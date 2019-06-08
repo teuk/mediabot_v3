@@ -1,0 +1,220 @@
+#!/bin/bash
+
+# +-------------------------------------------------------------------------+
+# | Mediabot configuration                                                  |
+# +-------------------------------------------------------------------------+
+
+if [ $(id -u) -eq 0 ]; then
+	echo "This script must not be run as root user"
+	echo "Create a non-privileges user to run configure script ex: mediabot"
+	exit 1
+fi
+
+cd install
+if [ $? -ne 0 ]; then
+	echo "Run ./$(basename $0) in its directory"
+	exit 2
+fi
+
+SCRIPT_LOGFILE=configure.log
+
+# +-------------------------------------------------------------------------+
+# | Functions                                                               |
+# +-------------------------------------------------------------------------+
+function messageln {
+    if [ ! -z "$1" ]; then
+        echo "[$(date +'%d/%m/%Y %H:%M:%S')] $*" | tee -a $SCRIPT_LOGFILE
+    fi
+}
+ 
+function message {
+    if [ ! -z "$1" ]; then
+        echo -n "[$(date +'%d/%m/%Y %H:%M:%S')] $* " | tee -a $SCRIPT_LOGFILE
+    fi
+}
+ 
+function ok_failed {
+    if [ ! -z "$1" ] && [ $1 -eq 0 ]; then
+        echo "OK" | tee -a $SCRIPT_LOGFILE
+    else
+    	RETVALUE=$1
+      echo -e " Failed. "
+      if [ ! -z "$2" ]; then
+      	shift
+      	echo "$*"
+      fi
+      echo -e "Installation log is available in $SCRIPT_LOGFILE" | tee -a $SCRIPT_LOGFILE
+      exit $RETVALUE
+    fi
+}
+
+function usage {
+	if [ ! -z "$1" ]; then
+		messageln "Error : $1"
+  fi
+  messageln "configure help:"
+  messageln "-h                         show this help"
+  messageln "-s <configuration_file>    configure servers"
+  messageln "-l                         list all networks/servers (requires -s)"
+  exit 1
+}
+
+# +-------------------------------------------------------------------------+
+# | Check command line parameters                                           |
+# +-------------------------------------------------------------------------+
+
+while getopts 'lhs:' opt; do
+        case $opt in
+        				l)			OPTSFOUND=1
+                        CONFIG_LIST=1
+                        ;;
+                h)			OPTSFOUND=1
+                        usage
+                        ;;
+                s)			OPTSFOUND=1
+                				CONF_FILE=${OPTARG}
+                				if [ "$(echo $CONF_FILE | cut -c1)" != "/" ]; then
+                        	CONF_FILE=../$CONF_FILE
+                        fi
+                        ;;
+                \?)			usage "Invalid option"
+                        ;;
+        esac
+done
+shift $(( $OPTIND-1 ))
+
+if [ ! -z "$CONFIG_LIST" ] && [ -z "$CONF_FILE" ]; then
+	usage "Missing -s <configuration_file> parameter"
+fi
+
+if [ ! -z "$CONF_FILE" ]; then
+	if [ ! -f $CONF_FILE ]; then
+		usage "$CONF_FILE does not exist"
+	else
+		if [ ! -z "$CONFIG_LIST" ]; then
+			./conf_servers.pl --conf=$CONF_FILE --list
+		else
+			./conf_servers.pl --conf=$CONF_FILE
+		fi
+	fi
+	exit $?
+fi
+
+# +-------------------------------------------------------------------------+
+# | Check required package                                                  |
+# +-------------------------------------------------------------------------+
+message "Check if sudo is available"
+which sudo &>/dev/null
+ok_failed $? "You should install sudo on your system before installation."
+
+message "Check if perl is available"
+which perl &>/dev/null
+ok_failed $? "You should install perl on your system before installation."
+
+message "Check if cpan is available"
+which cpan &>/dev/null
+ok_failed $? "You should install cpan utility on your system before installation."
+
+message "Check if make is available"
+which make &>/dev/null
+ok_failed $? "You should install make utility on your system before installation."
+
+message "Check if gcc is available"
+which gcc &>/dev/null
+ok_failed $? "You should install gcc compiler on your system before installation."
+
+message "Check if mysql is available"
+which mysql &>/dev/null
+ok_failed $? "You should install MySQL server and client (at least client) on your system before installation."
+
+# +-------------------------------------------------------------------------+
+# | Configure                                                               |
+# +-------------------------------------------------------------------------+
+messageln "This script will assume that you will install the bot in the same location of config file"
+messageln "Choose config file location where you want to install the bot"
+CONFIG_FILE=$(dirname $(pwd))/mediabot.conf
+message "Enter config file absolute path in current directory (Hit enter for '$CONFIG_FILE') :"
+read myresp
+if [ ! -z "$myresp" ]; then
+    CONFIG_FILE=$myresp
+fi
+while [ "${CONFIG_FILE:0:1}" != "/" ]
+	do
+		message "Please enter an absolute path : "
+		read myresp
+		if [ ! -z "$myresp" ]; then
+		    CONFIG_FILE=$myresp
+		fi
+	done
+	
+messageln "Configure $CONFIG_FILE (Hit CTRL-C to abort and launch ./configure again to change"
+read -n 1 -s -r -p "[$(date +'%d/%m/%Y %H:%M:%S')] Press any key to continue"
+echo
+INSTALL_DIR=$(dirname $CONFIG_FILE)
+messageln "The bot will be installed in $INSTALL_DIR with $CONFIG_FILE configuration file"
+read -n 1 -s -r -p "[$(date +'%d/%m/%Y %H:%M:%S')] Press any key to continue"
+echo
+
+echo "[main]
+MAIN_PROG_NAME=Mediabot
+MAIN_PROG_NAME_LOWER=mediabot
+MAIN_PID_FILE=$INSTALL_DIR/mediabot.pid
+MAIN_LOG_FILE=$INSTALL_DIR/mediabot.log
+MAIN_PROG_BIRTHDATE=$(date +%s)
+MAIN_PROG_TZ=America/New_York
+MAIN_PROG_URL=http://www.domain.tld/mediabot
+MAIN_PROG_QUIT_MSG=So long and thanks for all the fish !
+MAIN_PROG_DEBUG=0
+MAIN_PROG_MAXLEN=400
+MAIN_SQL_FLOOD_PROTECT_COUNT=10
+MAIN_SQL_FLOOD_PROTECT_DURATION=120" >$CONFIG_FILE
+
+MAIN_PROG_CMD_CHAR='!'
+message "Enter a prefix char to reply to commands on channels [!] :"
+read myresp
+if [ ! -z "$myresp" ]; then
+    MAIN_PROG_CMD_CHAR=$myresp
+fi
+while [ ${#MAIN_PROG_CMD_CHAR} -ne 1 ]
+	do
+		message "Enter a prefix char to reply to commands on channels [!] :"
+		read myresp
+		if [ ! -z "$myresp" ]; then
+		    MAIN_PROG_CMD_CHAR=$myresp
+		fi
+	done
+echo "MAIN_PROG_CMD_CHAR=$MAIN_PROG_CMD_CHAR
+
+" >>$CONFIG_FILE
+
+# +-------------------------------------------------------------------------+
+# | Configure MySQL Database                                                |
+# +-------------------------------------------------------------------------+
+messageln "Database installation must be run with sudo (as root user)"
+sudo ./db_install.sh -c $CONFIG_FILE
+ok_failed $? "Errors while configuring database"
+
+# +-------------------------------------------------------------------------+
+# | Configure Perl Modules                                                  |
+# +-------------------------------------------------------------------------+
+messageln "Perl modules installation must be run with sudo (as root user). This may take a long time, be patient"
+read -n 1 -s -r -p "[$(date +'%d/%m/%Y %H:%M:%S')] Press any key to continue"
+echo
+sudo ./cpan_install.sh
+RETVAL=$?
+if [ $RETVAL -ne 0 ]; then
+	messageln "Errors while installing perl modules"
+	exit $RETVAL
+fi
+
+# +-------------------------------------------------------------------------+
+# | Configure IRC Connection                                                |
+# +-------------------------------------------------------------------------+
+./configure.pl --conf=$CONFIG_FILE
+RETVAL=$?
+if [ $RETVAL -ne 0 ]; then
+	messageln "Errors while configuring connection"
+	exit $RETVAL
+fi
+
+messageln "Configuration completed."

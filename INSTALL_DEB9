@@ -1,0 +1,12 @@
+wget https://teuk.org/mediabotv3.tar.gz
+
+# useradd -m -s /bin/bash mediabot
+# visudo
+
+add this line (which MUST be removed after installation) :
+
+mediabot ALL=(ALL) NOPASSWD:ALL
+
+# apt-get install build-essential
+# apt-get install mysql-server
+# apt-get install git
