@@ -82,7 +82,8 @@ Data::Dumper
 DBI
 Switch
 Memory::Usage
-String::IRC" | while read perl_module
+String::IRC
+JSON" | while read perl_module
  do
   message "Checking $perl_module "
   perl -M$perl_module -e "exit 0;" &>/dev/null
@@ -109,7 +110,8 @@ Data::Dumper
 DBI
 Switch
 Memory::Usage
-String::IRC" | while read perl_module
+String::IRC
+JSON" | while read perl_module
  do
   message "Checking $perl_module"
   perl -M$perl_module -e "exit 0;"
