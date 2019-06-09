@@ -476,15 +476,15 @@ sub on_message_PRIVMSG(@) {
       	$mediabot->mbCommandPublic($message,$where,$who,$sCommand,@tArgs);
       }
 		}
-		#elsif ( ( $what =~ /http.*:\/\/www\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/m\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/youtu\.be.*/i ) ) {
-		#	my $id_chanset_list = getIdChansetList(\%MAIN_CONF,$LOG,$dbh,"Youtube");
-		#	if (defined($id_chanset_list)) {
-		#		my $id_channel_set = getIdChannelSet(\%MAIN_CONF,$LOG,$dbh,$where,$id_chanset_list);
-		#		if (defined($id_channel_set)) {
-		#			displayYoutubeDetails(\%MAIN_CONF,$LOG,$dbh,$self,$message,$who,$where,$what);
-		#		}
-		#	}
-		#}
+		elsif ( ( $what =~ /http.*:\/\/www\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/m\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/youtu\.be.*/i ) ) {
+			my $id_chanset_list = $mediabot->getIdChansetList("Youtube");
+			if (defined($id_chanset_list)) {
+				my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);
+				if (defined($id_channel_set)) {
+					$mediabot->displayYoutubeDetails($message,$who,$where,$what);
+				}
+			}
+		}
 		if ((ord(substr($what,0,1)) == 1) && ($what =~ /^.ACTION /)) {
 			$what =~ s/(.)/(ord($1) == 1) ? "" : $1/egs;
 			$what =~ s/^ACTION //;

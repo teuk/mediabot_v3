@@ -11,6 +11,7 @@ use Switch;
 use Memory::Usage;
 use IO::Async::Timer::Periodic;
 use String::IRC;
+use JSON;
 
 sub new {
 	my ($class,$args) = @_;
@@ -5419,6 +5420,108 @@ sub channelNicksRemove(@) {
 		}
 	}
 	%{$self->{hChannelsNicks}} = %hChannelsNicks;
+}
+
+sub displayYoutubeDetails(@) {
+	my ($self,$message,$sNick,$sChannel,$sText) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $sYoutubeId;
+	log_message($self,3,"displayYoutubeDetails() $sText");
+	if ( $sText =~ /http.*:\/\/www\.youtube\..*\/watch/i ) {
+		$sYoutubeId = $sText;
+		$sYoutubeId =~ s/^.*watch\?v=//;
+		#my $sTempYoutubeId = ($sText =~ m/^.*(http:\/\/[^ ]+).*$]/)[0];
+	}
+	elsif ( $sText =~ /http.*:\/\/m\.youtube\..*\/watch/i ) {
+		$sYoutubeId = $sText;
+		$sYoutubeId =~ s/^.*watch\?v=//;
+	}
+	elsif ( $sText =~ /http.*:\/\/youtu\.be.*/i ) {
+		$sYoutubeId = $sText;
+		$sYoutubeId =~ s/^.*youtu\.be\///;
+	}
+	if (defined($sYoutubeId) && ( $sYoutubeId ne "" )) {
+		log_message($self,3,"displayYoutubeDetails() sYoutubeId = $sYoutubeId");
+		my $APIKEY = $MAIN_CONF{'main.YOUTUBE_APIKEY'};
+		unless (defined($APIKEY) && ($APIKEY ne "")) {
+			log_message($self,0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
+			log_message($self,0,"displayYoutubeDetails() section [main]");
+			log_message($self,0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
+			return undef;
+		}
+		unless ( open YOUTUBE_INFOS, "curl -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
+			log_message(0,"Could not open plugins/API_Youtube.py");
+		}
+		else {
+			my $line;
+			my $i = 0;
+			my $sTitle;
+			my $sDuration;
+			my $sViewCount;
+			my $json_details;
+			while(defined($line=<YOUTUBE_INFOS>)) {
+				chomp($line);
+				$json_details .= $line;
+				log_message($self,5,"displayYoutubeDetails() $line");
+				$i++;
+			}
+			log_message($self,4,"displayYoutubeDetails() json_details : $json_details");
+			my $sYoutubeInfo = decode_json $json_details;
+			my %hYoutubeInfo = %$sYoutubeInfo;
+			my @tYoutubeItems = $hYoutubeInfo{'items'};
+			my %hYoutubeItems = %{$tYoutubeItems[0][0]};
+			log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
+			$sViewCount = "vue $hYoutubeItems{'statistics'}{'viewCount'} fois";
+			$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
+			$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
+			$sDuration =~ s/^PT//;
+			my $sMin = $sDuration;
+			$sMin =~ s/M.*$//;
+			my $sSec = $sDuration;
+			$sSec =~ s/^.*M//;
+			$sSec =~ s/S$//;
+			$sDuration = $sMin . "mn " . $sSec . "s";
+			log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDuration");
+			log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
+			log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
+			
+			if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
+				my $sMsgSong .= String::IRC->new('You')->black('white');
+				$sMsgSong .= String::IRC->new('Tube')->white('red');
+				$sMsgSong .= String::IRC->new(" $sTitle ")->white('black');
+				$sMsgSong .= String::IRC->new("- ")->orange('black');
+				$sMsgSong .= String::IRC->new("$sDuration ")->grey('black');
+				$sMsgSong .= String::IRC->new("- ")->orange('black');
+				$sMsgSong .= String::IRC->new("$sViewCount")->grey('black');
+				botPrivmsg($self,$sChannel,$sMsgSong);
+			}
+			else {
+				log_message($self,3,"displayYoutubeDetails() one of the youtube field is undef or empty");
+				if (defined($sTitle)) {
+					log_message($self,3,"displayYoutubeDetails() sTitle=$sTitle");
+				}
+				else {
+					log_message($self,3,"displayYoutubeDetails() sTitle is undefined");
+				}
+				
+				if (defined($sDuration)) {
+					log_message($self,3,"displayYoutubeDetails() sDuration=$sDuration");
+				}
+				else {
+					log_message($self,3,"displayYoutubeDetails() sDuration is undefined");
+				}
+				if (defined($sViewCount)) {
+					log_message($self,3,"displayYoutubeDetails() sViewCount=$sViewCount");
+				}
+				else {
+					log_message($self,3,"displayYoutubeDetails() sViewCount is undefined");
+				}
+			}
+		}
+	}
+	else {
+		log_message($self,3,"displayYoutubeDetails() sYoutubeId could not be determined");
+	}
 }
 
 1;
