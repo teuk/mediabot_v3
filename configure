@@ -127,6 +127,10 @@ message "Check if mysql is available"
 which mysql &>/dev/null
 ok_failed $? "You should install MySQL server and client (at least client) on your system before installation."
 
+message "Check if curl is available"
+which curl &>/dev/null
+ok_failed $? "You should install curl utility on your system before installation."
+
 # +-------------------------------------------------------------------------+
 # | Configure                                                               |
 # +-------------------------------------------------------------------------+
