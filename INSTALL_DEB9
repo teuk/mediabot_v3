@@ -10,6 +10,7 @@ mediabot ALL=(ALL) NOPASSWD:ALL
 # apt-get install build-essential
 # apt-get install mysql-server
 # apt-get install git
+# apt-get install curl
 # su - mediabot
 $ git clone https://github.com/teuk/mediabot_v3
 $ cd mediabot_v3
