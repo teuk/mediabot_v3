@@ -80,6 +80,7 @@ Config::Simple
 Date::Format
 Data::Dumper
 DBI
+DBD:mysql
 Switch
 Memory::Usage
 String::IRC
@@ -108,6 +109,7 @@ Config::Simple
 Date::Format
 Data::Dumper
 DBI
+DBD:mysql
 Switch
 Memory::Usage
 String::IRC
