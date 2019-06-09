@@ -1,0 +1,147 @@
+Commands of Mediabotv2 Last revised: Feb 04, 2018
+
+INTRODUCTION
+
+The bot connects to a random irc server attached to defined network in config file
+
+Then it will join console channel (you should have added one during configure stage)
+
+Note : 
+If user mode +x is set on Undernet network, it will use a random nick and wait for X successfull login
+Then the bot try to change to its defined nick
+
+If freenode network type is defined and a password is defined it will authenticate to NickServ
+
+At the begining the database USER table is empty and you have to register an Owner user with :
+
+/msg mediabot register <username> <password>
+
+Ex : /msg mediabot register Logan W0lv3r|ne
+
+You are now a global Owner of the bot and command register cannot be used anymore
+
+Now you can login to the bot using
+
+/msg mediabot login <username> <password>
+
+Ex : /msg mediabot login Logan W0lv3r|ne
+
+GLOBAL COMMANDS
+
+* Add a user to the bot (Level Master)
+
+/msg mediabot adduser [-n] <username> *ident@hostname <Owner|Master|Administrator|User>
+
+Ex : /msg mediabot adduser -n diablo *diablo@diablo.users.undernet.org User
+
+-n option will notice user that he has been added to the bot.
+
+* User has to set its password :
+
+/msg mediabot pass <password>
+
+* User can reset its password :
+
+/msg mediabot newpass <password>
+
+* User can add a new hostmask :
+
+/msg mediabot ident <username> <password>
+
+OWNER COMMANDS
+
+* Make the bot issue a raw irc command (use with care)
+
+/msg mediabot dump <raw command>
+
+Master COMMANDS
+
+* Quit bot
+
+/msg mediabot quit [reason]
+
+or on channel
+
+!quit [reason]
+
+* Add a user to the bot (Level Master)
+
+/msg mediabot adduser [-n] <username> *ident@hostname <Owner|Master|Administrator|User>
+
+or on channel
+
+!adduser [-n] <username> *ident@hostname <Owner|Master|Administrator|User>
+
+Administrator COMMANDS
+
+* Make the bot say something on a channel
+
+/msg mediabot say #channel <message>
+
+or on channel
+
+!say #channel <message>
+
+* Make the bot act something on a channel
+
+/msg mediabot act #channel <message>
+
+or on channel
+
+!act #channel <message>
+
+* Check logged users
+
+/msg mediabot cstat
+
+or on channel
+
+!cstat
+
+* Register a channel for a user (make the user be Level 500 on the channel and make the bot join it)
+
+/msg mediabot addchan #channel <username>
+
+or on channel
+
+!addchan #channel <username>
+
+Channels COMMMANDS
+
+Level  500: part
+Level  450: join chanset
+Level  400: add modinfo rem
+Level  100: op deop invite
+Level   50: kick topic
+Level   25: voice devoice
+Level    0: chaninfo whoami
+
+all commands may be used like this /msg mediabot <command> <#channel> <parameters>
+
+or on channel
+!command #channel <parameters>
+
+Examples :
+
+/msg mediabot add #channel diablo 400
+
+!part #channel
+
+/msg mediabot voice #channel diablo
+
+!chaninfo #channel
+
+
+This file has to be completed, please be patient.
+
+Thanks for your suggestions
+
+TeuK
+
+
+
+
+
+
+
+
