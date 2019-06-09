@@ -1,6 +1,6 @@
 INSTALLATION on Centos 7.6.1810
 
-# useradd -s /bin/bash mediabot
+# useradd mediabot
 # visudo
 
 add this line (which MUST be removed after installation) :
