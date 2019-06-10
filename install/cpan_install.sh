@@ -74,7 +74,6 @@ File::Basename
 IO::Async::Loop
 IO::Async::Timer::Periodic
 Net::Async::IRC
-Switch
 Data::Dumper
 Config::Simple
 Date::Format
@@ -103,7 +102,6 @@ File::Basename
 IO::Async::Loop
 IO::Async::Timer::Periodic
 Net::Async::IRC
-Switch
 Data::Dumper
 Config::Simple
 Date::Format
