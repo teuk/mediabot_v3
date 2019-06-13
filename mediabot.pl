@@ -504,33 +504,26 @@ sub on_message_PRIVMSG(@) {
     if (defined($sCommand) && ($sCommand ne "")) {
     	switch($sCommand) {
     		case "debug"			{ 
-														#%MAIN_CONF = mbDebug($cfg,\%MAIN_CONF,$LOG,$dbh,$irc,$message,$who,@tArgs);
+														#$mediabot->mbDebug($message,$who,@tArgs);
 													}
 				case "restart"		{ 
 														if ($MAIN_PROG_DAEMON) {
-										    			#mbRestart(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$who,($sFullParams));
+										    			#$mediabot->mbRestart($message,$who,($sFullParams));
 										    		}
 										    		else {
-										    			#botNotice(\%MAIN_CONF,$LOG,$dbh,$self,$who,"restart command can only be used in daemon mode (use --daemon to launch the bot)");
+										    			#$mediabot->botNotice($who,"restart command can only be used in daemon mode (use --daemon to launch the bot)");
 										    		}
 													}
 				case "jump"				{ 
 														if ($MAIN_PROG_DAEMON) {
-										    			#mbJump(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$who,($sFullParams,$tArgs[0]));
+										    			#$mediabot->mbJump($message,$who,($sFullParams,$tArgs[0]));
 										    		}
 										    		else {
-										    			#botNotice(\%MAIN_CONF,$LOG,$dbh,$self,$who,"jump command can only be used in daemon mode (use --daemon to launch the bot)");
+										    			#$mediabot->botNotice($who,"jump command can only be used in daemon mode (use --daemon to launch the bot)");
 										    		}
 													}
 	    	else {
 	    		$mediabot->mbCommandPrivate($message,$who,$sCommand,@tArgs);
-	    		#my %GLOBAL_HASH = mbCommandPrivate($loop,\%hTimers,\%hChannelsNicks,\%WHOIS_VARS,\%MAIN_CONF,$LOG,$dbh,$self,$message,$MAIN_PROG_VERSION,$iConnectionTimestamp,$who,$sCommand,@tArgs);
-	    		#if (exists $GLOBAL_HASH{'WHOIS_VARS'}) {
-        	#	%WHOIS_VARS = %{$GLOBAL_HASH{'WHOIS_VARS'}};
-        	#}
-        	#if (exists $GLOBAL_HASH{'hTimers'}) {
-        	#	%hTimers = %{$GLOBAL_HASH{'hTimers'}};
-        	#}
 	    	}
 	    }
     }
