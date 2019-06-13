@@ -5450,7 +5450,7 @@ sub displayYoutubeDetails(@) {
 			return undef;
 		}
 		unless ( open YOUTUBE_INFOS, "curl -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
-			log_message(0,"Could not open plugins/API_Youtube.py");
+			log_message(0,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 		}
 		else {
 			my $line;
