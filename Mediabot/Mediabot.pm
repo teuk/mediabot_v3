@@ -4077,14 +4077,14 @@ sub whoTalk(@) {
 						$sTargetChannel = $sChannel;
 					}
 				}
-				my $sQuery = "SELECT nick,COUNT(nick) as nbLinesPerHour FROM CHANNEL,CHANNEL_LOG WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND (event_type='public' OR event_type='action') AND CHANNEL.name like ? AND ts > date_sub('" . time2str("%Y-%m-%d %H:%M:%S",time) . "', INTERVAL 1 HOUR) GROUP BY nick ORDER BY nbLinesPerHour DESC LIMIT 5";
+				my $sQuery = "SELECT nick,COUNT(nick) as nbLinesPerHour FROM CHANNEL,CHANNEL_LOG WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND (event_type='public' OR event_type='action') AND CHANNEL.name like ? AND ts > date_sub('" . time2str("%Y-%m-%d %H:%M:%S",time) . "', INTERVAL 1 HOUR) GROUP BY nick ORDER BY nbLinesPerHour DESC LIMIT 20";
 				log_message($self,3,$sQuery);
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($sChannel)) {
 					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
-					my $sResult = "Top 5 talker ";
+					my $sResult = "Top 20 talkers ";
 					my $i = 0;
 					while (my $ref = $sth->fetchrow_hashref()) {
 						my $nbLinesPerHour = $ref->{'nbLinesPerHour'};
