@@ -5465,57 +5465,62 @@ sub displayYoutubeDetails(@) {
 				log_message($self,5,"displayYoutubeDetails() $line");
 				$i++;
 			}
-			log_message($self,4,"displayYoutubeDetails() json_details : $json_details");
-			my $sYoutubeInfo = decode_json $json_details;
-			my %hYoutubeInfo = %$sYoutubeInfo;
-			my @tYoutubeItems = $hYoutubeInfo{'items'};
-			my %hYoutubeItems = %{$tYoutubeItems[0][0]};
-			log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
-			$sViewCount = "vue $hYoutubeItems{'statistics'}{'viewCount'} fois";
-			$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
-			$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
-			$sDuration =~ s/^PT//;
-			my $sMin = $sDuration;
-			$sMin =~ s/M.*$//;
-			my $sSec = $sDuration;
-			$sSec =~ s/^.*M//;
-			$sSec =~ s/S$//;
-			$sDuration = $sMin . "mn " . $sSec . "s";
-			log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDuration");
-			log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
-			log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
-			
-			if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
-				my $sMsgSong .= String::IRC->new('You')->black('white');
-				$sMsgSong .= String::IRC->new('Tube')->white('red');
-				$sMsgSong .= String::IRC->new(" $sTitle ")->white('black');
-				$sMsgSong .= String::IRC->new("- ")->orange('black');
-				$sMsgSong .= String::IRC->new("$sDuration ")->grey('black');
-				$sMsgSong .= String::IRC->new("- ")->orange('black');
-				$sMsgSong .= String::IRC->new("$sViewCount")->grey('black');
-				botPrivmsg($self,$sChannel,$sMsgSong);
+			if (defined($json_details) && ($json_details ne "")) {
+				log_message($self,4,"displayYoutubeDetails() json_details : $json_details");
+				my $sYoutubeInfo = decode_json $json_details;
+				my %hYoutubeInfo = %$sYoutubeInfo;
+				my @tYoutubeItems = $hYoutubeInfo{'items'};
+				my %hYoutubeItems = %{$tYoutubeItems[0][0]};
+				log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
+				$sViewCount = "vue $hYoutubeItems{'statistics'}{'viewCount'} fois";
+				$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
+				$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
+				$sDuration =~ s/^PT//;
+				my $sMin = $sDuration;
+				$sMin =~ s/M.*$//;
+				my $sSec = $sDuration;
+				$sSec =~ s/^.*M//;
+				$sSec =~ s/S$//;
+				$sDuration = $sMin . "mn " . $sSec . "s";
+				log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDuration");
+				log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
+				log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
+				
+				if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
+					my $sMsgSong .= String::IRC->new('You')->black('white');
+					$sMsgSong .= String::IRC->new('Tube')->white('red');
+					$sMsgSong .= String::IRC->new(" $sTitle ")->white('black');
+					$sMsgSong .= String::IRC->new("- ")->orange('black');
+					$sMsgSong .= String::IRC->new("$sDuration ")->grey('black');
+					$sMsgSong .= String::IRC->new("- ")->orange('black');
+					$sMsgSong .= String::IRC->new("$sViewCount")->grey('black');
+					botPrivmsg($self,$sChannel,$sMsgSong);
+				}
+				else {
+					log_message($self,3,"displayYoutubeDetails() one of the youtube field is undef or empty");
+					if (defined($sTitle)) {
+						log_message($self,3,"displayYoutubeDetails() sTitle=$sTitle");
+					}
+					else {
+						log_message($self,3,"displayYoutubeDetails() sTitle is undefined");
+					}
+					
+					if (defined($sDuration)) {
+						log_message($self,3,"displayYoutubeDetails() sDuration=$sDuration");
+					}
+					else {
+						log_message($self,3,"displayYoutubeDetails() sDuration is undefined");
+					}
+					if (defined($sViewCount)) {
+						log_message($self,3,"displayYoutubeDetails() sViewCount=$sViewCount");
+					}
+					else {
+						log_message($self,3,"displayYoutubeDetails() sViewCount is undefined");
+					}
+				}
 			}
 			else {
-				log_message($self,3,"displayYoutubeDetails() one of the youtube field is undef or empty");
-				if (defined($sTitle)) {
-					log_message($self,3,"displayYoutubeDetails() sTitle=$sTitle");
-				}
-				else {
-					log_message($self,3,"displayYoutubeDetails() sTitle is undefined");
-				}
-				
-				if (defined($sDuration)) {
-					log_message($self,3,"displayYoutubeDetails() sDuration=$sDuration");
-				}
-				else {
-					log_message($self,3,"displayYoutubeDetails() sDuration is undefined");
-				}
-				if (defined($sViewCount)) {
-					log_message($self,3,"displayYoutubeDetails() sViewCount=$sViewCount");
-				}
-				else {
-					log_message($self,3,"displayYoutubeDetails() sViewCount is undefined");
-				}
+				log_message($self,3,"displayYoutubeDetails() curl empty result for : curl -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
 			}
 		}
 	}
