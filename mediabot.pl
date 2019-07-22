@@ -499,27 +499,28 @@ sub on_message_PRIVMSG(@) {
 		unless ( $what =~ /^login|^register|^pass|^newpass|^ident/i) {
 			$mediabot->log_message(2,"<$who> $what");
 		}
-		my ($sCommand,@tArgs) = split(/\s+/,$what);   
+		my ($sCommand,@tArgs) = split(/\s+/,$what);
     $sCommand =~ tr/A-Z/a-z/;
+    $mediabot->log_message(3,"sCommands = $sCommand");
     if (defined($sCommand) && ($sCommand ne "")) {
     	switch($sCommand) {
-    		case "debug"			{ 
-														#$mediabot->mbDebug($message,$who,@tArgs);
+    		case /^debug$/i		{ 
+														$mediabot->mbDebug($message,$who,@tArgs);
 													}
 				case "restart"		{ 
 														if ($MAIN_PROG_DAEMON) {
-										    			#$mediabot->mbRestart($message,$who,($sFullParams));
+										    			$mediabot->mbRestart($message,$who,($sFullParams));
 										    		}
 										    		else {
-										    			#$mediabot->botNotice($who,"restart command can only be used in daemon mode (use --daemon to launch the bot)");
+										    			$mediabot->botNotice($who,"restart command can only be used in daemon mode (use --daemon to launch the bot)");
 										    		}
 													}
 				case "jump"				{ 
 														if ($MAIN_PROG_DAEMON) {
-										    			#$mediabot->mbJump($message,$who,($sFullParams,$tArgs[0]));
+										    			$mediabot->mbJump($message,$who,($sFullParams,$tArgs[0]));
 										    		}
 										    		else {
-										    			#$mediabot->botNotice($who,"jump command can only be used in daemon mode (use --daemon to launch the bot)");
+										    			$mediabot->botNotice($who,"jump command can only be used in daemon mode (use --daemon to launch the bot)");
 										    		}
 													}
 	    	else {

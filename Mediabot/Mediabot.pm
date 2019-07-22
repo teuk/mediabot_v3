@@ -12,6 +12,7 @@ use Memory::Usage;
 use IO::Async::Timer::Periodic;
 use String::IRC;
 use JSON;
+use POSIX 'setsid';
 
 sub new {
 	my ($class,$args) = @_;
@@ -33,6 +34,7 @@ sub readConfigFile(@) {
 	$cfg->read($self->{config_file}) or die $cfg->error();
 	print STDERR time2str("[%d/%m/%Y %H:%M:%S]",time) . " $self->{config_file} loaded.\n";
 	$self->{MAIN_CONF} = $cfg->vars();
+	$self->{cfg} = $cfg;
 }
 
 sub getConfig(@) {
@@ -44,6 +46,13 @@ sub getMainConf(@) {
 	my $self = shift;
 	return $self->{MAIN_CONF};
 }
+
+sub getMainConfCfg(@) {
+	my $self = shift;
+	return $self->{cfg};
+}
+
+
 
 sub init_log(@) {
 	my ($self) = shift;
@@ -5526,6 +5535,114 @@ sub displayYoutubeDetails(@) {
 	}
 	else {
 		log_message($self,3,"displayYoutubeDetails() sYoutubeId could not be determined");
+	}
+}
+
+sub mbDebug(@) {
+	my ($self,$message,$sNick,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $cfg = $self->{cfg};
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Owner")) {
+				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /[0-9]+/) && ($tArgs[0] <= 5)) {
+					$cfg->param("main.MAIN_PROG_DEBUG", $tArgs[0]);
+					$cfg->save();
+					$self->{cfg} = $cfg;
+					$self->{MAIN_CONF} = $cfg->vars();
+					log_message($self,0,"Debug set to " . $tArgs[0]);
+					botNotice($self,$sNick,"Debug set to " . $tArgs[0]);
+					logBot($self,$message,undef,"debug",("Debug set to " . $tArgs[0]));
+				}
+				else {
+					botNotice($self,$sNick,"Syntax: debug <debug_level>");
+					botNotice($self,$sNick,"debug_level 0 to 5");
+				}	
+			}
+			else {
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+			}
+		}
+		else {
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+		}
+	}
+}
+
+sub mbRestart(@) {
+	my ($self,$message,$sNick,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Owner")) {
+				my $iCHildPid;
+				if (defined($iCHildPid = fork())) {
+					unless ($iCHildPid) {
+						log_message($self,0,"Restart request from $sMatchingUserHandle");
+						setsid;
+						exec "./mb_restart.sh",$tArgs[0];
+					}
+					else {
+						botNotice($self,$sNick,"Restarting bot");
+						logBot($self,$message,undef,"restart",($MAIN_CONF{'main.MAIN_PROG_QUIT_MSG'}));
+						$self->{irc}->send_message( "QUIT", undef, $MAIN_CONF{'main.MAIN_PROG_QUIT_MSG'} );
+					}
+				}
+				logBot($self,$message,undef,"restart",undef);
+			}
+			else {
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
+}
+
+sub mbJump(@) {
+	my ($self,$message,$sNick,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Owner")) {
+				my $sServer = pop @tArgs;
+				my $sFullParams = join(" ",@tArgs);
+				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+					$sFullParams =~ s/\-\-server=[^ ]*//g;
+					log_message($self,3,$sFullParams);
+					my $iCHildPid;
+					if (defined($iCHildPid = fork())) {
+						unless ($iCHildPid) {
+							log_message($self,0,"Jump request from $sMatchingUserHandle");
+							setsid;
+							exec "./mb_restart.sh",($sFullParams,"--server=$sServer");
+						}
+						else {
+							botNotice($self,$sNick,"Jumping to $sServer");
+							logBot($self,$message,undef,"jump",($sServer));
+							$self->{irc}->send_message( "QUIT", undef, "Changing server" );
+						}
+					}
+				}
+				else {
+					botNotice($self,$sNick,"Syntax: jump <server>");
+				}
+			}
+			else {
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
 	}
 }
 
