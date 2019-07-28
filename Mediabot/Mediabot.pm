@@ -5679,9 +5679,9 @@ sub make_colors {
 			next;
 		}
 		$newstr .= "\003";
-		$newstr .= int(rand(16));
+		$newstr .= int(rand(100));
 		$newstr .= ",";
-		$newstr .= int(rand(16));
+		$newstr .= int(rand(100));
 		$newstr .= $char;
 	}
 
