@@ -898,6 +898,9 @@ sub mbCommandPublic(@) {
 		case /^birthdate$/i	{ $bFound = 1;
 														displayBirthDate($self,$message,$sNick,$sChannel,@tArgs);
 												}
+		case /^colors$/i		{ $bFound = 1;
+														mbColors($self,$message,$sNick,$sChannel,@tArgs);
+												}												
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													unless ( $bFound ) {
@@ -5662,6 +5665,31 @@ sub mbJump(@) {
 			return undef;
 		}
 	}
+}
+
+sub make_colors {
+	my ($self,$string) = @_;
+	Encode::_utf8_on($string);
+	my $newstr = "";
+	my $color;
+	for (my $c = 0; $c < length($string); $c++) {
+		my $char = substr($string, $c, 1);
+		if ($char eq ' ') {
+			$newstr .= $char;
+			next;
+		}
+		$newstr .= "\003";
+		$newstr .= int(rand(16));
+		$newstr .= $char;
+	}
+
+	return $newstr;
+}
+
+sub mbColors(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my $sText = join(" ",@tArgs);
+	botPrivmsg($self,$sChannel,make_colors($self,$sText));
 }
 
 1;
