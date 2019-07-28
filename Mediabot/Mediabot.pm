@@ -5680,6 +5680,8 @@ sub make_colors {
 		}
 		$newstr .= "\003";
 		$newstr .= int(rand(16));
+		$newstr .= ",";
+		$newstr .= int(rand(16));
 		$newstr .= $char;
 	}
 
