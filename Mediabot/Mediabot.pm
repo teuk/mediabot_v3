@@ -185,6 +185,11 @@ sub dbLogoutUsers(@) {
 	}
 }
 
+sub setServer(@) {
+	my ($self,$sServer) = @_;
+	$self->{server} = $sServer;
+}
+
 sub pickServer(@) {
 	my ($self) = shift;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
@@ -1144,6 +1149,7 @@ sub mbQuit(@) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
 				logBot($self,$message,undef,"die",@tArgs);
+				$self->{Quit} = 1;
 				$self->{irc}->send_message( "QUIT", undef, join(" ",@tArgs) );
 			}
 			else {
@@ -1609,6 +1615,16 @@ sub setConnectionTimestamp(@) {
 sub getConnectionTimestamp(@) {
 	my $self = shift;
 	return $self->{iConnectionTimestamp};
+}
+
+sub setQuit(@) {
+	my ($self,$iQuit) = @_;
+	$self->{Quit} = $iQuit;
+}
+
+sub getQuit(@) {
+	my $self = shift;
+	return $self->{Quit};
 }
 
 sub mbChangeNick(@) {
@@ -5587,7 +5603,8 @@ sub mbRestart(@) {
 					else {
 						botNotice($self,$sNick,"Restarting bot");
 						logBot($self,$message,undef,"restart",($MAIN_CONF{'main.MAIN_PROG_QUIT_MSG'}));
-						$self->{irc}->send_message( "QUIT", undef, $MAIN_CONF{'main.MAIN_PROG_QUIT_MSG'} );
+						$self->{Quit} = 1;
+						$self->{irc}->send_message( "QUIT", undef, "Restarting" );
 					}
 				}
 				logBot($self,$message,undef,"restart",undef);
@@ -5626,6 +5643,7 @@ sub mbJump(@) {
 						else {
 							botNotice($self,$sNick,"Jumping to $sServer");
 							logBot($self,$message,undef,"jump",($sServer));
+							$self->{Quit} = 1;
 							$self->{irc}->send_message( "QUIT", undef, "Changing server" );
 						}
 					}

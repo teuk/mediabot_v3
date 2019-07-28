@@ -41,6 +41,7 @@ my $MAIN_PROG_DAEMON = 0;
 sub usage(@);
 sub catch_hup(@);
 sub catch_term(@);
+sub reconnect(@);
 
 # +---------------------------------------------------------------------------+
 # !          IRC FUNCTIONS                                                    !
@@ -236,8 +237,17 @@ sub on_timer_tick(@) {
 		close PID;
 	}
 	unless ($irc->is_connected) {
-		$mediabot->log_message(0,"Disconnected from server");
-		$mediabot->clean_and_exit(0);
+		if ($mediabot->getQuit()) {
+			$mediabot->log_message(0,"Disconnected from server");
+			$mediabot->clean_and_exit(0);
+		}
+		else {
+			$mediabot->setServer(undef);
+			$loop->stop;
+			$mediabot->log_message(0,"Lost connection to server. Waiting 300 seconds to reconnect");
+			sleep 300;
+			reconnect();
+		}
 	}
 }
 
@@ -281,6 +291,7 @@ sub on_login(@) {
 	my ( $self, $message, $hints ) = @_;
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	$mediabot->log_message(0,"on_login() Connected to irc server " . $mediabot->getServerHostname());
+	$mediabot->setQuit(0);
 	$mediabot->setConnectionTimestamp(time);
 	
 	# Undernet : authentication to channel service if credentials are defined
@@ -743,4 +754,69 @@ sub on_message_RPL_WHOISUSER(@) {
 			}
 		}
 	}
+}
+
+sub reconnect(@) {
+	# Pick IRC Server
+	$mediabot->pickServer();
+
+	$loop = IO::Async::Loop->new;
+	$mediabot->setLoop($loop);
+
+	$timer = IO::Async::Timer::Periodic->new(
+	    interval => 5,
+	    on_tick => \&on_timer_tick,
+	);
+	$mediabot->setMainTimerTick($timer);
+
+	$irc = Net::Async::IRC->new(
+	  on_message_text => \&on_private,
+	  on_message_motd => \&on_motd,
+	  on_message_INVITE => \&on_message_INVITE,
+	  on_message_KICK => \&on_message_KICK,
+	  on_message_MODE => \&on_message_MODE,
+	  on_message_NICK => \&on_message_NICK,
+	  on_message_NOTICE => \&on_message_NOTICE,
+	  on_message_QUIT => \&on_message_QUIT,
+	  on_message_PART => \&on_message_PART,
+	  on_message_PRIVMSG => \&on_message_PRIVMSG,
+	  on_message_TOPIC => \&on_message_TOPIC,
+	  on_message_LIST => \&on_message_LIST,
+	  on_message_RPL_NAMEREPLY => \&on_message_RPL_NAMEREPLY,
+	  on_message_RPL_ENDOFNAMES => \&on_message_RPL_ENDOFNAMES,
+	  on_message_WHO => \&on_message_WHO,
+	  on_message_WHOIS => \&on_message_WHOIS,
+	  on_message_WHOWAS => \&on_message_WHOWAS,
+	  on_message_JOIN => \&on_message_JOIN,
+	  
+	  on_message_001 => \&on_message_001,
+	  on_message_002 => \&on_message_002,
+	  on_message_003 => \&on_message_003,
+	  on_message_RPL_WHOISUSER => \&on_message_RPL_WHOISUSER,
+	);
+
+	$mediabot->setIrc($irc);
+
+	$loop->add($irc);
+
+	$sConnectionNick = $mediabot->getConnectionNick();
+	$sServerPass = $mediabot->getServerPass();
+	$sServerPassDisplay = ( $sServerPass eq "" ? "none defined" : $sServerPass );
+	$bNickTriggerCommand =$mediabot->getNickTrigger();
+	$mediabot->log_message(0,"Trying to connect to " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort() . " (pass : $sServerPassDisplay)");
+
+	$login = $irc->login(
+		pass => $sServerPass,
+	  nick => $sConnectionNick,
+	  host => $mediabot->getServerHostname(),
+	  service => $mediabot->getServerPort(),
+	  user => $mediabot->getUserName(),
+	  realname => $mediabot->getIrcName(),
+	  on_login => \&on_login,
+	);
+
+	$login->get;
+
+	# Start main loop
+	$loop->run;
 }
