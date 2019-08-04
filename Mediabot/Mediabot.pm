@@ -2975,14 +2975,14 @@ sub userModinfo(@) {
 				userModinfoSyntax($self,$message,$sNick,@tArgs);
 				return undef;
 			}
-			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,400))) {
+			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,400) || ( ($tArgs[0] =~ /^greet$/i) && ( checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,1))) )) {
 				if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] ne "") && defined($tArgs[2]) && ($tArgs[2] ne "")) {
 					my $id_channel = getIdChannel($self,$sChannel);
 					if (defined($id_channel)) {
 						my ($id_user,$level) = getIdUserChannelLevel($self,$tArgs[1],$sChannel);
 						if (defined($id_user)) {
 							my (undef,$iMatchingUserLevelChannel) = getIdUserChannelLevel($self,$sMatchingUserHandle,$sChannel);
-							if (($iMatchingUserLevelChannel > $level) || (checkUserLevel($self,$iMatchingUserLevel,"Administrator"))) {
+							if (($iMatchingUserLevelChannel > $level) || (checkUserLevel($self,$iMatchingUserLevel,"Administrator")) || ( ($tArgs[0] =~ /^greet$/i) && ( $iMatchingUserLevelChannel > 0)) ) {
 								switch($tArgs[0]) {
 									case "automode"			{
 																				my $sAutomode = $tArgs[2];
