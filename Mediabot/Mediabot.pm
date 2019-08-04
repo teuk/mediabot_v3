@@ -4208,6 +4208,15 @@ sub mbDbCommand(@) {
 								$actionDo =~ s/%B/false/g;
 							}
 						}
+						if ( $actionDo =~ /%on/ ) {
+							my $iTrueFalse = int(rand(2));
+							if ( $iTrueFalse == 1 ) {
+								$actionDo =~ s/%on/oui/g;
+							}
+							else {
+								$actionDo =~ s/%B/non/g;
+							}
+						}
 						$actionDo =~ s/%c/$sChannel/g;
 						$actionDo =~ s/%N/$sNick/g;
 						my @tActionDo = split(/ /,$actionDo);
@@ -4271,6 +4280,15 @@ sub mbDbCommand(@) {
 							}
 							else {
 								$actionDo =~ s/%B/false/g;
+							}
+						}
+						if ( $actionDo =~ /%on/ ) {
+							my $iTrueFalse = int(rand(2));
+							if ( $iTrueFalse == 1 ) {
+								$actionDo =~ s/%on/oui/g;
+							}
+							else {
+								$actionDo =~ s/%B/non/g;
 							}
 						}
 						my @tActionDo = split(/ /,$actionDo);
