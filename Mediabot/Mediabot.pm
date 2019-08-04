@@ -4214,7 +4214,7 @@ sub mbDbCommand(@) {
 								$actionDo =~ s/%on/oui/g;
 							}
 							else {
-								$actionDo =~ s/%B/non/g;
+								$actionDo =~ s/%on/non/g;
 							}
 						}
 						$actionDo =~ s/%c/$sChannel/g;
@@ -4288,7 +4288,7 @@ sub mbDbCommand(@) {
 								$actionDo =~ s/%on/oui/g;
 							}
 							else {
-								$actionDo =~ s/%B/non/g;
+								$actionDo =~ s/%on/non/g;
 							}
 						}
 						my @tActionDo = split(/ /,$actionDo);
