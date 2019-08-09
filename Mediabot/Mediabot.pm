@@ -5524,14 +5524,28 @@ sub displayYoutubeDetails(@) {
 				$sViewCount = "vue $hYoutubeItems{'statistics'}{'viewCount'} fois";
 				$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
 				$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
+				log_message($self,3,"displayYoutubeDetails() sDuration : $sDuration");
 				$sDuration =~ s/^PT//;
+				my $sDisplayDuration;
+				my $sHour = $sDuration;
+				if ( $sHour =~ /H/ ) {
+					$sHour =~ s/H.*$//;
+					$sDisplayDuration .= "$sHour h ";
+				}
 				my $sMin = $sDuration;
-				$sMin =~ s/M.*$//;
+				if ( $sMin =~ /M/ ) {
+					$sMin =~ s/^.*H//;
+					$sMin =~ s/M.*$//;
+					$sDisplayDuration .= "$sMin mn ";
+				}
 				my $sSec = $sDuration;
-				$sSec =~ s/^.*M//;
-				$sSec =~ s/S$//;
-				$sDuration = $sMin . "mn " . $sSec . "s";
-				log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDuration");
+				if ( $sSec =~ /S/ ) {
+					$sSec =~ s/^.*H//;
+					$sSec =~ s/^.*M//;
+					$sSec =~ s/S$//;
+					$sDisplayDuration .= "$sSec s";
+				}
+				log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
 				log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
 				log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
 				
@@ -5540,7 +5554,7 @@ sub displayYoutubeDetails(@) {
 					$sMsgSong .= String::IRC->new('Tube')->white('red');
 					$sMsgSong .= String::IRC->new(" $sTitle ")->white('black');
 					$sMsgSong .= String::IRC->new("- ")->orange('black');
-					$sMsgSong .= String::IRC->new("$sDuration ")->grey('black');
+					$sMsgSong .= String::IRC->new("$sDisplayDuration ")->grey('black');
 					$sMsgSong .= String::IRC->new("- ")->orange('black');
 					$sMsgSong .= String::IRC->new("$sViewCount")->grey('black');
 					botPrivmsg($self,$sChannel,$sMsgSong);
