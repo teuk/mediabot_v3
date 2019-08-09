@@ -3008,6 +3008,9 @@ sub userModinfo(@) {
 																			}
 									case "greet"				{
 																				my $sUser = $tArgs[1];
+																				if ( (($iMatchingUserLevelChannel < 400) && ( $sUser ne $sMatchingUserHandle)) && (!checkUserLevel($self,$iMatchingUserLevel,"Administrator"))) {
+																					botNotice($self,$sNick,"Your level does not allow you to perfom this command.");
+																				}
 																				splice @tArgs,0,2;
 																				my $sGreet = join(" ",@tArgs);
 																				my $sQuery = "UPDATE USER_CHANNEL SET greet=? WHERE id_user=? AND id_channel=?";
