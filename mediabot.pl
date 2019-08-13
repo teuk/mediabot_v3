@@ -470,7 +470,9 @@ sub on_message_PRIVMSG(@) {
 	my ($who, $where, $what) = @{$hints}{qw<prefix_nick targets text>};
 	if ( substr($where,0,1) eq '#' ) {
 		# Message on channel
-		$mediabot->log_message(2,"$where: <$who> $what");
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+			$mediabot->log_message(0,"[LIVE] $where: <$who> $what");
+		}
 		my ($sCommand,@tArgs) = split(/\s+/,$what);
 		if (substr($what, 0, 1) eq $MAIN_CONF{'main.MAIN_PROG_CMD_CHAR'}) {
         $sCommand = substr($sCommand,1);
@@ -508,7 +510,9 @@ sub on_message_PRIVMSG(@) {
 	else {
 		# Private message hide passwords
 		unless ( $what =~ /^login|^register|^pass|^newpass|^ident/i) {
-			$mediabot->log_message(2,"<$who> $what");
+			if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+				$mediabot->log_message(0,"[LIVE] $where: <$who> $what");
+			}
 		}
 		my ($sCommand,@tArgs) = split(/\s+/,$what);
     $sCommand =~ tr/A-Z/a-z/;
