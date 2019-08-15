@@ -4191,7 +4191,9 @@ sub mbDbCommand(@) {
 							$actionDo =~ s/%R/$sRandomNick/g;
 						}
 						if ( $actionDo =~ /%s/ ) {
-							$actionDo =~ s/%s/$sCommand/g;
+							my $sCommandWithSpaces = $sCommand;
+							$sCommandWithSpaces =~ s/_/ /g;
+							$actionDo =~ s/%s/$sCommandWithSpaces/g;
 						}
 						if ( $actionDo =~ /%b/ ) {
 							my $iTrueFalse = int(rand(2));
@@ -4265,7 +4267,9 @@ sub mbDbCommand(@) {
 						}
 						$actionDo =~ s/%N/$sNick/g;
 						if ( $actionDo =~ /%s/ ) {
-							$actionDo =~ s/%s/$sCommand/g;
+							my $sCommandWithSpaces = $sCommand;
+							$sCommandWithSpaces =~ s/_/ /g;
+							$actionDo =~ s/%s/$sCommandWithSpaces/g;
 						}
 						if ( $actionDo =~ /%b/ ) {
 							my $iTrueFalse = int(rand(2));
@@ -5727,6 +5731,31 @@ sub mbColors(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my $sText = join(" ",@tArgs);
 	botPrivmsg($self,$sChannel,make_colors($self,$sText));
+}
+
+# In progress...
+sub mbSeen(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+		my $sQuery = "SELECT * FROM EVENT_LOG WHERE nick=? ORDER BY ts DESC LIMIT 1";
+		my $sth = $self->{dbh}->prepare($sQuery);
+		unless ($sth->execute()) {
+			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		}
+		else {
+			my $sCommandText;
+			if (my $ref = $sth->fetchrow_hashref()) {
+				my $ts = $ref->{'ts'};
+				my $command = $ref->{'command'};
+				my $userhost = $ref->{'userhost'};
+				my $args = $ref->{'args'};
+				
+			}
+			logBot($self,$message,$sChannel,"seen",undef);
+		}
+		$sth->finish;
+	}
 }
 
 1;
