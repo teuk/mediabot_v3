@@ -5534,20 +5534,20 @@ sub displayYoutubeDetails(@) {
 				my $sHour = $sDuration;
 				if ( $sHour =~ /H/ ) {
 					$sHour =~ s/H.*$//;
-					$sDisplayDuration .= "$sHour h ";
+					$sDisplayDuration .= "$sHour" . "h ";
 				}
 				my $sMin = $sDuration;
 				if ( $sMin =~ /M/ ) {
 					$sMin =~ s/^.*H//;
 					$sMin =~ s/M.*$//;
-					$sDisplayDuration .= "$sMin mn ";
+					$sDisplayDuration .= "$sMin" . "mn ";
 				}
 				my $sSec = $sDuration;
 				if ( $sSec =~ /S/ ) {
 					$sSec =~ s/^.*H//;
 					$sSec =~ s/^.*M//;
 					$sSec =~ s/S$//;
-					$sDisplayDuration .= "$sSec s";
+					$sDisplayDuration .= "$sSec" . "s";
 				}
 				log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
 				log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
