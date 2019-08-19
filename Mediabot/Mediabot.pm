@@ -900,7 +900,10 @@ sub mbCommandPublic(@) {
 												}
 		case /^colors$/i		{ $bFound = 1;
 														mbColors($self,$message,$sNick,$sChannel,@tArgs);
-												}												
+												}
+		case /^seen$/i			{ $bFound = 1;
+														mbSeen($self,$message,$sNick,$sChannel,@tArgs);
+												}
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													unless ( $bFound ) {
@@ -5738,7 +5741,13 @@ sub mbSeen(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-		my $sQuery = "SELECT * FROM EVENT_LOG WHERE nick=? ORDER BY ts DESC LIMIT 1";
+		# Quit vars from EVENT_LOG
+		my $tsQuit;
+		my $commandQuit;
+		my $userhostQuit;
+		my $argsQuit;
+		
+		my $sQuery = "SELECT * FROM EVENT_LOG WHERE nick like ? ORDER BY ts DESC LIMIT 1";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute()) {
 			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -5746,14 +5755,50 @@ sub mbSeen(@) {
 		else {
 			my $sCommandText;
 			if (my $ref = $sth->fetchrow_hashref()) {
-				my $ts = $ref->{'ts'};
-				my $command = $ref->{'command'};
-				my $userhost = $ref->{'userhost'};
-				my $args = $ref->{'args'};
-				
+				$tsQuit = $ref->{'ts'};
+				$commandQuit = $ref->{'command'};
+				$userhostQuit = $ref->{'userhost'};
+				$argsQuit = $ref->{'args'};
 			}
-			logBot($self,$message,$sChannel,"seen",undef);
 		}
+		
+		my $tsPart;
+		my $channelPart;
+		my $msgPart;
+		my $userhostPart;
+		# Part vars from CHANNEL_LOG
+		my $sQuery = "SELECT * FROM USER,CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND CHANNEL.name like ? AND nick like ? AND event_type='part' ORDER BY ts DESC LIMIT 1";
+		my $sth = $self->{dbh}->prepare($sQuery);
+		unless ($sth->execute($sChannel,$tArgs[0])) {
+			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		}
+		else {
+			my $sCommandText;
+			if (my $ref = $sth->fetchrow_hashref()) {
+				$tsPart = $ref->{'ts'};
+				$channelPart = $ref->{'name'};
+				$msgPart = $ref->{'publictext'};
+				$userhostPart = $ref->{'userhost'};
+			}
+		}
+		
+		unless (defined($tsQuit)) { $tsQuit = 0; }
+		unless (defined($tsPart)) { $tsQuit = 0; }
+		if (( $tsQuit == 0) && ( $tsPart == 0)) {
+			botPrivmsg($self,$sChannel,"I don't remember nick ". $tArgs[0]);
+		}
+		else {
+			if ( $tsPart > $tsQuit ) {
+				my $sDatePart = time2str("%m/%d/%Y %H:%M:%S", $tsPart);
+				botPrivmsg($self,$sChannel,$tArgs[0] . "($userhostPart) was last seen parting $sChannel : $sDatePart ($msgPart)");
+			}
+			else {
+				my $sDateQuit = time2str("%m/%d/%Y %H:%M:%S", $tsQuit);
+				botPrivmsg($self,$sChannel,$tArgs[0] . "($userhostQuit) was last seen quitting : $sDateQuit ($argsQuit)");
+			}
+		}
+		
+		logBot($self,$message,$sChannel,"seen",@tArgs);
 		$sth->finish;
 	}
 }
