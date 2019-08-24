@@ -5769,6 +5769,7 @@ sub mbSeen(@) {
 		# Part vars from CHANNEL_LOG
 		$sQuery = "SELECT * FROM USER,CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND CHANNEL.name like ? AND nick like ? AND event_type='part' ORDER BY ts DESC LIMIT 1";
 		$sth = $self->{dbh}->prepare($sQuery);
+		
 		unless ($sth->execute($sChannel,$tArgs[0])) {
 			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
