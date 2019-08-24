@@ -4178,12 +4178,12 @@ sub mbDbCommand(@) {
 				my ($actionType,$actionTo,$actionDo) = split(/ /,$action,3);
 				if ( $actionType eq 'PRIVMSG' ) {
 					if ( $actionTo eq '%c' ) {
-						if (defined($tArgs[0])) {
+						if (defined($tArgs[0]) && ($tArgs[0] =~ /[^%]%n/)) {
 							my $sNickAction = join(" ",@tArgs);
-							$actionDo =~ s/[^%]%n/$sNickAction/g;
+							$actionDo =~ s/%n/$sNickAction/g;
 						}
 						else {
-							$actionDo =~ s/[^%]%n/$sNick/g;
+							$actionDo =~ s/%n/$sNick/g;
 						}
 						if ( $actionDo =~ /[^%]%r/ ) {
 							my $sRandomNick = getRandomNick($self,$sChannel);
@@ -4253,12 +4253,12 @@ sub mbDbCommand(@) {
 				}
 				elsif ( $actionType eq 'ACTION' ) {
 					if ( $actionTo eq '%c' ) {
-						if (defined($tArgs[0])) {
+						if (defined($tArgs[0]) && ($tArgs[0] =~ /[^%]%n/)) {
 							my $sNickAction = join(" ",@tArgs);
-							$actionDo =~ s/[^%]%n/$sNickAction/g;
+							$actionDo =~ s/%n/$sNickAction/g;
 						}
 						else {
-							$actionDo =~ s/[^%]%n/$sNick/g;
+							$actionDo =~ s/%n/$sNick/g;
 						}
 						if ( $actionDo =~ /[^%]%r/ ) {
 							my $sRandomNick = getRandomNick($self,$sChannel);
