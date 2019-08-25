@@ -106,6 +106,13 @@ unless (defined($CONFIG_FILE)) {
         usage("You must specify a config file");
 }
 
+unless (open PGREP, "pgrep -fl \"mediabot.pl --conf=.*$CONFIG_FILE\" |" ) {
+	if (defined(my $line=<PGREP>)) {
+		print STDERR "Another instance is running ($line)";
+		exit 1;
+	}
+}
+
 # Daemon mode actions
 if ( $MAIN_PROG_DAEMON ) {
 		print STDERR "Mediabot v$MAIN_PROG_VERSION starting in daemon mode\n";
