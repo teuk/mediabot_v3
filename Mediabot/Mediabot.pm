@@ -4179,13 +4179,15 @@ sub mbDbCommand(@) {
 				if ( $actionType eq 'PRIVMSG' ) {
 					if ( $actionTo eq '%c' ) {
 						if (defined($tArgs[0])) {
-							my $sNickAction = join(" ",@tArgs);
-							$actionDo =~ s/%{2,}/%%/g;
-							$actionDo =~ s/[^%]*%n/$sNickAction/g;
+							my $sArgs = join(" ",@tArgs);
+							unless ( $actionDo =~ /%{2,}n/ ) {
+								$actionDo =~ s/%n/$sArgs/g;
+							}
 						}
 						else {
-							$actionDo =~ s/%{2,}/%%/g;
-							$actionDo =~ s/[^%]*%n/$sNick/g;
+							unless ( $actionDo =~ /%{2,}n/ ) {
+								$actionDo =~ s/%n/$sNick/g;
+							}
 						}
 						if ( $actionDo =~ /[^%]*%r/ ) {
 							my $sRandomNick = getRandomNick($self,$sChannel);
