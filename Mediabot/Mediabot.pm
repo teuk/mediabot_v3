@@ -439,19 +439,9 @@ sub logBotAction(@) {
 		log_message($self,1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			$id_channel = $ref->{'id_channel'};
+		if ((my $ref = $sth->fetchrow_hashref()) || ($eventtype eq "quit")) {
+			unless ($eventtype eq "quit") { $id_channel = $ref->{'id_channel'}; }
 			log_message($self,5,"logBotAction() ts = " . time2str("%Y-%m-%d %H-%M-%S",time));
-			my $sQuery = "INSERT INTO CHANNEL_LOG (id_channel,ts,event_type,nick,userhost,publictext) VALUES (?,?,?,?,?,?)";
-			my $sth = $self->{dbh}->prepare($sQuery);
-			unless ($sth->execute($id_channel,time2str("%Y-%m-%d %H-%M-%S",time),$eventtype,$sNick,$sUserhost,$sText) ) {
-				log_message($self,1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-			}
-			else {
-				log_message($self,5,"logBotAction() inserted " . $eventtype . " event into CHANNEL_LOG");
-			}
-		}
-		else {
 			my $sQuery = "INSERT INTO CHANNEL_LOG (id_channel,ts,event_type,nick,userhost,publictext) VALUES (?,?,?,?,?,?)";
 			my $sth = $self->{dbh}->prepare($sQuery);
 			unless ($sth->execute($id_channel,time2str("%Y-%m-%d %H-%M-%S",time),$eventtype,$sNick,$sUserhost,$sText) ) {
@@ -5683,9 +5673,9 @@ sub mbSeen(@) {
 		my $msgQuit;
 		my $userhostQuit;
 		
-		my $sQuery = "SELECT * FROM USER,CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND CHANNEL.name like ? AND nick like ? AND event_type='quit' ORDER BY ts DESC LIMIT 1";
+		my $sQuery = "SELECT * FROM CHANNEL_LOG WHERE nick like ? AND event_type='quit' ORDER BY ts DESC LIMIT 1";
 		my $sth = $self->{dbh}->prepare($sQuery);
-		unless ($sth->execute($sChannel,$tArgs[0])) {
+		unless ($sth->execute($tArgs[0])) {
 			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
@@ -5704,7 +5694,7 @@ sub mbSeen(@) {
 		my $msgPart;
 		my $userhostPart;
 		# Part vars from CHANNEL_LOG
-		$sQuery = "SELECT * FROM USER,CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND CHANNEL.name like ? AND nick like ? AND event_type='part' ORDER BY ts DESC LIMIT 1";
+		$sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND CHANNEL.name like ? AND nick like ? AND event_type='part' ORDER BY ts DESC LIMIT 1";
 		$sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($sChannel,$tArgs[0])) {
 			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -5739,10 +5729,12 @@ sub mbSeen(@) {
 		}
 		else {
 			if ( $epochTsPart > $epochTsQuit ) {
-				botPrivmsg($self,$sChannel,$tArgs[0] . "($userhostPart) was last seen parting $sChannel : $tsPart ($msgPart)");
+				$userhostPart =~ s/^.*!//;
+				botPrivmsg($self,$sChannel,$tArgs[0] . " ($userhostPart) was last seen parting $sChannel : $tsPart ($msgPart)");
 			}
 			elsif ( $epochTsQuit != 0) {
-				botPrivmsg($self,$sChannel,$tArgs[0] . "($userhostQuit) was last seen quitting : $tsQuit ($msgQuit)");
+				$userhostQuit =~ s/^.*!//;
+				botPrivmsg($self,$sChannel,$tArgs[0] . " ($userhostQuit) was last seen quitting : $tsQuit ($msgQuit)");
 			}
 			else {
 				
