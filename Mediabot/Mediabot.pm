@@ -5,6 +5,7 @@ use warnings;
 use diagnostics;
 use Config::Simple;
 use Date::Format;
+use Date::Parse;
 use Data::Dumper;
 use DBI;
 use Switch;
@@ -5678,11 +5679,11 @@ sub mbSeen(@) {
 	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 		# Quit vars from EVENT_LOG
 		my $tsQuit;
-		my $commandQuit;
+		my $channelQuit;
+		my $msgQuit;
 		my $userhostQuit;
-		my $argsQuit;
 		
-		my $sQuery = "SELECT * FROM EVENT_LOG WHERE nick like ? ORDER BY ts DESC LIMIT 1";
+		my $sQuery = "SELECT * FROM USER,CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND CHANNEL.name like ? AND nick like ? AND event_type='quit' ORDER BY ts DESC LIMIT 1";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute()) {
 			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -5691,9 +5692,10 @@ sub mbSeen(@) {
 			my $sCommandText;
 			if (my $ref = $sth->fetchrow_hashref()) {
 				$tsQuit = $ref->{'ts'};
-				$commandQuit = $ref->{'command'};
+				$channelQuit = $ref->{'name'};
+				$msgQuit = $ref->{'publictext'};
 				$userhostQuit = $ref->{'userhost'};
-				$argsQuit = $ref->{'args'};
+				log_message($self,3,"mbSeen() Quit : $tsQuit");
 			}
 		}
 		
@@ -5715,22 +5717,33 @@ sub mbSeen(@) {
 				$channelPart = $ref->{'name'};
 				$msgPart = $ref->{'publictext'};
 				$userhostPart = $ref->{'userhost'};
+				log_message($self,3,"mbSeen() Part : $tsPart");
 			}
 		}
 		
-		unless (defined($tsQuit)) { $tsQuit = 0; }
-		unless (defined($tsPart)) { $tsQuit = 0; }
-		if (( $tsQuit == 0) && ( $tsPart == 0)) {
+		my $epochTsQuit;
+		unless (defined($tsQuit)) {
+			$epochTsQuit = 0;
+		}
+		else {
+			$epochTsQuit = str2time($tsQuit);
+		}
+		my $epochTsPart;
+		unless (defined($tsPart)) {
+			$epochTsPart = 0;
+		}
+		else {
+			$epochTsPart = str2time($tsPart);
+		}
+		if (( $epochTsQuit == 0) && ( $epochTsPart == 0)) {
 			botPrivmsg($self,$sChannel,"I don't remember nick ". $tArgs[0]);
 		}
 		else {
-			if ( $tsPart >= $tsQuit ) {
-				my $sDatePart = time2str("%m/%d/%Y %H:%M:%S", $tsPart);
-				botPrivmsg($self,$sChannel,$tArgs[0] . "($userhostPart) was last seen parting $sChannel : $sDatePart ($msgPart)");
+			if ( $epochTsPart > $epochTsQuit ) {
+				botPrivmsg($self,$sChannel,$tArgs[0] . "($userhostPart) was last seen parting $sChannel : $tsPart ($msgPart)");
 			}
-			elsif ( $tsQuit != 0) {
-				my $sDateQuit = time2str("%m/%d/%Y %H:%M:%S", $tsQuit);
-				botPrivmsg($self,$sChannel,$tArgs[0] . "($userhostQuit) was last seen quitting : $sDateQuit ($argsQuit)");
+			elsif ( $epochTsQuit != 0) {
+				botPrivmsg($self,$sChannel,$tArgs[0] . "($userhostQuit) was last seen quitting : $tsQuit ($msgQuit)");
 			}
 			else {
 				
