@@ -14,6 +14,7 @@ use diagnostics;
 use POSIX 'setsid';
 use Getopt::Long;
 use File::Basename;
+use Proc::Find qw(find_proc proc_exists);
 use Mediabot::Mediabot;
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
@@ -106,11 +107,9 @@ unless (defined($CONFIG_FILE)) {
         usage("You must specify a config file");
 }
 
-unless (open PGREP, "pgrep -fl \"mediabot.pl --conf=.*$CONFIG_FILE\" |" ) {
-	if (defined(my $line=<PGREP>)) {
-		print STDERR "Another instance is running ($line)";
+if (proc_exists(name => qr/mediabot.pl.*$CONFIG_FILE/)) {
+		print STDERR "Another instance is running matching mediabot.pl and $CONFIG_FILE\n";
 		exit 1;
-	}
 }
 
 # Daemon mode actions
