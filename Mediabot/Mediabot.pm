@@ -4176,7 +4176,7 @@ sub mbDbCommand(@) {
 			else {
 				log_message($self,2,"SQL command found : $sCommand description : $description action : $action");
 				my ($actionType,$actionTo,$actionDo) = split(/ /,$action,3);
-				if ( $actionType eq 'PRIVMSG' ) {
+				if (( $actionType eq 'PRIVMSG' ) || ( $actionType eq 'ACTION' )){
 					if ( $actionTo eq '%c' ) {
 						if (defined($tArgs[0])) {
 							my $sArgs = join(" ",@tArgs);
@@ -4240,97 +4240,23 @@ sub mbDbCommand(@) {
 						}
 						$actionDo = join(" ",@tActionDo);
 						for ($pos=0;$pos<=$#tActionDo;$pos++) {
-							if ( $tActionDo[$pos] =~ /[^%]%dd/ ) {
+							if ( $tActionDo[$pos] =~ /%dd/ ) {
 								$tActionDo[$pos] = int(rand(90) + 10);
 							}
 						}
 						$actionDo = join(" ",@tActionDo);
 						for ($pos=0;$pos<=$#tActionDo;$pos++) {
-							if ( $tActionDo[$pos] =~ /[^%]%ddd/ ) {
+							if ( $tActionDo[$pos] =~ /%ddd/ ) {
 								$tActionDo[$pos] = int(rand(900) + 100);
 							}
 						}
 						$actionDo = join(" ",@tActionDo);
-						botPrivmsg($self,$sChannel,$actionDo);
-					}
-					return 1;
-				}
-				elsif ( $actionType eq 'ACTION' ) {
-					if ( $actionTo eq '%c' ) {
-						if (defined($tArgs[0])) {
-							my $sArgs = join(" ",@tArgs);
-							$actionDo =~ s/%n/$sArgs/g;
+						if ( $actionType eq 'PRIVMSG' ) {
+							botPrivmsg($self,$sChannel,$actionDo);
 						}
 						else {
-							$actionDo =~ s/%n/$sNick/g;
+							botAction($self,$sChannel,$actionDo);
 						}
-						if ( $actionDo =~ /%r/ ) {
-							my $sRandomNick = getRandomNick($self,$sChannel);
-							$actionDo =~ s/%r/$sRandomNick/g;
-						}
-						if ( $actionDo =~ /%R/ ) {
-							my $sRandomNick = getRandomNick($self,$sChannel);
-							$actionDo =~ s/%R/$sRandomNick/g;
-						}
-						if ( $actionDo =~ /%s/ ) {
-							my $sCommandWithSpaces = $sCommand;
-							$sCommandWithSpaces =~ s/_/ /g;
-							$actionDo =~ s/%s/$sCommandWithSpaces/g;
-						}
-						unless ( $actionDo =~ /%b/ ) {
-							my $iTrueFalse = int(rand(2));
-							if ( $iTrueFalse == 1 ) {
-								$actionDo =~ s/%b/true/g;
-							}
-							else {
-								$actionDo =~ s/%b/false/g;
-							}
-						}
-						if ( $actionDo =~ /%B/ ) {
-							my $iTrueFalse = int(rand(2));
-							if ( $iTrueFalse == 1 ) {
-								$actionDo =~ s/%B/true/g;
-							}
-							else {
-								$actionDo =~ s/%B/false/g;
-							}
-						}
-						if ( $actionDo =~ /%on/ ) {
-							my $iTrueFalse = int(rand(2));
-							if ( $iTrueFalse == 1 ) {
-								$actionDo =~ s/%on/oui/g;
-							}
-							else {
-								$actionDo =~ s/%on/non/g;
-							}
-						}
-						if ( $actionDo =~ /%c/ ) {
-							$actionDo =~ s/%c/$sChannel/g;
-						}
-						if ( $actionDo =~ /%N/ ) {
-							$actionDo =~ s/%N/$sNick/g;
-						}
-						my @tActionDo = split(/ /,$actionDo);
-						my $pos;
-						for ($pos=0;$pos<=$#tActionDo;$pos++) {
-							if ( $tActionDo[$pos] =~ /%d/ ) {
-								$tActionDo[$pos] = int(rand(10) + 1);
-							}
-						}
-						$actionDo = join(" ",@tActionDo);
-						for ($pos=0;$pos<=$#tActionDo;$pos++) {
-							if ( $tActionDo[$pos] =~ /[^%]%dd/ ) {
-								$tActionDo[$pos] = int(rand(90) + 10);
-							}
-						}
-						$actionDo = join(" ",@tActionDo);
-						for ($pos=0;$pos<=$#tActionDo;$pos++) {
-							if ( $tActionDo[$pos] =~ /[^%]%ddd/ ) {
-								$tActionDo[$pos] = int(rand(900) + 100);
-							}
-						}
-						$actionDo = join(" ",@tActionDo);
-						botAction($self,$sChannel,$actionDo);
 					}
 					return 1;
 				}
