@@ -4189,20 +4189,20 @@ sub mbDbCommand(@) {
 								$actionDo =~ s/%n/$sNick/g;
 							}
 						}
-						if ( $actionDo =~ /[^%]*%r/ ) {
+						unless ( $actionDo =~ /%{2,}r/ ) {
 							my $sRandomNick = getRandomNick($self,$sChannel);
 							$actionDo =~ s/%r/$sRandomNick/g;
 						}
-						if ( $actionDo =~ /[^%]*%R/ ) {
+						unless ( $actionDo =~ /%{2,}R/ ) {
 							my $sRandomNick = getRandomNick($self,$sChannel);
 							$actionDo =~ s/%R/$sRandomNick/g;
 						}
-						if ( $actionDo =~ /[^%]*%s/ ) {
+						unless ( $actionDo =~ /%{2,}s/ ) {
 							my $sCommandWithSpaces = $sCommand;
 							$sCommandWithSpaces =~ s/_/ /g;
 							$actionDo =~ s/%s/$sCommandWithSpaces/g;
 						}
-						if ( $actionDo =~ /[^%]*%b/ ) {
+						unless ( $actionDo =~ /%{2,}b/ ) {
 							my $iTrueFalse = int(rand(2));
 							if ( $iTrueFalse == 1 ) {
 								$actionDo =~ s/%b/true/g;
@@ -4211,7 +4211,7 @@ sub mbDbCommand(@) {
 								$actionDo =~ s/%b/false/g;
 							}
 						}
-						if ( $actionDo =~ /[^%]*%B/ ) {
+						unless ( $actionDo =~ /%{2,}B/ ) {
 							my $iTrueFalse = int(rand(2));
 							if ( $iTrueFalse == 1 ) {
 								$actionDo =~ s/%B/true/g;
@@ -4220,7 +4220,7 @@ sub mbDbCommand(@) {
 								$actionDo =~ s/%B/false/g;
 							}
 						}
-						if ( $actionDo =~ /[^%]*%on/ ) {
+						unless ( $actionDo =~ /%{2,}on/ ) {
 							my $iTrueFalse = int(rand(2));
 							if ( $iTrueFalse == 1 ) {
 								$actionDo =~ s/%on/oui/g;
@@ -4229,8 +4229,12 @@ sub mbDbCommand(@) {
 								$actionDo =~ s/%on/non/g;
 							}
 						}
-						$actionDo =~ s/[^%]*%c/$sChannel/g;
-						$actionDo =~ s/[^%]*%N/$sNick/g;
+						unless ( $actionDo =~ /%{2,}c/ ) {
+							$actionDo =~ s/%c/$sChannel/g;
+						}
+						unless ( $actionDo =~ /%{2,}N/ ) {
+							$actionDo =~ s/%N/$sNick/g;
+						}
 						my @tActionDo = split(/ /,$actionDo);
 						my $pos;
 						for ($pos=0;$pos<=$#tActionDo;$pos++) {
@@ -4258,28 +4262,30 @@ sub mbDbCommand(@) {
 				elsif ( $actionType eq 'ACTION' ) {
 					if ( $actionTo eq '%c' ) {
 						if (defined($tArgs[0])) {
-							my $sNickAction = join(" ",@tArgs);
-							$actionDo =~ s/%{2,}/%%/g;
-							$actionDo =~ s/[^%]*%n/$sNickAction/g;
+							my $sArgs = join(" ",@tArgs);
+							unless ( $actionDo =~ /%{2,}n/ ) {
+								$actionDo =~ s/%n/$sArgs/g;
+							}
 						}
 						else {
-							$actionDo =~ s/%{2,}/%%/g;
-							$actionDo =~ s/[^%]*%n/$sNick/g;
+							unless ( $actionDo =~ /%{2,}n/ ) {
+								$actionDo =~ s/%n/$sNick/g;
+							}
 						}
-						if ( $actionDo =~ /[^%]*%r/ ) {
+						unless ( $actionDo =~ /%{2,}r/ ) {
 							my $sRandomNick = getRandomNick($self,$sChannel);
 							$actionDo =~ s/%r/$sRandomNick/g;
 						}
-						if ( $actionDo =~ /[^%]*%R/ ) {
+						unless ( $actionDo =~ /%{2,}R/ ) {
 							my $sRandomNick = getRandomNick($self,$sChannel);
 							$actionDo =~ s/%R/$sRandomNick/g;
 						}
-						if ( $actionDo =~ /[^%]*%s/ ) {
+						unless ( $actionDo =~ /%{2,}s/ ) {
 							my $sCommandWithSpaces = $sCommand;
 							$sCommandWithSpaces =~ s/_/ /g;
 							$actionDo =~ s/%s/$sCommandWithSpaces/g;
 						}
-						if ( $actionDo =~ /[^%]*%b/ ) {
+						unless ( $actionDo =~ /%{2,}b/ ) {
 							my $iTrueFalse = int(rand(2));
 							if ( $iTrueFalse == 1 ) {
 								$actionDo =~ s/%b/true/g;
@@ -4288,7 +4294,7 @@ sub mbDbCommand(@) {
 								$actionDo =~ s/%b/false/g;
 							}
 						}
-						if ( $actionDo =~ /[^%]*%B/ ) {
+						unless ( $actionDo =~ /%{2,}B/ ) {
 							my $iTrueFalse = int(rand(2));
 							if ( $iTrueFalse == 1 ) {
 								$actionDo =~ s/%B/true/g;
@@ -4297,7 +4303,7 @@ sub mbDbCommand(@) {
 								$actionDo =~ s/%B/false/g;
 							}
 						}
-						if ( $actionDo =~ /[^%]*%on/ ) {
+						unless ( $actionDo =~ /%{2,}on/ ) {
 							my $iTrueFalse = int(rand(2));
 							if ( $iTrueFalse == 1 ) {
 								$actionDo =~ s/%on/oui/g;
@@ -4306,8 +4312,12 @@ sub mbDbCommand(@) {
 								$actionDo =~ s/%on/non/g;
 							}
 						}
-						$actionDo =~ s/[^%]*%c/$sChannel/g;
-						$actionDo =~ s/[^%]*%N/$sNick/g;
+						unless ( $actionDo =~ /%{2,}c/ ) {
+							$actionDo =~ s/%c/$sChannel/g;
+						}
+						unless ( $actionDo =~ /%{2,}N/ ) {
+							$actionDo =~ s/%N/$sNick/g;
+						}
 						my @tActionDo = split(/ /,$actionDo);
 						my $pos;
 						for ($pos=0;$pos<=$#tActionDo;$pos++) {
