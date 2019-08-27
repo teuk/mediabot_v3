@@ -459,15 +459,20 @@ sub botPrivmsg(@) {
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	if (defined($sTo)) {
 		my $eventtype = "public";
-		if (substr($sTo, 0, 1) eq '#') {
-			log_message($self,0,"$sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
-			logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,$sMsg);
+		if (substr($sTo, 0, 1) eq '#') {			
+				log_message($self,0,"$sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
+				logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,$sMsg);
 		}
 		else {
 			$eventtype = "private";
 			log_message($self,0,"-> *$sTo* $sMsg");
 		}
-		$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
+		unless (( $sMsg =~ /annie-claude/i ) && ( $sTo =~ /^#montreal$/i )) {
+			$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
+		}
+		else {
+			log_message($self,0,"IGNORED BECAUSE OF bad-word $sMsg => $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
+		}
 	}
 	else {
 		log_message($self,0,"botPrivmsg() ERROR no target specified to send $sMsg");
@@ -486,7 +491,12 @@ sub botAction(@) {
 		$eventtype = "private";
 		log_message($self,0,"-> *$sTo* ACTION $sMsg");
 	}
-	$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $sMsg\1" );
+	unless (( $sMsg =~ /annie-claude/i ) && ( $sTo =~ /^#montreal$/i )) {
+		$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $sMsg\1" );
+	}
+	else {
+		log_message($self,0,"IGNORED BECAUSE OF bad-word $sMsg => $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
+	}
 }
 
 sub botNotice(@) {

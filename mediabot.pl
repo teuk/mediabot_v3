@@ -107,10 +107,18 @@ unless (defined($CONFIG_FILE)) {
         usage("You must specify a config file");
 }
 
-if (proc_exists(name => qr/mediabot.pl.*$CONFIG_FILE/)) {
-		print STDERR "Another instance is running matching mediabot.pl and $CONFIG_FILE\n";
-		exit 1;
-}
+#my $CONFIG_FILE_BASENAME = basename($CONFIG_FILE);
+#
+#my $nbInstances = `pgrep -fl $CONFIG_FILE_BASENAME | wc -l`;
+#print STDERR "CONFIG_FILE_BASENAME : $CONFIG_FILE_BASENAME\n";
+#print STDERR "Instances running :\n";
+#print STDERR "$nbInstances";
+#
+##if (proc_exists(cmndline => qr/--conf=$CONFIG_FILE_BASENAME/)) {
+#if ( defined($nbInstances) && ($nbInstances >2)) {
+#		print STDERR "Another instance is running matching $CONFIG_FILE_BASENAME\n";
+#		exit 1;
+#}
 
 # Daemon mode actions
 if ( $MAIN_PROG_DAEMON ) {
