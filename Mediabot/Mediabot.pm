@@ -5725,17 +5725,19 @@ sub mbSeen(@) {
 			$epochTsQuit = 0;
 		}
 		else {
-			$epochTsQuit = str2time($tsQuit);
+			# I know this is ugly, ts logs are in CEST in my case, I'll take care of TZ later...
+			$epochTsQuit = str2time($tsQuit) - 21600;
 		}
 		my $epochTsPart;
 		unless (defined($tsPart)) {
 			$epochTsPart = 0;
 		}
 		else {
-			$epochTsPart = str2time($tsPart);
+			# I know this is ugly, ts logs are in CEST in my case, I'll take care of TZ later...
+			$epochTsPart = str2time($tsPart) - 21600;
 		}
 		if (( $epochTsQuit == 0) && ( $epochTsPart == 0)) {
-			botPrivmsg($self,$sChannel,"I don't remember nick ". $tArgs[0]);
+			botPrivmsg($self,$sChannel,"I don't remember nick seeing ". $tArgs[0]);
 		}
 		else {
 			if ( $epochTsPart > $epochTsQuit ) {
