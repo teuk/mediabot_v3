@@ -78,6 +78,7 @@ Data::Dumper
 Config::Simple
 Date::Format
 Data::Dumper
+Date::Parse
 DBI
 DBD::mysql
 Switch
@@ -106,6 +107,7 @@ Data::Dumper
 Config::Simple
 Date::Format
 Data::Dumper
+Date::Parse
 DBI
 DBD::mysql
 Switch
