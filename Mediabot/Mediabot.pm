@@ -2961,7 +2961,7 @@ sub userModinfoSyntax(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	botNotice($self,$sNick,"Syntax: modinfo [#channel] automode <user> <voice|op|none>");
-	botNotice($self,$sNick,"Syntax: modinfo [#channel] greet <user> <greet>");
+	botNotice($self,$sNick,"Syntax: modinfo [#channel] greet <user> <greet> (use keyword \"none\" for <greet> to remove it)");
 	botNotice($self,$sNick,"Syntax: modinfo [#channel] level <user> <level>");
 }
 
@@ -5737,7 +5737,7 @@ sub mbSeen(@) {
 			$epochTsPart = str2time($tsPart) - 21600;
 		}
 		if (( $epochTsQuit == 0) && ( $epochTsPart == 0)) {
-			botPrivmsg($self,$sChannel,"I don't remember nick seeing ". $tArgs[0]);
+			botPrivmsg($self,$sChannel,"I don't remember seeing nick ". $tArgs[0]);
 		}
 		else {
 			if ( $epochTsPart > $epochTsQuit ) {

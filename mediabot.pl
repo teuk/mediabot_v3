@@ -108,13 +108,7 @@ unless (defined($CONFIG_FILE)) {
 }
 
 my $CONFIG_FILE_BASENAME = basename($CONFIG_FILE);
-#
 my $nbInstances = `pgrep -fl $CONFIG_FILE_BASENAME | wc -l`;
-#my $sInstances = `ps -eaf | grep -v grep | grep $CONFIG_FILE_BASENAME`;
-#print STDERR "CONFIG_FILE_BASENAME : $CONFIG_FILE_BASENAME\n";
-#print STDERR "Instances running :\n";
-#print STDERR "$sInstances\n";
-#print STDERR "$nbInstances";
 
 if (defined($nbInstances) && ($nbInstances > 2)) {
 		print STDERR "Another instance is running matching $CONFIG_FILE_BASENAME\n";
