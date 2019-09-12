@@ -5422,15 +5422,17 @@ sub displayYoutubeDetails(@) {
 	if ( $sText =~ /http.*:\/\/www\.youtube\..*\/watch/i ) {
 		$sYoutubeId = $sText;
 		$sYoutubeId =~ s/^.*watch\?v=//;
-		#my $sTempYoutubeId = ($sText =~ m/^.*(http:\/\/[^ ]+).*$]/)[0];
+		$sYoutubeId = substr($sYoutubeId,0,11);
 	}
 	elsif ( $sText =~ /http.*:\/\/m\.youtube\..*\/watch/i ) {
 		$sYoutubeId = $sText;
 		$sYoutubeId =~ s/^.*watch\?v=//;
+		$sYoutubeId = substr($sYoutubeId,0,11);
 	}
 	elsif ( $sText =~ /http.*:\/\/youtu\.be.*/i ) {
 		$sYoutubeId = $sText;
 		$sYoutubeId =~ s/^.*youtu\.be\///;
+		$sYoutubeId = substr($sYoutubeId,0,11);
 	}
 	if (defined($sYoutubeId) && ( $sYoutubeId ne "" )) {
 		log_message($self,3,"displayYoutubeDetails() sYoutubeId = $sYoutubeId");
