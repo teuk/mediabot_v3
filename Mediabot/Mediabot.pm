@@ -3016,7 +3016,11 @@ sub userModinfo(@) {
 																					botNotice($self,$sNick,"Your level does not allow you to perfom this command.");
 																				}
 																				splice @tArgs,0,2;
-																				my $sGreet = join(" ",@tArgs);
+																				my $sGreet;
+																				# Check remove keyword "none"
+																				unless (( $tArgs[0] =~ /none/i ) && ($#tArgs == 0)) {
+																					$sGreet = join(" ",@tArgs);
+																				}
 																				my $sQuery = "UPDATE USER_CHANNEL SET greet=? WHERE id_user=? AND id_channel=?";
 																				my $sth = $self->{dbh}->prepare($sQuery);
 																				unless ($sth->execute($sGreet,$id_user,$id_channel)) {
