@@ -1946,7 +1946,7 @@ sub userCstat(@) {
 					while (my $ref = $sth->fetchrow_hashref()) {
 						$sAuthUserStr .= $ref->{'nickname'} . " (" . $ref->{'description'} . ") ";
 					}
-					botNotice($self,$sNick,"Utilisateurs authentifiés : " . $sAuthUserStr);
+					botNotice($self,$sNick,"Utilisateurs authentifiÃ©s : " . $sAuthUserStr);
 					logBot($self,$message,undef,"cstat",@tArgs);
 				}
 				$sth->finish;
