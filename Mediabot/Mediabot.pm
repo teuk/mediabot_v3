@@ -5779,7 +5779,7 @@ sub mbPopCommand(@) {
 		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
-		my $sNbCommandNotice = "Top commands for " . $tArgs[0] . " : ";
+		my $sNbCommandNotice = "Popular commands for " . $tArgs[0] . " : ";
 		my $i = 0;
 		while (my $ref = $sth->fetchrow_hashref()) {
 			my $command = $ref->{'command'};
@@ -5797,10 +5797,10 @@ sub mbPopCommand(@) {
 		}
 		else {
 			if (defined($sChannel)) {
-				botPrivmsg($self,$sChannel,"No top commands for " . $tArgs[0]);
+				botPrivmsg($self,$sChannel,"No popular commands for " . $tArgs[0]);
 			}
 			else {
-				botNotice($self,$sNick,"No top commands for " . $tArgs[0]);
+				botNotice($self,$sNick,"No popular commands for " . $tArgs[0]);
 			}
 		}
 		logBot($self,$message,$sChannel,"popcmd",undef);
