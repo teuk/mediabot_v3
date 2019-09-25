@@ -860,6 +860,9 @@ sub mbCommandPublic(@) {
 		case /^topcmd$/i		{ $bFound = 1;
 														mbTopCommand($self,$message,$sNick,$sChannel,@tArgs);
 												}
+		case /^popcmd$/i		{ $bFound = 1;
+														mbPopCommand($self,$message,$sNick,$sChannel,@tArgs);
+												}
 		case /^searchcmd$/i	{ $bFound = 1;
 														mbDbSearchCommand($self,$message,$sNick,$sChannel,@tArgs);
 												}
@@ -1086,6 +1089,9 @@ sub mbCommandPrivate(@) {
 												}
 		case /^topcmd$/i		{ $bFound = 1;
 														mbTopCommand($self,$message,$sNick,undef,@tArgs);
+												}
+		case /^popcmd$/i		{ $bFound = 1;
+														mbPopCommand($self,$message,$sNick,undef,@tArgs);
 												}
 		case /^searchcmd$/i	{ $bFound = 1;
 														mbDbSearchCommand($self,$message,$sNick,undef,@tArgs);
@@ -5762,6 +5768,44 @@ sub mbSeen(@) {
 		logBot($self,$message,$sChannel,"seen",@tArgs);
 		$sth->finish;
 	}
+}
+
+sub mbPopCommand(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $sQuery = "SELECT command,hits FROM USER,PUBLIC_COMMANDS WHERE USER.id_user=PUBLIC_COMMANDS.id_user AND nickname like ? ORDER BY hits DESC LIMIT 20";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($tArgs[0])) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		my $sNbCommandNotice = "Top commands for " . $tArgs[0] . " : ";
+		my $i = 0;
+		while (my $ref = $sth->fetchrow_hashref()) {
+			my $command = $ref->{'command'};
+			my $hits = $ref->{'hits'};
+			$sNbCommandNotice .= "$command ($hits) ";
+			$i++;
+		}
+		if ( $i ) {
+			if (defined($sChannel)) {
+				botPrivmsg($self,$sChannel,$sNbCommandNotice);
+			}
+			else {
+				botNotice($self,$sNick,$sNbCommandNotice);
+			}
+		}
+		else {
+			if (defined($sChannel)) {
+				botPrivmsg($self,$sChannel,"No top commands for " . $tArgs[0]);
+			}
+			else {
+				botNotice($self,$sNick,"No top commands for " . $tArgs[0]);
+			}
+		}
+		logBot($self,$message,$sChannel,"popcmd",undef);
+	}
+	$sth->finish;
 }
 
 1;

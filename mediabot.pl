@@ -79,7 +79,7 @@ sub on_message_RPL_WHOISUSER(@);
 my $sFullParams = join(" ",@ARGV);
 my $sServer;
 
-# Get version
+# Get current version
 unless (open VERSION, "VERSION") {
 	print STDERR "Could not get version from VERSION file\n";
 	$MAIN_PROG_VERSION = "Undefined";
