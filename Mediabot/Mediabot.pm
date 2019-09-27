@@ -14,6 +14,8 @@ use IO::Async::Timer::Periodic;
 use String::IRC;
 use JSON;
 use POSIX 'setsid';
+use DateTime;
+use DateTime::TimeZone;
 
 sub new {
 	my ($class,$args) = @_;
@@ -908,6 +910,9 @@ sub mbCommandPublic(@) {
 		case /^seen$/i			{ $bFound = 1;
 														mbSeen($self,$message,$sNick,$sChannel,@tArgs);
 												}
+		case /^date$/i			{ $bFound = 1;
+														displayDate($self,$message,$sNick,$sChannel,@tArgs);
+												}				
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													unless ( $bFound ) {
@@ -5806,6 +5811,23 @@ sub mbPopCommand(@) {
 		logBot($self,$message,$sChannel,"popcmd",undef);
 	}
 	$sth->finish;
+}
+
+sub displayDate(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $sDefaultTZ = 'America/New_York';
+	if (defined($tArgs[0])) {
+		if ( $tArgs[0] =~ /^fr$/i ) {
+			$sDefaultTZ = 'Europe/Paris';
+		}
+		else {
+			botPrivmsg($self,$sChannel,"Invalid parameter");	
+			return undef;
+		}
+	}
+	my $time = DateTime->now( time_zone => $sDefaultTZ );
+	botPrivmsg($self,$sChannel,"$sDefaultTZ : " . $time->format_cldr("cccc dd/MM/yyyy HH:mm:ss"));
 }
 
 1;

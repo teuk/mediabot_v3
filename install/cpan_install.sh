@@ -84,7 +84,9 @@ DBD::mysql
 Switch
 Memory::Usage
 String::IRC
-JSON" | while read perl_module
+JSON
+DateTime
+DateTime::TimeZone" | while read perl_module
  do
   message "Checking $perl_module "
   perl -M$perl_module -e "exit 0;" &>/dev/null
@@ -113,7 +115,9 @@ DBD::mysql
 Switch
 Memory::Usage
 String::IRC
-JSON" | while read perl_module
+JSON
+DateTime
+DateTime::TimeZone" | while read perl_module
  do
   message "Checking $perl_module"
   perl -M$perl_module -e "exit 0;"
