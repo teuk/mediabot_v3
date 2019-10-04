@@ -5440,12 +5440,12 @@ sub displayYoutubeDetails(@) {
 	log_message($self,3,"displayYoutubeDetails() $sText");
 	if ( $sText =~ /http.*:\/\/www\.youtube\..*\/watch/i ) {
 		$sYoutubeId = $sText;
-		$sYoutubeId =~ s/^.*watch\?v=//;
+		$sYoutubeId =~ s/^.*watch.*v=//;
 		$sYoutubeId = substr($sYoutubeId,0,11);
 	}
 	elsif ( $sText =~ /http.*:\/\/m\.youtube\..*\/watch/i ) {
 		$sYoutubeId = $sText;
-		$sYoutubeId =~ s/^.*watch\?v=//;
+		$sYoutubeId =~ s/^.*watch.*v=//;
 		$sYoutubeId = substr($sYoutubeId,0,11);
 	}
 	elsif ( $sText =~ /http.*:\/\/youtu\.be.*/i ) {
