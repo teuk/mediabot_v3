@@ -5438,12 +5438,12 @@ sub displayYoutubeDetails(@) {
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sYoutubeId;
 	log_message($self,3,"displayYoutubeDetails() $sText");
-	if ( $sText =~ /http.*:\/\/www\.youtube\..*\/watch/i ) {
+	if ( $sText =~ /http.*:\/\/www\.youtube\..*\/watch.*v=/i ) {
 		$sYoutubeId = $sText;
 		$sYoutubeId =~ s/^.*watch.*v=//;
 		$sYoutubeId = substr($sYoutubeId,0,11);
 	}
-	elsif ( $sText =~ /http.*:\/\/m\.youtube\..*\/watch/i ) {
+	elsif ( $sText =~ /http.*:\/\/m\.youtube\..*\/watch.*v=/i ) {
 		$sYoutubeId = $sText;
 		$sYoutubeId =~ s/^.*watch.*v=//;
 		$sYoutubeId = substr($sYoutubeId,0,11);
