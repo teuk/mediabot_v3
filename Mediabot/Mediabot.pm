@@ -5435,6 +5435,9 @@ sub channelNicksRemove(@) {
 
 sub displayYoutubeDetails(@) {
 	my ($self,$message,$sNick,$sChannel,$sText) = @_;
+	if ( $sNick =~ /sid/i ) {
+		return;
+	}
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sYoutubeId;
 	log_message($self,3,"displayYoutubeDetails() $sText");
