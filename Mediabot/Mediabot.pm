@@ -5486,7 +5486,7 @@ sub displayYoutubeDetails(@) {
 				my @fTyoutubeItems = @{$tYoutubeItems[0]};
 				log_message($self,4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
 				# Check items
-				if ( $#fTyoutubeItems > 0 ) {
+				if ( $#fTyoutubeItems >= 0 ) {
 					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
 					log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
 					$sViewCount = "vue $hYoutubeItems{'statistics'}{'viewCount'} fois";
