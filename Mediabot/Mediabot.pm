@@ -5483,67 +5483,74 @@ sub displayYoutubeDetails(@) {
 				my $sYoutubeInfo = decode_json $json_details;
 				my %hYoutubeInfo = %$sYoutubeInfo;
 				my @tYoutubeItems = $hYoutubeInfo{'items'};
-				my %hYoutubeItems = %{$tYoutubeItems[0][0]};
-				log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
-				$sViewCount = "vue $hYoutubeItems{'statistics'}{'viewCount'} fois";
-				$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
-				$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
-				log_message($self,3,"displayYoutubeDetails() sDuration : $sDuration");
-				$sDuration =~ s/^PT//;
-				my $sDisplayDuration;
-				my $sHour = $sDuration;
-				if ( $sHour =~ /H/ ) {
-					$sHour =~ s/H.*$//;
-					$sDisplayDuration .= "$sHour" . "h ";
-				}
-				my $sMin = $sDuration;
-				if ( $sMin =~ /M/ ) {
-					$sMin =~ s/^.*H//;
-					$sMin =~ s/M.*$//;
-					$sDisplayDuration .= "$sMin" . "mn ";
-				}
-				my $sSec = $sDuration;
-				if ( $sSec =~ /S/ ) {
-					$sSec =~ s/^.*H//;
-					$sSec =~ s/^.*M//;
-					$sSec =~ s/S$//;
-					$sDisplayDuration .= "$sSec" . "s";
-				}
-				log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
-				log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
-				log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
-				
-				if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
-					my $sMsgSong .= String::IRC->new('You')->black('white');
-					$sMsgSong .= String::IRC->new('Tube')->white('red');
-					$sMsgSong .= String::IRC->new(" $sTitle ")->white('black');
-					$sMsgSong .= String::IRC->new("- ")->orange('black');
-					$sMsgSong .= String::IRC->new("$sDisplayDuration ")->grey('black');
-					$sMsgSong .= String::IRC->new("- ")->orange('black');
-					$sMsgSong .= String::IRC->new("$sViewCount")->grey('black');
-					botPrivmsg($self,$sChannel,$sMsgSong);
+				my @fTyoutubeItems = @{$tYoutubeItems[0]};
+				log_message($self,4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
+				if ( $#fTyoutubeItems > 0 ) {
+					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
+					log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
+					$sViewCount = "vue $hYoutubeItems{'statistics'}{'viewCount'} fois";
+					$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
+					$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
+					log_message($self,3,"displayYoutubeDetails() sDuration : $sDuration");
+					$sDuration =~ s/^PT//;
+					my $sDisplayDuration;
+					my $sHour = $sDuration;
+					if ( $sHour =~ /H/ ) {
+						$sHour =~ s/H.*$//;
+						$sDisplayDuration .= "$sHour" . "h ";
+					}
+					my $sMin = $sDuration;
+					if ( $sMin =~ /M/ ) {
+						$sMin =~ s/^.*H//;
+						$sMin =~ s/M.*$//;
+						$sDisplayDuration .= "$sMin" . "mn ";
+					}
+					my $sSec = $sDuration;
+					if ( $sSec =~ /S/ ) {
+						$sSec =~ s/^.*H//;
+						$sSec =~ s/^.*M//;
+						$sSec =~ s/S$//;
+						$sDisplayDuration .= "$sSec" . "s";
+					}
+					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
+					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
+					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
+					
+					if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
+						my $sMsgSong .= String::IRC->new('You')->black('white');
+						$sMsgSong .= String::IRC->new('Tube')->white('red');
+						$sMsgSong .= String::IRC->new(" $sTitle ")->white('black');
+						$sMsgSong .= String::IRC->new("- ")->orange('black');
+						$sMsgSong .= String::IRC->new("$sDisplayDuration ")->grey('black');
+						$sMsgSong .= String::IRC->new("- ")->orange('black');
+						$sMsgSong .= String::IRC->new("$sViewCount")->grey('black');
+						botPrivmsg($self,$sChannel,$sMsgSong);
+					}
+					else {
+						log_message($self,3,"displayYoutubeDetails() one of the youtube field is undef or empty");
+						if (defined($sTitle)) {
+							log_message($self,3,"displayYoutubeDetails() sTitle=$sTitle");
+						}
+						else {
+							log_message($self,3,"displayYoutubeDetails() sTitle is undefined");
+						}
+						
+						if (defined($sDuration)) {
+							log_message($self,3,"displayYoutubeDetails() sDuration=$sDuration");
+						}
+						else {
+							log_message($self,3,"displayYoutubeDetails() sDuration is undefined");
+						}
+						if (defined($sViewCount)) {
+							log_message($self,3,"displayYoutubeDetails() sViewCount=$sViewCount");
+						}
+						else {
+							log_message($self,3,"displayYoutubeDetails() sViewCount is undefined");
+						}
+					}
 				}
 				else {
-					log_message($self,3,"displayYoutubeDetails() one of the youtube field is undef or empty");
-					if (defined($sTitle)) {
-						log_message($self,3,"displayYoutubeDetails() sTitle=$sTitle");
-					}
-					else {
-						log_message($self,3,"displayYoutubeDetails() sTitle is undefined");
-					}
-					
-					if (defined($sDuration)) {
-						log_message($self,3,"displayYoutubeDetails() sDuration=$sDuration");
-					}
-					else {
-						log_message($self,3,"displayYoutubeDetails() sDuration is undefined");
-					}
-					if (defined($sViewCount)) {
-						log_message($self,3,"displayYoutubeDetails() sViewCount=$sViewCount");
-					}
-					else {
-						log_message($self,3,"displayYoutubeDetails() sViewCount is undefined");
-					}
+					log_message($self,3,"displayYoutubeDetails() Invalid id : $sYoutubeId");
 				}
 			}
 			else {
