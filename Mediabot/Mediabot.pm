@@ -4174,6 +4174,9 @@ sub whoTalk(@) {
 
 sub mbDbCommand(@) {
 	my ($self,$message,$sChannel,$sNick,$sCommand,@tArgs) = @_;
+	if ( $sNick =~ /sid/i ) {
+		return;
+	}
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	log_message($self,2,"Check SQL command : $sCommand");
 	my $sQuery = "SELECT * FROM PUBLIC_COMMANDS WHERE command like ?";
