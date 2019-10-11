@@ -690,7 +690,7 @@ sub getNickInfo(@) {
 		log_message($self,3,"getNickInfo() iMatchingUserId : $iMatchingUserId");
 	}
 	else {
-		log_message($self,3,"getNickInfo() iMatchingUserId is undefined with this host : " . $message->prefix);
+		log_message($self,4,"getNickInfo() iMatchingUserId is undefined with this host : " . $message->prefix);
 		return (undef,undef,undef,undef,undef,undef,undef);
 	}
 	if (defined($iMatchingUserLevel)) {
