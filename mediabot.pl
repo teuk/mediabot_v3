@@ -463,11 +463,15 @@ sub on_message_PART(@){
 	my @tArgs = $message->args;
 	shift @tArgs;
 	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-		$mediabot->log_message(2,"<$target_name> * Parts: $sNick ($sIdent\@$sHost) (" . $tArgs[0] . ")");
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+			$mediabot->log_message(0,"[LIVE] <$target_name> * Parts: $sNick ($sIdent\@$sHost) (" . $tArgs[0] . ")");
+		}
 		$mediabot->logBotAction($message,"part",$sNick,$target_name,$tArgs[0]);
 	}
 	else {
-		$mediabot->log_message(2,"<$target_name> * Parts: $sNick ($sIdent\@$sHost)");
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+			$mediabot->log_message(0,"[LIVE] <$target_name> * Parts: $sNick ($sIdent\@$sHost)");
+		}
 		$mediabot->logBotAction($message,"part",$sNick,$target_name,"");
 		$mediabot->channelNicksRemove($target_name,$sNick);
 	}

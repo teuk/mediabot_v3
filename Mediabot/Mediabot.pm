@@ -471,9 +471,9 @@ sub botPrivmsg(@) {
 			log_message($self,0,"-> *$sTo* $sMsg");
 		}
 		unless (( $sMsg =~ /annie-claude/i ) && ( $sTo =~ /^#montreal$/i )) {
-			if (utf8::is_utf8($sMsg)) {
-				$sMsg = utf8::decode($sMsg);
-			}
+			#if (utf8::is_utf8($sMsg)) {
+			#	$sMsg = utf8::decode($sMsg);
+			#}
 			$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
 		}
 		else {
