@@ -4174,7 +4174,7 @@ sub whoTalk(@) {
 
 sub mbDbCommand(@) {
 	my ($self,$message,$sChannel,$sNick,$sCommand,@tArgs) = @_;
-	if ( $sNick =~ /sid/i ) {
+	if ( $sNick =~ /SiD/ ) {
 		return;
 	}
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
@@ -5438,7 +5438,7 @@ sub channelNicksRemove(@) {
 
 sub displayYoutubeDetails(@) {
 	my ($self,$message,$sNick,$sChannel,$sText) = @_;
-	if ( $sNick =~ /sid/i ) {
+	if ( $sNick =~ /SiD/ ) {
 		return;
 	}
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
