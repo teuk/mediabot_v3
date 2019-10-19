@@ -5438,7 +5438,7 @@ sub channelNicksRemove(@) {
 
 sub displayYoutubeDetails(@) {
 	my ($self,$message,$sNick,$sChannel,$sText) = @_;
-	if ( $sNick =~ /SiD/ ) {
+	if (( $sNick =~ /SiD/ ) || ( $sNick =~ /SilenceRadio/ )) {
 		return;
 	}
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
