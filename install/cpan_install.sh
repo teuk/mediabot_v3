@@ -86,7 +86,8 @@ Memory::Usage
 String::IRC
 JSON
 DateTime
-DateTime::TimeZone" | while read perl_module
+DateTime::TimeZone
+HTML::Tree" | while read perl_module
  do
   message "Checking $perl_module "
   perl -M$perl_module -e "exit 0;" &>/dev/null
@@ -117,7 +118,8 @@ Memory::Usage
 String::IRC
 JSON
 DateTime
-DateTime::TimeZone" | while read perl_module
+DateTime::TimeZone
+HTML::Tree" | while read perl_module
  do
   message "Checking $perl_module"
   perl -M$perl_module -e "exit 0;"
