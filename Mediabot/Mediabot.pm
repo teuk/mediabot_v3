@@ -5596,7 +5596,8 @@ sub displayUrlTitle(@) {
 			my $tree = HTML::Tree->new();
 			$tree->parse($sContent);
 			my ($title) = $tree->look_down( '_tag' , 'title' );
-			botPrivmsg($self,$sChannel,$title->as_text);
+			my $sText = String::IRC->new('Titre de l\'URL:')->grey('black');
+			botPrivmsg($self,$sChannel,$sText . " " . $title->as_text);
 		}
 	}
 }
