@@ -17,6 +17,7 @@ use POSIX 'setsid';
 use DateTime;
 use DateTime::TimeZone;
 use utf8;
+use HTML::Tree;
 
 sub new {
 	my ($class,$args) = @_;
@@ -5570,6 +5571,33 @@ sub displayYoutubeDetails(@) {
 	}
 	else {
 		log_message($self,3,"displayYoutubeDetails() sYoutubeId could not be determined");
+	}
+}
+
+sub displayUrlTitle(@) {
+	my ($self,$message,$sNick,$sChannel,$sText) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	log_message($self,3,"displayUrlTitle() $sText");
+	unless ( open URL_TITLE, "curl -L -ks \"$sText\" |" ) {
+		log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
+	}
+	else {
+		my $line;
+		my $i = 0;
+		my $sTitle;
+		my $sContent;
+		while(defined($line=<URL_TITLE>)) {
+			chomp($line);
+			log_message($self,4,"displayUrlTitle() $line");
+			$sContent .= "$line\n";
+			$i++;
+		}
+		if ( $i > 0 ) {
+			my $tree = HTML::Tree->new();
+			$tree->parse($sContent);
+			my ($title) = $tree->look_down( '_tag' , 'title' );
+			botPrivmsg($self,$sChannel,$title->as_text);
+		}
 	}
 }
 

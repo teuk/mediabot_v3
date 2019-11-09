@@ -511,6 +511,15 @@ sub on_message_PRIVMSG(@) {
 				}
 			}
 		}
+		elsif ( ( $what =~ /http.*:\/\//i ) ) {
+			my $id_chanset_list = $mediabot->getIdChansetList("UrlTitle");
+			if (defined($id_chanset_list)) {
+				my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);
+				if (defined($id_channel_set)) {
+					$mediabot->displayUrlTitle($message,$who,$where,$what);
+				}
+			}
+		}
 		if ((ord(substr($what,0,1)) == 1) && ($what =~ /^.ACTION /)) {
 			$what =~ s/(.)/(ord($1) == 1) ? "" : $1/egs;
 			$what =~ s/^ACTION //;
