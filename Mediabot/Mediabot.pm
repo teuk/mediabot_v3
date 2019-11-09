@@ -92,6 +92,8 @@ sub log_message(@) {
 	my ($self,$iLevel,$sMsg) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $LOG = $self->{LOG};
+	binmode STDOUT, ':utf8';
+	binmode $LOG, ':utf8';
 	if (defined($sMsg) && ($sMsg ne "")) {
 		my $sDisplayMsg = time2str("[%d/%m/%Y %H:%M:%S]",time) . " ";
 		select $LOG;
@@ -471,10 +473,15 @@ sub botPrivmsg(@) {
 			log_message($self,0,"-> *$sTo* $sMsg");
 		}
 		unless (( $sMsg =~ /annie-claude/i ) && ( $sTo =~ /^#montreal$/i )) {
-			#if (utf8::is_utf8($sMsg)) {
-			#	$sMsg = utf8::decode($sMsg);
-			#}
-			$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
+			if (utf8::is_utf8($sMsg)) {
+				$sMsg = Encode::encode("ISO-8859-1", $sMsg);
+				log_message($self,0,"ISO-8859-1 : $sMsg");
+				$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
+			}
+			else {
+				log_message($self,0,"NOT UTF8 : $sMsg");
+				$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
+			}
 		}
 		else {
 			log_message($self,0,"IGNORED BECAUSE OF bad-word $sMsg => $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
@@ -4174,9 +4181,6 @@ sub whoTalk(@) {
 
 sub mbDbCommand(@) {
 	my ($self,$message,$sChannel,$sNick,$sCommand,@tArgs) = @_;
-	if ( $sNick =~ /SiD/ ) {
-		return;
-	}
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	log_message($self,2,"Check SQL command : $sCommand");
 	my $sQuery = "SELECT * FROM PUBLIC_COMMANDS WHERE command like ?";
@@ -5438,9 +5442,6 @@ sub channelNicksRemove(@) {
 
 sub displayYoutubeDetails(@) {
 	my ($self,$message,$sNick,$sChannel,$sText) = @_;
-	if (( $sNick =~ /SiD/ ) || ( $sNick =~ /SilenceRadio/ )) {
-		return;
-	}
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sYoutubeId;
 	log_message($self,3,"displayYoutubeDetails() $sText");
