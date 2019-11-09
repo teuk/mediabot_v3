@@ -474,8 +474,10 @@ sub botPrivmsg(@) {
 		}
 		unless (( $sMsg =~ /annie-claude/i ) && ( $sTo =~ /^#montreal$/i )) {
 			if (utf8::is_utf8($sMsg)) {
-				$sMsg = Encode::encode("ISO-8859-1", $sMsg);
-				log_message($self,0,"ISO-8859-1 : $sMsg");
+				#$sMsg = Encode::encode("ISO-8859-1", $sMsg);
+				$sMsg = Encode::encode("UTF-8", $sMsg);
+				#log_message($self,0,"ISO-8859-1 : $sMsg");
+				log_message($self,0,"UTF-8 : $sMsg");
 				$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
 			}
 			else {
