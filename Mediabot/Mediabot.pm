@@ -5473,7 +5473,7 @@ sub displayYoutubeDetails(@) {
 			return undef;
 		}
 		unless ( open YOUTUBE_INFOS, "curl -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
-			log_message(0,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
+			log_message(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 		}
 		else {
 			my $line;
@@ -5578,26 +5578,59 @@ sub displayUrlTitle(@) {
 	my ($self,$message,$sNick,$sChannel,$sText) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	log_message($self,3,"displayUrlTitle() $sText");
-	unless ( open URL_TITLE, "curl -L -ks \"$sText\" |" ) {
-		log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
+	my $sContentType;
+	my $iHttpResponseCode;
+	unless ( open URL_HEAD, "curl -L -I -ks \"$sText\" |" ) {
+		log_message(3,"displayUrlTitle() Could not curl headers for $sText");
 	}
 	else {
 		my $line;
 		my $i = 0;
-		my $sTitle;
-		my $sContent;
-		while(defined($line=<URL_TITLE>)) {
+		while(defined($line=<URL_HEAD>)) {
 			chomp($line);
 			log_message($self,4,"displayUrlTitle() $line");
-			$sContent .= "$line\n";
+			if ( $line =~ /^content\-type/i ) {
+				(undef,$sContentType) = split(" ",$line);
+				log_message($self,4,"displayUrlTitle() sContentType = $sContentType");
+			}
+			elsif ( $line =~ /^http/i ) {
+				(undef,$iHttpResponseCode) = split(" ",$line);
+				log_message($self,4,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
+			}
 			$i++;
 		}
-		if ( $i > 0 ) {
-			my $tree = HTML::Tree->new();
-			$tree->parse($sContent);
-			my ($title) = $tree->look_down( '_tag' , 'title' );
-			my $sText = String::IRC->new('URL Title:')->grey('black');
-			botPrivmsg($self,$sChannel,$sText . " " . $title->as_text);
+	}
+	unless (defined($iHttpResponseCode) && ($iHttpResponseCode eq "200")) {
+		log_message($self,3,"displayUrlTitle() Wrong HTTP response code for $sText " . (defined($iHttpResponseCode) ? $iHttpResponseCode : "Undefined") );
+	}
+	else {
+		unless (defined($sContentType) && ($sContentType =~ /text\/html/i)) {
+			log_message($self,3,"displayUrlTitle() Wrong Content-Type for $sText " . (defined($sContentType) ? $sContentType : "Undefined") );
+		}
+		else {
+			log_message($self,3,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
+			unless ( open URL_TITLE, "curl -L -ks \"$sText\" |" ) {
+				log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
+			}
+			else {
+				my $line;
+				my $i = 0;
+				my $sTitle;
+				my $sContent;
+				while(defined($line=<URL_TITLE>)) {
+					chomp($line);
+					log_message($self,4,"displayUrlTitle() $line");
+					$sContent .= "$line\n";
+					$i++;
+				}
+				if ( $i > 0 ) {
+					my $tree = HTML::Tree->new();
+					$tree->parse($sContent);
+					my ($title) = $tree->look_down( '_tag' , 'title' );
+					my $sText = String::IRC->new('URL Title:')->grey('black');
+					botPrivmsg($self,$sChannel,$sText . " " . $title->as_text);
+				}
+			}
 		}
 	}
 }

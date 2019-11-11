@@ -235,7 +235,7 @@ sub on_timer_tick(@) {
 	#$mediabot->log_message(3,"---------------------------------------------------------------");
 	#$mediabot->log_message(3,Dumper(@params));
 	#$mediabot->log_message(3,"---------------------------------------------------------------");
-	$mediabot->log_message(4,"on_timer_tick() tick");
+	$mediabot->log_message(5,"on_timer_tick() tick");
 	# update pid file
 	my $sPidFilename = $MAIN_CONF{'main.MAIN_PID_FILE'};
 	unless (open PID, ">$sPidFilename") {
