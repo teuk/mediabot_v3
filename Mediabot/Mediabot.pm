@@ -5628,7 +5628,7 @@ sub displayUrlTitle(@) {
 					$tree->parse($sContent);
 					my ($title) = $tree->look_down( '_tag' , 'title' );
 					if (defined($title) && ($title->as_text ne "")) {
-						my $sText = String::IRC->new('URL Title from $sNick:')->grey('black');
+						my $sText = String::IRC->new("URL Title from $sNick:")->grey('black');
 						botPrivmsg($self,$sChannel,$sText . " " . $title->as_text);
 					}
 				}
