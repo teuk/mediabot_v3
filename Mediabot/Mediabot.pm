@@ -475,14 +475,10 @@ sub botPrivmsg(@) {
 		}
 		unless (( $sMsg =~ /annie-claude/i ) && ( $sTo =~ /^#montreal$/i )) {
 			if (utf8::is_utf8($sMsg)) {
-				#$sMsg = Encode::encode("ISO-8859-1", $sMsg);
 				$sMsg = Encode::encode("UTF-8", $sMsg);
-				#log_message($self,0,"ISO-8859-1 : $sMsg");
-				log_message($self,0,"UTF-8 : $sMsg");
 				$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
 			}
 			else {
-				log_message($self,0,"NOT UTF8 : $sMsg");
 				$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
 			}
 		}
@@ -5584,10 +5580,11 @@ sub displayWeather(@) {
 	if (defined($id_chanset_list)) {
 		my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
 		if (defined($id_channel_set)) {
-			if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^\w+$/)) {
+			my $sText = join(" ",@tArgs);
+			if (defined($sText) && ($sText ne "") && ( $sText =~ /^[\w,\-,\s]+$/)) {
 				my $sContentType;
 				my $iHttpResponseCode;
-				my $sCity = $tArgs[0];
+				my $sCity = $sText;
 				unless ( open URL_WEATHER, "curl --connect-timeout 3 --max-time 3 -L -ks 'http://wttr.in/" . $sCity . "?format=\"%l:+%c+%t+%w+%p\"&m' |" ) {
 					log_message(3,"displayUrlTitle() Could not curl headers from wttr.in");
 				}
