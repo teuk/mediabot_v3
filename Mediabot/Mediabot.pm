@@ -5580,7 +5580,7 @@ sub displayUrlTitle(@) {
 	log_message($self,3,"displayUrlTitle() $sText");
 	my $sContentType;
 	my $iHttpResponseCode;
-	unless ( open URL_HEAD, "curl -L -I -ks \"$sText\" |" ) {
+	unless ( open URL_HEAD, "curl --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |" ) {
 		log_message(3,"displayUrlTitle() Could not curl headers for $sText");
 	}
 	else {
@@ -5609,7 +5609,7 @@ sub displayUrlTitle(@) {
 		}
 		else {
 			log_message($self,3,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
-			unless ( open URL_TITLE, "curl -L -ks \"$sText\" |" ) {
+			unless ( open URL_TITLE, "curl --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
 				log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 			}
 			else {
