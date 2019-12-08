@@ -926,7 +926,10 @@ sub mbCommandPublic(@) {
 												}
 		case /^date$/i			{ $bFound = 1;
 														displayDate($self,$message,$sNick,$sChannel,@tArgs);
-												}				
+												}
+		case /^weather$/i		{ $bFound = 1;
+														displayWeather($self,$message,$sNick,$sChannel,@tArgs);
+												}
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													unless ( $bFound ) {
@@ -5571,6 +5574,38 @@ sub displayYoutubeDetails(@) {
 	}
 	else {
 		log_message($self,3,"displayYoutubeDetails() sYoutubeId could not be determined");
+	}
+}
+
+sub displayWeather(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $id_chanset_list = getIdChansetList($self,"UrlTitle");
+	if (defined($id_chanset_list)) {
+		my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
+		if (defined($id_channel_set)) {
+			if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^\w+$/)) {
+				my $sContentType;
+				my $iHttpResponseCode;
+				my $sCity = $tArgs[0];
+				unless ( open URL_WEATHER, "curl --connect-timeout 3 --max-time 3 -L -ks 'http://wttr.in/" . $sCity . "?format=\"%l:+%c+%t+%w+%p\"&m' |" ) {
+					log_message(3,"displayUrlTitle() Could not curl headers from wttr.in");
+				}
+				else {
+					my $line;
+					if(defined($line=<URL_WEATHER>)) {
+						chomp($line);
+						$line =~ s/^\"//;
+						$line =~ s/\"$//;
+						botPrivmsg($self,$sChannel,$line);
+					}
+				}
+			}
+			else {
+				botNotice($self,$sNick,"Syntax (no accents): weather <City>");
+				return undef;
+			}
+		}
 	}
 }
 
