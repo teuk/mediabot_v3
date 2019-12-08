@@ -5576,7 +5576,7 @@ sub displayYoutubeDetails(@) {
 sub displayWeather(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $id_chanset_list = getIdChansetList($self,"UrlTitle");
+	my $id_chanset_list = getIdChansetList($self,"Weather");
 	if (defined($id_chanset_list)) {
 		my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
 		if (defined($id_channel_set)) {
