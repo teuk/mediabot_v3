@@ -5596,6 +5596,9 @@ sub displayWeather(@) {
 						$line =~ s/\"$//;
 						botPrivmsg($self,$sChannel,$line);
 					}
+					else {
+						botPrivmsg($self,$sChannel,"No answer from http://wttr.in for $sCity");
+					}
 				}
 			}
 			else {
