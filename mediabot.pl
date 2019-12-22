@@ -372,11 +372,15 @@ sub on_message_KICK(@) {
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my ($kicker_nick,$target_name,$kicked_nick,$text) = @{$hints}{qw<kicker_nick target_name kicked_nick text>};
 	if ($self->is_nick_me($kicked_nick)) {
-		$mediabot->log_message(0,"* you were kicked from $target_name by $kicker_nick ($text)");
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+			$mediabot->log_message(0,"[LIVE] * you were kicked from $target_name by $kicker_nick ($text)");
+		}
 		$mediabot->joinChannel($target_name);
 	}
 	else {
-		$mediabot->log_message(2,"$target_name: $kicked_nick was kicked by $kicker_nick ($text)");
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+			$mediabot->log_message(0,"[LIVE] $target_name: $kicked_nick was kicked by $kicker_nick ($text)");
+		}
 		$mediabot->channelNicksRemove($target_name,$kicked_nick);
 	}
 	$mediabot->logBotAction($message,"kick",$kicker_nick,$target_name,"$kicked_nick ($text)");
@@ -393,11 +397,15 @@ sub on_message_MODE(@) {
 		my $sModes = $tArgs[0];
 		shift @tArgs;
 		my $sTargetNicks = join(" ",@tArgs);
-		$mediabot->log_message(2,"<$target_name> $sNick sets mode $sModes $sTargetNicks");
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+			$mediabot->log_message(0,"[LIVE] <$target_name> $sNick sets mode $sModes $sTargetNicks");
+		}
 		$mediabot->logBotAction($message,"mode",$sNick,$target_name,"$sModes $sTargetNicks");
 	}
 	else {
-		$mediabot->log_message(2,"$target_name sets mode " . $tArgs[1]);
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+			$mediabot->log_message(0,"[LIVE] $target_name sets mode " . $tArgs[1]);
+		}
 	}
 }
 
@@ -414,7 +422,9 @@ sub on_message_NICK(@) {
 		$self->_set_nick($new_nick);
 	}
 	else {
-		$mediabot->log_message(2,"* $old_nick is now known as $new_nick");
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+			$mediabot->log_message(0,"[LIVE] * $old_nick is now known as $new_nick");
+		}
 	}
 	# Change nick in %hChannelsNicks
 	for my $sChannel (keys %hChannelsNicks) {
@@ -442,11 +452,15 @@ sub on_message_QUIT(@) {
 	unless(defined($text)) { $text="";}
 	my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
 	if (defined($text) && ($text ne "")) {
-		$mediabot->log_message(2," * Quits: $sNick ($sIdent\@$sHost) ($text)");
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+			$mediabot->log_message(0,"[LIVE] * Quits: $sNick ($sIdent\@$sHost) ($text)");
+		}
 		$mediabot->logBotAction($message,"quit",$sNick,undef,$text);
 	}
 	else {
-		$mediabot->log_message(2," * Quits: $sNick ($sIdent\@$sHost) ()");
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+			$mediabot->log_message(0,"[LIVE] * Quits: $sNick ($sIdent\@$sHost) ()");
+		}
 		$mediabot->logBotAction($message,"quit",$sNick,undef,"");
 	}
 	for my $sChannel (keys %hChannelsNicks) {
@@ -577,7 +591,9 @@ sub on_message_TOPIC(@) {
 	my ($target_name,$text) = @{$hints}{qw<target_name text>};
 	my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
 	unless(defined($text)) { $text="";}
-	$mediabot->log_message(2,"<$target_name> * $sNick changes topic to '$text'");
+	if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+		$mediabot->log_message(0,"[LIVE] <$target_name> * $sNick changes topic to '$text'");
+	}
 	$mediabot->logBotAction($message,"topic",$sNick,$target_name,$text);
 }
 
@@ -649,10 +665,14 @@ sub on_message_JOIN(@) {
 	my ($target_name) = @{$hints}{qw<target_name>};
 	my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
 	if ( $sNick eq $self->nick ) {
-		$mediabot->log_message(2," * Now talking in $target_name");
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+			$mediabot->log_message(0,"[LIVE] * Now talking in $target_name");
+		}
 	}
 	else {
-		$mediabot->log_message(2,"<$target_name> * Joins $sNick ($sIdent\@$sHost)");
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+			$mediabot->log_message(0,"[LIVE] <$target_name> * Joins $sNick ($sIdent\@$sHost)");
+		}
 		$mediabot->userOnJoin($message,$target_name,$sNick);
 		push @{$hChannelsNicks{$target_name}}, $sNick;
 		$mediabot->sethChannelNicks(\%hChannelsNicks);
