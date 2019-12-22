@@ -5534,7 +5534,7 @@ sub displayYoutubeDetails(@) {
 						$sMsgSong .= String::IRC->new("$sDisplayDuration ")->grey('black');
 						$sMsgSong .= String::IRC->new("- ")->orange('black');
 						$sMsgSong .= String::IRC->new("$sViewCount")->grey('black');
-						botPrivmsg($self,$sChannel,$sMsgSong);
+						botPrivmsg($self,$sChannel,"($sNick) $sMsgSong");
 					}
 					else {
 						log_message($self,3,"displayYoutubeDetails() one of the youtube field is undef or empty");
