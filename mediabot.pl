@@ -520,6 +520,9 @@ sub on_message_PRIVMSG(@) {
 				}
 			}
 		}
+		elsif ( $mediabot->checkResponder($message,$who,$where,$what,@tArgs) ) {
+			$mediabot->log_message(3,"Found responder [$where] for $what");
+		}
 		if ((ord(substr($what,0,1)) == 1) && ($what =~ /^.ACTION /)) {
 			$what =~ s/(.)/(ord($1) == 1) ? "" : $1/egs;
 			$what =~ s/^ACTION //;

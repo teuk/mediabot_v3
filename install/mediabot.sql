@@ -271,6 +271,13 @@ CREATE TABLE `WEBLOG` (
   `logresult` tinyint(1) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
+CREATE TABLE `RESPONDERS` (
+  `id_responders` bigint(20) NOT NULL,
+  `id_channel` bigint(20) NOT NULL,
+  `responder` varchar(255) NOT NULL,
+  `answer` varchar(255) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
 --
 -- Index pour les tables déchargées
 --
