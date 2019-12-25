@@ -5953,11 +5953,32 @@ sub displayDate(@) {
 sub checkResponder(@) {
 	my ($self,$message,$sNick,$sChannel,$sMsg,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $sMsgQuery = $sMsg;
-	$sMsgQuery =~ s/\'/\\\'/g;
-	my $sQuery = "SELECT answer FROM RESPONDERS,CHANNEL WHERE CHANNEL.id_channel=RESPONDERS.id_channel AND CHANNEL.name like ? AND responder like '%" . $sMsgQuery . "%'";
+	#my $sMsgQuery = $sMsg;
+	#$sMsgQuery =~ s/\'/\\\'/g;
+	my $sQuery = "SELECT answer FROM RESPONDERS,CHANNEL WHERE CHANNEL.id_channel=RESPONDERS.id_channel AND CHANNEL.name like ? AND responder like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel)) {
+	unless ($sth->execute($sChannel,$sMsg)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $sAnswer = $ref->{'answer'};
+			log_message($self,3,"checkResponder() Found answer $sAnswer");
+			botPrivmsg($self,$sChannel,$sAnswer);
+		}
+	}
+	$sth->finish;
+	return 0;
+}
+
+sub addResponder(@) {
+	my ($self,$message,$sNick,$sChannel,$sMsg,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	#my $sMsgQuery = $sMsg;
+	#$sMsgQuery =~ s/\'/\\\'/g;
+	my $sQuery = "SELECT answer FROM RESPONDERS,CHANNEL WHERE CHANNEL.id_channel=RESPONDERS.id_channel AND CHANNEL.name like ? AND responder like ?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sChannel,$sMsg)) {
 		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
