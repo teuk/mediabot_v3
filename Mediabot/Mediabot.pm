@@ -4263,19 +4263,19 @@ sub mbDbCommand(@) {
 						my @tActionDo = split(/ /,$actionDo);
 						my $pos;
 						for ($pos=0;$pos<=$#tActionDo;$pos++) {
-							if ( $tActionDo[$pos] =~ /%d/ ) {
+							if ( $tActionDo[$pos] eq '%d' ) {
 								$tActionDo[$pos] = int(rand(10) + 1);
 							}
 						}
 						$actionDo = join(" ",@tActionDo);
 						for ($pos=0;$pos<=$#tActionDo;$pos++) {
-							if ( $tActionDo[$pos] =~ /%dd/ ) {
+							if ( $tActionDo[$pos] eq '%dd' ) {
 								$tActionDo[$pos] = int(rand(90) + 10);
 							}
 						}
 						$actionDo = join(" ",@tActionDo);
 						for ($pos=0;$pos<=$#tActionDo;$pos++) {
-							if ( $tActionDo[$pos] =~ /%ddd/ ) {
+							if ( $tActionDo[$pos] eq '%ddd' ) {
 								$tActionDo[$pos] = int(rand(900) + 100);
 							}
 						}
