@@ -535,7 +535,12 @@ sub on_message_PRIVMSG(@) {
 			}
 		}
 		elsif ( $mediabot->checkResponder($message,$who,$where,$what,@tArgs) ) {
-			$mediabot->log_message(3,"Found responder [$where] for $what");
+			my $luckyShot = rand(100);
+			$mediabot->log_message(3,"Found responder [$where] for $what with luckyShot : $luckyShot");
+			if ( $luckyShot > 30 ) {
+				$mediabot->log_message(3,"I have a lucky shot to answer for $what");
+				$mediabot->doResponder($message,$who,$where,$what,@tArgs)
+			}
 		}
 		if ((ord(substr($what,0,1)) == 1) && ($what =~ /^.ACTION /)) {
 			$what =~ s/(.)/(ord($1) == 1) ? "" : $1/egs;
