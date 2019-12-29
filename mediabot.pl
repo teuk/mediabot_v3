@@ -537,7 +537,7 @@ sub on_message_PRIVMSG(@) {
 		elsif ( $mediabot->checkResponder($message,$who,$where,$what,@tArgs) ) {
 			my $luckyShot = rand(100);
 			$mediabot->log_message(3,"Found responder [$where] for $what with luckyShot : $luckyShot");
-			if ( $luckyShot >= 10 ) {
+			if ( $luckyShot >= 5 ) {
 				$mediabot->log_message(3,"I have a lucky shot to answer for $what");
 				$mediabot->doResponder($message,$who,$where,$what,@tArgs)
 			}
