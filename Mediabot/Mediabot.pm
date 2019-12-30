@@ -5881,7 +5881,7 @@ sub displayDate(@) {
 sub checkResponder(@) {
 	my ($self,$message,$sNick,$sChannel,$sMsg,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $sQuery = "SELECT answer FROM RESPONDERS,CHANNEL WHERE ((CHANNEL.id_channel=RESPONDERS.id_channel AND CHANNEL.name like ?) OR (RESPONDERS.id_channel=0)) AND responder like ?";
+	my $sQuery = "SELECT answer,chance FROM RESPONDERS,CHANNEL WHERE ((CHANNEL.id_channel=RESPONDERS.id_channel AND CHANNEL.name like ?) OR (RESPONDERS.id_channel=0)) AND responder like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$sMsg)) {
 		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -5889,12 +5889,13 @@ sub checkResponder(@) {
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
 			my $sAnswer = $ref->{'answer'};
-			log_message($self,3,"checkResponder() Found answer $sAnswer");
-			return 1;
+			my $iChance = $ref->{'chance'};
+			log_message($self,3,"checkResponder() Found answer $sAnswer for $sMsg with chance $iChance");
+			return $iChance;
 		}
 	}
 	$sth->finish;
-	return 0;
+	return 100;
 }
 
 sub doResponder(@) {
