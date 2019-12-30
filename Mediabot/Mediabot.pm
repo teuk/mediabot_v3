@@ -5888,8 +5888,6 @@ sub checkResponder(@) {
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
-			my $sAnswer = $ref->{'answer'};
-			my $actionDo = evalAction($self,$message,$sNick,$sChannel,$sMsg,$sAnswer);
 			log_message($self,3,"checkResponder() Found answer $sAnswer");
 			return 1;
 		}
