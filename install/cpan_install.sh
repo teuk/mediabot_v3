@@ -87,7 +87,8 @@ String::IRC
 JSON
 DateTime
 DateTime::TimeZone
-HTML::Tree" | while read perl_module
+HTML::Tree
+Proc::Find" | while read perl_module
  do
   message "Checking $perl_module "
   perl -M$perl_module -e "exit 0;" &>/dev/null
@@ -119,7 +120,8 @@ String::IRC
 JSON
 DateTime
 DateTime::TimeZone
-HTML::Tree" | while read perl_module
+HTML::Tree
+Proc::Find" | while read perl_module
  do
   message "Checking $perl_module"
   perl -M$perl_module -e "exit 0;"
