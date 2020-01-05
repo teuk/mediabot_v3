@@ -5462,7 +5462,7 @@ sub displayYoutubeDetails(@) {
 						$sMsgSong .= String::IRC->new("$sDisplayDuration ")->grey('black');
 						$sMsgSong .= String::IRC->new("- ")->orange('black');
 						$sMsgSong .= String::IRC->new("$sViewCount")->grey('black');
-						unless ( $sMsgSong =~ /Annie-Claude/i ) {
+						unless (( $sTitle =~ /annie\s+claude/i ) || ( $sTitle =~ /annie.claude/i )) {
 							botPrivmsg($self,$sChannel,"($sNick) $sMsgSong");
 						}
 					}
@@ -5594,7 +5594,7 @@ sub displayUrlTitle(@) {
 					my ($title) = $tree->look_down( '_tag' , 'title' );
 					if (defined($title) && ($title->as_text ne "")) {
 						my $sText = String::IRC->new("URL Title from $sNick:")->grey('black');
-						unless ( $title->as_text =~ /Annie-Claude/i ) {
+						unless (( $title->as_text =~ /annie\s+claude/i ) || ( $title->as_text =~ /annie.claude/i )) {
 							botPrivmsg($self,$sChannel,$sText . " " . $title->as_text);
 						}
 					}
