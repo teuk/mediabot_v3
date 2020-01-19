@@ -542,6 +542,7 @@ sub on_message_PRIVMSG(@) {
 			if ( $luckyShot >= $mediabot->checkResponder($message,$who,$where,$what,@tArgs) ) {
 				$mediabot->log_message(3,"Found responder [$where] for $what with luckyShot : $luckyShot");
 				$mediabot->log_message(3,"I have a lucky shot to answer for $what");
+				$mediabot->log_message(3,"time : " . time . " getLastReponderTs() " . $mediabot->getLastReponderTs() . " delta " . (time - $mediabot->getLastReponderTs()));
 				if ((time - $mediabot->getLastReponderTs()) >= 600 ) {
 					$mediabot->doResponder($message,$who,$where,$what,@tArgs)
 				}
