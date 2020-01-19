@@ -5926,6 +5926,7 @@ sub doResponder(@) {
 			else {
 				log_message($self,3,"$hits hits for $sMsg");
 			}
+			setLastReponderTs($self,time);
 			return 1;
 		}
 	}
@@ -6032,6 +6033,16 @@ sub evalAction(@) {
 	}
 	$actionDo = join(" ",@tActionDo);
 	return $actionDo;
+}
+
+sub setLastReponderTs(@) {
+	my ($self,$ts) = @_;
+	$self->{last_responder_ts} = $ts;
+}
+
+sub getLastReponderTs(@) {
+	my $self = shift;
+	return $self->{last_responder_ts};
 }
 
 1;

@@ -157,6 +157,9 @@ $mediabot->dbLogoutUsers();
 # Pick IRC Server
 $mediabot->pickServer();
 
+# Initialize last_responder_ts
+$mediabot->setLastReponderTs(0);
+
 my $loop = IO::Async::Loop->new;
 $mediabot->setLoop($loop);
 
@@ -539,7 +542,9 @@ sub on_message_PRIVMSG(@) {
 			if ( $luckyShot >= $mediabot->checkResponder($message,$who,$where,$what,@tArgs) ) {
 				$mediabot->log_message(3,"Found responder [$where] for $what with luckyShot : $luckyShot");
 				$mediabot->log_message(3,"I have a lucky shot to answer for $what");
-				$mediabot->doResponder($message,$who,$where,$what,@tArgs)
+				if ((time - $mediabot->getLastReponderTs()) >= 600 ) {
+					$mediabot->doResponder($message,$who,$where,$what,@tArgs)
+				}
 			}
 		}
 		if ((ord(substr($what,0,1)) == 1) && ($what =~ /^.ACTION /)) {
