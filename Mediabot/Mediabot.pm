@@ -5905,7 +5905,7 @@ sub checkResponder(@) {
 sub doResponder(@) {
 	my ($self,$message,$sNick,$sChannel,$sMsg,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $sQuery = "SELECT answer FROM RESPONDERS,CHANNEL WHERE ((CHANNEL.id_channel=RESPONDERS.id_channel AND CHANNEL.name like ?) OR (RESPONDERS.id_channel=0)) AND responder like ?";
+	my $sQuery = "SELECT id_responders,answer,hits FROM RESPONDERS,CHANNEL WHERE ((CHANNEL.id_channel=RESPONDERS.id_channel AND CHANNEL.name like ?) OR (RESPONDERS.id_channel=0)) AND responder like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$sMsg)) {
 		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -5913,9 +5913,19 @@ sub doResponder(@) {
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
 			my $sAnswer = $ref->{'answer'};
+			my $id_responders = $ref->{'id_responders'};
+			my $hits = $ref->{'hits'} + 1;
 			my $actionDo = evalAction($self,$message,$sNick,$sChannel,$sMsg,$sAnswer);
 			log_message($self,3,"checkResponder() Found answer $sAnswer");
 			botPrivmsg($self,$sChannel,$actionDo);
+			my $sQuery = "UPDATE RESPONDERS SET hits=? WHERE id_responders=?";
+			my $sth = $self->{dbh}->prepare($sQuery);
+			unless ($sth->execute($hits,$id_responders)) {
+				log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			}
+			else {
+				log_message($self,3,"$hits hits for $sMsg");
+			}
 			return 1;
 		}
 	}
