@@ -926,6 +926,9 @@ sub mbCommandPublic(@) {
 		case /^weather$/i		{ $bFound = 1;
 														displayWeather($self,$message,$sNick,$sChannel,@tArgs);
 												}
+		case /^countslaps/i {	$bFound = 1;
+														mbCountSlaps($self,$message,$sNick,$sChannel,@tArgs);
+												}
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													unless ( $bFound ) {
@@ -4421,6 +4424,38 @@ sub mbTopCommand(@) {
 		logBot($self,$message,$sChannel,"topcmd",undef);
 	}
 	$sth->finish;
+}
+
+sub mbCountSlaps(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+		my $sQuery = "SELECT ts,count(ts) as hits FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND CHANNEL.name like ? AND `event_type` LIKE 'action' AND `nick` LIKE ? AND `publictext` LIKE '%slaps%' GROUP BY TO_DAYS(`ts`) ORDER BY ts DESC LIMIT 1";
+		my $sth = $self->{dbh}->prepare($sQuery);
+		unless ($sth->execute($sChannel,$tArgs[0])) {
+			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		}
+		else {
+			my $sNbSlapsMsg = "Slaps count for " . $tArgs[0];
+			if (my $ref = $sth->fetchrow_hashref()) {
+				my $hits = $ref->{'hits'};
+				my $ts = $ref->{'ts'};
+				my $sDay = $ts;
+				$sDay =~ s/\s+.*$//;
+				$sNbSlapsMsg .= " : $hits ($sDay)";
+				botPrivmsg($self,$sChannel,$sNbSlapsMsg);
+			}
+			else {
+				$sNbSlapsMsg .= " : None";
+				botPrivmsg($self,$sChannel,$sNbSlapsMsg);
+			}
+			logBot($self,$message,$sChannel,"countslaps",@tArgs);
+		}
+		$sth->finish;
+	}
+	else {
+		botNotice($self,$sNick,"Syntax : countslaps <nick>");
+	}
 }
 
 # lastcmd
