@@ -473,7 +473,7 @@ sub botPrivmsg(@) {
 			$eventtype = "private";
 			log_message($self,0,"-> *$sTo* $sMsg");
 		}
-		unless (( $sMsg =~ /annie-claude/i ) && ( $sTo =~ /^#montreal$/i )) {
+		unless ( (( $sMsg =~ /annie-claude/i ) || ( $sMsg =~ /pedopedro/i ) || ( $sMsg =~ /30EhctiVA6Q/i )) && ( $sTo =~ /^#montreal$/i )) {
 			if (utf8::is_utf8($sMsg)) {
 				$sMsg = Encode::encode("UTF-8", $sMsg);
 				$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
