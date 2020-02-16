@@ -467,23 +467,35 @@ sub botPrivmsg(@) {
 		my $eventtype = "public";
 		if (substr($sTo, 0, 1) eq '#') {			
 				log_message($self,0,"$sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
-				logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,$sMsg);
+				my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND name=? AND badword LIKE ?";
+				my $sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($sTo,$sMsg) ) {
+					log_message($self,1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					if (my $ref = $sth->fetchrow_hashref()) {
+						my $sBadword = $ref->{'badword'};
+						logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,"$sMsg (BADWORD)");
+						noticeConsoleChan($self,"Badword : $sBadword blocked on channel $sTo");						
+						log_message($self,3,"Badword : $sBadword blocked on channel $sTo");
+						$sth->finish;
+						return;
+					}
+					else {
+						logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,$sMsg);
+					}
+				}
 		}
 		else {
 			$eventtype = "private";
 			log_message($self,0,"-> *$sTo* $sMsg");
 		}
-		unless ( (( $sMsg =~ /annie-claude/i ) || ( $sMsg =~ /pedopedro/i ) || ( $sMsg =~ /30EhctiVA6Q/i )) && ( $sTo =~ /^#montreal$/i )) {
-			if (utf8::is_utf8($sMsg)) {
-				$sMsg = Encode::encode("UTF-8", $sMsg);
-				$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
-			}
-			else {
-				$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
-			}
+		if (utf8::is_utf8($sMsg)) {
+			$sMsg = Encode::encode("UTF-8", $sMsg);
+			$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
 		}
 		else {
-			log_message($self,0,"IGNORED BECAUSE OF bad-word $sMsg => $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
+			$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
 		}
 	}
 	else {
