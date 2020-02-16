@@ -467,23 +467,25 @@ sub botPrivmsg(@) {
 		my $eventtype = "public";
 		if (substr($sTo, 0, 1) eq '#') {			
 				log_message($self,0,"$sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
-				my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND name=? AND badword LIKE ?";
+				my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND name=?";
 				my $sth = $self->{dbh}->prepare($sQuery);
-				unless ($sth->execute($sTo,$sMsg) ) {
+				unless ($sth->execute($sTo) ) {
 					log_message($self,1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
-					if (my $ref = $sth->fetchrow_hashref()) {
-						my $sBadword = $ref->{'badword'};
-						logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,"$sMsg (BADWORD)");
-						noticeConsoleChan($self,"Badword : $sBadword blocked on channel $sTo");						
-						log_message($self,3,"Badword : $sBadword blocked on channel $sTo");
-						$sth->finish;
-						return;
+					while (my $ref = $sth->fetchrow_hashref()) {
+						my $sBadwordDb = $ref->{'badword'};
+						my $sBadwordLc = lc $sBadwordDb;
+						my $sMsgLc = lc $sMsg;
+						if (index($sMsgLc, $sBadwordLc) != -1) {
+							logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,"$sMsg (BADWORD : $sBadwordDb)");
+							noticeConsoleChan($self,"Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
+							log_message($self,3,"Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
+							$sth->finish;
+							return;
+						}
 					}
-					else {
-						logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,$sMsg);
-					}
+					logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,$sMsg);
 				}
 		}
 		else {
