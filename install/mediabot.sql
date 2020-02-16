@@ -516,4 +516,73 @@ ALTER TABLE `CHANSET_LIST`
   MODIFY `id_chanset_list` bigint(20) NOT NULL AUTO_INCREMENT;
 
 INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES (1, 'Youtube');
+
+-- --------------------------------------------------------
+
+--
+-- Structure de la table `RESPONDERS`
+--
+
+CREATE TABLE `RESPONDERS` (
+  `id_responders` bigint(20) NOT NULL,
+  `id_channel` bigint(20) NOT NULL DEFAULT '0',
+  `hits` bigint(20) NOT NULL DEFAULT '0',
+  `chance` bigint(20) NOT NULL DEFAULT '95',
+  `responder` varchar(255) NOT NULL,
+  `answer` varchar(255) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+--
+-- Index pour les tables déchargées
+--
+
+--
+-- Index pour la table `RESPONDERS`
+--
+ALTER TABLE `RESPONDERS`
+  ADD PRIMARY KEY (`id_responders`);
+
+--
+-- AUTO_INCREMENT pour les tables déchargées
+--
+
+--
+-- AUTO_INCREMENT pour la table `RESPONDERS`
+--
+ALTER TABLE `RESPONDERS`
+  MODIFY `id_responders` bigint(20) NOT NULL AUTO_INCREMENT;
+  
+-- --------------------------------------------------------
+
+--
+-- Structure de la table `BADWORDS`
+--
+
+CREATE TABLE `BADWORDS` (
+  `id_badwords` bigint(20) NOT NULL,
+  `id_channel` bigint(20) NOT NULL DEFAULT '0',
+  `badword` varchar(255) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+--
+-- Index pour les tables déchargées
+--
+
+--
+-- Index pour la table `BADWORDS`
+--
+ALTER TABLE `BADWORDS`
+  ADD PRIMARY KEY (`id_badwords`),
+  ADD KEY `badword` (`badword`);
+
+--
+-- AUTO_INCREMENT pour les tables déchargées
+--
+
+--
+-- AUTO_INCREMENT pour la table `BADWORDS`
+--
+ALTER TABLE `BADWORDS`
+  MODIFY `id_badwords` bigint(20) NOT NULL AUTO_INCREMENT;
+
 COMMIT;
