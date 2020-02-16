@@ -5598,6 +5598,12 @@ sub displayUrlTitle(@) {
 	log_message($self,3,"displayUrlTitle() $sText");
 	my $sContentType;
 	my $iHttpResponseCode;
+	my $sTextURL = $sText;
+	$sTextURL =~ s/^.*http/http/;
+	$sTextURL =~ s/\s+.*$//;
+	$sText = $sTextURL;
+	log_message($self,3,"displayUrlTitle() URL = $sText");
+	
 	unless ( open URL_HEAD, "curl --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |" ) {
 		log_message(3,"displayUrlTitle() Could not curl headers for $sText");
 	}
@@ -5619,7 +5625,7 @@ sub displayUrlTitle(@) {
 		}
 	}
 	unless (defined($iHttpResponseCode) && ($iHttpResponseCode eq "200")) {
-		log_message($self,3,"displayUrlTitle() Wrong HTTP response code for $sText " . (defined($iHttpResponseCode) ? $iHttpResponseCode : "Undefined") );
+		log_message($self,3,"displayUrlTitle() Wrong HTTP response code (" . (defined($iHttpResponseCode) ? $iHttpResponseCode : "undefined") .") for $sText " . (defined($iHttpResponseCode) ? $iHttpResponseCode : "Undefined") );
 	}
 	else {
 		unless (defined($sContentType) && ($sContentType =~ /text\/html/i)) {
