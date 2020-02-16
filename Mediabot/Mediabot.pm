@@ -943,6 +943,10 @@ sub mbCommandPublic(@) {
 		case /^countslaps/i {	$bFound = 1;
 														mbCountSlaps($self,$message,$sNick,$sChannel,@tArgs);
 												}
+		case /^addbadword/i {
+														$bFound = 1;
+														channelAddBadword($self,$message,$sNick,$sChannel,@tArgs);
+												}
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													unless ( $bFound ) {
@@ -6092,6 +6096,84 @@ sub setLastReponderTs(@) {
 sub getLastReponderTs(@) {
 	my $self = shift;
 	return $self->{last_responder_ts};
+}
+
+sub channelAddBadword(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				my $sTargetChannel;
+				if (!defined($sChannel)) {
+					if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
+						$sTargetChannel = $tArgs[0];
+						$sChannel = $tArgs[0];
+						shift @tArgs;
+					}
+					else {
+						botNotice($self,$sNick,"Syntax: addbadword <#channel> <badword text>");
+						return undef;
+					}
+				}
+				else {
+					if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
+						$sTargetChannel = $sChannel;
+						$sChannel = $tArgs[0];
+						unless (defined(getIdChannel($self,$sChannel))) {
+							botNotice($self,$sNick,"Channel #channel is undefined");
+							return;
+						}
+						shift @tArgs;
+					}
+					else {
+						$sTargetChannel = $sChannel;
+					}
+				}
+				my $sAddBadwords = join(" ",@tArgs);
+				my $sQuery = "SELECT id_badwords,badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND CHANNEL.name like ? AND badword like ?";
+				my $sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($sChannel,$sAddBadwords)) {
+					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					if (my $ref = $sth->fetchrow_hashref()) {
+						my $id_badwords = $ref->{'id_badwords'};
+						my $sBadword = $ref->{'badword'};
+						botNotice($self,$sNick,"Badword [$id_badwords] $sBadword on $sChannel is already set");
+						logBot($self,$message,undef,"addbadword",($sChannel));
+						$sth->finish;
+						return;
+					}
+					else {
+						my $id_channel = getIdChannel($self,$sChannel);
+						$sQuery = "INSERT INTO BADWORDS (id_channel,badword) VALUES (?,?)";
+						$sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute($id_channel,$sAddBadwords)) {
+							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						}
+						else {
+							botNotice($self,$sNick,"Added $sAddBadwords on $sChannel");
+						}
+					}
+				}
+				$sth->finish;
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " addbadword command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " addbadword command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
 }
 
 1;
