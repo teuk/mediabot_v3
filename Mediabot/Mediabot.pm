@@ -6194,7 +6194,7 @@ sub isIgnored(@) {
 	else {	
 		while (my $ref = $sth->fetchrow_hashref()) {
 			my $sHostmask = $ref->{'hostmask'};
-			log_message($self,3,"isIgnored() Checking hostmask : " . $sHostmask);
+			log_message($self,4,"isIgnored() Checking hostmask : " . $sHostmask);
 			$sHostmask =~ s/\./\\./g;
 			$sHostmask =~ s/\*/.*/g;
 			$sHostmask =~ s/\[/\\[/g;
@@ -6216,7 +6216,7 @@ sub isIgnored(@) {
 	else {	
 		while (my $ref = $sth->fetchrow_hashref()) {
 			my $sHostmask = $ref->{'hostmask'};
-			log_message($self,3,"isIgnored() ($sChannel) Checking hostmask : " . $sHostmask);
+			log_message($self,4,"isIgnored() ($sChannel) Checking hostmask : " . $sHostmask);
 			$sHostmask =~ s/\./\\./g;
 			$sHostmask =~ s/\*/.*/g;
 			$sHostmask =~ s/\[/\\[/g;
