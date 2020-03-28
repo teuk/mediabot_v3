@@ -6185,7 +6185,6 @@ sub channelAddBadword(@) {
 sub isIgnored(@) {
 	my ($self,$message,$sChannel,$sNick)	= @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	log_message($self,3,"isIgnored() Checking ignore " . $message->prefix);
 	my $sCheckQuery = "SELECT * FROM IGNORES WHERE id_channel=0";
 	my $sth = $self->{dbh}->prepare($sCheckQuery);
 	unless ($sth->execute ) {
