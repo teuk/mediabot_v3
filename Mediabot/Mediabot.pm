@@ -6182,4 +6182,55 @@ sub channelAddBadword(@) {
 	}
 }
 
+sub isIgnored(@) {
+	my ($self,$message,$sChannel,$sNick)	= @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	log_message($self,3,"isIgnored() Checking ignore " . $message->prefix);
+	my $sCheckQuery = "SELECT * FROM IGNORES WHERE id_channel=0";
+	my $sth = $self->{dbh}->prepare($sCheckQuery);
+	unless ($sth->execute ) {
+		log_message($self,1,"isIgnored() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
+	}
+	else {	
+		while (my $ref = $sth->fetchrow_hashref()) {
+			my $sHostmask = $ref->{'hostmask'};
+			log_message($self,3,"isIgnored() Checking hostmask : " . $sHostmask);
+			$sHostmask =~ s/\./\\./g;
+			$sHostmask =~ s/\*/.*/g;
+			$sHostmask =~ s/\[/\\[/g;
+			$sHostmask =~ s/\]/\\]/g;
+			$sHostmask =~ s/\{/\\{/g;
+			$sHostmask =~ s/\}/\\}/g;
+			if ( $message->prefix =~ /^$sHostmask/ ) {
+				log_message($self,3,"isIgnored() (allchans) $sHostmask matches " . $message->prefix);
+				return 1;
+			}
+		}
+	}
+	$sth->finish;
+	$sCheckQuery = "SELECT * FROM IGNORES,CHANNEL WHERE IGNORES.id_channel=CHANNEL.id_channel AND CHANNEL.name like ?";
+	$sth = $self->{dbh}->prepare($sCheckQuery);
+	unless ($sth->execute($sChannel)) {
+		log_message($self,1,"isIgnored() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
+	}
+	else {	
+		while (my $ref = $sth->fetchrow_hashref()) {
+			my $sHostmask = $ref->{'hostmask'};
+			log_message($self,3,"isIgnored() ($sChannel) Checking hostmask : " . $sHostmask);
+			$sHostmask =~ s/\./\\./g;
+			$sHostmask =~ s/\*/.*/g;
+			$sHostmask =~ s/\[/\\[/g;
+			$sHostmask =~ s/\]/\\]/g;
+			$sHostmask =~ s/\{/\\{/g;
+			$sHostmask =~ s/\}/\\}/g;
+			if ( $message->prefix =~ /^$sHostmask/ ) {
+				log_message($self,3,"isIgnored() $sHostmask matches " . $message->prefix);
+				return 1;
+			}
+		}
+	}
+	$sth->finish;
+	return 0;
+}
+
 1;

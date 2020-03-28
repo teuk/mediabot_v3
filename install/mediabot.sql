@@ -577,5 +577,32 @@ ALTER TABLE `BADWORDS`
 --
 ALTER TABLE `BADWORDS`
   MODIFY `id_badwords` bigint(20) NOT NULL AUTO_INCREMENT;
+  
+CREATE TABLE `IGNORES` (
+  `id_ignores` bigint(20) NOT NULL,
+  `id_channel` bigint(20) NOT NULL DEFAULT '0',
+  `hostmask` varchar(255) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+--
+-- Index pour les tables déchargées
+--
+
+--
+-- Index pour la table `IGNORES`
+--
+ALTER TABLE `IGNORES`
+  ADD PRIMARY KEY (`id_ignores`),
+  ADD KEY `hostmask` (`hostmask`);
+
+--
+-- AUTO_INCREMENT pour les tables déchargées
+--
+
+--
+-- AUTO_INCREMENT pour la table `IGNORES`
+--
+ALTER TABLE `IGNORES`
+  MODIFY `id_ignores` bigint(20) NOT NULL AUTO_INCREMENT;
 
 COMMIT;

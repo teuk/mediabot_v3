@@ -498,6 +498,10 @@ sub on_message_PRIVMSG(@) {
 	my ($self, $message, $hints) = @_;
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my ($who, $where, $what) = @{$hints}{qw<prefix_nick targets text>};
+	if ( $mediabot->isIgnored($message,$where,$who)) {
+		$mediabot->log_message(0,"IGNORED $where: <$who> $what");
+		return undef;
+	}
 	if ( substr($where,0,1) eq '#' ) {
 		# Message on channel
 		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
