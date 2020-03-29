@@ -6243,11 +6243,11 @@ sub isIgnored(@) {
 sub IgnoresList(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $sTargetChannel;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
-				my $sTargetChannel;
 				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
 					$sTargetChannel = $tArgs[0];
 					unless (defined(getIdChannel($self,$sChannel))) {
@@ -6256,8 +6256,40 @@ sub IgnoresList(@) {
 					}
 					shift @tArgs;
 				}
-				
-				unless(defined($sTargetChannel)) {
+				if (defined($sTargetChannel) && ($sTargetChannel ne "")) {
+					# Ignores ($sTargetChannel)
+					my $sQuery = "SELECT COUNT(*) as nbIgnores FROM IGNORES,CHANNEL WHERE IGNORES.id_channel=CHANNEL.id_channel AND CHANNEL.name like ?";
+					my $sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute($sTargetChannel)) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {
+						my $ref = $sth->fetchrow_hashref();
+						my $nbIgnores = $ref->{'nbIgnores'};
+						$sth->finish;
+						if ( $nbIgnores == 0 ) {
+							botNotice($self,$sNick,"Ignores ($sTargetChannel) : there is no ignores");
+							logBot($self,$message,undef,"ignores",undef);
+							return undef;
+						}
+						else {
+							my $sQuery = "SELECT IGNORES.id_ignores,IGNORES.hostmask FROM IGNORES,CHANNEL WHERE IGNORES.id_channel=CHANNEL.id_channel AND CHANNEL.name like ?";
+							my $sth = $self->{dbh}->prepare($sQuery);
+							unless ($sth->execute($sTargetChannel)) {
+								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							}
+							else {
+								botNotice($self,$sNick,"Ignores ($sTargetChannel) : there " . ($nbIgnores > 1 ? "are" : "is") . " $nbIgnores ignore" . ($nbIgnores > 1 ? "s" : ""));
+								while (my $ref = $sth->fetchrow_hashref()) {
+									my $id_ignores = $ref->{'id_ignores'};
+									my $sHostmask = $ref->{'hostmask'};
+									botNotice($self,$sNick,"ID : $id_ignores : $sHostmask");
+								}
+							}
+						}
+					}
+				}
+				else {
 					# Ignores (allchans/private)
 					my $sQuery = "SELECT COUNT(*) as nbIgnores FROM IGNORES WHERE id_channel=0";
 					my $sth = $self->{dbh}->prepare($sQuery);
@@ -6269,7 +6301,7 @@ sub IgnoresList(@) {
 						my $nbIgnores = $ref->{'nbIgnores'};
 						$sth->finish;
 						if ( $nbIgnores == 0 ) {
-							botNotice($self,$sNick,"Ignores (allchans/private) : there is no general ignores");
+							botNotice($self,$sNick,"Ignores (allchans/private) : there is no global ignores");
 							logBot($self,$message,undef,"ignores",undef);
 							return undef;
 						}
@@ -6280,7 +6312,7 @@ sub IgnoresList(@) {
 								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
-								botNotice($self,$sNick,"Ignores (allchans/private) : there " . ($nbIgnores > 1 ? "are" : "is") . " $nbIgnores general ignore" . ($nbIgnores > 1 ? "s" : ""));
+								botNotice($self,$sNick,"Ignores (allchans/private) : there " . ($nbIgnores > 1 ? "are" : "is") . " $nbIgnores global ignore" . ($nbIgnores > 1 ? "s" : ""));
 								while (my $ref = $sth->fetchrow_hashref()) {
 									my $id_ignores = $ref->{'id_ignores'};
 									my $sHostmask = $ref->{'hostmask'};
@@ -6289,37 +6321,6 @@ sub IgnoresList(@) {
 							}
 						}
 					}
-				}
-				else {
-					# Ignores ($sTargetChannel)
-					#my $sAddBadwords = join(" ",@tArgs);
-					#my $sQuery = "SELECT id_badwords,badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND CHANNEL.name like ? AND badword like ?";
-					#my $sth = $self->{dbh}->prepare($sQuery);
-					#unless ($sth->execute($sChannel,$sAddBadwords)) {
-					#	log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-					#}
-					#else {
-					#	if (my $ref = $sth->fetchrow_hashref()) {
-					#		my $id_badwords = $ref->{'id_badwords'};
-					#		my $sBadword = $ref->{'badword'};
-					#		botNotice($self,$sNick,"Badword [$id_badwords] $sBadword on $sChannel is already set");
-					#		logBot($self,$message,undef,"addbadword",($sChannel));
-					#		$sth->finish;
-					#		return;
-					#	}
-					#	else {
-					#		my $id_channel = getIdChannel($self,$sChannel);
-					#		$sQuery = "INSERT INTO BADWORDS (id_channel,badword) VALUES (?,?)";
-					#		$sth = $self->{dbh}->prepare($sQuery);
-					#		unless ($sth->execute($id_channel,$sAddBadwords)) {
-					#			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-					#		}
-					#		else {
-					#			botNotice($self,$sNick,"Added $sAddBadwords on $sChannel");
-					#		}
-					#	}
-					#}
-					#$sth->finish;
 				}
 			}
 			else {
