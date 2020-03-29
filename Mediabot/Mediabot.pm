@@ -6183,7 +6183,7 @@ sub channelAddBadword(@) {
 }
 
 sub isIgnored(@) {
-	my ($self,$message,$sChannel,$sNick)	= @_;
+	my ($self,$message,$sChannel,$sNick,$sMsg)	= @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sCheckQuery = "SELECT * FROM IGNORES WHERE id_channel=0";
 	my $sth = $self->{dbh}->prepare($sCheckQuery);
@@ -6193,7 +6193,6 @@ sub isIgnored(@) {
 	else {	
 		while (my $ref = $sth->fetchrow_hashref()) {
 			my $sHostmask = $ref->{'hostmask'};
-			log_message($self,4,"isIgnored() Checking hostmask : " . $sHostmask);
 			$sHostmask =~ s/\./\\./g;
 			$sHostmask =~ s/\*/.*/g;
 			$sHostmask =~ s/\[/\\[/g;
@@ -6201,7 +6200,8 @@ sub isIgnored(@) {
 			$sHostmask =~ s/\{/\\{/g;
 			$sHostmask =~ s/\}/\\}/g;
 			if ( $message->prefix =~ /^$sHostmask/ ) {
-				log_message($self,3,"isIgnored() (allchans) $sHostmask matches " . $message->prefix);
+				log_message($self,4,"isIgnored() (allchans/private) $sHostmask matches " . $message->prefix);
+				log_message($self,0,"[IGNORED] " . $ref->{'hostmask'} . " (allchans/private) " . ((substr($sChannel,0,1) eq '#') ? "$sChannel:" : "") . "<$sNick> $sMsg");
 				return 1;
 			}
 		}
@@ -6215,7 +6215,6 @@ sub isIgnored(@) {
 	else {	
 		while (my $ref = $sth->fetchrow_hashref()) {
 			my $sHostmask = $ref->{'hostmask'};
-			log_message($self,4,"isIgnored() ($sChannel) Checking hostmask : " . $sHostmask);
 			$sHostmask =~ s/\./\\./g;
 			$sHostmask =~ s/\*/.*/g;
 			$sHostmask =~ s/\[/\\[/g;
@@ -6223,7 +6222,8 @@ sub isIgnored(@) {
 			$sHostmask =~ s/\{/\\{/g;
 			$sHostmask =~ s/\}/\\}/g;
 			if ( $message->prefix =~ /^$sHostmask/ ) {
-				log_message($self,3,"isIgnored() $sHostmask matches " . $message->prefix);
+				log_message($self,4,"isIgnored() $sHostmask matches " . $message->prefix);
+				log_message($self,0,"[IGNORED] " . $ref->{'hostmask'} . " $sChannel:<$sNick> $sMsg");
 				return 1;
 			}
 		}
