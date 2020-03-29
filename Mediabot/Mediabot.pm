@@ -947,6 +947,10 @@ sub mbCommandPublic(@) {
 														$bFound = 1;
 														channelAddBadword($self,$message,$sNick,$sChannel,@tArgs);
 												}
+		case /^ignores/i 		{
+														$bFound = 1;
+														IgnoresList($self,$message,$sNick,$sChannel,@tArgs);
+												}
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													unless ( $bFound ) {
@@ -1176,6 +1180,10 @@ sub mbCommandPrivate(@) {
 												}
 		case /^birthdate$/i	{ $bFound = 1;
 														displayBirthDate($self,$message,$sNick,undef,@tArgs);
+												}
+		case /^ignores/i 		{
+														$bFound = 1;
+														IgnoresList($self,$message,$sNick,undef,@tArgs);
 												}
 		#else								{
 		#											$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,undef,$sNick,$sCommand,@tArgs);
@@ -6230,6 +6238,104 @@ sub isIgnored(@) {
 	}
 	$sth->finish;
 	return 0;
+}
+
+sub IgnoresList(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				my $sTargetChannel;
+				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
+					$sTargetChannel = $tArgs[0];
+					unless (defined(getIdChannel($self,$sChannel))) {
+						botNotice($self,$sNick,"Channel #channel is undefined");
+						return;
+					}
+					shift @tArgs;
+				}
+				
+				unless(defined($sTargetChannel)) {
+					# Ignores (allchans/private)
+					my $sQuery = "SELECT COUNT(*) as nbIgnores FROM IGNORES WHERE id_channel=0";
+					my $sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute()) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {
+						my $ref = $sth->fetchrow_hashref();
+						my $nbIgnores = $ref->{'nbIgnores'};
+						$sth->finish;
+						if ( $nbIgnores == 0 ) {
+							botNotice($self,$sNick,"Ignores (allchans/private) : there is no general ignores");
+							logBot($self,$message,undef,"ignores",undef);
+							return undef;
+						}
+						else {
+							my $sQuery = "SELECT * FROM IGNORES WHERE id_channel=0";
+							my $sth = $self->{dbh}->prepare($sQuery);
+							unless ($sth->execute()) {
+								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							}
+							else {
+								botNotice($self,$sNick,"Ignores (allchans/private) : there " . ($nbIgnores > 1 ? "are" : "is") . " $nbIgnores general ignore" . ($nbIgnores > 1 ? "s" : ""));
+								while (my $ref = $sth->fetchrow_hashref()) {
+									my $id_ignores = $ref->{'id_ignores'};
+									my $sHostmask = $ref->{'hostmask'};
+									botNotice($self,$sNick,"ID : $id_ignores : $sHostmask");
+								}
+							}
+						}
+					}
+				}
+				else {
+					# Ignores ($sTargetChannel)
+					#my $sAddBadwords = join(" ",@tArgs);
+					#my $sQuery = "SELECT id_badwords,badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND CHANNEL.name like ? AND badword like ?";
+					#my $sth = $self->{dbh}->prepare($sQuery);
+					#unless ($sth->execute($sChannel,$sAddBadwords)) {
+					#	log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					#}
+					#else {
+					#	if (my $ref = $sth->fetchrow_hashref()) {
+					#		my $id_badwords = $ref->{'id_badwords'};
+					#		my $sBadword = $ref->{'badword'};
+					#		botNotice($self,$sNick,"Badword [$id_badwords] $sBadword on $sChannel is already set");
+					#		logBot($self,$message,undef,"addbadword",($sChannel));
+					#		$sth->finish;
+					#		return;
+					#	}
+					#	else {
+					#		my $id_channel = getIdChannel($self,$sChannel);
+					#		$sQuery = "INSERT INTO BADWORDS (id_channel,badword) VALUES (?,?)";
+					#		$sth = $self->{dbh}->prepare($sQuery);
+					#		unless ($sth->execute($id_channel,$sAddBadwords)) {
+					#			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					#		}
+					#		else {
+					#			botNotice($self,$sNick,"Added $sAddBadwords on $sChannel");
+					#		}
+					#	}
+					#}
+					#$sth->finish;
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " ignores command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " ignores command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
 }
 
 1;
