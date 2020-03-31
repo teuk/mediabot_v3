@@ -951,6 +951,14 @@ sub mbCommandPublic(@) {
 														$bFound = 1;
 														IgnoresList($self,$message,$sNick,$sChannel,@tArgs);
 												}
+		case /^ignore/i 		{
+														$bFound = 1;
+														addIgnore($self,$message,$sNick,$sChannel,@tArgs);
+												}
+		case /^unignore/i		{
+														$bFound = 1;
+														delIgnore($self,$message,$sNick,$sChannel,@tArgs);
+												}
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													unless ( $bFound ) {
@@ -1184,6 +1192,14 @@ sub mbCommandPrivate(@) {
 		case /^ignores/i 		{
 														$bFound = 1;
 														IgnoresList($self,$message,$sNick,undef,@tArgs);
+												}
+		case /^ignore/i 		{
+														$bFound = 1;
+														addIgnore($self,$message,$sNick,undef,@tArgs);
+												}
+		case /^unignore/i		{
+														$bFound = 1;
+														delIgnore($self,$message,$sNick,undef,@tArgs);
 												}
 		#else								{
 		#											$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,undef,$sNick,$sCommand,@tArgs);
@@ -6251,7 +6267,7 @@ sub IgnoresList(@) {
 				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
 					$sTargetChannel = $tArgs[0];
 					unless (defined(getIdChannel($self,$sChannel))) {
-						botNotice($self,$sNick,"Channel #channel is undefined");
+						botNotice($self,$sNick,"Channel sTargetChannel is undefined");
 						return;
 					}
 					shift @tArgs;
@@ -6332,6 +6348,194 @@ sub IgnoresList(@) {
 		}
 		else {
 			my $sNoticeMsg = $message->prefix . " ignores command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
+}
+
+sub addIgnore(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $sTargetChannel;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				my $id_channel;
+				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
+					$sTargetChannel = $tArgs[0];
+					$id_channel = getIdChannel($self,$sChannel);
+					unless (defined($id_channel)) {
+						botNotice($self,$sNick,"Channel $sTargetChannel is undefined");
+						return undef;
+					}
+					shift @tArgs;
+				}
+				unless (defined($tArgs[0]) && ($tArgs[0] =~ /^.+!.+\@.+$/)) {
+					botNotice($self,$sNick,"Syntax ignore [#channel] <hostmask>");
+					botNotice($self,$sNick,"hostmask example : nick*!*ident\@domain*.tld");
+				}
+				
+				if (defined($sTargetChannel) && ($sTargetChannel ne "")) {
+					# Ignores ($sTargetChannel)
+					my $sQuery = "SELECT * FROM IGNORES,CHANNEL WHERE IGNORES.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND IGNORES.hostmask LIKE ?";
+					my $sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute($sTargetChannel,$tArgs[0])) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {
+						if (my $ref = $sth->fetchrow_hashref()) {
+							my $hostmask = $ref->{hostmask};
+							botNotice($self,$sNick,"hostmask $hostmask is already ignored on $sTargetChannel");
+							$sth->finish;
+							return undef;
+						}
+						else {
+							$sQuery = "INSERT INTO IGNORES (id_channel,hostmask) VALUES (?,?)";
+							$sth = $self->{dbh}->prepare($sQuery);
+							unless ($sth->execute($id_channel,$tArgs[0])) {
+								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							}
+							else {
+								my $id_ignores = $sth->{ mysql_insertid };
+								botNotice($self,$sNick,"Added ignore ID $id_ignores " . $tArgs[0] . " on $sTargetChannel");
+							}
+						}
+					}
+				}
+				else {
+					# Ignores (allchans/private)
+					my $sQuery = "SELECT * FROM IGNORES WHERE id_channel=0 AND IGNORES.hostmask LIKE ?";
+					my $sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute($tArgs[0])) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {
+						if (my $ref = $sth->fetchrow_hashref()) {
+							my $hostmask = $ref->{hostmask};
+							botNotice($self,$sNick,"hostmask $hostmask is already ignored on (allchans/private)");
+							$sth->finish;
+							return undef;
+						}
+						else {
+							$sQuery = "INSERT INTO IGNORES (hostmask) VALUES (?)";
+							$sth = $self->{dbh}->prepare($sQuery);
+							unless ($sth->execute($tArgs[0])) {
+								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							}
+							else {
+								my $id_ignores = $sth->{ mysql_insertid };
+								botNotice($self,$sNick,"Added ignore ID $id_ignores " . $tArgs[0] . " on (allchans/private)");
+							}
+						}
+					}
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " ignore command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " ignore command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
+}
+
+sub delIgnore(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $sTargetChannel;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				my $id_channel;
+				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
+					$sTargetChannel = $tArgs[0];
+					$id_channel = getIdChannel($self,$sChannel);
+					unless (defined($id_channel)) {
+						botNotice($self,$sNick,"Channel $sTargetChannel is undefined");
+						return undef;
+					}
+					shift @tArgs;
+				}
+				unless (defined($tArgs[0]) && ($tArgs[0] =~ /^.+!.+\@.+$/)) {
+					botNotice($self,$sNick,"Syntax unignore [#channel] <hostmask>");
+					botNotice($self,$sNick,"hostmask example : nick*!*ident\@domain*.tld");
+				}
+				
+				if (defined($sTargetChannel) && ($sTargetChannel ne "")) {
+					# Ignores ($sTargetChannel)
+					my $sQuery = "SELECT * FROM IGNORES,CHANNEL WHERE IGNORES.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND IGNORES.hostmask LIKE ?";
+					my $sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute($sTargetChannel,$tArgs[0])) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {
+						unless (my $ref = $sth->fetchrow_hashref()) {
+							my $hostmask = $ref->{hostmask};
+							botNotice($self,$sNick,"hostmask $hostmask is not ignored on $sTargetChannel");
+							$sth->finish;
+							return undef;
+						}
+						else {
+							$sQuery = "DELETE FROM IGNORES WHERE id_channel=? AND hostmask LIKE ?";
+							$sth = $self->{dbh}->prepare($sQuery);
+							unless ($sth->execute($id_channel,$tArgs[0])) {
+								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							}
+							else {
+								#my $id_ignores = $sth->{ mysql_insertid };
+								botNotice($self,$sNick,"Deleted ignore " . $tArgs[0] . " on $sTargetChannel");
+							}
+						}
+					}
+				}
+				else {
+					# Ignores (allchans/private)
+					my $sQuery = "SELECT * FROM IGNORES WHERE id_channel=0 AND IGNORES.hostmask LIKE ?";
+					my $sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute($tArgs[0])) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {
+						unless (my $ref = $sth->fetchrow_hashref()) {
+							my $hostmask = $ref->{hostmask};
+							botNotice($self,$sNick,"hostmask $hostmask is not ignored on (allchans/private)");
+							$sth->finish;
+							return undef;
+						}
+						else {
+							$sQuery = "DELETE FROM IGNORES WHERE id_channel=0 AND hostmask LIKE ?";
+							$sth = $self->{dbh}->prepare($sQuery);
+							unless ($sth->execute($tArgs[0])) {
+								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							}
+							else {
+								#my $id_ignores = $sth->{ mysql_insertid };
+								botNotice($self,$sNick,"Deleted ignore " . $tArgs[0] . " on (allchans/private)");
+							}
+						}
+					}
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " unignore command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " unignore command attempt (user $sMatchingUserHandle is not logged in)";
 			noticeConsoleChan($self,$sNoticeMsg);
 			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
 			return undef;
