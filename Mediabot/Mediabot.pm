@@ -5628,7 +5628,7 @@ sub displayUrlTitle(@) {
 	$sText = $sTextURL;
 	log_message($self,3,"displayUrlTitle() URL = $sText");
 	
-	unless ( open URL_HEAD, "curl --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |" ) {
+	unless ( open URL_HEAD, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0\" --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |" ) {
 		log_message(3,"displayUrlTitle() Could not curl headers for $sText");
 	}
 	else {
@@ -5657,7 +5657,7 @@ sub displayUrlTitle(@) {
 		}
 		else {
 			log_message($self,3,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
-			unless ( open URL_TITLE, "curl --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
+			unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
 				log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 			}
 			else {
