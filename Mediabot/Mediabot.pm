@@ -3206,21 +3206,19 @@ sub userOpChannel(@) {
 				return undef;
 			}
 			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,100))) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-					my $id_channel = getIdChannel($self,$sChannel);
-					if (defined($id_channel)) {
-						log_message($self,0,"$sNick issued a op $sChannel command");
+				my $id_channel = getIdChannel($self,$sChannel);
+				if (defined($id_channel)) {
+					if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 						$self->{irc}->send_message("MODE",undef,($sChannel,"+o",$tArgs[0]));
-						logBot($self,$message,$sChannel,"op",@tArgs);
-						return $id_channel;
 					}
 					else {
-						botNotice($self,$sNick,"Channel $sChannel does not exist");
-						return undef;
+						$self->{irc}->send_message("MODE",undef,($sChannel,"+o",$sNick));
 					}
+					logBot($self,$message,$sChannel,"op",@tArgs);
+					return $id_channel;
 				}
 				else {
-					botNotice($self,$sNick,"Syntax: op #channel <nick>");
+					botNotice($self,$sNick,"Channel $sChannel does not exist");
 					return undef;
 				}
 			}
@@ -3255,21 +3253,19 @@ sub userDeopChannel(@) {
 				return undef;
 			}
 			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,100))) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-					my $id_channel = getIdChannel($self,$sChannel);
-					if (defined($id_channel)) {
-						log_message($self,0,"$sNick issued a deop $sChannel command");
+				my $id_channel = getIdChannel($self,$sChannel);
+				if (defined($id_channel)) {
+					if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 						$self->{irc}->send_message("MODE",undef,($sChannel,"-o",$tArgs[0]));
-						logBot($self,$message,$sChannel,"deop",@tArgs);
-						return $id_channel;
 					}
 					else {
-						botNotice($self,$sNick,"Channel $sChannel does not exist");
-						return undef;
+						$self->{irc}->send_message("MODE",undef,($sChannel,"-o",$sNick));
 					}
+					logBot($self,$message,$sChannel,"deop",@tArgs);
+					return $id_channel;
 				}
 				else {
-					botNotice($self,$sNick,"Syntax: deop #channel <nick>");
+					botNotice($self,$sNick,"Channel $sChannel does not exist");
 					return undef;
 				}
 			}
@@ -3304,31 +3300,20 @@ sub userInviteChannel(@) {
 				return undef;
 			}
 			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,100))) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-					my $id_channel = getIdChannel($self,$sChannel);
-					if (defined($id_channel)) {
-						log_message($self,0,"$sNick issued an invite $sChannel command");
+				my $id_channel = getIdChannel($self,$sChannel);
+				if (defined($id_channel)) {
+					if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 						$self->{irc}->send_message("INVITE",undef,($tArgs[0],$sChannel));
-						logBot($self,$message,$sChannel,"invite",@tArgs);
-						return $id_channel;
 					}
 					else {
-						botNotice($self,$sNick,"Channel $sChannel does not exist");
-						return undef;
+						$self->{irc}->send_message("INVITE",undef,($sNick,$sChannel));
 					}
+					logBot($self,$message,$sChannel,"invite",@tArgs);
+					return $id_channel;
 				}
 				else {
-					my $id_channel = getIdChannel($self,$sChannel);
-					if (defined($id_channel)) {
-						log_message($self,0,"$sNick issued an invite $sChannel command");
-						$self->{irc}->send_message("INVITE",undef,($sNick,$sChannel));
-						logBot($self,$message,$sChannel,"invite",($sNick));
-						return $id_channel;
-					}
-					else {
-						botNotice($self,$sNick,"Channel $sChannel does not exist");
-						return undef;
-					}
+					botNotice($self,$sNick,"Channel $sChannel does not exist");
+					return undef;
 				}
 			}
 			else {
@@ -3362,21 +3347,19 @@ sub userVoiceChannel(@) {
 				return undef;
 			}
 			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,25))) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-					my $id_channel = getIdChannel($self,$sChannel);
-					if (defined($id_channel)) {
-						log_message($self,0,"$sNick issued a voice $sChannel command");
+				my $id_channel = getIdChannel($self,$sChannel);
+				if (defined($id_channel)) {
+					if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 						$self->{irc}->send_message("MODE",undef,($sChannel,"+v",$tArgs[0]));
-						logBot($self,$message,$sChannel,"voice",@tArgs);
-						return $id_channel;
 					}
 					else {
-						botNotice($self,$sNick,"Channel $sChannel does not exist");
-						return undef;
+						$self->{irc}->send_message("MODE",undef,($sChannel,"+v",$sNick));
 					}
+					logBot($self,$message,$sChannel,"voice",@tArgs);
+					return $id_channel;
 				}
 				else {
-					botNotice($self,$sNick,"Syntax: voice #channel <nick>");
+					botNotice($self,$sNick,"Channel $sChannel does not exist");
 					return undef;
 				}
 			}
@@ -3411,21 +3394,19 @@ sub userDevoiceChannel(@) {
 				return undef;
 			}
 			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,25))) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-					my $id_channel = getIdChannel($self,$sChannel);
-					if (defined($id_channel)) {
-						log_message($self,0,"$sNick issued a devoice $sChannel command");
+				my $id_channel = getIdChannel($self,$sChannel);
+				if (defined($id_channel)) {
+					if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 						$self->{irc}->send_message("MODE",undef,($sChannel,"-v",$tArgs[0]));
-						logBot($self,$message,$sChannel,"devoice",@tArgs);
-						return $id_channel;
 					}
 					else {
-						botNotice($self,$sNick,"Channel $sChannel does not exist");
-						return undef;
+						$self->{irc}->send_message("MODE",undef,($sChannel,"-v",$sNick));
 					}
+					logBot($self,$message,$sChannel,"devoice",@tArgs);
+					return $id_channel;
 				}
 				else {
-					botNotice($self,$sNick,"Syntax: devoice #channel <nick>");
+					botNotice($self,$sNick,"Channel $sChannel does not exist");
 					return undef;
 				}
 			}
