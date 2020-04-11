@@ -5462,6 +5462,11 @@ sub displayYoutubeDetails(@) {
 		$sYoutubeId =~ s/^.*watch.*v=//;
 		$sYoutubeId = substr($sYoutubeId,0,11);
 	}
+	elsif ( $sText =~ /http.*:\/\/music\.youtube\..*\/watch.*v=/i ) {
+		$sYoutubeId = $sText;
+		$sYoutubeId =~ s/^.*watch.*v=//;
+		$sYoutubeId = substr($sYoutubeId,0,11);
+	}
 	elsif ( $sText =~ /http.*:\/\/youtu\.be.*/i ) {
 		$sYoutubeId = $sText;
 		$sYoutubeId =~ s/^.*youtu\.be\///;

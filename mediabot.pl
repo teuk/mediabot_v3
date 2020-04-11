@@ -522,7 +522,7 @@ sub on_message_PRIVMSG(@) {
       	$mediabot->mbCommandPublic($message,$where,$who,$sCommand,@tArgs);
       }
 		}
-		elsif ( ( $what =~ /http.*:\/\/www\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/m\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/youtu\.be.*/i ) ) {
+		elsif ( ( $what =~ /http.*:\/\/www\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/m\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/music\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/youtu\.be.*/i ) ) {
 			my $id_chanset_list = $mediabot->getIdChansetList("Youtube");
 			if (defined($id_chanset_list)) {
 				my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);
