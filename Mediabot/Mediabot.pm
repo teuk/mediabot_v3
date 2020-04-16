@@ -5963,7 +5963,7 @@ sub checkResponder(@) {
 		if (my $ref = $sth->fetchrow_hashref()) {
 			my $sAnswer = $ref->{'answer'};
 			my $iChance = $ref->{'chance'};
-			log_message($self,3,"checkResponder() Found answer $sAnswer for $sMsg with chance $iChance");
+			log_message($self,4,"checkResponder() Found answer $sAnswer for $sMsg with chance $iChance");
 			return $iChance;
 		}
 	}
