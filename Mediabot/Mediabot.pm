@@ -943,9 +943,6 @@ sub mbCommandPublic(@) {
 		case /^meteo$/i			{ $bFound = 1;
 														displayWeather($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^météo$/i			{ $bFound = 1;
-														displayWeather($self,$message,$sNick,$sChannel,@tArgs);
-												}
 		case /^countslaps/i {	$bFound = 1;
 														mbCountSlaps($self,$message,$sNick,$sChannel,@tArgs);
 												}
