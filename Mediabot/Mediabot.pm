@@ -6554,7 +6554,6 @@ sub youtubeSearch(@) {
 		return undef;
 	}
 	my $sYoutubeId;
-	#curl -G "https://www.googleapis.com/youtube/v3/search" -d part="snippet" -d q="Tiesto%20Tell%20me%20why" -d key="XXXXXXXXX" 2>&1 | grep videoId | head -1
 	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 		botNotice($self,$sNick,"yt <search>");
 		return undef;
@@ -6679,7 +6678,7 @@ sub youtubeSearch(@) {
 						$sMsgSong .= String::IRC->new("- ")->orange('black');
 						$sMsgSong .= String::IRC->new("$sViewCount")->grey('black');
 						unless (( $sTitle =~ /annie\s+claude/i ) || ( $sTitle =~ /annie.claude/i ) || ( $sTitle =~ /418.*618.*1447/)) {
-							botPrivmsg($self,$sChannel,"($sNick) $sMsgSong");
+							botPrivmsg($self,$sChannel,"($sNick) https://www.youtube.com/watch?v=$sYoutubeId - $sMsgSong");
 						}
 					}
 					else {
