@@ -5532,9 +5532,7 @@ sub displayYoutubeDetails(@) {
 						$sMsgSong .= String::IRC->new("$sDisplayDuration ")->grey('black');
 						$sMsgSong .= String::IRC->new("- ")->orange('black');
 						$sMsgSong .= String::IRC->new("$sViewCount")->grey('black');
-						unless (( $sTitle =~ /annie\s+claude/i ) || ( $sTitle =~ /annie.claude/i ) || ( $sTitle =~ /418.*618.*1447/)) {
-							botPrivmsg($self,$sChannel,"($sNick) $sMsgSong");
-						}
+						botPrivmsg($self,$sChannel,"($sNick) $sMsgSong");
 					}
 					else {
 						log_message($self,3,"displayYoutubeDetails() one of the youtube field is undef or empty");
@@ -6672,14 +6670,12 @@ sub youtubeSearch(@) {
 					if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
 						my $sMsgSong .= String::IRC->new('You')->black('white');
 						$sMsgSong .= String::IRC->new('Tube')->white('red');
-						$sMsgSong .= String::IRC->new(" $sTitle ")->white('black');
+						$sMsgSong .= String::IRC->new(" https://www.youtube.com/watch?v=$sYoutubeId - $sTitle ")->white('black');
 						$sMsgSong .= String::IRC->new("- ")->orange('black');
 						$sMsgSong .= String::IRC->new("$sDisplayDuration ")->grey('black');
 						$sMsgSong .= String::IRC->new("- ")->orange('black');
 						$sMsgSong .= String::IRC->new("$sViewCount")->grey('black');
-						unless (( $sTitle =~ /annie\s+claude/i ) || ( $sTitle =~ /annie.claude/i ) || ( $sTitle =~ /418.*618.*1447/)) {
-							botPrivmsg($self,$sChannel,"($sNick) https://www.youtube.com/watch?v=$sYoutubeId - $sMsgSong");
-						}
+						botPrivmsg($self,$sChannel,"($sNick) $sMsgSong");
 					}
 					else {
 						log_message($self,3,"displayYoutubeDetails() one of the youtube field is undef or empty");
