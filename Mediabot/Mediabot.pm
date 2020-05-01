@@ -962,6 +962,10 @@ sub mbCommandPublic(@) {
 														$bFound = 1;
 														delIgnore($self,$message,$sNick,$sChannel,@tArgs);
 												}
+		case /^yt/i					{
+														$bFound = 1;
+														youtubeSearch($self,$message,$sNick,$sChannel,@tArgs);
+												}
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													unless ( $bFound ) {
@@ -6529,6 +6533,189 @@ sub delIgnore(@) {
 			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
 			return undef;
 		}
+	}
+}
+
+sub youtubeSearch(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $id_chanset_list = getIdChansetList($self,"YoutubeSearch");
+	if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
+		log_message($self,3,"id_chanset_list = $id_chanset_list");
+		my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
+		unless (defined($id_channel_set) && ($id_channel_set ne "")) {
+			return undef;
+		}
+		else {
+			log_message($self,3,"id_channel_set = $id_channel_set");
+		}
+	}
+	else {
+		return undef;
+	}
+	my $sYoutubeId;
+	#curl -G "https://www.googleapis.com/youtube/v3/search" -d part="snippet" -d q="Tiesto%20Tell%20me%20why" -d key="XXXXXXXXX" 2>&1 | grep videoId | head -1
+	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+		botNotice($self,$sNick,"yt <search>");
+		return undef;
+	}
+	my $sText = join("%20",@tArgs);
+	log_message($self,3,"youtubeSearch() on $sText");
+	my $APIKEY = $MAIN_CONF{'main.YOUTUBE_APIKEY'};
+	unless (defined($APIKEY) && ($APIKEY ne "")) {
+		log_message($self,0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
+		log_message($self,0,"displayYoutubeDetails() section [main]");
+		log_message($self,0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
+		return undef;
+	}
+	unless ( open YOUTUBE_INFOS, "curl -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\" |" ) {
+		log_message(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
+	}
+	else {
+		my $line;
+		my $i = 0;
+		my $json_details;
+		while(defined($line=<YOUTUBE_INFOS>)) {
+			chomp($line);
+			$json_details .= $line;
+			log_message($self,5,"displayYoutubeDetails() $line");
+			$i++;
+		}
+		if (defined($json_details) && ($json_details ne "")) {
+			log_message($self,4,"displayYoutubeDetails() json_details : $json_details");
+			my $sYoutubeInfo = decode_json $json_details;
+			my %hYoutubeInfo = %$sYoutubeInfo;
+				my @tYoutubeItems = $hYoutubeInfo{'items'};
+				my @fTyoutubeItems = @{$tYoutubeItems[0]};
+				log_message($self,4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
+				# Check items
+				if ( $#fTyoutubeItems >= 0 ) {
+					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
+					log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
+					my @tYoutubeId = $hYoutubeItems{'id'};
+					my %hYoutubeId = %{$tYoutubeId[0]};
+					log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Id : " . Dumper(%hYoutubeId));
+					$sYoutubeId = $hYoutubeId{'videoId'};
+					log_message($self,4,"displayYoutubeDetails() sYoutubeId : $sYoutubeId");
+				}
+				else {
+					log_message($self,3,"displayYoutubeDetails() Invalid id : $sYoutubeId");
+				}
+		}
+		else {
+			log_message($self,3,"displayYoutubeDetails() curl empty result for : curl -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\"");
+		}
+	}
+	if (defined($sYoutubeId) && ( $sYoutubeId ne "" )) {
+		log_message($self,3,"displayYoutubeDetails() sYoutubeId = $sYoutubeId");
+		my $APIKEY = $MAIN_CONF{'main.YOUTUBE_APIKEY'};
+		unless (defined($APIKEY) && ($APIKEY ne "")) {
+			log_message($self,0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
+			log_message($self,0,"displayYoutubeDetails() section [main]");
+			log_message($self,0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
+			return undef;
+		}
+		unless ( open YOUTUBE_INFOS, "curl -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
+			log_message(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
+		}
+		else {
+			my $line;
+			my $i = 0;
+			my $sTitle;
+			my $sDuration;
+			my $sViewCount;
+			my $json_details;
+			while(defined($line=<YOUTUBE_INFOS>)) {
+				chomp($line);
+				$json_details .= $line;
+				log_message($self,5,"displayYoutubeDetails() $line");
+				$i++;
+			}
+			if (defined($json_details) && ($json_details ne "")) {
+				log_message($self,4,"displayYoutubeDetails() json_details : $json_details");
+				my $sYoutubeInfo = decode_json $json_details;
+				my %hYoutubeInfo = %$sYoutubeInfo;
+				my @tYoutubeItems = $hYoutubeInfo{'items'};
+				my @fTyoutubeItems = @{$tYoutubeItems[0]};
+				log_message($self,4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
+				# Check items
+				if ( $#fTyoutubeItems >= 0 ) {
+					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
+					log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
+					$sViewCount = "vue $hYoutubeItems{'statistics'}{'viewCount'} fois";
+					$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
+					$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
+					log_message($self,3,"displayYoutubeDetails() sDuration : $sDuration");
+					$sDuration =~ s/^PT//;
+					my $sDisplayDuration;
+					my $sHour = $sDuration;
+					if ( $sHour =~ /H/ ) {
+						$sHour =~ s/H.*$//;
+						$sDisplayDuration .= "$sHour" . "h ";
+					}
+					my $sMin = $sDuration;
+					if ( $sMin =~ /M/ ) {
+						$sMin =~ s/^.*H//;
+						$sMin =~ s/M.*$//;
+						$sDisplayDuration .= "$sMin" . "mn ";
+					}
+					my $sSec = $sDuration;
+					if ( $sSec =~ /S/ ) {
+						$sSec =~ s/^.*H//;
+						$sSec =~ s/^.*M//;
+						$sSec =~ s/S$//;
+						$sDisplayDuration .= "$sSec" . "s";
+					}
+					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
+					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
+					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
+					
+					if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
+						my $sMsgSong .= String::IRC->new('You')->black('white');
+						$sMsgSong .= String::IRC->new('Tube')->white('red');
+						$sMsgSong .= String::IRC->new(" $sTitle ")->white('black');
+						$sMsgSong .= String::IRC->new("- ")->orange('black');
+						$sMsgSong .= String::IRC->new("$sDisplayDuration ")->grey('black');
+						$sMsgSong .= String::IRC->new("- ")->orange('black');
+						$sMsgSong .= String::IRC->new("$sViewCount")->grey('black');
+						unless (( $sTitle =~ /annie\s+claude/i ) || ( $sTitle =~ /annie.claude/i ) || ( $sTitle =~ /418.*618.*1447/)) {
+							botPrivmsg($self,$sChannel,"($sNick) $sMsgSong");
+						}
+					}
+					else {
+						log_message($self,3,"displayYoutubeDetails() one of the youtube field is undef or empty");
+						if (defined($sTitle)) {
+							log_message($self,3,"displayYoutubeDetails() sTitle=$sTitle");
+						}
+						else {
+							log_message($self,3,"displayYoutubeDetails() sTitle is undefined");
+						}
+						
+						if (defined($sDuration)) {
+							log_message($self,3,"displayYoutubeDetails() sDuration=$sDuration");
+						}
+						else {
+							log_message($self,3,"displayYoutubeDetails() sDuration is undefined");
+						}
+						if (defined($sViewCount)) {
+							log_message($self,3,"displayYoutubeDetails() sViewCount=$sViewCount");
+						}
+						else {
+							log_message($self,3,"displayYoutubeDetails() sViewCount is undefined");
+						}
+					}
+				}
+				else {
+					log_message($self,3,"displayYoutubeDetails() Invalid id : $sYoutubeId");
+				}
+			}
+			else {
+				log_message($self,3,"displayYoutubeDetails() curl empty result for : curl -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
+			}
+		}
+	}
+	else {
+		log_message($self,3,"displayYoutubeDetails() sYoutubeId could not be determined");
 	}
 }
 
