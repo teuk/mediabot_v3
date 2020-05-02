@@ -465,7 +465,15 @@ sub botPrivmsg(@) {
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	if (defined($sTo)) {
 		my $eventtype = "public";
-		if (substr($sTo, 0, 1) eq '#') {			
+		if (substr($sTo, 0, 1) eq '#') {
+				my $id_chanset_list = getIdChansetList($self,"NoColors");
+				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
+					log_message($self,3,"id_chanset_list = $id_chanset_list");
+					my $id_channel_set = getIdChannelSet($self,$sTo,$id_chanset_list);
+					if (defined($id_channel_set) && ($id_channel_set ne "")) {
+						$sMsg =~ s/\cC\d{1,2}(?:,\d{1,2})?|[\cC\cB\cI\cU\cR\cO]//g;
+					}
+				}
 				log_message($self,0,"$sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
 				my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND name=?";
 				my $sth = $self->{dbh}->prepare($sQuery);
