@@ -508,7 +508,12 @@ ALTER TABLE `CHANNEL_SET`
 ALTER TABLE `CHANSET_LIST`
   MODIFY `id_chanset_list` bigint(20) NOT NULL AUTO_INCREMENT;
 
-INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES (1, 'Youtube');
+INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES
+(1, 'Youtube'),
+(2, 'UrlTitle'),
+(3, 'Weather'),
+(4, 'YoutubeSearch'),
+(5, 'NoColors');
 
 -- --------------------------------------------------------
 
