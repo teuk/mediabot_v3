@@ -974,6 +974,10 @@ sub mbCommandPublic(@) {
 														$bFound = 1;
 														youtubeSearch($self,$message,$sNick,$sChannel,@tArgs);
 												}
+		case /^song/i				{
+														$bFound = 1;
+														displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
+												}
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													unless ( $bFound ) {
@@ -6722,5 +6726,63 @@ sub youtubeSearch(@) {
 		log_message($self,3,"displayYoutubeDetails() sYoutubeId could not be determined");
 	}
 }
+
+sub getRadioCurrentSong(@) {
+	my ($self) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	
+	my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
+	my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
+	my $RADIO_JSON = $MAIN_CONF{'radio.RADIO_JSON'};
+	my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
+
+	unless (defined($RADIO_HOSTNAME) && ($RADIO_HOSTNAME ne "")) {
+		log_message($self,0,"getRadioCurrentSong() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
+		return undef;
+	}
+	unless (open ICECAST_STATUS_JSON, "curl -f -s http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_JSON |") {
+		return "N/A";
+	}
+	my $line;
+	if (defined($line=<ICECAST_STATUS_JSON>)) {
+		chomp($line);
+		my $json = decode_json $line;
+		my @sources = $json->{'icestats'}{'source'};
+		my %source = %{$sources[0][$RADIO_SOURCE]};
+		return $source{'title'};
+	}
+	else {
+		return "N/A";
+	}
+}
+
+sub displayRadioCurrentSong(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
+	my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
+	my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
+	my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
+	
+	my $sRadioCurrentSongTitle = getRadioCurrentSong($self);
+	
+	if (defined($sRadioCurrentSongTitle) && ($sRadioCurrentSongTitle ne "")) {
+		# Format message with irc colors
+		my $sMsgSong = "";
+		$sMsgSong .= String::IRC->new('[ ')->grey('black');
+		$sMsgSong .= String::IRC->new("http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_URL")->orange('black');
+		$sMsgSong .= String::IRC->new(' ] ')->grey('black');
+		$sMsgSong .= String::IRC->new(' - ')->white('black');
+		$sMsgSong .= String::IRC->new(' [ ')->orange('black');
+		$sMsgSong .= String::IRC->new($sRadioCurrentSongTitle)->grey('black');
+		$sMsgSong .= String::IRC->new(' ]')->orange('black');
+		
+		botPrivmsg($self,$sChannel,"$sMsgSong");
+	}
+	else {
+		botNotice($self,$sNick,"Radio is currently unavailable");
+	}
+}
+
 
 1;
