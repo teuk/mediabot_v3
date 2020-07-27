@@ -6749,8 +6749,13 @@ sub getRadioCurrentSong(@) {
 		my $json = decode_json $line;
 		my @sources = $json->{'icestats'}{'source'};
 		#my %source = %{$sources[0][$RADIO_SOURCE]};
-		my %source = %{$sources[0]};
-		return $source{'title'};
+		if (defined($sources[0])) {
+			my %source = %{$sources[0]};
+			return $source{'title'};
+		}
+		else {
+			return "N/A";
+		}
 	}
 	else {
 		return "N/A";
