@@ -6754,7 +6754,7 @@ sub getRadioCurrentSong(@) {
 			return $source{'title'};
 		}
 		else {
-			return "N/A";
+			return undef;
 		}
 	}
 	else {
