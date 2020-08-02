@@ -6751,7 +6751,18 @@ sub getRadioCurrentSong(@) {
 		#my %source = %{$sources[0][$RADIO_SOURCE]};
 		if (defined($sources[0])) {
 			my %source = %{$sources[0]};
-			return $source{'title'};
+			if (defined($source{'title'})) {
+				return $source{'title'};
+			}
+			elsif (defined($source{'server_description'})) {
+				return $source{'server_description'};
+			}
+			elsif (defined($source{'server_name'})) {
+				return $source{'server_name'};
+			}
+			else {
+				return "N/A";
+			}
 		}
 		else {
 			return undef;
