@@ -6838,6 +6838,7 @@ sub setRadioMetadata(@) {
 			close ICECAST_UPDATE_METADATA;
 			chomp($line);
 			if (defined($sChannel) && ($sChannel ne "")) {
+				sleep 2;
 				displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
 			}
 			else {
