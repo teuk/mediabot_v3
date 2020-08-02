@@ -18,6 +18,7 @@ use DateTime;
 use DateTime::TimeZone;
 use utf8;
 use HTML::Tree;
+use URL::Encode qw(url_encode_utf8);
 
 sub new {
 	my ($class,$args) = @_;
@@ -1219,6 +1220,10 @@ sub mbCommandPrivate(@) {
 		case /^unignore/i		{
 														$bFound = 1;
 														delIgnore($self,$message,$sNick,undef,@tArgs);
+												}
+		case /^metadata/i		{
+														$bFound = 1;
+														setRadioMetadata($self,$message,$sNick,undef,@tArgs);
 												}
 		#else								{
 		#											$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,undef,$sNick,$sCommand,@tArgs);
@@ -6745,6 +6750,7 @@ sub getRadioCurrentSong(@) {
 	}
 	my $line;
 	if (defined($line=<ICECAST_STATUS_JSON>)) {
+		close ICECAST_STATUS_JSON;
 		chomp($line);
 		my $json = decode_json $line;
 		my @sources = $json->{'icestats'}{'source'};
@@ -6798,6 +6804,52 @@ sub displayRadioCurrentSong(@) {
 	}
 	else {
 		botNotice($self,$sNick,"Radio is currently unavailable");
+	}
+}
+
+sub setRadioMetadata(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
+	my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
+	my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
+	my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
+	my $RADIO_ADMINPASS = $MAIN_CONF{'radio.RADIO_ADMINPASS'};
+	
+	my $id_channel;
+	if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
+		$id_channel = getIdChannel($self,$tArgs[0]);
+		unless (defined($id_channel)) {
+			botNotice($self,$sNick,"Channel " . $tArgs[0] . " is undefined");
+			return undef;
+		}
+		else {
+			$sChannel = $tArgs[0];
+		}
+		shift @tArgs;
+	}
+	
+	if (defined($RADIO_ADMINPASS) && ($RADIO_ADMINPASS ne "")) {
+		unless (open ICECAST_UPDATE_METADATA, "curl -f -s -u admin:$RADIO_ADMINPASS \"http://$RADIO_HOSTNAME:$RADIO_PORT/admin/metadata?mount=/$RADIO_URL&mode=updinfo&song=" . url_encode_utf8(join(" ",@tArgs)) . "\" |") {
+			botNotice($self,$sNick,"Unable to update metadata (curl failed)");
+		}
+		my $line;
+		if (defined($line=<ICECAST_UPDATE_METADATA>)) {
+			close ICECAST_UPDATE_METADATA;
+			chomp($line);
+			if (defined($sChannel) && ($sChannel ne "")) {
+				displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
+			}
+			else {
+				botNotice($self,$sNick,"Metadata updated to : " . join(" ",@tArgs));
+			}
+		}
+		else {
+			botNotice($self,$sNick,"Unable to update metadata");
+		}
+	}
+	else {
+		log_message($self,0,"setRadioMetadata() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
 	}
 }
 

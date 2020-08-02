@@ -88,7 +88,8 @@ JSON
 DateTime
 DateTime::TimeZone
 HTML::Tree
-Proc::Find" | while read perl_module
+Proc::Find
+URL::Encode" | while read perl_module
  do
   message "Checking $perl_module "
   perl -M$perl_module -e "exit 0;" &>/dev/null
@@ -121,7 +122,8 @@ JSON
 DateTime
 DateTime::TimeZone
 HTML::Tree
-Proc::Find" | while read perl_module
+Proc::Find
+URL::Encode" | while read perl_module
  do
   message "Checking $perl_module"
   perl -M$perl_module -e "exit 0;"
