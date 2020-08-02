@@ -6809,48 +6809,67 @@ sub displayRadioCurrentSong(@) {
 
 sub setRadioMetadata(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
-	my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
-	my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
-	my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
-	my $RADIO_ADMINPASS = $MAIN_CONF{'radio.RADIO_ADMINPASS'};
-	
-	my $id_channel;
-	if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-		$id_channel = getIdChannel($self,$tArgs[0]);
-		unless (defined($id_channel)) {
-			botNotice($self,$sNick,"Channel " . $tArgs[0] . " is undefined");
-			return undef;
-		}
-		else {
-			$sChannel = $tArgs[0];
-		}
-		shift @tArgs;
-	}
-	
-	if (defined($RADIO_ADMINPASS) && ($RADIO_ADMINPASS ne "")) {
-		unless (open ICECAST_UPDATE_METADATA, "curl -f -s -u admin:$RADIO_ADMINPASS \"http://$RADIO_HOSTNAME:$RADIO_PORT/admin/metadata?mount=/$RADIO_URL&mode=updinfo&song=" . url_encode_utf8(join(" ",@tArgs)) . "\" |") {
-			botNotice($self,$sNick,"Unable to update metadata (curl failed)");
-		}
-		my $line;
-		if (defined($line=<ICECAST_UPDATE_METADATA>)) {
-			close ICECAST_UPDATE_METADATA;
-			chomp($line);
-			if (defined($sChannel) && ($sChannel ne "")) {
-				sleep 2;
-				displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
+				my %MAIN_CONF = %{$self->{MAIN_CONF}};
+				my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
+				my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
+				my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
+				my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
+				my $RADIO_ADMINPASS = $MAIN_CONF{'radio.RADIO_ADMINPASS'};
+				
+				my $id_channel;
+				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
+					$id_channel = getIdChannel($self,$tArgs[0]);
+					unless (defined($id_channel)) {
+						botNotice($self,$sNick,"Channel " . $tArgs[0] . " is undefined");
+						return undef;
+					}
+					else {
+						$sChannel = $tArgs[0];
+					}
+					shift @tArgs;
+				}
+				
+				if (defined($RADIO_ADMINPASS) && ($RADIO_ADMINPASS ne "")) {
+					unless (open ICECAST_UPDATE_METADATA, "curl -f -s -u admin:$RADIO_ADMINPASS \"http://$RADIO_HOSTNAME:$RADIO_PORT/admin/metadata?mount=/$RADIO_URL&mode=updinfo&song=" . url_encode_utf8(join(" ",@tArgs)) . "\" |") {
+						botNotice($self,$sNick,"Unable to update metadata (curl failed)");
+					}
+					my $line;
+					if (defined($line=<ICECAST_UPDATE_METADATA>)) {
+						close ICECAST_UPDATE_METADATA;
+						chomp($line);
+						if (defined($sChannel) && ($sChannel ne "")) {
+							sleep 2;
+							displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
+						}
+						else {
+							botNotice($self,$sNick,"Metadata updated to : " . join(" ",@tArgs));
+						}
+					}
+					else {
+						botNotice($self,$sNick,"Unable to update metadata");
+					}
+				}
+				else {
+					log_message($self,0,"setRadioMetadata() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
+				}
 			}
 			else {
-				botNotice($self,$sNick,"Metadata updated to : " . join(" ",@tArgs));
+				my $sNoticeMsg = $message->prefix . " unignore command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
 			}
 		}
 		else {
-			botNotice($self,$sNick,"Unable to update metadata");
+			my $sNoticeMsg = $message->prefix . " unignore command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
 		}
-	}
-	else {
-		log_message($self,0,"setRadioMetadata() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
 	}
 }
 
