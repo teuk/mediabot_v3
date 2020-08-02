@@ -6858,14 +6858,14 @@ sub setRadioMetadata(@) {
 				}
 			}
 			else {
-				my $sNoticeMsg = $message->prefix . " unignore command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				my $sNoticeMsg = $message->prefix . " metadata command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
 				noticeConsoleChan($self,$sNoticeMsg);
 				botNotice($self,$sNick,"Your level does not allow you to use this command.");
 				return undef;
 			}
 		}
 		else {
-			my $sNoticeMsg = $message->prefix . " unignore command attempt (user $sMatchingUserHandle is not logged in)";
+			my $sNoticeMsg = $message->prefix . " metadata command attempt (user $sMatchingUserHandle is not logged in)";
 			noticeConsoleChan($self,$sNoticeMsg);
 			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
 			return undef;
