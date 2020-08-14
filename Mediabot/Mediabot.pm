@@ -979,6 +979,10 @@ sub mbCommandPublic(@) {
 														$bFound = 1;
 														displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
 												}
+		case /^listeners/i	{
+														$bFound = 1;
+														displayRadioListeners($self,$message,$sNick,$sChannel,@tArgs);
+												}
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													unless ( $bFound ) {
@@ -6779,6 +6783,47 @@ sub getRadioCurrentSong(@) {
 	}
 }
 
+sub getRadioCurrentListeners(@) {
+	my ($self) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	
+	my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
+	my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
+	my $RADIO_JSON = $MAIN_CONF{'radio.RADIO_JSON'};
+	my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
+
+	unless (defined($RADIO_HOSTNAME) && ($RADIO_HOSTNAME ne "")) {
+		log_message($self,0,"getRadioCurrentSong() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
+		return undef;
+	}
+	unless (open ICECAST_STATUS_JSON, "curl -f -s http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_JSON |") {
+		return "N/A";
+	}
+	my $line;
+	if (defined($line=<ICECAST_STATUS_JSON>)) {
+		close ICECAST_STATUS_JSON;
+		chomp($line);
+		my $json = decode_json $line;
+		my @sources = $json->{'icestats'}{'source'};
+		#my %source = %{$sources[0][$RADIO_SOURCE]};
+		if (defined($sources[0])) {
+			my %source = %{$sources[0]};
+			if (defined($source{'listeners'})) {
+				return $source{'listeners'};
+			}
+			else {
+				return "N/A";
+			}
+		}
+		else {
+			return undef;
+		}
+	}
+	else {
+		return "N/A";
+	}
+}
+
 sub displayRadioCurrentSong(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
@@ -6801,6 +6846,43 @@ sub displayRadioCurrentSong(@) {
 		$sMsgSong .= String::IRC->new(' ]')->orange('black');
 		
 		botPrivmsg($self,$sChannel,"$sMsgSong");
+	}
+	else {
+		botNotice($self,$sNick,"Radio is currently unavailable");
+	}
+}
+
+sub displayRadioListeners(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
+	my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
+	my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
+	my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
+	
+	my $sRadioCurrentListeners = getRadioCurrentListeners($self);
+	
+	if (defined($sRadioCurrentListeners) && ($sRadioCurrentListeners ne "")) {
+		# Format message with irc colors
+		my $sMsgListeners = String::IRC->new('(')->white('red');
+		$sMsgListeners .= String::IRC->new(')')->maroon('red');
+		$sMsgListeners .= String::IRC->new('(')->red('maroon');
+		$sMsgListeners .= String::IRC->new(')')->black('maroon');
+		$sMsgListeners .= String::IRC->new('( ')->maroon('black');
+		$sMsgListeners .= String::IRC->new('( ')->red('black');
+		$sMsgListeners .= String::IRC->new('Currently ')->silver('black');
+		$sMsgListeners .= String::IRC->new(')-( ')->red('black');
+		$sMsgListeners .= int($sRadioCurrentListeners);
+		$sMsgListeners .= String::IRC->new(' )-( ')->red('black');
+		$sMsgListeners .= String::IRC->new("listener(s)")->white('black');
+		$sMsgListeners .= String::IRC->new(' ) ')->red('black');
+		$sMsgListeners .= String::IRC->new(')')->maroon('black');
+		$sMsgListeners .= String::IRC->new('(')->black('maroon');
+		$sMsgListeners .= String::IRC->new(')')->red('maroon');
+		$sMsgListeners .= String::IRC->new('(')->maroon('red');
+		$sMsgListeners .= String::IRC->new(')')->white('red');
+		
+		botPrivmsg($self,$sChannel,"$sMsgListeners");
 	}
 	else {
 		botNotice($self,$sNick,"Radio is currently unavailable");
