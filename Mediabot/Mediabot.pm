@@ -983,6 +983,10 @@ sub mbCommandPublic(@) {
 														$bFound = 1;
 														displayRadioListeners($self,$message,$sNick,$sChannel,@tArgs);
 												}
+		case /^nextsong/i		{
+														$bFound = 1;
+														radioNext($self,$message,$sNick,$sChannel,@tArgs);
+												}
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													unless ( $bFound ) {
@@ -6955,5 +6959,63 @@ sub setRadioMetadata(@) {
 	}
 }
 
+sub radioNext(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
+				my %MAIN_CONF = %{$self->{MAIN_CONF}};
+				my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
+				my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
+				my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
+				my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
+				my $RADIO_ADMINPASS = $MAIN_CONF{'radio.RADIO_ADMINPASS'};
+				my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
+				my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+				my $LIQUIDSOAP_MOUNPOINT = $RADIO_URL;
+				$LIQUIDSOAP_MOUNPOINT =~ s/\./(dot)/;
+				
+				if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
+					unless (open LIQUIDSOAP_NEXT, "echo -ne \"$LIQUIDSOAP_MOUNPOINT.skip\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
+						botNotice($self,$sNick,"Unable to connect to LIQUIDSOAP telnet port");
+					}
+					my $line;
+					my $i = 0;
+					while (defined($line=<LIQUIDSOAP_NEXT>)) {
+						chomp($line);
+						$i++;
+					}
+					if ( $i != 0 ) {
+						my $sMsgSong = "";
+						$sMsgSong .= String::IRC->new('[ ')->grey('black');
+						$sMsgSong .= String::IRC->new("http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_URL")->orange('black');
+						$sMsgSong .= String::IRC->new(' ] ')->grey('black');
+						$sMsgSong .= String::IRC->new(' - ')->white('black');
+						$sMsgSong .= String::IRC->new(' [ ')->orange('black');
+						$sMsgSong .= String::IRC->new("$sNick skipped to next track")->grey('black');
+						$sMsgSong .= String::IRC->new(' ]')->orange('black');
+						botPrivmsg($self,$sChannel,"$sMsgSong");
+					}
+				}
+				else {
+					log_message($self,0,"radioNext() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " nextsong command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " nextsong command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
+}
 
 1;
