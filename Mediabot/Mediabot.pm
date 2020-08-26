@@ -6828,6 +6828,68 @@ sub getRadioCurrentListeners(@) {
 	}
 }
 
+sub getRadioHarbor(@) {
+	my ($self) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
+	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
+		unless (open LIQUIDSOAP_HARBOR, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
+			log_message($self,3,"Unable to connect to LIQUIDSOAP telnet port");
+		}
+		my $line;
+		my $sHarbor;
+		while (defined($line=<LIQUIDSOAP_HARBOR>)) {
+			chomp($line);
+			if ( $line =~ /harbor/) {
+				my $sHarbor = $line;
+				$sHarbor =~ s/^.*harbor/harbor/;
+				$sHarbor =~ s/\..*$//;
+				close LIQUIDSOAP_HARBOR;
+				return $sHarbor;
+			}
+		}
+		close LIQUIDSOAP_HARBOR;
+		return undef;
+	}
+	else {
+		return undef;
+	}
+}
+
+sub isRadioLive(@) {
+	my ($self,$sHarbor) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
+	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
+		unless (open LIQUIDSOAP_HARBOR, "echo -ne \"$sHarbor.status\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
+			log_message($self,3,"Unable to connect to LIQUIDSOAP telnet port");
+		}
+		my $line;
+		my $sHarbor;
+		while (defined($line=<LIQUIDSOAP_HARBOR>)) {
+			#source client connected from lfbn-idf1-1-1164-145.w90-79.abo.wanadoo.fr
+			#no source client connected
+			chomp($line);
+			if ( $line =~ /source/ ) {
+				log_message($self,3,$line);
+				if ( $line =~ /no source client connected/ ) {
+					return 0;
+				}
+				else {
+					return 1;
+				}
+			}
+		}
+		close LIQUIDSOAP_HARBOR;
+		return 0;
+	}
+	else {
+		return 0;
+	}
+}
+
 sub displayRadioCurrentSong(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
@@ -6838,6 +6900,13 @@ sub displayRadioCurrentSong(@) {
 	
 	my $sRadioCurrentSongTitle = getRadioCurrentSong($self);
 	
+	my $sHarbor = getRadioHarbor($self);
+	my $bRadioLive = 0;
+	if (defined($sHarbor) && ($sHarbor ne "")) {
+		log_message($self,3,$sHarbor);
+		$bRadioLive = isRadioLive($self,$sHarbor);
+	}
+	
 	if (defined($sRadioCurrentSongTitle) && ($sRadioCurrentSongTitle ne "")) {
 		# Format message with irc colors
 		my $sMsgSong = "";
@@ -6846,7 +6915,7 @@ sub displayRadioCurrentSong(@) {
 		$sMsgSong .= String::IRC->new(' ] ')->grey('black');
 		$sMsgSong .= String::IRC->new(' - ')->white('black');
 		$sMsgSong .= String::IRC->new(' [ ')->orange('black');
-		$sMsgSong .= String::IRC->new($sRadioCurrentSongTitle)->grey('black');
+		$sMsgSong .= String::IRC->new(($bRadioLive ? "LIVE : " : "") . $sRadioCurrentSongTitle)->grey('black');
 		$sMsgSong .= String::IRC->new(' ]')->orange('black');
 		
 		botPrivmsg($self,$sChannel,"$sMsgSong");
