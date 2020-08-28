@@ -6915,9 +6915,17 @@ sub displayRadioCurrentSong(@) {
 		$sMsgSong .= String::IRC->new(' ] ')->grey('black');
 		$sMsgSong .= String::IRC->new(' - ')->white('black');
 		$sMsgSong .= String::IRC->new(' [ ')->orange('black');
-		$sMsgSong .= String::IRC->new(($bRadioLive ? "LIVE : " : "") . $sRadioCurrentSongTitle)->grey('black');
+		$sMsgSong .= String::IRC->new($sRadioCurrentSongTitle)->grey('black');
 		$sMsgSong .= String::IRC->new(' ]')->orange('black');
-		
+		if ( $bRadioLive ) {
+			$sMsgSong .= String::IRC->new(' - ')->white('black');
+			$sMsgSong .= String::IRC->new(' [ ')->orange('black');
+			$sMsgSong .= String::IRC->new('LIVE !')->grey('black');
+			$sMsgSong .= String::IRC->new(' ]')->orange('black');
+		}
+		else {
+			#Remaining time
+		}
 		botPrivmsg($self,$sChannel,"$sMsgSong");
 	}
 	else {
