@@ -6869,8 +6869,6 @@ sub isRadioLive(@) {
 		my $line;
 		my $sHarbor;
 		while (defined($line=<LIQUIDSOAP_HARBOR>)) {
-			#source client connected from lfbn-idf1-1-1164-145.w90-79.abo.wanadoo.fr
-			#no source client connected
 			chomp($line);
 			if ( $line =~ /source/ ) {
 				log_message($self,3,$line);
@@ -6890,6 +6888,31 @@ sub isRadioLive(@) {
 	}
 }
 
+sub getRadioRemainingTime(@) {
+	my ($self) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
+	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
+	my $LIQUIDSOAP_MOUNPOINT = $RADIO_URL;
+	$LIQUIDSOAP_MOUNPOINT =~ s/\./(dot)/;
+	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
+		unless (open LIQUIDSOAP_NEXT, "echo -ne \"$LIQUIDSOAP_MOUNPOINT.remaining\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
+			log_message($self,0,"getRadioRemainingTime() Unable to connect to LIQUIDSOAP telnet port");
+		}
+		my $line;
+		if (defined($line=<LIQUIDSOAP_NEXT>)) {
+			chomp($line);
+			log_message($self,3,$line);
+			return($line);
+		}
+		return 0;
+	}
+	else {
+		log_message($self,0,"radioNext() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+	}
+}
+
 sub displayRadioCurrentSong(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
@@ -6897,6 +6920,7 @@ sub displayRadioCurrentSong(@) {
 	my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
 	my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
 	my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
+	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
 	
 	my $sRadioCurrentSongTitle = getRadioCurrentSong($self);
 	
@@ -6923,8 +6947,30 @@ sub displayRadioCurrentSong(@) {
 			$sMsgSong .= String::IRC->new('LIVE !')->grey('black');
 			$sMsgSong .= String::IRC->new(' ]')->orange('black');
 		}
-		else {
+		elsif (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 			#Remaining time
+			my $sRemainingTime = getRadioRemainingTime($self);
+			log_message($self,3,"displayRadioCurrentSong() sRemainingTime = $sRemainingTime");
+			my $siSecondsRemaining = int($sRemainingTime);
+			my $iMinutesRemaining = int($siSecondsRemaining / 60) ;
+			my $iSecondsRemaining = int($siSecondsRemaining - ( $iMinutesRemaining * 60 ));
+			$sMsgSong .= String::IRC->new(' - ')->white('black');
+			$sMsgSong .= String::IRC->new(' [ ')->orange('black');
+			my $sTimeRemaining = "";
+			if ( $iMinutesRemaining > 0 ) {
+				$sTimeRemaining .= $iMinutesRemaining . " mn";
+				if ( $iMinutesRemaining > 1 ) {
+					$sTimeRemaining .= "s";
+				}
+				$sTimeRemaining .= " and ";
+			}
+			$sTimeRemaining .= $iSecondsRemaining . " sec";
+			if ( $iSecondsRemaining > 1 ) {
+				$sTimeRemaining .= "s";
+			}
+			$sTimeRemaining .= " remaining";
+			$sMsgSong .= String::IRC->new($sTimeRemaining)->grey('black');
+			$sMsgSong .= String::IRC->new(' ]')->orange('black');
 		}
 		botPrivmsg($self,$sChannel,"$sMsgSong");
 	}
