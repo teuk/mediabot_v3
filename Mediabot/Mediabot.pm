@@ -987,6 +987,10 @@ sub mbCommandPublic(@) {
 														$bFound = 1;
 														radioNext($self,$message,$sNick,$sChannel,@tArgs);
 												}
+		case /^wordstat/i		{
+														$bFound = 1;
+														wordStat($self,$message,$sNick,$sChannel,@tArgs);
+												}
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													unless ( $bFound ) {
@@ -7141,4 +7145,31 @@ sub radioNext(@) {
 	}
 }
 
+sub wordStat(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	unless (defined($tArgs[0]) && ($tArgs[0])) {
+		botNotice($self,$sNick,"Syntax : wordstat <word>");
+		return undef;
+	}
+	else {
+		my $sQuery = "SELECT count(*) as countWord FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND name=? AND publictext like ? AND ts > date_sub('" . time2str("%Y-%m-%d %H:%M:%S",time) . "', INTERVAL 1 DAY)";
+		my $sth = $self->{dbh}->prepare($sQuery);
+		unless ($sth->execute($sChannel,$tArgs[0])) {
+			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		}
+		else {
+			my $sResponse;
+			if (my $ref = $sth->fetchrow_hashref()) {
+				my $countWord = $ref->{'countWord'};
+				botPrivmsg($self,$sChannel,"wordstat for $tArgs[0] : $countWord");
+				logBot($self,$message,$sChannel,"wordstat",@tArgs);
+			}
+			else {
+				return undef;
+			}
+		}
+		$sth->finish;	
+	}
+}
 1;
