@@ -7168,7 +7168,7 @@ sub wordStat(@) {
 		my $i = 0;
 		while (my $ref = $sth->fetchrow_hashref()) {
 			my $publictext = $ref->{'publictext'};
-			if (( $publictext =~ /\s$sWord/i ) || ( $publictext =~ /\s$sWord\s/i ) || ( $publictext =~ /$sWord\s/i ) || ( $publictext =~ /^$sWord$/i )) {
+			if (( $publictext =~ /\s$sWord$/i ) || ( $publictext =~ /\s$sWord\s/i ) || ( $publictext =~ /^$sWord\s/i ) || ( $publictext =~ /^$sWord$/i )) {
 				if ( $i < 10 ) {
 					log_message($self,3,"publictext : $publictext");
 				}
