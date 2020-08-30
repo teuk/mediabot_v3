@@ -7153,7 +7153,7 @@ sub wordStat(@) {
 		return undef;
 	}
 	else {
-		my $sQuery = "SELECT count(*) as countWord FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND name=? AND publictext like ? AND ts > date_sub('" . time2str("%Y-%m-%d %H:%M:%S",time) . "', INTERVAL 1 DAY)";
+		my $sQuery = "SELECT count(*) as countWord FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND name=? AND (publictext like ? or publictext like '% " . $tArgs[0] . " %') AND ts > date_sub('" . time2str("%Y-%m-%d %H:%M:%S",time) . "', INTERVAL 1 DAY)";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($sChannel,$tArgs[0])) {
 			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
