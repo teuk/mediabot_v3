@@ -7148,28 +7148,34 @@ sub radioNext(@) {
 sub wordStat(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $MAIN_PROG_CMD_CHAR = $MAIN_CONF{'main.MAIN_PROG_CMD_CHAR'};
+	my $sWord;
 	unless (defined($tArgs[0]) && ($tArgs[0])) {
 		botNotice($self,$sNick,"Syntax : wordstat <word>");
 		return undef;
 	}
 	else {
-		my $sQuery = "SELECT count(*) as countWord FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND name=? AND (publictext like ? or publictext like '% " . $tArgs[0] . " %') AND ts > date_sub('" . time2str("%Y-%m-%d %H:%M:%S",time) . "', INTERVAL 1 DAY)";
-		my $sth = $self->{dbh}->prepare($sQuery);
-		unless ($sth->execute($sChannel,$tArgs[0])) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-		}
-		else {
-			my $sResponse;
-			if (my $ref = $sth->fetchrow_hashref()) {
-				my $countWord = $ref->{'countWord'};
-				botPrivmsg($self,$sChannel,"wordstat for $tArgs[0] : $countWord");
-				logBot($self,$message,$sChannel,"wordstat",@tArgs);
-			}
-			else {
-				return undef;
-			}
-		}
-		$sth->finish;	
+		$sWord = $tArgs[0];
 	}
+	
+	my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND name=? AND ts > date_sub('" . time2str("%Y-%m-%d %H:%M:%S",time) . "', INTERVAL 1 DAY)";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sChannel)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		my $sResponse;
+		my $i = 0;
+		while (my $ref = $sth->fetchrow_hashref()) {
+			my $publictext = $ref->{'publictext'};
+			if (( $publictext =~ /\s$sWord/i ) || ( $publictext =~ /\s$sWord\s/i ) || ( $publictext =~ /$sWord\s/i ) || ( $publictext =~ /^$sWord$/i )) {
+				$i++;
+			}
+		}
+		botPrivmsg($self,$sChannel,"wordstat for $tArgs[0] : $i");
+		logBot($self,$message,$sChannel,"wordstat",@tArgs);
+	}
+	$sth->finish;
+	
 }
 1;
