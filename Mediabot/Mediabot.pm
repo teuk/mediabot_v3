@@ -18,7 +18,7 @@ use DateTime;
 use DateTime::TimeZone;
 use utf8;
 use HTML::Tree;
-use URL::Encode qw(url_encode_utf8);
+use URL::Encode qw(url_encode_utf8 url_encode);
 
 sub new {
 	my ($class,$args) = @_;
@@ -7045,9 +7045,10 @@ sub setRadioMetadata(@) {
 					}
 					shift @tArgs;
 				}
+				my $sNewMetadata = join(" ",@tArgs);
 				
 				if (defined($RADIO_ADMINPASS) && ($RADIO_ADMINPASS ne "")) {
-					unless (open ICECAST_UPDATE_METADATA, "curl -f -s -u admin:$RADIO_ADMINPASS \"http://$RADIO_HOSTNAME:$RADIO_PORT/admin/metadata?mount=/$RADIO_URL&mode=updinfo&song=" . url_encode(join(" ",@tArgs)) . "\" |") {
+					unless (open ICECAST_UPDATE_METADATA, "curl -f -s -u admin:$RADIO_ADMINPASS \"http://$RADIO_HOSTNAME:$RADIO_PORT/admin/metadata?mount=/$RADIO_URL&mode=updinfo&song=" . url_encode_utf8($sNewMetadata) . "\" |") {
 						botNotice($self,$sNick,"Unable to update metadata (curl failed)");
 					}
 					my $line;
