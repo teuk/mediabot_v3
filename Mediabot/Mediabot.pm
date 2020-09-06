@@ -1637,7 +1637,34 @@ sub mbStatus(@) {
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
-				log_message($self,3,"Checking uptime");
+				# Bot Uptime
+				my $iUptime = time - $self->{iConnectionTimestamp};
+				my $days = int($iUptime / 86400);
+				my $hours = int(($iUptime - ( $days * 86400 )) / 3600);
+				$hours = sprintf("%02d",$hours);
+				my $minutes = int(($iUptime - ( $days * 86400 ) - ( $hours * 3600 )) / 60);
+				$minutes = sprintf("%02d",$minutes);
+				my $seconds = int($iUptime - ( $days * 86400 ) - ( $hours * 3600 ) - ( $minutes * 60 ));
+				$seconds = sprintf("%02d",$seconds);
+				log_message($self,3,"days = $days hours = $hours minutes = $minutes seconds = $seconds");
+				#my $sUptimeStr = ($days > 0 ? "$days days, " : "") . (int($hours) > 0 ? ("$hours" . "h ") : "") . (int($minutes > 0 ? ("$minutes" . "mn") : "")) . "$seconds" . "s";
+				my $sUptimeStr;
+				if ($days > 0) {
+					$sUptimeStr .= "$days days, ";
+				}
+				if (int($hours) > 0) {
+					$sUptimeStr .= "$hours" . "h ";
+				}
+				if (int($minutes) > 0) {
+					$sUptimeStr .= "$minutes" . "mn ";
+				}
+				$sUptimeStr .= "$seconds" . "s";
+				
+				unless (defined($sUptimeStr)) {
+					$sUptimeStr = "Unknown";
+				}
+				
+				# Server Uptime
 				my $sUptime = "Unknown";
 				unless (open LOAD, "uptime |") {
 					log_message($self,0,"Could not exec uptime command");
@@ -1649,17 +1676,19 @@ sub mbStatus(@) {
 						$sUptime = $line;
 					}
 				}
-				# Uptime
-				my $iUptime = time - $self->{iConnectionTimestamp};
-				my $days = int($iUptime / 86400);
-				my $hours = int(($iUptime - ( $days * 86400 )) / 3600);
-				$hours = sprintf("%02d",$hours);
-				my $minutes = int(($iUptime - ( $days * 86400 ) - ( $hours * 3600 )) / 60);
-				$minutes = sprintf("%02d",$minutes);
-				my $seconds = int($iUptime - ( $days * 86400 ) - ( $hours * 3600 ) - ( $minutes * 60 ));
-				$seconds = sprintf("%02d",$seconds);
-				my $sAnswer = "$days days, $hours" . "h" . "$minutes" . "mn" . "$seconds" . "s";
 				
+				# Server type
+				my $sUname = "Unknown";
+				unless (open UNAME, "uname -a |") {
+					log_message($self,0,"Could not exec uptime command");
+				}
+				else {
+					my $line;
+					if (defined($line=<UNAME>)) {
+						chomp($line);
+						$sUname = $line;
+					}
+				}
 				
 				# Memory usage
 				my $mu = Memory::Usage->new();
@@ -1699,11 +1728,10 @@ sub mbStatus(@) {
 					$fDataStackSize = sprintf("%.2f",$fDataStackSize);
 				
 				}
-				unless (defined($sAnswer)) {
-					$sAnswer = "Unknown";
-				}
-				botNotice($self,$sNick,$MAIN_CONF{'main.MAIN_PROG_NAME'} . " v" . $self->{main_prog_version} . " Uptime : $sAnswer");
+				
+				botNotice($self,$sNick,$MAIN_CONF{'main.MAIN_PROG_NAME'} . " v" . $self->{main_prog_version} . " Uptime : $sUptimeStr");
 				botNotice($self,$sNick,"Memory usage (VM $fVmSize MB) (Resident Set $fResSetSize MB) (Shared Memory $fSharedMemSize MB) (Data and Stack $fDataStackSize MB)");
+				botNotice($self,$sNick,"Server : $sUname");
 				botNotice($self,$sNick,"Server's uptime : $sUptime");
 				logBot($self,$message,undef,"status",undef);
 			}
