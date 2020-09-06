@@ -7047,7 +7047,7 @@ sub setRadioMetadata(@) {
 				}
 				
 				if (defined($RADIO_ADMINPASS) && ($RADIO_ADMINPASS ne "")) {
-					unless (open ICECAST_UPDATE_METADATA, "curl -f -s -u admin:$RADIO_ADMINPASS \"http://$RADIO_HOSTNAME:$RADIO_PORT/admin/metadata?mount=/$RADIO_URL&mode=updinfo&song=" . url_encode_utf8(join(" ",@tArgs)) . "\" |") {
+					unless (open ICECAST_UPDATE_METADATA, "curl -f -s -u admin:$RADIO_ADMINPASS \"http://$RADIO_HOSTNAME:$RADIO_PORT/admin/metadata?mount=/$RADIO_URL&mode=updinfo&song=" . url_encode(join(" ",@tArgs)) . "\" |") {
 						botNotice($self,$sNick,"Unable to update metadata (curl failed)");
 					}
 					my $line;
