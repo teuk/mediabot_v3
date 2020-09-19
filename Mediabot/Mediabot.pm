@@ -946,12 +946,9 @@ sub mbCommandPublic(@) {
 		case /^date$/i			{ $bFound = 1;
 														displayDate($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^weather$/i		{ $bFound = 1;
-														displayWeather($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^meteo$/i			{ $bFound = 1;
-														displayWeather($self,$message,$sNick,$sChannel,@tArgs);
-												}
+		case /^weather$|^meteo$/i		{ $bFound = 1;
+																	displayWeather($self,$message,$sNick,$sChannel,@tArgs);
+																}
 		case /^countslaps/i {	$bFound = 1;
 														mbCountSlaps($self,$message,$sNick,$sChannel,@tArgs);
 												}
@@ -5637,11 +5634,11 @@ sub displayWeather(@) {
 		my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
 		if (defined($id_channel_set)) {
 			my $sText = join(" ",@tArgs);
-			if (defined($sText) && ($sText ne "") && ( $sText =~ /^[\w,\-,\s]+$/)) {
+			if (defined($sText) && ($sText ne "")) {
 				my $sContentType;
 				my $iHttpResponseCode;
 				my $sCity = $sText;
-				unless ( open URL_WEATHER, "curl --connect-timeout 3 --max-time 3 -L -ks 'http://wttr.in/" . $sCity . "?format=\"%l:+%c+%t+%w+%p\"&m' |" ) {
+				unless ( open URL_WEATHER, "curl --connect-timeout 3 --max-time 3 -L -ks 'http://wttr.in/" . url_encode($sCity) . "?format=\"%l:+%c+%t+%w+%p\"&m' |" ) {
 					log_message(3,"displayUrlTitle() Could not curl headers from wttr.in");
 				}
 				else {
@@ -5650,6 +5647,7 @@ sub displayWeather(@) {
 						chomp($line);
 						$line =~ s/^\"//;
 						$line =~ s/\"$//;
+						$line =~ s/\+/ /g;
 						botPrivmsg($self,$sChannel,$line);
 					}
 					else {
