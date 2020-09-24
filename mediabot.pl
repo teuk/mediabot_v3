@@ -547,7 +547,7 @@ sub on_message_PRIVMSG(@) {
 				$mediabot->log_message(3,"I have a lucky shot to answer for $what");
 				$mediabot->log_message(3,"time : " . time . " getLastReponderTs() " . $mediabot->getLastReponderTs() . " delta " . (time - $mediabot->getLastReponderTs()));
 				if ((time - $mediabot->getLastReponderTs()) >= 600 ) {
-					sleep 2;
+					sleep int(rand(8)+2);
 					$mediabot->doResponder($message,$who,$where,$what,@tArgs)
 				}
 			}
