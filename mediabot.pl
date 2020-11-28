@@ -14,19 +14,20 @@ use diagnostics;
 use POSIX 'setsid';
 use Getopt::Long;
 use File::Basename;
-use Proc::Find qw(find_proc proc_exists);
 use Mediabot::Mediabot;
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use Net::Async::IRC;
 use Switch;
 use Data::Dumper;
+use Date::Format;
 
 # +---------------------------------------------------------------------------+
 # !          SETTINGS                                                         !
 # +---------------------------------------------------------------------------+
 my $CONFIG_FILE;
 my $MAIN_PROG_VERSION;
+my $MAIN_GIT_VERSION;
 my $MAIN_PROG_CHECK_CONFIG = 0;
 my $MAIN_PID_FILE;
 my $MAIN_PROG_DAEMON = 0;
@@ -43,6 +44,7 @@ sub usage(@);
 sub catch_hup(@);
 sub catch_term(@);
 sub reconnect(@);
+sub getVersion(@);
 
 # +---------------------------------------------------------------------------+
 # !          IRC FUNCTIONS                                                    !
@@ -79,9 +81,15 @@ sub on_message_RPL_WHOISUSER(@);
 my $sFullParams = join(" ",@ARGV);
 my $sServer;
 
+binmode STDOUT, ':utf8';
+binmode STDERR, ':utf8';
+
 # Get current version
+my ($cVerMajor,$cVerMinor,$cStable,$cVerDev);
+my ($gVerMajor,$gVerMinor,$gStable,$gVerDev);
+print time2str("[%d/%m/%Y %H:%M:%S]",time) . " Getting current version from VERSION file\n";
 unless (open VERSION, "VERSION") {
-	print STDERR "Could not get version from VERSION file\n";
+	print STDERR time2str("[%d/%m/%Y %H:%M:%S]",time) . " Could not get version from VERSION file\n";
 	$MAIN_PROG_VERSION = "Undefined";
 }
 else {
@@ -89,9 +97,49 @@ else {
 	if (defined($line=<VERSION>)) {
 		chomp($line);
 		$MAIN_PROG_VERSION = $line;
+		($cVerMajor,$cVerMinor,$cStable,$cVerDev) = getVersion($MAIN_PROG_VERSION);
 	}
 	else {
 		$MAIN_PROG_VERSION = "Undefined";
+	}
+	if (defined($cVerMajor) && ($cVerMajor ne "") && defined($cVerMinor) && ($cVerMinor ne "") && defined($cStable) && ($cStable ne "")) {
+		print time2str("[%d/%m/%Y %H:%M:%S]",time) . " -> Mediabot $cStable version $cVerMajor.$cVerMinor " . ((defined($cVerDev) && ($cVerDev ne "")) ? "($cVerDev)" : "") . "\n";
+	}
+	else {
+		print time2str("[%d/%m/%Y %H:%M:%S]",time) . " -> Mediabot unknown version detected : $MAIN_PROG_VERSION\n";
+	}
+}
+
+unless ( $MAIN_PROG_VERSION eq "Undefined" ) {
+	# Check for latest version
+	print time2str("[%d/%m/%Y %H:%M:%S]",time) . " Checking latest version from github (https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION)\n";
+	unless (open GITVERSION, "curl -f -s https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION |") {
+		print STDERR time2str("[%d/%m/%Y %H:%M:%S]",time) . " Could not get version from github\n";
+		$MAIN_GIT_VERSION = "Undefined";
+	}
+	else {
+		my $line;
+		if (defined($line=<GITVERSION>)) {
+			chomp($line);
+			$MAIN_GIT_VERSION = $line;
+			($gVerMajor,$gVerMinor,$gStable,$gVerDev) = getVersion($MAIN_GIT_VERSION);
+			if (defined($gVerMajor) && ($gVerMajor ne "") && defined($gVerMinor) && ($gVerMinor ne "") && defined($gStable) && ($gStable ne "")) {
+				print time2str("[%d/%m/%Y %H:%M:%S]",time) . " -> Mediabot github $cStable version $gVerMajor.$gVerMinor " . ((defined($gVerDev) && ($gVerDev ne "")) ? "($cVerDev)" : "") . "\n";
+				if ( $MAIN_PROG_VERSION eq $MAIN_GIT_VERSION ) {
+					print time2str("[%d/%m/%Y %H:%M:%S]",time) . " Mediabot is up to date\n";
+				}
+				else {
+					print time2str("[%d/%m/%Y %H:%M:%S]",time) . " Mediabot should be updated to $cStable version $gVerMajor.$gVerMinor " . ((defined($gVerDev) && ($gVerDev ne "")) ? "($cVerDev)" : "") . "\n";
+				}
+			}
+			else {
+				print time2str("[%d/%m/%Y %H:%M:%S]",time) . " Mediabot unknown git version detected : $MAIN_GIT_VERSION\n";
+			}
+		}
+		else {
+			$MAIN_GIT_VERSION = "Undefined";
+			print time2str("[%d/%m/%Y %H:%M:%S]",time) . " -> Mediabot undefined git version detected ($MAIN_GIT_VERSION)\n";
+		}
 	}
 }
 
@@ -105,14 +153,6 @@ my $result = GetOptions (
 
 unless (defined($CONFIG_FILE)) {
         usage("You must specify a config file");
-}
-
-my $CONFIG_FILE_BASENAME = basename($CONFIG_FILE);
-my $nbInstances = `pgrep -fl $CONFIG_FILE_BASENAME | wc -l`;
-
-if (defined($nbInstances) && ($nbInstances > 2)) {
-		print STDERR "Another instance is running matching $CONFIG_FILE_BASENAME\n";
-		exit 1;
 }
 
 # Daemon mode actions
@@ -883,4 +923,25 @@ sub reconnect(@) {
 
 	# Start main loop
 	$loop->run;
+}
+
+sub getVersion(@) {
+	my ($sVersion) = @_;
+	my ($str1,$str2) = split(/\./,$sVersion);
+	if ( $str2 =~ /^[0-9]+$/) {
+		# Stable version
+		#print time2str("[%d/%m/%Y %H:%M:%S]",time) . " [DEBUG1] getVersion() Mediabot stable $str1.$str2\n";
+		return ($str1,$str2,"stable",undef);
+	}
+	elsif ( $str2 =~ /dev/ ) {
+		# Devel version
+		my ($sMinor,$sReleaseDate) = split(/\-/,$str2);
+		$sMinor =~ s/dev//;
+		#print time2str("[%d/%m/%Y %H:%M:%S]",time) . " [DEBUG1] getVersion() Mediabot devel $str1.$sMinor ($sReleaseDate)\n";
+		return ($str1,$sMinor,"devel",$sReleaseDate);
+	}
+	else {
+		#print time2str("[%d/%m/%Y %H:%M:%S]",time) . " [DEBUG1] getVersion() Mediabot unknown version : $sVersion\n";
+		return (undef,undef,undef,undef);
+	}
 }

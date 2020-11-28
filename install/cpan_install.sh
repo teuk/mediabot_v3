@@ -50,6 +50,9 @@ function wait_for_cmd {
 	wait $WAIT_PID
 }
 
+# +-------------------------------------------------------------------------+
+# | CPAN MODULES INSTALL                                                    |
+# +-------------------------------------------------------------------------+
 message "Autoconfigure cpan"
 bash -c "(echo y;echo o conf prerequisites_policy follow;echo o conf commit)|cpan" >>$CPAN_LOGFILE 2>&1
 ok_failed $?
@@ -88,7 +91,6 @@ JSON
 DateTime
 DateTime::TimeZone
 HTML::Tree
-Proc::Find
 URL::Encode" | while read perl_module
  do
   message "Checking $perl_module "
@@ -102,6 +104,9 @@ URL::Encode" | while read perl_module
 	fi
  done
 
+# +-------------------------------------------------------------------------+
+# | CPAN VERIFY MODULES                                                     |
+# +-------------------------------------------------------------------------+
 messageln "Verify perl modules installation"
 echo "Getopt::Long
 File::Basename
@@ -122,7 +127,6 @@ JSON
 DateTime
 DateTime::TimeZone
 HTML::Tree
-Proc::Find
 URL::Encode" | while read perl_module
  do
   message "Checking $perl_module"
