@@ -609,5 +609,33 @@ ALTER TABLE `IGNORES`
 --
 ALTER TABLE `IGNORES`
   MODIFY `id_ignores` bigint(20) NOT NULL AUTO_INCREMENT;
+  
+CREATE TABLE `QUOTES` (
+  `id_quotes` bigint(20) NOT NULL,
+  `id_channel` bigint(20) NOT NULL,
+  `id_user` bigint(20) NOT NULL,
+  `ts` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `quotetext` varchar(255) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+--
+-- Index pour les tables déchargées
+--
+
+--
+-- Index pour la table `QUOTES`
+--
+ALTER TABLE `QUOTES`
+  ADD PRIMARY KEY (`id_quotes`);
+
+--
+-- AUTO_INCREMENT pour les tables déchargées
+--
+
+--
+-- AUTO_INCREMENT pour la table `QUOTES`
+--
+ALTER TABLE `QUOTES`
+  MODIFY `id_quotes` bigint(20) NOT NULL AUTO_INCREMENT;
 
 COMMIT;

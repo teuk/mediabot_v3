@@ -336,7 +336,6 @@ sub getMessageNickIdentHost(@) {
 
 sub getIdChannel(@) {
 	my ($self,$sChannel) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $id_channel = undef;
 	my $sQuery = "SELECT id_channel FROM CHANNEL WHERE name=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -350,6 +349,23 @@ sub getIdChannel(@) {
 	}
 	$sth->finish;
 	return $id_channel;
+}
+
+sub getUserhandle(@) {
+	my ($self,$id_user) = @_;
+	my $sUserhandle = undef;
+	my $sQuery = "SELECT nickname FROM USER WHERE id_user=?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($id_user) ) {
+		log_message($self,1,"getUserhandle() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			$sUserhandle = $ref->{'nickname'};
+		}
+	}
+	$sth->finish;
+	return $sUserhandle;
 }
 
 sub getConsoleChan(@) {
@@ -1000,6 +1016,18 @@ sub mbCommandPublic(@) {
 														$bFound = 1;
 														update($self,$message,$sNick,$sChannel,@tArgs);
 											}
+		case /^lastcom/i	{
+														$bFound = 1;
+														lastCom($self,$message,$sNick,$sChannel,@tArgs);
+											}
+		case "q"					{
+														$bFound = 1;
+														mbQuotes($self,$message,$sNick,$sChannel,@tArgs);
+											}
+		case "Q"					{
+														$bFound = 1;
+														mbQuotes($self,$message,$sNick,$sChannel,@tArgs);
+											}
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													unless ( $bFound ) {
@@ -1018,12 +1046,6 @@ sub mbCommandPublic(@) {
 	}
 	unless ( $bFound ) {
 		log_message($self,1,"Public command '$sCommand' not found");
-	}
-	else {
-		#my %GLOBAL_HASH;
-		#$GLOBAL_HASH{'WHOIS_VARS'} = \%WHOIS_VARS;
-		#$GLOBAL_HASH{'hTimers'} = \%hTimers;
-		#return %GLOBAL_HASH;
 	}
 }
 
@@ -1246,6 +1268,14 @@ sub mbCommandPrivate(@) {
 														$bFound = 1;
 														setRadioMetadata($self,$message,$sNick,undef,@tArgs);
 												}
+		case /^update/i		{
+												$bFound = 1;
+												update($self,$message,$sNick,undef,@tArgs);
+											}
+		case /^lastcom/i	{
+														$bFound = 1;
+														lastCom($self,$message,$sNick,undef,@tArgs);
+											}
 		#else								{
 		#											$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,undef,$sNick,$sCommand,@tArgs);
 		#										}
@@ -7348,6 +7378,368 @@ sub update(@) {
 			return undef;
 		}
 	}
+}
+
+sub lastCom(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				log_message($self,3,"Lastcom TBD ;)");
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " lastcom command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " lastcom command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
+}
+
+sub mbQuotes(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+		botNotice($self,$sNick,"Quotes syntax :");
+		botNotice($self,$sNick,"q [add or a] text1 | text2 | ... | textn");
+		botNotice($self,$sNick,"q [del or q] id");
+		botNotice($self,$sNick,"q [view or v] id");
+		botNotice($self,$sNick,"q [search or s] text");
+		botNotice($self,$sNick,"q [random or r]");
+		botNotice($self,$sNick,"q stats");
+		return undef;
+	}
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
+				my $sCommand = $tArgs[0];
+				shift @tArgs;
+				switch($sCommand) {
+					case /^add$|^a$/i		{ mbQuoteAdd($self,$message,$iMatchingUserId,$sMatchingUserHandle,$sNick,$sChannel,@tArgs); }
+					case /^del$|^d$/i		{ mbQuoteDel($self,$message,$sMatchingUserHandle,$sNick,$sChannel,@tArgs); }
+					case /^view$|^v$/i	{ mbQuoteView($self,$message,$sNick,$sChannel,@tArgs); }
+					case /^search$/i	{ mbQuoteSearch($self,$message,$sNick,$sChannel,@tArgs); }
+					case "s" { mbQuoteSearch($self,$message,$sNick,$sChannel,@tArgs); }
+					case "S" { mbQuoteSearch($self,$message,$sNick,$sChannel,@tArgs); }
+					case /^random$|^r$/i { mbQuoteRand($self,$message,$sNick,$sChannel,@tArgs); }
+					case /^stats$/i { mbQuoteStats($self,$message,$sNick,$sChannel,@tArgs); }
+					else {
+						botNotice($self,$sNick,"Quotes syntax :");
+						botNotice($self,$sNick,"q [add or a] text1 | text2 | ... | textn");
+						botNotice($self,$sNick,"q [del or q] id");
+						botNotice($self,$sNick,"q [view or v] id");
+						botNotice($self,$sNick,"q [search or s] text");
+						botNotice($self,$sNick,"q [random or r]");
+						botNotice($self,$sNick,"q stats");
+					}
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " q command attempt (command level [User] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^view$|^v$/i)) {
+			shift @tArgs;
+			mbQuoteView($self,$message,$sNick,$sChannel,@tArgs);
+		}
+		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && (($tArgs[0] =~ /^search$/i) || ($tArgs[0] eq "s") || ($tArgs[0] eq "S"))) {
+			shift @tArgs;
+			mbQuoteSearch($self,$message,$sNick,$sChannel,@tArgs);
+		}
+		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^random$|^r$/i)) {
+			shift @tArgs;
+			mbQuoteRand($self,$message,$sNick,$sChannel,@tArgs);
+		}
+		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^stats$|^r$/i)) {
+			shift @tArgs;
+			mbQuoteStats($self,$message,$sNick,$sChannel,@tArgs);
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " q command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
+}
+
+sub mbQuoteAdd(@) {
+	my ($self,$message,$iMatchingUserId,$sMatchingUserHandle,$sNick,$sChannel,@tArgs) = @_;
+	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+		botNotice($self,$sNick,"q [add or a] text1 | text2 | ... | textn");
+	}
+	else {
+		my $sQuoteText = join(" ",@tArgs);
+		my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name=? AND quotetext like ?";
+		my $sth = $self->{dbh}->prepare($sQuery);
+		unless ($sth->execute($sChannel,$sQuoteText)) {
+			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		}
+		else {
+			if (my $ref = $sth->fetchrow_hashref()) {
+				my $id_quotes = $ref->{'id_quotes'};
+				botPrivmsg($self,$sChannel,"Quote (id : $id_quotes) already exists");
+				logBot($self,$message,$sChannel,"q",@tArgs);
+			}
+			else {
+				my $id_channel = getIdChannel($self,$sChannel);
+				unless (defined($id_channel) && ($id_channel ne "")) {
+					botNotice($self,$sNick,"Channel $sChannel is not registered to me");
+				}
+				else {
+					$sQuery = "INSERT INTO QUOTES (id_channel,id_user,quotetext) VALUES (?,?,?)";
+					$sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute($id_channel,$iMatchingUserId,$sQuoteText)) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {
+						my $id_inserted = String::IRC->new($sth->{ mysql_insertid })->bold;
+						botPrivmsg($self,$sChannel,"($sMatchingUserHandle) done. (id: $id_inserted)");
+						logBot($self,$message,$sChannel,"q",@tArgs);
+					}
+				}
+			}
+		}
+		$sth->finish;
+	}
+}
+
+sub mbQuoteDel(@) {
+	my ($self,$message,$sMatchingUserHandle,$sNick,$sChannel,@tArgs) = @_;
+	my $id_quotes = $tArgs[0];
+	unless (defined($tArgs[0]) && ($tArgs[0] ne "") && ($id_quotes =~ /[0-9]+/)) {
+		botNotice($self,$sNick,"q [del or q] id");
+	}
+	else {
+		my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? AND id_quotes=?";
+		my $sth = $self->{dbh}->prepare($sQuery);
+		unless ($sth->execute($sChannel,$id_quotes)) {
+			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		}
+		else {
+			if (my $ref = $sth->fetchrow_hashref()) {
+				$sQuery = "DELETE FROM QUOTES WHERE id_quotes=?";
+				my $sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($id_quotes)) {
+					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					my $id_removed = String::IRC->new($id_quotes)->bold;
+					botPrivmsg($self,$sChannel,"($sMatchingUserHandle) done. (id: $id_removed)");
+				}
+			}
+			else {
+				botPrivmsg($self,$sChannel,"Quote (id : $id_quotes) does not exist for channel $sChannel");
+			}
+		}
+		$sth->finish;
+	}
+}
+
+sub mbQuoteView(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my $id_quotes = $tArgs[0];
+	unless (defined($tArgs[0]) && ($tArgs[0] ne "") && ($id_quotes =~ /[0-9]+/)) {
+		botNotice($self,$sNick,"q [view or v] id");
+	}
+	else {
+		my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? AND id_quotes=?";
+		my $sth = $self->{dbh}->prepare($sQuery);
+		unless ($sth->execute($sChannel,$id_quotes)) {
+			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		}
+		else {
+			if (my $ref = $sth->fetchrow_hashref()) {
+				my $id_quotes = $ref->{'id_quotes'};
+				my $sQuoteText = $ref->{'quotetext'};
+				my $id_user = $ref->{'id_user'};
+				my $sUserhandle = getUserhandle($self,$id_user);
+				$sUserhandle = (defined($sUserhandle) && ($sUserhandle ne "") ? $sUserhandle : "Unknown");
+				my $id_q = String::IRC->new($id_quotes)->bold;
+				botPrivmsg($self,$sChannel,"($sUserhandle) [id: $id_q] $sQuoteText");
+			}
+			else {
+				botPrivmsg($self,$sChannel,"Quote (id : $id_quotes) does not exist for channel $sChannel");
+			}
+		}
+		$sth->finish;
+	}
+}
+
+sub mbQuoteSearch(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+		botNotice($self,$sNick,"q [search or s] text");
+	}
+	else {
+		my $MAXQUOTES = 50;
+		my $sQuoteText = join(" ",@tArgs);
+		my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name=?";
+		my $sth = $self->{dbh}->prepare($sQuery);
+		unless ($sth->execute($sChannel)) {
+			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		}
+		else {
+			my $i = 0;
+			my $sQuotesIdFound;
+			my $sLastQuote;
+			my $ref;
+			my $id_quotes;
+			my $id_user;
+			my $ts;
+			while ($ref = $sth->fetchrow_hashref()) {
+				my $sQuote = $ref->{'quotetext'};
+				if ( $sQuote =~ /$sQuoteText/i ) {
+					$id_quotes = $ref->{'id_quotes'};
+					$id_user = $ref->{'id_user'};
+					$ts = $ref->{'ts'};
+					if ( $i == 0) {
+						$sQuotesIdFound .= "$id_quotes";
+					}
+					else {
+						$sQuotesIdFound .= "|$id_quotes";
+					}
+					$sLastQuote = $sQuote;
+					$i++;
+				}
+			}
+			if ( $i == 0) {
+				botPrivmsg($self,$sChannel,"No quote found matching \"$sQuoteText\" on $sChannel");
+			}
+			elsif ( $i <= $MAXQUOTES ) {
+					botPrivmsg($self,$sChannel,"$i quote(s) matching \"$sQuoteText\" on $sChannel : $sQuotesIdFound");
+					my $id_q = String::IRC->new($id_quotes)->bold;
+					my $sUserHandle = getUserhandle($self,$id_user);
+					$sUserHandle = ((defined($sUserHandle) && ($sUserHandle ne "")) ? $sUserHandle : "Unknown");
+					botPrivmsg($self,$sChannel,"Last on $ts by $sUserHandle (id : $id_q) $sLastQuote");
+			}
+			else {
+					botPrivmsg($self,$sChannel,"More than $MAXQUOTES quotes matching \"$sQuoteText\" found on $sChannel, please be more specific :)");
+			}
+		}
+		$sth->finish;
+	}
+}
+
+sub mbQuoteRand(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? ORDER BY RAND() LIMIT 1";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sChannel)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $id_quotes = $ref->{'id_quotes'};
+			my $sQuoteText = $ref->{'quotetext'};
+			my $id_user = $ref->{'id_user'};
+			my $sUserhandle = getUserhandle($self,$id_user);
+			$sUserhandle = (defined($sUserhandle) && ($sUserhandle ne "") ? $sUserhandle : "Unknown");
+			my $id_q = String::IRC->new($id_quotes)->bold;
+			botPrivmsg($self,$sChannel,"($sUserhandle) [id: $id_q] $sQuoteText");
+		}
+		else {
+			botPrivmsg($self,$sChannel,"Quote database is empty for $sChannel");
+		}
+	}
+	$sth->finish;
+}
+
+sub mbQuoteStats(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my $sQuery = "SELECT count(*) as nbQuotes FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sChannel)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $nbQuotes = $ref->{'nbQuotes'};
+			if ( $nbQuotes == 0) {
+				botPrivmsg($self,$sChannel,"Quote database is empty for $sChannel");
+			}
+			else {
+				$sQuery = "SELECT UNIX_TIMESTAMP(ts) as minDate FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? ORDER by ts LIMIT 1";
+				$sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($sChannel)) {
+					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					if (my $ref = $sth->fetchrow_hashref()) {
+						my $minDate = $ref->{'minDate'};
+						$sQuery = "SELECT UNIX_TIMESTAMP(ts) as maxDate FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? ORDER by ts DESC LIMIT 1";
+						$sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute($sChannel)) {
+							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						}
+						else {
+							if (my $ref = $sth->fetchrow_hashref()) {
+								my $maxDate = $ref->{'maxDate'};
+								my $d = time() - $minDate;
+								my @int = (
+								    [ 'second', 1                ],
+								    [ 'minute', 60               ],
+								    [ 'hour',   60*60            ],
+								    [ 'day',    60*60*24         ],
+								    [ 'week',   60*60*24*7       ],
+								    [ 'month',  60*60*24*30.5    ],
+								    [ 'year',   60*60*24*30.5*12 ]
+								);
+								my $i = $#int;
+								my @r;
+								while ( ($i>=0) && ($d) )
+								{
+								    if ($d / $int[$i] -> [1] >= 1)
+								    {
+								        push @r, sprintf "%d %s%s",
+								                     $d / $int[$i] -> [1],
+								                     $int[$i]->[0],
+								                     ( sprintf "%d", $d / $int[$i] -> [1] ) > 1
+								                         ? 's'
+								                         : '';
+								    }
+								    $d %= $int[$i] -> [1];
+								    $i--;
+								}
+								my $minTimeAgo = join ", ", @r if @r;
+								@r = ();
+								$d = time() - $maxDate;
+								$i = $#int;
+								while ( ($i>=0) && ($d) )
+								{
+								    if ($d / $int[$i] -> [1] >= 1)
+								    {
+								        push @r, sprintf "%d %s%s",
+								                     $d / $int[$i] -> [1],
+								                     $int[$i]->[0],
+								                     ( sprintf "%d", $d / $int[$i] -> [1] ) > 1
+								                         ? 's'
+								                         : '';
+								    }
+								    $d %= $int[$i] -> [1];
+								    $i--;
+								}
+								my $maxTimeAgo = join ", ", @r if @r;
+								botPrivmsg($self,$sChannel,"Quotes : $nbQuotes for channel $sChannel -- first : $minTimeAgo ago -- last : $maxTimeAgo ago");
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	$sth->finish;
 }
 
 1;
