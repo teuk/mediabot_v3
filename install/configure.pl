@@ -276,6 +276,13 @@ if ( $line == 1 ) {
 		$line = "";
 	}
 	print CONF "UNET_CSERVICE_PASSWORD=$line\n";
+	
+	log_message("Enter channel service hidden host suffix [users.undernet.org] : ");
+	$line=<STDIN>;
+	chomp($line);
+	if ($line eq "" ) { $line ="users.undernet.org"; }
+	print CONF "UNET_CSERVICE_HOSTMASK=$line\n";
+	
 }
 elsif ( $line == 2 ) {
 	log_messageln("Configure freenode section");

@@ -368,6 +368,23 @@ sub getUserhandle(@) {
 	return $sUserhandle;
 }
 
+sub getChannelName(@) {
+	my ($self,$id_channel) = @_;
+	my $name = undef;
+	my $sQuery = "SELECT name FROM CHANNEL WHERE id_channel=?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($id_channel) ) {
+		log_message($self,1,"getChannelName() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			$name = $ref->{'name'};
+		}
+	}
+	$sth->finish;
+	return $name;
+}
+
 sub getConsoleChan(@) {
 	my ($self) = @_;
 	my $sQuery = "SELECT * FROM CHANNEL WHERE description='console'";
@@ -689,11 +706,12 @@ sub getNickInfo(@) {
 	unless ($sth->execute ) {
 		log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
 	}
-	else {	
+	else {
 		while (my $ref = $sth->fetchrow_hashref()) {
 			my @tHostmasks = split(/,/,$ref->{'hostmasks'});
 			foreach my $sHostmask (@tHostmasks) {
 				log_message($self,4,"getNickInfo() Checking hostmask : " . $sHostmask);
+				my $sHostmaskSource = $sHostmask;
 				$sHostmask =~ s/\./\\./g;
 				$sHostmask =~ s/\*/.*/g;
 				$sHostmask =~ s/\[/\\[/g;
@@ -720,6 +738,24 @@ sub getNickInfo(@) {
 						}
 					}
 					$iMatchingUserAuth = $ref->{'auth'};
+					if ( defined($MAIN_CONF{'connection.CONN_NETWORK_TYPE'}) && ($MAIN_CONF{'connection.CONN_NETWORK_TYPE'} eq "1") && defined($MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'}) && ($MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'} ne "")) {
+						unless ($iMatchingUserAuth) {
+							my $sUnetHostmask = $MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'};
+							if ($sHostmaskSource =~ /$sUnetHostmask/) {
+								my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
+								my $sth2 = $self->{dbh}->prepare($sQuery);
+								unless ($sth2->execute($iMatchingUserId)) {
+									log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								}
+								else {
+									$iMatchingUserAuth = 1;
+									log_message($self,0,"getNickInfo() Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource");
+									noticeConsoleChan($self,"Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource");
+								}
+								$sth2->finish;
+							}
+						}
+					}
 					if (defined($ref->{'info1'})) {
 						$sMatchingUserInfo1 = $ref->{'info1'};
 					}
@@ -7386,7 +7422,43 @@ sub lastCom(@) {
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
-				log_message($self,3,"Lastcom TBD ;)");
+				my $maxCom = 8;
+				my $nbCom = 5;
+				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /[0-9]+/) && ($tArgs[0] ne "0")) {
+					if ($tArgs[0] > $maxCom) {
+						$nbCom = $maxCom;
+						botNotice($self,$sNick,"lastCom : max lines $maxCom");
+					}
+					else {
+						$nbCom = $tArgs[0];
+					}
+				}
+				my $sQuery = "SELECT * FROM ACTIONS_LOG ORDER by ts DESC LIMIT $nbCom";
+				my $sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute()) {
+					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					my $i = 0;
+					while (my $ref = $sth->fetchrow_hashref()) {
+						my $ts = $ref->{'ts'};
+						my $id_user = $ref->{'id_user'};
+						my $sUserhandle = getUserhandle($self,$id_user);
+						$sUserhandle = (defined($sUserhandle) && ($sUserhandle ne "") ? $sUserhandle : "Unknown");
+						my $id_channel = $ref->{'id_channel'};
+						my $sChannelCom = getChannelName($self,$id_channel);
+						$sChannelCom = (defined($sChannelCom) && ($sChannelCom ne "") ? " $sChannelCom" : "");
+						my $hostmask = $ref->{'hostmask'};
+						my $action = $ref->{'action'};
+						my $args = $ref->{'args'};
+						$args = (defined($args) && ($args ne "") ? $args : "");
+						botNotice($self,$sNick,"$ts ($sUserhandle)$sChannelCom $hostmask $action $args");
+						#$self->{irc}->write("NOTICE " . $sNick . ":$ts ($sUserhandle)$sChannelCom $hostmask $action $args\x0d\x0a");
+						#if (($i % 3) == 0) { sleep 3; }
+						$i++;
+					}
+					logBot($self,$message,$sChannel,"lastcom",@tArgs);
+				}
 			}
 			else {
 				my $sNoticeMsg = $message->prefix . " lastcom command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
