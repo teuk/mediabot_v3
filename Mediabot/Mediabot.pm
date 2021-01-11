@@ -368,6 +368,42 @@ sub getUserhandle(@) {
 	return $sUserhandle;
 }
 
+sub getUserAutologin(@) {
+	my ($self,$sMatchingUserHandle) = @_;
+	my $sQuery = "SELECT * FROM USER WHERE nickname like ? AND username='#AUTOLOGIN#'";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sMatchingUserHandle) ) {
+		log_message($self,1,"getUserAutologin() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			$sth->finish;
+			return 1;
+		}
+		else {
+			$sth->finish;
+			return 0;
+		}
+	}
+}
+
+sub getIdUser(@) {
+	my ($self,$sUserhandle) = @_;
+	my $id_user = undef;
+	my $sQuery = "SELECT id_user FROM USER WHERE nickname like ?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sUserhandle) ) {
+		log_message($self,1,"getIdUser() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			$id_user = $ref->{'id_user'};
+		}
+	}
+	$sth->finish;
+	return $id_user;
+}
+
 sub getChannelName(@) {
 	my ($self,$id_channel) = @_;
 	my $name = undef;
@@ -741,7 +777,7 @@ sub getNickInfo(@) {
 					if ( defined($MAIN_CONF{'connection.CONN_NETWORK_TYPE'}) && ($MAIN_CONF{'connection.CONN_NETWORK_TYPE'} eq "1") && defined($MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'}) && ($MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'} ne "")) {
 						unless ($iMatchingUserAuth) {
 							my $sUnetHostmask = $MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'};
-							if ($sHostmaskSource =~ /$sUnetHostmask/) {
+							if ($sHostmaskSource =~ /$sUnetHostmask$/) {
 								my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
 								my $sth2 = $self->{dbh}->prepare($sQuery);
 								unless ($sth2->execute($iMatchingUserId)) {
@@ -754,6 +790,21 @@ sub getNickInfo(@) {
 								}
 								$sth2->finish;
 							}
+						}
+					}
+					if (getUserAutologin($self,$sMatchingUserHandle)) {
+						unless ($iMatchingUserAuth) {
+							my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
+							my $sth2 = $self->{dbh}->prepare($sQuery);
+							unless ($sth2->execute($iMatchingUserId)) {
+								log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							}
+							else {
+								$iMatchingUserAuth = 1;
+								log_message($self,0,"getNickInfo() Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource (autologin is ON)");
+								noticeConsoleChan($self,"Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource (autologin is ON)");
+							}
+							$sth2->finish;
 						}
 					}
 					if (defined($ref->{'info1'})) {
@@ -1001,58 +1052,58 @@ sub mbCommandPublic(@) {
 		case /^weather$|^meteo$/i		{ $bFound = 1;
 																	displayWeather($self,$message,$sNick,$sChannel,@tArgs);
 																}
-		case /^countslaps/i {	$bFound = 1;
+		case /^countslaps$/i {	$bFound = 1;
 														mbCountSlaps($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^addbadword/i {
+		case /^addbadword$/i {
 														$bFound = 1;
 														channelAddBadword($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^rembadword/i {
+		case /^rembadword$/i {
 														$bFound = 1;
 														channelRemBadword($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^ignores/i 		{
+		case /^ignores$/i 		{
 														$bFound = 1;
 														IgnoresList($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^ignore/i 		{
+		case /^ignore$/i 		{
 														$bFound = 1;
 														addIgnore($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^unignore/i		{
+		case /^unignore$/i		{
 														$bFound = 1;
 														delIgnore($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^yt/i					{
+		case /^yt$/i					{
 														$bFound = 1;
 														youtubeSearch($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^song/i				{
+		case /^song$/i				{
 														$bFound = 1;
 														displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^listeners/i	{
+		case /^listeners$/i	{
 														$bFound = 1;
 														displayRadioListeners($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^nextsong/i		{
+		case /^nextsong$/i		{
 														$bFound = 1;
 														radioNext($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^wordstat/i		{
+		case /^wordstat$/i		{
 														$bFound = 1;
 														wordStat($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^addresponder/i		{
+		case /^addresponder$/i		{
 															$bFound = 1;
 															addResponder($self,$message,$sNick,$sChannel,@tArgs);
 														}
-		case /^update/i		{
+		case /^update$/i		{
 														$bFound = 1;
 														update($self,$message,$sNick,$sChannel,@tArgs);
 											}
-		case /^lastcom/i	{
+		case /^lastcom$/i	{
 														$bFound = 1;
 														lastCom($self,$message,$sNick,$sChannel,@tArgs);
 											}
@@ -1063,6 +1114,10 @@ sub mbCommandPublic(@) {
 		case "Q"					{
 														$bFound = 1;
 														mbQuotes($self,$message,$sNick,$sChannel,@tArgs);
+											}
+		case /^moduser$/i {
+														$bFound = 1;
+														mbModUser($self,$message,$sNick,$sChannel,@tArgs);
 											}
 		else								{
 													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
@@ -1288,29 +1343,33 @@ sub mbCommandPrivate(@) {
 		case /^birthdate$/i	{ $bFound = 1;
 														displayBirthDate($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^ignores/i 		{
+		case /^ignores$/i 		{
 														$bFound = 1;
 														IgnoresList($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^ignore/i 		{
+		case /^ignore$/i 		{
 														$bFound = 1;
 														addIgnore($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^unignore/i		{
+		case /^unignore$/i		{
 														$bFound = 1;
 														delIgnore($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^metadata/i		{
+		case /^metadata$/i		{
 														$bFound = 1;
 														setRadioMetadata($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^update/i		{
+		case /^update$/i		{
 												$bFound = 1;
 												update($self,$message,$sNick,undef,@tArgs);
 											}
-		case /^lastcom/i	{
+		case /^lastcom$/i	{
 														$bFound = 1;
 														lastCom($self,$message,$sNick,undef,@tArgs);
+											}
+		case /^moduser$/i {
+														$bFound = 1;
+														mbModUser($self,$message,$sNick,undef,@tArgs);
 											}
 		#else								{
 		#											$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,undef,$sNick,$sCommand,@tArgs);
@@ -1480,7 +1539,6 @@ sub getMessageHostmask(@) {
 
 sub getIdUserLevel(@) {
 	my ($self,$sLevel) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sQuery = "SELECT id_user_level FROM USER_LEVEL WHERE description like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sLevel)) {
@@ -1491,6 +1549,46 @@ sub getIdUserLevel(@) {
 			my $id_user_level = $ref->{'id_user_level'};
 			$sth->finish;
 			return $id_user_level;
+		}
+		else {
+			$sth->finish;
+			return undef;
+		}
+	}
+}
+
+sub getLevel(@) {
+	my ($self,$sLevel) = @_;
+	my $sQuery = "SELECT level FROM USER_LEVEL WHERE description like ?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sLevel)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $level = $ref->{'level'};
+			$sth->finish;
+			return $level;
+		}
+		else {
+			$sth->finish;
+			return undef;
+		}
+	}
+}
+
+sub getLevelUser(@) {
+	my ($self,$sUserHandle) = @_;
+	my $sQuery = "SELECT level FROM USER,USER_LEVEL WHERE USER.id_user_level=USER_LEVEL.id_user_level AND nickname like ?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sUserHandle)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $level = $ref->{'level'};
+			$sth->finish;
+			return $level;
 		}
 		else {
 			$sth->finish;
@@ -2203,7 +2301,7 @@ sub addUser(@) {
 							return undef;
 						}
 					}
-					if ((getUserLevel($self,$iMatchingUserLevel) eq "Master") && ($sLevel eq "Owner")) {
+					if ((getUserLevelDesc($self,$iMatchingUserLevel) eq "Master") && ($sLevel eq "Owner")) {
 						botNotice($self,$sNick,"Masters cannot add a user with Owner level");
 						logBot($self,$message,undef,"adduser","Masters cannot add a user with Owner level");
 						return undef;
@@ -2246,30 +2344,8 @@ sub addUser(@) {
 	}
 }
 
-sub getIdUser(@) {
-	my ($self,$sUserHandle) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $sQuery = "SELECT id_user FROM USER WHERE nickname=?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sUserHandle)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $id_user = $ref->{'id_user'};
-			$sth->finish;
-			return $id_user;
-		}
-		else {
-			$sth->finish;
-			return undef;
-		}
-	}
-}
-
-sub getUserLevel(@) {
+sub getUserLevelDesc(@) {
 	my ($self,$level) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sQuery = "SELECT description FROM USER_LEVEL WHERE level=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($level)) {
@@ -5792,7 +5868,6 @@ sub displayUrlTitle(@) {
 				my $sContent;
 				while(defined($line=<URL_TITLE>)) {
 					chomp($line);
-					log_message($self,4,"displayUrlTitle() $line");
 					$sContent .= "$line\n";
 					$i++;
 				}
@@ -7533,7 +7608,7 @@ sub mbQuotes(@) {
 			shift @tArgs;
 			mbQuoteRand($self,$message,$sNick,$sChannel,@tArgs);
 		}
-		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^stats$|^r$/i)) {
+		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^stats$/i)) {
 			shift @tArgs;
 			mbQuoteStats($self,$message,$sNick,$sChannel,@tArgs);
 		}
@@ -7814,4 +7889,167 @@ sub mbQuoteStats(@) {
 	$sth->finish;
 }
 
+sub mbModUser(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				my @oArgs = @tArgs;
+				unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+					botNotice($self,$sNick,"moduser <user> level <Owner|Master|Administrator|User>");
+					botNotice($self,$sNick,"moduser <user> autologin <on|off>");
+				}
+				else {
+					my $sUser = $tArgs[0];
+					shift @tArgs;
+					my $id_user = getIdUser($self,$sUser);
+					unless (defined($id_user) && ($id_user ne "")) {
+						botNotice($self,$sNick,"User: $sUser does not exist");
+					}
+					elsif ($id_user == $iMatchingUserId) {
+						botNotice($self,$sNick,"You don't want to do that :)");
+					}
+					else {
+						unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+							botNotice($self,$sNick,"moduser <user> level <Owner|Master|Administrator|User>");
+						}
+						else {
+							my $sCommand = $tArgs[0];
+							shift @tArgs;
+							switch($sCommand) {
+								case /^level$/i {
+									unless (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^owner$|^master$|^administrator$|^user$/i)) {
+										botNotice($self,$sNick,"moduser <user> level <Owner|Master|Administrator|User>");
+									}
+									else {
+										my $target_user_level = getLevel($self,$tArgs[0]);
+										my $current_user_level = getLevelUser($self,$sUser);
+										if (( $target_user_level == 0) && ($iMatchingUserLevel == 0)) {
+											unless (defined($tArgs[1]) && ($tArgs[1] ne "") && ($tArgs[1] =~ /^force$/i)) {
+												botNotice($self,$sNick,"Do you really want to do that ?");
+												botNotice($self,$sNick,"If you know what you are doing use : moduser $sUser level Owner force");
+											}
+											else {
+												botNotice($self,$sNick,"User $sUser is know a global Owner of the bot !");
+												logBot($self,$message,$sChannel,"moduser",@oArgs);
+											}
+										}
+										elsif (($iMatchingUserLevel < $current_user_level) && ($iMatchingUserLevel < $target_user_level)) {
+											if ( $target_user_level == $current_user_level ) {
+												botNotice($self,$sNick,"User $sUser is already a global " . $tArgs[0] . " of the bot");
+											}
+											else {
+												if ( setUserLevel($self,$sUser,getIdUserLevel($self,$tArgs[0])) ) {
+													botNotice($self,$sNick,"User $sUser is now a global " . $tArgs[0] . " of the bot");
+													logBot($self,$message,$sChannel,"moduser",@oArgs);
+												}
+												else {
+													botNotice($self,$sNick,"Could not set $sUser as a global " . $tArgs[0] . " of the bot, weird ^^");
+												}
+											}
+										}
+										else {
+											if ( $target_user_level == $current_user_level) {
+												botNotice($self,$sNick,"As a global $iMatchingUserLevelDesc, you can't set $sUser as a global " . $tArgs[0] . " of the bot, it's funny cause $sUser is already a global " . getUserLevelDesc($self,$current_user_level) . " of the bot ;)");
+											}
+											else {
+												botNotice($self,$sNick,"As a global $iMatchingUserLevelDesc, you can't set $sUser (" . getUserLevelDesc($self,$current_user_level) . ") as a global " . $tArgs[0] . " of the bot");
+											}
+										}
+										
+									}
+								}
+								case /^autologin$/i {
+									unless (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^on$|^off$/i)) {
+										botNotice($self,$sNick,"moduser <user> autologin <on|off>");
+									}
+									else {
+										switch($tArgs[0]) {
+											case /^on$/i {
+												my $sQuery = "SELECT * FROM USER WHERE nickname like ? AND username='#AUTOLOGIN#'";
+												my $sth = $self->{dbh}->prepare($sQuery);
+												unless ($sth->execute($sUser)) {
+													log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+												}
+												else {
+													if (my $ref = $sth->fetchrow_hashref()) {
+														botNotice($self,$sNick,"autologin is already ON for user $sUser");
+													}
+													else {
+														$sQuery = "UPDATE USER SET username='#AUTOLOGIN#' WHERE nickname like ?";
+														$sth = $self->{dbh}->prepare($sQuery);
+														unless ($sth->execute($sUser)) {
+															log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+														}
+														else {
+															botNotice($self,$sNick,"Set autologin ON for user $sUser");
+														}
+													}
+												}
+												$sth->finish;
+											}
+											case /^off$/i {
+												my $sQuery = "SELECT * FROM USER WHERE nickname like ? AND username='#AUTOLOGIN#'";
+												my $sth = $self->{dbh}->prepare($sQuery);
+												unless ($sth->execute($sUser)) {
+													log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+												}
+												else {
+													if (my $ref = $sth->fetchrow_hashref()) {
+														$sQuery = "UPDATE USER SET username=NULL WHERE nickname like ?";
+														$sth = $self->{dbh}->prepare($sQuery);
+														unless ($sth->execute($sUser)) {
+															log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+														}
+														else {
+															botNotice($self,$sNick,"Set autologin OFF for user $sUser");
+														}
+														
+													}
+													else {
+														botNotice($self,$sNick,"autologin is already OFF for user $sUser");
+													}
+												}
+												$sth->finish;
+											}
+										}
+									}
+								}
+								else {
+									botNotice($self,$sNick,"Unknown moduser command : $sCommand");
+								}
+							}
+						}
+					}
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " moduser command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " moduser command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
+}
+
+sub setUserLevel(@) {
+	my ($self,$sUser,$id_user_level) = @_;
+	my $sQuery = "UPDATE USER SET id_user_level=? WHERE nickname like ?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($id_user_level,$sUser)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		return 0;
+	}
+	else {
+		return 1;
+	}
+}
 1;
