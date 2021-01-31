@@ -1131,6 +1131,9 @@ sub mbCommandPublic(@) {
 																$bFound = 1;
 																displayBirthDate($self,$message,$sNick,$sChannel,@tArgs);
 															}
+															case /.*\?/ {
+																botPrivmsg($self,$sChannel,"I dunno $sNick coz I'm lame");
+															}
 														}
 													}
 												}
@@ -4962,7 +4965,7 @@ sub userTopSay(@) {
 							my $event_type = $ref->{'event_type'};
 							my $hit = $ref->{'hit'};
 							$publictext =~ s/(.)/(ord($1) == 1) ? "" : $1/egs;
-							unless (($publictext =~ /^\s*$/) || ($publictext eq ':)') || ($publictext eq ';)') || ($publictext eq ':p') || ($publictext eq ':P') || ($publictext eq ':d') || ($publictext eq ':D') || ($publictext eq ':o') || ($publictext eq ':O') || ($publictext eq '(:') || ($publictext eq '(;') || ($publictext =~ /lol/i) || ($publictext eq 'xD') || ($publictext eq 'XD') || ($publictext eq 'heh') || ($publictext eq 'hah') || ($publictext eq 'huh') || ($publictext eq 'hih') || ($publictext eq '!bang') || ($publictext eq '!reload') || ($publictext eq '!tappe') || ($publictext eq '!duckstats') || ($publictext eq '=D') || ($publictext eq '=)') || ($publictext eq ';p') || ($publictext eq ':>') || ($publictext eq ';>')) {
+							unless (($publictext =~ /^\s*$/) || ($publictext eq ':)') || ($publictext eq ';)') || ($publictext eq ':p') || ($publictext eq ':P') || ($publictext eq ':d') || ($publictext eq ':D') || ($publictext eq ':o') || ($publictext eq ':O') || ($publictext eq '(:') || ($publictext eq '(;') || ($publictext =~ /lol/i) || ($publictext eq 'xD') || ($publictext eq 'XD') || ($publictext eq 'heh') || ($publictext eq 'hah') || ($publictext eq 'huh') || ($publictext eq 'hih') || ($publictext eq '!bang') || ($publictext eq '!reload') || ($publictext eq '!inventory') || ($publictext eq '!lastduck') || ($publictext eq '!tappe') || ($publictext eq '!duckstats') || ($publictext =~ /^!shop/i) || ($publictext eq '=D') || ($publictext eq '=)') || ($publictext eq ';p') || ($publictext eq ':>') || ($publictext eq ';>')) {
 								if ( $event_type eq "action" ) {
 									$sTopSayMax .= String::IRC->new("$publictext ($hit) ")->bold;
 									if (length($sTopSayMax) < 300) {
