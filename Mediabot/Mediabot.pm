@@ -4955,6 +4955,7 @@ sub userTopSay(@) {
 					}
 					else {
 						my $sTopSay = $tArgs[0] . " : ";
+						my $sTopSayMax = $sTopSay;
 						my $i = 0;
 						while (my $ref = $sth->fetchrow_hashref()) {
 							my $publictext = $ref->{'publictext'};
@@ -4963,20 +4964,34 @@ sub userTopSay(@) {
 							$publictext =~ s/(.)/(ord($1) == 1) ? "" : $1/egs;
 							unless (($publictext =~ /^\s*$/) || ($publictext eq ':)') || ($publictext eq ';)') || ($publictext eq ':p') || ($publictext eq ':P') || ($publictext eq ':d') || ($publictext eq ':D') || ($publictext eq ':o') || ($publictext eq ':O') || ($publictext eq '(:') || ($publictext eq '(;') || ($publictext =~ /lol/i) || ($publictext eq 'xD') || ($publictext eq 'XD') || ($publictext eq 'heh') || ($publictext eq 'hah') || ($publictext eq 'huh') || ($publictext eq 'hih') || ($publictext eq '!bang') || ($publictext eq '!reload') || ($publictext eq '!tappe') || ($publictext eq '!duckstats') || ($publictext eq '=D') || ($publictext eq '=)') || ($publictext eq ';p') || ($publictext eq ':>') || ($publictext eq ';>')) {
 								if ( $event_type eq "action" ) {
-									$sTopSay .= String::IRC->new("$publictext ($hit) ")->bold;
+									$sTopSayMax .= String::IRC->new("$publictext ($hit) ")->bold;
+									if (length($sTopSayMax) < 300) {
+										$sTopSay .= String::IRC->new("$publictext ($hit) ")->bold;
+									}
+									else {
+										$i++;
+										last;
+									}
 								}
 								else {
-									$sTopSay .= "$publictext ($hit) ";
+									$sTopSayMax .= "$publictext ($hit) ";
+									if (length($sTopSayMax) < 300) {
+										$sTopSay .= "$publictext ($hit) ";
+									}
+									else {
+										$i++;
+										last;
+									}
 								}
 								$i++;
 							}
 						}
 						if ( $i ) {
 							unless ($isPrivate) {
-								botPrivmsg($self,$sChannelDest,substr($sTopSay,0,300));
+								botPrivmsg($self,$sChannelDest,$sTopSay);
 							}
 							else {
-								botNotice($self,$sNick,substr($sTopSay,0,300));
+								botNotice($self,$sNick,$sTopSay);
 							}
 						}
 						else {
@@ -7563,6 +7578,7 @@ sub mbQuotes(@) {
 		botNotice($self,$sNick,"q stats");
 		return undef;
 	}
+	my @oArgs = @tArgs;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -7653,7 +7669,7 @@ sub mbQuoteAdd(@) {
 					else {
 						my $id_inserted = String::IRC->new($sth->{ mysql_insertid })->bold;
 						botPrivmsg($self,$sChannel,"($sMatchingUserHandle) done. (id: $id_inserted)");
-						logBot($self,$message,$sChannel,"q",@tArgs);
+						logBot($self,$message,$sChannel,"q add",@tArgs);
 					}
 				}
 			}
@@ -7684,6 +7700,7 @@ sub mbQuoteDel(@) {
 				else {
 					my $id_removed = String::IRC->new($id_quotes)->bold;
 					botPrivmsg($self,$sChannel,"($sMatchingUserHandle) done. (id: $id_removed)");
+					logBot($self,$message,$sChannel,"q del",@tArgs);
 				}
 			}
 			else {
@@ -7715,6 +7732,7 @@ sub mbQuoteView(@) {
 				$sUserhandle = (defined($sUserhandle) && ($sUserhandle ne "") ? $sUserhandle : "Unknown");
 				my $id_q = String::IRC->new($id_quotes)->bold;
 				botPrivmsg($self,$sChannel,"($sUserhandle) [id: $id_q] $sQuoteText");
+				logBot($self,$message,$sChannel,"q view",@tArgs);
 			}
 			else {
 				botPrivmsg($self,$sChannel,"Quote (id : $id_quotes) does not exist for channel $sChannel");
@@ -7774,6 +7792,7 @@ sub mbQuoteSearch(@) {
 			else {
 					botPrivmsg($self,$sChannel,"More than $MAXQUOTES quotes matching \"$sQuoteText\" found on $sChannel, please be more specific :)");
 			}
+			logBot($self,$message,$sChannel,"q search",@tArgs);
 		}
 		$sth->finish;
 	}
@@ -7799,6 +7818,7 @@ sub mbQuoteRand(@) {
 		else {
 			botPrivmsg($self,$sChannel,"Quote database is empty for $sChannel");
 		}
+		logBot($self,$message,$sChannel,"q random",@tArgs);
 	}
 	$sth->finish;
 }
@@ -7879,6 +7899,7 @@ sub mbQuoteStats(@) {
 								}
 								my $maxTimeAgo = join ", ", @r if @r;
 								botPrivmsg($self,$sChannel,"Quotes : $nbQuotes for channel $sChannel -- first : $minTimeAgo ago -- last : $maxTimeAgo ago");
+								logBot($self,$message,$sChannel,"q stats",@tArgs);
 							}
 						}
 					}
@@ -7984,6 +8005,7 @@ sub mbModUser(@) {
 														}
 														else {
 															botNotice($self,$sNick,"Set autologin ON for user $sUser");
+															logBot($self,$message,$sChannel,"moduser",@oArgs);
 														}
 													}
 												}
@@ -8004,6 +8026,7 @@ sub mbModUser(@) {
 														}
 														else {
 															botNotice($self,$sNick,"Set autologin OFF for user $sUser");
+															logBot($self,$message,$sChannel,"moduser",@oArgs);
 														}
 														
 													}
