@@ -6097,40 +6097,44 @@ sub mbSeen(@) {
 
 sub mbPopCommand(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $sQuery = "SELECT command,hits FROM USER,PUBLIC_COMMANDS WHERE USER.id_user=PUBLIC_COMMANDS.id_user AND nickname like ? ORDER BY hits DESC LIMIT 20";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($tArgs[0])) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+		botNotice($self,$sNick,"Syntax: popcmd <nick>");
 	}
 	else {
-		my $sNbCommandNotice = "Popular commands for " . $tArgs[0] . " : ";
-		my $i = 0;
-		while (my $ref = $sth->fetchrow_hashref()) {
-			my $command = $ref->{'command'};
-			my $hits = $ref->{'hits'};
-			$sNbCommandNotice .= "$command ($hits) ";
-			$i++;
-		}
-		if ( $i ) {
-			if (defined($sChannel)) {
-				botPrivmsg($self,$sChannel,$sNbCommandNotice);
-			}
-			else {
-				botNotice($self,$sNick,$sNbCommandNotice);
-			}
+		my $sQuery = "SELECT command,hits FROM USER,PUBLIC_COMMANDS WHERE USER.id_user=PUBLIC_COMMANDS.id_user AND nickname like ? ORDER BY hits DESC LIMIT 20";
+		my $sth = $self->{dbh}->prepare($sQuery);
+		unless ($sth->execute($tArgs[0])) {
+			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
-			if (defined($sChannel)) {
-				botPrivmsg($self,$sChannel,"No popular commands for " . $tArgs[0]);
+			my $sNbCommandNotice = "Popular commands for " . $tArgs[0] . " : ";
+			my $i = 0;
+			while (my $ref = $sth->fetchrow_hashref()) {
+				my $command = $ref->{'command'};
+				my $hits = $ref->{'hits'};
+				$sNbCommandNotice .= "$command ($hits) ";
+				$i++;
+			}
+			if ( $i ) {
+				if (defined($sChannel)) {
+					botPrivmsg($self,$sChannel,$sNbCommandNotice);
+				}
+				else {
+					botNotice($self,$sNick,$sNbCommandNotice);
+				}
 			}
 			else {
-				botNotice($self,$sNick,"No popular commands for " . $tArgs[0]);
+				if (defined($sChannel)) {
+					botPrivmsg($self,$sChannel,"No popular commands for " . $tArgs[0]);
+				}
+				else {
+					botNotice($self,$sNick,"No popular commands for " . $tArgs[0]);
+				}
 			}
+			logBot($self,$message,$sChannel,"popcmd",undef);
 		}
-		logBot($self,$message,$sChannel,"popcmd",undef);
+		$sth->finish;
 	}
-	$sth->finish;
 }
 
 sub displayDate(@) {
