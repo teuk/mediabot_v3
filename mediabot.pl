@@ -35,7 +35,8 @@ my $MAIN_PROG_DAEMON = 0;
 # +---------------------------------------------------------------------------+
 # !          GLOBAL VARS                                                      !
 # +---------------------------------------------------------------------------+
-
+my $BOTNICK_WASNOT_TRIGGERED = 0;
+my $BOTNICK_WAS_TRIGGERED = 1;
 
 # +---------------------------------------------------------------------------+
 # !          SUBS DECLARATION                                                 !
@@ -551,15 +552,15 @@ sub on_message_PRIVMSG(@) {
         $sCommand = substr($sCommand,1);
         $sCommand =~ tr/A-Z/a-z/;
         if (defined($sCommand) && ($sCommand ne "")) {
-        	$mediabot->mbCommandPublic($message,$where,$who,$sCommand,@tArgs);
+        	$mediabot->mbCommandPublic($message,$where,$who,$BOTNICK_WASNOT_TRIGGERED,$sCommand,@tArgs);
         }
 		}
 		elsif (($sCommand eq $self->nick_folded) && $bNickTriggerCommand) {
 			$what =~ s/^\S+\s*//;
 			($sCommand,@tArgs) = split(/\s+/,$what);
-			$sCommand =~ tr/A-Z/a-z/;
       if (defined($sCommand) && ($sCommand ne "")) {
-      	$mediabot->mbCommandPublic($message,$where,$who,$sCommand,@tArgs);
+      	$sCommand =~ tr/A-Z/a-z/;
+      	$mediabot->mbCommandPublic($message,$where,$who,$BOTNICK_WAS_TRIGGERED,$sCommand,@tArgs);
       }
 		}
 		elsif ( ( $what =~ /http.*:\/\/www\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/m\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/music\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/youtu\.be.*/i ) ) {

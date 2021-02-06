@@ -851,542 +851,509 @@ sub getNickInfo(@) {
 }
 
 sub mbCommandPublic(@) {
-	my ($self,$message,$sChannel,$sNick,$sCommand,@tArgs)	= @_;
+	my ($self,$message,$sChannel,$sNick,$botNickTriggered,$sCommand,@tArgs)	= @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $bFound = 0;
 	switch($sCommand) {
-		case /^die$/i				{ $bFound = 1;
+		case /^die$/i				{
 													mbQuit($self,$message,$sNick,@tArgs);
 												}
-		case /^nick$/i			{ $bFound = 1;
+		case /^nick$/i			{
 													mbChangeNick($self,$message,$sNick,@tArgs);
 												}
-		case /^addtimer$/i	{ $bFound = 1;
+		case /^addtimer$/i	{
 													mbAddTimer($self,$message,$sChannel,$sNick,@tArgs);
 												}
-		case /^remtimer$/i	{ $bFound = 1;
+		case /^remtimer$/i	{
 													mbRemTimer($self,$message,$sChannel,$sNick,@tArgs);
 												}
-		case /^timers$/i		{ $bFound = 1;
+		case /^timers$/i		{
 													mbTimers($self,$message,$sChannel,$sNick,@tArgs);
 												}
-		case /^msg$/i				{ $bFound = 1;
+		case /^msg$/i				{
 													msgCmd($self,$message,$sNick,@tArgs);
 												}
-		case /^say$/i				{ $bFound = 1;
+		case /^say$/i				{
 													sayChannel($self,$message,$sNick,@tArgs);
 												}
-		case /^act$/i				{ $bFound = 1;
+		case /^act$/i				{
 													actChannel($self,$message,$sNick,@tArgs);
 												}
-		case /^cstat$/i			{ $bFound = 1;
+		case /^cstat$/i			{
 													userCstat($self,$message,$sNick,@tArgs);
 												}
-		case /^status$/i		{ $bFound = 1;
+		case /^status$/i		{
 													mbStatus($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^adduser$/i		{ $bFound = 1;
+		case /^adduser$/i		{
 													addUser($self,$message,$sNick,@tArgs);
 												}
-		case /^users$/i			{ $bFound = 1;
+		case /^users$/i			{
 													userStats($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^userinfo$/i	{ $bFound = 1;
+		case /^userinfo$/i	{
 													userInfo($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^addhost$/i		{ $bFound = 1;
+		case /^addhost$/i		{
 													addUserHost($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^addchan$/i		{ $bFound = 1;
+		case /^addchan$/i		{
 													addChannel($self,$message,$sNick,@tArgs);
 												}
-		case /^chanset$/i		{ $bFound = 1;
+		case /^chanset$/i		{
 													channelSet($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^purge$/i			{ $bFound = 1;
+		case /^purge$/i			{
 													purgeChannel($self,$message,$sNick,@tArgs);
 												}
-		case /^part$/i			{ $bFound = 1;
+		case /^part$/i			{
 													channelPart($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^join$/i			{ $bFound = 1;
+		case /^join$/i			{
 													channelJoin($self,$message,$sNick,@tArgs);
 												}
-		case /^add$/i				{ $bFound = 1;
+		case /^add$/i				{
 													channelAddUser($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^del$/i				{ $bFound = 1;
+		case /^del$/i				{
 													channelDelUser($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^modinfo$/i		{ $bFound = 1;
+		case /^modinfo$/i		{
 													userModinfo($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^op$/i				{ $bFound = 1;
+		case /^op$/i				{
 													userOpChannel($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^deop$/i			{ $bFound = 1;
+		case /^deop$/i			{
 													userDeopChannel($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^invite$/i		{ $bFound = 1;
+		case /^invite$/i		{
 													userInviteChannel($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^voice$/i			{ $bFound = 1;
+		case /^voice$/i			{
 													userVoiceChannel($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^devoice$/i		{ $bFound = 1;
+		case /^devoice$/i		{
 													userDevoiceChannel($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^kick$/i			{ $bFound = 1;
+		case /^kick$/i			{
 													userKickChannel($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^topic$/i			{ $bFound = 1;
+		case /^topic$/i			{
 													userTopicChannel($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^showcommands$/i	{ $bFound = 1;
+		case /^showcommands$/i	{
 													userShowcommandsChannel($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^chaninfo$/i	{ $bFound = 1;
+		case /^chaninfo$/i	{
 													userChannelInfo($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^chanlist$/i	{ $bFound = 1;
+		case /^chanlist$/i	{
 													channelList($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^whoami$/i		{ $bFound = 1;
+		case /^whoami$/i		{
 													userWhoAmI($self,$message,$sNick,@tArgs);
 												}
-		case /^auth$/i			{ $bFound = 1;
+		case /^auth$/i			{
 													userAuthNick($self,$message,$sNick,@tArgs);
 												}
-		case /^verify$/i		{ $bFound = 1;
+		case /^verify$/i		{
 													userVerifyNick($self,$message,$sNick,@tArgs);
 												}
-		case /^access$/i		{ $bFound = 1;
+		case /^access$/i		{
 													userAccessChannel($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^addcmd$/i		{ $bFound = 1;
+		case /^addcmd$/i		{
 													mbDbAddCommand($self,$message,$sNick,@tArgs);
 												}
-		case /^remcmd$/i		{ $bFound = 1;
+		case /^remcmd$/i		{
 													mbDbRemCommand($self,$message,$sNick,@tArgs);
 												}
-		case /^modcmd$/i		{ $bFound = 1;
+		case /^modcmd$/i		{
 													mbDbModCommand($self,$message,$sNick,@tArgs);
 												}
-		case /^mvcmd$/i			{ $bFound = 1;
+		case /^mvcmd$/i			{
 													mbDbMvCommand($self,$message,$sNick,@tArgs);
 												}
-		case /^chowncmd$/i	{ $bFound = 1;
+		case /^chowncmd$/i	{
 													mbChownCommand($self,$message,$sNick,@tArgs);
 												}
-		case /^showcmd$/i		{ $bFound = 1;
+		case /^showcmd$/i		{
 													mbDbShowCommand($self,$message,$sNick,@tArgs);
 												}
-		case /^version$/i		{ $bFound = 1;
+		case /^version$/i		{
 													log_message($self,0,"mbVersion() by $sNick on $sChannel");
 													botPrivmsg($self,$sChannel,$MAIN_CONF{'main.MAIN_PROG_NAME'} . $self->{main_prog_version});
 													logBot($self,$message,undef,"version",undef);
 												}
-		case /^chanstatlines$/i	{ $bFound = 1;
+		case /^chanstatlines$/i	{
 														channelStatLines($self,$message,$sChannel,$sNick,@tArgs);
 													}
-		case /^whotalk$/i		{ $bFound = 1;
+		case /^whotalk$/i		{
 														whoTalk($self,$message,$sChannel,$sNick,@tArgs);
 												}
-		case /^countcmd$/i	{ $bFound = 1;
+		case /^countcmd$/i	{
 														mbCountCommand($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^topcmd$/i		{ $bFound = 1;
+		case /^topcmd$/i		{
 														mbTopCommand($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^popcmd$/i		{ $bFound = 1;
+		case /^popcmd$/i		{
 														mbPopCommand($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^searchcmd$/i	{ $bFound = 1;
+		case /^searchcmd$/i	{
 														mbDbSearchCommand($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^lastcmd$/i		{ $bFound = 1;
+		case /^lastcmd$/i		{
 														mbLastCommand($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^owncmd$/i		{ $bFound = 1;
+		case /^owncmd$/i		{
 														mbDbOwnersCommand($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^addcatcmd$/i	{ $bFound = 1;
+		case /^addcatcmd$/i	{
 														mbDbAddCategoryCommand($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^chcatcmd$/i	{ $bFound = 1;
+		case /^chcatcmd$/i	{
 														mbDbChangeCategoryCommand($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^topsay$/i		{ $bFound = 1;
+		case /^topsay$/i		{
 														userTopSay($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^checkhostchan$/i		{ $bFound = 1;
+		case /^checkhostchan$/i		{
 															mbDbCheckHostnameNickChan($self,$message,$sNick,$sChannel,@tArgs);
 														}
-		case /^checkhost$/i	{ $bFound = 1;
+		case /^checkhost$/i	{
 															mbDbCheckHostnameNick($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^checknick$/i	{ $bFound = 1;
+		case /^checknick$/i	{
 													mbDbCheckNickHostname($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^greet$/i			{ $bFound = 1;
+		case /^greet$/i			{
 													userGreet($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^nicklist$/i	{ $bFound = 1;
+		case /^nicklist$/i	{
 														channelNickList($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^rnick$/i			{ $bFound = 1;
+		case /^rnick$/i			{
 														randomChannelNick($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^birthdate$/i	{ $bFound = 1;
+		case /^birthdate$/i	{
 														displayBirthDate($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^colors$/i		{ $bFound = 1;
+		case /^colors$/i		{
 														mbColors($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^seen$/i			{ $bFound = 1;
+		case /^seen$/i			{
 														mbSeen($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^date$/i			{ $bFound = 1;
+		case /^date$/i			{
 														displayDate($self,$message,$sNick,$sChannel,@tArgs);
 												}
-		case /^weather$|^meteo$/i		{ $bFound = 1;
+		case /^weather$|^meteo$/i		{
 																	displayWeather($self,$message,$sNick,$sChannel,@tArgs);
 																}
-		case /^countslaps$/i {	$bFound = 1;
+		case /^countslaps$/i	{
 														mbCountSlaps($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^addbadword$/i {
-														$bFound = 1;
+													}
+		case /^addbadword$/i	{
 														channelAddBadword($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^rembadword$/i {
-														$bFound = 1;
+													}
+		case /^rembadword$/i	{
 														channelRemBadword($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^ignores$/i 		{
-														$bFound = 1;
+													}
+		case /^ignores$/i			{
 														IgnoresList($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^ignore$/i 		{
-														$bFound = 1;
+													}
+			case /^ignore$/i 		{
 														addIgnore($self,$message,$sNick,$sChannel,@tArgs);
-												}
+													}
 		case /^unignore$/i		{
-														$bFound = 1;
 														delIgnore($self,$message,$sNick,$sChannel,@tArgs);
-												}
+													}
 		case /^yt$/i					{
-														$bFound = 1;
 														youtubeSearch($self,$message,$sNick,$sChannel,@tArgs);
-												}
+													}
 		case /^song$/i				{
-														$bFound = 1;
 														displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^listeners$/i	{
-														$bFound = 1;
+													}
+		case /^listeners$/i		{
 														displayRadioListeners($self,$message,$sNick,$sChannel,@tArgs);
-												}
+													}
 		case /^nextsong$/i		{
-														$bFound = 1;
 														radioNext($self,$message,$sNick,$sChannel,@tArgs);
-												}
+													}
 		case /^wordstat$/i		{
-														$bFound = 1;
 														wordStat($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^addresponder$/i		{
-															$bFound = 1;
+													}
+		case /^addresponder$/i	{
 															addResponder($self,$message,$sNick,$sChannel,@tArgs);
 														}
-		case /^update$/i		{
-														$bFound = 1;
+		case /^update$/i			{
 														update($self,$message,$sNick,$sChannel,@tArgs);
-											}
-		case /^lastcom$/i	{
-														$bFound = 1;
-														lastCom($self,$message,$sNick,$sChannel,@tArgs);
-											}
-		case "q"					{
-														$bFound = 1;
-														mbQuotes($self,$message,$sNick,$sChannel,@tArgs);
-											}
-		case "Q"					{
-														$bFound = 1;
-														mbQuotes($self,$message,$sNick,$sChannel,@tArgs);
-											}
-		case /^moduser$/i {
-														$bFound = 1;
-														mbModUser($self,$message,$sNick,$sChannel,@tArgs);
-											}
-		else								{
-													#$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
-													unless ( $bFound ) {
-														$bFound = mbDbCommand($self,$message,$sChannel,$sNick,$sCommand,@tArgs);
 													}
-													unless ( $bFound ) {
-														my $what = join(" ",($sCommand,@tArgs));
-														switch($what) {
-															case /how\s+old\s+are\s+you|how\s+old\s+r\s+you|how\s+old\s+r\s+u/i {
-																$bFound = 1;
-																displayBirthDate($self,$message,$sNick,$sChannel,@tArgs);
+		case /^lastcom$/i			{
+														lastCom($self,$message,$sNick,$sChannel,@tArgs);
+													}
+		case "q"							{
+														mbQuotes($self,$message,$sNick,$sChannel,@tArgs);
+													}
+		case "Q"							{
+														mbQuotes($self,$message,$sNick,$sChannel,@tArgs);
+													}
+		case /^moduser$/i 		{
+														mbModUser($self,$message,$sNick,$sChannel,@tArgs);
+													}
+		else									{
+														#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
+														my $bFound = mbDbCommand($self,$message,$sChannel,$sNick,$sCommand,@tArgs);
+														unless ( $bFound ) {
+															if ($botNickTriggered) {
+																my $what = join(" ",($sCommand,@tArgs));
+																switch($what) {
+																	case /how\s+old\s+are\s+you|how\s+old\s+r\s+you|how\s+old\s+r\s+u/i {
+																		$bFound = 1;
+																		displayBirthDate($self,$message,$sNick,$sChannel,@tArgs);
+																	}
+																	case /.+\?/ {
+																		botPrivmsg($self,$sChannel,"I dunno $sNick coz I'm lame");
+																	}
+																}
 															}
-															case /.*\?/ {
-																botPrivmsg($self,$sChannel,"I dunno $sNick coz I'm lame");
+															else {
+																log_message($self,3,"Public command '$sCommand' not found");
 															}
 														}
 													}
-												}
-	}
-	unless ( $bFound ) {
-		log_message($self,1,"Public command '$sCommand' not found");
 	}
 }
 
 sub mbCommandPrivate(@) {
 	my ($self,$message,$sNick,$sCommand,@tArgs)	= @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $bFound = 0;
 	switch($sCommand) {
-		case /^die$/i				{ $bFound = 1;
+		case /^die$/i				{
 													mbQuit($self,$message,$sNick,@tArgs);
 												}
-		case /^nick$/i			{ $bFound = 1;
+		case /^nick$/i			{
 													mbChangeNick($self,$message,$sNick,@tArgs);
 												}
-		case /^addtimer$/i	{ $bFound = 1;
+		case /^addtimer$/i	{
 													mbAddTimer($self,$message,undef,$sNick,@tArgs);
 												}
-		case /^remtimer$/i	{ $bFound = 1;
+		case /^remtimer$/i	{
 													mbRemTimer($self,$message,undef,$sNick,@tArgs);
 												}
-		case /^timers$/i		{ $bFound = 1;
+		case /^timers$/i		{
 													mbTimers($self,$message,undef,$sNick,@tArgs);
 												}
-		case /^register$/i	{ $bFound = 1;
+		case /^register$/i	{
 													mbRegister($self,$message,$sNick,@tArgs);
 												}
-		case /^dump$/i			{ $bFound = 1;
+		case /^dump$/i			{
 													dumpCmd($self,$message,$sNick,@tArgs);
 												}
-		case /^msg$/i				{ $bFound = 1;
+		case /^msg$/i				{
 													msgCmd($self,$message,$sNick,@tArgs);
 												}
-		case /^say$/i				{ $bFound = 1;
+		case /^say$/i				{
 													sayChannel($self,$message,$sNick,@tArgs);
 												}
-		case /^act$/i				{ $bFound = 1;
+		case /^act$/i				{
 													actChannel($self,$message,$sNick,@tArgs);
 												}
-		case /^status$/i		{ $bFound = 1;
+		case /^status$/i		{
 													mbStatus($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^login$/i			{ $bFound = 1;
+		case /^login$/i			{
 													userLogin($self,$message,$sNick,@tArgs);
 												}
-		case /^pass$/i			{ $bFound = 1;
+		case /^pass$/i			{
 													userPass($self,$message,$sNick,@tArgs);
 												}
-		case /^ident$/i			{ $bFound = 1;
+		case /^ident$/i			{
 													userIdent($self,$message,$sNick,@tArgs);
 												}
-		case /^cstat$/i			{ $bFound = 1;
+		case /^cstat$/i			{
 													userCstat($self,$message,$sNick,@tArgs);
 												}
-		case /^adduser$/i		{ $bFound = 1;
+		case /^adduser$/i		{
 													addUser($self,$message,$sNick,@tArgs);
 												}
-		case /^users$/i			{ $bFound = 1;
+		case /^users$/i			{
 													userStats($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^userinfo$/i	{ $bFound = 1;
+		case /^userinfo$/i	{
 													userInfo($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^addhost$/i		{ $bFound = 1;
+		case /^addhost$/i		{
 													addUserHost($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^addchan$/i		{ $bFound = 1;
+		case /^addchan$/i		{
 													addChannel($self,$message,$sNick,@tArgs);
 												}
-		case /^chanset$/i		{ $bFound = 1;
+		case /^chanset$/i		{
 													channelSet($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^purge$/i			{ $bFound = 1;
+		case /^purge$/i			{
 													purgeChannel($self,$message,$sNick,@tArgs);
 												}
-		case /^part$/i			{ $bFound = 1;
+		case /^part$/i			{
 													channelPart($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^join$/i			{ $bFound = 1;
+		case /^join$/i			{
 													channelJoin($self,$message,$sNick,@tArgs);
 												}
-		case /^add$/i				{ $bFound = 1;
+		case /^add$/i				{
 													channelAddUser($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^del$/i				{ $bFound = 1;
+		case /^del$/i				{
 													channelDelUser($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^modinfo$/i		{ $bFound = 1;
+		case /^modinfo$/i		{
 													userModinfo($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^op$/i				{ $bFound = 1;
+		case /^op$/i				{
 													userOpChannel($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^deop$/i			{ $bFound = 1;
+		case /^deop$/i			{
 													userDeopChannel($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^invite$/i		{ $bFound = 1;
+		case /^invite$/i		{
 													userInviteChannel($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^voice$/i			{ $bFound = 1;
+		case /^voice$/i			{
 													userVoiceChannel($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^devoice$/i		{ $bFound = 1;
+		case /^devoice$/i		{
 													userDevoiceChannel($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^kick$/i			{ $bFound = 1;
+		case /^kick$/i			{
 													userKickChannel($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^topic$/i			{ $bFound = 1;
+		case /^topic$/i			{
 													userTopicChannel($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^showcommands$/i	{ $bFound = 1;
-													userShowcommandsChannel($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^chaninfo$/i	{ $bFound = 1;
+		case /^showcommands$/i	{
+															userShowcommandsChannel($self,$message,$sNick,undef,@tArgs);
+														}
+		case /^chaninfo$/i	{
 													userChannelInfo($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^chanlist$/i	{ $bFound = 1;
+		case /^chanlist$/i	{
 													channelList($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^whoami$/i		{ $bFound = 1;
+		case /^whoami$/i		{
 													userWhoAmI($self,$message,$sNick,@tArgs);
 												}
-		case /^verify$/i		{ $bFound = 1;
+		case /^verify$/i		{
 													userVerifyNick($self,$message,$sNick,@tArgs);
 												}
-		case /^auth$/i			{ $bFound = 1;
+		case /^auth$/i			{
 													userAuthNick($self,$message,$sNick,@tArgs);
 												}
-		case /^access$/i		{ $bFound = 1;
+		case /^access$/i		{
 													userAccessChannel($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^addcmd$/i		{ $bFound = 1;
+		case /^addcmd$/i		{
 													mbDbAddCommand($self,$message,$sNick,@tArgs);
 												}
-		case /^remcmd$/i		{ $bFound = 1;
+		case /^remcmd$/i		{
 													mbDbRemCommand($self,$message,$sNick,@tArgs);
 												}
-		case /^modcmd$/i		{ $bFound = 1;
+		case /^modcmd$/i		{
 													mbDbModCommand($self,$message,$sNick,@tArgs);
 												}
-		case /^showcmd$/i		{ $bFound = 1;
+		case /^showcmd$/i		{
 													mbDbShowCommand($self,$message,$sNick,@tArgs);
 												}
-		case /^chowncmd$/i	{ $bFound = 1;
+		case /^chowncmd$/i	{
 													mbChownCommand($self,$message,$sNick,@tArgs);
 												}
-		case /^mvcmd$/i			{ $bFound = 1;
+		case /^mvcmd$/i			{
 													mbDbMvCommand($self,$message,$sNick,@tArgs);
 												}
-		case /^chowncmd$/i	{ $bFound = 1;
+		case /^chowncmd$/i	{
 													mbChownCommand($self,$message,$sNick,@tArgs);
 												}
-		case /^countcmd$/i	{ $bFound = 1;
+		case /^countcmd$/i	{
 														mbCountCommand($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^topcmd$/i		{ $bFound = 1;
+		case /^topcmd$/i		{
 														mbTopCommand($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^popcmd$/i		{ $bFound = 1;
+		case /^popcmd$/i		{
 														mbPopCommand($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^searchcmd$/i	{ $bFound = 1;
+		case /^searchcmd$/i	{
 														mbDbSearchCommand($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^lastcmd$/i		{ $bFound = 1;
+		case /^lastcmd$/i		{
 														mbLastCommand($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^owncmd$/i		{ $bFound = 1;
+		case /^owncmd$/i		{
 														mbDbOwnersCommand($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^addcatcmd$/i	{ $bFound = 1;
+		case /^addcatcmd$/i	{
 														mbDbAddCategoryCommand($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^chcatcmd$/i	{ $bFound = 1;
+		case /^chcatcmd$/i	{
 														mbDbChangeCategoryCommand($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^topsay$/i		{ $bFound = 1;
+		case /^topsay$/i		{
 														userTopSay($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^checkhostchan$/i		{ $bFound = 1;
-															mbDbCheckHostnameNickChan($self,$message,$sNick,undef,@tArgs);
-														}
-		case /^checkhost$/i	{ $bFound = 1;
-															mbDbCheckHostnameNick($self,$message,$sNick,undef,@tArgs);
+		case /^checkhostchan$/i		{
+																mbDbCheckHostnameNickChan($self,$message,$sNick,undef,@tArgs);
+															}
+		case /^checkhost$/i	{
+													mbDbCheckHostnameNick($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^checknick$/i	{ $bFound = 1;
+		case /^checknick$/i	{
 													mbDbCheckNickHostname($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^greet$/i			{ $bFound = 1;
+		case /^greet$/i			{
 													userGreet($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^nicklist$/i	{ $bFound = 1;
+		case /^nicklist$/i	{
 														channelNickList($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^rnick$/i			{ $bFound = 1;
+		case /^rnick$/i			{
 														randomChannelNick($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^chanstatlines$/i	{ $bFound = 1;
-														channelStatLines($self,$message,undef,$sNick,@tArgs);
-													}
-		case /^whotalk$/i		{ $bFound = 1;
+		case /^chanstatlines$/i	{
+															channelStatLines($self,$message,undef,$sNick,@tArgs);
+														}
+		case /^whotalk$/i		{
 														whoTalk($self,$message,undef,$sNick,@tArgs);
 												}
-		case /^birthdate$/i	{ $bFound = 1;
+		case /^birthdate$/i	{
 														displayBirthDate($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^ignores$/i 		{
-														$bFound = 1;
-														IgnoresList($self,$message,$sNick,undef,@tArgs);
+		case /^ignores$/i 	{
+													IgnoresList($self,$message,$sNick,undef,@tArgs);
 												}
 		case /^ignore$/i 		{
-														$bFound = 1;
-														addIgnore($self,$message,$sNick,undef,@tArgs);
+													addIgnore($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^unignore$/i		{
-														$bFound = 1;
-														delIgnore($self,$message,$sNick,undef,@tArgs);
+		case /^unignore$/i	{
+													delIgnore($self,$message,$sNick,undef,@tArgs);
 												}
-		case /^metadata$/i		{
-														$bFound = 1;
-														setRadioMetadata($self,$message,$sNick,undef,@tArgs);
+		case /^metadata$/i	{
+													setRadioMetadata($self,$message,$sNick,undef,@tArgs);
 												}
 		case /^update$/i		{
-												$bFound = 1;
-												update($self,$message,$sNick,undef,@tArgs);
-											}
+													update($self,$message,$sNick,undef,@tArgs);
+												}
 		case /^lastcom$/i	{
-														$bFound = 1;
-														lastCom($self,$message,$sNick,undef,@tArgs);
+												lastCom($self,$message,$sNick,undef,@tArgs);
 											}
 		case /^moduser$/i {
-														$bFound = 1;
-														mbModUser($self,$message,$sNick,undef,@tArgs);
+												mbModUser($self,$message,$sNick,undef,@tArgs);
 											}
-		#else								{
-		#											$bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,undef,$sNick,$sCommand,@tArgs);
-		#										}
-	}
-	unless ( $bFound ) {
-		log_message($self,3,$message->prefix . " Private command '$sCommand' not found");
-	}
-	else {
-		#my %GLOBAL_HASH;
-		#$GLOBAL_HASH{'WHOIS_VARS'} = \%WHOIS_VARS;
-		#$GLOBAL_HASH{'hTimers'} = \%hTimers;
-		#return %GLOBAL_HASH;
-		return undef;
+		else							{
+													#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,undef,$sNick,$sCommand,@tArgs);
+													log_message($self,3,$message->prefix . " Private command '$sCommand' not found");
+													return undef;
+											}
 	}
 }
 
@@ -6364,6 +6331,16 @@ sub setLastReponderTs(@) {
 sub getLastReponderTs(@) {
 	my $self = shift;
 	return $self->{last_responder_ts};
+}
+
+sub setLastCommandTs(@) {
+	my ($self,$ts) = @_;
+	$self->{last_command_ts} = $ts;
+}
+
+sub getLastCommandTs(@) {
+	my $self = shift;
+	return $self->{last_command_ts};
 }
 
 sub channelAddBadword(@) {
