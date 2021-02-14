@@ -1087,6 +1087,9 @@ sub mbCommandPublic(@) {
 		case /^addresponder$/i	{
 															addResponder($self,$message,$sNick,$sChannel,@tArgs);
 														}
+		case /^delresponder$/i	{
+															delResponder($self,$message,$sNick,$sChannel,@tArgs);
+														}
 		case /^update$/i			{
 														update($self,$message,$sNick,$sChannel,@tArgs);
 													}
@@ -6166,7 +6169,7 @@ sub checkResponder(@) {
 		if (my $ref = $sth->fetchrow_hashref()) {
 			my $sAnswer = $ref->{'answer'};
 			my $iChance = $ref->{'chance'};
-			log_message($self,4,"checkResponder() Found answer $sAnswer for $sMsg with chance $iChance");
+			log_message($self,4,"checkResponder() Found answer $sAnswer for $sMsg with chance " . (100-$iChance) ." %");
 			return $iChance;
 		}
 	}
@@ -6208,37 +6211,195 @@ sub doResponder(@) {
 
 sub addResponder(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
-				my $sQuery = "SELECT responder FROM RESPONDERS,CHANNEL WHERE CHANNEL.id_channel=RESPONDERS.id_channel AND CHANNEL.name like ? AND responder like ?";
+				my $id_channel;
+				my $chance;
+				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
+					$sChannel = $tArgs[0];
+					$id_channel = getIdChannel($self,$sChannel);
+					unless (defined($id_channel) && ($id_channel ne "")) {
+						botNotice($self,$sNick,"$sChannel is not registered to me");
+						return undef;
+					}
+					log_message($self,3,"Adding responder for channel $sChannel($id_channel)");
+					shift @tArgs;
+				}
+				else {
+					$id_channel = 0;
+					log_message($self,3,"Adding global responder");
+				}
+				my $sArgs = join(" ",@tArgs);
+				unless (defined($sArgs) && ($sArgs ne "")) {
+					botNotice($self,$sNick,"Syntax : addresponder [#channel] <chance> <responder> | <answer>");
+					return undef;
+				}
+				
+				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^[0-9]+/) && ($tArgs[0] <= 100)) {
+					$chance = $tArgs[0];
+					shift(@tArgs);
+				}
+				else {
+					botNotice($self,$sNick,"Syntax : addresponder [#channel] <chance> <responder> | <answer>");
+					return undef;
+				}
+				
+				# Parse @tArgs
+				my $i;
+				my $sResponder;
+				my $sAnswer;
+				my $sepFound = 0;
+				for ($i=0;$i<=$#tArgs;$i++) {
+					if ($sepFound) {
+						if ($i==0) {
+							$sAnswer = $tArgs[0];
+						}
+						else {
+							$sAnswer .= " " . $tArgs[$i];
+						}
+					}
+					elsif ($tArgs[$i] eq "|") {
+						$sepFound = 1;
+					}
+					else {
+						if ($i==0) {
+							$sResponder = $tArgs[0];
+						}
+						else {
+							$sResponder .= " " . $tArgs[$i];
+						}
+					}
+				}
+				unless ($sepFound && defined($sResponder) && ($sResponder ne "") && defined($sAnswer) && ($sAnswer ne "")) {
+					botNotice($self,$sNick,"Syntax : addresponder [#channel] <chance> <responder> | <answer>");
+					return undef;
+				}
+				else {
+					log_message($self,3,"chance = $chance sResponder = $sResponder sAnswer = $sAnswer");
+				}
+				
+				my $sQuery = "SELECT * FROM RESPONDERS WHERE id_channel=? AND responder like ?";
 				my $sth = $self->{dbh}->prepare($sQuery);
-				unless ($sth->execute($sChannel,$tArgs[0])) {
+				unless ($sth->execute($id_channel,$sResponder)) {
 					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					if (my $ref = $sth->fetchrow_hashref()) {
-						my $sAnswer = $ref->{'answer'};
-						log_message($self,3,"addResponder() Found answer $sAnswer for responder ". $tArgs[0]);
-						botPrivmsg($self,$sChannel,$sAnswer);
+						my $answer = $ref->{'answer'};
+						my $iChance = $ref->{'chance'};
+						my $hits = $ref->{'hits'};
+						log_message($self,3,"addResponder() Found answer $answer for responder $sResponder");
+						botNotice($self,$sNick,"Found answer $answer for responder $sResponder with chance $iChance on $sChannel [hits : $hits]");
 					}
 					else {
-						$sQuery = "SELECT responder FROM RESPONDERS WHERE RESPONDERS.id_channel=0 AND CHANNEL.name like ? AND responder like ?";
+						$sQuery = "INSERT INTO RESPONDERS (id_channel,chance,responder,answer) VALUES (?,?,?,?)";
+						$sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute($id_channel,(100 - $chance),$sResponder,$sAnswer)) {
+							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						}
+						else {
+							my $sResponderType;
+							if ( $id_channel == 0 ) {
+								$sResponderType = "global responder";
+							}
+							else {
+								$sResponderType = "responder for channel $sChannel";
+							}
+							botNotice($self,$sNick,"Added $sResponderType : $sResponder with chance $chance % -> $sAnswer");
+						}
 					}
 				}
 				$sth->finish;
 			}
 			else {
-				my $sNoticeMsg = $message->prefix . " addResponder command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				my $sNoticeMsg = $message->prefix . " addresponder command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
 				noticeConsoleChan($self,$sNoticeMsg);
 				botNotice($self,$sNick,"Your level does not allow you to use this command.");
 				return undef;
 			}
 		}
 		else {
-			my $sNoticeMsg = $message->prefix . " addResponder command attempt (user $sMatchingUserHandle is not logged in)";
+			my $sNoticeMsg = $message->prefix . " addresponder command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}				
+	return 0;
+}
+
+sub delResponder(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				my $id_channel;
+				my $chance;
+				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
+					$sChannel = $tArgs[0];
+					$id_channel = getIdChannel($self,$sChannel);
+					unless (defined($id_channel) && ($id_channel ne "")) {
+						botNotice($self,$sNick,"$sChannel is not registered to me");
+						return undef;
+					}
+					log_message($self,3,"Deleting responder for channel $sChannel($id_channel)");
+					shift @tArgs;
+				}
+				else {
+					$id_channel = 0;
+					log_message($self,3,"Deleting global responder");
+				}
+				my $sResponder = join(" ",@tArgs);
+				unless (defined($sResponder) && ($sResponder ne "")) {
+					botNotice($self,$sNick,"Syntax : delresponder [#channel] <responder>");
+					return undef;
+				}
+				
+				my $sQuery = "SELECT * FROM RESPONDERS WHERE id_channel=? AND responder like ?";
+				my $sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($id_channel,$sResponder)) {
+					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					my $sResponderType;
+					if ( $id_channel == 0 ) {
+						$sResponderType = "global responder";
+					}
+					else {
+						$sResponderType = "responder for channel $sChannel";
+					}
+					if (my $ref = $sth->fetchrow_hashref()) {
+						my $answer = $ref->{'answer'};
+						my $iChance = $ref->{'chance'};
+						my $hits = $ref->{'hits'};
+						log_message($self,3,"delResponder() Found answer $answer for responder $sResponder");
+						$sQuery = "DELETE FROM RESPONDERS WHERE id_channel=? AND responder like ?";
+						$sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute($id_channel,$sResponder)) {
+							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						}
+						else {	
+							botNotice($self,$sNick,"Deleted $sResponderType : $sResponder with chance " . (100 - $iChance) . " % -> $answer [hits : $hits]");
+						}
+					}
+					else {
+						botNotice($self,$sNick,"Could not find a $sResponderType matching $sResponder");
+					}
+				}
+				$sth->finish;
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " delresponder command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " delresponder command attempt (user $sMatchingUserHandle is not logged in)";
 			noticeConsoleChan($self,$sNoticeMsg);
 			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
 			return undef;
