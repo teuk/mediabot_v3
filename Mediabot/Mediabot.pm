@@ -598,20 +598,65 @@ sub botPrivmsg(@) {
 sub botAction(@) {
 	my ($self,$sTo,$sMsg) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $eventtype = "action";
-	if (substr($sTo, 0, 1) eq '#') {
-		log_message($self,0,"$sTo:<" . $self->{irc}->nick_folded . ">ACTION $sMsg");
-		logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,$sMsg);
+	if (defined($sTo)) {
+		my $eventtype = "public";
+		if (substr($sTo, 0, 1) eq '#') {
+				my $id_chanset_list = getIdChansetList($self,"NoColors");
+				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
+					log_message($self,4,"botAction() check chanset NoColors, id_chanset_list = $id_chanset_list");
+					my $id_channel_set = getIdChannelSet($self,$sTo,$id_chanset_list);
+					if (defined($id_channel_set) && ($id_channel_set ne "")) {
+						log_message($self,3,"botAction() channel $sTo has chanset +NoColors");
+						$sMsg =~ s/\cC\d{1,2}(?:,\d{1,2})?|[\cC\cB\cI\cU\cR\cO]//g;
+					}
+				}
+				$id_chanset_list = getIdChansetList($self,"AntiFlood");
+				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
+					log_message($self,4,"botAction() check chanset AntiFlood, id_chanset_list = $id_chanset_list");
+					my $id_channel_set = getIdChannelSet($self,$sTo,$id_chanset_list);
+					if (defined($id_channel_set) && ($id_channel_set ne "")) {
+						log_message($self,3,"botAction() channel $sTo has chanset +AntiFlood");
+						if (checkAntiFlood($self,$sTo)) {
+							return undef;
+						}
+					}
+				}
+				log_message($self,0,"$sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
+				my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND name=?";
+				my $sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($sTo) ) {
+					log_message($self,1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					while (my $ref = $sth->fetchrow_hashref()) {
+						my $sBadwordDb = $ref->{'badword'};
+						my $sBadwordLc = lc $sBadwordDb;
+						my $sMsgLc = lc $sMsg;
+						if (index($sMsgLc, $sBadwordLc) != -1) {
+							logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,"$sMsg (BADWORD : $sBadwordDb)");
+							noticeConsoleChan($self,"Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
+							log_message($self,3,"Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
+							$sth->finish;
+							return;
+						}
+					}
+					logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,$sMsg);
+				}
+		}
+		else {
+			$eventtype = "private";
+			log_message($self,0,"-> *$sTo* $sMsg");
+		}
+		if (utf8::is_utf8($sMsg)) {
+			$sMsg = Encode::encode("UTF-8", $sMsg);
+			$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $sMsg\1" );
+		}
+		else {
+			$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $sMsg\1" );
+		}
 	}
 	else {
-		$eventtype = "private";
-		log_message($self,0,"-> *$sTo* ACTION $sMsg");
-	}
-	unless (( $sMsg =~ /annie-claude/i ) && ( $sTo =~ /^#montreal$/i )) {
-		$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $sMsg\1" );
-	}
-	else {
-		log_message($self,0,"IGNORED BECAUSE OF bad-word $sMsg => $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
+		log_message($self,0,"botAction() ERROR no target specified to send $sMsg");
 	}
 }
 
