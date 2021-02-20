@@ -513,7 +513,8 @@ INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES
 (2, 'UrlTitle'),
 (3, 'Weather'),
 (4, 'YoutubeSearch'),
-(5, 'NoColors');
+(5, 'NoColors'),
+(6, 'AntiFlood');
 
 -- --------------------------------------------------------
 
