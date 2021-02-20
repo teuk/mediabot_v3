@@ -538,10 +538,22 @@ sub botPrivmsg(@) {
 		if (substr($sTo, 0, 1) eq '#') {
 				my $id_chanset_list = getIdChansetList($self,"NoColors");
 				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-					log_message($self,3,"id_chanset_list = $id_chanset_list");
+					log_message($self,4,"botPrivmsg() check chanset NoColors, id_chanset_list = $id_chanset_list");
 					my $id_channel_set = getIdChannelSet($self,$sTo,$id_chanset_list);
 					if (defined($id_channel_set) && ($id_channel_set ne "")) {
+						log_message($self,3,"botPrivmsg() channel $sTo has chanset +NoColors");
 						$sMsg =~ s/\cC\d{1,2}(?:,\d{1,2})?|[\cC\cB\cI\cU\cR\cO]//g;
+					}
+				}
+				$id_chanset_list = getIdChansetList($self,"AntiFlood");
+				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
+					log_message($self,4,"botPrivmsg() check chanset AntiFlood, id_chanset_list = $id_chanset_list");
+					my $id_channel_set = getIdChannelSet($self,$sTo,$id_chanset_list);
+					if (defined($id_channel_set) && ($id_channel_set ne "")) {
+						log_message($self,3,"botPrivmsg() channel $sTo has chanset +AntiFlood");
+						if (checkAntiFlood($self,$sTo)) {
+							return undef;
+						}
 					}
 				}
 				log_message($self,0,"$sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
@@ -2612,7 +2624,6 @@ sub addChannel(@) {
 
 sub channelSet(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -2703,18 +2714,18 @@ sub channelSet(@) {
 																		if ((substr($tArgs[0],0,1) eq "+") || (substr($tArgs[0],0,1) eq "-")){
 																			my $sChansetValue = substr($tArgs[0],1);
 																			my $sChansetAction = substr($tArgs[0],0,1);
-																			log_message($self,0,"chansetFlag $sChannel $sChansetAction$sChansetValue");
+																			log_message($self,0,"chanset $sChannel $sChansetAction$sChansetValue");
 																			my $id_chanset_list = getIdChansetList($self,$sChansetValue);
-																			unless (defined($id_chanset_list)) {
-																				botNotice($self,$sNick,"Undefined flag $sChansetValue");
-																				logBot($self,$message,$sChannel,"chanset",($sChannel,"Undefined flag $sChansetValue"));
+																			unless (defined($id_chanset_list) && ($id_chanset_list ne "")) {
+																				botNotice($self,$sNick,"Undefined chanset $sChansetValue");
+																				logBot($self,$message,$sChannel,"chanset",($sChannel,"Undefined chanset $sChansetValue"));
 																				return undef;
 																			}
 																			my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
 																			if ( $sChansetAction eq "+" ) {
 																				if (defined($id_channel_set)) {
-																					botNotice($self,$sNick,"Flag +$sChansetValue is already set for $sChannel");
-																					logBot($self,$message,$sChannel,"chanset",("Flag +$sChansetValue is already set"));
+																					botNotice($self,$sNick,"Chanset +$sChansetValue is already set for $sChannel");
+																					logBot($self,$message,$sChannel,"chanset",("Chanset +$sChansetValue is already set"));
 																					return undef;
 																				}
 																				my $sQuery = "INSERT INTO CHANNEL_SET (id_channel,id_chanset_list) VALUES (?,?)";
@@ -2723,15 +2734,19 @@ sub channelSet(@) {
 																					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 																				}
 																				else {
-																					logBot($self,$message,$sChannel,"chanset",("Flag $sChansetValue set"));
+																					botNotice($self,$sNick,"Chanset +$sChansetValue for $sChannel");
+																					logBot($self,$message,$sChannel,"chanset",("Chanset +$sChansetValue"));
+																					if ($sChansetValue =~ /^AntiFlood$/i) {
+																						setChannelAntiFlood($self,$message,$sNick,$sChannel,@tArgs);
+																					}
 																				}
 																				$sth->finish;
 																				return $id_channel;
 																			}
 																			else {
 																				unless (defined($id_channel_set)) {
-																					botNotice($self,$sNick,"Flag $sChansetValue is not set for $sChannel");
-																					logBot($self,$message,$sChannel,"chanset",("Flag $sChansetValue is not set"));
+																					botNotice($self,$sNick,"Chanset +$sChansetValue is not set for $sChannel");
+																					logBot($self,$message,$sChannel,"chanset",("Chanset +$sChansetValue is not set"));
 																					return undef;
 																				}
 																				my $sQuery = "DELETE FROM CHANNEL_SET WHERE id_channel_set=?";
@@ -2740,7 +2755,8 @@ sub channelSet(@) {
 																					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 																				}
 																				else {
-																					logBot($self,$message,$sChannel,"chanset",("Flag $sChansetValue unset"));
+																					botNotice($self,$sNick,"Chanset -$sChansetValue for $sChannel");
+																					logBot($self,$message,$sChannel,"chanset",("Chanset -$sChansetValue"));
 																				}
 																				$sth->finish;
 																				return $id_channel;
@@ -2782,7 +2798,6 @@ sub channelSet(@) {
 
 sub channelSetSyntax(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	botNotice($self,$sNick,"Syntax: chanset [#channel] key <key>");
 	botNotice($self,$sNick,"Syntax: chanset [#channel] chanmode <+chanmode>");
 	botNotice($self,$sNick,"Syntax: chanset [#channel] description <description>");
@@ -6508,6 +6523,16 @@ sub getLastCommandTs(@) {
 	return $self->{last_command_ts};
 }
 
+sub setLastCommandCount(@) {
+	my ($self,$count) = @_;
+	$self->{last_command_count} = $count;
+}
+
+sub getLastCommandCount(@) {
+	my $self = shift;
+	return $self->{last_command_count};
+}
+
 sub channelAddBadword(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
@@ -8220,4 +8245,160 @@ sub setUserLevel(@) {
 		return 1;
 	}
 }
+
+sub setChannelAntiFlood(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my $id_channel = getIdChannel($self,$sChannel);
+	my $sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($id_channel)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $nbmsg_max = $ref->{'nbmsg_max'};
+			my $duration = $ref->{'duration'};
+			my $timetowait = $ref->{'timetowait'};
+			log_message($self,3,"setChannelAntiFlood() AntiFlood record exists (id_channel $id_channel) nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds");
+			botNotice($self,$sNick,"Chanset parameters already exist and will be used for $sChannel (nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds)");
+		}
+		else {
+			$sQuery = "INSERT INTO CHANNEL_FLOOD (id_channel) VALUES (?)";
+			$sth = $self->{dbh}->prepare($sQuery);
+			unless ($sth->execute($id_channel)) {
+				log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			}
+			else {
+				my $id_channel_flood = $sth->{ mysql_insertid };
+				log_message($self,3,"setChannelAntiFlood() AntiFlood record created, id_channel_flood : $id_channel_flood");
+				$sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
+				my $sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($id_channel)) {
+					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					if (my $ref = $sth->fetchrow_hashref()) {
+						my $nbmsg_max = $ref->{'nbmsg_max'};
+						my $duration = $ref->{'duration'};
+						my $timetowait = $ref->{'timetowait'};
+						botNotice($self,$sNick,"Chanset parameters for $sChannel (nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds)");
+					}
+					else {
+						botNotice($self,$sNick,"Something funky happened, could not find record id_channel_flood : $id_channel_flood in Table CHANNEL_FLOOD for channel $sChannel (id_channel : $id_channel)");
+					}
+				}
+			}
+		}
+	}
+	$sth->finish;
+}
+
+sub checkAntiFlood(@) {
+	my ($self,$sChannel) = @_;
+	my $id_channel = getIdChannel($self,$sChannel);
+	my $sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($id_channel)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $nbmsg_max = $ref->{'nbmsg_max'};
+			my $nbmsg = $ref->{'nbmsg'};
+			my $duration = $ref->{'duration'};
+			my $first = $ref->{'first'};
+			my $latest = $ref->{'latest'};
+			my $timetowait = $ref->{'timetowait'};
+			my $notification = $ref->{'notification'};
+			my $currentTs = time;
+			my $deltaDb = ($latest - $first);
+			my $delta = ($currentTs - $first);
+			
+			if ($nbmsg == 0) {
+				$nbmsg++;
+				$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?,first=?,latest=? WHERE id_channel=?";
+				my $sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($nbmsg,$currentTs,$currentTs,$id_channel)) {
+					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					my $sLatest = time2str("%Y-%m-%d %H-%M-%S",$currentTs);
+					log_message($self,4,"checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
+					return 0;
+				}
+			}
+			else {
+				if ( $deltaDb <= $duration ) {
+					if ($nbmsg < $nbmsg_max) {
+						$nbmsg++;
+						$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?,latest=? WHERE id_channel=?";
+						my $sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute($nbmsg,$currentTs,$id_channel)) {
+							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						}
+						else {
+							my $sLatest = time2str("%Y-%m-%d %H-%M-%S",$currentTs);
+							log_message($self,4,"checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max set latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds");
+							return 0;
+						}
+					}
+					else {
+						my $sLatest = time2str("%Y-%m-%d %H-%M-%S",$currentTs);
+						my $endTs = $latest + $timetowait;
+						unless ( $currentTs <= $endTs ) {
+							$nbmsg = 1;
+							log_message($self,0,"checkAntiFlood() End of antiflood for channel $sChannel");
+							$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?,first=?,latest=?,notification=? WHERE id_channel=?";
+							my $sth = $self->{dbh}->prepare($sQuery);
+							unless ($sth->execute($nbmsg,$currentTs,$currentTs,0,$id_channel)) {
+								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							}
+							else {
+								my $sLatest = time2str("%Y-%m-%d %H-%M-%S",$currentTs);
+								log_message($self,4,"checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
+								return 0;
+							}
+						}
+						else {
+							unless ( $notification ) {
+								$self->{irc}->do_PRIVMSG( target => $sChannel, text => "Anti flood active for $timetowait seconds on channel $sChannel, no more than $nbmsg_max requests in $duration seconds." );
+								$sQuery = "UPDATE CHANNEL_FLOOD SET notification=? WHERE id_channel=?";
+								my $sth = $self->{dbh}->prepare($sQuery);
+								unless ($sth->execute(1,$id_channel)) {
+									log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								}
+								else {
+									log_message($self,4,"checkAntiFlood() Antiflood notification set to DB for $sChannel");
+									noticeConsoleChan($self,"Anti flood activated on channel $sChannel $nbmsg messages in less than $duration seconds, waiting $timetowait seconds to desactivate");
+								}
+							}
+							log_message($self,4,"checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds endTs = $endTs " . ($endTs - $currentTs) . " seconds left");
+							log_message($self,0,"checkAntiFlood() Antiflood is active for channel $sChannel wait " . ($endTs - $currentTs) . " seconds");
+							return 1;
+						}
+					}
+				}
+				else {
+					$nbmsg = 1;
+					log_message($self,0,"checkAntiFlood() End of antiflood for channel $sChannel");
+					$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?,first=?,latest=?,notification=? WHERE id_channel=?";
+					my $sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute($nbmsg,$currentTs,$currentTs,0,$id_channel)) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {
+						my $sLatest = time2str("%Y-%m-%d %H-%M-%S",$currentTs);
+						log_message($self,4,"checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
+						return 0;
+					}
+				}
+			}
+		}
+		else {
+			log_message($self,0,"Something funky happened, could not find record in Table CHANNEL_FLOOD for channel $sChannel (id_channel : $id_channel)");
+		}
+	}
+	return 0;
+}
+
 1;

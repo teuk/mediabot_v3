@@ -637,5 +637,41 @@ ALTER TABLE `QUOTES`
 --
 ALTER TABLE `QUOTES`
   MODIFY `id_quotes` bigint(20) NOT NULL AUTO_INCREMENT;
+  
+--
+-- Structure de la table `CHANNEL_FLOOD`
+--
+
+CREATE TABLE `CHANNEL_FLOOD` (
+  `id_channel_flood` bigint(20) NOT NULL,
+  `id_channel` bigint(20) NOT NULL,
+  `nbmsg_max` int(11) NOT NULL DEFAULT '5',
+  `nbmsg` int(11) NOT NULL DEFAULT '0',
+  `duration` int(11) NOT NULL DEFAULT '30',
+  `first` int(11) DEFAULT '0',
+  `latest` bigint(20) NOT NULL DEFAULT '0',
+  `timetowait` int(11) NOT NULL DEFAULT '300',
+  `notification` int(11) NOT NULL DEFAULT '0'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+--
+-- Index pour les tables déchargées
+--
+
+--
+-- Index pour la table `CHANNEL_FLOOD`
+--
+ALTER TABLE `CHANNEL_FLOOD`
+  ADD PRIMARY KEY (`id_channel_flood`);
+
+--
+-- AUTO_INCREMENT pour les tables déchargées
+--
+
+--
+-- AUTO_INCREMENT pour la table `CHANNEL_FLOOD`
+--
+ALTER TABLE `CHANNEL_FLOOD`
+  MODIFY `id_channel_flood` bigint(20) NOT NULL AUTO_INCREMENT;
 
 COMMIT;
