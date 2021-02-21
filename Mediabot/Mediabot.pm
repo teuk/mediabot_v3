@@ -2479,10 +2479,12 @@ sub userInfo(@) {
 								my $sInfo2 = $ref->{'info2'};								
 								my $last_login = $ref->{'last_login'};
 								my $auth = $ref->{'auth'};
+								my $username = $ref->{'username'};
 								botNotice($self,$sNick,"User : $sUser (Id: $id_user - $sDescription) - created $creation_date - last login $last_login");
 								my $sPasswordSet = (defined($sPassword) ? "Password set" : "Password is not set" );
 								my $sLoggedIn = (($auth) ? "logged in" : "not logged in" );
-								botNotice($self,$sNick,"$sPasswordSet ($sLoggedIn)");
+								my $sAutoLogin = (($username eq "#AUTOLOGIN#") ? "ON" : "OFF");
+								botNotice($self,$sNick,"$sPasswordSet ($sLoggedIn) Force AUTOLOGIN : $sAutoLogin");
 								botNotice($self,$sNick,"Hostmasks : $sHostmasks");
 								botNotice($self,$sNick,"Infos : " . (defined($sInfo1) ? $sInfo1 : "N/A") . " - " . (defined($sInfo2) ? $sInfo2 : "N/A"));								
 							}
@@ -5853,7 +5855,7 @@ sub displayWeather(@) {
 						botPrivmsg($self,$sChannel,$line);
 					}
 					else {
-						botPrivmsg($self,$sChannel,"No answer from http://wttr.in for $sCity");
+						botPrivmsg($self,$sChannel,"No answer from http://wttr.in for $sCity. Try again in a few seconds.");
 					}
 				}
 			}
@@ -6561,21 +6563,6 @@ sub getLastReponderTs(@) {
 sub setLastCommandTs(@) {
 	my ($self,$ts) = @_;
 	$self->{last_command_ts} = $ts;
-}
-
-sub getLastCommandTs(@) {
-	my $self = shift;
-	return $self->{last_command_ts};
-}
-
-sub setLastCommandCount(@) {
-	my ($self,$count) = @_;
-	$self->{last_command_count} = $count;
-}
-
-sub getLastCommandCount(@) {
-	my $self = shift;
-	return $self->{last_command_count};
 }
 
 sub channelAddBadword(@) {
