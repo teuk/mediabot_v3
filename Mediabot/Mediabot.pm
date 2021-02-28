@@ -6310,13 +6310,15 @@ sub addResponder(@) {
 				
 				# Parse @tArgs
 				my $i;
+				my $j = 0;
 				my $sResponder;
 				my $sAnswer;
 				my $sepFound = 0;
 				for ($i=0;$i<=$#tArgs;$i++) {
 					if ($sepFound) {
-						if ($i==0) {
+						if ($j==0) {
 							$sAnswer = $tArgs[0];
+							$j++;
 						}
 						else {
 							$sAnswer .= " " . $tArgs[$i];
