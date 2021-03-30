@@ -5856,7 +5856,12 @@ sub displayWeather(@) {
 						$line =~ s/^\"//;
 						$line =~ s/\"$//;
 						$line =~ s/\+/ /g;
-						botPrivmsg($self,$sChannel,$line);
+						unless ($line =~ /^Unknown location/) {
+							botPrivmsg($self,$sChannel,$line);
+						}
+						else {
+							botPrivmsg($self,$sChannel,"Service unavailable, try again later");
+						}
 					}
 					else {
 						botPrivmsg($self,$sChannel,"No answer from http://wttr.in for $sCity. Try again in a few seconds.");
