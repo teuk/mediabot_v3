@@ -1162,6 +1162,9 @@ sub mbCommandPublic(@) {
 		case /^moduser$/i 		{
 														mbModUser($self,$message,$sNick,$sChannel,@tArgs);
 													}
+		case /^antifloodset$/i 		{
+																setChannelAntiFloodParams($self,$message,$sNick,$sChannel,@tArgs);
+															}
 		else									{
 														#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 														my $bFound = mbDbCommand($self,$message,$sChannel,$sNick,$sCommand,@tArgs);
@@ -1409,6 +1412,9 @@ sub mbCommandPrivate(@) {
 		case /^moduser$/i {
 												mbModUser($self,$message,$sNick,undef,@tArgs);
 											}
+		case /^antifloodset$/i 		{
+																setChannelAntiFloodParams($self,$message,$sNick,undef,@tArgs);
+															}
 		else							{
 													#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,undef,$sNick,$sCommand,@tArgs);
 													log_message($self,3,$message->prefix . " Private command '$sCommand' not found");
@@ -4982,68 +4988,66 @@ sub userTopSay(@) {
 					botNotice($self,$sNick,"Syntax: topsay [#channel] <nick>");
 					return undef;
 				}
-				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-					my $sQuery = "SELECT event_type,publictext,count(publictext) as hit FROM CHANNEL,CHANNEL_LOG WHERE (event_type='public' OR event_type='action') AND CHANNEL.id_channel=CHANNEL_LOG.id_channel AND name=? AND nick like ? GROUP BY publictext ORDER by hit DESC LIMIT 30";
-					my $sth = $self->{dbh}->prepare($sQuery);
-					unless ($sth->execute($sChannel,$tArgs[0])) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-					}
-					else {
-						my $sTopSay = $tArgs[0] . " : ";
-						my $sTopSayMax = $sTopSay;
-						my $i = 0;
-						while (my $ref = $sth->fetchrow_hashref()) {
-							my $publictext = $ref->{'publictext'};
-							my $event_type = $ref->{'event_type'};
-							my $hit = $ref->{'hit'};
-							$publictext =~ s/(.)/(ord($1) == 1) ? "" : $1/egs;
-							unless (($publictext =~ /^\s*$/) || ($publictext eq ':)') || ($publictext eq ';)') || ($publictext eq ':p') || ($publictext eq ':P') || ($publictext eq ':d') || ($publictext eq ':D') || ($publictext eq ':o') || ($publictext eq ':O') || ($publictext eq '(:') || ($publictext eq '(;') || ($publictext =~ /lol/i) || ($publictext eq 'xD') || ($publictext eq 'XD') || ($publictext eq 'heh') || ($publictext eq 'hah') || ($publictext eq 'huh') || ($publictext eq 'hih') || ($publictext eq '!bang') || ($publictext eq '!reload') || ($publictext eq '!inventory') || ($publictext eq '!lastduck') || ($publictext eq '!tappe') || ($publictext eq '!duckstats') || ($publictext =~ /^!shop/i) || ($publictext eq '=D') || ($publictext eq '=)') || ($publictext eq ';p') || ($publictext eq ':>') || ($publictext eq ';>')) {
-								if ( $event_type eq "action" ) {
-									$sTopSayMax .= String::IRC->new("$publictext ($hit) ")->bold;
-									if (length($sTopSayMax) < 300) {
-										$sTopSay .= String::IRC->new("$publictext ($hit) ")->bold;
-									}
-									else {
-										$i++;
-										last;
-									}
-								}
-								else {
-									$sTopSayMax .= "$publictext ($hit) ";
-									if (length($sTopSayMax) < 300) {
-										$sTopSay .= "$publictext ($hit) ";
-									}
-									else {
-										$i++;
-										last;
-									}
-								}
-								$i++;
-							}
-						}
-						if ( $i ) {
-							unless ($isPrivate) {
-								botPrivmsg($self,$sChannelDest,$sTopSay);
-							}
-							else {
-								botNotice($self,$sNick,$sTopSay);
-							}
-						}
-						else {
-							if (defined($sChannel)) {
-								botPrivmsg($self,$sChannelDest,"No results.");
-							}
-							else {
-								botNotice($self,$sNick,"No results.");
-							}
-						}
-						my $sNoticeMsg = $message->prefix . " topsay on " . $tArgs[0];
-						logBot($self,$message,$sChannel,"topsay",$sNoticeMsg);
-						$sth->finish;
-					}
+				unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+					$tArgs[0] = $sNick;
+				}
+				my $sQuery = "SELECT event_type,publictext,count(publictext) as hit FROM CHANNEL,CHANNEL_LOG WHERE (event_type='public' OR event_type='action') AND CHANNEL.id_channel=CHANNEL_LOG.id_channel AND name=? AND nick like ? GROUP BY publictext ORDER by hit DESC LIMIT 30";
+				my $sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($sChannel,$tArgs[0])) {
+					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
-					botNotice($self,$sNick,"Syntax: topsay [#channel] <nick>");
+					my $sTopSay = $tArgs[0] . " : ";
+					my $sTopSayMax = $sTopSay;
+					my $i = 0;
+					while (my $ref = $sth->fetchrow_hashref()) {
+						my $publictext = $ref->{'publictext'};
+						my $event_type = $ref->{'event_type'};
+						my $hit = $ref->{'hit'};
+						$publictext =~ s/(.)/(ord($1) == 1) ? "" : $1/egs;
+						unless (($publictext =~ /^\s*$/) || ($publictext eq ':)') || ($publictext eq ';)') || ($publictext eq ':p') || ($publictext eq ':P') || ($publictext eq ':d') || ($publictext eq ':D') || ($publictext eq ':o') || ($publictext eq ':O') || ($publictext eq '(:') || ($publictext eq '(;') || ($publictext =~ /lol/i) || ($publictext eq 'xD') || ($publictext eq 'XD') || ($publictext eq 'heh') || ($publictext eq 'hah') || ($publictext eq 'huh') || ($publictext eq 'hih') || ($publictext eq '!bang') || ($publictext eq '!reload') || ($publictext eq '!inventory') || ($publictext eq '!lastduck') || ($publictext eq '!tappe') || ($publictext eq '!duckstats') || ($publictext =~ /^!shop/i) || ($publictext eq '=D') || ($publictext eq '=)') || ($publictext eq ';p') || ($publictext eq ':>') || ($publictext eq ';>')) {
+							if ( $event_type eq "action" ) {
+								$sTopSayMax .= String::IRC->new("$publictext ($hit) ")->bold;
+								if (length($sTopSayMax) < 300) {
+									$sTopSay .= String::IRC->new("$publictext ($hit) ")->bold;
+								}
+								else {
+									$i++;
+									last;
+								}
+							}
+							else {
+								$sTopSayMax .= "$publictext ($hit) ";
+								if (length($sTopSayMax) < 300) {
+									$sTopSay .= "$publictext ($hit) ";
+								}
+								else {
+									$i++;
+									last;
+								}
+							}
+							$i++;
+						}
+					}
+					if ( $i ) {
+						unless ($isPrivate) {
+							botPrivmsg($self,$sChannelDest,$sTopSay);
+						}
+						else {
+							botNotice($self,$sNick,$sTopSay);
+						}
+					}
+					else {
+						if (defined($sChannel)) {
+							botPrivmsg($self,$sChannelDest,"No results.");
+						}
+						else {
+							botNotice($self,$sNick,"No results.");
+						}
+					}
+					my $sNoticeMsg = $message->prefix . " topsay on " . $tArgs[0];
+					logBot($self,$message,$sChannel,"topsay",$sNoticeMsg);
+					$sth->finish;
 				}
 			}
 			else {
@@ -8433,6 +8437,75 @@ sub checkAntiFlood(@) {
 		}
 	}
 	return 0;
+}
+
+sub setChannelAntiFloodParams(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my $sTargetChannel;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				my $id_channel = getIdChannel($self,$sChannel);
+				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
+					$sChannel = $tArgs[0];
+					$id_channel = getIdChannel($self,$sChannel);
+					unless (defined($id_channel)) {
+						botNotice($self,$sNick,"Channel $sTargetChannel is not registered to me");
+						return undef;
+					}
+					shift @tArgs;
+				}
+				unless (defined($sChannel) && ($sChannel ne "")) {
+					botNotice($self,$sNick,"Undefined channel");
+					botNotice($self,$sNick,"Syntax antifloodset [#channel] <max_msg> <period in sec> <timetowait in sec>");
+					return undef;
+				}
+				unless (defined($tArgs[0]) && ($tArgs[0] =~ /^[0-9]+$/)) {
+					botNotice($self,$sNick,"Syntax antifloodset [#channel] <max_msg> <period in sec> <timetowait in sec>");
+					return undef;
+				}
+				unless (defined($tArgs[1]) && ($tArgs[1] =~ /^[0-9]+$/)) {
+					botNotice($self,$sNick,"Syntax antifloodset [#channel] <max_msg> <period in sec> <timetowait in sec>");
+					return undef;
+				}
+				unless (defined($tArgs[2]) && ($tArgs[2] =~ /^[0-9]+$/)) {
+					botNotice($self,$sNick,"Syntax antifloodset [#channel] <max_msg> <period in sec> <timetowait in sec>");
+					return undef;
+				}
+				my $id_chanset_list = getIdChansetList($self,"AntiFlood");
+				my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
+				unless (defined($id_channel_set)) {
+					botNotice($self,$sNick,"To change antiflood parameters, first issue a chanset $sChannel +AntiFlood");
+					return undef;
+				}
+				else {
+					my $sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg_max=?,duration=?,timetowait=? WHERE id_channel=?";
+					my $sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute($tArgs[0],$tArgs[1],$tArgs[2],$id_channel)) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {
+						$sth->finish;
+						botNotice($self,$sNick,"Antiflood parameters set for $sChannel, $tArgs[0] messages max in $tArgs[1] seconds, wait for $tArgs[2] seconds");
+						return 0;
+					}
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " antifloodset command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " antifloodset command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
 }
 
 1;
