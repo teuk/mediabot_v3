@@ -5250,7 +5250,6 @@ sub mbDbCheckNickHostname(@) {
 
 sub userGreet(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $isPrivate = !defined($sChannel);
 	my $sChannelDest = $sChannel;
 	if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
@@ -5261,47 +5260,46 @@ sub userGreet(@) {
 		botNotice($self,$sNick,"Syntax (in private): greet #channel <nick>");
 		return undef;
 	}
+	my $sGreetNick = $sNick;
 	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-			my $sQuery = "SELECT greet FROM USER,USER_CHANNEL,CHANNEL WHERE USER.id_user=USER_CHANNEL.id_user AND CHANNEL.id_channel=USER_CHANNEL.id_channel AND name=? AND nickname=?";
-			my $sth = $self->{dbh}->prepare($sQuery);
-			unless ($sth->execute($sChannel,$tArgs[0])) {
-				log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-			}
-			else {
-				if (my $ref = $sth->fetchrow_hashref()) {
-					my $greet = $ref->{'greet'};
-					if (defined($greet)) {
-						unless ($isPrivate) {
-							botPrivmsg($self,$sChannelDest,"greet on $sChannel (" . $tArgs[0] . ") $greet");
-						}
-						else {
-							botNotice($self,$sNick,"greet on $sChannel (" . $tArgs[0] . ") $greet");
-						}
-					}
-					else {
-						unless ($isPrivate) {
-							botPrivmsg($self,$sChannelDest,"No greet for " . $tArgs[0] . " on $sChannel");
-						}
-						else {
-							botNotice($self,$sNick,"No greet for " . $tArgs[0] . " on $sChannel");
-						}
-					}
-				}
-				else {
-					unless ($isPrivate) {
-						botPrivmsg($self,$sChannelDest,"No greet for " . $tArgs[0] . " on $sChannel");
-					}
-					else {
-						botNotice($self,$sNick,"No greet for " . $tArgs[0] . " on $sChannel");
-					}
-				}
-				my $sNoticeMsg = $message->prefix . " greet on " . $tArgs[0] . " for $sChannel";
-				logBot($self,$message,$sChannelDest,"greet",$sNoticeMsg);
-				$sth->finish;
-		}
+		$sGreetNick = $tArgs[0];
+	}
+	my $sQuery = "SELECT greet FROM USER,USER_CHANNEL,CHANNEL WHERE USER.id_user=USER_CHANNEL.id_user AND CHANNEL.id_channel=USER_CHANNEL.id_channel AND name=? AND nickname=?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sChannel,$sGreetNick)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
-		botNotice($self,$sNick,"Syntax: greet [#channel] <nick>");
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $greet = $ref->{'greet'};
+			if (defined($greet)) {
+				unless ($isPrivate) {
+					botPrivmsg($self,$sChannelDest,"greet on $sChannel (" . $sGreetNick . ") $greet");
+				}
+				else {
+					botNotice($self,$sNick,"greet on $sChannel (" . $sGreetNick . ") $greet");
+				}
+			}
+			else {
+				unless ($isPrivate) {
+					botPrivmsg($self,$sChannelDest,"No greet for " . $sGreetNick . " on $sChannel");
+				}
+				else {
+					botNotice($self,$sNick,"No greet for " . $sGreetNick . " on $sChannel");
+				}
+			}
+		}
+		else {
+			unless ($isPrivate) {
+				botPrivmsg($self,$sChannelDest,"No greet for " . $sGreetNick . " on $sChannel");
+			}
+			else {
+				botNotice($self,$sNick,"No greet for " . $sGreetNick . " on $sChannel");
+			}
+		}
+		my $sNoticeMsg = $message->prefix . " greet on " . $sGreetNick . " for $sChannel";
+		logBot($self,$message,$sChannelDest,"greet",$sNoticeMsg);
+		$sth->finish;
 	}
 }
 
