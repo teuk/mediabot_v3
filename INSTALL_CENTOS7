@@ -2,7 +2,7 @@ INSTALLATION on Centos 7.6.1810
 
 # useradd mediabot
 
-Mediabot need several perl modules from cpan to run, they will be install as root user in order to be available for every user of the system
+Mediabot needs several perl modules from cpan to run, they will be install as root user in order to be available for every user of the system
 That's why it needs a temporary sudo access, to do so visudo is used
 If you prefer nano as an editor instead of vi, type the following commands before visudo
 (Thanks to Hero on Undernet who made me add this)
