@@ -1176,6 +1176,9 @@ sub mbCommandPublic(@) {
 																		$bFound = 1;
 																		displayBirthDate($self,$message,$sNick,$sChannel,@tArgs);
 																	}
+																	case /^who.. your daddy/i {
+																		botPrivmsg($self,$sChannel,"Well I'm registered to [k], but Te[u]K's my daddy (and a pain in the ass also pfff)");
+																	}
 																	case /.+\?/ {
 																		botPrivmsg($self,$sChannel,"I dunno $sNick coz I'm lame");
 																	}
@@ -6214,12 +6217,12 @@ sub displayDate(@) {
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sDefaultTZ = 'America/New_York';
 	if (defined($tArgs[0])) {
-		if ( $tArgs[0] =~ /^fr$/i ) {
-			$sDefaultTZ = 'Europe/Paris';
-		}
-		else {
-			botPrivmsg($self,$sChannel,"Invalid parameter");	
-			return undef;
+		switch($tArgs[0]) {
+			case /^fr$/i { $sDefaultTZ = 'Europe/Paris'; }
+			case /^Moscow$/i { $sDefaultTZ = 'Europe/Moscow'; }
+			else { 	botPrivmsg($self,$sChannel,"Invalid parameter");	
+							return undef;
+			}
 		}
 	}
 	my $time = DateTime->now( time_zone => $sDefaultTZ );
