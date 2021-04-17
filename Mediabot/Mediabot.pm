@@ -1176,8 +1176,14 @@ sub mbCommandPublic(@) {
 																		$bFound = 1;
 																		displayBirthDate($self,$message,$sNick,$sChannel,@tArgs);
 																	}
-																	case /^who.. your daddy/i {
-																		botPrivmsg($self,$sChannel,"Well I'm registered to [k], but Te[u]K's my daddy (and a pain in the ass also pfff)");
+																	case /who.. your daddy|who is your daddy/i {
+																		my $owner = getChannelOwner($self,$sChannel);
+																		unless (defined($owner) && ($owner ne "")) {
+																			botPrivmsg($self,$sChannel,"I have no clue of who is " . $sChannel . "'s owner, but Te[u]K's my daddy");
+																		}
+																		else {
+																			botPrivmsg($self,$sChannel,"Well I'm registered to $owner on $sChannel, but Te[u]K's my daddy");
+																		}
 																	}
 																	case /.+\?/ {
 																		botPrivmsg($self,$sChannel,"I dunno $sNick coz I'm lame");
@@ -8509,6 +8515,25 @@ sub setChannelAntiFloodParams(@) {
 			my $sNoticeMsg = $message->prefix . " antifloodset command attempt (user $sMatchingUserHandle is not logged in)";
 			noticeConsoleChan($self,$sNoticeMsg);
 			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
+}
+
+sub getChannelOwner(@) {
+	my ($self,$sChannel) = @_;
+	my $id_channel = getIdChannel($self,$sChannel);
+	my $sQuery = "SELECT nickname FROM USER,USER_CHANNEL WHERE USER.id_user=USER_CHANNEL.id_user AND id_channel=? AND USER_CHANNEL.level=500";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($id_channel)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		return undef;
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			return $ref->{'nickname'};
+		}
+		else {
 			return undef;
 		}
 	}
