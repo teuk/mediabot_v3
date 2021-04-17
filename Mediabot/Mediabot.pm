@@ -1165,6 +1165,9 @@ sub mbCommandPublic(@) {
 		case /^antifloodset$/i 		{
 																setChannelAntiFloodParams($self,$message,$sNick,$sChannel,@tArgs);
 															}
+		case /^leet$/i 				{
+														displayLeetString($self,$message,$sNick,$sChannel,@tArgs);
+													}	
 		else									{
 														#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 														my $bFound = mbDbCommand($self,$message,$sChannel,$sNick,$sCommand,@tArgs);
@@ -8536,6 +8539,31 @@ sub getChannelOwner(@) {
 		else {
 			return undef;
 		}
+	}
+}
+
+sub leet(@) {
+	my ($self,$input) = @_;
+	my @english = ("l","a", "e", "s", "S", "A", "o", "O", "t", "l", "ph", "y", "H", "W", "M", "D", "V", "x"); 
+	my @leet = ("7","4", "3", "z", "Z", "4", "0", "0", "+", "1", "f", "j", "|-|", "\\/\\/", "|\\/|", "|)", "\\/", "><");
+
+	my $i;
+	for ($i=0;$i<=$#english;$i++) {
+		my $c = $english[$i];
+		my $l = $leet[$i];
+		$input =~ s/$c/$l/g;
+	}
+	return $input;
+}
+
+sub displayLeetString(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+		botNotice($self,$sNick,"Syntax : leet <string>");
+		return undef;
+	}
+	else {
+		botPrivmsg($self,$sChannel,"l33t($sNick) : " . leet($self,join(" ",@tArgs)));
 	}
 }
 
