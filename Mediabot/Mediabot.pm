@@ -7460,17 +7460,17 @@ sub displayRadioCurrentSong(@) {
 	if (defined($sRadioCurrentSongTitle) && ($sRadioCurrentSongTitle ne "")) {
 		# Format message with irc colors
 		my $sMsgSong = "";
-		$sMsgSong .= String::IRC->new('[ ')->grey('black');
+		$sMsgSong .= String::IRC->new('[ ')->white('black');
 		$sMsgSong .= String::IRC->new("http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_URL")->orange('black');
-		$sMsgSong .= String::IRC->new(' ] ')->grey('black');
+		$sMsgSong .= String::IRC->new(' ] ')->white('black');
 		$sMsgSong .= String::IRC->new(' - ')->white('black');
 		$sMsgSong .= String::IRC->new(' [ ')->orange('black');
-		$sMsgSong .= String::IRC->new($sRadioCurrentSongTitle)->grey('black');
+		$sMsgSong .= String::IRC->new($sRadioCurrentSongTitle)->white('black');
 		$sMsgSong .= String::IRC->new(' ]')->orange('black');
 		if ( $bRadioLive ) {
 			$sMsgSong .= String::IRC->new(' - ')->white('black');
 			$sMsgSong .= String::IRC->new(' [ ')->orange('black');
-			$sMsgSong .= String::IRC->new('LIVE !')->grey('black');
+			$sMsgSong .= String::IRC->new('LIVE !')->white('black');
 			$sMsgSong .= String::IRC->new(' ]')->orange('black');
 		}
 		elsif (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
@@ -7495,7 +7495,7 @@ sub displayRadioCurrentSong(@) {
 				$sTimeRemaining .= "s";
 			}
 			$sTimeRemaining .= " remaining";
-			$sMsgSong .= String::IRC->new($sTimeRemaining)->grey('black');
+			$sMsgSong .= String::IRC->new($sTimeRemaining)->white('black');
 			$sMsgSong .= String::IRC->new(' ]')->orange('black');
 		}
 		botPrivmsg($self,$sChannel,"$sMsgSong");
