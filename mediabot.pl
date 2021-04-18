@@ -85,65 +85,6 @@ my $sServer;
 binmode STDOUT, ':utf8';
 binmode STDERR, ':utf8';
 
-# Get current version
-my ($cVerMajor,$cVerMinor,$cStable,$cVerDev);
-my ($gVerMajor,$gVerMinor,$gStable,$gVerDev);
-print time2str("[%d/%m/%Y %H:%M:%S]",time) . " Getting current version from VERSION file\n";
-unless (open VERSION, "VERSION") {
-	print STDERR time2str("[%d/%m/%Y %H:%M:%S]",time) . " Could not get version from VERSION file\n";
-	$MAIN_PROG_VERSION = "Undefined";
-}
-else {
-	my $line;
-	if (defined($line=<VERSION>)) {
-		chomp($line);
-		$MAIN_PROG_VERSION = $line;
-		($cVerMajor,$cVerMinor,$cStable,$cVerDev) = getVersion($MAIN_PROG_VERSION);
-	}
-	else {
-		$MAIN_PROG_VERSION = "Undefined";
-	}
-	if (defined($cVerMajor) && ($cVerMajor ne "") && defined($cVerMinor) && ($cVerMinor ne "") && defined($cStable) && ($cStable ne "")) {
-		print time2str("[%d/%m/%Y %H:%M:%S]",time) . " -> Mediabot $cStable version $cVerMajor.$cVerMinor " . ((defined($cVerDev) && ($cVerDev ne "")) ? "($cVerDev)" : "") . "\n";
-	}
-	else {
-		print time2str("[%d/%m/%Y %H:%M:%S]",time) . " -> Mediabot unknown version detected : $MAIN_PROG_VERSION\n";
-	}
-}
-
-unless ( $MAIN_PROG_VERSION eq "Undefined" ) {
-	# Check for latest version
-	print time2str("[%d/%m/%Y %H:%M:%S]",time) . " Checking latest version from github (https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION)\n";
-	unless (open GITVERSION, "curl -f -s https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION |") {
-		print STDERR time2str("[%d/%m/%Y %H:%M:%S]",time) . " Could not get version from github\n";
-		$MAIN_GIT_VERSION = "Undefined";
-	}
-	else {
-		my $line;
-		if (defined($line=<GITVERSION>)) {
-			chomp($line);
-			$MAIN_GIT_VERSION = $line;
-			($gVerMajor,$gVerMinor,$gStable,$gVerDev) = getVersion($MAIN_GIT_VERSION);
-			if (defined($gVerMajor) && ($gVerMajor ne "") && defined($gVerMinor) && ($gVerMinor ne "") && defined($gStable) && ($gStable ne "")) {
-				print time2str("[%d/%m/%Y %H:%M:%S]",time) . " -> Mediabot github $cStable version $gVerMajor.$gVerMinor " . ((defined($gVerDev) && ($gVerDev ne "")) ? "($cVerDev)" : "") . "\n";
-				if ( $MAIN_PROG_VERSION eq $MAIN_GIT_VERSION ) {
-					print time2str("[%d/%m/%Y %H:%M:%S]",time) . " Mediabot is up to date\n";
-				}
-				else {
-					print time2str("[%d/%m/%Y %H:%M:%S]",time) . " Mediabot should be updated to $cStable version $gVerMajor.$gVerMinor " . ((defined($gVerDev) && ($gVerDev ne "")) ? "($cVerDev)" : "") . "\n";
-				}
-			}
-			else {
-				print time2str("[%d/%m/%Y %H:%M:%S]",time) . " Mediabot unknown git version detected : $MAIN_GIT_VERSION\n";
-			}
-		}
-		else {
-			$MAIN_GIT_VERSION = "Undefined";
-			print time2str("[%d/%m/%Y %H:%M:%S]",time) . " -> Mediabot undefined git version detected ($MAIN_GIT_VERSION)\n";
-		}
-	}
-}
-
 # Check command line parameters
 my $result = GetOptions (
         "conf=s" => \$CONFIG_FILE,
@@ -156,21 +97,8 @@ unless (defined($CONFIG_FILE)) {
         usage("You must specify a config file");
 }
 
-# Daemon mode actions
-if ( $MAIN_PROG_DAEMON ) {
-		print STDERR "Mediabot v$MAIN_PROG_VERSION starting in daemon mode\n";
-		umask 0;
-		open STDIN, '/dev/null'   or die "Can't read /dev/null: $!";
-		open STDOUT, '>/dev/null' or die "Can't write to /dev/null: $!";
-		open STDERR, '>/dev/null' or die "Can't write to /dev/null: $!";
-		defined(my $pid = fork)   or die "Can't fork: $!";
-		exit if $pid;
-		setsid                    or die "Can't start a new session: $!";
-}
-
 my $mediabot = Mediabot->new({
 	config_file => $CONFIG_FILE,
-	main_prog_version => $MAIN_PROG_VERSION,
 	server => $sServer,
 });
 
@@ -180,11 +108,48 @@ $mediabot->readConfigFile();
 # Init log file
 $mediabot->init_log();
 
+# Check if the bot is already running
+my $pid = $mediabot->getPidFromFile();
+if (defined($pid) && ($pid ne "")) {
+	unless (open CHECKPID, "ps -eaf | grep -v grep | grep $pid |") {
+		$mediabot->log_message(0,"Could not check if process $pid is running");
+	}
+	else {
+		my $line;
+		if (defined($line=<CHECKPID>)) {
+			chomp($line);
+			close CHECKPID;
+			$mediabot->log_message(0,"Mediabot is already running with pid : $pid");
+			$mediabot->log_message(0,"$line");
+			$mediabot->log_message(0,"Either kill the process $pid or delete file " . $mediabot->getPidFile() . " if you know what you are doing");
+			$mediabot->clean_and_exit(1);
+		}
+	}
+}
+
+($MAIN_PROG_VERSION,$MAIN_GIT_VERSION) = $mediabot->getVersion();
+
 # Check config
 if ( $MAIN_PROG_CHECK_CONFIG != 0 ) {
-	$mediabot->getConfig();
+	$mediabot->dumpConfig();
 	$mediabot->clean_and_exit(0);
 }
+
+# Daemon mode actions
+if ( $MAIN_PROG_DAEMON ) {
+		$mediabot->log_message(0,"Mediabot v$MAIN_PROG_VERSION starting in daemon mode check " . $mediabot->getLogFile() . " for more details");
+		umask 0;
+		open STDIN, '/dev/null'   or die "Can't read /dev/null: $!";
+		open STDOUT, '>/dev/null' or die "Can't write to /dev/null: $!";
+		open STDERR, '>/dev/null' or die "Can't write to /dev/null: $!";
+		defined(my $pid = fork)   or die "Can't fork: $!";
+		exit if $pid;
+		setsid                    or die "Can't start a new session: $!";
+}
+
+my $sStartedMode = ( $MAIN_PROG_DAEMON ? "background" : "foreground");
+my $MAIN_PROG_DEBUG = $mediabot->getDebugLevel();
+$mediabot->log_message(0,"Mediabot v$MAIN_PROG_VERSION started in $sStartedMode with debug level $MAIN_PROG_DEBUG");
 
 # Database connection
 $mediabot->dbConnect();
@@ -926,23 +891,3 @@ sub reconnect(@) {
 	$loop->run;
 }
 
-sub getVersion(@) {
-	my ($sVersion) = @_;
-	my ($str1,$str2) = split(/\./,$sVersion);
-	if ( $str2 =~ /^[0-9]+$/) {
-		# Stable version
-		#print time2str("[%d/%m/%Y %H:%M:%S]",time) . " [DEBUG1] getVersion() Mediabot stable $str1.$str2\n";
-		return ($str1,$str2,"stable",undef);
-	}
-	elsif ( $str2 =~ /dev/ ) {
-		# Devel version
-		my ($sMinor,$sReleaseDate) = split(/\-/,$str2);
-		$sMinor =~ s/dev//;
-		#print time2str("[%d/%m/%Y %H:%M:%S]",time) . " [DEBUG1] getVersion() Mediabot devel $str1.$sMinor ($sReleaseDate)\n";
-		return ($str1,$sMinor,"devel",$sReleaseDate);
-	}
-	else {
-		#print time2str("[%d/%m/%Y %H:%M:%S]",time) . " [DEBUG1] getVersion() Mediabot unknown version : $sVersion\n";
-		return (undef,undef,undef,undef);
-	}
-}

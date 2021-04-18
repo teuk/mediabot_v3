@@ -24,7 +24,6 @@ sub new {
 	my ($class,$args) = @_;
 	my $self = bless {
 		config_file => $args->{config_file},
-		main_prog_version => $args->{main_prog_version},
 		server => $args->{server},
 	}, $class;
 }
@@ -43,7 +42,106 @@ sub readConfigFile(@) {
 	$self->{cfg} = $cfg;
 }
 
-sub getConfig(@) {
+sub getVersion(@) {
+	my $self = shift;
+	my ($MAIN_PROG_VERSION,$MAIN_GIT_VERSION);
+	my ($cVerMajor,$cVerMinor,$cStable,$cVerDev);
+	my ($gVerMajor,$gVerMinor,$gStable,$gVerDev);
+	
+	# Get current version
+	log_message($self,0,"Getting current version from VERSION file");
+	unless (open VERSION, "VERSION") {
+		log_message($self,0,"Could not get version from VERSION file");
+		$MAIN_PROG_VERSION = "Undefined";
+	}
+	else {
+		my $line;
+		if (defined($line=<VERSION>)) {
+			chomp($line);
+			$MAIN_PROG_VERSION = $line;
+			($cVerMajor,$cVerMinor,$cStable,$cVerDev) = getDetailedVersion($self,$MAIN_PROG_VERSION);
+		}
+		else {
+			$MAIN_PROG_VERSION = "Undefined";
+		}
+		if (defined($cVerMajor) && ($cVerMajor ne "") && defined($cVerMinor) && ($cVerMinor ne "") && defined($cStable) && ($cStable ne "")) {
+			log_message($self,0,"-> Mediabot $cStable version $cVerMajor.$cVerMinor " . ((defined($cVerDev) && ($cVerDev ne "")) ? "($cVerDev)" : ""));
+		}
+		else {
+			log_message($self,0,"-> Mediabot unknown version detected : $MAIN_PROG_VERSION");
+		}
+	}
+
+	unless ( $MAIN_PROG_VERSION eq "Undefined" ) {
+		# Check for latest version
+		log_message($self,0,"Checking latest version from github (https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION)");
+		unless (open GITVERSION, "curl -f -s https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION |") {
+			log_message($self,0,"Could not get version from github");
+			$MAIN_GIT_VERSION = "Undefined";
+		}
+		else {
+			my $line;
+			if (defined($line=<GITVERSION>)) {
+				chomp($line);
+				$MAIN_GIT_VERSION = $line;
+				($gVerMajor,$gVerMinor,$gStable,$gVerDev) = getDetailedVersion($self,$MAIN_GIT_VERSION);
+				if (defined($gVerMajor) && ($gVerMajor ne "") && defined($gVerMinor) && ($gVerMinor ne "") && defined($gStable) && ($gStable ne "")) {
+					log_message($self,0,"-> Mediabot github $cStable version $gVerMajor.$gVerMinor " . ((defined($gVerDev) && ($gVerDev ne "")) ? "($cVerDev)" : ""));
+					if ( $MAIN_PROG_VERSION eq $MAIN_GIT_VERSION ) {
+						log_message($self,0,"Mediabot is up to date");
+					}
+					else {
+						log_message($self,0,"Mediabot should be updated to $cStable version $gVerMajor.$gVerMinor " . ((defined($gVerDev) && ($gVerDev ne "")) ? "($cVerDev)" : ""));
+					}
+				}
+				else {
+					log_message($self,0,"Mediabot unknown git version detected : $MAIN_GIT_VERSION");
+				}
+			}
+			else {
+				$MAIN_GIT_VERSION = "Undefined";
+				log_message($self,0,"-> Mediabot undefined git version detected ($MAIN_GIT_VERSION)");
+			}
+		}
+	}
+	$self->{'main_prog_version'} = $MAIN_PROG_VERSION;
+	return ($MAIN_PROG_VERSION,$MAIN_GIT_VERSION);
+}
+
+sub getDetailedVersion(@) {
+	my ($self,$sVersion) = @_;
+	my ($str1,$str2) = split(/\./,$sVersion);
+	if ( $str2 =~ /^[0-9]+$/) {
+		# Stable version
+		#print time2str("[%d/%m/%Y %H:%M:%S]",time) . " [DEBUG1] getVersion() Mediabot stable $str1.$str2\n";
+		return ($str1,$str2,"stable",undef);
+	}
+	elsif ( $str2 =~ /dev/ ) {
+		# Devel version
+		my ($sMinor,$sReleaseDate) = split(/\-/,$str2);
+		$sMinor =~ s/dev//;
+		#print time2str("[%d/%m/%Y %H:%M:%S]",time) . " [DEBUG1] getVersion() Mediabot devel $str1.$sMinor ($sReleaseDate)\n";
+		return ($str1,$sMinor,"devel",$sReleaseDate);
+	}
+	else {
+		#print time2str("[%d/%m/%Y %H:%M:%S]",time) . " [DEBUG1] getVersion() Mediabot unknown version : $sVersion\n";
+		return (undef,undef,undef,undef);
+	}
+}
+
+sub getDebugLevel(@) {
+	my $self = shift;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	return $MAIN_CONF{'main.MAIN_PROG_DEBUG'};
+}
+
+sub getLogFile(@) {
+	my $self = shift;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	return $MAIN_CONF{'main.MAIN_LOG_FILE'};
+}
+
+sub dumpConfig(@) {
 	my $self = shift;
 	print STDERR Dumper($self->{MAIN_CONF});
 }
@@ -58,7 +156,32 @@ sub getMainConfCfg(@) {
 	return $self->{cfg};
 }
 
+sub getPidFile(@) {
+	my $self = shift;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	return $MAIN_CONF{'main.MAIN_PID_FILE'};
+}
 
+sub getPidFromFile(@) {
+	my $self = shift;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $pidfile = $MAIN_CONF{'main.MAIN_PID_FILE'};
+	unless (open PIDFILE, $pidfile) {
+		return undef;
+	}
+	else {
+		my $line;
+		if (defined($line=<PIDFILE>)) {
+			chomp($line);
+			close PIDFILE;
+			return $line;
+		}
+		else {
+			log_message($self,1,"getPidFromFile() couldn't read PID from $pidfile");
+			return undef;
+		}
+	}
+}
 
 sub init_log(@) {
 	my ($self) = shift;
