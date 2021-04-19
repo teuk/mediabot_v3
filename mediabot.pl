@@ -147,6 +147,9 @@ if ( $MAIN_PROG_DAEMON ) {
 		setsid                    or die "Can't start a new session: $!";
 }
 
+# Catch signals
+$SIG{HUP}  = \&catch_hup;
+
 my $sStartedMode = ( $MAIN_PROG_DAEMON ? "background" : "foreground");
 my $MAIN_PROG_DEBUG = $mediabot->getDebugLevel();
 $mediabot->log_message(0,"Mediabot v$MAIN_PROG_VERSION started in $sStartedMode with debug level $MAIN_PROG_DEBUG");
@@ -241,9 +244,6 @@ sub usage(@) {
 sub on_timer_tick(@) {
 	my @params = @_;
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
-	#$mediabot->log_message(3,"---------------------------------------------------------------");
-	#$mediabot->log_message(3,Dumper(@params));
-	#$mediabot->log_message(3,"---------------------------------------------------------------");
 	$mediabot->log_message(5,"on_timer_tick() tick");
 	# update pid file
 	my $sPidFilename = $MAIN_CONF{'main.MAIN_PID_FILE'};
@@ -891,3 +891,7 @@ sub reconnect(@) {
 	$loop->run;
 }
 
+sub catch_hup(@) {
+	$mediabot->readConfigFile();
+	$mediabot->noticeConsoleChan("Caught HUP and successfully rehashed")
+}

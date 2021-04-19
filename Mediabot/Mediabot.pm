@@ -568,7 +568,6 @@ sub getConsoleChan(@) {
 
 sub noticeConsoleChan(@) {
 	my ($self,$sMsg) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($id_channel,$name,$chanmode,$key) = getConsoleChan($self);
 	unless(defined($name) && ($name ne "")) {
 		log_message($self,0,"No console chan defined ! Run ./configure to setup the bot");
@@ -1290,7 +1289,10 @@ sub mbCommandPublic(@) {
 															}
 		case /^leet$/i 				{
 														displayLeetString($self,$message,$sNick,$sChannel,@tArgs);
-													}	
+													}
+		case /^rehash/i				{
+														mbRehash($self,$message,$sNick,$sChannel,@tArgs);
+													}
 		else									{
 														#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 														my $bFound = mbDbCommand($self,$message,$sChannel,$sNick,$sCommand,@tArgs);
@@ -1550,6 +1552,9 @@ sub mbCommandPrivate(@) {
 		case /^antifloodset$/i 		{
 																setChannelAntiFloodParams($self,$message,$sNick,undef,@tArgs);
 															}
+		case /^rehash/i				{
+														mbRehash($self,$message,$sNick,undef,@tArgs);
+													}
 		else							{
 													#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,undef,$sNick,$sCommand,@tArgs);
 													log_message($self,3,$message->prefix . " Private command '$sCommand' not found");
@@ -8668,7 +8673,7 @@ sub getChannelOwner(@) {
 sub leet(@) {
 	my ($self,$input) = @_;
 	my @english = ("i","I","l","a", "e", "s", "S", "A", "o", "O", "t", "l", "ph", "y", "H", "W", "M", "D", "V", "x"); 
-	my @leet = ("1","1","7","4", "3", "z", "Z", "4", "0", "0", "+", "1", "f", "j", "|-|", "\\/\\/", "|\\/|", "|)", "\\/", "><");
+	my @leet = ("1","1","7","4", "3", "z", "Z", "4", "0", "0", "7", "1", "f", "j", "|-|", "\\/\\/", "|\\/|", "|)", "\\/", "><");
 
 	my $i;
 	for ($i=0;$i<=$#english;$i++) {
@@ -8687,6 +8692,37 @@ sub displayLeetString(@) {
 	}
 	else {
 		botPrivmsg($self,$sChannel,"l33t($sNick) : " . leet($self,join(" ",@tArgs)));
+	}
+}
+
+sub mbRehash(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				readConfigFile($self);
+				unless (defined($sChannel) && ($sChannel ne "")) {
+					botNotice($self,$sNick,"Successfully rehashed");
+				}
+				else {
+					botPrivmsg($self,$sChannel,"($sNick) Successfully rehashed");
+				}
+				logBot($self,$message,$sChannel,"rehash",@tArgs);
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " rehash command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " rehash command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
 	}
 }
 
