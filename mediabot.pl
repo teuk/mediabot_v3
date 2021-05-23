@@ -137,7 +137,7 @@ if ( $MAIN_PROG_CHECK_CONFIG != 0 ) {
 
 # Daemon mode actions
 if ( $MAIN_PROG_DAEMON ) {
-		$mediabot->log_message(0,"Mediabot v$MAIN_PROG_VERSION starting in daemon mode check " . $mediabot->getLogFile() . " for more details");
+		$mediabot->log_message(0,"Mediabot v$MAIN_PROG_VERSION starting in daemon mode, check " . $mediabot->getLogFile() . " for more details");
 		umask 0;
 		open STDIN, '/dev/null'   or die "Can't read /dev/null: $!";
 		open STDOUT, '>/dev/null' or die "Can't write to /dev/null: $!";

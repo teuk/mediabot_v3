@@ -1188,6 +1188,9 @@ sub mbCommandPublic(@) {
 		case /^owncmd$/i		{
 														mbDbOwnersCommand($self,$message,$sNick,$sChannel,@tArgs);
 												}
+		case /^holdcmd$/i		{
+														mbDbHoldCommand($self,$message,$sNick,$sChannel,@tArgs);
+												}
 		case /^addcatcmd$/i	{
 														mbDbAddCategoryCommand($self,$message,$sNick,$sChannel,@tArgs);
 												}
@@ -1491,6 +1494,9 @@ sub mbCommandPrivate(@) {
 												}
 		case /^owncmd$/i		{
 														mbDbOwnersCommand($self,$message,$sNick,undef,@tArgs);
+												}
+		case /^holdcmd$/i		{
+														mbDbHoldCommand($self,$message,$sNick,undef,@tArgs);
 												}
 		case /^addcatcmd$/i	{
 														mbDbAddCategoryCommand($self,$message,$sNick,undef,@tArgs);
@@ -4018,13 +4024,41 @@ sub userChannelInfo(@) {
 			else {
 				my $sChansetFlags = "Channel flags ";
 				my $i;
+				my $isChansetAntiFlood = 0;
 				while (my $ref = $sth->fetchrow_hashref()) {
 					my $chanset = $ref->{'chanset'};
+					if ( $chanset =~ /AntiFlood/i ) {
+						$isChansetAntiFlood = 1;
+					}
 					$sChansetFlags .= "+$chanset ";
 					$i++;
 				}
 				if ( $i ) {
 					botNotice($self,$sNick,$sChansetFlags);
+				}
+				if ( $isChansetAntiFlood ) {
+					my $id_channel = getIdChannel($self,$sChannel);
+					$sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
+					$sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute($id_channel)) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {
+						if (my $ref = $sth->fetchrow_hashref()) {
+							my $nbmsg_max = $ref->{'nbmsg_max'};
+							my $nbmsg = $ref->{'nbmsg'};
+							my $duration = $ref->{'duration'};
+							my $first = $ref->{'first'};
+							my $latest = $ref->{'latest'};
+							my $timetowait = $ref->{'timetowait'};
+							my $notification = $ref->{'notification'};
+							my $sNotification = ( $notification ? "on" : "off" );
+							botNotice($self,$sNick,"Antiflood parameters : $nbmsg_max messages in $duration seconds, wait for $timetowait seconds, notification : $sNotification");
+						}
+						else {
+							botNotice($self,$sNick,"Antiflood parameters : not set ?");
+						}
+					}
 				}
 			}
 		}
@@ -4989,6 +5023,35 @@ sub mbDbOwnersCommand(@) {
 		logBot($self,$message,$sChannel,"owncmd",undef);
 	}
 	$sth->finish;
+}
+
+sub mbDbHoldCommand(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
+				unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+					botNotice($self,$sNick,"Syntax: addcatcmd <new_catgeroy>");
+				}
+				else {
+					logBot($self,$message,$sChannel,"holdcmd",@tArgs);
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " addcatcmd command attempt (command level [Administrator] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " addcatcmd command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
 }
 
 sub mbDbAddCategoryCommand(@) {
@@ -8673,7 +8736,7 @@ sub getChannelOwner(@) {
 sub leet(@) {
 	my ($self,$input) = @_;
 	my @english = ("i","I","l","a", "e", "s", "S", "A", "o", "O", "t", "l", "ph", "y", "H", "W", "M", "D", "V", "x"); 
-	my @leet = ("1","1","7","4", "3", "z", "Z", "4", "0", "0", "7", "1", "f", "j", "|-|", "\\/\\/", "|\\/|", "|)", "\\/", "><");
+	my @leet = ("1","1","|","4", "3", "5", "Z", "4", "0", "0", "7", "1", "f", "Y", "|-|", "\\/\\/", "|\\/|", "|)", "\\/", "><");
 
 	my $i;
 	for ($i=0;$i<=$#english;$i++) {
