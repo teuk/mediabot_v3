@@ -1301,6 +1301,9 @@ sub mbCommandPublic(@) {
 		case /^play/i					{
 														playRadio($self,$message,$sNick,$sChannel,@tArgs);
 													}
+		case /^rplay/i					{
+														rplayRadio($self,$message,$sNick,$sChannel,@tArgs);
+													}	
 		case /^queue/i				{
 														queueRadio($self,$message,$sNick,$sChannel,@tArgs);
 													}
@@ -9314,6 +9317,16 @@ sub playRadio(@) {
 								}
 							}
 							if (defined($sYoutubeId) && ($sYoutubeId ne "")) {
+								my $ytUrl = "https://www.youtube.com/watch?v=$sYoutubeId";
+								my ($sDurationSeconds,$sMsgSong) = getYoutubeDetails($self,$ytUrl);
+								unless (defined($sMsgSong)) {
+									botPrivmsg($self,$sChannel,"($sNick radio play) Unknown Youtube link");
+									return undef;
+								}
+								unless ($sDurationSeconds < (12 * 60)) {
+									botPrivmsg($self,$sChannel,"($sNick radio play) Youtube link duration is too long, sorry");
+									return undef;
+								}
 								my $sQuery = "SELECT id_youtube,artist,title,folder,filename FROM MP3 WHERE id_youtube=?";
 								my $sth = $self->{dbh}->prepare($sQuery);
 								unless ($sth->execute($sYoutubeId)) {
@@ -9340,7 +9353,7 @@ sub playRadio(@) {
 											if (defined($id_youtube) && ($id_youtube ne "")) {
 												($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
 											}
-											botPrivmsg($self,$sChannel,"($sNick radio play youtube ID : $sText (cached) / $sMsgSong / Queued)");
+											botPrivmsg($self,$sChannel,"($sNick radio play youtube ID : $id_youtube (cached) / $sMsgSong / Queued)");
 											logBot($self,$message,$sChannel,"play",$sText);
 										}
 										else {
@@ -9473,7 +9486,8 @@ sub queueRadio(@) {
 						chomp($line);
 						log_message($self,3,$line);
 					}
-					botPrivmsg($self,$sChannel,radioMsg($self,"$line track(s) in queue"));
+					my $sNbTrack = ( $line > 0 ? "tracks" : "track" );
+					botPrivmsg($self,$sChannel,radioMsg($self,"$line $sNbTrack in queue"));
 					logBot($self,$message,$sChannel,"queue",@tArgs);
 				}
 				else {
@@ -9557,4 +9571,74 @@ sub radioMsg(@) {
 	return($sMsgSong);
 }
 
+sub rplayRadio(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $incomingDir = $MAIN_CONF{'radio.YOUTUBEDL_INCOMING'};
+	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
+	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
+				if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
+					my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 ORDER BY RAND() LIMIT 1";
+					my $sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute()) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {	
+						if (my $ref = $sth->fetchrow_hashref()) {
+							my $id_mp3 = $ref->{'id_mp3'};
+							my $id_youtube = $ref->{'id_youtube'};
+							my $ytDestinationFile = $ref->{'folder'} . "/" . $ref->{'filename'};
+							if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
+								unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.push $ytDestinationFile\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
+									log_message($self,0,"playRadio() Unable to connect to LIQUIDSOAP telnet port");
+									return undef;
+								}
+								my $line;
+								while (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+									chomp($line);
+									log_message($self,3,$line);
+								}
+								my $id_youtube = $ref->{'id_youtube'};
+								my $artist = ( defined($ref->{'artist'}) ? $ref->{'artist'} : "Unknown");
+								my $title = ( defined($ref->{'title'}) ? $ref->{'title'} : "Unknown");
+								my $duration = 0;
+								my $sMsgSong = "$artist - $title";
+								if (defined($id_youtube) && ($id_youtube ne "")) {
+									($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
+								}
+								botPrivmsg($self,$sChannel,"($sNick radio play) (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+								logBot($self,$message,$sChannel,"play",@tArgs);
+							}
+							else {
+								botPrivmsg($self,$sChannel,"($sNick radio play / could not queue)");
+								log_message($self,0,"playRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+							}
+						}
+					}
+					$sth->finish;
+				}
+				else {
+					log_message($self,0,"rplayRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " rplay command attempt (command level [Administrator] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " rplay command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
+}
 1;
