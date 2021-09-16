@@ -9245,13 +9245,14 @@ sub playRadio(@) {
 													if ($title eq $id_youtube) {
 														$title = "";
 													}
-													print 
+													my $id_mp3;
 													my $sQuery = "INSERT INTO MP3 (id_user,id_youtube,folder,filename,artist,title) VALUES (?,?,?,?,?,?)";
 													my $sth = $self->{dbh}->prepare($sQuery);
 													unless ($sth->execute($iMatchingUserId,$id_youtube,$folder,$filename,$artist,$title)) {
 														log_message($self,1,"Error : " . $DBI::errstr . " Query : " . $sQuery);
 													}
 													else {
+														$id_mp3 = $sth->{ mysql_insertid };
 														log_message($self,3,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
 													}
 													$sth->finish;
@@ -9265,7 +9266,7 @@ sub playRadio(@) {
 															chomp($line);
 															log_message($self,3,$line);
 														}
-														botPrivmsg($self,$sChannel,"($sNick radio play) Youtube ID : $id_youtube (downloaded) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+														botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $id_youtube (downloaded) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
 														logBot($self,$message,$sChannel,"play",$sText);
 													}
 													else {
@@ -9423,13 +9424,14 @@ sub playRadio(@) {
 														if ($title eq $id_youtube) {
 															$title = "";
 														}
-														print 
+														my $id_mp3 = 0;
 														my $sQuery = "INSERT INTO MP3 (id_user,id_youtube,folder,filename,artist,title) VALUES (?,?,?,?,?,?)";
 														my $sth = $self->{dbh}->prepare($sQuery);
 														unless ($sth->execute($iMatchingUserId,$id_youtube,$folder,$filename,$artist,$title)) {
 															log_message($self,1,"Error : " . $DBI::errstr . " Query : " . $sQuery);
 														}
 														else {
+															$id_mp3 = $sth->{ mysql_insertid };
 															log_message($self,3,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
 														}
 														$sth->finish;
@@ -9443,7 +9445,7 @@ sub playRadio(@) {
 																chomp($line);
 																log_message($self,3,$line);
 															}
-															botPrivmsg($self,$sChannel,"($sNick radio play) Youtube ID : $id_youtube (downloaded) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
+															botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $id_youtube (downloaded) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
 															logBot($self,$message,$sChannel,"play",$sText);
 														}
 														else {
