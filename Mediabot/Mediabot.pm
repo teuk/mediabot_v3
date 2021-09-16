@@ -9658,47 +9658,100 @@ sub rplayRadio(@) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
 				if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-					my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 ORDER BY RAND() LIMIT 1";
-					my $sth = $self->{dbh}->prepare($sQuery);
-					unless ($sth->execute()) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-					}
-					else {	
-						if (my $ref = $sth->fetchrow_hashref()) {
-							my $id_mp3 = $ref->{'id_mp3'};
-							my $id_youtube = $ref->{'id_youtube'};
-							my $ytDestinationFile = $ref->{'folder'} . "/" . $ref->{'filename'};
-							if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-								unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.push $ytDestinationFile\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
-									log_message($self,0,"playRadio() Unable to connect to LIQUIDSOAP telnet port");
-									return undef;
-								}
-								my $line;
-								while (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
-									chomp($line);
-									log_message($self,3,$line);
-								}
+					if (defined($tArgs[0]) && ($tArgs[0] eq "user") && defined($tArgs[1]) && ($tArgs[1] ne "")) {
+						my $id_user = getIdUser($self,$tArgs[1]);
+						unless (defined($id_user)) {
+							botPrivmsg($self,$sChannel,"($sNick radio play) Unknown user " . $tArgs[0]);
+							return undef;
+						}
+						my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE id_user=? ORDER BY RAND() LIMIT 1";
+						my $sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute($id_user)) {
+							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						}
+						else {	
+							if (my $ref = $sth->fetchrow_hashref()) {
+								my $id_mp3 = $ref->{'id_mp3'};
 								my $id_youtube = $ref->{'id_youtube'};
-								my $artist = ( defined($ref->{'artist'}) ? $ref->{'artist'} : "Unknown");
-								my $title = ( defined($ref->{'title'}) ? $ref->{'title'} : "Unknown");
-								my $duration = 0;
-								my $sMsgSong = "$artist - $title";
-								if (defined($id_youtube) && ($id_youtube ne "")) {
-									($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
-									botPrivmsg($self,$sChannel,"($sNick radio play) (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+								my $ytDestinationFile = $ref->{'folder'} . "/" . $ref->{'filename'};
+								if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
+									unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.push $ytDestinationFile\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
+										log_message($self,0,"playRadio() Unable to connect to LIQUIDSOAP telnet port");
+										return undef;
+									}
+									my $line;
+									while (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+										chomp($line);
+										log_message($self,3,$line);
+									}
+									my $id_youtube = $ref->{'id_youtube'};
+									my $artist = ( defined($ref->{'artist'}) ? $ref->{'artist'} : "Unknown");
+									my $title = ( defined($ref->{'title'}) ? $ref->{'title'} : "Unknown");
+									my $duration = 0;
+									my $sMsgSong = "$artist - $title";
+									if (defined($id_youtube) && ($id_youtube ne "")) {
+										($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
+										botPrivmsg($self,$sChannel,"($sNick radio play user " . $tArgs[1] . ") (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+									}
+									else {
+										botPrivmsg($self,$sChannel,"($sNick radio play user " . $tArgs[1] . ") (Library ID : $id_mp3) / $artist - $title / Queued");
+									}
+									logBot($self,$message,$sChannel,"rplay",@tArgs);
 								}
 								else {
-									botPrivmsg($self,$sChannel,"($sNick radio play) (Library ID : $id_mp3) / $artist - $title / Queued");
+									botPrivmsg($self,$sChannel,"($sNick radio play / could not queue)");
+									log_message($self,0,"playRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
 								}
-								logBot($self,$message,$sChannel,"rplay",@tArgs);
 							}
 							else {
-								botPrivmsg($self,$sChannel,"($sNick radio play / could not queue)");
-								log_message($self,0,"playRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+								botPrivmsg($self,$sChannel,"($sNick radio play user " . $tArgs[1] . " / no track found)");
 							}
 						}
+						$sth->finish;
 					}
-					$sth->finish;
+					else {
+						my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 ORDER BY RAND() LIMIT 1";
+						my $sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute()) {
+							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						}
+						else {	
+							if (my $ref = $sth->fetchrow_hashref()) {
+								my $id_mp3 = $ref->{'id_mp3'};
+								my $id_youtube = $ref->{'id_youtube'};
+								my $ytDestinationFile = $ref->{'folder'} . "/" . $ref->{'filename'};
+								if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
+									unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.push $ytDestinationFile\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
+										log_message($self,0,"playRadio() Unable to connect to LIQUIDSOAP telnet port");
+										return undef;
+									}
+									my $line;
+									while (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+										chomp($line);
+										log_message($self,3,$line);
+									}
+									my $id_youtube = $ref->{'id_youtube'};
+									my $artist = ( defined($ref->{'artist'}) ? $ref->{'artist'} : "Unknown");
+									my $title = ( defined($ref->{'title'}) ? $ref->{'title'} : "Unknown");
+									my $duration = 0;
+									my $sMsgSong = "$artist - $title";
+									if (defined($id_youtube) && ($id_youtube ne "")) {
+										($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
+										botPrivmsg($self,$sChannel,"($sNick radio play) (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+									}
+									else {
+										botPrivmsg($self,$sChannel,"($sNick radio play) (Library ID : $id_mp3) / $artist - $title / Queued");
+									}
+									logBot($self,$message,$sChannel,"rplay",@tArgs);
+								}
+								else {
+									botPrivmsg($self,$sChannel,"($sNick radio play / could not queue)");
+									log_message($self,0,"playRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+								}
+							}
+						}
+						$sth->finish;
+					}
 				}
 				else {
 					log_message($self,0,"rplayRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
