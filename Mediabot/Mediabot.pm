@@ -9013,13 +9013,15 @@ sub playRadio(@) {
 								chdir $incomingDir;
 							}
 							my $ytDestinationFile;
-							my $sQuery = "SELECT folder,filename FROM MP3 WHERE id_youtube=?";
+							my $sQuery = "SELECT id_mp3,folder,filename FROM MP3 WHERE id_youtube=?";
 							my $sth = $self->{dbh}->prepare($sQuery);
+							my $id_mp3;
 							unless ($sth->execute($sYoutubeId)) {
 								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								if (my $ref = $sth->fetchrow_hashref()) {
+									$id_mp3 = $ref->{'id_mp3'};
 									$ytDestinationFile = $ref->{'folder'} . "/" . $ref->{'filename'};
 								}
 							}
@@ -9034,7 +9036,7 @@ sub playRadio(@) {
 										chomp($line);
 										log_message($self,3,$line);
 									}
-									botPrivmsg($self,$sChannel,"($sNick radio play) ID : $sYoutubeId (cached) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
+									botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : ID : $sYoutubeId (cached) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
 									logBot($self,$message,$sChannel,"play",$sText);
 								}
 								else {
@@ -9079,10 +9081,12 @@ sub playRadio(@) {
 											print 
 											my $sQuery = "INSERT INTO MP3 (id_user,id_youtube,folder,filename,artist,title) VALUES (?,?,?,?,?,?)";
 											my $sth = $self->{dbh}->prepare($sQuery);
+											my $id_mp3 = 0;
 											unless ($sth->execute($iMatchingUserId,$id_youtube,$folder,$filename,$artist,$title)) {
 												log_message($self,1,"Error : " . $DBI::errstr . " Query : " . $sQuery);
 											}
 											else {
+												$id_mp3 = $sth->{ mysql_insertid };
 												log_message($self,3,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
 											}
 											$sth->finish;
@@ -9096,7 +9100,7 @@ sub playRadio(@) {
 													chomp($line);
 													log_message($self,3,$line);
 												}
-												botPrivmsg($self,$sChannel,"($sNick radio play) Youtube ID : $sYoutubeId (downloaded) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
+												botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $sYoutubeId (downloaded) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
 												logBot($self,$message,$sChannel,"play",$sText);
 											}
 											else {
@@ -9113,7 +9117,7 @@ sub playRadio(@) {
 						}
 					}
 					else {
-						if (defined($tArgs[0]) && ($tArgs[0] =~ /^id$/) && defined($tArgs[1]) && ($tArgs[1] =~ /^[0-9]*$/)) {
+						if (defined($tArgs[0]) && ($tArgs[0] =~ /^id$/) && defined($tArgs[1]) && ($tArgs[1] =~ /^[0-9]+$/)) {
 							my $sQuery = "SELECT id_youtube,artist,title,folder,filename FROM MP3 WHERE id_mp3=?";
 							my $sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($tArgs[1])) {
@@ -9139,10 +9143,10 @@ sub playRadio(@) {
 										my $sMsgSong = "$artist - $title";
 										if (defined($id_youtube) && ($id_youtube ne "")) {
 											($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
-											botPrivmsg($self,$sChannel,"($sNick radio play) library ID : " . $tArgs[1] . " (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+											botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : " . $tArgs[1] . " (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
 										}
 										else {
-											botPrivmsg($self,$sChannel,"($sNick radio play) library ID : " . $tArgs[1] . " (cached) / $sMsgSong / Queued");
+											botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : " . $tArgs[1] . " (cached) / $sMsgSong / Queued");
 										}
 										logBot($self,$message,$sChannel,"play",$sText);
 										return 1;
@@ -9185,7 +9189,7 @@ sub playRadio(@) {
 										if (defined($id_youtube) && ($id_youtube ne "")) {
 											($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
 										}
-										botPrivmsg($self,$sChannel,"($sNick radio play) youtube ID : $sText (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+										botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : " . $tArgs[1] . " Youtube ID : $sText (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
 										logBot($self,$message,$sChannel,"play",$sText);
 									}
 									else {
@@ -9276,7 +9280,7 @@ sub playRadio(@) {
 								}
 							}
 						}
-						else {
+						elsif (!($tArgs[0] =~ /^[0-9]+$/)) {
 							my $sYoutubeId;
 							my $sText = join("%20",@tArgs);
 							log_message($self,3,"radioplay() youtubeSearch() on $sText");
@@ -9336,7 +9340,7 @@ sub playRadio(@) {
 									botPrivmsg($self,$sChannel,"($sNick radio play) Youtube link duration is too long, sorry");
 									return undef;
 								}
-								my $sQuery = "SELECT id_youtube,artist,title,folder,filename FROM MP3 WHERE id_youtube=?";
+								my $sQuery = "SELECT id_mp3;id_youtube,artist,title,folder,filename FROM MP3 WHERE id_youtube=?";
 								my $sth = $self->{dbh}->prepare($sQuery);
 								unless ($sth->execute($sYoutubeId)) {
 									log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -9354,6 +9358,7 @@ sub playRadio(@) {
 												chomp($line);
 												log_message($self,3,$line);
 											}
+											my $id_mp3 = $ref->{'id_mp3'};
 											my $id_youtube = $ref->{'id_youtube'};
 											my $artist = ( defined($ref->{'artist'}) ? $ref->{'artist'} : "Unknown");
 											my $title = ( defined($ref->{'title'}) ? $ref->{'title'} : "Unknown");
@@ -9362,7 +9367,7 @@ sub playRadio(@) {
 											if (defined($id_youtube) && ($id_youtube ne "")) {
 												($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
 											}
-											botPrivmsg($self,$sChannel,"($sNick radio play) youtube ID : $id_youtube (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+											botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $id_youtube (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
 											logBot($self,$message,$sChannel,"play",$sText);
 										}
 										else {
@@ -9600,9 +9605,8 @@ sub nextRadio(@) {
 						chomp($line);
 						log_message($self,3,$line);
 					}
-					botPrivmsg($self,$sChannel,radioMsg($self,"Skipped track"));
 					logBot($self,$message,$sChannel,"next",@tArgs);
-					sleep(7);
+					sleep(6);
 					displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
 				}
 				else {
@@ -9727,7 +9731,7 @@ sub mp3(@) {
 					botNotice($self,$sNick,"Syntax : mp3 <title>");
 					return undef;
 				}
-				if ($tArgs[0] eq "-count") {
+				if ($tArgs[0] eq "count") {
 					my $sQuery = "SELECT count(*) as nbMp3 FROM MP3";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute()) {
@@ -9743,10 +9747,11 @@ sub mp3(@) {
 						}
 					}
 				}
-				else {
-					my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE title like ? LIMIT 1";
+				elsif ($tArgs[0] eq "id" && (defined($tArgs[1]) && ($tArgs[1] =~ /[0-9]+/))) {
+					my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE id_mp3=?";
+					log_message($self,3,"$sQuery = $sQuery");
 					my $sth = $self->{dbh}->prepare($sQuery);
-					unless ($sth->execute($sText)) {
+					unless ($sth->execute($tArgs[1])) {
 						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {	
@@ -9762,15 +9767,89 @@ sub mp3(@) {
 								botPrivmsg($self,$sChannel,"($sNick mp3 search) (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube");
 							}
 							else {
-								botPrivmsg($self,$sChannel,"($sNick mp3 search) (Library ID : $id_mp3) / $artist - $title");
+								botPrivmsg($self,$sChannel,"($sNick mp3 search) First result (Library ID : $id_mp3) / $artist - $title");
 							}
 							logBot($self,$message,$sChannel,"mp3",@tArgs);
 						}
 						else {
-							botPrivmsg($self,$sChannel,"($sNick mp3 search) $sText not found");
+							botPrivmsg($self,$sChannel,"($sNick mp3 search) ID " . $tArgs[1] . " not found");
 						}
 					}
 					$sth->finish;
+				}
+				else {
+					my $searchstring = $sText ;
+					$searchstring =~ s/\s/\%/;
+					my $nbMp3 = 0;
+					my $sQuery = "SELECT count(*) as nbMp3 FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sText . "%'";
+					log_message($self,3,"$sQuery = $sQuery");
+					my $sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute()) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {	
+						if (my $ref = $sth->fetchrow_hashref()) {
+							$nbMp3 = $ref->{'nbMp3'};
+						}
+					}
+					$sth->finish;
+					unless ($nbMp3 > 0 ) {
+						botPrivmsg($self,$sChannel,"($sNick mp3 search) $sText not found");
+						return undef;
+					}
+
+					$sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sText . "%' LIMIT 1";
+					log_message($self,3,"$sQuery = $sQuery");
+					$sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute()) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {	
+						if (my $ref = $sth->fetchrow_hashref()) {
+							my $sNbMp3 = ( $nbMp3 > 1 ? "matches" : "match" );
+							my $id_mp3 = $ref->{'id_mp3'};
+							my $id_youtube = $ref->{'id_youtube'};
+							my $artist = ( defined($ref->{'artist'}) ? $ref->{'artist'} : "Unknown");
+							my $title = ( defined($ref->{'title'}) ? $ref->{'title'} : "Unknown");
+							my $duration = 0;
+							my $sMsgSong = "$artist - $title";
+							if (defined($id_youtube) && ($id_youtube ne "")) {
+								($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
+								botPrivmsg($self,$sChannel,"($sNick mp3 search) $nbMp3 $sNbMp3, first result : (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube");
+							}
+							else {
+								botPrivmsg($self,$sChannel,"($sNick mp3 search) First result (Library ID : $id_mp3) / $artist - $title");
+							}
+							if ( $nbMp3 > 1 ) {
+								$sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sText . "%' LIMIT 10";
+								log_message($self,3,"$sQuery = $sQuery");
+								$sth = $self->{dbh}->prepare($sQuery);
+								unless ($sth->execute()) {
+									log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								}
+								else {
+									my $sOutput = "";
+									while (my $ref = $sth->fetchrow_hashref()) {
+										my $id_mp3 = $ref->{'id_mp3'};
+										my $id_youtube = $ref->{'id_youtube'};
+										my $artist = ( defined($ref->{'artist'}) ? $ref->{'artist'} : "Unknown");
+										my $title = ( defined($ref->{'title'}) ? $ref->{'title'} : "Unknown");
+										my $duration = 0;
+										my $sMsgSong = "$artist - $title";
+										if (defined($id_youtube) && ($id_youtube ne "")) {
+											($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
+										}
+										$sOutput .= "$id_mp3 ";
+									}
+									if ($nbMp3 > 10 ) {
+										$sOutput .= "And " . ( $nbMp3 - 10 ) . " more..."
+									}
+									botPrivmsg($self,$sChannel,"($sNick mp3 search) Next 10 Library IDs : " . $sOutput);
+								}
+								logBot($self,$message,$sChannel,"mp3",@tArgs);
+							}
+						}
+					}
 				}
 			}
 			else {
