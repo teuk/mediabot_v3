@@ -675,4 +675,34 @@ ALTER TABLE `CHANNEL_FLOOD`
 ALTER TABLE `CHANNEL_FLOOD`
   MODIFY `id_channel_flood` bigint(20) NOT NULL AUTO_INCREMENT;
 
+CREATE TABLE `MP3` (
+  `id_mp3` bigint(20) NOT NULL,
+  `id_user` bigint(20) NOT NULL,
+  `id_youtube` varchar(255) NOT NULL,
+  `folder` varchar(255) NOT NULL,
+  `filename` varchar(255) NOT NULL,
+  `artist` varchar(255) NOT NULL,
+  `title` varchar(255) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+--
+-- Index pour les tables déchargées
+--
+
+--
+-- Index pour la table `MP3`
+--
+ALTER TABLE `MP3`
+  ADD PRIMARY KEY (`id_mp3`);
+
+--
+-- AUTO_INCREMENT pour les tables déchargées
+--
+
+--
+-- AUTO_INCREMENT pour la table `MP3`
+--
+ALTER TABLE `MP3`
+  MODIFY `id_mp3` bigint(20) NOT NULL AUTO_INCREMENT;
+
 COMMIT;
