@@ -9483,6 +9483,23 @@ sub playRadio(@) {
 	}
 }
 
+sub queueCount(@) {
+	my ($self) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
+	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 | wc -w |") {
+		log_message($self,0,"queueCount() Unable to connect to LIQUIDSOAP telnet port");
+		return undef;
+	}
+	my $line;
+	if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+		chomp($line);
+		log_message($self,3,$line);
+	}
+	return $line;
+}
+
 sub queueRadio(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
@@ -9493,80 +9510,76 @@ sub queueRadio(@) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
 				if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-					unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 | wc -w |") {
-						log_message($self,0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
-						return undef;
-					}
-					my $line;
-					if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
-						chomp($line);
-						log_message($self,3,$line);
-					}
-					my $iNbTrack = $line;
-					my $sNbTrack = ( $line > 1 ? "tracks" : "track" );
-					#botPrivmsg($self,$sChannel,radioMsg($self,"$line $sNbTrack in queue"));
-					unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
-						log_message($self,0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
-						return undef;
-					}
-					if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
-						chomp($line);
-						$line =~ s/\r//;
-						$line =~ s/\n//;
-						log_message($self,3,$line);
-					}
-					if ($iNbTrack > 0) {
-						botPrivmsg($self,$sChannel,radioMsg($self,"$iNbTrack $sNbTrack in queue, RID : $line"));
-						my @RIDS = split(/ /,$line);
-						my $i;
-						for ($i=0;($i<3 && $i<=$#RIDS);$i++) {
-							unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"request.trace " . $RIDS[$i] . "\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
-								log_message($self,0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
-								return undef;
-							}
-							my $line;
-							if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
-								chomp($line);
-								$line =~ s/\r//;
-								$line =~ s/\n//;
-								$line =~ s/^.*\[\"//;
-								$line =~ s/\".*$//;
-								log_message($self,3,$line);
-								my $sFolder = dirname($line);
-								my $sFilename = basename($line);
-								my $sQuery = "SELECT artist,title FROM MP3 WHERE folder=? AND filename=?";
-								my $sth = $self->{dbh}->prepare($sQuery);
-								unless ($sth->execute($sFolder,$sFilename)) {
-									log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					my $iNbTrack = queueCount($self);
+					unless ( $iNbTrack == 0 ) {
+						my $sNbTrack = ( $iNbTrack > 1 ? "tracks" : "track" );
+						my $line;
+						unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
+							log_message($self,0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
+							return undef;
+						}
+						if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+							chomp($line);
+							$line =~ s/\r//;
+							$line =~ s/\n//;
+							log_message($self,3,$line);
+						}
+						if ($iNbTrack > 0) {
+							botPrivmsg($self,$sChannel,radioMsg($self,"$iNbTrack $sNbTrack in queue, RID : $line"));
+							my @RIDS = split(/ /,$line);
+							my $i;
+							for ($i=0;($i<3 && $i<=$#RIDS);$i++) {
+								unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"request.trace " . $RIDS[$i] . "\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
+									log_message($self,0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
+									return undef;
 								}
-								else {
-									if (my $ref = $sth->fetchrow_hashref()) {
-										my $title = $ref->{'title'};
-										my $artist = $ref->{'artist'};
-										if ($i == 0) {
-											botPrivmsg($self,$sChannel,"» $artist - $title");
-										}
-										else {
-											botPrivmsg($self,$sChannel,"└ $artist - $title");
-										}
+								my $line;
+								if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+									chomp($line);
+									$line =~ s/\r//;
+									$line =~ s/\n//;
+									$line =~ s/^.*\[\"//;
+									$line =~ s/\".*$//;
+									log_message($self,3,$line);
+									my $sFolder = dirname($line);
+									my $sFilename = basename($line);
+									my $sQuery = "SELECT artist,title FROM MP3 WHERE folder=? AND filename=?";
+									my $sth = $self->{dbh}->prepare($sQuery);
+									unless ($sth->execute($sFolder,$sFilename)) {
+										log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 									}
 									else {
-										if ($i == 0) {
-											botPrivmsg($self,$sChannel,"» $sFilename");
+										if (my $ref = $sth->fetchrow_hashref()) {
+											my $title = $ref->{'title'};
+											my $artist = $ref->{'artist'};
+											if ($i == 0) {
+												botPrivmsg($self,$sChannel,"» $artist - $title");
+											}
+											else {
+												botPrivmsg($self,$sChannel,"└ $artist - $title");
+											}
 										}
 										else {
-											botPrivmsg($self,$sChannel,"└ $sFilename");
+											if ($i == 0) {
+												botPrivmsg($self,$sChannel,"» $sFilename");
+											}
+											else {
+												botPrivmsg($self,$sChannel,"└ $sFilename");
+											}
 										}
 									}
+									$sth->finish;
 								}
-								$sth->finish;
 							}
 						}
+						else {
+							botPrivmsg($self,$sChannel,radioMsg($self,"No track in queue"));
+						}
+						logBot($self,$message,$sChannel,"queue",@tArgs);
 					}
 					else {
-						botPrivmsg($self,$sChannel,radioMsg($self,"No track in queue"));
+						botPrivmsg($self,$sChannel,radioMsg($self,"Affiche-moi la queue de la PL Globale asti !"));
 					}
-					logBot($self,$message,$sChannel,"queue",@tArgs);
 				}
 				else {
 					log_message($self,0,"queueRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
