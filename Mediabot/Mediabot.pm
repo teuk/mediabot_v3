@@ -9340,7 +9340,7 @@ sub playRadio(@) {
 									botPrivmsg($self,$sChannel,"($sNick radio play) Youtube link duration is too long, sorry");
 									return undef;
 								}
-								my $sQuery = "SELECT id_mp3;id_youtube,artist,title,folder,filename FROM MP3 WHERE id_youtube=?";
+								my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE id_youtube=?";
 								my $sth = $self->{dbh}->prepare($sQuery);
 								unless ($sth->execute($sYoutubeId)) {
 									log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
