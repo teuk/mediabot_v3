@@ -512,8 +512,10 @@ sub on_message_PRIVMSG(@) {
 		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
 			$mediabot->log_message(0,"[LIVE] $where: <$who> $what");
 		}
-		my ($sCommand,@tArgs) = split(/\s+/,$what);
-		if (substr($what, 0, 1) eq $MAIN_CONF{'main.MAIN_PROG_CMD_CHAR'}) {
+		my $line = $what;
+		$line =~ s/^\s+//;
+		my ($sCommand,@tArgs) = split(/\s+/,$line);
+		if (substr($sCommand, 0, 1) eq $MAIN_CONF{'main.MAIN_PROG_CMD_CHAR'}) {
         $sCommand = substr($sCommand,1);
         $sCommand =~ tr/A-Z/a-z/;
         if (defined($sCommand) && ($sCommand ne "")) {
