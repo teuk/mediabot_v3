@@ -9513,6 +9513,7 @@ sub queueRadio(@) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
 				my $iHarborId = getHarBorId($self);
+				my $bHarbor = 0;
 				if (defined($iHarborId) && ($iHarborId ne "")) {
 					log_message($self,3,"Harbord ID : $iHarborId");
 					if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
@@ -9528,6 +9529,7 @@ sub queueRadio(@) {
 							log_message($self,3,$line);
 							unless ($line =~ /^no source client connected/) {
 								botPrivmsg($self,$sChannel,radioMsg($self,"Live on air - " . getRadioCurrentSong($self)));
+								$bHarbor = 1;
 							}
 						}
 					}
@@ -9605,7 +9607,9 @@ sub queueRadio(@) {
 					}
 				}
 				else {
-					botPrivmsg($self,$sChannel,radioMsg($self,"Global playlist on air - " . getRadioCurrentSong($self)));
+					unless ( $bHarbor ) {
+						botPrivmsg($self,$sChannel,radioMsg($self,"Global playlist on air - " . getRadioCurrentSong($self)));
+					}
 				}
 				logBot($self,$message,$sChannel,"queue",@tArgs);
 			}
