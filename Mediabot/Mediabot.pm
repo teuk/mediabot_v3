@@ -1298,20 +1298,23 @@ sub mbCommandPublic(@) {
 		case /^rehash/i								{
 														mbRehash($self,$message,$sNick,$sChannel,@tArgs);
 													}
-		case /^play/i								{
+		case /^play$/i								{
 														playRadio($self,$message,$sNick,$sChannel,@tArgs);
 													}
-		case /^rplay/i								{
+		case /^rplay$/i								{
 														rplayRadio($self,$message,$sNick,$sChannel,@tArgs);
 													}	
-		case /^queue/i								{
+		case /^queue$/i								{
 														queueRadio($self,$message,$sNick,$sChannel,@tArgs);
 													}
-		case /^next/i								{
+		case /^next$/i								{
 														nextRadio($self,$message,$sNick,$sChannel,@tArgs);
 													}
-		case /^mp3/i								{		
+		case /^mp3$/i								{		
 														mp3($self,$message,$sNick,$sChannel,@tArgs);
+													}
+		case /^exec$/i								{		
+														mbExec($self,$message,$sNick,$sChannel,@tArgs);
 													}
 		else									{
 														#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
@@ -9773,7 +9776,7 @@ sub rplayRadio(@) {
 						$sth->finish;
 					}
 					elsif (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-						my $sText = join (" ",@tArgs);
+						my $sText = join ("%",@tArgs);
 						my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sText . "%' ORDER BY RAND() LIMIT 1";
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute()) {
@@ -9981,7 +9984,7 @@ sub mp3(@) {
 								botPrivmsg($self,$sChannel,"($sNick mp3 search) $nbMp3 $sNbMp3, first result : (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube");
 							}
 							else {
-								botPrivmsg($self,$sChannel,"($sNick mp3 search) First result (Library ID : $id_mp3) / $artist - $title");
+								botPrivmsg($self,$sChannel,"($sNick mp3 search) $nbMp3 $sNbMp3, first result : (Library ID : $id_mp3) / $artist - $title");
 							}
 							if ( $nbMp3 > 1 ) {
 								$sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sText . "%' LIMIT 10";
@@ -10029,6 +10032,50 @@ sub mp3(@) {
 			return undef;
 		}
 	}
+}
+
+sub mbExec(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Owner")) {
+				my $sText = join (" ",@tArgs);
+				unless (defined($sText) && ($sText ne "")) {
+					botNotice($self,$sNick,"Syntax : exec <command> [");
+					return undef;
+				}
+				unless (open CMD, "$sText | tail -n 3 |") {
+					log_message($self,3,"mbExec could not issue $sText command");
+				}
+				else {
+					my $line;
+					my $i = 0;
+					while (defined($line=<CMD>)) {
+						chomp($line);
+						botPrivmsg($self,$sChannel,"$i: $line");
+						if ($i > 3) {
+							close CMD;
+							return undef;
+						}
+						$i++;
+					}
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " exec command attempt (command level [Owner] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " exec command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}	
 }
 
 1;
