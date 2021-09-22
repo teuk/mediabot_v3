@@ -9528,7 +9528,7 @@ sub queueRadio(@) {
 							$line =~ s/\n//;
 							log_message($self,3,$line);
 							unless ($line =~ /^no source client connected/) {
-								botPrivmsg($self,$sChannel,radioMsg($self,"Live on air - " . getRadioCurrentSong($self)));
+								botPrivmsg($self,$sChannel,radioMsg($self,"Live - " . getRadioCurrentSong($self)));
 								$bHarbor = 1;
 							}
 						}
@@ -9608,7 +9608,7 @@ sub queueRadio(@) {
 				}
 				else {
 					unless ( $bHarbor ) {
-						botPrivmsg($self,$sChannel,radioMsg($self,"Global playlist on air - " . getRadioCurrentSong($self)));
+						botPrivmsg($self,$sChannel,radioMsg($self,"Global playlist - " . getRadioCurrentSong($self)));
 					}
 				}
 				logBot($self,$message,$sChannel,"queue",@tArgs);
