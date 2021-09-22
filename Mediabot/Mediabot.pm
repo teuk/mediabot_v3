@@ -9004,7 +9004,7 @@ sub playRadio(@) {
 						}
 						else {
 							unless ($sDurationSeconds < (12 * 60)) {
-								botPrivmsg($self,$sChannel,"($sNick radio play) Youtube link duration is too long, sorry");
+								botPrivmsg($self,$sChannel,"($sNick radio play) Youtube link duration is too long ($sDurationSeconds seconds), sorry");
 								return undef;
 							}
 							botPrivmsg($self,$sChannel,"($sNick radio play) $sMsgSong");
@@ -9341,7 +9341,7 @@ sub playRadio(@) {
 									return undef;
 								}
 								unless ($sDurationSeconds < (12 * 60)) {
-									botPrivmsg($self,$sChannel,"($sNick radio play) Youtube link duration is too long, sorry");
+									botPrivmsg($self,$sChannel,"($sNick radio play) Youtube link duration is too long ($sDurationSeconds seconds), sorry");
 									return undef;
 								}
 								my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE id_youtube=?";
@@ -9512,11 +9512,35 @@ sub queueRadio(@) {
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
-				if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-					my $iNbTrack = queueCount($self);
-					unless ( $iNbTrack == 0 ) {
-						my $sNbTrack = ( $iNbTrack > 1 ? "tracks" : "track" );
+				my $iHarborId = getHarBorId($self);
+				if (defined($iHarborId) && ($iHarborId ne "")) {
+					log_message($self,3,"Harbord ID : $iHarborId");
+					if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
+						unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"harbor_$iHarborId.status\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
+							log_message($self,0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
+							return undef;
+						}
 						my $line;
+						if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+							chomp($line);
+							$line =~ s/\r//;
+							$line =~ s/\n//;
+							log_message($self,3,$line);
+							unless ($line =~ /^no source client connected/) {
+								botPrivmsg($self,$sChannel,radioMsg($self,"Live on air - " . getRadioCurrentSong($self)));
+							}
+						}
+					}
+					else {
+						log_message($self,0,"queueRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+					}
+				}
+				
+				my $iNbTrack = queueCount($self);
+				unless ( $iNbTrack == 0 ) {
+					my $sNbTrack = ( $iNbTrack > 1 ? "tracks" : "track" );
+					my $line;
+					if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 						unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
 							log_message($self,0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
 							return undef;
@@ -9575,18 +9599,15 @@ sub queueRadio(@) {
 								}
 							}
 						}
-						else {
-							botPrivmsg($self,$sChannel,radioMsg($self,"No track in queue"));
-						}
-						logBot($self,$message,$sChannel,"queue",@tArgs);
 					}
 					else {
-						botPrivmsg($self,$sChannel,radioMsg($self,"Affiche-moi la queue de la PL Globale asti !"));
+						log_message($self,0,"queueRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});	
 					}
 				}
 				else {
-					log_message($self,0,"queueRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+					botPrivmsg($self,$sChannel,radioMsg($self,"Global playlist on air - " . getRadioCurrentSong($self)));
 				}
+				logBot($self,$message,$sChannel,"queue",@tArgs);
 			}
 			else {
 				my $sNoticeMsg = $message->prefix . " queue command attempt (command level [User] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
@@ -10076,6 +10097,32 @@ sub mbExec(@) {
 			return undef;
 		}
 	}	
+}
+
+sub getHarBorId(@) {
+	my ($self) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
+	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
+		unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | grep harbor | grep status | awk '{print \$2}' | awk -F'.' {'print \$1}' | awk -F'_' '{print \$2}' |") {
+			log_message($self,0,"getHarBorId() Unable to connect to LIQUIDSOAP telnet port");
+			return undef;
+		}
+		my $line;
+		if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+			chomp($line);
+			log_message($self,3,$line);
+			return $line;
+		}
+		else {
+			log_message($self,3,"getHarBorId() No output");
+		}
+	}
+	else {
+		log_message($self,0,"getHarBorId() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+	}
+	return undef;
 }
 
 1;
