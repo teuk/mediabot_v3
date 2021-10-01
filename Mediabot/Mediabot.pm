@@ -21,6 +21,9 @@ use HTML::Tree;
 use URL::Encode qw(url_encode_utf8 url_encode);
 use MP3::Tag;
 use File::Basename;
+# coming soon :
+#use Moose;
+#use Hailo;
 
 sub new {
 	my ($class,$args) = @_;
@@ -2714,7 +2717,9 @@ sub addUserHost(@) {
 						return undef;
 					}
 					else {
-						my $sQuery = "SELECT nickname FROM USER WHERE hostmasks LIKE '%" . $tArgs[1] . "%'";
+						my $sSearch = $tArgs[1];
+						$sSearch =~ s/;//g;
+						my $sQuery = "SELECT nickname FROM USER WHERE hostmasks LIKE '%" . $sSearch . "%'";
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute()) {
 							log_message($self,1,"addUserHost() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -4979,9 +4984,11 @@ sub mbDbSearchCommand(@) {
 	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 		my $sCommand = $tArgs[0];
 		unless ($sCommand =~ /%/) {
-			$sCommand =~ s/\'/\\'/;
 			log_message($self,3,"sCommand : $sCommand");
-			my $sQuery = "SELECT * FROM PUBLIC_COMMANDS WHERE action LIKE '%" . $sCommand . "%' ORDER BY command LIMIT 20";
+			my $sSearch = $sCommand;
+			$sSearch =~ s/'/\\'/g;
+			$sSearch =~ s/;//g;
+			my $sQuery = "SELECT * FROM PUBLIC_COMMANDS WHERE action LIKE '%" . $sSearch . "%' ORDER BY command LIMIT 20";
 			my $sth = $self->{dbh}->prepare($sQuery);
 			unless ($sth->execute()) {
 				log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -9565,6 +9572,30 @@ sub queueRadio(@) {
 								my $line;
 								if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
 									chomp($line);
+									my $sMsgSong;
+									if ( $i == 0 ) {
+										#Remaining time
+										my $sRemainingTime = getRadioRemainingTime($self);
+										log_message($self,3,"queueRadio() sRemainingTime = $sRemainingTime");
+										my $siSecondsRemaining = int($sRemainingTime);
+										my $iMinutesRemaining = int($siSecondsRemaining / 60) ;
+										my $iSecondsRemaining = int($siSecondsRemaining - ( $iMinutesRemaining * 60 ));
+										$sMsgSong .= String::IRC->new(' - ')->white('black');
+										my $sTimeRemaining = "";
+										if ( $iMinutesRemaining > 0 ) {
+											$sTimeRemaining .= $iMinutesRemaining . " mn";
+											if ( $iMinutesRemaining > 1 ) {
+												$sTimeRemaining .= "s";
+											}
+											$sTimeRemaining .= " and ";
+										}
+										$sTimeRemaining .= $iSecondsRemaining . " sec";
+										if ( $iSecondsRemaining > 1 ) {
+											$sTimeRemaining .= "s";
+										}
+										$sTimeRemaining .= " remaining";
+										$sMsgSong .= String::IRC->new($sTimeRemaining)->white('black');
+									}
 									$line =~ s/\r//;
 									$line =~ s/\n//;
 									$line =~ s/^.*\[\"//;
@@ -9582,7 +9613,7 @@ sub queueRadio(@) {
 											my $title = $ref->{'title'};
 											my $artist = $ref->{'artist'};
 											if ($i == 0) {
-												botPrivmsg($self,$sChannel,"» $artist - $title");
+												botPrivmsg($self,$sChannel,"» $artist - $title" . $sMsgSong);
 											}
 											else {
 												botPrivmsg($self,$sChannel,"└ $artist - $title");
@@ -9590,7 +9621,7 @@ sub queueRadio(@) {
 										}
 										else {
 											if ($i == 0) {
-												botPrivmsg($self,$sChannel,"» $sFilename");
+												botPrivmsg($self,$sChannel,"» $sFilename" . $sMsgSong);
 											}
 											else {
 												botPrivmsg($self,$sChannel,"└ $sFilename");
@@ -9608,7 +9639,28 @@ sub queueRadio(@) {
 				}
 				else {
 					unless ( $bHarbor ) {
-						botPrivmsg($self,$sChannel,radioMsg($self,"Global playlist - " . getRadioCurrentSong($self)));
+						#Remaining time
+						my $sRemainingTime = getRadioRemainingTime($self);
+						log_message($self,3,"queueRadio() sRemainingTime = $sRemainingTime");
+						my $siSecondsRemaining = int($sRemainingTime);
+						my $iMinutesRemaining = int($siSecondsRemaining / 60) ;
+						my $iSecondsRemaining = int($siSecondsRemaining - ( $iMinutesRemaining * 60 ));
+						my $sMsgSong .= String::IRC->new(' - ')->white('black');
+						my $sTimeRemaining = "";
+						if ( $iMinutesRemaining > 0 ) {
+							$sTimeRemaining .= $iMinutesRemaining . " mn";
+							if ( $iMinutesRemaining > 1 ) {
+								$sTimeRemaining .= "s";
+							}
+							$sTimeRemaining .= " and ";
+						}
+						$sTimeRemaining .= $iSecondsRemaining . " sec";
+						if ( $iSecondsRemaining > 1 ) {
+							$sTimeRemaining .= "s";
+						}
+						$sTimeRemaining .= " remaining";
+						$sMsgSong .= String::IRC->new($sTimeRemaining)->white('black');
+						botPrivmsg($self,$sChannel,radioMsg($self,"Global playlist - " . getRadioCurrentSong($self) . $sMsgSong));
 					}
 				}
 				logBot($self,$message,$sChannel,"queue",@tArgs);
@@ -9802,7 +9854,13 @@ sub rplayRadio(@) {
 					}
 					elsif (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 						my $sText = join ("%",@tArgs);
-						my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sText . "%' ORDER BY RAND() LIMIT 1";
+						my $sSearch = $sText;
+						$sSearch =~ s/\s+/%/g;
+						$sSearch =~ s/%+/%/g;
+						$sSearch =~ s/;//g;
+						$sSearch =~ s/'/\\'/g;
+						my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sSearch . "%' ORDER BY RAND() LIMIT 1";
+						log_message($self,3,"rplayRadio() Query : $sQuery");
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute()) {
 							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -9970,9 +10028,11 @@ sub mp3(@) {
 				}
 				else {
 					my $searchstring = $sText ;
-					$searchstring =~ s/\s/\%/;
+					$searchstring =~ s/\s+/%/g;
+					$searchstring =~ s/'/\\'/g;
+					$searchstring =~ s/;//g;
 					my $nbMp3 = 0;
-					my $sQuery = "SELECT count(*) as nbMp3 FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sText . "%'";
+					my $sQuery = "SELECT count(*) as nbMp3 FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $searchstring . "%'";
 					log_message($self,3,"$sQuery = $sQuery");
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute()) {
@@ -9989,7 +10049,7 @@ sub mp3(@) {
 						return undef;
 					}
 
-					$sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sText . "%' LIMIT 1";
+					$sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $searchstring . "%' LIMIT 1";
 					log_message($self,3,"$sQuery = $sQuery");
 					$sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute()) {
@@ -10012,7 +10072,7 @@ sub mp3(@) {
 								botPrivmsg($self,$sChannel,"($sNick mp3 search) $nbMp3 $sNbMp3, first result : (Library ID : $id_mp3) / $artist - $title");
 							}
 							if ( $nbMp3 > 1 ) {
-								$sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sText . "%' LIMIT 10";
+								$sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $searchstring . "%' LIMIT 10";
 								log_message($self,3,"$sQuery = $sQuery");
 								$sth = $self->{dbh}->prepare($sQuery);
 								unless ($sth->execute()) {
