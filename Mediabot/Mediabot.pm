@@ -7828,43 +7828,43 @@ sub displayRadioCurrentSong(@) {
 	if (defined($sRadioCurrentSongTitle) && ($sRadioCurrentSongTitle ne "")) {
 		# Format message with irc colors
 		my $sMsgSong = "";
+		
 		$sMsgSong .= String::IRC->new('[ ')->white('black');
 		$sMsgSong .= String::IRC->new("http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_URL")->orange('black');
 		$sMsgSong .= String::IRC->new(' ] ')->white('black');
 		$sMsgSong .= String::IRC->new(' - ')->white('black');
 		$sMsgSong .= String::IRC->new(' [ ')->orange('black');
+		if ( $bRadioLive ) {
+			$sMsgSong .= String::IRC->new('Live - ')->white('black');
+		}
 		$sMsgSong .= String::IRC->new($sRadioCurrentSongTitle)->white('black');
 		$sMsgSong .= String::IRC->new(' ]')->orange('black');
-		if ( $bRadioLive ) {
-			$sMsgSong .= String::IRC->new(' - ')->white('black');
-			$sMsgSong .= String::IRC->new(' [ ')->orange('black');
-			$sMsgSong .= String::IRC->new('LIVE !')->white('black');
-			$sMsgSong .= String::IRC->new(' ]')->orange('black');
-		}
-		elsif (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-			#Remaining time
-			my $sRemainingTime = getRadioRemainingTime($self);
-			log_message($self,3,"displayRadioCurrentSong() sRemainingTime = $sRemainingTime");
-			my $siSecondsRemaining = int($sRemainingTime);
-			my $iMinutesRemaining = int($siSecondsRemaining / 60) ;
-			my $iSecondsRemaining = int($siSecondsRemaining - ( $iMinutesRemaining * 60 ));
-			$sMsgSong .= String::IRC->new(' - ')->white('black');
-			$sMsgSong .= String::IRC->new(' [ ')->orange('black');
-			my $sTimeRemaining = "";
-			if ( $iMinutesRemaining > 0 ) {
-				$sTimeRemaining .= $iMinutesRemaining . " mn";
-				if ( $iMinutesRemaining > 1 ) {
+		unless ( $bRadioLive ) {
+			if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
+				#Remaining time
+				my $sRemainingTime = getRadioRemainingTime($self);
+				log_message($self,3,"displayRadioCurrentSong() sRemainingTime = $sRemainingTime");
+				my $siSecondsRemaining = int($sRemainingTime);
+				my $iMinutesRemaining = int($siSecondsRemaining / 60) ;
+				my $iSecondsRemaining = int($siSecondsRemaining - ( $iMinutesRemaining * 60 ));
+				$sMsgSong .= String::IRC->new(' - ')->white('black');
+				$sMsgSong .= String::IRC->new(' [ ')->orange('black');
+				my $sTimeRemaining = "";
+				if ( $iMinutesRemaining > 0 ) {
+					$sTimeRemaining .= $iMinutesRemaining . " mn";
+					if ( $iMinutesRemaining > 1 ) {
+						$sTimeRemaining .= "s";
+					}
+					$sTimeRemaining .= " and ";
+				}
+				$sTimeRemaining .= $iSecondsRemaining . " sec";
+				if ( $iSecondsRemaining > 1 ) {
 					$sTimeRemaining .= "s";
 				}
-				$sTimeRemaining .= " and ";
+				$sTimeRemaining .= " remaining";
+				$sMsgSong .= String::IRC->new($sTimeRemaining)->white('black');
+				$sMsgSong .= String::IRC->new(' ]')->orange('black');
 			}
-			$sTimeRemaining .= $iSecondsRemaining . " sec";
-			if ( $iSecondsRemaining > 1 ) {
-				$sTimeRemaining .= "s";
-			}
-			$sTimeRemaining .= " remaining";
-			$sMsgSong .= String::IRC->new($sTimeRemaining)->white('black');
-			$sMsgSong .= String::IRC->new(' ]')->orange('black');
 		}
 		botPrivmsg($self,$sChannel,"$sMsgSong");
 	}
@@ -9572,8 +9572,8 @@ sub queueRadio(@) {
 								my $line;
 								if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
 									chomp($line);
-									my $sMsgSong;
-									if ( $i == 0 ) {
+									my $sMsgSong = "";
+									if (( $i == 0 ) && (!$bHarbor)) {
 										#Remaining time
 										my $sRemainingTime = getRadioRemainingTime($self);
 										log_message($self,3,"queueRadio() sRemainingTime = $sRemainingTime");
@@ -9603,6 +9603,7 @@ sub queueRadio(@) {
 									log_message($self,3,$line);
 									my $sFolder = dirname($line);
 									my $sFilename = basename($line);
+									my $sBaseFilename = basename($sFilename, ".mp3");
 									my $sQuery = "SELECT artist,title FROM MP3 WHERE folder=? AND filename=?";
 									my $sth = $self->{dbh}->prepare($sQuery);
 									unless ($sth->execute($sFolder,$sFilename)) {
@@ -9613,7 +9614,12 @@ sub queueRadio(@) {
 											my $title = $ref->{'title'};
 											my $artist = $ref->{'artist'};
 											if ($i == 0) {
-												botPrivmsg($self,$sChannel,"» $artist - $title" . $sMsgSong);
+												unless ($bHarbor) {
+													botPrivmsg($self,$sChannel,"» $artist - $title" . $sMsgSong);
+												}
+												else {
+													botPrivmsg($self,$sChannel,"» $artist - $title");
+												}
 											}
 											else {
 												botPrivmsg($self,$sChannel,"└ $artist - $title");
@@ -9621,10 +9627,15 @@ sub queueRadio(@) {
 										}
 										else {
 											if ($i == 0) {
-												botPrivmsg($self,$sChannel,"» $sFilename" . $sMsgSong);
+												unless ($bHarbor) {
+													botPrivmsg($self,$sChannel,"» $$sBaseFilename" . $sMsgSong);
+												}
+												else {
+													botPrivmsg($self,$sChannel,"» $$sBaseFilename");
+												}
 											}
 											else {
-												botPrivmsg($self,$sChannel,"└ $sFilename");
+												botPrivmsg($self,$sChannel,"└ $$sBaseFilename");
 											}
 										}
 									}
