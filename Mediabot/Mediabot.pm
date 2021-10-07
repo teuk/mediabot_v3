@@ -9291,7 +9291,7 @@ sub playRadio(@) {
 								}
 							}
 						}
-						elsif (!($tArgs[0] =~ /^[0-9]+$/)) {
+						else {
 							my $sYoutubeId;
 							my $sText = join("%20",@tArgs);
 							log_message($self,3,"radioplay() youtubeSearch() on $sText");
@@ -9558,7 +9558,7 @@ sub queueRadio(@) {
 							chomp($line);
 							$line =~ s/\r//;
 							$line =~ s/\n//;
-							log_message($self,3,$line);
+							log_message($self,3,"queueRadio() $line");
 						}
 						if ($iNbTrack > 0) {
 							botPrivmsg($self,$sChannel,radioMsg($self,"$iNbTrack $sNbTrack in queue, RID : $line"));
@@ -9600,7 +9600,7 @@ sub queueRadio(@) {
 									$line =~ s/\n//;
 									$line =~ s/^.*\[\"//;
 									$line =~ s/\".*$//;
-									log_message($self,3,$line);
+									log_message($self,3,"queueRadio() $line");
 									my $sFolder = dirname($line);
 									my $sFilename = basename($line);
 									my $sBaseFilename = basename($sFilename, ".mp3");
@@ -9628,14 +9628,14 @@ sub queueRadio(@) {
 										else {
 											if ($i == 0) {
 												unless ($bHarbor) {
-													botPrivmsg($self,$sChannel,"» $$sBaseFilename" . $sMsgSong);
+													botPrivmsg($self,$sChannel,"» $sBaseFilename" . $sMsgSong);
 												}
 												else {
-													botPrivmsg($self,$sChannel,"» $$sBaseFilename");
+													botPrivmsg($self,$sChannel,"» $sBaseFilename");
 												}
 											}
 											else {
-												botPrivmsg($self,$sChannel,"└ $$sBaseFilename");
+												botPrivmsg($self,$sChannel,"└ $sBaseFilename");
 											}
 										}
 									}
