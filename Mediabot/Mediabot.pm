@@ -1319,6 +1319,9 @@ sub mbCommandPublic(@) {
 		case /^exec$/i								{		
 														mbExec($self,$message,$sNick,$sChannel,@tArgs);
 													}
+		case /^qlog$/i								{		
+														mbChannelLog($self,$message,$sNick,$sChannel,@tArgs);
+													}
 		else									{
 														#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 														my $bFound = mbDbCommand($self,$message,$sChannel,$sNick,$sCommand,@tArgs);
@@ -10198,6 +10201,115 @@ sub getHarBorId(@) {
 		log_message($self,0,"getHarBorId() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
 	}
 	return undef;
+}
+
+sub mbChannelLog(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
+				my $sText = join ("%",@tArgs);
+				unless (defined($sText) && ($sText ne "")) {
+					botNotice($self,$sNick,"Syntax : qlog [-n nickname] <word1> <word2> ... <<wordn>");
+					return undef;
+				}
+				elsif (defined($tArgs[0]) && ($tArgs[0] eq "-n") && defined($tArgs[1]) && ($tArgs[1] ne "")) {
+					shift @tArgs;
+					my $nickname = $tArgs[0];
+					shift @tArgs;
+					if (defined($nickname) && ($nickname ne "")) {
+						my $searchstring = join ("%",@tArgs);
+						$searchstring =~ s/'/\\'/;
+						$searchstring =~ s/;//;
+						my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL_LOG.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND nick LIKE ? AND publictext LIKE '%" . $searchstring . "%' ORDER BY RAND() LIMIT 1";
+						log_message($self,3,"sQuery = $sQuery");
+						my $sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute($sChannel,$nickname)) {
+							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						}
+						else {
+							my $sOutput = "";
+							if (my $ref = $sth->fetchrow_hashref()) {
+								my $publictext = $ref->{'publictext'};
+								my $nick = $ref->{'nick'};
+								my $sDate = $ref->{'ts'};
+								$sOutput = $publictext;
+								botPrivmsg($self,$sChannel,"($sNick qlog search) $sDate <$nick> $sOutput");
+							}
+							else {
+								botPrivmsg($self,$sChannel,"($sNick qlog search) No result");
+							}
+						}
+						$sth->finish;
+						logBot($self,$message,$sChannel,"qlog",@tArgs);
+					}
+					else {
+						my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL_LOG.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND nick LIKE ? ORDER BY RAND() LIMIT 1";
+						log_message($self,3,"sQuery = $sQuery");
+						my $sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute($sChannel,$nickname)) {
+							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						}
+						else {
+							my $sOutput = "";
+							if (my $ref = $sth->fetchrow_hashref()) {
+								my $publictext = $ref->{'publictext'};
+								my $nick = $ref->{'nick'};
+								my $sDate = $ref->{'ts'};
+								$sOutput = $publictext;
+								botPrivmsg($self,$sChannel,"($sNick qlog search) $sDate <$nick> $sOutput");
+							}
+							else {
+								botPrivmsg($self,$sChannel,"($sNick qlog search) No result");
+							}
+						}
+						$sth->finish;
+						logBot($self,$message,$sChannel,"qlog",@tArgs);
+					}
+				}
+				else {
+					my $searchstring = join ("%",@tArgs);
+					$searchstring =~ s/'/\\'/;
+					$searchstring =~ s/;//;
+					my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL_LOG.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND publictext LIKE '%" . $searchstring . "%' ORDER BY RAND() LIMIT 1";
+					log_message($self,3,"sQuery = $sQuery");
+					my $sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute($sChannel)) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {
+						my $sOutput = "";
+						if (my $ref = $sth->fetchrow_hashref()) {
+							my $publictext = $ref->{'publictext'};
+							my $nick = $ref->{'nick'};
+							my $sDate = $ref->{'ts'};
+							$sOutput = $publictext;
+							botPrivmsg($self,$sChannel,"($sNick qlog search) $sDate <$nick> $sOutput");
+						}
+						else {
+							botPrivmsg($self,$sChannel,"($sNick qlog search) No result");
+						}
+					}
+					$sth->finish;
+					logBot($self,$message,$sChannel,"qlog",@tArgs);
+				}
+				
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " qlog command attempt (command level [Owner] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " qlog command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}	
 }
 
 1;
