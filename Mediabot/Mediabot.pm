@@ -5996,7 +5996,7 @@ sub getYoutubeDetails(@) {
 				if ( $#fTyoutubeItems >= 0 ) {
 					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
 					log_message($self,4,"getYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
-					$sViewCount = "vue $hYoutubeItems{'statistics'}{'viewCount'} fois";
+					$sViewCount = "views $hYoutubeItems{'statistics'}{'viewCount'}";
 					$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
 					$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
 					log_message($self,3,"getYoutubeDetails() sDuration : $sDuration");
@@ -6138,7 +6138,7 @@ sub displayYoutubeDetails(@) {
 				if ( $#fTyoutubeItems >= 0 ) {
 					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
 					log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
-					$sViewCount = "vue $hYoutubeItems{'statistics'}{'viewCount'} fois";
+					$sViewCount = "views $hYoutubeItems{'statistics'}{'viewCount'}";
 					$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
 					$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
 					log_message($self,3,"displayYoutubeDetails() sDuration : $sDuration");
@@ -7562,7 +7562,7 @@ sub youtubeSearch(@) {
 				if ( $#fTyoutubeItems >= 0 ) {
 					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
 					log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
-					$sViewCount = "vue $hYoutubeItems{'statistics'}{'viewCount'} fois";
+					$sViewCount = "views $hYoutubeItems{'statistics'}{'viewCount'}";
 					$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
 					$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
 					log_message($self,3,"displayYoutubeDetails() sDuration : $sDuration");
