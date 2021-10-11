@@ -9474,7 +9474,7 @@ sub playRadio(@) {
 								}
 							}
 							else {
-								botPrivmsg($self,$sChannel,"($sNick radio play not Youtube ID found for " . join(" ",@tArgs));
+								botPrivmsg($self,$sChannel,"($sNick radio play no Youtube ID found for " . join(" ",@tArgs));
 							}
 						}
 					}
