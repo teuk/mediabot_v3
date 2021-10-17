@@ -9125,6 +9125,7 @@ sub playRadio(@) {
 							else {
 								if (my $ref = $sth->fetchrow_hashref()) {
 									my $ytDestinationFile = $ref->{'folder'} . "/" . $ref->{'filename'};
+									log_message($self,3,"playRadio() pushing $ytDestinationFile to queue");
 									my $rPush = queuePushRadio($self,$ytDestinationFile);
 									if (defined($rPush) && $rPush) {
 										my $id_youtube = $ref->{'id_youtube'};
@@ -9326,7 +9327,7 @@ sub playRadio(@) {
 								else {
 									if (my $ref = $sth->fetchrow_hashref()) {
 										my $ytDestinationFile = $ref->{'folder'} . "/" . $ref->{'filename'};
-										my $rPush = queuePushRadio($self,"$incomingDir/$ytDestinationFile");
+										my $rPush = queuePushRadio($self,"$ytDestinationFile");
 										if (defined($rPush) && $rPush) {
 											my $id_mp3 = $ref->{'id_mp3'};
 											my $id_youtube = $ref->{'id_youtube'};
@@ -9703,28 +9704,38 @@ sub queueRadio(@) {
 
 sub queuePushRadio(@) {
 	my ($self,$sAudioFilename) = @_;
-	unless (isInQueueRadio($self,$sAudioFilename)) {
-		my %MAIN_CONF = %{$self->{MAIN_CONF}};
-		my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
-		my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
-		if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-			unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.push $sAudioFilename\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
-				log_message($self,0,"queuePushRadio() Unable to connect to LIQUIDSOAP telnet port");
-				return undef;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
+	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	if (defined($sAudioFilename) && ($sAudioFilename ne "")) {
+		unless (isInQueueRadio($self,$sAudioFilename)) {
+			if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
+				log_message($self,3,"queuePushRadio() pushing $sAudioFilename to queue");
+				unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.push $sAudioFilename\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
+					log_message($self,0,"queuePushRadio() Unable to connect to LIQUIDSOAP telnet port");
+					return undef;
+				}
+				my $line;
+				while (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+					chomp($line);
+					log_message($self,3,$line);
+				}
+				return 1;
 			}
-			my $line;
-			while (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
-				chomp($line);
-				log_message($self,3,$line);
+			else {
+				log_message($self,0,"playRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+				return 0;
 			}
-			return 1;
 		}
 		else {
-			log_message($self,0,"playRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+			log_message($self,3,"queuePushRadio() $sAudioFilename already in queue");
 			return 0;
 		}
 	}
-	return 0;
+	else {
+		log_message($self,3,"queuePushRadio() missing audio file parameter");
+		return 0;
+	}
 }
 
 sub nextRadio(@) {
