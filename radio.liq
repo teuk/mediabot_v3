@@ -56,6 +56,7 @@ radio = random(weights = [1, 20],[jingles, radio])
 
 # Add a request queue
 queue = request.queue()
+queue = audio_to_stereo(queue)
 
 full = fallback(track_sensitive=false,[live,queue,radio])
 
