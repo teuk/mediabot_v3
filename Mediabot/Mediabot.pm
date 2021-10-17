@@ -9017,7 +9017,6 @@ sub playRadio(@) {
 								botPrivmsg($self,$sChannel,"($sNick radio play) Youtube link duration is too long ($sDurationSeconds seconds), sorry");
 								return undef;
 							}
-							botPrivmsg($self,$sChannel,"($sNick radio play) $sMsgSong");
 							unless ( -d $incomingDir ) {
 								log_message($self,0,"Incoming YOUTUBEDL directory : $incomingDir does not exist");
 								return undef;
@@ -9051,6 +9050,7 @@ sub playRadio(@) {
 								}
 							}
 							else {
+								botPrivmsg($self,$sChannel,"($sNick radio play) $sMsgSong - Please wait while downloading");
 								my $timer = IO::Async::Timer::Countdown->new(
 							   	delay => 3,
 							   	on_expire => sub {
@@ -9197,7 +9197,7 @@ sub playRadio(@) {
 										botPrivmsg($self,$sChannel,"($sNick radio play) Unknown Youtube link");
 										return undef;
 									}
-									botPrivmsg($self,$sChannel,"($sNick radio play) $sMsgSong");
+									botPrivmsg($self,$sChannel,"($sNick radio play) $sMsgSong - Please wait while downloading");
 									my $timer = IO::Async::Timer::Countdown->new(
 										delay => 3,
 										on_expire => sub {
@@ -9260,6 +9260,49 @@ sub playRadio(@) {
 							}
 						}
 						else {
+							# Local library search
+							my $sTextLocal = join ("%",@tArgs);
+							my $sSearch = $sTextLocal;
+							$sSearch =~ s/\s+/%/g;
+							$sSearch =~ s/%+/%/g;
+							$sSearch =~ s/;//g;
+							$sSearch =~ s/'/\\'/g;
+							my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sSearch . "%' ORDER BY RAND() LIMIT 1";
+							log_message($self,3,"playRadio() Query : $sQuery");
+							my $sth = $self->{dbh}->prepare($sQuery);
+							unless ($sth->execute()) {
+								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							}
+							else {	
+								if (my $ref = $sth->fetchrow_hashref()) {
+									my $id_mp3 = $ref->{'id_mp3'};
+									my $id_youtube = $ref->{'id_youtube'};
+									my $ytDestinationFile = $ref->{'folder'} . "/" . $ref->{'filename'};
+									my $rPush = queuePushRadio($self,$ytDestinationFile);
+									if (defined($rPush) && $rPush) {
+										my $id_youtube = $ref->{'id_youtube'};
+										my $artist = ( defined($ref->{'artist'}) ? $ref->{'artist'} : "Unknown");
+										my $title = ( defined($ref->{'title'}) ? $ref->{'title'} : "Unknown");
+										my $duration = 0;
+										my $sMsgSong = "$artist - $title";
+										if (defined($id_youtube) && ($id_youtube ne "")) {
+											($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
+											botPrivmsg($self,$sChannel,"($sNick radio play " . $sText . ") (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+										}
+										else {
+											botPrivmsg($self,$sChannel,"($sNick radio play " . $sText . ") (Library ID : $id_mp3) / $artist - $title / Queued");
+										}
+										logBot($self,$message,$sChannel,"play",@tArgs);
+										return 1;
+									}
+									else {
+										log_message($self,3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");	
+										botPrivmsg($self,$sChannel,"($sNick radio rplay / could not queue)");
+										return undef;
+									}
+								}
+							}
+							# Youtube Search
 							my $sYoutubeId;
 							my $sText = join("%20",@tArgs);
 							log_message($self,3,"radioplay() youtubeSearch() on $sText");
@@ -9361,7 +9404,7 @@ sub playRadio(@) {
 											botPrivmsg($self,$sChannel,"($sNick radio play) Unknown Youtube link");
 											return undef;
 										}
-										botPrivmsg($self,$sChannel,"($sNick radio play) $sMsgSong");
+										botPrivmsg($self,$sChannel,"($sNick radio play) $sMsgSong - Please wait while downloading");
 										my $timer = IO::Async::Timer::Countdown->new(
 											delay => 3,
 											on_expire => sub {
