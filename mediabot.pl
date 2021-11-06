@@ -515,14 +515,14 @@ sub on_message_PRIVMSG(@) {
 		my $line = $what;
 		$line =~ s/^\s+//;
 		my ($sCommand,@tArgs) = split(/\s+/,$line);
-		if (substr($sCommand, 0, 1) eq $MAIN_CONF{'main.MAIN_PROG_CMD_CHAR'}) {
+		if (substr($sCommand, 0, 1) eq $MAIN_CONF{'main.MAIN_PROG_CMD_CHAR'}){
         $sCommand = substr($sCommand,1);
         $sCommand =~ tr/A-Z/a-z/;
         if (defined($sCommand) && ($sCommand ne "")) {
         	$mediabot->mbCommandPublic($message,$where,$who,$BOTNICK_WASNOT_TRIGGERED,$sCommand,@tArgs);
         }
 		}
-		elsif (($sCommand eq $self->nick_folded) && $bNickTriggerCommand) {
+		elsif ((($sCommand eq $self->nick_folded) && $bNickTriggerCommand) || ($sCommand eq substr($self->nick_folded, 0, 1))){
 			$what =~ s/^\S+\s*//;
 			($sCommand,@tArgs) = split(/\s+/,$what);
       if (defined($sCommand) && ($sCommand ne "")) {

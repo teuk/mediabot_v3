@@ -8979,6 +8979,16 @@ sub playRadio(@) {
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
+				my $sHarbor = getRadioHarbor($self);
+				my $bRadioLive = 0;
+				if (defined($sHarbor) && ($sHarbor ne "")) {
+					log_message($self,3,$sHarbor);
+					$bRadioLive = isRadioLive($self,$sHarbor);
+				}
+				if ($bRadioLive) {
+					botPrivmsg($self,$sChannel,"($sNick radio play) Cannot queue requests while radio is live");
+					return undef;
+				}
 				my $sYoutubeId;
 				unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 					botNotice($self,$sNick,"Syntax : play id <ID>|ytid <YTID>|<searchstring>");
@@ -9852,6 +9862,16 @@ sub rplayRadio(@) {
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
+				my $sHarbor = getRadioHarbor($self);
+				my $bRadioLive = 0;
+				if (defined($sHarbor) && ($sHarbor ne "")) {
+					log_message($self,3,$sHarbor);
+					$bRadioLive = isRadioLive($self,$sHarbor);
+				}
+				if ($bRadioLive) {
+					botPrivmsg($self,$sChannel,"($sNick radio rplay) Cannot queue requests while radio is live");
+					return undef;
+				}
 				if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 					if (defined($tArgs[0]) && ($tArgs[0] eq "user") && defined($tArgs[1]) && ($tArgs[1] ne "")) {
 						my $id_user = getIdUser($self,$tArgs[1]);
