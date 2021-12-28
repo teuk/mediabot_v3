@@ -91,9 +91,12 @@ JSON
 DateTime
 DateTime::TimeZone
 HTML::Tree
+HTML::Entities
 URL::Encode
 MP3::Tag
-Time::HiRes" | while read perl_module
+Time::HiRes
+Moose
+Hailo" | while read perl_module
  do
   message "Checking $perl_module "
   perl -M$perl_module -e "exit 0;" &>/dev/null
@@ -129,9 +132,12 @@ JSON
 DateTime
 DateTime::TimeZone
 HTML::Tree
+HTML::Entities
 URL::Encode
 MP3::Tag
-Time::HiRes" | while read perl_module
+Time::HiRes
+Moose
+Hailo" | while read perl_module
  do
   message "Checking $perl_module"
   perl -M$perl_module -e "exit 0;"

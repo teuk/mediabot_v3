@@ -21,6 +21,7 @@ use Net::Async::IRC;
 use Switch;
 use Data::Dumper;
 use Date::Format;
+use Encode;
 
 # +---------------------------------------------------------------------------+
 # !          SETTINGS                                                         !
@@ -169,6 +170,9 @@ $mediabot->pickServer();
 # Initialize last_responder_ts
 $mediabot->setLastReponderTs(0);
 
+# Initialize hailo
+$mediabot->init_hailo();
+
 my $loop = IO::Async::Loop->new;
 $mediabot->setLoop($loop);
 
@@ -237,7 +241,7 @@ sub usage(@) {
         if (defined($strErr)) {
                 print STDERR "Error : " . $strErr . "\n";
         }
-        print STDERR "Usage: " . basename($0) . "--conf <config_file> [--check] [--daemon] [--server <hostname>]\n";
+        print STDERR "Usage: " . basename($0) . "--conf=<config_file> [--check] [--daemon] [--server=<hostname>]\n";
         exit 4;
 }
 
@@ -516,19 +520,20 @@ sub on_message_PRIVMSG(@) {
 		$line =~ s/^\s+//;
 		my ($sCommand,@tArgs) = split(/\s+/,$line);
 		if (substr($sCommand, 0, 1) eq $MAIN_CONF{'main.MAIN_PROG_CMD_CHAR'}){
-        $sCommand = substr($sCommand,1);
-        $sCommand =~ tr/A-Z/a-z/;
-        if (defined($sCommand) && ($sCommand ne "")) {
-        	$mediabot->mbCommandPublic($message,$where,$who,$BOTNICK_WASNOT_TRIGGERED,$sCommand,@tArgs);
-        }
+			$sCommand = substr($sCommand,1);
+			$sCommand =~ tr/A-Z/a-z/;
+			if (defined($sCommand) && ($sCommand ne "")) {
+				$mediabot->mbCommandPublic($message,$where,$who,$BOTNICK_WASNOT_TRIGGERED,$sCommand,@tArgs);
+			}
 		}
 		elsif ((($sCommand eq $self->nick_folded) && $bNickTriggerCommand) || ($sCommand eq substr($self->nick_folded, 0, 1))){
+			my $botNickTriggered = (($sCommand eq $self->nick_folded) ? 1 : 0);
 			$what =~ s/^\S+\s*//;
 			($sCommand,@tArgs) = split(/\s+/,$what);
-      if (defined($sCommand) && ($sCommand ne "")) {
-      	$sCommand =~ tr/A-Z/a-z/;
-      	$mediabot->mbCommandPublic($message,$where,$who,$BOTNICK_WAS_TRIGGERED,$sCommand,@tArgs);
-      }
+			if (defined($sCommand) && ($sCommand ne "")) {
+				$sCommand =~ tr/A-Z/a-z/;
+				$mediabot->mbCommandPublic($message,$where,$who,$botNickTriggered,$sCommand,@tArgs);
+			}
 		}
 		elsif ( ( $what =~ /http.*:\/\/www\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/m\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/music\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/youtu\.be.*/i ) ) {
 			my $id_chanset_list = $mediabot->getIdChansetList("Youtube");
@@ -549,7 +554,9 @@ sub on_message_PRIVMSG(@) {
 			}
 		}
 		else {
+			my $sCurrentNick = $self->nick_folded;
 			my $luckyShot = rand(100);
+			my $luckyShotHailoChatter = rand(100);
 			if ( $luckyShot >= $mediabot->checkResponder($message,$who,$where,$what,@tArgs) ) {
 				$mediabot->log_message(3,"Found responder [$where] for $what with luckyShot : $luckyShot");
 				$mediabot->log_message(3,"I have a lucky shot to answer for $what");
@@ -557,6 +564,66 @@ sub on_message_PRIVMSG(@) {
 				if ((time - $mediabot->getLastReponderTs()) >= 600 ) {
 					sleep int(rand(8)+2);
 					$mediabot->doResponder($message,$who,$where,$what,@tArgs)
+				}
+			}
+			elsif ($what =~ /$sCurrentNick/i) {
+				my $id_chanset_list = $mediabot->getIdChansetList("Hailo");
+				if (defined($id_chanset_list)) {
+					my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);
+					if (defined($id_channel_set)) {
+						unless ($mediabot->is_hailo_excluded_nick($who) || (substr($what, 0, 1) eq "!") || (substr($what, 0, 1) eq $MAIN_CONF{'main.MAIN_PROG_CMD_CHAR'})) {
+							my $hailo = $mediabot->get_hailo();
+							$what =~ s/$sCurrentNick//g;
+							$what =~ s/^\s+//g;
+							$what =~ s/\s+$//g;
+							$what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
+							my $sAnswer = $hailo->learn_reply($what);
+							if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
+								$mediabot->log_message(4,"Hailo current nick learn_reply $what from $who : $sAnswer");
+								$mediabot->botPrivmsg($where,$sAnswer);
+							}
+						}
+					}
+				}
+			}
+			elsif ( ($mediabot->get_hailo_channel_ratio($where) != -1) && ($luckyShotHailoChatter >= $mediabot->get_hailo_channel_ratio($where)) ) {
+				my $id_chanset_list = $mediabot->getIdChansetList("HailoChatter");
+				if (defined($id_chanset_list)) {
+					my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);
+					if (defined($id_channel_set)) {
+						unless ($mediabot->is_hailo_excluded_nick($who) || (substr($what, 0, 1) eq "!") || (substr($what, 0, 1) eq $MAIN_CONF{'main.MAIN_PROG_CMD_CHAR'})) {
+							my $hailo = $mediabot->get_hailo();
+							$what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
+							my $sAnswer = $hailo->learn_reply($what);
+							if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
+								$mediabot->log_message(4,"HailoChatter learn_reply $what from $who : $sAnswer");
+								$mediabot->botPrivmsg($where,$sAnswer);
+							}
+						}
+					}
+				}
+			}
+			else {
+				my $id_chanset_list = $mediabot->getIdChansetList("Hailo");
+				if (defined($id_chanset_list)) {
+					my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);
+					if (defined($id_channel_set)) {
+						unless ($mediabot->is_hailo_excluded_nick($who) || (substr($what, 0, 1) eq "!") || (substr($what, 0, 1) eq $MAIN_CONF{'main.MAIN_PROG_CMD_CHAR'})) {
+							my $min_words = (defined($MAIN_CONF{'hailo.HAILO_LEARN_MIN_WORDS'}) ? $MAIN_CONF{'hailo.HAILO_LEARN_MIN_WORDS'} : 3);
+							my $max_words = (defined($MAIN_CONF{'hailo.HAILO_LEARN_MAX_WORDS'}) ? $MAIN_CONF{'hailo.HAILO_LEARN_MAX_WORDS'} : 20);
+							my $num;
+							$num++ while $what =~ /\S+/g;
+							if (($num >= $min_words) && ($num <= $max_words)) {
+								my $hailo = $mediabot->get_hailo();
+								$what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
+								$hailo->learn($what);
+								$mediabot->log_message(4,"learnt $what from $who");
+							}
+							else {
+								$mediabot->log_message(4,"word count is out of range to learn $what from $who");
+							}
+						}
+					}
 				}
 			}
 		}

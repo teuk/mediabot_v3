@@ -514,7 +514,9 @@ INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES
 (3, 'Weather'),
 (4, 'YoutubeSearch'),
 (5, 'NoColors'),
-(6, 'AntiFlood');
+(6, 'AntiFlood'),
+(7, 'Hailo'),
+(8, 'HailoChatter');
 
 -- --------------------------------------------------------
 
@@ -704,5 +706,66 @@ ALTER TABLE `MP3`
 --
 ALTER TABLE `MP3`
   MODIFY `id_mp3` bigint(20) NOT NULL AUTO_INCREMENT;
+
+--
+-- Structure de la table `HAILO_EXCLUSION_NICK`
+--
+
+CREATE TABLE `HAILO_EXCLUSION_NICK` (
+  `id_hailo_exclusion_nick` bigint(20) NOT NULL,
+  `nick` varchar(255) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+--
+-- Index pour les tables déchargées
+--
+
+--
+-- Index pour la table `HAILO_EXCLUSION_NICK`
+--
+ALTER TABLE `HAILO_EXCLUSION_NICK`
+  ADD PRIMARY KEY (`id_hailo_exclusion_nick`),
+  ADD KEY `nick` (`nick`);
+
+--
+-- AUTO_INCREMENT pour les tables déchargées
+--
+
+--
+-- AUTO_INCREMENT pour la table `HAILO_EXCLUSION_NICK`
+--
+ALTER TABLE `HAILO_EXCLUSION_NICK`
+  MODIFY `id_hailo_exclusion_nick` bigint(20) NOT NULL AUTO_INCREMENT;
+
+--
+-- Structure de la table `HAILO_CHANNEL`
+--
+
+CREATE TABLE `HAILO_CHANNEL` (
+  `id_hailo_channel` bigint(20) NOT NULL,
+  `id_channel` bigint(20) NOT NULL,
+  `ratio` int(11) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+--
+-- Index pour les tables déchargées
+--
+
+--
+-- Index pour la table `HAILO_CHANNEL`
+--
+ALTER TABLE `HAILO_CHANNEL`
+  ADD PRIMARY KEY (`id_hailo_channel`),
+  ADD UNIQUE KEY `id_channel` (`id_channel`);
+
+--
+-- AUTO_INCREMENT pour les tables déchargées
+--
+
+--
+-- AUTO_INCREMENT pour la table `HAILO_CHANNEL`
+--
+ALTER TABLE `HAILO_CHANNEL`
+  MODIFY `id_hailo_channel` bigint(20) NOT NULL AUTO_INCREMENT;
 
 COMMIT;

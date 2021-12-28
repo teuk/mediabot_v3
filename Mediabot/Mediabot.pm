@@ -18,12 +18,13 @@ use DateTime;
 use DateTime::TimeZone;
 use utf8;
 use HTML::Tree;
-use URL::Encode qw(url_encode_utf8 url_encode);
+use URL::Encode qw(url_encode_utf8 url_encode url_decode_utf8);
+use HTML::Entities;
 use MP3::Tag;
 use File::Basename;
-# coming soon :
-#use Moose;
-#use Hailo;
+use Encode;
+use Moose;
+use Hailo;
 
 sub new {
 	my ($class,$args) = @_;
@@ -80,7 +81,7 @@ sub getVersion(@) {
 	unless ( $MAIN_PROG_VERSION eq "Undefined" ) {
 		# Check for latest version
 		log_message($self,0,"Checking latest version from github (https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION)");
-		unless (open GITVERSION, "curl -f -s https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION |") {
+		unless (open GITVERSION, "curl --connect-timeout 5 -f -s https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION |") {
 			log_message($self,0,"Could not get version from github");
 			$MAIN_GIT_VERSION = "Undefined";
 		}
@@ -200,6 +201,21 @@ sub init_log(@) {
 	$|=1;
 	print $LOG "+--------------------------------------------------------------------------------------------------+\n";
 	$self->{LOG} = $LOG;
+}
+
+sub init_hailo(@) {
+	my ($self) = shift;
+	log_message($self,0,"Initialize Hailo");
+	my $hailo = Hailo->new(
+		brain => 'mediabot_v3.brn',
+		save_on_exit => 1,
+	);
+	$self->{hailo} = $hailo;
+}
+
+sub get_hailo(@) {
+	my ($self) = shift;
+	return $self->{hailo};
 }
 
 sub clean_and_exit(@) {
@@ -709,12 +725,17 @@ sub botPrivmsg(@) {
 			$eventtype = "private";
 			log_message($self,0,"-> *$sTo* $sMsg");
 		}
-		if (utf8::is_utf8($sMsg)) {
-			$sMsg = Encode::encode("UTF-8", $sMsg);
-			$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
+		if (defined($sMsg) && ($sMsg ne "")) {
+			if (utf8::is_utf8($sMsg)) {
+				$sMsg = Encode::encode("UTF-8", $sMsg);
+				$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
+			}
+			else {
+				$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
+			}
 		}
 		else {
-			$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
+			log_message($self,0,"botPrivmsg() ERROR no message specified to send to target");
 		}
 	}
 	else {
@@ -774,12 +795,17 @@ sub botAction(@) {
 			$eventtype = "private";
 			log_message($self,0,"-> *$sTo* $sMsg");
 		}
-		if (utf8::is_utf8($sMsg)) {
-			$sMsg = Encode::encode("UTF-8", $sMsg);
-			$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $sMsg\1" );
+		if (defined($sMsg) && ($sMsg ne "")) {
+			if (utf8::is_utf8($sMsg)) {
+				$sMsg = Encode::encode("UTF-8", $sMsg);
+				$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $sMsg\1" );
+			}
+			else {
+				$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $sMsg\1" );
+			}
 		}
 		else {
-			$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $sMsg\1" );
+			log_message($self,0,"botPrivmsg() ERROR no message specified to send to target");
 		}
 	}
 	else {
@@ -1250,7 +1276,7 @@ sub mbCommandPublic(@) {
 		case /^ignores$/i							{
 														IgnoresList($self,$message,$sNick,$sChannel,@tArgs);
 													}
-			case /^ignore$/i 						{
+		case /^ignore$/i 							{
 														addIgnore($self,$message,$sNick,$sChannel,@tArgs);
 													}
 		case /^unignore$/i							{
@@ -1322,6 +1348,18 @@ sub mbCommandPublic(@) {
 		case /^qlog$/i								{		
 														mbChannelLog($self,$message,$sNick,$sChannel,@tArgs);
 													}
+		case /^hailo_ignore$/i						{		
+														hailo_ignore($self,$message,$sNick,$sChannel,@tArgs);
+													}
+		case /^hailo_unignore$/i					{		
+														hailo_unignore($self,$message,$sNick,$sChannel,@tArgs);
+													}
+		case /^hailo_status$/i						{		
+														hailo_status($self,$message,$sNick,$sChannel,@tArgs);
+													}
+		case /^hailo_chatter$/i						{		
+														hailo_chatter($self,$message,$sNick,$sChannel,@tArgs);
+													}
 		else									{
 														#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 														my $bFound = mbDbCommand($self,$message,$sChannel,$sNick,$sCommand,@tArgs);
@@ -1348,8 +1386,24 @@ sub mbCommandPublic(@) {
 																	case /who.. StatiK/i {
 																		botPrivmsg($self,$sChannel,"StatiK is my big brother $sNick, he's awesome !");
 																	}
-																	case /.+\?/ {
-																		botPrivmsg($self,$sChannel,"I dunno $sNick coz I'm lame");
+																	elsif ($botNickTriggered) {
+																		my $id_chanset_list = getIdChansetList($self,"Hailo");
+																		if (defined($id_chanset_list)) {
+																			my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
+																			if (defined($id_channel_set)) {
+																				unless (is_hailo_excluded_nick($self,$sNick) || (substr($what, 0, 1) eq "!") || (substr($what, 0, 1) eq $MAIN_CONF{'main.MAIN_PROG_CMD_CHAR'})) {
+																					my $hailo = get_hailo($self);
+																					my $sCurrentNick = $self->{irc}->nick_folded;
+																					$what =~ s/$sCurrentNick//g;
+																					$what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
+																					my $sAnswer = $hailo->learn_reply($what);
+																					if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
+																						log_message($self,4,"learn_reply $what from $sNick : $sAnswer");
+																						botPrivmsg($self,$sChannel,$sAnswer);
+																					}
+																				}
+																			}
+																		}
 																	}
 																}
 															}
@@ -2971,6 +3025,10 @@ sub channelSet(@) {
 																					logBot($self,$message,$sChannel,"chanset",("Chanset +$sChansetValue"));
 																					if ($sChansetValue =~ /^AntiFlood$/i) {
 																						setChannelAntiFlood($self,$message,$sNick,$sChannel,@tArgs);
+																					}
+																					elsif ($sChansetValue =~ /^HailoChatter$/i) {
+																						# TBD : check old ratio
+																						set_hailo_channel_ratio($self,$sChannel,97);
 																					}
 																				}
 																				$sth->finish;
@@ -5968,7 +6026,7 @@ sub getYoutubeDetails(@) {
 			log_message($self,0,"getYoutubeDetails() YOUTUBE_APIKEY=key");
 			return undef;
 		}
-		unless ( open YOUTUBE_INFOS, "curl -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
+		unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
 			log_message(3,"getYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 		}
 		else {
@@ -6067,7 +6125,7 @@ sub getYoutubeDetails(@) {
 				}
 			}
 			else {
-				log_message($self,3,"getYoutubeDetails() curl empty result for : curl -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
+				log_message($self,3,"getYoutubeDetails() curl empty result for : curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
 			}
 		}
 	}
@@ -6111,7 +6169,7 @@ sub displayYoutubeDetails(@) {
 			log_message($self,0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
 			return undef;
 		}
-		unless ( open YOUTUBE_INFOS, "curl -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
+		unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
 			log_message(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 		}
 		else {
@@ -6206,7 +6264,7 @@ sub displayYoutubeDetails(@) {
 				}
 			}
 			else {
-				log_message($self,3,"displayYoutubeDetails() curl empty result for : curl -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
+				log_message($self,3,"displayYoutubeDetails() curl empty result for : curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
 			}
 		}
 	}
@@ -7488,7 +7546,7 @@ sub youtubeSearch(@) {
 		log_message($self,0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
 		return undef;
 	}
-	unless ( open YOUTUBE_INFOS, "curl -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\" |" ) {
+	unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\" |" ) {
 		log_message(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 	}
 	else {
@@ -7523,7 +7581,7 @@ sub youtubeSearch(@) {
 				}
 		}
 		else {
-			log_message($self,3,"displayYoutubeDetails() curl empty result for : curl -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\"");
+			log_message($self,3,"displayYoutubeDetails() curl empty result for : curl --connect-timeout 5 -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\"");
 		}
 	}
 	if (defined($sYoutubeId) && ( $sYoutubeId ne "" )) {
@@ -7535,7 +7593,7 @@ sub youtubeSearch(@) {
 			log_message($self,0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
 			return undef;
 		}
-		unless ( open YOUTUBE_INFOS, "curl -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
+		unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
 			log_message(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 		}
 		else {
@@ -7628,7 +7686,7 @@ sub youtubeSearch(@) {
 				}
 			}
 			else {
-				log_message($self,3,"displayYoutubeDetails() curl empty result for : curl -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
+				log_message($self,3,"displayYoutubeDetails() curl empty result for : curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
 			}
 		}
 	}
@@ -7650,7 +7708,11 @@ sub getRadioCurrentSong(@) {
 		log_message($self,0,"getRadioCurrentSong() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
 		return undef;
 	}
-	unless (open ICECAST_STATUS_JSON, "curl -f -s http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_JSON |") {
+	my $JSON_STATUS_URL = "http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_JSON";
+	if ( $RADIO_PORT == 443 ) {
+		$JSON_STATUS_URL = "https://$RADIO_HOSTNAME/$RADIO_JSON";
+	}
+	unless (open ICECAST_STATUS_JSON, "curl --connect-timeout 3 -f -s $JSON_STATUS_URL |") {
 		return "N/A";
 	}
 	my $line;
@@ -7663,7 +7725,13 @@ sub getRadioCurrentSong(@) {
 		if (defined($sources[0])) {
 			my %source = %{$sources[0]};
 			if (defined($source{'title'})) {
-				return $source{'title'};
+				my $title = $source{'title'};
+				if ( $title =~ /&#.*;/) {
+					return decode_entities($title);
+				}
+				else {
+					return $source{'title'};
+				}
 			}
 			elsif (defined($source{'server_description'})) {
 				return $source{'server_description'};
@@ -7697,7 +7765,11 @@ sub getRadioCurrentListeners(@) {
 		log_message($self,0,"getRadioCurrentSong() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
 		return undef;
 	}
-	unless (open ICECAST_STATUS_JSON, "curl -f -s http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_JSON |") {
+	my $JSON_STATUS_URL = "http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_JSON";
+	if ( $RADIO_PORT == 443 ) {
+		$JSON_STATUS_URL = "https://$RADIO_HOSTNAME/$RADIO_JSON";
+	}
+	unless (open ICECAST_STATUS_JSON, "curl --connect-timeout 3 -f -s $JSON_STATUS_URL |") {
 		return "N/A";
 	}
 	my $line;
@@ -7794,19 +7866,27 @@ sub getRadioRemainingTime(@) {
 	my $LIQUIDSOAP_MOUNPOINT = $RADIO_URL;
 	$LIQUIDSOAP_MOUNPOINT =~ s/\./(dot)/;
 	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-		unless (open LIQUIDSOAP_NEXT, "echo -ne \"$LIQUIDSOAP_MOUNPOINT.remaining\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
+		unless (open LIQUIDSOAP, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | grep remaining | tr -s \" \" | cut -f2 -d\" \" | tail -n 1 |") {
 			log_message($self,0,"getRadioRemainingTime() Unable to connect to LIQUIDSOAP telnet port");
 		}
 		my $line;
-		if (defined($line=<LIQUIDSOAP_NEXT>)) {
+		if (defined($line=<LIQUIDSOAP>)) {
 			chomp($line);
 			log_message($self,3,$line);
-			return($line);
+			unless (open LIQUIDSOAP2, "echo -ne \"$line\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
+				log_message($self,0,"getRadioRemainingTime() Unable to connect to LIQUIDSOAP telnet port");
+			}
+			my $line2;
+			if (defined($line2=<LIQUIDSOAP2>)) {
+				chomp($line2);
+				log_message($self,3,$line2);
+				return($line2);
+			}
 		}
 		return 0;
 	}
 	else {
-		log_message($self,0,"radioNext() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+		log_message($self,0,"getRadioRemainingTime() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
 	}
 }
 
@@ -7833,7 +7913,12 @@ sub displayRadioCurrentSong(@) {
 		my $sMsgSong = "";
 		
 		$sMsgSong .= String::IRC->new('[ ')->white('black');
-		$sMsgSong .= String::IRC->new("http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_URL")->orange('black');
+		if ( $RADIO_PORT == 443 ) {
+			$sMsgSong .= String::IRC->new("https://$RADIO_HOSTNAME/$RADIO_URL")->orange('black');
+		}
+		else {
+			$sMsgSong .= String::IRC->new("http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_URL")->orange('black');
+		}
 		$sMsgSong .= String::IRC->new(' ] ')->white('black');
 		$sMsgSong .= String::IRC->new(' - ')->white('black');
 		$sMsgSong .= String::IRC->new(' [ ')->orange('black');
@@ -7939,9 +8024,15 @@ sub setRadioMetadata(@) {
 					shift @tArgs;
 				}
 				my $sNewMetadata = join(" ",@tArgs);
+				unless (defined($sNewMetadata) && ($sNewMetadata ne "")) {
+					if (defined($sChannel) && ($sChannel ne "")) {
+						displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
+					}
+					return undef;
+				}
 				
 				if (defined($RADIO_ADMINPASS) && ($RADIO_ADMINPASS ne "")) {
-					unless (open ICECAST_UPDATE_METADATA, "curl -f -s -u admin:$RADIO_ADMINPASS \"http://$RADIO_HOSTNAME:$RADIO_PORT/admin/metadata?mount=/$RADIO_URL&mode=updinfo&song=" . url_encode_utf8($sNewMetadata) . "\" |") {
+					unless (open ICECAST_UPDATE_METADATA, "curl --connect-timeout 3 -f -s -u admin:$RADIO_ADMINPASS \"http://$RADIO_HOSTNAME:$RADIO_PORT/admin/metadata?mount=/$RADIO_URL&mode=updinfo&song=" . url_encode_utf8($sNewMetadata) . "\" |") {
 						botNotice($self,$sNick,"Unable to update metadata (curl failed)");
 					}
 					my $line;
@@ -9323,7 +9414,7 @@ sub playRadio(@) {
 								log_message($self,0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
 								return undef;
 							}
-							unless ( open YOUTUBE_INFOS, "curl -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\" |" ) {
+							unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\" |" ) {
 								log_message(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 							}
 							else {
@@ -9358,7 +9449,7 @@ sub playRadio(@) {
 										}
 								}
 								else {
-									log_message($self,3,"radioplay() youtubeSearch() curl empty result for : curl -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\"");
+									log_message($self,3,"radioplay() youtubeSearch() curl empty result for : curl --connect-timeout 5 -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\"");
 								}
 							}
 							if (defined($sYoutubeId) && ($sYoutubeId ne "")) {
@@ -10300,7 +10391,7 @@ sub mbChannelLog(@) {
 						my $searchstring = join ("%",@tArgs);
 						$searchstring =~ s/'/\\'/;
 						$searchstring =~ s/;//;
-						my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL_LOG.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND nick LIKE ? AND publictext LIKE '%" . $searchstring . "%' ORDER BY RAND() LIMIT 1";
+						my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL_LOG.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND nick LIKE ? AND publictext LIKE '%" . $searchstring . "%' AND publictext not LIKE '%qlog%' ORDER BY RAND() LIMIT 1";
 						log_message($self,3,"sQuery = $sQuery");
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($sChannel,$nickname)) {
@@ -10323,7 +10414,7 @@ sub mbChannelLog(@) {
 						logBot($self,$message,$sChannel,"qlog",@tArgs);
 					}
 					else {
-						my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL_LOG.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND nick LIKE ? ORDER BY RAND() LIMIT 1";
+						my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL_LOG.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND nick LIKE ? AND publictext not LIKE '%qlog%' ORDER BY RAND() LIMIT 1";
 						log_message($self,3,"sQuery = $sQuery");
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($sChannel,$nickname)) {
@@ -10350,7 +10441,7 @@ sub mbChannelLog(@) {
 					my $searchstring = join ("%",@tArgs);
 					$searchstring =~ s/'/\\'/;
 					$searchstring =~ s/;//;
-					my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL_LOG.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND publictext LIKE '%" . $searchstring . "%' ORDER BY RAND() LIMIT 1";
+					my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL_LOG.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND publictext LIKE '%" . $searchstring . "%' AND publictext not LIKE '%qlog%' ORDER BY RAND() LIMIT 1";
 					log_message($self,3,"sQuery = $sQuery");
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sChannel)) {
@@ -10390,4 +10481,269 @@ sub mbChannelLog(@) {
 	}	
 }
 
+sub is_hailo_excluded_nick(@) {
+	my ($self,$nick) = @_;
+	my $sQuery = "SELECT * FROM HAILO_EXCLUSION_NICK WHERE nick like ?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($nick)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		my $sOutput = "";
+		if (my $ref = $sth->fetchrow_hashref()) {
+			$sth->finish;
+			return 1;
+		}
+		else {
+			$sth->finish;
+			return 0;
+		}
+	}
+}
+
+sub hailo_ignore(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				unless (defined($tArgs[0] && ($tArgs[0] ne ""))) {
+					botNotice($self,$sNick,"Syntax: hailo_ignore <nick>");
+					return undef;
+				}
+				my $sQuery = "SELECT * FROM HAILO_EXCLUSION_NICK WHERE nick like ?";
+				my $sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($tArgs[0])) {
+					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					if (my $ref = $sth->fetchrow_hashref()) {
+						$sth->finish;
+						botNotice($self,$sNick,"Nick " . $tArgs[0] . " is already ignored by Hailo");
+						return undef;
+					}
+					else {
+						$sQuery = "INSERT INTO HAILO_EXCLUSION_NICK (nick) VALUES (?)";
+						$sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute($tArgs[0])) {
+							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						}
+						else {
+							botNotice($self,$sNick,"Hailo ignored nick " . $tArgs[0]);
+							return 1;
+						}
+					}
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " hailo_ignore command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " hailo_ignore command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
+}
+
+sub hailo_unignore(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				unless (defined($tArgs[0] && ($tArgs[0] ne ""))) {
+					botNotice($self,$sNick,"Syntax: hailo_unignore <nick>");
+					return undef;
+				}
+				my $sQuery = "SELECT * FROM HAILO_EXCLUSION_NICK WHERE nick like ?";
+				my $sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($tArgs[0])) {
+					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					if (my $ref = $sth->fetchrow_hashref()) {
+						$sQuery = "DELETE FROM HAILO_EXCLUSION_NICK WHERE nick like ?";
+						$sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute($tArgs[0])) {
+							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						}
+						else {
+							botNotice($self,$sNick,"Hailo unignored nick " . $tArgs[0]);
+							return 1;
+						}
+					}
+					else {
+						$sth->finish;
+						botNotice($self,$sNick,"Nick " . $tArgs[0] . " is not ignored by Hailo");
+						return undef;
+					}
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " hailo_unignore command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " hailo_unignore command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
+}
+
+sub hailo_status(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;	
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				my $hailo = get_hailo($self);
+				my $status = $hailo->stats();
+				log_message($self,3,"$status tokens, expressions, previous token links and next token links");
+				botPrivmsg($self,$sChannel,"$status tokens, expressions, previous token links and next token links");
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " hailo_status command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " hailo_status command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
+}
+
+sub get_hailo_channel_ratio(@) {
+	my ($self,$sChannel) = @_;
+	my $sQuery = "SELECT ratio FROM HAILO_CHANNEL,CHANNEL WHERE HAILO_CHANNEL.id_channel=CHANNEL.id_channel AND name like ?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sChannel)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $ratio = $ref->{'ratio'};
+			$sth->finish;
+			return $ratio;
+		}
+		else {
+			$sth->finish;
+			return -1;
+		}
+	}
+}
+
+sub set_hailo_channel_ratio(@) {
+	my ($self,$sChannel,$ratio) = @_;
+	my $sQuery = "SELECT * FROM HAILO_CHANNEL,CHANNEL WHERE HAILO_CHANNEL.id_channel=CHANNEL.id_channel AND CHANNEL.name like ?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sChannel)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $id_channel = $ref->{'id_channel'};
+			$sQuery = "UPDATE HAILO_CHANNEL SET ratio=? WHERE id_channel=?";
+			$sth = $self->{dbh}->prepare($sQuery);
+			unless ($sth->execute($ratio,$id_channel)) {
+				log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			}
+			else {
+				$sth->finish;
+				log_message($self,3,"set_hailo_channel_ratio updated hailo chatter ratio to $ratio for $sChannel");
+				return 0;
+			}
+		}
+		else {
+			my $id_channel = getIdChannel($self,$sChannel);
+			unless (defined($id_channel)) {
+				$sth->finish;
+				return undef;
+			}
+			else {
+				$sQuery = "INSERT INTO HAILO_CHANNEL (id_channel,ratio) VALUES (?,?)";
+				$sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($id_channel,$ratio)) {
+					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					$sth->finish;
+					log_message($self,3,"set_hailo_channel_ratio set hailo chatter ratio to $ratio for $sChannel");
+					return 0;
+				}
+			}
+		}
+	}
+}
+
+sub hailo_chatter(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				my $sTargetChannel = $sChannel;
+				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
+					$sTargetChannel = $tArgs[0];
+					shift @tArgs;
+				}
+				unless (defined($tArgs[0]) && ($tArgs[0] =~ /[0-9]+/) ) {
+					my $ratio = get_hailo_channel_ratio($self,$sTargetChannel);
+					if ( $ratio == -1) {
+						botNotice($self,$sNick,"No hailo chatter ratio set for $sTargetChannel");	
+					}
+					else {
+						botNotice($self,$sNick,"hailo chatter ratio is " . (100 - $ratio) ."% for $sTargetChannel");
+					}
+					return undef;
+				}
+				if ( $tArgs[0] > 100 ) {
+					botNotice($self,$sNick,"Syntax: hailo_chatter <ratio>");
+					botNotice($self,$sNick,"ratio must be between 0 and 100");
+					return undef;
+				}
+				my $id_chanset_list = getIdChansetList($self,"HailoChatter");
+				if (defined($id_chanset_list)) {
+					my $id_channel_set = getIdChannelSet($self,$sTargetChannel,$id_chanset_list);
+					if (defined($id_channel_set)) {
+						my $ret = set_hailo_channel_ratio($self,$sTargetChannel,(100 - $tArgs[0]));
+						botNotice($self,$sNick,"HailoChatter's ratio is now set to " . $tArgs[0] . "% on $sTargetChannel");
+						return $ret;
+					}
+					else {
+						botNotice($self,$sNick,"Chanset +HailoChatter is not set on $sTargetChannel");
+						return undef;
+					}
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " hailo_chatter command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " hailo_chatter command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
+}
 1;
