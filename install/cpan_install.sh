@@ -109,6 +109,14 @@ Hailo" | while read perl_module
 	fi
  done
 
+ messageln "Installing Hailo manually (ignore last error)"
+ wget https://cpan.metacpan.org/authors/id/A/AV/AVAR/Hailo-0.75.tar.gz
+ tar xzf Hailo-0.75.tar.gz
+ cd Hailo-0.75
+ perl Makefile.PL
+ make
+ make install
+
 # +-------------------------------------------------------------------------+
 # | CPAN VERIFY MODULES                                                     |
 # +-------------------------------------------------------------------------+
