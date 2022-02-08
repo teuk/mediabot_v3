@@ -8613,12 +8613,10 @@ sub mbModUser(@) {
 					unless (defined($id_user) && ($id_user ne "")) {
 						botNotice($self,$sNick,"User: $sUser does not exist");
 					}
-					elsif ($id_user == $iMatchingUserId) {
-						botNotice($self,$sNick,"You don't want to do that :)");
-					}
 					else {
 						unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 							botNotice($self,$sNick,"moduser <user> level <Owner|Master|Administrator|User>");
+							botNotice($self,$sNick,"moduser <user> autologin <on|off>");
 						}
 						else {
 							my $sCommand = $tArgs[0];
@@ -9890,7 +9888,7 @@ sub nextRadio(@) {
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
 				if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 					unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"radio(dot)mp3.skip\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
 						log_message($self,0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
@@ -9933,7 +9931,12 @@ sub radioMsg(@) {
 	my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
 	my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
 	$sMsgSong .= String::IRC->new('[ ')->white('black');
-	$sMsgSong .= String::IRC->new("http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_URL")->orange('black');
+	if ( $RADIO_PORT == 443 ) {
+		$sMsgSong .= String::IRC->new("https://$RADIO_HOSTNAME/$RADIO_URL")->orange('black');
+	}
+	else {
+		$sMsgSong .= String::IRC->new("http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_URL")->orange('black');
+	}
 	$sMsgSong .= String::IRC->new(' ] ')->white('black');
 	$sMsgSong .= String::IRC->new(' - ')->white('black');
 	$sMsgSong .= String::IRC->new(' [ ')->orange('black');
