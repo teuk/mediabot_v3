@@ -6658,6 +6658,7 @@ sub displayDate(@) {
 		switch($tArgs[0]) {
 			case /^fr$/i { $sDefaultTZ = 'Europe/Paris'; }
 			case /^Moscow$/i { $sDefaultTZ = 'Europe/Moscow'; }
+			case /^LA$/i { $sDefaultTZ = 'America/Los_Angeles'; }
 			else { 	botPrivmsg($self,$sChannel,"Invalid parameter");	
 							return undef;
 			}
