@@ -891,6 +891,16 @@ sub on_message_RPL_WHOISUSER(@) {
 					}
 				}
 			}
+			case "mbWhereis" {
+				$mediabot->log_message(3,"WHOIS mbWhereis");
+				my $country = $mediabot->whereis($sHostname);
+				if (defined($country)) {
+					$mediabot->botPrivmsg($WHOIS_VARS{'channel'},"($WHOIS_VARS{'caller'} whereis $WHOIS_VARS{'nick'}) Country : $country");
+				}
+				else {
+					$mediabot->botPrivmsg($WHOIS_VARS{'channel'},"($WHOIS_VARS{'caller'} whereis $WHOIS_VARS{'nick'}) Country : $country");
+				}
+			}
 		}
 	}
 }

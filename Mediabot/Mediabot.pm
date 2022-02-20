@@ -25,6 +25,7 @@ use File::Basename;
 use Encode;
 use Moose;
 use Hailo;
+use Socket;
 
 sub new {
 	my ($class,$args) = @_;
@@ -1359,6 +1360,9 @@ sub mbCommandPublic(@) {
 													}
 		case /^hailo_chatter$/i						{		
 														hailo_chatter($self,$message,$sNick,$sChannel,@tArgs);
+													}
+		case /^whereis$/i							{		
+														mbWhereis($self,$message,$sNick,$sChannel,@tArgs);
 													}
 		else									{
 														#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
@@ -10750,4 +10754,60 @@ sub hailo_chatter(@) {
 		}
 	}
 }
+
+sub whereis(@) {
+	my ($self,$sHostname) = @_;
+	my $userIP;
+	log_message($self,3,"whereis() $sHostname");
+	unless ( $sHostname =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/ ) {
+		my $packed_ip = gethostbyname("$sHostname");
+		if (defined $packed_ip) {
+			$userIP = inet_ntoa($packed_ip);
+		}
+	}
+	else {
+		$userIP = $sHostname;
+	}
+	unless (defined($userIP) && ($userIP =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/)) {
+		return "N/A";
+	}
+	unless (open WHEREIS, "curl --connect-timeout 3 -f -s https://api.country.is/$userIP |") {
+		return "N/A";
+	}
+	my $line;
+	if (defined($line=<WHEREIS>)) {
+		close WHEREIS;
+		chomp($line);
+		my $json = decode_json $line;
+		my $country = $json->{'country'};
+		if (defined($country)) {
+			return $country;
+		}
+		else {
+			return undef;
+		}
+	}
+	else {
+		return "N/A";
+	}	
+}
+
+sub mbWhereis(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %WHOIS_VARS;
+	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+		$WHOIS_VARS{'nick'} = $tArgs[0];
+		$WHOIS_VARS{'sub'} = "mbWhereis";
+		$WHOIS_VARS{'caller'} = $sNick;
+		$WHOIS_VARS{'channel'} = $sChannel;
+		$WHOIS_VARS{'message'} = $message;
+		$self->{irc}->send_message("WHOIS", undef, $tArgs[0]);
+		%{$self->{WHOIS_VARS}} = %WHOIS_VARS;
+		return undef;
+	}
+	else {
+		botNotice($self,$sNick,"Syntax: whereis <nick>");
+	}
+}
+
 1;
