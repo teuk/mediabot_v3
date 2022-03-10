@@ -839,8 +839,6 @@ sub joinChannel(@) {
 # Join channel with auto_join set
 sub joinChannels(@) {
 	my $self = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my %hTimers;
 	my $sQuery = "SELECT * FROM CHANNEL WHERE auto_join=1 and description !='console'";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute()) {
@@ -863,10 +861,16 @@ sub joinChannels(@) {
 			log_message($self,0,"No channel to auto join");
 		}
 	}
+	$sth->finish;
 	
-	# Set timers at startup
-	$sQuery = "SELECT * FROM TIMERS";
-	$sth = $self->{dbh}->prepare($sQuery);
+}
+
+# Set timers at startup
+sub onStartTimers(@) {
+	my $self = shift;
+	my %hTimers;
+	my $sQuery = "SELECT * FROM TIMERS";
+	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute()) {
 		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
@@ -10759,6 +10763,9 @@ sub whereis(@) {
 	my ($self,$sHostname) = @_;
 	my $userIP;
 	log_message($self,3,"whereis() $sHostname");
+	if ( $sHostname =~ /users.undernet.org$/ ) {
+		return "on an Undernet hidden host ;)";
+	}
 	unless ( $sHostname =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/ ) {
 		my $packed_ip = gethostbyname("$sHostname");
 		if (defined $packed_ip) {

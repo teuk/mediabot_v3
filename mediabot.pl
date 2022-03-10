@@ -315,6 +315,7 @@ sub on_login(@) {
 	$mediabot->log_message(0,"on_login() Connected to irc server " . $mediabot->getServerHostname());
 	$mediabot->setQuit(0);
 	$mediabot->setConnectionTimestamp(time);
+	$mediabot->onStartTimers();
 	
 	# Undernet : authentication to channel service if credentials are defined
 	if (defined($MAIN_CONF{'connection.CONN_NETWORK_TYPE'}) && ( $MAIN_CONF{'connection.CONN_NETWORK_TYPE'} == 1 ) && defined($MAIN_CONF{'undernet.UNET_CSERVICE_LOGIN'}) && ($MAIN_CONF{'undernet.UNET_CSERVICE_LOGIN'} ne "") && defined($MAIN_CONF{'undernet.UNET_CSERVICE_USERNAME'}) && ($MAIN_CONF{'undernet.UNET_CSERVICE_USERNAME'} ne "") && defined($MAIN_CONF{'undernet.UNET_CSERVICE_PASSWORD'}) && ($MAIN_CONF{'undernet.UNET_CSERVICE_PASSWORD'} ne "")) {
