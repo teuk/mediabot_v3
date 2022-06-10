@@ -8883,7 +8883,7 @@ sub checkAntiFlood(@) {
 						}
 						else {
 							unless ( $notification ) {
-								$self->{irc}->do_PRIVMSG( target => $sChannel, text => "Anti flood active for $timetowait seconds on channel $sChannel, no more than $nbmsg_max requests in $duration seconds." );
+								#$self->{irc}->do_PRIVMSG( target => $sChannel, text => "Anti flood active for $timetowait seconds on channel $sChannel, no more than $nbmsg_max requests in $duration seconds." );
 								$sQuery = "UPDATE CHANNEL_FLOOD SET notification=? WHERE id_channel=?";
 								my $sth = $self->{dbh}->prepare($sQuery);
 								unless ($sth->execute(1,$id_channel)) {
@@ -8944,6 +8944,27 @@ sub setChannelAntiFloodParams(@) {
 					botNotice($self,$sNick,"Undefined channel");
 					botNotice($self,$sNick,"Syntax antifloodset [#channel] <max_msg> <period in sec> <timetowait in sec>");
 					return undef;
+				}
+				if ($#tArgs == -1) {
+					log_message($self,3,"Check antifloodset on $sChannel");
+					my $sQuery = "SELECT * FROM CHANNEL,CHANNEL_FLOOD WHERE CHANNEL.id_channel=CHANNEL_FLOOD.id_channel and CHANNEL.name like ?";
+					my $sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute($sChannel)) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						return undef;
+					}
+					else {
+						if (my $ref = $sth->fetchrow_hashref()) {
+							my $nbmsg_max =  $ref->{'nbmsg_max'};
+							my $duration =  $ref->{'duration'};
+							my $timetowait =  $ref->{'timetowait'};
+							botNotice($self,$sNick,"antifloodset for $sChannel : $nbmsg_max message". ($nbmsg_max > 1 ? "s" : "") . " max in $duration second". ($duration > 1 ? "s" : "") . ", $timetowait second". ($duration > 1 ? "s" : "") . " to wait if breached");
+						}
+						else {
+							botNotice($self,$sNick,"no antifloodset settings for $sChannel");
+						}
+					}
+					return 0;
 				}
 				unless (defined($tArgs[0]) && ($tArgs[0] =~ /^[0-9]+$/)) {
 					botNotice($self,$sNick,"Syntax antifloodset [#channel] <max_msg> <period in sec> <timetowait in sec>");
