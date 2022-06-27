@@ -4306,6 +4306,7 @@ sub mbDbAddCommand(@) {
 				}
 				else {
 					botNotice($self,$sNick,"Syntax: addcmd <command> <message|action> <category> <text>");
+					botNotice($self,$sNick,"Ex: m addcmd Hello message general Hello %n !");
 				}
 			}
 			else {
