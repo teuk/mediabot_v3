@@ -6331,9 +6331,8 @@ sub displayUrlTitle(@) {
 	my $sContentType;
 	my $iHttpResponseCode;
 	my $sTextURL = $sText;
-	$sTextURL =~ s/^.*http/http/;
-	$sTextURL =~ s/\s+.*$//;
-	$sText = $sTextURL;
+	$sText =~ s/^.*http/http/;
+	$sText =~ s/\s+.*$//;
 	log_message($self,3,"displayUrlTitle() URL = $sText");
 	
 	unless ( open URL_HEAD, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0\" --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |" ) {
@@ -6364,6 +6363,28 @@ sub displayUrlTitle(@) {
 			log_message($self,3,"displayUrlTitle() Wrong Content-Type for $sText " . (defined($sContentType) ? $sContentType : "Undefined") );
 		}
 		else {
+			if ( $sText =~ /open.spotify.com/ ) {
+				unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
+					log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
+				}
+				else {
+					#curl -f -s 'https://open.spotify.com/track/4D1VchY3LaTzchH12BCLoe?si=hn7GarGZReCUeKuBxrdMSA&nd=1' | grep -i '<title' | head -1 | sed -e 's/^.*<title>//g' | sed -e 's/<\/title.*$//'
+					my $line;
+					my $i = 0;
+					my $sTitle;
+					while(defined($line=<URL_TITLE>)) {
+						chomp($line);
+						if ( $line =~ /<title>/) {
+							my $sDisplayMsg = $line;
+							$sDisplayMsg =~ s/^.*<title//;
+							$sDisplayMsg =~ s/<\/title>.*$//;
+							botPrivmsg($self,$sChannel,"$sDisplayMsg");
+						}	
+						$i++;
+					}
+				}
+				return undef;
+			}
 			log_message($self,3,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
 			unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
 				log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
@@ -6668,6 +6689,11 @@ sub displayDate(@) {
 			case /^fr$/i { $sDefaultTZ = 'Europe/Paris'; }
 			case /^Moscow$/i { $sDefaultTZ = 'Europe/Moscow'; }
 			case /^LA$/i { $sDefaultTZ = 'America/Los_Angeles'; }
+			case /^me$/i { 
+				botPrivmsg($self,$sChannel,"Have you seen your face $sNick ? Not in your life !");
+				return undef;
+
+			}
 			else { 	botPrivmsg($self,$sChannel,"Invalid parameter");	
 							return undef;
 			}
