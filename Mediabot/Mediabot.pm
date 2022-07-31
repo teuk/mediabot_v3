@@ -6838,7 +6838,7 @@ sub displayDate(@) {
 						my $nick = $ref->{'nickname'};
 						if (defined($tz)) {
 							my $time = DateTime->now( time_zone => $tz );
-							botPrivmsg($self,$sChannel,"Current date for $nick $tz" . $time->format_cldr("cccc dd/MM/yyyy HH:mm:ss"));
+							botPrivmsg($self,$sChannel,"Current date for $nick $tz " . $time->format_cldr("cccc dd/MM/yyyy HH:mm:ss"));
 							return 0;
 						}
 						else {
@@ -6852,7 +6852,7 @@ sub displayDate(@) {
 								if (my $ref = $sth->fetchrow_hashref()) {
 									my $tz = $ref->{'tz'};
 									my $time = DateTime->now( time_zone => $tz );
-									botPrivmsg($self,$sChannel,"$tz" . $time->format_cldr("cccc dd/MM/yyyy HH:mm:ss"));
+									botPrivmsg($self,$sChannel,"$tz " . $time->format_cldr("cccc dd/MM/yyyy HH:mm:ss"));
 									$i++;
 								}
 								return 0;
