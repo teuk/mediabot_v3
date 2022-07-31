@@ -6689,6 +6689,7 @@ sub displayDate(@) {
 			case /^fr$/i { $sDefaultTZ = 'Europe/Paris'; }
 			case /^Moscow$/i { $sDefaultTZ = 'Europe/Moscow'; }
 			case /^LA$/i { $sDefaultTZ = 'America/Los_Angeles'; }
+			case /^DK$/i { $sDefaultTZ = 'Europe/Copenhagen'; }
 			case /^me$/i { 
 				botPrivmsg($self,$sChannel,"Have you seen your face $sNick ? Not in your life !");
 				return undef;
