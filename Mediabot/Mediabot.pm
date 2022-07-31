@@ -6842,7 +6842,7 @@ sub displayDate(@) {
 							return 0;
 						}
 						else {
-							$sQuery = "SELECT tz FROM TIMEZONES WHERE tz like ?";
+							$sQuery = "SELECT tz FROM TIMEZONE WHERE tz like ?";
 							my $sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($tArgs[0])) {
 								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
