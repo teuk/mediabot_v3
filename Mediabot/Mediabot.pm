@@ -6681,6 +6681,9 @@ sub mbPopCommand(@) {
 }
 
 sub displayDate(@) {
+	#u date user add <alias name> <timezone>
+	#u date user del <alias name>
+	#u date list
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sDefaultTZ = 'America/New_York';
@@ -6693,13 +6696,203 @@ sub displayDate(@) {
 			case /^me$/i { 
 				botPrivmsg($self,$sChannel,"Have you seen your face $sNick ? Not in your life !");
 				return undef;
-
 			}
-			else { 	botPrivmsg($self,$sChannel,"Invalid parameter");	
+			case /^list$/i {
+				botPrivmsg($self,$sChannel,"Available Timezones can be found here : https://pastebin.com/4p4pby3y");
+				return 0;
+			}
+			case /^user$/i {
+				if (defined($tArgs[1]) && ($tArgs[1] ne "")) {
+					switch($tArgs[1]) {
+						case /^add$/i {
+							my $sQuery = "SELECT nickname,tz FROM USER WHERE nickname like ?";
+							my $sth = $self->{dbh}->prepare($sQuery);
+							if (defined($tArgs[2]) && ($tArgs[2] ne "") && defined($tArgs[3] && $tArgs[3] ne "")) {
+								unless ($sth->execute($tArgs[2])) {
+									log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								}
+								else {
+									my $i = 0;
+									if (my $ref = $sth->fetchrow_hashref()) {
+										my $tz = $ref->{'tz'};
+										my $nick = $ref->{'nickname'};
+										if (defined($tz)) {
+											botPrivmsg($self,$sChannel,"$nick has already a timezone set to $tz, delete it before change it");
+											return undef;
+										}
+										else {
+											log_message($self,3,"$nick has no defined timezone");
+											$sQuery = "SELECT tz FROM TIMEZONE WHERE tz like ?";
+											$sth = $self->{dbh}->prepare($sQuery);
+											unless ($sth->execute($tArgs[3])) {
+												log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+											}
+											else {
+												my $i = 0;
+												if (my $ref = $sth->fetchrow_hashref()) {
+													my $tzset = $ref->{'tz'};
+													if (defined($tzset)) {
+														log_message($self,3,"Found timezone : $tzset");
+														$sQuery = "UPDATE USER SET tz=? WHERE nickname like ?";
+														$sth = $self->{dbh}->prepare($sQuery);
+														unless ($sth->execute($tzset,$nick)) {
+															log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+														}
+														else {
+															my $time = DateTime->now( time_zone => $tzset );
+															botPrivmsg($self,$sChannel,"Updated timezone for $nick : $tzset " . $time->format_cldr("cccc dd/MM/yyyy HH:mm:ss"));
+															return 0;
+														}
+														return undef;
+													}
+													else {
+														botPrivmsg($self,$sChannel,"Something weird happened. Sorry try again.");
+														return undef;
+													}
+													$i++;
+												}
+												else {
+													botPrivmsg($self,$sChannel,"Timezone $tArgs[3] was not found. Available Timezones can be found here : https://pastebin.com/4p4pby3y");
+													return undef;
+												}
+												logBot($self,$message,$sChannel,"date",@tArgs);
+											}
+											$sth->finish;
+											return 0;
+										}
+										$i++;
+									}
+									else {
+										botPrivmsg($self,$sChannel,"$tArgs[2] user unknown");
+										return undef;
+									}
+									logBot($self,$message,$sChannel,"date",@tArgs);
+								}
+								$sth->finish;
+							}
+							else {
+								botPrivmsg($self,$sChannel,"date user add <nick> <timezone>");
+							}
+						}
+						case /^del$/i {
+							my $sQuery = "SELECT nickname,tz FROM USER WHERE nickname like ?";
+							my $sth = $self->{dbh}->prepare($sQuery);
+							if (defined($tArgs[2]) && ($tArgs[2] ne "")) {
+								unless ($sth->execute($tArgs[2])) {
+									log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								}
+								else {
+									my $i = 0;
+									if (my $ref = $sth->fetchrow_hashref()) {
+										my $tz = $ref->{'tz'};
+										my $nick = $ref->{'nickname'};
+										if (defined($tz)) {
+											log_message($self,3,"$nick has already a timezone set to $tz, let's delete it.");
+											$sQuery = "UPDATE USER SET tz=NULL WHERE nickname like ?";
+											$sth = $self->{dbh}->prepare($sQuery);
+											unless ($sth->execute($tArgs[2])) {
+												log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+											}
+											else {
+												botPrivmsg($self,$sChannel,"Deleted timezone for user $nick.");
+											}
+											return undef;
+										}
+										else {
+											botPrivmsg($self,$sChannel,"$nick has no defined timezone.");
+										}
+										$i++;
+									}
+									else {
+										botPrivmsg($self,$sChannel,"$tArgs[2] user unknown");
+										return undef;
+									}
+									logBot($self,$message,$sChannel,"date",@tArgs);
+								}
+								$sth->finish;
+							}
+							else {
+								botPrivmsg($self,$sChannel,"date user del <nick>");
+							}
+						}
+						else {
+							
+						}
+					}
+				}
+				else {
+					botPrivmsg($self,$sChannel,"date user add <nick> <timezone>");
+					botPrivmsg($self,$sChannel,"date user del <nick>");
+				}
+			}
+			else {
+				my $sQuery = "SELECT nickname,tz FROM USER WHERE nickname like ?";
+				my $sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($tArgs[0])) {
+					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					my $i = 0;
+					if (my $ref = $sth->fetchrow_hashref()) {
+						my $tz = $ref->{'tz'};
+						my $nick = $ref->{'nickname'};
+						if (defined($tz)) {
+							my $time = DateTime->now( time_zone => $tz );
+							botPrivmsg($self,$sChannel,"Current date for $nick $tz" . $time->format_cldr("cccc dd/MM/yyyy HH:mm:ss"));
+							return 0;
+						}
+						else {
+							$sQuery = "SELECT tz FROM TIMEZONES WHERE tz like ?";
+							my $sth = $self->{dbh}->prepare($sQuery);
+							unless ($sth->execute($tArgs[0])) {
+								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							}
+							else {
+								my $i = 0;
+								if (my $ref = $sth->fetchrow_hashref()) {
+									my $tz = $ref->{'tz'};
+									my $time = DateTime->now( time_zone => $tz );
+									botPrivmsg($self,$sChannel,"$tz" . $time->format_cldr("cccc dd/MM/yyyy HH:mm:ss"));
+									$i++;
+								}
+								return 0;
+							}
+							botPrivmsg($self,$sChannel,"I don't know this timezone or user's timezone.");
 							return undef;
+						}
+						$i++;
+					}
+					else {
+						$sQuery = "SELECT tz FROM TIMEZONE WHERE tz like ?";
+						my $sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute($tArgs[0])) {
+							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						}
+						else {
+							my $i = 0;
+							if (my $ref = $sth->fetchrow_hashref()) {
+								my $tz = $ref->{'tz'};
+								my $time = DateTime->now( time_zone => $tz );
+								botPrivmsg($self,$sChannel,"$tz" . $time->format_cldr("cccc dd/MM/yyyy HH:mm:ss"));
+								$i++;
+							}
+							return 0;
+						}
+						botPrivmsg($self,$sChannel,"I don't know this timezone or user's timezone.");
+						return undef;
+					}
+					logBot($self,$message,$sChannel,"date",@tArgs);
+				}
+				$sth->finish;
+				botPrivmsg($self,$sChannel,"date <timezone> -or- date <timezone_alias>");
+				botPrivmsg($self,$sChannel,"date user add <nick> <timezone>");
+				botPrivmsg($self,$sChannel,"date user del <nick>");
+				botPrivmsg($self,$sChannel,"date list");
+				return undef;
 			}
 		}
 	}
+	
 	my $time = DateTime->now( time_zone => $sDefaultTZ );
 	botPrivmsg($self,$sChannel,"$sDefaultTZ : " . $time->format_cldr("cccc dd/MM/yyyy HH:mm:ss"));
 }
