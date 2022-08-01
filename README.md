@@ -85,3 +85,4 @@ DON'T FORGET TO REMOVE SUDO RIGHTS, THIS IS IMPORTANT ! :
 
 $ sudo rm -fv /etc/sudoers.d/mediabot
 
+Once you did all that register your bot and see the commands available in Wiki section : https://github.com/teuk/mediabot_v3/wiki
