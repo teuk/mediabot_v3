@@ -45,7 +45,7 @@ $ sudo echo 'mediabot ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/mediabot
 
 Install needed packages :
 
-$ sudo apt install build-essential mariadb-server git curl
+$ sudo apt install build-essential mariadb-server libmariadb-dev default-libmysqlclient-dev git curl
 
 
 ### Bot installation
