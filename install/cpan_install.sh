@@ -109,13 +109,22 @@ Hailo" | while read perl_module
 	fi
  done
 
- messageln "Installing Hailo manually (ignore last error)"
- wget https://cpan.metacpan.org/authors/id/A/AV/AVAR/Hailo-0.75.tar.gz
- tar xzf Hailo-0.75.tar.gz
- cd Hailo-0.75
- perl Makefile.PL
- make
- make install
+messageln "Installing DBD::mysql manually"
+wget "https://cpan.metacpan.org/authors/id/D/DV/DVEEDEN/DBD-mysql-4.050.tar.gz"
+tar xzf DBD-mysql-4.050.tar.gz
+cd DBD-mysql-4.050
+perl Makefile.PL
+make
+make install
+
+
+messageln "Installing Hailo manually (ignore previous error for this  module)"
+wget https://cpan.metacpan.org/authors/id/A/AV/AVAR/Hailo-0.75.tar.gz
+tar xzf Hailo-0.75.tar.gz
+cd Hailo-0.75
+perl Makefile.PL
+make
+make install
 
 # +-------------------------------------------------------------------------+
 # | CPAN VERIFY MODULES                                                     |
