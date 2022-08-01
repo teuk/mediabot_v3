@@ -109,7 +109,7 @@ Hailo" | while read perl_module
 	fi
  done
 
-messageln "Installing DBD::mysql manually"
+messageln "Installing DBD::mysql manually "
 wget "https://cpan.metacpan.org/authors/id/D/DV/DVEEDEN/DBD-mysql-4.050.tar.gz"
 tar xzf DBD-mysql-4.050.tar.gz
 chown -R mediabot: DBD-mysql-4.050
