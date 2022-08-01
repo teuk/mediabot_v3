@@ -76,12 +76,12 @@ To run the bot in daemon mode :
 
 (mediabot)$ ./mediabot.pl --conf=mediabot.conf --daemon
 
-
-DON'T FORGET TO REMOVE SUDO RIGHTS :
-
-$ sudo rm -fv /etc/sudoers.d/mediabot
-
 Always have a look at what is going on :
 
 (mediabot)$ tail -40f mediabot.log
+
+
+DON'T FORGET TO REMOVE SUDO RIGHTS, THIS IS IMPORTANT ! :
+
+$ sudo rm -fv /etc/sudoers.d/mediabot
 
