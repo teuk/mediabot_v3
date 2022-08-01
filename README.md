@@ -63,6 +63,8 @@ The following script is supposed to do all the work for DB creation and Perl mod
 (mediabot)$ ./configure
 
 
+### Running the bot
+
 If everything's ok then test in foreground using your config file e.g :
 
 
@@ -82,3 +84,4 @@ $ sudo rm -fv /etc/sudoers.d/mediabot
 Always have a look at what is going on :
 
 (mediabot)$ tail -40f mediabot.log
+
