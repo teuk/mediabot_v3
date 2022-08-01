@@ -17,7 +17,7 @@ WHAT IS MEDIABOT?
 
 I've been coding this bot for a while, and it's time to write documentation (about time)
 
-This perl bot is using Net::Async::IRC and a MySQL/MariaDB backend. I tried to make things easier to install it by running the configure script but sometimes it needs manuals actions. Check the Installation chapter for hints.
+This perl bot is using Net::Async::IRC and a MySQL/MariaDB backend. I tried to make things easier to install it by running the configure script but sometimes it needs manual actions. Check the Installation chapter for hints.
 
 I hope you'll have fun using mediabot :)
 
