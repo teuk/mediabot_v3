@@ -35,7 +35,7 @@ Add a mediabot user :
 $ sudo useradd -m -s /bin/bash mediabot
 
 
-Now, give sudo rights to mediabot user and keep it mind that you MUST remove this file after the installation !
+Now, give sudo rights to mediabot user and keep in mind that you MUST remove this file after the installation !
 If you don't, you let an irc bot running with root privileges (trust me you don't want that).
 
 $ sudo echo 'mediabot ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/mediabot
