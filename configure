@@ -201,7 +201,8 @@ ok_failed $? "Errors while configuring database"
 # +-------------------------------------------------------------------------+
 # | Configure Perl Modules                                                  |
 # +-------------------------------------------------------------------------+
-messageln "Perl modules installation must be run with sudo (as root user). This may take a long time, be patient"
+messageln "Perl modules installation must be run with sudo (as root user). This may take a long time (especially for DateTime and Moose/Hailo module), please be patient"
+messageln "Note : if you'd like to follow modules installation you can tail -f install/cpan_install_details.log in a separate terminal, let's go !"
 read -n 1 -s -r -p "[$(date +'%d/%m/%Y %H:%M:%S')] Press any key to continue"
 echo
 sudo ./cpan_install.sh
