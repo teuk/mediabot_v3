@@ -39,8 +39,11 @@ Now, give sudo rights to mediabot user and keep in mind that you MUST remove thi
 If you don't, you let an irc bot running with root privileges (trust me you don't want that).
 
 $ sudo -i
+
 (root)# echo 'mediabot ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/mediabot
+
 (root)# exit
+
 
 ### Required packages installation
 
