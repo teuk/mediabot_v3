@@ -12,6 +12,7 @@ WHAT IS MEDIABOT?
   
   Read COMMANDS file to know how to register it at first use and refer to bot log file to know what is going on.
 
+  The full documentation is in the Wiki section : https://github.com/teuk/mediabot_v3/wiki
 
 # Mediabot
 
