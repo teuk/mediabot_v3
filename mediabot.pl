@@ -136,6 +136,8 @@ if ( $MAIN_PROG_CHECK_CONFIG != 0 ) {
 	$mediabot->clean_and_exit(0);
 }
 
+print STDOUT "mediabot_v3 Copyright (C) 2019-2022 teuk\n";
+
 # Daemon mode actions
 if ( $MAIN_PROG_DAEMON ) {
 		$mediabot->log_message(0,"Mediabot v$MAIN_PROG_VERSION starting in daemon mode, check " . $mediabot->getLogFile() . " for more details");

@@ -1368,6 +1368,16 @@ sub mbCommandPublic(@) {
 		case /^whereis$/i							{		
 														mbWhereis($self,$message,$sNick,$sChannel,@tArgs);
 													}
+		case /^help$/i								{
+														unless(defined($tArgs[0]) && ($tArgs[0] ne "")) {
+															botPrivmsg($self,$sChannel,"Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
+															return 0;
+														}
+														else {
+															botPrivmsg($self,$sChannel,"Help on command $tArgs[0] is not available (unknown command ?). Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
+															return 0;
+														}
+													}	
 		else									{
 														#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
 														my $bFound = mbDbCommand($self,$message,$sChannel,$sNick,$sCommand,@tArgs);
@@ -4790,7 +4800,7 @@ sub displayBirthDate(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $isPrivate = !defined($sChannel);
-	my $sBirthDate = time2str("I was born on %m/%d/%Y at %H:%M:%S.",$MAIN_CONF{'main.MAIN_PROG_BIRTHDATE'});
+	my $sBirthDate = time2str("I was born on %d/%m/%Y at %H:%M:%S.",$MAIN_CONF{'main.MAIN_PROG_BIRTHDATE'});
 	my $d = time() - $MAIN_CONF{'main.MAIN_PROG_BIRTHDATE'};
 	my @int = (
 	    [ 'second', 1                ],
@@ -6681,9 +6691,10 @@ sub mbPopCommand(@) {
 }
 
 sub displayDate(@) {
-	#u date user add <alias name> <timezone>
-	#u date user del <alias name>
+	#u date user add <username> <timezone>
+	#u date user del <username>
 	#u date list
+	#u date list EUrope/Paris
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sDefaultTZ = 'America/New_York';
@@ -8285,7 +8296,7 @@ sub setRadioMetadata(@) {
 						close ICECAST_UPDATE_METADATA;
 						chomp($line);
 						if (defined($sChannel) && ($sChannel ne "")) {
-							sleep 2;
+							sleep 3;
 							displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
 						}
 						else {
