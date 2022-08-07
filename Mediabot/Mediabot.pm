@@ -11109,7 +11109,7 @@ sub userBirthday(@) {
 											if (my $ref = $sth->fetchrow_hashref()) {
 												my $nickname = $ref->{'nickname'};
 												my $birthday = $ref->{'birthday'};
-												if (defined($birthday) && ($birthday ne "")) {
+												if (defined($birthday)) {
 													botPrivmsg($self,$sChannel,"User $tArgs[2] already has a birthday set to $birthday");
 													$sth->finish;
 													return undef;
@@ -11150,22 +11150,22 @@ sub userBirthday(@) {
 									else {
 										if (my $ref = $sth->fetchrow_hashref()) {
 											my $nickname = $ref->{'nickname'};
-												my $birthday = $ref->{'birthday'};
-												if (defined($birthday) && ($birthday ne "")) {
-													$sQuery = "UPDATE USER SET birthday=NULL WHERE nickname like ?";
-													$sth = $self->{dbh}->prepare($sQuery);
-													unless ($sth->execute($tArgs[2])) {
-														log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-													}
-													else {
-														botPrivmsg($self,$sChannel,"Deleted " . $tArgs[2] . "'s birthday.");
-													}
+											my $birthday = $ref->{'birthday'};
+											if (defined($birthday) && ($birthday ne "")) {
+												$sQuery = "UPDATE USER SET birthday=NULL WHERE nickname like ?";
+												$sth = $self->{dbh}->prepare($sQuery);
+												unless ($sth->execute($tArgs[2])) {
+													log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 												}
 												else {
-													botPrivmsg($self,$sChannel,"User $tArgs[2] has no defined birthday.");
-													$sth->finish;
-													return undef;
+													botPrivmsg($self,$sChannel,"Deleted " . $tArgs[2] . "'s birthday.");
 												}
+											}
+											else {
+												botPrivmsg($self,$sChannel,"User $tArgs[2] has no defined birthday.");
+												$sth->finish;
+												return undef;
+											}
 										}
 										else {
 											botPrivmsg($self,$sChannel,"Unknown user $tArgs[2]");
@@ -11209,7 +11209,7 @@ sub userBirthday(@) {
 					if (my $ref = $sth->fetchrow_hashref()) {
 						my $nickname = $ref->{'nickname'};
 						my $birthday = $ref->{'birthday'};
-						if (defined($birthday) && ($birthday ne "")) {
+						if (defined($birthday)) {
 							botPrivmsg($self,$sChannel,$tArgs[0] . "'s birthday is $birthday");
 							$sth->finish;
 							return 0;
