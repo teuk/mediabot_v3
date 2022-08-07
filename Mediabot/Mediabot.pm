@@ -1368,6 +1368,9 @@ sub mbCommandPublic(@) {
 		case /^whereis$/i							{		
 														mbWhereis($self,$message,$sNick,$sChannel,@tArgs);
 													}
+		case /^birthday$/i							{		
+														userBirthday($self,$message,$sNick,$sChannel,@tArgs);
+													}	
 		case /^help$/i								{
 														unless(defined($tArgs[0]) && ($tArgs[0] ne "")) {
 															botPrivmsg($self,$sChannel,"Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
@@ -2598,7 +2601,7 @@ sub addUser(@) {
 						noticeConsoleChan($self,"Added user " . $tArgs[0] . " id_user : $id_user with hostmask " . $tArgs[1] . " (Level:" . $sLevel .")");
 						botNotice($self,$sNick,"Added user " . $tArgs[0] . " id_user : $id_user with hostmask " . $tArgs[1] . " (Level:" . $sLevel .")");
 						if ( $bNotify ) {
-							botNotice($self,$tArgs[0],"You've been added to " . $self->{irc}->nick_folded . " as user " . $tArgs[0] . " (Level : " . $sLevel . ")");
+							botNotice($self,$tArgs[0],"You've been added to " . $self->{irc}->nick_folded . " as user " . $tArgs[0] . " (Level : " . $sLevel . ") with hostmask $tArgs[1]");
 							botNotice($self,$tArgs[0],"/msg " . $self->{irc}->nick_folded . " pass password");
 							botNotice($self,$tArgs[0],"replace 'password' with something strong and that you won't forget :p");
 						}
@@ -2736,7 +2739,7 @@ sub userInfo(@) {
 								my $last_login = $ref->{'last_login'};
 								my $auth = $ref->{'auth'};
 								my $username = $ref->{'username'};
-								botNotice($self,$sNick,"User : $sUser (Id: $id_user - $sDescription) - created $creation_date - last login $last_login");
+								botNotice($self,$sNick,"User : $sUser (Id: $id_user - $sDescription) - created $creation_date - last login " . (defined($last_login) ? $last_login : ""));
 								my $sPasswordSet = (defined($sPassword) ? "Password set" : "Password is not set" );
 								my $sLoggedIn = (($auth) ? "logged in" : "not logged in" );
 								my $sAutoLogin = (($username eq "#AUTOLOGIN#") ? "ON" : "OFF");
@@ -11085,4 +11088,154 @@ sub mbWhereis(@) {
 	}
 }
 
+sub userBirthday(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	if (defined($tArgs[0]) && $tArgs[0] ne "") {
+		if ($tArgs[0] =~ /^add$|^del$/i) {
+			my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+			if (defined($iMatchingUserId)) {
+				if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+					if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
+						if (defined($tArgs[1]) && ($tArgs[1] =~ /^user$/i) && defined($tArgs[2]) && ($tArgs[2] ne "")) {
+							switch ($tArgs[0]) {
+								case /^add$/i {
+									if (defined($tArgs[3]) && (($tArgs[3] =~  /^[0-9]{2}\/[0-9]{2}$/) || $tArgs[3] =~ /^[0-9]{2}\/[0-9]{2}\/[0-9]{4}$/)) {
+										my $sQuery = "SELECT nickname,birthday FROM USER WHERE nickname like ?";
+										my $sth = $self->{dbh}->prepare($sQuery);
+										unless ($sth->execute($tArgs[2])) {
+											log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+										}
+										else {
+											if (my $ref = $sth->fetchrow_hashref()) {
+												my $nickname = $ref->{'nickname'};
+												my $birthday = $ref->{'birthday'};
+												if (defined($birthday) && ($birthday ne "")) {
+													botPrivmsg($self,$sChannel,"User $tArgs[2] already has a birthday set to $birthday");
+													$sth->finish;
+													return undef;
+												}
+												else {
+													$sQuery = "UPDATE USER SET birthday=?";
+													$sth = $self->{dbh}->prepare($sQuery);
+													unless ($sth->execute($tArgs[3])) {
+														log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+													}
+													else {
+														botPrivmsg($self,$sChannel,"Set " . $tArgs[2] . "'s birthday to $tArgs[3]");
+														$sth->finish;
+														return 0
+													}
+												}
+												$sth->finish;
+												return 0;
+											}
+											else {
+												botPrivmsg($self,$sChannel,"Unknown user $tArgs[2]");
+												return undef;
+											}
+										}
+									}
+									else {
+										botNotice($self,$sNick,"Syntax: birthday add user <username> [dd/mm | dd/mm/YYYY]");
+										botNotice($self,$sNick,"Syntax: birthday del user <username>");
+										return undef;
+									}
+								}
+								case /^del$/i {
+									my $sQuery = "SELECT nickname,birthday FROM USER WHERE nickname like ?";
+									my $sth = $self->{dbh}->prepare($sQuery);
+									unless ($sth->execute($tArgs[2])) {
+										log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+									}
+									else {
+										if (my $ref = $sth->fetchrow_hashref()) {
+											my $nickname = $ref->{'nickname'};
+												my $birthday = $ref->{'birthday'};
+												if (defined($birthday) && ($birthday ne "")) {
+													$sQuery = "UPDATE USER SET birthday=NULL WHERE nickname like ?";
+													$sth = $self->{dbh}->prepare($sQuery);
+													unless ($sth->execute($tArgs[2])) {
+														log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+													}
+													else {
+														botPrivmsg($self,$sChannel,"Deleted " . $tArgs[2] . "'s birthday.");
+													}
+												}
+												else {
+													botPrivmsg($self,$sChannel,"User $tArgs[2] has no defined birthday.");
+													$sth->finish;
+													return undef;
+												}
+										}
+										else {
+											botPrivmsg($self,$sChannel,"Unknown user $tArgs[2]");
+											return undef;
+										}
+									}
+								}
+								else {
+									botNotice($self,$sNick,"Syntax: birthday add user <username> [dd/mm | dd/mm/YYYY]");
+									botNotice($self,$sNick,"Syntax: birthday del user <username>");
+									return undef;
+								}
+							}
+							
+						}
+						else {
+							botNotice($self,$sNick,"Syntax: birthday add user <username> [dd/mm | dd/mm/YYYY]");
+							botNotice($self,$sNick,"Syntax: birthday del user <username>");
+							return undef;
+						}
+					}
+					else {
+						botNotice($self,$sNick,"Your level does not allow you to use this command.");
+						return undef;
+					}
+				}
+				else {
+					botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+					return undef;
+				}
+			}
+		}
+		else {
+			if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+				my $sQuery = "SELECT nickname,birthday FROM USER WHERE nickname like ?";
+				my $sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($tArgs[0])) {
+					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					if (my $ref = $sth->fetchrow_hashref()) {
+						my $nickname = $ref->{'nickname'};
+						my $birthday = $ref->{'birthday'};
+						if (defined($birthday) && ($birthday ne "")) {
+							botPrivmsg($self,$sChannel,$tArgs[0] . "'s birthday is $birthday");
+							$sth->finish;
+							return 0;
+						}
+						else {
+							botPrivmsg($self,$sChannel,"User " . $tArgs[0] . "has no defined birthday.");
+							$sth->finish;
+							return undef;
+						}
+					}
+					else {
+						botPrivmsg($self,$sChannel,"Unknown user $tArgs[0]");
+						$sth->finish;
+						return undef;
+					}
+				}
+				$sth->finish;
+			}
+			else {
+				botNotice($self,$sNick,"Syntax: birthday <username>");
+			}
+		}
+	}
+	else {
+		botNotice($self,$sNick,"Syntax: birthday <username>");
+		return undef;
+	}
+}
 1;
