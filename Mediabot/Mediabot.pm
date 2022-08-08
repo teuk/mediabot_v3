@@ -11110,14 +11110,14 @@ sub userBirthday(@) {
 												my $nickname = $ref->{'nickname'};
 												my $birthday = $ref->{'birthday'};
 												if (defined($birthday)) {
-													botPrivmsg($self,$sChannel,"User $tArgs[2] already has a birthday set to $birthday");
+													botPrivmsg($self,$sChannel,"User $nickname already has a birthday set to $birthday");
 													$sth->finish;
 													return undef;
 												}
 												else {
-													$sQuery = "UPDATE USER SET birthday=?";
+													$sQuery = "UPDATE USER SET birthday=? WHERE nickname like ?";
 													$sth = $self->{dbh}->prepare($sQuery);
-													unless ($sth->execute($tArgs[3])) {
+													unless ($sth->execute($tArgs[3],$tArgs[2])) {
 														log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 													}
 													else {
