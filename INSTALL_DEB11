@@ -12,7 +12,7 @@ add this line (which MUST be removed after installation) :
 
 mediabot ALL=(ALL) NOPASSWD:ALL
 
-# apt install build-essential mariadb-server git curl
+# apt install build-essential mariadb-server default-libmysqlclient-dev default-libmysqld-dev git curl
 # su - mediabot
 $ git clone https://github.com/teuk/mediabot_v3
 $ cd mediabot_v3
