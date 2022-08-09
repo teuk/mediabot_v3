@@ -33,11 +33,16 @@ This is an installation example on Debian GNU/Linux 11 (bullseye)
 
 Add a mediabot user :
 
+```
+
 $ sudo useradd -m -s /bin/bash mediabot
 
+```
 
 Now, give sudo rights to mediabot user and keep in mind that you MUST remove this file after the installation !
 If you don't, you let an irc bot running with root privileges (trust me you don't want that).
+
+```
 
 $ sudo -i
 
@@ -45,17 +50,24 @@ $ sudo -i
 
 (root)# exit
 
+```
+
 
 ### Required packages installation
 
 Install needed packages :
 
+```
+
 $ sudo apt install build-essential mariadb-server default-libmysqlclient-dev default-libmysqld-dev git curl
 
+```
 
 ### Bot installation
 
 Now get the bot as mediabot user and run configure script :
+
+```
 
 $ sudo -iu mediabot
 
@@ -63,15 +75,21 @@ $ sudo -iu mediabot
 
 (mediabot)$ cd mediabot_v3
 
+```
+
 The following script is supposed to do all the work for DB creation and Perl modules installation (but you may have to do manual actions sometimes) :
+
+```
 
 (mediabot)$ ./configure
 
+```
 
 ### Running the bot
 
 If everything's ok then test in foreground using your config file e.g :
 
+```
 
 (mediabot)$ ./mediabot.pl --conf=mediabot.conf
 
@@ -125,25 +143,41 @@ If everything's ok then test in foreground using your config file e.g :
 
 [06/08/2022 06:31:37] -irc.mediabot.rules- on 1 ca 1(4) ft 10(10) tr
 
+```
 
 And you should see the bot join on #mediabot console channel :
+
+```
 
 [06:30:25] * Now talking in #mediabot
 
 [06:31:39] * Joins: mediabot (mediabot@mediabot.mediabot.rules)
 
+```
+
 To run the bot in daemon mode :
 
+```
 
 (mediabot)$ ./mediabot.pl --conf=mediabot.conf --daemon
 
+```
+
 Always have a look at what is going on :
+
+```
 
 (mediabot)$ tail -40f mediabot.log
 
+```
 
 DON'T FORGET TO REMOVE SUDO RIGHTS, THIS IS IMPORTANT ! :
 
+```
+
 $ sudo rm -fv /etc/sudoers.d/mediabot
 
+```
+
 Once you did all that, register your bot and see the commands available in Wiki section : https://github.com/teuk/mediabot_v3/wiki
+
