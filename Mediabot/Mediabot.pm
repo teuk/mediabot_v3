@@ -11117,7 +11117,7 @@ sub userBirthday(@) {
 												else {
 													$sQuery = "UPDATE USER SET birthday=? WHERE nickname like ?";
 													$sth = $self->{dbh}->prepare($sQuery);
-													unless ($sth->execute($tArgs[3],$tArgs[2])) {
+													unless ($sth->execute($tArgs[3],$tArgs[2	])) {
 														log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 													}
 													else {
@@ -11215,7 +11215,7 @@ sub userBirthday(@) {
 							return 0;
 						}
 						else {
-							botPrivmsg($self,$sChannel,"User " . $tArgs[0] . "has no defined birthday.");
+							botPrivmsg($self,$sChannel,"User " . $tArgs[0] . " has no defined birthday.");
 							$sth->finish;
 							return undef;
 						}
