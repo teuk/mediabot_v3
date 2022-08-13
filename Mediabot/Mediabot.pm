@@ -11198,6 +11198,84 @@ sub userBirthday(@) {
 				}
 			}
 		}
+		elsif (defined($tArgs[0]) && ($tArgs[0] =~ /^next$/i)) {
+			my $time = DateTime->now( time_zone => 'America/New_York' );
+			my $tday = $time->format_cldr("dd");
+			my $tmonth = $time->format_cldr("MM");
+			my $tyear = $time->format_cldr("yyyy");
+			my $tref = "$tmonth$tday";
+			my @bmin;
+			my @bcandidate;
+			my $bnickname;
+			my $sQuery = "SELECT nickname,birthday FROM USER";
+			my $sth = $self->{dbh}->prepare($sQuery);
+			unless ($sth->execute()) {
+				log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			}
+			else {
+				my $i = 0;
+				while (my $ref = $sth->fetchrow_hashref()) {
+					my $nickname = $ref->{'nickname'};
+					my $birthday = $ref->{'birthday'};
+					if (defined($birthday)) {
+						my ($bday,$bmonth,$byear);
+						if ( $birthday =~ /^([0-9]*)\/([0-9]*)\/([0-9]*)$/ ) {
+							$bday = $1;
+							$bmonth = $2;
+							$byear = $3;
+						}
+						elsif ( $birthday =~ /^([0-9]*)\/([0-9]*)$/ ) {
+							$bday = $1;
+							$bmonth = $2;
+						}
+						my $cbday = "$bmonth$bday";
+
+						unless (defined($bmin[1])) {
+							$bmin[0] = $nickname;
+							$bmin[1] = $cbday;
+						}
+						elsif ( $cbday < $bmin[1] ) {
+							$bmin[0] = $nickname;
+							$bmin[1] = $cbday;
+						}
+
+						unless (defined($bcandidate[1])) {
+							if ($cbday > $tref) {
+								$bcandidate[1] = $cbday;
+							}
+						}
+						elsif ( ($cbday > $tref) && (defined($bcandidate[1]) && ($bcandidate[1] > $tref)) && (defined($bcandidate[1]) && ($cbday < $bcandidate[1])) ) {
+							$bcandidate[1] = $cbday;
+						}
+						$i++;
+					}
+				}
+				unless ($i > 0) {
+					botPrivmsg($self,$sChannel,"No user's birthday defnied in database.");
+					return undef;
+				}
+				if ( defined($bcandidate[1]) && $bcandidate[1] > $tref ) {
+					$bnickname = $bcandidate[0];
+				}
+				else {
+					$bnickname = $bmin[0];
+				}
+				$sQuery = "SELECT nickname,birthday FROM USER where nickname LIKE ?";
+				$sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($bnickname)) {
+					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				}
+				else {
+					if (my $ref = $sth->fetchrow_hashref()) {
+						my $nickname = $ref->{'nickname'};
+						my $birthday = $ref->{'birthday'};
+						botPrivmsg($self,$sChannel,"Next birthday is " . $nickname . "'s ($birthday)");
+					}
+				}
+				$sth->finish;
+			}
+			return undef;
+		}
 		else {
 			if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 				my $sQuery = "SELECT nickname,birthday FROM USER WHERE nickname like ?";
