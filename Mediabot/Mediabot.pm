@@ -104,6 +104,7 @@ sub getVersion(@) {
 				else {
 					log_message($self,0,"Mediabot unknown git version detected : $MAIN_GIT_VERSION");
 				}
+				close GITVERSION;
 			}
 			else {
 				$MAIN_GIT_VERSION = "Undefined";
@@ -11241,17 +11242,20 @@ sub userBirthday(@) {
 
 						unless (defined($bcandidate[1])) {
 							if ($cbday > $tref) {
+								$bcandidate[0] = $nickname;
 								$bcandidate[1] = $cbday;
 							}
 						}
 						elsif ( ($cbday > $tref) && (defined($bcandidate[1]) && ($bcandidate[1] > $tref)) && (defined($bcandidate[1]) && ($cbday < $bcandidate[1])) ) {
+							$bcandidate[0] = $nickname;
 							$bcandidate[1] = $cbday;
 						}
+						log_message($self,3,"Min : $bmin[0] $bmin[1] Candidate : " . (defined($bcandidate[0]) ? "$bcandidate[0] " : "N/A ") . (defined($bcandidate[1]) ? "$bcandidate[1]" : "N/A") . " Current $nickname $cbday");
 						$i++;
 					}
 				}
 				unless ($i > 0) {
-					botPrivmsg($self,$sChannel,"No user's birthday defnied in database.");
+					botPrivmsg($self,$sChannel,"No user's birthday defined in database.");
 					return undef;
 				}
 				if ( defined($bcandidate[1]) && $bcandidate[1] > $tref ) {
