@@ -11253,7 +11253,7 @@ sub userBirthday(@) {
 						if ( $cbday == $tref ) {
 							botPrivmsg($self,$sChannel,"Happy Birthday To: \2$nickname\2 - Hope you have a Great Day! !!!");
 						}
-						log_message($self,3,"Min : $bmin[0] $bmin[1] Candidate : " . (defined($bcandidate[0]) ? "$bcandidate[0] " : "N/A ") . (defined($bcandidate[1]) ? "$bcandidate[1]" : "N/A") . " Current $nickname $cbday");
+						if ( $i < 50 ) { log_message($self,3,"(birthday next) Min : $bmin[0] $bmin[1] Candidate : " . (defined($bcandidate[0]) ? "$bcandidate[0] " : "N/A ") . (defined($bcandidate[1]) ? "$bcandidate[1]" : "N/A") . " Current $nickname $cbday"); }
 						$i++;
 					}
 				}

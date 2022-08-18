@@ -516,7 +516,7 @@ sub on_message_PRIVMSG(@) {
 	}
 	if ( substr($where,0,1) eq '#' ) {
 		# Message on channel
-		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'}==1)) {
 			$mediabot->log_message(0,"[LIVE] $where: <$who> $what");
 		}
 		my $line = $what;
@@ -529,7 +529,7 @@ sub on_message_PRIVMSG(@) {
 				$mediabot->mbCommandPublic($message,$where,$who,$BOTNICK_WASNOT_TRIGGERED,$sCommand,@tArgs);
 			}
 		}
-		elsif ((($sCommand eq $self->nick_folded) && $bNickTriggerCommand) || ($sCommand eq substr($self->nick_folded, 0, 1))){
+		elsif ((($sCommand eq $self->nick_folded) && $bNickTriggerCommand) || (($sCommand eq substr($self->nick_folded, 0, 1)) && (defined($MAIN_CONF{'main.MAIN_PROG_INITIAL_TRIGGER'}) && $MAIN_CONF{'main.MAIN_PROG_INITIAL_TRIGGER'}))) {
 			my $botNickTriggered = (($sCommand eq $self->nick_folded) ? 1 : 0);
 			$what =~ s/^\S+\s*//;
 			($sCommand,@tArgs) = split(/\s+/,$what);
