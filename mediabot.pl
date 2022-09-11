@@ -251,7 +251,8 @@ sub on_timer_tick(@) {
 	my @params = @_;
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	$mediabot->log_message(5,"on_timer_tick() tick");
-	# update pid file
+
+	# Update pid file
 	my $sPidFilename = $MAIN_CONF{'main.MAIN_PID_FILE'};
 	unless (open PID, ">$sPidFilename") {
 		print STDERR "Could not open $sPidFilename for writing.\n";
@@ -260,6 +261,8 @@ sub on_timer_tick(@) {
 		print PID "$$";
 		close PID;
 	}
+
+	# Check connection status and reconnect if not connected
 	unless ($irc->is_connected) {
 		if ($mediabot->getQuit()) {
 			$mediabot->log_message(0,"Disconnected from server");
@@ -268,9 +271,35 @@ sub on_timer_tick(@) {
 		else {
 			$mediabot->setServer(undef);
 			$loop->stop;
-			$mediabot->log_message(0,"Lost connection to server. Waiting 300 seconds to reconnect");
-			sleep 300;
+			$mediabot->log_message(0,"Lost connection to server. Waiting 150 seconds to reconnect");
+			sleep 150;
 			reconnect();
+		}
+	}
+
+	# Check channels with chanset +RadioPub
+	if (defined($MAIN_CONF{'radio.RADIO_HOSTNAME'})) {
+		my $radioPubDelay = defined($MAIN_CONF{'radio.RADIO_PUB'}) ? $MAIN_CONF{'radio.RADIO_PUB'} : 10800;
+		unless ($radioPubDelay >= 900) {
+			$mediabot->log_message(0,"Mediabot was not designed to spam channels, please set RADIO_PUB to a value greater than 899 seconds in [radio] section of $CONFIG_FILE");
+		}
+		elsif ((time - $mediabot->getLastRadioPub()) > $radioPubDelay ) {
+			my $sQuery = "SELECT name FROM CHANNEL,CHANNEL_SET,CHANSET_LIST WHERE CHANNEL.id_channel=CHANNEL_SET.id_channel AND CHANNEL_SET.id_chanset_list=CHANSET_LIST.id_chanset_list AND CHANSET_LIST.chanset LIKE 'RadioPub'";
+			my $sth = $mediabot->getDbh->prepare($sQuery);
+			unless ($sth->execute()) {
+				$mediabot->log_message(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			}
+			else {
+				while (my $ref = $sth->fetchrow_hashref()) {
+					my $curChannel = $ref->{'name'};
+					$mediabot->log_message(3,"RadioPub on $curChannel");
+					$mediabot->displayRadioCurrentSong(undef,undef,$curChannel,undef);
+					# sleep 500ms
+					usleep(500000);
+				}
+			}
+			$sth->finish;
+			$mediabot->setLastRadioPub(time);
 		}
 	}
 }
@@ -297,7 +326,7 @@ sub on_message_NOTICE(@) {
 				$self->write("MODE " . $self->nick_folded . " +x\x0d\x0a");
 				$self->change_nick( $MAIN_CONF{'connection.CONN_NICK'} );
 				$mediabot->joinChannels();
-		  }
+		  	}
 		}
 		elsif (defined($MAIN_CONF{'connection.CONN_NETWORK_TYPE'}) && ( $MAIN_CONF{'connection.CONN_NETWORK_TYPE'} == 2 ) && defined($MAIN_CONF{'freenode.FREENODE_NICKSERV_PASSWORD'}) && ($MAIN_CONF{'freenode.FREENODE_NICKSERV_PASSWORD'} ne "")) {
 			if (($who eq "NickServ") && (($what =~ /This nickname is registered/) && defined($MAIN_CONF{'connection.CONN_NETWORK_TYPE'}) && ($MAIN_CONF{'connection.CONN_NETWORK_TYPE'} == 2))) {
@@ -317,6 +346,7 @@ sub on_login(@) {
 	$mediabot->log_message(0,"on_login() Connected to irc server " . $mediabot->getServerHostname());
 	$mediabot->setQuit(0);
 	$mediabot->setConnectionTimestamp(time);
+	$mediabot->setLastRadioPub(time);
 	$mediabot->onStartTimers();
 	
 	# Undernet : authentication to channel service if credentials are defined

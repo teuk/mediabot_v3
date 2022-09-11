@@ -3,6 +3,7 @@ package Mediabot;
 use strict;
 use warnings;
 use diagnostics;
+use Time::HiRes qw(usleep);
 use Config::Simple;
 use Date::Format;
 use Date::Parse;
@@ -2218,6 +2219,16 @@ sub setConnectionTimestamp(@) {
 sub getConnectionTimestamp(@) {
 	my $self = shift;
 	return $self->{iConnectionTimestamp};
+}
+
+sub setLastRadioPub(@) {
+	my ($self,$iLastRadioPub) = @_;
+	$self->{iLastRadioPub} = $iLastRadioPub;
+}
+
+sub getLastRadioPub(@) {
+	my $self = shift;
+	return $self->{iLastRadioPub};
 }
 
 sub setQuit(@) {
