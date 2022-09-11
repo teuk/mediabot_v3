@@ -44,11 +44,7 @@ If you don't, you let an irc bot running with root privileges (trust me you don'
 
 ```
 
-$ sudo -i
-
-(root)# echo 'mediabot ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/mediabot
-
-(root)# exit
+$ echo 'mediabot ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/mediabot
 
 ```
 
