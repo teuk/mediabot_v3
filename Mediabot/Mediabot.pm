@@ -6389,7 +6389,9 @@ sub displayUrlTitle(@) {
 		}
 		else {
 			if ( $sText =~ /open.spotify.com/ ) {
-				unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
+				my $url = $sText;
+				$url =~ s/\?.*$//;
+				unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0\" --connect-timeout 3 --max-time 3 -L -ks \"$url\" |" ) {
 					log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 				}
 				else {
