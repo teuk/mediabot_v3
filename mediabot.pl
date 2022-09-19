@@ -294,8 +294,6 @@ sub on_timer_tick(@) {
 					my $curChannel = $ref->{'name'};
 					$mediabot->log_message(3,"RadioPub on $curChannel");
 					$mediabot->displayRadioCurrentSong(undef,undef,$curChannel,undef);
-					# sleep 500ms
-					usleep(500000);
 				}
 			}
 			$sth->finish;

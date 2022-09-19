@@ -6360,7 +6360,7 @@ sub displayUrlTitle(@) {
 	$sText =~ s/\s+.*$//;
 	log_message($self,3,"displayUrlTitle() URL = $sText");
 	
-	unless ( open URL_HEAD, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0\" --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |" ) {
+	unless ( open URL_HEAD, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0\" --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |" ) {
 		log_message(3,"displayUrlTitle() Could not curl headers for $sText");
 	}
 	else {
@@ -6389,7 +6389,7 @@ sub displayUrlTitle(@) {
 		}
 		else {
 			if ( $sText =~ /open.spotify.com/ ) {
-				unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
+				unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
 					log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 				}
 				else {
@@ -6403,7 +6403,11 @@ sub displayUrlTitle(@) {
 							my $sDisplayMsg = $line;
 							$sDisplayMsg =~ s/^.*<title//;
 							$sDisplayMsg =~ s/<\/title>.*$//;
-							botPrivmsg($self,$sChannel,"$sDisplayMsg");
+							$sDisplayMsg =~ s/^\s*>//;
+							$sDisplayMsg =~ s/ | Spotify$//;
+							my $sText = String::IRC->new("Spotify")->white('green');
+							$sText .= " $sDisplayMsg";
+							botPrivmsg($self,$sChannel,$sText);
 						}	
 						$i++;
 					}
@@ -6411,7 +6415,7 @@ sub displayUrlTitle(@) {
 				return undef;
 			}
 			log_message($self,3,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
-			unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
+			unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
 				log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 			}
 			else {
