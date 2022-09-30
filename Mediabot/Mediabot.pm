@@ -27,6 +27,7 @@ use Encode;
 use Moose;
 use Hailo;
 use Socket;
+use Twitter::API;
 
 sub new {
 	my ($class,$args) = @_;
@@ -6409,6 +6410,9 @@ sub displayUrlTitle(@) {
 							$sDisplayMsg =~ s/ | Spotify$//;
 							my $sText = String::IRC->new("Spotify")->white('green');
 							$sText .= " $sDisplayMsg";
+							if ( $sText =~ /&#.*;/) {
+								$sText = decode_entities($sText);
+							}
 							botPrivmsg($self,$sChannel,$sText);
 						}	
 						$i++;
@@ -6416,8 +6420,25 @@ sub displayUrlTitle(@) {
 				}
 				return undef;
 			}
+			elsif ( $sText =~ /txitter.com/ ) {
+				my $YOUR_CONSUMER_KEY;
+				my $YOUR_CONSUMER_SECRET;
+				my $YOUR_ACCESS_TOKEN;
+				my $YOUR_ACCESS_TOKEN_SECRET;
+				my $client = Twitter::API->new_with_traits(
+					traits              => 'Enchilada',
+					consumer_key        => $YOUR_CONSUMER_KEY,
+					consumer_secret     => $YOUR_CONSUMER_SECRET,
+					access_token        => $YOUR_ACCESS_TOKEN,
+					access_token_secret => $YOUR_ACCESS_TOKEN_SECRET,
+				);
+				return undef;
+			}
+			elsif ( $sText =~ /instagram.com/ ) {
+				return undef;
+			}
 			log_message($self,3,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
-			unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
+			unless ( open URL_TITLE, "curl -A \" \" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
 				log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 			}
 			else {
@@ -6443,6 +6464,7 @@ sub displayUrlTitle(@) {
 				}
 			}
 		}
+		
 	}
 }
 
