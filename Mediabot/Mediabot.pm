@@ -20,7 +20,8 @@ use DateTime::TimeZone;
 use utf8;
 use HTML::Tree;
 use URL::Encode qw(url_encode_utf8 url_encode url_decode_utf8);
-use HTML::Entities;
+use HTML::Entities '%entity2char';
+use HTML::Entities qw(decode_entities);
 use MP3::Tag;
 use File::Basename;
 use Encode;
@@ -6410,7 +6411,8 @@ sub displayUrlTitle(@) {
 							$sDisplayMsg =~ s/ | Spotify$//;
 							my $sText = String::IRC->new("Spotify")->white('green');
 							$sText .= " $sDisplayMsg";
-							if ( $sText =~ /&#.*;/) {
+							my $regex = "&(?:" . join("|", map {s/;\z//; $_} keys %entity2char) . ");";
+							if (($sText =~ /$regex/) || ( $sText =~ /&#.*;/)) {
 								$sText = decode_entities($sText);
 							}
 							botPrivmsg($self,$sChannel,$sText);
