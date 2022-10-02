@@ -6422,11 +6422,26 @@ sub displayUrlTitle(@) {
 				}
 				return undef;
 			}
-			elsif ( $sText =~ /txitter.com/ ) {
-				my $YOUR_CONSUMER_KEY;
-				my $YOUR_CONSUMER_SECRET;
-				my $YOUR_ACCESS_TOKEN;
-				my $YOUR_ACCESS_TOKEN_SECRET;
+			elsif ( $sText =~ /twitter.com/ ) {
+				my $id_chanset_list = getIdChansetList($self,"Twitter");
+				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
+					log_message($self,3,"id_chanset_list = $id_chanset_list");
+					my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
+					unless (defined($id_channel_set) && ($id_channel_set ne "")) {
+						return undef;
+					}
+					else {
+						log_message($self,3,"id_channel_set = $id_channel_set");
+					}
+				}
+				my $YOUR_CONSUMER_KEY = $MAIN_CONF{'twitter.CONSUMER_KEY'};
+				my $YOUR_CONSUMER_SECRET = $MAIN_CONF{'twitter.CONSUMER_SECRET'};
+				my $YOUR_ACCESS_TOKEN = $MAIN_CONF{'twitter.ACCESS_TOKEN'};
+				my $YOUR_ACCESS_TOKEN_SECRET = $MAIN_CONF{'twitter.ACCESS_TOKEN_SECRET'};
+				unless (defined($YOUR_CONSUMER_KEY) && defined($YOUR_CONSUMER_SECRET) && defined($YOUR_ACCESS_TOKEN) && defined($YOUR_ACCESS_TOKEN_SECRET)) {
+					log_message($self,0,"Twitter API : one of the access tokens is missing check your config file");
+					return undef;
+				}
 				my $client = Twitter::API->new_with_traits(
 					traits              => 'Enchilada',
 					consumer_key        => $YOUR_CONSUMER_KEY,
@@ -6434,6 +6449,37 @@ sub displayUrlTitle(@) {
 					access_token        => $YOUR_ACCESS_TOKEN,
 					access_token_secret => $YOUR_ACCESS_TOKEN_SECRET,
 				);
+				my $me = $client->verify_credentials;
+				my $id;
+				if ( $sText =~ /twitter\.com.*status.(\d+)/ ) {
+					$id = $1;
+				}
+				else {
+					return undef;
+				}
+				log_message($self,3,"id = $id");
+				my $sDetails = $client->get("https://api.twitter.com/2/tweets?ids=$id&tweet.fields=created_at&expansions=author_id&user.fields=created_at");
+				log_message($self,3,"Twitter GET on $id");
+				log_message($self,3,Dumper($sDetails));
+				log_message($self,3,"------------------");
+				my %hDetails = %{$sDetails};
+				my @tData = @{$hDetails{'data'}};
+				my %hData = %{$tData[0]};
+				my $sDescription = $hData{'text'};
+				$sDescription =~ s/\n//g;
+				chomp($sDescription);
+
+				my $sUsername = ' @';
+				my @tUsers = $hDetails{'includes'}{'users'};
+				my %hUsers = %{$tUsers[0][0]};
+				$sUsername .= $hUsers{'username'};
+
+				log_message($self,3,"sDescription = $sDescription");
+				my $sPublicMsg = String::IRC->new("Twitter")->blue('white');
+				$sPublicMsg .= "$sUsername $sDescription";
+				unless ($sChannel =~ /#hedonism/i) {
+					botPrivmsg($self,$sChannel,"($sNick) $sPublicMsg");
+				}
 				return undef;
 			}
 			elsif ( $sText =~ /instagram.com/ ) {
