@@ -6386,7 +6386,9 @@ sub displayUrlTitle(@) {
 			$sText = decode_entities($sText);
 		}
 		$sText = "($sNick) " . $sText;
-		botPrivmsg($self,$sChannel,substr($sText, 0, 200));
+		unless ( $sText =~ /DOCTYPE html/ ) {
+			botPrivmsg($self,$sChannel,substr($sText, 0, 200));
+		}
 
 		return undef;
 	}
