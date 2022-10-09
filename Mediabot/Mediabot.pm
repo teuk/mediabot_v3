@@ -29,7 +29,7 @@ use Moose;
 use Hailo;
 use Socket;
 use Twitter::API;
-
+ 
 sub new {
 	my ($class,$args) = @_;
 	my $self = bless {
@@ -6362,6 +6362,35 @@ sub displayUrlTitle(@) {
 	$sText =~ s/\s+.*$//;
 	log_message($self,3,"displayUrlTitle() URL = $sText");
 	
+	if ( $sText =~ /instagram.com/ ) {
+		my $content;
+		unless ( open URL_HEAD, "curl \"$sText\" |" ) {
+			log_message(3,"displayUrlTitle() insta Could not curl GET for url details");
+		}
+		else {
+			my $line;
+			while (defined($line=<URL_HEAD>)) {
+				chomp($line);
+				$content .= $line;
+			}
+		}
+
+		$content =~ s/^.*og:title" content="//;
+		$content =~ s/" .><meta property="og:image".*$//;
+		log_message($self,3,$content);
+
+		$sText = String::IRC->new("Instagram")->white('pink');
+		$sText .= " $content";
+		my $regex = "&(?:" . join("|", map {s/;\z//; $_} keys %entity2char) . ");";
+		if (($sText =~ /$regex/) || ( $sText =~ /&#.*;/)) {
+			$sText = decode_entities($sText);
+		}
+		$sText = "($sNick) " . $sText;
+		botPrivmsg($self,$sChannel,substr($sText, 0, 200));
+
+		return undef;
+	}
+
 	unless ( open URL_HEAD, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0\" --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |" ) {
 		log_message(3,"displayUrlTitle() Could not curl headers for $sText");
 	}
@@ -6397,7 +6426,6 @@ sub displayUrlTitle(@) {
 					log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 				}
 				else {
-					#curl -f -s 'https://open.spotify.com/track/4D1VchY3LaTzchH12BCLoe?si=hn7GarGZReCUeKuBxrdMSA&nd=1' | grep -i '<title' | head -1 | sed -e 's/^.*<title>//g' | sed -e 's/<\/title.*$//'
 					my $line;
 					my $i = 0;
 					my $sTitle;
@@ -6415,7 +6443,7 @@ sub displayUrlTitle(@) {
 							if (($sText =~ /$regex/) || ( $sText =~ /&#.*;/)) {
 								$sText = decode_entities($sText);
 							}
-							botPrivmsg($self,$sChannel,$sText);
+							botPrivmsg($self,$sChannel,"($sNick) $sText");
 						}	
 						$i++;
 					}
@@ -6475,14 +6503,10 @@ sub displayUrlTitle(@) {
 				$sUsername .= $hUsers{'username'};
 
 				log_message($self,3,"sDescription = $sDescription");
-				my $sPublicMsg = String::IRC->new("Twitter")->blue('white');
+				my $sPublicMsg = String::IRC->new("Twitter")->white('cyan');
 				$sPublicMsg .= "$sUsername $sDescription";
-				unless ($sChannel =~ /#hedonism/i) {
-					botPrivmsg($self,$sChannel,"($sNick) $sPublicMsg");
-				}
-				return undef;
-			}
-			elsif ( $sText =~ /instagram.com/ ) {
+				botPrivmsg($self,$sChannel,"($sNick) $sPublicMsg");
+				
 				return undef;
 			}
 			log_message($self,3,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
