@@ -6375,12 +6375,21 @@ sub displayUrlTitle(@) {
 			}
 		}
 
-		$content =~ s/^.*og:title" content="//;
-		$content =~ s/" .><meta property="og:image".*$//;
-		log_message($self,3,$content);
+		my $title = $content;
+		$title =~ s/^.*og:title" content="//;
+		$title =~ s/" .><meta property="og:image".*$//;
+		unless ( $title =~ /DOCTYPE html/ ) {
+			log_message($self,3,"displayUrlTitle() (insta) Extracted title : $title");
+		}
+		else {
+			$title = $content;
+			$title =~ s/^.*<title//;
+			$title =~ s/<\/title>.*$//;
+			$title =~ s/^\s*>//;
+		}
 
 		$sText = String::IRC->new("Instagram")->white('pink');
-		$sText .= " $content";
+		$sText .= " $title";
 		my $regex = "&(?:" . join("|", map {s/;\z//; $_} keys %entity2char) . ");";
 		if (($sText =~ /$regex/) || ( $sText =~ /&#.*;/)) {
 			$sText = decode_entities($sText);
