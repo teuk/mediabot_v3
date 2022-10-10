@@ -281,7 +281,7 @@ sub on_timer_tick(@) {
 	if (defined($MAIN_CONF{'radio.RADIO_HOSTNAME'})) {
 		my $radioPubDelay = defined($MAIN_CONF{'radio.RADIO_PUB'}) ? $MAIN_CONF{'radio.RADIO_PUB'} : 10800;
 		unless ($radioPubDelay >= 900) {
-			$mediabot->log_message(0,"Mediabot was not designed to spam channels, please set RADIO_PUB to a value greater than 899 seconds in [radio] section of $CONFIG_FILE");
+			$mediabot->log_message(0,"Mediabot was not designed to spam channels, please set RADIO_PUB to a value greater or equal than 900 seconds in [radio] section of $CONFIG_FILE");
 		}
 		elsif ((time - $mediabot->getLastRadioPub()) > $radioPubDelay ) {
 			my $sQuery = "SELECT name FROM CHANNEL,CHANNEL_SET,CHANSET_LIST WHERE CHANNEL.id_channel=CHANNEL_SET.id_channel AND CHANNEL_SET.id_chanset_list=CHANSET_LIST.id_chanset_list AND CHANSET_LIST.chanset LIKE 'RadioPub'";
@@ -293,7 +293,13 @@ sub on_timer_tick(@) {
 				while (my $ref = $sth->fetchrow_hashref()) {
 					my $curChannel = $ref->{'name'};
 					$mediabot->log_message(3,"RadioPub on $curChannel");
-					$mediabot->displayRadioCurrentSong(undef,undef,$curChannel,undef);
+					my $currentTitle = $mediabot->getRadioCurrentSong();
+					if ( $currentTitle ne "Unknown" ) {
+						$mediabot->displayRadioCurrentSong(undef,undef,$curChannel,undef);
+					}
+					else {
+						$mediabot->log_message(3,"RadioPub skipped for $curChannel, title is $currentTitle");
+					}
 				}
 			}
 			$sth->finish;
