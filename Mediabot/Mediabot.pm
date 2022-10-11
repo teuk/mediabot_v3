@@ -6539,9 +6539,15 @@ sub displayUrlTitle(@) {
 					$tree->parse($sContent);
 					my ($title) = $tree->look_down( '_tag' , 'title' );
 					if (defined($title) && ($title->as_text ne "")) {
-						my $sText = String::IRC->new("URL Title from $sNick:")->grey('black');
-						unless (( $title->as_text =~ /annie\s+claude/i ) || ( $title->as_text =~ /annie.claude/i ) || ( $title->as_text =~ /418.*618.*1447/)) {
-							botPrivmsg($self,$sChannel,$sText . " " . $title->as_text);
+						my $sDisplayMsg;
+						if (( $sText =~ /youtube.com/ ) || ( $sText =~ /youtu\.be/ )) {
+							$sDisplayMsg = String::IRC->new('You')->black('white');
+							$sDisplayMsg .= String::IRC->new('Tube')->white('red');
+							botPrivmsg($self,$sChannel,"($sNick) $sDisplayMsg " . $title->as_text);
+						}
+						else {
+							$sDisplayMsg = String::IRC->new("URL Title from $sNick:")->grey('black');
+							botPrivmsg($self,$sChannel,$sDisplayMsg . " " . $title->as_text);
 						}
 					}
 				}
