@@ -6514,7 +6514,7 @@ sub displayUrlTitle(@) {
 				$sUsername .= $hUsers{'username'};
 
 				log_message($self,3,"sDescription = $sDescription");
-				my $sPublicMsg = String::IRC->new("Twitter")->white('cyan');
+				my $sPublicMsg = String::IRC->new("Twitter")->black('cyan');
 				$sPublicMsg .= "$sUsername $sDescription";
 				botPrivmsg($self,$sChannel,"($sNick) $sPublicMsg");
 				
@@ -6543,6 +6543,10 @@ sub displayUrlTitle(@) {
 						if (( $sText =~ /youtube.com/ ) || ( $sText =~ /youtu\.be/ )) {
 							$sDisplayMsg = String::IRC->new('You')->black('white');
 							$sDisplayMsg .= String::IRC->new('Tube')->white('red');
+							botPrivmsg($self,$sChannel,"($sNick) $sDisplayMsg " . $title->as_text);
+						}
+						elsif ( $sText =~ /music.apple.com/ ) {
+							$sDisplayMsg = String::IRC->new('AppleMusic')->white('grey');
 							botPrivmsg($self,$sChannel,"($sNick) $sDisplayMsg " . $title->as_text);
 						}
 						else {
