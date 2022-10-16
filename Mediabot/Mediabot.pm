@@ -9520,7 +9520,12 @@ sub playRadio(@) {
 					$bRadioLive = isRadioLive($self,$sHarbor);
 				}
 				if ($bRadioLive) {
-					botPrivmsg($self,$sChannel,"($sNick radio play) Cannot queue requests while radio is live");
+					unless (defined($sChannel) && ($sChannel ne "")) {
+						botPrivmsg($self,$sChannel,"($sNick radio play) Cannot queue requests while radio is live");
+					}
+					else {
+						botNotice($self,$sNick,"($sNick radio play) Cannot queue requests while radio is live");
+					}
 					return undef;
 				}
 				my $sYoutubeId;
@@ -9553,12 +9558,22 @@ sub playRadio(@) {
 						my $ytUrl = "https://www.youtube.com/watch?v=$sYoutubeId";
 						my ($sDurationSeconds,$sMsgSong) = getYoutubeDetails($self,$ytUrl);
 						unless (defined($sMsgSong)) {
-							botPrivmsg($self,$sChannel,"($sNick radio play) Unknown Youtube link");
+							if (defined($sChannel) && ($sChannel ne "")) {
+								botPrivmsg($self,$sChannel,"($sNick radio play) Unknown Youtube link");
+							}
+							else {
+								botNotice($self,$sNick,"($sNick radio play) Unknown Youtube link");
+							}
 							return undef;
 						}
 						else {
 							unless ($sDurationSeconds < (12 * 60)) {
-								botPrivmsg($self,$sChannel,"($sNick radio play) Youtube link duration is too long ($sDurationSeconds seconds), sorry");
+								if (defined($sChannel) && ($sChannel ne "")) {
+									botPrivmsg($self,$sChannel,"($sNick radio play) Youtube link duration is too long ($sDurationSeconds seconds), sorry");
+								}
+								else {
+									botNotice($self,$sNick,"($sNick radio play) Youtube link duration is too long ($sDurationSeconds seconds), sorry");
+								}
 								return undef;
 							}
 							unless ( -d $incomingDir ) {
@@ -9584,17 +9599,32 @@ sub playRadio(@) {
 							if (defined($ytDestinationFile) && ($ytDestinationFile ne "")) {
 								my $rPush = queuePushRadio($self,$ytDestinationFile);
 								if (defined($rPush) && $rPush) {
-									botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : ID : $sYoutubeId (cached) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
+									if (defined($sChannel) && ($sChannel ne "")) {
+										botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : ID : $sYoutubeId (cached) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
+									}
+									else {
+										botNotice($self,$sNick,"($sNick radio play) Library ID : ID : $sYoutubeId (cached) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
+									}
 									logBot($self,$message,$sChannel,"play",$sText);
 								}
 								else {
-									log_message($self,3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");	
-									botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
+									log_message($self,3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");
+									if (defined($sChannel) && ($sChannel ne "")) {
+										botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
+									}
+									else {
+										botNotice($self,$sNick,"($sNick radio play could not queue) Already asked ?");
+									}
 									return undef;
 								}
 							}
 							else {
-								botPrivmsg($self,$sChannel,"($sNick radio play) $sMsgSong - Please wait while downloading");
+								if (defined($sChannel) && ($sChannel ne "")) {
+									botPrivmsg($self,$sChannel,"($sNick radio play) $sMsgSong - Please wait while downloading");
+								}
+								else {
+									botNotice($self,$sNick,"($sNick radio play) $sMsgSong - Please wait while downloading");
+								}
 								my $timer = IO::Async::Timer::Countdown->new(
 							   	delay => 3,
 							   	on_expire => sub {
@@ -9642,12 +9672,22 @@ sub playRadio(@) {
 											$sth->finish;
 											my $rPush = queuePushRadio($self,"$incomingDir/$ytDestinationFile");
 											if (defined($rPush) && $rPush) {
-												botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $sYoutubeId (downloaded) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
+												if (defined($sChannel) && ($sChannel ne "")) {
+													botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $sYoutubeId (downloaded) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
+												}
+												else {
+													botNotice($self,$sNick,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $sYoutubeId (downloaded) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
+												}
 												logBot($self,$message,$sChannel,"play",$sText);
 											}
 											else {
-												log_message($self,3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");	
-												botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
+												log_message($self,3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");
+												if (defined($sChannel) && ($sChannel ne "")) {
+													botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
+												}
+												else {
+													botNotice($self,$sNick,"($sNick radio play could not queue) Already asked ?");
+												}
 												return undef;
 											}
 										}
@@ -9679,22 +9719,42 @@ sub playRadio(@) {
 										my $sMsgSong = "$artist - $title";
 										if (defined($id_youtube) && ($id_youtube ne "")) {
 											($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
-											botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : " . $tArgs[1] . " (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+											if (defined($sChannel) && ($sChannel ne "")) {
+												botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : " . $tArgs[1] . " (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+											}
+											else {
+												botNotice($self,$sNick,"($sNick radio play) Library ID : " . $tArgs[1] . " (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+											}
 										}
 										else {
-											botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : " . $tArgs[1] . " (cached) / $sMsgSong / Queued");
+											if (defined($sChannel) && ($sChannel ne "")) {
+												botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : " . $tArgs[1] . " (cached) / $sMsgSong / Queued");
+											}
+											else {
+												botNotice($self,$sNick,"($sNick radio play) Library ID : " . $tArgs[1] . " (cached) / $sMsgSong / Queued");
+											}
 										}
 										logBot($self,$message,$sChannel,"play",$sText);
 										return 1;
 									}
 									else {
-										log_message($self,3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");	
-										botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
+										log_message($self,3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");
+										if (defined($sChannel) && ($sChannel ne "")) {
+											botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
+										}
+										else {
+											botNotice($self,$sNick,"($sNick radio play could not queue) Already asked ?");
+										}
 										return undef;
 									}
 								}
 								else {
-									botPrivmsg($self,$sChannel,"($sNick radio play / could not find mp3 id in library : $tArgs[1]");
+									if (defined($sChannel) && ($sChannel ne "")) {
+										botPrivmsg($self,$sChannel,"($sNick radio play / could not find mp3 id in library : $tArgs[1]");
+									}
+									else {
+										botNotice($self,$sNick,"($sNick radio play / could not find mp3 id in library : $tArgs[1]");
+									}
 									return undef;
 								}
 							}
@@ -9718,12 +9778,22 @@ sub playRadio(@) {
 										if (defined($id_youtube) && ($id_youtube ne "")) {
 											($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
 										}
-										botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : " . $tArgs[1] . " Youtube ID : $sText (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+										if (defined($sChannel) && ($sChannel ne "")) {
+											botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : " . $tArgs[1] . " Youtube ID : $sText (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+										}
+										else {
+											botNotice($self,$sNick,"($sNick radio play) Library ID : " . $tArgs[1] . " Youtube ID : $sText (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+										}
 										logBot($self,$message,$sChannel,"play",$sText);
 									}
 									else {
 										log_message($self,3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");	
-										botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
+										if (defined($sChannel) && ($sChannel ne "")) {
+											botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
+										}
+										else {
+											botNotice($self,$sNick,"($sNick radio play could not queue) Already asked ?");
+										}
 										return undef;
 									}
 								}
@@ -9738,10 +9808,20 @@ sub playRadio(@) {
 									my $ytUrl = "https://www.youtube.com/watch?v=" . $tArgs[1];
 									my ($sDurationSeconds,$sMsgSong) = getYoutubeDetails($self,$ytUrl);
 									unless (defined($sMsgSong)) {
-										botPrivmsg($self,$sChannel,"($sNick radio play) Unknown Youtube link");
+										if (defined($sChannel) && ($sChannel ne "")) {
+											botPrivmsg($self,$sChannel,"($sNick radio play) Unknown Youtube link");
+										}
+										else {
+											botNotice($self,$sNick,"($sNick radio play) Unknown Youtube link");
+										}
 										return undef;
 									}
-									botPrivmsg($self,$sChannel,"($sNick radio play) $sMsgSong - Please wait while downloading");
+									if (defined($sChannel) && ($sChannel ne "")) {
+										botPrivmsg($self,$sChannel,"($sNick radio play) $sMsgSong - Please wait while downloading");
+									}
+									else {
+										botNotice($self,$sNick,"($sNick radio play) $sMsgSong - Please wait while downloading");
+									}
 									my $timer = IO::Async::Timer::Countdown->new(
 										delay => 3,
 										on_expire => sub {
@@ -9787,12 +9867,22 @@ sub playRadio(@) {
 													$sth->finish;
 													my $rPush = queuePushRadio($self,"$incomingDir/$ytDestinationFile");
 													if (defined($rPush) && $rPush) {
-														botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $id_youtube (downloaded) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+														if (defined($sChannel) && ($sChannel ne "")) {
+															botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $id_youtube (downloaded) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+														}
+														else {
+															botNotice($self,$sNick,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $id_youtube (downloaded) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+														}
 														logBot($self,$message,$sChannel,"play",$sText);
 													}
 													else {
-														log_message($self,3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");	
-														botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
+														log_message($self,3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");
+														if (defined($sChannel) && ($sChannel ne "")) {
+															botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
+														}
+														else {
+															botNotice($self,$sNick,"($sNick radio play could not queue) Already asked ?");
+														}
 														return undef;
 													}
 												}
@@ -9831,17 +9921,32 @@ sub playRadio(@) {
 										my $sMsgSong = "$artist - $title";
 										if (defined($id_youtube) && ($id_youtube ne "")) {
 											($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
-											botPrivmsg($self,$sChannel,"($sNick radio play " . $sText . ") (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+											if (defined($sChannel) && ($sChannel ne "")) {
+												botPrivmsg($self,$sChannel,"($sNick radio play " . $sText . ") (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+											}
+											else {
+												botNotice($self,$sNick,"($sNick radio play " . $sText . ") (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+											}
 										}
 										else {
-											botPrivmsg($self,$sChannel,"($sNick radio play " . $sText . ") (Library ID : $id_mp3) / $artist - $title / Queued");
+											if (defined($sChannel) && ($sChannel ne "")) {
+												botPrivmsg($self,$sChannel,"($sNick radio play " . $sText . ") (Library ID : $id_mp3) / $artist - $title / Queued");
+											}
+											else {
+												botNotice($self,$sNick,"($sNick radio play " . $sText . ") (Library ID : $id_mp3) / $artist - $title / Queued");
+											}
 										}
 										logBot($self,$message,$sChannel,"play",@tArgs);
 										return 1;
 									}
 									else {
-										log_message($self,3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");	
-										botPrivmsg($self,$sChannel,"($sNick radio rplay / could not queue)");
+										log_message($self,3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");
+										if (defined($sChannel) && ($sChannel ne "")) {
+											botPrivmsg($self,$sChannel,"($sNick radio rplay / could not queue)");
+										}
+										else {
+											botNotice($self,$sNick,"($sNick radio rplay / could not queue)");
+										}
 										return undef;
 									}
 								}
@@ -9899,11 +10004,21 @@ sub playRadio(@) {
 								my $ytUrl = "https://www.youtube.com/watch?v=$sYoutubeId";
 								my ($sDurationSeconds,$sMsgSong) = getYoutubeDetails($self,$ytUrl);
 								unless (defined($sMsgSong)) {
-									botPrivmsg($self,$sChannel,"($sNick radio play) Unknown Youtube link");
+									if (defined($sChannel) && ($sChannel ne "")) {
+										botPrivmsg($self,$sChannel,"($sNick radio play) Unknown Youtube link");
+									}
+									else {
+										botNotice($self,$sNick,"($sNick radio play) Unknown Youtube link");
+									}
 									return undef;
 								}
 								unless ($sDurationSeconds < (12 * 60)) {
-									botPrivmsg($self,$sChannel,"($sNick radio play) Youtube link duration is too long ($sDurationSeconds seconds), sorry");
+									if (defined($sChannel) && ($sChannel ne "")) {
+										botPrivmsg($self,$sChannel,"($sNick radio play) Youtube link duration is too long ($sDurationSeconds seconds), sorry");
+									}
+									else {
+										botNotice($self,$sNick,"($sNick radio play) Youtube link duration is too long ($sDurationSeconds seconds), sorry");
+									}
 									return undef;
 								}
 								my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE id_youtube=?";
@@ -9925,12 +10040,22 @@ sub playRadio(@) {
 											if (defined($id_youtube) && ($id_youtube ne "")) {
 												($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
 											}
-											botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $id_youtube (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+											if (defined($sChannel) && ($sChannel ne "")) {
+												botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $id_youtube (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+											}
+											else {
+												botNotice($self,$sNick,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $id_youtube (cached) / https://www.youtube.com/watch?v=$id_youtube / $sMsgSong / Queued");
+											}
 											logBot($self,$message,$sChannel,"play",$sText);
 										}
 										else {
-											log_message($self,3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");	
-											botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
+											log_message($self,3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");
+											if (defined($sChannel) && ($sChannel ne "")) {
+												botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
+											}
+											else {
+												botNotice($self,$sNick,"($sNick radio play could not queue) Already asked ?");
+											}
 											return undef;
 										}
 									}
@@ -9945,10 +10070,20 @@ sub playRadio(@) {
 										my $ytUrl = "https://www.youtube.com/watch?v=$sYoutubeId";
 										my ($sDurationSeconds,$sMsgSong) = getYoutubeDetails($self,$ytUrl);
 										unless (defined($sMsgSong)) {
-											botPrivmsg($self,$sChannel,"($sNick radio play) Unknown Youtube link");
+											if (defined($sChannel) && ($sChannel ne "")) {
+												botPrivmsg($self,$sChannel,"($sNick radio play) Unknown Youtube link");
+											}
+											else {
+												botNotice($self,$sNick,"($sNick radio play) Unknown Youtube link");
+											}
 											return undef;
 										}
-										botPrivmsg($self,$sChannel,"($sNick radio play) $sMsgSong - Please wait while downloading");
+										if (defined($sChannel) && ($sChannel ne "")) {
+											botPrivmsg($self,$sChannel,"($sNick radio play) $sMsgSong - Please wait while downloading");
+										}
+										else {
+											botNotice($self,$sNick,"($sNick radio play) $sMsgSong - Please wait while downloading");
+										}
 										my $timer = IO::Async::Timer::Countdown->new(
 											delay => 3,
 											on_expire => sub {
@@ -9995,12 +10130,22 @@ sub playRadio(@) {
 														$sth->finish;
 														my $rPush = queuePushRadio($self,"$incomingDir/$ytDestinationFile");
 														if (defined($rPush) && $rPush) {
-															botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $id_youtube (downloaded) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
+															if (defined($sChannel) && ($sChannel ne "")) {
+																botPrivmsg($self,$sChannel,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $id_youtube (downloaded) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
+															}
+															else {
+																botNotice($self,$sNick,"($sNick radio play) Library ID : $id_mp3 / Youtube ID : $id_youtube (downloaded) / https://www.youtube.com/watch?v=$sYoutubeId / $sMsgSong / Queued");
+															}
 															logBot($self,$message,$sChannel,"play",$sText);
 														}
 														else {
-															log_message($self,3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");	
-															botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
+															log_message($self,3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");
+															if (defined($sChannel) && ($sChannel ne "")) {
+																botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
+															}
+															else {
+																botNotice($self,$sNick,"($sNick radio play could not queue) Already asked ?");
+															}
 															return undef;
 														}
 													}
@@ -10012,7 +10157,12 @@ sub playRadio(@) {
 								}
 							}
 							else {
-								botPrivmsg($self,$sChannel,"($sNick radio play no Youtube ID found for " . join(" ",@tArgs));
+								if (defined($sChannel) && ($sChannel ne "")) {
+									botPrivmsg($self,$sChannel,"($sNick radio play no Youtube ID found for " . join(" ",@tArgs));
+								}
+								else {
+									botNotice($self,$sNick,"($sNick radio play no Youtube ID found for " . join(" ",@tArgs));
+								}
 							}
 						}
 					}
@@ -10132,7 +10282,12 @@ sub queueRadio(@) {
 							$line =~ s/\n//;
 							log_message($self,3,$line);
 							unless ($line =~ /^no source client connected/) {
-								botPrivmsg($self,$sChannel,radioMsg($self,"Live - " . getRadioCurrentSong($self)));
+								if (defined($sChannel) && ($sChannel ne "")) {
+									botPrivmsg($self,$sChannel,radioMsg($self,"Live - " . getRadioCurrentSong($self)));
+								}
+								else {
+									botNotice($self,$sNick,radioMsg($self,"Live - " . getRadioCurrentSong($self)));
+								}
 								$bHarbor = 1;
 							}
 						}
@@ -10158,7 +10313,12 @@ sub queueRadio(@) {
 							log_message($self,3,"queueRadio() $line");
 						}
 						if ($iNbTrack > 0) {
-							botPrivmsg($self,$sChannel,radioMsg($self,"$iNbTrack $sNbTrack in queue, RID : $line"));
+							if (defined($sChannel) && ($sChannel ne "")) {
+								botPrivmsg($self,$sChannel,radioMsg($self,"$iNbTrack $sNbTrack in queue, RID : $line"));
+							}
+							else {
+								botNotice($self,$sNick,radioMsg($self,"$iNbTrack $sNbTrack in queue, RID : $line"));
+							}
 							my @RIDS = split(/ /,$line);
 							my $i;
 							for ($i=0;($i<3 && $i<=$#RIDS);$i++) {
@@ -10212,27 +10372,57 @@ sub queueRadio(@) {
 											my $artist = $ref->{'artist'};
 											if ($i == 0) {
 												unless ($bHarbor) {
-													botPrivmsg($self,$sChannel,"» $artist - $title" . $sMsgSong);
+													if (defined($sChannel) && ($sChannel ne "")) {
+														botPrivmsg($self,$sChannel,"» $artist - $title" . $sMsgSong);
+													}
+													else {
+														botNotice($self,$sNick,"» $artist - $title" . $sMsgSong);
+													}
 												}
 												else {
-													botPrivmsg($self,$sChannel,"» $artist - $title");
+													if (defined($sChannel) && ($sChannel ne "")) {
+														botPrivmsg($self,$sChannel,"» $artist - $title");
+													}
+													else {
+														botNotice($self,$sNick,"» $artist - $title");
+													}
 												}
 											}
 											else {
-												botPrivmsg($self,$sChannel,"└ $artist - $title");
+												if (defined($sChannel) && ($sChannel ne "")) {
+													botPrivmsg($self,$sChannel,"└ $artist - $title");
+												}
+												else {
+													botNotice($self,$sNick,"└ $artist - $title");
+												}
 											}
 										}
 										else {
 											if ($i == 0) {
 												unless ($bHarbor) {
-													botPrivmsg($self,$sChannel,"» $sBaseFilename" . $sMsgSong);
+													if (defined($sChannel) && ($sChannel ne "")) {
+														botPrivmsg($self,$sChannel,"» $sBaseFilename" . $sMsgSong);
+													}
+													else {
+														botNotice($self,$sNick,"» $sBaseFilename" . $sMsgSong);
+													}
 												}
 												else {
-													botPrivmsg($self,$sChannel,"» $sBaseFilename");
+													if (defined($sChannel) && ($sChannel ne "")) {
+														botPrivmsg($self,$sChannel,"» $sBaseFilename");
+													}
+													else {
+														botNotice($self,$sNick,"» $sBaseFilename");
+													}
 												}
 											}
 											else {
-												botPrivmsg($self,$sChannel,"└ $sBaseFilename");
+												if (defined($sChannel) && ($sChannel ne "")) {
+													botPrivmsg($self,$sChannel,"└ $sBaseFilename");
+												}
+												else {
+													botNotice($self,$sNick,"└ $sBaseFilename");
+												}
 											}
 										}
 									}
@@ -10268,7 +10458,12 @@ sub queueRadio(@) {
 						}
 						$sTimeRemaining .= " remaining";
 						$sMsgSong .= String::IRC->new($sTimeRemaining)->white('black');
-						botPrivmsg($self,$sChannel,radioMsg($self,"Global playlist - " . getRadioCurrentSong($self) . $sMsgSong));
+						if (defined($sChannel) && ($sChannel ne "")) {
+							botPrivmsg($self,$sChannel,radioMsg($self,"Global playlist - " . getRadioCurrentSong($self) . $sMsgSong));
+						}
+						else {
+							botNotice($self,$sNick,radioMsg($self,"Global playlist - " . getRadioCurrentSong($self) . $sMsgSong));
+						}
 					}
 				}
 				logBot($self,$message,$sChannel,"queue",@tArgs);
@@ -10408,14 +10603,24 @@ sub rplayRadio(@) {
 					$bRadioLive = isRadioLive($self,$sHarbor);
 				}
 				if ($bRadioLive) {
-					botPrivmsg($self,$sChannel,"($sNick radio rplay) Cannot queue requests while radio is live");
+					if (defined($sChannel) && ($sChannel ne "")) {
+						botPrivmsg($self,$sChannel,"($sNick radio rplay) Cannot queue requests while radio is live");
+					}
+					else {
+						botNotice($self,$sNick,"($sNick radio rplay) Cannot queue requests while radio is live");
+					}
 					return undef;
 				}
 				if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 					if (defined($tArgs[0]) && ($tArgs[0] eq "user") && defined($tArgs[1]) && ($tArgs[1] ne "")) {
 						my $id_user = getIdUser($self,$tArgs[1]);
 						unless (defined($id_user)) {
-							botPrivmsg($self,$sChannel,"($sNick radio play) Unknown user " . $tArgs[0]);
+							if (defined($sChannel) && ($sChannel ne "")) {
+								botPrivmsg($self,$sChannel,"($sNick radio play) Unknown user " . $tArgs[0]);
+							}
+							else {
+								botNotice($self,$sNick,"($sNick radio play) Unknown user " . $tArgs[0]);
+							}
 							return undef;
 						}
 						my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE id_user=? ORDER BY RAND() LIMIT 1";
@@ -10437,21 +10642,41 @@ sub rplayRadio(@) {
 									my $sMsgSong = "$artist - $title";
 									if (defined($id_youtube) && ($id_youtube ne "")) {
 										($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
-										botPrivmsg($self,$sChannel,"($sNick radio play user " . $tArgs[1] . ") (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+										if (defined($sChannel) && ($sChannel ne "")) {
+											botPrivmsg($self,$sChannel,"($sNick radio play user " . $tArgs[1] . ") (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+										}
+										else {
+											botNotice($self,$sNick,"($sNick radio play user " . $tArgs[1] . ") (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+										}
 									}
 									else {
-										botPrivmsg($self,$sChannel,"($sNick radio play user " . $tArgs[1] . ") (Library ID : $id_mp3) / $artist - $title / Queued");
+										if (defined($sChannel) && ($sChannel ne "")) {
+											botPrivmsg($self,$sChannel,"($sNick radio play user " . $tArgs[1] . ") (Library ID : $id_mp3) / $artist - $title / Queued");
+										}
+										else {
+											botNotice($self,$sNick,"($sNick radio play user " . $tArgs[1] . ") (Library ID : $id_mp3) / $artist - $title / Queued");
+										}
 									}
 									logBot($self,$message,$sChannel,"rplay",@tArgs);
 								}
 								else {
 									log_message($self,3,"rplayRadio() user / could not queue queuePushRadio() $ytDestinationFile");	
-									botPrivmsg($self,$sChannel,"($sNick radio rplay / user / could not queue)");
+									if (defined($sChannel) && ($sChannel ne "")) {
+										botPrivmsg($self,$sChannel,"($sNick radio rplay / user / could not queue)");
+									}
+									else {
+										botNotice($self,$sNick,"($sNick radio rplay / user / could not queue)");
+									}
 									return undef;
 								}
 							}
 							else {
-								botPrivmsg($self,$sChannel,"($sNick radio play user " . $tArgs[1] . " / no track found)");
+								if (defined($sChannel) && ($sChannel ne "")) {
+									botPrivmsg($self,$sChannel,"($sNick radio play user " . $tArgs[1] . " / no track found)");
+								}
+								else {
+									botNotice($self,$sNick,"($sNick radio play user " . $tArgs[1] . " / no track found)");
+								}
 							}
 						}
 						$sth->finish;
@@ -10478,21 +10703,42 @@ sub rplayRadio(@) {
 									my $sMsgSong = "$artist - $title";
 									if (defined($id_youtube) && ($id_youtube ne "")) {
 										($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
-										botPrivmsg($self,$sChannel,"($sNick radio play artist " . $sText . ") (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+										if (defined($sChannel) && ($sChannel ne "")) {
+											botPrivmsg($self,$sChannel,"($sNick radio play artist " . $sText . ") (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+										}
+										else {
+											botNotice($self,$sNick,"($sNick radio play artist " . $sText . ") (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+										}
 									}
 									else {
-										botPrivmsg($self,$sChannel,"($sNick radio play artist " . $sText . ") (Library ID : $id_mp3) / $artist - $title / Queued");
+										if (defined($sChannel) && ($sChannel ne "")) {
+											botPrivmsg($self,$sChannel,"($sNick radio play artist " . $sText . ") (Library ID : $id_mp3) / $artist - $title / Queued");
+										}
+										else {
+											botNotice($self,$sNick,"($sNick radio play artist " . $sText . ") (Library ID : $id_mp3) / $artist - $title / Queued");
+										}
 									}
 									logBot($self,$message,$sChannel,"rplay",@tArgs);
 								}
 								else {
-									log_message($self,3,"rplayRadio() artist / could not queue queuePushRadio() $ytDestinationFile");	
-									botPrivmsg($self,$sChannel,"($sNick radio rplay / artist / could not queue)");
+									log_message($self,3,"rplayRadio() artist / could not queue queuePushRadio() $ytDestinationFile");
+									if (defined($sChannel) && ($sChannel ne "")) {
+										botPrivmsg($self,$sChannel,"($sNick radio rplay / artist / could not queue)");
+									}
+									else {
+										botNotice($self,$sNick,"($sNick radio rplay / artist / could not queue)");
+									}
+									
 									return undef;
 								}
 							}
 							else {
-								botPrivmsg($self,$sChannel,"($sNick radio play user " . $tArgs[1] . " / no track found)");
+								if (defined($sChannel) && ($sChannel ne "")) {
+									botPrivmsg($self,$sChannel,"($sNick radio play user " . $tArgs[1] . " / no track found)");
+								}
+								else {
+									botNotice($self,$sNick,"($sNick radio play user " . $tArgs[1] . " / no track found)");
+								}
 							}
 						}
 						$sth->finish;
@@ -10524,21 +10770,41 @@ sub rplayRadio(@) {
 									my $sMsgSong = "$artist - $title";
 									if (defined($id_youtube) && ($id_youtube ne "")) {
 										($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
-										botPrivmsg($self,$sChannel,"($sNick radio play " . $sText . ") (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+										if (defined($sChannel) && ($sChannel ne "")) {
+											botPrivmsg($self,$sChannel,"($sNick radio play " . $sText . ") (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+										}
+										else {
+											botNotice($self,$sNick,"($sNick radio play " . $sText . ") (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+										}
 									}
 									else {
-										botPrivmsg($self,$sChannel,"($sNick radio play " . $sText . ") (Library ID : $id_mp3) / $artist - $title / Queued");
+										if (defined($sChannel) && ($sChannel ne "")) {
+											botPrivmsg($self,$sChannel,"($sNick radio play " . $sText . ") (Library ID : $id_mp3) / $artist - $title / Queued");
+										}
+										else {
+											botNotice($self,$sNick,"($sNick radio play " . $sText . ") (Library ID : $id_mp3) / $artist - $title / Queued");
+										}
 									}
 									logBot($self,$message,$sChannel,"rplay",@tArgs);
 								}
 								else {
-									log_message($self,3,"rplayRadio() could not queue queuePushRadio() $ytDestinationFile");	
-									botPrivmsg($self,$sChannel,"($sNick radio rplay / could not queue)");
+									log_message($self,3,"rplayRadio() could not queue queuePushRadio() $ytDestinationFile");
+									if (defined($sChannel) && ($sChannel ne "")) {
+										botPrivmsg($self,$sChannel,"($sNick radio rplay / could not queue)");
+									}
+									else {
+										botNotice($self,$sNick,"($sNick radio rplay / could not queue)");
+									}
 									return undef;
 								}
 							}
 							else {
-								botPrivmsg($self,$sChannel,"($sNick radio play $sText / no track found)");
+								if (defined($sChannel) && ($sChannel ne "")) {
+									botPrivmsg($self,$sChannel,"($sNick radio play $sText / no track found)");
+								}
+								else {
+									botNotice($self,$sNick,"($sNick radio play $sText / no track found)");
+								}
 							}
 						}
 						$sth->finish;
@@ -10563,16 +10829,31 @@ sub rplayRadio(@) {
 									my $sMsgSong = "$artist - $title";
 									if (defined($id_youtube) && ($id_youtube ne "")) {
 										($duration,$sMsgSong) = getYoutubeDetails($self,"https://www.youtube.com/watch?v=$id_youtube");
-										botPrivmsg($self,$sChannel,"($sNick radio play) (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+										if (defined($sChannel) && ($sChannel ne "")) {
+											botPrivmsg($self,$sChannel,"($sNick radio play) (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+										}
+										else {
+											botNotice($self,$sNick,"($sNick radio play) (Library ID : $id_mp3 YTID : $id_youtube) / $sMsgSong - https://www.youtube.com/watch?v=$id_youtube / Queued");
+										}
 									}
 									else {
-										botPrivmsg($self,$sChannel,"($sNick radio play) (Library ID : $id_mp3) / $artist - $title / Queued");
+										if (defined($sChannel) && ($sChannel ne "")) {
+											botPrivmsg($self,$sChannel,"($sNick radio play) (Library ID : $id_mp3) / $artist - $title / Queued");
+										}
+										else {
+											botNotice($self,$sNick,"($sNick radio play) (Library ID : $id_mp3) / $artist - $title / Queued");
+										}
 									}
 									logBot($self,$message,$sChannel,"rplay",@tArgs);
 								}
 								else {
 									log_message($self,3,"rplayRadio() could not queue queuePushRadio() $ytDestinationFile");	
-									botPrivmsg($self,$sChannel,"($sNick radio rplay / could not queue)");
+									if (defined($sChannel) && ($sChannel ne "")) {
+										botPrivmsg($self,$sChannel,"($sNick radio rplay / could not queue)");
+									}
+									else {
+										botNotice($self,$sNick,"($sNick radio rplay / could not queue)");
+									}
 									return undef;
 								}
 							}
