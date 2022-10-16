@@ -1372,9 +1372,9 @@ sub mbCommandPublic(@) {
 		case /^whereis$/i							{		
 														mbWhereis($self,$message,$sNick,$sChannel,@tArgs);
 													}
-		case /^birthday$/i							{		
+		case /^birthday$/i							{
 														userBirthday($self,$message,$sNick,$sChannel,@tArgs);
-													}	
+													}
 		case /^help$/i								{
 														unless(defined($tArgs[0]) && ($tArgs[0] ne "")) {
 															botPrivmsg($self,$sChannel,"Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
@@ -1672,6 +1672,15 @@ sub mbCommandPrivate(@) {
 		case /^rehash/i				{
 														mbRehash($self,$message,$sNick,undef,@tArgs);
 													}
+		case /^play$/i								{
+														playRadio($self,$message,$sNick,undef,@tArgs);
+													}
+		case /^radiopub$/i							{
+														radioPub($self,$message,$sNick,undef,@tArgs);
+													}
+		case /^song$/i								{
+														displayRadioCurrentSong($self,$message,$sNick,undef,@tArgs);
+													}	
 		else							{
 													#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,undef,$sNick,$sCommand,@tArgs);
 													log_message($self,3,$message->prefix . " Private command '$sCommand' not found");
@@ -8290,6 +8299,23 @@ sub displayRadioCurrentSong(@) {
 	my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
 	my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
 	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
+
+	unless (defined($sChannel) && ($sChannel ne "")) {
+		my $id_channel;
+		if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
+			$sChannel = $tArgs[0];
+			$id_channel = getIdChannel($self,$sChannel);
+			unless (defined($id_channel)) {
+				botNotice($self,$sNick,"Channel $sChannel is not registered");
+				return undef;
+			}
+			shift @tArgs;
+		}
+		else {
+			botNotice($self,$sNick,"Syntax: song <#channnel>");
+			return undef;
+		}
+	}
 	
 	my $sRadioCurrentSongTitle = getRadioCurrentSong($self);
 	
@@ -11455,4 +11481,32 @@ sub userBirthday(@) {
 		return undef;
 	}
 }
+
+sub radioPub(@) {
+	my ($self,$message,$sNick,undef,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};	
+	# Check channels with chanset +RadioPub
+	if (defined($MAIN_CONF{'radio.RADIO_HOSTNAME'})) {	
+		my $sQuery = "SELECT name FROM CHANNEL,CHANNEL_SET,CHANSET_LIST WHERE CHANNEL.id_channel=CHANNEL_SET.id_channel AND CHANNEL_SET.id_chanset_list=CHANSET_LIST.id_chanset_list AND CHANSET_LIST.chanset LIKE 'RadioPub'";
+		my $sth = $self->{dbh}->prepare($sQuery);
+		unless ($sth->execute()) {
+			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		}
+		else {
+			while (my $ref = $sth->fetchrow_hashref()) {
+				my $curChannel = $ref->{'name'};
+				log_message($self,3,"RadioPub on $curChannel");
+				my $currentTitle = getRadioCurrentSong($self);
+				if ( $currentTitle ne "Unknown" ) {
+					displayRadioCurrentSong($self,undef,undef,$curChannel,undef);
+				}
+				else {
+					log_message($self,3,"RadioPub skipped for $curChannel, title is $currentTitle");
+				}
+			}
+		}
+		$sth->finish;
+	}
+}
+
 1;
