@@ -1106,6 +1106,9 @@ sub mbCommandPublic(@) {
 		case /^adduser$/i		{
 													addUser($self,$message,$sNick,@tArgs);
 												}
+		case /^deluser$/i		{
+													delUser($self,$message,$sNick,@tArgs);
+												}
 		case /^users$/i			{
 													userStats($self,$message,$sNick,$sChannel,@tArgs);
 												}
@@ -1491,6 +1494,9 @@ sub mbCommandPrivate(@) {
 												}
 		case /^adduser$/i		{
 													addUser($self,$message,$sNick,@tArgs);
+												}
+		case /^deluser$/i		{
+													delUser($self,$message,$sNick,@tArgs);
 												}
 		case /^users$/i			{
 													userStats($self,$message,$sNick,undef,@tArgs);
@@ -11509,4 +11515,54 @@ sub radioPub(@) {
 	}
 }
 
+sub delUser(@) {
+	my ($self,$message,$sNick,@tArgs) = @_;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+					log_message($self,3,"delUser() " . $tArgs[0]);
+					my $id_user = getIdUser($self,$tArgs[0]);
+					if (defined($id_user)) {
+						my $sQuery = "DELETE FROM USER_CHANNEL WHERE id_user=?";
+						my $sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute($id_user)) {
+							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						}
+						$sQuery = "DELETE FROM USER WHERE id_user=?";
+						$sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute($id_user)) {
+							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							return undef;
+						}
+						$sth->finish;
+						logBot($self,$message,undef,"deluser","User " . $tArgs[0] . " (id_user : $id_user) has been deleted");
+						return undef;
+					}
+					else {
+						botNotice($self,$sNick,"Undefined user " . $tArgs[0]);
+					}
+				}
+				else {
+					botNotice($self,$sNick,"Syntax: deluser <username>");
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix;
+				$sNoticeMsg .= " deluser command attempt, (command level [1] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"This command is not available for your level. Contact a bot master.");
+				logBot($self,$message,undef,"adduser",$sNoticeMsg);
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix;
+			$sNoticeMsg .= " deluser command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command : /msg " . $self->{irc}->nick_folded . " login username password");
+			logBot($self,$message,undef,"adduser",$sNoticeMsg);
+		}
+	}
+}
 1;
