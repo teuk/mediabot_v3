@@ -6536,7 +6536,7 @@ sub displayUrlTitle(@) {
 				return undef;
 			}
 			log_message($self,3,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
-			unless ( open URL_TITLE, "curl -A \" \" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
+			unless ( open URL_TITLE, "curl -A -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
 				log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 			}
 			else {
@@ -6565,8 +6565,13 @@ sub displayUrlTitle(@) {
 							botPrivmsg($self,$sChannel,"($sNick) $sDisplayMsg " . $title->as_text);
 						}
 						else {
-							$sDisplayMsg = String::IRC->new("URL Title from $sNick:")->grey('black');
-							botPrivmsg($self,$sChannel,$sDisplayMsg . " " . $title->as_text);
+							if ( $title->as_text =~ /The page is temporarily unavailable/i ) {
+								return undef;
+							}
+							else {
+								$sDisplayMsg = String::IRC->new("URL Title from $sNick:")->grey('black');
+								botPrivmsg($self,$sChannel,$sDisplayMsg . " " . $title->as_text);
+							}
 						}
 					}
 				}
