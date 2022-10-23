@@ -88,55 +88,30 @@ If everything's ok then test in foreground using your config file e.g :
 ```
 
 (mediabot)$ ./mediabot.pl --conf=mediabot.conf
-
 [06/08/2022 06:31:37] Reading configuration file mediabot.conf
-
 [06/08/2022 06:31:37] mediabot.conf loaded.
-
 [06/08/2022 06:31:37] Getting current version from VERSION file
-
 [06/08/2022 06:31:37] -> Mediabot devel version 3.0 (20220801_111934)
-
 [06/08/2022 06:31:37] Checking latest version from github (https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION)
-
 [06/08/2022 06:31:37] -> Mediabot github devel version 3.0 (20220801_111934)
-
 [06/08/2022 06:31:37] Mediabot is up to date
-
 [06/08/2022 06:31:37] Mediabot v3.0dev-20220801_111934 started in foreground with debug level 0
-
 [06/08/2022 06:31:37] Logged out all users
-
 [06/08/2022 06:31:37] Picked irc.mediabot.rules from Network Mediabot_Rules
-
 [06/08/2022 06:31:37] Initialize Hailo
-
 [06/08/2022 06:31:37] Connection nick : mediabot
-
 [06/08/2022 06:31:37] Trying to connect to irc.mediabot.rules:6667 (pass : none defined)
-
 [06/08/2022 06:31:37] *** Looking up your hostname
-
 [06/08/2022 06:31:37] *** Checking Ident
-
 [06/08/2022 06:31:37] *** Found your hostname
-
 [06/08/2022 06:31:37] *** Got ident response
-
 [06/08/2022 06:31:37] on_login() Connected to irc server irc.mediabot.rules
-
 [06/08/2022 06:31:37] Checking timers to set at startup
-
 [06/08/2022 06:31:37] No timer to set at startup
-
 [06/08/2022 06:31:37] on_login() Setting user mode +i
-
 [06/08/2022 06:31:37] Trying to join #mediabot
-
 [06/08/2022 06:31:37] No channel to auto join
-
 [06/08/2022 06:31:37] -irc.mediabot.rules- Highest connection count: 2 (2 clients)
-
 [06/08/2022 06:31:37] -irc.mediabot.rules- on 1 ca 1(4) ft 10(10) tr
 
 ```
