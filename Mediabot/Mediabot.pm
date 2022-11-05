@@ -6230,6 +6230,7 @@ sub displayYoutubeDetails(@) {
 			my $sDuration;
 			my $sViewCount;
 			my $json_details;
+			my $schannelTitle;
 			while(defined($line=<YOUTUBE_INFOS>)) {
 				chomp($line);
 				$json_details .= $line;
@@ -6249,6 +6250,7 @@ sub displayYoutubeDetails(@) {
 					log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
 					$sViewCount = "views $hYoutubeItems{'statistics'}{'viewCount'}";
 					$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
+					$schannelTitle = $hYoutubeItems{'snippet'}{'channelTitle'};
 					$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
 					log_message($self,3,"displayYoutubeDetails() sDuration : $sDuration");
 					$sDuration =~ s/^PT//;
@@ -6274,6 +6276,8 @@ sub displayYoutubeDetails(@) {
 					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
 					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
 					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
+					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics channelTitle : $schannelTitle");
+					
 					
 					if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
 						my $sMsgSong .= String::IRC->new('You')->black('white');
@@ -6282,7 +6286,9 @@ sub displayYoutubeDetails(@) {
 						$sMsgSong .= String::IRC->new("- ")->orange('black');
 						$sMsgSong .= String::IRC->new("$sDisplayDuration ")->grey('black');
 						$sMsgSong .= String::IRC->new("- ")->orange('black');
-						$sMsgSong .= String::IRC->new("$sViewCount")->grey('black');
+						$sMsgSong .= String::IRC->new("$sViewCount ")->grey('black');
+						$sMsgSong .= String::IRC->new("- ")->orange('black');
+						$sMsgSong .= String::IRC->new("$schannelTitle")->grey('$black');
 						$sMsgSong =~ s/\r//;
 						$sMsgSong =~ s/\n//;
 						botPrivmsg($self,$sChannel,"($sNick) $sMsgSong");
