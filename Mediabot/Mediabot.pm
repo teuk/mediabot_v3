@@ -6417,13 +6417,13 @@ sub displayUrlTitle(@) {
 		}
 		$sText = "($sNick) " . $sText;
 		unless ( $sText =~ /DOCTYPE html/ ) {
-			botPrivmsg($self,$sChannel,substr($sText, 0, 200));
+			botPrivmsg($self,$sChannel,substr($sText, 0, 300));
 		}
 
 		return undef;
 	}
 
-	unless ( open URL_HEAD, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0\" --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |" ) {
+	unless ( open URL_HEAD, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:107.0) Gecko/20100101 Firefox/107.0\" --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |" ) {
 		log_message(3,"displayUrlTitle() Could not curl headers for $sText");
 	}
 	else {
@@ -6454,7 +6454,7 @@ sub displayUrlTitle(@) {
 			if ( $sText =~ /open.spotify.com/ ) {
 				my $url = $sText;
 				$url =~ s/\?.*$//;
-				unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0\" --connect-timeout 3 --max-time 3 -L -ks \"$url\" |" ) {
+				unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:107.0) Gecko/20100101 Firefox/107.0\" --connect-timeout 3 --max-time 3 -L -ks \"$url\" |" ) {
 					log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 				}
 				else {
@@ -6467,8 +6467,7 @@ sub displayUrlTitle(@) {
 							my $sDisplayMsg = $line;
 							$sDisplayMsg =~ s/^.*<title//;
 							$sDisplayMsg =~ s/<\/title>.*$//;
-							$sDisplayMsg =~ s/^\s*>//;
-							$sDisplayMsg =~ s/ | Spotify$//;
+							$sDisplayMsg =~ s/^>//;
 							my $sText = String::IRC->new("Spotify")->white('green');
 							$sText .= " $sDisplayMsg";
 							my $regex = "&(?:" . join("|", map {s/;\z//; $_} keys %entity2char) . ");";
@@ -6542,7 +6541,7 @@ sub displayUrlTitle(@) {
 				return undef;
 			}
 			log_message($self,3,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
-			unless ( open URL_TITLE, "curl -A -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
+			unless ( open URL_TITLE, "curl -A -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:107.0) Gecko/20100101 Firefox/107.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
 				log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 			}
 			else {
