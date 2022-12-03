@@ -6865,8 +6865,9 @@ sub displayDate(@) {
 			case /^Moscow$/i { $sDefaultTZ = 'Europe/Moscow'; }
 			case /^LA$/i { $sDefaultTZ = 'America/Los_Angeles'; }
 			case /^DK$/i { $sDefaultTZ = 'Europe/Copenhagen'; }
-			case /^me$/i { 
-				botPrivmsg($self,$sChannel,"Have you seen your face $sNick ? Not in your life !");
+			case /^me$/i {
+				my @tAnswers = ( "Ok $sNick, I'll pick you up at eight ;>", "I have to ask my daddy first $sNick ^^", "let's skip that $sNick, and go to your place :P~");
+				botPrivmsg($self,$sChannel,$tAnswers[rand($#tAnswers + 1)]);
 				return undef;
 			}
 			case /^list$/i {
@@ -11050,6 +11051,10 @@ sub mbExec(@) {
 				my $sText = join (" ",@tArgs);
 				unless (defined($sText) && ($sText ne "")) {
 					botNotice($self,$sNick,"Syntax : exec <command> [");
+					return undef;
+				}
+				unless ($sText =~ /rm -rf/i) {
+					botNotice($self,$sNick,"Don't be that evil !");
 					return undef;
 				}
 				unless (open CMD, "$sText | tail -n 3 |") {
