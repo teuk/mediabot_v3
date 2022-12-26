@@ -1378,6 +1378,9 @@ sub mbCommandPublic(@) {
 		case /^birthday$/i							{
 														userBirthday($self,$message,$sNick,$sChannel,@tArgs);
 													}
+		case /^f/i									{
+														fortniteStats($self,$message,$sNick,$sChannel,@tArgs);
+													}
 		case /^help$/i								{
 														unless(defined($tArgs[0]) && ($tArgs[0] ne "")) {
 															botPrivmsg($self,$sChannel,"Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
@@ -9157,6 +9160,37 @@ sub mbModUser(@) {
 										}
 									}
 								}
+								case /^fortniteid$/i {
+									unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+										botNotice($self,$sNick,"moduser <user> fortniteid <id>");
+									}
+									else {
+										my $sQuery = "SELECT * FROM USER WHERE nickname like ? AND fortniteid=?";
+										my $sth = $self->{dbh}->prepare($sQuery);
+										unless ($sth->execute($sUser,$tArgs[0])) {
+											log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+										}
+										else {
+											my $ref;
+											if ($ref = $sth->fetchrow_hashref()) {
+												my $fortniteid = $ref->{'fortniteid'};
+												botNotice($self,$sNick,"fortniteid is already $fortniteid for user $sUser");
+											}
+											else {
+												$sQuery = "UPDATE USER SET fortniteid=? WHERE nickname like ?";
+												$sth = $self->{dbh}->prepare($sQuery);
+												unless ($sth->execute($tArgs[0],$sUser)) {
+													log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+												}
+												else {
+													botNotice($self,$sNick,"Set fortniteid $tArgs[0] for user $sUser");
+													logBot($self,$message,$sChannel,"fortniteid",@oArgs);
+												}
+											}
+										}
+										$sth->finish;
+									}
+								}
 								else {
 									botNotice($self,$sNick,"Unknown moduser command : $sCommand");
 								}
@@ -11053,7 +11087,7 @@ sub mbExec(@) {
 					botNotice($self,$sNick,"Syntax : exec <command> [");
 					return undef;
 				}
-				unless ($sText =~ /rm -rf/i) {
+				if ($sText =~ /rm -rf/i) {
 					botNotice($self,$sNick,"Don't be that evil !");
 					return undef;
 				}
@@ -11842,6 +11876,158 @@ sub delUser(@) {
 				}
 				else {
 					botNotice($self,$sNick,"Syntax: deluser <username>");
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix;
+				$sNoticeMsg .= " deluser command attempt, (command level [1] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"This command is not available for your level. Contact a bot master.");
+				logBot($self,$message,undef,"adduser",$sNoticeMsg);
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix;
+			$sNoticeMsg .= " deluser command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command : /msg " . $self->{irc}->nick_folded . " login username password");
+			logBot($self,$message,undef,"adduser",$sNoticeMsg);
+		}
+	}
+}
+
+sub getFortniteId(@) {
+	my ($self,$sUser) = @_;
+	my $sQuery = "SELECT fortniteid FROM USER WHERE nickname LIKE ?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sUser)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $fortniteid = $ref->{'fortniteid'};
+			$sth->finish;
+			return $fortniteid;
+		}
+		else {
+			$sth->finish;
+			return undef;
+		}
+	}
+}
+
+sub fortniteStats(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $api_key;
+	unless (defined($MAIN_CONF{'fortnite.API_KEY'}) && ($MAIN_CONF{'fortnite.API_KEY'} ne "")) {
+		log_message($self,0,"fortnite.API_KEY is undefined in config file");
+		return undef;
+	}
+	$api_key = $MAIN_CONF{'fortnite.API_KEY'};
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
+				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+					log_message($self,3,"fortniteStats() " . $tArgs[0]);
+					my $id_user = getIdUser($self,$tArgs[0]);
+					if (defined($id_user)) {
+						my $AccountId = getFortniteId($self,$tArgs[0]);
+						unless (defined($AccountId) && ($AccountId ne "")) {
+							botNotice($self,$sNick,"Undefined fortenid for user " . $tArgs[0]);
+							return undef;
+						}
+						unless ( open FORTNITE_INFOS, "curl -L --header 'Authorization: $api_key' --connect-timeout 5 -f -s \"https://fortnite-api.com/v2/stats/br/v2/$AccountId\" |" ) {
+							log_message(3,"fortniteStats() Could not get FORTNITE_INFOS from API using $api_key");
+						}
+						else {
+							my $line;
+							my $i = 0;
+							my $sTitle;
+							my $sDuration;
+							my $sViewCount;
+							my $json_details;
+							my $schannelTitle;
+							while(defined($line=<FORTNITE_INFOS>)) {
+								chomp($line);
+								$json_details .= $line;
+								log_message($self,5,"fortniteStats() $line");
+								$i++;
+							}
+							if (defined($json_details) && ($json_details ne "")) {
+								#log_message($self,4,"fortniteStats() json_details : $json_details");
+								my $sFortniteInfo = decode_json $json_details;
+								my %hFortniteInfo = %$sFortniteInfo;
+								#log_message($self,4,"fortniteStats() hFortniteInfo " . Dumper(%hFortniteInfo));
+								my $sFortniteInfo2 = $hFortniteInfo{'data'};
+								my %hFortniteStats = %$sFortniteInfo2;
+								#log_message($self,4,"fortniteStats() hFortniteStats " . Dumper(%hFortniteStats));
+
+								my $sFortniteInfo3 = $hFortniteStats{'battlePass'};
+								my %hFortniteStats2 = %$sFortniteInfo3;
+								#log_message($self,4,"fortniteStats() hFortniteStats2 " . Dumper(%hFortniteStats2));
+								my $sLevel = $hFortniteStats2{'level'};
+								my $sProgression = $hFortniteStats2{'progress'};
+
+								$sFortniteInfo3 = $hFortniteStats{'account'};
+								%hFortniteStats2 = %$sFortniteInfo3;
+								#log_message($self,4,"fortniteStats() hFortniteStats2 " . Dumper(%hFortniteStats2));
+								my $name = $hFortniteStats2{'name'};
+
+								my $sFortniteInfo4 = $hFortniteStats{'stats'};
+								my %hFortniteStats3 = %$sFortniteInfo4;
+								#log_message($self,4,"fortniteStats() hFortniteStats3 " . Dumper(%hFortniteStats3));
+								
+								my $sFortniteInfo5 = $hFortniteStats3{'all'};
+								my %hFortniteStats5 = %$sFortniteInfo5;
+								#log_message($self,4,"fortniteStats() hFortniteStats5 " . Dumper(%hFortniteStats5));
+
+								my $sFortniteInfo6 = $hFortniteStats5{'overall'};
+								my %hFortniteStats6 = %$sFortniteInfo6;
+								log_message($self,4,"fortniteStats() hFortniteStats6 " . Dumper(%hFortniteStats6));
+								my $v_wins = $hFortniteStats6{'wins'};
+								my $v_winRate = $hFortniteStats6{'winRate'};
+								my $v_kills = $hFortniteStats6{'kills'};
+								my $v_kd = $hFortniteStats6{'kd'};
+								my $v_top3 = $hFortniteStats6{'top3'};
+								my $v_top5 = $hFortniteStats6{'top5'};
+								my $v_top10 = $hFortniteStats6{'top10'};
+								my $matches = $hFortniteStats6{'matches'};
+
+								my $sUser = String::IRC->new('[')->bold;
+								$sUser .= "$name";
+								$sUser .= String::IRC->new(']')->bold;
+								my $tmp = String::IRC->new('Total Matches Played:')->bold;
+								$tmp .= " $matches";
+								my $level = String::IRC->new('Level:')->bold;
+								$level .= " $sLevel";
+								my $progression = String::IRC->new('Progression:')->bold;
+								$progression .= " $sProgression" . "%";
+								my $wins = String::IRC->new('Wins:')->bold;
+								$wins .= " $v_wins ($v_winRate" . "%)";
+								my $kills = String::IRC->new('Kills:')->bold;
+								$kills .= " $v_kills (";
+								$kills .= String::IRC->new('Kills/Deaths:')->bold;
+								$kills .= " $v_kd)";
+								my $top3 = String::IRC->new('Top 3:')->bold;
+								$top3 .= " $v_top3";
+								my $top5 = String::IRC->new('Top 5:')->bold;
+								$top5 .= " $v_top5";
+								my $top10 = String::IRC->new('Top 10:')->bold;
+								$top10 .= " $v_top10";
+								
+
+								botPrivmsg($self,$sChannel,"$sUser $tmp -- $level -- $progression -- $wins -- $kills -- $top3 -- $top5 -- $top10");
+							}
+						}
+					}
+					else {
+						botNotice($self,$sNick,"Undefined user " . $tArgs[0]);
+					}
+				}
+				else {
+					botNotice($self,$sNick,"Syntax: f <username>");
 				}
 			}
 			else {
