@@ -217,7 +217,8 @@ CREATE TABLE `USER` (
   `last_login` timestamp NULL DEFAULT NULL,
   `auth` int(11) NOT NULL DEFAULT '0',
   `tz` varchar(255) DEFAULT NULL,
-  `birthday` varchar(255) DEFAULT NULL
+  `birthday` varchar(255) DEFAULT NULL,
+  `fortniteid` varchar(255) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 -- --------------------------------------------------------
