@@ -1378,7 +1378,7 @@ sub mbCommandPublic(@) {
 		case /^birthday$/i							{
 														userBirthday($self,$message,$sNick,$sChannel,@tArgs);
 													}
-		case /^f/i									{
+		case /^f$/i									{
 														fortniteStats($self,$message,$sNick,$sChannel,@tArgs);
 													}
 		case /^help$/i								{
@@ -6400,27 +6400,30 @@ sub displayUrlTitle(@) {
 		}
 
 		my $title = $content;
-		$title =~ s/^.*og:title" content="//;
-		$title =~ s/" .><meta property="og:image".*$//;
-		unless ( $title =~ /DOCTYPE html/ ) {
-			log_message($self,3,"displayUrlTitle() (insta) Extracted title : $title");
-		}
-		else {
-			$title = $content;
-			$title =~ s/^.*<title//;
-			$title =~ s/<\/title>.*$//;
-			$title =~ s/^\s*>//;
-		}
-
-		$sText = String::IRC->new("Instagram")->white('pink');
-		$sText .= " $title";
-		my $regex = "&(?:" . join("|", map {s/;\z//; $_} keys %entity2char) . ");";
-		if (($sText =~ /$regex/) || ( $sText =~ /&#.*;/)) {
-			$sText = decode_entities($sText);
-		}
-		$sText = "($sNick) " . $sText;
-		unless ( $sText =~ /DOCTYPE html/ ) {
-			botPrivmsg($self,$sChannel,substr($sText, 0, 300));
+		if (defined($title)) {
+			$title =~ s/^.*og:title" content="//;
+			$title =~ s/" .><meta property="og:image".*$//;
+			unless ( $title =~ /DOCTYPE html/ ) {
+				log_message($self,3,"displayUrlTitle() (insta) Extracted title : $title");
+			}
+			else {
+				$title = $content;
+				$title =~ s/^.*<title//;
+				$title =~ s/<\/title>.*$//;
+				$title =~ s/^\s*>//;
+			}
+			if ($title ne "") {
+				$sText = String::IRC->new("Instagram")->white('pink');
+				$sText .= " $title";
+				my $regex = "&(?:" . join("|", map {s/;\z//; $_} keys %entity2char) . ");";
+				if (($sText =~ /$regex/) || ( $sText =~ /&#.*;/)) {
+					$sText = decode_entities($sText);
+				}
+				$sText = "($sNick) " . $sText;
+				unless ( $sText =~ /DOCTYPE html/ ) {
+					botPrivmsg($self,$sChannel,substr($sText, 0, 300));
+				}
+			}
 		}
 
 		return undef;
@@ -12018,7 +12021,7 @@ sub fortniteStats(@) {
 								$top10 .= " $v_top10";
 								
 
-								botPrivmsg($self,$sChannel,"$sUser $tmp -- $level -- $progression -- $wins -- $kills -- $top3 -- $top5 -- $top10");
+								botPrivmsg($self,$sChannel,"Fortnite stats -- $sUser $tmp -- $level -- $progression -- $wins -- $kills -- $top3 -- $top5 -- $top10");
 							}
 						}
 					}
