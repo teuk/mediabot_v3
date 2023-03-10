@@ -29,6 +29,7 @@ use Moose;
 use Hailo;
 use Socket;
 use Twitter::API;
+use JSON::MaybeXS;
  
 sub new {
 	my ($class,$args) = @_;
@@ -1381,6 +1382,9 @@ sub mbCommandPublic(@) {
 		case /^f$/i									{
 														fortniteStats($self,$message,$sNick,$sChannel,@tArgs);
 													}
+		case /^tellme$/i							{
+														chatGPT($self,$message,$sNick,$sChannel,@tArgs);
+													}	
 		case /^help$/i								{
 														unless(defined($tArgs[0]) && ($tArgs[0] ne "")) {
 															botPrivmsg($self,$sChannel,"Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
@@ -12035,18 +12039,93 @@ sub fortniteStats(@) {
 			}
 			else {
 				my $sNoticeMsg = $message->prefix;
-				$sNoticeMsg .= " deluser command attempt, (command level [1] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				$sNoticeMsg .= " f command attempt, (command level [1] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
 				noticeConsoleChan($self,$sNoticeMsg);
 				botNotice($self,$sNick,"This command is not available for your level. Contact a bot master.");
-				logBot($self,$message,undef,"adduser",$sNoticeMsg);
+				logBot($self,$message,undef,"f",$sNoticeMsg);
 			}
 		}
 		else {
 			my $sNoticeMsg = $message->prefix;
-			$sNoticeMsg .= " deluser command attempt (user $sMatchingUserHandle is not logged in)";
+			$sNoticeMsg .= " f command attempt (user $sMatchingUserHandle is not logged in)";
 			noticeConsoleChan($self,$sNoticeMsg);
 			botNotice($self,$sNick,"You must be logged to use this command : /msg " . $self->{irc}->nick_folded . " login username password");
-			logBot($self,$message,undef,"adduser",$sNoticeMsg);
+			logBot($self,$message,undef,"f",$sNoticeMsg);
+		}
+	}
+}
+
+sub chatGPT(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $api_key;
+	unless (defined($MAIN_CONF{'openai.API_KEY'}) && ($MAIN_CONF{'openai.API_KEY'} ne "")) {
+		log_message($self,0,"openai.API_KEY is undefined in config file");
+		return undef;
+	}
+	$api_key = $MAIN_CONF{'openai.API_KEY'};
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
+				my $id_chanset_list = getIdChansetList($self,"chatGPT");
+				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
+					log_message($self,4,"chatGPT() check chanset chatGPT, id_chanset_list = $id_chanset_list");
+					my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
+					if (defined($id_channel_set) && ($id_channel_set ne "")) {
+						log_message($self,3,"chatGPT() channel $sChannel has chanset +chatGPT");
+						if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+							my $model = "text-davinci-002"; # or any other model ID
+							my $prompt = join(" ",@tArgs);
+							my $temperature = 0.5;
+							my $max_tokens = 50;
+							
+							my $url = "https://api.openai.com/v1/engines/$model/completions";
+							my $data = {
+								prompt => $prompt,
+								temperature => $temperature,
+								max_tokens => $max_tokens,
+							};
+							my $headers = "Content-Type: application/json";
+							my $token_header = "Authorization: Bearer $api_key";
+							
+							my $curl_cmd = "curl -s -H '$headers' -H '$token_header' -X POST -d '" . encode_json($data) . "' '$url'";
+							my $response = `$curl_cmd`;
+							
+							if ($response) {
+								my $data = decode_json($response);
+								my $text = $data->{choices}[0]{text};
+								log_message($self,3,$text);
+								my @lines = split(/\n/, $text);
+								foreach my $line (@lines) {
+									botPrivmsg($self,$sChannel,$line);
+								}
+								
+							}
+							else {
+								botPrivmsg($self,$sChannel,"Failed to generate text.");
+							}
+						}
+						else {
+							botNotice($self,$sNick,"Syntax: tellme <prompt>");
+						}
+					}
+				}				
+			}
+			else {
+				my $sNoticeMsg = $message->prefix;
+				$sNoticeMsg .= " tellme command attempt, (command level [1] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"This command is not available for your level. Contact a bot master.");
+				logBot($self,$message,undef,"tellme",$sNoticeMsg);
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix;
+			$sNoticeMsg .= " tellme command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command : /msg " . $self->{irc}->nick_folded . " login username password");
+			logBot($self,$message,undef,"tellme",$sNoticeMsg);
 		}
 	}
 }

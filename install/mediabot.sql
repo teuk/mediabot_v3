@@ -521,7 +521,8 @@ INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES
 (7, 'Hailo'),
 (8, 'HailoChatter'),
 (9, 'RadioPub'),
-(10, 'Twitter');
+(10, 'Twitter'),
+(11, 'chatGPT');
 
 -- --------------------------------------------------------
 
