@@ -30,6 +30,7 @@ use Hailo;
 use Socket;
 use Twitter::API;
 use JSON::MaybeXS;
+use Try::Tiny;
  
 sub new {
 	my ($class,$args) = @_;
@@ -6518,7 +6519,7 @@ sub displayUrlTitle(@) {
 					access_token        => $YOUR_ACCESS_TOKEN,
 					access_token_secret => $YOUR_ACCESS_TOKEN_SECRET,
 				);
-				my $me = $client->verify_credentials;
+				
 				my $id;
 				if ( $sText =~ /twitter\.com.*status.(\d+)/ ) {
 					$id = $1;
@@ -6527,26 +6528,57 @@ sub displayUrlTitle(@) {
 					return undef;
 				}
 				log_message($self,3,"id = $id");
-				my $sDetails = $client->get("https://api.twitter.com/2/tweets?ids=$id&tweet.fields=created_at&expansions=author_id&user.fields=created_at");
-				log_message($self,3,"Twitter GET on $id");
-				log_message($self,3,Dumper($sDetails));
-				log_message($self,3,"------------------");
-				my %hDetails = %{$sDetails};
-				my @tData = @{$hDetails{'data'}};
-				my %hData = %{$tData[0]};
-				my $sDescription = $hData{'text'};
-				$sDescription =~ s/\n//g;
-				chomp($sDescription);
+				my $sDetails;
+				try {
+					my $me = $client->verify_credentials;
+				}
+				catch {
+					die $_ unless is_twitter_api_error($_);
+				
+					# The error object includes plenty of information
+					log_message($self,3,$_->http_request->as_string);
+					log_message($self,3,$_->http_response->as_string);
+					if ($_->is_permanent_error) {
+						log_message($self,3,"No use retrying right away");
+					}
+					if ( $_->is_token_error ) {
+						log_message($self,3,"There's something wrong with this token.");
+					}
+					if ( $_->twitter_error_code == 326 ) {
+						log_message($self,3,"Oops! Twitter thinks you're spam bot!");
+					}
+				};
 
-				my $sUsername = ' @';
-				my @tUsers = $hDetails{'includes'}{'users'};
-				my %hUsers = %{$tUsers[0][0]};
-				$sUsername .= $hUsers{'username'};
+				try {
+					$sDetails = $client->get("https://api.twitter.com/2/tweets?ids=$id&tweet.fields=created_at&expansions=author_id&user.fields=created_at");
+				}
+				catch {
+					#die $_ unless is_twitter_api_error($_);
+					# The error object includes plenty of information
+					log_message($self,3,$_->http_request->as_string);
+					log_message($self,3,$_->http_response->as_string);
+				};
+				if (defined($sDetails)) {
+					log_message($self,3,"Twitter GET on $id");
+					log_message($self,3,Dumper($sDetails));
+					log_message($self,3,"------------------");
+					my %hDetails = %{$sDetails};
+					my @tData = @{$hDetails{'data'}};
+					my %hData = %{$tData[0]};
+					my $sDescription = $hData{'text'};
+					$sDescription =~ s/\n//g;
+					chomp($sDescription);
 
-				log_message($self,3,"sDescription = $sDescription");
-				my $sPublicMsg = String::IRC->new("Twitter")->black('cyan');
-				$sPublicMsg .= "$sUsername $sDescription";
-				botPrivmsg($self,$sChannel,"($sNick) $sPublicMsg");
+					my $sUsername = ' @';
+					my @tUsers = $hDetails{'includes'}{'users'};
+					my %hUsers = %{$tUsers[0][0]};
+					$sUsername .= $hUsers{'username'};
+
+					log_message($self,3,"sDescription = $sDescription");
+					my $sPublicMsg = String::IRC->new("Twitter")->black('cyan');
+					$sPublicMsg .= "$sUsername $sDescription";
+					botPrivmsg($self,$sChannel,"($sNick) $sPublicMsg");
+				}
 				
 				return undef;
 			}
