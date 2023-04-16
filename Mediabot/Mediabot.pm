@@ -6512,14 +6512,23 @@ sub displayUrlTitle(@) {
 					log_message($self,0,"Twitter API : one of the access tokens is missing check your config file");
 					return undef;
 				}
-				my $client = Twitter::API->new_with_traits(
+				my $client;
+				try {
+					$client = Twitter::API->new_with_traits(
 					traits              => 'Enchilada',
 					consumer_key        => $YOUR_CONSUMER_KEY,
 					consumer_secret     => $YOUR_CONSUMER_SECRET,
 					access_token        => $YOUR_ACCESS_TOKEN,
 					access_token_secret => $YOUR_ACCESS_TOKEN_SECRET,
-				);
-				
+					);
+				}
+				catch {
+					#die $_ unless is_twitter_api_error($_);
+					# The error object includes plenty of information
+					log_message($self,3,$_->http_request->as_string);
+					log_message($self,3,$_->http_response->as_string);
+				};
+
 				my $id;
 				if ( $sText =~ /twitter\.com.*status.(\d+)/ ) {
 					$id = $1;
