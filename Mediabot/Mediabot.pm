@@ -12119,7 +12119,7 @@ sub chatGPT(@) {
 							my $model = "text-davinci-002"; # or any other model ID
 							my $prompt = join(" ",@tArgs);
 							my $temperature = 0.5;
-							my $max_tokens = 50;
+							my $max_tokens = 400;
 							
 							my $url = "https://api.openai.com/v1/engines/$model/completions";
 							my $data = {
