@@ -6466,7 +6466,7 @@ sub displayUrlTitle(@) {
 				my $url = $sText;
 				$url =~ s/\?.*$//;
 				unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:107.0) Gecko/20100101 Firefox/107.0\" --connect-timeout 3 --max-time 3 -L -ks \"$url\" |" ) {
-					log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
+					log_message($self,0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 				}
 				else {
 					my $line;
@@ -6479,12 +6479,20 @@ sub displayUrlTitle(@) {
 							$sDisplayMsg =~ s/^.*<title//;
 							$sDisplayMsg =~ s/<\/title>.*$//;
 							$sDisplayMsg =~ s/^>//;
+							my $artist = $sDisplayMsg;
+							$artist =~ s/^.*song and lyrics by //;
+							$artist =~ s/ \| Spotify//;
+							my $song = $sDisplayMsg;
+							$song =~ s/ - song and lyrics by.*$//;
+							log_message($self,3,"displayUrlTitle() artist = $artist song = $song");
+
 							my $sText = String::IRC->new("Spotify")->white('green');
-							$sText .= " $sDisplayMsg";
+							$sText .= " $artist - $song";
 							my $regex = "&(?:" . join("|", map {s/;\z//; $_} keys %entity2char) . ");";
 							if (($sText =~ /$regex/) || ( $sText =~ /&#.*;/)) {
 								$sText = decode_entities($sText);
 							}
+							
 							botPrivmsg($self,$sChannel,"($sNick) $sText");
 						}	
 						$i++;
