@@ -6295,8 +6295,10 @@ sub displayYoutubeDetails(@) {
 						$sMsgSong .= String::IRC->new("$sDisplayDuration ")->grey('black');
 						$sMsgSong .= String::IRC->new("- ")->orange('black');
 						$sMsgSong .= String::IRC->new("$sViewCount ")->grey('black');
-						$sMsgSong .= String::IRC->new("- ")->orange('black');
-						$sMsgSong .= String::IRC->new("$schannelTitle")->grey('$black');
+						unless ( $schannelTitle ne "Topic") {
+							$sMsgSong .= String::IRC->new("- ")->orange('black');
+							$sMsgSong .= String::IRC->new("$schannelTitle")->grey('$black');
+						}
 						$sMsgSong =~ s/\r//;
 						$sMsgSong =~ s/\n//;
 						botPrivmsg($self,$sChannel,"($sNick) $sMsgSong");
