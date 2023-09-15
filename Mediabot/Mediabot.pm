@@ -6394,7 +6394,7 @@ sub displayUrlTitle(@) {
 	$sText =~ s/^.*http/http/;
 	$sText =~ s/\s+.*$//;
 	log_message($self,3,"displayUrlTitle() URL = $sText");
-	if ( $sText =~ /twitter.com/ ) {
+	if ( $sText =~ /x.com/ ) {
 		my $id_chanset_list = getIdChansetList($self,"Twitter");
 		if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
 			log_message($self,3,"id_chanset_list = $id_chanset_list");
@@ -6406,47 +6406,7 @@ sub displayUrlTitle(@) {
 				log_message($self,3,"id_channel_set = $id_channel_set");
 			}
 		}
-		# Set your Twitter API v2 OAuth 2.0 Client ID and Client Secret
-		my $client_id = 'TkJJZEVYeFJvd1JwbkVvR2RxdlQ6MTpjaQ';
-		my $client_secret = 'BId8VRwG3qZWNikLhWTQhCokYqneYEOFaSOEE0ybxHMklzizhJ';
-
-		# Set the link to the specific resource you want to retrieve
-		my $link = 'https://api.twitter.com/2/tweets/sample/stream';
-
-		# Construct the curl command to obtain the bearer token
-		my $token_command = "curl --request POST --url 'https://api.twitter.com/oauth2/token' --header 'Content-Type: application/x-www-form-urlencoded;charset=UTF-8' --user '$client_id:$client_secret' --data 'grant_type=client_credentials'";
-
-		# Execute the curl command to obtain the bearer token and capture the output
-		my $token_output = `$token_command`;
-
-		# Check if the command execution was successful
-		if ($? == 0) {
-			# Extract the access token from the token response
-			my ($access_token) = $token_output =~ /"access_token"\s*:\s*"([^"]+)"/;
-
-			if ($access_token) {
-				# Construct the curl command to retrieve the link title
-				my $title_command = "curl --request GET --url $link --header 'Authorization: Bearer $access_token'";
-
-				# Execute the curl command to retrieve the link title and capture the output
-				my $title_output = `$title_command`;
-
-				# Check if the command execution was successful
-				if ($? == 0) {
-					# Extract the title of the link from the title response
-					my ($title) = $title_output =~ /"title"\s*:\s*"([^"]+)"/;
-
-					# Print the title
-					print "Link title: $title\n" if defined $title;
-				} else {
-					print "Title command failed: $!\n";
-				}
-			} else {
-				print "Failed to extract access token from token response.\n";
-			}
-		} else {
-			print "Token command failed: $!\n";
-		}
+		#TBD
 	}
 	if ( $sText =~ /instagram.com/ ) {
 		my $content;
@@ -6491,7 +6451,7 @@ sub displayUrlTitle(@) {
 		return undef;
 	}
 
-	unless ( open URL_HEAD, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:107.0) Gecko/20100101 Firefox/107.0\" --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |" ) {
+	unless ( open URL_HEAD, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |" ) {
 		log_message(3,"displayUrlTitle() Could not curl headers for $sText");
 	}
 	else {
@@ -6522,7 +6482,7 @@ sub displayUrlTitle(@) {
 			if ( $sText =~ /open.spotify.com/ ) {
 				my $url = $sText;
 				$url =~ s/\?.*$//;
-				unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:107.0) Gecko/20100101 Firefox/107.0\" --connect-timeout 3 --max-time 3 -L -ks \"$url\" |" ) {
+				unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -ks \"$url\" |" ) {
 					log_message($self,0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 				}
 				else {
@@ -6695,7 +6655,7 @@ sub displayUrlTitle(@) {
 				}
 			}
 			log_message($self,3,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
-			unless ( open URL_TITLE, "curl -A -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:107.0) Gecko/20100101 Firefox/107.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
+			unless ( open URL_TITLE, "curl -A -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
 				log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 			}
 			else {
