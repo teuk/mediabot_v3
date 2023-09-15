@@ -6299,7 +6299,7 @@ sub displayYoutubeDetails(@) {
 						$sMsgSong .= String::IRC->new("- ")->orange('black');
 						$sMsgSong .= String::IRC->new("$sViewCount ")->grey('black');
 						$sMsgSong .= String::IRC->new("- ")->orange('black');
-						$sMsgSong .= String::IRC->new("$schannelTitle")->grey('$black');
+						$sMsgSong .= String::IRC->new("by $schannelTitle")->grey('$black');
 						
 						$sMsgSong =~ s/\r//;
 						$sMsgSong =~ s/\n//;
