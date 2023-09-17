@@ -9785,16 +9785,16 @@ sub playRadio(@) {
 							   	delay => 3,
 							   	on_expire => sub {
 										log_message($self,3,"Timer start, downloading $ytUrl");
-										
-										unless ( open YT, "youtube-dl --extract-audio --audio-format mp3 --add-metadata $ytUrl |" ) {
-				                    		log_message($self,0,"Could not youtube-dl $ytUrl");
+										#/usr/local/bin/yt-dlp -x --audio-format mp3 --audio-quality 0 https://www.youtube.com/watch?v=JRDgihVDEko
+										unless ( open YT, "/usr/local/bin/yt-dlp -x --audio-format mp3 --audio-quality 0 $ytUrl |" ) {
+				                    		log_message($self,0,"Could not yt-dlp $ytUrl");
 				                    		return undef;
 				            			}
 				            			my $ytdlOuput;
 				            
 										while (defined($ytdlOuput=<YT>)) {
 												chomp($ytdlOuput);
-												if ( $ytdlOuput =~ /^\[ffmpeg\] Destination: (.*)$/ ) {
+												if ( $ytdlOuput =~ /^\[ExtractAudio\] Destination: (.*)$/ ) {
 													$ytDestinationFile = $1;
 													log_message($self,0,"Downloaded mp3 : $incomingDir/$ytDestinationFile");
 													
@@ -12181,6 +12181,9 @@ sub chatGPT(@) {
 						if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 							my $model = "text-davinci-002"; # or any other model ID
 							my $prompt = join(" ",@tArgs);
+							$prompt =~ s/'/ /g;
+							$prompt =~ s/"/ /g;
+							log_message($self,3,$prompt);
 							my $temperature = 0.5;
 							my $max_tokens = 400;
 							
@@ -12192,22 +12195,56 @@ sub chatGPT(@) {
 							};
 							my $headers = "Content-Type: application/json";
 							my $token_header = "Authorization: Bearer $api_key";
-							
 							my $curl_cmd = "curl -s -H '$headers' -H '$token_header' -X POST -d '" . encode_json($data) . "' '$url'";
-							my $response = `$curl_cmd`;
-							
-							if ($response) {
-								my $data = decode_json($response);
-								my $text = $data->{choices}[0]{text};
-								log_message($self,3,$text);
-								my @lines = split(/\n/, $text);
-								foreach my $line (@lines) {
-									botPrivmsg($self,$sChannel,$line);
-								}
-								
+							unless ( open CHATGPT, "curl -s -H '$headers' -H '$token_header' -X POST -d '" . encode_json($data) ."' $url |" ) {
+								log_message(3,"chatGPT() Could not get CHATGPT from API using $api_key");
 							}
 							else {
-								botPrivmsg($self,$sChannel,"Failed to generate text.");
+								my $response;
+								my $line;
+								my $i = 0;
+								while(defined($line=<CHATGPT>)) {
+									chomp($line);
+									$response .= $line;
+									log_message($self,5,"chatGPT() $line");
+									$i++;
+								}
+								if ($response) {
+									my $data = decode_json($response);
+									my $text = $data->{choices}[0]{text};
+									log_message($self,3,"chatGPT() response = $text");
+									my @lines = split(/\n/, $text);
+									my $sPrivMsg;
+									my $i = 0;
+									my $j = 0;
+									foreach my $line (@lines) {
+										chomp($line);
+										$line =~ s/\r//;
+										$line =~ s/\n//;
+										if (( $line ne "" ) && !( $line =~ /^\s*$/ )) {
+											log_message($self,3,"chatGPT() line = $line");
+											$sPrivMsg .= $line;
+											if (length($sPrivMsg) >= 200) {
+												botPrivmsg($self,$sChannel,$sPrivMsg);
+												$sPrivMsg = "";
+												$j++;
+											}
+										}
+										$i++;
+									}
+									if (( $j == 0 ) && (length($sPrivMsg) > 0)) {
+										botPrivmsg($self,$sChannel,$sPrivMsg);
+										$j++;
+									}
+									log_message($self,3,"chatGPT() number of lines = $i");
+									log_message($self,3,"chatGPT() number of PRIVMSG = $j");
+									if ( $j == 0 ) {
+										botPrivmsg($self,$sChannel,"I'm sorry, something went wrong while I processed chatGPT response :(");
+									}
+								}
+								else {
+									botPrivmsg($self,$sChannel,"Failed to generate text.");
+								}
 							}
 						}
 						else {
