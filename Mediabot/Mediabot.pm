@@ -944,6 +944,20 @@ sub userOnJoin(@) {
 		}
 		$sth->finish;
 	}
+	my $sChannelUserQuery = "SELECT * FROM CHANNEL WHERE name=?";
+	log_message($self,4,$sChannelUserQuery);
+	my $sth = $self->{dbh}->prepare($sChannelUserQuery);
+	unless ($sth->execute($sChannel)) {
+		log_message($self,1,"on_join() SQL Error : " . $DBI::errstr . " Query : " . $sChannelUserQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $sNoticeOnJoin = $ref->{'notice'};
+			if (defined($sNoticeOnJoin) && ($sNoticeOnJoin ne "")) {
+				botNotice($self,$sNick,$sNoticeOnJoin);
+			}
+		}
+	}
 }
 
 sub getNickInfo(@) {
@@ -6407,6 +6421,68 @@ sub displayUrlTitle(@) {
 			}
 		}
 		#TBD
+	}
+	if ( $sText =~ /x.com/ ) {
+		# Twitter URL = https://x.com/emilyshar1/status/1703268201159876867?s=20
+		log_message($self,3,"displayUrlTitle() Twitter URL = $sText");
+		my $user;
+		my $id;
+		if ( $sText =~ /^https.*x\.com\/(.*)\/status.*$/ ) {
+			$user = $1;
+		}
+		if ( $sText =~ /^https.*x\.com\/.*\/status\/([^?]*).*$/ ) {
+			$id = $1;
+		}
+		if ($user) {
+			log_message($self,3,"displayUrlTitle() user = $user");
+		}
+		else {
+			log_message($self,3,"displayUrlTitle() Could not get Twitter user");
+			return undef;
+		}
+		if ($id) {
+			log_message($self,3,"displayUrlTitle() id = $id");
+		}
+		else {
+			log_message($self,3,"displayUrlTitle() Could not get Twitter id");
+			return undef;
+		}
+
+		
+
+		my $twitter_url = "https://twitter.com/$user/status/$id";  # Replace with the actual URL
+		log_message($self,3,"displayUrlTitle() twitter_url = $twitter_url");
+
+		
+
+		# Use curl to fetch the Twitter page content
+		my $curl_output = `curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0" -s "$twitter_url"`;
+		#log_message($self,4,"displayUrlTitle() curl_output = $curl_output");
+
+		# Check if the curl command was successful
+		if ($? == -1) {
+			log_message($self,3,"displayUrlTitle() Failed to execute curl: $!");
+			return undef;
+		}
+		elsif ($? & 127) {
+			log_message($self,3,"displayUrlTitle() curl died with signal " . ($? & 127));
+		}
+		else {
+			my $exit_code = $? >> 8;
+			if ($exit_code != 0) {
+				log_message($self,3,"displayUrlTitle() curl exited with non-zero status: $exit_code");
+			}
+		}
+
+		# Extract the tweet text from the HTML response using a regular expression
+		if ($curl_output =~ /<p class="tweet-text" data-aria-label-part="0">([^<]+)/) {
+			my $tweet_text = $1;
+			$tweet_text =~ s/\s+/ /g;  # Remove extra whitespace
+			log_message($self,3,"displayUrlTitle() Tweet Text: $tweet_text");
+		}
+		else {
+			log_message($self,3,"displayUrlTitle() Tweet text not found");
+		}
 	}
 	if ( $sText =~ /instagram.com/ ) {
 		my $content;

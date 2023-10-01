@@ -52,7 +52,8 @@ CREATE TABLE `CHANNEL` (
   `description` varchar(255) DEFAULT NULL,
   `key` varchar(255) DEFAULT NULL,
   `chanmode` varchar(255) DEFAULT NULL,
-  `auto_join` tinyint(1) NOT NULL
+  `auto_join` tinyint(1) NOT NULL,
+  `notice` varchar(255) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 -- --------------------------------------------------------
