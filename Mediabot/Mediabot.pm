@@ -12297,11 +12297,11 @@ sub chatGPT(@) {
 										chomp($line);
 										$line =~ s/\r/ /;
 										$line =~ s/\n/ /;
-										$line =~ s/  / /g;
 										if (( $line ne "" ) && !( $line =~ /^\s*$/ )) {
 											log_message($self,3,"chatGPT() line = $line");
-											$sPrivMsg .= $line;
+											$sPrivMsg .= $line . " ";
 											if (length($sPrivMsg) >= 200) {
+												$sPrivMsg =~ s/ $//;
 												botPrivmsg($self,$sChannel,$sPrivMsg);
 												$sPrivMsg = "";
 												$j++;
