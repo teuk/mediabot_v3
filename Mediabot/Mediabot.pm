@@ -12295,8 +12295,9 @@ sub chatGPT(@) {
 									my $j = 0;
 									foreach my $line (@lines) {
 										chomp($line);
-										$line =~ s/\r//;
-										$line =~ s/\n//;
+										$line =~ s/\r/ /;
+										$line =~ s/\n/ /;
+										$line =~ s/  / /g;
 										if (( $line ne "" ) && !( $line =~ /^\s*$/ )) {
 											log_message($self,3,"chatGPT() line = $line");
 											$sPrivMsg .= $line;
