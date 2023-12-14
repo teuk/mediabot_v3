@@ -6422,7 +6422,7 @@ sub displayUrlTitle(@) {
 		}
 		#TBD
 	}
-	if ( ($sText =~ /x.com/) || ($sText =~ /twitter.com/) || ($sChannel =~ /#Phat/i)) {
+	if ( (($sText =~ /x.com/) || ($sText =~ /twitter.com/)) && ($sChannel =~ /#Phat/i)) {
 		log_message($self,3,"displayUrlTitle() Twitter URL = $sText");
 		my @tAnswers = ( "Ok $sNick, you need to take a breathe", "$sNick the truth is out theeeeere ^^", "You're the wisest $sNick, you checked your sources :P~");
 		botPrivmsg($self,$sChannel,$tAnswers[rand($#tAnswers + 1)]);
