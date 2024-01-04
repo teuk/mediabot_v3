@@ -2851,41 +2851,48 @@ sub addUserHost(@) {
 					else {
 						my $sSearch = $tArgs[1];
 						$sSearch =~ s/;//g;
-						my $sQuery = "SELECT nickname FROM USER WHERE hostmasks LIKE '%" . $sSearch . "%'";
+						my $sQuery = "SELECT * FROM USER WHERE nickname=?";
 						my $sth = $self->{dbh}->prepare($sQuery);
-						unless ($sth->execute()) {
+						unless ($sth->execute($tArgs[0])) {
 							log_message($self,1,"addUserHost() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							if (my $ref = $sth->fetchrow_hashref()) {
 								my $sUser = $ref->{'nickname'};
-								my $sNoticeMsg = $message->prefix . " Hostmask " . $tArgs[1] . " already exist for user for user $sUser";
-								log_message($self,0,$sNoticeMsg);
-								noticeConsoleChan($self,$sNoticeMsg);
-								logBot($self,$message,undef,"addhost",$sNoticeMsg);
-							}
-							else {
-								$sQuery = "SELECT hostmasks FROM USER WHERE id_user=?";
-								$sth = $self->{dbh}->prepare($sQuery);
-								unless ($sth->execute($id_user)) {
-									log_message($self,1,"addUserHost() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-								}
-								else {
-									my $sHostmasks = "";
-									if (my $ref = $sth->fetchrow_hashref()) {
-										$sHostmasks = $ref->{'hostmasks'};
-									}
-									$sQuery = "UPDATE USER SET hostmasks=? WHERE id_user=?";
-									$sth = $self->{dbh}->prepare($sQuery);
-									unless ($sth->execute($sHostmasks . "," . $tArgs[1],$id_user)) {
-										log_message($self,1,"addUserHost() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-									}
-									else {
-										my $sNoticeMsg = $message->prefix . " Hostmask " . $tArgs[1] . " added for user " . $tArgs[0];
+								my $sHostmasks = $ref->{'hostmasks'};
+								log_message($self,3,"(addUserHost) $sHostmasks");
+								my @tHostmasks = split (",",$sHostmasks);
+								foreach my $hm (@tHostmasks) {
+									log_message($self,3,"(addUserHost) $hm");
+									if ( $hm eq $tArgs[1]) {
+										my $sNoticeMsg = $message->prefix . " Hostmask " . $tArgs[1] . " already exist for user for user $sUser";
 										log_message($self,0,$sNoticeMsg);
 										noticeConsoleChan($self,$sNoticeMsg);
 										logBot($self,$message,undef,"addhost",$sNoticeMsg);
+										return undef;
 									}
+								}
+							}
+							$sQuery = "SELECT hostmasks FROM USER WHERE id_user=?";
+							$sth = $self->{dbh}->prepare($sQuery);
+							unless ($sth->execute($id_user)) {
+								log_message($self,1,"addUserHost() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							}
+							else {
+								my $sHostmasks = "";
+								if (my $ref = $sth->fetchrow_hashref()) {
+									$sHostmasks = $ref->{'hostmasks'};
+								}
+								$sQuery = "UPDATE USER SET hostmasks=? WHERE id_user=?";
+								$sth = $self->{dbh}->prepare($sQuery);
+								unless ($sth->execute($sHostmasks . "," . $tArgs[1],$id_user)) {
+									log_message($self,1,"addUserHost() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								}
+								else {
+									my $sNoticeMsg = $message->prefix . " Hostmask " . $tArgs[1] . " added for user " . $tArgs[0];
+									log_message($self,0,$sNoticeMsg);
+									noticeConsoleChan($self,$sNoticeMsg);
+									logBot($self,$message,undef,"addhost",$sNoticeMsg);
 								}
 							}
 						}
@@ -5046,38 +5053,6 @@ sub mbTopCommand(@) {
 	$sth->finish;
 }
 
-sub mbCountSlaps(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-		my $sQuery = "SELECT ts,count(ts) as hits FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND CHANNEL.name like ? AND `event_type` LIKE 'action' AND `nick` LIKE ? AND `publictext` LIKE '%slaps%' GROUP BY TO_DAYS(`ts`) ORDER BY ts DESC LIMIT 1";
-		my $sth = $self->{dbh}->prepare($sQuery);
-		unless ($sth->execute($sChannel,$tArgs[0])) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-		}
-		else {
-			my $sNbSlapsMsg = "Slaps count for " . $tArgs[0];
-			if (my $ref = $sth->fetchrow_hashref()) {
-				my $hits = $ref->{'hits'};
-				my $ts = $ref->{'ts'};
-				my $sDay = $ts;
-				$sDay =~ s/\s+.*$//;
-				$sNbSlapsMsg .= " : $hits ($sDay)";
-				botPrivmsg($self,$sChannel,$sNbSlapsMsg);
-			}
-			else {
-				$sNbSlapsMsg .= " : None";
-				botPrivmsg($self,$sChannel,$sNbSlapsMsg);
-			}
-			logBot($self,$message,$sChannel,"countslaps",@tArgs);
-		}
-		$sth->finish;
-	}
-	else {
-		botNotice($self,$sNick,"Syntax : countslaps <nick>");
-	}
-}
-
 # lastcmd
 sub mbLastCommand(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
@@ -5120,37 +5095,35 @@ sub mbDbSearchCommand(@) {
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 		my $sCommand = $tArgs[0];
-		unless ($sCommand =~ /%/) {
-			log_message($self,3,"sCommand : $sCommand");
-			my $sSearch = $sCommand;
-			$sSearch =~ s/'/\\'/g;
-			$sSearch =~ s/;//g;
-			my $sQuery = "SELECT * FROM PUBLIC_COMMANDS WHERE action LIKE '%" . $sSearch . "%' ORDER BY command LIMIT 20";
-			my $sth = $self->{dbh}->prepare($sQuery);
-			unless ($sth->execute()) {
-				log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-			}
-			else {
-				my $sResponse;
-				while (my $ref = $sth->fetchrow_hashref()) {
-					my $command = $ref->{'command'};
+		log_message($self,3,"sCommand : $sCommand");
+		my $sQuery = "SELECT * FROM PUBLIC_COMMANDS";
+		my $sth = $self->{dbh}->prepare($sQuery);
+		unless ($sth->execute()) {
+			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		}
+		else {
+			my $sResponse;
+			while (my $ref = $sth->fetchrow_hashref()) {
+				my $command = $ref->{'command'};
+				my $action = $ref->{'action'};
+				if ( $action =~ /$sCommand/ ) {
 					$sResponse .= " $command";
 				}
-				unless(defined($sResponse) && ($sResponse ne "")) {
-					botNotice($self,$sNick,"keyword $sCommand not found in commands");
+			}
+			unless(defined($sResponse) && ($sResponse ne "")) {
+				botNotice($self,$sNick,"keyword $sCommand not found in commands");
+			}
+			else {
+				if (defined($sChannel)) {
+					botPrivmsg($self,$sChannel,"Commands containing $sCommand : $sResponse");
 				}
 				else {
-					if (defined($sChannel)) {
-						botPrivmsg($self,$sChannel,"Commands containing $sCommand : $sResponse");
-					}
-					else {
-						botNotice($self,$sNick,"Commands containing $sCommand : $sResponse");
-					}
+					botNotice($self,$sNick,"Commands containing $sCommand : $sResponse");
 				}
-				logBot($self,$message,$sChannel,"searchcmd",("Commands containing $sCommand"));
 			}
-			$sth->finish;
+			logBot($self,$message,$sChannel,"searchcmd",("Commands containing $sCommand"));
 		}
+		$sth->finish;
 	}
 	else {
 		botNotice($self,$sNick,"Syntax: searchcmd <keyword>");
@@ -10129,16 +10102,11 @@ sub playRadio(@) {
 						}
 						else {
 							# Local library search
-							my $sTextLocal = join ("%",@tArgs);
-							my $sSearch = $sTextLocal;
-							$sSearch =~ s/\s+/%/g;
-							$sSearch =~ s/%+/%/g;
-							$sSearch =~ s/;//g;
-							$sSearch =~ s/'/\\'/g;
-							my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sSearch . "%' ORDER BY RAND() LIMIT 1";
+							my $sSearch = join (" ",@tArgs);
+							my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE (artist LIKE ? OR title LIKE ?) ORDER BY RAND() LIMIT 1";
 							log_message($self,3,"playRadio() Query : $sQuery");
 							my $sth = $self->{dbh}->prepare($sQuery);
-							unless ($sth->execute()) {
+							unless ($sth->execute($sSearch,$sSearch)) {
 								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {	
