@@ -6397,6 +6397,7 @@ sub displayUrlTitle(@) {
 	} # Special prank for a bro :)
 	if ( (($sText =~ /x.com/) || ($sText =~ /twitter.com/)) && (($sNick =~ /^\[k\]$/) || ($sNick =~ /^NHI$/) || ($sNick =~ /^PersianYeti$/))) {
 		log_message($self,3,"displayUrlTitle() Twitter URL = $sText");
+		return undef;
 		my @tAnswers = ( "Ok $sNick, you need to take a breathe", "$sNick the truth is out theeeeere ^^", "You're the wisest $sNick, you checked your sources :P~","Great another Twitter thingy, we missed that $sNick");
 		botPrivmsg($self,$sChannel,$tAnswers[rand($#tAnswers + 1)]);
 		return undef;
