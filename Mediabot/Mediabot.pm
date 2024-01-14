@@ -12300,7 +12300,7 @@ sub chatGPT(@) {
 												if ( $j < 4) {
 													log_message($self,3,"chatGPT() line $i = $line");
 													$sPrivMsg .= $line . " ";
-													if (length($sPrivMsg) >= 220) {
+													if (length($sPrivMsg) >= 200) {
 														$sPrivMsg =~ s/ $//;
 														log_message($self,3,"chatGPT() sent to irc => line $j : $sPrivMsg");
 														botPrivmsg($self,$sChannel,$sPrivMsg);
