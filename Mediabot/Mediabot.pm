@@ -1226,7 +1226,7 @@ sub mbCommandPublic(@) {
 		case /^chanstatlines$/i	{
 														channelStatLines($self,$message,$sChannel,$sNick,@tArgs);
 													}
-		case /^whotalk$/i		{
+		case /^whotalk|whotalks$/i		{
 														whoTalk($self,$message,$sChannel,$sNick,@tArgs);
 												}
 		case /^countcmd$/i	{
@@ -12215,6 +12215,7 @@ sub chatGPT(@) {
 		return undef;
 	}
 	$api_key = $MAIN_CONF{'openai.API_KEY'};
+	my $api_url = 'https://api.openai.com/v1/chat/completions';
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -12226,24 +12227,39 @@ sub chatGPT(@) {
 					if (defined($id_channel_set) && ($id_channel_set ne "")) {
 						log_message($self,3,"chatGPT() channel $sChannel has chanset +chatGPT");
 						if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-							my $model = "text-davinci-002"; # or any other model ID
+							my $override = 0;
+							if ($tArgs[0] =~ /\-override/i) {
+								$override = 1;
+								shift @tArgs;
+							}
 							my $prompt = join(" ",@tArgs);
-							$prompt =~ s/'/ /g;
-							$prompt =~ s/"/ /g;
-							log_message($self,3,$prompt);
-							my $temperature = 0.5;
-							my $max_tokens = 400;
-							
-							my $url = "https://api.openai.com/v1/engines/$model/completions";
-							my $data = {
-								prompt => $prompt,
-								temperature => $temperature,
-								max_tokens => $max_tokens,
+							#$prompt =~ s/'/ /g;
+							#$prompt =~ s/"/ /g;
+							log_message($self,3,"chatGPT() prompt = $prompt");
+
+							#my $model = "text-davinci-002"; # or any other model ID
+							my $tone = "friendly";  # Set the tone as needed
+
+							# Format the input for ChatGPT
+							my $messages = [
+								{ 'role' => 'system', 'content' => 'You are a helpful assistant.' },
+								{ 'role' => 'user', 'content' => $prompt },
+								{ 'role' => 'assistant', 'content' => ''},
+							];
+
+							# Create the payload
+							my $payload = {
+								'model' => 'gpt-3.5-turbo',
+								'messages' => $messages,
+								'temperature' => 0.7,  # Adjust the temperature as needed
+								'max_tokens' => 400,   # Adjust the max tokens as needed
 							};
-							my $headers = "Content-Type: application/json";
-							my $token_header = "Authorization: Bearer $api_key";
-							my $curl_cmd = "curl -s -H '$headers' -H '$token_header' -X POST -d '" . encode_json($data) . "' '$url'";
-							unless ( open CHATGPT, "curl -s -H '$headers' -H '$token_header' -X POST -d '" . encode_json($data) ."' $url |" ) {
+
+							# Convert payload to JSON
+							my $json_payload = encode_json($payload);
+
+							# Use curl to make the HTTP request directly
+							unless ( open CHATGPT, "curl -f -s -X POST -H 'Content-Type: application/json' -H 'Authorization: Bearer $api_key' --data-raw '$json_payload' $api_url |" ) {
 								log_message(3,"chatGPT() Could not get CHATGPT from API using $api_key");
 							}
 							else {
@@ -12253,45 +12269,70 @@ sub chatGPT(@) {
 								while(defined($line=<CHATGPT>)) {
 									chomp($line);
 									$response .= $line;
-									log_message($self,5,"chatGPT() $line");
+									log_message($self,5,"chatGPT() line $i : $line");
 									$i++;
 								}
+								if ( $i > 0 ) { close CHATGPT; }
+								log_message($self,3,"chatGPT() $i JSON response line(s)");
 								if ($response) {
-									my $data = decode_json($response);
-									my $text = $data->{choices}[0]{text};
-									log_message($self,3,"chatGPT() response = $text");
-									my @lines = split(/\n/, $text);
-									my $sPrivMsg;
-									my $i = 0;
-									my $j = 0;
-									foreach my $line (@lines) {
-										chomp($line);
-										$line =~ s/\r/ /;
-										$line =~ s/\n/ /;
-										if (( $line ne "" ) && !( $line =~ /^\s*$/ )) {
-											log_message($self,3,"chatGPT() line = $line");
-											$sPrivMsg .= $line . " ";
-											if (length($sPrivMsg) >= 200) {
-												$sPrivMsg =~ s/ $//;
-												botPrivmsg($self,$sChannel,$sPrivMsg);
-												$sPrivMsg = "";
-												$j++;
+									log_message($self,5,"chatGPT() JSON response = $response");
+									# Parse the JSON response
+									my $decoded_response = decode_json($response);
+									my $answer = $decoded_response->{'choices'}[0]{'message'}{'content'};
+									unless (defined($answer) && ($answer ne "")) {
+										log_message($self,3,"chatGPT() no answer from chatGPT");
+									}
+									else {
+										my @lines = split(/\n/, $answer);
+										log_message($self,3,"chatGPT() " . ( $#lines + 1 ) . " line(s) in chatGPT answer");
+										my $sPrivMsg;
+										my $i = 0;
+										my $j = 0;
+										my $k = 0;
+										my $nbEmptyLines = 0;
+										my $line;
+										for ($i=0;$i<=$#lines;$i++) {
+											$line = $lines[$i];
+											chomp($line);
+											$line =~ s/\r/ /;
+											$line =~ s/\n/ /;
+											if (( $line ne "" ) && !( $line =~ /^\s*$/ )) {
+												if ( $j < 4) {
+													log_message($self,3,"chatGPT() line $i = $line");
+													$sPrivMsg .= $line . " ";
+													if (length($sPrivMsg) >= 220) {
+														$sPrivMsg =~ s/ $//;
+														log_message($self,3,"chatGPT() sent to irc => line $j : $sPrivMsg");
+														botPrivmsg($self,$sChannel,$sPrivMsg);
+														$k++;
+														$sPrivMsg = "";
+														$j++;
+													}
+												}
+												else {
+													log_message($self,3,"chatGPT() too much lines to send to irc");
+													$j++;
+												}
+											}
+											else {
+												$nbEmptyLines++;
 											}
 										}
-										$i++;
+										if (( $j == 0 ) && (length($sPrivMsg) > 0)) {
+											log_message($self,3,"chatGPT() single line $j sent to irc $sPrivMsg");
+											botPrivmsg($self,$sChannel,$sPrivMsg);
+											$k++;
+											$j++;
+										}
+										else {
+											log_message($self,3,"chatGPT() Number of lines to send to irc = $j, number of lines sent = $k");
+										}
+										log_message($self,3,"chatGPT() number of lines = $i, number of empty lines = $nbEmptyLines, nummber of PRIVMSG = $j");
+										if ( $j == 0 ) {
+											botPrivmsg($self,$sChannel,"I'm sorry, something went wrong while I processed chatGPT response :(");
+										}
+										log_message($self,3,"chatGPT() answer = $answer");
 									}
-									if (( $j == 0 ) && (length($sPrivMsg) > 0)) {
-										botPrivmsg($self,$sChannel,$sPrivMsg);
-										$j++;
-									}
-									log_message($self,3,"chatGPT() number of lines = $i");
-									log_message($self,3,"chatGPT() number of PRIVMSG = $j");
-									if ( $j == 0 ) {
-										botPrivmsg($self,$sChannel,"I'm sorry, something went wrong while I processed chatGPT response :(");
-									}
-								}
-								else {
-									botPrivmsg($self,$sChannel,"Failed to generate text.");
 								}
 							}
 						}
@@ -12299,7 +12340,7 @@ sub chatGPT(@) {
 							botNotice($self,$sNick,"Syntax: tellme <prompt>");
 						}
 					}
-				}				
+				}
 			}
 			else {
 				my $sNoticeMsg = $message->prefix;

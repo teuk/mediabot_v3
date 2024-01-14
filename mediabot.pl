@@ -572,6 +572,14 @@ sub on_message_PRIVMSG(@) {
 				$mediabot->mbCommandPublic($message,$where,$who,$botNickTriggered,$sCommand,@tArgs);
 			}
 		}
+		elsif ($sCommand eq $self->nick_folded . ":") {
+			$what =~ s/^\S+\s*//;
+			($sCommand,@tArgs) = split(/\s+/,$what);
+			if (defined($sCommand) && ($sCommand ne "")) {
+				$sCommand =~ tr/A-Z/a-z/;
+				$mediabot->chatGPT($message,$who,$where,@tArgs);
+			}
+		}
 		elsif ( ( $what =~ /http.*:\/\/www\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/m\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/music\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/youtu\.be.*/i ) ) {
 			my $id_chanset_list = $mediabot->getIdChansetList("Youtube");
 			if (defined($id_chanset_list)) {
