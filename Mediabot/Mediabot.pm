@@ -1292,9 +1292,6 @@ sub mbCommandPublic(@) {
 		case /^weather$|^meteo$/i					{
 																	displayWeather($self,$message,$sNick,$sChannel,@tArgs);
 													}
-		case /^countslaps$/i						{
-														mbCountSlaps($self,$message,$sNick,$sChannel,@tArgs);
-													}
 		case /^addbadword$/i						{
 														channelAddBadword($self,$message,$sNick,$sChannel,@tArgs);
 													}
@@ -1399,7 +1396,10 @@ sub mbCommandPublic(@) {
 													}
 		case /^tellme$/i							{
 														chatGPT($self,$message,$sNick,$sChannel,@tArgs);
-													}	
+													}
+		case /^xlogin$/i							{
+														xLogin($self,$message,$sNick,$sChannel,@tArgs);
+													}
 		case /^Spike$/i								{
 														botPrivmsg($self,$sChannel,"https://teuk.org/In_Spike_Memory.jpg");
 													}	
@@ -12356,6 +12356,52 @@ sub chatGPT(@) {
 			noticeConsoleChan($self,$sNoticeMsg);
 			botNotice($self,$sNick,"You must be logged to use this command : /msg " . $self->{irc}->nick_folded . " login username password");
 			logBot($self,$message,undef,"tellme",$sNoticeMsg);
+		}
+	}
+}
+
+sub xLogin(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				my $xService = $MAIN_CONF{'undernet.UNET_CSERVICE_LOGIN'};
+				unless (defined($xService) && ($xService ne "")) {
+					botNotice($self,$sNick,"undernet.UNET_CSERVICE_LOGIN is undefined in configuration file");
+					return undef;
+				}
+				my $xUsername = $MAIN_CONF{'undernet.UNET_CSERVICE_USERNAME'};
+				unless (defined($xUsername) && ($xUsername ne "")) {
+					botNotice($self,$sNick,"undernet.UNET_CSERVICE_USERNAME is undefined in configuration file");
+					return undef;
+				}
+				my $xPassword = $MAIN_CONF{'undernet.UNET_CSERVICE_PASSWORD'};
+				unless (defined($xPassword) && ($xPassword ne "")) {
+					botNotice($self,$sNick,"undernet.UNET_CSERVICE_PASSWORD is undefined in configuration file");
+					return undef;
+				}
+				my $sNoticeMsg = "Authenticating to $xService with username $xUsername";
+				botNotice($self,$sNick,$sNoticeMsg);
+				noticeConsoleChan($self,$sNoticeMsg);
+				botPrivmsg($self,$xService,"login $xUsername $xPassword");
+				$self->{irc}->write("MODE " . $self->{irc}->nick_folded . " +x\x0d\x0a");
+			}
+			else {
+				my $sNoticeMsg = $message->prefix;
+				$sNoticeMsg .= " xLogin command attempt, (command level [1] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"This command is not available for your level. Contact a bot master.");
+				logBot($self,$message,undef,"tellme",$sNoticeMsg);
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix;
+			$sNoticeMsg .= " xLogin command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command : /msg " . $self->{irc}->nick_folded . " login username password");
+			logBot($self,$message,undef,"xLogin",$sNoticeMsg);
 		}
 	}
 }
