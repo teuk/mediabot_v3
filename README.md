@@ -1,7 +1,7 @@
 # mediabot_v3
 
   Mediabotv3 is a perl Net::Async::IRC bot
-  It is still a beta version and has been tested on Undernet ircu server and Freenode.
+  It is still a beta version and has been tested on Undernet ircu server and Libera.
 
 WHAT IS MEDIABOT?
 
