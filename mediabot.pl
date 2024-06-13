@@ -574,7 +574,7 @@ sub on_message_PRIVMSG(@) {
 		}
 		elsif ($sCommand eq $self->nick_folded . ":") {
 			$what =~ s/^\S+\s*//;
-			($sCommand,@tArgs) = split(/\s+/,$what);
+			@tArgs = split(/\s+/,$what);
 			if (defined($sCommand) && ($sCommand ne "")) {
 				$sCommand =~ tr/A-Z/a-z/;
 				$mediabot->chatGPT($message,$who,$where,@tArgs);

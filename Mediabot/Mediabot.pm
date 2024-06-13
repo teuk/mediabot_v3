@@ -31,6 +31,7 @@ use Socket;
 use Twitter::API;
 use JSON::MaybeXS;
 use Try::Tiny;
+use Unicode::Normalize;
  
 sub new {
 	my ($class,$args) = @_;
@@ -1393,9 +1394,6 @@ sub mbCommandPublic(@) {
 													}
 		case /^f$/i									{
 														fortniteStats($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^tellme$/i							{
-														chatGPT($self,$message,$sNick,$sChannel,@tArgs);
 													}
 		case /^xlogin$/i							{
 														xLogin($self,$message,$sNick,$sChannel,@tArgs);
@@ -12227,14 +12225,13 @@ sub chatGPT(@) {
 					if (defined($id_channel_set) && ($id_channel_set ne "")) {
 						log_message($self,3,"chatGPT() channel $sChannel has chanset +chatGPT");
 						if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-							my $override = 0;
-							if ($tArgs[0] =~ /\-override/i) {
-								$override = 1;
-								shift @tArgs;
-							}
 							my $prompt = join(" ",@tArgs);
-							#$prompt =~ s/'/ /g;
-							#$prompt =~ s/"/ /g;
+							#if (utf8::is_utf8($prompt)) {
+							#	$prompt = Encode::encode("UTF-8", $prompt);
+							#}
+							$prompt =~ s/'//g;
+							$prompt =~ s/"//g;
+							
 							log_message($self,3,"chatGPT() prompt = $prompt");
 
 							#my $model = "text-davinci-002"; # or any other model ID
@@ -12247,6 +12244,8 @@ sub chatGPT(@) {
 								{ 'role' => 'assistant', 'content' => ''},
 							];
 
+							log_message($self,3,"chatGPT() message = $message");
+
 							# Create the payload
 							my $payload = {
 								'model' => 'gpt-3.5-turbo',
@@ -12254,13 +12253,15 @@ sub chatGPT(@) {
 								'temperature' => 0.7,  # Adjust the temperature as needed
 								'max_tokens' => 400,   # Adjust the max tokens as needed
 							};
+							
 
 							# Convert payload to JSON
 							my $json_payload = encode_json($payload);
 
 							# Use curl to make the HTTP request directly
-							unless ( open CHATGPT, "curl -f -s -X POST -H 'Content-Type: application/json' -H 'Authorization: Bearer $api_key' --data-raw '$json_payload' $api_url |" ) {
+							unless ( open CHATGPT, "curl -X POST -H 'Content-Type: application/json' -H 'Authorization: Bearer $api_key' --data-raw '$json_payload' $api_url |" ) {
 								log_message(3,"chatGPT() Could not get CHATGPT from API using $api_key");
+								log_message(4,"chatGPT() curl cmd : curl -X POST -H 'Content-Type: application/json' -H 'Authorization: Bearer $api_key' --data-raw '$json_payload' $api_url");
 							}
 							else {
 								my $response;
