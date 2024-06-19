@@ -12226,11 +12226,8 @@ sub chatGPT(@) {
 						log_message($self,3,"chatGPT() channel $sChannel has chanset +chatGPT");
 						if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 							my $prompt = join(" ",@tArgs);
-							#if (utf8::is_utf8($prompt)) {
-							#	$prompt = Encode::encode("UTF-8", $prompt);
-							#}
-							$prompt =~ s/'//g;
-							$prompt =~ s/"//g;
+							$prompt =~ s/'/ /g;
+							$prompt =~ s/"/ /g;
 							
 							log_message($self,3,"chatGPT() prompt = $prompt");
 
