@@ -1398,6 +1398,9 @@ sub mbCommandPublic(@) {
 		case /^xlogin$/i							{
 														xLogin($self,$message,$sNick,$sChannel,@tArgs);
 													}
+		case /^yomomma$/i							{
+														Yomomma($self,$message,$sNick,$sChannel,@tArgs);
+													}
 		case /^Spike$/i								{
 														botPrivmsg($self,$sChannel,"https://teuk.org/In_Spike_Memory.jpg");
 													}	
@@ -12214,146 +12217,126 @@ sub chatGPT(@) {
 	}
 	$api_key = $MAIN_CONF{'openai.API_KEY'};
 	my $api_url = 'https://api.openai.com/v1/chat/completions';
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
-				my $id_chanset_list = getIdChansetList($self,"chatGPT");
-				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-					log_message($self,4,"chatGPT() check chanset chatGPT, id_chanset_list = $id_chanset_list");
-					my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
-					if (defined($id_channel_set) && ($id_channel_set ne "")) {
-						log_message($self,3,"chatGPT() channel $sChannel has chanset +chatGPT");
-						if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-							my $prompt = join(" ",@tArgs);
-							$prompt =~ s/'/ /g;
-							$prompt =~ s/"/ /g;
-							
-							log_message($self,3,"chatGPT() prompt = $prompt");
+	
+	my $id_chanset_list = getIdChansetList($self,"chatGPT");
+	if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
+		log_message($self,4,"chatGPT() check chanset chatGPT, id_chanset_list = $id_chanset_list");
+		my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
+		if (defined($id_channel_set) && ($id_channel_set ne "")) {
+			log_message($self,3,"chatGPT() channel $sChannel has chanset +chatGPT");
+			if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+				my $prompt = join(" ",@tArgs);
+				$prompt =~ s/'/ /g;
+				$prompt =~ s/"/ /g;
+				
+				log_message($self,3,"chatGPT() prompt = $prompt");
 
-							#my $model = "text-davinci-002"; # or any other model ID
-							my $tone = "friendly";  # Set the tone as needed
+				#my $model = "text-davinci-002"; # or any other model ID
+				my $tone = "friendly";  # Set the tone as needed
 
-							# Format the input for ChatGPT
-							my $messages = [
-								{ 'role' => 'system', 'content' => 'You are a helpful assistant.' },
-								{ 'role' => 'user', 'content' => $prompt },
-								{ 'role' => 'assistant', 'content' => ''},
-							];
+				# Format the input for ChatGPT
+				my $messages = [
+					{ 'role' => 'system', 'content' => 'You are a helpful assistant.' },
+					{ 'role' => 'user', 'content' => $prompt },
+					{ 'role' => 'assistant', 'content' => ''},
+				];
 
-							log_message($self,3,"chatGPT() message = $message");
+				log_message($self,3,"chatGPT() message = $message");
 
-							# Create the payload
-							my $payload = {
-								'model' => 'gpt-3.5-turbo',
-								'messages' => $messages,
-								'temperature' => 0.7,  # Adjust the temperature as needed
-								'max_tokens' => 400,   # Adjust the max tokens as needed
-							};
-							
+				# Create the payload
+				my $payload = {
+					'model' => 'gpt-3.5-turbo',
+					'messages' => $messages,
+					'temperature' => 0.7,  # Adjust the temperature as needed
+					'max_tokens' => 400,   # Adjust the max tokens as needed
+				};
+				
 
-							# Convert payload to JSON
-							my $json_payload = encode_json($payload);
+				# Convert payload to JSON
+				my $json_payload = encode_json($payload);
 
-							# Use curl to make the HTTP request directly
-							unless ( open CHATGPT, "curl -X POST -H 'Content-Type: application/json' -H 'Authorization: Bearer $api_key' --data-raw '$json_payload' $api_url |" ) {
-								log_message(3,"chatGPT() Could not get CHATGPT from API using $api_key");
-								log_message(4,"chatGPT() curl cmd : curl -X POST -H 'Content-Type: application/json' -H 'Authorization: Bearer $api_key' --data-raw '$json_payload' $api_url");
-							}
-							else {
-								my $response;
-								my $line;
-								my $i = 0;
-								while(defined($line=<CHATGPT>)) {
-									chomp($line);
-									$response .= $line;
-									log_message($self,5,"chatGPT() line $i : $line");
-									$i++;
-								}
-								if ( $i > 0 ) { close CHATGPT; }
-								log_message($self,3,"chatGPT() $i JSON response line(s)");
-								if ($response) {
-									log_message($self,5,"chatGPT() JSON response = $response");
-									# Parse the JSON response
-									my $decoded_response = decode_json($response);
-									my $answer = $decoded_response->{'choices'}[0]{'message'}{'content'};
-									unless (defined($answer) && ($answer ne "")) {
-										log_message($self,3,"chatGPT() no answer from chatGPT");
-									}
-									else {
-										my @lines = split(/\n/, $answer);
-										log_message($self,3,"chatGPT() " . ( $#lines + 1 ) . " line(s) in chatGPT answer");
-										my $sPrivMsg;
-										my $i = 0;
-										my $j = 0;
-										my $k = 0;
-										my $nbEmptyLines = 0;
-										my $line;
-										for ($i=0;$i<=$#lines;$i++) {
-											$line = $lines[$i];
-											chomp($line);
-											$line =~ s/\r/ /;
-											$line =~ s/\n/ /;
-											if (( $line ne "" ) && !( $line =~ /^\s*$/ )) {
-												if ( $j < 4) {
-													log_message($self,3,"chatGPT() line $i = $line");
-													$sPrivMsg .= $line . " ";
-													if (length($sPrivMsg) >= 200) {
-														$sPrivMsg =~ s/ $//;
-														log_message($self,3,"chatGPT() sent to irc => line $j : $sPrivMsg");
-														botPrivmsg($self,$sChannel,$sPrivMsg);
-														$k++;
-														$sPrivMsg = "";
-														$j++;
-													}
-												}
-												else {
-													log_message($self,3,"chatGPT() too much lines to send to irc");
-													$j++;
-												}
-											}
-											else {
-												$nbEmptyLines++;
-											}
-										}
-										if (( $j == 0 ) && (length($sPrivMsg) > 0)) {
-											log_message($self,3,"chatGPT() single line $j sent to irc $sPrivMsg");
-											botPrivmsg($self,$sChannel,$sPrivMsg);
-											$k++;
-											$j++;
-										}
-										else {
-											log_message($self,3,"chatGPT() Number of lines to send to irc = $j, number of lines sent = $k");
-										}
-										log_message($self,3,"chatGPT() number of lines = $i, number of empty lines = $nbEmptyLines, nummber of PRIVMSG = $j");
-										if ( $j == 0 ) {
-											botPrivmsg($self,$sChannel,"I'm sorry, something went wrong while I processed chatGPT response :(");
-										}
-										log_message($self,3,"chatGPT() answer = $answer");
-									}
-								}
-							}
+				# Use curl to make the HTTP request directly
+				unless ( open CHATGPT, "curl -X POST -H 'Content-Type: application/json' -H 'Authorization: Bearer $api_key' --data-raw '$json_payload' $api_url |" ) {
+					log_message(3,"chatGPT() Could not get CHATGPT from API using $api_key");
+					log_message(4,"chatGPT() curl cmd : curl -X POST -H 'Content-Type: application/json' -H 'Authorization: Bearer $api_key' --data-raw '$json_payload' $api_url");
+				}
+				else {
+					my $response;
+					my $line;
+					my $i = 0;
+					while(defined($line=<CHATGPT>)) {
+						chomp($line);
+						$response .= $line;
+						log_message($self,5,"chatGPT() line $i : $line");
+						$i++;
+					}
+					if ( $i > 0 ) { close CHATGPT; }
+					log_message($self,3,"chatGPT() $i JSON response line(s)");
+					if ($response) {
+						log_message($self,5,"chatGPT() JSON response = $response");
+						# Parse the JSON response
+						my $decoded_response = decode_json($response);
+						my $answer = $decoded_response->{'choices'}[0]{'message'}{'content'};
+						unless (defined($answer) && ($answer ne "")) {
+							log_message($self,3,"chatGPT() no answer from chatGPT");
 						}
 						else {
-							botNotice($self,$sNick,"Syntax: tellme <prompt>");
+							my @lines = split(/\n/, $answer);
+							log_message($self,3,"chatGPT() " . ( $#lines + 1 ) . " line(s) in chatGPT answer");
+							my $sPrivMsg;
+							my $i = 0;
+							my $j = 0;
+							my $k = 0;
+							my $nbEmptyLines = 0;
+							my $line;
+							for ($i=0;$i<=$#lines;$i++) {
+								$line = $lines[$i];
+								chomp($line);
+								$line =~ s/\r/ /;
+								$line =~ s/\n/ /;
+								if (( $line ne "" ) && !( $line =~ /^\s*$/ )) {
+									if ( $j < 4) {
+										log_message($self,3,"chatGPT() line $i = $line");
+										$sPrivMsg .= $line . " ";
+										if (length($sPrivMsg) >= 200) {
+											$sPrivMsg =~ s/ $//;
+											log_message($self,3,"chatGPT() sent to irc => line $j : $sPrivMsg");
+											botPrivmsg($self,$sChannel,$sPrivMsg);
+											$k++;
+											$sPrivMsg = "";
+											$j++;
+										}
+									}
+									else {
+										log_message($self,3,"chatGPT() too much lines to send to irc");
+										$j++;
+									}
+								}
+								else {
+									$nbEmptyLines++;
+								}
+							}
+							if (( $j == 0 ) && (length($sPrivMsg) > 0)) {
+								log_message($self,3,"chatGPT() single line $j sent to irc $sPrivMsg");
+								botPrivmsg($self,$sChannel,$sPrivMsg);
+								$k++;
+								$j++;
+							}
+							else {
+								log_message($self,3,"chatGPT() Number of lines to send to irc = $j, number of lines sent = $k");
+							}
+							log_message($self,3,"chatGPT() number of lines = $i, number of empty lines = $nbEmptyLines, nummber of PRIVMSG = $j");
+							if ( $j == 0 ) {
+								botPrivmsg($self,$sChannel,"I'm sorry, something went wrong while I processed chatGPT response :(");
+							}
+							log_message($self,3,"chatGPT() answer = $answer");
 						}
 					}
 				}
 			}
 			else {
-				my $sNoticeMsg = $message->prefix;
-				$sNoticeMsg .= " tellme command attempt, (command level [1] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"This command is not available for your level. Contact a bot master.");
-				logBot($self,$message,undef,"tellme",$sNoticeMsg);
+				botNotice($self,$sNick,"Syntax: tellme <prompt>");
 			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix;
-			$sNoticeMsg .= " tellme command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command : /msg " . $self->{irc}->nick_folded . " login username password");
-			logBot($self,$message,undef,"tellme",$sNoticeMsg);
 		}
 	}
 }
@@ -12403,4 +12386,49 @@ sub xLogin(@) {
 		}
 	}
 }
+
+sub Yomomma(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my $sQuery;
+	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+		$sQuery = "SELECT * FROM YOMOMMA ORDER BY rand() LIMIT 1";
+		my $sth = $self->{dbh}->prepare($sQuery);
+		unless ($sth->execute ) {
+			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		}
+		else {
+			if (my $ref = $sth->fetchrow_hashref()) {
+				my $sCurrentYomomma = $ref->{'yomomma'};
+				my $id_yomomma = $ref->{'id_yomomma'};
+				if (defined($sCurrentYomomma) && ( $sCurrentYomomma ne "" )) {
+					botPrivmsg($self,$sChannel,"[$id_yomomma] $sCurrentYomomma");
+				}
+			}
+			else {
+				botPrivmsg($self,$sChannel,"Not found");
+			}
+		}
+	}
+	else {
+		my $id_yomomma = int($tArgs[0]);
+		$sQuery = "SELECT * FROM YOMOMMA WHERE id_yomomma=?";
+		my $sth = $self->{dbh}->prepare($sQuery);
+		unless ($sth->execute($id_yomomma)) {
+			log_message(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		}
+		else {
+			if (my $ref = $sth->fetchrow_hashref()) {
+				my $sCurrentYomomma = $ref->{'yomomma'};
+				my $id_yomomma = $ref->{'id_yomomma'};
+				if (defined($sCurrentYomomma) && ( $sCurrentYomomma ne "" )) {
+					botPrivmsg($self,$sChannel,"[$id_yomomma] $sCurrentYomomma");
+				}
+			}
+			else {
+				botPrivmsg($self,$sChannel,"Not found");
+			}
+		}
+	}
+}
+
 1;
