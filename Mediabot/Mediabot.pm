@@ -6394,7 +6394,7 @@ sub displayUrlTitle(@) {
 				log_message($self,3,"id_channel_set = $id_channel_set");
 			}
 		}
-		#TBD
+		#TBD or not
 	} # Special prank for a bro :)
 	if ( (($sText =~ /x.com/) || ($sText =~ /twitter.com/)) && (($sNick =~ /^\[k\]$/) || ($sNick =~ /^NHI$/) || ($sNick =~ /^PersianYeti$/))) {
 		log_message($self,3,"displayUrlTitle() Twitter URL = $sText");
@@ -6570,144 +6570,6 @@ sub displayUrlTitle(@) {
 				}
 				return undef;
 			}
-			elsif ( $sText =~ /tabarnak.com/ ) {
-				my $id_chanset_list = getIdChansetList($self,"Twitter");
-				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-					log_message($self,3,"id_chanset_list = $id_chanset_list");
-					my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
-					unless (defined($id_channel_set) && ($id_channel_set ne "")) {
-						return undef;
-					}
-					else {
-						log_message($self,3,"id_channel_set = $id_channel_set");
-					}
-				}
-				
-				#unless (defined($YOUR_CONSUMER_KEY) && defined($YOUR_CONSUMER_SECRET) && defined($YOUR_ACCESS_TOKEN) && defined($YOUR_ACCESS_TOKEN_SECRET)) {
-				#	log_message($self,0,"Twitter API : one of the access tokens is missing check your config file");
-				#	return undef;
-				#}
-				#my $client;
-				#try {
-				#	$client = Twitter::API->new_with_traits(
-				#	traits              => 'Enchilada',
-				#	consumer_key        => $YOUR_CONSUMER_KEY,
-				#	consumer_secret     => $YOUR_CONSUMER_SECRET,
-				#	access_token        => $YOUR_ACCESS_TOKEN,
-				#	access_token_secret => $YOUR_ACCESS_TOKEN_SECRET,
-				#	);
-				#}
-				#catch {
-					#die $_ unless is_twitter_api_error($_);
-					# The error object includes plenty of information
-				#	log_message($self,3,$_->http_request->as_string);
-				#	log_message($self,3,$_->http_response->as_string);
-				#};
-
-				#my $id;
-				#if ( $sText =~ /twitter\.com.*status.(\d+)/ ) {
-				#	$id = $1;
-				#}
-				#else {
-				#	return undef;
-				#}
-				#log_message($self,3,"id = $id");
-				#my $sDetails;
-				#try {
-				#	my $me = $client->verify_credentials;
-				#}
-				#catch {
-				#	die $_ unless is_twitter_api_error($_);
-				
-					# The error object includes plenty of information
-				#	log_message($self,3,$_->http_request->as_string);
-				#	log_message($self,3,$_->http_response->as_string);
-				#	if ($_->is_permanent_error) {
-				#		log_message($self,3,"No use retrying right away");
-				#	}
-				#	if ( $_->is_token_error ) {
-				#		log_message($self,3,"There's something wrong with this token.");
-				#	}
-				#	if ( $_->twitter_error_code == 326 ) {
-				#		log_message($self,3,"Oops! Twitter thinks you're spam bot!");
-				#	}
-				#};
-
-				#try {
-				#	$sDetails = $client->get("https://api.twitter.com/2/tweets?ids=$id&tweet.fields=created_at&expansions=author_id&user.fields=created_at");
-				#}
-				#catch {
-					#die $_ unless is_twitter_api_error($_);
-					# The error object includes plenty of information
-				#	log_message($self,3,$_->http_request->as_string);
-				#	log_message($self,3,$_->http_response->as_string);
-				#};
-				#if (defined($sDetails)) {
-				#	log_message($self,3,"Twitter GET on $id");
-				#	log_message($self,3,Dumper($sDetails));
-				#	log_message($self,3,"------------------");
-				#	my %hDetails = %{$sDetails};
-				#	my @tData = @{$hDetails{'data'}};
-				#	my %hData = %{$tData[0]};
-				#	my $sDescription = $hData{'text'};
-				#	$sDescription =~ s/\n//g;
-				#	chomp($sDescription);
-
-				#	my $sUsername = ' @';
-				#	my @tUsers = $hDetails{'includes'}{'users'};
-				#	my %hUsers = %{$tUsers[0][0]};
-				#	$sUsername .= $hUsers{'username'};
-
-				#	log_message($self,3,"sDescription = $sDescription");
-				#	my $sPublicMsg = String::IRC->new("Twitter")->black('cyan');
-				#	$sPublicMsg .= "$sUsername $sDescription";
-				#	botPrivmsg($self,$sChannel,"($sNick) $sPublicMsg");
-				#}
-				
-				#return undef;
-				# Set your Twitter API v2 OAuth 2.0 Client ID and Client Secret
-				my $client_id = 'TkJJZEVYeFJvd1JwbkVvR2RxdlQ6MTpjaQ';
-				my $client_secret = 'BId8VRwG3qZWNikLhWTQhCokYqneYEOFaSOEE0ybxHMklzizhJ';
-
-				# Set the link to the specific resource you want to retrieve
-				my $link = 'https://api.twitter.com/2/tweets/sample/stream';
-
-				# Construct the curl command to obtain the bearer token
-				my $token_command = "curl --request POST --url 'https://api.twitter.com/oauth2/token' --header 'Content-Type: application/x-www-form-urlencoded;charset=UTF-8' --user '$client_id:$client_secret' --data 'grant_type=client_credentials'";
-
-				# Execute the curl command to obtain the bearer token and capture the output
-				my $token_output = `$token_command`;
-
-				# Check if the command execution was successful
-				if ($? == 0) {
-					# Extract the access token from the token response
-					my ($access_token) = $token_output =~ /"access_token"\s*:\s*"([^"]+)"/;
-
-					if ($access_token) {
-						# Construct the curl command to retrieve the link title
-						my $title_command = "curl --request GET --url $link --header 'Authorization: Bearer $access_token'";
-
-						# Execute the curl command to retrieve the link title and capture the output
-						my $title_output = `$title_command`;
-
-						# Check if the command execution was successful
-						if ($? == 0) {
-							# Extract the title of the link from the title response
-							my ($title) = $title_output =~ /"title"\s*:\s*"([^"]+)"/;
-
-							# Print the title
-							print "Link title: $title\n" if defined $title;
-						} else {
-							print "Title command failed: $!\n";
-						}
-					} else {
-						print "Failed to extract access token from token response.\n";
-					}
-				} else {
-					print "Token command failed: $!\n";
-				}
-			}
-			log_message($self,3,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
 			unless ( open URL_TITLE, "curl -A -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
 				log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 			}
@@ -6733,6 +6595,17 @@ sub displayUrlTitle(@) {
 							botPrivmsg($self,$sChannel,"($sNick) $sDisplayMsg " . $title->as_text);
 						}
 						elsif ( $sText =~ /music.apple.com/ ) {
+							my $id_chanset_list = getIdChansetList($self,"AppleMusic");
+							if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
+								log_message($self,3,"id_chanset_list = $id_chanset_list");
+								my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
+								unless (defined($id_channel_set) && ($id_channel_set ne "")) {
+									return undef;
+								}
+								else {
+									log_message($self,3,"id_channel_set = $id_channel_set");
+								}
+							}
 							$sDisplayMsg = String::IRC->new('AppleMusic')->white('grey');
 							botPrivmsg($self,$sChannel,"($sNick) $sDisplayMsg " . $title->as_text);
 						}
