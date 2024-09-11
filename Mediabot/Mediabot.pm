@@ -8740,9 +8740,9 @@ sub mbQuotes(@) {
 	}
 	my @oArgs = @tArgs;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
+	#if (defined($iMatchingUserId)) {
+		#if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			#if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
 				my $sCommand = $tArgs[0];
 				shift @tArgs;
 				switch($sCommand) {
@@ -8764,37 +8764,37 @@ sub mbQuotes(@) {
 						botNotice($self,$sNick,"q stats");
 					}
 				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " q command attempt (command level [User] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^view$|^v$/i)) {
-			shift @tArgs;
-			mbQuoteView($self,$message,$sNick,$sChannel,@tArgs);
-		}
-		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && (($tArgs[0] =~ /^search$/i) || ($tArgs[0] eq "s") || ($tArgs[0] eq "S"))) {
-			shift @tArgs;
-			mbQuoteSearch($self,$message,$sNick,$sChannel,@tArgs);
-		}
-		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^random$|^r$/i)) {
-			shift @tArgs;
-			mbQuoteRand($self,$message,$sNick,$sChannel,@tArgs);
-		}
-		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^stats$/i)) {
-			shift @tArgs;
-			mbQuoteStats($self,$message,$sNick,$sChannel,@tArgs);
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " q command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+			#}
+			#else {
+			#	my $sNoticeMsg = $message->prefix . " q command attempt (command level [User] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+			#	noticeConsoleChan($self,$sNoticeMsg);
+			#	botNotice($self,$sNick,"Your level does not allow you to use this command.");
+			#	return undef;
+			#}
+		#}
+		#if (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^view$|^v$/i)) {
+		#	shift @tArgs;
+		#	mbQuoteView($self,$message,$sNick,$sChannel,@tArgs);
+		#}
+		#elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && (($tArgs[0] =~ /^search$/i) || ($tArgs[0] eq "s") || ($tArgs[0] eq "S"))) {
+		#	shift @tArgs;
+		#	mbQuoteSearch($self,$message,$sNick,$sChannel,@tArgs);
+		#}
+		#elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^random$|^r$/i)) {
+		#	shift @tArgs;
+		#	mbQuoteRand($self,$message,$sNick,$sChannel,@tArgs);
+		#}
+		#elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^stats$/i)) {
+		#	shift @tArgs;
+		#	mbQuoteStats($self,$message,$sNick,$sChannel,@tArgs);
+		#}
+		#else {
+		#	my $sNoticeMsg = $message->prefix . " q command attempt (user $sMatchingUserHandle is not logged in)";
+		#	noticeConsoleChan($self,$sNoticeMsg);
+		#	botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+		#	return undef;
+		#}
+	#}
 }
 
 sub mbQuoteAdd(@) {
