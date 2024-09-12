@@ -8741,8 +8741,8 @@ sub mbQuotes(@) {
 	my @oArgs = @tArgs;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
-		#if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			#if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
 				my $sCommand = $tArgs[0];
 				shift @tArgs;
 				switch($sCommand) {
