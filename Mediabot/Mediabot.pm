@@ -6561,8 +6561,8 @@ sub displayUrlTitle(@) {
 							log_message($self,3,"displayUrlTitle() artist = $artist song = $song");
 
 							my $sText = String::IRC->new("[")->white('black');
-							$sText = String::IRC->new("Spotify")->black('green');
-							$sText = String::IRC->new("]")->white('black');
+							$sText .= String::IRC->new("Spotify")->black('green');
+							$sText .= String::IRC->new("]")->white('black');
 							$sText .= " $artist - $song";
 							my $regex = "&(?:" . join("|", map {s/;\z//; $_} keys %entity2char) . ");";
 							if (($sText =~ /$regex/) || ( $sText =~ /&#.*;/)) {
@@ -6597,9 +6597,9 @@ sub displayUrlTitle(@) {
 						my $sDisplayMsg;
 						if (( $sText =~ /youtube.com/ ) || ( $sText =~ /youtu\.be/ )) {
 							$sDisplayMsg = String::IRC->new('[')->white('black');
-							$sDisplayMsg = String::IRC->new('You')->black('white');
+							$sDisplayMsg .= String::IRC->new('You')->black('white');
 							$sDisplayMsg .= String::IRC->new('Tube')->white('red');
-							$sDisplayMsg = String::IRC->new(']')->white('black');
+							$sDisplayMsg .= String::IRC->new(']')->white('black');
 							botPrivmsg($self,$sChannel,"($sNick) $sDisplayMsg " . $title->as_text);
 						}
 						elsif ( $sText =~ /music.apple.com/ ) {
@@ -6615,8 +6615,8 @@ sub displayUrlTitle(@) {
 								}
 							}
 							$sDisplayMsg = String::IRC->new('[')->white('black');
-							$sDisplayMsg = String::IRC->new('AppleMusic')->white('grey');
-							$sDisplayMsg = String::IRC->new(']')->white('black');
+							$sDisplayMsg .= String::IRC->new('AppleMusic')->white('grey');
+							$sDisplayMsg .= String::IRC->new(']')->white('black');
 							botPrivmsg($self,$sChannel,"($sNick) $sDisplayMsg " . $title->as_text);
 						}
 						else {
