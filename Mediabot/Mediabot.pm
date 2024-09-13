@@ -8782,7 +8782,7 @@ sub mbQuotes(@) {
 				return undef;
 			}
 		}
-		if (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^view$|^v$/i)) {
+		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^view$|^v$/i)) {
 			shift @tArgs;
 			mbQuoteView($self,$message,$sNick,$sChannel,@tArgs);
 		}
