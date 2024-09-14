@@ -306,6 +306,44 @@ sub on_timer_tick(@) {
 			$mediabot->setLastRadioPub(time);
 		}
 	}
+
+	# Check channels with chanset +RandomQuote
+	if (defined($MAIN_CONF{'main.RANDOM_QUOTE'})) {
+		my $randomQuoteDelay = defined($MAIN_CONF{'main.RANDOM_QUOTE'}) ? $MAIN_CONF{'main.RANDOM_QUOTE'} : 10800;
+		unless ($randomQuoteDelay >= 900) {
+			$mediabot->log_message(0,"Mediabot was not designed to spam channels, please set RANDOM_QUOTE to a value greater or equal than 900 seconds in [main] section of $CONFIG_FILE");
+		}
+		elsif ((time - $mediabot->getLastRandomQuote()) > $randomQuoteDelay ) {
+			my $sQuery = "SELECT name FROM CHANNEL,CHANNEL_SET,CHANSET_LIST WHERE CHANNEL.id_channel=CHANNEL_SET.id_channel AND CHANNEL_SET.id_chanset_list=CHANSET_LIST.id_chanset_list AND CHANSET_LIST.chanset LIKE 'RandomQuote'";
+			my $sth = $mediabot->getDbh->prepare($sQuery);
+			unless ($sth->execute()) {
+				$mediabot->log_message(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			}
+			else {
+				while (my $ref = $sth->fetchrow_hashref()) {
+					my $curChannel = $ref->{'name'};
+					$mediabot->log_message(3,"RandomQuote on $curChannel");
+					my $sQuery = "SELECT * FROM QUOTES,CHANNEL,USER WHERE QUOTES.id_channel=CHANNEL.id_channel AND QUOTES.id_user=USER.id_user AND CHANNEL.name=? ORDER BY RAND() LIMIT 1";
+					my $sth2 = $mediabot->getDbh->prepare($sQuery);
+					unless ($sth2->execute($curChannel)) {
+						$mediabot->log_message(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					}
+					else {
+						if (my $ref = $sth2->fetchrow_hashref()) {
+							my $sQuoteId = $ref->{'id_quotes'};
+							my $sQuoteNick = $ref->{'nickname'};
+							my $sQuote = $ref->{'quotetext'};
+							my $id_q = String::IRC->new($sQuoteId)->bold;
+							$mediabot->botPrivmsg($curChannel,"($sQuoteNick) [id: $id_q] $sQuote");
+						}
+					}
+					$sth2->finish;
+				}
+			}
+			$sth->finish;
+			$mediabot->setLastRandomQuote(time);
+		}
+	}
 }
 
 sub on_message_NOTICE(@) {
@@ -351,6 +389,7 @@ sub on_login(@) {
 	$mediabot->setQuit(0);
 	$mediabot->setConnectionTimestamp(time);
 	$mediabot->setLastRadioPub(time);
+	$mediabot->setLastRandomQuote(time);
 	$mediabot->onStartTimers();
 	
 	# Undernet : authentication to channel service if credentials are defined

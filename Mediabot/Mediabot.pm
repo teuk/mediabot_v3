@@ -2274,6 +2274,16 @@ sub getLastRadioPub(@) {
 	return $self->{iLastRadioPub};
 }
 
+sub setLastRandomQuote(@) {
+	my ($self,$iLastRandomQuote) = @_;
+	$self->{iLastRandomQuote} = $iLastRandomQuote;
+}
+
+sub getLastRandomQuote(@) {
+	my $self = shift;
+	return $self->{iLastRandomQuote};
+}
+
 sub setQuit(@) {
 	my ($self,$iQuit) = @_;
 	$self->{Quit} = $iQuit;
