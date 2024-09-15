@@ -8127,8 +8127,10 @@ sub youtubeSearch(@) {
 					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
 					
 					if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
-						my $sMsgSong .= String::IRC->new('You')->black('white');
+						my $sMsgSong = String::IRC->new('[')->white('black');
+						$sMsgSong .= String::IRC->new('You')->black('white');
 						$sMsgSong .= String::IRC->new('Tube')->white('red');
+						$sMsgSong .= String::IRC->new(']')->white('black');
 						$sMsgSong .= String::IRC->new(" https://www.youtube.com/watch?v=$sYoutubeId - $sTitle ")->white('black');
 						$sMsgSong .= String::IRC->new("- ")->orange('black');
 						$sMsgSong .= String::IRC->new("$sDisplayDuration ")->grey('black');
