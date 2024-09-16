@@ -136,7 +136,7 @@ if ( $MAIN_PROG_CHECK_CONFIG != 0 ) {
 	$mediabot->clean_and_exit(0);
 }
 
-print STDOUT "mediabot_v3 Copyright (C) 2019-2022 teuk\n";
+print STDOUT "mediabot_v3 Copyright (C) 2019-2024 teuk\n";
 
 # Daemon mode actions
 if ( $MAIN_PROG_DAEMON ) {

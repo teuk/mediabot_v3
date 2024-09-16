@@ -8794,32 +8794,32 @@ sub mbQuotes(@) {
 				return undef;
 			}
 		}
-		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^view$|^v$/i)) {
-			shift @tArgs;
-			mbQuoteView($self,$message,$sNick,$sChannel,@tArgs);
-		}
-		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && (($tArgs[0] =~ /^search$/i) || ($tArgs[0] eq "s") || ($tArgs[0] eq "S"))) {
-			shift @tArgs;
-			mbQuoteSearch($self,$message,$sNick,$sChannel,@tArgs);
-		}
-		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^random$|^r$/i)) {
-			shift @tArgs;
-			mbQuoteRand($self,$message,$sNick,$sChannel,@tArgs);
-		}
-		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^stats$/i)) {
-			shift @tArgs;
-			mbQuoteStats($self,$message,$sNick,$sChannel,@tArgs);
-		}
-		elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^add$|^a$/i)) {
-			shift @tArgs;
-			mbQuoteAdd($self,$message,$sNick,$sChannel,@tArgs);
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " q command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
+	}
+	elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^view$|^v$/i)) {
+		shift @tArgs;
+		mbQuoteView($self,$message,$sNick,$sChannel,@tArgs);
+	}
+	elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && (($tArgs[0] =~ /^search$/i) || ($tArgs[0] eq "s") || ($tArgs[0] eq "S"))) {
+		shift @tArgs;
+		mbQuoteSearch($self,$message,$sNick,$sChannel,@tArgs);
+	}
+	elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^random$|^r$/i)) {
+		shift @tArgs;
+		mbQuoteRand($self,$message,$sNick,$sChannel,@tArgs);
+	}
+	elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^stats$/i)) {
+		shift @tArgs;
+		mbQuoteStats($self,$message,$sNick,$sChannel,@tArgs);
+	}
+	elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^add$|^a$/i)) {
+		shift @tArgs;
+		mbQuoteAdd($self,$message,$sNick,$sChannel,@tArgs);
+	}
+	else {
+		my $sNoticeMsg = $message->prefix . " q command attempt (user $sMatchingUserHandle is not logged in)";
+		noticeConsoleChan($self,$sNoticeMsg);
+		botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+		return undef;
 	}
 }
 
