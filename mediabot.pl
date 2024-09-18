@@ -334,7 +334,7 @@ sub on_timer_tick(@) {
 							my $sQuoteNick = $ref->{'nickname'};
 							my $sQuote = $ref->{'quotetext'};
 							my $id_q = String::IRC->new($sQuoteId)->bold;
-							$mediabot->botPrivmsg($curChannel,"($sQuoteNick) [id: $id_q] $sQuote");
+							$mediabot->botPrivmsg($curChannel,"[id: $id_q] $sQuote");
 						}
 					}
 					$sth2->finish;
