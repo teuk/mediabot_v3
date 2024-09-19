@@ -8854,7 +8854,7 @@ sub mbQuoteAdd(@) {
 					}
 					else {
 						my $id_inserted = String::IRC->new($sth->{ mysql_insertid })->bold;
-						botPrivmsg($self,$sChannel,(defined($iMatchingUserId) ? "($iMatchingUserId)" : "") . "done. (id: $id_inserted)");
+						botPrivmsg($self,$sChannel,(defined($sMatchingUserHandle) ? "($sMatchingUserHandle) " : "") . "done. (id: $id_inserted)");
 						logBot($self,$message,$sChannel,"q add",@tArgs);
 					}
 				}
