@@ -8813,7 +8813,7 @@ sub mbQuotes(@) {
 	}
 	elsif (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^add$|^a$/i)) {
 		shift @tArgs;
-		mbQuoteAdd($self,$message,$sNick,$sChannel,@tArgs);
+		mbQuoteAdd($self,$message,undef,undef,$sNick,$sChannel,@tArgs);
 	}
 	else {
 		my $sNoticeMsg = $message->prefix . " q command attempt (user $sMatchingUserHandle is not logged in)";
@@ -8849,12 +8849,12 @@ sub mbQuoteAdd(@) {
 				else {
 					$sQuery = "INSERT INTO QUOTES (id_channel,id_user,quotetext) VALUES (?,?,?)";
 					$sth = $self->{dbh}->prepare($sQuery);
-					unless ($sth->execute($id_channel,$iMatchingUserId,$sQuoteText)) {
+					unless ($sth->execute($id_channel,(defined($iMatchingUserId) ? $iMatchingUserId : 0),$sQuoteText)) {
 						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						my $id_inserted = String::IRC->new($sth->{ mysql_insertid })->bold;
-						botPrivmsg($self,$sChannel,"($sMatchingUserHandle) done. (id: $id_inserted)");
+						botPrivmsg($self,$sChannel,(defined($iMatchingUserId) ? "($iMatchingUserId)" : "") . "done. (id: $id_inserted)");
 						logBot($self,$message,$sChannel,"q add",@tArgs);
 					}
 				}
