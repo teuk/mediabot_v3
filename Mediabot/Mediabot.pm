@@ -6355,7 +6355,7 @@ sub displayWeather(@) {
 				my $iHttpResponseCode;
 				my $sCity = $sText;
 				unless ( open URL_WEATHER, "curl --connect-timeout 3 --max-time 3 -L -ks 'http://wttr.in/" . url_encode($sCity) . "?format=\"%l:+%c+%t+%w+%p\"&m' |" ) {
-					log_message(3,"displayUrlTitle() Could not curl headers from wttr.in");
+					log_message(3,"displayWeather() Could not curl headers from wttr.in");
 				}
 				else {
 					my $line;
@@ -6501,8 +6501,8 @@ sub displayUrlTitle(@) {
 			}
 			if ($title ne "") {
 				$sText = String::IRC->new("[")->white('black');
-				$sText = String::IRC->new("Instagram")->white('pink');
-				$sText = String::IRC->new("]")->white('black');
+				$sText .= String::IRC->new("Instagram")->white('pink');
+				$sText .= String::IRC->new("]")->white('black');
 				$sText .= " $title";
 				my $regex = "&(?:" . join("|", map {s/;\z//; $_} keys %entity2char) . ");";
 				if (($sText =~ /$regex/) || ( $sText =~ /&#.*;/)) {
