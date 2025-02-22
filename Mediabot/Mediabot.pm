@@ -6182,6 +6182,8 @@ sub getYoutubeDetails(@) {
 				}
 				else {
 					log_message($self,3,"getYoutubeDetails() Invalid id : $sYoutubeId");
+					my $sNoticeMsg = "getYoutubeDetails() Invalid id : $sYoutubeId";
+					noticeConsoleChan($self,$sNoticeMsg);
 				}
 			}
 			else {
@@ -8015,7 +8017,8 @@ sub youtubeSearch(@) {
 		botNotice($self,$sNick,"yt <search>");
 		return undef;
 	}
-	my $sText = join("%20",@tArgs);
+	my $sText = join(" ",@tArgs);
+	$sText = url_encode_utf8($sText);
 	log_message($self,3,"youtubeSearch() on $sText");
 	my $APIKEY = $MAIN_CONF{'main.YOUTUBE_APIKEY'};
 	unless (defined($APIKEY) && ($APIKEY ne "")) {
