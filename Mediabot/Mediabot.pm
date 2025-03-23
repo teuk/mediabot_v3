@@ -1403,6 +1403,9 @@ sub mbCommandPublic(@) {
 													}
 		case /^Spike$/i								{
 														botPrivmsg($self,$sChannel,"https://teuk.org/In_Spike_Memory.jpg");
+													}
+		case /^resolve$/i							{
+														mbResolver($self,$message,$sNick,$sChannel,@tArgs);
 													}	
 		case /^help$/i								{
 														unless(defined($tArgs[0]) && ($tArgs[0] ne "")) {
@@ -12329,6 +12332,33 @@ sub Yomomma(@) {
 			else {
 				botPrivmsg($self,$sChannel,"Not found");
 			}
+		}
+	}
+}
+
+sub mbResolver(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+		botNotice($self,$sNick,"Syntax : resolve <hostname|IP>");
+		return undef;
+	}
+	my $input = $tArgs[0];
+	if ($input =~ /^\d{1,3}(?:\.\d{1,3}){3}$/) {
+		# It's an IP address; do reverse DNS lookup
+		my $host = gethostbyaddr(inet_aton($input), AF_INET);
+		if (defined $host) {
+			botPrivmsg($self,$sChannel,"($sNick) Reverse DNS of $input: $host");
+		} else {
+			botPrivmsg($self,$sChannel,"($sNick) No reverse DNS entry found for $input");
+		}
+	} else {
+		# It's a hostname; resolve it to IP
+		my $addr = inet_aton($input);
+		if (defined $addr) {
+			my $ip = inet_ntoa($addr);
+			botPrivmsg($self,$sChannel,"($sNick) IP of $input: $ip");
+		} else {
+			botPrivmsg($self,$sChannel,"($sNick) Hostname $input could not be resolved.");
 		}
 	}
 }
