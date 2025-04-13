@@ -31,8 +31,7 @@ use Socket;
 use Twitter::API;
 use JSON::MaybeXS;
 use Try::Tiny;
-use Unicode::Normalize;
- 
+
 sub new {
 	my ($class,$args) = @_;
 	my $self = bless {
@@ -6118,7 +6117,7 @@ sub getYoutubeDetails(@) {
 					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
 					log_message($self,4,"getYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
 					$sViewCount = "views $hYoutubeItems{'statistics'}{'viewCount'}";
-					$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
+					my $sTitleItem = $hYoutubeItems{'snippet'}{'localized'}{'title'};
 					$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
 					log_message($self,3,"getYoutubeDetails() sDuration : $sDuration");
 					$sDuration =~ s/^PT//;
@@ -12150,7 +12149,7 @@ sub chatGPT(@) {
 
 				# Create the payload
 				my $payload = {
-					'model' => 'gpt-3.5-turbo',
+					'model' => 'gpt-4-turbo',
 					'messages' => $messages,
 					'temperature' => 0.7,  # Adjust the temperature as needed
 					'max_tokens' => 400,   # Adjust the max tokens as needed
@@ -12181,6 +12180,8 @@ sub chatGPT(@) {
 						log_message($self,5,"chatGPT() JSON response = $response");
 						# Parse the JSON response
 						my $decoded_response = decode_json($response);
+						log_message($self,3,"chatGPT() decoded_response");
+						log_message($self,3,"chatGPT() " . Dumper($decoded_response));
 						my $answer = $decoded_response->{'choices'}[0]{'message'}{'content'};
 						unless (defined($answer) && ($answer ne "")) {
 							log_message($self,3,"chatGPT() no answer from chatGPT");
