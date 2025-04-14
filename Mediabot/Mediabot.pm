@@ -31,6 +31,7 @@ use Socket;
 use Twitter::API;
 use JSON::MaybeXS;
 use Try::Tiny;
+use URI::Escape qw(uri_escape);
 
 sub new {
 	my ($class,$args) = @_;
@@ -1405,7 +1406,10 @@ sub mbCommandPublic(@) {
 													}
 		case /^resolve$/i							{
 														mbResolver($self,$message,$sNick,$sChannel,@tArgs);
-													}	
+													}
+		case /^tmdb$/i						    {
+														mbTMDBSearch($self,$message,$sNick,$sChannel,@tArgs);
+													}														
 		case /^help$/i								{
 														unless(defined($tArgs[0]) && ($tArgs[0] ne "")) {
 															botPrivmsg($self,$sChannel,"Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
@@ -12362,6 +12366,42 @@ sub mbResolver(@) {
 			botPrivmsg($self,$sChannel,"($sNick) Hostname $input could not be resolved.");
 		}
 	}
+}
+
+sub mbTMDBSearch(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $api_key = $MAIN_CONF{'tmdb.API_KEY'};
+	unless (defined($MAIN_CONF{'tmdb.API_KEY'}) && ($MAIN_CONF{'tmdb.API_KEY'} ne "")) {
+		log_message($self,0,"tmdb.API_KEY is undefined in config file");
+		return undef;
+	}
+	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+		botNotice($self,$sNick,"Syntax : tmdb <movie or serie name>");
+		return undef;
+	}
+	my $input = join(" ",@tArgs);
+	botPrivmsg($self,$sChannel,"($sNick) Synopsis for $input : " . get_tmdb_synopsis_with_curl($api_key,$input));
+}
+
+sub get_tmdb_synopsis_with_curl {
+    my ($api_key,$query) = @_;
+    
+    my $lang = 'fr-FR';
+
+    my $encoded_query = uri_escape($query);
+    my $url = "https://api.themoviedb.org/3/search/movie?api_key=$api_key&language=$lang&query=$encoded_query";
+
+    # Fetch JSON using curl
+    my $json_response = `curl -s "$url"`;
+    return "Failed to fetch data." unless $json_response;
+
+    # Decode JSON and extract synopsis
+    my $data = eval { decode_json($json_response) };
+    return "Failed to decode JSON." unless $data and ref($data) eq 'HASH';
+
+    my $result = $data->{results}[0];
+    return $result ? $result->{overview} : "No synopsis found.";
 }
 
 1;
