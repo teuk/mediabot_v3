@@ -611,7 +611,7 @@ sub on_message_PRIVMSG(@) {
 				$mediabot->mbCommandPublic($message,$where,$who,$botNickTriggered,$sCommand,@tArgs);
 			}
 		}
-		elsif ($sCommand eq $self->nick_folded . ":") {
+		elsif (($sCommand eq $self->nick_folded . ":") || ($sCommand eq $self->nick_folded . ",")) {
 			$what =~ s/^\S+\s*//;
 			@tArgs = split(/\s+/,$what);
 			if (defined($sCommand) && ($sCommand ne "")) {

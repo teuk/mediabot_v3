@@ -1345,7 +1345,7 @@ sub mbCommandPublic(@) {
 														mbModUser($self,$message,$sNick,$sChannel,@tArgs);
 													}
 		case /^antifloodset$/i 						{
-																setChannelAntiFloodParams($self,$message,$sNick,$sChannel,@tArgs);
+														setChannelAntiFloodParams($self,$message,$sNick,$sChannel,@tArgs);
 													}
 		case /^leet$/i 								{
 														displayLeetString($self,$message,$sNick,$sChannel,@tArgs);
@@ -12401,7 +12401,17 @@ sub get_tmdb_synopsis_with_curl {
     return "Failed to decode JSON." unless $data and ref($data) eq 'HASH';
 
     my $result = $data->{results}[0];
-    return $result ? $result->{overview} : "No synopsis found.";
+	# Decode UTF-8 string safely
+    my $synopsis = decode('UTF-8', $result->{overview});
+
+    # Properly cut to 350 characters
+    if (length($synopsis) > 350) {
+        $synopsis = substr($synopsis, 0, 347) . '...';
+    }
+
+    # Re-encode for printing/output if needed
+    return encode('UTF-8', $synopsis);
+
 }
 
 1;
