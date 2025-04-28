@@ -12144,7 +12144,7 @@ sub chatGPT(@) {
 
 				# Format the input for ChatGPT
 				my $messages = [
-					{ 'role' => 'system', 'content' => 'You always answer in a funny, charming tone.' },
+					{ 'role' => 'system', 'content' => 'You always answer in a funny, charming tone and never start your answer with "Oh là là" in french.' },
 					{ 'role' => 'user', 'content' => $prompt },
 					{ 'role' => 'assistant', 'content' => ''},
 				];
