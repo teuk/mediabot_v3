@@ -12144,7 +12144,7 @@ sub chatGPT(@) {
 
 				# Format the input for ChatGPT
 				my $messages = [
-					{ 'role' => 'system', 'content' => 'You always answer in a funny, charming tone and never start your answer with "Oh là là" in french.' },
+					{ 'role' => 'system', 'content' => 'You always answer in a funny, charming tone, helpful, precise and never start your answer with "Oh là là" in french, always respond using a maximum of 10 lines of text and line-based.' },
 					{ 'role' => 'user', 'content' => $prompt },
 					{ 'role' => 'assistant', 'content' => ''},
 				];
@@ -12208,14 +12208,16 @@ sub chatGPT(@) {
 									if ( $j < 4) {
 										log_message($self,3,"chatGPT() line $i = $line");
 										$sPrivMsg .= $line . " ";
-										if (length($sPrivMsg) >= 200) {
-											$sPrivMsg =~ s/ $//;
-											log_message($self,3,"chatGPT() sent to irc => line $j : $sPrivMsg");
-											botPrivmsg($self,$sChannel,$sPrivMsg);
-											$k++;
-											$sPrivMsg = "";
+										$sPrivMsg =~ s/ $//;
+										log_message($self,3,"chatGPT() sent to irc => line $j : $sPrivMsg");
+										my @s = wrap_text_400($self,$sPrivMsg);
+										foreach my $s (@s) {
+											botPrivmsg($self,$sChannel,$s);
+											usleep(500_000);
 											$j++;
 										}
+										$k++;
+										$sPrivMsg = "";
 									}
 									else {
 										log_message($self,3,"chatGPT() too much lines to send to irc");
@@ -12228,9 +12230,12 @@ sub chatGPT(@) {
 							}
 							if (( $j == 0 ) && (length($sPrivMsg) > 0)) {
 								log_message($self,3,"chatGPT() single line $j sent to irc $sPrivMsg");
-								botPrivmsg($self,$sChannel,$sPrivMsg);
+								my @s = wrap_text_400($self,$sPrivMsg);
+								foreach my $s (@s) {
+									botPrivmsg($self,$sChannel,$s);
+									$j++;
+								}
 								$k++;
-								$j++;
 							}
 							else {
 								log_message($self,3,"chatGPT() Number of lines to send to irc = $j, number of lines sent = $k");
@@ -12249,6 +12254,29 @@ sub chatGPT(@) {
 			}
 		}
 	}
+}
+
+sub wrap_text_400(@) {
+    my ($self,$text) = @_;
+    my @lines;
+    my $current_line = '';
+
+    foreach my $word (split(/\s+/, $text)) {
+        if (length($current_line) + length($word) + 1 <= 400) {
+            # Add word to current line
+            $current_line .= ' ' if length($current_line);
+            $current_line .= $word;
+        } else {
+            # Line is full, push and start a new one
+            push @lines, $current_line if $current_line ne '';
+            $current_line = $word;
+        }
+    }
+
+    # Push the last line if not empty
+    push @lines, $current_line if $current_line ne '';
+
+    return @lines;
 }
 
 sub xLogin(@) {
