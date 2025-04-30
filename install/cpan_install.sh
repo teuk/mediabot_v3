@@ -98,7 +98,9 @@ Time::HiRes
 Moose
 Hailo
 Twitter::API
-JSON::MaybeXS" | while read perl_module
+JSON::MaybeXS
+List::Util
+File::Temp" | while read perl_module
  do
   message "Checking $perl_module "
   perl -M$perl_module -e "exit 0;" &>/dev/null
@@ -160,7 +162,9 @@ Time::HiRes
 Moose
 Hailo
 Twitter::API
-JSON::MaybeXS" | while read perl_module
+JSON::MaybeXS
+List::Util
+File::Temp" | while read perl_module
  do
   message "Checking $perl_module"
   perl -M$perl_module -e "exit 0;"
