@@ -27,7 +27,7 @@ TeuK
 20250501
 
 - I'm testing chatGPT to fix parts of the code, so the installation process currently fails, I could fix it myself but chatGPT is in a deep search to fix its own issues and this is funny... If it does not succeed, I'll make a simple correction so mediabot can be installed easily again (-; Thanks for your patience.
-- It's still searching :) I commented "set -euo pipefail" in install/db_install.sh, it was proposed by chatGPT and I didn't even read what it does really (I'll have a look). But DB Installation should be fixed now.
+- It's still searching :) I commented "set -euo pipefail" in install/db_install.sh, it was proposed by chatGPT (I mean I did not intentionnaly put it there) and I didn't even read what it does really (I'll have a look). But DB Installation should be fixed now.
 
 
 ## Installation
