@@ -1,3 +1,5 @@
+Note: (20250501) I'm testing chatGPT to fix parts of the code, so the installation process currently fails, I could fix it myself but chatGPT is in a deep search to fix its own issues and this is funny... If it does not succeed, I'll make a simple correction so mediabot can be installed easily again (-; Thanks for your patience.
+
 # mediabot_v3
 
   Mediabotv3 is a perl Net::Async::IRC bot
