@@ -35,7 +35,7 @@ Add a mediabot user :
 
 ```
 
-$ sudo useradd -m -s /bin/bash mediabot
+sudo useradd -m -s /bin/bash mediabot
 
 ```
 
@@ -44,7 +44,7 @@ If you don't, you let an irc bot running with root privileges (trust me you don'
 
 ```
 
-$ echo 'mediabot ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/mediabot
+echo 'mediabot ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/mediabot
 
 ```
 
@@ -55,7 +55,7 @@ Install needed packages :
 
 ```
 
-$ sudo apt install build-essential mariadb-server default-libmysqlclient-dev default-libmysqld-dev git curl
+sudo apt install build-essential mariadb-server default-libmysqlclient-dev default-libmysqld-dev git curl
 
 ```
 
@@ -65,11 +65,11 @@ Now get the bot as mediabot user and run configure script :
 
 ```
 
-$ sudo -iu mediabot
+sudo -iu mediabot
 
-(mediabot)$ git clone https://github.com/teuk/mediabot_v3
+git clone https://github.com/teuk/mediabot_v3
 
-(mediabot)$ cd mediabot_v3
+cd mediabot_v3
 
 ```
 
@@ -77,7 +77,7 @@ The following script is supposed to do all the work for DB creation and Perl mod
 
 ```
 
-(mediabot)$ ./configure
+./configure
 
 ```
 
@@ -87,7 +87,11 @@ If everything's ok then test in foreground using your config file e.g :
 
 ```
 
-(mediabot)$ ./mediabot.pl --conf=mediabot.conf
+./mediabot.pl --conf=mediabot.conf
+
+```
+```
+
 [06/08/2022 06:31:37] Reading configuration file mediabot.conf
 [06/08/2022 06:31:37] mediabot.conf loaded.
 [06/08/2022 06:31:37] Getting current version from VERSION file
@@ -130,7 +134,7 @@ To run the bot in daemon mode :
 
 ```
 
-(mediabot)$ ./mediabot.pl --conf=mediabot.conf --daemon
+./mediabot.pl --conf=mediabot.conf --daemon
 
 ```
 
@@ -138,7 +142,7 @@ Always have a look at what is going on :
 
 ```
 
-(mediabot)$ tail -40f mediabot.log
+tail -40f mediabot.log
 
 ```
 
@@ -146,7 +150,7 @@ DON'T FORGET TO REMOVE SUDO RIGHTS, THIS IS IMPORTANT ! :
 
 ```
 
-$ sudo rm -fv /etc/sudoers.d/mediabot
+sudo rm -fv /etc/sudoers.d/mediabot
 
 ```
 
