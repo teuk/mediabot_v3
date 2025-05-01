@@ -124,21 +124,24 @@ fi
 # +-------------------------------------------------------------------------+
 # | [4] Stage 2: Database user creation                                       |
 # +-------------------------------------------------------------------------+
+# +-------------------------------------------------------------------------+
+# | Stage 2 : Database user creation                                        |
+# +-------------------------------------------------------------------------+
 messageln "[+] Stage 2 : Database user creation"
 
 # ─── Defaults & random password ──────────────────────────────────────────
 DEFAULT_DB_USER="mediabot"
-DEFAULT_DB_PASS=$(tr -cd '[:alnum:]' </dev/urandom | fold -w12 | head -n1)
+DEFAULT_DB_PASS=$(tr -dc '[:alnum:]' </dev/urandom | fold -w12 | head -n1)
 
 # ─── Prompt for database user ───────────────────────────────────────────
 printf "%s Enter MySQL database user (not root) [%s]: " "$(ts)" "$DEFAULT_DB_USER" > /dev/tty
-read -r myresp </dev/tty
-MYSQL_DB_USER=${myresp:-$DEFAULT_DB_USER}
+read -r MYSQL_DB_USER </dev/tty
+MYSQL_DB_USER=${MYSQL_DB_USER:-$DEFAULT_DB_USER}
 
 # ─── Prompt for database user password ──────────────────────────────────
 printf "%s Enter MySQL database user pass [%s]: " "$(ts)" "$DEFAULT_DB_PASS" > /dev/tty
-read -r -s myresp </dev/tty; echo "" > /dev/tty
-MYSQL_DB_PASS=${myresp:-$DEFAULT_DB_PASS}
+read -r -s MYSQL_DB_PASS </dev/tty; echo "" > /dev/tty
+MYSQL_DB_PASS=${MYSQL_DB_PASS:-$DEFAULT_DB_PASS}
 
 # ─── Determine AUTH_HOST ────────────────────────────────────────────────
 if [[ -z "$MYSQL_HOST" || "$MYSQL_HOST" == "127.0.0.1" ]]; then
@@ -151,35 +154,38 @@ fi
 messageln "Creating user '${MYSQL_DB_USER}'@'${AUTH_HOST}'..."
 mysql ${MYSQL_PARAMS} \
   -e "CREATE USER IF NOT EXISTS '${MYSQL_DB_USER}'@'${AUTH_HOST}' IDENTIFIED BY '${MYSQL_DB_PASS}';"
-ok_failed $?
+ok_failed $? "Failed to create user ${MYSQL_DB_USER}@${AUTH_HOST}"
 
 # ─── 2) GRANT PRIVILEGES ────────────────────────────────────────────────
 messageln "Granting privileges on ${MYSQL_DB} to ${MYSQL_DB_USER}@${AUTH_HOST}..."
-if ! mysql ${MYSQL_PARAMS} \
-      -e "GRANT ALL PRIVILEGES ON ${MYSQL_DB}.* TO '${MYSQL_DB_USER}'@'${AUTH_HOST}'; FLUSH PRIVILEGES;"; then
-
-    messageln "Grant failed, dropping user..."
-    mysql ${MYSQL_PARAMS} \
-      -e "DROP USER '${MYSQL_DB_USER}'@'${AUTH_HOST}';"
-    ok_failed $? "Error cleaning up failed user"
-    ok_failed 1  "Error granting privileges"
+mysql ${MYSQL_PARAMS} \
+  -e "GRANT ALL PRIVILEGES ON ${MYSQL_DB}.* TO '${MYSQL_DB_USER}'@'${AUTH_HOST}';"
+if [ $? -ne 0 ]; then
+    ok_failed $? "Failed to grant privileges"
+    messageln "Dropping user due to grant failure"
+    mysql ${MYSQL_PARAMS} -e "DROP USER '${MYSQL_DB_USER}'@'${AUTH_HOST}';"
+    ok_failed $? "Failed to drop user after grant failure"
 fi
-ok_failed $?
+ok_failed 0
 
-# ─── 3) VERIFY NEW USER CONNECTION ───────────────────────────────────────
+# ─── 3) FLUSH PRIVILEGES ────────────────────────────────────────────────
+messageln "Flushing privileges..."
+mysql ${MYSQL_PARAMS} -e "FLUSH PRIVILEGES;"
+ok_failed $? "Failed to flush privileges"
+
+# ─── 4) VERIFY NEW USER CONNECTION ───────────────────────────────────────
 USER_MYSQL_PARAMS="-u${MYSQL_DB_USER} -p${MYSQL_DB_PASS}"
 [[ -n "$MYSQL_HOST" ]] && USER_MYSQL_PARAMS+=" -h${MYSQL_HOST} -P${MYSQL_PORT}"
 
-messageln "Checking connection as ${MYSQL_DB_USER}..."
-if ! echo exit | mysql ${USER_MYSQL_PARAMS} ${MYSQL_DB}; then
-
-    messageln "Verification failed, dropping user..."
-    mysql ${MYSQL_PARAMS} \
-      -e "DROP USER '${MYSQL_DB_USER}'@'${AUTH_HOST}';"
-    ok_failed $? "Error cleaning up failed user"
-    ok_failed 1  "Error verifying new user"
+messageln "Verifying connection as ${MYSQL_DB_USER}..."
+echo "SELECT 1;" | mysql ${USER_MYSQL_PARAMS} ${MYSQL_DB}
+if [ $? -ne 0 ]; then
+    ok_failed $? "Failed to connect as ${MYSQL_DB_USER}"
+    messageln "Dropping user due to verification failure"
+    mysql ${MYSQL_PARAMS} -e "DROP USER '${MYSQL_DB_USER}'@'${AUTH_HOST}';"
+    ok_failed $? "Failed to drop user after verification failure"
 fi
-ok_failed $?
+ok_failed 0
 
 messageln "Database user creation completed."
 messageln "User '${MYSQL_DB_USER}'@'${AUTH_HOST}' created with password '${MYSQL_DB_PASS}'"
