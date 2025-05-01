@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 if [ $(id -u) -ne 0 ]; then
 	echo "This script must be run as root user"
@@ -81,85 +82,77 @@ which mysql &>/dev/null
 ok_failed $? "You must install MySQL Server and client to continue."
 
 messageln "[+] Stage 1 : Database creation"
-MYSQL_DB=mediabot
-message "Enter MySQL database (Hit enter for 'mediabot') : "
-read myresp
-if [ ! -z "$myresp" ]; then
-    if [ $myresp == "mysql" ]; then
-        messageln "Mediabot db cannot be $myresp !"
-        messageln "Exiting."
-        exit 1;
-    fi
-    MYSQL_DB=$myresp
+
+# ─── Defaults ──────────────────────────────────────────────────
+DEFAULT_DB="mediabot"
+DEFAULT_HOST="localhost"
+DEFAULT_PORT="3306"
+DEFAULT_USER="root"
+
+# ─── Prompt for database name ──────────────────────────────────
+read -rp "Enter MySQL database [${DEFAULT_DB}]: " MYSQL_DB
+MYSQL_DB=${MYSQL_DB:-$DEFAULT_DB}
+if [[ "$MYSQL_DB" == "mysql" ]]; then
+    messageln "Mediabot db cannot be 'mysql' !"
+    messageln "Exiting."
+    exit 1
 fi
 
-MYSQL_HOST=localhost
-message "Enter MySQL host (Hit enter for localhost) : "
-read myresp
-if [ ! -z "$myresp" ]; then
-    if [ "$myresp" == "localhost" ]; then
-        # Did you know that mysql -h localhost -P 1234 will assume 3306 ?
-        MYSQL_HOST=127.0.0.1
-    else
-        MYSQL_HOST=$myresp
-    fi
+# ─── Prompt for host ───────────────────────────────────────────
+read -rp "Enter MySQL host [${DEFAULT_HOST}]: " HOST_IN
+HOST_IN=${HOST_IN:-$DEFAULT_HOST}
+# if user stuck with default 'localhost', we'll use the socket
+if [[ "$HOST_IN" == "$DEFAULT_HOST" ]]; then
+    MYSQL_HOST=""
+else
+    MYSQL_HOST="$HOST_IN"
 fi
 
-if [ ! -z "${MYSQL_HOST}" ]; then
-    MYSQL_PORT=3306
-    message "Enter MySQL port (Hit enter for '3306') : "
-    read myresp
-    if [ ! -z "$myresp" ]; then
-        MYSQL_PORT=$myresp
-    fi
+# ─── Prompt for port (only if host is non-empty) ───────────────
+if [[ -n "${MYSQL_HOST}" ]]; then
+    read -rp "Enter MySQL port [${DEFAULT_PORT}]: " MYSQL_PORT
+    MYSQL_PORT=${MYSQL_PORT:-$DEFAULT_PORT}
 fi
- 
-MYSQL_USER=root
-message "Enter MySQL root user (Hit enter for 'root') : "
-read myresp
-if [ ! -z "$myresp" ]; then
-    MYSQL_USER=$myresp
-fi
- 
-unset MYSQL_PASS
-prompt="[$(date +'%d/%m/%Y %H:%M:%S')] Enter MySQL root password (Hit enter if empty) : "
-while IFS= read -p "$prompt" -r -s -n 1 char
-do
-    if [[ $char == $'\0' ]]
-    then
-        break
-    fi
-    prompt='*'
-    MYSQL_PASS+="$char"
-done
+
+# ─── Prompt for user ───────────────────────────────────────────
+read -rp "Enter MySQL root user [${DEFAULT_USER}]: " MYSQL_USER
+MYSQL_USER=${MYSQL_USER:-$DEFAULT_USER}
+
+# ─── Prompt for password (silent) ─────────────────────────────
+read -rsp "Enter MySQL root password (Hit enter if empty): " MYSQL_PASS
 echo
- 
-MYSQL_CONNECTION_MESSAGE="Database $MYSQL_DB creation using"
-if [ ! -z "$MYSQL_HOST" ]; then
-    MYSQL_CONNECTION_MESSAGE="$MYSQL_CONNECTION_MESSAGE ($MYSQL_HOST:$MYSQL_PORT)"
+
+# ─── Connection summary ────────────────────────────────────────
+if [[ -n "${MYSQL_HOST}" ]]; then
+    conn_info="${MYSQL_HOST}:${MYSQL_PORT}"
 else
-    MYSQL_CONNECTION_MESSAGE="$MYSQL_CONNECTION_MESSAGE (local socket)"
+    conn_info="local socket"
 fi
- 
-MYSQL_CONNECTION_MESSAGE="$MYSQL_CONNECTION_MESSAGE ($MYSQL_USER"
-if [ -z "$MYSQL_PASS" ]; then
-    MYSQL_CONNECTION_MESSAGE="$MYSQL_CONNECTION_MESSAGE <empty password>)"
+if [[ -n "${MYSQL_PASS}" ]]; then
+    pass_info="password set"
 else
-    MYSQL_CONNECTION_MESSAGE="$MYSQL_CONNECTION_MESSAGE <password set>)"
+    pass_info="empty password"
 fi
- 
-messageln "$MYSQL_CONNECTION_MESSAGE"
-if [ ! -z "$MYSQL_HOST" ]; then
-    MYSQL_PARAMS="-h $MYSQL_HOST -P $MYSQL_PORT "
+messageln "Database '$MYSQL_DB' creation using (${conn_info}) user '$MYSQL_USER' (${pass_info})"
+
+# ─── Build MYSQL_PARAMS ────────────────────────────────────────
+MYSQL_PARAMS="-u ${MYSQL_USER}"
+if [[ -n "${MYSQL_HOST}" ]]; then
+    MYSQL_PARAMS+=" -h ${MYSQL_HOST} -P ${MYSQL_PORT}"
 fi
-MYSQL_PARAMS="$MYSQL_PARAMS -u ${MYSQL_USER} "
-if [ ! -z "$MYSQL_PASS" ]; then
-    MYSQL_PARAMS="$MYSQL_PARAMS -p${MYSQL_PASS} "
+if [[ -n "${MYSQL_PASS}" ]]; then
+    MYSQL_PARAMS+=" -p${MYSQL_PASS}"
 fi
- 
+
+echo "MYSQL_PARAMS=${MYSQL_PARAMS}"
+
+# ─── Test connection ───────────────────────────────────────────
 message "Check connection to MySQL DB"
-echo "exit" | mysql $MYSQL_PARAMS
-ok_failed $?
+if echo "exit" | mysql ${MYSQL_PARAMS}; then
+    ok_failed 0
+else
+    ok_failed 1
+fi
  
 CHECK_DB_EXISTENCE=$(mysql $MYSQL_PARAMS --skip-column-names -e "SHOW DATABASES LIKE '$MYSQL_DB'")
 if [ "$CHECK_DB_EXISTENCE" == "$MYSQL_DB" ]; then
