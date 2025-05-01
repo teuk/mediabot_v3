@@ -84,7 +84,7 @@ DEFAULT_PORT="3306"
 DEFAULT_USER="root"
 
 # helper to get a timestamp
-ts() { date +'\[%d/%m/%Y %H:%M:%S\]'; }
+ts() { date '+[%d/%m/%Y %H:%M:%S]'; }
 
 # ─── Prompt for database name ──────────────────────────────────
 read -rp "$(ts) Enter MySQL database [${DEFAULT_DB}]: " MYSQL_DB
