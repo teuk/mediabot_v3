@@ -1,5 +1,3 @@
-Note: (20250501) I'm testing chatGPT to fix parts of the code, so the installation process currently fails, I could fix it myself but chatGPT is in a deep search to fix its own issues and this is funny... If it does not succeed, I'll make a simple correction so mediabot can be installed easily again (-; Thanks for your patience.
-
 # mediabot_v3
 
   Mediabotv3 is a perl Net::Async::IRC bot
@@ -23,6 +21,13 @@ This perl bot is using Net::Async::IRC and a MySQL/MariaDB backend. I tried to m
 I hope you'll have fun using mediabot :)
 
 TeuK
+
+# Notes
+
+20250501
+
+- I'm testing chatGPT to fix parts of the code, so the installation process currently fails, I could fix it myself but chatGPT is in a deep search to fix its own issues and this is funny... If it does not succeed, I'll make a simple correction so mediabot can be installed easily again (-; Thanks for your patience.
+- It's still searching :) I commented "set -euo pipefail" in install/db_install.sh, it was proposed by chatGPT and I didn't even read what it does really (I'll have a look). But DB Installation should be fixed now.
 
 
 ## Installation
