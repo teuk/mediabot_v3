@@ -1,5 +1,6 @@
 #!/bin/bash
-set -euo pipefail
+# chatGPT you should have told me to comment this but keep searching :) and yes you removed mysql_create_mediabot_db function...
+#set -euo pipefail
 
 # +-------------------------------------------------------------------------+
 # | [1] Startup & opts                                                      |
@@ -26,9 +27,11 @@ SCRIPT_LOGFILE=db_install.log
 messageln(){
     [ -n "${1-}" ] && echo "[$(date +'%d/%m/%Y %H:%M:%S')] $*" | tee -a "$SCRIPT_LOGFILE"
 }
+
 message(){
     [ -n "${1-}" ] && echo -n "[$(date +'%d/%m/%Y %H:%M:%S')] $* " | tee -a "$SCRIPT_LOGFILE"
 }
+
 ok_failed(){
     local rc=$1
     if [ "$rc" -eq 0 ]; then
@@ -40,7 +43,34 @@ ok_failed(){
         exit "$rc"
     fi
 }
+
 ts(){ date '+[%d/%m/%Y %H:%M:%S]'; }
+
+mysql_create_mediabot_db() {
+    if [ "$CHECK_DB_EXISTENCE" == "$MYSQL_DB" ]; then
+        message "Drop database $MYSQL_DB"
+        echo "DROP DATABASE IF EXISTS $MYSQL_DB" | mysql $MYSQL_PARAMS
+        ok_failed $?
+    fi
+    message "Create database $MYSQL_DB"
+    echo "CREATE DATABASE $MYSQL_DB" | mysql $MYSQL_PARAMS
+    ok_failed $?
+
+    message "Create database structure"
+    if [ -f $MYSQL_DB_CREATION_SCRIPT ]; then
+        cat $MYSQL_DB_CREATION_SCRIPT | mysql $MYSQL_PARAMS $MYSQL_DB
+        ok_failed $?
+    else
+        messageln "Could not find $MYSQL_DB_CREATION_SCRIPT"
+        exit 1
+    fi
+
+    messageln "DB Tables"
+    echo "SHOW TABLES" | mysql $MYSQL_PARAMS $MYSQL_DB
+    if [ $? -ne 0 ]; then
+        echo -e "Failed.\nInstallation log is available in $SCRIPT_LOGFILE" | tee -a $SCRIPT_LOGFILE
+    fi
+}
 
 # +-------------------------------------------------------------------------+
 # | [3] Stage 1: Database creation                                           |
