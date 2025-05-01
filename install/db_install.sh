@@ -165,81 +165,48 @@ else
     mysql_create_mediabot_db
 fi
 
-messageln "[+] Stage 2 : Database user creation"
-MYSQL_DB_USER=mediabot
-message "Enter MySQL database user (not root) (Hit enter for 'mediabot') : "
-read myresp
-if [ ! -z "$myresp" ]; then
-    MYSQL_DB_USER=$myresp
-fi
- 
-MYSQL_DB_PASS=$(tr -cd '[:alnum:]' < /dev/urandom | fold -w12 | head -n1)
-message "Enter MySQL database user pass (Hit enter for '$MYSQL_DB_PASS') : "
-read myresp
-if [ ! -z "$myresp" ]; then
-    MYSQL_DB_PASS=$myresp
-fi
+messageln "$(ts) [+] Stage 2 : Database user creation"
 
-if [ -z "$MYSQL_HOST" ]; then
-    IPADDR="localhost"
-    MYSQL_PORT="3306"
-elif [ "$MYSQL_HOST" != "localhost" ] && [ "$MYSQL_HOST" != "127.0.0.1" ]; then
-    IPADDR=
-    messageln "MySQL host $MYSQL_HOST is external we need to determine our ip address"
-    message "Check if dig command is available"
-    which dig &>/dev/null
-    if [ $? -eq 0 ]; then
-        IPADDR=$(dig +short myip.opendns.com @resolver1.opendns.com)
-        echo "OK IPADDR=$IPADDR"
-    else
-        echo "Failed."
-        message "dig is not available trying with curl"
-        which curl &>/dev/null
-        if [ $? -eq 0 ]; then
-            IPADDR=$(curl -f -s checkip.dyndns.org | awk '{ print $NF }' | sed -e 's/<\/body><\/html>//')
-            echo "OK IPADDR=$IPADDR"
-        else
-            echo "Failed."
-            message "curl is not available, finally trying to guess from ip settings"
-            IPADDR=$(ip route get 8.8.8.8 | awk '/8.8.8.8/ {print $NF}')
-            if [ ! -z "$IPADDR" ]; then
-                echo "OK IPADDR=$IPADDR"
-            fi
-        fi
-    fi
-    if [ -z "$IPADDR" ]; then
-        echo "Could not determine our ip address"
-        message "Enter it manually (be sure of what you are typing, not checking) : "
-        read myresp
-        while [ -z "$myresp" ]
-            do
-                echo -n "ip address cannot be empty. Enter our ip address : "
-                read myresp
-            done
-    fi
-else
-    IPADDR=$MYSQL_HOST
-fi
- 
-message "Grant privileges on $MYSQL_DB to $MYSQL_DB_USER with user password"
-if [ "$IPADDR" == "127.0.0.1" ]; then
+# ─── DB USER NAME ─────────────────────────────────────────────────
+DEFAULT_DB_USER="mediabot"
+read -rp "$(ts) Enter MySQL database user (not root) [${DEFAULT_DB_USER}]: " myresp
+MYSQL_DB_USER=${myresp:-$DEFAULT_DB_USER}
+
+# ─── DB USER PASSWORD ───────────────────────────────────────────────
+# generate a 12-char random default
+DEFAULT_DB_PASS=$(tr -cd '[:alnum:]' </dev/urandom | fold -w12 | head -n1)
+read -rsp "$(ts) Enter MySQL database user pass [${DEFAULT_DB_PASS}]: " myresp
+echo
+MYSQL_DB_PASS=${myresp:-$DEFAULT_DB_PASS}
+
+# ─── DETERMINE AUTH_HOST ───────────────────────────────────────────
+# if $MYSQL_HOST is empty → local socket → use 'localhost' in GRANT
+# if $MYSQL_HOST is 127.0.0.1 → map to 'localhost'
+# otherwise assume $IPADDR (already computed in Stage 1 or earlier)
+if [[ -z "$MYSQL_HOST" || "$MYSQL_HOST" == "127.0.0.1" ]]; then
     AUTH_HOST="localhost"
 else
-    AUTH_HOST=$IPADDR
+    AUTH_HOST=${IPADDR:-$MYSQL_HOST}
 fi
-echo "GRANT ALL PRIVILEGES ON $MYSQL_DB.* TO '$MYSQL_DB_USER'@'$AUTH_HOST' IDENTIFIED BY '$MYSQL_DB_PASS'" | mysql ${MYSQL_PARAMS}
-ok_failed $?
- 
-message "Flush privileges"
-echo "FLUSH PRIVILEGES" | mysql ${MYSQL_PARAMS}
-ok_failed $?
- 
-MYSQL_PARAMS="-h $MYSQL_HOST -P $MYSQL_PORT -u ${MYSQL_DB_USER} -p${MYSQL_DB_PASS}"
-message "Check connection to MySQL DB with defined user $MYSQL_DB_USER"
-echo "exit" | mysql $MYSQL_PARAMS $MYSQL_DB
+
+# ─── GRANT PRIVILEGES AS ROOT ──────────────────────────────────────
+messageln "$(ts) Granting all privileges on \`${MYSQL_DB}\` to ${MYSQL_DB_USER}@${AUTH_HOST}"
+echo "GRANT ALL PRIVILEGES ON \`${MYSQL_DB}\`.* TO '$MYSQL_DB_USER'@'$AUTH_HOST' IDENTIFIED BY '$MYSQL_DB_PASS'; FLUSH PRIVILEGES;" \
+  | mysql ${MYSQL_PARAMS}
 ok_failed $?
 
-messageln "Database configuration completed."
+# ─── VERIFY NEW USER CAN CONNECT ──────────────────────────────────
+# build a separate set of flags for the new user
+USER_MYSQL_PARAMS="-u${MYSQL_DB_USER} -p${MYSQL_DB_PASS}"
+if [[ -n "$MYSQL_HOST" ]]; then
+    USER_MYSQL_PARAMS+=" -h${MYSQL_HOST} -P${MYSQL_PORT}"
+fi
+
+messageln "$(ts) Checking connection as ${MYSQL_DB_USER}"
+echo "exit" | mysql ${USER_MYSQL_PARAMS} ${MYSQL_DB}
+ok_failed $?
+
+messageln "$(ts) Database configuration completed."
 
 if [ ! -z "$CONFIG_FILE" ] && [ -w "$CONFIG_FILE" ]; then
 	message "Configure $CONFIG_FILE [mysql] parameters"
