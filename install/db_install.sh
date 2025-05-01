@@ -75,12 +75,6 @@ function mysql_create_mediabot_db {
     fi
 }
 
-messageln "mediabot DB Installation"
-
-message "Check if mysql command is available"
-which mysql &>/dev/null
-ok_failed $? "You must install MySQL Server and client to continue."
-
 messageln "[+] Stage 1 : Database creation"
 
 # ─── Defaults ──────────────────────────────────────────────────
@@ -89,8 +83,11 @@ DEFAULT_HOST="localhost"
 DEFAULT_PORT="3306"
 DEFAULT_USER="root"
 
+# helper to get a timestamp
+ts() { date +'\[%d/%m/%Y %H:%M:%S\]'; }
+
 # ─── Prompt for database name ──────────────────────────────────
-read -rp "Enter MySQL database [${DEFAULT_DB}]: " MYSQL_DB
+read -rp "$(ts) Enter MySQL database [${DEFAULT_DB}]: " MYSQL_DB
 MYSQL_DB=${MYSQL_DB:-$DEFAULT_DB}
 if [[ "$MYSQL_DB" == "mysql" ]]; then
     messageln "Mediabot db cannot be 'mysql' !"
@@ -99,7 +96,7 @@ if [[ "$MYSQL_DB" == "mysql" ]]; then
 fi
 
 # ─── Prompt for host ───────────────────────────────────────────
-read -rp "Enter MySQL host [${DEFAULT_HOST}]: " HOST_IN
+read -rp "$(ts) Enter MySQL host [${DEFAULT_HOST}]: " HOST_IN
 HOST_IN=${HOST_IN:-$DEFAULT_HOST}
 # if user stuck with default 'localhost', we'll use the socket
 if [[ "$HOST_IN" == "$DEFAULT_HOST" ]]; then
@@ -110,16 +107,16 @@ fi
 
 # ─── Prompt for port (only if host is non-empty) ───────────────
 if [[ -n "${MYSQL_HOST}" ]]; then
-    read -rp "Enter MySQL port [${DEFAULT_PORT}]: " MYSQL_PORT
+    read -rp "$(ts) Enter MySQL port [${DEFAULT_PORT}]: " MYSQL_PORT
     MYSQL_PORT=${MYSQL_PORT:-$DEFAULT_PORT}
 fi
 
 # ─── Prompt for user ───────────────────────────────────────────
-read -rp "Enter MySQL root user [${DEFAULT_USER}]: " MYSQL_USER
+read -rp "$(ts) Enter MySQL root user [${DEFAULT_USER}]: " MYSQL_USER
 MYSQL_USER=${MYSQL_USER:-$DEFAULT_USER}
 
 # ─── Prompt for password (silent) ─────────────────────────────
-read -rsp "Enter MySQL root password (Hit enter if empty): " MYSQL_PASS
+read -rsp "$(ts) Enter MySQL root password (Hit enter if empty): " MYSQL_PASS
 echo
 
 # ─── Connection summary ────────────────────────────────────────
