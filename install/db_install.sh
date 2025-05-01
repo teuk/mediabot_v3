@@ -131,13 +131,12 @@ DEFAULT_DB_USER="mediabot"
 DEFAULT_DB_PASS=$(tr -dc '[:alnum:]' </dev/urandom | fold -w12 | head -n1)
 
 # ─── Prompt for database user ───────────────────────────────────────────
-printf "%s Enter MySQL database user (not root) [%s]: " "$(ts)" "$DEFAULT_DB_USER" >/dev/tty
-read -r MYSQL_DB_USER </dev/tty
+read -rp "$(ts) Enter MySQL database user (not root) [${DEFAULT_DB_USER}]: " MYSQL_DB_USER
 MYSQL_DB_USER=${MYSQL_DB_USER:-$DEFAULT_DB_USER}
 
 # ─── Prompt for database user password ──────────────────────────────────
-printf "%s Enter MySQL database user pass [%s]: " "$(ts)" "$DEFAULT_DB_PASS" >/dev/tty
-read -r -s MYSQL_DB_PASS </dev/tty; echo "" >/dev/tty
+read -rsp "$(ts) Enter MySQL database user pass [${DEFAULT_DB_PASS}]: " MYSQL_DB_PASS
+echo
 MYSQL_DB_PASS=${MYSQL_DB_PASS:-$DEFAULT_DB_PASS}
 
 # ─── Determine AUTH_HOST ────────────────────────────────────────────────
@@ -148,32 +147,34 @@ else
 fi
 
 # ─── 1) CREATE (or ALTER) & GRANT & FLUSH in one shot ───────────────────
-messageln "Creating/Updating '${MYSQL_DB_USER}'@'${AUTH_HOST}' and granting on ${MYSQL_DB}"
-mysql ${MYSQL_PARAMS} -e \
-"CREATE USER IF NOT EXISTS '${MYSQL_DB_USER}'@'${AUTH_HOST}' \
-   IDENTIFIED BY '${MYSQL_DB_PASS}'; \
- ALTER USER       '${MYSQL_DB_USER}'@'${AUTH_HOST}' \
-   IDENTIFIED BY '${MYSQL_DB_PASS}'; \
- GRANT ALL PRIVILEGES ON ${MYSQL_DB}.* \
-   TO '${MYSQL_DB_USER}'@'${AUTH_HOST}'; \
- FLUSH PRIVILEGES;"
+messageln "Creating/updating '${MYSQL_DB_USER}'@'${AUTH_HOST}' and granting on ${MYSQL_DB}"
+mysql ${MYSQL_PARAMS} -e "
+  CREATE USER IF NOT EXISTS '${MYSQL_DB_USER}'@'${AUTH_HOST}'
+    IDENTIFIED BY '${MYSQL_DB_PASS}';
+  ALTER USER '${MYSQL_DB_USER}'@'${AUTH_HOST}'
+    IDENTIFIED BY '${MYSQL_DB_PASS}';
+  GRANT ALL PRIVILEGES ON ${MYSQL_DB}.* 
+    TO '${MYSQL_DB_USER}'@'${AUTH_HOST}';
+  FLUSH PRIVILEGES;
+"
 ok_failed $? "Errors while creating/granting for user ${MYSQL_DB_USER}@${AUTH_HOST}"
 
 # ─── 2) VERIFY new user can connect ──────────────────────────────────────
 USER_MYSQL_PARAMS="-u${MYSQL_DB_USER} -p${MYSQL_DB_PASS}"
 [[ -n "$MYSQL_HOST" ]] && USER_MYSQL_PARAMS+=" -h${MYSQL_HOST} -P${MYSQL_PORT}"
 
-messageln "Verifying login as ${MYSQL_DB_USER}…"
+messageln "Verifying connection as ${MYSQL_DB_USER}…"
 if ! echo "SELECT 1;" | mysql ${USER_MYSQL_PARAMS} ${MYSQL_DB}; then
     ok_failed $? "User ${MYSQL_DB_USER} failed to connect"
     messageln "Dropping user '${MYSQL_DB_USER}'@'${AUTH_HOST}' due to verification failure"
     mysql ${MYSQL_PARAMS} -e "DROP USER '${MYSQL_DB_USER}'@'${AUTH_HOST}';"
-    ok_failed $? "Failed to clean up user ${MYSQL_DB_USER}@${AUTH_HOST}"
+    ok_failed $? "Failed to drop ${MYSQL_DB_USER}@${AUTH_HOST} after failure"
 fi
 ok_failed 0
 
 messageln "Database user creation completed."
 messageln "User '${MYSQL_DB_USER}'@'${AUTH_HOST}' created with password '${MYSQL_DB_PASS}'"
+
 
 
 # +-------------------------------------------------------------------------+
