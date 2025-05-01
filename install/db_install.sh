@@ -167,26 +167,32 @@ fi
 
 messageln "[+] Stage 2 : Database user creation"
 
-# ─── defaults & prompts ──────────────────────────────────────────
+# ─── defaults ────────────────────────────────────────────────────
 DEFAULT_DB_USER="mediabot"
 DEFAULT_DB_PASS=$(tr -cd '[:alnum:]' </dev/urandom | fold -w12 | head -n1)
 
-read -rp "$(ts) Enter MySQL database user (not root) [${DEFAULT_DB_USER}]: " myresp
+# ─── prompt for DB user ─────────────────────────────────────────
+# write the prompt to the terminal explicitly, then read from the terminal
+printf "%s Enter MySQL database user (not root) [%s]: " "$(ts)" "$DEFAULT_DB_USER" > /dev/tty
+read -r myresp </dev/tty
 MYSQL_DB_USER=${myresp:-$DEFAULT_DB_USER}
 
-read -rsp "$(ts) Enter MySQL database user pass [${DEFAULT_DB_PASS}]: " myresp
-echo
+# ─── prompt for DB user password ─────────────────────────────────
+printf "%s Enter MySQL database user pass [%s]: " "$(ts)" "$DEFAULT_DB_PASS" > /dev/tty
+# silent read from the terminal
+read -r -s myresp </dev/tty
+echo "" >/dev/tty
 MYSQL_DB_PASS=${myresp:-$DEFAULT_DB_PASS}
 
-# ─── figure out how MySQL sees “localhost” ───────────────────────
+# ─── compute AUTH_HOST ───────────────────────────────────────────
 if [[ -z "$MYSQL_HOST" || "$MYSQL_HOST" == "127.0.0.1" ]]; then
     AUTH_HOST="localhost"
 else
     AUTH_HOST=${IPADDR:-$MYSQL_HOST}
 fi
 
-# ─── create+grant via here-doc ───────────────────────────────────
-messageln "Creating '${MYSQL_DB_USER}'@'${AUTH_HOST}' and granting on ${MYSQL_DB}"
+# ─── create user & grant ────────────────────────────────────────
+messageln "Creating user '${MYSQL_DB_USER}'@'${AUTH_HOST}' and granting on ${MYSQL_DB}"
 mysql ${MYSQL_PARAMS} <<EOF
 CREATE USER IF NOT EXISTS '${MYSQL_DB_USER}'@'${AUTH_HOST}'
   IDENTIFIED BY '${MYSQL_DB_PASS}';
@@ -196,7 +202,7 @@ FLUSH PRIVILEGES;
 EOF
 ok_failed $?
 
-# ─── verify that the new user can actually connect ───────────────
+# ─── verify new user can connect ─────────────────────────────────
 USER_MYSQL_PARAMS="-u${MYSQL_DB_USER}"
 if [[ -n "$MYSQL_HOST" ]]; then
     USER_MYSQL_PARAMS+=" -h${MYSQL_HOST} -P${MYSQL_PORT}"
