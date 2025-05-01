@@ -167,39 +167,37 @@ fi
 
 messageln "[+] Stage 2 : Database user creation"
 
-# ─── Defaults ──────────────────────────────────────────────────
+# ─── defaults & prompts ──────────────────────────────────────────
 DEFAULT_DB_USER="mediabot"
 DEFAULT_DB_PASS=$(tr -cd '[:alnum:]' </dev/urandom | fold -w12 | head -n1)
 
-# ─── Prompt for DB user ─────────────────────────────────────────
 read -rp "$(ts) Enter MySQL database user (not root) [${DEFAULT_DB_USER}]: " myresp
 MYSQL_DB_USER=${myresp:-$DEFAULT_DB_USER}
 
-# ─── Prompt for DB user password ─────────────────────────────────
 read -rsp "$(ts) Enter MySQL database user pass [${DEFAULT_DB_PASS}]: " myresp
 echo
 MYSQL_DB_PASS=${myresp:-$DEFAULT_DB_PASS}
 
-# ─── Compute AUTH_HOST ───────────────────────────────────────────
+# ─── figure out how MySQL sees “localhost” ───────────────────────
 if [[ -z "$MYSQL_HOST" || "$MYSQL_HOST" == "127.0.0.1" ]]; then
     AUTH_HOST="localhost"
 else
     AUTH_HOST=${IPADDR:-$MYSQL_HOST}
 fi
 
-# ─── Create user & grant as root ─────────────────────────────────
-messageln "Creating user '${MYSQL_DB_USER}'@'${AUTH_HOST}' and granting privileges"
+# ─── create+grant via here-doc ───────────────────────────────────
+messageln "Creating '${MYSQL_DB_USER}'@'${AUTH_HOST}' and granting on ${MYSQL_DB}"
 mysql ${MYSQL_PARAMS} <<EOF
 CREATE USER IF NOT EXISTS '${MYSQL_DB_USER}'@'${AUTH_HOST}'
   IDENTIFIED BY '${MYSQL_DB_PASS}';
-GRANT ALL PRIVILEGES ON \`${MYSQL_DB}\`.* 
+GRANT ALL PRIVILEGES ON ${MYSQL_DB}.* 
   TO '${MYSQL_DB_USER}'@'${AUTH_HOST}';
 FLUSH PRIVILEGES;
 EOF
 ok_failed $?
 
-# ─── Verify new user can connect ─────────────────────────────────
-USER_MYSQL_PARAMS="-u${MYSQL_DB_USER} -p${MYSQL_DB_PASS}"
+# ─── verify that the new user can actually connect ───────────────
+USER_MYSQL_PARAMS="-u${MYSQL_DB_USER}"
 if [[ -n "$MYSQL_HOST" ]]; then
     USER_MYSQL_PARAMS+=" -h${MYSQL_HOST} -P${MYSQL_PORT}"
 fi
