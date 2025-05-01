@@ -165,48 +165,50 @@ else
     mysql_create_mediabot_db
 fi
 
-messageln "$(ts) [+] Stage 2 : Database user creation"
+messageln "[+] Stage 2 : Database user creation"
 
-# ─── DB USER NAME ─────────────────────────────────────────────────
+# ─── Defaults ──────────────────────────────────────────────────
 DEFAULT_DB_USER="mediabot"
+DEFAULT_DB_PASS=$(tr -cd '[:alnum:]' </dev/urandom | fold -w12 | head -n1)
+
+# ─── Prompt for DB user ─────────────────────────────────────────
 read -rp "$(ts) Enter MySQL database user (not root) [${DEFAULT_DB_USER}]: " myresp
 MYSQL_DB_USER=${myresp:-$DEFAULT_DB_USER}
 
-# ─── DB USER PASSWORD ───────────────────────────────────────────────
-# generate a 12-char random default
-DEFAULT_DB_PASS=$(tr -cd '[:alnum:]' </dev/urandom | fold -w12 | head -n1)
+# ─── Prompt for DB user password ─────────────────────────────────
 read -rsp "$(ts) Enter MySQL database user pass [${DEFAULT_DB_PASS}]: " myresp
 echo
 MYSQL_DB_PASS=${myresp:-$DEFAULT_DB_PASS}
 
-# ─── DETERMINE AUTH_HOST ───────────────────────────────────────────
-# if $MYSQL_HOST is empty → local socket → use 'localhost' in GRANT
-# if $MYSQL_HOST is 127.0.0.1 → map to 'localhost'
-# otherwise assume $IPADDR (already computed in Stage 1 or earlier)
+# ─── Compute AUTH_HOST ───────────────────────────────────────────
 if [[ -z "$MYSQL_HOST" || "$MYSQL_HOST" == "127.0.0.1" ]]; then
     AUTH_HOST="localhost"
 else
     AUTH_HOST=${IPADDR:-$MYSQL_HOST}
 fi
 
-# ─── GRANT PRIVILEGES AS ROOT ──────────────────────────────────────
-messageln "$(ts) Granting all privileges on \`${MYSQL_DB}\` to ${MYSQL_DB_USER}@${AUTH_HOST}"
-echo "GRANT ALL PRIVILEGES ON \`${MYSQL_DB}\`.* TO '$MYSQL_DB_USER'@'$AUTH_HOST' IDENTIFIED BY '$MYSQL_DB_PASS'; FLUSH PRIVILEGES;" \
-  | mysql ${MYSQL_PARAMS}
+# ─── Create user & grant as root ─────────────────────────────────
+messageln "Creating user '${MYSQL_DB_USER}'@'${AUTH_HOST}' and granting privileges"
+mysql ${MYSQL_PARAMS} <<EOF
+CREATE USER IF NOT EXISTS '${MYSQL_DB_USER}'@'${AUTH_HOST}'
+  IDENTIFIED BY '${MYSQL_DB_PASS}';
+GRANT ALL PRIVILEGES ON \`${MYSQL_DB}\`.* 
+  TO '${MYSQL_DB_USER}'@'${AUTH_HOST}';
+FLUSH PRIVILEGES;
+EOF
 ok_failed $?
 
-# ─── VERIFY NEW USER CAN CONNECT ──────────────────────────────────
-# build a separate set of flags for the new user
+# ─── Verify new user can connect ─────────────────────────────────
 USER_MYSQL_PARAMS="-u${MYSQL_DB_USER} -p${MYSQL_DB_PASS}"
 if [[ -n "$MYSQL_HOST" ]]; then
     USER_MYSQL_PARAMS+=" -h${MYSQL_HOST} -P${MYSQL_PORT}"
 fi
 
-messageln "$(ts) Checking connection as ${MYSQL_DB_USER}"
+messageln "Checking connection as ${MYSQL_DB_USER}"
 echo "exit" | mysql ${USER_MYSQL_PARAMS} ${MYSQL_DB}
 ok_failed $?
 
-messageln "$(ts) Database configuration completed."
+messageln "Database configuration completed."
 
 if [ ! -z "$CONFIG_FILE" ] && [ -w "$CONFIG_FILE" ]; then
 	message "Configure $CONFIG_FILE [mysql] parameters"
