@@ -22,7 +22,8 @@ use HTML::Tree;
 use URL::Encode qw(url_encode_utf8 url_encode url_decode_utf8);
 use HTML::Entities '%entity2char';
 use HTML::Entities qw(decode_entities);
-use MP3::Tag;
+# Let's commeent this out for now (in case noone reads the README)
+#use MP3::Tag;
 use File::Basename;
 use Encode;
 use Moose;
