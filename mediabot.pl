@@ -104,7 +104,9 @@ my $mediabot = Mediabot->new({
 });
 
 # Load configuration
-$mediabot->readConfigFile();
+unless ( $mediabot->readConfigFile ) {
+    die "ERROR: could not load configuration, aborting.\n";
+}
 
 # Init log file
 $mediabot->init_log();
@@ -1054,7 +1056,12 @@ sub reconnect(@) {
 	$loop->run;
 }
 
-sub catch_hup(@) {
-	$mediabot->readConfigFile();
-	$mediabot->noticeConsoleChan("Caught HUP and successfully rehashed")
+sub catch_hup {
+    my ($signal) = @_;    # you can inspect $signal if you like
+    if ( $mediabot->readConfigFile ) {
+        $mediabot->noticeConsoleChan("Caught SIGHUP - configuration reloaded successfully");
+    }
+    else {
+        $mediabot->noticeConsoleChan("Caught SIGHUP - FAILED to reload configuration");
+    }
 }

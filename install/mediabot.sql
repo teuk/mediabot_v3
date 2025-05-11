@@ -626,7 +626,7 @@ CREATE TABLE `QUOTES` (
   `id_channel` bigint(20) NOT NULL,
   `id_user` bigint(20) NOT NULL,
   `ts` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `quotetext` varchar(255) NOT NULL
+  `quotetext` varchar(360) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 --

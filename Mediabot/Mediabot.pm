@@ -3,6 +3,7 @@ package Mediabot;
 use strict;
 use warnings;
 use diagnostics;
+use Exporter;
 use Time::HiRes qw(usleep);
 use Config::Simple;
 use Date::Format;
@@ -14,7 +15,7 @@ use Memory::Usage;
 use IO::Async::Timer::Periodic;
 use String::IRC;
 use JSON;
-use POSIX 'setsid';
+use POSIX qw(setsid);
 use DateTime;
 use DateTime::TimeZone;
 use utf8;
@@ -35,6 +36,7 @@ use Try::Tiny;
 use URI::Escape qw(uri_escape);
 use List::Util qw/min/;
 use File::Temp qw/tempfile/;
+use Carp qw(croak);
 
 sub new {
 	my ($class,$args) = @_;
@@ -44,19 +46,62 @@ sub new {
 	}, $class;
 }
 
-sub readConfigFile(@) {
-	my $self = shift;
-	unless ( -r $self->{config_file} ) {
-		print STDERR time2str("[%d/%m/%Y %H:%M:%S]",time) . " Cannot open $self->{config_file}\n";
-		exit 1;
-	}
-	print STDERR time2str("[%d/%m/%Y %H:%M:%S]",time) . " Reading configuration file $self->{config_file}\n";
-	my $cfg = new Config::Simple();
-	$cfg->read($self->{config_file}) or die $cfg->error();
-	print STDERR time2str("[%d/%m/%Y %H:%M:%S]",time) . " $self->{config_file} loaded.\n";
-	$self->{MAIN_CONF} = $cfg->vars();
-	$self->{cfg} = $cfg;
+#-----------------------------------------------------------------
+# Timestamped log methods (avoid namespace collisions)
+#-----------------------------------------------------------------
+sub my_log_info {
+    my ($self, $msg) = @_;
+    my $ts = POSIX::strftime("[%d/%m/%Y %H:%M:%S]", localtime);
+    print STDOUT "$ts INFO: $msg\n";
 }
+
+sub my_log_error {
+    my ($self, $msg) = @_;
+    my $ts = POSIX::strftime("[%d/%m/%Y %H:%M:%S]", localtime);
+    print STDERR "$ts ERROR: $msg\n";
+}
+
+#-----------------------------------------------------------------
+# read_config_file – return 1 on success, undef on failure
+#-----------------------------------------------------------------
+sub readConfigFile {
+    my ($self, $file) = @_;
+
+    # allow override or default to the object’s setting
+    $file //= $self->{config_file}
+        or croak "No config file specified (\$self->{config_file} is empty)";
+
+    # exist & readable?
+    unless (-e $file) {
+        $self->my_log_error("Config file '$file' does not exist");
+        return;
+    }
+    unless (-r $file) {
+        $self->my_log_error("Cannot read config file '$file'");
+        return;
+    }
+
+    $self->my_log_info("Loading configuration from '$file'");
+
+    # instantiate + read in one shot
+    my $cfg;
+    eval {
+        $cfg = Config::Simple->new( filename => $file );
+    };
+    if ($@ or not $cfg) {
+        my $err = $@ || $Config::Simple::error;
+        $self->my_log_error("Failed to parse '$file': $err");
+        return;
+    }
+
+    # store
+    $self->{cfg}       = $cfg;
+    $self->{MAIN_CONF} = $cfg->vars();
+
+    $self->my_log_info("Configuration loaded successfully");
+    return 1;
+}
+
 
 sub getVersion(@) {
 	my $self = shift;
