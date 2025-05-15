@@ -1455,9 +1455,12 @@ sub mbCommandPublic(@) {
 		case /^resolve$/i							{
 														mbResolver($self,$message,$sNick,$sChannel,@tArgs);
 													}
-		case /^tmdb$/i						    {
+		case /^tmdb$/i						    	{
 														mbTMDBSearch($self,$message,$sNick,$sChannel,@tArgs);
-													}														
+													}
+		case /^debug$/i						    	{
+														mbDebug($self,$message,$sNick,$sChannel,@tArgs);
+													}
 		case /^help$/i								{
 														unless(defined($tArgs[0]) && ($tArgs[0] ne "")) {
 															botPrivmsg($self,$sChannel,"Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
@@ -1766,7 +1769,10 @@ sub mbCommandPrivate(@) {
 													}
 		case /^song$/i								{
 														displayRadioCurrentSong($self,$message,$sNick,undef,@tArgs);
-													}	
+													}
+		case /^debug$/i						    	{
+														mbDebug($self,$message,$sNick,undef,@tArgs);
+													}
 		else							{
 													#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,undef,$sNick,$sCommand,@tArgs);
 													log_message($self,3,$message->prefix . " Private command '$sCommand' not found");
@@ -6702,36 +6708,47 @@ sub displayUrlTitle(@) {
 	}
 }
 
+# Set DEBUG level
 sub mbDebug(@) {
-	my ($self,$message,$sNick,@tArgs) = @_;
+	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+	my $level = $tArgs[0];
+
+	my $irc_nick = $self->{irc}->nick_folded;
+	my $cfg       = $self->{cfg};
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $cfg = $self->{cfg};
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Owner")) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /[0-9]+/) && ($tArgs[0] <= 5)) {
-					$cfg->param("main.MAIN_PROG_DEBUG", $tArgs[0]);
-					$cfg->save();
-					$self->{cfg} = $cfg;
-					$self->{MAIN_CONF} = $cfg->vars();
-					log_message($self,0,"Debug set to " . $tArgs[0]);
-					botNotice($self,$sNick,"Debug set to " . $tArgs[0]);
-					logBot($self,$message,undef,"debug",("Debug set to " . $tArgs[0]));
-				}
-				else {
-					botNotice($self,$sNick,"Syntax: debug <debug_level>");
-					botNotice($self,$sNick,"debug_level 0 to 5");
-				}	
-			}
-			else {
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-			}
-		}
-		else {
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-		}
+	my ($uid, $ulevel, $ulevel_desc, $is_auth, $uhandle, $upass, $info1, $info2) = getNickInfo($self, $message);
+
+	unless (defined $uid) {
+		return; # no user matched, silent fail
 	}
+
+	unless ($is_auth) {
+		botNotice($self, $sNick, "You must be logged to use this command - /msg $irc_nick login username password");
+		return;
+	}
+
+	unless (defined $ulevel && checkUserLevel($self, $ulevel, "Owner")) {
+		botNotice($self, $sNick, "Your level does not allow you to use this command.");
+		return;
+	}
+
+	unless (defined($level) && $level =~ /^[0-5]$/) {
+		botNotice($self, $sNick, "Syntax: debug <debug_level>");
+		botNotice($self, $sNick, "debug_level must be between 0 and 5");
+		return;
+	}
+
+	# Update the config
+	$cfg->param("main.MAIN_PROG_DEBUG", $level);
+	$cfg->save();
+
+	# Reload values in object
+	$self->{cfg}       = $cfg;
+	$self->{MAIN_CONF} = $cfg->vars();
+
+	log_message($self, 0, "Debug set to $level");
+	botNotice($self, $sNick, "Debug set to $level");
+	logBot($self, $message, $sChannel, "debug", "Debug set to $level");
 }
 
 sub mbRestart(@) {

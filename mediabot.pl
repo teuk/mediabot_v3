@@ -483,13 +483,13 @@ sub on_message_KICK(@) {
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my ($kicker_nick,$target_name,$kicked_nick,$text) = @{$hints}{qw<kicker_nick target_name kicked_nick text>};
 	if ($self->is_nick_me($kicked_nick)) {
-		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
 			$mediabot->log_message(0,"[LIVE] * you were kicked from $target_name by $kicker_nick ($text)");
 		}
 		$mediabot->joinChannel($target_name);
 	}
 	else {
-		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
 			$mediabot->log_message(0,"[LIVE] $target_name: $kicked_nick was kicked by $kicker_nick ($text)");
 		}
 		$mediabot->channelNicksRemove($target_name,$kicked_nick);
@@ -508,13 +508,13 @@ sub on_message_MODE(@) {
 		my $sModes = $tArgs[0];
 		shift @tArgs;
 		my $sTargetNicks = join(" ",@tArgs);
-		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
 			$mediabot->log_message(0,"[LIVE] <$target_name> $sNick sets mode $sModes $sTargetNicks");
 		}
 		$mediabot->logBotAction($message,"mode",$sNick,$target_name,"$sModes $sTargetNicks");
 	}
 	else {
-		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
 			$mediabot->log_message(0,"[LIVE] $target_name sets mode " . $tArgs[1]);
 		}
 	}
@@ -533,7 +533,7 @@ sub on_message_NICK(@) {
 		$self->_set_nick($new_nick);
 	}
 	else {
-		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
 			$mediabot->log_message(0,"[LIVE] * $old_nick is now known as $new_nick");
 		}
 	}
@@ -563,13 +563,13 @@ sub on_message_QUIT(@) {
 	unless(defined($text)) { $text="";}
 	my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
 	if (defined($text) && ($text ne "")) {
-		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
 			$mediabot->log_message(0,"[LIVE] * Quits: $sNick ($sIdent\@$sHost) ($text)");
 		}
 		$mediabot->logBotAction($message,"quit",$sNick,undef,$text);
 	}
 	else {
-		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
 			$mediabot->log_message(0,"[LIVE] * Quits: $sNick ($sIdent\@$sHost) ()");
 		}
 		$mediabot->logBotAction($message,"quit",$sNick,undef,"");
@@ -588,13 +588,13 @@ sub on_message_PART(@){
 	my @tArgs = $message->args;
 	shift @tArgs;
 	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
 			$mediabot->log_message(0,"[LIVE] <$target_name> * Parts: $sNick ($sIdent\@$sHost) (" . $tArgs[0] . ")");
 		}
 		$mediabot->logBotAction($message,"part",$sNick,$target_name,$tArgs[0]);
 	}
 	else {
-		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
 			$mediabot->log_message(0,"[LIVE] <$target_name> * Parts: $sNick ($sIdent\@$sHost)");
 		}
 		$mediabot->logBotAction($message,"part",$sNick,$target_name,"");
@@ -611,7 +611,7 @@ sub on_message_PRIVMSG(@) {
 	}
 	if ( substr($where,0,1) eq '#' ) {
 		# Message on channel
-		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'}==1)) {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
 			$mediabot->log_message(0,"[LIVE] $where: <$who> $what");
 		}
 		my $line = $what;
@@ -745,40 +745,40 @@ sub on_message_PRIVMSG(@) {
 	else {
 		# Private message hide passwords
 		unless ( $what =~ /^login|^register|^pass|^newpass|^ident/i) {
-			if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+			if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
 				$mediabot->log_message(0,"[LIVE] $where: <$who> $what");
 			}
 		}
 		my ($sCommand,@tArgs) = split(/\s+/,$what);
-    $sCommand =~ tr/A-Z/a-z/;
-    $mediabot->log_message(3,"sCommands = $sCommand");
-    if (defined($sCommand) && ($sCommand ne "")) {
-    	switch($sCommand) {
-    		case /^debug$/i		{ 
-														$mediabot->mbDebug($message,$who,@tArgs);
-													}
-				case "restart"		{ 
-														if ($MAIN_PROG_DAEMON) {
-										    			$mediabot->mbRestart($message,$who,($sFullParams));
-										    		}
-										    		else {
-										    			$mediabot->botNotice($who,"restart command can only be used in daemon mode (use --daemon to launch the bot)");
-										    		}
-													}
-				case "jump"				{ 
-														if ($MAIN_PROG_DAEMON) {
-										    			$mediabot->mbJump($message,$who,($sFullParams,$tArgs[0]));
-										    		}
-										    		else {
-										    			$mediabot->botNotice($who,"jump command can only be used in daemon mode (use --daemon to launch the bot)");
-										    		}
-													}
-	    	else {
-	    		$mediabot->mbCommandPrivate($message,$who,$sCommand,@tArgs);
-	    	}
-	    }
-    }
-	}	
+		$sCommand =~ tr/A-Z/a-z/;
+		$mediabot->log_message(3,"sCommands = $sCommand");
+		if (defined($sCommand) && ($sCommand ne "")) {
+			switch($sCommand) {
+				#case /^debug$/i	{ 
+				#						$mediabot->mbDebug($message,$who,@tArgs);
+				#}
+				case /restart/i		{
+										if ($MAIN_PROG_DAEMON) {
+											$mediabot->mbRestart($message,$who,($sFullParams));
+										}
+										else {
+											$mediabot->botNotice($who,"restart command can only be used in daemon mode (use --daemon to launch the bot)");
+										}
+				}
+				case /jump/i		{
+										if ($MAIN_PROG_DAEMON) {
+											$mediabot->mbJump($message,$who,($sFullParams,$tArgs[0]));
+										}
+										else {
+											$mediabot->botNotice($who,"jump command can only be used in daemon mode (use --daemon to launch the bot)");
+										}
+				}
+				else {
+					$mediabot->mbCommandPrivate($message,$who,$sCommand,@tArgs);
+				}
+			}
+		}
+	}
 }
 
 sub on_message_TOPIC(@) {
@@ -787,7 +787,7 @@ sub on_message_TOPIC(@) {
 	my ($target_name,$text) = @{$hints}{qw<target_name text>};
 	my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
 	unless(defined($text)) { $text="";}
-	if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+	if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
 		$mediabot->log_message(0,"[LIVE] <$target_name> * $sNick changes topic to '$text'");
 	}
 	$mediabot->logBotAction($message,"topic",$sNick,$target_name,$text);
@@ -861,12 +861,12 @@ sub on_message_JOIN(@) {
 	my ($target_name) = @{$hints}{qw<target_name>};
 	my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
 	if ( $sNick eq $self->nick ) {
-		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
 			$mediabot->log_message(0,"[LIVE] * Now talking in $target_name");
 		}
 	}
 	else {
-		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} =1)) {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
 			$mediabot->log_message(0,"[LIVE] <$target_name> * Joins $sNick ($sIdent\@$sHost)");
 		}
 		$mediabot->userOnJoin($message,$target_name,$sNick);
