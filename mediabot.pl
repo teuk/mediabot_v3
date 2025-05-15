@@ -11,7 +11,7 @@ BEGIN {push @INC, '.';}
 use strict;
 use warnings;
 use diagnostics;
-use POSIX 'setsid';
+use POSIX qw/setsid strftime/;
 use Getopt::Long;
 use File::Basename;
 use Mediabot::Mediabot;
@@ -43,8 +43,10 @@ my $BOTNICK_WAS_TRIGGERED = 1;
 # !          SUBS DECLARATION                                                 !
 # +---------------------------------------------------------------------------+
 sub usage(@);
+sub log_message(@);
 sub catch_hup(@);
 sub catch_term(@);
+sub catch_int(@);
 sub reconnect(@);
 sub getVersion(@);
 
@@ -103,6 +105,12 @@ my $mediabot = Mediabot->new({
 	server => $sServer,
 });
 
+# Catch signal TERM
+$SIG{TERM} = \&catch_term;
+
+# Catch signal INT
+$SIG{INT}  = \&catch_int;
+
 # Load configuration
 unless ( $mediabot->readConfigFile ) {
     die "ERROR: could not load configuration, aborting.\n";
@@ -152,7 +160,7 @@ if ( $MAIN_PROG_DAEMON ) {
 		setsid                    or die "Can't start a new session: $!";
 }
 
-# Catch signals
+# Catch signal HUP
 $SIG{HUP}  = \&catch_hup;
 
 my $sStartedMode = ( $MAIN_PROG_DAEMON ? "background" : "foreground");
@@ -247,6 +255,18 @@ sub usage(@) {
         }
         print STDERR "Usage: " . basename($0) . "--conf=<config_file> [--check] [--daemon] [--server=<hostname>]\n";
         exit 4;
+}
+
+sub log_message(@) {
+    my ($level, $msg) = @_;
+    $level //= 0;
+
+    if ($mediabot) {
+        $mediabot->log_message($level,$msg);
+    } else {
+        my $ts = POSIX::strftime("[%d/%m/%Y %H:%M:%S]", localtime);
+        print "$ts $msg\n" if $level <= 0;
+    }
 }
 
 sub on_timer_tick(@) {
@@ -1056,7 +1076,7 @@ sub reconnect(@) {
 	$loop->run;
 }
 
-sub catch_hup {
+sub catch_hup(@) {
     my ($signal) = @_;    # you can inspect $signal if you like
     if ( $mediabot->readConfigFile ) {
         $mediabot->noticeConsoleChan("Caught SIGHUP - configuration reloaded successfully");
@@ -1064,4 +1084,18 @@ sub catch_hup {
     else {
         $mediabot->noticeConsoleChan("Caught SIGHUP - FAILED to reload configuration");
     }
+}
+
+sub catch_term(@) {
+	my ($signal) = @_;    # you can inspect $signal if you like
+    log_message(0,"Received SIGTERM (Ctrl+C). Initiating clean shutdown.");
+    $mediabot && $mediabot->clean_and_exit(0);
+    exit 0;
+}
+
+sub catch_int(@) {
+	my ($signal) = @_;    # you can inspect $signal if you like
+    log_message(0,"Received SIGINT (Ctrl+C). Initiating clean shutdown.");
+    $mediabot && $mediabot->clean_and_exit(0);
+    exit 0;
 }
