@@ -79,6 +79,25 @@ sub on_message_002(@);
 sub on_message_003(@);
 sub on_message_RPL_WHOISUSER(@);
 
+sub on_message_PING(@);
+sub on_message_PONG(@);
+sub on_message_ERROR(@);
+sub on_message_KILL(@);
+sub on_message_SERVER(@);
+sub on_message_004(@);
+sub on_message_005(@);
+sub on_message_RPL_TOPIC(@);
+sub on_message_RPL_TOPICWHOTIME(@);
+sub on_message_RPL_LIST(@);
+sub on_message_RPL_LISTEND(@);
+sub on_message_RPL_WHOREPLY(@);
+sub on_message_RPL_ENDOFWHO(@);
+sub on_message_RPL_WHOISCHANNELS(@);
+sub on_message_RPL_WHOISSERVER(@);
+sub on_message_RPL_WHOISIDLE(@);
+sub on_message_ERR_NICKNAMEINUSE(@);
+
+
 # +---------------------------------------------------------------------------+
 # !          MAIN                                                             !
 # +---------------------------------------------------------------------------+
@@ -1009,6 +1028,103 @@ sub on_message_RPL_WHOISUSER(@) {
 			}
 		}
 	}
+}
+
+sub on_message_PING(@) {
+    my ($self, $message, $hints) = @_;
+    my $payload = $message->args->[0];
+    $self->write("PONG $payload");
+    $mediabot->log_message(4, "PING → PONG $payload");
+}
+
+sub on_message_PONG(@) {
+    my ($self, $message, $hints) = @_;
+    $mediabot->log_message(4, "PONG received: " . join(" ", @{ $message->args }));
+}
+
+sub on_message_ERROR(@) {
+    my ($self, $message, $hints) = @_;
+    $mediabot->log_message(0, "ERROR from server: " . join(" ", @{ $message->args }));
+    # optionally $mediabot->clean_and_exit(1);
+}
+
+sub on_message_KILL(@) {
+    my ($self, $message, $hints) = @_;
+    my ($killer, $victim, $reason) = @{ $message->args };
+    $mediabot->log_message(0, "Killed by $killer: $reason – will reconnect.");
+    # reconnect logic if desired
+}
+
+sub on_message_SERVER(@) {
+    my ($self, $message, $hints) = @_;
+    $mediabot->log_message(0, "SERVER message: " . join(" ", @{ $message->args }));
+}
+
+sub on_message_004(@) {
+    my ($self, $message, $hints) = @_;
+    $mediabot->log_message(0, "Server info (004): " . join(" ", @{ $message->args }));
+}
+
+sub on_message_005(@) {
+    my ($self, $message, $hints) = @_;
+    $mediabot->log_message(0, "ISUPPORT (005): " . join(" ", @{ $message->args }));
+}
+
+sub on_message_RPL_TOPIC(@) {
+    my ($self, $message, $hints) = @_;
+    my ($chan, $topic) = @{ $message->args };
+    $mediabot->log_message(0, "Topic for $chan: $topic");
+}
+
+sub on_message_RPL_TOPICWHOTIME(@) {
+    my ($self, $message, $hints) = @_;
+    my ($chan, $setter, $ts) = @{ $message->args };
+    $mediabot->log_message(0, "Topic set by $setter on " . scalar localtime($ts));
+}
+
+sub on_message_RPL_LIST(@) {
+    my ($self, $message, $hints) = @_;
+    my ($chan, $users, $topic) = @{ $message->args };
+    $mediabot->log_message(2, "Channel $chan ($users users): $topic");
+}
+
+sub on_message_RPL_LISTEND(@) {
+    $mediabot->log_message(2, "End of channel list.");
+}
+
+sub on_message_RPL_WHOREPLY(@) {
+    my ($self, $message, $hints) = @_;
+    $mediabot->log_message(2, "WHO reply: " . join(" ", @{ $message->args }));
+}
+
+sub on_message_RPL_ENDOFWHO(@) {
+    $mediabot->log_message(2, "End of WHO list.");
+}
+
+sub on_message_RPL_WHOISCHANNELS(@) {
+    my ($self, $message, $hints) = @_;
+    my ($nick, $chans) = @{ $message->args };
+    $mediabot->log_message(0, "$nick on channels: $chans");
+}
+
+sub on_message_RPL_WHOISSERVER(@) {
+    my ($self, $message, $hints) = @_;
+    my ($nick, $server, $info) = @{ $message->args };
+    $mediabot->log_message(0, "$nick server $server ($info)");
+}
+
+sub on_message_RPL_WHOISIDLE(@) {
+    my ($self, $message, $hints) = @_;
+    my ($nick, $idle, $signon) = @{ $message->args };
+    $mediabot->log_message(0, "$nick idle for ${idle}s, signon: " . scalar localtime($signon));
+}
+
+sub on_message_ERR_NICKNAMEINUSE(@) {
+    my ($self, $message, $hints) = @_;
+    my $conflict = $message->args->[1] // '';
+    my $new_nick = $self->nick_folded . "_";
+    $self->change_nick($new_nick);
+    $mediabot->log_message(0, "Nick “$conflict” in use, switched to $new_nick");
 }
 
 sub reconnect(@) {
