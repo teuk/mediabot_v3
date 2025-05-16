@@ -138,24 +138,34 @@ unless ( $mediabot->readConfigFile ) {
 # Init log file
 $mediabot->init_log();
 
-# Check if the bot is already running
-my $pid = $mediabot->getPidFromFile();
-if (defined($pid) && ($pid ne "")) {
-	unless (open CHECKPID, "ps -eaf | grep -v grep | grep $pid |") {
-		$mediabot->log_message(0,"Could not check if process $pid is running");
-	}
-	else {
-		my $line;
-		if (defined($line=<CHECKPID>)) {
-			chomp($line);
-			close CHECKPID;
-			$mediabot->log_message(0,"Mediabot is already running with pid : $pid");
-			$mediabot->log_message(0,"$line");
-			$mediabot->log_message(0,"Either kill the process $pid or delete file " . $mediabot->getPidFile() . " if you know what you are doing");
-			$mediabot->clean_and_exit(1);
-		}
-	}
+# === Single‐Instance Guard ===
+
+# Retrieve PID file path and stored PID
+my $pidfile = $mediabot->getPidFile();
+my $pid     = $mediabot->getPidFromFile();
+
+if (defined $pid && $pid =~ /^\d+$/) {
+
+    # kill 0 just tests “does this process exist and can I signal it?”
+    if (kill 0, $pid) {
+        # process is alive
+        $mediabot->log_message(0, "Mediabot is already running with PID $pid.");
+        $mediabot->log_message(0, "Either kill process $pid or remove stale PID file: $pidfile");
+        $mediabot->clean_and_exit(1);
+    }
+    else {
+        # PID file is stale; remove it so a new instance can start
+        if (unlink $pidfile) {
+            $mediabot->log_message(1, "Removed stale PID file: $pidfile");
+        }
+        else {
+            $mediabot->log_message(0, "Could not remove stale PID file '$pidfile': $!");
+            $mediabot->log_message(0, "Please remove it manually before restarting.");
+            $mediabot->clean_and_exit(1);
+        }
+    }
 }
+
 
 ($MAIN_PROG_VERSION,$MAIN_GIT_VERSION) = $mediabot->getVersion();
 
