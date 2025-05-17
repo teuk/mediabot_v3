@@ -79,8 +79,6 @@ sub on_message_002(@);
 sub on_message_003(@);
 sub on_message_RPL_WHOISUSER(@);
 
-sub on_message_PING(@);
-sub on_message_PONG(@);
 sub on_message_ERROR(@);
 sub on_message_KILL(@);
 sub on_message_SERVER(@);
@@ -96,6 +94,15 @@ sub on_message_RPL_WHOISCHANNELS(@);
 sub on_message_RPL_WHOISSERVER(@);
 sub on_message_RPL_WHOISIDLE(@);
 sub on_message_ERR_NICKNAMEINUSE(@);
+
+sub on_message_RPL_INVITING(@);          # 341
+sub on_message_RPL_INVITELIST(@);        # 346
+sub on_message_RPL_ENDOFINVITELIST(@);   # 347
+
+# Common errors
+sub on_message_ERR_NICKNAMEINUSE(@);     # 433
+sub on_message_ERR_NEEDMOREPARAMS(@);    # 461
+
 
 
 # +---------------------------------------------------------------------------+
@@ -247,6 +254,28 @@ my $irc = Net::Async::IRC->new(
   on_message_002 => \&on_message_002,
   on_message_003 => \&on_message_003,
   on_message_RPL_WHOISUSER => \&on_message_RPL_WHOISUSER,
+
+  on_message_ERROR => \&on_message_ERROR,
+  on_message_KILL => \&on_message_KILL,
+  on_message_SERVER => \&on_message_SERVER,
+  on_message_004 => \&on_message_004,
+  on_message_005 => \&on_message_005,
+  on_message_RPL_TOPIC => \&on_message_RPL_TOPIC,
+  on_message_RPL_TOPICWHOTIME => \&on_message_RPL_TOPICWHOTIME,
+  on_message_RPL_LIST => \&on_message_RPL_LIST,
+  on_message_RPL_LISTEND => \&on_message_RPL_LISTEND,
+  on_message_RPL_WHOREPLY => \&on_message_RPL_WHOREPLY,
+  on_message_RPL_ENDOFWHO => \&on_message_RPL_ENDOFWHO,
+  on_message_RPL_WHOISCHANNELS => \&on_message_RPL_WHOISCHANNELS,
+  on_message_RPL_WHOISSERVER => \&on_message_RPL_WHOISSERVER,
+  on_message_RPL_WHOISIDLE => \&on_message_RPL_WHOISIDLE,
+  on_message_ERR_NICKNAMEINUSE => \&on_message_ERR_NICKNAMEINUSE,
+
+  on_message_RPL_INVITING          => \&on_message_RPL_INVITING,
+  on_message_RPL_INVITELIST        => \&on_message_RPL_INVITELIST,
+  on_message_RPL_ENDOFINVITELIST   => \&on_message_RPL_ENDOFINVITELIST,
+  on_message_ERR_NICKNAMEINUSE     => \&on_message_ERR_NICKNAMEINUSE,
+  on_message_ERR_NEEDMOREPARAMS    => \&on_message_ERR_NEEDMOREPARAMS,
 );
 
 $mediabot->setIrc($irc);
@@ -298,8 +327,17 @@ sub log_message(@) {
     }
 }
 
+# Safely turn $message->args into a list
+sub _get_args {
+    my ($message) = @_;
+    my $a = $message->args;
+    return ref($a) eq 'ARRAY' ? @$a : (defined $a ? $a : ());
+}
+
+
 sub on_timer_tick(@) {
 	my @params = @_;
+	$mediabot->log_message(5, "on_timer_tick \@params (): " . Dumper(@params));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	$mediabot->log_message(5,"on_timer_tick() tick");
 
@@ -399,6 +437,7 @@ sub on_timer_tick(@) {
 
 sub on_message_NOTICE(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_NOTICE \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my ($who, $what) = @{$hints}{qw<prefix_name text>};
 	my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
@@ -480,6 +519,7 @@ sub on_login(@) {
 
 sub on_private(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_private \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my ($who, $what) = @{$hints}{qw<prefix_name text>};
 	$mediabot->log_message(2,"on_private() -$who- $what");
@@ -487,6 +527,7 @@ sub on_private(@) {
 
 sub on_message_INVITE(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_INVITE \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my ($inviter_nick,$invited_nick,$target_name) = @{$hints}{qw<inviter_nick invited_nick target_name>};
 	unless ($self->is_nick_me($inviter_nick)) {
@@ -509,6 +550,7 @@ sub on_message_INVITE(@) {
 
 sub on_message_KICK(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_KICK \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my ($kicker_nick,$target_name,$kicked_nick,$text) = @{$hints}{qw<kicker_nick target_name kicked_nick text>};
 	if ($self->is_nick_me($kicked_nick)) {
@@ -528,6 +570,7 @@ sub on_message_KICK(@) {
 
 sub on_message_MODE(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_MODE \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my ($target_name,$modechars,$modeargs) = @{$hints}{qw<target_name modechars modeargs>};
 	my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
@@ -551,6 +594,7 @@ sub on_message_MODE(@) {
 
 sub on_message_NICK(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_NICK \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my %hChannelsNicks = ();
 	if (defined($mediabot->gethChannelNicks())) {
@@ -583,6 +627,7 @@ sub on_message_NICK(@) {
 
 sub on_message_QUIT(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_QUIT \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my %hChannelsNicks = ();
 	if (defined($mediabot->gethChannelNicks())) {
@@ -610,6 +655,7 @@ sub on_message_QUIT(@) {
 
 sub on_message_PART(@){
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_PART \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my ($target_name,$text) = @{$hints}{qw<target_name text>};
 	unless(defined($text)) { $text="";}
@@ -633,6 +679,7 @@ sub on_message_PART(@){
 
 sub on_message_PRIVMSG(@) {
 	my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_PRIVMSG \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my ($who, $where, $what) = @{$hints}{qw<prefix_nick targets text>};
 	if ( $mediabot->isIgnored($message,$where,$who,$what)) {
@@ -783,9 +830,6 @@ sub on_message_PRIVMSG(@) {
 		$mediabot->log_message(3,"sCommands = $sCommand");
 		if (defined($sCommand) && ($sCommand ne "")) {
 			switch($sCommand) {
-				#case /^debug$/i	{ 
-				#						$mediabot->mbDebug($message,$who,@tArgs);
-				#}
 				case /restart/i		{
 										if ($MAIN_PROG_DAEMON) {
 											$mediabot->mbRestart($message,$who,($sFullParams));
@@ -812,6 +856,7 @@ sub on_message_PRIVMSG(@) {
 
 sub on_message_TOPIC(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_TOPIC \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my ($target_name,$text) = @{$hints}{qw<target_name text>};
 	my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
@@ -824,6 +869,7 @@ sub on_message_TOPIC(@) {
 
 sub on_message_LIST(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_LIST \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my ($target_name) = @{$hints}{qw<target_name>};
 	$mediabot->log_message(2,"on_message_LIST() $target_name");
@@ -831,6 +877,7 @@ sub on_message_LIST(@) {
 
 sub on_message_RPL_NAMEREPLY(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_RPL_NAMEREPLY \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my @args = $message->args;
 	$args[3] =~ s/@//g;
@@ -850,38 +897,74 @@ sub on_message_RPL_NAMEREPLY(@) {
 	$mediabot->sethChannelsNicksOnChan($target_name,@tChannelNicklist);
 }
 
+# Numeric 366 RPL_ENDOFNAMES
 sub on_message_RPL_ENDOFNAMES(@) {
-	my ($self,$message,$hints) = @_;
-	my %MAIN_CONF = %{$mediabot->getMainConf()};
-	my ($target_name) = @{$hints}{qw<target_name>};
-	$mediabot->log_message(2,"on_message_RPL_ENDOFNAMES() $target_name");
-	$mediabot->sethChannelsNicksEndOnChan($target_name,1);
+    my ($self,$message,$hints) = @_;
+    $mediabot->log_message(5, "on_message_RPL_ENDOFNAMES \$message->args (): " . Dumper($message->args));
+    my @args = $message->args;
+    my $channel = $args[1] // '<unknown>';
+    my %MAIN_CONF = %{$mediabot->getMainConf()};
+    $mediabot->log_message(2,"on_message_RPL_ENDOFNAMES() $channel");
+    if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'}==1)) {
+        $mediabot->log_message(0,"[LIVE] * Now talking in $channel");
+    }
+    $mediabot->log_message(2,"Joined channel: $channel");
 }
 
 sub on_message_WHO(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_WHO \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my ($target_name) = @{$hints}{qw<target_name>};
-	$mediabot->log_message($2,"on_message_WHO() $target_name");
+	$mediabot->log_message(0,"on_message_WHO() $target_name");
 }
 
 sub on_message_WHOIS(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_WHOIS \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	$mediabot->log_message(3,Dumper($message));
 	my ($target_name) = @{$hints}{qw<target_name>};
-	$mediabot->log_message(2,"on_message_WHOIS() $target_name");
+	$mediabot->log_message(0,"on_message_WHOIS() $target_name");
 }
 
 sub on_message_WHOWAS(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_WHOWAS \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my ($target_name) = @{$hints}{qw<target_name>};
-	$mediabot->log_message(2,"on_message_WHOWAS() $target_name");
+	$mediabot->log_message(0,"on_message_WHOWAS() $target_name");
+}
+
+sub on_message_WHOWAS(@) {
+	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_WHOWAS \$message->args (): " . Dumper($message->args));
+	my %MAIN_CONF = %{$mediabot->getMainConf()};
+	my %hChannelsNicks = ();
+	if (defined($mediabot->gethChannelNicks())) {
+		%hChannelsNicks = %{$mediabot->gethChannelNicks()};
+	}
+	my ($target_name) = @{$hints}{qw<target_name>};
+	my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
+	if ( $sNick eq $self->nick ) {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
+			$mediabot->log_message(0,"[LIVE] * Now talking in $target_name");
+		}
+	}
+	else {
+		if (defined($MAIN_CONF{'main.MAIN_PROG_LIVE'}) && ($MAIN_CONF{'main.MAIN_PROG_LIVE'} == 1)) {
+			$mediabot->log_message(0,"[LIVE] <$target_name> * Joins $sNick ($sIdent\@$sHost)");
+		}
+		$mediabot->userOnJoin($message,$target_name,$sNick);
+		push @{$hChannelsNicks{$target_name}}, $sNick;
+		$mediabot->sethChannelNicks(\%hChannelsNicks);
+	}
+	$mediabot->logBotAction($message,"join",$sNick,$target_name,"");
 }
 
 sub on_message_JOIN(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_JOIN \$message->args (): " . Dumper($message->args));
 	my %MAIN_CONF = %{$mediabot->getMainConf()};
 	my %hChannelsNicks = ();
 	if (defined($mediabot->gethChannelNicks())) {
@@ -907,24 +990,28 @@ sub on_message_JOIN(@) {
 
 sub on_message_001(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_001 \$message->args (): " . Dumper($message->args));
 	my ($text) = @{$hints}{qw<text>};
 	$mediabot->log_message($self,0,"001 $text");
 }
 
 sub on_message_002(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_002 \$message->args (): " . Dumper($message->args));
 	my ($text) = @{$hints}{qw<text>};
 	$mediabot->log_message($self,0,"002 $text");
 }
 
 sub on_message_003(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_003 \$message->args (): " . Dumper($message->args));
 	my ($text) = @{$hints}{qw<text>};
 	$mediabot->log_message($self,0,"003 $text");
 }
 
 sub on_motd(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_motd \$message->args (): " . Dumper($message->args));
 	my @motd_lines = @{$hints}{qw<motd>};
 	foreach my $line (@{$motd_lines[0]}) {
 		$mediabot->log_message($self,0,"-motd- $line");
@@ -933,6 +1020,7 @@ sub on_motd(@) {
 
 sub on_message_RPL_WHOISUSER(@) {
 	my ($self,$message,$hints) = @_;
+	$mediabot->log_message(5, "on_message_RPL_WHOISUSER \$message->args (): " . Dumper($message->args));
 	my %WHOIS_VARS = %{$mediabot->getWhoisVar()};
 	my @tArgs = $message->args;
 	my $sHostname = $tArgs[3];
@@ -1040,26 +1128,16 @@ sub on_message_RPL_WHOISUSER(@) {
 	}
 }
 
-sub on_message_PING(@) {
-    my ($self, $message, $hints) = @_;
-    my $payload = $message->args->[0];
-    $self->write("PONG $payload");
-    $mediabot->log_message(4, "PING → PONG $payload");
-}
-
-sub on_message_PONG(@) {
-    my ($self, $message, $hints) = @_;
-    $mediabot->log_message(4, "PONG received: " . join(" ", @{ $message->args }));
-}
-
 sub on_message_ERROR(@) {
     my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_ERROR \$message->args (): " . Dumper($message->args));
     $mediabot->log_message(0, "ERROR from server: " . join(" ", @{ $message->args }));
     # optionally $mediabot->clean_and_exit(1);
 }
 
 sub on_message_KILL(@) {
     my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_KILL \$message->args (): " . Dumper($message->args));
     my ($killer, $victim, $reason) = @{ $message->args };
     $mediabot->log_message(0, "Killed by $killer: $reason – will reconnect.");
     # reconnect logic if desired
@@ -1067,33 +1145,57 @@ sub on_message_KILL(@) {
 
 sub on_message_SERVER(@) {
     my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_SERVER \$message->args (): " . Dumper($message->args));
     $mediabot->log_message(0, "SERVER message: " . join(" ", @{ $message->args }));
 }
 
+# Numeric 004 – Server version/info
 sub on_message_004(@) {
     my ($self, $message, $hints) = @_;
-    $mediabot->log_message(0, "Server info (004): " . join(" ", @{ $message->args }));
+	$mediabot->log_message(5, "on_message_004 \$message->args (): " . Dumper($message->args));
+    my @args = $message->args;
+    my $server = $args[0] // '<unknown>';
+    my $version = $args[1] // '<unknown>';
+    my $user_modes = $args[2] // '';
+    my $chan_modes = $args[3] // '';
+    $mediabot->log_message(0, "Server info (004): server=$server version=$version user_modes=$user_modes chan_modes=$chan_modes");
 }
 
+# Numeric 005 – ISUPPORT
 sub on_message_005(@) {
     my ($self, $message, $hints) = @_;
-    $mediabot->log_message(0, "ISUPPORT (005): " . join(" ", @{ $message->args }));
+	$mediabot->log_message(5, "on_message_005 \$message->args (): " . Dumper($message->args));
+    my @args = $message->args;
+    shift @args; # Remove nickname (first arg)
+    my $features = join(" ", @args);
+    $mediabot->log_message(0, "ISUPPORT (005): $features");
 }
 
+# Numeric 332 RPL_TOPIC
 sub on_message_RPL_TOPIC(@) {
     my ($self, $message, $hints) = @_;
-    my ($chan, $topic) = @{ $message->args };
-    $mediabot->log_message(0, "Topic for $chan: $topic");
+	$mediabot->log_message(5, "on_message_RPL_TOPIC \$message->args (): " . Dumper($message->args));
+    my @args = $message->args;
+    my $channel = $args[1] // '<unknown>';
+    my $topic   = $args[2] // '<none>';
+    $mediabot->log_message(0, "Topic for $channel: $topic");
 }
 
+# Numeric 333 RPL_TOPICWHOTIME
 sub on_message_RPL_TOPICWHOTIME(@) {
     my ($self, $message, $hints) = @_;
-    my ($chan, $setter, $ts) = @{ $message->args };
-    $mediabot->log_message(0, "Topic set by $setter on " . scalar localtime($ts));
+	$mediabot->log_message(5, "on_message_RPL_TOPICWHOTIME \$message->args (): " . Dumper($message->args));
+    my @args = $message->args;
+    my $channel = $args[1] // '<unknown>';
+    my $setter  = $args[2] // '<unknown>';
+    my $ts      = $args[3] // time;
+    my $time    = scalar localtime($ts);
+    $mediabot->log_message(0, "Topic for $channel set by $setter on $time");
 }
 
 sub on_message_RPL_LIST(@) {
     my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_RPL_LIST \$message->args (): " . Dumper($message->args));
     my ($chan, $users, $topic) = @{ $message->args };
     $mediabot->log_message(2, "Channel $chan ($users users): $topic");
 }
@@ -1104,6 +1206,7 @@ sub on_message_RPL_LISTEND(@) {
 
 sub on_message_RPL_WHOREPLY(@) {
     my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_RPL_WHOREPLY \$message->args (): " . Dumper($message->args));
     $mediabot->log_message(2, "WHO reply: " . join(" ", @{ $message->args }));
 }
 
@@ -1113,28 +1216,86 @@ sub on_message_RPL_ENDOFWHO(@) {
 
 sub on_message_RPL_WHOISCHANNELS(@) {
     my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_RPL_WHOISCHANNELS \$message->args (): " . Dumper($message->args));
     my ($nick, $chans) = @{ $message->args };
     $mediabot->log_message(0, "$nick on channels: $chans");
 }
 
 sub on_message_RPL_WHOISSERVER(@) {
     my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_RPL_WHOISSERVER \$message->args (): " . Dumper($message->args));
     my ($nick, $server, $info) = @{ $message->args };
     $mediabot->log_message(0, "$nick server $server ($info)");
 }
 
 sub on_message_RPL_WHOISIDLE(@) {
     my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_RPL_WHOISIDLE \$message->args (): " . Dumper($message->args));
     my ($nick, $idle, $signon) = @{ $message->args };
     $mediabot->log_message(0, "$nick idle for ${idle}s, signon: " . scalar localtime($signon));
 }
 
 sub on_message_ERR_NICKNAMEINUSE(@) {
     my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_ERR_NICKNAMEINUSE \$message->args (): " . Dumper($message->args));
     my $conflict = $message->args->[1] // '';
     my $new_nick = $self->nick_folded . "_";
     $self->change_nick($new_nick);
     $mediabot->log_message(0, "Nick “$conflict” in use, switched to $new_nick");
+}
+
+sub on_message_RPL_MYINFO {
+    my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_RPL_MYINFO \$message->args (): " . Dumper($message->args));
+    # args = [ servername, version, user_modes, chan_modes ]
+    my @a = @{$message->args};
+    $mediabot->log_message(4,
+        "Server info: host=$a[0], ver=$a[1], umodes=$a[2], cmodes=$a[3]");
+}
+
+sub on_message_RPL_ISUPPORT {
+    my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_RPL_ISUPPORT \$message->args (): " . Dumper($message->args));
+    # args = [ token1, token2, … ]
+    $mediabot->log_message(5, "ISUPPORT tokens: " . join(' ', @{$message->args}));
+}
+
+sub on_message_RPL_INVITING(@) {
+    my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_RPL_INVITING \$message->args (): " . Dumper($message->args));
+    my ($nick, $channel) = @{$message->args}[1,2];
+    $mediabot->log_message(2, "You have been invited: $nick -> $channel");
+}
+
+sub on_message_RPL_INVITELIST(@) {
+    my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_RPL_INVITELIST \$message->args (): " . Dumper($message->args));
+    my ($channel, $nick) = @{$message->args}[1,2];
+    $mediabot->log_message(4, "Invite list for $channel: $nick");
+}
+
+sub on_message_RPL_ENDOFINVITELIST(@) {
+    my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_RPL_ENDOFINVITELIST \$message->args (): " . Dumper($message->args));
+    my $channel = $message->args->[1];
+    $mediabot->log_message(4, "End of invite list for $channel");
+}
+
+sub on_message_ERR_NICKNAMEINUSE(@) {
+    my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_ERR_NICKNAMEINUSE \$message->args (): " . Dumper($message->args));
+    # args = [ your_nick, nick_in_use, "Nickname is already in use." ]
+    my ($me, $badnick) = @{$message->args}[0,1];
+    $mediabot->log_message(0, "Nick '$badnick' is in use. Appending '_' and retrying.");
+    $self->change_nick($me . '_');
+}
+
+sub on_message_ERR_NEEDMOREPARAMS(@) {
+    my ($self, $message, $hints) = @_;
+	$mediabot->log_message(5, "on_message_ERR_NEEDMOREPARAMS \$message->args (): " . Dumper($message->args));
+    # args = [ your_nick, command, "Not enough parameters" ]
+    my ($me, $cmd) = @{$message->args}[0,1];
+    $mediabot->log_message(1, "ERR_NEEDMOREPARAMS for $cmd – vérifiez la syntaxe.");
 }
 
 sub reconnect(@) {
@@ -1151,29 +1312,51 @@ sub reconnect(@) {
 	$mediabot->setMainTimerTick($timer);
 
 	$irc = Net::Async::IRC->new(
-	  on_message_text => \&on_private,
-	  on_message_motd => \&on_motd,
-	  on_message_INVITE => \&on_message_INVITE,
-	  on_message_KICK => \&on_message_KICK,
-	  on_message_MODE => \&on_message_MODE,
-	  on_message_NICK => \&on_message_NICK,
-	  on_message_NOTICE => \&on_message_NOTICE,
-	  on_message_QUIT => \&on_message_QUIT,
-	  on_message_PART => \&on_message_PART,
-	  on_message_PRIVMSG => \&on_message_PRIVMSG,
-	  on_message_TOPIC => \&on_message_TOPIC,
-	  on_message_LIST => \&on_message_LIST,
-	  on_message_RPL_NAMEREPLY => \&on_message_RPL_NAMEREPLY,
-	  on_message_RPL_ENDOFNAMES => \&on_message_RPL_ENDOFNAMES,
-	  on_message_WHO => \&on_message_WHO,
-	  on_message_WHOIS => \&on_message_WHOIS,
-	  on_message_WHOWAS => \&on_message_WHOWAS,
-	  on_message_JOIN => \&on_message_JOIN,
-	  
-	  on_message_001 => \&on_message_001,
-	  on_message_002 => \&on_message_002,
-	  on_message_003 => \&on_message_003,
-	  on_message_RPL_WHOISUSER => \&on_message_RPL_WHOISUSER,
+	  	on_message_text => \&on_private,
+		on_message_motd => \&on_motd,
+		on_message_INVITE => \&on_message_INVITE,
+		on_message_KICK => \&on_message_KICK,
+		on_message_MODE => \&on_message_MODE,
+		on_message_NICK => \&on_message_NICK,
+		on_message_NOTICE => \&on_message_NOTICE,
+		on_message_QUIT => \&on_message_QUIT,
+		on_message_PART => \&on_message_PART,
+		on_message_PRIVMSG => \&on_message_PRIVMSG,
+		on_message_TOPIC => \&on_message_TOPIC,
+		on_message_LIST => \&on_message_LIST,
+		on_message_RPL_NAMEREPLY => \&on_message_RPL_NAMEREPLY,
+		on_message_RPL_ENDOFNAMES => \&on_message_RPL_ENDOFNAMES,
+		on_message_WHO => \&on_message_WHO,
+		on_message_WHOIS => \&on_message_WHOIS,
+		on_message_WHOWAS => \&on_message_WHOWAS,
+		on_message_JOIN => \&on_message_JOIN,
+		
+		on_message_001 => \&on_message_001,
+		on_message_002 => \&on_message_002,
+		on_message_003 => \&on_message_003,
+		on_message_RPL_WHOISUSER => \&on_message_RPL_WHOISUSER,
+
+		on_message_ERROR => \&on_message_ERROR,
+		on_message_KILL => \&on_message_KILL,
+		on_message_SERVER => \&on_message_SERVER,
+		on_message_004 => \&on_message_004,
+		on_message_005 => \&on_message_005,
+		on_message_RPL_TOPIC => \&on_message_RPL_TOPIC,
+		on_message_RPL_TOPICWHOTIME => \&on_message_RPL_TOPICWHOTIME,
+		on_message_RPL_LIST => \&on_message_RPL_LIST,
+		on_message_RPL_LISTEND => \&on_message_RPL_LISTEND,
+		on_message_RPL_WHOREPLY => \&on_message_RPL_WHOREPLY,
+		on_message_RPL_ENDOFWHO => \&on_message_RPL_ENDOFWHO,
+		on_message_RPL_WHOISCHANNELS => \&on_message_RPL_WHOISCHANNELS,
+		on_message_RPL_WHOISSERVER => \&on_message_RPL_WHOISSERVER,
+		on_message_RPL_WHOISIDLE => \&on_message_RPL_WHOISIDLE,
+		on_message_ERR_NICKNAMEINUSE => \&on_message_ERR_NICKNAMEINUSE,
+
+		on_message_RPL_INVITING          => \&on_message_RPL_INVITING,
+		on_message_RPL_INVITELIST        => \&on_message_RPL_INVITELIST,
+		on_message_RPL_ENDOFINVITELIST   => \&on_message_RPL_ENDOFINVITELIST,
+		on_message_ERR_NICKNAMEINUSE     => \&on_message_ERR_NICKNAMEINUSE,
+		on_message_ERR_NEEDMOREPARAMS    => \&on_message_ERR_NEEDMOREPARAMS,
 	);
 
 	$mediabot->setIrc($irc);
