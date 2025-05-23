@@ -1,18 +1,18 @@
-# mediabot_v3
+# Mediabot - https://teuk.org
 
-  Mediabotv3 is a perl Net::Async::IRC bot
-  It is still a beta version and has been tested on Undernet ircu server and Libera.
+  Mediabotv3 is a perl Net::Async::IRC bot now tho I started it with Net::IRC which is now deprecated
+  It is still a beta version after all these years but a release is coming up
 
 WHAT IS MEDIABOT?
 
-  Mediabot is a Net::Async::IRC bot tested on Undernet ircu server and Libera (but it may supports other networks)
+  Mediabot is a Net::Async::IRC bot tested on Undernet ircu server, Libera and Epiknet (but it may supports other networks)
   The bot joins a console channel where it will notice its action
   
   Go to the Wiki section and read Installation chapter to know how to deploy it.
   
   The full documentation is in the Wiki section : https://github.com/teuk/mediabot_v3/wiki
 
-# Mediabot
+# mediabot_v3
 
 I've been coding this bot for a while, and it's time to write documentation (about time)
 
