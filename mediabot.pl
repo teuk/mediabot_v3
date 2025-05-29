@@ -21,7 +21,6 @@ use IO::Async::Timer::Periodic;
 use Net::Async::IRC;
 use Switch;
 use Data::Dumper;
-use Date::Format;
 use Encode;
 
 # +---------------------------------------------------------------------------+
@@ -45,6 +44,9 @@ my $BOTNICK_WAS_TRIGGERED = 1;
 # +---------------------------------------------------------------------------+
 sub usage;
 sub log_message;
+sub log_info;
+sub log_warn;
+sub log_error;
 sub catch_hup;
 sub catch_term;
 sub catch_int;
@@ -134,7 +136,8 @@ $SIG{INT}  = \&catch_int;
 
 # Load configuration
 unless ( $mediabot->readConfigFile ) {
-    die "ERROR: could not load configuration, aborting.\n";
+    log_error("ERROR: could not load configuration, aborting.");
+    exit 1;
 }
 
 # Instantiate Mediabot configuration
@@ -180,7 +183,8 @@ if ( $MAIN_PROG_CHECK_CONFIG != 0 ) {
     $mediabot->clean_and_exit(0);
 }
 
-print STDOUT "mediabot_v3 Copyright (C) 2019-2025 teuk\n";
+log_info("mediabot_v3 Copyright (C) 2019-2025 teuk");
+log_info("Mediabot v$MAIN_PROG_VERSION starting with config file $CONFIG_FILE");
 
 # Daemon mode actions
 if ( $MAIN_PROG_DAEMON ) {
@@ -303,10 +307,14 @@ $loop->run;
 sub usage {
     my ($strErr) = @_;
     if (defined($strErr)) {
-        print STDERR "Error : " . $strErr . "\n";
+        log_error("Error : " . $strErr);
     }
-    print STDERR "Usage: " . basename($0) . "--conf=<config_file> [--check] [--daemon] [--server=<hostname>]\n";
+    log_error("Usage: " . basename($0) . "--conf=<config_file> [--check] [--daemon] [--server=<hostname>]");
     exit 4;
+}
+
+sub log_timestamp {
+    return strftime("[%d/%m/%Y %H:%M:%S]", localtime);
 }
 
 sub log_message {
@@ -331,6 +339,21 @@ sub log_debug_args {
     $mediabot->log_message(5, "$context args: $dump");
 }
 
+sub log_info {
+    my ($msg) = @_;
+    print STDOUT log_timestamp() . " [INFO] $msg\n";
+}
+
+sub log_warn {
+    my ($msg) = @_;
+    print STDERR log_timestamp() . " [WARN] $msg\n";
+}
+
+sub log_error {
+    my ($msg) = @_;
+    print STDERR log_timestamp() . " [ERROR] $msg\n";
+}
+
 sub on_timer_tick {
     my @params = @_;
 
@@ -340,7 +363,7 @@ sub on_timer_tick {
     # Update pid file
     my $sPidFilename = $mediabot->{conf}->get('main.MAIN_PID_FILE');
     unless (open PID, ">$sPidFilename") {
-        print STDERR "Could not open $sPidFilename for writing.\n";
+        log_error("Could not open $sPidFilename for writing.");
     }
     else {
         print PID "$$";

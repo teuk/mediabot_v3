@@ -52,13 +52,13 @@ sub new {
 sub my_log_info {
     my ($self, $msg) = @_;
     my $ts = POSIX::strftime("[%d/%m/%Y %H:%M:%S]", localtime);
-    print STDOUT "$ts INFO: $msg\n";
+    print STDOUT "$ts [INFO] $msg\n";
 }
 
 sub my_log_error {
     my ($self, $msg) = @_;
     my $ts = POSIX::strftime("[%d/%m/%Y %H:%M:%S]", localtime);
-    print STDERR "$ts ERROR: $msg\n";
+    print STDERR "$ts [ERROR] $msg\n";
 }
 
 #-----------------------------------------------------------------
@@ -302,7 +302,7 @@ sub log_message(@) {
 		$|=1;
 		if ( $MAIN_CONF{'main.MAIN_PROG_DEBUG'} >= $iLevel ) {
 			if ( $iLevel == 0 ) {
-				$sDisplayMsg .= "$sMsg\n";
+				$sDisplayMsg .= "[INFO] $sMsg\n";
 				print $LOG $sDisplayMsg;
 			}
 			else {
