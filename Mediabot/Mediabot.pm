@@ -12257,14 +12257,17 @@ sub chatGPT(@) {
     }
 
     # --------------------------------------------------------------
-    # decode the JSON response
-    # --------------------------------------------------------------
-    my $data = eval { decode_json($response) };
-    if ($@ || !($data->{choices}[0]{message}{content} || '')) {
-        log_message($self,0,'chatGPT() chatGPT invalid JSON response');
-        botPrivmsg($self,$chan,'($nick) Could not read API response.');
-        return;
-    }
+	# decode the JSON response
+	# --------------------------------------------------------------
+	my $data = eval { decode_json($response) };
+	if ($@ || !($data->{choices}[0]{message}{content} || '')) {
+		log_message($self, 0, 'chatGPT() chatGPT invalid JSON response');
+		log_message($self, 3, "chatGPT() Raw API response: $response");
+		log_message($self, 3, "chatGPT() JSON decode error: $@") if $@;
+		log_message($self, 3, "chatGPT() Missing expected content in response structure") unless $@;
+		botPrivmsg($self, $chan, "($nick) Could not read API response.");
+		return;
+	}
 
 	my $answer = $data->{choices}[0]{message}{content};
     log_message($self,4,"chatGPT() chatGPT raw answer: $answer");
