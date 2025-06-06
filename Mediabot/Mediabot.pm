@@ -12444,49 +12444,62 @@ sub mbResolver(@) {
 }
 
 sub mbTMDBSearch(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $api_key = $MAIN_CONF{'tmdb.API_KEY'};
-	unless (defined($MAIN_CONF{'tmdb.API_KEY'}) && ($MAIN_CONF{'tmdb.API_KEY'} ne "")) {
-		log_message($self,0,"tmdb.API_KEY is undefined in config file");
-		return undef;
-	}
-	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-		botNotice($self,$sNick,"Syntax : tmdb <movie or serie name>");
-		return undef;
-	}
-	my $input = join(" ",@tArgs);
-	botPrivmsg($self,$sChannel,"($sNick) Synopsis for $input : " . get_tmdb_synopsis_with_curl($api_key,$input));
+    my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+    my %MAIN_CONF = %{$self->{MAIN_CONF}};
+    my $api_key = $MAIN_CONF{'tmdb.API_KEY'};
+
+    unless (defined($api_key) && $api_key ne "") {
+        log_message($self, 0, "tmdb.API_KEY is undefined in config file");
+        return;
+    }
+
+    unless (defined($tArgs[0]) && $tArgs[0] ne "") {
+        botNotice($self, $sNick, "Syntax : tmdb <movie or serie name>");
+        return;
+    }
+
+    my $input = join(" ", @tArgs);
+    my $synopsis = get_tmdb_synopsis_with_curl($api_key, $input);
+
+    my $output = "($sNick) Synopsis for $input : $synopsis";
+	botPrivmsg($self, $sChannel, $output);
 }
 
 sub get_tmdb_synopsis_with_curl {
-    my ($api_key,$query) = @_;
-    
-    my $lang = 'fr-FR';
+    my ($api_key, $query) = @_;
 
+    # Language setting: use 'en-US' first for global use
+    my $lang = 'en-US';
+
+    # Encode query for safe URL usage
     my $encoded_query = uri_escape($query);
     my $url = "https://api.themoviedb.org/3/search/movie?api_key=$api_key&language=$lang&query=$encoded_query";
 
-    # Fetch JSON using curl
+    # Execute curl request
     my $json_response = `curl -s "$url"`;
-    return "Failed to fetch data." unless $json_response;
+    unless ($json_response) {
+        return "Failed to fetch data from TMDB.";
+    }
 
-    # Decode JSON and extract synopsis
+    # Try to decode the JSON response
     my $data = eval { decode_json($json_response) };
-    return "Failed to decode JSON." unless $data and ref($data) eq 'HASH';
+    if ($@ || !ref($data) || !$data->{results} || !@{$data->{results}}) {
+        return "Invalid or empty JSON data from TMDB.";
+    }
 
+    # Take the first result
     my $result = $data->{results}[0];
-	# Decode UTF-8 string safely
-    my $synopsis = decode('UTF-8', $result->{overview});
+    my $synopsis = $result->{overview} // "No synopsis available.";
 
-    # Properly cut to 350 characters
+    # Ensure UTF-8 integrity
+    #$synopsis = decode('UTF-8', $synopsis);
+
+    # Trim to 350 characters, cleanly
     if (length($synopsis) > 350) {
         $synopsis = substr($synopsis, 0, 347) . '...';
     }
 
-    # Re-encode for printing/output if needed
-    return encode('UTF-8', $synopsis);
-
+    return $synopsis;
 }
 
 1;
