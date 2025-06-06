@@ -87,7 +87,6 @@ DBD::mysql
 Switch
 Memory::Usage
 String::IRC
-JSON
 DateTime
 DateTime::TimeZone
 HTML::Tree
@@ -151,7 +150,6 @@ DBD::mysql
 Switch
 Memory::Usage
 String::IRC
-JSON
 DateTime
 DateTime::TimeZone
 HTML::Tree
