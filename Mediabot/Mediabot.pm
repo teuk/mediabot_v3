@@ -1456,6 +1456,9 @@ sub mbCommandPublic(@) {
 		case /^tmdb$/i						    	{
 														mbTMDBSearch($self,$message,$sNick,$sChannel,@tArgs);
 													}
+		case /^tmdblangset$/i						{
+														setTMDBLangChannel($self,$message,$sNick,$sChannel,@tArgs);
+													}	
 		case /^debug$/i						    	{
 														mbDebug($self,$message,$sNick,$sChannel,@tArgs);
 													}
@@ -12443,6 +12446,63 @@ sub mbResolver(@) {
 	}
 }
 
+sub setTMDBLangChannel(@) {
+	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my $sTargetChannel;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+				my $id_channel = getIdChannel($self,$sChannel);
+				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
+					$sChannel = $tArgs[0];
+					$id_channel = getIdChannel($self,$sChannel);
+					unless (defined($id_channel)) {
+						botNotice($self,$sNick,"Channel $sTargetChannel is not registered to me");
+						return undef;
+					}
+					shift @tArgs;
+				}
+				unless (defined($sChannel) && ($sChannel ne "")) {
+					botNotice($self,$sNick,"Undefined channel");
+					botNotice($self,$sNick,"Syntax tmdblangset [#channel] <lang>");
+					return undef;
+				}
+				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
+					my $sLang = $tArgs[0];
+					log_message($self,3,"setTMDBLangChannel() " . $sChannel . " lang set to " . $sLang);
+					my $sQuery = "UPDATE CHANNEL SET tmdb_lang=? WHERE id_channel=?";
+					my $sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute($sLang,$id_channel)) {
+						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						return undef;
+					}
+					else {
+						botPrivmsg($self,$sChannel,"TMDB language set to " . $sLang);
+						$sth->finish;
+						return undef;
+					}
+				}
+				else {
+					botNotice($self,$sNick,"Syntax tmdblangset [#channel] <lang>");
+				}
+			}
+			else {
+				my $sNoticeMsg = $message->prefix . " tmdblangset command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				noticeConsoleChan($self,$sNoticeMsg);
+				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				return undef;
+			}
+		}
+		else {
+			my $sNoticeMsg = $message->prefix . " tmdblangset command attempt (user $sMatchingUserHandle is not logged in)";
+			noticeConsoleChan($self,$sNoticeMsg);
+			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+			return undef;
+		}
+	}
+}
+
 sub mbTMDBSearch(@) {
     my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
     my %MAIN_CONF = %{$self->{MAIN_CONF}};
@@ -12458,18 +12518,37 @@ sub mbTMDBSearch(@) {
         return;
     }
 
+	my $tmdb_lang = getTMDBLangChannel($self, $sChannel);
+	log_message($self, 3, "tmdb_lang for $sChannel is $tmdb_lang");
     my $input = join(" ", @tArgs);
-    my $synopsis = get_tmdb_synopsis_with_curl($api_key, $input);
+    my $synopsis = get_tmdb_synopsis_with_curl($api_key, $tmdb_lang, $input);
 
     my $output = "($sNick) Synopsis for $input : $synopsis";
 	botPrivmsg($self, $sChannel, $output);
 }
 
-sub get_tmdb_synopsis_with_curl {
-    my ($api_key, $query) = @_;
+sub getTMDBLangChannel (@) {
+	my ($self, $sChannel) = @_;
+	my $sQuery = "SELECT tmdb_lang FROM CHANNEL WHERE name LIKE ?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sChannel)) {
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $tmdb_lang = $ref->{'tmdb_lang'};
+			$sth->finish;
+			return $tmdb_lang || 'en-US';
+		}
+		else {
+			$sth->finish;
+			return undef;
+		}
+	}
+}
 
-    # Language setting: use 'en-US' first for global use
-    my $lang = 'en-US';
+sub get_tmdb_synopsis_with_curl {
+    my ($api_key, $lang, $query) = @_;
 
     # Encode query for safe URL usage
     my $encoded_query = uri_escape($query);
@@ -12490,9 +12569,6 @@ sub get_tmdb_synopsis_with_curl {
     # Take the first result
     my $result = $data->{results}[0];
     my $synopsis = $result->{overview} // "No synopsis available.";
-
-    # Ensure UTF-8 integrity
-    #$synopsis = decode('UTF-8', $synopsis);
 
     # Trim to 350 characters, cleanly
     if (length($synopsis) > 350) {

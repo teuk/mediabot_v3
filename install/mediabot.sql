@@ -53,7 +53,8 @@ CREATE TABLE `CHANNEL` (
   `key` varchar(255) DEFAULT NULL,
   `chanmode` varchar(255) DEFAULT NULL,
   `auto_join` tinyint(1) NOT NULL,
-  `notice` varchar(255) DEFAULT NULL
+  `notice` varchar(255) DEFAULT NULL,
+  `tmdb_lang` varchar(255) NOT NULL DEFAULT 'en-US'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 -- --------------------------------------------------------
@@ -69,7 +70,7 @@ CREATE TABLE `CHANNEL_LOG` (
   `event_type` varchar(255) CHARACTER SET latin1 NOT NULL,
   `nick` varchar(255) CHARACTER SET latin1 NOT NULL,
   `userhost` varchar(255) NOT NULL,
-  `publictext` varchar(255) CHARACTER SET latin1 DEFAULT NULL
+  `publictext` varchar(400) CHARACTER SET latin1 DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 -- --------------------------------------------------------
