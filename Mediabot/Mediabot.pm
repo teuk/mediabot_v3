@@ -204,8 +204,7 @@ sub getDebugLevel(@) {
 
 sub getLogFile(@) {
 	my $self = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	return $MAIN_CONF{'main.MAIN_LOG_FILE'};
+	return $self->{conf}->get('main.MAIN_LOG_FILE');
 }
 
 sub dumpConfig(@) {
@@ -225,43 +224,43 @@ sub getMainConfCfg(@) {
 
 sub getPidFile(@) {
 	my $self = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	return $MAIN_CONF{'main.MAIN_PID_FILE'};
+	return $self->{conf}->get('main.MAIN_PID_FILE');
 }
 
 sub getPidFromFile(@) {
-	my $self = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $pidfile = $MAIN_CONF{'main.MAIN_PID_FILE'};
-	unless (open PIDFILE, $pidfile) {
-		return undef;
-	}
-	else {
-		my $line;
-		if (defined($line=<PIDFILE>)) {
-			chomp($line);
-			close PIDFILE;
-			return $line;
-		}
-		else {
-			log_message($self,1,"getPidFromFile() couldn't read PID from $pidfile");
-			return undef;
-		}
-	}
+    my $self = shift;
+    my $pidfile = $self->{conf}->get('main.MAIN_PID_FILE');
+
+    unless (open PIDFILE, $pidfile) {
+        return undef;
+    }
+    else {
+        my $line;
+        if (defined($line = <PIDFILE>)) {
+            chomp($line);
+            close PIDFILE;
+            return $line;
+        }
+        else {
+            log_message($self, 1, "getPidFromFile() couldn't read PID from $pidfile");
+            return undef;
+        }
+    }
 }
 
 sub init_log(@) {
-	my ($self) = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $sLogFilename = $MAIN_CONF{'main.MAIN_LOG_FILE'};
-	my $LOG;
-	unless (open $LOG, ">>$sLogFilename") {
-		print STDERR "Could not open $sLogFilename for writing.\n";
-		clean_and_exit($self,1);
-	}
-	$|=1;
-	print $LOG "+--------------------------------------------------------------------------------------------------+\n";
-	$self->{LOG} = $LOG;
+    my ($self) = shift;
+    my $sLogFilename = $self->{conf}->get('main.MAIN_LOG_FILE');
+    my $LOG;
+
+    unless (open $LOG, ">>$sLogFilename") {
+        print STDERR "Could not open $sLogFilename for writing.\n";
+        clean_and_exit($self, 1);
+    }
+
+    $| = 1;
+    print $LOG "+--------------------------------------------------------------------------------------------------+\n";
+    $self->{LOG} = $LOG;
 }
 
 # Populate all CHANNEL entries into $self->{channels}
@@ -301,6 +300,7 @@ sub populateChannels {
     }
 }
 
+# Initialize Hailo object
 sub init_hailo(@) {
 	my ($self) = shift;
 	log_message($self,0,"Initialize Hailo");
@@ -311,11 +311,13 @@ sub init_hailo(@) {
 	$self->{hailo} = $hailo;
 }
 
+# Get the Hailo object
 sub get_hailo(@) {
 	my ($self) = shift;
 	return $self->{hailo};
 }
 
+# Clean up and exit the program
 sub clean_and_exit(@) {
 	my ($self,$iRetValue) = @_;
 	log_message($self,0,"Cleaning and exiting...");
@@ -331,67 +333,74 @@ sub clean_and_exit(@) {
 	exit $iRetValue;
 }
 
+# Log a message with timestamp and level
 sub log_message(@) {
-	my ($self,$iLevel,$sMsg) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $LOG = $self->{LOG};
-	binmode STDOUT, ':utf8';
-	binmode $LOG, ':utf8';
-	if (defined($sMsg) && ($sMsg ne "")) {
-		my $sDisplayMsg = time2str("[%d/%m/%Y %H:%M:%S]",time) . " ";
-		select $LOG;
-		$|=1;
-		if ( $MAIN_CONF{'main.MAIN_PROG_DEBUG'} >= $iLevel ) {
-			if ( $iLevel == 0 ) {
-				$sDisplayMsg .= "[INFO] $sMsg\n";
-				print $LOG $sDisplayMsg;
-			}
-			else {
-				$sDisplayMsg .= "[DEBUG" . $iLevel . "] $sMsg\n";
-				print $LOG $sDisplayMsg;
-			}
-			select STDOUT;
-			print $sDisplayMsg;
-		}
-	}
+    my ($self, $iLevel, $sMsg) = @_;
+    my $conf = $self->{conf};
+    my $LOG = $self->{LOG};
+
+    binmode STDOUT, ':utf8';
+    binmode $LOG, ':utf8';
+
+    if (defined($sMsg) && ($sMsg ne "")) {
+        my $sDisplayMsg = time2str("[%d/%m/%Y %H:%M:%S]", time) . " ";
+        select $LOG;
+        $| = 1;
+
+        my $debug_level = $conf->get('main.MAIN_PROG_DEBUG');
+        if ($debug_level >= $iLevel) {
+            if ($iLevel == 0) {
+                $sDisplayMsg .= "[INFO] $sMsg\n";
+                print $LOG $sDisplayMsg;
+            } else {
+                $sDisplayMsg .= "[DEBUG$iLevel] $sMsg\n";
+                print $LOG $sDisplayMsg;
+            }
+            select STDOUT;
+            print $sDisplayMsg;
+        }
+    }
 }
 
+# Connect to the database
 sub dbConnect(@) {
-	my ($self) = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $LOG = $self->{LOG};
-	my $connectionInfo="DBI:mysql:database=" . $MAIN_CONF{'mysql.MAIN_PROG_DDBNAME'} . ";" . $MAIN_CONF{'mysql.MAIN_PROG_DBHOST'} . ":" . $MAIN_CONF{'mysql.MAIN_PROG_DBPORT'};   # Database connection string
-	# Database handle
-	my $dbh;
+    my ($self) = @_;
+    my $conf = $self->{conf};
+    my $LOG  = $self->{LOG};
 
-	log_message($self,1,"dbConnect() Connecting to Database : " . $MAIN_CONF{'mysql.MAIN_PROG_DDBNAME'});
-	
-	unless ( $dbh = DBI->connect($connectionInfo,$MAIN_CONF{'mysql.MAIN_PROG_DBUSER'},$MAIN_CONF{'mysql.MAIN_PROG_DBPASS'}) ) {
-	        log_message($self,0,"dbConnect() DBI Error : " . $DBI::errstr);
-	        log_message($self,0,"dbConnect() DBI Native error code : " . $DBI::err);
-	        if ( defined( $DBI::err ) ) {
-	        	clean_and_exit($self,3);
-	        }
-	}
-	$dbh->{mysql_auto_reconnect} = 1;
-	log_message($self,1,"dbConnect() Connected to " . $MAIN_CONF{'mysql.MAIN_PROG_DDBNAME'} . ".");
-	my $sQuery = "SET NAMES 'utf8'";
-	my $sth = $dbh->prepare($sQuery);
-	unless ($sth->execute() ) {
-		log_message($self,1,"dbConnect() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	$sQuery = "SET CHARACTER SET utf8";
-	$sth = $dbh->prepare($sQuery);
-	unless ($sth->execute() ) {
-		log_message($self,1,"dbConnect() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	$sQuery = "SET COLLATION_CONNECTION = 'utf8_general_ci'";
-	$sth = $dbh->prepare($sQuery);
-	unless ($sth->execute() ) {
-		log_message($self,1,"dbConnect() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	$sth->finish;
-	$self->{dbh} = $dbh;
+    my $dbname = $conf->get('mysql.MAIN_PROG_DDBNAME');
+    my $dbhost = $conf->get('mysql.MAIN_PROG_DBHOST') // 'localhost';
+    my $dbport = $conf->get('mysql.MAIN_PROG_DBPORT') // 3306;
+    my $dbuser = $conf->get('mysql.MAIN_PROG_DBUSER');
+    my $dbpass = $conf->get('mysql.MAIN_PROG_DBPASS');
+
+    my $connectionInfo = "DBI:mysql:database=$dbname;host=$dbhost;port=$dbport";
+
+    log_message($self, 1, "dbConnect() Connecting to Database: $dbname");
+
+    my $dbh;
+    unless ($dbh = DBI->connect($connectionInfo, $dbuser, $dbpass, { RaiseError => 0, PrintError => 0 })) {
+        log_message($self, 0, "dbConnect() DBI Error: " . $DBI::errstr);
+        log_message($self, 0, "dbConnect() DBI Native error code: " . ($DBI::err // 'undef'));
+        clean_and_exit($self, 3) if defined $DBI::err;
+    }
+
+    $dbh->{mysql_auto_reconnect} = 1;
+    log_message($self, 1, "dbConnect() Connected to $dbname.");
+
+    foreach my $sql (
+        "SET NAMES 'utf8'",
+        "SET CHARACTER SET utf8",
+        "SET COLLATION_CONNECTION = 'utf8_general_ci'"
+    ) {
+        my $sth = $dbh->prepare($sql);
+        unless ($sth->execute()) {
+            log_message($self, 1, "dbConnect() SQL Error: $DBI::errstr Query: $sql");
+        }
+        $sth->finish;
+    }
+
+    $self->{dbh} = $dbh;
 }
 
 sub getDbh(@) {
@@ -437,130 +446,155 @@ sub setServer(@) {
 	$self->{server} = $sServer;
 }
 
+# Pick a server from the database or command line
 sub pickServer(@) {
-	my ($self) = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $LOG = $self->{LOG};
-	my $dbh = $self->{dbh};
-	unless (defined($self->{server}) && ($self->{server} ne "")) {
-		# Pick a server in db default on CONN_SERVER_NETWORK
-		my $sQuery = "SELECT SERVERS.server_hostname FROM NETWORK,SERVERS WHERE NETWORK.id_network=SERVERS.id_network AND NETWORK.network_name like ? ORDER BY RAND() LIMIT 1";
-		my $sth = $self->{dbh}->prepare($sQuery);
-		unless ($sth->execute($MAIN_CONF{'connection.CONN_SERVER_NETWORK'})) {
-			log_message($self,0,"Startup select SERVER, SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	my ($self) = @_;
+	my $conf = $self->{conf};
+	my $LOG  = $self->{LOG};
+	my $dbh  = $self->{dbh};
+
+	unless (defined($self->{server}) && $self->{server} ne "") {
+		# Retrieve network name from config
+		my $network_name = $conf->get('connection.CONN_SERVER_NETWORK');
+
+		unless (defined($network_name) && $network_name ne "") {
+			log_message($self, 0, "No CONN_SERVER_NETWORK defined in $self->{config_file}");
+			log_message($self, 0, "Run ./configure at first use or ./configure -s to set it properly");
+			clean_and_exit($self, 4);
 		}
-		else {	
+
+		# Try to fetch a random server from DB for that network
+		my $sQuery = "SELECT SERVERS.server_hostname FROM NETWORK,SERVERS WHERE NETWORK.id_network=SERVERS.id_network AND NETWORK.network_name LIKE ? ORDER BY RAND() LIMIT 1";
+		my $sth = $dbh->prepare($sQuery);
+		unless ($sth->execute($network_name)) {
+			log_message($self, 0, "Startup select SERVER, SQL Error: " . $DBI::errstr . " Query: $sQuery");
+		}
+		else {
 			if (my $ref = $sth->fetchrow_hashref()) {
 				$self->{server} = $ref->{'server_hostname'};
 			}
+			$sth->finish;
 		}
-		$sth->finish;
 
-		unless (defined($MAIN_CONF{'connection.CONN_SERVER_NETWORK'}) && ($MAIN_CONF{'connection.CONN_SERVER_NETWORK'} ne "")) {
-			log_message($self,0,"No CONN_SERVER_NETWORK defined in $self->{config_file}");
-			log_message($self,0,"Run ./configure at first use or ./configure -s to set it properly");
-			clean_and_exit($self,4);
+		unless (defined($self->{server}) && $self->{server} ne "") {
+			log_message($self, 0, "No server found for network $network_name defined in $self->{config_file}");
+			log_message($self, 0, "Run ./configure at first use or ./configure -s to set it properly");
+			clean_and_exit($self, 4);
 		}
-		unless (defined($self->{server}) && ($self->{server} ne "")) {
-			log_message($self,0,"No server found for network " . $MAIN_CONF{'connection.CONN_SERVER_NETWORK'} . " defined in $self->{config_file}");
-			log_message($self,0,"Run ./configure at first use or ./configure -s to set it properly");
-			clean_and_exit($self,4);
-		}
-		$self->log_message(0,"Picked $self->{server} from Network $MAIN_CONF{'connection.CONN_SERVER_NETWORK'}");
+
+		$self->log_message(0, "Picked $self->{server} from Network $network_name");
 	}
 	else {
-		$self->log_message(0,"Picked $self->{server} from command line");
+		$self->log_message(0, "Picked $self->{server} from command line");
 	}
-	
+
+	# Extract hostname and port
 	$self->{server_hostname} = $self->{server};
-	if ( $self->{server} =~ /:/ ) {
-		$self->{server_hostname} =~ s/\:.*$//;
-		$self->{server_port} = $self->{server};
-		$self->{server_port} =~ s/^.*\://;
+	if ($self->{server} =~ /:/) {
+		($self->{server_hostname}, $self->{server_port}) = split(/:/, $self->{server}, 2);
 	}
 	else {
 		$self->{server_port} = 6667;
 	}
 }
 
+# Get server hostname 
 sub getServerHostname(@) {
 	my $self = shift;
 	return $self->{server_hostname};
 }
 
+# Get server port
 sub getServerPort(@) {
 	my $self = shift;
 	return $self->{server_port};
 }
 
+# Set loop
 sub setLoop(@) {
 	my ($self,$loop) = @_;
 	$self->{loop} = $loop;
 }
 
+# Get loop
 sub getLoop(@) {
 	my $self = shift;
 	return $self->{loop};
 }
 
+# Set main timer tick
 sub setMainTimerTick(@) {
 	my ($self,$timer) = @_;
 	$self->{main_timer_tick} = $timer;
 }
 
+# Get main timer tick
 sub getMainTimerTick(@) {
 	my $self = shift;
 	return $self->{maint_timer_tick};
 }
 
+# Set IRC object
 sub setIrc(@) {
 	my ($self,$irc) = @_;
 	$self->{irc} = $irc;
 }
 
+# Get IRC object
 sub getIrc(@) {
 	my $self = shift;
 	return $self->{irc};
 }
 
+# Get connection nick
 sub getConnectionNick(@) {
 	my $self = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $sConnectionNick = $MAIN_CONF{'connection.CONN_NICK'};
-	if (($MAIN_CONF{'connection.CONN_NETWORK_TYPE'} == 1) && ($MAIN_CONF{'connection.CONN_USERMODE'} =~ /x/)) {
+	my $conf = $self->{conf};
+
+	my $sConnectionNick = $conf->get('connection.CONN_NICK');
+	my $network_type    = $conf->get('connection.CONN_NETWORK_TYPE');
+	my $usermode        = $conf->get('connection.CONN_USERMODE');
+
+	if (defined($network_type) && $network_type == 1 && defined($usermode) && $usermode =~ /x/) {
 		my @chars = ("A".."Z", "a".."z");
 		my $string;
 		$string .= $chars[rand @chars] for 1..8;
-		$sConnectionNick = $string . (int(rand(100))+10);
+		$sConnectionNick = $string . (int(rand(100)) + 10);
 	}
-	log_message($self,0,"Connection nick : $sConnectionNick");
+
+	log_message($self, 0, "Connection nick: $sConnectionNick");
 	return $sConnectionNick;
 }
 
+# Get server password
 sub getServerPass(@) {
 	my $self = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	return (defined($MAIN_CONF{'connection.CONN_PASS'}) ? $MAIN_CONF{'connection.CONN_PASS'} : "");
+	my $conf = $self->{conf};
+	return $conf->get('connection.CONN_PASS') // "";
 }
 
+# Get nick trigger status
 sub getNickTrigger(@) {
 	my $self = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	return (defined($MAIN_CONF{'main.NICK_TRIGGER'}) ? $MAIN_CONF{'main.NICK_TRIGGER'} : 0);
+	my $conf = $self->{conf};
+	return $conf->get('main.NICK_TRIGGER') // 0;
 }
 
+# Get IRC username from configuration
 sub getUserName(@) {
 	my $self = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	return $MAIN_CONF{'connection.CONN_USERNAME'};
+	my $conf = $self->{conf};
+	return $conf->get('connection.CONN_USERNAME');
 }
 
+# Get IRC real name from configuration
 sub getIrcName(@) {
 	my $self = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	return $MAIN_CONF{'connection.CONN_IRCNAME'};
+	my $conf = $self->{conf};
+	return $conf->get('connection.CONN_IRCNAME');
 }
 
+# Get nick info from a message
 sub getMessageNickIdentHost(@) {
 	my ($self,$message) = @_;
 	my $sNick = $message->prefix;
@@ -573,6 +607,7 @@ sub getMessageNickIdentHost(@) {
 	return ($sNick,$sIdent,$sHost);
 }
 
+# Get channel id from channel name
 sub getIdChannel(@) {
 	my ($self,$sChannel) = @_;
 	my $id_channel = undef;
@@ -590,6 +625,7 @@ sub getIdChannel(@) {
 	return $id_channel;
 }
 
+# Get user nickname from user id
 sub getUserhandle(@) {
 	my ($self,$id_user) = @_;
 	my $sUserhandle = undef;
@@ -607,6 +643,7 @@ sub getUserhandle(@) {
 	return $sUserhandle;
 }
 
+# Get user autologin status
 sub getUserAutologin(@) {
 	my ($self,$sMatchingUserHandle) = @_;
 	my $sQuery = "SELECT * FROM USER WHERE nickname like ? AND username='#AUTOLOGIN#'";
@@ -626,6 +663,7 @@ sub getUserAutologin(@) {
 	}
 }
 
+# Get user id from user handle
 sub getIdUser(@) {
 	my ($self,$sUserhandle) = @_;
 	my $id_user = undef;
@@ -643,6 +681,7 @@ sub getIdUser(@) {
 	return $id_user;
 }
 
+# Get channel name from channel id
 sub getChannelName(@) {
 	my ($self,$id_channel) = @_;
 	my $name = undef;
@@ -660,6 +699,7 @@ sub getChannelName(@) {
 	return $name;
 }
 
+# Get console channel from description
 sub getConsoleChan {
     my ($self) = @_;
 
@@ -678,6 +718,7 @@ sub getConsoleChan {
     return undef;
 }
 
+# Send a notice to the console channel
 sub noticeConsoleChan(@) {
 	my ($self,$sMsg) = @_;
 	my ($id_channel,$name,$chanmode,$key) = getConsoleChan($self);
@@ -689,6 +730,7 @@ sub noticeConsoleChan(@) {
 	}
 }
 
+# Log bot actions
 sub logBot(@) {
 	my ($self,$message,$sChannel,$action,@tArgs) = @_;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
@@ -725,6 +767,7 @@ sub logBot(@) {
 	$sth->finish;
 }
 
+# Log bot action with event type
 sub logBotAction(@) {
 	my ($self,$message,$eventtype,$sNick,$sChannel,$sText) = @_;
 	#my $dbh = $self->{dbh};
@@ -762,6 +805,7 @@ sub logBotAction(@) {
 	}
 }
 
+# Send a private message to a target
 sub botPrivmsg(@) {
 	my ($self,$sTo,$sMsg) = @_;
 	if (defined($sTo)) {
@@ -831,6 +875,7 @@ sub botPrivmsg(@) {
 	}
 }
 
+# Send a private message to a target (action)
 sub botAction(@) {
 	my ($self,$sTo,$sMsg) = @_;
 	if (defined($sTo)) {
@@ -900,6 +945,7 @@ sub botAction(@) {
 	}
 }
 
+# Send a notice to a target
 sub botNotice(@) {
 	my ($self,$sTo,$sMsg) = @_;
 	$self->{irc}->do_NOTICE( target => $sTo, text => $sMsg );
@@ -909,6 +955,7 @@ sub botNotice(@) {
 	}
 }
 
+# Join a channel with an optional key
 sub joinChannel(@) {
 	my ($self,$channel,$key) = @_;
 	if (defined($key) && ($key ne "")) {
@@ -941,7 +988,6 @@ sub joinChannels {
 
     $i == 0 and log_message($self, 0, "No channel to auto join");
 }
-
 
 # Set timers at startup
 sub onStartTimers(@) {
@@ -986,179 +1032,299 @@ sub onStartTimers(@) {
 	%{$self->{hTimers}} = %hTimers;
 }
 
-sub userOnJoin(@) {
-	my ($self,$message,$sChannel,$sNick) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		my $sChannelUserQuery = "SELECT * FROM USER_CHANNEL,CHANNEL WHERE USER_CHANNEL.id_channel=CHANNEL.id_channel AND name=? AND id_user=?";
-		log_message($self,4,$sChannelUserQuery);
-		my $sth = $self->{dbh}->prepare($sChannelUserQuery);
-		unless ($sth->execute($sChannel,$iMatchingUserId)) {
-			log_message($self,1,"on_join() SQL Error : " . $DBI::errstr . " Query : " . $sChannelUserQuery);
-		}
-		else {
-			if (my $ref = $sth->fetchrow_hashref()) {
-				my $sAutoMode = $ref->{'automode'};
-				if (defined($sAutoMode) && ($sAutoMode ne "")) {
-					if ($sAutoMode eq 'OP') {
-						$self->{irc}->send_message("MODE", undef, ($sChannel,"+o",$sNick));
-					}
-					elsif ($sAutoMode eq 'VOICE') {
-						$self->{irc}->send_message("MODE", undef, ($sChannel,"+v",$sNick));
-					}
-				}
-				my $sGreetChan = $ref->{'greet'};
-				if (defined($sGreetChan) && ($sGreetChan ne "")) {
-					botPrivmsg($self,$sChannel,"($sMatchingUserHandle) $sGreetChan");
-				}
-			}
-		}
-		$sth->finish;
-	}
-	my $sChannelUserQuery = "SELECT * FROM CHANNEL WHERE name=?";
-	log_message($self,4,$sChannelUserQuery);
-	my $sth = $self->{dbh}->prepare($sChannelUserQuery);
-	unless ($sth->execute($sChannel)) {
-		log_message($self,1,"on_join() SQL Error : " . $DBI::errstr . " Query : " . $sChannelUserQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $sNoticeOnJoin = $ref->{'notice'};
-			if (defined($sNoticeOnJoin) && ($sNoticeOnJoin ne "")) {
-				botNotice($self,$sNick,$sNoticeOnJoin);
-			}
-		}
-	}
-}
+## Handle user join event
+#sub userOnJoin(@) {
+#	my ($self,$message,$sChannel,$sNick) = @_;
+#	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+#	if (defined($iMatchingUserId)) {
+#		my $sChannelUserQuery = "SELECT * FROM USER_CHANNEL,CHANNEL WHERE USER_CHANNEL.id_channel=CHANNEL.id_channel AND name=? AND id_user=?";
+#		log_message($self,4,$sChannelUserQuery);
+#		my $sth = $self->{dbh}->prepare($sChannelUserQuery);
+#		unless ($sth->execute($sChannel,$iMatchingUserId)) {
+#			log_message($self,1,"on_join() SQL Error : " . $DBI::errstr . " Query : " . $sChannelUserQuery);
+#		}
+#		else {
+#			if (my $ref = $sth->fetchrow_hashref()) {
+#				my $sAutoMode = $ref->{'automode'};
+#				if (defined($sAutoMode) && ($sAutoMode ne "")) {
+#					if ($sAutoMode eq 'OP') {
+#						$self->{irc}->send_message("MODE", undef, ($sChannel,"+o",$sNick));
+#					}
+#					elsif ($sAutoMode eq 'VOICE') {
+#						$self->{irc}->send_message("MODE", undef, ($sChannel,"+v",$sNick));
+#					}
+#				}
+#				my $sGreetChan = $ref->{'greet'};
+#				if (defined($sGreetChan) && ($sGreetChan ne "")) {
+#					botPrivmsg($self,$sChannel,"($sMatchingUserHandle) $sGreetChan");
+#				}
+#			}
+#		}
+#		$sth->finish;
+#	}
+#	my $sChannelUserQuery = "SELECT * FROM CHANNEL WHERE name=?";
+#	log_message($self,4,$sChannelUserQuery);
+#	my $sth = $self->{dbh}->prepare($sChannelUserQuery);
+#	unless ($sth->execute($sChannel)) {
+#		log_message($self,1,"on_join() SQL Error : " . $DBI::errstr . " Query : " . $sChannelUserQuery);
+#	}
+#	else {
+#		if (my $ref = $sth->fetchrow_hashref()) {
+#			my $sNoticeOnJoin = $ref->{'notice'};
+#			if (defined($sNoticeOnJoin) && ($sNoticeOnJoin ne "")) {
+#				botNotice($self,$sNick,$sNoticeOnJoin);
+#			}
+#		}
+#	}
+#}
+#
+## Get nick information from a message
+#sub getNickInfo(@) {
+#	my ($self,$message) = @_;
+#	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+#	my $iMatchingUserId;
+#	my $iMatchingUserLevel;
+#	my $iMatchingUserLevelDesc;
+#	my $iMatchingUserAuth;
+#	my $sMatchingUserHandle;
+#	my $sMatchingUserPasswd;
+#	my $sMatchingUserInfo1;
+#	my $sMatchingUserInfo2;
+#	
+#	my $sCheckQuery = "SELECT * FROM USER";
+#	my $sth = $self->{dbh}->prepare($sCheckQuery);
+#	unless ($sth->execute ) {
+#		log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
+#	}
+#	else {
+#		while (my $ref = $sth->fetchrow_hashref()) {
+#			my @tHostmasks = split(/,/,$ref->{'hostmasks'});
+#			foreach my $sHostmask (@tHostmasks) {
+#				log_message($self,4,"getNickInfo() Checking hostmask : " . $sHostmask);
+#				my $sHostmaskSource = $sHostmask;
+#				$sHostmask =~ s/\./\\./g;
+#				$sHostmask =~ s/\*/.*/g;
+#				$sHostmask =~ s/\[/\\[/g;
+#				$sHostmask =~ s/\]/\\]/g;
+#				$sHostmask =~ s/\{/\\{/g;
+#				$sHostmask =~ s/\}/\\}/g;
+#				if ( $message->prefix =~ /^$sHostmask/ ) {
+#					log_message($self,3,"getNickInfo() $sHostmask matches " . $message->prefix);
+#					$sMatchingUserHandle = $ref->{'nickname'};
+#					if (defined($ref->{'password'})) {
+#						$sMatchingUserPasswd = $ref->{'password'};
+#					}
+#					$iMatchingUserId = $ref->{'id_user'};
+#					my $iMatchingUserLevelId = $ref->{'id_user_level'};
+#					my $sGetLevelQuery = "SELECT * FROM USER_LEVEL WHERE id_user_level=?";
+#					my $sth2 = $self->{dbh}->prepare($sGetLevelQuery);
+#				        unless ($sth2->execute($iMatchingUserLevelId)) {
+#                				log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sGetLevelQuery);
+#        				}
+#        				else {
+#               					while (my $ref2 = $sth2->fetchrow_hashref()) {
+#							$iMatchingUserLevel = $ref2->{'level'};
+#							$iMatchingUserLevelDesc = $ref2->{'description'};
+#						}
+#					}
+#					$iMatchingUserAuth = $ref->{'auth'};
+#					if ( defined($MAIN_CONF{'connection.CONN_NETWORK_TYPE'}) && ($MAIN_CONF{'connection.CONN_NETWORK_TYPE'} eq "1") && defined($MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'}) && ($MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'} ne "")) {
+#						unless ($iMatchingUserAuth) {
+#							my $sUnetHostmask = $MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'};
+#							if ($sHostmaskSource =~ /$sUnetHostmask$/) {
+#								my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
+#								my $sth2 = $self->{dbh}->prepare($sQuery);
+#								unless ($sth2->execute($iMatchingUserId)) {
+#									log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+#								}
+#								else {
+#									$iMatchingUserAuth = 1;
+#									log_message($self,0,"getNickInfo() Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource");
+#									noticeConsoleChan($self,"Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource");
+#								}
+#								$sth2->finish;
+#							}
+#						}
+#					}
+#					if (getUserAutologin($self,$sMatchingUserHandle)) {
+#						unless ($iMatchingUserAuth) {
+#							my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
+#							my $sth2 = $self->{dbh}->prepare($sQuery);
+#							unless ($sth2->execute($iMatchingUserId)) {
+#								log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+#							}
+#							else {
+#								$iMatchingUserAuth = 1;
+#								log_message($self,0,"getNickInfo() Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource (autologin is ON)");
+#								noticeConsoleChan($self,"Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource (autologin is ON)");
+#							}
+#							$sth2->finish;
+#						}
+#					}
+#					if (defined($ref->{'info1'})) {
+#						$sMatchingUserInfo1 = $ref->{'info1'};
+#					}
+#					if (defined($ref->{'info2'})) {
+#						$sMatchingUserInfo2 = $ref->{'info2'};
+#					}
+#				}
+#			}
+#		}
+#	}
+#	$sth->finish;
+#	if (defined($iMatchingUserId)) {
+#		log_message($self,3,"getNickInfo() iMatchingUserId : $iMatchingUserId");
+#	}
+#	else {
+#		log_message($self,4,"getNickInfo() iMatchingUserId is undefined with this host : " . $message->prefix);
+#		return (undef,undef,undef,undef,undef,undef,undef);
+#	}
+#	if (defined($iMatchingUserLevel)) {
+#		log_message($self,4,"getNickInfo() iMatchingUserLevel : $iMatchingUserLevel");
+#	}
+#	if (defined($iMatchingUserLevelDesc)) {
+#		log_message($self,4,"getNickInfo() iMatchingUserLevelDesc : $iMatchingUserLevelDesc");
+#	}
+#	if (defined($iMatchingUserAuth)) {
+#		log_message($self,4,"getNickInfo() iMatchingUserAuth : $iMatchingUserAuth");
+#	}
+#	if (defined($sMatchingUserHandle)) {
+#		log_message($self,4,"getNickInfo() sMatchingUserHandle : $sMatchingUserHandle");
+#	}
+#	if (defined($sMatchingUserPasswd)) {
+#		log_message($self,4,"getNickInfo() sMatchingUserPasswd : $sMatchingUserPasswd");
+#	}
+#	if (defined($sMatchingUserInfo1)) {
+#		log_message($self,4,"getNickInfo() sMatchingUserInfo1 : $sMatchingUserInfo1");
+#	}
+#	if (defined($sMatchingUserInfo2)) {
+#		log_message($self,4,"getNickInfo() sMatchingUserInfo2 : $sMatchingUserInfo2");
+#	}
+#	
+#	return ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2);
+#}
 
+# Get nick information from a message
 sub getNickInfo(@) {
-	my ($self,$message) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $iMatchingUserId;
-	my $iMatchingUserLevel;
-	my $iMatchingUserLevelDesc;
-	my $iMatchingUserAuth;
-	my $sMatchingUserHandle;
-	my $sMatchingUserPasswd;
-	my $sMatchingUserInfo1;
-	my $sMatchingUserInfo2;
-	
-	my $sCheckQuery = "SELECT * FROM USER";
-	my $sth = $self->{dbh}->prepare($sCheckQuery);
-	unless ($sth->execute ) {
-		log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
-	}
-	else {
-		while (my $ref = $sth->fetchrow_hashref()) {
-			my @tHostmasks = split(/,/,$ref->{'hostmasks'});
-			foreach my $sHostmask (@tHostmasks) {
-				log_message($self,4,"getNickInfo() Checking hostmask : " . $sHostmask);
-				my $sHostmaskSource = $sHostmask;
-				$sHostmask =~ s/\./\\./g;
-				$sHostmask =~ s/\*/.*/g;
-				$sHostmask =~ s/\[/\\[/g;
-				$sHostmask =~ s/\]/\\]/g;
-				$sHostmask =~ s/\{/\\{/g;
-				$sHostmask =~ s/\}/\\}/g;
-				if ( $message->prefix =~ /^$sHostmask/ ) {
-					log_message($self,3,"getNickInfo() $sHostmask matches " . $message->prefix);
-					$sMatchingUserHandle = $ref->{'nickname'};
-					if (defined($ref->{'password'})) {
-						$sMatchingUserPasswd = $ref->{'password'};
-					}
-					$iMatchingUserId = $ref->{'id_user'};
-					my $iMatchingUserLevelId = $ref->{'id_user_level'};
-					my $sGetLevelQuery = "SELECT * FROM USER_LEVEL WHERE id_user_level=?";
-					my $sth2 = $self->{dbh}->prepare($sGetLevelQuery);
-				        unless ($sth2->execute($iMatchingUserLevelId)) {
-                				log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sGetLevelQuery);
-        				}
-        				else {
-               					while (my $ref2 = $sth2->fetchrow_hashref()) {
-							$iMatchingUserLevel = $ref2->{'level'};
-							$iMatchingUserLevelDesc = $ref2->{'description'};
-						}
-					}
-					$iMatchingUserAuth = $ref->{'auth'};
-					if ( defined($MAIN_CONF{'connection.CONN_NETWORK_TYPE'}) && ($MAIN_CONF{'connection.CONN_NETWORK_TYPE'} eq "1") && defined($MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'}) && ($MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'} ne "")) {
-						unless ($iMatchingUserAuth) {
-							my $sUnetHostmask = $MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'};
-							if ($sHostmaskSource =~ /$sUnetHostmask$/) {
-								my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
-								my $sth2 = $self->{dbh}->prepare($sQuery);
-								unless ($sth2->execute($iMatchingUserId)) {
-									log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-								}
-								else {
-									$iMatchingUserAuth = 1;
-									log_message($self,0,"getNickInfo() Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource");
-									noticeConsoleChan($self,"Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource");
-								}
-								$sth2->finish;
-							}
-						}
-					}
-					if (getUserAutologin($self,$sMatchingUserHandle)) {
-						unless ($iMatchingUserAuth) {
-							my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
-							my $sth2 = $self->{dbh}->prepare($sQuery);
-							unless ($sth2->execute($iMatchingUserId)) {
-								log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-							}
-							else {
-								$iMatchingUserAuth = 1;
-								log_message($self,0,"getNickInfo() Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource (autologin is ON)");
-								noticeConsoleChan($self,"Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource (autologin is ON)");
-							}
-							$sth2->finish;
-						}
-					}
-					if (defined($ref->{'info1'})) {
-						$sMatchingUserInfo1 = $ref->{'info1'};
-					}
-					if (defined($ref->{'info2'})) {
-						$sMatchingUserInfo2 = $ref->{'info2'};
-					}
-				}
-			}
-		}
-	}
-	$sth->finish;
-	if (defined($iMatchingUserId)) {
-		log_message($self,3,"getNickInfo() iMatchingUserId : $iMatchingUserId");
-	}
-	else {
-		log_message($self,4,"getNickInfo() iMatchingUserId is undefined with this host : " . $message->prefix);
-		return (undef,undef,undef,undef,undef,undef,undef);
-	}
-	if (defined($iMatchingUserLevel)) {
-		log_message($self,4,"getNickInfo() iMatchingUserLevel : $iMatchingUserLevel");
-	}
-	if (defined($iMatchingUserLevelDesc)) {
-		log_message($self,4,"getNickInfo() iMatchingUserLevelDesc : $iMatchingUserLevelDesc");
-	}
-	if (defined($iMatchingUserAuth)) {
-		log_message($self,4,"getNickInfo() iMatchingUserAuth : $iMatchingUserAuth");
-	}
-	if (defined($sMatchingUserHandle)) {
-		log_message($self,4,"getNickInfo() sMatchingUserHandle : $sMatchingUserHandle");
-	}
-	if (defined($sMatchingUserPasswd)) {
-		log_message($self,4,"getNickInfo() sMatchingUserPasswd : $sMatchingUserPasswd");
-	}
-	if (defined($sMatchingUserInfo1)) {
-		log_message($self,4,"getNickInfo() sMatchingUserInfo1 : $sMatchingUserInfo1");
-	}
-	if (defined($sMatchingUserInfo2)) {
-		log_message($self,4,"getNickInfo() sMatchingUserInfo2 : $sMatchingUserInfo2");
-	}
-	
-	return ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2);
+    my ($self, $message) = @_;
+
+    my $conf = $self->{conf};
+
+    my ($iMatchingUserId, $iMatchingUserLevel, $iMatchingUserLevelDesc, $iMatchingUserAuth);
+    my ($sMatchingUserHandle, $sMatchingUserPasswd, $sMatchingUserInfo1, $sMatchingUserInfo2);
+
+    my $sCheckQuery = "SELECT * FROM USER";
+    my $sth = $self->{dbh}->prepare($sCheckQuery);
+    unless ($sth->execute) {
+        log_message($self, 1, "getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
+    } else {
+        while (my $ref = $sth->fetchrow_hashref()) {
+            my @tHostmasks = split(/,/, $ref->{'hostmasks'});
+            foreach my $sHostmask (@tHostmasks) {
+                log_message($self, 4, "getNickInfo() Checking hostmask : $sHostmask");
+                my $sHostmaskSource = $sHostmask;
+                $sHostmask =~ s/\./\\./g;
+                $sHostmask =~ s/\*/.*/g;
+                $sHostmask =~ s/\[/\\[/g;
+                $sHostmask =~ s/\]/\\]/g;
+                $sHostmask =~ s/\{/\\{/g;
+                $sHostmask =~ s/\}/\\}/g;
+                if ($message->prefix =~ /^$sHostmask/) {
+                    log_message($self, 3, "getNickInfo() $sHostmask matches " . $message->prefix);
+                    $sMatchingUserHandle = $ref->{'nickname'};
+                    $sMatchingUserPasswd = $ref->{'password'} if defined($ref->{'password'});
+                    $iMatchingUserId = $ref->{'id_user'};
+                    my $iMatchingUserLevelId = $ref->{'id_user_level'};
+
+                    my $sGetLevelQuery = "SELECT * FROM USER_LEVEL WHERE id_user_level=?";
+                    my $sth2 = $self->{dbh}->prepare($sGetLevelQuery);
+                    unless ($sth2->execute($iMatchingUserLevelId)) {
+                        log_message($self, 1, "getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sGetLevelQuery);
+                    } else {
+                        while (my $ref2 = $sth2->fetchrow_hashref()) {
+                            $iMatchingUserLevel = $ref2->{'level'};
+                            $iMatchingUserLevelDesc = $ref2->{'description'};
+                        }
+                    }
+
+                    $iMatchingUserAuth = $ref->{'auth'};
+
+                    if (
+                        defined($conf->get('connection.CONN_NETWORK_TYPE')) &&
+                        $conf->get('connection.CONN_NETWORK_TYPE') eq "1" &&
+                        defined($conf->get('undernet.UNET_CSERVICE_HOSTMASK')) &&
+                        $conf->get('undernet.UNET_CSERVICE_HOSTMASK') ne ""
+                    ) {
+                        unless ($iMatchingUserAuth) {
+                            my $sUnetHostmask = $conf->get('undernet.UNET_CSERVICE_HOSTMASK');
+                            if ($sHostmaskSource =~ /$sUnetHostmask$/) {
+                                my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
+                                my $sth2 = $self->{dbh}->prepare($sQuery);
+                                unless ($sth2->execute($iMatchingUserId)) {
+                                    log_message($self, 1, "getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+                                } else {
+                                    $iMatchingUserAuth = 1;
+                                    log_message($self, 0, "getNickInfo() Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource");
+                                    noticeConsoleChan($self, "Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource");
+                                }
+                                $sth2->finish;
+                            }
+                        }
+                    }
+
+                    if (getUserAutologin($self, $sMatchingUserHandle)) {
+                        unless ($iMatchingUserAuth) {
+                            my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
+                            my $sth2 = $self->{dbh}->prepare($sQuery);
+                            unless ($sth2->execute($iMatchingUserId)) {
+                                log_message($self, 1, "getNickInfo() SQL Error : " . $DBI::errstr . " Query : $sQuery");
+                            } else {
+                                $iMatchingUserAuth = 1;
+                                log_message($self, 0, "getNickInfo() Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource (autologin is ON)");
+                                noticeConsoleChan($self, "Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource (autologin is ON)");
+                            }
+                            $sth2->finish;
+                        }
+                    }
+
+                    $sMatchingUserInfo1 = $ref->{'info1'} if defined($ref->{'info1'});
+                    $sMatchingUserInfo2 = $ref->{'info2'} if defined($ref->{'info2'});
+                }
+            }
+        }
+    }
+    $sth->finish;
+
+    unless (defined($iMatchingUserId)) {
+        log_message($self, 4, "getNickInfo() iMatchingUserId is undefined with this host : " . $message->prefix);
+        return (undef, undef, undef, undef, undef, undef, undef);
+    }
+
+    log_message($self, 3, "getNickInfo() iMatchingUserId : $iMatchingUserId")       if defined($iMatchingUserId);
+    log_message($self, 4, "getNickInfo() iMatchingUserLevel : $iMatchingUserLevel") if defined($iMatchingUserLevel);
+    log_message($self, 4, "getNickInfo() iMatchingUserLevelDesc : $iMatchingUserLevelDesc") if defined($iMatchingUserLevelDesc);
+    log_message($self, 4, "getNickInfo() iMatchingUserAuth : $iMatchingUserAuth")   if defined($iMatchingUserAuth);
+    log_message($self, 4, "getNickInfo() sMatchingUserHandle : $sMatchingUserHandle") if defined($sMatchingUserHandle);
+    log_message($self, 4, "getNickInfo() sMatchingUserPasswd : $sMatchingUserPasswd") if defined($sMatchingUserPasswd);
+    log_message($self, 4, "getNickInfo() sMatchingUserInfo1 : $sMatchingUserInfo1") if defined($sMatchingUserInfo1);
+    log_message($self, 4, "getNickInfo() sMatchingUserInfo2 : $sMatchingUserInfo2") if defined($sMatchingUserInfo2);
+
+    return (
+        $iMatchingUserId,
+        $iMatchingUserLevel,
+        $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,
+        $sMatchingUserHandle,
+        $sMatchingUserPasswd,
+        $sMatchingUserInfo1,
+        $sMatchingUserInfo2
+    );
 }
 
+# Handle public commands
 sub mbCommandPublic(@) {
 	my ($self,$message,$sChannel,$sNick,$botNickTriggered,$sCommand,@tArgs)	= @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $conf = $self->{conf};
 	switch($sCommand) {
 		case /^die$/i				{
 													mbQuit($self,$message,$sNick,@tArgs);
@@ -1289,10 +1455,10 @@ sub mbCommandPublic(@) {
 		case /^showcmd$/i		{
 													mbDbShowCommand($self,$message,$sNick,@tArgs);
 												}
-		case /^version$/i		{
-													log_message($self,0,"mbVersion() by $sNick on $sChannel");
-													botPrivmsg($self,$sChannel,$MAIN_CONF{'main.MAIN_PROG_NAME'} . $self->{main_prog_version});
-													logBot($self,$message,undef,"version",undef);
+		case /^version$/i 						{
+													log_message($self, 0, "mbVersion() by $sNick on $sChannel");
+													botPrivmsg($self,$sChannel,$self->{conf}->get('main.MAIN_PROG_NAME') . $self->{main_prog_version});
+													logBot($self, $message, undef, "version", undef);
 												}
 		case /^chanstatlines$/i	{
 														channelStatLines($self,$message,$sChannel,$sNick,@tArgs);
@@ -1496,8 +1662,7 @@ sub mbCommandPublic(@) {
 															return 0;
 														}
 													}	
-		else									{
-														#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,$sChannel,$sNick,$sCommand,@tArgs);
+		else										{
 														my $bFound = mbDbCommand($self,$message,$sChannel,$sNick,$sCommand,@tArgs);
 														unless ( $bFound ) {
 															if ($botNickTriggered) {
@@ -1523,19 +1688,19 @@ sub mbCommandPublic(@) {
 																		botPrivmsg($self,$sChannel,"StatiK is my big brother $sNick, he's awesome !");
 																	}
 																	elsif ($botNickTriggered) {
-																		my $id_chanset_list = getIdChansetList($self,"Hailo");
+																		my $id_chanset_list = getIdChansetList($self, "Hailo");
 																		if (defined($id_chanset_list)) {
-																			my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
+																			my $id_channel_set = getIdChannelSet($self, $sChannel, $id_chanset_list);
 																			if (defined($id_channel_set)) {
-																				unless (is_hailo_excluded_nick($self,$sNick) || (substr($what, 0, 1) eq "!") || (substr($what, 0, 1) eq $MAIN_CONF{'main.MAIN_PROG_CMD_CHAR'})) {
+																				unless (is_hailo_excluded_nick($self, $sNick) || (substr($what, 0, 1) eq "!")  || (substr($what, 0, 1) eq $self->{conf}->get('main.MAIN_PROG_CMD_CHAR')) ) {
 																					my $hailo = get_hailo($self);
 																					my $sCurrentNick = $self->{irc}->nick_folded;
 																					$what =~ s/$sCurrentNick//g;
 																					$what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
 																					my $sAnswer = $hailo->learn_reply($what);
 																					if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
-																						log_message($self,4,"learn_reply $what from $sNick : $sAnswer");
-																						botPrivmsg($self,$sChannel,$sAnswer);
+																						log_message($self, 4, "learn_reply $what from $sNick : $sAnswer");
+																						botPrivmsg($self, $sChannel, $sAnswer);
 																					}
 																				}
 																			}
@@ -1551,6 +1716,7 @@ sub mbCommandPublic(@) {
 	}
 }
 
+# Handle private commands
 sub mbCommandPrivate(@) {
 	my ($self,$message,$sNick,$sCommand,@tArgs)	= @_;
 	switch($sCommand) {
@@ -1804,6 +1970,7 @@ sub mbCommandPrivate(@) {
 	}
 }
 
+# Quit the bot
 sub mbQuit(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
@@ -1826,6 +1993,7 @@ sub mbQuit(@) {
 	}
 }
 
+# Check if the user is logged in
 sub checkAuth(@) {
 	my ($self,$iUserId,$sUserHandle,$sPassword) = @_;
 	my $sCheckAuthQuery = "SELECT * FROM USER WHERE id_user=? AND nickname=? AND password=PASSWORD(?)";
@@ -1856,6 +2024,7 @@ sub checkAuth(@) {
 	$sth->finish;
 }
 
+# User login command
 sub userLogin(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
 	#login <username> <password>
@@ -1891,6 +2060,7 @@ sub userLogin(@) {
 	}
 }
 
+# check user Level
 sub checkUserLevel(@) {
 	my ($self,$iUserLevel,$sLevelRequired) = @_;
 	log_message($self,3,"isUserLevel() $iUserLevel vs $sLevelRequired");
@@ -1918,6 +2088,7 @@ sub checkUserLevel(@) {
 	}
 }
 
+# Count the number of users in the database
 sub userCount(@) {
 	my ($self) = @_;
 	my $sQuery = "SELECT count(*) as nbUser FROM USER";
@@ -2208,122 +2379,79 @@ sub actChannel(@) {
 	}
 }
 
+# Check resource usage of the bot
 sub mbStatus(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+	my ($iMatchingUserId, $iMatchingUserLevel, $iMatchingUserLevelDesc, $iMatchingUserAuth, $sMatchingUserHandle, $sMatchingUserPasswd, $sMatchingUserInfo1, $sMatchingUserInfo2) = getNickInfo($self, $message);
+	
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self, $iMatchingUserLevel, "Master")) {
+
 				# Bot Uptime
 				my $iUptime = time - $self->{iConnectionTimestamp};
 				my $days = int($iUptime / 86400);
-				my $hours = int(($iUptime - ( $days * 86400 )) / 3600);
-				$hours = sprintf("%02d",$hours);
-				my $minutes = int(($iUptime - ( $days * 86400 ) - ( $hours * 3600 )) / 60);
-				$minutes = sprintf("%02d",$minutes);
-				my $seconds = int($iUptime - ( $days * 86400 ) - ( $hours * 3600 ) - ( $minutes * 60 ));
-				$seconds = sprintf("%02d",$seconds);
-				log_message($self,3,"days = $days hours = $hours minutes = $minutes seconds = $seconds");
-				#my $sUptimeStr = ($days > 0 ? "$days days, " : "") . (int($hours) > 0 ? ("$hours" . "h ") : "") . (int($minutes > 0 ? ("$minutes" . "mn") : "")) . "$seconds" . "s";
-				my $sUptimeStr;
-				if ($days > 0) {
-					$sUptimeStr .= "$days days, ";
-				}
-				if (int($hours) > 0) {
-					$sUptimeStr .= "$hours" . "h ";
-				}
-				if (int($minutes) > 0) {
-					$sUptimeStr .= "$minutes" . "mn ";
-				}
+				my $hours = sprintf("%02d", int(($iUptime % 86400) / 3600));
+				my $minutes = sprintf("%02d", int(($iUptime % 3600) / 60));
+				my $seconds = sprintf("%02d", $iUptime % 60);
+
+				log_message($self, 3, "days = $days hours = $hours minutes = $minutes seconds = $seconds");
+
+				my $sUptimeStr = "";
+				$sUptimeStr .= "$days days, " if $days > 0;
+				$sUptimeStr .= "$hours" . "h " if $hours > 0;
+				$sUptimeStr .= "$minutes" . "mn " if $minutes > 0;
 				$sUptimeStr .= "$seconds" . "s";
-				
-				unless (defined($sUptimeStr)) {
-					$sUptimeStr = "Unknown";
-				}
-				
+
+				$sUptimeStr = "Unknown" unless defined($sUptimeStr);
+
 				# Server Uptime
 				my $sUptime = "Unknown";
-				unless (open LOAD, "uptime |") {
-					log_message($self,0,"Could not exec uptime command");
+				if (open my $LOAD, "-|", "uptime") {
+					chomp($sUptime = <$LOAD>) if defined($sUptime = <$LOAD>);
+					close $LOAD;
+				} else {
+					log_message($self, 0, "Could not exec uptime command");
 				}
-				else {
-					my $line;
-					if (defined($line=<LOAD>)) {
-						chomp($line);
-						$sUptime = $line;
-					}
-				}
-				
+
 				# Server type
 				my $sUname = "Unknown";
-				unless (open UNAME, "uname -a |") {
-					log_message($self,0,"Could not exec uptime command");
+				if (open my $UNAME, "-|", "uname -a") {
+					chomp($sUname = <$UNAME>) if defined($sUname = <$UNAME>);
+					close $UNAME;
+				} else {
+					log_message($self, 0, "Could not exec uname command");
 				}
-				else {
-					my $line;
-					if (defined($line=<UNAME>)) {
-						chomp($line);
-						$sUname = $line;
-					}
-				}
-				
+
 				# Memory usage
 				my $mu = Memory::Usage->new();
 				$mu->record('Memory stats');
 
 				my @tMemStateResultsArrayRef = $mu->state();
 				my @tMemStateResults = $tMemStateResultsArrayRef[0][0];
-				
-				my ($iTimestamp,$sMessage,$fVmSize,$fResSetSize,$fSharedMemSize,$sCodeSize,$fDataStackSize);
-				if (defined($tMemStateResults[0][0]) && ($tMemStateResults[0][0] ne "")) {
-					$iTimestamp = $tMemStateResults[0][0];
-				}
-				if (defined($tMemStateResults[0][1]) && ($tMemStateResults[0][1] ne "")) {
-					$sMessage = $tMemStateResults[0][1];
-				}
-				if (defined($tMemStateResults[0][2]) && ($tMemStateResults[0][2] ne "")) {
-					$fVmSize = $tMemStateResults[0][2];
-					$fVmSize = $fVmSize / 1024;
-					$fVmSize = sprintf("%.2f",$fVmSize);
-				}
-				if (defined($tMemStateResults[0][3]) && ($tMemStateResults[0][3] ne "")) {
-					$fResSetSize = $tMemStateResults[0][3];
-					$fResSetSize = $fResSetSize / 1024;
-					$fResSetSize = sprintf("%.2f",$fResSetSize);
-				}
-				if (defined($tMemStateResults[0][4]) && ($tMemStateResults[0][4] ne "")) {
-					$fSharedMemSize = $tMemStateResults[0][4];
-					$fSharedMemSize = $fSharedMemSize / 1024;
-					$fSharedMemSize = sprintf("%.2f",$fSharedMemSize);
-				}
-				if (defined($tMemStateResults[0][5]) && ($tMemStateResults[0][5] ne "")) {
-					$sCodeSize = $tMemStateResults[0][5];
-				}
-				if (defined($tMemStateResults[0][6]) && ($tMemStateResults[0][6] ne "")) {
-					$fDataStackSize = $tMemStateResults[0][6];
-					$fDataStackSize = $fDataStackSize / 1024;
-					$fDataStackSize = sprintf("%.2f",$fDataStackSize);
-				
-				}
-				
-				botNotice($self,$sNick,$MAIN_CONF{'main.MAIN_PROG_NAME'} . " v" . $self->{main_prog_version} . " Uptime : $sUptimeStr");
-				botNotice($self,$sNick,"Memory usage (VM $fVmSize MB) (Resident Set $fResSetSize MB) (Shared Memory $fSharedMemSize MB) (Data and Stack $fDataStackSize MB)");
-				botNotice($self,$sNick,"Server : $sUname");
-				botNotice($self,$sNick,"Server's uptime : $sUptime");
-				logBot($self,$message,undef,"status",undef);
-			}
-			else {
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				my ($iTimestamp, $sMessage, $fVmSize, $fResSetSize, $fSharedMemSize, $sCodeSize, $fDataStackSize);
+
+				$fVmSize = sprintf("%.2f", $tMemStateResults[0][2] / 1024) if defined $tMemStateResults[0][2];
+				$fResSetSize = sprintf("%.2f", $tMemStateResults[0][3] / 1024) if defined $tMemStateResults[0][3];
+				$fSharedMemSize = sprintf("%.2f", $tMemStateResults[0][4] / 1024) if defined $tMemStateResults[0][4];
+				$fDataStackSize = sprintf("%.2f", $tMemStateResults[0][6] / 1024) if defined $tMemStateResults[0][6];
+
+				botNotice($self, $sNick, $self->{conf}->get('main.MAIN_PROG_NAME') . " v" . $self->{main_prog_version} . " Uptime : $sUptimeStr");
+				botNotice($self, $sNick, "Memory usage (VM $fVmSize MB) (Resident Set $fResSetSize MB) (Shared Memory $fSharedMemSize MB) (Data and Stack $fDataStackSize MB)");
+				botNotice($self, $sNick, "Server : $sUname");
+				botNotice($self, $sNick, "Server's uptime : $sUptime");
+				logBot($self, $message, undef, "status", undef);
+			} else {
+				botNotice($self, $sNick, "Your level does not allow you to use this command.");
 				return undef;
 			}
-		}
-		else {
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+		} else {
+			botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
 			return undef;
 		}
 	}
 }
+
 
 sub setConnectionTimestamp(@) {
 	my ($self,$iConnectionTimestamp) = @_;
@@ -4897,12 +5025,15 @@ sub mbDbCommand(@) {
 	$sth->finish;
 }
 
+# Display the bot birth date and its age
 sub displayBirthDate(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 	my $isPrivate = !defined($sChannel);
-	my $sBirthDate = time2str("I was born on %d/%m/%Y at %H:%M:%S.",$MAIN_CONF{'main.MAIN_PROG_BIRTHDATE'});
-	my $d = time() - $MAIN_CONF{'main.MAIN_PROG_BIRTHDATE'};
+
+	my $birth_ts = $self->{conf}->get('main.MAIN_PROG_BIRTHDATE');
+	my $sBirthDate = time2str("I was born on %d/%m/%Y at %H:%M:%S.", $birth_ts);
+
+	my $d = time() - $birth_ts;
 	my @int = (
 	    [ 'second', 1                ],
 	    [ 'minute', 60               ],
@@ -4912,29 +5043,27 @@ sub displayBirthDate(@) {
 	    [ 'month',  60*60*24*30.5    ],
 	    [ 'year',   60*60*24*30.5*12 ]
 	);
+
 	my $i = $#int;
 	my @r;
-	while ( ($i>=0) && ($d) )
-	{
-	    if ($d / $int[$i] -> [1] >= 1)
-	    {
+
+	while ($i >= 0 && $d) {
+	    if ($d / $int[$i]->[1] >= 1) {
 	        push @r, sprintf "%d %s%s",
-	                     $d / $int[$i] -> [1],
-	                     $int[$i]->[0],
-	                     ( sprintf "%d", $d / $int[$i] -> [1] ) > 1
-	                         ? 's'
-	                         : '';
+	            int($d / $int[$i]->[1]),
+	            $int[$i]->[0],
+	            (int($d / $int[$i]->[1]) > 1 ? 's' : '');
 	    }
-	    $d %= $int[$i] -> [1];
+	    $d %= $int[$i]->[1];
 	    $i--;
 	}
 
-	my $runtime = join ", ", @r if @r;
-	unless ($isPrivate) {
-		botPrivmsg($self,$sChannel,"$sBirthDate I am $runtime old");
-	}
-	else {
-		botNotice($self,$sNick,"$sBirthDate I am $runtime old");
+	my $runtime = join(", ", @r) if @r;
+
+	if ($isPrivate) {
+		botNotice($self, $sNick, "$sBirthDate I am $runtime old");
+	} else {
+		botPrivmsg($self, $sChannel, "$sBirthDate I am $runtime old");
 	}
 }
 
@@ -6061,7 +6190,7 @@ sub channelNicksRemove(@) {
 
 sub getYoutubeDetails(@) {
 	my ($self,$sText) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $conf = $self->{conf};
 	my $sYoutubeId;
 	log_message($self,3,"getYoutubeDetails() $sText");
 	if ( $sText =~ /http.*:\/\/www\.youtube\..*\/watch.*v=/i ) {
@@ -6086,7 +6215,7 @@ sub getYoutubeDetails(@) {
 	}
 	if (defined($sYoutubeId) && ( $sYoutubeId ne "" )) {
 		log_message($self,3,"getYoutubeDetails() sYoutubeId = $sYoutubeId");
-		my $APIKEY = $MAIN_CONF{'main.YOUTUBE_APIKEY'};
+		my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
 		unless (defined($APIKEY) && ($APIKEY ne "")) {
 			log_message($self,0,"getYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
 			log_message($self,0,"getYoutubeDetails() section [main]");
@@ -6204,11 +6333,13 @@ sub getYoutubeDetails(@) {
 	return undef;
 }
 
+# Display Youtube details
 sub displayYoutubeDetails(@) {
 	my ($self,$message,$sNick,$sChannel,$sText) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $conf = $self->{conf};
 	my $sYoutubeId;
 	log_message($self,3,"displayYoutubeDetails() $sText");
+
 	if ( $sText =~ /http.*:\/\/www\.youtube\..*\/watch.*v=/i ) {
 		$sYoutubeId = $sText;
 		$sYoutubeId =~ s/^.*watch.*v=//;
@@ -6229,15 +6360,18 @@ sub displayYoutubeDetails(@) {
 		$sYoutubeId =~ s/^.*youtu\.be\///;
 		$sYoutubeId = substr($sYoutubeId,0,11);
 	}
+
 	if (defined($sYoutubeId) && ( $sYoutubeId ne "" )) {
 		log_message($self,3,"displayYoutubeDetails() sYoutubeId = $sYoutubeId");
-		my $APIKEY = $MAIN_CONF{'main.YOUTUBE_APIKEY'};
+
+		my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
 		unless (defined($APIKEY) && ($APIKEY ne "")) {
 			log_message($self,0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
 			log_message($self,0,"displayYoutubeDetails() section [main]");
 			log_message($self,0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
 			return undef;
 		}
+
 		unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
 			log_message(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 		}
@@ -6262,7 +6396,6 @@ sub displayYoutubeDetails(@) {
 				my @tYoutubeItems = $hYoutubeInfo{'items'};
 				my @fTyoutubeItems = @{$tYoutubeItems[0]};
 				log_message($self,4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
-				# Check items
 				if ( $#fTyoutubeItems >= 0 ) {
 					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
 					log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
@@ -6295,8 +6428,7 @@ sub displayYoutubeDetails(@) {
 					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
 					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
 					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics channelTitle : $schannelTitle");
-					
-					
+
 					if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
 						my $sMsgSong .= String::IRC->new('[')->white('black');
 						$sMsgSong .= String::IRC->new('You')->black('white');
@@ -6309,32 +6441,16 @@ sub displayYoutubeDetails(@) {
 						$sMsgSong .= String::IRC->new("$sViewCount ")->grey('black');
 						$sMsgSong .= String::IRC->new("- ")->orange('black');
 						$sMsgSong .= String::IRC->new("by $schannelTitle")->grey('black');
-						
+
 						$sMsgSong =~ s/\r//;
 						$sMsgSong =~ s/\n//;
 						botPrivmsg($self,$sChannel,"($sNick) $sMsgSong");
 					}
 					else {
 						log_message($self,3,"displayYoutubeDetails() one of the youtube field is undef or empty");
-						if (defined($sTitle)) {
-							log_message($self,3,"displayYoutubeDetails() sTitle=$sTitle");
-						}
-						else {
-							log_message($self,3,"displayYoutubeDetails() sTitle is undefined");
-						}
-						
-						if (defined($sDuration)) {
-							log_message($self,3,"displayYoutubeDetails() sDuration=$sDuration");
-						}
-						else {
-							log_message($self,3,"displayYoutubeDetails() sDuration is undefined");
-						}
-						if (defined($sViewCount)) {
-							log_message($self,3,"displayYoutubeDetails() sViewCount=$sViewCount");
-						}
-						else {
-							log_message($self,3,"displayYoutubeDetails() sViewCount is undefined");
-						}
+						log_message($self,3,"displayYoutubeDetails() sTitle=$sTitle")     if defined($sTitle);
+						log_message($self,3,"displayYoutubeDetails() sDuration=$sDuration") if defined($sDuration);
+						log_message($self,3,"displayYoutubeDetails() sViewCount=$sViewCount") if defined($sViewCount);
 					}
 				}
 				else {
@@ -6653,14 +6769,15 @@ sub displayUrlTitle(@) {
 	}
 }
 
-# Set DEBUG level
+# Set the debug level of the bot
 sub mbDebug(@) {
 	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 	my $level = $tArgs[0];
 
 	my $irc_nick = $self->{irc}->nick_folded;
-	my $cfg       = $self->{cfg};
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $cfg       = $self->{cfg};  # config en écriture
+	my $conf      = $self->{conf}; # config en lecture (objet Mediabot::Conf)
+
 	my ($uid, $ulevel, $ulevel_desc, $is_auth, $uhandle, $upass, $info1, $info2) = getNickInfo($self, $message);
 
 	unless (defined $uid) {
@@ -6683,54 +6800,55 @@ sub mbDebug(@) {
 		return;
 	}
 
-	# Update the config
+	# Update the config on disk
 	$cfg->param("main.MAIN_PROG_DEBUG", $level);
 	$cfg->save();
 
-	# Reload values in object
+	# Update in memory
 	$self->{cfg}       = $cfg;
-	$self->{MAIN_CONF} = $cfg->vars();
+	$self->{MAIN_CONF} = $cfg->vars(); # temporaire pour backward compat
 
 	log_message($self, 0, "Debug set to $level");
 	botNotice($self, $sNick, "Debug set to $level");
 	logBot($self, $message, $sChannel, "debug", "Debug set to $level");
 }
 
+# Restart the bot
 sub mbRestart(@) {
-	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	my ($self, $message, $sNick, @tArgs) = @_;
+	my $conf = $self->{conf};  # nouvelle méthode de lecture de config
+
+	my ($iMatchingUserId, $iMatchingUserLevel, $iMatchingUserLevelDesc, $iMatchingUserAuth, $sMatchingUserHandle, $sMatchingUserPasswd, $sMatchingUserInfo1, $sMatchingUserInfo2) = getNickInfo($self, $message);
+
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Owner")) {
+			if (defined($iMatchingUserLevel) && checkUserLevel($self, $iMatchingUserLevel, "Owner")) {
 				my $iCHildPid;
 				if (defined($iCHildPid = fork())) {
 					unless ($iCHildPid) {
-						log_message($self,0,"Restart request from $sMatchingUserHandle");
+						log_message($self, 0, "Restart request from $sMatchingUserHandle");
 						setsid;
-						exec "./mb_restart.sh",$tArgs[0];
-					}
-					else {
-						botNotice($self,$sNick,"Restarting bot");
-						logBot($self,$message,undef,"restart",($MAIN_CONF{'main.MAIN_PROG_QUIT_MSG'}));
+						exec "./mb_restart.sh", $tArgs[0];
+					} else {
+						botNotice($self, $sNick, "Restarting bot");
+						logBot($self, $message, undef, "restart", $conf->get('main.MAIN_PROG_QUIT_MSG'));
 						$self->{Quit} = 1;
-						$self->{irc}->send_message( "QUIT", undef, "Restarting" );
+						$self->{irc}->send_message("QUIT", undef, "Restarting");
 					}
 				}
-				logBot($self,$message,undef,"restart",undef);
-			}
-			else {
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+				logBot($self, $message, undef, "restart", undef);
+			} else {
+				botNotice($self, $sNick, "Your level does not allow you to use this command.");
 				return undef;
 			}
-		}
-		else {
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+		} else {
+			botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
 			return undef;
 		}
 	}
 }
 
+# Jump to another server
 sub mbJump(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
@@ -7999,23 +8117,25 @@ sub delIgnore(@) {
 	}
 }
 
+# Search for a youtube video
 sub youtubeSearch(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
+	my $conf = $self->{conf};
+	my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
+
 	my $id_chanset_list = getIdChansetList($self,"YoutubeSearch");
 	if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
 		log_message($self,3,"id_chanset_list = $id_chanset_list");
 		my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
 		unless (defined($id_channel_set) && ($id_channel_set ne "")) {
 			return undef;
-		}
-		else {
+		} else {
 			log_message($self,3,"id_channel_set = $id_channel_set");
 		}
-	}
-	else {
+	} else {
 		return undef;
 	}
+
 	my $sYoutubeId;
 	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 		botNotice($self,$sNick,"yt <search>");
@@ -8024,13 +8144,14 @@ sub youtubeSearch(@) {
 	my $sText = join(" ",@tArgs);
 	$sText = url_encode_utf8($sText);
 	log_message($self,3,"youtubeSearch() on $sText");
-	my $APIKEY = $MAIN_CONF{'main.YOUTUBE_APIKEY'};
+
 	unless (defined($APIKEY) && ($APIKEY ne "")) {
 		log_message($self,0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
 		log_message($self,0,"displayYoutubeDetails() section [main]");
 		log_message($self,0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
 		return undef;
 	}
+
 	unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\" |" ) {
 		log_message(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 	}
@@ -8048,36 +8169,37 @@ sub youtubeSearch(@) {
 			log_message($self,4,"displayYoutubeDetails() json_details : $json_details");
 			my $sYoutubeInfo = decode_json $json_details;
 			my %hYoutubeInfo = %$sYoutubeInfo;
-				my @tYoutubeItems = $hYoutubeInfo{'items'};
-				my @fTyoutubeItems = @{$tYoutubeItems[0]};
-				log_message($self,4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
-				# Check items
-				if ( $#fTyoutubeItems >= 0 ) {
-					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
-					log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
-					my @tYoutubeId = $hYoutubeItems{'id'};
-					my %hYoutubeId = %{$tYoutubeId[0]};
-					log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Id : " . Dumper(%hYoutubeId));
-					$sYoutubeId = $hYoutubeId{'videoId'};
-					log_message($self,4,"displayYoutubeDetails() sYoutubeId : $sYoutubeId");
-				}
-				else {
-					log_message($self,3,"displayYoutubeDetails() Invalid id : $sYoutubeId");
-				}
+			my @tYoutubeItems = $hYoutubeInfo{'items'};
+			my @fTyoutubeItems = @{$tYoutubeItems[0]};
+			log_message($self,4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
+			if ( $#fTyoutubeItems >= 0 ) {
+				my %hYoutubeItems = %{$tYoutubeItems[0][0]};
+				log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
+				my @tYoutubeId = $hYoutubeItems{'id'};
+				my %hYoutubeId = %{$tYoutubeId[0]};
+				log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Id : " . Dumper(%hYoutubeId));
+				$sYoutubeId = $hYoutubeId{'videoId'};
+				log_message($self,4,"displayYoutubeDetails() sYoutubeId : $sYoutubeId");
+			}
+			else {
+				log_message($self,3,"displayYoutubeDetails() Invalid id : $sYoutubeId");
+			}
 		}
 		else {
 			log_message($self,3,"displayYoutubeDetails() curl empty result for : curl --connect-timeout 5 -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\"");
 		}
 	}
-	if (defined($sYoutubeId) && ( $sYoutubeId ne "" )) {
+
+	if (defined($sYoutubeId) && ($sYoutubeId ne "")) {
 		log_message($self,3,"displayYoutubeDetails() sYoutubeId = $sYoutubeId");
-		my $APIKEY = $MAIN_CONF{'main.YOUTUBE_APIKEY'};
+
 		unless (defined($APIKEY) && ($APIKEY ne "")) {
 			log_message($self,0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
 			log_message($self,0,"displayYoutubeDetails() section [main]");
 			log_message($self,0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
 			return undef;
 		}
+
 		unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
 			log_message(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 		}
@@ -8101,7 +8223,6 @@ sub youtubeSearch(@) {
 				my @tYoutubeItems = $hYoutubeInfo{'items'};
 				my @fTyoutubeItems = @{$tYoutubeItems[0]};
 				log_message($self,4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
-				# Check items
 				if ( $#fTyoutubeItems >= 0 ) {
 					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
 					log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
@@ -8132,8 +8253,8 @@ sub youtubeSearch(@) {
 					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
 					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
 					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
-					
-					if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
+
+					if (defined($sTitle) && ($sTitle ne "") && defined($sDuration) && ($sDuration ne "") && defined($sViewCount) && ($sViewCount ne "")) {
 						my $sMsgSong = String::IRC->new('[')->white('black');
 						$sMsgSong .= String::IRC->new('You')->black('white');
 						$sMsgSong .= String::IRC->new('Tube')->white('red');
@@ -8147,25 +8268,9 @@ sub youtubeSearch(@) {
 					}
 					else {
 						log_message($self,3,"displayYoutubeDetails() one of the youtube field is undef or empty");
-						if (defined($sTitle)) {
-							log_message($self,3,"displayYoutubeDetails() sTitle=$sTitle");
-						}
-						else {
-							log_message($self,3,"displayYoutubeDetails() sTitle is undefined");
-						}
-						
-						if (defined($sDuration)) {
-							log_message($self,3,"displayYoutubeDetails() sDuration=$sDuration");
-						}
-						else {
-							log_message($self,3,"displayYoutubeDetails() sDuration is undefined");
-						}
-						if (defined($sViewCount)) {
-							log_message($self,3,"displayYoutubeDetails() sViewCount=$sViewCount");
-						}
-						else {
-							log_message($self,3,"displayYoutubeDetails() sViewCount is undefined");
-						}
+						log_message($self,3,"sTitle=$sTitle") if defined $sTitle;
+						log_message($self,3,"sDuration=$sDuration") if defined $sDuration;
+						log_message($self,3,"sViewCount=$sViewCount") if defined $sViewCount;
 					}
 				}
 				else {
@@ -8182,42 +8287,45 @@ sub youtubeSearch(@) {
 	}
 }
 
+# Get the current song from the radio stream
 sub getRadioCurrentSong(@) {
 	my ($self) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	
-	my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
-	my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
-	my $RADIO_JSON = $MAIN_CONF{'radio.RADIO_JSON'};
-	my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
+	my $conf = $self->{conf};
+
+	my $RADIO_HOSTNAME = $conf->get('radio.RADIO_HOSTNAME');
+	my $RADIO_PORT     = $conf->get('radio.RADIO_PORT');
+	my $RADIO_JSON     = $conf->get('radio.RADIO_JSON');
+	my $RADIO_SOURCE   = $conf->get('radio.RADIO_SOURCE');
 
 	unless (defined($RADIO_HOSTNAME) && ($RADIO_HOSTNAME ne "")) {
 		log_message($self,0,"getRadioCurrentSong() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
 		return undef;
 	}
+	
 	my $JSON_STATUS_URL = "http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_JSON";
-	if ( $RADIO_PORT == 443 ) {
+	if ($RADIO_PORT == 443) {
 		$JSON_STATUS_URL = "https://$RADIO_HOSTNAME/$RADIO_JSON";
 	}
+	
 	unless (open ICECAST_STATUS_JSON, "curl --connect-timeout 3 -f -s $JSON_STATUS_URL |") {
 		return "N/A";
 	}
+	
 	my $line;
-	if (defined($line=<ICECAST_STATUS_JSON>)) {
+	if (defined($line = <ICECAST_STATUS_JSON>)) {
 		close ICECAST_STATUS_JSON;
 		chomp($line);
 		my $json = decode_json $line;
 		my @sources = $json->{'icestats'}{'source'};
-		#my %source = %{$sources[0][$RADIO_SOURCE]};
+
 		if (defined($sources[0])) {
 			my %source = %{$sources[0]};
 			if (defined($source{'title'})) {
 				my $title = $source{'title'};
-				if ( $title =~ /&#.*;/) {
+				if ($title =~ /&#.*;/) {
 					return decode_entities($title);
-				}
-				else {
-					return $source{'title'};
+				} else {
+					return $title;
 				}
 			}
 			elsif (defined($source{'server_description'})) {
@@ -8239,65 +8347,69 @@ sub getRadioCurrentSong(@) {
 	}
 }
 
+# Get the current listeners from the radio stream
 sub getRadioCurrentListeners(@) {
 	my ($self) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	
-	my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
-	my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
-	my $RADIO_JSON = $MAIN_CONF{'radio.RADIO_JSON'};
-	my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
+	my $conf = $self->{conf};
+
+	my $RADIO_HOSTNAME = $conf->get('radio.RADIO_HOSTNAME');
+	my $RADIO_PORT     = $conf->get('radio.RADIO_PORT');
+	my $RADIO_JSON     = $conf->get('radio.RADIO_JSON');
+	my $RADIO_SOURCE   = $conf->get('radio.RADIO_SOURCE');
 
 	unless (defined($RADIO_HOSTNAME) && ($RADIO_HOSTNAME ne "")) {
 		log_message($self,0,"getRadioCurrentSong() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
 		return undef;
 	}
+
 	my $JSON_STATUS_URL = "http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_JSON";
-	if ( $RADIO_PORT == 443 ) {
+	if ($RADIO_PORT == 443) {
 		$JSON_STATUS_URL = "https://$RADIO_HOSTNAME/$RADIO_JSON";
 	}
+
 	unless (open ICECAST_STATUS_JSON, "curl --connect-timeout 3 -f -s $JSON_STATUS_URL |") {
 		return "N/A";
 	}
+
 	my $line;
-	if (defined($line=<ICECAST_STATUS_JSON>)) {
+	if (defined($line = <ICECAST_STATUS_JSON>)) {
 		close ICECAST_STATUS_JSON;
 		chomp($line);
 		my $json = decode_json $line;
 		my @sources = $json->{'icestats'}{'source'};
-		#my %source = %{$sources[0][$RADIO_SOURCE]};
+
 		if (defined($sources[0])) {
 			my %source = %{$sources[0]};
 			if (defined($source{'listeners'})) {
 				return $source{'listeners'};
-			}
-			else {
+			} else {
 				return "N/A";
 			}
-		}
-		else {
+		} else {
 			return undef;
 		}
-	}
-	else {
+	} else {
 		return "N/A";
 	}
 }
 
+# Get the harbor name from the LIQUIDSOAP telnet port
 sub getRadioHarbor(@) {
 	my ($self) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
-	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	my $conf = $self->{conf};
+
+	my $LIQUIDSOAP_TELNET_HOST = $conf->get('radio.LIQUIDSOAP_TELNET_HOST');
+	my $LIQUIDSOAP_TELNET_PORT = $conf->get('radio.LIQUIDSOAP_TELNET_PORT');
+
 	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 		unless (open LIQUIDSOAP_HARBOR, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
-			log_message($self,3,"Unable to connect to LIQUIDSOAP telnet port");
+			log_message($self, 3, "Unable to connect to LIQUIDSOAP telnet port");
 		}
+
 		my $line;
-		my $sHarbor;
-		while (defined($line=<LIQUIDSOAP_HARBOR>)) {
+		while (defined($line = <LIQUIDSOAP_HARBOR>)) {
 			chomp($line);
-			if ( $line =~ /harbor/) {
+			if ($line =~ /harbor/) {
 				my $sHarbor = $line;
 				$sHarbor =~ s/^.*harbor/harbor/;
 				$sHarbor =~ s/\..*$//;
@@ -8305,90 +8417,96 @@ sub getRadioHarbor(@) {
 				return $sHarbor;
 			}
 		}
+
 		close LIQUIDSOAP_HARBOR;
 		return undef;
-	}
-	else {
+	} else {
 		return undef;
 	}
 }
 
+# Check if the radio is live by checking the LIQUIDSOAP harbor status
 sub isRadioLive(@) {
-	my ($self,$sHarbor) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
-	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	my ($self, $sHarbor) = @_;
+	my $conf = $self->{conf};
+
+	my $LIQUIDSOAP_TELNET_HOST = $conf->get('radio.LIQUIDSOAP_TELNET_HOST');
+	my $LIQUIDSOAP_TELNET_PORT = $conf->get('radio.LIQUIDSOAP_TELNET_PORT');
+
 	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 		unless (open LIQUIDSOAP_HARBOR, "echo -ne \"$sHarbor.status\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
-			log_message($self,3,"Unable to connect to LIQUIDSOAP telnet port");
+			log_message($self, 3, "Unable to connect to LIQUIDSOAP telnet port");
 		}
+
 		my $line;
-		my $sHarbor;
-		while (defined($line=<LIQUIDSOAP_HARBOR>)) {
+		while (defined($line = <LIQUIDSOAP_HARBOR>)) {
 			chomp($line);
-			if ( $line =~ /source/ ) {
-				log_message($self,3,$line);
-				if ( $line =~ /no source client connected/ ) {
+			if ($line =~ /source/) {
+				log_message($self, 3, $line);
+				if ($line =~ /no source client connected/) {
 					return 0;
-				}
-				else {
+				} else {
 					return 1;
 				}
 			}
 		}
 		close LIQUIDSOAP_HARBOR;
 		return 0;
-	}
-	else {
+	} else {
 		return 0;
 	}
 }
 
+# Get the remaining time of the current song from the LIQUIDSOAP telnet port
 sub getRadioRemainingTime(@) {
 	my ($self) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
-	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
-	my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
+	my $conf = $self->{conf};
+
+	my $LIQUIDSOAP_TELNET_HOST = $conf->get('radio.LIQUIDSOAP_TELNET_HOST');
+	my $LIQUIDSOAP_TELNET_PORT = $conf->get('radio.LIQUIDSOAP_TELNET_PORT');
+	my $RADIO_URL = $conf->get('radio.RADIO_URL');
+
 	my $LIQUIDSOAP_MOUNPOINT = $RADIO_URL;
 	$LIQUIDSOAP_MOUNPOINT =~ s/\./(dot)/;
+
 	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 		unless (open LIQUIDSOAP, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | grep remaining | tr -s \" \" | cut -f2 -d\" \" | tail -n 1 |") {
-			log_message($self,0,"getRadioRemainingTime() Unable to connect to LIQUIDSOAP telnet port");
+			log_message($self, 0, "getRadioRemainingTime() Unable to connect to LIQUIDSOAP telnet port");
 		}
 		my $line;
-		if (defined($line=<LIQUIDSOAP>)) {
+		if (defined($line = <LIQUIDSOAP>)) {
 			chomp($line);
-			log_message($self,3,$line);
+			log_message($self, 3, $line);
 			unless (open LIQUIDSOAP2, "echo -ne \"$line\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
-				log_message($self,0,"getRadioRemainingTime() Unable to connect to LIQUIDSOAP telnet port");
+				log_message($self, 0, "getRadioRemainingTime() Unable to connect to LIQUIDSOAP telnet port");
 			}
 			my $line2;
-			if (defined($line2=<LIQUIDSOAP2>)) {
+			if (defined($line2 = <LIQUIDSOAP2>)) {
 				chomp($line2);
-				log_message($self,3,$line2);
-				return($line2);
+				log_message($self, 3, $line2);
+				return $line2;
 			}
 		}
 		return 0;
-	}
-	else {
-		log_message($self,0,"getRadioRemainingTime() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+	} else {
+		log_message($self, 0, "getRadioRemainingTime() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
 	}
 }
 
+# Display the current song on the radio
 sub displayRadioCurrentSong(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
-	my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
-	my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
-	my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
-	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
+	my $conf = $self->{conf};
+
+	my $RADIO_HOSTNAME = $conf->get('radio.RADIO_HOSTNAME');
+	my $RADIO_PORT = $conf->get('radio.RADIO_PORT');
+	my $RADIO_SOURCE = $conf->get('radio.RADIO_SOURCE');
+	my $RADIO_URL = $conf->get('radio.RADIO_URL');
+	my $LIQUIDSOAP_TELNET_HOST = $conf->get('radio.LIQUIDSOAP_TELNET_HOST');
 
 	unless (defined($sChannel) && ($sChannel ne "")) {
 		my $id_channel;
-		if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
+		if (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^#/)) {
 			$sChannel = $tArgs[0];
 			$id_channel = getIdChannel($self,$sChannel);
 			unless (defined($id_channel)) {
@@ -8396,87 +8514,80 @@ sub displayRadioCurrentSong(@) {
 				return undef;
 			}
 			shift @tArgs;
-		}
-		else {
+		} else {
 			botNotice($self,$sNick,"Syntax: song <#channnel>");
 			return undef;
 		}
 	}
-	
+
 	my $sRadioCurrentSongTitle = getRadioCurrentSong($self);
-	
+
 	my $sHarbor = getRadioHarbor($self);
 	my $bRadioLive = 0;
 	if (defined($sHarbor) && ($sHarbor ne "")) {
 		log_message($self,3,$sHarbor);
 		$bRadioLive = isRadioLive($self,$sHarbor);
 	}
-	
+
 	if (defined($sRadioCurrentSongTitle) && ($sRadioCurrentSongTitle ne "")) {
-		# Format message with irc colors
 		my $sMsgSong = "";
-		
+
 		$sMsgSong .= String::IRC->new('[ ')->white('black');
-		if ( $RADIO_PORT == 443 ) {
+		if ($RADIO_PORT == 443) {
 			$sMsgSong .= String::IRC->new("https://$RADIO_HOSTNAME/$RADIO_URL")->orange('black');
-		}
-		else {
+		} else {
 			$sMsgSong .= String::IRC->new("http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_URL")->orange('black');
 		}
 		$sMsgSong .= String::IRC->new(' ] ')->white('black');
 		$sMsgSong .= String::IRC->new(' - ')->white('black');
 		$sMsgSong .= String::IRC->new(' [ ')->orange('black');
-		if ( $bRadioLive ) {
+		if ($bRadioLive) {
 			$sMsgSong .= String::IRC->new('Live - ')->white('black');
 		}
 		$sMsgSong .= String::IRC->new($sRadioCurrentSongTitle)->white('black');
 		$sMsgSong .= String::IRC->new(' ]')->orange('black');
-		unless ( $bRadioLive ) {
+
+		unless ($bRadioLive) {
 			if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-				#Remaining time
 				my $sRemainingTime = getRadioRemainingTime($self);
 				log_message($self,3,"displayRadioCurrentSong() sRemainingTime = $sRemainingTime");
 				my $siSecondsRemaining = int($sRemainingTime);
-				my $iMinutesRemaining = int($siSecondsRemaining / 60) ;
-				my $iSecondsRemaining = int($siSecondsRemaining - ( $iMinutesRemaining * 60 ));
+				my $iMinutesRemaining = int($siSecondsRemaining / 60);
+				my $iSecondsRemaining = int($siSecondsRemaining - ($iMinutesRemaining * 60));
 				$sMsgSong .= String::IRC->new(' - ')->white('black');
 				$sMsgSong .= String::IRC->new(' [ ')->orange('black');
 				my $sTimeRemaining = "";
-				if ( $iMinutesRemaining > 0 ) {
+				if ($iMinutesRemaining > 0) {
 					$sTimeRemaining .= $iMinutesRemaining . " mn";
-					if ( $iMinutesRemaining > 1 ) {
-						$sTimeRemaining .= "s";
-					}
+					$sTimeRemaining .= "s" if $iMinutesRemaining > 1;
 					$sTimeRemaining .= " and ";
 				}
 				$sTimeRemaining .= $iSecondsRemaining . " sec";
-				if ( $iSecondsRemaining > 1 ) {
-					$sTimeRemaining .= "s";
-				}
+				$sTimeRemaining .= "s" if $iSecondsRemaining > 1;
 				$sTimeRemaining .= " remaining";
 				$sMsgSong .= String::IRC->new($sTimeRemaining)->white('black');
 				$sMsgSong .= String::IRC->new(' ]')->orange('black');
 			}
 		}
 		botPrivmsg($self,$sChannel,"$sMsgSong");
-	}
-	else {
+	} else {
 		botNotice($self,$sNick,"Radio is currently unavailable");
 	}
 }
 
+# Display the current song on the radio
 sub displayRadioListeners(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
-	my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
-	my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
-	my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
+	my $conf = $self->{conf};
+
+	my $RADIO_HOSTNAME = $conf->get('radio.RADIO_HOSTNAME');
+	my $RADIO_PORT     = $conf->get('radio.RADIO_PORT');
+	my $RADIO_SOURCE   = $conf->get('radio.RADIO_SOURCE');
+	my $RADIO_URL      = $conf->get('radio.RADIO_URL');
 	
 	my $sRadioCurrentListeners = getRadioCurrentListeners($self);
-	
+
 	if (defined($sRadioCurrentListeners) && ($sRadioCurrentListeners ne "")) {
-		# Format message with irc colors
 		my $sMsgListeners = String::IRC->new('(')->white('red');
 		$sMsgListeners .= String::IRC->new(')')->maroon('red');
 		$sMsgListeners .= String::IRC->new('(')->red('maroon');
@@ -8494,27 +8605,29 @@ sub displayRadioListeners(@) {
 		$sMsgListeners .= String::IRC->new(')')->red('maroon');
 		$sMsgListeners .= String::IRC->new('(')->maroon('red');
 		$sMsgListeners .= String::IRC->new(')')->white('red');
-		
+
 		botPrivmsg($self,$sChannel,"$sMsgListeners");
-	}
-	else {
+	} else {
 		botNotice($self,$sNick,"Radio is currently unavailable");
 	}
 }
 
+# set the radio metadata
 sub setRadioMetadata(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
-				my %MAIN_CONF = %{$self->{MAIN_CONF}};
-				my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
-				my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
-				my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
-				my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
-				my $RADIO_ADMINPASS = $MAIN_CONF{'radio.RADIO_ADMINPASS'};
-				
+
+				my $conf = $self->{conf};
+				my $RADIO_HOSTNAME  = $conf->get('radio.RADIO_HOSTNAME');
+				my $RADIO_PORT      = $conf->get('radio.RADIO_PORT');
+				my $RADIO_SOURCE    = $conf->get('radio.RADIO_SOURCE');
+				my $RADIO_URL       = $conf->get('radio.RADIO_URL');
+				my $RADIO_ADMINPASS = $conf->get('radio.RADIO_ADMINPASS');
+
 				my $id_channel;
 				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
 					$id_channel = getIdChannel($self,$tArgs[0]);
@@ -8527,6 +8640,7 @@ sub setRadioMetadata(@) {
 					}
 					shift @tArgs;
 				}
+
 				my $sNewMetadata = join(" ",@tArgs);
 				unless (defined($sNewMetadata) && ($sNewMetadata ne "")) {
 					if (defined($sChannel) && ($sChannel ne "")) {
@@ -8534,7 +8648,7 @@ sub setRadioMetadata(@) {
 					}
 					return undef;
 				}
-				
+
 				if (defined($RADIO_ADMINPASS) && ($RADIO_ADMINPASS ne "")) {
 					unless (open ICECAST_UPDATE_METADATA, "curl --connect-timeout 3 -f -s -u admin:$RADIO_ADMINPASS \"http://$RADIO_HOSTNAME:$RADIO_PORT/admin/metadata?mount=/$RADIO_URL&mode=updinfo&song=" . url_encode_utf8($sNewMetadata) . "\" |") {
 						botNotice($self,$sNick,"Unable to update metadata (curl failed)");
@@ -8556,7 +8670,7 @@ sub setRadioMetadata(@) {
 					}
 				}
 				else {
-					log_message($self,0,"setRadioMetadata() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
+					log_message($self,0,"setRadioMetadata() radio.RADIO_ADMINPASS not set in " . $self->{config_file});
 				}
 			}
 			else {
@@ -8575,23 +8689,27 @@ sub setRadioMetadata(@) {
 	}
 }
 
+# Skip to the next song in the radio stream
 sub radioNext(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
-				my %MAIN_CONF = %{$self->{MAIN_CONF}};
-				my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
-				my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
-				my $RADIO_SOURCE = $MAIN_CONF{'radio.RADIO_SOURCE'};
-				my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
-				my $RADIO_ADMINPASS = $MAIN_CONF{'radio.RADIO_ADMINPASS'};
-				my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
-				my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+
+				my $conf = $self->{conf};
+				my $RADIO_HOSTNAME         = $conf->get('radio.RADIO_HOSTNAME');
+				my $RADIO_PORT             = $conf->get('radio.RADIO_PORT');
+				my $RADIO_SOURCE           = $conf->get('radio.RADIO_SOURCE');
+				my $RADIO_URL              = $conf->get('radio.RADIO_URL');
+				my $RADIO_ADMINPASS        = $conf->get('radio.RADIO_ADMINPASS');
+				my $LIQUIDSOAP_TELNET_HOST = $conf->get('radio.LIQUIDSOAP_TELNET_HOST');
+				my $LIQUIDSOAP_TELNET_PORT = $conf->get('radio.LIQUIDSOAP_TELNET_PORT');
+
 				my $LIQUIDSOAP_MOUNPOINT = $RADIO_URL;
 				$LIQUIDSOAP_MOUNPOINT =~ s/\./(dot)/;
-				
+
 				if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 					unless (open LIQUIDSOAP_NEXT, "echo -ne \"$LIQUIDSOAP_MOUNPOINT.skip\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
 						botNotice($self,$sNick,"Unable to connect to LIQUIDSOAP telnet port");
@@ -8602,7 +8720,7 @@ sub radioNext(@) {
 						chomp($line);
 						$i++;
 					}
-					if ( $i != 0 ) {
+					if ($i != 0) {
 						my $sMsgSong = "";
 						$sMsgSong .= String::IRC->new('[ ')->grey('black');
 						$sMsgSong .= String::IRC->new("http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_URL")->orange('black');
@@ -8634,33 +8752,32 @@ sub radioNext(@) {
 	}
 }
 
+# Display the word statistics for a given word in the last 24 hours
 sub wordStat(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $MAIN_PROG_CMD_CHAR = $MAIN_CONF{'main.MAIN_PROG_CMD_CHAR'};
+	my $MAIN_PROG_CMD_CHAR = $self->{conf}->get('main.MAIN_PROG_CMD_CHAR');
 	my $sWord;
+
 	unless (defined($tArgs[0]) && ($tArgs[0])) {
 		botNotice($self,$sNick,"Syntax : wordstat <word>");
 		return undef;
-	}
-	else {
+	} else {
 		$sWord = $tArgs[0];
 	}
 	
 	my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND name=? AND ts > date_sub('" . time2str("%Y-%m-%d %H:%M:%S",time) . "', INTERVAL 1 DAY)";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		my $sResponse;
+		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : $sQuery");
+	} else {
 		my $i = 0;
 		while (my $ref = $sth->fetchrow_hashref()) {
 			my $publictext = $ref->{'publictext'};
-			if (( $publictext =~ /\s$sWord$/i ) || ( $publictext =~ /\s$sWord\s/i ) || ( $publictext =~ /^$sWord\s/i ) || ( $publictext =~ /^$sWord$/i )) {
-				if ( $i < 10 ) {
-					log_message($self,3,"publictext : $publictext");
-				}
+			if (( $publictext =~ /\s$sWord$/i ) || 
+			    ( $publictext =~ /\s$sWord\s/i ) || 
+			    ( $publictext =~ /^$sWord\s/i ) || 
+			    ( $publictext =~ /^$sWord$/i )) {
+				log_message($self,3,"publictext : $publictext") if $i < 10;
 				$i++;
 			}
 		}
@@ -8668,9 +8785,9 @@ sub wordStat(@) {
 		logBot($self,$message,$sChannel,"wordstat",@tArgs);
 	}
 	$sth->finish;
-	
 }
 
+# Update the bot
 sub update(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
@@ -9618,6 +9735,7 @@ sub mbRehash(@) {
 	}
 }
 
+# Play a radio request
 sub playRadio(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
