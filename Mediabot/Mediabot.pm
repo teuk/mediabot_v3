@@ -318,7 +318,6 @@ sub get_hailo(@) {
 
 sub clean_and_exit(@) {
 	my ($self,$iRetValue) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	log_message($self,0,"Cleaning and exiting...");
 	
 	if (defined($self->{dbh}) && ($self->{dbh} != 0)) {
@@ -402,7 +401,6 @@ sub getDbh(@) {
 
 sub dbCheckTables(@) {
 	my ($self) = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $LOG = $self->{LOG};
 	my $dbh = $self->{dbh};
 	log_message($self,3,"Checking USER table");
@@ -422,7 +420,6 @@ sub dbCheckTables(@) {
 
 sub dbLogoutUsers(@) {
 	my ($self) = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $LOG = $self->{LOG};
 	my $dbh = $self->{dbh};
 	my $sLogoutQuery = "UPDATE USER SET auth=0 WHERE auth=1";
@@ -694,7 +691,6 @@ sub noticeConsoleChan(@) {
 
 sub logBot(@) {
 	my ($self,$message,$sChannel,$action,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	my $sHostmask = $message->prefix;
 	my $id_user = undef;
@@ -731,7 +727,6 @@ sub logBot(@) {
 
 sub logBotAction(@) {
 	my ($self,$message,$eventtype,$sNick,$sChannel,$sText) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	#my $dbh = $self->{dbh};
 	my $sUserhost = "";
 	if (defined($message)) {
@@ -769,7 +764,6 @@ sub logBotAction(@) {
 
 sub botPrivmsg(@) {
 	my ($self,$sTo,$sMsg) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	if (defined($sTo)) {
 		my $eventtype = "public";
 		if (substr($sTo, 0, 1) eq '#') {
@@ -839,7 +833,6 @@ sub botPrivmsg(@) {
 
 sub botAction(@) {
 	my ($self,$sTo,$sMsg) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	if (defined($sTo)) {
 		my $eventtype = "public";
 		if (substr($sTo, 0, 1) eq '#') {
@@ -909,7 +902,6 @@ sub botAction(@) {
 
 sub botNotice(@) {
 	my ($self,$sTo,$sMsg) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	$self->{irc}->do_NOTICE( target => $sTo, text => $sMsg );
 	log_message($self,0,"-> -$sTo- $sMsg");
 	if (substr($sTo, 0, 1) eq '#') {
@@ -996,7 +988,6 @@ sub onStartTimers(@) {
 
 sub userOnJoin(@) {
 	my ($self,$message,$sChannel,$sNick) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		my $sChannelUserQuery = "SELECT * FROM USER_CHANNEL,CHANNEL WHERE USER_CHANNEL.id_channel=CHANNEL.id_channel AND name=? AND id_user=?";
@@ -1562,7 +1553,6 @@ sub mbCommandPublic(@) {
 
 sub mbCommandPrivate(@) {
 	my ($self,$message,$sNick,$sCommand,@tArgs)	= @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	switch($sCommand) {
 		case /^die$/i				{
 													mbQuit($self,$message,$sNick,@tArgs);
@@ -1807,17 +1797,15 @@ sub mbCommandPrivate(@) {
 		case /^debug$/i						    	{
 														mbDebug($self,$message,$sNick,undef,@tArgs);
 													}
-		else							{
-													#my $bFound = mbPluginCommand(\%MAIN_CONF,$LOG,$dbh,$irc,$message,undef,$sNick,$sCommand,@tArgs);
-													log_message($self,3,$message->prefix . " Private command '$sCommand' not found");
-													return undef;
-											}
+		else										{
+														log_message($self,3,$message->prefix . " Private command '$sCommand' not found");
+														return undef;
+													}
 	}
 }
 
 sub mbQuit(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -1840,7 +1828,6 @@ sub mbQuit(@) {
 
 sub checkAuth(@) {
 	my ($self,$iUserId,$sUserHandle,$sPassword) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sCheckAuthQuery = "SELECT * FROM USER WHERE id_user=? AND nickname=? AND password=PASSWORD(?)";
 	my $sth = $self->{dbh}->prepare($sCheckAuthQuery);
 	unless ($sth->execute($iUserId,$sUserHandle,$sPassword)) {
@@ -1871,7 +1858,6 @@ sub checkAuth(@) {
 
 sub userLogin(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	#login <username> <password>
 	if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] ne "")) {
 		my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
@@ -1907,7 +1893,6 @@ sub userLogin(@) {
 
 sub checkUserLevel(@) {
 	my ($self,$iUserLevel,$sLevelRequired) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	log_message($self,3,"isUserLevel() $iUserLevel vs $sLevelRequired");
 	my $sQuery = "SELECT level FROM USER_LEVEL WHERE description like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -1935,7 +1920,6 @@ sub checkUserLevel(@) {
 
 sub userCount(@) {
 	my ($self) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sQuery = "SELECT count(*) as nbUser FROM USER";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute()) {
@@ -2027,7 +2011,6 @@ sub getLevelUser(@) {
 
 sub userAdd(@) {
 	my ($self,$sHostmask,$sUserHandle,$sPassword,$sLevel) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	unless (defined($sHostmask) && ($sHostmask =~ /^.+@.+/)) {
 		return undef;
 	}
@@ -2064,7 +2047,6 @@ sub userAdd(@) {
 
 sub registerChannel(@) {
 	my ($self,$message,$sNick,$id_channel,$id_user) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sQuery = "INSERT INTO USER_CHANNEL (id_user,id_channel,level) VALUES (?,?,500)";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($id_user,$id_channel)) {
@@ -2081,7 +2063,6 @@ sub registerChannel(@) {
 
 sub mbRegister(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sUserHandle = $tArgs[0];
 	my $sPassword = $tArgs[1];
 	if (defined($sUserHandle) && ($sUserHandle ne "") && defined($sPassword) && ($sPassword ne "")) {
@@ -2113,7 +2094,6 @@ sub mbRegister(@) {
 
 sub sayChannel(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -2145,7 +2125,6 @@ sub sayChannel(@) {
 
 sub dumpCmd(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -2172,7 +2151,6 @@ sub dumpCmd(@) {
 
 sub msgCmd(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -2201,7 +2179,6 @@ sub msgCmd(@) {
 
 sub actChannel(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -2390,7 +2367,6 @@ sub getQuit(@) {
 
 sub mbChangeNick(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -2422,7 +2398,6 @@ sub mbChangeNick(@) {
 
 sub mbAddTimer(@) {
 	my ($self,$message,$sChannel,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my %hTimers;
 	if ($self->{hTimers}) {
 		%hTimers = %{$self->{hTimers}};
@@ -2484,7 +2459,6 @@ sub mbAddTimer(@) {
 
 sub mbRemTimer(@) {
 	my ($self,$message,$sChannel,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my %hTimers;
 	if ($self->{hTimers}) {
 		%hTimers = %{$self->{hTimers}};
@@ -2534,7 +2508,6 @@ sub mbRemTimer(@) {
 
 sub mbTimers(@) {
 	my ($self,$message,$sChannel,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my %hTimers;
 	if ($self->{hTimers}) {
 		%hTimers = %{$self->{hTimers}};
@@ -2589,7 +2562,6 @@ sub mbTimers(@) {
 
 sub userPass(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 		my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 		if (defined($iMatchingUserId) && (defined($sMatchingUserHandle))) {
@@ -2622,7 +2594,6 @@ sub userPass(@) {
 
 sub userIdent(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	#login <username> <password>
 	if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] ne "")) {
 		my ($id_user,$bAlreadyExists) = checkAuthByUser($self,$message,$tArgs[0],$tArgs[1]);
@@ -2646,7 +2617,6 @@ sub userIdent(@) {
 
 sub checkAuthByUser(@) {
 	my ($self,$message,$sUserHandle,$sPassword) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sCheckAuthQuery = "SELECT * FROM USER WHERE nickname=? AND password=PASSWORD(?)";
 	my $sth = $self->{dbh}->prepare($sCheckAuthQuery);
 	unless ($sth->execute($sUserHandle,$sPassword)) {
@@ -2685,7 +2655,6 @@ sub checkAuthByUser(@) {
 
 sub userCstat(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -2721,7 +2690,6 @@ sub userCstat(@) {
 
 sub addUser(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $bNotify = 0;
 	if (defined($tArgs[0]) && ($tArgs[0] eq "-n")) {
 		$bNotify = 1;
@@ -2814,7 +2782,6 @@ sub getUserLevelDesc(@) {
 
 sub userStats(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -2874,7 +2841,6 @@ sub userStats(@) {
 
 sub userInfo(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -2940,7 +2906,6 @@ sub userInfo(@) {
 
 sub addUserHost(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -3028,7 +2993,6 @@ sub addUserHost(@) {
 
 sub addChannel(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -3285,7 +3249,6 @@ sub channelSetSyntax(@) {
 
 sub getIdChansetList(@) {
 	my ($self,$sChansetValue) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $id_chanset_list;
 	my $sQuery = "SELECT id_chanset_list FROM CHANSET_LIST WHERE chanset=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -3303,7 +3266,6 @@ sub getIdChansetList(@) {
 
 sub getIdChannelSet(@) {
 	my ($self,$sChannel,$id_chanset_list) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $id_channel_set;
 	my $sQuery = "SELECT id_channel_set FROM CHANNEL_SET,CHANNEL WHERE CHANNEL_SET.id_channel=CHANNEL.id_channel AND name=? AND id_chanset_list=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -3321,7 +3283,6 @@ sub getIdChannelSet(@) {
 
 sub purgeChannel(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -3421,7 +3382,6 @@ sub partChannel(@) {
 
 sub channelPart(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -3465,7 +3425,6 @@ sub channelPart(@) {
 
 sub checkUserChannelLevel(@) {
 	my ($self,$message,$sChannel,$id_user,$level) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sQuery = "SELECT level FROM CHANNEL,USER_CHANNEL WHERE CHANNEL.id_channel=USER_CHANNEL.id_channel AND name=? AND id_user=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$id_user)) {
@@ -3492,7 +3451,6 @@ sub checkUserChannelLevel(@) {
 
 sub channelJoin(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -3551,7 +3509,6 @@ sub channelJoin(@) {
 
 sub channelAddUser(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -3620,7 +3577,6 @@ sub channelAddUser(@) {
 
 sub getUserChannelLevel(@) {
 	my ($self,$message,$sChannel,$id_user) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sQuery = "SELECT level FROM CHANNEL,USER_CHANNEL WHERE CHANNEL.id_channel=USER_CHANNEL.id_channel AND name=? AND id_user=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$id_user)) {
@@ -3641,7 +3597,6 @@ sub getUserChannelLevel(@) {
 
 sub channelDelUser(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -3709,7 +3664,6 @@ sub channelDelUser(@) {
 
 sub userModinfoSyntax(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	botNotice($self,$sNick,"Syntax: modinfo [#channel] automode <user> <voice|op|none>");
 	botNotice($self,$sNick,"Syntax: modinfo [#channel] greet <user> <greet> (use keyword \"none\" for <greet> to remove it)");
 	botNotice($self,$sNick,"Syntax: modinfo [#channel] level <user> <level>");
@@ -3717,7 +3671,6 @@ sub userModinfoSyntax(@) {
 
 sub userModinfo(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -3851,7 +3804,6 @@ sub userModinfo(@) {
 
 sub getIdUserChannelLevel(@) {
 	my ($self,$sUserHandle,$sChannel) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sQuery = "SELECT USER.id_user,USER_CHANNEL.level FROM CHANNEL,USER,USER_CHANNEL WHERE CHANNEL.id_channel=USER_CHANNEL.id_channel AND USER.id_user=USER_CHANNEL.id_user AND USER.nickname=? AND CHANNEL.name=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sUserHandle,$sChannel)) {
@@ -3874,7 +3826,6 @@ sub getIdUserChannelLevel(@) {
 
 sub userOpChannel(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -3921,7 +3872,6 @@ sub userOpChannel(@) {
 
 sub userDeopChannel(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -3968,7 +3918,6 @@ sub userDeopChannel(@) {
 
 sub userInviteChannel(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -4015,7 +3964,6 @@ sub userInviteChannel(@) {
 
 sub userVoiceChannel(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -4062,7 +4010,6 @@ sub userVoiceChannel(@) {
 
 sub userDevoiceChannel(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -4109,7 +4056,6 @@ sub userDevoiceChannel(@) {
 
 sub userKickChannel(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -4161,7 +4107,6 @@ sub userKickChannel(@) {
 
 sub userTopicChannel(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -4210,7 +4155,6 @@ sub userTopicChannel(@) {
 
 sub userShowcommandsChannel(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -4256,7 +4200,6 @@ sub userShowcommandsChannel(@) {
 
 sub userChannelInfo(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
 		$sChannel = $tArgs[0];
 		shift @tArgs;
@@ -4351,7 +4294,6 @@ sub userChannelInfo(@) {
 
 sub channelList(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -4389,7 +4331,6 @@ sub channelList(@) {
 
 sub userWhoAmI(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		my $sNoticeMsg = "User $sMatchingUserHandle ($iMatchingUserLevelDesc)";
@@ -4433,7 +4374,6 @@ sub userWhoAmI(@) {
 
 sub mbDbAddCommand(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -4506,7 +4446,6 @@ sub mbDbAddCommand(@) {
 
 sub getCommandCategory(@) {
 	my ($self,$sCategory) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sQuery = "SELECT id_public_commands_category FROM PUBLIC_COMMANDS_CATEGORY WHERE description LIKE ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sCategory)) {
@@ -4525,7 +4464,6 @@ sub getCommandCategory(@) {
 
 sub mbDbRemCommand(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -4586,7 +4524,6 @@ sub mbDbRemCommand(@) {
 
 sub mbDbModCommand(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -4665,7 +4602,6 @@ sub mbDbModCommand(@) {
 
 sub mbDbShowCommand(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 		my $sCommand = $tArgs[0];
 		my $sQuery = "SELECT hits,id_user,creation_date,action,PUBLIC_COMMANDS_CATEGORY.description as category FROM PUBLIC_COMMANDS,PUBLIC_COMMANDS_CATEGORY WHERE PUBLIC_COMMANDS.id_public_commands_category=PUBLIC_COMMANDS_CATEGORY.id_public_commands_category AND command LIKE ?";
@@ -4713,7 +4649,6 @@ sub mbDbShowCommand(@) {
 
 sub mbChownCommand(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -4782,7 +4717,6 @@ sub mbChownCommand(@) {
 
 sub channelStatLines(@) {
 	my ($self,$message,$sChannel,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -4849,7 +4783,6 @@ sub channelStatLines(@) {
 
 sub whoTalk(@) {
 	my ($self,$message,$sChannel,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -4918,7 +4851,6 @@ sub whoTalk(@) {
 
 sub mbDbCommand(@) {
 	my ($self,$message,$sChannel,$sNick,$sCommand,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	log_message($self,2,"Check SQL command : $sCommand");
 	my $sQuery = "SELECT * FROM PUBLIC_COMMANDS WHERE command like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -5008,7 +4940,6 @@ sub displayBirthDate(@) {
 
 sub mbDbMvCommand(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -5070,7 +5001,6 @@ sub mbDbMvCommand(@) {
 
 sub mbCountCommand(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sQuery = "SELECT count(*) as nbCommands FROM PUBLIC_COMMANDS";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute()) {
@@ -5122,7 +5052,6 @@ sub mbCountCommand(@) {
 
 sub mbTopCommand(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sQuery = "SELECT command,hits FROM PUBLIC_COMMANDS ORDER BY hits DESC LIMIT 20";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute()) {
@@ -5161,7 +5090,6 @@ sub mbTopCommand(@) {
 # lastcmd
 sub mbLastCommand(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sQuery = "SELECT command FROM PUBLIC_COMMANDS ORDER BY creation_date DESC LIMIT 10";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute()) {
@@ -5197,7 +5125,6 @@ sub mbLastCommand(@) {
 
 sub mbDbSearchCommand(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 		my $sCommand = $tArgs[0];
 		log_message($self,3,"sCommand : $sCommand");
@@ -5238,7 +5165,6 @@ sub mbDbSearchCommand(@) {
 
 sub mbDbOwnersCommand(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sQuery = "SELECT nickname,count(command) as nbCommands FROM PUBLIC_COMMANDS,USER WHERE PUBLIC_COMMANDS.id_user=USER.id_user GROUP by nickname ORDER BY nbCommands DESC";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute()) {
@@ -5305,7 +5231,6 @@ sub mbDbHoldCommand(@) {
 
 sub mbDbAddCategoryCommand(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -5358,7 +5283,6 @@ sub mbDbAddCategoryCommand(@) {
 
 sub mbDbChangeCategoryCommand(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -5425,7 +5349,6 @@ sub mbDbChangeCategoryCommand(@) {
 
 sub userTopSay(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $isPrivate = !defined($sChannel);
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
@@ -5523,7 +5446,6 @@ sub userTopSay(@) {
 # checkhostchan [#channel] <hostname>
 sub mbDbCheckHostnameNickChan(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $isPrivate = !defined($sChannel);
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
@@ -5586,7 +5508,6 @@ sub mbDbCheckHostnameNickChan(@) {
 # checkhost <hostname>
 sub mbDbCheckHostnameNick(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $isPrivate = !defined($sChannel);
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
@@ -5644,7 +5565,6 @@ sub mbDbCheckHostnameNick(@) {
 # checknick <nick>
 sub mbDbCheckNickHostname(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $isPrivate = !defined($sChannel);
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
@@ -5764,7 +5684,6 @@ sub getWhoisVar(@) {
 # access #channel =<nick>
 sub userAccessChannel(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my %WHOIS_VARS;
 	if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
 		$sChannel = $tArgs[0];
@@ -5826,7 +5745,6 @@ sub userAccessChannel(@) {
 
 sub getUserChannelLevelByName(@) {
 	my ($self,$sChannel,$sHandle) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $iChannelUserLevel = 0;
 	my $sQuery = "SELECT level FROM USER,USER_CHANNEL,CHANNEL WHERE USER.id_user=USER_CHANNEL.id_user AND USER_CHANNEL.id_channel=CHANNEL.id_channel AND CHANNEL.name=? AND USER.nickname=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -5845,7 +5763,6 @@ sub getUserChannelLevelByName(@) {
 
 sub getNickInfoWhois(@) {
 	my ($self,$sWhoisHostmask) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $iMatchingUserId = undef;
 	my $iMatchingUserLevel = undef;
 	my $iMatchingUserLevelDesc = undef;
@@ -5932,7 +5849,6 @@ sub getNickInfoWhois(@) {
 
 sub userAuthNick(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my %WHOIS_VARS;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
@@ -5970,7 +5886,6 @@ sub userAuthNick(@) {
 
 sub userVerifyNick(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my %WHOIS_VARS;
 	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 		$WHOIS_VARS{'nick'} = $tArgs[0];
@@ -5990,7 +5905,6 @@ sub userVerifyNick(@) {
 # nicklist #channel
 sub channelNickList(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my %hChannelsNicks = ();
 	if (defined($self->{hChannelsNicks})) {
 		%hChannelsNicks = %{$self->{hChannelsNicks}};
@@ -6028,7 +5942,6 @@ sub channelNickList(@) {
 # rnick #channel
 sub randomChannelNick(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my %hChannelsNicks;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
@@ -6440,7 +6353,6 @@ sub displayYoutubeDetails(@) {
 
 sub displayWeather(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $id_chanset_list = getIdChansetList($self,"Weather");
 	if (defined($id_chanset_list)) {
 		my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
@@ -6482,7 +6394,6 @@ sub displayWeather(@) {
 
 sub displayUrlTitle(@) {
 	my ($self,$message,$sNick,$sChannel,$sText) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	log_message($self,3,"displayUrlTitle() $sText");
 	my $sContentType;
 	my $iHttpResponseCode;
@@ -6822,7 +6733,6 @@ sub mbRestart(@) {
 
 sub mbJump(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -6893,7 +6803,6 @@ sub mbColors(@) {
 # In progress...
 sub mbSeen(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 		# Quit vars from EVENT_LOG
 		my $tsQuit;
@@ -7024,7 +6933,6 @@ sub displayDate(@) {
 	#u date list
 	#u date list EUrope/Paris
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sDefaultTZ = 'America/New_York';
 	if (defined($tArgs[0])) {
 		switch($tArgs[0]) {
@@ -7254,7 +7162,6 @@ sub displayDate(@) {
 
 sub checkResponder(@) {
 	my ($self,$message,$sNick,$sChannel,$sMsg,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sQuery = "SELECT answer,chance FROM RESPONDERS,CHANNEL WHERE ((CHANNEL.id_channel=RESPONDERS.id_channel AND CHANNEL.name like ?) OR (RESPONDERS.id_channel=0)) AND responder like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$sMsg)) {
@@ -7274,7 +7181,6 @@ sub checkResponder(@) {
 
 sub doResponder(@) {
 	my ($self,$message,$sNick,$sChannel,$sMsg,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sQuery = "SELECT id_responders,answer,hits FROM RESPONDERS,CHANNEL WHERE ((CHANNEL.id_channel=RESPONDERS.id_channel AND CHANNEL.name like ?) OR (RESPONDERS.id_channel=0)) AND responder like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$sMsg)) {
@@ -7507,7 +7413,6 @@ sub delResponder(@) {
 
 sub evalAction(@) {
 	my ($self,$message,$sNick,$sChannel,$sCommand,$actionDo,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	log_message($self,3,"evalAction() $sCommand / $actionDo");
 	if (defined($tArgs[0])) {
 		my $sArgs = join(" ",@tArgs);
@@ -7602,7 +7507,6 @@ sub setLastCommandTs(@) {
 
 sub channelAddBadword(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -7684,7 +7588,6 @@ sub channelAddBadword(@) {
 
 sub channelRemBadword(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -7765,7 +7668,6 @@ sub channelRemBadword(@) {
 
 sub isIgnored(@) {
 	my ($self,$message,$sChannel,$sNick,$sMsg)	= @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sCheckQuery = "SELECT * FROM IGNORES WHERE id_channel=0";
 	my $sth = $self->{dbh}->prepare($sCheckQuery);
 	unless ($sth->execute ) {
@@ -7815,7 +7717,6 @@ sub isIgnored(@) {
 
 sub IgnoresList(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sTargetChannel;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
@@ -7914,7 +7815,6 @@ sub IgnoresList(@) {
 
 sub addIgnore(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sTargetChannel;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
@@ -8008,7 +7908,6 @@ sub addIgnore(@) {
 
 sub delIgnore(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sTargetChannel;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
