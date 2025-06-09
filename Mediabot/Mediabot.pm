@@ -37,12 +37,19 @@ use File::Temp qw/tempfile/;
 use Carp qw(croak);
 
 sub new {
-	my ($class,$args) = @_;
-	my $self = bless {
-		config_file => $args->{config_file},
-		server => $args->{server},
-	}, $class;
+    my ($class, $args) = @_;
+
+    my $self = bless {
+        config_file => $args->{config_file} // undef,
+        server      => $args->{server}      // undef,
+        dbh         => $args->{dbh}         // undef,
+        conf        => $args->{conf}        // undef,
+        channels    => {},
+    }, $class;
+
+    return $self;
 }
+
 
 #-----------------------------------------------------------------
 # Timestamped log methods (avoid namespace collisions)
@@ -255,6 +262,43 @@ sub init_log(@) {
 	$|=1;
 	print $LOG "+--------------------------------------------------------------------------------------------------+\n";
 	$self->{LOG} = $LOG;
+}
+
+# Populate all CHANNEL entries into $self->{channels}
+sub populateChannels {
+    my ($self) = @_;
+
+    log_message($self, 3, "populateChannels: Populating channels from database");
+
+    my $sQuery = "SELECT id_channel, name, description, topic, tmdb_lang, `key` FROM CHANNEL";
+    my $sth = $self->{dbh}->prepare($sQuery);
+    unless ($sth->execute()) {
+        log_message($self, 1, "SQL Error: " . $DBI::errstr . " Query: $sQuery");
+        return;
+    }
+
+    my $i = 0;
+    while (my $ref = $sth->fetchrow_hashref()) {
+        $i++ == 0 and log_message($self, 0, "Populating channel objects");
+
+        my $channel_obj = Mediabot::Channel->new({
+            id         => $ref->{id_channel},
+            name       => $ref->{name},
+			description => $ref->{description},
+            topic      => $ref->{topic},
+            tmdb_lang  => $ref->{tmdb_lang},
+            key        => $ref->{key},
+            dbh        => $self->{dbh},
+        });
+
+        $self->{channels}{ $ref->{name} } = $channel_obj;
+    }
+
+    $sth->finish;
+
+    if ($i == 0) {
+        log_message($self, 0, "No channel found in database.");
+    }
 }
 
 sub init_hailo(@) {
@@ -619,26 +663,22 @@ sub getChannelName(@) {
 	return $name;
 }
 
-sub getConsoleChan(@) {
-	my ($self) = @_;
-	my $sQuery = "SELECT * FROM CHANNEL WHERE description='console'";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute()) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $id_channel = $ref->{'id_channel'};
-			my $name = $ref->{'name'};
-			my $chanmode = $ref->{'chanmode'};
-			my $key = $ref->{'key'};
-			return($id_channel,$name,$chanmode,$key);
-		}
-		else {
-			return (undef,undef,undef,undef);
-		}
-	}
-	$sth->finish;
+sub getConsoleChan {
+    my ($self) = @_;
+
+    foreach my $chan (values %{ $self->{channels} }) {
+        if ($chan->get_description eq 'console') {
+            return (
+                $chan->get_id,
+                $chan->get_name,
+                $chan->get_chanmode,
+                $chan->get_key,
+            );
+        }
+    }
+
+    # If no console channel is found
+    return undef;
 }
 
 sub noticeConsoleChan(@) {
@@ -889,34 +929,27 @@ sub joinChannel(@) {
 	}
 }
 
-# Join channel with auto_join set
-sub joinChannels(@) {
-	my $self = shift;
-	my $sQuery = "SELECT * FROM CHANNEL WHERE auto_join=1 and description !='console'";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute()) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		my $i = 0;
-		while (my $ref = $sth->fetchrow_hashref()) {
-			if ( $i == 0 ) {
-				log_message($self,0,"Auto join channels");
-			}
-			my $id_channel = $ref->{'id_channel'};
-			my $name = $ref->{'name'};
-			my $chanmode = $ref->{'chanmode'};
-			my $key = $ref->{'key'};
-			joinChannel($self,$name,$key);
-			$i++;
-		}
-		if ( $i == 0 ) {
-			log_message($self,0,"No channel to auto join");
-		}
-	}
-	$sth->finish;
-	
+# Join channels with auto_join enabled, except console
+sub joinChannels {
+    my ($self) = @_;
+
+    my $i = 0;
+    foreach my $chan (values %{ $self->{channels} }) {
+        next unless $chan->get_auto_join;
+        next if ($chan->get_description // '') eq 'console';
+
+        $i++ == 0 and log_message($self, 0, "Auto join channels");
+
+        my $name = $chan->get_name;
+        my $key  = $chan->get_key;
+
+        joinChannel($self, $name, $key);
+        log_message($self, 2, "Joining channel $name");
+    }
+
+    $i == 0 and log_message($self, 0, "No channel to auto join");
 }
+
 
 # Set timers at startup
 sub onStartTimers(@) {

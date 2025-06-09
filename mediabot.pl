@@ -14,8 +14,9 @@ use diagnostics;
 use POSIX qw/setsid strftime/;
 use Getopt::Long;
 use File::Basename;
-use Mediabot::Conf;
 use Mediabot::Mediabot;
+use Mediabot::Conf;
+use Mediabot::Channel;
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use Net::Async::IRC;
@@ -214,6 +215,9 @@ $mediabot->dbCheckTables();
 # Log out all user at start
 $mediabot->dbLogoutUsers();
 
+# Populate channels from database
+$mediabot->populateChannels();
+
 # Pick IRC Server
 $mediabot->pickServer();
 
@@ -276,8 +280,10 @@ my $irc = Net::Async::IRC->new(
     on_message_ERR_NEEDMOREPARAMS    => \&on_message_ERR_NEEDMOREPARAMS,
 );
 
+# Set up IRC object
 $mediabot->setIrc($irc);
 
+# Add IRC object to the loop
 $loop->add($irc);
 
 my $sConnectionNick = $mediabot->getConnectionNick();
@@ -519,13 +525,22 @@ sub on_login {
         }
     }
 
-    # First join console chan
-    my ($id_channel,$name,$chanmode,$key) = $mediabot->getConsoleChan();
-    unless (defined($id_channel)) {
-        $mediabot->log_message(0,"Warning no console channel defined, run configure again or read documentation");
+    # First join the console channel from the populated channels
+    my $console_channel;
+    foreach my $chan (values %{ $mediabot->{channels} }) {
+        if ($chan->get_description eq 'console') {
+            $console_channel = $chan;
+            last;
+        }
     }
-    else {
-        $mediabot->joinChannel($name,$key);
+
+    if (defined $console_channel) {
+        my $name = $console_channel->get_name;
+        my $key  = $console_channel->get_key;
+        $mediabot->log_message(0, "Joining console channel $name");
+        $mediabot->joinChannel($name, $key);
+    } else {
+        $mediabot->log_message(0, "Warning: no console channel found in database (description = 'console'). You may want to run configure script again.");
     }
 
     # Join other channels

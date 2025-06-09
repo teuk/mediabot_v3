@@ -54,7 +54,8 @@ CREATE TABLE `CHANNEL` (
   `chanmode` varchar(255) DEFAULT NULL,
   `auto_join` tinyint(1) NOT NULL,
   `notice` varchar(255) DEFAULT NULL,
-  `tmdb_lang` varchar(255) NOT NULL DEFAULT 'en-US'
+  `tmdb_lang` varchar(255) NOT NULL DEFAULT 'en-US',
+  `topic` varchar(400) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 -- --------------------------------------------------------
