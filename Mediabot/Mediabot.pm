@@ -9738,10 +9738,9 @@ sub mbRehash(@) {
 # Play a radio request
 sub playRadio(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $incomingDir = $MAIN_CONF{'radio.YOUTUBEDL_INCOMING'};
-	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
-	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	my $incomingDir = $self->{conf}->get('radio.YOUTUBEDL_INCOMING');
+	my $LIQUIDSOAP_TELNET_HOST = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_HOST');
+	my $LIQUIDSOAP_TELNET_PORT = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_PORT');
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -10183,7 +10182,7 @@ sub playRadio(@) {
 							my $sYoutubeId;
 							my $sText = join("%20",@tArgs);
 							log_message($self,3,"radioplay() youtubeSearch() on $sText");
-							my $APIKEY = $MAIN_CONF{'main.YOUTUBE_APIKEY'};
+							my $APIKEY = $self->{conf}->get('main.YOUTUBE_APIKEY');
 							unless (defined($APIKEY) && ($APIKEY ne "")) {
 								log_message($self,0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
 								log_message($self,0,"displayYoutubeDetails() section [main]");
@@ -10412,11 +10411,11 @@ sub playRadio(@) {
 	}
 }
 
+# Check the number of tracks in the queue
 sub queueCount(@) {
 	my ($self) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
-	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	my $LIQUIDSOAP_TELNET_HOST = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_HOST');
+	my $LIQUIDSOAP_TELNET_PORT = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_PORT');
 	unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 | wc -w |") {
 		log_message($self,0,"queueCount() Unable to connect to LIQUIDSOAP telnet port");
 		return undef;
@@ -10429,11 +10428,11 @@ sub queueCount(@) {
 	return $line;
 }
 
+# Check if a track is in the queue
 sub isInQueueRadio(@) {
 	my ($self,$sAudioFilename) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
-	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	my $LIQUIDSOAP_TELNET_HOST = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_HOST');
+	my $LIQUIDSOAP_TELNET_PORT = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_PORT');
 	my $iNbTrack = queueCount($self);
 	unless ( $iNbTrack == 0 ) {
 		my $sNbTrack = ( $iNbTrack > 1 ? "tracks" : "track" );
@@ -10485,11 +10484,11 @@ sub isInQueueRadio(@) {
 	}
 }
 
+# Push a track to the radio queue
 sub queueRadio(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
-	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	my $LIQUIDSOAP_TELNET_HOST = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_HOST');
+	my $LIQUIDSOAP_TELNET_PORT = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_PORT');
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -10712,11 +10711,11 @@ sub queueRadio(@) {
 	}
 }
 
+# Push a track to the radio queue
 sub queuePushRadio(@) {
 	my ($self,$sAudioFilename) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
-	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	my $LIQUIDSOAP_TELNET_HOST = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_HOST');
+	my $LIQUIDSOAP_TELNET_PORT = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_PORT');
 	if (defined($sAudioFilename) && ($sAudioFilename ne "")) {
 		unless (isInQueueRadio($self,$sAudioFilename)) {
 			if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
@@ -10748,11 +10747,11 @@ sub queuePushRadio(@) {
 	}
 }
 
+# Send a next command to the radio
 sub nextRadio(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
-	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	my $LIQUIDSOAP_TELNET_HOST = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_HOST');
+	my $LIQUIDSOAP_TELNET_PORT = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_PORT');
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -10791,13 +10790,14 @@ sub nextRadio(@) {
 	}
 }
 
+# Display the current song on the radio
 sub radioMsg(@) {
 	my ($self,$sText) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
 	my $sMsgSong = "";
-	my $RADIO_HOSTNAME = $MAIN_CONF{'radio.RADIO_HOSTNAME'};
-	my $RADIO_PORT = $MAIN_CONF{'radio.RADIO_PORT'};
-	my $RADIO_URL = $MAIN_CONF{'radio.RADIO_URL'};
+	my $RADIO_HOSTNAME = $self->{conf}->get('radio.RADIO_HOSTNAME');
+	my $RADIO_PORT     = $self->{conf}->get('radio.RADIO_PORT');
+	my $RADIO_URL      = $self->{conf}->get('radio.RADIO_URL');
+	
 	$sMsgSong .= String::IRC->new('[ ')->white('black');
 	if ( $RADIO_PORT == 443 ) {
 		$sMsgSong .= String::IRC->new("https://$RADIO_HOSTNAME/$RADIO_URL")->orange('black');
@@ -10813,12 +10813,12 @@ sub radioMsg(@) {
 	return($sMsgSong);
 }
 
+# Ransomly play a track from the radio library
 sub rplayRadio(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $incomingDir = $MAIN_CONF{'radio.YOUTUBEDL_INCOMING'};
-	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
-	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	my $incomingDir = $self->{conf}->get('radio.YOUTUBEDL_INCOMING');
+	my $LIQUIDSOAP_TELNET_HOST = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_HOST');
+	my $LIQUIDSOAP_TELNET_PORT = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_PORT');
 
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
@@ -11307,11 +11307,11 @@ sub mbExec(@) {
 	}	
 }
 
+# Get the harbor ID from LIQUIDSOAP telnet server
 sub getHarBorId(@) {
 	my ($self) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $LIQUIDSOAP_TELNET_HOST = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_HOST'};
-	my $LIQUIDSOAP_TELNET_PORT = $MAIN_CONF{'radio.LIQUIDSOAP_TELNET_PORT'};
+	my $LIQUIDSOAP_TELNET_HOST = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_HOST');
+	my $LIQUIDSOAP_TELNET_PORT = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_PORT');
 	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 		unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | grep harbor | grep status | awk '{print \$2}' | awk -F'.' {'print \$1}' | awk -F'_' '{print \$2}' |") {
 			log_message($self,0,"getHarBorId() Unable to connect to LIQUIDSOAP telnet port");
@@ -11333,6 +11333,7 @@ sub getHarBorId(@) {
 	return undef;
 }
 
+# check CHANNEL_LOG table for a specific pattern
 sub mbChannelLog(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
@@ -12001,11 +12002,12 @@ sub userBirthday(@) {
 	}
 }
 
+# Send a public message to all channels with chanset +RadioPub
 sub radioPub(@) {
 	my ($self,$message,$sNick,undef,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};	
+	
 	# Check channels with chanset +RadioPub
-	if (defined($MAIN_CONF{'radio.RADIO_HOSTNAME'})) {	
+	if (defined($self->{conf}->get('radio.RADIO_HOSTNAME'))) {	
 		my $sQuery = "SELECT name FROM CHANNEL,CHANNEL_SET,CHANSET_LIST WHERE CHANNEL.id_channel=CHANNEL_SET.id_channel AND CHANNEL_SET.id_chanset_list=CHANSET_LIST.id_chanset_list AND CHANSET_LIST.chanset LIKE 'RadioPub'";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute()) {
@@ -12028,6 +12030,7 @@ sub radioPub(@) {
 	}
 }
 
+# Delete a user from the database
 sub delUser(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
@@ -12079,6 +12082,7 @@ sub delUser(@) {
 	}
 }
 
+# Get Fortnite ID for a user
 sub getFortniteId(@) {
 	my ($self,$sUser) = @_;
 	my $sQuery = "SELECT fortniteid FROM USER WHERE nickname LIKE ?";
@@ -12099,114 +12103,60 @@ sub getFortniteId(@) {
 	}
 }
 
+# Get Fortnite stats for a user
 sub fortniteStats(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my $api_key;
-	unless (defined($MAIN_CONF{'fortnite.API_KEY'}) && ($MAIN_CONF{'fortnite.API_KEY'} ne "")) {
+	
+	my $api_key = $self->{conf}->get('fortnite.API_KEY');
+	unless (defined($api_key) && $api_key ne "") {
 		log_message($self,0,"fortnite.API_KEY is undefined in config file");
 		return undef;
 	}
-	$api_key = $MAIN_CONF{'fortnite.API_KEY'};
+
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-					log_message($self,3,"fortniteStats() " . $tArgs[0]);
+				if (defined($tArgs[0]) && $tArgs[0] ne "") {
+					log_message($self,3,"fortniteStats() $tArgs[0]");
 					my $id_user = getIdUser($self,$tArgs[0]);
 					if (defined($id_user)) {
 						my $AccountId = getFortniteId($self,$tArgs[0]);
-						unless (defined($AccountId) && ($AccountId ne "")) {
-							botNotice($self,$sNick,"Undefined fortenid for user " . $tArgs[0]);
+						unless (defined($AccountId) && $AccountId ne "") {
+							botNotice($self,$sNick,"Undefined fortenid for user $tArgs[0]");
 							return undef;
 						}
 						unless ( open FORTNITE_INFOS, "curl -L --header 'Authorization: $api_key' --connect-timeout 5 -f -s \"https://fortnite-api.com/v2/stats/br/v2/$AccountId\" |" ) {
 							log_message(3,"fortniteStats() Could not get FORTNITE_INFOS from API using $api_key");
 						}
 						else {
-							my $line;
-							my $i = 0;
-							my $sTitle;
-							my $sDuration;
-							my $sViewCount;
-							my $json_details;
-							my $schannelTitle;
-							while(defined($line=<FORTNITE_INFOS>)) {
-								chomp($line);
-								$json_details .= $line;
-								log_message($self,5,"fortniteStats() $line");
-								$i++;
-							}
-							if (defined($json_details) && ($json_details ne "")) {
-								#log_message($self,4,"fortniteStats() json_details : $json_details");
+							my $json_details = join('', <FORTNITE_INFOS>);
+							log_message($self,5,"fortniteStats() $json_details");
+							if ($json_details ne "") {
 								my $sFortniteInfo = decode_json $json_details;
 								my %hFortniteInfo = %$sFortniteInfo;
-								#log_message($self,4,"fortniteStats() hFortniteInfo " . Dumper(%hFortniteInfo));
-								my $sFortniteInfo2 = $hFortniteInfo{'data'};
-								my %hFortniteStats = %$sFortniteInfo2;
-								#log_message($self,4,"fortniteStats() hFortniteStats " . Dumper(%hFortniteStats));
-
-								my $sFortniteInfo3 = $hFortniteStats{'battlePass'};
-								my %hFortniteStats2 = %$sFortniteInfo3;
-								#log_message($self,4,"fortniteStats() hFortniteStats2 " . Dumper(%hFortniteStats2));
-								my $sLevel = $hFortniteStats2{'level'};
-								my $sProgression = $hFortniteStats2{'progress'};
-
-								$sFortniteInfo3 = $hFortniteStats{'account'};
-								%hFortniteStats2 = %$sFortniteInfo3;
-								#log_message($self,4,"fortniteStats() hFortniteStats2 " . Dumper(%hFortniteStats2));
-								my $name = $hFortniteStats2{'name'};
-
-								my $sFortniteInfo4 = $hFortniteStats{'stats'};
-								my %hFortniteStats3 = %$sFortniteInfo4;
-								#log_message($self,4,"fortniteStats() hFortniteStats3 " . Dumper(%hFortniteStats3));
+								my %hFortniteStats = %{ $hFortniteInfo{'data'} };
 								
-								my $sFortniteInfo5 = $hFortniteStats3{'all'};
-								my %hFortniteStats5 = %$sFortniteInfo5;
-								#log_message($self,4,"fortniteStats() hFortniteStats5 " . Dumper(%hFortniteStats5));
+								my %hBattlePass = %{ $hFortniteStats{'battlePass'} };
+								my %hAccount    = %{ $hFortniteStats{'account'} };
+								my %hStatsAll   = %{ $hFortniteStats{'stats'}{'all'}{'overall'} };
 
-								my $sFortniteInfo6 = $hFortniteStats5{'overall'};
-								my %hFortniteStats6 = %$sFortniteInfo6;
-								log_message($self,4,"fortniteStats() hFortniteStats6 " . Dumper(%hFortniteStats6));
-								my $v_wins = $hFortniteStats6{'wins'};
-								my $v_winRate = $hFortniteStats6{'winRate'};
-								my $v_kills = $hFortniteStats6{'kills'};
-								my $v_kd = $hFortniteStats6{'kd'};
-								my $v_top3 = $hFortniteStats6{'top3'};
-								my $v_top5 = $hFortniteStats6{'top5'};
-								my $v_top10 = $hFortniteStats6{'top10'};
-								my $matches = $hFortniteStats6{'matches'};
-
-								my $sUser = String::IRC->new('[')->bold;
-								$sUser .= "$name";
-								$sUser .= String::IRC->new(']')->bold;
-								my $tmp = String::IRC->new('Total Matches Played:')->bold;
-								$tmp .= " $matches";
-								my $level = String::IRC->new('Level:')->bold;
-								$level .= " $sLevel";
-								my $progression = String::IRC->new('Progression:')->bold;
-								$progression .= " $sProgression" . "%";
-								my $wins = String::IRC->new('Wins:')->bold;
-								$wins .= " $v_wins ($v_winRate" . "%)";
-								my $kills = String::IRC->new('Kills:')->bold;
-								$kills .= " $v_kills (";
-								$kills .= String::IRC->new('Kills/Deaths:')->bold;
-								$kills .= " $v_kd)";
-								my $top3 = String::IRC->new('Top 3:')->bold;
-								$top3 .= " $v_top3";
-								my $top5 = String::IRC->new('Top 5:')->bold;
-								$top5 .= " $v_top5";
-								my $top10 = String::IRC->new('Top 10:')->bold;
-								$top10 .= " $v_top10";
-								
+								my $sUser        = String::IRC->new('[')->bold . $hAccount{'name'} . String::IRC->new(']')->bold;
+								my $tmp          = String::IRC->new('Total Matches Played:')->bold . " $hStatsAll{'matches'}";
+								my $level        = String::IRC->new('Level:')->bold . " $hBattlePass{'level'}";
+								my $progression  = String::IRC->new('Progression:')->bold . " $hBattlePass{'progress'}%";
+								my $wins         = String::IRC->new('Wins:')->bold . " $hStatsAll{'wins'} ($hStatsAll{'winRate'}%)";
+								my $kills        = String::IRC->new('Kills:')->bold . " $hStatsAll{'kills'} (" . String::IRC->new('Kills/Deaths:')->bold . " $hStatsAll{'kd'})";
+								my $top3         = String::IRC->new('Top 3:')->bold . " $hStatsAll{'top3'}";
+								my $top5         = String::IRC->new('Top 5:')->bold . " $hStatsAll{'top5'}";
+								my $top10        = String::IRC->new('Top 10:')->bold . " $hStatsAll{'top10'}";
 
 								botPrivmsg($self,$sChannel,"Fortnite stats -- $sUser $tmp -- $level -- $progression -- $wins -- $kills -- $top3 -- $top5 -- $top10");
 							}
 						}
 					}
 					else {
-						botNotice($self,$sNick,"Undefined user " . $tArgs[0]);
+						botNotice($self,$sNick,"Undefined user $tArgs[0]");
 					}
 				}
 				else {
@@ -12214,22 +12164,21 @@ sub fortniteStats(@) {
 				}
 			}
 			else {
-				my $sNoticeMsg = $message->prefix;
-				$sNoticeMsg .= " f command attempt, (command level [1] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+				my $sNoticeMsg = $message->prefix . " f command attempt, (command level [1] for user $sMatchingUserHandle\[$iMatchingUserLevel\])";
 				noticeConsoleChan($self,$sNoticeMsg);
 				botNotice($self,$sNick,"This command is not available for your level. Contact a bot master.");
 				logBot($self,$message,undef,"f",$sNoticeMsg);
 			}
 		}
 		else {
-			my $sNoticeMsg = $message->prefix;
-			$sNoticeMsg .= " f command attempt (user $sMatchingUserHandle is not logged in)";
+			my $sNoticeMsg = $message->prefix . " f command attempt (user $sMatchingUserHandle is not logged in)";
 			noticeConsoleChan($self,$sNoticeMsg);
 			botNotice($self,$sNick,"You must be logged to use this command : /msg " . $self->{irc}->nick_folded . " login username password");
 			logBot($self,$message,undef,"f",$sNoticeMsg);
 		}
 	}
 }
+
 
 # ------------------------------------------------------------------
 # CONSTANTS (all prefixed with CHATGPT_)
@@ -12250,13 +12199,12 @@ use constant {
 # ------------------------------------------------------------------
 sub chatGPT(@) {
     my ($self, $message, $nick, $chan, @args) = @_;
-    my %MAIN_CONF = %{ $self->{MAIN_CONF} };
 
     # --------------------------------------------------------------
     #  sanity / config checks
     # --------------------------------------------------------------
-    my $api_key = $MAIN_CONF{'openai.API_KEY'}
-        or (log_message($self,0,'chatGPT() openai.API_KEY missing'), return);
+	my $api_key = $self->{conf}->get('openai.API_KEY')
+    	or (log_message($self,0,'chatGPT() openai.API_KEY missing'), return);
 
     @args
         or (botNotice($self,$nick,'Syntax: tellme <prompt>'), return);
@@ -12379,6 +12327,7 @@ sub _chatgpt_wrap {
     return @out;
 }
 
+# send a login request to Undernet CSERVICE
 sub xLogin(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my %MAIN_CONF = %{$self->{MAIN_CONF}};
@@ -12425,6 +12374,7 @@ sub xLogin(@) {
 	}
 }
 
+# send a silly Yomomma joke
 sub Yomomma(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my $sQuery;
