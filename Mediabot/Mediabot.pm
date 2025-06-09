@@ -1032,177 +1032,51 @@ sub onStartTimers(@) {
 	%{$self->{hTimers}} = %hTimers;
 }
 
-## Handle user join event
-#sub userOnJoin(@) {
-#	my ($self,$message,$sChannel,$sNick) = @_;
-#	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-#	if (defined($iMatchingUserId)) {
-#		my $sChannelUserQuery = "SELECT * FROM USER_CHANNEL,CHANNEL WHERE USER_CHANNEL.id_channel=CHANNEL.id_channel AND name=? AND id_user=?";
-#		log_message($self,4,$sChannelUserQuery);
-#		my $sth = $self->{dbh}->prepare($sChannelUserQuery);
-#		unless ($sth->execute($sChannel,$iMatchingUserId)) {
-#			log_message($self,1,"on_join() SQL Error : " . $DBI::errstr . " Query : " . $sChannelUserQuery);
-#		}
-#		else {
-#			if (my $ref = $sth->fetchrow_hashref()) {
-#				my $sAutoMode = $ref->{'automode'};
-#				if (defined($sAutoMode) && ($sAutoMode ne "")) {
-#					if ($sAutoMode eq 'OP') {
-#						$self->{irc}->send_message("MODE", undef, ($sChannel,"+o",$sNick));
-#					}
-#					elsif ($sAutoMode eq 'VOICE') {
-#						$self->{irc}->send_message("MODE", undef, ($sChannel,"+v",$sNick));
-#					}
-#				}
-#				my $sGreetChan = $ref->{'greet'};
-#				if (defined($sGreetChan) && ($sGreetChan ne "")) {
-#					botPrivmsg($self,$sChannel,"($sMatchingUserHandle) $sGreetChan");
-#				}
-#			}
-#		}
-#		$sth->finish;
-#	}
-#	my $sChannelUserQuery = "SELECT * FROM CHANNEL WHERE name=?";
-#	log_message($self,4,$sChannelUserQuery);
-#	my $sth = $self->{dbh}->prepare($sChannelUserQuery);
-#	unless ($sth->execute($sChannel)) {
-#		log_message($self,1,"on_join() SQL Error : " . $DBI::errstr . " Query : " . $sChannelUserQuery);
-#	}
-#	else {
-#		if (my $ref = $sth->fetchrow_hashref()) {
-#			my $sNoticeOnJoin = $ref->{'notice'};
-#			if (defined($sNoticeOnJoin) && ($sNoticeOnJoin ne "")) {
-#				botNotice($self,$sNick,$sNoticeOnJoin);
-#			}
-#		}
-#	}
-#}
-#
-## Get nick information from a message
-#sub getNickInfo(@) {
-#	my ($self,$message) = @_;
-#	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-#	my $iMatchingUserId;
-#	my $iMatchingUserLevel;
-#	my $iMatchingUserLevelDesc;
-#	my $iMatchingUserAuth;
-#	my $sMatchingUserHandle;
-#	my $sMatchingUserPasswd;
-#	my $sMatchingUserInfo1;
-#	my $sMatchingUserInfo2;
-#	
-#	my $sCheckQuery = "SELECT * FROM USER";
-#	my $sth = $self->{dbh}->prepare($sCheckQuery);
-#	unless ($sth->execute ) {
-#		log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
-#	}
-#	else {
-#		while (my $ref = $sth->fetchrow_hashref()) {
-#			my @tHostmasks = split(/,/,$ref->{'hostmasks'});
-#			foreach my $sHostmask (@tHostmasks) {
-#				log_message($self,4,"getNickInfo() Checking hostmask : " . $sHostmask);
-#				my $sHostmaskSource = $sHostmask;
-#				$sHostmask =~ s/\./\\./g;
-#				$sHostmask =~ s/\*/.*/g;
-#				$sHostmask =~ s/\[/\\[/g;
-#				$sHostmask =~ s/\]/\\]/g;
-#				$sHostmask =~ s/\{/\\{/g;
-#				$sHostmask =~ s/\}/\\}/g;
-#				if ( $message->prefix =~ /^$sHostmask/ ) {
-#					log_message($self,3,"getNickInfo() $sHostmask matches " . $message->prefix);
-#					$sMatchingUserHandle = $ref->{'nickname'};
-#					if (defined($ref->{'password'})) {
-#						$sMatchingUserPasswd = $ref->{'password'};
-#					}
-#					$iMatchingUserId = $ref->{'id_user'};
-#					my $iMatchingUserLevelId = $ref->{'id_user_level'};
-#					my $sGetLevelQuery = "SELECT * FROM USER_LEVEL WHERE id_user_level=?";
-#					my $sth2 = $self->{dbh}->prepare($sGetLevelQuery);
-#				        unless ($sth2->execute($iMatchingUserLevelId)) {
-#                				log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sGetLevelQuery);
-#        				}
-#        				else {
-#               					while (my $ref2 = $sth2->fetchrow_hashref()) {
-#							$iMatchingUserLevel = $ref2->{'level'};
-#							$iMatchingUserLevelDesc = $ref2->{'description'};
-#						}
-#					}
-#					$iMatchingUserAuth = $ref->{'auth'};
-#					if ( defined($MAIN_CONF{'connection.CONN_NETWORK_TYPE'}) && ($MAIN_CONF{'connection.CONN_NETWORK_TYPE'} eq "1") && defined($MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'}) && ($MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'} ne "")) {
-#						unless ($iMatchingUserAuth) {
-#							my $sUnetHostmask = $MAIN_CONF{'undernet.UNET_CSERVICE_HOSTMASK'};
-#							if ($sHostmaskSource =~ /$sUnetHostmask$/) {
-#								my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
-#								my $sth2 = $self->{dbh}->prepare($sQuery);
-#								unless ($sth2->execute($iMatchingUserId)) {
-#									log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-#								}
-#								else {
-#									$iMatchingUserAuth = 1;
-#									log_message($self,0,"getNickInfo() Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource");
-#									noticeConsoleChan($self,"Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource");
-#								}
-#								$sth2->finish;
-#							}
-#						}
-#					}
-#					if (getUserAutologin($self,$sMatchingUserHandle)) {
-#						unless ($iMatchingUserAuth) {
-#							my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
-#							my $sth2 = $self->{dbh}->prepare($sQuery);
-#							unless ($sth2->execute($iMatchingUserId)) {
-#								log_message($self,1,"getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-#							}
-#							else {
-#								$iMatchingUserAuth = 1;
-#								log_message($self,0,"getNickInfo() Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource (autologin is ON)");
-#								noticeConsoleChan($self,"Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource (autologin is ON)");
-#							}
-#							$sth2->finish;
-#						}
-#					}
-#					if (defined($ref->{'info1'})) {
-#						$sMatchingUserInfo1 = $ref->{'info1'};
-#					}
-#					if (defined($ref->{'info2'})) {
-#						$sMatchingUserInfo2 = $ref->{'info2'};
-#					}
-#				}
-#			}
-#		}
-#	}
-#	$sth->finish;
-#	if (defined($iMatchingUserId)) {
-#		log_message($self,3,"getNickInfo() iMatchingUserId : $iMatchingUserId");
-#	}
-#	else {
-#		log_message($self,4,"getNickInfo() iMatchingUserId is undefined with this host : " . $message->prefix);
-#		return (undef,undef,undef,undef,undef,undef,undef);
-#	}
-#	if (defined($iMatchingUserLevel)) {
-#		log_message($self,4,"getNickInfo() iMatchingUserLevel : $iMatchingUserLevel");
-#	}
-#	if (defined($iMatchingUserLevelDesc)) {
-#		log_message($self,4,"getNickInfo() iMatchingUserLevelDesc : $iMatchingUserLevelDesc");
-#	}
-#	if (defined($iMatchingUserAuth)) {
-#		log_message($self,4,"getNickInfo() iMatchingUserAuth : $iMatchingUserAuth");
-#	}
-#	if (defined($sMatchingUserHandle)) {
-#		log_message($self,4,"getNickInfo() sMatchingUserHandle : $sMatchingUserHandle");
-#	}
-#	if (defined($sMatchingUserPasswd)) {
-#		log_message($self,4,"getNickInfo() sMatchingUserPasswd : $sMatchingUserPasswd");
-#	}
-#	if (defined($sMatchingUserInfo1)) {
-#		log_message($self,4,"getNickInfo() sMatchingUserInfo1 : $sMatchingUserInfo1");
-#	}
-#	if (defined($sMatchingUserInfo2)) {
-#		log_message($self,4,"getNickInfo() sMatchingUserInfo2 : $sMatchingUserInfo2");
-#	}
-#	
-#	return ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2);
-#}
+# Handle user join event
+sub userOnJoin(@) {
+	my ($self,$message,$sChannel,$sNick) = @_;
+	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+	if (defined($iMatchingUserId)) {
+		my $sChannelUserQuery = "SELECT * FROM USER_CHANNEL,CHANNEL WHERE USER_CHANNEL.id_channel=CHANNEL.id_channel AND name=? AND id_user=?";
+		log_message($self,4,$sChannelUserQuery);
+		my $sth = $self->{dbh}->prepare($sChannelUserQuery);
+		unless ($sth->execute($sChannel,$iMatchingUserId)) {
+			log_message($self,1,"on_join() SQL Error : " . $DBI::errstr . " Query : " . $sChannelUserQuery);
+		}
+		else {
+			if (my $ref = $sth->fetchrow_hashref()) {
+				my $sAutoMode = $ref->{'automode'};
+				if (defined($sAutoMode) && ($sAutoMode ne "")) {
+					if ($sAutoMode eq 'OP') {
+						$self->{irc}->send_message("MODE", undef, ($sChannel,"+o",$sNick));
+					}
+					elsif ($sAutoMode eq 'VOICE') {
+						$self->{irc}->send_message("MODE", undef, ($sChannel,"+v",$sNick));
+					}
+				}
+				my $sGreetChan = $ref->{'greet'};
+				if (defined($sGreetChan) && ($sGreetChan ne "")) {
+					botPrivmsg($self,$sChannel,"($sMatchingUserHandle) $sGreetChan");
+				}
+			}
+		}
+		$sth->finish;
+	}
+	my $sChannelUserQuery = "SELECT * FROM CHANNEL WHERE name=?";
+	log_message($self,4,$sChannelUserQuery);
+	my $sth = $self->{dbh}->prepare($sChannelUserQuery);
+	unless ($sth->execute($sChannel)) {
+		log_message($self,1,"on_join() SQL Error : " . $DBI::errstr . " Query : " . $sChannelUserQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $sNoticeOnJoin = $ref->{'notice'};
+			if (defined($sNoticeOnJoin) && ($sNoticeOnJoin ne "")) {
+				botNotice($self,$sNick,$sNoticeOnJoin);
+			}
+		}
+	}
+}
 
 # Get nick information from a message
 sub getNickInfo(@) {
