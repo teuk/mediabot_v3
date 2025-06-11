@@ -73,14 +73,63 @@ sub set_tmdb_lang {
     $self->{tmdb_lang} = $new_lang;
 }
 
-# Set channel key and update DB
+# Set channel key (password) and update DB
 sub set_key {
     my ($self, $new_key) = @_;
     return unless defined $new_key;
-
     my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET `key`=? WHERE id_channel=?");
     $sth->execute($new_key, $self->{id});
     $self->{key} = $new_key;
+}
+
+# Set channel description and update DB
+sub set_description {
+    my ($self, $new_description) = @_;
+    return unless defined $new_description;
+    my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET description=? WHERE id_channel=?");
+    $sth->execute($new_description, $self->{id});
+    $self->{description} = $new_description;
+}
+
+# Set channel mode (chanmode) and update DB
+sub set_chanmode {
+    my ($self, $new_chanmode) = @_;
+    return unless defined $new_chanmode;
+    my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET chanmode=? WHERE id_channel=?");
+    $sth->execute($new_chanmode, $self->{id});
+    $self->{chanmode} = $new_chanmode;
+}
+
+# Set auto_join flag and update DB
+sub set_auto_join {
+    my ($self, $new_auto_join) = @_;
+    return unless defined $new_auto_join;
+    my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET auto_join=? WHERE id_channel=?");
+    $sth->execute($new_auto_join, $self->{id});
+    $self->{auto_join} = $new_auto_join;
+}
+
+# ------------------------
+# Channel Methods
+# ------------------------
+
+sub exists_in_db {
+    my ($self) = @_;
+    my $sth = $self->{dbh}->prepare("SELECT id FROM CHANNEL WHERE name = ?");
+    $sth->execute($self->{name});
+    my ($id) = $sth->fetchrow_array;
+    return $id;
+}
+
+sub create_in_db {
+    my ($self) = @_;
+    my $sth = $self->{dbh}->prepare("INSERT INTO CHANNEL (name, description, auto_join) VALUES (?, ?, ?)");
+    if ($sth->execute($self->{name}, $self->{description} || $self->{name}, 1)) {
+        $self->{id} = $sth->{mysql_insertid};
+        return $self->{id};
+    } else {
+        return undef;
+    }
 }
 
 1;

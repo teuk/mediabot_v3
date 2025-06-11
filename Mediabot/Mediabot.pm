@@ -2993,251 +2993,298 @@ sub addUserHost(@) {
 	}
 }
 
+# Add a channel to the bot, and register it to a user
+#sub addChannel(@) {
+#	my ($self,$message,$sNick,@tArgs) = @_;
+#	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+#	if (defined($iMatchingUserId)) {
+#		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+#			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
+#				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/) && defined($tArgs[1]) && ($tArgs[1] ne "")) {
+#					my $sChannel = $tArgs[0];
+#					my $sUser = $tArgs[1];
+#					log_message($self,0,"$sNick issued an addchan command $sChannel $sUser");
+#					my $id_channel = getIdChannel($self,$sChannel);
+#					unless (defined($id_channel)) {
+#						my $id_user = getIdUser($self,$sUser);
+#						if (defined($id_user)) {
+#							my $sQuery = "INSERT INTO CHANNEL (name,description,auto_join) VALUES (?,?,1)";
+#							my $sth = $self->{dbh}->prepare($sQuery);
+#							unless ($sth->execute($sChannel,$sChannel)) {
+#								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+#								$sth->finish;
+#								return undef;
+#							}
+#							else {
+#								my $id_channel = $sth->{ mysql_insertid };
+#								log_message($self,3,"addChannel() Added channel : $sChannel id_channel : $id_channel");
+#								my $sNoticeMsg = $message->prefix . " addchan command $sMatchingUserHandle added $sChannel (id_channel : $id_channel)";
+#								noticeConsoleChan($self,$sNoticeMsg);
+#								logBot($self,$message,undef,"addchan",($sChannel,@tArgs));
+#								joinChannel($self,$sChannel,undef);
+#								if (registerChannel($self,$message,$sNick,$id_channel,$id_user)) {
+#									log_message($self,0,"registerChannel successfull $sChannel $sUser");
+#								}
+#								else {
+#									log_message($self,0,"registerChannel failed $sChannel $sUser");
+#								}
+#								$sth->finish;
+#								return $id_channel;
+#							}
+#						}
+#						else {
+#							botNotice($self,$sNick,"User $sUser does not exist");
+#							return undef;
+#						}
+#					}
+#					else {
+#						botNotice($self,$sNick,"Channel $sChannel already exists");
+#						return undef;
+#					}
+#				}
+#				else {
+#					botNotice($self,$sNick,"Syntax: addchan <#channel> <user>");
+#					return undef;
+#				}
+#			}
+#			else {
+#				my $sNoticeMsg = $message->prefix . " addchan command attempt (command level [Administrator] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
+#				noticeConsoleChan($self,$sNoticeMsg);
+#				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+#				return undef;
+#			}
+#		}
+#		else {
+#			my $sNoticeMsg = $message->prefix . " addchan command attempt (user $sMatchingUserHandle is not logged in)";
+#			noticeConsoleChan($self,$sNoticeMsg);
+#			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+#			return undef;
+#		}
+#	}
+#}
+
 sub addChannel(@) {
-	my ($self,$message,$sNick,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/) && defined($tArgs[1]) && ($tArgs[1] ne "")) {
-					my $sChannel = $tArgs[0];
-					my $sUser = $tArgs[1];
-					log_message($self,0,"$sNick issued an addchan command $sChannel $sUser");
-					my $id_channel = getIdChannel($self,$sChannel);
-					unless (defined($id_channel)) {
-						my $id_user = getIdUser($self,$sUser);
-						if (defined($id_user)) {
-							my $sQuery = "INSERT INTO CHANNEL (name,description,auto_join) VALUES (?,?,1)";
-							my $sth = $self->{dbh}->prepare($sQuery);
-							unless ($sth->execute($sChannel,$sChannel)) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-								$sth->finish;
-								return undef;
-							}
-							else {
-								my $id_channel = $sth->{ mysql_insertid };
-								log_message($self,3,"addChannel() Added channel : $sChannel id_channel : $id_channel");
-								my $sNoticeMsg = $message->prefix . " addchan command $sMatchingUserHandle added $sChannel (id_channel : $id_channel)";
-								noticeConsoleChan($self,$sNoticeMsg);
-								logBot($self,$message,undef,"addchan",($sChannel,@tArgs));
-								joinChannel($self,$sChannel,undef);
-								if (registerChannel($self,$message,$sNick,$id_channel,$id_user)) {
-									log_message($self,0,"registerChannel successfull $sChannel $sUser");
-								}
-								else {
-									log_message($self,0,"registerChannel failed $sChannel $sUser");
-								}
-								$sth->finish;
-								return $id_channel;
-							}
-						}
-						else {
-							botNotice($self,$sNick,"User $sUser does not exist");
-							return undef;
-						}
-					}
-					else {
-						botNotice($self,$sNick,"Channel $sChannel already exists");
-						return undef;
-					}
-				}
-				else {
-					botNotice($self,$sNick,"Syntax: addchan <#channel> <user>");
-					return undef;
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " addchan command attempt (command level [Administrator] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " addchan command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+    my ($self, $message, $sNick, @tArgs) = @_;
+
+    # Authentication check
+    my ($id_user, $user_level, $desc, $auth, $handle) = getNickInfo($self, $message);
+    unless ($id_user && $auth) {
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+    unless (checkUserLevel($self, $user_level, "Administrator")) {
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    # Arguments
+    my ($sChannel, $sUser) = @tArgs;
+    unless ($sChannel && $sUser && $sChannel =~ /^#/) {
+        botNotice($self, $sNick, "Syntax: addchan <#channel> <user>");
+        return;
+    }
+
+    log_message($self, 0, "$sNick issued addchan command: $sChannel $sUser");
+
+    # Check if target user exists
+    my $id_target_user = getIdUser($self, $sUser);
+    unless ($id_target_user) {
+        botNotice($self, $sNick, "User $sUser does not exist");
+        return;
+    }
+
+    # Check channel existence
+    my $channel = Mediabot::Channel->new({
+        name => $sChannel,
+        dbh  => $self->{dbh},
+    });
+
+    if (my $existing_id = $channel->exists_in_db) {
+        botNotice($self, $sNick, "Channel $sChannel already exists");
+        return;
+    }
+
+    # Create new channel
+    my $id_channel = $channel->create_in_db;
+    unless ($id_channel) {
+        log_message($self, 1, "addChannel() failed SQL insert for $sChannel");
+        return;
+    }
+
+    # Register channel
+    joinChannel($self, $sChannel, undef);
+    my $registered = registerChannel($self, $message, $sNick, $id_channel, $id_target_user);
+
+    log_message($self, 0, $registered ? "registerChannel successful $sChannel $sUser" : "registerChannel failed $sChannel $sUser");
+    logBot($self, $message, undef, "addchan", ($sChannel, @tArgs));
+    noticeConsoleChan($self, $message->prefix . " addchan command $handle added $sChannel (id_channel: $id_channel)");
+
+    return $id_channel;
 }
 
 sub channelSet(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-				$sChannel = $tArgs[0];
-				shift @tArgs;
-			}
-			unless (defined($sChannel)) {
-				channelSetSyntax($self,$message,$sNick,@tArgs);
-				return undef;
-			}
-			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,450))) {	
-				if ( (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] ne "")) || (defined($tArgs[0]) && ($tArgs[0] ne "") && ((substr($tArgs[0],0,1) eq "+") || (substr($tArgs[0],0,1) eq "-"))) ) {
-					my $id_channel = getIdChannel($self,$sChannel);
-					if (defined($id_channel)) {
-						switch($tArgs[0]) {
-							case "key"					{
-																		my $sQuery = "UPDATE CHANNEL SET `key`=? WHERE id_channel=?";
-																		my $sth = $self->{dbh}->prepare($sQuery);
-																		unless ($sth->execute($tArgs[1],$id_channel)) {
-																			log_message($self,1,"channelSet() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-																			$sth->finish;
-																			return undef;
-																		}
-																		botNotice($self,$sNick,"Set $sChannel key " . $tArgs[1]);
-																		logBot($self,$message,$sChannel,"chanset",($sChannel,@tArgs));
-																		$sth->finish;
-																		return $id_channel;
-																	}
-							case "chanmode"			{
-																		my $sQuery = "UPDATE CHANNEL SET chanmode=? WHERE id_channel=?";
-																		my $sth = $self->{dbh}->prepare($sQuery);
-																		unless ($sth->execute($tArgs[1],$id_channel)) {
-																			log_message($self,1,"channelSet() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-																			$sth->finish;
-																			return undef;
-																		}
-																		botNotice($self,$sNick,"Set $sChannel chanmode " . $tArgs[1]);
-																		logBot($self,$message,$sChannel,"chanset",($sChannel,@tArgs));
-																		$sth->finish;
-																		return $id_channel;
-																	}
-							case "auto_join"		{
-																		my $bAutoJoin;
-																		if ( $tArgs[1] =~ /on/i ) {
-																			$bAutoJoin = 1;
-																		}
-																		elsif ( $tArgs[1] =~ /off/i ) {
-																			$bAutoJoin = 0;
-																		}
-																		else {
-																			channelSetSyntax($self,$message,$sNick,@tArgs);
-																			return undef;
-																		}
-																		my $sQuery = "UPDATE CHANNEL SET auto_join=? WHERE id_channel=?";
-																		my $sth = $self->{dbh}->prepare($sQuery);
-																		unless ($sth->execute($bAutoJoin,$id_channel)) {
-																			log_message($self,1,"channelSet() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-																			$sth->finish;
-																			return undef;
-																		}
-																		botNotice($self,$sNick,"Set $sChannel auto_join " . $tArgs[1]);
-																		logBot($self,$message,$sChannel,"chanset",($sChannel,@tArgs));
-																		$sth->finish;
-																		return $id_channel;
-																	}
-							case "description"	{
-																		shift @tArgs;
-																		unless ( $tArgs[0] =~ /console/i ) {
-																			my $sQuery = "UPDATE CHANNEL SET description=? WHERE id_channel=?";
-																			my $sth = $self->{dbh}->prepare($sQuery);
-																			unless ($sth->execute(join(" ",@tArgs),$id_channel)) {
-																				log_message($self,1,"channelSet() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-																				$sth->finish;
-																				return undef;
-																			}
-																			botNotice($self,$sNick,"Set $sChannel description " . join(" ",@tArgs));
-																			logBot($self,$message,$sChannel,"chanset",($sChannel,"description",@tArgs));
-																			$sth->finish;
-																			return $id_channel;
-																		}
-																		else {
-																			botNotice($self,$sNick,"You cannot set $sChannel description to " . $tArgs[0]);
-																			logBot($self,$message,$sChannel,"chanset",("You cannot set $sChannel description to " . $tArgs[0]));
-																		}
-																	}
-							else								{
-																		if ((substr($tArgs[0],0,1) eq "+") || (substr($tArgs[0],0,1) eq "-")){
-																			my $sChansetValue = substr($tArgs[0],1);
-																			my $sChansetAction = substr($tArgs[0],0,1);
-																			log_message($self,0,"chanset $sChannel $sChansetAction$sChansetValue");
-																			my $id_chanset_list = getIdChansetList($self,$sChansetValue);
-																			unless (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-																				botNotice($self,$sNick,"Undefined chanset $sChansetValue");
-																				logBot($self,$message,$sChannel,"chanset",($sChannel,"Undefined chanset $sChansetValue"));
-																				return undef;
-																			}
-																			my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
-																			if ( $sChansetAction eq "+" ) {
-																				if (defined($id_channel_set)) {
-																					botNotice($self,$sNick,"Chanset +$sChansetValue is already set for $sChannel");
-																					logBot($self,$message,$sChannel,"chanset",("Chanset +$sChansetValue is already set"));
-																					return undef;
-																				}
-																				my $sQuery = "INSERT INTO CHANNEL_SET (id_channel,id_chanset_list) VALUES (?,?)";
-																				my $sth = $self->{dbh}->prepare($sQuery);
-																				unless ($sth->execute($id_channel,$id_chanset_list)) {
-																					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-																				}
-																				else {
-																					botNotice($self,$sNick,"Chanset +$sChansetValue for $sChannel");
-																					logBot($self,$message,$sChannel,"chanset",("Chanset +$sChansetValue"));
-																					if ($sChansetValue =~ /^AntiFlood$/i) {
-																						setChannelAntiFlood($self,$message,$sNick,$sChannel,@tArgs);
-																					}
-																					elsif ($sChansetValue =~ /^HailoChatter$/i) {
-																						# TBD : check old ratio
-																						set_hailo_channel_ratio($self,$sChannel,97);
-																					}
-																				}
-																				$sth->finish;
-																				return $id_channel;
-																			}
-																			else {
-																				unless (defined($id_channel_set)) {
-																					botNotice($self,$sNick,"Chanset +$sChansetValue is not set for $sChannel");
-																					logBot($self,$message,$sChannel,"chanset",("Chanset +$sChansetValue is not set"));
-																					return undef;
-																				}
-																				my $sQuery = "DELETE FROM CHANNEL_SET WHERE id_channel_set=?";
-																				my $sth = $self->{dbh}->prepare($sQuery);
-																				unless ($sth->execute($id_channel_set)) {
-																					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-																				}
-																				else {
-																					botNotice($self,$sNick,"Chanset -$sChansetValue for $sChannel");
-																					logBot($self,$message,$sChannel,"chanset",("Chanset -$sChansetValue"));
-																				}
-																				$sth->finish;
-																				return $id_channel;
-																			}
-																			
-																		}
-																		else {
-																			channelSetSyntax($self,$message,$sNick,@tArgs);
-																			return undef;
-																		}
-																	}
-						}
-					}
-					else {
-						botNotice($self,$sNick,"Channel $sChannel does not exist");
-						return undef;
-					}
-				}
-				else {
-					channelSetSyntax($self,$message,$sNick,@tArgs);
-					return undef;
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " chanset command attempt for user " . $sMatchingUserHandle . " [" . $iMatchingUserLevelDesc ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " chanset command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+    my ($iMatchingUserId, $iMatchingUserLevel, $iMatchingUserLevelDesc, 
+        $iMatchingUserAuth, $sMatchingUserHandle, $sMatchingUserPasswd, 
+        $sMatchingUserInfo1, $sMatchingUserInfo2) = getNickInfo($self, $message);
+
+    if (defined($iMatchingUserId)) {
+        if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+
+            # Si le premier argument commence par '#', c'est le channel
+            if (defined($tArgs[0]) && $tArgs[0] ne "" && $tArgs[0] =~ /^#/) {
+                $sChannel = $tArgs[0];
+                shift @tArgs;
+            }
+            unless (defined($sChannel)) {
+                channelSetSyntax($self, $message, $sNick, @tArgs);
+                return undef;
+            }
+
+            # Vérifier le niveau de l’utilisateur (Admin global ou niveau >=450 sur ce channel)
+            if (defined($iMatchingUserLevel) && 
+                (checkUserLevel($self, $iMatchingUserLevel, "Administrator") 
+                 || checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 450))) {
+
+                # Check if arguments are provided
+                if ( (defined($tArgs[0]) && $tArgs[0] ne "" && defined($tArgs[1]) && $tArgs[1] ne "") || (defined($tArgs[0]) && $tArgs[0] ne "" && ((substr($tArgs[0], 0, 1) eq "+") || (substr($tArgs[0], 0, 1) eq "-")) ) ) {
+                    # get channel object if exists
+                    if (exists $self->{channels}{$sChannel}) {
+                        my $channel = $self->{channels}{$sChannel};
+                        my $id_channel = $channel->get_id;
+                        switch ($tArgs[0]) {
+                            case "key" {
+                                $channel->set_key($tArgs[1]);
+                                botNotice($self, $sNick, "Set $sChannel key " . $tArgs[1]);
+                                logBot($self, $message, $sChannel, "chanset", ($sChannel, @tArgs));
+                                return $id_channel;
+                            }
+                            case "chanmode" {
+                                $channel->set_chanmode($tArgs[1]);
+                                botNotice($self, $sNick, "Set $sChannel chanmode " . $tArgs[1]);
+                                logBot($self, $message, $sChannel, "chanset", ($sChannel, @tArgs));
+                                return $id_channel;
+                            }
+                            case "auto_join" {
+                                my $bAutoJoin;
+                                if    ($tArgs[1] =~ /on/i)  { $bAutoJoin = 1; }
+                                elsif ($tArgs[1] =~ /off/i) { $bAutoJoin = 0; }
+                                else {
+                                    channelSetSyntax($self, $message, $sNick, @tArgs);
+                                    return undef;
+                                }
+                                $channel->set_auto_join($bAutoJoin);
+                                botNotice($self, $sNick, "Set $sChannel auto_join " . $tArgs[1]);
+                                logBot($self, $message, $sChannel, "chanset", ($sChannel, @tArgs));
+                                return $id_channel;
+                            }
+                            case "description" {
+                                shift @tArgs;
+                                unless ($tArgs[0] =~ /console/i) {
+                                    my $new_desc = join(" ", @tArgs);
+                                    $channel->set_description($new_desc);
+                                    botNotice($self, $sNick, "Set $sChannel description " . $new_desc);
+                                    logBot($self, $message, $sChannel, "chanset", ($sChannel, "description", @tArgs));
+                                    return $id_channel;
+                                }
+                                else {
+                                    botNotice($self, $sNick, "You cannot set $sChannel description to " . $tArgs[0]);
+                                    logBot($self, $message, $sChannel, "chanset", ("You cannot set $sChannel description to " . $tArgs[0]));
+                                }
+                            }
+                            else {
+                                # Chanset management with +/-
+                                if ((substr($tArgs[0], 0, 1) eq "+") || (substr($tArgs[0], 0, 1) eq "-")) {
+                                    my $sChansetValue  = substr($tArgs[0], 1);
+                                    my $sChansetAction = substr($tArgs[0], 0, 1);
+                                    log_message($self, 0, "chanset $sChannel $sChansetAction$sChansetValue");
+                                    my $id_chanset_list = getIdChansetList($self, $sChansetValue);
+                                    unless (defined($id_chanset_list) && $id_chanset_list ne "") {
+                                        botNotice($self, $sNick, "Undefined chanset $sChansetValue");
+                                        logBot($self, $message, $sChannel, "chanset", 
+                                               ($sChannel, "Undefined chanset $sChansetValue"));
+                                        return undef;
+                                    }
+                                    my $id_channel_set = getIdChannelSet($self, $sChannel, $id_chanset_list);
+                                    if ($sChansetAction eq "+") {
+                                        if (defined($id_channel_set)) {
+                                            botNotice($self, $sNick, "Chanset +$sChansetValue is already set for $sChannel");
+                                            logBot($self, $message, $sChannel, "chanset", 
+                                                   ("Chanset +$sChansetValue is already set"));
+                                            return undef;
+                                        }
+                                        my $sQuery = "INSERT INTO CHANNEL_SET (id_channel, id_chanset_list) VALUES (?, ?)";
+                                        my $sth = $self->{dbh}->prepare($sQuery);
+                                        unless ($sth->execute($id_channel, $id_chanset_list)) {
+                                            log_message($self, 1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+                                        }
+                                        else {
+                                            botNotice($self, $sNick, "Chanset +$sChansetValue for $sChannel");
+                                            logBot($self, $message, $sChannel, "chanset", ("Chanset +$sChansetValue"));
+                                            if ($sChansetValue =~ /^AntiFlood$/i) {
+                                                setChannelAntiFlood($self, $message, $sNick, $sChannel, @tArgs);
+                                            }
+                                            elsif ($sChansetValue =~ /^HailoChatter$/i) {
+                                                # TBD: check old ratio
+                                                set_hailo_channel_ratio($self, $sChannel, 97);
+                                            }
+                                        }
+                                        $sth->finish;
+                                        return $id_channel;
+                                    }
+                                    else {  # $sChansetAction eq "-"
+                                        unless (defined($id_channel_set)) {
+                                            botNotice($self, $sNick, "Chanset +$sChansetValue is not set for $sChannel");
+                                            logBot($self, $message, $sChannel, "chanset", 
+                                                   ("Chanset +$sChansetValue is not set"));
+                                            return undef;
+                                        }
+                                        my $sQuery = "DELETE FROM CHANNEL_SET WHERE id_channel_set=?";
+                                        my $sth = $self->{dbh}->prepare($sQuery);
+                                        unless ($sth->execute($id_channel_set)) {
+                                            log_message($self, 1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+                                        }
+                                        else {
+                                            botNotice($self, $sNick, "Chanset -$sChansetValue for $sChannel");
+                                            logBot($self, $message, $sChannel, "chanset", ("Chanset -$sChansetValue"));
+                                        }
+                                        $sth->finish;
+                                        return $id_channel;
+                                    }
+                                }
+                                else {
+                                    channelSetSyntax($self, $message, $sNick, @tArgs);
+                                    return undef;
+                                }
+                            }
+
+                        }
+                    }
+                    else {
+                        # Channel not found in hash
+                        log_message($self, 3, "channelSet : channel $sChannel not found in hash");
+                        return undef;
+                    }
+                }
+                else {
+                    channelSetSyntax($self, $message, $sNick, @tArgs);
+                    return undef;
+                }
+            }
+            else {
+                my $sNoticeMsg = $message->prefix . " chanset command attempt for user " . $sMatchingUserHandle . " [" . $iMatchingUserLevelDesc . "]";
+                noticeConsoleChan($self, $sNoticeMsg);
+                botNotice($self, $sNick, "Your level does not allow you to use this command.");
+                return undef;
+            }
+        }
+        else {
+            my $sNoticeMsg = $message->prefix . " chanset command attempt (user $sMatchingUserHandle is not logged in)";
+            noticeConsoleChan($self, $sNoticeMsg);
+            botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login <user> <pass>");
+            return undef;
+        }
+    }
 }
 
 sub channelSetSyntax(@) {
@@ -6304,6 +6351,20 @@ sub displayYoutubeDetails(@) {
 					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics channelTitle : $schannelTitle");
 
 					if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
+						# Normalize title if too many uppercase letters
+						my $upper_count_title   = ($sTitle =~ tr/A-Z//);
+						my $upper_count_channel = ($schannelTitle =~ tr/A-Z//);
+
+						if ($upper_count_title > 20) {
+							log_message($self, 3, "displayYoutubeDetails() sTitle has $upper_count_title uppercase letters, normalizing.");
+							$sTitle = ucfirst(lc($sTitle));
+						}
+
+						if ($upper_count_channel > 20) {
+							log_message($self, 3, "displayYoutubeDetails() schannelTitle has $upper_count_channel uppercase letters, normalizing.");
+							$schannelTitle = ucfirst(lc($schannelTitle));
+						}
+
 						my $sMsgSong .= String::IRC->new('[')->white('black');
 						$sMsgSong .= String::IRC->new('You')->black('white');
 						$sMsgSong .= String::IRC->new('Tube')->white('red');
