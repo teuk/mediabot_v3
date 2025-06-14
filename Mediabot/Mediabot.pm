@@ -3,6 +3,7 @@ package Mediabot;
 use strict;
 use warnings;
 use diagnostics;
+use Mediabot::Auth;
 use Time::HiRes qw(usleep);
 use Config::Simple;
 use Date::Format;
@@ -107,73 +108,77 @@ sub readConfigFile {
     return 1;
 }
 
-
+# getVersion – returns the current and latest version of the program
 sub getVersion(@) {
-	my $self = shift;
-	my ($MAIN_PROG_VERSION,$MAIN_GIT_VERSION);
-	my ($cVerMajor,$cVerMinor,$cStable,$cVerDev);
-	my ($gVerMajor,$gVerMinor,$gStable,$gVerDev);
-	
-	# Get current version
-	log_message($self,0,"Getting current version from VERSION file");
-	unless (open VERSION, "VERSION") {
-		log_message($self,0,"Could not get version from VERSION file");
-		$MAIN_PROG_VERSION = "Undefined";
-	}
-	else {
-		my $line;
-		if (defined($line=<VERSION>)) {
-			chomp($line);
-			$MAIN_PROG_VERSION = $line;
-			($cVerMajor,$cVerMinor,$cStable,$cVerDev) = getDetailedVersion($self,$MAIN_PROG_VERSION);
-		}
-		else {
-			$MAIN_PROG_VERSION = "Undefined";
-		}
-		if (defined($cVerMajor) && ($cVerMajor ne "") && defined($cVerMinor) && ($cVerMinor ne "") && defined($cStable) && ($cStable ne "")) {
-			log_message($self,0,"-> Mediabot $cStable version $cVerMajor.$cVerMinor " . ((defined($cVerDev) && ($cVerDev ne "")) ? "($cVerDev)" : ""));
-		}
-		else {
-			log_message($self,0,"-> Mediabot unknown version detected : $MAIN_PROG_VERSION");
-		}
-	}
+    my $self = shift;
+    my ($MAIN_PROG_VERSION, $MAIN_GIT_VERSION) = ("Undefined", "Undefined");
+    my ($cVerMajor, $cVerMinor, $cStable, $cVerDev);
+    my ($gVerMajor, $gVerMinor, $gStable, $gVerDev);
 
-	unless ( $MAIN_PROG_VERSION eq "Undefined" ) {
-		# Check for latest version
-		log_message($self,0,"Checking latest version from github (https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION)");
-		unless (open GITVERSION, "curl --connect-timeout 5 -f -s https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION |") {
-			log_message($self,0,"Could not get version from github");
-			$MAIN_GIT_VERSION = "Undefined";
-		}
-		else {
-			my $line;
-			if (defined($line=<GITVERSION>)) {
-				chomp($line);
-				$MAIN_GIT_VERSION = $line;
-				($gVerMajor,$gVerMinor,$gStable,$gVerDev) = getDetailedVersion($self,$MAIN_GIT_VERSION);
-				if (defined($gVerMajor) && ($gVerMajor ne "") && defined($gVerMinor) && ($gVerMinor ne "") && defined($gStable) && ($gStable ne "")) {
-					log_message($self,0,"-> Mediabot github $cStable version $gVerMajor.$gVerMinor " . ((defined($gVerDev) && ($gVerDev ne "")) ? "($cVerDev)" : ""));
-					if ( $MAIN_PROG_VERSION eq $MAIN_GIT_VERSION ) {
-						log_message($self,0,"Mediabot is up to date");
-					}
-					else {
-						log_message($self,0,"Mediabot should be updated to $cStable version $gVerMajor.$gVerMinor " . ((defined($gVerDev) && ($gVerDev ne "")) ? "($cVerDev)" : ""));
-					}
-				}
-				else {
-					log_message($self,0,"Mediabot unknown git version detected : $MAIN_GIT_VERSION");
-				}
-				close GITVERSION;
-			}
-			else {
-				$MAIN_GIT_VERSION = "Undefined";
-				log_message($self,0,"-> Mediabot undefined git version detected ($MAIN_GIT_VERSION)");
-			}
-		}
-	}
-	$self->{'main_prog_version'} = $MAIN_PROG_VERSION;
-	return ($MAIN_PROG_VERSION,$MAIN_GIT_VERSION);
+    # Get current version from VERSION file
+    $self->{logger}->log(0, "Getting current version from VERSION file");
+
+    if (open my $fh, '<', 'VERSION') {
+        my $line = <$fh>;
+        close $fh;
+        if (defined $line) {
+            chomp($line);
+            $MAIN_PROG_VERSION = $line;
+            ($cVerMajor, $cVerMinor, $cStable, $cVerDev) = getDetailedVersion($self, $MAIN_PROG_VERSION);
+        }
+    } else {
+        $self->{logger}->log(0, "Could not get version from VERSION file");
+    }
+
+    if (defined $cVerMajor && $cVerMajor ne '' &&
+        defined $cVerMinor && $cVerMinor ne '' &&
+        defined $cStable    && $cStable    ne '') {
+        
+        my $suffix = (defined $cVerDev && $cVerDev ne '') ? "($cVerDev)" : '';
+        $self->{logger}->log(0, "-> Mediabot $cStable version $cVerMajor.$cVerMinor $suffix");
+    } else {
+        $self->{logger}->log(0, "-> Mediabot unknown version detected: $MAIN_PROG_VERSION");
+    }
+
+    # Check latest version from GitHub if local version is defined
+    if ($MAIN_PROG_VERSION ne 'Undefined') {
+        $self->{logger}->log(0, "Checking latest version from GitHub (https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION)");
+
+        if (open my $gh, '-|', 'curl --connect-timeout 5 -f -s https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION') {
+            my $line = <$gh>;
+            close $gh;
+            if (defined $line) {
+                chomp($line);
+                $MAIN_GIT_VERSION = $line;
+                ($gVerMajor, $gVerMinor, $gStable, $gVerDev) = getDetailedVersion($self, $MAIN_GIT_VERSION);
+
+                if (defined $gVerMajor && $gVerMajor ne '' &&
+                    defined $gVerMinor && $gVerMinor ne '' &&
+                    defined $gStable    && $gStable    ne '') {
+                    
+                    my $suffix = (defined $gVerDev && $gVerDev ne '') ? "($gVerDev)" : '';
+                    $self->{logger}->log(0, "-> Mediabot GitHub $gStable version $gVerMajor.$gVerMinor $suffix");
+
+                    if ($MAIN_PROG_VERSION eq $MAIN_GIT_VERSION) {
+                        $self->{logger}->log(0, "Mediabot is up to date");
+                    } else {
+                        $self->{logger}->log(0, "Mediabot should be updated to $gStable version $gVerMajor.$gVerMinor $suffix");
+                    }
+                } else {
+                    $self->{logger}->log(0, "Mediabot unknown GitHub version detected: $MAIN_GIT_VERSION");
+                }
+            } else {
+                $self->{logger}->log(0, "Could not read line from GitHub version stream");
+            }
+        } else {
+            $self->{logger}->log(0, "Could not get version from GitHub");
+        }
+    }
+
+    $self->{main_prog_version} = $MAIN_PROG_VERSION;
+    return ($MAIN_PROG_VERSION, $MAIN_GIT_VERSION);
 }
+
 
 sub getDetailedVersion(@) {
 	my ($self,$sVersion) = @_;
@@ -222,6 +227,11 @@ sub getMainConfCfg(@) {
 	return $self->{cfg};
 }
 
+sub getChannel {
+    my ($self, $chan_name) = @_;
+    return $self->{channels}{$chan_name};
+}
+
 sub getPidFile(@) {
 	my $self = shift;
 	return $self->{conf}->get('main.MAIN_PID_FILE');
@@ -242,7 +252,7 @@ sub getPidFromFile(@) {
             return $line;
         }
         else {
-            log_message($self, 1, "getPidFromFile() couldn't read PID from $pidfile");
+            $self->{logger}->log( 1, "getPidFromFile() couldn't read PID from $pidfile");
             return undef;
         }
     }
@@ -263,22 +273,35 @@ sub init_log(@) {
     $self->{LOG} = $LOG;
 }
 
+# Initialize the authentication module
+sub init_auth {
+    my ($self) = @_;
+
+    $self->{auth} = Mediabot::Auth->new(
+        dbh    => $self->{dbh},
+        logger => $self->{logger},
+    );
+
+    $self->{logger}->log(1, "Authentication module initialized");
+}
+
+
 # Populate all CHANNEL entries into $self->{channels}
 sub populateChannels {
     my ($self) = @_;
 
-    log_message($self, 3, "populateChannels: Populating channels from database");
+    $self->{logger}->log( 3, "populateChannels: Populating channels from database");
 
     my $sQuery = "SELECT id_channel, name, description, topic, tmdb_lang, `key` FROM CHANNEL";
     my $sth = $self->{dbh}->prepare($sQuery);
     unless ($sth->execute()) {
-        log_message($self, 1, "SQL Error: " . $DBI::errstr . " Query: $sQuery");
+        $self->{logger}->log( 1, "SQL Error: " . $DBI::errstr . " Query: $sQuery");
         return;
     }
 
     my $i = 0;
     while (my $ref = $sth->fetchrow_hashref()) {
-        $i++ == 0 and log_message($self, 0, "Populating channel objects");
+        $i++ == 0 and $self->{logger}->log( 0, "Populating channel objects");
 
         my $channel_obj = Mediabot::Channel->new({
             id         => $ref->{id_channel},
@@ -288,6 +311,7 @@ sub populateChannels {
             tmdb_lang  => $ref->{tmdb_lang},
             key        => $ref->{key},
             dbh        => $self->{dbh},
+			irc		   => $self->{irc},
         });
 
         $self->{channels}{ $ref->{name} } = $channel_obj;
@@ -296,14 +320,14 @@ sub populateChannels {
     $sth->finish;
 
     if ($i == 0) {
-        log_message($self, 0, "No channel found in database.");
+        $self->{logger}->log( 0, "No channel found in database.");
     }
 }
 
 # Initialize Hailo object
 sub init_hailo(@) {
 	my ($self) = shift;
-	log_message($self,0,"Initialize Hailo");
+	$self->{logger}->log(0,"Initialize Hailo");
 	my $hailo = Hailo->new(
 		brain => 'mediabot_v3.brn',
 		save_on_exit => 1,
@@ -320,7 +344,7 @@ sub get_hailo(@) {
 # Clean up and exit the program
 sub clean_and_exit(@) {
 	my ($self,$iRetValue) = @_;
-	log_message($self,0,"Cleaning and exiting...");
+	$self->{logger}->log(0,"Cleaning and exiting...");
 	
 	if (defined($self->{dbh}) && ($self->{dbh} != 0)) {
 		if ( $iRetValue != 1146 ) {
@@ -331,35 +355,6 @@ sub clean_and_exit(@) {
 	if(defined(fileno($self->{LOG}))) { close $self->{LOG}; }
 	
 	exit $iRetValue;
-}
-
-# Log a message with timestamp and level
-sub log_message(@) {
-    my ($self, $iLevel, $sMsg) = @_;
-    my $conf = $self->{conf};
-    my $LOG = $self->{LOG};
-
-    binmode STDOUT, ':utf8';
-    binmode $LOG, ':utf8';
-
-    if (defined($sMsg) && ($sMsg ne "")) {
-        my $sDisplayMsg = time2str("[%d/%m/%Y %H:%M:%S]", time) . " ";
-        select $LOG;
-        $| = 1;
-
-        my $debug_level = $conf->get('main.MAIN_PROG_DEBUG');
-        if ($debug_level >= $iLevel) {
-            if ($iLevel == 0) {
-                $sDisplayMsg .= "[INFO] $sMsg\n";
-                print $LOG $sDisplayMsg;
-            } else {
-                $sDisplayMsg .= "[DEBUG$iLevel] $sMsg\n";
-                print $LOG $sDisplayMsg;
-            }
-            select STDOUT;
-            print $sDisplayMsg;
-        }
-    }
 }
 
 # Connect to the database
@@ -376,17 +371,17 @@ sub dbConnect(@) {
 
     my $connectionInfo = "DBI:mysql:database=$dbname;host=$dbhost;port=$dbport";
 
-    log_message($self, 1, "dbConnect() Connecting to Database: $dbname");
+    $self->{logger}->log( 1, "dbConnect() Connecting to Database: $dbname");
 
     my $dbh;
     unless ($dbh = DBI->connect($connectionInfo, $dbuser, $dbpass, { RaiseError => 0, PrintError => 0 })) {
-        log_message($self, 0, "dbConnect() DBI Error: " . $DBI::errstr);
-        log_message($self, 0, "dbConnect() DBI Native error code: " . ($DBI::err // 'undef'));
+        $self->{logger}->log( 0, "dbConnect() DBI Error: " . $DBI::errstr);
+        $self->{logger}->log( 0, "dbConnect() DBI Native error code: " . ($DBI::err // 'undef'));
         clean_and_exit($self, 3) if defined $DBI::err;
     }
 
     $dbh->{mysql_auto_reconnect} = 1;
-    log_message($self, 1, "dbConnect() Connected to $dbname.");
+    $self->{logger}->log( 1, "dbConnect() Connected to $dbname.");
 
     foreach my $sql (
         "SET NAMES 'utf8'",
@@ -395,7 +390,7 @@ sub dbConnect(@) {
     ) {
         my $sth = $dbh->prepare($sql);
         unless ($sth->execute()) {
-            log_message($self, 1, "dbConnect() SQL Error: $DBI::errstr Query: $sql");
+            $self->{logger}->log( 1, "dbConnect() SQL Error: $DBI::errstr Query: $sql");
         }
         $sth->finish;
     }
@@ -412,18 +407,18 @@ sub dbCheckTables(@) {
 	my ($self) = shift;
 	my $LOG = $self->{LOG};
 	my $dbh = $self->{dbh};
-	log_message($self,3,"Checking USER table");
+	$self->{logger}->log(3,"Checking USER table");
 	my $sLogoutQuery = "SELECT * FROM USER";
 	my $sth = $dbh->prepare($sLogoutQuery);
 	unless ($sth->execute) {
-		log_message($self,0,"dbCheckTables() SQL Error : " . $DBI::errstr . "(" . $DBI::err . ") Query : " . $sLogoutQuery);
+		$self->{logger}->log(0,"dbCheckTables() SQL Error : " . $DBI::errstr . "(" . $DBI::err . ") Query : " . $sLogoutQuery);
 		if (defined($DBI::err) && ($DBI::err == 1146)) {
-			log_message($self,3,"USER table does not exist. Check your database installation");
+			$self->{logger}->log(3,"USER table does not exist. Check your database installation");
 			clean_and_exit($self,1146);
 		}
 	}
 	else {	
-		log_message($self,3,"USER table exists");
+		$self->{logger}->log(3,"USER table exists");
 	}
 }
 
@@ -434,10 +429,10 @@ sub dbLogoutUsers(@) {
 	my $sLogoutQuery = "UPDATE USER SET auth=0 WHERE auth=1";
 	my $sth = $dbh->prepare($sLogoutQuery);
 	unless ($sth->execute) {
-		log_message($self,0,"dbLogoutUsers() SQL Error : " . $DBI::errstr . "(" . $DBI::err . ") Query : " . $sLogoutQuery);
+		$self->{logger}->log(0,"dbLogoutUsers() SQL Error : " . $DBI::errstr . "(" . $DBI::err . ") Query : " . $sLogoutQuery);
 	}
 	else {	
-		log_message($self,0,"Logged out all users");
+		$self->{logger}->log(0,"Logged out all users");
 	}
 }
 
@@ -458,8 +453,8 @@ sub pickServer(@) {
 		my $network_name = $conf->get('connection.CONN_SERVER_NETWORK');
 
 		unless (defined($network_name) && $network_name ne "") {
-			log_message($self, 0, "No CONN_SERVER_NETWORK defined in $self->{config_file}");
-			log_message($self, 0, "Run ./configure at first use or ./configure -s to set it properly");
+			$self->{logger}->log( 0, "No CONN_SERVER_NETWORK defined in $self->{config_file}");
+			$self->{logger}->log( 0, "Run ./configure at first use or ./configure -s to set it properly");
 			clean_and_exit($self, 4);
 		}
 
@@ -467,7 +462,7 @@ sub pickServer(@) {
 		my $sQuery = "SELECT SERVERS.server_hostname FROM NETWORK,SERVERS WHERE NETWORK.id_network=SERVERS.id_network AND NETWORK.network_name LIKE ? ORDER BY RAND() LIMIT 1";
 		my $sth = $dbh->prepare($sQuery);
 		unless ($sth->execute($network_name)) {
-			log_message($self, 0, "Startup select SERVER, SQL Error: " . $DBI::errstr . " Query: $sQuery");
+			$self->{logger}->log( 0, "Startup select SERVER, SQL Error: " . $DBI::errstr . " Query: $sQuery");
 		}
 		else {
 			if (my $ref = $sth->fetchrow_hashref()) {
@@ -477,15 +472,15 @@ sub pickServer(@) {
 		}
 
 		unless (defined($self->{server}) && $self->{server} ne "") {
-			log_message($self, 0, "No server found for network $network_name defined in $self->{config_file}");
-			log_message($self, 0, "Run ./configure at first use or ./configure -s to set it properly");
+			$self->{logger}->log( 0, "No server found for network $network_name defined in $self->{config_file}");
+			$self->{logger}->log( 0, "Run ./configure at first use or ./configure -s to set it properly");
 			clean_and_exit($self, 4);
 		}
 
-		$self->log_message(0, "Picked $self->{server} from Network $network_name");
+		$self->{logger}->log(0,"Picked $self->{server} from Network $network_name");
 	}
 	else {
-		$self->log_message(0, "Picked $self->{server} from command line");
+		$self->{logger}->log(0,"Picked $self->{server} from command line");
 	}
 
 	# Extract hostname and port
@@ -562,7 +557,7 @@ sub getConnectionNick(@) {
 		$sConnectionNick = $string . (int(rand(100)) + 10);
 	}
 
-	log_message($self, 0, "Connection nick: $sConnectionNick");
+	$self->{logger}->log( 0, "Connection nick: $sConnectionNick");
 	return $sConnectionNick;
 }
 
@@ -614,7 +609,7 @@ sub getIdChannel(@) {
 	my $sQuery = "SELECT id_channel FROM CHANNEL WHERE name=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel) ) {
-		log_message($self,1,"getIdChannel() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"getIdChannel() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -632,7 +627,7 @@ sub getUserhandle(@) {
 	my $sQuery = "SELECT nickname FROM USER WHERE id_user=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($id_user) ) {
-		log_message($self,1,"getUserhandle() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"getUserhandle() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -649,7 +644,7 @@ sub getUserAutologin(@) {
 	my $sQuery = "SELECT * FROM USER WHERE nickname like ? AND username='#AUTOLOGIN#'";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sMatchingUserHandle) ) {
-		log_message($self,1,"getUserAutologin() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"getUserAutologin() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -670,7 +665,7 @@ sub getIdUser(@) {
 	my $sQuery = "SELECT id_user FROM USER WHERE nickname like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sUserhandle) ) {
-		log_message($self,1,"getIdUser() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"getIdUser() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -688,7 +683,7 @@ sub getChannelName(@) {
 	my $sQuery = "SELECT name FROM CHANNEL WHERE id_channel=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($id_channel) ) {
-		log_message($self,1,"getChannelName() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"getChannelName() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -723,7 +718,7 @@ sub noticeConsoleChan(@) {
 	my ($self,$sMsg) = @_;
 	my ($id_channel,$name,$chanmode,$key) = getConsoleChan($self);
 	unless(defined($name) && ($name ne "")) {
-		log_message($self,0,"No console chan defined ! Run ./configure to setup the bot");
+		$self->{logger}->log(0,"No console chan defined ! Run ./configure to setup the bot");
 	}
 	else {
 		botNotice($self,$name,$sMsg);
@@ -751,7 +746,7 @@ sub logBot(@) {
 		$tArgs[0] = "";
 	}
 	unless ($sth->execute(time2str("%Y-%m-%d %H-%M-%S",time),$id_user,$id_channel,$sHostmask,$action,join(" ",@tArgs))) {
-		log_message($self,0,"logBot() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(0,"logBot() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		my $sNoticeMsg = "($sUser : $sHostmask) command $action";
@@ -762,7 +757,7 @@ sub logBot(@) {
 			$sNoticeMsg .= " on $sChannel";
 		}
 		noticeConsoleChan($self,$sNoticeMsg);
-		log_message($self,3,"logBot() $sNoticeMsg");
+		$self->{logger}->log(3,"logBot() $sNoticeMsg");
 	}
 	$sth->finish;
 }
@@ -777,29 +772,29 @@ sub logBotAction(@) {
 	}
 	my $id_channel;
 	if (defined($sChannel)) {
-		log_message($self,5,"logBotAction() eventtype = $eventtype chan = $sChannel nick = $sNick text = $sText");
+		$self->{logger}->log(5,"logBotAction() eventtype = $eventtype chan = $sChannel nick = $sNick text = $sText");
 	}
 	else {
-		log_message($self,5,"logBotAction() eventtype = $eventtype nick = $sNick text = $sText");
+		$self->{logger}->log(5,"logBotAction() eventtype = $eventtype nick = $sNick text = $sText");
 	}
-	log_message($self,5,"logBotAction() " . Dumper($message));
+	$self->{logger}->log(5,"logBotAction() " . Dumper($message));
 	
 	my $sQuery = "SELECT * FROM CHANNEL WHERE name=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel) ) {
-		log_message($self,1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if ((my $ref = $sth->fetchrow_hashref()) || ($eventtype eq "quit")) {
 			unless ($eventtype eq "quit") { $id_channel = $ref->{'id_channel'}; }
-			log_message($self,5,"logBotAction() ts = " . time2str("%Y-%m-%d %H-%M-%S",time));
+			$self->{logger}->log(5,"logBotAction() ts = " . time2str("%Y-%m-%d %H-%M-%S",time));
 			my $sQuery = "INSERT INTO CHANNEL_LOG (id_channel,ts,event_type,nick,userhost,publictext) VALUES (?,?,?,?,?,?)";
 			my $sth = $self->{dbh}->prepare($sQuery);
 			unless ($sth->execute($id_channel,time2str("%Y-%m-%d %H-%M-%S",time),$eventtype,$sNick,$sUserhost,$sText) ) {
-				log_message($self,1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				$self->{logger}->log(1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 			}
 			else {
-				log_message($self,5,"logBotAction() inserted " . $eventtype . " event into CHANNEL_LOG");
+				$self->{logger}->log(5,"logBotAction() inserted " . $eventtype . " event into CHANNEL_LOG");
 			}
 		}
 	}
@@ -813,29 +808,29 @@ sub botPrivmsg(@) {
 		if (substr($sTo, 0, 1) eq '#') {
 				my $id_chanset_list = getIdChansetList($self,"NoColors");
 				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-					log_message($self,4,"botPrivmsg() check chanset NoColors, id_chanset_list = $id_chanset_list");
+					$self->{logger}->log(4,"botPrivmsg() check chanset NoColors, id_chanset_list = $id_chanset_list");
 					my $id_channel_set = getIdChannelSet($self,$sTo,$id_chanset_list);
 					if (defined($id_channel_set) && ($id_channel_set ne "")) {
-						log_message($self,3,"botPrivmsg() channel $sTo has chanset +NoColors");
+						$self->{logger}->log(3,"botPrivmsg() channel $sTo has chanset +NoColors");
 						$sMsg =~ s/\cC\d{1,2}(?:,\d{1,2})?|[\cC\cB\cI\cU\cR\cO]//g;
 					}
 				}
 				$id_chanset_list = getIdChansetList($self,"AntiFlood");
 				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-					log_message($self,4,"botPrivmsg() check chanset AntiFlood, id_chanset_list = $id_chanset_list");
+					$self->{logger}->log(4,"botPrivmsg() check chanset AntiFlood, id_chanset_list = $id_chanset_list");
 					my $id_channel_set = getIdChannelSet($self,$sTo,$id_chanset_list);
 					if (defined($id_channel_set) && ($id_channel_set ne "")) {
-						log_message($self,3,"botPrivmsg() channel $sTo has chanset +AntiFlood");
+						$self->{logger}->log(3,"botPrivmsg() channel $sTo has chanset +AntiFlood");
 						if (checkAntiFlood($self,$sTo)) {
 							return undef;
 						}
 					}
 				}
-				log_message($self,0,"$sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
+				$self->{logger}->log(0,"$sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
 				my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND name=?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($sTo) ) {
-					log_message($self,1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					while (my $ref = $sth->fetchrow_hashref()) {
@@ -845,7 +840,7 @@ sub botPrivmsg(@) {
 						if (index($sMsgLc, $sBadwordLc) != -1) {
 							logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,"$sMsg (BADWORD : $sBadwordDb)");
 							noticeConsoleChan($self,"Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
-							log_message($self,3,"Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
+							$self->{logger}->log(3,"Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
 							$sth->finish;
 							return;
 						}
@@ -855,7 +850,7 @@ sub botPrivmsg(@) {
 		}
 		else {
 			$eventtype = "private";
-			log_message($self,0,"-> *$sTo* $sMsg");
+			$self->{logger}->log(0,"-> *$sTo* $sMsg");
 		}
 		if (defined($sMsg) && ($sMsg ne "")) {
 			if (utf8::is_utf8($sMsg)) {
@@ -867,11 +862,11 @@ sub botPrivmsg(@) {
 			}
 		}
 		else {
-			log_message($self,0,"botPrivmsg() ERROR no message specified to send to target");
+			$self->{logger}->log(0,"botPrivmsg() ERROR no message specified to send to target");
 		}
 	}
 	else {
-		log_message($self,0,"botPrivmsg() ERROR no target specified to send $sMsg");
+		$self->{logger}->log(0,"botPrivmsg() ERROR no target specified to send $sMsg");
 	}
 }
 
@@ -883,29 +878,29 @@ sub botAction(@) {
 		if (substr($sTo, 0, 1) eq '#') {
 				my $id_chanset_list = getIdChansetList($self,"NoColors");
 				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-					log_message($self,4,"botAction() check chanset NoColors, id_chanset_list = $id_chanset_list");
+					$self->{logger}->log(4,"botAction() check chanset NoColors, id_chanset_list = $id_chanset_list");
 					my $id_channel_set = getIdChannelSet($self,$sTo,$id_chanset_list);
 					if (defined($id_channel_set) && ($id_channel_set ne "")) {
-						log_message($self,3,"botAction() channel $sTo has chanset +NoColors");
+						$self->{logger}->log(3,"botAction() channel $sTo has chanset +NoColors");
 						$sMsg =~ s/\cC\d{1,2}(?:,\d{1,2})?|[\cC\cB\cI\cU\cR\cO]//g;
 					}
 				}
 				$id_chanset_list = getIdChansetList($self,"AntiFlood");
 				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-					log_message($self,4,"botAction() check chanset AntiFlood, id_chanset_list = $id_chanset_list");
+					$self->{logger}->log(4,"botAction() check chanset AntiFlood, id_chanset_list = $id_chanset_list");
 					my $id_channel_set = getIdChannelSet($self,$sTo,$id_chanset_list);
 					if (defined($id_channel_set) && ($id_channel_set ne "")) {
-						log_message($self,3,"botAction() channel $sTo has chanset +AntiFlood");
+						$self->{logger}->log(3,"botAction() channel $sTo has chanset +AntiFlood");
 						if (checkAntiFlood($self,$sTo)) {
 							return undef;
 						}
 					}
 				}
-				log_message($self,0,"$sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
+				$self->{logger}->log(0,"$sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
 				my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND name=?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($sTo) ) {
-					log_message($self,1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					while (my $ref = $sth->fetchrow_hashref()) {
@@ -915,7 +910,7 @@ sub botAction(@) {
 						if (index($sMsgLc, $sBadwordLc) != -1) {
 							logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,"$sMsg (BADWORD : $sBadwordDb)");
 							noticeConsoleChan($self,"Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
-							log_message($self,3,"Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
+							$self->{logger}->log(3,"Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
 							$sth->finish;
 							return;
 						}
@@ -925,7 +920,7 @@ sub botAction(@) {
 		}
 		else {
 			$eventtype = "private";
-			log_message($self,0,"-> *$sTo* $sMsg");
+			$self->{logger}->log(0,"-> *$sTo* $sMsg");
 		}
 		if (defined($sMsg) && ($sMsg ne "")) {
 			if (utf8::is_utf8($sMsg)) {
@@ -937,11 +932,11 @@ sub botAction(@) {
 			}
 		}
 		else {
-			log_message($self,0,"botPrivmsg() ERROR no message specified to send to target");
+			$self->{logger}->log(0,"botPrivmsg() ERROR no message specified to send to target");
 		}
 	}
 	else {
-		log_message($self,0,"botAction() ERROR no target specified to send $sMsg");
+		$self->{logger}->log(0,"botAction() ERROR no target specified to send $sMsg");
 	}
 }
 
@@ -949,7 +944,7 @@ sub botAction(@) {
 sub botNotice(@) {
 	my ($self,$sTo,$sMsg) = @_;
 	$self->{irc}->do_NOTICE( target => $sTo, text => $sMsg );
-	log_message($self,0,"-> -$sTo- $sMsg");
+	$self->{logger}->log(0,"-> -$sTo- $sMsg");
 	if (substr($sTo, 0, 1) eq '#') {
 		logBotAction($self,undef,"notice",$self->{irc}->nick_folded,$sTo,$sMsg);
 	}
@@ -959,11 +954,11 @@ sub botNotice(@) {
 sub joinChannel(@) {
 	my ($self,$channel,$key) = @_;
 	if (defined($key) && ($key ne "")) {
-		log_message($self,0,"Trying to join $channel with key $key");
+		$self->{logger}->log(0,"Trying to join $channel with key $key");
 		$self->{irc}->send_message("JOIN", undef, ($channel,$key));
 	}
 	else {
-		log_message($self,0,"Trying to join $channel");
+		$self->{logger}->log(0,"Trying to join $channel");
 		$self->{irc}->send_message("JOIN", undef, $channel);
 	}
 }
@@ -977,16 +972,16 @@ sub joinChannels {
         next unless $chan->get_auto_join;
         next if ($chan->get_description // '') eq 'console';
 
-        $i++ == 0 and log_message($self, 0, "Auto join channels");
+        $i++ == 0 and $self->{logger}->log( 0, "Auto join channels");
 
         my $name = $chan->get_name;
         my $key  = $chan->get_key;
 
         joinChannel($self, $name, $key);
-        log_message($self, 2, "Joining channel $name");
+        $self->{logger}->log( 2, "Joining channel $name");
     }
 
-    $i == 0 and log_message($self, 0, "No channel to auto join");
+    $i == 0 and $self->{logger}->log( 0, "No channel to auto join");
 }
 
 # Set timers at startup
@@ -996,10 +991,10 @@ sub onStartTimers(@) {
 	my $sQuery = "SELECT * FROM TIMERS";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute()) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
-		log_message($self,0,"Checking timers to set at startup");
+		$self->{logger}->log(0,"Checking timers to set at startup");
 		my $i = 0;
 		while (my $ref = $sth->fetchrow_hashref()) {
 			my $id_timers = $ref->{'id_timers'};
@@ -1007,11 +1002,11 @@ sub onStartTimers(@) {
 			my $duration = $ref->{'duration'};
 			my $command = $ref->{'command'};
 			my $sSecondText = ( $duration > 1 ? "seconds" : "second" );
-			log_message($self,0,"Timer $name - id : $id_timers - every $duration $sSecondText - command $command");
+			$self->{logger}->log(0,"Timer $name - id : $id_timers - every $duration $sSecondText - command $command");
 			my $timer = IO::Async::Timer::Periodic->new(
 			    interval => $duration,
 			    on_tick => sub {
-			    	log_message($self,3,"Timer every $duration seconds : $command");
+			    	$self->{logger}->log(3,"Timer every $duration seconds : $command");
   					$self->{irc}->write("$command\x0d\x0a");
 					},
 			);
@@ -1022,10 +1017,10 @@ sub onStartTimers(@) {
 		}
 		if ( $i ) {
 			my $sTimerText = ( $i > 1 ? "timers" : "timer" );
-			log_message($self,0,"$i active $sTimerText set at startup");
+			$self->{logger}->log(0,"$i active $sTimerText set at startup");
 		}
 		else {
-			log_message($self,0,"No timer to set at startup");
+			$self->{logger}->log(0,"No timer to set at startup");
 		}
 	}
 	$sth->finish;
@@ -1038,10 +1033,10 @@ sub userOnJoin(@) {
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {
 		my $sChannelUserQuery = "SELECT * FROM USER_CHANNEL,CHANNEL WHERE USER_CHANNEL.id_channel=CHANNEL.id_channel AND name=? AND id_user=?";
-		log_message($self,4,$sChannelUserQuery);
+		$self->{logger}->log(4,$sChannelUserQuery);
 		my $sth = $self->{dbh}->prepare($sChannelUserQuery);
 		unless ($sth->execute($sChannel,$iMatchingUserId)) {
-			log_message($self,1,"on_join() SQL Error : " . $DBI::errstr . " Query : " . $sChannelUserQuery);
+			$self->{logger}->log(1,"on_join() SQL Error : " . $DBI::errstr . " Query : " . $sChannelUserQuery);
 		}
 		else {
 			if (my $ref = $sth->fetchrow_hashref()) {
@@ -1063,10 +1058,10 @@ sub userOnJoin(@) {
 		$sth->finish;
 	}
 	my $sChannelUserQuery = "SELECT * FROM CHANNEL WHERE name=?";
-	log_message($self,4,$sChannelUserQuery);
+	$self->{logger}->log(4,$sChannelUserQuery);
 	my $sth = $self->{dbh}->prepare($sChannelUserQuery);
 	unless ($sth->execute($sChannel)) {
-		log_message($self,1,"on_join() SQL Error : " . $DBI::errstr . " Query : " . $sChannelUserQuery);
+		$self->{logger}->log(1,"on_join() SQL Error : " . $DBI::errstr . " Query : " . $sChannelUserQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -1090,12 +1085,12 @@ sub getNickInfo(@) {
     my $sCheckQuery = "SELECT * FROM USER";
     my $sth = $self->{dbh}->prepare($sCheckQuery);
     unless ($sth->execute) {
-        log_message($self, 1, "getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
+        $self->{logger}->log( 1, "getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
     } else {
         while (my $ref = $sth->fetchrow_hashref()) {
             my @tHostmasks = split(/,/, $ref->{'hostmasks'});
             foreach my $sHostmask (@tHostmasks) {
-                log_message($self, 4, "getNickInfo() Checking hostmask : $sHostmask");
+                $self->{logger}->log( 4, "getNickInfo() Checking hostmask : $sHostmask");
                 my $sHostmaskSource = $sHostmask;
                 $sHostmask =~ s/\./\\./g;
                 $sHostmask =~ s/\*/.*/g;
@@ -1104,7 +1099,7 @@ sub getNickInfo(@) {
                 $sHostmask =~ s/\{/\\{/g;
                 $sHostmask =~ s/\}/\\}/g;
                 if ($message->prefix =~ /^$sHostmask/) {
-                    log_message($self, 3, "getNickInfo() $sHostmask matches " . $message->prefix);
+                    $self->{logger}->log( 3, "getNickInfo() $sHostmask matches " . $message->prefix);
                     $sMatchingUserHandle = $ref->{'nickname'};
                     $sMatchingUserPasswd = $ref->{'password'} if defined($ref->{'password'});
                     $iMatchingUserId = $ref->{'id_user'};
@@ -1113,7 +1108,7 @@ sub getNickInfo(@) {
                     my $sGetLevelQuery = "SELECT * FROM USER_LEVEL WHERE id_user_level=?";
                     my $sth2 = $self->{dbh}->prepare($sGetLevelQuery);
                     unless ($sth2->execute($iMatchingUserLevelId)) {
-                        log_message($self, 1, "getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sGetLevelQuery);
+                        $self->{logger}->log( 1, "getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sGetLevelQuery);
                     } else {
                         while (my $ref2 = $sth2->fetchrow_hashref()) {
                             $iMatchingUserLevel = $ref2->{'level'};
@@ -1135,10 +1130,10 @@ sub getNickInfo(@) {
                                 my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
                                 my $sth2 = $self->{dbh}->prepare($sQuery);
                                 unless ($sth2->execute($iMatchingUserId)) {
-                                    log_message($self, 1, "getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+                                    $self->{logger}->log( 1, "getNickInfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
                                 } else {
                                     $iMatchingUserAuth = 1;
-                                    log_message($self, 0, "getNickInfo() Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource");
+                                    $self->{logger}->log( 0, "getNickInfo() Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource");
                                     noticeConsoleChan($self, "Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource");
                                 }
                                 $sth2->finish;
@@ -1151,10 +1146,10 @@ sub getNickInfo(@) {
                             my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
                             my $sth2 = $self->{dbh}->prepare($sQuery);
                             unless ($sth2->execute($iMatchingUserId)) {
-                                log_message($self, 1, "getNickInfo() SQL Error : " . $DBI::errstr . " Query : $sQuery");
+                                $self->{logger}->log( 1, "getNickInfo() SQL Error : " . $DBI::errstr . " Query : $sQuery");
                             } else {
                                 $iMatchingUserAuth = 1;
-                                log_message($self, 0, "getNickInfo() Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource (autologin is ON)");
+                                $self->{logger}->log( 0, "getNickInfo() Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource (autologin is ON)");
                                 noticeConsoleChan($self, "Auto logged $sMatchingUserHandle with hostmask $sHostmaskSource (autologin is ON)");
                             }
                             $sth2->finish;
@@ -1170,18 +1165,18 @@ sub getNickInfo(@) {
     $sth->finish;
 
     unless (defined($iMatchingUserId)) {
-        log_message($self, 4, "getNickInfo() iMatchingUserId is undefined with this host : " . $message->prefix);
+        $self->{logger}->log( 4, "getNickInfo() iMatchingUserId is undefined with this host : " . $message->prefix);
         return (undef, undef, undef, undef, undef, undef, undef);
     }
 
-    log_message($self, 3, "getNickInfo() iMatchingUserId : $iMatchingUserId")       if defined($iMatchingUserId);
-    log_message($self, 4, "getNickInfo() iMatchingUserLevel : $iMatchingUserLevel") if defined($iMatchingUserLevel);
-    log_message($self, 4, "getNickInfo() iMatchingUserLevelDesc : $iMatchingUserLevelDesc") if defined($iMatchingUserLevelDesc);
-    log_message($self, 4, "getNickInfo() iMatchingUserAuth : $iMatchingUserAuth")   if defined($iMatchingUserAuth);
-    log_message($self, 4, "getNickInfo() sMatchingUserHandle : $sMatchingUserHandle") if defined($sMatchingUserHandle);
-    log_message($self, 4, "getNickInfo() sMatchingUserPasswd : $sMatchingUserPasswd") if defined($sMatchingUserPasswd);
-    log_message($self, 4, "getNickInfo() sMatchingUserInfo1 : $sMatchingUserInfo1") if defined($sMatchingUserInfo1);
-    log_message($self, 4, "getNickInfo() sMatchingUserInfo2 : $sMatchingUserInfo2") if defined($sMatchingUserInfo2);
+    $self->{logger}->log( 3, "getNickInfo() iMatchingUserId : $iMatchingUserId")       if defined($iMatchingUserId);
+    $self->{logger}->log( 4, "getNickInfo() iMatchingUserLevel : $iMatchingUserLevel") if defined($iMatchingUserLevel);
+    $self->{logger}->log( 4, "getNickInfo() iMatchingUserLevelDesc : $iMatchingUserLevelDesc") if defined($iMatchingUserLevelDesc);
+    $self->{logger}->log( 4, "getNickInfo() iMatchingUserAuth : $iMatchingUserAuth")   if defined($iMatchingUserAuth);
+    $self->{logger}->log( 4, "getNickInfo() sMatchingUserHandle : $sMatchingUserHandle") if defined($sMatchingUserHandle);
+    $self->{logger}->log( 4, "getNickInfo() sMatchingUserPasswd : $sMatchingUserPasswd") if defined($sMatchingUserPasswd);
+    $self->{logger}->log( 4, "getNickInfo() sMatchingUserInfo1 : $sMatchingUserInfo1") if defined($sMatchingUserInfo1);
+    $self->{logger}->log( 4, "getNickInfo() sMatchingUserInfo2 : $sMatchingUserInfo2") if defined($sMatchingUserInfo2);
 
     return (
         $iMatchingUserId,
@@ -1330,7 +1325,7 @@ sub mbCommandPublic(@) {
 													mbDbShowCommand($self,$message,$sNick,@tArgs);
 												}
 		case /^version$/i 						{
-													log_message($self, 0, "mbVersion() by $sNick on $sChannel");
+													$self->{logger}->log( 0, "mbVersion() by $sNick on $sChannel");
 													botPrivmsg($self,$sChannel,$self->{conf}->get('main.MAIN_PROG_NAME') . $self->{main_prog_version});
 													logBot($self, $message, undef, "version", undef);
 												}
@@ -1573,7 +1568,7 @@ sub mbCommandPublic(@) {
 																					$what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
 																					my $sAnswer = $hailo->learn_reply($what);
 																					if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
-																						log_message($self, 4, "learn_reply $what from $sNick : $sAnswer");
+																						$self->{logger}->log( 4, "learn_reply $what from $sNick : $sAnswer");
 																						botPrivmsg($self, $sChannel, $sAnswer);
 																					}
 																				}
@@ -1583,7 +1578,7 @@ sub mbCommandPublic(@) {
 																}
 															}
 															else {
-																log_message($self,3,"Public command '$sCommand' not found");
+																$self->{logger}->log(3,"Public command '$sCommand' not found");
 															}
 														}
 													}
@@ -1838,7 +1833,7 @@ sub mbCommandPrivate(@) {
 														mbDebug($self,$message,$sNick,undef,@tArgs);
 													}
 		else										{
-														log_message($self,3,$message->prefix . " Private command '$sCommand' not found");
+														$self->{logger}->log(3,$message->prefix . " Private command '$sCommand' not found");
 														return undef;
 													}
 	}
@@ -1873,7 +1868,7 @@ sub checkAuth(@) {
 	my $sCheckAuthQuery = "SELECT * FROM USER WHERE id_user=? AND nickname=? AND password=PASSWORD(?)";
 	my $sth = $self->{dbh}->prepare($sCheckAuthQuery);
 	unless ($sth->execute($iUserId,$sUserHandle,$sPassword)) {
-		log_message($self,1,"checkAuth() SQL Error : " . $DBI::errstr . " Query : " . $sCheckAuthQuery);
+		$self->{logger}->log(1,"checkAuth() SQL Error : " . $DBI::errstr . " Query : " . $sCheckAuthQuery);
 		return 0;
 	}
 	else {	
@@ -1881,13 +1876,13 @@ sub checkAuth(@) {
 			my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
 			my $sth2 = $self->{dbh}->prepare($sQuery);
 			unless ($sth2->execute($iUserId)) {
-				log_message($self,1,"checkAuth() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				$self->{logger}->log(1,"checkAuth() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				return 0;
 			}
 			$sQuery = "UPDATE USER SET last_login=? WHERE id_user =?";
 			$sth = $self->{dbh}->prepare($sQuery);
 			unless ($sth->execute(time2str("%Y-%m-%d %H-%M-%S",time),$iUserId)) {
-				log_message($self,1,"checkAuth() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				$self->{logger}->log(1,"checkAuth() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 			}
 			return 1;
 		}
@@ -1899,49 +1894,85 @@ sub checkAuth(@) {
 }
 
 # User login command
+#sub userLogin(@) {
+#	my ($self,$message,$sNick,@tArgs) = @_;
+#	#login <username> <password>
+#	if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] ne "")) {
+#		my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+#		if (defined($iMatchingUserId)) {
+#			unless (defined($sMatchingUserPasswd)) {
+#				botNotice($self,$sNick,"Your password is not set. Use /msg " . $self->{irc}->nick_folded . " pass password");
+#			}
+#			else {
+#				if (checkAuth($self,$iMatchingUserId,$tArgs[0],$tArgs[1])) {
+#					botNotice($self,$sNick,"Login successfull as $sMatchingUserHandle (Level : $iMatchingUserLevelDesc)");
+#					my $sNoticeMsg = $message->prefix . " Successfull login as $sMatchingUserHandle (Level : $iMatchingUserLevelDesc)";
+#					noticeConsoleChan($self,$sNoticeMsg);
+#					logBot($self,$message,undef,"login",($tArgs[0],"Success"));
+#				}
+#				else {
+#					botNotice($self,$sNick,"Login failed (Bad password).");
+#					my $sNoticeMsg = $message->prefix . " Failed login (Bad password)";
+#					noticeConsoleChan($self,$sNoticeMsg);
+#					logBot($self,$message,undef,"login",($tArgs[0],"Failed (Bad password)"));
+#				}
+#			}
+#		}
+#		else {
+#			my $sNoticeMsg = $message->prefix . " Failed login (hostmask may not be present in database)";
+#			noticeConsoleChan($self,$sNoticeMsg);
+#			logBot($self,$message,undef,"login",($tArgs[0],"Failed (Bad hostmask)"));
+#		}
+#	}
+#	else {
+#		botNotice($self,$sNick,"Syntax error : /msg " . $self->{irc}->nick_folded . " login <username> <password>");
+#	}
+#}
+
 sub userLogin(@) {
-	my ($self,$message,$sNick,@tArgs) = @_;
-	#login <username> <password>
-	if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] ne "")) {
-		my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-		if (defined($iMatchingUserId)) {
-			unless (defined($sMatchingUserPasswd)) {
-				botNotice($self,$sNick,"Your password is not set. Use /msg " . $self->{irc}->nick_folded . " pass password");
-			}
-			else {
-				if (checkAuth($self,$iMatchingUserId,$tArgs[0],$tArgs[1])) {
-					botNotice($self,$sNick,"Login successfull as $sMatchingUserHandle (Level : $iMatchingUserLevelDesc)");
-					my $sNoticeMsg = $message->prefix . " Successfull login as $sMatchingUserHandle (Level : $iMatchingUserLevelDesc)";
-					noticeConsoleChan($self,$sNoticeMsg);
-					logBot($self,$message,undef,"login",($tArgs[0],"Success"));
-				}
-				else {
-					botNotice($self,$sNick,"Login failed (Bad password).");
-					my $sNoticeMsg = $message->prefix . " Failed login (Bad password)";
-					noticeConsoleChan($self,$sNoticeMsg);
-					logBot($self,$message,undef,"login",($tArgs[0],"Failed (Bad password)"));
-				}
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " Failed login (hostmask may not be present in database)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			logBot($self,$message,undef,"login",($tArgs[0],"Failed (Bad hostmask)"));
-		}
-	}
-	else {
-		botNotice($self,$sNick,"Syntax error : /msg " . $self->{irc}->nick_folded . " login <username> <password>");
-	}
+    my ($self,$message,$sNick,@tArgs) = @_;
+
+    # login <username> <password>
+    if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] ne "")) {
+        my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,
+            $sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+
+        if (defined($iMatchingUserId)) {
+            unless (defined($sMatchingUserPasswd)) {
+                botNotice($self,$sNick,"Your password is not set. Use /msg " . $self->{irc}->nick_folded . " pass password");
+            } else {
+                my $auth_ok = $self->{auth}->verify_credentials($iMatchingUserId, $tArgs[0], $tArgs[1]);
+
+                if ($auth_ok) {
+                    botNotice($self,$sNick,"Login successful as $sMatchingUserHandle (Level : $iMatchingUserLevelDesc)");
+                    my $sNoticeMsg = $message->prefix . " Successful login as $sMatchingUserHandle (Level : $iMatchingUserLevelDesc)";
+                    noticeConsoleChan($self,$sNoticeMsg);
+                    logBot($self,$message,undef,"login",($tArgs[0],"Success"));
+                } else {
+                    botNotice($self,$sNick,"Login failed (Bad password).");
+                    my $sNoticeMsg = $message->prefix . " Failed login (Bad password)";
+                    noticeConsoleChan($self,$sNoticeMsg);
+                    logBot($self,$message,undef,"login",($tArgs[0],"Failed (Bad password)"));
+                }
+            }
+        } else {
+            my $sNoticeMsg = $message->prefix . " Failed login (hostmask may not be present in database)";
+            noticeConsoleChan($self,$sNoticeMsg);
+            logBot($self,$message,undef,"login",($tArgs[0],"Failed (Bad hostmask)"));
+        }
+    } else {
+        botNotice($self,$sNick,"Syntax error : /msg " . $self->{irc}->nick_folded . " login <username> <password>");
+    }
 }
 
 # check user Level
 sub checkUserLevel(@) {
 	my ($self,$iUserLevel,$sLevelRequired) = @_;
-	log_message($self,3,"isUserLevel() $iUserLevel vs $sLevelRequired");
+	$self->{logger}->log(3,"isUserLevel() $iUserLevel vs $sLevelRequired");
 	my $sQuery = "SELECT level FROM USER_LEVEL WHERE description like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sLevelRequired)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -1968,11 +1999,11 @@ sub userCount(@) {
 	my $sQuery = "SELECT count(*) as nbUser FROM USER";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute()) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
-			log_message($self,3,"userCount() " . $ref->{'nbUser'});
+			$self->{logger}->log(3,"userCount() " . $ref->{'nbUser'});
 			my $nbUser = $ref->{'nbUser'};
 			$sth->finish;
 			return($nbUser);
@@ -1999,7 +2030,7 @@ sub getIdUserLevel(@) {
 	my $sQuery = "SELECT id_user_level FROM USER_LEVEL WHERE description like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sLevel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -2019,7 +2050,7 @@ sub getLevel(@) {
 	my $sQuery = "SELECT level FROM USER_LEVEL WHERE description like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sLevel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -2039,7 +2070,7 @@ sub getLevelUser(@) {
 	my $sQuery = "SELECT level FROM USER,USER_LEVEL WHERE USER.id_user_level=USER_LEVEL.id_user_level AND nickname like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sUserHandle)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -2064,12 +2095,12 @@ sub userAdd(@) {
 		my $sQuery = "INSERT INTO USER (hostmasks,nickname,password,id_user_level) VALUES (?,?,PASSWORD(?),?)";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($sHostmask,$sUserHandle,$sPassword,$id_user_level)) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 			return undef;
 		}
 		else {
 			my $id_user = $sth->{ mysql_insertid };
-			log_message($self,3,"userAdd() Added user : $sUserHandle with hostmask : $sHostmask id_user : $id_user as $sLevel password set : yes");
+			$self->{logger}->log(3,"userAdd() Added user : $sUserHandle with hostmask : $sHostmask id_user : $id_user as $sLevel password set : yes");
 			return ($id_user);
 		}
 		$sth->finish;
@@ -2078,12 +2109,12 @@ sub userAdd(@) {
 		my $sQuery = "INSERT INTO USER (hostmasks,nickname,id_user_level) VALUES (?,?,?)";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($sHostmask,$sUserHandle,$id_user_level)) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 			return undef;
 		}
 		else {
 			my $id_user = $sth->{ mysql_insertid };
-			log_message($self,0,"Added user : $sUserHandle with hostmask : $sHostmask id_user : $id_user as $sLevel password set : no");
+			$self->{logger}->log(0,"Added user : $sUserHandle with hostmask : $sHostmask id_user : $id_user as $sLevel password set : no");
 			return ($id_user);
 		}
 		$sth->finish;
@@ -2095,7 +2126,7 @@ sub registerChannel(@) {
 	my $sQuery = "INSERT INTO USER_CHANNEL (id_user,id_channel,level) VALUES (?,?,500)";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($id_user,$id_channel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		$sth->finish;
 		return 0;
 	}
@@ -2112,27 +2143,27 @@ sub mbRegister(@) {
 	my $sPassword = $tArgs[1];
 	if (defined($sUserHandle) && ($sUserHandle ne "") && defined($sPassword) && ($sPassword ne "")) {
 		if (userCount($self) == 0) {
- 			log_message($self,0,$message->prefix . " wants to register");
+ 			$self->{logger}->log(0,$message->prefix . " wants to register");
  			my $sHostmask = getMessageHostmask($self,$message);
  			my $id_user = userAdd($self,$sHostmask,$sUserHandle,$sPassword,"Owner");
  			if (defined($id_user)) {
- 				log_message($self,0,"Registered $sUserHandle (id_user : $id_user) as Owner with hostmask $sHostmask");
+ 				$self->{logger}->log(0,"Registered $sUserHandle (id_user : $id_user) as Owner with hostmask $sHostmask");
  				botNotice($self,$sNick,"You just registered as $sUserHandle (id_user : $id_user) as Owner with hostmask $sHostmask");
  				logBot($self,$message,undef,"register","Success");
  				my ($id_channel,$name,$chanmode,$key) = getConsoleChan($self);
  				if (registerChannel($self,$message,$sNick,$id_channel,$id_user)) {
-					log_message($self,0,"registerChan successfull $name $sUserHandle");
+					$self->{logger}->log(0,"registerChan successfull $name $sUserHandle");
 				}
 				else {
-					log_message($self,0,"registerChan failed $name $sUserHandle");
+					$self->{logger}->log(0,"registerChan failed $name $sUserHandle");
 				}
  			}
  			else {
- 				log_message($self,0,"Register failed for " . $message->prefix);
+ 				$self->{logger}->log(0,"Register failed for " . $message->prefix);
  			}
  		}
  		else {
- 			log_message($self,0,"Register attempt from " . $message->prefix);
+ 			$self->{logger}->log(0,"Register attempt from " . $message->prefix);
  		}
 	}
 }
@@ -2146,7 +2177,7 @@ sub sayChannel(@) {
 				if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] ne "") && ( $tArgs[0] =~ /^#/)) {
 					my (undef,@tArgsTemp) = @tArgs;
 					my $sChannelText = join(" ",@tArgsTemp);
-					log_message($self,0,"$sNick issued a say command : " . $tArgs[0] . " $sChannelText");
+					$self->{logger}->log(0,"$sNick issued a say command : " . $tArgs[0] . " $sChannelText");
 					botPrivmsg($self,$tArgs[0],$sChannelText);
 					logBot($self,$message,undef,"say",@tArgs);
 				}
@@ -2176,7 +2207,7 @@ sub dumpCmd(@) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Owner")) {
 				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 					my $sDumpCommand = join(" ",@tArgs);
-					log_message($self,0,"$sNick issued a dump command : $sDumpCommand");
+					$self->{logger}->log(0,"$sNick issued a dump command : $sDumpCommand");
 					$self->{irc}->write("$sDumpCommand\x0d\x0a");
 					logBot($self,$message,undef,"dump",@tArgs);
     		}
@@ -2204,7 +2235,7 @@ sub msgCmd(@) {
 					my $sTarget = $tArgs[0];
 					shift @tArgs;
 					my $sMsg = join(" ",@tArgs);
-					log_message($self,0,"$sNick issued a msg command : $sTarget $sMsg");
+					$self->{logger}->log(0,"$sNick issued a msg command : $sTarget $sMsg");
 					botPrivmsg($self,$sTarget,$sMsg);
 					logBot($self,$message,undef,"msg",($sTarget,@tArgs));
     		}
@@ -2231,7 +2262,7 @@ sub actChannel(@) {
 				if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] ne "") && ( $tArgs[0] =~ /^#/)) {
 					my (undef,@tArgsTemp) = @tArgs;
 					my $sChannelText = join(" ",@tArgsTemp);
-					log_message($self,0,"$sNick issued a act command : " . $tArgs[0] . "ACTION $sChannelText");
+					$self->{logger}->log(0,"$sNick issued a act command : " . $tArgs[0] . "ACTION $sChannelText");
 					botAction($self,$tArgs[0],$sChannelText);
 					logBot($self,$message,undef,"act",@tArgs);
 				}
@@ -2269,7 +2300,7 @@ sub mbStatus(@) {
 				my $minutes = sprintf("%02d", int(($iUptime % 3600) / 60));
 				my $seconds = sprintf("%02d", $iUptime % 60);
 
-				log_message($self, 3, "days = $days hours = $hours minutes = $minutes seconds = $seconds");
+				$self->{logger}->log( 3, "days = $days hours = $hours minutes = $minutes seconds = $seconds");
 
 				my $sUptimeStr = "";
 				$sUptimeStr .= "$days days, " if $days > 0;
@@ -2285,7 +2316,7 @@ sub mbStatus(@) {
 					chomp($sUptime = <$LOAD>) if defined($sUptime = <$LOAD>);
 					close $LOAD;
 				} else {
-					log_message($self, 0, "Could not exec uptime command");
+					$self->{logger}->log( 0, "Could not exec uptime command");
 				}
 
 				# Server type
@@ -2294,7 +2325,7 @@ sub mbStatus(@) {
 					chomp($sUname = <$UNAME>) if defined($sUname = <$UNAME>);
 					close $UNAME;
 				} else {
-					log_message($self, 0, "Could not exec uname command");
+					$self->{logger}->log( 0, "Could not exec uname command");
 				}
 
 				# Memory usage
@@ -2422,7 +2453,7 @@ sub mbAddTimer(@) {
 					$timer = IO::Async::Timer::Periodic->new(
 				    interval => $iFrequency,
 				    on_tick => sub {
-				    	log_message($self,3,"Timer every $iFrequency seconds : $sRaw");
+				    	$self->{logger}->log(3,"Timer every $iFrequency seconds : $sRaw");
     					$self->{irc}->write("$sRaw\x0d\x0a");
  						},
 					);
@@ -2432,7 +2463,7 @@ sub mbAddTimer(@) {
 					my $sQuery = "INSERT INTO TIMERS (name,duration,command) VALUES (?,?,?)";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sTimerName,$iFrequency,$sRaw)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						botNotice($self,$sNick,"Timer $sTimerName added.");
@@ -2481,7 +2512,7 @@ sub mbRemTimer(@) {
 					my $sQuery = "DELETE FROM TIMERS WHERE name=?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sTimerName)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						botNotice($self,$sNick,"Timer $sTimerName removed.");
@@ -2521,7 +2552,7 @@ sub mbTimers(@) {
 				my $sQuery = "SELECT * FROM TIMERS";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute()) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					my @tTimers;
@@ -2570,12 +2601,12 @@ sub userPass(@) {
 			my $sQuery = "UPDATE USER SET password=PASSWORD(?) WHERE id_user=?";
 			my $sth = $self->{dbh}->prepare($sQuery);
 			unless ($sth->execute($tArgs[0],$iMatchingUserId)) {
-				log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				$sth->finish;
 				return 0;
 			}
 			else {
-				log_message($self,3,"userPass() Set password for $sNick id_user : $iMatchingUserId (" . $message->prefix . ")");
+				$self->{logger}->log(3,"userPass() Set password for $sNick id_user : $iMatchingUserId (" . $message->prefix . ")");
 				my $sNoticeMsg = "Set password for $sNick id_user : $iMatchingUserId (" . $message->prefix . ")";
 				noticeConsoleChan($self,$sNoticeMsg);
 				botNotice($self,$sNick,"Password set.");
@@ -2610,7 +2641,7 @@ sub userIdent(@) {
 		}
 		else {
 			my $sNoticeMsg = $message->prefix . " Ident failed (Bad password)";
-			log_message($self,0,$sNoticeMsg);
+			$self->{logger}->log(0,$sNoticeMsg);
 			noticeConsoleChan($self,$sNoticeMsg);
 			logBot($self,$message,undef,"ident",$sNoticeMsg);
 		}
@@ -2622,14 +2653,14 @@ sub checkAuthByUser(@) {
 	my $sCheckAuthQuery = "SELECT * FROM USER WHERE nickname=? AND password=PASSWORD(?)";
 	my $sth = $self->{dbh}->prepare($sCheckAuthQuery);
 	unless ($sth->execute($sUserHandle,$sPassword)) {
-		log_message($self,1,"checkAuthByUser() SQL Error : " . $DBI::errstr . " Query : " . $sCheckAuthQuery);
+		$self->{logger}->log(1,"checkAuthByUser() SQL Error : " . $DBI::errstr . " Query : " . $sCheckAuthQuery);
 		$sth->finish;
 		return 0;
 	}
 	else {	
 		if (my $ref = $sth->fetchrow_hashref()) {
 			my $sHostmask = getMessageHostmask($self,$message);
-			log_message($self,3,"checkAuthByUser() Hostmask : $sHostmask to add to $sUserHandle");
+			$self->{logger}->log(3,"checkAuthByUser() Hostmask : $sHostmask to add to $sUserHandle");
 			my $sCurrentHostmasks = $ref->{'hostmasks'};
 			my $id_user = $ref->{'id_user'};
 			if ( $sCurrentHostmasks =~ /\Q$sHostmask/ ) {
@@ -2640,7 +2671,7 @@ sub checkAuthByUser(@) {
 				my $Query = "UPDATE USER SET hostmasks=? WHERE id_user=?";
 				my $sth = $self->{dbh}->prepare($Query);
 				unless ($sth->execute($sNewHostmasks,$id_user)) {
-					log_message($self,1,"checkAuthByUser() SQL Error : " . $DBI::errstr . " Query : " . $Query);
+					$self->{logger}->log(1,"checkAuthByUser() SQL Error : " . $DBI::errstr . " Query : " . $Query);
 					$sth->finish;
 					return (0,0);
 				}
@@ -2664,7 +2695,7 @@ sub userCstat(@) {
 				my $sGetAuthUsers = "SELECT nickname,description,level FROM USER,USER_LEVEL WHERE USER.id_user_level=USER_LEVEL.id_user_level AND auth=1 ORDER by level";
 				my $sth = $self->{dbh}->prepare($sGetAuthUsers);
 				unless ($sth->execute) {
-					log_message($self,1,"userCstat() SQL Error : " . $DBI::errstr . " Query : " . $sGetAuthUsers);
+					$self->{logger}->log(1,"userCstat() SQL Error : " . $DBI::errstr . " Query : " . $sGetAuthUsers);
 				}
 				else {
 					my $sAuthUserStr;
@@ -2702,7 +2733,7 @@ sub addUser(@) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
 				if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] ne "")) {
-					log_message($self,3,"addUser() " . $tArgs[0] . " " . $tArgs[1]);
+					$self->{logger}->log(3,"addUser() " . $tArgs[0] . " " . $tArgs[1]);
 					my $id_user = getIdUser($self,$tArgs[0]);
 					if (defined($id_user)) {
 						botNotice($self,$sNick,"User " . $tArgs[0] . " already exists (id_user : $id_user)");
@@ -2726,7 +2757,7 @@ sub addUser(@) {
 					}
 					$id_user = userAdd($self,$tArgs[1],$tArgs[0],undef,$sLevel);
 					if (defined($id_user)) {
-						log_message($self,0,"addUser() id_user : $id_user " . $tArgs[0] . " Hostmask : " . $tArgs[1] . " (Level:" . $sLevel . ")");
+						$self->{logger}->log(0,"addUser() id_user : $id_user " . $tArgs[0] . " Hostmask : " . $tArgs[1] . " (Level:" . $sLevel . ")");
 						noticeConsoleChan($self,"Added user " . $tArgs[0] . " id_user : $id_user with hostmask " . $tArgs[1] . " (Level:" . $sLevel .")");
 						botNotice($self,$sNick,"Added user " . $tArgs[0] . " id_user : $id_user with hostmask " . $tArgs[1] . " (Level:" . $sLevel .")");
 						if ( $bNotify ) {
@@ -2767,7 +2798,7 @@ sub getUserLevelDesc(@) {
 	my $sQuery = "SELECT description FROM USER_LEVEL WHERE level=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($level)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -2791,7 +2822,7 @@ sub userStats(@) {
 				my $sQuery="SELECT count(*) as nbUsers FROM USER";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute()) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					my $sNoticeMsg = "Numbers of users : ";
@@ -2801,7 +2832,7 @@ sub userStats(@) {
 						$sQuery="SELECT description,count(nickname) as nbUsers FROM USER,USER_LEVEL WHERE USER.id_user_level=USER_LEVEL.id_user_level GROUP BY description ORDER BY level";
 						$sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute()) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							my $i = 0;
@@ -2851,7 +2882,7 @@ sub userInfo(@) {
 						my $sQuery = "SELECT * FROM USER,USER_LEVEL WHERE USER.id_user_level=USER_LEVEL.id_user_level AND nickname LIKE ?";
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($tArgs[0])) {
-							log_message($self,1,"addUserHost() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"addUserHost() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							if (my $ref = $sth->fetchrow_hashref()) {
@@ -2878,7 +2909,7 @@ sub userInfo(@) {
 								botNotice($self,$sNick,"User " . $tArgs[0] . " does not exist");
 							}
 							my $sNoticeMsg = $message->prefix . " userinfo on " . $tArgs[0];
-							log_message($self,0,$sNoticeMsg);
+							$self->{logger}->log(0,$sNoticeMsg);
 							noticeConsoleChan($self,$sNoticeMsg);
 							logBot($self,$message,undef,"userinfo",$sNoticeMsg);
 							$sth->finish;
@@ -2913,7 +2944,7 @@ sub addUserHost(@) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
 				if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] ne "")) {
-					log_message($self,3,"addUserHost() " . $tArgs[0] . " " . $tArgs[1]);
+					$self->{logger}->log(3,"addUserHost() " . $tArgs[0] . " " . $tArgs[1]);
 					my $id_user = getIdUser($self,$tArgs[0]);
 					unless (defined($id_user)) {
 						botNotice($self,$sNick,"User " . $tArgs[0] . " does not exists");
@@ -2926,19 +2957,19 @@ sub addUserHost(@) {
 						my $sQuery = "SELECT * FROM USER WHERE nickname=?";
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($tArgs[0])) {
-							log_message($self,1,"addUserHost() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"addUserHost() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							if (my $ref = $sth->fetchrow_hashref()) {
 								my $sUser = $ref->{'nickname'};
 								my $sHostmasks = $ref->{'hostmasks'};
-								log_message($self,3,"(addUserHost) $sHostmasks");
+								$self->{logger}->log(3,"(addUserHost) $sHostmasks");
 								my @tHostmasks = split (",",$sHostmasks);
 								foreach my $hm (@tHostmasks) {
-									log_message($self,3,"(addUserHost) $hm");
+									$self->{logger}->log(3,"(addUserHost) $hm");
 									if ( $hm eq $tArgs[1]) {
 										my $sNoticeMsg = $message->prefix . " Hostmask " . $tArgs[1] . " already exist for user for user $sUser";
-										log_message($self,0,$sNoticeMsg);
+										$self->{logger}->log(0,$sNoticeMsg);
 										noticeConsoleChan($self,$sNoticeMsg);
 										logBot($self,$message,undef,"addhost",$sNoticeMsg);
 										return undef;
@@ -2948,7 +2979,7 @@ sub addUserHost(@) {
 							$sQuery = "SELECT hostmasks FROM USER WHERE id_user=?";
 							$sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($id_user)) {
-								log_message($self,1,"addUserHost() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"addUserHost() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								my $sHostmasks = "";
@@ -2958,11 +2989,11 @@ sub addUserHost(@) {
 								$sQuery = "UPDATE USER SET hostmasks=? WHERE id_user=?";
 								$sth = $self->{dbh}->prepare($sQuery);
 								unless ($sth->execute($sHostmasks . "," . $tArgs[1],$id_user)) {
-									log_message($self,1,"addUserHost() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+									$self->{logger}->log(1,"addUserHost() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 								}
 								else {
 									my $sNoticeMsg = $message->prefix . " Hostmask " . $tArgs[1] . " added for user " . $tArgs[0];
-									log_message($self,0,$sNoticeMsg);
+									$self->{logger}->log(0,$sNoticeMsg);
 									noticeConsoleChan($self,$sNoticeMsg);
 									logBot($self,$message,undef,"addhost",$sNoticeMsg);
 								}
@@ -2993,75 +3024,6 @@ sub addUserHost(@) {
 	}
 }
 
-# Add a channel to the bot, and register it to a user
-#sub addChannel(@) {
-#	my ($self,$message,$sNick,@tArgs) = @_;
-#	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-#	if (defined($iMatchingUserId)) {
-#		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-#			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
-#				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/) && defined($tArgs[1]) && ($tArgs[1] ne "")) {
-#					my $sChannel = $tArgs[0];
-#					my $sUser = $tArgs[1];
-#					log_message($self,0,"$sNick issued an addchan command $sChannel $sUser");
-#					my $id_channel = getIdChannel($self,$sChannel);
-#					unless (defined($id_channel)) {
-#						my $id_user = getIdUser($self,$sUser);
-#						if (defined($id_user)) {
-#							my $sQuery = "INSERT INTO CHANNEL (name,description,auto_join) VALUES (?,?,1)";
-#							my $sth = $self->{dbh}->prepare($sQuery);
-#							unless ($sth->execute($sChannel,$sChannel)) {
-#								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-#								$sth->finish;
-#								return undef;
-#							}
-#							else {
-#								my $id_channel = $sth->{ mysql_insertid };
-#								log_message($self,3,"addChannel() Added channel : $sChannel id_channel : $id_channel");
-#								my $sNoticeMsg = $message->prefix . " addchan command $sMatchingUserHandle added $sChannel (id_channel : $id_channel)";
-#								noticeConsoleChan($self,$sNoticeMsg);
-#								logBot($self,$message,undef,"addchan",($sChannel,@tArgs));
-#								joinChannel($self,$sChannel,undef);
-#								if (registerChannel($self,$message,$sNick,$id_channel,$id_user)) {
-#									log_message($self,0,"registerChannel successfull $sChannel $sUser");
-#								}
-#								else {
-#									log_message($self,0,"registerChannel failed $sChannel $sUser");
-#								}
-#								$sth->finish;
-#								return $id_channel;
-#							}
-#						}
-#						else {
-#							botNotice($self,$sNick,"User $sUser does not exist");
-#							return undef;
-#						}
-#					}
-#					else {
-#						botNotice($self,$sNick,"Channel $sChannel already exists");
-#						return undef;
-#					}
-#				}
-#				else {
-#					botNotice($self,$sNick,"Syntax: addchan <#channel> <user>");
-#					return undef;
-#				}
-#			}
-#			else {
-#				my $sNoticeMsg = $message->prefix . " addchan command attempt (command level [Administrator] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
-#				noticeConsoleChan($self,$sNoticeMsg);
-#				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-#				return undef;
-#			}
-#		}
-#		else {
-#			my $sNoticeMsg = $message->prefix . " addchan command attempt (user $sMatchingUserHandle is not logged in)";
-#			noticeConsoleChan($self,$sNoticeMsg);
-#			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-#			return undef;
-#		}
-#	}
-#}
 
 sub addChannel(@) {
     my ($self, $message, $sNick, @tArgs) = @_;
@@ -3084,7 +3046,7 @@ sub addChannel(@) {
         return;
     }
 
-    log_message($self, 0, "$sNick issued addchan command: $sChannel $sUser");
+    $self->{logger}->log( 0, "$sNick issued addchan command: $sChannel $sUser");
 
     # Check if target user exists
     my $id_target_user = getIdUser($self, $sUser);
@@ -3097,6 +3059,7 @@ sub addChannel(@) {
     my $channel = Mediabot::Channel->new({
         name => $sChannel,
         dbh  => $self->{dbh},
+		irc  => $self->{irc},
     });
 
     if (my $existing_id = $channel->exists_in_db) {
@@ -3107,15 +3070,23 @@ sub addChannel(@) {
     # Create new channel
     my $id_channel = $channel->create_in_db;
     unless ($id_channel) {
-        log_message($self, 1, "addChannel() failed SQL insert for $sChannel");
+        $self->{logger}->log( 1, "addChannel() failed SQL insert for $sChannel");
         return;
     }
+
+	# Create channel object and store it
+	$self->{channels}{$sChannel} = Mediabot::Channel->new({
+		id         => $id_channel,
+		name       => $sChannel,
+		dbh        => $self->{dbh},
+		irc        => $self->{irc},
+	});
 
     # Register channel
     joinChannel($self, $sChannel, undef);
     my $registered = registerChannel($self, $message, $sNick, $id_channel, $id_target_user);
 
-    log_message($self, 0, $registered ? "registerChannel successful $sChannel $sUser" : "registerChannel failed $sChannel $sUser");
+    $self->{logger}->log( 0, $registered ? "registerChannel successful $sChannel $sUser" : "registerChannel failed $sChannel $sUser");
     logBot($self, $message, undef, "addchan", ($sChannel, @tArgs));
     noticeConsoleChan($self, $message->prefix . " addchan command $handle added $sChannel (id_channel: $id_channel)");
 
@@ -3197,7 +3168,7 @@ sub channelSet(@) {
                                 if ((substr($tArgs[0], 0, 1) eq "+") || (substr($tArgs[0], 0, 1) eq "-")) {
                                     my $sChansetValue  = substr($tArgs[0], 1);
                                     my $sChansetAction = substr($tArgs[0], 0, 1);
-                                    log_message($self, 0, "chanset $sChannel $sChansetAction$sChansetValue");
+                                    $self->{logger}->log( 0, "chanset $sChannel $sChansetAction$sChansetValue");
                                     my $id_chanset_list = getIdChansetList($self, $sChansetValue);
                                     unless (defined($id_chanset_list) && $id_chanset_list ne "") {
                                         botNotice($self, $sNick, "Undefined chanset $sChansetValue");
@@ -3216,7 +3187,7 @@ sub channelSet(@) {
                                         my $sQuery = "INSERT INTO CHANNEL_SET (id_channel, id_chanset_list) VALUES (?, ?)";
                                         my $sth = $self->{dbh}->prepare($sQuery);
                                         unless ($sth->execute($id_channel, $id_chanset_list)) {
-                                            log_message($self, 1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+                                            $self->{logger}->log( 1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
                                         }
                                         else {
                                             botNotice($self, $sNick, "Chanset +$sChansetValue for $sChannel");
@@ -3242,7 +3213,7 @@ sub channelSet(@) {
                                         my $sQuery = "DELETE FROM CHANNEL_SET WHERE id_channel_set=?";
                                         my $sth = $self->{dbh}->prepare($sQuery);
                                         unless ($sth->execute($id_channel_set)) {
-                                            log_message($self, 1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+                                            $self->{logger}->log( 1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
                                         }
                                         else {
                                             botNotice($self, $sNick, "Chanset -$sChansetValue for $sChannel");
@@ -3262,7 +3233,7 @@ sub channelSet(@) {
                     }
                     else {
                         # Channel not found in hash
-                        log_message($self, 3, "channelSet : channel $sChannel not found in hash");
+                        $self->{logger}->log( 3, "channelSet : channel $sChannel not found in hash");
                         return undef;
                     }
                 }
@@ -3302,7 +3273,7 @@ sub getIdChansetList(@) {
 	my $sQuery = "SELECT id_chanset_list FROM CHANSET_LIST WHERE chanset=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChansetValue) ) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -3319,7 +3290,7 @@ sub getIdChannelSet(@) {
 	my $sQuery = "SELECT id_channel_set FROM CHANNEL_SET,CHANNEL WHERE CHANNEL_SET.id_channel=CHANNEL.id_channel AND name=? AND id_chanset_list=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$id_chanset_list) ) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -3338,13 +3309,13 @@ sub purgeChannel(@) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
 				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
 					my $sChannel = $tArgs[0];
-					log_message($self,0,"$sNick issued an purge command $sChannel");
+					$self->{logger}->log(0,"$sNick issued an purge command $sChannel");
 					my $id_channel = getIdChannel($self,$sChannel);
 					if (defined($id_channel)) {
 						my $sQuery = "SELECT * FROM CHANNEL WHERE id_channel=?";
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($id_channel)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							if (my $ref = $sth->fetchrow_hashref()) {
@@ -3355,30 +3326,30 @@ sub purgeChannel(@) {
 								$sQuery = "DELETE FROM CHANNEL WHERE id_channel=?";
 								$sth = $self->{dbh}->prepare($sQuery);
 								unless ($sth->execute($id_channel)) {
-									log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+									$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 									$sth->finish;
 									return undef;
 								}
 								else {
-									log_message($self,0,"Deleted channel $sChannel id_channel : $id_channel");
+									$self->{logger}->log(0,"Deleted channel $sChannel id_channel : $id_channel");
 									$sQuery = "DELETE FROM USER_CHANNEL WHERE id_channel=?";
 									$sth = $self->{dbh}->prepare($sQuery);
 									unless ($sth->execute($id_channel)) {
-										log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+										$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 										$sth->finish;
 										return undef;
 									}
 									else {
-										log_message($self,0,"Deleted channel access for $sChannel id_channel : $id_channel");
+										$self->{logger}->log(0,"Deleted channel access for $sChannel id_channel : $id_channel");
 										$sQuery = "INSERT INTO CHANNEL_PURGED (id_channel,name,description,`key`,chanmode,auto_join) VALUES (?,?,?,?,?,?)";
 										$sth = $self->{dbh}->prepare($sQuery);
 										unless ($sth->execute($id_channel,$sChannel,$sDecription,$sKey,$sChanmode,$bAutoJoin)) {
-											log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+											$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 											$sth->finish;
 											return undef;
 										}
 										else {
-											log_message($self,0,"Added $sChannel id_channel : $id_channel to CHANNEL_PURGED");
+											$self->{logger}->log(0,"Added $sChannel id_channel : $id_channel to CHANNEL_PURGED");
 											partChannel($self,$sChannel,"Channel purged by $sNick");
 											logBot($self,$message,undef,"purge","$sNick purge $sChannel id_channel : $id_channel");
 										}
@@ -3420,11 +3391,11 @@ sub purgeChannel(@) {
 sub partChannel(@) {
 	my ($self,$channel,$sPartMsg) = @_;
 	if (defined($sPartMsg) && ($sPartMsg ne "")) {
-		log_message($self,0,"Parting $channel $sPartMsg");
+		$self->{logger}->log(0,"Parting $channel $sPartMsg");
 		$self->{irc}->send_message("PART", undef, ($channel,$sPartMsg));
 	}
 	else {
-		log_message($self,0,"Parting $channel");
+		$self->{logger}->log(0,"Parting $channel");
 		$self->{irc}->send_message("PART", undef,$channel);
 	}
 }
@@ -3447,7 +3418,7 @@ sub channelPart(@) {
 			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,500))) {
 				my $id_channel = getIdChannel($self,$sChannel);
 				if (defined($id_channel)) {
-					log_message($self,0,"$sNick issued a part $sChannel command");
+					$self->{logger}->log(0,"$sNick issued a part $sChannel command");
 					partChannel($self,$sChannel,"At the request of $sMatchingUserHandle");
 					logBot($self,$message,$sChannel,"part","At the request of $sMatchingUserHandle");
 				}
@@ -3477,7 +3448,7 @@ sub checkUserChannelLevel(@) {
 	my $sQuery = "SELECT level FROM CHANNEL,USER_CHANNEL WHERE CHANNEL.id_channel=USER_CHANNEL.id_channel AND name=? AND id_user=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$id_user)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -3509,12 +3480,12 @@ sub channelJoin(@) {
 				if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,450))) {
 					my $id_channel = getIdChannel($self,$sChannel);
 					if (defined($id_channel)) {
-						log_message($self,0,"$sNick issued a join $sChannel command");
+						$self->{logger}->log(0,"$sNick issued a join $sChannel command");
 						my $sKey;
 						my $sQuery = "SELECT `key` FROM CHANNEL WHERE id_channel=?";
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($id_channel)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							if (my $ref = $sth->fetchrow_hashref()) {
@@ -3572,7 +3543,7 @@ sub channelAddUser(@) {
 				if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] =~ /[0-9]+/)) {
 					my $id_channel = getIdChannel($self,$sChannel);
 					if (defined($id_channel)) {
-						log_message($self,0,"$sNick issued a add user $sChannel command");
+						$self->{logger}->log(0,"$sNick issued a add user $sChannel command");
 						my $sUserHandle = $tArgs[0];
 						my $iLevel = $tArgs[1];
 						my $id_user = getIdUser($self,$tArgs[0]);
@@ -3583,7 +3554,7 @@ sub channelAddUser(@) {
 									my $sQuery = "INSERT INTO USER_CHANNEL (id_user,id_channel,level) VALUES (?,?,?)";
 									my $sth = $self->{dbh}->prepare($sQuery);
 									unless ($sth->execute($id_user,$id_channel,$iLevel)) {
-										log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+										$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 									}
 									else {
 										logBot($self,$message,$sChannel,"add",@tArgs);
@@ -3629,7 +3600,7 @@ sub getUserChannelLevel(@) {
 	my $sQuery = "SELECT level FROM CHANNEL,USER_CHANNEL WHERE CHANNEL.id_channel=USER_CHANNEL.id_channel AND name=? AND id_user=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$id_user)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -3660,7 +3631,7 @@ sub channelDelUser(@) {
 				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 					my $id_channel = getIdChannel($self,$sChannel);
 					if (defined($id_channel)) {
-						log_message($self,0,"$sNick issued a del user $sChannel command");
+						$self->{logger}->log(0,"$sNick issued a del user $sChannel command");
 						my $sUserHandle = $tArgs[0];
 						my $id_user = getIdUser($self,$tArgs[0]);
 						if (defined($id_user)) {
@@ -3670,7 +3641,7 @@ sub channelDelUser(@) {
 									my $sQuery = "DELETE FROM USER_CHANNEL WHERE id_user=? AND id_channel=?";
 									my $sth = $self->{dbh}->prepare($sQuery);
 									unless ($sth->execute($id_user,$id_channel)) {
-										log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+										$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 									}
 									else {
 										logBot($self,$message,$sChannel,"del",@tArgs);
@@ -3747,7 +3718,7 @@ sub userModinfo(@) {
 																					my $sQuery = "UPDATE USER_CHANNEL SET automode=? WHERE id_user=? AND id_channel=?";
 																					my $sth = $self->{dbh}->prepare($sQuery);
 																					unless ($sth->execute($sAutomode,$id_user,$id_channel)) {
-																						log_message($self,1,"userModinfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+																						$self->{logger}->log(1,"userModinfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 																						$sth->finish;
 																						return undef;
 																					}
@@ -3776,7 +3747,7 @@ sub userModinfo(@) {
 																				my $sQuery = "UPDATE USER_CHANNEL SET greet=? WHERE id_user=? AND id_channel=?";
 																				my $sth = $self->{dbh}->prepare($sQuery);
 																				unless ($sth->execute($sGreet,$id_user,$id_channel)) {
-																					log_message($self,1,"userModinfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+																					$self->{logger}->log(1,"userModinfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 																					$sth->finish;
 																					return undef;
 																				}
@@ -3792,7 +3763,7 @@ sub userModinfo(@) {
 																						my $sQuery = "UPDATE USER_CHANNEL SET level=? WHERE id_user=? AND id_channel=?";
 																						my $sth = $self->{dbh}->prepare($sQuery);
 																						unless ($sth->execute($tArgs[2]	,$id_user,$id_channel)) {
-																							log_message($self,1,"userModinfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+																							$self->{logger}->log(1,"userModinfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 																							$sth->finish;
 																							return undef;
 																						}
@@ -3856,13 +3827,13 @@ sub getIdUserChannelLevel(@) {
 	my $sQuery = "SELECT USER.id_user,USER_CHANNEL.level FROM CHANNEL,USER,USER_CHANNEL WHERE CHANNEL.id_channel=USER_CHANNEL.id_channel AND USER.id_user=USER_CHANNEL.id_user AND USER.nickname=? AND CHANNEL.name=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sUserHandle,$sChannel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
 			my $id_user = $ref->{'id_user'};
 			my $level = $ref->{'level'};
-			log_message($self,3,"getIdUserChannelLevel() $id_user $level");
+			$self->{logger}->log(3,"getIdUserChannelLevel() $id_user $level");
 			$sth->finish;
 			return ($id_user,$level);
 		}
@@ -4120,7 +4091,7 @@ sub userKickChannel(@) {
 				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 					my $id_channel = getIdChannel($self,$sChannel);
 					if (defined($id_channel)) {
-						log_message($self,0,"$sNick issued a kick $sChannel command");
+						$self->{logger}->log(0,"$sNick issued a kick $sChannel command");
 						my $sKickNick = $tArgs[0];
 						shift @tArgs;
 						my $sKickReason = join(" ",@tArgs);
@@ -4171,7 +4142,7 @@ sub userTopicChannel(@) {
 				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 					my $id_channel = getIdChannel($self,$sChannel);
 					if (defined($id_channel)) {
-						log_message($self,0,"$sNick issued a topic $sChannel command");
+						$self->{logger}->log(0,"$sNick issued a topic $sChannel command");
 						$self->{irc}->send_message("TOPIC",undef,($sChannel,join(" ",@tArgs)));
 						logBot($self,$message,$sChannel,"topic",@tArgs);
 						return $id_channel;
@@ -4260,7 +4231,7 @@ sub userChannelInfo(@) {
 	my $sQuery = "SELECT * FROM USER,USER_CHANNEL,CHANNEL WHERE USER.id_user=USER_CHANNEL.id_user AND CHANNEL.id_channel=USER_CHANNEL.id_channel AND name=? AND level=500";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -4290,7 +4261,7 @@ sub userChannelInfo(@) {
 			$sQuery = "SELECT chanset FROM CHANSET_LIST,CHANNEL_SET,CHANNEL WHERE CHANNEL_SET.id_channel=CHANNEL.id_channel AND CHANNEL_SET.id_chanset_list=CHANSET_LIST.id_chanset_list AND name like ?";
 			$sth = $self->{dbh}->prepare($sQuery);
 			unless ($sth->execute($sChannel)) {
-				log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 			}
 			else {
 				my $sChansetFlags = "Channel flags ";
@@ -4312,7 +4283,7 @@ sub userChannelInfo(@) {
 					$sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
 					$sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($id_channel)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						if (my $ref = $sth->fetchrow_hashref()) {
@@ -4350,7 +4321,7 @@ sub channelList(@) {
 				my $sQuery="SELECT name,count(id_user) as nbUsers FROM CHANNEL,USER_CHANNEL WHERE CHANNEL.id_channel=USER_CHANNEL.id_channel GROUP BY name ORDER by creation_date LIMIT 20";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute()) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					my $sNoticeMsg = "[#chan (users)] ";
@@ -4386,7 +4357,7 @@ sub userWhoAmI(@) {
 		my $sQuery = "SELECT password,hostmasks,creation_date,last_login FROM USER WHERE id_user=?";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($iMatchingUserId)) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			if (my $ref = $sth->fetchrow_hashref()) {
@@ -4439,7 +4410,7 @@ sub mbDbAddCommand(@) {
 						my $sQuery = "SELECT command FROM PUBLIC_COMMANDS WHERE command LIKE ?";
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($sCommand)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							unless (my $ref = $sth->fetchrow_hashref()) {
@@ -4455,7 +4426,7 @@ sub mbDbAddCommand(@) {
 								$sQuery = "INSERT INTO PUBLIC_COMMANDS (id_user,id_public_commands_category,command,description,action) VALUES (?,?,?,?,?)";
 								$sth = $self->{dbh}->prepare($sQuery);
 								unless ($sth->execute($iMatchingUserId,$id_public_commands_category,$sCommand,$sCommand,$sAction)) {
-									log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+									$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 								}
 								else {
 									botNotice($self,$sNick,"Command $sCommand added");
@@ -4498,7 +4469,7 @@ sub getCommandCategory(@) {
 	my $sQuery = "SELECT id_public_commands_category FROM PUBLIC_COMMANDS_CATEGORY WHERE description LIKE ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sCategory)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -4523,7 +4494,7 @@ sub mbDbRemCommand(@) {
 					my $sQuery = "SELECT id_user,id_public_commands FROM PUBLIC_COMMANDS WHERE command LIKE ?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sCommand)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						if (my $ref = $sth->fetchrow_hashref()) {
@@ -4534,7 +4505,7 @@ sub mbDbRemCommand(@) {
 								$sQuery = "DELETE FROM PUBLIC_COMMANDS WHERE id_public_commands=?";
 								my $sth = $self->{dbh}->prepare($sQuery);
 								unless ($sth->execute($id_public_commands)) {
-									log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+									$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 								}
 								else {
 									botNotice($self,$sNick,"Command $sCommand removed");
@@ -4587,7 +4558,7 @@ sub mbDbModCommand(@) {
 					my $sQuery = "SELECT id_public_commands,id_user FROM PUBLIC_COMMANDS WHERE command LIKE ?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sCommand)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						if (my $ref = $sth->fetchrow_hashref()) {
@@ -4608,7 +4579,7 @@ sub mbDbModCommand(@) {
 									$sQuery = "UPDATE PUBLIC_COMMANDS SET id_public_commands_category=?,action=? WHERE id_public_commands=?";
 									$sth = $self->{dbh}->prepare($sQuery);
 									unless ($sth->execute($id_public_commands_category,$sAction,$id_public_commands)) {
-										log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+										$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 									}
 									else {
 										botNotice($self,$sNick,"Command $sCommand modified");
@@ -4656,7 +4627,7 @@ sub mbDbShowCommand(@) {
 		my $sQuery = "SELECT hits,id_user,creation_date,action,PUBLIC_COMMANDS_CATEGORY.description as category FROM PUBLIC_COMMANDS,PUBLIC_COMMANDS_CATEGORY WHERE PUBLIC_COMMANDS.id_public_commands_category=PUBLIC_COMMANDS_CATEGORY.id_public_commands_category AND command LIKE ?";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($sCommand)) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			if (my $ref = $sth->fetchrow_hashref()) {
@@ -4671,7 +4642,7 @@ sub mbDbShowCommand(@) {
 					$sQuery = "SELECT * FROM USER WHERE id_user=?";
 					my $sth2 = $self->{dbh}->prepare($sQuery);
 					unless ($sth2->execute($id_user)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						if (my $ref2 = $sth2->fetchrow_hashref()) {
@@ -4708,7 +4679,7 @@ sub mbChownCommand(@) {
 					my $sQuery = "SELECT nickname,USER.id_user,id_public_commands FROM PUBLIC_COMMANDS,USER WHERE PUBLIC_COMMANDS.id_user=USER.id_user AND command LIKE ?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sCommand)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						if (my $ref = $sth->fetchrow_hashref()) {
@@ -4718,7 +4689,7 @@ sub mbChownCommand(@) {
 							$sQuery = "SELECT id_user,nickname FROM USER WHERE nickname LIKE ?";
 							$sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($sUsername)) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								if (my $ref = $sth->fetchrow_hashref()) {
@@ -4726,7 +4697,7 @@ sub mbChownCommand(@) {
 									$sQuery = "UPDATE PUBLIC_COMMANDS SET id_user=? WHERE id_public_commands=?";
 									$sth = $self->{dbh}->prepare($sQuery);
 									unless ($sth->execute($id_user_new,$id_public_commands)) {
-										log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+										$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 									}
 									else {
 										botNotice($self,$sNick,"Changed owner of command $sCommand ($nickname -> $sUsername)");
@@ -4793,10 +4764,10 @@ sub channelStatLines(@) {
 					}
 				}
 				my $sQuery = "SELECT COUNT(*) as nbLinesPerHour FROM CHANNEL,CHANNEL_LOG WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND CHANNEL.name like ? AND ts > date_sub('" . time2str("%Y-%m-%d %H:%M:%S",time) . "', INTERVAL 1 HOUR)";
-				log_message($self,3,$sQuery);
+				$self->{logger}->log(3,$sQuery);
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($sChannel)) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					if (my $ref = $sth->fetchrow_hashref()) {
@@ -4861,7 +4832,7 @@ sub whoTalk(@) {
 				my $sQuery = "SELECT nick,COUNT(nick) as nbLinesPerHour FROM CHANNEL,CHANNEL_LOG WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND (event_type='public' OR event_type='action') AND CHANNEL.name like ? AND ts > date_sub('" . time2str("%Y-%m-%d %H:%M:%S",time) . "', INTERVAL 1 HOUR) GROUP BY nick ORDER BY nbLinesPerHour DESC LIMIT 20";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($sChannel)) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					my $sResult = "Top 20 talkers ";
@@ -4900,11 +4871,11 @@ sub whoTalk(@) {
 
 sub mbDbCommand(@) {
 	my ($self,$message,$sChannel,$sNick,$sCommand,@tArgs) = @_;
-	log_message($self,2,"Check SQL command : $sCommand");
+	$self->{logger}->log(2,"Check SQL command : $sCommand");
 	my $sQuery = "SELECT * FROM PUBLIC_COMMANDS WHERE command like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sCommand)) {
-		log_message($self,1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -4916,10 +4887,10 @@ sub mbDbCommand(@) {
 			$sQuery = "UPDATE PUBLIC_COMMANDS SET hits=? WHERE id_public_commands=?";
 			$sth = $self->{dbh}->prepare($sQuery);
 			unless ($sth->execute($hits,$id_public_commands)) {
-				log_message($self,1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				$self->{logger}->log(1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 			}
 			else {
-				log_message($self,2,"SQL command found : $sCommand description : $description action : $action");
+				$self->{logger}->log(2,"SQL command found : $sCommand description : $description action : $action");
 				my ($actionType,$actionTo,$actionDo) = split(/ /,$action,3);
 				if (( $actionType eq 'PRIVMSG' ) || ( $actionType eq 'ACTION' )){
 					if ( $actionTo eq '%c' ) {
@@ -4934,7 +4905,7 @@ sub mbDbCommand(@) {
 					return 1;
 				}
 				else {
-					log_message($self,2,"Unknown actionType : $actionType");
+					$self->{logger}->log(2,"Unknown actionType : $actionType");
 					return 0;
 				}
 			}
@@ -5000,7 +4971,7 @@ sub mbDbMvCommand(@) {
 					my $sQuery = "SELECT id_user,id_public_commands FROM PUBLIC_COMMANDS WHERE command LIKE ?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sCommand)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						if (my $ref = $sth->fetchrow_hashref()) {
@@ -5011,7 +4982,7 @@ sub mbDbMvCommand(@) {
 								$sQuery = "UPDATE PUBLIC_COMMANDS SET command=? WHERE id_public_commands=?";
 								my $sth = $self->{dbh}->prepare($sQuery);
 								unless ($sth->execute($sCommandNew,$id_public_commands)) {
-									log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+									$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 									botNotice($self,$sNick,"Does command $sCommandNew already exists ?");
 								}
 								else {
@@ -5054,7 +5025,7 @@ sub mbCountCommand(@) {
 	my $sQuery = "SELECT count(*) as nbCommands FROM PUBLIC_COMMANDS";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute()) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		my $nbTotalCommands = 0;
@@ -5064,7 +5035,7 @@ sub mbCountCommand(@) {
 		$sQuery = "SELECT PUBLIC_COMMANDS_CATEGORY.description as sCategory,count(*) as nbCommands FROM PUBLIC_COMMANDS,PUBLIC_COMMANDS_CATEGORY WHERE PUBLIC_COMMANDS.id_public_commands_category=PUBLIC_COMMANDS_CATEGORY.id_public_commands_category GROUP by PUBLIC_COMMANDS_CATEGORY.description";
 		$sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute()) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			my $sNbCommandNotice = "$nbTotalCommands Commands in database : ";
@@ -5105,7 +5076,7 @@ sub mbTopCommand(@) {
 	my $sQuery = "SELECT command,hits FROM PUBLIC_COMMANDS ORDER BY hits DESC LIMIT 20";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute()) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		my $sNbCommandNotice = "Top commands in database : ";
@@ -5143,7 +5114,7 @@ sub mbLastCommand(@) {
 	my $sQuery = "SELECT command FROM PUBLIC_COMMANDS ORDER BY creation_date DESC LIMIT 10";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute()) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		my $sCommandText;
@@ -5177,11 +5148,11 @@ sub mbDbSearchCommand(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 		my $sCommand = $tArgs[0];
-		log_message($self,3,"sCommand : $sCommand");
+		$self->{logger}->log(3,"sCommand : $sCommand");
 		my $sQuery = "SELECT * FROM PUBLIC_COMMANDS";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute()) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			my $sResponse;
@@ -5218,7 +5189,7 @@ sub mbDbOwnersCommand(@) {
 	my $sQuery = "SELECT nickname,count(command) as nbCommands FROM PUBLIC_COMMANDS,USER WHERE PUBLIC_COMMANDS.id_user=USER.id_user GROUP by nickname ORDER BY nbCommands DESC";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute()) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		my $sResponse = "Number of commands by user : ";
@@ -5290,7 +5261,7 @@ sub mbDbAddCategoryCommand(@) {
 					my $sQuery = "SELECT id_public_commands_category FROM PUBLIC_COMMANDS_CATEGORY WHERE description LIKE ?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sCategory)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						if (my $ref = $sth->fetchrow_hashref()) {
@@ -5302,7 +5273,7 @@ sub mbDbAddCategoryCommand(@) {
 							$sQuery = "INSERT INTO PUBLIC_COMMANDS_CATEGORY (description) VALUES (?)";
 							$sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($sCategory)) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								botNotice($self,$sNick,"Category $sCategory added");
@@ -5342,7 +5313,7 @@ sub mbDbChangeCategoryCommand(@) {
 					my $sQuery = "SELECT id_public_commands_category FROM PUBLIC_COMMANDS_CATEGORY WHERE description LIKE ?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sCategory)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						unless (my $ref = $sth->fetchrow_hashref()) {
@@ -5355,7 +5326,7 @@ sub mbDbChangeCategoryCommand(@) {
 							# Change category
 							$sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($tArgs[1])) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								unless (my $ref = $sth->fetchrow_hashref()) {
@@ -5366,7 +5337,7 @@ sub mbDbChangeCategoryCommand(@) {
 									$sQuery = "UPDATE PUBLIC_COMMANDS SET id_public_commands_category=? WHERE command like ?";
 									$sth = $self->{dbh}->prepare($sQuery);
 									unless ($sth->execute($id_public_commands_category,$tArgs[1])) {
-										log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+										$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 									}
 									else {
 										botNotice($self,$sNick,"Changed category to $sCategory for " . $tArgs[1]);
@@ -5419,7 +5390,7 @@ sub userTopSay(@) {
 				my $sQuery = "SELECT event_type,publictext,count(publictext) as hit FROM CHANNEL,CHANNEL_LOG WHERE (event_type='public' OR event_type='action') AND CHANNEL.id_channel=CHANNEL_LOG.id_channel AND name=? AND nick like ? GROUP BY publictext ORDER by hit DESC LIMIT 30";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($sChannel,$tArgs[0])) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					my $sTopSay = $tArgs[0] . " : ";
@@ -5511,7 +5482,7 @@ sub mbDbCheckHostnameNickChan(@) {
 					my $sQuery = "SELECT nick,count(nick) as hits FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND name=? AND userhost like '%!%@" . $sHostname . "' GROUP BY nick ORDER by hits DESC LIMIT 10";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sChannel)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						my $sResponse = "Nicks for host $sHostname on $sChannel - ";
@@ -5568,7 +5539,7 @@ sub mbDbCheckHostnameNick(@) {
 					my $sQuery = "SELECT nick,count(nick) as hits FROM CHANNEL_LOG WHERE userhost like '%!%@" . $sHostname . "' GROUP BY nick ORDER by hits DESC LIMIT 10";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute()) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						my $sResponse = "Nicks for host $sHostname - ";
@@ -5625,7 +5596,7 @@ sub mbDbCheckNickHostname(@) {
 					my $sQuery = "SELECT userhost,count(userhost) as hits FROM CHANNEL_LOG WHERE nick LIKE ? GROUP BY userhost ORDER BY hits DESC LIMIT 10";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sNickSearch)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						my $sResponse = "Hostmasks for $sNickSearch - ";
@@ -5689,7 +5660,7 @@ sub userGreet(@) {
 	my $sQuery = "SELECT greet FROM USER,USER_CHANNEL,CHANNEL WHERE USER.id_user=USER_CHANNEL.id_user AND CHANNEL.id_channel=USER_CHANNEL.id_channel AND name=? AND nickname=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$sGreetNick)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -5766,7 +5737,7 @@ sub userAccessChannel(@) {
 				my $sQuery = "SELECT automode,greet FROM USER,USER_CHANNEL,CHANNEL WHERE CHANNEL.id_channel=USER_CHANNEL.id_channel AND USER.id_user=USER_CHANNEL.id_user AND nickname like ? AND CHANNEL.name=?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($tArgs[0],$sChannel)) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					my $sAuthUserStr;
@@ -5799,13 +5770,13 @@ sub getUserChannelLevelByName(@) {
 	my $sQuery = "SELECT level FROM USER,USER_CHANNEL,CHANNEL WHERE USER.id_user=USER_CHANNEL.id_user AND USER_CHANNEL.id_channel=CHANNEL.id_channel AND CHANNEL.name=? AND USER.nickname=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$sHandle)) {
-		log_message($self,1,"getUserChannelLevelByName() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"getUserChannelLevelByName() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
 			$iChannelUserLevel = $ref->{'level'};
 		}
-		log_message($self,3,"getUserChannelLevelByName() iChannelUserLevel = $iChannelUserLevel");
+		$self->{logger}->log(3,"getUserChannelLevelByName() iChannelUserLevel = $iChannelUserLevel");
 	}
 	$sth->finish;
 	return $iChannelUserLevel;
@@ -5825,17 +5796,17 @@ sub getNickInfoWhois(@) {
 	my $sCheckQuery = "SELECT * FROM USER";
 	my $sth = $self->{dbh}->prepare($sCheckQuery);
 	unless ($sth->execute ) {
-		log_message($self,1,"getNickInfoWhois() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
+		$self->{logger}->log(1,"getNickInfoWhois() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
 	}
 	else {	
 		while (my $ref = $sth->fetchrow_hashref()) {
 			my @tHostmasks = split(/,/,$ref->{'hostmasks'});
 			foreach my $sHostmask (@tHostmasks) {
-				log_message($self,4,"getNickInfoWhois() Checking hostmask : " . $sHostmask);
+				$self->{logger}->log(4,"getNickInfoWhois() Checking hostmask : " . $sHostmask);
 				$sHostmask =~ s/\./\\./g;
 				$sHostmask =~ s/\*/.*/g;
 				if ( $sWhoisHostmask =~ /^$sHostmask/ ) {
-					log_message($self,3,"getNickInfoWhois() $sHostmask matches " . $sWhoisHostmask);
+					$self->{logger}->log(3,"getNickInfoWhois() $sHostmask matches " . $sWhoisHostmask);
 					$sMatchingUserHandle = $ref->{'nickname'};
 					if (defined($ref->{'password'})) {
 						$sMatchingUserPasswd = $ref->{'password'};
@@ -5845,7 +5816,7 @@ sub getNickInfoWhois(@) {
 					my $sGetLevelQuery = "SELECT * FROM USER_LEVEL WHERE id_user_level=?";
 					my $sth2 = $self->{dbh}->prepare($sGetLevelQuery);
 	        unless ($sth2->execute($iMatchingUserLevelId)) {
-          				log_message($self,0,"getNickInfoWhois() SQL Error : " . $DBI::errstr . " Query : " . $sGetLevelQuery);
+          				$self->{logger}->log(0,"getNickInfoWhois() SQL Error : " . $DBI::errstr . " Query : " . $sGetLevelQuery);
   				}
   				else {
 						while (my $ref2 = $sth2->fetchrow_hashref()) {
@@ -5867,32 +5838,32 @@ sub getNickInfoWhois(@) {
 	}
 	$sth->finish;
 	if (defined($iMatchingUserId)) {
-		log_message($self,3,"getNickInfoWhois() iMatchingUserId : $iMatchingUserId");
+		$self->{logger}->log(3,"getNickInfoWhois() iMatchingUserId : $iMatchingUserId");
 	}
 	else {
-		log_message($self,3,"getNickInfoWhois() iMatchingUserId is undefined with this host : " . $sWhoisHostmask);
+		$self->{logger}->log(3,"getNickInfoWhois() iMatchingUserId is undefined with this host : " . $sWhoisHostmask);
 		return (undef,undef,undef,undef,undef,undef,undef);
 	}
 	if (defined($iMatchingUserLevel)) {
-		log_message($self,4,"getNickInfoWhois() iMatchingUserLevel : $iMatchingUserLevel");
+		$self->{logger}->log(4,"getNickInfoWhois() iMatchingUserLevel : $iMatchingUserLevel");
 	}
 	if (defined($iMatchingUserLevelDesc)) {
-		log_message($self,4,"getNickInfoWhois() iMatchingUserLevelDesc : $iMatchingUserLevelDesc");
+		$self->{logger}->log(4,"getNickInfoWhois() iMatchingUserLevelDesc : $iMatchingUserLevelDesc");
 	}
 	if (defined($iMatchingUserAuth)) {
-		log_message($self,4,"getNickInfoWhois() iMatchingUserAuth : $iMatchingUserAuth");
+		$self->{logger}->log(4,"getNickInfoWhois() iMatchingUserAuth : $iMatchingUserAuth");
 	}
 	if (defined($sMatchingUserHandle)) {
-		log_message($self,4,"getNickInfoWhois() sMatchingUserHandle : $sMatchingUserHandle");
+		$self->{logger}->log(4,"getNickInfoWhois() sMatchingUserHandle : $sMatchingUserHandle");
 	}
 	if (defined($sMatchingUserPasswd)) {
-		log_message($self,4,"getNickInfoWhois() sMatchingUserPasswd : $sMatchingUserPasswd");
+		$self->{logger}->log(4,"getNickInfoWhois() sMatchingUserPasswd : $sMatchingUserPasswd");
 	}
 	if (defined($sMatchingUserInfo1)) {
-		log_message($self,4,"getNickInfoWhois() sMatchingUserInfo1 : $sMatchingUserInfo1");
+		$self->{logger}->log(4,"getNickInfoWhois() sMatchingUserInfo1 : $sMatchingUserInfo1");
 	}
 	if (defined($sMatchingUserInfo2)) {
-		log_message($self,4,"getNickInfoWhois() sMatchingUserInfo2 : $sMatchingUserInfo2");
+		$self->{logger}->log(4,"getNickInfoWhois() sMatchingUserInfo2 : $sMatchingUserInfo2");
 	}
 	return ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2);
 }
@@ -5971,7 +5942,7 @@ sub channelNickList(@) {
 					botNotice($self,$sNick,"Syntax: nicklist #channel");
 					return undef;
 				}
-				log_message($self,0,"Users on $sChannel : " . join(" ",@{$hChannelsNicks{$sChannel}}));
+				$self->{logger}->log(0,"Users on $sChannel : " . join(" ",@{$hChannelsNicks{$sChannel}}));
 			}
 			else {
 				my $sNoticeMsg = $message->prefix . " nicklist command attempt (command level [Administrator] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
@@ -6113,7 +6084,7 @@ sub getYoutubeDetails(@) {
 	my ($self,$sText) = @_;
 	my $conf = $self->{conf};
 	my $sYoutubeId;
-	log_message($self,3,"getYoutubeDetails() $sText");
+	$self->{logger}->log(3,"getYoutubeDetails() $sText");
 	if ( $sText =~ /http.*:\/\/www\.youtube\..*\/watch.*v=/i ) {
 		$sYoutubeId = $sText;
 		$sYoutubeId =~ s/^.*watch.*v=//;
@@ -6135,16 +6106,16 @@ sub getYoutubeDetails(@) {
 		$sYoutubeId = substr($sYoutubeId,0,11);
 	}
 	if (defined($sYoutubeId) && ( $sYoutubeId ne "" )) {
-		log_message($self,3,"getYoutubeDetails() sYoutubeId = $sYoutubeId");
+		$self->{logger}->log(3,"getYoutubeDetails() sYoutubeId = $sYoutubeId");
 		my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
 		unless (defined($APIKEY) && ($APIKEY ne "")) {
-			log_message($self,0,"getYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
-			log_message($self,0,"getYoutubeDetails() section [main]");
-			log_message($self,0,"getYoutubeDetails() YOUTUBE_APIKEY=key");
+			$self->{logger}->log(0,"getYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
+			$self->{logger}->log(0,"getYoutubeDetails() section [main]");
+			$self->{logger}->log(0,"getYoutubeDetails() YOUTUBE_APIKEY=key");
 			return undef;
 		}
 		unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
-			log_message(3,"getYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
+			$self->{logger}->log(3,"getYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 		}
 		else {
 			my $line;
@@ -6157,24 +6128,24 @@ sub getYoutubeDetails(@) {
 			while(defined($line=<YOUTUBE_INFOS>)) {
 				chomp($line);
 				$json_details .= $line;
-				log_message($self,5,"getYoutubeDetails() $line");
+				$self->{logger}->log(5,"getYoutubeDetails() $line");
 				$i++;
 			}
 			if (defined($json_details) && ($json_details ne "")) {
-				log_message($self,4,"getYoutubeDetails() json_details : $json_details");
+				$self->{logger}->log(4,"getYoutubeDetails() json_details : $json_details");
 				my $sYoutubeInfo = decode_json $json_details;
 				my %hYoutubeInfo = %$sYoutubeInfo;
 				my @tYoutubeItems = $hYoutubeInfo{'items'};
 				my @fTyoutubeItems = @{$tYoutubeItems[0]};
-				log_message($self,4,"getYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
+				$self->{logger}->log(4,"getYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
 				# Check items
 				if ( $#fTyoutubeItems >= 0 ) {
 					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
-					log_message($self,4,"getYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
+					$self->{logger}->log(4,"getYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
 					$sViewCount = "views $hYoutubeItems{'statistics'}{'viewCount'}";
 					my $sTitleItem = $hYoutubeItems{'snippet'}{'localized'}{'title'};
 					$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
-					log_message($self,3,"getYoutubeDetails() sDuration : $sDuration");
+					$self->{logger}->log(3,"getYoutubeDetails() sDuration : $sDuration");
 					$sDuration =~ s/^PT//;
 					my $sDisplayDuration;
 					my $sHour = $sDuration;
@@ -6198,9 +6169,9 @@ sub getYoutubeDetails(@) {
 						$sDisplayDuration .= "$sSec" . "s";
 						$sDururationSeconds += $sSec;
 					}
-					log_message($self,3,"getYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
-					log_message($self,3,"getYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
-					log_message($self,3,"getYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
+					$self->{logger}->log(3,"getYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
+					$self->{logger}->log(3,"getYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
+					$self->{logger}->log(3,"getYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
 					
 					if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
 						my $sMsgSong .= String::IRC->new('You')->black('white');
@@ -6215,41 +6186,41 @@ sub getYoutubeDetails(@) {
 						return($sDururationSeconds,$sMsgSong);
 					}
 					else {
-						log_message($self,3,"getYoutubeDetails() one of the youtube field is undef or empty");
+						$self->{logger}->log(3,"getYoutubeDetails() one of the youtube field is undef or empty");
 						if (defined($sTitle)) {
-							log_message($self,3,"getYoutubeDetails() sTitle=$sTitle");
+							$self->{logger}->log(3,"getYoutubeDetails() sTitle=$sTitle");
 						}
 						else {
-							log_message($self,3,"getYoutubeDetails() sTitle is undefined");
+							$self->{logger}->log(3,"getYoutubeDetails() sTitle is undefined");
 						}
 						
 						if (defined($sDuration)) {
-							log_message($self,3,"getYoutubeDetails() sDuration=$sDuration");
+							$self->{logger}->log(3,"getYoutubeDetails() sDuration=$sDuration");
 						}
 						else {
-							log_message($self,3,"getYoutubeDetails() sDuration is undefined");
+							$self->{logger}->log(3,"getYoutubeDetails() sDuration is undefined");
 						}
 						if (defined($sViewCount)) {
-							log_message($self,3,"getYoutubeDetails() sViewCount=$sViewCount");
+							$self->{logger}->log(3,"getYoutubeDetails() sViewCount=$sViewCount");
 						}
 						else {
-							log_message($self,3,"getYoutubeDetails() sViewCount is undefined");
+							$self->{logger}->log(3,"getYoutubeDetails() sViewCount is undefined");
 						}
 					}
 				}
 				else {
-					log_message($self,3,"getYoutubeDetails() Invalid id : $sYoutubeId");
+					$self->{logger}->log(3,"getYoutubeDetails() Invalid id : $sYoutubeId");
 					my $sNoticeMsg = "getYoutubeDetails() Invalid id : $sYoutubeId";
 					noticeConsoleChan($self,$sNoticeMsg);
 				}
 			}
 			else {
-				log_message($self,3,"getYoutubeDetails() curl empty result for : curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
+				$self->{logger}->log(3,"getYoutubeDetails() curl empty result for : curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
 			}
 		}
 	}
 	else {
-		log_message($self,3,"getYoutubeDetails() sYoutubeId could not be determined");
+		$self->{logger}->log(3,"getYoutubeDetails() sYoutubeId could not be determined");
 	}
 	return undef;
 }
@@ -6259,7 +6230,7 @@ sub displayYoutubeDetails(@) {
 	my ($self,$message,$sNick,$sChannel,$sText) = @_;
 	my $conf = $self->{conf};
 	my $sYoutubeId;
-	log_message($self,3,"displayYoutubeDetails() $sText");
+	$self->{logger}->log(3,"displayYoutubeDetails() $sText");
 
 	if ( $sText =~ /http.*:\/\/www\.youtube\..*\/watch.*v=/i ) {
 		$sYoutubeId = $sText;
@@ -6283,18 +6254,18 @@ sub displayYoutubeDetails(@) {
 	}
 
 	if (defined($sYoutubeId) && ( $sYoutubeId ne "" )) {
-		log_message($self,3,"displayYoutubeDetails() sYoutubeId = $sYoutubeId");
+		$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeId = $sYoutubeId");
 
 		my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
 		unless (defined($APIKEY) && ($APIKEY ne "")) {
-			log_message($self,0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
-			log_message($self,0,"displayYoutubeDetails() section [main]");
-			log_message($self,0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
+			$self->{logger}->log(0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
+			$self->{logger}->log(0,"displayYoutubeDetails() section [main]");
+			$self->{logger}->log(0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
 			return undef;
 		}
 
 		unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
-			log_message(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
+			$self->{logger}->log(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 		}
 		else {
 			my $line;
@@ -6307,24 +6278,24 @@ sub displayYoutubeDetails(@) {
 			while(defined($line=<YOUTUBE_INFOS>)) {
 				chomp($line);
 				$json_details .= $line;
-				log_message($self,5,"displayYoutubeDetails() $line");
+				$self->{logger}->log(5,"displayYoutubeDetails() $line");
 				$i++;
 			}
 			if (defined($json_details) && ($json_details ne "")) {
-				log_message($self,4,"displayYoutubeDetails() json_details : $json_details");
+				$self->{logger}->log(4,"displayYoutubeDetails() json_details : $json_details");
 				my $sYoutubeInfo = decode_json $json_details;
 				my %hYoutubeInfo = %$sYoutubeInfo;
 				my @tYoutubeItems = $hYoutubeInfo{'items'};
 				my @fTyoutubeItems = @{$tYoutubeItems[0]};
-				log_message($self,4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
+				$self->{logger}->log(4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
 				if ( $#fTyoutubeItems >= 0 ) {
 					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
-					log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
+					$self->{logger}->log(4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
 					$sViewCount = "views $hYoutubeItems{'statistics'}{'viewCount'}";
 					$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
 					$schannelTitle = $hYoutubeItems{'snippet'}{'channelTitle'};
 					$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
-					log_message($self,3,"displayYoutubeDetails() sDuration : $sDuration");
+					$self->{logger}->log(3,"displayYoutubeDetails() sDuration : $sDuration");
 					$sDuration =~ s/^PT//;
 					my $sDisplayDuration;
 					my $sHour = $sDuration;
@@ -6345,10 +6316,10 @@ sub displayYoutubeDetails(@) {
 						$sSec =~ s/S$//;
 						$sDisplayDuration .= "$sSec" . "s";
 					}
-					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
-					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
-					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
-					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics channelTitle : $schannelTitle");
+					$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
+					$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
+					$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
+					$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeInfo statistics channelTitle : $schannelTitle");
 
 					if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
 						# Normalize title if too many uppercase letters
@@ -6356,12 +6327,12 @@ sub displayYoutubeDetails(@) {
 						my $upper_count_channel = ($schannelTitle =~ tr/A-Z//);
 
 						if ($upper_count_title > 20) {
-							log_message($self, 3, "displayYoutubeDetails() sTitle has $upper_count_title uppercase letters, normalizing.");
+							$self->{logger}->log( 3, "displayYoutubeDetails() sTitle has $upper_count_title uppercase letters, normalizing.");
 							$sTitle = ucfirst(lc($sTitle));
 						}
 
 						if ($upper_count_channel > 20) {
-							log_message($self, 3, "displayYoutubeDetails() schannelTitle has $upper_count_channel uppercase letters, normalizing.");
+							$self->{logger}->log( 3, "displayYoutubeDetails() schannelTitle has $upper_count_channel uppercase letters, normalizing.");
 							$schannelTitle = ucfirst(lc($schannelTitle));
 						}
 
@@ -6382,23 +6353,23 @@ sub displayYoutubeDetails(@) {
 						botPrivmsg($self,$sChannel,"($sNick) $sMsgSong");
 					}
 					else {
-						log_message($self,3,"displayYoutubeDetails() one of the youtube field is undef or empty");
-						log_message($self,3,"displayYoutubeDetails() sTitle=$sTitle")     if defined($sTitle);
-						log_message($self,3,"displayYoutubeDetails() sDuration=$sDuration") if defined($sDuration);
-						log_message($self,3,"displayYoutubeDetails() sViewCount=$sViewCount") if defined($sViewCount);
+						$self->{logger}->log(3,"displayYoutubeDetails() one of the youtube field is undef or empty");
+						$self->{logger}->log(3,"displayYoutubeDetails() sTitle=$sTitle")     if defined($sTitle);
+						$self->{logger}->log(3,"displayYoutubeDetails() sDuration=$sDuration") if defined($sDuration);
+						$self->{logger}->log(3,"displayYoutubeDetails() sViewCount=$sViewCount") if defined($sViewCount);
 					}
 				}
 				else {
-					log_message($self,3,"displayYoutubeDetails() Invalid id : $sYoutubeId");
+					$self->{logger}->log(3,"displayYoutubeDetails() Invalid id : $sYoutubeId");
 				}
 			}
 			else {
-				log_message($self,3,"displayYoutubeDetails() curl empty result for : curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
+				$self->{logger}->log(3,"displayYoutubeDetails() curl empty result for : curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
 			}
 		}
 	}
 	else {
-		log_message($self,3,"displayYoutubeDetails() sYoutubeId could not be determined");
+		$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeId could not be determined");
 	}
 }
 
@@ -6414,7 +6385,7 @@ sub displayWeather(@) {
 				my $iHttpResponseCode;
 				my $sCity = $sText;
 				unless ( open URL_WEATHER, "curl --connect-timeout 3 --max-time 3 -L -ks 'http://wttr.in/" . url_encode($sCity) . "?format=\"%l:+%c+%t+%w+%p\"&m' |" ) {
-					log_message(3,"displayWeather() Could not curl headers from wttr.in");
+					$self->{logger}->log(3,"displayWeather() Could not curl headers from wttr.in");
 				}
 				else {
 					my $line;
@@ -6445,29 +6416,29 @@ sub displayWeather(@) {
 
 sub displayUrlTitle(@) {
 	my ($self,$message,$sNick,$sChannel,$sText) = @_;
-	log_message($self,3,"displayUrlTitle() $sText");
+	$self->{logger}->log(3,"displayUrlTitle() $sText");
 	my $sContentType;
 	my $iHttpResponseCode;
 	my $sTextURL = $sText;
 	$sText =~ s/^.*http/http/;
 	$sText =~ s/\s+.*$//;
-	log_message($self,3,"displayUrlTitle() URL = $sText");
+	$self->{logger}->log(3,"displayUrlTitle() URL = $sText");
 	if ( $sText =~ /x.com/ ) {
 		my $id_chanset_list = getIdChansetList($self,"Twitter");
 		if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-			log_message($self,3,"id_chanset_list = $id_chanset_list");
+			$self->{logger}->log(3,"id_chanset_list = $id_chanset_list");
 			my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
 			unless (defined($id_channel_set) && ($id_channel_set ne "")) {
 				return undef;
 			}
 			else {
-				log_message($self,3,"id_channel_set = $id_channel_set");
+				$self->{logger}->log(3,"id_channel_set = $id_channel_set");
 			}
 		}
 		#TBD or not
 	} # Special prank for a bro :)
 	if ( (($sText =~ /x.com/) || ($sText =~ /twitter.com/)) && (($sNick =~ /^\[k\]$/) || ($sNick =~ /^NHI$/) || ($sNick =~ /^PersianYeti$/))) {
-		log_message($self,3,"displayUrlTitle() Twitter URL = $sText");
+		$self->{logger}->log(3,"displayUrlTitle() Twitter URL = $sText");
 		return undef;
 		my @tAnswers = ( "Ok $sNick, you need to take a breathe", "$sNick the truth is out theeeeere ^^", "You're the wisest $sNick, you checked your sources :P~","Great another Twitter thingy, we missed that $sNick");
 		botPrivmsg($self,$sChannel,$tAnswers[rand($#tAnswers + 1)]);
@@ -6481,43 +6452,43 @@ sub displayUrlTitle(@) {
 			$id = $1;
 		}
 		if ($user) {
-			log_message($self,3,"displayUrlTitle() user = $user");
+			$self->{logger}->log(3,"displayUrlTitle() user = $user");
 		}
 		else {
-			log_message($self,3,"displayUrlTitle() Could not get Twitter user");
+			$self->{logger}->log(3,"displayUrlTitle() Could not get Twitter user");
 			return undef;
 		}
 		if ($id) {
-			log_message($self,3,"displayUrlTitle() id = $id");
+			$self->{logger}->log(3,"displayUrlTitle() id = $id");
 		}
 		else {
-			log_message($self,3,"displayUrlTitle() Could not get Twitter id");
+			$self->{logger}->log(3,"displayUrlTitle() Could not get Twitter id");
 			return undef;
 		}
 
 		
 
 		my $twitter_url = "https://twitter.com/$user/status/$id";  # Replace with the actual URL
-		log_message($self,3,"displayUrlTitle() twitter_url = $twitter_url");
+		$self->{logger}->log(3,"displayUrlTitle() twitter_url = $twitter_url");
 
 		
 
 		# Use curl to fetch the Twitter page content
 		my $curl_output = `curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0" -s "$twitter_url"`;
-		#log_message($self,4,"displayUrlTitle() curl_output = $curl_output");
+		#$self->{logger}->log(4,"displayUrlTitle() curl_output = $curl_output");
 
 		# Check if the curl command was successful
 		if ($? == -1) {
-			log_message($self,3,"displayUrlTitle() Failed to execute curl: $!");
+			$self->{logger}->log(3,"displayUrlTitle() Failed to execute curl: $!");
 			return undef;
 		}
 		elsif ($? & 127) {
-			log_message($self,3,"displayUrlTitle() curl died with signal " . ($? & 127));
+			$self->{logger}->log(3,"displayUrlTitle() curl died with signal " . ($? & 127));
 		}
 		else {
 			my $exit_code = $? >> 8;
 			if ($exit_code != 0) {
-				log_message($self,3,"displayUrlTitle() curl exited with non-zero status: $exit_code");
+				$self->{logger}->log(3,"displayUrlTitle() curl exited with non-zero status: $exit_code");
 			}
 		}
 
@@ -6525,16 +6496,16 @@ sub displayUrlTitle(@) {
 		if ($curl_output =~ /<p class="tweet-text" data-aria-label-part="0">([^<]+)/) {
 			my $tweet_text = $1;
 			$tweet_text =~ s/\s+/ /g;  # Remove extra whitespace
-			log_message($self,3,"displayUrlTitle() Tweet Text: $tweet_text");
+			$self->{logger}->log(3,"displayUrlTitle() Tweet Text: $tweet_text");
 		}
 		else {
-			log_message($self,3,"displayUrlTitle() Tweet text not found");
+			$self->{logger}->log(3,"displayUrlTitle() Tweet text not found");
 		}
 	}
 	if ( $sText =~ /instagram.com/ ) {
 		my $content;
 		unless ( open URL_HEAD, "curl \"$sText\" |" ) {
-			log_message(3,"displayUrlTitle() insta Could not curl GET for url details");
+			$self->{logger}->log(3,"displayUrlTitle() insta Could not curl GET for url details");
 		}
 		else {
 			my $line;
@@ -6549,7 +6520,7 @@ sub displayUrlTitle(@) {
 			$title =~ s/^.*og:title" content="//;
 			$title =~ s/" .><meta property="og:image".*$//;
 			unless ( $title =~ /DOCTYPE html/ ) {
-				log_message($self,3,"displayUrlTitle() (insta) Extracted title : $title");
+				$self->{logger}->log(3,"displayUrlTitle() (insta) Extracted title : $title");
 			}
 			else {
 				$title = $content;
@@ -6577,38 +6548,38 @@ sub displayUrlTitle(@) {
 	}
 
 	unless ( open URL_HEAD, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |" ) {
-		log_message(3,"displayUrlTitle() Could not curl headers for $sText");
+		$self->{logger}->log(3,"displayUrlTitle() Could not curl headers for $sText");
 	}
 	else {
 		my $line;
 		my $i = 0;
 		while(defined($line=<URL_HEAD>)) {
 			chomp($line);
-			log_message($self,4,"displayUrlTitle() $line");
+			$self->{logger}->log(4,"displayUrlTitle() $line");
 			if ( $line =~ /^content\-type/i ) {
 				(undef,$sContentType) = split(" ",$line);
-				log_message($self,4,"displayUrlTitle() sContentType = $sContentType");
+				$self->{logger}->log(4,"displayUrlTitle() sContentType = $sContentType");
 			}
 			elsif ( $line =~ /^http/i ) {
 				(undef,$iHttpResponseCode) = split(" ",$line);
-				log_message($self,4,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
+				$self->{logger}->log(4,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
 			}
 			$i++;
 		}
 	}
 	unless (defined($iHttpResponseCode) && ($iHttpResponseCode eq "200")) {
-		log_message($self,3,"displayUrlTitle() Wrong HTTP response code (" . (defined($iHttpResponseCode) ? $iHttpResponseCode : "undefined") .") for $sText " . (defined($iHttpResponseCode) ? $iHttpResponseCode : "Undefined") );
+		$self->{logger}->log(3,"displayUrlTitle() Wrong HTTP response code (" . (defined($iHttpResponseCode) ? $iHttpResponseCode : "undefined") .") for $sText " . (defined($iHttpResponseCode) ? $iHttpResponseCode : "Undefined") );
 	}
 	else {
 		unless (defined($sContentType) && ($sContentType =~ /text\/html/i)) {
-			log_message($self,3,"displayUrlTitle() Wrong Content-Type for $sText " . (defined($sContentType) ? $sContentType : "Undefined") );
+			$self->{logger}->log(3,"displayUrlTitle() Wrong Content-Type for $sText " . (defined($sContentType) ? $sContentType : "Undefined") );
 		}
 		else {
 			if ( $sText =~ /open.spotify.com/ ) {
 				my $url = $sText;
 				$url =~ s/\?.*$//;
 				unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -ks \"$url\" |" ) {
-					log_message($self,0,"displayUrlTitle() Could not curl UrlTitle for $sText");
+					$self->{logger}->log(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 				}
 				else {
 					my $line;
@@ -6626,7 +6597,7 @@ sub displayUrlTitle(@) {
 							$artist =~ s/ \| Spotify//;
 							my $song = $sDisplayMsg;
 							$song =~ s/ - song and lyrics by.*$//;
-							log_message($self,3,"displayUrlTitle() artist = $artist song = $song");
+							$self->{logger}->log(3,"displayUrlTitle() artist = $artist song = $song");
 
 							my $sText = String::IRC->new("[")->white('black');
 							$sText .= String::IRC->new("Spotify")->black('green');
@@ -6645,7 +6616,7 @@ sub displayUrlTitle(@) {
 				return undef;
 			}
 			unless ( open URL_TITLE, "curl -A -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
-				log_message(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
+				$self->{logger}->log(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
 			}
 			else {
 				my $line;
@@ -6673,13 +6644,13 @@ sub displayUrlTitle(@) {
 						elsif ( $sText =~ /music.apple.com/ ) {
 							my $id_chanset_list = getIdChansetList($self,"AppleMusic");
 							if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-								log_message($self,3,"id_chanset_list = $id_chanset_list");
+								$self->{logger}->log(3,"id_chanset_list = $id_chanset_list");
 								my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
 								unless (defined($id_channel_set) && ($id_channel_set ne "")) {
 									return undef;
 								}
 								else {
-									log_message($self,3,"id_channel_set = $id_channel_set");
+									$self->{logger}->log(3,"id_channel_set = $id_channel_set");
 								}
 							}
 							$sDisplayMsg = String::IRC->new('[')->white('black');
@@ -6743,7 +6714,7 @@ sub mbDebug(@) {
 	$self->{cfg}       = $cfg;
 	$self->{MAIN_CONF} = $cfg->vars(); # temporaire pour backward compat
 
-	log_message($self, 0, "Debug set to $level");
+	$self->{logger}->log( 0, "Debug set to $level");
 	botNotice($self, $sNick, "Debug set to $level");
 	logBot($self, $message, $sChannel, "debug", "Debug set to $level");
 }
@@ -6761,7 +6732,7 @@ sub mbRestart(@) {
 				my $iCHildPid;
 				if (defined($iCHildPid = fork())) {
 					unless ($iCHildPid) {
-						log_message($self, 0, "Restart request from $sMatchingUserHandle");
+						$self->{logger}->log( 0, "Restart request from $sMatchingUserHandle");
 						setsid;
 						exec "./mb_restart.sh", $tArgs[0];
 					} else {
@@ -6794,11 +6765,11 @@ sub mbJump(@) {
 				my $sFullParams = join(" ",@tArgs);
 				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 					$sFullParams =~ s/\-\-server=[^ ]*//g;
-					log_message($self,3,$sFullParams);
+					$self->{logger}->log(3,$sFullParams);
 					my $iCHildPid;
 					if (defined($iCHildPid = fork())) {
 						unless ($iCHildPid) {
-							log_message($self,0,"Jump request from $sMatchingUserHandle");
+							$self->{logger}->log(0,"Jump request from $sMatchingUserHandle");
 							setsid;
 							exec "./mb_restart.sh",($sFullParams,"--server=$sServer");
 						}
@@ -6866,7 +6837,7 @@ sub mbSeen(@) {
 		my $sQuery = "SELECT * FROM CHANNEL_LOG WHERE nick like ? AND event_type='quit' ORDER BY ts DESC LIMIT 1";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($tArgs[0])) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			my $sCommandText;
@@ -6875,7 +6846,7 @@ sub mbSeen(@) {
 				$channelQuit = $ref->{'name'};
 				$msgQuit = $ref->{'publictext'};
 				$userhostQuit = $ref->{'userhost'};
-				log_message($self,3,"mbSeen() Quit : $tsQuit");
+				$self->{logger}->log(3,"mbSeen() Quit : $tsQuit");
 			}
 		}
 		
@@ -6887,7 +6858,7 @@ sub mbSeen(@) {
 		$sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND CHANNEL.name like ? AND nick like ? AND event_type='part' ORDER BY ts DESC LIMIT 1";
 		$sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($sChannel,$tArgs[0])) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			my $sCommandText;
@@ -6896,7 +6867,7 @@ sub mbSeen(@) {
 				$channelPart = $ref->{'name'};
 				$msgPart = $ref->{'publictext'};
 				$userhostPart = $ref->{'userhost'};
-				log_message($self,3,"mbSeen() Part : $tsPart");
+				$self->{logger}->log(3,"mbSeen() Part : $tsPart");
 			}
 		}
 		
@@ -6947,7 +6918,7 @@ sub mbPopCommand(@) {
 		my $sQuery = "SELECT command,hits FROM USER,PUBLIC_COMMANDS WHERE USER.id_user=PUBLIC_COMMANDS.id_user AND nickname like ? ORDER BY hits DESC LIMIT 20";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($tArgs[0])) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			my $sNbCommandNotice = "Popular commands for " . $tArgs[0] . " : ";
@@ -7014,7 +6985,7 @@ sub displayDate(@) {
 										my $sth = $self->{dbh}->prepare($sQuery);
 										if (defined($tArgs[2]) && ($tArgs[2] ne "") && defined($tArgs[3] && $tArgs[3] ne "")) {
 											unless ($sth->execute($tArgs[2])) {
-												log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+												$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 											}
 											else {
 												my $i = 0;
@@ -7026,22 +6997,22 @@ sub displayDate(@) {
 														return undef;
 													}
 													else {
-														log_message($self,3,"$nick has no defined timezone");
+														$self->{logger}->log(3,"$nick has no defined timezone");
 														$sQuery = "SELECT tz FROM TIMEZONE WHERE tz like ?";
 														$sth = $self->{dbh}->prepare($sQuery);
 														unless ($sth->execute($tArgs[3])) {
-															log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+															$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 														}
 														else {
 															my $i = 0;
 															if (my $ref = $sth->fetchrow_hashref()) {
 																my $tzset = $ref->{'tz'};
 																if (defined($tzset)) {
-																	log_message($self,3,"Found timezone : $tzset");
+																	$self->{logger}->log(3,"Found timezone : $tzset");
 																	$sQuery = "UPDATE USER SET tz=? WHERE nickname like ?";
 																	$sth = $self->{dbh}->prepare($sQuery);
 																	unless ($sth->execute($tzset,$nick)) {
-																		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+																		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 																	}
 																	else {
 																		my $time = DateTime->now( time_zone => $tzset );
@@ -7084,7 +7055,7 @@ sub displayDate(@) {
 										my $sth = $self->{dbh}->prepare($sQuery);
 										if (defined($tArgs[2]) && ($tArgs[2] ne "")) {
 											unless ($sth->execute($tArgs[2])) {
-												log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+												$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 											}
 											else {
 												my $i = 0;
@@ -7092,11 +7063,11 @@ sub displayDate(@) {
 													my $tz = $ref->{'tz'};
 													my $nick = $ref->{'nickname'};
 													if (defined($tz)) {
-														log_message($self,3,"$nick has already a timezone set to $tz, let's delete it.");
+														$self->{logger}->log(3,"$nick has already a timezone set to $tz, let's delete it.");
 														$sQuery = "UPDATE USER SET tz=NULL WHERE nickname like ?";
 														$sth = $self->{dbh}->prepare($sQuery);
 														unless ($sth->execute($tArgs[2])) {
-															log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+															$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 														}
 														else {
 															botPrivmsg($self,$sChannel,"Deleted timezone for user $nick.");
@@ -7145,7 +7116,7 @@ sub displayDate(@) {
 				my $sQuery = "SELECT nickname,tz FROM USER WHERE nickname like ?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($tArgs[0])) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					my $i = 0;
@@ -7161,7 +7132,7 @@ sub displayDate(@) {
 							$sQuery = "SELECT tz FROM TIMEZONE WHERE tz like ?";
 							my $sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($tArgs[0])) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								my $i = 0;
@@ -7182,7 +7153,7 @@ sub displayDate(@) {
 						$sQuery = "SELECT tz FROM TIMEZONE WHERE tz like ?";
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($tArgs[0])) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							my $i = 0;
@@ -7218,13 +7189,13 @@ sub checkResponder(@) {
 	my $sQuery = "SELECT answer,chance FROM RESPONDERS,CHANNEL WHERE ((CHANNEL.id_channel=RESPONDERS.id_channel AND CHANNEL.name like ?) OR (RESPONDERS.id_channel=0)) AND responder like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$sMsg)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
 			my $sAnswer = $ref->{'answer'};
 			my $iChance = $ref->{'chance'};
-			log_message($self,4,"checkResponder() Found answer $sAnswer for $sMsg with chance " . (100-$iChance) ." %");
+			$self->{logger}->log(4,"checkResponder() Found answer $sAnswer for $sMsg with chance " . (100-$iChance) ." %");
 			return $iChance;
 		}
 	}
@@ -7237,7 +7208,7 @@ sub doResponder(@) {
 	my $sQuery = "SELECT id_responders,answer,hits FROM RESPONDERS,CHANNEL WHERE ((CHANNEL.id_channel=RESPONDERS.id_channel AND CHANNEL.name like ?) OR (RESPONDERS.id_channel=0)) AND responder like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$sMsg)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -7245,15 +7216,15 @@ sub doResponder(@) {
 			my $id_responders = $ref->{'id_responders'};
 			my $hits = $ref->{'hits'} + 1;
 			my $actionDo = evalAction($self,$message,$sNick,$sChannel,$sMsg,$sAnswer);
-			log_message($self,3,"checkResponder() Found answer $sAnswer");
+			$self->{logger}->log(3,"checkResponder() Found answer $sAnswer");
 			botPrivmsg($self,$sChannel,$actionDo);
 			my $sQuery = "UPDATE RESPONDERS SET hits=? WHERE id_responders=?";
 			my $sth = $self->{dbh}->prepare($sQuery);
 			unless ($sth->execute($hits,$id_responders)) {
-				log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 			}
 			else {
-				log_message($self,3,"$hits hits for $sMsg");
+				$self->{logger}->log(3,"$hits hits for $sMsg");
 			}
 			setLastReponderTs($self,time);
 			return 1;
@@ -7278,12 +7249,12 @@ sub addResponder(@) {
 						botNotice($self,$sNick,"$sChannel is not registered to me");
 						return undef;
 					}
-					log_message($self,3,"Adding responder for channel $sChannel($id_channel)");
+					$self->{logger}->log(3,"Adding responder for channel $sChannel($id_channel)");
 					shift @tArgs;
 				}
 				else {
 					$id_channel = 0;
-					log_message($self,3,"Adding global responder");
+					$self->{logger}->log(3,"Adding global responder");
 				}
 				my $sArgs = join(" ",@tArgs);
 				unless (defined($sArgs) && ($sArgs ne "")) {
@@ -7333,27 +7304,27 @@ sub addResponder(@) {
 					return undef;
 				}
 				else {
-					log_message($self,3,"chance = $chance sResponder = $sResponder sAnswer = $sAnswer");
+					$self->{logger}->log(3,"chance = $chance sResponder = $sResponder sAnswer = $sAnswer");
 				}
 				
 				my $sQuery = "SELECT * FROM RESPONDERS WHERE id_channel=? AND responder like ?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($id_channel,$sResponder)) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					if (my $ref = $sth->fetchrow_hashref()) {
 						my $answer = $ref->{'answer'};
 						my $iChance = $ref->{'chance'};
 						my $hits = $ref->{'hits'};
-						log_message($self,3,"addResponder() Found answer $answer for responder $sResponder");
+						$self->{logger}->log(3,"addResponder() Found answer $answer for responder $sResponder");
 						botNotice($self,$sNick,"Found answer $answer for responder $sResponder with chance $iChance on $sChannel [hits : $hits]");
 					}
 					else {
 						$sQuery = "INSERT INTO RESPONDERS (id_channel,chance,responder,answer) VALUES (?,?,?,?)";
 						$sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($id_channel,(100 - $chance),$sResponder,$sAnswer)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							my $sResponderType;
@@ -7401,12 +7372,12 @@ sub delResponder(@) {
 						botNotice($self,$sNick,"$sChannel is not registered to me");
 						return undef;
 					}
-					log_message($self,3,"Deleting responder for channel $sChannel($id_channel)");
+					$self->{logger}->log(3,"Deleting responder for channel $sChannel($id_channel)");
 					shift @tArgs;
 				}
 				else {
 					$id_channel = 0;
-					log_message($self,3,"Deleting global responder");
+					$self->{logger}->log(3,"Deleting global responder");
 				}
 				my $sResponder = join(" ",@tArgs);
 				unless (defined($sResponder) && ($sResponder ne "")) {
@@ -7417,7 +7388,7 @@ sub delResponder(@) {
 				my $sQuery = "SELECT * FROM RESPONDERS WHERE id_channel=? AND responder like ?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($id_channel,$sResponder)) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					my $sResponderType;
@@ -7431,11 +7402,11 @@ sub delResponder(@) {
 						my $answer = $ref->{'answer'};
 						my $iChance = $ref->{'chance'};
 						my $hits = $ref->{'hits'};
-						log_message($self,3,"delResponder() Found answer $answer for responder $sResponder");
+						$self->{logger}->log(3,"delResponder() Found answer $answer for responder $sResponder");
 						$sQuery = "DELETE FROM RESPONDERS WHERE id_channel=? AND responder like ?";
 						$sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($id_channel,$sResponder)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {	
 							botNotice($self,$sNick,"Deleted $sResponderType : $sResponder with chance " . (100 - $iChance) . " % -> $answer [hits : $hits]");
@@ -7466,7 +7437,7 @@ sub delResponder(@) {
 
 sub evalAction(@) {
 	my ($self,$message,$sNick,$sChannel,$sCommand,$actionDo,@tArgs) = @_;
-	log_message($self,3,"evalAction() $sCommand / $actionDo");
+	$self->{logger}->log(3,"evalAction() $sCommand / $actionDo");
 	if (defined($tArgs[0])) {
 		my $sArgs = join(" ",@tArgs);
 		$actionDo =~ s/%n/$sArgs/g;
@@ -7598,7 +7569,7 @@ sub channelAddBadword(@) {
 				my $sQuery = "SELECT id_badwords,badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND CHANNEL.name like ? AND badword like ?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($sChannel,$sAddBadwords)) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					if (my $ref = $sth->fetchrow_hashref()) {
@@ -7614,7 +7585,7 @@ sub channelAddBadword(@) {
 						$sQuery = "INSERT INTO BADWORDS (id_channel,badword) VALUES (?,?)";
 						$sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($id_channel,$sAddBadwords)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							botNotice($self,$sNick,"Added badwords $sAddBadwords on $sChannel");
@@ -7679,7 +7650,7 @@ sub channelRemBadword(@) {
 				my $sQuery = "SELECT id_badwords,badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND CHANNEL.name like ? AND badword like ?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($sChannel,$sAddBadwords)) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					if (my $ref = $sth->fetchrow_hashref()) {
@@ -7688,7 +7659,7 @@ sub channelRemBadword(@) {
 						$sQuery = "DELETE FROM BADWORDS WHERE id_badwords=?";
 						$sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($id_badwords)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							botNotice($self,$sNick,"Removed badwords $sAddBadwords on $sChannel");
@@ -7724,7 +7695,7 @@ sub isIgnored(@) {
 	my $sCheckQuery = "SELECT * FROM IGNORES WHERE id_channel=0";
 	my $sth = $self->{dbh}->prepare($sCheckQuery);
 	unless ($sth->execute ) {
-		log_message($self,1,"isIgnored() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
+		$self->{logger}->log(1,"isIgnored() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
 	}
 	else {	
 		while (my $ref = $sth->fetchrow_hashref()) {
@@ -7736,8 +7707,8 @@ sub isIgnored(@) {
 			$sHostmask =~ s/\{/\\{/g;
 			$sHostmask =~ s/\}/\\}/g;
 			if ( $message->prefix =~ /^$sHostmask/ ) {
-				log_message($self,4,"isIgnored() (allchans/private) $sHostmask matches " . $message->prefix);
-				log_message($self,0,"[IGNORED] " . $ref->{'hostmask'} . " (allchans/private) " . ((substr($sChannel,0,1) eq '#') ? "$sChannel:" : "") . "<$sNick> $sMsg");
+				$self->{logger}->log(4,"isIgnored() (allchans/private) $sHostmask matches " . $message->prefix);
+				$self->{logger}->log(0,"[IGNORED] " . $ref->{'hostmask'} . " (allchans/private) " . ((substr($sChannel,0,1) eq '#') ? "$sChannel:" : "") . "<$sNick> $sMsg");
 				return 1;
 			}
 		}
@@ -7746,7 +7717,7 @@ sub isIgnored(@) {
 	$sCheckQuery = "SELECT * FROM IGNORES,CHANNEL WHERE IGNORES.id_channel=CHANNEL.id_channel AND CHANNEL.name like ?";
 	$sth = $self->{dbh}->prepare($sCheckQuery);
 	unless ($sth->execute($sChannel)) {
-		log_message($self,1,"isIgnored() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
+		$self->{logger}->log(1,"isIgnored() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
 	}
 	else {	
 		while (my $ref = $sth->fetchrow_hashref()) {
@@ -7758,8 +7729,8 @@ sub isIgnored(@) {
 			$sHostmask =~ s/\{/\\{/g;
 			$sHostmask =~ s/\}/\\}/g;
 			if ( $message->prefix =~ /^$sHostmask/ ) {
-				log_message($self,4,"isIgnored() $sHostmask matches " . $message->prefix);
-				log_message($self,0,"[IGNORED] " . $ref->{'hostmask'} . " $sChannel:<$sNick> $sMsg");
+				$self->{logger}->log(4,"isIgnored() $sHostmask matches " . $message->prefix);
+				$self->{logger}->log(0,"[IGNORED] " . $ref->{'hostmask'} . " $sChannel:<$sNick> $sMsg");
 				return 1;
 			}
 		}
@@ -7788,7 +7759,7 @@ sub IgnoresList(@) {
 					my $sQuery = "SELECT COUNT(*) as nbIgnores FROM IGNORES,CHANNEL WHERE IGNORES.id_channel=CHANNEL.id_channel AND CHANNEL.name like ?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sTargetChannel)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						my $ref = $sth->fetchrow_hashref();
@@ -7803,7 +7774,7 @@ sub IgnoresList(@) {
 							my $sQuery = "SELECT IGNORES.id_ignores,IGNORES.hostmask FROM IGNORES,CHANNEL WHERE IGNORES.id_channel=CHANNEL.id_channel AND CHANNEL.name like ?";
 							my $sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($sTargetChannel)) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								botNotice($self,$sNick,"Ignores ($sTargetChannel) : there " . ($nbIgnores > 1 ? "are" : "is") . " $nbIgnores ignore" . ($nbIgnores > 1 ? "s" : ""));
@@ -7821,7 +7792,7 @@ sub IgnoresList(@) {
 					my $sQuery = "SELECT COUNT(*) as nbIgnores FROM IGNORES WHERE id_channel=0";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute()) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						my $ref = $sth->fetchrow_hashref();
@@ -7836,7 +7807,7 @@ sub IgnoresList(@) {
 							my $sQuery = "SELECT * FROM IGNORES WHERE id_channel=0";
 							my $sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute()) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								botNotice($self,$sNick,"Ignores (allchans/private) : there " . ($nbIgnores > 1 ? "are" : "is") . " $nbIgnores global ignore" . ($nbIgnores > 1 ? "s" : ""));
@@ -7893,7 +7864,7 @@ sub addIgnore(@) {
 					my $sQuery = "SELECT * FROM IGNORES,CHANNEL WHERE IGNORES.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND IGNORES.hostmask LIKE ?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sTargetChannel,$tArgs[0])) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						if (my $ref = $sth->fetchrow_hashref()) {
@@ -7906,7 +7877,7 @@ sub addIgnore(@) {
 							$sQuery = "INSERT INTO IGNORES (id_channel,hostmask) VALUES (?,?)";
 							$sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($id_channel,$tArgs[0])) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								my $id_ignores = $sth->{ mysql_insertid };
@@ -7920,7 +7891,7 @@ sub addIgnore(@) {
 					my $sQuery = "SELECT * FROM IGNORES WHERE id_channel=0 AND IGNORES.hostmask LIKE ?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($tArgs[0])) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						if (my $ref = $sth->fetchrow_hashref()) {
@@ -7933,7 +7904,7 @@ sub addIgnore(@) {
 							$sQuery = "INSERT INTO IGNORES (hostmask) VALUES (?)";
 							$sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($tArgs[0])) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								my $id_ignores = $sth->{ mysql_insertid };
@@ -7986,7 +7957,7 @@ sub delIgnore(@) {
 					my $sQuery = "SELECT * FROM IGNORES,CHANNEL WHERE IGNORES.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND IGNORES.hostmask LIKE ?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sTargetChannel,$tArgs[0])) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						unless (my $ref = $sth->fetchrow_hashref()) {
@@ -7999,7 +7970,7 @@ sub delIgnore(@) {
 							$sQuery = "DELETE FROM IGNORES WHERE id_channel=? AND hostmask LIKE ?";
 							$sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($id_channel,$tArgs[0])) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								#my $id_ignores = $sth->{ mysql_insertid };
@@ -8013,7 +7984,7 @@ sub delIgnore(@) {
 					my $sQuery = "SELECT * FROM IGNORES WHERE id_channel=0 AND IGNORES.hostmask LIKE ?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($tArgs[0])) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						unless (my $ref = $sth->fetchrow_hashref()) {
@@ -8026,7 +7997,7 @@ sub delIgnore(@) {
 							$sQuery = "DELETE FROM IGNORES WHERE id_channel=0 AND hostmask LIKE ?";
 							$sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($tArgs[0])) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								#my $id_ignores = $sth->{ mysql_insertid };
@@ -8060,12 +8031,12 @@ sub youtubeSearch(@) {
 
 	my $id_chanset_list = getIdChansetList($self,"YoutubeSearch");
 	if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-		log_message($self,3,"id_chanset_list = $id_chanset_list");
+		$self->{logger}->log(3,"id_chanset_list = $id_chanset_list");
 		my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
 		unless (defined($id_channel_set) && ($id_channel_set ne "")) {
 			return undef;
 		} else {
-			log_message($self,3,"id_channel_set = $id_channel_set");
+			$self->{logger}->log(3,"id_channel_set = $id_channel_set");
 		}
 	} else {
 		return undef;
@@ -8078,17 +8049,17 @@ sub youtubeSearch(@) {
 	}
 	my $sText = join(" ",@tArgs);
 	$sText = url_encode_utf8($sText);
-	log_message($self,3,"youtubeSearch() on $sText");
+	$self->{logger}->log(3,"youtubeSearch() on $sText");
 
 	unless (defined($APIKEY) && ($APIKEY ne "")) {
-		log_message($self,0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
-		log_message($self,0,"displayYoutubeDetails() section [main]");
-		log_message($self,0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
+		$self->{logger}->log(0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
+		$self->{logger}->log(0,"displayYoutubeDetails() section [main]");
+		$self->{logger}->log(0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
 		return undef;
 	}
 
 	unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\" |" ) {
-		log_message(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
+		$self->{logger}->log(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 	}
 	else {
 		my $line;
@@ -8097,46 +8068,46 @@ sub youtubeSearch(@) {
 		while(defined($line=<YOUTUBE_INFOS>)) {
 			chomp($line);
 			$json_details .= $line;
-			log_message($self,5,"displayYoutubeDetails() $line");
+			$self->{logger}->log(5,"displayYoutubeDetails() $line");
 			$i++;
 		}
 		if (defined($json_details) && ($json_details ne "")) {
-			log_message($self,4,"displayYoutubeDetails() json_details : $json_details");
+			$self->{logger}->log(4,"displayYoutubeDetails() json_details : $json_details");
 			my $sYoutubeInfo = decode_json $json_details;
 			my %hYoutubeInfo = %$sYoutubeInfo;
 			my @tYoutubeItems = $hYoutubeInfo{'items'};
 			my @fTyoutubeItems = @{$tYoutubeItems[0]};
-			log_message($self,4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
+			$self->{logger}->log(4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
 			if ( $#fTyoutubeItems >= 0 ) {
 				my %hYoutubeItems = %{$tYoutubeItems[0][0]};
-				log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
+				$self->{logger}->log(4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
 				my @tYoutubeId = $hYoutubeItems{'id'};
 				my %hYoutubeId = %{$tYoutubeId[0]};
-				log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Id : " . Dumper(%hYoutubeId));
+				$self->{logger}->log(4,"displayYoutubeDetails() sYoutubeInfo Id : " . Dumper(%hYoutubeId));
 				$sYoutubeId = $hYoutubeId{'videoId'};
-				log_message($self,4,"displayYoutubeDetails() sYoutubeId : $sYoutubeId");
+				$self->{logger}->log(4,"displayYoutubeDetails() sYoutubeId : $sYoutubeId");
 			}
 			else {
-				log_message($self,3,"displayYoutubeDetails() Invalid id : $sYoutubeId");
+				$self->{logger}->log(3,"displayYoutubeDetails() Invalid id : $sYoutubeId");
 			}
 		}
 		else {
-			log_message($self,3,"displayYoutubeDetails() curl empty result for : curl --connect-timeout 5 -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\"");
+			$self->{logger}->log(3,"displayYoutubeDetails() curl empty result for : curl --connect-timeout 5 -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\"");
 		}
 	}
 
 	if (defined($sYoutubeId) && ($sYoutubeId ne "")) {
-		log_message($self,3,"displayYoutubeDetails() sYoutubeId = $sYoutubeId");
+		$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeId = $sYoutubeId");
 
 		unless (defined($APIKEY) && ($APIKEY ne "")) {
-			log_message($self,0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
-			log_message($self,0,"displayYoutubeDetails() section [main]");
-			log_message($self,0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
+			$self->{logger}->log(0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
+			$self->{logger}->log(0,"displayYoutubeDetails() section [main]");
+			$self->{logger}->log(0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
 			return undef;
 		}
 
 		unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
-			log_message(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
+			$self->{logger}->log(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 		}
 		else {
 			my $line;
@@ -8148,23 +8119,23 @@ sub youtubeSearch(@) {
 			while(defined($line=<YOUTUBE_INFOS>)) {
 				chomp($line);
 				$json_details .= $line;
-				log_message($self,5,"displayYoutubeDetails() $line");
+				$self->{logger}->log(5,"displayYoutubeDetails() $line");
 				$i++;
 			}
 			if (defined($json_details) && ($json_details ne "")) {
-				log_message($self,4,"displayYoutubeDetails() json_details : $json_details");
+				$self->{logger}->log(4,"displayYoutubeDetails() json_details : $json_details");
 				my $sYoutubeInfo = decode_json $json_details;
 				my %hYoutubeInfo = %$sYoutubeInfo;
 				my @tYoutubeItems = $hYoutubeInfo{'items'};
 				my @fTyoutubeItems = @{$tYoutubeItems[0]};
-				log_message($self,4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
+				$self->{logger}->log(4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
 				if ( $#fTyoutubeItems >= 0 ) {
 					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
-					log_message($self,4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
+					$self->{logger}->log(4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
 					$sViewCount = "views $hYoutubeItems{'statistics'}{'viewCount'}";
 					$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
 					$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
-					log_message($self,3,"displayYoutubeDetails() sDuration : $sDuration");
+					$self->{logger}->log(3,"displayYoutubeDetails() sDuration : $sDuration");
 					$sDuration =~ s/^PT//;
 					my $sDisplayDuration;
 					my $sHour = $sDuration;
@@ -8185,9 +8156,9 @@ sub youtubeSearch(@) {
 						$sSec =~ s/S$//;
 						$sDisplayDuration .= "$sSec" . "s";
 					}
-					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
-					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
-					log_message($self,3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
+					$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
+					$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
+					$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
 
 					if (defined($sTitle) && ($sTitle ne "") && defined($sDuration) && ($sDuration ne "") && defined($sViewCount) && ($sViewCount ne "")) {
 						my $sMsgSong = String::IRC->new('[')->white('black');
@@ -8202,23 +8173,23 @@ sub youtubeSearch(@) {
 						botPrivmsg($self,$sChannel,"($sNick) $sMsgSong");
 					}
 					else {
-						log_message($self,3,"displayYoutubeDetails() one of the youtube field is undef or empty");
-						log_message($self,3,"sTitle=$sTitle") if defined $sTitle;
-						log_message($self,3,"sDuration=$sDuration") if defined $sDuration;
-						log_message($self,3,"sViewCount=$sViewCount") if defined $sViewCount;
+						$self->{logger}->log(3,"displayYoutubeDetails() one of the youtube field is undef or empty");
+						$self->{logger}->log(3,"sTitle=$sTitle") if defined $sTitle;
+						$self->{logger}->log(3,"sDuration=$sDuration") if defined $sDuration;
+						$self->{logger}->log(3,"sViewCount=$sViewCount") if defined $sViewCount;
 					}
 				}
 				else {
-					log_message($self,3,"displayYoutubeDetails() Invalid id : $sYoutubeId");
+					$self->{logger}->log(3,"displayYoutubeDetails() Invalid id : $sYoutubeId");
 				}
 			}
 			else {
-				log_message($self,3,"displayYoutubeDetails() curl empty result for : curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
+				$self->{logger}->log(3,"displayYoutubeDetails() curl empty result for : curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
 			}
 		}
 	}
 	else {
-		log_message($self,3,"displayYoutubeDetails() sYoutubeId could not be determined");
+		$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeId could not be determined");
 	}
 }
 
@@ -8233,7 +8204,7 @@ sub getRadioCurrentSong(@) {
 	my $RADIO_SOURCE   = $conf->get('radio.RADIO_SOURCE');
 
 	unless (defined($RADIO_HOSTNAME) && ($RADIO_HOSTNAME ne "")) {
-		log_message($self,0,"getRadioCurrentSong() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
+		$self->{logger}->log(0,"getRadioCurrentSong() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
 		return undef;
 	}
 	
@@ -8293,7 +8264,7 @@ sub getRadioCurrentListeners(@) {
 	my $RADIO_SOURCE   = $conf->get('radio.RADIO_SOURCE');
 
 	unless (defined($RADIO_HOSTNAME) && ($RADIO_HOSTNAME ne "")) {
-		log_message($self,0,"getRadioCurrentSong() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
+		$self->{logger}->log(0,"getRadioCurrentSong() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
 		return undef;
 	}
 
@@ -8338,7 +8309,7 @@ sub getRadioHarbor(@) {
 
 	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 		unless (open LIQUIDSOAP_HARBOR, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
-			log_message($self, 3, "Unable to connect to LIQUIDSOAP telnet port");
+			$self->{logger}->log( 3, "Unable to connect to LIQUIDSOAP telnet port");
 		}
 
 		my $line;
@@ -8370,14 +8341,14 @@ sub isRadioLive(@) {
 
 	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 		unless (open LIQUIDSOAP_HARBOR, "echo -ne \"$sHarbor.status\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
-			log_message($self, 3, "Unable to connect to LIQUIDSOAP telnet port");
+			$self->{logger}->log( 3, "Unable to connect to LIQUIDSOAP telnet port");
 		}
 
 		my $line;
 		while (defined($line = <LIQUIDSOAP_HARBOR>)) {
 			chomp($line);
 			if ($line =~ /source/) {
-				log_message($self, 3, $line);
+				$self->{logger}->log( 3, $line);
 				if ($line =~ /no source client connected/) {
 					return 0;
 				} else {
@@ -8406,25 +8377,25 @@ sub getRadioRemainingTime(@) {
 
 	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 		unless (open LIQUIDSOAP, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | grep remaining | tr -s \" \" | cut -f2 -d\" \" | tail -n 1 |") {
-			log_message($self, 0, "getRadioRemainingTime() Unable to connect to LIQUIDSOAP telnet port");
+			$self->{logger}->log( 0, "getRadioRemainingTime() Unable to connect to LIQUIDSOAP telnet port");
 		}
 		my $line;
 		if (defined($line = <LIQUIDSOAP>)) {
 			chomp($line);
-			log_message($self, 3, $line);
+			$self->{logger}->log( 3, $line);
 			unless (open LIQUIDSOAP2, "echo -ne \"$line\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
-				log_message($self, 0, "getRadioRemainingTime() Unable to connect to LIQUIDSOAP telnet port");
+				$self->{logger}->log( 0, "getRadioRemainingTime() Unable to connect to LIQUIDSOAP telnet port");
 			}
 			my $line2;
 			if (defined($line2 = <LIQUIDSOAP2>)) {
 				chomp($line2);
-				log_message($self, 3, $line2);
+				$self->{logger}->log( 3, $line2);
 				return $line2;
 			}
 		}
 		return 0;
 	} else {
-		log_message($self, 0, "getRadioRemainingTime() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+		$self->{logger}->log( 0, "getRadioRemainingTime() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
 	}
 }
 
@@ -8460,7 +8431,7 @@ sub displayRadioCurrentSong(@) {
 	my $sHarbor = getRadioHarbor($self);
 	my $bRadioLive = 0;
 	if (defined($sHarbor) && ($sHarbor ne "")) {
-		log_message($self,3,$sHarbor);
+		$self->{logger}->log(3,$sHarbor);
 		$bRadioLive = isRadioLive($self,$sHarbor);
 	}
 
@@ -8485,7 +8456,7 @@ sub displayRadioCurrentSong(@) {
 		unless ($bRadioLive) {
 			if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 				my $sRemainingTime = getRadioRemainingTime($self);
-				log_message($self,3,"displayRadioCurrentSong() sRemainingTime = $sRemainingTime");
+				$self->{logger}->log(3,"displayRadioCurrentSong() sRemainingTime = $sRemainingTime");
 				my $siSecondsRemaining = int($sRemainingTime);
 				my $iMinutesRemaining = int($siSecondsRemaining / 60);
 				my $iSecondsRemaining = int($siSecondsRemaining - ($iMinutesRemaining * 60));
@@ -8605,7 +8576,7 @@ sub setRadioMetadata(@) {
 					}
 				}
 				else {
-					log_message($self,0,"setRadioMetadata() radio.RADIO_ADMINPASS not set in " . $self->{config_file});
+					$self->{logger}->log(0,"setRadioMetadata() radio.RADIO_ADMINPASS not set in " . $self->{config_file});
 				}
 			}
 			else {
@@ -8668,7 +8639,7 @@ sub radioNext(@) {
 					}
 				}
 				else {
-					log_message($self,0,"radioNext() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+					$self->{logger}->log(0,"radioNext() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
 				}
 			}
 			else {
@@ -8703,7 +8674,7 @@ sub wordStat(@) {
 	my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND name=? AND ts > date_sub('" . time2str("%Y-%m-%d %H:%M:%S",time) . "', INTERVAL 1 DAY)";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : $sQuery");
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : $sQuery");
 	} else {
 		my $i = 0;
 		while (my $ref = $sth->fetchrow_hashref()) {
@@ -8712,7 +8683,7 @@ sub wordStat(@) {
 			    ( $publictext =~ /\s$sWord\s/i ) || 
 			    ( $publictext =~ /^$sWord\s/i ) || 
 			    ( $publictext =~ /^$sWord$/i )) {
-				log_message($self,3,"publictext : $publictext") if $i < 10;
+				$self->{logger}->log(3,"publictext : $publictext") if $i < 10;
 				$i++;
 			}
 		}
@@ -8729,7 +8700,7 @@ sub update(@) {
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Owner")) {
-				log_message($self,3,"Update TBD ;)");
+				$self->{logger}->log(3,"Update TBD ;)");
 			}
 			else {
 				my $sNoticeMsg = $message->prefix . " update command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
@@ -8767,7 +8738,7 @@ sub lastCom(@) {
 				my $sQuery = "SELECT * FROM ACTIONS_LOG ORDER by ts DESC LIMIT $nbCom";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute()) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					my $i = 0;
@@ -8892,7 +8863,7 @@ sub mbQuoteAdd(@) {
 		my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name=? AND quotetext like ?";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($sChannel,$sQuoteText)) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			if (my $ref = $sth->fetchrow_hashref()) {
@@ -8909,7 +8880,7 @@ sub mbQuoteAdd(@) {
 					$sQuery = "INSERT INTO QUOTES (id_channel,id_user,quotetext) VALUES (?,?,?)";
 					$sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($id_channel,(defined($iMatchingUserId) ? $iMatchingUserId : 0),$sQuoteText)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						my $id_inserted = String::IRC->new($sth->{ mysql_insertid })->bold;
@@ -8933,14 +8904,14 @@ sub mbQuoteDel(@) {
 		my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? AND id_quotes=?";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($sChannel,$id_quotes)) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			if (my $ref = $sth->fetchrow_hashref()) {
 				$sQuery = "DELETE FROM QUOTES WHERE id_quotes=?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($id_quotes)) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					my $id_removed = String::IRC->new($id_quotes)->bold;
@@ -8966,7 +8937,7 @@ sub mbQuoteView(@) {
 		my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? AND id_quotes=?";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($sChannel,$id_quotes)) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			if (my $ref = $sth->fetchrow_hashref()) {
@@ -8998,7 +8969,7 @@ sub mbQuoteSearch(@) {
 		my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name=?";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($sChannel)) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			my $i = 0;
@@ -9048,7 +9019,7 @@ sub mbQuoteRand(@) {
 	my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? ORDER BY RAND() LIMIT 1";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -9073,7 +9044,7 @@ sub mbQuoteStats(@) {
 	my $sQuery = "SELECT count(*) as nbQuotes FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -9085,7 +9056,7 @@ sub mbQuoteStats(@) {
 				$sQuery = "SELECT UNIX_TIMESTAMP(ts) as minDate FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? ORDER by ts LIMIT 1";
 				$sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($sChannel)) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					if (my $ref = $sth->fetchrow_hashref()) {
@@ -9093,7 +9064,7 @@ sub mbQuoteStats(@) {
 						$sQuery = "SELECT UNIX_TIMESTAMP(ts) as maxDate FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? ORDER by ts DESC LIMIT 1";
 						$sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($sChannel)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							if (my $ref = $sth->fetchrow_hashref()) {
@@ -9234,7 +9205,7 @@ sub mbModUser(@) {
 												my $sQuery = "SELECT * FROM USER WHERE nickname like ? AND username='#AUTOLOGIN#'";
 												my $sth = $self->{dbh}->prepare($sQuery);
 												unless ($sth->execute($sUser)) {
-													log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+													$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 												}
 												else {
 													if (my $ref = $sth->fetchrow_hashref()) {
@@ -9244,7 +9215,7 @@ sub mbModUser(@) {
 														$sQuery = "UPDATE USER SET username='#AUTOLOGIN#' WHERE nickname like ?";
 														$sth = $self->{dbh}->prepare($sQuery);
 														unless ($sth->execute($sUser)) {
-															log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+															$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 														}
 														else {
 															botNotice($self,$sNick,"Set autologin ON for user $sUser");
@@ -9258,14 +9229,14 @@ sub mbModUser(@) {
 												my $sQuery = "SELECT * FROM USER WHERE nickname like ? AND username='#AUTOLOGIN#'";
 												my $sth = $self->{dbh}->prepare($sQuery);
 												unless ($sth->execute($sUser)) {
-													log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+													$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 												}
 												else {
 													if (my $ref = $sth->fetchrow_hashref()) {
 														$sQuery = "UPDATE USER SET username=NULL WHERE nickname like ?";
 														$sth = $self->{dbh}->prepare($sQuery);
 														unless ($sth->execute($sUser)) {
-															log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+															$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 														}
 														else {
 															botNotice($self,$sNick,"Set autologin OFF for user $sUser");
@@ -9290,7 +9261,7 @@ sub mbModUser(@) {
 										my $sQuery = "SELECT * FROM USER WHERE nickname like ? AND fortniteid=?";
 										my $sth = $self->{dbh}->prepare($sQuery);
 										unless ($sth->execute($sUser,$tArgs[0])) {
-											log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+											$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 										}
 										else {
 											my $ref;
@@ -9302,7 +9273,7 @@ sub mbModUser(@) {
 												$sQuery = "UPDATE USER SET fortniteid=? WHERE nickname like ?";
 												$sth = $self->{dbh}->prepare($sQuery);
 												unless ($sth->execute($tArgs[0],$sUser)) {
-													log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+													$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 												}
 												else {
 													botNotice($self,$sNick,"Set fortniteid $tArgs[0] for user $sUser");
@@ -9342,7 +9313,7 @@ sub setUserLevel(@) {
 	my $sQuery = "UPDATE USER SET id_user_level=? WHERE nickname like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($id_user_level,$sUser)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		return 0;
 	}
 	else {
@@ -9356,29 +9327,29 @@ sub setChannelAntiFlood(@) {
 	my $sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($id_channel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
 			my $nbmsg_max = $ref->{'nbmsg_max'};
 			my $duration = $ref->{'duration'};
 			my $timetowait = $ref->{'timetowait'};
-			log_message($self,3,"setChannelAntiFlood() AntiFlood record exists (id_channel $id_channel) nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds");
+			$self->{logger}->log(3,"setChannelAntiFlood() AntiFlood record exists (id_channel $id_channel) nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds");
 			botNotice($self,$sNick,"Chanset parameters already exist and will be used for $sChannel (nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds)");
 		}
 		else {
 			$sQuery = "INSERT INTO CHANNEL_FLOOD (id_channel) VALUES (?)";
 			$sth = $self->{dbh}->prepare($sQuery);
 			unless ($sth->execute($id_channel)) {
-				log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 			}
 			else {
 				my $id_channel_flood = $sth->{ mysql_insertid };
-				log_message($self,3,"setChannelAntiFlood() AntiFlood record created, id_channel_flood : $id_channel_flood");
+				$self->{logger}->log(3,"setChannelAntiFlood() AntiFlood record created, id_channel_flood : $id_channel_flood");
 				$sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($id_channel)) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					if (my $ref = $sth->fetchrow_hashref()) {
@@ -9403,7 +9374,7 @@ sub checkAntiFlood(@) {
 	my $sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($id_channel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -9423,11 +9394,11 @@ sub checkAntiFlood(@) {
 				$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?,first=?,latest=? WHERE id_channel=?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($nbmsg,$currentTs,$currentTs,$id_channel)) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					my $sLatest = time2str("%Y-%m-%d %H-%M-%S",$currentTs);
-					log_message($self,4,"checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
+					$self->{logger}->log(4,"checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
 					return 0;
 				}
 			}
@@ -9438,11 +9409,11 @@ sub checkAntiFlood(@) {
 						$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?,latest=? WHERE id_channel=?";
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($nbmsg,$currentTs,$id_channel)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							my $sLatest = time2str("%Y-%m-%d %H-%M-%S",$currentTs);
-							log_message($self,4,"checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max set latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds");
+							$self->{logger}->log(4,"checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max set latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds");
 							return 0;
 						}
 					}
@@ -9451,15 +9422,15 @@ sub checkAntiFlood(@) {
 						my $endTs = $latest + $timetowait;
 						unless ( $currentTs <= $endTs ) {
 							$nbmsg = 1;
-							log_message($self,0,"checkAntiFlood() End of antiflood for channel $sChannel");
+							$self->{logger}->log(0,"checkAntiFlood() End of antiflood for channel $sChannel");
 							$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?,first=?,latest=?,notification=? WHERE id_channel=?";
 							my $sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($nbmsg,$currentTs,$currentTs,0,$id_channel)) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								my $sLatest = time2str("%Y-%m-%d %H-%M-%S",$currentTs);
-								log_message($self,4,"checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
+								$self->{logger}->log(4,"checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
 								return 0;
 							}
 						}
@@ -9469,37 +9440,37 @@ sub checkAntiFlood(@) {
 								$sQuery = "UPDATE CHANNEL_FLOOD SET notification=? WHERE id_channel=?";
 								my $sth = $self->{dbh}->prepare($sQuery);
 								unless ($sth->execute(1,$id_channel)) {
-									log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+									$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 								}
 								else {
-									log_message($self,4,"checkAntiFlood() Antiflood notification set to DB for $sChannel");
+									$self->{logger}->log(4,"checkAntiFlood() Antiflood notification set to DB for $sChannel");
 									noticeConsoleChan($self,"Anti flood activated on channel $sChannel $nbmsg messages in less than $duration seconds, waiting $timetowait seconds to desactivate");
 								}
 							}
-							log_message($self,4,"checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds endTs = $endTs " . ($endTs - $currentTs) . " seconds left");
-							log_message($self,0,"checkAntiFlood() Antiflood is active for channel $sChannel wait " . ($endTs - $currentTs) . " seconds");
+							$self->{logger}->log(4,"checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds endTs = $endTs " . ($endTs - $currentTs) . " seconds left");
+							$self->{logger}->log(0,"checkAntiFlood() Antiflood is active for channel $sChannel wait " . ($endTs - $currentTs) . " seconds");
 							return 1;
 						}
 					}
 				}
 				else {
 					$nbmsg = 1;
-					log_message($self,0,"checkAntiFlood() End of antiflood for channel $sChannel");
+					$self->{logger}->log(0,"checkAntiFlood() End of antiflood for channel $sChannel");
 					$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?,first=?,latest=?,notification=? WHERE id_channel=?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($nbmsg,$currentTs,$currentTs,0,$id_channel)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						my $sLatest = time2str("%Y-%m-%d %H-%M-%S",$currentTs);
-						log_message($self,4,"checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
+						$self->{logger}->log(4,"checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
 						return 0;
 					}
 				}
 			}
 		}
 		else {
-			log_message($self,0,"Something funky happened, could not find record in Table CHANNEL_FLOOD for channel $sChannel (id_channel : $id_channel)");
+			$self->{logger}->log(0,"Something funky happened, could not find record in Table CHANNEL_FLOOD for channel $sChannel (id_channel : $id_channel)");
 		}
 	}
 	return 0;
@@ -9528,11 +9499,11 @@ sub setChannelAntiFloodParams(@) {
 					return undef;
 				}
 				if ($#tArgs == -1) {
-					log_message($self,3,"Check antifloodset on $sChannel");
+					$self->{logger}->log(3,"Check antifloodset on $sChannel");
 					my $sQuery = "SELECT * FROM CHANNEL,CHANNEL_FLOOD WHERE CHANNEL.id_channel=CHANNEL_FLOOD.id_channel and CHANNEL.name like ?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sChannel)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						return undef;
 					}
 					else {
@@ -9570,7 +9541,7 @@ sub setChannelAntiFloodParams(@) {
 					my $sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg_max=?,duration=?,timetowait=? WHERE id_channel=?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($tArgs[0],$tArgs[1],$tArgs[2],$id_channel)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						$sth->finish;
@@ -9601,7 +9572,7 @@ sub getChannelOwner(@) {
 	my $sQuery = "SELECT nickname FROM USER,USER_CHANNEL WHERE USER.id_user=USER_CHANNEL.id_user AND id_channel=? AND USER_CHANNEL.level=500";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($id_channel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		return undef;
 	}
 	else {
@@ -9683,7 +9654,7 @@ sub playRadio(@) {
 				my $sHarbor = getRadioHarbor($self);
 				my $bRadioLive = 0;
 				if (defined($sHarbor) && ($sHarbor ne "")) {
-					log_message($self,3,$sHarbor);
+					$self->{logger}->log(3,$sHarbor);
 					$bRadioLive = isRadioLive($self,$sHarbor);
 				}
 				if ($bRadioLive) {
@@ -9744,7 +9715,7 @@ sub playRadio(@) {
 								return undef;
 							}
 							unless ( -d $incomingDir ) {
-								log_message($self,0,"Incoming YOUTUBEDL directory : $incomingDir does not exist");
+								$self->{logger}->log(0,"Incoming YOUTUBEDL directory : $incomingDir does not exist");
 								return undef;
 							}
 							else {
@@ -9755,7 +9726,7 @@ sub playRadio(@) {
 							my $sth = $self->{dbh}->prepare($sQuery);
 							my $id_mp3;
 							unless ($sth->execute($sYoutubeId)) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								if (my $ref = $sth->fetchrow_hashref()) {
@@ -9775,7 +9746,7 @@ sub playRadio(@) {
 									logBot($self,$message,$sChannel,"play",$sText);
 								}
 								else {
-									log_message($self,3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");
+									$self->{logger}->log(3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");
 									if (defined($sChannel) && ($sChannel ne "")) {
 										botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
 									}
@@ -9795,10 +9766,10 @@ sub playRadio(@) {
 								my $timer = IO::Async::Timer::Countdown->new(
 							   	delay => 3,
 							   	on_expire => sub {
-										log_message($self,3,"Timer start, downloading $ytUrl");
+										$self->{logger}->log(3,"Timer start, downloading $ytUrl");
 										#/usr/local/bin/yt-dlp -x --audio-format mp3 --audio-quality 0 https://www.youtube.com/watch?v=JRDgihVDEko
 										unless ( open YT, "/usr/local/bin/yt-dlp -x --audio-format mp3 --audio-quality 0 $ytUrl |" ) {
-				                    		log_message($self,0,"Could not yt-dlp $ytUrl");
+				                    		$self->{logger}->log(0,"Could not yt-dlp $ytUrl");
 				                    		return undef;
 				            			}
 				            			my $ytdlOuput;
@@ -9807,10 +9778,10 @@ sub playRadio(@) {
 												chomp($ytdlOuput);
 												if ( $ytdlOuput =~ /^\[ExtractAudio\] Destination: (.*)$/ ) {
 													$ytDestinationFile = $1;
-													log_message($self,0,"Downloaded mp3 : $incomingDir/$ytDestinationFile");
+													$self->{logger}->log(0,"Downloaded mp3 : $incomingDir/$ytDestinationFile");
 													
 												}
-												log_message($self,3,"$ytdlOuput");
+												$self->{logger}->log(3,"$ytdlOuput");
 										}
 										if (defined($ytDestinationFile) && ($ytDestinationFile ne "")) {			
 											my $filename = $ytDestinationFile;
@@ -9830,11 +9801,11 @@ sub playRadio(@) {
 											my $sth = $self->{dbh}->prepare($sQuery);
 											my $id_mp3 = 0;
 											unless ($sth->execute($iMatchingUserId,$id_youtube,$folder,$filename,$artist,$title)) {
-												log_message($self,1,"Error : " . $DBI::errstr . " Query : " . $sQuery);
+												$self->{logger}->log(1,"Error : " . $DBI::errstr . " Query : " . $sQuery);
 											}
 											else {
 												$id_mp3 = $sth->{ mysql_insertid };
-												log_message($self,3,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
+												$self->{logger}->log(3,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
 											}
 											$sth->finish;
 											my $rPush = queuePushRadio($self,"$incomingDir/$ytDestinationFile");
@@ -9848,7 +9819,7 @@ sub playRadio(@) {
 												logBot($self,$message,$sChannel,"play",$sText);
 											}
 											else {
-												log_message($self,3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");
+												$self->{logger}->log(3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");
 												if (defined($sChannel) && ($sChannel ne "")) {
 													botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
 												}
@@ -9871,12 +9842,12 @@ sub playRadio(@) {
 							my $sQuery = "SELECT id_youtube,artist,title,folder,filename FROM MP3 WHERE id_mp3=?";
 							my $sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($tArgs[1])) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								if (my $ref = $sth->fetchrow_hashref()) {
 									my $ytDestinationFile = $ref->{'folder'} . "/" . $ref->{'filename'};
-									log_message($self,3,"playRadio() pushing $ytDestinationFile to queue");
+									$self->{logger}->log(3,"playRadio() pushing $ytDestinationFile to queue");
 									my $rPush = queuePushRadio($self,$ytDestinationFile);
 									if (defined($rPush) && $rPush) {
 										my $id_youtube = $ref->{'id_youtube'};
@@ -9905,7 +9876,7 @@ sub playRadio(@) {
 										return 1;
 									}
 									else {
-										log_message($self,3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");
+										$self->{logger}->log(3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");
 										if (defined($sChannel) && ($sChannel ne "")) {
 											botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
 										}
@@ -9930,7 +9901,7 @@ sub playRadio(@) {
 							my $sQuery = "SELECT id_youtube,artist,title,folder,filename FROM MP3 WHERE id_youtube=?";
 							my $sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($tArgs[1])) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {
 								if (my $ref = $sth->fetchrow_hashref()) {
@@ -9954,7 +9925,7 @@ sub playRadio(@) {
 										logBot($self,$message,$sChannel,"play",$sText);
 									}
 									else {
-										log_message($self,3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");	
+										$self->{logger}->log(3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");	
 										if (defined($sChannel) && ($sChannel ne "")) {
 											botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
 										}
@@ -9966,7 +9937,7 @@ sub playRadio(@) {
 								}
 								else {
 									unless ( -d $incomingDir ) {
-										log_message($self,0,"Incoming YOUTUBEDL directory : $incomingDir does not exist");
+										$self->{logger}->log(0,"Incoming YOUTUBEDL directory : $incomingDir does not exist");
 										return undef;
 									}
 									else {
@@ -9992,9 +9963,9 @@ sub playRadio(@) {
 									my $timer = IO::Async::Timer::Countdown->new(
 										delay => 3,
 										on_expire => sub {
-												log_message($self,3,"Timer start, downloading $ytUrl");
+												$self->{logger}->log(3,"Timer start, downloading $ytUrl");
 												unless ( open YT, "youtube-dl --extract-audio --audio-format mp3 --add-metadata $ytUrl |" ) {
-													log_message($self,0,"Could not youtube-dl $ytUrl");
+													$self->{logger}->log(0,"Could not youtube-dl $ytUrl");
 													return undef;
 												}
 												my $ytdlOuput;
@@ -10003,17 +9974,17 @@ sub playRadio(@) {
 														chomp($ytdlOuput);
 														if ( $ytdlOuput =~ /^\[ffmpeg\] Destination: (.*)$/ ) {
 															$ytDestinationFile = $1;
-															log_message($self,0,"Downloaded mp3 : $incomingDir/$ytDestinationFile");
+															$self->{logger}->log(0,"Downloaded mp3 : $incomingDir/$ytDestinationFile");
 															
 														}
-														log_message($self,3,"$ytdlOuput");
+														$self->{logger}->log(3,"$ytdlOuput");
 												}
 												if (defined($ytDestinationFile) && ($ytDestinationFile ne "")) {			
 													my $filename = $ytDestinationFile;
 													my $folder = $incomingDir;
 													my $id_youtube = substr($filename,-15);
 													$id_youtube = substr($id_youtube,0,11);
-													log_message($self,3,"Destination : $incomingDir/$ytDestinationFile");
+													$self->{logger}->log(3,"Destination : $incomingDir/$ytDestinationFile");
 													my $mp3 = MP3::Tag->new("$incomingDir/$ytDestinationFile");
 													$mp3->get_tags;
 													my ($title, $track, $artist, $album, $comment, $year, $genre) = $mp3->autoinfo();
@@ -10025,11 +9996,11 @@ sub playRadio(@) {
 													my $sQuery = "INSERT INTO MP3 (id_user,id_youtube,folder,filename,artist,title) VALUES (?,?,?,?,?,?)";
 													my $sth = $self->{dbh}->prepare($sQuery);
 													unless ($sth->execute($iMatchingUserId,$id_youtube,$folder,$filename,$artist,$title)) {
-														log_message($self,1,"Error : " . $DBI::errstr . " Query : " . $sQuery);
+														$self->{logger}->log(1,"Error : " . $DBI::errstr . " Query : " . $sQuery);
 													}
 													else {
 														$id_mp3 = $sth->{ mysql_insertid };
-														log_message($self,3,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
+														$self->{logger}->log(3,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
 													}
 													$sth->finish;
 													my $rPush = queuePushRadio($self,"$incomingDir/$ytDestinationFile");
@@ -10043,7 +10014,7 @@ sub playRadio(@) {
 														logBot($self,$message,$sChannel,"play",$sText);
 													}
 													else {
-														log_message($self,3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");
+														$self->{logger}->log(3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");
 														if (defined($sChannel) && ($sChannel ne "")) {
 															botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
 														}
@@ -10064,10 +10035,10 @@ sub playRadio(@) {
 							# Local library search
 							my $sSearch = join (" ",@tArgs);
 							my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE (artist LIKE ? OR title LIKE ?) ORDER BY RAND() LIMIT 1";
-							log_message($self,3,"playRadio() Query : $sQuery");
+							$self->{logger}->log(3,"playRadio() Query : $sQuery");
 							my $sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($sSearch,$sSearch)) {
-								log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							}
 							else {	
 								if (my $ref = $sth->fetchrow_hashref()) {
@@ -10102,7 +10073,7 @@ sub playRadio(@) {
 										return 1;
 									}
 									else {
-										log_message($self,3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");
+										$self->{logger}->log(3,"playRadio() could not queue queuePushRadio() $ytDestinationFile");
 										if (defined($sChannel) && ($sChannel ne "")) {
 											botPrivmsg($self,$sChannel,"($sNick radio rplay / could not queue)");
 										}
@@ -10116,16 +10087,16 @@ sub playRadio(@) {
 							# Youtube Search
 							my $sYoutubeId;
 							my $sText = join("%20",@tArgs);
-							log_message($self,3,"radioplay() youtubeSearch() on $sText");
+							$self->{logger}->log(3,"radioplay() youtubeSearch() on $sText");
 							my $APIKEY = $self->{conf}->get('main.YOUTUBE_APIKEY');
 							unless (defined($APIKEY) && ($APIKEY ne "")) {
-								log_message($self,0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
-								log_message($self,0,"displayYoutubeDetails() section [main]");
-								log_message($self,0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
+								$self->{logger}->log(0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
+								$self->{logger}->log(0,"displayYoutubeDetails() section [main]");
+								$self->{logger}->log(0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
 								return undef;
 							}
 							unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\" |" ) {
-								log_message(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
+								$self->{logger}->log(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 							}
 							else {
 								my $line;
@@ -10134,32 +10105,32 @@ sub playRadio(@) {
 								while(defined($line=<YOUTUBE_INFOS>)) {
 									chomp($line);
 									$json_details .= $line;
-									log_message($self,5,"radioplay() youtubeSearch() $line");
+									$self->{logger}->log(5,"radioplay() youtubeSearch() $line");
 									$i++;
 								}
 								if (defined($json_details) && ($json_details ne "")) {
-									log_message($self,4,"radioplay() youtubeSearch() json_details : $json_details");
+									$self->{logger}->log(4,"radioplay() youtubeSearch() json_details : $json_details");
 									my $sYoutubeInfo = decode_json $json_details;
 									my %hYoutubeInfo = %$sYoutubeInfo;
 										my @tYoutubeItems = $hYoutubeInfo{'items'};
 										my @fTyoutubeItems = @{$tYoutubeItems[0]};
-										log_message($self,4,"radioplay() youtubeSearch() tYoutubeItems length : " . $#fTyoutubeItems);
+										$self->{logger}->log(4,"radioplay() youtubeSearch() tYoutubeItems length : " . $#fTyoutubeItems);
 										# Check items
 										if ( $#fTyoutubeItems >= 0 ) {
 											my %hYoutubeItems = %{$tYoutubeItems[0][0]};
-											log_message($self,4,"radioplay() youtubeSearch() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
+											$self->{logger}->log(4,"radioplay() youtubeSearch() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
 											my @tYoutubeId = $hYoutubeItems{'id'};
 											my %hYoutubeId = %{$tYoutubeId[0]};
-											log_message($self,4,"radioplay() youtubeSearch() sYoutubeInfo Id : " . Dumper(%hYoutubeId));
+											$self->{logger}->log(4,"radioplay() youtubeSearch() sYoutubeInfo Id : " . Dumper(%hYoutubeId));
 											$sYoutubeId = $hYoutubeId{'videoId'};
-											log_message($self,4,"radioplay() youtubeSearch() sYoutubeId : $sYoutubeId");
+											$self->{logger}->log(4,"radioplay() youtubeSearch() sYoutubeId : $sYoutubeId");
 										}
 										else {
-											log_message($self,3,"radioplay() youtubeSearch() Invalid id : $sYoutubeId");
+											$self->{logger}->log(3,"radioplay() youtubeSearch() Invalid id : $sYoutubeId");
 										}
 								}
 								else {
-									log_message($self,3,"radioplay() youtubeSearch() curl empty result for : curl --connect-timeout 5 -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\"");
+									$self->{logger}->log(3,"radioplay() youtubeSearch() curl empty result for : curl --connect-timeout 5 -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\"");
 								}
 							}
 							if (defined($sYoutubeId) && ($sYoutubeId ne "")) {
@@ -10186,7 +10157,7 @@ sub playRadio(@) {
 								my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE id_youtube=?";
 								my $sth = $self->{dbh}->prepare($sQuery);
 								unless ($sth->execute($sYoutubeId)) {
-									log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+									$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 								}
 								else {
 									if (my $ref = $sth->fetchrow_hashref()) {
@@ -10211,7 +10182,7 @@ sub playRadio(@) {
 											logBot($self,$message,$sChannel,"play",$sText);
 										}
 										else {
-											log_message($self,3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");
+											$self->{logger}->log(3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");
 											if (defined($sChannel) && ($sChannel ne "")) {
 												botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
 											}
@@ -10223,7 +10194,7 @@ sub playRadio(@) {
 									}
 									else {
 										unless ( -d $incomingDir ) {
-											log_message($self,0,"Incoming YOUTUBEDL directory : $incomingDir does not exist");
+											$self->{logger}->log(0,"Incoming YOUTUBEDL directory : $incomingDir does not exist");
 											return undef;
 										}
 										else {
@@ -10249,10 +10220,10 @@ sub playRadio(@) {
 										my $timer = IO::Async::Timer::Countdown->new(
 											delay => 3,
 											on_expire => sub {
-													log_message($self,3,"Timer start, downloading $ytUrl");
+													$self->{logger}->log(3,"Timer start, downloading $ytUrl");
 													
 													unless ( open YT, "youtube-dl --extract-audio --audio-format mp3 --add-metadata $ytUrl |" ) {
-														log_message($self,0,"Could not youtube-dl $ytUrl");
+														$self->{logger}->log(0,"Could not youtube-dl $ytUrl");
 														return undef;
 													}
 													my $ytdlOuput;
@@ -10261,17 +10232,17 @@ sub playRadio(@) {
 															chomp($ytdlOuput);
 															if ( $ytdlOuput =~ /^\[ffmpeg\] Destination: (.*)$/ ) {
 																$ytDestinationFile = $1;
-																log_message($self,0,"Downloaded mp3 : $incomingDir/$ytDestinationFile");
+																$self->{logger}->log(0,"Downloaded mp3 : $incomingDir/$ytDestinationFile");
 																
 															}
-															log_message($self,3,"$ytdlOuput");
+															$self->{logger}->log(3,"$ytdlOuput");
 													}
 													if (defined($ytDestinationFile) && ($ytDestinationFile ne "")) {			
 														my $filename = $ytDestinationFile;
 														my $folder = $incomingDir;
 														my $id_youtube = substr($filename,-15);
 														$id_youtube = substr($id_youtube,0,11);
-														log_message($self,3,"Destination : $incomingDir/$ytDestinationFile");
+														$self->{logger}->log(3,"Destination : $incomingDir/$ytDestinationFile");
 														my $mp3 = MP3::Tag->new("$incomingDir/$ytDestinationFile");
 														$mp3->get_tags;
 														my ($title, $track, $artist, $album, $comment, $year, $genre) = $mp3->autoinfo();
@@ -10283,11 +10254,11 @@ sub playRadio(@) {
 														my $sQuery = "INSERT INTO MP3 (id_user,id_youtube,folder,filename,artist,title) VALUES (?,?,?,?,?,?)";
 														my $sth = $self->{dbh}->prepare($sQuery);
 														unless ($sth->execute($iMatchingUserId,$id_youtube,$folder,$filename,$artist,$title)) {
-															log_message($self,1,"Error : " . $DBI::errstr . " Query : " . $sQuery);
+															$self->{logger}->log(1,"Error : " . $DBI::errstr . " Query : " . $sQuery);
 														}
 														else {
 															$id_mp3 = $sth->{ mysql_insertid };
-															log_message($self,3,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
+															$self->{logger}->log(3,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
 														}
 														$sth->finish;
 														my $rPush = queuePushRadio($self,"$incomingDir/$ytDestinationFile");
@@ -10301,7 +10272,7 @@ sub playRadio(@) {
 															logBot($self,$message,$sChannel,"play",$sText);
 														}
 														else {
-															log_message($self,3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");
+															$self->{logger}->log(3,"playRadio() could not queue queuePushRadio() $incomingDir/$ytDestinationFile");
 															if (defined($sChannel) && ($sChannel ne "")) {
 																botPrivmsg($self,$sChannel,"($sNick radio play could not queue) Already asked ?");
 															}
@@ -10352,13 +10323,13 @@ sub queueCount(@) {
 	my $LIQUIDSOAP_TELNET_HOST = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_HOST');
 	my $LIQUIDSOAP_TELNET_PORT = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_PORT');
 	unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 | wc -w |") {
-		log_message($self,0,"queueCount() Unable to connect to LIQUIDSOAP telnet port");
+		$self->{logger}->log(0,"queueCount() Unable to connect to LIQUIDSOAP telnet port");
 		return undef;
 	}
 	my $line;
 	if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
 		chomp($line);
-		log_message($self,3,$line);
+		$self->{logger}->log(3,$line);
 	}
 	return $line;
 }
@@ -10374,21 +10345,21 @@ sub isInQueueRadio(@) {
 		my $line;
 		if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 			unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
-				log_message($self,0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
+				$self->{logger}->log(0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
 				return undef;
 			}
 			if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
 				chomp($line);
 				$line =~ s/\r//;
 				$line =~ s/\n//;
-				log_message($self,3,"isInQueueRadio() $line");
+				$self->{logger}->log(3,"isInQueueRadio() $line");
 			}
 			if ($iNbTrack > 0) {
 				my @RIDS = split(/ /,$line);
 				my $i;
 				for ($i=0;$i<=$#RIDS;$i++) {
 					unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"request.trace " . $RIDS[$i] . "\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
-						log_message($self,0,"isInQueueRadio() Unable to connect to LIQUIDSOAP telnet port");
+						$self->{logger}->log(0,"isInQueueRadio() Unable to connect to LIQUIDSOAP telnet port");
 						return undef;
 					}
 					my $line;
@@ -10399,7 +10370,7 @@ sub isInQueueRadio(@) {
 						$line =~ s/\n//;
 						$line =~ s/^.*\[\"//;
 						$line =~ s/\".*$//;
-						log_message($self,3,"isInQueueRadio() $line");
+						$self->{logger}->log(3,"isInQueueRadio() $line");
 						my $sFolder = dirname($line);
 						my $sFilename = basename($line);
 						my $sBaseFilename = basename($sFilename, ".mp3");
@@ -10411,7 +10382,7 @@ sub isInQueueRadio(@) {
 			}
 		}
 		else {
-			log_message($self,0,"queueRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});	
+			$self->{logger}->log(0,"queueRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});	
 		}
 	}
 	else {
@@ -10431,10 +10402,10 @@ sub queueRadio(@) {
 				my $iHarborId = getHarBorId($self);
 				my $bHarbor = 0;
 				if (defined($iHarborId) && ($iHarborId ne "")) {
-					log_message($self,3,"Harbord ID : $iHarborId");
+					$self->{logger}->log(3,"Harbord ID : $iHarborId");
 					if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 						unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"harbor_$iHarborId.status\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
-							log_message($self,0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
+							$self->{logger}->log(0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
 							return undef;
 						}
 						my $line;
@@ -10442,7 +10413,7 @@ sub queueRadio(@) {
 							chomp($line);
 							$line =~ s/\r//;
 							$line =~ s/\n//;
-							log_message($self,3,$line);
+							$self->{logger}->log(3,$line);
 							unless ($line =~ /^no source client connected/) {
 								if (defined($sChannel) && ($sChannel ne "")) {
 									botPrivmsg($self,$sChannel,radioMsg($self,"Live - " . getRadioCurrentSong($self)));
@@ -10455,7 +10426,7 @@ sub queueRadio(@) {
 						}
 					}
 					else {
-						log_message($self,0,"queueRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+						$self->{logger}->log(0,"queueRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
 					}
 				}
 				
@@ -10465,14 +10436,14 @@ sub queueRadio(@) {
 					my $line;
 					if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 						unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
-							log_message($self,0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
+							$self->{logger}->log(0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
 							return undef;
 						}
 						if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
 							chomp($line);
 							$line =~ s/\r//;
 							$line =~ s/\n//;
-							log_message($self,3,"queueRadio() $line");
+							$self->{logger}->log(3,"queueRadio() $line");
 						}
 						if ($iNbTrack > 0) {
 							if (defined($sChannel) && ($sChannel ne "")) {
@@ -10485,7 +10456,7 @@ sub queueRadio(@) {
 							my $i;
 							for ($i=0;($i<3 && $i<=$#RIDS);$i++) {
 								unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"request.trace " . $RIDS[$i] . "\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
-									log_message($self,0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
+									$self->{logger}->log(0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
 									return undef;
 								}
 								my $line;
@@ -10495,7 +10466,7 @@ sub queueRadio(@) {
 									if (( $i == 0 ) && (!$bHarbor)) {
 										#Remaining time
 										my $sRemainingTime = getRadioRemainingTime($self);
-										log_message($self,3,"queueRadio() sRemainingTime = $sRemainingTime");
+										$self->{logger}->log(3,"queueRadio() sRemainingTime = $sRemainingTime");
 										my $siSecondsRemaining = int($sRemainingTime);
 										my $iMinutesRemaining = int($siSecondsRemaining / 60) ;
 										my $iSecondsRemaining = int($siSecondsRemaining - ( $iMinutesRemaining * 60 ));
@@ -10519,14 +10490,14 @@ sub queueRadio(@) {
 									$line =~ s/\n//;
 									$line =~ s/^.*\[\"//;
 									$line =~ s/\".*$//;
-									log_message($self,3,"queueRadio() $line");
+									$self->{logger}->log(3,"queueRadio() $line");
 									my $sFolder = dirname($line);
 									my $sFilename = basename($line);
 									my $sBaseFilename = basename($sFilename, ".mp3");
 									my $sQuery = "SELECT artist,title FROM MP3 WHERE folder=? AND filename=?";
 									my $sth = $self->{dbh}->prepare($sQuery);
 									unless ($sth->execute($sFolder,$sFilename)) {
-										log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+										$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 									}
 									else {
 										if (my $ref = $sth->fetchrow_hashref()) {
@@ -10594,14 +10565,14 @@ sub queueRadio(@) {
 						}
 					}
 					else {
-						log_message($self,0,"queueRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});	
+						$self->{logger}->log(0,"queueRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});	
 					}
 				}
 				else {
 					unless ( $bHarbor ) {
 						#Remaining time
 						my $sRemainingTime = getRadioRemainingTime($self);
-						log_message($self,3,"queueRadio() sRemainingTime = $sRemainingTime");
+						$self->{logger}->log(3,"queueRadio() sRemainingTime = $sRemainingTime");
 						my $siSecondsRemaining = int($sRemainingTime);
 						my $iMinutesRemaining = int($siSecondsRemaining / 60) ;
 						my $iSecondsRemaining = int($siSecondsRemaining - ( $iMinutesRemaining * 60 ));
@@ -10654,30 +10625,30 @@ sub queuePushRadio(@) {
 	if (defined($sAudioFilename) && ($sAudioFilename ne "")) {
 		unless (isInQueueRadio($self,$sAudioFilename)) {
 			if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-				log_message($self,3,"queuePushRadio() pushing $sAudioFilename to queue");
+				$self->{logger}->log(3,"queuePushRadio() pushing $sAudioFilename to queue");
 				unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.push $sAudioFilename\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
-					log_message($self,0,"queuePushRadio() Unable to connect to LIQUIDSOAP telnet port");
+					$self->{logger}->log(0,"queuePushRadio() Unable to connect to LIQUIDSOAP telnet port");
 					return undef;
 				}
 				my $line;
 				while (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
 					chomp($line);
-					log_message($self,3,$line);
+					$self->{logger}->log(3,$line);
 				}
 				return 1;
 			}
 			else {
-				log_message($self,0,"playRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+				$self->{logger}->log(0,"playRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
 				return 0;
 			}
 		}
 		else {
-			log_message($self,3,"queuePushRadio() $sAudioFilename already in queue");
+			$self->{logger}->log(3,"queuePushRadio() $sAudioFilename already in queue");
 			return 0;
 		}
 	}
 	else {
-		log_message($self,3,"queuePushRadio() missing audio file parameter");
+		$self->{logger}->log(3,"queuePushRadio() missing audio file parameter");
 		return 0;
 	}
 }
@@ -10693,20 +10664,20 @@ sub nextRadio(@) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
 				if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 					unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"radio(dot)mp3.skip\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
-						log_message($self,0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
+						$self->{logger}->log(0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
 						return undef;
 					}
 					my $line;
 					while (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
 						chomp($line);
-						log_message($self,3,$line);
+						$self->{logger}->log(3,$line);
 					}
 					logBot($self,$message,$sChannel,"next",@tArgs);
 					sleep(6);
 					displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
 				}
 				else {
-					log_message($self,0,"nextRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+					$self->{logger}->log(0,"nextRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
 				}
 			}
 			else {
@@ -10762,7 +10733,7 @@ sub rplayRadio(@) {
 				my $sHarbor = getRadioHarbor($self);
 				my $bRadioLive = 0;
 				if (defined($sHarbor) && ($sHarbor ne "")) {
-					log_message($self,3,$sHarbor);
+					$self->{logger}->log(3,$sHarbor);
 					$bRadioLive = isRadioLive($self,$sHarbor);
 				}
 				if ($bRadioLive) {
@@ -10789,7 +10760,7 @@ sub rplayRadio(@) {
 						my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE id_user=? ORDER BY RAND() LIMIT 1";
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($id_user)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {	
 							if (my $ref = $sth->fetchrow_hashref()) {
@@ -10823,7 +10794,7 @@ sub rplayRadio(@) {
 									logBot($self,$message,$sChannel,"rplay",@tArgs);
 								}
 								else {
-									log_message($self,3,"rplayRadio() user / could not queue queuePushRadio() $ytDestinationFile");	
+									$self->{logger}->log(3,"rplayRadio() user / could not queue queuePushRadio() $ytDestinationFile");	
 									if (defined($sChannel) && ($sChannel ne "")) {
 										botPrivmsg($self,$sChannel,"($sNick radio rplay / user / could not queue)");
 									}
@@ -10850,7 +10821,7 @@ sub rplayRadio(@) {
 						my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE artist like ? ORDER BY RAND() LIMIT 1";
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($sText)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {	
 							if (my $ref = $sth->fetchrow_hashref()) {
@@ -10884,7 +10855,7 @@ sub rplayRadio(@) {
 									logBot($self,$message,$sChannel,"rplay",@tArgs);
 								}
 								else {
-									log_message($self,3,"rplayRadio() artist / could not queue queuePushRadio() $ytDestinationFile");
+									$self->{logger}->log(3,"rplayRadio() artist / could not queue queuePushRadio() $ytDestinationFile");
 									if (defined($sChannel) && ($sChannel ne "")) {
 										botPrivmsg($self,$sChannel,"($sNick radio rplay / artist / could not queue)");
 									}
@@ -10914,10 +10885,10 @@ sub rplayRadio(@) {
 						$sSearch =~ s/;//g;
 						$sSearch =~ s/'/\\'/g;
 						my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sSearch . "%' ORDER BY RAND() LIMIT 1";
-						log_message($self,3,"rplayRadio() Query : $sQuery");
+						$self->{logger}->log(3,"rplayRadio() Query : $sQuery");
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute()) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {	
 							if (my $ref = $sth->fetchrow_hashref()) {
@@ -10951,7 +10922,7 @@ sub rplayRadio(@) {
 									logBot($self,$message,$sChannel,"rplay",@tArgs);
 								}
 								else {
-									log_message($self,3,"rplayRadio() could not queue queuePushRadio() $ytDestinationFile");
+									$self->{logger}->log(3,"rplayRadio() could not queue queuePushRadio() $ytDestinationFile");
 									if (defined($sChannel) && ($sChannel ne "")) {
 										botPrivmsg($self,$sChannel,"($sNick radio rplay / could not queue)");
 									}
@@ -10976,7 +10947,7 @@ sub rplayRadio(@) {
 						my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 ORDER BY RAND() LIMIT 1";
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute()) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {	
 							if (my $ref = $sth->fetchrow_hashref()) {
@@ -11010,7 +10981,7 @@ sub rplayRadio(@) {
 									logBot($self,$message,$sChannel,"rplay",@tArgs);
 								}
 								else {
-									log_message($self,3,"rplayRadio() could not queue queuePushRadio() $ytDestinationFile");	
+									$self->{logger}->log(3,"rplayRadio() could not queue queuePushRadio() $ytDestinationFile");	
 									if (defined($sChannel) && ($sChannel ne "")) {
 										botPrivmsg($self,$sChannel,"($sNick radio rplay / could not queue)");
 									}
@@ -11025,7 +10996,7 @@ sub rplayRadio(@) {
 					}
 				}
 				else {
-					log_message($self,0,"rplayRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+					$self->{logger}->log(0,"rplayRadio() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
 				}
 			}
 			else {
@@ -11059,7 +11030,7 @@ sub mp3(@) {
 					my $sQuery = "SELECT count(*) as nbMp3 FROM MP3";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute()) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {	
 						if (my $ref = $sth->fetchrow_hashref()) {
@@ -11073,10 +11044,10 @@ sub mp3(@) {
 				}
 				elsif ($tArgs[0] eq "id" && (defined($tArgs[1]) && ($tArgs[1] =~ /[0-9]+/))) {
 					my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE id_mp3=?";
-					log_message($self,3,"$sQuery = $sQuery");
+					$self->{logger}->log(3,"$sQuery = $sQuery");
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($tArgs[1])) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {	
 						if (my $ref = $sth->fetchrow_hashref()) {
@@ -11108,10 +11079,10 @@ sub mp3(@) {
 					$searchstring =~ s/;//g;
 					my $nbMp3 = 0;
 					my $sQuery = "SELECT count(*) as nbMp3 FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $searchstring . "%'";
-					log_message($self,3,"$sQuery = $sQuery");
+					$self->{logger}->log(3,"$sQuery = $sQuery");
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute()) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {	
 						if (my $ref = $sth->fetchrow_hashref()) {
@@ -11125,10 +11096,10 @@ sub mp3(@) {
 					}
 
 					$sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $searchstring . "%' LIMIT 1";
-					log_message($self,3,"$sQuery = $sQuery");
+					$self->{logger}->log(3,"$sQuery = $sQuery");
 					$sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute()) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {	
 						if (my $ref = $sth->fetchrow_hashref()) {
@@ -11148,10 +11119,10 @@ sub mp3(@) {
 							}
 							if ( $nbMp3 > 1 ) {
 								$sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $searchstring . "%' LIMIT 10";
-								log_message($self,3,"$sQuery = $sQuery");
+								$self->{logger}->log(3,"$sQuery = $sQuery");
 								$sth = $self->{dbh}->prepare($sQuery);
 								unless ($sth->execute()) {
-									log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+									$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 								}
 								else {
 									my $sOutput = "";
@@ -11210,7 +11181,7 @@ sub mbExec(@) {
 					return undef;
 				}
 				unless (open CMD, "$sText | tail -n 3 |") {
-					log_message($self,3,"mbExec could not issue $sText command");
+					$self->{logger}->log(3,"mbExec could not issue $sText command");
 				}
 				else {
 					my $line;
@@ -11249,21 +11220,21 @@ sub getHarBorId(@) {
 	my $LIQUIDSOAP_TELNET_PORT = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_PORT');
 	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 		unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | grep harbor | grep status | awk '{print \$2}' | awk -F'.' {'print \$1}' | awk -F'_' '{print \$2}' |") {
-			log_message($self,0,"getHarBorId() Unable to connect to LIQUIDSOAP telnet port");
+			$self->{logger}->log(0,"getHarBorId() Unable to connect to LIQUIDSOAP telnet port");
 			return undef;
 		}
 		my $line;
 		if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
 			chomp($line);
-			log_message($self,3,$line);
+			$self->{logger}->log(3,$line);
 			return $line;
 		}
 		else {
-			log_message($self,3,"getHarBorId() No output");
+			$self->{logger}->log(3,"getHarBorId() No output");
 		}
 	}
 	else {
-		log_message($self,0,"getHarBorId() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
+		$self->{logger}->log(0,"getHarBorId() radio.LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
 	}
 	return undef;
 }
@@ -11289,10 +11260,10 @@ sub mbChannelLog(@) {
 						$searchstring =~ s/'/\\'/;
 						$searchstring =~ s/;//;
 						my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL_LOG.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND nick LIKE ? AND publictext LIKE '%" . $searchstring . "%' AND publictext not LIKE '%qlog%' ORDER BY RAND() LIMIT 1";
-						log_message($self,3,"sQuery = $sQuery");
+						$self->{logger}->log(3,"sQuery = $sQuery");
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($sChannel,$nickname)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							my $sOutput = "";
@@ -11312,10 +11283,10 @@ sub mbChannelLog(@) {
 					}
 					else {
 						my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL_LOG.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND nick LIKE ? AND publictext not LIKE '%qlog%' ORDER BY RAND() LIMIT 1";
-						log_message($self,3,"sQuery = $sQuery");
+						$self->{logger}->log(3,"sQuery = $sQuery");
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($sChannel,$nickname)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							my $sOutput = "";
@@ -11339,10 +11310,10 @@ sub mbChannelLog(@) {
 					$searchstring =~ s/'/\\'/;
 					$searchstring =~ s/;//;
 					my $sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL_LOG.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND publictext LIKE '%" . $searchstring . "%' AND publictext not LIKE '%qlog%' ORDER BY RAND() LIMIT 1";
-					log_message($self,3,"sQuery = $sQuery");
+					$self->{logger}->log(3,"sQuery = $sQuery");
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sChannel)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 					}
 					else {
 						my $sOutput = "";
@@ -11383,7 +11354,7 @@ sub is_hailo_excluded_nick(@) {
 	my $sQuery = "SELECT * FROM HAILO_EXCLUSION_NICK WHERE nick like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($nick)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		my $sOutput = "";
@@ -11411,7 +11382,7 @@ sub hailo_ignore(@) {
 				my $sQuery = "SELECT * FROM HAILO_EXCLUSION_NICK WHERE nick like ?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($tArgs[0])) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					if (my $ref = $sth->fetchrow_hashref()) {
@@ -11423,7 +11394,7 @@ sub hailo_ignore(@) {
 						$sQuery = "INSERT INTO HAILO_EXCLUSION_NICK (nick) VALUES (?)";
 						$sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($tArgs[0])) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							botNotice($self,$sNick,"Hailo ignored nick " . $tArgs[0]);
@@ -11461,14 +11432,14 @@ sub hailo_unignore(@) {
 				my $sQuery = "SELECT * FROM HAILO_EXCLUSION_NICK WHERE nick like ?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($tArgs[0])) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					if (my $ref = $sth->fetchrow_hashref()) {
 						$sQuery = "DELETE FROM HAILO_EXCLUSION_NICK WHERE nick like ?";
 						$sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($tArgs[0])) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {
 							botNotice($self,$sNick,"Hailo unignored nick " . $tArgs[0]);
@@ -11506,7 +11477,7 @@ sub hailo_status(@) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
 				my $hailo = get_hailo($self);
 				my $status = $hailo->stats();
-				log_message($self,3,"$status tokens, expressions, previous token links and next token links");
+				$self->{logger}->log(3,"$status tokens, expressions, previous token links and next token links");
 				botPrivmsg($self,$sChannel,"$status tokens, expressions, previous token links and next token links");
 			}
 			else {
@@ -11530,7 +11501,7 @@ sub get_hailo_channel_ratio(@) {
 	my $sQuery = "SELECT ratio FROM HAILO_CHANNEL,CHANNEL WHERE HAILO_CHANNEL.id_channel=CHANNEL.id_channel AND name like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -11550,7 +11521,7 @@ sub set_hailo_channel_ratio(@) {
 	my $sQuery = "SELECT * FROM HAILO_CHANNEL,CHANNEL WHERE HAILO_CHANNEL.id_channel=CHANNEL.id_channel AND CHANNEL.name like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -11558,11 +11529,11 @@ sub set_hailo_channel_ratio(@) {
 			$sQuery = "UPDATE HAILO_CHANNEL SET ratio=? WHERE id_channel=?";
 			$sth = $self->{dbh}->prepare($sQuery);
 			unless ($sth->execute($ratio,$id_channel)) {
-				log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 			}
 			else {
 				$sth->finish;
-				log_message($self,3,"set_hailo_channel_ratio updated hailo chatter ratio to $ratio for $sChannel");
+				$self->{logger}->log(3,"set_hailo_channel_ratio updated hailo chatter ratio to $ratio for $sChannel");
 				return 0;
 			}
 		}
@@ -11576,11 +11547,11 @@ sub set_hailo_channel_ratio(@) {
 				$sQuery = "INSERT INTO HAILO_CHANNEL (id_channel,ratio) VALUES (?,?)";
 				$sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($id_channel,$ratio)) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					$sth->finish;
-					log_message($self,3,"set_hailo_channel_ratio set hailo chatter ratio to $ratio for $sChannel");
+					$self->{logger}->log(3,"set_hailo_channel_ratio set hailo chatter ratio to $ratio for $sChannel");
 					return 0;
 				}
 			}
@@ -11647,7 +11618,7 @@ sub hailo_chatter(@) {
 sub whereis(@) {
 	my ($self,$sHostname) = @_;
 	my $userIP;
-	log_message($self,3,"whereis() $sHostname");
+	$self->{logger}->log(3,"whereis() $sHostname");
 	if ( $sHostname =~ /users.undernet.org$/ ) {
 		return "on an Undernet hidden host ;)";
 	}
@@ -11717,7 +11688,7 @@ sub userBirthday(@) {
 										my $sQuery = "SELECT nickname,birthday FROM USER WHERE nickname like ?";
 										my $sth = $self->{dbh}->prepare($sQuery);
 										unless ($sth->execute($tArgs[2])) {
-											log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+											$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 										}
 										else {
 											if (my $ref = $sth->fetchrow_hashref()) {
@@ -11732,7 +11703,7 @@ sub userBirthday(@) {
 													$sQuery = "UPDATE USER SET birthday=? WHERE nickname like ?";
 													$sth = $self->{dbh}->prepare($sQuery);
 													unless ($sth->execute($tArgs[3],$tArgs[2	])) {
-														log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+														$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 													}
 													else {
 														botPrivmsg($self,$sChannel,"Set " . $tArgs[2] . "'s birthday to $tArgs[3]");
@@ -11759,7 +11730,7 @@ sub userBirthday(@) {
 									my $sQuery = "SELECT nickname,birthday FROM USER WHERE nickname like ?";
 									my $sth = $self->{dbh}->prepare($sQuery);
 									unless ($sth->execute($tArgs[2])) {
-										log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+										$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 									}
 									else {
 										if (my $ref = $sth->fetchrow_hashref()) {
@@ -11769,7 +11740,7 @@ sub userBirthday(@) {
 												$sQuery = "UPDATE USER SET birthday=NULL WHERE nickname like ?";
 												$sth = $self->{dbh}->prepare($sQuery);
 												unless ($sth->execute($tArgs[2])) {
-													log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+													$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 												}
 												else {
 													botPrivmsg($self,$sChannel,"Deleted " . $tArgs[2] . "'s birthday.");
@@ -11824,7 +11795,7 @@ sub userBirthday(@) {
 			my $sQuery = "SELECT nickname,birthday FROM USER";
 			my $sth = $self->{dbh}->prepare($sQuery);
 			unless ($sth->execute()) {
-				log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 			}
 			else {
 				my $i = 0;
@@ -11866,7 +11837,7 @@ sub userBirthday(@) {
 						if ( $cbday == $tref ) {
 							botPrivmsg($self,$sChannel,"Happy Birthday To: \2$nickname\2 - Hope you have a Great Day! !!!");
 						}
-						if ( $i < 50 ) { log_message($self,3,"(birthday next) Min : $bmin[0] $bmin[1] Candidate : " . (defined($bcandidate[0]) ? "$bcandidate[0] " : "N/A ") . (defined($bcandidate[1]) ? "$bcandidate[1]" : "N/A") . " Current $nickname $cbday"); }
+						if ( $i < 50 ) { $self->{logger}->log(3,"(birthday next) Min : $bmin[0] $bmin[1] Candidate : " . (defined($bcandidate[0]) ? "$bcandidate[0] " : "N/A ") . (defined($bcandidate[1]) ? "$bcandidate[1]" : "N/A") . " Current $nickname $cbday"); }
 						$i++;
 					}
 				}
@@ -11883,7 +11854,7 @@ sub userBirthday(@) {
 				$sQuery = "SELECT nickname,birthday FROM USER where nickname LIKE ?";
 				$sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($bnickname)) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					if (my $ref = $sth->fetchrow_hashref()) {
@@ -11901,7 +11872,7 @@ sub userBirthday(@) {
 				my $sQuery = "SELECT nickname,birthday FROM USER WHERE nickname like ?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($tArgs[0])) {
-					log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
 					if (my $ref = $sth->fetchrow_hashref()) {
@@ -11946,18 +11917,18 @@ sub radioPub(@) {
 		my $sQuery = "SELECT name FROM CHANNEL,CHANNEL_SET,CHANSET_LIST WHERE CHANNEL.id_channel=CHANNEL_SET.id_channel AND CHANNEL_SET.id_chanset_list=CHANSET_LIST.id_chanset_list AND CHANSET_LIST.chanset LIKE 'RadioPub'";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute()) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			while (my $ref = $sth->fetchrow_hashref()) {
 				my $curChannel = $ref->{'name'};
-				log_message($self,3,"RadioPub on $curChannel");
+				$self->{logger}->log(3,"RadioPub on $curChannel");
 				my $currentTitle = getRadioCurrentSong($self);
 				if ( $currentTitle ne "Unknown" ) {
 					displayRadioCurrentSong($self,undef,undef,$curChannel,undef);
 				}
 				else {
-					log_message($self,3,"RadioPub skipped for $curChannel, title is $currentTitle");
+					$self->{logger}->log(3,"RadioPub skipped for $curChannel, title is $currentTitle");
 				}
 			}
 		}
@@ -11973,18 +11944,18 @@ sub delUser(@) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
 				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-					log_message($self,3,"delUser() " . $tArgs[0]);
+					$self->{logger}->log(3,"delUser() " . $tArgs[0]);
 					my $id_user = getIdUser($self,$tArgs[0]);
 					if (defined($id_user)) {
 						my $sQuery = "DELETE FROM USER_CHANNEL WHERE id_user=?";
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($id_user)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						$sQuery = "DELETE FROM USER WHERE id_user=?";
 						$sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($id_user)) {
-							log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 							return undef;
 						}
 						$sth->finish;
@@ -12023,7 +11994,7 @@ sub getFortniteId(@) {
 	my $sQuery = "SELECT fortniteid FROM USER WHERE nickname LIKE ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sUser)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
@@ -12044,7 +12015,7 @@ sub fortniteStats(@) {
 	
 	my $api_key = $self->{conf}->get('fortnite.API_KEY');
 	unless (defined($api_key) && $api_key ne "") {
-		log_message($self,0,"fortnite.API_KEY is undefined in config file");
+		$self->{logger}->log(0,"fortnite.API_KEY is undefined in config file");
 		return undef;
 	}
 
@@ -12053,7 +12024,7 @@ sub fortniteStats(@) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"User")) {
 				if (defined($tArgs[0]) && $tArgs[0] ne "") {
-					log_message($self,3,"fortniteStats() $tArgs[0]");
+					$self->{logger}->log(3,"fortniteStats() $tArgs[0]");
 					my $id_user = getIdUser($self,$tArgs[0]);
 					if (defined($id_user)) {
 						my $AccountId = getFortniteId($self,$tArgs[0]);
@@ -12062,11 +12033,11 @@ sub fortniteStats(@) {
 							return undef;
 						}
 						unless ( open FORTNITE_INFOS, "curl -L --header 'Authorization: $api_key' --connect-timeout 5 -f -s \"https://fortnite-api.com/v2/stats/br/v2/$AccountId\" |" ) {
-							log_message(3,"fortniteStats() Could not get FORTNITE_INFOS from API using $api_key");
+							$self->{logger}->log(3,"fortniteStats() Could not get FORTNITE_INFOS from API using $api_key");
 						}
 						else {
 							my $json_details = join('', <FORTNITE_INFOS>);
-							log_message($self,5,"fortniteStats() $json_details");
+							$self->{logger}->log(5,"fortniteStats() $json_details");
 							if ($json_details ne "") {
 								my $sFortniteInfo = decode_json $json_details;
 								my %hFortniteInfo = %$sFortniteInfo;
@@ -12139,7 +12110,7 @@ sub chatGPT(@) {
     #  sanity / config checks
     # --------------------------------------------------------------
 	my $api_key = $self->{conf}->get('openai.API_KEY')
-    	or (log_message($self,0,'chatGPT() openai.API_KEY missing'), return);
+    	or ($self->{logger}->log(0,'chatGPT() openai.API_KEY missing'), return);
 
     @args
         or (botNotice($self,$nick,'Syntax: tellme <prompt>'), return);
@@ -12153,7 +12124,7 @@ sub chatGPT(@) {
     # payload preparation
     # --------------------------------------------------------------
     my $prompt = join ' ', @args;
-    log_message($self,3,"chatGPT() chatGPT prompt: $prompt");
+    $self->{logger}->log(3,"chatGPT() chatGPT prompt: $prompt");
 
     my $json = encode_json {
         model       => CHATGPT_MODEL,
@@ -12185,7 +12156,7 @@ sub chatGPT(@) {
 
     my $response = qx{$cmd};
     if ($? != 0 || !$response) {
-        log_message($self,0,"chatGPT() chatGPT curl failed: $?");
+        $self->{logger}->log(0,"chatGPT() chatGPT curl failed: $?");
         botPrivmsg($self,$chan,"($nick) Sorry, API did not answer.");
         return;
     }
@@ -12195,16 +12166,16 @@ sub chatGPT(@) {
 	# --------------------------------------------------------------
 	my $data = eval { decode_json($response) };
 	if ($@ || !($data->{choices}[0]{message}{content} || '')) {
-		log_message($self, 0, 'chatGPT() chatGPT invalid JSON response');
-		log_message($self, 3, "chatGPT() Raw API response: $response");
-		log_message($self, 3, "chatGPT() JSON decode error: $@") if $@;
-		log_message($self, 3, "chatGPT() Missing expected content in response structure") unless $@;
+		$self->{logger}->log( 0, 'chatGPT() chatGPT invalid JSON response');
+		$self->{logger}->log( 3, "chatGPT() Raw API response: $response");
+		$self->{logger}->log( 3, "chatGPT() JSON decode error: $@") if $@;
+		$self->{logger}->log( 3, "chatGPT() Missing expected content in response structure") unless $@;
 		botPrivmsg($self, $chan, "($nick) Could not read API response.");
 		return;
 	}
 
 	my $answer = $data->{choices}[0]{message}{content};
-    log_message($self,4,"chatGPT() chatGPT raw answer: $answer");
+    $self->{logger}->log(4,"chatGPT() chatGPT raw answer: $answer");
 
     # -------- minimise PRIVMSG --------------------------------------
     $answer =~ s/[\r\n]+/ /g;    # strip CR/LF
@@ -12231,7 +12202,7 @@ sub chatGPT(@) {
         botPrivmsg($self,$chan,$chunk[$i]);
         usleep(CHATGPT_SLEEP_US);
     }
-    log_message($self,3,"chatGPT() sent ".($last+1)." PRIVMSG");
+    $self->{logger}->log(3,"chatGPT() sent ".($last+1)." PRIVMSG");
 }
 
 # ------------------------------------------------------------------
@@ -12317,7 +12288,7 @@ sub Yomomma(@) {
 		$sQuery = "SELECT * FROM YOMOMMA ORDER BY rand() LIMIT 1";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute ) {
-			log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			if (my $ref = $sth->fetchrow_hashref()) {
@@ -12337,7 +12308,7 @@ sub Yomomma(@) {
 		$sQuery = "SELECT * FROM YOMOMMA WHERE id_yomomma=?";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($id_yomomma)) {
-			log_message(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			if (my $ref = $sth->fetchrow_hashref()) {
@@ -12405,11 +12376,11 @@ sub setTMDBLangChannel(@) {
 				}
 				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 					my $sLang = $tArgs[0];
-					log_message($self,3,"setTMDBLangChannel() " . $sChannel . " lang set to " . $sLang);
+					$self->{logger}->log(3,"setTMDBLangChannel() " . $sChannel . " lang set to " . $sLang);
 					my $sQuery = "UPDATE CHANNEL SET tmdb_lang=? WHERE id_channel=?";
 					my $sth = $self->{dbh}->prepare($sQuery);
 					unless ($sth->execute($sLang,$id_channel)) {
-						log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						return undef;
 					}
 					else {
@@ -12444,7 +12415,7 @@ sub mbTMDBSearch(@) {
     my $api_key = $MAIN_CONF{'tmdb.API_KEY'};
 
     unless (defined($api_key) && $api_key ne "") {
-        log_message($self, 0, "tmdb.API_KEY is undefined in config file");
+        $self->{logger}->log( 0, "tmdb.API_KEY is undefined in config file");
         return;
     }
 
@@ -12454,7 +12425,7 @@ sub mbTMDBSearch(@) {
     }
 
 	my $tmdb_lang = getTMDBLangChannel($self, $sChannel);
-	log_message($self, 3, "tmdb_lang for $sChannel is $tmdb_lang");
+	$self->{logger}->log( 3, "tmdb_lang for $sChannel is $tmdb_lang");
     my $input = join(" ", @tArgs);
     my $synopsis = get_tmdb_synopsis_with_curl($api_key, $tmdb_lang, $input);
 
@@ -12467,7 +12438,7 @@ sub getTMDBLangChannel (@) {
 	my $sQuery = "SELECT tmdb_lang FROM CHANNEL WHERE name LIKE ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel)) {
-		log_message($self,1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {

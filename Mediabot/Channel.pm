@@ -16,6 +16,7 @@ sub new {
         auto_join => $args->{auto_join},
         key       => $args->{key},
         dbh       => $args->{dbh},  # needed for SQL updates
+        irc       => $args->{irc},  # needed for IRC operations
     };
     bless $self, $class;
     return $self;

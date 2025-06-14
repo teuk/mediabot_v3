@@ -16,7 +16,9 @@ use Getopt::Long;
 use File::Basename;
 use Mediabot::Mediabot;
 use Mediabot::Conf;
+use Mediabot::Log;
 use Mediabot::Channel;
+use Mediabot::Partyline;
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use Net::Async::IRC;
@@ -147,6 +149,15 @@ $mediabot->{conf} = Mediabot::Conf->new($mediabot->getMainConf());
 # Init log file
 $mediabot->init_log();
 
+# Instantiate logger
+$mediabot->{logger} = Mediabot::Log->new(
+    debug_level => $mediabot->{conf}->get('main.MAIN_PROG_DEBUG'),
+    logfile     => $mediabot->{conf}->get('main.MAIN_LOG_FILE'),
+);
+
+# Display Partyline port in debug log
+$mediabot->{logger}->log(3, "Partyline port is: " . $mediabot->{conf}->get("main.PARTYLINE_PORT"));
+
 # === Single‐Instance Guard ===
 
 # Retrieve PID file path and stored PID
@@ -158,18 +169,18 @@ if (defined $pid && $pid =~ /^\d+$/) {
     # kill 0 just tests “does this process exist and can I signal it?”
     if (kill 0, $pid) {
         # process is alive
-        $mediabot->log_message(0, "Mediabot is already running with PID $pid.");
-        $mediabot->log_message(0, "Either kill process $pid or remove stale PID file: $pidfile");
+        $mediabot->{logger}->log(0, "Mediabot is already running with PID $pid.");
+        $mediabot->{logger}->log(0, "Either kill process $pid or remove stale PID file: $pidfile");
         $mediabot->clean_and_exit(1);
     }
     else {
         # PID file is stale; remove it so a new instance can start
         if (unlink $pidfile) {
-            $mediabot->log_message(1, "Removed stale PID file: $pidfile");
+            $mediabot->{logger}->log(1, "Removed stale PID file: $pidfile");
         }
         else {
-            $mediabot->log_message(0, "Could not remove stale PID file '$pidfile': $!");
-            $mediabot->log_message(0, "Please remove it manually before restarting.");
+            $mediabot->{logger}->log(0, "Could not remove stale PID file '$pidfile': $!");
+            $mediabot->{logger}->log(0, "Please remove it manually before restarting.");
             $mediabot->clean_and_exit(1);
         }
     }
@@ -189,7 +200,7 @@ log_info("Mediabot v$MAIN_PROG_VERSION starting with config file $CONFIG_FILE");
 
 # Daemon mode actions
 if ( $MAIN_PROG_DAEMON ) {
-    $mediabot->log_message(0,"Mediabot v$MAIN_PROG_VERSION starting in daemon mode, check " . $mediabot->getLogFile() . " for more details");
+    $mediabot->{logger}->log(0,"Mediabot v$MAIN_PROG_VERSION starting in daemon mode, check " . $mediabot->getLogFile() . " for more details");
     umask 0;
     open STDIN, '/dev/null'   or die "Can't read /dev/null: $!";
     open STDOUT, '>/dev/null' or die "Can't write to /dev/null: $!";
@@ -204,13 +215,16 @@ $SIG{HUP}  = \&catch_hup;
 
 my $sStartedMode = ( $MAIN_PROG_DAEMON ? "background" : "foreground");
 my $MAIN_PROG_DEBUG = $mediabot->getDebugLevel();
-$mediabot->log_message(0,"Mediabot v$MAIN_PROG_VERSION started in $sStartedMode with debug level $MAIN_PROG_DEBUG");
+$mediabot->{logger}->log(0,"Mediabot v$MAIN_PROG_VERSION started in $sStartedMode with debug level $MAIN_PROG_DEBUG");
 
 # Database connection
 $mediabot->dbConnect();
 
 # Check USER table and fail if not present
 $mediabot->dbCheckTables();
+
+# Init authentication object
+$mediabot->init_auth();
 
 # Log out all user at start
 $mediabot->dbLogoutUsers();
@@ -227,9 +241,19 @@ $mediabot->setLastReponderTs(0);
 # Initialize hailo
 $mediabot->init_hailo();
 
+# Initialize IO::Async loop
 my $loop = IO::Async::Loop->new;
 $mediabot->setLoop($loop);
 
+# Initialize partyline
+my $partyline = Mediabot::Partyline->new(
+    bot  => $mediabot,
+    loop => $loop,
+    port => $mediabot->{conf}->get("main.PARTYLINE_PORT"),
+);
+$mediabot->{partyline} = $partyline;  # ← optionnel : accès plus tard dans le bot
+
+# Set up main timer
 my $timer = IO::Async::Timer::Periodic->new(
 interval => 5,
 on_tick => \&on_timer_tick,
@@ -290,7 +314,7 @@ my $sConnectionNick = $mediabot->getConnectionNick();
 my $sServerPass = $mediabot->getServerPass();
 my $sServerPassDisplay = ( $sServerPass eq "" ? "none defined" : $sServerPass );
 my $bNickTriggerCommand =$mediabot->getNickTrigger();
-$mediabot->log_message(0,"Trying to connect to " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort() . " (pass : $sServerPassDisplay)");
+$mediabot->{logger}->log(0,"Trying to connect to " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort() . " (pass : $sServerPassDisplay)");
 
 my $login = $irc->login(
     pass => $sServerPass,
@@ -328,7 +352,7 @@ sub log_message {
     $level //= 0;
     
     if ($mediabot) {
-        $mediabot->log_message($level,$msg);
+        $mediabot->{logger}->log($level,$msg);
     } else {
         my $ts = POSIX::strftime("[%d/%m/%Y %H:%M:%S]", localtime);
         print "$ts $msg\n" if $level <= 0;
@@ -342,7 +366,7 @@ sub log_debug_args {
     my $dump = Dumper($message->args);
     $dump =~ s/^\$VAR1 = //;
     $dump =~ s/;\s*$//;
-    $mediabot->log_message(5, "$context args: $dump");
+    $mediabot->{logger}->log(5, "$context args: $dump");
 }
 
 sub log_info {
@@ -363,8 +387,8 @@ sub log_error {
 sub on_timer_tick {
     my @params = @_;
 
-    $mediabot->log_message(5, "on_timer_tick \@params (): " . Dumper(@params));
-    $mediabot->log_message(5,"on_timer_tick() tick");
+    $mediabot->{logger}->log(5, "on_timer_tick \@params (): " . Dumper(@params));
+    $mediabot->{logger}->log(5,"on_timer_tick() tick");
     
     # Update pid file
     my $sPidFilename = $mediabot->{conf}->get('main.MAIN_PID_FILE');
@@ -379,13 +403,13 @@ sub on_timer_tick {
     # Check connection status and reconnect if not connected
     unless ($irc->is_connected) {
         if ($mediabot->getQuit()) {
-            $mediabot->log_message(0,"Disconnected from server");
+            $mediabot->{logger}->log(0,"Disconnected from server");
             $mediabot->clean_and_exit(0);
         }
         else {
             $mediabot->setServer(undef);
             $loop->stop;
-            $mediabot->log_message(0,"Lost connection to server. Waiting 150 seconds to reconnect");
+            $mediabot->{logger}->log(0,"Lost connection to server. Waiting 150 seconds to reconnect");
             sleep 150;
             reconnect();
         }
@@ -395,24 +419,24 @@ sub on_timer_tick {
     if (defined($mediabot->{conf}->get('main.MAIN_PID_FILE'))) {
     my $radioPubDelay = defined($mediabot->{conf}->get('radio.RADIO_PUB')) ? $mediabot->{conf}->get('radio.RADIO_PUB') : 10800;
     unless ($radioPubDelay >= 900) {
-        $mediabot->log_message(0,"Mediabot was not designed to spam channels, please set RADIO_PUB to a value greater or equal than 900 seconds in [radio] section of $CONFIG_FILE");
+        $mediabot->{logger}->log(0,"Mediabot was not designed to spam channels, please set RADIO_PUB to a value greater or equal than 900 seconds in [radio] section of $CONFIG_FILE");
     }
     elsif ((time - $mediabot->getLastRadioPub()) > $radioPubDelay ) {
         my $sQuery = "SELECT name FROM CHANNEL,CHANNEL_SET,CHANSET_LIST WHERE CHANNEL.id_channel=CHANNEL_SET.id_channel AND CHANNEL_SET.id_chanset_list=CHANSET_LIST.id_chanset_list AND CHANSET_LIST.chanset LIKE 'RadioPub'";
         my $sth = $mediabot->getDbh->prepare($sQuery);
         unless ($sth->execute()) {
-            $mediabot->log_message(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+            $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
         }
         else {
             while (my $ref = $sth->fetchrow_hashref()) {
                 my $curChannel = $ref->{'name'};
-                $mediabot->log_message(3,"RadioPub on $curChannel");
+                $mediabot->{logger}->log(3,"RadioPub on $curChannel");
                 my $currentTitle = $mediabot->getRadioCurrentSong();
                 if ( $currentTitle ne "Unknown" ) {
                     $mediabot->displayRadioCurrentSong(undef,undef,$curChannel,undef);
                 }
                 else {
-                    $mediabot->log_message(3,"RadioPub skipped for $curChannel, title is $currentTitle");
+                    $mediabot->{logger}->log(3,"RadioPub skipped for $curChannel, title is $currentTitle");
                 }
             }
         }
@@ -425,22 +449,22 @@ sub on_timer_tick {
 if (defined($mediabot->{conf}->get('main.RANDOM_QUOTE'))) {
     my $randomQuoteDelay = defined($mediabot->{conf}->get('main.RANDOM_QUOTE')) ? $mediabot->{conf}->get('main.RANDOM_QUOTE') : 10800;
     unless ($randomQuoteDelay >= 900) {
-        $mediabot->log_message(0,"Mediabot was not designed to spam channels, please set RANDOM_QUOTE to a value greater or equal than 900 seconds in [main] section of $CONFIG_FILE");
+        $mediabot->{logger}->log(0,"Mediabot was not designed to spam channels, please set RANDOM_QUOTE to a value greater or equal than 900 seconds in [main] section of $CONFIG_FILE");
     }
     elsif ((time - $mediabot->getLastRandomQuote()) > $randomQuoteDelay ) {
         my $sQuery = "SELECT name FROM CHANNEL,CHANNEL_SET,CHANSET_LIST WHERE CHANNEL.id_channel=CHANNEL_SET.id_channel AND CHANNEL_SET.id_chanset_list=CHANSET_LIST.id_chanset_list AND CHANSET_LIST.chanset LIKE 'RandomQuote'";
         my $sth = $mediabot->getDbh->prepare($sQuery);
         unless ($sth->execute()) {
-            $mediabot->log_message(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+            $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
         }
         else {
             while (my $ref = $sth->fetchrow_hashref()) {
                 my $curChannel = $ref->{'name'};
-                $mediabot->log_message(3,"RandomQuote on $curChannel");
+                $mediabot->{logger}->log(3,"RandomQuote on $curChannel");
                 my $sQuery = "SELECT * FROM QUOTES,CHANNEL,USER WHERE QUOTES.id_channel=CHANNEL.id_channel AND QUOTES.id_user=USER.id_user AND CHANNEL.name=? ORDER BY RAND() LIMIT 1";
                 my $sth2 = $mediabot->getDbh->prepare($sQuery);
                 unless ($sth2->execute($curChannel)) {
-                    $mediabot->log_message(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+                    $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
                 }
                 else {
                     if (my $ref = $sth2->fetchrow_hashref()) {
@@ -469,11 +493,11 @@ sub on_message_NOTICE {
     my @tArgs = $message->args;
     if (defined($who) && ($who ne "")) {
         if (defined($tArgs[0]) && (substr($tArgs[0],0,1) eq '#')) {
-            $mediabot->log_message(0,"-$who:" . $tArgs[0] . "- $what");
+            $mediabot->{logger}->log(0,"-$who:" . $tArgs[0] . "- $what");
             $mediabot->logBotAction($message,"notice",$sNick,$tArgs[0],$what);
         }
         else {
-            $mediabot->log_message(0,"-$who- $what");
+            $mediabot->{logger}->log(0,"-$who- $what");
         }
         if (defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ( $mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 1 ) && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN') ne "") && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME') ne "") && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD') ne "")) {
             # Undernet CService login
@@ -493,14 +517,14 @@ sub on_message_NOTICE {
         }
     }
     else {
-        $mediabot->log_message(0,"$what");
+        $mediabot->{logger}->log(0,"$what");
     }
 }
 
 sub on_login {
     my ( $self, $message, $hints ) = @_;
 
-    $mediabot->log_message(0,"on_login() Connected to irc server " . $mediabot->getServerHostname());
+    $mediabot->{logger}->log(0,"on_login() Connected to irc server " . $mediabot->getServerHostname());
     $mediabot->setQuit(0);
     $mediabot->setConnectionTimestamp(time);
     $mediabot->setLastRadioPub(time);
@@ -509,7 +533,7 @@ sub on_login {
     
     # Undernet : authentication to channel service if credentials are defined
     if (defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ( $mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 1 ) && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN') ne "") && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME') ne "") && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD') ne "")) {
-        $mediabot->log_message(0,"on_login() Logging to " . $mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN'));
+        $mediabot->{logger}->log(0,"on_login() Logging to " . $mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN'));
         $mediabot->botPrivmsg($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN'),"login " . $mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME') . " "  . $mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD'));
     }
 
@@ -520,7 +544,7 @@ sub on_login {
             if (defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ( $mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 1 )) {
                 $sUserMode =~ s/x//;
             }
-            $mediabot->log_message(0,"on_login() Setting user mode $sUserMode");
+            $mediabot->{logger}->log(0,"on_login() Setting user mode $sUserMode");
             $self->write("MODE " . $mediabot->{conf}->get('connection.CONN_NICK') . " +" . $sUserMode . "\x0d\x0a");
         }
     }
@@ -537,10 +561,10 @@ sub on_login {
     if (defined $console_channel) {
         my $name = $console_channel->get_name;
         my $key  = $console_channel->get_key;
-        $mediabot->log_message(0, "Joining console channel $name");
+        $mediabot->{logger}->log(0, "Joining console channel $name");
         $mediabot->joinChannel($name, $key);
     } else {
-        $mediabot->log_message(0, "Warning: no console channel found in database (description = 'console'). You may want to run configure script again.");
+        $mediabot->{logger}->log(0, "Warning: no console channel found in database (description = 'console'). You may want to run configure script again.");
     }
 
     # Join other channels
@@ -555,7 +579,7 @@ sub on_private {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_private', $message);
     my ($who, $what) = @{$hints}{qw<prefix_name text>};
-    $mediabot->log_message(2,"on_private() -$who- $what");
+    $mediabot->{logger}->log(2,"on_private() -$who- $what");
 }
 
 sub on_message_INVITE {
@@ -564,7 +588,7 @@ sub on_message_INVITE {
     log_debug_args('on_message_INVITE', $message);
     my ($inviter_nick,$invited_nick,$target_name) = @{$hints}{qw<inviter_nick invited_nick target_name>};
     unless ($self->is_nick_me($inviter_nick)) {
-        $mediabot->log_message(0,"* $inviter_nick invites you to join $target_name");
+        $mediabot->{logger}->log(0,"* $inviter_nick invites you to join $target_name");
         $mediabot->logBotAction($message,"invite",$inviter_nick,undef,$target_name);
         my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = $mediabot->getNickInfo($message);
         if (defined($iMatchingUserId)) {
@@ -577,7 +601,7 @@ sub on_message_INVITE {
         }
     }
     else {
-        $mediabot->log_message(0,"$invited_nick has been invited to join $target_name");
+        $mediabot->{logger}->log(0,"$invited_nick has been invited to join $target_name");
     }
 }
     
@@ -588,13 +612,13 @@ sub on_message_KICK {
     my ($kicker_nick,$target_name,$kicked_nick,$text) = @{$hints}{qw<kicker_nick target_name kicked_nick text>};
     if ($self->is_nick_me($kicked_nick)) {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-            $mediabot->log_message(0,"[LIVE] * you were kicked from $target_name by $kicker_nick ($text)");
+            $mediabot->{logger}->log(0,"[LIVE] * you were kicked from $target_name by $kicker_nick ($text)");
         }
         $mediabot->joinChannel($target_name);
     }
     else {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-            $mediabot->log_message(0,"[LIVE] $target_name: $kicked_nick was kicked by $kicker_nick ($text)");
+            $mediabot->{logger}->log(0,"[LIVE] $target_name: $kicked_nick was kicked by $kicker_nick ($text)");
         }
         $mediabot->channelNicksRemove($target_name,$kicked_nick);
     }
@@ -614,13 +638,13 @@ sub on_message_MODE {
         shift @tArgs;
         my $sTargetNicks = join(" ",@tArgs);
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-            $mediabot->log_message(0,"[LIVE] <$target_name> $sNick sets mode $sModes $sTargetNicks");
+            $mediabot->{logger}->log(0,"[LIVE] <$target_name> $sNick sets mode $sModes $sTargetNicks");
         }
         $mediabot->logBotAction($message,"mode",$sNick,$target_name,"$sModes $sTargetNicks");
     }
     else {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-            $mediabot->log_message(0,"[LIVE] $target_name sets mode " . $tArgs[1]);
+            $mediabot->{logger}->log(0,"[LIVE] $target_name sets mode " . $tArgs[1]);
         }
     }
 }
@@ -635,12 +659,12 @@ sub on_message_NICK {
     }
     my ($old_nick,$new_nick) = @{$hints}{qw<old_nick new_nick>};
     if ($self->is_nick_me($old_nick)) {
-        $mediabot->log_message(0,"* Your nick is now $new_nick");
+        $mediabot->{logger}->log(0,"* Your nick is now $new_nick");
         $self->_set_nick($new_nick);
     }
     else {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-            $mediabot->log_message(0,"[LIVE] * $old_nick is now known as $new_nick");
+            $mediabot->{logger}->log(0,"[LIVE] * $old_nick is now known as $new_nick");
         }
     }
     # Change nick in %hChannelsNicks
@@ -671,13 +695,13 @@ sub on_message_QUIT {
     my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
     if (defined($text) && ($text ne "")) {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-            $mediabot->log_message(0,"[LIVE] * Quits: $sNick ($sIdent\@$sHost) ($text)");
+            $mediabot->{logger}->log(0,"[LIVE] * Quits: $sNick ($sIdent\@$sHost) ($text)");
         }
         $mediabot->logBotAction($message,"quit",$sNick,undef,$text);
     }
     else {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-            $mediabot->log_message(0,"[LIVE] * Quits: $sNick ($sIdent\@$sHost) ()");
+            $mediabot->{logger}->log(0,"[LIVE] * Quits: $sNick ($sIdent\@$sHost) ()");
         }
         $mediabot->logBotAction($message,"quit",$sNick,undef,"");
     }
@@ -697,13 +721,13 @@ sub on_message_PART {
     shift @tArgs;
     if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-            $mediabot->log_message(0,"[LIVE] <$target_name> * Parts: $sNick ($sIdent\@$sHost) (" . $tArgs[0] . ")");
+            $mediabot->{logger}->log(0,"[LIVE] <$target_name> * Parts: $sNick ($sIdent\@$sHost) (" . $tArgs[0] . ")");
         }
         $mediabot->logBotAction($message,"part",$sNick,$target_name,$tArgs[0]);
     }
     else {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-            $mediabot->log_message(0,"[LIVE] <$target_name> * Parts: $sNick ($sIdent\@$sHost)");
+            $mediabot->{logger}->log(0,"[LIVE] <$target_name> * Parts: $sNick ($sIdent\@$sHost)");
         }
         $mediabot->logBotAction($message,"part",$sNick,$target_name,"");
         $mediabot->channelNicksRemove($target_name,$sNick);
@@ -721,7 +745,7 @@ sub on_message_PRIVMSG {
     if ( substr($where,0,1) eq '#' ) {
         # Message on channel
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-            $mediabot->log_message(0,"[LIVE] $where: <$who> $what");
+            $mediabot->{logger}->log(0,"[LIVE] $where: <$who> $what");
         }
         my $line = $what;
         $line =~ s/^\s+//;
@@ -773,9 +797,9 @@ sub on_message_PRIVMSG {
             my $luckyShot = rand(100);
             my $luckyShotHailoChatter = rand(100);
             if ( $luckyShot >= $mediabot->checkResponder($message,$who,$where,$what,@tArgs) ) {
-                $mediabot->log_message(3,"Found responder [$where] for $what with luckyShot : $luckyShot");
-                $mediabot->log_message(3,"I have a lucky shot to answer for $what");
-                $mediabot->log_message(3,"time : " . time . " getLastReponderTs() " . $mediabot->getLastReponderTs() . " delta " . (time - $mediabot->getLastReponderTs()));
+                $mediabot->{logger}->log(3,"Found responder [$where] for $what with luckyShot : $luckyShot");
+                $mediabot->{logger}->log(3,"I have a lucky shot to answer for $what");
+                $mediabot->{logger}->log(3,"time : " . time . " getLastReponderTs() " . $mediabot->getLastReponderTs() . " delta " . (time - $mediabot->getLastReponderTs()));
                 if ((time - $mediabot->getLastReponderTs()) >= 600 ) {
                     sleep int(rand(8)+2);
                     $mediabot->doResponder($message,$who,$where,$what,@tArgs)
@@ -794,7 +818,7 @@ sub on_message_PRIVMSG {
                             $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
                             my $sAnswer = $hailo->learn_reply($what);
                             if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
-                                $mediabot->log_message(4,"Hailo current nick learn_reply $what from $who : $sAnswer");
+                                $mediabot->{logger}->log(4,"Hailo current nick learn_reply $what from $who : $sAnswer");
                                 $mediabot->botPrivmsg($where,$sAnswer);
                             }
                         }
@@ -811,7 +835,7 @@ sub on_message_PRIVMSG {
                             $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
                             my $sAnswer = $hailo->learn_reply($what);
                             if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
-                                $mediabot->log_message(4,"HailoChatter learn_reply $what from $who : $sAnswer");
+                                $mediabot->{logger}->log(4,"HailoChatter learn_reply $what from $who : $sAnswer");
                                 $mediabot->botPrivmsg($where,$sAnswer);
                             }
                         }
@@ -832,10 +856,10 @@ sub on_message_PRIVMSG {
                                 my $hailo = $mediabot->get_hailo();
                                 $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
                                 $hailo->learn($what);
-                                $mediabot->log_message(4,"learnt $what from $who");
+                                $mediabot->{logger}->log(4,"learnt $what from $who");
                             }
                             else {
-                                $mediabot->log_message(4,"word count is out of range to learn $what from $who");
+                                $mediabot->{logger}->log(4,"word count is out of range to learn $what from $who");
                             }
                         }
                     }
@@ -855,12 +879,12 @@ sub on_message_PRIVMSG {
         # Private message hide passwords
         unless ( $what =~ /^login|^register|^pass|^newpass|^ident/i) {
             if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-                $mediabot->log_message(0,"[LIVE] $where: <$who> $what");
+                $mediabot->{logger}->log(0,"[LIVE] $where: <$who> $what");
             }
         }
         my ($sCommand,@tArgs) = split(/\s+/,$what);
         $sCommand =~ tr/A-Z/a-z/;
-        $mediabot->log_message(3,"sCommands = $sCommand");
+        $mediabot->{logger}->log(3,"sCommands = $sCommand");
         if (defined($sCommand) && ($sCommand ne "")) {
             switch($sCommand) {
                 case /restart/i		{
@@ -895,7 +919,7 @@ sub on_message_TOPIC(@) {
     my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
     unless(defined($text)) { $text="";}
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-        $mediabot->log_message(0,"[LIVE] <$target_name> * $sNick changes topic to '$text'");
+        $mediabot->{logger}->log(0,"[LIVE] <$target_name> * $sNick changes topic to '$text'");
     }
     $mediabot->logBotAction($message,"topic",$sNick,$target_name,$text);
 }
@@ -904,7 +928,7 @@ sub on_message_LIST(@) {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_LIST', $message);
     my ($target_name) = @{$hints}{qw<target_name>};
-    $mediabot->log_message(2,"on_message_LIST() $target_name");
+    $mediabot->{logger}->log(2,"on_message_LIST() $target_name");
 }
 
 sub on_message_RPL_NAMEREPLY {
@@ -935,33 +959,33 @@ sub on_message_RPL_ENDOFNAMES {
     log_debug_args('on_message_RPL_ENDOFNAMES', $message);
     my @args = $message->args;
     my $channel = $args[1] // '<unknown>';
-    $mediabot->log_message(2,"on_message_RPL_ENDOFNAMES() $channel");
+    $mediabot->{logger}->log(2,"on_message_RPL_ENDOFNAMES() $channel");
     if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE')==1)) {
-        $mediabot->log_message(0,"[LIVE] * Now talking in $channel");
+        $mediabot->{logger}->log(0,"[LIVE] * Now talking in $channel");
     }
-    $mediabot->log_message(2,"Joined channel: $channel");
+    $mediabot->{logger}->log(2,"Joined channel: $channel");
 }
 
 sub on_message_WHO(@) {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_WHO', $message);
     my ($target_name) = @{$hints}{qw<target_name>};
-    $mediabot->log_message(0,"on_message_WHO() $target_name");
+    $mediabot->{logger}->log(0,"on_message_WHO() $target_name");
 }
 
 sub on_message_WHOIS(@) {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_WHOIS', $message);
-    $mediabot->log_message(3,Dumper($message));
+    $mediabot->{logger}->log(3,Dumper($message));
     my ($target_name) = @{$hints}{qw<target_name>};
-    $mediabot->log_message(0,"on_message_WHOIS() $target_name");
+    $mediabot->{logger}->log(0,"on_message_WHOIS() $target_name");
 }
 
 sub on_message_WHOWAS {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_WHOWAS', $message);
     my ($target_name) = @{$hints}{qw<target_name>};
-    $mediabot->log_message(0,"on_message_WHOWAS() $target_name");
+    $mediabot->{logger}->log(0,"on_message_WHOWAS() $target_name");
 }
                 
 sub on_message_JOIN {
@@ -976,12 +1000,12 @@ sub on_message_JOIN {
     my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
     if ( $sNick eq $self->nick ) {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-            $mediabot->log_message(0,"[LIVE] * Now talking in $target_name");
+            $mediabot->{logger}->log(0,"[LIVE] * Now talking in $target_name");
         }
     }
     else {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-            $mediabot->log_message(0,"[LIVE] <$target_name> * Joins $sNick ($sIdent\@$sHost)");
+            $mediabot->{logger}->log(0,"[LIVE] <$target_name> * Joins $sNick ($sIdent\@$sHost)");
         }
         $mediabot->userOnJoin($message,$target_name,$sNick);
         push @{$hChannelsNicks{$target_name}}, $sNick;
@@ -994,21 +1018,21 @@ sub on_message_001 {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_001', $message);
     my ($text) = @{$hints}{qw<text>};
-    $mediabot->log_message(0,"001 $text");
+    $mediabot->{logger}->log(0,"001 $text");
 }
         
 sub on_message_002 {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_002', $message);
     my ($text) = @{$hints}{qw<text>};
-    $mediabot->log_message(0,"002 $text");
+    $mediabot->{logger}->log(0,"002 $text");
 }
         
 sub on_message_003 {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_003', $message);
     my ($text) = @{$hints}{qw<text>};
-    $mediabot->log_message(0,"003 $text");
+    $mediabot->{logger}->log(0,"003 $text");
 }
         
 # Numeric 004 – Server version/info
@@ -1020,7 +1044,7 @@ sub on_message_004 {
     my $version = $args[1] // '<unknown>';
     my $user_modes = $args[2] // '';
     my $chan_modes = $args[3] // '';
-    $mediabot->log_message(0, "004 server=$server version=$version user_modes=$user_modes chan_modes=$chan_modes");
+    $mediabot->{logger}->log(0, "004 server=$server version=$version user_modes=$user_modes chan_modes=$chan_modes");
 }
         
 # Numeric 005 – ISUPPORT
@@ -1030,7 +1054,7 @@ sub on_message_005 {
     my @args = $message->args;
     shift @args; # Remove nickname (first arg)
     my $features = join(" ", @args);
-    $mediabot->log_message(0, "005 $features");
+    $mediabot->{logger}->log(0, "005 $features");
 }
         
 sub on_motd {
@@ -1038,7 +1062,7 @@ sub on_motd {
     log_debug_args('on_motd', $message);
     my @motd_lines = @{$hints}{qw<motd>};
     foreach my $line (@{$motd_lines[0]}) {
-        $mediabot->log_message(0,"-motd- $line");
+        $mediabot->{logger}->log(0,"-motd- $line");
     }
 }
     
@@ -1049,11 +1073,11 @@ sub on_message_RPL_WHOISUSER {
     my @tArgs = $message->args;
     my $sHostname = $tArgs[3];
     my ($target_name,$ident,$host,$flags,$realname) = @{$hints}{qw<target_name ident host flags realname>};
-    $mediabot->log_message(0,"$target_name is $ident\@$sHostname $flags $realname");
+    $mediabot->{logger}->log(0,"$target_name is $ident\@$sHostname $flags $realname");
     if (defined($WHOIS_VARS{'nick'}) && ($WHOIS_VARS{'nick'} eq $target_name) && defined($WHOIS_VARS{'sub'}) && ($WHOIS_VARS{'sub'} ne "")) {
         switch($WHOIS_VARS{'sub'}) {
             case "userVerifyNick" {
-                $mediabot->log_message(3,"WHOIS userVerifyNick");
+                $mediabot->{logger}->log(3,"WHOIS userVerifyNick");
                 my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = $mediabot->getNickInfoWhois("$ident\@$sHostname");
                 if (defined($WHOIS_VARS{'caller'}) && ($WHOIS_VARS{'caller'} ne "")) {
                     if (defined($iMatchingUserId)) {
@@ -1071,7 +1095,7 @@ sub on_message_RPL_WHOISUSER {
                 }
             }
             case "userAuthNick" {
-                $mediabot->log_message(3,"WHOIS userAuthNick");
+                $mediabot->{logger}->log(3,"WHOIS userAuthNick");
                 my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = $mediabot->getNickInfoWhois("$ident\@$sHostname");
                 if (defined($WHOIS_VARS{'caller'}) && ($WHOIS_VARS{'caller'} ne "")) {
                     if (defined($iMatchingUserId)) {
@@ -1082,7 +1106,7 @@ sub on_message_RPL_WHOISUSER {
                             my $sQuery = "UPDATE USER SET auth=1 WHERE nickname=?";
                             my $sth = $mediabot->getDbh->prepare($sQuery);
                             unless ($sth->execute($sMatchingUserHandle)) {
-                                $mediabot->log_message(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+                                $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
                             }
                             else {
                                 $mediabot->botNotice($WHOIS_VARS{'caller'},"$target_name has been authenticated. User $sMatchingUserHandle ($iMatchingUserLevelDesc)");
@@ -1097,7 +1121,7 @@ sub on_message_RPL_WHOISUSER {
                 }
             }
             case "userAccessChannel" {
-                $mediabot->log_message(3,"WHOIS userAccessChannel");
+                $mediabot->{logger}->log(3,"WHOIS userAccessChannel");
                 my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = $mediabot->getNickInfoWhois("$ident\@$sHostname");
                 if (defined($WHOIS_VARS{'caller'}) && ($WHOIS_VARS{'caller'} ne "")) {
                     unless (defined($sMatchingUserHandle)) {
@@ -1115,7 +1139,7 @@ sub on_message_RPL_WHOISUSER {
                             my $sQuery = "SELECT automode,greet FROM USER,USER_CHANNEL,CHANNEL WHERE CHANNEL.id_channel=USER_CHANNEL.id_channel AND USER.id_user=USER_CHANNEL.id_user AND nickname like ? AND CHANNEL.name=?";
                             my $sth = $mediabot->getDbh->prepare($sQuery);
                             unless ($sth->execute($sMatchingUserHandle,$WHOIS_VARS{'channel'})) {
-                                $mediabot->log_message(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+                                $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
                             }
                             else {
                                 my $sAuthUserStr;
@@ -1139,7 +1163,7 @@ sub on_message_RPL_WHOISUSER {
                 }  
             }
             case "mbWhereis" {
-                $mediabot->log_message(3,"WHOIS mbWhereis");
+                $mediabot->{logger}->log(3,"WHOIS mbWhereis");
                 my $country = $mediabot->whereis($sHostname);
                 if (defined($country)) {
                     $mediabot->botPrivmsg($WHOIS_VARS{'channel'},"($WHOIS_VARS{'caller'} whereis $WHOIS_VARS{'nick'}) Country : $country");
@@ -1155,7 +1179,7 @@ sub on_message_RPL_WHOISUSER {
 sub on_message_ERROR(@) {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_ERROR', $message);
-    $mediabot->log_message(0, "ERROR from server: " . join(" ", @{ $message->args }));
+    $mediabot->{logger}->log(0, "ERROR from server: " . join(" ", @{ $message->args }));
     # optionally $mediabot->clean_and_exit(1);
 }
 
@@ -1163,14 +1187,14 @@ sub on_message_KILL {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_KILL', $message);
     my ($killer, $victim, $reason) = @{ $message->args };
-    $mediabot->log_message(0, "Killed by $killer: $reason – will reconnect.");
+    $mediabot->{logger}->log(0, "Killed by $killer: $reason – will reconnect.");
     # reconnect logic if desired
 }
 
 sub on_message_SERVER {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_SERVER', $message);
-    $mediabot->log_message(0, "SERVER message: " . join(" ", @{ $message->args }));
+    $mediabot->{logger}->log(0, "SERVER message: " . join(" ", @{ $message->args }));
 }
 
 # Numeric 332 RPL_TOPIC
@@ -1180,7 +1204,7 @@ sub on_message_RPL_TOPIC {
     my @args = $message->args;
     my $channel = $args[1] // '<unknown>';
     my $topic   = $args[2] // '<none>';
-    $mediabot->log_message(0, "Topic for $channel: $topic");
+    $mediabot->{logger}->log(0, "Topic for $channel: $topic");
 }
 
 # Numeric 333 RPL_TOPICWHOTIME
@@ -1192,49 +1216,49 @@ sub on_message_RPL_TOPICWHOTIME {
     my $setter  = $args[2] // '<unknown>';
     my $ts      = $args[3] // time;
     my $time    = scalar localtime($ts);
-    $mediabot->log_message(0, "Topic for $channel set by $setter on $time");
+    $mediabot->{logger}->log(0, "Topic for $channel set by $setter on $time");
 }
 
 sub on_message_RPL_LIST {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_LIST', $message);
     my ($chan, $users, $topic) = @{ $message->args };
-    $mediabot->log_message(2, "Channel $chan ($users users): $topic");
+    $mediabot->{logger}->log(2, "Channel $chan ($users users): $topic");
 }
 
 sub on_message_RPL_LISTEND {
-    $mediabot->log_message(2, "End of channel list.");
+    $mediabot->{logger}->log(2, "End of channel list.");
 }
 
 sub on_message_RPL_WHOREPLY {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_WHOREPLY', $message);
-    $mediabot->log_message(2, "WHO reply: " . join(" ", @{ $message->args }));
+    $mediabot->{logger}->log(2, "WHO reply: " . join(" ", @{ $message->args }));
 }
 
 sub on_message_RPL_ENDOFWHO {
-    $mediabot->log_message(2, "End of WHO list.");
+    $mediabot->{logger}->log(2, "End of WHO list.");
 }
 
 sub on_message_RPL_WHOISCHANNELS {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_WHOISCHANNELS', $message);
     my ($nick, $chans) = @{ $message->args };
-    $mediabot->log_message(0, "$nick on channels: $chans");
+    $mediabot->{logger}->log(0, "$nick on channels: $chans");
 }
 
 sub on_message_RPL_WHOISSERVER {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_WHOISSERVER', $message);
     my ($nick, $server, $info) = @{ $message->args };
-    $mediabot->log_message(0, "$nick server $server ($info)");
+    $mediabot->{logger}->log(0, "$nick server $server ($info)");
 }
 
 sub on_message_RPL_WHOISIDLE {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_WHOISIDLE', $message);
     my ($nick, $idle, $signon) = @{ $message->args };
-    $mediabot->log_message(0, "$nick idle for ${idle}s, signon: " . scalar localtime($signon));
+    $mediabot->{logger}->log(0, "$nick idle for ${idle}s, signon: " . scalar localtime($signon));
 }
 
 sub on_message_ERR_NICKNAMEINUSE {
@@ -1243,7 +1267,7 @@ sub on_message_ERR_NICKNAMEINUSE {
     my $conflict = $message->args->[1] // '';
     my $new_nick = $self->nick_folded . "_";
     $self->change_nick($new_nick);
-    $mediabot->log_message(0, "Nick “$conflict” in use, switched to $new_nick");
+    $mediabot->{logger}->log(0, "Nick “$conflict” in use, switched to $new_nick");
 }
 
 sub on_message_RPL_MYINFO {
@@ -1251,35 +1275,35 @@ sub on_message_RPL_MYINFO {
     log_debug_args('on_message_RPL_MYINFO', $message);
     # args = [ servername, version, user_modes, chan_modes ]
     my @a = @{$message->args};
-    $mediabot->log_message(4,"Server info: host=$a[0], ver=$a[1], umodes=$a[2], cmodes=$a[3]");
+    $mediabot->{logger}->log(4,"Server info: host=$a[0], ver=$a[1], umodes=$a[2], cmodes=$a[3]");
 }
 
 sub on_message_RPL_ISUPPORT {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_ISUPPORT', $message);
     # args = [ token1, token2, … ]
-    $mediabot->log_message(5, "ISUPPORT tokens: " . join(' ', @{$message->args}));
+    $mediabot->{logger}->log(5, "ISUPPORT tokens: " . join(' ', @{$message->args}));
 }
 
 sub on_message_RPL_INVITING {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_INVITING', $message);
     my ($nick, $channel) = @{$message->args}[1,2];
-    $mediabot->log_message(2, "You have been invited: $nick -> $channel");
+    $mediabot->{logger}->log(2, "You have been invited: $nick -> $channel");
 }
 
 sub on_message_RPL_INVITELIST {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_INVITELIST', $message);
     my ($channel, $nick) = @{$message->args}[1,2];
-    $mediabot->log_message(4, "Invite list for $channel: $nick");
+    $mediabot->{logger}->log(4, "Invite list for $channel: $nick");
 }
 
 sub on_message_RPL_ENDOFINVITELIST {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_ENDOFINVITELIST', $message);
     my $channel = $message->args->[1];
-    $mediabot->log_message(4, "End of invite list for $channel");
+    $mediabot->{logger}->log(4, "End of invite list for $channel");
 }
 
 sub on_message_ERR_NEEDMOREPARAMS {
@@ -1287,7 +1311,7 @@ sub on_message_ERR_NEEDMOREPARAMS {
     log_debug_args('on_message_ERR_NEEDMOREPARAMS', $message);
     # args = [ your_nick, command, "Not enough parameters" ]
     my ($me, $cmd) = @{$message->args}[0,1];
-    $mediabot->log_message(1, "ERR_NEEDMOREPARAMS for $cmd – vérifiez la syntaxe.");
+    $mediabot->{logger}->log(1, "ERR_NEEDMOREPARAMS for $cmd – vérifiez la syntaxe.");
 }
 
 sub reconnect {
@@ -1355,7 +1379,7 @@ sub reconnect {
     $sServerPass = $mediabot->getServerPass();
     $sServerPassDisplay = ( $sServerPass eq "" ? "none defined" : $sServerPass );
     $bNickTriggerCommand =$mediabot->getNickTrigger();
-    $mediabot->log_message(0,"Trying to connect to " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort() . " (pass : $sServerPassDisplay)");
+    $mediabot->{logger}->log(0,"Trying to connect to " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort() . " (pass : $sServerPassDisplay)");
     
     $login = $irc->login(
         pass => $sServerPass,
