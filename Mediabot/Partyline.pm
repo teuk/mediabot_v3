@@ -25,6 +25,11 @@ sub new {
     return $self;
 }
 
+sub get_port {
+    my ($self) = @_;
+    return $self->{bot}->{conf}->get("main.PARTYLINE_PORT") || 23456;
+}
+
 sub _start_listener {
     my ($self) = @_;
     my $loop = $self->{loop};
@@ -82,8 +87,9 @@ sub _handle_line {
     unless ($user->{authenticated}) {
         if ($line =~ /^login\s+(\S+)\s+(\S+)$/) {
             my ($login, $password) = ($1, $2);
-            my $id_user = getIdUser($self->{bot}, $login);
-            if ($id_user && verifyPassword($self->{bot}, $id_user, $password)) {
+            my $id_user = $self->{bot}->getIdUser($login);
+
+            if ($id_user && $self->{bot}->{auth}->verify_credentials($id_user, $login, $password)) {
                 $user->{authenticated} = 1;
                 $user->{login} = $login;
                 $stream->write("✅ Authenticated as $login\nType .help for available commands.\n");
@@ -98,23 +104,40 @@ sub _handle_line {
         return;
     }
 
-    # Commandes partyline
     if ($line eq '.stat') {
-        my $channels = $self->{bot}->{channels};
-        my $txt = "🛰️ Mediabot channel status:\n";
-        foreach my $chan (sort keys %$channels) {
-            my $c = $channels->{$chan};
-            my $irc_status = $self->{bot}->{irc}->is_on_channel($chan) ? "✅ joined" : "❌ not joined";
-            $txt .= " - $chan : $irc_status\n";
-        }
-        $stream->write($txt);
+        # Get the bot's current nickname (folded form)
+        my $nick = $self->{bot}->{irc}->nick_folded;
+
+        # Store the current stream in the Partyline object, indexed by file descriptor
+        # This will allow the WHOIS response handler to send data back to the user
+        $self->{streams}{$id} = $stream;
+
+        # Prepare the WHOIS_VARS used to track this WHOIS request
+        my %WHOIS_VARS = (
+            nick    => $nick,
+            caller  => $id,
+            sub     => "statPartyline",   # Stub: response handler should match on this
+            message => undef,             # Stub: will hold original IRC message if needed
+            channel => undef,             # Not required for stat
+        );
+
+        # Set the WHOIS_VARS hash in the bot object (used later in IRC WHOIS response)
+        %{ $self->{bot}->{WHOIS_VARS} } = %WHOIS_VARS;
+
+        # Send the WHOIS request for our own bot nick
+        #$self->{bot}->{irc}->send_message("WHOIS", undef, $nick);
+
+        # Inform the user we are waiting for a reply from the IRC server
+        $stream->write("⌛ Retrieving channel status from IRC...\n");
     }
     elsif ($line eq '.help') {
-        $stream->write(".stat - Show bot status\n.help - Show this help\n");
+        $stream->write(".stat - Show bot channel join status\n.help - Show this help message\n");
     }
     else {
-        $stream->write("Unknown command. Type .help\n");
+        $stream->write("Unknown command. Type .help for a list of available commands.\n");
     }
+
 }
+
 
 1;

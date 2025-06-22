@@ -50,6 +50,64 @@ sub get_auto_join        { return shift->{auto_join}; }
 # Get chanmode status
 sub get_chanmode        { return shift->{chanmode}; }
 
+# Get user level in this channel
+sub get_user_level {
+    my ($self, $nickname) = @_;
+    my $level = 0;
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT level
+        FROM USER
+        JOIN USER_CHANNEL USING (id_user)
+        WHERE id_channel = ?
+          AND nickname = ?
+    });
+
+    if ($sth->execute($self->{id}, $nickname)) {
+        if (my $ref = $sth->fetchrow_hashref) {
+            $level = $ref->{level};
+        }
+    } else {
+        $self->{logger}->log(1, "get_user_level SQL error: $DBI::errstr");
+    }
+
+    $sth->finish;
+    return $level;
+}
+
+# Get user info (level, automode, greet) in this channel
+sub get_user_info {
+    my ($self, $nickname) = @_;
+    my $info = {
+        level    => 0,
+        automode => 'None',
+        greet    => 'None',
+    };
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT level, automode, greet
+        FROM USER
+        JOIN USER_CHANNEL USING (id_user)
+        WHERE id_channel = ?
+          AND nickname = ?
+    });
+
+    if ($sth->execute($self->{id}, $nickname)) {
+        if (my $ref = $sth->fetchrow_hashref) {
+            $info->{level}    = $ref->{level}    if defined $ref->{level};
+            $info->{automode} = $ref->{automode} if defined $ref->{automode};
+            $info->{greet}    = $ref->{greet}    if defined $ref->{greet};
+        }
+    } else {
+        $self->{logger}->log(1, "get_user_info SQL error: $DBI::errstr");
+    }
+
+    $sth->finish;
+    return $info;
+}
+
+
+
 # ------------------------
 # SETTERS (with database update)
 # ------------------------

@@ -155,9 +155,6 @@ $mediabot->{logger} = Mediabot::Log->new(
     logfile     => $mediabot->{conf}->get('main.MAIN_LOG_FILE'),
 );
 
-# Display Partyline port in debug log
-$mediabot->{logger}->log(3, "Partyline port is: " . $mediabot->{conf}->get("main.PARTYLINE_PORT"));
-
 # === Single‐Instance Guard ===
 
 # Retrieve PID file path and stored PID
@@ -246,12 +243,14 @@ my $loop = IO::Async::Loop->new;
 $mediabot->setLoop($loop);
 
 # Initialize partyline
-my $partyline = Mediabot::Partyline->new(
-    bot  => $mediabot,
-    loop => $loop,
-    port => $mediabot->{conf}->get("main.PARTYLINE_PORT"),
-);
-$mediabot->{partyline} = $partyline;  # ← optionnel : accès plus tard dans le bot
+#my $partyline = Mediabot::Partyline->new(
+#    bot  => $mediabot,
+#    loop => $loop,
+#    port => $mediabot->{conf}->get("main.PARTYLINE_PORT"),
+#);
+#$mediabot->{partyline} = $partyline;
+#my $partyline_port = $mediabot->{partyline}->get_port;
+#$mediabot->{logger}->log(3, "Partyline port is: $partyline_port");
 
 # Set up main timer
 my $timer = IO::Async::Timer::Periodic->new(
@@ -1172,6 +1171,33 @@ sub on_message_RPL_WHOISUSER {
                     $mediabot->botPrivmsg($WHOIS_VARS{'channel'},"($WHOIS_VARS{'caller'} whereis $WHOIS_VARS{'nick'}) Country : $country");
                 }
             }
+            case "statPartyline" {
+               $mediabot->{logger}->log(3, "WHOIS statPartyline");
+
+               my $fd = $WHOIS_VARS{'caller'};
+               my $stream = $mediabot->{partyline}->{streams}{$fd};
+               unless ($stream) {
+                   $mediabot->{logger}->log(1, "statPartyline: stream $fd not found");
+                   return;
+               }
+
+               my $args_ref = $message->args;
+               my @args = ref($args_ref) eq 'ARRAY' ? @$args_ref : ();
+               my $channels_str = $args[2] // "";
+
+               my %joined = map { $_ => 1 } grep { /^#/ } split /\s+/, $channels_str;
+
+               my $txt = "🛰️ Mediabot channel status:\n";
+               foreach my $chan (sort keys %{ $mediabot->{channels} }) {
+                   if ($joined{$chan}) {
+                       $txt .= " - $chan : ✅ joined\n";
+                   } else {
+                       $txt .= " - $chan : ❌ not joined\n";
+                   }
+               }
+               $stream->write($txt);
+           }
+
         }
     }
 }
@@ -1243,7 +1269,14 @@ sub on_message_RPL_ENDOFWHO {
 sub on_message_RPL_WHOISCHANNELS {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_WHOISCHANNELS', $message);
-    my ($nick, $chans) = @{ $message->args };
+
+    my $args_ref = $message->args;
+    my @args = ref($args_ref) eq 'ARRAY' ? @$args_ref : ();
+
+    my ($nick, $chans) = @args;
+    $nick  //= "<undef>";
+    $chans //= "";
+
     $mediabot->{logger}->log(0, "$nick on channels: $chans");
 }
 

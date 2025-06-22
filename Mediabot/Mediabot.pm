@@ -108,97 +108,75 @@ sub readConfigFile {
     return 1;
 }
 
-# getVersion – returns the current and latest version of the program
-sub getVersion(@) {
+# getVersion – retrieves the current local version and compares it to the latest GitHub version
+sub getVersion {
     my $self = shift;
-    my ($MAIN_PROG_VERSION, $MAIN_GIT_VERSION) = ("Undefined", "Undefined");
-    my ($cVerMajor, $cVerMinor, $cStable, $cVerDev);
-    my ($gVerMajor, $gVerMinor, $gStable, $gVerDev);
+    my ($local_version, $remote_version) = ("Undefined", "Undefined");
+    my ($c_major, $c_minor, $c_type, $c_dev_info);
+    my ($r_major, $r_minor, $r_type, $r_dev_info);
 
-    # Get current version from VERSION file
-    $self->{logger}->log(0, "Getting current version from VERSION file");
+    $self->{logger}->log(0, "Reading local version from VERSION file...");
 
+    # Read local VERSION file
     if (open my $fh, '<', 'VERSION') {
-        my $line = <$fh>;
+        chomp($local_version = <$fh>);
         close $fh;
-        if (defined $line) {
-            chomp($line);
-            $MAIN_PROG_VERSION = $line;
-            ($cVerMajor, $cVerMinor, $cStable, $cVerDev) = getDetailedVersion($self, $MAIN_PROG_VERSION);
-        }
+        ($c_major, $c_minor, $c_type, $c_dev_info) = $self->getDetailedVersion($local_version);
     } else {
-        $self->{logger}->log(0, "Could not get version from VERSION file");
+        $self->{logger}->log(0, "Unable to read local VERSION file.");
     }
 
-    if (defined $cVerMajor && $cVerMajor ne '' &&
-        defined $cVerMinor && $cVerMinor ne '' &&
-        defined $cStable    && $cStable    ne '') {
-        
-        my $suffix = (defined $cVerDev && $cVerDev ne '') ? "($cVerDev)" : '';
-        $self->{logger}->log(0, "-> Mediabot $cStable version $cVerMajor.$cVerMinor $suffix");
+    if (defined $c_major && defined $c_minor && defined $c_type) {
+        my $suffix = $c_dev_info ? "($c_dev_info)" : '';
+        $self->{logger}->log(0, "-> Mediabot $c_type version $c_major.$c_minor $suffix");
     } else {
-        $self->{logger}->log(0, "-> Mediabot unknown version detected: $MAIN_PROG_VERSION");
+        $self->{logger}->log(0, "-> Unknown local version format: $local_version");
     }
 
-    # Check latest version from GitHub if local version is defined
-    if ($MAIN_PROG_VERSION ne 'Undefined') {
-        $self->{logger}->log(0, "Checking latest version from GitHub (https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION)");
+    # If we have a valid local version, try fetching the GitHub version
+    if ($local_version ne "Undefined") {
+        $self->{logger}->log(0, "Checking latest version from GitHub...");
 
         if (open my $gh, '-|', 'curl --connect-timeout 5 -f -s https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION') {
-            my $line = <$gh>;
+            chomp($remote_version = <$gh>);
             close $gh;
-            if (defined $line) {
-                chomp($line);
-                $MAIN_GIT_VERSION = $line;
-                ($gVerMajor, $gVerMinor, $gStable, $gVerDev) = getDetailedVersion($self, $MAIN_GIT_VERSION);
+            ($r_major, $r_minor, $r_type, $r_dev_info) = $self->getDetailedVersion($remote_version);
 
-                if (defined $gVerMajor && $gVerMajor ne '' &&
-                    defined $gVerMinor && $gVerMinor ne '' &&
-                    defined $gStable    && $gStable    ne '') {
-                    
-                    my $suffix = (defined $gVerDev && $gVerDev ne '') ? "($gVerDev)" : '';
-                    $self->{logger}->log(0, "-> Mediabot GitHub $gStable version $gVerMajor.$gVerMinor $suffix");
+            if (defined $r_major && defined $r_minor && defined $r_type) {
+                my $suffix = $r_dev_info ? "($r_dev_info)" : '';
+                $self->{logger}->log(0, "-> GitHub $r_type version $r_major.$r_minor $suffix");
 
-                    if ($MAIN_PROG_VERSION eq $MAIN_GIT_VERSION) {
-                        $self->{logger}->log(0, "Mediabot is up to date");
-                    } else {
-                        $self->{logger}->log(0, "Mediabot should be updated to $gStable version $gVerMajor.$gVerMinor $suffix");
-                    }
+                if ($local_version eq $remote_version) {
+                    $self->{logger}->log(0, "Mediabot is up to date.");
                 } else {
-                    $self->{logger}->log(0, "Mediabot unknown GitHub version detected: $MAIN_GIT_VERSION");
+                    $self->{logger}->log(0, "Update available: $r_type version $r_major.$r_minor $suffix");
                 }
             } else {
-                $self->{logger}->log(0, "Could not read line from GitHub version stream");
+                $self->{logger}->log(0, "Unknown remote version format: $remote_version");
             }
         } else {
-            $self->{logger}->log(0, "Could not get version from GitHub");
+            $self->{logger}->log(0, "Failed to fetch version from GitHub.");
         }
     }
 
-    $self->{main_prog_version} = $MAIN_PROG_VERSION;
-    return ($MAIN_PROG_VERSION, $MAIN_GIT_VERSION);
+    $self->{main_prog_version} = $local_version;
+    return ($local_version, $remote_version);
 }
 
+# getDetailedVersion – parses a version string and returns its components
+sub getDetailedVersion {
+    my ($self, $version_string) = @_;
 
-sub getDetailedVersion(@) {
-	my ($self,$sVersion) = @_;
-	my ($str1,$str2) = split(/\./,$sVersion);
-	if ( $str2 =~ /^[0-9]+$/) {
-		# Stable version
-		#print time2str("[%d/%m/%Y %H:%M:%S]",time) . " [DEBUG1] getVersion() Mediabot stable $str1.$str2\n";
-		return ($str1,$str2,"stable",undef);
-	}
-	elsif ( $str2 =~ /dev/ ) {
-		# Devel version
-		my ($sMinor,$sReleaseDate) = split(/\-/,$str2);
-		$sMinor =~ s/dev//;
-		#print time2str("[%d/%m/%Y %H:%M:%S]",time) . " [DEBUG1] getVersion() Mediabot devel $str1.$sMinor ($sReleaseDate)\n";
-		return ($str1,$sMinor,"devel",$sReleaseDate);
-	}
-	else {
-		#print time2str("[%d/%m/%Y %H:%M:%S]",time) . " [DEBUG1] getVersion() Mediabot unknown version : $sVersion\n";
-		return (undef,undef,undef,undef);
-	}
+    # Expecting version format like: 3.0 or 3.0dev-20250614_192031
+    if ($version_string =~ /^(\d+)\.(\d+)$/) {
+        # Stable version
+        return ($1, $2, "stable", undef);
+    } elsif ($version_string =~ /^(\d+)\.(\d+)dev[-_]?([\d_]+)$/) {
+        # Dev version like 3.0dev-20250614_192031
+        return ($1, $2, "devel", $3);
+    } else {
+        return (undef, undef, undef, undef);
+    }
 }
 
 sub getDebugLevel(@) {
@@ -674,6 +652,23 @@ sub getIdUser(@) {
 	}
 	$sth->finish;
 	return $id_user;
+}
+
+# Get channel object by name
+sub get_channel_by_name {
+    my ($self, $name) = @_;
+    my $sth = $self->{dbh}->prepare("SELECT id_channel FROM CHANNEL WHERE name = ?");
+    return undef unless $sth->execute($name);
+    if (my $ref = $sth->fetchrow_hashref) {
+        require Mediabot::Channel;
+        return Mediabot::Channel->new(
+            dbh     => $self->{dbh},
+            logger  => $self->{logger},
+            id      => $ref->{id_channel},
+            name    => $name,
+        );
+    }
+    return undef;
 }
 
 # Get channel name from channel id
@@ -1892,42 +1887,6 @@ sub checkAuth(@) {
 	}
 	$sth->finish;
 }
-
-# User login command
-#sub userLogin(@) {
-#	my ($self,$message,$sNick,@tArgs) = @_;
-#	#login <username> <password>
-#	if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] ne "")) {
-#		my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-#		if (defined($iMatchingUserId)) {
-#			unless (defined($sMatchingUserPasswd)) {
-#				botNotice($self,$sNick,"Your password is not set. Use /msg " . $self->{irc}->nick_folded . " pass password");
-#			}
-#			else {
-#				if (checkAuth($self,$iMatchingUserId,$tArgs[0],$tArgs[1])) {
-#					botNotice($self,$sNick,"Login successfull as $sMatchingUserHandle (Level : $iMatchingUserLevelDesc)");
-#					my $sNoticeMsg = $message->prefix . " Successfull login as $sMatchingUserHandle (Level : $iMatchingUserLevelDesc)";
-#					noticeConsoleChan($self,$sNoticeMsg);
-#					logBot($self,$message,undef,"login",($tArgs[0],"Success"));
-#				}
-#				else {
-#					botNotice($self,$sNick,"Login failed (Bad password).");
-#					my $sNoticeMsg = $message->prefix . " Failed login (Bad password)";
-#					noticeConsoleChan($self,$sNoticeMsg);
-#					logBot($self,$message,undef,"login",($tArgs[0],"Failed (Bad password)"));
-#				}
-#			}
-#		}
-#		else {
-#			my $sNoticeMsg = $message->prefix . " Failed login (hostmask may not be present in database)";
-#			noticeConsoleChan($self,$sNoticeMsg);
-#			logBot($self,$message,undef,"login",($tArgs[0],"Failed (Bad hostmask)"));
-#		}
-#	}
-#	else {
-#		botNotice($self,$sNick,"Syntax error : /msg " . $self->{irc}->nick_folded . " login <username> <password>");
-#	}
-#}
 
 sub userLogin(@) {
     my ($self,$message,$sNick,@tArgs) = @_;
