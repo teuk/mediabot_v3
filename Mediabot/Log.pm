@@ -11,6 +11,7 @@ sub new {
 
     if (defined $args{logfile}) {
         open my $fh, '>>:utf8', $args{logfile} or die "Cannot open logfile $args{logfile}: $!";
+        $fh->autoflush(1);
         $self->{logfilehandle} = $fh;
     }
 
