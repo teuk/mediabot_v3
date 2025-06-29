@@ -155,7 +155,11 @@ $mediabot->{logger} = Mediabot::Log->new(
     logfile     => $mediabot->{conf}->get('main.MAIN_LOG_FILE'),
 );
 
-# === Single‐Instance Guard ===
+# Check config
+if ( $MAIN_PROG_CHECK_CONFIG != 0 ) {
+    $mediabot->dumpConfig();
+    $mediabot->clean_and_exit(0);
+}
 
 # Retrieve PID file path and stored PID
 my $pidfile = $mediabot->getPidFile();
@@ -186,11 +190,7 @@ if (defined $pid && $pid =~ /^\d+$/) {
 
 ($MAIN_PROG_VERSION,$MAIN_GIT_VERSION) = $mediabot->getVersion();
 
-# Check config
-if ( $MAIN_PROG_CHECK_CONFIG != 0 ) {
-    $mediabot->dumpConfig();
-    $mediabot->clean_and_exit(0);
-}
+
 
 log_info("mediabot_v3 Copyright (C) 2019-2025 teuk");
 log_info("Mediabot v$MAIN_PROG_VERSION starting with config file $CONFIG_FILE");

@@ -6747,7 +6747,7 @@ sub mbDebug(@) {
 	# Update in memory
 	$self->{cfg}       = $cfg;
 	$self->{MAIN_CONF} = $cfg->vars(); # backward compat
-	
+
 	# 🔥 Apply change to the logger object now
 	$self->{logger}->{debug_level} = $level;
 
@@ -6834,25 +6834,27 @@ sub mbJump(@) {
 	}
 }
 
+# Make a string with colors
 sub make_colors {
-	my ($self,$string) = @_;
-	Encode::_utf8_on($string);
-	my $newstr = "";
-	my $color;
-	for (my $c = 0; $c < length($string); $c++) {
-		my $char = substr($string, $c, 1);
-		if ($char eq ' ') {
-			$newstr .= $char;
-			next;
-		}
-		$newstr .= "\003";
-		$newstr .= int(rand(100));
-		$newstr .= ",";
-		$newstr .= int(rand(100));
-		$newstr .= $char;
-	}
+    my ($self, $string) = @_;
+    Encode::_utf8_on($string);
 
-	return $newstr;
+    my @palette = (3, 7, 8, 9, 10, 11, 12, 13);  # green → pink
+    my $num_colors = scalar @palette;
+    my $newstr = "";
+
+    my $i = 0;
+    for my $char (split //, $string) {
+        if ($char eq ' ') {
+            $newstr .= $char;
+            next;
+        }
+        my $color = $palette[$i % $num_colors];
+        $newstr .= "\003" . sprintf("%02d", $color) . $char;
+        $i++;
+    }
+
+    return $newstr;
 }
 
 sub mbColors(@) {
