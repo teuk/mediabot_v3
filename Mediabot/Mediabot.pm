@@ -896,7 +896,7 @@ sub botPrivmsg(@) {
 						}
 					}
 				}
-				$self->{logger}->log(0,"$sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
+				$self->{logger}->log(0,"[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
 				my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND name=?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($sTo) ) {
@@ -966,7 +966,7 @@ sub botAction(@) {
 						}
 					}
 				}
-				$self->{logger}->log(0,"$sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
+				$self->{logger}->log(0,"[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
 				my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND name=?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($sTo) ) {
