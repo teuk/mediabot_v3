@@ -259,6 +259,16 @@ on_tick => \&on_timer_tick,
 );
 $mediabot->setMainTimerTick($timer);
 
+# Set up channel hash refresh timer
+my $channel_hash_timer = IO::Async::Timer::Periodic->new(
+    interval => 60, # toutes les 60 secondes
+    on_tick  => sub {
+        $mediabot->refresh_channel_hashes;
+    },
+);
+$channel_hash_timer->start;
+$loop->add($channel_hash_timer);
+
 my $irc = Net::Async::IRC->new(
     on_message_text                  => \&on_private,
     on_message_motd                  => \&on_motd,

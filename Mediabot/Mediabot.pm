@@ -22,7 +22,7 @@ use HTML::Tree;
 use URL::Encode qw(url_encode_utf8 url_encode url_decode_utf8);
 use HTML::Entities '%entity2char';
 use HTML::Entities qw(decode_entities);
-# Let's commeent this out for now (in case noone reads the README)
+# Let's comment this out for now (in case noone reads the README)
 #use MP3::Tag;
 use File::Basename;
 use Encode;
@@ -502,6 +502,44 @@ sub getLoop(@) {
 sub setMainTimerTick(@) {
 	my ($self,$timer) = @_;
 	$self->{main_timer_tick} = $timer;
+}
+
+# Set refresh channel hashes
+sub refresh_channel_hashes {
+    my ($self) = @_;
+
+    $self->{logger}->log(4, "Refreshing channel information from database");
+
+    my $sQuery = "SELECT name, description, topic, tmdb_lang, `key` FROM CHANNEL";
+    my $sth = $self->{dbh}->prepare($sQuery);
+    unless ($sth->execute()) {
+        $self->{logger}->log(1, "SQL Error: " . $DBI::errstr . " Query: $sQuery");
+        return;
+    }
+
+    my %db_info;
+    while (my $ref = $sth->fetchrow_hashref()) {
+        $db_info{ $ref->{name} } = $ref;
+    }
+    $sth->finish;
+
+    foreach my $chan_name (keys %{ $self->{channels} }) {
+        my $chan_obj = $self->{channels}{$chan_name};
+
+        if (exists $db_info{$chan_name}) {
+            my $ref = $db_info{$chan_name};
+
+            # fields to update
+            $chan_obj->{description} = $ref->{description};
+            $chan_obj->{topic}       = $ref->{topic};
+            $chan_obj->{tmdb_lang}   = $ref->{tmdb_lang};
+            $chan_obj->{key}         = $ref->{key};
+
+            $self->{logger}->log(4, "Refreshed data for $chan_name");
+        } else {
+            $self->{logger}->log(1, "Channel $chan_name not found in DB during refresh");
+        }
+    }
 }
 
 # Get main timer tick
