@@ -6746,7 +6746,10 @@ sub mbDebug(@) {
 
 	# Update in memory
 	$self->{cfg}       = $cfg;
-	$self->{MAIN_CONF} = $cfg->vars(); # temporaire pour backward compat
+	$self->{MAIN_CONF} = $cfg->vars(); # backward compat
+	
+	# 🔥 Apply change to the logger object now
+	$self->{logger}->{debug_level} = $level;
 
 	$self->{logger}->log( 0, "Debug set to $level");
 	botNotice($self, $sNick, "Debug set to $level");
