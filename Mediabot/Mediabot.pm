@@ -190,9 +190,43 @@ sub getLogFile(@) {
 	return $self->{conf}->get('main.MAIN_LOG_FILE');
 }
 
-sub dumpConfig(@) {
-	my $self = shift;
-	print STDERR Dumper($self->{MAIN_CONF});
+# Dump the configuration to STDERR
+sub dumpConfig {
+    my ($self) = @_;
+
+    my $conf = $self->{MAIN_CONF};
+    return unless defined $conf && ref($conf) eq 'HASH';
+
+    print STDERR "\e[1m=== Mediabot configuration dump ===\e[0m\n";
+
+    foreach my $section (sort keys %$conf) {
+        my $val = $conf->{$section};
+
+        # Section simple (key => value)
+        if (!ref $val) {
+            print STDERR sprintf("  \e[1;34m%-20s\e[0m : %s\n", $section, _format_val($val));
+            next;
+        }
+
+        # Section complexe (ex: IRC => { ... })
+        if (ref $val eq 'HASH') {
+            print STDERR "\n\e[1;36m[$section]\e[0m\n";
+            foreach my $key (sort keys %$val) {
+                my $v = $val->{$key};
+                printf STDERR "  \e[1;33m%-18s\e[0m : %s\n", $key, _format_val($v);
+            }
+        }
+    }
+
+    print STDERR "\n\e[1m===================================\e[0m\n";
+}
+
+# Format a single value with color
+sub _format_val {
+    my ($val) = @_;
+    return "\e[31m(undef)\e[0m" unless defined $val;
+    return "\e[33m[empty]\e[0m" if $val eq '';
+    return "\e[32m$val\e[0m";
 }
 
 sub getMainConf(@) {
