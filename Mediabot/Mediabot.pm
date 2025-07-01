@@ -229,26 +229,31 @@ sub _format_val {
     return "\e[32m$val\e[0m";
 }
 
+# Get the main configuration hashref
 sub getMainConf(@) {
 	my $self = shift;
 	return $self->{MAIN_CONF};
 }
 
+# Get the main configuration object
 sub getMainConfCfg(@) {
 	my $self = shift;
 	return $self->{cfg};
 }
 
+# Get channel object by name
 sub getChannel {
     my ($self, $chan_name) = @_;
     return $self->{channels}{$chan_name};
 }
 
+# Get PID file path from configuration
 sub getPidFile(@) {
 	my $self = shift;
 	return $self->{conf}->get('main.MAIN_PID_FILE');
 }
 
+# Get PID from the PID file
 sub getPidFromFile(@) {
     my $self = shift;
     my $pidfile = $self->{conf}->get('main.MAIN_PID_FILE');
@@ -270,6 +275,7 @@ sub getPidFromFile(@) {
     }
 }
 
+# Initialize log file
 sub init_log(@) {
     my ($self) = shift;
     my $sLogFilename = $self->{conf}->get('main.MAIN_LOG_FILE');
@@ -413,11 +419,13 @@ sub dbConnect(@) {
     $self->{dbh} = $dbh;
 }
 
+# Get the database handle
 sub getDbh(@) {
 	my $self = shift;
 	return $self->{dbh};
 }
 
+# Check if the USER table exists in the database
 sub dbCheckTables(@) {
 	my ($self) = shift;
 	my $LOG = $self->{LOG};
@@ -451,6 +459,7 @@ sub dbLogoutUsers(@) {
 	}
 }
 
+# Set server attribute
 sub setServer(@) {
 	my ($self,$sServer) = @_;
 	$self->{server} = $sServer;
@@ -747,22 +756,33 @@ sub get_channel_by_name {
 }
 
 # Get channel name from channel id
-sub getChannelName(@) {
-	my ($self,$id_channel) = @_;
-	my $name = undef;
-	my $sQuery = "SELECT name FROM CHANNEL WHERE id_channel=?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($id_channel) ) {
-		$self->{logger}->log(1,"getChannelName() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+#sub getChannelName(@) {
+#	my ($self,$id_channel) = @_;
+#	my $name = undef;
+#	my $sQuery = "SELECT name FROM CHANNEL WHERE id_channel=?";
+#	my $sth = $self->{dbh}->prepare($sQuery);
+#	unless ($sth->execute($id_channel) ) {
+#		$self->{logger}->log(1,"getChannelName() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+#	}
+#	else {
+#		if (my $ref = $sth->fetchrow_hashref()) {
+#			$name = $ref->{'name'};
+#		}
+#	}
+#	$sth->finish;
+#	return $name;
+#}
+
+# Get channel object by id
+sub getChannelById {
+	my ($self, $id_channel) = @_;
+	foreach my $chan_name (keys %{ $self->{channels} }) {
+		my $chan = $self->{channels}{$chan_name};
+		return $chan if $chan->{id} == $id_channel;
 	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			$name = $ref->{'name'};
-		}
-	}
-	$sth->finish;
-	return $name;
+	return undef;
 }
+
 
 # Get console channel from description
 sub getConsoleChan {
@@ -8787,15 +8807,13 @@ sub lastCom(@) {
 						my $sUserhandle = getUserhandle($self,$id_user);
 						$sUserhandle = (defined($sUserhandle) && ($sUserhandle ne "") ? $sUserhandle : "Unknown");
 						my $id_channel = $ref->{'id_channel'};
-						my $sChannelCom = getChannelName($self,$id_channel);
-						$sChannelCom = (defined($sChannelCom) && ($sChannelCom ne "") ? " $sChannelCom" : "");
+						my $chan_obj = $self->getChannelById($id_channel);
+						my $sChannelCom = defined($chan_obj) ? " " . $chan_obj->{name} : "";
 						my $hostmask = $ref->{'hostmask'};
 						my $action = $ref->{'action'};
 						my $args = $ref->{'args'};
 						$args = (defined($args) && ($args ne "") ? $args : "");
 						botNotice($self,$sNick,"$ts ($sUserhandle)$sChannelCom $hostmask $action $args");
-						#$self->{irc}->write("NOTICE " . $sNick . ":$ts ($sUserhandle)$sChannelCom $hostmask $action $args\x0d\x0a");
-						#if (($i % 3) == 0) { sleep 3; }
 						$i++;
 					}
 					logBot($self,$message,$sChannel,"lastcom",@tArgs);
