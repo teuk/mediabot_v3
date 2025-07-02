@@ -67,17 +67,13 @@ sub my_log_error {
     print STDERR "$ts [ERROR] $msg\n";
 }
 
-#-----------------------------------------------------------------
-# read_config_file – return 1 on success, undef on failure
-#-----------------------------------------------------------------
+# Read the configuration file and populate the $self->{conf} object
 sub readConfigFile {
     my ($self, $file) = @_;
 
-    # allow override or default to the object’s setting
     $file //= $self->{config_file}
         or croak "No config file specified (\$self->{config_file} is empty)";
 
-    # exist & readable?
     unless (-e $file) {
         $self->my_log_error("Config file '$file' does not exist");
         return;
@@ -89,20 +85,17 @@ sub readConfigFile {
 
     $self->my_log_info("Loading configuration from '$file'");
 
-    # instantiate + read in one shot
-    my $cfg;
+    my $conf;
     eval {
-        $cfg = Config::Simple->new( filename => $file );
+        require Mediabot::Conf;
+        $conf = Mediabot::Conf->new(undef, $file);
     };
-    if ($@ or not $cfg) {
-        my $err = $@ || $Config::Simple::error;
-        $self->my_log_error("Failed to parse '$file': $err");
+    if ($@ or not $conf) {
+        $self->my_log_error("Failed to load configuration: $@");
         return;
     }
 
-    # store
-    $self->{cfg}       = $cfg;
-    $self->{MAIN_CONF} = $cfg->vars();
+    $self->{conf} = $conf;
 
     $self->my_log_info("Configuration loaded successfully");
     return 1;
@@ -179,12 +172,13 @@ sub getDetailedVersion {
     }
 }
 
-sub getDebugLevel(@) {
+# Get the debug level from the configuration
+sub getDebugLevel {
 	my $self = shift;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	return $MAIN_CONF{'main.MAIN_PROG_DEBUG'};
+	return $self->{conf}->get('main.MAIN_PROG_DEBUG');
 }
 
+# Get the log file path from the configuration
 sub getLogFile(@) {
 	my $self = shift;
 	return $self->{conf}->get('main.MAIN_LOG_FILE');
@@ -194,27 +188,20 @@ sub getLogFile(@) {
 sub dumpConfig {
     my ($self) = @_;
 
-    my $conf = $self->{MAIN_CONF};
-    return unless defined $conf && ref($conf) eq 'HASH';
+    my %conf = $self->{conf}->all;
+    return unless %conf;
 
     print STDERR "\e[1m=== Mediabot configuration dump ===\e[0m\n";
 
-    foreach my $section (sort keys %$conf) {
-        my $val = $conf->{$section};
+    foreach my $key (sort keys %conf) {
+        my $val = $conf{$key};
 
-        # Section simple (key => value)
-        if (!ref $val) {
-            print STDERR sprintf("  \e[1;34m%-20s\e[0m : %s\n", $section, _format_val($val));
-            next;
-        }
-
-        # Section complexe (ex: IRC => { ... })
-        if (ref $val eq 'HASH') {
-            print STDERR "\n\e[1;36m[$section]\e[0m\n";
-            foreach my $key (sort keys %$val) {
-                my $v = $val->{$key};
-                printf STDERR "  \e[1;33m%-18s\e[0m : %s\n", $key, _format_val($v);
-            }
+        # Formattage section.clé en deux parties si souhaité
+        if ($key =~ /^(.+?)\.(.+)$/) {
+            my ($section, $subkey) = ($1, $2);
+            printf STDERR "  \e[1;36m[%s]\e[0m \e[1;33m%-18s\e[0m : %s\n", $section, $subkey, _format_val($val);
+        } else {
+            printf STDERR "  \e[1;34m%-20s\e[0m : %s\n", $key, _format_val($val);
         }
     }
 
@@ -227,12 +214,6 @@ sub _format_val {
     return "\e[31m(undef)\e[0m" unless defined $val;
     return "\e[33m[empty]\e[0m" if $val eq '';
     return "\e[32m$val\e[0m";
-}
-
-# Get the main configuration hashref
-sub getMainConf(@) {
-	my $self = shift;
-	return $self->{MAIN_CONF};
 }
 
 # Get the main configuration object
@@ -945,6 +926,8 @@ sub botPrivmsg(@) {
 		if (defined($sMsg) && ($sMsg ne "")) {
 			if (utf8::is_utf8($sMsg)) {
 				$sMsg = Encode::encode("UTF-8", $sMsg);
+				# Clean IRC message: no newlines allowed
+				$sMsg =~ s/[\r\n]+/ /g;
 				$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
 			}
 			else {
@@ -6729,51 +6712,54 @@ sub displayUrlTitle(@) {
 	}
 }
 
-# Set the debug level of the bot
-sub mbDebug(@) {
-	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
-	my $level = $tArgs[0];
+# Set or show the debug level of the bot
+sub mbDebug {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+    my $level = $tArgs[0];
 
-	my $irc_nick = $self->{irc}->nick_folded;
-	my $cfg       = $self->{cfg};  # config en écriture
-	my $conf      = $self->{conf}; # config en lecture (objet Mediabot::Conf)
+    my $irc_nick = $self->{irc}->nick_folded;
+    my $conf     = $self->{conf}; # object Mediabot::Conf
 
-	my ($uid, $ulevel, $ulevel_desc, $is_auth, $uhandle, $upass, $info1, $info2) = getNickInfo($self, $message);
+    my ($uid, $ulevel, $ulevel_desc, $is_auth, $uhandle, $upass, $info1, $info2) = getNickInfo($self, $message);
 
-	unless (defined $uid) {
-		return; # no user matched, silent fail
-	}
+    unless (defined $uid) {
+        return; # no user matched, silent fail
+    }
 
-	unless ($is_auth) {
-		botNotice($self, $sNick, "You must be logged to use this command - /msg $irc_nick login username password");
-		return;
-	}
+    unless ($is_auth) {
+        botNotice($self, $sNick, "You must be logged to use this command - /msg $irc_nick login username password");
+        return;
+    }
 
-	unless (defined $ulevel && checkUserLevel($self, $ulevel, "Owner")) {
-		botNotice($self, $sNick, "Your level does not allow you to use this command.");
-		return;
-	}
+    unless (defined $ulevel && checkUserLevel($self, $ulevel, "Owner")) {
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
 
-	unless (defined($level) && $level =~ /^[0-5]$/) {
-		botNotice($self, $sNick, "Syntax: debug <debug_level>");
-		botNotice($self, $sNick, "debug_level must be between 0 and 5");
-		return;
-	}
+    # Display current debug level if no argument is given
+    unless (defined $level) {
+        my $current = $conf->get("main.MAIN_PROG_DEBUG") // 0;
+        botNotice($self, $sNick, "Current debug level is $current (0-5)");
+        return;
+    }
 
-	# Update the config on disk
-	$cfg->param("main.MAIN_PROG_DEBUG", $level);
-	$cfg->save();
+    # Check if the level is a valid integer between 0 and 5
+    unless ($level =~ /^[0-5]$/) {
+        botNotice($self, $sNick, "Syntax: debug <debug_level>");
+        botNotice($self, $sNick, "debug_level must be between 0 and 5");
+        return;
+    }
 
-	# Update in memory
-	$self->{cfg}       = $cfg;
-	$self->{MAIN_CONF} = $cfg->vars(); # backward compat
+    # Update the configuration with the new debug level
+    $conf->set("main.MAIN_PROG_DEBUG", $level);
+    $conf->save();
 
-	# 🔥 Apply change to the logger object now
-	$self->{logger}->{debug_level} = $level;
+    # Immediately update the logger's debug level
+    $self->{logger}->{debug_level} = $level;
 
-	$self->{logger}->log( 0, "Debug set to $level");
-	botNotice($self, $sNick, "Debug set to $level");
-	logBot($self, $message, $sChannel, "debug", "Debug set to $level");
+    $self->{logger}->log(0, "Debug set to $level");
+    botNotice($self, $sNick, "Debug level set to $level");
+    logBot($self, $message, $sChannel, "debug", "Debug set to $level");
 }
 
 # Restart the bot
@@ -12290,51 +12276,58 @@ sub _chatgpt_wrap {
     return @out;
 }
 
-# send a login request to Undernet CSERVICE
-sub xLogin(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my %MAIN_CONF = %{$self->{MAIN_CONF}};
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
-				my $xService = $MAIN_CONF{'undernet.UNET_CSERVICE_LOGIN'};
-				unless (defined($xService) && ($xService ne "")) {
-					botNotice($self,$sNick,"undernet.UNET_CSERVICE_LOGIN is undefined in configuration file");
-					return undef;
-				}
-				my $xUsername = $MAIN_CONF{'undernet.UNET_CSERVICE_USERNAME'};
-				unless (defined($xUsername) && ($xUsername ne "")) {
-					botNotice($self,$sNick,"undernet.UNET_CSERVICE_USERNAME is undefined in configuration file");
-					return undef;
-				}
-				my $xPassword = $MAIN_CONF{'undernet.UNET_CSERVICE_PASSWORD'};
-				unless (defined($xPassword) && ($xPassword ne "")) {
-					botNotice($self,$sNick,"undernet.UNET_CSERVICE_PASSWORD is undefined in configuration file");
-					return undef;
-				}
-				my $sNoticeMsg = "Authenticating to $xService with username $xUsername";
-				botNotice($self,$sNick,$sNoticeMsg);
-				noticeConsoleChan($self,$sNoticeMsg);
-				botPrivmsg($self,$xService,"login $xUsername $xPassword");
-				$self->{irc}->write("MODE " . $self->{irc}->nick_folded . " +x\x0d\x0a");
-			}
-			else {
-				my $sNoticeMsg = $message->prefix;
-				$sNoticeMsg .= " xLogin command attempt, (command level [1] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"This command is not available for your level. Contact a bot master.");
-				logBot($self,$message,undef,"tellme",$sNoticeMsg);
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix;
-			$sNoticeMsg .= " xLogin command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command : /msg " . $self->{irc}->nick_folded . " login username password");
-			logBot($self,$message,undef,"xLogin",$sNoticeMsg);
-		}
-	}
+# Send a login request to Undernet CSERVICE
+sub xLogin {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+    my $conf = $self->{conf};
+
+    my ($iMatchingUserId, $iMatchingUserLevel, $iMatchingUserLevelDesc, $iMatchingUserAuth,
+        $sMatchingUserHandle, $sMatchingUserPasswd, $sMatchingUserInfo1, $sMatchingUserInfo2) = getNickInfo($self, $message);
+
+    if (defined($iMatchingUserId)) {
+        if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+            if (defined($iMatchingUserLevel) && checkUserLevel($self, $iMatchingUserLevel, "Master")) {
+
+                my $xService  = $conf->get('undernet.UNET_CSERVICE_LOGIN');
+                unless (defined($xService) && $xService ne "") {
+                    botNotice($self, $sNick, "undernet.UNET_CSERVICE_LOGIN is undefined in configuration file");
+                    return;
+                }
+
+                my $xUsername = $conf->get('undernet.UNET_CSERVICE_USERNAME');
+                unless (defined($xUsername) && $xUsername ne "") {
+                    botNotice($self, $sNick, "undernet.UNET_CSERVICE_USERNAME is undefined in configuration file");
+                    return;
+                }
+
+                my $xPassword = $conf->get('undernet.UNET_CSERVICE_PASSWORD');
+                unless (defined($xPassword) && $xPassword ne "") {
+                    botNotice($self, $sNick, "undernet.UNET_CSERVICE_PASSWORD is undefined in configuration file");
+                    return;
+                }
+
+                my $sNoticeMsg = "Authenticating to $xService with username $xUsername";
+                botNotice($self, $sNick, $sNoticeMsg);
+                noticeConsoleChan($self, $sNoticeMsg);
+                botPrivmsg($self, $xService, "login $xUsername $xPassword");
+                $self->{irc}->write("MODE " . $self->{irc}->nick_folded . " +x\x0d\x0a");
+
+            } else {
+                my $sNoticeMsg = $message->prefix .
+                    " xLogin command attempt, (command level [1] for user " .
+                    $sMatchingUserHandle . "[" . $iMatchingUserLevel . "])";
+                noticeConsoleChan($self, $sNoticeMsg);
+                botNotice($self, $sNick, "This command is not available for your level. Contact a bot master.");
+                logBot($self, $message, undef, "tellme", $sNoticeMsg);
+            }
+        } else {
+            my $sNoticeMsg = $message->prefix .
+                " xLogin command attempt (user $sMatchingUserHandle is not logged in)";
+            noticeConsoleChan($self, $sNoticeMsg);
+            botNotice($self, $sNick, "You must be logged to use this command : /msg " . $self->{irc}->nick_folded . " login username password");
+            logBot($self, $message, undef, "xLogin", $sNoticeMsg);
+        }
+    }
 }
 
 # send a silly Yomomma joke
@@ -12409,6 +12402,7 @@ sub mbResolver(@) {
 	}
 }
 
+# Set TMDB language for a channel
 sub setTMDBLangChannel(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my $sTargetChannel;
@@ -12466,30 +12460,48 @@ sub setTMDBLangChannel(@) {
 	}
 }
 
-sub mbTMDBSearch(@) {
-    my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-    my %MAIN_CONF = %{$self->{MAIN_CONF}};
-    my $api_key = $MAIN_CONF{'tmdb.API_KEY'};
+# Search a movie or TV show on TMDB and return a clean synopsis with details
+sub mbTMDBSearch {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+    my $conf = $self->{conf};
 
+    my $api_key = $conf->get('tmdb.API_KEY');
     unless (defined($api_key) && $api_key ne "") {
-        $self->{logger}->log( 0, "tmdb.API_KEY is undefined in config file");
+        $self->{logger}->log(0, "tmdb.API_KEY is undefined in config file");
+        botNotice($self, $sNick, "TMDB API key is missing in the configuration.");
         return;
     }
 
     unless (defined($tArgs[0]) && $tArgs[0] ne "") {
-        botNotice($self, $sNick, "Syntax : tmdb <movie or serie name>");
+        botNotice($self, $sNick, "Syntax: tmdb <movie or series name>");
         return;
     }
 
-	my $tmdb_lang = getTMDBLangChannel($self, $sChannel);
-	$self->{logger}->log( 3, "tmdb_lang for $sChannel is $tmdb_lang");
-    my $input = join(" ", @tArgs);
-    my $synopsis = get_tmdb_synopsis_with_curl($api_key, $tmdb_lang, $input);
+    my $query = join(" ", @tArgs);
+    my $lang  = getTMDBLangChannel($self, $sChannel) || 'en';
+    $self->{logger}->log(3, "tmdb_lang for $sChannel is $lang");
 
-    my $output = "($sNick) Synopsis for $input : $synopsis";
-	botPrivmsg($self, $sChannel, $output);
+    # Make the TMDB API call
+    my $info = get_tmdb_info_with_curl($api_key, $lang, $query);
+    unless ($info) {
+        botNotice($self, $sNick, "No results found for '$query'.");
+        return;
+    }
+
+    my $title     = $info->{title}     || $info->{name}     || "Unknown title";
+    my $overview  = $info->{overview}  || "No synopsis available.";
+    my $date      = $info->{release_date} || $info->{first_air_date} || "????";
+    my $year      = ($date =~ /^(\d{4})/) ? $1 : "????";
+    my $rating    = defined($info->{vote_average}) ? sprintf("%.1f", $info->{vote_average}) : "?";
+    my $type      = exists($info->{title}) ? "Movie" : "TV Series";
+
+    my $msg = "🎬 [$type] \"$title\" ($year) • Rating: $rating/10\n📜 Synopsis: $overview";
+    $msg = "($sNick) $msg" if defined $sNick;
+
+    botPrivmsg($self, $sChannel, $msg);
 }
 
+# Get TMDB info using curl
 sub getTMDBLangChannel (@) {
 	my ($self, $sChannel) = @_;
 	my $sQuery = "SELECT tmdb_lang FROM CHANNEL WHERE name LIKE ?";
@@ -12510,35 +12522,42 @@ sub getTMDBLangChannel (@) {
 	}
 }
 
-sub get_tmdb_synopsis_with_curl {
+# Get detailed TMDB info for the first matching result
+sub get_tmdb_info_with_curl {
     my ($api_key, $lang, $query) = @_;
 
-    # Encode query for safe URL usage
     my $encoded_query = uri_escape($query);
-    my $url = "https://api.themoviedb.org/3/search/movie?api_key=$api_key&language=$lang&query=$encoded_query";
+    my $url = "https://api.themoviedb.org/3/search/multi?api_key=$api_key&language=$lang&query=$encoded_query";
 
-    # Execute curl request
     my $json_response = `curl -s "$url"`;
-    unless ($json_response) {
-        return "Failed to fetch data from TMDB.";
-    }
+    return undef unless $json_response;
 
-    # Try to decode the JSON response
     my $data = eval { decode_json($json_response) };
-    if ($@ || !ref($data) || !$data->{results} || !@{$data->{results}}) {
-        return "Invalid or empty JSON data from TMDB.";
+    return undef if $@ || !ref($data) || !$data->{results} || !@{$data->{results}};
+
+    # Find the first movie or TV result
+    my $result;
+    foreach my $item (@{$data->{results}}) {
+        next unless $item->{media_type} eq 'movie' || $item->{media_type} eq 'tv';
+        $result = $item;
+        last;
     }
 
-    # Take the first result
-    my $result = $data->{results}[0];
-    my $synopsis = $result->{overview} // "No synopsis available.";
+    return undef unless $result;
 
-    # Trim to 350 characters, cleanly
-    if (length($synopsis) > 350) {
-        $synopsis = substr($synopsis, 0, 347) . '...';
+    # Trim the overview cleanly
+    my $overview = $result->{overview} // "No synopsis available.";
+    if (length($overview) > 350) {
+        $overview = substr($overview, 0, 347) . '...';
     }
 
-    return $synopsis;
+    return {
+        title           => $result->{title} // $result->{name},
+        overview        => $overview,
+        release_date    => $result->{release_date} // $result->{first_air_date},
+        vote_average    => $result->{vote_average},
+        media_type      => $result->{media_type},
+    };
 }
 
 1;

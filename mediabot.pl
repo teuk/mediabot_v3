@@ -143,9 +143,6 @@ unless ( $mediabot->readConfigFile ) {
     exit 1;
 }
 
-# Instantiate Mediabot configuration
-$mediabot->{conf} = Mediabot::Conf->new($mediabot->getMainConf());
-
 # Init log file
 $mediabot->init_log();
 
@@ -602,10 +599,14 @@ sub on_message_INVITE {
         my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = $mediabot->getNickInfo($message);
         if (defined($iMatchingUserId)) {
             if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-                #if (defined($iMatchingUserLevel) && checkUserLevel(\%MAIN_CONF,$LOG,$dbh,$iMatchingUserLevel,"Master")) {
-                #	$mediabot->joinChannel($target_name);
-                #	noticeConsoleChan(\%MAIN_CONF,$LOG,$dbh,$irc,"Joined $target_name after $inviter_nick invite (user $sMatchingUserHandle)");
-                #}
+                $mediabot->{logger}->log(0,"$invited_nick has been invited to join $target_name by $inviter_nick (authentified user)");
+                #$mediabot->joinChannel($target_name);
+            }
+            else {
+                if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
+                    $mediabot->{logger}->log(0,"[LIVE] $invited_nick has been invited to join $target_name by $inviter_nick (not authentified user)");
+                }
+                #$mediabot->joinChannel($target_name);
             }
         }
     }
