@@ -17,6 +17,7 @@ use File::Basename;
 use Mediabot::Mediabot;
 use Mediabot::Conf;
 use Mediabot::Log;
+use Mediabot::DB;
 use Mediabot::Channel;
 use Mediabot::Partyline;
 use IO::Async::Loop;
@@ -211,8 +212,9 @@ my $sStartedMode = ( $MAIN_PROG_DAEMON ? "background" : "foreground");
 my $MAIN_PROG_DEBUG = $mediabot->getDebugLevel();
 $mediabot->{logger}->log(0,"Mediabot v$MAIN_PROG_VERSION started in $sStartedMode with debug level $MAIN_PROG_DEBUG");
 
-# Database connection
-$mediabot->dbConnect();
+# Initialize Database instance
+$mediabot->{db} = Mediabot::DB->new($mediabot->{conf}, $mediabot->{logger});
+$mediabot->{dbh} = $mediabot->{db}->dbh;  # for compatibility with old code
 
 # Check USER table and fail if not present
 $mediabot->dbCheckTables();

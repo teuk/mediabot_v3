@@ -256,24 +256,33 @@ sub getPidFromFile(@) {
     }
 }
 
-# Initialize log file
-sub init_log(@) {
-    my ($self) = shift;
-    my $sLogFilename = $self->{conf}->get('main.MAIN_LOG_FILE');
-    my $LOG;
+# Initialize the log file for Mediabot
+sub init_log {
+    my ($self) = @_;
 
-    unless (open $LOG, ">>$sLogFilename") {
-        print STDERR "Could not open $sLogFilename for writing.\n";
+    my $log_path = $self->{conf}->get('main.MAIN_LOG_FILE');
+    unless (defined $log_path && $log_path ne '') {
+        print STDERR "[ERROR] Log file path not defined in config.\n";
         clean_and_exit($self, 1);
     }
 
-    $| = 1;
-	select($LOG);
-    $| = 1;
-    select(STDOUT);
-    print $LOG "+--------------------------------------------------------------------------------------------------+\n";
+    open(my $LOG, ">>", $log_path) or do {
+        print STDERR "[ERROR] Could not open log file '$log_path' for writing: $!\n";
+        clean_and_exit($self, 1);
+    };
+
+    # Autoflush enabled
+    select((select($LOG), $| = 1)[0]);
+
+    # Optional: timestamp or header
+    print $LOG "+--------------------------------------------------------------------------------+\n";
+    print $LOG "| Mediabot log started at " . scalar(localtime) . "\n";
+    print $LOG "+--------------------------------------------------------------------------------+\n";
+
+    # Store filehandle in object
     $self->{LOG} = $LOG;
 }
+
 
 # Initialize the authentication module
 sub init_auth {
