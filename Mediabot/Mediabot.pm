@@ -430,24 +430,35 @@ sub getDbh(@) {
 
 # Check if the USER table exists in the database
 sub dbCheckTables(@) {
-	my ($self) = shift;
-	my $LOG = $self->{LOG};
-	my $dbh = $self->{dbh};
-	$self->{logger}->log(3,"Checking USER table");
-	my $sLogoutQuery = "SELECT * FROM USER";
-	my $sth = $dbh->prepare($sLogoutQuery);
-	unless ($sth->execute) {
-		$self->{logger}->log(0,"dbCheckTables() SQL Error : " . $DBI::errstr . "(" . $DBI::err . ") Query : " . $sLogoutQuery);
-		if (defined($DBI::err) && ($DBI::err == 1146)) {
-			$self->{logger}->log(3,"USER table does not exist. Check your database installation");
-			clean_and_exit($self,1146);
-		}
-	}
-	else {	
-		$self->{logger}->log(3,"USER table exists");
-	}
+    my ($self) = shift;
+    my $LOG = $self->{LOG};
+    my $dbh = $self->{dbh};
+
+    $self->{logger}->log(3, "Checking USER table");
+
+    unless (defined $dbh) {
+        $self->{logger}->log(0, "❌ No DBI handle found (dbh is undef). Aborting DB check.");
+        $self->{logger}->log(0, "Check your database credentials in mediabot.conf and ensure the user has proper access.");
+        clean_and_exit($self, 1);
+    }
+
+    my $sLogoutQuery = "SELECT * FROM USER";
+    my $sth = $dbh->prepare($sLogoutQuery);
+
+    unless ($sth->execute) {
+        $self->{logger}->log(0, "dbCheckTables() SQL Error: $DBI::errstr ($DBI::err) Query: $sLogoutQuery");
+
+        if (defined($DBI::err) && $DBI::err == 1146) {
+            $self->{logger}->log(3, "USER table does not exist. Check your database installation.");
+            clean_and_exit($self, 1146);
+        }
+    }
+    else {
+        $self->{logger}->log(3, "USER table exists");
+    }
 }
 
+# Logout all users in the USER table
 sub dbLogoutUsers(@) {
 	my ($self) = shift;
 	my $LOG = $self->{LOG};

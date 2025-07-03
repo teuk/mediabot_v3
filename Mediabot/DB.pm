@@ -6,7 +6,6 @@ use DBI;
 
 sub new {
     my ($class, $conf, $logger) = @_;
-
     my $self = {
         conf   => $conf,
         logger => $logger,
@@ -14,7 +13,44 @@ sub new {
     };
 
     bless $self, $class;
-    $self->_connect;
+
+    # Lire les paramètres de [mysql], pas [main]
+    my $dbname = $conf->get('mysql.MAIN_PROG_DDBNAME') || '';
+    my $dbhost = $conf->get('mysql.MAIN_PROG_DBHOST') || 'localhost';
+    my $dbuser = $conf->get('mysql.MAIN_PROG_DBUSER') || '';
+    my $dbpass = $conf->get('mysql.MAIN_PROG_DBPASS') || '';
+    my $dbport = $conf->get('mysql.MAIN_PROG_DBPORT') || 3306;
+
+    # Vérifie que les paramètres essentiels sont définis
+    unless ($dbname && $dbuser) {
+        $logger->log(0, "❌ Missing DB configuration: DDBNAME or DBUSER is undefined.");
+        $logger->log(0, "Check your [mysql] section in mediabot.conf");
+        exit 1;
+    }
+
+    $logger->log(1, "Connecting to DB: $dbname at $dbhost:$dbport");
+
+    my $dsn = "DBI:mysql:database=$dbname;host=$dbhost;port=$dbport";
+
+    my $dbh = DBI->connect(
+        $dsn, $dbuser, $dbpass,
+        {
+            RaiseError => 0,
+            PrintError => 0,
+            mysql_enable_utf8mb4 => 1,
+        }
+    );
+
+    if (!defined $dbh) {
+        $logger->log(0, "❌ DBI connect failed: " . $DBI::errstr);
+        $logger->log(0, "Check your credentials in mediabot.conf");
+        $logger->log(0, "Aborting startup.");
+        exit 1;
+    }
+
+    $self->{dbh} = $dbh;
+    $logger->log(3, "✅ DBI connection successful");
+
     return $self;
 }
 

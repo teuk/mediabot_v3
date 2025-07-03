@@ -1,0 +1,27 @@
+# 🔒 Fichiers sensibles à exclure
+mediabot.conf
+*.key
+*.pem
+*.crt
+*.env
+*.secrets
+*.bak
+*.log
+*.db
+*.sqlite
+*.pw
+*.ini
+*.yml
+*.json
+
+# 🔧 Configs locales
+config/
+tmp/
+cache/
+commit.sh
+mediabot.log
+commit.sh
+*.bak
+*.db
+*.sqlite3
+*~

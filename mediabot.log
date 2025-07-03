@@ -921,3 +921,313 @@
 [03/07/2025 04:26:31] [DEBUG3] evalAction() check / I'm fine Houston, over.
 [03/07/2025 04:26:31] [LIVE] #radiocapsule:<mediabotv3> I'm fine Houston, over.
 [03/07/2025 04:26:40] [LIVE] #radiocapsule: <Balibalo> il faut se mÃ©fier quand mÃªme temps du coup je me mÃ©lange
++--------------------------------------------------------------------------------+
+| Mediabot log started at Thu Jul  3 05:48:49 2025
++--------------------------------------------------------------------------------+
+[03/07/2025 05:48:49] [INFO] Mediabot is already running with PID 161522.
+[03/07/2025 05:48:49] [INFO] Either kill process 161522 or remove stale PID file: /home/mediabot/mediabot_v3/mediabot.pid
+[03/07/2025 05:48:49] [INFO] Cleaning and exiting...
++--------------------------------------------------------------------------------+
+| Mediabot log started at Thu Jul  3 05:49:53 2025
++--------------------------------------------------------------------------------+
+[03/07/2025 05:49:53] [DEBUG1] Removed stale PID file: /home/mediabot/mediabot_v3/mediabot.pid
+[03/07/2025 05:49:53] [INFO] Reading local version from VERSION file...
+[03/07/2025 05:49:53] [INFO] -> Mediabot devel version 3.0 (20250702_191244)
+[03/07/2025 05:49:53] [INFO] Checking latest version from GitHub...
+[03/07/2025 05:49:53] [INFO] -> GitHub devel version 3.0 (20250702_191244)
+[03/07/2025 05:49:53] [INFO] Mediabot is up to date.
+[03/07/2025 05:49:53] [INFO] Mediabot v3.0dev-20250702_191244 started in foreground with debug level 3
+[03/07/2025 05:49:53] [DEBUG1] Connecting to DB: mediabotv3 at localhost:3306
+[03/07/2025 05:49:53] [INFO] DBI connect failed: Access denied for user 'mediabotv3'@'localhost' (using password: NO)
+[03/07/2025 05:49:53] [DEBUG3] Checking USER table
++--------------------------------------------------------------------------------+
+| Mediabot log started at Thu Jul  3 05:51:06 2025
++--------------------------------------------------------------------------------+
+[03/07/2025 05:51:06] [INFO] Reading local version from VERSION file...
+[03/07/2025 05:51:06] [INFO] -> Mediabot devel version 3.0 (20250702_191244)
+[03/07/2025 05:51:06] [INFO] Checking latest version from GitHub...
+[03/07/2025 05:51:06] [INFO] -> GitHub devel version 3.0 (20250702_191244)
+[03/07/2025 05:51:06] [INFO] Mediabot is up to date.
+[03/07/2025 05:51:06] [INFO] Mediabot v3.0dev-20250702_191244 started in foreground with debug level 3
+[03/07/2025 05:51:06] [DEBUG1] Connecting to DB: mediabotv3 at localhost:3306
+[03/07/2025 05:51:06] [DEBUG3] Checking USER table
+[03/07/2025 05:51:06] [DEBUG3] USER table exists
+[03/07/2025 05:51:06] [DEBUG1] Authentication module initialized
+[03/07/2025 05:51:06] [INFO] Logged out all users
+[03/07/2025 05:51:06] [DEBUG3] populateChannels: Populating channels from database
+[03/07/2025 05:51:06] [INFO] Populating channel objects
+[03/07/2025 05:51:06] [INFO] Picked localhost:15432 from Network Radiocapsule
+[03/07/2025 05:51:06] [INFO] Initialize Hailo
+[03/07/2025 05:51:06] [INFO] Connection nick: mediabot
+[03/07/2025 05:51:06] [INFO] Trying to connect to localhost:15432 (pass : mediabot/Radiocapsule:fum3l4w33dfum3l4w33d)
+[03/07/2025 05:51:06] [INFO] on_login() Connected to irc server localhost
+[03/07/2025 05:51:06] [INFO] Checking timers to set at startup
+[03/07/2025 05:51:06] [INFO] No timer to set at startup
+[03/07/2025 05:51:06] [INFO] on_login() Logging to x@channels.undernet.org
+[03/07/2025 05:51:06] [INFO] -> *x@channels.undernet.org* login mediabot ***********
+[03/07/2025 05:51:06] [INFO] on_login() Setting user mode +iw
+[03/07/2025 05:51:06] [INFO] Joining console channel #teuk
+[03/07/2025 05:51:06] [INFO] Trying to join #teuk with key gabou
+[03/07/2025 05:51:06] [INFO] No channel to auto join
+[03/07/2025 05:51:06] [INFO] 001 Welcome to the Radiocapsule IRC Network, mediabotv3
+[03/07/2025 05:51:06] [INFO] 002 Your host is radiocapsule.com, running version u2.10.12.19
+[03/07/2025 05:51:06] [INFO] 003 This server was created ven. 06 juin CEST at 2025 22:25:45
+[03/07/2025 05:51:06] [INFO] 004 server=mediabot version=radiocapsule.com user_modes=u2.10.12.19 chan_modes=diOoswkgx
+[03/07/2025 05:51:06] [INFO] 005 WHOX WALLCHOPS WALLVOICES USERIP CPRIVMSG CNOTICE SILENCE=25 MODES=6 MAXCHANNELS=10 MAXBANS=100 NICKLEN=12 are supported by this server
+[03/07/2025 05:51:06] [INFO] 005 MAXNICKLEN=15 TOPICLEN=160 AWAYLEN=160 KICKLEN=160 CHANNELLEN=200 MAXCHANNELLEN=200 CHANTYPES=#& PREFIX=(ov)@+ STATUSMSG=@+ CHANMODES=b,k,l,imnpstrDdRcCPM CASEMAPPING=rfc1459 NETWORK=Radiocapsule are supported by this server
+[03/07/2025 05:51:06] [INFO] * Your nick is now mediabotv3
+[03/07/2025 05:51:06] [LIVE] mediabotv3 sets mode +iw
+[03/07/2025 05:51:06] [LIVE] * Now talking in #teuk
+[03/07/2025 05:51:07] [DEBUG2] on_message_RPL_ENDOFNAMES() #teuk
+[03/07/2025 05:51:07] [LIVE] * Now talking in #teuk
+[03/07/2025 05:51:07] [DEBUG2] Joined channel: #teuk
+[03/07/2025 05:51:07] [LIVE] * Now talking in #quebec
+[03/07/2025 05:51:07] [DEBUG2] on_message_RPL_ENDOFNAMES() #quebec
+[03/07/2025 05:51:07] [LIVE] * Now talking in #quebec
+[03/07/2025 05:51:07] [DEBUG2] Joined channel: #quebec
+[03/07/2025 05:51:07] [LIVE] * Now talking in #miaw
+[03/07/2025 05:51:07] [DEBUG2] on_message_RPL_ENDOFNAMES() #miaw
+[03/07/2025 05:51:07] [LIVE] * Now talking in #miaw
+[03/07/2025 05:51:07] [DEBUG2] Joined channel: #miaw
+[03/07/2025 05:51:07] [LIVE] * Now talking in #gabou
+[03/07/2025 05:51:07] [DEBUG2] on_message_RPL_ENDOFNAMES() #gabou
+[03/07/2025 05:51:07] [LIVE] * Now talking in #gabou
+[03/07/2025 05:51:07] [DEBUG2] Joined channel: #gabou
+[03/07/2025 05:51:07] [LIVE] * Now talking in #radiocapsule
+[03/07/2025 05:51:07] [DEBUG2] on_message_RPL_ENDOFNAMES() #radiocapsule
+[03/07/2025 05:51:07] [LIVE] * Now talking in #radiocapsule
+[03/07/2025 05:51:07] [DEBUG2] Joined channel: #radiocapsule
+[03/07/2025 05:51:07] [LIVE] * Now talking in #123
+[03/07/2025 05:51:07] [DEBUG2] on_message_RPL_ENDOFNAMES() #123
+[03/07/2025 05:51:07] [LIVE] * Now talking in #123
+[03/07/2025 05:51:07] [DEBUG2] Joined channel: #123
+[03/07/2025 05:51:10] [INFO] Received SIGINT (Ctrl+C). Initiating clean shutdown.
+[03/07/2025 05:51:10] [INFO] Cleaning and exiting...
++--------------------------------------------------------------------------------+
+| Mediabot log started at Thu Jul  3 05:56:28 2025
++--------------------------------------------------------------------------------+
+[03/07/2025 05:56:28] [INFO] Reading local version from VERSION file...
+[03/07/2025 05:56:28] [INFO] -> Mediabot devel version 3.0 (20250702_191244)
+[03/07/2025 05:56:28] [INFO] Checking latest version from GitHub...
+[03/07/2025 05:56:28] [INFO] -> GitHub devel version 3.0 (20250702_191244)
+[03/07/2025 05:56:28] [INFO] Mediabot is up to date.
+[03/07/2025 05:56:28] [INFO] Mediabot v3.0dev-20250702_191244 started in foreground with debug level 3
+[03/07/2025 05:56:28] [DEBUG1] Connecting to DB: mediabotv3 at localhost:3306
+[03/07/2025 05:56:28] [INFO] DBI connect failed: Access denied for user 'mediabotv3'@'localhost' (using password: YES)
+[03/07/2025 05:56:28] [DEBUG3] Checking USER table
+[03/07/2025 05:56:28] [INFO] ❌ No DBI handle found (dbh is undef). Aborting DB check.
+[03/07/2025 05:56:28] [INFO] Check your database credentials in mediabot.conf and ensure the user has proper access.
+[03/07/2025 05:56:28] [INFO] Cleaning and exiting...
++--------------------------------------------------------------------------------+
+| Mediabot log started at Thu Jul  3 05:58:50 2025
++--------------------------------------------------------------------------------+
+[03/07/2025 05:58:50] [INFO] Reading local version from VERSION file...
+[03/07/2025 05:58:50] [INFO] -> Mediabot devel version 3.0 (20250702_191244)
+[03/07/2025 05:58:50] [INFO] Checking latest version from GitHub...
+[03/07/2025 05:58:50] [INFO] -> GitHub devel version 3.0 (20250702_191244)
+[03/07/2025 05:58:50] [INFO] Mediabot is up to date.
+[03/07/2025 05:58:50] [INFO] Mediabot v3.0dev-20250702_191244 started in foreground with debug level 3
+[03/07/2025 05:58:50] [DEBUG1] Connecting to DB:  at localhost:3306
+[03/07/2025 05:58:50] [INFO] â DBI connect failed: Access denied for user 'mediabot'@'localhost' (using password: NO)
+[03/07/2025 05:58:50] [INFO] Check your credentials in mediabot.conf
+[03/07/2025 05:58:50] [INFO] Aborting startup.
++--------------------------------------------------------------------------------+
+| Mediabot log started at Thu Jul  3 06:00:25 2025
++--------------------------------------------------------------------------------+
+[03/07/2025 06:00:25] [INFO] Reading local version from VERSION file...
+[03/07/2025 06:00:25] [INFO] -> Mediabot devel version 3.0 (20250702_191244)
+[03/07/2025 06:00:25] [INFO] Checking latest version from GitHub...
+[03/07/2025 06:00:26] [INFO] -> GitHub devel version 3.0 (20250702_191244)
+[03/07/2025 06:00:26] [INFO] Mediabot is up to date.
+[03/07/2025 06:00:26] [INFO] Mediabot v3.0dev-20250702_191244 started in foreground with debug level 3
+[03/07/2025 06:00:26] [DEBUG1] Connecting to DB: mediabotv3 at localhost:3306
+[03/07/2025 06:00:26] [INFO] â DBI connect failed: Access denied for user 'mediabotv3'@'localhost' (using password: YES)
+[03/07/2025 06:00:26] [INFO] Check your credentials in mediabot.conf
+[03/07/2025 06:00:26] [INFO] Aborting startup.
++--------------------------------------------------------------------------------+
+| Mediabot log started at Thu Jul  3 06:02:41 2025
++--------------------------------------------------------------------------------+
+[03/07/2025 06:02:41] [INFO] Reading local version from VERSION file...
+[03/07/2025 06:02:41] [INFO] -> Mediabot devel version 3.0 (20250702_191244)
+[03/07/2025 06:02:41] [INFO] Checking latest version from GitHub...
+[03/07/2025 06:02:41] [INFO] -> GitHub devel version 3.0 (20250702_191244)
+[03/07/2025 06:02:41] [INFO] Mediabot is up to date.
+[03/07/2025 06:02:41] [INFO] Mediabot v3.0dev-20250702_191244 started in foreground with debug level 3
+[03/07/2025 06:02:41] [DEBUG1] Connecting to DB: mediabotv3 at localhost:3306
+[03/07/2025 06:02:41] [DEBUG3] â DBI connection successful
+[03/07/2025 06:02:41] [DEBUG3] Checking USER table
+[03/07/2025 06:02:41] [DEBUG3] USER table exists
+[03/07/2025 06:02:41] [DEBUG1] Authentication module initialized
+[03/07/2025 06:02:41] [INFO] Logged out all users
+[03/07/2025 06:02:41] [DEBUG3] populateChannels: Populating channels from database
+[03/07/2025 06:02:41] [INFO] Populating channel objects
+[03/07/2025 06:02:41] [INFO] Picked localhost:15432 from Network Radiocapsule
+[03/07/2025 06:02:41] [INFO] Initialize Hailo
+[03/07/2025 06:02:41] [INFO] Connection nick: mediabot
+[03/07/2025 06:02:41] [INFO] Trying to connect to localhost:15432 (pass : mediabot/Radiocapsule:fum3l4w33dfum3l4w33d)
+[03/07/2025 06:02:41] [INFO] on_login() Connected to irc server localhost
+[03/07/2025 06:02:41] [INFO] Checking timers to set at startup
+[03/07/2025 06:02:41] [INFO] No timer to set at startup
+[03/07/2025 06:02:41] [INFO] on_login() Logging to x@channels.undernet.org
+[03/07/2025 06:02:41] [INFO] -> *x@channels.undernet.org* login mediabot ***********
+[03/07/2025 06:02:41] [INFO] on_login() Setting user mode +iw
+[03/07/2025 06:02:41] [INFO] Joining console channel #teuk
+[03/07/2025 06:02:41] [INFO] Trying to join #teuk with key gabou
+[03/07/2025 06:02:41] [INFO] No channel to auto join
+[03/07/2025 06:02:41] [INFO] 001 Welcome to the Radiocapsule IRC Network, mediabotv3
+[03/07/2025 06:02:41] [INFO] 002 Your host is radiocapsule.com, running version u2.10.12.19
+[03/07/2025 06:02:41] [INFO] 003 This server was created ven. 06 juin CEST at 2025 22:25:45
+[03/07/2025 06:02:41] [INFO] 004 server=mediabot version=radiocapsule.com user_modes=u2.10.12.19 chan_modes=diOoswkgx
+[03/07/2025 06:02:41] [INFO] 005 WHOX WALLCHOPS WALLVOICES USERIP CPRIVMSG CNOTICE SILENCE=25 MODES=6 MAXCHANNELS=10 MAXBANS=100 NICKLEN=12 are supported by this server
+[03/07/2025 06:02:41] [INFO] 005 MAXNICKLEN=15 TOPICLEN=160 AWAYLEN=160 KICKLEN=160 CHANNELLEN=200 MAXCHANNELLEN=200 CHANTYPES=#& PREFIX=(ov)@+ STATUSMSG=@+ CHANMODES=b,k,l,imnpstrDdRcCPM CASEMAPPING=rfc1459 NETWORK=Radiocapsule are supported by this server
+[03/07/2025 06:02:41] [INFO] * Your nick is now mediabotv3
+[03/07/2025 06:02:41] [LIVE] mediabotv3 sets mode +iw
+[03/07/2025 06:02:41] [LIVE] * Now talking in #teuk
+[03/07/2025 06:02:41] [DEBUG2] on_message_RPL_ENDOFNAMES() #teuk
+[03/07/2025 06:02:41] [LIVE] * Now talking in #teuk
+[03/07/2025 06:02:41] [DEBUG2] Joined channel: #teuk
+[03/07/2025 06:02:41] [LIVE] * Now talking in #quebec
+[03/07/2025 06:02:41] [DEBUG2] on_message_RPL_ENDOFNAMES() #quebec
+[03/07/2025 06:02:41] [LIVE] * Now talking in #quebec
+[03/07/2025 06:02:41] [DEBUG2] Joined channel: #quebec
+[03/07/2025 06:02:41] [LIVE] * Now talking in #miaw
+[03/07/2025 06:02:41] [DEBUG2] on_message_RPL_ENDOFNAMES() #miaw
+[03/07/2025 06:02:41] [LIVE] * Now talking in #miaw
+[03/07/2025 06:02:41] [DEBUG2] Joined channel: #miaw
+[03/07/2025 06:02:41] [LIVE] * Now talking in #gabou
+[03/07/2025 06:02:41] [DEBUG2] on_message_RPL_ENDOFNAMES() #gabou
+[03/07/2025 06:02:41] [LIVE] * Now talking in #gabou
+[03/07/2025 06:02:41] [DEBUG2] Joined channel: #gabou
+[03/07/2025 06:02:41] [LIVE] * Now talking in #radiocapsule
+[03/07/2025 06:02:41] [DEBUG2] on_message_RPL_ENDOFNAMES() #radiocapsule
+[03/07/2025 06:02:41] [LIVE] * Now talking in #radiocapsule
+[03/07/2025 06:02:41] [DEBUG2] Joined channel: #radiocapsule
+[03/07/2025 06:02:41] [LIVE] #radiocapsule: <***> Buffer Playback...
+[03/07/2025 06:02:41] [LIVE] #radiocapsule: <mediacaps> [11:52:10] 14,01[ 07,01http://www.radiocapsule.com/radio.m3u14,01 ] 00,01 - 07,01 [ 14,01Objekt - Rest Yr Troubles Over Me07,01 ]00,01 - 07,01 [ 14,01LIVE !07,01 ]
+[03/07/2025 06:02:41] [DEBUG3] displayUrlTitle() [11:52:10] 14,01[ 07,01http://www.radiocapsule.com/radio.m3u14,01 ] 00,01 - 07,01 [ 14,01Objekt - Rest Yr Troubles Over Me07,01 ]00,01 - 07,01 [ 14,01LIVE !07,01 ]
+[03/07/2025 06:02:41] [DEBUG3] displayUrlTitle() URL = http://www.radiocapsule.com/radio.m3u14,01
+[03/07/2025 06:02:41] [DEBUG3] displayUrlTitle() Wrong HTTP response code (undefined) for http://www.radiocapsule.com/radio.m3u14,01 Undefined
+[03/07/2025 06:02:41] [LIVE] #radiocapsule: <***> Playback Complete.
+[03/07/2025 06:02:41] [LIVE] * Now talking in #123
+[03/07/2025 06:02:41] [DEBUG2] on_message_RPL_ENDOFNAMES() #123
+[03/07/2025 06:02:41] [LIVE] * Now talking in #123
+[03/07/2025 06:02:41] [DEBUG2] Joined channel: #123
+[03/07/2025 06:03:03] [LIVE] #radiocapsule: <Te[u]K> j'te jure ce chatGPT
+[03/07/2025 06:03:05] [LIVE] #radiocapsule: <Te[u]K> m check
+[03/07/2025 06:03:05] [DEBUG2] Check SQL command : check
+[03/07/2025 06:03:05] [DEBUG2] SQL command found : check description : check action : PRIVMSG %c I'm fine Houston, over.
+[03/07/2025 06:03:05] [DEBUG3] evalAction() check / I'm fine Houston, over.
+[03/07/2025 06:03:05] [LIVE] #radiocapsule:<mediabotv3> I'm fine Houston, over.
+[03/07/2025 06:03:10] [LIVE] #radiocapsule: <Te[u]K> m version
+[03/07/2025 06:03:10] [INFO] mbVersion() by Te[u]K on #radiocapsule
+[03/07/2025 06:03:10] [LIVE] #radiocapsule:<mediabotv3> Mediabot3.0dev-20250702_191244
+[03/07/2025 06:03:10] [DEBUG3] getNickInfo() .*teuk@teuk\.org matches Te[u]K!teuk@teuk.org
+[03/07/2025 06:03:10] [INFO] getNickInfo() Auto logged teuk with hostmask *teuk@teuk.org (autologin is ON)
+[03/07/2025 06:03:10] [INFO] -> -#teuk- Auto logged teuk with hostmask *teuk@teuk.org (autologin is ON)
+[03/07/2025 06:03:10] [DEBUG3] getNickInfo() iMatchingUserId : 1
+[03/07/2025 06:03:10] [INFO] -> -#teuk- (teuk : Te[u]K!teuk@teuk.org) command version
+[03/07/2025 06:03:10] [DEBUG3] logBot() (teuk : Te[u]K!teuk@teuk.org) command version
+[03/07/2025 06:03:14] [LIVE] #radiocapsule: <Te[u]K> mm
+[03/07/2025 06:03:37] [LIVE] #radiocapsule: <Te[u]K> m meteo Sceaux
+[03/07/2025 06:03:40] [LIVE] #radiocapsule:<mediabotv3> No answer from http://wttr.in for Sceaux. Try again in a few seconds.
+[03/07/2025 06:03:51] [LIVE] #radiocapsule: <Te[u]K> k Ã§a aussi Ã§a me lourde
+[03/07/2025 06:03:59] [LIVE] #radiocapsule: <Te[u]K> https://teuk.org
+[03/07/2025 06:03:59] [DEBUG3] displayUrlTitle() https://teuk.org
+[03/07/2025 06:03:59] [DEBUG3] displayUrlTitle() URL = https://teuk.org
+[03/07/2025 06:04:00] [LIVE] #radiocapsule:<mediabotv3> 14,01URL Title from Te[u]K: TeuK â Univers Unix, bots IRC et sortilÃ¨ges bienveillants / Linux IRC Undernet Libera Perl Net::Async::IRC
+[03/07/2025 06:04:11] [LIVE] #radiocapsule: <Te[u]K> m yt you can call me al
+[03/07/2025 06:04:11] [DEBUG3] id_chanset_list = 4
+[03/07/2025 06:04:11] [DEBUG3] id_channel_set = 35
+[03/07/2025 06:04:11] [DEBUG3] youtubeSearch() on you+can+call+me+al
+[03/07/2025 06:04:12] [DEBUG3] displayYoutubeDetails() sYoutubeId = uq-gYOrU8bA
+[03/07/2025 06:04:12] [DEBUG3] displayYoutubeDetails() sDuration : PT4M36S
+[03/07/2025 06:04:12] [DEBUG3] displayYoutubeDetails() sYoutubeInfo statistics duration : 4mn 36s
+[03/07/2025 06:04:12] [DEBUG3] displayYoutubeDetails() sYoutubeInfo statistics viewCount : views 139900608
+[03/07/2025 06:04:12] [DEBUG3] displayYoutubeDetails() sYoutubeInfo statistics title : Paul Simon - You Can Call Me Al (Official Video)
+[03/07/2025 06:04:12] [LIVE] #radiocapsule:<mediabotv3> (Te[u]K) 00,01[01,00You00,04Tube00,01]00,01 https://www.youtube.com/watch?v=uq-gYOrU8bA - Paul Simon - You Can Call Me Al (Official Video) 07,01- 14,014mn 36s 07,01- 14,01views 139900608
+[03/07/2025 06:04:22] [LIVE] #radiocapsule: <Balibalo> il faut se mÃ©fier quand mÃªme rÃ©ussi Ã  me connect Ã  #boulets via ton kiwi S[e]bb :(
+[03/07/2025 06:04:29] [LIVE] #radiocapsule: <Te[u]K> https://www.youtube.com/watch?v=-ZRoK8tdxdY
+[03/07/2025 06:04:29] [DEBUG3] displayYoutubeDetails() https://www.youtube.com/watch?v=-ZRoK8tdxdY
+[03/07/2025 06:04:29] [DEBUG3] displayYoutubeDetails() sYoutubeId = -ZRoK8tdxdY
+[03/07/2025 06:04:29] [DEBUG3] displayYoutubeDetails() sDuration : PT7M1S
+[03/07/2025 06:04:29] [DEBUG3] displayYoutubeDetails() sYoutubeInfo statistics duration : 7mn 1s
+[03/07/2025 06:04:29] [DEBUG3] displayYoutubeDetails() sYoutubeInfo statistics viewCount : views 971166
+[03/07/2025 06:04:29] [DEBUG3] displayYoutubeDetails() sYoutubeInfo statistics title : Temper No favors
+[03/07/2025 06:04:29] [DEBUG3] displayYoutubeDetails() sYoutubeInfo statistics channelTitle : kmill42 miller
+[03/07/2025 06:04:29] [LIVE] #radiocapsule:<mediabotv3> (Te[u]K) 00,01[01,00You00,04Tube00,01]00,01 Temper No favors 07,01- 14,017mn 1s 07,01- 14,01views 971166 07,01- 14,01by kmill42 miller
+[03/07/2025 06:04:37] [LIVE] #radiocapsule: <Te[u]K> k
+[03/07/2025 06:05:34] [LIVE] #radiocapsule: <Te[u]K> ðð
+[03/07/2025 06:05:34] [DEBUG1] SQL Error : Illegal mix of collations (utf8mb3_general_ci,IMPLICIT) and (utf8mb4_general_ci,COERCIBLE) for operation 'like' Query : SELECT answer,chance FROM RESPONDERS,CHANNEL WHERE ((CHANNEL.id_channel=RESPONDERS.id_channel AND CHANNEL.name like ?) OR (RESPONDERS.id_channel=0)) AND responder like ?
+[03/07/2025 06:05:34] [DEBUG1] logBotAction() SQL Error : Incorrect string value: '\xF0\x9F\x98\x98\xF0\x9F...' for column `mediabotv3`.`CHANNEL_LOG`.`publictext` at row 1 Query : INSERT INTO CHANNEL_LOG (id_channel,ts,event_type,nick,userhost,publictext) VALUES (?,?,?,?,?,?)
+[03/07/2025 06:05:43] [LIVE] #radiocapsule: <Te[u]K> ok
+[03/07/2025 06:05:47] [LIVE] #radiocapsule: <Te[u]K> bon bon
+[03/07/2025 06:05:57] [LIVE] #radiocapsule: <Te[u]K> on va commit avant que je me fÃ¢che
+[03/07/2025 06:06:00] [INFO] Received SIGINT (Ctrl+C). Initiating clean shutdown.
+[03/07/2025 06:06:00] [INFO] Cleaning and exiting...
++--------------------------------------------------------------------------------+
+| Mediabot log started at Thu Jul  3 06:06:18 2025
++--------------------------------------------------------------------------------+
+[03/07/2025 06:06:18] [DEBUG1] Removed stale PID file: /home/mediabot/mediabot_v3/mediabot.pid
+[03/07/2025 06:06:18] [INFO] Reading local version from VERSION file...
+[03/07/2025 06:06:18] [INFO] -> Mediabot devel version 3.0 (20250702_191244)
+[03/07/2025 06:06:18] [INFO] Checking latest version from GitHub...
+[03/07/2025 06:06:18] [INFO] -> GitHub devel version 3.0 (20250702_191244)
+[03/07/2025 06:06:18] [INFO] Mediabot is up to date.
+[03/07/2025 06:06:18] [INFO] Starting in daemon mode...
+[03/07/2025 06:06:18] [DEBUG1] Logfile: /home/mediabot/mediabot_v3/mediabot.log
+[03/07/2025 06:06:18] [DEBUG1] PID file written to /home/mediabot/mediabot_v3/mediabot.pid
+[03/07/2025 06:06:18] [DEBUG1] Daemon process started successfully.
+[03/07/2025 06:06:18] [INFO] Mediabot v3.0dev-20250702_191244 started in background with debug level 3
+[03/07/2025 06:06:18] [DEBUG1] Connecting to DB: mediabotv3 at localhost:3306
+[03/07/2025 06:06:18] [DEBUG3] â DBI connection successful
+[03/07/2025 06:06:18] [DEBUG3] Checking USER table
+[03/07/2025 06:06:18] [DEBUG3] USER table exists
+[03/07/2025 06:06:18] [DEBUG1] Authentication module initialized
+[03/07/2025 06:06:18] [INFO] Logged out all users
+[03/07/2025 06:06:18] [DEBUG3] populateChannels: Populating channels from database
+[03/07/2025 06:06:18] [INFO] Populating channel objects
+[03/07/2025 06:06:18] [INFO] Picked localhost:15432 from Network Radiocapsule
+[03/07/2025 06:06:18] [INFO] Initialize Hailo
+[03/07/2025 06:06:18] [INFO] Connection nick: mediabot
+[03/07/2025 06:06:18] [INFO] Trying to connect to localhost:15432 (pass : mediabot/Radiocapsule:fum3l4w33dfum3l4w33d)
+[03/07/2025 06:06:18] [INFO] on_login() Connected to irc server localhost
+[03/07/2025 06:06:18] [INFO] Checking timers to set at startup
+[03/07/2025 06:06:18] [INFO] No timer to set at startup
+[03/07/2025 06:06:18] [INFO] on_login() Logging to x@channels.undernet.org
+[03/07/2025 06:06:18] [INFO] -> *x@channels.undernet.org* login mediabot ***********
+[03/07/2025 06:06:18] [INFO] on_login() Setting user mode +iw
+[03/07/2025 06:06:18] [INFO] Joining console channel #teuk
+[03/07/2025 06:06:18] [INFO] Trying to join #teuk with key gabou
+[03/07/2025 06:06:18] [INFO] No channel to auto join
+[03/07/2025 06:06:18] [INFO] 001 Welcome to the Radiocapsule IRC Network, mediabotv3
+[03/07/2025 06:06:18] [INFO] 002 Your host is radiocapsule.com, running version u2.10.12.19
+[03/07/2025 06:06:18] [INFO] 003 This server was created ven. 06 juin CEST at 2025 22:25:45
+[03/07/2025 06:06:18] [INFO] 004 server=mediabot version=radiocapsule.com user_modes=u2.10.12.19 chan_modes=diOoswkgx
+[03/07/2025 06:06:18] [INFO] 005 WHOX WALLCHOPS WALLVOICES USERIP CPRIVMSG CNOTICE SILENCE=25 MODES=6 MAXCHANNELS=10 MAXBANS=100 NICKLEN=12 are supported by this server
+[03/07/2025 06:06:18] [INFO] 005 MAXNICKLEN=15 TOPICLEN=160 AWAYLEN=160 KICKLEN=160 CHANNELLEN=200 MAXCHANNELLEN=200 CHANTYPES=#& PREFIX=(ov)@+ STATUSMSG=@+ CHANMODES=b,k,l,imnpstrDdRcCPM CASEMAPPING=rfc1459 NETWORK=Radiocapsule are supported by this server
+[03/07/2025 06:06:18] [INFO] * Your nick is now mediabotv3
+[03/07/2025 06:06:18] [LIVE] mediabotv3 sets mode +iw
+[03/07/2025 06:06:18] [LIVE] * Now talking in #teuk
+[03/07/2025 06:06:18] [DEBUG2] on_message_RPL_ENDOFNAMES() #teuk
+[03/07/2025 06:06:18] [LIVE] * Now talking in #teuk
+[03/07/2025 06:06:18] [DEBUG2] Joined channel: #teuk
+[03/07/2025 06:06:18] [LIVE] * Now talking in #quebec
+[03/07/2025 06:06:18] [DEBUG2] on_message_RPL_ENDOFNAMES() #quebec
+[03/07/2025 06:06:18] [LIVE] * Now talking in #quebec
+[03/07/2025 06:06:18] [DEBUG2] Joined channel: #quebec
+[03/07/2025 06:06:18] [LIVE] * Now talking in #miaw
+[03/07/2025 06:06:19] [DEBUG2] on_message_RPL_ENDOFNAMES() #miaw
+[03/07/2025 06:06:19] [LIVE] * Now talking in #miaw
+[03/07/2025 06:06:19] [DEBUG2] Joined channel: #miaw
+[03/07/2025 06:06:19] [LIVE] * Now talking in #gabou
+[03/07/2025 06:06:19] [DEBUG2] on_message_RPL_ENDOFNAMES() #gabou
+[03/07/2025 06:06:19] [LIVE] * Now talking in #gabou
+[03/07/2025 06:06:19] [DEBUG2] Joined channel: #gabou
+[03/07/2025 06:06:19] [LIVE] * Now talking in #radiocapsule
+[03/07/2025 06:06:19] [DEBUG2] on_message_RPL_ENDOFNAMES() #radiocapsule
+[03/07/2025 06:06:19] [LIVE] * Now talking in #radiocapsule
+[03/07/2025 06:06:19] [DEBUG2] Joined channel: #radiocapsule
+[03/07/2025 06:06:19] [LIVE] * Now talking in #123
+[03/07/2025 06:06:19] [DEBUG2] on_message_RPL_ENDOFNAMES() #123
+[03/07/2025 06:06:19] [LIVE] * Now talking in #123
+[03/07/2025 06:06:19] [DEBUG2] Joined channel: #123
