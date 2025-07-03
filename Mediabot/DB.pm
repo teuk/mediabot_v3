@@ -14,14 +14,14 @@ sub new {
 
     bless $self, $class;
 
-    # Lire les paramètres de [mysql], pas [main]
+    # Read database configuration from the provided config object
     my $dbname = $conf->get('mysql.MAIN_PROG_DDBNAME') || '';
     my $dbhost = $conf->get('mysql.MAIN_PROG_DBHOST') || 'localhost';
     my $dbuser = $conf->get('mysql.MAIN_PROG_DBUSER') || '';
     my $dbpass = $conf->get('mysql.MAIN_PROG_DBPASS') || '';
     my $dbport = $conf->get('mysql.MAIN_PROG_DBPORT') || 3306;
 
-    # Vérifie que les paramètres essentiels sont définis
+    # check if mandatory parameters are defined
     unless ($dbname && $dbuser) {
         $logger->log(0, "❌ Missing DB configuration: DDBNAME or DBUSER is undefined.");
         $logger->log(0, "Check your [mysql] section in mediabot.conf");
