@@ -1,0 +1,4 @@
+#!/bin/bash
+
+echo "🚀 Starting Mediabot in foreground..."
+exec /usr/bin/perl ./mediabot.pl --conf=mediabot.conf

@@ -112,8 +112,8 @@ sub on_message_RPL_ENDOFINVITELIST;  # 347
 my $sFullParams = join(" ",@ARGV);
 my $sServer;
 
-binmode STDOUT, ':utf8';
-binmode STDERR, ':utf8';
+# Set UTF-8 output for STDOUT and STDERR
+set_utf8_output();
 
 # Check command line parameters
 my $result = GetOptions (
@@ -123,6 +123,11 @@ my $result = GetOptions (
 "server=s" => \$sServer,
 );
 
+unless ($result) {
+    usage("Invalid command-line parameters");
+}
+
+# Check if config file is defined
 unless (defined($CONFIG_FILE)) {
     usage("You must specify a config file");
 }
@@ -194,15 +199,52 @@ log_info("mediabot_v3 Copyright (C) 2019-2025 teuk");
 log_info("Mediabot v$MAIN_PROG_VERSION starting with config file $CONFIG_FILE");
 
 # Daemon mode actions
-if ( $MAIN_PROG_DAEMON ) {
-    $mediabot->{logger}->log(0,"Mediabot v$MAIN_PROG_VERSION starting in daemon mode, check " . $mediabot->getLogFile() . " for more details");
+if ($MAIN_PROG_DAEMON) {
+    $mediabot->{logger}->log(0, "Starting in daemon mode...");
+    $mediabot->{logger}->log(1, "Logfile: " . $mediabot->getLogFile());
+
     umask 0;
-    open STDIN, '/dev/null'   or die "Can't read /dev/null: $!";
-    open STDOUT, '>/dev/null' or die "Can't write to /dev/null: $!";
-    open STDERR, '>/dev/null' or die "Can't write to /dev/null: $!";
-    defined(my $pid = fork)   or die "Can't fork: $!";
-    exit if $pid;
-    setsid                    or die "Can't start a new session: $!";
+
+    # Redirect STDIN, STDOUT, STDERR to /dev/null
+    open STDIN,  '<', '/dev/null' or do {
+        $mediabot->{logger}->log(0, "Can't open /dev/null for STDIN: $!");
+        $mediabot->clean_and_exit(1);
+    };
+
+    open STDOUT, '>', '/dev/null' or do {
+        $mediabot->{logger}->log(0, "Can't open /dev/null for STDOUT: $!");
+        $mediabot->clean_and_exit(1);
+    };
+
+    open STDERR, '>', '/dev/null' or do {
+        $mediabot->{logger}->log(0, "Can't open /dev/null for STDERR: $!");
+        $mediabot->clean_and_exit(1);
+    };
+
+    defined(my $pid = fork) or do {
+        $mediabot->{logger}->log(0, "Can't fork process: $!");
+        $mediabot->clean_and_exit(1);
+    };
+
+    if ($pid) {
+        # Parent process exits quietly
+        exit(0);
+    }
+
+    unless (setsid) {
+        $mediabot->{logger}->log(0, "Can't start a new session with setsid: $!");
+        $mediabot->clean_and_exit(1);
+    }
+
+    # Write the PID file
+    if ($mediabot->writePidFile()) {
+        $mediabot->{logger}->log(1, "PID file written to " . $mediabot->getPidFile());
+    } else {
+        $mediabot->{logger}->log(0, "Failed to write PID file, aborting.");
+        $mediabot->clean_and_exit(1);
+    }
+
+    $mediabot->{logger}->log(1, "Daemon process started successfully.");
 }
 
 # Catch signal HUP
@@ -342,6 +384,8 @@ $loop->run;
 # +---------------------------------------------------------------------------+
 # !          SUBS                                                             !
 # +---------------------------------------------------------------------------+
+
+# Display usage information
 sub usage {
     my ($strErr) = @_;
     if (defined($strErr)) {
@@ -351,6 +395,13 @@ sub usage {
     exit 4;
 }
 
+# Set UTF-8 output for STDOUT and STDERR
+sub set_utf8_output {
+    binmode STDOUT, ':utf8';
+    binmode STDERR, ':utf8';
+}
+
+# Get timestamp for logging
 sub log_timestamp {
     return strftime("[%d/%m/%Y %H:%M:%S]", localtime);
 }

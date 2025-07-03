@@ -1,0 +1,14 @@
+#!/bin/bash
+
+CONFIG_FILE="mediabot.conf"
+
+echo "👻 Launching Mediabot in daemon mode..."
+
+# Vérification du fichier de config
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "❌ Configuration file '$CONFIG_FILE' not found!"
+    exit 1
+fi
+
+# Lancer le bot avec l'option --daemon
+exec ./mediabot.pl --conf="$CONFIG_FILE" --daemon

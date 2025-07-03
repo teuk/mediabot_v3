@@ -234,6 +234,19 @@ sub getPidFile(@) {
 	return $self->{conf}->get('main.MAIN_PID_FILE');
 }
 
+# Write the current process ID to the PID file
+sub writePidFile {
+    my ($self) = @_;
+    my $pidfile = $self->getPidFile();
+    open my $fh, '>', $pidfile or do {
+        $self->{logger}->log(0, "Failed to write PID file '$pidfile': $!");
+        return 0;
+    };
+    print $fh $$;
+    close $fh;
+    return 1;
+}
+
 # Get PID from the PID file
 sub getPidFromFile(@) {
     my $self = shift;

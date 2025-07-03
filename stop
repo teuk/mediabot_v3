@@ -1,0 +1,43 @@
+#!/bin/bash
+
+PIDFILE="mediabot.pid"
+CMDLINE="./mediabot.pl --conf=mediabot.conf"
+
+# 1. Try to stop using the PID file
+if [[ -f "$PIDFILE" ]]; then
+    PID=$(cat "$PIDFILE")
+    if kill -0 "$PID" 2>/dev/null; then
+        echo "🛑 Stopping Mediabot (daemon mode) with PID $PID"
+        kill "$PID"
+        sleep 1
+        if kill -0 "$PID" 2>/dev/null; then
+            echo "❌ Failed to stop process $PID (still running)"
+            exit 1
+        else
+            echo "✅ Mediabot stopped (PID $PID)"
+            rm -f "$PIDFILE"
+            exit 0
+        fi
+    else
+        echo "⚠️ PID file found but no process $PID running. Cleaning up..."
+        rm -f "$PIDFILE"
+    fi
+fi
+
+# 2. Try to find the process if not daemonized
+PID=$(pgrep -f "$CMDLINE")
+if [[ -n "$PID" ]]; then
+    echo "🛑 Stopping Mediabot (foreground) with PID $PID"
+    kill "$PID"
+    sleep 1
+    if kill -0 "$PID" 2>/dev/null; then
+        echo "❌ Failed to stop process $PID (still running)"
+        exit 1
+    else
+        echo "✅ Mediabot stopped (PID $PID)"
+        exit 0
+    fi
+else
+    echo "ℹ️ Mediabot is not running"
+    exit 1
+fi
