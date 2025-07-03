@@ -1,33 +1,30 @@
-# Logs
-*.log
-*.pid
 
-# Secrets & confs
-*.conf
-*.key
-*.pem
-*.crt
-*.env
-*.secrets
-*.pw
-*.ini
-*.json
-*.yml
-
+*~
+*.bak
 # Binary files / state
 *.brn
+cache/
+commit.sh
+*.conf
+config/
+*.crt
 *.db
+# Editor junk
+*.env
+*.ini
+*.json
+*.key
+# Local tools & tmp
+*.log
+# Logs
+*.pem
+*.pid
+*.pw
+*.secrets
+# Secrets & confs
 *.sqlite
 *.sqlite3
-*~
-
-# Editor junk
 *.swp
-*.bak
 *.tmp
-
-# Local tools & tmp
-commit.sh
-config/
 tmp/
-cache/
+*.yml
