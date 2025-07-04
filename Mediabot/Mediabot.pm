@@ -479,56 +479,58 @@ sub setServer(@) {
 	$self->{server} = $sServer;
 }
 
-# Pick a server from the database or command line
-sub pickServer(@) {
-	my ($self) = @_;
-	my $conf = $self->{conf};
-	my $LOG  = $self->{LOG};
-	my $dbh  = $self->{dbh};
+# Pick a server from the database based on the configured network
+sub pickServer {
+    my ($self) = @_;
+    my $conf = $self->{conf};
+    my $dbh  = $self->{dbh};
 
-	unless (defined($self->{server}) && $self->{server} ne "") {
-		# Retrieve network name from config
-		my $network_name = $conf->get('connection.CONN_SERVER_NETWORK');
+    if (!defined($self->{server}) || $self->{server} eq "") {
+        my $network_name = $conf->get('connection.CONN_SERVER_NETWORK');
 
-		unless (defined($network_name) && $network_name ne "") {
-			$self->{logger}->log( 0, "No CONN_SERVER_NETWORK defined in $self->{config_file}");
-			$self->{logger}->log( 0, "Run ./configure at first use or ./configure -s to set it properly");
-			clean_and_exit($self, 4);
-		}
+        unless ($network_name) {
+            $self->{logger}->log(0, "No CONN_SERVER_NETWORK defined in $self->{config_file}");
+            _log_configure_hint($self);
+            clean_and_exit($self, 4);
+        }
 
-		# Try to fetch a random server from DB for that network
-		my $sQuery = "SELECT SERVERS.server_hostname FROM NETWORK,SERVERS WHERE NETWORK.id_network=SERVERS.id_network AND NETWORK.network_name LIKE ? ORDER BY RAND() LIMIT 1";
-		my $sth = $dbh->prepare($sQuery);
-		unless ($sth->execute($network_name)) {
-			$self->{logger}->log( 0, "Startup select SERVER, SQL Error: " . $DBI::errstr . " Query: $sQuery");
-		}
-		else {
-			if (my $ref = $sth->fetchrow_hashref()) {
-				$self->{server} = $ref->{'server_hostname'};
-			}
-			$sth->finish;
-		}
+        my $sQuery = "SELECT SERVERS.server_hostname FROM NETWORK,SERVERS WHERE NETWORK.id_network=SERVERS.id_network AND NETWORK.network_name LIKE ? ORDER BY RAND() LIMIT 1";
+        my $sth = $dbh->prepare($sQuery);
+        if ($sth->execute($network_name)) {
+            if (my $ref = $sth->fetchrow_hashref()) {
+                $self->{server} = $ref->{server_hostname};
+            }
+            $sth->finish;
+        } else {
+            $self->{logger}->log(0, "Startup select SERVER, SQL Error: " . $DBI::errstr . " Query: $sQuery");
+        }
 
-		unless (defined($self->{server}) && $self->{server} ne "") {
-			$self->{logger}->log( 0, "No server found for network $network_name defined in $self->{config_file}");
-			$self->{logger}->log( 0, "Run ./configure at first use or ./configure -s to set it properly");
-			clean_and_exit($self, 4);
-		}
+        unless ($self->{server}) {
+            $self->{logger}->log(0, "No server found for network $network_name defined in $self->{config_file}");
+            _log_configure_hint($self);
+            clean_and_exit($self, 4);
+        }
 
-		$self->{logger}->log(0,"Picked $self->{server} from Network $network_name");
-	}
-	else {
-		$self->{logger}->log(0,"Picked $self->{server} from command line");
-	}
+        $self->{logger}->log(0, "Picked $self->{server} from Network $network_name");
+    } else {
+        $self->{logger}->log(0, "Picked $self->{server} from command line");
+    }
 
-	# Extract hostname and port
-	$self->{server_hostname} = $self->{server};
-	if ($self->{server} =~ /:/) {
-		($self->{server_hostname}, $self->{server_port}) = split(/:/, $self->{server}, 2);
-	}
-	else {
-		$self->{server_port} = 6667;
-	}
+    # Parse hostname[:port]
+    if ($self->{server} =~ /:/) {
+        ($self->{server_hostname}, $self->{server_port}) = split(/:/, $self->{server}, 2);
+    } else {
+        $self->{server_hostname} = $self->{server};
+        $self->{server_port} = 6667;
+    }
+
+    $self->{logger}->log(3, "Using host $self->{server_hostname}, port $self->{server_port}");
+}
+
+# Log a hint to run ./configure if no server is set
+sub _log_configure_hint {
+    my ($self) = @_;
+    $self->{logger}->log(0, "Run ./configure at first use or ./configure -s to set it properly");
 }
 
 # Get server hostname 
