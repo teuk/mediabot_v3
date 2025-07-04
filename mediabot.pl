@@ -137,11 +137,7 @@ my $mediabot = Mediabot->new({
     server => $sServer,
 });
 
-# Catch signal TERM
-$SIG{TERM} = \&catch_term;
 
-# Catch signal INT
-$SIG{INT}  = \&catch_int;
 
 # Load configuration
 unless ( $mediabot->readConfigFile ) {
@@ -157,6 +153,9 @@ $mediabot->{logger} = Mediabot::Log->new(
     debug_level => $mediabot->{conf}->get('main.MAIN_PROG_DEBUG'),
     logfile     => $mediabot->{conf}->get('main.MAIN_LOG_FILE'),
 );
+
+# Initialize signals catchers
+init_signals($mediabot->{logger});
 
 # Check config
 if ( $MAIN_PROG_CHECK_CONFIG != 0 ) {
@@ -246,9 +245,6 @@ if ($MAIN_PROG_DAEMON) {
 
     $mediabot->{logger}->log(1, "Daemon process started successfully.");
 }
-
-# Catch signal HUP
-$SIG{HUP}  = \&catch_hup;
 
 my $sStartedMode = ( $MAIN_PROG_DAEMON ? "background" : "foreground");
 my $MAIN_PROG_DEBUG = $mediabot->getDebugLevel();
@@ -395,6 +391,20 @@ sub usage {
     exit 4;
 }
 
+# Initialize signals
+sub init_signals {
+    my ($logger) = @_;
+    $logger->log(3, "Registering signal handler for TERM");
+    $SIG{TERM} = \&catch_term;
+
+    $logger->log(3, "Registering signal handler for INT");
+    $SIG{INT}  = \&catch_int;
+
+    $logger->log(3, "Registering signal handler for HUP");
+    $SIG{HUP}  = \&catch_hup;
+}
+
+
 # Set UTF-8 output for STDOUT and STDERR
 sub set_utf8_output {
     binmode STDOUT, ':utf8';
@@ -406,6 +416,7 @@ sub log_timestamp {
     return strftime("[%d/%m/%Y %H:%M:%S]", localtime);
 }
 
+# Log a message with a specific level
 sub log_message {
     my ($level, $msg) = @_;
     $level //= 0;
