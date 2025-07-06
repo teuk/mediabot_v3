@@ -680,23 +680,13 @@ sub getMessageNickIdentHost(@) {
 	return ($sNick,$sIdent,$sHost);
 }
 
-# Get channel id from channel name
-sub getIdChannel(@) {
-	my ($self,$sChannel) = @_;
-	my $id_channel = undef;
-	my $sQuery = "SELECT id_channel FROM CHANNEL WHERE name=?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel) ) {
-		$self->{logger}->log(1,"getIdChannel() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			$id_channel = $ref->{'id_channel'};
-		}
-	}
-	$sth->finish;
-	return $id_channel;
+# DEPRECATED: use $self->{channels}{$name}->get_id instead
+sub getIdChannel {
+    my ($self, $sChannel) = @_;
+    $self->{logger}->log(1, "⚠️ getIdChannel() is deprecated. Use channel object instead.");
+    return $self->{channels}{$sChannel} ? $self->{channels}{$sChannel}->get_id : undef;
 }
+
 
 # Get user nickname from user id
 sub getUserhandle(@) {
@@ -820,52 +810,62 @@ sub getConsoleChan {
 }
 
 # Send a notice to the console channel
-sub noticeConsoleChan(@) {
-	my ($self,$sMsg) = @_;
-	my ($id_channel,$name,$chanmode,$key) = getConsoleChan($self);
-	unless(defined($name) && ($name ne "")) {
-		$self->{logger}->log(0,"No console chan defined ! Run ./configure to setup the bot");
-	}
-	else {
-		botNotice($self,$name,$sMsg);
-	}
+sub noticeConsoleChan {
+    my ($self, $sMsg) = @_;
+    my ($id_channel, $name, $chanmode, $key) = getConsoleChan($self);
+
+    if (defined $name && $name ne '') {
+        botNotice($self, $name, $sMsg);
+    } else {
+        $self->{logger}->log(0, "No console channel defined! Run ./configure to set up the bot.");
+    }
 }
 
-# Log bot actions
-sub logBot(@) {
-	my ($self,$message,$sChannel,$action,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	my $sHostmask = $message->prefix;
-	my $id_user = undef;
-	my $sUser = "Unknown user";
-	if (defined($iMatchingUserId)) {
-		$id_user = $iMatchingUserId;
-		$sUser = $sMatchingUserHandle;
-	}
-	my $id_channel = undef;
-	if (defined($sChannel)) {
-		$id_channel = getIdChannel($self,$sChannel);
-	}
-	my $sQuery = "INSERT INTO ACTIONS_LOG (ts,id_user,id_channel,hostmask,action,args) VALUES (?,?,?,?,?,?)";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless (defined($tArgs[0])) {
-		$tArgs[0] = "";
-	}
-	unless ($sth->execute(time2str("%Y-%m-%d %H-%M-%S",time),$id_user,$id_channel,$sHostmask,$action,join(" ",@tArgs))) {
-		$self->{logger}->log(0,"logBot() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		my $sNoticeMsg = "($sUser : $sHostmask) command $action";
-		if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-			$sNoticeMsg .= " " . join(" ",@tArgs);
-		}
-		if (defined($sChannel)) {
-			$sNoticeMsg .= " on $sChannel";
-		}
-		noticeConsoleChan($self,$sNoticeMsg);
-		$self->{logger}->log(3,"logBot() $sNoticeMsg");
-	}
-	$sth->finish;
+# Log a bot command, optionally linked to a channel and user
+sub logBot {
+    my ($self, $message, $sChannel, $action, @tArgs) = @_;
+
+    # Retrieve user info from the message
+    my (
+        $iMatchingUserId,     $iMatchingUserLevel,    $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,   $sMatchingUserHandle,   $sMatchingUserPasswd,
+        $sMatchingUserInfo1,  $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    my $sHostmask = $message->prefix // 'unknown';
+    my $id_user   = $iMatchingUserId // undef;
+    my $sUser     = defined $iMatchingUserId ? $sMatchingUserHandle : "Unknown user";
+
+    # Resolve channel ID if a valid channel name is provided
+    my $id_channel;
+    if (defined $sChannel && exists $self->{channels}{$sChannel}) {
+        $id_channel = $self->{channels}{$sChannel}->get_id;
+    }
+
+    # Prepare the arguments as a single string
+    my $args_string = join(" ", @tArgs);
+    $args_string = "" unless defined $args_string;
+
+    # Insert the log entry into the database
+    my $sQuery = "INSERT INTO ACTIONS_LOG (ts, id_user, id_channel, hostmask, action, args) VALUES (?, ?, ?, ?, ?, ?)";
+    my $sth = $self->{dbh}->prepare($sQuery);
+    my $timestamp = time2str("%Y-%m-%d %H-%M-%S", time);
+
+    unless ($sth->execute($timestamp, $id_user, $id_channel, $sHostmask, $action, $args_string)) {
+        $self->{logger}->log(0, "logBot() SQL Error: " . $DBI::errstr . " Query: $sQuery");
+        return;
+    }
+
+    # Build a human-readable notice for the console
+    my $sNoticeMsg = "($sUser : $sHostmask) command $action";
+    $sNoticeMsg .= " $args_string" if $args_string ne "";
+    $sNoticeMsg .= " on $sChannel" if defined $sChannel;
+
+    # Send a notice and log the event
+    $self->noticeConsoleChan($sNoticeMsg);
+    $self->{logger}->log(3, "logBot() $sNoticeMsg");
+
+    $sth->finish;
 }
 
 # Log bot action with event type
@@ -3373,91 +3373,94 @@ sub getIdChannelSet(@) {
 	return $id_channel_set;
 }
 
-sub purgeChannel(@) {
-	my ($self,$message,$sNick,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-					my $sChannel = $tArgs[0];
-					$self->{logger}->log(0,"$sNick issued an purge command $sChannel");
-					my $id_channel = getIdChannel($self,$sChannel);
-					if (defined($id_channel)) {
-						my $sQuery = "SELECT * FROM CHANNEL WHERE id_channel=?";
-						my $sth = $self->{dbh}->prepare($sQuery);
-						unless ($sth->execute($id_channel)) {
-							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-						}
-						else {
-							if (my $ref = $sth->fetchrow_hashref()) {
-								my $sDecription = $ref->{'description'};
-								my $sKey = $ref->{'key'};
-								my $sChanmode = $ref->{'chanmode'};
-								my $bAutoJoin = $ref->{'auto_join'};
-								$sQuery = "DELETE FROM CHANNEL WHERE id_channel=?";
-								$sth = $self->{dbh}->prepare($sQuery);
-								unless ($sth->execute($id_channel)) {
-									$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-									$sth->finish;
-									return undef;
-								}
-								else {
-									$self->{logger}->log(0,"Deleted channel $sChannel id_channel : $id_channel");
-									$sQuery = "DELETE FROM USER_CHANNEL WHERE id_channel=?";
-									$sth = $self->{dbh}->prepare($sQuery);
-									unless ($sth->execute($id_channel)) {
-										$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-										$sth->finish;
-										return undef;
-									}
-									else {
-										$self->{logger}->log(0,"Deleted channel access for $sChannel id_channel : $id_channel");
-										$sQuery = "INSERT INTO CHANNEL_PURGED (id_channel,name,description,`key`,chanmode,auto_join) VALUES (?,?,?,?,?,?)";
-										$sth = $self->{dbh}->prepare($sQuery);
-										unless ($sth->execute($id_channel,$sChannel,$sDecription,$sKey,$sChanmode,$bAutoJoin)) {
-											$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-											$sth->finish;
-											return undef;
-										}
-										else {
-											$self->{logger}->log(0,"Added $sChannel id_channel : $id_channel to CHANNEL_PURGED");
-											partChannel($self,$sChannel,"Channel purged by $sNick");
-											logBot($self,$message,undef,"purge","$sNick purge $sChannel id_channel : $id_channel");
-										}
-									}
-								}
-							}
-							else {
-								$sth->finish;
-								return undef;
-							}
-						}
-					}
-					else {
-						botNotice($self,$sNick,"Channel $sChannel does not exist");
-						return undef;
-					}
-				}
-				else {
-					botNotice($self,$sNick,"Syntax: purge <#channel>");
-					return undef;
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " purge command attempt (command level [Administrator] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " purge command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+# Purge a channel from the bot (delete + archive), if the user is an authenticated administrator
+sub purgeChannel {
+    my ($self, $message, $sNick, @tArgs) = @_;
+
+    # Retrieve user info
+    my (
+        $iMatchingUserId,     $iMatchingUserLevel,    $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,   $sMatchingUserHandle,   $sMatchingUserPasswd,
+        $sMatchingUserInfo1,  $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    unless (defined $iMatchingUserId && $iMatchingUserAuth) {
+        botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        my $notice = $message->prefix . " purge command attempt (user $sMatchingUserHandle is not logged in)";
+        $self->noticeConsoleChan($notice);
+        return;
+    }
+
+    unless (checkUserLevel($self, $iMatchingUserLevel, "Administrator")) {
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        my $notice = $message->prefix . " purge command attempt (command level [Administrator] for user $sMatchingUserHandle [$iMatchingUserLevel])";
+        $self->noticeConsoleChan($notice);
+        return;
+    }
+
+    my $sChannel = $tArgs[0] // '';
+    unless ($sChannel =~ /^#/) {
+        botNotice($self, $sNick, "Syntax: purge <#channel>");
+        return;
+    }
+
+    my $channel_obj = $self->{channels}{$sChannel};
+    unless (defined $channel_obj) {
+        botNotice($self, $sNick, "Channel $sChannel does not exist");
+        return;
+    }
+
+    my $id_channel = $self->{channels}{$sChannel}->get_id;
+    $self->{logger}->log(0, "$sNick issued a purge command on $sChannel");
+
+    # Retrieve full channel info from DB (not just what's cached)
+    my $sth = $self->{dbh}->prepare("SELECT * FROM CHANNEL WHERE id_channel = ?");
+    unless ($sth->execute($id_channel)) {
+        $self->{logger}->log(1, "SQL Error: " . $DBI::errstr . " Query: SELECT * FROM CHANNEL WHERE id_channel = ?");
+        return;
+    }
+
+    my $ref = $sth->fetchrow_hashref();
+    $sth->finish;
+    unless ($ref) {
+        $self->{logger}->log(1, "Channel $sChannel (id: $id_channel) not found in database during purge.");
+        return;
+    }
+
+    my $sDescription = $ref->{description};
+    my $sKey         = $ref->{key};
+    my $sChanmode    = $ref->{chanmode};
+    my $bAutoJoin    = $ref->{auto_join};
+
+    # Delete from CHANNEL table
+    $sth = $self->{dbh}->prepare("DELETE FROM CHANNEL WHERE id_channel = ?");
+    unless ($sth->execute($id_channel)) {
+        $self->{logger}->log(1, "SQL Error: " . $DBI::errstr . " while deleting from CHANNEL");
+        return;
+    }
+
+    # Delete associated access rights
+    $sth = $self->{dbh}->prepare("DELETE FROM USER_CHANNEL WHERE id_channel = ?");
+    unless ($sth->execute($id_channel)) {
+        $self->{logger}->log(1, "SQL Error: " . $DBI::errstr . " while deleting from USER_CHANNEL");
+        return;
+    }
+
+    # Archive into CHANNEL_PURGED
+    $sth = $self->{dbh}->prepare("INSERT INTO CHANNEL_PURGED (id_channel, name, description, `key`, chanmode, auto_join) VALUES (?, ?, ?, ?, ?, ?)");
+    unless ($sth->execute($id_channel, $sChannel, $sDescription, $sKey, $sChanmode, $bAutoJoin)) {
+        $self->{logger}->log(1, "SQL Error: " . $DBI::errstr . " while inserting into CHANNEL_PURGED");
+        return;
+    }
+
+    # Clean IRC and memory
+    $self->{logger}->log(0, "Channel $sChannel (id: $id_channel) successfully purged");
+    $self->partChannel($sChannel, "Channel purged by $sNick");
+    delete $self->{channels}{$sChannel};  # Remove from in-memory hash
+
+    # Log and notify
+    my $log_msg = "$sNick purged $sChannel (id_channel: $id_channel)";
+    $self->logBot($message, undef, "purge", $log_msg);
 }
 
 sub partChannel(@) {
@@ -3472,48 +3475,59 @@ sub partChannel(@) {
 	}
 }
 
-sub channelPart(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (!defined($sChannel) || (defined($tArgs[0]) && ($tArgs[0] ne ""))) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-					$sChannel = $tArgs[0];
-					shift @tArgs;
-				}
-				else {
-					botNotice($self,$sNick,"Syntax: part <#channel>");
-					return undef;
-				}
-			}
-			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,500))) {
-				my $id_channel = getIdChannel($self,$sChannel);
-				if (defined($id_channel)) {
-					$self->{logger}->log(0,"$sNick issued a part $sChannel command");
-					partChannel($self,$sChannel,"At the request of $sMatchingUserHandle");
-					logBot($self,$message,$sChannel,"part","At the request of $sMatchingUserHandle");
-				}
-				else {
-					botNotice($self,$sNick,"Channel $sChannel does not exist");
-					return undef;
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " part command attempt for user " . $sMatchingUserHandle . " [" . $iMatchingUserLevelDesc ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " part command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+# Channel part command
+sub channelPart {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    my (
+        $iMatchingUserId,     $iMatchingUserLevel,    $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,   $sMatchingUserHandle,   $sMatchingUserPasswd,
+        $sMatchingUserInfo1,  $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    if (defined($iMatchingUserId)) {
+        if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+
+            if (!defined($sChannel) || (defined($tArgs[0]) && $tArgs[0] ne "")) {
+                if (defined($tArgs[0]) && $tArgs[0] ne "" && $tArgs[0] =~ /^#/) {
+                    $sChannel = $tArgs[0];
+                    shift @tArgs;
+                } else {
+                    botNotice($self, $sNick, "Syntax: part <#channel>");
+                    return undef;
+                }
+            }
+
+            if (defined($iMatchingUserLevel)
+                && (checkUserLevel($self, $iMatchingUserLevel, "Administrator")
+                    || checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 500))) {
+
+                my $channel_obj = $self->{channels}{$sChannel};
+                if (defined $channel_obj) {
+                    $self->{logger}->log(0, "$sNick issued a part $sChannel command");
+                    partChannel($self, $sChannel, "At the request of $sMatchingUserHandle");
+                    logBot($self, $message, $sChannel, "part", "At the request of $sMatchingUserHandle");
+                } else {
+                    botNotice($self, $sNick, "Channel $sChannel does not exist");
+                    return undef;
+                }
+
+            } else {
+                my $sNoticeMsg = $message->prefix . " part command attempt for user $sMatchingUserHandle [$iMatchingUserLevelDesc])";
+                noticeConsoleChan($self, $sNoticeMsg);
+                botNotice($self, $sNick, "Your level does not allow you to use this command.");
+                return undef;
+            }
+
+        } else {
+            my $sNoticeMsg = $message->prefix . " part command attempt (user $sMatchingUserHandle is not logged in)";
+            noticeConsoleChan($self, $sNoticeMsg);
+            botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+            return undef;
+        }
+    }
 }
+
 
 sub checkUserChannelLevel(@) {
 	my ($self,$message,$sChannel,$id_user,$level) = @_;
@@ -3541,130 +3555,159 @@ sub checkUserChannelLevel(@) {
 	}	
 }
 
-sub channelJoin(@) {
-	my ($self,$message,$sNick,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-				my $sChannel = $tArgs[0];
-				shift @tArgs;
-				if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,450))) {
-					my $id_channel = getIdChannel($self,$sChannel);
-					if (defined($id_channel)) {
-						$self->{logger}->log(0,"$sNick issued a join $sChannel command");
-						my $sKey;
-						my $sQuery = "SELECT `key` FROM CHANNEL WHERE id_channel=?";
-						my $sth = $self->{dbh}->prepare($sQuery);
-						unless ($sth->execute($id_channel)) {
-							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-						}
-						else {
-							if (my $ref = $sth->fetchrow_hashref()) {
-								$sKey = $ref->{'key'};
-							}
-						}
-						if (defined($sKey) && ($sKey ne "")) {
-							joinChannel($self,$sChannel,$sKey);
-						}
-						else {
-							joinChannel($self,$sChannel,undef);
-						}
-						logBot($self,$message,$sChannel,"join","");
-						$sth->finish;
-					}
-					else {
-						botNotice($self,$sNick,"Channel $sChannel does not exist");
-						return undef;
-					}
-				}
-				else {
-					my $sNoticeMsg = $message->prefix . " join command attempt for user " . $sMatchingUserHandle . " [" . $iMatchingUserLevelDesc ."])";
-					noticeConsoleChan($self,$sNoticeMsg);
-					botNotice($self,$sNick,"Your level does not allow you to use this command.");
-					return undef;
-				}
-			}
-			else {
-				botNotice($self,$sNick,"Syntax: join <#channel>");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " join command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+# Join a channel with a key if it exists, or without key if not
+sub channelJoin {
+    my ($self, $message, $sNick, @tArgs) = @_;
+
+    my (
+        $iMatchingUserId,     $iMatchingUserLevel,    $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,   $sMatchingUserHandle,   $sMatchingUserPasswd,
+        $sMatchingUserInfo1,  $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    if (defined($iMatchingUserId)) {
+        if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
+            if (defined($tArgs[0]) && $tArgs[0] ne "" && $tArgs[0] =~ /^#/) {
+                my $sChannel = $tArgs[0];
+                shift @tArgs;
+
+                if (defined($iMatchingUserLevel) &&
+                    (checkUserLevel($self, $iMatchingUserLevel, "Administrator")
+                        || checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 450))) {
+
+                    my $channel_obj = $self->{channels}{$sChannel};
+                    unless (defined $channel_obj) {
+                        botNotice($self, $sNick, "Channel $sChannel does not exist");
+                        return undef;
+                    }
+
+                    my $id_channel = $channel_obj->get_id;
+                    $self->{logger}->log(0, "$sNick issued a join $sChannel command");
+
+                    my $sKey;
+                    my $sQuery = "SELECT `key` FROM CHANNEL WHERE id_channel=?";
+                    my $sth = $self->{dbh}->prepare($sQuery);
+                    unless ($sth->execute($id_channel)) {
+                        $self->{logger}->log(1, "SQL Error : " . $DBI::errstr . " Query : $sQuery");
+                    } else {
+                        if (my $ref = $sth->fetchrow_hashref()) {
+                            $sKey = $ref->{'key'};
+                        }
+                        $sth->finish;
+                    }
+
+                    # Join with or without key
+                    if (defined($sKey) && $sKey ne "") {
+                        joinChannel($self, $sChannel, $sKey);
+                    } else {
+                        joinChannel($self, $sChannel, undef);
+                    }
+
+                    logBot($self, $message, $sChannel, "join", "");
+                } else {
+                    my $sNoticeMsg = $message->prefix . " join command attempt for user $sMatchingUserHandle [$iMatchingUserLevelDesc])";
+                    noticeConsoleChan($self, $sNoticeMsg);
+                    botNotice($self, $sNick, "Your level does not allow you to use this command.");
+                    return undef;
+                }
+            } else {
+                botNotice($self, $sNick, "Syntax: join <#channel>");
+                return undef;
+            }
+        } else {
+            my $sNoticeMsg = $message->prefix . " join command attempt (user $sMatchingUserHandle is not logged in)";
+            noticeConsoleChan($self, $sNoticeMsg);
+            botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+            return undef;
+        }
+    }
 }
 
-sub channelAddUser(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-				$sChannel = $tArgs[0];
-				shift @tArgs;
-			}
-			unless (defined($sChannel)) {
-				botNotice($self,$sNick,"Syntax: add <#channel> <handle> <level>");
-			}
-			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,400))) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] =~ /[0-9]+/)) {
-					my $id_channel = getIdChannel($self,$sChannel);
-					if (defined($id_channel)) {
-						$self->{logger}->log(0,"$sNick issued a add user $sChannel command");
-						my $sUserHandle = $tArgs[0];
-						my $iLevel = $tArgs[1];
-						my $id_user = getIdUser($self,$tArgs[0]);
-						if (defined($id_user)) {
-							my $iCheckUserLevel = getUserChannelLevel($self,$message,$sChannel,$id_user);
-							if ( $iCheckUserLevel == 0 ) {
-								if ( $iLevel < getUserChannelLevel($self,$message,$sChannel,$iMatchingUserId) || checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
-									my $sQuery = "INSERT INTO USER_CHANNEL (id_user,id_channel,level) VALUES (?,?,?)";
-									my $sth = $self->{dbh}->prepare($sQuery);
-									unless ($sth->execute($id_user,$id_channel,$iLevel)) {
-										$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-									}
-									else {
-										logBot($self,$message,$sChannel,"add",@tArgs);
-									}
-									$sth->finish;
-								}
-								else {
-									botNotice($self,$sNick,"You can't add a user with a level equal or greater than yours");
-								}
-							}
-							else {
-								botNotice($self,$sNick,"User $sUserHandle on $sChannel already added at level $iCheckUserLevel");
-							}
-						}
-						else {
-							botNotice($self,$sNick,"User $sUserHandle does not exist");
-						}
-					}
-					else {
-						botNotice($self,$sNick,"Channel $sChannel does not exist");
-					}
-				}
-				else {
-					botNotice($self,$sNick,"Syntax: add <#channel> <handle> <level>");
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " add user command attempt for user " . $sMatchingUserHandle . " [" . $iMatchingUserLevelDesc ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " add user command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-		}
-	}
+# Add a user to a channel with a specific level
+sub channelAddUser {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    my (
+        $iMatchingUserId,     $iMatchingUserLevel,    $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,   $sMatchingUserHandle,   $sMatchingUserPasswd,
+        $sMatchingUserInfo1,  $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    return unless defined $iMatchingUserId;
+
+    unless ($iMatchingUserAuth) {
+        my $notice = $message->prefix . " add user command attempt (user $sMatchingUserHandle is not logged in)";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    # Extract channel from arguments if not directly passed
+    if (defined($tArgs[0]) && $tArgs[0] =~ /^#/) {
+        $sChannel = $tArgs[0];
+        shift @tArgs;
+    }
+
+    unless (defined $sChannel) {
+        botNotice($self, $sNick, "Syntax: add <#channel> <handle> <level>");
+        return;
+    }
+
+    unless (
+        defined $iMatchingUserLevel &&
+        (checkUserLevel($self, $iMatchingUserLevel, "Administrator") ||
+         checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 400))
+    ) {
+        my $notice = $message->prefix . " add user command attempt for user $sMatchingUserHandle [$iMatchingUserLevelDesc])";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    unless (defined($tArgs[0]) && $tArgs[0] ne "" && defined($tArgs[1]) && $tArgs[1] =~ /^\d+$/) {
+        botNotice($self, $sNick, "Syntax: add <#channel> <handle> <level>");
+        return;
+    }
+
+    my $channel_obj = $self->{channels}{$sChannel};
+    unless (defined $channel_obj) {
+        botNotice($self, $sNick, "Channel $sChannel does not exist");
+        return;
+    }
+
+    my $id_channel   = $channel_obj->get_id;
+    my $sUserHandle  = $tArgs[0];
+    my $iLevel       = $tArgs[1];
+    my $id_user      = getIdUser($self, $sUserHandle);
+
+    unless (defined $id_user) {
+        botNotice($self, $sNick, "User $sUserHandle does not exist");
+        return;
+    }
+
+    my $iCheckUserLevel = getUserChannelLevel($self, $message, $sChannel, $id_user);
+    if ($iCheckUserLevel != 0) {
+        botNotice($self, $sNick, "User $sUserHandle on $sChannel already added at level $iCheckUserLevel");
+        return;
+    }
+
+    # Check if the user can assign the level
+    if (
+        $iLevel < getUserChannelLevel($self, $message, $sChannel, $iMatchingUserId)
+        || checkUserLevel($self, $iMatchingUserLevel, "Administrator")
+    ) {
+        my $sQuery = "INSERT INTO USER_CHANNEL (id_user, id_channel, level) VALUES (?, ?, ?)";
+        my $sth = $self->{dbh}->prepare($sQuery);
+        unless ($sth->execute($id_user, $id_channel, $iLevel)) {
+            $self->{logger}->log(1, "SQL Error : " . $DBI::errstr . " Query : $sQuery");
+        } else {
+            $self->{logger}->log(0, "$sNick issued a add user $sChannel command");
+            logBot($self, $message, $sChannel, "add", @tArgs);
+        }
+        $sth->finish;
+    } else {
+        botNotice($self, $sNick, "You can't add a user with a level equal or greater than yours");
+    }
 }
 
 sub getUserChannelLevel(@) {
@@ -3754,6 +3797,7 @@ sub channelDelUser(@) {
 	}
 }
 
+# User modinfo syntax notification
 sub userModinfoSyntax(@) {
 	my ($self,$message,$sNick,@tArgs) = @_;
 	botNotice($self,$sNick,"Syntax: modinfo [#channel] automode <user> <voice|op|none>");
@@ -3761,137 +3805,160 @@ sub userModinfoSyntax(@) {
 	botNotice($self,$sNick,"Syntax: modinfo [#channel] level <user> <level>");
 }
 
-sub userModinfo(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-				$sChannel = $tArgs[0];
-				shift @tArgs;
-			}
-			unless (defined($sChannel)) {
-				userModinfoSyntax($self,$message,$sNick,@tArgs);
-				return undef;
-			}
-			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,400) || ( ($tArgs[0] =~ /^greet$/i) && ( checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,1))) )) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] ne "") && defined($tArgs[2]) && ($tArgs[2] ne "")) {
-					my $id_channel = getIdChannel($self,$sChannel);
-					if (defined($id_channel)) {
-						my ($id_user,$level) = getIdUserChannelLevel($self,$tArgs[1],$sChannel);
-						if (defined($id_user)) {
-							my (undef,$iMatchingUserLevelChannel) = getIdUserChannelLevel($self,$sMatchingUserHandle,$sChannel);
-							if (($iMatchingUserLevelChannel > $level) || (checkUserLevel($self,$iMatchingUserLevel,"Administrator")) || ( ($tArgs[0] =~ /^greet$/i) && ( $iMatchingUserLevelChannel > 0)) ) {
-								switch($tArgs[0]) {
-									case "automode"			{
-																				my $sAutomode = $tArgs[2];
-																				if ( ($sAutomode =~ /op/i ) || ($sAutomode =~ /voice/i) || ($sAutomode =~ /none/i)) {
-																					$sAutomode = uc($sAutomode);
-																					my $sQuery = "UPDATE USER_CHANNEL SET automode=? WHERE id_user=? AND id_channel=?";
-																					my $sth = $self->{dbh}->prepare($sQuery);
-																					unless ($sth->execute($sAutomode,$id_user,$id_channel)) {
-																						$self->{logger}->log(1,"userModinfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-																						$sth->finish;
-																						return undef;
-																					}
-																					botNotice($self,$sNick,"Set automode $sAutomode on $sChannel for " . $tArgs[1]);
-																					logBot($self,$message,$sChannel,"modinfo",@tArgs);
-																					$sth->finish;
-																					return $id_channel;
-																												}
-																					
-																				else {
-																					userModinfoSyntax($self,$message,$sNick,@tArgs);
-																					return undef;
-																				}
-																			}
-									case "greet"				{
-																				my $sUser = $tArgs[1];
-																				if ( (($iMatchingUserLevelChannel < 400) && ( $sUser ne $sMatchingUserHandle)) && (!checkUserLevel($self,$iMatchingUserLevel,"Administrator"))) {
-																					botNotice($self,$sNick,"Your level does not allow you to perfom this command.");
-																				}
-																				splice @tArgs,0,2;
-																				my $sGreet;
-																				# Check remove keyword "none"
-																				unless (( $tArgs[0] =~ /none/i ) && ($#tArgs == 0)) {
-																					$sGreet = join(" ",@tArgs);
-																				}
-																				my $sQuery = "UPDATE USER_CHANNEL SET greet=? WHERE id_user=? AND id_channel=?";
-																				my $sth = $self->{dbh}->prepare($sQuery);
-																				unless ($sth->execute($sGreet,$id_user,$id_channel)) {
-																					$self->{logger}->log(1,"userModinfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-																					$sth->finish;
-																					return undef;
-																				}
-																				botNotice($self,$sNick,"Set greet ($sGreet) on $sChannel for $sUser");
-																				logBot($self,$message,$sChannel,"modinfo",("greet $sUser",@tArgs));
-																				$sth->finish;
-																				return $id_channel;
-																			}
-									case "level"				{
-																				my $sUser = $tArgs[1];
-																				if ( $tArgs[2] =~ /[0-9]+/ ) {
-																					if ( $tArgs [2] <= 500 ) {
-																						my $sQuery = "UPDATE USER_CHANNEL SET level=? WHERE id_user=? AND id_channel=?";
-																						my $sth = $self->{dbh}->prepare($sQuery);
-																						unless ($sth->execute($tArgs[2]	,$id_user,$id_channel)) {
-																							$self->{logger}->log(1,"userModinfo() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-																							$sth->finish;
-																							return undef;
-																						}
-																						botNotice($self,$sNick,"Set level " . $tArgs[2] . " on $sChannel for $sUser");
-																						logBot($self,$message,$sChannel,"modinfo",@tArgs);
-																						$sth->finish;
-																						return $id_channel;
-																					}
-																					else {
-																						botNotice($self,$sNick,"Cannot set user access higher than 500.");
-																					}
-																				}
-																				else {
-																					userModinfoSyntax($self,$message,$sNick,@tArgs);
-																					return undef;
-																				}
-																			}
-									else								{
-																				userModinfoSyntax($self,$message,$sNick,@tArgs);
-																				return undef;
-																			}
-								}
-							}
-							else {
-								botNotice($self,$sNick,"Cannot modify a user with equal or higher access than your own.");
-							}
-						}
-						else {
-							botNotice($self,$sNick,"User " . $tArgs[1] . " does not exist on $sChannel");
-							return undef;
-						}
-					}
-					else {
-						botNotice($self,$sNick,"Channel $sChannel does not exist");
-						return undef;
-					}
-				}
-				else {
-					userModinfoSyntax($self,$message,$sNick,@tArgs);
-					return undef;
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " modinfo command attempt for user " . $sMatchingUserHandle . " [" . $iMatchingUserLevelDesc ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " modinfo command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+# User modinfo command
+sub userModinfo {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    my (
+        $iMatchingUserId,     $iMatchingUserLevel,    $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,   $sMatchingUserHandle,   $sMatchingUserPasswd,
+        $sMatchingUserInfo1,  $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    return unless defined $iMatchingUserId;
+
+    unless ($iMatchingUserAuth) {
+        my $notice = $message->prefix . " modinfo command attempt (user $sMatchingUserHandle is not logged in)";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    # Extract channel if passed as first arg
+    if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
+        $sChannel = shift @tArgs;
+    }
+
+    unless (defined $sChannel) {
+        userModinfoSyntax($self, $message, $sNick, @tArgs);
+        return;
+    }
+
+    # Check global or channel-specific permissions
+    my $has_access =
+        checkUserLevel($self, $iMatchingUserLevel, "Administrator")
+        || checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 400)
+        || (
+            defined $tArgs[0]
+            && $tArgs[0] =~ /^greet$/i
+            && checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 1)
+        );
+
+    unless ($has_access) {
+        my $notice = $message->prefix . " modinfo command attempt for user $sMatchingUserHandle [$iMatchingUserLevelDesc])";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    # Basic syntax check
+    unless (defined $tArgs[0] && $tArgs[0] ne "" && defined $tArgs[1] && defined $tArgs[2] && $tArgs[2] ne "") {
+        userModinfoSyntax($self, $message, $sNick, @tArgs);
+        return;
+    }
+
+    my $channel_obj = $self->{channels}{$sChannel};
+    unless (defined $channel_obj) {
+        botNotice($self, $sNick, "Channel $sChannel does not exist");
+        return;
+    }
+
+    my $id_channel = $channel_obj->get_id;
+    my ($id_user, $level) = getIdUserChannelLevel($self, $tArgs[1], $sChannel);
+
+    unless (defined $id_user) {
+        botNotice($self, $sNick, "User $tArgs[1] does not exist on $sChannel");
+        return;
+    }
+
+    my (undef, $iMatchingUserLevelChannel) = getIdUserChannelLevel($self, $sMatchingUserHandle, $sChannel);
+
+    unless (
+        $iMatchingUserLevelChannel > $level
+        || checkUserLevel($self, $iMatchingUserLevel, "Administrator")
+        || ($tArgs[0] =~ /^greet$/i && $iMatchingUserLevelChannel > 0)
+    ) {
+        botNotice($self, $sNick, "Cannot modify a user with equal or higher access than your own.");
+        return;
+    }
+
+    my $sType = lc $tArgs[0];
+    my $sth;
+
+    SWITCH: {
+        $sType eq "automode" and do {
+            my $sAutomode = uc($tArgs[2]);
+            unless ($sAutomode =~ /^(OP|VOICE|NONE)$/i) {
+                userModinfoSyntax($self, $message, $sNick, @tArgs);
+                last SWITCH;
+            }
+
+            my $query = "UPDATE USER_CHANNEL SET automode=? WHERE id_user=? AND id_channel=?";
+            $sth = $self->{dbh}->prepare($query);
+            unless ($sth->execute($sAutomode, $id_user, $id_channel)) {
+                $self->{logger}->log(1, "userModinfo() SQL Error : " . $DBI::errstr . " Query : $query");
+                $sth->finish;
+                return;
+            }
+            botNotice($self, $sNick, "Set automode $sAutomode on $sChannel for $tArgs[1]");
+            logBot($self, $message, $sChannel, "modinfo", @tArgs);
+            $sth->finish;
+            return $id_channel;
+        };
+
+        $sType eq "greet" and do {
+            my $sUser = $tArgs[1];
+
+            if ($iMatchingUserLevelChannel < 400 && $sUser ne $sMatchingUserHandle && !checkUserLevel($self, $iMatchingUserLevel, "Administrator")) {
+                botNotice($self, $sNick, "Your level does not allow you to perform this command.");
+                last SWITCH;
+            }
+
+            splice @tArgs, 0, 2;
+            my $sGreet = (scalar @tArgs == 1 && $tArgs[0] =~ /none/i) ? undef : join(" ", @tArgs);
+
+            my $query = "UPDATE USER_CHANNEL SET greet=? WHERE id_user=? AND id_channel=?";
+            $sth = $self->{dbh}->prepare($query);
+            unless ($sth->execute($sGreet, $id_user, $id_channel)) {
+                $self->{logger}->log(1, "userModinfo() SQL Error : " . $DBI::errstr . " Query : $query");
+                $sth->finish;
+                return;
+            }
+
+            botNotice($self, $sNick, "Set greet (" . ($sGreet // "none") . ") on $sChannel for $sUser");
+            logBot($self, $message, $sChannel, "modinfo", ("greet $sUser", @tArgs));
+            $sth->finish;
+            return $id_channel;
+        };
+
+        $sType eq "level" and do {
+            my $sUser = $tArgs[1];
+            my $new_level = $tArgs[2];
+
+            unless ($new_level =~ /^\d+$/ && $new_level <= 500) {
+                botNotice($self, $sNick, "Cannot set user access higher than 500.");
+                last SWITCH;
+            }
+
+            my $query = "UPDATE USER_CHANNEL SET level=? WHERE id_user=? AND id_channel=?";
+            $sth = $self->{dbh}->prepare($query);
+            unless ($sth->execute($new_level, $id_user, $id_channel)) {
+                $self->{logger}->log(1, "userModinfo() SQL Error : " . $DBI::errstr . " Query : $query");
+                $sth->finish;
+                return;
+            }
+
+            botNotice($self, $sNick, "Set level $new_level on $sChannel for $sUser");
+            logBot($self, $message, $sChannel, "modinfo", @tArgs);
+            $sth->finish;
+            return $id_channel;
+        };
+
+        # Unknown case
+        userModinfoSyntax($self, $message, $sNick, @tArgs);
+    }
+
+    return;
 }
 
 sub getIdUserChannelLevel(@) {
@@ -3916,334 +3983,418 @@ sub getIdUserChannelLevel(@) {
 	}
 }
 
-sub userOpChannel(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-				$sChannel = $tArgs[0];
-				shift @tArgs;
-			}
-			unless (defined($sChannel)) {
-				botNotice($self,$sNick,"Syntax: op #channel <nick>");
-				return undef;
-			}
-			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,100))) {
-				my $id_channel = getIdChannel($self,$sChannel);
-				if (defined($id_channel)) {
-					if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-						$self->{irc}->send_message("MODE",undef,($sChannel,"+o",$tArgs[0]));
-					}
-					else {
-						$self->{irc}->send_message("MODE",undef,($sChannel,"+o",$sNick));
-					}
-					logBot($self,$message,$sChannel,"op",@tArgs);
-					return $id_channel;
-				}
-				else {
-					botNotice($self,$sNick,"Channel $sChannel does not exist");
-					return undef;
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " op command attempt for user " . $sMatchingUserHandle . " [" . $iMatchingUserLevelDesc ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " op command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+# User op command
+sub userOpChannel {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    my (
+        $iMatchingUserId,     $iMatchingUserLevel,    $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,   $sMatchingUserHandle,   $sMatchingUserPasswd,
+        $sMatchingUserInfo1,  $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    return unless defined $iMatchingUserId;
+
+    unless ($iMatchingUserAuth) {
+        my $notice = $message->prefix . " op command attempt (user $sMatchingUserHandle is not logged in)";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    # Extract channel from args if necessary
+    if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
+        $sChannel = shift @tArgs;
+    }
+
+    unless (defined $sChannel) {
+        botNotice($self, $sNick, "Syntax: op #channel <nick>");
+        return;
+    }
+
+    # Check global or per-channel privileges
+    unless (
+        defined $iMatchingUserLevel &&
+        (checkUserLevel($self, $iMatchingUserLevel, "Administrator")
+            || checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 100))
+    ) {
+        my $notice = $message->prefix . " op command attempt for user $sMatchingUserHandle [$iMatchingUserLevelDesc])";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    my $channel_obj = $self->{channels}{$sChannel};
+    unless (defined $channel_obj) {
+        botNotice($self, $sNick, "Channel $sChannel does not exist");
+        return;
+    }
+
+    my $id_channel = $channel_obj->get_id;
+
+    # Determine who gets +o
+    my $target_nick = defined($tArgs[0]) && $tArgs[0] ne "" ? $tArgs[0] : $sNick;
+
+    $self->{irc}->send_message("MODE", undef, ($sChannel, "+o", $target_nick));
+    logBot($self, $message, $sChannel, "op", @tArgs);
+
+    return $id_channel;
 }
 
-sub userDeopChannel(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-				$sChannel = $tArgs[0];
-				shift @tArgs;
-			}
-			unless (defined($sChannel)) {
-				botNotice($self,$sNick,"Syntax: deop #channel <nick>");
-				return undef;
-			}
-			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,100))) {
-				my $id_channel = getIdChannel($self,$sChannel);
-				if (defined($id_channel)) {
-					if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-						$self->{irc}->send_message("MODE",undef,($sChannel,"-o",$tArgs[0]));
-					}
-					else {
-						$self->{irc}->send_message("MODE",undef,($sChannel,"-o",$sNick));
-					}
-					logBot($self,$message,$sChannel,"deop",@tArgs);
-					return $id_channel;
-				}
-				else {
-					botNotice($self,$sNick,"Channel $sChannel does not exist");
-					return undef;
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " deop command attempt for user " . $sMatchingUserHandle . " [" . $iMatchingUserLevelDesc ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " deop command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+# User deop command
+sub userDeopChannel {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    my (
+        $iMatchingUserId,     $iMatchingUserLevel,    $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,   $sMatchingUserHandle,   $sMatchingUserPasswd,
+        $sMatchingUserInfo1,  $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    return unless defined $iMatchingUserId;
+
+    unless ($iMatchingUserAuth) {
+        my $notice = $message->prefix . " deop command attempt (user $sMatchingUserHandle is not logged in)";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    # Extract channel from args if necessary
+    if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
+        $sChannel = shift @tArgs;
+    }
+
+    unless (defined $sChannel) {
+        botNotice($self, $sNick, "Syntax: deop #channel <nick>");
+        return;
+    }
+
+    # Check global or per-channel privileges
+    unless (
+        defined $iMatchingUserLevel &&
+        (checkUserLevel($self, $iMatchingUserLevel, "Administrator")
+            || checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 100))
+    ) {
+        my $notice = $message->prefix . " deop command attempt for user $sMatchingUserHandle [$iMatchingUserLevelDesc])";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    my $channel_obj = $self->{channels}{$sChannel};
+    unless (defined $channel_obj) {
+        botNotice($self, $sNick, "Channel $sChannel does not exist");
+        return;
+    }
+
+    my $id_channel = $channel_obj->get_id;
+
+    # Determine who gets -o
+    my $target_nick = defined($tArgs[0]) && $tArgs[0] ne "" ? $tArgs[0] : $sNick;
+
+    $self->{irc}->send_message("MODE", undef, ($sChannel, "-o", $target_nick));
+    logBot($self, $message, $sChannel, "deop", @tArgs);
+
+    return $id_channel;
 }
 
-sub userInviteChannel(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-				$sChannel = $tArgs[0];
-				shift @tArgs;
-			}
-			unless (defined($sChannel)) {
-				botNotice($self,$sNick,"Syntax: invite #channel <nick>");
-				return undef;
-			}
-			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,100))) {
-				my $id_channel = getIdChannel($self,$sChannel);
-				if (defined($id_channel)) {
-					if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-						$self->{irc}->send_message("INVITE",undef,($tArgs[0],$sChannel));
-					}
-					else {
-						$self->{irc}->send_message("INVITE",undef,($sNick,$sChannel));
-					}
-					logBot($self,$message,$sChannel,"invite",@tArgs);
-					return $id_channel;
-				}
-				else {
-					botNotice($self,$sNick,"Channel $sChannel does not exist");
-					return undef;
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " invite command attempt for user " . $sMatchingUserHandle . " [" . $iMatchingUserLevelDesc ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " invite command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+# User invite command
+sub userInviteChannel {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    my (
+        $iMatchingUserId,     $iMatchingUserLevel,    $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,   $sMatchingUserHandle,   $sMatchingUserPasswd,
+        $sMatchingUserInfo1,  $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    return unless defined $iMatchingUserId;
+
+    unless ($iMatchingUserAuth) {
+        my $notice = $message->prefix . " invite command attempt (user $sMatchingUserHandle is not logged in)";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    # Extract channel from args if necessary
+    if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
+        $sChannel = shift @tArgs;
+    }
+
+    unless (defined $sChannel) {
+        botNotice($self, $sNick, "Syntax: invite #channel <nick>");
+        return;
+    }
+
+    # Check global or per-channel privileges
+    unless (
+        defined $iMatchingUserLevel &&
+        (checkUserLevel($self, $iMatchingUserLevel, "Administrator")
+            || checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 100))
+    ) {
+        my $notice = $message->prefix . " invite command attempt for user $sMatchingUserHandle [$iMatchingUserLevelDesc])";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    my $channel_obj = $self->{channels}{$sChannel};
+    unless (defined $channel_obj) {
+        botNotice($self, $sNick, "Channel $sChannel does not exist");
+        return;
+    }
+
+    my $id_channel = $channel_obj->get_id;
+
+    # Determine who to invite
+    my $target_nick = defined($tArgs[0]) && $tArgs[0] ne "" ? $tArgs[0] : $sNick;
+
+    $self->{irc}->send_message("INVITE", undef, ($target_nick, $sChannel));
+    logBot($self, $message, $sChannel, "invite", @tArgs);
+
+    return $id_channel;
 }
 
-sub userVoiceChannel(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-				$sChannel = $tArgs[0];
-				shift @tArgs;
-			}
-			unless (defined($sChannel)) {
-				botNotice($self,$sNick,"Syntax: voice #channel <nick>");
-				return undef;
-			}
-			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,25))) {
-				my $id_channel = getIdChannel($self,$sChannel);
-				if (defined($id_channel)) {
-					if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-						$self->{irc}->send_message("MODE",undef,($sChannel,"+v",$tArgs[0]));
-					}
-					else {
-						$self->{irc}->send_message("MODE",undef,($sChannel,"+v",$sNick));
-					}
-					logBot($self,$message,$sChannel,"voice",@tArgs);
-					return $id_channel;
-				}
-				else {
-					botNotice($self,$sNick,"Channel $sChannel does not exist");
-					return undef;
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " voice command attempt for user " . $sMatchingUserHandle . " [" . $iMatchingUserLevelDesc ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " voice command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+# User voice command
+sub userVoiceChannel {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    my (
+        $iMatchingUserId,     $iMatchingUserLevel,    $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,   $sMatchingUserHandle,   $sMatchingUserPasswd,
+        $sMatchingUserInfo1,  $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    return unless defined $iMatchingUserId;
+
+    unless ($iMatchingUserAuth) {
+        my $notice = $message->prefix . " voice command attempt (user $sMatchingUserHandle is not logged in)";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    # Extract channel from args if necessary
+    if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
+        $sChannel = shift @tArgs;
+    }
+
+    unless (defined $sChannel) {
+        botNotice($self, $sNick, "Syntax: voice #channel <nick>");
+        return;
+    }
+
+    # Check global or per-channel privileges
+    unless (
+        defined $iMatchingUserLevel &&
+        (checkUserLevel($self, $iMatchingUserLevel, "Administrator")
+            || checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 25))
+    ) {
+        my $notice = $message->prefix . " voice command attempt for user $sMatchingUserHandle [$iMatchingUserLevelDesc])";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    my $channel_obj = $self->{channels}{$sChannel};
+    unless (defined $channel_obj) {
+        botNotice($self, $sNick, "Channel $sChannel does not exist");
+        return;
+    }
+
+    my $id_channel = $channel_obj->get_id;
+
+    # Determine who gets +v
+    my $target_nick = defined($tArgs[0]) && $tArgs[0] ne "" ? $tArgs[0] : $sNick;
+
+    $self->{irc}->send_message("MODE", undef, ($sChannel, "+v", $target_nick));
+    logBot($self, $message, $sChannel, "voice", @tArgs);
+
+    return $id_channel;
 }
 
-sub userDevoiceChannel(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-				$sChannel = $tArgs[0];
-				shift @tArgs;
-			}
-			unless (defined($sChannel)) {
-				botNotice($self,$sNick,"Syntax: devoice #channel <nick>");
-				return undef;
-			}
-			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,25))) {
-				my $id_channel = getIdChannel($self,$sChannel);
-				if (defined($id_channel)) {
-					if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-						$self->{irc}->send_message("MODE",undef,($sChannel,"-v",$tArgs[0]));
-					}
-					else {
-						$self->{irc}->send_message("MODE",undef,($sChannel,"-v",$sNick));
-					}
-					logBot($self,$message,$sChannel,"devoice",@tArgs);
-					return $id_channel;
-				}
-				else {
-					botNotice($self,$sNick,"Channel $sChannel does not exist");
-					return undef;
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " devoice command attempt for user " . $sMatchingUserHandle . " [" . $iMatchingUserLevelDesc ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " devoice command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+# User devoice command
+sub userDevoiceChannel {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    my (
+        $iMatchingUserId,     $iMatchingUserLevel,    $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,   $sMatchingUserHandle,   $sMatchingUserPasswd,
+        $sMatchingUserInfo1,  $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    return unless defined $iMatchingUserId;
+
+    unless ($iMatchingUserAuth) {
+        my $notice = $message->prefix . " devoice command attempt (user $sMatchingUserHandle is not logged in)";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    # Extract channel from args if necessary
+    if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
+        $sChannel = shift @tArgs;
+    }
+
+    unless (defined $sChannel) {
+        botNotice($self, $sNick, "Syntax: devoice #channel <nick>");
+        return;
+    }
+
+    unless (
+        defined $iMatchingUserLevel &&
+        (checkUserLevel($self, $iMatchingUserLevel, "Administrator")
+            || checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 25))
+    ) {
+        my $notice = $message->prefix . " devoice command attempt for user $sMatchingUserHandle [$iMatchingUserLevelDesc])";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    my $channel_obj = $self->{channels}{$sChannel};
+    unless (defined $channel_obj) {
+        botNotice($self, $sNick, "Channel $sChannel does not exist");
+        return;
+    }
+
+    my $id_channel = $channel_obj->get_id;
+
+    my $target_nick = defined($tArgs[0]) && $tArgs[0] ne "" ? $tArgs[0] : $sNick;
+
+    $self->{irc}->send_message("MODE", undef, ($sChannel, "-v", $target_nick));
+    logBot($self, $message, $sChannel, "devoice", @tArgs);
+
+    return $id_channel;
 }
 
-sub userKickChannel(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-				$sChannel = $tArgs[0];
-				shift @tArgs;
-			}
-			unless (defined($sChannel)) {
-				botNotice($self,$sNick,"Syntax: kick #channel <nick> [reason]");
-				return undef;
-			}
-			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,50))) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-					my $id_channel = getIdChannel($self,$sChannel);
-					if (defined($id_channel)) {
-						$self->{logger}->log(0,"$sNick issued a kick $sChannel command");
-						my $sKickNick = $tArgs[0];
-						shift @tArgs;
-						my $sKickReason = join(" ",@tArgs);
-						$self->{irc}->send_message("KICK",undef,($sChannel,$sKickNick,"($sMatchingUserHandle) $sKickReason"));
-						logBot($self,$message,$sChannel,"kick",($sKickNick,@tArgs));
-						return $id_channel;
-					}
-					else {
-						botNotice($self,$sNick,"Channel $sChannel does not exist");
-						return undef;
-					}
-				}
-				else {
-					botNotice($self,$sNick,"Syntax: kick #channel <nick> [reason]");
-					return undef;
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " kick command attempt for user " . $sMatchingUserHandle . " [" . $iMatchingUserLevelDesc ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " kick command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+# User kick command
+sub userKickChannel {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    my (
+        $iMatchingUserId,     $iMatchingUserLevel,    $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,   $sMatchingUserHandle,   $sMatchingUserPasswd,
+        $sMatchingUserInfo1,  $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    return unless defined $iMatchingUserId;
+
+    unless ($iMatchingUserAuth) {
+        my $sNoticeMsg = $message->prefix . " kick command attempt (user $sMatchingUserHandle is not logged in)";
+        $self->noticeConsoleChan($sNoticeMsg);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    # Channel from args if needed
+    if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
+        $sChannel = shift @tArgs;
+    }
+
+    unless (defined $sChannel) {
+        botNotice($self, $sNick, "Syntax: kick #channel <nick> [reason]");
+        return;
+    }
+
+    unless (
+        defined $iMatchingUserLevel &&
+        (checkUserLevel($self, $iMatchingUserLevel, "Administrator")
+            || checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 50))
+    ) {
+        my $sNoticeMsg = $message->prefix . " kick command attempt for user $sMatchingUserHandle [$iMatchingUserLevelDesc])";
+        $self->noticeConsoleChan($sNoticeMsg);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    my $channel_obj = $self->{channels}{$sChannel};
+    unless (defined $channel_obj) {
+        botNotice($self, $sNick, "Channel $sChannel does not exist");
+        return;
+    }
+
+    my $id_channel = $channel_obj->get_id;
+
+    unless (defined $tArgs[0] && $tArgs[0] ne "") {
+        botNotice($self, $sNick, "Syntax: kick #channel <nick> [reason]");
+        return;
+    }
+
+    my $sKickNick   = shift @tArgs;
+    my $sKickReason = join(" ", @tArgs) // "";
+    my $sFinalMsg   = "($sMatchingUserHandle) $sKickReason";
+
+    $self->{logger}->log(0, "$sNick issued a kick $sChannel command");
+    $self->{irc}->send_message("KICK", undef, ($sChannel, $sKickNick, $sFinalMsg));
+    logBot($self, $message, $sChannel, "kick", ($sKickNick, @tArgs));
+
+    return $id_channel;
 }
 
-sub userTopicChannel(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-				$sChannel = $tArgs[0];
-				shift @tArgs;
-			}
-			unless (defined($sChannel)) {
-				botNotice($self,$sNick,"Syntax: topic #channel <topic>");
-				return undef;
-			}
-			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,50))) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-					my $id_channel = getIdChannel($self,$sChannel);
-					if (defined($id_channel)) {
-						$self->{logger}->log(0,"$sNick issued a topic $sChannel command");
-						$self->{irc}->send_message("TOPIC",undef,($sChannel,join(" ",@tArgs)));
-						logBot($self,$message,$sChannel,"topic",@tArgs);
-						return $id_channel;
-					}
-					else {
-						botNotice($self,$sNick,"Channel $sChannel does not exist");
-						return undef;
-					}
-				}
-				else {
-					botNotice($self,$sNick,"Syntax: topic #channel <topic>");
-					return undef;
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " topic command attempt for user " . $sMatchingUserHandle . " [" . $iMatchingUserLevelDesc ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " topic command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+# User topic command
+sub userTopicChannel {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    my (
+        $iMatchingUserId,     $iMatchingUserLevel,    $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,   $sMatchingUserHandle,   $sMatchingUserPasswd,
+        $sMatchingUserInfo1,  $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    return unless defined $iMatchingUserId;
+
+    unless ($iMatchingUserAuth) {
+        my $sNoticeMsg = $message->prefix . " topic command attempt (user $sMatchingUserHandle is not logged in)";
+        $self->noticeConsoleChan($sNoticeMsg);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
+        $sChannel = shift @tArgs;
+    }
+
+    unless (defined $sChannel) {
+        botNotice($self, $sNick, "Syntax: topic #channel <topic>");
+        return;
+    }
+
+    unless (
+        defined $iMatchingUserLevel &&
+        (checkUserLevel($self, $iMatchingUserLevel, "Administrator")
+         || checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 50))
+    ) {
+        my $sNoticeMsg = $message->prefix . " topic command attempt for user $sMatchingUserHandle [$iMatchingUserLevelDesc])";
+        $self->noticeConsoleChan($sNoticeMsg);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    unless (defined $tArgs[0] && $tArgs[0] ne "") {
+        botNotice($self, $sNick, "Syntax: topic #channel <topic>");
+        return;
+    }
+
+    my $channel_obj = $self->{channels}{$sChannel};
+    unless (defined $channel_obj) {
+        botNotice($self, $sNick, "Channel $sChannel does not exist");
+        return;
+    }
+
+    my $id_channel = $channel_obj->get_id;
+    my $new_topic  = join(" ", @tArgs);
+
+    $self->{logger}->log(0, "$sNick issued a topic $sChannel command");
+    $self->{irc}->send_message("TOPIC", undef, ($sChannel, $new_topic));
+    logBot($self, $message, $sChannel, "topic", @tArgs);
+
+    return $id_channel;
 }
+
 
 sub userShowcommandsChannel(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
@@ -4290,98 +4441,104 @@ sub userShowcommandsChannel(@) {
 	}
 }
 
-sub userChannelInfo(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-		$sChannel = $tArgs[0];
-		shift @tArgs;
-	}
-	unless (defined($sChannel)) {
-		botNotice($self,$sNick,"Syntax: chaninfo #channel");
-		return undef;
-	}
-	my $sQuery = "SELECT * FROM USER,USER_CHANNEL,CHANNEL WHERE USER.id_user=USER_CHANNEL.id_user AND CHANNEL.id_channel=USER_CHANNEL.id_channel AND name=? AND level=500";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $sUsername = $ref->{'nickname'};
-			my $sLastLogin = $ref->{'last_login'};
-			my $creation_date = $ref->{'creation_date'};
-			my $description = $ref->{'description'};
-			my $sKey = $ref->{'key'};
-			$sKey = ( defined($sKey) ? $sKey : "Not set" );
-			my $chanmode = $ref->{'chanmode'};
-			$chanmode = ( defined($chanmode) ? $chanmode : "Not set" );
-			my $sAutoJoin = $ref->{'auto_join'};
-			$sAutoJoin = ( $sAutoJoin ? "True" : "False" );
-			unless(defined($sLastLogin) && ($sLastLogin ne "")) {
-				$sLastLogin = "Never";
-			}
-			botNotice($self,$sNick,"$sChannel is registered by $sUsername - last login: $sLastLogin");
-			botNotice($self,$sNick,"Creation date : $creation_date - Description : $description");
-			my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-			if (defined($iMatchingUserId)) {
-				if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-					if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
-						botNotice($self,$sNick,"Chan modes : $chanmode - Key : $sKey - Auto join : $sAutoJoin");
-					}
-				}
-			}
-			$sQuery = "SELECT chanset FROM CHANSET_LIST,CHANNEL_SET,CHANNEL WHERE CHANNEL_SET.id_channel=CHANNEL.id_channel AND CHANNEL_SET.id_chanset_list=CHANSET_LIST.id_chanset_list AND name like ?";
-			$sth = $self->{dbh}->prepare($sQuery);
-			unless ($sth->execute($sChannel)) {
-				$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-			}
-			else {
-				my $sChansetFlags = "Channel flags ";
-				my $i;
-				my $isChansetAntiFlood = 0;
-				while (my $ref = $sth->fetchrow_hashref()) {
-					my $chanset = $ref->{'chanset'};
-					if ( $chanset =~ /AntiFlood/i ) {
-						$isChansetAntiFlood = 1;
-					}
-					$sChansetFlags .= "+$chanset ";
-					$i++;
-				}
-				if ( $i ) {
-					botNotice($self,$sNick,$sChansetFlags);
-				}
-				if ( $isChansetAntiFlood ) {
-					my $id_channel = getIdChannel($self,$sChannel);
-					$sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
-					$sth = $self->{dbh}->prepare($sQuery);
-					unless ($sth->execute($id_channel)) {
-						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-					}
-					else {
-						if (my $ref = $sth->fetchrow_hashref()) {
-							my $nbmsg_max = $ref->{'nbmsg_max'};
-							my $nbmsg = $ref->{'nbmsg'};
-							my $duration = $ref->{'duration'};
-							my $first = $ref->{'first'};
-							my $latest = $ref->{'latest'};
-							my $timetowait = $ref->{'timetowait'};
-							my $notification = $ref->{'notification'};
-							my $sNotification = ( $notification ? "ON" : "OFF" );
-							botNotice($self,$sNick,"Antiflood parameters : $nbmsg_max messages in $duration seconds, wait for $timetowait seconds, notification : $sNotification");
-						}
-						else {
-							botNotice($self,$sNick,"Antiflood parameters : not set ?");
-						}
-					}
-				}
-			}
-		}
-		else {
-			botNotice($self,$sNick,"The channel $sChannel doesn't appear to be registered");
-		}
-		logBot($self,$message,$sChannel,"chaninfo",@tArgs);
-	}
-	$sth->finish;
+# Channel info command
+sub userChannelInfo {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    if (defined($tArgs[0]) && $tArgs[0] =~ /^#/) {
+        $sChannel = shift @tArgs;
+    }
+
+    unless (defined $sChannel) {
+        botNotice($self, $sNick, "Syntax: chaninfo #channel");
+        return;
+    }
+
+    # Recherche du propriétaire du channel
+    my $sQuery = "SELECT * FROM USER,USER_CHANNEL,CHANNEL WHERE USER.id_user=USER_CHANNEL.id_user AND CHANNEL.id_channel=USER_CHANNEL.id_channel AND name=? AND level=500";
+    my $sth = $self->{dbh}->prepare($sQuery);
+    unless ($sth->execute($sChannel)) {
+        $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+        return;
+    }
+
+    if (my $ref = $sth->fetchrow_hashref()) {
+        my $sUsername    = $ref->{'nickname'};
+        my $sLastLogin   = $ref->{'last_login'} // "Never";
+        my $creation_date = $ref->{'creation_date'};
+        my $description  = $ref->{'description'};
+        my $sKey         = $ref->{'key'} // "Not set";
+        my $chanmode     = $ref->{'chanmode'} // "Not set";
+        my $sAutoJoin    = $ref->{'auto_join'} ? "True" : "False";
+
+        botNotice($self, $sNick, "$sChannel is registered by $sUsername - last login: $sLastLogin");
+        botNotice($self, $sNick, "Creation date : $creation_date - Description : $description");
+
+        # Infos privées réservées aux Master
+        my (
+            $iMatchingUserId, $iMatchingUserLevel, $iMatchingUserLevelDesc,
+            $iMatchingUserAuth, $sMatchingUserHandle, $sMatchingUserPasswd,
+            $sMatchingUserInfo1, $sMatchingUserInfo2
+        ) = getNickInfo($self, $message);
+
+        if (defined $iMatchingUserId && $iMatchingUserAuth && checkUserLevel($self, $iMatchingUserLevel, "Master")) {
+            botNotice($self, $sNick, "Chan modes : $chanmode - Key : $sKey - Auto join : $sAutoJoin");
+        }
+
+        # Liste des flags CHANSET
+        $sQuery = "SELECT chanset FROM CHANSET_LIST,CHANNEL_SET,CHANNEL WHERE CHANNEL_SET.id_channel=CHANNEL.id_channel AND CHANNEL_SET.id_chanset_list=CHANSET_LIST.id_chanset_list AND name=?";
+        $sth = $self->{dbh}->prepare($sQuery);
+        unless ($sth->execute($sChannel)) {
+            $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+        } else {
+            my $sChansetFlags = "Channel flags ";
+            my $i;
+            my $isChansetAntiFlood = 0;
+
+            while (my $ref = $sth->fetchrow_hashref()) {
+                my $chanset = $ref->{'chanset'};
+                $sChansetFlags .= "+$chanset ";
+                $isChansetAntiFlood = 1 if $chanset =~ /AntiFlood/i;
+                $i++;
+            }
+
+            botNotice($self, $sNick, $sChansetFlags) if $i;
+
+            # Si le flag AntiFlood est présent, on récupère les paramètres
+            if ($isChansetAntiFlood) {
+                my $channel_obj = $self->{channels}{$sChannel};
+                if (defined $channel_obj) {
+                    my $id_channel = $channel_obj->get_id;
+
+                    $sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
+                    $sth = $self->{dbh}->prepare($sQuery);
+                    unless ($sth->execute($id_channel)) {
+                        $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+                    } elsif (my $ref = $sth->fetchrow_hashref()) {
+                        my $nbmsg_max  = $ref->{'nbmsg_max'};
+                        my $nbmsg      = $ref->{'nbmsg'};
+                        my $duration   = $ref->{'duration'};
+                        my $timetowait = $ref->{'timetowait'};
+                        my $notification = $ref->{'notification'};
+                        my $sNotification = $notification ? "ON" : "OFF";
+
+                        botNotice($self, $sNick,
+                            "Antiflood parameters : $nbmsg_max messages in $duration seconds, wait for $timetowait seconds, notification : $sNotification"
+                        );
+                    } else {
+                        botNotice($self, $sNick, "Antiflood parameters : not set ?");
+                    }
+                } else {
+                    botNotice($self, $sNick, "Antiflood details unavailable: internal channel object not found.");
+                }
+            }
+        }
+    } else {
+        botNotice($self, $sNick, "The channel $sChannel doesn't appear to be registered");
+    }
+
+    logBot($self, $message, $sChannel, "chaninfo", @tArgs);
+    $sth->finish;
 }
 
 sub channelList(@) {
@@ -7314,205 +7471,181 @@ sub doResponder(@) {
 	return 0;
 }
 
-sub addResponder(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
-				my $id_channel;
-				my $chance;
-				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-					$sChannel = $tArgs[0];
-					$id_channel = getIdChannel($self,$sChannel);
-					unless (defined($id_channel) && ($id_channel ne "")) {
-						botNotice($self,$sNick,"$sChannel is not registered to me");
-						return undef;
-					}
-					$self->{logger}->log(3,"Adding responder for channel $sChannel($id_channel)");
-					shift @tArgs;
-				}
-				else {
-					$id_channel = 0;
-					$self->{logger}->log(3,"Adding global responder");
-				}
-				my $sArgs = join(" ",@tArgs);
-				unless (defined($sArgs) && ($sArgs ne "")) {
-					botNotice($self,$sNick,"Syntax : addresponder [#channel] <chance> <responder> | <answer>");
-					return undef;
-				}
-				
-				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^[0-9]+/) && ($tArgs[0] <= 100)) {
-					$chance = $tArgs[0];
-					shift(@tArgs);
-				}
-				else {
-					botNotice($self,$sNick,"Syntax : addresponder [#channel] <chance> <responder> | <answer>");
-					return undef;
-				}
-				
-				# Parse @tArgs
-				my $i;
-				my $j = 0;
-				my $sResponder;
-				my $sAnswer;
-				my $sepFound = 0;
-				for ($i=0;$i<=$#tArgs;$i++) {
-					if ($sepFound) {
-						if ($j==0) {
-							$sAnswer = $tArgs[0];
-							$j++;
-						}
-						else {
-							$sAnswer .= " " . $tArgs[$i];
-						}
-					}
-					elsif ($tArgs[$i] eq "|") {
-						$sepFound = 1;
-					}
-					else {
-						if ($i==0) {
-							$sResponder = $tArgs[0];
-						}
-						else {
-							$sResponder .= " " . $tArgs[$i];
-						}
-					}
-				}
-				unless ($sepFound && defined($sResponder) && ($sResponder ne "") && defined($sAnswer) && ($sAnswer ne "")) {
-					botNotice($self,$sNick,"Syntax : addresponder [#channel] <chance> <responder> | <answer>");
-					return undef;
-				}
-				else {
-					$self->{logger}->log(3,"chance = $chance sResponder = $sResponder sAnswer = $sAnswer");
-				}
-				
-				my $sQuery = "SELECT * FROM RESPONDERS WHERE id_channel=? AND responder like ?";
-				my $sth = $self->{dbh}->prepare($sQuery);
-				unless ($sth->execute($id_channel,$sResponder)) {
-					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-				}
-				else {
-					if (my $ref = $sth->fetchrow_hashref()) {
-						my $answer = $ref->{'answer'};
-						my $iChance = $ref->{'chance'};
-						my $hits = $ref->{'hits'};
-						$self->{logger}->log(3,"addResponder() Found answer $answer for responder $sResponder");
-						botNotice($self,$sNick,"Found answer $answer for responder $sResponder with chance $iChance on $sChannel [hits : $hits]");
-					}
-					else {
-						$sQuery = "INSERT INTO RESPONDERS (id_channel,chance,responder,answer) VALUES (?,?,?,?)";
-						$sth = $self->{dbh}->prepare($sQuery);
-						unless ($sth->execute($id_channel,(100 - $chance),$sResponder,$sAnswer)) {
-							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-						}
-						else {
-							my $sResponderType;
-							if ( $id_channel == 0 ) {
-								$sResponderType = "global responder";
-							}
-							else {
-								$sResponderType = "responder for channel $sChannel";
-							}
-							botNotice($self,$sNick,"Added $sResponderType : $sResponder with chance $chance % -> $sAnswer");
-						}
-					}
-				}
-				$sth->finish;
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " addresponder command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " addresponder command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}				
-	return 0;
+# Add a new responder
+sub addResponder {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    # Get user info
+    my (
+        $iMatchingUserId, $iMatchingUserLevel, $iMatchingUserLevelDesc,
+        $iMatchingUserAuth, $sMatchingUserHandle, $sMatchingUserPasswd,
+        $sMatchingUserInfo1, $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    # Require login and master level
+    unless (defined $iMatchingUserId && $iMatchingUserAuth) {
+        my $sNoticeMsg = $message->prefix . " addresponder command attempt (user $sMatchingUserHandle is not logged in)";
+        noticeConsoleChan($self, $sNoticeMsg);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    unless (checkUserLevel($self, $iMatchingUserLevel, "Master")) {
+        my $sNoticeMsg = $message->prefix . " addresponder command attempt (command level [Master] for user $sMatchingUserHandle [$iMatchingUserLevel])";
+        noticeConsoleChan($self, $sNoticeMsg);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    # Optional channel name
+    my $id_channel = 0;
+    if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
+        $sChannel = shift @tArgs;
+        my $channel_obj = $self->{channels}{$sChannel};
+        if (defined $channel_obj) {
+            $id_channel = $channel_obj->get_id;
+            $self->{logger}->log(3, "Adding responder for channel $sChannel ($id_channel)");
+        } else {
+            botNotice($self, $sNick, "$sChannel is not registered to me");
+            return;
+        }
+    } else {
+        $self->{logger}->log(3, "Adding global responder");
+    }
+
+    # Syntax fallback
+    my $syntax_msg = "Syntax : addresponder [#channel] <chance> <responder> | <answer>";
+
+    # Check chance
+    my $chance = shift @tArgs;
+    unless (defined $chance && $chance =~ /^[0-9]+$/ && $chance <= 100) {
+        botNotice($self, $sNick, $syntax_msg);
+        return;
+    }
+
+    # Join remaining args and split on first '|'
+    my $sJoined = join(' ', @tArgs);
+    my ($sResponder, $sAnswer) = split(/\s*\|\s*/, $sJoined, 2);
+    unless (defined $sResponder && defined $sAnswer && $sResponder ne "" && $sAnswer ne "") {
+        botNotice($self, $sNick, $syntax_msg);
+        return;
+    }
+
+    $self->{logger}->log(3, "Parsed responder: '$sResponder' -> '$sAnswer' at $chance%");
+
+    # Check existing entry
+    my $sQuery = "SELECT * FROM RESPONDERS WHERE id_channel=? AND responder LIKE ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+    unless ($sth->execute($id_channel, $sResponder)) {
+        $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+        return;
+    }
+
+    if (my $ref = $sth->fetchrow_hashref()) {
+        my $existing_answer = $ref->{'answer'};
+        my $iChance = $ref->{'chance'};
+        my $hits = $ref->{'hits'};
+        $self->{logger}->log(3, "Found existing responder: $sResponder -> $existing_answer ($iChance%) [$hits hits]");
+        botNotice($self, $sNick, "Found answer '$existing_answer' for responder '$sResponder' with chance $iChance on $sChannel [hits: $hits]");
+    } else {
+        # Insert new responder
+        $sQuery = "INSERT INTO RESPONDERS (id_channel, chance, responder, answer) VALUES (?,?,?,?)";
+        $sth = $self->{dbh}->prepare($sQuery);
+        unless ($sth->execute($id_channel, (100 - $chance), $sResponder, $sAnswer)) {
+            $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+        } else {
+            my $responder_type = ($id_channel == 0) ? "global responder" : "responder for channel $sChannel";
+            botNotice($self, $sNick, "Added $responder_type: $sResponder with chance $chance% → $sAnswer");
+        }
+    }
+
+    $sth->finish;
+    return 0;
 }
 
-sub delResponder(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
-				my $id_channel;
-				my $chance;
-				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-					$sChannel = $tArgs[0];
-					$id_channel = getIdChannel($self,$sChannel);
-					unless (defined($id_channel) && ($id_channel ne "")) {
-						botNotice($self,$sNick,"$sChannel is not registered to me");
-						return undef;
-					}
-					$self->{logger}->log(3,"Deleting responder for channel $sChannel($id_channel)");
-					shift @tArgs;
-				}
-				else {
-					$id_channel = 0;
-					$self->{logger}->log(3,"Deleting global responder");
-				}
-				my $sResponder = join(" ",@tArgs);
-				unless (defined($sResponder) && ($sResponder ne "")) {
-					botNotice($self,$sNick,"Syntax : delresponder [#channel] <responder>");
-					return undef;
-				}
-				
-				my $sQuery = "SELECT * FROM RESPONDERS WHERE id_channel=? AND responder like ?";
-				my $sth = $self->{dbh}->prepare($sQuery);
-				unless ($sth->execute($id_channel,$sResponder)) {
-					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-				}
-				else {
-					my $sResponderType;
-					if ( $id_channel == 0 ) {
-						$sResponderType = "global responder";
-					}
-					else {
-						$sResponderType = "responder for channel $sChannel";
-					}
-					if (my $ref = $sth->fetchrow_hashref()) {
-						my $answer = $ref->{'answer'};
-						my $iChance = $ref->{'chance'};
-						my $hits = $ref->{'hits'};
-						$self->{logger}->log(3,"delResponder() Found answer $answer for responder $sResponder");
-						$sQuery = "DELETE FROM RESPONDERS WHERE id_channel=? AND responder like ?";
-						$sth = $self->{dbh}->prepare($sQuery);
-						unless ($sth->execute($id_channel,$sResponder)) {
-							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-						}
-						else {	
-							botNotice($self,$sNick,"Deleted $sResponderType : $sResponder with chance " . (100 - $iChance) . " % -> $answer [hits : $hits]");
-						}
-					}
-					else {
-						botNotice($self,$sNick,"Could not find a $sResponderType matching $sResponder");
-					}
-				}
-				$sth->finish;
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " delresponder command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " delresponder command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}				
-	return 0;
+# Delete a responder
+sub delResponder {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    # Get user info
+    my (
+        $iMatchingUserId, $iMatchingUserLevel, $iMatchingUserLevelDesc,
+        $iMatchingUserAuth, $sMatchingUserHandle, $sMatchingUserPasswd,
+        $sMatchingUserInfo1, $sMatchingUserInfo2
+    ) = getNickInfo($self, $message);
+
+    # Auth checks
+    unless (defined $iMatchingUserId && $iMatchingUserAuth) {
+        my $sNoticeMsg = $message->prefix . " delresponder command attempt (user $sMatchingUserHandle is not logged in)";
+        noticeConsoleChan($self, $sNoticeMsg);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    unless (checkUserLevel($self, $iMatchingUserLevel, "Master")) {
+        my $sNoticeMsg = $message->prefix . " delresponder command attempt (command level [Master] for user $sMatchingUserHandle [$iMatchingUserLevel])";
+        noticeConsoleChan($self, $sNoticeMsg);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    # Init channel context
+    my $id_channel = 0;
+    my $responder_type = "global responder";
+
+    if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
+        $sChannel = shift @tArgs;
+        my $channel_obj = $self->{channels}{$sChannel};
+        if (defined $channel_obj) {
+            $id_channel = $channel_obj->get_id;
+            $responder_type = "responder for channel $sChannel";
+            $self->{logger}->log(3, "Deleting responder for $sChannel ($id_channel)");
+        } else {
+            botNotice($self, $sNick, "$sChannel is not registered to me");
+            return;
+        }
+    } else {
+        $self->{logger}->log(3, "Deleting global responder");
+    }
+
+    # Parse responder
+    my $sResponder = join(" ", @tArgs);
+    unless (defined $sResponder && $sResponder ne "") {
+        botNotice($self, $sNick, "Syntax : delresponder [#channel] <responder>");
+        return;
+    }
+
+    # Look up
+    my $sQuery = "SELECT * FROM RESPONDERS WHERE id_channel=? AND responder LIKE ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+    unless ($sth->execute($id_channel, $sResponder)) {
+        $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+        return;
+    }
+
+    if (my $ref = $sth->fetchrow_hashref()) {
+        my $answer = $ref->{'answer'};
+        my $iChance = $ref->{'chance'};
+        my $hits = $ref->{'hits'};
+        $self->{logger}->log(3, "delResponder() Found answer '$answer' for responder '$sResponder'");
+
+        # Delete it
+        $sQuery = "DELETE FROM RESPONDERS WHERE id_channel=? AND responder LIKE ?";
+        $sth = $self->{dbh}->prepare($sQuery);
+        unless ($sth->execute($id_channel, $sResponder)) {
+            $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+        } else {
+            botNotice(
+                $self, $sNick,
+                "Deleted $responder_type : '$sResponder' with chance " . (100 - $iChance) . "% → $answer [hits: $hits]"
+            );
+        }
+    } else {
+        botNotice($self, $sNick, "Could not find a $responder_type matching '$sResponder'");
+    }
+
+    $sth->finish;
+    return 0;
 }
 
 sub evalAction(@) {
