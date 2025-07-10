@@ -907,76 +907,79 @@ sub logBotAction(@) {
 }
 
 # Send a private message to a target
-sub botPrivmsg(@) {
-	my ($self,$sTo,$sMsg) = @_;
-	if (defined($sTo)) {
-		my $eventtype = "public";
-		if (substr($sTo, 0, 1) eq '#') {
-				my $id_chanset_list = getIdChansetList($self,"NoColors");
-				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-					$self->{logger}->log(4,"botPrivmsg() check chanset NoColors, id_chanset_list = $id_chanset_list");
-					my $id_channel_set = getIdChannelSet($self,$sTo,$id_chanset_list);
-					if (defined($id_channel_set) && ($id_channel_set ne "")) {
-						$self->{logger}->log(3,"botPrivmsg() channel $sTo has chanset +NoColors");
-						$sMsg =~ s/\cC\d{1,2}(?:,\d{1,2})?|[\cC\cB\cI\cU\cR\cO]//g;
-					}
-				}
-				$id_chanset_list = getIdChansetList($self,"AntiFlood");
-				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-					$self->{logger}->log(4,"botPrivmsg() check chanset AntiFlood, id_chanset_list = $id_chanset_list");
-					my $id_channel_set = getIdChannelSet($self,$sTo,$id_chanset_list);
-					if (defined($id_channel_set) && ($id_channel_set ne "")) {
-						$self->{logger}->log(3,"botPrivmsg() channel $sTo has chanset +AntiFlood");
-						if (checkAntiFlood($self,$sTo)) {
-							return undef;
-						}
-					}
-				}
-				$self->{logger}->log(0,"[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
-				my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND name=?";
-				my $sth = $self->{dbh}->prepare($sQuery);
-				unless ($sth->execute($sTo) ) {
-					$self->{logger}->log(1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-				}
-				else {
-					while (my $ref = $sth->fetchrow_hashref()) {
-						my $sBadwordDb = $ref->{'badword'};
-						my $sBadwordLc = lc $sBadwordDb;
-						my $sMsgLc = lc $sMsg;
-						if (index($sMsgLc, $sBadwordLc) != -1) {
-							logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,"$sMsg (BADWORD : $sBadwordDb)");
-							noticeConsoleChan($self,"Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
-							$self->{logger}->log(3,"Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
-							$sth->finish;
-							return;
-						}
-					}
-					logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,$sMsg);
-				}
-		}
-		else {
-			$eventtype = "private";
-			$self->{logger}->log(0,"-> *$sTo* $sMsg");
-		}
-		if (defined($sMsg) && ($sMsg ne "")) {
-			if (utf8::is_utf8($sMsg)) {
-				$sMsg = Encode::encode("UTF-8", $sMsg);
-				# Clean IRC message: no newlines allowed
-				$sMsg =~ s/[\r\n]+/ /g;
-				$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
-			}
-			else {
-				$self->{irc}->do_PRIVMSG( target => $sTo, text => $sMsg );
+sub botPrivmsg {
+	my ($self, $sTo, $sMsg) = @_;
+
+	return unless defined($sTo);
+
+	my $eventtype = "public";
+
+	if ($sTo =~ /^#/) {
+		# Channel mode
+
+		# NoColors chanset check
+		my $id_chanset_list = getIdChansetList($self, "NoColors");
+		if (defined($id_chanset_list) && $id_chanset_list ne "") {
+			$self->{logger}->log(4, "botPrivmsg() check chanset NoColors, id_chanset_list = $id_chanset_list");
+			my $id_channel_set = getIdChannelSet($self, $sTo, $id_chanset_list);
+			if (defined($id_channel_set) && $id_channel_set ne "") {
+				$self->{logger}->log(3, "botPrivmsg() channel $sTo has chanset +NoColors");
+				$sMsg =~ s/\cC\d{1,2}(?:,\d{1,2})?|[\cC\cB\cI\cU\cR\cO]//g;
 			}
 		}
-		else {
-			$self->{logger}->log(0,"botPrivmsg() ERROR no message specified to send to target");
+
+		# AntiFlood chanset check
+		$id_chanset_list = getIdChansetList($self, "AntiFlood");
+		if (defined($id_chanset_list) && $id_chanset_list ne "") {
+			$self->{logger}->log(4, "botPrivmsg() check chanset AntiFlood, id_chanset_list = $id_chanset_list");
+			my $id_channel_set = getIdChannelSet($self, $sTo, $id_chanset_list);
+			if (defined($id_channel_set) && $id_channel_set ne "") {
+				$self->{logger}->log(3, "botPrivmsg() channel $sTo has chanset +AntiFlood");
+				return undef if checkAntiFlood($self, $sTo);  # Already refactored
+			}
 		}
+
+		# Log output to console
+		$self->{logger}->log(0, "[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
+
+		# Badword filtering
+		my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel = BADWORDS.id_channel AND name = ?";
+		my $sth = $self->{dbh}->prepare($sQuery);
+
+		unless ($sth->execute($sTo)) {
+			$self->{logger}->log(1, "logBotAction() SQL Error : $DBI::errstr | Query : $sQuery");
+		} else {
+			while (my $ref = $sth->fetchrow_hashref()) {
+				my $sBadwordDb = $ref->{badword};
+				if (index(lc($sMsg), lc($sBadwordDb)) != -1) {
+					logBotAction($self, undef, $eventtype, $self->{irc}->nick_folded, $sTo, "$sMsg (BADWORD : $sBadwordDb)");
+					noticeConsoleChan($self, "Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
+					$self->{logger}->log(3, "Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
+					$sth->finish;
+					return;
+				}
+			}
+			logBotAction($self, undef, $eventtype, $self->{irc}->nick_folded, $sTo, $sMsg);
+		}
+		$sth->finish;
+	} else {
+		# Private message
+		$eventtype = "private";
+		$self->{logger}->log(0, "-> *$sTo* $sMsg");
 	}
-	else {
-		$self->{logger}->log(0,"botPrivmsg() ERROR no target specified to send $sMsg");
+
+	# Send actual message
+	if (defined($sMsg) && $sMsg ne "") {
+		if (utf8::is_utf8($sMsg)) {
+			$sMsg = Encode::encode("UTF-8", $sMsg);
+			$sMsg =~ s/[\r\n]+/ /g;
+		}
+		$self->{irc}->do_PRIVMSG(target => $sTo, text => $sMsg);
+	} else {
+		$self->{logger}->log(0, "botPrivmsg() ERROR no message specified to send to target");
 	}
 }
+
 
 # Send a private message to a target (action)
 sub botAction(@) {
@@ -3730,71 +3733,77 @@ sub getUserChannelLevel(@) {
 	}	
 }
 
+# Delete a user from a channel
 sub channelDelUser(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-				$sChannel = $tArgs[0];
-				shift @tArgs;
-			}
-			unless (defined($sChannel)) {
-				botNotice($self,$sNick,"Syntax: del <#channel> <handle>");
-			}
-			if (defined($iMatchingUserLevel) && ( checkUserLevel($self,$iMatchingUserLevel,"Administrator") || checkUserChannelLevel($self,$message,$sChannel,$iMatchingUserId,400))) {
-				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-					my $id_channel = getIdChannel($self,$sChannel);
-					if (defined($id_channel)) {
-						$self->{logger}->log(0,"$sNick issued a del user $sChannel command");
-						my $sUserHandle = $tArgs[0];
-						my $id_user = getIdUser($self,$tArgs[0]);
-						if (defined($id_user)) {
-							my $iCheckUserLevel = getUserChannelLevel($self,$message,$sChannel,$id_user);
-							if ( $iCheckUserLevel != 0 ) {
-								if ( $iCheckUserLevel < getUserChannelLevel($self,$message,$sChannel,$iMatchingUserId) || checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
-									my $sQuery = "DELETE FROM USER_CHANNEL WHERE id_user=? AND id_channel=?";
-									my $sth = $self->{dbh}->prepare($sQuery);
-									unless ($sth->execute($id_user,$id_channel)) {
-										$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-									}
-									else {
-										logBot($self,$message,$sChannel,"del",@tArgs);
-									}
-									$sth->finish;
-								}
-								else {
-									botNotice($self,$sNick,"You can't del a user with a level equal or greater than yours");
-								}
-							}
-							else {
-								botNotice($self,$sNick,"User $sUserHandle does not appear to have access on $sChannel");
-							}
-						}
-						else {
-							botNotice($self,$sNick,"User $sUserHandle does not exist");
-						}
-					}
-					else {
-						botNotice($self,$sNick,"Channel $sChannel does not exist");
-					}
-				}
-				else {
-					botNotice($self,$sNick,"Syntax: del <#channel> <handle>");
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " del user command attempt for user " . $sMatchingUserHandle . " [" . $iMatchingUserLevelDesc ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " del user command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-		}
-	}
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+    my ($iMatchingUserId, $iMatchingUserLevel, $iMatchingUserLevelDesc,
+        $iMatchingUserAuth, $sMatchingUserHandle, $sMatchingUserPasswd,
+        $sMatchingUserInfo1, $sMatchingUserInfo2) = getNickInfo($self, $message);
+
+    return unless defined $iMatchingUserId && $iMatchingUserAuth;
+
+    # Manage channel extraction from arguments
+    if (defined($tArgs[0]) && $tArgs[0] =~ /^#/) {
+        $sChannel = shift @tArgs;
+    }
+
+    unless ($sChannel) {
+        botNotice($self, $sNick, "Syntax: del <#channel> <handle>");
+        return;
+    }
+
+    # Get channel object
+    my $channel_obj = $self->{channels}{$sChannel};
+    unless ($channel_obj) {
+        botNotice($self, $sNick, "Channel $sChannel does not exist");
+        return;
+    }
+
+    # Check if the user has permission to delete users
+    unless (
+        checkUserLevel($self, $iMatchingUserLevel, "Administrator")
+        || checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 400)
+    ) {
+        my $sNoticeMsg = $message->prefix . " del user command attempt for user $sMatchingUserHandle [$iMatchingUserLevelDesc]";
+        noticeConsoleChan($self, $sNoticeMsg);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    # Get the target handle from arguments
+    my $sTargetHandle = $tArgs[0];
+    unless ($sTargetHandle) {
+        botNotice($self, $sNick, "Syntax: del <#channel> <handle>");
+        return;
+    }
+
+    my $id_target = getIdUser($self, $sTargetHandle);
+    unless (defined $id_target) {
+        botNotice($self, $sNick, "User $sTargetHandle does not exist");
+        return;
+    }
+
+    my $level_target = getUserChannelLevel($self, $message, $sChannel, $id_target);
+    if (!$level_target) {
+        botNotice($self, $sNick, "User $sTargetHandle does not appear to have access on $sChannel");
+        return;
+    }
+
+    # Can't delete a user with a level equal or greater than the issuer's level
+    my $level_issuer = getUserChannelLevel($self, $message, $sChannel, $iMatchingUserId);
+    unless ($level_target < $level_issuer || checkUserLevel($self, $iMatchingUserLevel, "Administrator")) {
+        botNotice($self, $sNick, "You can't del a user with a level equal or greater than yours");
+        return;
+    }
+
+    my $sth = $self->{dbh}->prepare("DELETE FROM USER_CHANNEL WHERE id_user=? AND id_channel=?");
+    unless ($sth->execute($id_target, $channel_obj->get_id)) {
+        $self->{logger}->log(1, "SQL Error: $DBI::errstr");
+        return;
+    }
+
+    logBot($self, $message, $sChannel, "del", $sTargetHandle);
+    botNotice($self, $sNick, "User $sTargetHandle removed from $sChannel");
 }
 
 # User modinfo syntax notification
@@ -8159,97 +8168,96 @@ sub addIgnore(@) {
     $sth->finish;
 }
 
+# Delete an ignore
 sub delIgnore(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my $sTargetChannel;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
-				my $id_channel;
-				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-					$sTargetChannel = $tArgs[0];
-					$id_channel = getIdChannel($self,$sChannel);
-					unless (defined($id_channel)) {
-						botNotice($self,$sNick,"Channel $sTargetChannel is undefined");
-						return undef;
-					}
-					shift @tArgs;
-				}
-				unless (defined($tArgs[0]) && ($tArgs[0] =~ /^.+!.+\@.+$/)) {
-					botNotice($self,$sNick,"Syntax unignore [#channel] <hostmask>");
-					botNotice($self,$sNick,"hostmask example : nick*!*ident\@domain*.tld");
-				}
-				
-				if (defined($sTargetChannel) && ($sTargetChannel ne "")) {
-					# Ignores ($sTargetChannel)
-					my $sQuery = "SELECT * FROM IGNORES,CHANNEL WHERE IGNORES.id_channel=CHANNEL.id_channel AND CHANNEL.name like ? AND IGNORES.hostmask LIKE ?";
-					my $sth = $self->{dbh}->prepare($sQuery);
-					unless ($sth->execute($sTargetChannel,$tArgs[0])) {
-						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-					}
-					else {
-						unless (my $ref = $sth->fetchrow_hashref()) {
-							my $hostmask = $ref->{hostmask};
-							botNotice($self,$sNick,"hostmask $hostmask is not ignored on $sTargetChannel");
-							$sth->finish;
-							return undef;
-						}
-						else {
-							$sQuery = "DELETE FROM IGNORES WHERE id_channel=? AND hostmask LIKE ?";
-							$sth = $self->{dbh}->prepare($sQuery);
-							unless ($sth->execute($id_channel,$tArgs[0])) {
-								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-							}
-							else {
-								#my $id_ignores = $sth->{ mysql_insertid };
-								botNotice($self,$sNick,"Deleted ignore " . $tArgs[0] . " on $sTargetChannel");
-							}
-						}
-					}
-				}
-				else {
-					# Ignores (allchans/private)
-					my $sQuery = "SELECT * FROM IGNORES WHERE id_channel=0 AND IGNORES.hostmask LIKE ?";
-					my $sth = $self->{dbh}->prepare($sQuery);
-					unless ($sth->execute($tArgs[0])) {
-						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-					}
-					else {
-						unless (my $ref = $sth->fetchrow_hashref()) {
-							my $hostmask = $ref->{hostmask};
-							botNotice($self,$sNick,"hostmask $hostmask is not ignored on (allchans/private)");
-							$sth->finish;
-							return undef;
-						}
-						else {
-							$sQuery = "DELETE FROM IGNORES WHERE id_channel=0 AND hostmask LIKE ?";
-							$sth = $self->{dbh}->prepare($sQuery);
-							unless ($sth->execute($tArgs[0])) {
-								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-							}
-							else {
-								#my $id_ignores = $sth->{ mysql_insertid };
-								botNotice($self,$sNick,"Deleted ignore " . $tArgs[0] . " on (allchans/private)");
-							}
-						}
-					}
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " unignore command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " unignore command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+    my ($user_id, $user_level, $user_level_desc, $user_auth, $user_handle, undef, undef, undef) = getNickInfo($self, $message);
+
+    return unless defined $user_id;
+
+    unless ($user_auth) {
+        my $notice = $message->prefix . " unignore command attempt (user $user_handle is not logged in)";
+        noticeConsoleChan($self, $notice);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    unless (checkUserLevel($self, $user_level, "Master")) {
+        my $notice = $message->prefix . " unignore command attempt (command level [Master] for user $user_handle [$user_level])";
+        noticeConsoleChan($self, $notice);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    my $target_channel;
+    my $channel_obj;
+    if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
+        $target_channel = shift @tArgs;
+        $channel_obj = $self->{channels}{$target_channel};
+        unless ($channel_obj) {
+            botNotice($self, $sNick, "Channel $target_channel is undefined");
+            return;
+        }
+    }
+
+    unless (defined $tArgs[0] && $tArgs[0] =~ /^.+!.+\@.+$/) {
+        botNotice($self, $sNick, "Syntax: unignore [#channel] <hostmask>");
+        botNotice($self, $sNick, "hostmask example : nick*!*ident\@domain*.tld");
+        return;
+    }
+
+    my $hostmask = $tArgs[0];
+
+    if ($channel_obj) {
+        # Scoped ignore
+        my $sQuery = "SELECT * FROM IGNORES WHERE id_channel=? AND hostmask LIKE ?";
+        my $sth = $self->{dbh}->prepare($sQuery);
+        unless ($sth->execute($channel_obj->get_id, $hostmask)) {
+            $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+            return;
+        }
+
+        unless (my $ref = $sth->fetchrow_hashref()) {
+            botNotice($self, $sNick, "hostmask $hostmask is not ignored on $target_channel");
+            $sth->finish;
+            return;
+        }
+
+        $sth->finish;
+
+        $sQuery = "DELETE FROM IGNORES WHERE id_channel=? AND hostmask LIKE ?";
+        $sth = $self->{dbh}->prepare($sQuery);
+        unless ($sth->execute($channel_obj->get_id, $hostmask)) {
+            $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+        } else {
+            botNotice($self, $sNick, "Deleted ignore $hostmask on $target_channel");
+        }
+
+    } else {
+        # Global ignore
+        my $sQuery = "SELECT * FROM IGNORES WHERE id_channel=0 AND hostmask LIKE ?";
+        my $sth = $self->{dbh}->prepare($sQuery);
+        unless ($sth->execute($hostmask)) {
+            $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+            return;
+        }
+
+        unless (my $ref = $sth->fetchrow_hashref()) {
+            botNotice($self, $sNick, "hostmask $hostmask is not ignored on (allchans/private)");
+            $sth->finish;
+            return;
+        }
+
+        $sth->finish;
+
+        $sQuery = "DELETE FROM IGNORES WHERE id_channel=0 AND hostmask LIKE ?";
+        $sth = $self->{dbh}->prepare($sQuery);
+        unless ($sth->execute($hostmask)) {
+            $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+        } else {
+            botNotice($self, $sNick, "Deleted ignore $hostmask on (allchans/private)");
+        }
+    }
 }
 
 # Search for a youtube video
@@ -8628,85 +8636,103 @@ sub getRadioRemainingTime(@) {
 	}
 }
 
-# Display the current song on the radio
+# Display the current song playing on the radio, with optional remaining time
 sub displayRadioCurrentSong(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 	my $conf = $self->{conf};
 
-	my $RADIO_HOSTNAME = $conf->get('radio.RADIO_HOSTNAME');
-	my $RADIO_PORT = $conf->get('radio.RADIO_PORT');
-	my $RADIO_SOURCE = $conf->get('radio.RADIO_SOURCE');
-	my $RADIO_URL = $conf->get('radio.RADIO_URL');
+	my $RADIO_HOSTNAME          = $conf->get('radio.RADIO_HOSTNAME');
+	my $RADIO_PORT              = $conf->get('radio.RADIO_PORT');
+	my $RADIO_SOURCE            = $conf->get('radio.RADIO_SOURCE');
+	my $RADIO_URL               = $conf->get('radio.RADIO_URL');
 	my $LIQUIDSOAP_TELNET_HOST = $conf->get('radio.LIQUIDSOAP_TELNET_HOST');
 
-	unless (defined($sChannel) && ($sChannel ne "")) {
-		my $id_channel;
-		if (defined($tArgs[0]) && ($tArgs[0] ne "") && ($tArgs[0] =~ /^#/)) {
-			$sChannel = $tArgs[0];
-			$id_channel = getIdChannel($self,$sChannel);
-			unless (defined($id_channel)) {
-				botNotice($self,$sNick,"Channel $sChannel is not registered");
-				return undef;
+	# Determine target channel
+	my $channel_obj;
+	if (!defined($sChannel) || $sChannel eq '') {
+		if (defined($tArgs[0]) && $tArgs[0] =~ /^#/) {
+			$sChannel = shift @tArgs;
+			$channel_obj = $self->{channels}{$sChannel};
+			unless (defined $channel_obj) {
+				botNotice($self, $sNick, "Channel $sChannel is not registered");
+				return;
 			}
-			shift @tArgs;
 		} else {
-			botNotice($self,$sNick,"Syntax: song <#channnel>");
-			return undef;
+			botNotice($self, $sNick, "Syntax: song <#channel>");
+			return;
+		}
+	} else {
+		$channel_obj = $self->{channels}{$sChannel};
+		unless (defined $channel_obj) {
+			botNotice($self, $sNick, "Channel $sChannel is not registered");
+			return;
 		}
 	}
 
+	# Get current song title and harbor status
 	my $sRadioCurrentSongTitle = getRadioCurrentSong($self);
-
 	my $sHarbor = getRadioHarbor($self);
 	my $bRadioLive = 0;
-	if (defined($sHarbor) && ($sHarbor ne "")) {
-		$self->{logger}->log(3,$sHarbor);
-		$bRadioLive = isRadioLive($self,$sHarbor);
+
+	if (defined($sHarbor) && $sHarbor ne '') {
+		$self->{logger}->log(3, $sHarbor);
+		$bRadioLive = isRadioLive($self, $sHarbor);
 	}
 
-	if (defined($sRadioCurrentSongTitle) && ($sRadioCurrentSongTitle ne "")) {
-		my $sMsgSong = "";
+	# If a song is currently playing
+	if (defined($sRadioCurrentSongTitle) && $sRadioCurrentSongTitle ne '') {
+		my $sMsgSong = String::IRC->new('[ ')->white('black');
 
-		$sMsgSong .= String::IRC->new('[ ')->white('black');
+		# Build radio link
 		if ($RADIO_PORT == 443) {
 			$sMsgSong .= String::IRC->new("https://$RADIO_HOSTNAME/$RADIO_URL")->orange('black');
 		} else {
 			$sMsgSong .= String::IRC->new("http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_URL")->orange('black');
 		}
+
 		$sMsgSong .= String::IRC->new(' ] ')->white('black');
 		$sMsgSong .= String::IRC->new(' - ')->white('black');
 		$sMsgSong .= String::IRC->new(' [ ')->orange('black');
+
+		# Show live status if applicable
 		if ($bRadioLive) {
 			$sMsgSong .= String::IRC->new('Live - ')->white('black');
 		}
+
+		# Append current song title
 		$sMsgSong .= String::IRC->new($sRadioCurrentSongTitle)->white('black');
 		$sMsgSong .= String::IRC->new(' ]')->orange('black');
 
+		# If not live, show remaining time
 		unless ($bRadioLive) {
-			if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
+			if (defined($LIQUIDSOAP_TELNET_HOST) && $LIQUIDSOAP_TELNET_HOST ne '') {
 				my $sRemainingTime = getRadioRemainingTime($self);
-				$self->{logger}->log(3,"displayRadioCurrentSong() sRemainingTime = $sRemainingTime");
-				my $siSecondsRemaining = int($sRemainingTime);
-				my $iMinutesRemaining = int($siSecondsRemaining / 60);
-				my $iSecondsRemaining = int($siSecondsRemaining - ($iMinutesRemaining * 60));
-				$sMsgSong .= String::IRC->new(' - ')->white('black');
-				$sMsgSong .= String::IRC->new(' [ ')->orange('black');
+				$self->{logger}->log(3, "displayRadioCurrentSong() sRemainingTime = $sRemainingTime");
+
+				my $iTotal = int($sRemainingTime);
+				my $iMin   = int($iTotal / 60);
+				my $iSec   = $iTotal % 60;
+
 				my $sTimeRemaining = "";
-				if ($iMinutesRemaining > 0) {
-					$sTimeRemaining .= $iMinutesRemaining . " mn";
-					$sTimeRemaining .= "s" if $iMinutesRemaining > 1;
+				if ($iMin > 0) {
+					$sTimeRemaining .= "$iMin mn";
+					$sTimeRemaining .= "s" if $iMin > 1;
 					$sTimeRemaining .= " and ";
 				}
-				$sTimeRemaining .= $iSecondsRemaining . " sec";
-				$sTimeRemaining .= "s" if $iSecondsRemaining > 1;
+				$sTimeRemaining .= "$iSec sec";
+				$sTimeRemaining .= "s" if $iSec > 1;
 				$sTimeRemaining .= " remaining";
+
+				$sMsgSong .= String::IRC->new(' - ')->white('black');
+				$sMsgSong .= String::IRC->new(' [ ')->orange('black');
 				$sMsgSong .= String::IRC->new($sTimeRemaining)->white('black');
 				$sMsgSong .= String::IRC->new(' ]')->orange('black');
 			}
 		}
-		botPrivmsg($self,$sChannel,"$sMsgSong");
+
+		botPrivmsg($self, $sChannel, "$sMsgSong");
 	} else {
-		botNotice($self,$sNick,"Radio is currently unavailable");
+		botNotice($self, $sNick, "Radio is currently unavailable");
 	}
 }
 
@@ -8747,82 +8773,97 @@ sub displayRadioListeners(@) {
 	}
 }
 
-# set the radio metadata
-sub setRadioMetadata(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
+# Set the radio metadata (song title, etc.)
+sub setRadioMetadata {
+	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Administrator")) {
+	# Get user info and auth status
+	my (
+		$iMatchingUserId, $iMatchingUserLevel, $iMatchingUserLevelDesc, $iMatchingUserAuth,
+		$sMatchingUserHandle, $sMatchingUserPasswd, $sMatchingUserInfo1, $sMatchingUserInfo2
+	) = getNickInfo($self, $message);
 
-				my $conf = $self->{conf};
-				my $RADIO_HOSTNAME  = $conf->get('radio.RADIO_HOSTNAME');
-				my $RADIO_PORT      = $conf->get('radio.RADIO_PORT');
-				my $RADIO_SOURCE    = $conf->get('radio.RADIO_SOURCE');
-				my $RADIO_URL       = $conf->get('radio.RADIO_URL');
-				my $RADIO_ADMINPASS = $conf->get('radio.RADIO_ADMINPASS');
+	return unless defined $iMatchingUserId;
 
-				my $id_channel;
-				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-					$id_channel = getIdChannel($self,$tArgs[0]);
-					unless (defined($id_channel)) {
-						botNotice($self,$sNick,"Channel " . $tArgs[0] . " is undefined");
-						return undef;
-					}
-					else {
-						$sChannel = $tArgs[0];
-					}
-					shift @tArgs;
-				}
+	# Require authentication
+	unless ($iMatchingUserAuth) {
+		my $msg = $message->prefix . " metadata command attempt (user $sMatchingUserHandle is not logged in)";
+		noticeConsoleChan($self, $msg);
+		botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+		return;
+	}
 
-				my $sNewMetadata = join(" ",@tArgs);
-				unless (defined($sNewMetadata) && ($sNewMetadata ne "")) {
-					if (defined($sChannel) && ($sChannel ne "")) {
-						displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
-					}
-					return undef;
-				}
+	# Require Administrator level
+	unless (defined($iMatchingUserLevel) && checkUserLevel($self, $iMatchingUserLevel, "Administrator")) {
+		my $msg = $message->prefix . " metadata command attempt (command level [Administrator] for user $sMatchingUserHandle [$iMatchingUserLevelDesc])";
+		noticeConsoleChan($self, $msg);
+		botNotice($self, $sNick, "Your level does not allow you to use this command.");
+		return;
+	}
 
-				if (defined($RADIO_ADMINPASS) && ($RADIO_ADMINPASS ne "")) {
-					unless (open ICECAST_UPDATE_METADATA, "curl --connect-timeout 3 -f -s -u admin:$RADIO_ADMINPASS \"http://$RADIO_HOSTNAME:$RADIO_PORT/admin/metadata?mount=/$RADIO_URL&mode=updinfo&song=" . url_encode_utf8($sNewMetadata) . "\" |") {
-						botNotice($self,$sNick,"Unable to update metadata (curl failed)");
-					}
-					my $line;
-					if (defined($line=<ICECAST_UPDATE_METADATA>)) {
-						close ICECAST_UPDATE_METADATA;
-						chomp($line);
-						if (defined($sChannel) && ($sChannel ne "")) {
-							sleep 3;
-							displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
-						}
-						else {
-							botNotice($self,$sNick,"Metadata updated to : " . join(" ",@tArgs));
-						}
-					}
-					else {
-						botNotice($self,$sNick,"Unable to update metadata");
-					}
-				}
-				else {
-					$self->{logger}->log(0,"setRadioMetadata() radio.RADIO_ADMINPASS not set in " . $self->{config_file});
-				}
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " metadata command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
+	# Load radio config
+	my $conf = $self->{conf};
+	my $RADIO_HOSTNAME  = $conf->get('radio.RADIO_HOSTNAME');
+	my $RADIO_PORT      = $conf->get('radio.RADIO_PORT');
+	my $RADIO_SOURCE    = $conf->get('radio.RADIO_SOURCE');
+	my $RADIO_URL       = $conf->get('radio.RADIO_URL');
+	my $RADIO_ADMINPASS = $conf->get('radio.RADIO_ADMINPASS');
+
+	# If first argument is a channel name, validate and shift it
+	if (defined($tArgs[0]) && $tArgs[0] =~ /^#/) {
+		my $channel_name = shift @tArgs;
+		my $channel_obj = $self->{channels}{$channel_name};
+
+		unless (defined $channel_obj) {
+			botNotice($self, $sNick, "Channel $channel_name is undefined");
+			return;
 		}
-		else {
-			my $sNoticeMsg = $message->prefix . " metadata command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
+
+		$sChannel = $channel_name;
+	}
+
+	# Join remaining arguments as metadata string
+	my $sNewMetadata = join(" ", @tArgs);
+
+	# If no metadata provided, show current song instead
+	unless ($sNewMetadata ne '') {
+		displayRadioCurrentSong($self, $message, $sNick, $sChannel)
+			if (defined($sChannel) && $sChannel ne '');
+		return;
+	}
+
+	# Ensure admin password is set
+	unless (defined($RADIO_ADMINPASS) && $RADIO_ADMINPASS ne '') {
+		$self->{logger}->log(0, "setRadioMetadata() radio.RADIO_ADMINPASS not set in " . $self->{config_file});
+		return;
+	}
+
+	# Send metadata update to Icecast
+	my $encoded_meta = url_encode_utf8($sNewMetadata);
+	my $curl_cmd = qq{curl --connect-timeout 3 -f -s -u admin:$RADIO_ADMINPASS "http://$RADIO_HOSTNAME:$RADIO_PORT/admin/metadata?mount=/$RADIO_URL&mode=updinfo&song=$encoded_meta"};
+
+	unless (open ICECAST_UPDATE_METADATA, "$curl_cmd |") {
+		botNotice($self, $sNick, "Unable to update metadata (curl failed)");
+		return;
+	}
+
+	my $line = <ICECAST_UPDATE_METADATA>;
+	close ICECAST_UPDATE_METADATA;
+
+	# Confirm or show updated metadata
+	if (defined $line) {
+		chomp $line;
+		if (defined($sChannel) && $sChannel ne '') {
+			sleep 3;  # let Icecast refresh its metadata
+			displayRadioCurrentSong($self, $message, $sNick, $sChannel);
+		} else {
+			botNotice($self, $sNick, "Metadata updated to: $sNewMetadata");
 		}
+	} else {
+		botNotice($self, $sNick, "Unable to update metadata");
 	}
 }
+
 
 # Skip to the next song in the radio stream
 sub radioNext(@) {
@@ -9080,46 +9121,59 @@ sub mbQuotes(@) {
 	}
 }
 
-sub mbQuoteAdd(@) {
-	my ($self,$message,$iMatchingUserId,$sMatchingUserHandle,$sNick,$sChannel,@tArgs) = @_;
-	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-		botNotice($self,$sNick,"q [add or a] text1 | text2 | ... | textn");
+# Add a new quote to the database for the specified channel
+sub mbQuoteAdd {
+	my ($self, $message, $iMatchingUserId, $sMatchingUserHandle, $sNick, $sChannel, @tArgs) = @_;
+
+	# Require at least one argument
+	unless (defined($tArgs[0]) && $tArgs[0] ne "") {
+		botNotice($self, $sNick, "q [add or a] text1 | text2 | ... | textn");
+		return;
 	}
-	else {
-		my $sQuoteText = join(" ",@tArgs);
-		my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name=? AND quotetext like ?";
-		my $sth = $self->{dbh}->prepare($sQuery);
-		unless ($sth->execute($sChannel,$sQuoteText)) {
-			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-		}
-		else {
-			if (my $ref = $sth->fetchrow_hashref()) {
-				my $id_quotes = $ref->{'id_quotes'};
-				botPrivmsg($self,$sChannel,"Quote (id : $id_quotes) already exists");
-				logBot($self,$message,$sChannel,"q",@tArgs);
-			}
-			else {
-				my $id_channel = getIdChannel($self,$sChannel);
-				unless (defined($id_channel) && ($id_channel ne "")) {
-					botNotice($self,$sNick,"Channel $sChannel is not registered to me");
-				}
-				else {
-					$sQuery = "INSERT INTO QUOTES (id_channel,id_user,quotetext) VALUES (?,?,?)";
-					$sth = $self->{dbh}->prepare($sQuery);
-					unless ($sth->execute($id_channel,(defined($iMatchingUserId) ? $iMatchingUserId : 0),$sQuoteText)) {
-						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-					}
-					else {
-						my $id_inserted = String::IRC->new($sth->{ mysql_insertid })->bold;
-						botPrivmsg($self,$sChannel,(defined($sMatchingUserHandle) ? "($sMatchingUserHandle) " : "") . "done. (id: $id_inserted)");
-						logBot($self,$message,$sChannel,"q add",@tArgs);
-					}
-				}
-			}
-		}
+
+	my $sQuoteText = join(" ", @tArgs);
+
+	# Check for existing quote on this channel
+	my $sQuery = "SELECT * FROM QUOTES, CHANNEL WHERE CHANNEL.id_channel = QUOTES.id_channel AND name = ? AND quotetext LIKE ?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sChannel, $sQuoteText)) {
+		$self->{logger}->log(1, "SQL Error: $DBI::errstr | Query: $sQuery");
+		return;
+	}
+
+	if (my $ref = $sth->fetchrow_hashref()) {
+		my $id_quotes = $ref->{'id_quotes'};
+		botPrivmsg($self, $sChannel, "Quote (id: $id_quotes) already exists");
+		logBot($self, $message, $sChannel, "q", @tArgs);
 		$sth->finish;
+		return;
 	}
+	$sth->finish;
+
+	# Get channel object
+	my $channel_obj = $self->{channels}{$sChannel};
+
+	unless (defined($channel_obj)) {
+		botNotice($self, $sNick, "Channel $sChannel is not registered to me");
+		return;
+	}
+
+	my $id_channel = $channel_obj->get_id;
+
+	# Insert quote
+	$sQuery = "INSERT INTO QUOTES (id_channel, id_user, quotetext) VALUES (?, ?, ?)";
+	$sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($id_channel, (defined($iMatchingUserId) ? $iMatchingUserId : 0), $sQuoteText)) {
+		$self->{logger}->log(1, "SQL Error: $DBI::errstr | Query: $sQuery");
+	} else {
+		my $id_inserted = String::IRC->new($sth->{mysql_insertid})->bold;
+		my $prefix = defined($sMatchingUserHandle) ? "($sMatchingUserHandle) " : "";
+		botPrivmsg($self, $sChannel, "$prefix" . "done. (id: $id_inserted)");
+		logBot($self, $message, $sChannel, "q add", @tArgs);
+	}
+	$sth->finish;
 }
+
 
 sub mbQuoteDel(@) {
 	my ($self,$message,$sMatchingUserHandle,$sNick,$sChannel,@tArgs) = @_;
@@ -9548,269 +9602,313 @@ sub setUserLevel(@) {
 	}
 }
 
-sub setChannelAntiFlood(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my $id_channel = getIdChannel($self,$sChannel);
+# Set the anti-flood parameters for a channel
+sub setChannelAntiFlood {
+	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+	my $channel_obj = $self->{channels}{$sChannel};
+
+	unless (defined $channel_obj) {
+		botNotice($self, $sNick, "Channel $sChannel is not registered to me");
+		return;
+	}
+
+	my $id_channel = $channel_obj->get_id;
+
 	my $sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
+
 	unless ($sth->execute($id_channel)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+		$sth->finish;
+		return;
 	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
+
+	if (my $ref = $sth->fetchrow_hashref()) {
+		my $nbmsg_max = $ref->{'nbmsg_max'};
+		my $duration  = $ref->{'duration'};
+		my $timetowait = $ref->{'timetowait'};
+
+		$self->{logger}->log(3, "setChannelAntiFlood() AntiFlood record exists (id_channel $id_channel) nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds");
+		botNotice($self, $sNick, "Chanset parameters already exist and will be used for $sChannel (nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds)");
+
+	} else {
+		$sQuery = "INSERT INTO CHANNEL_FLOOD (id_channel) VALUES (?)";
+		$sth = $self->{dbh}->prepare($sQuery);
+
+		unless ($sth->execute($id_channel)) {
+			$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+			$sth->finish;
+			return;
+		}
+
+		my $id_channel_flood = $sth->{mysql_insertid};
+		$self->{logger}->log(3, "setChannelAntiFlood() AntiFlood record created, id_channel_flood : $id_channel_flood");
+
+		$sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
+		my $sth2 = $self->{dbh}->prepare($sQuery);
+
+		unless ($sth2->execute($id_channel)) {
+			$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+		} elsif (my $ref = $sth2->fetchrow_hashref()) {
 			my $nbmsg_max = $ref->{'nbmsg_max'};
-			my $duration = $ref->{'duration'};
+			my $duration  = $ref->{'duration'};
 			my $timetowait = $ref->{'timetowait'};
-			$self->{logger}->log(3,"setChannelAntiFlood() AntiFlood record exists (id_channel $id_channel) nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds");
-			botNotice($self,$sNick,"Chanset parameters already exist and will be used for $sChannel (nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds)");
+
+			botNotice($self, $sNick, "Chanset parameters for $sChannel (nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds)");
+		} else {
+			botNotice($self, $sNick, "Something funky happened, could not find record id_channel_flood : $id_channel_flood in Table CHANNEL_FLOOD for channel $sChannel (id_channel : $id_channel)");
 		}
-		else {
-			$sQuery = "INSERT INTO CHANNEL_FLOOD (id_channel) VALUES (?)";
-			$sth = $self->{dbh}->prepare($sQuery);
-			unless ($sth->execute($id_channel)) {
-				$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-			}
-			else {
-				my $id_channel_flood = $sth->{ mysql_insertid };
-				$self->{logger}->log(3,"setChannelAntiFlood() AntiFlood record created, id_channel_flood : $id_channel_flood");
-				$sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
-				my $sth = $self->{dbh}->prepare($sQuery);
-				unless ($sth->execute($id_channel)) {
-					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-				}
-				else {
-					if (my $ref = $sth->fetchrow_hashref()) {
-						my $nbmsg_max = $ref->{'nbmsg_max'};
-						my $duration = $ref->{'duration'};
-						my $timetowait = $ref->{'timetowait'};
-						botNotice($self,$sNick,"Chanset parameters for $sChannel (nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds)");
-					}
-					else {
-						botNotice($self,$sNick,"Something funky happened, could not find record id_channel_flood : $id_channel_flood in Table CHANNEL_FLOOD for channel $sChannel (id_channel : $id_channel)");
-					}
-				}
-			}
-		}
+
+		$sth2->finish;
 	}
+
 	$sth->finish;
 }
 
-sub checkAntiFlood(@) {
-	my ($self,$sChannel) = @_;
-	my $id_channel = getIdChannel($self,$sChannel);
+# Check the anti-flood status for a channel
+sub checkAntiFlood {
+	my ($self, $sChannel) = @_;
+
+	my $channel_obj = $self->{channels}{$sChannel};
+
+	unless (defined $channel_obj) {
+		$self->{logger}->log(1, "checkAntiFlood() unknown channel: $sChannel");
+		return 0;
+	}
+
+	my $id_channel = $channel_obj->get_id;
 	my $sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
+
 	unless ($sth->execute($id_channel)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+		$sth->finish;
+		return 0;
 	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $nbmsg_max = $ref->{'nbmsg_max'};
-			my $nbmsg = $ref->{'nbmsg'};
-			my $duration = $ref->{'duration'};
-			my $first = $ref->{'first'};
-			my $latest = $ref->{'latest'};
-			my $timetowait = $ref->{'timetowait'};
-			my $notification = $ref->{'notification'};
-			my $currentTs = time;
-			my $deltaDb = ($latest - $first);
-			my $delta = ($currentTs - $first);
-			
-			if ($nbmsg == 0) {
-				$nbmsg++;
-				$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?,first=?,latest=? WHERE id_channel=?";
-				my $sth = $self->{dbh}->prepare($sQuery);
-				unless ($sth->execute($nbmsg,$currentTs,$currentTs,$id_channel)) {
-					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+
+	if (my $ref = $sth->fetchrow_hashref()) {
+		my $nbmsg       = $ref->{'nbmsg'};
+		my $nbmsg_max   = $ref->{'nbmsg_max'};
+		my $duration    = $ref->{'duration'};
+		my $first       = $ref->{'first'};
+		my $latest      = $ref->{'latest'};
+		my $timetowait  = $ref->{'timetowait'};
+		my $notification = $ref->{'notification'};
+		my $currentTs   = time;
+
+		my $deltaDb = ($latest - $first);
+		my $delta   = ($currentTs - $first);
+
+		if ($nbmsg == 0) {
+			$nbmsg++;
+			$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?, first=?, latest=? WHERE id_channel=?";
+			my $sth = $self->{dbh}->prepare($sQuery);
+			unless ($sth->execute($nbmsg, $currentTs, $currentTs, $id_channel)) {
+				$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+			} else {
+				my $sLatest = time2str("%Y-%m-%d %H-%M-%S", $currentTs);
+				$self->{logger}->log(4, "checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
+				return 0;
+			}
+		} else {
+			if ($deltaDb <= $duration) {
+				if ($nbmsg < $nbmsg_max) {
+					$nbmsg++;
+					$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?, latest=? WHERE id_channel=?";
+					my $sth = $self->{dbh}->prepare($sQuery);
+					unless ($sth->execute($nbmsg, $currentTs, $id_channel)) {
+						$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+					} else {
+						my $sLatest = time2str("%Y-%m-%d %H-%M-%S", $currentTs);
+						$self->{logger}->log(4, "checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max set latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds");
+						return 0;
+					}
+				} else {
+					my $sLatest = time2str("%Y-%m-%d %H-%M-%S", $currentTs);
+					my $endTs = $latest + $timetowait;
+
+					if ($currentTs > $endTs) {
+						$nbmsg = 1;
+						$self->{logger}->log(0, "checkAntiFlood() End of antiflood for channel $sChannel");
+						$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?, first=?, latest=?, notification=? WHERE id_channel=?";
+						my $sth = $self->{dbh}->prepare($sQuery);
+						unless ($sth->execute($nbmsg, $currentTs, $currentTs, 0, $id_channel)) {
+							$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+						} else {
+							my $sLatest = time2str("%Y-%m-%d %H-%M-%S", $currentTs);
+							$self->{logger}->log(4, "checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
+							return 0;
+						}
+					} else {
+						if (!$notification) {
+							$sQuery = "UPDATE CHANNEL_FLOOD SET notification=? WHERE id_channel=?";
+							my $sth = $self->{dbh}->prepare($sQuery);
+							unless ($sth->execute(1, $id_channel)) {
+								$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+							} else {
+								$self->{logger}->log(4, "checkAntiFlood() Antiflood notification set to DB for $sChannel");
+								noticeConsoleChan($self, "Anti flood activated on channel $sChannel $nbmsg messages in less than $duration seconds, waiting $timetowait seconds to deactivate");
+							}
+						}
+						$self->{logger}->log(4, "checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds endTs = $endTs " . ($endTs - $currentTs) . " seconds left");
+						$self->{logger}->log(0, "checkAntiFlood() Antiflood is active for channel $sChannel wait " . ($endTs - $currentTs) . " seconds");
+						return 1;
+					}
 				}
-				else {
-					my $sLatest = time2str("%Y-%m-%d %H-%M-%S",$currentTs);
-					$self->{logger}->log(4,"checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
+			} else {
+				$nbmsg = 1;
+				$self->{logger}->log(0, "checkAntiFlood() End of antiflood for channel $sChannel");
+				$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?, first=?, latest=?, notification=? WHERE id_channel=?";
+				my $sth = $self->{dbh}->prepare($sQuery);
+				unless ($sth->execute($nbmsg, $currentTs, $currentTs, 0, $id_channel)) {
+					$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+				} else {
+					my $sLatest = time2str("%Y-%m-%d %H-%M-%S", $currentTs);
+					$self->{logger}->log(4, "checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
 					return 0;
 				}
 			}
-			else {
-				if ( $deltaDb <= $duration ) {
-					if ($nbmsg < $nbmsg_max) {
-						$nbmsg++;
-						$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?,latest=? WHERE id_channel=?";
-						my $sth = $self->{dbh}->prepare($sQuery);
-						unless ($sth->execute($nbmsg,$currentTs,$id_channel)) {
-							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-						}
-						else {
-							my $sLatest = time2str("%Y-%m-%d %H-%M-%S",$currentTs);
-							$self->{logger}->log(4,"checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max set latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds");
-							return 0;
-						}
-					}
-					else {
-						my $sLatest = time2str("%Y-%m-%d %H-%M-%S",$currentTs);
-						my $endTs = $latest + $timetowait;
-						unless ( $currentTs <= $endTs ) {
-							$nbmsg = 1;
-							$self->{logger}->log(0,"checkAntiFlood() End of antiflood for channel $sChannel");
-							$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?,first=?,latest=?,notification=? WHERE id_channel=?";
-							my $sth = $self->{dbh}->prepare($sQuery);
-							unless ($sth->execute($nbmsg,$currentTs,$currentTs,0,$id_channel)) {
-								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-							}
-							else {
-								my $sLatest = time2str("%Y-%m-%d %H-%M-%S",$currentTs);
-								$self->{logger}->log(4,"checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
-								return 0;
-							}
-						}
-						else {
-							unless ( $notification ) {
-								#$self->{irc}->do_PRIVMSG( target => $sChannel, text => "Anti flood active for $timetowait seconds on channel $sChannel, no more than $nbmsg_max requests in $duration seconds." );
-								$sQuery = "UPDATE CHANNEL_FLOOD SET notification=? WHERE id_channel=?";
-								my $sth = $self->{dbh}->prepare($sQuery);
-								unless ($sth->execute(1,$id_channel)) {
-									$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-								}
-								else {
-									$self->{logger}->log(4,"checkAntiFlood() Antiflood notification set to DB for $sChannel");
-									noticeConsoleChan($self,"Anti flood activated on channel $sChannel $nbmsg messages in less than $duration seconds, waiting $timetowait seconds to desactivate");
-								}
-							}
-							$self->{logger}->log(4,"checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds endTs = $endTs " . ($endTs - $currentTs) . " seconds left");
-							$self->{logger}->log(0,"checkAntiFlood() Antiflood is active for channel $sChannel wait " . ($endTs - $currentTs) . " seconds");
-							return 1;
-						}
-					}
-				}
-				else {
-					$nbmsg = 1;
-					$self->{logger}->log(0,"checkAntiFlood() End of antiflood for channel $sChannel");
-					$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?,first=?,latest=?,notification=? WHERE id_channel=?";
-					my $sth = $self->{dbh}->prepare($sQuery);
-					unless ($sth->execute($nbmsg,$currentTs,$currentTs,0,$id_channel)) {
-						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-					}
-					else {
-						my $sLatest = time2str("%Y-%m-%d %H-%M-%S",$currentTs);
-						$self->{logger}->log(4,"checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
-						return 0;
-					}
-				}
-			}
 		}
-		else {
-			$self->{logger}->log(0,"Something funky happened, could not find record in Table CHANNEL_FLOOD for channel $sChannel (id_channel : $id_channel)");
-		}
+	} else {
+		$self->{logger}->log(0, "checkAntiFlood() could not find record in CHANNEL_FLOOD for channel $sChannel (id_channel : $id_channel)");
 	}
+
+	$sth->finish;
 	return 0;
 }
 
-sub setChannelAntiFloodParams(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my $sTargetChannel;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
-				my $id_channel = getIdChannel($self,$sChannel);
-				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-					$sChannel = $tArgs[0];
-					$id_channel = getIdChannel($self,$sChannel);
-					unless (defined($id_channel)) {
-						botNotice($self,$sNick,"Channel $sTargetChannel is not registered to me");
-						return undef;
-					}
-					shift @tArgs;
-				}
-				unless (defined($sChannel) && ($sChannel ne "")) {
-					botNotice($self,$sNick,"Undefined channel");
-					botNotice($self,$sNick,"Syntax antifloodset [#channel] <max_msg> <period in sec> <timetowait in sec>");
-					return undef;
-				}
-				if ($#tArgs == -1) {
-					$self->{logger}->log(3,"Check antifloodset on $sChannel");
-					my $sQuery = "SELECT * FROM CHANNEL,CHANNEL_FLOOD WHERE CHANNEL.id_channel=CHANNEL_FLOOD.id_channel and CHANNEL.name like ?";
-					my $sth = $self->{dbh}->prepare($sQuery);
-					unless ($sth->execute($sChannel)) {
-						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-						return undef;
-					}
-					else {
-						if (my $ref = $sth->fetchrow_hashref()) {
-							my $nbmsg_max =  $ref->{'nbmsg_max'};
-							my $duration =  $ref->{'duration'};
-							my $timetowait =  $ref->{'timetowait'};
-							botNotice($self,$sNick,"antifloodset for $sChannel : $nbmsg_max message". ($nbmsg_max > 1 ? "s" : "") . " max in $duration second". ($duration > 1 ? "s" : "") . ", $timetowait second". ($duration > 1 ? "s" : "") . " to wait if breached");
-						}
-						else {
-							botNotice($self,$sNick,"no antifloodset settings for $sChannel");
-						}
-					}
-					return 0;
-				}
-				unless (defined($tArgs[0]) && ($tArgs[0] =~ /^[0-9]+$/)) {
-					botNotice($self,$sNick,"Syntax antifloodset [#channel] <max_msg> <period in sec> <timetowait in sec>");
-					return undef;
-				}
-				unless (defined($tArgs[1]) && ($tArgs[1] =~ /^[0-9]+$/)) {
-					botNotice($self,$sNick,"Syntax antifloodset [#channel] <max_msg> <period in sec> <timetowait in sec>");
-					return undef;
-				}
-				unless (defined($tArgs[2]) && ($tArgs[2] =~ /^[0-9]+$/)) {
-					botNotice($self,$sNick,"Syntax antifloodset [#channel] <max_msg> <period in sec> <timetowait in sec>");
-					return undef;
-				}
-				my $id_chanset_list = getIdChansetList($self,"AntiFlood");
-				my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
-				unless (defined($id_channel_set)) {
-					botNotice($self,$sNick,"To change antiflood parameters, first issue a chanset $sChannel +AntiFlood");
-					return undef;
-				}
-				else {
-					my $sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg_max=?,duration=?,timetowait=? WHERE id_channel=?";
-					my $sth = $self->{dbh}->prepare($sQuery);
-					unless ($sth->execute($tArgs[0],$tArgs[1],$tArgs[2],$id_channel)) {
-						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-					}
-					else {
-						$sth->finish;
-						botNotice($self,$sNick,"Antiflood parameters set for $sChannel, $tArgs[0] messages max in $tArgs[1] seconds, wait for $tArgs[2] seconds");
-						return 0;
-					}
-				}
+# Set the anti-flood parameters for a channel, with user level checks
+sub setChannelAntiFloodParams {
+	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+	my $sTargetChannel = $sChannel;
+
+	my (
+		$iMatchingUserId, $iMatchingUserLevel, $iMatchingUserLevelDesc,
+		$iMatchingUserAuth, $sMatchingUserHandle, $sMatchingUserPasswd,
+		$sMatchingUserInfo1, $sMatchingUserInfo2
+	) = getNickInfo($self, $message);
+
+	return undef unless defined $iMatchingUserId;
+
+	if ($iMatchingUserAuth) {
+		if (defined($iMatchingUserLevel) && checkUserLevel($self, $iMatchingUserLevel, "Master")) {
+
+			# Handle explicit channel passed as first argument
+			if (defined($tArgs[0]) && $tArgs[0] =~ /^#/) {
+				$sChannel = shift @tArgs;
+				$sTargetChannel = $sChannel;
 			}
-			else {
-				my $sNoticeMsg = $message->prefix . " antifloodset command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+
+			unless (defined($sChannel) && $sChannel ne "") {
+				botNotice($self, $sNick, "Undefined channel");
+				botNotice($self, $sNick, "Syntax: antifloodset [#channel] <max_msg> <period in sec> <timetowait in sec>");
 				return undef;
 			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " antifloodset command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+
+			# Resolve channel object and ID
+			my $channel_obj = $self->{channels}{$sChannel};
+
+			unless (defined $channel_obj) {
+				botNotice($self, $sNick, "Channel $sChannel is not registered to me");
+				return undef;
+			}
+
+			my $id_channel = $channel_obj->get_id;
+
+			# Display current settings if no args
+			if ($#tArgs == -1) {
+				$self->{logger}->log(3, "Check antifloodset on $sChannel");
+				my $sQuery = "SELECT * FROM CHANNEL,CHANNEL_FLOOD WHERE CHANNEL.id_channel=CHANNEL_FLOOD.id_channel AND CHANNEL.name LIKE ?";
+				my $sth = $self->{dbh}->prepare($sQuery);
+
+				unless ($sth->execute($sChannel)) {
+					$self->{logger}->log(1, "SQL Error: $DBI::errstr | Query: $sQuery");
+					return undef;
+				}
+
+				if (my $ref = $sth->fetchrow_hashref()) {
+					my ($nbmsg_max, $duration, $timetowait) = @$ref{qw(nbmsg_max duration timetowait)};
+					botNotice($self, $sNick, "antifloodset for $sChannel: $nbmsg_max message" . ($nbmsg_max > 1 ? "s" : "") .
+						" max in $duration second" . ($duration > 1 ? "s" : "") .
+						", $timetowait second" . ($timetowait > 1 ? "s" : "") . " to wait if breached");
+				} else {
+					botNotice($self, $sNick, "No antifloodset settings for $sChannel");
+				}
+				return 0;
+			}
+
+			# Validate input arguments
+			for my $i (0 .. 2) {
+				unless (defined($tArgs[$i]) && $tArgs[$i] =~ /^[0-9]+$/) {
+					botNotice($self, $sNick, "Syntax: antifloodset [#channel] <max_msg> <period in sec> <timetowait in sec>");
+					return undef;
+				}
+			}
+
+			my $id_chanset_list = getIdChansetList($self, "AntiFlood");
+			my $id_channel_set  = getIdChannelSet($self, $sChannel, $id_chanset_list);
+
+			unless (defined($id_channel_set)) {
+				botNotice($self, $sNick, "To change antiflood parameters, first issue: chanset $sChannel +AntiFlood");
+				return undef;
+			}
+
+			# Update flood params
+			my $sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg_max=?, duration=?, timetowait=? WHERE id_channel=?";
+			my $sth = $self->{dbh}->prepare($sQuery);
+
+			if ($sth->execute(@tArgs[0 .. 2], $id_channel)) {
+				$sth->finish;
+				botNotice($self, $sNick, "Antiflood parameters set for $sChannel: $tArgs[0] messages max in $tArgs[1] seconds, wait $tArgs[2] seconds");
+				return 0;
+			} else {
+				$self->{logger}->log(1, "SQL Error: $DBI::errstr | Query: $sQuery");
+				return undef;
+			}
+
+		} else {
+			my $sNoticeMsg = $message->prefix . " antifloodset command attempt (command level [Master] for user $sMatchingUserHandle [$iMatchingUserLevel])";
+			noticeConsoleChan($self, $sNoticeMsg);
+			botNotice($self, $sNick, "Your level does not allow you to use this command.");
 			return undef;
 		}
+	} else {
+		my $sNoticeMsg = $message->prefix . " antifloodset command attempt (user $sMatchingUserHandle is not logged in)";
+		noticeConsoleChan($self, $sNoticeMsg);
+		botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+		return undef;
 	}
 }
 
-sub getChannelOwner(@) {
-	my ($self,$sChannel) = @_;
-	my $id_channel = getIdChannel($self,$sChannel);
-	my $sQuery = "SELECT nickname FROM USER,USER_CHANNEL WHERE USER.id_user=USER_CHANNEL.id_user AND id_channel=? AND USER_CHANNEL.level=500";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($id_channel)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+# Get the owner of a channel
+sub getChannelOwner {
+	my ($self, $sChannel) = @_;
+
+	my $channel_obj = $self->{channels}{$sChannel};
+
+	unless (defined $channel_obj) {
+		$self->{logger}->log(1, "getChannelOwner() unknown channel: $sChannel");
 		return undef;
 	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			return $ref->{'nickname'};
-		}
-		else {
-			return undef;
-		}
+
+	my $id_channel = $channel_obj->get_id;
+
+	my $sQuery = "SELECT nickname FROM USER,USER_CHANNEL WHERE USER.id_user = USER_CHANNEL.id_user AND id_channel = ? AND USER_CHANNEL.level = 500";
+	my $sth = $self->{dbh}->prepare($sQuery);
+
+	unless ($sth->execute($id_channel)) {
+		$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+		return undef;
 	}
+
+	if (my $ref = $sth->fetchrow_hashref()) {
+		return $ref->{nickname};
+	}
+
+	return undef;
 }
+
 
 sub leet(@) {
 	my ($self,$input) = @_;
@@ -11743,48 +11841,57 @@ sub get_hailo_channel_ratio(@) {
 	}
 }
 
-sub set_hailo_channel_ratio(@) {
-	my ($self,$sChannel,$ratio) = @_;
-	my $sQuery = "SELECT * FROM HAILO_CHANNEL,CHANNEL WHERE HAILO_CHANNEL.id_channel=CHANNEL.id_channel AND CHANNEL.name like ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+# Set the Hailo chatter ratio for a specific channel
+sub set_hailo_channel_ratio {
+	my ($self, $sChannel, $ratio) = @_;
+
+	my $channel_obj = $self->{channels}{$sChannel};
+
+	unless (defined $channel_obj) {
+		$self->{logger}->log(1, "set_hailo_channel_ratio() unknown channel: $sChannel");
+		return undef;
 	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $id_channel = $ref->{'id_channel'};
-			$sQuery = "UPDATE HAILO_CHANNEL SET ratio=? WHERE id_channel=?";
-			$sth = $self->{dbh}->prepare($sQuery);
-			unless ($sth->execute($ratio,$id_channel)) {
-				$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-			}
-			else {
-				$sth->finish;
-				$self->{logger}->log(3,"set_hailo_channel_ratio updated hailo chatter ratio to $ratio for $sChannel");
-				return 0;
-			}
+
+	my $id_channel = $channel_obj->get_id;
+
+	# Check if HAILO_CHANNEL entry exists for this channel
+	my $sQuery = "SELECT * FROM HAILO_CHANNEL WHERE id_channel = ?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+
+	unless ($sth->execute($id_channel)) {
+		$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+		return undef;
+	}
+
+	if (my $ref = $sth->fetchrow_hashref()) {
+		# Entry exists, update ratio
+		$sQuery = "UPDATE HAILO_CHANNEL SET ratio = ? WHERE id_channel = ?";
+		$sth = $self->{dbh}->prepare($sQuery);
+
+		if ($sth->execute($ratio, $id_channel)) {
+			$sth->finish;
+			$self->{logger}->log(3, "set_hailo_channel_ratio updated hailo chatter ratio to $ratio for $sChannel");
+			return 0;
+		} else {
+			$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+			return undef;
 		}
-		else {
-			my $id_channel = getIdChannel($self,$sChannel);
-			unless (defined($id_channel)) {
-				$sth->finish;
-				return undef;
-			}
-			else {
-				$sQuery = "INSERT INTO HAILO_CHANNEL (id_channel,ratio) VALUES (?,?)";
-				$sth = $self->{dbh}->prepare($sQuery);
-				unless ($sth->execute($id_channel,$ratio)) {
-					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-				}
-				else {
-					$sth->finish;
-					$self->{logger}->log(3,"set_hailo_channel_ratio set hailo chatter ratio to $ratio for $sChannel");
-					return 0;
-				}
-			}
+	} else {
+		# No entry yet, insert new one
+		$sQuery = "INSERT INTO HAILO_CHANNEL (id_channel, ratio) VALUES (?, ?)";
+		$sth = $self->{dbh}->prepare($sQuery);
+
+		if ($sth->execute($id_channel, $ratio)) {
+			$sth->finish;
+			$self->{logger}->log(3, "set_hailo_channel_ratio set hailo chatter ratio to $ratio for $sChannel");
+			return 0;
+		} else {
+			$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+			return undef;
 		}
 	}
 }
+
 
 sub hailo_chatter(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
@@ -12586,63 +12693,77 @@ sub mbResolver(@) {
 	}
 }
 
-# Set TMDB language for a channel
-sub setTMDBLangChannel(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my $sTargetChannel;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
-				my $id_channel = getIdChannel($self,$sChannel);
-				if (defined($tArgs[0]) && ($tArgs[0] ne "") && ( $tArgs[0] =~ /^#/)) {
-					$sChannel = $tArgs[0];
-					$id_channel = getIdChannel($self,$sChannel);
-					unless (defined($id_channel)) {
-						botNotice($self,$sNick,"Channel $sTargetChannel is not registered to me");
-						return undef;
-					}
-					shift @tArgs;
-				}
-				unless (defined($sChannel) && ($sChannel ne "")) {
-					botNotice($self,$sNick,"Undefined channel");
-					botNotice($self,$sNick,"Syntax tmdblangset [#channel] <lang>");
-					return undef;
-				}
-				if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-					my $sLang = $tArgs[0];
-					$self->{logger}->log(3,"setTMDBLangChannel() " . $sChannel . " lang set to " . $sLang);
-					my $sQuery = "UPDATE CHANNEL SET tmdb_lang=? WHERE id_channel=?";
-					my $sth = $self->{dbh}->prepare($sQuery);
-					unless ($sth->execute($sLang,$id_channel)) {
-						$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-						return undef;
-					}
-					else {
-						botPrivmsg($self,$sChannel,"TMDB language set to " . $sLang);
-						$sth->finish;
-						return undef;
-					}
-				}
-				else {
-					botNotice($self,$sNick,"Syntax tmdblangset [#channel] <lang>");
-				}
+# Set the TMDB language for a channel
+sub setTMDBLangChannel {
+	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+	my $sTargetChannel = $sChannel;
+
+	my (
+		$iMatchingUserId, $iMatchingUserLevel, $iMatchingUserLevelDesc,
+		$iMatchingUserAuth, $sMatchingUserHandle, $sMatchingUserPasswd,
+		$sMatchingUserInfo1, $sMatchingUserInfo2
+	) = getNickInfo($self, $message);
+
+	return undef unless defined $iMatchingUserId;
+
+	if ($iMatchingUserAuth) {
+		if (defined($iMatchingUserLevel) && checkUserLevel($self, $iMatchingUserLevel, "Master")) {
+
+			# If first argument is a channel, shift it
+			if (defined($tArgs[0]) && $tArgs[0] =~ /^#/) {
+				$sChannel = shift @tArgs;
+				$sTargetChannel = $sChannel;
 			}
-			else {
-				my $sNoticeMsg = $message->prefix . " tmdblangset command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
+
+			unless (defined($sChannel) && $sChannel ne "") {
+				botNotice($self, $sNick, "Undefined channel");
+				botNotice($self, $sNick, "Syntax tmdblangset [#channel] <lang>");
 				return undef;
 			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " tmdblangset command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+
+			my $channel_obj = $self->{channels}{$sChannel};
+
+			unless (defined $channel_obj) {
+				botNotice($self, $sNick, "Channel $sChannel is not registered to me");
+				return undef;
+			}
+
+			my $id_channel = $channel_obj->get_id;
+
+			if (defined($tArgs[0]) && $tArgs[0] ne "") {
+				my $sLang = $tArgs[0];
+
+				$self->{logger}->log(3, "setTMDBLangChannel() $sChannel lang set to $sLang");
+
+				my $sQuery = "UPDATE CHANNEL SET tmdb_lang = ? WHERE id_channel = ?";
+				my $sth = $self->{dbh}->prepare($sQuery);
+
+				unless ($sth->execute($sLang, $id_channel)) {
+					$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+					return undef;
+				} else {
+					botPrivmsg($self, $sChannel, "TMDB language set to $sLang");
+					$sth->finish;
+					return undef;
+				}
+			} else {
+				botNotice($self, $sNick, "Syntax tmdblangset [#channel] <lang>");
+			}
+
+		} else {
+			my $sNoticeMsg = $message->prefix . " tmdblangset command attempt (command level [Master] for user $sMatchingUserHandle [$iMatchingUserLevel])";
+			noticeConsoleChan($self, $sNoticeMsg);
+			botNotice($self, $sNick, "Your level does not allow you to use this command.");
 			return undef;
 		}
+	} else {
+		my $sNoticeMsg = $message->prefix . " tmdblangset command attempt (user $sMatchingUserHandle is not logged in)";
+		noticeConsoleChan($self, $sNoticeMsg);
+		botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+		return undef;
 	}
 }
+
 
 # Search a movie or TV show on TMDB and return a clean synopsis with details
 sub mbTMDBSearch {
