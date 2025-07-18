@@ -24,6 +24,24 @@ TeuK
 
 # Notes
 
+20250718
+
+I had to to do this for a long time, sorry guys
+
+ALTER TABLE CHANNEL_LOG
+  MODIFY ts DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+ALTER TABLE RESPONDERS
+  MODIFY responder VARCHAR(255)
+    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  MODIFY answer TEXT
+    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+ALTER TABLE CHANNEL
+  MODIFY name VARCHAR(255)
+    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+
 20250501
 
 - I'm testing chatGPT to fix parts of the code, so the installation process currently fails, I could fix it myself but chatGPT is in a deep search to fix its own issues and this is funny... If it does not succeed, I'll make a simple correction so mediabot can be installed easily again (-; Thanks for your patience.
