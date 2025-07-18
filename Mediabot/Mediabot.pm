@@ -851,12 +851,14 @@ sub noticeConsoleChan {
 sub logBot {
     my ($self, $message, $channel, $action, @args) = @_;
 
+    return unless $self->{dbh};  # Skip if DBH is missing
+
     # Attempt to resolve the user object
     my $user = $self->get_user_from_message($message);
 
-    my $user_id   = $user ? $user->id : undef;
+    my $user_id   = $user ? $user->id       : undef;
     my $user_name = $user ? $user->nickname : 'Unknown user';
-    my $hostmask  = $message->prefix // 'unknown';
+    my $hostmask  = $message->prefix        // 'unknown';
 
     # Resolve the channel ID using channel object, if available
     my $channel_id;
@@ -864,12 +866,15 @@ sub logBot {
         $channel_id = $self->{channels}{$channel}->get_id;
     }
 
-    # Normalize args string
-    my $args_string = join(' ', @args) // '';
+    # Normalize and sanitize args string
+    my $args_string = @args ? join(' ', map { defined($_) ? $_ : '' } @args) : '';
 
     # Insert the log entry
     my $sql = "INSERT INTO ACTIONS_LOG (ts, id_user, id_channel, hostmask, action, args) VALUES (?, ?, ?, ?, ?, ?)";
-    my $sth = $self->{dbh}->prepare($sql);
+    my $sth = $self->{dbh}->prepare($sql) or do {
+        $self->{logger}->log(0, "logBot() SQL prepare failed: $DBI::errstr");
+        return;
+    };
     my $timestamp = time2str("%Y-%m-%d %H-%M-%S", time);
 
     unless ($sth->execute($timestamp, $user_id, $channel_id, $hostmask, $action, $args_string)) {
@@ -887,6 +892,7 @@ sub logBot {
 
     $sth->finish;
 }
+
 
 # Log bot action into the CHANNEL_LOG table
 # Handles JOIN, PART, PUBLIC, ACTION, NOTICE, KICK, QUIT, etc.
@@ -1281,400 +1287,204 @@ sub getNickInfo {
     return undef;
 }
 
-# Handle public commands
+# 🧙‍♂️ mbCommandPublic: The Sorting Hat of Mediabot – routes every incantation to the proper spell
 sub mbCommandPublic(@) {
-	my ($self,$message,$sChannel,$sNick,$botNickTriggered,$sCommand,@tArgs)	= @_;
-	my $conf = $self->{conf};
-	switch($sCommand) {
-		case /^die$/i				{
-													mbQuit($self,$message,$sNick,@tArgs);
-												}
-		case /^nick$/i			{
-													mbChangeNick($self,$message,$sNick,@tArgs);
-												}
-		case /^addtimer$/i	{
-													mbAddTimer($self,$message,$sChannel,$sNick,@tArgs);
-												}
-		case /^remtimer$/i	{
-													mbRemTimer($self,$message,$sChannel,$sNick,@tArgs);
-												}
-		case /^timers$/i		{
-													mbTimers($self,$message,$sChannel,$sNick,@tArgs);
-												}
-		case /^msg$/i				{
-													msgCmd($self,$message,$sNick,@tArgs);
-												}
-		case /^say$/i				{
-													sayChannel($self,$message,$sNick,@tArgs);
-												}
-		case /^act$/i				{
-													actChannel($self,$message,$sNick,@tArgs);
-												}
-		case /^cstat$/i			{
-													userCstat($self,$message,$sNick,@tArgs);
-												}
-		case /^status$/i		{
-													mbStatus($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^adduser$/i		{
-													addUser($self,$message,$sNick,@tArgs);
-												}
-		case /^deluser$/i		{
-													delUser($self,$message,$sNick,@tArgs);
-												}
-		case /^users$/i			{
-													userStats($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^userinfo$/i	{
-													userInfo($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^addhost$/i		{
-													addUserHost($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^addchan$/i		{
-													addChannel($self,$message,$sNick,@tArgs);
-												}
-		case /^chanset$/i		{
-													channelSet($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^purge$/i			{
-													purgeChannel($self,$message,$sNick,@tArgs);
-												}
-		case /^part$/i			{
-													channelPart($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^join$/i			{
-													channelJoin($self,$message,$sNick,@tArgs);
-												}
-		case /^add$/i				{
-													channelAddUser($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^del$/i				{
-													channelDelUser($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^modinfo$/i		{
-													userModinfo($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^op$/i				{
-													userOpChannel($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^deop$/i			{
-													userDeopChannel($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^invite$/i		{
-													userInviteChannel($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^voice$/i			{
-													userVoiceChannel($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^devoice$/i		{
-													userDevoiceChannel($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^kick$/i			{
-													userKickChannel($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^topic$/i			{
-													userTopicChannel($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^showcommands$/i	{
-													userShowcommandsChannel($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^chaninfo$/i	{
-													userChannelInfo($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^chanlist$/i	{
-													channelList($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^whoami$/i		{
-													userWhoAmI($self,$message,$sNick,@tArgs);
-												}
-		case /^auth$/i			{
-													userAuthNick($self,$message,$sNick,@tArgs);
-												}
-		case /^verify$/i		{
-													userVerifyNick($self,$message,$sNick,@tArgs);
-												}
-		case /^access$/i		{
-													userAccessChannel($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^addcmd$/i		{
-													mbDbAddCommand($self,$message,$sNick,@tArgs);
-												}
-		case /^remcmd$/i		{
-													mbDbRemCommand($self,$message,$sNick,@tArgs);
-												}
-		case /^modcmd$/i		{
-													mbDbModCommand($self,$message,$sNick,@tArgs);
-												}
-		case /^mvcmd$/i			{
-													mbDbMvCommand($self,$message,$sNick,@tArgs);
-												}
-		case /^chowncmd$/i	{
-													mbChownCommand($self,$message,$sNick,@tArgs);
-												}
-		case /^showcmd$/i		{
-													mbDbShowCommand($self,$message,$sNick,@tArgs);
-												}
-		case /^version$/i 						{
-													$self->{logger}->log( 0, "mbVersion() by $sNick on $sChannel");
-													botPrivmsg($self,$sChannel,$self->{conf}->get('main.MAIN_PROG_NAME') . $self->{main_prog_version});
-													logBot($self, $message, undef, "version", undef);
-												}
-		case /^chanstatlines$/i	{
-														channelStatLines($self,$message,$sChannel,$sNick,@tArgs);
-													}
-		case /^whotalk|whotalks$/i		{
-														whoTalk($self,$message,$sChannel,$sNick,@tArgs);
-												}
-		case /^countcmd$/i	{
-														mbCountCommand($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^topcmd$/i		{
-														mbTopCommand($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^popcmd$/i		{
-														mbPopCommand($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^searchcmd$/i	{
-														mbDbSearchCommand($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^lastcmd$/i		{
-														mbLastCommand($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^owncmd$/i		{
-														mbDbOwnersCommand($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^holdcmd$/i		{
-														mbDbHoldCommand($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^addcatcmd$/i	{
-														mbDbAddCategoryCommand($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^chcatcmd$/i	{
-														mbDbChangeCategoryCommand($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^topsay$/i		{
-														userTopSay($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^checkhostchan$/i		{
-															mbDbCheckHostnameNickChan($self,$message,$sNick,$sChannel,@tArgs);
-														}
-		case /^checkhost$/i	{
-															mbDbCheckHostnameNick($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^checknick$/i	{
-													mbDbCheckNickHostname($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^greet$/i			{
-													userGreet($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^nicklist$/i	{
-														channelNickList($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^rnick$/i			{
-														randomChannelNick($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^birthdate$/i	{
-														displayBirthDate($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^colors$/i		{
-														mbColors($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^seen$/i			{
-														mbSeen($self,$message,$sNick,$sChannel,@tArgs);
-												}
-		case /^date$/i								{
-														displayDate($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^weather$|^meteo$/i					{
-																	displayWeather($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^addbadword$/i						{
-														channelAddBadword($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^rembadword$/i						{
-														channelRemBadword($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^ignores$/i							{
-														IgnoresList($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^ignore$/i 							{
-														addIgnore($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^unignore$/i							{
-														delIgnore($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^yt$/i								{
-														youtubeSearch($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^song$/i								{
-														displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^listeners$/i							{
-														displayRadioListeners($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^nextsong$/i							{
-														radioNext($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^wordstat$/i							{
-														wordStat($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^addresponder$/i						{
-															addResponder($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^delresponder$/i						{
-															delResponder($self,$message,$sNick,$sChannel,@tArgs);
-														}
-		case /^update$/i							{
-														update($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^lastcom$/i							{
-														lastCom($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case "q"									{
-														mbQuotes($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case "Q"									{
-														mbQuotes($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^moduser$/i 							{
-														mbModUser($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^antifloodset$/i 						{
-														setChannelAntiFloodParams($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^leet$/i 								{
-														displayLeetString($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^rehash/i								{
-														mbRehash($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^play$/i								{
-														playRadio($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^rplay$/i								{
-														rplayRadio($self,$message,$sNick,$sChannel,@tArgs);
-													}	
-		case /^queue$/i								{
-														queueRadio($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^next$/i								{
-														nextRadio($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^mp3$/i								{		
-														mp3($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^exec$/i								{		
-														mbExec($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^qlog$/i								{		
-														mbChannelLog($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^hailo_ignore$/i						{		
-														hailo_ignore($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^hailo_unignore$/i					{		
-														hailo_unignore($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^hailo_status$/i						{		
-														hailo_status($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^hailo_chatter$/i						{		
-														hailo_chatter($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^whereis$/i							{		
-														mbWhereis($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^birthday$/i							{
-														userBirthday($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^f$/i									{
-														fortniteStats($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^xlogin$/i							{
-														xLogin($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^yomomma$/i							{
-														Yomomma($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^Spike$/i								{
-														botPrivmsg($self,$sChannel,"https://teuk.org/In_Spike_Memory.jpg");
-													}
-		case /^resolve$/i							{
-														mbResolver($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^tmdb$/i						    	{
-														mbTMDBSearch($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^tmdblangset$/i						{
-														setTMDBLangChannel($self,$message,$sNick,$sChannel,@tArgs);
-													}	
-		case /^debug$/i						    	{
-														mbDebug($self,$message,$sNick,$sChannel,@tArgs);
-													}
-		case /^help$/i								{
-														unless(defined($tArgs[0]) && ($tArgs[0] ne "")) {
-															botPrivmsg($self,$sChannel,"Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
-															return 0;
-														}
-														else {
-															botPrivmsg($self,$sChannel,"Help on command $tArgs[0] is not available (unknown command ?). Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
-															return 0;
-														}
-													}	
-		else										{
-														my $bFound = mbDbCommand($self,$message,$sChannel,$sNick,$sCommand,@tArgs);
-														unless ( $bFound ) {
-															if ($botNickTriggered) {
-																my $what = join(" ",($sCommand,@tArgs));
-																switch($what) {
-																	case /how\s+old\s+are\s+you|how\s+old\s+r\s+you|how\s+old\s+r\s+u/i {
-																		$bFound = 1;
-																		displayBirthDate($self,$message,$sNick,$sChannel,@tArgs);
-																	}
-																	case /who.. your daddy|who is your daddy/i {
-																		my $owner = getChannelOwner($self,$sChannel);
-																		unless (defined($owner) && ($owner ne "")) {
-																			botPrivmsg($self,$sChannel,"I have no clue of who is " . $sChannel . "'s owner, but Te[u]K's my daddy");
-																		}
-																		else {
-																			botPrivmsg($self,$sChannel,"Well I'm registered to $owner on $sChannel, but Te[u]K's my daddy");
-																		}
-																	}
-																	case /^thx$|^thanx$|^thank you$|^thanks$/i {
-																		botPrivmsg($self,$sChannel,"you're welcome $sNick");
-																	}
-																	case /who.. StatiK/i {
-																		botPrivmsg($self,$sChannel,"StatiK is my big brother $sNick, he's awesome !");
-																	}
-																	elsif ($botNickTriggered) {
-																		my $id_chanset_list = getIdChansetList($self, "Hailo");
-																		if (defined($id_chanset_list)) {
-																			my $id_channel_set = getIdChannelSet($self, $sChannel, $id_chanset_list);
-																			if (defined($id_channel_set)) {
-																				unless (is_hailo_excluded_nick($self, $sNick) || (substr($what, 0, 1) eq "!")  || (substr($what, 0, 1) eq $self->{conf}->get('main.MAIN_PROG_CMD_CHAR')) ) {
-																					my $hailo = get_hailo($self);
-																					my $sCurrentNick = $self->{irc}->nick_folded;
-																					$what =~ s/$sCurrentNick//g;
-																					$what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
-																					my $sAnswer = $hailo->learn_reply($what);
-																					if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
-																						$self->{logger}->log( 4, "learn_reply $what from $sNick : $sAnswer");
-																						botPrivmsg($self, $sChannel, $sAnswer);
-																					}
-																				}
-																			}
-																		}
-																	}
-																}
-															}
-															else {
-																$self->{logger}->log(3,"Public command '$sCommand' not found");
-															}
-														}
-													}
+    my ($self,$message,$sChannel,$sNick,$botNickTriggered,$sCommand,@tArgs) = @_;
+    my $conf = $self->{conf};
+
+    # Commandes simples mappées à leur sous-routine
+    my %command_map = (
+        die         => sub { mbQuit($self,$message,$sNick,@tArgs) },
+        nick        => sub { mbChangeNick($self,$message,$sNick,@tArgs) },
+        addtimer    => sub { mbAddTimer($self,$message,$sChannel,$sNick,@tArgs) },
+        remtimer    => sub { mbRemTimer($self,$message,$sChannel,$sNick,@tArgs) },
+        timers      => sub { mbTimers($self,$message,$sChannel,$sNick,@tArgs) },
+        msg         => sub { msgCmd($self,$message,$sNick,@tArgs) },
+        say         => sub { sayChannel($self,$message,$sNick,@tArgs) },
+        act         => sub { actChannel($self,$message,$sNick,@tArgs) },
+        cstat       => sub { userCstat($self,$message,$sNick,@tArgs) },
+        status      => sub { mbStatus($self,$message,$sNick,$sChannel,@tArgs) },
+        adduser     => sub { addUser($self,$message,$sNick,@tArgs) },
+        deluser     => sub { delUser($self,$message,$sNick,@tArgs) },
+        users       => sub { userStats($self,$message,$sNick,$sChannel,@tArgs) },
+        userinfo    => sub { userInfo($self,$message,$sNick,$sChannel,@tArgs) },
+        addhost     => sub { addUserHost($self,$message,$sNick,$sChannel,@tArgs) },
+        addchan     => sub { addChannel($self,$message,$sNick,@tArgs) },
+        chanset     => sub { channelSet($self,$message,$sNick,$sChannel,@tArgs) },
+        purge       => sub { purgeChannel($self,$message,$sNick,@tArgs) },
+        part        => sub { channelPart($self,$message,$sNick,$sChannel,@tArgs) },
+        join        => sub { channelJoin($self,$message,$sNick,@tArgs) },
+        add         => sub { channelAddUser($self,$message,$sNick,$sChannel,@tArgs) },
+        del         => sub { channelDelUser($self,$message,$sNick,$sChannel,@tArgs) },
+        modinfo     => sub { userModinfo($self,$message,$sNick,$sChannel,@tArgs) },
+        op          => sub { userOpChannel($self,$message,$sNick,$sChannel,@tArgs) },
+        deop        => sub { userDeopChannel($self,$message,$sNick,$sChannel,@tArgs) },
+        invite      => sub { userInviteChannel($self,$message,$sNick,$sChannel,@tArgs) },
+        voice       => sub { userVoiceChannel($self,$message,$sNick,$sChannel,@tArgs) },
+        devoice     => sub { userDevoiceChannel($self,$message,$sNick,$sChannel,@tArgs) },
+        kick        => sub { userKickChannel($self,$message,$sNick,$sChannel,@tArgs) },
+        topic       => sub { userTopicChannel($self,$message,$sNick,$sChannel,@tArgs) },
+        showcommands=> sub { userShowcommandsChannel($self,$message,$sNick,$sChannel,@tArgs) },
+        chaninfo    => sub { userChannelInfo($self,$message,$sNick,$sChannel,@tArgs) },
+        chanlist    => sub { channelList($self,$message,$sNick,$sChannel,@tArgs) },
+        whoami      => sub { userWhoAmI($self,$message,$sNick,@tArgs) },
+        auth        => sub { userAuthNick($self,$message,$sNick,@tArgs) },
+        verify      => sub { userVerifyNick($self,$message,$sNick,@tArgs) },
+        access      => sub { userAccessChannel($self,$message,$sNick,$sChannel,@tArgs) },
+        addcmd      => sub { mbDbAddCommand($self,$message,$sNick,@tArgs) },
+        remcmd      => sub { mbDbRemCommand($self,$message,$sNick,@tArgs) },
+        modcmd      => sub { mbDbModCommand($self,$message,$sNick,@tArgs) },
+        mvcmd       => sub { mbDbMvCommand($self,$message,$sNick,@tArgs) },
+        chowncmd    => sub { mbChownCommand($self,$message,$sNick,@tArgs) },
+        showcmd     => sub { mbDbShowCommand($self,$message,$sNick,@tArgs) },
+        chanstatlines => sub { channelStatLines($self,$message,$sChannel,$sNick,@tArgs) },
+        whotalk     => sub { whoTalk($self,$message,$sChannel,$sNick,@tArgs) },
+        whotalks    => sub { whoTalk($self,$message,$sChannel,$sNick,@tArgs) },
+        countcmd    => sub { mbCountCommand($self,$message,$sNick,$sChannel,@tArgs) },
+        topcmd      => sub { mbTopCommand($self,$message,$sNick,$sChannel,@tArgs) },
+        popcmd      => sub { mbPopCommand($self,$message,$sNick,$sChannel,@tArgs) },
+        searchcmd   => sub { mbDbSearchCommand($self,$message,$sNick,$sChannel,@tArgs) },
+        lastcmd     => sub { mbLastCommand($self,$message,$sNick,$sChannel,@tArgs) },
+        owncmd      => sub { mbDbOwnersCommand($self,$message,$sNick,$sChannel,@tArgs) },
+        holdcmd     => sub { mbDbHoldCommand($self,$message,$sNick,$sChannel,@tArgs) },
+        addcatcmd   => sub { mbDbAddCategoryCommand($self,$message,$sNick,$sChannel,@tArgs) },
+        chcatcmd    => sub { mbDbChangeCategoryCommand($self,$message,$sNick,$sChannel,@tArgs) },
+        topsay      => sub { userTopSay($self,$message,$sNick,$sChannel,@tArgs) },
+        checkhostchan => sub { mbDbCheckHostnameNickChan($self,$message,$sNick,$sChannel,@tArgs) },
+        checkhost   => sub { mbDbCheckHostnameNick($self,$message,$sNick,$sChannel,@tArgs) },
+        checknick   => sub { mbDbCheckNickHostname($self,$message,$sNick,$sChannel,@tArgs) },
+        greet       => sub { userGreet($self,$message,$sNick,$sChannel,@tArgs) },
+        nicklist    => sub { channelNickList($self,$message,$sNick,$sChannel,@tArgs) },
+        rnick       => sub { randomChannelNick($self,$message,$sNick,$sChannel,@tArgs) },
+        birthdate   => sub { displayBirthDate($self,$message,$sNick,$sChannel,@tArgs) },
+        colors      => sub { mbColors($self,$message,$sNick,$sChannel,@tArgs) },
+        seen        => sub { mbSeen($self,$message,$sNick,$sChannel,@tArgs) },
+        date        => sub { displayDate($self,$message,$sNick,$sChannel,@tArgs) },
+        weather     => sub { displayWeather($self,$message,$sNick,$sChannel,@tArgs) },
+        meteo       => sub { displayWeather($self,$message,$sNick,$sChannel,@tArgs) },
+        addbadword  => sub { channelAddBadword($self,$message,$sNick,$sChannel,@tArgs) },
+        rembadword  => sub { channelRemBadword($self,$message,$sNick,$sChannel,@tArgs) },
+        ignores     => sub { IgnoresList($self,$message,$sNick,$sChannel,@tArgs) },
+        ignore      => sub { addIgnore($self,$message,$sNick,$sChannel,@tArgs) },
+        unignore    => sub { delIgnore($self,$message,$sNick,$sChannel,@tArgs) },
+        yt          => sub { youtubeSearch($self,$message,$sNick,$sChannel,@tArgs) },
+        song        => sub { displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs) },
+        listeners   => sub { displayRadioListeners($self,$message,$sNick,$sChannel,@tArgs) },
+        nextsong    => sub { radioNext($self,$message,$sNick,$sChannel,@tArgs) },
+        wordstat    => sub { wordStat($self,$message,$sNick,$sChannel,@tArgs) },
+        addresponder=> sub { addResponder($self,$message,$sNick,$sChannel,@tArgs) },
+        delresponder=> sub { delResponder($self,$message,$sNick,$sChannel,@tArgs) },
+        update      => sub { update($self,$message,$sNick,$sChannel,@tArgs) },
+        lastcom     => sub { lastCom($self,$message,$sNick,$sChannel,@tArgs) },
+        q           => sub { mbQuotes($self,$message,$sNick,$sChannel,@tArgs) },
+        Q           => sub { mbQuotes($self,$message,$sNick,$sChannel,@tArgs) },
+        moduser     => sub { mbModUser($self,$message,$sNick,$sChannel,@tArgs) },
+        antifloodset=> sub { setChannelAntiFloodParams($self,$message,$sNick,$sChannel,@tArgs) },
+        leet        => sub { displayLeetString($self,$message,$sNick,$sChannel,@tArgs) },
+        rehash      => sub { mbRehash($self,$message,$sNick,$sChannel,@tArgs) },
+        play        => sub { playRadio($self,$message,$sNick,$sChannel,@tArgs) },
+        rplay       => sub { rplayRadio($self,$message,$sNick,$sChannel,@tArgs) },
+        queue       => sub { queueRadio($self,$message,$sNick,$sChannel,@tArgs) },
+        next        => sub { nextRadio($self,$message,$sNick,$sChannel,@tArgs) },
+        mp3         => sub { mp3($self,$message,$sNick,$sChannel,@tArgs) },
+        exec        => sub { mbExec($self,$message,$sNick,$sChannel,@tArgs) },
+        qlog        => sub { mbChannelLog($self,$message,$sNick,$sChannel,@tArgs) },
+        hailo_ignore => sub { hailo_ignore($self,$message,$sNick,$sChannel,@tArgs) },
+        hailo_unignore => sub { hailo_unignore($self,$message,$sNick,$sChannel,@tArgs) },
+        hailo_status => sub { hailo_status($self,$message,$sNick,$sChannel,@tArgs) },
+        hailo_chatter => sub { hailo_chatter($self,$message,$sNick,$sChannel,@tArgs) },
+        whereis     => sub { mbWhereis($self,$message,$sNick,$sChannel,@tArgs) },
+        birthday    => sub { userBirthday($self,$message,$sNick,$sChannel,@tArgs) },
+        f           => sub { fortniteStats($self,$message,$sNick,$sChannel,@tArgs) },
+        xlogin      => sub { xLogin($self,$message,$sNick,$sChannel,@tArgs) },
+        yomomma     => sub { Yomomma($self,$message,$sNick,$sChannel,@tArgs) },
+        spike       => sub { botPrivmsg($self,$sChannel,"https://teuk.org/In_Spike_Memory.jpg") },
+        resolve     => sub { mbResolver($self,$message,$sNick,$sChannel,@tArgs) },
+        tmdb        => sub { mbTMDBSearch($self,$message,$sNick,$sChannel,@tArgs) },
+        tmdblangset => sub { setTMDBLangChannel($self,$message,$sNick,$sChannel,@tArgs) },
+        debug       => sub { mbDebug($self,$message,$sNick,$sChannel,@tArgs) },
+        help        => sub {
+            if (defined($tArgs[0]) && $tArgs[0] ne "") {
+                botPrivmsg($self,$sChannel,"Help on command $tArgs[0] is not available (unknown command ?). Please visit https://github.com/teuk/mediabot_v3/wiki");
+            } else {
+                botPrivmsg($self,$sChannel,"Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
+            }
+        },
+        version     => sub {
+            $self->{logger}->log( 0, "mbVersion() by $sNick on $sChannel");
+            botPrivmsg($self,$sChannel,$conf->get('main.MAIN_PROG_NAME') . " " . $self->{main_prog_version});
+            logBot($self, $message, undef, "version", undef);
+        },
+    );
+
+    # Appel direct si la commande est trouvée
+    if (exists $command_map{lc($sCommand)}) {
+        $command_map{lc($sCommand)}->();
+        return;
+    }
+
+    # Sinon, essaie depuis la DB ou hailo
+    my $bFound = mbDbCommand($self,$message,$sChannel,$sNick,$sCommand,@tArgs);
+    return if $bFound;
+
+    if ($botNickTriggered) {
+		my $what = join(" ", $sCommand, @tArgs);
+
+		# 🎯 Special hardcoded patterns for natural replies
+		if ($what =~ /how\s+old\s+(are|r)\s+(you|u)/i) {
+			# User asks for the bot's age
+			displayBirthDate($self, $message, $sNick, $sChannel, @tArgs);
+		} 
+		elsif ($what =~ /who.*(your daddy|is your daddy)/i) {
+			# User asks who is the bot's owner
+			my $owner = getChannelOwner($self, $sChannel);
+			my $reply = defined $owner && $owner ne ""
+				? "Well I'm registered to $owner on $sChannel, but Te[u]K's my daddy"
+				: "I have no clue of who is $sChannel\'s owner, but Te[u]K's my daddy";
+			botPrivmsg($self, $sChannel, $reply);
+		} 
+		elsif ($what =~ /^(thx|thanx|thank you|thanks)$/i) {
+			# Gratitude detected
+			botPrivmsg($self, $sChannel, "you're welcome $sNick");
+		} 
+		elsif ($what =~ /who.*StatiK/i) {
+			# Reference to StatiK
+			botPrivmsg($self, $sChannel, "StatiK is my big brother $sNick, he's awesome !");
+		} 
+		else {
+			# 🧠 Hailo fallback if allowed
+			my $id_chanset_list = getIdChansetList($self, "Hailo");
+			my $id_channel_set = getIdChannelSet($self, $sChannel, $id_chanset_list);
+
+			unless (
+				is_hailo_excluded_nick($self, $sNick) ||        # Ignore if nick excluded
+				$what =~ /^[!]/ ||                              # Ignore if starts with !
+				$what =~ /^@{[$self->{conf}->get('main.MAIN_PROG_CMD_CHAR')]}/  # Ignore if starts with bot command prefix
+			) {
+				my $hailo = get_hailo($self);
+				my $sCurrentNick = $self->{irc}->nick_folded;
+				$what =~ s/\Q$sCurrentNick\E//g;  # Remove bot name from query
+
+				# Decode user input (fallback to ISO-8859-2 if needed)
+				$what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
+
+				# Get reply from Hailo
+				my $sAnswer = $hailo->learn_reply($what);
+
+				# Send if answer is valid and not redundant
+				if (defined($sAnswer) && $sAnswer ne "" && $sAnswer !~ /^\Q$what\E\s*\.$/i) {
+					$self->{logger}->log(4, "learn_reply $what from $sNick : $sAnswer");
+					botPrivmsg($self, $sChannel, $sAnswer);
+				}
+			}
+		}
+	} else {
+		# Command not recognized and bot not directly triggered
+		$self->{logger}->log(3, "Public command '$sCommand' not found");
 	}
+
 }
+
 
 # Handle private commands
 sub mbCommandPrivate(@) {
@@ -2376,76 +2186,94 @@ sub actChannel {
 }
 
 
-# Check bot resource usage and status
+# Display detailed bot and system status to authenticated Master users
 sub mbStatus {
     my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-    # Retrieve the user object from message prefix
+    # Retrieve the user
     my $user = $self->get_user_from_message($message);
+    return unless defined $user;
 
-    if (defined $user) {
-        if ($user->is_authenticated) {
-            if (defined($user->level) && checkUserLevel($self, $user->level, "Master")) {
-
-                # --- Bot Uptime ---
-                my $uptime = time - $self->{iConnectionTimestamp};
-                my $days    = int($uptime / 86400);
-                my $hours   = sprintf("%02d", int(($uptime % 86400) / 3600));
-                my $minutes = sprintf("%02d", int(($uptime % 3600) / 60));
-                my $seconds = sprintf("%02d", $uptime % 60);
-
-                my $uptime_str = "";
-                $uptime_str .= "$days days, "    if $days > 0;
-                $uptime_str .= "$hours" . "h "   if $hours > 0;
-                $uptime_str .= "$minutes" . "mn " if $minutes > 0;
-                $uptime_str .= "$seconds" . "s";
-                $uptime_str = "Unknown" unless $uptime_str;
-
-                # --- Server uptime ---
-                my $server_uptime = "Unknown";
-                if (open my $fh_uptime, "-|", "uptime") {
-                    chomp($server_uptime = <$fh_uptime>) if defined($server_uptime = <$fh_uptime>);
-                    close $fh_uptime;
-                } else {
-                    $self->{logger}->log(0, "Could not exec uptime command");
-                }
-
-                # --- Server OS info ---
-                my $uname = "Unknown";
-                if (open my $fh_uname, "-|", "uname -a") {
-                    chomp($uname = <$fh_uname>) if defined($uname = <$fh_uname>);
-                    close $fh_uname;
-                } else {
-                    $self->{logger}->log(0, "Could not exec uname command");
-                }
-
-                # --- Memory usage ---
-                my $mu = Memory::Usage->new();
-                $mu->record('Memory stats');
-
-                my @mem_state = $mu->state();
-                my @values = $mem_state[0][0];
-                my $vm_mb     = sprintf("%.2f", $values[2] / 1024) if defined $values[2];
-                my $rss_mb    = sprintf("%.2f", $values[3] / 1024) if defined $values[3];
-                my $shared_mb = sprintf("%.2f", $values[4] / 1024) if defined $values[4];
-                my $data_mb   = sprintf("%.2f", $values[6] / 1024) if defined $values[6];
-
-                # --- Output bot status to user ---
-                botNotice($self, $sNick, $self->{conf}->get('main.MAIN_PROG_NAME') . " v" . $self->{main_prog_version} . " Uptime: $uptime_str");
-                botNotice($self, $sNick, "Memory usage (VM ${vm_mb}MB) (Resident ${rss_mb}MB) (Shared ${shared_mb}MB) (Data+Stack ${data_mb}MB)");
-                botNotice($self, $sNick, "Server: $uname");
-                botNotice($self, $sNick, "Server uptime: $server_uptime");
-
-                logBot($self, $message, undef, "status", undef);
-
-            } else {
-                botNotice($self, $sNick, "Your level does not allow you to use this command.");
-            }
-        } else {
-            botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-        }
+    # Require authentication
+    unless ($user->is_authenticated) {
+        botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
     }
+
+    # Require Master access level
+    unless (defined $user->level && checkUserLevel($self, $user->level, "Master")) {
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    # --- Bot Uptime ---
+    my $uptime = time - $self->{iConnectionTimestamp};
+    my $days    = int($uptime / 86400);
+    my $hours   = sprintf("%02d", int(($uptime % 86400) / 3600));
+    my $minutes = sprintf("%02d", int(($uptime % 3600) / 60));
+    my $seconds = sprintf("%02d", $uptime % 60);
+
+    my $uptime_str = "";
+    $uptime_str .= "$days days, "  if $days > 0;
+    $uptime_str .= "${hours}h "    if $hours > 0;
+    $uptime_str .= "${minutes}mn " if $minutes > 0;
+    $uptime_str .= "${seconds}s";
+    $uptime_str ||= "Unknown";
+
+    # --- Server uptime ---
+    my $server_uptime = "Unavailable";
+    if (open my $fh_uptime, "-|", "uptime") {
+        if (defined(my $line = <$fh_uptime>)) {
+            chomp $line;
+            $server_uptime = $line;
+        }
+        close $fh_uptime;
+    } else {
+        $self->{logger}->log(1, "Could not execute 'uptime' command");
+    }
+
+    # --- OS Info ---
+    my $uname = "Unknown";
+    if (open my $fh_uname, "-|", "uname -a") {
+        if (defined(my $line = <$fh_uname>)) {
+            chomp $line;
+            $uname = $line;
+        }
+        close $fh_uname;
+    } else {
+        $self->{logger}->log(1, "Could not execute 'uname' command");
+    }
+
+    # --- Memory usage ---
+    my ($vm_mb, $rss_mb, $shared_mb, $data_mb) = ("?", "?", "?", "?");
+
+    eval {
+        require Memory::Usage;
+        my $mu = Memory::Usage->new();
+        $mu->record('Memory stats');
+        my @mem_state = $mu->state();
+        if (@mem_state && ref $mem_state[0][0] eq 'ARRAY') {
+            my @values = @{ $mem_state[0][0] };
+            $vm_mb     = sprintf("%.2f", $values[2] / 1024) if defined $values[2];
+            $rss_mb    = sprintf("%.2f", $values[3] / 1024) if defined $values[3];
+            $shared_mb = sprintf("%.2f", $values[4] / 1024) if defined $values[4];
+            $data_mb   = sprintf("%.2f", $values[6] / 1024) if defined $values[6];
+        }
+    };
+    if ($@) {
+        $self->{logger}->log(1, "Memory::Usage failed: $@");
+    }
+
+    # --- Display results to user ---
+    botNotice($self, $sNick, $self->{conf}->get('main.MAIN_PROG_NAME') . " v" . $self->{main_prog_version} . " Uptime: $uptime_str");
+    botNotice($self, $sNick, "Memory usage (VM ${vm_mb}MB) (Resident ${rss_mb}MB) (Shared ${shared_mb}MB) (Data+Stack ${data_mb}MB)");
+    botNotice($self, $sNick, "Server: $uname");
+    botNotice($self, $sNick, "Server uptime: $server_uptime");
+
+    # Log the command
+    logBot($self, $message, undef, "status", undef);
 }
+
 
 
 sub setConnectionTimestamp(@) {
@@ -4640,10 +4468,11 @@ sub channelList {
 }
 
 
-# Return info about the current authenticated user
+# Return detailed information about the currently authenticated user
 sub userWhoAmI {
     my ($self, $message, $sNick, @tArgs) = @_;
 
+    # Try to find the user object based on the IRC hostmask
     my $user = $self->get_user_from_message($message);
 
     unless ($user && defined $user->id) {
@@ -4651,8 +4480,10 @@ sub userWhoAmI {
         return;
     }
 
-    my $sNoticeMsg = "User " . $user->handle . " (" . $user->level_desc . ")";
+    # Build the first notice with nickname and access level
+    my $sNoticeMsg = "User " . $user->nickname . " (" . $user->level_description . ")";
 
+    # Fetch additional user info from the database
     my $sQuery = "SELECT password, hostmasks, creation_date, last_login FROM USER WHERE id_user=?";
     my $sth = $self->{dbh}->prepare($sQuery);
 
@@ -4662,22 +4493,28 @@ sub userWhoAmI {
     }
 
     if (my $ref = $sth->fetchrow_hashref()) {
-        my $sPasswordSet = defined($ref->{'creation_date'}) ? "Password set" : "Password not set";
-        $sNoticeMsg .= " - created " . $ref->{'creation_date'} . " - last login " . ($ref->{'last_login'} // "never");
+        # Determine if password has ever been set
+        my $sPasswordSet = defined($ref->{creation_date}) ? "Password set" : "Password not set";
+
+        # Append account creation and last login date
+        $sNoticeMsg .= " - created " . $ref->{creation_date};
+        $sNoticeMsg .= " - last login " . ($ref->{last_login} // "never");
 
         botNotice($self, $sNick, $sNoticeMsg);
         botNotice($self, $sNick, $sPasswordSet);
-        botNotice($self, $sNick, "Hostmasks : " . ($ref->{'hostmasks'} // "N/A"));
+        botNotice($self, $sNick, "Hostmasks : " . ($ref->{hostmasks} // "N/A"));
     }
 
     $sth->finish;
 
+    # Print extra user-defined info fields (info1 / info2)
     my $sInfos = "Infos : ";
     $sInfos .= (defined $user->info1 ? $user->info1 : "N/A") . " - ";
     $sInfos .= (defined $user->info2 ? $user->info2 : "N/A");
 
     botNotice($self, $sNick, $sInfos);
 
+    # Log the command usage
     logBot($self, $message, undef, "whoami", @tArgs);
 }
 
