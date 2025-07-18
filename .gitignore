@@ -28,3 +28,4 @@ config/
 *.tmp
 tmp/
 *.yml
+mediabot.pid
