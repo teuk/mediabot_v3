@@ -13,13 +13,14 @@ Mediabot::User - Represents a user in the Mediabot system.
   use Mediabot::User;
 
   my $user = Mediabot::User->new($user_row);
-  $user->load_level($dbh);
-  $user->maybe_autologin($bot, $matched_hostmask);
+  $user->set_dbh($dbh);
+  $user->load_level();
+  $user->maybe_autologin($bot, $hostmask);
 
 =head1 DESCRIPTION
 
-This module encapsulates a user known to the bot. It provides accessors
-and utility methods such as privilege lookup and auto-login behavior.
+This module encapsulates a user known to the bot. It provides accessors,
+privilege-level management, and optional auto-login logic.
 
 =cut
 
@@ -41,6 +42,7 @@ sub new {
         auth         => $args->{auth},
         level        => undef,
         level_desc   => undef,
+        dbh          => $args->{dbh},  # optional
     };
 
     bless $self, $class;
@@ -48,8 +50,6 @@ sub new {
 }
 
 =head2 Accessors
-
-Basic attribute accessors.
 
 =cut
 
@@ -64,15 +64,28 @@ sub level_description { $_[0]->{level_desc} }
 sub is_authenticated  { $_[0]->{auth} ? 1 : 0 }
 sub hostmasks         { $_[0]->{hostmasks} }
 
-=head2 load_level($dbh)
+=head2 set_dbh($dbh)
 
-Load the user's privilege level and description from the USER_LEVEL table.
+Set or override the database handle for this user object.
+
+=cut
+
+sub set_dbh {
+    my ($self, $dbh) = @_;
+    $self->{dbh} = $dbh;
+}
+
+=head2 load_level([$dbh])
+
+Loads the user's privilege level and description from the USER_LEVEL table.
+Will use stored DBH if available.
 
 =cut
 
 sub load_level {
     my ($self, $dbh) = @_;
-    return unless defined $self->{level_id};
+    $dbh //= $self->{dbh};
+    return unless $dbh && defined $self->{level_id};
 
     my $sth = $dbh->prepare("SELECT * FROM USER_LEVEL WHERE id_user_level=?");
     if ($sth->execute($self->{level_id})) {
@@ -86,17 +99,19 @@ sub load_level {
 
 =head2 maybe_autologin($bot, $matched_hostmask)
 
-Attempt to automatically log in the user based on config or DB flags.
+Try to log in the user automatically using config-based or DB-based flags.
 
 =cut
 
 sub maybe_autologin {
     my ($self, $bot, $matched_hostmask) = @_;
+    return if $self->{auth};  # already logged in
 
     my $conf = $bot->{conf};
-    return if $self->{auth};  # Already logged in
+    my $dbh  = $bot->{dbh};
+    $self->set_dbh($dbh);
 
-    # Check Undernet-style auto-login based on hostmask suffix
+    # Undernet hostmask-based auto-login
     if (
         defined($conf->get('connection.CONN_NETWORK_TYPE')) &&
         $conf->get('connection.CONN_NETWORK_TYPE') eq "1" &&
@@ -105,9 +120,10 @@ sub maybe_autologin {
     ) {
         my $unet_mask = $conf->get('undernet.UNET_CSERVICE_HOSTMASK');
         if ($matched_hostmask =~ /$unet_mask$/) {
-            my $sth = $bot->{dbh}->prepare("UPDATE USER SET auth=1 WHERE id_user=?");
+            my $sth = $dbh->prepare("UPDATE USER SET auth=1 WHERE id_user=?");
             if ($sth->execute($self->{id})) {
                 $self->{auth} = 1;
+                $self->load_level($dbh);
                 $bot->{logger}->log(0, "Auto login (Undernet mask) for $self->{nickname} [$matched_hostmask]");
                 $bot->noticeConsoleChan("Auto login (Undernet mask) for $self->{nickname} [$matched_hostmask]");
             }
@@ -115,16 +131,48 @@ sub maybe_autologin {
         }
     }
 
-    # Check if the username field is '#AUTOLOGIN#'
+    # #AUTOLOGIN# fallback
     if (defined $self->{username} && $self->{username} eq '#AUTOLOGIN#') {
-        my $sth = $bot->{dbh}->prepare("UPDATE USER SET auth=1 WHERE id_user=?");
+        my $sth = $dbh->prepare("UPDATE USER SET auth=1 WHERE id_user=?");
         if ($sth->execute($self->{id})) {
             $self->{auth} = 1;
+            $self->load_level($dbh);
             $bot->{logger}->log(0, "Auto login (DB flag #AUTOLOGIN#) for $self->{nickname} [$matched_hostmask]");
             $bot->noticeConsoleChan("Auto login (DB flag #AUTOLOGIN#) for $self->{nickname} [$matched_hostmask]");
         }
         $sth->finish;
     }
+}
+
+=head2 has_level($required_level [, $dbh])
+
+Check if the user has at least the required level.
+If a string is passed (e.g. "Administrator"), $dbh must be available or passed.
+
+=cut
+
+sub has_level {
+    my ($self, $required_level, $dbh) = @_;
+    $dbh //= $self->{dbh};
+    return 0 unless defined $required_level && $dbh;
+
+    $self->load_level($dbh) unless defined $self->{level};
+
+    # Numeric level
+    if ($required_level =~ /^\d+$/) {
+        return ($self->{level} <= $required_level);
+    }
+
+    # Named level
+    my $sth = $dbh->prepare("SELECT level FROM USER_LEVEL WHERE description = ?");
+    if ($sth->execute($required_level)) {
+        if (my $ref = $sth->fetchrow_hashref) {
+            my $required_value = $ref->{level};
+            return ($self->{level} <= $required_value);
+        }
+    }
+
+    return 0;
 }
 
 =head1 AUTHOR

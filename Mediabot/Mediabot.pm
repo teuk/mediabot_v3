@@ -888,43 +888,58 @@ sub logBot {
     $sth->finish;
 }
 
-# Log bot action with event type
+# Log bot action into the CHANNEL_LOG table
+# Handles JOIN, PART, PUBLIC, ACTION, NOTICE, KICK, QUIT, etc.
 sub logBotAction(@) {
-	my ($self,$message,$eventtype,$sNick,$sChannel,$sText) = @_;
-	#my $dbh = $self->{dbh};
-	my $sUserhost = "";
-	if (defined($message)) {
-		$sUserhost = $message->prefix;
-	}
-	my $id_channel;
-	if (defined($sChannel)) {
-		$self->{logger}->log(5,"logBotAction() eventtype = $eventtype chan = $sChannel nick = $sNick text = $sText");
-	}
-	else {
-		$self->{logger}->log(5,"logBotAction() eventtype = $eventtype nick = $sNick text = $sText");
-	}
-	$self->{logger}->log(5,"logBotAction() " . Dumper($message));
-	
-	my $sQuery = "SELECT * FROM CHANNEL WHERE name=?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel) ) {
-		$self->{logger}->log(1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if ((my $ref = $sth->fetchrow_hashref()) || ($eventtype eq "quit")) {
-			unless ($eventtype eq "quit") { $id_channel = $ref->{'id_channel'}; }
-			$self->{logger}->log(5,"logBotAction() ts = " . time2str("%Y-%m-%d %H-%M-%S",time));
-			my $sQuery = "INSERT INTO CHANNEL_LOG (id_channel,ts,event_type,nick,userhost,publictext) VALUES (?,?,?,?,?,?)";
-			my $sth = $self->{dbh}->prepare($sQuery);
-			unless ($sth->execute($id_channel,time2str("%Y-%m-%d %H-%M-%S",time),$eventtype,$sNick,$sUserhost,$sText) ) {
-				$self->{logger}->log(1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-			}
-			else {
-				$self->{logger}->log(5,"logBotAction() inserted " . $eventtype . " event into CHANNEL_LOG");
-			}
-		}
-	}
+    my ($self, $message, $eventtype, $sNick, $sChannel, $sText) = @_;
+
+    my $sUserhost = "";
+    $sUserhost = $message->prefix if defined $message;
+
+    # Optional debug
+    if (defined $sChannel) {
+        $self->{logger}->log(5, "logBotAction() eventtype = $eventtype chan = $sChannel nick = $sNick text = $sText");
+    } else {
+        $self->{logger}->log(5, "logBotAction() eventtype = $eventtype nick = $sNick text = $sText");
+    }
+
+    $self->{logger}->log(5, "logBotAction() " . Dumper($message)) if defined($self->{logger}->{debug}) && $self->{logger}->{debug} >= 5;
+
+    my $id_channel;
+
+    # Only look up channel ID if channel is defined (not for QUIT events)
+    if (defined $sChannel) {
+        my $sQuery = "SELECT id_channel FROM CHANNEL WHERE name = ?";
+        my $sth = $self->{dbh}->prepare($sQuery);
+
+        unless ($sth->execute($sChannel)) {
+            $self->{logger}->log(1, "logBotAction() SQL Error: $DBI::errstr Query: $sQuery");
+            return;
+        }
+
+        my $ref = $sth->fetchrow_hashref();
+        unless ($ref) {
+            $self->{logger}->log(3, "logBotAction() channel not found: $sChannel");
+            return;
+        }
+
+        $id_channel = $ref->{'id_channel'};
+    }
+
+    # Perform the actual insert — ts will be auto-filled by MariaDB
+    my $insert_query = <<'SQL';
+INSERT INTO CHANNEL_LOG (id_channel, event_type, nick, userhost, publictext)
+VALUES (?, ?, ?, ?, ?)
+SQL
+
+    my $sth_insert = $self->{dbh}->prepare($insert_query);
+    unless ($sth_insert->execute($id_channel, $eventtype, $sNick, $sUserhost, $sText)) {
+        $self->{logger}->log(1, "logBotAction() SQL Insert Error: $DBI::errstr Query: $insert_query");
+    } else {
+        $self->{logger}->log(5, "logBotAction() inserted $eventtype event into CHANNEL_LOG");
+    }
 }
+
 
 # Send a private message to a target
 sub botPrivmsg {
@@ -1054,7 +1069,7 @@ sub botAction(@) {
 			$self->{logger}->log(0,"-> *$sTo* $sMsg");
 		}
 		if (defined($sMsg) && ($sMsg ne "")) {
-			if (utf8::is_utf8($sMsg)) {
+			if (defined($sMsg) && utf8::is_utf8($sMsg)) {
 				$sMsg = Encode::encode("UTF-8", $sMsg);
 				$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $sMsg\1" );
 			}
@@ -5023,33 +5038,37 @@ sub mbChownCommand {
 sub channelStatLines {
     my ($self, $message, $sChannel, $sNick, @tArgs) = @_;
 
+    # Get user object from message
     my $user = $self->get_user_from_message($message);
 
+    # Require authentication
     unless ($user && $user->is_authenticated) {
         my $notice = $message->prefix . " chanstatlines command attempt (user " . ($user ? $user->handle : "unknown") . " is not logged in)";
         $self->noticeConsoleChan($notice);
-        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        botNotice($self, $sNick, "You must be logged in to use this command — try: /msg " . $self->{irc}->nick_folded . " login username password");
         return;
     }
 
+    # Require Administrator level
     unless ($user->has_level("Administrator")) {
         my $notice = $message->prefix . " chanstatlines command attempt (requires Administrator level for user " . $user->handle . "[" . $user->level . "])";
         $self->noticeConsoleChan($notice);
-        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        botNotice($self, $sNick, "Sorry, this command is reserved for Administrators.");
         return;
     }
 
-    # Determine the target channel
+    # Determine which channel we're analyzing
     my $target_channel;
     if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
         $target_channel = shift @tArgs;
     } elsif (defined $sChannel && $sChannel =~ /^#/) {
         $target_channel = $sChannel;
     } else {
-        botNotice($self, $sNick, "Syntax: chanstatlines <#channel>");
+        botNotice($self, $sNick, "Usage: chanstatlines <#channel>");
         return;
     }
 
+    # Prepare SQL statement
     my $sql = <<'SQL';
 SELECT COUNT(*) AS nb_lines
 FROM CHANNEL_LOG
@@ -5064,39 +5083,55 @@ SQL
         return;
     }
 
+    # Fetch and display result
     if (my $row = $sth->fetchrow_hashref) {
         my $count = $row->{nb_lines} || 0;
-        my $plural = $count == 1 ? "line" : "lines";
-        botPrivmsg($self, $target_channel, "$count $plural per hour on $target_channel");
+
+        my $msg = ($count == 0)
+            ? "It's been awfully quiet on $target_channel this past hour... Not a single line. ☕"
+            : "📈 Activity report: $count " . ($count == 1 ? "line" : "lines") . " sent on $target_channel in the last hour.";
+
+        botPrivmsg($self, $target_channel, $msg);
         logBot($self, $message, undef, "chanstatlines", $target_channel);
     } else {
-        botNotice($self, $sNick, "Channel $target_channel is not registered.");
+        botNotice($self, $sNick, "Hmm... Channel $target_channel doesn't seem to be registered.");
     }
 
     $sth->finish;
 }
 
 
-# Show top talkers in a channel and warn the top spammer
+
+# Display top talkers in a channel during the last hour.
+# Automatically warns the most talkative user if flooding is detected.
 sub whoTalk {
     my ($self, $message, $sChannel, $sNick, @tArgs) = @_;
 
+    # Extract user object from message
     my $user = $self->get_user_from_message($message);
 
+    # Require user authentication
     unless ($user && $user->is_authenticated) {
-        my $notice = $message->prefix . " whotalk command attempt (user " . ($user ? $user->handle : "unknown") . " is not logged in)";
+        my $notice = $message->prefix . " whotalk command attempt (user " . ($user ? $user->nickname : "unknown") . " is not logged in)";
         $self->noticeConsoleChan($notice);
-        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login <user> <pass>");
         return;
     }
 
-    unless ($user->has_level("Administrator")) {
-        my $notice = $message->prefix . " whotalk command attempt (requires Administrator level for user " . $user->handle . "[" . $user->level . "])";
+    # Load user level if not already available
+    if (!defined $user->level) {
+        $user->load_level($self->{dbh});
+    }
+
+    # Require Administrator level to execute the command
+    unless ($user->has_level("Administrator", $self->{dbh})) {
+        my $notice = $message->prefix . " whotalk command attempt (requires Administrator level for user " . $user->nickname . " [" . ($user->level // 'undef') . "])";
         $self->noticeConsoleChan($notice);
-        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        botNotice($self, $sNick, "Access denied. This command requires Administrator privileges.");
         return;
     }
 
+    # Determine which channel we're targeting
     my $target_channel;
     if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
         $target_channel = shift @tArgs;
@@ -5107,12 +5142,17 @@ sub whoTalk {
         return;
     }
 
+    # Normalize channel name (lowercase and trimmed)
+    $target_channel = lc($target_channel);
+    $target_channel =~ s/^\s+|\s+$//g;
+
+    # Build SQL query to count messages from public or action events within the last hour
     my $sql = <<'SQL';
-SELECT nick, COUNT(nick) AS nbLines
+SELECT nick, COUNT(*) AS nbLines
 FROM CHANNEL_LOG
 JOIN CHANNEL ON CHANNEL_LOG.id_channel = CHANNEL.id_channel
 WHERE (event_type = 'public' OR event_type = 'action')
-  AND CHANNEL.name = ?
+  AND LOWER(TRIM(CHANNEL.name)) = ?
   AND ts > (NOW() - INTERVAL 1 HOUR)
 GROUP BY nick
 ORDER BY nbLines DESC
@@ -5121,38 +5161,49 @@ SQL
 
     my $sth = $self->{dbh}->prepare($sql);
     unless ($sth->execute($target_channel)) {
-        $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sql");
+        $self->{logger}->log(1, "whoTalk() SQL Error: $DBI::errstr Query: $sql");
         return;
     }
 
-    my $results = "";
-    my $warned = 0;
-    my $i = 0;
+    my $i        = 0;
+    my $warned   = 0;
+    my @rows;
+    my $line_total = 0;
 
+    # Fetch results
     while (my $row = $sth->fetchrow_hashref) {
-        my $nick = $row->{nick} // next;
+        my $nick  = $row->{nick}    // next;
         my $lines = $row->{nbLines} // 0;
-
-        $results .= "$nick ($lines) ";
+        $line_total += $lines;
+        push @rows, [$nick, $lines];
         $i++;
-
-        # Warn the top spammer only once
-        if ($i == 1 && $lines >= 25) {
-            # threshold adjustable
-            botPrivmsg($self, $target_channel, "$nick: hey, calm down a bit – you're flooding the channel!");
-            $warned = 1;
-        }
     }
 
     if ($i == 0) {
-        botNotice($self, $sNick, "No talkers found in $target_channel during the last hour.");
+        # No talkers at all
+        botNotice($self, $sNick, "No messages recorded in $target_channel during the last hour.");
     } else {
-        botPrivmsg($self, $target_channel, "Top $i talkers in the last hour: $results");
+        # Build the summary string
+        my @talkers = map { "$_->[0] ($_->[1])" } @rows;
+        my $summary = join(', ', @talkers);
+        my $count = scalar(@rows);
+        botPrivmsg($self, $target_channel, "Top $count talkers in the last hour: $summary");
+
+        # Warn the top talker if message count is excessive
+        if ($rows[0][1] >= 25) {
+            botPrivmsg($self, $target_channel, "$rows[0][0]: please slow down a bit – you're flooding the channel!");
+            $warned = 1;
+        }
+
+        # Optional: log summary to console
+        $self->{logger}->log(3, "whoTalk() => $count users, $line_total total lines in $target_channel");
     }
 
+    # Log this command invocation
     logBot($self, $message, undef, "whotalk", $target_channel);
     $sth->finish;
 }
+
 
 
 sub mbDbCommand(@) {
@@ -7259,90 +7310,80 @@ sub mbColors(@) {
 	botPrivmsg($self,$sChannel,make_colors($self,$sText));
 }
 
-# In progress...
+# Enhanced and cleaned-up version of mbSeen()
 sub mbSeen(@) {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-		# Quit vars from EVENT_LOG
-		my $tsQuit;
-		my $channelQuit;
-		my $msgQuit;
-		my $userhostQuit;
-		
-		my $sQuery = "SELECT * FROM CHANNEL_LOG WHERE nick like ? AND event_type='quit' ORDER BY ts DESC LIMIT 1";
-		my $sth = $self->{dbh}->prepare($sQuery);
-		unless ($sth->execute($tArgs[0])) {
-			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+	return unless defined $tArgs[0] && $tArgs[0] ne "";
+
+	my $targetNick = $tArgs[0];
+	my ($quit, $part);
+
+	# --- Fetch the latest quit event ---
+	my $sth_quit = $self->{dbh}->prepare(
+		"SELECT ts, userhost, publictext FROM CHANNEL_LOG WHERE nick = ? AND event_type = 'quit' ORDER BY ts DESC LIMIT 1"
+	);
+	if ($sth_quit->execute($targetNick)) {
+		if (my $ref = $sth_quit->fetchrow_hashref()) {
+			$quit = {
+				ts         => $ref->{ts},
+				userhost   => $ref->{userhost},
+				publictext => $ref->{publictext} // '',
+			};
+			$self->{logger}->log(3, "mbSeen() Quit: $quit->{ts}");
 		}
-		else {
-			my $sCommandText;
-			if (my $ref = $sth->fetchrow_hashref()) {
-				$tsQuit = $ref->{'ts'};
-				$channelQuit = $ref->{'name'};
-				$msgQuit = $ref->{'publictext'};
-				$userhostQuit = $ref->{'userhost'};
-				$self->{logger}->log(3,"mbSeen() Quit : $tsQuit");
-			}
-		}
-		
-		my $tsPart;
-		my $channelPart;
-		my $msgPart;
-		my $userhostPart;
-		# Part vars from CHANNEL_LOG
-		$sQuery = "SELECT * FROM CHANNEL_LOG,CHANNEL WHERE CHANNEL.id_channel=CHANNEL_LOG.id_channel AND CHANNEL.name like ? AND nick like ? AND event_type='part' ORDER BY ts DESC LIMIT 1";
-		$sth = $self->{dbh}->prepare($sQuery);
-		unless ($sth->execute($sChannel,$tArgs[0])) {
-			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-		}
-		else {
-			my $sCommandText;
-			if (my $ref = $sth->fetchrow_hashref()) {
-				$tsPart = $ref->{'ts'};
-				$channelPart = $ref->{'name'};
-				$msgPart = $ref->{'publictext'};
-				$userhostPart = $ref->{'userhost'};
-				$self->{logger}->log(3,"mbSeen() Part : $tsPart");
-			}
-		}
-		
-		my $epochTsQuit;
-		unless (defined($tsQuit)) {
-			$epochTsQuit = 0;
-		}
-		else {
-			# I know this is ugly, ts logs are in CEST in my case, I'll take care of TZ later...
-			$epochTsQuit = str2time($tsQuit) - 21600;
-		}
-		my $epochTsPart;
-		unless (defined($tsPart)) {
-			$epochTsPart = 0;
-		}
-		else {
-			# I know this is ugly, ts logs are in CEST in my case, I'll take care of TZ later...
-			$epochTsPart = str2time($tsPart) - 21600;
-		}
-		if (( $epochTsQuit == 0) && ( $epochTsPart == 0)) {
-			botPrivmsg($self,$sChannel,"I don't remember seeing nick ". $tArgs[0]);
-		}
-		else {
-			if ( $epochTsPart > $epochTsQuit ) {
-				$userhostPart =~ s/^.*!//;
-				botPrivmsg($self,$sChannel,$tArgs[0] . " ($userhostPart) was last seen parting $sChannel : $tsPart ($msgPart)");
-			}
-			elsif ( $epochTsQuit != 0) {
-				$userhostQuit =~ s/^.*!//;
-				botPrivmsg($self,$sChannel,$tArgs[0] . " ($userhostQuit) was last seen quitting : $tsQuit ($msgQuit)");
-			}
-			else {
-				
-			}
-		}
-		
-		logBot($self,$message,$sChannel,"seen",@tArgs);
-		$sth->finish;
+	} else {
+		$self->{logger}->log(1, "SQL Error (quit): $DBI::errstr");
 	}
+
+	# --- Fetch the latest part event for the current channel ---
+	my $sth_part = $self->{dbh}->prepare(
+		"SELECT CHANNEL_LOG.ts, CHANNEL_LOG.userhost, CHANNEL_LOG.publictext FROM CHANNEL_LOG \
+		 JOIN CHANNEL ON CHANNEL.id_channel = CHANNEL_LOG.id_channel \
+		 WHERE CHANNEL.name = ? AND CHANNEL_LOG.nick = ? AND event_type = 'part' \
+		 ORDER BY CHANNEL_LOG.ts DESC LIMIT 1"
+	);
+	if ($sth_part->execute($sChannel, $targetNick)) {
+		if (my $ref = $sth_part->fetchrow_hashref()) {
+			$part = {
+				ts         => $ref->{ts},
+				userhost   => $ref->{userhost},
+				publictext => $ref->{publictext} // '',
+			};
+			$self->{logger}->log(3, "mbSeen() Part: $part->{ts}");
+		}
+	} else {
+		$self->{logger}->log(1, "SQL Error (part): $DBI::errstr");
+	}
+
+	# --- Convert timestamps to epoch ---
+	my $ts_quit_epoch = $quit  ? str2time($quit->{ts})  - 21600 : 0;
+	my $ts_part_epoch = $part  ? str2time($part->{ts})  - 21600 : 0;
+
+	# --- Generate output ---
+	if ($ts_quit_epoch == 0 && $ts_part_epoch == 0) {
+		botPrivmsg($self, $sChannel, "I don't remember seeing nick $targetNick");
+	} elsif ($ts_part_epoch > $ts_quit_epoch) {
+		my $host = $part->{userhost} // '';
+		$host =~ s/^.*!//;
+		botPrivmsg(
+			$self, $sChannel,
+			"$targetNick ($host) was last seen parting $sChannel : $part->{ts} ($part->{publictext})"
+		);
+	} else {
+		my $host = $quit->{userhost} // '';
+		$host =~ s/^.*!//;
+		botPrivmsg(
+			$self, $sChannel,
+			"$targetNick ($host) was last seen quitting : $quit->{ts} ($quit->{publictext})"
+		);
+	}
+
+	logBot($self, $message, $sChannel, "seen", @tArgs);
+
+	$sth_quit->finish;
+	$sth_part->finish;
 }
+
 
 sub mbPopCommand(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
@@ -8736,20 +8777,25 @@ sub setRadioMetadata {
 sub radioNext {
     my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-    # Retrieve user authentication info
-    my (
-        $uid, $level, $level_desc, $auth,
-        $handle, $passwd, $info1, $info2
-    ) = getNickInfo($self, $message);
+    # Retrieve user object from the IRC message
+    my $user = $self->get_user_from_message($message);
 
-    # Check if user is authenticated and has the proper level
-    unless (defined $uid && $auth && defined $level && checkUserLevel($self, $level, "Administrator")) {
-        my $why = !$auth ? "is not logged in" : "does not have [Administrator] rights";
-        my $msg = $message->prefix . " nextsong command attempt (user $handle $why)";
+    unless ($user && $user->id) {
+        botNotice($self, $sNick, "User not found.");
+        return;
+    }
+
+    unless ($user->is_authenticated) {
+        my $msg = $message->prefix . " nextsong command attempt (user " . $user->nickname . " is not logged in)";
         noticeConsoleChan($self, $msg);
-        botNotice($self, $sNick, $auth
-            ? "Your level does not allow you to use this command."
-            : "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    unless (checkUserLevel($self, $user->level, "Administrator")) {
+        my $msg = $message->prefix . " nextsong command attempt (user " . $user->nickname . " does not have [Administrator] rights)";
+        noticeConsoleChan($self, $msg);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
         return;
     }
 
@@ -8761,7 +8807,6 @@ sub radioNext {
     my $LIQUIDSOAP_TELNET_HOST = $conf->get('radio.LIQUIDSOAP_TELNET_HOST');
     my $LIQUIDSOAP_TELNET_PORT = $conf->get('radio.LIQUIDSOAP_TELNET_PORT');
 
-    # Check if Liquidsoap telnet host is configured
     unless ($LIQUIDSOAP_TELNET_HOST) {
         $self->{logger}->log(0, "radioNext(): LIQUIDSOAP_TELNET_HOST not set in " . $self->{config_file});
         return;
@@ -8775,13 +8820,11 @@ sub radioNext {
     my $cmd = qq{echo -ne "$mountpoint.skip\\nquit\\n" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT};
 
     # Execute command
-    my $fh;
-    open($fh, "$cmd |") or do {
+    open my $fh, "$cmd |" or do {
         botNotice($self, $sNick, "Unable to connect to LIQUIDSOAP telnet port");
         return;
     };
 
-    # Count output lines (just to verify it responded)
     my $i = 0;
     while (my $line = <$fh>) {
         chomp($line);
@@ -8789,7 +8832,6 @@ sub radioNext {
     }
     close $fh;
 
-    # If there's any response, announce the skip
     if ($i > 0) {
         my $msg = "";
         $msg .= String::IRC->new('[ ')->grey('black');
@@ -8802,6 +8844,7 @@ sub radioNext {
         botPrivmsg($self, $sChannel, $msg);
     }
 }
+
 
 
 # Update the bot
@@ -11307,59 +11350,64 @@ sub mp3(@) {
 
 # Execute a shell command and return the last 3 lines (Owner-only command)
 sub mbExec {
-	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-	# Retrieve authentication info
-	my (
-		$uid, $level, $level_desc, $auth,
-		$handle, $passwd, $info1, $info2
-	) = getNickInfo($self, $message);
+    # Retrieve user object from message
+    my $user = $self->get_user_from_message($message);
 
-	# Must be logged in
-	unless (defined $uid && $auth) {
-		my $msg = $message->prefix . " exec command attempt (user $handle is not logged in)";
-		noticeConsoleChan($self, $msg);
-		botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-		return;
-	}
+    # Check authentication
+    unless ($user && $user->is_authenticated) {
+        my $who = $user ? $user->nickname : "unknown";
+        my $msg = $message->prefix . " exec command attempt (user $who is not logged in)";
+        noticeConsoleChan($self, $msg);
+        botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
 
-	# Must be Owner-level
-	unless (checkUserLevel($self, $level, "Owner")) {
-		my $msg = $message->prefix . " exec command attempt (command level [Owner] for user $handle [$level])";
-		noticeConsoleChan($self, $msg);
-		botNotice($self, $sNick, "Your level does not allow you to use this command.");
-		return;
-	}
+    # Check privilege
+    unless ($user->has_level("Owner")) {
+        my $msg = $message->prefix . " exec command attempt (command level [Owner] for user " . $user->nickname . " [" . ($user->level // 'undef') . "])";
+        noticeConsoleChan($self, $msg);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
 
-	# Ensure command is provided
-	my $command = join(" ", @tArgs);
-	unless ($command && $command ne "") {
-		botNotice($self, $sNick, "Syntax: exec <command>");
-		return;
-	}
+    # Join command arguments
+    my $command = join(" ", @tArgs);
+    unless ($command && $command ne "") {
+        botNotice($self, $sNick, "Syntax: exec <command>");
+        return;
+    }
 
-	# Prevent dangerous command
-	if ($command =~ /\brm\s+-rf\b/i) {
-		botNotice($self, $sNick, "Don't be that evil!");
-		return;
-	}
+    # Block dangerous commands
+    if ($command =~ /\brm\s+-rf\b/i || $command =~ /:()\s*{\s*:|:&};:/ || $command =~ /shutdown|reboot|mkfs|dd\s+if=|>\s+\/dev\/sd/) {
+        botNotice($self, $sNick, "Don't be that evil!");
+        return;
+    }
 
-	# Execute the command and return last 3 lines of output
-	my $shell = "$command | tail -n 3";
-	open my $cmd_fh, "-|", $shell or do {
-		$self->{logger}->log(3, "mbExec: Failed to execute: $command");
-		botNotice($self, $sNick, "Execution failed.");
-		return;
-	};
+    # Execute command and output last 3 lines
+    my $shell = "$command | tail -n 3 2>&1";
+    open my $cmd_fh, "-|", $shell or do {
+        $self->{logger}->log(3, "mbExec: Failed to execute: $command");
+        botNotice($self, $sNick, "Execution failed.");
+        return;
+    };
 
-	my $i = 0;
-	while (my $line = <$cmd_fh>) {
-		chomp $line;
-		botPrivmsg($self, $sChannel, "$i: $line");
-		last if ++$i >= 3;
-	}
-	close $cmd_fh;
+    my $i = 0;
+    my $has_output = 0;
+    while (my $line = <$cmd_fh>) {
+        chomp $line;
+        botPrivmsg($self, $sChannel, "$i: $line");
+        $has_output = 1;
+        last if ++$i >= 3;
+    }
+    close $cmd_fh;
+
+    botPrivmsg($self, $sChannel, "No output.") unless $has_output;
 }
+
+
+
 
 
 # Get the harbor ID from LIQUIDSOAP telnet server

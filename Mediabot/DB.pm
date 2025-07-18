@@ -21,7 +21,6 @@ sub new {
     my $dbpass = $conf->get('mysql.MAIN_PROG_DBPASS') || '';
     my $dbport = $conf->get('mysql.MAIN_PROG_DBPORT') || 3306;
 
-    # check if mandatory parameters are defined
     unless ($dbname && $dbuser) {
         $logger->log(0, "❌ Missing DB configuration: DDBNAME or DBUSER is undefined.");
         $logger->log(0, "Check your [mysql] section in mediabot.conf");
@@ -35,9 +34,10 @@ sub new {
     my $dbh = DBI->connect(
         $dsn, $dbuser, $dbpass,
         {
-            RaiseError => 0,
-            PrintError => 0,
+            RaiseError           => 0,
+            PrintError           => 0,
             mysql_enable_utf8mb4 => 1,
+            mysql_auto_reconnect => 1,
         }
     );
 
@@ -47,6 +47,27 @@ sub new {
         $logger->log(0, "Aborting startup.");
         exit 1;
     }
+
+    # Set character set to utf8mb4
+    foreach my $sql (
+        "SET NAMES 'utf8mb4'",
+        "SET CHARACTER SET utf8mb4'",
+        "SET COLLATION_CONNECTION = 'utf8mb4_unicode_ci'"
+    ) {
+        my $sth = $dbh->prepare($sql);
+        unless ($sth->execute) {
+            $logger->log(1, "SQL error during init: $DBI::errstr (query: $sql)");
+        }
+        $sth->finish;
+    }
+
+    # Optional: print current DB collation for verification
+    my $sth = $dbh->prepare("SHOW VARIABLES LIKE 'collation_connection'");
+    if ($sth->execute) {
+        my ($name, $value) = $sth->fetchrow_array;
+        $logger->log(3, "⚙️  DB collation in use: $value");
+    }
+    $sth->finish;
 
     $self->{dbh} = $dbh;
     $logger->log(3, "✅ DBI connection successful");
@@ -69,9 +90,10 @@ sub _connect {
     $logger->log(1, "Connecting to DB: $dbname at $dbhost:$dbport");
 
     my $dbh = DBI->connect($dsn, $dbuser, $dbpass, {
-        RaiseError         => 0,
-        PrintError         => 0,
+        RaiseError           => 0,
+        PrintError           => 0,
         mysql_auto_reconnect => 1,
+        mysql_enable_utf8mb4 => 1,
     });
 
     unless ($dbh) {
@@ -80,9 +102,9 @@ sub _connect {
     }
 
     foreach my $sql (
-        "SET NAMES 'utf8'",
-        "SET CHARACTER SET utf8",
-        "SET COLLATION_CONNECTION = 'utf8_general_ci'"
+        "SET NAMES 'utf8mb4'",
+        "SET CHARACTER SET utf8mb4'",
+        "SET COLLATION_CONNECTION = 'utf8mb4_unicode_ci'"
     ) {
         my $sth = $dbh->prepare($sql);
         unless ($sth->execute) {
