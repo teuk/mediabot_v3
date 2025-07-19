@@ -1092,15 +1092,31 @@ sub botAction(@) {
 	}
 }
 
-# Send a notice to a target
-sub botNotice(@) {
-	my ($self,$sTo,$sMsg) = @_;
-	$self->{irc}->do_NOTICE( target => $sTo, text => $sMsg );
-	$self->{logger}->log(0,"-> -$sTo- $sMsg");
-	if (substr($sTo, 0, 1) eq '#') {
-		logBotAction($self,undef,"notice",$self->{irc}->nick_folded,$sTo,$sMsg);
-	}
+# Send a notice to a target (user or channel)
+sub botNotice {
+    my ($self, $target, $text) = @_;
+
+    # Sanity check: both target and message must be defined and non-empty
+    return unless defined $target && $target ne '';
+    return unless defined $text && $text ne '';
+
+    # Send the actual IRC NOTICE using do_NOTICE (compatible with Net::Async::IRC)
+    $self->{irc}->do_NOTICE(
+        target => $target,
+        text   => $text
+    );
+
+    # Log the NOTICE to the console or logfile
+    $self->{logger}->log(0, "-> -$target- $text");
+
+    # If it's a channel NOTICE, log to the bot's action log
+    if ($target =~ /^#/) {
+        logBotAction($self, undef, "notice", $self->{irc}->nick_folded, $target, $text);
+    }
 }
+
+
+
 
 # Join a channel with an optional key
 sub joinChannel(@) {
@@ -1485,260 +1501,116 @@ sub mbCommandPublic(@) {
 
 }
 
-
-# Handle private commands
-sub mbCommandPrivate(@) {
-	my ($self,$message,$sNick,$sCommand,@tArgs)	= @_;
-	switch($sCommand) {
-		case /^die$/i				{
-													mbQuit($self,$message,$sNick,@tArgs);
-												}
-		case /^nick$/i			{
-													mbChangeNick($self,$message,$sNick,@tArgs);
-												}
-		case /^addtimer$/i	{
-													mbAddTimer($self,$message,undef,$sNick,@tArgs);
-												}
-		case /^remtimer$/i	{
-													mbRemTimer($self,$message,undef,$sNick,@tArgs);
-												}
-		case /^timers$/i		{
-													mbTimers($self,$message,undef,$sNick,@tArgs);
-												}
-		case /^register$/i	{
-													mbRegister($self,$message,$sNick,@tArgs);
-												}
-		case /^dump$/i			{
-													dumpCmd($self,$message,$sNick,@tArgs);
-												}
-		case /^msg$/i				{
-													msgCmd($self,$message,$sNick,@tArgs);
-												}
-		case /^say$/i				{
-													sayChannel($self,$message,$sNick,@tArgs);
-												}
-		case /^act$/i				{
-													actChannel($self,$message,$sNick,@tArgs);
-												}
-		case /^status$/i		{
-													mbStatus($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^login$/i			{
-													userLogin($self,$message,$sNick,@tArgs);
-												}
-		case /^pass$/i			{
-													userPass($self,$message,$sNick,@tArgs);
-												}
-		case /^ident$/i			{
-													userIdent($self,$message,$sNick,@tArgs);
-												}
-		case /^cstat$/i			{
-													userCstat($self,$message,$sNick,@tArgs);
-												}
-		case /^adduser$/i		{
-													addUser($self,$message,$sNick,@tArgs);
-												}
-		case /^deluser$/i		{
-													delUser($self,$message,$sNick,@tArgs);
-												}
-		case /^users$/i			{
-													userStats($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^userinfo$/i	{
-													userInfo($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^addhost$/i		{
-													addUserHost($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^addchan$/i		{
-													addChannel($self,$message,$sNick,@tArgs);
-												}
-		case /^chanset$/i		{
-													channelSet($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^purge$/i			{
-													purgeChannel($self,$message,$sNick,@tArgs);
-												}
-		case /^part$/i			{
-													channelPart($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^join$/i			{
-													channelJoin($self,$message,$sNick,@tArgs);
-												}
-		case /^add$/i				{
-													channelAddUser($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^del$/i				{
-													channelDelUser($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^modinfo$/i		{
-													userModinfo($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^op$/i				{
-													userOpChannel($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^deop$/i			{
-													userDeopChannel($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^invite$/i		{
-													userInviteChannel($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^voice$/i			{
-													userVoiceChannel($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^devoice$/i		{
-													userDevoiceChannel($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^kick$/i			{
-													userKickChannel($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^topic$/i			{
-													userTopicChannel($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^showcommands$/i	{
-															userShowcommandsChannel($self,$message,$sNick,undef,@tArgs);
-														}
-		case /^chaninfo$/i	{
-													userChannelInfo($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^chanlist$/i	{
-													channelList($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^whoami$/i		{
-													userWhoAmI($self,$message,$sNick,@tArgs);
-												}
-		case /^verify$/i		{
-													userVerifyNick($self,$message,$sNick,@tArgs);
-												}
-		case /^auth$/i			{
-													userAuthNick($self,$message,$sNick,@tArgs);
-												}
-		case /^access$/i		{
-													userAccessChannel($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^addcmd$/i		{
-													mbDbAddCommand($self,$message,$sNick,@tArgs);
-												}
-		case /^remcmd$/i		{
-													mbDbRemCommand($self,$message,$sNick,@tArgs);
-												}
-		case /^modcmd$/i		{
-													mbDbModCommand($self,$message,$sNick,@tArgs);
-												}
-		case /^showcmd$/i		{
-													mbDbShowCommand($self,$message,$sNick,@tArgs);
-												}
-		case /^chowncmd$/i	{
-													mbChownCommand($self,$message,$sNick,@tArgs);
-												}
-		case /^mvcmd$/i			{
-													mbDbMvCommand($self,$message,$sNick,@tArgs);
-												}
-		case /^chowncmd$/i	{
-													mbChownCommand($self,$message,$sNick,@tArgs);
-												}
-		case /^countcmd$/i	{
-														mbCountCommand($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^topcmd$/i		{
-														mbTopCommand($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^popcmd$/i		{
-														mbPopCommand($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^searchcmd$/i	{
-														mbDbSearchCommand($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^lastcmd$/i		{
-														mbLastCommand($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^owncmd$/i		{
-														mbDbOwnersCommand($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^holdcmd$/i		{
-														mbDbHoldCommand($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^addcatcmd$/i	{
-														mbDbAddCategoryCommand($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^chcatcmd$/i	{
-														mbDbChangeCategoryCommand($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^topsay$/i		{
-														userTopSay($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^checkhostchan$/i		{
-																mbDbCheckHostnameNickChan($self,$message,$sNick,undef,@tArgs);
-															}
-		case /^checkhost$/i	{
-													mbDbCheckHostnameNick($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^checknick$/i	{
-													mbDbCheckNickHostname($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^greet$/i			{
-													userGreet($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^nicklist$/i	{
-														channelNickList($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^rnick$/i			{
-														randomChannelNick($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^chanstatlines$/i	{
-															channelStatLines($self,$message,undef,$sNick,@tArgs);
-														}
-		case /^whotalk$/i		{
-														whoTalk($self,$message,undef,$sNick,@tArgs);
-												}
-		case /^birthdate$/i	{
-														displayBirthDate($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^ignores$/i 	{
-													IgnoresList($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^ignore$/i 		{
-													addIgnore($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^unignore$/i	{
-													delIgnore($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^metadata$/i	{
-													setRadioMetadata($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^update$/i		{
-													update($self,$message,$sNick,undef,@tArgs);
-												}
-		case /^lastcom$/i	{
-												lastCom($self,$message,$sNick,undef,@tArgs);
-											}
-		case /^moduser$/i {
-												mbModUser($self,$message,$sNick,undef,@tArgs);
-											}
-		case /^antifloodset$/i 		{
-																setChannelAntiFloodParams($self,$message,$sNick,undef,@tArgs);
-															}
-		case /^rehash/i				{
-														mbRehash($self,$message,$sNick,undef,@tArgs);
-													}
-		case /^play$/i								{
-														playRadio($self,$message,$sNick,undef,@tArgs);
-													}
-		case /^radiopub$/i							{
-														radioPub($self,$message,$sNick,undef,@tArgs);
-													}
-		case /^song$/i								{
-														displayRadioCurrentSong($self,$message,$sNick,undef,@tArgs);
-													}
-		case /^debug$/i						    	{
-														mbDebug($self,$message,$sNick,undef,@tArgs);
-													}
-		else										{
-														$self->{logger}->log(3,$message->prefix . " Private command '$sCommand' not found");
-														return undef;
-													}
-	}
+# Extracts reply target from a message (either channel or sender nick)
+sub getReplyTarget {
+    my ($self, $message, $nick) = @_;
+    my $target = $message->{params}[0] // '';
+    return ($target =~ /^#/) ? $target : $nick;
 }
+
+
+# 🧙‍♂️ Handle private commands with centralized dispatching and full command set.
+sub mbCommandPrivate {
+    my ($self, $message, $sNick, $sCommand, @tArgs) = @_;
+
+    # Normalize command
+    $sCommand = lc $sCommand;
+
+    # Command dispatch table
+    my %command_table = (
+        'die'               => \&mbQuit,
+        'nick'              => \&mbChangeNick,
+        'addtimer'          => \&mbAddTimer,
+        'remtimer'          => \&mbRemTimer,
+        'timers'            => \&mbTimers,
+        'register'          => \&mbRegister,
+        'dump'              => \&dumpCmd,
+        'msg'               => \&msgCmd,
+        'say'               => \&sayChannel,
+        'act'               => \&actChannel,
+        'status'            => \&mbStatus,
+        'login'             => \&userLogin,
+        'pass'              => \&userPass,
+        'ident'             => \&userIdent,
+        'cstat'             => \&userCstat,
+        'adduser'           => \&addUser,
+        'deluser'           => \&delUser,
+        'users'             => \&userStats,
+        'userinfo'          => \&userInfo,
+        'addhost'           => \&addUserHost,
+        'addchan'           => \&addChannel,
+        'chanset'           => \&channelSet,
+        'purge'             => \&purgeChannel,
+        'part'              => \&channelPart,
+        'join'              => \&channelJoin,
+        'add'               => \&channelAddUser,
+        'del'               => \&channelDelUser,
+        'modinfo'           => \&userModinfo,
+        'op'                => \&userOpChannel,
+        'deop'              => \&userDeopChannel,
+        'invite'            => \&userInviteChannel,
+        'voice'             => \&userVoiceChannel,
+        'devoice'           => \&userDevoiceChannel,
+        'kick'              => \&userKickChannel,
+        'topic'             => \&userTopicChannel,
+        'showcommands'      => \&userShowcommandsChannel,
+        'chaninfo'          => \&userChannelInfo,
+        'chanlist'          => \&channelList,
+        'whoami'            => \&userWhoAmI,
+        'verify'            => \&userVerifyNick,
+        'auth'              => \&userAuthNick,
+        'access'            => \&userAccessChannel,
+        'addcmd'            => \&mbDbAddCommand,
+        'remcmd'            => \&mbDbRemCommand,
+        'modcmd'            => \&mbDbModCommand,
+        'showcmd'           => \&mbDbShowCommand,
+        'chowncmd'          => \&mbChownCommand,
+        'mvcmd'             => \&mbDbMvCommand,
+        'countcmd'          => \&mbCountCommand,
+        'topcmd'            => \&mbTopCommand,
+        'popcmd'            => \&mbPopCommand,
+        'searchcmd'         => \&mbDbSearchCommand,
+        'lastcmd'           => \&mbLastCommand,
+        'owncmd'            => \&mbDbOwnersCommand,
+        'holdcmd'           => \&mbDbHoldCommand,
+        'addcatcmd'         => \&mbDbAddCategoryCommand,
+        'chcatcmd'          => \&mbDbChangeCategoryCommand,
+        'topsay'            => \&userTopSay,
+        'checkhostchan'     => \&mbDbCheckHostnameNickChan,
+        'checkhost'         => \&mbDbCheckHostnameNick,
+        'checknick'         => \&mbDbCheckNickHostname,
+        'greet'             => \&userGreet,
+        'nicklist'          => \&channelNickList,
+        'rnick'             => \&randomChannelNick,
+        'chanstatlines'     => \&channelStatLines,
+        'whotalk'           => \&whoTalk,
+        'birthdate'         => \&displayBirthDate,
+        'ignores'           => \&IgnoresList,
+        'ignore'            => \&addIgnore,
+        'unignore'          => \&delIgnore,
+        'metadata'          => \&setRadioMetadata,
+        'update'            => \&update,
+        'lastcom'           => \&lastCom,
+        'moduser'           => \&mbModUser,
+        'antifloodset'      => \&setChannelAntiFloodParams,
+        'rehash'            => \&mbRehash,
+        'play'              => \&playRadio,
+        'radiopub'          => \&radioPub,
+        'song'              => \&displayRadioCurrentSong,
+        'debug'             => \&mbDebug,
+    );
+
+    # Dispatch the command if found
+    if (my $handler = $command_table{$sCommand}) {
+        my $target = $message->{params}[0] // '';
+		my $reply_target = $self->getReplyTarget($message, $sNick);
+		return $handler->($self, $message, $reply_target, $sNick, @tArgs);
+    } else {
+        $self->{logger}->log(3, $message->prefix . " Private command '$sCommand' not found");
+        return undef;
+    }
+}
+
 
 # Quit the bot
 sub mbQuit {
@@ -4939,15 +4811,15 @@ SQL
 
 
 
-# Display top talkers in a channel during the last hour.
-# Automatically warns the most talkative user if flooding is detected.
+# 🧙 Display top talkers in a channel during the last hour.
+# Shows the top 20 speakers and warns the most talkative one if flooding is detected.
 sub whoTalk {
     my ($self, $message, $sChannel, $sNick, @tArgs) = @_;
 
-    # Extract user object from message
+    # 🕵️‍♂️ Extract user object from message
     my $user = $self->get_user_from_message($message);
 
-    # Require user authentication
+    # 🔐 Require authentication
     unless ($user && $user->is_authenticated) {
         my $notice = $message->prefix . " whotalk command attempt (user " . ($user ? $user->nickname : "unknown") . " is not logged in)";
         $self->noticeConsoleChan($notice);
@@ -4955,12 +4827,12 @@ sub whoTalk {
         return;
     }
 
-    # Load user level if not already available
+    # 🛡️ Ensure user level is loaded
     if (!defined $user->level) {
         $user->load_level($self->{dbh});
     }
 
-    # Require Administrator level to execute the command
+    # 🚫 Require Administrator privileges
     unless ($user->has_level("Administrator", $self->{dbh})) {
         my $notice = $message->prefix . " whotalk command attempt (requires Administrator level for user " . $user->nickname . " [" . ($user->level // 'undef') . "])";
         $self->noticeConsoleChan($notice);
@@ -4968,7 +4840,7 @@ sub whoTalk {
         return;
     }
 
-    # Determine which channel we're targeting
+    # 🎯 Determine target channel
     my $target_channel;
     if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
         $target_channel = shift @tArgs;
@@ -4979,11 +4851,11 @@ sub whoTalk {
         return;
     }
 
-    # Normalize channel name (lowercase and trimmed)
+    # 🧼 Normalize channel name
     $target_channel = lc($target_channel);
     $target_channel =~ s/^\s+|\s+$//g;
 
-    # Build SQL query to count messages from public or action events within the last hour
+    # 🗃️ Query the last hour’s messages from the DB
     my $sql = <<'SQL';
 SELECT nick, COUNT(*) AS nbLines
 FROM CHANNEL_LOG
@@ -5002,12 +4874,11 @@ SQL
         return;
     }
 
-    my $i        = 0;
-    my $warned   = 0;
-    my @rows;
-    my $line_total = 0;
+    my $i           = 0;
+    my $warned      = 0;
+    my @rows        = ();
+    my $line_total  = 0;
 
-    # Fetch results
     while (my $row = $sth->fetchrow_hashref) {
         my $nick  = $row->{nick}    // next;
         my $lines = $row->{nbLines} // 0;
@@ -5017,29 +4888,31 @@ SQL
     }
 
     if ($i == 0) {
-        # No talkers at all
-        botNotice($self, $sNick, "No messages recorded in $target_channel during the last hour.");
+        # 📭 No messages in the last hour
+        botPrivmsg($self, $target_channel, "📭 No messages recorded in $target_channel during the last hour.");
     } else {
-        # Build the summary string
+        # 🏆 Display top talkers
         my @talkers = map { "$_->[0] ($_->[1])" } @rows;
         my $summary = join(', ', @talkers);
-        my $count = scalar(@rows);
-        botPrivmsg($self, $target_channel, "Top $count talkers in the last hour: $summary");
+        my $count   = scalar(@rows);
 
-        # Warn the top talker if message count is excessive
+        botPrivmsg($self, $target_channel, "🗣️ Top $count talkers in the last hour: $summary");
+
+        # 🚨 Warn top talker if they're flooding
         if ($rows[0][1] >= 25) {
-            botPrivmsg($self, $target_channel, "$rows[0][0]: please slow down a bit – you're flooding the channel!");
+            botPrivmsg($self, $target_channel, "$rows[0][0]: please slow down a bit – you're flooding the channel! 🚨");
             $warned = 1;
         }
 
-        # Optional: log summary to console
+        # 📝 Optional: log summary
         $self->{logger}->log(3, "whoTalk() => $count users, $line_total total lines in $target_channel");
     }
 
-    # Log this command invocation
+    # 🧾 Log command usage
     logBot($self, $message, undef, "whotalk", $target_channel);
     $sth->finish;
 }
+
 
 
 
