@@ -7,7 +7,6 @@ use Mediabot::Auth;
 use Mediabot::User;
 use Time::HiRes qw(usleep);
 use Config::Simple;
-use Date::Format;
 use Date::Parse;
 use Data::Dumper;
 use DBI;
@@ -847,42 +846,45 @@ sub noticeConsoleChan {
     }
 }
 
-# Log a bot command to ACTIONS_LOG, optionally linked to a user and a channel
+# Log a bot command to the ACTIONS_LOG table, optionally linked to a user and/or channel
 sub logBot {
     my ($self, $message, $channel, $action, @args) = @_;
 
-    return unless $self->{dbh};  # Skip if DBH is missing
+    return unless $self->{dbh};  # Abort if the database handle is not available
 
-    # Attempt to resolve the user object
+    # Try to retrieve the User object from the message
     my $user = $self->get_user_from_message($message);
 
     my $user_id   = $user ? $user->id       : undef;
     my $user_name = $user ? $user->nickname : 'Unknown user';
     my $hostmask  = $message->prefix        // 'unknown';
 
-    # Resolve the channel ID using channel object, if available
+    # Retrieve the channel ID from the channel object if available
     my $channel_id;
     if (defined $channel && exists $self->{channels}{$channel}) {
         $channel_id = $self->{channels}{$channel}->get_id;
     }
 
-    # Normalize and sanitize args string
+    # Normalize the argument string (handle undefined values)
     my $args_string = @args ? join(' ', map { defined($_) ? $_ : '' } @args) : '';
 
-    # Insert the log entry
+    # Prepare the SQL query
     my $sql = "INSERT INTO ACTIONS_LOG (ts, id_user, id_channel, hostmask, action, args) VALUES (?, ?, ?, ?, ?, ?)";
     my $sth = $self->{dbh}->prepare($sql) or do {
         $self->{logger}->log(0, "logBot() SQL prepare failed: $DBI::errstr");
         return;
     };
-    my $timestamp = time2str("%Y-%m-%d %H-%M-%S", time);
 
+    # Generate current timestamp in SQL format
+    my $timestamp = strftime('%Y-%m-%d %H:%M:%S', localtime(time));
+
+    # Execute the insert with bound parameters
     unless ($sth->execute($timestamp, $user_id, $channel_id, $hostmask, $action, $args_string)) {
         $self->{logger}->log(0, "logBot() SQL error: $DBI::errstr — Query: $sql");
         return;
     }
 
-    # Compose and log a console message
+    # Format and display a console log message
     my $log_msg = "($user_name : $hostmask) command $action";
     $log_msg .= " $args_string" if $args_string ne '';
     $log_msg .= " on $channel"  if defined $channel;
@@ -892,6 +894,7 @@ sub logBot {
 
     $sth->finish;
 }
+
 
 
 # Log bot action into the CHANNEL_LOG table
@@ -1419,18 +1422,14 @@ sub mbCommandPublic(@) {
         tmdb        => sub { mbTMDBSearch($self,$message,$sNick,$sChannel,@tArgs) },
         tmdblangset => sub { setTMDBLangChannel($self,$message,$sNick,$sChannel,@tArgs) },
         debug       => sub { mbDebug($self,$message,$sNick,$sChannel,@tArgs) },
+		version     => sub { $self->versionCheck($message,$sChannel,$sNick) },
         help        => sub {
             if (defined($tArgs[0]) && $tArgs[0] ne "") {
                 botPrivmsg($self,$sChannel,"Help on command $tArgs[0] is not available (unknown command ?). Please visit https://github.com/teuk/mediabot_v3/wiki");
             } else {
                 botPrivmsg($self,$sChannel,"Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
             }
-        },
-        version     => sub {
-            $self->{logger}->log( 0, "mbVersion() by $sNick on $sChannel");
-            botPrivmsg($self,$sChannel,$conf->get('main.MAIN_PROG_NAME') . " " . $self->{main_prog_version});
-            logBot($self, $message, undef, "version", undef);
-        },
+        }
     );
 
     # Appel direct si la commande est trouvée
@@ -1499,6 +1498,27 @@ sub mbCommandPublic(@) {
 		$self->{logger}->log(3, "Public command '$sCommand' not found");
 	}
 
+}
+
+# versionCheck() - sends version info in channel and alerts if update is available
+sub versionCheck {
+    my ($self, $message, $sChannel, $sNick) = @_;
+    my $conf = $self->{conf};
+
+    # Fetch versions
+    my ($local_version, $remote_version) = $self->getVersion();
+    
+    # Compose base output
+    my $bot_name = $conf->get('main.MAIN_PROG_NAME');
+    my $sMsg = "$bot_name version: $local_version";
+
+    # Compare and warn if outdated
+    if ($remote_version ne "Undefined" && $remote_version ne $local_version) {
+        $sMsg .= " (update available: $remote_version)";
+    }
+
+    botPrivmsg($self, $sChannel, $sMsg);
+    logBot($self, $message, undef, "version", undef);
 }
 
 # Extracts reply target from a message (either channel or sender nick)
@@ -1662,7 +1682,7 @@ sub checkAuth(@) {
 			}
 			$sQuery = "UPDATE USER SET last_login=? WHERE id_user =?";
 			$sth = $self->{dbh}->prepare($sQuery);
-			unless ($sth->execute(time2str("%Y-%m-%d %H-%M-%S",time),$iUserId)) {
+			unless ($sth->execute(strftime('%Y-%m-%d %H:%M:%S', localtime(time)),$iUserId)) {
 				$self->{logger}->log(1,"checkAuth() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 			}
 			return 1;
@@ -4970,7 +4990,7 @@ sub displayBirthDate(@) {
 	my $isPrivate = !defined($sChannel);
 
 	my $birth_ts = $self->{conf}->get('main.MAIN_PROG_BIRTHDATE');
-	my $sBirthDate = time2str("I was born on %d/%m/%Y at %H:%M:%S.", $birth_ts);
+	my $sBirthDate = "I was born on " . strftime("%d/%m/%Y at %H:%M:%S.", localtime($birth_ts));
 
 	my $d = time() - $birth_ts;
 	my @int = (
@@ -9269,7 +9289,7 @@ sub checkAntiFlood {
 			unless ($sth->execute($nbmsg, $currentTs, $currentTs, $id_channel)) {
 				$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
 			} else {
-				my $sLatest = time2str("%Y-%m-%d %H-%M-%S", $currentTs);
+				my $sLatest = strftime("%Y-%m-%d %H-%M-%S", localtime($currentTs));
 				$self->{logger}->log(4, "checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
 				return 0;
 			}
@@ -9282,12 +9302,12 @@ sub checkAntiFlood {
 					unless ($sth->execute($nbmsg, $currentTs, $id_channel)) {
 						$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
 					} else {
-						my $sLatest = time2str("%Y-%m-%d %H-%M-%S", $currentTs);
+						my $sLatest = strftime("%Y-%m-%d %H-%M-%S", localtime($currentTs));
 						$self->{logger}->log(4, "checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max set latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds");
 						return 0;
 					}
 				} else {
-					my $sLatest = time2str("%Y-%m-%d %H-%M-%S", $currentTs);
+					my $sLatest = strftime("%Y-%m-%d %H-%M-%S", localtime($currentTs));
 					my $endTs = $latest + $timetowait;
 
 					if ($currentTs > $endTs) {
@@ -9298,7 +9318,7 @@ sub checkAntiFlood {
 						unless ($sth->execute($nbmsg, $currentTs, $currentTs, 0, $id_channel)) {
 							$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
 						} else {
-							my $sLatest = time2str("%Y-%m-%d %H-%M-%S", $currentTs);
+							my $sLatest = strftime("%Y-%m-%d %H-%M-%S", localtime($currentTs));
 							$self->{logger}->log(4, "checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
 							return 0;
 						}
@@ -9326,7 +9346,7 @@ sub checkAntiFlood {
 				unless ($sth->execute($nbmsg, $currentTs, $currentTs, 0, $id_channel)) {
 					$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
 				} else {
-					my $sLatest = time2str("%Y-%m-%d %H-%M-%S", $currentTs);
+					my $sLatest = strftime("%Y-%m-%d %H-%M-%S", localtime($currentTs));
 					$self->{logger}->log(4, "checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
 					return 0;
 				}

@@ -79,7 +79,6 @@ IO::Async::Timer::Periodic
 Net::Async::IRC
 Data::Dumper
 Config::Simple
-Date::Format
 Data::Dumper
 Date::Parse
 DBI
@@ -142,7 +141,6 @@ IO::Async::Timer::Periodic
 Net::Async::IRC
 Data::Dumper
 Config::Simple
-Date::Format
 Data::Dumper
 Date::Parse
 DBI
