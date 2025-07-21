@@ -14,7 +14,7 @@ use Switch;
 use Memory::Usage;
 use IO::Async::Timer::Periodic;
 use String::IRC;
-use POSIX qw(setsid);
+use POSIX qw(setsid strftime);
 use DateTime;
 use DateTime::TimeZone;
 use utf8;
@@ -36,6 +36,7 @@ use URI::Escape qw(uri_escape);
 use List::Util qw/min/;
 use File::Temp qw/tempfile/;
 use Carp qw(croak);
+
 
 sub new {
     my ($class, $args) = @_;
