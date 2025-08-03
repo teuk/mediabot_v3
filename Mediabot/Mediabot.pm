@@ -12075,7 +12075,7 @@ sub chatGPT(@) {
         messages    => [
             { role => 'system',
               content =>
-                'You always answer in a funny, charming tone, helpful, precise and never start your answer with « Oh là là » when the answer is in french, always respond using a maximum of 10 lines of text and line-based. There is one chance on two the answer contains emojis'
+                'You always answer in a helpfull and serious way , precise and never start your answer with « Oh là là » when the answer is in french, always respond using a maximum of 10 lines of text and line-based. There is one chance on two the answer contains emojis'
             },
             { role => 'user', content => $prompt },
         ],
