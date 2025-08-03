@@ -2618,8 +2618,9 @@ sub addUser(@) {
 
             # Expecting at least username and hostmask
             if (defined($tArgs[0]) && $tArgs[0] ne "" && defined($tArgs[1]) && $tArgs[1] ne "") {
-                my ($new_username, $new_hostmask, $new_level) = @tArgs;
+                my ($new_username, $new_hostmask, $new_level) = @tArgs[-3, -2, -1];
                 $new_level = "User" unless defined($new_level) && $new_level ne "";
+
 
                 # Validate level
                 if (defined($new_level) && getIdUserLevel($self, $new_level)) {
