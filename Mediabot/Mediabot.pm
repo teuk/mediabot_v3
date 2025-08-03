@@ -2919,7 +2919,7 @@ sub addUserHost(@) {
 }
 
 
-
+# Add a new channel and register it with a user
 sub addChannel(@) {
     my ($self, $message, $sNick, @tArgs) = @_;
 
@@ -2937,9 +2937,13 @@ sub addChannel(@) {
         return;
     }
 
+    # Debug: voir les args bruts
+    $self->{logger}->log(3, "addChannel() raw args: @tArgs");
+
     # Arguments
-    my ($sChannel, $sUser) = @tArgs;
+    my ($sChannel, $sUser) = @tArgs[-2, -1];
     unless ($sChannel && $sUser && $sChannel =~ /^#/) {
+        $self->{logger}->log(2, "addChannel() missing or malformed arguments: sChannel='$sChannel', sUser='$sUser'");
         botNotice($self, $sNick, "Syntax: addchan <#channel> <user>");
         return;
     }
@@ -2993,6 +2997,7 @@ sub addChannel(@) {
 
     return $id_channel;
 }
+
 
 
 sub channelSetSyntax(@) {
