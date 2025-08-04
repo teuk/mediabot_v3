@@ -31,3 +31,5 @@ tmp/
 mediabot.pid
 test_all_commands.pl
 test_log.txt
+test_all_commands.pl
+test_log.txt
