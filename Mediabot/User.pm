@@ -175,6 +175,13 @@ sub has_level {
     return 0;
 }
 
+# Handle method for compatibility with other parts of the bot
+sub handle {
+    my ($self) = @_;
+    return $self->{nickname};  # or put a field like 'handle' if needed
+}
+
+
 =head1 AUTHOR
 
 Christophe <teuk@teuk.org>

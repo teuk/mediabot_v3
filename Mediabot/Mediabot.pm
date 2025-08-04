@@ -1391,7 +1391,6 @@ sub mbCommandPublic(@) {
         song        => sub { displayRadioCurrentSong($self,$message,$sNick,$sChannel,@tArgs) },
         listeners   => sub { displayRadioListeners($self,$message,$sNick,$sChannel,@tArgs) },
         nextsong    => sub { radioNext($self,$message,$sNick,$sChannel,@tArgs) },
-        wordstat    => sub { wordStat($self,$message,$sNick,$sChannel,@tArgs) },
         addresponder=> sub { addResponder($self,$message,$sNick,$sChannel,@tArgs) },
         delresponder=> sub { delResponder($self,$message,$sNick,$sChannel,@tArgs) },
         update      => sub { update($self,$message,$sNick,$sChannel,@tArgs) },
@@ -1431,7 +1430,11 @@ sub mbCommandPublic(@) {
                 botPrivmsg($self,$sChannel,"Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
             }
         }
+        
     );
+    if (exists $command_map{$sCommand}) {
+        $self->{logger}->log(3, "✅ PUBLIC: $sNick triggered .$sCommand on $sChannel");
+    }
 
     # Appel direct si la commande est trouvée
     if (exists $command_map{lc($sCommand)}) {
@@ -8112,7 +8115,8 @@ sub getRadioCurrentSong(@) {
 		close ICECAST_STATUS_JSON;
 		chomp($line);
 		my $json = decode_json $line;
-		my @sources = $json->{'icestats'}{'source'};
+		my $source_data = $json->{'icestats'}{'source'};
+        my @sources = ref($source_data) eq 'ARRAY' ? @$source_data : ($source_data);
 
 		if (defined($sources[0])) {
 			my %source = %{$sources[0]};
@@ -8143,7 +8147,6 @@ sub getRadioCurrentSong(@) {
 	}
 }
 
-# Get the current listeners from the radio stream
 sub getRadioCurrentListeners(@) {
 	my ($self) = @_;
 	my $conf = $self->{conf};
@@ -8151,43 +8154,52 @@ sub getRadioCurrentListeners(@) {
 	my $RADIO_HOSTNAME = $conf->get('radio.RADIO_HOSTNAME');
 	my $RADIO_PORT     = $conf->get('radio.RADIO_PORT');
 	my $RADIO_JSON     = $conf->get('radio.RADIO_JSON');
-	my $RADIO_SOURCE   = $conf->get('radio.RADIO_SOURCE');
+	my $RADIO_SOURCE   = $conf->get('radio.RADIO_SOURCE');  # optionnel
 
-	unless (defined($RADIO_HOSTNAME) && ($RADIO_HOSTNAME ne "")) {
-		$self->{logger}->log(0,"getRadioCurrentSong() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
+	unless (defined($RADIO_HOSTNAME) && $RADIO_HOSTNAME ne "") {
+		$self->{logger}->log(0, "getRadioCurrentListeners() radio.RADIO_HOSTNAME not set in " . $self->{config_file});
 		return undef;
 	}
 
 	my $JSON_STATUS_URL = "http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_JSON";
-	if ($RADIO_PORT == 443) {
-		$JSON_STATUS_URL = "https://$RADIO_HOSTNAME/$RADIO_JSON";
+	$JSON_STATUS_URL = "https://$RADIO_HOSTNAME/$RADIO_JSON" if $RADIO_PORT == 443;
+
+	my $fh;
+	unless (open($fh, "-|", "curl", "--connect-timeout", "3", "-f", "-s", $JSON_STATUS_URL)) {
+		return undef;
 	}
 
-	unless (open ICECAST_STATUS_JSON, "curl --connect-timeout 3 -f -s $JSON_STATUS_URL |") {
-		return "N/A";
+	my $line = <$fh>;
+	close $fh;
+
+	return undef unless defined $line;
+	chomp($line);
+
+	my $json;
+	eval { $json = decode_json($line); };
+	if ($@ or not defined $json->{'icestats'}{'source'}) {
+		return undef;
 	}
 
-	my $line;
-	if (defined($line = <ICECAST_STATUS_JSON>)) {
-		close ICECAST_STATUS_JSON;
-		chomp($line);
-		my $json = decode_json $line;
-		my @sources = $json->{'icestats'}{'source'};
+	my $source_data = $json->{'icestats'}{'source'};
+	my @sources = ref($source_data) eq 'ARRAY' ? @$source_data : ($source_data);
 
-		if (defined($sources[0])) {
-			my %source = %{$sources[0]};
-			if (defined($source{'listeners'})) {
-				return $source{'listeners'};
-			} else {
-				return "N/A";
+	if (defined $RADIO_SOURCE && $RADIO_SOURCE ne '') {
+		foreach my $s (@sources) {
+			if (defined($s->{'mount'}) && $s->{'mount'} eq $RADIO_SOURCE) {
+				return int($s->{'listeners'} || 0);
 			}
-		} else {
-			return undef;
 		}
 	} else {
-		return "N/A";
+		my $s = $sources[0];
+		return int($s->{'listeners'} || 0) if defined $s;
 	}
+
+	return undef;
 }
+
+
+
 
 # Get the harbor name from the LIQUIDSOAP telnet port
 sub getRadioHarbor(@) {
