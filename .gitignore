@@ -29,3 +29,5 @@ config/
 tmp/
 *.yml
 mediabot.pid
+test_all_commands.pl
+test_log.txt
