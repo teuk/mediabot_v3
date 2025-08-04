@@ -36,6 +36,7 @@ use URI::Escape qw(uri_escape);
 use List::Util qw/min/;
 use File::Temp qw/tempfile/;
 use Carp qw(croak);
+use Encode qw(encode);
 
 
 sub new {
@@ -838,14 +839,24 @@ sub getConsoleChan {
 # Send a notice to the console channel
 sub noticeConsoleChan {
     my ($self, $sMsg) = @_;
+
+    $self->{logger}->log(3, "📢 noticeConsoleChan() called with message: $sMsg");
+
     my ($id_channel, $name, $chanmode, $key) = getConsoleChan($self);
 
+    $self->{logger}->log(3, "ℹ️ getConsoleChan() returned: id_channel=$id_channel, name=" . 
+        (defined $name ? $name : 'undef') . ", mode=" . 
+        (defined $chanmode ? $chanmode : 'undef') . ", key=" . 
+        (defined $key ? $key : 'undef'));
+
     if (defined $name && $name ne '') {
+        $self->{logger}->log(3, "✅ Sending notice to console channel: $name");
         botNotice($self, $name, $sMsg);
     } else {
-        $self->{logger}->log(0, "No console channel defined! Run ./configure to set up the bot.");
+        $self->{logger}->log(1, "⚠️ No console channel defined! Run ./configure to set up the bot.");
     }
 }
+
 
 # Log a bot command to the ACTIONS_LOG table, optionally linked to a user and/or channel
 sub logBot {
@@ -951,79 +962,84 @@ SQL
 }
 
 
+use Encode qw(encode);
+
 # Send a private message to a target
 sub botPrivmsg {
-	my ($self, $sTo, $sMsg) = @_;
+    my ($self, $sTo, $sMsg) = @_;
 
-	return unless defined($sTo);
+    return unless defined($sTo);
 
-	my $eventtype = "public";
+    my $eventtype = "public";
 
-	if ($sTo =~ /^#/) {
-		# Channel mode
+    if ($sTo =~ /^#/) {
+        # Channel mode
 
-		# NoColors chanset check
-		my $id_chanset_list = getIdChansetList($self, "NoColors");
-		if (defined($id_chanset_list) && $id_chanset_list ne "") {
-			$self->{logger}->log(4, "botPrivmsg() check chanset NoColors, id_chanset_list = $id_chanset_list");
-			my $id_channel_set = getIdChannelSet($self, $sTo, $id_chanset_list);
-			if (defined($id_channel_set) && $id_channel_set ne "") {
-				$self->{logger}->log(3, "botPrivmsg() channel $sTo has chanset +NoColors");
-				$sMsg =~ s/\cC\d{1,2}(?:,\d{1,2})?|[\cC\cB\cI\cU\cR\cO]//g;
-			}
-		}
+        # NoColors chanset check
+        my $id_chanset_list = getIdChansetList($self, "NoColors");
+        if (defined($id_chanset_list) && $id_chanset_list ne "") {
+            $self->{logger}->log(4, "botPrivmsg() check chanset NoColors, id_chanset_list = $id_chanset_list");
+            my $id_channel_set = getIdChannelSet($self, $sTo, $id_chanset_list);
+            if (defined($id_channel_set) && $id_channel_set ne "") {
+                $self->{logger}->log(3, "botPrivmsg() channel $sTo has chanset +NoColors");
+                $sMsg =~ s/\cC\d{1,2}(?:,\d{1,2})?|[\cC\cB\cI\cU\cR\cO]//g;
+            }
+        }
 
-		# AntiFlood chanset check
-		$id_chanset_list = getIdChansetList($self, "AntiFlood");
-		if (defined($id_chanset_list) && $id_chanset_list ne "") {
-			$self->{logger}->log(4, "botPrivmsg() check chanset AntiFlood, id_chanset_list = $id_chanset_list");
-			my $id_channel_set = getIdChannelSet($self, $sTo, $id_chanset_list);
-			if (defined($id_channel_set) && $id_channel_set ne "") {
-				$self->{logger}->log(3, "botPrivmsg() channel $sTo has chanset +AntiFlood");
-				return undef if checkAntiFlood($self, $sTo);  # Already refactored
-			}
-		}
+        # AntiFlood chanset check
+        $id_chanset_list = getIdChansetList($self, "AntiFlood");
+        if (defined($id_chanset_list) && $id_chanset_list ne "") {
+            $self->{logger}->log(4, "botPrivmsg() check chanset AntiFlood, id_chanset_list = $id_chanset_list");
+            my $id_channel_set = getIdChannelSet($self, $sTo, $id_chanset_list);
+            if (defined($id_channel_set) && $id_channel_set ne "") {
+                $self->{logger}->log(3, "botPrivmsg() channel $sTo has chanset +AntiFlood");
+                return undef if checkAntiFlood($self, $sTo);  # Already refactored
+            }
+        }
 
-		# Log output to console
-		$self->{logger}->log(0, "[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
+        # Log output to console
+        $self->{logger}->log(0, "[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
 
-		# Badword filtering
-		my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel = BADWORDS.id_channel AND name = ?";
-		my $sth = $self->{dbh}->prepare($sQuery);
+        # Badword filtering
+        my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel = BADWORDS.id_channel AND name = ?";
+        my $sth = $self->{dbh}->prepare($sQuery);
 
-		unless ($sth->execute($sTo)) {
-			$self->{logger}->log(1, "logBotAction() SQL Error : $DBI::errstr | Query : $sQuery");
-		} else {
-			while (my $ref = $sth->fetchrow_hashref()) {
-				my $sBadwordDb = $ref->{badword};
-				if (index(lc($sMsg), lc($sBadwordDb)) != -1) {
-					logBotAction($self, undef, $eventtype, $self->{irc}->nick_folded, $sTo, "$sMsg (BADWORD : $sBadwordDb)");
-					noticeConsoleChan($self, "Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
-					$self->{logger}->log(3, "Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
-					$sth->finish;
-					return;
-				}
-			}
-			logBotAction($self, undef, $eventtype, $self->{irc}->nick_folded, $sTo, $sMsg);
-		}
-		$sth->finish;
-	} else {
-		# Private message
-		$eventtype = "private";
-		$self->{logger}->log(0, "-> *$sTo* $sMsg");
-	}
+        unless ($sth->execute($sTo)) {
+            $self->{logger}->log(1, "logBotAction() SQL Error : $DBI::errstr | Query : $sQuery");
+        } else {
+            while (my $ref = $sth->fetchrow_hashref()) {
+                my $sBadwordDb = $ref->{badword};
+                if (index(lc($sMsg), lc($sBadwordDb)) != -1) {
+                    logBotAction($self, undef, $eventtype, $self->{irc}->nick_folded, $sTo, "$sMsg (BADWORD : $sBadwordDb)");
+                    noticeConsoleChan($self, "Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
+                    $self->{logger}->log(3, "Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
+                    $sth->finish;
+                    return;
+                }
+            }
+            logBotAction($self, undef, $eventtype, $self->{irc}->nick_folded, $sTo, $sMsg);
+        }
+        $sth->finish;
+    } else {
+        # Private message
+        $eventtype = "private";
+        $self->{logger}->log(0, "-> *$sTo* $sMsg");
+    }
 
-	# Send actual message
-	if (defined($sMsg) && $sMsg ne "") {
-		if (utf8::is_utf8($sMsg)) {
-			$sMsg = Encode::encode("UTF-8", $sMsg);
-			$sMsg =~ s/[\r\n]+/ /g;
-		}
-		$self->{irc}->do_PRIVMSG(target => $sTo, text => $sMsg);
-	} else {
-		$self->{logger}->log(0, "botPrivmsg() ERROR no message specified to send to target");
-	}
+    # Send actual message
+    if (defined($sMsg) && $sMsg ne "") {
+        # Forcer en UTF-8 et nettoyer les retours à la ligne
+        if (utf8::is_utf8($sMsg)) {
+            $sMsg = encode("UTF-8", $sMsg);
+        }
+        $sMsg =~ s/[\r\n]+/ /g;
+
+        $self->{irc}->do_PRIVMSG(target => $sTo, text => $sMsg);
+    } else {
+        $self->{logger}->log(0, "botPrivmsg() ERROR no message specified to send to target");
+    }
 }
+
 
 
 # Send a private message to a target (action)
@@ -1096,28 +1112,51 @@ sub botAction(@) {
 	}
 }
 
+use Encode qw(encode);
+
 # Send a notice to a target (user or channel)
 sub botNotice {
     my ($self, $target, $text) = @_;
 
     # Sanity check: both target and message must be defined and non-empty
-    return unless defined $target && $target ne '';
-    return unless defined $text && $text ne '';
+    unless (defined $target && $target ne '') {
+        $self->{logger}->log(3, "[DEBUG] botNotice() aborted: target is undefined or empty");
+        return;
+    }
+    unless (defined $text && $text ne '') {
+        $self->{logger}->log(3, "[DEBUG] botNotice() aborted: text is undefined or empty");
+        return;
+    }
 
-    # Send the actual IRC NOTICE using do_NOTICE (compatible with Net::Async::IRC)
+    $self->{logger}->log(3, "[DEBUG] botNotice() called with target='$target', text='$text'");
+
+    # Nettoyer les retours à la ligne
+    $text =~ s/[\r\n]+/ /g;
+
+    # Encode en UTF-8 pour l'envoi IRC
+    my $encoded_text = encode('UTF-8', $text);
+
+    $self->{logger}->log(4, "[DEBUG] botNotice() sending encoded text length=" . length($encoded_text));
+
+    # Envoi du NOTICE
     $self->{irc}->do_NOTICE(
         target => $target,
-        text   => $text
+        text   => $encoded_text
     );
 
-    # Log the NOTICE to the console or logfile
+    # Log interne (version lisible)
     $self->{logger}->log(0, "-> -$target- $text");
 
-    # If it's a channel NOTICE, log to the bot's action log
+    # Si c'est un channel NOTICE, log dans l'action log
     if ($target =~ /^#/) {
+        $self->{logger}->log(4, "[DEBUG] botNotice() target is a channel, logging to action log");
         logBotAction($self, undef, "notice", $self->{irc}->nick_folded, $target, $text);
     }
 }
+
+
+
+
 
 
 
@@ -1861,41 +1900,68 @@ sub getLevelUser(@) {
 	}
 }
 
-sub userAdd(@) {
-	my ($self,$sHostmask,$sUserHandle,$sPassword,$sLevel) = @_;
-	unless (defined($sHostmask) && ($sHostmask =~ /^.+@.+/)) {
-		return undef;
-	}
-	my $id_user_level = getIdUserLevel($self,$sLevel);
-	if (defined($sPassword) && ($sPassword ne "")) {
-		my $sQuery = "INSERT INTO USER (hostmasks,nickname,password,id_user_level) VALUES (?,?,PASSWORD(?),?)";
-		my $sth = $self->{dbh}->prepare($sQuery);
-		unless ($sth->execute($sHostmask,$sUserHandle,$sPassword,$id_user_level)) {
-			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-			return undef;
-		}
-		else {
-			my $id_user = $sth->{ mysql_insertid };
-			$self->{logger}->log(3,"userAdd() Added user : $sUserHandle with hostmask : $sHostmask id_user : $id_user as $sLevel password set : yes");
-			return ($id_user);
-		}
-		$sth->finish;
-	}
-	else {
-		my $sQuery = "INSERT INTO USER (hostmasks,nickname,id_user_level) VALUES (?,?,?)";
-		my $sth = $self->{dbh}->prepare($sQuery);
-		unless ($sth->execute($sHostmask,$sUserHandle,$id_user_level)) {
-			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-			return undef;
-		}
-		else {
-			my $id_user = $sth->{ mysql_insertid };
-			$self->{logger}->log(0,"Added user : $sUserHandle with hostmask : $sHostmask id_user : $id_user as $sLevel password set : no");
-			return ($id_user);
-		}
-		$sth->finish;
-	}
+# Add a new user into the USER table
+sub userAdd {
+    my ($self, $hostmask, $nickname, $password, $level, $username) = @_;
+
+    $self->{logger}->log(3, "🆕 userAdd() called with: hostmask='$hostmask', nickname='$nickname', password=" . (defined $password ? '***' : 'undef') . ", level='$level', username=" . (defined $username ? $username : 'undef'));
+
+    # Vérif arguments
+    unless (defined $hostmask && $hostmask ne '' && defined $nickname && $nickname ne '') {
+        $self->{logger}->log(1, "❌ userAdd() missing required args");
+        return undef;
+    }
+
+    my $dbh = $self->{dbh};
+
+    # Convertir le niveau si nécessaire
+    my $id_user_level;
+    if (defined $level && $level =~ /^\d+$/) {
+        $id_user_level = $level;
+    } elsif (defined $level && $level ne '') {
+        $id_user_level = getIdUserLevel($self, $level);
+    }
+    unless (defined $id_user_level) {
+        $self->{logger}->log(1, "❌ userAdd() invalid or missing user level: '$level'");
+        return undef;
+    }
+
+    # Vérifier si le nickname existe déjà
+    my $sth = $dbh->prepare("SELECT id_user FROM USER WHERE nickname = ?");
+    $sth->execute($nickname);
+    if (my $ref = $sth->fetchrow_hashref) {
+        $self->{logger}->log(1, "❌ userAdd() nickname '$nickname' already exists (id_user=$ref->{id_user})");
+        $sth->finish;
+        return undef;
+    }
+    $sth->finish;
+
+    # Construction de la requête
+    my $sql = q{
+        INSERT INTO USER
+        (hostmasks, nickname, password, username, id_user_level, auth)
+        VALUES (?, ?, ?, ?, ?, 0)
+    };
+    $sth = $dbh->prepare($sql);
+
+    my $ok = $sth->execute(
+        $hostmask,
+        $nickname,
+        $password,
+        $username,
+        $id_user_level
+    );
+
+    if ($ok) {
+        my $id = $dbh->{mysql_insertid};
+        $self->{logger}->log(0, "✅ userAdd() created user '$nickname' (id_user=$id, level_id=$id_user_level)");
+        return $id;
+    } else {
+        $self->{logger}->log(1, "❌ userAdd() failed for nickname '$nickname': " . $dbh->errstr);
+        return undef;
+    }
 }
+
 
 sub registerChannel(@) {
 	my ($self,$message,$sNick,$id_channel,$id_user) = @_;
@@ -2605,83 +2671,107 @@ sub userCstat {
 # Add a new user with a specified hostmask and optional level
 sub addUser(@) {
     my ($self, $message, $sNick, @tArgs) = @_;
-    my $bNotify = 0;
 
-    # Handle optional -n flag for notification
-    if (defined($tArgs[0]) && ($tArgs[0] eq "-n")) {
-        $bNotify = 1;
+    $self->{logger}->log(3, "🆕 addUser() called by '$sNick' with raw args: @tArgs");
+
+    # 🔹 Évite de parser le nick de l'appelant comme argument
+    if (@tArgs && lc($tArgs[0]) eq lc($sNick)) {
+        $self->{logger}->log(3, "ℹ️ Removing caller nick '$tArgs[0]' from args list");
         shift @tArgs;
     }
 
+    my $bNotify = 0;
+
+    # 🔹 Gestion du flag -n
+    if (@tArgs && $tArgs[0] eq "-n") {
+        $bNotify = 1;
+        $self->{logger}->log(3, "ℹ️ Notification flag -n detected");
+        shift @tArgs;
+    }
+
+    # 🔹 Validation du nombre minimal d'arguments
+    unless (@tArgs >= 2) {
+        $self->{logger}->log(2, "⚠️ Missing arguments: need at least <nickname> <hostmask>");
+        botNotice($self, $sNick, "Syntax: adduser [-n] <nickname> <hostmask> [level]");
+        return;
+    }
+
+    # 🔹 Extraction des arguments
+    my $new_username = shift @tArgs;
+    my $new_hostmask = shift @tArgs;
+    my $new_level    = shift(@tArgs) // 'User';
+
+    $self->{logger}->log(3, "📦 Parsed new user data: nickname='$new_username', hostmask='$new_hostmask', level='$new_level'");
+
+    # 🔹 Récupération de l'objet utilisateur appelant
     my $user = $self->get_user_from_message($message);
-    return unless $user;
+    unless ($user) {
+        $self->{logger}->log(1, "❌ No user object for caller '$sNick'");
+        return;
+    }
 
-    if ($user->is_authenticated) {
-        if (checkUserLevel($self, $user->level, "Master")) {
+    $self->{logger}->log(3, "👤 Caller: ".$user->nickname." (auth=".$user->is_authenticated.", level=".$user->level.", desc=".$user->level_description.")");
 
-            # Expecting at least username and hostmask
-            if (defined($tArgs[0]) && $tArgs[0] ne "" && defined($tArgs[1]) && $tArgs[1] ne "") {
-                my ($new_username, $new_hostmask, $new_level) = @tArgs[-3, -2, -1];
-                $new_level = "User" unless defined($new_level) && $new_level ne "";
-
-
-                # Validate level
-                if (defined($new_level) && getIdUserLevel($self, $new_level)) {
-                    if ($user->level_description eq "Master" && $new_level eq "Owner") {
-                        botNotice($self, $sNick, "Masters cannot add a user with Owner level");
-                        logBot($self, $message, undef, "adduser", "Masters cannot add a user with Owner level");
-                        return;
-                    }
-                } else {
-                    botNotice($self, $sNick, "$new_level is not a valid user level");
-                    return;
-                }
-
-                # Check if user already exists
-                my $existing_id = getIdUser($self, $new_username);
-                if (defined($existing_id)) {
-                    botNotice($self, $sNick, "User $new_username already exists (id_user: $existing_id)");
-                    logBot($self, $message, undef, "adduser", "User $new_username already exists (id_user: $existing_id)");
-                    return;
-                }
-
-                # Add user
-                my $new_id = userAdd($self, $new_hostmask, $new_username, undef, $new_level);
-                if (defined($new_id)) {
-                    my $msg = sprintf("Added user %s id_user: %d with hostmask %s (Level: %s)", $new_username, $new_id, $new_hostmask, $new_level);
-                    $self->{logger}->log(0, "addUser() $msg");
-                    noticeConsoleChan($self, $msg);
-                    botNotice($self, $sNick, $msg);
-
-                    if ($bNotify) {
-                        botNotice($self, $new_username, "You've been added to " . $self->{irc}->nick_folded . " as user $new_username (Level: $new_level) with hostmask $new_hostmask");
-                        botNotice($self, $new_username, "/msg " . $self->{irc}->nick_folded . " pass password");
-                        botNotice($self, $new_username, "Replace 'password' with something strong and that you won't forget :p");
-                    }
-
-                    logBot($self, $message, undef, "adduser", $msg);
-                } else {
-                    botNotice($self, $sNick, "Could not add user $new_username");
-                }
-
-            } else {
-                botNotice($self, $sNick, "Syntax: adduser [-n] <username> <hostmask> [level]");
-            }
-
-        } else {
-            my $msg = $message->prefix . " adduser command attempt, (command level [Master] required for user " . $user->nickname . " [" . $user->level . "])";
-            noticeConsoleChan($self, $msg);
-            botNotice($self, $sNick, "This command is not available for your level. Contact a bot master.");
-            logBot($self, $message, undef, "adduser", $msg);
-        }
-
-    } else {
+    # 🔹 Vérification authentification
+    unless ($user->is_authenticated) {
         my $msg = $message->prefix . " adduser command attempt (user " . $user->nickname . " is not logged in)";
         noticeConsoleChan($self, $msg);
         botNotice($self, $sNick, "You must be logged to use this command : /msg " . $self->{irc}->nick_folded . " login username password");
         logBot($self, $message, undef, "adduser", $msg);
+        return;
+    }
+
+    # 🔹 Vérification niveau minimum
+    unless ($user->has_level("Master", $self->{dbh})) {
+        my $msg = $message->prefix . " adduser command attempt (Master required; caller level=".$user->level_description.")";
+        noticeConsoleChan($self, $msg);
+        botNotice($self, $sNick, "This command is not available for your level. Contact a bot master.");
+        logBot($self, $message, undef, "adduser", $msg);
+        return;
+    }
+
+    # 🔹 Validation du level fourni
+    unless (getIdUserLevel($self, $new_level)) {
+        $self->{logger}->log(1, "❌ Invalid user level: $new_level");
+        botNotice($self, $sNick, "$new_level is not a valid user level");
+        return;
+    }
+
+    # 🔹 Protection Master → Owner
+    if ($user->level_description eq "Master" && $new_level eq "Owner") {
+        botNotice($self, $sNick, "Masters cannot add a user with Owner level");
+        logBot($self, $message, undef, "adduser", "Masters cannot add a user with Owner level");
+        return;
+    }
+
+    # 🔹 Vérification si utilisateur existe déjà
+    if (my $existing_id = getIdUser($self, $new_username)) {
+        botNotice($self, $sNick, "User $new_username already exists (id_user: $existing_id)");
+        logBot($self, $message, undef, "adduser", "User $new_username already exists (id_user: $existing_id)");
+        return;
+    }
+
+    # 🔹 Ajout de l'utilisateur
+    my $new_id = userAdd($self, $new_hostmask, $new_username, undef, $new_level);
+    if (defined $new_id) {
+        my $msg = sprintf("✅ Added user %s (id_user: %d) with hostmask %s (Level: %s)", $new_username, $new_id, $new_hostmask, $new_level);
+        $self->{logger}->log(0, $msg);
+        noticeConsoleChan($self, $msg);
+        botNotice($self, $sNick, $msg);
+
+        if ($bNotify) {
+            botNotice($self, $new_username, "You've been added to " . $self->{irc}->nick_folded . " as user $new_username (Level: $new_level) with hostmask $new_hostmask");
+            botNotice($self, $new_username, "/msg " . $self->{irc}->nick_folded . " pass password");
+            botNotice($self, $new_username, "Replace 'password' with something strong and that you won't forget :p");
+        }
+
+        logBot($self, $message, undef, "adduser", $msg);
+    } else {
+        botNotice($self, $sNick, "Could not add user $new_username");
     }
 }
+
+
 
 
 

@@ -158,12 +158,16 @@ sub has_level {
 
     $self->load_level($dbh) unless defined $self->{level};
 
-    # Numeric level
+    # Log interne (debug)
+    if ($self->{logger}) {
+        $self->{logger}->log(3, "🔍 has_level() check for user " . $self->nickname .
+                             " [current=" . ($self->{level_desc} // 'undef') . ", required=$required_level]");
+    }
+
     if ($required_level =~ /^\d+$/) {
         return ($self->{level} <= $required_level);
     }
 
-    # Named level
     my $sth = $dbh->prepare("SELECT level FROM USER_LEVEL WHERE description = ?");
     if ($sth->execute($required_level)) {
         if (my $ref = $sth->fetchrow_hashref) {
@@ -174,6 +178,7 @@ sub has_level {
 
     return 0;
 }
+
 
 # Handle method for compatibility with other parts of the bot
 sub handle {
@@ -187,5 +192,100 @@ sub handle {
 Christophe <teuk@teuk.org>
 
 =cut
+
+=head2 create($dbh, \%params, [$logger])
+
+Create a new user in the USER table.
+Params hash must contain:
+  nickname  => string (required)
+  hostmasks => string (required)
+  level     => string or numeric level (optional, default 'User')
+  password  => string (optional)
+  info1/2   => string (optional)
+
+Returns: Mediabot::User object on success, undef on failure.
+
+=cut
+
+sub create {
+    my ($class, $dbh, $params, $logger) = @_;
+
+    croak "create() requires DB handle" unless $dbh;
+    croak "create() requires a hashref of params" unless ref($params) eq 'HASH';
+
+    my $nickname  = $params->{nickname}  // '';
+    my $hostmasks = $params->{hostmasks} // '';
+    my $level     = $params->{level}     // 'User';
+    my $password  = $params->{password};
+    my $info1     = $params->{info1};
+    my $info2     = $params->{info2};
+
+    unless ($nickname && $hostmasks) {
+        carp "Nickname and hostmask are required";
+        return undef;
+    }
+
+    $logger->log(3, "🆕 Creating user: nickname=$nickname, hostmasks=$hostmasks, level=$level") if $logger;
+
+    # Determine level ID
+    my $level_id;
+    if ($level =~ /^\d+$/) {
+        $level_id = $level;
+    } else {
+        my $sth = $dbh->prepare("SELECT id_user_level FROM USER_LEVEL WHERE description = ?");
+        $sth->execute($level);
+        if (my $ref = $sth->fetchrow_hashref) {
+            $level_id = $ref->{id_user_level};
+        }
+        $sth->finish;
+    }
+    unless ($level_id) {
+        carp "Invalid level: $level";
+        $logger->log(1, "❌ Invalid level: $level") if $logger;
+        return undef;
+    }
+
+    # Check if user exists
+    my $sth_check = $dbh->prepare("SELECT id_user FROM USER WHERE nickname = ?");
+    $sth_check->execute($nickname);
+    if (my $ref = $sth_check->fetchrow_hashref) {
+        carp "User $nickname already exists (id_user: $ref->{id_user})";
+        $logger->log(1, "❌ User $nickname already exists (id_user: $ref->{id_user})") if $logger;
+        return undef;
+    }
+    $sth_check->finish;
+
+    # Insert new user
+    my $sth_insert = $dbh->prepare("
+        INSERT INTO USER (hostmasks, nickname, password, username, id_user_level, info1, info2, auth)
+        VALUES (?, ?, ?, NULL, ?, ?, ?, 0)
+    ");
+    my $pass_db = defined $password ? $password : undef;
+    my $ok = $sth_insert->execute($hostmasks, $nickname, $pass_db, $level_id, $info1, $info2);
+    $sth_insert->finish;
+
+    unless ($ok) {
+        carp "Failed to insert user $nickname";
+        $logger->log(1, "❌ Failed to insert user $nickname") if $logger;
+        return undef;
+    }
+
+    # Fetch the newly created user
+    my $sth_get = $dbh->prepare("SELECT * FROM USER WHERE nickname = ?");
+    $sth_get->execute($nickname);
+    my $row = $sth_get->fetchrow_hashref;
+    $sth_get->finish;
+
+    return undef unless $row;
+    $row->{dbh} = $dbh;
+
+    my $user_obj = $class->new($row);
+    $user_obj->load_level($dbh);
+
+    $logger->log(0, "✅ User created: $nickname (id_user=" . $user_obj->id . ", level=" . $user_obj->level_description . ")") if $logger;
+
+    return $user_obj;
+}
+
 
 1;
