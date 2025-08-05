@@ -50,8 +50,16 @@ sub new {
         channels    => {},
     }, $class;
 
+    # Logger minimal pour éviter les undef avant init_log()
+    require Mediabot::Log;
+    $self->{logger} = Mediabot::Log->new(
+        debug_level => 0,
+        logfile     => undef
+    );
+
     return $self;
 }
+
 
 
 #-----------------------------------------------------------------
@@ -59,21 +67,32 @@ sub new {
 #-----------------------------------------------------------------
 
 # Return a Mediabot::User object matching the message prefix, or undef if none matched
-# Return a Mediabot::User object from IRC message
 sub get_user_from_message {
     my ($self, $message) = @_;
 
-    my $hostmask = $message->prefix;
+    my $hostmask = $message->prefix // '';
+    $self->{logger}->log(3, "🔍 get_user_from_message() called with hostmask: '$hostmask'");
+
     my $query = "SELECT * FROM USER";
+    $self->{logger}->log(4, "📜 SQL Query: $query");
+
     my $sth = $self->{dbh}->prepare($query);
     unless ($sth->execute) {
-        $self->{logger}->log(1, "get_user_from_message() SQL Error: $DBI::errstr");
+        $self->{logger}->log(1, "❌ get_user_from_message() SQL Error: $DBI::errstr");
         return;
     }
 
+    my $row_count = 0;
+    my $matched_user;
     while (my $row = $sth->fetchrow_hashref) {
-        my @patterns = split(/,/, $row->{hostmasks} // "");
+        $row_count++;
+        my $patterns_raw = $row->{hostmasks} // '';
+        $self->{logger}->log(4, "👤 Checking user '$row->{nickname}' (id_user=$row->{id_user}), hostmasks='$patterns_raw'");
+
+        my @patterns = split(/,/, $patterns_raw);
         foreach my $mask (@patterns) {
+            my $orig_mask = $mask;
+            $mask =~ s/^\s+|\s+$//g; # trim
             my $regex = $mask;
             $regex =~ s/\./\\./g;
             $regex =~ s/\*/.*/g;
@@ -82,22 +101,36 @@ sub get_user_from_message {
             $regex =~ s/\{/\\{/g;
             $regex =~ s/\}/\\}/g;
 
+            $self->{logger}->log(4, "   🛠 Testing pattern '$orig_mask' → regex /^$regex/");
+
             if ($hostmask =~ /^$regex/) {
-                $self->{logger}->log(3, "get_user_from_message() $regex matches $hostmask");
+                $self->{logger}->log(3, "✅ Pattern match: /^$regex/ matches '$hostmask' for user '$row->{nickname}'");
+
                 require Mediabot::User;
                 my $user = Mediabot::User->new($row);
                 $user->load_level($self->{dbh});
                 $user->maybe_autologin($self, $hostmask);
-                $self->{logger}->log(3, "get_user_from_message() matched user id: " . $user->id);
-                return $user;
+
+                $self->{logger}->log(3, "🎯 Matched user id=" . $user->id . ", nickname='" . $user->nickname . "', level='" . ($user->level_description // 'undef') . "'");
+                $matched_user = $user;
+                last; # match found, no need to check more patterns for this user
             }
         }
+
+        last if $matched_user; # stop loop if match found
     }
 
     $sth->finish;
-    $self->{logger}->log(3, "get_user_from_message() no user matched hostmask $hostmask");
-    return;
+    $self->{logger}->log(4, "ℹ️ get_user_from_message() scanned $row_count users in DB");
+
+    unless ($matched_user) {
+        $self->{logger}->log(3, "🚫 No user matched hostmask '$hostmask'");
+        return;
+    }
+
+    return $matched_user;
 }
+
 
 
 sub my_log_info {

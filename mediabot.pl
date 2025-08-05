@@ -132,30 +132,30 @@ unless (defined($CONFIG_FILE)) {
     usage("You must specify a config file");
 }
 
+# Create Mediabot instance
 my $mediabot = Mediabot->new({
     config_file => $CONFIG_FILE,
-    server => $sServer,
+    server      => $sServer,
 });
 
-
-
-# Load configuration
-unless ( $mediabot->readConfigFile ) {
-    log_error("ERROR: could not load configuration, aborting.");
+# Load configuration before anything else
+unless ($mediabot->readConfigFile()) {
+    print "[FATAL] Could not load configuration, aborting.\n";
     exit 1;
 }
 
-# Init log file
+# Now that we have the config, we can initialize the logger
 $mediabot->init_log();
 
-# Instantiate logger
+# Logger initialization
 $mediabot->{logger} = Mediabot::Log->new(
     debug_level => $mediabot->{conf}->get('main.MAIN_PROG_DEBUG'),
     logfile     => $mediabot->{conf}->get('main.MAIN_LOG_FILE'),
 );
 
-# Initialize signals catchers
+# Trap signals
 init_signals($mediabot->{logger});
+
 
 # Check config
 if ( $MAIN_PROG_CHECK_CONFIG != 0 ) {
