@@ -3245,42 +3245,85 @@ sub channelSet {
     }
 }
 
+# Retrieve the ID of a chanset from the CHANSET_LIST table
+sub getIdChansetList {
+    my ($self, $sChansetValue) = @_;
 
+    # Basic sanity check
+    unless (defined $sChansetValue && $sChansetValue ne '') {
+        $self->{logger}->log(2, "⚠️ getIdChansetList() called without a chanset value");
+        return undef;
+    }
 
+    $self->{logger}->log(3, "🔍 getIdChansetList() looking up chanset: '$sChansetValue'");
 
-sub getIdChansetList(@) {
-	my ($self,$sChansetValue) = @_;
-	my $id_chanset_list;
-	my $sQuery = "SELECT id_chanset_list FROM CHANSET_LIST WHERE chanset=?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChansetValue) ) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			$id_chanset_list = $ref->{'id_chanset_list'};
-		}
-	}
-	$sth->finish;
-	return $id_chanset_list;
+    my $id_chanset_list;
+    my $sQuery = "SELECT id_chanset_list FROM CHANSET_LIST WHERE chanset=?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    if (!$sth->execute($sChansetValue)) {
+        # Log SQL error
+        $self->{logger}->log(1, "❌ SQL Error in getIdChansetList(): " . $DBI::errstr . " | Query: $sQuery");
+    }
+    else {
+        if (my $ref = $sth->fetchrow_hashref()) {
+            $id_chanset_list = $ref->{id_chanset_list};
+            $self->{logger}->log(3, "✅ getIdChansetList() found id_chanset_list=$id_chanset_list for chanset '$sChansetValue'");
+        }
+        else {
+            $self->{logger}->log(3, "ℹ️ getIdChansetList() no result found for chanset '$sChansetValue'");
+        }
+    }
+
+    $sth->finish;
+    return $id_chanset_list;
 }
 
-sub getIdChannelSet(@) {
-	my ($self,$sChannel,$id_chanset_list) = @_;
-	my $id_channel_set;
-	my $sQuery = "SELECT id_channel_set FROM CHANNEL_SET,CHANNEL WHERE CHANNEL_SET.id_channel=CHANNEL.id_channel AND name=? AND id_chanset_list=?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel,$id_chanset_list) ) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			$id_channel_set = $ref->{'id_channel_set'};
-		}
-	}
-	$sth->finish;
-	return $id_channel_set;
+
+# Retrieve the ID of a channel set from CHANNEL_SET table for a given channel and chanset list ID
+sub getIdChannelSet {
+    my ($self, $sChannel, $id_chanset_list) = @_;
+
+    # Basic sanity checks
+    unless (defined $sChannel && $sChannel ne '') {
+        $self->{logger}->log(2, "⚠️ getIdChannelSet() called without a channel name");
+        return undef;
+    }
+    unless (defined $id_chanset_list && $id_chanset_list ne '') {
+        $self->{logger}->log(2, "⚠️ getIdChannelSet() called without an id_chanset_list");
+        return undef;
+    }
+
+    $self->{logger}->log(3, "🔍 getIdChannelSet() searching for chanset_list_id=$id_chanset_list in channel '$sChannel'");
+
+    my $id_channel_set;
+    my $sQuery = q{
+        SELECT id_channel_set
+        FROM CHANNEL_SET
+        JOIN CHANNEL ON CHANNEL_SET.id_channel = CHANNEL.id_channel
+        WHERE name = ? AND id_chanset_list = ?
+    };
+
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    if (!$sth->execute($sChannel, $id_chanset_list)) {
+        # SQL execution failed
+        $self->{logger}->log(1, "❌ SQL Error in getIdChannelSet(): " . $DBI::errstr . " | Query: $sQuery");
+    }
+    else {
+        if (my $ref = $sth->fetchrow_hashref()) {
+            $id_channel_set = $ref->{id_channel_set};
+            $self->{logger}->log(3, "✅ getIdChannelSet() found id_channel_set=$id_channel_set for channel '$sChannel' and chanset_list_id=$id_chanset_list");
+        }
+        else {
+            $self->{logger}->log(3, "ℹ️ getIdChannelSet() no matching record for channel '$sChannel' and chanset_list_id=$id_chanset_list");
+        }
+    }
+
+    $sth->finish;
+    return $id_channel_set;
 }
+
 
 # Purge a channel from the bot: delete it and archive its data
 # Only accessible by authenticated users with Administrator level
@@ -6735,265 +6778,194 @@ sub displayWeather(@) {
 }
 
 sub displayUrlTitle(@) {
-	my ($self,$message,$sNick,$sChannel,$sText) = @_;
-	$self->{logger}->log(3,"displayUrlTitle() $sText");
-	my $sContentType;
-	my $iHttpResponseCode;
-	my $sTextURL = $sText;
-	$sText =~ s/^.*http/http/;
-	$sText =~ s/\s+.*$//;
-	$self->{logger}->log(3,"displayUrlTitle() URL = $sText");
-	if ( $sText =~ /x.com/ ) {
-		my $id_chanset_list = getIdChansetList($self,"Twitter");
-		if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-			$self->{logger}->log(3,"id_chanset_list = $id_chanset_list");
-			my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
-			unless (defined($id_channel_set) && ($id_channel_set ne "")) {
-				return undef;
-			}
-			else {
-				$self->{logger}->log(3,"id_channel_set = $id_channel_set");
-			}
-		}
-		#TBD or not
-	} # Special prank for a bro :)
-	if ( (($sText =~ /x.com/) || ($sText =~ /twitter.com/)) && (($sNick =~ /^\[k\]$/) || ($sNick =~ /^NHI$/) || ($sNick =~ /^PersianYeti$/))) {
-		$self->{logger}->log(3,"displayUrlTitle() Twitter URL = $sText");
-		return undef;
-		my @tAnswers = ( "Ok $sNick, you need to take a breathe", "$sNick the truth is out theeeeere ^^", "You're the wisest $sNick, you checked your sources :P~","Great another Twitter thingy, we missed that $sNick");
-		botPrivmsg($self,$sChannel,$tAnswers[rand($#tAnswers + 1)]);
-		return undef;
-		my $user;
-		my $id;
-		if ( $sText =~ /^https.*x\.com\/(.*)\/status.*$/ ) {
-			$user = $1;
-		}
-		if ( $sText =~ /^https.*x\.com\/.*\/status\/([^?]*).*$/ ) {
-			$id = $1;
-		}
-		if ($user) {
-			$self->{logger}->log(3,"displayUrlTitle() user = $user");
-		}
-		else {
-			$self->{logger}->log(3,"displayUrlTitle() Could not get Twitter user");
-			return undef;
-		}
-		if ($id) {
-			$self->{logger}->log(3,"displayUrlTitle() id = $id");
-		}
-		else {
-			$self->{logger}->log(3,"displayUrlTitle() Could not get Twitter id");
-			return undef;
-		}
+    my ($self, $message, $sNick, $sChannel, $sText) = @_;
 
-		
+    # Debug initial
+    $self->{logger}->log(3, "displayUrlTitle() RAW input: $sText");
 
-		my $twitter_url = "https://twitter.com/$user/status/$id";  # Replace with the actual URL
-		$self->{logger}->log(3,"displayUrlTitle() twitter_url = $twitter_url");
+    my $sContentType;
+    my $iHttpResponseCode;
+    my $sTextURL = $sText;
 
-		
+    # Extraction stricte de l'URL
+    $sText =~ s/^.*http/http/;
+    $sText =~ s/\s+.*$//;
+    $self->{logger}->log(3, "displayUrlTitle() URL extracted: $sText");
 
-		# Use curl to fetch the Twitter page content
-		my $curl_output = `curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0" -s "$twitter_url"`;
-		#$self->{logger}->log(4,"displayUrlTitle() curl_output = $curl_output");
+    # --- Twitter (x.com) chanset ---
+    if ( $sText =~ /x.com/ ) {
+        my $id_chanset_list = getIdChansetList($self, "Twitter");
+        if (defined $id_chanset_list && $id_chanset_list ne "") {
+            $self->{logger}->log(3, "id_chanset_list = $id_chanset_list");
+            my $id_channel_set = getIdChannelSet($self, $sChannel, $id_chanset_list);
+            unless (defined $id_channel_set && $id_channel_set ne "") {
+                return undef;
+            }
+            $self->{logger}->log(3, "id_channel_set = $id_channel_set");
+        }
+    }
 
-		# Check if the curl command was successful
-		if ($? == -1) {
-			$self->{logger}->log(3,"displayUrlTitle() Failed to execute curl: $!");
-			return undef;
-		}
-		elsif ($? & 127) {
-			$self->{logger}->log(3,"displayUrlTitle() curl died with signal " . ($? & 127));
-		}
-		else {
-			my $exit_code = $? >> 8;
-			if ($exit_code != 0) {
-				$self->{logger}->log(3,"displayUrlTitle() curl exited with non-zero status: $exit_code");
-			}
-		}
+    # --- Twitter special prank ---
+    if ((($sText =~ /x.com/) || ($sText =~ /twitter.com/))
+        && (($sNick =~ /^\[k\]$/) || ($sNick =~ /^NHI$/) || ($sNick =~ /^PersianYeti$/))) {
+        $self->{logger}->log(3, "displayUrlTitle() Twitter URL = $sText");
+        return undef;
+    }
 
-		# Extract the tweet text from the HTML response using a regular expression
-		if ($curl_output =~ /<p class="tweet-text" data-aria-label-part="0">([^<]+)/) {
-			my $tweet_text = $1;
-			$tweet_text =~ s/\s+/ /g;  # Remove extra whitespace
-			$self->{logger}->log(3,"displayUrlTitle() Tweet Text: $tweet_text");
-		}
-		else {
-			$self->{logger}->log(3,"displayUrlTitle() Tweet text not found");
-		}
-	}
-	if ( $sText =~ /instagram.com/ ) {
-		my $content;
-		unless ( open URL_HEAD, "curl \"$sText\" |" ) {
-			$self->{logger}->log(3,"displayUrlTitle() insta Could not curl GET for url details");
-		}
-		else {
-			my $line;
-			while (defined($line=<URL_HEAD>)) {
-				chomp($line);
-				$content .= $line;
-			}
-		}
+    # --- Instagram ---
+    if ( $sText =~ /instagram.com/ ) {
+        my $content;
+        unless (open URL_HEAD, "curl \"$sText\" |") {
+            $self->{logger}->log(3, "displayUrlTitle() insta Could not curl GET for url details");
+        } else {
+            while (my $line = <URL_HEAD>) {
+                chomp($line);
+                $content .= $line;
+            }
+            close URL_HEAD;
+        }
 
-		my $title = $content;
-		if (defined($title)) {
-			$title =~ s/^.*og:title" content="//;
-			$title =~ s/" .><meta property="og:image".*$//;
-			unless ( $title =~ /DOCTYPE html/ ) {
-				$self->{logger}->log(3,"displayUrlTitle() (insta) Extracted title : $title");
-			}
-			else {
-				$title = $content;
-				$title =~ s/^.*<title//;
-				$title =~ s/<\/title>.*$//;
-				$title =~ s/^\s*>//;
-			}
-			if ($title ne "") {
-				$sText = String::IRC->new("[")->white('black');
-				$sText .= String::IRC->new("Instagram")->white('pink');
-				$sText .= String::IRC->new("]")->white('black');
-				$sText .= " $title";
-				my $regex = "&(?:" . join("|", map {s/;\z//; $_} keys %entity2char) . ");";
-				if (($sText =~ /$regex/) || ( $sText =~ /&#.*;/)) {
-					$sText = decode_entities($sText);
-				}
-				$sText = "($sNick) " . $sText;
-				unless ( $sText =~ /DOCTYPE html/ ) {
-					botPrivmsg($self,$sChannel,substr($sText, 0, 300));
-				}
-			}
-		}
+        my $title = $content;
+        if (defined $title) {
+            $title =~ s/^.*og:title" content="//;
+            $title =~ s/" .><meta property="og:image".*$//;
+            unless ($title =~ /DOCTYPE html/) {
+                $self->{logger}->log(3, "displayUrlTitle() (insta) Extracted title : $title");
+            } else {
+                $title = $content;
+                $title =~ s/^.*<title//;
+                $title =~ s/<\/title>.*$//;
+                $title =~ s/^\s*>//;
+            }
+            if ($title ne "") {
+                my $msg = String::IRC->new("[")->white('black');
+                $msg .= String::IRC->new("Instagram")->white('pink');
+                $msg .= String::IRC->new("]")->white('black');
+                $msg .= " $title";
+                my $regex = "&(?:" . join("|", map { s/;\z//; $_ } keys %entity2char) . ");";
+                if (($msg =~ /$regex/) || ($msg =~ /&#.*;/)) {
+                    $msg = decode_entities($msg);
+                }
+                $msg = "($sNick) " . $msg;
+                unless ($msg =~ /DOCTYPE html/) {
+                    botPrivmsg($self, $sChannel, substr($msg, 0, 300));
+                }
+            }
+        }
+        return undef;
+    }
 
-		return undef;
-	}
+    # --- HEAD request pour content-type + HTTP code ---
+    unless (open URL_HEAD, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |") {
+        $self->{logger}->log(3, "displayUrlTitle() Could not curl headers for $sText");
+    } else {
+        while (my $line = <URL_HEAD>) {
+            chomp($line);
+            $self->{logger}->log(4, "displayUrlTitle() HEAD: $line");
+            if ($line =~ /^content\-type/i) {
+                (undef, $sContentType) = split(" ", $line);
+                $self->{logger}->log(4, "displayUrlTitle() sContentType = $sContentType");
+            } elsif ($line =~ /^http/i) {
+                (undef, $iHttpResponseCode) = split(" ", $line);
+                $self->{logger}->log(4, "displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
+            }
+        }
+        close URL_HEAD;
+    }
 
-	unless ( open URL_HEAD, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |" ) {
-		$self->{logger}->log(3,"displayUrlTitle() Could not curl headers for $sText");
-	}
-	else {
-		my $line;
-		my $i = 0;
-		while(defined($line=<URL_HEAD>)) {
-			chomp($line);
-			$self->{logger}->log(4,"displayUrlTitle() $line");
-			if ( $line =~ /^content\-type/i ) {
-				(undef,$sContentType) = split(" ",$line);
-				$self->{logger}->log(4,"displayUrlTitle() sContentType = $sContentType");
-			}
-			elsif ( $line =~ /^http/i ) {
-				(undef,$iHttpResponseCode) = split(" ",$line);
-				$self->{logger}->log(4,"displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
-			}
-			$i++;
-		}
-	}
-	unless (defined($iHttpResponseCode) && ($iHttpResponseCode eq "200")) {
-		$self->{logger}->log(3,"displayUrlTitle() Wrong HTTP response code (" . (defined($iHttpResponseCode) ? $iHttpResponseCode : "undefined") .") for $sText " . (defined($iHttpResponseCode) ? $iHttpResponseCode : "Undefined") );
-	}
-	else {
-		unless (defined($sContentType) && ($sContentType =~ /text\/html/i)) {
-			$self->{logger}->log(3,"displayUrlTitle() Wrong Content-Type for $sText " . (defined($sContentType) ? $sContentType : "Undefined") );
-		}
-		else {
-			if ( $sText =~ /open.spotify.com/ ) {
-				my $url = $sText;
-				$url =~ s/\?.*$//;
-				unless ( open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -ks \"$url\" |" ) {
-					$self->{logger}->log(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
-				}
-				else {
-					my $line;
-					my $i = 0;
-					my $sTitle;
-					while(defined($line=<URL_TITLE>)) {
-						chomp($line);
-						if ( $line =~ /<title>/) {
-							my $sDisplayMsg = $line;
-							$sDisplayMsg =~ s/^.*<title//;
-							$sDisplayMsg =~ s/<\/title>.*$//;
-							$sDisplayMsg =~ s/^>//;
-							my $artist = $sDisplayMsg;
-							$artist =~ s/^.*song and lyrics by //;
-							$artist =~ s/ \| Spotify//;
-							my $song = $sDisplayMsg;
-							$song =~ s/ - song and lyrics by.*$//;
-							$self->{logger}->log(3,"displayUrlTitle() artist = $artist song = $song");
+    unless (defined $iHttpResponseCode && $iHttpResponseCode eq "200") {
+        $self->{logger}->log(3, "displayUrlTitle() Wrong HTTP response code (" . ($iHttpResponseCode // "undefined") . ") for $sText");
+        return undef;
+    }
 
-							my $sText = String::IRC->new("[")->white('black');
-							$sText .= String::IRC->new("Spotify")->black('green');
-							$sText .= String::IRC->new("]")->white('black');
-							$sText .= " $artist - $song";
-							my $regex = "&(?:" . join("|", map {s/;\z//; $_} keys %entity2char) . ");";
-							if (($sText =~ /$regex/) || ( $sText =~ /&#.*;/)) {
-								$sText = decode_entities($sText);
-							}
-							
-							botPrivmsg($self,$sChannel,"($sNick) $sText");
-						}	
-						$i++;
-					}
-				}
-				return undef;
-			}
-			unless ( open URL_TITLE, "curl -A -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |" ) {
-				$self->{logger}->log(0,"displayUrlTitle() Could not curl UrlTitle for $sText");
-			}
-			else {
-				my $line;
-				my $i = 0;
-				my $sTitle;
-				my $sContent;
-				while(defined($line=<URL_TITLE>)) {
-					chomp($line);
-					$sContent .= "$line\n";
-					$i++;
-				}
-				if ( $i > 0 ) {
-					my $tree = HTML::Tree->new();
-					$tree->parse($sContent);
-					my ($title) = $tree->look_down( '_tag' , 'title' );
-					if (defined($title) && ($title->as_text ne "")) {
-						my $sDisplayMsg;
-						if (( $sText =~ /youtube.com/ ) || ( $sText =~ /youtu\.be/ )) {
-							$sDisplayMsg = String::IRC->new('[')->white('black');
-							$sDisplayMsg .= String::IRC->new('You')->black('white');
-							$sDisplayMsg .= String::IRC->new('Tube')->white('red');
-							$sDisplayMsg .= String::IRC->new(']')->white('black');
-							botPrivmsg($self,$sChannel,"($sNick) $sDisplayMsg " . $title->as_text);
-						}
-						elsif ( $sText =~ /music.apple.com/ ) {
-							my $id_chanset_list = getIdChansetList($self,"AppleMusic");
-							if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
-								$self->{logger}->log(3,"id_chanset_list = $id_chanset_list");
-								my $id_channel_set = getIdChannelSet($self,$sChannel,$id_chanset_list);
-								unless (defined($id_channel_set) && ($id_channel_set ne "")) {
-									return undef;
-								}
-								else {
-									$self->{logger}->log(3,"id_channel_set = $id_channel_set");
-								}
-							}
-							$sDisplayMsg = String::IRC->new('[')->white('black');
-							$sDisplayMsg .= String::IRC->new('AppleMusic')->white('grey');
-							$sDisplayMsg .= String::IRC->new(']')->white('black');
-							botPrivmsg($self,$sChannel,"($sNick) $sDisplayMsg " . $title->as_text);
-						}
-						else {
-							if ( $title->as_text =~ /The page is temporarily unavailable/i ) {
-								return undef;
-							}
-							else {
-								$sDisplayMsg = String::IRC->new("URL Title from $sNick:")->grey('black');
-								botPrivmsg($self,$sChannel,$sDisplayMsg . " " . $title->as_text);
-							}
-						}
-					}
-				}
-			}
-		}
-		
-	}
+    unless (defined $sContentType && $sContentType =~ /text\/html/i) {
+        $self->{logger}->log(3, "displayUrlTitle() Wrong Content-Type for $sText (" . ($sContentType // "Undefined") . ")");
+        return undef;
+    }
+
+    # --- Spotify ---
+    if ($sText =~ /open.spotify.com/) {
+        my $url = $sText;
+        $url =~ s/\?.*$//;
+        unless (open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -ks \"$url\" |") {
+            $self->{logger}->log(0, "displayUrlTitle() Could not curl UrlTitle for $sText");
+        } else {
+            while (my $line = <URL_TITLE>) {
+                chomp($line);
+                if ($line =~ /<title>/) {
+                    my $sDisplayMsg = $line;
+                    $sDisplayMsg =~ s/^.*<title//;
+                    $sDisplayMsg =~ s/<\/title>.*$//;
+                    $sDisplayMsg =~ s/^>//;
+                    my $artist = $sDisplayMsg;
+                    $artist =~ s/^.*song and lyrics by //;
+                    $artist =~ s/ \| Spotify//;
+                    my $song = $sDisplayMsg;
+                    $song =~ s/ - song and lyrics by.*$//;
+                    $self->{logger}->log(3, "displayUrlTitle() artist = $artist song = $song");
+
+                    my $sTextIrc = String::IRC->new("[")->white('black');
+                    $sTextIrc .= String::IRC->new("Spotify")->black('green');
+                    $sTextIrc .= String::IRC->new("]")->white('black');
+                    $sTextIrc .= " $artist - $song";
+                    my $regex = "&(?:" . join("|", map { s/;\z//; $_ } keys %entity2char) . ");";
+                    if (($sTextIrc =~ /$regex/) || ($sTextIrc =~ /&#.*;/)) {
+                        $sTextIrc = decode_entities($sTextIrc);
+                    }
+                    botPrivmsg($self, $sChannel, "($sNick) $sTextIrc");
+                }
+            }
+            close URL_TITLE;
+        }
+        return undef;
+    }
+
+    # --- URL générique ---
+    unless (open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |") {
+        $self->{logger}->log(0, "displayUrlTitle() Could not curl UrlTitle for $sText");
+    } else {
+        my $sContent;
+        while (my $line = <URL_TITLE>) {
+            chomp($line);
+            $sContent .= "$line\n";
+        }
+        close URL_TITLE;
+
+        my $tree = HTML::Tree->new();
+        $tree->parse($sContent);
+        my ($title) = $tree->look_down('_tag', 'title');
+        if (defined($title) && $title->as_text ne "") {
+            if (($sText =~ /youtube.com/) || ($sText =~ /youtu\.be/)) {
+                my $yt = String::IRC->new('[')->white('black');
+                $yt .= String::IRC->new('You')->black('white');
+                $yt .= String::IRC->new('Tube')->white('red');
+                $yt .= String::IRC->new(']')->white('black');
+                botPrivmsg($self, $sChannel, "($sNick) $yt " . $title->as_text);
+            }
+            elsif ($sText =~ /music.apple.com/) {
+                my $id_chanset_list = getIdChansetList($self, "AppleMusic");
+                if (defined($id_chanset_list) && $id_chanset_list ne "") {
+                    my $id_channel_set = getIdChannelSet($self, $sChannel, $id_chanset_list);
+                    unless (defined($id_channel_set) && $id_channel_set ne "") {
+                        return undef;
+                    }
+                }
+                my $apple = String::IRC->new('[')->white('black');
+                $apple .= String::IRC->new('AppleMusic')->white('grey');
+                $apple .= String::IRC->new(']')->white('black');
+                botPrivmsg($self, $sChannel, "($sNick) $apple " . $title->as_text);
+            }
+            else {
+                if ($title->as_text !~ /The page is temporarily unavailable/i) {
+                    my $msg = String::IRC->new("URL Title from $sNick:")->grey('black');
+                    botPrivmsg($self, $sChannel, $msg . " " . $title->as_text);
+                }
+            }
+        }
+    }
 }
+
+
 
 # Set or show the debug level of the bot
 sub mbDebug {
