@@ -25,7 +25,7 @@ TeuK
 # Notes
 20250805
 
-![Spotify demo in Mediabot](docs/img/spotify_rockz_29250805.jpg?raw=true)
+![Spotify demo in Mediabot](https://github.com/teuk/mediabot_v3/raw/master/docs/img/spotify_rockz_29250805.jpg)
 
 
 20250718
