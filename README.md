@@ -23,6 +23,9 @@ I hope you'll have fun using mediabot :)
 TeuK
 
 # Notes
+20250805
+
+![Spotify demo in Mediabot](docs/img/spotify_rockz_29250805.jpg)
 
 20250718
 
