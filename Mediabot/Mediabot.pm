@@ -3106,114 +3106,145 @@ sub channelSetSyntax(@) {
 sub channelSet {
     my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-    my ($iMatchingUserId, $iMatchingUserLevel, $iMatchingUserLevelDesc,
-        $iMatchingUserAuth, $sMatchingUserHandle, $sMatchingUserPasswd,
-        $sMatchingUserInfo1, $sMatchingUserInfo2) = getNickInfo($self, $message);
+    # --- DEBUG: Entry point ---
+    $self->{logger}->log(3, "📥 channelSet() called by '$sNick' on channel '$sChannel' with args: @tArgs");
 
-    if (defined($iMatchingUserId)) {
-        if ($iMatchingUserAuth) {
+    # Retrieve the user object from the incoming IRC message
+    my $user = get_user_from_message($self, $message);
 
-            if (defined($tArgs[0]) && $tArgs[0] =~ /^#/) {
-                $sChannel = shift @tArgs;
-            }
+    unless ($user) {
+        $self->{logger}->log(1, "❌ No user object found for '$sNick'");
+        botNotice($self, $sNick, "Unknown user.");
+        return;
+    }
 
-            unless (defined $sChannel) {
-                channelSetSyntax($self, $message, $sNick, @tArgs);
-                return;
-            }
+    # --- DEBUG: Show retrieved user info ---
+    $self->{logger}->log(3, "👤 Found user object: id=" . ($user->id // 'undef') .
+                             ", nick=" . ($user->nickname // 'undef') .
+                             ", auth=" . ($user->is_authenticated ? '1' : '0') .
+                             ", level_id=" . ($user->{level_id} // 'undef'));
 
-            if (checkUserLevel($self, $iMatchingUserLevel, "Administrator")
-                || checkUserChannelLevel($self, $message, $sChannel, $iMatchingUserId, 450)) {
+    # Try automatic login if user is not already authenticated
+    if (!$user->is_authenticated) {
+        $self->{logger}->log(3, "🔑 Attempting auto-login for '$sNick' using hostmask '$message->{prefix}'");
+        $user->maybe_autologin($self, $message->{prefix});
+    }
 
-                if ((defined($tArgs[0]) && $tArgs[0] ne "" && defined($tArgs[1]) && $tArgs[1] ne "")
-                    || (defined($tArgs[0]) && $tArgs[0] =~ /^[+-]/)) {
+    # Check if user is now authenticated
+    if ($user->is_authenticated) {
 
-                    if (exists $self->{channels}{$sChannel}) {
-                        my $channel = $self->{channels}{$sChannel};
-                        my $id_channel = $channel->get_id;
+        $self->{logger}->log(3, "✅ '$sNick' is authenticated, loading privilege level...");
+        $user->load_level($self->{dbh});
+        $self->{logger}->log(3, "🔍 Loaded user level: " . ($user->level_description // 'undef') . " (numeric=" . ($user->level // 'undef') . ")");
 
-                        # Gestion par mot-clé
-                        if ($tArgs[0] eq "key") {
-                            $channel->set_key($tArgs[1]);
-                            botNotice($self, $sNick, "Set $sChannel key $tArgs[1]");
-                        }
-                        elsif ($tArgs[0] eq "chanmode") {
-                            $channel->set_chanmode($tArgs[1]);
-                            botNotice($self, $sNick, "Set $sChannel chanmode $tArgs[1]");
-                        }
-                        elsif ($tArgs[0] eq "auto_join") {
-                            my $flag = lc($tArgs[1]) eq "on" ? 1 : (lc($tArgs[1]) eq "off" ? 0 : undef);
-                            if (!defined $flag) {
-                                channelSetSyntax($self, $message, $sNick, @tArgs);
-                                return;
-                            }
-                            $channel->set_auto_join($flag);
-                            botNotice($self, $sNick, "Set $sChannel auto_join $tArgs[1]");
-                        }
-                        elsif ($tArgs[0] eq "description") {
-                            shift @tArgs;
-                            if ($tArgs[0] =~ /console/i) {
-                                botNotice($self, $sNick, "You cannot set $sChannel description to $tArgs[0]");
-                            } else {
-                                my $desc = join(" ", @tArgs);
-                                $channel->set_description($desc);
-                                botNotice($self, $sNick, "Set $sChannel description $desc");
-                            }
-                        }
+        # If the first argument is a channel, shift it into $sChannel
+        if (defined($tArgs[0]) && $tArgs[0] =~ /^#/) {
+            $sChannel = shift @tArgs;
+            $self->{logger}->log(3, "ℹ️ First arg is a channel, overriding target channel to '$sChannel'");
+        }
 
-                        # Gestion des +/-
-                        elsif ($tArgs[0] =~ /^([+-])(\w+)$/) {
-                            my ($op, $chanset) = ($1, $2);
-                            my $id_chanset_list = getIdChansetList($self, $chanset);
-                            unless ($id_chanset_list) {
-                                botNotice($self, $sNick, "Undefined chanset $chanset");
-                                return;
-                            }
-                            my $id_channel_set = getIdChannelSet($self, $sChannel, $id_chanset_list);
-                            if ($op eq "+") {
-                                if ($id_channel_set) {
-                                    botNotice($self, $sNick, "Chanset +$chanset is already set");
-                                    return;
-                                }
-                                my $sth = $self->{dbh}->prepare("INSERT INTO CHANNEL_SET (id_channel, id_chanset_list) VALUES (?, ?)");
-                                $sth->execute($id_channel, $id_chanset_list);
-                                botNotice($self, $sNick, "Chanset +$chanset applied to $sChannel");
+        # If no channel is defined after processing arguments, show syntax
+        unless (defined $sChannel) {
+            $self->{logger}->log(2, "⚠️ No target channel specified, showing syntax help");
+            channelSetSyntax($self, $message, $sNick, @tArgs);
+            return;
+        }
 
-                                setChannelAntiFlood($self, $message, $sNick, $sChannel, @tArgs) if $chanset =~ /^AntiFlood$/i;
-                                set_hailo_channel_ratio($self, $sChannel, 97) if $chanset =~ /^HailoChatter$/i;
-                            } else {
-                                unless ($id_channel_set) {
-                                    botNotice($self, $sNick, "Chanset +$chanset is not set");
-                                    return;
-                                }
-                                my $sth = $self->{dbh}->prepare("DELETE FROM CHANNEL_SET WHERE id_channel_set=?");
-                                $sth->execute($id_channel_set);
-                                botNotice($self, $sNick, "Chanset -$chanset removed from $sChannel");
-                            }
-                        }
-                        else {
-                            channelSetSyntax($self, $message, $sNick, @tArgs);
-                        }
+        # Check global or channel-specific privilege
+        if (checkUserLevel($self, $user->level, "Administrator")
+            || checkUserChannelLevel($self, $message, $sChannel, $user->id, 450)) {
 
-                        logBot($self, $message, $sChannel, "chanset", ($sChannel, @tArgs));
-                        return $channel->get_id;
-                    } else {
-                        $self->{logger}->log(3, "channelSet: channel $sChannel not found in hash");
+            # Command must have at least 2 args OR a +/-
+            if ((defined($tArgs[0]) && $tArgs[0] ne "" && defined($tArgs[1]) && $tArgs[1] ne "")
+                || (defined($tArgs[0]) && $tArgs[0] =~ /^[+-]/)) {
+
+                # Ensure the channel exists in our hash
+                if (exists $self->{channels}{$sChannel}) {
+                    my $channel = $self->{channels}{$sChannel};
+                    my $id_channel = $channel->get_id;
+                    $self->{logger}->log(3, "📌 Target channel object found: id_channel=$id_channel");
+
+                    # --- Command handling ---
+                    if ($tArgs[0] eq "key") {
+                        $channel->set_key($tArgs[1]);
+                        botNotice($self, $sNick, "Set $sChannel key $tArgs[1]");
                     }
-                }
-                else {
-                    channelSetSyntax($self, $message, $sNick, @tArgs);
+                    elsif ($tArgs[0] eq "chanmode") {
+                        $channel->set_chanmode($tArgs[1]);
+                        botNotice($self, $sNick, "Set $sChannel chanmode $tArgs[1]");
+                    }
+                    elsif ($tArgs[0] eq "auto_join") {
+                        my $flag = lc($tArgs[1]) eq "on" ? 1 : (lc($tArgs[1]) eq "off" ? 0 : undef);
+                        if (!defined $flag) {
+                            channelSetSyntax($self, $message, $sNick, @tArgs);
+                            return;
+                        }
+                        $channel->set_auto_join($flag);
+                        botNotice($self, $sNick, "Set $sChannel auto_join $tArgs[1]");
+                    }
+                    elsif ($tArgs[0] eq "description") {
+                        shift @tArgs;
+                        if ($tArgs[0] =~ /console/i) {
+                            botNotice($self, $sNick, "You cannot set $sChannel description to $tArgs[0]");
+                        } else {
+                            my $desc = join(" ", @tArgs);
+                            $channel->set_description($desc);
+                            botNotice($self, $sNick, "Set $sChannel description $desc");
+                        }
+                    }
+                    elsif ($tArgs[0] =~ /^([+-])(\w+)$/) {
+                        my ($op, $chanset) = ($1, $2);
+                        my $id_chanset_list = getIdChansetList($self, $chanset);
+                        unless ($id_chanset_list) {
+                            botNotice($self, $sNick, "Undefined chanset $chanset");
+                            return;
+                        }
+                        my $id_channel_set = getIdChannelSet($self, $sChannel, $id_chanset_list);
+                        if ($op eq "+") {
+                            if ($id_channel_set) {
+                                botNotice($self, $sNick, "Chanset +$chanset is already set");
+                                return;
+                            }
+                            my $sth = $self->{dbh}->prepare("INSERT INTO CHANNEL_SET (id_channel, id_chanset_list) VALUES (?, ?)");
+                            $sth->execute($id_channel, $id_chanset_list);
+                            botNotice($self, $sNick, "Chanset +$chanset applied to $sChannel");
+
+                            setChannelAntiFlood($self, $message, $sNick, $sChannel, @tArgs) if $chanset =~ /^AntiFlood$/i;
+                            set_hailo_channel_ratio($self, $sChannel, 97) if $chanset =~ /^HailoChatter$/i;
+                        } else {
+                            unless ($id_channel_set) {
+                                botNotice($self, $sNick, "Chanset +$chanset is not set");
+                                return;
+                            }
+                            my $sth = $self->{dbh}->prepare("DELETE FROM CHANNEL_SET WHERE id_channel_set=?");
+                            $sth->execute($id_channel_set);
+                            botNotice($self, $sNick, "Chanset -$chanset removed from $sChannel");
+                        }
+                    }
+                    else {
+                        channelSetSyntax($self, $message, $sNick, @tArgs);
+                    }
+
+                    logBot($self, $message, $sChannel, "chanset", ($sChannel, @tArgs));
+                    return $channel->get_id;
+                } else {
+                    $self->{logger}->log(2, "❌ Channel '$sChannel' not found in channel hash");
                 }
             }
             else {
-                botNotice($self, $sNick, "Your level does not allow you to use this command.");
+                channelSetSyntax($self, $message, $sNick, @tArgs);
             }
         }
         else {
-            botNotice($self, $sNick, "You must be logged in to use this command.");
+            botNotice($self, $sNick, "Your level does not allow you to use this command.");
         }
     }
+    else {
+        $self->{logger}->log(2, "🚫 '$sNick' is not authenticated after auto-login attempt");
+        botNotice($self, $sNick, "You must be logged in to use this command.");
+    }
 }
+
 
 
 
