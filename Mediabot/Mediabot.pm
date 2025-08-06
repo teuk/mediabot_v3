@@ -1415,7 +1415,6 @@ sub mbCommandPublic(@) {
         voice       => sub { userVoiceChannel($self,$message,$sNick,$sChannel,@tArgs) },
         devoice     => sub { userDevoiceChannel($self,$message,$sNick,$sChannel,@tArgs) },
         kick        => sub { userKickChannel($self,$message,$sNick,$sChannel,@tArgs) },
-        topic       => sub { userTopicChannel($self,$message,$sNick,$sChannel,@tArgs) },
         showcommands=> sub { userShowcommandsChannel($self,$message,$sNick,$sChannel,@tArgs) },
         chaninfo    => sub { userChannelInfo($self,$message,$sNick,$sChannel,@tArgs) },
         chanlist    => sub { channelList($self,$message,$sNick,$sChannel,@tArgs) },
