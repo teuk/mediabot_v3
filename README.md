@@ -23,6 +23,12 @@ I hope you'll have fun using mediabot :)
 TeuK
 
 # Notes
+20250806
+
+ALTER TABLE CHANNEL_PURGED ADD COLUMN purged_by VARCHAR(255) DEFAULT NULL;
+ALTER TABLE CHANNEL_PURGED ADD COLUMN purged_at DATETIME DEFAULT CURRENT_TIMESTAMP;
+
+
 20250805
 
 ![Spotify demo in Mediabot](docs/img/spotify_rockz_29250805.jpg?raw=true)
