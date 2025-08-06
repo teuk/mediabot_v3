@@ -3363,7 +3363,9 @@ sub getIdChannelSet {
 sub purgeChannel {
     my ($self, $message, $sNick, @tArgs) = @_;
 
-    # Get user object from message prefix (hostmask-based matching)
+    $self->{logger}->log(3, "🔍 purgeChannel() called by $sNick with args: @tArgs");
+
+    # Get user object from message prefix
     my $user = $self->get_user_from_message($message);
     unless ($user && $user->is_authenticated) {
         botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
@@ -3392,53 +3394,65 @@ sub purgeChannel {
     }
 
     my $id_channel = $channel_obj->get_id;
-    $self->{logger}->log(0, "$sNick issued a purge command on $sChannel");
+    $self->{logger}->log(0, "🗑️ $sNick issued a purge command on $sChannel (id=$id_channel)");
 
     # Retrieve full channel info from DB
     my $sth = $self->{dbh}->prepare("SELECT * FROM CHANNEL WHERE id_channel = ?");
     unless ($sth->execute($id_channel)) {
-        $self->{logger}->log(1, "SQL Error: $DBI::errstr while fetching channel info");
+        $self->{logger}->log(1, "❌ SQL Error: $DBI::errstr while fetching channel info");
         return;
     }
 
     my $ref = $sth->fetchrow_hashref();
     $sth->finish;
     unless ($ref) {
-        $self->{logger}->log(1, "Channel $sChannel (id: $id_channel) not found in DB");
+        $self->{logger}->log(1, "❌ Channel $sChannel (id: $id_channel) not found in DB");
         return;
     }
 
-    # Extract values for archiving
-    my ($desc, $key, $chanmode, $auto_join) = @$ref{qw(description key chanmode auto_join)};
+    # Safely extract values for archiving
+    my $desc      = defined $ref->{description} ? $ref->{description} : '';
+    my $key       = defined $ref->{key}         ? $ref->{key}         : '';
+    my $chanmode  = defined $ref->{chanmode}    ? $ref->{chanmode}    : '';
+    my $auto_join = defined $ref->{auto_join}   ? $ref->{auto_join}   : 0;
+
+    $self->{logger}->log(3, "ℹ️ Archiving channel: desc='$desc', key='$key', chanmode='$chanmode', auto_join='$auto_join', purged_by='$sNick'");
 
     # Delete from CHANNEL
     $sth = $self->{dbh}->prepare("DELETE FROM CHANNEL WHERE id_channel = ?");
     unless ($sth->execute($id_channel)) {
-        $self->{logger}->log(1, "SQL Error: $DBI::errstr while deleting CHANNEL");
+        $self->{logger}->log(1, "❌ SQL Error: $DBI::errstr while deleting CHANNEL");
         return;
     }
 
     # Delete user-channel links
     $sth = $self->{dbh}->prepare("DELETE FROM USER_CHANNEL WHERE id_channel = ?");
     unless ($sth->execute($id_channel)) {
-        $self->{logger}->log(1, "SQL Error: $DBI::errstr while deleting USER_CHANNEL");
+        $self->{logger}->log(1, "❌ SQL Error: $DBI::errstr while deleting USER_CHANNEL");
         return;
     }
 
     # Archive into CHANNEL_PURGED
-    $sth = $self->{dbh}->prepare("INSERT INTO CHANNEL_PURGED (id_channel, name, description, `key`, chanmode, auto_join) VALUES (?, ?, ?, ?, ?, ?)");
-    unless ($sth->execute($id_channel, $sChannel, $desc, $key, $chanmode, $auto_join)) {
-        $self->{logger}->log(1, "SQL Error: $DBI::errstr while inserting into CHANNEL_PURGED");
+    $sth = $self->{dbh}->prepare("
+        INSERT INTO CHANNEL_PURGED 
+            (id_channel, name, description, `key`, chanmode, auto_join, purged_by, purged_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+    ");
+    unless ($sth->execute($id_channel, $sChannel, $desc, $key, $chanmode, $auto_join, $sNick)) {
+        $self->{logger}->log(1, "❌ SQL Error: $DBI::errstr while inserting into CHANNEL_PURGED");
         return;
     }
 
     # Part from IRC and clean memory
-    $self->partChannel($sChannel, "Channel purged by $sNick");
+    $self->{logger}->log(3, "📤 Sending PART for $sChannel");
+    $self->{irc}->send_message("PART", $sChannel, "Channel purged by $sNick");
     delete $self->{channels}{$sChannel};
 
     # Log action
     $self->logBot($message, undef, "purge", "$sNick purged $sChannel (id: $id_channel)");
 }
+
+
 
 
 # Channel part command (refactored)
