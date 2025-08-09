@@ -38,6 +38,9 @@ use File::Temp qw/tempfile/;
 use Carp qw(croak);
 use Encode qw(encode);
 
+# --- Top of Mediabot.pm (near other 'my' / 'our' declarations)
+my $ALREADY_EXITING = 0;  # re-entrance guard for clean_and_exit
+
 
 sub new {
     my ($class, $args) = @_;
@@ -50,7 +53,7 @@ sub new {
         channels    => {},
     }, $class;
 
-    # Logger minimal pour éviter les undef avant init_log()
+    # Minimal logging setup
     require Mediabot::Log;
     $self->{logger} = Mediabot::Log->new(
         debug_level => 0,
@@ -132,13 +135,14 @@ sub get_user_from_message {
 }
 
 
-
+# Log info with timestamp
 sub my_log_info {
     my ($self, $msg) = @_;
     my $ts = POSIX::strftime("[%d/%m/%Y %H:%M:%S]", localtime);
     print STDOUT "$ts [INFO] $msg\n";
 }
 
+# Log error with timestamp
 sub my_log_error {
     my ($self, $msg) = @_;
     my $ts = POSIX::strftime("[%d/%m/%Y %H:%M:%S]", localtime);
@@ -443,21 +447,71 @@ sub get_hailo(@) {
 	return $self->{hailo};
 }
 
-# Clean up and exit the program
+# Clean up and exit the program (with proper Net::Async::IRC QUIT)
 sub clean_and_exit(@) {
-	my ($self,$iRetValue) = @_;
-	$self->{logger}->log(0,"Cleaning and exiting...");
-	
-	if (defined($self->{dbh}) && ($self->{dbh} != 0)) {
-		if ( $iRetValue != 1146 ) {
-		}
-		$self->{dbh}->disconnect();
-	}
-	
-	if(defined(fileno($self->{LOG}))) { close $self->{LOG}; }
-	
-	exit $iRetValue;
+    my ($self, $iRetValue) = @_;
+    $iRetValue = 0 unless defined $iRetValue;
+
+    # Re-entrance guard without 'state'
+    if ($ALREADY_EXITING) { CORE::exit($iRetValue); }
+    $ALREADY_EXITING = 1;
+
+    # Log if possible (best-effort)
+    eval {
+        $self->{logger}->log(0, "Cleaning and exiting...")
+            if $self->{logger} && $self->{logger}->can('log');
+        1;
+    };
+
+    # --- Graceful IRC QUIT via Net::Async::IRC ---
+    eval {
+        my $irc = $self->{irc};
+        if ($irc) {
+            my $quit_msg = "Mediabot shutting down";
+            if ($self->{conf} && $self->{conf}->can('get')) {
+                my $cfg = eval { $self->{conf}->get('IRC_QUIT_MESSAGE') };
+                $quit_msg = $cfg if defined($cfg) && $cfg ne '';
+            }
+            $irc->can('do_QUIT') ? $irc->do_QUIT( reason => $quit_msg )
+                                 : 0;
+        }
+        1;
+    };
+
+    # --- DB: safe disconnect ---
+    eval {
+        if (defined $self->{dbh} && $self->{dbh}) {
+            if ($iRetValue != 1146) { } # keep original no-op
+            my $dbh = $self->{dbh};
+            if (ref($dbh) && eval { $dbh->{Active} }) {
+                eval { $dbh->disconnect(); 1 };
+            }
+        }
+        1;
+    };
+
+    # --- Raw LOG filehandle: safe close ---
+    eval {
+        if (defined $self->{LOG}) {
+            my $fh = $self->{LOG};
+            if (defined(fileno($fh))) {
+                eval { local $| = 1; 1; }; # opportunistic flush
+                close $fh;
+            }
+        }
+        1;
+    };
+
+    # --- Flush object logger if available ---
+    eval {
+        $self->{logger}->flush()
+            if $self->{logger} && $self->{logger}->can('flush');
+        1;
+    };
+
+    CORE::exit($iRetValue);
 }
+
 
 # Connect to the database
 sub dbConnect(@) {
