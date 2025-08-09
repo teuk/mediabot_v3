@@ -1544,7 +1544,7 @@ sub mbCommandPublic(@) {
         yomomma     => sub { Yomomma($self,$message,$sNick,$sChannel,@tArgs) },
         spike       => sub { botPrivmsg($self,$sChannel,"https://teuk.org/In_Spike_Memory.jpg") },
         resolve     => sub { mbResolver($self,$message,$sNick,$sChannel,@tArgs) },
-        tmdb        => sub { mbTMDBSearch($self,$message,$sNick,$sChannel,@tArgs) },
+#        tmdb        => sub { mbTMDBSearch($self,$message,$sNick,$sChannel,@tArgs) },
         tmdblangset => sub { setTMDBLangChannel($self,$message,$sNick,$sChannel,@tArgs) },
         debug       => sub { mbDebug($self,$message,$sNick,$sChannel,@tArgs) },
 		version     => sub { $self->versionCheck($message,$sChannel,$sNick) },
