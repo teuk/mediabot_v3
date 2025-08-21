@@ -362,15 +362,26 @@ my $sServerPassDisplay = ( $sServerPass eq "" ? "none defined" : $sServerPass );
 my $bNickTriggerCommand =$mediabot->getNickTrigger();
 $mediabot->{logger}->log(0,"Trying to connect to " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort() . " (pass : $sServerPassDisplay)");
 
+my $bind_ip = $mediabot->{conf}->get('connection.CONN_BIND_IP');
+
 my $login = $irc->login(
-    pass => $sServerPass,
-    nick => $sConnectionNick,
-    host => $mediabot->getServerHostname(),
-    service => $mediabot->getServerPort(),
-    user => $mediabot->getUserName(),
+    pass     => $sServerPass,
+    nick     => $sConnectionNick,
+    host     => $mediabot->getServerHostname(),
+    service  => $mediabot->getServerPort(),
+    user     => $mediabot->getUserName(),
     realname => $mediabot->getIrcName(),
+
+    # --- BIND IP (optionnel, si défini dans [connection].CONN_BIND_IP) ---
+    ( $bind_ip ? (
+        local_host => $bind_ip,                      # chemin standard IO::Async
+        connect    => { local_host => $bind_ip },    # compat anciennes versions
+        ( $bind_ip =~ /:/ ? ( family => 'inet6' ) : () ),  # si IPv6
+    ) : () ),
+
     on_login => \&on_login,
 );
+
 
 $login->get;
 
@@ -1489,13 +1500,21 @@ sub reconnect {
     $bNickTriggerCommand =$mediabot->getNickTrigger();
     $mediabot->{logger}->log(0,"Trying to connect to " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort() . " (pass : $sServerPassDisplay)");
     
-    $login = $irc->login(
-        pass => $sServerPass,
-        nick => $sConnectionNick,
-        host => $mediabot->getServerHostname(),
-        service => $mediabot->getServerPort(),
-        user => $mediabot->getUserName(),
+    my $login = $irc->login(
+        pass     => $sServerPass,
+        nick     => $sConnectionNick,
+        host     => $mediabot->getServerHostname(),
+        service  => $mediabot->getServerPort(),
+        user     => $mediabot->getUserName(),
         realname => $mediabot->getIrcName(),
+
+        # --- BIND IP (optionnel, si défini dans [connection].CONN_BIND_IP) ---
+        ( $bind_ip ? (
+            local_host => $bind_ip,                      # chemin standard IO::Async
+            connect    => { local_host => $bind_ip },    # compat anciennes versions
+            ( $bind_ip =~ /:/ ? ( family => 'inet6' ) : () ),  # si IPv6
+        ) : () ),
+
         on_login => \&on_login,
     );
 
