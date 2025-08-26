@@ -65,71 +65,72 @@ sub new {
 
 
 
-#-----------------------------------------------------------------
-# Timestamped log methods (avoid namespace collisions)
-#-----------------------------------------------------------------
-
 # Return a Mediabot::User object matching the message prefix, or undef if none matched
 sub get_user_from_message {
     my ($self, $message) = @_;
 
-    my $hostmask = $message->prefix // '';
-    $self->{logger}->log(3, "🔍 get_user_from_message() called with hostmask: '$hostmask'");
+    my $fullmask = $message->prefix // '';
+    my ($nick)   = $fullmask =~ /^([^!]+)/;
+    $nick ||= '';
 
-    my $query = "SELECT * FROM USER";
-    $self->{logger}->log(4, "📜 SQL Query: $query");
+    $self->{logger}->log(3, "🔍 get_user_from_message() called with hostmask: '$fullmask'");
 
-    my $sth = $self->{dbh}->prepare($query);
+    my $sth = $self->{dbh}->prepare("SELECT * FROM USER");
     unless ($sth->execute) {
         $self->{logger}->log(1, "❌ get_user_from_message() SQL Error: $DBI::errstr");
         return;
     }
 
-    my $row_count = 0;
     my $matched_user;
     while (my $row = $sth->fetchrow_hashref) {
-        $row_count++;
-        my $patterns_raw = $row->{hostmasks} // '';
-        $self->{logger}->log(4, "👤 Checking user '$row->{nickname}' (id_user=$row->{id_user}), hostmasks='$patterns_raw'");
-
-        my @patterns = split(/,/, $patterns_raw);
+        my @patterns = split(/,/, ($row->{hostmasks} // ''));
         foreach my $mask (@patterns) {
             my $orig_mask = $mask;
-            $mask =~ s/^\s+|\s+$//g; # trim
-            my $regex = $mask;
-            $regex =~ s/\./\\./g;
-            $regex =~ s/\*/.*/g;
-            $regex =~ s/\[/\\[/g;
-            $regex =~ s/\]/\\]/g;
-            $regex =~ s/\{/\\{/g;
-            $regex =~ s/\}/\\}/g;
+            $mask =~ s/^\s+|\s+$//g;
+            my $regex = $mask; $regex =~ s/\./\\./g; $regex =~ s/\*/.*/g; $regex =~ s/\[/\\[/g; $regex =~ s/\]/\\]/g; $regex =~ s/\{/\\{/g; $regex =~ s/\}/\\}/g;
 
-            $self->{logger}->log(4, "   🛠 Testing pattern '$orig_mask' → regex /^$regex/");
-
-            if ($hostmask =~ /^$regex/) {
-                $self->{logger}->log(3, "✅ Pattern match: /^$regex/ matches '$hostmask' for user '$row->{nickname}'");
-
+            if ($fullmask =~ /^$regex/) {
                 require Mediabot::User;
                 my $user = Mediabot::User->new($row);
                 $user->load_level($self->{dbh});
-                $user->maybe_autologin($self, $hostmask);
 
-                $self->{logger}->log(3, "🎯 Matched user id=" . $user->id . ", nickname='" . $user->nickname . "', level='" . ($user->level_description // 'undef') . "'");
+                # DEBUG avant autologin
+                $self->_dbg_auth_snapshot('pre-auto', $user, $nick, $fullmask);
+
+                # AUTOLOGIN (pose auth en DB)
+                if ($user->can('maybe_autologin')) {
+                    $user->maybe_autologin($self, $nick, $fullmask);
+                }
+
+                # DEBUG après autologin
+                $self->_dbg_auth_snapshot('post-auto', $user, $nick, $fullmask);
+
+                # Synchronise tous les caches si la DB dit auth=1
+                $self->_ensure_logged_in_state($user, $nick, $fullmask);
+
+                # DEBUG après synchronisation
+                $self->_dbg_auth_snapshot('post-ensure', $user, $nick, $fullmask);
+
+                $self->{logger}->log(3, "🎯 Matched user id=" . ($user->can('id') ? $user->id : $user->{id_user}) .
+                                         ", nickname='" . $user->nickname .
+                                         "', level='" . ($user->level_description // 'undef') . "'");
+
                 $matched_user = $user;
-                last; # match found, no need to check more patterns for this user
+                last;
             }
         }
-
-        last if $matched_user; # stop loop if match found
+        last if $matched_user;
     }
 
     $sth->finish;
-    $self->{logger}->log(4, "ℹ️ get_user_from_message() scanned $row_count users in DB");
 
     unless ($matched_user) {
-        $self->{logger}->log(3, "🚫 No user matched hostmask '$hostmask'");
+        $self->{logger}->log(3, "🚫 No user matched hostmask '$fullmask'");
         return;
     }
+
+    # DEBUG au retour
+    $self->_dbg_auth_snapshot('return', $matched_user, $nick, $fullmask);
 
     return $matched_user;
 }
@@ -2100,37 +2101,102 @@ sub mbRegister(@) {
 sub sayChannel {
     my ($self, $message, $sNick, @tArgs) = @_;
 
+    my $prefix = $message->prefix // '';
+    my ($nick) = $prefix =~ /^([^!]+)/;
+    $nick ||= $sNick || '';
+
+    # DEBUG: show received args
+    my $args_dbg = join(' | ', map { defined $_ ? $_ : '<undef>' } @tArgs);
+    $self->{logger}->log(3, "[say] ENTER nick=$nick prefix='$prefix' args_count=" . scalar(@tArgs) . " args=[ $args_dbg ]");
+
     my $user = $self->get_user_from_message($message);
+    unless ($user) {
+        $self->{logger}->log(3, "[say] get_user_from_message -> no user");
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
 
-    if (defined $user) {
-        if ($user->is_authenticated) {
-            if (defined($user->level) && checkUserLevel($self, $user->level, "Administrator")) {
+    # If available, ensure consistent 'logged-in' state across caches/modules
+    if ($self->can('_ensure_logged_in_state')) {
+        eval { $self->_ensure_logged_in_state($user, $nick, $prefix) };
+        $self->{logger}->log(3, "[say] _ensure_logged_in_state done (err=$@)") if $@;
+    }
 
-                # Expect: say #channel message
-                if (defined($tArgs[0]) && $tArgs[0] ne "" && $tArgs[0] =~ /^#/ && defined($tArgs[1])) {
-                    my (undef, @tArgsTemp) = @tArgs;
-                    my $sChannelText = join(" ", @tArgsTemp);
+    my $is_auth   = eval { $user->is_authenticated ? 1 : 0 } // ($user->{auth} ? 1 : 0);
+    my $lvl_name  = eval { $user->level_description } // ($user->{level} // 'undef');
 
-                    $self->{logger}->log(0, "$sNick issued a say command: $tArgs[0] $sChannelText");
-                    botPrivmsg($self, $tArgs[0], $sChannelText);
-                    logBot($self, $message, undef, "say", @tArgs);
-                } else {
-                    botNotice($self, $sNick, "Syntax: say <#channel> <text>");
-                }
+    $self->{logger}->log(3, "[say] user=".$user->nickname." is_auth=$is_auth level=".$lvl_name);
 
-            } else {
-                my $msg = $message->prefix . " say command attempt (command level [Administrator] for user " . $user->nickname . " [" . ($user->level // 'undef') . "])";
-                $self->noticeConsoleChan($msg);
-                botNotice($self, $sNick, "Your level does not allow you to use this command.");
-            }
-        } else {
-            my $msg = $message->prefix . " say command attempt (user " . $user->nickname . " is not logged in)";
-            $self->noticeConsoleChan($msg);
-            botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+    unless ($is_auth) {
+        my $msg = $message->prefix . " say command attempt (user " . $user->nickname . " is not logged in)";
+        $self->noticeConsoleChan($msg);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    my $has_level = 0;
+    eval {
+        $has_level = checkUserLevel($self, $user->level, "Administrator") ? 1 : 0;
+        1;
+    } or do {
+        $self->{logger}->log(1, "[say] checkUserLevel threw error: $@");
+        $has_level = 0;
+    };
+    $self->{logger}->log(3, "[say] checkUserLevel(user->level, Administrator) => $has_level");
+
+    unless ($has_level) {
+        my $msg = $message->prefix . " say command attempt (command level [Administrator] for user " . $user->nickname . " [" . ($user->level // 'undef') . "])";
+        $self->noticeConsoleChan($msg);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    # ---------- robust args parsing ----------
+    # Expected: say <#channel> <text...>
+    my @a = @tArgs;
+
+    # If the first arg is exactly the caller's nick (case-insensitive), drop it.
+    # This fixes flows where args look like: [ <nick> | <#channel> | <text...> ]
+    if (@a && defined $nick && length $nick) {
+        if (lc($a[0]) eq lc($nick)) {
+            $self->{logger}->log(3, "[say] detected leading nick in args -> shifting it out");
+            shift @a;
         }
     }
-}
 
+    my $chan = shift(@a) // '';
+    my $text = join(' ', @a);
+
+    # Trim spaces
+    for ($chan, $text) { $_ //= ''; s/^\s+|\s+$//g; }
+
+    # If the parser removed '#', restore it (we require a channel target)
+    if ($chan ne '' && $chan !~ /^#/) {
+        $self->{logger}->log(3, "[say] channel '$chan' had no leading '#', normalizing");
+        $chan = "#$chan";
+    }
+
+    $self->{logger}->log(3, "[say] parsed channel='$chan' text='$text' (len=".length($text).")");
+
+    # Validate syntax
+    if ($chan eq '' || $chan !~ /^#/) {
+        $self->{logger}->log(3, "[say] SYNTAX fail: bad channel");
+        botNotice($self, $sNick, "Syntax: say <#channel> <text>");
+        return;
+    }
+    if ($text eq '') {
+        $self->{logger}->log(3, "[say] SYNTAX fail: empty text");
+        botNotice($self, $sNick, "Syntax: say <#channel> <text>");
+        return;
+    }
+
+    # ---------- execution ----------
+    $self->{logger}->log(0, "$sNick issued a say command: $chan $text");
+    botPrivmsg($self, $chan, $text);
+    logBot($self, $message, undef, "say", $chan, $text);
+
+    $self->{logger}->log(3, "[say] DONE");
+}
 
 # Allows the bot Owner to send a raw IRC command manually
 sub dumpCmd {
@@ -2198,40 +2264,102 @@ sub msgCmd {
 sub actChannel {
     my ($self, $message, $sNick, @tArgs) = @_;
 
+    # Derive caller nick for potential arg normalization
+    my $prefix = $message->prefix // '';
+    my ($nick) = $prefix =~ /^([^!]+)/;
+    $nick ||= $sNick || '';
+
+    # DEBUG: show received args
+    my $args_dbg = join(' | ', map { defined $_ ? $_ : '<undef>' } @tArgs);
+    $self->{logger}->log(3, "[act] ENTER nick=$nick args_count=" . scalar(@tArgs) . " args=[ $args_dbg ]");
+
     my $user = $self->get_user_from_message($message);
+    unless (defined $user) {
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
 
-    if (defined $user) {
-        if ($user->is_authenticated) {
-            if (defined($user->level) && checkUserLevel($self, $user->level, "Administrator")) {
+    # Keep caches/modules in sync if helper exists
+    if ($self->can('_ensure_logged_in_state')) {
+        eval { $self->_ensure_logged_in_state($user, $nick, $prefix) };
+        $self->{logger}->log(3, "[act] _ensure_logged_in_state done (err=$@)") if $@;
+    }
 
-                # Ensure we have a channel and some text
-                if (defined($tArgs[0]) && $tArgs[0] ne "" &&
-                    defined($tArgs[1]) && $tArgs[1] ne "" &&
-                    $tArgs[0] =~ /^#/) {
+    my $is_auth  = eval { $user->is_authenticated ? 1 : 0 } // ($user->{auth} ? 1 : 0);
+    my $lvl_name = eval { $user->level_description } // ($user->level // 'undef');
+    $self->{logger}->log(3, "[act] user=".$user->nickname." is_auth=$is_auth level=".$lvl_name);
 
-                    my (undef, @tArgsText) = @tArgs;
-                    my $sChannelText = join(" ", @tArgsText);
+    unless ($is_auth) {
+        my $notice = $message->prefix . " act command attempt (user " . $user->nickname . " is not logged in)";
+        noticeConsoleChan($self, $notice);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
 
-                    $self->{logger}->log(0, "$sNick issued an act command: $tArgs[0] ACTION $sChannelText");
-                    botAction($self, $tArgs[0], $sChannelText);
-                    logBot($self, $message, undef, "act", @tArgs);
+    my $has_level = 0;
+    eval {
+        $has_level = checkUserLevel($self, $user->level, "Administrator") ? 1 : 0;
+        1;
+    } or do {
+        $self->{logger}->log(1, "[act] checkUserLevel threw error: $@");
+        $has_level = 0;
+    };
+    $self->{logger}->log(3, "[act] checkUserLevel(user->level, Administrator) => $has_level");
 
-                } else {
-                    botNotice($self, $sNick, "Syntax: act <#channel> <text>");
-                }
+    unless ($has_level) {
+        my $notice = $message->prefix . " act command attempt (command level [Administrator] for user " . $user->nickname . " [" . ($user->level // 'undef') . "])";
+        noticeConsoleChan($self, $notice);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
 
-            } else {
-                my $notice = $message->prefix . " act command attempt (command level [Administrator] for user " . $user->nickname . "[" . $user->level . "])";
-                noticeConsoleChan($self, $notice);
-                botNotice($self, $sNick, "Your level does not allow you to use this command.");
-            }
-        } else {
-            my $notice = $message->prefix . " act command attempt (user " . $user->nickname . " is not logged in)";
-            noticeConsoleChan($self, $notice);
-            botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+    # ---------- robust args parsing ----------
+    # Expected: act <#channel> <text...>
+    my @a = @tArgs;
+
+    # If the first arg equals the caller's nick (case-insensitive), drop it.
+    # This fixes flows like: [ <nick> | <#channel> | <text...> ]
+    if (@a && defined $nick && length $nick) {
+        if (lc($a[0]) eq lc($nick)) {
+            $self->{logger}->log(3, "[act] detected leading nick in args -> shifting it out");
+            shift @a;
         }
     }
+
+    my $chan = shift(@a) // '';
+    my $text = join(' ', @a);
+
+    # Trim spaces
+    for ($chan, $text) { $_ //= ''; s/^\s+|\s+$//g; }
+
+    # Normalize channel: if no leading '#', add it (act targets channels only)
+    if ($chan ne '' && $chan !~ /^#/) {
+        $self->{logger}->log(3, "[act] channel '$chan' had no leading '#', normalizing");
+        $chan = "#$chan";
+    }
+
+    $self->{logger}->log(3, "[act] parsed channel='$chan' text='$text' (len=".length($text).")");
+
+    # Validate syntax
+    unless ($chan ne '' && $chan =~ /^#/) {
+        $self->{logger}->log(3, "[act] SYNTAX fail: bad channel");
+        botNotice($self, $sNick, "Syntax: act <#channel> <text>");
+        return;
+    }
+    if ($text eq '') {
+        $self->{logger}->log(3, "[act] SYNTAX fail: empty text");
+        botNotice($self, $sNick, "Syntax: act <#channel> <text>");
+        return;
+    }
+
+    # ---------- execution ----------
+    $self->{logger}->log(0, "$sNick issued an act command: $chan ACTION $text");
+    botAction($self, $chan, $text);
+    logBot($self, $message, undef, "act", $chan, $text);
+
+    $self->{logger}->log(3, "[act] DONE");
 }
+
 
 
 # Display detailed bot and system status to authenticated Master users
@@ -12678,5 +12806,107 @@ sub get_tmdb_info_with_curl {
         media_type      => $result->{media_type},
     };
 }
+
+# --- Helpers DEBUG ------------------------------------------------------------
+
+sub _bool_str {  # affiche joliment undef/0/1
+    return 'undef' if !defined $_[0];
+    return $_[0] ? '1' : '0';
+}
+
+# Dump l'état d'auth partout (objet, DB, module Auth, caches)
+sub _dbg_auth_snapshot {
+    my ($self, $stage, $user, $nick, $fullmask) = @_;
+
+    my $uid = eval { $user && $user->can('id') ? $user->id : undef } // ($user->{id_user} // $user->{id} // undef);
+    my $user_auth = $user ? $user->{auth} : undef;
+
+    my $db_auth   = 'n/a';
+    if ($uid) {
+        eval { ($db_auth) = $self->{dbh}->selectrow_array('SELECT auth FROM USER WHERE id_user=?', undef, $uid); 1; }
+          or do { $db_auth = 'err'; };
+    }
+
+    my $auth_mod = 'n/a';
+    if ($self->{auth} && $uid) {
+        my $ok = eval { $self->{auth}->is_logged_in_id($uid) };
+        $auth_mod = defined $ok ? $ok : 'err';
+    }
+
+    my $sess_auth = eval { $self->{sessions}{lc($nick)}{auth} } // undef;
+    my $cache_id  = eval { $self->{logged_in}{$uid} } // undef;
+
+    $self->{logger}->log(
+        3,
+        sprintf("🔎 AUTH[%s] uid=%s user.auth=%s db.auth=%s authmod=%s cache.logged_in=%s session[%s].auth=%s mask='%s'",
+            $stage,
+            (defined $uid ? $uid : 'undef'),
+            _bool_str($user_auth),
+            ( $db_auth eq 'n/a' || $db_auth eq 'err' ? $db_auth : _bool_str($db_auth) ),
+            ( $auth_mod eq 'n/a' || $auth_mod eq 'err' ? $auth_mod : _bool_str($auth_mod) ),
+            _bool_str($cache_id),
+            (defined $nick ? $nick : ''),
+            _bool_str($sess_auth),
+            (defined $fullmask ? $fullmask : '')
+        )
+    );
+}
+
+# Force les caches mémoire si la DB dit auth=1 (utile si du vieux code lit ailleurs)
+sub _ensure_logged_in_state {
+    my ($self, $user, $nick, $fullmask) = @_;
+    return unless $user;
+
+    my $uid = eval { $user->can('id') ? $user->id : undef } // ($user->{id_user} // $user->{id} // undef);
+    return unless $uid;
+
+    my ($auth_db) = $self->{dbh}->selectrow_array('SELECT auth FROM USER WHERE id_user=?', undef, $uid);
+    return unless $auth_db;
+
+    $user->{auth} = 1;
+
+    if ($self->{auth}) {
+        eval { $self->{auth}->set_logged_in($uid, 1) };
+        eval {
+            $self->{auth}->set_session_user($nick, {
+                id_user        => $uid,
+                nickname       => $user->{nickname},
+                username       => $user->{username},
+                id_user_level  => $user->{id_user_level},
+                auth           => 1,
+                hostmask       => $fullmask,
+            })
+        };
+        eval { $self->{auth}->update_last_login($uid) };
+    }
+
+    $self->{logged_in}{$uid}           = 1;
+    $self->{logged_in_by_nick}{lc $nick} = 1;
+    $self->{sessions}{lc $nick} = {
+        id_user        => $uid,
+        nickname       => $user->{nickname},
+        username       => $user->{username},
+        id_user_level  => $user->{id_user_level},
+        auth           => 1,
+        hostmask       => $fullmask,
+    };
+    $self->{users_by_id}{$uid} = {
+        id_user        => $uid,
+        nickname       => $user->{nickname},
+        username       => $user->{username},
+        id_user_level  => $user->{id_user_level},
+        auth           => 1,
+        hostmask       => $fullmask,
+    };
+    $self->{users_by_nick}{lc $nick} = {
+        id_user        => $uid,
+        nickname       => $user->{nickname},
+        username       => $user->{username},
+        id_user_level  => $user->{id_user_level},
+        auth           => 1,
+        hostmask       => $fullmask,
+    };
+}
+
 
 1;

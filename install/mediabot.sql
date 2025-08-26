@@ -1,15 +1,13 @@
 -- -*- coding: utf-8 -*-
-SET NAMES utf8mb4;
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 SET CHARACTER SET utf8mb4;
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 SET AUTOCOMMIT = 0;
 START TRANSACTION;
 SET time_zone = "+00:00";
 
-SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
-SET AUTOCOMMIT = 0;
-START TRANSACTION;
-SET time_zone = "+00:00";
+-- -*- coding: utf-8 -*-
+
 
 -- --------------------------------------------------------
 
@@ -25,7 +23,7 @@ CREATE TABLE `ACTIONS_LOG` (
   `hostmask` varchar(255) NOT NULL,
   `action` varchar(255) NOT NULL,
   `args` varchar(255) DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 -- --------------------------------------------------------
 
@@ -45,7 +43,7 @@ CREATE TABLE `ACTIONS_QUEUE` (
   `result5` varchar(255) DEFAULT NULL,
   `result6` varchar(255) DEFAULT NULL,
   `status` int(11) NOT NULL DEFAULT '0'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 -- --------------------------------------------------------
 
@@ -64,7 +62,7 @@ CREATE TABLE `CHANNEL` (
   `notice` varchar(255) DEFAULT NULL,
   `tmdb_lang` varchar(255) NOT NULL DEFAULT 'en-US',
   `topic` varchar(400) DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 -- --------------------------------------------------------
 
@@ -76,11 +74,11 @@ CREATE TABLE `CHANNEL_LOG` (
   `id_channel_log` bigint(20) NOT NULL,
   `id_channel` bigint(20) DEFAULT NULL,
   `ts` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `event_type` varchar(255) CHARACTER SET latin1 NOT NULL,
-  `nick` varchar(255) CHARACTER SET latin1 NOT NULL,
+  `event_type` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `nick` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `userhost` varchar(255) NOT NULL,
-  `publictext` varchar(400) CHARACTER SET latin1 DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+  `publictext` varchar(400) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 -- --------------------------------------------------------
 
@@ -97,7 +95,7 @@ CREATE TABLE `CHANNEL_PURGED` (
   `key` varchar(255) DEFAULT NULL,
   `chanmode` varchar(255) DEFAULT NULL,
   `auto_join` tinyint(1) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 -- --------------------------------------------------------
 
@@ -110,9 +108,9 @@ CREATE TABLE `CONSOLE` (
   `id_parent` bigint(20) DEFAULT NULL,
   `position` int(11) NOT NULL DEFAULT '1',
   `level` int(11) NOT NULL DEFAULT '0',
-  `description` varchar(255) CHARACTER SET utf8 COLLATE utf8_unicode_ci NOT NULL,
-  `url` varchar(255) CHARACTER SET utf8 COLLATE utf8_unicode_ci NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+  `description` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COLLATE utf8mb4_unicode_ci NOT NULL,
+  `url` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COLLATE utf8mb4_unicode_ci NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Déchargement des données de la table `CONSOLE`
@@ -139,7 +137,7 @@ INSERT INTO `CONSOLE` (`id_console`, `id_parent`, `position`, `level`, `descript
 CREATE TABLE `NETWORK` (
   `id_network` bigint(20) NOT NULL,
   `network_name` varchar(255) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 -- --------------------------------------------------------
 
@@ -152,11 +150,11 @@ CREATE TABLE `PUBLIC_COMMANDS` (
   `id_user` bigint(20) DEFAULT NULL,
   `id_public_commands_category` bigint(20) NOT NULL,
   `creation_date` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `command` varchar(255) CHARACTER SET utf8 COLLATE utf8_unicode_ci NOT NULL,
-  `description` varchar(255) CHARACTER SET utf8 COLLATE utf8_unicode_ci NOT NULL,
-  `action` varchar(255) CHARACTER SET utf8 COLLATE utf8_unicode_ci NOT NULL,
+  `command` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COLLATE utf8mb4_unicode_ci NOT NULL,
+  `action` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COLLATE utf8mb4_unicode_ci NOT NULL,
   `hits` bigint(20) NOT NULL DEFAULT '0'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Déchargement des données de la table `PUBLIC_COMMANDS`
@@ -175,7 +173,7 @@ INSERT INTO `PUBLIC_COMMANDS` (`id_public_commands`, `id_user`, `id_public_comma
 CREATE TABLE `PUBLIC_COMMANDS_CATEGORY` (
   `id_public_commands_category` bigint(20) NOT NULL,
   `description` varchar(255) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Déchargement des données de la table `PUBLIC_COMMANDS_CATEGORY`
@@ -194,7 +192,7 @@ CREATE TABLE `SERVERS` (
   `id_server` bigint(20) NOT NULL,
   `id_network` bigint(20) NOT NULL,
   `server_hostname` varchar(255) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 -- --------------------------------------------------------
 
@@ -204,10 +202,10 @@ CREATE TABLE `SERVERS` (
 
 CREATE TABLE `TIMERS` (
   `id_timers` bigint(20) NOT NULL,
-  `name` varchar(255) CHARACTER SET utf8 NOT NULL,
+  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `duration` bigint(20) NOT NULL,
-  `command` varchar(255) CHARACTER SET utf8 NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+  `command` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 -- --------------------------------------------------------
 
@@ -218,19 +216,19 @@ CREATE TABLE `TIMERS` (
 CREATE TABLE `USER` (
   `id_user` bigint(20) NOT NULL,
   `creation_date` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `hostmasks` varchar(255) CHARACTER SET latin1 NOT NULL DEFAULT '',
-  `nickname` varchar(255) CHARACTER SET latin1 NOT NULL DEFAULT '',
-  `password` varchar(255) CHARACTER SET latin1 DEFAULT NULL,
-  `username` varchar(255) CHARACTER SET latin1 DEFAULT NULL,
+  `hostmasks` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `nickname` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `password` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `username` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `id_user_level` bigint(20) NOT NULL,
-  `info1` varchar(255) CHARACTER SET latin1 DEFAULT NULL,
-  `info2` varchar(255) CHARACTER SET latin1 DEFAULT NULL,
+  `info1` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `info2` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `last_login` timestamp NULL DEFAULT NULL,
   `auth` int(11) NOT NULL DEFAULT '0',
   `tz` varchar(255) DEFAULT NULL,
   `birthday` varchar(255) DEFAULT NULL,
   `fortniteid` varchar(255) DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 -- --------------------------------------------------------
 
@@ -243,9 +241,9 @@ CREATE TABLE `USER_CHANNEL` (
   `id_user` bigint(20) NOT NULL,
   `id_channel` bigint(20) NOT NULL,
   `level` bigint(20) NOT NULL DEFAULT '0',
-  `greet` varchar(255) CHARACTER SET latin1 DEFAULT NULL,
-  `automode` varchar(255) CHARACTER SET latin1 NOT NULL DEFAULT 'NONE'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+  `greet` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `automode` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'NONE'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 -- --------------------------------------------------------
 
@@ -256,8 +254,8 @@ CREATE TABLE `USER_CHANNEL` (
 CREATE TABLE `USER_LEVEL` (
   `id_user_level` bigint(20) NOT NULL,
   `level` int(11) NOT NULL,
-  `description` varchar(255) CHARACTER SET latin1 NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+  `description` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Déchargement des données de la table `USER_LEVEL`
@@ -283,7 +281,7 @@ CREATE TABLE `WEBLOG` (
   `ip` varchar(255) NOT NULL,
   `hostname` varchar(255) DEFAULT NULL,
   `logresult` tinyint(1) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Index pour les tables déchargées
@@ -300,7 +298,7 @@ ALTER TABLE `ACTIONS_LOG`
 --
 ALTER TABLE `CHANNEL`
   ADD PRIMARY KEY (`id_channel`),
-  ADD UNIQUE KEY `name` (`name`);
+  ADD UNIQUE KEY `name` (`name`(191));
 
 --
 -- Index pour la table `CHANNEL_LOG`
@@ -308,8 +306,8 @@ ALTER TABLE `CHANNEL`
 ALTER TABLE `CHANNEL_LOG`
   ADD PRIMARY KEY (`id_channel_log`),
   ADD KEY `ts` (`ts`),
-  ADD KEY `nick` (`nick`),
-  ADD KEY `userhost` (`userhost`);
+  ADD KEY `nick` (`nick`(191)),
+  ADD KEY `userhost` (`userhost`(191));
 
 --
 -- Index pour la table `CHANNEL_PURGED`
@@ -328,14 +326,14 @@ ALTER TABLE `CONSOLE`
 --
 ALTER TABLE `NETWORK`
   ADD PRIMARY KEY (`id_network`),
-  ADD UNIQUE KEY `network_name` (`network_name`);
+  ADD UNIQUE KEY `network_name` (`network_name`(191));
 
 --
 -- Index pour la table `PUBLIC_COMMANDS`
 --
 ALTER TABLE `PUBLIC_COMMANDS`
   ADD PRIMARY KEY (`id_public_commands`),
-  ADD UNIQUE KEY `command` (`command`);
+  ADD UNIQUE KEY `command` (`command`(191));
 
 --
 -- Index pour la table `PUBLIC_COMMANDS_CATEGORY`
@@ -354,14 +352,14 @@ ALTER TABLE `SERVERS`
 --
 ALTER TABLE `TIMERS`
   ADD PRIMARY KEY (`id_timers`),
-  ADD UNIQUE KEY `name` (`name`);
+  ADD UNIQUE KEY `name` (`name`(191));
 
 --
 -- Index pour la table `USER`
 --
 ALTER TABLE `USER`
   ADD PRIMARY KEY (`id_user`),
-  ADD UNIQUE KEY `nickname` (`nickname`);
+  ADD UNIQUE KEY `nickname` (`nickname`(191));
 
 --
 -- Index pour la table `USER_CHANNEL`
@@ -477,7 +475,7 @@ CREATE TABLE `CHANNEL_SET` (
   `id_channel_set` bigint(20) NOT NULL,
   `id_channel` bigint(20) NOT NULL,
   `id_chanset_list` bigint(20) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 -- --------------------------------------------------------
 
@@ -488,7 +486,7 @@ CREATE TABLE `CHANNEL_SET` (
 CREATE TABLE `CHANSET_LIST` (
   `id_chanset_list` bigint(20) NOT NULL,
   `chanset` varchar(255) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Index pour les tables déchargées
@@ -549,7 +547,7 @@ CREATE TABLE `RESPONDERS` (
   `chance` bigint(20) NOT NULL DEFAULT '95',
   `responder` varchar(255) NOT NULL,
   `answer` varchar(255) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Index pour les tables déchargées
@@ -581,7 +579,7 @@ CREATE TABLE `BADWORDS` (
   `id_badwords` bigint(20) NOT NULL,
   `id_channel` bigint(20) NOT NULL DEFAULT '0',
   `badword` varchar(255) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Index pour les tables déchargées
@@ -592,7 +590,7 @@ CREATE TABLE `BADWORDS` (
 --
 ALTER TABLE `BADWORDS`
   ADD PRIMARY KEY (`id_badwords`),
-  ADD KEY `badword` (`badword`);
+  ADD KEY `badword` (`badword`(191));
 
 --
 -- AUTO_INCREMENT pour les tables déchargées
@@ -608,7 +606,7 @@ CREATE TABLE `IGNORES` (
   `id_ignores` bigint(20) NOT NULL,
   `id_channel` bigint(20) NOT NULL DEFAULT '0',
   `hostmask` varchar(255) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Index pour les tables déchargées
@@ -619,7 +617,7 @@ CREATE TABLE `IGNORES` (
 --
 ALTER TABLE `IGNORES`
   ADD PRIMARY KEY (`id_ignores`),
-  ADD KEY `hostmask` (`hostmask`);
+  ADD KEY `hostmask` (`hostmask`(191));
 
 --
 -- AUTO_INCREMENT pour les tables déchargées
@@ -637,7 +635,7 @@ CREATE TABLE `QUOTES` (
   `id_user` bigint(20) NOT NULL,
   `ts` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `quotetext` varchar(360) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Index pour les tables déchargées
@@ -673,7 +671,7 @@ CREATE TABLE `CHANNEL_FLOOD` (
   `latest` bigint(20) NOT NULL DEFAULT '0',
   `timetowait` int(11) NOT NULL DEFAULT '300',
   `notification` int(11) NOT NULL DEFAULT '0'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Index pour les tables déchargées
@@ -703,7 +701,7 @@ CREATE TABLE `MP3` (
   `filename` varchar(255) NOT NULL,
   `artist` varchar(255) NOT NULL,
   `title` varchar(255) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Index pour les tables déchargées
@@ -732,7 +730,7 @@ ALTER TABLE `MP3`
 CREATE TABLE `HAILO_EXCLUSION_NICK` (
   `id_hailo_exclusion_nick` bigint(20) NOT NULL,
   `nick` varchar(255) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Index pour les tables déchargées
@@ -743,7 +741,7 @@ CREATE TABLE `HAILO_EXCLUSION_NICK` (
 --
 ALTER TABLE `HAILO_EXCLUSION_NICK`
   ADD PRIMARY KEY (`id_hailo_exclusion_nick`),
-  ADD KEY `nick` (`nick`);
+  ADD KEY `nick` (`nick`(191));
 
 --
 -- AUTO_INCREMENT pour les tables déchargées
@@ -763,7 +761,7 @@ CREATE TABLE `HAILO_CHANNEL` (
   `id_hailo_channel` bigint(20) NOT NULL,
   `id_channel` bigint(20) NOT NULL,
   `ratio` int(11) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Index pour les tables déchargées
@@ -793,7 +791,7 @@ ALTER TABLE `HAILO_CHANNEL`
 CREATE TABLE `TIMEZONE` (
   `id_timezone` bigint(20) NOT NULL,
   `tz` varchar(255) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Déchargement des données de la table `TIMEZONE`
@@ -1217,7 +1215,7 @@ ALTER TABLE `TIMEZONE`
 CREATE TABLE `YOMOMMA` (
   `id_yomomma` bigint(20) NOT NULL,
   `yomomma` varchar(255) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 
 --
 -- Déchargement des données de la table `YOMOMMA`
@@ -1799,4 +1797,3 @@ ALTER TABLE `YOMOMMA`
   MODIFY `id_yomomma` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=554;
 
 COMMIT;
-

@@ -27,6 +27,10 @@ use Switch;
 use Data::Dumper;
 use Encode;
 
+use open qw(:std :encoding(UTF-8));
+binmode(STDOUT, ':encoding(UTF-8)');
+binmode(STDERR, ':encoding(UTF-8)');
+
 # +---------------------------------------------------------------------------+
 # !          SETTINGS                                                         !
 # +---------------------------------------------------------------------------+

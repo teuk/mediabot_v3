@@ -104,38 +104,80 @@ Try to log in the user automatically using config-based or DB-based flags.
 =cut
 
 sub maybe_autologin {
-    my ($self, $bot, $nick, $fullmask) = @_;
-    my $dbh    = $bot->{dbh};
-    my $logger = $bot->{logger};
+    my ($self, $bot, $matched_hostmask) = @_;
+    return if $self->{auth};  # already logged in
 
-    $logger->log(3, "🟡 maybe_autologin() enter: id=$self->{id} nick=$self->{nickname} user.auth=".($self->{auth}//'undef')." username=".($self->{username}//'undef')." mask='$fullmask'");
+    my $conf = $bot->{conf};
+    my $dbh  = $bot->{dbh};
+    $self->set_dbh($dbh);
 
-    return 1 if $self->{auth};  # déjà loggé
-
-    my $did = 0;
-
-    if (defined $self->{username} && $self->{username} eq '#AUTOLOGIN#') {
-        my $rows = $dbh->do('UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?', undef, $self->{id});
-        $logger->log(3, "🟢 AUTOLOGIN DB-flag: UPDATE auth=1 rows=$rows");
-        if ($rows) { $self->{auth} = 1; $did = 1; }
-    }
-
-    if (!$did) {
-        my $unet = $bot->{conf}->get('undernet.UNET_CSERVICE_HOSTMASK') || '';
-        if ($unet && $fullmask =~ /\Q$unet\E$/) {
-            my $rows = $dbh->do('UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?', undef, $self->{id});
-            $logger->log(3, "🟢 AUTOLOGIN Undernet: UPDATE auth=1 rows=$rows (mask match on '$unet')");
-            if ($rows) { $self->{auth} = 1; $did = 1; }
+    # Undernet hostmask-based auto-login
+    if (
+        defined($conf->get('connection.CONN_NETWORK_TYPE')) &&
+        $conf->get('connection.CONN_NETWORK_TYPE') eq "1" &&
+        defined($conf->get('undernet.UNET_CSERVICE_HOSTMASK')) &&
+        $conf->get('undernet.UNET_CSERVICE_HOSTMASK') ne ""
+    ) {
+        my $unet_mask = $conf->get('undernet.UNET_CSERVICE_HOSTMASK');
+        if ($matched_hostmask =~ /$unet_mask$/) {
+            my $sth = $dbh->prepare("UPDATE USER SET auth=1 WHERE id_user=?");
+            if ($sth->execute($self->{id})) {
+                $self->{auth} = 1;
+                $self->load_level($dbh);
+                $bot->{logger}->log(0, "Auto login (Undernet mask) for $self->{nickname} [$matched_hostmask]");
+                $bot->noticeConsoleChan("Auto login (Undernet mask) for $self->{nickname} [$matched_hostmask]");
+            }
+            $sth->finish;
         }
     }
 
-    $logger->log(3, "🔵 maybe_autologin() leave: did=$did user.auth=".($self->{auth}//'undef'));
-    return $did ? 1 : 0;
+    # #AUTOLOGIN# fallback
+    if (defined $self->{username} && $self->{username} eq '#AUTOLOGIN#') {
+        my $sth = $dbh->prepare("UPDATE USER SET auth=1 WHERE id_user=?");
+        if ($sth->execute($self->{id})) {
+            $self->{auth} = 1;
+            $self->load_level($dbh);
+            $bot->{logger}->log(0, "Auto login (DB flag #AUTOLOGIN#) for $self->{nickname} [$matched_hostmask]");
+            $bot->noticeConsoleChan("Auto login (DB flag #AUTOLOGIN#) for $self->{nickname} [$matched_hostmask]");
+        }
+        $sth->finish;
+    }
 }
 
+=head2 has_level($required_level [, $dbh])
 
+Check if the user has at least the required level.
+If a string is passed (e.g. "Administrator"), $dbh must be available or passed.
 
+=cut
 
+sub has_level {
+    my ($self, $required_level, $dbh) = @_;
+    $dbh //= $self->{dbh};
+    return 0 unless defined $required_level && $dbh;
+
+    $self->load_level($dbh) unless defined $self->{level};
+
+    # Log interne (debug)
+    if ($self->{logger}) {
+        $self->{logger}->log(3, "🔍 has_level() check for user " . $self->nickname .
+                             " [current=" . ($self->{level_desc} // 'undef') . ", required=$required_level]");
+    }
+
+    if ($required_level =~ /^\d+$/) {
+        return ($self->{level} <= $required_level);
+    }
+
+    my $sth = $dbh->prepare("SELECT level FROM USER_LEVEL WHERE description = ?");
+    if ($sth->execute($required_level)) {
+        if (my $ref = $sth->fetchrow_hashref) {
+            my $required_value = $ref->{level};
+            return ($self->{level} <= $required_value);
+        }
+    }
+
+    return 0;
+}
 
 
 # Handle method for compatibility with other parts of the bot
