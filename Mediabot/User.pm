@@ -103,35 +103,68 @@ Try to log in the user automatically using config-based or DB-based flags.
 
 =cut
 
+# Auto-login helper: authenticate user if autologin flag is set OR if host cloak matches "<nickname>.users.undernet.org"
 sub maybe_autologin {
-    my ($self, $bot, $nick, $fullmask) = @_;
-    my $dbh    = $bot->{dbh};
-    my $logger = $bot->{logger};
+    my ($self, $user, $irc_nick, $prefix) = @_;
+    my $logger = $self->{logger};
 
-    $logger->log(3, "🟡 maybe_autologin() enter: id=$self->{id} nick=$self->{nickname} user.auth=".($self->{auth}//'undef')." username=".($self->{username}//'undef')." mask='$fullmask'");
+    # Already authenticated?
+    my $is_auth = eval { $user->is_authenticated ? 1 : 0 } // ($user->{auth} ? 1 : 0);
+    return 0 if $is_auth;
 
-    return 1 if $self->{auth};  # déjà loggé
-
-    my $did = 0;
-
-    if (defined $self->{username} && $self->{username} eq '#AUTOLOGIN#') {
-        my $rows = $dbh->do('UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?', undef, $self->{id});
-        $logger->log(3, "🟢 AUTOLOGIN DB-flag: UPDATE auth=1 rows=$rows");
-        if ($rows) { $self->{auth} = 1; $did = 1; }
+    my $uid      = eval { $user->id }        // $user->{id_user};
+    my $db_nick  = lc( eval { $user->nickname } // ($user->{nickname} // '') );
+    my $username =      eval { $user->username } // $user->{username};
+    my $host     = '';
+    if (defined $prefix && $prefix ne '') {
+        # prefix like "Nick!ident@host"
+        ($host) = $prefix =~ /@(.+)$/;
+        $host = lc($host // '');
     }
 
-    if (!$did) {
-        my $unet = $bot->{conf}->get('undernet.UNET_CSERVICE_HOSTMASK') || '';
-        if ($unet && $fullmask =~ /\Q$unet\E$/) {
-            my $rows = $dbh->do('UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?', undef, $self->{id});
-            $logger->log(3, "🟢 AUTOLOGIN Undernet: UPDATE auth=1 rows=$rows (mask match on '$unet')");
-            if ($rows) { $self->{auth} = 1; $did = 1; }
+    my $should_auto = 0;
+    my $reason      = '';
+
+    # A) Explicit autologin flag in DB (username == '#AUTOLOGIN#')
+    if (defined $username && $username eq '#AUTOLOGIN#') {
+        $should_auto = 1;
+        $reason      = 'flag';
+    }
+    # B) UnderNet cloak: "<nickname>.users.undernet.org"
+    elsif ($host =~ /(?:^|\.)(users\.undernet\.org)$/) {
+        my ($leftmost) = split(/\./, $host, 2);  # leftmost label before ".users.undernet.org"
+        if (defined $leftmost && $leftmost ne '' && $db_nick ne '' && lc($leftmost) eq $db_nick) {
+            $should_auto = 1;
+            $reason      = 'cloak';
         }
     }
 
-    $logger->log(3, "🔵 maybe_autologin() leave: did=$did user.auth=".($self->{auth}//'undef'));
-    return $did ? 1 : 0;
+    return 0 unless $should_auto;
+
+    # Mark authenticated in DB and memory
+    my $dbh = $self->{dbh} // eval { $self->{db}->dbh };
+    if ($dbh) {
+        eval {
+            $dbh->do('UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?', undef, $uid);
+            1;
+        } or do {
+            $logger->log(1, "[AUTOLOGIN] DB update failed for uid=$uid: $@");
+        };
+    } else {
+        $logger->log(1, "[AUTOLOGIN] No DB handle; cannot persist auth state for uid=$uid");
+    }
+
+    # In-memory caches (best effort)
+    eval {
+        $self->{auth}->{logged_in}{$uid} = 1 if exists $self->{auth}->{logged_in};
+        $self->{auth}->{sessions}{lc $db_nick} = { id_user => $uid, auth => 1 } if (defined $db_nick && exists $self->{auth}->{sessions});
+        1;
+    };
+
+    $logger->log(3, sprintf("[AUTOLOGIN] uid=%s nick=%s via=%s -> auth=1", $uid//'?', $db_nick||'?', $reason));
+    return 1;
 }
+
 
 
 
