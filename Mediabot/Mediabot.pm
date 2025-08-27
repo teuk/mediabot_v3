@@ -1824,45 +1824,97 @@ sub checkAuth(@) {
 	$sth->finish;
 }
 
-# Handle user login via private message
+# Handle user login via private message (strictly DB nickname + password)
 sub userLogin {
     my ($self, $message, $sNick, @tArgs) = @_;
 
-    # Expect exactly: login <username> <password>
-    if (defined $tArgs[0] && $tArgs[0] ne "" && defined $tArgs[1] && $tArgs[1] ne "") {
-        my $user = $self->get_user_from_message($message);
+    # Extract caller nick from prefix for robust arg parsing
+    my $prefix  = $message->prefix // '';
+    my ($caller) = $prefix =~ /^([^!]+)/;     # e.g., Te[u]K
+    $caller //= $sNick // '';
 
-        if (defined $user) {
-            my $password = $user->password;
-            my $user_id  = $user->id;
-            my $nickname = $user->nickname;
-            my $level_desc = $user->level_description // "unknown";
+    # If the first arg is the caller nick (common when parser prepends it), drop it
+    if (@tArgs >= 3 && defined $caller && $caller ne '' && lc($tArgs[0]) eq lc($caller)) {
+        shift @tArgs;
+        # now we expect exactly: <nickname_in_db> <password>
+    }
 
-            unless (defined $password) {
-                botNotice($self, $sNick, "Your password is not set. Use /msg " . $self->{irc}->nick_folded . " pass password");
-                return;
-            }
-
-            my $auth_ok = $self->{auth}->verify_credentials($user_id, $tArgs[0], $tArgs[1]);
-
-            if ($auth_ok) {
-                botNotice($self, $sNick, "Login successful as $nickname (Level: $level_desc)");
-                my $msg = $message->prefix . " Successful login as $nickname (Level: $level_desc)";
-                $self->noticeConsoleChan($msg);
-                logBot($self, $message, undef, "login", $tArgs[0], "Success");
-            } else {
-                botNotice($self, $sNick, "Login failed (Bad password).");
-                my $msg = $message->prefix . " Failed login (Bad password)";
-                $self->noticeConsoleChan($msg);
-                logBot($self, $message, undef, "login", $tArgs[0], "Failed (Bad password)");
-            }
-        } else {
-            my $msg = $message->prefix . " Failed login (hostmask not found in DB)";
-            $self->noticeConsoleChan($msg);
-            logBot($self, $message, undef, "login", $tArgs[0], "Failed (Bad hostmask)");
-        }
-    } else {
+    # Expect: login <nickname_in_db> <password>
+    unless (defined $tArgs[0] && $tArgs[0] ne "" && defined $tArgs[1] && $tArgs[1] ne "") {
         botNotice($self, $sNick, "Syntax error: /msg " . $self->{irc}->nick_folded . " login <username> <password>");
+        return;
+    }
+
+    my $typed_user = $tArgs[0];     # MUST match USER.nickname exactly (e.g., 'teuk')
+    my $typed_pass = $tArgs[1];
+
+    my $dbh = eval { $self->{db}->dbh } or do {
+        botNotice($self, $sNick, "Internal error (DB unavailable).");
+        return;
+    };
+
+    # 1) Fetch account strictly by DB nickname
+    my ($id_user, $db_nick, $stored_hash, $level_id);
+    eval {
+        my $sth = $dbh->prepare(q{
+            SELECT id_user, nickname, password, id_user_level
+            FROM USER
+            WHERE nickname = ?
+            LIMIT 1
+        });
+        $sth->execute($typed_user);
+        ($id_user, $db_nick, $stored_hash, $level_id) = $sth->fetchrow_array;
+        $sth->finish;
+        1;
+    } or do {
+        botNotice($self, $sNick, "Internal error (query failed).");
+        return;
+    };
+
+    unless (defined $id_user) {
+        botNotice($self, $sNick, "Login failed (Unknown user).");
+        my $msg = $message->prefix . " Failed login (Unknown user: $typed_user)";
+        $self->noticeConsoleChan($msg);
+        logBot($self, $message, undef, "login", $typed_user, "Failed (Unknown user)");
+        return;
+    }
+
+    unless (defined $stored_hash && $stored_hash ne "") {
+        botNotice($self, $sNick, "Your password is not set. Use /msg " . $self->{irc}->nick_folded . " pass <password>");
+        return;
+    }
+
+    # 2) Compute MariaDB PASSWORD() candidate and compare
+    my ($calc_hash) = eval { $dbh->selectrow_array('SELECT PASSWORD(?)', undef, $typed_pass) };
+    unless (defined $calc_hash) {
+        botNotice($self, $sNick, "Internal error (hash compute failed).");
+        return;
+    }
+
+    if ($stored_hash eq $calc_hash) {
+        # 3) Mark authenticated and stamp last_login (always by id_user)
+        eval {
+            $dbh->do('UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?', undef, $id_user);
+            1;
+        };
+
+        # Best-effort in-memory flags (ignore if not present)
+        eval {
+            $self->{auth}->{logged_in}{$id_user} = 1 if exists $self->{auth}->{logged_in};
+            $self->{auth}->{sessions}{lc $db_nick} = { id_user => $id_user, auth => 1 } if exists $self->{auth}->{sessions};
+            1;
+        };
+
+        my $level_desc = eval { $self->{auth}->level_id_to_desc($level_id) } // $level_id // "unknown";
+        botNotice($self, $sNick, "Login successful as $db_nick (Level: $level_desc)");
+        my $msg = $message->prefix . " Successful login as $db_nick (Level: $level_desc)";
+        $self->noticeConsoleChan($msg);
+        logBot($self, $message, undef, "login", $typed_user, "Success");
+    } else {
+        botNotice($self, $sNick, "Login failed (Bad password).");
+        my $msg = $message->prefix . " Failed login (Bad password)";
+        $self->noticeConsoleChan($msg);
+        logBot($self, $message, undef, "login", $typed_user, "Failed (Bad password)");
     }
 }
 

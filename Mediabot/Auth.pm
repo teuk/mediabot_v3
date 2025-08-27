@@ -17,64 +17,56 @@ sub new {
     return $self;
 }
 
-# Vérifie le mot de passe :
-# 1) essai "normal" (UTF-8) : PASSWORD(?)
-# 2) essai compat "legacy" (latin1) : PASSWORD(CONVERT(? USING latin1))
-# Si le chemin legacy passe, on réécrit le hash en UTF-8 et on pose auth=1.
+# Verify credentials for a user identified by id_user.
+# Compatible signatures:
+#   verify_credentials($id_user, $password)
+#   verify_credentials($id_user, $ignored_username, $password)
 sub verify_credentials {
-    my ($self, $user_id, $nickname, $password) = @_;
+    my ($self, @args) = @_;
     my $dbh    = $self->{dbh};
     my $logger = $self->{logger};
 
-    # --- essai UTF-8
-    my $sql_u = "SELECT id_user FROM USER WHERE id_user=? AND nickname=? AND password=PASSWORD(?)";
-    my $sth_u = $dbh->prepare($sql_u);
-    unless ($sth_u && $sth_u->execute($user_id, $nickname, $password)) {
-        $logger->log(1, "verify_credentials() SQL Error: $DBI::errstr | Query: $sql_u");
+    my ($id_user, $password);
+    if (@args == 2) {
+        ($id_user, $password) = @args;
+    } elsif (@args == 3) {
+        ($id_user, undef, $password) = @args;  # ignore typed username
+    } else {
+        $logger->log(1, "verify_credentials(): invalid args (@args)");
         return 0;
     }
-    my $row_u = $sth_u->fetchrow_arrayref;
-    $sth_u->finish;
 
-    if ($row_u) {
-        my $sql_ok = "UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?";
-        my $sth_ok = $dbh->prepare($sql_ok);
-        unless ($sth_ok && $sth_ok->execute($user_id)) {
-            $logger->log(1, "verify_credentials() SQL Error: $DBI::errstr | Query: $sql_ok");
-            return 0;
-        }
-        $self->{logged_in}{$user_id} = 1;
+    # 1) Fetch stored hash by id_user
+    my $sth = $dbh->prepare('SELECT password, nickname FROM USER WHERE id_user=?');
+    unless ($sth && $sth->execute($id_user)) {
+        $logger->log(1, "verify_credentials() SQL Error: $DBI::errstr | SELECT password FROM USER WHERE id_user=?");
+        return 0;
+    }
+    my ($stored_hash, $db_nick) = $sth->fetchrow_array;
+    $sth->finish;
+
+    return 0 unless defined $stored_hash && $stored_hash ne "";
+
+    # 2) Compute candidate with MariaDB PASSWORD()
+    my ($calc) = eval { $dbh->selectrow_array('SELECT PASSWORD(?)', undef, $password) };
+    unless (defined $calc) {
+        $logger->log(1, "verify_credentials() failed to compute PASSWORD(): $DBI::errstr");
+        return 0;
+    }
+
+    # 3) Compare and set auth if OK
+    if ($stored_hash eq $calc) {
+        my $rows = $dbh->do('UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?', undef, $id_user);
+        $self->{logged_in}{$id_user} = 1;
+        $self->{sessions}{lc($db_nick // '')} = { id_user => $id_user, auth => 1 } if defined $db_nick;
         return 1;
     }
 
-    # --- essai legacy latin1
-    my $sql_l = "SELECT id_user FROM USER WHERE id_user=? AND nickname=? AND password=PASSWORD(CONVERT(? USING latin1))";
-    my $sth_l = $dbh->prepare($sql_l);
-    unless ($sth_l && $sth_l->execute($user_id, $nickname, $password)) {
-        $logger->log(1, "verify_credentials() SQL Error: $DBI::errstr | Query: $sql_l");
-        return 0;
-    }
-    my $row_l = $sth_l->fetchrow_arrayref;
-    $sth_l->finish;
-
-    unless ($row_l) {
-        # aucun des deux chemins ne matche
-        return 0;
-    }
-
-    # Chemin legacy OK -> upgrade du hash en UTF-8
-    my $sql_up = "UPDATE USER SET password=PASSWORD(?), auth=1, last_login=NOW() WHERE id_user=?";
-    my $sth_up = $dbh->prepare($sql_up);
-    if (!$sth_up || !$sth_up->execute($password, $user_id)) {
-        $logger->log(1, "verify_credentials() legacy upgrade failed: $DBI::errstr | Query: $sql_up");
-        # Même si l’upgrade échoue, on pose auth=1 pour la session courante
-        my $sql_auth = "UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?";
-        my $sth_a = $dbh->prepare($sql_auth);
-        $sth_a->execute($user_id) if $sth_a;
-    }
-    $self->{logged_in}{$user_id} = 1;
-    return 1;
+    return 0;
 }
+
+
+
 
 # Met à jour l'état d'auth en DB et en cache
 sub set_logged_in {
