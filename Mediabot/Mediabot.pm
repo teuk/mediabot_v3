@@ -2039,67 +2039,34 @@ sub getLevelUser(@) {
 	}
 }
 
-# Add a new user into the USER table
 sub userAdd {
-    my ($self, $hostmask, $nickname, $password, $level, $username) = @_;
+    my ($self, $hostmask, $nickname, $plain_password, $level_name, $username) = @_;
+    my $dbh    = $self->{dbh} || $self->{db}->dbh;
+    my $logger = $self->{logger};
 
-    $self->{logger}->log(3, "🆕 userAdd() called with: hostmask='$hostmask', nickname='$nickname', password=" . (defined $password ? '***' : 'undef') . ", level='$level', username=" . (defined $username ? $username : 'undef'));
+    return undef unless $dbh;
 
-    # Vérif arguments
-    unless (defined $hostmask && $hostmask ne '' && defined $nickname && $nickname ne '') {
-        $self->{logger}->log(1, "❌ userAdd() missing required args");
-        return undef;
-    }
+    # Map du niveau global -> id_user_level (ajuste si tu as déjà un helper)
+    my %LEVEL = ( owner => 1, master => 2, administrator => 3, user => 4 );
+    my $level_id = $LEVEL{lc($level_name // 'user')} // 4;
 
-    my $dbh = $self->{dbh};
-
-    # Convertir le niveau si nécessaire
-    my $id_user_level;
-    if (defined $level && $level =~ /^\d+$/) {
-        $id_user_level = $level;
-    } elsif (defined $level && $level ne '') {
-        $id_user_level = getIdUserLevel($self, $level);
-    }
-    unless (defined $id_user_level) {
-        $self->{logger}->log(1, "❌ userAdd() invalid or missing user level: '$level'");
-        return undef;
-    }
-
-    # Vérifier si le nickname existe déjà
-    my $sth = $dbh->prepare("SELECT id_user FROM USER WHERE nickname = ?");
-    $sth->execute($nickname);
-    if (my $ref = $sth->fetchrow_hashref) {
-        $self->{logger}->log(1, "❌ userAdd() nickname '$nickname' already exists (id_user=$ref->{id_user})");
-        $sth->finish;
-        return undef;
-    }
+    my $sth = $dbh->prepare(q{
+        INSERT INTO USER (creation_date, hostmasks, nickname, password, username, id_user_level, auth)
+        VALUES (NOW(), ?, ?, PASSWORD(?), ?, ?, 0)
+    });
+    my $ok = $sth->execute($hostmask, $nickname, $plain_password, $username, $level_id);
     $sth->finish;
 
-    # Construction de la requête
-    my $sql = q{
-        INSERT INTO USER
-        (hostmasks, nickname, password, username, id_user_level, auth)
-        VALUES (?, ?, ?, ?, ?, 0)
-    };
-    $sth = $dbh->prepare($sql);
-
-    my $ok = $sth->execute(
-        $hostmask,
-        $nickname,
-        $password,
-        $username,
-        $id_user_level
-    );
-
-    if ($ok) {
-        my $id = $dbh->{mysql_insertid};
-        $self->{logger}->log(0, "✅ userAdd() created user '$nickname' (id_user=$id, level_id=$id_user_level)");
-        return $id;
-    } else {
-        $self->{logger}->log(1, "❌ userAdd() failed for nickname '$nickname': " . $dbh->errstr);
+    unless ($ok) {
+        $logger->log(1, "userAdd() INSERT failed: $DBI::errstr");
         return undef;
     }
+
+    my $id = $dbh->{mysql_insertid} || $dbh->last_insert_id(undef,undef,'USER','id_user');
+    $logger->log(1, "✅ userAdd() created user '$nickname' (id_user=$id, level_id=$level_id)");
+    return $id;
 }
+
 
 
 sub registerChannel(@) {
@@ -2118,36 +2085,50 @@ sub registerChannel(@) {
 	}
 }
 
+# Allows first user creation: register <nickname_in_db> <password>
 sub mbRegister(@) {
-	my ($self,$message,$sNick,@tArgs) = @_;
-	my $sUserHandle = $tArgs[0];
-	my $sPassword = $tArgs[1];
-	if (defined($sUserHandle) && ($sUserHandle ne "") && defined($sPassword) && ($sPassword ne "")) {
-		if (userCount($self) == 0) {
- 			$self->{logger}->log(0,$message->prefix . " wants to register");
- 			my $sHostmask = getMessageHostmask($self,$message);
- 			my $id_user = userAdd($self,$sHostmask,$sUserHandle,$sPassword,"Owner");
- 			if (defined($id_user)) {
- 				$self->{logger}->log(0,"Registered $sUserHandle (id_user : $id_user) as Owner with hostmask $sHostmask");
- 				botNotice($self,$sNick,"You just registered as $sUserHandle (id_user : $id_user) as Owner with hostmask $sHostmask");
- 				logBot($self,$message,undef,"register","Success");
- 				my ($id_channel,$name,$chanmode,$key) = getConsoleChan($self);
- 				if (registerChannel($self,$message,$sNick,$id_channel,$id_user)) {
-					$self->{logger}->log(0,"registerChan successfull $name $sUserHandle");
-				}
-				else {
-					$self->{logger}->log(0,"registerChan failed $name $sUserHandle");
-				}
- 			}
- 			else {
- 				$self->{logger}->log(0,"Register failed for " . $message->prefix);
- 			}
- 		}
- 		else {
- 			$self->{logger}->log(0,"Register attempt from " . $message->prefix);
- 		}
-	}
+    my ($self,$message,$sNick,@tArgs) = @_;
+
+    # --- drop caller nick if parser injected it as first arg ---
+    my $prefix  = $message->prefix // '';
+    my ($caller) = $prefix =~ /^([^!]+)/;  # ex: Te[u]K
+    $caller //= $sNick // '';
+    if (@tArgs >= 3 && defined $caller && $caller ne '' && lc($tArgs[0]) eq lc($caller)) {
+        shift @tArgs;
+    }
+
+    my $sUserHandle = $tArgs[0];
+    my $sPassword   = $tArgs[1];
+
+    unless (defined($sUserHandle) && $sUserHandle ne "" && defined($sPassword) && $sPassword ne "") {
+        botNotice($self,$sNick,"Syntax: register <username> <password>");
+        return;
+    }
+
+    if (userCount($self) == 0) {
+        $self->{logger}->log(0, $message->prefix . " wants to register");
+        my $sHostmask = getMessageHostmask($self,$message);
+
+        # IMPORTANT: userAdd doit stocker PASSWORD(?) côté SQL (voir B)
+        my $id_user = userAdd($self, $sHostmask, $sUserHandle, $sPassword, "Owner");
+        if (defined $id_user) {
+            $self->{logger}->log(0, "Registered $sUserHandle (id_user : $id_user) as Owner with hostmask $sHostmask");
+            botNotice($self,$sNick,"You just registered as $sUserHandle (id_user : $id_user) as Owner with hostmask $sHostmask");
+            logBot($self,$message,undef,"register","Success");
+            my ($id_channel,$name,$chanmode,$key) = getConsoleChan($self);
+            if (registerChannel($self,$message,$sNick,$id_channel,$id_user)) {
+                $self->{logger}->log(0,"registerChan successfull $name $sUserHandle");
+            } else {
+                $self->{logger}->log(0,"registerChan failed $name $sUserHandle");
+            }
+        } else {
+            $self->{logger}->log(0,"Register failed for " . $message->prefix);
+        }
+    } else {
+        $self->{logger}->log(0,"Register attempt from " . $message->prefix);
+    }
 }
+
 
 # Allows an Administrator to force the bot to say something in a given channel
 sub sayChannel {
