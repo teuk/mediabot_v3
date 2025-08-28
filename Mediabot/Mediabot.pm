@@ -4170,113 +4170,206 @@ sub getIdUserChannelLevel(@) {
 	}
 }
 
-# Give +o operator mode to a user on a channel
+# --- OP ---------------------------------------------------------------------
 sub userOpChannel {
     my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-    # Load user object from IRC hostmask
-    my $user = $self->get_user_from_message($message);
+    my $prefix = eval { $message->prefix } // '';
+    my $user   = eval { $self->get_user_from_message($message) };
 
-    unless ($user && $user->is_authenticated) {
-        my $notice = $message->prefix . " op command attempt (unauthenticated)";
-        $self->noticeConsoleChan($notice);
-        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+    unless ($user) {
+        $self->noticeConsoleChan("$prefix op command: no user object from get_user_from_message()");
+        botNotice($self, $sNick, "Internal error: no user");
         return;
     }
 
-    # Extract channel from args if it's the first element
+    # Safe getters (compat champs/méthodes)
+    my $uid       = eval { $user->id }                 // eval { $user->{id_user} }        // 0;
+    my $handle    = eval { $user->nickname }           // eval { $user->{nickname} }       // $sNick;
+    my $auth      = eval { $user->auth }               // eval { $user->{auth} }           // 0;
+    my $level     = eval { $user->level }              // eval { $user->{level} }          // undef;
+    my $level_desc= eval { $user->level_description }  // eval { $user->{level_desc} }     // 'unknown';
+
+    $self->noticeConsoleChan("$prefix AUTH[op-enter] uid=$uid nick=$handle auth=$auth level=$level_desc");
+
+    # ---------- tentative d'auto-login si auth=0 ----------
+    if (!$auth) {
+        my ($username, $masks) = ('','');
+        eval {
+            my $sth = $self->{dbh}->prepare("SELECT username, hostmasks FROM USER WHERE id_user=?");
+            $sth->execute($uid);
+            ($username, $masks) = $sth->fetchrow_array;
+            $sth->finish;
+        };
+        my $userhost = $prefix; $userhost =~ s/^.*?!(.+)$/$1/;
+        my $matched_mask;
+        for my $mask (grep { length } map { my $x=$_; $x =~ s/^\s+|\s+$//g; $x } split /,/, ($masks//'') ) {
+            my $re = do {
+                my $q = quotemeta($mask);
+                $q =~ s/\\\*/.*/g; # '*' -> '.*'
+                $q =~ s/\\\?/./g;  # '?' -> '.'
+                qr/^$q$/i;
+            };
+            if ($userhost =~ $re) { $matched_mask = $mask; last; }
+        }
+        $self->noticeConsoleChan("$prefix op: auth=0; username='".($username//'')."'; mask check => ".($matched_mask ? "matched '$matched_mask'" : "no match"));
+
+        if (defined $username && $username eq '#AUTOLOGIN#' && $matched_mask) {
+            my ($ok,$why) = eval { $self->{auth}->maybe_autologin($user, $prefix) };
+            $ok //= 0; $why //= ($@ ? "exception: $@" : "unknown");
+            $self->noticeConsoleChan("$prefix op: maybe_autologin => ".($ok?'OK':'NO')." ($why)");
+
+            # recharger l'objet user et l'état auth
+            $user  = eval { $self->get_user_from_message($message) } || $user;
+            $auth  = eval { $user->auth } // eval { $user->{auth} } // 0;
+            $level = eval { $user->level } // eval { $user->{level} } // $level;
+            $level_desc = eval { $user->level_description } // eval { $user->{level_desc} } // $level_desc;
+            $self->noticeConsoleChan("$prefix op: after autologin => auth=$auth level=$level_desc");
+        } else {
+            $self->noticeConsoleChan("$prefix op: autologin not eligible");
+        }
+    }
+
+    # Refuser si toujours pas loggé
+    unless ($auth) {
+        my $notice = "$prefix op command attempt (unauthenticated)";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login <username> <password>");
+        return;
+    }
+
+    # Canal en 1er argument ?
     if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
         $sChannel = shift @tArgs;
     }
-
     unless (defined $sChannel) {
         botNotice($self, $sNick, "Syntax: op #channel <nick>");
         return;
     }
 
-    # Check privileges: must be Administrator or have at least 100 access level on channel
-    unless (
-        checkUserLevel($self, $user->level, "Administrator") ||
-        checkUserChannelLevel($self, $message, $sChannel, $user->id, 100)
-    ) {
-        my $notice = $message->prefix . " op command attempt for user " . $user->handle . " [" . $user->level_desc . "]";
+    # Droits : Administrator global OU >=100 sur le channel
+    unless ( checkUserLevel($self, $level, "Administrator")
+          ||  checkUserChannelLevel($self, $message, $sChannel, (eval{$user->id}//$uid), 100) ) {
+        my $notice = "$prefix op command attempt for user $handle [$level_desc]";
         $self->noticeConsoleChan($notice);
         botNotice($self, $sNick, "Your level does not allow you to use this command.");
         return;
     }
 
-    # Check channel existence
+    # Existence du channel
     my $channel_obj = $self->{channels}{$sChannel};
     unless ($channel_obj) {
         botNotice($self, $sNick, "Channel $sChannel does not exist");
         return;
     }
-
     my $id_channel = $channel_obj->get_id;
 
-    # Determine the target nick for +o
-    my $target_nick = defined($tArgs[0]) && $tArgs[0] ne "" ? $tArgs[0] : $sNick;
+    # cible +o
+    my $target_nick = (defined $tArgs[0] && $tArgs[0] ne '') ? $tArgs[0] : $sNick;
 
-    # Send MODE +o
     $self->{irc}->send_message("MODE", undef, ($sChannel, "+o", $target_nick));
     logBot($self, $message, $sChannel, "op", @tArgs);
 
     return $id_channel;
 }
 
-
-# Remove +o operator mode from a user on a channel
+# --- DEOP -------------------------------------------------------------------
 sub userDeopChannel {
     my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-    # Load authenticated user from message
-    my $user = $self->get_user_from_message($message);
+    my $prefix = eval { $message->prefix } // '';
+    my $user   = eval { $self->get_user_from_message($message) };
 
-    unless ($user && $user->is_authenticated) {
-        my $notice = $message->prefix . " deop command attempt (unauthenticated)";
-        $self->noticeConsoleChan($notice);
-        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+    unless ($user) {
+        $self->noticeConsoleChan("$prefix deop command: no user object from get_user_from_message()");
+        botNotice($self, $sNick, "Internal error: no user");
         return;
     }
 
-    # Extract channel from args if needed
+    # Safe getters
+    my $uid       = eval { $user->id }                 // eval { $user->{id_user} }        // 0;
+    my $handle    = eval { $user->nickname }           // eval { $user->{nickname} }       // $sNick;
+    my $auth      = eval { $user->auth }               // eval { $user->{auth} }           // 0;
+    my $level     = eval { $user->level }              // eval { $user->{level} }          // undef;
+    my $level_desc= eval { $user->level_description }  // eval { $user->{level_desc} }     // 'unknown';
+
+    $self->noticeConsoleChan("$prefix AUTH[deop-enter] uid=$uid nick=$handle auth=$auth level=$level_desc");
+
+    # tentative d'auto-login si nécessaire
+    if (!$auth) {
+        my ($username, $masks) = ('','');
+        eval {
+            my $sth = $self->{dbh}->prepare("SELECT username, hostmasks FROM USER WHERE id_user=?");
+            $sth->execute($uid);
+            ($username, $masks) = $sth->fetchrow_array;
+            $sth->finish;
+        };
+        my $userhost = $prefix; $userhost =~ s/^.*?!(.+)$/$1/;
+        my $matched_mask;
+        for my $mask (grep { length } map { my $x=$_; $x =~ s/^\s+|\s+$//g; $x } split /,/, ($masks//'') ) {
+            my $re = do {
+                my $q = quotemeta($mask);
+                $q =~ s/\\\*/.*/g;
+                $q =~ s/\\\?/./g;
+                qr/^$q$/i;
+            };
+            if ($userhost =~ $re) { $matched_mask = $mask; last; }
+        }
+        $self->noticeConsoleChan("$prefix deop: auth=0; username='".($username//'')."'; mask check => ".($matched_mask ? "matched '$matched_mask'" : "no match"));
+
+        if (defined $username && $username eq '#AUTOLOGIN#' && $matched_mask) {
+            my ($ok,$why) = eval { $self->{auth}->maybe_autologin($user, $prefix) };
+            $ok //= 0; $why //= ($@ ? "exception: $@" : "unknown");
+            $self->noticeConsoleChan("$prefix deop: maybe_autologin => ".($ok?'OK':'NO')." ($why)");
+            $user  = eval { $self->get_user_from_message($message) } || $user;
+            $auth  = eval { $user->auth } // eval { $user->{auth} } // 0;
+            $level = eval { $user->level } // eval { $user->{level} } // $level;
+            $level_desc = eval { $user->level_description } // eval { $user->{level_desc} } // $level_desc;
+            $self->noticeConsoleChan("$prefix deop: after autologin => auth=$auth level=$level_desc");
+        } else {
+            $self->noticeConsoleChan("$prefix deop: autologin not eligible");
+        }
+    }
+
+    unless ($auth) {
+        my $notice = "$prefix deop command attempt (unauthenticated)";
+        $self->noticeConsoleChan($notice);
+        botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login <username> <password>");
+        return;
+    }
+
+    # Canal en 1er argument ?
     if (defined $tArgs[0] && $tArgs[0] =~ /^#/) {
         $sChannel = shift @tArgs;
     }
-
     unless (defined $sChannel) {
         botNotice($self, $sNick, "Syntax: deop #channel <nick>");
         return;
     }
 
-    # Check global or channel privileges
-    unless (
-        checkUserLevel($self, $user->level, "Administrator") ||
-        checkUserChannelLevel($self, $message, $sChannel, $user->id, 100)
-    ) {
-        my $notice = $message->prefix . " deop command attempt for user " . $user->handle . " [" . $user->level_desc . "]";
+    unless ( checkUserLevel($self, $level, "Administrator")
+          ||  checkUserChannelLevel($self, $message, $sChannel, (eval{$user->id}//$uid), 100) ) {
+        my $notice = "$prefix deop command attempt for user $handle [$level_desc]";
         $self->noticeConsoleChan($notice);
         botNotice($self, $sNick, "Your level does not allow you to use this command.");
         return;
     }
 
-    # Check channel existence
     my $channel_obj = $self->{channels}{$sChannel};
     unless (defined $channel_obj) {
         botNotice($self, $sNick, "Channel $sChannel does not exist");
         return;
     }
-
     my $id_channel = $channel_obj->get_id;
 
-    # Determine who gets -o
-    my $target_nick = defined($tArgs[0]) && $tArgs[0] ne "" ? $tArgs[0] : $sNick;
+    my $target_nick = (defined $tArgs[0] && $tArgs[0] ne '') ? $tArgs[0] : $sNick;
 
     $self->{irc}->send_message("MODE", undef, ($sChannel, "-o", $target_nick));
     logBot($self, $message, $sChannel, "deop", @tArgs);
 
     return $id_channel;
 }
+
 
 
 # Invite a user to a channel if the issuer has the required permissions
