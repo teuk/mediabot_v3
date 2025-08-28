@@ -9885,46 +9885,103 @@ sub displayLeetString(@) {
 
 # Reload the bot configuration file (rehash), restricted to Master-level users
 sub mbRehash {
-	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-	# Fetch user authentication info
-	my (
-		$uid, $level, $level_desc, $auth,
-		$handle, $passwd, $info1, $info2
-	) = getNickInfo($self, $message);
+    my $prefix = eval { $message->prefix } // '';
+    my $user   = eval { $self->get_user_from_message($message) };
+    unless ($user) {
+        noticeConsoleChan($self, "$prefix rehash: no user object from get_user_from_message()");
+        botNotice($self, $sNick, "Internal error: no user object");
+        return;
+    }
 
-	# Reject if user not identified
-	return unless defined $uid;
+    # Safe getters
+    my $uid    = eval { $user->id }                // eval { $user->{id_user} }       // 0;
+    my $nick   = eval { $user->nickname }         // eval { $user->{nickname} }       // $sNick;
+    my $auth   = eval { $user->auth }             // eval { $user->{auth} }           // 0;
+    my $lvlid  = eval { $user->level }            // eval { $user->{level} }          // undef;
+    my $lvldes = eval { $user->level_description }// eval { $user->{level_desc} }     // 'unknown';
 
-	# Reject if not logged in
-	unless ($auth) {
-		my $msg = $message->prefix . " rehash command attempt (user $handle is not logged in)";
-		noticeConsoleChan($self, $msg);
-		botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-		return;
-	}
+    # --- DEBUG snapshot
+    noticeConsoleChan($self, "$prefix AUTH[rehash-enter] uid=$uid nick=$nick auth=$auth level=$lvldes");
 
-	# Reject if user level is insufficient
-	unless (checkUserLevel($self, $level, "Master")) {
-		my $msg = $message->prefix . " rehash command attempt (command level [Master] for user $handle [$level])";
-		noticeConsoleChan($self, $msg);
-		botNotice($self, $sNick, "Your level does not allow you to use this command.");
-		return;
-	}
+    # Si pas loggé, essayer l'autologin si activé (#AUTOLOGIN#) ET masque qui matche
+    if (!$auth) {
+        my ($username, $masks) = ('','');
+        eval {
+            my $sth = $self->{dbh}->prepare("SELECT username, hostmasks FROM USER WHERE id_user=?");
+            $sth->execute($uid);
+            ($username, $masks) = $sth->fetchrow_array;
+            $sth->finish;
+        };
+        noticeConsoleChan($self, "$prefix rehash: auth=0; username='".($username//'')."'; masks='".($masks//'')."'");
 
-	# Perform configuration reload
-	readConfigFile($self);
+        # Vérifier si un masque matche (info debug)
+        my $userhost = $prefix; $userhost =~ s/^.*?!(.+)$/$1/;
+        my $matched_mask = undef;
+        for my $mask (grep { length } map { my $x=$_; $x =~ s/^\s+|\s+$//g; $x } split /,/, ($masks//'') ) {
+            my $re = do {
+                my $q = quotemeta($mask);
+                $q =~ s/\\\*/.*/g;   # '*' -> .*
+                $q =~ s/\\\?/./g;    # '?' -> .
+                qr/^$q$/i;
+            };
+            if ($userhost =~ $re) { $matched_mask = $mask; last; }
+        }
+        noticeConsoleChan($self, "$prefix rehash: autologin mask check => " . ($matched_mask ? "matched '$matched_mask'" : "no mask matched"));
 
-	# Notify in appropriate channel or private
-	if ($sChannel && $sChannel ne "") {
-		botPrivmsg($self, $sChannel, "($sNick) Successfully rehashed");
-	} else {
-		botNotice($self, $sNick, "Successfully rehashed");
-	}
+        # Si eligible, tenter l'autologin
+        if (defined $username && $username eq '#AUTOLOGIN#' && $matched_mask) {
+            my ($ok, $reason) = eval { $self->{auth}->maybe_autologin($user, $prefix) };
+            $ok //= 0;
+            $reason //= ($@ ? "exception: $@" : "unknown");
+            noticeConsoleChan($self, "$prefix rehash: maybe_autologin => ".($ok?'OK':'NO')." ($reason)");
 
-	# Log the action
-	logBot($self, $message, $sChannel, "rehash", @tArgs);
+            if ($ok) {
+                # Recharger l'état utilisateur (cache/DB) après autologin
+                $user = eval { $self->get_user_from_message($message) } || $user;
+                $auth = eval { $user->auth } // eval { $user->{auth} } // 0;
+                $lvlid = eval { $user->level } // eval { $user->{level} } // $lvlid;
+                $lvldes = eval { $user->level_description } // eval { $user->{level_desc} } // $lvldes;
+                noticeConsoleChan($self, "$prefix rehash: after autologin => auth=$auth level=$lvldes");
+            }
+        } else {
+            noticeConsoleChan($self, "$prefix rehash: autologin not eligible (username!='#AUTOLOGIN#' or mask not matched)");
+        }
+    }
+
+    # Toujours refuser si pas loggé
+    unless ($auth) {
+        my $msg = "$prefix rehash command attempt (user $nick is not logged in)";
+        noticeConsoleChan($self, $msg);
+        botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login <username> <password>");
+        return;
+    }
+
+    # Vérifier les droits (Master+)
+    unless (checkUserLevel($self, $lvlid, "Master")) {
+        my $msg = "$prefix rehash command attempt (command level [Master] for user $nick [$lvldes])";
+        noticeConsoleChan($self, $msg);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    # Reload config
+    readConfigFile($self);
+
+    # Notify
+    if ($sChannel && $sChannel ne '') {
+        botPrivmsg($self, $sChannel, "($sNick) Successfully rehashed");
+    } else {
+        botNotice($self, $sNick, "Successfully rehashed");
+    }
+
+    # Log action
+    logBot($self, $message, $sChannel, "rehash", @tArgs);
 }
+
+
+
 
 
 # Play a radio request
