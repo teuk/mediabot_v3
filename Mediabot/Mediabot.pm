@@ -2041,20 +2041,28 @@ sub getLevelUser(@) {
 
 sub userAdd {
     my ($self, $hostmask, $nickname, $plain_password, $level_name, $username) = @_;
-    my $dbh    = $self->{dbh} || $self->{db}->dbh;
+    my $dbh    = $self->{dbh} || ($self->{db} && $self->{db}->dbh);
     my $logger = $self->{logger};
 
     return undef unless $dbh;
 
-    # Map du niveau global -> id_user_level (ajuste si tu as déjà un helper)
     my %LEVEL = ( owner => 1, master => 2, administrator => 3, user => 4 );
-    my $level_id = $LEVEL{lc($level_name // 'user')} // 4;
+    my $level_id = $LEVEL{ lc($level_name // 'user') } // 4;
 
-    my $sth = $dbh->prepare(q{
+    # password: si undef => NULL (évite PASSWORD(NULL))
+    my $pass_sql = defined $plain_password ? 'PASSWORD(?)' : 'NULL';
+
+    my $sql = qq{
         INSERT INTO USER (creation_date, hostmasks, nickname, password, username, id_user_level, auth)
-        VALUES (NOW(), ?, ?, PASSWORD(?), ?, ?, 0)
-    });
-    my $ok = $sth->execute($hostmask, $nickname, $plain_password, $username, $level_id);
+        VALUES (NOW(), ?, ?, $pass_sql, ?, ?, 0)
+    };
+
+    my @bind = ($hostmask, $nickname);
+    push @bind, $plain_password if defined $plain_password;
+    push @bind, ($username, $level_id);
+
+    my $sth = $dbh->prepare($sql);
+    my $ok  = $sth->execute(@bind);
     $sth->finish;
 
     unless ($ok) {
@@ -2062,10 +2070,12 @@ sub userAdd {
         return undef;
     }
 
-    my $id = $dbh->{mysql_insertid} || $dbh->last_insert_id(undef,undef,'USER','id_user');
-    $logger->log(1, "✅ userAdd() created user '$nickname' (id_user=$id, level_id=$level_id)");
+    my $id = $dbh->{mysql_insertid} || eval { $dbh->last_insert_id(undef, undef, 'USER', 'id_user') };
+    $logger->log(0, "✅ userAdd() created user '$nickname' (id_user=$id, level_id=$level_id)");
     return $id;
 }
+
+
 
 
 
@@ -2921,45 +2931,34 @@ sub addUser(@) {
 
     $self->{logger}->log(3, "🆕 addUser() called by '$sNick' with raw args: @tArgs");
 
-    # 🔹 Évite de parser le nick de l'appelant comme argument
+    # Ne pas confondre le nick appelant avec les arguments
     if (@tArgs && lc($tArgs[0]) eq lc($sNick)) {
         $self->{logger}->log(3, "ℹ️ Removing caller nick '$tArgs[0]' from args list");
         shift @tArgs;
     }
 
     my $bNotify = 0;
-
-    # 🔹 Gestion du flag -n
     if (@tArgs && $tArgs[0] eq "-n") {
         $bNotify = 1;
         $self->{logger}->log(3, "ℹ️ Notification flag -n detected");
         shift @tArgs;
     }
 
-    # 🔹 Validation du nombre minimal d'arguments
-    unless (@tArgs >= 2) {
-        $self->{logger}->log(2, "⚠️ Missing arguments: need at least <nickname> <hostmask>");
-        botNotice($self, $sNick, "Syntax: adduser [-n] <nickname> <hostmask> [level]");
-        return;
-    }
-
-    # 🔹 Extraction des arguments
-    my $new_username = shift @tArgs;
-    my $new_hostmask = shift @tArgs;
-    my $new_level    = shift(@tArgs) // 'User';
-
-    $self->{logger}->log(3, "📦 Parsed new user data: nickname='$new_username', hostmask='$new_hostmask', level='$new_level'");
-
-    # 🔹 Récupération de l'objet utilisateur appelant
+    # Récupération de l'objet user appelant
     my $user = $self->get_user_from_message($message);
     unless ($user) {
         $self->{logger}->log(1, "❌ No user object for caller '$sNick'");
         return;
     }
 
-    $self->{logger}->log(3, "👤 Caller: ".$user->nickname." (auth=".$user->is_authenticated.", level=".$user->level.", desc=".$user->level_description.")");
+    if (!$user->is_authenticated) {
+        my $prefix = ($message && $message->can('prefix')) ? $message->prefix : '';
+        my $did = eval { Mediabot::User::maybe_autologin($self, $user, $sNick, $prefix) } || 0;
+        $self->{logger}->log(3, "addUser(): maybe_autologin tried did=$did" . ($@ ? " err=$@" : ""));
+        $user->{auth} = 1 if $did;   # keep in-memory state aligned with DB
+    }
 
-    # 🔹 Vérification authentification
+    # Vérif auth
     unless ($user->is_authenticated) {
         my $msg = $message->prefix . " adduser command attempt (user " . $user->nickname . " is not logged in)";
         noticeConsoleChan($self, $msg);
@@ -2968,37 +2967,99 @@ sub addUser(@) {
         return;
     }
 
-    # 🔹 Vérification niveau minimum
-    unless ($user->has_level("Master", $self->{dbh})) {
-        my $msg = $message->prefix . " adduser command attempt (Master required; caller level=".$user->level_description.")";
+    my $caller_level = eval { $user->can('level') ? $user->level : undef };
+    my $has_master   = (defined $caller_level) && checkUserLevel($self, $caller_level, "Master");
+
+    unless ($has_master) {
+        my $caller_desc = eval {
+            $user->can('level_description') ? $user->level_description
+                : getUserLevelDesc($self, $caller_level)
+        } // '?';
+
+        my $msg = $message->prefix
+                . " adduser command attempt (Master required; caller level="
+                . $caller_desc . ")";
         noticeConsoleChan($self, $msg);
         botNotice($self, $sNick, "This command is not available for your level. Contact a bot master.");
         logBot($self, $message, undef, "adduser", $msg);
         return;
     }
 
-    # 🔹 Validation du level fourni
+    # Besoin d'au moins 1 arg (on supporte deux formes)
+    unless (@tArgs >= 1) {
+        $self->{logger}->log(2, "⚠️ Missing arguments");
+        botNotice($self, $sNick, "Syntax: adduser [-n] <nickname> <hostmask> [level]  OR  adduser [-n] <hostmask> [level]");
+        return;
+    }
+
+    my ($arg1, $arg2, $arg3) = @tArgs;
+    my ($new_username, $new_hostmask, $new_level);
+
+    my $is_hostmask = sub {
+        my ($s) = @_;
+        return defined($s) && $s ne '' && $s =~ /@/;
+    };
+    my $derive_nick = sub {
+        my ($mask, $fallback) = @_;
+        return $1 if defined($mask) && $mask =~ /^([^!@]+)!/;        # nick!ident@host
+        return $1 if defined($mask) && $mask =~ /^[\*\?]?([^@]+)\@/; # *ident@host ou ident@host
+        return $fallback;
+    };
+    my $is_level = sub {
+        my ($s) = @_;
+        return defined($s) && $s =~ /^(owner|master|administrator|user)$/i;
+    };
+
+    if ($is_hostmask->($arg1)) {
+        # Forme 2: adduser <hostmask> [level]  OU  <hostmask> <nick> [level]
+        $new_hostmask = $arg1;
+
+        if (defined $arg2 && $is_level->($arg2)) {
+            # adduser <hostmask> <level>
+            $new_level    = $arg2;
+            $new_username = $derive_nick->($new_hostmask, $sNick);
+        } else {
+            # adduser <hostmask> <nick> [level]
+            $new_username = $arg2 // $derive_nick->($new_hostmask, $sNick);
+            $new_level    = $arg3 // 'User';
+        }
+    } else {
+        # Forme 1: adduser <nick> <hostmask> [level]
+        $new_username = $arg1;
+        $new_hostmask = $arg2;
+        $new_level    = $arg3 // 'User';
+    }
+
+    $self->{logger}->log(3, "📦 Parsed new user data: nickname='$new_username', hostmask='$new_hostmask', level='$new_level'");
+
+    # Validation minimale
+    unless (defined $new_username && $new_username ne '' && defined $new_hostmask && $new_hostmask =~ /@/) {
+        botNotice($self, $sNick, "Syntax: adduser [-n] <nickname> <hostmask> [level]  OR  adduser [-n] <hostmask> [level]");
+        return;
+    }
+
+    # Niveau cible valide ?
     unless (getIdUserLevel($self, $new_level)) {
         $self->{logger}->log(1, "❌ Invalid user level: $new_level");
         botNotice($self, $sNick, "$new_level is not a valid user level");
         return;
     }
 
-    # 🔹 Protection Master → Owner
-    if ($user->level_description eq "Master" && $new_level eq "Owner") {
+    # Protection Master -> Owner
+    if ($user->level_description eq "Master" && lc($new_level) eq "owner") {
         botNotice($self, $sNick, "Masters cannot add a user with Owner level");
         logBot($self, $message, undef, "adduser", "Masters cannot add a user with Owner level");
         return;
     }
 
-    # 🔹 Vérification si utilisateur existe déjà
+    # Déjà existant ?
     if (my $existing_id = getIdUser($self, $new_username)) {
         botNotice($self, $sNick, "User $new_username already exists (id_user: $existing_id)");
         logBot($self, $message, undef, "adduser", "User $new_username already exists (id_user: $existing_id)");
         return;
     }
 
-    # 🔹 Ajout de l'utilisateur
+    # Ajout
     my $new_id = userAdd($self, $new_hostmask, $new_username, undef, $new_level);
     if (defined $new_id) {
         my $msg = sprintf("✅ Added user %s (id_user: %d) with hostmask %s (Level: %s)", $new_username, $new_id, $new_hostmask, $new_level);
@@ -3017,8 +3078,6 @@ sub addUser(@) {
         botNotice($self, $sNick, "Could not add user $new_username");
     }
 }
-
-
 
 
 
