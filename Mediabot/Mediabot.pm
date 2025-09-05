@@ -3106,9 +3106,54 @@ sub userStats(@) {
 sub userInfo(@) {
     my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-    my $user = $self->get_user_from_message($message);
+    # 1) Récup de l'utilisateur via le nouvel helper
+    my $user = eval { $self->get_user_from_message($message) };
     return unless $user;
 
+    # Hostmask complet "nick!user@host" (peut être vide selon l'appel)
+    my $mask = ($message && $message->can('prefix')) ? ($message->prefix // '') : '';
+
+    # 2) Essayer l'autologin "normal"
+    if (!$user->is_authenticated && $user->can('maybe_autologin')) {
+        my $did = eval { $user->maybe_autologin($self, $mask) } // 0;
+        $self->{logger}->log(3, "userInfo(): maybe_autologin tried mask='$mask' did=$did auth=" . ($user->is_authenticated ? 1 : 0));
+    }
+
+    # 3) Fallback robuste : si toujours pas auth, mais username == #AUTOLOGIN#
+    #    ET le hostmask courant matche un des hostmasks DB => on force auth=1 en DB
+    if (!$user->is_authenticated) {
+        my $uid       = eval { $user->id };
+        my $username  = eval { $user->can('username')  ? $user->username  : undef };
+        my $hostmasks = eval { $user->can('hostmasks') ? $user->hostmasks : undef };
+
+        if (defined $uid && defined $username && $username eq '#AUTOLOGIN#' && defined $hostmasks && $mask ne '') {
+            my $match = 0;
+            for my $raw (split /,/, $hostmasks) {
+                next unless defined $raw && $raw ne '';
+                # même logique que l’ancienne: escape puis * => .*, ancre au début
+                my $rx = quotemeta($raw);
+                $rx =~ s/\\\*/.*/g;
+                $rx = '^' . $rx;
+                if ($mask =~ /$rx/) { $match = 1; last; }
+            }
+
+            if ($match) {
+                my $upd = $self->{dbh}->prepare('UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?');
+                if ($upd && $upd->execute($uid)) {
+                    # mettre à jour l’objet en mémoire
+                    eval { $user->{auth} = 1 };
+                    $self->{logger}->log(3, "userInfo(): forced autologin via hostmask match for uid=$uid");
+                } else {
+                    $self->{logger}->log(1, "userInfo(): failed to set auth=1 for uid=$uid: $DBI::errstr");
+                }
+                $upd->finish if $upd;
+            } else {
+                $self->{logger}->log(3, "userInfo(): autologin fallback: no hostmask match (uid=$uid mask='$mask')");
+            }
+        }
+    }
+
+    # 4) Ta logique d’origine : contrôle d’auth et de niveau
     if ($user->is_authenticated) {
         if (checkUserLevel($self, $user->level, "Master")) {
 
@@ -3174,6 +3219,7 @@ sub userInfo(@) {
         logBot($self, $message, undef, "userinfo", $sNoticeMsg);
     }
 }
+
 
 
 sub addUserHost(@) {
