@@ -105,19 +105,45 @@ Try to log in the user automatically using config-based or DB-based flags.
 
 # Auto-login helper: authenticate user if autologin flag is set OR if host cloak matches "<nickname>.users.undernet.org"
 sub maybe_autologin {
-    my ($self, $user, $irc_nick, $prefix) = @_;
-    my $logger = $self->{logger};
+    my ($first, @rest) = @_;
 
-    # Already authenticated?
+    # Supporte les deux styles d'appel:
+    #  - $user->maybe_autologin($bot, $irc_nick, $prefix)
+    #  - Mediabot::User::maybe_autologin($bot, $user, $irc_nick, $prefix)
+    my ($bot, $user, $irc_nick, $prefix);
+    if (ref($first) && ref($first) =~ /Mediabot::User/) {
+        $user = $first;
+        ($bot, $irc_nick, $prefix) = @rest;
+    } else {
+        ($bot, $user, $irc_nick, $prefix) = ($first, @rest);
+    }
+
+    return 0 unless $bot && $user;
+
+    my $logger = $bot->{logger};
+    my $dbh    = $bot->{dbh} // eval { $bot->{db}->dbh };
+
+    # Déjà auth ?
     my $is_auth = eval { $user->is_authenticated ? 1 : 0 } // ($user->{auth} ? 1 : 0);
     return 0 if $is_auth;
 
     my $uid      = eval { $user->id }        // $user->{id_user};
     my $db_nick  = lc( eval { $user->nickname } // ($user->{nickname} // '') );
-    my $username =      eval { $user->username } // $user->{username};
-    my $host     = '';
+
+    # S'assurer qu'on a bien username; sinon on le lit en DB
+    my $username = eval { $user->username } // $user->{username};
+    if ((!defined $username || $username eq '') && $dbh && $uid) {
+        my $row = eval { $dbh->selectrow_hashref('SELECT username, auth FROM USER WHERE id_user=?', undef, $uid) };
+        if ($row) {
+            $username     = $row->{username};
+            $user->{username} = $username;
+            $user->{auth} = $row->{auth} if defined $row->{auth};
+        }
+    }
+
+    # Host IRC (si fourni)
+    my $host = '';
     if (defined $prefix && $prefix ne '') {
-        # prefix like "Nick!ident@host"
         ($host) = $prefix =~ /@(.+)$/;
         $host = lc($host // '');
     }
@@ -125,14 +151,14 @@ sub maybe_autologin {
     my $should_auto = 0;
     my $reason      = '';
 
-    # A) Explicit autologin flag in DB (username == '#AUTOLOGIN#')
+    # A) Autologin explicite en DB
     if (defined $username && $username eq '#AUTOLOGIN#') {
         $should_auto = 1;
         $reason      = 'flag';
     }
-    # B) UnderNet cloak: "<nickname>.users.undernet.org"
-    elsif ($host =~ /(?:^|\.)(users\.undernet\.org)$/) {
-        my ($leftmost) = split(/\./, $host, 2);  # leftmost label before ".users.undernet.org"
+    # B) Cloak Undernet: "<nickname>.users.undernet.org"
+    elsif ($host =~ /(^|\.)users\.undernet\.org$/) {
+        my ($leftmost) = split(/\./, $host, 2);
         if (defined $leftmost && $leftmost ne '' && $db_nick ne '' && lc($leftmost) eq $db_nick) {
             $should_auto = 1;
             $reason      = 'cloak';
@@ -141,9 +167,8 @@ sub maybe_autologin {
 
     return 0 unless $should_auto;
 
-    # Mark authenticated in DB and memory
-    my $dbh = $self->{dbh} // eval { $self->{db}->dbh };
-    if ($dbh) {
+    # Persistance DB
+    if ($dbh && $uid) {
         eval {
             $dbh->do('UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?', undef, $uid);
             1;
@@ -154,16 +179,23 @@ sub maybe_autologin {
         $logger->log(1, "[AUTOLOGIN] No DB handle; cannot persist auth state for uid=$uid");
     }
 
-    # In-memory caches (best effort)
+    # Caches mémoire
     eval {
-        $self->{auth}->{logged_in}{$uid} = 1 if exists $self->{auth}->{logged_in};
-        $self->{auth}->{sessions}{lc $db_nick} = { id_user => $uid, auth => 1 } if (defined $db_nick && exists $self->{auth}->{sessions});
+        $bot->{auth}->{logged_in}{$uid} = 1 if exists $bot->{auth}->{logged_in};
+
+        my $session_key = (defined $irc_nick && $irc_nick ne '') ? lc $irc_nick : lc($db_nick // '');
+        if ($session_key ne '' && exists $bot->{auth}->{sessions}) {
+            $bot->{auth}->{sessions}{$session_key} = { id_user => $uid, auth => 1 };
+        }
+
+        $user->{auth} = 1; # aligne l'objet
         1;
     };
 
     $logger->log(3, sprintf("[AUTOLOGIN] uid=%s nick=%s via=%s -> auth=1", $uid//'?', $db_nick||'?', $reason));
     return 1;
 }
+
 
 
 

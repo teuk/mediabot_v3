@@ -1335,7 +1335,7 @@ sub userOnJoin {
 
     if ($user) {
         # Check for channel-specific user settings (auto mode and greet)
-        my $sql = "SELECT * FROM USER_CHANNEL, CHANNEL WHERE USER_CHANNEL.id_channel = CHANNEL.id_channel AND name = ? AND id_user = ?";
+        my $sql = "SELECT uc.*, c.* FROM USER_CHANNEL AS uc JOIN CHANNEL AS c ON c.id_channel = uc.id_channel WHERE c.name = ? AND uc.id_user = ?;";
         $self->{logger}->log(4, $sql);
         my $sth = $self->{dbh}->prepare($sql);
 
@@ -1629,6 +1629,45 @@ sub mbCommandPublic(@) {
 	}
 
 }
+
+# List all known channels and user count (Master only)
+sub channelList {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    my $user = $self->get_user_from_message($message);
+
+    unless ($user && $user->is_authenticated) {
+        my $sNoticeMsg = $message->prefix . " chanlist command attempt (user " . ($user ? $user->handle : 'unknown') . " is not logged in)";
+        noticeConsoleChan($self, $sNoticeMsg);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    unless (checkUserLevel($self, $user->level, "Master")) {
+        my $sNoticeMsg = $message->prefix . " chanlist command attempt (command level [Master] for user " . $user->handle . "[" . $user->level . "])";
+        noticeConsoleChan($self, $sNoticeMsg);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        return;
+    }
+
+    my $sQuery = "SELECT CHANNEL.name, COUNT(USER_CHANNEL.id_user) as nbUsers FROM CHANNEL, USER_CHANNEL WHERE CHANNEL.id_channel = USER_CHANNEL.id_channel GROUP BY CHANNEL.name ORDER BY creation_date";
+    
+    my $sth = $self->{dbh}->prepare($sQuery);
+    unless ($sth->execute()) {
+        $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+        return;
+    }
+
+    my $sNoticeMsg = "[#chan (users)] ";
+    while (my $ref = $sth->fetchrow_hashref()) {
+        my $name    = $ref->{'name'};
+        my $nbUsers = $ref->{'nbUsers'};
+        $sNoticeMsg .= "$name ($nbUsers) ";
+    }
+
+    botNotice($self, $sNick, $sNoticeMsg);
+}
+
 
 # versionCheck() - sends version info in channel and alerts if update is available
 sub versionCheck {
@@ -5077,28 +5116,37 @@ sub userChannelInfo {
         return;
     }
 
-    # Main SQL query: get channel info + owner (level 500)
-    my $sQuery = q{
-        SELECT * FROM USER, USER_CHANNEL, CHANNEL
-         WHERE USER.id_user = USER_CHANNEL.id_user
-           AND CHANNEL.id_channel = USER_CHANNEL.id_channel
-           AND name = ?
-           AND level = 500
+    # --- Main SQL query: get channel info + owner (level 500)
+    my $sql1 = q{
+        SELECT
+            U.nickname       AS nickname,
+            U.last_login     AS last_login,
+            C.creation_date  AS creation_date,
+            C.description    AS description,
+            C.`key`          AS c_key,
+            C.chanmode       AS chanmode,
+            C.auto_join      AS auto_join
+        FROM `USER` U
+        JOIN USER_CHANNEL UC ON U.id_user     = UC.id_user
+        JOIN CHANNEL      C  ON C.id_channel  = UC.id_channel
+        WHERE C.name = ? AND UC.level = 500
+        LIMIT 1
     };
-    my $sth = $self->{dbh}->prepare($sQuery);
-    unless ($sth->execute($sChannel)) {
-        $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+
+    my $sth1 = $self->{dbh}->prepare($sql1);
+    unless ($sth1 && $sth1->execute($sChannel)) {
+        $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sql1");
         return;
     }
 
-    if (my $ref = $sth->fetchrow_hashref()) {
-        my $sUsername      = $ref->{'nickname'};
-        my $sLastLogin     = $ref->{'last_login'} // "Never";
-        my $creation_date  = $ref->{'creation_date'} // "Unknown";
-        my $description    = $ref->{'description'} // "No description";
-        my $sKey           = $ref->{'key'} // "Not set";
-        my $chanmode       = $ref->{'chanmode'} // "Not set";
-        my $sAutoJoin      = $ref->{'auto_join'} ? "True" : "False";
+    if (my $ref = $sth1->fetchrow_hashref()) {
+        my $sUsername      = $ref->{nickname};
+        my $sLastLogin     = defined $ref->{last_login}    ? $ref->{last_login}    : "Never";
+        my $creation_date  = defined $ref->{creation_date} ? $ref->{creation_date} : "Unknown";
+        my $description    = defined $ref->{description}   ? $ref->{description}   : "No description";
+        my $sKey           = defined $ref->{c_key}         ? $ref->{c_key}         : "Not set";
+        my $chanmode       = defined $ref->{chanmode}      ? $ref->{chanmode}      : "Not set";
+        my $sAutoJoin      = $ref->{auto_join} ? "True" : "False";
 
         botNotice($self, $sNick, "$sChannel is registered by $sUsername - last login: $sLastLogin");
         botNotice($self, $sNick, "Creation date : $creation_date - Description : $description");
@@ -5109,24 +5157,26 @@ sub userChannelInfo {
             botNotice($self, $sNick, "Chan modes : $chanmode - Key : $sKey - Auto join : $sAutoJoin");
         }
 
-        # List CHANSET flags
-        $sQuery = q{
-            SELECT chanset FROM CHANSET_LIST, CHANNEL_SET, CHANNEL
-             WHERE CHANNEL_SET.id_channel = CHANNEL.id_channel
-               AND CHANNEL_SET.id_chanset_list = CHANSET_LIST.id_chanset_list
-               AND name = ?
+        # --- List CHANSET flags
+        my $sql2 = q{
+            SELECT CL.chanset
+            FROM CHANSET_LIST CL
+            JOIN CHANNEL_SET  CS ON CS.id_chanset_list = CL.id_chanset_list
+            JOIN CHANNEL      C  ON CS.id_channel      = C.id_channel
+            WHERE C.name = ?
         };
-        $sth = $self->{dbh}->prepare($sQuery);
-        if ($sth->execute($sChannel)) {
+        my $sth2 = $self->{dbh}->prepare($sql2);
+        if ($sth2 && $sth2->execute($sChannel)) {
             my $sChansetFlags = "Channel flags ";
             my $hasFlags = 0;
             my $isChansetAntiFlood = 0;
 
-            while (my $ref = $sth->fetchrow_hashref()) {
-                my $chanset = $ref->{'chanset'};
+            while (my $r = $sth2->fetchrow_hashref()) {
+                my $chanset = $r->{chanset};
+                next unless defined $chanset;
                 $sChansetFlags .= "+$chanset ";
                 $isChansetAntiFlood = 1 if $chanset =~ /AntiFlood/i;
-                $hasFlags++;
+                $hasFlags = 1;
             }
 
             botNotice($self, $sNick, $sChansetFlags) if $hasFlags;
@@ -5136,86 +5186,46 @@ sub userChannelInfo {
                 my $channel_obj = $self->{channels}{$sChannel};
                 if ($channel_obj) {
                     my $id_channel = $channel_obj->get_id;
-                    $sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
-                    $sth = $self->{dbh}->prepare($sQuery);
-                    if ($sth->execute($id_channel)) {
-                        if (my $ref = $sth->fetchrow_hashref()) {
-                            my $nbmsg_max  = $ref->{'nbmsg_max'};
-                            my $nbmsg      = $ref->{'nbmsg'};
-                            my $duration   = $ref->{'duration'};
-                            my $timetowait = $ref->{'timetowait'};
-                            my $notif      = $ref->{'notification'};
-                            my $notif_txt  = $notif ? "ON" : "OFF";
+                    my $sql3 = q{
+                        SELECT nbmsg_max, nbmsg, duration, timetowait, notification
+                        FROM CHANNEL_FLOOD WHERE id_channel = ?
+                    };
+                    my $sth3 = $self->{dbh}->prepare($sql3);
+                    if ($sth3 && $sth3->execute($id_channel)) {
+                        if (my $rf = $sth3->fetchrow_hashref()) {
+                            my $nbmsg_max  = $rf->{nbmsg_max};
+                            my $nbmsg      = $rf->{nbmsg};
+                            my $duration   = $rf->{duration};
+                            my $timetowait = $rf->{timetowait};
+                            my $notif      = $rf->{notification} ? "ON" : "OFF";
 
                             botNotice(
                                 $self, $sNick,
-                                "Antiflood parameters : $nbmsg_max messages in $duration seconds, wait for $timetowait seconds, notification : $notif_txt"
+                                "Antiflood parameters : $nbmsg_max messages in $duration seconds, wait for $timetowait seconds, notification : $notif"
                             );
                         } else {
                             botNotice($self, $sNick, "Antiflood parameters : not set ?");
                         }
                     } else {
-                        $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+                        $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sql3");
                     }
                 } else {
                     botNotice($self, $sNick, "Antiflood details unavailable: internal channel object not found.");
                 }
             }
         } else {
-            $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
+            $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sql2");
         }
     } else {
         botNotice($self, $sNick, "The channel $sChannel doesn't appear to be registered");
     }
 
     logBot($self, $message, $sChannel, "chaninfo", @tArgs);
-    $sth->finish;
 }
 
 
-# List all known channels and user count (Master only)
-sub channelList {
-    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-    my $user = $self->get_user_from_message($message);
 
-    unless ($user && $user->is_authenticated) {
-        my $sNoticeMsg = $message->prefix . " chanlist command attempt (user " . ($user ? $user->handle : 'unknown') . " is not logged in)";
-        noticeConsoleChan($self, $sNoticeMsg);
-        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-        return;
-    }
-
-    unless (checkUserLevel($self, $user->level, "Master")) {
-        my $sNoticeMsg = $message->prefix . " chanlist command attempt (command level [Master] for user " . $user->handle . "[" . $user->level . "])";
-        noticeConsoleChan($self, $sNoticeMsg);
-        botNotice($self, $sNick, "Your level does not allow you to use this command.");
-        return;
-    }
-
-    my $sQuery = q{
-        SELECT name, COUNT(id_user) AS nbUsers
-        FROM CHANNEL, USER_CHANNEL
-        WHERE CHANNEL.id_channel = USER_CHANNEL.id_channel
-        GROUP BY name
-        ORDER BY creation_date
-        LIMIT 20
-    };
-    my $sth = $self->{dbh}->prepare($sQuery);
-    unless ($sth->execute()) {
-        $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sQuery");
-        return;
-    }
-
-    my $sNoticeMsg = "[#chan (users)] ";
-    while (my $ref = $sth->fetchrow_hashref()) {
-        my $name    = $ref->{'name'};
-        my $nbUsers = $ref->{'nbUsers'};
-        $sNoticeMsg .= "$name ($nbUsers) ";
-    }
-
-    botNotice($self, $sNick, $sNoticeMsg);
-}
 
 
 # Return detailed information about the currently authenticated user
