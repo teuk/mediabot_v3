@@ -1386,53 +1386,53 @@ sub userOnJoin {
 
 # DEPRECATED: Get nick information from a message and return a Mediabot::User object
 # This method is maintained for backward compatibility only.
-sub getNickInfo {
-    my ($self, $message) = @_;
-
-    my $conf   = $self->{conf};
-    my $prefix = $message->prefix;
-
-    $self->{logger}->log(2, "DEPRECATED: getNickInfo() was called – use get_user_from_message() instead");
-
-    my $sQuery = "SELECT * FROM USER";
-    my $sth = $self->{dbh}->prepare($sQuery);
-    unless ($sth->execute) {
-        $self->{logger}->log(1, "getNickInfo() SQL Error: $DBI::errstr - Query: $sQuery");
-        return undef;
-    }
-
-    while (my $ref = $sth->fetchrow_hashref()) {
-        my @masks = split(/,/, $ref->{hostmasks});
-        foreach my $raw_mask (@masks) {
-            $self->{logger}->log(4, "getNickInfo() Checking hostmask: $raw_mask");
-
-            my $src = $raw_mask;
-            my $mask = $raw_mask;
-            $mask =~ s/\./\\./g;
-            $mask =~ s/\*/.*/g;
-            $mask =~ s/\[/\\[/g;
-            $mask =~ s/\]/\\]/g;
-            $mask =~ s/\{/\\{/g;
-            $mask =~ s/\}/\\}/g;
-
-            if ($prefix =~ /^$mask/) {
-                $self->{logger}->log(3, "getNickInfo() $mask matches $prefix");
-
-                my $user = Mediabot::User->new($ref);
-                $user->load_level($self->{dbh});
-                $user->maybe_autologin($self, $src);
-
-                $self->{logger}->log(3, "getNickInfo() matched user id: " . $user->id);
-                $sth->finish;
-                return $user;
-            }
-        }
-    }
-
-    $sth->finish;
-    $self->{logger}->log(4, "getNickInfo() No match for prefix $prefix");
-    return undef;
-}
+#sub getNickInfo {
+#    my ($self, $message) = @_;
+#
+#    my $conf   = $self->{conf};
+#    my $prefix = $message->prefix;
+#
+#    $self->{logger}->log(2, "DEPRECATED: getNickInfo() was called – use get_user_from_message() instead");
+#
+#    my $sQuery = "SELECT * FROM USER";
+#    my $sth = $self->{dbh}->prepare($sQuery);
+#    unless ($sth->execute) {
+#        $self->{logger}->log(1, "getNickInfo() SQL Error: $DBI::errstr - Query: $sQuery");
+#        return undef;
+#    }
+#
+#    while (my $ref = $sth->fetchrow_hashref()) {
+#        my @masks = split(/,/, $ref->{hostmasks});
+#        foreach my $raw_mask (@masks) {
+#            $self->{logger}->log(4, "getNickInfo() Checking hostmask: $raw_mask");
+#
+#            my $src = $raw_mask;
+#            my $mask = $raw_mask;
+#            $mask =~ s/\./\\./g;
+#            $mask =~ s/\*/.*/g;
+#            $mask =~ s/\[/\\[/g;
+#            $mask =~ s/\]/\\]/g;
+#            $mask =~ s/\{/\\{/g;
+#            $mask =~ s/\}/\\}/g;
+#
+#            if ($prefix =~ /^$mask/) {
+#                $self->{logger}->log(3, "getNickInfo() $mask matches $prefix");
+#
+#                my $user = Mediabot::User->new($ref);
+#                $user->load_level($self->{dbh});
+#                $user->maybe_autologin($self, $src);
+#
+#                $self->{logger}->log(3, "getNickInfo() matched user id: " . $user->id);
+#                $sth->finish;
+#                return $user;
+#            }
+#        }
+#    }
+#
+#    $sth->finish;
+#    $self->{logger}->log(4, "getNickInfo() No match for prefix $prefix");
+#    return undef;
+#}
 
 # 🧙‍♂️ mbCommandPublic: The Sorting Hat of Mediabot – routes every incantation to the proper spell
 sub mbCommandPublic(@) {
@@ -9412,28 +9412,28 @@ sub update(@) {
 sub lastCom {
     my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-    # Get user auth info
-    my (
-        $uid, $level, $level_desc, $auth,
-        $handle, $passwd, $info1, $info2
-    ) = getNickInfo($self, $message);
+    # Auth via modern API
+    my $user = $self->get_user_from_message($message);
 
-    # Check if user is authenticated and has "Master" level
-    unless (defined $uid && $auth && defined $level && checkUserLevel($self, $level, "Master")) {
-        my $why = !$auth ? "is not logged in" : "does not have [Master] rights";
-        my $msg = $message->prefix . " lastcom command attempt (user $handle $why)";
-        noticeConsoleChan($self, $msg);
-        botNotice($self, $sNick,
-            $auth
-                ? "Your level does not allow you to use this command."
-                : "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password"
-        );
+    # Must be logged in
+    unless ($user && $user->is_authenticated) {
+        my $sNoticeMsg = $message->prefix . " lastcom command attempt (user " . ($user ? $user->handle : 'unknown') . " is not logged in)";
+        noticeConsoleChan($self, $sNoticeMsg);
+        botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        return;
+    }
+
+    # Master only
+    unless (checkUserLevel($self, $user->level, "Master")) {
+        my $sNoticeMsg = $message->prefix . " lastcom command attempt (insufficient level [Master] for user " . $user->handle . "[" . $user->level . "])";
+        noticeConsoleChan($self, $sNoticeMsg);
+        botNotice($self, $sNick, "Your level does not allow you to use this command.");
         return;
     }
 
     # Determine number of lines to show
     my $max_lines = 8;
-    my $nb_lines = 5;
+    my $nb_lines  = 5;
     if (defined $tArgs[0] && $tArgs[0] =~ /^\d+$/ && $tArgs[0] != 0) {
         if ($tArgs[0] > $max_lines) {
             $nb_lines = $max_lines;
@@ -9442,11 +9442,13 @@ sub lastCom {
             $nb_lines = $tArgs[0];
         }
     }
+    $nb_lines = int($nb_lines);
+    $nb_lines = 1 if $nb_lines < 1;
 
-    # Prepare and execute SQL query
-    my $sql = "SELECT * FROM ACTIONS_LOG ORDER BY ts DESC LIMIT ?";
+    # Query (embed sanitized integer to avoid LIMIT binding issues)
+    my $sql = "SELECT ts, id_user, id_channel, hostmask, action, args FROM ACTIONS_LOG ORDER BY ts DESC LIMIT $nb_lines";
     my $sth = $self->{dbh}->prepare($sql);
-    unless ($sth->execute($nb_lines)) {
+    unless ($sth && $sth->execute()) {
         $self->{logger}->log(1, "SQL Error: $DBI::errstr | Query: $sql");
         return;
     }
@@ -9455,21 +9457,33 @@ sub lastCom {
     while (my $row = $sth->fetchrow_hashref()) {
         my $ts        = $row->{ts};
         my $id_user   = $row->{id_user};
-        my $hostmask  = $row->{hostmask};
-        my $action    = $row->{action};
-        my $args      = $row->{args} // "";
+        my $hostmask  = $row->{hostmask} // "";
+        my $action    = $row->{action}  // "";
+        my $args      = defined $row->{args} ? $row->{args} : "";
 
         my $userhandle = getUserhandle($self, $id_user);
         $userhandle = (defined $userhandle && $userhandle ne "") ? $userhandle : "Unknown";
 
-        my $chan_obj = $self->getChannelById($row->{id_channel});
-        my $channel_str = defined $chan_obj ? " " . $chan_obj->{name} : "";
+        my $channel_str = "";
+        if (defined $row->{id_channel}) {
+            my $chan_obj = $self->getChannelById($row->{id_channel});
+            if ($chan_obj) {
+                my $chan_name;
+                if (ref($chan_obj) && eval { $chan_obj->can('get_name') }) {
+                    $chan_name = $chan_obj->get_name;
+                } elsif (ref($chan_obj) eq 'HASH') {
+                    $chan_name = $chan_obj->{name};
+                }
+                $channel_str = defined $chan_name ? " $chan_name" : "";
+            }
+        }
 
         botNotice($self, $sNick, "$ts ($userhandle)$channel_str $hostmask $action $args");
     }
 
     logBot($self, $message, $sChannel, "lastcom", @tArgs);
 }
+
 
 
 # Handles all quote-related commands: add, del, view, search, random, stats
