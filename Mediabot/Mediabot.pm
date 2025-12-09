@@ -820,23 +820,56 @@ sub getIdChannel {
     return $self->{channels}{$sChannel} ? $self->{channels}{$sChannel}->get_id : undef;
 }
 
-
 # Get user nickname from user id
-sub getUserhandle(@) {
-	my ($self,$id_user) = @_;
-	my $sUserhandle = undef;
-	my $sQuery = "SELECT nickname FROM USER WHERE id_user=?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($id_user) ) {
-		$self->{logger}->log(1,"getUserhandle() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			$sUserhandle = $ref->{'nickname'};
-		}
-	}
-	$sth->finish;
-	return $sUserhandle;
+# Get user nickname/handle from user id
+sub getUserhandle {
+    my ($self, $id_user) = @_;
+
+    # unvalid user => undef
+    return unless defined $id_user && $id_user =~ /^\d+$/ && $id_user > 0;
+
+    my $logger = $self->{logger};
+
+    # 1) If user already loaded in memory
+    if (my $users = $self->{users}) {
+
+        # a) hash indexed by id_user
+        if (exists $users->{$id_user}) {
+            my $user = $users->{$id_user};
+            my $handle = eval { $user->handle } // eval { $user->nickname };
+            return $handle if defined $handle && $handle ne '';
+        }
+
+        # b) Old-style : browse all users
+        foreach my $k (keys %$users) {
+            my $user = $users->{$k} or next;
+            my $uid  = eval { $user->id } // $user->{id_user};
+            next unless defined $uid && $uid =~ /^\d+$/;
+            next unless $uid == $id_user;
+
+            my $handle = eval { $user->handle } // eval { $user->nickname };
+            return $handle if defined $handle && $handle ne '';
+        }
+    }
+
+    # 2) Fallback DB direct
+    my $dbh = $self->{dbh} // eval { $self->{db}->dbh };
+    return unless $dbh;
+
+    my $row = eval {
+        $dbh->selectrow_hashref(
+            "SELECT nickname FROM USER WHERE id_user = ?",
+            undef, $id_user
+        );
+    };
+    if ($@) {
+        $logger->log(1, "SQL Error in getUserhandle(): $@") if $logger;
+        return;
+    }
+    return unless $row;
+
+    my $nickname = $row->{nickname} // '';
+    return $nickname ne '' ? $nickname : undef;
 }
 
 # Get user autologin status
@@ -9484,51 +9517,65 @@ sub lastCom {
     logBot($self, $message, $sChannel, "lastcom", @tArgs);
 }
 
-
-
 # Handles all quote-related commands: add, del, view, search, random, stats
 sub mbQuotes {
-	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-	# Show syntax if no subcommand is provided
-	unless (@tArgs && $tArgs[0] ne "") {
-		$self->_printQuoteSyntax($sNick);
-		return;
-	}
+    # Show syntax if no subcommand is provided
+    unless (@tArgs && defined $tArgs[0] && $tArgs[0] ne "") {
+        $self->_printQuoteSyntax($sNick);
+        return;
+    }
 
-	# Extract subcommand and normalize
-	my $subcmd = lc shift @tArgs;
+    # Extract subcommand and normalize
+    my $subcmd = lc shift @tArgs;
 
-	# Retrieve user info
-	my ($uid, $level, $level_desc, $auth, $handle) = getNickInfo($self, $message);
+    # --- Get info from user ---
+    my $user = $self->get_user_from_message($message);
 
-	# Authenticated + has level "User"
-	if ($uid && $auth && $level && checkUserLevel($self, $level, "User")) {
+    my ($uid, $handle, $auth, $level, $level_desc) = (undef, undef, 0, undef, undef);
+    if ($user) {
+        $uid        = $user->id;
+        $handle     = $user->nickname;
+        $auth       = $user->is_authenticated ? 1 : 0;
+        $level      = $user->level;               # numeric level
+        $level_desc = $user->level_description;   # "User", "Owner", ...
+    }
 
-		return mbQuoteAdd($self, $message, $uid, $handle, $sNick, $sChannel, @tArgs)    if $subcmd =~ /^(add|a)$/;
-		return mbQuoteDel($self, $message, $handle, $sNick, $sChannel, @tArgs)          if $subcmd =~ /^(del|d)$/;
-		return mbQuoteView($self, $message, $sNick, $sChannel, @tArgs)                  if $subcmd =~ /^(view|v)$/;
-		return mbQuoteSearch($self, $message, $sNick, $sChannel, @tArgs)                if $subcmd =~ /^(search|s)$/;
-		return mbQuoteRand($self, $message, $sNick, $sChannel, @tArgs)                  if $subcmd =~ /^(random|r)$/;
-		return mbQuoteStats($self, $message, $sNick, $sChannel, @tArgs)                 if $subcmd eq "stats";
+    # --- User authenticated and level >= "User" -> all subcommands ---
+    if ($user && $auth && defined $level && checkUserLevel($self, $level, "User")) {
 
-		# Unknown subcommand
-		$self->_printQuoteSyntax($sNick);
-		return;
-	}
+        return mbQuoteAdd($self, $message, $uid, $handle, $sNick, $sChannel, @tArgs) if $subcmd =~ /^(add|a)$/;
+        return mbQuoteDel($self, $message, $handle, $sNick, $sChannel, @tArgs)       if $subcmd =~ /^(del|d)$/;
+        return mbQuoteView($self, $message, $sNick, $sChannel, @tArgs)               if $subcmd =~ /^(view|v)$/;
+        return mbQuoteSearch($self, $message, $sNick, $sChannel, @tArgs)             if $subcmd =~ /^(search|s)$/;
+        return mbQuoteRand($self, $message, $sNick, $sChannel, @tArgs)               if $subcmd =~ /^(random|r)$/;
+        return mbQuoteStats($self, $message, $sNick, $sChannel, @tArgs)              if $subcmd eq "stats";
 
-	# Anonymous users: allow safe commands
-	return mbQuoteView($self, $message, $sNick, $sChannel, @tArgs)     if $subcmd =~ /^(view|v)$/;
-	return mbQuoteSearch($self, $message, $sNick, $sChannel, @tArgs)   if $subcmd =~ /^(search|s)$/;
-	return mbQuoteRand($self, $message, $sNick, $sChannel, @tArgs)     if $subcmd =~ /^(random|r)$/;
-	return mbQuoteStats($self, $message, $sNick, $sChannel, @tArgs)    if $subcmd eq "stats";
-	return mbQuoteAdd($self, $message, undef, undef, $sNick, $sChannel, @tArgs) if $subcmd =~ /^(add|a)$/;
+        # Unknown subcommand
+        $self->_printQuoteSyntax($sNick);
+        return;
+    }
 
-	# If we reach this, it's an unauthorized or invalid command
-	my $msg = $message->prefix . " q command attempt (user $handle is not logged in)";
-	noticeConsoleChan($self, $msg);
-	botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-	return;
+    # --- User unauthenticated or level < "User" -> only "view", "search", "random", "stats" ---
+    return mbQuoteView($self, $message, $sNick, $sChannel, @tArgs)                if $subcmd =~ /^(view|v)$/;
+    return mbQuoteSearch($self, $message, $sNick, $sChannel, @tArgs)              if $subcmd =~ /^(search|s)$/;
+    return mbQuoteRand($self, $message, $sNick, $sChannel, @tArgs)                if $subcmd =~ /^(random|r)$/;
+    return mbQuoteStats($self, $message, $sNick, $sChannel, @tArgs)               if $subcmd eq "stats";
+    return mbQuoteAdd($self, $message, undef, undef, $sNick, $sChannel, @tArgs)   if $subcmd =~ /^(add|a)$/;
+
+    # At this point, the user is either unauthenticated or has insufficient level for the requested subcommand
+    my $who = defined $handle ? $handle : $sNick;
+    my $msg = $message->prefix . " q command attempt (user $who is not logged in)";
+    noticeConsoleChan($self, $msg);
+    botNotice(
+        $self,
+        $sNick,
+        "You must be logged to use this command - /msg "
+          . $self->{irc}->nick_folded
+          . " login username password"
+    );
+    return;
 }
 
 # Display the syntax for the quote command
@@ -9542,9 +9589,6 @@ sub _printQuoteSyntax {
 	botNotice($self, $sNick, "q [random or r]");
 	botNotice($self, $sNick, "q stats");
 }
-
-
-
 
 # Add a new quote to the database for the specified channel
 sub mbQuoteAdd {
@@ -9588,7 +9632,7 @@ sub mbQuoteAdd {
 	# Insert quote
 	$sQuery = "INSERT INTO QUOTES (id_channel, id_user, quotetext) VALUES (?, ?, ?)";
 	$sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($id_channel, (defined($iMatchingUserId) ? $iMatchingUserId : 0), $sQuoteText)) {
+	unless ($sth->execute($id_channel, ($iMatchingUserId && $iMatchingUserId =~ /^\d+$/ ? $iMatchingUserId : 0), $sQuoteText)) {
 		$self->{logger}->log(1, "SQL Error: $DBI::errstr | Query: $sQuery");
 	} else {
 		my $id_inserted = String::IRC->new($sth->{mysql_insertid})->bold;
@@ -9640,18 +9684,33 @@ sub mbQuoteView(@) {
 		botNotice($self,$sNick,"q [view or v] id");
 	}
 	else {
-		my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? AND id_quotes=?";
+		my $sQuery =
+			"SELECT QUOTES.*,CHANNEL.*,USER.nickname AS user_nickname ".
+			"FROM QUOTES ".
+			"JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel ".
+			"LEFT JOIN USER ON USER.id_user = QUOTES.id_user ".
+			"WHERE CHANNEL.name LIKE ? AND QUOTES.id_quotes = ?";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($sChannel,$id_quotes)) {
 			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		}
 		else {
 			if (my $ref = $sth->fetchrow_hashref()) {
-				my $id_quotes = $ref->{'id_quotes'};
+				my $id_quotes  = $ref->{'id_quotes'};
 				my $sQuoteText = $ref->{'quotetext'};
-				my $id_user = $ref->{'id_user'};
-				my $sUserhandle = getUserhandle($self,$id_user);
+				my $id_user    = $ref->{'id_user'};
+
+				# 1) handle depuis la jointure USER
+				my $sUserhandle = $ref->{'user_nickname'};
+
+				# 2) sinon on tente l'ancien getUserhandle()
+				if (!defined($sUserhandle) || $sUserhandle eq "") {
+					$sUserhandle = getUserhandle($self,$id_user);
+				}
+
+				# 3) fallback final
 				$sUserhandle = (defined($sUserhandle) && ($sUserhandle ne "") ? $sUserhandle : "Unknown");
+
 				my $id_q = String::IRC->new($id_quotes)->bold;
 				botPrivmsg($self,$sChannel,"($sUserhandle) [id: $id_q] $sQuoteText");
 				logBot($self,$message,$sChannel,"q view",@tArgs);
@@ -9663,7 +9722,7 @@ sub mbQuoteView(@) {
 		$sth->finish;
 	}
 }
-
+                
 sub mbQuoteSearch(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
