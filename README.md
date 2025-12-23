@@ -23,6 +23,28 @@ I hope you'll have fun using mediabot :)
 TeuK
 
 # Notes
+
+20251222
+
+After a *long* (very long) refactoring campaign, Mediabot finally migrated most of its command handling
+to a proper Context-based architecture.
+
+Yes, this includes:
+- removing years of implicit state,
+- surviving strict mode,
+- fixing bugs that existed longer than some IRC networks,
+- and arguing endlessly with ChatGPT (which sometimes won, often didn’t).
+
+The bot is now running in production on:
+- Undernet (as historical mediabot and as a separate ubot),
+- Epiknet (#gabou, #35+ans),
+
+and surprisingly… it mostly works.
+
+There are still rough edges, but the hard part is done.
+Future me will be thankful.
+Probably.
+
 20250806
 
 ALTER TABLE CHANNEL_PURGED ADD COLUMN purged_by VARCHAR(255) DEFAULT NULL;
