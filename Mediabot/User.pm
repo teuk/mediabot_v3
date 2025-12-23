@@ -310,5 +310,38 @@ sub create {
     return $user_obj;
 }
 
+# Return true if user's level is >= required level
+# Hierarchy (lower is stronger):
+# Owner(0) > Master(1) > Administrator(2) > User(3)
+sub has_level {
+    my ($self, $required) = @_;
+
+    return 0 unless defined $required && $required ne '';
+
+    # Current user level (string)
+    my $current = eval { $self->level_description }
+               || eval { $self->level }
+               || '';
+
+    return 0 unless $current ne '';
+
+    my %level_rank = (
+        owner          => 0,
+        master         => 1,
+        administrator  => 2,
+        user           => 3,
+    );
+
+    my $cur_lc = lc($current);
+    my $req_lc = lc($required);
+
+    # Safe deny if unknown level
+    return 0
+        unless exists $level_rank{$cur_lc}
+            && exists $level_rank{$req_lc};
+
+    # Lower or equal rank == sufficient privilege
+    return ($level_rank{$cur_lc} <= $level_rank{$req_lc}) ? 1 : 0;
+}
 
 1;
