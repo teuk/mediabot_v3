@@ -98,7 +98,8 @@ Hailo
 Twitter::API
 JSON::MaybeXS
 List::Util
-File::Temp" | while read perl_module
+File::Temp
+HTTP::Tiny" | while read perl_module
  do
   message "Checking $perl_module "
   perl -M$perl_module -e "exit 0;" &>/dev/null
@@ -160,7 +161,8 @@ Hailo
 Twitter::API
 JSON::MaybeXS
 List::Util
-File::Temp" | while read perl_module
+File::Temp
+HTTP::Tiny" | while read perl_module
  do
   message "Checking $perl_module"
   perl -M$perl_module -e "exit 0;"

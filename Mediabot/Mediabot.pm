@@ -37,11 +37,13 @@ use Socket;
 use Twitter::API;
 use JSON::MaybeXS;
 use Try::Tiny;
-use URI::Escape qw(uri_escape);
+use URI::Escape qw(uri_escape_utf8);
 use List::Util qw/min/;
 use File::Temp qw/tempfile/;
 use Carp qw(croak);
 use Encode qw(encode);
+use HTTP::Tiny;
+
 
 # --- Top of Mediabot.pm (near other 'my' / 'our' declarations)
 my $ALREADY_EXITING = 0;  # re-entrance guard for clean_and_exit
@@ -8055,8 +8057,8 @@ sub displayWeather_ctx {
     # %l location, %c icon, %t temp, %f feelslike, %h humidity, %w wind, %p precip
     my $format = '%l: %c %t (feels %f) | 💧%h | 🌬%w | ☔%p';
 
-    my $encoded = url_encode($location);
-    my $url = "https://wttr.in/$encoded?format=" . url_encode($format) . "&m";
+    my $encoded = uri_escape_utf8($location);
+    my $url = "https://wttr.in/$encoded?format=" . uri_escape_utf8($format) . "&m";
 
     my $http = HTTP::Tiny->new(
         timeout => 4,

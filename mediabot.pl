@@ -25,7 +25,8 @@ use IO::Async::Timer::Periodic;
 use Net::Async::IRC;
 use Switch;
 use Data::Dumper;
-use Encode;
+use utf8;
+use Encode qw(encode decode);
 
 use open qw(:std :encoding(UTF-8));
 binmode(STDOUT, ':encoding(UTF-8)');
