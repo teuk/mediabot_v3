@@ -61,6 +61,7 @@ sub catch_term;
 sub catch_int;
 sub reconnect;
 sub getVersion;
+sub _build_irc;
 
 # +---------------------------------------------------------------------------+
 # !          IRC FUNCTIONS                                                    !
@@ -174,7 +175,7 @@ my $pid     = $mediabot->getPidFromFile();
 
 if (defined $pid && $pid =~ /^\d+$/) {
     
-    # kill 0 just tests “does this process exist and can I signal it?”
+    # kill 0 just tests "does this process exist and can I signal it?"
     if (kill 0, $pid) {
         # process is alive
         $mediabot->{logger}->log(0, "Mediabot is already running with PID $pid.");
@@ -284,15 +285,15 @@ $mediabot->init_hailo();
 my $loop = IO::Async::Loop->new;
 $mediabot->setLoop($loop);
 
-# Initialize partyline
-#my $partyline = Mediabot::Partyline->new(
-#    bot  => $mediabot,
-#    loop => $loop,
-#    port => $mediabot->{conf}->get("main.PARTYLINE_PORT"),
-#);
-#$mediabot->{partyline} = $partyline;
-#my $partyline_port = $mediabot->{partyline}->get_port;
-#$mediabot->{logger}->log(3, "Partyline port is: $partyline_port");
+# Initialize Partyline
+my $partyline = Mediabot::Partyline->new(
+    bot  => $mediabot,
+    loop => $loop,
+    port => $mediabot->{conf}->get("main.PARTYLINE_PORT"),
+);
+$mediabot->{partyline} = $partyline;
+my $partyline_port = $mediabot->{partyline}->get_port;
+$mediabot->{logger}->log(3, "Partyline port is: $partyline_port");
 
 # Set up main timer
 my $timer = IO::Async::Timer::Periodic->new(
@@ -311,83 +312,17 @@ my $channel_hash_timer = IO::Async::Timer::Periodic->new(
 $channel_hash_timer->start;
 $loop->add($channel_hash_timer);
 
-my $irc = Net::Async::IRC->new(
-    on_message_text                  => \&on_private,
-    on_message_motd                  => \&on_motd,
-    on_message_INVITE                => \&on_message_INVITE,
-    on_message_KICK                  => \&on_message_KICK,
-    on_message_MODE                  => \&on_message_MODE,
-    on_message_NICK                  => \&on_message_NICK,
-    on_message_NOTICE                => \&on_message_NOTICE,
-    on_message_QUIT                  => \&on_message_QUIT,
-    on_message_PART                  => \&on_message_PART,
-    on_message_PRIVMSG               => \&on_message_PRIVMSG,
-    on_message_TOPIC                 => \&on_message_TOPIC,
-    on_message_LIST                  => \&on_message_LIST,
-    on_message_RPL_NAMEREPLY         => \&on_message_RPL_NAMEREPLY,
-    on_message_RPL_ENDOFNAMES        => \&on_message_RPL_ENDOFNAMES,
-    on_message_WHO                   => \&on_message_WHO,
-    on_message_WHOIS                 => \&on_message_WHOIS,
-    on_message_WHOWAS                => \&on_message_WHOWAS,
-    on_message_JOIN                  => \&on_message_JOIN,
-    on_message_001                   => \&on_message_001,
-    on_message_002                   => \&on_message_002,
-    on_message_003                   => \&on_message_003,
-    on_message_004                   => \&on_message_004,
-    on_message_005                   => \&on_message_005,
-    on_message_RPL_WHOISUSER         => \&on_message_RPL_WHOISUSER,
-    on_message_ERROR                 => \&on_message_ERROR,
-    on_message_KILL                  => \&on_message_KILL,
-    on_message_SERVER                => \&on_message_SERVER,
-    on_message_RPL_TOPIC             => \&on_message_RPL_TOPIC,
-    on_message_RPL_TOPICWHOTIME      => \&on_message_RPL_TOPICWHOTIME,
-    on_message_RPL_LIST              => \&on_message_RPL_LIST,
-    on_message_RPL_LISTEND           => \&on_message_RPL_LISTEND,
-    on_message_RPL_WHOREPLY          => \&on_message_RPL_WHOREPLY,
-    on_message_RPL_ENDOFWHO          => \&on_message_RPL_ENDOFWHO,
-    on_message_RPL_WHOISCHANNELS     => \&on_message_RPL_WHOISCHANNELS,
-    on_message_RPL_WHOISSERVER       => \&on_message_RPL_WHOISSERVER,
-    on_message_RPL_WHOISIDLE         => \&on_message_RPL_WHOISIDLE,
-    on_message_ERR_NICKNAMEINUSE     => \&on_message_ERR_NICKNAMEINUSE,
-    on_message_RPL_INVITING          => \&on_message_RPL_INVITING,
-    on_message_RPL_INVITELIST        => \&on_message_RPL_INVITELIST,
-    on_message_RPL_ENDOFINVITELIST   => \&on_message_RPL_ENDOFINVITELIST,
-    on_message_ERR_NEEDMOREPARAMS    => \&on_message_ERR_NEEDMOREPARAMS,
-);
-
-# Set up IRC object
+# Build IRC object and connect (initial connection)
+my ($irc, $bind_ip) = _build_irc($loop);
 $mediabot->setIrc($irc);
-
-# Add IRC object to the loop
-$loop->add($irc);
 
 my $sConnectionNick = $mediabot->getConnectionNick();
 my $sServerPass = $mediabot->getServerPass();
 my $sServerPassDisplay = ( $sServerPass eq "" ? "none defined" : $sServerPass );
-my $bNickTriggerCommand =$mediabot->getNickTrigger();
+my $bNickTriggerCommand = $mediabot->getNickTrigger();
 $mediabot->{logger}->log(0,"Trying to connect to " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort() . " (pass : $sServerPassDisplay)");
 
-my $bind_ip = $mediabot->{conf}->get('connection.CONN_BIND_IP');
-
-my $login = $irc->login(
-    pass     => $sServerPass,
-    nick     => $sConnectionNick,
-    host     => $mediabot->getServerHostname(),
-    service  => $mediabot->getServerPort(),
-    user     => $mediabot->getUserName(),
-    realname => $mediabot->getIrcName(),
-
-    # --- BIND IP (optionnel, si défini dans [connection].CONN_BIND_IP) ---
-    ( $bind_ip ? (
-        local_host => $bind_ip,                      # chemin standard IO::Async
-        connect    => { local_host => $bind_ip },    # compat anciennes versions
-        ( $bind_ip =~ /:/ ? ( family => 'inet6' ) : () ),  # si IPv6
-    ) : () ),
-
-    on_login => \&on_login,
-);
-
-
+my $login = _do_login($irc, $bind_ip);
 $login->get;
 
 # Start main loop
@@ -396,6 +331,95 @@ $loop->run;
 # +---------------------------------------------------------------------------+
 # !          SUBS                                                             !
 # +---------------------------------------------------------------------------+
+
+# +---------------------------------------------------------------------------+
+# ! _build_irc($loop)                                                        !
+# ! Creates and registers a fresh Net::Async::IRC object into $loop.         !
+# ! Returns ($irc, $bind_ip).                                                !
+# +---------------------------------------------------------------------------+
+sub _build_irc {
+    my ($loop) = @_;
+
+    my $bind_ip = $mediabot->{conf}->get('connection.CONN_BIND_IP');
+
+    my $irc = Net::Async::IRC->new(
+        on_message_text                  => \&on_private,
+        on_message_motd                  => \&on_motd,
+        on_message_INVITE                => \&on_message_INVITE,
+        on_message_KICK                  => \&on_message_KICK,
+        on_message_MODE                  => \&on_message_MODE,
+        on_message_NICK                  => \&on_message_NICK,
+        on_message_NOTICE                => \&on_message_NOTICE,
+        on_message_QUIT                  => \&on_message_QUIT,
+        on_message_PART                  => \&on_message_PART,
+        on_message_PRIVMSG               => \&on_message_PRIVMSG,
+        on_message_TOPIC                 => \&on_message_TOPIC,
+        on_message_LIST                  => \&on_message_LIST,
+        on_message_RPL_NAMEREPLY         => \&on_message_RPL_NAMEREPLY,
+        on_message_RPL_ENDOFNAMES        => \&on_message_RPL_ENDOFNAMES,
+        on_message_WHO                   => \&on_message_WHO,
+        on_message_WHOIS                 => \&on_message_WHOIS,
+        on_message_WHOWAS                => \&on_message_WHOWAS,
+        on_message_JOIN                  => \&on_message_JOIN,
+        on_message_001                   => \&on_message_001,
+        on_message_002                   => \&on_message_002,
+        on_message_003                   => \&on_message_003,
+        on_message_004                   => \&on_message_004,
+        on_message_005                   => \&on_message_005,
+        on_message_RPL_WHOISUSER         => \&on_message_RPL_WHOISUSER,
+        on_message_ERROR                 => \&on_message_ERROR,
+        on_message_KILL                  => \&on_message_KILL,
+        on_message_SERVER                => \&on_message_SERVER,
+        on_message_RPL_TOPIC             => \&on_message_RPL_TOPIC,
+        on_message_RPL_TOPICWHOTIME      => \&on_message_RPL_TOPICWHOTIME,
+        on_message_RPL_LIST              => \&on_message_RPL_LIST,
+        on_message_RPL_LISTEND           => \&on_message_RPL_LISTEND,
+        on_message_RPL_WHOREPLY          => \&on_message_RPL_WHOREPLY,
+        on_message_RPL_ENDOFWHO          => \&on_message_RPL_ENDOFWHO,
+        on_message_RPL_WHOISCHANNELS     => \&on_message_RPL_WHOISCHANNELS,
+        on_message_RPL_WHOISSERVER       => \&on_message_RPL_WHOISSERVER,
+        on_message_RPL_WHOISIDLE         => \&on_message_RPL_WHOISIDLE,
+        on_message_ERR_NICKNAMEINUSE     => \&on_message_ERR_NICKNAMEINUSE,
+        on_message_RPL_INVITING          => \&on_message_RPL_INVITING,
+        on_message_RPL_INVITELIST        => \&on_message_RPL_INVITELIST,
+        on_message_RPL_ENDOFINVITELIST   => \&on_message_RPL_ENDOFINVITELIST,
+        on_message_ERR_NEEDMOREPARAMS    => \&on_message_ERR_NEEDMOREPARAMS,
+    );
+
+    $loop->add($irc);
+
+    return ($irc, $bind_ip);
+}
+
+# +---------------------------------------------------------------------------+
+# ! _do_login($irc, $bind_ip)                                                !
+# ! Issues irc->login() with current server settings.                       !
+# ! Returns the login Future.                                                !
+# +---------------------------------------------------------------------------+
+sub _do_login {
+    my ($irc, $bind_ip) = @_;
+
+    my $sConnectionNick = $mediabot->getConnectionNick();
+    my $sServerPass     = $mediabot->getServerPass();
+
+    return $irc->login(
+        pass     => $sServerPass,
+        nick     => $sConnectionNick,
+        host     => $mediabot->getServerHostname(),
+        service  => $mediabot->getServerPort(),
+        user     => $mediabot->getUserName(),
+        realname => $mediabot->getIrcName(),
+
+        # Bind IP (optional — set CONN_BIND_IP in [connection] section)
+        ( $bind_ip ? (
+            local_host => $bind_ip,
+            connect    => { local_host => $bind_ip },
+            ( $bind_ip =~ /:/ ? ( family => 'inet6' ) : () ),
+        ) : () ),
+
+        on_login => \&on_login,
+    );
+}
 
 # Display usage information
 sub usage {
@@ -1159,7 +1183,8 @@ sub on_motd {
 sub on_message_RPL_WHOISUSER {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_RPL_WHOISUSER', $message);
-    my %WHOIS_VARS = %{$mediabot->getWhoisVar()};
+    my $whois_ref = $mediabot->getWhoisVar();
+    my %WHOIS_VARS = (ref($whois_ref) eq 'HASH') ? %{$whois_ref} : ();
     my @tArgs = $message->args;
     my $sHostname = $tArgs[3];
     my ($target_name,$ident,$host,$flags,$realname) = @{$hints}{qw<target_name ident host flags realname>};
@@ -1278,12 +1303,12 @@ sub on_message_RPL_WHOISUSER {
 
                my %joined = map { $_ => 1 } grep { /^#/ } split /\s+/, $channels_str;
 
-               my $txt = "🛰️ Mediabot channel status:\n";
+               my $txt = "Mediabot channel status:\n";
                foreach my $chan (sort keys %{ $mediabot->{channels} }) {
                    if ($joined{$chan}) {
-                       $txt .= " - $chan : ✅ joined\n";
+                       $txt .= " - $chan : joined\n";
                    } else {
-                       $txt .= " - $chan : ❌ not joined\n";
+                       $txt .= " - $chan : not joined\n";
                    }
                }
                $stream->write($txt);
@@ -1297,7 +1322,6 @@ sub on_message_ERROR(@) {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_ERROR', $message);
     $mediabot->{logger}->log(0, "ERROR from server: " . join(" ", @{ $message->args }));
-    # optionally $mediabot->clean_and_exit(1);
 }
 
 sub on_message_KILL {
@@ -1305,7 +1329,6 @@ sub on_message_KILL {
     log_debug_args('on_message_KILL', $message);
     my ($killer, $victim, $reason) = @{ $message->args };
     $mediabot->{logger}->log(0, "Killed by $killer: $reason – will reconnect.");
-    # reconnect logic if desired
 }
 
 sub on_message_SERVER {
@@ -1359,29 +1382,31 @@ sub on_message_RPL_ENDOFWHO {
 
 sub on_message_RPL_WHOISCHANNELS {
     my ($self, $message, $hints) = @_;
-    log_debug_args('on_message_RPL_WHOISCHANNELS', $message);
 
-    my $args_ref = $message->args;
-    my @args = ref($args_ref) eq 'ARRAY' ? @$args_ref : ();
-
-    my ($nick, $chans) = @args;
-    $nick  //= "<undef>";
-    $chans //= "";
+    my @args = $message->args;
+    my $nick  = $args[1] // '<undef>';
+    my $chans = $args[2] // '';
 
     $mediabot->{logger}->log(0, "$nick on channels: $chans");
 }
 
 sub on_message_RPL_WHOISSERVER {
     my ($self, $message, $hints) = @_;
-    log_debug_args('on_message_RPL_WHOISSERVER', $message);
-    my ($nick, $server, $info) = @{ $message->args };
+
+    my @args   = $message->args;
+    my $nick   = $args[1] // '';
+    my $server = $args[2] // '';
+    my $info   = $args[3] // '';
     $mediabot->{logger}->log(0, "$nick server $server ($info)");
 }
 
 sub on_message_RPL_WHOISIDLE {
     my ($self, $message, $hints) = @_;
-    log_debug_args('on_message_RPL_WHOISIDLE', $message);
-    my ($nick, $idle, $signon) = @{ $message->args };
+
+    my @args   = $message->args;
+    my $nick   = $args[1] // '';
+    my $idle   = $args[2] // 0;
+    my $signon = $args[3] // time;
     $mediabot->{logger}->log(0, "$nick idle for ${idle}s, signon: " . scalar localtime($signon));
 }
 
@@ -1391,13 +1416,12 @@ sub on_message_ERR_NICKNAMEINUSE {
     my $conflict = $message->args->[1] // '';
     my $new_nick = $self->nick_folded . "_";
     $self->change_nick($new_nick);
-    $mediabot->{logger}->log(0, "Nick “$conflict” in use, switched to $new_nick");
+    $mediabot->{logger}->log(0, "Nick \"$conflict\" in use, switched to $new_nick");
 }
 
 sub on_message_RPL_MYINFO {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_MYINFO', $message);
-    # args = [ servername, version, user_modes, chan_modes ]
     my @a = @{$message->args};
     $mediabot->{logger}->log(4,"Server info: host=$a[0], ver=$a[1], umodes=$a[2], cmodes=$a[3]");
 }
@@ -1405,7 +1429,6 @@ sub on_message_RPL_MYINFO {
 sub on_message_RPL_ISUPPORT {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_ISUPPORT', $message);
-    # args = [ token1, token2, … ]
     $mediabot->{logger}->log(5, "ISUPPORT tokens: " . join(' ', @{$message->args}));
 }
 
@@ -1433,104 +1456,47 @@ sub on_message_RPL_ENDOFINVITELIST {
 sub on_message_ERR_NEEDMOREPARAMS {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_ERR_NEEDMOREPARAMS', $message);
-    # args = [ your_nick, command, "Not enough parameters" ]
     my ($me, $cmd) = @{$message->args}[0,1];
     $mediabot->{logger}->log(1, "ERR_NEEDMOREPARAMS for $cmd – vérifiez la syntaxe.");
 }
 
 sub reconnect {
-    # Pick IRC Server
+    # Pick a (possibly different) IRC server
     $mediabot->pickServer();
-        
+
+    # Fresh IO::Async loop
     $loop = IO::Async::Loop->new;
     $mediabot->setLoop($loop);
-        
+
+    # Fresh timer
     $timer = IO::Async::Timer::Periodic->new(
-    interval => 5,
-    on_tick => \&on_timer_tick,
+        interval => 5,
+        on_tick  => \&on_timer_tick,
     );
     $mediabot->setMainTimerTick($timer);
-    
-    $irc = Net::Async::IRC->new(
-        on_message_text                  => \&on_private,
-        on_message_motd                  => \&on_motd,
-        on_message_INVITE                => \&on_message_INVITE,
-        on_message_KICK                  => \&on_message_KICK,
-        on_message_MODE                  => \&on_message_MODE,
-        on_message_NICK                  => \&on_message_NICK,
-        on_message_NOTICE                => \&on_message_NOTICE,
-        on_message_QUIT                  => \&on_message_QUIT,
-        on_message_PART                  => \&on_message_PART,
-        on_message_PRIVMSG               => \&on_message_PRIVMSG,
-        on_message_TOPIC                 => \&on_message_TOPIC,
-        on_message_LIST                  => \&on_message_LIST,
-        on_message_RPL_NAMEREPLY         => \&on_message_RPL_NAMEREPLY,
-        on_message_RPL_ENDOFNAMES        => \&on_message_RPL_ENDOFNAMES,
-        on_message_WHO                   => \&on_message_WHO,
-        on_message_WHOIS                 => \&on_message_WHOIS,
-        on_message_WHOWAS                => \&on_message_WHOWAS,
-        on_message_JOIN                  => \&on_message_JOIN,
-        on_message_001                   => \&on_message_001,
-        on_message_002                   => \&on_message_002,
-        on_message_003                   => \&on_message_003,
-        on_message_004                   => \&on_message_004,
-        on_message_005                   => \&on_message_005,
-        on_message_RPL_WHOISUSER         => \&on_message_RPL_WHOISUSER,
-        on_message_ERROR                 => \&on_message_ERROR,
-        on_message_KILL                  => \&on_message_KILL,
-        on_message_SERVER                => \&on_message_SERVER,
-        on_message_RPL_TOPIC             => \&on_message_RPL_TOPIC,
-        on_message_RPL_TOPICWHOTIME      => \&on_message_RPL_TOPICWHOTIME,
-        on_message_RPL_LIST              => \&on_message_RPL_LIST,
-        on_message_RPL_LISTEND           => \&on_message_RPL_LISTEND,
-        on_message_RPL_WHOREPLY          => \&on_message_RPL_WHOREPLY,
-        on_message_RPL_ENDOFWHO          => \&on_message_RPL_ENDOFWHO,
-        on_message_RPL_WHOISCHANNELS     => \&on_message_RPL_WHOISCHANNELS,
-        on_message_RPL_WHOISSERVER       => \&on_message_RPL_WHOISSERVER,
-        on_message_RPL_WHOISIDLE         => \&on_message_RPL_WHOISIDLE,
-        on_message_ERR_NICKNAMEINUSE     => \&on_message_ERR_NICKNAMEINUSE,
-        on_message_RPL_INVITING          => \&on_message_RPL_INVITING,
-        on_message_RPL_INVITELIST        => \&on_message_RPL_INVITELIST,
-        on_message_RPL_ENDOFINVITELIST   => \&on_message_RPL_ENDOFINVITELIST,
-        on_message_ERR_NEEDMOREPARAMS    => \&on_message_ERR_NEEDMOREPARAMS,
-    );
 
+    # Build a fresh IRC object via the shared helper
+    my ($new_irc, $new_bind_ip) = _build_irc($loop);
+    $irc = $new_irc;
     $mediabot->setIrc($irc);
-    
-    $loop->add($irc);
-    
-    $sConnectionNick = $mediabot->getConnectionNick();
-    $sServerPass = $mediabot->getServerPass();
+
+    # Refresh connection-related variables from config
+    $sConnectionNick    = $mediabot->getConnectionNick();
+    $sServerPass        = $mediabot->getServerPass();
     $sServerPassDisplay = ( $sServerPass eq "" ? "none defined" : $sServerPass );
-    $bNickTriggerCommand =$mediabot->getNickTrigger();
+    $bNickTriggerCommand = $mediabot->getNickTrigger();
+
     $mediabot->{logger}->log(0,"Trying to connect to " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort() . " (pass : $sServerPassDisplay)");
-    
-    my $login = $irc->login(
-        pass     => $sServerPass,
-        nick     => $sConnectionNick,
-        host     => $mediabot->getServerHostname(),
-        service  => $mediabot->getServerPort(),
-        user     => $mediabot->getUserName(),
-        realname => $mediabot->getIrcName(),
 
-        # --- BIND IP (optionnel, si défini dans [connection].CONN_BIND_IP) ---
-        ( $bind_ip ? (
-            local_host => $bind_ip,                      # chemin standard IO::Async
-            connect    => { local_host => $bind_ip },    # compat anciennes versions
-            ( $bind_ip =~ /:/ ? ( family => 'inet6' ) : () ),  # si IPv6
-        ) : () ),
-
-        on_login => \&on_login,
-    );
-
+    my $login = _do_login($irc, $new_bind_ip);
     $login->get;
-    
+
     # Start main loop
     $loop->run;
 }
 
 sub catch_hup {
-    my ($signal) = @_;    # you can inspect $signal if you like
+    my ($signal) = @_;
     if ( $mediabot->readConfigFile ) {
         $mediabot->noticeConsoleChan("Caught SIGHUP - configuration reloaded successfully");
     }
@@ -1540,14 +1506,14 @@ sub catch_hup {
 }
 
 sub catch_term {
-    my ($signal) = @_;    # you can inspect $signal if you like
+    my ($signal) = @_;
     log_message(0,"Received SIGTERM (Ctrl+C). Initiating clean shutdown.");
     $mediabot && $mediabot->clean_and_exit(0);
     exit 0;
 }
 
 sub catch_int {
-    my ($signal) = @_;    # you can inspect $signal if you like
+    my ($signal) = @_;
     log_message(0,"Received SIGINT (Ctrl+C). Initiating clean shutdown.");
     $mediabot && $mediabot->clean_and_exit(0);
     exit 0;

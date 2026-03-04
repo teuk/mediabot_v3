@@ -37,7 +37,7 @@ use Socket;
 use Twitter::API;
 use JSON::MaybeXS;
 use Try::Tiny;
-use URI::Escape qw(uri_escape_utf8);
+use URI::Escape qw(uri_escape_utf8 uri_escape);
 use List::Util qw/min/;
 use File::Temp qw/tempfile/;
 use Carp qw(croak);
@@ -48,7 +48,7 @@ use HTTP::Tiny;
 # --- Top of Mediabot.pm (near other 'my' / 'our' declarations)
 my $ALREADY_EXITING = 0;  # re-entrance guard for clean_and_exit
 
-
+# Constructor for Mediabot object
 sub new {
     my ($class, $args) = @_;
 
@@ -58,6 +58,7 @@ sub new {
         dbh         => $args->{dbh}         // undef,
         conf        => $args->{conf}        // undef,
         channels    => {},
+        WHOIS_VARS  => {},
     }, $class;
 
     # Minimal logging setup
@@ -1546,11 +1547,12 @@ sub mbCommandPublic(@) {
         birthday    => sub { userBirthday_ctx($ctx) },
         f           => sub { fortniteStats_ctx($ctx) },
         xlogin      => sub { xLogin_ctx($ctx) },
+        tellme      => sub { chatGPT_ctx($ctx) },
         yomomma     => sub { Yomomma_ctx($ctx) },
         spike       => sub { botPrivmsg($self,$sChannel,"https://teuk.org/In_Spike_Memory.jpg") },
         resolve     => sub { mbResolver_ctx($ctx) },
-#        tmdb        => sub { mbTMDBSearch($self,$message,$sNick,$sChannel,@tArgs) },
-        tmdblangset => sub { setTMDBLangChannel($self,$message,$sNick,$sChannel,@tArgs) },
+        tmdb        => sub { mbTMDBSearch_ctx($ctx) },
+        tmdblangset => sub { setTMDBLangChannel_ctx($ctx) },
         debug       => sub { debug_ctx($ctx) },
         version     => sub { $self->versionCheck($message,$sChannel,$sNick) },
         help        => sub {
@@ -15048,6 +15050,19 @@ use constant {
 	CHATGPT_TRUNC_MSG    => ' [¯\_(ツ)_/¯ guess you can’t have everything…]',   # suffix when we truncate
 };
 
+# chatGPT_ctx() — wrapper Context pour la commande publique !tellme
+sub chatGPT_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my $message = $ctx->message;
+    my @args    = @{ $ctx->args };
+
+    chatGPT($self, $message, $nick, $channel, @args);
+}
+
 # ------------------------------------------------------------------
 # chatGPT()
 # ------------------------------------------------------------------
@@ -15395,117 +15410,111 @@ sub resolve_ctx {
     return 1;
 }
 
-# Set the TMDB language for a channel
-sub setTMDBLangChannel {
-	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
-	my $sTargetChannel = $sChannel;
+# set tmdb_lang for a channel (Administrator+ or channel owner)
+sub setTMDBLangChannel_ctx {
+    my ($ctx) = @_;
 
-	my (
-		$iMatchingUserId, $iMatchingUserLevel, $iMatchingUserLevelDesc,
-		$iMatchingUserAuth, $sMatchingUserHandle, $sMatchingUserPasswd,
-		$sMatchingUserInfo1, $sMatchingUserInfo2
-	) = getNickInfo($self, $message);
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my $message = $ctx->message;
+    my @args    = @{ $ctx->args };
 
-	return undef unless defined $iMatchingUserId;
+    # Syntax: tmdblangset [#channel] <lang>
+    # Si le premier arg commence par #, c'est un channel cible explicite
+    my ($target_channel, $lang);
+    if (defined($args[0]) && $args[0] =~ /^#/) {
+        $target_channel = shift @args;
+        $lang           = shift @args;
+    } else {
+        $target_channel = $channel;
+        $lang           = shift @args;
+    }
 
-	if ($iMatchingUserAuth) {
-		if (defined($iMatchingUserLevel) && checkUserLevel($self, $iMatchingUserLevel, "Master")) {
+    unless (defined($lang) && $lang ne "") {
+        botNotice($self, $nick, "Syntax: tmdblangset [#channel] <lang>  (ex: fr-FR, en-US)");
+        return;
+    }
 
-			# If first argument is a channel, shift it
-			if (defined($tArgs[0]) && $tArgs[0] =~ /^#/) {
-				$sChannel = shift @tArgs;
-				$sTargetChannel = $sChannel;
-			}
+    # Vérification d'authentification
+    my $user = $ctx->user;
+    unless ($user && $user->is_authenticated) {
+        botNotice($self, $nick, "You must be logged in to use this command.");
+        return;
+    }
 
-			unless (defined($sChannel) && $sChannel ne "") {
-				botNotice($self, $sNick, "Undefined channel");
-				botNotice($self, $sNick, "Syntax tmdblangset [#channel] <lang>");
-				return undef;
-			}
+    # Administrator+ bypasse tout ; sinon il faut être owner du channel cible (level 500)
+    my $is_admin = eval { $user->has_level('Administrator') ? 1 : 0 } || 0;
 
-			my $channel_obj = $self->{channels}{$sChannel};
+    unless ($is_admin) {
+        my $has_chan_level = eval {
+            checkUserChannelLevel($self, $message, $target_channel, $user->id, 500) ? 1 : 0;
+        } || 0;
+        unless ($has_chan_level) {
+            botNotice($self, $nick, "Your level does not allow you to use this command.");
+            return;
+        }
+    }
 
-			unless (defined $channel_obj) {
-				botNotice($self, $sNick, "Channel $sChannel is not registered to me");
-				return undef;
-			}
+    my $id_channel = getIdChannel($self, $target_channel);
+    unless (defined($id_channel)) {
+        botNotice($self, $nick, "Unknown channel: $target_channel");
+        return;
+    }
 
-			my $id_channel = $channel_obj->get_id;
+    my $sQuery = "UPDATE CHANNEL SET tmdb_lang = ? WHERE id_channel = ?";
+    my $sth    = $self->{dbh}->prepare($sQuery);
+    unless ($sth->execute($lang, $id_channel)) {
+        $self->{logger}->log(1, "SQL Error: " . $DBI::errstr . " Query: " . $sQuery);
+        botNotice($self, $nick, "Database error while updating tmdb_lang.");
+        return;
+    }
+    $sth->finish;
 
-			if (defined($tArgs[0]) && $tArgs[0] ne "") {
-				my $sLang = $tArgs[0];
-
-				$self->{logger}->log(3, "setTMDBLangChannel() $sChannel lang set to $sLang");
-
-				my $sQuery = "UPDATE CHANNEL SET tmdb_lang = ? WHERE id_channel = ?";
-				my $sth = $self->{dbh}->prepare($sQuery);
-
-				unless ($sth->execute($sLang, $id_channel)) {
-					$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
-					return undef;
-				} else {
-					botPrivmsg($self, $sChannel, "TMDB language set to $sLang");
-					$sth->finish;
-					return undef;
-				}
-			} else {
-				botNotice($self, $sNick, "Syntax tmdblangset [#channel] <lang>");
-			}
-
-		} else {
-			my $sNoticeMsg = $message->prefix . " tmdblangset command attempt (command level [Master] for user $sMatchingUserHandle [$iMatchingUserLevel])";
-			noticeConsoleChan($self, $sNoticeMsg);
-			botNotice($self, $sNick, "Your level does not allow you to use this command.");
-			return undef;
-		}
-	} else {
-		my $sNoticeMsg = $message->prefix . " tmdblangset command attempt (user $sMatchingUserHandle is not logged in)";
-		noticeConsoleChan($self, $sNoticeMsg);
-		botNotice($self, $sNick, "You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-		return undef;
-	}
+    botNotice($self, $nick, "tmdb_lang set to '$lang' for $target_channel");
+    logBot($self, $message, $target_channel, "tmdblangset", ($target_channel, $lang));
 }
 
+sub mbTMDBSearch_ctx {
+    my ($ctx) = @_;
 
-# Search a movie or TV show on TMDB and return a clean synopsis with details
-sub mbTMDBSearch {
-    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @tArgs   = @{ $ctx->args };
+
     my $conf = $self->{conf};
 
     my $api_key = $conf->get('tmdb.API_KEY');
     unless (defined($api_key) && $api_key ne "") {
         $self->{logger}->log(0, "tmdb.API_KEY is undefined in config file");
-        botNotice($self, $sNick, "TMDB API key is missing in the configuration.");
+        botNotice($self, $nick, "TMDB API key is missing in the configuration.");
         return;
     }
 
     unless (defined($tArgs[0]) && $tArgs[0] ne "") {
-        botNotice($self, $sNick, "Syntax: tmdb <movie or series name>");
+        botNotice($self, $nick, "Syntax: tmdb <movie or series name>");
         return;
     }
 
     my $query = join(" ", @tArgs);
-    my $lang  = getTMDBLangChannel($self, $sChannel) || 'en';
-    $self->{logger}->log(3, "tmdb_lang for $sChannel is $lang");
+    my $lang  = getTMDBLangChannel($self, $channel) || 'en';
+    $self->{logger}->log(3, "mbTMDBSearch_ctx() tmdb_lang for $channel is $lang");
 
-    # Make the TMDB API call
     my $info = get_tmdb_info_with_curl($api_key, $lang, $query);
     unless ($info) {
-        botNotice($self, $sNick, "No results found for '$query'.");
+        botPrivmsg($self, $channel, "($nick) No results found for '$query'.");
         return;
     }
 
-    my $title     = $info->{title}     || $info->{name}     || "Unknown title";
-    my $overview  = $info->{overview}  || "No synopsis available.";
-    my $date      = $info->{release_date} || $info->{first_air_date} || "????";
-    my $year      = ($date =~ /^(\d{4})/) ? $1 : "????";
-    my $rating    = defined($info->{vote_average}) ? sprintf("%.1f", $info->{vote_average}) : "?";
-    my $type      = exists($info->{title}) ? "Movie" : "TV Series";
+    my $title    = $info->{title}    || $info->{name}          || "Unknown title";
+    my $overview = $info->{overview} || "No synopsis available.";
+    my $date     = $info->{release_date} || $info->{first_air_date} || "????";
+    my $year     = ($date =~ /^(\d{4})/) ? $1 : "????";
+    my $rating   = defined($info->{vote_average}) ? sprintf("%.1f", $info->{vote_average}) : "?";
+    my $type     = exists($info->{title}) ? "Movie" : "TV Series";
 
-    my $msg = "🎬 [$type] \"$title\" ($year) • Rating: $rating/10\n📜 Synopsis: $overview";
-    $msg = "($sNick) $msg" if defined $sNick;
-
-    botPrivmsg($self, $sChannel, $msg);
+    botPrivmsg($self, $channel, "($nick) [$type] \"$title\" ($year) - Rating: $rating/10 - $overview");
 }
 
 # Get TMDB info using curl

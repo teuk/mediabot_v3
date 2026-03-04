@@ -1,23 +1,49 @@
 package Mediabot::Partyline;
 
+# +---------------------------------------------------------------------------+
+# ! Mediabot::Partyline                                                       !
+# ! TCP telnet-style partyline for bot administration                        !
+# !                                                                           !
+# ! Access : telnet <host> <PARTYLINE_PORT>  or  nc <host> <PARTYLINE_PORT>  !
+# !                                                                           !
+# ! Authentication : login <user> <password>                                 !
+# ! Required global level : Master (or above)                                !
+# !                                                                           !
+# ! Commands :                                                                !
+# !   .help                  — this help                                     !
+# !   .stat                  — channel status (owner, chansets, nick count)  !
+# !   .say #chan <message>   — send a PRIVMSG to a channel                   !
+# !   .who #chan             — list nicks present in a channel               !
+# !   .join #chan [key]      — make the bot join a channel                   !
+# !   .part #chan            — make the bot part a channel                   !
+# !   .nick <newnick>        — change the bot's nick                         !
+# !   .raw <IRC command>     — send a raw IRC command (Owner only)           !
+# !   .quit                  — close this session                            !
+# +---------------------------------------------------------------------------+
+
 use strict;
 use warnings;
 use IO::Async::Listener;
 use IO::Async::Stream;
 use Scalar::Util qw(weaken);
-use JSON;
-use Exporter 'import';
 
 our @EXPORT_OK = qw();
 
+# +---------------------------------------------------------------------------+
+# ! Constructor                                                               !
+# +---------------------------------------------------------------------------+
+
 sub new {
     my ($class, %args) = @_;
+
     my $self = {
-        bot   => $args{bot},    # reference to the Mediabot object
-        loop  => $args{loop},   # IO::Async::Loop
-        port  => $args{port} || 23456,
-        users => {},            # session storage
+        bot     => $args{bot},              # Mediabot object
+        loop    => $args{loop},             # IO::Async::Loop
+        port    => $args{port} || 23456,
+        streams => {},                      # fd => IO::Async::Stream
+        users   => {},                      # fd => { authenticated, login, level, level_desc }
     };
+
     bless $self, $class;
 
     $self->_start_listener;
@@ -25,13 +51,22 @@ sub new {
     return $self;
 }
 
+# +---------------------------------------------------------------------------+
+# ! Accessors                                                                 !
+# +---------------------------------------------------------------------------+
+
 sub get_port {
     my ($self) = @_;
     return $self->{bot}->{conf}->get("main.PARTYLINE_PORT") || 23456;
 }
 
+# +---------------------------------------------------------------------------+
+# ! Internal : start TCP listener                                             !
+# +---------------------------------------------------------------------------+
+
 sub _start_listener {
     my ($self) = @_;
+
     my $loop = $self->{loop};
     my $bot  = $self->{bot};
     weaken($bot);
@@ -42,102 +77,373 @@ sub _start_listener {
         on_stream => sub {
             my ($stream) = @_;
             my $id = fileno($stream->read_handle);
+
             $self->{users}{$id} = {
                 authenticated => 0,
                 login         => '',
-                buffer        => '',
+                level         => undef,
+                level_desc    => '',
             };
+            $self->{streams}{$id} = $stream;
 
             $stream->configure(
                 on_read => sub {
                     my ($stream, $buffref, $eof) = @_;
-                    while ($$buffref =~ s/^(.*)\n//) {
+
+                    while ($$buffref =~ s/^([^\n]*)\n//) {
                         my $line = $1;
-                        $self->{bot}->{logger}->log(3, "Partyline <- $line (fd=$id)");
+                        $line =~ s/\r$//;
+                        $self->{bot}->{logger}->log(3, "Partyline <- '$line' (fd=$id)");
                         eval {
                             $self->_handle_line($stream, $id, $line);
                         };
                         if ($@) {
                             $self->{bot}->{logger}->log(1, "Partyline exception: $@");
-                            $stream->write("💥 Internal error: $@\n");
+                            $stream->write("Internal error: $@\r\n");
                         }
                     }
+
+                    if ($eof) {
+                        $self->{bot}->{logger}->log(3, "Partyline EOF (fd=$id)");
+                        $self->_close_session($id);
+                    }
+
                     return 0;
                 },
                 on_closed => sub {
                     $self->{bot}->{logger}->log(3, "Partyline connection closed (fd=$id)");
-                    delete $self->{users}{$id};
+                    $self->_close_session($id);
                 },
             );
 
-            $stream->write("👋 Welcome to Mediabot partyline. Use 'login <user> <pass>' to authenticate.\n");
-
-            $self->{loop}->add($stream);  # 🔥 essentiel pour que le stream fonctionne
-            return $stream;
+            $loop->add($stream);
+            $stream->write("=== Mediabot Partyline ===\r\nlogin <user> <password>\r\n");
+            $self->{bot}->{logger}->log(2, "Partyline: new connection (fd=$id)");
         },
-    )->get;  # attendre le future pour s'assurer du binding correct
+        on_resolve_error => sub {
+            $bot->{logger}->log(0, "Partyline: resolve error: $_[0]");
+        },
+        on_listen_error => sub {
+            $bot->{logger}->log(0, "Partyline: listen error: $_[0]");
+        },
+    )->get;
 }
+
+# +---------------------------------------------------------------------------+
+# ! Internal : clean up a session                                             !
+# +---------------------------------------------------------------------------+
+
+sub _close_session {
+    my ($self, $id) = @_;
+    delete $self->{users}{$id};
+    delete $self->{streams}{$id};
+}
+
+# +---------------------------------------------------------------------------+
+# ! Internal : dispatch an incoming line                                      !
+# +---------------------------------------------------------------------------+
 
 sub _handle_line {
     my ($self, $stream, $id, $line) = @_;
-    $line =~ s/\r$//;
 
-    my $user = $self->{users}{$id};
+    my $session = $self->{users}{$id};
 
-    unless ($user->{authenticated}) {
+    # ---- Not yet authenticated : only accept "login" ----------------------
+    unless ($session->{authenticated}) {
         if ($line =~ /^login\s+(\S+)\s+(\S+)$/) {
-            my ($login, $password) = ($1, $2);
-            my $id_user = $self->{bot}->getIdUser($login);
-
-            if ($id_user && $self->{bot}->{auth}->verify_credentials($id_user, $login, $password)) {
-                $user->{authenticated} = 1;
-                $user->{login} = $login;
-                $stream->write("✅ Authenticated as $login\nType .help for available commands.\n");
-                $self->{bot}->{logger}->log(2, "Partyline: $login authenticated (fd=$id)");
-            } else {
-                $stream->write("❌ Authentication failed\n");
-                $self->{bot}->{logger}->log(2, "Partyline: failed auth attempt for $login (fd=$id)");
-            }
-        } else {
-            $stream->write("Please login using: login <user> <pass>\n");
+            $self->_do_login($stream, $id, $1, $2);
+        }
+        else {
+            $stream->write("Please authenticate first: login <user> <password>\r\n");
         }
         return;
     }
 
-    if ($line eq '.stat') {
-        # Get the bot's current nickname (folded form)
-        my $nick = $self->{bot}->{irc}->nick_folded;
-
-        # Store the current stream in the Partyline object, indexed by file descriptor
-        # This will allow the WHOIS response handler to send data back to the user
-        $self->{streams}{$id} = $stream;
-
-        # Prepare the WHOIS_VARS used to track this WHOIS request
-        my %WHOIS_VARS = (
-            nick    => $nick,
-            caller  => $id,
-            sub     => "statPartyline",   # Stub: response handler should match on this
-            message => undef,             # Stub: will hold original IRC message if needed
-            channel => undef,             # Not required for stat
-        );
-
-        # Set the WHOIS_VARS hash in the bot object (used later in IRC WHOIS response)
-        %{ $self->{bot}->{WHOIS_VARS} } = %WHOIS_VARS;
-
-        # Send the WHOIS request for our own bot nick
-        #$self->{bot}->{irc}->send_message("WHOIS", undef, $nick);
-
-        # Inform the user we are waiting for a reply from the IRC server
-        $stream->write("⌛ Retrieving channel status from IRC...\n");
-    }
-    elsif ($line eq '.help') {
-        $stream->write(".stat - Show bot channel join status\n.help - Show this help message\n");
+    # ---- Authenticated : dispatch commands --------------------------------
+    if    ($line =~ /^\.help$/i)                        { $self->_cmd_help($stream, $id) }
+    elsif ($line =~ /^\.stat$/i)                        { $self->_cmd_stat($stream, $id) }
+    elsif ($line =~ /^\.say\s+(#\S+)\s+(.+)$/i)        { $self->_cmd_say($stream, $id, $1, $2) }
+    elsif ($line =~ /^\.who\s+(#\S+)$/i)                { $self->_cmd_who($stream, $id, $1) }
+    elsif ($line =~ /^\.join\s+(#\S+)(?:\s+(\S+))?$/i) { $self->_cmd_join($stream, $id, $1, $2) }
+    elsif ($line =~ /^\.part\s+(#\S+)$/i)               { $self->_cmd_part($stream, $id, $1) }
+    elsif ($line =~ /^\.nick\s+(\S+)$/i)                { $self->_cmd_nick($stream, $id, $1) }
+    elsif ($line =~ /^\.raw\s+(.+)$/i)                  { $self->_cmd_raw($stream, $id, $1) }
+    elsif ($line =~ /^\.quit$/i) {
+        $stream->write("Goodbye.\r\n");
+        $stream->close_when_empty;
+        $self->_close_session($id);
     }
     else {
-        $stream->write("Unknown command. Type .help for a list of available commands.\n");
+        $stream->write("Unknown command. Type .help for available commands.\r\n");
     }
-
 }
 
+# +---------------------------------------------------------------------------+
+# ! Internal : authentication                                                 !
+# +---------------------------------------------------------------------------+
+
+sub _do_login {
+    my ($self, $stream, $id, $login, $password) = @_;
+
+    my $bot = $self->{bot};
+    my $dbh = $bot->{dbh};
+
+    my $sth = $dbh->prepare(
+        "SELECT u.id_user, u.nickname, u.password, ul.level, ul.description
+         FROM USER u
+         JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
+         WHERE u.nickname = ?"
+    );
+
+    unless ($sth->execute($login)) {
+        $bot->{logger}->log(1, "Partyline: SQL error on login query: " . $DBI::errstr);
+        $stream->write("Internal error during authentication.\r\n");
+        return;
+    }
+
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+
+    unless ($row) {
+        $bot->{logger}->log(2, "Partyline: unknown user '$login' (fd=$id)");
+        $stream->write("Authentication failed.\r\n");
+        return;
+    }
+
+    unless ($bot->{auth}->verify_credentials($row->{id_user}, $login, $password)) {
+        $bot->{logger}->log(2, "Partyline: bad password for '$login' (fd=$id)");
+        $stream->write("Authentication failed.\r\n");
+        return;
+    }
+
+    # Minimum level : Master (Owner=0, Master=1 => level <= 1)
+    unless (defined($row->{level}) && $row->{level} <= 1) {
+        $bot->{logger}->log(2, "Partyline: '$login' level=" . ($row->{level} // 'undef') . " insufficient (fd=$id)");
+        $stream->write("Access denied: Master level or above required.\r\n");
+        return;
+    }
+
+    $self->{users}{$id}{authenticated} = 1;
+    $self->{users}{$id}{login}         = $login;
+    $self->{users}{$id}{level}         = $row->{level};
+    $self->{users}{$id}{level_desc}    = $row->{description};
+
+    $bot->{logger}->log(2, "Partyline: '$login' authenticated (level=" . $row->{description} . ", fd=$id)");
+    $stream->write("Authenticated as $login (" . $row->{description} . ").\r\nType .help for available commands.\r\n");
+}
+
+# +---------------------------------------------------------------------------+
+# ! Commands                                                                  !
+# +---------------------------------------------------------------------------+
+
+# ---------------------------------------------------------------------------
+# .help
+# ---------------------------------------------------------------------------
+sub _cmd_help {
+    my ($self, $stream, $id) = @_;
+    $stream->write(
+        "Available commands:\r\n"
+      . "  .help               - this help\r\n"
+      . "  .stat               - channel status (owner, chansets, nick count)\r\n"
+      . "  .say #chan <msg>    - send a message to a channel\r\n"
+      . "  .who #chan          - list nicks present in a channel\r\n"
+      . "  .join #chan [key]   - make the bot join a channel\r\n"
+      . "  .part #chan         - make the bot part a channel\r\n"
+      . "  .nick <newnick>     - change the bot's nick\r\n"
+      . "  .raw <IRC command>  - send a raw IRC command (Owner only)\r\n"
+      . "  .quit               - close this partyline session\r\n"
+    );
+}
+
+# ---------------------------------------------------------------------------
+# .stat — for each known channel: joined?, nick count, owner, chansets
+# ---------------------------------------------------------------------------
+sub _cmd_stat {
+    my ($self, $stream, $id) = @_;
+
+    my $bot = $self->{bot};
+    my $irc = $bot->{irc};
+    my $dbh = $bot->{dbh};
+
+    unless ($irc && $irc->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    my $bot_nick = $irc->nick_folded // '';
+
+    # Header
+    $stream->write(sprintf("%-30s %-12s %-5s %-20s %s\r\n",
+        "Channel", "Status", "Nicks", "Owner", "Chansets"));
+    $stream->write(("-" x 90) . "\r\n");
+
+    foreach my $chan_name (sort keys %{ $bot->{channels} }) {
+        my $chan_obj   = $bot->{channels}{$chan_name};
+        my $id_channel = eval { $chan_obj->get_id } // 0;
+
+        # --- joined? + nick count ---
+        my @nicks      = $bot->gethChannelsNicksOnChan($chan_name);
+        my $joined     = grep { lc($_) eq lc($bot_nick) } @nicks;
+        my $nick_count = scalar @nicks;
+        my $status     = $joined ? "joined" : "NOT joined";
+
+        # --- owner (USER_CHANNEL.level = 500) ---
+        my $owner = 'none';
+        if ($id_channel) {
+            my $sth = $dbh->prepare(
+                "SELECT u.nickname FROM USER u
+                 JOIN USER_CHANNEL uc ON uc.id_user = u.id_user
+                 WHERE uc.id_channel = ? AND uc.level = 500
+                 LIMIT 1"
+            );
+            if ($sth->execute($id_channel)) {
+                if (my $row = $sth->fetchrow_hashref) {
+                    $owner = $row->{nickname} if $row->{nickname};
+                }
+            }
+            $sth->finish;
+        }
+
+        # --- chansets ---
+        my $chansets = 'none';
+        if ($id_channel) {
+            my $sth = $dbh->prepare(
+                "SELECT cl.chanset FROM CHANSET_LIST cl
+                 JOIN CHANNEL_SET cs ON cs.id_chanset_list = cl.id_chanset_list
+                 WHERE cs.id_channel = ?
+                 ORDER BY cl.chanset"
+            );
+            if ($sth->execute($id_channel)) {
+                my @flags;
+                while (my $row = $sth->fetchrow_hashref) {
+                    push @flags, '+' . $row->{chanset} if $row->{chanset};
+                }
+                $chansets = join(' ', @flags) if @flags;
+            }
+            $sth->finish;
+        }
+
+        $stream->write(sprintf("%-30s %-12s %-5d %-20s %s\r\n",
+            $chan_name, $status, $nick_count, $owner, $chansets));
+    }
+}
+
+# ---------------------------------------------------------------------------
+# .say #chan <message>
+# ---------------------------------------------------------------------------
+sub _cmd_say {
+    my ($self, $stream, $id, $chan, $msg) = @_;
+
+    my $bot  = $self->{bot};
+    my $nick = $self->{users}{$id}{login};
+
+    unless ($bot->{irc} && $bot->{irc}->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    $bot->botPrivmsg($chan, $msg);
+    $bot->{logger}->log(2, "Partyline: $nick sent to $chan: $msg");
+    $stream->write("-> $chan: $msg\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .who #chan — list nicks in a channel
+# ---------------------------------------------------------------------------
+sub _cmd_who {
+    my ($self, $stream, $id, $chan) = @_;
+
+    my $bot = $self->{bot};
+
+    my @nicks = $bot->gethChannelsNicksOnChan($chan);
+    unless (@nicks) {
+        $stream->write("No nicks known for $chan (not joined or channel is empty).\r\n");
+        return;
+    }
+
+    $stream->write(scalar(@nicks) . " nick(s) in $chan:\r\n");
+    $stream->write(join(', ', sort @nicks) . "\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .join #chan [key]
+# ---------------------------------------------------------------------------
+sub _cmd_join {
+    my ($self, $stream, $id, $chan, $key) = @_;
+
+    my $bot  = $self->{bot};
+    my $nick = $self->{users}{$id}{login};
+
+    unless ($bot->{irc} && $bot->{irc}->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    $bot->joinChannel($chan, $key);
+    $bot->{logger}->log(2, "Partyline: $nick requested JOIN $chan" . ($key ? " (key: $key)" : ""));
+    $stream->write("Joining $chan" . ($key ? " with key $key" : "") . "...\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .part #chan
+# ---------------------------------------------------------------------------
+sub _cmd_part {
+    my ($self, $stream, $id, $chan) = @_;
+
+    my $bot  = $self->{bot};
+    my $nick = $self->{users}{$id}{login};
+
+    unless ($bot->{irc} && $bot->{irc}->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    $bot->{irc}->send_message("PART", undef, $chan);
+    $bot->{logger}->log(2, "Partyline: $nick requested PART $chan");
+    $stream->write("Parting $chan...\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .nick <newnick>
+# ---------------------------------------------------------------------------
+sub _cmd_nick {
+    my ($self, $stream, $id, $newnick) = @_;
+
+    my $bot  = $self->{bot};
+    my $nick = $self->{users}{$id}{login};
+
+    unless ($bot->{irc} && $bot->{irc}->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    $bot->{irc}->change_nick($newnick);
+    $bot->{logger}->log(2, "Partyline: $nick changed bot nick to $newnick");
+    $stream->write("Nick change requested: $newnick\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .raw <IRC command>  — Owner only
+# ---------------------------------------------------------------------------
+sub _cmd_raw {
+    my ($self, $stream, $id, $raw) = @_;
+
+    my $bot  = $self->{bot};
+    my $nick = $self->{users}{$id}{login};
+
+    unless ($bot->{irc} && $bot->{irc}->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    unless (defined($self->{users}{$id}{level}) && $self->{users}{$id}{level} == 0) {
+        $stream->write("Access denied: .raw requires Owner level.\r\n");
+        return;
+    }
+
+    $bot->{irc}->write($raw . "\x0d\x0a");
+    $bot->{logger}->log(2, "Partyline: $nick sent RAW: $raw");
+    $stream->write("RAW -> $raw\r\n");
+}
 
 1;
