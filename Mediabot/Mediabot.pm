@@ -39,7 +39,6 @@ use JSON::MaybeXS;
 use Try::Tiny;
 use URI::Escape qw(uri_escape_utf8 uri_escape);
 use List::Util qw/min/;
-use File::Temp qw/tempfile/;
 use Carp qw(croak);
 use Encode qw(encode);
 use HTTP::Tiny;
@@ -1764,7 +1763,7 @@ sub mbCommandPrivate {
         'pass'              => \&userPass,
         'ident'             => \&userIdent,
         'topic'             => \&userTopicChannel,
-        'metadata'          => \&setRadioMetadata,
+        'metadata'          => \&setRadioMetadata_ctx,
         'update'            => \&update,
         'play'              => \&playRadio,
         'radiopub'          => \&radioPub,
@@ -1919,6 +1918,7 @@ sub mbCommandPrivate {
         lastcom
         antifloodset
         rehash
+        metadata
     );
 
     # Dispatch the command if found
@@ -1941,8 +1941,8 @@ sub mbCommandPrivate {
             return $handler->($ctx);
         }
 
-        # Legacy path: keep old signature for now
-        return $handler->($self, $message, $reply_target, $sNick, @tArgs);
+        # Legacy path: signature is ($self, $message, $sNick, $sChannel, @tArgs)
+        return $handler->($self, $message, $sNick, $reply_target, @tArgs);
 
     } else {
         $self->{logger}->log(3, $message->prefix . " Private command '$sCommand' not found");
@@ -10522,85 +10522,111 @@ sub _radio_listeners_format {
 }
 
 # Set the radio metadata (current song)
-sub setRadioMetadata {
-    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+sub setRadioMetadata_ctx {
+    my ($ctx) = @_;
 
-    my $user = $self->get_user_from_message($message);
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my $message = $ctx->message;
+    my @args    = @{ $ctx->args };
+
+    # Authentification
+    my $user = $ctx->user;
     unless ($user && $user->is_authenticated) {
         my $msg = $message->prefix . " metadata command attempt (user not logged in)";
         noticeConsoleChan($self, $msg);
-        botNotice($self, $sNick, "You must be logged in to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
+        botNotice($self, $nick, "You must be logged in to use this command - /msg "
+            . $self->{irc}->nick_folded . " login username password");
         return;
     }
 
-    unless ($user->level eq "Administrator") {
-        my $msg = $message->prefix . " metadata command attempt (command level [Administrator] for user " . $user->nickname . " [" . $user->level_description . "])";
+    # Niveau requis : Administrator+
+    unless ($user->has_level('Administrator')) {
+        my $msg = $message->prefix . " metadata command attempt (level ["
+            . $user->level_description . "] insufficient for user " . $user->nickname . ")";
         noticeConsoleChan($self, $msg);
-        botNotice($self, $sNick, "Your level does not allow you to use this command.");
+        botNotice($self, $nick, "Your level does not allow you to use this command.");
         return;
     }
 
-    # Load radio config
-    my $conf = $self->{conf};
+    # Si premier arg est un #channel, on l'utilise comme cible
+    if (defined($args[0]) && $args[0] =~ /^#/) {
+        my $chan_name = shift @args;
+        my $chan_obj  = $self->{channels}{$chan_name};
+        unless ($chan_obj) {
+            botNotice($self, $nick, "Channel $chan_name is undefined");
+            return;
+        }
+        $channel = $chan_name;
+    }
+
+    my $sNewMetadata = join(" ", @args);
+
+    # Pas de métadonnée fournie : afficher le titre courant
+    unless ($sNewMetadata ne '') {
+        displayRadioCurrentSong($self, $message, $nick, $channel)
+            if (defined($channel) && $channel ne '');
+        return;
+    }
+
+    # Config radio
+    my $conf            = $self->{conf};
     my $RADIO_HOSTNAME  = $conf->get('radio.RADIO_HOSTNAME');
     my $RADIO_PORT      = $conf->get('radio.RADIO_PORT');
-    my $RADIO_SOURCE    = $conf->get('radio.RADIO_SOURCE');
     my $RADIO_URL       = $conf->get('radio.RADIO_URL');
     my $RADIO_ADMINPASS = $conf->get('radio.RADIO_ADMINPASS');
 
-    # If first argument is a channel name, validate and shift it
-    if (defined($tArgs[0]) && $tArgs[0] =~ /^#/) {
-        my $channel_name = shift @tArgs;
-        my $channel_obj = $self->{channels}{$channel_name};
-
-        unless ($channel_obj) {
-            botNotice($self, $sNick, "Channel $channel_name is undefined");
-            return;
-        }
-
-        $sChannel = $channel_name;
-    }
-
-    # Join remaining arguments as metadata string
-    my $sNewMetadata = join(" ", @tArgs);
-
-    # If no metadata provided, show current song instead
-    unless ($sNewMetadata ne '') {
-        displayRadioCurrentSong($self, $message, $sNick, $sChannel)
-            if (defined($sChannel) && $sChannel ne '');
-        return;
-    }
-
-    # Ensure admin password is set
     unless (defined($RADIO_ADMINPASS) && $RADIO_ADMINPASS ne '') {
-        $self->{logger}->log(0, "setRadioMetadata() radio.RADIO_ADMINPASS not set in " . $self->{config_file});
+        $self->{logger}->log(0, "setRadioMetadata_ctx() radio.RADIO_ADMINPASS not set");
         return;
     }
 
-    # Send metadata update to Icecast
+    # Envoi de la métadonnée à Icecast via HTTP::Tiny
     my $encoded_meta = url_encode_utf8($sNewMetadata);
-    my $curl_cmd = qq{curl --connect-timeout 3 -f -s -u admin:$RADIO_ADMINPASS "http://$RADIO_HOSTNAME:$RADIO_PORT/admin/metadata?mount=/$RADIO_URL&mode=updinfo&song=$encoded_meta"};
+    my $url = "http://$RADIO_HOSTNAME:$RADIO_PORT/admin/metadata"
+            . "?mount=/$RADIO_URL&mode=updinfo&song=$encoded_meta";
 
-    unless (open ICECAST_UPDATE_METADATA, "$curl_cmd |") {
-        botNotice($self, $sNick, "Unable to update metadata (curl failed)");
+    my $http = HTTP::Tiny->new(
+        timeout => 5,
+    );
+
+    # Icecast attend une authentification Basic
+    require MIME::Base64;
+    my $credentials = MIME::Base64::encode_base64("admin:$RADIO_ADMINPASS", '');
+
+    my $response = $http->request('GET', $url, {
+        headers => { 'Authorization' => "Basic $credentials" },
+    });
+
+    unless ($response->{success}) {
+        $self->{logger}->log(1, "setRadioMetadata_ctx() Icecast HTTP error: "
+            . "$response->{status} $response->{reason}");
+        botNotice($self, $nick, "Unable to update metadata (HTTP error $response->{status}).");
         return;
     }
 
-    my $line = <ICECAST_UPDATE_METADATA>;
-    close ICECAST_UPDATE_METADATA;
-
-    # Confirm or show updated metadata
-    if (defined $line) {
-        chomp $line;
-        if (defined($sChannel) && $sChannel ne '') {
-            sleep 3;  # let Icecast refresh its metadata
-            displayRadioCurrentSong($self, $message, $sNick, $sChannel);
-        } else {
-            botNotice($self, $sNick, "Metadata updated to: $sNewMetadata");
-        }
+    # Confirmer ou afficher le titre mis à jour
+    if (defined($channel) && $channel ne '') {
+        sleep 3;  # laisser Icecast rafraîchir ses métadonnées
+        displayRadioCurrentSong($self, $message, $nick, $channel);
     } else {
-        botNotice($self, $sNick, "Unable to update metadata");
+        botNotice($self, $nick, "Metadata updated to: $sNewMetadata");
     }
+}
+
+# Legacy wrapper
+sub setRadioMetadata {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+    my $ctx = Mediabot::Context->new(
+        bot     => $self,
+        message => $message,
+        nick    => $sNick,
+        channel => $sChannel,
+        command => 'metadata',
+        args    => \@tArgs,
+    );
+    setRadioMetadata_ctx($ctx);
 }
 
 # Skip to the next song in the radio stream (Context version)
@@ -14952,25 +14978,19 @@ sub fortniteStats_ctx {
     # Call API
     my $url = "https://fortnite-api.com/v2/stats/br/v2/$account_id";
 
-    # Use exec list form to avoid shell quoting issues (still via curl)
-    my @cmd = (
-        "curl", "-L",
-        "--header", "Authorization: $api_key",
-        "--connect-timeout", "5",
-        "--max-time", "8",
-        "-sS",
+    my $http = HTTP::Tiny->new(timeout => 10);
+    my $http_response = $http->get(
         $url,
+        { headers => { 'Authorization' => $api_key } }
     );
 
-    open my $fh, "-|", @cmd or do {
-        $self->{logger}->log(3, "fortniteStats_ctx(): failed to exec curl");
+    unless ($http_response->{success}) {
+        $self->{logger}->log(3, "fortniteStats_ctx(): HTTP error $http_response->{status} $http_response->{reason}");
         botPrivmsg($self, $reply_to, "Fortnite stats: service unavailable, try again later.");
         return;
-    };
+    }
 
-    my $json_details = join('', <$fh>);
-    close $fh;
-
+    my $json_details = $http_response->{content};
     unless (defined $json_details && $json_details ne '') {
         $self->{logger}->log(3, "fortniteStats_ctx(): empty API response for $target_name/$account_id");
         botPrivmsg($self, $reply_to, "Fortnite stats: service unavailable, try again later.");
@@ -15102,25 +15122,32 @@ sub chatGPT(@) {
         ],
     };
 
-    # write JSON to a temp file to avoid shell-quoting hell
-    my ($fh,$tmp) = tempfile(UNLINK => 1, SUFFIX => '.json');
-    print $fh $json;
-    close $fh;
-
     # --------------------------------------------------------------
-    # call the API with curl
+    # call the API with HTTP::Tiny (non-blocking, no shell)
     # --------------------------------------------------------------
-    my $cmd = join ' ',
-        'curl -sS -X POST',
-        "-H 'Content-Type: application/json'",
-        "-H 'Authorization: Bearer $api_key'",
-        "--data-binary \@$tmp",
-        CHATGPT_API_URL;
+    my $http = HTTP::Tiny->new(timeout => 30);
+    my $http_response = $http->request(
+        'POST',
+        CHATGPT_API_URL,
+        {
+            headers => {
+                'Content-Type'  => 'application/json',
+                'Authorization' => "Bearer $api_key",
+            },
+            content => $json,
+        }
+    );
 
-    my $response = qx{$cmd};
-    if ($? != 0 || !$response) {
-        $self->{logger}->log(0,"chatGPT() chatGPT curl failed: $?");
-        botPrivmsg($self,$chan,"($nick) Sorry, API did not answer.");
+    unless ($http_response->{success}) {
+        $self->{logger}->log(0, "chatGPT() HTTP error: $http_response->{status} $http_response->{reason}");
+        botPrivmsg($self, $chan, "($nick) Sorry, API did not answer.");
+        return;
+    }
+
+    my $response = $http_response->{content};
+    unless ($response) {
+        $self->{logger}->log(0, "chatGPT() empty response from API");
+        botPrivmsg($self, $chan, "($nick) Sorry, API did not answer.");
         return;
     }
 
@@ -15501,7 +15528,7 @@ sub mbTMDBSearch_ctx {
     my $lang  = getTMDBLangChannel($self, $channel) || 'en';
     $self->{logger}->log(3, "mbTMDBSearch_ctx() tmdb_lang for $channel is $lang");
 
-    my $info = get_tmdb_info_with_curl($api_key, $lang, $query);
+    my $info = get_tmdb_info($api_key, $lang, $query);
     unless ($info) {
         botPrivmsg($self, $channel, "($nick) No results found for '$query'.");
         return;
@@ -15514,7 +15541,17 @@ sub mbTMDBSearch_ctx {
     my $rating   = defined($info->{vote_average}) ? sprintf("%.1f", $info->{vote_average}) : "?";
     my $type     = exists($info->{title}) ? "Movie" : "TV Series";
 
-    botPrivmsg($self, $channel, "($nick) [$type] \"$title\" ($year) - Rating: $rating/10 - $overview");
+    # Truncate overview to fit within MAXLEN (prefix takes ~40 chars)
+    my $maxlen   = $self->{conf}->get('main.MAIN_PROG_MAXLEN') || 400;
+    my $prefix   = "($nick) [$type] \"$title\" ($year) - Rating: $rating/10 - ";
+    my $overview_max = $maxlen - length($prefix) - 4; # 4 = "..." + margin
+    if (length($overview) > $overview_max) {
+        $overview = substr($overview, 0, $overview_max);
+        $overview =~ s/\s+\S*$//;  # backtrack to last complete word
+        $overview .= "...";
+    }
+
+    botPrivmsg($self, $channel, $prefix . $overview);
 }
 
 # Get TMDB info using curl
@@ -15539,16 +15576,21 @@ sub getTMDBLangChannel (@) {
 }
 
 # Get detailed TMDB info for the first matching result
-sub get_tmdb_info_with_curl {
+sub get_tmdb_info {
     my ($api_key, $lang, $query) = @_;
 
     my $encoded_query = uri_escape($query);
     my $url = "https://api.themoviedb.org/3/search/multi?api_key=$api_key&language=$lang&query=$encoded_query";
 
-    my $json_response = `curl -s "$url"`;
-    return undef unless $json_response;
+    my $http     = HTTP::Tiny->new(timeout => 10);
+    my $response = $http->get($url);
 
-    my $data = eval { decode_json($json_response) };
+    unless ($response->{success}) {
+        warn "get_tmdb_info() HTTP error: $response->{status} $response->{reason}";
+        return undef;
+    }
+
+    my $data = eval { decode_json($response->{content}) };
     return undef if $@ || !ref($data) || !$data->{results} || !@{$data->{results}};
 
     # Find the first movie or TV result
@@ -15559,21 +15601,7 @@ sub get_tmdb_info_with_curl {
         last;
     }
 
-    return undef unless $result;
-
-    # Trim the overview cleanly
-    my $overview = $result->{overview} // "No synopsis available.";
-    if (length($overview) > 350) {
-        $overview = substr($overview, 0, 347) . '...';
-    }
-
-    return {
-        title           => $result->{title} // $result->{name},
-        overview        => $overview,
-        release_date    => $result->{release_date} // $result->{first_air_date},
-        vote_average    => $result->{vote_average},
-        media_type      => $result->{media_type},
-    };
+    return $result;
 }
 
 # --- Helpers DEBUG ------------------------------------------------------------
