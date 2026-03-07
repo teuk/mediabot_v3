@@ -7853,150 +7853,116 @@ sub getYoutubeDetails(@) {
 
 # Display Youtube details
 sub displayYoutubeDetails(@) {
-	my ($self,$message,$sNick,$sChannel,$sText) = @_;
-	my $conf = $self->{conf};
-	my $sYoutubeId;
-	$self->{logger}->log(3,"displayYoutubeDetails() $sText");
+    my ($self, $message, $sNick, $sChannel, $sText) = @_;
 
-	if ( $sText =~ /http.*:\/\/www\.youtube\..*\/watch.*v=/i ) {
-		$sYoutubeId = $sText;
-		$sYoutubeId =~ s/^.*watch.*v=//;
-		$sYoutubeId = substr($sYoutubeId,0,11);
-	}
-	elsif ( $sText =~ /http.*:\/\/m\.youtube\..*\/watch.*v=/i ) {
-		$sYoutubeId = $sText;
-		$sYoutubeId =~ s/^.*watch.*v=//;
-		$sYoutubeId = substr($sYoutubeId,0,11);
-	}
-	elsif ( $sText =~ /http.*:\/\/music\.youtube\..*\/watch.*v=/i ) {
-		$sYoutubeId = $sText;
-		$sYoutubeId =~ s/^.*watch.*v=//;
-		$sYoutubeId = substr($sYoutubeId,0,11);
-	}
-	elsif ( $sText =~ /http.*:\/\/youtu\.be.*/i ) {
-		$sYoutubeId = $sText;
-		$sYoutubeId =~ s/^.*youtu\.be\///;
-		$sYoutubeId = substr($sYoutubeId,0,11);
-	}
+    my $conf = $self->{conf};
+    $self->{logger}->log(3, "displayYoutubeDetails() $sText");
 
-	if (defined($sYoutubeId) && ( $sYoutubeId ne "" )) {
-		$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeId = $sYoutubeId");
+    # --- Extraction du video ID ---
+    my $sYoutubeId;
+    if    ($sText =~ /https?:\/\/(?:www\.|m\.|music\.)?youtube\.[^\/]+\/watch.*[?&]v=([A-Za-z0-9_-]{11})/i) {
+        $sYoutubeId = $1;
+    }
+    elsif ($sText =~ /https?:\/\/youtu\.be\/([A-Za-z0-9_-]{11})/i) {
+        $sYoutubeId = $1;
+    }
 
-		my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
-		unless (defined($APIKEY) && ($APIKEY ne "")) {
-			$self->{logger}->log(0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
-			$self->{logger}->log(0,"displayYoutubeDetails() section [main]");
-			$self->{logger}->log(0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
-			return undef;
-		}
+    unless (defined($sYoutubeId) && $sYoutubeId ne '') {
+        $self->{logger}->log(3, "displayYoutubeDetails() sYoutubeId could not be determined");
+        return undef;
+    }
 
-		unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
-			$self->{logger}->log(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
-		}
-		else {
-			my $line;
-			my $i = 0;
-			my $sTitle;
-			my $sDuration;
-			my $sViewCount;
-			my $json_details;
-			my $schannelTitle;
-			while(defined($line=<YOUTUBE_INFOS>)) {
-				chomp($line);
-				$json_details .= $line;
-				$self->{logger}->log(5,"displayYoutubeDetails() $line");
-				$i++;
-			}
-			if (defined($json_details) && ($json_details ne "")) {
-				$self->{logger}->log(4,"displayYoutubeDetails() json_details : $json_details");
-				my $sYoutubeInfo = decode_json $json_details;
-				my %hYoutubeInfo = %$sYoutubeInfo;
-				my @tYoutubeItems = $hYoutubeInfo{'items'};
-				my @fTyoutubeItems = @{$tYoutubeItems[0]};
-				$self->{logger}->log(4,"displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
-				if ( $#fTyoutubeItems >= 0 ) {
-					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
-					$self->{logger}->log(4,"displayYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
-					$sViewCount = "views $hYoutubeItems{'statistics'}{'viewCount'}";
-					$sTitle = $hYoutubeItems{'snippet'}{'localized'}{'title'};
-					$schannelTitle = $hYoutubeItems{'snippet'}{'channelTitle'};
-					$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
-					$self->{logger}->log(3,"displayYoutubeDetails() sDuration : $sDuration");
-					$sDuration =~ s/^PT//;
-					my $sDisplayDuration;
-					my $sHour = $sDuration;
-					if ( $sHour =~ /H/ ) {
-						$sHour =~ s/H.*$//;
-						$sDisplayDuration .= "$sHour" . "h ";
-					}
-					my $sMin = $sDuration;
-					if ( $sMin =~ /M/ ) {
-						$sMin =~ s/^.*H//;
-						$sMin =~ s/M.*$//;
-						$sDisplayDuration .= "$sMin" . "mn ";
-					}
-					my $sSec = $sDuration;
-					if ( $sSec =~ /S/ ) {
-						$sSec =~ s/^.*H//;
-						$sSec =~ s/^.*M//;
-						$sSec =~ s/S$//;
-						$sDisplayDuration .= "$sSec" . "s";
-					}
-					$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
-					$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
-					$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
-					$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeInfo statistics channelTitle : $schannelTitle");
+    $self->{logger}->log(3, "displayYoutubeDetails() sYoutubeId = $sYoutubeId");
 
-					if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
-						# Normalize title if too many uppercase letters
-						my $upper_count_title   = ($sTitle =~ tr/A-Z//);
-						my $upper_count_channel = ($schannelTitle =~ tr/A-Z//);
+    my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
+    unless (defined($APIKEY) && $APIKEY ne '') {
+        $self->{logger}->log(0, "displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
+        $self->{logger}->log(0, "displayYoutubeDetails() section [main] YOUTUBE_APIKEY=key");
+        return undef;
+    }
 
-						if ($upper_count_title > 20) {
-							$self->{logger}->log( 3, "displayYoutubeDetails() sTitle has $upper_count_title uppercase letters, normalizing.");
-							$sTitle = ucfirst(lc($sTitle));
-						}
+    # --- Appel HTTP::Tiny ---
+    my $url = "https://www.googleapis.com/youtube/v3/videos"
+            . "?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status";
 
-						if ($upper_count_channel > 20) {
-							$self->{logger}->log( 3, "displayYoutubeDetails() schannelTitle has $upper_count_channel uppercase letters, normalizing.");
-							$schannelTitle = ucfirst(lc($schannelTitle));
-						}
+    my $http     = HTTP::Tiny->new(timeout => 8);
+    my $response = $http->get($url);
 
-						my $sMsgSong .= String::IRC->new('[')->white('black');
-						$sMsgSong .= String::IRC->new('You')->black('white');
-						$sMsgSong .= String::IRC->new('Tube')->white('red');
-						$sMsgSong .= String::IRC->new(']')->white('black');
-						$sMsgSong .= String::IRC->new(" $sTitle ")->white('black');
-						$sMsgSong .= String::IRC->new("- ")->orange('black');
-						$sMsgSong .= String::IRC->new("$sDisplayDuration ")->grey('black');
-						$sMsgSong .= String::IRC->new("- ")->orange('black');
-						$sMsgSong .= String::IRC->new("$sViewCount ")->grey('black');
-						$sMsgSong .= String::IRC->new("- ")->orange('black');
-						$sMsgSong .= String::IRC->new("by $schannelTitle")->grey('black');
+    unless ($response->{success}) {
+        $self->{logger}->log(3, "displayYoutubeDetails() HTTP error $response->{status} for $sYoutubeId");
+        return undef;
+    }
 
-						$sMsgSong =~ s/\r//;
-						$sMsgSong =~ s/\n//;
-						botPrivmsg($self,$sChannel,"($sNick) $sMsgSong");
-					}
-					else {
-						$self->{logger}->log(3,"displayYoutubeDetails() one of the youtube field is undef or empty");
-						$self->{logger}->log(3,"displayYoutubeDetails() sTitle=$sTitle")     if defined($sTitle);
-						$self->{logger}->log(3,"displayYoutubeDetails() sDuration=$sDuration") if defined($sDuration);
-						$self->{logger}->log(3,"displayYoutubeDetails() sViewCount=$sViewCount") if defined($sViewCount);
-					}
-				}
-				else {
-					$self->{logger}->log(3,"displayYoutubeDetails() Invalid id : $sYoutubeId");
-				}
-			}
-			else {
-				$self->{logger}->log(3,"displayYoutubeDetails() curl empty result for : curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
-			}
-		}
-	}
-	else {
-		$self->{logger}->log(3,"displayYoutubeDetails() sYoutubeId could not be determined");
-	}
+    my $json_details = $response->{content};
+    unless (defined($json_details) && $json_details ne '') {
+        $self->{logger}->log(3, "displayYoutubeDetails() empty response for $sYoutubeId");
+        return undef;
+    }
+
+    $self->{logger}->log(4, "displayYoutubeDetails() json_details : $json_details");
+
+    my $sYoutubeInfo = eval { decode_json($json_details) };
+    if ($@ || !ref($sYoutubeInfo)) {
+        $self->{logger}->log(3, "displayYoutubeDetails() JSON decode error: $@");
+        return undef;
+    }
+
+    my @fTyoutubeItems = @{ $sYoutubeInfo->{items} // [] };
+    $self->{logger}->log(4, "displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
+
+    unless (@fTyoutubeItems && $fTyoutubeItems[0]) {
+        $self->{logger}->log(3, "displayYoutubeDetails() Invalid id : $sYoutubeId");
+        return undef;
+    }
+
+    my $item         = $fTyoutubeItems[0];
+    my $sViewCount   = "views " . ($item->{statistics}{viewCount} // '?');
+    my $sTitle       = $item->{snippet}{localized}{title}  // '';
+    my $schannelTitle = $item->{snippet}{channelTitle}     // '';
+    my $sDuration    = $item->{contentDetails}{duration}   // '';
+
+    $self->{logger}->log(3, "displayYoutubeDetails() sDuration : $sDuration");
+    $self->{logger}->log(3, "displayYoutubeDetails() sViewCount : $sViewCount");
+    $self->{logger}->log(3, "displayYoutubeDetails() sTitle : $sTitle");
+    $self->{logger}->log(3, "displayYoutubeDetails() schannelTitle : $schannelTitle");
+
+    unless ($sTitle ne '' && $sDuration ne '' && $sViewCount ne '') {
+        $self->{logger}->log(3, "displayYoutubeDetails() one of the youtube field is undef or empty");
+        return undef;
+    }
+
+    # --- Formatage de la durée (PT1H23M45S) ---
+    my $sDisplayDuration = '';
+    my $raw = $sDuration;
+    $raw =~ s/^PT//;
+    if ($raw =~ /(\d+)H/) { $sDisplayDuration .= "${1}h "; }
+    if ($raw =~ /(\d+)M/) { $sDisplayDuration .= "${1}mn "; }
+    if ($raw =~ /(\d+)S/) { $sDisplayDuration .= "${1}s"; }
+    $sDisplayDuration =~ s/\s+$//;
+
+    $self->{logger}->log(3, "displayYoutubeDetails() sDisplayDuration : $sDisplayDuration");
+
+    # --- Normalisation des majuscules excessives ---
+    if (($sTitle        =~ tr/A-Z//) > 20) { $sTitle        = ucfirst(lc($sTitle)); }
+    if (($schannelTitle =~ tr/A-Z//) > 20) { $schannelTitle = ucfirst(lc($schannelTitle)); }
+
+    # --- Formatage IRC coloré ---
+    my $sMsgSong = String::IRC->new('[')->white('black');
+    $sMsgSong   .= String::IRC->new('You')->black('white');
+    $sMsgSong   .= String::IRC->new('Tube')->white('red');
+    $sMsgSong   .= String::IRC->new(']')->white('black');
+    $sMsgSong   .= String::IRC->new(" $sTitle ")->white('black');
+    $sMsgSong   .= String::IRC->new("- ")->orange('black');
+    $sMsgSong   .= String::IRC->new("$sDisplayDuration ")->grey('black');
+    $sMsgSong   .= String::IRC->new("- ")->orange('black');
+    $sMsgSong   .= String::IRC->new("$sViewCount ")->grey('black');
+    $sMsgSong   .= String::IRC->new("- ")->orange('black');
+    $sMsgSong   .= String::IRC->new("by $schannelTitle")->grey('black');
+
+    $sMsgSong =~ s/\r|\n//g;
+    botPrivmsg($self, $sChannel, "($sNick) $sMsgSong");
+
+    return 1;
 }
 
 # Weather command using wttr.in
@@ -8115,186 +8081,150 @@ sub displayWeather_ctx {
 sub displayUrlTitle(@) {
     my ($self, $message, $sNick, $sChannel, $sText) = @_;
 
-    # Debug initial
     $self->{logger}->log(3, "displayUrlTitle() RAW input: $sText");
-
-    my $sContentType;
-    my $iHttpResponseCode;
-    my $sTextURL = $sText;
 
     # Extraction stricte de l'URL
     $sText =~ s/^.*http/http/;
     $sText =~ s/\s+.*$//;
     $self->{logger}->log(3, "displayUrlTitle() URL extracted: $sText");
 
+    my $UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0";
+    my $http = HTTP::Tiny->new(
+        timeout    => 5,
+        agent      => $UA,
+        verify_SSL => 0,
+    );
+
     # --- Twitter (x.com) chanset ---
-    if ( $sText =~ /x.com/ ) {
+    if ($sText =~ /x\.com/) {
         my $id_chanset_list = getIdChansetList($self, "Twitter");
         if (defined $id_chanset_list && $id_chanset_list ne "") {
-            $self->{logger}->log(3, "id_chanset_list = $id_chanset_list");
             my $id_channel_set = getIdChannelSet($self, $sChannel, $id_chanset_list);
             unless (defined $id_channel_set && $id_channel_set ne "") {
                 return undef;
             }
-            $self->{logger}->log(3, "id_channel_set = $id_channel_set");
         }
     }
 
     # --- Twitter special prank ---
-    if ((($sText =~ /x.com/) || ($sText =~ /twitter.com/))
-        && (($sNick =~ /^\[k\]$/) || ($sNick =~ /^NHI$/) || ($sNick =~ /^PersianYeti$/))) {
+    if (($sText =~ /x\.com/ || $sText =~ /twitter\.com/)
+        && ($sNick =~ /^\[k\]$/ || $sNick =~ /^NHI$/ || $sNick =~ /^PersianYeti$/)) {
         $self->{logger}->log(3, "displayUrlTitle() Twitter URL = $sText");
         return undef;
     }
 
     # --- Instagram ---
-    if ( $sText =~ /instagram.com/ ) {
-        my $content;
-        unless (open URL_HEAD, "curl \"$sText\" |") {
-            $self->{logger}->log(3, "displayUrlTitle() insta Could not curl GET for url details");
-        } else {
-            while (my $line = <URL_HEAD>) {
-                chomp($line);
-                $content .= $line;
-            }
-            close URL_HEAD;
+    if ($sText =~ /instagram\.com/) {
+        my $res = $http->get($sText);
+        unless ($res->{success}) {
+            $self->{logger}->log(3, "displayUrlTitle() insta HTTP error $res->{status}");
+            return undef;
         }
-
+        my $content = $res->{content} // '';
         my $title = $content;
-        if (defined $title) {
-            $title =~ s/^.*og:title" content="//;
-            $title =~ s/" .><meta property="og:image".*$//;
-            unless ($title =~ /DOCTYPE html/) {
-                $self->{logger}->log(3, "displayUrlTitle() (insta) Extracted title : $title");
-            } else {
-                $title = $content;
-                $title =~ s/^.*<title//;
-                $title =~ s/<\/title>.*$//;
-                $title =~ s/^\s*>//;
-            }
-            if ($title ne "") {
-                my $msg = String::IRC->new("[")->white('black');
-                $msg .= String::IRC->new("Instagram")->white('pink');
-                $msg .= String::IRC->new("]")->white('black');
-                $msg .= " $title";
-                my $regex = "&(?:" . join("|", map { s/;\z//; $_ } keys %entity2char) . ");";
-                if (($msg =~ /$regex/) || ($msg =~ /&#.*;/)) {
-                    $msg = decode_entities($msg);
-                }
-                $msg = "($sNick) " . $msg;
-                unless ($msg =~ /DOCTYPE html/) {
-                    botPrivmsg($self, $sChannel, substr($msg, 0, 300));
-                }
-            }
+        $title =~ s/^.*og:title" content="//;
+        $title =~ s/" .><meta property="og:image".*$//;
+        if ($title =~ /DOCTYPE html/) {
+            $title = $content;
+            $title =~ s/^.*<title//;
+            $title =~ s/<\/title>.*$//;
+            $title =~ s/^\s*>//;
+        }
+        if (defined($title) && $title ne "") {
+            my $msg = String::IRC->new("[")->white('black');
+            $msg .= String::IRC->new("Instagram")->white('pink');
+            $msg .= String::IRC->new("]")->white('black');
+            $msg .= " $title";
+            my $regex = "&(?:" . join("|", map { s/;\z//; $_ } keys %entity2char) . ");";
+            $msg = decode_entities($msg) if ($msg =~ /$regex/ || $msg =~ /&#.*;/);
+            $msg = "($sNick) " . $msg;
+            botPrivmsg($self, $sChannel, substr($msg, 0, 300)) unless $msg =~ /DOCTYPE html/;
         }
         return undef;
     }
 
-    # --- HEAD request pour content-type + HTTP code ---
-    unless (open URL_HEAD, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -I -ks \"$sText\" |") {
-        $self->{logger}->log(3, "displayUrlTitle() Could not curl headers for $sText");
-    } else {
-        while (my $line = <URL_HEAD>) {
-            chomp($line);
-            $self->{logger}->log(4, "displayUrlTitle() HEAD: $line");
-            if ($line =~ /^content\-type/i) {
-                (undef, $sContentType) = split(" ", $line);
-                $self->{logger}->log(4, "displayUrlTitle() sContentType = $sContentType");
-            } elsif ($line =~ /^http/i) {
-                (undef, $iHttpResponseCode) = split(" ", $line);
-                $self->{logger}->log(4, "displayUrlTitle() iHttpResponseCode = $iHttpResponseCode");
-            }
-        }
-        close URL_HEAD;
-    }
+    # --- HEAD request : vérification content-type + HTTP code ---
+    my $head_res = $http->request('HEAD', $sText);
+    my $iHttpResponseCode = $head_res->{status}  // 0;
+    my $sContentType      = $head_res->{headers}{'content-type'} // '';
+    # HTTP::Tiny suit les redirects, le status final est le bon
+    $self->{logger}->log(4, "displayUrlTitle() HTTP code=$iHttpResponseCode content-type=$sContentType");
 
-    unless (defined $iHttpResponseCode && $iHttpResponseCode eq "200") {
-        $self->{logger}->log(3, "displayUrlTitle() Wrong HTTP response code (" . ($iHttpResponseCode // "undefined") . ") for $sText");
+    unless ($iHttpResponseCode == 200) {
+        $self->{logger}->log(3, "displayUrlTitle() Wrong HTTP response code ($iHttpResponseCode) for $sText");
         return undef;
     }
 
-    unless (defined $sContentType && $sContentType =~ /text\/html/i) {
-        $self->{logger}->log(3, "displayUrlTitle() Wrong Content-Type for $sText (" . ($sContentType // "Undefined") . ")");
+    unless ($sContentType =~ /text\/html/i) {
+        $self->{logger}->log(3, "displayUrlTitle() Wrong Content-Type for $sText ($sContentType)");
         return undef;
     }
 
     # --- Spotify ---
-    if ($sText =~ /open.spotify.com/) {
+    if ($sText =~ /open\.spotify\.com/) {
         my $url = $sText;
         $url =~ s/\?.*$//;
-        unless (open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -ks \"$url\" |") {
-            $self->{logger}->log(0, "displayUrlTitle() Could not curl UrlTitle for $sText");
-        } else {
-            while (my $line = <URL_TITLE>) {
-                chomp($line);
-                if ($line =~ /<title>/) {
-                    my $sDisplayMsg = $line;
-                    $sDisplayMsg =~ s/^.*<title//;
-                    $sDisplayMsg =~ s/<\/title>.*$//;
-                    $sDisplayMsg =~ s/^>//;
-                    my $artist = $sDisplayMsg;
-                    $artist =~ s/^.*song and lyrics by //;
-                    $artist =~ s/ \| Spotify//;
-                    my $song = $sDisplayMsg;
-                    $song =~ s/ - song and lyrics by.*$//;
-                    $self->{logger}->log(3, "displayUrlTitle() artist = $artist song = $song");
-
-                    my $sTextIrc = String::IRC->new("[")->white('black');
-                    $sTextIrc .= String::IRC->new("Spotify")->black('green');
-                    $sTextIrc .= String::IRC->new("]")->white('black');
-                    $sTextIrc .= " $artist - $song";
-                    my $regex = "&(?:" . join("|", map { s/;\z//; $_ } keys %entity2char) . ");";
-                    if (($sTextIrc =~ /$regex/) || ($sTextIrc =~ /&#.*;/)) {
-                        $sTextIrc = decode_entities($sTextIrc);
-                    }
-                    botPrivmsg($self, $sChannel, "($sNick) $sTextIrc");
-                }
-            }
-            close URL_TITLE;
+        my $res = $http->get($url);
+        unless ($res->{success}) {
+            $self->{logger}->log(0, "displayUrlTitle() Spotify HTTP error $res->{status}");
+            return undef;
+        }
+        my $content = $res->{content} // '';
+        if ($content =~ /<title[^>]*>(.*?)<\/title>/si) {
+            my $sDisplayMsg = $1;
+            $sDisplayMsg =~ s/^\s+|\s+$//g;
+            my $artist = $sDisplayMsg;
+            $artist =~ s/^.*song and lyrics by //;
+            $artist =~ s/ \| Spotify//;
+            my $song = $sDisplayMsg;
+            $song =~ s/ - song and lyrics by.*$//;
+            $self->{logger}->log(3, "displayUrlTitle() artist=$artist song=$song");
+            my $sTextIrc = String::IRC->new("[")->white('black');
+            $sTextIrc .= String::IRC->new("Spotify")->black('green');
+            $sTextIrc .= String::IRC->new("]")->white('black');
+            $sTextIrc .= " $artist - $song";
+            my $regex = "&(?:" . join("|", map { s/;\z//; $_ } keys %entity2char) . ");";
+            $sTextIrc = decode_entities($sTextIrc) if ($sTextIrc =~ /$regex/ || $sTextIrc =~ /&#.*;/);
+            botPrivmsg($self, $sChannel, "($sNick) $sTextIrc");
         }
         return undef;
     }
 
     # --- URL générique ---
-    unless (open URL_TITLE, "curl -A \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0\" --connect-timeout 3 --max-time 3 -L -ks \"$sText\" |") {
-        $self->{logger}->log(0, "displayUrlTitle() Could not curl UrlTitle for $sText");
-    } else {
-        my $sContent;
-        while (my $line = <URL_TITLE>) {
-            chomp($line);
-            $sContent .= "$line\n";
-        }
-        close URL_TITLE;
+    my $res = $http->get($sText);
+    unless ($res->{success}) {
+        $self->{logger}->log(0, "displayUrlTitle() HTTP error $res->{status} for $sText");
+        return undef;
+    }
 
-        my $tree = HTML::Tree->new();
-        $tree->parse($sContent);
-        my ($title) = $tree->look_down('_tag', 'title');
-        if (defined($title) && $title->as_text ne "") {
-            if (($sText =~ /youtube.com/) || ($sText =~ /youtu\.be/)) {
-                my $yt = String::IRC->new('[')->white('black');
-                $yt .= String::IRC->new('You')->black('white');
-                $yt .= String::IRC->new('Tube')->white('red');
-                $yt .= String::IRC->new(']')->white('black');
-                botPrivmsg($self, $sChannel, "($sNick) $yt " . $title->as_text);
+    my $sContent = $res->{content} // '';
+    my $tree = HTML::Tree->new();
+    $tree->parse($sContent);
+    my ($title) = $tree->look_down('_tag', 'title');
+
+    if (defined($title) && $title->as_text ne "") {
+        if ($sText =~ /youtube\.com/ || $sText =~ /youtu\.be/) {
+            my $yt = String::IRC->new('[')->white('black');
+            $yt .= String::IRC->new('You')->black('white');
+            $yt .= String::IRC->new('Tube')->white('red');
+            $yt .= String::IRC->new(']')->white('black');
+            botPrivmsg($self, $sChannel, "($sNick) $yt " . $title->as_text);
+        }
+        elsif ($sText =~ /music\.apple\.com/) {
+            my $id_chanset_list = getIdChansetList($self, "AppleMusic");
+            if (defined($id_chanset_list) && $id_chanset_list ne "") {
+                my $id_channel_set = getIdChannelSet($self, $sChannel, $id_chanset_list);
+                return undef unless defined($id_channel_set) && $id_channel_set ne "";
             }
-            elsif ($sText =~ /music.apple.com/) {
-                my $id_chanset_list = getIdChansetList($self, "AppleMusic");
-                if (defined($id_chanset_list) && $id_chanset_list ne "") {
-                    my $id_channel_set = getIdChannelSet($self, $sChannel, $id_chanset_list);
-                    unless (defined($id_channel_set) && $id_channel_set ne "") {
-                        return undef;
-                    }
-                }
-                my $apple = String::IRC->new('[')->white('black');
-                $apple .= String::IRC->new('AppleMusic')->white('grey');
-                $apple .= String::IRC->new(']')->white('black');
-                botPrivmsg($self, $sChannel, "($sNick) $apple " . $title->as_text);
-            }
-            else {
-                if ($title->as_text !~ /The page is temporarily unavailable/i) {
-                    my $msg = String::IRC->new("URL Title from $sNick:")->grey('black');
-                    botPrivmsg($self, $sChannel, $msg . " " . $title->as_text);
-                }
+            my $apple = String::IRC->new('[')->white('black');
+            $apple .= String::IRC->new('AppleMusic')->white('grey');
+            $apple .= String::IRC->new(']')->white('black');
+            botPrivmsg($self, $sChannel, "($sNick) $apple " . $title->as_text);
+        }
+        else {
+            unless ($title->as_text =~ /The page is temporarily unavailable/i) {
+                my $msg = String::IRC->new("URL Title from $sNick:")->grey('black');
+                botPrivmsg($self, $sChannel, $msg . " " . $title->as_text);
             }
         }
     }
