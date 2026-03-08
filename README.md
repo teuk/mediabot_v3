@@ -79,6 +79,59 @@ Available options :
 --cmdchar     <char>   Command character               (default: !)
 ```
 
+### Running the live IRC test framework
+
+The live test framework connects a real bot instance and a spy client to an IRC server, creates a dedicated `mediabot_test` database, runs a series of end-to-end tests, then tears everything down automatically.
+
+**Requirements :**
+- An accessible IRC server (local ircu on `localhost:6667` is recommended for speed and reliability)
+- `sudo mysql` access (socket authentication, no password required)
+- All Perl dependencies already installed by `./configure`
+
+**Basic usage against a local ircu server :**
+
+```
+perl t/test_live.pl --server localhost --port 6667 --channel '#mbtest'
+```
+
+All tests should pass :
+
+```
+[ 01_connect.t ]
+[ 02_commands.t ]
+[ 03_auth_live.t ]
+============================================================
+PASSED : 13/13  (22s)
+============================================================
+```
+
+For detailed output of each individual test :
+
+```
+perl t/test_live.pl --verbose --server localhost --port 6667 --channel '#mbtest'
+```
+
+Keep the test database after the run for inspection :
+
+```
+perl t/test_live.pl --keep-db --server localhost --port 6667 --channel '#mbtest'
+```
+
+Available options :
+
+```
+--server, -s  <host>   IRC server              (default: irc.libera.chat)
+--port        <port>   IRC port                (default: 6667)
+--channel, -c <chan>   Test channel            (default: ##mbtest)
+--botnick, -b <nick>   Bot nick                (default: mbtest_XXXX)
+--spynick     <nick>   Spy client nick         (default: mbspy_XXXX)
+--cmdchar     <char>   Command character       (default: !)
+--timeout, -t <sec>    Per-reply timeout       (default: 30)
+--keep-db              Keep mediabot_test DB after tests
+--verbose, -v          Show each test result [OK]/[FAIL]
+--filter, -f  <pat>    Run only files matching <pat>  (e.g. --filter 02)
+```
+
 ### Running the bot
 If everything's ok then test in foreground using your config file e.g :
 ```
