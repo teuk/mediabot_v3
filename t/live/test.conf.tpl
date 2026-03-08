@@ -1,0 +1,75 @@
+# =============================================================================
+#  test.conf.tpl — Template de configuration pour les tests live Mediabot
+#  Généré automatiquement par test_live.pl — NE PAS ÉDITER MANUELLEMENT
+#  Les valeurs {{PLACEHOLDER}} sont substituées au moment de l'exécution.
+# =============================================================================
+
+[openai]
+API_KEY=
+
+[mysql]
+MAIN_PROG_DBUSER=mediabot_test
+MAIN_PROG_DBHOST={{DBHOST}}
+MAIN_PROG_DBPASS=
+MAIN_PROG_DDBNAME=mediabot_test
+MAIN_PROG_DBPORT={{DBPORT}}
+
+[hailo]
+HAILO_LEARN_MAX_WORDS=20
+HAILO_LEARN_MIN_WORDS=3
+
+[radio]
+RADIO_PORT=8000
+RADIO_JSON=status-json.xsl
+RADIO_SOURCE=0
+RADIO_HOSTNAME=localhost
+RADIO_PUB=0
+LIQUIDSOAP_PLAYLIST=
+RADIO_URL=
+LIQUIDSOAP_TELNET_PORT=1234
+LIQUIDSOAP_TELNET_HOST=localhost
+RADIO_ADMINPASS=
+YOUTUBEDL_INCOMING=/tmp
+
+[connection]
+CONN_NICK={{BOTNICK}}
+CONN_SERVER_NETWORK=TestNetwork
+CONN_IRCNAME=mediabot_test
+CONN_NETWORK_TYPE=1
+CONN_USERMODE=+i
+CONN_NICK_ALTERNATE={{BOTNICK}}_
+CONN_USERNAME=mediabot
+CONN_PASS=
+
+[undernet]
+UNET_CSERVICE_USERNAME=
+UNET_CSERVICE_PASSWORD=
+UNET_CSERVICE_HOSTMASK=
+UNET_CSERVICE_LOGIN=
+
+[main]
+MAIN_PROG_NAME=Mediabot
+MAIN_PROG_MAXLEN=400
+MAIN_PROG_CMD_CHAR={{CMDCHAR}}
+MAIN_PROG_URL=
+MAIN_PROG_BIRTHDATE=1556692931
+MAIN_PID_FILE=/tmp/mediabot_test.pid
+MAIN_PROG_NAME_LOWER=mediabot
+MAIN_PROG_QUIT_MSG=Test shutdown
+MAIN_SQL_FLOOD_PROTECT_DURATION=120
+MAIN_LOG_FILE={{LOGFILE}}
+MAIN_SQL_FLOOD_PROTECT_COUNT=10
+MAIN_PROG_LIVE=1
+MAIN_PROG_TZ=Europe/Paris
+MAIN_PROG_DEBUG=0
+MAIN_PROG_INITIAL_TRIGGER=1
+YOUTUBE_APIKEY=
+NICK_TRIGGER=1
+RANDOM_QUOTE=0
+PARTYLINE_PORT={{PARTYLINE_PORT}}
+
+[fortnite]
+API_KEY=
+
+[tmdb]
+API_KEY=

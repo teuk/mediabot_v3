@@ -406,7 +406,7 @@ sub populateChannels {
 
     $self->{logger}->log( 3, "populateChannels: Populating channels from database");
 
-    my $sQuery = "SELECT id_channel, name, description, topic, tmdb_lang, `key` FROM CHANNEL";
+    my $sQuery = "SELECT id_channel, name, description, topic, tmdb_lang, `key`, auto_join FROM CHANNEL";
     my $sth = $self->{dbh}->prepare($sQuery);
     unless ($sth->execute()) {
         $self->{logger}->log( 1, "SQL Error: " . $DBI::errstr . " Query: $sQuery");
@@ -426,6 +426,7 @@ sub populateChannels {
             key        => $ref->{key},
             dbh        => $self->{dbh},
 			irc		   => $self->{irc},
+            auto_join  => $ref->{auto_join},
         });
 
         $self->{channels}{ $ref->{name} } = $channel_obj;
