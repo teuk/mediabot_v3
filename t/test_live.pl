@@ -40,7 +40,7 @@ my $opt_channel      = '##mbtest';
 my $opt_botnick      = '';          # généré aléatoirement si vide
 my $opt_spynick      = '';          # généré aléatoirement si vide
 my $opt_cmdchar      = '!';
-my $opt_timeout      = 30;
+my $opt_timeout      = 45;
 my $opt_dbhost       = 'localhost';
 my $opt_dbport       = 3306;
 my $opt_dbuser       = 'mediabot_test';
@@ -253,7 +253,27 @@ sub wait_for {
 # Attendre le JOIN du bot sur le canal
 sub wait_for_bot_join {
     my ($self, $botnick, $timeout) = @_;
-    return $self->wait_for(qr/^:\Q$botnick\E[!@][^ ]+ JOIN/i, $timeout);
+    $timeout //= 30;
+    my $deadline = main::time() + $timeout;
+    my $pattern = qr/^:\Q$botnick\E[!@][^ ]+ JOIN/i;
+    while (main::time() < $deadline) {
+        my $remaining = $deadline - main::time();
+        last if $remaining <= 0;
+        my $line = $self->read_line($remaining > 2 ? 2 : $remaining);
+        if (!defined $line) {
+            print "  [SPY] read_line timeout (remaining=" . int($deadline - main::time()) . "s)\n"
+                if $main::opt_verbose;
+            next;
+        }
+        print "  [SPY RECV] $line\n" if $main::opt_verbose;
+        # Répondre aux PINGs Libera pendant l'attente
+        if ($line =~ /^PING (.+)/) {
+            $self->send_raw("PONG $1");
+            next;
+        }
+        return $line if $line =~ $pattern;
+    }
+    return undef;
 }
 
 # ---------------------------------------------------------------------------

@@ -323,7 +323,7 @@ my $bNickTriggerCommand = $mediabot->getNickTrigger();
 $mediabot->{logger}->log(0,"Trying to connect to " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort() . " (pass : $sServerPassDisplay)");
 
 my $login = _do_login($irc, $bind_ip);
-$login->get;
+eval { $login->get }; if ($@) { my $err = $@; $err =~ s/\n/ /g; $mediabot->{logger}->log(0, "Login Future failed: $err"); $mediabot->clean_and_exit(1); }
 
 # Start main loop
 $loop->run;
@@ -511,7 +511,9 @@ sub on_timer_tick {
     }
     
     # Check connection status and reconnect if not connected
-    unless ($irc->is_connected) {
+    # Grace period of 15s after login to let Net::Async::IRC finish CAP negotiation
+    my $grace = (time - ($mediabot->getConnectionTimestamp() // 0)) < 15;
+    unless ($grace || $irc->is_connected) {
         if ($mediabot->getQuit()) {
             $mediabot->{logger}->log(0,"Disconnected from server");
             $mediabot->clean_and_exit(0);
@@ -1489,7 +1491,7 @@ sub reconnect {
     $mediabot->{logger}->log(0,"Trying to connect to " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort() . " (pass : $sServerPassDisplay)");
 
     my $login = _do_login($irc, $new_bind_ip);
-    $login->get;
+    eval { $login->get }; if ($@) { my $err = $@; $err =~ s/\n/ /g; $mediabot->{logger}->log(0, "Login Future failed: $err"); $mediabot->clean_and_exit(1); }
 
     # Start main loop
     $loop->run;
