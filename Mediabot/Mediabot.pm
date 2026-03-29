@@ -1427,252 +1427,245 @@ sub userOnJoin {
 
 # 🧙‍♂️ mbCommandPublic: The Sorting Hat of Mediabot – routes every incantation to the proper spell
 sub mbCommandPublic(@) {
-    my ($self,$message,$sChannel,$sNick,$botNickTriggered,$sCommand,@tArgs) = @_;
-    my $conf = $self->{conf};
+    my ($self, $message, $sChannel, $sNick, $botNickTriggered, $sCommand, @tArgs) = @_;
 
-    # --- NEW: build a Context object for this invocation ---
+    # Normalize command once
+    my $cmd = lc $sCommand;
+
+    # Build Context once for all handlers
     my $ctx = Mediabot::Context->new(
         bot     => $self,
         message => $message,
         nick    => $sNick,
         channel => $sChannel,
-        command => $sCommand,
+        command => $cmd,
         args    => \@tArgs,
     );
 
-    # Command dispatch table
-    my %command_map = (
-        die         => sub { mbQuit_ctx($ctx) },
-        nick        => sub { mbChangeNick_ctx($ctx) },
-        addtimer    => sub { mbAddTimer_ctx($ctx) },
-        remtimer    => sub { mbRemTimer_ctx($ctx) },
-        timers      => sub { mbTimers_ctx($ctx) },
-        msg         => sub { msgCmd_ctx($ctx) },
-        say         => sub { sayChannel_ctx($ctx) },
-        act         => sub { actChannel_ctx($ctx) },
-        cstat       => sub { userCstat_ctx($ctx) },
-        status      => sub { mbStatus_ctx($ctx) },
-
-        # --- NEW: test command using Context only ---
-        echo        => sub { mbEcho($ctx) },
-
-        adduser     => sub { addUser_ctx($ctx) },
-        deluser     => sub { delUser_ctx($ctx) },
-        users       => sub { userStats_ctx($ctx) },
-        userinfo    => sub { userInfo_ctx($ctx) },
-        addhost     => sub { addUserHost_ctx($ctx) },
-        addchan     => sub { addChannel_ctx($ctx) },
-        chanset     => sub { channelSet_ctx($ctx) },
-        purge       => sub { purgeChannel_ctx($ctx) },
-        part        => sub { channelPart_ctx($ctx) },
-        join        => sub { channelJoin_ctx($ctx) },
-        add         => sub { channelAddUser_ctx($ctx) },
-        del         => sub { channelDelUser_ctx($ctx) },
-        modinfo     => sub { userModinfo_ctx($ctx) },
-        op          => sub { userOpChannel_ctx($ctx) },
-        deop        => sub { userDeopChannel_ctx($ctx) },
-        invite      => sub { userInviteChannel_ctx($ctx) },
-        voice       => sub { userVoiceChannel_ctx($ctx) },
-        devoice     => sub { userDevoiceChannel_ctx($ctx) },
-        kick        => sub { userKickChannel_ctx($ctx) },
-        showcommands=> sub { userShowcommandsChannel_ctx($ctx) },
-        chaninfo    => sub { userChannelInfo_ctx($ctx) },
-        chanlist    => sub { channelList_ctx($ctx) },
-        whoami      => sub { userWhoAmI_ctx($ctx) },
-        auth        => sub { userAuthNick_ctx($ctx,) },
-        verify      => sub { userVerifyNick_ctx($ctx) },
-        access      => sub { userAccessChannel_ctx($ctx) },
-        addcmd      => sub { mbDbAddCommand_ctx($ctx) },
-        remcmd      => sub { mbDbRemCommand_ctx($ctx) },
-        modcmd      => sub { mbDbModCommand_ctx($ctx) },
-        mvcmd       => sub { mbDbMvCommand_ctx($ctx) },
-        chowncmd    => sub { mbChownCommand_ctx($ctx) },
-        showcmd     => sub { mbDbShowCommand_ctx($ctx) },
-        chanstatlines => sub { channelStatLines_ctx($ctx) },
-        whotalk     => sub { whoTalk_ctx($ctx) },
-        whotalks    => sub { whoTalk_ctx($ctx) },
-        countcmd    => sub { mbCountCommand_ctx($ctx) },
-        topcmd      => sub { mbTopCommand_ctx($ctx) },
-        popcmd      => sub { mbPopCommand_ctx($ctx) },
-        searchcmd   => sub { mbDbSearchCommand_ctx($ctx) },
-        lastcmd     => sub { mbLastCommand_ctx($ctx) },
-        owncmd      => sub { mbDbOwnersCommand_ctx($ctx) },
-        holdcmd     => sub { mbDbHoldCommand_ctx($ctx) },
-        addcatcmd   => sub { mbDbAddCategoryCommand_ctx($ctx) },
-        chcatcmd    => sub { mbDbChangeCategoryCommand_ctx($ctx) },
-        topsay      => sub { userTopSay_ctx($ctx) },
-        checkhostchan => sub { mbDbCheckHostnameNickChan_ctx($ctx) },
-        checkhost   => sub { mbDbCheckHostnameNick_ctx($ctx) },
-        checknick   => sub { mbDbCheckNickHostname_ctx($ctx) },
-        greet       => sub { userGreet_ctx($ctx) },
-        nicklist    => sub { channelNickList_ctx($ctx) },
-        rnick       => sub { randomChannelNick_ctx($ctx) },
-        birthdate   => sub { displayBirthDate_ctx($ctx) },
-        colors      => sub { mbColors_ctx($ctx) },
-        seen        => sub { mbSeen_ctx($ctx) },
-        date        => sub { displayDate_ctx($ctx) },
-        weather     => sub { displayWeather_ctx($ctx) },
-        meteo       => sub { displayWeather_ctx($ctx) },
-        addbadword  => sub { channelAddBadword_ctx($ctx) },
-        rembadword  => sub { channelRemBadword_ctx($ctx) },
-        ignores     => sub { IgnoresList_ctx($ctx) },
-        ignore      => sub { addIgnore_ctx($ctx) },
-        unignore    => sub { delIgnore_ctx($ctx) },
-        yt          => sub { youtubeSearch_ctx($ctx) },
-        song        => sub { displayRadioCurrentSong_ctx($ctx) },
-        listeners   => sub { displayRadioListeners_ctx($ctx) },
-        nextsong    => sub { radioNext_ctx($ctx) },
-        addresponder=> sub { addResponder_ctx($ctx) },
-        delresponder=> sub { delResponder_ctx($ctx) },
-        update      => sub { update($self,$message,$sNick,$sChannel,@tArgs) },
-        lastcom     => sub { lastCom_ctx($ctx) },
-        q           => sub { mbQuotes_ctx($ctx) },
-        Q           => sub { mbQuotes_ctx($ctx) },
-        moduser     => sub { mbModUser_ctx($ctx) },
-        antifloodset=> sub { setChannelAntiFloodParams_ctx($ctx) },
-        leet        => sub { displayLeetString_ctx($ctx) },
-        rehash      => sub { mbRehash_ctx($ctx) },
-        play        => sub { playRadio($self,$message,$sNick,$sChannel,@tArgs) },
-        rplay       => sub { rplayRadio($self,$message,$sNick,$sChannel,@tArgs) },
-        queue       => sub { queueRadio($self,$message,$sNick,$sChannel,@tArgs) },
-        next        => sub { nextRadio($self,$message,$sNick,$sChannel,@tArgs) },
-        mp3         => sub { mp3_ctx($ctx) },
-        exec        => sub { mbExec_ctx($ctx) },
-        qlog        => sub { mbChannelLog_ctx($ctx) },
-        hailo_ignore => sub { hailo_ignore_ctx($ctx) },
-        hailo_unignore => sub { hailo_unignore_ctx($ctx) },
-        hailo_status => sub { hailo_status_ctx($ctx) },
-        hailo_chatter => sub { hailo_chatter_ctx($ctx) },
-        whereis     => sub { mbWhereis_ctx($ctx) },
-        birthday    => sub { userBirthday_ctx($ctx) },
-        f           => sub { fortniteStats_ctx($ctx) },
-        xlogin      => sub { xLogin_ctx($ctx) },
-        tellme      => sub { chatGPT_ctx($ctx) },
-        yomomma     => sub { Yomomma_ctx($ctx) },
-        spike       => sub { botPrivmsg($self,$sChannel,"https://teuk.org/In_Spike_Memory.jpg") },
-        resolve     => sub { mbResolver_ctx($ctx) },
-        tmdb        => sub { mbTMDBSearch_ctx($ctx) },
-        tmdblangset => sub { setTMDBLangChannel_ctx($ctx) },
-        debug       => sub { debug_ctx($ctx) },
-        version     => sub { $self->versionCheck($message,$sChannel,$sNick) },
-        help        => sub {
-            if (defined($tArgs[0]) && $tArgs[0] ne "") {
-                botPrivmsg($self,$sChannel,"Help on command $tArgs[0] is not available (unknown command ?). Please visit https://github.com/teuk/mediabot_v3/wiki");
-            } else {
-                botPrivmsg($self,$sChannel,"Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
-            }
-        }
+    # Attach a Command object to the Context for handlers that want it
+    $ctx->{command_obj} = Mediabot::Command->new(
+        name    => $cmd,
+        args    => \@tArgs,
+        raw     => join(" ", $sCommand, @tArgs),
+        context => $ctx,
+        source  => 'public',
     );
 
-    if (exists $command_map{lc($sCommand)}) {
-        $self->{logger}->log(3, "✅ PUBLIC: $sNick triggered .$sCommand on $sChannel");
-    }
+    # ---------------------------------------------------------------------------
+    # Command dispatch table
+    # All handlers receive a Mediabot::Context object, except the few radio/legacy
+    # commands that still use the old signature and are wrapped in closures.
+    # ---------------------------------------------------------------------------
+    my %command_map = (
+        die          => sub { mbQuit_ctx($ctx) },
+        nick         => sub { mbChangeNick_ctx($ctx) },
+        addtimer     => sub { mbAddTimer_ctx($ctx) },
+        remtimer     => sub { mbRemTimer_ctx($ctx) },
+        timers       => sub { mbTimers_ctx($ctx) },
+        msg          => sub { msgCmd_ctx($ctx) },
+        say          => sub { sayChannel_ctx($ctx) },
+        act          => sub { actChannel_ctx($ctx) },
+        cstat        => sub { userCstat_ctx($ctx) },
+        status       => sub { mbStatus_ctx($ctx) },
+        echo         => sub { mbEcho($ctx) },
+        adduser      => sub { addUser_ctx($ctx) },
+        deluser      => sub { delUser_ctx($ctx) },
+        users        => sub { userStats_ctx($ctx) },
+        userinfo     => sub { userInfo_ctx($ctx) },
+        addhost      => sub { addUserHost_ctx($ctx) },
+        addchan      => sub { addChannel_ctx($ctx) },
+        chanset      => sub { channelSet_ctx($ctx) },
+        purge        => sub { purgeChannel_ctx($ctx) },
+        part         => sub { channelPart_ctx($ctx) },
+        join         => sub { channelJoin_ctx($ctx) },
+        add          => sub { channelAddUser_ctx($ctx) },
+        del          => sub { channelDelUser_ctx($ctx) },
+        modinfo      => sub { userModinfo_ctx($ctx) },
+        op           => sub { userOpChannel_ctx($ctx) },
+        deop         => sub { userDeopChannel_ctx($ctx) },
+        invite       => sub { userInviteChannel_ctx($ctx) },
+        voice        => sub { userVoiceChannel_ctx($ctx) },
+        devoice      => sub { userDevoiceChannel_ctx($ctx) },
+        kick         => sub { userKickChannel_ctx($ctx) },
+        showcommands => sub { userShowcommandsChannel_ctx($ctx) },
+        chaninfo     => sub { userChannelInfo_ctx($ctx) },
+        chanlist     => sub { channelList_ctx($ctx) },
+        whoami       => sub { userWhoAmI_ctx($ctx) },
+        auth         => sub { userAuthNick_ctx($ctx) },
+        verify       => sub { userVerifyNick_ctx($ctx) },
+        access       => sub { userAccessChannel_ctx($ctx) },
+        addcmd       => sub { mbDbAddCommand_ctx($ctx) },
+        remcmd       => sub { mbDbRemCommand_ctx($ctx) },
+        modcmd       => sub { mbDbModCommand_ctx($ctx) },
+        mvcmd        => sub { mbDbMvCommand_ctx($ctx) },
+        chowncmd     => sub { mbChownCommand_ctx($ctx) },
+        showcmd      => sub { mbDbShowCommand_ctx($ctx) },
+        chanstatlines => sub { channelStatLines_ctx($ctx) },
+        whotalk      => sub { whoTalk_ctx($ctx) },
+        whotalks     => sub { whoTalk_ctx($ctx) },
+        countcmd     => sub { mbCountCommand_ctx($ctx) },
+        topcmd       => sub { mbTopCommand_ctx($ctx) },
+        popcmd       => sub { mbPopCommand_ctx($ctx) },
+        searchcmd    => sub { mbDbSearchCommand_ctx($ctx) },
+        lastcmd      => sub { mbLastCommand_ctx($ctx) },
+        owncmd       => sub { mbDbOwnersCommand_ctx($ctx) },
+        holdcmd      => sub { mbDbHoldCommand_ctx($ctx) },
+        addcatcmd    => sub { mbDbAddCategoryCommand_ctx($ctx) },
+        chcatcmd     => sub { mbDbChangeCategoryCommand_ctx($ctx) },
+        topsay       => sub { userTopSay_ctx($ctx) },
+        checkhostchan => sub { mbDbCheckHostnameNickChan_ctx($ctx) },
+        checkhost    => sub { mbDbCheckHostnameNick_ctx($ctx) },
+        checknick    => sub { mbDbCheckNickHostname_ctx($ctx) },
+        greet        => sub { userGreet_ctx($ctx) },
+        nicklist     => sub { channelNickList_ctx($ctx) },
+        rnick        => sub { randomChannelNick_ctx($ctx) },
+        birthdate    => sub { displayBirthDate_ctx($ctx) },
+        colors       => sub { mbColors_ctx($ctx) },
+        seen         => sub { mbSeen_ctx($ctx) },
+        date         => sub { displayDate_ctx($ctx) },
+        weather      => sub { displayWeather_ctx($ctx) },
+        meteo        => sub { displayWeather_ctx($ctx) },
+        addbadword   => sub { channelAddBadword_ctx($ctx) },
+        rembadword   => sub { channelRemBadword_ctx($ctx) },
+        ignores      => sub { IgnoresList_ctx($ctx) },
+        ignore       => sub { addIgnore_ctx($ctx) },
+        unignore     => sub { delIgnore_ctx($ctx) },
+        yt           => sub { youtubeSearch_ctx($ctx) },
+        song         => sub { displayRadioCurrentSong_ctx($ctx) },
+        listeners    => sub { displayRadioListeners_ctx($ctx) },
+        nextsong     => sub { radioNext_ctx($ctx) },
+        addresponder => sub { addResponder_ctx($ctx) },
+        delresponder => sub { delResponder_ctx($ctx) },
+        lastcom      => sub { lastCom_ctx($ctx) },
+        q            => sub { mbQuotes_ctx($ctx) },
+        moduser      => sub { mbModUser_ctx($ctx) },
+        antifloodset => sub { setChannelAntiFloodParams_ctx($ctx) },
+        leet         => sub { displayLeetString_ctx($ctx) },
+        rehash       => sub { mbRehash_ctx($ctx) },
+        mp3          => sub { mp3_ctx($ctx) },
+        exec         => sub { mbExec_ctx($ctx) },
+        qlog         => sub { mbChannelLog_ctx($ctx) },
+        hailo_ignore   => sub { hailo_ignore_ctx($ctx) },
+        hailo_unignore => sub { hailo_unignore_ctx($ctx) },
+        hailo_status   => sub { hailo_status_ctx($ctx) },
+        hailo_chatter  => sub { hailo_chatter_ctx($ctx) },
+        whereis      => sub { mbWhereis_ctx($ctx) },
+        birthday     => sub { userBirthday_ctx($ctx) },
+        f            => sub { fortniteStats_ctx($ctx) },
+        xlogin       => sub { xLogin_ctx($ctx) },
+        tellme       => sub { chatGPT_ctx($ctx) },
+        yomomma      => sub { Yomomma_ctx($ctx) },
+        resolve      => sub { mbResolver_ctx($ctx) },
+        tmdb         => sub { mbTMDBSearch_ctx($ctx) },
+        tmdblangset  => sub { setTMDBLangChannel_ctx($ctx) },
+        debug        => sub { debug_ctx($ctx) },
+        version      => sub { versionCheck($ctx) },
+        help         => sub { mbHelp_ctx($ctx) },
+        spike        => sub { $ctx->reply("https://teuk.org/In_Spike_Memory.jpg") },
 
-    # Direct command mapping
-    if (exists $command_map{lc($sCommand)}) {
-        $command_map{lc($sCommand)}->();
+        # --- Legacy radio handlers (not yet migrated to Context) ---
+        update  => sub { update_ctx($ctx) },
+        play    => sub { playRadio_ctx($ctx) },
+        rplay   => sub { rplayRadio_ctx($ctx) },
+        queue   => sub { queueRadio_ctx($ctx) },
+        next    => sub { nextRadio_ctx($ctx) },
+    );
+
+    # Dispatch known command
+    if (my $handler = $command_map{$cmd}) {
+        $self->{logger}->log(3, "PUBLIC: $sNick triggered $sCommand on $sChannel");
+        $handler->();
         return;
     }
 
-    # Or check in the database for custom commands
-    my $bFound = mbDbCommand($self,$message,$sChannel,$sNick,$sCommand,@tArgs);
+    # Check database for custom commands
+    my $bFound = mbDbCommand($self, $message, $sChannel, $sNick, $sCommand, @tArgs);
     return if $bFound;
 
+    # Bot nick triggered — natural language / Hailo fallback
     if ($botNickTriggered) {
-        my $what = join(" ", $sCommand, @tArgs);
-
-		# 🎯 Special hardcoded patterns for natural replies
-		if ($what =~ /how\s+old\s+(are|r)\s+(you|u)/i) {
-			# User asks for the bot's age
-			displayBirthDate_ctx($ctx);
-		} 
-		elsif ($what =~ /who.*(your daddy|is your daddy)/i) {
-			# User asks who is the bot's owner
-			my $owner = getChannelOwner($self, $sChannel);
-			my $reply = defined $owner && $owner ne ""
-				? "Well I'm registered to $owner on $sChannel, but Te[u]K's my daddy"
-				: "I have no clue of who is $sChannel\'s owner, but Te[u]K's my daddy";
-			botPrivmsg($self, $sChannel, $reply);
-		} 
-		elsif ($what =~ /^(thx|thanx|thank you|thanks)$/i) {
-			# Gratitude detected
-			botPrivmsg($self, $sChannel, "you're welcome $sNick");
-		} 
-		elsif ($what =~ /who.*StatiK/i) {
-			# Reference to StatiK
-			botPrivmsg($self, $sChannel, "StatiK is my big brother $sNick, he's awesome !");
-		} 
-		else {
-			# 🧠 Hailo fallback if allowed
-			my $id_chanset_list = getIdChansetList($self, "Hailo");
-			my $id_channel_set = getIdChannelSet($self, $sChannel, $id_chanset_list);
-
-			unless (
-				is_hailo_excluded_nick($self, $sNick) ||        # Ignore if nick excluded
-				$what =~ /^[!]/ ||                              # Ignore if starts with !
-				$what =~ /^@{[$self->{conf}->get('main.MAIN_PROG_CMD_CHAR')]}/  # Ignore if starts with bot command prefix
-			) {
-				my $hailo = get_hailo($self);
-				my $sCurrentNick = $self->{irc}->nick_folded;
-				$what =~ s/\Q$sCurrentNick\E//g;  # Remove bot name from query
-
-				# Decode user input (fallback to ISO-8859-2 if needed)
-				$what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
-
-				# Get reply from Hailo
-				my $sAnswer = $hailo->learn_reply($what);
-
-				# Send if answer is valid and not redundant
-				if (defined($sAnswer) && $sAnswer ne "" && $sAnswer !~ /^\Q$what\E\s*\.$/i) {
-					$self->{logger}->log(4, "learn_reply $what from $sNick : $sAnswer");
-					botPrivmsg($self, $sChannel, $sAnswer);
-				}
-			}
-		}
-	} else {
-		# Command not recognized and bot not directly triggered
-		$self->{logger}->log(3, "Public command '$sCommand' not found");
-	}
+        mbHandleNickTriggered($ctx, join(" ", $sCommand, @tArgs));
+    } else {
+        $self->{logger}->log(3, "Public command '$sCommand' not found");
+    }
 }
+
+# Handle help command
+sub mbHelp_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $channel = $ctx->channel;
+    my @args    = @{ $ctx->args };
+
+    if (defined $args[0] && $args[0] ne "") {
+        botPrivmsg($self, $channel,
+            "Help on command $args[0] is not available (unknown command ?). "
+            . "Please visit https://github.com/teuk/mediabot_v3/wiki");
+    } else {
+        botPrivmsg($self, $channel,
+            "Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
+    }
+}
+
+# Handle bot nick triggered messages — natural patterns + Hailo fallback
+sub mbHandleNickTriggered {
+    my ($ctx, $what) = @_;
+
+    my $self     = $ctx->bot;
+    my $sNick    = $ctx->nick;
+    my $sChannel = $ctx->channel;
+
+    if ($what =~ /how\s+old\s+(are|r)\s+(you|u)/i) {
+        displayBirthDate_ctx($ctx);
+    }
+    elsif ($what =~ /who.*(your daddy|is your daddy)/i) {
+        my $owner = getChannelOwner($self, $sChannel);
+        my $reply = defined $owner && $owner ne ""
+            ? "Well I'm registered to $owner on $sChannel, but Te[u]K's my daddy"
+            : "I have no clue of who is $sChannel\'s owner, but Te[u]K's my daddy";
+        botPrivmsg($self, $sChannel, $reply);
+    }
+    elsif ($what =~ /^(thx|thanx|thank you|thanks)$/i) {
+        botPrivmsg($self, $sChannel, "you're welcome $sNick");
+    }
+    elsif ($what =~ /who.*StatiK/i) {
+        botPrivmsg($self, $sChannel, "StatiK is my big brother $sNick, he's awesome !");
+    }
+    else {
+        # 🧠 Hailo fallback
+        my $id_chanset_list = getIdChansetList($self, "Hailo");
+        my $id_channel_set  = getIdChannelSet($self, $sChannel, $id_chanset_list);
+
+        unless (
+            is_hailo_excluded_nick($self, $sNick)
+            || $what =~ /^[!]/
+            || $what =~ /^@{[$self->{conf}->get('main.MAIN_PROG_CMD_CHAR')]}/
+        ) {
+            my $hailo        = get_hailo($self);
+            my $sCurrentNick = $self->{irc}->nick_folded;
+            $what =~ s/\Q$sCurrentNick\E//g;
+
+            $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
+
+            my $sAnswer = $hailo->learn_reply($what);
+
+            if (defined $sAnswer && $sAnswer ne "" && $sAnswer !~ /^\Q$what\E\s*\.$/i) {
+                $self->{logger}->log(4, "learn_reply $what from $sNick : $sAnswer");
+                botPrivmsg($self, $sChannel, $sAnswer);
+            }
+        }
+    }
+}
+
 
 # List all known channels and user count (Master only, Context-based)
 sub channelList_ctx {
     my ($ctx) = @_;
 
+    return unless $ctx->require_level('Master');
+
     my $self = $ctx->bot;
     my $nick = $ctx->nick;
-
-    my $user = $ctx->user;
-
-    # Require authentication
-    unless ($user && $user->is_authenticated) {
-        my $pfx = ($ctx->message && $ctx->message->can('prefix')) ? ($ctx->message->prefix // $nick) : $nick;
-        my $u   = $user ? (eval { $user->nickname } || eval { $user->handle } || 'unknown') : 'unknown';
-
-        my $msg = "$pfx chanlist command attempt (user $u is not logged in)";
-        noticeConsoleChan($self, $msg);
-
-        botNotice(
-            $self, $nick,
-            "You must be logged to use this command - /msg "
-            . $self->{irc}->nick_folded
-            . " login username password"
-        );
-        return;
-    }
-
-    # Master only (Owner passes because hierarchy is Owner(0) > Master(1) ...)
-    unless (eval { $user->has_level('Master') }) {
-        my $pfx = ($ctx->message && $ctx->message->can('prefix')) ? ($ctx->message->prefix // $nick) : $nick;
-        my $lvl = eval { $user->level_description } || eval { $user->level } || '?';
-        my $u   = eval { $user->nickname } || eval { $user->handle } || 'unknown';
-
-        my $msg = "$pfx chanlist command attempt (Master required; user $u [$lvl])";
-        noticeConsoleChan($self, $msg);
-
-        botNotice($self, $nick, "Your level does not allow you to use this command.");
-        return;
-    }
 
     my $sql = q{
         SELECT
@@ -1725,230 +1718,153 @@ sub channelList_ctx {
 
 # versionCheck() - sends version info in channel and alerts if update is available
 sub versionCheck {
-    my ($self, $message, $sChannel, $sNick) = @_;
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
     my $conf = $self->{conf};
 
-    # Fetch versions
     my ($local_version, $remote_version) = $self->getVersion();
-    
-    # Compose base output
+
     my $bot_name = $conf->get('main.MAIN_PROG_NAME');
     my $sMsg = "$bot_name version: $local_version";
 
-    # Compare and warn if outdated
     if ($remote_version ne "Undefined" && $remote_version ne $local_version) {
         $sMsg .= " (update available: $remote_version)";
     }
 
-    botPrivmsg($self, $sChannel, $sMsg);
-    logBot($self, $message, undef, "version", undef);
+    $ctx->reply($sMsg);
+    logBot($self, $ctx->message, undef, "version", undef);
 }
-
-# Extracts reply target from a message (either channel or sender nick)
-sub getReplyTarget {
-    my ($self, $message, $nick) = @_;
-    my $target = $message->{params}[0] // '';
-    return ($target =~ /^#/) ? $target : $nick;
-}
-
 
 # 🧙‍♂️ Handle private commands with centralized dispatching and full command set.
 sub mbCommandPrivate {
     my ($self, $message, $sNick, $sCommand, @tArgs) = @_;
 
-    # Normalize command
+    # Normalize command — q and Q are the same
     $sCommand = lc $sCommand;
 
-    # Command dispatch table (legacy handlers + new Context-based ones)
+    # Build Context once, used by all handlers
+    my $ctx = Mediabot::Context->new(
+        bot     => $self,
+        message => $message,
+        nick    => $sNick,
+        channel => $sNick,   # private context: reply target is the nick
+        command => $sCommand,
+        args    => \@tArgs,
+    );
+
+    # Attach a Command object to the Context for handlers that want it
+    $ctx->{command_obj} = Mediabot::Command->new(
+        name    => $sCommand,
+        args    => \@tArgs,
+        raw     => join(" ", $sCommand, @tArgs),
+        context => $ctx,
+        source  => 'private',
+    );
+
+    # ---------------------------------------------------------------------------
+    # Command dispatch table
+    # All handlers receive a Mediabot::Context object.
+    # Legacy handlers (pass, ident, topic, update, play, radiopub, debug) still
+    # receive the old signature ($self, $message, $sNick, $sChannel, @tArgs)
+    # and are wrapped in closures for forward compatibility.
+    # ---------------------------------------------------------------------------
     my %command_table = (
-        'pass'              => \&userPass,
-        'ident'             => \&userIdent,
-        'topic'             => \&userTopicChannel,
-        'metadata'          => \&setRadioMetadata_ctx,
-        'update'            => \&update,
-        'play'              => \&playRadio,
-        'radiopub'          => \&radioPub,
-        'song'              => \&displayRadioCurrentSong_ctx,
-        'debug'             => \&mbDebug,
 
-        # New style (Context-based) commands:
-        'status'            => \&mbStatus_ctx,
-        'echo'              => \&mbEcho,
-        'die'               => \&mbQuit_ctx,
-        'nick'              => \&mbChangeNick_ctx,
-        'addtimer'          => \&mbAddTimer_ctx,
-        'remtimer'          => \&mbRemTimer_ctx,
-        'timers'            => \&mbTimers_ctx,
-        'register'          => \&mbRegister_ctx,
-        'msg'               => \&msgCmd_ctx,
-        'dump'              => \&dumpCmd_ctx,
-        'say'               => \&sayChannel_ctx,
-        'act'               => \&actChannel_ctx,
-        'adduser'           => \&addUser_ctx,
-        'deluser'           => \&delUser_ctx,
-        'users'             => \&userStats_ctx,
-        'cstat'             => \&userCstat_ctx,
-        'login'             => \&userLogin_ctx,
-        'userinfo'          => \&userInfo_ctx,
-        'addhost'           => \&addUserHost_ctx,
-        'addchan'           => \&addChannel_ctx,
-        'chanset'           => \&channelSet_ctx,
-        'purge'             => \&purgeChannel_ctx,
-        'part'              => \&channelPart_ctx,
-        'join'              => \&channelJoin_ctx,
-        'add'               => \&channelAddUser_ctx,
-        'del'               => \&channelDelUser_ctx,
-        'modinfo'           => \&userModinfo_ctx,
-        'op'                => \&userOpChannel_ctx,
-        'deop'              => \&userDeopChannel_ctx,
-        'invite'            => \&userInviteChannel_ctx,
-        'voice'             => \&userVoiceChannel_ctx,
-        'devoice'           => \&userDevoiceChannel_ctx,
-        'kick'              => \&userKickChannel_ctx,
-        'showcommands'      => \&userShowcommandsChannel_ctx,
-        'chaninfo'          => \&userChannelInfo_ctx,
-        'whoami'            => \&userWhoAmI_ctx,
-        'auth'              => \&userAuthNick_ctx,
-        'verify'            => \&userVerifyNick_ctx,
-        'access'            => \&userAccessChannel_ctx,
-        'addcmd'            => \&mbDbAddCommand_ctx,
-        'remcmd'            => \&mbDbRemCommand_ctx,
-        'modcmd'            => \&mbDbModCommand_ctx,
-        'mvcmd'             => \&mbDbMvCommand_ctx,
-        'chowncmd'          => \&mbChownCommand_ctx,
-        'showcmd'           => \&mbDbShowCommand_ctx,
-        'chanstatlines'     => \&channelStatLines_ctx,
-        'whotalk'           => \&whoTalk_ctx,
-        'countcmd'          => \&mbCountCommand_ctx,
-        'topcmd'            => \&mbTopCommand_ctx,
-        'popcmd'            => \&mbPopCommand_ctx,
-        'searchcmd'         => \&mbDbSearchCommand_ctx,
-        'lastcmd'           => \&mbLastCommand_ctx,
-        'owncmd'            => \&mbDbOwnersCommand_ctx,
-        'holdcmd'           => \&mbDbHoldCommand_ctx,
-        'addcatcmd'         => \&mbDbAddCategoryCommand_ctx,
-        'chcatcmd'          => \&mbDbChangeCategoryCommand_ctx,
-        'topsay'            => \&userTopSay_ctx,
-        'checkhostchan'     => \&mbDbCheckHostnameNickChan_ctx,
-        'checkhost'         => \&mbDbCheckHostnameNick_ctx,
-        'checknick'         => \&mbDbCheckNickHostname_ctx,
-        'greet'             => \&userGreet_ctx,
-        'nicklist'          => \&channelNickList_ctx,
-        'rnick'             => \&randomChannelNick_ctx,
-        'birthdate'         => \&displayBirthDate_ctx,
-        'ignores'           => \&IgnoresList_ctx,
-        'ignore'            => \&addIgnore_ctx,
-        'unignore'          => \&delIgnore_ctx,
-        'lastcom'           => \&lastCom_ctx,
-        'moduser'           => \&mbModUser_ctx,
-        'antifloodset'      => \&setChannelAntiFloodParams_ctx,
-        'rehash'            => \&mbRehash_ctx,
+        # --- Legacy handlers (not yet migrated to Context) ---
+        pass        => sub { userPass_ctx($ctx) },
+        ident       => sub { userIdent_ctx($ctx) },
+        topic       => sub { userTopicChannel_ctx($ctx) },
+        update      => sub { update_ctx($ctx) },
+        play        => sub { playRadio_ctx($ctx) },
+        radiopub    => sub { radioPub_ctx($ctx) },
+        debug       => sub { debug_ctx($ctx) },
+
+        # --- Context-based handlers ---
+        status      => sub { mbStatus_ctx($ctx) },
+        echo        => sub { mbEcho($ctx) },
+        die         => sub { mbQuit_ctx($ctx) },
+        nick        => sub { mbChangeNick_ctx($ctx) },
+        addtimer    => sub { mbAddTimer_ctx($ctx) },
+        remtimer    => sub { mbRemTimer_ctx($ctx) },
+        timers      => sub { mbTimers_ctx($ctx) },
+        register    => sub { mbRegister_ctx($ctx) },
+        msg         => sub { msgCmd_ctx($ctx) },
+        dump        => sub { dumpCmd_ctx($ctx) },
+        say         => sub { sayChannel_ctx($ctx) },
+        act         => sub { actChannel_ctx($ctx) },
+        song        => sub { displayRadioCurrentSong_ctx($ctx) },
+        metadata    => sub { setRadioMetadata_ctx($ctx) },
+        adduser     => sub { addUser_ctx($ctx) },
+        deluser     => sub { delUser_ctx($ctx) },
+        users       => sub { userStats_ctx($ctx) },
+        cstat       => sub { userCstat_ctx($ctx) },
+        login       => sub { userLogin_ctx($ctx) },
+        userinfo    => sub { userInfo_ctx($ctx) },
+        addhost     => sub { addUserHost_ctx($ctx) },
+        addchan     => sub { addChannel_ctx($ctx) },
+        chanset     => sub { channelSet_ctx($ctx) },
+        purge       => sub { purgeChannel_ctx($ctx) },
+        part        => sub { channelPart_ctx($ctx) },
+        join        => sub { channelJoin_ctx($ctx) },
+        add         => sub { channelAddUser_ctx($ctx) },
+        del         => sub { channelDelUser_ctx($ctx) },
+        modinfo     => sub { userModinfo_ctx($ctx) },
+        op          => sub { userOpChannel_ctx($ctx) },
+        deop        => sub { userDeopChannel_ctx($ctx) },
+        invite      => sub { userInviteChannel_ctx($ctx) },
+        voice       => sub { userVoiceChannel_ctx($ctx) },
+        devoice     => sub { userDevoiceChannel_ctx($ctx) },
+        kick        => sub { userKickChannel_ctx($ctx) },
+        showcommands => sub { userShowcommandsChannel_ctx($ctx) },
+        chaninfo    => sub { userChannelInfo_ctx($ctx) },
+        chanlist    => sub { channelList_ctx($ctx) },
+        whoami      => sub { userWhoAmI_ctx($ctx) },
+        auth        => sub { userAuthNick_ctx($ctx) },
+        verify      => sub { userVerifyNick_ctx($ctx) },
+        access      => sub { userAccessChannel_ctx($ctx) },
+        addcmd      => sub { mbDbAddCommand_ctx($ctx) },
+        remcmd      => sub { mbDbRemCommand_ctx($ctx) },
+        modcmd      => sub { mbDbModCommand_ctx($ctx) },
+        mvcmd       => sub { mbDbMvCommand_ctx($ctx) },
+        chowncmd    => sub { mbChownCommand_ctx($ctx) },
+        showcmd     => sub { mbDbShowCommand_ctx($ctx) },
+        chanstatlines => sub { channelStatLines_ctx($ctx) },
+        whotalk     => sub { whoTalk_ctx($ctx) },
+        whotalks    => sub { whoTalk_ctx($ctx) },
+        countcmd    => sub { mbCountCommand_ctx($ctx) },
+        topcmd      => sub { mbTopCommand_ctx($ctx) },
+        popcmd      => sub { mbPopCommand_ctx($ctx) },
+        searchcmd   => sub { mbDbSearchCommand_ctx($ctx) },
+        lastcmd     => sub { mbLastCommand_ctx($ctx) },
+        owncmd      => sub { mbDbOwnersCommand_ctx($ctx) },
+        holdcmd     => sub { mbDbHoldCommand_ctx($ctx) },
+        addcatcmd   => sub { mbDbAddCategoryCommand_ctx($ctx) },
+        chcatcmd    => sub { mbDbChangeCategoryCommand_ctx($ctx) },
+        topsay      => sub { userTopSay_ctx($ctx) },
+        checkhostchan => sub { mbDbCheckHostnameNickChan_ctx($ctx) },
+        checkhost   => sub { mbDbCheckHostnameNick_ctx($ctx) },
+        checknick   => sub { mbDbCheckNickHostname_ctx($ctx) },
+        greet       => sub { userGreet_ctx($ctx) },
+        nicklist    => sub { channelNickList_ctx($ctx) },
+        rnick       => sub { randomChannelNick_ctx($ctx) },
+        birthdate   => sub { displayBirthDate_ctx($ctx) },
+        ignores     => sub { IgnoresList_ctx($ctx) },
+        ignore      => sub { addIgnore_ctx($ctx) },
+        unignore    => sub { delIgnore_ctx($ctx) },
+        lastcom     => sub { lastCom_ctx($ctx) },
+        moduser     => sub { mbModUser_ctx($ctx) },
+        antifloodset => sub { setChannelAntiFloodParams_ctx($ctx) },
+        rehash      => sub { mbRehash_ctx($ctx) },
     );
 
-    # Commands that expect a Mediabot::Context object
-    my %ctx_commands = map { $_ => 1 } qw(
-        status
-        echo
-        die
-        nick
-        addtimer
-        remtimer
-        timers
-        register
-        msg
-        dump
-        say
-        act
-        adduser
-        deluser
-        users
-        cstat
-        login
-        userinfo
-        addhost
-        addchan
-        chanset
-        purge
-        part
-        join
-        add
-        del
-        modinfo
-        op
-        deop
-        invite
-        voice
-        devoice
-        kick
-        showcommands
-        chaninfo
-        chanlist
-        whoami
-        auth
-        verify
-        access
-        addcmd
-        remcmd
-        modcmd
-        mvcmd
-        chowncmd
-        showcmd
-        chanstatlines
-        whotalk
-        countcmd
-        topcmd
-        popcmd
-        searchcmd
-        lastcmd
-        owncmd
-        holdcmd
-        addcatcmd
-        chcatcmd
-        topsay
-        checkhostchan
-        checkhost
-        checknick
-        greet
-        nicklist
-        rnick
-        birthdate
-        ignores
-        ignore
-        unignore
-        moduser
-        lastcom
-        antifloodset
-        rehash
-        metadata
-    );
-
-    # Dispatch the command if found
     if (my $handler = $command_table{$sCommand}) {
-
-        my $reply_target = $self->getReplyTarget($message, $sNick);
-
-        # Context-based path
-        if ($ctx_commands{$sCommand}) {
-
-            my $ctx = Mediabot::Context->new(
-                bot     => $self,
-                message => $message,
-                nick    => $sNick,
-                channel => $reply_target,
-                command => $sCommand,
-                args    => \@tArgs,
-            );
-
-            return $handler->($ctx);
-        }
-
-        # Legacy path: signature is ($self, $message, $sNick, $sChannel, @tArgs)
-        return $handler->($self, $message, $sNick, $reply_target, @tArgs);
-
-    } else {
-        $self->{logger}->log(3, $message->prefix . " Private command '$sCommand' not found");
-        return undef;
+        $self->{logger}->log(3, "PRIVATE: $sNick triggered $sCommand");
+        return $handler->();
     }
+
+    $self->{logger}->log(3, $message->prefix . " Private command '$sCommand' not found");
+    return undef;
 }
 
 # Handle bot quit command (Master only)
@@ -10586,18 +10502,7 @@ sub radioNext_ctx {
         return;
     }
 
-    # Droits Administrator+
-    my $is_admin = eval { $user->has_level('Administrator') };
-    $is_admin = checkUserLevel($self, $user->level, "Administrator") unless $is_admin;
 
-    unless ($is_admin) {
-        my $msg = ($message && $message->can('prefix'))
-            ? $message->prefix . " nextsong command attempt (user " . $user->nickname . " does not have [Administrator] rights)"
-            : "nextsong command attempt (insufficient rights)";
-        noticeConsoleChan($self, $msg);
-        botNotice($self, $nick, "Your level does not allow you to use this command.");
-        return;
-    }
 
     # Options d'affichage : --safe / --plain (facultatives)
     my $safe  = 0;
@@ -10927,14 +10832,12 @@ sub mbQuotes_ctx {
     # ---------------------------------------------------------
     # Resolve user object (prefer Context, fallback to legacy)
     # ---------------------------------------------------------
-    my $user = $ctx->user || eval { $self->get_user_from_message($message) };
+    my $user = $ctx->user;
 
-    my ($uid, $handle, $auth, $level, $level_desc) = (undef, undef, 0, undef, undef);
-
+    my ($uid, $handle, $level, $level_desc) = (undef, undef, undef, undef);
     if ($user) {
         $uid        = eval { $user->id };
         $handle     = eval { $user->nickname } // $nick;
-        $auth       = eval { $user->is_authenticated } ? 1 : 0;
         $level      = eval { $user->level };
         $level_desc = eval { $user->level_description };
     }
@@ -10943,7 +10846,7 @@ sub mbQuotes_ctx {
     # Authenticated users with level >= "User"
     #   -> full access to all subcommands
     # ---------------------------------------------------------
-    if ( $user && $auth && defined $level && checkUserLevel($self, $level, "User") ) {
+    if ( $user && $user->is_authenticated && eval { $user->has_level('User') } ) {
 
         return mbQuoteAdd($self, $message, $uid, $handle, $nick, $channel, @args)
             if $subcmd =~ /^(add|a)$/;
@@ -11349,31 +11252,9 @@ sub mbModUser_ctx {
         return;
     }
 
-    my $uid        = eval { $user->id };
-    my $level      = eval { $user->level };
-    my $level_desc = eval { $user->level_description } || $level || 'unknown';
-    my $auth       = eval { $user->is_authenticated } ? 1 : 0;
-    my $handle     = eval { $user->nickname } || $nick;
-
-    # ---------------------------------------------------------
-    # Must be authenticated
-    # ---------------------------------------------------------
-    unless ($auth) {
-        my $pfx = ($message && $message->can('prefix')) ? $message->prefix : $nick;
-        noticeConsoleChan($self, "$pfx moduser attempt (user $handle not logged in)");
-        botNotice($self, $nick, "You must be logged in to use this command.");
-        return;
-    }
-
-    # ---------------------------------------------------------
-    # Master-only command
-    # ---------------------------------------------------------
-    unless (defined $level && checkUserLevel($self, $level, "Master")) {
-        my $pfx = ($message && $message->can('prefix')) ? $message->prefix : $nick;
-        noticeConsoleChan($self, "$pfx moduser attempt (required: Master; current: $level_desc)");
-        botNotice($self, $nick, "Your level does not allow you to use this command.");
-        return;
-    }
+    my $uid    = eval { $user->id };
+    my $handle = eval { $user->nickname } || $nick;
+    my $level  = eval { $user->level };
 
     # ---------------------------------------------------------
     # Arguments dispatch
@@ -11736,47 +11617,12 @@ sub setChannelAntiFloodParams_ctx {
 
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    # ---------------------------------------------------------
-    # Resolve user from Context (preferred) or legacy helper
-    # ---------------------------------------------------------
-    my $user = $ctx->user || eval { $self->get_user_from_message($message) };
+    return unless $ctx->require_level('Master');
 
-    unless ($user) {
-        botNotice($self, $nick, "User not found.");
-        return;
-    }
+    my $user   = $ctx->user;
+    my $handle = eval { $user->nickname } || $nick;
 
-    my $auth       = eval { $user->is_authenticated } ? 1 : 0;
-    my $level      = eval { $user->level };
-    my $handle     = eval { $user->nickname } || $nick;
-    my $level_desc = eval { $user->level_description } || ($level // '?');
 
-    # ---------------------------------------------------------
-    # Must be authenticated
-    # ---------------------------------------------------------
-    unless ($auth) {
-        my $pfx = ($message && $message->can('prefix')) ? $message->prefix : $nick;
-        noticeConsoleChan($self, "$pfx antifloodset attempt (user $handle not logged in)");
-        botNotice($self, $nick,
-            "You must be logged in to use this command - /msg "
-          . $self->{irc}->nick_folded
-          . " login username password"
-        );
-        return;
-    }
-
-    # ---------------------------------------------------------
-    # Master only (same behavior as original checkUserLevel)
-    # ---------------------------------------------------------
-    unless (defined $level && checkUserLevel($self, $level, "Master")) {
-        my $pfx = ($message && $message->can('prefix')) ? $message->prefix : $nick;
-        noticeConsoleChan(
-            $self,
-            "$pfx antifloodset attempt (required: Master, user: $handle [$level_desc])"
-        );
-        botNotice($self, $nick, "Your level does not allow you to use this command.");
-        return;
-    }
 
     # ---------------------------------------------------------
     # Resolve target channel
@@ -12027,113 +11873,10 @@ sub mbRehash_ctx {
 
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    my $prefix = eval { $message->prefix } // '';
-    my $user   = $ctx->user // eval { $self->get_user_from_message($message) };
+    return unless $ctx->require_level('Master');
 
-    unless ($user) {
-        noticeConsoleChan($self, "$prefix rehash: no user object from ctx->user/get_user_from_message()");
-        botNotice($self, $nick, "Internal error: no user object");
-        return;
-    }
-
-    # Safe getters from user object
-    my $uid    = eval { $user->id }                  // eval { $user->{id_user} }          // 0;
-    my $unick  = eval { $user->nickname }           // eval { $user->{nickname} }         // $nick;
-    my $auth   = eval { $user->auth }               // eval { $user->{auth} }             // 0;
-    my $lvlid  = eval { $user->level }              // eval { $user->{level} }            // undef;
-    my $lvldes = eval { $user->level_description }  // eval { $user->{level_desc} }       // 'unknown';
-
-    # Debug snapshot
-    noticeConsoleChan($self, "$prefix AUTH[rehash-enter] uid=$uid nick=$unick auth=$auth level=$lvldes");
-
-    # If not authenticated, attempt autologin when eligible (#AUTOLOGIN# + matching hostmask)
-    if (!$auth) {
-        my ($username, $masks) = ('', '');
-        eval {
-            my $sth = $self->{dbh}->prepare("SELECT username, hostmasks FROM USER WHERE id_user=?");
-            $sth->execute($uid);
-            ($username, $masks) = $sth->fetchrow_array;
-            $sth->finish;
-        };
-
-        noticeConsoleChan(
-            $self,
-            "$prefix rehash: auth=0; username='" . ($username // '') . "'; masks='" . ($masks // '') . "'"
-        );
-
-        # Extract "ident@host" from prefix (nick!ident@host)
-        my $userhost = $prefix;
-        $userhost =~ s/^.*?!(.+)$/$1/;
-
-        my $matched_mask;
-        for my $mask (
-            grep { length }
-            map  { my $x = $_; $x =~ s/^\s+|\s+$//g; $x }
-            split /,/, ($masks // '')
-        ) {
-            my $re = do {
-                my $q = quotemeta($mask);
-                $q =~ s/\\\*/.*/g;   # '*' -> .*
-                $q =~ s/\\\?/./g;    # '?' -> .
-                qr/^$q$/i;
-            };
-            if ($userhost =~ $re) {
-                $matched_mask = $mask;
-                last;
-            }
-        }
-
-        noticeConsoleChan(
-            $self,
-            "$prefix rehash: autologin mask check => " . ($matched_mask ? "matched '$matched_mask'" : "no mask matched")
-        );
-
-        # If we are eligible for autologin, try to use Mediabot::Auth
-        if (defined $username && $username eq '#AUTOLOGIN#' && $matched_mask) {
-            my ($ok, $reason) = eval { $self->{auth}->maybe_autologin($user, $prefix) };
-            $ok     //= 0;
-            $reason //= ($@ ? "exception: $@" : "unknown");
-
-            noticeConsoleChan($self, "$prefix rehash: maybe_autologin => " . ($ok ? 'OK' : 'NO') . " ($reason)");
-
-            if ($ok) {
-                # Refresh user object after autologin
-                $user   = $ctx->user // eval { $self->get_user_from_message($message) } || $user;
-                $auth   = eval { $user->auth }               // eval { $user->{auth} }             // $auth;
-                $lvlid  = eval { $user->level }              // eval { $user->{level} }            // $lvlid;
-                $lvldes = eval { $user->level_description }  // eval { $user->{level_desc} }       // $lvldes;
-
-                noticeConsoleChan($self, "$prefix rehash: after autologin => auth=$auth level=$lvldes");
-            }
-        } else {
-            noticeConsoleChan(
-                $self,
-                "$prefix rehash: autologin not eligible (username!='#AUTOLOGIN#' or mask not matched)"
-            );
-        }
-    }
-
-    # Still not authenticated? Deny.
-    unless ($auth) {
-        my $msg = "$prefix rehash command attempt (user $unick is not logged in)";
-        noticeConsoleChan($self, $msg);
-        botNotice(
-            $self,
-            $nick,
-            "You must be logged in to use this command - /msg "
-              . $self->{irc}->nick_folded
-              . " login <username> <password>"
-        );
-        return;
-    }
-
-    # Check level (Master+)
-    unless (checkUserLevel($self, $lvlid, "Master")) {
-        my $msg = "$prefix rehash command attempt (command level [Master] for user $unick [$lvldes])";
-        noticeConsoleChan($self, $msg);
-        botNotice($self, $nick, "Your level does not allow you to use this command.");
-        return;
-    }
+    my $user  = $ctx->user;
+    my $unick = eval { $user->nickname } // $nick;
 
     # Reload configuration file
     readConfigFile($self);
@@ -12152,6 +11895,57 @@ sub mbRehash_ctx {
 }
 
 # Play a radio request
+# ---------------------------------------------------------------------------
+# Radio command wrappers — Context-based shims over legacy handlers.
+# The legacy subs (playRadio, rplayRadio, etc.) keep their original
+# signature ($self, $message, $sNick, $sChannel, @tArgs) unchanged.
+# ---------------------------------------------------------------------------
+
+sub playRadio_ctx {
+    my ($ctx) = @_;
+    playRadio($ctx->bot, $ctx->message, $ctx->nick, $ctx->channel, @{ $ctx->args });
+}
+
+sub radioPub_ctx {
+    my ($ctx) = @_;
+    radioPub($ctx->bot, $ctx->message, $ctx->nick, undef, @{ $ctx->args });
+}
+
+sub rplayRadio_ctx {
+    my ($ctx) = @_;
+    rplayRadio($ctx->bot, $ctx->message, $ctx->nick, $ctx->channel, @{ $ctx->args });
+}
+
+sub queueRadio_ctx {
+    my ($ctx) = @_;
+    queueRadio($ctx->bot, $ctx->message, $ctx->nick, $ctx->channel, @{ $ctx->args });
+}
+
+sub nextRadio_ctx {
+    my ($ctx) = @_;
+    nextRadio($ctx->bot, $ctx->message, $ctx->nick, $ctx->channel, @{ $ctx->args });
+}
+
+sub update_ctx {
+    my ($ctx) = @_;
+    update($ctx->bot, $ctx->message, $ctx->nick, $ctx->channel, @{ $ctx->args });
+}
+
+sub userPass_ctx {
+    my ($ctx) = @_;
+    userPass($ctx->bot, $ctx->message, $ctx->nick, @{ $ctx->args });
+}
+
+sub userIdent_ctx {
+    my ($ctx) = @_;
+    userIdent($ctx->bot, $ctx->message, $ctx->nick, @{ $ctx->args });
+}
+
+sub userTopicChannel_ctx {
+    my ($ctx) = @_;
+    userTopicChannel($ctx->bot, $ctx->message, $ctx->nick, $ctx->channel, @{ $ctx->args });
+}
+
 sub playRadio(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my $incomingDir = $self->{conf}->get('radio.YOUTUBEDL_INCOMING');
@@ -13563,20 +13357,7 @@ sub mp3_ctx {
         return;
     }
 
-    # Require at least "User" level (this was already the case logically)
-    my $level = eval { $user->level };
-    unless (defined $level && checkUserLevel($self, $level, "User")) {
-        my $who   = eval { $user->nickname } // $nick;
-        my $lvl_d = eval { $user->level_description } || eval { $user->level } || '?';
-        my $pfx   = eval { $message->prefix } // $who;
 
-        noticeConsoleChan(
-            $self,
-            "$pfx mp3 command attempt (command level [User] for user $who [$lvl_d])"
-        );
-        botNotice($self, $nick, "Your level does not allow you to use this command.");
-        return;
-    }
 
     # --- No arguments => syntax ---
     unless (@args) {

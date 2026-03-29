@@ -71,24 +71,13 @@ sub reply_channel {
     return $self->context->reply_channel($msg);
 }
 
-# --- Rights helpers (will rely on Mediabot::User / Auth) ---
+# --- Rights helpers ---
 
+# Require a minimum privilege level.
+# Delegates to Context->require_level for consistent auth/deny handling.
 sub require_auth_level {
     my ($self, $level) = @_;
-    my $user = $self->user;
-
-    # To be adjusted according to your auth system
-    if (!$user) {
-        $self->reply_private("Tu dois être authentifié pour utiliser cette commande.");
-        return;
-    }
-
-    if (!$user->has_level($level)) {
-        $self->reply_private("Tu n'as pas les droits pour cette commande.");
-        return;
-    }
-
-    return 1;
+    return $self->context->require_level($level);
 }
 
 # ---------------------------------------------------------------------------

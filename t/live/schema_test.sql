@@ -327,3 +327,12 @@ INSERT INTO `USER` (`id_user`, `hostmasks`, `nickname`, `password`, `username`, 
 -- Membership du bot sur le canal de test
 INSERT INTO `USER_CHANNEL` (`id_user_channel`, `id_user`, `id_channel`, `level`, `automode`) VALUES
 (1, 1, 1, 0, 'NONE');
+
+-- Utilisateur Master de test pour les tests d'authentification par password
+-- password = 'testpass123' (hashé via MariaDB PASSWORD())
+INSERT INTO `USER` (`id_user`, `hostmasks`, `nickname`, `password`, `username`, `id_user_level`, `auth`) VALUES
+(2, 'mbspy*!*@*', 'mboper', PASSWORD('testpass123'), 'mboper', 2, 0);
+
+-- Membership de mboper sur le canal de test (level Master)
+INSERT INTO `USER_CHANNEL` (`id_user_channel`, `id_user`, `id_channel`, `level`, `automode`) VALUES
+(2, 2, 1, 1, 'NONE');

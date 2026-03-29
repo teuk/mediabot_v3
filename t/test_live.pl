@@ -504,7 +504,8 @@ if (!@test_files) {
         }
         if (ref $code eq 'CODE') {
             $code->($assert, $spy, $send_cmd, $send_private, $wait_reply,
-                    $opt_botnick, $opt_spynick, $opt_channel, $opt_cmdchar);
+                    $opt_botnick, $opt_spynick, $opt_channel, $opt_cmdchar,
+                    'mboper', 'testpass123');  # loginuser, loginpass
         } else {
             print "  (pas de sous-routine retournée, skip)\n";
         }

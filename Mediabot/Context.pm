@@ -11,8 +11,23 @@ Mediabot::Context - Lightweight container for command execution context.
 
 This object carries all contextual information for a single command
 execution: bot instance, message object, IRC nick, channel, command
-name and arguments. It also provides thin helpers for logging using
-the shared Mediabot::Log instance.
+name and arguments. It also provides thin helpers for replying,
+logging, and access control using the shared Mediabot infrastructure.
+
+=head1 SYNOPSIS
+
+    my $ctx = Mediabot::Context->new(
+        bot     => $self,
+        message => $message,
+        nick    => $sNick,
+        channel => $sChannel,
+        command => $sCommand,
+        args    => \@tArgs,
+    );
+
+    $ctx->reply("Hello!");
+    $ctx->reply_private("Only you can see this.");
+    return $ctx->deny("Access denied.") unless $ctx->require_level('Master');
 
 =cut
 
@@ -36,6 +51,48 @@ sub new {
 
     return bless $self, $class;
 }
+
+#----------------------------------------------------------------------
+# Basic accessors
+#----------------------------------------------------------------------
+
+sub bot     { $_[0]->{bot} }
+sub message { $_[0]->{message} }
+sub nick    { $_[0]->{nick} }
+sub channel { $_[0]->{channel} }
+sub command { $_[0]->{command} }
+
+# Always return an arrayref for args
+sub args {
+    my ($self) = @_;
+    my $args = $self->{args};
+
+    return []        unless defined $args;
+    return $args     if ref $args eq 'ARRAY';
+    return [ $args ];
+}
+
+# Return the Mediabot::Command object attached to this context (if any)
+sub command_obj { $_[0]->{command_obj} }
+
+# True if the command was issued in a private message (no channel)
+sub is_private {
+    my ($self) = @_;
+    my $chan = $self->{channel} // '';
+    return $chan !~ /^#/;
+}
+
+# Return the Channel object for the current channel, or undef
+sub channel_obj {
+    my ($self) = @_;
+    my $bot  = $self->{bot}  or return undef;
+    my $chan = $self->{channel} or return undef;
+    return $bot->{channels}{$chan} // undef;
+}
+
+#----------------------------------------------------------------------
+# User access
+#----------------------------------------------------------------------
 
 # Return caller user object (cached)
 sub user {
@@ -68,8 +125,7 @@ sub require_auth {
     }
 
     unless ($user->is_authenticated) {
-        botNotice(
-            $bot,
+        $bot->botNotice(
             $nick,
             "You must be logged to use this command - /msg "
               . $bot->{irc}->nick_folded
@@ -90,47 +146,46 @@ sub require_level {
     return $self->deny("You must be logged in to use this command.")
         unless $user && $user->is_authenticated;
 
-    # Your rule: only rely on User->has_level (no checkUserLevel anywhere)
     return 1 if $user->has_level($level);
 
     return $self->deny("Your level does not allow you to use this command.");
 }
 
-# Send a notice to the caller and return undef
+# Send a notice to the caller and return undef (use as: return $ctx->deny(...))
 sub deny {
     my ($self, $msg) = @_;
 
     my $bot = $self->{bot};
     return unless $bot;
 
-    # Send notice to user
     $bot->botNotice($self->{nick}, $msg);
 
     return;
 }
 
 #----------------------------------------------------------------------
-# Basic accessors
+# Reply helpers
 #----------------------------------------------------------------------
 
-sub bot     { $_[0]->{bot} }
-sub message { $_[0]->{message} }
-sub nick    { $_[0]->{nick} }
-sub channel { $_[0]->{channel} }
-sub command { $_[0]->{command} }
-# Always return an arrayref for args
-sub args {
-    my ($self) = @_;
-    my $args = $self->{args};
+# Send a PRIVMSG to the channel (public reply)
+sub reply {
+    my ($self, $msg) = @_;
+    my $bot = $self->{bot} or return;
+    $bot->botPrivmsg($self->{channel}, $msg);
+}
 
-    # No args -> always an empty arrayref
-    return [] unless defined $args;
+# Send a PRIVMSG to the channel (explicit public reply — alias of reply)
+sub reply_channel {
+    my ($self, $msg) = @_;
+    my $bot = $self->{bot} or return;
+    $bot->botPrivmsg($self->{channel}, $msg);
+}
 
-    # Already an arrayref -> keep as is
-    return $args if ref $args eq 'ARRAY';
-
-    # Scalar or other -> wrap into an arrayref
-    return [ $args ];
+# Send a NOTICE to the calling nick (private reply)
+sub reply_private {
+    my ($self, $msg) = @_;
+    my $bot = $self->{bot} or return;
+    $bot->botNotice($self->{nick}, $msg);
 }
 
 #----------------------------------------------------------------------
@@ -146,8 +201,6 @@ sub log {
     my $bot    = $self->{bot}     or return;
     my $logger = $bot->{logger}   or return;
 
-    # Build a lightweight context prefix (no leading [TAG] to keep
-    # Mediabot::Log free to add its own [INFO]/[DEBUGx] labels).
     my $nick = defined $self->{nick}    ? $self->{nick}    : '?';
     my $chan = defined $self->{channel} ? $self->{channel} : '(priv)';
     my $cmd  = defined $self->{command} ? $self->{command} : '';
@@ -158,11 +211,23 @@ sub log {
     $logger->log($level, "$ctx_prefix :: $msg");
 }
 
-# Convenience wrapper for debug-style messages.
+# Log at INFO level (0)
+sub log_info {
+    my ($self, $msg) = @_;
+    $self->log(0, $msg);
+}
+
+# Log at ERROR level (1)
+sub log_error {
+    my ($self, $msg) = @_;
+    $self->log(1, $msg);
+}
+
+# Log at DEBUG level (default 1, configurable)
 # Example: $ctx->log_debug(3, "something happened");
 sub log_debug {
     my ($self, $level, $msg) = @_;
-    $level //= 1;   # default to DEBUG1 if no level provided
+    $level //= 1;
     $self->log($level, $msg);
 }
 
