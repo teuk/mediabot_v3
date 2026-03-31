@@ -36,17 +36,17 @@ sub new {
 
     $logger->log(1, "Connecting to DB: $dbname at $dbhost:$dbport (charset_mode=$mode)");
 
-    my $dsn = "DBI:mysql:database=$dbname;host=$dbhost;port=$dbport";
+    # DBD::MariaDB refuses port when host=localhost (uses Unix socket instead)
+    # Force TCP by converting localhost to 127.0.0.1
+    my $tcp_host = ($dbhost eq 'localhost') ? '127.0.0.1' : $dbhost;
+    my $dsn = "DBI:MariaDB:database=$dbname;host=$tcp_host;port=$dbport";
 
     my %attrs = (
         RaiseError           => 0,
         PrintError           => 0,
         AutoCommit           => 1,
-        mysql_auto_reconnect => 1,
+        mariadb_auto_reconnect => 1,
         # Active seulement en mode utf8mb4 (sinon on laisse à 0)
-        mysql_enable_utf8mb4 => ($mode eq 'utf8mb4') ? 1 : 0,
-        # On laisse mysql_enable_utf8 à 0 (deprecated) pour éviter les confusions
-        mysql_enable_utf8    => 0,
     );
 
     my $dbh = DBI->connect($dsn, $dbuser, $dbpass, \%attrs);
@@ -133,14 +133,15 @@ sub _connect {
     my $dbport = $conf->get('mysql.MAIN_PROG_DBPORT')  || 3306;
     my $mode   = $self->{charset_mode} // 'utf8mb4';
 
-    my $dsn = "DBI:mysql:database=$dbname;host=$dbhost;port=$dbport";
+    # DBD::MariaDB refuses port when host=localhost (uses Unix socket instead)
+    # Force TCP by converting localhost to 127.0.0.1
+    my $tcp_host = ($dbhost eq 'localhost') ? '127.0.0.1' : $dbhost;
+    my $dsn = "DBI:MariaDB:database=$dbname;host=$tcp_host;port=$dbport";
     my %attrs = (
         RaiseError           => 0,
         PrintError           => 0,
         AutoCommit           => 1,
-        mysql_auto_reconnect => 1,
-        mysql_enable_utf8mb4 => ($mode eq 'utf8mb4') ? 1 : 0,
-        mysql_enable_utf8    => 0,
+        mariadb_auto_reconnect => 1,
     );
 
     $logger->log(1, "Connecting to DB: $dbname at $dbhost:$dbport (charset_mode=$mode)");

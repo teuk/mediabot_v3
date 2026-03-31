@@ -377,7 +377,7 @@ sub dbConnect(@) {
         clean_and_exit($self, 3) if defined $DBI::err;
     }
 
-    $dbh->{mysql_auto_reconnect} = 1;
+    $dbh->{mariadb_auto_reconnect} = 1;
     $self->{logger}->log( 1, "dbConnect() Connected to $dbname.");
 
     foreach my $sql (
