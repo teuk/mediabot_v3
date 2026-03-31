@@ -15,7 +15,7 @@ TeuK
 Get the latest news on Mediabot here : [https://teuk.org/forum](https://teuk.org/forum/c/mediabot)
 ## Installation
 ### Creating a dedicated user
-This is an installation example on Debian GNU/Linux 11 (bullseye)
+This is an installation example on Debian GNU/Linux 13 (trixie)
 Add a mediabot user :
 ```
 sudo useradd -m -s /bin/bash mediabot
@@ -28,7 +28,7 @@ echo 'mediabot ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/mediabot
 ### Required packages installation
 Install needed packages :
 ```
-sudo apt install build-essential mariadb-server default-libmysqlclient-dev default-libmysqld-dev git curl
+sudo apt install build-essential mariadb-server default-libmysqlclient-dev git curl
 ```
 ### Bot installation
 Now get the bot as mediabot user and run configure script :
