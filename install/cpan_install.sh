@@ -90,7 +90,6 @@ DateTime::TimeZone
 HTML::Tree
 HTML::Entities
 URL::Encode
-MP3::Tag
 Time::HiRes
 Moose
 Hailo
@@ -142,7 +141,6 @@ DateTime::TimeZone
 HTML::Tree
 HTML::Entities
 URL::Encode
-MP3::Tag
 Time::HiRes
 Moose
 Hailo

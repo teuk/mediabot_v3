@@ -175,7 +175,7 @@ else {
 			exit 12;
 		}
 		else {
-			$id_network = $sth->{ mysql_insertid };
+			$id_network = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
 			log_messageln("Network $line added in NETWORK table with id : $id_network");
 			print CONF "CONN_SERVER_NETWORK=$line\n";
 			log_message("Enter irc server hostname : ");
@@ -354,7 +354,7 @@ sub addIrcServer(@) {
 		exit 10;
 	}
 	else {
-		$id_server = $sth->{ mysql_insertid };
+		$id_server = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
 		log_messageln("IRC Server $line added in SERVERS table with id : $id_server");
 	}
 	return $id_server;
@@ -422,7 +422,7 @@ sub addConsoleChannel() {
 			exit 15;
 		}
 		else {
-			my $id_channel = $sth->{ mysql_insertid };
+			my $id_channel = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
 			log_messageln("Console channel $sConsoleChannel added in CHANNEL table with id : $id_channel");
 		}
 	}
@@ -434,7 +434,7 @@ sub addConsoleChannel() {
 			exit 15;
 		}
 		else {
-			my $id_channel = $sth->{ mysql_insertid };
+			my $id_channel = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
 			log_messageln("Console channel $sConsoleChannel added in CHANNEL table with id : $id_channel");
 		}
 	}
