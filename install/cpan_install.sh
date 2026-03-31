@@ -82,7 +82,7 @@ Config::Simple
 Data::Dumper
 Date::Parse
 DBI
-DBD::mysql
+DBD::MariaDB
 Switch
 Memory::Usage
 String::IRC
@@ -145,7 +145,7 @@ Config::Simple
 Data::Dumper
 Date::Parse
 DBI
-DBD::mysql
+DBD::MariaDB
 Switch
 Memory::Usage
 String::IRC
