@@ -1,0 +1,187 @@
++--------------------------------------------------------------------------------+
+| Mediabot log started at Tue Mar 31 02:23:49 2026
++--------------------------------------------------------------------------------+
+[31/03/2026 02:23:49] [INFO] Reading local version from VERSION file...
+[31/03/2026 02:23:49] [INFO] -> Mediabot devel version 3.0 (20260329_133129)
+[31/03/2026 02:23:49] [INFO] Checking latest version from GitHub...
+[31/03/2026 02:23:49] [INFO] Loading configuration from '/home/mediabot/mediabot_v3/t/live/test.conf'
+[31/03/2026 02:23:49] [INFO] Configuration loaded successfully
+[31/03/2026 02:23:49] [INFO] Reading local version from VERSION file...
+[31/03/2026 02:23:49] [INFO] -> Mediabot devel version 3.0 (20260329_133129)
+[31/03/2026 02:23:49] [INFO] Checking latest version from GitHub...
+[31/03/2026 02:23:49] [INFO] -> GitHub devel version 3.0 (20260329_133129)
+[31/03/2026 02:23:49] [INFO] Mediabot is up to date.
+[31/03/2026 02:23:49] [INFO] Mediabot v3.0dev-20260329_133129 started in foreground with debug level 0
+[31/03/2026 02:23:49] [INFO] Logged out all users
+[31/03/2026 02:23:49] [INFO] Populating channel objects
+[31/03/2026 02:23:49] [INFO] Picked localhost:6667 from Network TestNetwork
+[31/03/2026 02:23:49] [INFO] Initialize Hailo
+[31/03/2026 02:23:49] [INFO] Connection nick: mbtest_6875
+[31/03/2026 02:23:49] [INFO] Trying to connect to localhost:6667 (pass : none defined)
+[31/03/2026 02:23:49] [INFO] Connection nick: mbtest_6875
+[31/03/2026 02:23:49] [INFO] -> GitHub devel version 3.0 (20260329_133129)
+[31/03/2026 02:23:49] [INFO] Mediabot is up to date.
+[31/03/2026 02:23:49] [INFO] mediabot_v3 Copyright (C) 2019-2025 teuk
+[31/03/2026 02:23:49] [INFO] Mediabot v3.0dev-20260329_133129 starting with config file /home/mediabot/mediabot_v3/t/live/test.conf
+[31/03/2026 02:23:49] [INFO] Mediabot v3.0dev-20260329_133129 started in foreground with debug level 0
+[31/03/2026 02:23:49] [INFO] Logged out all users
+[31/03/2026 02:23:49] [INFO] Populating channel objects
+[31/03/2026 02:23:49] [INFO] Picked localhost:6667 from Network TestNetwork
+[31/03/2026 02:23:49] [INFO] Initialize Hailo
+[31/03/2026 02:23:49] [INFO] Connection nick: mbtest_6875
+[31/03/2026 02:23:49] [INFO] Trying to connect to localhost:6667 (pass : none defined)
+[31/03/2026 02:23:49] [INFO] Connection nick: mbtest_6875
+[31/03/2026 02:23:49] [INFO] *** Checking Ident
+[31/03/2026 02:23:49] [INFO] *** Got ident response
+[31/03/2026 02:23:49] [INFO] on_login() Connected to irc server localhost
+[31/03/2026 02:23:49] [INFO] Checking timers to set at startup
+[31/03/2026 02:23:49] [INFO] No timer to set at startup
+[31/03/2026 02:23:49] [INFO] on_login() Setting user mode +i
+[31/03/2026 02:23:49] [INFO] Warning: no console channel found in database (description = 'console'). You may want to run configure script again.
+[31/03/2026 02:23:49] [INFO] Auto join channels
+[31/03/2026 02:23:49] [INFO] Trying to join #mbtest
+[31/03/2026 02:23:49] [INFO] 001 Welcome to the teuk.org IRC Network, mbtest_6875
+[31/03/2026 02:23:49] [INFO] 002 Your host is teuk.org, running version u2.10.12.19
+[31/03/2026 02:23:49] [INFO] 003 This server was created ven. 06 juin CEST at 2025 22:25:45
+[31/03/2026 02:23:49] [INFO] 004 server=mbtest_6875 version=teuk.org user_modes=u2.10.12.19 chan_modes=diOoswkgx
+[31/03/2026 02:23:49] [INFO] *** Checking Ident
+[31/03/2026 02:23:49] [INFO] *** Got ident response
+[31/03/2026 02:23:49] [INFO] on_login() Connected to irc server localhost
+[31/03/2026 02:23:49] [INFO] Checking timers to set at startup
+[31/03/2026 02:23:49] [INFO] No timer to set at startup
+[31/03/2026 02:23:49] [INFO] on_login() Setting user mode +i
+[31/03/2026 02:23:49] [INFO] Warning: no console channel found in database (description = 'console'). You may want to run configure script again.
+[31/03/2026 02:23:49] [INFO] Auto join channels
+[31/03/2026 02:23:49] [INFO] Trying to join #mbtest
+[31/03/2026 02:23:49] [INFO] 001 Welcome to the teuk.org IRC Network, mbtest_6875
+[31/03/2026 02:23:49] [INFO] 002 Your host is teuk.org, running version u2.10.12.19
+[31/03/2026 02:23:49] [INFO] 003 This server was created ven. 06 juin CEST at 2025 22:25:45
+[31/03/2026 02:23:49] [INFO] 004 server=mbtest_6875 version=teuk.org user_modes=u2.10.12.19 chan_modes=diOoswkgx
+[31/03/2026 02:23:49] [INFO] 005 WHOX WALLCHOPS WALLV[31/03/2026 02:23:49] [INFO] 005 WHOX WALLCHOPS WALLVOICES USERIP CPRIVMSG CNOTICE SILENCE=25 MODES=6 MAXCHANNELS=10 MAXBANS=100 NICKLEN=12 are supported by this server
+[31/03/2026 02:23:49] [INFO] 005 MAXNICKLEN=15 TOPICLEN=160 AWAYLEN=160 KICKLEN=160 CHANNELLEN=200 MAXCHANNELLEN=200 CHANTYPES=#& PREFIX=(ov)@+ STATUSMSG=@+ CHANMODES=b,k,l,imnpstrDdRcCPM CASEMAPPING=rfc1459 NETWORK=teuk.org are supported by this server
+[31/03/2026 02:23:49] [INFO] -teuk.org- Highest connection count: 12 (12 clients)
+[31/03/2026 02:23:49] [INFO] -teuk.org- on 1 ca 1(4) ft 10(10)
+[31/03/2026 02:23:49] [LIVE] mbtest_6875 sets mode +i
+[31/03/2026 02:23:51] [LIVE] * Now talking in #mbtest
+[31/03/2026 02:23:51] [LIVE] * Now talking in #mbtest
+[31/03/2026 02:23:51] [LIVE] #mbtest: <mbspy_6875> !date
+[31/03/2026 02:23:51] [LIVE] #mbtest:<mbtest_6875> America/New_York : Tuesday 31/03/2026 02:23:51
+[31/03/2026 02:23:54] [LIVE] #mbtest: <mbspy_6875> !leet hello
+[31/03/2026 02:23:54] [LIVE] #mbtest:<mbtest_6875> l33t(mbspy_6875) : h3||0
+OICES USERIP CPRIVMSG CNOTICE SILENCE=25 MODES=6 MAXCHANNELS=10 MAXBANS=100 NICKLEN=12 are supported by this server
+[31/03/2026 02:23:49] [INFO] 005 MAXNICKLEN=15 TOPICLEN=160 AWAYLEN=160 KICKLEN=160 CHANNELLEN=200 MAXCHANNELLEN=200 CHANTYPES=#& PREFIX=(ov)@+ STATUSMSG=@+ CHANMODES=b,k,l,imnpstrDdRcCPM CASEMAPPING=rfc1459 NETWORK=teuk.org are supported by this server
+[31/03/2026 02:23:49] [INFO] -teuk.org- Highest connection count: 12 (12 clients)
+[31/03/2026 02:23:49] [INFO] -teuk.org- on 1 ca 1(4) ft 10(10)
+[31/03/2026 02:23:49] [LIVE] mbtest_6875 sets mode +i
+[31/03/2026 02:23:51] [LIVE] * Now talking in #mbtest
+[31/03/2026 02:23:51] [LIVE] * Now talking in #mbtest
+[31/03/2026 02:23:51] [LIVE] #mbtest: <mbspy_6875> !date
+[31/03/2026 02:23:51] [LIVE] #mbtest:<mbtest_6875> America/New_York : Tuesday 31/03/2026 02:23:51
+[31/03/2026 02:23:54] [LIVE] #mbtest: <mbspy_6875> !leet hello
+[31/03/2026 02:23:54] [LIVE] #mbtest:<mbtest_6875> l33t(mbspy_6875) : h3||0
+[31/03/2026 02:23:55] [LIVE] #mbtest: <mbspy_6875> !c[31/03/2026 02:23:55] [LIVE] #mbtest: <mbspy_6875> !colors
+[31/03/2026 02:23:55] [INFO] -> -mbspy_6875- Syntax: colors <text>
+[31/03/2026 02:23:58] [LIVE] #mbtest: <mbspy_6875> !echo hello world
+[31/03/2026 02:23:58] [LIVE] #mbtest:<mbtest_6875> hello world
+[31/03/2026 02:24:00] [INFO] -> -mbspy_6875- Login successful as mboper (Level: Master)
+[31/03/2026 02:24:01] [LIVE] mbtest_6875: <mbspy_6875> status
+olors
+[31/03/2026 02:23:55] [INFO] -> -mbspy_6875- Syntax: colors <text>
+[31/03/2026 02:23:58] [LIVE] #mbtest: <mbspy_6875> !echo hello world
+[31/03/2026 02:23:58] [LIVE] #mbtest:<mbtest_6875> hello world
+[31/03/2026 02:24:00] [INFO] -> -mbspy_6875- Login successful as mboper (Level: Master)
+[31/03/2026 02:24:01] [LIVE] mbtest_6875: <mbspy_6875> status
+Use of uninitialized value $id_channel in concatenation (.) or string at
+	Mediabot/Helpers.pm line 239 (#1)
+    (W uninitialized) An undefined value was used as if it were already
+    defined.  It was interpreted as a "" or a 0, but maybe it was a mistake.
+    To suppress this warning assign a defined value to your variables.
+    
+    To help you figure out what was undefined, perl will try to tell you
+    the name of the variable (if any) that was undefined.  In some cases
+    it cannot do this, so it also tells you what operation you used the
+    undefined value in.  Note, however, that perl optimizes your program
+    and the operation displayed in the warning may not necessarily appear
+    literally in your program.  For example, "that $foo" is usually
+    optimized into "that " . $foo, and the warning will refer to the
+    concatenation (.) operator, even though there is no . in
+    your program.
+    
+[31/03/2026 02:24:01] [INFO] -> -mbspy_6875- Mediabot v3.0dev-20260329_133129 Uptime: 12s
+[31/03/2026 02:24:01] [INFO] -> -mbspy_6875- Memory usage (VM 92.78MB) (Resident 86.32MB) (Shared 10.73MB) (Data+Stack 75.13MB)
+[31/03/2026 02:24:01] [INFO] -> -mbspy_6875- Server: Linux teuk.org 6.19.6 #1 SMP PREEMPT_DYNAMIC Thu Mar 12 13:29:34 CET 2026 x86_64 GNU/Linux
+[31/03/2026 02:24:01] [INFO] -> -mbspy_6875- Server uptime:  02:24:01 up 18 days, 14:42,  4 users,  load average: 0,53, 0,53, 0,54
+[31/03/2026 02:24:03] [INFO] -> -mbspy_6875- Login successful as mboper (Level: Master)
+[31/03/2026 02:24:12] [LIVE] mbtest_6875: <mbspy_6875> ignores
+[31/03/2026 02:24:12] [INFO] -> -mbspy_6875- Ignores (allchans/private): none.
+[31/03/2026 02:24:13] [LIVE] mbtest_6875: <mbspy_6875> ignore *zzztest_ignore_live@*
+[31/03/2026 02:24:13] [INFO] -> -mbspy_6875- Syntax: ignore [#channel] <hostmask>
+[31/03/2026 02:24:13] [INFO] -> -mbspy_6875- Example: nick*!*ident@*.example.org
+[31/03/2026 02:24:01] [INFO] -> -mbspy_6875- Mediabot v3.0dev-20260329_133129 Uptime: 12s
+[31/03/2026 02:24:01] [INFO] -> -mbspy_6875- Memory usage (VM 92.78MB) (Resident 86.32MB) (Shared 10.73MB) (Data+Stack 75.13MB)
+[31/03/2026 02:24:01] [INFO] -> -mbspy_6875- Server: Linux teuk.org 6.19.6 #1 SMP PREEMPT_DYNAMIC Thu Mar 12 13:29:34 CET 2026 x86_64 GNU/Linux
+[31/03/2026 02:24:01] [INFO] -> -mbspy_6875- Server uptime:  02:24:01 up 18 days, 14:42,  4 users,  load average: 0,53, 0,53, 0,54
+[31/03/2026 02:24:03] [INFO] -> -mbspy_6875- Login successful as mboper (Level: Master)
+[31/03/2026 02:24:12] [LIVE] mbtest_6875: <mbspy_6875> ignores
+[31/03/2026 02:24:12] [INFO] -> -mbspy_6875- Ignores (allchans/private): none.
+[31/03/2026 02:24:13] [LIVE] mbtest_6875: <mbspy_6875> ignore *zzztest_ignore_live@*
+[31/03/2026 02:24:13] [INFO] -> -mbspy_6875- Syntax: ignore [#channel] <hostmask>
+[31/03/2026 02:24:13] [INFO] -> -mbspy_6875- Example: nick*!*ident@*.example.org
+[31/03/2026 02:24:16] [LIVE] mbtest_6875: <mbspy_6875[31/03/2026 02:24:16] [LIVE] mbtest_6875: <mbspy_6875> ignores
+[31/03/2026 02:24:16] [INFO] -> -mbspy_6875- Ignores (allchans/private): none.
+[31/03/2026 02:24:32] [LIVE] mbtest_6875: <mbspy_6875> unignore *zzztest_ignore_live@*
+[31/03/2026 02:24:32] [INFO] -> -mbspy_6875- Syntax: unignore [#channel] <hostmask>
+[31/03/2026 02:24:32] [INFO] -> -mbspy_6875- Example: nick*!*ident@*.example.org
+[31/03/2026 02:24:33] [LIVE] #mbtest: <mbspy_6875> !yomomma
+[31/03/2026 02:24:33] [LIVE] #mbtest:<mbtest_6875> Not found
+[31/03/2026 02:24:34] [LIVE] mbtest_6875: <mbspy_6875> timers
+[31/03/2026 02:24:34] [INFO] -> -mbspy_6875- Your level does not allow you to use this command.
+[31/03/2026 02:24:35] [LIVE] #mbtest: <mbspy_6875> !check
+[31/03/2026 02:24:35] [LIVE] #mbtest:<mbtest_6875> I'm fine Houston, over.
+[31/03/2026 02:24:35] [INFO] -> -mbspy_6875- Login successful as mboper (Level: Master)
+[31/03/2026 02:24:36] [LIVE] #mbtest: <mbspy_6875> !addcmd zzztest_cmd_live message general Test command live
+> ignores
+[31/03/2026 02:24:16] [INFO] -> -mbspy_6875- Ignores (allchans/private): none.
+[31/03/2026 02:24:32] [LIVE] mbtest_6875: <mbspy_6875> unignore *zzztest_ignore_live@*
+[31/03/2026 02:24:32] [INFO] -> -mbspy_6875- Syntax: unignore [#channel] <hostmask>
+[31/03/2026 02:24:32] [INFO] -> -mbspy_6875- Example: nick*!*ident@*.example.org
+[31/03/2026 02:24:33] [LIVE] #mbtest: <mbspy_6875> !yomomma
+[31/03/2026 02:24:33] [LIVE] #mbtest:<mbtest_6875> Not found
+[31/03/2026 02:24:34] [LIVE] mbtest_6875: <mbspy_6875> timers
+[31/03/2026 02:24:34] [INFO] -> -mbspy_6875- Your level does not allow you to use this command.
+[31/03/2026 02:24:35] [LIVE] #mbtest: <mbspy_6875> !check
+[31/03/2026 02:24:35] [LIVE] #mbtest:<mbtest_6875> I'm fine Houston, over.
+[31/03/2026 02:24:35] [INFO] -> -mbspy_6875- Login successful as mboper (Level: Master)
+[31/03/2026 02:24:36] [LIVE] #mbtest: <mbspy_6875> !addcmd zzztest_cmd_live message general Test command live
+[31/03/2026 02:24:36] [INFO] -> -mbspy_6875- Adding command zzztest_cmd_l[31/03/2026 02:24:36] [INFO] -> -mbspy_6875- Adding command zzztest_cmd_live [message] Test command live
+[31/03/2026 02:24:36] [INFO] -> -mbspy_6875- Command zzztest_cmd_live added
+[31/03/2026 02:24:37] [LIVE] #mbtest: <mbspy_6875> !zzztest_cmd_live
+[31/03/2026 02:24:37] [LIVE] #mbtest:<mbtest_6875> Test command live
+[31/03/2026 02:24:41] [LIVE] #mbtest: <mbspy_6875> !showcmd zzztest_cmd_live
+[31/03/2026 02:24:41] [INFO] -> -mbspy_6875- Command : zzztest_cmd_live Author : mboper Created : 2026-03-31 08:24:36
+[31/03/2026 02:24:41] [INFO] -> -mbspy_6875- 1 hit Category : general Action : PRIVMSG %c Test command live
+[31/03/2026 02:24:42] [LIVE] #mbtest: <mbspy_6875> !countcmd
+[31/03/2026 02:24:42] [LIVE] #mbtest:<mbtest_6875> 2 Commands in database: (general 1) (test 1)
+[31/03/2026 02:24:44] [LIVE] #mbtest: <mbspy_6875> !topcmd
+[31/03/2026 02:24:44] [LIVE] #mbtest:<mbtest_6875> Top commands: 1) check(1) | 2) zzztest_cmd_live(1)
+[31/03/2026 02:24:46] [LIVE] #mbtest: <mbspy_6875> !searchcmd zzztest_cmd_live
+[31/03/2026 02:24:46] [INFO] -> -mbspy_6875- Internal error (SQL).
+ive [message] Test command live
+[31/03/2026 02:24:36] [INFO] -> -mbspy_6875- Command zzztest_cmd_live added
+[31/03/2026 02:24:37] [LIVE] #mbtest: <mbspy_6875> !zzztest_cmd_live
+[31/03/2026 02:24:37] [LIVE] #mbtest:<mbtest_6875> Test command live
+[31/03/2026 02:24:41] [LIVE] #mbtest: <mbspy_6875> !showcmd zzztest_cmd_live
+[31/03/2026 02:24:41] [INFO] -> -mbspy_6875- Command : zzztest_cmd_live Author : mboper Created : 2026-03-31 08:24:36
+[31/03/2026 02:24:41] [INFO] -> -mbspy_6875- 1 hit Category : general Action : PRIVMSG %c Test command live
+[31/03/2026 02:24:42] [LIVE] #mbtest: <mbspy_6875> !countcmd
+[31/03/2026 02:24:42] [LIVE] #mbtest:<mbtest_6875> 2 Commands in database: (general 1) (test 1)
+[31/03/2026 02:24:44] [LIVE] #mbtest: <mbspy_6875> !topcmd
+[31/03/2026 02:24:44] [LIVE] #mbtest:<mbtest_6875> Top commands: 1) check(1) | 2) zzztest_cmd_live(1)
+[31/03/2026 02:24:46] [LIVE] #mbtest: <mbspy_6875> !searchcmd zzztest_cmd_live
+[31/03/2026 02:24:46] [INFO] -> -mbspy_6875- Internal error (SQL).
+[31/03/2026[31/03/2026 02:24:48] [LIVE] #mbtest: <mbspy_6875> !delcmd zzztest_cmd_live
+[31/03/2026 02:24:49] [INFO] Received SIGTERM (Ctrl+C). Initiating clean shutdown.
+[31/03/2026 02:24:49] [INFO] Cleaning and exiting...
+ 02:24:48] [LIVE] #mbtest: <mbspy_6875> !delcmd zzztest_cmd_live
+[31/03/2026 02:24:49] [INFO] Received SIGTERM (Ctrl+C). Initiating clean shutdown.
+[31/03/2026 02:24:49] [INFO] Cleaning and exiting...

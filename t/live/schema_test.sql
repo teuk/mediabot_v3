@@ -228,23 +228,32 @@ CREATE TABLE `TIMEZONE` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
 
 CREATE TABLE `USER` (
-  `id_user` bigint(20) NOT NULL AUTO_INCREMENT,
-  `creation_date` timestamp NOT NULL DEFAULT current_timestamp(),
-  `hostmasks` varchar(255) CHARACTER SET latin1 NOT NULL DEFAULT '',
-  `nickname` varchar(255) CHARACTER SET latin1 NOT NULL DEFAULT '',
-  `password` varchar(255) CHARACTER SET latin1 DEFAULT NULL,
-  `username` varchar(255) CHARACTER SET latin1 DEFAULT NULL,
-  `id_user_level` bigint(20) NOT NULL,
-  `info1` varchar(255) CHARACTER SET latin1 DEFAULT NULL,
-  `info2` varchar(255) CHARACTER SET latin1 DEFAULT NULL,
-  `last_login` timestamp NULL DEFAULT NULL,
-  `auth` int(11) NOT NULL DEFAULT 0,
-  `tz` varchar(255) DEFAULT NULL,
-  `birthday` varchar(255) DEFAULT NULL,
-  `fortniteid` varchar(255) DEFAULT NULL,
+  `id_user` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `creation_date` datetime NOT NULL DEFAULT current_timestamp(),
+  `nickname`   VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `password`   VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `username`   VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `id_user_level` BIGINT UNSIGNED NOT NULL,
+  `info1`      VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `info2`      VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `last_login` datetime NULL DEFAULT NULL,
+  `auth`       TINYINT(1) NOT NULL DEFAULT 0,
+  `tz`         VARCHAR(255) DEFAULT NULL,
+  `birthday`   VARCHAR(255) DEFAULT NULL,
+  `fortniteid` VARCHAR(255) DEFAULT NULL,
   PRIMARY KEY (`id_user`),
   UNIQUE KEY `nickname` (`nickname`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `USER_HOSTMASK` (
+  `id_user_hostmask` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_user`          BIGINT UNSIGNED NOT NULL,
+  `hostmask`         VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at`       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_user_hostmask`),
+  KEY `idx_user_hostmask_id_user`  (`id_user`),
+  KEY `idx_user_hostmask_hostmask` (`hostmask`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `USER_CHANNEL` (
   `id_user_channel` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -280,6 +289,13 @@ CREATE TABLE `YOMOMMA` (
   `yomomma` varchar(255) NOT NULL,
   PRIMARY KEY (`id_yomomma`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+-- Catégorie de base pour les tests
+INSERT INTO `PUBLIC_COMMANDS_CATEGORY` (`id_public_commands_category`, `description`) VALUES (1, 'test'),
+(2, 'general');
+
+INSERT INTO `PUBLIC_COMMANDS` (`id_public_commands`, `id_user`, `id_public_commands_category`, `command`, `description`, `action`, `hits`) VALUES
+(1, 1, 1, 'check', 'check', 'PRIVMSG %c I\'m fine Houston, over.', 0);
+
 
 -- ---------------------------------------------------------------------------
 -- Données de référence — nécessaires au fonctionnement du bot
@@ -321,8 +337,9 @@ INSERT INTO `CHANNEL` (`id_channel`, `name`, `auto_join`) VALUES
 
 -- Utilisateur Owner de test (autologin, hostmask wildcard pour les tests)
 -- Le nick sera remplacé dynamiquement par test_live.pl
-INSERT INTO `USER` (`id_user`, `hostmasks`, `nickname`, `password`, `username`, `id_user_level`, `auth`) VALUES
-(1, '*mbtest@*', 'mbtest', NULL, '#AUTOLOGIN#', 1, 0);
+INSERT INTO `USER` (`id_user`, `nickname`, `password`, `username`, `id_user_level`, `auth`) VALUES
+(1, 'mbtest', NULL, '#AUTOLOGIN#', 1, 0);
+INSERT INTO `USER_HOSTMASK` (`id_user`, `hostmask`) VALUES (1, '*mbtest@*');
 
 -- Membership du bot sur le canal de test
 INSERT INTO `USER_CHANNEL` (`id_user_channel`, `id_user`, `id_channel`, `level`, `automode`) VALUES
@@ -330,8 +347,9 @@ INSERT INTO `USER_CHANNEL` (`id_user_channel`, `id_user`, `id_channel`, `level`,
 
 -- Utilisateur Master de test pour les tests d'authentification par password
 -- password = 'testpass123' (hashé via MariaDB PASSWORD())
-INSERT INTO `USER` (`id_user`, `hostmasks`, `nickname`, `password`, `username`, `id_user_level`, `auth`) VALUES
-(2, 'mbspy*!*@*', 'mboper', PASSWORD('testpass123'), 'mboper', 2, 0);
+INSERT INTO `USER` (`id_user`, `nickname`, `password`, `username`, `id_user_level`, `auth`) VALUES
+(2, 'mboper', PASSWORD('testpass123'), 'mboper', 2, 0);
+INSERT INTO `USER_HOSTMASK` (`id_user`, `hostmask`) VALUES (2, 'mbspy*!*@*');
 
 -- Membership de mboper sur le canal de test (level Master)
 INSERT INTO `USER_CHANNEL` (`id_user_channel`, `id_user`, `id_channel`, `level`, `automode`) VALUES

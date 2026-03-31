@@ -34,6 +34,8 @@ use Time::HiRes qw(sleep time);
 # ---------------------------------------------------------------------------
 my $opt_verbose      = 0;
 my $opt_filter       = '';
+my $opt_from         = 0;   # lancer à partir du test N (inclus)
+my $opt_to           = 999; # jusqu'au test N (inclus)
 my $opt_server       = 'irc.libera.chat';
 my $opt_port         = 6667;
 my $opt_channel      = '##mbtest';
@@ -62,6 +64,8 @@ GetOptions(
     'dbuser=s'     => \$opt_dbuser,
     'dbpass=s'     => \$opt_dbpass,
     'keep-db'      => \$opt_keep_db,
+    'from=i'       => \$opt_from,
+    'to=i'         => \$opt_to,
 ) or die usage();
 
 sub usage {
@@ -87,6 +91,8 @@ Usage: perl t/test_live.pl [options]
   Général:
     --verbose, -v          Afficher chaque test [OK]/[FAIL]
     --filter,  -f <pat>    Lancer uniquement les .t matching <pat>
+    --from        <N>     Lancer à partir du test N (ex: --from 10)
+    --to          <N>     Lancer jusqu'au test N (ex: --to 12)
 
 END
 }
@@ -239,13 +245,23 @@ sub wait_for {
     my ($self, $pattern, $timeout) = @_;
     $timeout //= 30;
     my $deadline = main::time() + $timeout;
+    my @received;
     while (main::time() < $deadline) {
         my $remaining = $deadline - main::time();
         last if $remaining <= 0;
         my $line = $self->read_line($remaining > 1 ? 1 : $remaining);
         next unless defined $line;
         print "  [SPY RECV] $line\n" if $main::opt_verbose;
+        push @received, $line;
         return $line if $line =~ $pattern;
+    }
+    # Timeout : afficher les lignes reçues pour debug même sans --verbose
+    if (!$main::opt_verbose && @received) {
+        print "  [DEBUG] Timeout - lignes reçues :\n";
+        my @tail = @received > 3 ? @received[-3..-1] : @received;
+        print "    $_\n" for @tail;
+    } elsif (!@received) {
+        print "  [DEBUG] Timeout - aucune ligne reçue du bot\n";
     }
     return undef;
 }
@@ -418,7 +434,22 @@ $spy->connect;
 my $welcomed = $spy->wait_for(qr/^:.*001 \Q$opt_spynick\E/, 30);
 die "ERROR: Spy client did not receive IRC welcome (001). Server issue?\n"
     unless $welcomed;
-print "  Spy connected.\n";
+
+# Absorber les messages initiaux (MOTD, MODE, etc.) et traiter les nick conflicts
+my $nick_final = $opt_spynick;
+{
+    my $dl = time() + 5;
+    while (time() < $dl) {
+        my $line = $spy->read_line(1);
+        last unless defined $line;
+        # Nick already in use → ajouter un suffix
+        if ($line =~ /433/) {
+            $nick_final .= '_';
+            $spy->send_raw("NICK $nick_final");
+        }
+    }
+}
+print "  Spy connected (nick=$nick_final).\n";
 
 $spy->join_channel;
 my $spy_joined = $spy->wait_for(qr/JOIN.*\Q$opt_channel\E/i, 15);
@@ -429,7 +460,11 @@ print "  Spy joined $opt_channel.\n";
 # Étape 6 : lancer le bot en subprocess
 # ---------------------------------------------------------------------------
 print "[ Starting bot subprocess ($opt_botnick) ]\n";
-unlink $log_file if -f $log_file;
+# Conserver le bot.log précédent avec timestamp pour debug
+if (-f $log_file) {
+    my $ts = time();
+    rename($log_file, "$log_file.$ts") or unlink $log_file;
+}
 
 my $bot_pid = fork;
 die "ERROR: fork failed: $!\n" unless defined $bot_pid;
@@ -477,10 +512,20 @@ my $send_private = sub {
     $spy->privmsg($opt_botnick, "$cmd");  # Pas de cmdchar en PRIVMSG prive
 };
 
-my @test_files = sort grep {
+my @test_files_raw = sort grep {
     my $name = basename($_);
-    !$opt_filter || $name =~ /\Q$opt_filter\E/
+    my ($num) = $name =~ /^(\d+)/;
+    $num //= 0;
+    my $num_ok  = ($num >= $opt_from && $num <= $opt_to);
+    my $filt_ok = (!$opt_filter || $name =~ /\Q$opt_filter\E/);
+    $num_ok && $filt_ok;
 } glob("$cases_dir/*.t");
+
+# Always run die_last files last, regardless of their number prefix
+my @test_files = (
+    grep { basename($_) !~ /die_last/i } @test_files_raw,
+    grep { basename($_) =~ /die_last/i  } @test_files_raw,
+);
 
 if (!@test_files) {
     print "No test files found in $cases_dir/\n";
@@ -496,6 +541,14 @@ if (!@test_files) {
         my $name = basename($file);
         print "\n[ $name ]\n";
 
+        # Check bot is still alive before running the test
+        # (except die_last which intentionally kills the bot)
+        if ($name !~ /die_last/i && $bot_pid && !kill(0, $bot_pid)) {
+            print "  [SKIP] Bot process is gone — skipping remaining tests.\n";
+            $assert->fail("$name: bot mort avant ce test");
+            last;
+        }
+
         my $code = do $file;
         if ($@) {
             print "  ERREUR de chargement : $@\n";
@@ -503,9 +556,28 @@ if (!@test_files) {
             next;
         }
         if (ref $code eq 'CODE') {
+            my $before = $assert->failed;
+            # drain: vider le buffer IRC (absorber lignes résiduelles)
+            my $drain = sub {
+                my $n = shift // 10;
+                $spy->read_line(0.3) for 1..$n;
+            };
             $code->($assert, $spy, $send_cmd, $send_private, $wait_reply,
                     $opt_botnick, $opt_spynick, $opt_channel, $opt_cmdchar,
-                    'mboper', 'testpass123');  # loginuser, loginpass
+                    'mboper', 'testpass123',  # loginuser, loginpass
+                    $drain);
+            # Si le bot est mort, afficher les dernières lignes du log
+            if ($bot_pid && !kill(0, $bot_pid)) {
+                print "  [WARN] Bot process died during this test file\n";
+                if (-f $log_file) {
+                    open(my $lf, '<', $log_file) or last;
+                    my @lines = <$lf>;
+                    close $lf;
+                    my @tail = @lines > 20 ? @lines[-20..-1] : @lines;
+                    print "  [BOT LOG - last lines]:\n";
+                    print "    $_" for @tail;
+                }
+            }
         } else {
             print "  (pas de sous-routine retournée, skip)\n";
         }
