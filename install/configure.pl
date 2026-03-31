@@ -330,7 +330,7 @@ sub log_message(@) {
 
 sub dbConnect(@) {
 	my ($dbname,$dbhost,$dbport,$dbuser,$dbpasswd) = @_;
-	my $connectionInfo="DBI:mysql:database=$dbname;$dbhost:$dbport";   # Database connection string
+	my $connectionInfo="DBI:MariaDB:database=$dbname;$dbhost:$dbport";   # Database connection string
 	my $dbh;                                                   				 # Database handle
 	
 	unless ( $dbh = DBI->connect($connectionInfo,$dbuser,$dbpasswd) ) {

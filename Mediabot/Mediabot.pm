@@ -366,7 +366,7 @@ sub dbConnect(@) {
     my $dbuser = $conf->get('mysql.MAIN_PROG_DBUSER');
     my $dbpass = $conf->get('mysql.MAIN_PROG_DBPASS');
 
-    my $connectionInfo = "DBI:mysql:database=$dbname;host=$dbhost;port=$dbport";
+    my $connectionInfo = "DBI:MariaDB:database=$dbname;host=$dbhost;port=$dbport";
 
     $self->{logger}->log( 1, "dbConnect() Connecting to Database: $dbname");
 

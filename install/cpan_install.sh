@@ -82,7 +82,6 @@ Config::Simple
 Data::Dumper
 Date::Parse
 DBI
-DBD::MariaDB
 Switch
 Memory::Usage
 String::IRC
@@ -99,7 +98,7 @@ Twitter::API
 JSON::MaybeXS
 List::Util
 File::Temp
-HTTP::Tiny0" | while read perl_module
+HTTP::Tiny" | while read perl_module
  do
   message "Checking $perl_module "
   perl -M$perl_module -e "exit 0;" &>/dev/null
@@ -111,16 +110,6 @@ HTTP::Tiny0" | while read perl_module
 		echo "OK"
 	fi
  done
-
-messageln "Installing DBD::mysql manually "
-wget "https://cpan.metacpan.org/authors/id/D/DV/DVEEDEN/DBD-mysql-4.050.tar.gz"
-tar xzf DBD-mysql-4.050.tar.gz
-chown -R mediabot: DBD-mysql-4.050
-cd DBD-mysql-4.050
-perl Makefile.PL
-make
-make install
-
 
 messageln "Installing Hailo manually (ignore previous error for this  module)"
 wget https://cpan.metacpan.org/authors/id/A/AV/AVAR/Hailo-0.75.tar.gz
@@ -145,7 +134,6 @@ Config::Simple
 Data::Dumper
 Date::Parse
 DBI
-DBD::MariaDB
 Switch
 Memory::Usage
 String::IRC
