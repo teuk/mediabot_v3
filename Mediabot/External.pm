@@ -9,7 +9,6 @@ use warnings;
 use POSIX qw(strftime);
 use List::Util qw(min);
 use Exporter 'import';
-use Data::Dumper;
 use Encode qw(encode);
 use Try::Tiny;
 use Mediabot::Helpers;
@@ -59,7 +58,7 @@ sub getYoutubeDetails(@) {
 		$sYoutubeId = substr($sYoutubeId,0,11);
 	}
 	if (defined($sYoutubeId) && ( $sYoutubeId ne "" )) {
-		$self->{logger}->log(3,"getYoutubeDetails() sYoutubeId = $sYoutubeId");
+		$self->{logger}->log(4,"getYoutubeDetails() sYoutubeId = $sYoutubeId");
 		my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
 		unless (defined($APIKEY) && ($APIKEY ne "")) {
 			$self->{logger}->log(0,"getYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
@@ -94,11 +93,11 @@ sub getYoutubeDetails(@) {
 				# Check items
 				if ( $#fTyoutubeItems >= 0 ) {
 					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
-					$self->{logger}->log(4,"getYoutubeDetails() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
+					$self->{logger}->log(4,"getYoutubeDetails() title=" . ($hYoutubeItems{snippet}{localized}{title} // "?") . " duration=" . ($hYoutubeItems{contentDetails}{duration} // "?"));
 					$sViewCount = "views $hYoutubeItems{'statistics'}{'viewCount'}";
 					my $sTitleItem = $hYoutubeItems{'snippet'}{'localized'}{'title'};
 					$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
-					$self->{logger}->log(3,"getYoutubeDetails() sDuration : $sDuration");
+					$self->{logger}->log(4,"getYoutubeDetails() sDuration : $sDuration");
 					$sDuration =~ s/^PT//;
 					my $sDisplayDuration;
 					my $sHour = $sDuration;
@@ -122,9 +121,9 @@ sub getYoutubeDetails(@) {
 						$sDisplayDuration .= "$sSec" . "s";
 						$sDururationSeconds += $sSec;
 					}
-					$self->{logger}->log(3,"getYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
-					$self->{logger}->log(3,"getYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
-					$self->{logger}->log(3,"getYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
+					$self->{logger}->log(4,"getYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
+					$self->{logger}->log(4,"getYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
+					$self->{logger}->log(4,"getYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
 					
 					if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
 						my $sMsgSong .= String::IRC->new('You')->black('white');
@@ -139,25 +138,25 @@ sub getYoutubeDetails(@) {
 						return($sDururationSeconds,$sMsgSong);
 					}
 					else {
-						$self->{logger}->log(3,"getYoutubeDetails() one of the youtube field is undef or empty");
+						$self->{logger}->log(4,"getYoutubeDetails() one of the youtube field is undef or empty");
 						if (defined($sTitle)) {
-							$self->{logger}->log(3,"getYoutubeDetails() sTitle=$sTitle");
+							$self->{logger}->log(4,"getYoutubeDetails() sTitle=$sTitle");
 						}
 						else {
-							$self->{logger}->log(3,"getYoutubeDetails() sTitle is undefined");
+							$self->{logger}->log(4,"getYoutubeDetails() sTitle is undefined");
 						}
 						
 						if (defined($sDuration)) {
-							$self->{logger}->log(3,"getYoutubeDetails() sDuration=$sDuration");
+							$self->{logger}->log(4,"getYoutubeDetails() sDuration=$sDuration");
 						}
 						else {
 							$self->{logger}->log(3,"getYoutubeDetails() sDuration is undefined");
 						}
 						if (defined($sViewCount)) {
-							$self->{logger}->log(3,"getYoutubeDetails() sViewCount=$sViewCount");
+							$self->{logger}->log(4,"getYoutubeDetails() sViewCount=$sViewCount");
 						}
 						else {
-							$self->{logger}->log(3,"getYoutubeDetails() sViewCount is undefined");
+							$self->{logger}->log(4,"getYoutubeDetails() sViewCount is undefined");
 						}
 					}
 				}
@@ -199,7 +198,7 @@ sub displayYoutubeDetails(@) {
         return undef;
     }
 
-    $self->{logger}->log(3, "displayYoutubeDetails() sYoutubeId = $sYoutubeId");
+    $self->{logger}->log(4, "displayYoutubeDetails() sYoutubeId = $sYoutubeId");
 
     my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
     unless (defined($APIKEY) && $APIKEY ne '') {
@@ -248,10 +247,10 @@ sub displayYoutubeDetails(@) {
     my $schannelTitle = $item->{snippet}{channelTitle}     // '';
     my $sDuration    = $item->{contentDetails}{duration}   // '';
 
-    $self->{logger}->log(3, "displayYoutubeDetails() sDuration : $sDuration");
-    $self->{logger}->log(3, "displayYoutubeDetails() sViewCount : $sViewCount");
-    $self->{logger}->log(3, "displayYoutubeDetails() sTitle : $sTitle");
-    $self->{logger}->log(3, "displayYoutubeDetails() schannelTitle : $schannelTitle");
+    $self->{logger}->log(4, "displayYoutubeDetails() sDuration : $sDuration");
+    $self->{logger}->log(4, "displayYoutubeDetails() sViewCount : $sViewCount");
+    $self->{logger}->log(4, "displayYoutubeDetails() sTitle : $sTitle");
+    $self->{logger}->log(4, "displayYoutubeDetails() schannelTitle : $schannelTitle");
 
     unless ($sTitle ne '' && $sDuration ne '' && $sViewCount ne '') {
         $self->{logger}->log(3, "displayYoutubeDetails() one of the youtube field is undef or empty");
@@ -267,7 +266,7 @@ sub displayYoutubeDetails(@) {
     if ($raw =~ /(\d+)S/) { $sDisplayDuration .= "${1}s"; }
     $sDisplayDuration =~ s/\s+$//;
 
-    $self->{logger}->log(3, "displayYoutubeDetails() sDisplayDuration : $sDisplayDuration");
+    $self->{logger}->log(4, "displayYoutubeDetails() sDisplayDuration : $sDisplayDuration");
 
     # --- Normalisation des majuscules excessives ---
     if (($sTitle        =~ tr/A-Z//) > 20) { $sTitle        = ucfirst(lc($sTitle)); }
@@ -408,12 +407,12 @@ sub displayWeather_ctx {
 sub displayUrlTitle(@) {
     my ($self, $message, $sNick, $sChannel, $sText) = @_;
 
-    $self->{logger}->log(3, "displayUrlTitle() RAW input: $sText");
+    $self->{logger}->log(4, "displayUrlTitle() RAW input: $sText");
 
     # Extraction stricte de l'URL
     $sText =~ s/^.*http/http/;
     $sText =~ s/\s+.*$//;
-    $self->{logger}->log(3, "displayUrlTitle() URL extracted: $sText");
+    $self->{logger}->log(4, "displayUrlTitle() URL extracted: $sText");
 
     my $UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0";
     my $http = HTTP::Tiny->new(
@@ -436,7 +435,7 @@ sub displayUrlTitle(@) {
     # --- Twitter special prank ---
     if (($sText =~ /x\.com/ || $sText =~ /twitter\.com/)
         && ($sNick =~ /^\[k\]$/ || $sNick =~ /^NHI$/ || $sNick =~ /^PersianYeti$/)) {
-        $self->{logger}->log(3, "displayUrlTitle() Twitter URL = $sText");
+        $self->{logger}->log(4, "displayUrlTitle() Twitter URL = $sText");
         return undef;
     }
 
@@ -505,7 +504,7 @@ sub displayUrlTitle(@) {
             $artist =~ s/ \| Spotify//;
             my $song = $sDisplayMsg;
             $song =~ s/ - song and lyrics by.*$//;
-            $self->{logger}->log(3, "displayUrlTitle() artist=$artist song=$song");
+            $self->{logger}->log(4, "displayUrlTitle() artist=$artist song=$song");
             my $sTextIrc = String::IRC->new("[")->white('black');
             $sTextIrc .= String::IRC->new("Spotify")->black('green');
             $sTextIrc .= String::IRC->new("]")->white('black');
@@ -916,7 +915,7 @@ sub chatGPT(@) {
     # payload preparation
     # --------------------------------------------------------------
     my $prompt = join ' ', @args;
-    $self->{logger}->log(3,"chatGPT() chatGPT prompt: $prompt");
+    $self->{logger}->log(4,"chatGPT() chatGPT prompt: $prompt");
 
     my $json = encode_json {
         model       => CHATGPT_MODEL,
@@ -1001,7 +1000,7 @@ sub chatGPT(@) {
         botPrivmsg($self,$chan,$chunk[$i]);
         usleep(CHATGPT_SLEEP_US);
     }
-    $self->{logger}->log(3,"chatGPT() sent ".($last+1)." PRIVMSG");
+    $self->{logger}->log(4,"chatGPT() sent ".($last+1)." PRIVMSG");
 }
 
 # ------------------------------------------------------------------
@@ -1061,7 +1060,7 @@ sub mbTMDBSearch_ctx {
 
     my $query = join(" ", @tArgs);
     my $lang  = getTMDBLangChannel($self, $channel) || 'en';
-    $self->{logger}->log(3, "mbTMDBSearch_ctx() tmdb_lang for $channel is $lang");
+    $self->{logger}->log(4, "mbTMDBSearch_ctx() tmdb_lang for $channel is $lang");
 
     my $info = get_tmdb_info($api_key, $lang, $query);
     unless ($info) {

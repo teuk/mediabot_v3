@@ -17,7 +17,6 @@ use warnings;
 use Exporter 'import';
 use URI::Escape qw(uri_escape);
 use JSON::MaybeXS;
-use Data::Dumper;
 use Try::Tiny;
 use Socket;
 use POSIX qw(strftime);
@@ -232,17 +231,17 @@ sub getIdUser(@) {
 sub noticeConsoleChan {
     my ($self, $sMsg) = @_;
 
-    $self->{logger}->log(3, "📢 noticeConsoleChan() called with message: $sMsg");
+    $self->{logger}->log(4, "📢 noticeConsoleChan() called with message: $sMsg");
 
     my ($id_channel, $name, $chanmode, $key) = getConsoleChan($self);
 
-    $self->{logger}->log(3, "ℹ️ getConsoleChan() returned: id_channel=$id_channel, name=" . 
+    $self->{logger}->log(4, "ℹ️ getConsoleChan() returned: id_channel=$id_channel, name=" . 
         (defined $name ? $name : 'undef') . ", mode=" . 
         (defined $chanmode ? $chanmode : 'undef') . ", key=" . 
         (defined $key ? $key : 'undef'));
 
     if (defined $name && $name ne '') {
-        $self->{logger}->log(3, "✅ Sending notice to console channel: $name");
+        $self->{logger}->log(4, "✅ Sending notice to console channel: $name");
         botNotice($self, $name, $sMsg);
     } else {
         $self->{logger}->log(1, "⚠️ No console channel defined! Run ./configure to set up the bot.");
@@ -294,7 +293,7 @@ sub logBot {
     $log_msg .= " on $channel"  if defined $channel;
 
     $self->noticeConsoleChan($log_msg);
-    $self->{logger}->log(3, "logBot() $log_msg");
+    $self->{logger}->log(4, "logBot() $log_msg");
 
     $sth->finish;
 }
@@ -319,7 +318,7 @@ sub botPrivmsg {
             $self->{logger}->log(4, "botPrivmsg() check chanset NoColors, id_chanset_list = $id_chanset_list");
             my $id_channel_set = getIdChannelSet($self, $sTo, $id_chanset_list);
             if (defined($id_channel_set) && $id_channel_set ne "") {
-                $self->{logger}->log(3, "botPrivmsg() channel $sTo has chanset +NoColors");
+                $self->{logger}->log(4, "botPrivmsg() channel $sTo has chanset +NoColors");
                 $sMsg =~ s/\cC\d{1,2}(?:,\d{1,2})?|[\cC\cB\cI\cU\cR\cO]//g;
             }
         }
@@ -330,7 +329,7 @@ sub botPrivmsg {
             $self->{logger}->log(4, "botPrivmsg() check chanset AntiFlood, id_chanset_list = $id_chanset_list");
             my $id_channel_set = getIdChannelSet($self, $sTo, $id_chanset_list);
             if (defined($id_channel_set) && $id_channel_set ne "") {
-                $self->{logger}->log(3, "botPrivmsg() channel $sTo has chanset +AntiFlood");
+                $self->{logger}->log(4, "botPrivmsg() channel $sTo has chanset +AntiFlood");
                 return undef if checkAntiFlood($self, $sTo);  # Already refactored
             }
         }
@@ -391,7 +390,7 @@ sub botAction(@) {
 					$self->{logger}->log(4,"botAction() check chanset NoColors, id_chanset_list = $id_chanset_list");
 					my $id_channel_set = getIdChannelSet($self,$sTo,$id_chanset_list);
 					if (defined($id_channel_set) && ($id_channel_set ne "")) {
-						$self->{logger}->log(3,"botAction() channel $sTo has chanset +NoColors");
+						$self->{logger}->log(4,"botAction() channel $sTo has chanset +NoColors");
 						$sMsg =~ s/\cC\d{1,2}(?:,\d{1,2})?|[\cC\cB\cI\cU\cR\cO]//g;
 					}
 				}
@@ -400,7 +399,7 @@ sub botAction(@) {
 					$self->{logger}->log(4,"botAction() check chanset AntiFlood, id_chanset_list = $id_chanset_list");
 					my $id_channel_set = getIdChannelSet($self,$sTo,$id_chanset_list);
 					if (defined($id_channel_set) && ($id_channel_set ne "")) {
-						$self->{logger}->log(3,"botAction() channel $sTo has chanset +AntiFlood");
+						$self->{logger}->log(4,"botAction() channel $sTo has chanset +AntiFlood");
 						if (checkAntiFlood($self,$sTo)) {
 							return undef;
 						}
@@ -458,15 +457,15 @@ sub botNotice {
 
     # Sanity check: both target and message must be defined and non-empty
     unless (defined $target && $target ne '') {
-        $self->{logger}->log(3, "[DEBUG] botNotice() aborted: target is undefined or empty");
+        $self->{logger}->log(4, "[DEBUG] botNotice() aborted: target is undefined or empty");
         return;
     }
     unless (defined $text && $text ne '') {
-        $self->{logger}->log(3, "[DEBUG] botNotice() aborted: text is undefined or empty");
+        $self->{logger}->log(4, "[DEBUG] botNotice() aborted: text is undefined or empty");
         return;
     }
 
-    $self->{logger}->log(3, "[DEBUG] botNotice() called with target='$target', text='$text'");
+    $self->{logger}->log(4, "[DEBUG] botNotice() called with target='$target', text='$text'");
 
     # Nettoyer les retours à la ligne
     $text =~ s/[\r\n]+/ /g;
@@ -515,7 +514,7 @@ sub joinChannel(@) {
 # Join channels with auto_join enabled, except console
 sub checkUserLevel(@) {
 	my ($self,$iUserLevel,$sLevelRequired) = @_;
-	$self->{logger}->log(3,"isUserLevel() $iUserLevel vs $sLevelRequired");
+	$self->{logger}->log(4,"isUserLevel() $iUserLevel vs $sLevelRequired");
 	my $sQuery = "SELECT level FROM USER_LEVEL WHERE description like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sLevelRequired)) {
@@ -550,7 +549,7 @@ sub userCount(@) {
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {
-			$self->{logger}->log(3,"userCount() " . $ref->{'nbUser'});
+			$self->{logger}->log(4,"userCount() " . $ref->{'nbUser'});
 			my $nbUser = $ref->{'nbUser'};
 			$sth->finish;
 			return($nbUser);
@@ -646,7 +645,7 @@ sub partChannel {
         return;
     };
 
-    $self->{logger}->log(3, "partChannel(): PART sent for $channel (reason='$reason')");
+    $self->{logger}->log(4, "partChannel(): PART sent for $channel (reason='$reason')");
     return 1;
 }
 
@@ -689,7 +688,7 @@ sub getIdUserChannelLevel(@) {
 		if (my $ref = $sth->fetchrow_hashref()) {
 			my $id_user = $ref->{'id_user'};
 			my $level = $ref->{'level'};
-			$self->{logger}->log(3,"getIdUserChannelLevel() $id_user $level");
+			$self->{logger}->log(4,"getIdUserChannelLevel() $id_user $level");
 			$sth->finish;
 			return ($id_user,$level);
 		}
@@ -714,7 +713,7 @@ sub getUserChannelLevelByName(@) {
 		if (my $ref = $sth->fetchrow_hashref()) {
 			$iChannelUserLevel = $ref->{'level'};
 		}
-		$self->{logger}->log(3,"getUserChannelLevelByName() iChannelUserLevel = $iChannelUserLevel");
+		$self->{logger}->log(4,"getUserChannelLevelByName() iChannelUserLevel = $iChannelUserLevel");
 	}
 	$sth->finish;
 	return $iChannelUserLevel;
@@ -746,7 +745,7 @@ sub setChannelAntiFlood {
 		my $duration  = $ref->{'duration'};
 		my $timetowait = $ref->{'timetowait'};
 
-		$self->{logger}->log(3, "setChannelAntiFlood() AntiFlood record exists (id_channel $id_channel) nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds");
+		$self->{logger}->log(4, "setChannelAntiFlood() AntiFlood record exists (id_channel $id_channel) nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds");
 		botNotice($self, $sNick, "Chanset parameters already exist and will be used for $sChannel (nbmsg_max : $nbmsg_max duration : $duration seconds timetowait : $timetowait seconds)");
 
 	} else {
@@ -760,7 +759,7 @@ sub setChannelAntiFlood {
 		}
 
 		my $id_channel_flood = $sth->{mysql_insertid};
-		$self->{logger}->log(3, "setChannelAntiFlood() AntiFlood record created, id_channel_flood : $id_channel_flood");
+		$self->{logger}->log(4, "setChannelAntiFlood() AntiFlood record created, id_channel_flood : $id_channel_flood");
 
 		$sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
 		my $sth2 = $self->{dbh}->prepare($sQuery);
@@ -817,7 +816,7 @@ sub logBotAction(@) {
         $self->{logger}->log(5, "logBotAction() eventtype = $eventtype nick = $sNick text = $sText");
     }
 
-    $self->{logger}->log(5, "logBotAction() " . Dumper($message)) if defined($self->{logger}->{debug}) && $self->{logger}->{debug} >= 5;
+    $self->{logger}->log(5, "logBotAction() prefix=" . ($message->prefix // "?") . " command=" . ($message->command // "?")) if defined($self->{logger}->{debug}) && $self->{logger}->{debug} >= 5;
 
     my $id_channel;
 
@@ -833,7 +832,7 @@ sub logBotAction(@) {
 
         my $ref = $sth->fetchrow_hashref();
         unless ($ref) {
-            $self->{logger}->log(3, "logBotAction() channel not found: $sChannel");
+            $self->{logger}->log(4, "logBotAction() channel not found: $sChannel");
             return;
         }
 
@@ -1114,7 +1113,7 @@ sub getIdChannelSet {
         return undef;
     }
 
-    $self->{logger}->log(3, "🔍 getIdChannelSet() searching for chanset_list_id=$id_chanset_list in channel '$sChannel'");
+    $self->{logger}->log(4, "🔍 getIdChannelSet() searching for chanset_list_id=$id_chanset_list in channel '$sChannel'");
 
     my $id_channel_set;
     my $sQuery = q{
@@ -1133,10 +1132,10 @@ sub getIdChannelSet {
     else {
         if (my $ref = $sth->fetchrow_hashref()) {
             $id_channel_set = $ref->{id_channel_set};
-            $self->{logger}->log(3, "✅ getIdChannelSet() found id_channel_set=$id_channel_set for channel '$sChannel' and chanset_list_id=$id_chanset_list");
+            $self->{logger}->log(4, "✅ getIdChannelSet() found id_channel_set=$id_channel_set for channel '$sChannel' and chanset_list_id=$id_chanset_list");
         }
         else {
-            $self->{logger}->log(3, "ℹ️ getIdChannelSet() no matching record for channel '$sChannel' and chanset_list_id=$id_chanset_list");
+            $self->{logger}->log(4, "ℹ️ getIdChannelSet() no matching record for channel '$sChannel' and chanset_list_id=$id_chanset_list");
         }
     }
 
@@ -1155,7 +1154,7 @@ sub getIdChansetList {
         return undef;
     }
 
-    $self->{logger}->log(3, "🔍 getIdChansetList() looking up chanset: '$sChansetValue'");
+    $self->{logger}->log(4, "🔍 getIdChansetList() looking up chanset: '$sChansetValue'");
 
     my $id_chanset_list;
     my $sQuery = "SELECT id_chanset_list FROM CHANSET_LIST WHERE chanset=?";
@@ -1168,10 +1167,10 @@ sub getIdChansetList {
     else {
         if (my $ref = $sth->fetchrow_hashref()) {
             $id_chanset_list = $ref->{id_chanset_list};
-            $self->{logger}->log(3, "✅ getIdChansetList() found id_chanset_list=$id_chanset_list for chanset '$sChansetValue'");
+            $self->{logger}->log(4, "✅ getIdChansetList() found id_chanset_list=$id_chanset_list for chanset '$sChansetValue'");
         }
         else {
-            $self->{logger}->log(3, "ℹ️ getIdChansetList() no result found for chanset '$sChansetValue'");
+            $self->{logger}->log(4, "ℹ️ getIdChansetList() no result found for chanset '$sChansetValue'");
         }
     }
 
@@ -1184,7 +1183,7 @@ sub getIdChansetList {
 
 sub evalAction(@) {
 	my ($self,$message,$sNick,$sChannel,$sCommand,$actionDo,@tArgs) = @_;
-	$self->{logger}->log(3,"evalAction() $sCommand / $actionDo");
+	$self->{logger}->log(4,"evalAction() $sCommand / $actionDo");
 	if (defined($tArgs[0])) {
 		my $sArgs = join(" ",@tArgs);
 		$actionDo =~ s/%n/$sArgs/g;
@@ -1576,7 +1575,7 @@ sub userAuthNick_ctx {
         message => $ctx->message,
     };
 
-    $self->{logger}->log(3, "Triggering WHOIS on $targetNick for $nick via userAuthNick_ctx()");
+    $self->{logger}->log(4, "Triggering WHOIS on $targetNick for $nick via userAuthNick_ctx()");
     $self->{irc}->send_message("WHOIS", undef, $targetNick);
 
     return;
@@ -2121,7 +2120,7 @@ sub mp3_ctx {
         my $id = int($args[1]);
 
         my $sql = "SELECT id_mp3, id_youtube, artist, title, folder, filename FROM MP3 WHERE id_mp3 = ?";
-        $self->{logger}->log(3, "mp3_ctx(): $sql (id=$id)");
+        $self->{logger}->log(4, "mp3_ctx(): $sql (id=$id)");
 
         my $sth = $self->{dbh}->prepare($sql);
         unless ($sth && $sth->execute($id)) {
@@ -2181,7 +2180,7 @@ sub mp3_ctx {
 
     # 1) Count matching MP3s
     my $sql_count = "SELECT COUNT(*) AS nbMp3 FROM MP3 WHERE CONCAT(artist, ' ', title) LIKE ?";
-    $self->{logger}->log(3, "mp3_ctx(): $sql_count (pattern=$pattern)");
+    $self->{logger}->log(4, "mp3_ctx(): $sql_count (pattern=$pattern)");
     my $sth = $self->{dbh}->prepare($sql_count);
 
     my $nbMp3 = 0;
@@ -2203,7 +2202,7 @@ sub mp3_ctx {
     # 2) Fetch first matching result
     my $sql_first = "SELECT id_mp3, id_youtube, artist, title, folder, filename FROM MP3 ".
                     "WHERE CONCAT(artist, ' ', title) LIKE ? LIMIT 1";
-    $self->{logger}->log(3, "mp3_ctx(): $sql_first (pattern=$pattern)");
+    $self->{logger}->log(4, "mp3_ctx(): $sql_first (pattern=$pattern)");
     $sth = $self->{dbh}->prepare($sql_first);
 
     unless ($sth && $sth->execute($pattern)) {
@@ -2241,7 +2240,7 @@ sub mp3_ctx {
         if ($nbMp3 > 1) {
             my $sql_list = "SELECT id_mp3, id_youtube, artist, title, folder, filename ".
                            "FROM MP3 WHERE CONCAT(artist, ' ', title) LIKE ? LIMIT 10";
-            $self->{logger}->log(3, "mp3_ctx(): $sql_list (pattern=$pattern)");
+            $self->{logger}->log(4, "mp3_ctx(): $sql_list (pattern=$pattern)");
             my $sth2 = $self->{dbh}->prepare($sql_list);
 
             unless ($sth2 && $sth2->execute($pattern)) {
@@ -2552,7 +2551,7 @@ sub userVerifyNick_ctx {
         message => $ctx->message,
     };
 
-    $self->{logger}->log(3, "Triggering WHOIS on $targetNick for $nick via userVerifyNick_ctx()");
+    $self->{logger}->log(4, "Triggering WHOIS on $targetNick for $nick via userVerifyNick_ctx()");
     $self->{irc}->send_message("WHOIS", undef, $targetNick);
 
     return;
@@ -2617,7 +2616,7 @@ sub getNickInfoWhois(@) {
 				$sHostmask =~ s/\./\\./g;
 				$sHostmask =~ s/\*/.*/g;
 				if ( $sWhoisHostmask =~ /^$sHostmask/ ) {
-					$self->{logger}->log(3,"getNickInfoWhois() $sHostmask matches " . $sWhoisHostmask);
+					$self->{logger}->log(4,"getNickInfoWhois() $sHostmask matches " . $sWhoisHostmask);
 					$sMatchingUserHandle = $ref->{'nickname'};
 					if (defined($ref->{'password'})) {
 						$sMatchingUserPasswd = $ref->{'password'};
@@ -2649,10 +2648,10 @@ sub getNickInfoWhois(@) {
 	}
 	$sth->finish;
 	if (defined($iMatchingUserId)) {
-		$self->{logger}->log(3,"getNickInfoWhois() iMatchingUserId : $iMatchingUserId");
+		$self->{logger}->log(4,"getNickInfoWhois() iMatchingUserId : $iMatchingUserId");
 	}
 	else {
-		$self->{logger}->log(3,"getNickInfoWhois() iMatchingUserId is undefined with this host : " . $sWhoisHostmask);
+		$self->{logger}->log(4,"getNickInfoWhois() iMatchingUserId is undefined with this host : " . $sWhoisHostmask);
 		return (undef,undef,undef,undef,undef,undef,undef);
 	}
 	if (defined($iMatchingUserLevel)) {
@@ -2704,7 +2703,7 @@ sub channelNicksRemove(@) {
 sub whereis(@) {
 	my ($self,$sHostname) = @_;
 	my $userIP;
-	$self->{logger}->log(3,"whereis() $sHostname");
+	$self->{logger}->log(4,"whereis() $sHostname");
 	if ( $sHostname =~ /users.undernet.org$/ ) {
 		return "on an Undernet hidden host ;)";
 	}

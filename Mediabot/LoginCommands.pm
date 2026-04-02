@@ -20,6 +20,7 @@ use POSIX qw(strftime);
 use Exporter 'import';
 use List::Util qw(min);
 use Mediabot::Helpers;
+use Mediabot::ChannelCommands;
 
 our @EXPORT = qw(
     init_auth
@@ -229,10 +230,18 @@ sub mbRegister_ctx {
     my $id = userAdd($self, $mask, $user, $pass, "Owner");
 
     if (defined $id) {
-        $self->botNotice($nick, "Registered $user as Owner (id_user: $id) with hostmask $mask");
+        # Auto-register the console channel at level 500 for the new Owner
+        my ($id_console_chan, $console_name) = getConsoleChan($self);
+        if (defined $id_console_chan && defined $console_name) {
+            registerChannel($self, $ctx->message, $nick, $id_console_chan, $id);
+            $self->{logger}->log(0, "Register: auto-registered $user (id=$id) on console channel $console_name at level 500");
+        } else {
+            $self->{logger}->log(1, "Register: could not find console channel to auto-register $user");
+        }
+        botNotice($self, $nick, "Registered $user as Owner (id_user: $id) with hostmask $mask");
         logBot($self, $ctx->message, undef, 'register', 'Success');
     } else {
-        $self->botNotice($nick, "Register failed");
+        botNotice($self, $nick, "Register failed");
         logBot($self, $ctx->message, undef, 'register', 'Failed');
     }
 }

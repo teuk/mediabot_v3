@@ -183,7 +183,7 @@ sub mbJump {
     my $params = join(" ", @tArgs);
     $params =~ s/--server=[^ ]*//g;  # clean existing --server if present
 
-    $self->{logger}->log(3, "Jumping with args: $params");
+    $self->{logger}->log(4, "Jumping with args: $params");
 
     my $child_pid;
     if (defined($child_pid = fork())) {
@@ -213,7 +213,7 @@ sub update(@) {
 	if (defined($iMatchingUserId)) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Owner")) {
-				$self->{logger}->log(3,"Update TBD ;)");
+				$self->{logger}->log(4,"Update TBD ;)");
 			}
 			else {
 				my $sNoticeMsg = $message->prefix . " update command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";

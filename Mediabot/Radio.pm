@@ -9,7 +9,6 @@ use warnings;
 use POSIX qw(strftime);
 use List::Util qw(min);
 use Exporter 'import';
-use Data::Dumper;
 use HTML::Entities qw(decode_entities);
 use Encode qw(encode);
 use Mediabot::Helpers;
@@ -954,7 +953,7 @@ sub playRadio(@) {
 								my $timer = IO::Async::Timer::Countdown->new(
 							   	delay => 3,
 							   	on_expire => sub {
-										$self->{logger}->log(3,"Timer start, downloading $ytUrl");
+										$self->{logger}->log(4,"Timer start, downloading $ytUrl");
 										#/usr/local/bin/yt-dlp -x --audio-format mp3 --audio-quality 0 https://www.youtube.com/watch?v=JRDgihVDEko
 										unless ( open YT, "/usr/local/bin/yt-dlp -x --audio-format mp3 --audio-quality 0 $ytUrl |" ) {
 				                    		$self->{logger}->log(0,"Could not yt-dlp $ytUrl");
@@ -993,7 +992,7 @@ sub playRadio(@) {
 											}
 											else {
 												$id_mp3 = $sth->{ mysql_insertid };
-												$self->{logger}->log(3,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
+												$self->{logger}->log(4,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
 											}
 											$sth->finish;
 											my $rPush = queuePushRadio($self,"$incomingDir/$ytDestinationFile");
@@ -1035,7 +1034,7 @@ sub playRadio(@) {
 							else {
 								if (my $ref = $sth->fetchrow_hashref()) {
 									my $ytDestinationFile = $ref->{'folder'} . "/" . $ref->{'filename'};
-									$self->{logger}->log(3,"playRadio() pushing $ytDestinationFile to queue");
+									$self->{logger}->log(4,"playRadio() pushing $ytDestinationFile to queue");
 									my $rPush = queuePushRadio($self,$ytDestinationFile);
 									if (defined($rPush) && $rPush) {
 										my $id_youtube = $ref->{'id_youtube'};
@@ -1151,7 +1150,7 @@ sub playRadio(@) {
 									my $timer = IO::Async::Timer::Countdown->new(
 										delay => 3,
 										on_expire => sub {
-												$self->{logger}->log(3,"Timer start, downloading $ytUrl");
+												$self->{logger}->log(4,"Timer start, downloading $ytUrl");
 												unless ( open YT, "youtube-dl --extract-audio --audio-format mp3 --add-metadata $ytUrl |" ) {
 													$self->{logger}->log(0,"Could not youtube-dl $ytUrl");
 													return undef;
@@ -1172,7 +1171,7 @@ sub playRadio(@) {
 													my $folder = $incomingDir;
 													my $id_youtube = substr($filename,-15);
 													$id_youtube = substr($id_youtube,0,11);
-													$self->{logger}->log(3,"Destination : $incomingDir/$ytDestinationFile");
+													$self->{logger}->log(4,"Destination : $incomingDir/$ytDestinationFile");
 													my $mp3 = MP3::Tag->new("$incomingDir/$ytDestinationFile");
 													$mp3->get_tags;
 													my ($title, $track, $artist, $album, $comment, $year, $genre) = $mp3->autoinfo();
@@ -1188,7 +1187,7 @@ sub playRadio(@) {
 													}
 													else {
 														$id_mp3 = $sth->{ mysql_insertid };
-														$self->{logger}->log(3,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
+														$self->{logger}->log(4,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
 													}
 													$sth->finish;
 													my $rPush = queuePushRadio($self,"$incomingDir/$ytDestinationFile");
@@ -1223,7 +1222,7 @@ sub playRadio(@) {
 							# Local library search
 							my $sSearch = join (" ",@tArgs);
 							my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE (artist LIKE ? OR title LIKE ?) ORDER BY RAND() LIMIT 1";
-							$self->{logger}->log(3,"playRadio() Query : $sQuery");
+							$self->{logger}->log(4,"playRadio() Query : $sQuery");
 							my $sth = $self->{dbh}->prepare($sQuery);
 							unless ($sth->execute($sSearch,$sSearch)) {
 								$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -1275,7 +1274,7 @@ sub playRadio(@) {
 							# Youtube Search
 							my $sYoutubeId;
 							my $sText = join("%20",@tArgs);
-							$self->{logger}->log(3,"radioplay() youtubeSearch() on $sText");
+							$self->{logger}->log(4,"radioplay() youtubeSearch() on $sText");
 							my $APIKEY = $self->{conf}->get('main.YOUTUBE_APIKEY');
 							unless (defined($APIKEY) && ($APIKEY ne "")) {
 								$self->{logger}->log(0,"displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
@@ -1306,10 +1305,9 @@ sub playRadio(@) {
 										# Check items
 										if ( $#fTyoutubeItems >= 0 ) {
 											my %hYoutubeItems = %{$tYoutubeItems[0][0]};
-											$self->{logger}->log(4,"radioplay() youtubeSearch() sYoutubeInfo Items : " . Dumper(%hYoutubeItems));
+											$self->{logger}->log(4,"radioplay() youtubeSearch() title=" . ($hYoutubeItems{snippet}{title} // "?"));
 											my @tYoutubeId = $hYoutubeItems{'id'};
 											my %hYoutubeId = %{$tYoutubeId[0]};
-											$self->{logger}->log(4,"radioplay() youtubeSearch() sYoutubeInfo Id : " . Dumper(%hYoutubeId));
 											$sYoutubeId = $hYoutubeId{'videoId'};
 											$self->{logger}->log(4,"radioplay() youtubeSearch() sYoutubeId : $sYoutubeId");
 										}
@@ -1408,7 +1406,7 @@ sub playRadio(@) {
 										my $timer = IO::Async::Timer::Countdown->new(
 											delay => 3,
 											on_expire => sub {
-													$self->{logger}->log(3,"Timer start, downloading $ytUrl");
+													$self->{logger}->log(4,"Timer start, downloading $ytUrl");
 													
 													unless ( open YT, "youtube-dl --extract-audio --audio-format mp3 --add-metadata $ytUrl |" ) {
 														$self->{logger}->log(0,"Could not youtube-dl $ytUrl");
@@ -1430,7 +1428,7 @@ sub playRadio(@) {
 														my $folder = $incomingDir;
 														my $id_youtube = substr($filename,-15);
 														$id_youtube = substr($id_youtube,0,11);
-														$self->{logger}->log(3,"Destination : $incomingDir/$ytDestinationFile");
+														$self->{logger}->log(4,"Destination : $incomingDir/$ytDestinationFile");
 														my $mp3 = MP3::Tag->new("$incomingDir/$ytDestinationFile");
 														$mp3->get_tags;
 														my ($title, $track, $artist, $album, $comment, $year, $genre) = $mp3->autoinfo();
@@ -1446,7 +1444,7 @@ sub playRadio(@) {
 														}
 														else {
 															$id_mp3 = $sth->{ mysql_insertid };
-															$self->{logger}->log(3,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
+															$self->{logger}->log(4,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
 														}
 														$sth->finish;
 														my $rPush = queuePushRadio($self,"$incomingDir/$ytDestinationFile");
@@ -1540,7 +1538,7 @@ sub isInQueueRadio(@) {
 				chomp($line);
 				$line =~ s/\r//;
 				$line =~ s/\n//;
-				$self->{logger}->log(3,"isInQueueRadio() $line");
+				$self->{logger}->log(4,"isInQueueRadio() $line");
 			}
 			if ($iNbTrack > 0) {
 				my @RIDS = split(/ /,$line);
@@ -1558,7 +1556,7 @@ sub isInQueueRadio(@) {
 						$line =~ s/\n//;
 						$line =~ s/^.*\[\"//;
 						$line =~ s/\".*$//;
-						$self->{logger}->log(3,"isInQueueRadio() $line");
+						$self->{logger}->log(4,"isInQueueRadio() $line");
 						my $sFolder = dirname($line);
 						my $sFilename = basename($line);
 						my $sBaseFilename = basename($sFilename, ".mp3");
@@ -1590,7 +1588,7 @@ sub queueRadio(@) {
 				my $iHarborId = getHarBorId($self);
 				my $bHarbor = 0;
 				if (defined($iHarborId) && ($iHarborId ne "")) {
-					$self->{logger}->log(3,"Harbord ID : $iHarborId");
+					$self->{logger}->log(4,"Harbord ID : $iHarborId");
 					if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 						unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"harbor_$iHarborId.status\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
 							$self->{logger}->log(0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
@@ -1654,7 +1652,7 @@ sub queueRadio(@) {
 									if (( $i == 0 ) && (!$bHarbor)) {
 										#Remaining time
 										my $sRemainingTime = getRadioRemainingTime($self);
-										$self->{logger}->log(3,"queueRadio() sRemainingTime = $sRemainingTime");
+										$self->{logger}->log(4,"queueRadio() sRemainingTime = $sRemainingTime");
 										my $siSecondsRemaining = int($sRemainingTime);
 										my $iMinutesRemaining = int($siSecondsRemaining / 60) ;
 										my $iSecondsRemaining = int($siSecondsRemaining - ( $iMinutesRemaining * 60 ));
@@ -1760,7 +1758,7 @@ sub queueRadio(@) {
 					unless ( $bHarbor ) {
 						#Remaining time
 						my $sRemainingTime = getRadioRemainingTime($self);
-						$self->{logger}->log(3,"queueRadio() sRemainingTime = $sRemainingTime");
+						$self->{logger}->log(4,"queueRadio() sRemainingTime = $sRemainingTime");
 						my $siSecondsRemaining = int($sRemainingTime);
 						my $iMinutesRemaining = int($siSecondsRemaining / 60) ;
 						my $iSecondsRemaining = int($siSecondsRemaining - ( $iMinutesRemaining * 60 ));
@@ -1813,7 +1811,7 @@ sub queuePushRadio(@) {
 	if (defined($sAudioFilename) && ($sAudioFilename ne "")) {
 		unless (isInQueueRadio($self,$sAudioFilename)) {
 			if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-				$self->{logger}->log(3,"queuePushRadio() pushing $sAudioFilename to queue");
+				$self->{logger}->log(4,"queuePushRadio() pushing $sAudioFilename to queue");
 				unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.push $sAudioFilename\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
 					$self->{logger}->log(0,"queuePushRadio() Unable to connect to LIQUIDSOAP telnet port");
 					return undef;
@@ -1836,7 +1834,7 @@ sub queuePushRadio(@) {
 		}
 	}
 	else {
-		$self->{logger}->log(3,"queuePushRadio() missing audio file parameter");
+		$self->{logger}->log(4,"queuePushRadio() missing audio file parameter");
 		return 0;
 	}
 }
@@ -2073,7 +2071,7 @@ sub rplayRadio(@) {
 						$sSearch =~ s/;//g;
 						$sSearch =~ s/'/\\'/g;
 						my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sSearch . "%' ORDER BY RAND() LIMIT 1";
-						$self->{logger}->log(3,"rplayRadio() Query : $sQuery");
+						$self->{logger}->log(4,"rplayRadio() Query : $sQuery");
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute()) {
 							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -2252,13 +2250,13 @@ sub radioPub(@) {
 		else {
 			while (my $ref = $sth->fetchrow_hashref()) {
 				my $curChannel = $ref->{'name'};
-				$self->{logger}->log(3,"RadioPub on $curChannel");
+				$self->{logger}->log(4,"RadioPub on $curChannel");
 				my $currentTitle = getRadioCurrentSong($self);
 				if ( $currentTitle ne "Unknown" ) {
 					displayRadioCurrentSong($self,undef,undef,$curChannel,undef);
 				}
 				else {
-					$self->{logger}->log(3,"RadioPub skipped for $curChannel, title is $currentTitle");
+					$self->{logger}->log(4,"RadioPub skipped for $curChannel, title is $currentTitle");
 				}
 			}
 		}

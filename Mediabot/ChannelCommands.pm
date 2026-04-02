@@ -271,7 +271,7 @@ sub addChannel_ctx {
 
     # Args: addchan <#channel> <user>
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-    $self->{logger}->log(3, "addChannel_ctx() raw args: " . join(' ', map { defined $_ ? $_ : '<undef>' } @args));
+    $self->{logger}->log(4, "addChannel_ctx() raw args: " . join(' ', map { defined $_ ? $_ : '<undef>' } @args));
 
     # Take last 2 args to avoid any parser quirks
     my ($sChannel, $sUser) = @args >= 2 ? @args[-2, -1] : ('','');
@@ -502,7 +502,7 @@ sub purgeChannel_ctx {
     my $nick = $ctx->nick;
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    $self->{logger}->log(3, "🔍 purgeChannel_ctx() called by $nick with args: @args");
+    $self->{logger}->log(4, "🔍 purgeChannel_ctx() called by $nick with args: @args");
 
     # Privilege gate
     return unless $ctx->require_level('Administrator');
@@ -2300,7 +2300,7 @@ sub userAccessChannel_ctx {
             message => $ctx->message,
         };
 
-        $self->{logger}->log(3, "Triggering WHOIS on $target for $nick via userAccessChannel_ctx() channel=$chan");
+        $self->{logger}->log(4, "Triggering WHOIS on $target for $nick via userAccessChannel_ctx() channel=$chan");
         $self->{irc}->send_message("WHOIS", undef, $target);
         return;
     }
@@ -2430,7 +2430,7 @@ sub channelNickList_ctx {
     }
     botNotice($self, $nick, $line) if $line ne $header;
 
-    $self->{logger}->log(3, "nicklist $target_chan => " . scalar(@nicks) . " users");
+    $self->{logger}->log(4, "nicklist $target_chan => " . scalar(@nicks) . " users");
     logBot($self, $ctx->message, undef, "nicklist", $target_chan);
 
     return 1;
@@ -2518,7 +2518,7 @@ sub randomChannelNick_ctx {
     my $random_nick = $pool[ int(rand(@pool)) ];
 
     botNotice($self, $nick, "Random nick on $target_chan: $random_nick");
-    $self->{logger}->log(3, "rnick $target_chan => $random_nick");
+    $self->{logger}->log(4, "rnick $target_chan => $random_nick");
     logBot($self, $ctx->message, undef, "rnick", $target_chan);
 
     return 1;
@@ -2785,7 +2785,7 @@ sub setChannelAntiFloodParams_ctx {
     # If no args: display current antiflood parameters
     # ---------------------------------------------------------
     if (@args == 0) {
-        $self->{logger}->log(3, "Fetching antiflood settings for $target_channel");
+        $self->{logger}->log(4, "Fetching antiflood settings for $target_channel");
 
         my $sql = q{
             SELECT CHANNEL_FLOOD.nbmsg_max,

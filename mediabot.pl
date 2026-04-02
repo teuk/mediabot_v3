@@ -24,7 +24,6 @@ use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use Net::Async::IRC;
 use Switch;
-use Data::Dumper;
 use utf8;
 use Encode qw(encode decode);
 
@@ -293,7 +292,7 @@ my $partyline = Mediabot::Partyline->new(
 );
 $mediabot->{partyline} = $partyline;
 my $partyline_port = $mediabot->{partyline}->get_port;
-$mediabot->{logger}->log(3, "Partyline port is: $partyline_port");
+$mediabot->{logger}->log(4, "Partyline port is: $partyline_port");
 
 # Set up main timer
 my $timer = IO::Async::Timer::Periodic->new(
@@ -434,13 +433,13 @@ sub usage {
 # Initialize signals
 sub init_signals {
     my ($logger) = @_;
-    $logger->log(3, "Registering signal handler for TERM");
+    $logger->log(4, "Registering signal handler for TERM");
     $SIG{TERM} = \&catch_term;
 
-    $logger->log(3, "Registering signal handler for INT");
+    $logger->log(4, "Registering signal handler for INT");
     $SIG{INT}  = \&catch_int;
 
-    $logger->log(3, "Registering signal handler for HUP");
+    $logger->log(4, "Registering signal handler for HUP");
     $SIG{HUP}  = \&catch_hup;
 }
 
@@ -472,11 +471,9 @@ sub log_message {
 sub log_debug_args {
     my ($context, $message) = @_;
     return unless defined $message && ref($message) && $mediabot;
-    
-    my $dump = Dumper($message->args);
-    $dump =~ s/^\$VAR1 = //;
-    $dump =~ s/;\s*$//;
-    $mediabot->{logger}->log(5, "$context args: $dump");
+    my @args = eval { @{ $message->args // [] } };
+    my $args_str = join(', ', map { defined $_ ? "'$_'" : 'undef' } @args);
+    $mediabot->{logger}->log(5, "$context args: [$args_str]");
 }
 
 sub log_info {
@@ -497,7 +494,7 @@ sub log_error {
 sub on_timer_tick {
     my @params = @_;
 
-    $mediabot->{logger}->log(5, "on_timer_tick \@params (): " . Dumper(@params));
+    $mediabot->{logger}->log(5, "on_timer_tick() params: " . scalar(@params) . " args");
     $mediabot->{logger}->log(5,"on_timer_tick() tick");
     
     # Update pid file
@@ -542,13 +539,13 @@ sub on_timer_tick {
         else {
             while (my $ref = $sth->fetchrow_hashref()) {
                 my $curChannel = $ref->{'name'};
-                $mediabot->{logger}->log(3,"RadioPub on $curChannel");
+                $mediabot->{logger}->log(4,"RadioPub on $curChannel");
                 my $currentTitle = $mediabot->getRadioCurrentSong();
                 if ( $currentTitle ne "Unknown" ) {
                     $mediabot->displayRadioCurrentSong(undef,undef,$curChannel,undef);
                 }
                 else {
-                    $mediabot->{logger}->log(3,"RadioPub skipped for $curChannel, title is $currentTitle");
+                    $mediabot->{logger}->log(4,"RadioPub skipped for $curChannel, title is $currentTitle");
                 }
             }
         }
@@ -572,7 +569,7 @@ if (defined($mediabot->{conf}->get('main.RANDOM_QUOTE'))) {
         else {
             while (my $ref = $sth->fetchrow_hashref()) {
                 my $curChannel = $ref->{'name'};
-                $mediabot->{logger}->log(3,"RandomQuote on $curChannel");
+                $mediabot->{logger}->log(4,"RandomQuote on $curChannel");
                 my $sQuery = "SELECT * FROM QUOTES,CHANNEL,USER WHERE QUOTES.id_channel=CHANNEL.id_channel AND QUOTES.id_user=USER.id_user AND CHANNEL.name=? ORDER BY RAND() LIMIT 1";
                 my $sth2 = $mediabot->getDbh->prepare($sQuery);
                 unless ($sth2->execute($curChannel)) {
@@ -913,9 +910,9 @@ sub on_message_PRIVMSG {
             my $luckyShot = rand(100);
             my $luckyShotHailoChatter = rand(100);
             if ( $luckyShot >= $mediabot->checkResponder($message,$who,$where,$what,@tArgs) ) {
-                $mediabot->{logger}->log(3,"Found responder [$where] for $what with luckyShot : $luckyShot");
-                $mediabot->{logger}->log(3,"I have a lucky shot to answer for $what");
-                $mediabot->{logger}->log(3,"time : " . time . " getLastReponderTs() " . $mediabot->getLastReponderTs() . " delta " . (time - $mediabot->getLastReponderTs()));
+                $mediabot->{logger}->log(4,"Found responder [$where] for $what with luckyShot : $luckyShot");
+                $mediabot->{logger}->log(4,"I have a lucky shot to answer for $what");
+                $mediabot->{logger}->log(4,"time : " . time . " getLastReponderTs() " . $mediabot->getLastReponderTs() . " delta " . (time - $mediabot->getLastReponderTs()));
                 if ((time - $mediabot->getLastReponderTs()) >= 600 ) {
                     sleep int(rand(8)+2);
                     $mediabot->doResponder($message,$who,$where,$what,@tArgs)
@@ -1000,7 +997,7 @@ sub on_message_PRIVMSG {
         }
         my ($sCommand,@tArgs) = split(/\s+/,$what);
         $sCommand =~ tr/A-Z/a-z/;
-        $mediabot->{logger}->log(3,"sCommands = $sCommand");
+        $mediabot->{logger}->log(4,"sCommands = $sCommand");
         if (defined($sCommand) && ($sCommand ne "")) {
             switch($sCommand) {
                 case /restart/i		{
@@ -1092,7 +1089,7 @@ sub on_message_WHO(@) {
 sub on_message_WHOIS(@) {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_WHOIS', $message);
-    $mediabot->{logger}->log(3,Dumper($message));
+    $mediabot->{logger}->log(4, "on_message_WHOIS() prefix=" . ($message->prefix // "?") . " command=" . ($message->command // "?"));
     my ($target_name) = @{$hints}{qw<target_name>};
     $mediabot->{logger}->log(0,"on_message_WHOIS() $target_name");
 }
@@ -1194,7 +1191,7 @@ sub on_message_RPL_WHOISUSER {
     if (defined($WHOIS_VARS{'nick'}) && ($WHOIS_VARS{'nick'} eq $target_name) && defined($WHOIS_VARS{'sub'}) && ($WHOIS_VARS{'sub'} ne "")) {
         switch($WHOIS_VARS{'sub'}) {
             case "userVerifyNick" {
-                $mediabot->{logger}->log(3,"WHOIS userVerifyNick");
+                $mediabot->{logger}->log(4,"WHOIS userVerifyNick");
                 my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = $mediabot->getNickInfoWhois("$ident\@$sHostname");
                 if (defined($WHOIS_VARS{'caller'}) && ($WHOIS_VARS{'caller'} ne "")) {
                     if (defined($iMatchingUserId)) {
@@ -1212,7 +1209,7 @@ sub on_message_RPL_WHOISUSER {
                 }
             }
             case "userAuthNick" {
-                $mediabot->{logger}->log(3,"WHOIS userAuthNick");
+                $mediabot->{logger}->log(4,"WHOIS userAuthNick");
                 my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = $mediabot->getNickInfoWhois("$ident\@$sHostname");
                 if (defined($WHOIS_VARS{'caller'}) && ($WHOIS_VARS{'caller'} ne "")) {
                     if (defined($iMatchingUserId)) {
@@ -1238,7 +1235,7 @@ sub on_message_RPL_WHOISUSER {
                 }
             }
             case "userAccessChannel" {
-                $mediabot->{logger}->log(3,"WHOIS userAccessChannel");
+                $mediabot->{logger}->log(4,"WHOIS userAccessChannel");
                 my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = $mediabot->getNickInfoWhois("$ident\@$sHostname");
                 if (defined($WHOIS_VARS{'caller'}) && ($WHOIS_VARS{'caller'} ne "")) {
                     unless (defined($sMatchingUserHandle)) {
@@ -1280,7 +1277,7 @@ sub on_message_RPL_WHOISUSER {
                 }  
             }
             case "mbWhereis" {
-                $mediabot->{logger}->log(3,"WHOIS mbWhereis");
+                $mediabot->{logger}->log(4,"WHOIS mbWhereis");
                 my $country = $mediabot->whereis($sHostname);
                 if (defined($country)) {
                     $mediabot->botPrivmsg($WHOIS_VARS{'channel'},"($WHOIS_VARS{'caller'} whereis $WHOIS_VARS{'nick'}) Country : $country");
@@ -1290,7 +1287,7 @@ sub on_message_RPL_WHOISUSER {
                 }
             }
             case "statPartyline" {
-               $mediabot->{logger}->log(3, "WHOIS statPartyline");
+               $mediabot->{logger}->log(4, "WHOIS statPartyline");
 
                my $fd = $WHOIS_VARS{'caller'};
                my $stream = $mediabot->{partyline}->{streams}{$fd};

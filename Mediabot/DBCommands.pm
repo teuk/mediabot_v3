@@ -86,7 +86,7 @@ sub onStartTimers(@) {
 			my $timer = IO::Async::Timer::Periodic->new(
 			    interval => $duration,
 			    on_tick => sub {
-			    	$self->{logger}->log(3,"Timer every $duration seconds : $command");
+			    	$self->{logger}->log(4,"Timer every $duration seconds : $command");
   					$self->{irc}->write("$command\x0d\x0a");
 					},
 			);
@@ -196,7 +196,7 @@ sub mbAddTimer_ctx {
     my $timer = IO::Async::Timer::Periodic->new(
         interval => $interval,
         on_tick  => sub {
-            $self->{logger}->log(3, "Timer [$name] tick: $cmd");
+            $self->{logger}->log(4, "Timer [$name] tick: $cmd");
             $self->{irc}->write("$cmd\x0d\x0a");
         },
     );
@@ -1501,7 +1501,7 @@ sub doResponder(@) {
 			my $id_responders = $ref->{'id_responders'};
 			my $hits = $ref->{'hits'} + 1;
 			my $actionDo = evalAction($self,$message,$sNick,$sChannel,$sMsg,$sAnswer);
-			$self->{logger}->log(3,"checkResponder() Found answer $sAnswer");
+			$self->{logger}->log(4,"checkResponder() Found answer $sAnswer");
 			botPrivmsg($self,$sChannel,$actionDo);
 			my $sQuery = "UPDATE RESPONDERS SET hits=? WHERE id_responders=?";
 			my $sth = $self->{dbh}->prepare($sQuery);
@@ -1509,7 +1509,7 @@ sub doResponder(@) {
 				$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 			}
 			else {
-				$self->{logger}->log(3,"$hits hits for $sMsg");
+				$self->{logger}->log(4,"$hits hits for $sMsg");
 			}
 			setLastReponderTs($self,time);
 			return 1;

@@ -407,7 +407,7 @@ sub dbCheckTables(@) {
     my $LOG = $self->{LOG};
     my $dbh = $self->{dbh};
 
-    $self->{logger}->log(3, "Checking database schema");
+    $self->{logger}->log(4, "Checking database schema");
 
     unless (defined $dbh) {
         $self->{logger}->log(0, "❌ No DBI handle found (dbh is undef). Aborting DB check.");
@@ -425,7 +425,7 @@ sub dbCheckTables(@) {
         }
     }
     else {
-        $self->{logger}->log(3, "USER table exists");
+        $self->{logger}->log(4, "USER table exists");
     }
     $sth->finish;
 
@@ -455,7 +455,7 @@ sub dbCheckTables(@) {
         clean_and_exit($self, 1);
     }
 
-    $self->{logger}->log(3, "USER_HOSTMASK table exists — schema OK");
+    $self->{logger}->log(4, "USER_HOSTMASK table exists — schema OK");
 
     # Check USER.hostmasks column is gone (renamed to hostmasks_legacy)
     # This is a soft warning only — the bot can still run.
@@ -522,7 +522,7 @@ sub pickServer {
         $self->{server_port} = 6667;
     }
 
-    $self->{logger}->log(3, "Using host $self->{server_hostname}, port $self->{server_port}");
+    $self->{logger}->log(4, "Using host $self->{server_hostname}, port $self->{server_port}");
 }
 
 # Log a hint to run ./configure if no server is set
@@ -825,7 +825,7 @@ sub mbCommandPublic(@) {
 
     # Dispatch known command
     if (my $handler = $command_map{$cmd}) {
-        $self->{logger}->log(3, "PUBLIC: $sNick triggered $sCommand on $sChannel");
+        $self->{logger}->log(4, "PUBLIC: $sNick triggered $sCommand on $sChannel");
         $handler->();
         return;
     }
@@ -838,7 +838,7 @@ sub mbCommandPublic(@) {
     if ($botNickTriggered) {
         mbHandleNickTriggered($ctx, join(" ", $sCommand, @tArgs));
     } else {
-        $self->{logger}->log(3, "Public command '$sCommand' not found");
+        $self->{logger}->log(4, "Public command '$sCommand' not found");
     }
 }
 
@@ -1033,11 +1033,11 @@ sub mbCommandPrivate {
     );
 
     if (my $handler = $command_table{$sCommand}) {
-        $self->{logger}->log(3, "PRIVATE: $sNick triggered $sCommand");
+        $self->{logger}->log(4, "PRIVATE: $sNick triggered $sCommand");
         return $handler->();
     }
 
-    $self->{logger}->log(3, $message->prefix . " Private command '$sCommand' not found");
+    $self->{logger}->log(4, $message->prefix . " Private command '$sCommand' not found");
     return undef;
 }
 
