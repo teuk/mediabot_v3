@@ -284,9 +284,20 @@ MODS["USER"]="MODIFY \`id_user\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, MODIFY
 MODS["USER_CHANNEL"]="MODIFY \`id_user_channel\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, MODIFY \`id_user\` BIGINT UNSIGNED NOT NULL, MODIFY \`id_channel\` BIGINT UNSIGNED NOT NULL, MODIFY \`level\` BIGINT UNSIGNED NOT NULL DEFAULT 0"
 MODS["USER_LEVEL"]="MODIFY \`id_user_level\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT"
 MODS["WEBLOG"]="MODIFY \`id_weblog\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT"
-MODS["YOMOMMA"]="ADD PRIMARY KEY (\`id_yomomma\`) IGNORE, MODIFY \`id_yomomma\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT"
+MODS["YOMOMMA"]="MODIFY \`id_yomomma\` BIGINT UNSIGNED NOT NULL"
 MODS["MP3"]="MODIFY \`id_mp3\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, MODIFY \`id_user\` BIGINT UNSIGNED NOT NULL"
 MODS["USER_HOSTMASK"]="MODIFY \`id_user_hostmask\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, MODIFY \`id_user\` BIGINT UNSIGNED NOT NULL"
+
+# YOMOMMA : add PK if missing, then MODIFY
+if table_exists "YOMOMMA"; then
+    HAS_PK=$(mysql_q "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='YOMOMMA' AND CONSTRAINT_TYPE='PRIMARY KEY';")
+    if [[ "$HAS_PK" -eq 0 ]]; then
+        mysql_cmd "ALTER TABLE \`YOMOMMA\` ADD PRIMARY KEY (\`id_yomomma\`);"
+        ok "YOMOMMA: PRIMARY KEY added"
+    fi
+    mysql_cmd "ALTER TABLE \`YOMOMMA\` MODIFY \`id_yomomma\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT;"
+    ok "YOMOMMA: BIGINT UNSIGNED"
+fi
 
 for TBL in "${!MODS[@]}"; do
     if table_exists "$TBL"; then
@@ -350,6 +361,22 @@ for TBL in ACTIONS_LOG CHANNEL_LOG CHANNEL_FLOOD CHANNEL_SET BADWORDS IGNORES QU
     fi
 done
 
+# Tables where id_channel=0 means "global/no channel" but FK requires real id
+# CHANNEL_FLOOD and CHANNEL_SET with id_channel=0 are orphaned — delete them
+for TBL in CHANNEL_FLOOD CHANNEL_SET; do
+    if table_exists "$TBL"; then
+        ZERO=$(mysql_q "SELECT COUNT(*) FROM \`$TBL\` WHERE \`id_channel\` = 0;")
+        if [[ "$ZERO" -gt 0 ]]; then
+            warn "$TBL: $ZERO rows with id_channel=0 (no real channel) — deleting"
+            mysql_cmd "DELETE FROM \`$TBL\` WHERE \`id_channel\` = 0;"
+            ok "$TBL: rows with id_channel=0 removed"
+        fi
+    fi
+done
+
+# IGNORES with id_channel=0 are global ignores — keep them (FK allows 0 via default)
+# Instead skip FK for IGNORES id_channel since 0 = global scope
+
 # ===========================================================================
 # P10 — Foreign keys
 # ===========================================================================
@@ -379,7 +406,7 @@ add_fk fk_channel_flood_chan    CHANNEL_FLOOD    id_channel                  CHA
 add_fk fk_channel_set_channel  CHANNEL_SET      id_channel                  CHANNEL     id_channel     CASCADE     CASCADE
 add_fk fk_channel_set_chanset  CHANNEL_SET      id_chanset_list             CHANSET_LIST id_chanset_list CASCADE   CASCADE
 add_fk fk_badwords_channel     BADWORDS         id_channel                  CHANNEL     id_channel     CASCADE     CASCADE
-add_fk fk_ignores_channel      IGNORES          id_channel                  CHANNEL     id_channel     CASCADE     CASCADE
+# fk_ignores_channel skipped: id_channel=0 means global scope (no real channel ref)
 add_fk fk_quotes_channel       QUOTES           id_channel                  CHANNEL     id_channel     CASCADE     CASCADE
 add_fk fk_quotes_user          QUOTES           id_user                     USER        id_user        CASCADE     CASCADE
 add_fk fk_pc_user              PUBLIC_COMMANDS  id_user                     USER        id_user        "SET NULL"  CASCADE
