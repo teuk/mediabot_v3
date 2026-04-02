@@ -284,7 +284,7 @@ MODS["USER"]="MODIFY \`id_user\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, MODIFY
 MODS["USER_CHANNEL"]="MODIFY \`id_user_channel\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, MODIFY \`id_user\` BIGINT UNSIGNED NOT NULL, MODIFY \`id_channel\` BIGINT UNSIGNED NOT NULL, MODIFY \`level\` BIGINT UNSIGNED NOT NULL DEFAULT 0"
 MODS["USER_LEVEL"]="MODIFY \`id_user_level\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT"
 MODS["WEBLOG"]="MODIFY \`id_weblog\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT"
-MODS["YOMOMMA"]="MODIFY \`id_yomomma\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT"
+MODS["YOMOMMA"]="ADD PRIMARY KEY (\`id_yomomma\`) IGNORE, MODIFY \`id_yomomma\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT"
 MODS["MP3"]="MODIFY \`id_mp3\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, MODIFY \`id_user\` BIGINT UNSIGNED NOT NULL"
 MODS["USER_HOSTMASK"]="MODIFY \`id_user_hostmask\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, MODIFY \`id_user\` BIGINT UNSIGNED NOT NULL"
 
@@ -321,6 +321,34 @@ add_index CHANNEL_SET      idx_channel_set_chanset   '`id_chanset_list`'
 add_index IGNORES          idx_ignores_channel       '`id_channel`'
 add_index MP3              idx_mp3_user              '`id_user`'
 add_index SERVERS          idx_servers_network       '`id_network`'
+
+# ===========================================================================
+# P9b — Purge orphaned rows before adding foreign keys
+# ===========================================================================
+log "P9b — Purging orphaned rows (id_channel references)"
+
+for TBL in ACTIONS_LOG CHANNEL_LOG CHANNEL_FLOOD CHANNEL_SET BADWORDS IGNORES QUOTES RESPONDERS; do
+    if table_exists "$TBL"; then
+        COL="id_channel"
+        # Check if column exists in this table
+        if col_exists "$TBL" "$COL"; then
+            ORPHANS=$(mysql_q "SELECT COUNT(*) FROM \`$TBL\` WHERE \`$COL\` IS NOT NULL AND \`$COL\` NOT IN (SELECT id_channel FROM CHANNEL) AND \`$COL\` != 0;")
+            if [[ "$ORPHANS" -gt 0 ]]; then
+                warn "$TBL: $ORPHANS orphaned rows with invalid id_channel — setting to NULL or 0"
+                # Tables with NOT NULL id_channel get 0 (global scope), others get NULL
+                NULL_OK=$(mysql_q "SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='$TBL' AND COLUMN_NAME='id_channel';")
+                if [[ "$NULL_OK" == "YES" ]]; then
+                    mysql_cmd "UPDATE \`$TBL\` SET \`id_channel\` = NULL WHERE \`id_channel\` IS NOT NULL AND \`id_channel\` NOT IN (SELECT id_channel FROM CHANNEL);"
+                else
+                    mysql_cmd "UPDATE \`$TBL\` SET \`id_channel\` = 0 WHERE \`id_channel\` NOT IN (SELECT id_channel FROM CHANNEL) AND \`id_channel\` != 0;"
+                fi
+                ok "$TBL: orphans cleaned"
+            else
+                skip "$TBL: no orphaned rows"
+            fi
+        fi
+    fi
+done
 
 # ===========================================================================
 # P10 — Foreign keys
