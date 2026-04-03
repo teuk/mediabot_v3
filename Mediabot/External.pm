@@ -7,6 +7,7 @@ package Mediabot::External;
 use strict;
 use warnings;
 use POSIX qw(strftime);
+use Time::HiRes qw(usleep);
 use List::Util qw(min);
 use Exporter 'import';
 use Encode qw(encode);
