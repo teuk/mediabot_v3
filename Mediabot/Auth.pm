@@ -45,11 +45,15 @@ sub verify_credentials {
     my $dbh = $self->{dbh};
 
     # Resolve the user row
-    my ($where, $val) = ($user_id_or_nick =~ /^\d+$/)
-        ? ('id_user = ?', $user_id_or_nick)
-        : ('nickname = ?', $user_id_or_nick);
-
-    my $sql = "SELECT id_user, nickname, password FROM USER WHERE $where";
+    # Determine lookup key: numeric = id_user, otherwise nickname
+    my ($sql, $val);
+    if ($user_id_or_nick =~ /^\d+$/) {
+        $sql = "SELECT id_user, nickname, password FROM USER WHERE id_user = ?";
+        $val = $user_id_or_nick;
+    } else {
+        $sql = "SELECT id_user, nickname, password FROM USER WHERE nickname = ?";
+        $val = $user_id_or_nick;
+    }
     my $row;
     eval {
         my $sth = $dbh->prepare($sql);
@@ -200,10 +204,15 @@ sub _resolve_user {
     }
     # Scalar -> assume id first, then nickname
     if (defined $user_like && $user_like ne '') {
-        my ($where, $val) = ($user_like =~ /^\d+$/)
-            ? ('id_user = ?', $user_like)
-            : ('nickname = ?', $user_like);
-        my $sth = $dbh->prepare("SELECT id_user, nickname, username, hostmasks FROM USER WHERE $where");
+        my ($sql_r, $val);
+        if ($user_like =~ /^\d+$/) {
+            $sql_r = "SELECT id_user, nickname, username, hostmasks FROM USER WHERE id_user = ?";
+            $val   = $user_like;
+        } else {
+            $sql_r = "SELECT id_user, nickname, username, hostmasks FROM USER WHERE nickname = ?";
+            $val   = $user_like;
+        }
+        my $sth = $dbh->prepare($sql_r);
         $sth->execute($val);
         my $row = $sth->fetchrow_hashref;
         $sth->finish;

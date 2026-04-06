@@ -83,6 +83,9 @@ sub _start_listener {
                 login         => '',
                 level         => undef,
                 level_desc    => '',
+                # Rate limiting: max 10 commands per 5 seconds
+                rate_window   => time(),
+                rate_count    => 0,
             };
             $self->{streams}{$id} = $stream;
 
@@ -147,6 +150,19 @@ sub _handle_line {
     my ($self, $stream, $id, $line) = @_;
 
     my $session = $self->{users}{$id};
+
+    # ---- Rate limiting : max 10 commands per 5 seconds -------------------
+    my $now = time();
+    if ($now - ($session->{rate_window} // $now) >= 5) {
+        $session->{rate_window} = $now;
+        $session->{rate_count}  = 0;
+    }
+    $session->{rate_count}++;
+    if ($session->{rate_count} > 10) {
+        $self->{bot}->{logger}->log(2, "Partyline: rate limit hit for fd=$id login=" . ($session->{login} || 'anon'));
+        $stream->write("Rate limit exceeded. Slow down.\r\n");
+        return;
+    }
 
     # ---- Not yet authenticated : only accept "login" ----------------------
     unless ($session->{authenticated}) {
@@ -404,7 +420,8 @@ sub _cmd_part {
 }
 
 # ---------------------------------------------------------------------------
-# .nick <newnick>
+# .nick <newnick>  — Master level required (already enforced by login,
+#                    but validated explicitly here for clarity)
 # ---------------------------------------------------------------------------
 sub _cmd_nick {
     my ($self, $stream, $id, $newnick) = @_;
@@ -414,6 +431,12 @@ sub _cmd_nick {
 
     unless ($bot->{irc} && $bot->{irc}->is_connected) {
         $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    # Validate nick: IRC nicks must not contain spaces or control chars
+    unless ($newnick =~ /^[A-Za-z\[\]\\\`_\^\{\|\}][A-Za-z0-9\[\]\\\`_\-\^\{\|\}]{0,14}$/) {
+        $stream->write("Invalid nick format.\r\n");
         return;
     }
 

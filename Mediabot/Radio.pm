@@ -77,13 +77,14 @@ sub getRadioCurrentSong(@) {
 		$JSON_STATUS_URL = "https://$RADIO_HOSTNAME/$RADIO_JSON";
 	}
 	
-	unless (open ICECAST_STATUS_JSON, "curl --connect-timeout 3 -f -s $JSON_STATUS_URL |") {
+	my $fh_icecast;
+	unless (open $fh_icecast, "-|", "curl", "--connect-timeout", "3", "-f", "-s", $JSON_STATUS_URL) {
 		return "N/A";
 	}
 	
 	my $line;
-	if (defined($line = <ICECAST_STATUS_JSON>)) {
-		close ICECAST_STATUS_JSON;
+	if (defined($line = <$fh_icecast>)) {
+		close $fh_icecast;
 		chomp($line);
 		my $json = decode_json $line;
 		my $source_data = $json->{'icestats'}{'source'};
@@ -954,14 +955,16 @@ sub playRadio(@) {
 							   	delay => 3,
 							   	on_expire => sub {
 										$self->{logger}->log(4,"Timer start, downloading $ytUrl");
-										#/usr/local/bin/yt-dlp -x --audio-format mp3 --audio-quality 0 https://www.youtube.com/watch?v=JRDgihVDEko
-										unless ( open YT, "/usr/local/bin/yt-dlp -x --audio-format mp3 --audio-quality 0 $ytUrl |" ) {
-				                    		$self->{logger}->log(0,"Could not yt-dlp $ytUrl");
+										my $ytdlp_bin1 = $self->{conf}->get('radio.YTDLP_PATH') || '/usr/bin/yt-dlp';
+										my $fh_yt1;
+										unless ( open $fh_yt1, "-|", $ytdlp_bin1,
+										    "-x", "--audio-format", "mp3", "--audio-quality", "0", $ytUrl ) {
+				                    		$self->{logger}->log(0,"Could not run yt-dlp for $ytUrl");
 				                    		return undef;
 				            			}
 				            			my $ytdlOuput;
 				            
-										while (defined($ytdlOuput=<YT>)) {
+										while (defined($ytdlOuput=<$fh_yt1>)) {
 												chomp($ytdlOuput);
 												if ( $ytdlOuput =~ /^\[ExtractAudio\] Destination: (.*)$/ ) {
 													$ytDestinationFile = $1;
@@ -991,7 +994,7 @@ sub playRadio(@) {
 												$self->{logger}->log(1,"Error : " . $DBI::errstr . " Query : " . $sQuery);
 											}
 											else {
-												$id_mp3 = $sth->{ mysql_insertid };
+												$id_mp3 = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
 												$self->{logger}->log(4,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
 											}
 											$sth->finish;
@@ -1151,15 +1154,18 @@ sub playRadio(@) {
 										delay => 3,
 										on_expire => sub {
 												$self->{logger}->log(4,"Timer start, downloading $ytUrl");
-												unless ( open YT, "youtube-dl --extract-audio --audio-format mp3 --add-metadata $ytUrl |" ) {
-													$self->{logger}->log(0,"Could not youtube-dl $ytUrl");
+												my $ytdlp_bin2 = $self->{conf}->get('radio.YTDLP_PATH') || '/usr/bin/yt-dlp';
+												my $fh_yt2;
+												unless ( open $fh_yt2, "-|", $ytdlp_bin2,
+												    "-x", "--audio-format", "mp3", "--audio-quality", "0", $ytUrl ) {
+													$self->{logger}->log(0,"Could not run yt-dlp for $ytUrl");
 													return undef;
 												}
 												my $ytdlOuput;
 												my $ytDestinationFile;
-												while (defined($ytdlOuput=<YT>)) {
+												while (defined($ytdlOuput=<$fh_yt2>)) {
 														chomp($ytdlOuput);
-														if ( $ytdlOuput =~ /^\[ffmpeg\] Destination: (.*)$/ ) {
+														if ( $ytdlOuput =~ /^\[ExtractAudio\] Destination: (.*)$/ ) {
 															$ytDestinationFile = $1;
 															$self->{logger}->log(0,"Downloaded mp3 : $incomingDir/$ytDestinationFile");
 															
@@ -1186,7 +1192,7 @@ sub playRadio(@) {
 														$self->{logger}->log(1,"Error : " . $DBI::errstr . " Query : " . $sQuery);
 													}
 													else {
-														$id_mp3 = $sth->{ mysql_insertid };
+														$id_mp3 = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
 														$self->{logger}->log(4,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
 													}
 													$sth->finish;
@@ -1408,15 +1414,18 @@ sub playRadio(@) {
 											on_expire => sub {
 													$self->{logger}->log(4,"Timer start, downloading $ytUrl");
 													
-													unless ( open YT, "youtube-dl --extract-audio --audio-format mp3 --add-metadata $ytUrl |" ) {
-														$self->{logger}->log(0,"Could not youtube-dl $ytUrl");
+													my $ytdlp_bin3 = $self->{conf}->get('radio.YTDLP_PATH') || '/usr/bin/yt-dlp';
+													my $fh_yt3;
+													unless ( open $fh_yt3, "-|", $ytdlp_bin3,
+													    "-x", "--audio-format", "mp3", "--audio-quality", "0", $ytUrl ) {
+														$self->{logger}->log(0,"Could not run yt-dlp for $ytUrl");
 														return undef;
 													}
 													my $ytdlOuput;
 													my $ytDestinationFile;
-													while (defined($ytdlOuput=<YT>)) {
+													while (defined($ytdlOuput=<$fh_yt3>)) {
 															chomp($ytdlOuput);
-															if ( $ytdlOuput =~ /^\[ffmpeg\] Destination: (.*)$/ ) {
+															if ( $ytdlOuput =~ /^\[ExtractAudio\] Destination: (.*)$/ ) {
 																$ytDestinationFile = $1;
 																$self->{logger}->log(0,"Downloaded mp3 : $incomingDir/$ytDestinationFile");
 																
@@ -1443,7 +1452,7 @@ sub playRadio(@) {
 															$self->{logger}->log(1,"Error : " . $DBI::errstr . " Query : " . $sQuery);
 														}
 														else {
-															$id_mp3 = $sth->{ mysql_insertid };
+															$id_mp3 = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
 															$self->{logger}->log(4,"Added : $artist - Title : $title - Youtube ID : $id_youtube");
 														}
 														$sth->finish;

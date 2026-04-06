@@ -67,7 +67,10 @@ sub getYoutubeDetails(@) {
 			$self->{logger}->log(0,"getYoutubeDetails() YOUTUBE_APIKEY=key");
 			return undef;
 		}
-		unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\" |" ) {
+		my $yt_url = "https://www.googleapis.com/youtube/v3/videos"
+		           . "?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status";
+		my $fh_yt;
+		unless ( open $fh_yt, "-|", "curl", "--connect-timeout", "5", "-f", "-s", $yt_url ) {
 			$self->{logger}->log(3,"getYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 		}
 		else {
@@ -78,7 +81,7 @@ sub getYoutubeDetails(@) {
 			my $sDururationSeconds;
 			my $sViewCount;
 			my $json_details;
-			while(defined($line=<YOUTUBE_INFOS>)) {
+			while(defined($line=<$fh_yt>)) {
 				chomp($line);
 				$json_details .= $line;
 				$self->{logger}->log(5,"getYoutubeDetails() $line");

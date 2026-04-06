@@ -196,7 +196,7 @@ sub mbQuoteAdd {
 	unless ($sth->execute($id_channel, ($iMatchingUserId && $iMatchingUserId =~ /^\d+$/ ? $iMatchingUserId : 0), $sQuoteText)) {
 		$self->{logger}->log(1, "SQL Error: $DBI::errstr | Query: $sQuery");
 	} else {
-		my $id_inserted = String::IRC->new($sth->{mysql_insertid})->bold;
+		my $id_inserted = String::IRC->new($sth->{Database}->last_insert_id(undef, undef, undef, undef))->bold;
 		my $prefix = defined($sMatchingUserHandle) ? "($sMatchingUserHandle) " : "";
 		botPrivmsg($self, $sChannel, "$prefix" . "done. (id: $id_inserted)");
 		logBot($self, $message, $sChannel, "q add", @tArgs);

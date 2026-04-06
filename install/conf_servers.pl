@@ -164,7 +164,7 @@ if (defined($CONN_SERVER_NETWORK) && ($CONN_SERVER_NETWORK ne "")) {
 				exit 10;
 			}
 			else {
-				$id_network = $sth->{ mysql_insertid };
+				$id_network = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
 				log_messageln("Added network $CONN_SERVER_NETWORK_OLD in database (id_network : $id_network)");
 				$CONN_SERVER_NETWORK = $CONN_SERVER_NETWORK_OLD;
 			}
@@ -287,7 +287,7 @@ sub addIrcNetwork(@) {
 			exit 10;
 		}
 		else {
-			$id_network = $sth->{ mysql_insertid };
+			$id_network = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
 			$sNetworkName = $line;
 			log_messageln("Added network $line in database (id_network : $id_network)");
 		}
@@ -305,7 +305,7 @@ sub addIrcServer(@) {
 		exit 10;
 	}
 	else {
-		$id_server = $sth->{ mysql_insertid };
+		$id_server = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
 		log_messageln("IRC Server $line added in SERVERS table with id : $id_server");
 	}
 	return $id_server;

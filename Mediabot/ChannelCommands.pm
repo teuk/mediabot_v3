@@ -3009,19 +3009,19 @@ sub mbChannelLog_ctx {
         push @bind,  $pattern;
     }
 
+    # $where_sql contains only hardcoded column references with ? placeholders
+    # All user-supplied values go into @bind — no interpolation of user data
     my $where_sql = join(' AND ', @where);
 
     my $limit = 5;    # show up to 5 matches
-    $limit = 1 if $limit < 1;
+    $limit = int($limit < 1 ? 1 : $limit);  # ensure positive integer
 
-    my $sql = <<"SQL";
-SELECT cl.ts, cl.nick, cl.publictext
-FROM CHANNEL_LOG cl
-JOIN CHANNEL c ON c.id_channel = cl.id_channel
-WHERE $where_sql
-ORDER BY cl.ts DESC
-LIMIT $limit
-SQL
+    my $sql = "SELECT cl.ts, cl.nick, cl.publictext\n"
+            . "FROM CHANNEL_LOG cl\n"
+            . "JOIN CHANNEL c ON c.id_channel = cl.id_channel\n"
+            . "WHERE $where_sql\n"
+            . "ORDER BY cl.ts DESC\n"
+            . "LIMIT $limit\n";
 
     my $sth = $self->{dbh}->prepare($sql);
     unless ($sth && $sth->execute(@bind)) {

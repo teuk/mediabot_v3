@@ -614,7 +614,7 @@ sub userAdd {
         return undef;
     }
 
-    my $id = $dbh->{mysql_insertid} || eval { $dbh->last_insert_id(undef, undef, 'USER', 'id_user') };
+    my $id = $dbh->last_insert_id(undef, undef, undef, undef);
     $logger->log(0, "✅ userAdd() created user '$nickname' (id_user=$id, level_id=$level_id)");
     return $id;
 }
@@ -758,7 +758,7 @@ sub setChannelAntiFlood {
 			return;
 		}
 
-		my $id_channel_flood = $sth->{mysql_insertid};
+		my $id_channel_flood = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
 		$self->{logger}->log(4, "setChannelAntiFlood() AntiFlood record created, id_channel_flood : $id_channel_flood");
 
 		$sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
@@ -2719,12 +2719,14 @@ sub whereis(@) {
 	unless (defined($userIP) && ($userIP =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/)) {
 		return "N/A";
 	}
-	unless (open WHEREIS, "curl --connect-timeout 3 -f -s https://api.country.is/$userIP |") {
+	my $fh_whereis;
+	unless (open $fh_whereis, "-|", "curl", "--connect-timeout", "3", "-f", "-s",
+	        "https://api.country.is/$userIP") {
 		return "N/A";
 	}
 	my $line;
-	if (defined($line=<WHEREIS>)) {
-		close WHEREIS;
+	if (defined($line=<$fh_whereis>)) {
+		close $fh_whereis;
 		chomp($line);
 		my $json = decode_json $line;
 		my $country = $json->{'country'};

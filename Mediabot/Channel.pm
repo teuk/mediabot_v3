@@ -184,7 +184,7 @@ sub create_in_db {
     my ($self) = @_;
     my $sth = $self->{dbh}->prepare("INSERT INTO CHANNEL (name, description, auto_join) VALUES (?, ?, ?)");
     if ($sth->execute($self->{name}, $self->{description} || $self->{name}, 1)) {
-        $self->{id} = $sth->{mysql_insertid};
+        $self->{id} = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
         return $self->{id};
     } else {
         return undef;

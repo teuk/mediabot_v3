@@ -187,6 +187,14 @@ sub mbAddTimer_ctx {
 
     my $cmd = join(' ', @raw);
 
+    # Validate IRC command: must start with a known safe IRC verb
+    my @allowed_verbs = qw(PRIVMSG NOTICE JOIN PART TOPIC MODE KICK INVITE WHO WHOIS PING PONG);
+    my ($verb) = ($cmd =~ /^(\S+)/);
+    unless (defined $verb && grep { uc($verb) eq $_ } @allowed_verbs) {
+        $self->botNotice($nick, "Timer command must start with a valid IRC verb (" . join(', ', @allowed_verbs) . ")");
+        return;
+    }
+
     $self->{hTimers} ||= {};
     if (exists $self->{hTimers}{$name}) {
         $self->botNotice($nick, "Timer $name already exists");
