@@ -142,7 +142,7 @@ sub getIdUserLevel(@) {
 
 sub getLevelUser(@) {
 	my ($self,$sUserHandle) = @_;
-	my $sQuery = "SELECT level FROM USER,USER_LEVEL WHERE USER.id_user_level=USER_LEVEL.id_user_level AND nickname like ?";
+	my $sQuery = "SELECT USER_LEVEL.level FROM USER JOIN USER_LEVEL ON USER_LEVEL.id_user_level = USER.id_user_level WHERE USER.nickname LIKE ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sUserHandle)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -171,9 +171,8 @@ sub userCstat_ctx {
 
     my $query = q{
         SELECT USER.nickname, USER_LEVEL.description
-        FROM USER, USER_LEVEL
-        WHERE USER.id_user_level = USER_LEVEL.id_user_level
-          AND USER.auth = 1
+        FROM USER JOIN USER_LEVEL ON USER_LEVEL.id_user_level = USER.id_user_level
+        WHERE USER.auth = 1
         ORDER BY USER_LEVEL.level
     };
 
@@ -309,9 +308,8 @@ sub userInfo_ctx {
 
     my $sQuery = q{
         SELECT *
-        FROM USER, USER_LEVEL
-        WHERE USER.id_user_level = USER_LEVEL.id_user_level
-          AND nickname LIKE ?
+        FROM USER JOIN USER_LEVEL ON USER_LEVEL.id_user_level = USER.id_user_level
+        WHERE USER.nickname LIKE ?
         LIMIT 1
     };
 
@@ -435,7 +433,7 @@ sub addUserHost_ctx {
 # Context-based addchan command: add a new channel and register it with a user (Administrator only)
 sub getUserChannelLevel(@) {
 	my ($self,$message,$sChannel,$id_user) = @_;
-	my $sQuery = "SELECT level FROM CHANNEL,USER_CHANNEL WHERE CHANNEL.id_channel=USER_CHANNEL.id_channel AND name=? AND id_user=?";
+	my $sQuery = "SELECT USER_CHANNEL.level FROM CHANNEL JOIN USER_CHANNEL ON USER_CHANNEL.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ? AND USER_CHANNEL.id_user = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$id_user)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -756,11 +754,10 @@ sub userTopSay_ctx {
 
     my $sql = <<'SQL';
 SELECT event_type, publictext, COUNT(publictext) as hit
-FROM CHANNEL, CHANNEL_LOG
-WHERE (event_type='public' OR event_type='action')
-  AND CHANNEL.id_channel = CHANNEL_LOG.id_channel
-  AND name = ?
-  AND nick LIKE ?
+FROM CHANNEL JOIN CHANNEL_LOG ON CHANNEL_LOG.id_channel = CHANNEL.id_channel
+WHERE (CHANNEL_LOG.event_type = 'public' OR CHANNEL_LOG.event_type = 'action')
+  AND CHANNEL.name = ?
+  AND CHANNEL_LOG.nick LIKE ?
 GROUP BY publictext
 ORDER BY hit DESC
 LIMIT 30

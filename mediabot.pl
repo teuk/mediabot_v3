@@ -533,7 +533,7 @@ sub on_timer_tick {
     }
     elsif ((time - $mediabot->getLastRadioPub()) > $radioPubDelay ) {
         my $sQuery = "SELECT CHANNEL.name FROM CHANNEL JOIN CHANNEL_SET ON CHANNEL_SET.id_channel=CHANNEL.id_channel JOIN CHANSET_LIST ON CHANSET_LIST.id_chanset_list=CHANNEL_SET.id_chanset_list WHERE CHANSET_LIST.chanset = 'RadioPub'";
-        my $sth = $mediabot->getDbh->prepare($sQuery);
+        my $sth = $mediabot->{db}->ensure_connected()->prepare($sQuery);
         unless ($sth->execute()) {
             $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
         }
@@ -563,7 +563,7 @@ if (defined($mediabot->{conf}->get('main.RANDOM_QUOTE'))) {
     }
     elsif ((time - $mediabot->getLastRandomQuote()) > $randomQuoteDelay ) {
         my $sQuery = "SELECT CHANNEL.name FROM CHANNEL JOIN CHANNEL_SET ON CHANNEL_SET.id_channel=CHANNEL.id_channel JOIN CHANSET_LIST ON CHANSET_LIST.id_chanset_list=CHANNEL_SET.id_chanset_list WHERE CHANSET_LIST.chanset = 'RandomQuote'";
-        my $sth = $mediabot->getDbh->prepare($sQuery);
+        my $sth = $mediabot->{db}->ensure_connected()->prepare($sQuery);
         unless ($sth->execute()) {
             $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
         }
@@ -571,8 +571,8 @@ if (defined($mediabot->{conf}->get('main.RANDOM_QUOTE'))) {
             while (my $ref = $sth->fetchrow_hashref()) {
                 my $curChannel = $ref->{'name'};
                 $mediabot->{logger}->log(4,"RandomQuote on $curChannel");
-                my $sQuery = "SELECT * FROM QUOTES,CHANNEL,USER WHERE QUOTES.id_channel=CHANNEL.id_channel AND QUOTES.id_user=USER.id_user AND CHANNEL.name=? ORDER BY RAND() LIMIT 1";
-                my $sth2 = $mediabot->getDbh->prepare($sQuery);
+                my $sQuery = "SELECT QUOTES.* FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel JOIN USER ON USER.id_user = QUOTES.id_user WHERE CHANNEL.name = ? ORDER BY RAND() LIMIT 1";
+                my $sth2 = $mediabot->{db}->ensure_connected()->prepare($sQuery);
                 unless ($sth2->execute($curChannel)) {
                     $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
                 }
@@ -1092,7 +1092,7 @@ sub on_message_WHO(@) {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_WHO', $message);
     my ($target_name) = @{$hints}{qw<target_name>};
-    $mediabot->{logger}->log(0,"on_message_WHO() $target_name");
+    $mediabot->{logger}->log(3,"on_message_WHO() $target_name");
 }
 
 sub on_message_WHOIS(@) {
@@ -1100,14 +1100,14 @@ sub on_message_WHOIS(@) {
     log_debug_args('on_message_WHOIS', $message);
     $mediabot->{logger}->log(4, "on_message_WHOIS() prefix=" . ($message->prefix // "?") . " command=" . ($message->command // "?"));
     my ($target_name) = @{$hints}{qw<target_name>};
-    $mediabot->{logger}->log(0,"on_message_WHOIS() $target_name");
+    $mediabot->{logger}->log(3,"on_message_WHOIS() $target_name");
 }
 
 sub on_message_WHOWAS {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_WHOWAS', $message);
     my ($target_name) = @{$hints}{qw<target_name>};
-    $mediabot->{logger}->log(0,"on_message_WHOWAS() $target_name");
+    $mediabot->{logger}->log(3,"on_message_WHOWAS() $target_name");
 }
                 
 sub on_message_JOIN {
@@ -1227,7 +1227,7 @@ sub on_message_RPL_WHOISUSER {
                         }
                         else {
                             my $sQuery = "UPDATE USER SET auth=1 WHERE nickname=?";
-                            my $sth = $mediabot->getDbh->prepare($sQuery);
+                            my $sth = $mediabot->{db}->ensure_connected()->prepare($sQuery);
                             unless ($sth->execute($sMatchingUserHandle)) {
                                 $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
                             }
@@ -1259,8 +1259,8 @@ sub on_message_RPL_WHOISUSER {
                         }
                         else {
                             $mediabot->botNotice($WHOIS_VARS{'caller'},"USER: $sMatchingUserHandle ACCESS: $iChannelUserLevelAccess");
-                            my $sQuery = "SELECT automode,greet FROM USER,USER_CHANNEL,CHANNEL WHERE CHANNEL.id_channel=USER_CHANNEL.id_channel AND USER.id_user=USER_CHANNEL.id_user AND nickname like ? AND CHANNEL.name=?";
-                            my $sth = $mediabot->getDbh->prepare($sQuery);
+                            my $sQuery = "SELECT automode, greet FROM USER JOIN USER_CHANNEL ON USER_CHANNEL.id_user = USER.id_user JOIN CHANNEL ON CHANNEL.id_channel = USER_CHANNEL.id_channel WHERE USER.nickname LIKE ? AND CHANNEL.name = ?";
+                            my $sth = $mediabot->{db}->ensure_connected()->prepare($sQuery);
                             unless ($sth->execute($sMatchingUserHandle,$WHOIS_VARS{'channel'})) {
                                 $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
                             }

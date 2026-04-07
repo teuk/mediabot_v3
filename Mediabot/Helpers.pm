@@ -338,7 +338,7 @@ sub botPrivmsg {
         $self->{logger}->log(0, "[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
 
         # Badword filtering
-        my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel = BADWORDS.id_channel AND name = ?";
+        my $sQuery = "SELECT badword FROM CHANNEL JOIN BADWORDS ON BADWORDS.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ?";
         my $sth = $self->{dbh}->prepare($sQuery);
 
         unless ($sth->execute($sTo)) {
@@ -406,7 +406,7 @@ sub botAction(@) {
 					}
 				}
 				$self->{logger}->log(0,"[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
-				my $sQuery = "SELECT badword FROM CHANNEL,BADWORDS WHERE CHANNEL.id_channel=BADWORDS.id_channel AND name=?";
+				my $sQuery = "SELECT badword FROM CHANNEL JOIN BADWORDS ON BADWORDS.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($sTo) ) {
 					$self->{logger}->log(1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -652,7 +652,7 @@ sub partChannel {
 # Check if a user has a specific level on a channel
 sub checkUserChannelLevel(@) {
 	my ($self,$message,$sChannel,$id_user,$level) = @_;
-	my $sQuery = "SELECT level FROM CHANNEL,USER_CHANNEL WHERE CHANNEL.id_channel=USER_CHANNEL.id_channel AND name=? AND id_user=?";
+	my $sQuery = "SELECT level FROM CHANNEL JOIN USER_CHANNEL ON USER_CHANNEL.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ? AND USER_CHANNEL.id_user = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$id_user)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -679,7 +679,7 @@ sub checkUserChannelLevel(@) {
 # Join a channel (Administrator+ OR channel-level >= 450)
 sub getIdUserChannelLevel(@) {
 	my ($self,$sUserHandle,$sChannel) = @_;
-	my $sQuery = "SELECT USER.id_user,USER_CHANNEL.level FROM CHANNEL,USER,USER_CHANNEL WHERE CHANNEL.id_channel=USER_CHANNEL.id_channel AND USER.id_user=USER_CHANNEL.id_user AND USER.nickname=? AND CHANNEL.name=?";
+	my $sQuery = "SELECT USER.id_user, USER_CHANNEL.level FROM CHANNEL JOIN USER_CHANNEL ON USER_CHANNEL.id_channel = CHANNEL.id_channel JOIN USER ON USER.id_user = USER_CHANNEL.id_user WHERE USER.nickname = ? AND CHANNEL.name = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sUserHandle,$sChannel)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -704,7 +704,7 @@ sub getIdUserChannelLevel(@) {
 sub getUserChannelLevelByName(@) {
 	my ($self,$sChannel,$sHandle) = @_;
 	my $iChannelUserLevel = 0;
-	my $sQuery = "SELECT level FROM USER,USER_CHANNEL,CHANNEL WHERE USER.id_user=USER_CHANNEL.id_user AND USER_CHANNEL.id_channel=CHANNEL.id_channel AND CHANNEL.name=? AND USER.nickname=?";
+	my $sQuery = "SELECT USER_CHANNEL.level FROM USER JOIN USER_CHANNEL ON USER_CHANNEL.id_user = USER.id_user JOIN CHANNEL ON CHANNEL.id_channel = USER_CHANNEL.id_channel WHERE CHANNEL.name = ? AND USER.nickname = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$sHandle)) {
 		$self->{logger}->log(1,"getUserChannelLevelByName() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -2305,7 +2305,7 @@ sub isIgnored(@) {
 		}
 	}
 	$sth->finish;
-	$sCheckQuery = "SELECT * FROM IGNORES,CHANNEL WHERE IGNORES.id_channel=CHANNEL.id_channel AND CHANNEL.name like ?";
+	$sCheckQuery = "SELECT IGNORES.* FROM IGNORES JOIN CHANNEL ON CHANNEL.id_channel = IGNORES.id_channel WHERE CHANNEL.name LIKE ?";
 	$sth = $self->{dbh}->prepare($sCheckQuery);
 	unless ($sth->execute($sChannel)) {
 		$self->{logger}->log(1,"isIgnored() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);

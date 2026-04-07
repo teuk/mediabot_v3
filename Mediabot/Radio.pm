@@ -2278,7 +2278,7 @@ sub radioPub(@) {
 	
 	# Check channels with chanset +RadioPub
 	if (defined($self->{conf}->get('radio.RADIO_HOSTNAME'))) {	
-		my $sQuery = "SELECT name FROM CHANNEL,CHANNEL_SET,CHANSET_LIST WHERE CHANNEL.id_channel=CHANNEL_SET.id_channel AND CHANNEL_SET.id_chanset_list=CHANSET_LIST.id_chanset_list AND CHANSET_LIST.chanset LIKE 'RadioPub'";
+		my $sQuery = "SELECT CHANNEL.name FROM CHANNEL JOIN CHANNEL_SET ON CHANNEL_SET.id_channel = CHANNEL.id_channel JOIN CHANSET_LIST ON CHANSET_LIST.id_chanset_list = CHANNEL_SET.id_chanset_list WHERE CHANSET_LIST.chanset = 'RadioPub'";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute()) {
 			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);

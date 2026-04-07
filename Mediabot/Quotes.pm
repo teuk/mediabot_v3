@@ -164,7 +164,7 @@ sub mbQuoteAdd {
 	my $sQuoteText = join(" ", @tArgs);
 
 	# Check for existing quote on this channel
-	my $sQuery = "SELECT * FROM QUOTES, CHANNEL WHERE CHANNEL.id_channel = QUOTES.id_channel AND name = ? AND quotetext LIKE ?";
+	my $sQuery = "SELECT QUOTES.* FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? AND QUOTES.quotetext LIKE ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel, $sQuoteText)) {
 		$self->{logger}->log(1, "SQL Error: $DBI::errstr | Query: $sQuery");
@@ -212,7 +212,7 @@ sub mbQuoteDel(@) {
 		botNotice($self,$sNick,"q [del or q] id");
 	}
 	else {
-		my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? AND id_quotes=?";
+		my $sQuery = "SELECT QUOTES.* FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name LIKE ? AND QUOTES.id_quotes = ?";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($sChannel,$id_quotes)) {
 			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -292,7 +292,7 @@ sub mbQuoteSearch(@) {
 	else {
 		my $MAXQUOTES = 50;
 		my $sQuoteText = join(" ",@tArgs);
-		my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name=?";
+		my $sQuery = "SELECT QUOTES.* FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ?";
 		my $sth = $self->{dbh}->prepare($sQuery);
 		unless ($sth->execute($sChannel)) {
 			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -342,7 +342,7 @@ sub mbQuoteSearch(@) {
 
 sub mbQuoteRand(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my $sQuery = "SELECT * FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? ORDER BY RAND() LIMIT 1";
+	my $sQuery = "SELECT QUOTES.* FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name LIKE ? ORDER BY RAND() LIMIT 1";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -367,7 +367,7 @@ sub mbQuoteRand(@) {
 
 sub mbQuoteStats(@) {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my $sQuery = "SELECT count(*) as nbQuotes FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ?";
+	my $sQuery = "SELECT COUNT(*) AS nbQuotes FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name LIKE ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -379,7 +379,7 @@ sub mbQuoteStats(@) {
 				botPrivmsg($self,$sChannel,"Quote database is empty for $sChannel");
 			}
 			else {
-				$sQuery = "SELECT UNIX_TIMESTAMP(ts) as minDate FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? ORDER by ts LIMIT 1";
+				$sQuery = "SELECT UNIX_TIMESTAMP(ts) AS minDate FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name LIKE ? ORDER BY ts LIMIT 1";
 				$sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($sChannel)) {
 					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -387,7 +387,7 @@ sub mbQuoteStats(@) {
 				else {
 					if (my $ref = $sth->fetchrow_hashref()) {
 						my $minDate = $ref->{'minDate'};
-						$sQuery = "SELECT UNIX_TIMESTAMP(ts) as maxDate FROM QUOTES,CHANNEL WHERE CHANNEL.id_channel=QUOTES.id_channel AND name like ? ORDER by ts DESC LIMIT 1";
+						$sQuery = "SELECT UNIX_TIMESTAMP(ts) AS maxDate FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name LIKE ? ORDER BY ts DESC LIMIT 1";
 						$sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($sChannel)) {
 							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);

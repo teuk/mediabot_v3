@@ -62,9 +62,9 @@ sub getYoutubeDetails(@) {
 		$self->{logger}->log(4,"getYoutubeDetails() sYoutubeId = $sYoutubeId");
 		my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
 		unless (defined($APIKEY) && ($APIKEY ne "")) {
-			$self->{logger}->log(0,"getYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
-			$self->{logger}->log(0,"getYoutubeDetails() section [main]");
-			$self->{logger}->log(0,"getYoutubeDetails() YOUTUBE_APIKEY=key");
+			$self->{logger}->log(1,"getYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
+			$self->{logger}->log(1,"getYoutubeDetails() section [main]");
+			$self->{logger}->log(1,"getYoutubeDetails() YOUTUBE_APIKEY=key");
 			return undef;
 		}
 		my $yt_url = "https://www.googleapis.com/youtube/v3/videos"
@@ -210,8 +210,8 @@ sub displayYoutubeDetails(@) {
 
     my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
     unless (defined($APIKEY) && $APIKEY ne '') {
-        $self->{logger}->log(0, "displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
-        $self->{logger}->log(0, "displayYoutubeDetails() section [main] YOUTUBE_APIKEY=key");
+        $self->{logger}->log(1, "displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
+        $self->{logger}->log(1, "displayYoutubeDetails() section [main] YOUTUBE_APIKEY=key");
         return undef;
     }
 
@@ -599,7 +599,7 @@ sub youtubeSearch_ctx {
     my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
 
     unless (defined($APIKEY) && $APIKEY ne "") {
-        $self->{logger}->log(0, "youtubeSearch_ctx() YOUTUBE_APIKEY not set in ".$self->{config_file});
+        $self->{logger}->log(1, "youtubeSearch_ctx() YOUTUBE_APIKEY not set in ".$self->{config_file});
         return;
     }
 
@@ -747,7 +747,7 @@ sub fortniteStats_ctx {
     # API key from config
     my $api_key = eval { $self->{conf}->get('fortnite.API_KEY') } // '';
     unless ($api_key) {
-        $self->{logger}->log(0, "fortniteStats_ctx(): fortnite.API_KEY is undefined in config file");
+        $self->{logger}->log(1, "fortniteStats_ctx(): fortnite.API_KEY is undefined in config file");
         return;
     }
 
@@ -955,14 +955,14 @@ sub chatGPT(@) {
     );
 
     unless ($http_response->{success}) {
-        $self->{logger}->log(0, "chatGPT() HTTP error: $http_response->{status} $http_response->{reason}");
+        $self->{logger}->log(1, "chatGPT() HTTP error: $http_response->{status} $http_response->{reason}");
         botPrivmsg($self, $chan, "($nick) Sorry, API did not answer.");
         return;
     }
 
     my $response = $http_response->{content};
     unless ($response) {
-        $self->{logger}->log(0, "chatGPT() empty response from API");
+        $self->{logger}->log(1, "chatGPT() empty response from API");
         botPrivmsg($self, $chan, "($nick) Sorry, API did not answer.");
         return;
     }
@@ -1056,7 +1056,7 @@ sub mbTMDBSearch_ctx {
 
     my $api_key = $conf->get('tmdb.API_KEY');
     unless (defined($api_key) && $api_key ne "") {
-        $self->{logger}->log(0, "tmdb.API_KEY is undefined in config file");
+        $self->{logger}->log(1, "tmdb.API_KEY is undefined in config file");
         botNotice($self, $nick, "TMDB API key is missing in the configuration.");
         return;
     }

@@ -2325,10 +2325,11 @@ sub userAccessChannel_ctx {
 
     botNotice($self, $nick, "USER: $target ACCESS: $iAccess");
 
-    my $sQuery = "SELECT automode,greet FROM USER,USER_CHANNEL,CHANNEL "
-               . "WHERE CHANNEL.id_channel=USER_CHANNEL.id_channel "
-               . "AND USER.id_user=USER_CHANNEL.id_user "
-               . "AND nickname like ? AND CHANNEL.name=?";
+    my $sQuery = "SELECT automode, greet"
+               . " FROM USER"
+               . " JOIN USER_CHANNEL ON USER_CHANNEL.id_user = USER.id_user"
+               . " JOIN CHANNEL ON CHANNEL.id_channel = USER_CHANNEL.id_channel"
+               . " WHERE USER.nickname LIKE ? AND CHANNEL.name = ?";
 
     my $sth = $self->{dbh}->prepare($sQuery);
     unless ($sth && $sth->execute($target, $chan)) {
@@ -2898,7 +2899,7 @@ sub getChannelOwner {
 
 	my $id_channel = $channel_obj->get_id;
 
-	my $sQuery = "SELECT nickname FROM USER,USER_CHANNEL WHERE USER.id_user = USER_CHANNEL.id_user AND id_channel = ? AND USER_CHANNEL.level = 500";
+	my $sQuery = "SELECT USER.nickname FROM USER JOIN USER_CHANNEL ON USER_CHANNEL.id_user = USER.id_user WHERE USER_CHANNEL.id_channel = ? AND USER_CHANNEL.level = 500";
 	my $sth = $self->{dbh}->prepare($sQuery);
 
 	unless ($sth->execute($id_channel)) {
