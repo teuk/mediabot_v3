@@ -23,7 +23,6 @@ use Mediabot::AdminCommands;
 use Time::HiRes qw(usleep);
 use Config::Simple;
 use Date::Parse;
-use Data::Dumper;
 use DBI;
 use Switch;
 use Memory::Usage;
@@ -36,7 +35,6 @@ use utf8;
 use HTML::Tree;
 use URL::Encode qw(url_encode_utf8 url_encode url_decode_utf8);
 use HTML::Entities '%entity2char';
-use HTML::Entities qw(decode_entities);
 # Let's comment this out for now (in case noone reads the README)
 #use MP3::Tag;
 use File::Basename;
@@ -50,7 +48,6 @@ use Try::Tiny;
 use URI::Escape qw(uri_escape_utf8 uri_escape);
 use List::Util qw/min/;
 use Carp qw(croak);
-use Encode qw(encode);
 use HTTP::Tiny;
 
 

@@ -160,4 +160,18 @@ sub dbh {
     return $self->{dbh};
 }
 
+# ensure_connected() — verify DB handle is alive, reconnect if needed
+# Call this before any critical DB operation in long-running event loops
+sub ensure_connected {
+    my ($self) = @_;
+    my $dbh = $self->{dbh};
+
+    # Quick path: handle exists and ping succeeds
+    return $dbh if $dbh && eval { $dbh->ping };
+
+    $self->{logger}->log(1, "DB connection lost — reconnecting...") if $self->{logger};
+    $self->_connect;
+    return $self->{dbh};
+}
+
 1;

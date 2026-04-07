@@ -248,7 +248,7 @@ sub create {
         return undef;
     }
 
-    $logger->log(3, "🆕 Creating user: nickname=$nickname, hostmasks=$hostmasks, level=$level") if $logger;
+    $logger->log(1, "🆕 Creating user: nickname=$nickname, level=$level") if $logger;
 
     # Determine level ID
     my $level_id;
@@ -278,19 +278,33 @@ sub create {
     }
     $sth_check->finish;
 
-    # Insert new user
+    # Insert new user (no longer stores hostmasks in USER — they go in USER_HOSTMASK)
     my $sth_insert = $dbh->prepare("
-        INSERT INTO USER (hostmasks, nickname, password, username, id_user_level, info1, info2, auth)
-        VALUES (?, ?, ?, NULL, ?, ?, ?, 0)
+        INSERT INTO USER (nickname, password, username, id_user_level, info1, info2, auth)
+        VALUES (?, ?, NULL, ?, ?, ?, 0)
     ");
     my $pass_db = defined $password ? $password : undef;
-    my $ok = $sth_insert->execute($hostmasks, $nickname, $pass_db, $level_id, $info1, $info2);
-    $sth_insert->finish;
+    my $ok = $sth_insert->execute($nickname, $pass_db, $level_id, $info1, $info2);
 
     unless ($ok) {
+        $sth_insert->finish;
         carp "Failed to insert user $nickname";
         $logger->log(1, "❌ Failed to insert user $nickname") if $logger;
         return undef;
+    }
+
+    # Capture id immediately before any other statement
+    my $new_id = $sth_insert->{ Database }->last_insert_id(undef, undef, undef, undef);
+    $sth_insert->finish;
+
+    # Store hostmask in USER_HOSTMASK
+    if ($new_id && $hostmasks) {
+        for my $mask (grep { length } split /,/, $hostmasks) {
+            $mask =~ s/^\s+|\s+$//g;
+            my $hm = $dbh->prepare("INSERT INTO USER_HOSTMASK (id_user, hostmask) VALUES (?, ?)");
+            $hm->execute($new_id, $mask);
+            $hm->finish;
+        }
     }
 
     # Fetch the newly created user
@@ -305,7 +319,7 @@ sub create {
     my $user_obj = $class->new($row);
     $user_obj->load_level($dbh);
 
-    $logger->log(0, "✅ User created: $nickname (id_user=" . $user_obj->id . ", level=" . $user_obj->level_description . ")") if $logger;
+    $logger->log(1, "✅ User created: $nickname (id_user=" . $user_obj->id . ", level=" . $user_obj->level_description . ")") if $logger;
 
     return $user_obj;
 }

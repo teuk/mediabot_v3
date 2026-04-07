@@ -13,7 +13,6 @@ use warnings;
 use diagnostics;
 use Date::Format;
 use File::Basename;
-use Data::Dumper;
 use Getopt::Long;
 use DBI;
 

@@ -89,7 +89,11 @@ sub getYoutubeDetails(@) {
 			}
 			if (defined($json_details) && ($json_details ne "")) {
 				$self->{logger}->log(4,"getYoutubeDetails() json_details : $json_details");
-				my $sYoutubeInfo = decode_json $json_details;
+				my $sYoutubeInfo = eval { decode_json $json_details };
+				if ($@ || !defined $sYoutubeInfo) {
+					$self->{logger}->log(3, "getYoutubeDetails() JSON decode error: $@");
+					return undef;
+				}
 				my %hYoutubeInfo = %$sYoutubeInfo;
 				my @tYoutubeItems = $hYoutubeInfo{'items'};
 				my @fTyoutubeItems = @{$tYoutubeItems[0]};

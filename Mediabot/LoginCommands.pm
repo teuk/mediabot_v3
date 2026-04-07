@@ -82,17 +82,15 @@ sub checkAuth(@) {
 	}
 	else {	
 		if (my $ref = $sth->fetchrow_hashref()) {
-			my $sQuery = "UPDATE USER SET auth=1 WHERE id_user=?";
+			# Single UPDATE: set auth=1 and last_login in one statement
+			my $sQuery = "UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?";
 			my $sth2 = $self->{dbh}->prepare($sQuery);
 			unless ($sth2->execute($iUserId)) {
 				$self->{logger}->log(1,"checkAuth() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+				$sth2->finish;
 				return 0;
 			}
-			$sQuery = "UPDATE USER SET last_login=? WHERE id_user =?";
-			$sth = $self->{dbh}->prepare($sQuery);
-			unless ($sth->execute(strftime('%Y-%m-%d %H:%M:%S', localtime(time)),$iUserId)) {
-				$self->{logger}->log(1,"checkAuth() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-			}
+			$sth2->finish;
 			return 1;
 		}
 		else {
@@ -234,7 +232,7 @@ sub mbRegister_ctx {
         my ($id_console_chan, $console_name) = getConsoleChan($self);
         if (defined $id_console_chan && defined $console_name) {
             registerChannel($self, $ctx->message, $nick, $id_console_chan, $id);
-            $self->{logger}->log(0, "Register: auto-registered $user (id=$id) on console channel $console_name at level 500");
+            $self->{logger}->log(1, "Register: auto-registered $user (id=$id) on console channel $console_name at level 500");
         } else {
             $self->{logger}->log(1, "Register: could not find console channel to auto-register $user");
         }

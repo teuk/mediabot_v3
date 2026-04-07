@@ -34,11 +34,18 @@ our @EXPORT = qw(
 
 sub init_hailo(@) {
 	my ($self) = shift;
-	$self->{logger}->log(0,"Initialize Hailo");
-	my $hailo = Hailo->new(
-		brain => 'mediabot_v3.brn',
-		save_on_exit => 1,
-	);
+	$self->{logger}->log(1, "Initialize Hailo");
+	my $hailo = eval {
+		Hailo->new(
+			brain        => 'mediabot_v3.brn',
+			save_on_exit => 1,
+		);
+	};
+	if ($@) {
+		$self->{logger}->log(0, "❌ Hailo init failed: $@");
+		$self->{hailo} = undef;
+		return;
+	}
 	$self->{hailo} = $hailo;
 }
 
@@ -376,11 +383,15 @@ sub set_hailo_channel_ratio {
 
 	unless ($sth->execute($id_channel)) {
 		$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+		$sth->finish;
 		return undef;
 	}
 
-	if (my $ref = $sth->fetchrow_hashref()) {
-		# Entry exists, update ratio
+	my $ref_check = $sth->fetchrow_hashref();
+	$sth->finish;
+
+	if ($ref_check) {
+		# Entry exists — update ratio
 		$sQuery = "UPDATE HAILO_CHANNEL SET ratio = ? WHERE id_channel = ?";
 		$sth = $self->{dbh}->prepare($sQuery);
 

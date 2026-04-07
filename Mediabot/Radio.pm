@@ -979,10 +979,19 @@ sub playRadio(@) {
 											my $id_youtube = substr($filename,-15);
 											$id_youtube = substr($id_youtube,0,11);
 
-											my $mp3 = MP3::Tag->new("$incomingDir/$ytDestinationFile");
-											$mp3->get_tags;
-											my ($title, $track, $artist, $album, $comment, $year, $genre) = $mp3->autoinfo();
-											$mp3->close;
+											my ($title, $artist) = ('', '');
+											eval {
+												if (defined &MP3::Tag::new) {
+													my $mp3 = MP3::Tag->new("$incomingDir/$ytDestinationFile");
+													$mp3->get_tags;
+													my ($t, undef, $a) = $mp3->autoinfo();
+													$mp3->close;
+													$title  = $t // '';
+													$artist = $a // '';
+												}
+											};
+											if ($@) { $self->{logger}->log(1, "MP3::Tag error: $@") }
+											my ($track, $album, $comment, $year, $genre) = ('', '', '', '', '');
 											if ($title eq $id_youtube) {
 												$title = "";
 											}
@@ -1178,10 +1187,19 @@ sub playRadio(@) {
 													my $id_youtube = substr($filename,-15);
 													$id_youtube = substr($id_youtube,0,11);
 													$self->{logger}->log(4,"Destination : $incomingDir/$ytDestinationFile");
-													my $mp3 = MP3::Tag->new("$incomingDir/$ytDestinationFile");
-													$mp3->get_tags;
-													my ($title, $track, $artist, $album, $comment, $year, $genre) = $mp3->autoinfo();
-													$mp3->close;
+													my ($title, $artist) = ('', '');
+													eval {
+														if (defined &MP3::Tag::new) {
+															my $t_mp3 = MP3::Tag->new("$incomingDir/$ytDestinationFile");
+															$t_mp3->get_tags;
+															my ($t, undef, $a) = $t_mp3->autoinfo();
+															$t_mp3->close;
+															$title  = $t // '';
+															$artist = $a // '';
+														}
+													};
+													if ($@) { $self->{logger}->log(1, "MP3::Tag error: $@") }
+													my ($track, $album, $comment, $year, $genre) = ('', '', '', '', '');
 													if ($title eq $id_youtube) {
 														$title = "";
 													}
@@ -1438,10 +1456,19 @@ sub playRadio(@) {
 														my $id_youtube = substr($filename,-15);
 														$id_youtube = substr($id_youtube,0,11);
 														$self->{logger}->log(4,"Destination : $incomingDir/$ytDestinationFile");
-														my $mp3 = MP3::Tag->new("$incomingDir/$ytDestinationFile");
-														$mp3->get_tags;
-														my ($title, $track, $artist, $album, $comment, $year, $genre) = $mp3->autoinfo();
-														$mp3->close;
+														my ($title, $artist) = ('', '');
+														eval {
+															if (defined &MP3::Tag::new) {
+																my $t_mp3 = MP3::Tag->new("$incomingDir/$ytDestinationFile");
+																$t_mp3->get_tags;
+																my ($t, undef, $a) = $t_mp3->autoinfo();
+																$t_mp3->close;
+																$title  = $t // '';
+																$artist = $a // '';
+															}
+														};
+														if ($@) { $self->{logger}->log(1, "MP3::Tag error: $@") }
+														my ($track, $album, $comment, $year, $genre) = ('', '', '', '', '');
 														if ($title eq $id_youtube) {
 															$title = "";
 														}

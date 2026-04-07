@@ -185,20 +185,22 @@ sub _resolve_user {
         my $uid  = eval { $user_like->id } // eval { $user_like->{id} };
         my $nick = eval { $user_like->nickname } // eval { $user_like->{nickname} };
         if ($uid) {
-            my $sth = $dbh->prepare("SELECT id_user, nickname, username, hostmasks FROM USER WHERE id_user=?");
+            my $sth = $dbh->prepare("SELECT id_user, nickname, username FROM USER WHERE id_user=?");
             $sth->execute($uid);
             my $row = $sth->fetchrow_hashref;
             $sth->finish;
-            return ($row, undef) if $row;
-            return (undef, "object_id_not_found:$uid");
+            return (undef, "object_id_not_found:$uid") unless $row;
+            $row->{hostmasks} = _fetch_hostmasks($dbh, $row->{id_user});
+            return ($row, undef);
         }
         if ($nick) {
-            my $sth = $dbh->prepare("SELECT id_user, nickname, username, hostmasks FROM USER WHERE nickname=?");
+            my $sth = $dbh->prepare("SELECT id_user, nickname, username FROM USER WHERE nickname=?");
             $sth->execute($nick);
             my $row = $sth->fetchrow_hashref;
             $sth->finish;
-            return ($row, undef) if $row;
-            return (undef, "object_nick_not_found:$nick");
+            return (undef, "object_nick_not_found:$nick") unless $row;
+            $row->{hostmasks} = _fetch_hostmasks($dbh, $row->{id_user});
+            return ($row, undef);
         }
         return (undef, "unknown_object_type");
     }
@@ -206,23 +208,38 @@ sub _resolve_user {
     if (defined $user_like && $user_like ne '') {
         my ($sql_r, $val);
         if ($user_like =~ /^\d+$/) {
-            $sql_r = "SELECT id_user, nickname, username, hostmasks FROM USER WHERE id_user = ?";
+            $sql_r = "SELECT id_user, nickname, username FROM USER WHERE id_user = ?";
             $val   = $user_like;
         } else {
-            $sql_r = "SELECT id_user, nickname, username, hostmasks FROM USER WHERE nickname = ?";
+            $sql_r = "SELECT id_user, nickname, username FROM USER WHERE nickname = ?";
             $val   = $user_like;
         }
         my $sth = $dbh->prepare($sql_r);
         $sth->execute($val);
         my $row = $sth->fetchrow_hashref;
         $sth->finish;
-        return ($row, undef) if $row;
-        return (undef, "scalar_not_found:$user_like");
+        return (undef, "scalar_not_found:$user_like") unless $row;
+        $row->{hostmasks} = _fetch_hostmasks($dbh, $row->{id_user});
+        return ($row, undef);
     }
     return (undef, "undef_input");
 }
 
 # Returns (ok:boolean, why:string)
+# Internal helper: fetch comma-separated hostmasks from USER_HOSTMASK
+sub _fetch_hostmasks {
+    my ($dbh, $id_user) = @_;
+    return '' unless $dbh && $id_user;
+    my $sth = $dbh->prepare("SELECT hostmask FROM USER_HOSTMASK WHERE id_user = ? ORDER BY id_user_hostmask");
+    return '' unless $sth && $sth->execute($id_user);
+    my @masks;
+    while (my $row = $sth->fetchrow_arrayref) {
+        push @masks, $row->[0] if defined $row->[0] && $row->[0] ne '';
+    }
+    $sth->finish;
+    return join(',', @masks);
+}
+
 sub _password_matches {
     my ($clear, $stored) = @_;
 

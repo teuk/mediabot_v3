@@ -82,7 +82,7 @@ sub onStartTimers(@) {
 			my $duration = $ref->{'duration'};
 			my $command = $ref->{'command'};
 			my $sSecondText = ( $duration > 1 ? "seconds" : "second" );
-			$self->{logger}->log(0,"Timer $name - id : $id_timers - every $duration $sSecondText - command $command");
+			$self->{logger}->log(1,"Timer $name - id : $id_timers - every $duration $sSecondText - command $command");
 			my $timer = IO::Async::Timer::Periodic->new(
 			    interval => $duration,
 			    on_tick => sub {
@@ -97,10 +97,10 @@ sub onStartTimers(@) {
 		}
 		if ( $i ) {
 			my $sTimerText = ( $i > 1 ? "timers" : "timer" );
-			$self->{logger}->log(0,"$i active $sTimerText set at startup");
+			$self->{logger}->log(1,"$i active $sTimerText set at startup");
 		}
 		else {
-			$self->{logger}->log(0,"No timer to set at startup");
+			$self->{logger}->log(1,"No timer to set at startup");
 		}
 	}
 	$sth->finish;
@@ -817,7 +817,6 @@ sub mbDbCommand(@) {
 	$sth->finish;
 }
 
-use POSIX qw(strftime);
 
 # Display the bot birth date and its age (Context version)
 sub mbDbMvCommand_ctx {

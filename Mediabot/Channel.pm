@@ -64,6 +64,7 @@ sub get_user_level {
     });
 
     if ($sth->execute($self->{id}, $nickname)) {
+    $sth->finish;
         if (my $ref = $sth->fetchrow_hashref) {
             $level = $ref->{level};
         }
@@ -93,6 +94,7 @@ sub get_user_info {
     });
 
     if ($sth->execute($self->{id}, $nickname)) {
+    $sth->finish;
         if (my $ref = $sth->fetchrow_hashref) {
             $info->{level}    = $ref->{level}    if defined $ref->{level};
             $info->{automode} = $ref->{automode} if defined $ref->{automode};
@@ -119,6 +121,7 @@ sub set_topic {
 
     my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET topic=? WHERE id_channel=?");
     $sth->execute($new_topic, $self->{id});
+    $sth->finish;
     $self->{topic} = $new_topic;
 }
 
@@ -129,6 +132,7 @@ sub set_tmdb_lang {
 
     my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET tmdb_lang=? WHERE id_channel=?");
     $sth->execute($new_lang, $self->{id});
+    $sth->finish;
     $self->{tmdb_lang} = $new_lang;
 }
 
@@ -138,6 +142,7 @@ sub set_key {
     return unless defined $new_key;
     my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET `key`=? WHERE id_channel=?");
     $sth->execute($new_key, $self->{id});
+    $sth->finish;
     $self->{key} = $new_key;
 }
 
@@ -147,6 +152,7 @@ sub set_description {
     return unless defined $new_description;
     my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET description=? WHERE id_channel=?");
     $sth->execute($new_description, $self->{id});
+    $sth->finish;
     $self->{description} = $new_description;
 }
 
@@ -156,6 +162,7 @@ sub set_chanmode {
     return unless defined $new_chanmode;
     my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET chanmode=? WHERE id_channel=?");
     $sth->execute($new_chanmode, $self->{id});
+    $sth->finish;
     $self->{chanmode} = $new_chanmode;
 }
 
@@ -165,6 +172,7 @@ sub set_auto_join {
     return unless defined $new_auto_join;
     my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET auto_join=? WHERE id_channel=?");
     $sth->execute($new_auto_join, $self->{id});
+    $sth->finish;
     $self->{auto_join} = $new_auto_join;
 }
 
@@ -176,6 +184,7 @@ sub exists_in_db {
     my ($self) = @_;
     my $sth = $self->{dbh}->prepare("SELECT id FROM CHANNEL WHERE name = ?");
     $sth->execute($self->{name});
+    $sth->finish;
     my ($id) = $sth->fetchrow_array;
     return $id;
 }
@@ -184,6 +193,7 @@ sub create_in_db {
     my ($self) = @_;
     my $sth = $self->{dbh}->prepare("INSERT INTO CHANNEL (name, description, auto_join) VALUES (?, ?, ?)");
     if ($sth->execute($self->{name}, $self->{description} || $self->{name}, 1)) {
+    $sth->finish;
         $self->{id} = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
         return $self->{id};
     } else {

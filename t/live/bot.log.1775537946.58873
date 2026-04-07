@@ -1,0 +1,516 @@
++--------------------------------------------------------------------------------+
+| Mediabot log started at Mon Apr  6 15:50:42 2026
++--------------------------------------------------------------------------------+
+[06/04/2026 15:50:42] [INFO] Reading local version from VERSION file...
+[06/04/2026 15:50:42] [INFO] -> Mediabot devel version 3.0 (20260406_135510)
+[06/04/2026 15:50:42] [INFO] Checking latest version from GitHub...
+[06/04/2026 15:50:42] [INFO] Loading configuration from '/home/mediabot/mediabot_v3/t/live/test.conf'
+[06/04/2026 15:50:42] [INFO] Configuration loaded successfully
+[06/04/2026 15:50:42] [INFO] Reading local version from VERSION file...
+[06/04/2026 15:50:42] [INFO] -> Mediabot devel version 3.0 (20260406_135510)
+[06/04/2026 15:50:42] [INFO] Checking latest version from GitHub...
+[06/04/2026 15:50:42] [INFO] -> GitHub devel version 3.0 (20260406_135510)
+[06/04/2026 15:50:42] [INFO] Mediabot is up to date.
+[06/04/2026 15:50:42] [INFO] Mediabot v3.0dev-20260406_135510 started in foreground with debug level 0
+[06/04/2026 15:50:42] [INFO] Logged out all users
+[06/04/2026 15:50:42] [INFO] Populating channel objects
+[06/04/2026 15:50:42] [INFO] Picked localhost:6667 from Network TestNetwork
+[06/04/2026 15:50:42] [INFO] Connection nick: mbtest_6509
+[06/04/2026 15:50:42] [INFO] Trying to connect to localhost:6667 (pass : none defined)
+[06/04/2026 15:50:42] [INFO] Connection nick: mbtest_6509
+[06/04/2026 15:50:42] [INFO] -> GitHub devel version 3.0 (20260406_135510)
+[06/04/2026 15:50:42] [INFO] Mediabot is up to date.
+[06/04/2026 15:50:42] [INFO] mediabot_v3 Copyright (C) 2019-2025 teuk
+[06/04/2026 15:50:42] [INFO] Mediabot v3.0dev-20260406_135510 starting with config file /home/mediabot/mediabot_v3/t/live/test.conf
+[06/04/2026 15:50:42] [INFO] Mediabot v3.0dev-20260406_135510 started in foreground with debug level 0
+[06/04/2026 15:50:42] [INFO] Logged out all users
+[06/04/2026 15:50:42] [INFO] Populating channel objects
+[06/04/2026 15:50:42] [INFO] Picked localhost:6667 from Network TestNetwork
+[06/04/2026 15:50:42] [INFO] Connection nick: mbtest_6509
+[06/04/2026 15:50:42] [INFO] Trying to connect to localhost:6667 (pass : none defined)
+[06/04/2026 15:50:42] [INFO] Connection nick: mbtest_6509
+[06/04/2026 15:50:42] [INFO] *** Checking Ident
+[06/04/2026 15:50:42] [INFO] *** Got ident response
+[06/04/2026 15:50:43] [INFO] on_login() Connected to irc server localhost
+[06/04/2026 15:50:43] [INFO] Checking timers to set at startup
+[06/04/2026 15:50:43] [INFO] on_login() Setting user mode +i
+[06/04/2026 15:50:43] [INFO] Warning: no console channel found in database (description = 'console'). You may want to run configure script again.
+[06/04/2026 15:50:43] [INFO] Auto join channels
+[06/04/2026 15:50:43] [INFO] Trying to join #mbtest
+[06/04/2026 15:50:43] [INFO] 001 Welcome to the teuk.org IRC Network, mbtest_6509
+[06/04/2026 15:50:43] [INFO] 002 Your host is teuk.org, running version u2.10.12.19
+[06/04/2026 15:50:43] [INFO] 003 This server was created ven. 06 juin CEST at 2025 22:25:45
+[06/04/2026 15:50:43] [INFO] 004 server=mbtest_6509 version=teuk.org user_modes=u2.10.12.19 chan_modes=diOoswkgx
+[06/04/2026 15:50:42] [INFO] *** Checking Ident
+[06/04/2026 15:50:42] [INFO] *** Got ident response
+[06/04/2026 15:50:43] [INFO] on_login() Connected to irc server localhost
+[06/04/2026 15:50:43] [INFO] Checking timers to set at startup
+[06/04/2026 15:50:43] [INFO] on_login() Setting user mode +i
+[06/04/2026 15:50:43] [INFO] Warning: no console channel found in database (description = 'console'). You may want to run configure script again.
+[06/04/2026 15:50:43] [INFO] Auto join channels
+[06/04/2026 15:50:43] [INFO] Trying to join #mbtest
+[06/04/2026 15:50:43] [INFO] 001 Welcome to the teuk.org IRC Network, mbtest_6509
+[06/04/2026 15:50:43] [INFO] 002 Your host is teuk.org, running version u2.10.12.19
+[06/04/2026 15:50:43] [INFO] 003 This server was created ven. 06 juin CEST at 2025 22:25:45
+[06/04/2026 15:50:43] [INFO] 004 server=mbtest_6509 version=teuk.org user_modes=u2.10.12.19 chan_modes=diOoswkgx
+[06/04/2026 15:50:43] [INFO] 005 WHOX WALLCHOPS WALLVOICES USERIP CPRIVMSG CNOTICE SILENCE=25 MODES=6 MAXCHAN[06/04/2026 15:50:43] [INFO] 005 WHOX WALLCHOPS WALLVOICES USERIP CPRIVMSG CNOTICE SILENCE=25 MODES=6 MAXCHANNELS=10 MAXBANS=100 NICKLEN=12 are supported by this server
+[06/04/2026 15:50:43] [INFO] 005 MAXNICKLEN=15 TOPICLEN=160 AWAYLEN=160 KICKLEN=160 CHANNELLEN=200 MAXCHANNELLEN=200 CHANTYPES=#& PREFIX=(ov)@+ STATUSMSG=@+ CHANMODES=b,k,l,imnpstrDdRcCPM CASEMAPPING=rfc1459 NETWORK=teuk.org are supported by this server
+[06/04/2026 15:50:43] [INFO] -teuk.org- Highest connection count: 8 (8 clients)
+[06/04/2026 15:50:43] [INFO] -teuk.org- on 1 ca 1(4) ft 10(10)
+[06/04/2026 15:50:43] [LIVE] mbtest_6509 sets mode +i
+[06/04/2026 15:50:43] [LIVE] * Now talking in #mbtest
+[06/04/2026 15:50:43] [LIVE] * Now talking in #mbtest
+[06/04/2026 15:50:43] [LIVE] #mbtest: <mbspy_6509> !version
+[06/04/2026 15:50:43] [INFO] Reading local version from VERSION file...
+[06/04/2026 15:50:43] [INFO] -> Mediabot devel version 3.0 (20260406_135510)
+[06/04/2026 15:50:43] [INFO] Checking latest version from GitHub...
+NELS=10 MAXBANS=100 NICKLEN=12 are supported by this server
+[06/04/2026 15:50:43] [INFO] 005 MAXNICKLEN=15 TOPICLEN=160 AWAYLEN=160 KICKLEN=160 CHANNELLEN=200 MAXCHANNELLEN=200 CHANTYPES=#& PREFIX=(ov)@+ STATUSMSG=@+ CHANMODES=b,k,l,imnpstrDdRcCPM CASEMAPPING=rfc1459 NETWORK=teuk.org are supported by this server
+[06/04/2026 15:50:43] [INFO] -teuk.org- Highest connection count: 8 (8 clients)
+[06/04/2026 15:50:43] [INFO] -teuk.org- on 1 ca 1(4) ft 10(10)
+[06/04/2026 15:50:43] [LIVE] mbtest_6509 sets mode +i
+[06/04/2026 15:50:43] [LIVE] * Now talking in #mbtest
+[06/04/2026 15:50:43] [LIVE] * Now talking in #mbtest
+[06/04/2026 15:50:43] [LIVE] #mbtest: <mbspy_6509> !version
+[06/04/2026 15:50:43] [INFO] Reading local version from VERSION file...
+[06/04/2026 15:50:43] [INFO] -> Mediabot devel version 3.0 (20260406_135510)
+[06/04/2026 15:50:43] [INFO] Checking latest version from GitHub...
+[06/04/2026 15:50:43] [INFO] -> GitHub devel version 3.0 (20260406_135510)
+[06/04/2026 15:50:43] [INFO] Mediabot is up to date.
+[06/04/2026 15:50:43] [LIVE] #mbtest:<mbtest_6509> Mediabot version: 3.0dev-20260406_135510
+[06/04/2026 15:50:45] [LIVE] #mbtest: <mbspy_6509> !date
+[06/04/2026 15:50:45] [LIVE] #mbtest:<mbtest_6509> America/New_York : Monday 06/04/2026 15:50:45
+[06/04/2026 15:50:48] [LIVE] #mbtest: <mbspy_6509> !help
+[06/04/2026 15:50:48] [LIVE] #mbtest:<mbtest_6509> Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot
+[06/04/2026 15:50:51] [LIVE] #mbtest: <mbspy_6509> !whoami
+[06/04/2026 15:50:51] [INFO] -> -mbspy_6509- You must be logged in: /msg mbtest_6509 login <username> <password>
+[06/04/2026 15:50:52] [LIVE] #mbtest: <mbspy_6509> !die
+[06/04/2026 15:50:52] [INFO] -> -mbspy_6509- You must be logged in to use this command.
+[06/04/2026 15:50:55] [INFO] -> -mbspy_6509- Login failed (Unknown user).
+[06/04/2026 15:50:43] [INFO] -> GitHub devel version 3.0 (20260406_135510)
+[06/04/2026 15:50:43] [INFO] Mediabot is up to date.
+[06/04/2026 15:50:43] [LIVE] #mbtest:<mbtest_6509> Mediabot version: 3.0dev-20260406_135510
+[06/04/2026 15:50:45] [LIVE] #mbtest: <mbspy_6509> !date
+[06/04/2026 15:50:45] [LIVE] #mbtest:<mbtest_6509> America/New_York : Monday 06/04/2026 15:50:45
+[06/04/2026 15:50:48] [LIVE] #mbtest: <mbspy_6509> !help
+[06/04/2026 15:50:48] [LIVE] #mbtest:<mbtest_6509> Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot
+[06/04/2026 15:50:51] [LIVE] #mbtest: <mbspy_6509> !whoami
+[06/04/2026 15:50:51] [INFO] -> -mbspy_6509- You must be logged in: /msg mbtest_6509 login <username> <password>
+[06/04/2026 15:50:52] [LIVE] #mbtest: <mbspy_6509> !die
+[06/04/2026 15:50:52] [INFO] -> -mbspy_6509- You must be logged in to use this command.
+[06/04/2026 15:50:55] [INFO] -> -mbspy_6509- Login failed (Unknown user).
+[06/04/2026 15:50:56] [INFO] -> -mbspy_6509- Login failed (Unkn[06/04/2026 15:50:56] [INFO] -> -mbspy_6509- Login failed (Unknown user).
+[06/04/2026 15:50:59] [INFO] -> -mbspy_6509- Login failed (Bad password).
+[06/04/2026 15:51:00] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:51:03] [LIVE] mbtest_6509: <mbspy_6509> whoami
+[06/04/2026 15:51:03] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:51:03] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:51:00
+[06/04/2026 15:51:03] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+[06/04/2026 15:51:03] [INFO] -> -mbspy_6509- Hostmasks: mbspy*!*@*
+[06/04/2026 15:51:03] [INFO] -> -mbspy_6509- Infos: N/A | N/A
+[06/04/2026 15:51:04] [LIVE] mbtest_6509: <mbspy_6509> whoami
+[06/04/2026 15:51:04] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:51:04] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:51:00
+[06/04/2026 15:51:04] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+own user).
+[06/04/2026 15:50:59] [INFO] -> -mbspy_6509- Login failed (Bad password).
+[06/04/2026 15:51:00] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:51:03] [LIVE] mbtest_6509: <mbspy_6509> whoami
+[06/04/2026 15:51:03] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:51:03] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:51:00
+[06/04/2026 15:51:03] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+[06/04/2026 15:51:03] [INFO] -> -mbspy_6509- Hostmasks: mbspy*!*@*
+[06/04/2026 15:51:03] [INFO] -> -mbspy_6509- Infos: N/A | N/A
+[06/04/2026 15:51:04] [LIVE] mbtest_6509: <mbspy_6509> whoami
+[06/04/2026 15:51:04] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:51:04] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:51:00
+[06/04/2026 15:51:04] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+[06/04/2026 15:51:04] [INFO] -> -mbspy_650[06/04/2026 15:51:04] [INFO] -> -mbspy_6509- Hostmasks: mbspy*!*@*
+[06/04/2026 15:51:04] [INFO] -> -mbspy_6509- Infos: N/A | N/A
+[06/04/2026 15:51:13] [LIVE] #mbtest: <mbspy_6509> !help
+[06/04/2026 15:51:13] [LIVE] #mbtest:<mbtest_6509> Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot
+[06/04/2026 15:51:23] [LIVE] #mbtest: <mbspy_6509> !help foobar
+[06/04/2026 15:51:23] [LIVE] #mbtest:<mbtest_6509> Help on command foobar is not available (unknown command ?). Please visit https://github.com/teuk/mediabot_v3/wiki
+[06/04/2026 15:51:25] [LIVE] #mbtest: <mbspy_6509> !q
+[06/04/2026 15:51:25] [INFO] -> -mbspy_6509- Quotes syntax:
+[06/04/2026 15:51:25] [INFO] -> -mbspy_6509- q [add or a] text1 | text2 | ... | textn
+[06/04/2026 15:51:25] [INFO] -> -mbspy_6509- q [del or d] id
+[06/04/2026 15:51:25] [INFO] -> -mbspy_6509- q [view or v] id
+[06/04/2026 15:51:25] [INFO] -> -mbspy_6509- q [search or s] text
+[06/04/2026 15:51:25] [INFO] -> -mbspy_6509- q [random or r]
+[06/04/2026 15:51:25] [INFO] -> -mbspy_6509- q stats
+9- Hostmasks: mbspy*!*@*
+[06/04/2026 15:51:04] [INFO] -> -mbspy_6509- Infos: N/A | N/A
+[06/04/2026 15:51:13] [LIVE] #mbtest: <mbspy_6509> !help
+[06/04/2026 15:51:13] [LIVE] #mbtest:<mbtest_6509> Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot
+[06/04/2026 15:51:23] [LIVE] #mbtest: <mbspy_6509> !help foobar
+[06/04/2026 15:51:23] [LIVE] #mbtest:<mbtest_6509> Help on command foobar is not available (unknown command ?). Please visit https://github.com/teuk/mediabot_v3/wiki
+[06/04/2026 15:51:25] [LIVE] #mbtest: <mbspy_6509> !q
+[06/04/2026 15:51:25] [INFO] -> -mbspy_6509- Quotes syntax:
+[06/04/2026 15:51:25] [INFO] -> -mbspy_6509- q [add or a] text1 | text2 | ... | textn
+[06/04/2026 15:51:25] [INFO] -> -mbspy_6509- q [del or d] id
+[06/04/2026 15:51:25] [INFO] -> -mbspy_6509- q [view or v] id
+[06/04/2026 15:51:25] [INFO] -> -mbspy_6509- q [search or s] text
+[06/04/2026 15:51:25] [INFO] -> -mbspy_6509- q [random or r]
+[06/04/2026 15:51:25] [INFO] -> -mbspy_6509- q stats
+[06/04/[06/04/2026 15:51:29] [LIVE] #mbtest: <mbspy_6509> mbtest_6509 how old are you
+[06/04/2026 15:51:29] [LIVE] #mbtest:<mbtest_6509> I was born on 01/05/2019 at 02:42:11. I am 6 years, 11 months, 1 day, 1 hour, 9 minutes, 18 seconds old
+[06/04/2026 15:51:43] [LIVE] #mbtest: <mbspy_6509> mbtest_6509 who is StatiK
+[06/04/2026 15:51:43] [LIVE] #mbtest:<mbtest_6509> StatiK is my big brother mbspy_6509, he's awesome !
+[06/04/2026 15:51:45] [LIVE] #mbtest: <mbspy_6509> mbtest_6509 who is your daddy
+[06/04/2026 15:51:45] [LIVE] #mbtest:<mbtest_6509> I have no clue of who is #mbtest's owner, but Te[u]K's my daddy
+[06/04/2026 15:51:46] [LIVE] #mbtest: <mbspy_6509> !zzz_unknown_xyz
+[06/04/2026 15:51:47] [LIVE] #mbtest: <mbspy_6509> !version
+[06/04/2026 15:51:47] [INFO] Reading local version from VERSION file...
+[06/04/2026 15:51:47] [INFO] -> Mediabot devel version 3.0 (20260406_135510)
+[06/04/2026 15:51:47] [INFO] Checking latest version from GitHub...
+2026 15:51:29] [LIVE] #mbtest: <mbspy_6509> mbtest_6509 how old are you
+[06/04/2026 15:51:29] [LIVE] #mbtest:<mbtest_6509> I was born on 01/05/2019 at 02:42:11. I am 6 years, 11 months, 1 day, 1 hour, 9 minutes, 18 seconds old
+[06/04/2026 15:51:43] [LIVE] #mbtest: <mbspy_6509> mbtest_6509 who is StatiK
+[06/04/2026 15:51:43] [LIVE] #mbtest:<mbtest_6509> StatiK is my big brother mbspy_6509, he's awesome !
+[06/04/2026 15:51:45] [LIVE] #mbtest: <mbspy_6509> mbtest_6509 who is your daddy
+[06/04/2026 15:51:45] [LIVE] #mbtest:<mbtest_6509> I have no clue of who is #mbtest's owner, but Te[u]K's my daddy
+[06/04/2026 15:51:46] [LIVE] #mbtest: <mbspy_6509> !zzz_unknown_xyz
+[06/04/2026 15:51:47] [LIVE] #mbtest: <mbspy_6509> !version
+[06/04/2026 15:51:47] [INFO] Reading local version from VERSION file...
+[06/04/2026 15:51:47] [INFO] -> Mediabot devel version 3.0 (20260406_135510)
+[06/04/2026 15:51:47] [INFO] Checking latest version from GitHub...
+Use of uninitialized value $id_channel in concatenation (.) or string at
+	Mediabot/Helpers.pm line 238 (#1)
+    (W uninitialized) An undefined value was used as if it were already
+    defined.  It was interpreted as a "" or a 0, but maybe it was a mistake.
+    To suppress this warning assign a defined value to your variables.
+    
+    To help you figure out what was undefined, perl will try to tell you
+    the name of the variable (if any) that was undefined.  In some cases
+    it cannot do this, so it also tells you what operation you used the
+    undefined value in.  Note, however, that perl optimizes your program
+    and the operation displayed in the warning may not necessarily appear
+    literally in your program.  For example, "that $foo" is usually
+    optimized into "that " . $foo, and the warning will refer to the
+    concatenation (.) operator, even though there is no . in
+    your program.
+    
+[06/04/2026 15:51:48] [INFO] -> GitHub devel version 3.0 (20260406_135510)
+[06/04/2026 15:51:48] [INFO] Mediabot is up to date.
+[06/04/2026 15:51:48] [LIVE] #mbtest:<mbtest_6509> Mediabot version: 3.0dev-20260406_135510
+[06/04/2026 15:51:48] [LIVE] mbtest_6509: <mbspy_6509> whoami
+[06/04/2026 15:51:48] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:51:48] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:51:00
+[06/04/2026 15:51:48] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+[06/04/2026 15:51:48] [INFO] -> -mbspy_6509- Hostmasks: mbspy*!*@*
+[06/04/2026 15:51:48] [INFO] -> -mbspy_6509- Infos: N/A | N/A
+[06/04/2026 15:51:53] [LIVE] mbtest_6509: <mbspy_6509> chanlist
+[06/04/2026 15:51:53] [INFO] -> -mbspy_6509- [#chan (users)] #mbtest (2) 
+[06/04/2026 15:51:55] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:52:03] [LIVE] mbtest_6509: <mbspy_6509> whoami
+[06/04/2026 15:51:48] [INFO] -> GitHub devel version 3.0 (20260406_135510)
+[06/04/2026 15:51:48] [INFO] Mediabot is up to date.
+[06/04/2026 15:51:48] [LIVE] #mbtest:<mbtest_6509> Mediabot version: 3.0dev-20260406_135510
+[06/04/2026 15:51:48] [LIVE] mbtest_6509: <mbspy_6509> whoami
+[06/04/2026 15:51:48] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:51:48] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:51:00
+[06/04/2026 15:51:48] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+[06/04/2026 15:51:48] [INFO] -> -mbspy_6509- Hostmasks: mbspy*!*@*
+[06/04/2026 15:51:48] [INFO] -> -mbspy_6509- Infos: N/A | N/A
+[06/04/2026 15:51:53] [LIVE] mbtest_6509: <mbspy_6509> chanlist
+[06/04/2026 15:51:53] [INFO] -> -mbspy_6509- [#chan (users)] #mbtest (2) 
+[06/04/2026 15:51:55] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:52:03] [LIVE] mbtest_6509: <mbspy_6509> whoami
+[06/04/2026 15:52:03] [INFO] -> -mbspy_6509- Us[06/04/2026 15:52:03] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:52:03] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:51:55
+[06/04/2026 15:52:03] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+[06/04/2026 15:52:03] [INFO] -> -mbspy_6509- Hostmasks: mbspy*!*@*
+[06/04/2026 15:52:03] [INFO] -> -mbspy_6509- Infos: N/A | N/A
+[06/04/2026 15:52:06] [LIVE] mbtest_6509: <mbspy_6509> whoami
+[06/04/2026 15:52:06] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:52:06] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:51:55
+[06/04/2026 15:52:06] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+[06/04/2026 15:52:06] [INFO] -> -mbspy_6509- Hostmasks: mbspy*!*@*
+[06/04/2026 15:52:06] [INFO] -> -mbspy_6509- Infos: N/A | N/A
+[06/04/2026 15:52:16] [LIVE] mbtest_6509: <mbspy_6509> chanlist
+[06/04/2026 15:52:16] [INFO] -> -mbspy_6509- [#chan (users)] #mbtest (2) 
+er: mboper (Id: 2 - Master)
+[06/04/2026 15:52:03] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:51:55
+[06/04/2026 15:52:03] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+[06/04/2026 15:52:03] [INFO] -> -mbspy_6509- Hostmasks: mbspy*!*@*
+[06/04/2026 15:52:03] [INFO] -> -mbspy_6509- Infos: N/A | N/A
+[06/04/2026 15:52:06] [LIVE] mbtest_6509: <mbspy_6509> whoami
+[06/04/2026 15:52:06] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:52:06] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:51:55
+[06/04/2026 15:52:06] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+[06/04/2026 15:52:06] [INFO] -> -mbspy_6509- Hostmasks: mbspy*!*@*
+[06/04/2026 15:52:06] [INFO] -> -mbspy_6509- Infos: N/A | N/A
+[06/04/2026 15:52:16] [LIVE] mbtest_6509: <mbspy_6509> chanlist
+[06/04/2026 15:52:16] [INFO] -> -mbspy_6509- [#chan (users)] #mbtest (2) 
+[06/04/2026 15:52:26] [LIVE] mbtest_6509: <mbspy_6509> st[06/04/2026 15:52:26] [LIVE] mbtest_6509: <mbspy_6509> status
+atus
+Use of uninitialized value in string eq at Mediabot/Helpers.pm line 791 (#1)
+[06/04/2026 15:52:26] [INFO] -> -mbspy_6509- Mediabot v3.0dev-20260406_135510 Uptime: 01mn 43s
+[06/04/2026 15:52:26] [INFO] -> -mbspy_6509- Memory usage (VM 92.39MB) (Resident 85.95MB) (Shared 10.77MB) (Data+Stack 74.78MB)
+[06/04/2026 15:52:26] [INFO] -> -mbspy_6509- Server: Linux teuk.org 6.19.11 #1 SMP PREEMPT_DYNAMIC Sat Apr  4 10:34:35 CEST 2026 x86_64 GNU/Linux
+[06/04/2026 15:52:26] [INFO] -> -mbspy_6509- Server uptime:  15:52:26 up 1 day,  2:59,  4 users,  load average: 0,40, 0,46, 0,46
+[06/04/2026 15:52:27] [LIVE] mbtest_6509: <mbspy_6509> zzz_unknown_private_xyz
+[06/04/2026 15:52:29] [LIVE] #mbtest: <mbspy_6509> !version
+[06/04/2026 15:52:29] [INFO] Reading local version from VERSION file...
+[06/04/2026 15:52:29] [INFO] -> Mediabot devel version 3.0 (20260406_135510)
+[06/04/2026 15:52:29] [INFO] Checking latest version from GitHub...
+[06/04/2026 15:52:26] [INFO] -> -mbspy_6509- Mediabot v3.0dev-20260406_135510 Uptime: 01mn 43s
+[06/04/2026 15:52:26] [INFO] -> -mbspy_6509- Memory usage (VM 92.39MB) (Resident 85.95MB) (Shared 10.77MB) (Data+Stack 74.78MB)
+[06/04/2026 15:52:26] [INFO] -> -mbspy_6509- Server: Linux teuk.org 6.19.11 #1 SMP PREEMPT_DYNAMIC Sat Apr  4 10:34:35 CEST 2026 x86_64 GNU/Linux
+[06/04/2026 15:52:26] [INFO] -> -mbspy_6509- Server uptime:  15:52:26 up 1 day,  2:59,  4 users,  load average: 0,40, 0,46, 0,46
+[06/04/2026 15:52:27] [LIVE] mbtest_6509: <mbspy_6509> zzz_unknown_private_xyz
+[06/04/2026 15:52:29] [LIVE] #mbtest: <mbspy_6509> !version
+[06/04/2026 15:52:29] [INFO] Reading local version from VERSION file...
+[06/04/2026 15:52:29] [INFO] -> Mediabot devel version 3.0 (20260406_135510)
+[06/04/2026 15:52:29] [INFO] Checking latest version from GitHub...
+[06/04/2026 15:52:29] [INFO] -> GitHub devel version 3.0 (20260406_135510)
+[06/04/2026 15:52:29] [INFO] Mediabot is up to date.
+[06/04/2026 15:52:29] [LIVE] #mbtest:<mbtest_6509> Mediabot version: 3.0dev-20260406_135510
+[06/04/2026 15:52:34] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:52:37] [LIVE] #mbtest: <mbspy_6509> !whoami
+[06/04/2026 15:52:37] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:52:37] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:52:34
+[06/04/2026 15:52:37] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+[06/04/2026 15:52:37] [INFO] -> -mbspy_6509- Hostmasks: mbspy*!*@*
+[06/04/2026 15:52:37] [INFO] -> -mbspy_6509- Infos: N/A | N/A
+[06/04/2026 15:52:40] [LIVE] #mbtest: <mbspy_6509> !users
+[06/04/2026 15:52:40] [INFO] -> -mbspy_6509- Number of users: 2
+[06/04/2026 15:52:40] [INFO] -> -mbspy_6509- Owner (1)
+[06/04/2026 15:52:40] [INFO] -> -mbspy_6509- Master (1)
+[06/04/2026 15:52:29] [INFO] -> GitHub devel version 3.0 (20260406_135510)
+[06/04/2026 15:52:29] [INFO] Mediabot is up to date.
+[06/04/2026 15:52:29] [LIVE] #mbtest:<mbtest_6509> Mediabot version: 3.0dev-20260406_135510
+[06/04/2026 15:52:34] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:52:37] [LIVE] #mbtest: <mbspy_6509> !whoami
+[06/04/2026 15:52:37] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:52:37] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:52:34
+[06/04/2026 15:52:37] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+[06/04/2026 15:52:37] [INFO] -> -mbspy_6509- Hostmasks: mbspy*!*@*
+[06/04/2026 15:52:37] [INFO] -> -mbspy_6509- Infos: N/A | N/A
+[06/04/2026 15:52:40] [LIVE] #mbtest: <mbspy_6509> !users
+[06/04/2026 15:52:40] [INFO] -> -mbspy_6509- Number of users: 2
+[06/04/2026 15:52:40] [INFO] -> -mbspy_6509- Owner (1)
+[06/04/2026 15:52:40] [INFO] -> -mbspy_6509- Master (1)
+[06/04/2026 15:52[06/04/2026 15:52:41] [LIVE] #mbtest: <mbspy_6509> !chaninfo
+[06/04/2026 15:52:41] [INFO] -> -mbspy_6509- The channel #mbtest doesn't appear to be registered
+[06/04/2026 15:52:56] [LIVE] #mbtest: <mbspy_6509> !seen zzzunknownnick999
+[06/04/2026 15:52:56] [LIVE] #mbtest:<mbtest_6509> I don't remember seeing nick zzzunknownnick999.
+[06/04/2026 15:52:56] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:52:59] [LIVE] #mbtest: <mbspy_6509> !chaninfo
+[06/04/2026 15:52:59] [INFO] -> -mbspy_6509- The channel #mbtest doesn't appear to be registered
+[06/04/2026 15:53:02] [LIVE] #mbtest: <mbspy_6509> !chaninfo #zzznotachan999
+[06/04/2026 15:53:02] [INFO] -> -mbspy_6509- Channel #zzznotachan999 does not exist
+[06/04/2026 15:53:03] [LIVE] #mbtest: <mbspy_6509> !chanset
+[06/04/2026 15:53:03] [INFO] -> -mbspy_6509- Your level does not allow you to use this command.
+[06/04/2026 15:53:06] [LIVE] #mbtest: <mbspy_6509> !seen zzzunknownnick999
+:41] [LIVE] #mbtest: <mbspy_6509> !chaninfo
+[06/04/2026 15:52:41] [INFO] -> -mbspy_6509- The channel #mbtest doesn't appear to be registered
+[06/04/2026 15:52:56] [LIVE] #mbtest: <mbspy_6509> !seen zzzunknownnick999
+[06/04/2026 15:52:56] [LIVE] #mbtest:<mbtest_6509> I don't remember seeing nick zzzunknownnick999.
+[06/04/2026 15:52:56] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:52:59] [LIVE] #mbtest: <mbspy_6509> !chaninfo
+[06/04/2026 15:52:59] [INFO] -> -mbspy_6509- The channel #mbtest doesn't appear to be registered
+[06/04/2026 15:53:02] [LIVE] #mbtest: <mbspy_6509> !chaninfo #zzznotachan999
+[06/04/2026 15:53:02] [INFO] -> -mbspy_6509- Channel #zzznotachan999 does not exist
+[06/04/2026 15:53:03] [LIVE] #mbtest: <mbspy_6509> !chanset
+[06/04/2026 15:53:03] [INFO] -> -mbspy_6509- Your level does not allow you to use this command.
+[06/04/2026 15:53:06] [LIVE] #mbtest: <mbspy_6509> !seen zzzunknownnick999
+[06/04/2026 15:53:06] [LIVE] #mbtest:<mbtest_6509> I don't remember see[06/04/2026 15:53:06] [LIVE] #mbtest:<mbtest_6509> I don't remember seeing nick zzzunknownnick999.
+[06/04/2026 15:53:07] [LIVE] #mbtest: <mbspy_6509> !access
+[06/04/2026 15:53:07] [INFO] -> -mbspy_6509- Syntax: access #channel [=]<nick>
+[06/04/2026 15:53:10] [LIVE] mbtest_6509: <mbspy_6509> chanlist
+[06/04/2026 15:53:10] [INFO] -> -mbspy_6509- [#chan (users)] #mbtest (2) 
+[06/04/2026 15:53:10] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:53:13] [LIVE] #mbtest: <mbspy_6509> !users
+[06/04/2026 15:53:13] [INFO] -> -mbspy_6509- Number of users: 2
+[06/04/2026 15:53:13] [INFO] -> -mbspy_6509- Owner (1)
+[06/04/2026 15:53:13] [INFO] -> -mbspy_6509- Master (1)
+[06/04/2026 15:53:16] [LIVE] mbtest_6509: <mbspy_6509> userinfo mboper
+[06/04/2026 15:53:16] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:53:17] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:53:10
+[06/04/2026 15:53:17] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+ing nick zzzunknownnick999.
+[06/04/2026 15:53:07] [LIVE] #mbtest: <mbspy_6509> !access
+[06/04/2026 15:53:07] [INFO] -> -mbspy_6509- Syntax: access #channel [=]<nick>
+[06/04/2026 15:53:10] [LIVE] mbtest_6509: <mbspy_6509> chanlist
+[06/04/2026 15:53:10] [INFO] -> -mbspy_6509- [#chan (users)] #mbtest (2) 
+[06/04/2026 15:53:10] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:53:13] [LIVE] #mbtest: <mbspy_6509> !users
+[06/04/2026 15:53:13] [INFO] -> -mbspy_6509- Number of users: 2
+[06/04/2026 15:53:13] [INFO] -> -mbspy_6509- Owner (1)
+[06/04/2026 15:53:13] [INFO] -> -mbspy_6509- Master (1)
+[06/04/2026 15:53:16] [LIVE] mbtest_6509: <mbspy_6509> userinfo mboper
+[06/04/2026 15:53:16] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:53:17] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:53:10
+[06/04/2026 15:53:17] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+[06/04/2026 15:53:17] [INFO] -> -mbspy_6509- Hostm[06/04/2026 15:53:17] [INFO] -> -mbspy_6509- Hostmasks: mbspy*!*@*
+[06/04/2026 15:53:17] [INFO] -> -mbspy_6509- Info: N/A | N/A
+[06/04/2026 15:53:17] [INFO] mbspy_6509!mediabot@teuk.org userinfo on mboper
+[06/04/2026 15:53:20] [LIVE] mbtest_6509: <mbspy_6509> userinfo mbtest
+[06/04/2026 15:53:20] [INFO] -> -mbspy_6509- User: mbtest (Id: 1 - Owner)
+[06/04/2026 15:53:20] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: never
+[06/04/2026 15:53:20] [INFO] -> -mbspy_6509- Password is not set | Status: not logged in | AUTOLOGIN: ON
+[06/04/2026 15:53:20] [INFO] -> -mbspy_6509- Hostmasks: *mbtest@*
+[06/04/2026 15:53:20] [INFO] -> -mbspy_6509- Info: N/A | N/A
+[06/04/2026 15:53:20] [INFO] mbspy_6509!mediabot@teuk.org userinfo on mbtest
+[06/04/2026 15:53:32] [LIVE] #mbtest: <mbspy_6509> !whoami
+[06/04/2026 15:53:32] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:53:32] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:53:10
+asks: mbspy*!*@*
+[06/04/2026 15:53:17] [INFO] -> -mbspy_6509- Info: N/A | N/A
+[06/04/2026 15:53:17] [INFO] mbspy_6509!mediabot@teuk.org userinfo on mboper
+[06/04/2026 15:53:20] [LIVE] mbtest_6509: <mbspy_6509> userinfo mbtest
+[06/04/2026 15:53:20] [INFO] -> -mbspy_6509- User: mbtest (Id: 1 - Owner)
+[06/04/2026 15:53:20] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: never
+[06/04/2026 15:53:20] [INFO] -> -mbspy_6509- Password is not set | Status: not logged in | AUTOLOGIN: ON
+[06/04/2026 15:53:20] [INFO] -> -mbspy_6509- Hostmasks: *mbtest@*
+[06/04/2026 15:53:20] [INFO] -> -mbspy_6509- Info: N/A | N/A
+[06/04/2026 15:53:20] [INFO] mbspy_6509!mediabot@teuk.org userinfo on mbtest
+[06/04/2026 15:53:32] [LIVE] #mbtest: <mbspy_6509> !whoami
+[06/04/2026 15:53:32] [INFO] -> -mbspy_6509- User: mboper (Id: 2 - Master)
+[06/04/2026 15:53:32] [INFO] -> -mbspy_6509- Created: 2026-04-06 19:50:39 | Last login: 2026-04-06 21:53:10
+[06/04/2026 15:53:32] [INFO] -> -mbspy_6509- Password set | Status: logged in |[06/04/2026 15:53:32] [INFO] -> -mbspy_6509- Password set | Status: logged in | AUTOLOGIN: OFF
+[06/04/2026 15:53:32] [INFO] -> -mbspy_6509- Hostmasks: mbspy*!*@*
+[06/04/2026 15:53:32] [INFO] -> -mbspy_6509- Infos: N/A | N/A
+[06/04/2026 15:53:42] [LIVE] #mbtest: <mbspy_6509> !userstat
+[06/04/2026 15:53:44] [LIVE] #mbtest: <mbspy_6509> !seen mbspy_6509
+[06/04/2026 15:53:44] [LIVE] #mbtest:<mbtest_6509> I don't remember seeing nick mbspy_6509.
+[06/04/2026 15:53:52] [LIVE] #mbtest: <mbspy_6509> !greet
+[06/04/2026 15:53:52] [LIVE] #mbtest:<mbtest_6509> No greet for mbspy_6509 on #mbtest
+[06/04/2026 15:53:52] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:53:55] [LIVE] #mbtest: <mbspy_6509> !q stats
+[06/04/2026 15:53:55] [LIVE] #mbtest:<mbtest_6509> Quote database is empty for #mbtest
+[06/04/2026 15:53:58] [LIVE] #mbtest: <mbspy_6509> !q add zzzlive_test_quote_unique_23
+[06/04/2026 15:53:58] [LIVE] #mbtest:<mbtest_6509> (mboper) done. (id: 1)
+[06/04/2026 15:53:59] [LIVE] #mbtest: <mbspy_6509> !q search zzzlive_test_quote_unique_23
+ AUTOLOGIN: OFF
+[06/04/2026 15:53:32] [INFO] -> -mbspy_6509- Hostmasks: mbspy*!*@*
+[06/04/2026 15:53:32] [INFO] -> -mbspy_6509- Infos: N/A | N/A
+[06/04/2026 15:53:42] [LIVE] #mbtest: <mbspy_6509> !userstat
+[06/04/2026 15:53:44] [LIVE] #mbtest: <mbspy_6509> !seen mbspy_6509
+[06/04/2026 15:53:44] [LIVE] #mbtest:<mbtest_6509> I don't remember seeing nick mbspy_6509.
+[06/04/2026 15:53:52] [LIVE] #mbtest: <mbspy_6509> !greet
+[06/04/2026 15:53:52] [LIVE] #mbtest:<mbtest_6509> No greet for mbspy_6509 on #mbtest
+[06/04/2026 15:53:52] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:53:55] [LIVE] #mbtest: <mbspy_6509> !q stats
+[06/04/2026 15:53:55] [LIVE] #mbtest:<mbtest_6509> Quote database is empty for #mbtest
+[06/04/2026 15:53:58] [LIVE] #mbtest: <mbspy_6509> !q add zzzlive_test_quote_unique_23
+[06/04/2026 15:53:58] [LIVE] #mbtest:<mbtest_6509> (mboper) done. (id: 1)
+[06/04/2026 15:53:59] [LIVE] #mbtest: <mbspy_6509> !q search zzzlive_test_quote_unique_23
+[06/04/2026 15:53:59] [LIV[06/04/2026 15:53:59] [LIVE] #mbtest:<mbtest_6509> 1 quote(s) matching "zzzlive_test_quote_unique_23" on #mbtest : 1
+[06/04/2026 15:53:59] [LIVE] #mbtest:<mbtest_6509> Last on 2026-04-06 21:53:58 by Unknown (id : 1) zzzlive_test_quote_unique_23
+[06/04/2026 15:54:02] [LIVE] #mbtest: <mbspy_6509> !q random
+[06/04/2026 15:54:02] [LIVE] #mbtest:<mbtest_6509> (Unknown) [id: 1] zzzlive_test_quote_unique_23
+[06/04/2026 15:54:03] [LIVE] #mbtest: <mbspy_6509> !q view 1
+[06/04/2026 15:54:03] [LIVE] #mbtest:<mbtest_6509> (mboper) [id: 1] zzzlive_test_quote_unique_23
+[06/04/2026 15:54:06] [LIVE] #mbtest: <mbspy_6509> !q search zzzlive_test_quote_unique_23
+[06/04/2026 15:54:06] [LIVE] #mbtest:<mbtest_6509> 1 quote(s) matching "zzzlive_test_quote_unique_23" on #mbtest : 1
+[06/04/2026 15:54:06] [LIVE] #mbtest:<mbtest_6509> Last on 2026-04-06 21:53:58 by Unknown (id : 1) zzzlive_test_quote_unique_23
+[06/04/2026 15:54:20] [LIVE] #mbtest: <mbspy_6509> !q del 1
+[06/04/2026 15:54:20] [LIVE] #mbtest:<mbtest_6509> (mboper) done. (id: 1)
+E] #mbtest:<mbtest_6509> 1 quote(s) matching "zzzlive_test_quote_unique_23" on #mbtest : 1
+[06/04/2026 15:53:59] [LIVE] #mbtest:<mbtest_6509> Last on 2026-04-06 21:53:58 by Unknown (id : 1) zzzlive_test_quote_unique_23
+[06/04/2026 15:54:02] [LIVE] #mbtest: <mbspy_6509> !q random
+[06/04/2026 15:54:02] [LIVE] #mbtest:<mbtest_6509> (Unknown) [id: 1] zzzlive_test_quote_unique_23
+[06/04/2026 15:54:03] [LIVE] #mbtest: <mbspy_6509> !q view 1
+[06/04/2026 15:54:03] [LIVE] #mbtest:<mbtest_6509> (mboper) [id: 1] zzzlive_test_quote_unique_23
+[06/04/2026 15:54:06] [LIVE] #mbtest: <mbspy_6509> !q search zzzlive_test_quote_unique_23
+[06/04/2026 15:54:06] [LIVE] #mbtest:<mbtest_6509> 1 quote(s) matching "zzzlive_test_quote_unique_23" on #mbtest : 1
+[06/04/2026 15:54:06] [LIVE] #mbtest:<mbtest_6509> Last on 2026-04-06 21:53:58 by Unknown (id : 1) zzzlive_test_quote_unique_23
+[06/04/2026 15:54:20] [LIVE] #mbtest: <mbspy_6509> !q del 1
+[06/04/2026 15:54:20] [LIVE] #mbtest:<mbtest_6509> (mboper) done. (id: 1)
+[06/04/20[06/04/2026 15:54:35] [LIVE] #mbtest: <mbspy_6509> !date
+[06/04/2026 15:54:35] [LIVE] #mbtest:<mbtest_6509> America/New_York : Monday 06/04/2026 15:54:35
+[06/04/2026 15:54:36] [LIVE] #mbtest: <mbspy_6509> !leet hello
+[06/04/2026 15:54:36] [LIVE] #mbtest:<mbtest_6509> l33t(mbspy_6509) : h3||0
+[06/04/2026 15:54:37] [LIVE] #mbtest: <mbspy_6509> !colors
+[06/04/2026 15:54:37] [INFO] -> -mbspy_6509- Syntax: colors <text>
+[06/04/2026 15:54:38] [LIVE] #mbtest: <mbspy_6509> !echo hello world
+[06/04/2026 15:54:38] [LIVE] #mbtest:<mbtest_6509> hello world
+[06/04/2026 15:54:39] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:54:40] [LIVE] mbtest_6509: <mbspy_6509> status
+26 15:54:35] [LIVE] #mbtest: <mbspy_6509> !date
+[06/04/2026 15:54:35] [LIVE] #mbtest:<mbtest_6509> America/New_York : Monday 06/04/2026 15:54:35
+[06/04/2026 15:54:36] [LIVE] #mbtest: <mbspy_6509> !leet hello
+[06/04/2026 15:54:36] [LIVE] #mbtest:<mbtest_6509> l33t(mbspy_6509) : h3||0
+[06/04/2026 15:54:37] [LIVE] #mbtest: <mbspy_6509> !colors
+[06/04/2026 15:54:37] [INFO] -> -mbspy_6509- Syntax: colors <text>
+[06/04/2026 15:54:38] [LIVE] #mbtest: <mbspy_6509> !echo hello world
+[06/04/2026 15:54:38] [LIVE] #mbtest:<mbtest_6509> hello world
+[06/04/2026 15:54:39] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:54:40] [LIVE] mbtest_6509: <mbspy_6509> status
+[06/04/2026 15:54:40] [INFO] -> -mbspy_6509- Mediabot v3.0dev-20260406_135510 Uptime: 03mn 57s
+[06/04/2026 15:54:40] [INFO] -> -mbspy_6509- Memory usage (VM 92.39MB) (Resident 85.99MB) (Shared 10.77MB) (Data+Stack 74.78MB)
+[06/04/2026 15:54:40] [INFO] -> -mbspy_6509- Server: Linux teuk.org 6.19.11 #1 SMP PREEMPT_DYNAMIC Sat Apr  4 10:34:35 CEST 2026 x86_64 GNU/Linux
+[06/04/2026 15:54:40] [INFO] -> -mbspy_6509- Server uptime:  15:54:40 up 1 day,  3:01,  4 users,  load average: 0,52, 0,47, 0,46
+[06/04/2026 15:54:40] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:54:45] [LIVE] mbtest_6509: <mbspy_6509> ignores
+[06/04/2026 15:54:45] [INFO] -> -mbspy_6509- Ignores (allchans/private): none.
+[06/04/2026 15:54:48] [LIVE] mbtest_6509: <mbspy_6509> ignore *zzztest_ignore_live@*
+[06/04/2026 15:54:48] [INFO] -> -mbspy_6509- Syntax: ignore [#channel] <hostmask>
+[06/04/2026 15:54:48] [INFO] -> -mbspy_6509- Example: nick*!*ident@*.example.org
+[06/04/2026 15:54:40] [INFO] -> -mbspy_6509- Mediabot v3.0dev-20260406_135510 Uptime: 03mn 57s
+[06/04/2026 15:54:40] [INFO] -> -mbspy_6509- Memory usage (VM 92.39MB) (Resident 85.99MB) (Shared 10.77MB) (Data+Stack 74.78MB)
+[06/04/2026 15:54:40] [INFO] -> -mbspy_6509- Server: Linux teuk.org 6.19.11 #1 SMP PREEMPT_DYNAMIC Sat Apr  4 10:34:35 CEST 2026 x86_64 GNU/Linux
+[06/04/2026 15:54:40] [INFO] -> -mbspy_6509- Server uptime:  15:54:40 up 1 day,  3:01,  4 users,  load average: 0,52, 0,47, 0,46
+[06/04/2026 15:54:40] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:54:45] [LIVE] mbtest_6509: <mbspy_6509> ignores
+[06/04/2026 15:54:45] [INFO] -> -mbspy_6509- Ignores (allchans/private): none.
+[06/04/2026 15:54:48] [LIVE] mbtest_6509: <mbspy_6509> ignore *zzztest_ignore_live@*
+[06/04/2026 15:54:48] [INFO] -> -mbspy_6509- Syntax: ignore [#channel] <hostmask>
+[06/04/2026 15:54:48] [INFO] -> -mbspy_6509- Example: nick*!*ident@*.example.org
+[06/04/2026 15:54:50] [LIVE] mbtest_6509: <mbspy[06/04/2026 15:54:50] [LIVE] mbtest_6509: <mbspy_6509> unignore *zzztest_ignore_live@*
+[06/04/2026 15:54:50] [INFO] -> -mbspy_6509- Syntax: unignore [#channel] <hostmask>
+[06/04/2026 15:54:50] [INFO] -> -mbspy_6509- Example: nick*!*ident@*.example.org
+[06/04/2026 15:54:53] [LIVE] #mbtest: <mbspy_6509> !yomomma
+[06/04/2026 15:54:53] [LIVE] #mbtest:<mbtest_6509> Not found
+[06/04/2026 15:54:57] [LIVE] mbtest_6509: <mbspy_6509> timers
+[06/04/2026 15:54:57] [INFO] -> -mbspy_6509- Your level does not allow you to use this command.
+[06/04/2026 15:55:00] [LIVE] #mbtest: <mbspy_6509> !check
+[06/04/2026 15:55:00] [LIVE] #mbtest:<mbtest_6509> I'm fine Houston, over.
+[06/04/2026 15:55:00] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:55:03] [LIVE] #mbtest: <mbspy_6509> !addcmd zzztest_cmd_live message general Test command live
+[06/04/2026 15:55:03] [INFO] -> -mbspy_6509- Adding command zzztest_cmd_live [message] Test command live
+[06/04/2026 15:55:03] [INFO] -> -mbspy_6509- Command zzztest_cmd_live added
+_6509> unignore *zzztest_ignore_live@*
+[06/04/2026 15:54:50] [INFO] -> -mbspy_6509- Syntax: unignore [#channel] <hostmask>
+[06/04/2026 15:54:50] [INFO] -> -mbspy_6509- Example: nick*!*ident@*.example.org
+[06/04/2026 15:54:53] [LIVE] #mbtest: <mbspy_6509> !yomomma
+[06/04/2026 15:54:53] [LIVE] #mbtest:<mbtest_6509> Not found
+[06/04/2026 15:54:57] [LIVE] mbtest_6509: <mbspy_6509> timers
+[06/04/2026 15:54:57] [INFO] -> -mbspy_6509- Your level does not allow you to use this command.
+[06/04/2026 15:55:00] [LIVE] #mbtest: <mbspy_6509> !check
+[06/04/2026 15:55:00] [LIVE] #mbtest:<mbtest_6509> I'm fine Houston, over.
+[06/04/2026 15:55:00] [INFO] -> -mbspy_6509- Login successful as mboper (Level: Master)
+[06/04/2026 15:55:03] [LIVE] #mbtest: <mbspy_6509> !addcmd zzztest_cmd_live message general Test command live
+[06/04/2026 15:55:03] [INFO] -> -mbspy_6509- Adding command zzztest_cmd_live [message] Test command live
+[06/04/2026 15:55:03] [INFO] -> -mbspy_6509- Command zzztest_cmd_live added
+[06/04/2026 15:55:06] [LIVE] [06/04/2026 15:55:06] [LIVE] #mbtest: <mbspy_6509> !zzztest_cmd_live
+[06/04/2026 15:55:06] [LIVE] #mbtest:<mbtest_6509> Test command live
+[06/04/2026 15:55:10] [LIVE] #mbtest: <mbspy_6509> !showcmd zzztest_cmd_live
+[06/04/2026 15:55:10] [INFO] -> -mbspy_6509- Command : zzztest_cmd_live Author : mboper Created : 2026-04-06 21:55:03
+[06/04/2026 15:55:10] [INFO] -> -mbspy_6509- 1 hit Category : general Action : PRIVMSG %c Test command live
+[06/04/2026 15:55:11] [LIVE] #mbtest: <mbspy_6509> !countcmd
+[06/04/2026 15:55:11] [LIVE] #mbtest:<mbtest_6509> 2 Commands in database: (general 1) (test 1)
+[06/04/2026 15:55:13] [LIVE] #mbtest: <mbspy_6509> !topcmd
+[06/04/2026 15:55:13] [LIVE] #mbtest:<mbtest_6509> Top commands: 1) check(1) | 2) zzztest_cmd_live(1)
+[06/04/2026 15:55:15] [LIVE] #mbtest: <mbspy_6509> !searchcmd zzztest_cmd_live
+[06/04/2026 15:55:15] [INFO] -> -mbspy_6509- Internal error (SQL).
+[06/04/2026 15:55:17] [LIVE] #mbtest: <mbspy_6509> !delcmd zzztest_cmd_live
+#mbtest: <mbspy_6509> !zzztest_cmd_live
+[06/04/2026 15:55:06] [LIVE] #mbtest:<mbtest_6509> Test command live
+[06/04/2026 15:55:10] [LIVE] #mbtest: <mbspy_6509> !showcmd zzztest_cmd_live
+[06/04/2026 15:55:10] [INFO] -> -mbspy_6509- Command : zzztest_cmd_live Author : mboper Created : 2026-04-06 21:55:03
+[06/04/2026 15:55:10] [INFO] -> -mbspy_6509- 1 hit Category : general Action : PRIVMSG %c Test command live
+[06/04/2026 15:55:11] [LIVE] #mbtest: <mbspy_6509> !countcmd
+[06/04/2026 15:55:11] [LIVE] #mbtest:<mbtest_6509> 2 Commands in database: (general 1) (test 1)
+[06/04/2026 15:55:13] [LIVE] #mbtest: <mbspy_6509> !topcmd
+[06/04/2026 15:55:13] [LIVE] #mbtest:<mbtest_6509> Top commands: 1) check(1) | 2) zzztest_cmd_live(1)
+[06/04/2026 15:55:15] [LIVE] #mbtest: <mbspy_6509> !searchcmd zzztest_cmd_live
+[06/04/2026 15:55:15] [INFO] -> -mbspy_6509- Internal error (SQL).
+[06/04/2026 15:55:17] [LIVE] #mbtest: <mbspy_6509> !delcmd zzztest_cmd_live
+[06/04/2026 15:55:18] [INFO] Received SIGTERM (Ctrl+C). Initiating clean[06/04/2026 15:55:18] [INFO] Received SIGTERM (Ctrl+C). Initiating clean shutdown.
+[06/04/2026 15:55:18] [INFO] Cleaning and exiting...
+ shutdown.
+[06/04/2026 15:55:18] [INFO] Cleaning and exiting...

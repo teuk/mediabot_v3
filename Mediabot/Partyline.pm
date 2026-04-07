@@ -358,6 +358,12 @@ sub _cmd_say {
         return;
     }
 
+    # Verify the bot is actually in that channel
+    my $chan_lc = lc($chan);
+    unless (exists $bot->{channels}{$chan} || exists $bot->{channels}{$chan_lc}) {
+        $stream->write("Warning: bot does not appear to be in $chan (sending anyway).\r\n");
+    }
+
     $bot->botPrivmsg($chan, $msg);
     $bot->{logger}->log(2, "Partyline: $nick sent to $chan: $msg");
     $stream->write("-> $chan: $msg\r\n");

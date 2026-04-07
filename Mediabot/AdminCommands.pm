@@ -100,7 +100,7 @@ sub debug_ctx {
     # Keep backward compatibility with existing logger structure
     $self->{logger}->{debug_level} = $level;
 
-    $self->{logger}->log(0, "Debug set to $level");
+    $self->{logger}->log(1, "Debug set to $level");
     botNotice($self, $nick, "Debug level set to $level");
 
     logBot($self, $ctx->message, $channel, "debug", "Debug set to $level");
@@ -133,7 +133,7 @@ sub mbRestart {
     my $child_pid;
     if (defined($child_pid = fork())) {
         if ($child_pid == 0) {
-            $self->{logger}->log(0, "Restart requested by " . $user->nickname);
+            $self->{logger}->log(1, "Restart requested by " . $user->nickname);
             setsid;
             exec "./mb_restart.sh", $tArgs[0];
             exit 1; # just in case
@@ -188,7 +188,7 @@ sub mbJump {
     my $child_pid;
     if (defined($child_pid = fork())) {
         if ($child_pid == 0) {
-            $self->{logger}->log(0, "Jump request from " . $user->nickname);
+            $self->{logger}->log(1, "Jump request from " . $user->nickname);
             setsid;
             exec "./mb_restart.sh", $params, "--server=$server";
             exit 1;

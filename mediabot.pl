@@ -499,12 +499,11 @@ sub on_timer_tick {
     
     # Update pid file
     my $sPidFilename = $mediabot->{conf}->get('main.MAIN_PID_FILE');
-    unless (open PID, ">$sPidFilename") {
-        log_error("Could not open $sPidFilename for writing.");
-    }
-    else {
-        print PID "$$";
-        close PID;
+    if (open my $pid_fh, '>', $sPidFilename) {
+        print $pid_fh "$$";
+        close $pid_fh;
+    } else {
+        log_error("Could not open $sPidFilename for writing: $!");
     }
     
     # Check connection status and reconnect if not connected
@@ -518,8 +517,10 @@ sub on_timer_tick {
         else {
             $mediabot->setServer(undef);
             $loop->stop;
-            $mediabot->{logger}->log(0,"Lost connection to server. Waiting 150 seconds to reconnect");
-            sleep 150;
+            my $delay = int($mediabot->{conf}->get('main.RECONNECT_DELAY') // 30);
+            $delay = 30 if $delay < 5 || $delay > 600;
+            $mediabot->{logger}->log(0,"Lost connection to server. Waiting $delay seconds to reconnect");
+            sleep $delay;
             reconnect();
         }
     }
@@ -531,7 +532,7 @@ sub on_timer_tick {
         $mediabot->{logger}->log(0,"Mediabot was not designed to spam channels, please set RADIO_PUB to a value greater or equal than 900 seconds in [radio] section of $CONFIG_FILE");
     }
     elsif ((time - $mediabot->getLastRadioPub()) > $radioPubDelay ) {
-        my $sQuery = "SELECT name FROM CHANNEL,CHANNEL_SET,CHANSET_LIST WHERE CHANNEL.id_channel=CHANNEL_SET.id_channel AND CHANNEL_SET.id_chanset_list=CHANSET_LIST.id_chanset_list AND CHANSET_LIST.chanset LIKE 'RadioPub'";
+        my $sQuery = "SELECT CHANNEL.name FROM CHANNEL JOIN CHANNEL_SET ON CHANNEL_SET.id_channel=CHANNEL.id_channel JOIN CHANSET_LIST ON CHANSET_LIST.id_chanset_list=CHANNEL_SET.id_chanset_list WHERE CHANSET_LIST.chanset = 'RadioPub'";
         my $sth = $mediabot->getDbh->prepare($sQuery);
         unless ($sth->execute()) {
             $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -561,7 +562,7 @@ if (defined($mediabot->{conf}->get('main.RANDOM_QUOTE'))) {
         $mediabot->{logger}->log(0,"Mediabot was not designed to spam channels, please set RANDOM_QUOTE to a value greater or equal than 900 seconds in [main] section of $CONFIG_FILE");
     }
     elsif ((time - $mediabot->getLastRandomQuote()) > $randomQuoteDelay ) {
-        my $sQuery = "SELECT name FROM CHANNEL,CHANNEL_SET,CHANSET_LIST WHERE CHANNEL.id_channel=CHANNEL_SET.id_channel AND CHANNEL_SET.id_chanset_list=CHANSET_LIST.id_chanset_list AND CHANSET_LIST.chanset LIKE 'RandomQuote'";
+        my $sQuery = "SELECT CHANNEL.name FROM CHANNEL JOIN CHANNEL_SET ON CHANNEL_SET.id_channel=CHANNEL.id_channel JOIN CHANSET_LIST ON CHANSET_LIST.id_chanset_list=CHANNEL_SET.id_chanset_list WHERE CHANSET_LIST.chanset = 'RandomQuote'";
         my $sth = $mediabot->getDbh->prepare($sQuery);
         unless ($sth->execute()) {
             $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -914,8 +915,16 @@ sub on_message_PRIVMSG {
                 $mediabot->{logger}->log(4,"I have a lucky shot to answer for $what");
                 $mediabot->{logger}->log(4,"time : " . time . " getLastReponderTs() " . $mediabot->getLastReponderTs() . " delta " . (time - $mediabot->getLastReponderTs()));
                 if ((time - $mediabot->getLastReponderTs()) >= 600 ) {
-                    sleep int(rand(8)+2);
-                    $mediabot->doResponder($message,$who,$where,$what,@tArgs)
+                    # Non-blocking delay: schedule response via IO::Async timer
+                    my $resp_delay = int(rand(8) + 2);
+                    my $resp_timer = IO::Async::Timer::Countdown->new(
+                        delay     => $resp_delay,
+                        on_expire => sub {
+                            $mediabot->doResponder($message,$who,$where,$what,@tArgs);
+                        },
+                    );
+                    $loop->add($resp_timer);
+                    $resp_timer->start;
                 }
             }
             elsif ($what =~ /$sCurrentNick/i) {
@@ -1320,7 +1329,17 @@ sub on_message_RPL_WHOISUSER {
 sub on_message_ERROR(@) {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_ERROR', $message);
-    $mediabot->{logger}->log(0, "ERROR from server: " . join(" ", @{ $message->args }));
+    my $err_msg = join(" ", @{ $message->args // [] });
+    $mediabot->{logger}->log(0, "ERROR from server: $err_msg");
+    unless ($mediabot->getQuit()) {
+        $mediabot->setServer(undef);
+        $loop->stop;
+        my $delay = int($mediabot->{conf}->get('main.RECONNECT_DELAY') // 30);
+        $delay = 30 if $delay < 5 || $delay > 600;
+        $mediabot->{logger}->log(0, "Reconnecting in $delay seconds...");
+        sleep $delay;
+        reconnect();
+    }
 }
 
 sub on_message_KILL {
@@ -1328,6 +1347,14 @@ sub on_message_KILL {
     log_debug_args('on_message_KILL', $message);
     my ($killer, $victim, $reason) = @{ $message->args };
     $mediabot->{logger}->log(0, "Killed by $killer: $reason – will reconnect.");
+    unless ($mediabot->getQuit()) {
+        $mediabot->setServer(undef);
+        $loop->stop;
+        my $delay = int($mediabot->{conf}->get('main.RECONNECT_DELAY') // 30);
+        $delay = 30 if $delay < 5 || $delay > 600;
+        sleep $delay;
+        reconnect();
+    }
 }
 
 sub on_message_SERVER {

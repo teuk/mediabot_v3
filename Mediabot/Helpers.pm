@@ -615,7 +615,7 @@ sub userAdd {
     }
 
     my $id = $dbh->last_insert_id(undef, undef, undef, undef);
-    $logger->log(0, "✅ userAdd() created user '$nickname' (id_user=$id, level_id=$level_id)");
+    $logger->log(1, "✅ userAdd() created user '$nickname' (id_user=$id, level_id=$level_id)");
     return $id;
 }
 
@@ -854,8 +854,6 @@ SQL
 }
 
 
-use Encode qw(encode);
-
 # Send a private message to a target
 sub versionCheck {
     my ($ctx) = @_;
@@ -921,6 +919,7 @@ sub checkAntiFlood {
 				$self->{logger}->log(4, "checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
 				return 0;
 			}
+			$sth->finish if $sth;
 		} else {
 			if ($deltaDb <= $duration) {
 				if ($nbmsg < $nbmsg_max) {
@@ -934,13 +933,14 @@ sub checkAntiFlood {
 						$self->{logger}->log(4, "checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max set latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds");
 						return 0;
 					}
+					$sth->finish if $sth;
 				} else {
 					my $sLatest = strftime("%Y-%m-%d %H-%M-%S", localtime($currentTs));
 					my $endTs = $latest + $timetowait;
 
 					if ($currentTs > $endTs) {
 						$nbmsg = 1;
-						$self->{logger}->log(0, "checkAntiFlood() End of antiflood for channel $sChannel");
+						$self->{logger}->log(1, "checkAntiFlood() End of antiflood for channel $sChannel");
 						$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?, first=?, latest=?, notification=? WHERE id_channel=?";
 						my $sth = $self->{dbh}->prepare($sQuery);
 						unless ($sth->execute($nbmsg, $currentTs, $currentTs, 0, $id_channel)) {
@@ -950,6 +950,7 @@ sub checkAntiFlood {
 							$self->{logger}->log(4, "checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
 							return 0;
 						}
+						$sth->finish if $sth;
 					} else {
 						if (!$notification) {
 							$sQuery = "UPDATE CHANNEL_FLOOD SET notification=? WHERE id_channel=?";
@@ -960,9 +961,10 @@ sub checkAntiFlood {
 								$self->{logger}->log(4, "checkAntiFlood() Antiflood notification set to DB for $sChannel");
 								noticeConsoleChan($self, "Anti flood activated on channel $sChannel $nbmsg messages in less than $duration seconds, waiting $timetowait seconds to deactivate");
 							}
+							$sth->finish if $sth;
 						}
 						$self->{logger}->log(4, "checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds endTs = $endTs " . ($endTs - $currentTs) . " seconds left");
-						$self->{logger}->log(0, "checkAntiFlood() Antiflood is active for channel $sChannel wait " . ($endTs - $currentTs) . " seconds");
+						$self->{logger}->log(1, "checkAntiFlood() Antiflood is active for channel $sChannel wait " . ($endTs - $currentTs) . " seconds");
 						return 1;
 					}
 				}
@@ -978,6 +980,7 @@ sub checkAntiFlood {
 					$self->{logger}->log(4, "checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
 					return 0;
 				}
+				$sth->finish if $sth;
 			}
 		}
 	} else {
@@ -2207,6 +2210,7 @@ sub mp3_ctx {
 
     unless ($sth && $sth->execute($pattern)) {
         $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sql_first");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2520,7 +2524,10 @@ sub resolve_ctx {
 sub _tz_exists {
     my ($self, $tz) = @_;
     my $sth = $self->{dbh}->prepare("SELECT tz FROM TIMEZONE WHERE tz LIKE ?");
-    return $sth->execute($tz) && $sth->fetchrow_hashref();
+    unless ($sth->execute($tz)) { $sth->finish; return undef; }
+    my $ref = $sth->fetchrow_hashref();
+    $sth->finish;
+    return $ref;
 }
 
 # Get a user's timezone

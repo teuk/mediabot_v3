@@ -1058,8 +1058,9 @@ SQL
 sub _get_user_tz {
     my ($self, $nick) = @_;
     my $sth = $self->{dbh}->prepare("SELECT tz FROM USER WHERE nickname LIKE ?");
-    return unless $sth->execute($nick);
+    unless ($sth->execute($nick)) { $sth->finish; return undef; }
     my $ref = $sth->fetchrow_hashref();
+    $sth->finish;
     return $ref ? $ref->{tz} : undef;
 }
 
@@ -1067,14 +1068,18 @@ sub _get_user_tz {
 sub _set_user_tz {
     my ($self, $nick, $tz) = @_;
     my $sth = $self->{dbh}->prepare("UPDATE USER SET tz=? WHERE nickname LIKE ?");
-    return $sth->execute($tz, $nick);
+    my $ok = $sth->execute($tz, $nick);
+    $sth->finish;
+    return $ok;
 }
 
 # Clear timezone for a user
 sub _del_user_tz {
     my ($self, $nick) = @_;
     my $sth = $self->{dbh}->prepare("UPDATE USER SET tz=NULL WHERE nickname LIKE ?");
-    return $sth->execute($nick);
+    my $ok = $sth->execute($nick);
+    $sth->finish;
+    return $ok;
 }
 
 # date [tz|nick|alias|list|me|user add/del ...]
@@ -1188,8 +1193,10 @@ sub mbModUser_ctx {
         if ($arg eq 'on') {
             $sth = $self->{dbh}->prepare("SELECT * FROM USER WHERE nickname = ? AND username = '#AUTOLOGIN#'");
             $sth->execute($target_nick);
+            my $already_on = $sth->fetchrow_hashref();
+            $sth->finish;
 
-            if ($sth->fetchrow_hashref()) {
+            if ($already_on) {
                 botNotice($self, $nick, "Autologin is already ON for $target_nick");
             } else {
                 $sth = $self->{dbh}->prepare("UPDATE USER SET username = '#AUTOLOGIN#' WHERE nickname = ?");
@@ -1201,8 +1208,10 @@ sub mbModUser_ctx {
         } else {    # off
             $sth = $self->{dbh}->prepare("SELECT * FROM USER WHERE nickname = ? AND username = '#AUTOLOGIN#'");
             $sth->execute($target_nick);
+            my $is_on = $sth->fetchrow_hashref();
+            $sth->finish;
 
-            if ($sth->fetchrow_hashref()) {
+            if ($is_on) {
                 $sth = $self->{dbh}->prepare("UPDATE USER SET username = NULL WHERE nickname = ?");
                 if ($sth->execute($target_nick)) {
                     botNotice($self, $nick, "Set autologin OFF for $target_nick");
@@ -1229,8 +1238,10 @@ sub mbModUser_ctx {
 
         my $sth = $self->{dbh}->prepare("SELECT * FROM USER WHERE nickname = ? AND fortniteid = ?");
         $sth->execute($target_nick, $fortniteid);
+        my $already_set = $sth->fetchrow_hashref();
+        $sth->finish;
 
-        if ($sth->fetchrow_hashref()) {
+        if ($already_set) {
             botNotice($self, $nick, "fortniteid is already $fortniteid for $target_nick");
         } else {
             $sth = $self->{dbh}->prepare("UPDATE USER SET fortniteid = ? WHERE nickname = ?");
@@ -1401,8 +1412,9 @@ sub delUser_ctx {
         return;
     }
 
-    $self->{dbh}->do("DELETE FROM USER_CHANNEL WHERE id_user=?", undef, $id_user);
-    $self->{dbh}->do("DELETE FROM USER WHERE id_user=?", undef, $id_user);
+    $self->{dbh}->do("DELETE FROM USER_CHANNEL  WHERE id_user=?", undef, $id_user);
+    $self->{dbh}->do("DELETE FROM USER_HOSTMASK WHERE id_user=?", undef, $id_user);
+    $self->{dbh}->do("DELETE FROM USER          WHERE id_user=?", undef, $id_user);
 
     my $msg = "User $target (id_user: $id_user) has been deleted";
     botNotice($self, $nick, $msg);

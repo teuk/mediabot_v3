@@ -80,8 +80,13 @@ sub getIdChannel {
 sub get_channel_by_name {
     my ($self, $name) = @_;
     my $sth = $self->{dbh}->prepare("SELECT id_channel FROM CHANNEL WHERE name = ?");
-    return undef unless $sth->execute($name);
-    if (my $ref = $sth->fetchrow_hashref) {
+    unless ($sth->execute($name)) {
+        $sth->finish;
+        return undef;
+    }
+    my $ref = $sth->fetchrow_hashref;
+    $sth->finish;
+    if ($ref) {
         require Mediabot::Channel;
         return Mediabot::Channel->new(
             dbh     => $self->{dbh},
@@ -287,7 +292,7 @@ sub addChannel_ctx {
         return;
     }
 
-    $self->{logger}->log(0, "$nick issued addchan command: $sChannel $sUser");
+    $self->{logger}->log(1, "$nick issued addchan command: $sChannel $sUser");
 
     # Check if target user exists
     my $id_target_user = getIdUser($self, $sUser);
@@ -328,7 +333,7 @@ sub addChannel_ctx {
         $self->{logger}->log(1, "registerChannel failed $sChannel $sUser");
         botNotice($self, $nick, "Channel created but registration with user $sUser failed.");
     } else {
-        $self->{logger}->log(0, "registerChannel successful $sChannel $sUser");
+        $self->{logger}->log(1, "registerChannel successful $sChannel $sUser");
         botNotice($self, $nick, "Channel $sChannel added and linked to $sUser.");
     }
 
@@ -560,16 +565,20 @@ sub purgeChannel_ctx {
     unless ($sth && $sth->execute($id_channel)) {
         $self->{logger}->log(1, "❌ SQL Error: $DBI::errstr while deleting CHANNEL");
         Mediabot::botNotice($self, $nick, "SQL error while deleting channel.");
+        $sth->finish if $sth;
         return;
     }
+    $sth->finish if $sth;
 
     # Delete links
     $sth = $self->{dbh}->prepare("DELETE FROM USER_CHANNEL WHERE id_channel = ?");
     unless ($sth && $sth->execute($id_channel)) {
         $self->{logger}->log(1, "❌ SQL Error: $DBI::errstr while deleting USER_CHANNEL");
         Mediabot::botNotice($self, $nick, "SQL error while deleting channel links.");
+        $sth->finish if $sth;
         return;
     }
+    $sth->finish if $sth;
 
     # Archive into CHANNEL_PURGED
     $sth = $self->{dbh}->prepare(q{
@@ -666,7 +675,7 @@ sub channelPart_ctx {
     }
 
     # Execute: call the LEGACY partChannel() that actually parts on IRC
-    $self->{logger}->log(0, "$nick issued a part $target command");
+    $self->{logger}->log(1, "$nick issued a part $target command");
     partChannel($self, $target, "At the request of " . ($user->nickname // $nick));
     logBot($self, $ctx->message, $target, "part", "At the request of " . ($user->nickname // $nick));
 }
@@ -755,7 +764,7 @@ sub channelJoin_ctx {
     }
 
     # Execute JOIN (with key if any)
-    $self->{logger}->log(0, "$nick issued a join $target command");
+    $self->{logger}->log(1, "$nick issued a join $target command");
     joinChannel($self, $target, (defined($key) && $key ne '' ? $key : undef));
 
     logBot($self, $ctx->message, $target, "join", "");
@@ -900,7 +909,7 @@ sub channelAddUser_ctx {
     }
     $sth->finish if $sth;
 
-    $self->{logger}->log(0, "$nick added $target_handle to $channel at level $target_level");
+    $self->{logger}->log(1, "$nick added $target_handle to $channel at level $target_level");
     logBot($self, $ctx->message, $channel, "add", $channel, $target_handle, $target_level);
 
     botNotice($self, $nick, "Added $target_handle to $channel at level $target_level");
@@ -1572,7 +1581,7 @@ sub userKickChannel_ctx {
     my $final  = "(" . $issuer . ")" . (length($reason) ? " $reason" : "");
 
     # Execute KICK
-    $self->{logger}->log(0, "$nick issued a kick $target_chan command");
+    $self->{logger}->log(1, "$nick issued a kick $target_chan command");
     $self->{irc}->send_message("KICK", undef, ($target_chan, $kick_nick, $final));
 
     logBot($self, $ctx->message, $target_chan, "kick", $target_chan, $kick_nick, $reason);
@@ -1697,7 +1706,7 @@ sub userTopicChannel {
     my $new_topic  = join(" ", @tArgs);
 
     # Log and send IRC topic command
-    $self->{logger}->log(0, "$sNick issued a topic $sChannel command");
+    $self->{logger}->log(1, "$sNick issued a topic $sChannel command");
     $self->{irc}->send_message("TOPIC", undef, ($sChannel, $new_topic));
     logBot($self, $message, $sChannel, "topic", @tArgs);
 
@@ -2897,11 +2906,9 @@ sub getChannelOwner {
 		return undef;
 	}
 
-	if (my $ref = $sth->fetchrow_hashref()) {
-		return $ref->{nickname};
-	}
-
-	return undef;
+	my $ref = $sth->fetchrow_hashref();
+	$sth->finish;
+	return $ref ? $ref->{nickname} : undef;
 }
 
 # Convert a string to leet-speak.
