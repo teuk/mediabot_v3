@@ -64,15 +64,15 @@ sub get_user_level {
     });
 
     if ($sth->execute($self->{id}, $nickname)) {
-    $sth->finish;
         if (my $ref = $sth->fetchrow_hashref) {
             $level = $ref->{level};
         }
+        $sth->finish;
     } else {
         $self->{logger}->log(1, "get_user_level SQL error: $DBI::errstr");
+        $sth->finish;
     }
 
-    $sth->finish;
     return $level;
 }
 

@@ -502,11 +502,11 @@ sub botNotice {
 sub joinChannel(@) {
 	my ($self,$channel,$key) = @_;
 	if (defined($key) && ($key ne "")) {
-		$self->{logger}->log(0,"Trying to join $channel with key $key");
+		$self->{logger}->log(1,"Trying to join $channel with key $key");
 		$self->{irc}->send_message("JOIN", undef, ($channel,$key));
 	}
 	else {
-		$self->{logger}->log(0,"Trying to join $channel");
+		$self->{logger}->log(1,"Trying to join $channel");
 		$self->{irc}->send_message("JOIN", undef, $channel);
 	}
 }
@@ -597,24 +597,27 @@ sub userAdd {
     my $ok  = $sth->execute(@bind);
     $sth->finish;
 
-    # Insert initial hostmask into USER_HOSTMASK if provided
-    if ($ok && defined $hostmask && $hostmask ne '') {
-        my $new_id = $dbh->last_insert_id(undef, undef, undef, undef);
-        if ($new_id) {
-            my $hm_sth = $dbh->prepare(
-                "INSERT INTO USER_HOSTMASK (id_user, hostmask) VALUES (?, ?)"
-            );
-            $hm_sth->execute($new_id, $hostmask);
-            $hm_sth->finish;
-        }
-    }
-
     unless ($ok) {
         $logger->log(1, "userAdd() INSERT failed: $DBI::errstr");
         return undef;
     }
 
+    # Capture id ONCE immediately after INSERT USER — before any other statement
     my $id = $dbh->last_insert_id(undef, undef, undef, undef);
+    unless ($id) {
+        $logger->log(1, "userAdd() last_insert_id returned undef after INSERT USER");
+        return undef;
+    }
+
+    # Insert initial hostmask into USER_HOSTMASK if provided
+    if (defined $hostmask && $hostmask ne '') {
+        my $hm_sth = $dbh->prepare(
+            "INSERT INTO USER_HOSTMASK (id_user, hostmask) VALUES (?, ?)"
+        );
+        $hm_sth->execute($id, $hostmask);
+        $hm_sth->finish;
+    }
+
     $logger->log(1, "✅ userAdd() created user '$nickname' (id_user=$id, level_id=$level_id)");
     return $id;
 }
@@ -731,7 +734,7 @@ sub setChannelAntiFlood {
 
 	my $id_channel = $channel_obj->get_id;
 
-	my $sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
+	my $sQuery = "SELECT duration, first, latest, nbmsg, nbmsg_max, notification, timetowait FROM CHANNEL_FLOOD WHERE id_channel = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 
 	unless ($sth->execute($id_channel)) {
@@ -761,7 +764,7 @@ sub setChannelAntiFlood {
 		my $id_channel_flood = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
 		$self->{logger}->log(4, "setChannelAntiFlood() AntiFlood record created, id_channel_flood : $id_channel_flood");
 
-		$sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
+		$sQuery = "SELECT duration, first, latest, nbmsg, nbmsg_max, notification, timetowait FROM CHANNEL_FLOOD WHERE id_channel = ?";
 		my $sth2 = $self->{dbh}->prepare($sQuery);
 
 		unless ($sth2->execute($id_channel)) {
@@ -886,7 +889,7 @@ sub checkAntiFlood {
 	}
 
 	my $id_channel = $channel_obj->get_id;
-	my $sQuery = "SELECT * FROM CHANNEL_FLOOD WHERE id_channel=?";
+	my $sQuery = "SELECT duration, first, latest, nbmsg, nbmsg_max, notification, timetowait FROM CHANNEL_FLOOD WHERE id_channel = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 
 	unless ($sth->execute($id_channel)) {
@@ -970,7 +973,7 @@ sub checkAntiFlood {
 				}
 			} else {
 				$nbmsg = 1;
-				$self->{logger}->log(0, "checkAntiFlood() End of antiflood for channel $sChannel");
+				$self->{logger}->log(1, "checkAntiFlood() End of antiflood for channel $sChannel");
 				$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?, first=?, latest=?, notification=? WHERE id_channel=?";
 				my $sth = $self->{dbh}->prepare($sQuery);
 				unless ($sth->execute($nbmsg, $currentTs, $currentTs, 0, $id_channel)) {
@@ -984,7 +987,7 @@ sub checkAntiFlood {
 			}
 		}
 	} else {
-		$self->{logger}->log(0, "checkAntiFlood() could not find record in CHANNEL_FLOOD for channel $sChannel (id_channel : $id_channel)");
+		$self->{logger}->log(1, "checkAntiFlood() could not find record in CHANNEL_FLOOD for channel $sChannel (id_channel : $id_channel)");
 	}
 
 	$sth->finish;
@@ -1036,7 +1039,7 @@ sub getVersion {
     my ($c_major, $c_minor, $c_type, $c_dev_info);
     my ($r_major, $r_minor, $r_type, $r_dev_info);
 
-    $self->{logger}->log(0, "Reading local version from VERSION file...");
+    $self->{logger}->log(1, "Reading local version from VERSION file...");
 
     # Read local VERSION file
     if (open my $fh, '<', 'VERSION') {
@@ -1044,19 +1047,19 @@ sub getVersion {
         close $fh;
         ($c_major, $c_minor, $c_type, $c_dev_info) = $self->getDetailedVersion($local_version);
     } else {
-        $self->{logger}->log(0, "Unable to read local VERSION file.");
+        $self->{logger}->log(1, "Unable to read local VERSION file.");
     }
 
     if (defined $c_major && defined $c_minor && defined $c_type) {
         my $suffix = $c_dev_info ? "($c_dev_info)" : '';
-        $self->{logger}->log(0, "-> Mediabot $c_type version $c_major.$c_minor $suffix");
+        $self->{logger}->log(1, "-> Mediabot $c_type version $c_major.$c_minor $suffix");
     } else {
-        $self->{logger}->log(0, "-> Unknown local version format: $local_version");
+        $self->{logger}->log(1, "-> Unknown local version format: $local_version");
     }
 
     # If we have a valid local version, try fetching the GitHub version
     if ($local_version ne "Undefined") {
-        $self->{logger}->log(0, "Checking latest version from GitHub...");
+        $self->{logger}->log(1, "Checking latest version from GitHub...");
 
         if (open my $gh, '-|', 'curl --connect-timeout 5 -f -s https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION') {
             chomp($remote_version = <$gh>);
@@ -1065,18 +1068,18 @@ sub getVersion {
 
             if (defined $r_major && defined $r_minor && defined $r_type) {
                 my $suffix = $r_dev_info ? "($r_dev_info)" : '';
-                $self->{logger}->log(0, "-> GitHub $r_type version $r_major.$r_minor $suffix");
+                $self->{logger}->log(1, "-> GitHub $r_type version $r_major.$r_minor $suffix");
 
                 if ($local_version eq $remote_version) {
-                    $self->{logger}->log(0, "Mediabot is up to date.");
+                    $self->{logger}->log(1, "Mediabot is up to date.");
                 } else {
-                    $self->{logger}->log(0, "Update available: $r_type version $r_major.$r_minor $suffix");
+                    $self->{logger}->log(1, "Update available: $r_type version $r_major.$r_minor $suffix");
                 }
             } else {
-                $self->{logger}->log(0, "Unknown remote version format: $remote_version");
+                $self->{logger}->log(1, "Unknown remote version format: $remote_version");
             }
         } else {
-            $self->{logger}->log(0, "Failed to fetch version from GitHub.");
+            $self->{logger}->log(1, "Failed to fetch version from GitHub.");
         }
     }
 
@@ -2283,7 +2286,7 @@ sub mp3_ctx {
 
 sub isIgnored(@) {
 	my ($self,$message,$sChannel,$sNick,$sMsg)	= @_;
-	my $sCheckQuery = "SELECT * FROM IGNORES WHERE id_channel=0";
+	my $sCheckQuery = "SELECT hostmask FROM IGNORES WHERE id_channel = 0";
 	my $sth = $self->{dbh}->prepare($sCheckQuery);
 	unless ($sth->execute ) {
 		$self->{logger}->log(1,"isIgnored() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
@@ -2606,7 +2609,7 @@ sub getNickInfoWhois(@) {
 	my $sMatchingUserInfo1 = undef;
 	my $sMatchingUserInfo2 = undef;
 	
-	my $sCheckQuery = "SELECT * FROM USER";
+	my $sCheckQuery = "SELECT id_user, nickname, id_user_level, auth FROM USER";
 	my $sth = $self->{dbh}->prepare($sCheckQuery);
 	unless ($sth->execute ) {
 		$self->{logger}->log(1,"getNickInfoWhois() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
@@ -2630,7 +2633,7 @@ sub getNickInfoWhois(@) {
 					}
 					$iMatchingUserId = $ref->{'id_user'};
 					my $iMatchingUserLevelId = $ref->{'id_user_level'};
-					my $sGetLevelQuery = "SELECT * FROM USER_LEVEL WHERE id_user_level=?";
+					my $sGetLevelQuery = "SELECT level, description FROM USER_LEVEL WHERE id_user_level = ?";
 					my $sth2 = $self->{dbh}->prepare($sGetLevelQuery);
 	        unless ($sth2->execute($iMatchingUserLevelId)) {
           				$self->{logger}->log(0,"getNickInfoWhois() SQL Error : " . $DBI::errstr . " Query : " . $sGetLevelQuery);
@@ -2735,14 +2738,13 @@ sub whereis(@) {
 	if (defined($line=<$fh_whereis>)) {
 		close $fh_whereis;
 		chomp($line);
-		my $json = decode_json $line;
-		my $country = $json->{'country'};
-		if (defined($country)) {
-			return $country;
-		}
-		else {
+		my $json = eval { decode_json $line };
+		if ($@ || !defined $json) {
+			# Invalid JSON from geolocation API
 			return undef;
 		}
+		my $country = $json->{'country'};
+		return defined($country) ? $country : undef;
 	}
 	else {
 		return "N/A";

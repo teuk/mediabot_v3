@@ -68,7 +68,7 @@ sub getMainTimerTick(@) {
 sub onStartTimers(@) {
 	my $self = shift;
 	my %hTimers;
-	my $sQuery = "SELECT * FROM TIMERS";
+	my $sQuery = "SELECT id_timers, name, duration, command FROM TIMERS";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute()) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -87,7 +87,11 @@ sub onStartTimers(@) {
 			    interval => $duration,
 			    on_tick => sub {
 			    	$self->{logger}->log(4,"Timer every $duration seconds : $command");
-  					$self->{irc}->write("$command\x0d\x0a");
+					if ($self->{irc} && $self->{irc}->is_connected) {
+						$self->{irc}->write("$command\x0d\x0a");
+					} else {
+						$self->{logger}->log(1, "Timer $name skipped: bot not connected to IRC");
+					}
 					},
 			);
 			$hTimers{$name} = $timer;
@@ -124,6 +128,10 @@ sub dumpCmd_ctx {
     }
 
     my $cmd = join(' ', @raw);
+    unless ($self->{irc} && $self->{irc}->is_connected) {
+        $self->botNotice($nick, "Not connected to IRC.");
+        return;
+    }
     $self->{irc}->write("$cmd\x0d\x0a");
 
     logBot($self, $ctx->message, undef, 'dump', $cmd);
@@ -205,7 +213,11 @@ sub mbAddTimer_ctx {
         interval => $interval,
         on_tick  => sub {
             $self->{logger}->log(4, "Timer [$name] tick: $cmd");
-            $self->{irc}->write("$cmd\x0d\x0a");
+            if ($self->{irc} && $self->{irc}->is_connected) {
+                $self->{irc}->write("$cmd\x0d\x0a");
+            } else {
+                $self->{logger}->log(1, "Timer [$name] skipped: not connected to IRC");
+            }
         },
     );
 
@@ -772,7 +784,7 @@ sub mbDbShowCommand_ctx {
 sub mbDbCommand(@) {
 	my ($self,$message,$sChannel,$sNick,$sCommand,@tArgs) = @_;
 	$self->{logger}->log(2,"Check SQL command : $sCommand");
-	my $sQuery = "SELECT * FROM PUBLIC_COMMANDS WHERE command like ?";
+	my $sQuery = "SELECT id_public_commands, action, description, hits FROM PUBLIC_COMMANDS WHERE command LIKE ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sCommand)) {
 		$self->{logger}->log(1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -1600,7 +1612,7 @@ sub addResponder_ctx {
     # Check if the responder already exists
     # ---------------------------------------
     my $sth = $self->{dbh}->prepare(
-        "SELECT * FROM RESPONDERS WHERE id_channel=? AND responder LIKE ?"
+        "SELECT answer, chance, hits FROM RESPONDERS WHERE id_channel = ? AND responder LIKE ?"
     );
 
     unless ($sth->execute($id_channel, $responder)) {

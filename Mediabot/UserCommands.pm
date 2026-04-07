@@ -50,7 +50,7 @@ sub dbLogoutUsers(@) {
 		$self->{logger}->log(0,"dbLogoutUsers() SQL Error : " . $DBI::errstr . "(" . $DBI::err . ") Query : " . $sLogoutQuery);
 	}
 	else {	
-		$self->{logger}->log(0,"Logged out all users");
+		$self->{logger}->log(1,"Logged out all users");
 	}
 }
 
@@ -101,7 +101,7 @@ sub userOnJoin {
     }
 
     # Now check if the channel has a default notice to send on join
-    my $sql_channel = "SELECT * FROM CHANNEL WHERE name = ?";
+    my $sql_channel = "SELECT id_channel, notice, id_user_level FROM CHANNEL WHERE name = ?";
     $self->{logger}->log(4, $sql_channel);
     my $sth = $self->{dbh}->prepare($sql_channel);
 
@@ -1188,7 +1188,7 @@ sub mbModUser_ctx {
         my $sth;
 
         if ($arg eq 'on') {
-            $sth = $self->{dbh}->prepare("SELECT * FROM USER WHERE nickname = ? AND username = '#AUTOLOGIN#'");
+            $sth = $self->{dbh}->prepare("SELECT 1 FROM USER WHERE nickname = ? AND username = '#AUTOLOGIN#'");
             $sth->execute($target_nick);
             my $already_on = $sth->fetchrow_hashref();
             $sth->finish;
@@ -1203,7 +1203,7 @@ sub mbModUser_ctx {
                 }
             }
         } else {    # off
-            $sth = $self->{dbh}->prepare("SELECT * FROM USER WHERE nickname = ? AND username = '#AUTOLOGIN#'");
+            $sth = $self->{dbh}->prepare("SELECT 1 FROM USER WHERE nickname = ? AND username = '#AUTOLOGIN#'");
             $sth->execute($target_nick);
             my $is_on = $sth->fetchrow_hashref();
             $sth->finish;
@@ -1233,7 +1233,7 @@ sub mbModUser_ctx {
             return;
         }
 
-        my $sth = $self->{dbh}->prepare("SELECT * FROM USER WHERE nickname = ? AND fortniteid = ?");
+        my $sth = $self->{dbh}->prepare("SELECT 1 FROM USER WHERE nickname = ? AND fortniteid = ?");
         $sth->execute($target_nick, $fortniteid);
         my $already_set = $sth->fetchrow_hashref();
         $sth->finish;

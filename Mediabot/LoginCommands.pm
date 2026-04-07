@@ -54,7 +54,7 @@ sub init_auth {
 # Populate all CHANNEL entries into $self->{channels}
 sub getUserAutologin(@) {
 	my ($self,$sMatchingUserHandle) = @_;
-	my $sQuery = "SELECT * FROM USER WHERE nickname like ? AND username='#AUTOLOGIN#'";
+	my $sQuery = "SELECT 1 FROM USER WHERE nickname LIKE ? AND username = '#AUTOLOGIN#'";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sMatchingUserHandle) ) {
 		$self->{logger}->log(1,"getUserAutologin() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -74,7 +74,7 @@ sub getUserAutologin(@) {
 # Get user id from user handle
 sub checkAuth(@) {
 	my ($self,$iUserId,$sUserHandle,$sPassword) = @_;
-	my $sCheckAuthQuery = "SELECT * FROM USER WHERE id_user=? AND nickname=? AND password=PASSWORD(?)";
+	my $sCheckAuthQuery = "SELECT id_user FROM USER WHERE id_user = ? AND nickname = ? AND password = PASSWORD(?)";
 	my $sth = $self->{dbh}->prepare($sCheckAuthQuery);
 	unless ($sth->execute($iUserId,$sUserHandle,$sPassword)) {
 		$self->{logger}->log(1,"checkAuth() SQL Error : " . $DBI::errstr . " Query : " . $sCheckAuthQuery);
@@ -315,7 +315,7 @@ sub userIdent(@) {
 
 sub checkAuthByUser(@) {
 	my ($self,$message,$sUserHandle,$sPassword) = @_;
-	my $sCheckAuthQuery = "SELECT * FROM USER WHERE nickname=? AND password=PASSWORD(?)";
+	my $sCheckAuthQuery = "SELECT id_user FROM USER WHERE nickname = ? AND password = PASSWORD(?)";
 	my $sth = $self->{dbh}->prepare($sCheckAuthQuery);
 	unless ($sth->execute($sUserHandle,$sPassword)) {
 		$self->{logger}->log(1,"checkAuthByUser() SQL Error : " . $DBI::errstr . " Query : " . $sCheckAuthQuery);
@@ -522,9 +522,13 @@ sub xLogin_ctx {
     # Send login command to service
     botPrivmsg($self, $xService, "login $xUsername $xPassword");
 
-    # Request +x on the bot nick (same as old write)
-    my $botnick = $self->{irc}->nick_folded;
-    $self->{irc}->write("MODE $botnick +x\x0d\x0a");
+    # Request +x on the bot nick
+    if ($self->{irc} && $self->{irc}->is_connected) {
+        my $botnick = $self->{irc}->nick_folded;
+        $self->{irc}->write("MODE $botnick +x\x0d\x0a");
+    } else {
+        $self->{logger}->log(1, "xLogin_ctx: cannot set +x, not connected to IRC");
+    }
 
     # Log action
     logBot($self, $message, undef, "xLogin", "$xUsername\@$xService");

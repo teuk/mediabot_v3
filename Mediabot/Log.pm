@@ -66,28 +66,25 @@ sub log {
     if (my $fh = $self->{logfilehandle}) {
         print $fh $logline;
     }
+}
 
-    # ---------------------------------------------------------------------------
-    # Convenience helpers for logging
-    # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Convenience helpers — declared at package level (not nested inside sub log)
+# ---------------------------------------------------------------------------
 
-    sub info {
-        my ($self, $msg) = @_;
-        # Level 0 = INFO in existing log()
-        $self->log(0, $msg);
-    }
+sub info {
+    my ($self, $msg) = @_;
+    $self->log(0, $msg);
+}
 
-    sub debug {
-        my ($self, $msg) = @_;
-        # Level 2 chosen as "normal debug" (respects debug_level)
-        $self->log(2, $msg);
-    }
+sub debug {
+    my ($self, $msg) = @_;
+    $self->log(2, $msg);
+}
 
-    sub error {
-        my ($self, $msg) = @_;
-        # Still level 0 but with an explicit [ERROR] prefix in the message
-        $self->log(0, "[ERROR] $msg");
-    }
+sub error {
+    my ($self, $msg) = @_;
+    $self->log(0, "[ERROR] $msg");
 }
 
 1;

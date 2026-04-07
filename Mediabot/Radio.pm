@@ -86,7 +86,8 @@ sub getRadioCurrentSong(@) {
 	if (defined($line = <$fh_icecast>)) {
 		close $fh_icecast;
 		chomp($line);
-		my $json = decode_json $line;
+		my $json = eval { decode_json $line };
+		return "N/A" unless defined $json;
 		my $source_data = $json->{'icestats'}{'source'};
         my @sources = ref($source_data) eq 'ARRAY' ? @$source_data : ($source_data);
 
@@ -182,23 +183,24 @@ sub getRadioHarbor(@) {
 	my $LIQUIDSOAP_TELNET_PORT = $conf->get('radio.LIQUIDSOAP_TELNET_PORT');
 
 	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-		unless (open LIQUIDSOAP_HARBOR, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
+		my $fh_lsharbor;
+		unless (open $fh_lsharbor, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
 			$self->{logger}->log( 3, "Unable to connect to LIQUIDSOAP telnet port");
 		}
 
 		my $line;
-		while (defined($line = <LIQUIDSOAP_HARBOR>)) {
+		while (defined($line = <$fh_lsharbor>)) {
 			chomp($line);
 			if ($line =~ /harbor/) {
 				my $sHarbor = $line;
 				$sHarbor =~ s/^.*harbor/harbor/;
 				$sHarbor =~ s/\..*$//;
-				close LIQUIDSOAP_HARBOR;
+				close $fh_lsharbor;
 				return $sHarbor;
 			}
 		}
 
-		close LIQUIDSOAP_HARBOR;
+		close $fh_lsharbor;
 		return undef;
 	} else {
 		return undef;
@@ -214,12 +216,13 @@ sub isRadioLive(@) {
 	my $LIQUIDSOAP_TELNET_PORT = $conf->get('radio.LIQUIDSOAP_TELNET_PORT');
 
 	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-		unless (open LIQUIDSOAP_HARBOR, "echo -ne \"$sHarbor.status\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
+		my $fh_lsharbor;
+		unless (open $fh_lsharbor, "echo -ne \"$sHarbor.status\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
 			$self->{logger}->log( 3, "Unable to connect to LIQUIDSOAP telnet port");
 		}
 
 		my $line;
-		while (defined($line = <LIQUIDSOAP_HARBOR>)) {
+		while (defined($line = <$fh_lsharbor>)) {
 			chomp($line);
 			if ($line =~ /source/) {
 				$self->{logger}->log( 3, $line);
@@ -230,7 +233,7 @@ sub isRadioLive(@) {
 				}
 			}
 		}
-		close LIQUIDSOAP_HARBOR;
+		close $fh_lsharbor;
 		return 0;
 	} else {
 		return 0;
@@ -250,18 +253,20 @@ sub getRadioRemainingTime(@) {
 	$LIQUIDSOAP_MOUNPOINT =~ s/\./(dot)/;
 
 	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-		unless (open LIQUIDSOAP, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | grep remaining | tr -s \" \" | cut -f2 -d\" \" | tail -n 1 |") {
+		my $fh_ls;
+		unless (open $fh_ls, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | grep remaining | tr -s \" \" | cut -f2 -d\" \" | tail -n 1 |") {
 			$self->{logger}->log( 0, "getRadioRemainingTime() Unable to connect to LIQUIDSOAP telnet port");
 		}
 		my $line;
-		if (defined($line = <LIQUIDSOAP>)) {
+		if (defined($line = <$fh_ls>)) {
 			chomp($line);
 			$self->{logger}->log( 3, $line);
-			unless (open LIQUIDSOAP2, "echo -ne \"$line\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
+			my $fh_ls2;
+			unless (open $fh_ls2, "echo -ne \"$line\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
 				$self->{logger}->log( 0, "getRadioRemainingTime() Unable to connect to LIQUIDSOAP telnet port");
 			}
 			my $line2;
-			if (defined($line2 = <LIQUIDSOAP2>)) {
+			if (defined($line2 = <$fh_ls2>)) {
 				chomp($line2);
 				$self->{logger}->log( 3, $line2);
 				return $line2;
@@ -1306,14 +1311,14 @@ sub playRadio(@) {
 								$self->{logger}->log(0,"displayYoutubeDetails() YOUTUBE_APIKEY=key");
 								return undef;
 							}
-							unless ( open YOUTUBE_INFOS, "curl --connect-timeout 5 -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\" |" ) {
+							unless ( open my $fh_yt_radio, "curl --connect-timeout 5 -G -f -s \"https://www.googleapis.com/youtube/v3/search\" -d part=\"snippet\" -d q=\"$sText\" -d key=\"$APIKEY\" |" ) {
 								$self->{logger}->log(3,"displayYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
 							}
 							else {
 								my $line;
 								my $i = 0;
 								my $json_details;
-								while(defined($line=<YOUTUBE_INFOS>)) {
+								while(defined($line=<$fh_yt_radio>)) {
 									chomp($line);
 									$json_details .= $line;
 									$self->{logger}->log(5,"radioplay() youtubeSearch() $line");
@@ -1321,7 +1326,11 @@ sub playRadio(@) {
 								}
 								if (defined($json_details) && ($json_details ne "")) {
 									$self->{logger}->log(4,"radioplay() youtubeSearch() json_details : $json_details");
-									my $sYoutubeInfo = decode_json $json_details;
+									my $sYoutubeInfo = eval { decode_json $json_details };
+									if ($@ || !defined $sYoutubeInfo) {
+										$self->{logger}->log(3, "radioplay() JSON decode error: $@");
+										next;
+									}
 									my %hYoutubeInfo = %$sYoutubeInfo;
 										my @tYoutubeItems = $hYoutubeInfo{'items'};
 										my @fTyoutubeItems = @{$tYoutubeItems[0]};
@@ -1544,12 +1553,13 @@ sub queueCount(@) {
 	my ($self) = @_;
 	my $LIQUIDSOAP_TELNET_HOST = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_HOST');
 	my $LIQUIDSOAP_TELNET_PORT = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_PORT');
-	unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 | wc -w |") {
+	my $fh_lsts;
+	unless (open $fh_lsts, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 | wc -w |") {
 		$self->{logger}->log(0,"queueCount() Unable to connect to LIQUIDSOAP telnet port");
 		return undef;
 	}
 	my $line;
-	if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+	if (defined($line=<$fh_lsts>)) {
 		chomp($line);
 		$self->{logger}->log(3,$line);
 	}
@@ -1566,11 +1576,12 @@ sub isInQueueRadio(@) {
 		my $sNbTrack = ( $iNbTrack > 1 ? "tracks" : "track" );
 		my $line;
 		if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-			unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
+			my $fh_lsts;
+			unless (open $fh_lsts, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
 				$self->{logger}->log(0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
 				return undef;
 			}
-			if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+			if (defined($line=<$fh_lsts>)) {
 				chomp($line);
 				$line =~ s/\r//;
 				$line =~ s/\n//;
@@ -1580,12 +1591,13 @@ sub isInQueueRadio(@) {
 				my @RIDS = split(/ /,$line);
 				my $i;
 				for ($i=0;$i<=$#RIDS;$i++) {
-					unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"request.trace " . $RIDS[$i] . "\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
+					my $fh_lsts;
+					unless (open $fh_lsts, "echo -ne \"request.trace " . $RIDS[$i] . "\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
 						$self->{logger}->log(0,"isInQueueRadio() Unable to connect to LIQUIDSOAP telnet port");
 						return undef;
 					}
 					my $line;
-					if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+					if (defined($line=<$fh_lsts>)) {
 						chomp($line);
 						my $sMsgSong = "";
 						$line =~ s/\r//;
@@ -1626,12 +1638,13 @@ sub queueRadio(@) {
 				if (defined($iHarborId) && ($iHarborId ne "")) {
 					$self->{logger}->log(4,"Harbord ID : $iHarborId");
 					if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-						unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"harbor_$iHarborId.status\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
+						my $fh_lsts;
+						unless (open $fh_lsts, "echo -ne \"harbor_$iHarborId.status\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
 							$self->{logger}->log(0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
 							return undef;
 						}
 						my $line;
-						if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+						if (defined($line=<$fh_lsts>)) {
 							chomp($line);
 							$line =~ s/\r//;
 							$line =~ s/\n//;
@@ -1657,11 +1670,12 @@ sub queueRadio(@) {
 					my $sNbTrack = ( $iNbTrack > 1 ? "tracks" : "track" );
 					my $line;
 					if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-						unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
+						my $fh_lsts;
+						unless (open $fh_lsts, "echo -ne \"queue.queue\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
 							$self->{logger}->log(0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
 							return undef;
 						}
-						if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+						if (defined($line=<$fh_lsts>)) {
 							chomp($line);
 							$line =~ s/\r//;
 							$line =~ s/\n//;
@@ -1677,12 +1691,13 @@ sub queueRadio(@) {
 							my @RIDS = split(/ /,$line);
 							my $i;
 							for ($i=0;($i<3 && $i<=$#RIDS);$i++) {
-								unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"request.trace " . $RIDS[$i] . "\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
+								my $fh_lsts;
+								unless (open $fh_lsts, "echo -ne \"request.trace " . $RIDS[$i] . "\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | head -1 |") {
 									$self->{logger}->log(0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
 									return undef;
 								}
 								my $line;
-								if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+								if (defined($line=<$fh_lsts>)) {
 									chomp($line);
 									my $sMsgSong = "";
 									if (( $i == 0 ) && (!$bHarbor)) {
@@ -1848,12 +1863,13 @@ sub queuePushRadio(@) {
 		unless (isInQueueRadio($self,$sAudioFilename)) {
 			if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
 				$self->{logger}->log(4,"queuePushRadio() pushing $sAudioFilename to queue");
-				unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"queue.push $sAudioFilename\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
+				my $fh_lsts;
+				unless (open $fh_lsts, "echo -ne \"queue.push $sAudioFilename\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
 					$self->{logger}->log(0,"queuePushRadio() Unable to connect to LIQUIDSOAP telnet port");
 					return undef;
 				}
 				my $line;
-				while (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+				while (defined($line=<$fh_lsts>)) {
 					chomp($line);
 					$self->{logger}->log(3,$line);
 				}
@@ -1885,12 +1901,13 @@ sub nextRadio(@) {
 		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
 			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Master")) {
 				if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-					unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"radio(dot)mp3.skip\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
+					my $fh_lsts;
+					unless (open $fh_lsts, "echo -ne \"radio(dot)mp3.skip\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT |") {
 						$self->{logger}->log(0,"queueRadio() Unable to connect to LIQUIDSOAP telnet port");
 						return undef;
 					}
 					my $line;
-					while (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+					while (defined($line=<$fh_lsts>)) {
 						chomp($line);
 						$self->{logger}->log(3,$line);
 					}
@@ -2100,16 +2117,17 @@ sub rplayRadio(@) {
 						$sth->finish;
 					}
 					elsif (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-						my $sText = join ("%",@tArgs);
-						my $sSearch = $sText;
+						my $sText = join(" ", @tArgs);        # kept for display in IRC messages
+						my $sSearch = join("%", @tArgs);
 						$sSearch =~ s/\s+/%/g;
 						$sSearch =~ s/%+/%/g;
-						$sSearch =~ s/;//g;
-						$sSearch =~ s/'/\\'/g;
-						my $sQuery = "SELECT id_mp3,id_youtube,artist,title,folder,filename FROM MP3 WHERE CONCAT(artist,title) LIKE '%" . $sSearch . "%' ORDER BY RAND() LIMIT 1";
-						$self->{logger}->log(4,"rplayRadio() Query : $sQuery");
+						my $sPattern = "%" . $sSearch . "%"; # parameterized — no SQL injection
+						my $sQuery = "SELECT id_mp3, id_youtube, artist, title, folder, filename"
+						          . " FROM MP3 WHERE CONCAT(artist, title) LIKE ?"
+						          . " ORDER BY RAND() LIMIT 1";
+						$self->{logger}->log(4,"rplayRadio() Search: $sPattern");
 						my $sth = $self->{dbh}->prepare($sQuery);
-						unless ($sth->execute()) {
+						unless ($sth->execute($sPattern)) {
 							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 						}
 						else {	
@@ -2247,12 +2265,13 @@ sub getHarBorId(@) {
 	my $LIQUIDSOAP_TELNET_HOST = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_HOST');
 	my $LIQUIDSOAP_TELNET_PORT = $self->{conf}->get('radio.LIQUIDSOAP_TELNET_PORT');
 	if (defined($LIQUIDSOAP_TELNET_HOST) && ($LIQUIDSOAP_TELNET_HOST ne "")) {
-		unless (open LIQUIDSOAP_TELNET_SERVER, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | grep harbor | grep status | awk '{print \$2}' | awk -F'.' {'print \$1}' | awk -F'_' '{print \$2}' |") {
+		my $fh_lsts;
+		unless (open $fh_lsts, "echo -ne \"help\nquit\n\" | nc $LIQUIDSOAP_TELNET_HOST $LIQUIDSOAP_TELNET_PORT | grep harbor | grep status | awk '{print \$2}' | awk -F'.' {'print \$1}' | awk -F'_' '{print \$2}' |") {
 			$self->{logger}->log(0,"getHarBorId() Unable to connect to LIQUIDSOAP telnet port");
 			return undef;
 		}
 		my $line;
-		if (defined($line=<LIQUIDSOAP_TELNET_SERVER>)) {
+		if (defined($line=<$fh_lsts>)) {
 			chomp($line);
 			$self->{logger}->log(3,$line);
 			return $line;

@@ -296,7 +296,7 @@ sub clean_and_exit(@) {
 
     # Log if possible (best-effort)
     eval {
-        $self->{logger}->log(0, "Cleaning and exiting...")
+        $self->{logger}->log(1, "Cleaning and exiting...")
             if $self->{logger} && $self->{logger}->can('log');
         1;
     };
@@ -506,9 +506,9 @@ sub pickServer {
             clean_and_exit($self, 4);
         }
 
-        $self->{logger}->log(0, "Picked $self->{server} from Network $network_name");
+        $self->{logger}->log(1, "Picked $self->{server} from Network $network_name");
     } else {
-        $self->{logger}->log(0, "Picked $self->{server} from command line");
+        $self->{logger}->log(1, "Picked $self->{server} from command line");
     }
 
     # Parse hostname[:port]
@@ -525,7 +525,7 @@ sub pickServer {
 # Log a hint to run ./configure if no server is set
 sub _log_configure_hint {
     my ($self) = @_;
-    $self->{logger}->log(0, "Run ./configure at first use or ./configure -s to set it properly");
+    $self->{logger}->log(1, "Run ./configure at first use or ./configure -s to set it properly");
 }
 
 # Get server hostname 

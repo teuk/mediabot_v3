@@ -87,7 +87,7 @@ sub load_level {
     $dbh //= $self->{dbh};
     return unless $dbh && defined $self->{level_id};
 
-    my $sth = $dbh->prepare("SELECT * FROM USER_LEVEL WHERE id_user_level=?");
+    my $sth = $dbh->prepare("SELECT level, description FROM USER_LEVEL WHERE id_user_level = ?");
     if ($sth->execute($self->{level_id})) {
         if (my $ref = $sth->fetchrow_hashref) {
             $self->{level}      = $ref->{level};

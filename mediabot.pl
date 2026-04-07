@@ -671,10 +671,10 @@ sub on_login {
     if (defined $console_channel) {
         my $name = $console_channel->get_name;
         my $key  = $console_channel->get_key;
-        $mediabot->{logger}->log(0, "Joining console channel $name");
+        $mediabot->{logger}->log(1, "Joining console channel $name");
         $mediabot->joinChannel($name, $key);
     } else {
-        $mediabot->{logger}->log(0, "Warning: no console channel found in database (description = 'console'). You may want to run configure script again.");
+        $mediabot->{logger}->log(1, "Warning: no console channel found in database (description = 'console'). You may want to run configure script again.");
     }
 
     # Join other channels
@@ -698,12 +698,12 @@ sub on_message_INVITE {
     log_debug_args('on_message_INVITE', $message);
     my ($inviter_nick,$invited_nick,$target_name) = @{$hints}{qw<inviter_nick invited_nick target_name>};
     unless ($self->is_nick_me($inviter_nick)) {
-        $mediabot->{logger}->log(0,"* $inviter_nick invites you to join $target_name");
+        $mediabot->{logger}->log(1,"* $inviter_nick invites you to join $target_name");
         $mediabot->logBotAction($message,"invite",$inviter_nick,undef,$target_name);
         my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = $mediabot->getNickInfo($message);
         if (defined($iMatchingUserId)) {
             if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-                $mediabot->{logger}->log(0,"$invited_nick has been invited to join $target_name by $inviter_nick (authentified user)");
+                $mediabot->{logger}->log(1,"$invited_nick has been invited to join $target_name by $inviter_nick (authentified user)");
                 #$mediabot->joinChannel($target_name);
             }
             else {
@@ -715,7 +715,7 @@ sub on_message_INVITE {
         }
     }
     else {
-        $mediabot->{logger}->log(0,"$invited_nick has been invited to join $target_name");
+        $mediabot->{logger}->log(1,"$invited_nick has been invited to join $target_name");
     }
 }
     
@@ -773,7 +773,7 @@ sub on_message_NICK {
     }
     my ($old_nick,$new_nick) = @{$hints}{qw<old_nick new_nick>};
     if ($self->is_nick_me($old_nick)) {
-        $mediabot->{logger}->log(0,"* Your nick is now $new_nick");
+        $mediabot->{logger}->log(1,"* Your nick is now $new_nick");
         $self->_set_nick($new_nick);
     }
     else {
@@ -1140,21 +1140,21 @@ sub on_message_001 {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_001', $message);
     my ($text) = @{$hints}{qw<text>};
-    $mediabot->{logger}->log(0,"001 $text");
+    $mediabot->{logger}->log(2,"001 $text");
 }
         
 sub on_message_002 {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_002', $message);
     my ($text) = @{$hints}{qw<text>};
-    $mediabot->{logger}->log(0,"002 $text");
+    $mediabot->{logger}->log(2,"002 $text");
 }
         
 sub on_message_003 {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_003', $message);
     my ($text) = @{$hints}{qw<text>};
-    $mediabot->{logger}->log(0,"003 $text");
+    $mediabot->{logger}->log(2,"003 $text");
 }
         
 # Numeric 004 – Server version/info
@@ -1176,7 +1176,7 @@ sub on_message_005 {
     my @args = $message->args;
     shift @args; # Remove nickname (first arg)
     my $features = join(" ", @args);
-    $mediabot->{logger}->log(0, "005 $features");
+    $mediabot->{logger}->log(2, "005 $features");
 }
         
 sub on_motd {
@@ -1184,7 +1184,7 @@ sub on_motd {
     log_debug_args('on_motd', $message);
     my @motd_lines = @{$hints}{qw<motd>};
     foreach my $line (@{$motd_lines[0]}) {
-        $mediabot->{logger}->log(0,"-motd- $line");
+        $mediabot->{logger}->log(2,"-motd- $line");
     }
 }
     
@@ -1196,7 +1196,7 @@ sub on_message_RPL_WHOISUSER {
     my @tArgs = $message->args;
     my $sHostname = $tArgs[3];
     my ($target_name,$ident,$host,$flags,$realname) = @{$hints}{qw<target_name ident host flags realname>};
-    $mediabot->{logger}->log(0,"$target_name is $ident\@$sHostname $flags $realname");
+    $mediabot->{logger}->log(2,"$target_name is $ident\@$sHostname $flags $realname");
     if (defined($WHOIS_VARS{'nick'}) && ($WHOIS_VARS{'nick'} eq $target_name) && defined($WHOIS_VARS{'sub'}) && ($WHOIS_VARS{'sub'} ne "")) {
         switch($WHOIS_VARS{'sub'}) {
             case "userVerifyNick" {
@@ -1360,7 +1360,7 @@ sub on_message_KILL {
 sub on_message_SERVER {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_SERVER', $message);
-    $mediabot->{logger}->log(0, "SERVER message: " . join(" ", @{ $message->args }));
+    $mediabot->{logger}->log(1, "SERVER message: " . join(" ", @{ $message->args }));
 }
 
 # Numeric 332 RPL_TOPIC
@@ -1370,7 +1370,7 @@ sub on_message_RPL_TOPIC {
     my @args = $message->args;
     my $channel = $args[1] // '<unknown>';
     my $topic   = $args[2] // '<none>';
-    $mediabot->{logger}->log(0, "Topic for $channel: $topic");
+    $mediabot->{logger}->log(1, "Topic for $channel: $topic");
 }
 
 # Numeric 333 RPL_TOPICWHOTIME
@@ -1382,7 +1382,7 @@ sub on_message_RPL_TOPICWHOTIME {
     my $setter  = $args[2] // '<unknown>';
     my $ts      = $args[3] // time;
     my $time    = scalar localtime($ts);
-    $mediabot->{logger}->log(0, "Topic for $channel set by $setter on $time");
+    $mediabot->{logger}->log(1, "Topic for $channel set by $setter on $time");
 }
 
 sub on_message_RPL_LIST {
@@ -1413,7 +1413,7 @@ sub on_message_RPL_WHOISCHANNELS {
     my $nick  = $args[1] // '<undef>';
     my $chans = $args[2] // '';
 
-    $mediabot->{logger}->log(0, "$nick on channels: $chans");
+    $mediabot->{logger}->log(2, "$nick on channels: $chans");
 }
 
 sub on_message_RPL_WHOISSERVER {
@@ -1423,7 +1423,7 @@ sub on_message_RPL_WHOISSERVER {
     my $nick   = $args[1] // '';
     my $server = $args[2] // '';
     my $info   = $args[3] // '';
-    $mediabot->{logger}->log(0, "$nick server $server ($info)");
+    $mediabot->{logger}->log(2, "$nick server $server ($info)");
 }
 
 sub on_message_RPL_WHOISIDLE {
@@ -1433,7 +1433,7 @@ sub on_message_RPL_WHOISIDLE {
     my $nick   = $args[1] // '';
     my $idle   = $args[2] // 0;
     my $signon = $args[3] // time;
-    $mediabot->{logger}->log(0, "$nick idle for ${idle}s, signon: " . scalar localtime($signon));
+    $mediabot->{logger}->log(2, "$nick idle for ${idle}s, signon: " . scalar localtime($signon));
 }
 
 sub on_message_ERR_NICKNAMEINUSE {

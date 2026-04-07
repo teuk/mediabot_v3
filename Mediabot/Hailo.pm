@@ -58,7 +58,7 @@ sub get_hailo(@) {
 # Clean up and exit the program (with proper Net::Async::IRC QUIT)
 sub is_hailo_excluded_nick(@) {
 	my ($self,$nick) = @_;
-	my $sQuery = "SELECT * FROM HAILO_EXCLUSION_NICK WHERE nick like ?";
+	my $sQuery = "SELECT 1 FROM HAILO_EXCLUSION_NICK WHERE nick LIKE ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($nick)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -378,7 +378,7 @@ sub set_hailo_channel_ratio {
 	my $id_channel = $channel_obj->get_id;
 
 	# Check if HAILO_CHANNEL entry exists for this channel
-	my $sQuery = "SELECT * FROM HAILO_CHANNEL WHERE id_channel = ?";
+	my $sQuery = "SELECT ratio FROM HAILO_CHANNEL WHERE id_channel = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 
 	unless ($sth->execute($id_channel)) {

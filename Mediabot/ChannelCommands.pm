@@ -536,10 +536,10 @@ sub purgeChannel_ctx {
         return;
     }
 
-    $self->{logger}->log(0, "🗑️ $nick issued a purge command on $sChannel (id=$id_channel)");
+    $self->{logger}->log(1, "🗑️ $nick issued a purge command on $sChannel (id=$id_channel)");
 
     # Retrieve channel info from DB
-    my $sth = $self->{dbh}->prepare("SELECT * FROM CHANNEL WHERE id_channel = ?");
+    my $sth = $self->{dbh}->prepare("SELECT auto_join, chanmode, description, `key` FROM CHANNEL WHERE id_channel = ?");
     unless ($sth && $sth->execute($id_channel)) {
         $self->{logger}->log(1, "❌ SQL Error: $DBI::errstr while fetching channel info");
         Mediabot::botNotice($self, $nick, "SQL error while fetching channel info.");
