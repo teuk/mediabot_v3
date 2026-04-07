@@ -51,24 +51,26 @@ sub init_auth {
 }
 
 
-# Populate all CHANNEL entries into $self->{channels}
+# Get autologin status for a user handle (returns 1 if username='#AUTOLOGIN#', else 0)
 sub getUserAutologin(@) {
-	my ($self,$sMatchingUserHandle) = @_;
-	my $sQuery = "SELECT 1 FROM USER WHERE nickname LIKE ? AND username = '#AUTOLOGIN#'";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sMatchingUserHandle) ) {
-		$self->{logger}->log(1,"getUserAutologin() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			$sth->finish;
-			return 1;
-		}
-		else {
-			$sth->finish;
-			return 0;
-		}
-	}
+    my ($self, $sMatchingUserHandle) = @_;
+
+    my $sQuery = "SELECT 1 FROM USER WHERE nickname = ? AND username = '#AUTOLOGIN#'";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth->execute($sMatchingUserHandle)) {
+        $self->{logger}->log(1, "getUserAutologin() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+    }
+    else {
+        if (my $ref = $sth->fetchrow_hashref()) {
+            $sth->finish;
+            return 1;
+        }
+        else {
+            $sth->finish;
+            return 0;
+        }
+    }
 }
 
 # Get user id from user handle

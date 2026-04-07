@@ -698,25 +698,27 @@ sub youtubeSearch_ctx {
     return 1;
 }
 
-# Duration: ISO8601 "PT#H#M#S" -> "1h 02m 03s" / "3m 12s" / "45s"
+# Get fortniteid from nickname
 sub getFortniteId(@) {
-	my ($self,$sUser) = @_;
-	my $sQuery = "SELECT fortniteid FROM USER WHERE nickname LIKE ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sUser)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $fortniteid = $ref->{'fortniteid'};
-			$sth->finish;
-			return $fortniteid;
-		}
-		else {
-			$sth->finish;
-			return undef;
-		}
-	}
+    my ($self, $sUser) = @_;
+
+    my $sQuery = "SELECT fortniteid FROM USER WHERE nickname = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth->execute($sUser)) {
+        $self->{logger}->log(1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+    }
+    else {
+        if (my $ref = $sth->fetchrow_hashref()) {
+            my $fortniteid = $ref->{fortniteid};
+            $sth->finish;
+            return $fortniteid;
+        }
+        else {
+            $sth->finish;
+            return undef;
+        }
+    }
 }
 
 # Fortnite stats:

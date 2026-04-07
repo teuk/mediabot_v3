@@ -55,25 +55,26 @@ sub get_hailo(@) {
 	return $self->{hailo};
 }
 
-# Clean up and exit the program (with proper Net::Async::IRC QUIT)
+# Is the given nick in the HAILO_EXCLUSION_NICK table? Returns 1 if excluded, 0 if not.
 sub is_hailo_excluded_nick(@) {
-	my ($self,$nick) = @_;
-	my $sQuery = "SELECT 1 FROM HAILO_EXCLUSION_NICK WHERE nick LIKE ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($nick)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		my $sOutput = "";
-		if (my $ref = $sth->fetchrow_hashref()) {
-			$sth->finish;
-			return 1;
-		}
-		else {
-			$sth->finish;
-			return 0;
-		}
-	}
+    my ($self, $nick) = @_;
+
+    my $sQuery = "SELECT 1 FROM HAILO_EXCLUSION_NICK WHERE nick = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth->execute($nick)) {
+        $self->{logger}->log(1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+    }
+    else {
+        if (my $ref = $sth->fetchrow_hashref()) {
+            $sth->finish;
+            return 1;
+        }
+        else {
+            $sth->finish;
+            return 0;
+        }
+    }
 }
 
 # hailo_ignore <nick>
@@ -345,23 +346,25 @@ sub hailo_status_ctx {
 
 # Get the Hailo chatter ratio for a specific channel
 sub get_hailo_channel_ratio(@) {
-	my ($self,$sChannel) = @_;
-	my $sQuery = "SELECT HAILO_CHANNEL.ratio FROM HAILO_CHANNEL JOIN CHANNEL ON CHANNEL.id_channel = HAILO_CHANNEL.id_channel WHERE CHANNEL.name LIKE ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $ratio = $ref->{'ratio'};
-			$sth->finish;
-			return $ratio;
-		}
-		else {
-			$sth->finish;
-			return -1;
-		}
-	}
+    my ($self, $sChannel) = @_;
+
+    my $sQuery = "SELECT HAILO_CHANNEL.ratio FROM HAILO_CHANNEL JOIN CHANNEL ON CHANNEL.id_channel = HAILO_CHANNEL.id_channel WHERE CHANNEL.name = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth->execute($sChannel)) {
+        $self->{logger}->log(1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+    }
+    else {
+        if (my $ref = $sth->fetchrow_hashref()) {
+            my $ratio = $ref->{ratio};
+            $sth->finish;
+            return $ratio;
+        }
+        else {
+            $sth->finish;
+            return undef;
+        }
+    }
 }
 
 # Set the Hailo chatter ratio for a specific channel

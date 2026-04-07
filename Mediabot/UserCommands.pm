@@ -140,24 +140,27 @@ sub getIdUserLevel(@) {
 	}
 }
 
+# Get user level (numeric) from nickname (handle)
 sub getLevelUser(@) {
-	my ($self,$sUserHandle) = @_;
-	my $sQuery = "SELECT USER_LEVEL.level FROM USER JOIN USER_LEVEL ON USER_LEVEL.id_user_level = USER.id_user_level WHERE USER.nickname LIKE ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sUserHandle)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $level = $ref->{'level'};
-			$sth->finish;
-			return $level;
-		}
-		else {
-			$sth->finish;
-			return undef;
-		}
-	}
+    my ($self, $sUserHandle) = @_;
+
+    my $sQuery = "SELECT USER_LEVEL.level FROM USER JOIN USER_LEVEL ON USER_LEVEL.id_user_level = USER.id_user_level WHERE USER.nickname = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth->execute($sUserHandle)) {
+        $self->{logger}->log(1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+    }
+    else {
+        if (my $ref = $sth->fetchrow_hashref()) {
+            my $level = $ref->{level};
+            $sth->finish;
+            return $level;
+        }
+        else {
+            $sth->finish;
+            return undef;
+        }
+    }
 }
 
 sub userCstat_ctx {
@@ -290,26 +293,36 @@ sub userStats_ctx {
 
 # Context-based userinfo command (Master only)
 sub userInfo_ctx {
-    my ($ctx) = @_;
+    my ($self, $ctx) = @_;
+    return unless $ctx;
 
-    my $self = $ctx->bot;
     my $nick = $ctx->nick;
-
-    # Require Master privilege
     $ctx->require_level('Master') or return;
 
-    # Expected: userinfo <username>
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     my $target = $args[0] // '';
+
     if ($target eq '') {
         botNotice($self, $nick, "Syntax: userinfo <username>");
         return;
     }
 
     my $sQuery = q{
-        SELECT *
-        FROM USER JOIN USER_LEVEL ON USER_LEVEL.id_user_level = USER.id_user_level
-        WHERE USER.nickname LIKE ?
+        SELECT
+            USER.id_user,
+            USER.nickname,
+            USER.creation_date,
+            USER.last_login,
+            USER.password,
+            USER.info1,
+            USER.info2,
+            USER.auth,
+            USER.username,
+            USER_LEVEL.level,
+            USER_LEVEL.description
+        FROM USER
+        JOIN USER_LEVEL ON USER_LEVEL.id_user_level = USER.id_user_level
+        WHERE USER.nickname = ?
         LIMIT 1
     };
 
@@ -320,46 +333,48 @@ sub userInfo_ctx {
     }
 
     if (my $ref = $sth->fetchrow_hashref()) {
-        my $id_user     = $ref->{id_user}        // '?';
-        my $nickname    = $ref->{nickname}       // '?';
-        my $created     = $ref->{creation_date}  // 'N/A';
-        my $last_login  = $ref->{last_login}     // 'never';
-        # Fetch hostmasks from USER_HOSTMASK
+        my $id_user     = $ref->{id_user}       // '?';
+        my $nickname    = $ref->{nickname}      // '?';
+        my $created     = $ref->{creation_date} // 'N/A';
+        my $last_login  = $ref->{last_login}    // 'never';
+
         my $hm_sth = $self->{dbh}->prepare(
             "SELECT GROUP_CONCAT(hostmask ORDER BY id_user_hostmask SEPARATOR ', ') AS hm FROM USER_HOSTMASK WHERE id_user=?"
         );
+
         my $hostmasks = 'none';
         if ($hm_sth && $hm_sth->execute($id_user)) {
             my $hm_ref = $hm_sth->fetchrow_hashref;
             $hostmasks = $hm_ref->{hm} // 'none';
             $hm_sth->finish;
         }
-        my $password    = $ref->{password};
-        my $info1       = $ref->{info1}          // 'N/A';
-        my $info2       = $ref->{info2}          // 'N/A';
-        my $desc        = $ref->{description}    // 'Unknown';
-        my $auth        = $ref->{auth}           // 0;
-        my $username    = $ref->{username}       // 'N/A';
 
-        my $sAuthStatus = $auth ? "logged in" : "not logged in";
-        my $sPassStatus = (defined($password) && $password ne '') ? "Password set" : "Password is not set";
-        my $sAutoLogin  = ($username eq "#AUTOLOGIN#") ? "ON" : "OFF";
+        my $password = $ref->{password};
+        my $level    = defined $ref->{level}       ? $ref->{level}       : '?';
+        my $level_d  = defined $ref->{description} ? $ref->{description} : '?';
+        my $auth     = defined $ref->{auth}        ? $ref->{auth}        : 0;
+        my $username = defined $ref->{username}    ? $ref->{username}    : '';
+        my $info1    = defined $ref->{info1}       ? $ref->{info1}       : '';
+        my $info2    = defined $ref->{info2}       ? $ref->{info2}       : '';
 
-        botNotice($self, $nick, "User: $nickname (Id: $id_user - $desc)");
-        botNotice($self, $nick, "Created: $created | Last login: $last_login");
-        botNotice($self, $nick, "$sPassStatus | Status: $sAuthStatus | AUTOLOGIN: $sAutoLogin");
-        botNotice($self, $nick, "Hostmasks: $hostmasks");
-        botNotice($self, $nick, "Info: $info1 | $info2");
-    } else {
-        botNotice($self, $nick, "User '$target' does not exist.");
+        botNotice($self, $nick, "User ID      : $id_user");
+        botNotice($self, $nick, "Nickname     : $nickname");
+        botNotice($self, $nick, "Level        : $level ($level_d)");
+        botNotice($self, $nick, "Username     : $username");
+        botNotice($self, $nick, "Auth         : $auth");
+        botNotice($self, $nick, "Created      : $created");
+        botNotice($self, $nick, "Last login   : $last_login");
+        botNotice($self, $nick, "Hostmasks    : $hostmasks");
+        botNotice($self, $nick, "Info1        : " . ($info1 eq '' ? 'N/A' : $info1));
+        botNotice($self, $nick, "Info2        : " . ($info2 eq '' ? 'N/A' : $info2));
+        botNotice($self, $nick, "Password set : " . (defined($password) && $password ne '' ? 'yes' : 'no'));
+    }
+    else {
+        botNotice($self, $nick, "Unknown user $target");
     }
 
-    my $sNoticeMsg = $ctx->message->prefix . " userinfo on $target";
-    $self->{logger}->log(0, $sNoticeMsg);
-    noticeConsoleChan($self, $sNoticeMsg);
-    logBot($self, $ctx->message, undef, "userinfo", $sNoticeMsg);
-
-    $sth->finish if $sth;
+    $sth->finish;
+    return;
 }
 
 # Context-based addhost command: add a new hostmask to an existing user (Master only)
@@ -1047,35 +1062,41 @@ SQL
     return 1;
 }
 
-# popcmd — show top 20 public commands (by hits) created by a given user
-# Context-based migration:
-# - Uses ctx for bot/nick/channel/message/args
-# - Better display: one-line, truncated with "..."
-# - Sends to channel if invoked in-channel, otherwise NOTICE
+# Get timezone for a user (nickname / handle)
 sub _get_user_tz {
     my ($self, $nick) = @_;
-    my $sth = $self->{dbh}->prepare("SELECT tz FROM USER WHERE nickname LIKE ?");
-    unless ($sth->execute($nick)) { $sth->finish; return undef; }
+
+    my $sth = $self->{dbh}->prepare("SELECT tz FROM USER WHERE nickname = ?");
+    unless ($sth->execute($nick)) {
+        $sth->finish;
+        return undef;
+    }
+
     my $ref = $sth->fetchrow_hashref();
     $sth->finish;
+
     return $ref ? $ref->{tz} : undef;
 }
 
 # Set timezone for a user
 sub _set_user_tz {
     my ($self, $nick, $tz) = @_;
-    my $sth = $self->{dbh}->prepare("UPDATE USER SET tz=? WHERE nickname LIKE ?");
+
+    my $sth = $self->{dbh}->prepare("UPDATE USER SET tz=? WHERE nickname = ?");
     my $ok = $sth->execute($tz, $nick);
     $sth->finish;
+
     return $ok;
 }
 
 # Clear timezone for a user
 sub _del_user_tz {
     my ($self, $nick) = @_;
-    my $sth = $self->{dbh}->prepare("UPDATE USER SET tz=NULL WHERE nickname LIKE ?");
+
+    my $sth = $self->{dbh}->prepare("UPDATE USER SET tz=NULL WHERE nickname = ?");
     my $ok = $sth->execute($nick);
     $sth->finish;
+
     return $ok;
 }
 
@@ -1269,22 +1290,23 @@ sub _sendModUserSyntax {
     botNotice($self, $sNick, "moduser <user> fortniteid <id>");
 }
 
-
-
+# Set global user level (Owner/Master/Administrator/User)
 sub setUserLevel(@) {
-	my ($self,$sUser,$id_user_level) = @_;
-	my $sQuery = "UPDATE USER SET id_user_level=? WHERE nickname like ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($id_user_level,$sUser)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-		return 0;
-	}
-	else {
-		return 1;
-	}
+    my ($self, $sUser, $id_user_level) = @_;
+
+    my $sQuery = "UPDATE USER SET id_user_level=? WHERE nickname = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth->execute($id_user_level, $sUser)) {
+        $self->{logger}->log(1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+        return 0;
+    }
+    else {
+        return 1;
+    }
 }
 
-# Set the anti-flood parameters for a channel
+
 sub userBirthday_ctx {
     my ($ctx) = @_;
 
@@ -1311,7 +1333,7 @@ sub userBirthday_ctx {
     if (@args == 1 && $args[0] !~ /^(add|del|next)$/i) {
         my $target = $args[0];
 
-        my $sth = $self->{dbh}->prepare("SELECT birthday FROM USER WHERE nickname LIKE ?");
+        my $sth = $self->{dbh}->prepare("SELECT birthday FROM USER WHERE nickname = ?");
         unless ($sth && $sth->execute($target)) {
             $self->{logger}->log(1, "userBirthday_ctx() SQL Error: $DBI::errstr");
             return;

@@ -173,8 +173,8 @@ sub _format_val {
 
 # Get the main configuration object
 sub getMainConfCfg(@) {
-	my $self = shift;
-	return $self->{cfg};
+    my $self = shift;
+    return $self->{conf};
 }
 
 # Get pid file path from configuration
@@ -489,7 +489,7 @@ sub pickServer {
             clean_and_exit($self, 4);
         }
 
-        my $sQuery = "SELECT SERVERS.server_hostname FROM NETWORK JOIN SERVERS ON SERVERS.id_network = NETWORK.id_network WHERE NETWORK.network_name LIKE ? ORDER BY RAND() LIMIT 1";
+        my $sQuery = "SELECT SERVERS.server_hostname FROM NETWORK JOIN SERVERS ON SERVERS.id_network = NETWORK.id_network WHERE NETWORK.network_name = ? ORDER BY RAND() LIMIT 1";
         my $sth = $dbh->prepare($sQuery);
         if ($sth->execute($network_name)) {
             if (my $ref = $sth->fetchrow_hashref()) {

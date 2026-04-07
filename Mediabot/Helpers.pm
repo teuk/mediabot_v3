@@ -84,77 +84,139 @@ our @EXPORT = qw(
     versionCheck
 );
 
+# Get user object from message prefix (hostmask)
 sub get_user_from_message {
     my ($self, $message) = @_;
+
+    return unless $message;
 
     my $fullmask = $message->prefix // '';
     my ($nick)   = $fullmask =~ /^([^!]+)/;
     $nick ||= '';
 
+    my ($host) = $fullmask =~ /@(.+)$/;
+    $host = lc($host // '');
+
     $self->{logger}->log(3, "🔍 get_user_from_message() called with hostmask: '$fullmask'");
 
+    require Mediabot::Auth;
+    require Mediabot::User;
+
+    $self->{auth} ||= Mediabot::Auth->new(
+        dbh    => $self->{dbh},
+        logger => $self->{logger},
+    );
+
     my $sth = $self->{dbh}->prepare(q{
-        SELECT u.*, uh.hostmask AS _matched_hostmask
+        SELECT
+            u.id_user,
+            u.nickname,
+            u.password,
+            u.username,
+            u.id_user_level,
+            u.auth,
+            u.info1,
+            u.info2,
+            GROUP_CONCAT(uh.hostmask ORDER BY uh.id_user_hostmask SEPARATOR ',') AS hostmasks
         FROM USER u
-        JOIN USER_HOSTMASK uh ON uh.id_user = u.id_user
+        LEFT JOIN USER_HOSTMASK uh ON uh.id_user = u.id_user
+        GROUP BY
+            u.id_user,
+            u.nickname,
+            u.password,
+            u.username,
+            u.id_user_level,
+            u.auth,
+            u.info1,
+            u.info2
+        ORDER BY u.id_user
     });
+
     unless ($sth->execute) {
         $self->{logger}->log(1, "❌ get_user_from_message() SQL Error: $DBI::errstr");
         return;
     }
 
-    my $matched_user;
+    my $best_row;
+    my $best_reason = '';
+    my $best_score  = -1;
+
     while (my $row = $sth->fetchrow_hashref) {
-        my @patterns = ($row->{_matched_hostmask} // '');
-        foreach my $mask (@patterns) {
-            my $orig_mask = $mask;
-            $mask =~ s/^\s+|\s+$//g;
-            my $regex = $mask; $regex =~ s/\./\\./g; $regex =~ s/\*/.*/g; $regex =~ s/\[/\\[/g; $regex =~ s/\]/\\]/g; $regex =~ s/\{/\\{/g; $regex =~ s/\}/\\}/g;
+        my $matched = 0;
+        my $reason  = '';
+        my $score   = -1;
 
-            if ($fullmask =~ /^$regex/) {
-                require Mediabot::User;
-                my $user = Mediabot::User->new($row);
-                $user->load_level($self->{dbh});
+        my ($mask_ok, $matched_mask, undef, $mask_score) = $self->{auth}->hostmask_matches($row, $fullmask);
+        if ($mask_ok) {
+            $matched = 1;
+            $reason  = "hostmask:$matched_mask";
+            $score   = $mask_score;
+        }
+        else {
+            my $db_nick = lc($row->{nickname} // '');
 
-                # DEBUG before autologin
-                $self->_dbg_auth_snapshot('pre-auto', $user, $nick, $fullmask);
-
-                # AUTOLOGIN (auth in DB)
-                if ($user->can('maybe_autologin')) {
-                    $user->maybe_autologin($self, $nick, $fullmask);
+            if ($host =~ /(^|\.)users\.undernet\.org\z/i) {
+                my ($leftmost) = split(/\./, $host, 2);
+                if (defined $leftmost && $leftmost ne '' && $db_nick ne '' && lc($leftmost) eq $db_nick) {
+                    $matched = 1;
+                    $reason  = "undernet_cloak";
+                    $score   = 0;
                 }
-
-                # DEBUG after autologin
-                $self->_dbg_auth_snapshot('post-auto', $user, $nick, $fullmask);
-
-                # Synchronise all caches if DB says auth=1
-                $self->_ensure_logged_in_state($user, $nick, $fullmask);
-
-                # DEBUG after synchronisation
-                $self->_dbg_auth_snapshot('post-ensure', $user, $nick, $fullmask);
-
-                $self->{logger}->log(3, "🎯 Matched user id=" . ($user->can('id') ? $user->id : $user->{id_user}) .
-                                         ", nickname='" . $user->nickname .
-                                         "', level='" . ($user->level_description // 'undef') . "'");
-
-                $matched_user = $user;
-                last;
             }
         }
-        last if $matched_user;
+
+        next unless $matched;
+
+        if ($score > $best_score) {
+            $best_row    = { %$row };
+            $best_reason = $reason;
+            $best_score  = $score;
+        }
     }
 
     $sth->finish;
 
-    unless ($matched_user) {
+    unless ($best_row) {
         $self->{logger}->log(3, "🚫 No user matched hostmask '$fullmask'");
         return;
     }
 
-    # DEBUG au retour
-    $self->_dbg_auth_snapshot('return', $matched_user, $nick, $fullmask);
+    my $user = Mediabot::User->new({
+        %$best_row,
+        dbh => $self->{dbh},
+    });
+    $user->load_level($self->{dbh});
 
-    return $matched_user;
+    $self->_dbg_auth_snapshot('pre-auto', $user, $nick, $fullmask);
+
+    if ($user->can('maybe_autologin')) {
+        $user->maybe_autologin($self, $nick, $fullmask);
+    }
+
+    $self->_dbg_auth_snapshot('post-auto', $user, $nick, $fullmask);
+
+    $self->_ensure_logged_in_state($user, $nick, $fullmask);
+
+    $self->_dbg_auth_snapshot('post-ensure', $user, $nick, $fullmask);
+
+    $self->{logger}->log(
+        3,
+        "🎯 Matched user id="
+          . ($user->can('id') ? $user->id : $user->{id_user})
+          . ", nickname='"
+          . $user->nickname
+          . "', level='"
+          . ($user->level_description // 'undef')
+          . "', reason='"
+          . $best_reason
+          . "', score='"
+          . $best_score
+          . "'"
+    );
+
+    $self->_dbg_auth_snapshot('return', $user, $nick, $fullmask);
+
+    return $user;
 }
 
 
@@ -209,22 +271,24 @@ sub getUserhandle {
     return $nickname ne '' ? $nickname : undef;
 }
 
-# Get user autologin status
+# Get user ID from nickname (userhandle)
 sub getIdUser(@) {
-	my ($self,$sUserhandle) = @_;
-	my $id_user = undef;
-	my $sQuery = "SELECT id_user FROM USER WHERE nickname like ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sUserhandle) ) {
-		$self->{logger}->log(1,"getIdUser() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			$id_user = $ref->{'id_user'};
-		}
-	}
-	$sth->finish;
-	return $id_user;
+    my ($self, $sUserhandle) = @_;
+
+    my $id_user = undef;
+    my $sQuery = "SELECT id_user FROM USER WHERE nickname = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth->execute($sUserhandle)) {
+        $self->{logger}->log(1, "getIdUser() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+    }
+    else {
+        if (my $ref = $sth->fetchrow_hashref()) {
+            $id_user = $ref->{id_user};
+        }
+    }
+
+    return $id_user;
 }
 
 # Get channel object by name
@@ -2281,11 +2345,18 @@ sub mp3_ctx {
     return;
 }
 
-# Execute a shell command and return (up to) the last 3 lines.
-# Context-based version, restricted to Owner-level users.
-
+# Check if a message should be ignored based on the IGNORES table (both channel-specific and global ignores)
 sub isIgnored(@) {
 	my ($self,$message,$sChannel,$sNick,$sMsg)	= @_;
+
+	return 0 unless $message;
+
+	require Mediabot::Auth;
+	$self->{auth} ||= Mediabot::Auth->new(
+		dbh    => $self->{dbh},
+		logger => $self->{logger},
+	);
+
 	my $sCheckQuery = "SELECT hostmask FROM IGNORES WHERE id_channel = 0";
 	my $sth = $self->{dbh}->prepare($sCheckQuery);
 	unless ($sth->execute ) {
@@ -2293,38 +2364,33 @@ sub isIgnored(@) {
 	}
 	else {	
 		while (my $ref = $sth->fetchrow_hashref()) {
-			my $sHostmask = $ref->{'hostmask'};
-			$sHostmask =~ s/\./\\./g;
-			$sHostmask =~ s/\*/.*/g;
-			$sHostmask =~ s/\[/\\[/g;
-			$sHostmask =~ s/\]/\\]/g;
-			$sHostmask =~ s/\{/\\{/g;
-			$sHostmask =~ s/\}/\\}/g;
-			if ( $message->prefix =~ /^$sHostmask/ ) {
-				$self->{logger}->log(4,"isIgnored() (allchans/private) $sHostmask matches " . $message->prefix);
-				$self->{logger}->log(0,"[IGNORED] " . $ref->{'hostmask'} . " (allchans/private) " . ((substr($sChannel,0,1) eq '#') ? "$sChannel:" : "") . "<$sNick> $sMsg");
+			my $stored = $ref->{'hostmask'} // '';
+			my ($ok, $matched_mask) = $self->{auth}->hostmask_matches({ hostmasks => $stored }, $message->prefix);
+
+			if ($ok) {
+				$self->{logger}->log(4,"isIgnored() (allchans/private) $matched_mask matches " . $message->prefix);
+				$self->{logger}->log(0,"[IGNORED] " . $stored . " (allchans/private) " . ((substr($sChannel,0,1) eq '#') ? "$sChannel:" : "") . "<$sNick> $sMsg");
+				$sth->finish;
 				return 1;
 			}
 		}
 	}
 	$sth->finish;
-	$sCheckQuery = "SELECT IGNORES.* FROM IGNORES JOIN CHANNEL ON CHANNEL.id_channel = IGNORES.id_channel WHERE CHANNEL.name LIKE ?";
+
+	$sCheckQuery = "SELECT IGNORES.hostmask FROM IGNORES JOIN CHANNEL ON CHANNEL.id_channel = IGNORES.id_channel WHERE CHANNEL.name = ?";
 	$sth = $self->{dbh}->prepare($sCheckQuery);
 	unless ($sth->execute($sChannel)) {
 		$self->{logger}->log(1,"isIgnored() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
 	}
 	else {	
 		while (my $ref = $sth->fetchrow_hashref()) {
-			my $sHostmask = $ref->{'hostmask'};
-			$sHostmask =~ s/\./\\./g;
-			$sHostmask =~ s/\*/.*/g;
-			$sHostmask =~ s/\[/\\[/g;
-			$sHostmask =~ s/\]/\\]/g;
-			$sHostmask =~ s/\{/\\{/g;
-			$sHostmask =~ s/\}/\\}/g;
-			if ( $message->prefix =~ /^$sHostmask/ ) {
-				$self->{logger}->log(4,"isIgnored() $sHostmask matches " . $message->prefix);
-				$self->{logger}->log(0,"[IGNORED] " . $ref->{'hostmask'} . " $sChannel:<$sNick> $sMsg");
+			my $stored = $ref->{'hostmask'} // '';
+			my ($ok, $matched_mask) = $self->{auth}->hostmask_matches({ hostmasks => $stored }, $message->prefix);
+
+			if ($ok) {
+				$self->{logger}->log(4,"isIgnored() $matched_mask matches " . $message->prefix);
+				$self->{logger}->log(0,"[IGNORED] " . $stored . " $sChannel:<$sNick> $sMsg");
+				$sth->finish;
 				return 1;
 			}
 		}
@@ -2597,95 +2663,141 @@ sub getLevel(@) {
 	}
 }
 
-
+# Get user info by matching hostmask (for WHOIS response)
 sub getNickInfoWhois(@) {
-	my ($self,$sWhoisHostmask) = @_;
-	my $iMatchingUserId = undef;
-	my $iMatchingUserLevel = undef;
-	my $iMatchingUserLevelDesc = undef;
-	my $iMatchingUserAuth = undef;
-	my $sMatchingUserHandle = undef;
-	my $sMatchingUserPasswd = undef;
-	my $sMatchingUserInfo1 = undef;
-	my $sMatchingUserInfo2 = undef;
-	
-	my $sCheckQuery = "SELECT id_user, nickname, id_user_level, auth FROM USER";
-	my $sth = $self->{dbh}->prepare($sCheckQuery);
-	unless ($sth->execute ) {
-		$self->{logger}->log(1,"getNickInfoWhois() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
-	}
-	else {	
-		while (my $ref = $sth->fetchrow_hashref()) {
-			my $hm_s = $self->{dbh}->prepare("SELECT hostmask FROM USER_HOSTMASK WHERE id_user=? ORDER BY id_user_hostmask");
-			$hm_s->execute($ref->{id_user});
-			my @tHostmasks;
-			while (my $hr = $hm_s->fetchrow_hashref) { push @tHostmasks, $hr->{hostmask} }
-			$hm_s->finish;
-			foreach my $sHostmask (@tHostmasks) {
-				$self->{logger}->log(4,"getNickInfoWhois() Checking hostmask : " . $sHostmask);
-				$sHostmask =~ s/\./\\./g;
-				$sHostmask =~ s/\*/.*/g;
-				if ( $sWhoisHostmask =~ /^$sHostmask/ ) {
-					$self->{logger}->log(4,"getNickInfoWhois() $sHostmask matches " . $sWhoisHostmask);
-					$sMatchingUserHandle = $ref->{'nickname'};
-					if (defined($ref->{'password'})) {
-						$sMatchingUserPasswd = $ref->{'password'};
-					}
-					$iMatchingUserId = $ref->{'id_user'};
-					my $iMatchingUserLevelId = $ref->{'id_user_level'};
-					my $sGetLevelQuery = "SELECT level, description FROM USER_LEVEL WHERE id_user_level = ?";
-					my $sth2 = $self->{dbh}->prepare($sGetLevelQuery);
-	        unless ($sth2->execute($iMatchingUserLevelId)) {
-          				$self->{logger}->log(0,"getNickInfoWhois() SQL Error : " . $DBI::errstr . " Query : " . $sGetLevelQuery);
-  				}
-  				else {
-						while (my $ref2 = $sth2->fetchrow_hashref()) {
-							$iMatchingUserLevel = $ref2->{'level'};
-							$iMatchingUserLevelDesc = $ref2->{'description'};
-						}
-					}
-					$iMatchingUserAuth = $ref->{'auth'};
-					if (defined($ref->{'info1'})) {
-						$sMatchingUserInfo1 = $ref->{'info1'};
-					}
-					if (defined($ref->{'info2'})) {
-						$sMatchingUserInfo2 = $ref->{'info2'};
-					}
-					$sth2->finish;
-				}
-			}
-		}
-	}
-	$sth->finish;
-	if (defined($iMatchingUserId)) {
-		$self->{logger}->log(4,"getNickInfoWhois() iMatchingUserId : $iMatchingUserId");
-	}
-	else {
-		$self->{logger}->log(4,"getNickInfoWhois() iMatchingUserId is undefined with this host : " . $sWhoisHostmask);
-		return (undef,undef,undef,undef,undef,undef,undef);
-	}
-	if (defined($iMatchingUserLevel)) {
-		$self->{logger}->log(4,"getNickInfoWhois() iMatchingUserLevel : $iMatchingUserLevel");
-	}
-	if (defined($iMatchingUserLevelDesc)) {
-		$self->{logger}->log(4,"getNickInfoWhois() iMatchingUserLevelDesc : $iMatchingUserLevelDesc");
-	}
-	if (defined($iMatchingUserAuth)) {
-		$self->{logger}->log(4,"getNickInfoWhois() iMatchingUserAuth : $iMatchingUserAuth");
-	}
-	if (defined($sMatchingUserHandle)) {
-		$self->{logger}->log(4,"getNickInfoWhois() sMatchingUserHandle : $sMatchingUserHandle");
-	}
-	if (defined($sMatchingUserPasswd)) {
-		$self->{logger}->log(4,"getNickInfoWhois() sMatchingUserPasswd : $sMatchingUserPasswd");
-	}
-	if (defined($sMatchingUserInfo1)) {
-		$self->{logger}->log(4,"getNickInfoWhois() sMatchingUserInfo1 : $sMatchingUserInfo1");
-	}
-	if (defined($sMatchingUserInfo2)) {
-		$self->{logger}->log(4,"getNickInfoWhois() sMatchingUserInfo2 : $sMatchingUserInfo2");
-	}
-	return ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2);
+    my ($self, $sWhoisHostmask) = @_;
+
+    my $iMatchingUserId        = undef;
+    my $iMatchingUserLevel     = undef;
+    my $iMatchingUserLevelDesc = undef;
+    my $iMatchingUserAuth      = undef;
+    my $sMatchingUserHandle    = undef;
+    my $sMatchingUserPasswd    = undef;
+    my $sMatchingUserInfo1     = undef;
+    my $sMatchingUserInfo2     = undef;
+
+    require Mediabot::Auth;
+    $self->{auth} ||= Mediabot::Auth->new(
+        dbh    => $self->{dbh},
+        logger => $self->{logger},
+    );
+
+    my $sCheckQuery = q{
+        SELECT
+            u.id_user,
+            u.nickname,
+            u.id_user_level,
+            u.auth,
+            u.password,
+            u.info1,
+            u.info2,
+            GROUP_CONCAT(uh.hostmask ORDER BY uh.id_user_hostmask SEPARATOR ',') AS hostmasks
+        FROM USER u
+        LEFT JOIN USER_HOSTMASK uh ON uh.id_user = u.id_user
+        GROUP BY
+            u.id_user,
+            u.nickname,
+            u.id_user_level,
+            u.auth,
+            u.password,
+            u.info1,
+            u.info2
+        ORDER BY u.id_user
+    };
+
+    my $sth = $self->{dbh}->prepare($sCheckQuery);
+
+    unless ($sth->execute) {
+        $self->{logger}->log(1, "getNickInfoWhois() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
+    }
+    else {
+        my $best_ref;
+        my $best_mask;
+        my $best_score = -1;
+
+        while (my $ref = $sth->fetchrow_hashref()) {
+            my ($ok, $matched_mask, undef, $score) = $self->{auth}->hostmask_matches($ref, $sWhoisHostmask);
+            next unless $ok;
+
+            if ($score > $best_score) {
+                $best_ref   = { %$ref };
+                $best_mask  = $matched_mask;
+                $best_score = $score;
+            }
+        }
+
+        if ($best_ref) {
+            $self->{logger}->log(
+                4,
+                "getNickInfoWhois() matched hostmask '$sWhoisHostmask' with stored mask '$best_mask' for nick '$best_ref->{nickname}' score=$best_score"
+            );
+
+            $sMatchingUserHandle = $best_ref->{nickname};
+            $sMatchingUserPasswd = $best_ref->{password} if defined $best_ref->{password};
+            $iMatchingUserId     = $best_ref->{id_user};
+            $iMatchingUserAuth   = $best_ref->{auth};
+            $sMatchingUserInfo1  = $best_ref->{info1} if defined $best_ref->{info1};
+            $sMatchingUserInfo2  = $best_ref->{info2} if defined $best_ref->{info2};
+
+            my $iMatchingUserLevelId = $best_ref->{id_user_level};
+            my $sGetLevelQuery = "SELECT level, description FROM USER_LEVEL WHERE id_user_level = ?";
+            my $sth2 = $self->{dbh}->prepare($sGetLevelQuery);
+
+            unless ($sth2->execute($iMatchingUserLevelId)) {
+                $self->{logger}->log(0, "getNickInfoWhois() SQL Error : " . $DBI::errstr . " Query : " . $sGetLevelQuery);
+            }
+            else {
+                while (my $ref2 = $sth2->fetchrow_hashref()) {
+                    $iMatchingUserLevel     = $ref2->{level};
+                    $iMatchingUserLevelDesc = $ref2->{description};
+                }
+            }
+            $sth2->finish;
+        }
+    }
+
+    $sth->finish;
+
+    if (defined($iMatchingUserId)) {
+        $self->{logger}->log(4, "getNickInfoWhois() iMatchingUserId : $iMatchingUserId");
+    }
+    else {
+        $self->{logger}->log(4, "getNickInfoWhois() iMatchingUserId is undefined with this host : " . $sWhoisHostmask);
+        return (undef, undef, undef, undef, undef, undef, undef, undef);
+    }
+
+    if (defined($iMatchingUserLevel)) {
+        $self->{logger}->log(4, "getNickInfoWhois() iMatchingUserLevel : $iMatchingUserLevel");
+    }
+    if (defined($iMatchingUserLevelDesc)) {
+        $self->{logger}->log(4, "getNickInfoWhois() iMatchingUserLevelDesc : $iMatchingUserLevelDesc");
+    }
+    if (defined($iMatchingUserAuth)) {
+        $self->{logger}->log(4, "getNickInfoWhois() iMatchingUserAuth : $iMatchingUserAuth");
+    }
+    if (defined($sMatchingUserHandle)) {
+        $self->{logger}->log(4, "getNickInfoWhois() sMatchingUserHandle : $sMatchingUserHandle");
+    }
+    if (defined($sMatchingUserPasswd)) {
+        $self->{logger}->log(4, "getNickInfoWhois() sMatchingUserPasswd : $sMatchingUserPasswd");
+    }
+    if (defined($sMatchingUserInfo1)) {
+        $self->{logger}->log(4, "getNickInfoWhois() sMatchingUserInfo1 : $sMatchingUserInfo1");
+    }
+    if (defined($sMatchingUserInfo2)) {
+        $self->{logger}->log(4, "getNickInfoWhois() sMatchingUserInfo2 : $sMatchingUserInfo2");
+    }
+
+    return (
+        $iMatchingUserId,
+        $iMatchingUserLevel,
+        $iMatchingUserLevelDesc,
+        $iMatchingUserAuth,
+        $sMatchingUserHandle,
+        $sMatchingUserPasswd,
+        $sMatchingUserInfo1,
+        $sMatchingUserInfo2
+    );
 }
 
 # auth => sub { userAuthNick_ctx($ctx) },
