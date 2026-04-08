@@ -207,7 +207,7 @@ sub mbJump {
 }
 
 # Make a colored string with a high-contrast palette (dark+light bg friendly)
-sub update(@) {
+sub update {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
 	if (defined($iMatchingUserId)) {

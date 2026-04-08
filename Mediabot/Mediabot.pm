@@ -134,7 +134,7 @@ sub getDebugLevel {
 }
 
 # Get the log file path from the configuration
-sub getLogFile(@) {
+sub getLogFile {
 	my $self = shift;
 	return $self->{conf}->get('main.MAIN_LOG_FILE');
 }
@@ -172,13 +172,13 @@ sub _format_val {
 }
 
 # Get the main configuration object
-sub getMainConfCfg(@) {
+sub getMainConfCfg {
     my $self = shift;
     return $self->{conf};
 }
 
 # Get pid file path from configuration
-sub getPidFile(@) {
+sub getPidFile {
 	my $self = shift;
 	return $self->{conf}->get('main.MAIN_PID_FILE');
 }
@@ -197,24 +197,24 @@ sub writePidFile {
 }
 
 # Get PID from the PID file
-sub getPidFromFile(@) {
+sub getPidFromFile {
     my $self = shift;
     my $pidfile = $self->{conf}->get('main.MAIN_PID_FILE');
 
-    unless (open PIDFILE, $pidfile) {
+    my $fh_pid;
+    unless (open $fh_pid, '<', $pidfile) {
         return undef;
     }
+    my $line;
+    if (defined($line = <$fh_pid>)) {
+        chomp($line);
+        close $fh_pid;
+        return $line;
+    }
     else {
-        my $line;
-        if (defined($line = <PIDFILE>)) {
-            chomp($line);
-            close PIDFILE;
-            return $line;
-        }
-        else {
-            $self->{logger}->log( 1, "getPidFromFile() couldn't read PID from $pidfile");
-            return undef;
-        }
+        $self->{logger}->log(1, "getPidFromFile() couldn't read PID from $pidfile");
+        close $fh_pid;
+        return undef;
     }
 }
 
@@ -286,7 +286,7 @@ sub populateChannels {
 }
 
 # Clean up resources and exit the program with the given return value
-sub clean_and_exit(@) {
+sub clean_and_exit {
     my ($self, $iRetValue) = @_;
     $iRetValue = 0 unless defined $iRetValue;
 
@@ -352,7 +352,7 @@ sub clean_and_exit(@) {
 
 
 # Connect to the database
-sub dbConnect(@) {
+sub dbConnect {
     my ($self) = @_;
     my $conf = $self->{conf};
     my $LOG  = $self->{LOG};
@@ -393,13 +393,13 @@ sub dbConnect(@) {
 }
 
 # Get the database handle
-sub getDbh(@) {
+sub getDbh {
 	my $self = shift;
 	return $self->{dbh};
 }
 
 # Check if the USER table exists in the database
-sub dbCheckTables(@) {
+sub dbCheckTables {
     my ($self) = shift;
     my $LOG = $self->{LOG};
     my $dbh = $self->{dbh};
@@ -469,7 +469,7 @@ sub dbCheckTables(@) {
 }
 
 # Set the server hostname
-sub setServer(@) {
+sub setServer {
 	my ($self,$sServer) = @_;
 	$self->{server} = $sServer;
 }
@@ -529,25 +529,25 @@ sub _log_configure_hint {
 }
 
 # Get server hostname 
-sub getServerHostname(@) {
+sub getServerHostname {
 	my $self = shift;
 	return $self->{server_hostname};
 }
 
 # Get server port
-sub getServerPort(@) {
+sub getServerPort {
 	my $self = shift;
 	return $self->{server_port};
 }
 
 # Set loop
-sub setLoop(@) {
+sub setLoop {
 	my ($self,$loop) = @_;
 	$self->{loop} = $loop;
 }
 
 # Get loop
-sub getLoop(@) {
+sub getLoop {
 	my $self = shift;
 	return $self->{loop};
 }
@@ -591,19 +591,19 @@ sub refresh_channel_hashes {
 }
 
 # Set IRC object
-sub setIrc(@) {
+sub setIrc {
 	my ($self,$irc) = @_;
 	$self->{irc} = $irc;
 }
 
 # Get IRC object
-sub getIrc(@) {
+sub getIrc {
 	my $self = shift;
 	return $self->{irc};
 }
 
 # Get connection nick
-sub getConnectionNick(@) {
+sub getConnectionNick {
 	my $self = shift;
 	my $conf = $self->{conf};
 
@@ -623,28 +623,28 @@ sub getConnectionNick(@) {
 }
 
 # Get server password
-sub getServerPass(@) {
+sub getServerPass {
 	my $self = shift;
 	my $conf = $self->{conf};
 	return $conf->get('connection.CONN_PASS') // "";
 }
 
 # Get nick trigger status
-sub getNickTrigger(@) {
+sub getNickTrigger {
 	my $self = shift;
 	my $conf = $self->{conf};
 	return $conf->get('main.NICK_TRIGGER') // 0;
 }
 
 # Get IRC username from configuration
-sub getIrcName(@) {
+sub getIrcName {
 	my $self = shift;
 	my $conf = $self->{conf};
 	return $conf->get('connection.CONN_IRCNAME');
 }
 
 # Get nick info from a message
-sub getMessageNickIdentHost(@) {
+sub getMessageNickIdentHost {
 	my ($self,$message) = @_;
 	my $sNick = $message->prefix;
 	$sNick =~ s/!.*$//;
@@ -678,7 +678,7 @@ sub joinChannels {
 }
 
 # Handle public commands
-sub mbCommandPublic(@) {
+sub mbCommandPublic {
     my ($self, $message, $sChannel, $sNick, $botNickTriggered, $sCommand, @tArgs) = @_;
 
     # Normalize command once
@@ -971,6 +971,7 @@ sub mbCommandPrivate {
         users       => sub { userStats_ctx($ctx) },
         cstat       => sub { userCstat_ctx($ctx) },
         login       => sub { userLogin_ctx($ctx) },
+        logout      => sub { userLogout_ctx($ctx) },
         userinfo    => sub { userInfo_ctx($ctx) },
         addhost     => sub { addUserHost_ctx($ctx) },
         addchan     => sub { addChannel_ctx($ctx) },
@@ -1039,25 +1040,25 @@ sub mbCommandPrivate {
 }
 
 # Set connection timestamp (used for uptime calculation)
-sub setConnectionTimestamp(@) {
+sub setConnectionTimestamp {
 	my ($self,$iConnectionTimestamp) = @_;
 	$self->{iConnectionTimestamp} = $iConnectionTimestamp;
 }
 
 # Get connection timestamp
-sub getConnectionTimestamp(@) {
+sub getConnectionTimestamp {
 	my $self = shift;
 	return $self->{iConnectionTimestamp};
 }
 
 # Set quit flag (used to signal shutdown)
-sub setQuit(@) {
+sub setQuit {
 	my ($self,$iQuit) = @_;
 	$self->{Quit} = $iQuit;
 }
 
 # Get quit flag
-sub getQuit(@) {
+sub getQuit {
 	my $self = shift;
 	return $self->{Quit};
 }

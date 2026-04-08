@@ -168,7 +168,7 @@ sub channelList_ctx {
 }
 
 # versionCheck() - sends version info in channel and alerts if update is available
-sub registerChannel(@) {
+sub registerChannel {
 	my ($self,$message,$sNick,$id_channel,$id_user) = @_;
 	my $sQuery = "INSERT INTO USER_CHANNEL (id_user,id_channel,level) VALUES (?,?,500)";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -2326,10 +2326,10 @@ sub userAccessChannel_ctx {
     botNotice($self, $nick, "USER: $target ACCESS: $iAccess");
 
     my $sQuery = "SELECT automode, greet"
-           . " FROM USER"
-           . " JOIN USER_CHANNEL ON USER_CHANNEL.id_user = USER.id_user"
-           . " JOIN CHANNEL ON CHANNEL.id_channel = USER_CHANNEL.id_channel"
-           . " WHERE USER.nickname = ? AND CHANNEL.name = ?";
+               . " FROM USER"
+               . " JOIN USER_CHANNEL ON USER_CHANNEL.id_user = USER.id_user"
+               . " JOIN CHANNEL ON CHANNEL.id_channel = USER_CHANNEL.id_channel"
+               . " WHERE USER.nickname LIKE ? AND CHANNEL.name = ?";
 
     my $sth = $self->{dbh}->prepare($sQuery);
     unless ($sth && $sth->execute($target, $chan)) {
@@ -2799,11 +2799,11 @@ sub setChannelAntiFloodParams_ctx {
 
         my $sql = q{
             SELECT CHANNEL_FLOOD.nbmsg_max,
-                CHANNEL_FLOOD.duration,
-                CHANNEL_FLOOD.timetowait
+                   CHANNEL_FLOOD.duration,
+                   CHANNEL_FLOOD.timetowait
             FROM CHANNEL
             JOIN CHANNEL_FLOOD ON CHANNEL.id_channel = CHANNEL_FLOOD.id_channel
-            WHERE CHANNEL.name = ?
+            WHERE CHANNEL.name LIKE ?
         };
 
         my $sth = $self->{dbh}->prepare($sql);
@@ -3142,9 +3142,9 @@ sub setTMDBLangChannel_ctx {
     logBot($self, $message, $target_channel, "tmdblangset", ($target_channel, $lang));
 }
 
-sub getTMDBLangChannel (@) {
+sub getTMDBLangChannel {
 	my ($self, $sChannel) = @_;
-	my $sQuery = "SELECT tmdb_lang FROM CHANNEL WHERE name = ?";
+	my $sQuery = "SELECT tmdb_lang FROM CHANNEL WHERE name LIKE ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -3161,5 +3161,7 @@ sub getTMDBLangChannel (@) {
 		}
 	}
 }
+
+# Get detailed TMDB info for the first matching result
 
 1;

@@ -1033,7 +1033,7 @@ sub on_message_PRIVMSG {
     }
 }
 
-sub on_message_TOPIC(@) {
+sub on_message_TOPIC {
     my ($self,$message,$hints) = @_;
 
     log_debug_args('on_message_TOPIC', $message);
@@ -1046,7 +1046,7 @@ sub on_message_TOPIC(@) {
     $mediabot->logBotAction($message,"topic",$sNick,$target_name,$text);
 }
 
-sub on_message_LIST(@) {
+sub on_message_LIST {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_LIST', $message);
     my ($target_name) = @{$hints}{qw<target_name>};
@@ -1088,14 +1088,14 @@ sub on_message_RPL_ENDOFNAMES {
     $mediabot->{logger}->log(2,"Joined channel: $channel");
 }
 
-sub on_message_WHO(@) {
+sub on_message_WHO {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_WHO', $message);
     my ($target_name) = @{$hints}{qw<target_name>};
     $mediabot->{logger}->log(3,"on_message_WHO() $target_name");
 }
 
-sub on_message_WHOIS(@) {
+sub on_message_WHOIS {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_WHOIS', $message);
     $mediabot->{logger}->log(4, "on_message_WHOIS() prefix=" . ($message->prefix // "?") . " command=" . ($message->command // "?"));
@@ -1326,7 +1326,7 @@ sub on_message_RPL_WHOISUSER {
     }
 }
 
-sub on_message_ERROR(@) {
+sub on_message_ERROR {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_ERROR', $message);
     my $err_msg = join(" ", @{ $message->args // [] });

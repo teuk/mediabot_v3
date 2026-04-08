@@ -53,19 +53,19 @@ our @EXPORT = qw(
     setMainTimerTick
 );
 
-sub setMainTimerTick(@) {
+sub setMainTimerTick {
 	my ($self,$timer) = @_;
 	$self->{main_timer_tick} = $timer;
 }
 
 # Set refresh channel hashes
-sub getMainTimerTick(@) {
+sub getMainTimerTick {
 	my $self = shift;
 	return $self->{maint_timer_tick};
 }
 
 # Set IRC object
-sub onStartTimers(@) {
+sub onStartTimers {
 	my $self = shift;
 	my %hTimers;
 	my $sQuery = "SELECT id_timers, name, duration, command FROM TIMERS";
@@ -162,12 +162,12 @@ sub msgCmd_ctx {
 }
 
 # Context-based: Allows an Administrator to force the bot to say something in a given channel
-sub setLastRandomQuote(@) {
+sub setLastRandomQuote {
 	my ($self,$iLastRandomQuote) = @_;
 	$self->{iLastRandomQuote} = $iLastRandomQuote;
 }
 
-sub getLastRandomQuote(@) {
+sub getLastRandomQuote {
 	my $self = shift;
 	return $self->{iLastRandomQuote};
 }
@@ -339,7 +339,7 @@ sub mbDbAddCommand_ctx {
     }
 
     # Check duplicates
-    my $query_check = "SELECT command FROM PUBLIC_COMMANDS WHERE command = ?";
+    my $query_check = "SELECT command FROM PUBLIC_COMMANDS WHERE command LIKE ?";
     my $sth = $self->{dbh}->prepare($query_check);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query_check");
@@ -377,9 +377,9 @@ sub mbDbAddCommand_ctx {
 }
 
 # Get command category ID from description
-sub getCommandCategory(@) {
+sub getCommandCategory {
 	my ($self,$sCategory) = @_;
-	my $sQuery = "SELECT id_public_commands_category FROM PUBLIC_COMMANDS_CATEGORY WHERE description = ?";
+	my $sQuery = "SELECT id_public_commands_category FROM PUBLIC_COMMANDS_CATEGORY WHERE description LIKE ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sCategory)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -395,7 +395,10 @@ sub getCommandCategory(@) {
 	$sth->finish;
 }
 
-
+# Remove a public command from the database (Administrator+)
+# - Allowed if:
+#   * caller is the owner of the command, OR
+#   * caller is Master+ (stronger than Administrator in our hierarchy)
 sub mbDbRemCommand_ctx {
     my ($ctx) = @_;
 
@@ -415,7 +418,7 @@ sub mbDbRemCommand_ctx {
 
     my $sCommand = shift @args;
 
-    my $query = "SELECT id_user, id_public_commands FROM PUBLIC_COMMANDS WHERE command = ?";
+    my $query = "SELECT id_user, id_public_commands FROM PUBLIC_COMMANDS WHERE command LIKE ?";
     my $sth = $self->{dbh}->prepare($query);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query");
@@ -490,7 +493,7 @@ sub mbDbModCommand {
     my $sType     = shift @tArgs;
     my $sCategory = shift @tArgs;
 
-    my $query = "SELECT id_public_commands, id_user FROM PUBLIC_COMMANDS WHERE command = ?";
+    my $query = "SELECT id_public_commands, id_user FROM PUBLIC_COMMANDS WHERE command LIKE ?";
     my $sth = $self->{dbh}->prepare($query);
     unless ($sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query");
@@ -566,7 +569,7 @@ sub mbDbModCommand_ctx {
     my $sType     = shift @args;
     my $sCategory = shift @args;
 
-    my $query = "SELECT id_public_commands, id_user FROM PUBLIC_COMMANDS WHERE command = ?";
+    my $query = "SELECT id_public_commands, id_user FROM PUBLIC_COMMANDS WHERE command LIKE ?";
     my $sth = $self->{dbh}->prepare($query);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query");
@@ -731,7 +734,7 @@ sub mbDbShowCommand_ctx {
         FROM PUBLIC_COMMANDS PC
         JOIN PUBLIC_COMMANDS_CATEGORY PCC
           ON PC.id_public_commands_category = PCC.id_public_commands_category
-        WHERE PC.command = ?
+        WHERE PC.command LIKE ?
         LIMIT 1
     };
 
@@ -778,10 +781,10 @@ sub mbDbShowCommand_ctx {
 # chanstatlines => sub { channelStatLines_ctx($ctx) },
 
 # Show the number of lines sent on a channel during the last hour (Administrator+)
-sub mbDbCommand(@) {
+sub mbDbCommand {
 	my ($self,$message,$sChannel,$sNick,$sCommand,@tArgs) = @_;
 	$self->{logger}->log(2,"Check SQL command : $sCommand");
-	my $sQuery = "SELECT id_public_commands, action, description, hits FROM PUBLIC_COMMANDS WHERE command = ?";
+	my $sQuery = "SELECT id_public_commands, action, description, hits FROM PUBLIC_COMMANDS WHERE command LIKE ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sCommand)) {
 		$self->{logger}->log(1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -1408,14 +1411,16 @@ sub mbDbAddCategoryCommand_ctx {
     return 1;
 }
 
-# Show the most popular commands of a user, sorted by hits (Context version)
+# Change the category of an existing public command
+# Requires: authenticated + Administrator+
 sub mbPopCommand_ctx {
-    my ($self, $ctx) = @_;
-    return unless $ctx;
+    my ($ctx) = @_;
 
+    my $self = $ctx->bot;
     my $nick = $ctx->nick;
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
+    # Prefer output where the command was invoked
     my $out_chan = '';
     my $ctx_chan = $ctx->channel // '';
     $out_chan = $ctx_chan if defined($ctx_chan) && $ctx_chan =~ /^#/;
@@ -1431,7 +1436,7 @@ sub mbPopCommand_ctx {
         SELECT PC.command, PC.hits
         FROM USER U
         JOIN PUBLIC_COMMANDS PC ON U.id_user = PC.id_user
-        WHERE U.nickname = ?
+        WHERE U.nickname LIKE ?
         ORDER BY PC.hits DESC
         LIMIT 20
     };
@@ -1453,25 +1458,37 @@ sub mbPopCommand_ctx {
     }
     $sth->finish;
 
-    if (!@items) {
-        botNotice($self, $nick, "No public commands found for $target");
-        return;
+    my $line;
+    if (@items) {
+        my $prefix  = "Popular commands for $target: ";
+        my $max_len = 360; # conservative for IRC payload
+        $line = $prefix;
+
+        for my $it (@items) {
+            my $candidate = ($line eq $prefix) ? ($line . $it) : ($line . " | " . $it);
+            if (length($candidate) > $max_len) {
+                $line .= "..." if length($line) + 3 <= $max_len;
+                last;
+            }
+            $line = $candidate;
+        }
+    } else {
+        $line = "No popular commands for $target";
     }
 
-    my $msg = join(' | ', @items);
-
-    if ($out_chan ne '') {
-        botPrivmsg($self, $out_chan, $msg);
+    if ($out_chan) {
+        botPrivmsg($self, $out_chan, $line);
+        logBot($self, $ctx->message, $out_chan, "popcmd", $target);
+    } else {
+        botNotice($self, $nick, $line);
+        logBot($self, $ctx->message, undef, "popcmd", $target);
     }
-    else {
-        botNotice($self, $nick, $msg);
-    }
 
-    return;
+    return scalar(@items);
 }
 
 # Check if a timezone exists
-sub checkResponder(@) {
+sub checkResponder {
 	my ($self,$message,$sNick,$sChannel,$sMsg,@tArgs) = @_;
 	my $sQuery = "SELECT RESPONDERS.answer, RESPONDERS.chance FROM RESPONDERS LEFT JOIN CHANNEL ON CHANNEL.id_channel = RESPONDERS.id_channel WHERE ((CHANNEL.name LIKE ? AND CHANNEL.id_channel IS NOT NULL) OR RESPONDERS.id_channel = 0) AND RESPONDERS.responder LIKE ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -1490,7 +1507,7 @@ sub checkResponder(@) {
 	return 100;
 }
 
-sub doResponder(@) {
+sub doResponder {
 	my ($self,$message,$sNick,$sChannel,$sMsg,@tArgs) = @_;
 	my $sQuery = "SELECT RESPONDERS.id_responders, RESPONDERS.answer, RESPONDERS.hits FROM RESPONDERS LEFT JOIN CHANNEL ON CHANNEL.id_channel = RESPONDERS.id_channel WHERE ((CHANNEL.name LIKE ? AND CHANNEL.id_channel IS NOT NULL) OR RESPONDERS.id_channel = 0) AND RESPONDERS.responder LIKE ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -1783,17 +1800,17 @@ sub delResponder_ctx {
 }
 
 # Evaluate action string for responders and commands
-sub setLastReponderTs(@) {
+sub setLastReponderTs {
 	my ($self,$ts) = @_;
 	$self->{last_responder_ts} = $ts;
 }
 
-sub getLastReponderTs(@) {
+sub getLastReponderTs {
 	my $self = shift;
 	return $self->{last_responder_ts};
 }
 
-sub setLastCommandTs(@) {
+sub setLastCommandTs {
 	my ($self,$ts) = @_;
 	$self->{last_command_ts} = $ts;
 }

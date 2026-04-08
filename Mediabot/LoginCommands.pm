@@ -28,6 +28,7 @@ our @EXPORT = qw(
     checkAuthByUser
     getUserAutologin
     userLogin_ctx
+    userLogout_ctx
     mbRegister_ctx
     userPass
     userIdent
@@ -52,7 +53,7 @@ sub init_auth {
 
 
 # Get autologin status for a user handle (returns 1 if username='#AUTOLOGIN#', else 0)
-sub getUserAutologin(@) {
+sub getUserAutologin {
     my ($self, $sMatchingUserHandle) = @_;
 
     my $sQuery = "SELECT 1 FROM USER WHERE nickname = ? AND username = '#AUTOLOGIN#'";
@@ -74,7 +75,7 @@ sub getUserAutologin(@) {
 }
 
 # Get user id from user handle
-sub checkAuth(@) {
+sub checkAuth {
 	my ($self,$iUserId,$sUserHandle,$sPassword) = @_;
 	my $sCheckAuthQuery = "SELECT id_user FROM USER WHERE id_user = ? AND nickname = ? AND password = PASSWORD(?)";
 	my $sth = $self->{dbh}->prepare($sCheckAuthQuery);
@@ -178,6 +179,33 @@ sub userLogin_ctx {
             1;
         };
 
+        # 4) Register the caller's hostmask in USER_HOSTMASK if not already present
+        my $fullmask = $ctx->message->prefix // '';
+        my $hostmask = getMessageHostmask($self, $ctx->message);
+        if ($hostmask && $hostmask ne '') {
+            eval {
+                my $chk = $dbh->prepare(
+                    "SELECT id_user_hostmask FROM USER_HOSTMASK WHERE id_user=? AND hostmask=? LIMIT 1"
+                );
+                $chk->execute($id_user, $hostmask);
+                my $exists = $chk->fetchrow_arrayref;
+                $chk->finish;
+                unless ($exists) {
+                    my $ins = $dbh->prepare(
+                        "INSERT INTO USER_HOSTMASK (id_user, hostmask) VALUES (?, ?)"
+                    );
+                    $ins->execute($id_user, $hostmask);
+                    $ins->finish;
+                    $self->{logger}->log(2, "login: registered hostmask '$hostmask' for id_user=$id_user");
+                    $self->clear_user_cache($fullmask) if $self->can('clear_user_cache');
+                }
+                1;
+            };
+            if ($@) {
+                $self->{logger}->log(1, "login: failed to register hostmask: $@");
+            }
+        }
+
         # Best-effort in-memory flags (ignore if structure differs)
         eval {
             $self->{auth}->{logged_in}{$id_user} = 1 if ref($self->{auth}) eq 'HASH' && ref($self->{auth}->{logged_in}) eq 'HASH';
@@ -204,6 +232,46 @@ sub userLogin_ctx {
         $self->noticeConsoleChan($msg) if $self->can('noticeConsoleChan');
         logBot($self, $ctx->message, undef, "login", $typed_user, "Failed (Bad password)");
     }
+}
+
+
+# Context-based logout command
+sub userLogout_ctx {
+    my ($ctx) = @_;
+    return unless $ctx;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+    my $user = $ctx->user;
+
+    unless ($user && $user->is_authenticated) {
+        botNotice($self, $nick, "You are not logged in.");
+        return;
+    }
+
+    my $uid      = eval { $user->id } // 0;
+    my $username = eval { $user->nickname } // $nick;
+
+    eval {
+        $self->{dbh}->do(
+            "UPDATE USER SET auth=0 WHERE id_user=?",
+            undef, $uid
+        );
+        1;
+    } or do {
+        $self->{logger}->log(1, "userLogout_ctx() DB error: $@");
+        botNotice($self, $nick, "Internal error during logout.");
+        return;
+    };
+
+    # Invalidate user cache so subsequent commands see auth=0 immediately
+    my $logout_mask = eval { $ctx->message->prefix } // '';
+    $self->clear_user_cache($logout_mask) if $logout_mask && $self->can('clear_user_cache');
+
+    $self->{logger}->log(1, "logout: $username (id=$uid) logged out");
+    botNotice($self, $nick, "Logged out successfully.");
+    logBot($self, $ctx->message, undef, "logout", $username);
+    return 1;
 }
 
 # check user Level
@@ -292,7 +360,7 @@ sub userPass {
 }
 
 
-sub userIdent(@) {
+sub userIdent {
 	my ($self,$message,$sNick,@tArgs) = @_;
 	#login <username> <password>
 	if (defined($tArgs[0]) && ($tArgs[0] ne "") && defined($tArgs[1]) && ($tArgs[1] ne "")) {
@@ -315,7 +383,7 @@ sub userIdent(@) {
 	}
 }
 
-sub checkAuthByUser(@) {
+sub checkAuthByUser {
 	my ($self,$message,$sUserHandle,$sPassword) = @_;
 	my $sCheckAuthQuery = "SELECT id_user FROM USER WHERE nickname = ? AND password = PASSWORD(?)";
 	my $sth = $self->{dbh}->prepare($sCheckAuthQuery);
@@ -425,19 +493,22 @@ sub userWhoAmI_ctx {
 
         my $auth_status = $db_auth ? "logged in" : "not logged in";
 
-        botNotice($self, $nick, "Created: $created | Last login: $last_login");
-        botNotice($self, $nick, "$pass_set | Status: $auth_status | AUTOLOGIN: $autologin");
-        botNotice($self, $nick, "Hostmasks: $hostmasks");
+        # Compact — 2 NOTICE lines to avoid Excess Flood
+        my $info1 = eval { $user->info1 } // eval { $user->{info1} } // '';
+        my $info2 = eval { $user->info2 } // eval { $user->{info2} } // '';
+        botNotice($self, $nick,
+            "$pass_set | Status: $auth_status | AUTOLOGIN: $autologin | Masks: $hostmasks"
+        );
+        botNotice($self, $nick,
+            "Created: $created | Last: $last_login"
+            . ($info1 ne '' && $info1 ne 'N/A' ? " | $info1" : "")
+            . ($info2 ne '' && $info2 ne 'N/A' ? " | $info2" : "")
+        );
     } else {
         botNotice($self, $nick, "User record not found in database (id=$uid)");
     }
 
     $sth->finish;
-
-    # Extra fields (best-effort: depending on your User.pm)
-    my $info1 = eval { $user->info1 } // eval { $user->{info1} } // 'N/A';
-    my $info2 = eval { $user->info2 } // eval { $user->{info2} } // 'N/A';
-    botNotice($self, $nick, "Infos: $info1 | $info2");
 
     logBot($self, $ctx->message, undef, "whoami");
     return 1;

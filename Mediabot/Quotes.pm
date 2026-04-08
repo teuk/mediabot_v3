@@ -205,7 +205,7 @@ sub mbQuoteAdd {
 }
 
 
-sub mbQuoteDel(@) {
+sub mbQuoteDel {
 	my ($self,$message,$sMatchingUserHandle,$sNick,$sChannel,@tArgs) = @_;
 	my $id_quotes = $tArgs[0];
 	unless (defined($tArgs[0]) && ($tArgs[0] ne "") && ($id_quotes =~ /[0-9]+/)) {
@@ -226,7 +226,7 @@ sub mbQuoteDel(@) {
 				}
 				else {
 					my $id_removed = String::IRC->new($id_quotes)->bold;
-					botPrivmsg($self,$sChannel,"($sMatchingUserHandle) done. (id: $id_removed)");
+					botPrivmsg($self,$sChannel,"($sMatchingUserHandle) deleted. (id: $id_removed)");
 					logBot($self,$message,$sChannel,"q del",@tArgs);
 				}
 			}
@@ -238,7 +238,7 @@ sub mbQuoteDel(@) {
 	}
 }
 
-sub mbQuoteView(@) {
+sub mbQuoteView {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my $id_quotes = $tArgs[0];
 	unless (defined($tArgs[0]) && ($tArgs[0] ne "") && ($id_quotes =~ /[0-9]+/)) {
@@ -284,7 +284,7 @@ sub mbQuoteView(@) {
 	}
 }
                 
-sub mbQuoteSearch(@) {
+sub mbQuoteSearch {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
 		botNotice($self,$sNick,"q [search or s] text");
@@ -340,7 +340,7 @@ sub mbQuoteSearch(@) {
 	}
 }
 
-sub mbQuoteRand(@) {
+sub mbQuoteRand {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my $sQuery = "SELECT QUOTES.id_quotes, QUOTES.quotetext, QUOTES.id_user FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? ORDER BY RAND() LIMIT 1";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -365,7 +365,7 @@ sub mbQuoteRand(@) {
 	$sth->finish;
 }
 
-sub mbQuoteStats(@) {
+sub mbQuoteStats {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
 	my $sQuery = "SELECT COUNT(*) AS nbQuotes FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);

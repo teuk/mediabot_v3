@@ -266,7 +266,7 @@ sub create {
     }
 
     # Fetch the newly created user
-    my $sth_get = $dbh->prepare("SELECT * FROM USER WHERE nickname = ?");
+    my $sth_get = $dbh->prepare("SELECT id_user, nickname, password, username, id_user_level, auth, info1, info2 FROM USER WHERE nickname = ?");
     $sth_get->execute($nickname);
     my $row = $sth_get->fetchrow_hashref;
     $sth_get->finish;

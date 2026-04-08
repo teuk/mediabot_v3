@@ -17,6 +17,9 @@ config/
 # Local tools & tmp
 *.log
 # Logs
+*.log.*
+bot.log
+bot.log.*
 *.pem
 *.pid
 *.pw
@@ -31,5 +34,10 @@ tmp/
 mediabot.pid
 test_all_commands.pl
 test_log.txt
-test_all_commands.pl
-test_log.txt
+
+# Test artifacts
+t/live/test.conf
+
+# OS
+.DS_Store
+

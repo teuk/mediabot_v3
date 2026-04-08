@@ -85,6 +85,17 @@ our @EXPORT = qw(
 );
 
 # Get user object from message prefix (hostmask)
+sub clear_user_cache {
+    my ($self, $fullmask) = @_;
+    if (defined $fullmask) {
+        delete $self->{_user_cache}{$fullmask};
+        delete $self->{_user_cache_ts}{$fullmask};
+    } else {
+        $self->{_user_cache}    = {};
+        $self->{_user_cache_ts} = {};
+    }
+}
+
 sub get_user_from_message {
     my ($self, $message) = @_;
 
@@ -98,6 +109,19 @@ sub get_user_from_message {
     $host = lc($host // '');
 
     $self->{logger}->log(3, "🔍 get_user_from_message() called with hostmask: '$fullmask'");
+
+    # ── Hostmask cache — avoid GROUP_CONCAT query on every PRIVMSG ──────
+    my $cache_key = $fullmask;
+    my $now       = time;
+    my $TTL       = 5;    # seconds
+
+    if (   defined $self->{_user_cache}{$cache_key}
+        && ($now - ($self->{_user_cache_ts}{$cache_key} // 0)) < $TTL)
+    {
+        $self->{logger}->log(3, "🔍 get_user_from_message() cache hit for '$fullmask'");
+        return $self->{_user_cache}{$cache_key};
+    }
+    # ─────────────────────────────────────────────────────────────────────
 
     require Mediabot::Auth;
     require Mediabot::User;
@@ -199,6 +223,10 @@ sub get_user_from_message {
 
     $self->_dbg_auth_snapshot('post-ensure', $user, $nick, $fullmask);
 
+    # Store in cache
+    $self->{_user_cache}{$cache_key}    = $user;
+    $self->{_user_cache_ts}{$cache_key} = $now;
+
     $self->{logger}->log(
         3,
         "🎯 Matched user id="
@@ -272,7 +300,7 @@ sub getUserhandle {
 }
 
 # Get user ID from nickname (userhandle)
-sub getIdUser(@) {
+sub getIdUser {
     my ($self, $sUserhandle) = @_;
 
     my $id_user = undef;
@@ -444,7 +472,7 @@ sub botPrivmsg {
 
 
 # Send a private message to a target (action)
-sub botAction(@) {
+sub botAction {
 	my ($self,$sTo,$sMsg) = @_;
 	if (defined($sTo)) {
 		my $eventtype = "public";
@@ -563,7 +591,7 @@ sub botNotice {
 
 
 # Join a channel with an optional key
-sub joinChannel(@) {
+sub joinChannel {
 	my ($self,$channel,$key) = @_;
 	if (defined($key) && ($key ne "")) {
 		$self->{logger}->log(1,"Trying to join $channel with key $key");
@@ -576,7 +604,7 @@ sub joinChannel(@) {
 }
 
 # Join channels with auto_join enabled, except console
-sub checkUserLevel(@) {
+sub checkUserLevel {
 	my ($self,$iUserLevel,$sLevelRequired) = @_;
 	$self->{logger}->log(4,"isUserLevel() $iUserLevel vs $sLevelRequired");
 	my $sQuery = "SELECT level FROM USER_LEVEL WHERE description like ?";
@@ -604,7 +632,7 @@ sub checkUserLevel(@) {
 }
 
 # Count the number of users in the database
-sub userCount(@) {
+sub userCount {
 	my ($self) = @_;
 	my $sQuery = "SELECT count(*) as nbUser FROM USER";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -625,7 +653,7 @@ sub userCount(@) {
 	}
 }
 
-sub getMessageHostmask(@) {
+sub getMessageHostmask {
 	my ($self,$message) = @_;
 	my $sHostmask = $message->prefix;
 	$sHostmask =~ s/.*!//;
@@ -717,7 +745,7 @@ sub partChannel {
 }
 
 # Check if a user has a specific level on a channel
-sub checkUserChannelLevel(@) {
+sub checkUserChannelLevel {
 	my ($self,$message,$sChannel,$id_user,$level) = @_;
 	my $sQuery = "SELECT level FROM CHANNEL JOIN USER_CHANNEL ON USER_CHANNEL.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ? AND USER_CHANNEL.id_user = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -744,7 +772,7 @@ sub checkUserChannelLevel(@) {
 }
 
 # Join a channel (Administrator+ OR channel-level >= 450)
-sub getIdUserChannelLevel(@) {
+sub getIdUserChannelLevel {
 	my ($self,$sUserHandle,$sChannel) = @_;
 	my $sQuery = "SELECT USER.id_user, USER_CHANNEL.level FROM CHANNEL JOIN USER_CHANNEL ON USER_CHANNEL.id_channel = CHANNEL.id_channel JOIN USER ON USER.id_user = USER_CHANNEL.id_user WHERE USER.nickname = ? AND CHANNEL.name = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -768,7 +796,7 @@ sub getIdUserChannelLevel(@) {
 
 # Give operator (+o) to a nick on a channel.
 # Requires: authenticated user AND (Administrator+ OR channel-level >= 100).
-sub getUserChannelLevelByName(@) {
+sub getUserChannelLevelByName {
 	my ($self,$sChannel,$sHandle) = @_;
 	my $iChannelUserLevel = 0;
 	my $sQuery = "SELECT USER_CHANNEL.level FROM USER JOIN USER_CHANNEL ON USER_CHANNEL.id_user = USER.id_user JOIN CHANNEL ON CHANNEL.id_channel = USER_CHANNEL.id_channel WHERE CHANNEL.name = ? AND USER.nickname = ?";
@@ -870,7 +898,7 @@ sub getConsoleChan {
 }
 
 # Send a notice to the console channel
-sub logBotAction(@) {
+sub logBotAction {
     my ($self, $message, $eventtype, $sNick, $sChannel, $sText) = @_;
 
     my $sUserhost = "";
@@ -1251,7 +1279,7 @@ sub getIdChansetList {
 
 # Retrieve the ID of a channel set from CHANNEL_SET table for a given channel and chanset list ID
 
-sub evalAction(@) {
+sub evalAction {
 	my ($self,$message,$sNick,$sChannel,$sCommand,$actionDo,@tArgs) = @_;
 	$self->{logger}->log(4,"evalAction() $sCommand / $actionDo");
 	if (defined($tArgs[0])) {
@@ -1602,7 +1630,7 @@ SQL
 # greet [#channel] <nick>
 # If called in private: greet #channel <nick>
 
-sub sethChannelsNicksOnChan(@) {
+sub sethChannelsNicksOnChan {
 	my ($self,$sChannel,@tNicklist) = @_;
 	my %hChannelsNicks;
 	if (defined($self->{hChannelsNicks})) {
@@ -1613,7 +1641,7 @@ sub sethChannelsNicksOnChan(@) {
 }
 
 
-sub gethChannelNicks(@) {
+sub gethChannelNicks {
 	my $self = shift;
 	return $self->{hChannelsNicks};
 }
@@ -1653,7 +1681,7 @@ sub userAuthNick_ctx {
 
 # verify <nick> — Triggers a WHOIS to verify a user's existence
 
-sub getWhoisVar(@) {
+sub getWhoisVar {
 	my $self = shift;
 	return $self->{WHOIS_VARS};
 }
@@ -1661,7 +1689,7 @@ sub getWhoisVar(@) {
 # access #channel <nickhandle>
 # access #channel =<nick>
 
-sub gethChannelsNicksEndOnChan(@) {
+sub gethChannelsNicksEndOnChan {
 	my ($self,$Schannel) = @_;
 	my %hChannelsNicksEnd;
 	if (defined($self->{hChannelsNicksEnd})) {
@@ -2346,7 +2374,7 @@ sub mp3_ctx {
 }
 
 # Check if a message should be ignored based on the IGNORES table (both channel-specific and global ignores)
-sub isIgnored(@) {
+sub isIgnored {
 	my ($self,$message,$sChannel,$sNick,$sMsg)	= @_;
 
 	return 0 unless $message;
@@ -2414,7 +2442,7 @@ sub _yt_badge {
 
 # Get the current song from the radio stream
 
-sub sethChannelsNicksEndOnChan(@) {
+sub sethChannelsNicksEndOnChan {
 	my ($self,$sChannel,$end) = @_;
 	my %hChannelsNicksEnd;
 	if (defined($self->{hChannelsNicksEnd})) {
@@ -2466,7 +2494,7 @@ sub displayLeetString_ctx {
 # Reload the bot configuration file (rehash), restricted to Master-level users.
 # Context-based version.
 
-sub gethChannelsNicksOnChan(@) {
+sub gethChannelsNicksOnChan {
 	my ($self,$sChannel) = @_;
 	my %hChannelsNicks;
 	if (defined($self->{hChannelsNicks})) {
@@ -2495,7 +2523,7 @@ sub mbEcho {
 
 # Context-based status (Master only)
 
-sub getRandomNick(@) {
+sub getRandomNick {
 	my ($self,$sChannel) = @_;
 	my %hChannelsNicks;
 	if (defined($self->{hChannelsNicks})) {
@@ -2637,13 +2665,13 @@ sub userVerifyNick_ctx {
 # Shows the list of known users on a specific channel from memory (hChannelsNicks)
 # Requires: authenticated + Administrator+
 
-sub sethChannelNicks(@) {
+sub sethChannelNicks {
 	my ($self,$phChannelsNicks) = @_;
 	%{$self->{hChannelsNicks}} = %$phChannelsNicks;
 }
 
 
-sub getLevel(@) {
+sub getLevel {
 	my ($self,$sLevel) = @_;
 	my $sQuery = "SELECT level FROM USER_LEVEL WHERE description like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -2664,7 +2692,7 @@ sub getLevel(@) {
 }
 
 # Get user info by matching hostmask (for WHOIS response)
-sub getNickInfoWhois(@) {
+sub getNickInfoWhois {
     my ($self, $sWhoisHostmask) = @_;
 
     my $iMatchingUserId        = undef;
@@ -2804,7 +2832,7 @@ sub getNickInfoWhois(@) {
 
 # /auth <nick> — Triggers a WHOIS to identify if a user is known/authenticated
 
-sub channelNicksRemove(@) {
+sub channelNicksRemove {
 	my ($self,$sChannel,$sNick) = @_;
 	my %hChannelsNicks;
 	if (defined($self->{hChannelsNicks})) {
@@ -2822,7 +2850,7 @@ sub channelNicksRemove(@) {
 }
 
 
-sub whereis(@) {
+sub whereis {
 	my ($self,$sHostname) = @_;
 	my $userIP;
 	$self->{logger}->log(4,"whereis() $sHostname");

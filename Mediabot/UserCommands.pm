@@ -40,7 +40,7 @@ our @EXPORT = qw(
     userTopSay_ctx
 );
 
-sub dbLogoutUsers(@) {
+sub dbLogoutUsers {
 	my ($self) = shift;
 	my $LOG = $self->{LOG};
 	my $dbh = $self->{dbh};
@@ -55,7 +55,7 @@ sub dbLogoutUsers(@) {
 }
 
 # Set server attribute
-sub getUserName(@) {
+sub getUserName {
 	my $self = shift;
 	my $conf = $self->{conf};
 	return $conf->get('connection.CONN_USERNAME');
@@ -120,7 +120,7 @@ sub userOnJoin {
 }
 
 # 🧙‍♂️ mbCommandPublic: The Sorting Hat of Mediabot – routes every incantation to the proper spell
-sub getIdUserLevel(@) {
+sub getIdUserLevel {
 	my ($self,$sLevel) = @_;
 	my $sQuery = "SELECT id_user_level FROM USER_LEVEL WHERE description like ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -141,7 +141,7 @@ sub getIdUserLevel(@) {
 }
 
 # Get user level (numeric) from nickname (handle)
-sub getLevelUser(@) {
+sub getLevelUser {
     my ($self, $sUserHandle) = @_;
 
     my $sQuery = "SELECT USER_LEVEL.level FROM USER JOIN USER_LEVEL ON USER_LEVEL.id_user_level = USER.id_user_level WHERE USER.nickname = ?";
@@ -237,7 +237,7 @@ sub addUser_ctx {
     logBot($self, $ctx->message, undef, "adduser", $name);
 }
 
-sub getUserLevelDesc(@) {
+sub getUserLevelDesc {
 	my ($self,$level) = @_;
 	my $sQuery = "SELECT description FROM USER_LEVEL WHERE level=?";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -293,9 +293,10 @@ sub userStats_ctx {
 
 # Context-based userinfo command (Master only)
 sub userInfo_ctx {
-    my ($self, $ctx) = @_;
+    my ($ctx) = @_;
     return unless $ctx;
 
+    my $self = $ctx->bot;
     my $nick = $ctx->nick;
     $ctx->require_level('Master') or return;
 
@@ -357,17 +358,17 @@ sub userInfo_ctx {
         my $info1    = defined $ref->{info1}       ? $ref->{info1}       : '';
         my $info2    = defined $ref->{info2}       ? $ref->{info2}       : '';
 
-        botNotice($self, $nick, "User ID      : $id_user");
-        botNotice($self, $nick, "Nickname     : $nickname");
-        botNotice($self, $nick, "Level        : $level ($level_d)");
-        botNotice($self, $nick, "Username     : $username");
-        botNotice($self, $nick, "Auth         : $auth");
-        botNotice($self, $nick, "Created      : $created");
-        botNotice($self, $nick, "Last login   : $last_login");
-        botNotice($self, $nick, "Hostmasks    : $hostmasks");
-        botNotice($self, $nick, "Info1        : " . ($info1 eq '' ? 'N/A' : $info1));
-        botNotice($self, $nick, "Info2        : " . ($info2 eq '' ? 'N/A' : $info2));
-        botNotice($self, $nick, "Password set : " . (defined($password) && $password ne '' ? 'yes' : 'no'));
+        # Compact output — 2 NOTICE lines to avoid Excess Flood
+        my $pass_set = (defined($password) && $password ne '') ? 'yes' : 'no';
+        botNotice($self, $nick,
+            "[$id_user] $nickname | Level: $level_d | Auth: $auth | Pass: $pass_set"
+            . ($username ne '' ? " | Username: $username" : "")
+        );
+        botNotice($self, $nick,
+            "Created: $created | Last login: $last_login | Hostmasks: $hostmasks"
+            . ($info1 ne '' ? " | Info1: $info1" : "")
+            . ($info2 ne '' ? " | Info2: $info2" : "")
+        );
     }
     else {
         botNotice($self, $nick, "Unknown user $target");
@@ -446,7 +447,7 @@ sub addUserHost_ctx {
 }
 
 # Context-based addchan command: add a new channel and register it with a user (Administrator only)
-sub getUserChannelLevel(@) {
+sub getUserChannelLevel {
 	my ($self,$message,$sChannel,$id_user) = @_;
 	my $sQuery = "SELECT USER_CHANNEL.level FROM CHANNEL JOIN USER_CHANNEL ON USER_CHANNEL.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ? AND USER_CHANNEL.id_user = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
@@ -468,7 +469,7 @@ sub getUserChannelLevel(@) {
 
 # Delete a user from a channel
 # Requires: authenticated + (Administrator+ OR channel-level >= 400)
-sub userModinfoSyntax(@) {
+sub userModinfoSyntax {
     my ($self, $message, $sNick, @tArgs) = @_;
 
     botNotice($self, $sNick, "Syntax: modinfo [#channel] automode <user> <OP|VOICE|NONE>");
@@ -1219,8 +1220,11 @@ sub mbModUser_ctx {
             } else {
                 $sth = $self->{dbh}->prepare("UPDATE USER SET username = '#AUTOLOGIN#' WHERE nickname = ?");
                 if ($sth->execute($target_nick)) {
+                    $sth->finish;
                     botNotice($self, $nick, "Set autologin ON for $target_nick");
                     logBot($self, $message, $channel, "moduser", @original_args_for_log);
+                } else {
+                    $sth->finish;
                 }
             }
         } else {    # off
@@ -1232,15 +1236,17 @@ sub mbModUser_ctx {
             if ($is_on) {
                 $sth = $self->{dbh}->prepare("UPDATE USER SET username = NULL WHERE nickname = ?");
                 if ($sth->execute($target_nick)) {
+                    $sth->finish;
                     botNotice($self, $nick, "Set autologin OFF for $target_nick");
                     logBot($self, $message, $channel, "moduser", @original_args_for_log);
+                } else {
+                    $sth->finish;
                 }
             } else {
                 botNotice($self, $nick, "Autologin is already OFF for $target_nick");
             }
         }
 
-        $sth->finish if $sth;
         return;
     }
 
@@ -1291,7 +1297,7 @@ sub _sendModUserSyntax {
 }
 
 # Set global user level (Owner/Master/Administrator/User)
-sub setUserLevel(@) {
+sub setUserLevel {
     my ($self, $sUser, $id_user_level) = @_;
 
     my $sQuery = "UPDATE USER SET id_user_level=? WHERE nickname = ?";

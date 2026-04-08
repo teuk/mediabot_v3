@@ -33,7 +33,7 @@ our @EXPORT = qw(
     youtubeSearch_ctx
 );
 
-sub getYoutubeDetails(@) {
+sub getYoutubeDetails {
 	my ($self,$sText) = @_;
 	my $conf = $self->{conf};
 	my $sYoutubeId;
@@ -186,7 +186,7 @@ sub getYoutubeDetails(@) {
 }
 
 # Display Youtube details
-sub displayYoutubeDetails(@) {
+sub displayYoutubeDetails {
     my ($self, $message, $sNick, $sChannel, $sText) = @_;
 
     my $conf = $self->{conf};
@@ -412,7 +412,7 @@ sub displayWeather_ctx {
 }
 
 # Display URL title
-sub displayUrlTitle(@) {
+sub displayUrlTitle {
     my ($self, $message, $sNick, $sChannel, $sText) = @_;
 
     $self->{logger}->log(4, "displayUrlTitle() RAW input: $sText");
@@ -698,27 +698,25 @@ sub youtubeSearch_ctx {
     return 1;
 }
 
-# Get fortniteid from nickname
-sub getFortniteId(@) {
-    my ($self, $sUser) = @_;
-
-    my $sQuery = "SELECT fortniteid FROM USER WHERE nickname = ?";
-    my $sth = $self->{dbh}->prepare($sQuery);
-
-    unless ($sth->execute($sUser)) {
-        $self->{logger}->log(1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-    }
-    else {
-        if (my $ref = $sth->fetchrow_hashref()) {
-            my $fortniteid = $ref->{fortniteid};
-            $sth->finish;
-            return $fortniteid;
-        }
-        else {
-            $sth->finish;
-            return undef;
-        }
-    }
+# Duration: ISO8601 "PT#H#M#S" -> "1h 02m 03s" / "3m 12s" / "45s"
+sub getFortniteId {
+	my ($self,$sUser) = @_;
+	my $sQuery = "SELECT fortniteid FROM USER WHERE nickname LIKE ?";
+	my $sth = $self->{dbh}->prepare($sQuery);
+	unless ($sth->execute($sUser)) {
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+	}
+	else {
+		if (my $ref = $sth->fetchrow_hashref()) {
+			my $fortniteid = $ref->{'fortniteid'};
+			$sth->finish;
+			return $fortniteid;
+		}
+		else {
+			$sth->finish;
+			return undef;
+		}
+	}
 }
 
 # Fortnite stats:
@@ -904,7 +902,7 @@ sub chatGPT_ctx {
 # ------------------------------------------------------------------
 # chatGPT()
 # ------------------------------------------------------------------
-sub chatGPT(@) {
+sub chatGPT {
     my ($self, $message, $nick, $chan, @args) = @_;
 
     # --------------------------------------------------------------

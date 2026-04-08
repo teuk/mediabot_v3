@@ -94,7 +94,6 @@ sub get_user_info {
     });
 
     if ($sth->execute($self->{id}, $nickname)) {
-    $sth->finish;
         if (my $ref = $sth->fetchrow_hashref) {
             $info->{level}    = $ref->{level}    if defined $ref->{level};
             $info->{automode} = $ref->{automode} if defined $ref->{automode};
@@ -120,9 +119,12 @@ sub set_topic {
     return unless defined $new_topic;
 
     my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET topic=? WHERE id_channel=?");
-    $sth->execute($new_topic, $self->{id});
+    if ($sth->execute($new_topic, $self->{id})) {
+        $self->{topic} = $new_topic;
+    } else {
+        $self->{logger}->log(1, "set_topic() SQL error: $DBI::errstr") if $self->{logger};
+    }
     $sth->finish;
-    $self->{topic} = $new_topic;
 }
 
 # Set TMDB language and update DB
@@ -131,9 +133,12 @@ sub set_tmdb_lang {
     return unless defined $new_lang;
 
     my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET tmdb_lang=? WHERE id_channel=?");
-    $sth->execute($new_lang, $self->{id});
+    if ($sth->execute($new_lang, $self->{id})) {
+        $self->{tmdb_lang} = $new_lang;
+    } else {
+        $self->{logger}->log(1, "set_tmdb_lang() SQL error: $DBI::errstr") if $self->{logger};
+    }
     $sth->finish;
-    $self->{tmdb_lang} = $new_lang;
 }
 
 # Set channel key (password) and update DB
@@ -141,9 +146,12 @@ sub set_key {
     my ($self, $new_key) = @_;
     return unless defined $new_key;
     my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET `key`=? WHERE id_channel=?");
-    $sth->execute($new_key, $self->{id});
+    if ($sth->execute($new_key, $self->{id})) {
+        $self->{key} = $new_key;
+    } else {
+        $self->{logger}->log(1, "set_key() SQL error: $DBI::errstr") if $self->{logger};
+    }
     $sth->finish;
-    $self->{key} = $new_key;
 }
 
 # Set channel description and update DB
@@ -151,9 +159,12 @@ sub set_description {
     my ($self, $new_description) = @_;
     return unless defined $new_description;
     my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET description=? WHERE id_channel=?");
-    $sth->execute($new_description, $self->{id});
+    if ($sth->execute($new_description, $self->{id})) {
+        $self->{description} = $new_description;
+    } else {
+        $self->{logger}->log(1, "set_description() SQL error: $DBI::errstr") if $self->{logger};
+    }
     $sth->finish;
-    $self->{description} = $new_description;
 }
 
 # Set channel mode (chanmode) and update DB
@@ -161,9 +172,12 @@ sub set_chanmode {
     my ($self, $new_chanmode) = @_;
     return unless defined $new_chanmode;
     my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET chanmode=? WHERE id_channel=?");
-    $sth->execute($new_chanmode, $self->{id});
+    if ($sth->execute($new_chanmode, $self->{id})) {
+        $self->{chanmode} = $new_chanmode;
+    } else {
+        $self->{logger}->log(1, "set_chanmode() SQL error: $DBI::errstr") if $self->{logger};
+    }
     $sth->finish;
-    $self->{chanmode} = $new_chanmode;
 }
 
 # Set auto_join flag and update DB
@@ -171,9 +185,12 @@ sub set_auto_join {
     my ($self, $new_auto_join) = @_;
     return unless defined $new_auto_join;
     my $sth = $self->{dbh}->prepare("UPDATE CHANNEL SET auto_join=? WHERE id_channel=?");
-    $sth->execute($new_auto_join, $self->{id});
+    if ($sth->execute($new_auto_join, $self->{id})) {
+        $self->{auto_join} = $new_auto_join;
+    } else {
+        $self->{logger}->log(1, "set_auto_join() SQL error: $DBI::errstr") if $self->{logger};
+    }
     $sth->finish;
-    $self->{auto_join} = $new_auto_join;
 }
 
 # ------------------------

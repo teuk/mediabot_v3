@@ -6,7 +6,13 @@
 return sub {
     my ($assert, $spy, $send_cmd, $send_private, $wait_reply,
         $botnick, $spynick, $channel, $cmdchar,
-        $loginuser, $loginpass) = @_;
+        $loginuser, $loginpass, $drain) = @_;
+
+    # Garantir que le spy est délogué avant les tests "sans auth"
+    # (au cas où une session précédente aurait laissé auth=1 en DB)
+    $send_private->('logout');
+    $drain->(5);
+    sleep(1);
 
     # 1. whoami sans auth → refus
     $send_private->('whoami');

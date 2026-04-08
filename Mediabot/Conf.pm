@@ -24,6 +24,11 @@ sub new {
 
 sub get {
     my ($self, $key) = @_;
+    # Warn at debug level 4 if the key doesn't exist in the conf
+    # Helps diagnose missing configuration entries during development
+    unless (exists $self->{_conf}{$key}) {
+        warn "Conf->get(): key '$key' not found in configuration\n" if $ENV{MEDIABOT_DEBUG_CONF};
+    }
     return $self->{_conf}{$key};
 }
 
