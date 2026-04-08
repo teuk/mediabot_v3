@@ -207,29 +207,7 @@ sub mbJump {
 }
 
 # Make a colored string with a high-contrast palette (dark+light bg friendly)
-sub update {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = getNickInfo($self,$message);
-	if (defined($iMatchingUserId)) {
-		if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-			if (defined($iMatchingUserLevel) && checkUserLevel($self,$iMatchingUserLevel,"Owner")) {
-				$self->{logger}->log(4,"Update TBD ;)");
-			}
-			else {
-				my $sNoticeMsg = $message->prefix . " update command attempt (command level [Master] for user " . $sMatchingUserHandle . "[" . $iMatchingUserLevel ."])";
-				noticeConsoleChan($self,$sNoticeMsg);
-				botNotice($self,$sNick,"Your level does not allow you to use this command.");
-				return undef;
-			}
-		}
-		else {
-			my $sNoticeMsg = $message->prefix . " update command attempt (user $sMatchingUserHandle is not logged in)";
-			noticeConsoleChan($self,$sNoticeMsg);
-			botNotice($self,$sNick,"You must be logged to use this command - /msg " . $self->{irc}->nick_folded . " login username password");
-			return undef;
-		}
-	}
-}
+
 
 # Display the last N entries from ACTIONS_LOG table
 # Syntax:
@@ -278,7 +256,9 @@ sub mbRehash_ctx {
 
 sub update_ctx {
     my ($ctx) = @_;
-    update($ctx->bot, $ctx->message, $ctx->nick, $ctx->channel, @{ $ctx->args });
+    return unless $ctx->require_level('Owner');
+    my $self = $ctx->bot;
+    $self->{logger}->log(4, "update_ctx(): Update TBD");
 }
 
 sub mbExec_ctx {

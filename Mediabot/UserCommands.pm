@@ -52,6 +52,7 @@ sub dbLogoutUsers {
 	else {	
 		$self->{logger}->log(1,"Logged out all users");
 	}
+	$sth->finish;
 }
 
 # Set server attribute
@@ -1305,11 +1306,11 @@ sub setUserLevel {
 
     unless ($sth->execute($id_user_level, $sUser)) {
         $self->{logger}->log(1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+        $sth->finish;
         return 0;
     }
-    else {
-        return 1;
-    }
+    $sth->finish;
+    return 1;
 }
 
 

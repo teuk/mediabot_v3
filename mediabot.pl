@@ -199,7 +199,7 @@ if (defined $pid && $pid =~ /^\d+$/) {
 
 
 
-log_info("mediabot_v3 Copyright (C) 2019-2025 teuk");
+log_info("mediabot_v3 Copyright (C) 2019-2026 teuk");
 log_info("Mediabot v$MAIN_PROG_VERSION starting with config file $CONFIG_FILE");
 
 # Daemon mode actions
@@ -296,8 +296,8 @@ $mediabot->{logger}->log(4, "Partyline port is: $partyline_port");
 
 # Set up main timer
 my $timer = IO::Async::Timer::Periodic->new(
-interval => 5,
-on_tick => \&on_timer_tick,
+    interval => 5,
+    on_tick => \&on_timer_tick,
 );
 $mediabot->setMainTimerTick($timer);
 

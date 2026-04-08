@@ -79,13 +79,15 @@ sub _start_listener {
             my $id = fileno($stream->read_handle);
 
             $self->{users}{$id} = {
-                authenticated => 0,
-                login         => '',
-                level         => undef,
-                level_desc    => '',
+                authenticated  => 0,
+                login          => '',
+                level          => undef,
+                level_desc     => '',
                 # Rate limiting: max 10 commands per 5 seconds
-                rate_window   => time(),
-                rate_count    => 0,
+                rate_window    => time(),
+                rate_count     => 0,
+                # Brute-force: max 5 failed login attempts before disconnect
+                login_failures => 0,
             };
             $self->{streams}{$id} = $stream;
 
@@ -204,6 +206,16 @@ sub _do_login {
     my $bot = $self->{bot};
     my $dbh = $bot->{dbh};
 
+    # Brute-force protection
+    my $max_failures = 5;
+    my $failures = $self->{users}{$id}{login_failures} // 0;
+    if ($failures >= $max_failures) {
+        $bot->{logger}->log(1, "Partyline: too many login failures for fd=$id — closing connection");
+        $stream->write("Too many authentication failures. Disconnecting.\r\n");
+        $stream->close_now;
+        return;
+    }
+
     my $sth = $dbh->prepare(
         "SELECT u.id_user, u.nickname, u.password, ul.level, ul.description
          FROM USER u
@@ -222,12 +234,14 @@ sub _do_login {
 
     unless ($row) {
         $bot->{logger}->log(2, "Partyline: unknown user '$login' (fd=$id)");
+        $self->{users}{$id}{login_failures}++;
         $stream->write("Authentication failed.\r\n");
         return;
     }
 
     unless ($bot->{auth}->verify_credentials($row->{id_user}, $login, $password)) {
         $bot->{logger}->log(2, "Partyline: bad password for '$login' (fd=$id)");
+        $self->{users}{$id}{login_failures}++;
         $stream->write("Authentication failed.\r\n");
         return;
     }
@@ -235,9 +249,13 @@ sub _do_login {
     # Minimum level : Master (Owner=0, Master=1 => level <= 1)
     unless (defined($row->{level}) && $row->{level} <= 1) {
         $bot->{logger}->log(2, "Partyline: '$login' level=" . ($row->{level} // 'undef') . " insufficient (fd=$id)");
+        $self->{users}{$id}{login_failures}++;
         $stream->write("Access denied: Master level or above required.\r\n");
         return;
     }
+
+    # Reset counter on success
+    $self->{users}{$id}{login_failures} = 0;
 
     $self->{users}{$id}{authenticated} = 1;
     $self->{users}{$id}{login}         = $login;

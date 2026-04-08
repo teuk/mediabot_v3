@@ -69,24 +69,18 @@ sub getYoutubeDetails {
 		}
 		my $yt_url = "https://www.googleapis.com/youtube/v3/videos"
 		           . "?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status";
-		my $fh_yt;
-		unless ( open $fh_yt, "-|", "curl", "--connect-timeout", "5", "-f", "-s", $yt_url ) {
-			$self->{logger}->log(3,"getYoutubeDetails() Could not get YOUTUBE_INFOS from API using $APIKEY");
+		my $http = HTTP::Tiny->new(timeout => 10);
+		my $res  = $http->get($yt_url);
+		unless ($res->{success}) {
+			$self->{logger}->log(3,"getYoutubeDetails() HTTP error $res->{status} for $yt_url");
 		}
 		else {
-			my $line;
-			my $i = 0;
 			my $sTitle;
 			my $sDuration;
 			my $sDururationSeconds;
 			my $sViewCount;
-			my $json_details;
-			while(defined($line=<$fh_yt>)) {
-				chomp($line);
-				$json_details .= $line;
-				$self->{logger}->log(5,"getYoutubeDetails() $line");
-				$i++;
-			}
+			my $json_details = $res->{content};
+			$self->{logger}->log(5,"getYoutubeDetails() raw: $json_details");
 			if (defined($json_details) && ($json_details ne "")) {
 				$self->{logger}->log(4,"getYoutubeDetails() json_details : $json_details");
 				my $sYoutubeInfo = eval { decode_json $json_details };
@@ -175,7 +169,7 @@ sub getYoutubeDetails {
 				}
 			}
 			else {
-				$self->{logger}->log(3,"getYoutubeDetails() curl empty result for : curl --connect-timeout 5 -f -s \"https://www.googleapis.com/youtube/v3/videos?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status\"");
+				$self->{logger}->log(3,"getYoutubeDetails() empty response for: $yt_url");
 			}
 		}
 	}
@@ -617,14 +611,15 @@ sub youtubeSearch_ctx {
         . "&fields=items(id/videoId)";
 
     my $json_search = '';
-    if (open my $fh, "-|", "curl", "--connect-timeout", "5", "--max-time", "6", "-fsSL", $search_url) {
-        local $/;
-        $json_search = <$fh> // '';
-        close $fh;
-    } else {
-        $self->{logger}->log(2, "youtubeSearch_ctx(): curl failed for search endpoint");
-        botPrivmsg($self, $chan, "($nick) YouTube: service unavailable (search).");
-        return;
+    {
+        my $http_s = HTTP::Tiny->new(timeout => 10);
+        my $res_s  = $http_s->get($search_url);
+        unless ($res_s->{success}) {
+            $self->{logger}->log(2, "youtubeSearch_ctx(): HTTP $res_s->{status} for search endpoint");
+            botPrivmsg($self, $chan, "($nick) YouTube: service unavailable (search).");
+            return;
+        }
+        $json_search = $res_s->{content} // '';
     }
 
     my $video_id;
@@ -652,14 +647,15 @@ sub youtubeSearch_ctx {
         . "&fields=items(snippet/title,contentDetails/duration,statistics/viewCount)";
 
     my $json_vid = '';
-    if (open my $fh2, "-|", "curl", "--connect-timeout", "5", "--max-time", "6", "-fsSL", $videos_url) {
-        local $/;
-        $json_vid = <$fh2> // '';
-        close $fh2;
-    } else {
-        $self->{logger}->log(2, "youtubeSearch_ctx(): curl failed for videos endpoint");
-        botPrivmsg($self, $chan, "($nick) https://www.youtube.com/watch?v=$video_id");
-        return;
+    {
+        my $http_v = HTTP::Tiny->new(timeout => 10);
+        my $res_v  = $http_v->get($videos_url);
+        unless ($res_v->{success}) {
+            $self->{logger}->log(2, "youtubeSearch_ctx(): HTTP $res_v->{status} for videos endpoint");
+            botPrivmsg($self, $chan, "($nick) https://www.youtube.com/watch?v=$video_id");
+            return;
+        }
+        $json_vid = $res_v->{content} // '';
     }
 
     my ($title, $dur_iso, $views);

@@ -366,6 +366,7 @@ sub mbDbAddCommand_ctx {
     $sth = $self->{dbh}->prepare($insert_query);
     unless ($sth && $sth->execute($user->id, $id_cat, $sCommand, $sCommand, $sAction)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $insert_query");
+        $sth->finish if $sth;
         return;
     }
 
@@ -784,49 +785,51 @@ sub mbDbShowCommand_ctx {
 sub mbDbCommand {
 	my ($self,$message,$sChannel,$sNick,$sCommand,@tArgs) = @_;
 	$self->{logger}->log(2,"Check SQL command : $sCommand");
+
 	my $sQuery = "SELECT id_public_commands, action, description, hits FROM PUBLIC_COMMANDS WHERE command LIKE ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sCommand)) {
+	my $sth_sel = $self->{dbh}->prepare($sQuery);
+	unless ($sth_sel->execute($sCommand)) {
 		$self->{logger}->log(1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$sth_sel->finish;
+		return 0;
 	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $id_public_commands = $ref->{'id_public_commands'};
-			my $description = $ref->{'description'};
-			my $action = $ref->{'action'};
-			my $hits = $ref->{'hits'};
-			$hits++;
-			$sQuery = "UPDATE PUBLIC_COMMANDS SET hits=? WHERE id_public_commands=?";
-			$sth = $self->{dbh}->prepare($sQuery);
-			unless ($sth->execute($hits,$id_public_commands)) {
-				$self->{logger}->log(1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+
+	my $ref = $sth_sel->fetchrow_hashref();
+	$sth_sel->finish;
+	return 0 unless $ref;
+
+	my $id_public_commands = $ref->{'id_public_commands'};
+	my $description        = $ref->{'description'};
+	my $action             = $ref->{'action'};
+	my $hits               = $ref->{'hits'} + 1;
+
+	$sQuery = "UPDATE PUBLIC_COMMANDS SET hits=? WHERE id_public_commands=?";
+	my $sth_upd = $self->{dbh}->prepare($sQuery);
+	unless ($sth_upd->execute($hits,$id_public_commands)) {
+		$self->{logger}->log(1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$sth_upd->finish;
+		return 0;
+	}
+	$sth_upd->finish;
+
+	$self->{logger}->log(2,"SQL command found : $sCommand description : $description action : $action");
+	my ($actionType,$actionTo,$actionDo) = split(/ /,$action,3);
+	if (( $actionType eq 'PRIVMSG' ) || ( $actionType eq 'ACTION' )) {
+		if ( $actionTo eq '%c' ) {
+			$actionDo = evalAction($self,$message,$sNick,$sChannel,$sCommand,$actionDo,@tArgs);
+			if ( $actionType eq 'PRIVMSG' ) {
+				botPrivmsg($self,$sChannel,$actionDo);
 			}
 			else {
-				$self->{logger}->log(2,"SQL command found : $sCommand description : $description action : $action");
-				my ($actionType,$actionTo,$actionDo) = split(/ /,$action,3);
-				if (( $actionType eq 'PRIVMSG' ) || ( $actionType eq 'ACTION' )){
-					if ( $actionTo eq '%c' ) {
-						$actionDo = evalAction($self,$message,$sNick,$sChannel,$sCommand,$actionDo,@tArgs);
-						if ( $actionType eq 'PRIVMSG' ) {
-							botPrivmsg($self,$sChannel,$actionDo);
-						}
-						else {
-							botAction($self,$sChannel,$actionDo);
-						}
-					}
-					return 1;
-				}
-				else {
-					$self->{logger}->log(2,"Unknown actionType : $actionType");
-					return 0;
-				}
+				botAction($self,$sChannel,$actionDo);
 			}
 		}
-		else {
-			return 0;
-		}
+		return 1;
 	}
-	$sth->finish;
+	else {
+		$self->{logger}->log(2,"Unknown actionType : $actionType");
+		return 0;
+	}
 }
 
 
@@ -1510,32 +1513,35 @@ sub checkResponder {
 sub doResponder {
 	my ($self,$message,$sNick,$sChannel,$sMsg,@tArgs) = @_;
 	my $sQuery = "SELECT RESPONDERS.id_responders, RESPONDERS.answer, RESPONDERS.hits FROM RESPONDERS LEFT JOIN CHANNEL ON CHANNEL.id_channel = RESPONDERS.id_channel WHERE ((CHANNEL.name LIKE ? AND CHANNEL.id_channel IS NOT NULL) OR RESPONDERS.id_channel = 0) AND RESPONDERS.responder LIKE ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel,$sMsg)) {
+	my $sth_sel = $self->{dbh}->prepare($sQuery);
+	unless ($sth_sel->execute($sChannel,$sMsg)) {
+		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$sth_sel->finish;
+		return 0;
+	}
+
+	my $ref = $sth_sel->fetchrow_hashref();
+	$sth_sel->finish;
+	return 0 unless $ref;
+
+	my $sAnswer       = $ref->{'answer'};
+	my $id_responders = $ref->{'id_responders'};
+	my $hits          = $ref->{'hits'} + 1;
+	my $actionDo = evalAction($self,$message,$sNick,$sChannel,$sMsg,$sAnswer);
+	$self->{logger}->log(4,"checkResponder() Found answer $sAnswer");
+	botPrivmsg($self,$sChannel,$actionDo);
+
+	$sQuery = "UPDATE RESPONDERS SET hits=? WHERE id_responders=?";
+	my $sth_upd = $self->{dbh}->prepare($sQuery);
+	unless ($sth_upd->execute($hits,$id_responders)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $sAnswer = $ref->{'answer'};
-			my $id_responders = $ref->{'id_responders'};
-			my $hits = $ref->{'hits'} + 1;
-			my $actionDo = evalAction($self,$message,$sNick,$sChannel,$sMsg,$sAnswer);
-			$self->{logger}->log(4,"checkResponder() Found answer $sAnswer");
-			botPrivmsg($self,$sChannel,$actionDo);
-			my $sQuery = "UPDATE RESPONDERS SET hits=? WHERE id_responders=?";
-			my $sth = $self->{dbh}->prepare($sQuery);
-			unless ($sth->execute($hits,$id_responders)) {
-				$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-			}
-			else {
-				$self->{logger}->log(4,"$hits hits for $sMsg");
-			}
-			setLastReponderTs($self,time);
-			return 1;
-		}
+		$self->{logger}->log(4,"$hits hits for $sMsg");
 	}
-	$sth->finish;
-	return 0;
+	$sth_upd->finish;
+	setLastReponderTs($self,time);
+	return 1;
 }
 
 # Add a text responder (Context version)

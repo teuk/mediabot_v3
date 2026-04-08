@@ -213,28 +213,32 @@ sub mbQuoteDel {
 	}
 	else {
 		my $sQuery = "SELECT QUOTES.id_quotes FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? AND QUOTES.id_quotes = ?";
-		my $sth = $self->{dbh}->prepare($sQuery);
-		unless ($sth->execute($sChannel,$id_quotes)) {
+		my $sth_sel = $self->{dbh}->prepare($sQuery);
+		unless ($sth_sel->execute($sChannel,$id_quotes)) {
 			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+			$sth_sel->finish;
 		}
 		else {
-			if (my $ref = $sth->fetchrow_hashref()) {
+			if (my $ref = $sth_sel->fetchrow_hashref()) {
+				$sth_sel->finish;
 				$sQuery = "DELETE FROM QUOTES WHERE id_quotes=?";
-				my $sth = $self->{dbh}->prepare($sQuery);
-				unless ($sth->execute($id_quotes)) {
+				my $sth_del = $self->{dbh}->prepare($sQuery);
+				unless ($sth_del->execute($id_quotes)) {
 					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+					$sth_del->finish;
 				}
 				else {
 					my $id_removed = String::IRC->new($id_quotes)->bold;
 					botPrivmsg($self,$sChannel,"($sMatchingUserHandle) deleted. (id: $id_removed)");
 					logBot($self,$message,$sChannel,"q del",@tArgs);
 				}
+				$sth_del->finish;
 			}
 			else {
+				$sth_sel->finish;
 				botPrivmsg($self,$sChannel,"Quote (id : $id_quotes) does not exist for channel $sChannel");
 			}
 		}
-		$sth->finish;
 	}
 }
 
@@ -367,89 +371,71 @@ sub mbQuoteRand {
 
 sub mbQuoteStats {
 	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my $sQuery = "SELECT COUNT(*) AS nbQuotes FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ?";
+
+	# Single query: COUNT + MIN + MAX in one pass
+	my $sQuery = "SELECT COUNT(*) AS nbQuotes,
+				UNIX_TIMESTAMP(MIN(ts)) AS minDate,
+				UNIX_TIMESTAMP(MAX(ts)) AS maxDate
+				FROM QUOTES
+				JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel
+				WHERE CHANNEL.name = ?";
+
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$sth->finish;
+		return;
 	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $nbQuotes = $ref->{'nbQuotes'};
-			if ( $nbQuotes == 0) {
-				botPrivmsg($self,$sChannel,"Quote database is empty for $sChannel");
-			}
-			else {
-				$sQuery = "SELECT UNIX_TIMESTAMP(ts) AS minDate FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? ORDER BY ts LIMIT 1";
-				$sth = $self->{dbh}->prepare($sQuery);
-				unless ($sth->execute($sChannel)) {
-					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-				}
-				else {
-					if (my $ref = $sth->fetchrow_hashref()) {
-						my $minDate = $ref->{'minDate'};
-						$sQuery = "SELECT UNIX_TIMESTAMP(ts) AS maxDate FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? ORDER BY ts DESC LIMIT 1";
-						$sth = $self->{dbh}->prepare($sQuery);
-						unless ($sth->execute($sChannel)) {
-							$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-						}
-						else {
-							if (my $ref = $sth->fetchrow_hashref()) {
-								my $maxDate = $ref->{'maxDate'};
-								my $d = time() - $minDate;
-								my @int = (
-								    [ 'second', 1                ],
-								    [ 'minute', 60               ],
-								    [ 'hour',   60*60            ],
-								    [ 'day',    60*60*24         ],
-								    [ 'week',   60*60*24*7       ],
-								    [ 'month',  60*60*24*30.5    ],
-								    [ 'year',   60*60*24*30.5*12 ]
-								);
-								my $i = $#int;
-								my @r;
-								while ( ($i>=0) && ($d) )
-								{
-								    if ($d / $int[$i] -> [1] >= 1)
-								    {
-								        push @r, sprintf "%d %s%s",
-								                     $d / $int[$i] -> [1],
-								                     $int[$i]->[0],
-								                     ( sprintf "%d", $d / $int[$i] -> [1] ) > 1
-								                         ? 's'
-								                         : '';
-								    }
-								    $d %= $int[$i] -> [1];
-								    $i--;
-								}
-								my $minTimeAgo = join ", ", @r if @r;
-								@r = ();
-								$d = time() - $maxDate;
-								$i = $#int;
-								while ( ($i>=0) && ($d) )
-								{
-								    if ($d / $int[$i] -> [1] >= 1)
-								    {
-								        push @r, sprintf "%d %s%s",
-								                     $d / $int[$i] -> [1],
-								                     $int[$i]->[0],
-								                     ( sprintf "%d", $d / $int[$i] -> [1] ) > 1
-								                         ? 's'
-								                         : '';
-								    }
-								    $d %= $int[$i] -> [1];
-								    $i--;
-								}
-								my $maxTimeAgo = join ", ", @r if @r;
-								botPrivmsg($self,$sChannel,"Quotes : $nbQuotes for channel $sChannel -- first : $minTimeAgo ago -- last : $maxTimeAgo ago");
-								logBot($self,$message,$sChannel,"q stats",@tArgs);
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+
+	my $ref = $sth->fetchrow_hashref();
 	$sth->finish;
+
+	unless ($ref) {
+		$self->{logger}->log(1,"mbQuoteStats() fetchrow failed");
+		return;
+	}
+
+	my $nbQuotes = $ref->{'nbQuotes'} // 0;
+	if ($nbQuotes == 0) {
+		botPrivmsg($self,$sChannel,"Quote database is empty for $sChannel");
+		return;
+	}
+
+	my $minDate = $ref->{'minDate'};
+	my $maxDate = $ref->{'maxDate'};
+
+	my @int = (
+		[ 'second', 1                ],
+		[ 'minute', 60               ],
+		[ 'hour',   60*60            ],
+		[ 'day',    60*60*24         ],
+		[ 'week',   60*60*24*7       ],
+		[ 'month',  60*60*24*30.5    ],
+		[ 'year',   60*60*24*30.5*12 ],
+	);
+
+	my $elapsed_to_human = sub {
+		my ($d) = @_;
+		my @r;
+		my $i = $#int;
+		while ($i >= 0 && $d) {
+			if ($d / $int[$i]->[1] >= 1) {
+				push @r, sprintf "%d %s%s",
+					$d / $int[$i]->[1],
+					$int[$i]->[0],
+					(int($d / $int[$i]->[1]) > 1 ? 's' : '');
+			}
+			$d = int($d % $int[$i]->[1]);
+			$i--;
+		}
+		return join(", ", @r) || "just now";
+	};
+
+	my $minTimeAgo = $elapsed_to_human->(time() - $minDate);
+	my $maxTimeAgo = $elapsed_to_human->(time() - $maxDate);
+
+	botPrivmsg($self,$sChannel,"Quotes : $nbQuotes for channel $sChannel -- first : $minTimeAgo ago -- last : $maxTimeAgo ago");
+	logBot($self,$message,$sChannel,"q stats",@tArgs);
 }
 
 # Modify a user's global level, autologin status, or fortniteid (Context version)

@@ -316,6 +316,7 @@ sub getIdUser {
         }
     }
 
+    $sth->finish;
     return $id_user;
 }
 
@@ -922,10 +923,12 @@ sub logBotAction {
 
         unless ($sth->execute($sChannel)) {
             $self->{logger}->log(1, "logBotAction() SQL Error: $DBI::errstr Query: $sQuery");
+            $sth->finish;
             return;
         }
 
         my $ref = $sth->fetchrow_hashref();
+        $sth->finish;
         unless ($ref) {
             $self->{logger}->log(4, "logBotAction() channel not found: $sChannel");
             return;
