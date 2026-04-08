@@ -251,6 +251,7 @@ CREATE TABLE `PUBLIC_COMMANDS` (
   `description` VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `action`      VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `hits`        BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `active`      TINYINT(1) NOT NULL DEFAULT 1,
   PRIMARY KEY (`id_public_commands`),
   UNIQUE KEY `command` (`command`(191)),
   KEY `idx_pc_id_user`     (`id_user`),
@@ -507,9 +508,9 @@ INSERT INTO `PUBLIC_COMMANDS_CATEGORY` (`id_public_commands_category`, `descript
 --
 -- PUBLIC_COMMANDS — built-in commands
 --
-INSERT INTO `PUBLIC_COMMANDS` (`id_public_commands`, `id_user`, `id_public_commands_category`, `creation_date`, `command`, `description`, `action`, `hits`) VALUES
-(2, NULL, 1, '2018-02-04 06:06:55', 'dice',   'Play dice', 'PRIVMSG %c The dice rolls... Result : %d', 1),
-(3, NULL, 1, '2018-02-11 04:25:40', 'coffee', 'Coffee',    'ACTION %c serves \x02\x038,1c(\x0f\x02\x0305,01_\x0f\x02\x0308,01)\x0f\x02\x0315,01~\x0f to %n', 1);
+INSERT INTO `PUBLIC_COMMANDS` (`id_public_commands`, `id_user`, `id_public_commands_category`, `creation_date`, `command`, `description`, `action`, `hits`, `active`) VALUES
+(2, NULL, 1, '2018-02-04 06:06:55', 'dice',   'Play dice', 'PRIVMSG %c The dice rolls... Result : %d', 1, 1),
+(3, NULL, 1, '2018-02-11 04:25:40', 'coffee', 'Coffee',    'ACTION %c serves \x02\x038,1c(\x0f\x02\x0305,01_\x0f\x02\x0308,01)\x0f\x02\x0315,01~\x0f to %n', 1, 1);
 
 --
 -- CONSOLE — web interface navigation

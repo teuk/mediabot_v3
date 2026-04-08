@@ -731,6 +731,7 @@ sub mbDbShowCommand_ctx {
             PC.id_user,
             PC.creation_date,
             PC.action,
+            PC.active,
             PCC.description AS category
         FROM PUBLIC_COMMANDS PC
         JOIN PUBLIC_COMMANDS_CATEGORY PCC
@@ -754,6 +755,8 @@ sub mbDbShowCommand_ctx {
         my $sCreationDate = $ref->{creation_date} // 'Unknown';
         my $sAction       = $ref->{action} // '';
         my $hits          = $ref->{hits} // 0;
+        my $active        = defined $ref->{active} ? $ref->{active} : 1;
+        my $status        = $active ? 'active' : 'on hold';
         my $sHitsWord     = ($hits > 1) ? "$hits hits" : ($hits == 1 ? "1 hit" : "0 hit");
 
         my $sUserHandle = "Unknown";
@@ -770,7 +773,7 @@ sub mbDbShowCommand_ctx {
         }
 
         botNotice($self, $nick, "Command : $sCommand Author : $sUserHandle Created : $sCreationDate");
-        botNotice($self, $nick, "$sHitsWord Category : $sCategory Action : $sAction");
+                botNotice($self, $nick, "$sHitsWord Category : $sCategory Status : $status Action : $sAction");
     } else {
         botNotice($self, $nick, "$sCommand command does not exist");
     }
@@ -786,7 +789,7 @@ sub mbDbCommand {
 	my ($self,$message,$sChannel,$sNick,$sCommand,@tArgs) = @_;
 	$self->{logger}->log(2,"Check SQL command : $sCommand");
 
-	my $sQuery = "SELECT id_public_commands, action, description, hits FROM PUBLIC_COMMANDS WHERE command LIKE ?";
+	my $sQuery = "SELECT id_public_commands, action, description, hits FROM PUBLIC_COMMANDS WHERE command LIKE ? AND active = 1";
 	my $sth_sel = $self->{dbh}->prepare($sQuery);
 	unless ($sth_sel->execute($sCommand)) {
 		$self->{logger}->log(1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);

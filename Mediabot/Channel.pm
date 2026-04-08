@@ -7,16 +7,17 @@ use DBI;
 sub new {
     my ($class, $args) = @_;
     my $self = {
-        id        => $args->{id},
-        name      => $args->{name},
+        id          => $args->{id},
+        name        => $args->{name},
         description => $args->{description} || '',
-        topic     => $args->{topic},
-        tmdb_lang => $args->{tmdb_lang},
-        chanmode => $args->{chanmode},
-        auto_join => $args->{auto_join},
-        key       => $args->{key},
-        dbh       => $args->{dbh},  # needed for SQL updates
-        irc       => $args->{irc},  # needed for IRC operations
+        topic       => $args->{topic},
+        tmdb_lang   => $args->{tmdb_lang},
+        chanmode    => $args->{chanmode},
+        auto_join   => $args->{auto_join},
+        key         => $args->{key},
+        dbh         => $args->{dbh},     # needed for SQL updates
+        irc         => $args->{irc},     # needed for IRC operations
+        logger      => $args->{logger},  # optional logger
     };
     bless $self, $class;
     return $self;
@@ -199,11 +200,21 @@ sub set_auto_join {
 
 sub exists_in_db {
     my ($self) = @_;
-    my $sth = $self->{dbh}->prepare("SELECT id FROM CHANNEL WHERE name = ?");
-    $sth->execute($self->{name});
+
+    my $sth = $self->{dbh}->prepare(
+        "SELECT id_channel FROM CHANNEL WHERE name = ?"
+    );
+
+    unless ($sth && $sth->execute($self->{name})) {
+        $self->{logger}->log(1, "exists_in_db() SQL error: $DBI::errstr")
+            if $self->{logger};
+        return undef;
+    }
+
+    my ($id_channel) = $sth->fetchrow_array;
     $sth->finish;
-    my ($id) = $sth->fetchrow_array;
-    return $id;
+
+    return $id_channel;
 }
 
 sub create_in_db {

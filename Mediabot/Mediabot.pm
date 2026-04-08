@@ -264,15 +264,16 @@ sub populateChannels {
         $i++ == 0 and $self->{logger}->log( 0, "Populating channel objects");
 
         my $channel_obj = Mediabot::Channel->new({
-            id         => $ref->{id_channel},
-            name       => $ref->{name},
-			description => $ref->{description},
-            topic      => $ref->{topic},
-            tmdb_lang  => $ref->{tmdb_lang},
-            key        => $ref->{key},
-            dbh        => $self->{dbh},
-			irc		   => $self->{irc},
-            auto_join  => $ref->{auto_join},
+            id          => $ref->{id_channel},
+            name        => $ref->{name},
+            description => $ref->{description},
+            topic       => $ref->{topic},
+            tmdb_lang   => $ref->{tmdb_lang},
+            key         => $ref->{key},
+            dbh         => $self->{dbh},
+            irc         => $self->{irc},
+            logger      => $self->{logger},
+            auto_join   => $ref->{auto_join},
         });
 
         $self->{channels}{ $ref->{name} } = $channel_obj;

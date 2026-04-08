@@ -88,12 +88,13 @@ sub get_channel_by_name {
     $sth->finish;
     if ($ref) {
         require Mediabot::Channel;
-        return Mediabot::Channel->new(
-            dbh     => $self->{dbh},
-            logger  => $self->{logger},
-            id      => $ref->{id_channel},
-            name    => $name,
-        );
+        return Mediabot::Channel->new({
+            dbh    => $self->{dbh},
+            logger => $self->{logger},
+            id     => $ref->{id_channel},
+            name   => $name,
+            irc    => $self->{irc},
+        });
     }
     return undef;
 }
@@ -303,9 +304,10 @@ sub addChannel_ctx {
 
     # Build channel object
     my $channel = Mediabot::Channel->new({
-        name => $sChannel,
-        dbh  => $self->{dbh},
-        irc  => $self->{irc},
+        name   => $sChannel,
+        dbh    => $self->{dbh},
+        irc    => $self->{irc},
+        logger => $self->{logger},
     });
 
     # Already exists?

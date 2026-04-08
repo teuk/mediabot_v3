@@ -197,7 +197,7 @@ sub userLogin_ctx {
                     $ins->execute($id_user, $hostmask);
                     $ins->finish;
                     $self->{logger}->log(2, "login: registered hostmask '$hostmask' for id_user=$id_user");
-                    $self->clear_user_cache($fullmask) if $self->can('clear_user_cache');
+                    clear_user_cache($self, $fullmask);
                 }
                 1;
             };
@@ -266,7 +266,7 @@ sub userLogout_ctx {
 
     # Invalidate user cache so subsequent commands see auth=0 immediately
     my $logout_mask = eval { $ctx->message->prefix } // '';
-    $self->clear_user_cache($logout_mask) if $logout_mask && $self->can('clear_user_cache');
+    clear_user_cache($self, $logout_mask) if $logout_mask;
 
     $self->{logger}->log(1, "logout: $username (id=$uid) logged out");
     botNotice($self, $nick, "Logged out successfully.");

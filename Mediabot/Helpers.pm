@@ -26,6 +26,7 @@ our @EXPORT = qw(
     botNotice
     botPrivmsg
     botAction
+    clear_user_cache
     noticeConsoleChan
     logBot
     checkUserLevel
