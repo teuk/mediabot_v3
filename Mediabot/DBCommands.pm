@@ -74,7 +74,7 @@ sub onStartTimers {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
-		$self->{logger}->log(0,"Checking timers to set at startup");
+		$self->{logger}->log(1,"Checking timers to set at startup");
 		my $i = 0;
 		while (my $ref = $sth->fetchrow_hashref()) {
 			my $id_timers = $ref->{'id_timers'};

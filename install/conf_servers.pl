@@ -20,19 +20,19 @@ use DBI;
 # !          SUBS                                                             !
 # +---------------------------------------------------------------------------+
 
-sub log_messageln(@);
-sub log_message(@);
-sub log_messageln_wots(@);
-sub init_log(@);
-sub dbConnect(@);
-sub getNetworkInfos(@);
-sub addIrcNetwork(@);
-sub getIrcserversNetwork(@);
-sub addIrcServer(@);
-sub menuServers(@);
-sub getIrcServerId(@);
-sub writeNetworkToConf(@);
-sub displayAll(@);
+sub log_messageln;
+sub log_message;
+sub log_messageln_wots;
+sub init_log;
+sub dbConnect;
+sub getNetworkInfos;
+sub addIrcNetwork;
+sub getIrcserversNetwork;
+sub addIrcServer;
+sub menuServers;
+sub getIrcServerId;
+sub writeNetworkToConf;
+sub displayAll;
 
 # +---------------------------------------------------------------------------+
 # !          MAIN                                                             !
@@ -191,7 +191,7 @@ log_messageln("-----------------------------------------------------------------
 # +---------------------------------------------------------------------------+
 # !          SUBS                                                             !
 # +---------------------------------------------------------------------------+
-sub init_log(@) {
+sub init_log {
 	my ($sLogFilename) = @_;
 	unless (open LOG, ">>$sLogFilename") {
 		print STDERR "Could not open $sLogFilename for writing.\n";
@@ -201,7 +201,7 @@ sub init_log(@) {
 	print LOG "+--------------------------------------------------------------------------------------------------+\n";
 }
 
-sub log_messageln(@) {
+sub log_messageln {
 	my ($sMsg) = @_;
 	if (defined($sMsg) && ($sMsg ne "")) {
 		my $sDisplayMsg = time2str("[%d/%m/%Y %H:%M:%S]",time) . " $sMsg\n";
@@ -210,7 +210,7 @@ sub log_messageln(@) {
 	}
 }
 
-sub log_message(@) {
+sub log_message {
 	my ($sMsg) = @_;
 	if (defined($sMsg) && ($sMsg ne "")) {
 		my $sDisplayMsg = time2str("[%d/%m/%Y %H:%M:%S]",time) . " $sMsg";
@@ -219,7 +219,7 @@ sub log_message(@) {
 	}
 }
 
-sub log_messageln_wots(@) {
+sub log_messageln_wots {
 	my ($sMsg) = @_;
 	if (defined($sMsg) && ($sMsg ne "")) {
 		print "$sMsg\n";
@@ -227,7 +227,7 @@ sub log_messageln_wots(@) {
 	}
 }
 
-sub dbConnect(@) {
+sub dbConnect {
 	my ($dbname,$dbhost,$dbport,$dbuser,$dbpasswd) = @_;
 	my $connectionInfo="DBI:mysql:database=$dbname;$dbhost:$dbport";   # Database connection string
 	my $dbh;                                                   				 # Database handle
@@ -243,7 +243,7 @@ sub dbConnect(@) {
 	return $dbh;
 }
 
-sub getNetworkInfos(@) {
+sub getNetworkInfos {
 	my ($sNetworkParam) = @_;
 	my $sNetworkName;
 	my $id_network;
@@ -265,7 +265,7 @@ sub getNetworkInfos(@) {
 	}
 }
 
-sub addIrcNetwork(@) {
+sub addIrcNetwork {
 	log_message("Enter network name : ");
 	$line=<STDIN>;
 	chomp($line);
@@ -294,7 +294,7 @@ sub addIrcNetwork(@) {
 	return ($id_network,$sNetworkName);
 }
 
-sub addIrcServer(@) {
+sub addIrcServer {
 	my ($id_network,$server_hostname) = @_;
 	my $id_server;
 	my $sQuery = "INSERT INTO SERVERS (id_network,server_hostname) VALUES (?,?)";
@@ -310,7 +310,7 @@ sub addIrcServer(@) {
 	return $id_server;
 }
 
-sub getIrcServerId(@) {
+sub getIrcServerId {
 	my ($sServerhostname) = @_;
 	my $sQuery = "SELECT * FROM SERVERS where server_hostname like ?";
 	my $sth = $dbh->prepare($sQuery);
@@ -329,7 +329,7 @@ sub getIrcServerId(@) {
 	}
 }
 
-sub getIrcserversNetwork(@) {
+sub getIrcserversNetwork {
 	my ($id_network) = @_;
 	my $sQuery = "SELECT * FROM SERVERS where id_network=?";
 	my $sth = $dbh->prepare($sQuery);
@@ -353,7 +353,7 @@ sub getIrcserversNetwork(@) {
 	}
 }
 
-sub menuServers(@) {
+sub menuServers {
 	my ($id_network) = @_;
 	my $sResponse;
 	log_message("Choose what to do (a)dd, (r)emove or (q)uit [a] : ");
@@ -446,7 +446,7 @@ sub menuServers(@) {
 	}
 }
 
-sub writeNetworkToConf(@) {
+sub writeNetworkToConf {
 	my ($CONFIG_FILE,$sNetworkName) = @_;
 	unless (open SED, "sed -i -e 's/^CONN_SERVER_NETWORK=.*\$/CONN_SERVER_NETWORK=$sNetworkName/' $CONFIG_FILE |") {
 		log_messageln("Could not write CONN_SERVER_NETWORK to config file");
@@ -458,7 +458,7 @@ sub writeNetworkToConf(@) {
 	}
 }
 
-sub displayAll(@) {
+sub displayAll {
 	my ($CONN_SERVER_NETWORK) = @_;
 	unless (defined($CONN_SERVER_NETWORK) && ($CONN_SERVER_NETWORK ne "")) {
 		log_messageln("No current network set in $CONFIG_FILE ! Run ./configure -s to add one");

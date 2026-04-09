@@ -21,8 +21,8 @@ my $RADIO_SOURCE = 0;
 # +---------------------------------------------------------------------------+
 # !          SUBS DECLARATION                                                 !
 # +---------------------------------------------------------------------------+
-sub usage(@);
-sub getRadioCurrentSong(@);
+sub usage;
+sub getRadioCurrentSong;
 
 # +---------------------------------------------------------------------------+
 # !          MAIN                                                             !
@@ -54,7 +54,7 @@ else {
 # +---------------------------------------------------------------------------+
 # !          SUBS                                                             !
 # +---------------------------------------------------------------------------+
-sub usage(@) {
+sub usage {
     my ($strErr) = @_;
     if (defined($strErr)) {
             print STDERR "Error : " . $strErr . "\n";
@@ -63,7 +63,7 @@ sub usage(@) {
     exit 4;
 }
 
-sub getRadioCurrentSong(@) {
+sub getRadioCurrentSong {
 	unless (defined($RADIO_HOSTNAME) && ($RADIO_HOSTNAME ne "")) {
 		print STDERR "RADIO_HOSTNAME not set";
 		return undef;

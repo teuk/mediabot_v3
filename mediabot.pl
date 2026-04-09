@@ -700,19 +700,12 @@ sub on_message_INVITE {
     unless ($self->is_nick_me($inviter_nick)) {
         $mediabot->{logger}->log(1,"* $inviter_nick invites you to join $target_name");
         $mediabot->logBotAction($message,"invite",$inviter_nick,undef,$target_name);
-        my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = $mediabot->getNickInfo($message);
-        if (defined($iMatchingUserId)) {
-            if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
-                $mediabot->{logger}->log(1,"$invited_nick has been invited to join $target_name by $inviter_nick (authentified user)");
-                #$mediabot->joinChannel($target_name);
-            }
-            else {
-                if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-                    $mediabot->{logger}->log(0,"[LIVE] $invited_nick has been invited to join $target_name by $inviter_nick (not authentified user)");
-                }
-                #$mediabot->joinChannel($target_name);
-            }
-        }
+        my $inviter_user = $mediabot->get_user_from_message($message);
+        my $is_auth      = $inviter_user && $inviter_user->is_authenticated ? 1 : 0;
+        my $auth_label   = $is_auth ? 'authenticated' : 'not authenticated';
+        $mediabot->{logger}->log(1,"$invited_nick has been invited to join $target_name by $inviter_nick ($auth_label)");
+        # Auto-join disabled — uncomment to re-enable:
+        # $mediabot->joinChannel($target_name) if $is_auth;
     }
     else {
         $mediabot->{logger}->log(1,"$invited_nick has been invited to join $target_name");

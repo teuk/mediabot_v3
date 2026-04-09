@@ -19,11 +19,11 @@ use DBI;
 # !          SUBS                                                             !
 # +---------------------------------------------------------------------------+
 
-sub log_messageln(@);
-sub log_message(@);
-sub init_log(@);
-sub dbConnect(@);
-sub addIrcServer(@);
+sub log_messageln;
+sub log_message;
+sub init_log;
+sub dbConnect;
+sub addIrcServer;
 sub addConsoleChannelCheck();
 sub addConsoleChannel();
 
@@ -300,7 +300,7 @@ elsif ( $line == 2 ) {
 # +---------------------------------------------------------------------------+
 # !          SUBS                                                             !
 # +---------------------------------------------------------------------------+
-sub init_log(@) {
+sub init_log {
 	my ($sLogFilename) = @_;
 	unless (open LOG, ">>$sLogFilename") {
 		print STDERR "Could not open $sLogFilename for writing.\n";
@@ -310,7 +310,7 @@ sub init_log(@) {
 	print LOG "+--------------------------------------------------------------------------------------------------+\n";
 }
 
-sub log_messageln(@) {
+sub log_messageln {
 	my ($sMsg) = @_;
 	if (defined($sMsg) && ($sMsg ne "")) {
 		my $sDisplayMsg = time2str("[%d/%m/%Y %H:%M:%S]",time) . " $sMsg\n";
@@ -319,7 +319,7 @@ sub log_messageln(@) {
 	}
 }
 
-sub log_message(@) {
+sub log_message {
 	my ($sMsg) = @_;
 	if (defined($sMsg) && ($sMsg ne "")) {
 		my $sDisplayMsg = time2str("[%d/%m/%Y %H:%M:%S]",time) . " $sMsg";
@@ -328,7 +328,7 @@ sub log_message(@) {
 	}
 }
 
-sub dbConnect(@) {
+sub dbConnect {
 	my ($dbname,$dbhost,$dbport,$dbuser,$dbpasswd) = @_;
 	my $connectionInfo="DBI:MariaDB:database=$dbname;$dbhost:$dbport";   # Database connection string
 	my $dbh;                                                   				 # Database handle
@@ -344,7 +344,7 @@ sub dbConnect(@) {
 	return $dbh;
 }
 
-sub addIrcServer(@) {
+sub addIrcServer {
 	my ($id_network,$server_hostname) = @_;
 	my $id_server;
 	$sQuery = "INSERT INTO SERVERS (id_network,server_hostname) VALUES (?,?)";

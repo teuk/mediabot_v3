@@ -20,6 +20,7 @@ use JSON::MaybeXS;
 use Try::Tiny;
 use Socket;
 use POSIX qw(strftime);
+use Digest::SHA qw(sha1 sha1_hex);
 use List::Util qw(min);
 
 our @EXPORT = qw(
@@ -676,7 +677,8 @@ sub userAdd {
     my $level_id = $LEVEL{ lc($level_name // 'user') } // 4;
 
     # password: si undef => NULL (évite PASSWORD(NULL))
-    my $pass_sql = defined $plain_password ? 'PASSWORD(?)' : 'NULL';
+    my $hashed_pw  = defined $plain_password ? make_password_hash($plain_password) : undef;
+    my $pass_sql   = defined $hashed_pw ? '?' : 'NULL';
 
     my $sql = qq{
         INSERT INTO USER (creation_date, nickname, password, username, id_user_level, auth)
@@ -684,7 +686,7 @@ sub userAdd {
     };
 
     my @bind = ($nickname);
-    push @bind, $plain_password if defined $plain_password;
+    push @bind, $hashed_pw if defined $hashed_pw;
     push @bind, ($username, $level_id);
 
     my $sth = $dbh->prepare($sql);
@@ -880,6 +882,18 @@ sub setChannelAntiFlood {
 }
 
 # Check the anti-flood status for a channel
+
+# ---------------------------------------------------------------------------
+# make_password_hash($plain)
+# Reproduces MariaDB PASSWORD() without DB round-trip:
+#   '*' . uc( sha1_hex( sha1($plain) ) )
+# ---------------------------------------------------------------------------
+sub make_password_hash {
+    my ($plain) = @_;
+    return undef unless defined $plain && length $plain;
+    return '*' . uc(sha1_hex(sha1($plain)));
+}
+
 
 sub getConsoleChan {
     my ($self) = @_;
@@ -2401,7 +2415,7 @@ sub isIgnored {
 
 			if ($ok) {
 				$self->{logger}->log(4,"isIgnored() (allchans/private) $matched_mask matches " . $message->prefix);
-				$self->{logger}->log(0,"[IGNORED] " . $stored . " (allchans/private) " . ((substr($sChannel,0,1) eq '#') ? "$sChannel:" : "") . "<$sNick> $sMsg");
+				$self->{logger}->log(1,"[IGNORED] " . $stored . " (allchans/private) " . ((substr($sChannel,0,1) eq '#') ? "$sChannel:" : "") . "<$sNick> $sMsg");
 				$sth->finish;
 				return 1;
 			}
@@ -2421,7 +2435,7 @@ sub isIgnored {
 
 			if ($ok) {
 				$self->{logger}->log(4,"isIgnored() $matched_mask matches " . $message->prefix);
-				$self->{logger}->log(0,"[IGNORED] " . $stored . " $sChannel:<$sNick> $sMsg");
+				$self->{logger}->log(1,"[IGNORED] " . $stored . " $sChannel:<$sNick> $sMsg");
 				$sth->finish;
 				return 1;
 			}

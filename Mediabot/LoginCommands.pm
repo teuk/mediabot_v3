@@ -40,6 +40,7 @@ our @EXPORT = qw(
     _dbg_auth_snapshot
 );
 
+
 sub init_auth {
     my ($self) = @_;
 
@@ -77,9 +78,10 @@ sub getUserAutologin {
 # Get user id from user handle
 sub checkAuth {
 	my ($self,$iUserId,$sUserHandle,$sPassword) = @_;
-	my $sCheckAuthQuery = "SELECT id_user FROM USER WHERE id_user = ? AND nickname = ? AND password = PASSWORD(?)";
+	my $sHashedPw = make_password_hash($sPassword);
+	my $sCheckAuthQuery = "SELECT id_user FROM USER WHERE id_user = ? AND nickname = ? AND password = ?";
 	my $sth = $self->{dbh}->prepare($sCheckAuthQuery);
-	unless ($sth->execute($iUserId,$sUserHandle,$sPassword)) {
+	unless ($sth->execute($iUserId,$sUserHandle,$sHashedPw)) {
 		$self->{logger}->log(1,"checkAuth() SQL Error : " . $DBI::errstr . " Query : " . $sCheckAuthQuery);
 		return 0;
 	}
@@ -165,8 +167,8 @@ sub userLogin_ctx {
         return;
     }
 
-    # 2) Compute MariaDB PASSWORD() candidate and compare
-    my ($calc_hash) = eval { $dbh->selectrow_array('SELECT PASSWORD(?)', undef, $typed_pass) };
+    # 2) Compute password hash using same algorithm as MariaDB PASSWORD()
+    my $calc_hash = make_password_hash($typed_pass);
     unless (defined $calc_hash) {
         botNotice($self, $sNick, "Internal error (hash compute failed).");
         return;
@@ -290,7 +292,7 @@ sub mbRegister_ctx {
     }
 
     if (userCount($self) > 0) {
-        $self->{logger}->log(0, "Register attempt ignored (users already exist): " . ($ctx->message->prefix // ''));
+        $self->{logger}->log(1, "Register attempt ignored (users already exist): " . ($ctx->message->prefix // ''));
         return;
     }
 
@@ -327,11 +329,12 @@ sub userPass {
         if (defined($user) && defined($user->nickname)) {
 
             my $sNewPassword = $tArgs[0];
-            my $sQuery = "UPDATE USER SET password=PASSWORD(?) WHERE id_user=?";
+            my $sHashedNewPw = make_password_hash($sNewPassword);
+my $sQuery = "UPDATE USER SET password=? WHERE id_user=?";
             my $sth = $self->{dbh}->prepare($sQuery);
 
             # Try to update the password in the database
-            unless ($sth->execute($sNewPassword, $user->id)) {
+            unless ($sth->execute($sHashedNewPw, $user->id)) {
                 $self->{logger}->log(1, "SQL Error: $DBI::errstr - Query: $sQuery");
                 $sth->finish;
                 return 0;
@@ -385,9 +388,10 @@ sub userIdent {
 
 sub checkAuthByUser {
 	my ($self,$message,$sUserHandle,$sPassword) = @_;
-	my $sCheckAuthQuery = "SELECT id_user FROM USER WHERE nickname = ? AND password = PASSWORD(?)";
+	my $sHashedPw = make_password_hash($sPassword);
+	my $sCheckAuthQuery = "SELECT id_user FROM USER WHERE nickname = ? AND password = ?";
 	my $sth = $self->{dbh}->prepare($sCheckAuthQuery);
-	unless ($sth->execute($sUserHandle,$sPassword)) {
+	unless ($sth->execute($sUserHandle,$sHashedPw)) {
 		$self->{logger}->log(1,"checkAuthByUser() SQL Error : " . $DBI::errstr . " Query : " . $sCheckAuthQuery);
 		$sth->finish;
 		return 0;
