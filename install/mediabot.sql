@@ -1,6 +1,6 @@
 -- =============================================================================
 --  mediabot_v3 — Full database schema
---  Updated: 2026-03 — Reflects post-migration structure
+--  Updated: 2026-04 — Schema corrections vs production DB
 --
 --  Changes from previous version:
 --   - USER.hostmasks removed → replaced by USER_HOSTMASK table
@@ -13,6 +13,11 @@
 --   - 12 indexes added
 --   - All bigint(20) PKs → BIGINT UNSIGNED where appropriate
 --   - CHANSET_LIST + CHANNEL_SET: added
+--   [2026-04] RESPONDERS: corrected columns (command/response → responder/answer/chance/hits)
+--   [2026-04] TIMEZONE: corrected column name (timezone → tz, aligned with prod and code)
+--   [2026-04] TIMERS: removed undeployed columns (id_channel, enabled) — kept as comments
+--   [2026-04] PUBLIC_COMMANDS.active: already present in schema — apply to prod:
+--             ALTER TABLE PUBLIC_COMMANDS ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1;
 --
 --  Usage:
 --   mysql -u root -p < install/mediabot.sql
@@ -287,8 +292,10 @@ CREATE TABLE `QUOTES` (
 CREATE TABLE `RESPONDERS` (
   `id_responders` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `id_channel`    BIGINT UNSIGNED NOT NULL DEFAULT 0,
-  `command`       VARCHAR(255) NOT NULL,
-  `response`      VARCHAR(255) NOT NULL,
+  `hits`          BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `chance`        BIGINT UNSIGNED NOT NULL DEFAULT 95,
+  `responder`     VARCHAR(255) DEFAULT NULL,
+  `answer`        TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   PRIMARY KEY (`id_responders`),
   KEY `idx_responders_id_channel` (`id_channel`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -312,11 +319,11 @@ CREATE TABLE `TIMERS` (
   `name`       VARCHAR(255) NOT NULL,
   `duration`   INT(11) NOT NULL,
   `command`    VARCHAR(255) NOT NULL,
-  `id_channel` BIGINT UNSIGNED DEFAULT NULL,
-  `enabled`    TINYINT(1) NOT NULL DEFAULT 1,
+  -- Future columns (not yet deployed to production):
+  -- `id_channel` BIGINT UNSIGNED DEFAULT NULL,
+  -- `enabled`    TINYINT(1) NOT NULL DEFAULT 1,
   PRIMARY KEY (`id_timers`),
-  UNIQUE KEY `name` (`name`(191)),
-  KEY `idx_timers_id_channel` (`id_channel`)
+  UNIQUE KEY `name` (`name`(191))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
@@ -324,7 +331,7 @@ CREATE TABLE `TIMERS` (
 -- ---------------------------------------------------------------------------
 CREATE TABLE `TIMEZONE` (
   `id_timezone` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `timezone`    VARCHAR(255) NOT NULL,
+  `tz`          VARCHAR(255) NOT NULL,
   PRIMARY KEY (`id_timezone`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

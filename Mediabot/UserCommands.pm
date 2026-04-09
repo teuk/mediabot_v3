@@ -102,7 +102,7 @@ sub userOnJoin {
     }
 
     # Now check if the channel has a default notice to send on join
-    my $sql_channel = "SELECT id_channel, notice, id_user_level FROM CHANNEL WHERE name = ?";
+    my $sql_channel = "SELECT id_channel, notice FROM CHANNEL WHERE name = ?";
     $self->{logger}->log(4, $sql_channel);
     my $sth = $self->{dbh}->prepare($sql_channel);
 
