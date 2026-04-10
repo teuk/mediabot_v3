@@ -97,7 +97,13 @@ Twitter::API
 JSON::MaybeXS
 List::Util
 File::Temp
-HTTP::Tiny" | while read perl_module
+HTTP::Tiny
+IO::Socket::SSL
+Try::Tiny
+URI::Escape
+Date::Format
+JSON
+File::Slurp" | while read perl_module
  do
   message "Checking $perl_module "
   perl -M$perl_module -e "exit 0;" &>/dev/null
@@ -148,7 +154,13 @@ Twitter::API
 JSON::MaybeXS
 List::Util
 File::Temp
-HTTP::Tiny" | while read perl_module
+HTTP::Tiny
+IO::Socket::SSL
+Try::Tiny
+URI::Escape
+Date::Format
+JSON
+File::Slurp" | while read perl_module
  do
   message "Checking $perl_module"
   perl -M$perl_module -e "exit 0;"

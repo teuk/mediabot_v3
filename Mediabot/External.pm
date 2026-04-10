@@ -10,13 +10,18 @@ use POSIX qw(strftime);
 use Time::HiRes qw(usleep);
 use List::Util qw(min);
 use Exporter 'import';
-use Encode qw(encode);
+use Encode qw(encode decode);
 use Try::Tiny;
 use Mediabot::Helpers;
 use JSON::MaybeXS;
 use URI::Escape qw(uri_escape_utf8 uri_escape);
 use HTML::Entities qw(decode_entities);
 use HTML::Entities '%entity2char';
+use IO::Socket::SSL;
+use HTTP::Tiny;
+use String::IRC;
+use IPC::Open3;
+use Symbol qw(gensym);
 
 our @EXPORT = qw(
     _chatgpt_wrap
@@ -31,6 +36,17 @@ our @EXPORT = qw(
     get_tmdb_info
     mbTMDBSearch_ctx
     youtubeSearch_ctx
+    _chanset_ok
+    _decode_html
+    _extract_url
+    _handle_applemusic
+    _handle_generic_title
+    _handle_instagram
+    _handle_spotify
+    _is_youtube_url
+    _yt_label
+    _youtube_html_fallback
+    _make_http
 );
 
 sub getYoutubeDetails {
@@ -180,6 +196,71 @@ sub getYoutubeDetails {
 }
 
 # Display Youtube details
+
+# ---------------------------------------------------------------------------
+# _youtube_html_fallback($self, $nick, $channel, $url, $video_id)
+# Called when the YouTube Data API returns no items (geo-restricted, private,
+# age-restricted, or quota exceeded). Scrapes the page og:title as a
+# best-effort fallback — works well for Shorts.
+# ---------------------------------------------------------------------------
+sub _youtube_html_fallback {
+    my ($self, $nick, $channel, $url, $video_id) = @_;
+
+    $self->{logger}->log(3, "_youtube_html_fallback() trying oEmbed for $video_id");
+
+    # YouTube oEmbed API — no API key required, works for all video types
+    # including Shorts, Live, and geo-restricted videos.
+    # Returns JSON with title and author_name.
+    # Pass the original URL directly to oEmbed — it handles watch, shorts, live
+    # uri_escape_utf8 encodes only unsafe chars, keeping :/? readable for debug
+    my $oembed_base = ($url =~ m{youtu\.be|shorts|live}i)
+                    ? $url    # keep shorts/live/short-link as-is
+                    : "https://www.youtube.com/watch?v=$video_id";
+    my $oembed_url = 'https://www.youtube.com/oembed?format=json&url='
+                   . uri_escape_utf8($oembed_base);
+
+    my $http = _make_http(timeout => 8, max_size => 64 * 1024);
+    my $res  = $http->get($oembed_url);
+
+    unless ($res->{success}) {
+        if (($res->{status} // 0) == 404) {
+            $self->{logger}->log(3, "_youtube_html_fallback() oEmbed 404 — video $video_id does not exist or is private");
+        } else {
+            $self->{logger}->log(3, "_youtube_html_fallback() oEmbed HTTP $res->{status} for $video_id");
+        }
+        return undef;
+    }
+
+    my $data = eval { decode_json($res->{content}) };
+    if ($@ || !ref $data) {
+        $self->{logger}->log(3, "_youtube_html_fallback() oEmbed JSON parse error: $@");
+        return undef;
+    }
+
+    my $title       = $data->{title}       // '';
+    my $author_name = $data->{author_name} // '';
+
+    unless ($title ne '') {
+        $self->{logger}->log(3, "_youtube_html_fallback() oEmbed returned no title for $video_id");
+        return undef;
+    }
+
+    $title       = _decode_html($title);
+    $author_name = _decode_html($author_name);
+
+    $self->{logger}->log(3, "_youtube_html_fallback() oEmbed title='$title' author='$author_name'");
+
+    my $msg = _yt_label();
+    $msg .= String::IRC->new(" $title ")->white('black');
+    if ($author_name ne '') {
+        $msg .= String::IRC->new("- ")->orange('black');
+        $msg .= String::IRC->new("by $author_name")->grey('black');
+    }
+
+    botPrivmsg($self, $channel, "($nick) $msg");
+    return 1;
+}
+
 sub displayYoutubeDetails {
     my ($self, $message, $sNick, $sChannel, $sText) = @_;
 
@@ -188,10 +269,19 @@ sub displayYoutubeDetails {
 
     # --- Extraction du video ID ---
     my $sYoutubeId;
-    if    ($sText =~ /https?:\/\/(?:www\.|m\.|music\.)?youtube\.[^\/]+\/watch.*[?&]v=([A-Za-z0-9_-]{11})/i) {
+    if    ($sText =~ m{https?://(?:www\.|m\.|music\.)?youtube\.[^/]+/watch[^\s]*[?&]v=([A-Za-z0-9_-]{11})}i) {
         $sYoutubeId = $1;
     }
-    elsif ($sText =~ /https?:\/\/youtu\.be\/([A-Za-z0-9_-]{11})/i) {
+    elsif ($sText =~ m{https?://(?:www\.|m\.)?youtube\.[^/]+/shorts/([A-Za-z0-9_-]{11})}i) {
+        $sYoutubeId = $1;
+    }
+    elsif ($sText =~ m{https?://(?:www\.|m\.)?youtube\.[^/]+/live/([A-Za-z0-9_-]{11})}i) {
+        $sYoutubeId = $1;
+    }
+    elsif ($sText =~ m{https?://(?:www\.)?youtube(?:-nocookie)?\.com/embed/([A-Za-z0-9_-]{11})}i) {
+        $sYoutubeId = $1;
+    }
+    elsif ($sText =~ m{https?://youtu\.be/([A-Za-z0-9_-]{11})}i) {
         $sYoutubeId = $1;
     }
 
@@ -239,8 +329,8 @@ sub displayYoutubeDetails {
     $self->{logger}->log(4, "displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
 
     unless (@fTyoutubeItems && $fTyoutubeItems[0]) {
-        $self->{logger}->log(3, "displayYoutubeDetails() Invalid id : $sYoutubeId");
-        return undef;
+        $self->{logger}->log(3, "displayYoutubeDetails() API returned no items for $sYoutubeId — trying HTML fallback");
+        return _youtube_html_fallback($self, $sNick, $sChannel, $sText, $sYoutubeId);
     }
 
     my $item         = $fTyoutubeItems[0];
@@ -406,156 +496,849 @@ sub displayWeather_ctx {
 }
 
 # Display URL title
+# =============================================================================
+# URL handling — displayUrlTitle and helpers
+# Architecture:
+#   displayUrlTitle() → dispatch by URL type → specific handler
+#
+# Chanset guards:
+#   Youtube    → YouTube (watch/shorts/live/youtu.be/youtube-nocookie)
+#   UrlTitle   → Spotify, Instagram, generic pages
+#   AppleMusic → Apple Music
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# _yt_label — shared YouTube IRC label
+# ---------------------------------------------------------------------------
+sub _yt_label {
+    my $label = String::IRC->new('[')->white('black');
+    $label   .= String::IRC->new('You')->black('white');
+    $label   .= String::IRC->new('Tube')->white('red');
+    $label   .= String::IRC->new(']')->white('black');
+    return $label;
+}
+
+# ---------------------------------------------------------------------------
+# _extract_url($text) — pull the first URL out of a message
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# _make_http(%opts) — shared HTTP::Tiny factory with SSL bypass
+# HTTP 599 on HTTPS URLs usually means IO::Socket::SSL is present but
+# certificate verification fails. SSL_options forces no-verify mode.
+# ---------------------------------------------------------------------------
+sub _make_http {
+    my (%opts) = @_;
+    return HTTP::Tiny->new(
+        timeout    => $opts{timeout}  // 8,
+        agent      => $opts{agent}    // 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
+        verify_SSL => 0,
+        SSL_options => { SSL_verify_mode => 0 },
+        max_size   => $opts{max_size} // 512 * 1024,
+    );
+}
+
+sub _extract_url {
+    my ($text) = @_;
+    return undef unless defined $text;
+    $text =~ s/^.*?(https?:\/\/)/$1/i;
+    $text =~ s/\s+.*$//;
+    return $text;
+}
+
+# ---------------------------------------------------------------------------
+# _decode_html($str) — decode HTML entities in a string
+# ---------------------------------------------------------------------------
+sub _decode_html {
+    my ($str) = @_;
+    return '' unless defined $str;
+    my $regex = "&(?:" . join("|", map { (my $k = $_) =~ s/;\z//; $k } keys %entity2char) . ");";
+    $str = decode_entities($str) if ($str =~ /$regex/ || $str =~ /&#[0-9]+;/);
+    $str =~ s/\r|\n/ /g;
+    $str =~ s/\s{2,}/ /g;
+    $str =~ s/^\s+|\s+$//g;
+    return $str;
+}
+
+sub _decode_http_content_utf8 {
+    my ($self, $content, $context) = @_;
+    return '' unless defined $content;
+
+    my $decoded = $content;
+
+    eval {
+        $decoded = decode('UTF-8', $content, 1);
+        1;
+    } or do {
+        my $ctx = defined $context ? $context : 'unknown';
+        $self->{logger}->log(4, "_decode_http_content_utf8() UTF-8 decode failed for $ctx");
+    };
+
+    return $decoded;
+}
+
+sub _fetch_url_chromium_dumpdom {
+    my ($self, $url, %opts) = @_;
+    return undef unless defined $url && $url ne '';
+
+    my $chromium = '/usr/bin/chromium';
+    unless (-x $chromium) {
+        $self->{logger}->log(3, "_fetch_url_chromium_dumpdom() chromium not found at $chromium");
+        return undef;
+    }
+
+    my $virtual_time_budget = $opts{virtual_time_budget} // 3500;
+    my $alarm_timeout       = $opts{alarm_timeout}       // 12;
+    my $lang                = $opts{lang}                // 'fr-FR';
+    my $user_agent          = $opts{user_agent}          // 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36';
+
+    my @cmd = (
+        $chromium,
+        '--headless=new',
+        '--disable-gpu',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled',
+        '--window-size=1366,900',
+        "--lang=$lang",
+        "--user-agent=$user_agent",
+        "--virtual-time-budget=$virtual_time_budget",
+        '--dump-dom',
+        $url,
+    );
+
+    $self->{logger}->log(4, "_fetch_url_chromium_dumpdom() exec: " . join(' ', @cmd));
+
+    my $stderr = gensym;
+    my $pid;
+    my $stdout = '';
+
+    my $ok = eval {
+        local $SIG{ALRM} = sub { die "ALARM\n" };
+        alarm $alarm_timeout;
+
+        $pid = open3(undef, my $out, $stderr, @cmd);
+
+        {
+            local $/;
+            $stdout = <$out> // '';
+        }
+
+        alarm 0;
+        1;
+    };
+
+    if (!$ok) {
+        my $err = $@ || 'unknown error';
+        if ($pid) {
+            eval { kill 'TERM', $pid };
+            waitpid($pid, 0);
+        }
+        $err =~ s/\s+$//;
+        $self->{logger}->log(3, "_fetch_url_chromium_dumpdom() failed for $url: $err");
+        return undef;
+    }
+
+    my $stderr_txt = '';
+    {
+        local $/;
+        $stderr_txt = <$stderr> // '';
+    }
+
+    waitpid($pid, 0);
+    my $rc = $? >> 8;
+
+    eval {
+        $stdout = decode('UTF-8', $stdout, 1);
+        1;
+    } or do {
+        $self->{logger}->log(4, "_fetch_url_chromium_dumpdom() UTF-8 decode failed for $url");
+    };
+
+    my $len = length($stdout // '');
+    $self->{logger}->log(4, "_fetch_url_chromium_dumpdom() rc=$rc bytes=$len for $url");
+
+    if (defined $stderr_txt && $stderr_txt ne '') {
+        my $errlog = substr($stderr_txt, 0, 500);
+        $errlog =~ s/\s+/ /g;
+        $self->{logger}->log(4, "_fetch_url_chromium_dumpdom() stderr=$errlog");
+    }
+
+    unless ($rc == 0 && defined $stdout && $stdout ne '') {
+        $self->{logger}->log(3, "_fetch_url_chromium_dumpdom() chromium returned no usable DOM for $url");
+        return undef;
+    }
+
+    return $stdout;
+}
+
+sub _extract_meta_content_by_attr {
+    my ($html, $attr_name, $attr_value) = @_;
+    return undef unless defined $html && defined $attr_name && defined $attr_value;
+
+    while ($html =~ /<meta\b([^>]*?)>/sig) {
+        my $attrs = $1;
+        my %meta;
+
+        while ($attrs =~ /\b([a-zA-Z_:.-]+)\s*=\s*(["'])(.*?)\2/sg) {
+            $meta{lc $1} = $3;
+        }
+
+        next unless defined $meta{lc $attr_name};
+        next unless lc($meta{lc $attr_name}) eq lc($attr_value);
+
+        return $meta{content} if defined $meta{content} && $meta{content} ne '';
+    }
+
+    return undef;
+}
+
+sub _extract_title_tag {
+    my ($html) = @_;
+    return undef unless defined $html;
+
+    if ($html =~ /<title[^>]*>(.*?)<\/title>/si) {
+        my $title = $1;
+        $title =~ s/\s+/ /g;
+        $title =~ s/^\s+|\s+$//g;
+        return $title;
+    }
+
+    return undef;
+}
+
+sub _json_unescape_basic {
+    my ($s) = @_;
+    return undef unless defined $s;
+
+    $s =~ s/\\\\/\\/g;
+    $s =~ s/\\"/"/g;
+    $s =~ s#\\/#/#g;
+    $s =~ s/\\n/ /g;
+    $s =~ s/\\r/ /g;
+    $s =~ s/\\t/ /g;
+    $s =~ s/\s+/ /g;
+    $s =~ s/^\s+|\s+$//g;
+
+    return $s;
+}
+
+# ---------------------------------------------------------------------------
+# _chanset_ok($self, $channel, $chanset_name)
+# Returns 1 if the chanset is enabled on this channel (or if chanset doesn't
+# exist in CHANSET_LIST at all, which means the feature is always-on).
+# Returns 0 if the chanset exists but is NOT enabled on this channel.
+# ---------------------------------------------------------------------------
+sub _chanset_ok {
+    my ($self, $channel, $chanset_name) = @_;
+    my $id_cs = getIdChansetList($self, $chanset_name);
+    return 1 unless defined $id_cs && $id_cs ne '';   # chanset not in DB → always on
+    my $id_ch_set = getIdChannelSet($self, $channel, $id_cs);
+    return (defined $id_ch_set && $id_ch_set ne '') ? 1 : 0;
+}
+
+# ---------------------------------------------------------------------------
+# _is_youtube_url($url) — returns the video ID or undef
+# Covers: watch?v=, /shorts/, /live/, youtu.be, youtube-nocookie, m., music.
+# ---------------------------------------------------------------------------
+sub _is_youtube_url {
+    my ($url) = @_;
+    return undef unless defined $url;
+
+    # Standard watch URL on all subdomains
+    if ($url =~ m{https?://(?:www\.|m\.|music\.)?youtube\.[a-z.]+/watch[^\s]*[?&]v=([A-Za-z0-9_-]{11})}i) {
+        return $1;
+    }
+    # Shorts
+    if ($url =~ m{https?://(?:www\.|m\.)?youtube\.[a-z.]+/shorts/([A-Za-z0-9_-]{11})}i) {
+        return $1;
+    }
+    # Live
+    if ($url =~ m{https?://(?:www\.|m\.)?youtube\.[a-z.]+/live/([A-Za-z0-9_-]{11})}i) {
+        return $1;
+    }
+    # Embed
+    if ($url =~ m{https?://(?:www\.)?youtube(?:-nocookie)?\.com/embed/([A-Za-z0-9_-]{11})}i) {
+        return $1;
+    }
+    # youtu.be short link
+    if ($url =~ m{https?://youtu\.be/([A-Za-z0-9_-]{11})}i) {
+        return $1;
+    }
+    return undef;
+}
+
+
+# ---------------------------------------------------------------------------
+# _handle_instagram($self, $message, $nick, $channel, $url)
+# Parses Instagram page for a title. Instagram's
+# ---------------------------------------------------------------------------
+sub _handle_instagram {
+    my ($self, $message, $nick, $channel, $url) = @_;
+
+    $self->{logger}->log(4, "_handle_instagram() start url=$url");
+
+    my ($shortcode) = $url =~ m{/p/([^/?#]+)/?};
+    unless (defined $shortcode && $shortcode ne '') {
+        $self->{logger}->log(3, "_handle_instagram() could not extract shortcode from $url");
+        return undef;
+    }
+
+    my $title;
+
+    # ------------------------------------------------------------
+    # Step 1: one cheap HTTP fetch on the public page only
+    # ------------------------------------------------------------
+    my $http = _make_http(
+        timeout  => 8,
+        max_size => 1024 * 1024,
+    );
+
+    my $res = $http->get($url);
+
+    if ($res->{success}) {
+        my $content = _decode_http_content_utf8($self, $res->{content} // '', 'instagram-http');
+        my $len = length($content);
+        $self->{logger}->log(4, "_handle_instagram() HTTP fetched $len bytes for $url");
+
+        my $og_description;
+        my $meta_description;
+        my $title_tag;
+
+        if ($content =~ /<meta\s+property=["']og:description["']\s+content=["']([^"']+)["']/i) {
+            $og_description = $1;
+        }
+        elsif ($content =~ /<meta\s+content=["']([^"']+)["']\s+property=["']og:description["']/i) {
+            $og_description = $1;
+        }
+
+        if ($content =~ /<meta\s+name=["']description["']\s+content=["']([^"']+)["']/i) {
+            $meta_description = $1;
+        }
+        elsif ($content =~ /<meta\s+content=["']([^"']+)["']\s+name=["']description["']/i) {
+            $meta_description = $1;
+        }
+
+        if ($content =~ /<title[^>]*>([^<]+)<\/title>/i) {
+            $title_tag = $1;
+        }
+
+        for ($og_description, $meta_description, $title_tag) {
+            $_ = _decode_html($_) if defined $_;
+        }
+
+        $self->{logger}->log(4, "_handle_instagram() HTTP og:description=" . (defined $og_description ? $og_description : '<undef>'));
+        $self->{logger}->log(4, "_handle_instagram() HTTP meta description=" . (defined $meta_description ? $meta_description : '<undef>'));
+        $self->{logger}->log(4, "_handle_instagram() HTTP <title>=" . (defined $title_tag ? $title_tag : '<undef>'));
+
+        if (defined $og_description && $og_description ne '' && $og_description !~ /^\s*Instagram\s*$/i) {
+            $title = $og_description;
+            $self->{logger}->log(4, "_handle_instagram() selected HTTP og:description");
+        }
+        elsif (defined $meta_description && $meta_description ne '' && $meta_description !~ /^\s*Instagram\s*$/i) {
+            $title = $meta_description;
+            $self->{logger}->log(4, "_handle_instagram() selected HTTP meta description");
+        }
+        elsif (defined $title_tag && $title_tag ne '' && $title_tag !~ /^\s*Instagram\s*$/i) {
+            $title = $title_tag;
+            $self->{logger}->log(4, "_handle_instagram() selected HTTP <title>");
+        }
+
+        if (!defined($title) || $title eq '') {
+            if ($content =~ /"pageID":"httpErrorPage"/) {
+                $self->{logger}->log(4, "_handle_instagram() public page is an httpErrorPage shell for $url");
+            }
+        }
+    }
+    else {
+        $self->{logger}->log(4, "_handle_instagram() HTTP $res->{status} $res->{reason} for $url");
+    }
+
+    # ------------------------------------------------------------
+    # Step 2: Chromium fallback on the public page only
+    # ------------------------------------------------------------
+    unless (defined $title && $title ne '') {
+        $self->{logger}->log(4, "_handle_instagram() falling back to Chromium rendered DOM on public URL");
+
+        my $dom = _fetch_url_chromium_dumpdom($self, $url);
+        if (defined $dom && $dom ne '') {
+            my $len = length($dom);
+            $self->{logger}->log(4, "_handle_instagram() Chromium DOM fetched $len bytes for $url");
+
+            my $og_description;
+            my $meta_description;
+            my $title_tag;
+
+            if ($dom =~ /<meta\s+property=["']og:description["']\s+content=["']([^"']+)["']/i) {
+                $og_description = $1;
+            }
+            elsif ($dom =~ /<meta\s+content=["']([^"']+)["']\s+property=["']og:description["']/i) {
+                $og_description = $1;
+            }
+
+            if ($dom =~ /<meta\s+name=["']description["']\s+content=["']([^"']+)["']/i) {
+                $meta_description = $1;
+            }
+            elsif ($dom =~ /<meta\s+content=["']([^"']+)["']\s+name=["']description["']/i) {
+                $meta_description = $1;
+            }
+
+            if ($dom =~ /<title[^>]*>([^<]+)<\/title>/i) {
+                $title_tag = $1;
+            }
+
+            for ($og_description, $meta_description, $title_tag) {
+                $_ = _decode_html($_) if defined $_;
+            }
+
+            $self->{logger}->log(4, "_handle_instagram() Chromium og:description=" . (defined $og_description ? $og_description : '<undef>'));
+            $self->{logger}->log(4, "_handle_instagram() Chromium meta description=" . (defined $meta_description ? $meta_description : '<undef>'));
+            $self->{logger}->log(4, "_handle_instagram() Chromium <title>=" . (defined $title_tag ? $title_tag : '<undef>'));
+
+            if (defined $og_description
+                && $og_description ne ''
+                && $og_description !~ /^\s*Instagram\s*$/i
+                && $og_description !~ /create an account or log in to instagram/i
+            ) {
+                $title = $og_description;
+                $self->{logger}->log(4, "_handle_instagram() selected Chromium og:description");
+            }
+            elsif (defined $meta_description
+                && $meta_description ne ''
+                && $meta_description !~ /^\s*Instagram\s*$/i
+                && $meta_description !~ /create an account or log in to instagram/i
+            ) {
+                $title = $meta_description;
+                $self->{logger}->log(4, "_handle_instagram() selected Chromium meta description");
+            }
+            elsif (defined $title_tag
+                && $title_tag ne ''
+                && $title_tag !~ /^\s*Instagram\s*$/i
+                && $title_tag !~ /create an account or log in to instagram/i
+            ) {
+                $title = $title_tag;
+                $self->{logger}->log(4, "_handle_instagram() selected Chromium <title>");
+            }
+        }
+    }
+
+    unless (defined $title && $title ne '') {
+        $self->{logger}->log(3, "_handle_instagram() no usable title extracted for shortcode=$shortcode");
+        return undef;
+    }
+
+    $title =~ s/\s+/ /g;
+    $title =~ s/^\s+|\s+$//g;
+    $title =~ s/\s*-\s*Watch more on Instagram\.?\s*$//i;
+    $title =~ s/\s*[•·|]\s*Instagram\s*$//i;
+
+    if ($title =~ /^\s*Instagram\s*$/i || $title =~ /DOCTYPE/i || $title eq '') {
+        $self->{logger}->log(3, "_handle_instagram() extracted title is unusable after cleanup: '$title'");
+        return undef;
+    }
+
+    $self->{logger}->log(4, "_handle_instagram() final title='$title'");
+
+    my $msg = String::IRC->new("[")->white('black');
+    $msg   .= String::IRC->new("Instagram")->white('pink');
+    $msg   .= String::IRC->new("]")->white('black');
+    $msg   .= " " . substr($title, 0, 300);
+
+    botPrivmsg($self, $channel, "($nick) $msg");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# _handle_spotify($self, $message, $nick, $channel, $url)
+# Parses <title> from Spotify page. Format: "Song - artist | Spotify"
+# Also handles albums, playlists, podcasts via og:title.
+# ---------------------------------------------------------------------------
+sub _handle_spotify {
+    my ($self, $message, $nick, $channel, $url) = @_;
+
+    # Strip query string (Spotify redirects work without it)
+    (my $clean_url = $url) =~ s/\?.*$//;
+
+    my $display;
+
+    # ------------------------------------------------------------
+    # Step 1: cheap HTTP fetch first
+    # ------------------------------------------------------------
+    my $http = _make_http(max_size => 256 * 1024);
+    my $res  = $http->get($clean_url);
+
+    if ($res->{success}) {
+        my $content = _decode_http_content_utf8($self, $res->{content} // '', 'spotify-http');
+
+        # Try og:title first
+        if ($content =~ /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i) {
+            $display = $1;
+        }
+        elsif ($content =~ /<meta\s+content=["']([^"']+)["']\s+property=["']og:title["']/i) {
+            $display = $1;
+        }
+
+        # Fallback: <title>
+        unless (defined $display && $display ne '') {
+            if ($content =~ /<title[^>]*>([^<]+)<\/title>/i) {
+                $display = $1;
+                $display =~ s/\s*\|\s*Spotify\s*$//i;
+            }
+        }
+
+        $display = _decode_html($display) if defined $display;
+
+        $self->{logger}->log(4, "_handle_spotify() HTTP title=" . (defined $display ? $display : '<undef>'));
+    }
+    else {
+        $self->{logger}->log(3, "_handle_spotify() HTTP $res->{status} $res->{reason} for $clean_url");
+    }
+
+    # ------------------------------------------------------------
+    # Step 2: Chromium fallback if HTTP title is missing or generic
+    # ------------------------------------------------------------
+    my $display_check = defined($display) ? $display : '';
+    $display_check =~ s/\s+/ /g;
+    $display_check =~ s/^\s+|\s+$//g;
+
+    if (!defined($display) || $display_check eq '' || $display_check =~ /spotify.*web player/i) {
+        $self->{logger}->log(4, "_handle_spotify() falling back to Chromium rendered DOM for $clean_url");
+
+        my $dom = _fetch_url_chromium_dumpdom($self, $clean_url);
+
+        if (defined $dom && $dom ne '') {
+            my $og_title;
+            my $title_tag;
+
+            if ($dom =~ /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i) {
+                $og_title = $1;
+            }
+            elsif ($dom =~ /<meta\s+content=["']([^"']+)["']\s+property=["']og:title["']/i) {
+                $og_title = $1;
+            }
+
+            if ($dom =~ /<title[^>]*>([^<]+)<\/title>/i) {
+                $title_tag = $1;
+                $title_tag =~ s/\s*\|\s*Spotify\s*$//i;
+            }
+
+            for ($og_title, $title_tag) {
+                $_ = _decode_html($_) if defined $_;
+            }
+
+            $self->{logger}->log(4, "_handle_spotify() Chromium og:title=" . (defined $og_title ? $og_title : '<undef>'));
+            $self->{logger}->log(4, "_handle_spotify() Chromium <title>=" . (defined $title_tag ? $title_tag : '<undef>'));
+
+            if (defined $og_title && $og_title ne '' && $og_title !~ /spotify.*web player/i) {
+                $display = $og_title;
+                $self->{logger}->log(4, "_handle_spotify() selected Chromium og:title");
+            }
+            elsif (defined $title_tag && $title_tag ne '' && $title_tag !~ /spotify.*web player/i) {
+                $display = $title_tag;
+                $self->{logger}->log(4, "_handle_spotify() selected Chromium <title>");
+            }
+        }
+    }
+
+    unless (defined $display && $display ne '') {
+        $self->{logger}->log(3, "_handle_spotify() could not extract title from $clean_url");
+        return undef;
+    }
+
+    $display =~ s/\s+/ /g;
+    $display =~ s/^\s+|\s+$//g;
+
+    my $msg = String::IRC->new("[")->white('black');
+    $msg   .= String::IRC->new("Spotify")->black('green');
+    $msg   .= String::IRC->new("]")->white('black');
+    $msg   .= " $display";
+
+    botPrivmsg($self, $channel, "($nick) $msg");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# _handle_applemusic($self, $message, $nick, $channel, $url)
+# ---------------------------------------------------------------------------
+sub _handle_applemusic {
+    my ($self, $message, $nick, $channel, $url) = @_;
+
+    my $title;
+
+    # ------------------------------------------------------------
+    # Step 1: cheap HTTP fetch first
+    # ------------------------------------------------------------
+    my $http = _make_http(
+        timeout  => 12,
+        max_size => 512 * 1024,
+    );
+    my $res  = $http->get($url);
+
+    if ($res->{success}) {
+        my $content = _decode_http_content_utf8($self, $res->{content} // '', 'applemusic-http');
+
+        my $og_title;
+        my $meta_description;
+        my $title_tag;
+
+        if ($content =~ /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i) {
+            $og_title = $1;
+        }
+        elsif ($content =~ /<meta\s+content=["']([^"']+)["']\s+property=["']og:title["']/i) {
+            $og_title = $1;
+        }
+
+        if ($content =~ /<meta\s+name=["']description["']\s+content=["']([^"']+)["']/i) {
+            $meta_description = $1;
+        }
+        elsif ($content =~ /<meta\s+content=["']([^"']+)["']\s+name=["']description["']/i) {
+            $meta_description = $1;
+        }
+
+        if ($content =~ /<title[^>]*>([^<]+)<\/title>/i) {
+            $title_tag = $1;
+            $title_tag =~ s/\s*[–-]\s*Apple Music\s*$//i;
+        }
+
+        for ($og_title, $meta_description, $title_tag) {
+            $_ = _decode_html($_) if defined $_;
+        }
+
+        $self->{logger}->log(4, "_handle_applemusic() HTTP og:title=" . (defined $og_title ? $og_title : '<undef>'));
+        $self->{logger}->log(4, "_handle_applemusic() HTTP meta description=" . (defined $meta_description ? $meta_description : '<undef>'));
+        $self->{logger}->log(4, "_handle_applemusic() HTTP <title>=" . (defined $title_tag ? $title_tag : '<undef>'));
+
+        if (defined $og_title
+            && $og_title ne ''
+            && $og_title !~ /^\s*Apple Music\s*$/i
+            && $og_title !~ /listen on apple music/i
+            && $og_title !~ /open in music/i
+        ) {
+            $title = $og_title;
+            $self->{logger}->log(4, "_handle_applemusic() selected HTTP og:title");
+        }
+        elsif (defined $meta_description
+            && $meta_description ne ''
+            && $meta_description !~ /^\s*Apple Music\s*$/i
+            && $meta_description !~ /listen on apple music/i
+            && $meta_description !~ /open in music/i
+        ) {
+            $title = $meta_description;
+            $self->{logger}->log(4, "_handle_applemusic() selected HTTP meta description");
+        }
+        elsif (defined $title_tag
+            && $title_tag ne ''
+            && $title_tag !~ /^\s*Apple Music\s*$/i
+            && $title_tag !~ /listen on apple music/i
+            && $title_tag !~ /open in music/i
+        ) {
+            $title = $title_tag;
+            $self->{logger}->log(4, "_handle_applemusic() selected HTTP <title>");
+        }
+    }
+    else {
+        $self->{logger}->log(3, "_handle_applemusic() HTTP $res->{status} $res->{reason} for $url");
+    }
+
+    # ------------------------------------------------------------
+    # Step 2: Chromium fallback if HTTP title is missing or generic
+    # ------------------------------------------------------------
+    my $title_check = defined($title) ? $title : '';
+    $title_check =~ s/\s+/ /g;
+    $title_check =~ s/^\s+|\s+$//g;
+
+    if (!defined($title) || $title_check eq '' || $title_check =~ /^\s*Apple Music\s*$/i) {
+        $self->{logger}->log(4, "_handle_applemusic() falling back to Chromium rendered DOM for $url");
+
+        my $dom = _fetch_url_chromium_dumpdom(
+            $self,
+            $url,
+            virtual_time_budget => 7000,
+            alarm_timeout       => 20,
+        );
+
+        if (defined $dom && $dom ne '') {
+            my $og_title;
+            my $meta_description;
+            my $title_tag;
+
+            if ($dom =~ /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i) {
+                $og_title = $1;
+            }
+            elsif ($dom =~ /<meta\s+content=["']([^"']+)["']\s+property=["']og:title["']/i) {
+                $og_title = $1;
+            }
+
+            if ($dom =~ /<meta\s+name=["']description["']\s+content=["']([^"']+)["']/i) {
+                $meta_description = $1;
+            }
+            elsif ($dom =~ /<meta\s+content=["']([^"']+)["']\s+name=["']description["']/i) {
+                $meta_description = $1;
+            }
+
+            if ($dom =~ /<title[^>]*>([^<]+)<\/title>/i) {
+                $title_tag = $1;
+                $title_tag =~ s/\s*[–-]\s*Apple Music\s*$//i;
+            }
+
+            for ($og_title, $meta_description, $title_tag) {
+                $_ = _decode_html($_) if defined $_;
+            }
+
+            $self->{logger}->log(4, "_handle_applemusic() Chromium og:title=" . (defined $og_title ? $og_title : '<undef>'));
+            $self->{logger}->log(4, "_handle_applemusic() Chromium meta description=" . (defined $meta_description ? $meta_description : '<undef>'));
+            $self->{logger}->log(4, "_handle_applemusic() Chromium <title>=" . (defined $title_tag ? $title_tag : '<undef>'));
+
+            if (defined $og_title
+                && $og_title ne ''
+                && $og_title !~ /^\s*Apple Music\s*$/i
+                && $og_title !~ /listen on apple music/i
+                && $og_title !~ /open in music/i
+            ) {
+                $title = $og_title;
+                $self->{logger}->log(4, "_handle_applemusic() selected Chromium og:title");
+            }
+            elsif (defined $meta_description
+                && $meta_description ne ''
+                && $meta_description !~ /^\s*Apple Music\s*$/i
+                && $meta_description !~ /listen on apple music/i
+                && $meta_description !~ /open in music/i
+            ) {
+                $title = $meta_description;
+                $self->{logger}->log(4, "_handle_applemusic() selected Chromium meta description");
+            }
+            elsif (defined $title_tag
+                && $title_tag ne ''
+                && $title_tag !~ /^\s*Apple Music\s*$/i
+                && $title_tag !~ /listen on apple music/i
+                && $title_tag !~ /open in music/i
+            ) {
+                $title = $title_tag;
+                $self->{logger}->log(4, "_handle_applemusic() selected Chromium <title>");
+            }
+        }
+    }
+
+    unless (defined $title && $title ne '') {
+        $self->{logger}->log(3, "_handle_applemusic() could not extract title from $url");
+        return undef;
+    }
+
+    $title =~ s/\s+/ /g;
+    $title =~ s/^\s+|\s+$//g;
+
+    my $msg = String::IRC->new("[")->white('black');
+    $msg   .= String::IRC->new("AppleMusic")->white('grey');
+    $msg   .= String::IRC->new("]")->white('black');
+    $msg   .= " $title";
+
+    botPrivmsg($self, $channel, "($nick) $msg");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# _handle_generic_title($self, $message, $nick, $channel, $url)
+# Generic URL: fetch page, extract <title>. No HTML::Tree — regex is enough.
+# ---------------------------------------------------------------------------
+sub _handle_generic_title {
+    my ($self, $message, $nick, $channel, $url) = @_;
+
+    my $http = _make_http();
+    my $res  = $http->get($url);
+    unless ($res->{success}) {
+        $self->{logger}->log(3, "_handle_generic_title() HTTP $res->{status} $res->{reason} for $url");
+        return undef;
+    }
+
+    my $content = _decode_http_content_utf8($self, $res->{content} // '', 'generic');
+    my $title;
+
+    if ($content =~ /<title[^>]*>(.*?)<\/title>/si) {
+        $title = $1;
+    }
+
+    unless (defined $title && $title ne '') {
+        $self->{logger}->log(4, "_handle_generic_title() no <title> found for $url");
+        return undef;
+    }
+
+    $title = _decode_html($title);
+    return undef if $title eq '';
+    return undef if $title =~ /The page is temporarily unavailable/i;
+
+    my $msg = String::IRC->new("URL Title from $nick:")->grey('black');
+    botPrivmsg($self, $channel, "$msg $title");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# displayUrlTitle($self, $message, $nick, $channel, $text)
+#
+# Main entry point for URL handling from on_message_PRIVMSG.
+# Handles all URL types: YouTube, Instagram, Spotify, Apple Music, generic.
+# Chanset guards are checked here (not in mediabot.pl).
+# ---------------------------------------------------------------------------
 sub displayUrlTitle {
     my ($self, $message, $sNick, $sChannel, $sText) = @_;
 
     $self->{logger}->log(4, "displayUrlTitle() RAW input: $sText");
 
-    # Extraction stricte de l'URL
-    $sText =~ s/^.*http/http/;
-    $sText =~ s/\s+.*$//;
-    $self->{logger}->log(4, "displayUrlTitle() URL extracted: $sText");
-
-    my $UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0";
-    my $http = HTTP::Tiny->new(
-        timeout    => 5,
-        agent      => $UA,
-        verify_SSL => 0,
-    );
-
-    # --- Twitter (x.com) chanset ---
-    if ($sText =~ /x\.com/) {
-        my $id_chanset_list = getIdChansetList($self, "Twitter");
-        if (defined $id_chanset_list && $id_chanset_list ne "") {
-            my $id_channel_set = getIdChannelSet($self, $sChannel, $id_chanset_list);
-            unless (defined $id_channel_set && $id_channel_set ne "") {
-                return undef;
-            }
-        }
-    }
-
-    # --- Twitter special prank ---
-    if (($sText =~ /x\.com/ || $sText =~ /twitter\.com/)
-        && ($sNick =~ /^\[k\]$/ || $sNick =~ /^NHI$/ || $sNick =~ /^PersianYeti$/)) {
-        $self->{logger}->log(4, "displayUrlTitle() Twitter URL = $sText");
+    my $url = _extract_url($sText);
+    unless (defined $url && $url =~ /^https?:\/\//i) {
+        $self->{logger}->log(4, "displayUrlTitle() no valid URL found in: $sText");
         return undef;
     }
 
-    # --- Instagram ---
-    if ($sText =~ /instagram\.com/) {
-        my $res = $http->get($sText);
-        unless ($res->{success}) {
-            $self->{logger}->log(3, "displayUrlTitle() insta HTTP error $res->{status}");
+    $self->{logger}->log(4, "displayUrlTitle() URL: $url");
+
+    # ── 1. YouTube ─────────────────────────────────────────────────────────
+    # All YouTube URL variants (watch, shorts, live, youtu.be, nocookie, m., music.)
+    my $yt_id = _is_youtube_url($url);
+    if (defined $yt_id) {
+        unless (_chanset_ok($self, $sChannel, 'Youtube')) {
+            $self->{logger}->log(4, "displayUrlTitle() YouTube chanset not enabled on $sChannel");
             return undef;
         }
-        my $content = $res->{content} // '';
-        my $title = $content;
-        $title =~ s/^.*og:title" content="//;
-        $title =~ s/" .><meta property="og:image".*$//;
-        if ($title =~ /DOCTYPE html/) {
-            $title = $content;
-            $title =~ s/^.*<title//;
-            $title =~ s/<\/title>.*$//;
-            $title =~ s/^\s*>//;
-        }
-        if (defined($title) && $title ne "") {
-            my $msg = String::IRC->new("[")->white('black');
-            $msg .= String::IRC->new("Instagram")->white('pink');
-            $msg .= String::IRC->new("]")->white('black');
-            $msg .= " $title";
-            my $regex = "&(?:" . join("|", map { s/;\z//; $_ } keys %entity2char) . ");";
-            $msg = decode_entities($msg) if ($msg =~ /$regex/ || $msg =~ /&#.*;/);
-            $msg = "($sNick) " . $msg;
-            botPrivmsg($self, $sChannel, substr($msg, 0, 300)) unless $msg =~ /DOCTYPE html/;
-        }
-        return undef;
+        # Delegate to displayYoutubeDetails which uses the YouTube Data API v3
+        return displayYoutubeDetails($self, $message, $sNick, $sChannel, $url);
     }
 
-    # --- HEAD request : vérification content-type + HTTP code ---
-    my $head_res = $http->request('HEAD', $sText);
-    my $iHttpResponseCode = $head_res->{status}  // 0;
-    my $sContentType      = $head_res->{headers}{'content-type'} // '';
-    # HTTP::Tiny suit les redirects, le status final est le bon
-    $self->{logger}->log(4, "displayUrlTitle() HTTP code=$iHttpResponseCode content-type=$sContentType");
-
-    unless ($iHttpResponseCode == 200) {
-        $self->{logger}->log(3, "displayUrlTitle() Wrong HTTP response code ($iHttpResponseCode) for $sText");
-        return undef;
-    }
-
-    unless ($sContentType =~ /text\/html/i) {
-        $self->{logger}->log(3, "displayUrlTitle() Wrong Content-Type for $sText ($sContentType)");
-        return undef;
-    }
-
-    # --- Spotify ---
-    if ($sText =~ /open\.spotify\.com/) {
-        my $url = $sText;
-        $url =~ s/\?.*$//;
-        my $res = $http->get($url);
-        unless ($res->{success}) {
-            $self->{logger}->log(0, "displayUrlTitle() Spotify HTTP error $res->{status}");
+    # ── 2. Instagram ───────────────────────────────────────────────────────
+    if ($url =~ /instagram\.com/i) {
+        unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
+            $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Instagram)");
             return undef;
         }
-        my $content = $res->{content} // '';
-        if ($content =~ /<title[^>]*>(.*?)<\/title>/si) {
-            my $sDisplayMsg = $1;
-            $sDisplayMsg =~ s/^\s+|\s+$//g;
-            my $artist = $sDisplayMsg;
-            $artist =~ s/^.*song and lyrics by //;
-            $artist =~ s/ \| Spotify//;
-            my $song = $sDisplayMsg;
-            $song =~ s/ - song and lyrics by.*$//;
-            $self->{logger}->log(4, "displayUrlTitle() artist=$artist song=$song");
-            my $sTextIrc = String::IRC->new("[")->white('black');
-            $sTextIrc .= String::IRC->new("Spotify")->black('green');
-            $sTextIrc .= String::IRC->new("]")->white('black');
-            $sTextIrc .= " $artist - $song";
-            my $regex = "&(?:" . join("|", map { s/;\z//; $_ } keys %entity2char) . ");";
-            $sTextIrc = decode_entities($sTextIrc) if ($sTextIrc =~ /$regex/ || $sTextIrc =~ /&#.*;/);
-            botPrivmsg($self, $sChannel, "($sNick) $sTextIrc");
+        return _handle_instagram($self, $message, $sNick, $sChannel, $url);
+    }
+
+    # ── 3. Spotify ─────────────────────────────────────────────────────────
+    if ($url =~ /open\.spotify\.com/i) {
+        unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
+            $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Spotify)");
+            return undef;
         }
+        return _handle_spotify($self, $message, $sNick, $sChannel, $url);
+    }
+
+    # ── 4. Apple Music ─────────────────────────────────────────────────────
+    if ($url =~ /music\.apple\.com/i) {
+        unless (_chanset_ok($self, $sChannel, 'AppleMusic')) {
+            $self->{logger}->log(4, "displayUrlTitle() AppleMusic chanset not enabled on $sChannel");
+            return undef;
+        }
+        return _handle_applemusic($self, $message, $sNick, $sChannel, $url);
+    }
+
+    # ── 5. Twitter / X — ignored silently ──────────────────────────────────
+    return undef if $url =~ /(?:twitter|x)\.com/i;
+
+    # ── 6. Generic ─────────────────────────────────────────────────────────
+    unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
+        $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel");
         return undef;
     }
-
-    # --- URL générique ---
-    my $res = $http->get($sText);
-    unless ($res->{success}) {
-        $self->{logger}->log(0, "displayUrlTitle() HTTP error $res->{status} for $sText");
-        return undef;
-    }
-
-    my $sContent = $res->{content} // '';
-    my $tree = HTML::Tree->new();
-    $tree->parse($sContent);
-    my ($title) = $tree->look_down('_tag', 'title');
-
-    if (defined($title) && $title->as_text ne "") {
-        if ($sText =~ /youtube\.com/ || $sText =~ /youtu\.be/) {
-            my $yt = String::IRC->new('[')->white('black');
-            $yt .= String::IRC->new('You')->black('white');
-            $yt .= String::IRC->new('Tube')->white('red');
-            $yt .= String::IRC->new(']')->white('black');
-            botPrivmsg($self, $sChannel, "($sNick) $yt " . $title->as_text);
-        }
-        elsif ($sText =~ /music\.apple\.com/) {
-            my $id_chanset_list = getIdChansetList($self, "AppleMusic");
-            if (defined($id_chanset_list) && $id_chanset_list ne "") {
-                my $id_channel_set = getIdChannelSet($self, $sChannel, $id_chanset_list);
-                return undef unless defined($id_channel_set) && $id_channel_set ne "";
-            }
-            my $apple = String::IRC->new('[')->white('black');
-            $apple .= String::IRC->new('AppleMusic')->white('grey');
-            $apple .= String::IRC->new(']')->white('black');
-            botPrivmsg($self, $sChannel, "($sNick) $apple " . $title->as_text);
-        }
-        else {
-            unless ($title->as_text =~ /The page is temporarily unavailable/i) {
-                my $msg = String::IRC->new("URL Title from $sNick:")->grey('black');
-                botPrivmsg($self, $sChannel, $msg . " " . $title->as_text);
-            }
-        }
-    }
+    return _handle_generic_title($self, $message, $sNick, $sChannel, $url);
 }
 
 # debug [0-5]

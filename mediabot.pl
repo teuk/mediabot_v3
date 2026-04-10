@@ -881,23 +881,14 @@ sub on_message_PRIVMSG {
                 $mediabot->chatGPT($message,$who,$where,@tArgs);
             }
         }
-        elsif ( ( $what =~ /http.*:\/\/www\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/m\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/music\.youtube\..*\/watch/i ) || ( $what =~ /http.*:\/\/youtu\.be.*/i ) ) {
-            my $id_chanset_list = $mediabot->getIdChansetList("Youtube");
-            if (defined($id_chanset_list)) {
-                my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);
-                if (defined($id_channel_set)) {
-                    $mediabot->displayYoutubeDetails($message,$who,$where,$what);
-                }
-            }
-        }
-        elsif ( ( $what =~ /http.*:\/\//i ) ) {
-            my $id_chanset_list = $mediabot->getIdChansetList("UrlTitle");
-            if (defined($id_chanset_list)) {
-                my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);
-                if (defined($id_channel_set)) {
-                    $mediabot->displayUrlTitle($message,$who,$where,$what);
-                }
-            }
+        elsif ( $what =~ /https?:\/\//i ) {
+            # Single entry point for all URL types.
+            # displayUrlTitle() handles routing internally:
+            #   YouTube (watch/shorts/live/youtu.be) → chanset Youtube → YouTube Data API v3
+            #   Instagram, Spotify, Twitter/X        → chanset UrlTitle
+            #   Apple Music                          → chanset AppleMusic
+            #   Generic pages                        → chanset UrlTitle → <title> scrape
+            $mediabot->displayUrlTitle($message,$who,$where,$what);
         }
         else {
             my $sCurrentNick = $self->nick_folded;

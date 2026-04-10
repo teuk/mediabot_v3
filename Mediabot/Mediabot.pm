@@ -48,6 +48,7 @@ use Try::Tiny;
 use URI::Escape qw(uri_escape_utf8 uri_escape);
 use List::Util qw/min/;
 use Carp qw(croak);
+use IO::Socket::SSL;
 use HTTP::Tiny;
 
 
