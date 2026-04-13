@@ -107,12 +107,12 @@ sub debug_ctx {
     return 1;
 }
 
-# Restart the bot (/restart)
+# Restart bot
 sub mbRestart {
-    my ($self, $message, $sNick, @tArgs) = @_;
-    my $conf = $self->{conf};
+	my ($self, $message, $sNick, @tArgs) = @_;
+	my $conf = $self->{conf};
 
-    my $user = $self->get_user_from_message($message);
+	my $user = $self->get_user_from_message($message);
     return unless $user;
 
     unless ($user->is_authenticated) {
@@ -123,25 +123,35 @@ sub mbRestart {
     }
 
     unless (checkUserLevel($self, $user->level, "Owner")) {
-        my $msg = $message->prefix . " restart command attempt (level [Owner] required for user " . $user->nickname . " [" . $user->level . "])";
+        my $msg = $message->prefix . " restart command attempt (level [Owner] required for " . $user->nickname . " [" . $user->level . "])";
         noticeConsoleChan($self, $msg);
         botNotice($self, $sNick, "Your level does not allow you to use this command.");
         return;
     }
 
-    # Fork process
+    my $full_params = $tArgs[0] // '';
+
+    my @restart_args = grep {
+        defined($_) && $_ ne '' && $_ !~ /^--server=/
+    } split(/\s+/, $full_params);
+
+    $self->{logger}->log(
+        4,
+        "Restart requested with args: " . join(' ', @restart_args)
+    );
+
     my $child_pid;
     if (defined($child_pid = fork())) {
         if ($child_pid == 0) {
-            $self->{logger}->log(1, "Restart requested by " . $user->nickname);
+            $self->{logger}->log(1, "Restart request from " . $user->nickname);
             setsid;
-            exec "./mb_restart.sh", $tArgs[0];
-            exit 1; # just in case
+            exec "./mb_restart.sh", @restart_args;
+            exit 1;
         } else {
-            botNotice($self, $sNick, "Restarting bot");
-            logBot($self, $message, undef, "restart", $conf->get('main.MAIN_PROG_QUIT_MSG'));
+            botNotice($self, $sNick, "Restarting");
+            logBot($self, $message, undef, "restart", "");
             $self->{Quit} = 1;
-            $self->{irc}->send_message("QUIT", undef, "Restarting");
+            $self->{irc}->send_message("QUIT", undef, "Be right back");
         }
     } else {
         $self->{logger}->log(1, "Failed to fork for restart");
@@ -151,8 +161,7 @@ sub mbRestart {
     return;
 }
 
-
-# Jump to another server (/jump <server> [args...])
+# Jump to another server (/jump <server>)
 sub mbJump {
     my ($self, $message, $sNick, @tArgs) = @_;
     my $conf = $self->{conf};
@@ -174,23 +183,29 @@ sub mbJump {
         return;
     }
 
-    unless (@tArgs && $tArgs[-1] ne "") {
-        botNotice($self, $sNick, "Syntax: jump <server> [args...]");
+    my $full_params = $tArgs[0] // '';
+    my $server      = $tArgs[1] // '';
+
+    unless (defined($server) && $server ne '') {
+        botNotice($self, $sNick, "Syntax: jump <server>");
         return;
     }
 
-    my $server = pop @tArgs;
-    my $params = join(" ", @tArgs);
-    $params =~ s/--server=[^ ]*//g;  # clean existing --server if present
+    my @restart_args = grep {
+        defined($_) && $_ ne '' && $_ !~ /^--server=/
+    } split(/\s+/, $full_params);
 
-    $self->{logger}->log(4, "Jumping with args: $params");
+    $self->{logger}->log(
+        4,
+        "Jump requested to $server with restart args: " . join(' ', @restart_args)
+    );
 
     my $child_pid;
     if (defined($child_pid = fork())) {
         if ($child_pid == 0) {
-            $self->{logger}->log(1, "Jump request from " . $user->nickname);
+            $self->{logger}->log(1, "Jump request from " . $user->nickname . " to $server");
             setsid;
-            exec "./mb_restart.sh", $params, "--server=$server";
+            exec "./mb_restart.sh", @restart_args, "--server=$server";
             exit 1;
         } else {
             botNotice($self, $sNick, "Jumping to $server");
@@ -231,20 +246,24 @@ sub mbRehash_ctx {
     my $user  = $ctx->user;
     my $unick = eval { $user->nickname } // $nick;
 
-    # Reload configuration file
-    readConfigFile($self);
+    my $ok = $self->rehash_runtime_state();
 
-    # Notify caller
-    if (defined $channel && $channel ne '') {
-        botPrivmsg($self, $channel, "($nick) Successfully rehashed");
+    if ($ok) {
+        if (defined $channel && $channel ne '') {
+            botPrivmsg($self, $channel, "($nick) Successfully rehashed");
+        } else {
+            botNotice($self, $nick, "Successfully rehashed");
+        }
+        logBot($self, $message, $channel, "rehash", @args);
+        return 1;
     } else {
-        botNotice($self, $nick, "Successfully rehashed");
+        if (defined $channel && $channel ne '') {
+            botPrivmsg($self, $channel, "($nick) Rehash failed - check logs");
+        } else {
+            botNotice($self, $nick, "Rehash failed - check logs");
+        }
+        return;
     }
-
-    # Log action
-    logBot($self, $message, $channel, "rehash", @args);
-
-    return 1;
 }
 
 # Play a radio request

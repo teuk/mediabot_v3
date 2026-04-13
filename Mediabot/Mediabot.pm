@@ -59,13 +59,19 @@ my $ALREADY_EXITING = 0;  # re-entrance guard for clean_and_exit
 sub new {
     my ($class, $args) = @_;
 
-    my $self = bless {
-        config_file => $args->{config_file} // undef,
-        server      => $args->{server}      // undef,
-        dbh         => $args->{dbh}         // undef,
-        conf        => $args->{conf}        // undef,
-        channels    => {},
-        WHOIS_VARS  => {},
+        my $self = bless {
+        config_file             => $args->{config_file}      // undef,
+        requested_server        => $args->{server}           // undef,
+        server                  => $args->{server}           // undef,
+        server_hostname         => undef,
+        server_port             => undef,
+        server_source           => undef,
+        network_name            => undef,
+        dbh                     => $args->{dbh}              // undef,
+        conf                    => $args->{conf}             // undef,
+        channels                => {},
+        channel_nicklist_timers => {},
+        WHOIS_VARS              => {},
     }, $class;
 
     # Minimal logging setup
@@ -125,6 +131,191 @@ sub readConfigFile {
     $self->{conf} = $conf;
 
     $self->my_log_info("Configuration loaded successfully");
+    return 1;
+}
+
+sub reload_logger_from_config {
+    my ($self) = @_;
+
+    my $conf = $self->{conf};
+    unless ($conf) {
+        $self->my_log_error("reload_logger_from_config() called without loaded config");
+        return;
+    }
+
+    my $debug_level = $conf->get('main.MAIN_PROG_DEBUG');
+    $debug_level = 0 unless defined $debug_level && $debug_level =~ /^\d+$/;
+
+    my $log_path = $conf->get('main.MAIN_LOG_FILE');
+    unless (defined $log_path && $log_path ne '') {
+        $self->my_log_error("reload_logger_from_config() MAIN_LOG_FILE is empty");
+        return;
+    }
+
+    # Reopen raw LOG handle used by some legacy code paths
+    eval {
+        if (defined $self->{LOG}) {
+            my $oldfh = $self->{LOG};
+            close $oldfh if defined(fileno($oldfh));
+        }
+        1;
+    };
+
+    open(my $LOG, ">>", $log_path) or do {
+        $self->my_log_error("Could not reopen log file '$log_path': $!");
+        return;
+    };
+    select((select($LOG), $| = 1)[0]);
+    $self->{LOG} = $LOG;
+
+    # Recreate object logger with fresh config values
+    my $new_logger;
+    eval {
+        require Mediabot::Log;
+        $new_logger = Mediabot::Log->new(
+            debug_level => $debug_level,
+            logfile     => $log_path,
+        );
+        1;
+    } or do {
+        my $err = $@ || 'unknown error';
+        $self->my_log_error("Failed to recreate logger from config: $err");
+        return;
+    };
+
+    $self->{logger} = $new_logger;
+    $self->{logger}->log(1, "Logger reloaded from config (debug=$debug_level, logfile=$log_path)");
+
+    return 1;
+}
+
+sub rebuild_channel_cache {
+    my ($self) = @_;
+
+    $self->{logger}->log(1, "Rebuilding channel cache from database");
+    $self->{channels} = {};
+    
+    # Populate channels from DB
+	$self->populateChannels();
+
+	# Start per-channel nicklist refresh timers
+	$self->setup_channel_nicklist_timers();
+
+    my $count = scalar keys %{ $self->{channels} };
+    $self->{logger}->log(1, "Channel cache rebuilt ($count channel objects)");
+
+    return 1;
+}
+
+sub refresh_channel_nicklist {
+    my ($self, $channel_name) = @_;
+    return unless defined $channel_name && $channel_name ne '';
+
+    unless ($self->{irc}) {
+        $self->{logger}->log(4, "refresh_channel_nicklist() skipped for $channel_name: no IRC object");
+        return;
+    }
+
+    $self->{logger}->log(4, "Refreshing nicklist for $channel_name via NAMES");
+    eval {
+        $self->{irc}->send_message('NAMES', undef, $channel_name);
+        1;
+    } or do {
+        my $err = $@ || 'unknown error';
+        $self->{logger}->log(1, "Failed to refresh nicklist for $channel_name: $err");
+    };
+
+    return 1;
+}
+
+sub stop_all_channel_nicklist_timers {
+    my ($self) = @_;
+
+    my $timers = $self->{channel_nicklist_timers} || {};
+    foreach my $channel_name (keys %$timers) {
+        my $timer = $timers->{$channel_name};
+        next unless $timer;
+
+        eval {
+            if ($self->{loop}) {
+                $self->{loop}->remove($timer);
+            }
+            $timer->stop if $timer->can('stop');
+            1;
+        };
+    }
+
+    $self->{channel_nicklist_timers} = {};
+    $self->{logger}->log(1, "Stopped all channel nicklist timers");
+
+    return 1;
+}
+
+sub setup_channel_nicklist_timers {
+    my ($self) = @_;
+
+    my $conf = $self->{conf};
+    unless ($conf) {
+        $self->{logger}->log(1, "setup_channel_nicklist_timers() called without config");
+        return;
+    }
+
+    unless ($self->{loop}) {
+        $self->{logger}->log(1, "setup_channel_nicklist_timers() called without IO::Async loop");
+        return;
+    }
+
+    $self->stop_all_channel_nicklist_timers();
+
+    my $interval = $conf->get('main.MAIN_CHANNEL_NICKLIST_REFRESH_INTERVAL');
+    $interval = 300 unless defined $interval && $interval =~ /^\d+$/ && $interval > 0;
+
+    foreach my $channel_name (sort keys %{ $self->{channels} || {} }) {
+        my $channel_obj = $self->{channels}{$channel_name};
+        next unless $channel_obj;
+
+        my $timer = IO::Async::Timer::Periodic->new(
+            interval => $interval,
+            first_interval => $interval,
+            on_tick => sub {
+                $self->refresh_channel_nicklist($channel_name);
+            },
+        );
+
+        $self->{loop}->add($timer);
+        $timer->start;
+        $self->{channel_nicklist_timers}{$channel_name} = $timer;
+
+        $self->{logger}->log(1, "Started nicklist refresh timer for $channel_name (interval=${interval}s)");
+    }
+
+    my $count = scalar keys %{ $self->{channel_nicklist_timers} || {} };
+    $self->{logger}->log(1, "Nicklist timer setup complete ($count timers)");
+
+    return 1;
+}
+
+sub rehash_runtime_state {
+    my ($self) = @_;
+
+    my @done;
+
+    unless ($self->readConfigFile()) {
+        return;
+    }
+    push @done, 'config';
+
+    unless ($self->reload_logger_from_config()) {
+        return;
+    }
+    push @done, 'logger';
+
+    unless ($self->rebuild_channel_cache()) {
+        return;
+    }
+    push @done, 'channels';
+
+    $self->{logger}->log(1, "Rehash runtime state completed: " . join(', ', @done));
     return 1;
 }
 
@@ -472,8 +663,29 @@ sub dbCheckTables {
 
 # Set the server hostname
 sub setServer {
-	my ($self,$sServer) = @_;
+	my ($self, $sServer) = @_;
+	$self->{requested_server} = $sServer;
 	$self->{server} = $sServer;
+}
+
+sub getRequestedServer {
+    my ($self) = @_;
+    return $self->{requested_server};
+}
+
+sub getServerSource {
+    my ($self) = @_;
+    return $self->{server_source};
+}
+
+sub getNetworkName {
+    my ($self) = @_;
+    return $self->{network_name};
+}
+
+sub getServerHostPort {
+    my ($self) = @_;
+    return ($self->{server_hostname}, $self->{server_port});
 }
 
 # Pick a server from the database based on the configured network
@@ -482,8 +694,14 @@ sub pickServer {
     my $conf = $self->{conf};
     my $dbh  = $self->{dbh};
 
-    if (!defined($self->{server}) || $self->{server} eq "") {
+    $self->{network_name}  = undef;
+    $self->{server_source} = undef;
+
+    my $requested_server = $self->{requested_server};
+
+    if (!defined($requested_server) || $requested_server eq "") {
         my $network_name = $conf->get('connection.CONN_SERVER_NETWORK');
+        $self->{network_name} = $network_name;
 
         unless ($network_name) {
             $self->{logger}->log(0, "No CONN_SERVER_NETWORK defined in $self->{config_file}");
@@ -493,13 +711,15 @@ sub pickServer {
 
         my $sQuery = "SELECT SERVERS.server_hostname FROM NETWORK JOIN SERVERS ON SERVERS.id_network = NETWORK.id_network WHERE NETWORK.network_name = ? ORDER BY RAND() LIMIT 1";
         my $sth = $dbh->prepare($sQuery);
+
         if ($sth->execute($network_name)) {
             if (my $ref = $sth->fetchrow_hashref()) {
                 $self->{server} = $ref->{server_hostname};
+                $self->{server_source} = 'network-db';
             }
             $sth->finish;
         } else {
-            $self->{logger}->log(0, "Startup select SERVER, SQL Error: " . $DBI::errstr . " Query: $sQuery");
+            $self->{logger}->log(0, "Startup select SERVER, SQL Error: " . $DBI::errstr . " Query: " . $sQuery);
         }
 
         unless ($self->{server}) {
@@ -508,9 +728,13 @@ sub pickServer {
             clean_and_exit($self, 4);
         }
 
-        $self->{logger}->log(1, "Picked $self->{server} from Network $network_name");
+        $self->{logger}->log(1, "Picked $self->{server} from network '$network_name'");
     } else {
-        $self->{logger}->log(1, "Picked $self->{server} from command line");
+        $self->{server} = $requested_server;
+        $self->{server_source} = 'requested-server';
+        $self->{network_name} = $conf->get('connection.CONN_SERVER_NETWORK');
+
+        $self->{logger}->log(1, "Picked $self->{server} from requested server override");
     }
 
     # Parse hostname[:port]
@@ -521,7 +745,11 @@ sub pickServer {
         $self->{server_port} = 6667;
     }
 
-    $self->{logger}->log(4, "Using host $self->{server_hostname}, port $self->{server_port}");
+    $self->{logger}->log(
+        4,
+        "Using host $self->{server_hostname}, port $self->{server_port}, source=$self->{server_source}, network=" .
+        (defined $self->{network_name} ? $self->{network_name} : '<undef>')
+    );
 }
 
 # Log a hint to run ./configure if no server is set

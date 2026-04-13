@@ -140,7 +140,7 @@ unless (defined($CONFIG_FILE)) {
 # Create Mediabot instance
 my $mediabot = Mediabot->new({
     config_file => $CONFIG_FILE,
-    server      => $sServer,
+    server      => $sServer,   # explicit requested server override, if any
 });
 
 # Load configuration before anything else
@@ -283,6 +283,7 @@ $mediabot->init_hailo();
 # Initialize IO::Async loop
 my $loop = IO::Async::Loop->new;
 $mediabot->setLoop($loop);
+$mediabot->setup_channel_nicklist_timers();
 
 # Initialize Partyline
 my $partyline = Mediabot::Partyline->new(
@@ -885,7 +886,7 @@ sub on_message_PRIVMSG {
             # Single entry point for all URL types.
             # displayUrlTitle() handles routing internally:
             #   YouTube (watch/shorts/live/youtu.be) → chanset Youtube → YouTube Data API v3
-            #   Instagram, Spotify, Twitter/X        → chanset UrlTitle
+            #   Instagram, Spotify                   → chanset UrlTitle
             #   Apple Music                          → chanset AppleMusic
             #   Generic pages                        → chanset UrlTitle → <title> scrape
             $mediabot->displayUrlTitle($message,$who,$where,$what);
@@ -1477,6 +1478,7 @@ sub reconnect {
     # Fresh IO::Async loop
     $loop = IO::Async::Loop->new;
     $mediabot->setLoop($loop);
+    $mediabot->setup_channel_nicklist_timers();
 
     # Fresh timer
     $timer = IO::Async::Timer::Periodic->new(

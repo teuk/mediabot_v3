@@ -607,7 +607,10 @@ sub _fetch_url_chromium_dumpdom {
         $url,
     );
 
-    $self->{logger}->log(4, "_fetch_url_chromium_dumpdom() exec: " . join(' ', @cmd));
+    $self->{logger}->log(
+        4,
+        "_fetch_url_chromium_dumpdom() budget=$virtual_time_budget alarm=$alarm_timeout exec: " . join(' ', @cmd)
+    );
 
     my $stderr = gensym;
     my $pid;
@@ -617,12 +620,13 @@ sub _fetch_url_chromium_dumpdom {
         local $SIG{ALRM} = sub { die "ALARM\n" };
         alarm $alarm_timeout;
 
-        $pid = open3(undef, my $out, $stderr, @cmd);
+        $pid = open3('/dev/null', my $out, $stderr, @cmd);
 
         {
             local $/;
             $stdout = <$out> // '';
         }
+        close($out);
 
         alarm 0;
         1;
@@ -644,6 +648,7 @@ sub _fetch_url_chromium_dumpdom {
         local $/;
         $stderr_txt = <$stderr> // '';
     }
+    close($stderr);
 
     waitpid($pid, 0);
     my $rc = $? >> 8;
@@ -672,56 +677,8 @@ sub _fetch_url_chromium_dumpdom {
     return $stdout;
 }
 
-sub _extract_meta_content_by_attr {
-    my ($html, $attr_name, $attr_value) = @_;
-    return undef unless defined $html && defined $attr_name && defined $attr_value;
 
-    while ($html =~ /<meta\b([^>]*?)>/sig) {
-        my $attrs = $1;
-        my %meta;
 
-        while ($attrs =~ /\b([a-zA-Z_:.-]+)\s*=\s*(["'])(.*?)\2/sg) {
-            $meta{lc $1} = $3;
-        }
-
-        next unless defined $meta{lc $attr_name};
-        next unless lc($meta{lc $attr_name}) eq lc($attr_value);
-
-        return $meta{content} if defined $meta{content} && $meta{content} ne '';
-    }
-
-    return undef;
-}
-
-sub _extract_title_tag {
-    my ($html) = @_;
-    return undef unless defined $html;
-
-    if ($html =~ /<title[^>]*>(.*?)<\/title>/si) {
-        my $title = $1;
-        $title =~ s/\s+/ /g;
-        $title =~ s/^\s+|\s+$//g;
-        return $title;
-    }
-
-    return undef;
-}
-
-sub _json_unescape_basic {
-    my ($s) = @_;
-    return undef unless defined $s;
-
-    $s =~ s/\\\\/\\/g;
-    $s =~ s/\\"/"/g;
-    $s =~ s#\\/#/#g;
-    $s =~ s/\\n/ /g;
-    $s =~ s/\\r/ /g;
-    $s =~ s/\\t/ /g;
-    $s =~ s/\s+/ /g;
-    $s =~ s/^\s+|\s+$//g;
-
-    return $s;
-}
 
 # ---------------------------------------------------------------------------
 # _chanset_ok($self, $channel, $chanset_name)
@@ -746,15 +703,15 @@ sub _is_youtube_url {
     return undef unless defined $url;
 
     # Standard watch URL on all subdomains
-    if ($url =~ m{https?://(?:www\.|m\.|music\.)?youtube\.[a-z.]+/watch[^\s]*[?&]v=([A-Za-z0-9_-]{11})}i) {
+    if ($url =~ m{https?://(?:www\.|m\.|music\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp|be)/watch[^\s]*[?&]v=([A-Za-z0-9_-]{11})}i) {
         return $1;
     }
     # Shorts
-    if ($url =~ m{https?://(?:www\.|m\.)?youtube\.[a-z.]+/shorts/([A-Za-z0-9_-]{11})}i) {
+    if ($url =~ m{https?://(?:www\.|m\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp)/shorts/([A-Za-z0-9_-]{11})}i) {
         return $1;
     }
     # Live
-    if ($url =~ m{https?://(?:www\.|m\.)?youtube\.[a-z.]+/live/([A-Za-z0-9_-]{11})}i) {
+    if ($url =~ m{https?://(?:www\.|m\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp)/live/([A-Za-z0-9_-]{11})}i) {
         return $1;
     }
     # Embed
@@ -778,7 +735,7 @@ sub _handle_instagram {
 
     $self->{logger}->log(4, "_handle_instagram() start url=$url");
 
-    my ($shortcode) = $url =~ m{/p/([^/?#]+)/?};
+    my ($shortcode) = $url =~ m{/(?:p|reel|tv)/([^/?#]+)/?};
     unless (defined $shortcode && $shortcode ne '') {
         $self->{logger}->log(3, "_handle_instagram() could not extract shortcode from $url");
         return undef;
@@ -923,7 +880,7 @@ sub _handle_instagram {
     }
 
     unless (defined $title && $title ne '') {
-        $self->{logger}->log(3, "_handle_instagram() no usable title extracted for shortcode=$shortcode");
+        $self->{logger}->log(3, "_handle_instagram() no usable title extracted for shortcode=" . ($shortcode // "undef"));
         return undef;
     }
 
@@ -1153,8 +1110,8 @@ sub _handle_applemusic {
         my $dom = _fetch_url_chromium_dumpdom(
             $self,
             $url,
-            virtual_time_budget => 7000,
-            alarm_timeout       => 20,
+            virtual_time_budget => 10000,
+            alarm_timeout       => 30,
         );
 
         if (defined $dom && $dom ne '') {
@@ -1263,6 +1220,9 @@ sub _handle_generic_title {
     }
 
     $title = _decode_html($title);
+    $title =~ s/[\r\n\t]/ /g;
+    $title =~ s/\s{2,}/ /g;
+    $title =~ s/^\s+|\s+$//g;
     return undef if $title eq '';
     return undef if $title =~ /The page is temporarily unavailable/i;
 
@@ -1331,7 +1291,7 @@ sub displayUrlTitle {
     }
 
     # ── 5. Twitter / X — ignored silently ──────────────────────────────────
-    return undef if $url =~ /(?:twitter|x)\.com/i;
+    return undef if $url =~ m{https?://(?:www\.)?(?:twitter|x)\.com/}i;
 
     # ── 6. Generic ─────────────────────────────────────────────────────────
     unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
