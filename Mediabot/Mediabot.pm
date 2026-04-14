@@ -42,7 +42,6 @@ use Encode;
 use Moose;
 use Hailo;
 use Socket;
-use Twitter::API;
 use JSON::MaybeXS;
 use Try::Tiny;
 use URI::Escape qw(uri_escape_utf8 uri_escape);
