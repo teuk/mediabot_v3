@@ -819,27 +819,30 @@ sub on_message_QUIT {
 }
 
 sub on_message_PART {
-    my ($self,$message,$hints) = @_;
+    my ($self, $message, $hints) = @_;
 
     log_debug_args('on_message_PART', $message);
-    my ($target_name,$text) = @{$hints}{qw<target_name text>};
-    unless(defined($text)) { $text="";}
-    my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
+    my ($target_name, $text) = @{$hints}{qw<target_name text>};
+    unless (defined($text)) { $text = ""; }
+
+    my ($sNick, $sIdent, $sHost) = $mediabot->getMessageNickIdentHost($message);
     my @tArgs = $message->args;
     shift @tArgs;
+
     if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-            $mediabot->{logger}->log(0,"[LIVE] <$target_name> * Parts: $sNick ($sIdent\@$sHost) (" . $tArgs[0] . ")");
+            $mediabot->{logger}->log(0, "[LIVE] <$target_name> * Parts: $sNick ($sIdent\@$sHost) (" . $tArgs[0] . ")");
         }
-        $mediabot->logBotAction($message,"part",$sNick,$target_name,$tArgs[0]);
+        $mediabot->logBotAction($message, "part", $sNick, $target_name, $tArgs[0]);
     }
     else {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-            $mediabot->{logger}->log(0,"[LIVE] <$target_name> * Parts: $sNick ($sIdent\@$sHost)");
+            $mediabot->{logger}->log(0, "[LIVE] <$target_name> * Parts: $sNick ($sIdent\@$sHost)");
         }
-        $mediabot->logBotAction($message,"part",$sNick,$target_name,"");
-        $mediabot->channelNicksRemove($target_name,$sNick);
+        $mediabot->logBotAction($message, "part", $sNick, $target_name, "");
     }
+
+    $mediabot->channelNicksRemove($target_name, $sNick);
 }
 
 sub on_message_PRIVMSG {
@@ -1039,38 +1042,73 @@ sub on_message_LIST {
 }
 
 sub on_message_RPL_NAMEREPLY {
-    my ($self,$message,$hints) = @_;
+    my ($self, $message, $hints) = @_;
+
     log_debug_args('on_message_RPL_NAMEREPLY', $message);
+
     my @args = $message->args;
-    $args[3] =~ s/@//g;
-    $args[3] =~ s/\+//g;
-    my @tNicklist = split(" ",$args[3]);
     my ($target_name) = @{$hints}{qw<target_name>};
-    my $bChannelsNicksEnd = $mediabot->gethChannelsNicksEndOnChan($target_name);
-    unless ($bChannelsNicksEnd) {
-        $mediabot->sethChannelsNicksEndOnChan($target_name,0);
+
+    return unless defined $target_name && $target_name ne '';
+    return unless defined $args[3] && $args[3] ne '';
+
+    my $names_blob = $args[3];
+
+    # Remove common IRC prefix modes from nick list entries
+    $names_blob =~ s/[@+%&~]//g;
+
+    my @tNicklist = grep { defined($_) && $_ ne '' } split(/\s+/, $names_blob);
+
+    my %tmp_nicklists = ();
+    if (defined($mediabot->{hChannelsNicksTmp})) {
+        %tmp_nicklists = %{ $mediabot->{hChannelsNicksTmp} };
     }
-    my @tChannelNicklist = $mediabot->gethChannelsNicksOnChan($target_name);
-    if ( $bChannelsNicksEnd ) {
-        $mediabot->sethChannelsNicksEndOnChan($target_name,0);
-        $mediabot->sethChannelsNicksOnChan($target_name,());
-    }
-    push(@tChannelNicklist, @tNicklist);
-    $mediabot->sethChannelsNicksOnChan($target_name,@tChannelNicklist);
+
+    push @{ $tmp_nicklists{$target_name} }, @tNicklist;
+    %{ $mediabot->{hChannelsNicksTmp} } = %tmp_nicklists;
+
+    $mediabot->sethChannelsNicksEndOnChan($target_name, 0);
+    $mediabot->{logger}->log(4, "Buffered NAMES chunk for $target_name (" . scalar(@tNicklist) . " nicks)");
 }
 
 # Numeric 366 RPL_ENDOFNAMES
 sub on_message_RPL_ENDOFNAMES {
-    my ($self,$message,$hints) = @_;
+    my ($self, $message, $hints) = @_;
 
     log_debug_args('on_message_RPL_ENDOFNAMES', $message);
+
     my @args = $message->args;
     my $channel = $args[1] // '<unknown>';
-    $mediabot->{logger}->log(2,"on_message_RPL_ENDOFNAMES() $channel");
-    if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE')==1)) {
-        $mediabot->{logger}->log(0,"[LIVE] * Now talking in $channel");
+
+    $mediabot->{logger}->log(2, "on_message_RPL_ENDOFNAMES() $channel");
+
+    if (defined($channel) && $channel ne '' && $channel ne '<unknown>') {
+        my %tmp_nicklists = ();
+        if (defined($mediabot->{hChannelsNicksTmp})) {
+            %tmp_nicklists = %{ $mediabot->{hChannelsNicksTmp} };
+        }
+
+        my @buffered = ();
+        if (defined($tmp_nicklists{$channel})) {
+            @buffered = @{ $tmp_nicklists{$channel} };
+        }
+
+        my %seen;
+        my @deduped = grep { defined($_) && $_ ne '' && !$seen{$_}++ } @buffered;
+
+        $mediabot->sethChannelsNicksOnChan($channel, @deduped);
+        delete $tmp_nicklists{$channel};
+        %{ $mediabot->{hChannelsNicksTmp} } = %tmp_nicklists;
+
+        $mediabot->sethChannelsNicksEndOnChan($channel, 1);
+        $mediabot->{logger}->log(4, "Finalized NAMES for $channel (" . scalar(@deduped) . " unique nicks)");
     }
-    $mediabot->{logger}->log(2,"Joined channel: $channel");
+
+    if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
+        $mediabot->{logger}->log(0, "[LIVE] * Now talking in $channel");
+    }
+
+    $mediabot->{logger}->log(2, "Joined channel: $channel");
 }
 
 sub on_message_WHO {

@@ -442,7 +442,7 @@ ALTER TABLE `CHANNEL_LOG`
   ADD CONSTRAINT `fk_channel_log_channel` FOREIGN KEY (`id_channel`) REFERENCES `CHANNEL` (`id_channel`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 ALTER TABLE `CHANNEL_SET`
-  ADD CONSTRAINT `fk_channel_set_channel`      FOREIGN KEY (`id_channel`)      REFERENCES `CHANNEL`      (`id_channel`)      ON DELETE CASCADE ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_channel_set_channel`       FOREIGN KEY (`id_channel`)      REFERENCES `CHANNEL`      (`id_channel`)      ON DELETE CASCADE ON UPDATE CASCADE,
   ADD CONSTRAINT `fk_channel_set_chanset_list`  FOREIGN KEY (`id_chanset_list`) REFERENCES `CHANSET_LIST` (`id_chanset_list`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 ALTER TABLE `HAILO_CHANNEL`
@@ -462,8 +462,10 @@ ALTER TABLE `QUOTES`
 ALTER TABLE `SERVERS`
   ADD CONSTRAINT `fk_servers_network` FOREIGN KEY (`id_network`) REFERENCES `NETWORK` (`id_network`) ON DELETE CASCADE ON UPDATE CASCADE;
 
-ALTER TABLE `TIMERS`
-  ADD CONSTRAINT `fk_timers_channel` FOREIGN KEY (`id_channel`) REFERENCES `CHANNEL` (`id_channel`) ON DELETE SET NULL ON UPDATE CASCADE;
+-- TIMERS currently has no deployed `id_channel` column, so no foreign key is added here yet.
+-- Keep this commented until `id_channel` is actually part of the production schema.
+-- ALTER TABLE `TIMERS`
+--   ADD CONSTRAINT `fk_timers_channel` FOREIGN KEY (`id_channel`) REFERENCES `CHANNEL` (`id_channel`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 ALTER TABLE `USER`
   ADD CONSTRAINT `fk_user_level` FOREIGN KEY (`id_user_level`) REFERENCES `USER_LEVEL` (`id_user_level`) ON DELETE RESTRICT ON UPDATE CASCADE;
