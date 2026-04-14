@@ -1,7 +1,7 @@
 -- =============================================================================
---  mediabot_test — schéma minimal pour les tests live
---  Généré depuis mediabotv3.sql (dump prod)
---  Utilisé par test_live.pl : DROP DATABASE / CREATE DATABASE / SOURCE ce fichier
+--  mediabot_test — minimal schema for live IRC tests
+--  Generated from mediabotv3.sql (production dump)
+--  Used by test_live.pl: DROP DATABASE / CREATE DATABASE / SOURCE this file
 -- =============================================================================
 
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
@@ -9,7 +9,7 @@ SET time_zone = "+00:00";
 SET NAMES utf8mb4;
 
 -- ---------------------------------------------------------------------------
--- Tables structurelles (toujours nécessaires au démarrage du bot)
+-- Structural tables required for bot startup
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE `ACTIONS_LOG` (
@@ -289,26 +289,27 @@ CREATE TABLE `YOMOMMA` (
   `yomomma` varchar(255) NOT NULL,
   PRIMARY KEY (`id_yomomma`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
--- Catégorie de base pour les tests
-INSERT INTO `PUBLIC_COMMANDS_CATEGORY` (`id_public_commands_category`, `description`) VALUES (1, 'test'),
+
+-- Base category for tests
+INSERT INTO `PUBLIC_COMMANDS_CATEGORY` (`id_public_commands_category`, `description`) VALUES
+(1, 'test'),
 (2, 'general');
 
 INSERT INTO `PUBLIC_COMMANDS` (`id_public_commands`, `id_user`, `id_public_commands_category`, `command`, `description`, `action`, `hits`) VALUES
-(1, 1, 1, 'check', 'check', 'PRIVMSG %c I\'m fine Houston, over.', 0);
-
+(1, 1, 1, 'check', 'check', 'PRIVMSG %c I\\'m fine Houston, over.', 0);
 
 -- ---------------------------------------------------------------------------
--- Données de référence — nécessaires au fonctionnement du bot
+-- Reference data required for the bot to work during live tests
 -- ---------------------------------------------------------------------------
 
--- Hiérarchie des niveaux (absent du dump prod, recréé ici)
+-- User level hierarchy
 INSERT INTO `USER_LEVEL` (`id_user_level`, `level`, `description`) VALUES
 (1, 0, 'Owner'),
 (2, 1, 'Master'),
 (3, 2, 'Administrator'),
 (4, 3, 'User');
 
--- Chansets disponibles (identique prod)
+-- Available chansets
 INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES
 (1,  'Youtube'),
 (2,  'UrlTitle'),
@@ -324,33 +325,37 @@ INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES
 (12, 'AppleMusic'),
 (13, 'RandomQuote');
 
--- Réseau de test — le serveur sera remplacé dynamiquement par test_live.pl
+-- Test network — server will be replaced dynamically by test_live.pl
 INSERT INTO `NETWORK` (`id_network`, `network_name`) VALUES
 (1, 'TestNetwork');
 
 INSERT INTO `SERVERS` (`id_server`, `id_network`, `server_hostname`) VALUES
 (1, 1, 'irc.libera.chat:6667');
 
--- Canal de test (auto_join=1, sera remplacé dynamiquement)
+-- Test channel (auto_join=1, replaced dynamically)
 INSERT INTO `CHANNEL` (`id_channel`, `name`, `auto_join`) VALUES
 (1, '##mbtest', 1);
 
--- Utilisateur Owner de test (autologin, hostmask wildcard pour les tests)
--- Le nick sera remplacé dynamiquement par test_live.pl
+-- Test bot owner account (autologin via wildcard hostmask)
+-- Nick will be replaced dynamically by test_live.pl
 INSERT INTO `USER` (`id_user`, `nickname`, `password`, `username`, `id_user_level`, `auth`) VALUES
 (1, 'mbtest', NULL, '#AUTOLOGIN#', 1, 0);
-INSERT INTO `USER_HOSTMASK` (`id_user`, `hostmask`) VALUES (1, '*mbtest@*');
+INSERT INTO `USER_HOSTMASK` (`id_user`, `hostmask`) VALUES
+(1, '*mbtest@*');
 
--- Membership du bot sur le canal de test
+-- Bot membership on test channel
 INSERT INTO `USER_CHANNEL` (`id_user_channel`, `id_user`, `id_channel`, `level`, `automode`) VALUES
 (1, 1, 1, 0, 'NONE');
 
--- Utilisateur Master de test pour les tests d'authentification par password
--- password = 'testpass123' (hashé via MariaDB PASSWORD())
+-- Master test account for explicit authentication scenarios
+-- password = 'testpass123'
+-- Stored as the same legacy MariaDB PASSWORD() hash reproduced by make_password_hash()
 INSERT INTO `USER` (`id_user`, `nickname`, `password`, `username`, `id_user_level`, `auth`) VALUES
-(2, 'mboper', PASSWORD('testpass123'), 'mboper', 2, 0);
-INSERT INTO `USER_HOSTMASK` (`id_user`, `hostmask`) VALUES (2, 'mbspy*!*@*');
+(2, 'mboper', '*AE44FCBF2A029BA0F76B3DF897A0265E9EDB5BF9', 'mboper', 2, 0);
 
--- Membership de mboper sur le canal de test (level Master)
+-- Intentionally no USER_HOSTMASK row for mboper:
+-- auth tests must start from a non-autologged state.
+
+-- Membership of mboper on the test channel (level Master)
 INSERT INTO `USER_CHANNEL` (`id_user_channel`, `id_user`, `id_channel`, `level`, `automode`) VALUES
 (2, 2, 1, 1, 'NONE');

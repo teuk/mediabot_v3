@@ -1080,7 +1080,7 @@ sub on_message_RPL_ENDOFNAMES {
     my @args = $message->args;
     my $channel = $args[1] // '<unknown>';
 
-    $mediabot->{logger}->log(2, "on_message_RPL_ENDOFNAMES() $channel");
+    $mediabot->{logger}->log(4, "on_message_RPL_ENDOFNAMES() $channel");
 
     if (defined($channel) && $channel ne '' && $channel ne '<unknown>') {
         my %tmp_nicklists = ();
@@ -1103,12 +1103,6 @@ sub on_message_RPL_ENDOFNAMES {
         $mediabot->sethChannelsNicksEndOnChan($channel, 1);
         $mediabot->{logger}->log(4, "Finalized NAMES for $channel (" . scalar(@deduped) . " unique nicks)");
     }
-
-    if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
-        $mediabot->{logger}->log(0, "[LIVE] * Now talking in $channel");
-    }
-
-    $mediabot->{logger}->log(2, "Joined channel: $channel");
 }
 
 sub on_message_WHO {

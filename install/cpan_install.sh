@@ -93,7 +93,6 @@ URL::Encode
 Time::HiRes
 Moose
 Hailo
-Twitter::API
 JSON::MaybeXS
 List::Util
 File::Temp
@@ -150,7 +149,6 @@ URL::Encode
 Time::HiRes
 Moose
 Hailo
-Twitter::API
 JSON::MaybeXS
 List::Util
 File::Temp
