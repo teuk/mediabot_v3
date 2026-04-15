@@ -60,7 +60,17 @@ function ensure_module {
     if [ $? -ne 0 ]; then
         echo -n "Not found. Installing via cpan "
         wait_for_cmd "./install_perl_module.sh '$perl_module'"
-        ok_failed $?
+        local rc=$?
+
+        if [ "$rc" -ne 0 ]; then
+            if [ "$perl_module" = "Hailo" ]; then
+                echo "Failed. Will try manual Hailo installation later." | tee -a "$SCRIPT_LOGFILE"
+            else
+                ok_failed "$rc"
+            fi
+        else
+            echo "OK"
+        fi
     else
         echo "OK"
     fi
@@ -115,7 +125,7 @@ for perl_module in "${PERL_MODULES[@]}"; do
     ensure_module "$perl_module"
 done
 
-messageln "Installing Hailo manually (ignore previous error for this module)"
+messageln "Installing Hailo manually as fallback after CPAN attempt"
 wget https://cpan.metacpan.org/authors/id/A/AV/AVAR/Hailo-0.75.tar.gz
 tar xzf Hailo-0.75.tar.gz
 chown -R mediabot: Hailo-0.75
