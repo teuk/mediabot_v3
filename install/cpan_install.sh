@@ -114,7 +114,6 @@ PERL_MODULES=(
   "File::Temp"
   "HTTP::Tiny"
   "IO::Socket::SSL"
-  "Net::Curl"
   "Try::Tiny"
   "URI::Escape"
   "Date::Format"
