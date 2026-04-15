@@ -1035,7 +1035,7 @@ sub mbCommandPublic {
         xlogin       => sub { xLogin_ctx($ctx) },
         tellme       => sub { chatGPT_ctx($ctx) },
         yomomma      => sub { Yomomma_ctx($ctx) },
-        resolve      => sub { mbResolver_ctx($ctx) },
+        resolve      => sub { resolve_ctx($ctx) },
         tmdb         => sub { mbTMDBSearch_ctx($ctx) },
         tmdblangset  => sub { setTMDBLangChannel_ctx($ctx) },
         debug        => sub { debug_ctx($ctx) },
