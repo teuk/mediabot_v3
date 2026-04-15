@@ -23,6 +23,7 @@ package Mediabot::Partyline;
 
 use strict;
 use warnings;
+use POSIX qw(setsid);
 use IO::Async::Listener;
 use IO::Async::Stream;
 use Scalar::Util qw(weaken);
@@ -178,14 +179,17 @@ sub _handle_line {
     }
 
     # ---- Authenticated : dispatch commands --------------------------------
-    if    ($line =~ /^\.help$/i)                        { $self->_cmd_help($stream, $id) }
-    elsif ($line =~ /^\.stat$/i)                        { $self->_cmd_stat($stream, $id) }
-    elsif ($line =~ /^\.say\s+(#\S+)\s+(.+)$/i)        { $self->_cmd_say($stream, $id, $1, $2) }
-    elsif ($line =~ /^\.who\s+(#\S+)$/i)                { $self->_cmd_who($stream, $id, $1) }
-    elsif ($line =~ /^\.join\s+(#\S+)(?:\s+(\S+))?$/i) { $self->_cmd_join($stream, $id, $1, $2) }
-    elsif ($line =~ /^\.part\s+(#\S+)$/i)               { $self->_cmd_part($stream, $id, $1) }
-    elsif ($line =~ /^\.nick\s+(\S+)$/i)                { $self->_cmd_nick($stream, $id, $1) }
-    elsif ($line =~ /^\.raw\s+(.+)$/i)                  { $self->_cmd_raw($stream, $id, $1) }
+    if    ($line =~ /^\.help$/i)                         { $self->_cmd_help($stream, $id) }
+    elsif ($line =~ /^\.stat$/i)                         { $self->_cmd_stat($stream, $id) }
+    elsif ($line =~ /^\.say\s+(#\S+)\s+(.+)$/i)          { $self->_cmd_say($stream, $id, $1, $2) }
+    elsif ($line =~ /^\.who\s+(#\S+)$/i)                 { $self->_cmd_who($stream, $id, $1) }
+    elsif ($line =~ /^\.join\s+(#\S+)(?:\s+(\S+))?$/i)   { $self->_cmd_join($stream, $id, $1, $2) }
+    elsif ($line =~ /^\.part\s+(#\S+)$/i)                { $self->_cmd_part($stream, $id, $1) }
+    elsif ($line =~ /^\.nick\s+(\S+)$/i)                 { $self->_cmd_nick($stream, $id, $1) }
+    elsif ($line =~ /^\.raw\s+(.+)$/i)                   { $self->_cmd_raw($stream, $id, $1) }
+    elsif ($line =~ /^\.rehash$/i)                       { $self->_cmd_rehash($stream, $id) }
+    elsif ($line =~ /^\.restart$/i)                      { $self->_cmd_restart($stream, $id) }
+    elsif ($line =~ /^\.die(?:\s+(.*))?$/i)              { $self->_cmd_die($stream, $id, $1 // "Partyline requested termination") }
     elsif ($line =~ /^\.quit$/i) {
         $stream->write("Goodbye.\r\n");
         $stream->close_when_empty;
@@ -285,6 +289,9 @@ sub _cmd_help {
       . "  .part #chan         - make the bot part a channel\r\n"
       . "  .nick <newnick>     - change the bot's nick\r\n"
       . "  .raw <IRC command>  - send a raw IRC command (Owner only)\r\n"
+      . "  .rehash             - reload configuration and runtime state\r\n"
+      . "  .restart            - restart the bot (Owner only)\r\n"
+      . "  .die                - terminate the bot (Owner only)\r\n"
       . "  .quit               - close this partyline session\r\n"
     );
 }
@@ -491,6 +498,103 @@ sub _cmd_raw {
     $bot->{irc}->write($raw . "\x0d\x0a");
     $bot->{logger}->log(2, "Partyline: $nick sent RAW: $raw");
     $stream->write("RAW -> $raw\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .rehash
+# ---------------------------------------------------------------------------
+sub _cmd_rehash {
+    my ($self, $stream, $id) = @_;
+
+    my $bot   = $self->{bot};
+    my $nick  = $self->{users}{$id}{login};
+    my $level = $self->{users}{$id}{level};
+
+    unless (defined($level) && $level <= 1) {   # Owner=0, Master=1
+        $stream->write("Access denied: .rehash requires Master or Owner level.\r\n");
+        return;
+    }
+
+    $bot->{logger}->log(2, "Partyline: $nick requested rehash");
+    $stream->write("Rehashing...\r\n");
+
+    my $result = eval { $bot->rehash_runtime_state() };
+    if (!$result) {
+        my $err = $@ || 'rehash failed';
+        $bot->{logger}->log(1, "Partyline rehash failed for $nick: $err");
+        $stream->write("ERR rehash failed\r\n");
+        return;
+    }
+
+    $stream->write("OK rehash completed\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .restart
+# ---------------------------------------------------------------------------
+sub _cmd_restart {
+    my ($self, $stream, $id) = @_;
+
+    my $bot   = $self->{bot};
+    my $nick  = $self->{users}{$id}{login};
+    my $level = $self->{users}{$id}{level};
+
+    unless (defined($level) && $level == 0) {   # Owner only
+        $stream->write("Access denied: .restart requires Owner level.\r\n");
+        return;
+    }
+
+    $bot->{logger}->log(2, "Partyline: $nick requested restart");
+    $stream->write("Restarting bot...\r\n");
+
+    my @restart_args = ('--daemon');
+
+    if (defined $bot->{config_file} && $bot->{config_file} ne '') {
+        push @restart_args, "--conf=" . $bot->{config_file};
+    }
+
+    if (defined $bot->{requested_server} && $bot->{requested_server} ne '') {
+        push @restart_args, "--server=" . $bot->{requested_server};
+    }
+
+    my $child_pid;
+    if (defined($child_pid = fork())) {
+        if ($child_pid == 0) {
+            setsid;
+            exec "./mb_restart.sh", @restart_args;
+            exit 1;
+        } else {
+            $bot->{Quit} = 1;
+            $bot->{irc}->send_message("QUIT", undef, "Partyline requested restart");
+        }
+    } else {
+        $bot->{logger}->log(1, "Partyline restart failed: unable to fork");
+        $stream->write("ERR restart failed\r\n");
+    }
+}
+
+# ---------------------------------------------------------------------------
+# .die
+# ---------------------------------------------------------------------------
+sub _cmd_die {
+    my ($self, $stream, $id, $msg) = @_;
+
+    my $bot   = $self->{bot};
+    my $nick  = $self->{users}{$id}{login};
+    my $level = $self->{users}{$id}{level};
+
+    unless (defined($level) && $level == 0) {   # Owner only
+        $stream->write("Access denied: .die requires Owner level.\r\n");
+        return;
+    }
+
+    $msg //= "Partyline requested termination";
+
+    $bot->{logger}->log(2, "Partyline: $nick requested die ($msg)");
+    $stream->write("Terminating bot...\r\n");
+
+    $bot->{Quit} = 1;
+    $bot->{irc}->send_message("QUIT", undef, $msg);
 }
 
 1;
