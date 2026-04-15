@@ -1,4 +1,4 @@
-# t/live/09_user_commands.t
+# t/live/08_user_commands.t
 # =============================================================================
 #  UserCommands — users, userinfo, whoami, seen, userstat, modinfo
 #  Nécessite auth Master (mboper / testpass123)

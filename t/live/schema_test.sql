@@ -176,6 +176,7 @@ CREATE TABLE `PUBLIC_COMMANDS` (
   `description` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_unicode_ci NOT NULL,
   `action` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_unicode_ci NOT NULL,
   `hits` bigint(20) NOT NULL DEFAULT 0,
+  `active` tinyint(1) NOT NULL DEFAULT 1,
   PRIMARY KEY (`id_public_commands`),
   UNIQUE KEY `command` (`command`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;

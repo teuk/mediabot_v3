@@ -378,6 +378,17 @@ done
 # Instead skip FK for IGNORES id_channel since 0 = global scope
 
 # ===========================================================================
+# P9b — PUBLIC_COMMANDS.active column (holdcmd/showcmd feature)
+# ===========================================================================
+log "P9b — PUBLIC_COMMANDS.active"
+if ! col_exists PUBLIC_COMMANDS active; then
+    mysql_cmd "ALTER TABLE \`PUBLIC_COMMANDS\` ADD COLUMN \`active\` TINYINT(1) NOT NULL DEFAULT 1;"
+    ok "PUBLIC_COMMANDS.active added"
+else
+    skip "PUBLIC_COMMANDS.active already exists"
+fi
+
+# ===========================================================================
 # P10 — Foreign keys
 # ===========================================================================
 log "P10 — Foreign keys"

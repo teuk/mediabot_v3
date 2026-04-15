@@ -1,4 +1,4 @@
-# t/live/14_die_last.t
+# t/live/13_die_last.t
 # =============================================================================
 #  Test final — !die authentifié Master.
 #  CE FICHIER DOIT RESTER LE DERNIER : il tue le bot.

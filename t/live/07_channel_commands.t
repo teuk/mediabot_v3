@@ -1,4 +1,4 @@
-# t/live/08_channel_commands.t
+# t/live/07_channel_commands.t
 # =============================================================================
 #  ChannelCommands — chaninfo, chanset list, badwords, access
 #  Nécessite auth Master (mboper / testpass123)

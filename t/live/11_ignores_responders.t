@@ -1,4 +1,4 @@
-# t/live/13_ignores_responders.t
+# t/live/11_ignores_responders.t
 # =============================================================================
 #  DBCommands — ignores, responders, timers, yomomma
 #  Nécessite auth Master (mboper / testpass123)

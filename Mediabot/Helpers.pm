@@ -22,6 +22,8 @@ use Socket;
 use POSIX qw(strftime);
 use Digest::SHA qw(sha1 sha1_hex);
 use List::Util qw(min);
+use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
+use IO::Async::Timer::Countdown;
 
 our @EXPORT = qw(
     botNotice
@@ -2608,7 +2610,6 @@ sub resolve_ctx {
     }
 
     # Set pipe to non-blocking
-    use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
     my $flags = fcntl($pipe, F_GETFL, 0) || 0;
     fcntl($pipe, F_SETFL, $flags | O_NONBLOCK);
 
