@@ -296,7 +296,7 @@ INSERT INTO `PUBLIC_COMMANDS_CATEGORY` (`id_public_commands_category`, `descript
 (2, 'general');
 
 INSERT INTO `PUBLIC_COMMANDS` (`id_public_commands`, `id_user`, `id_public_commands_category`, `command`, `description`, `action`, `hits`) VALUES
-(1, 1, 1, 'check', 'check', 'PRIVMSG %c I\\'m fine Houston, over.', 0);
+(1, 1, 1, 'check', 'check', 'PRIVMSG %c I''m fine Houston, over.', 0);
 
 -- ---------------------------------------------------------------------------
 -- Reference data required for the bot to work during live tests
