@@ -1,6 +1,7 @@
 #!/bin/bash
+set -u
 
-if [ $(id -u) -ne 0 ]; then
+if [ "$(id -u)" -ne 0 ]; then
 	echo "This script must be run as root user"
 	exit 1
 fi
@@ -12,157 +13,130 @@ CPAN_LOGFILE=cpan_install_details.log
 # | Functions                                                               |
 # +-------------------------------------------------------------------------+
 function messageln {
-    if [ ! -z "$1" ]; then
-        echo "[$(date +'%d/%m/%Y %H:%M:%S')] $*" | tee -a $SCRIPT_LOGFILE
+    if [ ! -z "${1:-}" ]; then
+        echo "[$(date +'%d/%m/%Y %H:%M:%S')] $*" | tee -a "$SCRIPT_LOGFILE"
     fi
 }
  
 function message {
-    if [ ! -z "$1" ]; then
-        echo -n "[$(date +'%d/%m/%Y %H:%M:%S')] $* " | tee -a $SCRIPT_LOGFILE
+    if [ ! -z "${1:-}" ]; then
+        echo -n "[$(date +'%d/%m/%Y %H:%M:%S')] $* " | tee -a "$SCRIPT_LOGFILE"
     fi
 }
  
 function ok_failed {
-    if [ ! -z "$1" ] && [ $1 -eq 0 ]; then
-        echo "OK" | tee -a $SCRIPT_LOGFILE
+    if [ ! -z "${1:-}" ] && [ "$1" -eq 0 ]; then
+        echo "OK" | tee -a "$SCRIPT_LOGFILE"
     else
-    	RETVALUE=$1
-      echo -e " Failed. "
-      if [ ! -z "$2" ]; then
-      	shift
-      	echo "$*"
-      fi
-      echo -e "Installation log is available in $SCRIPT_LOGFILE" | tee -a $SCRIPT_LOGFILE
-      exit $RETVALUE
+    	RETVALUE="${1:-1}"
+        echo -e " Failed. "
+        if [ ! -z "${2:-}" ]; then
+      	    shift
+      	    echo "$*"
+        fi
+        echo -e "Installation log is available in $SCRIPT_LOGFILE" | tee -a "$SCRIPT_LOGFILE"
+        exit "$RETVALUE"
     fi
 }
 
 function wait_for_cmd {
-	$1 >>${CPAN_LOGFILE} 2>&1 &
+	local cmd="$1"
+	bash -c "$cmd" >>"${CPAN_LOGFILE}" 2>&1 &
 	WAIT_PID=$!
-	while [ -d /proc/$WAIT_PID ];
-	 do
-	  echo -n "."
-	  sleep 5
-	 done
+	while [ -d "/proc/$WAIT_PID" ];
+	do
+		echo -n "."
+		sleep 5
+	done
 	echo -n " "
-	wait $WAIT_PID
+	wait "$WAIT_PID"
+}
+
+function ensure_module {
+    local perl_module="$1"
+
+    message "Checking $perl_module "
+    perl -M"$perl_module" -e "exit 0;" &>/dev/null
+    if [ $? -ne 0 ]; then
+        echo -n "Not found. Installing via cpan "
+        wait_for_cmd "./install_perl_module.sh '$perl_module'"
+        ok_failed $?
+    else
+        echo "OK"
+    fi
 }
 
 # +-------------------------------------------------------------------------+
 # | CPAN MODULES INSTALL                                                    |
 # +-------------------------------------------------------------------------+
 message "Autoconfigure cpan"
-bash -c "(echo y;echo o conf prerequisites_policy follow;echo o conf commit)|cpan" >>$CPAN_LOGFILE 2>&1
+bash -c "(echo y; echo o conf prerequisites_policy follow; echo o conf commit) | cpan" >>"$CPAN_LOGFILE" 2>&1
 ok_failed $?
 
 messageln "Install perl module Module::Build"
-echo "Module::Build" | while read perl_module
- do
-  message "Checking $perl_module "
-  perl -M$perl_module -e "exit 0;" &>/dev/null
-  if [ $? -ne 0 ]; then
-  	echo -n "Not found. Installing via cpan "
-		wait_for_cmd "./install_perl_module.sh $perl_module"
-		ok_failed $?
-	else
-		echo "OK"
-	fi
- done
+ensure_module "Module::Build"
 
 messageln "Install perl modules"
-echo "Getopt::Long
-File::Basename
-IO::Async::Loop
-IO::Async::Timer::Periodic
-Net::Async::IRC
-Data::Dumper
-Config::Simple
-Data::Dumper
-Date::Parse
-DBI
-Switch
-Memory::Usage
-String::IRC
-DateTime
-DateTime::TimeZone
-HTML::Tree
-HTML::Entities
-URL::Encode
-Time::HiRes
-Moose
-Hailo
-JSON::MaybeXS
-List::Util
-File::Temp
-HTTP::Tiny
-IO::Socket::SSL
-Try::Tiny
-URI::Escape
-Date::Format
-JSON
-File::Slurp" | while read perl_module
- do
-  message "Checking $perl_module "
-  perl -M$perl_module -e "exit 0;" &>/dev/null
-  if [ $? -ne 0 ]; then
-  	echo -n "Not found. Installing via cpan "
-		wait_for_cmd "./install_perl_module.sh $perl_module"
-		ok_failed $?
-	else
-		echo "OK"
-	fi
- done
 
-messageln "Installing Hailo manually (ignore previous error for this  module)"
+PERL_MODULES=(
+  "Getopt::Long"
+  "File::Basename"
+  "IO::Async::Loop"
+  "IO::Async::Timer::Periodic"
+  "Net::Async::IRC"
+  "Data::Dumper"
+  "Config::Simple"
+  "Date::Parse"
+  "DBI"
+  "Switch"
+  "Memory::Usage"
+  "String::IRC"
+  "DateTime"
+  "DateTime::TimeZone"
+  "HTML::Tree"
+  "HTML::Entities"
+  "URL::Encode"
+  "Time::HiRes"
+  "Moose"
+  "Hailo"
+  "JSON::MaybeXS"
+  "List::Util"
+  "File::Temp"
+  "HTTP::Tiny"
+  "IO::Socket::SSL"
+  "Try::Tiny"
+  "URI::Escape"
+  "Date::Format"
+  "JSON"
+  "File::Slurp"
+)
+
+for perl_module in "${PERL_MODULES[@]}"; do
+    ensure_module "$perl_module"
+done
+
+messageln "Installing Hailo manually (ignore previous error for this module)"
 wget https://cpan.metacpan.org/authors/id/A/AV/AVAR/Hailo-0.75.tar.gz
 tar xzf Hailo-0.75.tar.gz
 chown -R mediabot: Hailo-0.75
-cd Hailo-0.75
-perl Makefile.PL
-make
-make install
+cd Hailo-0.75 || exit 1
+perl Makefile.PL >>"../${CPAN_LOGFILE}" 2>&1
+ok_failed $?
+make >>"../${CPAN_LOGFILE}" 2>&1
+ok_failed $?
+make install >>"../${CPAN_LOGFILE}" 2>&1
+ok_failed $?
+cd .. || exit 1
 
 # +-------------------------------------------------------------------------+
 # | CPAN VERIFY MODULES                                                     |
 # +-------------------------------------------------------------------------+
 messageln "Verify perl modules installation"
-echo "Getopt::Long
-File::Basename
-IO::Async::Loop
-IO::Async::Timer::Periodic
-Net::Async::IRC
-Data::Dumper
-Config::Simple
-Data::Dumper
-Date::Parse
-DBI
-Switch
-Memory::Usage
-String::IRC
-DateTime
-DateTime::TimeZone
-HTML::Tree
-HTML::Entities
-URL::Encode
-Time::HiRes
-Moose
-Hailo
-JSON::MaybeXS
-List::Util
-File::Temp
-HTTP::Tiny
-IO::Socket::SSL
-Try::Tiny
-URI::Escape
-Date::Format
-JSON
-File::Slurp" | while read perl_module
- do
-  message "Checking $perl_module"
-  perl -M$perl_module -e "exit 0;"
+
+for perl_module in "${PERL_MODULES[@]}"; do
+    message "Checking $perl_module"
+    perl -M"$perl_module" -e "exit 0;"
 	ok_failed $?
- done
+done
  
 messageln "Perl modules successfully installed"
