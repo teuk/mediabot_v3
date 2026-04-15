@@ -45,6 +45,7 @@ our @EXPORT = qw(
     userCount
     getDetailedVersion
     getVersion
+    make_password_hash
     checkAntiFlood
     getIdChannelSet
     getIdChansetList
