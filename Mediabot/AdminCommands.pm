@@ -136,6 +136,14 @@ sub mbRestart {
         defined($_) && $_ ne '' && $_ !~ /^--server=/
     } split(/\s+/, $full_params);
 
+    # Always pass --daemon (required by mb_restart.sh) and --conf
+    unshift @restart_args, '--daemon'
+        unless grep { $_ eq '--daemon' } @restart_args;
+    if (defined $self->{config_file} && $self->{config_file} ne '') {
+        push @restart_args, '--conf=' . $self->{config_file}
+            unless grep { /^--conf=/ } @restart_args;
+    }
+
     $self->{logger}->log(
         4,
         "Restart requested with args: " . join(' ', @restart_args)
@@ -198,6 +206,14 @@ sub mbJump {
     my @restart_args = grep {
         defined($_) && $_ ne '' && $_ !~ /^--server=/
     } split(/\s+/, $full_params);
+
+    # Always pass --daemon (required by mb_restart.sh) and --conf
+    unshift @restart_args, '--daemon'
+        unless grep { $_ eq '--daemon' } @restart_args;
+    if (defined $self->{config_file} && $self->{config_file} ne '') {
+        push @restart_args, '--conf=' . $self->{config_file}
+            unless grep { /^--conf=/ } @restart_args;
+    }
 
     $self->{logger}->log(
         4,
