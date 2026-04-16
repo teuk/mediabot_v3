@@ -181,7 +181,17 @@ Recommended reading order:
 8. Release and upgrade notes
 
 Wiki:
-- `https://github.com/teuk/mediabot_v3/wiki`
+- [Mediabot Wiki](https://github.com/teuk/mediabot_v3/wiki)
+
+### Direct wiki pages
+- [Installation](https://github.com/teuk/mediabot_v3/wiki/Installation)
+- [Configuration](https://github.com/teuk/mediabot_v3/wiki/Configuration)
+- [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands)
+- [Private and admin commands](https://github.com/teuk/mediabot_v3/wiki/Private-and-admin-commands)
+- [Partyline](https://github.com/teuk/mediabot_v3/wiki/Partyline)
+- [Troubleshooting](https://github.com/teuk/mediabot_v3/wiki/Troubleshooting)
+- [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing)
+- [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes)
 
 ---
 
@@ -198,6 +208,9 @@ It allows authenticated operators to:
 - terminate the bot
 
 This interface is documented separately in the wiki and should be treated as an administrative surface.
+
+See:
+- [Partyline documentation](https://github.com/teuk/mediabot_v3/wiki/Partyline)
 
 ---
 
@@ -253,7 +266,7 @@ After installation, at minimum verify:
 The project also includes a live testing path for deeper validation.
 
 See the wiki page:
-- `Testing`
+- [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing)
 
 ---
 
@@ -277,12 +290,12 @@ If you downloaded only one archive, `--ignore-missing` avoids errors for files t
 
 ## Project links
 
-- Repository: `https://github.com/teuk/mediabot_v3`
-- Wiki: `https://github.com/teuk/mediabot_v3/wiki`
+- [Repository](https://github.com/teuk/mediabot_v3)
+- [Wiki](https://github.com/teuk/mediabot_v3/wiki)
 - Stable downloads:
-  - `https://teuk.org/downloads/mediabot/mediabot_v3-3.1.tar.gz`
-  - `https://teuk.org/downloads/mediabot/mediabot_v3-3.1.tar.xz`
-  - `https://teuk.org/downloads/mediabot/SHA256SUMS`
+  - [mediabot_v3-3.1.tar.gz](https://teuk.org/downloads/mediabot/mediabot_v3-3.1.tar.gz)
+  - [mediabot_v3-3.1.tar.xz](https://teuk.org/downloads/mediabot/mediabot_v3-3.1.tar.xz)
+  - [SHA256SUMS](https://teuk.org/downloads/mediabot/SHA256SUMS)
 
 ---
 
@@ -301,7 +314,7 @@ That means:
 
 See:
 
-- `LICENSE.md`
+- [LICENSE.md](LICENSE.md)
 
 ---
 
@@ -309,4 +322,4 @@ See:
 
 If you are here to install Mediabot, start with the stable release tarball and then read the wiki:
 
-- `https://github.com/teuk/mediabot_v3/wiki`
+- [Mediabot Wiki](https://github.com/teuk/mediabot_v3/wiki)
