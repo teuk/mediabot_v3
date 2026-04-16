@@ -1,184 +1,312 @@
-# Mediabot - https://teuk.org
-  Mediabotv3 is a perl Net::Async::IRC bot now tho I started it with Net::IRC which is now deprecated
-  It is still a beta version after all these years but a release is coming up
-WHAT IS MEDIABOT?
-  Mediabot is a Net::Async::IRC bot tested on Undernet ircu server, Libera and Epiknet (but it may supports other networks)
-  The bot joins a console channel where it will notice its action
-  Go to the Wiki section and read Installation chapter to know how to deploy it.
-  The full documentation is in the Wiki section : https://github.com/teuk/mediabot_v3/wiki
-# mediabot_v3
-I've been coding this bot for a while, and it's time to write documentation (about time)
-This perl bot is using Net::Async::IRC and a MySQL/MariaDB backend. I tried to make things easier to install by running the configure script but sometimes it needs manual actions. Check the Installation chapter for hints.
-I hope you'll have fun using mediabot :)
-TeuK
-# Notes
-Get the latest news on Mediabot here : [https://teuk.org/forum](https://teuk.org/forum/c/mediabot)
-## Installation
-### Creating a dedicated user
-This is an installation example on Debian GNU/Linux 13 (trixie)
-Add a mediabot user :
-```
-sudo useradd -m -s /bin/bash mediabot
-```
-Now, give sudo rights to mediabot user and keep in mind that you MUST remove this file after the installation !
-If you don't, you let an irc bot running with root privileges (trust me you don't want that).
-```
-echo 'mediabot ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/mediabot
-```
-### Required packages installation
-Install needed packages :
-```
-sudo apt install build-essential mariadb-server mariadb-client libmariadb-dev libmariadb-dev-compat git curl cpanminus chromium yt-dlp
-```
-### Bot installation
-Now get the bot as mediabot user and run configure script :
-```
-sudo -iu mediabot
-git clone https://github.com/teuk/mediabot_v3
-cd mediabot_v3
-```
-The following script is supposed to do all the work for DB creation and Perl modules installation (but you may have to do manual actions sometimes) :
-```
+# Mediabot v3
+
+Mediabot is a multi-purpose IRC bot written in Perl.
+
+It is designed for real-world IRC operations and long-term use, with support for channel administration, user and hostmask management, database-backed commands, runtime administration, utility features, analytics, media helpers, URL title handling, and a dedicated TCP admin interface called **Partyline**.
+
+---
+
+## Release status
+
+- **Stable release:** `3.1`
+- **Current development line:** `3.2-dev`
+
+Mediabot now follows a simple versioning rule:
+
+- **odd minor versions** = **stable releases**
+- **even minor versions** = **development / beta lines**
+
+Examples:
+- `3.1` = stable release
+- `3.2-dev` = development line
+- `3.3` = next stable release
+
+This makes it immediately clear whether a version is intended for:
+- deployment
+- testing
+- active development
+
+---
+
+## Which version should I use?
+
+## Stable release (`3.1`)
+Choose the stable release if you want:
+- the recommended version for deployment
+- the documented installation path
+- a release tarball-based install
+- a cleaner, validated baseline
+
+This is the right choice for most users.
+
+## Development version (`3.2-dev`)
+Choose the development version if you want:
+- the latest work in progress
+- Git-based development access
+- changes that may not yet be fully documented or finalized
+- the current development branch after the 3.1 release
+
+This is the right choice for contributors and testers.
+
+---
+
+## Installation paths
+
+## Stable release install
+
+Use the release tarball for the stable version.
+
+### `.tar.gz`
+```bash
+wget https://teuk.org/downloads/mediabot/mediabot_v3-3.1.tar.gz
+tar xzf mediabot_v3-3.1.tar.gz
+cd mediabot_v3-3.1
 ./configure
 ```
-### Running the test framework
 
-Before running the bot, you can verify that the core logic is working correctly by running the test suite (no IRC connection required) :
-
-```
-perl t/test_commands.pl
-```
-
-All tests should pass :
-
-```
-[ 01_context.t ]
-[ 02_dispatch.t ]
-[ 03_auth.t ]
-[ 04_mockbot.t ]
-============================================================
-PASSED : 115/115  (13s)
-============================================================
+### `.tar.xz`
+```bash
+wget https://teuk.org/downloads/mediabot/mediabot_v3-3.1.tar.xz
+tar xJf mediabot_v3-3.1.tar.xz
+cd mediabot_v3-3.1
+./configure
 ```
 
-For detailed output of each individual test :
+## Development install (`3.2-dev`)
 
-```
-perl t/test_commands.pl --verbose
-```
+Use Git for the development version.
 
-Available options :
-
-```
---verbose, -v          Show each test result [OK]/[FAIL]
---filter,  -f <pat>    Run only files matching <pat>  (e.g. --filter 03)
---nick,    -n <nick>   Default nick for test messages  (default: testuser)
---host        <host>   Default hostname                (default: test.host)
---channel, -c <chan>   Default channel                 (default: #test)
---botnick, -b <n>      Bot nick                        (default: mediabot)
---cmdchar     <char>   Command character               (default: !)
+```bash
+git clone https://github.com/teuk/mediabot_v3.git
+cd mediabot_v3
+./configure
 ```
 
-### Running the live IRC test framework
+---
 
-The live test framework connects a real bot instance and a spy client to an IRC server, creates a dedicated `mediabot_test` database, runs a series of end-to-end tests, then tears everything down automatically.
+## Validated baseline
 
-**Requirements :**
-- An accessible IRC server (local ircu on `localhost:6667` is recommended for speed and reliability)
-- `sudo mysql` access (socket authentication, no password required)
-- All Perl dependencies already installed by `./configure`
+The 3.1 release cycle included a full validation pass on a **fresh Debian 13** environment.
 
-**Basic usage against a local ircu server :**
+That work helped identify and fix issues that a long-lived development machine can easily hide, including:
+- install script edge cases
+- schema mismatches
+- missing or brittle Perl dependency handling
+- runtime restart/jump path issues
+- test framework inconsistencies
+- admin/runtime edge cases
 
-```
-perl t/test_live.pl --server localhost --port 6667 --channel '#mbtest'
-```
+This was a major step toward making Mediabot a cleaner and more deliberate release.
 
-All tests should pass :
+---
 
-```
-[ 01_connect.t ]
-[ 02_commands.t ]
-[ 03_auth_live.t ]
-============================================================
-PASSED : 13/13  (22s)
-============================================================
-```
+## Key features
 
-For detailed output of each individual test :
+Depending on configuration and enabled features, Mediabot can provide:
 
-```
-perl t/test_live.pl --verbose --server localhost --port 6667 --channel '#mbtest'
-```
+- IRC channel administration and moderation
+- bot user and hostmask management
+- managed channel registration and channel settings
+- database-backed public commands
+- analytics and activity/statistics helpers
+- URL title handling
+- YouTube / TMDB / media helpers
+- timers and runtime administration
+- Partyline TCP admin interface
+- utility and conversational commands
+- radio-oriented helpers where configured
 
-Keep the test database after the run for inspection :
+---
 
-```
-perl t/test_live.pl --keep-db --server localhost --port 6667 --channel '#mbtest'
-```
+## Important runtime notes
 
-Available options :
+## Chromium
+Mediabot may use **Chromium** at runtime for some modern URL-title handling cases where a simple static HTTP fetch is not enough.
 
-```
---server, -s  <host>   IRC server              (default: irc.libera.chat)
---port        <port>   IRC port                (default: 6667)
---channel, -c <chan>   Test channel            (default: ##mbtest)
---botnick, -b <nick>   Bot nick                (default: mbtest_XXXX)
---spynick     <nick>   Spy client nick         (default: mbspy_XXXX)
---cmdchar     <char>   Command character       (default: !)
---timeout, -t <sec>    Per-reply timeout       (default: 30)
---keep-db              Keep mediabot_test DB after tests
---verbose, -v          Show each test result [OK]/[FAIL]
---filter, -f  <pat>    Run only files matching <pat>  (e.g. --filter 02)
+If you want full expected 3.1 URL-title behavior, install Chromium.
+
+On Debian 13, for example:
+
+```bash
+sudo apt update
+sudo apt install -y chromium
 ```
 
-### Running the bot
-If everything's ok then test in foreground using your config file e.g :
+## Hailo
+The dependency path for **Hailo** may require a fallback install path during setup.
+
+This is handled by the project install scripts, but it is worth knowing if you are validating a fresh system or reviewing dependency logs.
+
+---
+
+## Main entry points
+
+After installation:
+
+### Configure
+```bash
+./configure
 ```
-./mediabot.pl --conf=mediabot.conf
+
+### Start in foreground
+```bash
+./start
 ```
+
+### Start in background
+```bash
+./daemon
 ```
-[06/08/2022 06:31:37] Reading configuration file mediabot.conf
-[06/08/2022 06:31:37] mediabot.conf loaded.
-[06/08/2022 06:31:37] Getting current version from VERSION file
-[06/08/2022 06:31:37] -> Mediabot devel version 3.0 (20220801_111934)
-[06/08/2022 06:31:37] Checking latest version from github (https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION)
-[06/08/2022 06:31:37] -> Mediabot github devel version 3.0 (20220801_111934)
-[06/08/2022 06:31:37] Mediabot is up to date
-[06/08/2022 06:31:37] Mediabot v3.0dev-20220801_111934 started in foreground with debug level 0
-[06/08/2022 06:31:37] Logged out all users
-[06/08/2022 06:31:37] Picked irc.mediabot.rules from Network Mediabot_Rules
-[06/08/2022 06:31:37] Initialize Hailo
-[06/08/2022 06:31:37] Connection nick : mediabot
-[06/08/2022 06:31:37] Trying to connect to irc.mediabot.rules:6667 (pass : none defined)
-[06/08/2022 06:31:37] *** Looking up your hostname
-[06/08/2022 06:31:37] *** Checking Ident
-[06/08/2022 06:31:37] *** Found your hostname
-[06/08/2022 06:31:37] *** Got ident response
-[06/08/2022 06:31:37] on_login() Connected to irc server irc.mediabot.rules
-[06/08/2022 06:31:37] Checking timers to set at startup
-[06/08/2022 06:31:37] No timer to set at startup
-[06/08/2022 06:31:37] on_login() Setting user mode +i
-[06/08/2022 06:31:37] Trying to join #mediabot
-[06/08/2022 06:31:37] No channel to auto join
-[06/08/2022 06:31:37] -irc.mediabot.rules- Highest connection count: 2 (2 clients)
-[06/08/2022 06:31:37] -irc.mediabot.rules- on 1 ca 1(4) ft 10(10) tr
+
+### Stop
+```bash
+./stop
 ```
-And you should see the bot join on #mediabot console channel :
+
+---
+
+## Documentation
+
+The GitHub wiki is the main documentation hub.
+
+Recommended reading order:
+
+1. Installation
+2. Configuration
+3. Public commands
+4. Private and admin commands
+5. Partyline
+6. Troubleshooting
+7. Testing
+8. Release and upgrade notes
+
+Wiki:
+- `https://github.com/teuk/mediabot_v3/wiki`
+
+---
+
+## Partyline
+
+Mediabot includes a dedicated TCP admin interface called **Partyline**.
+
+It allows authenticated operators to:
+- inspect bot state
+- send messages
+- join or part channels
+- reload runtime state
+- restart the bot
+- terminate the bot
+
+This interface is documented separately in the wiki and should be treated as an administrative surface.
+
+---
+
+## Fresh install and release philosophy
+
+The goal of the 3.1 cycle was not only to keep adding features, but to make the project:
+
+- installable on a fresh system
+- more predictable at runtime
+- easier to test
+- easier to document
+- easier to release cleanly
+
+That is why 3.1 matters.
+
+It is not just another snapshot: it is a proper stable release target.
+
+---
+
+## Stable release vs development tree
+
+A stable release should be:
+- downloadable
+- documented
+- testable
+- understandable without guessing
+
+A development tree should be:
+- the place where active work continues
+- clearly identified as development
+- used by contributors and testers
+
+This is why Mediabot now distinguishes clearly between:
+- **stable tarball**
+- **development Git tree**
+
+---
+
+## Recommended post-install validation
+
+After installation, at minimum verify:
+
+- the bot parses cleanly
+- required Perl modules are visible
+- DB connection works
+- startup works
+- expected channels join
+- auth path works
+- rehash works
+- restart works
+- Partyline works if enabled
+
+The project also includes a live testing path for deeper validation.
+
+See the wiki page:
+- `Testing`
+
+---
+
+## Verify downloads
+
+You can verify the release archives with the published SHA256 checksums.
+
+### Download checksum file
+```bash
+wget https://teuk.org/downloads/mediabot/SHA256SUMS
 ```
-[06:30:25] * Now talking in #mediabot
-[06:31:39] * Joins: mediabot (mediabot@mediabot.mediabot.rules)
+
+### Verify the `.tar.gz` archive
+```bash
+sha256sum -c SHA256SUMS --ignore-missing
 ```
-To run the bot in daemon mode :
-```
-./mediabot.pl --conf=mediabot.conf --daemon
-```
-Always have a look at what is going on :
-```
-tail -40f mediabot.log
-```
-DON'T FORGET TO REMOVE SUDO RIGHTS, THIS IS IMPORTANT ! :
-```
-sudo rm -fv /etc/sudoers.d/mediabot
-```
-Once you did all that, register your bot and see the commands available in Wiki section : https://github.com/teuk/mediabot_v3/wiki
+
+If you downloaded only one archive, `--ignore-missing` avoids errors for files that are not present locally.
+
+---
+
+## Project links
+
+- Repository: `https://github.com/teuk/mediabot_v3`
+- Wiki: `https://github.com/teuk/mediabot_v3/wiki`
+- Stable downloads:
+  - `https://teuk.org/downloads/mediabot/mediabot_v3-3.1.tar.gz`
+  - `https://teuk.org/downloads/mediabot/mediabot_v3-3.1.tar.xz`
+  - `https://teuk.org/downloads/mediabot/SHA256SUMS`
+
+---
+
+## Current release direction
+
+- **3.1** is the stable release
+- **3.2-dev** is the active development line
+
+That means:
+- users should prefer the **3.1 tarball**
+- contributors and testers should follow **3.2-dev** in Git
+
+---
+
+## License
+
+See:
+
+- `LICENSE.md`
+
+---
+
+## Next step
+
+If you are here to install Mediabot, start with the stable release tarball and then read the wiki:
+
+- `https://github.com/teuk/mediabot_v3/wiki`
