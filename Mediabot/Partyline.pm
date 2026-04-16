@@ -24,6 +24,7 @@ package Mediabot::Partyline;
 use strict;
 use warnings;
 use POSIX qw(setsid);
+use File::Basename qw(dirname);
 use IO::Async::Listener;
 use IO::Async::Stream;
 use Scalar::Util qw(weaken);
@@ -445,7 +446,9 @@ sub _cmd_part {
         return;
     }
 
-    $bot->{irc}->send_message("PART", undef, $chan);
+    $bot->partChannel($chan, "Partyline requested part");
+    delete $bot->{channel_nicklist_timers}{$chan} if exists $bot->{channel_nicklist_timers}{$chan};
+    $bot->sethChannelsNicksOnChan($chan, ());
     $bot->{logger}->log(2, "Partyline: $nick requested PART $chan");
     $stream->write("Parting $chan...\r\n");
 }
@@ -495,6 +498,7 @@ sub _cmd_raw {
         return;
     }
 
+    $raw =~ s/[\r\n]//g;    # strip embedded CR/LF to prevent IRC command injection
     $bot->{irc}->write($raw . "\x0d\x0a");
     $bot->{logger}->log(2, "Partyline: $nick sent RAW: $raw");
     $stream->write("RAW -> $raw\r\n");
@@ -557,13 +561,20 @@ sub _cmd_restart {
         push @restart_args, "--server=" . $bot->{requested_server};
     }
 
+    # Resolve mb_restart.sh path relative to this module's location,
+    # not the process CWD — safe regardless of how the bot was launched.
+    my $bot_dir     = dirname(dirname(__FILE__));   # Mediabot/ -> bot root
+    my $restart_bin = "$bot_dir/mb_restart.sh";
+
     my $child_pid;
     if (defined($child_pid = fork())) {
         if ($child_pid == 0) {
             setsid;
-            exec "./mb_restart.sh", @restart_args;
+            exec $restart_bin, @restart_args;
             exit 1;
         } else {
+            $stream->close_when_empty;
+            $self->_close_session($id);
             $bot->{Quit} = 1;
             $bot->{irc}->send_message("QUIT", undef, "Partyline requested restart");
         }
@@ -592,6 +603,9 @@ sub _cmd_die {
 
     $bot->{logger}->log(2, "Partyline: $nick requested die ($msg)");
     $stream->write("Terminating bot...\r\n");
+
+    $stream->close_when_empty;
+    $self->_close_session($id);
 
     $bot->{Quit} = 1;
     $bot->{irc}->send_message("QUIT", undef, $msg);

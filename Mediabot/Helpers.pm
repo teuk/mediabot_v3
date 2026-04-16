@@ -739,7 +739,7 @@ sub partChannel {
     # Send PART
     eval {
         # Net::Async::IRC style
-        $self->{irc}->send_message("PART", $channel, $reason);
+        $self->{irc}->send_message("PART", undef, ($channel, $reason));
         1;
     } or do {
         my $err = $@ || 'unknown error';

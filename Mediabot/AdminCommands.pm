@@ -7,6 +7,7 @@ package Mediabot::AdminCommands;
 
 use strict;
 use warnings;
+use File::Basename qw(dirname);
 use POSIX qw(strftime setsid);
 use Exporter 'import';
 use List::Util qw(min);
@@ -143,9 +144,12 @@ sub mbRestart {
     my $child_pid;
     if (defined($child_pid = fork())) {
         if ($child_pid == 0) {
-            $self->{logger}->log(1, "Restart request from " . $user->nickname);
+            my $bot_dir     = dirname(dirname(__FILE__));
+            my $restart_bin = "$bot_dir/mb_restart.sh";
+
+            $self->{logger}->log(1, "Restart request from " . $user->nickname . " using $restart_bin");
             setsid;
-            exec "./mb_restart.sh", @restart_args;
+            exec $restart_bin, @restart_args;
             exit 1;
         } else {
             botNotice($self, $sNick, "Restarting");
@@ -203,9 +207,12 @@ sub mbJump {
     my $child_pid;
     if (defined($child_pid = fork())) {
         if ($child_pid == 0) {
-            $self->{logger}->log(1, "Jump request from " . $user->nickname . " to $server");
+            my $bot_dir     = dirname(dirname(__FILE__));
+            my $restart_bin = "$bot_dir/mb_restart.sh";
+
+            $self->{logger}->log(1, "Jump request from " . $user->nickname . " to $server using $restart_bin");
             setsid;
-            exec "./mb_restart.sh", @restart_args, "--server=$server";
+            exec $restart_bin, @restart_args, "--server=$server";
             exit 1;
         } else {
             botNotice($self, $sNick, "Jumping to $server");
