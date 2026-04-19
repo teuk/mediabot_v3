@@ -297,6 +297,10 @@ sub setup_channel_nicklist_timers {
 sub rehash_runtime_state {
     my ($self) = @_;
 
+    if ($self->{metrics}) {
+        $self->{metrics}->inc('mediabot_rehash_total');
+    }
+
     my @done;
 
     unless ($self->readConfigFile()) {
@@ -932,6 +936,25 @@ sub mbCommandPublic {
         source  => 'public',
     );
 
+    if ($self->{metrics} && defined $cmd && length $cmd) {
+        $self->{metrics}->inc(
+            'mediabot_commands_public_total',
+            { command => $cmd }
+        );
+
+        if (defined $sChannel && $sChannel =~ /^#/) {
+            $self->{metrics}->inc(
+                'mediabot_channel_commands_total',
+                { channel => $sChannel }
+            );
+
+            $self->{metrics}->inc(
+                'mediabot_channel_commands_by_name_total',
+                { channel => $sChannel, command => $cmd }
+            );
+        }
+    }
+
     # ---------------------------------------------------------------------------
     # Command dispatch table
     # All handlers receive a Mediabot::Context object
@@ -1161,6 +1184,13 @@ sub mbCommandPrivate {
         context => $ctx,
         source  => 'private',
     );
+
+    if ($self->{metrics} && defined $sCommand && length $sCommand) {
+        $self->{metrics}->inc(
+            'mediabot_commands_private_total',
+            { command => $sCommand }
+        );
+    }
 
     # ---------------------------------------------------------------------------
     # Command dispatch table

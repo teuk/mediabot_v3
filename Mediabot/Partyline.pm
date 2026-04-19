@@ -126,6 +126,10 @@ sub _start_listener {
             $loop->add($stream);
             $stream->write("=== Mediabot Partyline ===\r\nlogin <user> <password>\r\n");
             $self->{bot}->{logger}->log(2, "Partyline: new connection (fd=$id)");
+
+            if ($self->{bot}->{metrics}) {
+                $self->{bot}->{metrics}->add('mediabot_partyline_sessions_current', 1);
+            }
         },
         on_resolve_error => sub {
             $bot->{logger}->log(0, "Partyline: resolve error: $_[0]");
@@ -142,6 +146,15 @@ sub _start_listener {
 
 sub _close_session {
     my ($self, $id) = @_;
+
+    if ($self->{bot}->{metrics}) {
+        my $current = $self->{bot}->{metrics}->get('mediabot_partyline_sessions_current');
+        $current = 0 unless defined $current;
+        if ($current > 0) {
+            $self->{bot}->{metrics}->add('mediabot_partyline_sessions_current', -1);
+        }
+    }
+
     delete $self->{users}{$id};
     delete $self->{streams}{$id};
 }
@@ -179,19 +192,53 @@ sub _handle_line {
         return;
     }
 
-    # ---- Authenticated : dispatch commands --------------------------------
-    if    ($line =~ /^\.help$/i)                         { $self->_cmd_help($stream, $id) }
-    elsif ($line =~ /^\.stat$/i)                         { $self->_cmd_stat($stream, $id) }
-    elsif ($line =~ /^\.say\s+(#\S+)\s+(.+)$/i)          { $self->_cmd_say($stream, $id, $1, $2) }
-    elsif ($line =~ /^\.who\s+(#\S+)$/i)                 { $self->_cmd_who($stream, $id, $1) }
-    elsif ($line =~ /^\.join\s+(#\S+)(?:\s+(\S+))?$/i)   { $self->_cmd_join($stream, $id, $1, $2) }
-    elsif ($line =~ /^\.part\s+(#\S+)$/i)                { $self->_cmd_part($stream, $id, $1) }
-    elsif ($line =~ /^\.nick\s+(\S+)$/i)                 { $self->_cmd_nick($stream, $id, $1) }
-    elsif ($line =~ /^\.raw\s+(.+)$/i)                   { $self->_cmd_raw($stream, $id, $1) }
-    elsif ($line =~ /^\.rehash$/i)                       { $self->_cmd_rehash($stream, $id) }
-    elsif ($line =~ /^\.restart$/i)                      { $self->_cmd_restart($stream, $id) }
-    elsif ($line =~ /^\.die(?:\s+(.*))?$/i)              { $self->_cmd_die($stream, $id, $1 // "Partyline requested termination") }
+        # ---- Authenticated : dispatch commands --------------------------------
+    if    ($line =~ /^\.help$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.help' }) if $self->{bot}->{metrics};
+        $self->_cmd_help($stream, $id)
+    }
+    elsif ($line =~ /^\.stat$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.stat' }) if $self->{bot}->{metrics};
+        $self->_cmd_stat($stream, $id)
+    }
+    elsif ($line =~ /^\.say\s+(#\S+)\s+(.+)$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.say' }) if $self->{bot}->{metrics};
+        $self->_cmd_say($stream, $id, $1, $2)
+    }
+    elsif ($line =~ /^\.who\s+(#\S+)$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.who' }) if $self->{bot}->{metrics};
+        $self->_cmd_who($stream, $id, $1)
+    }
+    elsif ($line =~ /^\.join\s+(#\S+)(?:\s+(\S+))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.join' }) if $self->{bot}->{metrics};
+        $self->_cmd_join($stream, $id, $1, $2)
+    }
+    elsif ($line =~ /^\.part\s+(#\S+)$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.part' }) if $self->{bot}->{metrics};
+        $self->_cmd_part($stream, $id, $1)
+    }
+    elsif ($line =~ /^\.nick\s+(\S+)$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.nick' }) if $self->{bot}->{metrics};
+        $self->_cmd_nick($stream, $id, $1)
+    }
+    elsif ($line =~ /^\.raw\s+(.+)$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.raw' }) if $self->{bot}->{metrics};
+        $self->_cmd_raw($stream, $id, $1)
+    }
+    elsif ($line =~ /^\.rehash$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.rehash' }) if $self->{bot}->{metrics};
+        $self->_cmd_rehash($stream, $id)
+    }
+    elsif ($line =~ /^\.restart$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.restart' }) if $self->{bot}->{metrics};
+        $self->_cmd_restart($stream, $id)
+    }
+    elsif ($line =~ /^\.die(?:\s+(.*))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.die' }) if $self->{bot}->{metrics};
+        $self->_cmd_die($stream, $id, $1 // "Partyline requested termination")
+    }
     elsif ($line =~ /^\.quit$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.quit' }) if $self->{bot}->{metrics};
         $stream->write("Goodbye.\r\n");
         $stream->close_when_empty;
         $self->_close_session($id);
@@ -266,6 +313,10 @@ sub _do_login {
     $self->{users}{$id}{login}         = $login;
     $self->{users}{$id}{level}         = $row->{level};
     $self->{users}{$id}{level_desc}    = $row->{description};
+
+    if ($bot->{metrics}) {
+        $bot->{metrics}->inc('mediabot_partyline_logins_total');
+    }
 
     $bot->{logger}->log(2, "Partyline: '$login' authenticated (level=" . $row->{description} . ", fd=$id)");
     $stream->write("Authenticated as $login (" . $row->{description} . ").\r\nType .help for available commands.\r\n");

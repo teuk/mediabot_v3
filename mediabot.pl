@@ -17,6 +17,7 @@ use File::Basename;
 use Mediabot::Mediabot;
 use Mediabot::Conf;
 use Mediabot::Log;
+use Mediabot::Metrics;
 use Mediabot::DB;
 use Mediabot::Channel;
 use Mediabot::Partyline;
@@ -259,6 +260,10 @@ $mediabot->{logger}->log(0,"Mediabot v$MAIN_PROG_VERSION started in $sStartedMod
 $mediabot->{db} = Mediabot::DB->new($mediabot->{conf}, $mediabot->{logger});
 $mediabot->{dbh} = $mediabot->{db}->dbh;  # for compatibility with old code
 
+if ($mediabot->{metrics}) {
+    $mediabot->{metrics}->set('mediabot_db_connected', $mediabot->{dbh} ? 1 : 0);
+}
+
 # Check USER table and fail if not present
 $mediabot->dbCheckTables();
 
@@ -270,6 +275,13 @@ $mediabot->dbLogoutUsers();
 
 # Populate channels from database
 $mediabot->populateChannels();
+
+if ($mediabot->{metrics}) {
+    $mediabot->{metrics}->set(
+        'mediabot_channels_managed',
+        scalar(keys %{ $mediabot->{channels} || {} })
+    );
+}
 
 # Pick IRC Server
 $mediabot->pickServer();
@@ -284,6 +296,29 @@ $mediabot->init_hailo();
 my $loop = IO::Async::Loop->new;
 $mediabot->setLoop($loop);
 $mediabot->setup_channel_nicklist_timers();
+
+# Initialize Metrics
+$mediabot->{metrics} = Mediabot::Metrics->new(
+    enabled => $mediabot->{conf}->get('metrics.METRICS_ENABLED') || 0,
+    bind    => $mediabot->{conf}->get('metrics.METRICS_BIND')    || '127.0.0.1',
+    port    => $mediabot->{conf}->get('metrics.METRICS_PORT')    || 9108,
+    loop    => $loop,
+    logger  => $mediabot->{logger},
+);
+
+$mediabot->{metrics}->set_build_info(
+    version => $MAIN_PROG_VERSION || 'unknown',
+    network => $mediabot->{conf}->get('connection.CONN_SERVER_NETWORK') || 'unknown',
+    nick    => $mediabot->{conf}->get('connection.CONN_NICK') || 'unknown',
+);
+
+$mediabot->{metrics}->start_http_server();
+
+if ($mediabot->{metrics}) {
+    $mediabot->{metrics}->set('mediabot_db_connected', $mediabot->{dbh} ? 1 : 0);
+    $mediabot->{metrics}->set('mediabot_channels_managed', scalar(keys %{ $mediabot->{channels} || {} }));
+    $mediabot->{metrics}->set('mediabot_users_known', scalar(keys %{ $mediabot->{users} || {} })) if ref $mediabot->{users} eq 'HASH';
+}
 
 # Initialize Partyline
 my $partyline = Mediabot::Partyline->new(
@@ -521,6 +556,12 @@ sub on_timer_tick {
             my $delay = int($mediabot->{conf}->get('main.RECONNECT_DELAY') // 30);
             $delay = 30 if $delay < 5 || $delay > 600;
             $mediabot->{logger}->log(0,"Lost connection to server. Waiting $delay seconds to reconnect");
+
+            if ($mediabot->{metrics}) {
+                $mediabot->{metrics}->set('mediabot_irc_connected', 0);
+                $mediabot->{metrics}->inc('mediabot_irc_reconnect_total');
+            }
+
             sleep $delay;
             reconnect();
         }
@@ -636,6 +677,10 @@ sub on_login {
     my ( $self, $message, $hints ) = @_;
 
     $mediabot->{logger}->log(0,"on_login() Connected to irc server " . $mediabot->getServerHostname());
+    if ($mediabot->{metrics}) {
+        $mediabot->{metrics}->inc('mediabot_irc_login_total');
+        $mediabot->{metrics}->set('mediabot_irc_connected', 1);
+    }
     $mediabot->setQuit(0);
     $mediabot->setConnectionTimestamp(time);
     $mediabot->setLastRadioPub(time);
@@ -855,9 +900,17 @@ sub on_message_PRIVMSG {
     }
     if ( substr($where,0,1) eq '#' ) {
         # Message on channel
+        if ($mediabot->{metrics}) {
+            $mediabot->{metrics}->inc(
+                'mediabot_channel_lines_in_total',
+                { channel => $where }
+            );
+        }
+
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
             $mediabot->{logger}->log(0,"[LIVE] $where: <$who> $what");
         }
+        
         my $line = $what;
         $line =~ s/^\s+//;
         my ($sCommand,@tArgs) = split(/\s+/,$line);
@@ -1354,6 +1407,12 @@ sub on_message_ERROR {
         my $delay = int($mediabot->{conf}->get('main.RECONNECT_DELAY') // 30);
         $delay = 30 if $delay < 5 || $delay > 600;
         $mediabot->{logger}->log(0, "Reconnecting in $delay seconds...");
+
+        if ($mediabot->{metrics}) {
+            $mediabot->{metrics}->set('mediabot_irc_connected', 0);
+            $mediabot->{metrics}->inc('mediabot_irc_reconnect_total');
+        }
+
         sleep $delay;
         reconnect();
     }
