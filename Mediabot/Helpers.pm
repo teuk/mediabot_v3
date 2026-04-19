@@ -80,6 +80,7 @@ our @EXPORT = qw(
     userVerifyNick_ctx
     sethChannelNicks
     getLevel
+    get_user_from_whois
     getNickInfoWhois
     channelNicksRemove
     whereis
@@ -441,6 +442,7 @@ sub botPrivmsg {
 
         unless ($sth->execute($sTo)) {
             $self->{logger}->log(1, "logBotAction() SQL Error : $DBI::errstr | Query : $sQuery");
+            $self->{metrics}->inc('mediabot_db_query_errors_total') if $self->{metrics};
         } else {
             while (my $ref = $sth->fetchrow_hashref()) {
                 my $sBadwordDb = $ref->{badword};
@@ -469,6 +471,7 @@ sub botPrivmsg {
         }
         $sMsg =~ s/[\r\n]+/ /g;
 
+        $self->{metrics}->inc('mediabot_privmsg_out_total') if $self->{metrics};
         $self->{irc}->do_PRIVMSG(target => $sTo, text => $sMsg);
     } else {
         $self->{logger}->log(0, "botPrivmsg() ERROR no message specified to send to target");
@@ -574,6 +577,7 @@ sub botNotice {
     $self->{logger}->log(4, "[DEBUG] botNotice() sending encoded text length=" . length($encoded_text));
 
     # Envoi du NOTICE
+    $self->{metrics}->inc('mediabot_notice_out_total') if $self->{metrics};
     $self->{irc}->do_NOTICE(
         target => $target,
         text   => $encoded_text
@@ -2712,6 +2716,101 @@ sub getLevel {
 }
 
 # Get user info by matching hostmask (for WHOIS response)
+# ---------------------------------------------------------------------------
+# get_user_from_whois($hostmask) — like get_user_from_message but for WHOIS
+# Returns a Mediabot::User object (or undef) from a bare "ident\@host" mask.
+# Used in on_message_311 WHOIS handlers (userVerifyNick, userAuthNick, etc.)
+# ---------------------------------------------------------------------------
+sub get_user_from_whois {
+    my ($self, $whois_hostmask) = @_;
+
+    return undef unless defined $whois_hostmask && $whois_hostmask ne '';
+
+    require Mediabot::User;
+    require Mediabot::Auth;
+
+    $self->{auth} ||= Mediabot::Auth->new(
+        dbh    => $self->{dbh},
+        logger => $self->{logger},
+    );
+
+    my $sQuery = q{
+        SELECT
+            u.id_user,
+            u.nickname,
+            u.id_user_level,
+            u.auth,
+            u.password,
+            u.info1,
+            u.info2,
+            GROUP_CONCAT(uh.hostmask ORDER BY uh.id_user_hostmask SEPARATOR ',') AS hostmasks
+        FROM USER u
+        LEFT JOIN USER_HOSTMASK uh ON uh.id_user = u.id_user
+        GROUP BY u.id_user, u.nickname, u.id_user_level, u.auth, u.password, u.info1, u.info2
+        ORDER BY u.id_user
+    };
+
+    my $sth = $self->{dbh}->prepare($sQuery);
+    unless ($sth->execute) {
+        $self->{logger}->log(1, "get_user_from_whois() SQL Error: $DBI::errstr");
+        return undef;
+    }
+
+    my $best_ref   = undef;
+    my $best_mask  = undef;
+    my $best_score = -1;
+
+    while (my $ref = $sth->fetchrow_hashref()) {
+        my ($ok, $matched_mask, undef, $score) = $self->{auth}->hostmask_matches($ref, $whois_hostmask);
+        next unless $ok;
+        if ($score > $best_score) {
+            $best_ref   = { %$ref };
+            $best_mask  = $matched_mask;
+            $best_score = $score;
+        }
+    }
+    $sth->finish;
+
+    return undef unless $best_ref;
+
+    $self->{logger}->log(4, "get_user_from_whois() matched '$whois_hostmask' -> '$best_ref->{nickname}' (mask=$best_mask score=$best_score)");
+
+    # Resolve level + description
+    my $level     = undef;
+    my $level_desc = undef;
+    if (defined $best_ref->{id_user_level}) {
+        my $sth2 = $self->{dbh}->prepare(
+            "SELECT level, description FROM USER_LEVEL WHERE id_user_level = ?"
+        );
+        if ($sth2->execute($best_ref->{id_user_level})) {
+            if (my $r2 = $sth2->fetchrow_hashref) {
+                $level      = $r2->{level};
+                $level_desc = $r2->{description};
+            }
+        }
+        $sth2->finish;
+    }
+
+    my $user = Mediabot::User->new({
+        id_user       => $best_ref->{id_user},
+        nickname      => $best_ref->{nickname},
+        password      => $best_ref->{password},
+        username      => $best_ref->{nickname},
+        hostmasks     => $best_ref->{hostmasks},
+        info1         => $best_ref->{info1},
+        info2         => $best_ref->{info2},
+        id_user_level => $best_ref->{id_user_level},
+        auth          => $best_ref->{auth},
+    });
+
+    $user->{level}      = $level;
+    $user->{level_desc} = $level_desc;
+    $user->{dbh}        = $self->{dbh};
+
+    return $user;
+}
+
+
 sub getNickInfoWhois {
     my ($self, $sWhoisHostmask) = @_;
 

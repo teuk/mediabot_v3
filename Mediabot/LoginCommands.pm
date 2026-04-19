@@ -156,6 +156,7 @@ sub userLogin_ctx {
 
     unless (defined $id_user) {
         botNotice($self, $sNick, "Login failed (Unknown user).");
+        $self->{metrics}->inc('mediabot_auth_failure_total') if $self->{metrics};
         my $msg = ($ctx->message->prefix // '') . " Failed login (Unknown user: $typed_user)";
         $self->noticeConsoleChan($msg) if $self->can('noticeConsoleChan');
         logBot($self, $ctx->message, undef, "login", $typed_user, "Failed (Unknown user)");
@@ -223,6 +224,7 @@ sub userLogin_ctx {
             $desc;
         } // $level_id // "unknown";
         botNotice($self, $sNick, "Login successful as $db_nick (Level: $level_desc)");
+        $self->{metrics}->inc('mediabot_auth_success_total') if $self->{metrics};
 
         my $msg = ($ctx->message->prefix // '') . " Successful login as $db_nick (Level: $level_desc)";
         $self->noticeConsoleChan($msg) if $self->can('noticeConsoleChan');
@@ -230,6 +232,7 @@ sub userLogin_ctx {
     }
     else {
         botNotice($self, $sNick, "Login failed (Bad password).");
+        $self->{metrics}->inc('mediabot_auth_failure_total') if $self->{metrics};
         my $msg = ($ctx->message->prefix // '') . " Failed login (Bad password)";
         $self->noticeConsoleChan($msg) if $self->can('noticeConsoleChan');
         logBot($self, $ctx->message, undef, "login", $typed_user, "Failed (Bad password)");

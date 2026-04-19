@@ -161,6 +161,7 @@ sub mbRestart {
             exit 1;
         } else {
             botNotice($self, $sNick, "Restarting");
+            $self->{metrics}->inc('mediabot_restart_total') if $self->{metrics};
             logBot($self, $message, undef, "restart", "");
             $self->{Quit} = 1;
             $self->{irc}->send_message("QUIT", undef, "Be right back");
@@ -232,6 +233,7 @@ sub mbJump {
             exit 1;
         } else {
             botNotice($self, $sNick, "Jumping to $server");
+            $self->{metrics}->inc('mediabot_jump_total') if $self->{metrics};
             logBot($self, $message, undef, "jump", $server);
             $self->{Quit} = 1;
             $self->{irc}->send_message("QUIT", undef, "Changing server");

@@ -298,17 +298,24 @@ sub _log {
     my ($self, $level, $msg) = @_;
     return unless $self->{logger};
 
+    # Normalize level: accept numeric (0,1,2…) or symbolic ('INFO','ERROR',…)
+    my %_sym = ( INFO => 0, DEBUG => 2, WARN => 1, WARNING => 1, ERROR => 1 );
+    my $numeric_level = (defined $level && $level =~ /^[0-9]+$/)
+        ? $level
+        : ($_sym{ uc($level // '') } // 1);
+
     if ($self->{logger}->can('log')) {
-        eval { $self->{logger}->log($level, $msg); };
+        eval { $self->{logger}->log($numeric_level, $msg); };
         return;
     }
 
-    if ($self->{logger}->can('info') && $level eq 'INFO') {
+    # Fallback for loggers that only expose named methods
+    if ($numeric_level == 0 && $self->{logger}->can('info')) {
         eval { $self->{logger}->info($msg); };
         return;
     }
 
-    if ($self->{logger}->can('error') && $level eq 'ERROR') {
+    if ($numeric_level >= 1 && $self->{logger}->can('error')) {
         eval { $self->{logger}->error($msg); };
         return;
     }

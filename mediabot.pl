@@ -318,6 +318,8 @@ if ($mediabot->{metrics}) {
     $mediabot->{metrics}->set('mediabot_db_connected', $mediabot->{dbh} ? 1 : 0);
     $mediabot->{metrics}->set('mediabot_channels_managed', scalar(keys %{ $mediabot->{channels} || {} }));
     $mediabot->{metrics}->set('mediabot_users_known', scalar(keys %{ $mediabot->{users} || {} })) if ref $mediabot->{users} eq 'HASH';
+    $mediabot->{metrics}->set('mediabot_timers_current',
+        scalar(keys %{ $mediabot->{channel_nicklist_timers} || {} }));
 }
 
 # Initialize Partyline
@@ -888,6 +890,11 @@ sub on_message_PART {
     }
 
     $mediabot->channelNicksRemove($target_name, $sNick);
+    if ($sNick eq $self->nick && $mediabot->{metrics}) {
+        $mediabot->{metrics}->set('mediabot_channel_joined', 0, { channel => $target_name });
+        $mediabot->{metrics}->set('mediabot_current_channels',
+            scalar(keys %{ $mediabot->{channels} || {} }));
+    }
 }
 
 sub on_message_PRIVMSG {
@@ -898,6 +905,7 @@ sub on_message_PRIVMSG {
     if ( $mediabot->isIgnored($message,$where,$who,$what)) {
         return undef;
     }
+    $mediabot->{metrics}->inc('mediabot_privmsg_in_total') if $mediabot->{metrics};
     if ( substr($where,0,1) eq '#' ) {
         # Message on channel
         if ($mediabot->{metrics}) {
@@ -1154,6 +1162,10 @@ sub on_message_RPL_ENDOFNAMES {
         %{ $mediabot->{hChannelsNicksTmp} } = %tmp_nicklists;
 
         $mediabot->sethChannelsNicksEndOnChan($channel, 1);
+        if ($mediabot->{metrics}) {
+            $mediabot->{metrics}->set('mediabot_channel_nick_count',
+                scalar(@deduped), { channel => $channel });
+        }
         $mediabot->{logger}->log(4, "Finalized NAMES for $channel (" . scalar(@deduped) . " unique nicks)");
     }
 }
@@ -1193,6 +1205,11 @@ sub on_message_JOIN {
     if ( $sNick eq $self->nick ) {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
             $mediabot->{logger}->log(0,"[LIVE] * Now talking in $target_name");
+        }
+        if ($mediabot->{metrics}) {
+            $mediabot->{metrics}->set('mediabot_channel_joined', 1, { channel => $target_name });
+            $mediabot->{metrics}->set('mediabot_current_channels',
+                scalar(keys %{ $mediabot->{channels} || {} }));
         }
     }
     else {
@@ -1271,7 +1288,15 @@ sub on_message_RPL_WHOISUSER {
         switch($WHOIS_VARS{'sub'}) {
             case "userVerifyNick" {
                 $mediabot->{logger}->log(4,"WHOIS userVerifyNick");
-                my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = $mediabot->getNickInfoWhois("$ident\@$sHostname");
+                my $_whois_user = $mediabot->get_user_from_whois("$ident\@$sHostname");
+                my $iMatchingUserId        = $_whois_user ? eval { $_whois_user->id }                              : undef;
+                my $iMatchingUserLevel     = $_whois_user ? $_whois_user->{level}                                  : undef;
+                my $iMatchingUserLevelDesc = $_whois_user ? $_whois_user->{level_desc}                             : undef;
+                my $iMatchingUserAuth      = $_whois_user ? (eval { $_whois_user->is_authenticated } ? 1 : ($_whois_user->{auth} // 0)) : undef;
+                my $sMatchingUserHandle    = $_whois_user ? eval { $_whois_user->nickname }                        : undef;
+                my $sMatchingUserPasswd    = $_whois_user ? $_whois_user->{password}                               : undef;
+                my $sMatchingUserInfo1     = $_whois_user ? $_whois_user->{info1}                                  : undef;
+                my $sMatchingUserInfo2     = $_whois_user ? $_whois_user->{info2}                                  : undef;
                 if (defined($WHOIS_VARS{'caller'}) && ($WHOIS_VARS{'caller'} ne "")) {
                     if (defined($iMatchingUserId)) {
                         if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -1289,7 +1314,15 @@ sub on_message_RPL_WHOISUSER {
             }
             case "userAuthNick" {
                 $mediabot->{logger}->log(4,"WHOIS userAuthNick");
-                my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = $mediabot->getNickInfoWhois("$ident\@$sHostname");
+                my $_whois_user = $mediabot->get_user_from_whois("$ident\@$sHostname");
+                my $iMatchingUserId        = $_whois_user ? eval { $_whois_user->id }                              : undef;
+                my $iMatchingUserLevel     = $_whois_user ? $_whois_user->{level}                                  : undef;
+                my $iMatchingUserLevelDesc = $_whois_user ? $_whois_user->{level_desc}                             : undef;
+                my $iMatchingUserAuth      = $_whois_user ? (eval { $_whois_user->is_authenticated } ? 1 : ($_whois_user->{auth} // 0)) : undef;
+                my $sMatchingUserHandle    = $_whois_user ? eval { $_whois_user->nickname }                        : undef;
+                my $sMatchingUserPasswd    = $_whois_user ? $_whois_user->{password}                               : undef;
+                my $sMatchingUserInfo1     = $_whois_user ? $_whois_user->{info1}                                  : undef;
+                my $sMatchingUserInfo2     = $_whois_user ? $_whois_user->{info2}                                  : undef;
                 if (defined($WHOIS_VARS{'caller'}) && ($WHOIS_VARS{'caller'} ne "")) {
                     if (defined($iMatchingUserId)) {
                         if (defined($iMatchingUserAuth) && $iMatchingUserAuth) {
@@ -1315,7 +1348,15 @@ sub on_message_RPL_WHOISUSER {
             }
             case "userAccessChannel" {
                 $mediabot->{logger}->log(4,"WHOIS userAccessChannel");
-                my ($iMatchingUserId,$iMatchingUserLevel,$iMatchingUserLevelDesc,$iMatchingUserAuth,$sMatchingUserHandle,$sMatchingUserPasswd,$sMatchingUserInfo1,$sMatchingUserInfo2) = $mediabot->getNickInfoWhois("$ident\@$sHostname");
+                my $_whois_user = $mediabot->get_user_from_whois("$ident\@$sHostname");
+                my $iMatchingUserId        = $_whois_user ? eval { $_whois_user->id }                              : undef;
+                my $iMatchingUserLevel     = $_whois_user ? $_whois_user->{level}                                  : undef;
+                my $iMatchingUserLevelDesc = $_whois_user ? $_whois_user->{level_desc}                             : undef;
+                my $iMatchingUserAuth      = $_whois_user ? (eval { $_whois_user->is_authenticated } ? 1 : ($_whois_user->{auth} // 0)) : undef;
+                my $sMatchingUserHandle    = $_whois_user ? eval { $_whois_user->nickname }                        : undef;
+                my $sMatchingUserPasswd    = $_whois_user ? $_whois_user->{password}                               : undef;
+                my $sMatchingUserInfo1     = $_whois_user ? $_whois_user->{info1}                                  : undef;
+                my $sMatchingUserInfo2     = $_whois_user ? $_whois_user->{info2}                                  : undef;
                 if (defined($WHOIS_VARS{'caller'}) && ($WHOIS_VARS{'caller'} ne "")) {
                     unless (defined($sMatchingUserHandle)) {
                         $mediabot->botNotice($WHOIS_VARS{'caller'},"No Match!");

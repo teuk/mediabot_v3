@@ -903,6 +903,10 @@ sub joinChannels {
         my $name = $chan->get_name;
         my $key  = $chan->get_key;
 
+        if ($self->{metrics}) {
+            $self->{metrics}->set('mediabot_channel_autojoin', 1, { channel => $name });
+        }
+
         joinChannel($self, $name, $key);
         $self->{logger}->log( 2, "Joining channel $name");
     }
@@ -1075,7 +1079,12 @@ sub mbCommandPublic {
     # Dispatch known command
     if (my $handler = $command_map{$cmd}) {
         $self->{logger}->log(4, "PUBLIC: $sNick triggered $sCommand on $sChannel");
-        $handler->();
+        eval { $handler->() };
+        if ($@) {
+            $self->{logger}->log(1, "PUBLIC command '$cmd' error: $@");
+            $self->{metrics}->inc('mediabot_command_errors_total', { command => $cmd })
+                if $self->{metrics};
+        }
         return;
     }
 
