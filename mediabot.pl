@@ -1619,6 +1619,17 @@ sub reconnect {
     }
     $mediabot->setup_channel_nicklist_timers();
 
+    # Remove old main timer from loop before creating a new one.
+    # Without this, each reconnect adds a new timer while the old one
+    # stays in the loop -> on_timer_tick fires N times per tick after N restarts.
+    my $old_timer = $mediabot->getMainTimerTick();
+    if ($old_timer) {
+        eval {
+            $old_timer->stop if $old_timer->can('stop');
+            $loop->remove($old_timer);
+        };
+    }
+
     # Fresh timer
     $timer = IO::Async::Timer::Periodic->new(
         interval => 5,
