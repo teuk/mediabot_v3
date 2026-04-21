@@ -66,6 +66,44 @@ sub log {
     if (my $fh = $self->{logfilehandle}) {
         print $fh $logline;
     }
+
+    # Dispatch to partyline console hooks
+    # Each hook: { level => N, cb => sub { } }
+    # The logline sent to partyline strips trailing \n and uses \r\n
+    if ($self->{_console_hooks} && %{ $self->{_console_hooks} }) {
+        my $pl_line = $logline;
+        $pl_line =~ s/\n$//;
+        for my $id (keys %{ $self->{_console_hooks} }) {
+            my $hook = $self->{_console_hooks}{$id};
+            next unless $hook && $hook->{cb};
+            next if $level > ($hook->{level} // 0);
+            eval { $hook->{cb}->($pl_line) };
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Console hook API — used by Partyline to redirect logs to connected sessions
+# ---------------------------------------------------------------------------
+
+# Register a partyline session to receive log lines up to $hook_level
+sub add_console_hook {
+    my ($self, $id, $hook_level, $cb) = @_;
+    $self->{_console_hooks} //= {};
+    $self->{_console_hooks}{$id} = { level => ($hook_level // 0), cb => $cb };
+}
+
+# Remove a hook (called when session disconnects or disables console)
+sub remove_console_hook {
+    my ($self, $id) = @_;
+    delete $self->{_console_hooks}{$id} if $self->{_console_hooks};
+}
+
+# Return current hook level for a session (undef = not hooked)
+sub get_console_hook_level {
+    my ($self, $id) = @_;
+    return undef unless $self->{_console_hooks} && $self->{_console_hooks}{$id};
+    return $self->{_console_hooks}{$id}{level};
 }
 
 # ---------------------------------------------------------------------------

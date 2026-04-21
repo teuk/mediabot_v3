@@ -321,6 +321,61 @@ sub rehash_runtime_state {
     $self->{logger}->log(1, "Rehash runtime state completed: " . join(', ', @done));
     return 1;
 }
+# ---------------------------------------------------------------------------
+# restart_irc() — reconnect to IRC without killing the process
+# The Partyline stays alive. Called from Partyline .restart command.
+# ---------------------------------------------------------------------------
+sub restart_irc {
+    my ($self, %opts) = @_;
+
+    my $reason = $opts{reason} // "Restarting IRC connection";
+    my $server = $opts{server} // undef;   # optional jump target
+
+    $self->{logger}->log(1, "restart_irc(): initiating IRC restart ($reason)");
+
+    # Override server if jumping
+    if (defined $server && $server ne '') {
+        $self->{requested_server} = $server;
+        $self->{logger}->log(1, "restart_irc(): will connect to $server after restart");
+    }
+
+    # Signal reconnect (not clean exit)
+    $self->{Quit} = 0;
+
+    # Send QUIT to the IRC server (best-effort — socket may already be gone)
+    eval {
+        if ($self->{irc} && $self->{irc}->is_connected) {
+            $self->{irc}->send_message("QUIT", undef, $reason);
+        }
+    };
+
+    # Detach the IRC object from the loop immediately so:
+    #   a) the QUIT has no more handlers processing incoming data
+    #   b) reconnect() in on_timer_tick can safely add a fresh IRC object
+    #   c) the Partyline listener (also in the loop) is untouched
+    my $loop = $self->can('getLoop') ? $self->getLoop : undef;
+    if ($loop && $self->{irc}) {
+        eval { $loop->remove($self->{irc}) };
+        $self->{irc} = undef;
+        $self->setIrc(undef) if $self->can('setIrc');
+    }
+
+    # Invalidate connection timestamp so the grace period does not block
+    # the next on_timer_tick reconnect check.
+    $self->setConnectionTimestamp(0) if $self->can('setConnectionTimestamp');
+
+    if ($self->{metrics}) {
+        $self->{metrics}->inc('mediabot_restart_total');
+    }
+
+    # on_timer_tick fires every 5s; it will detect irc=undef / is_connected=false
+    # and call reconnect() through the normal code path.
+    $self->{logger}->log(1, "restart_irc(): IRC detached — on_timer_tick will reconnect");
+
+    return 1;
+}
+
+
 
 # get debug level from configuration
 sub getDebugLevel {

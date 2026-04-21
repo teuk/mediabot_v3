@@ -44,6 +44,7 @@ sub new {
         port    => $args{port} || 23456,
         streams => {},                      # fd => IO::Async::Stream
         users   => {},                      # fd => { authenticated, login, level, level_desc }
+        motd    => $args{motd} || [],       # MOTD lines shown after login
     };
 
     bless $self, $class;
@@ -90,6 +91,8 @@ sub _start_listener {
                 rate_count     => 0,
                 # Brute-force: max 5 failed login attempts before disconnect
                 login_failures => 0,
+                # Console: log level redirected to this session (undef = off)
+                console_level  => undef,
             };
             $self->{streams}{$id} = $stream;
 
@@ -119,6 +122,10 @@ sub _start_listener {
                 },
                 on_closed => sub {
                     $self->{bot}->{logger}->log(3, "Partyline connection closed (fd=$id)");
+                    my $nick = ($self->{users}{$id} && $self->{users}{$id}{authenticated})
+                        ? ($self->{users}{$id}{login} // '')
+                        : '';
+                    $self->_broadcast("*** $nick left the partyline (disconnected). ***") if $nick;
                     $self->_close_session($id);
                 },
             );
@@ -155,8 +162,43 @@ sub _close_session {
         }
     }
 
+    # Remove console hook from logger if active
+    if ($self->{bot} && $self->{bot}->{logger}
+        && $self->{bot}->{logger}->can('remove_console_hook')) {
+        $self->{bot}->{logger}->remove_console_hook($id);
+    }
+
     delete $self->{users}{$id};
     delete $self->{streams}{$id};
+}
+
+# ---------------------------------------------------------------------------
+# _broadcast($msg, $exclude_id)
+# Send a message to all authenticated partyline users, optionally skipping
+# one session (typically the sender).
+# ---------------------------------------------------------------------------
+sub _broadcast {
+    my ($self, $msg, $exclude_id) = @_;
+    $exclude_id //= -1;
+
+    for my $fid (keys %{ $self->{users} }) {
+        next if $fid == $exclude_id;
+        next unless $self->{users}{$fid}{authenticated};
+        my $stream = $self->{streams}{$fid};
+        next unless $stream;
+        $stream->write($msg . "\r\n");
+    }
+}
+
+# ---------------------------------------------------------------------------
+# _broadcast_chat($nick, $text, $exclude_id)
+# Broadcast a chat line in Eggdrop partyline style:
+#   <nick> text
+# ---------------------------------------------------------------------------
+sub _broadcast_chat {
+    my ($self, $nick, $text, $exclude_id) = @_;
+    $self->_broadcast("<$nick> $text", $exclude_id);
+    $self->{bot}->{logger}->log(2, "Partyline chat <$nick> $text");
 }
 
 # +---------------------------------------------------------------------------+
@@ -201,6 +243,26 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.stat' }) if $self->{bot}->{metrics};
         $self->_cmd_stat($stream, $id)
     }
+    elsif ($line =~ /^\.console(?:\s+(.*))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.console' }) if $self->{bot}->{metrics};
+        $self->_cmd_console($stream, $id, $1)
+    }
+    elsif ($line =~ /^\.whom$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.whom' }) if $self->{bot}->{metrics};
+        $self->_cmd_whom($stream, $id)
+    }
+    elsif ($line =~ /^\.match\s+(\S+)$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.match' }) if $self->{bot}->{metrics};
+        $self->_cmd_match($stream, $id, $1)
+    }
+    elsif ($line =~ /^\.boot\s+(\S+)$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.boot' }) if $self->{bot}->{metrics};
+        $self->_cmd_boot($stream, $id, $1)
+    }
+    elsif ($line =~ /^\.motd(?:\s+(.*))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.motd' }) if $self->{bot}->{metrics};
+        $self->_cmd_motd($stream, $id, $1)
+    }
     elsif ($line =~ /^\.say\s+(#\S+)\s+(.+)$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.say' }) if $self->{bot}->{metrics};
         $self->_cmd_say($stream, $id, $1, $2)
@@ -229,9 +291,9 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.rehash' }) if $self->{bot}->{metrics};
         $self->_cmd_rehash($stream, $id)
     }
-    elsif ($line =~ /^\.restart$/i) {
+    elsif ($line =~ /^\.restart(?:\s+(.*))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.restart' }) if $self->{bot}->{metrics};
-        $self->_cmd_restart($stream, $id)
+        $self->_cmd_restart($stream, $id, $1)
     }
     elsif ($line =~ /^\.die(?:\s+(.*))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.die' }) if $self->{bot}->{metrics};
@@ -239,12 +301,25 @@ sub _handle_line {
     }
     elsif ($line =~ /^\.quit$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.quit' }) if $self->{bot}->{metrics};
+        my $nick = $self->{users}{$id}{login} // 'unknown';
+        $self->_broadcast("*** $nick left the partyline. ***", $id);
         $stream->write("Goodbye.\r\n");
         $stream->close_when_empty;
         $self->_close_session($id);
     }
-    else {
+    elsif ($line =~ /^\./) {
+        # Unknown dot-command
         $stream->write("Unknown command. Type .help for available commands.\r\n");
+    }
+    else {
+        # Chat broadcast — anything not starting with '.' goes to everyone
+        my $nick = $self->{users}{$id}{login} // 'unknown';
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => 'chat' })
+            if $self->{bot}->{metrics};
+        # Echo back to sender with same format so they see their own message
+        $stream->write("<$nick> $line\r\n");
+        # Broadcast to all other authenticated users
+        $self->_broadcast_chat($nick, $line, $id);
     }
 }
 
@@ -320,6 +395,15 @@ sub _do_login {
 
     $bot->{logger}->log(2, "Partyline: '$login' authenticated (level=" . $row->{description} . ", fd=$id)");
     $stream->write("Authenticated as $login (" . $row->{description} . ").\r\nType .help for available commands.\r\n");
+
+    # Display MOTD if set
+    $self->_send_motd($stream) if @{ $self->{motd} || [] };
+
+    # Show who is on the partyline (Eggdrop-style auto .whom on join)
+    $self->_cmd_whom($stream, $id);
+
+    # Announce arrival to other partyline users
+    $self->_broadcast("*** $login joined the partyline. ***", $id);
 }
 
 # +---------------------------------------------------------------------------+
@@ -335,6 +419,8 @@ sub _cmd_help {
         "Available commands:\r\n"
       . "  .help               - this help\r\n"
       . "  .stat               - channel status (owner, chansets, nick count)\r\n"
+      . "  .whom               - list users currently on the partyline\r\n"
+      . "  .match <handle>     - show user record (wildcards * ? allowed)\r\n"
       . "  .say #chan <msg>    - send a message to a channel\r\n"
       . "  .who #chan          - list nicks present in a channel\r\n"
       . "  .join #chan [key]   - make the bot join a channel\r\n"
@@ -342,13 +428,278 @@ sub _cmd_help {
       . "  .nick <newnick>     - change the bot's nick\r\n"
       . "  .raw <IRC command>  - send a raw IRC command (Owner only)\r\n"
       . "  .rehash             - reload configuration and runtime state\r\n"
-      . "  .restart            - restart the bot (Owner only)\r\n"
-      . "  .die                - terminate the bot (Owner only)\r\n"
+      . "  .restart            - reconnect IRC without killing process (Owner)\r\n"
+      . "  .die                - terminate bot process entirely (Owner only)\r\n"
+      . "  .console [0-5|off]  - redirect bot log to this session\r\n"
+      . "  .boot <handle>      - kick a user off the partyline (Owner)\r\n"
+      . "  .motd [text|clear]  - show or set message of the day (Owner)\r\n"
       . "  .quit               - close this partyline session\r\n"
+      . "\r\n"
+      . "Chat:\r\n"
+      . "  <text>              - broadcast to all partyline users\r\n"
     );
 }
 
 # ---------------------------------------------------------------------------
+# .console — display or change per-session log redirect level
+# Usage : .console          → show current level
+#         .console <0-5>    → set level (0=INFO … 5=DEBUG5)
+#         .console off      → disable console
+sub _cmd_console {
+    my ($self, $stream, $id, $arg) = @_;
+
+    my $bot    = $self->{bot};
+    my $logger = $bot->{logger};
+
+    unless ($logger && $logger->can('add_console_hook')) {
+        $stream->write("Console hooks not supported by this logger.\r\n");
+        return;
+    }
+
+    if (!defined $arg || $arg eq '') {
+        my $cur = $self->{users}{$id}{console_level};
+        if (defined $cur) {
+            $stream->write("Console is ON at level $cur (0=INFO, 1=DEBUG1 … 5=DEBUG5).\r\n");
+        } else {
+            $stream->write("Console is OFF. Use .console <0-5> to enable.\r\n");
+        }
+        return;
+    }
+
+    if (lc($arg) eq 'off') {
+        $logger->remove_console_hook($id);
+        $self->{users}{$id}{console_level} = undef;
+        $stream->write("Console disabled.\r\n");
+        $bot->{logger}->log(2, "Partyline: " . ($self->{users}{$id}{login} // '?') . " disabled console (fd=$id)");
+        return;
+    }
+
+    unless ($arg =~ /^[0-5]$/) {
+        $stream->write("Usage: .console [0-5|off]  (0=INFO only, 5=all debug)\r\n");
+        return;
+    }
+
+    my $level = int($arg);
+    my $nick  = $self->{users}{$id}{login} // 'unknown';
+
+    $logger->add_console_hook($id, $level, sub {
+        my ($line) = @_;
+        return unless $self->{streams}{$id};
+        eval { $self->{streams}{$id}->write($line . "\r\n") };
+    });
+
+    $self->{users}{$id}{console_level} = $level;
+    $stream->write("Console enabled at level $level.\r\n");
+    $bot->{logger}->log(2, "Partyline: $nick set console level=$level (fd=$id)");
+}
+
+# .motd — display or set the partyline message of the day
+# Usage : .motd              → display current MOTD
+#         .motd <text>       → replace MOTD with a single line (Owner)
+#         .motd clear        → clear MOTD (Owner)
+sub _cmd_motd {
+    my ($self, $stream, $id, $arg) = @_;
+
+    my $nick = $self->{users}{$id}{login} // 'unknown';
+
+    if (!defined $arg || $arg eq '') {
+        $self->_send_motd($stream);
+        return;
+    }
+
+    # Modification requires Owner level
+    unless (defined($self->{users}{$id}{level}) && $self->{users}{$id}{level} == 0) {
+        $stream->write("Access denied: changing MOTD requires Owner level.\r\n");
+        return;
+    }
+
+    if (lc($arg) eq 'clear') {
+        $self->{motd} = [];
+        $stream->write("MOTD cleared.\r\n");
+        $self->{bot}->{logger}->log(2, "Partyline: $nick cleared MOTD");
+        return;
+    }
+
+    $self->{motd} = [ $arg ];
+    $stream->write("MOTD set.\r\n");
+    $self->{bot}->{logger}->log(2, "Partyline: $nick set MOTD to: $arg");
+}
+
+# Internal helper — send MOTD lines to a stream
+sub _send_motd {
+    my ($self, $stream) = @_;
+
+    my @lines = @{ $self->{motd} || [] };
+
+    if (!@lines) {
+        $stream->write("No MOTD set.\r\n");
+        return;
+    }
+
+    $stream->write("--- MOTD ---\r\n");
+    for my $line (@lines) {
+        $stream->write("$line\r\n");
+    }
+    $stream->write("--- End of MOTD ---\r\n");
+}
+
+# .whom — list all authenticated partyline sessions (Eggdrop style)
+sub _cmd_whom {
+    my ($self, $stream, $id) = @_;
+
+    my @lines;
+    my $count = 0;
+
+    for my $fid (sort { $a <=> $b } keys %{ $self->{users} }) {
+        my $u = $self->{users}{$fid};
+        next unless $u && $u->{authenticated};
+
+        my $nick       = $u->{login}        // '?';
+        my $level_desc = $u->{level_desc}   // '?';
+        my $con_level  = defined $u->{console_level}
+            ? "console:" . $u->{console_level}
+            : "console:off";
+        my $is_me      = ($fid == $id) ? " *" : "";
+
+        push @lines, sprintf("  %-14s  %-14s  fd=%-4d  %s%s",
+            $nick, $level_desc, $fid, $con_level, $is_me);
+        $count++;
+    }
+
+    if ($count == 0) {
+        $stream->write("No users currently on the partyline.\r\n");
+        return;
+    }
+
+    $stream->write(sprintf("Partyline users (%d):\r\n", $count));
+    $stream->write("  Nick            Level           Socket  Console\r\n");
+    $stream->write("  " . ("-" x 60) . "\r\n");
+    $stream->write("$_\r\n") for @lines;
+}
+
+# .match <handle> — show user record from database (Eggdrop whois-style)
+# Accepts exact handle or wildcard pattern (* and ?)
+sub _cmd_match {
+    my ($self, $stream, $id, $pattern) = @_;
+
+    my $bot = $self->{bot};
+    my $dbh = $bot->{dbh};
+
+    unless (defined $pattern && $pattern ne '') {
+        $stream->write("Usage: .match <handle>  (wildcards * and ? allowed)\r\n");
+        return;
+    }
+
+    # Convert Eggdrop-style wildcards to SQL LIKE wildcards
+    my $sql_pat = $pattern;
+    $sql_pat =~ s/\*/%/g;
+    $sql_pat =~ s/\?/_/g;
+
+    my $sth = $dbh->prepare(q{
+        SELECT
+            u.id_user,
+            u.nickname,
+            u.auth,
+            u.info1,
+            u.info2,
+            ul.description  AS level_desc,
+            ul.level        AS level_num,
+            GROUP_CONCAT(uh.hostmask ORDER BY uh.id_user_hostmask SEPARATOR ' ')
+                AS hostmasks
+        FROM USER u
+        JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
+        LEFT JOIN USER_HOSTMASK uh ON uh.id_user = u.id_user
+        WHERE u.nickname LIKE ?
+        GROUP BY u.id_user, u.nickname, u.auth, u.info1, u.info2,
+                 ul.description, ul.level
+        ORDER BY u.nickname
+        LIMIT 20
+    });
+
+    unless ($sth->execute($sql_pat)) {
+        $bot->{logger}->log(1, "Partyline .match SQL error: $DBI::errstr");
+        $stream->write("Database error.\r\n");
+        return;
+    }
+
+    my $found = 0;
+    while (my $row = $sth->fetchrow_hashref) {
+        $found++;
+        my $auth  = $row->{auth} ? "logged in" : "not logged in";
+        my $masks = $row->{hostmasks} // "(none)";
+        my $info1 = $row->{info1}     // "";
+        my $info2 = $row->{info2}     // "";
+
+        $stream->write("\r\n");
+        $stream->write(sprintf("  Handle  : %s\r\n", $row->{nickname}));
+        $stream->write(sprintf("  Level   : %s (%d)\r\n", $row->{level_desc}, $row->{level_num}));
+        $stream->write(sprintf("  Status  : %s\r\n", $auth));
+        $stream->write(sprintf("  Hosts   : %s\r\n", $masks));
+        $stream->write(sprintf("  Info1   : %s\r\n", $info1)) if $info1 ne '';
+        $stream->write(sprintf("  Info2   : %s\r\n", $info2)) if $info2 ne '';
+    }
+    $sth->finish;
+
+    if ($found == 0) {
+        $stream->write("No match for '$pattern'.\r\n");
+    } elsif ($found > 1) {
+        $stream->write(sprintf("\r\n%d match(es) for '%s'.\r\n", $found, $pattern));
+    }
+}
+
+# .boot <handle> — kick a user off the partyline (Owner only)
+sub _cmd_boot {
+    my ($self, $stream, $id, $target_login) = @_;
+
+    my $bot  = $self->{bot};
+    my $nick = $self->{users}{$id}{login} // 'unknown';
+
+    unless (defined($self->{users}{$id}{level}) && $self->{users}{$id}{level} == 0) {
+        $stream->write("Access denied: .boot requires Owner level.\r\n");
+        return;
+    }
+
+    unless (defined $target_login && $target_login ne '') {
+        $stream->write("Usage: .boot <handle>\r\n");
+        return;
+    }
+
+    # Find target session by login name
+    my $target_id;
+    for my $fid (keys %{ $self->{users} }) {
+        next unless $self->{users}{$fid}{authenticated};
+        if (lc($self->{users}{$fid}{login} // '') eq lc($target_login)) {
+            $target_id = $fid;
+            last;
+        }
+    }
+
+    unless (defined $target_id) {
+        $stream->write("No partyline session found for '$target_login'.\r\n");
+        return;
+    }
+
+    if ($target_id == $id) {
+        $stream->write("You cannot boot yourself. Use .quit instead.\r\n");
+        return;
+    }
+
+    my $target_stream = $self->{streams}{$target_id};
+    $bot->{logger}->log(2, "Partyline: $nick booted $target_login (fd=$target_id)");
+
+    # Notify the victim
+    if ($target_stream) {
+        $target_stream->write("You have been booted by $nick.\r\n");
+        $target_stream->close_when_empty;
+    }
+
+    # Announce to everyone else
+    $self->_broadcast("*** $target_login was booted by $nick. ***", $target_id);
+    $stream->write("Booted $target_login.\r\n");
+
+    $self->_close_session($target_id);
+}
+
 # .stat — for each known channel: joined?, nick count, owner, chansets
 # ---------------------------------------------------------------------------
 sub _cmd_stat {
@@ -588,7 +939,7 @@ sub _cmd_rehash {
 # .restart
 # ---------------------------------------------------------------------------
 sub _cmd_restart {
-    my ($self, $stream, $id) = @_;
+    my ($self, $stream, $id, $reason) = @_;
 
     my $bot   = $self->{bot};
     my $nick  = $self->{users}{$id}{login};
@@ -599,39 +950,18 @@ sub _cmd_restart {
         return;
     }
 
-    $bot->{logger}->log(2, "Partyline: $nick requested restart");
-    $stream->write("Restarting bot...\r\n");
+    $bot->{logger}->log(2, "Partyline: $nick requested IRC restart");
 
-    my @restart_args = ('--daemon');
-
-    if (defined $bot->{config_file} && $bot->{config_file} ne '') {
-        push @restart_args, "--conf=" . $bot->{config_file};
-    }
-
-    if (defined $bot->{requested_server} && $bot->{requested_server} ne '') {
-        push @restart_args, "--server=" . $bot->{requested_server};
-    }
-
-    # Resolve mb_restart.sh path relative to this module's location,
-    # not the process CWD — safe regardless of how the bot was launched.
-    my $bot_dir     = dirname(dirname(__FILE__));   # Mediabot/ -> bot root
-    my $restart_bin = "$bot_dir/mb_restart.sh";
-
-    my $child_pid;
-    if (defined($child_pid = fork())) {
-        if ($child_pid == 0) {
-            setsid;
-            exec $restart_bin, @restart_args;
-            exit 1;
-        } else {
-            $stream->close_when_empty;
-            $self->_close_session($id);
-            $bot->{Quit} = 1;
-            $bot->{irc}->send_message("QUIT", undef, "Partyline requested restart");
-        }
+    # In-process IRC restart: the Partyline stays alive.
+    # We call restart_irc() which sends QUIT and stops the loop;
+    # reconnect() will pick up in the same process on the same loop.
+    if ($bot->can('restart_irc')) {
+        $stream->write("Restarting IRC connection (Partyline stays up)...\r\n");
+        $self->_broadcast("*** IRC restarting — bot will reconnect shortly. ***");
+        my $msg = (defined $reason && $reason ne '') ? $reason : "Partyline .restart by $nick";
+        $bot->restart_irc(reason => $msg);
     } else {
-        $bot->{logger}->log(1, "Partyline restart failed: unable to fork");
-        $stream->write("ERR restart failed\r\n");
+        $stream->write("ERR: restart_irc() not available.\r\n");
     }
 }
 

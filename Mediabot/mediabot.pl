@@ -323,10 +323,13 @@ if ($mediabot->{metrics}) {
 }
 
 # Initialize Partyline
+my $_motd_raw = $mediabot->{conf}->get("main.PARTYLINE_MOTD") // '';
+my @_motd_lines = grep { length } split(/\\n/, $_motd_raw);
 my $partyline = Mediabot::Partyline->new(
     bot  => $mediabot,
     loop => $loop,
     port => $mediabot->{conf}->get("main.PARTYLINE_PORT"),
+    motd => \@_motd_lines,
 );
 $mediabot->{partyline} = $partyline;
 my $partyline_port = $mediabot->{partyline}->get_port;
@@ -544,14 +547,10 @@ sub on_timer_tick {
         log_error("Could not open $sPidFilename for writing: $!");
     }
     
-    # Sync $irc with $mediabot->{irc} in case restart_irc() cleared it
-    $irc = undef if defined $irc && !defined $mediabot->{irc};
-    $irc //= $mediabot->{irc};
-
     # Check connection status and reconnect if not connected
     # Grace period of 15s after login to let Net::Async::IRC finish CAP negotiation
     my $grace = (time - ($mediabot->getConnectionTimestamp() // 0)) < 15;
-    unless ($grace || (defined($irc) && $irc->is_connected)) {
+    unless ($grace || $irc->is_connected) {
         if ($mediabot->getQuit()) {
             $mediabot->{logger}->log(0,"Disconnected from server");
             $mediabot->clean_and_exit(0);
@@ -1611,12 +1610,9 @@ sub reconnect {
     # Pick a (possibly different) IRC server
     $mediabot->pickServer();
 
-    # Reuse the existing IO::Async loop — do NOT create a new one.
-    # This keeps the Partyline listener alive across IRC reconnects.
-    # Remove the old IRC object from the loop before adding a fresh one.
-    if ($irc) {
-        eval { $loop->remove($irc) };
-    }
+    # Fresh IO::Async loop
+    $loop = IO::Async::Loop->new;
+    $mediabot->setLoop($loop);
     $mediabot->setup_channel_nicklist_timers();
 
     # Fresh timer
@@ -1626,7 +1622,7 @@ sub reconnect {
     );
     $mediabot->setMainTimerTick($timer);
 
-    # Build a fresh IRC object and add it to the existing loop
+    # Build a fresh IRC object via the shared helper
     my ($new_irc, $new_bind_ip) = _build_irc($loop);
     $irc = $new_irc;
     $mediabot->setIrc($irc);
