@@ -829,7 +829,12 @@ sub _cmd_join {
         return;
     }
 
-    $bot->joinChannel($chan, $key);
+        $bot->joinChannel($chan, $key);
+
+    if ($bot->can('refresh_channel_nicklist')) {
+        eval { $bot->refresh_channel_nicklist($chan) };
+    }
+
     $bot->{logger}->log(2, "Partyline: $nick requested JOIN $chan" . ($key ? " (key: $key)" : ""));
     $stream->write("Joining $chan" . ($key ? " with key $key" : "") . "...\r\n");
 }
@@ -849,7 +854,11 @@ sub _cmd_part {
     }
 
     $bot->partChannel($chan, "Partyline requested part");
-    delete $bot->{channel_nicklist_timers}{$chan} if exists $bot->{channel_nicklist_timers}{$chan};
+
+    if ($bot->can('stop_channel_nicklist_timer')) {
+        $bot->stop_channel_nicklist_timer($chan);
+    }
+
     $bot->sethChannelsNicksOnChan($chan, ());
     $bot->{logger}->log(2, "Partyline: $nick requested PART $chan");
     $stream->write("Parting $chan...\r\n");
@@ -953,8 +962,8 @@ sub _cmd_restart {
     $bot->{logger}->log(2, "Partyline: $nick requested IRC restart");
 
     # In-process IRC restart: the Partyline stays alive.
-    # We call restart_irc() which sends QUIT and stops the loop;
-    # reconnect() will pick up in the same process on the same loop.
+    # restart_irc() sends QUIT best-effort, detaches the IRC object from the loop,
+    # and on_timer_tick() will trigger reconnect() in the same process on the same loop.
     if ($bot->can('restart_irc')) {
         $stream->write("Restarting IRC connection (Partyline stays up)...\r\n");
         $self->_broadcast("*** IRC restarting — bot will reconnect shortly. ***");

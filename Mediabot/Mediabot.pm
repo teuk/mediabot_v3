@@ -181,7 +181,11 @@ sub reload_logger_from_config {
         $self->my_log_error("Failed to recreate logger from config: $err");
         return;
     };
-
+    
+    if ($self->{logger} && $self->{logger}->{_console_hooks}) {
+        $new_logger->{_console_hooks} = $self->{logger}->{_console_hooks};
+    }
+    
     $self->{logger} = $new_logger;
     $self->{logger}->log(1, "Logger reloaded from config (debug=$debug_level, logfile=$log_path)");
 
@@ -246,6 +250,31 @@ sub stop_all_channel_nicklist_timers {
 
     $self->{channel_nicklist_timers} = {};
     $self->{logger}->log(1, "Stopped all channel nicklist timers");
+
+    return 1;
+}
+
+sub stop_channel_nicklist_timer {
+    my ($self, $channel_name) = @_;
+
+    return unless defined $channel_name && $channel_name ne '';
+
+    my $timer = $self->{channel_nicklist_timers}{$channel_name};
+    return unless $timer;
+
+    eval {
+        if ($self->{loop}) {
+            $self->{loop}->remove($timer);
+        }
+        $timer->stop if $timer->can('stop');
+        1;
+    } or do {
+        my $err = $@ || 'unknown error';
+        $self->{logger}->log(1, "Failed to stop nicklist timer for $channel_name: $err");
+    };
+
+    delete $self->{channel_nicklist_timers}{$channel_name};
+    $self->{logger}->log(1, "Stopped nicklist timer for $channel_name");
 
     return 1;
 }
@@ -330,6 +359,13 @@ sub restart_irc {
 
     my $reason = $opts{reason} // "Restarting IRC connection";
     my $server = $opts{server} // undef;   # optional jump target
+
+    if ($self->{irc_restart_in_progress}) {
+        $self->{logger}->log(1, "restart_irc(): restart already in progress, ignoring duplicate request");
+        return 0;
+    }
+
+    $self->{irc_restart_in_progress} = 1;
 
     $self->{logger}->log(1, "restart_irc(): initiating IRC restart ($reason)");
 

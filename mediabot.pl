@@ -1642,6 +1642,8 @@ sub reconnect {
     $irc = $new_irc;
     $mediabot->setIrc($irc);
 
+    $mediabot->{irc_restart_in_progress} = 0;
+
     # Refresh connection-related variables from config
     $sConnectionNick    = $mediabot->getConnectionNick();
     $sServerPass        = $mediabot->getServerPass();
