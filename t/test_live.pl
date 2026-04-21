@@ -471,7 +471,10 @@ die "ERROR: fork failed: $!\n" unless defined $bot_pid;
 
 if ($bot_pid == 0) {
     # Enfant : exec le bot
-    open(STDOUT, '>>', $log_file) or die;
+    # STDOUT is redirected to /dev/null to avoid duplicate log entries:
+    # Mediabot::Log already writes to $log_file via MAIN_LOG_FILE.
+    # Redirecting STDOUT here too would double every log line.
+    open(STDOUT, '>', '/dev/null') or die;
     open(STDERR, '>>', $log_file) or die;
     exec $^X, $bot_script, "--conf=$conf_file"
         or die "ERROR: exec failed: $!\n";

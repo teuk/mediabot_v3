@@ -334,7 +334,7 @@ sub noticeConsoleChan {
 
     my ($id_channel, $name, $chanmode, $key) = getConsoleChan($self);
 
-    $self->{logger}->log(4, "ℹ️ getConsoleChan() returned: id_channel=$id_channel, name=" . 
+    $self->{logger}->log(4, "ℹ️ getConsoleChan() returned: id_channel=" . ($id_channel // 'undef') . ", name=" . 
         (defined $name ? $name : 'undef') . ", mode=" . 
         (defined $chanmode ? $chanmode : 'undef') . ", key=" . 
         (defined $key ? $key : 'undef'));
@@ -906,7 +906,7 @@ sub getConsoleChan {
     my ($self) = @_;
 
     foreach my $chan (values %{ $self->{channels} }) {
-        if ($chan->get_description eq 'console') {
+        if (defined $chan->get_description && $chan->get_description eq 'console') {
             return (
                 $chan->get_id,
                 $chan->get_name,

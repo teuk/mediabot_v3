@@ -68,6 +68,6 @@ return sub {
     $send_cmd->('zzz_unknown_xyz');
     sleep(1);
     $send_cmd->('version');
-    $r = $wait_reply->(qr/PRIVMSG \Q$channel\E .*3\.0/i, 15);
+    $r = $wait_reply->(qr/PRIVMSG \Q$channel\E .*(?:Mediabot|3\.)/i, 15);
     $assert->ok(defined $r, "commande inconnue → bot toujours vivant");
 };

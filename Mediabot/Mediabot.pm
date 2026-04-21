@@ -375,43 +375,53 @@ sub restart_irc {
         $self->{logger}->log(1, "restart_irc(): will connect to $server after restart");
     }
 
-    # Signal reconnect (not clean exit)
+    # This is NOT a final exit.
     $self->{Quit} = 0;
 
-    # Send QUIT to the IRC server (best-effort — socket may already be gone)
+    if (my $pending = delete $self->{irc_reconnect_timer}) {
+        my $loop = $self->can('getLoop') ? $self->getLoop : undef;
+        eval {
+            $pending->stop if $pending->can('stop');
+            $loop->remove($pending) if $loop;
+        };
+    }
+
+    # Ask for an IRC reconnect through the normal runtime path.
+    # We do NOT stop the main loop and we do NOT tear down the Partyline.
+    $self->{irc_reconnect_requested} = 1;
+
+    $self->{logger}->log(0,
+        "restart_irc(): flags set "
+        . "restart_in_progress=" . ($self->{irc_restart_in_progress} // 'undef')
+        . " reconnect_requested=" . ($self->{irc_reconnect_requested} // 'undef')
+        . " reconnect_in_progress=" . ($self->{irc_reconnect_in_progress} // 'undef')
+    );
+
+    # Invalidate connection timestamp so the reconnect grace period does not block us.
+    $self->setConnectionTimestamp(0) if $self->can('setConnectionTimestamp');
+
+    # Best-effort QUIT.
+    # Do not remove the IRC object from the loop immediately: that can prevent
+    # the QUIT from being flushed and also defeats the goal of keeping the process alive cleanly.
     eval {
         if ($self->{irc} && $self->{irc}->is_connected) {
             $self->{irc}->send_message("QUIT", undef, $reason);
+            $self->{logger}->log(0, "restart_irc(): QUIT sent (best effort)");
         }
+        1;
+    } or do {
+        my $err = $@ || 'unknown error';
+        $self->{logger}->log(1, "restart_irc(): QUIT send failed: $err");
     };
-
-    # Detach the IRC object from the loop immediately so:
-    #   a) the QUIT has no more handlers processing incoming data
-    #   b) reconnect() in on_timer_tick can safely add a fresh IRC object
-    #   c) the Partyline listener (also in the loop) is untouched
-    my $loop = $self->can('getLoop') ? $self->getLoop : undef;
-    if ($loop && $self->{irc}) {
-        eval { $loop->remove($self->{irc}) };
-        $self->{irc} = undef;
-        $self->setIrc(undef) if $self->can('setIrc');
-    }
-
-    # Invalidate connection timestamp so the grace period does not block
-    # the next on_timer_tick reconnect check.
-    $self->setConnectionTimestamp(0) if $self->can('setConnectionTimestamp');
 
     if ($self->{metrics}) {
         $self->{metrics}->inc('mediabot_restart_total');
     }
 
-    # on_timer_tick fires every 5s; it will detect irc=undef / is_connected=false
-    # and call reconnect() through the normal code path.
-    $self->{logger}->log(1, "restart_irc(): IRC detached — on_timer_tick will reconnect");
+    $self->{logger}->log(1, "restart_irc(): reconnect requested — Partyline remains active");
 
     return 1;
 }
-
-
 
 # get debug level from configuration
 sub getDebugLevel {

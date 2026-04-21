@@ -23,6 +23,7 @@ use Mediabot::Channel;
 use Mediabot::Partyline;
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
+use IO::Async::Timer::Countdown;
 use Net::Async::IRC;
 use Switch;
 use utf8;
@@ -335,9 +336,11 @@ $mediabot->{logger}->log(4, "Partyline port is: $partyline_port");
 # Set up main timer
 my $timer = IO::Async::Timer::Periodic->new(
     interval => 5,
-    on_tick => \&on_timer_tick,
+    on_tick  => \&on_timer_tick,
 );
 $mediabot->setMainTimerTick($timer);
+$loop->add($timer);
+$timer->start;
 
 # Set up channel hash refresh timer
 my $channel_hash_timer = IO::Async::Timer::Periodic->new(
@@ -551,25 +554,56 @@ sub on_timer_tick {
     # Check connection status and reconnect if not connected
     # Grace period of 15s after login to let Net::Async::IRC finish CAP negotiation
     my $grace = (time - ($mediabot->getConnectionTimestamp() // 0)) < 15;
-    unless ($grace || (defined($irc) && $irc->is_connected)) {
-        if ($mediabot->getQuit()) {
+    my $irc_connected = (defined($irc) && $irc->is_connected) ? 1 : 0;
+    my $reconnect_needed = !$mediabot->{irc_reconnect_in_progress} && ($mediabot->{irc_reconnect_requested} || (!$grace && !$irc_connected));
+
+    $mediabot->{logger}->log(0,
+        "on_timer_tick(): reconnect state "
+        . "grace=$grace "
+        . "irc_connected=$irc_connected "
+        . "quit=" . ($mediabot->getQuit() // 'undef') . " "
+        . "restart_in_progress=" . ($mediabot->{irc_restart_in_progress} // 'undef') . " "
+        . "reconnect_requested=" . ($mediabot->{irc_reconnect_requested} // 'undef') . " "
+        . "reconnect_in_progress=" . ($mediabot->{irc_reconnect_in_progress} // 'undef') . " "
+        . "timer_present=" . ($mediabot->{irc_reconnect_timer} ? 1 : 0)
+    ) if $mediabot->{irc_reconnect_requested};
+
+    if ($reconnect_needed) {
+        if ($mediabot->getQuit() && !$mediabot->{irc_reconnect_requested}) {
             $mediabot->{logger}->log(0,"Disconnected from server");
             $mediabot->clean_and_exit(0);
         }
         else {
-            $mediabot->setServer(undef);
-            $loop->stop;
             my $delay = int($mediabot->{conf}->get('main.RECONNECT_DELAY') // 30);
             $delay = 30 if $delay < 5 || $delay > 600;
-            $mediabot->{logger}->log(0,"Lost connection to server. Waiting $delay seconds to reconnect");
 
-            if ($mediabot->{metrics}) {
-                $mediabot->{metrics}->set('mediabot_irc_connected', 0);
-                $mediabot->{metrics}->inc('mediabot_irc_reconnect_total');
+            if (!$mediabot->{irc_reconnect_timer}) {
+                $mediabot->setServer(undef);
+
+                my $why = $mediabot->{irc_reconnect_requested}
+                    ? "IRC restart requested"
+                    : "Lost connection to server";
+
+                $mediabot->{logger}->log(0, "$why. Scheduling reconnect in $delay seconds");
+
+                if ($mediabot->{metrics}) {
+                    $mediabot->{metrics}->set('mediabot_irc_connected', 0);
+                    $mediabot->{metrics}->inc('mediabot_irc_reconnect_total');
+                }
+
+                my $reconnect_timer = IO::Async::Timer::Countdown->new(
+                    delay => $delay,
+                    on_expire => sub {
+                        $mediabot->{logger}->log(0, "reconnect countdown expired");
+                        $mediabot->{irc_reconnect_timer} = undef;
+                        reconnect();
+                    },
+                );
+
+                $mediabot->{irc_reconnect_timer} = $reconnect_timer;
+                $loop->add($reconnect_timer);
+                $reconnect_timer->start;
             }
-
-            sleep $delay;
-            reconnect();
         }
     }
     
@@ -665,12 +699,14 @@ sub on_message_NOTICE {
                 $self->write("MODE " . $self->nick_folded . " +x\x0d\x0a");
                 $self->change_nick( $mediabot->{conf}->get('connection.CONN_NICK') );
                 $mediabot->joinChannels();
+                $mediabot->{logger}->log(0, "on_login(): joinChannels() called");
             }
         }
         elsif (defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ( $mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 2 ) && defined($mediabot->{conf}->get('freenode.FREENODE_NICKSERV_PASSWORD')) && ($mediabot->{conf}->get('freenode.FREENODE_NICKSERV_PASSWORD') ne "")) {
             if (($who eq "NickServ") && (($what =~ /This nickname is registered/) && defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 2))) {
                 $mediabot->botPrivmsg("NickServ","identify " . $mediabot->{conf}->get('freenode.FREENODE_NICKSERV_PASSWORD'));
                 $mediabot->joinChannels();
+                $mediabot->{logger}->log(0, "on_login(): joinChannels() called");
             }
         }
     }
@@ -733,8 +769,6 @@ sub on_login {
     unless ((($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 1) && ($mediabot->{conf}->get('connection.CONN_USERMODE') =~ /x/)) || (($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 2) && defined($mediabot->{conf}->get('freenode.FREENODE_NICKSERV_PASSWORD')) && ($mediabot->{conf}->get('freenode.FREENODE_NICKSERV_PASSWORD') ne ""))) {
         $mediabot->joinChannels();
     }
-    $loop->add( $timer );
-    $timer->start;
 }
 
 sub on_private {
@@ -1446,21 +1480,25 @@ sub on_message_ERROR {
     log_debug_args('on_message_ERROR', $message);
     my $err_msg = join(" ", @{ $message->args // [] });
     $mediabot->{logger}->log(0, "ERROR from server: $err_msg");
-    unless ($mediabot->getQuit()) {
-        $mediabot->setServer(undef);
-        $loop->stop;
-        my $delay = int($mediabot->{conf}->get('main.RECONNECT_DELAY') // 30);
-        $delay = 30 if $delay < 5 || $delay > 600;
-        $mediabot->{logger}->log(0, "Reconnecting in $delay seconds...");
 
-        if ($mediabot->{metrics}) {
-            $mediabot->{metrics}->set('mediabot_irc_connected', 0);
-            $mediabot->{metrics}->inc('mediabot_irc_reconnect_total');
-        }
-
-        sleep $delay;
-        reconnect();
+    if ($mediabot->getQuit()) {
+        $mediabot->clean_and_exit(0);
+        return;
     }
+
+    # Do NOT call $loop->stop here.
+    # Stopping the loop from a callback kills the main $loop->run,
+    # which terminates the process (and the Partyline) entirely.
+    # on_timer_tick detects is_connected=false and schedules reconnect()
+    # via IO::Async::Timer::Countdown — let it handle this.
+    $mediabot->setServer(undef);
+
+    if ($mediabot->{metrics}) {
+        $mediabot->{metrics}->set('mediabot_irc_connected', 0);
+        $mediabot->{metrics}->inc('mediabot_irc_reconnect_total');
+    }
+
+    $mediabot->{logger}->log(0, "on_message_ERROR: IRC connection lost — on_timer_tick will reconnect");
 }
 
 sub on_message_KILL {
@@ -1468,14 +1506,16 @@ sub on_message_KILL {
     log_debug_args('on_message_KILL', $message);
     my ($killer, $victim, $reason) = @{ $message->args };
     $mediabot->{logger}->log(0, "Killed by $killer: $reason – will reconnect.");
-    unless ($mediabot->getQuit()) {
-        $mediabot->setServer(undef);
-        $loop->stop;
-        my $delay = int($mediabot->{conf}->get('main.RECONNECT_DELAY') // 30);
-        $delay = 30 if $delay < 5 || $delay > 600;
-        sleep $delay;
-        reconnect();
+
+    if ($mediabot->getQuit()) {
+        $mediabot->clean_and_exit(0);
+        return;
     }
+
+    # Same as on_message_ERROR: do NOT call $loop->stop.
+    # on_timer_tick will detect is_connected=false and schedule reconnect().
+    $mediabot->setServer(undef);
+    $mediabot->{logger}->log(0, "on_message_KILL: IRC connection lost — on_timer_tick will reconnect");
 }
 
 sub on_message_SERVER {
@@ -1608,15 +1648,34 @@ sub on_message_ERR_NEEDMOREPARAMS {
 }
 
 sub reconnect {
+    return if $mediabot->{irc_reconnect_in_progress};
+
+    $mediabot->{irc_reconnect_in_progress} = 1;
+    $mediabot->{logger}->log(0, "reconnect(): entered");
+
+    # Clear pending async reconnect marker first
+    if (my $pending = delete $mediabot->{irc_reconnect_timer}) {
+        eval {
+            $pending->stop if $pending->can('stop');
+            $loop->remove($pending);
+        };
+    }
+
     # Pick a (possibly different) IRC server
     $mediabot->pickServer();
 
+    $mediabot->{logger}->log(0, "reconnect(): picked server " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort());
+
     # Reuse the existing IO::Async loop — do NOT create a new one.
     # This keeps the Partyline listener alive across IRC reconnects.
+
     # Remove the old IRC object from the loop before adding a fresh one.
     if ($irc) {
         eval { $loop->remove($irc) };
+        $irc = undef;
     }
+
+    # Rebuild nicklist timers on the current loop
     $mediabot->setup_channel_nicklist_timers();
 
     # Remove old main timer from loop before creating a new one.
@@ -1636,27 +1695,48 @@ sub reconnect {
         on_tick  => \&on_timer_tick,
     );
     $mediabot->setMainTimerTick($timer);
+    $loop->add($timer);
+    $timer->start;
+
+    $mediabot->{logger}->log(0, "reconnect(): building fresh IRC object");
 
     # Build a fresh IRC object and add it to the existing loop
     my ($new_irc, $new_bind_ip) = _build_irc($loop);
     $irc = $new_irc;
     $mediabot->setIrc($irc);
 
-    $mediabot->{irc_restart_in_progress} = 0;
+    $mediabot->{logger}->log(0, "reconnect(): fresh IRC object installed");
 
     # Refresh connection-related variables from config
-    $sConnectionNick    = $mediabot->getConnectionNick();
-    $sServerPass        = $mediabot->getServerPass();
-    $sServerPassDisplay = ( $sServerPass eq "" ? "none defined" : $sServerPass );
+    $sConnectionNick     = $mediabot->getConnectionNick();
+    $sServerPass         = $mediabot->getServerPass();
+    $sServerPassDisplay  = ( $sServerPass eq "" ? "none defined" : $sServerPass );
     $bNickTriggerCommand = $mediabot->getNickTrigger();
 
     $mediabot->{logger}->log(0,"Trying to connect to " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort() . " (pass : $sServerPassDisplay)");
 
     my $login = _do_login($irc, $new_bind_ip);
-    eval { $login->get }; if ($@) { my $err = $@; $err =~ s/\n/ /g; $mediabot->{logger}->log(0, "Login Future failed: $err"); $mediabot->clean_and_exit(1); }
+    eval { $login->get };
+    if ($@) {
+        my $err = $@;
+        $err =~ s/\n/ /g;
+        $mediabot->{logger}->log(0, "Login Future failed: $err");
 
-    # Start main loop
-    $loop->run;
+        # Allow another reconnect attempt later
+        $mediabot->{irc_restart_in_progress} = 0;
+        $mediabot->{irc_reconnect_requested} = 0;
+        $mediabot->{irc_reconnect_in_progress} = 0;
+
+        $mediabot->{logger}->log(0, "reconnect(): completed");
+        return;
+    }
+
+    $mediabot->{irc_restart_in_progress} = 0;
+    $mediabot->{irc_reconnect_requested} = 0;
+
+    $mediabot->{logger}->log(0, "reconnect(): completed");
+
+    return 1;
 }
 
 sub catch_hup {
