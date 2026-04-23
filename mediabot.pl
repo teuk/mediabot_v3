@@ -18,6 +18,7 @@ use Mediabot::Mediabot;
 use Mediabot::Conf;
 use Mediabot::Log;
 use Mediabot::Metrics;
+use Mediabot::Radio::Icecast;
 use Mediabot::DB;
 use Mediabot::Channel;
 use Mediabot::Partyline;
@@ -313,6 +314,30 @@ $mediabot->{metrics}->set_build_info(
     nick    => $mediabot->{conf}->get('connection.CONN_NICK') || 'unknown',
 );
 
+if ($mediabot->{metrics}) {
+    $mediabot->{metrics}->set_radio_status_provider(sub {
+        my $conf = $mediabot->{conf};
+
+        my $base_url      = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
+        my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || 'http://teuk.org:8000';
+        my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio160.mp3';
+        my $timeout       = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
+
+        $timeout = 5 unless defined $timeout && $timeout =~ /^\d+$/ && $timeout > 0;
+
+        my $radio = Mediabot::Radio::Icecast->new(
+            base_url => $base_url,
+            timeout  => $timeout,
+            logger   => $mediabot->{logger},
+        );
+
+        return $radio->get_summary(
+            primary_mount => $primary_mount,
+            public_base   => $public_base,
+        );
+    });
+}
+
 $mediabot->{metrics}->start_http_server();
 
 if ($mediabot->{metrics}) {
@@ -606,35 +631,6 @@ sub on_timer_tick {
             }
         }
     }
-    
-    # Check channels with chanset +RadioPub
-    if (defined($mediabot->{conf}->get('main.MAIN_PID_FILE'))) {
-    my $radioPubDelay = defined($mediabot->{conf}->get('radio.RADIO_PUB')) ? $mediabot->{conf}->get('radio.RADIO_PUB') : 10800;
-    unless ($radioPubDelay >= 900) {
-        $mediabot->{logger}->log(0,"Mediabot was not designed to spam channels, please set RADIO_PUB to a value greater or equal than 900 seconds in [radio] section of $CONFIG_FILE");
-    }
-    elsif ((time - $mediabot->getLastRadioPub()) > $radioPubDelay ) {
-        my $sQuery = "SELECT CHANNEL.name FROM CHANNEL JOIN CHANNEL_SET ON CHANNEL_SET.id_channel=CHANNEL.id_channel JOIN CHANSET_LIST ON CHANSET_LIST.id_chanset_list=CHANNEL_SET.id_chanset_list WHERE CHANSET_LIST.chanset = 'RadioPub'";
-        my $sth = $mediabot->{db}->ensure_connected()->prepare($sQuery);
-        unless ($sth->execute()) {
-            $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-        }
-        else {
-            while (my $ref = $sth->fetchrow_hashref()) {
-                my $curChannel = $ref->{'name'};
-                $mediabot->{logger}->log(4,"RadioPub on $curChannel");
-                my $currentTitle = $mediabot->getRadioCurrentSong();
-                if ( $currentTitle ne "Unknown" ) {
-                    $mediabot->displayRadioCurrentSong(undef,undef,$curChannel,undef);
-                }
-                else {
-                    $mediabot->{logger}->log(4,"RadioPub skipped for $curChannel, title is $currentTitle");
-                }
-            }
-        }
-        $sth->finish;
-        $mediabot->setLastRadioPub(time);
-    }
 }
 
 # Check channels with chanset +RandomQuote
@@ -673,7 +669,6 @@ if (defined($mediabot->{conf}->get('main.RANDOM_QUOTE'))) {
         $sth->finish;
         $mediabot->setLastRandomQuote(time);
     }
-}
 }
 
 sub on_message_NOTICE {
@@ -725,7 +720,6 @@ sub on_login {
     }
     $mediabot->setQuit(0);
     $mediabot->setConnectionTimestamp(time);
-    $mediabot->setLastRadioPub(time);
     $mediabot->setLastRandomQuote(time);
     $mediabot->onStartTimers();
     

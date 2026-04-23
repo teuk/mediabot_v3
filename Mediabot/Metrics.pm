@@ -5,6 +5,7 @@ use warnings;
 
 use IO::Socket::INET;
 use IO::Async::Listener;
+use JSON::MaybeXS qw(encode_json);
 
 sub new {
     my ($class, %args) = @_;
@@ -18,6 +19,7 @@ sub new {
         started   => time(),
         listener  => undef,
         metrics   => {},
+        radio_status_provider => undef,
     }, $class;
 
     # Core metrics
@@ -218,7 +220,13 @@ sub start_http_server {
                             $status = '200 OK';
                             $body   = $self->render_prometheus();
                             $ctype  = 'text/plain; version=0.0.4; charset=utf-8';
-                        } else {
+                        }
+                        elsif (($method || '') eq 'GET' && ($path || '') eq '/api/radio/status') {
+                            $status = '200 OK';
+                            $body   = $self->render_radio_status_json();
+                            $ctype  = 'application/json; charset=utf-8';
+                        }
+                        else {
                             $status = '404 Not Found';
                             $body   = "Not Found\n";
                             $ctype  = 'text/plain; charset=utf-8';
@@ -319,6 +327,43 @@ sub _log {
         eval { $self->{logger}->error($msg); };
         return;
     }
+}
+
+sub set_radio_status_provider {
+    my ($self, $cb) = @_;
+    $self->{radio_status_provider} = $cb if ref($cb) eq 'CODE';
+    return 1;
+}
+
+sub render_radio_status_json {
+    my ($self) = @_;
+
+    my $provider = $self->{radio_status_provider};
+    unless ($provider && ref($provider) eq 'CODE') {
+        return encode_json({
+            ok    => 0,
+            error => 'radio status provider not configured',
+        });
+    }
+
+    my $payload = eval { $provider->() };
+    if ($@) {
+        my $err = $@ || 'unknown provider error';
+        $self->_log("ERROR", "Radio status provider failed: $err");
+        return encode_json({
+            ok    => 0,
+            error => "radio status provider failed: $err",
+        });
+    }
+
+    if (!$payload || ref($payload) ne 'HASH') {
+        return encode_json({
+            ok    => 0,
+            error => 'radio status provider returned invalid payload',
+        });
+    }
+
+    return encode_json($payload);
 }
 
 1;

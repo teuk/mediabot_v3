@@ -16,7 +16,6 @@ use Mediabot::LoginCommands;
 use Mediabot::Helpers;
 use Mediabot::ChannelCommands;
 use Mediabot::UserCommands;
-use Mediabot::Radio;
 use Mediabot::External;
 use Mediabot::DBCommands;
 use Mediabot::AdminCommands;
@@ -1139,7 +1138,7 @@ sub mbCommandPublic {
         ignore       => sub { addIgnore_ctx($ctx) },
         unignore     => sub { delIgnore_ctx($ctx) },
         yt           => sub { youtubeSearch_ctx($ctx) },
-        song         => sub { displayRadioCurrentSong_ctx($ctx) },
+        song         => sub { song_ctx($ctx) },
         listeners    => sub { displayRadioListeners_ctx($ctx) },
         nextsong     => sub { radioNext_ctx($ctx) },
         addresponder => sub { addResponder_ctx($ctx) },
@@ -1171,10 +1170,6 @@ sub mbCommandPublic {
         help         => sub { mbHelp_ctx($ctx) },
         spike        => sub { $ctx->reply("https://teuk.org/In_Spike_Memory.jpg") },
         update       => sub { update_ctx($ctx) },
-        play         => sub { playRadio_ctx($ctx) },
-        rplay        => sub { rplayRadio_ctx($ctx) },
-        queue        => sub { queueRadio_ctx($ctx) },
-        next         => sub { nextRadio_ctx($ctx) },
     );
 
     # Dispatch known command
@@ -1316,12 +1311,12 @@ sub mbCommandPrivate {
         ident       => sub { userIdent_ctx($ctx) },
         topic       => sub { userTopicChannel_ctx($ctx) },
         update      => sub { update_ctx($ctx) },
-        play        => sub { playRadio_ctx($ctx) },
-        radiopub    => sub { radioPub_ctx($ctx) },
         debug       => sub { debug_ctx($ctx) },
 
         # --- Context-based handlers ---
         status      => sub { mbStatus_ctx($ctx) },
+        radiostatus => sub { radioStatus_ctx($ctx) },
+        radiomounts => sub { radioMounts_ctx($ctx) },
         echo        => sub { mbEcho($ctx) },
         die         => sub { mbQuit_ctx($ctx) },
         nick        => sub { mbChangeNick_ctx($ctx) },
@@ -1333,8 +1328,7 @@ sub mbCommandPrivate {
         dump        => sub { dumpCmd_ctx($ctx) },
         say         => sub { sayChannel_ctx($ctx) },
         act         => sub { actChannel_ctx($ctx) },
-        song        => sub { displayRadioCurrentSong_ctx($ctx) },
-        metadata    => sub { setRadioMetadata_ctx($ctx) },
+        song        => sub { song_ctx($ctx) },
         adduser     => sub { addUser_ctx($ctx) },
         deluser     => sub { delUser_ctx($ctx) },
         users       => sub { userStats_ctx($ctx) },

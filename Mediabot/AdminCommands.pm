@@ -13,6 +13,7 @@ use Exporter 'import';
 use List::Util qw(min);
 use Mediabot::Helpers;
 use Memory::Usage;
+use Mediabot::Radio::Icecast;
 
 our @EXPORT = qw(
     debug_ctx
@@ -22,6 +23,9 @@ our @EXPORT = qw(
     mbRehash_ctx
     mbRestart
     mbStatus_ctx
+    radioStatus_ctx
+    radioMounts_ctx
+    song_ctx
     update
     update_ctx
 );
@@ -485,6 +489,160 @@ sub mbStatus_ctx {
     logBot($self, $ctx->message, undef, 'status', undef);
 }
 
-1;
+sub radioStatus_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+    my $conf = $self->{conf};
+
+    return unless $ctx->require_level('Master');
+
+    my $base_url      = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
+    my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || 'http://teuk.org:8000';
+    my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio160.mp3';
+    my $timeout       = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
+
+    $timeout = 5 unless defined $timeout && $timeout =~ /^\d+$/ && $timeout > 0;
+
+    my $radio = Mediabot::Radio::Icecast->new(
+        base_url => $base_url,
+        timeout  => $timeout,
+        logger   => $self->{logger},
+    );
+
+    my $info = $radio->get_summary(
+        primary_mount => $primary_mount,
+        public_base   => $public_base,
+    );
+
+    unless ($info->{ok}) {
+        botNotice($self, $nick, "Radio status error: " . ($info->{error} || 'unknown error'));
+        logBot($self, $ctx->message, undef, 'radiostatus', 'error');
+        return;
+    }
+
+    my $host            = $info->{host}            || '?';
+    my $server_id       = $info->{server_id}       || '?';
+    my $sources         = defined $info->{sources}         ? $info->{sources}         : '?';
+    my $total_listeners = defined $info->{total_listeners} ? $info->{total_listeners} : '?';
+    my $mount           = $info->{primary_mount}   || '?';
+    my $bitrate         = defined $info->{bitrate}         ? $info->{bitrate}         : '?';
+    my $mount_listeners = defined $info->{mount_listeners} ? $info->{mount_listeners} : 0;
+    my $title           = defined $info->{title} && $info->{title} ne '' ? $info->{title} : 'unknown';
+    my $listen_url      = $info->{listen_url}      || '?';
+
+    botNotice($self, $nick, "Icecast $host | $server_id | sources=$sources | listeners=$total_listeners");
+    botNotice($self, $nick, "Primary mount: $mount (${bitrate}k, ${mount_listeners} listeners)");
+    botNotice($self, $nick, "Now playing: $title");
+    botNotice($self, $nick, "Listen: $listen_url");
+
+    logBot($self, $ctx->message, undef, 'radiostatus', undef);
+}
+
+sub radioMounts_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+    my $conf = $self->{conf};
+
+    return unless $ctx->require_level('Master');
+
+    my $base_url = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
+    my $timeout  = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
+    $timeout = 5 unless defined $timeout && $timeout =~ /^\d+$/ && $timeout > 0;
+
+    my $radio = Mediabot::Radio::Icecast->new(
+        base_url => $base_url,
+        timeout  => $timeout,
+        logger   => $self->{logger},
+    );
+
+    my $mounts = $radio->get_mounts();
+    unless ($mounts->{ok}) {
+        botNotice($self, $nick, "Radio mounts error: " . ($mounts->{error} || 'unknown error'));
+        logBot($self, $ctx->message, undef, 'radiomounts', 'error');
+        return;
+    }
+
+    my $list = $mounts->{mounts} || [];
+    if (!@$list) {
+        botNotice($self, $nick, "No Icecast mounts found.");
+        logBot($self, $ctx->message, undef, 'radiomounts', undef);
+        return;
+    }
+
+    for my $m (@$list) {
+        my $mount       = $m->{mount}       || '?';
+        my $bitrate     = defined $m->{bitrate}   ? $m->{bitrate}   : '?';
+        my $listeners   = defined $m->{listeners} ? $m->{listeners} : '?';
+        my $title       = defined $m->{title} && $m->{title} ne '' ? $m->{title} : 'n/a';
+        my $description = defined $m->{description} && $m->{description} ne '' ? $m->{description} : 'n/a';
+        my $listenurl   = defined $m->{listenurl} && $m->{listenurl} ne '' ? $m->{listenurl} : 'n/a';
+
+        botNotice(
+            $self, $nick,
+            "$mount | ${bitrate}k | listeners=$listeners | title=$title | desc=$description | url=$listenurl"
+        );
+    }
+
+    logBot($self, $ctx->message, undef, 'radiomounts', undef);
+}
+
+sub song_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $conf = $self->{conf};
+
+    my $base_url      = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
+    my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || 'http://teuk.org:8000';
+    my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio160.mp3';
+    my $timeout       = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
+
+    $timeout = 5 unless defined $timeout && $timeout =~ /^\d+$/ && $timeout > 0;
+
+    my $radio = Mediabot::Radio::Icecast->new(
+        base_url => $base_url,
+        timeout  => $timeout,
+        logger   => $self->{logger},
+    );
+
+    my $info = $radio->get_summary(
+        primary_mount => $primary_mount,
+        public_base   => $public_base,
+    );
+
+    unless ($info->{ok}) {
+        my $msg = "Radio error: " . ($info->{error} || 'unknown error');
+        if ($ctx->is_private) {
+            $ctx->reply_private($msg);
+        } else {
+            $ctx->reply($msg);
+        }
+        logBot($self, $ctx->message, undef, 'song', 'error');
+        return;
+    }
+
+    my $title      = defined $info->{title} && $info->{title} ne '' ? $info->{title} : 'unknown';
+    my $listen_url = $info->{listen_url} || 'http://teuk.org:8000/radio160.mp3';
+
+    my $msg =
+          String::IRC->new('[ ')->white
+        . String::IRC->new($listen_url)->blue->underline
+        . String::IRC->new(' ] - [ ')->white
+        . String::IRC->new($title)->yellow
+        . String::IRC->new(' ]')->white;
+
+    if ($ctx->is_private) {
+        $ctx->reply_private($msg);
+    } else {
+        $ctx->reply($msg);
+    }
+
+    logBot($self, $ctx->message, undef, 'song', undef);
+}
 
 1;
+
