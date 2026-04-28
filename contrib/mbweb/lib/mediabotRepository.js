@@ -14,7 +14,7 @@ async function tableExists(tableName) {
   return Number(rows[0]?.n || 0) > 0;
 }
 
-// Wrapper : vérifie l'existence puis délègue le cache à db.js/tableColumns
+// Wrapper: checks table existence then delegates cache to db.js/tableColumns
 async function getColumns(tableName) {
   if (!(await tableExists(tableName))) return [];
   return tableColumns(tableName);

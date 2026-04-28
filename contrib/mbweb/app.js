@@ -226,10 +226,10 @@ app.get(config.baseUrl + '/', async (req, res) => {
       <h2>Espace utilisateur Mediabot</h2>
       <p>
         Connecte-toi avec ton compte Mediabot pour voir ton profil, tes canaux,
-        tes droits, la radio et les outils adaptés à ton niveau.
+        your permissions, radio, and tools tailored to your level.
       </p>
     </div>
-    <a class="mbw-table-action" href="${safeBase('/login')}">Se connecter</a>
+    <a class="mbw-table-action" href="${safeBase('/login')}">Log in</a>
   </div>
 </section>
 `;
@@ -239,7 +239,7 @@ app.get(config.baseUrl + '/', async (req, res) => {
   <div class="mbw-section-head">
     <div>
       <h2>Session Mediabot</h2>
-      <p>Résumé du compte connecté et des droits globaux détectés.</p>
+      <p>Summary of the connected account and detected global permissions.</p>
     </div>
     <span class="mbw-count-badge">${escapeHtml(user.global_role)}</span>
   </div>
@@ -250,7 +250,7 @@ app.get(config.baseUrl + '/', async (req, res) => {
         <tr>
           <th>Nickname</th>
           <th>Username</th>
-          <th>Rôle global</th>
+          <th>Global role</th>
           <th>Niveau</th>
           <th>Canaux visibles</th>
           <th>Timezone</th>
@@ -280,7 +280,7 @@ app.get(config.baseUrl + '/', async (req, res) => {
 <section class="mbw-card mbw-wide">
   <div class="mbw-section-head">
     <div>
-      <h2>Accès rapides</h2>
+      <h2>Quick access</h2>
       <p>Les vues disponibles selon ton niveau Mediabot.</p>
     </div>
   </div>
@@ -288,12 +288,12 @@ app.get(config.baseUrl + '/', async (req, res) => {
   <div class="mbw-dashboard-grid">
     <a class="mbw-dashboard-tile" href="${safeBase('/profile')}">
       <strong>Profil</strong>
-      <span>Identité, niveau global, hostmasks, timezone.</span>
+      <span>Identity, global level, hostmasks, timezone.</span>
     </a>
 
     <a class="mbw-dashboard-tile" href="${safeBase('/channels')}">
       <strong>Channels</strong>
-      <span>Canaux visibles et droits associés.</span>
+      <span>Visible channels and associated permissions.</span>
     </a>
 
     <a class="mbw-dashboard-tile" href="${safeBase('/radio')}">
@@ -310,7 +310,7 @@ app.get(config.baseUrl + '/', async (req, res) => {
 
     <a class="mbw-dashboard-tile" href="${safeBase('/api/dashboard')}">
       <strong>API dashboard</strong>
-      <span>État JSON de ton dashboard courant.</span>
+      <span>JSON state of your current dashboard.</span>
     </a>
 
     ${isOwner(user) ? `
@@ -328,7 +328,7 @@ app.get(config.baseUrl + '/', async (req, res) => {
   <div class="mbw-section-head">
     <div>
       <h2>Canaux accessibles</h2>
-      <p>Aperçu compact des canaux visibles pour ton compte.</p>
+      <p>Compact overview of channels visible to your account.</p>
     </div>
     <a class="mbw-table-action" href="${safeBase('/channels')}">Tout voir</a>
   </div>
@@ -344,7 +344,7 @@ app.get(config.baseUrl + '/', async (req, res) => {
             <th>Mode</th>
             <th>Niveau canal</th>
             <th>Automode</th>
-            <th>Détail</th>
+            <th>Detail</th>
           </tr>
         </thead>
         <tbody>
@@ -366,14 +366,14 @@ app.get(config.baseUrl + '/', async (req, res) => {
                 <td class="mbw-muted-cell">${escapeHtml(ch.chanmode || 'n/a')}</td>
                 <td class="mbw-number-cell">${escapeHtml(ch.channel_level ?? 'n/a')}</td>
                 <td class="mbw-muted-cell">${escapeHtml(ch.automode ?? 'n/a')}</td>
-                <td><a class="mbw-table-action" href="${safeBase('/channels/' + ch.id_channel)}">ouvrir</a></td>
+                <td><a class="mbw-table-action" href="${safeBase('/channels/' + ch.id_channel)}">open</a></td>
               </tr>
             `;
           }).join('')}
         </tbody>
       </table>
     </div>
-  ` : `<p>Aucun canal accessible pour ce compte.</p>`}
+  ` : `<p>No accessible channel for this account.</p>`}
 </section>
 ` : '';
 
@@ -382,8 +382,8 @@ app.get(config.baseUrl + '/', async (req, res) => {
 <section class="mbw-card mbw-wide">
   <div class="mbw-section-head">
     <div>
-      <h2>Bot Mediabot — métriques live</h2>
-      <p>Données Prometheus exposées sur <code>${escapeHtml(config.urls?.metrics || 'n/a')}</code></p>
+      <h2>Bot Mediabot — live metrics</h2>
+      <p>Prometheus endpoint: <code>${escapeHtml(config.urls?.metrics || 'n/a')}</code></p>
     </div>
     <span class="mbw-count-badge ${data.metrics.ok ? 'ok' : 'bad'}">${data.metrics.ok ? 'online' : 'unreachable'}</span>
   </div>
@@ -392,18 +392,18 @@ app.get(config.baseUrl + '/', async (req, res) => {
     <div class="mbw-metrics-grid">
       <div class="mbw-metric-tile ${Number(data.metrics.irc_connected) ? 'ok' : 'bad'}">
         <span>IRC</span>
-        <strong>${Number(data.metrics.irc_connected) ? 'connecté' : 'déconnecté'}</strong>
+        <strong>${Number(data.metrics.irc_connected) ? 'connected' : 'disconnected'}</strong>
       </div>
       <div class="mbw-metric-tile ${Number(data.metrics.db_connected) ? 'ok' : 'bad'}">
         <span>DB</span>
-        <strong>${Number(data.metrics.db_connected) ? 'connectée' : 'erreur'}</strong>
+        <strong>${Number(data.metrics.db_connected) ? 'connected' : 'error'}</strong>
       </div>
       <div class="mbw-metric-tile">
         <span>Uptime</span>
         <strong>${escapeHtml(fmtUptime(data.metrics.uptime_seconds))}</strong>
       </div>
       <div class="mbw-metric-tile">
-        <span>Canaux gérés</span>
+        <span>Managed channels</span>
         <strong>${escapeHtml(data.metrics.channels_managed ?? 'n/a')}</strong>
       </div>
       <div class="mbw-metric-tile">
@@ -411,15 +411,15 @@ app.get(config.baseUrl + '/', async (req, res) => {
         <strong>${escapeHtml(data.metrics.current_channels ?? 'n/a')}</strong>
       </div>
       <div class="mbw-metric-tile">
-        <span>Messages reçus</span>
+        <span>Messages in</span>
         <strong>${escapeHtml(data.metrics.privmsg_in ?? 'n/a')}</strong>
       </div>
       <div class="mbw-metric-tile">
-        <span>Messages envoyés</span>
+        <span>Messages out</span>
         <strong>${escapeHtml(data.metrics.privmsg_out ?? 'n/a')}</strong>
       </div>
       <div class="mbw-metric-tile">
-        <span>Notices envoyées</span>
+        <span>Notices out</span>
         <strong>${escapeHtml(data.metrics.notice_out ?? 'n/a')}</strong>
       </div>
       <div class="mbw-metric-tile">
@@ -436,7 +436,7 @@ app.get(config.baseUrl + '/', async (req, res) => {
       </div>
     </div>
     <p class="mbw-muted-small">
-      <a href="${safeBase('/api/metrics')}">Voir toutes les métriques →</a>
+      <a href="${safeBase('/api/metrics')}">View all metrics →</a>
     </p>
   ` : `<p class="mbw-bad">Endpoint Prometheus inaccessible.</p>`}
 </section>
@@ -447,7 +447,7 @@ app.get(config.baseUrl + '/', async (req, res) => {
   <div class="mbw-section-head">
     <div>
       <h2>Vue Owner</h2>
-      <p>Résumé global réservé Owner.</p>
+      <p>Global summary restricted to Owner.</p>
     </div>
     <span class="mbw-count-badge">owner view</span>
   </div>
@@ -456,30 +456,30 @@ app.get(config.baseUrl + '/', async (req, res) => {
     <table class="mbw-data-table mbw-home-system-table">
       <thead>
         <tr>
-          <th>Élément</th>
+          <th>Item</th>
           <th>Valeur</th>
-          <th>Détail</th>
-          <th>Accès</th>
+          <th>Detail</th>
+          <th>Access</th>
         </tr>
       </thead>
       <tbody>
         <tr>
           <td><strong>Users</strong></td>
           <td class="mbw-number-cell">${escapeHtml(data.counts.users ?? 'n/a')}</td>
-          <td class="mbw-muted-cell">Comptes Mediabot dans USER.</td>
-          <td><a class="mbw-table-action" href="${safeBase('/users')}">ouvrir</a></td>
+          <td class="mbw-muted-cell">Mediabot accounts in USER.</td>
+          <td><a class="mbw-table-action" href="${safeBase('/users')}">open</a></td>
         </tr>
         <tr>
           <td><strong>Channels</strong></td>
           <td class="mbw-number-cell">${escapeHtml(data.counts.channels ?? 'n/a')}</td>
-          <td class="mbw-muted-cell">Canaux connus dans CHANNEL.</td>
-          <td><a class="mbw-table-action" href="${safeBase('/channels')}">ouvrir</a></td>
+          <td class="mbw-muted-cell">Known channels in CHANNEL.</td>
+          <td><a class="mbw-table-action" href="${safeBase('/channels')}">open</a></td>
         </tr>
         <tr>
           <td><strong>API status</strong></td>
           <td class="${data.db.ok ? 'mbw-ok' : 'mbw-bad'}">${data.db.ok ? 'ok' : 'error'}</td>
           <td class="mbw-muted-cell">${escapeHtml(data.db.user)}@${escapeHtml(data.db.host)} / ${escapeHtml(data.db.name)}</td>
-          <td><a class="mbw-table-action" href="${safeBase('/api/status')}">ouvrir</a></td>
+          <td><a class="mbw-table-action" href="${safeBase('/api/status')}">open</a></td>
         </tr>
       </tbody>
     </table>
@@ -490,14 +490,14 @@ app.get(config.baseUrl + '/', async (req, res) => {
   const body = `
 <section class="mbw-hero">
   <div>
-    <p class="mbw-kicker">Console utilisateur</p>
+    <p class="mbw-kicker">User console</p>
     <h1>Mediabot v3</h1>
     <p>
-      Espace personnel Mediabot : profil, canaux, droits, radio et vues
-      adaptées au niveau global de l’utilisateur connecté.
+      Your Mediabot console: profile, channels, permissions, radio
+      and views tailored to your global level.
     </p>
     <div class="mbw-actions">
-      ${user ? `<a class="mbw-primary" href="${safeBase('/profile')}">Mon profil</a>` : `<a class="mbw-primary" href="${safeBase('/login')}">Se connecter</a>`}
+      ${user ? `<a class="mbw-primary" href="${safeBase('/profile')}">My profile</a>` : `<a class="mbw-primary" href="${safeBase('/login')}">Log in</a>`}
       <a class="mbw-secondary" href="${safeBase('/health')}">Healthcheck</a>
     </div>
   </div>
@@ -506,7 +506,7 @@ app.get(config.baseUrl + '/', async (req, res) => {
 <section class="mbw-grid">
   <article class="mbw-card">
     <h2>Base Mediabot</h2>
-    <p class="${data.db.ok ? 'mbw-ok' : 'mbw-bad'}">${data.db.ok ? 'Connectée' : 'Erreur DB'}</p>
+    <p class="${data.db.ok ? 'mbw-ok' : 'mbw-bad'}">${data.db.ok ? 'Connected' : 'DB error'}</p>
     <p>${escapeHtml(data.db.user)}@${escapeHtml(data.db.host)} / ${escapeHtml(data.db.name)}</p>
     ${data.db.error ? `<pre>${escapeHtml(data.db.error)}</pre>` : ''}
   </article>
@@ -514,13 +514,13 @@ app.get(config.baseUrl + '/', async (req, res) => {
   <article class="mbw-card">
     <h2>Utilisateurs</h2>
     <p class="mbw-big">${escapeHtml(data.counts.users ?? 'n/a')}</p>
-    <p>Entrées dans la table USER.</p>
+    <p>Entries in USER table.</p>
   </article>
 
   <article class="mbw-card">
     <h2>Canaux</h2>
     <p class="mbw-big">${escapeHtml(data.counts.channels ?? 'n/a')}</p>
-    <p>Entrées dans la table CHANNEL.</p>
+    <p>Entries in CHANNEL table.</p>
   </article>
 </section>
 
@@ -531,7 +531,7 @@ ${metricsBlock}
 ${ownerSystemBlock}
 `;
 
-  res.send(renderPage('Accueil', body, req));
+  res.send(renderPage('Home', body, req));
 });
 
 
@@ -586,7 +586,7 @@ app.get(config.baseUrl + '/profile', requireLogin, async (req, res) => {
     return res.status(500).send(renderPage('Erreur', `
 <section class="mbw-card">
   <h1>Erreur serveur</h1>
-  <p>Impossible de charger le profil. Réessaie dans quelques instants.</p>
+  <p>Unable to load profile. Please try again in a few moments.</p>
 </section>
 `, req));
   }
@@ -594,14 +594,14 @@ app.get(config.baseUrl + '/profile', requireLogin, async (req, res) => {
   const body = `
 <section class="mbw-hero">
   <div>
-    <p class="mbw-kicker">Espace personnel</p>
+    <p class="mbw-kicker">Personal space</p>
     <h1>${escapeHtml(req.session.user.nickname)}</h1>
     <p>
-      Ton profil Mediabot, tes informations utiles et les accès détectés
+      Your Mediabot profile, useful information and detected access
       depuis la base du bot.
     </p>
     <div class="mbw-actions">
-      <a class="mbw-primary" href="${safeBase('/channels')}">Voir mes canaux</a>
+      <a class="mbw-primary" href="${safeBase('/channels')}">View my channels</a>
       <a class="mbw-secondary" href="${safeBase('/api/me')}">API me</a>
     </div>
   </div>
@@ -622,13 +622,13 @@ app.get(config.baseUrl + '/profile', requireLogin, async (req, res) => {
 
   <article class="mbw-card">
     <h2>Auth IRC</h2>
-    <p class="${Number(profile?.auth || 0) ? 'mbw-ok' : 'mbw-bad'}">${Number(profile?.auth || 0) ? 'authentifié' : 'non authentifié'}</p>
-    <p>état courant côté table USER.</p>
+    <p class="${Number(profile?.auth || 0) ? 'mbw-ok' : 'mbw-bad'}">${Number(profile?.auth || 0) ? 'authenticated' : 'not authenticated'}</p>
+    <p>current state from USER table.</p>
   </article>
 </section>
 
 <section class="mbw-card mbw-wide">
-  <h2>Détails du profil</h2>
+  <h2>Profile details</h2>
   <div class="mbw-kv">
     <div><span>id_user</span><strong>${escapeHtml(profile?.id_user ?? req.session.user.id_user)}</strong></div>
     <div><span>nickname</span><strong>${escapeHtml(profile?.nickname ?? req.session.user.nickname)}</strong></div>
@@ -651,7 +651,7 @@ app.get(config.baseUrl + '/profile', requireLogin, async (req, res) => {
         </div>
       `).join('')}
     </div>
-  ` : `<p>Aucune hostmask détectée.</p>`}
+  ` : `<p>No hostmask detected.</p>`}
 </section>
 `;
 
@@ -669,15 +669,15 @@ app.get(config.baseUrl + '/channels', requireLogin, async (req, res) => {
   const body = `
 <section class="mbw-hero">
   <div>
-    <p class="mbw-kicker">${isMaster(user) ? 'Vue globale' : 'Mes canaux'}</p>
+    <p class="mbw-kicker">${isMaster(user) ? 'Global view' : 'My channels'}</p>
     <h1>Channels</h1>
     <p>
       ${isMaster(user)
         ? 'Ton niveau permet de voir tous les canaux connus de Mediabot.'
-        : 'Vue limitée aux canaux associés à ton compte Mediabot.'}
+        : 'Limited to channels linked to your Mediabot account.'}
     </p>
     <div class="mbw-actions">
-      <a class="mbw-primary" href="${safeBase('/profile')}">Mon profil</a>
+      <a class="mbw-primary" href="${safeBase('/profile')}">My profile</a>
       <a class="mbw-secondary" href="${safeBase('/api/channels')}">API channels</a>
     </div>
   </div>
@@ -687,7 +687,7 @@ app.get(config.baseUrl + '/channels', requireLogin, async (req, res) => {
   <article class="mbw-card">
     <h2>Total channels</h2>
     <p class="mbw-big">${escapeHtml(channels.length)}</p>
-    <p>${isMaster(user) ? 'canaux globaux visibles' : 'canaux liés à ton compte'}.</p>
+    <p>${isMaster(user) ? 'all channels visible' : 'channels linked to your account'}.</p>
   </article>
 
   <article class="mbw-card">
@@ -727,7 +727,7 @@ app.get(config.baseUrl + '/channels', requireLogin, async (req, res) => {
             <th>Niveau canal</th>
             <th>Automode</th>
             <th>Owner</th>
-            <th>Détail</th>
+            <th>Detail</th>
           </tr>
         </thead>
         <tbody>
@@ -753,7 +753,7 @@ app.get(config.baseUrl + '/channels', requireLogin, async (req, res) => {
                 <td class="mbw-muted-cell">${escapeHtml(ch.automode ?? 'n/a')}</td>
                 <td class="mbw-number-cell">${escapeHtml(ch.channel_owner_id ?? 'n/a')}</td>
                 <td>
-                  <a class="mbw-table-action" href="${detailUrl}">ouvrir</a>
+                  <a class="mbw-table-action" href="${detailUrl}">open</a>
                 </td>
               </tr>
             `;
@@ -761,7 +761,7 @@ app.get(config.baseUrl + '/channels', requireLogin, async (req, res) => {
         </tbody>
       </table>
     </div>
-  ` : `<p>Aucun canal accessible pour ce compte.</p>`}
+  ` : `<p>No accessible channel for this account.</p>`}
 </section>
 `;
 
@@ -810,11 +810,11 @@ app.get(config.baseUrl + '/radio', requireLogin, async (req, res) => {
     <p class="mbw-kicker">Radio</p>
     <h1>Radio status</h1>
     <p>
-      État de la radio exposé depuis Icecast. Cette page est en lecture seule
-      et utilise le flux de statut configuré pour Mediabot.
+      Radio status exposed from Icecast. This page is read-only
+      and uses the status stream configured for Mediabot.
     </p>
     <div class="mbw-actions">
-      <a class="mbw-primary" href="${escapeHtml(radio.publicListenUrl || '#')}">Écouter le mount principal</a>
+      <a class="mbw-primary" href="${escapeHtml(radio.publicListenUrl || '#')}">Listen to main mount</a>
       <a class="mbw-secondary" href="${safeBase('/api/radio/status')}">API radio</a>
     </div>
   </div>
@@ -831,7 +831,7 @@ app.get(config.baseUrl + '/radio', requireLogin, async (req, res) => {
   <article class="mbw-card">
     <h2>Mounts actifs</h2>
     <p class="mbw-big">${escapeHtml(activeMounts)}</p>
-    <p>mounts retournés par Icecast.</p>
+    <p>mounts returned by Icecast.</p>
   </article>
 
   <article class="mbw-card">
@@ -845,7 +845,7 @@ app.get(config.baseUrl + '/radio', requireLogin, async (req, res) => {
   <div class="mbw-section-head">
     <div>
       <h2>Lecture courante</h2>
-      <p>Résumé du mount principal configuré pour Mediabot.</p>
+      <p>Summary of the primary mount configured for Mediabot.</p>
     </div>
     <span class="mbw-count-badge">${escapeHtml(radio.primaryMount || 'n/a')}</span>
   </div>
@@ -877,19 +877,19 @@ app.get(config.baseUrl + '/radio', requireLogin, async (req, res) => {
             <td class="mbw-number-cell">${escapeHtml(primary.listeners ?? 'n/a')}</td>
             <td class="mbw-number-cell">${escapeHtml(primary.listenerPeak ?? 'n/a')}</td>
             <td class="mbw-date-cell">${escapeHtml(primary.streamStart || 'n/a')}</td>
-            <td><a class="mbw-table-action" href="${escapeHtml(primary.publicListenUrl || radio.publicListenUrl || '#')}">ouvrir</a></td>
+            <td><a class="mbw-table-action" href="${escapeHtml(primary.publicListenUrl || radio.publicListenUrl || '#')}">open</a></td>
           </tr>
         </tbody>
       </table>
     </div>
-  ` : `<p>Aucun mount principal actif détecté.</p>`}
+  ` : `<p>No active primary mount detected.</p>`}
 </section>
 
 <section class="mbw-card mbw-wide">
   <div class="mbw-section-head">
     <div>
       <h2>Mounts Icecast</h2>
-      <p>Vue comparative des flux actuellement exposés par Icecast.</p>
+      <p>Comparative view of streams currently exposed by Icecast.</p>
     </div>
     <span class="mbw-count-badge">${escapeHtml(mounts.length)} mounts</span>
   </div>
@@ -922,13 +922,13 @@ app.get(config.baseUrl + '/radio', requireLogin, async (req, res) => {
               <td class="mbw-number-cell">${escapeHtml(m.bitrate ?? 'n/a')}</td>
               <td class="mbw-muted-cell">${escapeHtml(m.contentType || 'n/a')}</td>
               <td class="mbw-date-cell">${escapeHtml(m.streamStart || 'n/a')}</td>
-              <td><a class="mbw-table-action" href="${escapeHtml(m.publicListenUrl || '#')}">ouvrir</a></td>
+              <td><a class="mbw-table-action" href="${escapeHtml(m.publicListenUrl || '#')}">open</a></td>
             </tr>
           `).join('')}
         </tbody>
       </table>
     </div>
-  ` : `<p>Aucun mount actif retourné par Icecast.</p>`}
+  ` : `<p>No active mount returned by Icecast.</p>`}
 </section>
 `;
 
@@ -955,11 +955,11 @@ app.get(config.baseUrl + '/api/network', requireLogin, async (req, res) => {
 
 app.get(config.baseUrl + '/network', requireLogin, async (req, res) => {
   if (!isMaster(req.session.user)) {
-    return res.status(403).send(renderPage('Accès refusé', `
+    return res.status(403).send(renderPage('Access denied', `
 <section class="mbw-card">
-  <h1>Accès refusé</h1>
-  <p>Cette page est réservée aux Owner et Master Mediabot.</p>
-  <a href="${safeBase('/')}">← Retour à l'accueil</a>
+  <h1>Access denied</h1>
+  <p>This page is restricted to Owner and Master.</p>
+  <a href="${safeBase('/')}">← Back to home</a>
 </section>
 `, req));
   }
@@ -973,7 +973,7 @@ app.get(config.baseUrl + '/network', requireLogin, async (req, res) => {
     return res.status(500).send(renderPage('Erreur', `
 <section class="mbw-card">
   <h1>Erreur serveur</h1>
-  <p>Impossible de charger la topologie réseau.</p>
+  <p>Unable to load network topology.</p>
 </section>
 `, req));
   }
@@ -1000,17 +1000,17 @@ app.get(config.baseUrl + '/network', requireLogin, async (req, res) => {
             </div>
           `).join('')}
         </div>
-      ` : `<p class="mbw-muted-cell">Aucun serveur défini pour ce réseau.</p>`}
+      ` : `<p class="mbw-muted-cell">No server defined for this network.</p>`}
     </article>
-  `).join('') : `<p>Aucun réseau IRC configuré dans la base Mediabot.</p>`;
+  `).join('') : `<p>No IRC network configured in the Mediabot database.</p>`;
 
   const body = `
 <section class="mbw-hero">
   <div>
     <p class="mbw-kicker">Infrastructure</p>
-    <h1>Topologie réseau IRC</h1>
+    <h1>IRC Network Topology</h1>
     <p>
-      Réseaux et serveurs IRC configurés dans la base Mediabot.
+      IRC networks and servers configured in the Mediabot database.
       Lecture seule — modification via le script <code>conf_servers.pl</code>.
     </p>
     <div class="mbw-actions">
@@ -1022,34 +1022,34 @@ app.get(config.baseUrl + '/network', requireLogin, async (req, res) => {
 
 <section class="mbw-grid">
   <article class="mbw-card">
-    <h2>Réseaux</h2>
+    <h2>Networks</h2>
     <p class="mbw-big">${escapeHtml(networks.length)}</p>
-    <p>entrées dans NETWORK.</p>
+    <p>entries in NETWORK.</p>
   </article>
 
   <article class="mbw-card">
     <h2>Serveurs</h2>
     <p class="mbw-big">${escapeHtml(totalServers)}</p>
-    <p>entrées dans SERVERS.</p>
+    <p>entries in SERVERS.</p>
   </article>
 
   <article class="mbw-card">
     <h2>Moy. serveurs</h2>
     <p class="mbw-big">${escapeHtml(networks.length ? (totalServers / networks.length).toFixed(1) : 'n/a')}</p>
-    <p>par réseau configuré.</p>
+    <p>per configured network.</p>
   </article>
 </section>
 
 <section class="mbw-card mbw-wide">
   <div class="mbw-section-head">
     <div>
-      <h2>Réseaux IRC configurés</h2>
+      <h2>Configured IRC networks</h2>
       <p>
-        Chaque réseau liste ses serveurs de connexion.
+        Each network lists its connection servers.
         Mediabot choisit un serveur au hasard parmi ceux disponibles.
       </p>
     </div>
-    <span class="mbw-count-badge">${escapeHtml(networks.length)} réseaux</span>
+    <span class="mbw-count-badge">${escapeHtml(networks.length)} networks</span>
   </div>
 
   <div class="mbw-network-grid">
@@ -1155,9 +1155,9 @@ app.get(config.baseUrl + '/quotes', requireLogin, async (req, res) => {
 
   const paginationBar = totalPages > 1 ? `
 <div class="mbw-pagination">
-  ${page > 1         ? `<a class="mbw-page-btn" href="${escapeHtml(pageUrl(page - 1))}">‹ Précédent</a>` : '<span class="mbw-page-btn disabled">‹ Précédent</span>'}
+  ${page > 1         ? `<a class="mbw-page-btn" href="${escapeHtml(pageUrl(page - 1))}">‹ Previous</a>` : '<span class="mbw-page-btn disabled">‹ Previous</span>'}
   <span class="mbw-page-info">Page ${escapeHtml(page)} / ${escapeHtml(totalPages)}</span>
-  ${page < totalPages ? `<a class="mbw-page-btn" href="${escapeHtml(pageUrl(page + 1))}">Suivant ›</a>` : '<span class="mbw-page-btn disabled">Suivant ›</span>'}
+  ${page < totalPages ? `<a class="mbw-page-btn" href="${escapeHtml(pageUrl(page + 1))}">Next ›</a>` : '<span class="mbw-page-btn disabled">Next ›</span>'}
 </div>
 ` : '';
 
@@ -1167,7 +1167,7 @@ app.get(config.baseUrl + '/quotes', requireLogin, async (req, res) => {
     <input
       type="search"
       name="q"
-      placeholder="Rechercher dans le texte…"
+      placeholder="Search in text…"
       value="${escapeHtml(search || '')}"
       class="mbw-search-input"
     >
@@ -1180,8 +1180,8 @@ app.get(config.baseUrl + '/quotes', requireLogin, async (req, res) => {
         </option>
       `).join('')}
     </select>
-    <button type="submit" class="mbw-btn-primary">Filtrer</button>
-    ${search || channel ? `<a href="${safeBase('/quotes')}" class="mbw-btn-secondary">Réinitialiser</a>` : ''}
+    <button type="submit" class="mbw-btn-primary">Filter</button>
+    ${search || channel ? `<a href="${safeBase('/quotes')}" class="mbw-btn-secondary">Reset</a>` : ''}
   </form>
 </section>
 `;
@@ -1192,7 +1192,7 @@ app.get(config.baseUrl + '/quotes', requireLogin, async (req, res) => {
     <p class="mbw-kicker">Bot Mediabot</p>
     <h1>Quotes</h1>
     <p>
-      Explorateur des citations enregistrées par canal IRC.
+      Explorer for quotes recorded per IRC channel.
       Ajout et suppression via les commandes IRC <code>!q add</code> / <code>!q del</code>.
     </p>
     <div class="mbw-actions">
@@ -1227,8 +1227,8 @@ ${filterBar}
 <section class="mbw-card mbw-wide">
   <div class="mbw-section-head">
     <div>
-      <h2>${search || channel ? 'Résultats filtrés' : 'Dernières quotes'}</h2>
-      <p>${escapeHtml(result.rows.length)} quote(s) affichée(s) sur ${escapeHtml(result.total)} au total.</p>
+      <h2>${search || channel ? 'Filtered results' : 'Latest quotes'}</h2>
+      <p>${escapeHtml(result.rows.length)} quote(s) shown out of ${escapeHtml(result.total)} total.</p>
     </div>
     <span class="mbw-count-badge">${escapeHtml(result.total)} total</span>
   </div>
@@ -1249,7 +1249,7 @@ ${filterBar}
         </div>
       `).join('')}
     </div>
-  ` : `<p>Aucune quote${search || channel ? ' correspondant aux critères' : ''}.</p>`}
+  ` : `<p>Aucune quote${search || channel ? ' matching the filter' : ''}.</p>`}
 
   ${paginationBar}
 </section>
@@ -1309,12 +1309,12 @@ app.get(config.baseUrl + '/commands', requireLogin, async (req, res) => {
     <input
       type="search"
       name="q"
-      placeholder="Rechercher une commande…"
+      placeholder="Search a command…"
       value="${escapeHtml(search || '')}"
       class="mbw-search-input"
     >
     <select name="category" class="mbw-select">
-      <option value="">Toutes les catégories</option>
+      <option value="">All categories</option>
       ${categories.map(cat => `
         <option value="${escapeHtml(cat.category)}"
           ${category === cat.category ? 'selected' : ''}>
@@ -1322,8 +1322,8 @@ app.get(config.baseUrl + '/commands', requireLogin, async (req, res) => {
         </option>
       `).join('')}
     </select>
-    <button type="submit" class="mbw-btn-primary">Filtrer</button>
-    ${search || category ? `<a href="${safeBase('/commands')}" class="mbw-btn-secondary">Réinitialiser</a>` : ''}
+    <button type="submit" class="mbw-btn-primary">Filter</button>
+    ${search || category ? `<a href="${safeBase('/commands')}" class="mbw-btn-secondary">Reset</a>` : ''}
   </form>
 </section>
 `;
@@ -1332,9 +1332,9 @@ app.get(config.baseUrl + '/commands', requireLogin, async (req, res) => {
 <section class="mbw-hero">
   <div>
     <p class="mbw-kicker">Bot Mediabot</p>
-    <h1>Commandes personnalisées</h1>
+    <h1>Custom commands</h1>
     <p>
-      Explorateur des commandes IRC définies dans la base Mediabot.
+      Explorer for IRC commands defined in the Mediabot database.
       Lecture seule — modification via la commande IRC <code>!addcmd</code>.
     </p>
     <div class="mbw-actions">
@@ -1354,13 +1354,13 @@ app.get(config.baseUrl + '/commands', requireLogin, async (req, res) => {
   <article class="mbw-card">
     <h2>Actives</h2>
     <p class="mbw-big">${escapeHtml(activeCount)}</p>
-    <p>état active = 1.</p>
+    <p>active state = 1.</p>
   </article>
 
   <article class="mbw-card">
     <h2>Hits totaux</h2>
     <p class="mbw-big">${escapeHtml(totalHits)}</p>
-    <p>nombre d'utilisations cumulées.</p>
+    <p>cumulative usage count.</p>
   </article>
 </section>
 
@@ -1369,8 +1369,8 @@ ${filterBar}
 <section class="mbw-card mbw-wide">
   <div class="mbw-section-head">
     <div>
-      <h2>${search || category ? 'Résultats filtrés' : 'Toutes les commandes'}</h2>
-      <p>Triées par nombre de hits décroissant.</p>
+      <h2>${search || category ? 'Filtered results' : 'All commands'}</h2>
+      <p>Sorted by hit count descending.</p>
     </div>
     <span class="mbw-count-badge">${escapeHtml(commands.length)} commandes</span>
   </div>
@@ -1382,11 +1382,11 @@ ${filterBar}
           <tr>
             <th>Commande</th>
             <th>Action</th>
-            <th>Catégorie</th>
+            <th>Category</th>
             <th>Auteur</th>
             <th>Hits</th>
             <th>Statut</th>
-            <th>Créée le</th>
+            <th>Created</th>
           </tr>
         </thead>
         <tbody>
@@ -1411,7 +1411,7 @@ ${filterBar}
         </tbody>
       </table>
     </div>
-  ` : `<p>Aucune commande${search || category ? ' correspondant aux critères' : ' dans la base'}.</p>`}
+  ` : `<p>Aucune commande${search || category ? ' matching the filter' : ' in the database'}.</p>`}
 </section>
 `;
 
@@ -1448,11 +1448,11 @@ app.get(config.baseUrl + '/api/users', requireLogin, async (req, res) => {
 
 app.get(config.baseUrl + '/users', requireLogin, async (req, res) => {
   if (!isMaster(req.session.user)) {
-    return res.status(403).send(renderPage('Accès refusé', `
+    return res.status(403).send(renderPage('Access denied', `
 <section class="mbw-card">
-  <h1>Accès refusé</h1>
-  <p>Cette page est réservée aux Owner et Master Mediabot.</p>
-  <a href="${safeBase('/')}">← Retour à l'accueil</a>
+  <h1>Access denied</h1>
+  <p>This page is restricted to Owner and Master.</p>
+  <a href="${safeBase('/')}">← Back to home</a>
 </section>
 `, req));
   }
@@ -1490,12 +1490,12 @@ app.get(config.baseUrl + '/users', requireLogin, async (req, res) => {
     <p class="mbw-kicker">Administration lecture seule</p>
     <h1>Utilisateurs</h1>
     <p>
-      Vue globale des comptes Mediabot, de leurs niveaux, de leur état
+      Global overview of Mediabot accounts, their levels, and status
       d'authentification IRC et de leurs rattachements aux canaux.
     </p>
     <div class="mbw-actions">
       <a class="mbw-primary" href="${safeBase('/api/users')}">API JSON</a>
-      <a class="mbw-secondary" href="${safeBase('/profile')}">Mon profil</a>
+      <a class="mbw-secondary" href="${safeBase('/profile')}">My profile</a>
     </div>
   </div>
 </section>
@@ -1510,7 +1510,7 @@ app.get(config.baseUrl + '/users', requireLogin, async (req, res) => {
   <article class="mbw-card">
     <h2>Owner / Master</h2>
     <p class="mbw-big">${escapeHtml(masterCount)}</p>
-    <p>niveaux globaux élevés.</p>
+    <p>elevated global levels.</p>
   </article>
 
   <article class="mbw-card">
@@ -1523,8 +1523,8 @@ app.get(config.baseUrl + '/users', requireLogin, async (req, res) => {
 <section class="mbw-card mbw-wide">
   <div class="mbw-section-head">
     <div>
-      <h2>Répartition par rôle</h2>
-      <p>Vue synthétique des niveaux globaux Mediabot.</p>
+      <h2>Role breakdown</h2>
+      <p>Overview of Mediabot global levels.</p>
     </div>
   </div>
   <div class="mbw-role-grid">
@@ -1553,7 +1553,7 @@ app.get(config.baseUrl + '/users', requireLogin, async (req, res) => {
           <tr>
             <th>Nickname</th>
             <th>Username</th>
-            <th>Rôle</th>
+            <th>Role</th>
             <th>Auth</th>
             <th>Canaux</th>
             <th>Timezone</th>
@@ -1588,7 +1588,7 @@ app.get(config.baseUrl + '/users', requireLogin, async (req, res) => {
         </tbody>
       </table>
     </div>
-  ` : `<p>Aucun utilisateur trouvé.</p>`}
+  ` : `<p>No user found.</p>`}
 </section>
 `;
 
@@ -1629,11 +1629,11 @@ app.get(config.baseUrl + '/channels/:id', requireLogin, async (req, res) => {
   const idChannel = Number(req.params.id);
 
   if (!Number.isInteger(idChannel) || idChannel <= 0) {
-    return res.status(400).send(renderPage('Canal invalide', `
+    return res.status(400).send(renderPage('Invalid channel', `
 <section class="mbw-card">
   <h1>Canal invalide</h1>
-  <p>L'identifiant de canal demandé n'est pas valide.</p>
-  <a href="${safeBase('/channels')}">← Retour aux canaux</a>
+  <p>The requested channel ID is not valid.</p>
+  <a href="${safeBase('/channels')}">← Back to channels</a>
 </section>
 `, req));
   }
@@ -1647,17 +1647,17 @@ app.get(config.baseUrl + '/channels/:id', requireLogin, async (req, res) => {
     return res.status(500).send(renderPage('Erreur', `
 <section class="mbw-card">
   <h1>Erreur serveur</h1>
-  <p>Impossible de vérifier les droits d'accès.</p>
+  <p>Unable to verify access rights.</p>
 </section>
 `, req));
   }
 
   if (!allowed) {
-    return res.status(403).send(renderPage('Accès refusé', `
+    return res.status(403).send(renderPage('Access denied', `
 <section class="mbw-card">
-  <h1>Accès refusé</h1>
-  <p>Ton compte Mediabot ne possède pas les droits suffisants pour voir ce canal.</p>
-  <a href="${safeBase('/channels')}">← Retour aux canaux</a>
+  <h1>Access denied</h1>
+  <p>Your Mediabot account does not have sufficient permissions to view this channel.</p>
+  <a href="${safeBase('/channels')}">← Back to channels</a>
 </section>
 `, req));
   }
@@ -1673,7 +1673,7 @@ app.get(config.baseUrl + '/channels/:id', requireLogin, async (req, res) => {
     return res.status(500).send(renderPage('Erreur', `
 <section class="mbw-card">
   <h1>Erreur serveur</h1>
-  <p>Impossible de charger les données du canal.</p>
+  <p>Unable to load channel data.</p>
 </section>
 `, req));
   }
@@ -1682,16 +1682,16 @@ app.get(config.baseUrl + '/channels/:id', requireLogin, async (req, res) => {
     return res.status(404).send(renderPage('Canal introuvable', `
 <section class="mbw-card">
   <h1>Canal introuvable</h1>
-  <p>Aucun canal Mediabot ne correspond à cet identifiant.</p>
-  <a href="${safeBase('/channels')}">← Retour aux canaux</a>
+  <p>No Mediabot channel matches this identifier.</p>
+  <a href="${safeBase('/channels')}">← Back to channels</a>
 </section>
 `, req));
   }
 
   const chansetSection = relatedTables.length ? `
 <section class="mbw-card mbw-wide">
-  <h2>Tables liées détectées</h2>
-  <p>Chansets, responders, quotes et logs seront branchés dans une prochaine version.</p>
+  <h2>Linked tables detected</h2>
+  <p>Chansets, responders, quotes and logs will be wired in a future version.</p>
   <div class="mbw-taglist">
     ${relatedTables.map(t => `<span>${escapeHtml(t)}</span>`).join('')}
   </div>
@@ -1704,11 +1704,11 @@ app.get(config.baseUrl + '/channels/:id', requireLogin, async (req, res) => {
     <p class="mbw-kicker">Canal IRC</p>
     <h1>${escapeHtml(channel.name || 'unknown')}</h1>
     <p>
-      Vue détaillée du canal depuis la base Mediabot :
-      configuration, utilisateurs associés et niveaux par canal.
+      Detailed channel view from the Mediabot database:
+      configuration, associated users and per-channel levels.
     </p>
     <div class="mbw-actions">
-      <a class="mbw-primary" href="${safeBase('/channels')}">← Retour channels</a>
+      <a class="mbw-primary" href="${safeBase('/channels')}">← Back to channels</a>
       <a class="mbw-secondary" href="${safeBase('/api/channels/' + idChannel)}">API JSON</a>
     </div>
   </div>
@@ -1722,7 +1722,7 @@ app.get(config.baseUrl + '/channels/:id', requireLogin, async (req, res) => {
   </article>
 
   <article class="mbw-card">
-    <h2>Utilisateurs liés</h2>
+    <h2>Linked users</h2>
     <p class="mbw-big">${escapeHtml(users.length)}</p>
     <p>depuis USER_CHANNEL.</p>
   </article>
@@ -1759,7 +1759,7 @@ app.get(config.baseUrl + '/channels/:id', requireLogin, async (req, res) => {
         <thead>
           <tr>
             <th>Nickname</th>
-            <th>Rôle global</th>
+            <th>Global role</th>
             <th>Niveau canal</th>
             <th>Automode</th>
             <th>Greet</th>
@@ -1781,7 +1781,7 @@ app.get(config.baseUrl + '/channels/:id', requireLogin, async (req, res) => {
         </tbody>
       </table>
     </div>
-  ` : `<p>Aucun utilisateur lié à ce canal dans USER_CHANNEL.</p>`}
+  ` : `<p>No user linked to this channel in USER_CHANNEL.</p>`}
 </section>
 
 ${chansetSection}
@@ -1833,7 +1833,7 @@ app.use((err, req, res, next) => {
   <h1>${status === 404 ? '404 — Page introuvable' : 'Erreur serveur'}</h1>
   <p>${escapeHtml(message)}</p>
   ${!isProd && err.stack ? `<pre class="mbw-error-stack">${escapeHtml(err.stack)}</pre>` : ''}
-  <a href="${safeBase('/')}" class="mbw-btn-secondary">← Accueil</a>
+  <a href="${safeBase('/')}" class="mbw-btn-secondary">← Home</a>
 </section>
 `,
     req

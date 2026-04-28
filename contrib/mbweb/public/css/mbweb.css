@@ -194,8 +194,8 @@ button:hover {
 .mbw-hero {
   position: relative;
   overflow: hidden;
-  padding: clamp(2rem, 5vw, 4rem);
-  margin-bottom: 1.2rem;
+  padding: 1.4rem 1.6rem;
+  margin-bottom: .8rem;
 }
 
 .mbw-hero::after {
@@ -210,7 +210,7 @@ button:hover {
 }
 
 .mbw-kicker {
-  margin: 0 0 0.75rem;
+  margin: 0 0 .4rem;
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.16em;
@@ -221,9 +221,9 @@ button:hover {
 h1 {
   max-width: 900px;
   margin: 0 0 1rem;
-  font-size: clamp(2.6rem, 7vw, 5.8rem);
-  line-height: 0.94;
-  letter-spacing: -0.075em;
+  font-size: 1.25rem;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
 }
 
 h2 {
@@ -241,13 +241,13 @@ p {
 .mbw-hero p {
   max-width: 780px;
   color: var(--soft);
-  font-size: clamp(1rem, 2vw, 1.18rem);
+  font-size: .93rem;
 }
 
 .mbw-actions {
   display: flex;
   gap: 0.9rem;
-  margin-top: 1.6rem;
+  margin-top: 1rem;
   flex-wrap: wrap;
 }
 
@@ -269,7 +269,7 @@ p {
 .mbw-big {
   margin: 0.25rem 0;
   color: var(--text);
-  font-size: 2.7rem;
+  font-size: 1.5rem;
   line-height: 1;
   font-weight: 950;
   letter-spacing: -0.06em;
@@ -299,13 +299,13 @@ pre {
 .mbw-login-panel {
   width: min(560px, 100%);
   margin: 2.4rem auto;
-  padding: clamp(1.4rem, 4vw, 2.1rem);
+  padding: 1.4rem 1.6rem;
 }
 
 .mbw-login-panel h1 {
-  font-size: clamp(2.1rem, 6vw, 4.1rem);
-  line-height: 0.98;
-  letter-spacing: -0.07em;
+  font-size: 1.15rem;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
 }
 
 .mbw-form {
@@ -600,7 +600,7 @@ pre {
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1.2rem;
+  margin-bottom: .8rem;
 }
 
 .mbw-section-head h2 {
@@ -650,7 +650,7 @@ pre {
 
 .mbw-role-pill strong {
   color: var(--text);
-  font-size: 1.45rem;
+  font-size: 1.05rem;
   line-height: 1;
 }
 

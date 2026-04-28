@@ -44,7 +44,7 @@ function renderPage(title, body, req) {
 
     <nav class="mbw-nav">
       <div class="mbw-nav-links">
-        <a class="mbw-nav-pill" href="${homeUrl}">Accueil</a>
+        <a class="mbw-nav-pill" href="${homeUrl}">Home</a>
         ${user ? `
   <a class="mbw-nav-pill" href="${safeBase('/profile')}">Profil</a>
   <a class="mbw-nav-pill" href="${safeBase('/channels')}">Channels</a>
