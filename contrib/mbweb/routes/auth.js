@@ -150,7 +150,7 @@ router.post('/login', loginRateLimiter, async (req, res) => {
     return res.redirect(safeBase('/'));
   } catch (err) {
     console.error('[mbweb][auth] exception', err);
-    return res.redirect(safeBase('/login') + '?error=' + encodeURIComponent('Erreur authentification: ' + err.message));
+    return res.redirect(safeBase('/login') + '?error=' + encodeURIComponent('Erreur interne. Réessaie dans quelques instants.'));
   }
 });
 

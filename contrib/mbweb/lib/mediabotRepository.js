@@ -1,12 +1,6 @@
 'use strict';
 
-const { pool } = require('./db');
-
-// Column schema cache shared with db.js — avoids information_schema
-// round-trips on every page load.
-// Keys: table name → { cols: string[], expiresAt: number }
-const _repoColumnCache = new Map();
-const _REPO_CACHE_TTL  = 60_000; // ms
+const { pool, tableColumns, clearColumnCache } = require('./db');
 
 async function tableExists(tableName) {
   const [rows] = await pool.execute(`
@@ -15,32 +9,13 @@ async function tableExists(tableName) {
     WHERE table_schema = DATABASE()
       AND table_name = ?
   `, [tableName]);
-
   return Number(rows[0]?.n || 0) > 0;
 }
 
+// Wrapper : vérifie l'existence puis délègue le cache à db.js/tableColumns
 async function getColumns(tableName) {
-  const now = Date.now();
-  const cached = _repoColumnCache.get(tableName);
-  if (cached && cached.expiresAt > now) return cached.cols;
-
-  if (!(await tableExists(tableName))) {
-    // Cache negative result too — table won't appear spontaneously
-    _repoColumnCache.set(tableName, { cols: [], expiresAt: now + _REPO_CACHE_TTL });
-    return [];
-  }
-
-  const [rows] = await pool.execute(`
-    SELECT column_name
-    FROM information_schema.columns
-    WHERE table_schema = DATABASE()
-      AND table_name = ?
-    ORDER BY ordinal_position
-  `, [tableName]);
-
-  const cols = rows.map(r => r.column_name);
-  _repoColumnCache.set(tableName, { cols, expiresAt: now + _REPO_CACHE_TTL });
-  return cols;
+  if (!(await tableExists(tableName))) return [];
+  return tableColumns(tableName);
 }
 
 function has(columns, name) {
@@ -326,12 +301,16 @@ async function getAllUsersWithRoles() {
     select.push('NULL AS global_role');
   }
 
+  const orderBy = joinLevel
+    ? 'COALESCE(ul.level, u.id_user_level, 999)'
+    : 'COALESCE(u.id_user_level, 999)';
+
   const [rows] = await pool.query(`
     SELECT ${select.join(', ')}
     FROM USER u
     ${joinLevel}
     ORDER BY
-      COALESCE(ul.level, u.id_user_level, 999) ASC,
+      ${orderBy} ASC,
       u.nickname ASC
   `);
 
@@ -394,7 +373,7 @@ async function getCommands({ category = null, search = null, limit = 200 } = {})
   const conditions = [];
   const params = [];
 
-  if (category) {
+  if (category && catExists) {
     conditions.push('pcc.description = ?');
     params.push(category);
   }

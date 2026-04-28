@@ -14,31 +14,40 @@ const { requireLogin } = require('../lib/sessionUser');
 
 const router = express.Router();
 
-router.get('/health', async (req, res) => {
+// /health — pas d'auth requise (utilisé par monitoring/systemd)
+// mais ne retourne AUCUNE donnée sensible (pas de session, pas de DB)
+router.get('/health', (req, res) => {
   res.json({
-    ok: true,
-    service: 'mbweb',
-    baseUrl: config.baseUrl || '/',
-    db: `${config.db.user}@${config.db.host}:${config.db.port}/${config.db.database}`,
-    user: req.session?.user || null,
+    ok:        true,
+    service:   'mbweb',
     timestamp: new Date().toISOString()
   });
 });
 
-router.get('/api/status', async (req, res) => {
-  const data = await getDashboardData(req);
+// /api/status — réservé Owner
+// getDashboardData expose db.user, db.host, db.name → pas public
+router.get('/api/status', requireLogin, async (req, res) => {
+  if (!isOwner(req.session.user)) {
+    return res.status(403).json({ ok: false, error: 'Forbidden' });
+  }
 
-  res.json({
-    ok: true,
-    service: 'mbweb',
-    permissions: req.session?.user ? {
-      viewDashboard: can(req.session.user, 'view:dashboard'),
-      viewRadio: can(req.session.user, 'view:radio'),
-      viewSystem: can(req.session.user, 'view:system'),
-      viewAllChannels: can(req.session.user, 'view:all_channels')
-    } : null,
-    ...data
-  });
+  try {
+    const data = await getDashboardData(req);
+    res.json({
+      ok:      true,
+      service: 'mbweb',
+      permissions: {
+        viewDashboard:   can(req.session.user, 'view:dashboard'),
+        viewRadio:       can(req.session.user, 'view:radio'),
+        viewSystem:      can(req.session.user, 'view:system'),
+        viewAllChannels: can(req.session.user, 'view:all_channels')
+      },
+      ...data
+    });
+  } catch (err) {
+    console.error('[mbweb][/api/status] error:', err.message);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
 });
 
 router.get('/api/dashboard', requireLogin, async (req, res) => {
@@ -49,18 +58,18 @@ router.get('/api/dashboard', requireLogin, async (req, res) => {
     ok: true,
     me: user,
     role: {
-      global_level: user.global_level,
-      global_role: user.global_role,
-      owner: isOwner(user),
-      master: isMaster(user),
+      global_level:  user.global_level,
+      global_role:   user.global_role,
+      owner:         isOwner(user),
+      master:        isMaster(user),
       administrator: isAdministrator(user)
     },
     visibleBlocks: {
-      profile: can(user, 'view:profile'),
-      radio: can(user, 'view:radio'),
-      users: isMaster(user),
+      profile:     can(user, 'view:profile'),
+      radio:       can(user, 'view:radio'),
+      users:       isMaster(user),
       allChannels: isMaster(user),
-      system: isOwner(user)
+      system:      isOwner(user)
     },
     dashboard: data
   });

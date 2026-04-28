@@ -195,7 +195,28 @@ app.use(config.baseUrl, apiRoutes);
 app.use(config.baseUrl, authRoutes);
 
 app.get(config.baseUrl + '/', async (req, res) => {
-  const data = await getDashboardData(req);
+  const [data, parsedMetrics] = await Promise.all([
+    getDashboardData(req),
+    fetchMetrics()
+  ]);
+
+  data.metrics = parsedMetrics
+    ? {
+        ok:                       true,
+        irc_connected:            metricVal(parsedMetrics, 'mediabot_irc_connected'),
+        db_connected:             metricVal(parsedMetrics, 'mediabot_db_connected'),
+        up:                       metricVal(parsedMetrics, 'mediabot_up'),
+        uptime_seconds:           metricVal(parsedMetrics, 'mediabot_uptime_seconds'),
+        channels_managed:         metricVal(parsedMetrics, 'mediabot_channels_managed'),
+        current_channels:         metricVal(parsedMetrics, 'mediabot_current_channels'),
+        privmsg_in:               metricVal(parsedMetrics, 'mediabot_privmsg_in_total'),
+        privmsg_out:              metricVal(parsedMetrics, 'mediabot_privmsg_out_total'),
+        notice_out:               metricVal(parsedMetrics, 'mediabot_notice_out_total'),
+        irc_login_total:          metricVal(parsedMetrics, 'mediabot_irc_login_total'),
+        partyline_sessions:       metricVal(parsedMetrics, 'mediabot_partyline_sessions_current'),
+        timers:                   metricVal(parsedMetrics, 'mediabot_timers_current')
+      }
+    : { ok: false };
   const user = req.session?.user || null;
 
   const channelPreviewRows = user && data.myChannels.length ? data.myChannels.slice(0, 8) : [];
@@ -401,8 +422,8 @@ app.get(config.baseUrl + '/', async (req, res) => {
         <strong>${escapeHtml(data.metrics.channels_managed ?? 'n/a')}</strong>
       </div>
       <div class="mbw-metric-tile">
-        <span>Users connus</span>
-        <strong>${escapeHtml(data.metrics.users_known ?? 'n/a')}</strong>
+        <span>Canaux joints</span>
+        <strong>${escapeHtml(data.metrics.current_channels ?? 'n/a')}</strong>
       </div>
       <div class="mbw-metric-tile">
         <span>Messages reçus</span>
@@ -413,20 +434,20 @@ app.get(config.baseUrl + '/', async (req, res) => {
         <strong>${escapeHtml(data.metrics.privmsg_out ?? 'n/a')}</strong>
       </div>
       <div class="mbw-metric-tile">
-        <span>Logins réussis</span>
-        <strong>${escapeHtml(data.metrics.auth_success ?? 'n/a')}</strong>
+        <span>Notices envoyées</span>
+        <strong>${escapeHtml(data.metrics.notice_out ?? 'n/a')}</strong>
       </div>
-      <div class="mbw-metric-tile ${Number(data.metrics.auth_failure) > 0 ? 'warn' : ''}">
-        <span>Logins échoués</span>
-        <strong>${escapeHtml(data.metrics.auth_failure ?? 'n/a')}</strong>
+      <div class="mbw-metric-tile">
+        <span>Connexions IRC</span>
+        <strong>${escapeHtml(data.metrics.irc_login_total ?? 'n/a')}</strong>
       </div>
-      <div class="mbw-metric-tile ${Number(data.metrics.restart_total) > 0 ? 'warn' : ''}">
-        <span>Restarts IRC</span>
-        <strong>${escapeHtml(data.metrics.restart_total ?? 'n/a')}</strong>
+      <div class="mbw-metric-tile ${Number(data.metrics.partyline_sessions) > 0 ? 'ok' : ''}">
+        <span>Partyline</span>
+        <strong>${escapeHtml(data.metrics.partyline_sessions ?? 'n/a')} session(s)</strong>
       </div>
-      <div class="mbw-metric-tile ${Number(data.metrics.command_errors) > 0 ? 'bad' : ''}">
-        <span>Erreurs commandes</span>
-        <strong>${escapeHtml(data.metrics.command_errors ?? 'n/a')}</strong>
+      <div class="mbw-metric-tile">
+        <span>Timers actifs</span>
+        <strong>${escapeHtml(data.metrics.timers ?? 'n/a')}</strong>
       </div>
     </div>
     <p class="mbw-muted-small">
