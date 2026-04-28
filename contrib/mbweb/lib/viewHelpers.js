@@ -5,16 +5,17 @@ function boolLabel(value) {
   return Number(value) ? 'yes' : 'no';
 }
 
-function yesNo(value) {
-  return Number(value || 0) ? 'yes' : 'no';
+function fmtUptime(s) {
+  if (s === null || s === undefined) return 'n/a';
+  const secs = Math.floor(s);
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const parts = [];
+  if (d) parts.push(`${d}j`);
+  if (h) parts.push(`${h}h`);
+  parts.push(`${m}mn`);
+  return parts.join(' ');
 }
 
-function isEnabled(value) {
-  return Number(value || 0) === 1;
-}
-
-module.exports = {
-  boolLabel,
-  yesNo,
-  isEnabled
-};
+module.exports = { boolLabel, fmtUptime };

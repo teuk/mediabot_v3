@@ -1,6 +1,8 @@
 'use strict';
 
 const { pool, tableColumns, clearColumnCache } = require('./db');
+const { globalLevel } = require('./permissions');
+
 
 async function tableExists(tableName) {
   const [rows] = await pool.execute(`
@@ -191,14 +193,7 @@ async function getChannelById(idChannel) {
 async function userHasChannelAccess(idUser, idChannel) {
   const user = await getUserWithGlobalRole(idUser);
 
-  const semanticLevel =
-    typeof user?.global_level === 'number'
-      ? user.global_level
-      : Number.isFinite(Number(user?.id_user_level))
-        ? Math.max(0, Number(user.id_user_level) - 1)
-        : 999;
-
-  if (semanticLevel <= 1) {
+  if (globalLevel(user) <= 1) {
     return true;
   }
 

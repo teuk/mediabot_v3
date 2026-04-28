@@ -45,7 +45,17 @@ function renderPage(title, body, req) {
     <nav class="mbw-nav">
       <div class="mbw-nav-links">
         <a class="mbw-nav-pill" href="${homeUrl}">Accueil</a>
-        ${user ? `<a class="mbw-nav-pill" href="${safeBase('/profile')}">Profil</a><a class="mbw-nav-pill" href="${safeBase('/channels')}">Channels</a><a class="mbw-nav-pill" href="${safeBase('/radio')}">Radio</a>${isMaster(user) ? `<a class="mbw-nav-pill elevated" href="${safeBase('/users')}">Users</a>` : ''}` : ''}
+        ${user ? `
+  <a class="mbw-nav-pill" href="${safeBase('/profile')}">Profil</a>
+  <a class="mbw-nav-pill" href="${safeBase('/channels')}">Channels</a>
+  <a class="mbw-nav-pill" href="${safeBase('/radio')}">Radio</a>
+  <a class="mbw-nav-pill" href="${safeBase('/quotes')}">Quotes</a>
+  <a class="mbw-nav-pill" href="${safeBase('/commands')}">Commands</a>
+  ${isMaster(user) ? `
+    <a class="mbw-nav-pill elevated" href="${safeBase('/network')}">Network</a>
+    <a class="mbw-nav-pill elevated" href="${safeBase('/users')}">Users</a>
+  ` : ''}
+` : ''}
       </div>
 
       <div class="mbw-nav-session">

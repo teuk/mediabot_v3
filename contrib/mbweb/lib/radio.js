@@ -60,7 +60,7 @@ function findMount(sources, mountName) {
   const norm = s => String(s || '').replace(/\/+$/, '');
   const target = norm(mountName);
   return sources.find(src => src.listenurl && norm(src.listenurl).endsWith(target))
-      || sources.find(src => norm(src.server_name) === target)
+      || sources.find(src => norm(src.serverName) === target)
       || sources.find(src => norm(src.mount) === target)
       || sources.find(src => String(src.listenurl || '').includes(target))
       || null;

@@ -35,9 +35,7 @@ const { getDashboardData } = require('./lib/dashboardData');
 const {
   requireLogin
 } = require('./lib/sessionUser');
-const {
-  boolLabel
-} = require('./lib/viewHelpers');
+const { boolLabel, fmtUptime } = require('./lib/viewHelpers');
 const apiRoutes = require('./routes/api');
 const authRoutes = require('./routes/auth');
 
@@ -379,19 +377,6 @@ app.get(config.baseUrl + '/', async (req, res) => {
 </section>
 ` : '';
 
-  // Format uptime seconds → human readable
-  function fmtUptime(s) {
-    if (s === null || s === undefined) return 'n/a';
-    const secs  = Math.floor(s);
-    const d = Math.floor(secs / 86400);
-    const h = Math.floor((secs % 86400) / 3600);
-    const m = Math.floor((secs % 3600) / 60);
-    const parts = [];
-    if (d) parts.push(`${d}j`);
-    if (h) parts.push(`${h}h`);
-    parts.push(`${m}mn`);
-    return parts.join(' ');
-  }
 
   const metricsBlock = data.metrics ? `
 <section class="mbw-card mbw-wide">
