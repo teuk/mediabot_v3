@@ -22,14 +22,16 @@ router.get('/api/channels', requireLogin, async (req, res) => {
     const user    = req.session.user;
     const page    = Math.max(1, Number(req.query.page) || 1);
     const perPage = Math.min(Number(req.query.per_page) || 50, 200);
+    const search  = req.query.q?.trim() || null;
 
     const result = isMaster(user)
-      ? await getAllChannels({ page, perPage })
+      ? await getAllChannels({ page, perPage, search })
       : { rows: await getUserChannels(user.id_user), total: null };
 
     res.json({
       ok: true,
       scope:   isMaster(user) ? 'all' : 'mine',
+      search,
       total:   result.total,
       page,
       perPage,
@@ -46,9 +48,13 @@ router.get('/channels', requireLogin, async (req, res) => {
   const user = req.session.user;
   const PER_PAGE = 50;
   const page     = isMaster(user) ? Math.max(1, Number(req.query.page) || 1) : 1;
+  const search   = isMaster(user) ? (req.query.q?.trim() || null) : null;
 
   function pageUrl(p) {
-    return safeBase('/channels') + '?page=' + p;
+    const params = new URLSearchParams();
+    if (search) params.set('q', search);
+    params.set('page', p);
+    return safeBase('/channels') + '?' + params.toString();
   }
 
   function paginationBar(current, total) {
@@ -69,7 +75,7 @@ router.get('/channels', requireLogin, async (req, res) => {
 
   try {
     if (isMaster(user)) {
-      const result = await getAllChannels({ page, perPage: PER_PAGE });
+      const result = await getAllChannels({ page, perPage: PER_PAGE, search });
       channels      = result.rows;
       totalChannels = result.total;
       totalPages    = Math.ceil(totalChannels / PER_PAGE);
@@ -89,6 +95,23 @@ router.get('/channels', requireLogin, async (req, res) => {
   }
 
   const activeCount = channels.filter(ch => Number(ch.auto_join || 0) === 1).length;
+
+  const filterBar = isMaster(user) ? `
+<section class="mbw-card mbw-wide">
+  <form method="get" action="${safeBase('/channels')}" class="mbw-filter-bar">
+    <input
+      type="search"
+      name="q"
+      placeholder="Search by name, description or topic…"
+      value="${escapeHtml(search || '')}"
+      class="mbw-search-input"
+    >
+    <button type="submit" class="mbw-btn-primary">Filter</button>
+    ${search ? `<a href="${safeBase('/channels')}" class="mbw-btn-secondary">Reset</a>` : ''}
+  </form>
+</section>
+` : '';
+
 
   const body = `
 <section class="mbw-hero">
@@ -136,13 +159,12 @@ router.get('/channels', requireLogin, async (req, res) => {
         modes and your account permissions per channel.
       </p>
     </div>
-    <span class="mbw-count-badge">${isMaster(user) ? 'global view' : 'filtered view'}</span>
+    <span class="mbw-count-badge">${isMaster(user) ? (search ? `${escapeHtml(totalChannels)} matching` : 'global view') : 'filtered view'}</span>
   </div>
 
-  ${paginationBar(page, totalPages)}
+  ${filterBar}
 
-  <div>
-  </div>
+${paginationBar(page, totalPages)}
 
   ${channels.length ? `
     <div class="mbw-table-wrap">

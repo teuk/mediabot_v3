@@ -8,23 +8,6 @@ const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions'
 const { boolLabel, fmtUptime } = require('../lib/viewHelpers');
 const { fetchMetrics, metricVal } = require('../lib/metrics');
 const { getDashboardData } = require('../lib/dashboardData');
-const {
-  getUserWithGlobalRole,
-  getUserChannels,
-  getAllChannels,
-  getChannelById,
-  userHasChannelAccess,
-  getChannelUsers,
-  getKnownChannelRelatedTables,
-  getAllUsersWithRoles,
-  getUserChannelCountMap,
-  getUserHostmasks,
-  getCommands,
-  getCommandCategories,
-  getQuotes,
-  getQuoteChannels,
-  getNetworks
-} = require('../lib/mediabotRepository');
 
 const router = express.Router();
 
@@ -74,7 +57,7 @@ router.get('/', async (req, res) => {
 <section class="mbw-card mbw-wide">
   <div class="mbw-section-head">
     <div>
-      <h2>Session Mediabot</h2>
+      <h2>Mediabot session</h2>
       <p>Summary of the connected account and detected global permissions.</p>
     </div>
     <span class="mbw-count-badge">${escapeHtml(user.global_role)}</span>
@@ -117,7 +100,7 @@ router.get('/', async (req, res) => {
   <div class="mbw-section-head">
     <div>
       <h2>Quick access</h2>
-      <p>Les vues disponibles selon ton niveau Mediabot.</p>
+      <p>Views available based on your Mediabot level.</p>
     </div>
   </div>
 

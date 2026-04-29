@@ -129,7 +129,7 @@ router.get('/quotes', requireLogin, async (req, res) => {
   <article class="mbw-card">
     <h2>Channels</h2>
     <p class="mbw-big">${escapeHtml(channels.length)}</p>
-    <p>canaux avec au moins une quote.</p>
+    <p>channels with at least one quote.</p>
   </article>
 
   <article class="mbw-card">

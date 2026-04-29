@@ -121,7 +121,7 @@ ${filterBar}
       <h2>${search || category ? 'Filtered results' : 'All commands'}</h2>
       <p>Sorted by hit count descending.</p>
     </div>
-    <span class="mbw-count-badge">${escapeHtml(commands.length)} commandes</span>
+    <span class="mbw-count-badge">${escapeHtml(commands.length)} commands</span>
   </div>
 
   ${commands.length ? `

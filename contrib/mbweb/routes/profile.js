@@ -73,7 +73,7 @@ router.get('/profile', requireLogin, async (req, res) => {
   <article class="mbw-card">
     <h2>Accessible channels</h2>
     <p class="mbw-big">${escapeHtml(channels.length)}</p>
-    <p>selon USER_CHANNEL.</p>
+    <p>from USER_CHANNEL.</p>
   </article>
 
   <article class="mbw-card">

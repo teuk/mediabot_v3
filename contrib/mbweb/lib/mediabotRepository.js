@@ -109,7 +109,7 @@ async function getUserChannels(idUser) {
   return rows;
 }
 
-async function getAllChannels({ page = 0, perPage = 0 } = {}) {
+async function getAllChannels({ page = 0, perPage = 0, search = null } = {}) {
   const channelCols = await getColumns('CHANNEL');
   if (!channelCols.length) return { rows: [], total: 0 };
 
@@ -123,10 +123,17 @@ async function getAllChannels({ page = 0, perPage = 0 } = {}) {
     has(channelCols, 'id_user') ? 'id_user AS channel_owner_id' : 'NULL AS channel_owner_id'
   ];
 
-  const [[{ total }]] = await pool.query('SELECT COUNT(*) AS total FROM CHANNEL');
+  const whereClause = search ? 'WHERE (name LIKE ? OR description LIKE ? OR topic LIKE ?)' : '';
+  const searchParam = search ? `%${search}%` : null;
+  const searchParams = searchParam ? [searchParam, searchParam, searchParam] : [];
 
-  let sql = `SELECT ${select.join(', ')} FROM CHANNEL ORDER BY name`;
-  const params = [];
+  const [[{ total }]] = await pool.query(
+    `SELECT COUNT(*) AS total FROM CHANNEL ${whereClause}`,
+    searchParams
+  );
+
+  let sql = `SELECT ${select.join(', ')} FROM CHANNEL ${whereClause} ORDER BY name`;
+  const params = [...searchParams];
   if (perPage > 0) {
     sql += ' LIMIT ? OFFSET ?';
     params.push(perPage, (Math.max(1, page) - 1) * perPage);

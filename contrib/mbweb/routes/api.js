@@ -3,8 +3,8 @@
 const express = require('express');
 
 const { config } = require('../lib/config');
-const { can } = require('../lib/permissions');
 const {
+  can,
   isOwner,
   isMaster,
   isAdministrator
@@ -14,8 +14,8 @@ const { requireLogin } = require('../lib/sessionUser');
 
 const router = express.Router();
 
-// /health — pas d'auth requise (utilisé par monitoring/systemd)
-// mais ne retourne AUCUNE donnée sensible (pas de session, pas de DB)
+// /health — no auth required (used by monitoring/systemd)
+// returns no sensitive data (no session, no DB)
 router.get('/health', (req, res) => {
   res.json({
     ok:        true,
@@ -24,8 +24,8 @@ router.get('/health', (req, res) => {
   });
 });
 
-// /api/status — réservé Owner
-// getDashboardData expose db.user, db.host, db.name → pas public
+// /api/status — Owner only
+// getDashboardData exposes db.user, db.host, db.name → not public
 router.get('/api/status', requireLogin, async (req, res) => {
   if (!isOwner(req.session.user)) {
     return res.status(403).json({ ok: false, error: 'Forbidden' });
@@ -51,28 +51,33 @@ router.get('/api/status', requireLogin, async (req, res) => {
 });
 
 router.get('/api/dashboard', requireLogin, async (req, res) => {
-  const data = await getDashboardData(req);
-  const user = req.session.user;
+  try {
+    const data = await getDashboardData(req);
+    const user = req.session.user;
 
-  res.json({
-    ok: true,
-    me: user,
-    role: {
-      global_level:  user.global_level,
-      global_role:   user.global_role,
-      owner:         isOwner(user),
-      master:        isMaster(user),
-      administrator: isAdministrator(user)
-    },
-    visibleBlocks: {
-      profile:     can(user, 'view:profile'),
-      radio:       can(user, 'view:radio'),
-      users:       isMaster(user),
-      allChannels: isMaster(user),
-      system:      isOwner(user)
-    },
-    dashboard: data
-  });
+    res.json({
+      ok: true,
+      me: user,
+      role: {
+        global_level:  user.global_level,
+        global_role:   user.global_role,
+        owner:         isOwner(user),
+        master:        isMaster(user),
+        administrator: isAdministrator(user)
+      },
+      visibleBlocks: {
+        profile:     can(user, 'view:profile'),
+        radio:       can(user, 'view:radio'),
+        users:       isMaster(user),
+        allChannels: isMaster(user),
+        system:      isOwner(user)
+      },
+      dashboard: data
+    });
+  } catch (err) {
+    console.error('[mbweb][/api/dashboard] error:', err.message);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
 });
 
 module.exports = router;

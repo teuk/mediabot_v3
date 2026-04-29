@@ -146,7 +146,7 @@ router.get('/users', requireLogin, async (req, res) => {
 <section class="mbw-grid">
   <article class="mbw-card">
     <h2>Total</h2>
-    <p class="mbw-big">${escapeHtml(users.length)}</p>
+    <p class="mbw-big">${escapeHtml(total)}</p>
     <p>accounts in USER.</p>
   </article>
 
