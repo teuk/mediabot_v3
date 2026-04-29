@@ -109,9 +109,9 @@ async function getUserChannels(idUser) {
   return rows;
 }
 
-async function getAllChannels() {
+async function getAllChannels({ page = 0, perPage = 0 } = {}) {
   const channelCols = await getColumns('CHANNEL');
-  if (!channelCols.length) return [];
+  if (!channelCols.length) return { rows: [], total: 0 };
 
   const select = [
     has(channelCols, 'id_channel') ? 'id_channel' : 'NULL AS id_channel',
@@ -123,13 +123,17 @@ async function getAllChannels() {
     has(channelCols, 'id_user') ? 'id_user AS channel_owner_id' : 'NULL AS channel_owner_id'
   ];
 
-  const [rows] = await pool.query(`
-    SELECT ${select.join(', ')}
-    FROM CHANNEL
-    ORDER BY name
-  `);
+  const [[{ total }]] = await pool.query('SELECT COUNT(*) AS total FROM CHANNEL');
 
-  return rows;
+  let sql = `SELECT ${select.join(', ')} FROM CHANNEL ORDER BY name`;
+  const params = [];
+  if (perPage > 0) {
+    sql += ' LIMIT ? OFFSET ?';
+    params.push(perPage, (Math.max(1, page) - 1) * perPage);
+  }
+
+  const [rows] = await pool.query(sql, params);
+  return { rows, total: Number(total) };
 }
 
 async function getUserHostmasks(idUser) {
@@ -251,7 +255,17 @@ async function getChannelUsers(idChannel) {
   return rows;
 }
 
+// Cache for getKnownChannelRelatedTables — schema never changes at runtime
+let _relatedTablesCache = null;
+let _relatedTablesCacheAt = 0;
+const _RELATED_TABLES_TTL = 5 * 60 * 1000; // 5 minutes
+
 async function getKnownChannelRelatedTables() {
+  const now = Date.now();
+  if (_relatedTablesCache && (now - _relatedTablesCacheAt) < _RELATED_TABLES_TTL) {
+    return _relatedTablesCache;
+  }
+
   const [rows] = await pool.execute(`
     SELECT table_name
     FROM information_schema.tables
@@ -266,11 +280,13 @@ async function getKnownChannelRelatedTables() {
     ORDER BY table_name
   `);
 
-  return rows.map(r => r.table_name);
+  _relatedTablesCache  = rows.map(r => r.table_name);
+  _relatedTablesCacheAt = now;
+  return _relatedTablesCache;
 }
 
 
-async function getAllUsersWithRoles() {
+async function getAllUsersWithRoles({ page = 0, perPage = 0, search = null } = {}) {
   const userCols = await getColumns('USER');
   const levelCols = await getColumns('USER_LEVEL');
 
@@ -304,16 +320,32 @@ async function getAllUsersWithRoles() {
     ? 'COALESCE(ul.level, u.id_user_level, 999)'
     : 'COALESCE(u.id_user_level, 999)';
 
-  const [rows] = await pool.query(`
+  // Search filter: matches nickname or username (case-insensitive)
+  const whereClause = search ? 'WHERE (u.nickname LIKE ? OR u.username LIKE ?)' : '';
+  const searchParam = search ? `%${search}%` : null;
+
+  const [[{ total }]] = await pool.query(
+    `SELECT COUNT(*) AS total FROM USER u ${joinLevel} ${whereClause}`,
+    searchParam ? [searchParam, searchParam] : []
+  );
+
+  let sql = `
     SELECT ${select.join(', ')}
     FROM USER u
     ${joinLevel}
+    ${whereClause}
     ORDER BY
       ${orderBy} ASC,
       u.nickname ASC
-  `);
+  `;
+  const params = searchParam ? [searchParam, searchParam] : [];
+  if (perPage > 0) {
+    sql += ' LIMIT ? OFFSET ?';
+    params.push(perPage, (Math.max(1, page) - 1) * perPage);
+  }
 
-  return rows;
+  const [rows] = await pool.query(sql, params);
+  return { rows, total: Number(total) };
 }
 
 async function getUserChannelCountMap() {

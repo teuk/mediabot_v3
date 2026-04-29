@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto  = require('crypto');
 const express = require('express');
 
 const { safeBase } = require('../lib/config');
@@ -8,6 +9,22 @@ const { buildSessionUser } = require('../lib/sessionUser');
 const { escapeHtml, renderPage } = require('../lib/render');
 
 const router = express.Router();
+
+// ── CSRF helpers ──────────────────────────────────────────────────────────────
+function generateCsrfToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function csrfMiddleware(req, res, next) {
+  const token = req.body?._csrf;
+  const expected = req.session?._csrf;
+
+  if (!token || !expected || token !== expected) {
+    console.warn('[mbweb][csrf] token mismatch from IP', req.ip);
+    return res.redirect(safeBase('/login') + '?error=' + encodeURIComponent('Invalid or expired form token. Please try again.'));
+  }
+  next();
+}
 
 // Simple in-process IP-based rate limiter for POST /login.
 // Max 5 attempts per IP per 15-minute window.
@@ -38,14 +55,14 @@ function loginRateLimiter(req, res, next) {
       `(attempt ${entry.count}, retry in ${retryMin}mn)`
     );
 
-    return res.status(429).send(renderPage('Trop de tentatives', `
+    return res.status(429).send(renderPage('Too many attempts', `
 <section class="mbw-card">
-  <h1>Trop de tentatives</h1>
+  <h1>Too many attempts</h1>
   <p>
-    Trop de tentatives de connexion depuis cette adresse IP.
-    Réessaie dans <strong>${retryMin} minute(s)</strong>.
+    Too many login attempts from this IP address.
+    Please try again in <strong>${retryMin} minute(s)</strong>.
   </p>
-  <a href="${safeBase('/login')}" class="mbw-btn-secondary">← Retour</a>
+  <a href="${safeBase('/login')}" class="mbw-btn-secondary">← Back</a>
 </section>
 `, req));
   }
@@ -65,24 +82,30 @@ router.get('/login', (req, res) => {
     ? `<div class="mbw-alert">${escapeHtml(req.query.error)}</div>`
     : '';
 
+  // Generate a fresh CSRF token for this login form
+  const csrfToken = generateCsrfToken();
+  req.session._csrf = csrfToken;
+
   const body = `
 <section class="mbw-login-panel">
-  <h1>Connexion Mediabot</h1>
-  <p>Utilise ton compte Mediabot IRC.</p>
+  <h1>Mediabot Login</h1>
+  <p>Use your Mediabot IRC account.</p>
   ${error}
 
   <form method="post" action="${safeBase('/login')}" class="mbw-form">
+    <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
+
     <label>
       Nickname / username
       <input type="text" name="username" autocomplete="username" required autofocus>
     </label>
 
     <label>
-      Mot de passe Mediabot
+      Mediabot password
       <input type="password" name="password" autocomplete="current-password" required>
     </label>
 
-    <button type="submit">Se connecter</button>
+    <button type="submit">Log in</button>
   </form>
 </section>
 `;
@@ -90,7 +113,7 @@ router.get('/login', (req, res) => {
   res.send(renderPage('Login', body, req));
 });
 
-router.post('/login', loginRateLimiter, async (req, res) => {
+router.post('/login', loginRateLimiter, csrfMiddleware, async (req, res) => {
   const login = String(req.body.username || req.body.login || req.body.nickname || '').trim();
   const password = String(req.body.password || '');
 
@@ -104,7 +127,7 @@ router.post('/login', loginRateLimiter, async (req, res) => {
   });
 
   if (!login || !password) {
-    return res.redirect(safeBase('/login') + '?error=' + encodeURIComponent('Login ou mot de passe manquant.'));
+    return res.redirect(safeBase('/login') + '?error=' + encodeURIComponent('Login or password missing.'));
   }
 
   try {
@@ -121,8 +144,8 @@ router.post('/login', loginRateLimiter, async (req, res) => {
     if (!result.ok) {
       const message =
         result.reason === 'user-not-found'
-          ? 'Utilisateur inconnu.'
-          : 'Mot de passe refusé.';
+          ? 'Unknown user.'
+          : 'Wrong password.';
 
       return res.redirect(safeBase('/login') + '?error=' + encodeURIComponent(message));
     }
@@ -138,6 +161,7 @@ router.post('/login', loginRateLimiter, async (req, res) => {
     });
 
     loginAttempts.delete(req.ip || req.socket?.remoteAddress || 'unknown');
+    delete req.session._csrf; // CSRF token consumed
 
     logAuth('login success', {
       id_user: req.session.user.id_user,
@@ -150,7 +174,7 @@ router.post('/login', loginRateLimiter, async (req, res) => {
     return res.redirect(safeBase('/'));
   } catch (err) {
     console.error('[mbweb][auth] exception', err);
-    return res.redirect(safeBase('/login') + '?error=' + encodeURIComponent('Erreur interne. Réessaie dans quelques instants.'));
+    return res.redirect(safeBase('/login') + '?error=' + encodeURIComponent('Internal error. Please try again in a few moments.'));
   }
 });
 

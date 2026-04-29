@@ -15,10 +15,37 @@ function roleNameFromLevel(level) {
   return 'Unknown';
 }
 
+// Refresh interval: rebuild session user from DB if level may have changed.
+// Runs at most once every 2 minutes per session to avoid per-request DB hits.
+const SESSION_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
+
+async function refreshSessionUser(req) {
+  const user = req.session?.user;
+  if (!user) return;
+
+  const now = Date.now();
+  const lastRefresh = req.session._userRefreshedAt || 0;
+  if ((now - lastRefresh) < SESSION_REFRESH_INTERVAL_MS) return;
+
+  try {
+    const refreshed = await buildSessionUser({ id_user: user.id_user, ...user }, null);
+    req.session.user = refreshed;
+    req.session._userRefreshedAt = now;
+    await new Promise((resolve, reject) => {
+      req.session.save(err => err ? reject(err) : resolve());
+    });
+  } catch (err) {
+    // Non-fatal: keep existing session data
+    console.error('[mbweb][session] refresh failed:', err.message);
+  }
+}
+
 function requireLogin(req, res, next) {
   if (!req.session?.user) {
-    return res.redirect(safeBase('/login') + '?error=' + encodeURIComponent('Connexion requise.'));
+    return res.redirect(safeBase('/login') + '?error=' + encodeURIComponent('Login required.'));
   }
+  // Fire-and-forget refresh — does not block the request
+  refreshSessionUser(req).catch(() => {});
   next();
 }
 
@@ -72,5 +99,6 @@ async function buildSessionUser(rawUser, levelCol) {
 module.exports = {
   roleNameFromLevel,
   requireLogin,
-  buildSessionUser
+  buildSessionUser,
+  refreshSessionUser
 };

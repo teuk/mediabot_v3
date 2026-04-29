@@ -25,7 +25,7 @@ function renderPage(title, body, req) {
   const cssUrl = safeBase('/css/mbweb.css');
 
   return `<!doctype html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <title>${escapeHtml(title)} - Mediabot v3</title>
@@ -46,7 +46,7 @@ function renderPage(title, body, req) {
       <div class="mbw-nav-links">
         <a class="mbw-nav-pill" href="${homeUrl}">Home</a>
         ${user ? `
-  <a class="mbw-nav-pill" href="${safeBase('/profile')}">Profil</a>
+  <a class="mbw-nav-pill" href="${safeBase('/profile')}">Profile</a>
   <a class="mbw-nav-pill" href="${safeBase('/channels')}">Channels</a>
   <a class="mbw-nav-pill" href="${safeBase('/radio')}">Radio</a>
   <a class="mbw-nav-pill" href="${safeBase('/quotes')}">Quotes</a>
