@@ -44,7 +44,7 @@ const config = {
   urls: {
     metrics: process.env.MBWEB_METRICS_URL || 'http://127.0.0.1:9108/metrics',
     radioStatus: process.env.MBWEB_RADIO_STATUS_URL || 'http://127.0.0.1:8000/status-json.xsl',
-    radioPublicBase: process.env.MBWEB_RADIO_PUBLIC_BASE_URL || 'http://teuk.org:8000',
+    radioPublicBase: process.env.MBWEB_RADIO_PUBLIC_BASE_URL || 'http://example.org:8000',
     radioPrimaryMount: process.env.MBWEB_RADIO_PRIMARY_MOUNT || '/radio160.mp3'
   },
 

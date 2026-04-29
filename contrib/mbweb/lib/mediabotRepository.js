@@ -66,7 +66,11 @@ async function getUserWithGlobalRole(idUser) {
 
 async function getUserById(idUser) {
   const [rows] = await pool.execute(`
-    SELECT *
+    SELECT
+      id_user,
+      nickname,
+      username,
+      hostmasks_legacy
     FROM USER
     WHERE id_user = ?
     LIMIT 1
