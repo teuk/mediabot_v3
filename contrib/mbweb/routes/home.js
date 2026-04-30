@@ -3,40 +3,85 @@
 const express = require('express');
 const { config, safeBase } = require('../lib/config');
 const { escapeHtml, renderPage } = require('../lib/render');
-const { requireLogin } = require('../lib/sessionUser');
-const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
-const { boolLabel, fmtUptime } = require('../lib/viewHelpers');
+const { isOwner, isMaster } = require('../lib/permissions');
+const { fmtUptime } = require('../lib/viewHelpers');
 const { fetchMetrics, metricVal } = require('../lib/metrics');
 const { getDashboardData } = require('../lib/dashboardData');
 
 const router = express.Router();
 
 router.get('/', async (req, res) => {
-  const [data, parsedMetrics] = await Promise.all([
-    getDashboardData(req),
-    fetchMetrics()
-  ]);
-
-  data.metrics = parsedMetrics
-    ? {
-        ok:                       true,
-        irc_connected:            metricVal(parsedMetrics, 'mediabot_irc_connected'),
-        db_connected:             metricVal(parsedMetrics, 'mediabot_db_connected'),
-        up:                       metricVal(parsedMetrics, 'mediabot_up'),
-        uptime_seconds:           metricVal(parsedMetrics, 'mediabot_uptime_seconds'),
-        channels_managed:         metricVal(parsedMetrics, 'mediabot_channels_managed'),
-        current_channels:         metricVal(parsedMetrics, 'mediabot_current_channels'),
-        privmsg_in:               metricVal(parsedMetrics, 'mediabot_privmsg_in_total'),
-        privmsg_out:              metricVal(parsedMetrics, 'mediabot_privmsg_out_total'),
-        notice_out:               metricVal(parsedMetrics, 'mediabot_notice_out_total'),
-        irc_login_total:          metricVal(parsedMetrics, 'mediabot_irc_login_total'),
-        partyline_sessions:       metricVal(parsedMetrics, 'mediabot_partyline_sessions_current'),
-        timers:                   metricVal(parsedMetrics, 'mediabot_timers_current')
-      }
-    : { ok: false };
   const user = req.session?.user || null;
 
+  let data = {
+    db: {
+      ok: null,
+      name: null,
+      user: null,
+      host: null,
+      error: null
+    },
+    counts: {
+      users: null,
+      channels: null
+    },
+    me: user,
+    myChannels: [],
+    metrics: null,
+    generatedAt: new Date().toISOString()
+  };
+
+  if (user) {
+    data = await getDashboardData(req);
+  }
+
+  if (user && isOwner(user)) {
+    const parsedMetrics = await fetchMetrics();
+
+    data.metrics = parsedMetrics
+      ? {
+          ok:                       true,
+          irc_connected:            metricVal(parsedMetrics, 'mediabot_irc_connected'),
+          db_connected:             metricVal(parsedMetrics, 'mediabot_db_connected'),
+          up:                       metricVal(parsedMetrics, 'mediabot_up'),
+          uptime_seconds:           metricVal(parsedMetrics, 'mediabot_uptime_seconds'),
+          channels_managed:         metricVal(parsedMetrics, 'mediabot_channels_managed'),
+          current_channels:         metricVal(parsedMetrics, 'mediabot_current_channels'),
+          privmsg_in:               metricVal(parsedMetrics, 'mediabot_privmsg_in_total'),
+          privmsg_out:              metricVal(parsedMetrics, 'mediabot_privmsg_out_total'),
+          notice_out:               metricVal(parsedMetrics, 'mediabot_notice_out_total'),
+          irc_login_total:          metricVal(parsedMetrics, 'mediabot_irc_login_total'),
+          partyline_sessions:       metricVal(parsedMetrics, 'mediabot_partyline_sessions_current'),
+          timers:                   metricVal(parsedMetrics, 'mediabot_timers_current')
+        }
+      : { ok: false };
+  }
+
   const channelPreviewRows = user && data.myChannels.length ? data.myChannels.slice(0, 8) : [];
+
+  const summaryGrid = user ? `
+<section class="mbw-grid">
+  <article class="mbw-card">
+    <h2>Base Mediabot</h2>
+    <p class="${data.db.ok ? 'mbw-ok' : 'mbw-bad'}">${data.db.ok ? 'Connected' : 'DB error'}</p>
+    <p>${escapeHtml(data.db.user)}@${escapeHtml(data.db.host)} / ${escapeHtml(data.db.name)}</p>
+    ${data.db.error ? `<pre>${escapeHtml(data.db.error)}</pre>` : ''}
+  </article>
+
+  <article class="mbw-card">
+    <h2>Users</h2>
+    <p class="mbw-big">${escapeHtml(data.counts.users ?? 'n/a')}</p>
+    <p>Entries in USER table.</p>
+  </article>
+
+  <article class="mbw-card">
+    <h2>Channels</h2>
+    <p class="mbw-big">${escapeHtml(data.counts.channels ?? 'n/a')}</p>
+    <p>Entries in CHANNEL table.</p>
+  </article>
+</section>
+` : '';
+
 
   const guestBlock = `
 <section class="mbw-card mbw-wide">
@@ -322,26 +367,7 @@ router.get('/', async (req, res) => {
   </div>
 </section>
 
-<section class="mbw-grid">
-  <article class="mbw-card">
-    <h2>Base Mediabot</h2>
-    <p class="${data.db.ok ? 'mbw-ok' : 'mbw-bad'}">${data.db.ok ? 'Connected' : 'DB error'}</p>
-    <p>${escapeHtml(data.db.user)}@${escapeHtml(data.db.host)} / ${escapeHtml(data.db.name)}</p>
-    ${data.db.error ? `<pre>${escapeHtml(data.db.error)}</pre>` : ''}
-  </article>
-
-  <article class="mbw-card">
-    <h2>Users</h2>
-    <p class="mbw-big">${escapeHtml(data.counts.users ?? 'n/a')}</p>
-    <p>Entries in USER table.</p>
-  </article>
-
-  <article class="mbw-card">
-    <h2>Channels</h2>
-    <p class="mbw-big">${escapeHtml(data.counts.channels ?? 'n/a')}</p>
-    <p>Entries in CHANNEL table.</p>
-  </article>
-</section>
+${summaryGrid}
 
 ${sessionBlock}
 ${quickActions}

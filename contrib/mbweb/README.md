@@ -254,11 +254,37 @@ systemctl restart mbweb.service
 
 ## Apache reverse proxy example
 
+`mbweb` is designed to run locally on `127.0.0.1` and to be exposed through Apache.
+
+Example public path:
+
+```text
+/mediabotv3dev/
+```
+
+Example local target:
+
+```text
+http://127.0.0.1:4002/mediabotv3dev/
+```
+
+Enable the required Apache modules:
+
+```bash
+a2enmod proxy proxy_http headers
+systemctl reload apache2
+```
+
 Example Apache snippet:
 
 ```apache
+ProxyPreserveHost On
+
 ProxyPass        /mediabotv3dev/ http://127.0.0.1:4002/mediabotv3dev/
 ProxyPassReverse /mediabotv3dev/ http://127.0.0.1:4002/mediabotv3dev/
+
+RequestHeader set X-Forwarded-Proto "https"
+RequestHeader set X-Forwarded-Prefix "/mediabotv3dev"
 ```
 
 Then reload Apache:
@@ -276,6 +302,18 @@ MBWEB_BASE_URL
 ```
 
 They must stay consistent.
+
+### Important note about secure cookies
+
+When `NODE_ENV=production`, `mbweb` marks the session cookie as secure.
+
+That is correct for an HTTPS deployment, but Apache must tell the Node.js application that the public request is HTTPS. This is why the reverse proxy example includes:
+
+```apache
+RequestHeader set X-Forwarded-Proto "https"
+```
+
+Without that header, login may appear to work but the browser may not keep the session cookie correctly behind the reverse proxy.
 
 ---
 
@@ -314,6 +352,38 @@ Check current dependencies:
 
 ```bash
 npm ls --depth=0
+```
+
+---
+
+## Public home page behavior
+
+The public home page should stay intentionally quiet.
+
+Before login, it should show a simple landing page and a login entry point only. It must not expose:
+
+```text
+database user / host / name
+global user count
+global channel count
+Prometheus metrics endpoint
+internal metrics values
+```
+
+Those details belong to authenticated users, and the most sensitive operational views should remain reserved for Owner-level accounts.
+
+Useful check:
+
+```bash
+curl -s http://127.0.0.1:4002/mediabotv3dev/ \
+  | grep -Ei 'Base Mediabot|Entries in USER|Entries in CHANNEL|Prometheus|live metrics' \
+  || echo "OK: public home is not leaking dashboard details"
+```
+
+Expected result:
+
+```text
+OK: public home is not leaking dashboard details
 ```
 
 ---
@@ -361,6 +431,39 @@ grep -RInE 'MBWEB_DB_PASS=|MBWEB_SESSION_SECRET=|password|secret|passwd' contrib
 ```
 
 Most results should be normal code references, not real secrets.
+
+---
+
+## Suggested pre-commit checks
+
+From the Mediabot repository root:
+
+```bash
+cd /home/mediabot/mediabot_v3
+
+git status --short contrib/mbweb
+
+node -c contrib/mbweb/app.js
+find contrib/mbweb/lib -maxdepth 1 -name '*.js' -print -exec node -c {} \;
+find contrib/mbweb/routes -maxdepth 1 -name '*.js' -print -exec node -c {} \;
+
+grep -Rni "SELECT \*" contrib/mbweb || true
+grep -Rni "teuk.org" contrib/mbweb || true
+
+find contrib/mbweb \
+  \( -name '.env' -o \( -name '.env.*' ! -name '.env.sample' \) -o -name 'node_modules' -o -name '*.bak*' -o -name '*.log' -o -name '*.zip' -o -name '*.tar.gz' \) \
+  -print
+```
+
+Expected results:
+
+```text
+no SELECT *
+no teuk.org
+no real .env
+no node_modules
+no backup/log/archive files
+```
 
 ---
 
