@@ -10,15 +10,15 @@ package Mediabot::Partyline;
 # ! Required global level : Master (or above)                                !
 # !                                                                           !
 # ! Commands :                                                                !
-# !   .help                  — this help                                     !
-# !   .stat                  — channel status (owner, chansets, nick count)  !
-# !   .say #chan <message>   — send a PRIVMSG to a channel                   !
-# !   .who #chan             — list nicks present in a channel               !
-# !   .join #chan [key]      — make the bot join a channel                   !
-# !   .part #chan            — make the bot part a channel                   !
-# !   .nick <newnick>        — change the bot's nick                         !
-# !   .raw <IRC command>     — send a raw IRC command (Owner only)           !
-# !   .quit                  — close this session                            !
+# !   .help                  - this help                                     !
+# !   .stat                  - channel status (owner, chansets, nick count)  !
+# !   .say #chan <message>   - send a PRIVMSG to a channel                   !
+# !   .who #chan             - list nicks present in a channel               !
+# !   .join #chan [key]      - make the bot join a channel                   !
+# !   .part #chan            - make the bot part a channel                   !
+# !   .nick <newnick>        - change the bot's nick                         !
+# !   .raw <IRC command>     - send a raw IRC command (Owner only)           !
+# !   .quit                  - close this session                            !
 # +---------------------------------------------------------------------------+
 
 use strict;
@@ -101,14 +101,221 @@ sub accept_dcc_chat {
 
         on_connect_error => sub {
             my (undef, $err) = @_;
-            $bot->{logger}->log(1, "DCC CHAT: connect to $nick at $ip:$port failed — $err");
+            $bot->{logger}->log(1, "DCC CHAT: connect to $nick at $ip:$port failed - $err");
         },
 
         on_resolve_error => sub {
             my ($err) = @_;
-            $bot->{logger}->log(1, "DCC CHAT: resolve error for $ip — $err");
+            $bot->{logger}->log(1, "DCC CHAT: resolve error for $ip - $err");
         },
     );
+}
+
+# ---------------------------------------------------------------------------
+# _resolve_dcc_public_ip($bot)
+#
+# Return the public IPv4 address to advertise in DCC CHAT offers.
+# Reads historical Mediabot config keys first, then the environment,
+# then falls back to the local IRC socket address when possible.
+# ---------------------------------------------------------------------------
+sub _resolve_dcc_public_ip {
+    my ($self, $bot) = @_;
+
+    $bot //= $self->{bot};
+
+    my $public_ip = '';
+
+    for my $key (
+        'DCC_PUBLIC_IP',
+        'main.DCC_PUBLIC_IP',
+        'PARTYLINE_DCC_PUBLIC_IP',
+        'main.PARTYLINE_DCC_PUBLIC_IP',
+    ) {
+        my $v;
+        eval { $v = $bot->{conf}->get($key); };
+        next unless defined $v;
+
+        $v =~ s/^\s+|\s+$//g;
+        next if $v eq '';
+
+        $public_ip = $v;
+        last;
+    }
+
+    if (!$public_ip && defined $ENV{MEDIABOT_DCC_PUBLIC_IP}) {
+        $public_ip = $ENV{MEDIABOT_DCC_PUBLIC_IP};
+        $public_ip =~ s/^\s+|\s+$//g;
+    }
+
+    if (!$public_ip) {
+        eval {
+            my $sockname = $bot->{irc}->read_handle->sockname;
+            if ($sockname) {
+                my $family = Socket::sockaddr_family($sockname);
+                if ($family == AF_INET) {
+                    my (undef, $addr) = unpack_sockaddr_in($sockname);
+                    $public_ip = inet_ntoa($addr);
+                }
+            }
+        };
+    }
+
+    return unless $public_ip;
+    return if $public_ip eq '0.0.0.0';
+    return unless inet_aton($public_ip);
+
+    return $public_ip;
+}
+
+# ---------------------------------------------------------------------------
+# _dcc_listen_port($bot)
+#
+# Return the TCP port to use for temporary DCC CHAT listeners.
+#
+# If DCC_PORT_MIN and DCC_PORT_MAX are configured, pick a random port inside
+# that range. This makes firewalling DCC CHAT predictable.
+#
+# If the range is missing or invalid, return 0 and let the OS pick an
+# ephemeral port, preserving the old behavior.
+# ---------------------------------------------------------------------------
+sub _dcc_listen_port {
+    my ($self, $bot) = @_;
+
+    $bot //= $self->{bot};
+
+    my ($min, $max);
+
+    for my $pair (
+        [ 'DCC_PORT_MIN',       'DCC_PORT_MAX' ],
+        [ 'main.DCC_PORT_MIN',  'main.DCC_PORT_MAX' ],
+        [ 'PARTYLINE_DCC_PORT_MIN',      'PARTYLINE_DCC_PORT_MAX' ],
+        [ 'main.PARTYLINE_DCC_PORT_MIN', 'main.PARTYLINE_DCC_PORT_MAX' ],
+    ) {
+        my ($kmin, $kmax) = @$pair;
+        my ($vmin, $vmax);
+
+        eval { $vmin = $bot->{conf}->get($kmin); };
+        eval { $vmax = $bot->{conf}->get($kmax); };
+
+        next unless defined $vmin && defined $vmax;
+        next unless $vmin =~ /^\d+$/ && $vmax =~ /^\d+$/;
+
+        $min = int($vmin);
+        $max = int($vmax);
+        last;
+    }
+
+    if (!defined $min || !defined $max) {
+        return 0;
+    }
+
+    if ($min < 1 || $max > 65535 || $min > $max) {
+        eval {
+            $bot->{logger}->log(1, "DCC port range invalid: min=$min max=$max - falling back to OS ephemeral port");
+        };
+        return 0;
+    }
+
+    return $min + int(rand($max - $min + 1));
+}
+
+
+
+# ---------------------------------------------------------------------------
+# DCC pending offer tracking helpers
+# ---------------------------------------------------------------------------
+
+sub _dcc_offer_key {
+    my ($self, $type, $nick) = @_;
+
+    $type ||= 'dcc_chat';
+    $nick ||= 'unknown';
+
+    return lc($type) . ':' . lc($nick);
+}
+
+sub _dcc_pending_offer_for_nick {
+    my ($self, $nick) = @_;
+
+    return unless defined $nick && $nick ne '';
+
+    my $offers = $self->{dcc_offers} ||= {};
+
+    for my $key (sort keys %$offers) {
+        my $offer = $offers->{$key} || next;
+        next if $offer->{connected};
+
+        if (lc($offer->{nick} || '') eq lc($nick)) {
+            return $offer;
+        }
+    }
+
+    return;
+}
+
+sub _dcc_offer_register {
+    my ($self, $type, $nick, $port, $public_ip, $listener) = @_;
+
+    my $offers = $self->{dcc_offers} ||= {};
+    my $key    = $self->_dcc_offer_key($type, $nick);
+
+    $offers->{$key} = {
+        key        => $key,
+        type       => $type || 'dcc_chat',
+        nick       => $nick || 'unknown',
+        port       => $port || 0,
+        public_ip  => $public_ip || '',
+        listener   => $listener,
+        created_at => time,
+        connected  => 0,
+    };
+
+    return $offers->{$key};
+}
+
+sub _dcc_offer_remove {
+    my ($self, $type, $nick) = @_;
+
+    my $offers = $self->{dcc_offers} ||= {};
+    my $key    = $self->_dcc_offer_key($type, $nick);
+
+    delete $offers->{$key};
+    return;
+}
+
+sub _dcc_offer_mark_connected {
+    my ($self, $type, $nick) = @_;
+
+    my $offers = $self->{dcc_offers} ||= {};
+    my $key    = $self->_dcc_offer_key($type, $nick);
+
+    if ($offers->{$key}) {
+        $offers->{$key}{connected} = 1;
+    }
+
+    return;
+}
+
+sub _dcc_offers_snapshot {
+    my ($self) = @_;
+
+    my $offers = $self->{dcc_offers} ||= {};
+
+    return [
+        map {
+            my $o = $offers->{$_};
+            +{
+                key        => $o->{key},
+                type       => $o->{type},
+                nick       => $o->{nick},
+                port       => $o->{port},
+                public_ip  => $o->{public_ip},
+                created_at => $o->{created_at},
+                connected  => $o->{connected} ? 1 : 0,
+            }
+        }
+        sort keys %$offers
+    ];
 }
 
 # ---------------------------------------------------------------------------
@@ -132,24 +339,7 @@ sub offer_dcc_chat {
     my $loop   = $self->{loop};
     my $logger = $bot->{logger};
 
-    # Try config first.
-    # This should be the public IPv4 address reachable by IRC clients.
-    my $public_ip = $bot->{conf}->get('main.DCC_PUBLIC_IP') // '';
-
-    # Fallback: local IRC socket address. This is often not enough behind NAT,
-    # but it is useful on simple public-IP servers.
-    if (!$public_ip || $public_ip eq '') {
-        eval {
-            my $sockname = $bot->{irc}->read_handle->sockname;
-            if ($sockname) {
-                my $family = Socket::sockaddr_family($sockname);
-                if ($family == AF_INET) {
-                    my (undef, $addr) = unpack_sockaddr_in($sockname);
-                    $public_ip = inet_ntoa($addr);
-                }
-            }
-        };
-    }
+    my $public_ip = $self->_resolve_dcc_public_ip($bot);
 
     unless ($public_ip && $public_ip ne '0.0.0.0') {
         $logger->log(1, "CTCP CHAT from $nick: cannot determine public IP - set DCC_PUBLIC_IP in config");
@@ -166,6 +356,21 @@ sub offer_dcc_chat {
 
     $logger->log(2, "CTCP CHAT from $nick: opening DCC CHAT offer on $public_ip");
 
+    if (my $pending = $self->_dcc_pending_offer_for_nick($nick)) {
+        my $age = time - ($pending->{created_at} || time);
+        $logger->log(2, "DCC CHAT: refusing new CTCP offer for $nick - pending "
+            . ($pending->{type} || 'dcc_chat')
+            . " offer on port "
+            . ($pending->{port} || '?')
+            . " age=${age}s");
+
+        eval {
+            $bot->botPrivmsg($nick, "A DCC CHAT offer is already pending. Please connect to it or wait for timeout.");
+        };
+
+        return;
+    }
+
     my $listener;
     my $listen_port;
     my $connected = 0;
@@ -176,6 +381,8 @@ sub offer_dcc_chat {
 
             return if $connected;
             $connected = 1;
+            $self->_dcc_offer_mark_connected('ctcp_chat', $nick);
+            $self->_dcc_offer_remove('ctcp_chat', $nick);
 
             $logger->log(2, "CTCP CHAT: $nick connected to offered DCC CHAT");
 
@@ -187,12 +394,15 @@ sub offer_dcc_chat {
 
     $loop->add($listener);
 
+    my $dcc_port = $self->_dcc_listen_port($bot);
+
     $listener->listen(
-        addr => { family => 'inet', socktype => 'stream', port => 0 },
+        addr => { family => 'inet', socktype => 'stream', port => $dcc_port },
 
         on_listen => sub {
             my ($listener) = @_;
             $listen_port = $listener->read_handle->sockport;
+            $self->_dcc_offer_register('ctcp_chat', $nick, $listen_port, $public_ip, $listener);
 
             $logger->log(2, "CTCP CHAT: listening on port $listen_port for $nick");
 
@@ -206,7 +416,8 @@ sub offer_dcc_chat {
         },
 
         on_listen_error => sub {
-            $logger->log(1, "CTCP CHAT: listen error for $nick — $_[1]");
+            $logger->log(1, "CTCP CHAT: listen error for $nick - $_[1]");
+            $self->_dcc_offer_remove('ctcp_chat', $nick);
             eval { $loop->remove($listener) };
         },
     );
@@ -217,6 +428,7 @@ sub offer_dcc_chat {
             return if $connected;
 
             $logger->log(2, "CTCP CHAT: timeout waiting for $nick to connect");
+            $self->_dcc_offer_remove('ctcp_chat', $nick);
             eval { $loop->remove($listener) };
         },
     );
@@ -280,7 +492,7 @@ sub accept_dcc_chat_passive {
     }
 
     unless ($public_ip && $public_ip ne '0.0.0.0') {
-        $logger->log(1, "DCC CHAT passive from $nick: cannot determine public IP — set main.DCC_PUBLIC_IP in config");
+        $logger->log(1, "DCC CHAT passive from $nick: cannot determine public IP - set main.DCC_PUBLIC_IP in config");
         return;
     }
 
@@ -290,6 +502,21 @@ sub accept_dcc_chat_passive {
     $logger->log(2, "DCC CHAT passive from $nick: listening on $public_ip token=$token");
 
     # ── Open ephemeral listener ───────────────────────────────────────────────
+    if (my $pending = $self->_dcc_pending_offer_for_nick($nick)) {
+        my $age = time - ($pending->{created_at} || time);
+        $logger->log(2, "DCC CHAT: refusing new passive offer for $nick - pending "
+            . ($pending->{type} || 'dcc_chat')
+            . " offer on port "
+            . ($pending->{port} || '?')
+            . " age=${age}s");
+
+        eval {
+            $bot->botPrivmsg($nick, "A DCC CHAT offer is already pending. Please connect to it or wait for timeout.");
+        };
+
+        return;
+    }
+
     my $listener;
     my $listen_port;
     my $connected = 0;
@@ -300,6 +527,8 @@ sub accept_dcc_chat_passive {
 
             return if $connected;   # accept only one connection
             $connected = 1;
+            $self->_dcc_offer_mark_connected('passive_chat', $nick);
+            $self->_dcc_offer_remove('passive_chat', $nick);
 
             $logger->log(2, "DCC CHAT passive: $nick connected (token=$token)");
 
@@ -312,13 +541,16 @@ sub accept_dcc_chat_passive {
 
     $loop->add($listener);
 
-    # Bind to port 0 → OS assigns an ephemeral port
+    my $dcc_port = $self->_dcc_listen_port($bot);
+
+    # Bind to configured DCC range if set, otherwise port 0 lets the OS choose.
     $listener->listen(
-        addr => { family => 'inet', socktype => 'stream', port => 0 },
+        addr => { family => 'inet', socktype => 'stream', port => $dcc_port },
 
         on_listen => sub {
             my ($listener) = @_;
             $listen_port = $listener->read_handle->sockport;
+            $self->_dcc_offer_register('passive_chat', $nick, $listen_port, $public_ip, $listener);
             $logger->log(2, "DCC CHAT passive: listening on port $listen_port for $nick (token=$token)");
 
             # ── Send CTCP reply to client ─────────────────────────────────
@@ -328,12 +560,12 @@ sub accept_dcc_chat_passive {
         },
 
         on_listen_error => sub {
-            $logger->log(1, "DCC CHAT passive: listen error for $nick — $_[1]");
+            $logger->log(1, "DCC CHAT passive: listen error for $nick - $_[1]");
             eval { $loop->remove($listener) };
         },
     );
 
-    # ── 60-second timeout — close listener if client never connects ───────────
+    # ── 60-second timeout - close listener if client never connects ───────────
     my $timeout = IO::Async::Timer::Countdown->new(
         delay     => 60,
         on_expire => sub {
@@ -399,7 +631,7 @@ sub _init_dcc_session {
         on_read => sub {
             my ($stream, $buffref, $eof) = @_;
 
-            # DCC CHAT uses bare LF or CRLF — no TELNET IAC sequences
+            # DCC CHAT uses bare LF or CRLF - no TELNET IAC sequences
             while ($$buffref =~ s/^([^\n]*)\n//) {
                 my $line = $1;
                 $line =~ s/\r$//;
@@ -448,8 +680,8 @@ sub _init_dcc_session {
         $self->{bot}->{metrics}->add('mediabot_partyline_sessions_current', 1);
     }
 
-    # Prompt for password immediately — nick is already known
-    $stream->write("DCC CHAT — Mediabot Partyline\r\n\r\n");
+    # Prompt for password immediately - nick is already known
+    $stream->write("DCC CHAT - Mediabot Partyline\r\n\r\n");
     $stream->write("Hello $nick. Enter your password.\r\n");
     $self->_telnet_echo_off($stream);
 }
@@ -702,7 +934,7 @@ sub _handle_line {
             my $login = $session->{pending_login} || '';
 
             if ($login eq '') {
-                # Should never happen — nick is set by _init_dcc_session
+                # Should never happen - nick is set by _init_dcc_session
                 $stream->write("Internal error: no nick set for DCC session.\r\n");
                 $stream->close_when_empty;
                 $self->_close_session($id);
@@ -713,7 +945,7 @@ sub _handle_line {
             $self->_do_login($stream, $id, $login, $line);
 
             unless ($self->{users}{$id} && $self->{users}{$id}{authenticated}) {
-                # Wrong password — ask again
+                # Wrong password - ask again
                 $self->{users}{$id}{auth_stage} = 'dcc_pass' if $self->{users}{$id};
                 if ($self->{streams}{$id}) {
                     $stream->write("\r\nEnter your password.\r\n");
@@ -797,6 +1029,10 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.stat' }) if $self->{bot}->{metrics};
         $self->_cmd_stat($stream, $id)
     }
+    elsif ($line =~ /^\.(?:dccstat|dcc)$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.dccstat' }) if $self->{bot}->{metrics};
+        $self->_cmd_dccstat($stream, $id)
+    }
     elsif ($line =~ /^\.console(?:\s+(.*))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.console' }) if $self->{bot}->{metrics};
         $self->_cmd_console($stream, $id, $1)
@@ -866,7 +1102,7 @@ sub _handle_line {
         $stream->write("Unknown command. Type .help for available commands.\r\n");
     }
     else {
-        # Chat broadcast — anything not starting with '.' goes to everyone
+        # Chat broadcast - anything not starting with '.' goes to everyone
         my $nick = $self->{users}{$id}{login} // 'unknown';
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => 'chat' })
             if $self->{bot}->{metrics};
@@ -892,7 +1128,7 @@ sub _do_login {
     my $max_failures = 5;
     my $failures = $self->{users}{$id}{login_failures} // 0;
     if ($failures >= $max_failures) {
-        $bot->{logger}->log(1, "Partyline: too many login failures for fd=$id — closing connection");
+        $bot->{logger}->log(1, "Partyline: too many login failures for fd=$id - closing connection");
         $stream->write("Too many authentication failures. Disconnecting.\r\n");
         $stream->close_now;
         return;
@@ -983,6 +1219,7 @@ sub _cmd_help {
         "Available commands:\r\n"
       . "  .help               - this help\r\n"
       . "  .stat               - channel status (owner, chansets, nick count)\r\n"
+      . "  .dccstat            - show DCC Partyline listeners and sessions\r\n"
       . "  .whom               - list users currently on the partyline\r\n"
       . "  .match <handle>     - show user record (wildcards * ? allowed)\r\n"
       . "  .say #chan <msg>    - send a message to a channel\r\n"
@@ -1005,7 +1242,7 @@ sub _cmd_help {
 }
 
 # ---------------------------------------------------------------------------
-# .console — display or change per-session log redirect level
+# .console - display or change per-session log redirect level
 # Usage : .console          → show current level
 #         .console <0-5>    → set level (0=INFO … 5=DEBUG5)
 #         .console off      → disable console
@@ -1057,7 +1294,7 @@ sub _cmd_console {
     $bot->{logger}->log(2, "Partyline: $nick set console level=$level (fd=$id)");
 }
 
-# .motd — display or set the partyline message of the day
+# .motd - display or set the partyline message of the day
 # Usage : .motd              → display current MOTD
 #         .motd <text>       → replace MOTD with a single line (Owner)
 #         .motd clear        → clear MOTD (Owner)
@@ -1089,7 +1326,7 @@ sub _cmd_motd {
     $self->{bot}->{logger}->log(2, "Partyline: $nick set MOTD to: $arg");
 }
 
-# Internal helper — send MOTD lines to a stream
+# Internal helper - send MOTD lines to a stream
 sub _send_motd {
     my ($self, $stream) = @_;
 
@@ -1107,7 +1344,7 @@ sub _send_motd {
     $stream->write("--- End of MOTD ---\r\n");
 }
 
-# .whom — list all authenticated partyline sessions (Eggdrop style)
+# .whom - list all authenticated partyline sessions (Eggdrop style)
 sub _cmd_whom {
     my ($self, $stream, $id) = @_;
 
@@ -1141,7 +1378,7 @@ sub _cmd_whom {
     $stream->write("$_\r\n") for @lines;
 }
 
-# .match <handle> — show user record from database (Eggdrop whois-style)
+# .match <handle> - show user record from database (Eggdrop whois-style)
 # Accepts exact handle or wildcard pattern (* and ?)
 sub _cmd_match {
     my ($self, $stream, $id, $pattern) = @_;
@@ -1211,7 +1448,7 @@ sub _cmd_match {
     }
 }
 
-# .boot <handle> — kick a user off the partyline (Owner only)
+# .boot <handle> - kick a user off the partyline (Owner only)
 sub _cmd_boot {
     my ($self, $stream, $id, $target_login) = @_;
 
@@ -1264,8 +1501,150 @@ sub _cmd_boot {
     $self->_close_session($target_id);
 }
 
-# .stat — for each known channel: joined?, nick count, owner, chansets
+# .stat - for each known channel: joined?, nick count, owner, chansets
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# .dccstat - display DCC Partyline state
+# ---------------------------------------------------------------------------
+sub _cmd_dccstat {
+    my ($self, $stream, $id) = @_;
+
+    my $bot = $self->{bot};
+
+    my $public_ip = eval { $self->_resolve_dcc_public_ip($bot) } || '(not configured)';
+
+    my ($range_min, $range_max, $range_source);
+    for my $pair (
+        [ 'DCC_PORT_MIN',       'DCC_PORT_MAX',       'DCC_PORT_MIN/MAX' ],
+        [ 'main.DCC_PORT_MIN',  'main.DCC_PORT_MAX',  'main.DCC_PORT_MIN/MAX' ],
+        [ 'PARTYLINE_DCC_PORT_MIN',      'PARTYLINE_DCC_PORT_MAX',      'PARTYLINE_DCC_PORT_MIN/MAX' ],
+        [ 'main.PARTYLINE_DCC_PORT_MIN', 'main.PARTYLINE_DCC_PORT_MAX', 'main.PARTYLINE_DCC_PORT_MIN/MAX' ],
+    ) {
+        my ($kmin, $kmax, $label) = @$pair;
+        my ($vmin, $vmax);
+
+        eval { $vmin = $bot->{conf}->get($kmin); };
+        eval { $vmax = $bot->{conf}->get($kmax); };
+
+        next unless defined $vmin && defined $vmax;
+        next unless $vmin =~ /^\d+$/ && $vmax =~ /^\d+$/;
+
+        $range_min    = int($vmin);
+        $range_max    = int($vmax);
+        $range_source = $label;
+        last;
+    }
+
+    my $port_mode = 'OS ephemeral port';
+    if (defined $range_min && defined $range_max) {
+        if ($range_min >= 1 && $range_max <= 65535 && $range_min <= $range_max) {
+            $port_mode = "$range_min-$range_max ($range_source)";
+        }
+        else {
+            $port_mode = "invalid range $range_min-$range_max, falling back to OS ephemeral port";
+        }
+    }
+
+    my $offers = eval { $self->_dcc_offers_snapshot } || [];
+
+    my @dcc_sessions;
+    my @telnet_sessions;
+
+    for my $fid (sort { $a <=> $b } keys %{ $self->{users} || {} }) {
+        my $u = $self->{users}{$fid} || next;
+        next unless $u->{authenticated};
+
+        my $entry = {
+            fd         => $fid,
+            login      => $u->{login}      || '?',
+            level_desc => $u->{level_desc} || '?',
+            peer_host  => $u->{peer_host}  || 'unknown',
+            console    => defined $u->{console_level} ? $u->{console_level} : 'off',
+        };
+
+        if ($u->{is_dcc}) {
+            push @dcc_sessions, $entry;
+        }
+        else {
+            push @telnet_sessions, $entry;
+        }
+    }
+
+    $stream->write("DCC Partyline status:\r\n");
+    $stream->write("  Public IP      : $public_ip\r\n");
+    $stream->write("  Port mode      : $port_mode\r\n");
+    $stream->write("  Pending offers : " . scalar(@$offers) . "\r\n");
+    $stream->write("  DCC sessions   : " . scalar(@dcc_sessions) . "\r\n");
+    $stream->write("  Telnet sessions: " . scalar(@telnet_sessions) . "\r\n");
+    $stream->write("\r\n");
+
+    if (@$offers) {
+        $stream->write("Pending DCC offers:\r\n");
+        $stream->write(sprintf("  %-12s %-14s %-16s %-8s %-6s\r\n",
+            "Type", "Nick", "Public IP", "Port", "Age"));
+        $stream->write("  " . ("-" x 64) . "\r\n");
+
+        my $now = time;
+        for my $o (@$offers) {
+            my $age = $now - ($o->{created_at} || $now);
+            $stream->write(sprintf("  %-12s %-14s %-16s %-8s %ss\r\n",
+                $o->{type}      || '?',
+                $o->{nick}      || '?',
+                $o->{public_ip} || '?',
+                $o->{port}      || '?',
+                $age
+            ));
+        }
+
+        $stream->write("\r\n");
+    }
+    else {
+        $stream->write("No pending DCC offers.\r\n\r\n");
+    }
+
+    if (@dcc_sessions) {
+        $stream->write("Active DCC sessions:\r\n");
+        $stream->write(sprintf("  %-14s %-14s %-6s %-20s %-10s\r\n",
+            "Nick", "Level", "FD", "Peer", "Console"));
+        $stream->write("  " . ("-" x 76) . "\r\n");
+
+        for my $u (@dcc_sessions) {
+            $stream->write(sprintf("  %-14s %-14s fd=%-3s %-20s console:%s\r\n",
+                $u->{login},
+                $u->{level_desc},
+                $u->{fd},
+                $u->{peer_host},
+                $u->{console}
+            ));
+        }
+
+        $stream->write("\r\n");
+    }
+    else {
+        $stream->write("No active DCC sessions.\r\n\r\n");
+    }
+
+    if (@telnet_sessions) {
+        $stream->write("Active telnet sessions:\r\n");
+        $stream->write(sprintf("  %-14s %-14s %-6s %-20s %-10s\r\n",
+            "Nick", "Level", "FD", "Peer", "Console"));
+        $stream->write("  " . ("-" x 76) . "\r\n");
+
+        for my $u (@telnet_sessions) {
+            $stream->write(sprintf("  %-14s %-14s fd=%-3s %-20s console:%s\r\n",
+                $u->{login},
+                $u->{level_desc},
+                $u->{fd},
+                $u->{peer_host},
+                $u->{console}
+            ));
+        }
+
+        $stream->write("\r\n");
+    }
+}
+
 sub _cmd_stat {
     my ($self, $stream, $id) = @_;
 
@@ -1362,7 +1741,7 @@ sub _cmd_say {
 }
 
 # ---------------------------------------------------------------------------
-# .who #chan — list nicks in a channel
+# .who #chan - list nicks in a channel
 # ---------------------------------------------------------------------------
 sub _cmd_who {
     my ($self, $stream, $id, $chan) = @_;
@@ -1429,7 +1808,7 @@ sub _cmd_part {
 }
 
 # ---------------------------------------------------------------------------
-# .nick <newnick>  — Master level required (already enforced by login,
+# .nick <newnick>  - Master level required (already enforced by login,
 #                    but validated explicitly here for clarity)
 # ---------------------------------------------------------------------------
 sub _cmd_nick {
@@ -1455,7 +1834,7 @@ sub _cmd_nick {
 }
 
 # ---------------------------------------------------------------------------
-# .raw <IRC command>  — Owner only
+# .raw <IRC command>  - Owner only
 # ---------------------------------------------------------------------------
 sub _cmd_raw {
     my ($self, $stream, $id, $raw) = @_;
@@ -1530,7 +1909,7 @@ sub _cmd_restart {
     # and on_timer_tick() will trigger reconnect() in the same process on the same loop.
     if ($bot->can('restart_irc')) {
         $stream->write("Restarting IRC connection (Partyline stays up)...\r\n");
-        $self->_broadcast("*** IRC restarting — bot will reconnect shortly. ***");
+        $self->_broadcast("*** IRC restarting - bot will reconnect shortly. ***");
         my $msg = (defined $reason && $reason ne '') ? $reason : "Partyline .restart by $nick";
         $bot->restart_irc(reason => $msg);
     } else {

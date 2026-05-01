@@ -477,7 +477,7 @@ sub _do_login {
         user     => $mediabot->getUserName(),
         realname => $mediabot->getIrcName(),
 
-        # Bind IP (optional — set CONN_BIND_IP in [connection] section)
+        # Bind IP (optional - set CONN_BIND_IP in [connection] section)
         ( $bind_ip ? (
             local_host => $bind_ip,
             connect    => { local_host => $bind_ip },
@@ -786,7 +786,7 @@ sub on_message_INVITE {
         my $is_auth      = $inviter_user && $inviter_user->is_authenticated ? 1 : 0;
         my $auth_label   = $is_auth ? 'authenticated' : 'not authenticated';
         $mediabot->{logger}->log(1,"$invited_nick has been invited to join $target_name by $inviter_nick ($auth_label)");
-        # Auto-join disabled — uncomment to re-enable:
+        # Auto-join disabled - uncomment to re-enable:
         # $mediabot->joinChannel($target_name) if $is_auth;
     }
     else {
@@ -1081,9 +1081,9 @@ sub on_message_PRIVMSG {
         }
     }
     else {
-        # TEMP DCC DEBUG — retirer après diagnostic
+        # DCC/CTCP DEBUG - visible only at high debug level
         my $what_for_hex = defined($what) ? $what : '';
-        $mediabot->{logger}->log(0, sprintf(
+        $mediabot->{logger}->log(4, sprintf(
             "[DCC_DEBUG] what_hex='%s' where='%s' who='%s'",
             unpack('H*', $what_for_hex), $where, $who
         ));
@@ -1202,7 +1202,7 @@ sub on_message_ctcp_DCC {
         $mediabot->_handle_dcc_chat_request($message, $who, $ip_int, $port, $token);
     }
     else {
-        $mediabot->{logger}->log(2, "DCC from $who: unhandled DCC type '$args' — ignored");
+        $mediabot->{logger}->log(2, "DCC from $who: unhandled DCC type '$args' - ignored");
     }
 
     return undef;
@@ -1370,7 +1370,7 @@ sub on_message_003 {
     $mediabot->{logger}->log(2,"003 $text");
 }
         
-# Numeric 004 – Server version/info
+# Numeric 004 - Server version/info
 sub on_message_004 {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_004', $message);
@@ -1382,7 +1382,7 @@ sub on_message_004 {
     $mediabot->{logger}->log(0, "004 server=$server version=$version user_modes=$user_modes chan_modes=$chan_modes");
 }
         
-# Numeric 005 – ISUPPORT
+# Numeric 005 - ISUPPORT
 sub on_message_005 {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_005', $message);
@@ -1578,7 +1578,7 @@ sub on_message_ERROR {
     # Stopping the loop from a callback kills the main $loop->run,
     # which terminates the process (and the Partyline) entirely.
     # on_timer_tick detects is_connected=false and schedules reconnect()
-    # via IO::Async::Timer::Countdown — let it handle this.
+    # via IO::Async::Timer::Countdown - let it handle this.
     $mediabot->setServer(undef);
 
     if ($mediabot->{metrics}) {
@@ -1586,14 +1586,14 @@ sub on_message_ERROR {
         $mediabot->{metrics}->inc('mediabot_irc_reconnect_total');
     }
 
-    $mediabot->{logger}->log(0, "on_message_ERROR: IRC connection lost — on_timer_tick will reconnect");
+    $mediabot->{logger}->log(0, "on_message_ERROR: IRC connection lost - on_timer_tick will reconnect");
 }
 
 sub on_message_KILL {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_KILL', $message);
     my ($killer, $victim, $reason) = @{ $message->args };
-    $mediabot->{logger}->log(0, "Killed by $killer: $reason – will reconnect.");
+    $mediabot->{logger}->log(0, "Killed by $killer: $reason - will reconnect.");
 
     if ($mediabot->getQuit()) {
         $mediabot->clean_and_exit(0);
@@ -1603,7 +1603,7 @@ sub on_message_KILL {
     # Same as on_message_ERROR: do NOT call $loop->stop.
     # on_timer_tick will detect is_connected=false and schedule reconnect().
     $mediabot->setServer(undef);
-    $mediabot->{logger}->log(0, "on_message_KILL: IRC connection lost — on_timer_tick will reconnect");
+    $mediabot->{logger}->log(0, "on_message_KILL: IRC connection lost - on_timer_tick will reconnect");
 }
 
 sub on_message_SERVER {
@@ -1732,7 +1732,7 @@ sub on_message_ERR_NEEDMOREPARAMS {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_ERR_NEEDMOREPARAMS', $message);
     my ($me, $cmd) = @{$message->args}[0,1];
-    $mediabot->{logger}->log(1, "ERR_NEEDMOREPARAMS for $cmd – vérifiez la syntaxe.");
+    $mediabot->{logger}->log(1, "ERR_NEEDMOREPARAMS for $cmd - vérifiez la syntaxe.");
 }
 
 sub reconnect {
@@ -1754,7 +1754,7 @@ sub reconnect {
 
     $mediabot->{logger}->log(0, "reconnect(): picked server " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort());
 
-    # Reuse the existing IO::Async loop — do NOT create a new one.
+    # Reuse the existing IO::Async loop - do NOT create a new one.
     # This keeps the Partyline listener alive across IRC reconnects.
 
     # Remove the old IRC object from the loop before adding a fresh one.

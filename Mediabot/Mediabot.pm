@@ -350,7 +350,7 @@ sub rehash_runtime_state {
     return 1;
 }
 # ---------------------------------------------------------------------------
-# restart_irc() — reconnect to IRC without killing the process
+# restart_irc() - reconnect to IRC without killing the process
 # The Partyline stays alive. Called from Partyline .restart command.
 # ---------------------------------------------------------------------------
 sub restart_irc {
@@ -417,7 +417,7 @@ sub restart_irc {
         $self->{metrics}->inc('mediabot_restart_total');
     }
 
-    $self->{logger}->log(1, "restart_irc(): reconnect requested — Partyline remains active");
+    $self->{logger}->log(1, "restart_irc(): reconnect requested - Partyline remains active");
 
     return 1;
 }
@@ -722,7 +722,7 @@ sub dbCheckTables {
     }
     $sth->finish;
 
-    # Check USER_HOSTMASK table exists — required since schema migration
+    # Check USER_HOSTMASK table exists - required since schema migration
     # If missing, the bot cannot match user hostmasks and auth will be broken.
     my $hm_sth = $dbh->prepare(
         "SELECT 1 FROM INFORMATION_SCHEMA.TABLES " .
@@ -748,10 +748,10 @@ sub dbCheckTables {
         clean_and_exit($self, 1);
     }
 
-    $self->{logger}->log(4, "USER_HOSTMASK table exists — schema OK");
+    $self->{logger}->log(4, "USER_HOSTMASK table exists - schema OK");
 
     # Check USER.hostmasks column is gone (renamed to hostmasks_legacy)
-    # This is a soft warning only — the bot can still run.
+    # This is a soft warning only - the bot can still run.
     my $col_sth = $dbh->prepare(
         "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS " .
         "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'USER' AND COLUMN_NAME = 'hostmasks' LIMIT 1"
@@ -1188,7 +1188,7 @@ sub mbCommandPublic {
     my $bFound = mbDbCommand($self, $message, $sChannel, $sNick, $sCommand, @tArgs);
     return if $bFound;
 
-    # Bot nick triggered — natural language / Hailo fallback
+    # Bot nick triggered - natural language / Hailo fallback
     if ($botNickTriggered) {
         mbHandleNickTriggered($ctx, join(" ", $sCommand, @tArgs));
     } else {
@@ -1213,7 +1213,7 @@ sub mbHelp_ctx {
     }
 }
 
-# Handle bot nick triggered messages — natural patterns + Hailo fallback
+# Handle bot nick triggered messages - natural patterns + Hailo fallback
 sub mbHandleNickTriggered {
     my ($ctx, $what) = @_;
 
@@ -1268,7 +1268,7 @@ sub mbHandleNickTriggered {
 sub mbCommandPrivate {
     my ($self, $message, $sNick, $sCommand, @tArgs) = @_;
 
-    # Normalize command — q and Q are the same
+    # Normalize command - q and Q are the same
     $sCommand = lc $sCommand;
 
     # Build Context once, used by all handlers
@@ -1442,7 +1442,7 @@ sub _handle_ctcp_chat_request {
     my $dbh    = $self->{dbh};
 
     unless ($self->{partyline} && $self->{partyline}->can('offer_dcc_chat')) {
-        $logger->log(1, "CTCP CHAT from $nick: Partyline not available — ignored");
+        $logger->log(1, "CTCP CHAT from $nick: Partyline not available - ignored");
         return;
     }
 
@@ -1455,7 +1455,7 @@ sub _handle_ctcp_chat_request {
     });
 
     unless ($sth && $sth->execute($nick)) {
-        $logger->log(1, "CTCP CHAT from $nick: DB error — " . ($DBI::errstr // 'unknown'));
+        $logger->log(1, "CTCP CHAT from $nick: DB error - " . ($DBI::errstr // 'unknown'));
         return;
     }
 
@@ -1463,13 +1463,13 @@ sub _handle_ctcp_chat_request {
     $sth->finish;
 
     unless ($row) {
-        $logger->log(2, "CTCP CHAT from $nick: unknown user — ignored");
+        $logger->log(2, "CTCP CHAT from $nick: unknown user - ignored");
         return;
     }
 
     unless (defined($row->{level}) && $row->{level} <= 1) {
         $logger->log(2, sprintf(
-            "CTCP CHAT from %s: insufficient level (%s=%d) — ignored",
+            "CTCP CHAT from %s: insufficient level (%s=%d) - ignored",
             $nick, $row->{description} // '?', $row->{level} // -1
         ));
         return;
@@ -1503,17 +1503,17 @@ sub _handle_dcc_chat_request {
 
     # ── Sanity check on port (active mode only) ──────────────────────────────
     unless ($is_passive || (defined $port && $port >= 1024 && $port <= 65535)) {
-        $logger->log(1, "DCC CHAT from $nick: invalid port $port — ignored");
+        $logger->log(1, "DCC CHAT from $nick: invalid port $port - ignored");
         return;
     }
 
     # ── Partyline must be available ──────────────────────────────────────────
     unless ($self->{partyline} && $self->{partyline}->can('accept_dcc_chat')) {
-        $logger->log(1, "DCC CHAT from $nick: Partyline not available — ignored");
+        $logger->log(1, "DCC CHAT from $nick: Partyline not available - ignored");
         return;
     }
 
-    # ── Look up user in DB — must exist and have level <= 1 ─────────────────
+    # ── Look up user in DB - must exist and have level <= 1 ─────────────────
     my $sth = $dbh->prepare(q{
         SELECT u.id_user, u.nickname, ul.level, ul.description
         FROM USER u
@@ -1523,7 +1523,7 @@ sub _handle_dcc_chat_request {
     });
 
     unless ($sth && $sth->execute($nick)) {
-        $logger->log(1, "DCC CHAT from $nick: DB error — " . ($DBI::errstr // 'unknown'));
+        $logger->log(1, "DCC CHAT from $nick: DB error - " . ($DBI::errstr // 'unknown'));
         return;
     }
 
@@ -1531,13 +1531,13 @@ sub _handle_dcc_chat_request {
     $sth->finish;
 
     unless ($row) {
-        $logger->log(2, "DCC CHAT from $nick: unknown user — ignored");
+        $logger->log(2, "DCC CHAT from $nick: unknown user - ignored");
         return;
     }
 
     unless (defined($row->{level}) && $row->{level} <= 1) {
         $logger->log(2, sprintf(
-            "DCC CHAT from %s: insufficient level (%s=%d) — ignored",
+            "DCC CHAT from %s: insufficient level (%s=%d) - ignored",
             $nick, $row->{description} // '?', $row->{level} // -1
         ));
         return;
@@ -1546,14 +1546,14 @@ sub _handle_dcc_chat_request {
     # ── Delegate to Partyline ────────────────────────────────────────────────
     if ($is_passive) {
         $logger->log(2, sprintf(
-            "DCC CHAT from %s (level=%s): passive mode — token=%s",
+            "DCC CHAT from %s (level=%s): passive mode - token=%s",
             $nick, $row->{description}, $token
         ));
         $self->{partyline}->accept_dcc_chat_passive($self, $nick, $token);
     }
     else {
         $logger->log(2, sprintf(
-            "DCC CHAT from %s (level=%s): active mode — ip_int=%d port=%d",
+            "DCC CHAT from %s (level=%s): active mode - ip_int=%d port=%d",
             $nick, $row->{description}, $ip_int, $port
         ));
         $self->{partyline}->accept_dcc_chat($nick, $ip_int, $port);
