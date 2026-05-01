@@ -22,6 +22,7 @@ use Mediabot::Radio::Icecast;
 use Mediabot::DB;
 use Mediabot::Channel;
 use Mediabot::Partyline;
+use Mediabot::ChannelBan;
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use IO::Async::Timer::Countdown;
@@ -267,6 +268,14 @@ if ($mediabot->{metrics}) {
     $mediabot->{metrics}->set('mediabot_db_connected', $mediabot->{dbh} ? 1 : 0);
 }
 
+# Initialize persistent channel ban helper
+$mediabot->{channel_ban} = Mediabot::ChannelBan->new(
+    bot    => $mediabot,
+    dbh    => $mediabot->{dbh},
+    logger => $mediabot->{logger},
+);
+$mediabot->{logger}->log(4, "ChannelBan helper initialized");
+
 # Check USER table and fail if not present
 $mediabot->dbCheckTables();
 
@@ -377,6 +386,27 @@ my $channel_hash_timer = IO::Async::Timer::Periodic->new(
 );
 $channel_hash_timer->start;
 $loop->add($channel_hash_timer);
+
+# Set up channel ban expiration timer
+my $channel_ban_expire_timer = IO::Async::Timer::Periodic->new(
+    interval       => 60,
+    first_interval => 30,
+    on_tick        => sub {
+        my $removed = eval { $mediabot->process_expired_channel_bans };
+        if ($@) {
+            my $err = $@;
+            $err =~ s/\s+/ /g;
+            $mediabot->{logger}->log(1, "channelban: expiration timer failed: $err");
+            return;
+        }
+
+        if ($removed && $removed > 0) {
+            $mediabot->{logger}->log(2, "channelban: expiration timer removed $removed expired ban(s)");
+        }
+    },
+);
+$channel_ban_expire_timer->start;
+$loop->add($channel_ban_expire_timer);
 
 # Build IRC object and connect (initial connection)
 my ($irc, $bind_ip) = _build_irc($loop);

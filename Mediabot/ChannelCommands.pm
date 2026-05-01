@@ -44,6 +44,10 @@ our @EXPORT = qw(
     userVoiceChannel_ctx
     userDevoiceChannel_ctx
     userKickChannel_ctx
+    channelBan_ctx
+    channelKickBan_ctx
+    channelUnban_ctx
+    channelBans_ctx
     userTopicChannel
     userShowcommandsChannel_ctx
     userChannelInfo_ctx
@@ -1590,6 +1594,469 @@ sub userKickChannel_ctx {
 
     return $id_channel;
 }
+
+# =============================================================================
+# Channel ban / kickban / unban commands
+# =============================================================================
+
+sub _channelban_reply {
+    my ($ctx, $msg) = @_;
+    botNotice($ctx->bot, $ctx->nick, $msg);
+}
+
+sub _channelban_resolve_channel {
+    my ($ctx, $args_ref) = @_;
+
+    my @args = @$args_ref;
+    my $target_chan = '';
+
+    if (@args && defined $args[0] && $args[0] =~ /^#/) {
+        $target_chan = shift @args;
+    }
+    else {
+        my $ctx_chan = $ctx->channel // '';
+        $target_chan = ($ctx_chan =~ /^#/) ? $ctx_chan : '';
+    }
+
+    @$args_ref = @args;
+    return $target_chan;
+}
+
+sub _channelban_channel_obj {
+    my ($self, $channel) = @_;
+    return $self->{channels}{$channel} || $self->{channels}{lc($channel || '')};
+}
+
+sub _channelban_actor_level {
+    my ($self, $ctx, $channel, $user) = @_;
+
+    my $uid = eval { $user->id } // 0;
+    my $level = 0;
+
+    eval {
+        my (undef, $chan_level) = getIdUserChannelLevel($self, eval { $user->nickname } || '', $channel);
+        $level = int($chan_level || 0);
+        1;
+    } or do {
+        $self->{logger}->log(1, "channelban: getIdUserChannelLevel failed for $channel: $@");
+    };
+
+    # Global Administrator+ remains a safe emergency bypass, but normal access
+    # is channel-level based, Undernet-style.
+    my $is_admin = eval { $user->has_level('Administrator') ? 1 : 0 } || 0;
+    $level = 500 if $is_admin && $level < 75;
+
+    return $level;
+}
+
+sub _channelban_known_target_level {
+    my ($self, $channel, $target) = @_;
+
+    return unless defined $target && $target ne '';
+    return if $target =~ /[!@*?]/;
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT
+            u.id_user,
+            u.nickname,
+            uc.level
+        FROM USER u
+        JOIN USER_CHANNEL uc ON uc.id_user = u.id_user
+        JOIN CHANNEL c ON c.id_channel = uc.id_channel
+        WHERE c.name = ?
+          AND u.nickname = ?
+        LIMIT 1
+    });
+
+    unless ($sth && $sth->execute($channel, $target)) {
+        return;
+    }
+
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+
+    return $row;
+}
+
+sub _channelban_latest_hostmask_for_nick {
+    my ($self, $channel, $nick) = @_;
+
+    return unless defined $nick && $nick ne '';
+    return if $nick =~ /[!@*?]/;
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT cl.userhost
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ?
+          AND cl.nick = ?
+          AND cl.userhost IS NOT NULL
+          AND cl.userhost LIKE '%!%@%'
+        ORDER BY cl.ts DESC, cl.id_channel_log DESC
+        LIMIT 1
+    });
+
+    unless ($sth && $sth->execute($channel, $nick)) {
+        return;
+    }
+
+    my ($hostmask) = $sth->fetchrow_array;
+    $sth->finish;
+
+    return $hostmask;
+}
+
+sub _channelban_parse_args {
+    my ($self, $ctx, $args_ref, $need_target) = @_;
+
+    my @args = @$args_ref;
+
+    my $target = shift @args;
+    if ($need_target && (!defined($target) || $target eq '')) {
+        return (undef, "missing target");
+    }
+
+    my ($duration_arg, $level_arg);
+
+    if (@args && $self->{channel_ban}->looks_like_duration($args[0])) {
+        $duration_arg = shift @args;
+    }
+
+    if (@args && $self->{channel_ban}->looks_like_level($args[0])) {
+        $level_arg = shift @args;
+    }
+
+    my $reason = join(' ', @args);
+    $reason = undef if !defined($reason) || $reason eq '';
+
+    return ({
+        target       => $target,
+        duration_arg => $duration_arg,
+        level_arg    => $level_arg,
+        reason       => $reason,
+    }, undef);
+}
+
+sub _channelban_prepare {
+    my ($ctx, %opts) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $user = $ctx->user;
+    unless ($user && $user->is_authenticated) {
+        _channelban_reply($ctx, "You must be logged to use this command.");
+        return;
+    }
+
+    unless ($self->{channel_ban}) {
+        _channelban_reply($ctx, "ChannelBan helper is not initialized.");
+        return;
+    }
+
+    my $target_chan = _channelban_resolve_channel($ctx, \@args);
+    unless ($target_chan =~ /^#/) {
+        _channelban_reply($ctx, "Syntax: $opts{syntax}");
+        return;
+    }
+
+    my $channel_obj = _channelban_channel_obj($self, $target_chan);
+    unless ($channel_obj) {
+        _channelban_reply($ctx, "Channel $target_chan does not exist");
+        return;
+    }
+
+    my $id_channel = $channel_obj->get_id;
+
+    my $actor_level = _channelban_actor_level($self, $ctx, $target_chan, $user);
+    if ($actor_level < 75) {
+        _channelban_reply($ctx, "Your channel level on $target_chan must be at least 75 to use ban commands.");
+        return;
+    }
+
+    return ($self, $nick, $user, $target_chan, $id_channel, $actor_level, \@args);
+}
+
+sub _channelban_apply {
+    my ($ctx, %opts) = @_;
+
+    my ($self, $nick, $user, $target_chan, $id_channel, $actor_level, $args_ref) =
+        _channelban_prepare($ctx, syntax => $opts{syntax});
+
+    return unless $self;
+
+    my ($parsed, $parse_err) = _channelban_parse_args($self, $ctx, $args_ref, 1);
+    if ($parse_err) {
+        _channelban_reply($ctx, "Syntax: $opts{syntax}");
+        return;
+    }
+
+    my $target = $parsed->{target};
+
+    my ($duration_seconds, $duration_label, $duration_err) =
+        $self->{channel_ban}->parse_duration($parsed->{duration_arg});
+
+    if ($duration_err) {
+        _channelban_reply($ctx, $duration_err);
+        return;
+    }
+
+    my ($ban_level, $level_err) =
+        $self->{channel_ban}->parse_ban_level($parsed->{level_arg}, $actor_level);
+
+    if ($level_err) {
+        _channelban_reply($ctx, $level_err);
+        return;
+    }
+
+    my $target_level_row = _channelban_known_target_level($self, $target_chan, $target);
+    if ($target_level_row && defined $target_level_row->{level}) {
+        my $target_level = int($target_level_row->{level});
+        if ($target_level >= $actor_level) {
+            _channelban_reply(
+                $ctx,
+                "Refusing to ban $target: target channel level ($target_level) is >= your level ($actor_level)."
+            );
+            return;
+        }
+    }
+
+    my $mask = $self->{channel_ban}->normalize_mask($target);
+
+    if (defined $mask && $mask !~ /[!@*?]/) {
+        my $latest = _channelban_latest_hostmask_for_nick($self, $target_chan, $mask);
+        unless ($latest) {
+            _channelban_reply($ctx, "Cannot resolve hostmask for nick '$target'. Use an explicit mask like *!*user\@host.");
+            return;
+        }
+
+        my $resolved = $self->{channel_ban}->mask_from_hostmask($latest);
+        unless ($resolved) {
+            _channelban_reply($ctx, "Cannot build a safe ban mask from hostmask '$latest'.");
+            return;
+        }
+
+        $mask = $resolved;
+    }
+
+    if (my $mask_err = $self->{channel_ban}->validate_mask($mask)) {
+        _channelban_reply($ctx, $mask_err);
+        return;
+    }
+
+    my $expires_at = $self->{channel_ban}->expires_sql_from_seconds($duration_seconds);
+    my $issuer     = eval { $user->nickname } || $nick;
+    my $uid        = eval { $user->id } || undef;
+    my $reason     = $parsed->{reason};
+
+    my ($id_ban, $add_err) = $self->{channel_ban}->add_ban(
+        id_channel      => $id_channel,
+        mask            => $mask,
+        ban_level       => $ban_level,
+        reason          => $reason,
+        created_by      => $uid,
+        created_by_nick => $issuer,
+        expires_at      => $expires_at,
+        source          => 'irc',
+    );
+
+    if ($add_err) {
+        _channelban_reply($ctx, $add_err);
+        return;
+    }
+
+    eval {
+        $self->{irc}->send_message("MODE", undef, ($target_chan, "+b", $mask));
+        1;
+    } or do {
+        my $err = $@ || 'unknown error';
+        _channelban_reply($ctx, "Ban stored but MODE +b failed: $err");
+        $self->{logger}->log(1, "channelban: MODE +b failed on $target_chan $mask: $err");
+        return;
+    };
+
+    my $duration_txt = $duration_label || 'permanent';
+    my $msg = "Ban #$id_ban added on $target_chan: $mask level=$ban_level duration=$duration_txt";
+    $msg .= " reason=$reason" if defined $reason && $reason ne '';
+
+    _channelban_reply($ctx, $msg);
+    logBot($self, $ctx->message, $target_chan, "ban", $target_chan, $mask, $duration_txt, $ban_level);
+
+    if ($opts{kick}) {
+        my $kick_nick = $target;
+        if ($kick_nick =~ /[!@*?]/) {
+            _channelban_reply($ctx, "Kick skipped: target is a mask, not a nick.");
+            return $id_ban;
+        }
+
+        my $kick_reason = "(" . $issuer . ")" . (defined($reason) && $reason ne '' ? " $reason" : " banned");
+        eval {
+            $self->{irc}->send_message("KICK", undef, ($target_chan, $kick_nick, $kick_reason));
+            1;
+        } or do {
+            my $err = $@ || 'unknown error';
+            _channelban_reply($ctx, "Ban added but KICK failed: $err");
+            $self->{logger}->log(1, "channelban: KICK failed on $target_chan $kick_nick: $err");
+            return $id_ban;
+        };
+
+        logBot($self, $ctx->message, $target_chan, "kickban", $target_chan, $kick_nick, $mask, $duration_txt, $ban_level);
+    }
+
+    return $id_ban;
+}
+
+sub channelBan_ctx {
+    my ($ctx) = @_;
+    return _channelban_apply(
+        $ctx,
+        kick   => 0,
+        syntax => "ban [#channel] <nick|mask> [duration] [level] [reason]"
+    );
+}
+
+sub channelKickBan_ctx {
+    my ($ctx) = @_;
+    return _channelban_apply(
+        $ctx,
+        kick   => 1,
+        syntax => "kickban [#channel] <nick|mask> [duration] [level] [reason]"
+    );
+}
+
+sub channelBans_ctx {
+    my ($ctx) = @_;
+
+    my ($self, $nick, $user, $target_chan, $id_channel, $actor_level, $args_ref) =
+        _channelban_prepare($ctx, syntax => "bans [#channel]");
+
+    return unless $self;
+
+    my @bans = $self->{channel_ban}->list_active_bans($id_channel);
+
+    unless (@bans) {
+        _channelban_reply($ctx, "No active bans on $target_chan.");
+        return;
+    }
+
+    my $count = 0;
+    for my $ban (@bans) {
+        last if $count >= 10;
+        $count++;
+
+        my $expires = $ban->{expires_at} || 'permanent';
+        my $reason  = defined($ban->{reason}) && $ban->{reason} ne '' ? " reason=$ban->{reason}" : '';
+
+        _channelban_reply(
+            $ctx,
+            sprintf(
+                "#%s %s level=%s by=%s expires=%s%s",
+                $ban->{id_channel_ban},
+                $ban->{mask},
+                $ban->{ban_level},
+                $ban->{created_by_nick} || '?',
+                $expires,
+                $reason
+            )
+        );
+    }
+
+    _channelban_reply($ctx, "Showing $count/" . scalar(@bans) . " active bans on $target_chan.");
+    logBot($self, $ctx->message, $target_chan, "bans", $target_chan);
+
+    return scalar(@bans);
+}
+
+sub channelUnban_ctx {
+    my ($ctx) = @_;
+
+    my ($self, $nick, $user, $target_chan, $id_channel, $actor_level, $args_ref) =
+        _channelban_prepare($ctx, syntax => "unban [#channel] <id|mask>");
+
+    return unless $self;
+
+    my @args = @$args_ref;
+    my $selector = shift @args;
+
+    unless (defined $selector && $selector ne '') {
+        _channelban_reply($ctx, "Syntax: unban [#channel] <id|mask>");
+        return;
+    }
+
+    my $sth;
+    my $row;
+
+    if ($selector =~ /^\d+$/) {
+        $sth = $self->{dbh}->prepare(q{
+            SELECT id_channel_ban, mask, ban_level
+            FROM CHANNEL_BAN
+            WHERE id_channel = ?
+              AND id_channel_ban = ?
+              AND active = 1
+            LIMIT 1
+        });
+        $sth->execute($id_channel, $selector);
+    }
+    else {
+        $sth = $self->{dbh}->prepare(q{
+            SELECT id_channel_ban, mask, ban_level
+            FROM CHANNEL_BAN
+            WHERE id_channel = ?
+              AND mask = ?
+              AND active = 1
+            ORDER BY id_channel_ban DESC
+            LIMIT 1
+        });
+        $sth->execute($id_channel, $selector);
+    }
+
+    $row = $sth->fetchrow_hashref if $sth;
+    $sth->finish if $sth;
+
+    unless ($row) {
+        _channelban_reply($ctx, "No active ban found for '$selector' on $target_chan.");
+        return;
+    }
+
+    my $ban_level = int($row->{ban_level} || 75);
+    if ($actor_level < $ban_level) {
+        _channelban_reply($ctx, "Your channel level ($actor_level) is below this ban level ($ban_level).");
+        return;
+    }
+
+    my $issuer = eval { $user->nickname } || $nick;
+    my $uid    = eval { $user->id } || undef;
+
+    eval {
+        $self->{irc}->send_message("MODE", undef, ($target_chan, "-b", $row->{mask}));
+        1;
+    } or do {
+        my $err = $@ || 'unknown error';
+        _channelban_reply($ctx, "MODE -b failed: $err");
+        $self->{logger}->log(1, "channelban: MODE -b failed on $target_chan $row->{mask}: $err");
+        return;
+    };
+
+    my ($rows, $err) = $self->{channel_ban}->mark_removed(
+        id_channel      => $id_channel,
+        selector        => $row->{id_channel_ban},
+        removed_by      => $uid,
+        removed_by_nick => $issuer,
+        remove_reason   => 'manual unban',
+    );
+
+    if ($err) {
+        _channelban_reply($ctx, $err);
+        return;
+    }
+
+    _channelban_reply($ctx, "Unbanned #$row->{id_channel_ban} $row->{mask} from $target_chan.");
+    logBot($self, $ctx->message, $target_chan, "unban", $target_chan, $row->{mask});
+
+    return $rows;
+}
+
 
 # Set the topic of a channel if the user has the appropriate privileges
 sub userTopicChannel {

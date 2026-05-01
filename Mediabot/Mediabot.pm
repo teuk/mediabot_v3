@@ -1094,6 +1094,11 @@ sub mbCommandPublic {
         voice        => sub { userVoiceChannel_ctx($ctx) },
         devoice      => sub { userDevoiceChannel_ctx($ctx) },
         kick         => sub { userKickChannel_ctx($ctx) },
+        ban          => sub { channelBan_ctx($ctx) },
+        kickban      => sub { channelKickBan_ctx($ctx) },
+        kb           => sub { channelKickBan_ctx($ctx) },
+        unban        => sub { channelUnban_ctx($ctx) },
+        bans         => sub { channelBans_ctx($ctx) },
         showcommands => sub { userShowcommandsChannel_ctx($ctx) },
         chaninfo     => sub { userChannelInfo_ctx($ctx) },
         chanlist     => sub { channelList_ctx($ctx) },
@@ -1424,6 +1429,110 @@ sub setQuit {
 sub getQuit {
 	my $self = shift;
 	return $self->{Quit};
+}
+
+
+# ---------------------------------------------------------------------------
+# process_expired_channel_bans()
+#
+# Called periodically by the main event loop.
+#
+# For each active CHANNEL_BAN whose expires_at is in the past:
+#   - resolve channel id -> channel name
+#   - send MODE #channel -b mask
+#   - mark the ban inactive in DB
+#
+# This method is deliberately conservative:
+#   - if the IRC object is not ready, it does nothing
+#   - if a channel cannot be resolved, it logs and skips
+#   - if MODE -b fails, it keeps the ban active for a later retry
+# ---------------------------------------------------------------------------
+sub process_expired_channel_bans {
+    my ($self) = @_;
+
+    return 0 unless $self->{channel_ban};
+    return 0 unless $self->{irc};
+
+    my @expired = eval { $self->{channel_ban}->expired_bans };
+    if ($@) {
+        my $err = $@;
+        $err =~ s/\s+/ /g;
+        $self->{logger}->log(1, "channelban: failed to fetch expired bans: $err");
+        return 0;
+    }
+
+    return 0 unless @expired;
+
+    my $done = 0;
+
+    BAN:
+    for my $ban (@expired) {
+        my $id_channel = $ban->{id_channel};
+        my $mask       = $ban->{mask};
+        my $id_ban     = $ban->{id_channel_ban};
+
+        unless ($id_channel && $mask && $id_ban) {
+            $self->{logger}->log(1, "channelban: invalid expired ban row, skipping");
+            next BAN;
+        }
+
+        my $channel_name = '';
+
+        for my $name (sort keys %{ $self->{channels} || {} }) {
+            my $ch = $self->{channels}{$name} || next;
+            my $ch_id = eval { $ch->get_id };
+            if (defined $ch_id && $ch_id == $id_channel) {
+                $channel_name = eval { $ch->get_name } || $name;
+                last;
+            }
+        }
+
+        unless ($channel_name) {
+            $self->{logger}->log(1, "channelban: expired ban #$id_ban references unknown channel id=$id_channel");
+            next BAN;
+        }
+
+        $self->{logger}->log(2, "channelban: expiring ban #$id_ban on $channel_name mask=$mask");
+
+        my $mode_ok = eval {
+            $self->{irc}->send_message("MODE", undef, ($channel_name, "-b", $mask));
+            1;
+        };
+
+        unless ($mode_ok) {
+            my $err = $@ || 'unknown error';
+            $err =~ s/\s+/ /g;
+            $self->{logger}->log(1, "channelban: MODE -b failed for expired ban #$id_ban on $channel_name $mask: $err");
+            next BAN;
+        }
+
+        my ($rows, $err) = eval {
+            $self->{channel_ban}->mark_removed(
+                id_channel      => $id_channel,
+                selector        => $id_ban,
+                removed_by      => undef,
+                removed_by_nick => 'system',
+                remove_reason   => 'expired',
+            );
+        };
+
+        if ($@) {
+            my $e = $@;
+            $e =~ s/\s+/ /g;
+            $self->{logger}->log(1, "channelban: DB mark_removed failed for expired ban #$id_ban: $e");
+            next BAN;
+        }
+
+        if ($err) {
+            $self->{logger}->log(1, "channelban: DB mark_removed error for expired ban #$id_ban: $err");
+            next BAN;
+        }
+
+        $done++;
+        $self->{logger}->log(2, "channelban: expired ban #$id_ban removed from $channel_name ($mask)");
+    }
+
+    return $done;
 }
 
 # ---------------------------------------------------------------------------
