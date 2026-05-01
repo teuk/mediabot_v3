@@ -80,6 +80,7 @@ sub on_message_NOTICE;
 sub on_message_QUIT;
 sub on_message_PART;
 sub on_message_PRIVMSG;
+sub on_message_ctcp_DCC;
 sub on_message_TOPIC;
 sub on_message_LIST;
 sub on_message_RPL_NAMEREPLY;
@@ -418,6 +419,7 @@ sub _build_irc {
         on_message_QUIT                  => \&on_message_QUIT,
         on_message_PART                  => \&on_message_PART,
         on_message_PRIVMSG               => \&on_message_PRIVMSG,
+        on_message_ctcp_DCC              => \&on_message_ctcp_DCC,
         on_message_TOPIC                 => \&on_message_TOPIC,
         on_message_LIST                  => \&on_message_LIST,
         on_message_RPL_NAMEREPLY         => \&on_message_RPL_NAMEREPLY,
@@ -1079,6 +1081,54 @@ sub on_message_PRIVMSG {
         }
     }
     else {
+        # TEMP DCC DEBUG — retirer après diagnostic
+        my $what_for_hex = defined($what) ? $what : '';
+        $mediabot->{logger}->log(0, sprintf(
+            "[DCC_DEBUG] what_hex='%s' where='%s' who='%s'",
+            unpack('H*', $what_for_hex), $where, $who
+        ));
+
+        # ── Eggdrop-style CTCP CHAT detection ────────────────────────────────
+        # Some clients deliver:
+        #   /ctcp <botnick> CHAT
+        # as raw CTCP payload "\x01CHAT\x01" inside PRIVMSG.
+        # Handle it before the private command parser sees it as "chat".
+        if ($where !~ /^#/ && defined($what)) {
+            my $ctcp_payload = $what;
+            $ctcp_payload =~ s/^\x01//;
+            $ctcp_payload =~ s/\x01$//;
+            $ctcp_payload =~ s/^\s+|\s+$//g;
+
+            if ($ctcp_payload =~ /^CHAT$/i) {
+                $mediabot->{logger}->log(2, "CTCP CHAT request from $who via raw CTCP payload");
+                $mediabot->_handle_ctcp_chat_request($message, $who);
+                return undef;
+            }
+        }
+
+        # ── Eggdrop-style CTCP CHAT detection ────────────────────────────────
+        # Some IRC clients deliver:
+        #   /ctcp <botnick> CHAT
+        # as a private message payload "CHAT" after CTCP stripping.
+        if ($where !~ /^#/ && defined($what) && $what =~ /^CHAT\s*$/i) {
+            $mediabot->{logger}->log(2, "CTCP CHAT request from $who via private payload");
+            $mediabot->_handle_ctcp_chat_request($message, $who);
+            return undef;
+        }
+
+        # ── DCC CHAT detection ────────────────────────────────────────────────
+        # Net::Async::IRC strips \x01 and "DCC " before delivering to PRIVMSG.
+        # $what arrives as: "CHAT chat <ip_int> <port>" (active)
+        #                or "CHAT chat 0 0 <token>"     (passive)
+        # Only handle if sent directly to the bot (not a channel).
+        if ($where !~ /^#/ && defined($what) && $what =~ /^CHAT\s+chat\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s*$/i) {
+            my ($ip_int, $port, $token) = ($1, $2, $3);
+            $mediabot->{logger}->log(2, "DCC CHAT request from $who ip=$ip_int port=$port"
+                . (defined $token ? " token=$token" : ""));
+            $mediabot->_handle_dcc_chat_request($message, $who, $ip_int, $port, $token);
+            return undef;
+        }
+
         # Private message hide passwords
         unless ( $what =~ /^login|^register|^pass|^newpass|^ident/i) {
             if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
@@ -1112,6 +1162,50 @@ sub on_message_PRIVMSG {
             }
         }
     }
+}
+
+sub on_message_ctcp_CHAT {
+    my ($self, $message, $hints) = @_;
+
+    my $who = $hints->{prefix_nick}        // return;
+    my $to  = ($hints->{targets} // [])->[0] // '';
+
+    # Only handle CTCP CHAT directed to the bot, not a channel.
+    return if $to =~ /^#/;
+
+    $mediabot->{logger}->log(2, "CTCP CHAT request from $who");
+
+    $mediabot->_handle_ctcp_chat_request($message, $who);
+
+    return undef;
+}
+
+sub on_message_ctcp_DCC {
+    my ($self, $message, $hints) = @_;
+
+    my $who  = $hints->{prefix_nick}        // return;
+    my $args = $hints->{ctcp_args}          // '';
+    my $to   = ($hints->{targets} // [])->[0] // '';
+
+    # Only handle DCC CHAT directed to the bot (not to a channel)
+    return if $to =~ /^#/;
+
+    $mediabot->{logger}->log(3, "CTCP DCC from $who: $args");
+
+    # Active DCC CHAT:  CHAT chat <ip_int> <port>
+    # Passive DCC CHAT: CHAT chat 0 0 <token>
+    #                or CHAT chat 0 <token>       (some clients)
+    if ($args =~ /^CHAT\s+chat\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s*$/i) {
+        my ($ip_int, $port, $token) = ($1, $2, $3);
+        $mediabot->{logger}->log(2, "DCC CHAT request from $who ip=$ip_int port=$port"
+            . (defined $token ? " token=$token" : ""));
+        $mediabot->_handle_dcc_chat_request($message, $who, $ip_int, $port, $token);
+    }
+    else {
+        $mediabot->{logger}->log(2, "DCC from $who: unhandled DCC type '$args' — ignored");
+    }
+
+    return undef;
 }
 
 sub on_message_TOPIC {

@@ -1426,4 +1426,138 @@ sub getQuit {
 	return $self->{Quit};
 }
 
+# ---------------------------------------------------------------------------
+# _handle_ctcp_chat_request($message, $nick)
+#
+# Called when a simple Eggdrop-style CTCP CHAT request is received:
+#   /ctcp <botnick> CHAT
+#
+# The requester must be a known Mediabot user with global level <= 1
+# before we offer a DCC CHAT Partyline session.
+# ---------------------------------------------------------------------------
+sub _handle_ctcp_chat_request {
+    my ($self, $message, $nick) = @_;
+
+    my $logger = $self->{logger};
+    my $dbh    = $self->{dbh};
+
+    unless ($self->{partyline} && $self->{partyline}->can('offer_dcc_chat')) {
+        $logger->log(1, "CTCP CHAT from $nick: Partyline not available — ignored");
+        return;
+    }
+
+    my $sth = $dbh->prepare(q{
+        SELECT u.id_user, u.nickname, ul.level, ul.description
+        FROM USER u
+        JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
+        WHERE u.nickname = ?
+        LIMIT 1
+    });
+
+    unless ($sth && $sth->execute($nick)) {
+        $logger->log(1, "CTCP CHAT from $nick: DB error — " . ($DBI::errstr // 'unknown'));
+        return;
+    }
+
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+
+    unless ($row) {
+        $logger->log(2, "CTCP CHAT from $nick: unknown user — ignored");
+        return;
+    }
+
+    unless (defined($row->{level}) && $row->{level} <= 1) {
+        $logger->log(2, sprintf(
+            "CTCP CHAT from %s: insufficient level (%s=%d) — ignored",
+            $nick, $row->{description} // '?', $row->{level} // -1
+        ));
+        return;
+    }
+
+    $logger->log(2, sprintf(
+        "CTCP CHAT from %s (level=%s): offering DCC CHAT",
+        $nick, $row->{description}
+    ));
+
+    $self->{partyline}->offer_dcc_chat($self, $nick);
+}
+
+# ---------------------------------------------------------------------------
+# _handle_dcc_chat_request($message, $nick, $ip_int, $port)
+#
+# Called when a CTCP DCC CHAT request is received as a private PRIVMSG.
+# Validates the requesting user (must be known in DB with level <= 1),
+# then delegates the actual TCP connection to Partyline->accept_dcc_chat().
+# ---------------------------------------------------------------------------
+sub _handle_dcc_chat_request {
+    my ($self, $message, $nick, $ip_int, $port, $token) = @_;
+
+    my $logger = $self->{logger};
+    my $dbh    = $self->{dbh};
+
+    # ── Detect passive DCC CHAT (ip=0 port=0 token=N) ───────────────────────
+    my $is_passive = (defined $ip_int && $ip_int == 0
+                   && defined $port   && $port   == 0
+                   && defined $token  && $token  =~ /^\d+$/);
+
+    # ── Sanity check on port (active mode only) ──────────────────────────────
+    unless ($is_passive || (defined $port && $port >= 1024 && $port <= 65535)) {
+        $logger->log(1, "DCC CHAT from $nick: invalid port $port — ignored");
+        return;
+    }
+
+    # ── Partyline must be available ──────────────────────────────────────────
+    unless ($self->{partyline} && $self->{partyline}->can('accept_dcc_chat')) {
+        $logger->log(1, "DCC CHAT from $nick: Partyline not available — ignored");
+        return;
+    }
+
+    # ── Look up user in DB — must exist and have level <= 1 ─────────────────
+    my $sth = $dbh->prepare(q{
+        SELECT u.id_user, u.nickname, ul.level, ul.description
+        FROM USER u
+        JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
+        WHERE u.nickname = ?
+        LIMIT 1
+    });
+
+    unless ($sth && $sth->execute($nick)) {
+        $logger->log(1, "DCC CHAT from $nick: DB error — " . ($DBI::errstr // 'unknown'));
+        return;
+    }
+
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+
+    unless ($row) {
+        $logger->log(2, "DCC CHAT from $nick: unknown user — ignored");
+        return;
+    }
+
+    unless (defined($row->{level}) && $row->{level} <= 1) {
+        $logger->log(2, sprintf(
+            "DCC CHAT from %s: insufficient level (%s=%d) — ignored",
+            $nick, $row->{description} // '?', $row->{level} // -1
+        ));
+        return;
+    }
+
+    # ── Delegate to Partyline ────────────────────────────────────────────────
+    if ($is_passive) {
+        $logger->log(2, sprintf(
+            "DCC CHAT from %s (level=%s): passive mode — token=%s",
+            $nick, $row->{description}, $token
+        ));
+        $self->{partyline}->accept_dcc_chat_passive($self, $nick, $token);
+    }
+    else {
+        $logger->log(2, sprintf(
+            "DCC CHAT from %s (level=%s): active mode — ip_int=%d port=%d",
+            $nick, $row->{description}, $ip_int, $port
+        ));
+        $self->{partyline}->accept_dcc_chat($nick, $ip_int, $port);
+    }
+}
+
 1;

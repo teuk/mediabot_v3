@@ -27,6 +27,8 @@ use POSIX qw(setsid);
 use File::Basename qw(dirname);
 use IO::Async::Listener;
 use IO::Async::Stream;
+use IO::Async::Timer::Countdown;
+use Socket qw(unpack_sockaddr_in sockaddr_family inet_ntoa inet_aton AF_INET);
 use Scalar::Util qw(weaken);
 
 our @EXPORT_OK = qw();
@@ -67,6 +69,391 @@ sub get_port {
 # ! Internal : start TCP listener                                             !
 # +---------------------------------------------------------------------------+
 
+
+# ---------------------------------------------------------------------------
+# accept_dcc_chat($nick, $ip_int, $port)
+#
+# Open an outbound TCP connection to the DCC CHAT initiator and wire it
+# up as a Partyline session. Called from Mediabot::_handle_dcc_chat_request
+# after the user has been validated (level <= 1).
+# ---------------------------------------------------------------------------
+sub accept_dcc_chat {
+    my ($self, $nick, $ip_int, $port) = @_;
+
+    my $loop = $self->{loop};
+    my $bot  = $self->{bot};
+
+    # Convert 32-bit integer IP to dotted-quad
+    my $ip = join('.', unpack('C4', pack('N', $ip_int)));
+
+    $bot->{logger}->log(2, "DCC CHAT: connecting to $nick at $ip:$port");
+
+    $loop->connect(
+        host     => $ip,
+        service  => $port,
+        socktype => 'stream',
+
+        on_stream => sub {
+            my ($stream) = @_;
+            $bot->{logger}->log(2, "DCC CHAT: connected to $nick at $ip:$port");
+            $self->_init_dcc_session($stream, $nick, $ip);
+        },
+
+        on_connect_error => sub {
+            my (undef, $err) = @_;
+            $bot->{logger}->log(1, "DCC CHAT: connect to $nick at $ip:$port failed — $err");
+        },
+
+        on_resolve_error => sub {
+            my ($err) = @_;
+            $bot->{logger}->log(1, "DCC CHAT: resolve error for $ip — $err");
+        },
+    );
+}
+
+# ---------------------------------------------------------------------------
+# offer_dcc_chat($bot, $nick)
+#
+# Handle Eggdrop-style:
+#   /ctcp <botnick> CHAT
+#
+# In this mode the user asks the bot to open a DCC CHAT listener.
+# We:
+#   1. Open a temporary TCP listener on an ephemeral port
+#   2. Send back: CTCP DCC CHAT chat <our_ip_int> <port>
+#   3. Wait for the client to connect
+#   4. On connection: init a DCC Partyline session
+# ---------------------------------------------------------------------------
+sub offer_dcc_chat {
+    my ($self, $bot, $nick) = @_;
+
+    $bot //= $self->{bot};
+
+    my $loop   = $self->{loop};
+    my $logger = $bot->{logger};
+
+    # Try config first.
+    # This should be the public IPv4 address reachable by IRC clients.
+    my $public_ip = $bot->{conf}->get('main.DCC_PUBLIC_IP') // '';
+
+    # Fallback: local IRC socket address. This is often not enough behind NAT,
+    # but it is useful on simple public-IP servers.
+    if (!$public_ip || $public_ip eq '') {
+        eval {
+            my $sockname = $bot->{irc}->read_handle->sockname;
+            if ($sockname) {
+                my $family = Socket::sockaddr_family($sockname);
+                if ($family == AF_INET) {
+                    my (undef, $addr) = unpack_sockaddr_in($sockname);
+                    $public_ip = inet_ntoa($addr);
+                }
+            }
+        };
+    }
+
+    unless ($public_ip && $public_ip ne '0.0.0.0') {
+        $logger->log(1, "CTCP CHAT from $nick: cannot determine public IP - set DCC_PUBLIC_IP in config");
+        return;
+    }
+
+    my $packed_ip = inet_aton($public_ip);
+    unless ($packed_ip) {
+        $logger->log(1, "CTCP CHAT from $nick: invalid DCC_PUBLIC_IP '$public_ip'");
+        return;
+    }
+
+    my $ip_int = unpack('N', $packed_ip);
+
+    $logger->log(2, "CTCP CHAT from $nick: opening DCC CHAT offer on $public_ip");
+
+    my $listener;
+    my $listen_port;
+    my $connected = 0;
+
+    $listener = IO::Async::Listener->new(
+        on_stream => sub {
+            my (undef, $stream) = @_;
+
+            return if $connected;
+            $connected = 1;
+
+            $logger->log(2, "CTCP CHAT: $nick connected to offered DCC CHAT");
+
+            eval { $loop->remove($listener) };
+
+            $self->_init_dcc_session($stream, $nick, $public_ip);
+        },
+    );
+
+    $loop->add($listener);
+
+    $listener->listen(
+        addr => { family => 'inet', socktype => 'stream', port => 0 },
+
+        on_listen => sub {
+            my ($listener) = @_;
+            $listen_port = $listener->read_handle->sockport;
+
+            $logger->log(2, "CTCP CHAT: listening on port $listen_port for $nick");
+
+            # CTCP reply:
+            # \001DCC CHAT chat <ip_int> <port>\001
+            my $ctcp = "\001DCC CHAT chat $ip_int $listen_port\001";
+
+            $bot->botPrivmsg($nick, $ctcp);
+
+            $logger->log(2, "CTCP CHAT: sent DCC CHAT offer to $nick ip_int=$ip_int port=$listen_port");
+        },
+
+        on_listen_error => sub {
+            $logger->log(1, "CTCP CHAT: listen error for $nick — $_[1]");
+            eval { $loop->remove($listener) };
+        },
+    );
+
+    my $timeout = IO::Async::Timer::Countdown->new(
+        delay     => 60,
+        on_expire => sub {
+            return if $connected;
+
+            $logger->log(2, "CTCP CHAT: timeout waiting for $nick to connect");
+            eval { $loop->remove($listener) };
+        },
+    );
+
+    $loop->add($timeout);
+    $timeout->start;
+}
+
+# ---------------------------------------------------------------------------
+# accept_dcc_chat_passive($bot, $nick, $token)
+#
+# Handle passive DCC CHAT (RFC-style reverse DCC).
+# The client sent ip=0 port=0 token=N meaning it wants US to listen and
+# it will connect to us. We:
+#   1. Open a temporary TCP listener on an ephemeral port
+#   2. Send back to the client: CTCP DCC CHAT chat <our_ip_int> <port> <token>
+#   3. Wait for the client to connect (60s timeout)
+#   4. On connection: close the listener, init DCC session normally
+# ---------------------------------------------------------------------------
+sub accept_dcc_chat_passive {
+    my ($self, $bot, $nick, $token) = @_;
+
+    my $loop   = $self->{loop};
+    my $logger = $bot->{logger};
+
+    # ── Resolve our public IP ─────────────────────────────────────────────────
+        # Try config first.
+    # This should be the public IPv4 address reachable by IRC clients.
+    #
+    # Accept both forms because Mediabot configs historically use a mix of
+    # plain keys and section-prefixed keys depending on the loader path.
+    my $public_ip = '';
+
+    for my $key (
+        'DCC_PUBLIC_IP',
+        'main.DCC_PUBLIC_IP',
+        'PARTYLINE_DCC_PUBLIC_IP',
+        'main.PARTYLINE_DCC_PUBLIC_IP',
+    ) {
+        my $v;
+        eval { $v = $bot->{conf}->get($key); };
+        if (defined $v && $v ne '') {
+            $public_ip = $v;
+            last;
+        }
+    }
+
+    $public_ip ||= $ENV{MEDIABOT_DCC_PUBLIC_IP} || '';
+
+    if (!$public_ip || $public_ip eq '') {
+        eval {
+            my $sockname = $bot->{irc}->read_handle->sockname;
+            if ($sockname) {
+                my $family = Socket::sockaddr_family($sockname);
+                if ($family == AF_INET) {
+                    my (undef, $addr) = unpack_sockaddr_in($sockname);
+                    $public_ip = inet_ntoa($addr);
+                }
+            }
+        };
+    }
+
+    unless ($public_ip && $public_ip ne '0.0.0.0') {
+        $logger->log(1, "DCC CHAT passive from $nick: cannot determine public IP — set main.DCC_PUBLIC_IP in config");
+        return;
+    }
+
+    # Convert dotted-quad to 32-bit int for the CTCP reply
+    my $ip_int = unpack('N', inet_aton($public_ip));
+
+    $logger->log(2, "DCC CHAT passive from $nick: listening on $public_ip token=$token");
+
+    # ── Open ephemeral listener ───────────────────────────────────────────────
+    my $listener;
+    my $listen_port;
+    my $connected = 0;
+
+    $listener = IO::Async::Listener->new(
+        on_stream => sub {
+            my (undef, $stream) = @_;
+
+            return if $connected;   # accept only one connection
+            $connected = 1;
+
+            $logger->log(2, "DCC CHAT passive: $nick connected (token=$token)");
+
+            # Stop accepting new connections
+            eval { $loop->remove($listener) };
+
+            $self->_init_dcc_session($stream, $nick, $public_ip);
+        },
+    );
+
+    $loop->add($listener);
+
+    # Bind to port 0 → OS assigns an ephemeral port
+    $listener->listen(
+        addr => { family => 'inet', socktype => 'stream', port => 0 },
+
+        on_listen => sub {
+            my ($listener) = @_;
+            $listen_port = $listener->read_handle->sockport;
+            $logger->log(2, "DCC CHAT passive: listening on port $listen_port for $nick (token=$token)");
+
+            # ── Send CTCP reply to client ─────────────────────────────────
+            my $ctcp = "DCC CHAT chat $ip_int $listen_port $token";
+            $bot->botPrivmsg($nick, $ctcp);
+            $logger->log(2, "DCC CHAT passive: sent CTCP reply to $nick");
+        },
+
+        on_listen_error => sub {
+            $logger->log(1, "DCC CHAT passive: listen error for $nick — $_[1]");
+            eval { $loop->remove($listener) };
+        },
+    );
+
+    # ── 60-second timeout — close listener if client never connects ───────────
+    my $timeout = IO::Async::Timer::Countdown->new(
+        delay     => 60,
+        on_expire => sub {
+            return if $connected;
+            $logger->log(2, "DCC CHAT passive: timeout waiting for $nick (token=$token)");
+            eval { $loop->remove($listener) };
+        },
+    );
+    $loop->add($timeout);
+    $timeout->start;
+}
+
+# ---------------------------------------------------------------------------
+# _init_dcc_session($stream, $nick)
+#
+# Wire up a connected DCC CHAT stream as a Partyline session.
+# The nick is already known (from the CTCP request) so we skip the nick
+# prompt and go straight to password verification (stage 'dcc_pass').
+# A 60-second authentication timeout is enforced.
+# ---------------------------------------------------------------------------
+sub _init_dcc_session {
+    my ($self, $stream, $nick, $peer_host) = @_;
+    $peer_host //= 'dcc';
+
+    my $loop = $self->{loop};
+    my $id   = fileno($stream->read_handle);
+
+    $self->{users}{$id} = {
+        authenticated  => 0,
+        login          => $nick,        # nick pre-filled from IRC identity
+        level          => undef,
+        level_desc     => '',
+        rate_window    => time(),
+        rate_count     => 0,
+        login_failures => 0,
+        console_level  => undef,
+        auth_stage     => 'dcc_pass',   # DCC-specific: skip nick prompt
+        pending_login  => $nick,
+        is_dcc         => 1,
+        peer_host      => $peer_host,
+    };
+    $self->{streams}{$id} = $stream;
+
+    # ── Authentication timeout: 60 seconds ───────────────────────────────────
+    my $timeout_timer = IO::Async::Timer::Countdown->new(
+        delay     => 60,
+        on_expire => sub {
+            return unless $self->{users}{$id};
+            return if     $self->{users}{$id}{authenticated};
+            $self->{bot}->{logger}->log(2, "DCC CHAT: auth timeout for $nick (fd=$id)");
+            my $s = $self->{streams}{$id};
+            if ($s) {
+                $s->write("Authentication timeout.\r\n");
+                $s->close_when_empty;
+            }
+            $self->_close_session($id);
+        },
+    );
+    $loop->add($timeout_timer);
+    $timeout_timer->start;
+
+    $stream->configure(
+        on_read => sub {
+            my ($stream, $buffref, $eof) = @_;
+
+            # DCC CHAT uses bare LF or CRLF — no TELNET IAC sequences
+            while ($$buffref =~ s/^([^\n]*)\n//) {
+                my $line = $1;
+                $line =~ s/\r$//;
+
+                # Mask password in logs
+                my $log_line = $line;
+                if (($self->{users}{$id}{auth_stage} // '') eq 'dcc_pass') {
+                    $log_line = '********';
+                }
+                else {
+                    $log_line =~ s/^(login\s+\S+\s+).+/$1********/i;
+                }
+
+                $self->{bot}->{logger}->log(3, "DCC CHAT <- \'$log_line\' (fd=$id nick=$nick)");
+                eval { $self->_handle_line($stream, $id, $line) };
+                if ($@) {
+                    $self->{bot}->{logger}->log(1, "DCC CHAT exception: $@");
+                    $stream->write("Internal error.\r\n");
+                }
+            }
+
+            if ($eof) {
+                $self->{bot}->{logger}->log(3, "DCC CHAT EOF (fd=$id nick=$nick)");
+                $self->_close_session($id);
+            }
+
+            return 0;
+        },
+
+        on_closed => sub {
+            $self->{bot}->{logger}->log(3, "DCC CHAT connection closed (fd=$id nick=$nick)");
+            my $authed_nick = ($self->{users}{$id} && $self->{users}{$id}{authenticated})
+                ? ($self->{users}{$id}{login} // '')
+                : '';
+            $self->_broadcast("*** " . $self->_display_nick($id) . " left the partyline (DCC disconnected). ***")
+                if $authed_nick;
+            $self->_close_session($id);
+        },
+    );
+
+    $loop->add($stream);
+
+    $self->{bot}->{logger}->log(2, "DCC CHAT: session initialized for $nick (fd=$id)");
+
+    if ($self->{bot}->{metrics}) {
+        $self->{bot}->{metrics}->add('mediabot_partyline_sessions_current', 1);
+    }
+
+    # Prompt for password immediately — nick is already known
+    $stream->write("DCC CHAT — Mediabot Partyline\r\n\r\n");
+    $stream->write("Hello $nick. Enter your password.\r\n");
+    $self->_telnet_echo_off($stream);
+}
+
 sub _start_listener {
     my ($self) = @_;
 
@@ -81,11 +468,21 @@ sub _start_listener {
             my ($stream) = @_;
             my $id = fileno($stream->read_handle);
 
+            my $peer_host = 'unknown';
+            eval {
+                my $pn = $stream->read_handle->peername;
+                if ($pn && sockaddr_family($pn) == AF_INET) {
+                    my (undef, $addr) = unpack_sockaddr_in($pn);
+                    $peer_host = inet_ntoa($addr);
+                }
+            };
+
             $self->{users}{$id} = {
                 authenticated  => 0,
                 login          => '',
                 level          => undef,
                 level_desc     => '',
+                peer_host      => $peer_host,
                 # Rate limiting: max 10 commands per 5 seconds
                 rate_window    => time(),
                 rate_count     => 0,
@@ -147,7 +544,7 @@ sub _start_listener {
                     my $nick = ($self->{users}{$id} && $self->{users}{$id}{authenticated})
                         ? ($self->{users}{$id}{login} // '')
                         : '';
-                    $self->_broadcast("*** $nick left the partyline (disconnected). ***") if $nick;
+                    $self->_broadcast("*** " . $self->_display_nick($id) . " left the partyline (disconnected). ***") if $nick;
                     $self->_close_session($id);
                 },
             );
@@ -194,8 +591,16 @@ sub _close_session {
     delete $self->{streams}{$id};
 }
 
+
+sub _display_nick {
+    my ($self, $id) = @_;
+    my $nick = $self->{users}{$id}{login}     // 'unknown';
+    my $host = $self->{users}{$id}{peer_host} // 'unknown';
+    return "$nick\@$host";
+}
+
 # ---------------------------------------------------------------------------
-# _broadcast($msg, $exclude_id)
+# _broadcast(\$msg, \$exclude_id)
 # Send a message to all authenticated partyline users, optionally skipping
 # one session (typically the sender).
 # ---------------------------------------------------------------------------
@@ -218,9 +623,10 @@ sub _broadcast {
 #   <nick> text
 # ---------------------------------------------------------------------------
 sub _broadcast_chat {
-    my ($self, $nick, $text, $exclude_id) = @_;
-    $self->_broadcast("<$nick> $text", $exclude_id);
-    $self->{bot}->{logger}->log(2, "Partyline chat <$nick> $text");
+    my ($self, $id, $text, $exclude_id) = @_;
+    my $display = $self->_display_nick($id);
+    $self->_broadcast("<$display> $text", $exclude_id);
+    $self->{bot}->{logger}->log(2, "Partyline chat <$display> $text");
 }
 
 # +---------------------------------------------------------------------------+
@@ -291,6 +697,32 @@ sub _handle_line {
     unless ($session->{authenticated}) {
         my $stage = $session->{auth_stage} || 'nick';
 
+        # ---- DCC CHAT auth stage: nick is pre-filled, only password needed --
+        if ($stage eq 'dcc_pass') {
+            my $login = $session->{pending_login} || '';
+
+            if ($login eq '') {
+                # Should never happen — nick is set by _init_dcc_session
+                $stream->write("Internal error: no nick set for DCC session.\r\n");
+                $stream->close_when_empty;
+                $self->_close_session($id);
+                return;
+            }
+
+            $self->_telnet_echo_on($stream);
+            $self->_do_login($stream, $id, $login, $line);
+
+            unless ($self->{users}{$id} && $self->{users}{$id}{authenticated}) {
+                # Wrong password — ask again
+                $self->{users}{$id}{auth_stage} = 'dcc_pass' if $self->{users}{$id};
+                if ($self->{streams}{$id}) {
+                    $stream->write("\r\nEnter your password.\r\n");
+                    $self->_telnet_echo_off($stream);
+                }
+            }
+            return;
+        }
+
         # Backward compatibility with the former syntax:
         # login <user> <password>
         if ($line =~ /^login\s+(\S+)\s+(\S+)$/i) {
@@ -350,6 +782,13 @@ sub _handle_line {
     }
 
     # ---- Authenticated : dispatch commands --------------------------------
+    # Announce dot-commands to all other partyline users so every session
+    # knows who triggered what, without needing to run .whom.
+    if ($line =~ /^\./ && $line !~ /^\.quit$/i) {
+        my $cmd_display = $self->_display_nick($id);
+        $self->_broadcast("[${cmd_display}] $line", $id);
+    }
+
     if    ($line =~ /^\.help$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.help' }) if $self->{bot}->{metrics};
         $self->_cmd_help($stream, $id)
@@ -417,7 +856,7 @@ sub _handle_line {
     elsif ($line =~ /^\.quit$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.quit' }) if $self->{bot}->{metrics};
         my $nick = $self->{users}{$id}{login} // 'unknown';
-        $self->_broadcast("*** $nick left the partyline. ***", $id);
+        $self->_broadcast("*** " . $self->_display_nick($id) . " left the partyline. ***", $id);
         $stream->write("Goodbye.\r\n");
         $stream->close_when_empty;
         $self->_close_session($id);
@@ -432,9 +871,10 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => 'chat' })
             if $self->{bot}->{metrics};
         # Echo back to sender with same format so they see their own message
-        $stream->write("<$nick> $line\r\n");
+        my $display = $self->_display_nick($id);
+        $stream->write("<$display> $line\r\n");
         # Broadcast to all other authenticated users
-        $self->_broadcast_chat($nick, $line, $id);
+        $self->_broadcast_chat($id, $line, $id);
     }
 }
 
@@ -527,7 +967,7 @@ sub _do_login {
     $self->_cmd_whom($stream, $id);
 
     # Announce arrival to other partyline users
-    $self->_broadcast("*** $login joined the partyline. ***", $id);
+    $self->_broadcast("*** " . $self->_display_nick($id) . " joined the partyline. ***", $id);
 }
 
 # +---------------------------------------------------------------------------+
@@ -678,7 +1118,7 @@ sub _cmd_whom {
         my $u = $self->{users}{$fid};
         next unless $u && $u->{authenticated};
 
-        my $nick       = $u->{login}        // '?';
+        my $nick       = ($u->{login} // '?') . '@' . ($u->{peer_host} // 'unknown');
         my $level_desc = $u->{level_desc}   // '?';
         my $con_level  = defined $u->{console_level}
             ? "console:" . $u->{console_level}
@@ -818,7 +1258,7 @@ sub _cmd_boot {
     }
 
     # Announce to everyone else
-    $self->_broadcast("*** $target_login was booted by $nick. ***", $target_id);
+    $self->_broadcast("*** " . $self->_display_nick($target_id) . " was booted by " . $self->_display_nick($id) . ". ***", $target_id);
     $stream->write("Booted $target_login.\r\n");
 
     $self->_close_session($target_id);
