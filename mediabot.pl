@@ -1129,6 +1129,21 @@ sub on_message_PRIVMSG {
             $ctcp_payload =~ s/\x01$//;
             $ctcp_payload =~ s/^\s+|\s+$//g;
 
+            # Raw CTCP DCC CHAT:
+            #   \x01DCC CHAT chat <ip_int> <port>\x01
+            #   \x01DCC CHAT chat 0 0 <token>\x01
+            #
+            # Some clients deliver /dcc chat <botnick> this way, with the
+            # leading "DCC" still present. Normalize it before the private
+            # command parser sees it as a bogus "dcc" command.
+            if ($ctcp_payload =~ /^DCC\s+CHAT\s+chat\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s*$/i) {
+                my ($ip_int, $port, $token) = ($1, $2, $3);
+                $mediabot->{logger}->log(2, "DCC CHAT request from $who via raw CTCP payload ip=$ip_int port=$port"
+                    . (defined $token ? " token=$token" : ""));
+                $mediabot->_handle_dcc_chat_request($message, $who, $ip_int, $port, $token);
+                return undef;
+            }
+
             if ($ctcp_payload =~ /^CHAT$/i) {
                 $mediabot->{logger}->log(2, "CTCP CHAT request from $who via raw CTCP payload");
                 $mediabot->_handle_ctcp_chat_request($message, $who);
