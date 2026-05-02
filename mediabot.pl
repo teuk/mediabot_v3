@@ -682,21 +682,51 @@ if (defined($mediabot->{conf}->get('main.RANDOM_QUOTE'))) {
             while (my $ref = $sth->fetchrow_hashref()) {
                 my $curChannel = $ref->{'name'};
                 $mediabot->{logger}->log(4,"RandomQuote on $curChannel");
-                my $sQuery = "SELECT QUOTES.* FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel JOIN USER ON USER.id_user = QUOTES.id_user WHERE CHANNEL.name = ? ORDER BY RAND() LIMIT 1";
+
+                my $count_query = "
+                    SELECT COUNT(*) AS quote_count
+                    FROM QUOTES q
+                    JOIN CHANNEL c ON c.id_channel = q.id_channel
+                    WHERE c.name = ?
+                ";
+                my $sth_count = $mediabot->{db}->ensure_connected()->prepare($count_query);
+
+                unless ($sth_count && $sth_count->execute($curChannel)) {
+                    $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $count_query);
+                    next;
+                }
+
+                my $count_ref = $sth_count->fetchrow_hashref();
+                $sth_count->finish;
+
+                my $quote_count = int($count_ref->{quote_count} // 0);
+                next unless $quote_count > 0;
+
+                my $offset = int(rand($quote_count));
+
+                my $sQuery = "
+                    SELECT q.id_quotes, q.quotetext, u.nickname
+                    FROM QUOTES q
+                    JOIN CHANNEL c ON c.id_channel = q.id_channel
+                    JOIN USER u ON u.id_user = q.id_user
+                    WHERE c.name = ?
+                    ORDER BY q.id_quotes
+                    LIMIT 1 OFFSET $offset
+                ";
                 my $sth2 = $mediabot->{db}->ensure_connected()->prepare($sQuery);
-                unless ($sth2->execute($curChannel)) {
+
+                unless ($sth2 && $sth2->execute($curChannel)) {
                     $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
                 }
                 else {
                     if (my $ref = $sth2->fetchrow_hashref()) {
                         my $sQuoteId = $ref->{'id_quotes'};
-                        my $sQuoteNick = $ref->{'nickname'};
-                        my $sQuote = $ref->{'quotetext'};
+                        my $sQuote   = $ref->{'quotetext'};
                         my $id_q = String::IRC->new($sQuoteId)->bold;
                         $mediabot->botPrivmsg($curChannel,"[id: $id_q] $sQuote");
                     }
                 }
-                $sth2->finish;
+                $sth2->finish if $sth2;
             }
         }
         $sth->finish;

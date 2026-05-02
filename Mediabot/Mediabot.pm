@@ -819,17 +819,46 @@ sub pickServer {
             clean_and_exit($self, 4);
         }
 
-        my $sQuery = "SELECT SERVERS.server_hostname FROM NETWORK JOIN SERVERS ON SERVERS.id_network = NETWORK.id_network WHERE NETWORK.network_name = ? ORDER BY RAND() LIMIT 1";
-        my $sth = $dbh->prepare($sQuery);
+        my $count_query = "
+            SELECT COUNT(*) AS server_count
+            FROM NETWORK
+            JOIN SERVERS ON SERVERS.id_network = NETWORK.id_network
+            WHERE NETWORK.network_name = ?
+        ";
+        my $sth_count = $dbh->prepare($count_query);
 
-        if ($sth->execute($network_name)) {
-            if (my $ref = $sth->fetchrow_hashref()) {
-                $self->{server} = $ref->{server_hostname};
-                $self->{server_source} = 'network-db';
+        if ($sth_count && $sth_count->execute($network_name)) {
+            my $count_ref = $sth_count->fetchrow_hashref();
+            $sth_count->finish;
+
+            my $server_count = int($count_ref->{server_count} // 0);
+
+            if ($server_count > 0) {
+                my $offset = int(rand($server_count));
+
+                my $sQuery = "
+                    SELECT SERVERS.server_hostname
+                    FROM NETWORK
+                    JOIN SERVERS ON SERVERS.id_network = NETWORK.id_network
+                    WHERE NETWORK.network_name = ?
+                    ORDER BY SERVERS.id_server
+                    LIMIT 1 OFFSET $offset
+                ";
+                my $sth = $dbh->prepare($sQuery);
+
+                if ($sth && $sth->execute($network_name)) {
+                    if (my $ref = $sth->fetchrow_hashref()) {
+                        $self->{server} = $ref->{server_hostname};
+                        $self->{server_source} = 'network-db';
+                    }
+                    $sth->finish;
+                } else {
+                    $self->{logger}->log(0, "Startup select SERVER, SQL Error: " . $DBI::errstr . " Query: " . $sQuery);
+                }
             }
-            $sth->finish;
-        } else {
-            $self->{logger}->log(0, "Startup select SERVER, SQL Error: " . $DBI::errstr . " Query: " . $sQuery);
+        }
+        else {
+            $self->{logger}->log(0, "Startup count SERVER, SQL Error: " . $DBI::errstr . " Query: " . $count_query);
         }
 
         unless ($self->{server}) {

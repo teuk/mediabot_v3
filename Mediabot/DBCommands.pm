@@ -2266,26 +2266,57 @@ sub Yomomma_ctx {
         $id = int($args[0]);
     }
 
-    my ($sql, @bind);
+    my ($sql, @bind, $row);
+
     if (defined $id && $id > 0) {
         # Specific joke by ID
         $sql  = "SELECT id_yomomma, yomomma FROM YOMOMMA WHERE id_yomomma = ?";
         @bind = ($id);
-    } else {
-        # Random joke
-        $sql  = "SELECT id_yomomma, yomomma FROM YOMOMMA ORDER BY RAND() LIMIT 1";
-        @bind = ();
-    }
 
-    my $sth = $self->{dbh}->prepare($sql);
-    unless ($sth && $sth->execute(@bind)) {
-        $self->{logger}->log(1, "Yomomma_ctx() SQL Error: $DBI::errstr | Query: $sql");
-        botPrivmsg($self, $channel, "Not found");
-        return;
-    }
+        my $sth = $self->{dbh}->prepare($sql);
+        unless ($sth && $sth->execute(@bind)) {
+            $self->{logger}->log(1, "Yomomma_ctx() SQL Error: $DBI::errstr | Query: $sql");
+            botPrivmsg($self, $channel, "Not found");
+            return;
+        }
 
-    my $row = $sth->fetchrow_hashref();
-    $sth->finish;
+        $row = $sth->fetchrow_hashref();
+        $sth->finish;
+    }
+    else {
+        # Random joke without random SQL sorting.
+        my $count_sql = "SELECT COUNT(*) AS joke_count FROM YOMOMMA";
+        my $sth_count = $self->{dbh}->prepare($count_sql);
+
+        unless ($sth_count && $sth_count->execute()) {
+            $self->{logger}->log(1, "Yomomma_ctx() SQL Error: $DBI::errstr | Query: $count_sql");
+            botPrivmsg($self, $channel, "Not found");
+            return;
+        }
+
+        my $count_ref = $sth_count->fetchrow_hashref();
+        $sth_count->finish;
+
+        my $joke_count = int($count_ref->{joke_count} // 0);
+        unless ($joke_count > 0) {
+            botPrivmsg($self, $channel, "Not found");
+            return;
+        }
+
+        my $offset = int(rand($joke_count));
+
+        $sql = "SELECT id_yomomma, yomomma FROM YOMOMMA ORDER BY id_yomomma LIMIT 1 OFFSET $offset";
+        my $sth = $self->{dbh}->prepare($sql);
+
+        unless ($sth && $sth->execute()) {
+            $self->{logger}->log(1, "Yomomma_ctx() SQL Error: $DBI::errstr | Query: $sql");
+            botPrivmsg($self, $channel, "Not found");
+            return;
+        }
+
+        $row = $sth->fetchrow_hashref();
+        $sth->finish;
+    }
 
     unless ($row) {
         botPrivmsg($self, $channel, "Not found");
