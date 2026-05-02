@@ -15,6 +15,7 @@ BEGIN {
 use Mediabot::DCC qw(
     strip_ctcp_delimiters
     parse_ctcp_payload
+    parse_dcc_payload
     parse_dcc_chat_payload
     ip_int_to_ipv4
 );
@@ -143,6 +144,35 @@ return sub {
 
         $assert->is($r->{type}, 'invalid',
             'parse_dcc_chat_payload: leading DCC is invalid here');
+    }
+
+    {
+        my $r = parse_dcc_payload("DCC CHAT chat 1383695523 1024");
+
+        $assert->is($r->{type}, 'dcc_chat',
+            'parse_dcc_payload: leading DCC accepted');
+
+        $assert->is($r->{mode}, 'active',
+            'parse_dcc_payload: active mode');
+
+        $assert->is($r->{ip_int}, '1383695523',
+            'parse_dcc_payload: active ip_int');
+
+        $assert->is($r->{port}, '1024',
+            'parse_dcc_payload: active port');
+    }
+
+    {
+        my $r = parse_dcc_payload("\x01DCC CHAT chat 0 0 123456\x01");
+
+        $assert->is($r->{type}, 'dcc_chat',
+            'parse_dcc_payload: raw CTCP passive accepted');
+
+        $assert->is($r->{mode}, 'passive',
+            'parse_dcc_payload: passive mode');
+
+        $assert->is($r->{token}, '123456',
+            'parse_dcc_payload: passive token');
     }
 
     {

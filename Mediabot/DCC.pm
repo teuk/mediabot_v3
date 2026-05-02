@@ -7,6 +7,7 @@ use Exporter 'import';
 our @EXPORT_OK = qw(
     strip_ctcp_delimiters
     parse_ctcp_payload
+    parse_dcc_payload
     parse_dcc_chat_payload
     ip_int_to_ipv4
 );
@@ -92,6 +93,25 @@ sub parse_ctcp_payload {
         payload => $clean,
     };
 }
+
+sub parse_dcc_payload {
+    my ($payload) = @_;
+
+    $payload = '' unless defined $payload;
+    $payload = strip_ctcp_delimiters($payload);
+    $payload =~ s/^\s+|\s+$//g;
+
+    # Accept both:
+    #   DCC CHAT chat <ip_int> <port>
+    #   CHAT chat <ip_int> <port>
+    $payload =~ s/^DCC\s+//i;
+
+    my $dcc = parse_dcc_chat_payload($payload);
+    $dcc->{payload} = $payload if ref($dcc) eq 'HASH';
+
+    return $dcc;
+}
+
 
 sub parse_dcc_chat_payload {
     my ($payload) = @_;
