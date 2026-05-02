@@ -39,7 +39,7 @@ return sub {
     # -------------------------------------------------------------------------
     # 1. mediabot.pl must use the shared parser module
     # -------------------------------------------------------------------------
-    my $has_import = ($src =~ /use\s+Mediabot::DCC\s+qw\(parse_ctcp_payload\);/) ? 1 : 0;
+    my $has_import = ($src =~ /use\s+Mediabot::DCC\s+qw\([^)]*\bparse_ctcp_payload\b[^)]*\);/) ? 1 : 0;
     my $has_parse_call = ($src =~ /my\s+\$dcc_parse\s*=\s*parse_ctcp_payload\(\$what\);/) ? 1 : 0;
     my $has_ctcp_log = ($src =~ /CTCP CHAT request from \$who via Mediabot::DCC parser/) ? 1 : 0;
     my $has_dcc_log = ($src =~ /DCC CHAT request from \$who via Mediabot::DCC parser ip=\$ip_int port=\$port/) ? 1 : 0;
@@ -65,6 +65,23 @@ return sub {
         $src =~ /_handle_dcc_chat_request\(\$message,\s*\$who,\s*\$ip_int,\s*\$port,\s*\$token\)/,
         'mediabot.pl dispatches DCC CHAT to _handle_dcc_chat_request'
     );
+
+    my $has_ctcp_dcc_handler_parse = ($src =~ /sub\s+on_message_ctcp_DCC\s*\{[\s\S]*?parse_dcc_payload\(\$args\)/) ? 1 : 0;
+    my $has_ctcp_dcc_handler_predicate = ($src =~ /sub\s+on_message_ctcp_DCC\s*\{[\s\S]*?is_dcc_chat\(\$dcc_parse\)/) ? 1 : 0;
+    my $has_ctcp_dcc_handler_log = ($src =~ /CTCP DCC CHAT request from \$who via Mediabot::DCC parser/) ? 1 : 0;
+    my $has_dcc_debug_hints = ($src =~ /DCC_DEBUG_HINTS/) ? 1 : 0;
+
+    $assert->is($has_ctcp_dcc_handler_parse, 1,
+        'on_message_ctcp_DCC uses parse_dcc_payload');
+
+    $assert->is($has_ctcp_dcc_handler_predicate, 1,
+        'on_message_ctcp_DCC uses is_dcc_chat');
+
+    $assert->is($has_ctcp_dcc_handler_log, 1,
+        'on_message_ctcp_DCC logs Mediabot::DCC parser path');
+
+    $assert->is($has_dcc_debug_hints, 1,
+        'CTCP DCC raw debug is gated by DCC_DEBUG_HINTS');
 
     # -------------------------------------------------------------------------
     # 2. Parser module path must run before private command logging.

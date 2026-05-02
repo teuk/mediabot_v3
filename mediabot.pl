@@ -23,7 +23,7 @@ use Mediabot::DB;
 use Mediabot::Channel;
 use Mediabot::Partyline;
 use Mediabot::ChannelBan;
-use Mediabot::DCC qw(parse_ctcp_payload);
+use Mediabot::DCC qw(parse_ctcp_payload parse_dcc_payload is_ctcp_chat is_dcc_chat);
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use IO::Async::Timer::Countdown;
@@ -1130,13 +1130,13 @@ sub on_message_PRIVMSG {
         if ($where !~ /^#/ && defined($what)) {
             my $dcc_parse = parse_ctcp_payload($what);
 
-            if ($dcc_parse->{type} && $dcc_parse->{type} eq 'ctcp_chat') {
+            if (is_ctcp_chat($dcc_parse)) {
                 $mediabot->{logger}->log(2, "CTCP CHAT request from $who via Mediabot::DCC parser");
                 $mediabot->_handle_ctcp_chat_request($message, $who);
                 return undef;
             }
 
-            if ($dcc_parse->{type} && $dcc_parse->{type} eq 'dcc_chat') {
+            if (is_dcc_chat($dcc_parse)) {
                 my $ip_int = $dcc_parse->{ip_int};
                 my $port   = $dcc_parse->{port};
                 my $token  = $dcc_parse->{token};
@@ -1208,10 +1208,14 @@ sub on_message_ctcp_CHAT {
 sub on_message_ctcp_DCC {
     my ($self, $message, $hints) = @_;
 
-    # High-level CTCP DCC diagnostics, visible only at debug level 4 ───────────────
-    {
-        my $who_dbg = $hints->{prefix_nick} // '?';
+    my $dcc_debug_hints = eval { $mediabot->{conf}->get('main.DCC_DEBUG_HINTS') } || 0;
+
+    # High-level CTCP DCC diagnostics.
+    # Disabled by default; enable main.DCC_DEBUG_HINTS=1 when debugging client payloads.
+    if ($dcc_debug_hints) {
+        my $who_dbg = (ref($hints) eq 'HASH' ? ($hints->{prefix_nick} // '?') : '?');
         $mediabot->{logger}->log(4, "[CTCP_DCC_DEBUG] handler called from $who_dbg");
+
         for my $k (sort keys %{ $hints || {} }) {
             my $v = $hints->{$k} // 'undef';
             if (ref($v) eq 'ARRAY') {
@@ -1221,7 +1225,7 @@ sub on_message_ctcp_DCC {
             }
             $mediabot->{logger}->log(4, "[CTCP_DCC_DEBUG] hint $k=" . unpack('H*', "$v"));
         }
-        # Also log the raw message string
+
         my $raw = eval { $message->as_string } // '';
         $mediabot->{logger}->log(4, "[CTCP_DCC_DEBUG] raw_message_hex=" . unpack('H*', $raw));
     }
@@ -1229,35 +1233,36 @@ sub on_message_ctcp_DCC {
     my $who  = $hints->{prefix_nick}        // return;
     my $to   = ($hints->{targets} // [])->[0] // '';
 
-    # Try both known hint key names — Net::Async::IRC version-dependent
+    # Try both known hint key names — Net::Async::IRC version-dependent.
+    # Parsing itself is centralized in Mediabot::DCC.
     my $args = $hints->{ctcp_args}
             // $hints->{text}
             // $hints->{ctcp_data}
             // '';
 
-    # Trim CTCP delimiters if present
-    $args =~ s/^\x01//;
-    $args =~ s/\x01$//;
-
-    # Strip leading "DCC " prefix if delivered with it
-    $args =~ s/^DCC\s+//i;
-
     # Only handle DCC CHAT directed to the bot (not to a channel)
     return if $to =~ /^#/;
 
-    $mediabot->{logger}->log(3, "CTCP DCC from $who: '$args'");
+    my $dcc_parse = parse_dcc_payload($args);
+    my $payload   = $dcc_parse->{payload} // $args;
 
-    # Active DCC CHAT:  CHAT chat <ip_int> <port>
-    # Passive DCC CHAT: CHAT chat 0 0 <token>
-    #                or CHAT chat 0 <token>       (some clients)
-    if ($args =~ /^CHAT\s+chat\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s*$/i) {
-        my ($ip_int, $port, $token) = ($1, $2, $3);
-        $mediabot->{logger}->log(2, "DCC CHAT request from $who ip=$ip_int port=$port"
-            . (defined $token ? " token=$token" : ""));
+    $mediabot->{logger}->log(3, "CTCP DCC from $who: '$payload'");
+
+    if (is_dcc_chat($dcc_parse)) {
+        my $ip_int = $dcc_parse->{ip_int};
+        my $port   = $dcc_parse->{port};
+        my $token  = $dcc_parse->{token};
+
+        $mediabot->{logger}->log(
+            2,
+            "CTCP DCC CHAT request from $who via Mediabot::DCC parser ip=$ip_int port=$port"
+            . (defined $token ? " token=$token" : "")
+        );
+
         $mediabot->_handle_dcc_chat_request($message, $who, $ip_int, $port, $token);
     }
     else {
-        $mediabot->{logger}->log(2, "DCC from $who: unhandled DCC type '$args' - ignored");
+        $mediabot->{logger}->log(2, "DCC from $who: unhandled DCC type '$payload' - ignored");
     }
 
     return undef;

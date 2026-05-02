@@ -17,6 +17,10 @@ use Mediabot::DCC qw(
     parse_ctcp_payload
     parse_dcc_payload
     parse_dcc_chat_payload
+    is_ctcp_chat
+    is_dcc_chat
+    is_dcc_active
+    is_dcc_passive
     ip_int_to_ipv4
 );
 
@@ -190,6 +194,55 @@ return sub {
 
         $assert->ok($r->{type} ne 'private_command',
             'regression: raw /dcc chat does not become private command');
+    }
+
+    # -------------------------------------------------------------------------
+    # Predicate helpers
+    # -------------------------------------------------------------------------
+    {
+        my $r = parse_ctcp_payload("\x01CHAT\x01");
+
+        $assert->is(is_ctcp_chat($r), 1,
+            'predicate: is_ctcp_chat');
+
+        $assert->is(is_dcc_chat($r), 0,
+            'predicate: CTCP CHAT is not DCC CHAT');
+    }
+
+    {
+        my $r = parse_ctcp_payload("\x01DCC CHAT chat 1383695523 1024\x01");
+
+        $assert->is(is_dcc_chat($r), 1,
+            'predicate: is_dcc_chat');
+
+        $assert->is(is_dcc_active($r), 1,
+            'predicate: is_dcc_active');
+
+        $assert->is(is_dcc_passive($r), 0,
+            'predicate: active is not passive');
+    }
+
+    {
+        my $r = parse_ctcp_payload("\x01DCC CHAT chat 0 0 123456\x01");
+
+        $assert->is(is_dcc_chat($r), 1,
+            'predicate: passive is DCC CHAT');
+
+        $assert->is(is_dcc_active($r), 0,
+            'predicate: passive is not active');
+
+        $assert->is(is_dcc_passive($r), 1,
+            'predicate: is_dcc_passive');
+    }
+
+    {
+        my $r = parse_ctcp_payload("not a dcc payload");
+
+        $assert->is(is_ctcp_chat($r), 0,
+            'predicate: invalid is not CTCP CHAT');
+
+        $assert->is(is_dcc_chat($r), 0,
+            'predicate: invalid is not DCC CHAT');
     }
 
     # -------------------------------------------------------------------------

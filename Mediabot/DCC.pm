@@ -9,6 +9,10 @@ our @EXPORT_OK = qw(
     parse_ctcp_payload
     parse_dcc_payload
     parse_dcc_chat_payload
+    is_ctcp_chat
+    is_dcc_chat
+    is_dcc_active
+    is_dcc_passive
     ip_int_to_ipv4
 );
 
@@ -143,6 +147,31 @@ sub parse_dcc_chat_payload {
         token  => $token,
     };
 }
+
+sub is_ctcp_chat {
+    my ($parsed) = @_;
+    return 0 unless ref($parsed) eq 'HASH';
+    return ($parsed->{type} || '') eq 'ctcp_chat' ? 1 : 0;
+}
+
+sub is_dcc_chat {
+    my ($parsed) = @_;
+    return 0 unless ref($parsed) eq 'HASH';
+    return ($parsed->{type} || '') eq 'dcc_chat' ? 1 : 0;
+}
+
+sub is_dcc_active {
+    my ($parsed) = @_;
+    return 0 unless is_dcc_chat($parsed);
+    return ($parsed->{mode} || '') eq 'active' ? 1 : 0;
+}
+
+sub is_dcc_passive {
+    my ($parsed) = @_;
+    return 0 unless is_dcc_chat($parsed);
+    return ($parsed->{mode} || '') eq 'passive' ? 1 : 0;
+}
+
 
 sub ip_int_to_ipv4 {
     my ($ip_int) = @_;

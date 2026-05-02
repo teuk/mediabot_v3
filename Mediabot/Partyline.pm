@@ -572,7 +572,8 @@ sub _init_dcc_session {
         auth_stage     => 'dcc_pass',   # DCC-specific: skip nick prompt
         pending_login  => $nick,
         is_dcc         => 1,
-        peer_host      => $peer_host,
+        peer_ip        => $peer_host,
+        peer_host      => $self->_reverse_dns_timeout($peer_host, 2),
     };
     $self->{streams}{$id} = $stream;
 
@@ -676,12 +677,16 @@ sub _start_listener {
                 }
             };
 
+            my $peer_ip = $peer_host;
+            my $peer_rdns = $self->_reverse_dns_timeout($peer_ip, 2);
+
             $self->{users}{$id} = {
                 authenticated  => 0,
                 login          => '',
                 level          => undef,
                 level_desc     => '',
-                peer_host      => $peer_host,
+                peer_ip        => $peer_ip,
+                peer_host      => $peer_rdns,
                 # Rate limiting: max 10 commands per 5 seconds
                 rate_window    => time(),
                 rate_count     => 0,
@@ -791,12 +796,65 @@ sub _close_session {
 }
 
 
+# ---------------------------------------------------------------------------
+# _reverse_dns_timeout($ip, $timeout)
+#
+# Resolve an IPv4 address to a hostname without blocking the partyline for too
+# long. Falls back to the original IP on timeout or lookup failure.
+# ---------------------------------------------------------------------------
+sub _reverse_dns_timeout {
+    my ($self, $ip, $timeout) = @_;
+
+    $timeout ||= 2;
+
+    return $ip unless defined $ip && $ip ne '' && $ip ne 'unknown';
+    return $ip unless $ip =~ /^\d{1,3}(?:\.\d{1,3}){3}$/;
+
+    my $packed = inet_aton($ip);
+    return $ip unless $packed;
+
+    my $host;
+
+    eval {
+        local $SIG{ALRM} = sub { die "reverse dns timeout\n" };
+        alarm($timeout);
+        $host = gethostbyaddr($packed, AF_INET);
+        alarm(0);
+        1;
+    } or do {
+        alarm(0);
+        return $ip;
+    };
+
+    return $host if defined $host && $host ne '';
+    return $ip;
+}
+
+
 sub _display_nick {
-    my ($self, $id) = @_;
+    my ($self, $id, $max_host_len) = @_;
+
     my $nick = $self->{users}{$id}{login}     // 'unknown';
     my $host = $self->{users}{$id}{peer_host} // 'unknown';
+    my $ip   = $self->{users}{$id}{peer_ip}   // '';
+
+    # If both reverse DNS and IP are known, preserve the IP entirely.
+    # Only the reverse DNS part may be shortened for display.
+    if ($ip ne '' && $host ne 'unknown' && $host ne $ip) {
+        if ($max_host_len && length($host) > $max_host_len) {
+            my $keep = $max_host_len - 3;
+            $keep = 1 if $keep < 1;
+            $host = substr($host, 0, $keep) . '...';
+        }
+
+        return "$nick\@$host/$ip";
+    }
+
+    # No separate IP available, so this is either already an IP or unknown.
+    # Do not shorten here: better to keep the exact peer value.
     return "$nick\@$host";
 }
+
 
 # ---------------------------------------------------------------------------
 # _broadcast(\$msg, \$exclude_id)
@@ -1322,7 +1380,7 @@ sub _cmd_whom {
         my $u = $self->{users}{$fid};
         next unless $u && $u->{authenticated};
 
-        my $nick       = ($u->{login} // '?') . '@' . ($u->{peer_host} // 'unknown');
+        my $nick       = $self->_display_nick($fid, 48);
         my $level_desc = $u->{level_desc}   // '?';
         my $con_level  = defined $u->{console_level}
             ? "console:" . $u->{console_level}
@@ -1527,6 +1585,7 @@ sub _cmd_dccstat {
             login      => $u->{login}      || '?',
             level_desc => $u->{level_desc} || '?',
             peer_host  => $u->{peer_host}  || 'unknown',
+            peer_ip    => $u->{peer_ip}    || '',
             console    => defined $u->{console_level} ? $u->{console_level} : 'off',
         };
 
