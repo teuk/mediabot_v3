@@ -23,6 +23,7 @@ use Mediabot::DB;
 use Mediabot::Channel;
 use Mediabot::Partyline;
 use Mediabot::ChannelBan;
+use Mediabot::DCC qw(parse_ctcp_payload);
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use IO::Async::Timer::Countdown;
@@ -1117,6 +1118,40 @@ sub on_message_PRIVMSG {
             "[DCC_DEBUG] what_hex='%s' where='%s' who='%s'",
             unpack('H*', $what_for_hex), $where, $who
         ));
+
+        # DCC/CTCP parser module path.
+        #
+        # Handles fragile CTCP/DCC payloads before the private command parser
+        # can mistake raw DCC CHAT for a private command named "dcc":
+        #   \x01CHAT\x01
+        #   \x01DCC CHAT chat <ip_int> <port>\x01
+        #   \x01DCC CHAT chat 0 0 <token>\x01
+        #   CHAT chat <ip_int> <port>
+        if ($where !~ /^#/ && defined($what)) {
+            my $dcc_parse = parse_ctcp_payload($what);
+
+            if ($dcc_parse->{type} && $dcc_parse->{type} eq 'ctcp_chat') {
+                $mediabot->{logger}->log(2, "CTCP CHAT request from $who via Mediabot::DCC parser");
+                $mediabot->_handle_ctcp_chat_request($message, $who);
+                return undef;
+            }
+
+            if ($dcc_parse->{type} && $dcc_parse->{type} eq 'dcc_chat') {
+                my $ip_int = $dcc_parse->{ip_int};
+                my $port   = $dcc_parse->{port};
+                my $token  = $dcc_parse->{token};
+
+                $mediabot->{logger}->log(
+                    2,
+                    "DCC CHAT request from $who via Mediabot::DCC parser ip=$ip_int port=$port"
+                    . (defined $token ? " token=$token" : "")
+                );
+
+                $mediabot->_handle_dcc_chat_request($message, $who, $ip_int, $port, $token);
+                return undef;
+            }
+        }
+
 
         # ── Eggdrop-style CTCP CHAT detection ────────────────────────────────
         # Some clients deliver:

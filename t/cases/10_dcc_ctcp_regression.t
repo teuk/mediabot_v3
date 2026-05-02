@@ -1,19 +1,14 @@
 # t/cases/10_dcc_ctcp_regression.t
 # =============================================================================
-#  Tests de non-régression DCC / CTCP raw
+#  DCC / CTCP runtime regression tests
 #
-#  But :
-#    - ne plus casser /dcc chat <botnick>
-#    - ne plus casser /ctcp <botnick> CHAT
-#    - vérifier que le handler raw DCC CHAT existe avant le parser privé
+#  This test protects the mediabot.pl integration path.
 #
-#  Contexte :
-#    Certains clients livrent /dcc chat <botnick> sous forme :
-#      \x01DCC CHAT chat <ip_int> <port>\x01
+#  The pure parser itself is tested in:
+#    t/cases/11_dcc_parser.t
 #
-#    Si ce payload n'est pas intercepté avant le parser privé, Mediabot voit
-#    une commande privée "dcc" et loggue :
-#      Private command 'dcc' not found
+#  Here we verify that mediabot.pl is wired to Mediabot::DCC before the private
+#  command parser can treat raw DCC CHAT as a private command named "dcc".
 # =============================================================================
 
 use strict;
@@ -26,49 +21,13 @@ BEGIN {
 }
 
 use File::Spec;
+use Mediabot::DCC qw(parse_ctcp_payload);
 
 sub _slurp {
     my ($path) = @_;
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
     local $/;
     return <$fh>;
-}
-
-sub _parse_ctcp_payload_like_mediabot {
-    my ($what) = @_;
-
-    return { type => 'none' } unless defined $what;
-
-    my $payload = $what;
-    $payload =~ s/^\x01//;
-    $payload =~ s/\x01$//;
-    $payload =~ s/^\s+|\s+$//g;
-
-    if ($payload =~ /^DCC\s+CHAT\s+chat\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s*$/i) {
-        return {
-            type   => 'raw_dcc_chat',
-            ip_int => $1,
-            port   => $2,
-            token  => $3,
-        };
-    }
-
-    if ($payload =~ /^CHAT$/i) {
-        return {
-            type => 'raw_ctcp_chat',
-        };
-    }
-
-    if ($payload =~ /^CHAT\s+chat\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s*$/i) {
-        return {
-            type   => 'stripped_dcc_chat',
-            ip_int => $1,
-            port   => $2,
-            token  => $3,
-        };
-    }
-
-    return { type => 'private_command' };
 }
 
 return sub {
@@ -78,93 +37,109 @@ return sub {
     my $src = _slurp($mediabot_pl);
 
     # -------------------------------------------------------------------------
-    # 1. Static guard: raw CTCP/DCC handlers exist
+    # 1. mediabot.pl must use the shared parser module
     # -------------------------------------------------------------------------
-    $assert->ok(
-        $src =~ /Raw CTCP DCC CHAT:/,
-        'mediabot.pl contains Raw CTCP DCC CHAT block'
-    );
+    my $has_import = ($src =~ /use\s+Mediabot::DCC\s+qw\(parse_ctcp_payload\);/) ? 1 : 0;
+    my $has_parse_call = ($src =~ /my\s+\$dcc_parse\s*=\s*parse_ctcp_payload\(\$what\);/) ? 1 : 0;
+    my $has_ctcp_log = ($src =~ /CTCP CHAT request from \$who via Mediabot::DCC parser/) ? 1 : 0;
+    my $has_dcc_log = ($src =~ /DCC CHAT request from \$who via Mediabot::DCC parser ip=\$ip_int port=\$port/) ? 1 : 0;
+
+    $assert->is($has_import, 1,
+        'mediabot.pl imports Mediabot::DCC parse_ctcp_payload');
+
+    $assert->is($has_parse_call, 1,
+        'mediabot.pl parses CTCP/DCC payload through Mediabot::DCC');
+
+    $assert->is($has_ctcp_log, 1,
+        'mediabot.pl logs CTCP CHAT through Mediabot::DCC parser');
+
+    $assert->is($has_dcc_log, 1,
+        'mediabot.pl logs DCC CHAT through Mediabot::DCC parser');
 
     $assert->ok(
-        $src =~ /DCC CHAT request from \$who via raw CTCP payload ip=\$ip_int port=\$port/,
-        'mediabot.pl logs raw DCC CHAT payload before private parser'
+        $src =~ /_handle_ctcp_chat_request\(\$message,\s*\$who\)/,
+        'mediabot.pl dispatches CTCP CHAT to _handle_ctcp_chat_request'
     );
 
     $assert->ok(
         $src =~ /_handle_dcc_chat_request\(\$message,\s*\$who,\s*\$ip_int,\s*\$port,\s*\$token\)/,
-        'mediabot.pl dispatches raw DCC CHAT to _handle_dcc_chat_request'
-    );
-
-    $assert->ok(
-        $src =~ /CTCP CHAT request from \$who via raw CTCP payload/,
-        'mediabot.pl still handles raw CTCP CHAT'
-    );
-
-    $assert->ok(
-        $src =~ /_handle_ctcp_chat_request\(\$message,\s*\$who\)/,
-        'mediabot.pl dispatches raw CTCP CHAT to _handle_ctcp_chat_request'
+        'mediabot.pl dispatches DCC CHAT to _handle_dcc_chat_request'
     );
 
     # -------------------------------------------------------------------------
-    # 2. Static order guard: raw handlers must appear before private parser
+    # 2. Parser module path must run before private command logging.
     # -------------------------------------------------------------------------
-    my $pos_raw_dcc = index($src, 'Raw CTCP DCC CHAT:');
+    my $pos_parser = index($src, 'parse_ctcp_payload($what)');
     my $pos_private_log = index($src, 'sCommands = $sCommand');
 
-    $assert->ok($pos_raw_dcc >= 0, 'order: raw DCC block found');
+    $assert->ok($pos_parser >= 0, 'order: Mediabot::DCC parser call found');
     $assert->ok($pos_private_log >= 0, 'order: private command log found');
 
-    # The command split may happen earlier to prepare variables.
-    # The important regression guard is that raw DCC handling happens before
-    # the private command parser/log path can treat it as command "dcc".
     $assert->ok(
-        $pos_raw_dcc >= 0 && $pos_private_log >= 0 && $pos_raw_dcc < $pos_private_log,
-        'order: raw DCC block is before sCommands private parser log'
+        $pos_parser >= 0 && $pos_private_log >= 0 && $pos_parser < $pos_private_log,
+        'order: Mediabot::DCC parser path is before private command parser log'
     );
 
     # -------------------------------------------------------------------------
-    # 3. Behavioral parser regression samples
+    # 3. Actual parser behavior for the historically fragile cases.
     # -------------------------------------------------------------------------
     {
-        my $r = _parse_ctcp_payload_like_mediabot("\x01CHAT\x01");
-        $assert->is($r->{type}, 'raw_ctcp_chat',
-            'parse: raw CTCP CHAT payload');
+        my $r = parse_ctcp_payload("\x01CHAT\x01");
+
+        $assert->is($r->{type}, 'ctcp_chat',
+            'parser: raw CTCP CHAT payload');
     }
 
     {
-        my $r = _parse_ctcp_payload_like_mediabot("\x01DCC CHAT chat 1383695523 1024\x01");
-        $assert->is($r->{type}, 'raw_dcc_chat',
-            'parse: raw DCC CHAT active payload');
+        my $r = parse_ctcp_payload("\x01DCC CHAT chat 1383695523 1024\x01");
+
+        $assert->is($r->{type}, 'dcc_chat',
+            'parser: raw DCC CHAT active payload');
+
+        $assert->is($r->{mode}, 'active',
+            'parser: raw DCC CHAT active mode');
+
         $assert->is($r->{ip_int}, '1383695523',
-            'parse: raw DCC CHAT active ip_int');
+            'parser: raw DCC CHAT active ip_int');
+
         $assert->is($r->{port}, '1024',
-            'parse: raw DCC CHAT active port');
+            'parser: raw DCC CHAT active port');
+
         $assert->ok(!defined $r->{token},
-            'parse: raw DCC CHAT active has no token');
+            'parser: raw DCC CHAT active has no token');
     }
 
     {
-        my $r = _parse_ctcp_payload_like_mediabot("\x01DCC CHAT chat 0 0 123456\x01");
-        $assert->is($r->{type}, 'raw_dcc_chat',
-            'parse: raw DCC CHAT passive payload');
+        my $r = parse_ctcp_payload("\x01DCC CHAT chat 0 0 123456\x01");
+
+        $assert->is($r->{type}, 'dcc_chat',
+            'parser: raw DCC CHAT passive payload');
+
+        $assert->is($r->{mode}, 'passive',
+            'parser: raw DCC CHAT passive mode');
+
         $assert->is($r->{ip_int}, '0',
-            'parse: raw DCC CHAT passive ip_int');
+            'parser: raw DCC CHAT passive ip_int');
+
         $assert->is($r->{port}, '0',
-            'parse: raw DCC CHAT passive port');
+            'parser: raw DCC CHAT passive port');
+
         $assert->is($r->{token}, '123456',
-            'parse: raw DCC CHAT passive token');
+            'parser: raw DCC CHAT passive token');
     }
 
     {
-        my $r = _parse_ctcp_payload_like_mediabot("CHAT chat 1383695523 1024");
-        $assert->is($r->{type}, 'stripped_dcc_chat',
-            'parse: stripped DCC CHAT active payload');
+        my $r = parse_ctcp_payload("CHAT chat 1383695523 1024");
+
+        $assert->is($r->{type}, 'dcc_chat',
+            'parser: stripped DCC CHAT active payload');
     }
 
     {
-        my $r = _parse_ctcp_payload_like_mediabot("DCC CHAT chat nope 1024");
+        my $r = parse_ctcp_payload("\x01DCC CHAT chat nope 1024\x01");
+
         $assert->is($r->{type}, 'private_command',
-            'parse: malformed raw DCC CHAT is not accepted');
+            'parser: malformed raw DCC CHAT is not accepted as DCC CHAT');
     }
 
     # -------------------------------------------------------------------------
@@ -173,7 +148,8 @@ return sub {
     #    private command parser as command "dcc".
     # -------------------------------------------------------------------------
     {
-        my $r = _parse_ctcp_payload_like_mediabot("\x01DCC CHAT chat 1383695523 1024\x01");
+        my $r = parse_ctcp_payload("\x01DCC CHAT chat 1383695523 1024\x01");
+
         $assert->ok($r->{type} ne 'private_command',
             'regression: raw /dcc chat does not become private command dcc');
     }
