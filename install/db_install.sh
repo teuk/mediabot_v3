@@ -50,16 +50,16 @@ ts(){ date '+[%d/%m/%Y %H:%M:%S]'; }
 mysql_create_mediabot_db() {
     if [ "$CHECK_DB_EXISTENCE" == "$MYSQL_DB" ]; then
         message "Drop database $MYSQL_DB"
-        printf "DROP DATABASE IF EXISTS `%s`;\n" "$MYSQL_DB" | mysql --default-character-set=utf8mb4 $MYSQL_PARAMS
+        printf "DROP DATABASE IF EXISTS `%s`;\n" "$MYSQL_DB" | mysql ${MYSQL_PARAMS}
         ok_failed $?
     fi
     message "Create database $MYSQL_DB"
-    printf "CREATE DATABASE `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n" "$MYSQL_DB" | mysql --default-character-set=utf8mb4 $MYSQL_PARAMS
+    printf "CREATE DATABASE `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n" "$MYSQL_DB" | mysql ${MYSQL_PARAMS}
     ok_failed $?
 
     message "Create database structure"
     if [ -f "$MYSQL_DB_CREATION_SCRIPT" ]; then
-        mysql --default-character-set=utf8mb4 $MYSQL_PARAMS "$MYSQL_DB" --show-warnings --execute="
+        mysql ${MYSQL_PARAMS} "$MYSQL_DB" --show-warnings --execute="
 SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 SET CHARACTER SET utf8mb4;
 SOURCE ${MYSQL_DB_CREATION_SCRIPT};
@@ -71,7 +71,7 @@ SOURCE ${MYSQL_DB_CREATION_SCRIPT};
     fi
 
     messageln "DB Tables"
-    echo "SHOW TABLES" | mysql $MYSQL_PARAMS $MYSQL_DB
+    echo "SHOW TABLES" | mysql ${MYSQL_PARAMS} "$MYSQL_DB"
     if [ $? -ne 0 ]; then
         echo -e "Failed.\nInstallation log is available in $SCRIPT_LOGFILE" | tee -a $SCRIPT_LOGFILE
     fi
@@ -134,20 +134,36 @@ fi
 pass_info=$([[ -n "$MYSQL_PASS" ]] && echo "password set" || echo "empty password")
 messageln "Database '$MYSQL_DB' creation using (${conn_info}) user '$MYSQL_USER' (${pass_info})"
 
-# build params
-MYSQL_PARAMS="-u${MYSQL_USER}"
-[[ -n "$MYSQL_HOST" ]] && MYSQL_PARAMS+=" -h${MYSQL_HOST} -P${MYSQL_PORT}"
-[[ -n "$MYSQL_PASS" ]] && MYSQL_PARAMS+=" -p${MYSQL_PASS}"
+# build root MySQL client option file.
+# This avoids exposing passwords in process arguments.
+MYSQL_ROOT_CNF="$(mktemp /tmp/mediabot_mysql_root.XXXXXX.cnf)"
+chmod 600 "$MYSQL_ROOT_CNF"
+
+{
+    echo "[client]"
+    echo "user=${MYSQL_USER}"
+    [[ -n "$MYSQL_PASS" ]] && echo "password=${MYSQL_PASS}"
+    [[ -n "$MYSQL_HOST" ]] && echo "host=${MYSQL_HOST}"
+    [[ -n "$MYSQL_HOST" ]] && echo "port=${MYSQL_PORT}"
+    echo "default-character-set=utf8mb4"
+} > "$MYSQL_ROOT_CNF"
+
+MYSQL_PARAMS="--defaults-extra-file=${MYSQL_ROOT_CNF}"
+
+cleanup_mysql_cnf() {
+    rm -f "${MYSQL_ROOT_CNF:-}" "${MYSQL_APP_CNF:-}"
+}
+trap cleanup_mysql_cnf EXIT
 
 messageln "MySQL root connection parameters prepared (password hidden)"
 
 # test connection
 message "Check connection to MySQL DB"
-echo exit | mysql --default-character-set=utf8mb4 ${MYSQL_PARAMS}
+echo exit | mysql ${MYSQL_PARAMS}
 ok_failed $?
 
 # check existence
-CHECK_DB_EXISTENCE=$(mysql --default-character-set=utf8mb4 ${MYSQL_PARAMS} --skip-column-names -e "SHOW DATABASES LIKE '$MYSQL_DB'")
+CHECK_DB_EXISTENCE=$(mysql ${MYSQL_PARAMS} --skip-column-names -e "SHOW DATABASES LIKE '$MYSQL_DB'")
 if [[ "$CHECK_DB_EXISTENCE" == "$MYSQL_DB" ]]; then
     messageln "Database $MYSQL_DB exists."
     message "Re-create it? (y/N) [N]: "
@@ -174,6 +190,11 @@ DEFAULT_DB_PASS=$(tr -dc '[:alnum:]' </dev/urandom | fold -w12 | head -n1)
 read -rp "$(ts) Enter MySQL database user (not root) [${DEFAULT_DB_USER}]: " MYSQL_DB_USER
 MYSQL_DB_USER=${MYSQL_DB_USER:-$DEFAULT_DB_USER}
 
+if [[ ! "$MYSQL_DB_USER" =~ ^[A-Za-z0-9_]+$ ]]; then
+    messageln "Invalid database user '$MYSQL_DB_USER'. Use only letters, numbers and underscore."
+    exit 1
+fi
+
 # ─── Prompt for database user password ──────────────────────────────────
 read -rsp "$(ts) Enter MySQL database user pass [${DEFAULT_DB_PASS}]: " MYSQL_DB_PASS
 echo
@@ -186,25 +207,41 @@ else
     AUTH_HOST=${IPADDR:-$MYSQL_HOST}
 fi
 
+if [[ ! "$AUTH_HOST" =~ ^[A-Za-z0-9_.:%-]+$ ]]; then
+    messageln "Invalid MySQL grant host '$AUTH_HOST'."
+    exit 1
+fi
+
 # ─── 1) CREATE (or ALTER) & GRANT & FLUSH in one shot ───────────────────
 messageln "Creating/updating '${MYSQL_DB_USER}'@'${AUTH_HOST}' and granting on ${MYSQL_DB}"
-mysql --default-character-set=utf8mb4 ${MYSQL_PARAMS} -e "
-  CREATE USER IF NOT EXISTS '${MYSQL_DB_USER}'@'${AUTH_HOST}'
-    IDENTIFIED BY '${MYSQL_DB_PASS}';
-  ALTER USER '${MYSQL_DB_USER}'@'${AUTH_HOST}'
-    IDENTIFIED BY '${MYSQL_DB_PASS}';
-  GRANT ALL PRIVILEGES ON ${MYSQL_DB}.* 
-    TO '${MYSQL_DB_USER}'@'${AUTH_HOST}';
-  FLUSH PRIVILEGES;
-"
+mysql ${MYSQL_PARAMS} <<SQL
+CREATE USER IF NOT EXISTS '${MYSQL_DB_USER}'@'${AUTH_HOST}'
+  IDENTIFIED BY '${MYSQL_DB_PASS}';
+ALTER USER '${MYSQL_DB_USER}'@'${AUTH_HOST}'
+  IDENTIFIED BY '${MYSQL_DB_PASS}';
+GRANT ALL PRIVILEGES ON \`${MYSQL_DB}\`.*
+  TO '${MYSQL_DB_USER}'@'${AUTH_HOST}';
+FLUSH PRIVILEGES;
+SQL
 ok_failed $? "Errors while creating/granting for user ${MYSQL_DB_USER}@${AUTH_HOST}"
 
 # ─── 2) VERIFY new user can connect ──────────────────────────────────────
-USER_MYSQL_PARAMS="-u${MYSQL_DB_USER} -p${MYSQL_DB_PASS}"
-[[ -n "$MYSQL_HOST" ]] && USER_MYSQL_PARAMS+=" -h${MYSQL_HOST} -P${MYSQL_PORT}"
+MYSQL_APP_CNF="$(mktemp /tmp/mediabot_mysql_app.XXXXXX.cnf)"
+chmod 600 "$MYSQL_APP_CNF"
+
+{
+    echo "[client]"
+    echo "user=${MYSQL_DB_USER}"
+    echo "password=${MYSQL_DB_PASS}"
+    [[ -n "$MYSQL_HOST" ]] && echo "host=${MYSQL_HOST}"
+    [[ -n "$MYSQL_HOST" ]] && echo "port=${MYSQL_PORT}"
+    echo "default-character-set=utf8mb4"
+} > "$MYSQL_APP_CNF"
+
+USER_MYSQL_PARAMS="--defaults-extra-file=${MYSQL_APP_CNF}"
 
 messageln "Verifying connection as ${MYSQL_DB_USER}…"
-if ! echo "SELECT 1;" | mysql --default-character-set=utf8mb4 ${USER_MYSQL_PARAMS} ${MYSQL_DB}; then
+if ! echo "SELECT 1;" | mysql ${USER_MYSQL_PARAMS} "${MYSQL_DB}"; then
     ok_failed $? "User ${MYSQL_DB_USER} failed to connect"
     messageln "Dropping user '${MYSQL_DB_USER}'@'${AUTH_HOST}' due to verification failure"
     mysql ${MYSQL_PARAMS} -e "DROP USER '${MYSQL_DB_USER}'@'${AUTH_HOST}';"
