@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS `CHANNEL_BAN` (
   KEY `idx_channel_ban_level` (`ban_level`),
   KEY `idx_channel_ban_created_by` (`created_by`),
   KEY `idx_channel_ban_removed_by` (`removed_by`),
+  KEY `idx_channel_ban_channel_expires` (`id_channel`, `active`, `expires_at`),
 
   CONSTRAINT `fk_channel_ban_channel`
     FOREIGN KEY (`id_channel`)
