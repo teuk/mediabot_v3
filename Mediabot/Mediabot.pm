@@ -1494,16 +1494,31 @@ sub process_expired_channel_bans {
 
         $self->{logger}->log(2, "channelban: expiring ban #$id_ban on $channel_name mask=$mask");
 
-        my $mode_ok = eval {
-            $self->{irc}->send_message("MODE", undef, ($channel_name, "-b", $mask));
-            1;
-        };
+        # Verify the bot is actually present in the channel before sending MODE -b.
+        # If not, skip the IRC command but still mark the ban removed in DB so it
+        # does not pile up — the IRC ban either expired naturally or the bot was
+        # absent when it was set.
+        my $bot_nick = eval { $self->{irc}->nick_folded } // '';
+        my @chan_nicks = $self->gethChannelsNicksOnChan($channel_name);
+        my $bot_on_chan = grep { lc($_) eq lc($bot_nick) } @chan_nicks;
 
-        unless ($mode_ok) {
-            my $err = $@ || 'unknown error';
-            $err =~ s/\s+/ /g;
-            $self->{logger}->log(1, "channelban: MODE -b failed for expired ban #$id_ban on $channel_name $mask: $err");
-            next BAN;
+        my $mode_ok;
+        if ($bot_on_chan) {
+            $mode_ok = eval {
+                $self->{irc}->send_message("MODE", undef, ($channel_name, "-b", $mask));
+                1;
+            };
+
+            unless ($mode_ok) {
+                my $err = $@ || 'unknown error';
+                $err =~ s/\s+/ /g;
+                $self->{logger}->log(1, "channelban: MODE -b failed for expired ban #$id_ban on $channel_name $mask: $err");
+                next BAN;
+            }
+        }
+        else {
+            $self->{logger}->log(2, "channelban: bot not on $channel_name — skipping MODE -b for expired ban #$id_ban, marking removed in DB");
+            $mode_ok = 1;   # proceed to DB cleanup
         }
 
         my ($rows, $err) = eval {
@@ -1529,6 +1544,9 @@ sub process_expired_channel_bans {
         }
 
         $done++;
+        if ($self->{metrics}) {
+            $self->{metrics}->inc('mediabot_channel_bans_expired_total');
+        }
         $self->{logger}->log(2, "channelban: expired ban #$id_ban removed from $channel_name ($mask)");
     }
 
@@ -1658,7 +1676,7 @@ sub _handle_dcc_chat_request {
             "DCC CHAT from %s (level=%s): passive mode - token=%s",
             $nick, $row->{description}, $token
         ));
-        $self->{partyline}->accept_dcc_chat_passive($self, $nick, $token);
+        $self->{partyline}->accept_dcc_chat_passive($nick, $token);
     }
     else {
         $logger->log(2, sprintf(

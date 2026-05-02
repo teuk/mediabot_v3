@@ -1912,7 +1912,7 @@ sub channelBan_ctx {
     return _channelban_apply(
         $ctx,
         kick   => 0,
-        syntax => "ban [#channel] <nick|mask> [duration] [level] [reason]"
+        syntax => "ban [#channel] <nick|mask> [duration] [level] [reason] — e.g. !ban badnick 2h | durations: 10m 2h 3d 1w perm"
     );
 }
 
@@ -1921,7 +1921,7 @@ sub channelKickBan_ctx {
     return _channelban_apply(
         $ctx,
         kick   => 1,
-        syntax => "kickban [#channel] <nick|mask> [duration] [level] [reason]"
+        syntax => "kickban [#channel] <nick|mask> [duration] [level] [reason] — e.g. !kickban badnick 2h spamming"
     );
 }
 
@@ -1945,7 +1945,32 @@ sub channelBans_ctx {
         last if $count >= 10;
         $count++;
 
-        my $expires = $ban->{expires_at} || 'permanent';
+        my $expires_txt;
+        if ($ban->{expires_at}) {
+            # Calculate human-readable time remaining
+            # expires_at is a datetime string from MariaDB
+            my $sth_now = $self->{dbh}->prepare('SELECT TIMESTAMPDIFF(SECOND, NOW(), ?) AS secs');
+            $sth_now->execute($ban->{expires_at});
+            my $row = $sth_now->fetchrow_hashref;
+            $sth_now->finish;
+            my $secs = ($row && defined $row->{secs}) ? $row->{secs} : 0;
+
+            if ($secs <= 0) {
+                $expires_txt = 'expiring soon';
+            } else {
+                my $d = int($secs / 86400);
+                my $h = int(($secs % 86400) / 3600);
+                my $m = int(($secs % 3600) / 60);
+                $expires_txt = '';
+                $expires_txt .= "${d}d " if $d;
+                $expires_txt .= "${h}h " if $h;
+                $expires_txt .= "${m}m"  if $m || (!$d && !$h);
+                $expires_txt =~ s/\s+$//;
+            }
+        } else {
+            $expires_txt = 'permanent';
+        }
+
         my $reason  = defined($ban->{reason}) && $ban->{reason} ne '' ? " reason=$ban->{reason}" : '';
 
         _channelban_reply(
@@ -1956,7 +1981,7 @@ sub channelBans_ctx {
                 $ban->{mask},
                 $ban->{ban_level},
                 $ban->{created_by_nick} || '?',
-                $expires,
+                $expires_txt,
                 $reason
             )
         );

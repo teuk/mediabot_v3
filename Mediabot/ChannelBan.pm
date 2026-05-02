@@ -61,7 +61,10 @@ sub parse_duration {
 
     if ($text =~ /^(\d+)$/) {
         my $minutes = int($1);
-        return (undef, undef, "duration must be positive") if $minutes < 0;
+        # A bare "0" should be written as "perm" — caught above.
+        # A plain number of 0 minutes is meaningless as a timed ban.
+        return (undef, undef, "duration cannot be zero — use 'perm' for permanent bans")
+            if $minutes == 0;
         return ($minutes * 60, "${minutes}m", undef);
     }
 

@@ -1228,14 +1228,44 @@ sub on_message_ctcp_CHAT {
 sub on_message_ctcp_DCC {
     my ($self, $message, $hints) = @_;
 
+    # ── TEMP DEBUG — dump all hints keys to find the right one ───────────────
+    {
+        my $who_dbg = $hints->{prefix_nick} // '?';
+        $mediabot->{logger}->log(0, "[CTCP_DCC_DEBUG] handler called from $who_dbg");
+        for my $k (sort keys %{ $hints || {} }) {
+            my $v = $hints->{$k} // 'undef';
+            if (ref($v) eq 'ARRAY') {
+                $v = '[' . join(',', @$v) . ']';
+            } elsif (ref($v)) {
+                $v = ref($v);
+            }
+            $mediabot->{logger}->log(0, "[CTCP_DCC_DEBUG] hint $k=" . unpack('H*', "$v"));
+        }
+        # Also log the raw message string
+        my $raw = eval { $message->as_string } // '';
+        $mediabot->{logger}->log(0, "[CTCP_DCC_DEBUG] raw_message_hex=" . unpack('H*', $raw));
+    }
+
     my $who  = $hints->{prefix_nick}        // return;
-    my $args = $hints->{ctcp_args}          // '';
     my $to   = ($hints->{targets} // [])->[0] // '';
+
+    # Try both known hint key names — Net::Async::IRC version-dependent
+    my $args = $hints->{ctcp_args}
+            // $hints->{text}
+            // $hints->{ctcp_data}
+            // '';
+
+    # Trim CTCP delimiters if present
+    $args =~ s/^\x01//;
+    $args =~ s/\x01$//;
+
+    # Strip leading "DCC " prefix if delivered with it
+    $args =~ s/^DCC\s+//i;
 
     # Only handle DCC CHAT directed to the bot (not to a channel)
     return if $to =~ /^#/;
 
-    $mediabot->{logger}->log(3, "CTCP DCC from $who: $args");
+    $mediabot->{logger}->log(3, "CTCP DCC from $who: '$args'");
 
     # Active DCC CHAT:  CHAT chat <ip_int> <port>
     # Passive DCC CHAT: CHAT chat 0 0 <token>

@@ -449,47 +449,14 @@ sub offer_dcc_chat {
 #   4. On connection: close the listener, init DCC session normally
 # ---------------------------------------------------------------------------
 sub accept_dcc_chat_passive {
-    my ($self, $bot, $nick, $token) = @_;
+    my ($self, $nick, $token) = @_;
 
+    my $bot    = $self->{bot};
     my $loop   = $self->{loop};
     my $logger = $bot->{logger};
 
-    # ── Resolve our public IP ─────────────────────────────────────────────────
-        # Try config first.
-    # This should be the public IPv4 address reachable by IRC clients.
-    #
-    # Accept both forms because Mediabot configs historically use a mix of
-    # plain keys and section-prefixed keys depending on the loader path.
-    my $public_ip = '';
-
-    for my $key (
-        'DCC_PUBLIC_IP',
-        'main.DCC_PUBLIC_IP',
-        'PARTYLINE_DCC_PUBLIC_IP',
-        'main.PARTYLINE_DCC_PUBLIC_IP',
-    ) {
-        my $v;
-        eval { $v = $bot->{conf}->get($key); };
-        if (defined $v && $v ne '') {
-            $public_ip = $v;
-            last;
-        }
-    }
-
-    $public_ip ||= $ENV{MEDIABOT_DCC_PUBLIC_IP} || '';
-
-    if (!$public_ip || $public_ip eq '') {
-        eval {
-            my $sockname = $bot->{irc}->read_handle->sockname;
-            if ($sockname) {
-                my $family = Socket::sockaddr_family($sockname);
-                if ($family == AF_INET) {
-                    my (undef, $addr) = unpack_sockaddr_in($sockname);
-                    $public_ip = inet_ntoa($addr);
-                }
-            }
-        };
-    }
+    # ── Resolve our public IP via shared helper ──────────────────────────────
+    my $public_ip = $self->_resolve_dcc_public_ip($bot);
 
     unless ($public_ip && $public_ip ne '0.0.0.0') {
         $logger->log(1, "DCC CHAT passive from $nick: cannot determine public IP - set main.DCC_PUBLIC_IP in config");
