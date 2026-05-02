@@ -1153,38 +1153,6 @@ sub on_message_PRIVMSG {
         }
 
 
-        # ── Eggdrop-style CTCP CHAT detection ────────────────────────────────
-        # Some clients deliver:
-        #   /ctcp <botnick> CHAT
-        # as raw CTCP payload "\x01CHAT\x01" inside PRIVMSG.
-        # Handle it before the private command parser sees it as "chat".
-        if ($where !~ /^#/ && defined($what)) {
-            my $ctcp_payload = $what;
-            $ctcp_payload =~ s/^\x01//;
-            $ctcp_payload =~ s/\x01$//;
-            $ctcp_payload =~ s/^\s+|\s+$//g;
-
-            # Raw CTCP DCC CHAT:
-            #   \x01DCC CHAT chat <ip_int> <port>\x01
-            #   \x01DCC CHAT chat 0 0 <token>\x01
-            #
-            # Some clients deliver /dcc chat <botnick> this way, with the
-            # leading "DCC" still present. Normalize it before the private
-            # command parser sees it as a bogus "dcc" command.
-            if ($ctcp_payload =~ /^DCC\s+CHAT\s+chat\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s*$/i) {
-                my ($ip_int, $port, $token) = ($1, $2, $3);
-                $mediabot->{logger}->log(2, "DCC CHAT request from $who via raw CTCP payload ip=$ip_int port=$port"
-                    . (defined $token ? " token=$token" : ""));
-                $mediabot->_handle_dcc_chat_request($message, $who, $ip_int, $port, $token);
-                return undef;
-            }
-
-            if ($ctcp_payload =~ /^CHAT$/i) {
-                $mediabot->{logger}->log(2, "CTCP CHAT request from $who via raw CTCP payload");
-                $mediabot->_handle_ctcp_chat_request($message, $who);
-                return undef;
-            }
-        }
 
         # Private message hide passwords
         unless ( $what =~ /^login|^register|^pass|^newpass|^ident/i) {
@@ -1240,7 +1208,7 @@ sub on_message_ctcp_CHAT {
 sub on_message_ctcp_DCC {
     my ($self, $message, $hints) = @_;
 
-    # ── TEMP DEBUG — dump all hints keys to find the right one ───────────────
+    # High-level CTCP DCC diagnostics, visible only at debug level 4 ───────────────
     {
         my $who_dbg = $hints->{prefix_nick} // '?';
         $mediabot->{logger}->log(4, "[CTCP_DCC_DEBUG] handler called from $who_dbg");
