@@ -1050,6 +1050,18 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.history' }) if $self->{bot}->{metrics};
         $self->_cmd_history($stream, $id)
     }
+    elsif ($line =~ /^\.ban\s+(#\S+)\s+(\S+)(?:\s+(.*))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.ban' }) if $self->{bot}->{metrics};
+        my ($chan, $nick_t, $rest) = ($1, $2, $3 // '');
+        my @rest_args = split /\s+/, $rest;
+        $self->_cmd_ban($stream, $id, $chan, $nick_t, @rest_args)
+    }
+    elsif ($line =~ /^\.ban\s+(#\S+)\s+(\S+)(?:\s+(.*))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.ban' }) if $self->{bot}->{metrics};
+        my ($chan_b, $nick_b, $rest_b) = ($1, $2, $3 // '');
+        my @rest_args_b = split(/\s+/, $rest_b);
+        $self->_cmd_ban($stream, $id, $chan_b, $nick_b, @rest_args_b)
+    }
     elsif ($line =~ /^\.bans?\s+(#\S+)$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.bans' }) if $self->{bot}->{metrics};
         $self->_cmd_bans($stream, $id, $1)
@@ -1271,6 +1283,8 @@ sub _cmd_help {
       . "  .die                - terminate bot process entirely (Owner only)\r\n"
       . "  .eval <perl>        - execute Perl in bot context (Owner, dangerous)\r\n"
       . "  .console [0-5|off]  - redirect bot log to this session\r\n"
+      . "  .ban #chan <nick> [duration] [reason] - ban a nick via WHOIS\r\n"
+      . "  .ban #chan <nick> [dur] [reason] - ban a nick (WHOIS lookup)\r\n"
       . "  .bans #chan         - list active channel bans\r\n"
       . "  .unban #chan <mask|id> - remove an active ban\r\n"
       . "  .topic #chan [text] - show or change channel topic\r\n"
@@ -1651,6 +1665,74 @@ sub _cmd_bans {
     }
 }
 
+
+
+# ---------------------------------------------------------------------------
+# .ban #chan <nick> [duration] [reason]
+#
+# Bans a connected nick from a channel via Partyline.
+# Sends a WHOIS to the IRC server to get the real hostmask, then the
+# partylineBan callback in on_message_RPL_WHOISUSER performs the actual ban.
+# Duration formats: 10m 2h 3d 1w perm/permanent (default: permanent)
+# ---------------------------------------------------------------------------
+sub _cmd_ban {
+    my ($self, $stream, $id, $chan, $nick_target, @rest) = @_;
+
+    my $bot    = $self->{bot};
+    my $actor  = $self->{users}{$id}{login} // 'unknown';
+
+    unless ($bot->{irc} && $bot->{irc}->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    unless ($bot->{channel_ban}) {
+        $stream->write("ChannelBan module not available.\r\n");
+        return;
+    }
+
+    unless (defined $chan && $chan =~ /^#/ && defined $nick_target && $nick_target ne '') {
+        $stream->write("Usage: .ban #channel <nick> [duration] [reason]\r\n");
+        $stream->write("Durations: 10m 2h 3d 1w perm (default: permanent)\r\n");
+        return;
+    }
+
+    # Parse optional duration (first word of @rest if it looks like a duration)
+    my ($duration_secs, $dur_label, $reason);
+    if (@rest && $bot->{channel_ban}->looks_like_duration($rest[0])) {
+        my $dur_str = shift @rest;
+        my ($secs, $label, $err) = $bot->{channel_ban}->parse_duration($dur_str);
+        if ($err) {
+            $stream->write("Invalid duration: $err\r\n");
+            return;
+        }
+        ($duration_secs, $dur_label) = ($secs, $label);
+    } else {
+        ($duration_secs, $dur_label) = (0, 'permanent');
+    }
+    $reason = join(' ', @rest) // '';
+
+    # Store context for the async WHOIS callback
+    # Guard against concurrent .ban calls overwriting WHOIS_VARS.
+    # Store a unique token; the callback checks it matches before proceeding.
+    my $ban_token = "partylineBan:${id}:" . time();
+    %{ $bot->{WHOIS_VARS} } = (
+        nick      => $nick_target,
+        sub       => 'partylineBan',
+        token     => $ban_token,
+        caller    => $id,           # fd of the Partyline session
+        channel   => $chan,
+        duration  => $duration_secs,
+        dur_label => $dur_label,
+        reason    => $reason,
+        actor     => $actor,
+        ts        => time,
+    );
+
+    $bot->{irc}->send_message('WHOIS', undef, $nick_target);
+    $bot->{logger}->log(2, "Partyline: $actor requested ban on $nick_target in $chan");
+    $stream->write("WHOIS sent for $nick_target, ban will be applied on reply...\r\n");
+}
 
 # ---------------------------------------------------------------------------
 # .unban #chan <mask|ban_id>  - remove an active ban (Master+)

@@ -947,12 +947,8 @@ sub mbSeen_ctx {
         return;
     }
 
-    my $targetNick = shift @args;
+    my $targetNick = lc(shift @args);  # normalize for USER_SEEN PK lookup
 
-    # Channel context:
-    # - If caller gave a #channel as next arg => use it for part checks
-    # - Else if command issued in a channel => use ctx->channel
-    # - Else (private) => no channel part check unless provided
     my $chan_for_part;
     if (@args && defined $args[0] && $args[0] =~ /^#/) {
         $chan_for_part = shift @args;
@@ -961,98 +957,130 @@ sub mbSeen_ctx {
         $chan_for_part = ($cc =~ /^#/) ? $cc : undef;
     }
 
-    # Output destination
     my $is_private = !defined($ctx->channel) || $ctx->channel eq '';
-    my $dest_chan  = $ctx->channel; # only used when not private
+    my $dest_chan  = $ctx->channel;
 
-    # Resolve id_channel if we want a part check
-    my $id_channel = 0;
-    if (defined $chan_for_part && $chan_for_part =~ /^#/) {
-        my $channel_obj = $self->{channels}{$chan_for_part} || $self->{channels}{lc($chan_for_part)};
-        $id_channel = eval { $channel_obj->get_id } || 0;
-        # If channel not known in-memory, we just skip the part check (no noisy SQL)
-        $id_channel = 0 unless $id_channel;
-    }
-
-    # --- Latest QUIT (global) ---
-    my $quit;
-    my $sql_quit = <<'SQL';
-SELECT ts, UNIX_TIMESTAMP(ts) AS uts, userhost, publictext
-FROM CHANNEL_LOG
-WHERE nick = ? AND event_type = 'quit'
-ORDER BY ts DESC
-LIMIT 1
-SQL
-
-    my $sth_quit = $self->{dbh}->prepare($sql_quit);
-    if ($sth_quit && $sth_quit->execute($targetNick)) {
-        if (my $r = $sth_quit->fetchrow_hashref()) {
-            $quit = {
-                ts   => $r->{ts},
-                uts  => $r->{uts}  // 0,
-                host => $r->{userhost}   // '',
-                text => $r->{publictext} // '',
-            };
-        }
-    } else {
-        $self->{logger}->log(1, "mbSeen_ctx() SQL quit error: $DBI::errstr");
-    }
-    $sth_quit->finish if $sth_quit;
-
-    # --- Latest PART (channel-scoped, only if we have an id_channel) ---
-    my $part;
-    if ($id_channel) {
-        my $sql_part = <<'SQL';
-SELECT ts, UNIX_TIMESTAMP(ts) AS uts, userhost, publictext
-FROM CHANNEL_LOG
-WHERE id_channel = ? AND nick = ? AND event_type = 'part'
-ORDER BY ts DESC
-LIMIT 1
-SQL
-        my $sth_part = $self->{dbh}->prepare($sql_part);
-        if ($sth_part && $sth_part->execute($id_channel, $targetNick)) {
-            if (my $r = $sth_part->fetchrow_hashref()) {
-                $part = {
-                    ts   => $r->{ts},
-                    uts  => $r->{uts}  // 0,
-                    host => $r->{userhost}   // '',
-                    text => $r->{publictext} // '',
-                };
-            }
-        } else {
-            $self->{logger}->log(1, "mbSeen_ctx() SQL part error: $DBI::errstr");
-        }
-        $sth_part->finish if $sth_part;
-    }
-
-    # Helper: prettify host (strip "nick!")
     my $fmt_host = sub {
-        my ($h) = @_;
-        $h //= '';
-        $h =~ s/^.*!//;
-        return $h;
+        my ($h) = @_; $h //= ''; $h =~ s/^.*!//; return $h;
     };
 
-    # Decide what to report
-    my $msg;
-    my $quit_uts = $quit ? ($quit->{uts} // 0) : 0;
-    my $part_uts = $part ? ($part->{uts} // 0) : 0;
+    my $fmt_ago = sub {
+        my ($uts) = @_;
+        my $secs = time() - ($uts // 0);
+        return 'just now' if $secs < 5;
+        my $d = int($secs / 86400);
+        my $h = int(($secs % 86400) / 3600);
+        my $m = int(($secs % 3600) / 60);
+        my @p;
+        push @p, "${d}d" if $d;
+        push @p, "${h}h" if $h;
+        push @p, "${m}m" if $m || (!$d && !$h);
+        return join(' ', @p) . ' ago';
+    };
 
-    if (!$quit_uts && !$part_uts) {
+    # --- 1. Check USER_SEEN first (persisted, covers messages + joins) ---
+    my $seen_row;
+    {
+        my $sth = $self->{dbh}->prepare(
+            "SELECT nick, channel, userhost, event_type, last_msg, new_nick,
+                    seen_at, UNIX_TIMESTAMP(seen_at) AS seen_uts
+             FROM USER_SEEN WHERE nick = ? LIMIT 1"
+        );
+        if ($sth && $sth->execute($targetNick)) {
+            $seen_row = $sth->fetchrow_hashref;
+            $sth->finish;
+        }
+    }
+
+    # --- 2. Fallback: CHANNEL_LOG quit/part (older data pre-USER_SEEN) ---
+    my ($quit, $part);
+
+    unless ($seen_row) {
+        my $sth_quit = $self->{dbh}->prepare(
+            "SELECT ts, UNIX_TIMESTAMP(ts) AS uts, userhost, publictext
+             FROM CHANNEL_LOG
+             WHERE nick = ? AND event_type = 'quit'
+             ORDER BY ts DESC LIMIT 1"
+        );
+        if ($sth_quit && $sth_quit->execute($targetNick)) {
+            if (my $r = $sth_quit->fetchrow_hashref) {
+                $quit = { ts => $r->{ts}, uts => $r->{uts} // 0,
+                          host => $r->{userhost} // '', text => $r->{publictext} // '' };
+            }
+            $sth_quit->finish;
+        }
+
+        if (defined $chan_for_part) {
+            my $channel_obj = $self->{channels}{$chan_for_part}
+                           || $self->{channels}{lc($chan_for_part)};
+            my $id_channel = eval { $channel_obj->get_id } || 0;
+            if ($id_channel) {
+                my $sth_part = $self->{dbh}->prepare(
+                    "SELECT ts, UNIX_TIMESTAMP(ts) AS uts, userhost, publictext
+                     FROM CHANNEL_LOG
+                     WHERE id_channel = ? AND nick = ? AND event_type = 'part'
+                     ORDER BY ts DESC LIMIT 1"
+                );
+                if ($sth_part && $sth_part->execute($id_channel, $targetNick)) {
+                    if (my $r = $sth_part->fetchrow_hashref) {
+                        $part = { ts => $r->{ts}, uts => $r->{uts} // 0,
+                                  host => $r->{userhost} // '', text => $r->{publictext} // '' };
+                    }
+                    $sth_part->finish;
+                }
+            }
+        }
+    }
+
+    # --- Build message ---
+    my $msg;
+
+    if ($seen_row) {
+        my $host = $fmt_host->($seen_row->{userhost});
+        my $ago  = $fmt_ago->($seen_row->{seen_uts});
+        my $ev   = $seen_row->{event_type} // 'message';
+        my $chan  = $seen_row->{channel} // '';
+
+        if ($ev eq 'message') {
+            my $last = $seen_row->{last_msg} // '';
+            $msg = "$targetNick ($host) was last seen $ago"
+                 . ($chan ? " on $chan" : '')
+                 . ($last ? " saying: $last" : '');
+        } elsif ($ev eq 'join') {
+            $msg = "$targetNick ($host) was last seen joining $chan $ago";
+        } elsif ($ev eq 'part') {
+            my $last = $seen_row->{last_msg} // '';
+            $msg = "$targetNick ($host) was last seen parting $chan $ago"
+                 . ($last ? " ($last)" : '');
+        } elsif ($ev eq 'quit') {
+            my $last = $seen_row->{last_msg} // '';
+            $msg = "$targetNick ($host) was last seen quitting $ago"
+                 . ($last ? " ($last)" : '');
+        } elsif ($ev eq 'nick') {
+            my $nn = $seen_row->{new_nick} // '?';
+            $msg = "$targetNick ($host) was last seen $ago changing nick to $nn";
+        } else {
+            $msg = "$targetNick ($host) was last seen $ago ($ev)";
+        }
+    } elsif ($quit || $part) {
+        # Fallback CHANNEL_LOG path
+        my $quit_uts = $quit ? ($quit->{uts} // 0) : 0;
+        my $part_uts = $part ? ($part->{uts} // 0) : 0;
+        if ($part_uts && $part_uts >= $quit_uts && $chan_for_part) {
+            my $host = $fmt_host->($part->{host});
+            my $txt  = $part->{text} // '';
+            $msg = "$targetNick ($host) was last seen parting $chan_for_part : $part->{ts}"
+                 . ($txt ne '' ? " ($txt)" : '');
+        } else {
+            my $host = $fmt_host->($quit->{host});
+            my $txt  = $quit->{text} // '';
+            $msg = "$targetNick ($host) was last seen quitting : $quit->{ts}"
+                 . ($txt ne '' ? " ($txt)" : '');
+        }
+    } else {
         $msg = "I don't remember seeing nick $targetNick.";
     }
-    elsif ($part_uts && $part_uts >= $quit_uts && $chan_for_part) {
-        my $host = $fmt_host->($part->{host});
-        my $txt  = $part->{text} // '';
-        $msg = "$targetNick ($host) was last seen parting $chan_for_part : $part->{ts}" . ($txt ne '' ? " ($txt)" : "");
-    }
-    else {
-        my $host = $fmt_host->($quit->{host});
-        my $txt  = $quit->{text} // '';
-        $msg = "$targetNick ($host) was last seen quitting : $quit->{ts}" . ($txt ne '' ? " ($txt)" : "");
-    }
 
-    # Send output
     if ($is_private) {
         botNotice($self, $nick, $msg);
         logBot($self, $ctx->message, undef, "seen", $targetNick);

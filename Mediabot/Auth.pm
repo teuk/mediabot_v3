@@ -151,6 +151,10 @@ sub maybe_autologin {
 
     # Keep lightweight in-memory state in the auth object too
     $self->{logged_in}{$uid} = 1;
+    if ($self->{metrics} && $self->{metrics}->can('set')) {
+        $self->{metrics}->set('mediabot_auth_sessions_total',
+            scalar keys %{ $self->{sessions} });
+    }
     $self->{sessions}{lc $nick} = {
         id_user  => $uid,
         nickname => $nick,
@@ -212,6 +216,10 @@ sub logout {
         my $uid = $self->{sessions}{$nick_lc}{id_user};
         delete $self->{logged_in}{$uid} if defined $uid;
         delete $self->{sessions}{$nick_lc};
+    if ($self->{metrics} && $self->{metrics}->can('set')) {
+        $self->{metrics}->set('mediabot_auth_sessions_total',
+            scalar keys %{ $self->{sessions} });
+    }
         return 1;
     }
 

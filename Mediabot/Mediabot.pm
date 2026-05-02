@@ -1025,6 +1025,9 @@ sub joinChannels {
 sub mbCommandPublic {
     my ($self, $message, $sChannel, $sNick, $botNickTriggered, $sCommand, @tArgs) = @_;
 
+    # Per-nick flood protection — silently drop if flooding
+    return if checkNickFlood($self, $sNick);
+
     # Normalize command once
     my $cmd = lc $sCommand;
 
@@ -1279,6 +1282,9 @@ sub mbHandleNickTriggered {
 # Handle private commands (same as public but with channel = nick)
 sub mbCommandPrivate {
     my ($self, $message, $sNick, $sCommand, @tArgs) = @_;
+
+    # Per-nick flood protection — silently drop if flooding
+    return if checkNickFlood($self, $sNick);
 
     # Normalize command - q and Q are the same
     $sCommand = lc $sCommand;

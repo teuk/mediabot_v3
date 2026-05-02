@@ -289,84 +289,115 @@ sub mbQuoteView {
 }
                 
 sub mbQuoteSearch {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	unless (defined($tArgs[0]) && ($tArgs[0] ne "")) {
-		botNotice($self,$sNick,"q [search or s] text");
-	}
-	else {
-		my $MAXQUOTES = 50;
-		my $sQuoteText = join(" ",@tArgs);
-		my $sQuery = "SELECT QUOTES.* FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ?";
-		my $sth = $self->{dbh}->prepare($sQuery);
-		unless ($sth->execute($sChannel)) {
-			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-		}
-		else {
-			my $i = 0;
-			my $sQuotesIdFound;
-			my $sLastQuote;
-			my $ref;
-			my $id_quotes;
-			my $id_user;
-			my $ts;
-			while ($ref = $sth->fetchrow_hashref()) {
-				my $sQuote = $ref->{'quotetext'};
-				if ( $sQuote =~ /$sQuoteText/i ) {
-					$id_quotes = $ref->{'id_quotes'};
-					$id_user = $ref->{'id_user'};
-					$ts = $ref->{'ts'};
-					if ( $i == 0) {
-						$sQuotesIdFound .= "$id_quotes";
-					}
-					else {
-						$sQuotesIdFound .= "|$id_quotes";
-					}
-					$sLastQuote = $sQuote;
-					$i++;
-				}
-			}
-			if ( $i == 0) {
-				botPrivmsg($self,$sChannel,"No quote found matching \"$sQuoteText\" on $sChannel");
-			}
-			elsif ( $i <= $MAXQUOTES ) {
-					botPrivmsg($self,$sChannel,"$i quote(s) matching \"$sQuoteText\" on $sChannel : $sQuotesIdFound");
-					my $id_q = String::IRC->new($id_quotes)->bold;
-					my $sUserHandle = getUserhandle($self,$id_user);
-					$sUserHandle = ((defined($sUserHandle) && ($sUserHandle ne "")) ? $sUserHandle : "Unknown");
-					botPrivmsg($self,$sChannel,"Last on $ts by $sUserHandle (id : $id_q) $sLastQuote");
-			}
-			else {
-					botPrivmsg($self,$sChannel,"More than $MAXQUOTES quotes matching \"$sQuoteText\" found on $sChannel, please be more specific :)");
-			}
-			logBot($self,$message,$sChannel,"q search",@tArgs);
-		}
-		$sth->finish;
-	}
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    unless (defined($tArgs[0]) && $tArgs[0] ne '') {
+        botNotice($self, $sNick, "q [search or s] <text> [word2 ...]");
+        return;
+    }
+
+    my $MAXQUOTES = 50;
+
+    # B2: sanitize each word to prevent regex injection when echoing back.
+    # The SQL filter uses LIKE placeholders — no regex involved there.
+    my @words     = @tArgs;
+    my @safe_words = map { quotemeta($_) } @words;
+
+    # B1: filter in SQL with LIKE, one clause per word (AND logic).
+    # Each word is wrapped in % wildcards: "foo" -> "%foo%"
+    my $where_words = join(' AND ', map { 'quotetext LIKE ?' } @words);
+    my @binds_words = map { "%$_%" } @words;
+
+    my $sQuery = "SELECT q.id_quotes, q.quotetext, q.id_user, q.ts
+                  FROM QUOTES q
+                  JOIN CHANNEL c ON c.id_channel = q.id_channel
+                  WHERE c.name = ?
+                    AND $where_words
+                  ORDER BY q.id_quotes DESC
+                  LIMIT ?";
+
+    my $sth = $self->{dbh}->prepare($sQuery);
+    unless ($sth && $sth->execute($sChannel, @binds_words, $MAXQUOTES + 1)) {
+        $self->{logger}->log(1, "mbQuoteSearch SQL error: $DBI::errstr");
+        botNotice($self, $sNick, "Database error during search.");
+        return;
+    }
+
+    my @rows;
+    while (my $ref = $sth->fetchrow_hashref) {
+        push @rows, $ref;
+    }
+    $sth->finish;
+
+    my $display_text = join(' ', @words);
+
+    if (!@rows) {
+        botPrivmsg($self, $sChannel, "No quote found matching \"$display_text\" on $sChannel");
+    } elsif (@rows > $MAXQUOTES) {
+        botPrivmsg($self, $sChannel,
+            "More than $MAXQUOTES quotes matching \"$display_text\" on $sChannel — please be more specific :)");
+    } else {
+        my $count = scalar @rows;
+        my $id_list = join('|', map { $_->{id_quotes} } @rows);
+        botPrivmsg($self, $sChannel,
+            "$count quote(s) matching \"$display_text\" on $sChannel : $id_list");
+
+        # Show the most recent match in full
+        my $last   = $rows[0];
+        my $id_q   = String::IRC->new($last->{id_quotes})->bold;
+        my $handle = getUserhandle($self, $last->{id_user}) || 'Unknown';
+        botPrivmsg($self, $sChannel,
+            "Last on $last->{ts} by $handle (id : $id_q) $last->{quotetext}");
+    }
+
+    logBot($self, $message, $sChannel, "q search", @tArgs);
 }
 
 sub mbQuoteRand {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my $sQuery = "SELECT QUOTES.id_quotes, QUOTES.quotetext, QUOTES.id_user FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? ORDER BY RAND() LIMIT 1";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $id_quotes = $ref->{'id_quotes'};
-			my $sQuoteText = $ref->{'quotetext'};
-			my $id_user = $ref->{'id_user'};
-			my $sUserhandle = getUserhandle($self,$id_user);
-			$sUserhandle = (defined($sUserhandle) && ($sUserhandle ne "") ? $sUserhandle : "Unknown");
-			my $id_q = String::IRC->new($id_quotes)->bold;
-			botPrivmsg($self,$sChannel,"($sUserhandle) [id: $id_q] $sQuoteText");
-		}
-		else {
-			botPrivmsg($self,$sChannel,"Quote database is empty for $sChannel");
-		}
-		logBot($self,$message,$sChannel,"q random",@tArgs);
-	}
-	$sth->finish;
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    # A4: avoid ORDER BY RAND() fullscan — count then pick a random offset.
+    my $sth_count = $self->{dbh}->prepare(
+        "SELECT COUNT(*) FROM QUOTES q
+         JOIN CHANNEL c ON c.id_channel = q.id_channel
+         WHERE c.name = ?"
+    );
+    unless ($sth_count && $sth_count->execute($sChannel)) {
+        $self->{logger}->log(1, "mbQuoteRand count SQL error: $DBI::errstr");
+        return;
+    }
+    my ($count) = $sth_count->fetchrow_array;
+    $sth_count->finish;
+
+    unless ($count && $count > 0) {
+        botPrivmsg($self, $sChannel, "Quote database is empty for $sChannel");
+        logBot($self, $message, $sChannel, "q random", @tArgs);
+        return;
+    }
+
+    my $offset = int(rand($count));
+
+    my $sth = $self->{dbh}->prepare(
+        "SELECT q.id_quotes, q.quotetext, q.id_user
+         FROM QUOTES q
+         JOIN CHANNEL c ON c.id_channel = q.id_channel
+         WHERE c.name = ?
+         LIMIT 1 OFFSET ?"
+    );
+    unless ($sth && $sth->execute($sChannel, $offset)) {
+        $self->{logger}->log(1, "mbQuoteRand SQL error: $DBI::errstr");
+        return;
+    }
+
+    if (my $ref = $sth->fetchrow_hashref) {
+        my $id_q      = String::IRC->new($ref->{id_quotes})->bold;
+        my $handle    = getUserhandle($self, $ref->{id_user}) || 'Unknown';
+        botPrivmsg($self, $sChannel, "($handle) [id: $id_q] $ref->{quotetext}");
+    } else {
+        botPrivmsg($self, $sChannel, "Quote database is empty for $sChannel");
+    }
+    $sth->finish;
+    logBot($self, $message, $sChannel, "q random", @tArgs);
 }
 
 sub mbQuoteStats {

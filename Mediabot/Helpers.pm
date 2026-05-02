@@ -49,6 +49,7 @@ our @EXPORT = qw(
     getVersion
     make_password_hash
     checkAntiFlood
+    checkNickFlood
     getIdChannelSet
     getIdChansetList
     evalAction
@@ -59,6 +60,7 @@ our @EXPORT = qw(
     mbDbCheckNickHostname_ctx
     sethChannelsNicksOnChan
     gethChannelNicks
+    updateUserSeen
     userAuthNick_ctx
     getWhoisVar
     gethChannelsNicksEndOnChan
@@ -995,6 +997,38 @@ sub versionCheck {
 }
 
 # 🧙‍♂️ Handle private commands with centralized dispatching and full command set.
+
+# ---------------------------------------------------------------------------
+# checkNickFlood($self, $nick) — per-nick rate limit
+# Max 5 commands per 5 seconds, independent of channel AntiFlood.
+# Returns 1 if the nick is flooding (caller should silently drop), 0 if ok.
+# ---------------------------------------------------------------------------
+sub checkNickFlood {
+    my ($self, $nick) = @_;
+    return 0 unless defined $nick && $nick ne '';
+
+    my $now     = time();
+    my $window  = 5;    # seconds
+    my $max_cmd = 5;    # commands per window
+
+    my $state = $self->{_nick_flood}{$nick} //= { ts => $now, count => 0 };
+
+    if ($now - $state->{ts} >= $window) {
+        # New window: reset
+        $state->{ts}    = $now;
+        $state->{count} = 1;
+        return 0;
+    }
+
+    $state->{count}++;
+    if ($state->{count} > $max_cmd) {
+        $self->{logger}->log(3, "NickFlood: $nick exceeded $max_cmd cmds in ${window}s");
+        return 1;  # flooding
+    }
+
+    return 0;
+}
+
 sub checkAntiFlood {
 	my ($self, $sChannel) = @_;
 
@@ -1665,6 +1699,51 @@ sub sethChannelsNicksOnChan {
 	%{$self->{hChannelsNicks}} = %hChannelsNicks;
 }
 
+
+
+# ---------------------------------------------------------------------------
+# updateUserSeen($self, %args)
+# UPSERT USER_SEEN for a nick. One row per nick (PK = nick).
+# Safe to call from any IRC event handler — errors are logged silently.
+# ---------------------------------------------------------------------------
+sub updateUserSeen {
+    my ($self, %args) = @_;
+
+    my $nick       = lc($args{nick}   // return);
+    my $channel    = $args{channel}    // '';
+    my $userhost   = $args{userhost}   // '';
+    my $event_type = $args{event_type} // 'message';
+    my $last_msg   = $args{last_msg};
+    my $new_nick   = $args{new_nick};
+
+    # Trim to column sizes
+    $nick     = substr($nick,     0,  64) if length($nick)     >  64;
+    $channel  = substr($channel,  0,  64) if length($channel)  >  64;
+    $userhost = substr($userhost, 0, 128) if length($userhost) > 128;
+    $last_msg = substr($last_msg, 0, 512)
+        if defined $last_msg && length($last_msg) > 512;
+    $new_nick = substr($new_nick, 0,  64)
+        if defined $new_nick && length($new_nick) > 64;
+
+    my $dbh = $self->{dbh} or return;
+
+    my $sth = $dbh->prepare(q{
+        INSERT INTO USER_SEEN
+            (nick, channel, userhost, event_type, last_msg, new_nick, seen_at)
+        VALUES (?, ?, ?, ?, ?, ?, NOW())
+        ON DUPLICATE KEY UPDATE
+            channel    = VALUES(channel),
+            userhost   = VALUES(userhost),
+            event_type = VALUES(event_type),
+            last_msg   = VALUES(last_msg),
+            new_nick   = VALUES(new_nick),
+            seen_at    = NOW()
+    }) or return;
+
+    eval { $sth->execute($nick, $channel, $userhost, $event_type, $last_msg, $new_nick) };
+    $self->{logger}->log(3, "updateUserSeen: $@") if $@ && $self->{logger};
+    $sth->finish;
+}
 
 sub gethChannelNicks {
 	my $self = shift;

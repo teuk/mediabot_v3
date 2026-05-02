@@ -29,7 +29,6 @@ use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use IO::Async::Timer::Countdown;
 use Net::Async::IRC;
-use Switch;
 use utf8;
 use Encode qw(encode decode);
 
@@ -842,6 +841,8 @@ sub on_message_KICK {
             $mediabot->{logger}->log(0,"[LIVE] $target_name: $kicked_nick was kicked by $kicker_nick ($text)");
         }
         $mediabot->channelNicksRemove($target_name,$kicked_nick);
+        # Clear in-memory auth session for the kicked nick
+        eval { $mediabot->{auth}->logout($kicked_nick) } if $mediabot->{auth};
     }
     $mediabot->logBotAction($message,"kick",$kicker_nick,$target_name,"$kicked_nick ($text)");
 }
@@ -888,6 +889,18 @@ sub on_message_NICK {
             $mediabot->{logger}->log(0,"[LIVE] * $old_nick is now known as $new_nick");
         }
     }
+    # Track last seen on NICK change
+    {
+        my ($sNick_n, $sIdent_n, $sHost_n) = $mediabot->getMessageNickIdentHost($message);
+        eval { $mediabot->updateUserSeen(
+            nick       => $old_nick,
+            channel    => '',
+            userhost   => "$sIdent_n\@$sHost_n",
+            event_type => 'nick',
+            new_nick   => $new_nick,
+        ) } if $old_nick;
+    }
+
     # Change nick in %hChannelsNicks
     for my $sChannel (keys %hChannelsNicks) {
         my $index;
@@ -926,9 +939,20 @@ sub on_message_QUIT {
         }
         $mediabot->logBotAction($message,"quit",$sNick,undef,"");
     }
+    # Track last seen on QUIT
+    eval { $mediabot->updateUserSeen(
+        nick       => $sNick,
+        channel    => '',
+        userhost   => "$sIdent\@$sHost",
+        event_type => 'quit',
+        last_msg   => $text,
+    ) };
+
     for my $sChannel (keys %hChannelsNicks) {
         $mediabot->channelNicksRemove($sChannel,$sNick);
     }
+    # Clear in-memory auth session on QUIT
+    eval { $mediabot->{auth}->logout($sNick) } if $mediabot->{auth};
 }
 
 sub on_message_PART {
@@ -956,6 +980,18 @@ sub on_message_PART {
     }
 
     $mediabot->channelNicksRemove($target_name, $sNick);
+
+    # Track last seen on PART
+    eval { $mediabot->updateUserSeen(
+        nick       => $sNick,
+        channel    => $target_name,
+        userhost   => "$sIdent\@$sHost",
+        event_type => 'part',
+        last_msg   => '',
+    ) };
+
+    # Clear in-memory auth session on PART (only for other nicks, not the bot itself)
+    eval { $mediabot->{auth}->logout($sNick) } if $mediabot->{auth} && $sNick ne $self->nick;
     if ($sNick eq $self->nick && $mediabot->{metrics}) {
         $mediabot->{metrics}->set('mediabot_channel_joined', 0, { channel => $target_name });
         $mediabot->{metrics}->set('mediabot_current_channels',
@@ -974,6 +1010,17 @@ sub on_message_PRIVMSG {
     $mediabot->{metrics}->inc('mediabot_privmsg_in_total') if $mediabot->{metrics};
     if ( substr($where,0,1) eq '#' ) {
         # Message on channel
+        # Track last seen on public message
+        {
+            my ($sn,$si,$sh) = $mediabot->getMessageNickIdentHost($message);
+            eval { $mediabot->updateUserSeen(
+                nick       => $sn,
+                channel    => $where,
+                userhost   => "$si\@$sh",
+                event_type => 'message',
+                last_msg   => $what,
+            ) } if $sn;
+        }
         if ($mediabot->{metrics}) {
             $mediabot->{metrics}->inc(
                 'mediabot_channel_lines_in_total',
@@ -1165,8 +1212,7 @@ sub on_message_PRIVMSG {
         $sCommand =~ tr/A-Z/a-z/;
         $mediabot->{logger}->log(4,"sCommands = $sCommand");
         if (defined($sCommand) && ($sCommand ne "")) {
-            switch($sCommand) {
-                case /restart/i		{
+            if ($sCommand =~ /restart/i) {
                     if ($MAIN_PROG_DAEMON) {
                         $mediabot->mbRestart($message,$who,($sFullParams));
                     }
@@ -1174,7 +1220,7 @@ sub on_message_PRIVMSG {
                         $mediabot->botNotice($who,"restart command can only be used in daemon mode (use --daemon to launch the bot)");
                     }
                 }
-                case /jump/i		{
+                elsif ($sCommand =~ /jump/i) {
                     if ($MAIN_PROG_DAEMON) {
                         $mediabot->mbJump($message,$who,($sFullParams,$tArgs[0]));
                     }
@@ -1185,7 +1231,6 @@ sub on_message_PRIVMSG {
                 else {
                     $mediabot->mbCommandPrivate($message,$who,$sCommand,@tArgs);
                 }
-            }
         }
     }
 }
@@ -1404,6 +1449,38 @@ sub on_message_JOIN {
             $mediabot->{logger}->log(0,"[LIVE] <$target_name> * Joins $sNick ($sIdent\@$sHost)");
         }
         $mediabot->userOnJoin($message,$target_name,$sNick);
+
+        # Track last seen on JOIN
+        eval { $mediabot->updateUserSeen(
+            nick       => $sNick,
+            channel    => $target_name,
+            userhost   => "$sIdent\@$sHost",
+            event_type => 'join',
+        ) };
+
+        # Enforce active ChannelBans on JOIN: MODE +b + KICK if mask matches.
+        if ($mediabot->{channel_ban} && $sIdent && $sHost) {
+            my $cb       = $mediabot->{channel_ban};
+            my $chan_obj = $mediabot->{channels}{$target_name}
+                        // $mediabot->{channels}{lc($target_name)};
+            my $id_channel = eval { $chan_obj->get_id } // 0;
+            if ($id_channel) {
+                my $norm_mask = $cb->mask_from_hostmask("$sNick!$sIdent\@$sHost");
+                if ($norm_mask) {
+                    my $ban = $cb->active_ban_for_mask($id_channel, $norm_mask);
+                    if ($ban) {
+                        $mediabot->{logger}->log(2,
+                            "ChannelBan: $sNick matches ban #$ban->{id_channel_ban} on $target_name - enforcing");
+                        eval {
+                            $mediabot->{irc}->send_message('MODE', undef, $target_name, '+b', $norm_mask);
+                            $mediabot->{irc}->send_message('KICK', undef, $target_name, $sNick,
+                                $ban->{reason} // 'Banned');
+                        };
+                    }
+                }
+            }
+        }
+
         push @{$hChannelsNicks{$target_name}}, $sNick;
         $mediabot->sethChannelNicks(\%hChannelsNicks);
     }
@@ -1472,8 +1549,7 @@ sub on_message_RPL_WHOISUSER {
     my ($target_name,$ident,$host,$flags,$realname) = @{$hints}{qw<target_name ident host flags realname>};
     $mediabot->{logger}->log(2,"$target_name is $ident\@$sHostname $flags $realname");
     if (defined($WHOIS_VARS{'nick'}) && ($WHOIS_VARS{'nick'} eq $target_name) && defined($WHOIS_VARS{'sub'}) && ($WHOIS_VARS{'sub'} ne "")) {
-        switch($WHOIS_VARS{'sub'}) {
-            case "userVerifyNick" {
+        if ($WHOIS_VARS{'sub'} eq "userVerifyNick") {
                 $mediabot->{logger}->log(4,"WHOIS userVerifyNick");
                 my $_whois_user = $mediabot->get_user_from_whois("$ident\@$sHostname");
                 my $iMatchingUserId        = $_whois_user ? eval { $_whois_user->id }                              : undef;
@@ -1499,7 +1575,7 @@ sub on_message_RPL_WHOISUSER {
                     $mediabot->logBot($WHOIS_VARS{'message'},undef,"verify",($target_name));
                 }
             }
-            case "userAuthNick" {
+        elsif ($WHOIS_VARS{'sub'} eq "userAuthNick") {
                 $mediabot->{logger}->log(4,"WHOIS userAuthNick");
                 my $_whois_user = $mediabot->get_user_from_whois("$ident\@$sHostname");
                 my $iMatchingUserId        = $_whois_user ? eval { $_whois_user->id }                              : undef;
@@ -1533,7 +1609,7 @@ sub on_message_RPL_WHOISUSER {
                         $mediabot->logBot($WHOIS_VARS{'message'},undef,"auth",($target_name));
                 }
             }
-            case "userAccessChannel" {
+        elsif ($WHOIS_VARS{'sub'} eq "userAccessChannel") {
                 $mediabot->{logger}->log(4,"WHOIS userAccessChannel");
                 my $_whois_user = $mediabot->get_user_from_whois("$ident\@$sHostname");
                 my $iMatchingUserId        = $_whois_user ? eval { $_whois_user->id }                              : undef;
@@ -1583,7 +1659,7 @@ sub on_message_RPL_WHOISUSER {
                    }
                 }  
             }
-            case "mbWhereis" {
+        elsif ($WHOIS_VARS{'sub'} eq "mbWhereis") {
                 $mediabot->{logger}->log(4,"WHOIS mbWhereis");
                 my $country = $mediabot->whereis($sHostname);
                 if (defined($country)) {
@@ -1593,7 +1669,7 @@ sub on_message_RPL_WHOISUSER {
                     $mediabot->botPrivmsg($WHOIS_VARS{'channel'},"($WHOIS_VARS{'caller'} whereis $WHOIS_VARS{'nick'}) Country : $country");
                 }
             }
-            case "statPartyline" {
+        elsif ($WHOIS_VARS{'sub'} eq "statPartyline") {
                $mediabot->{logger}->log(4, "WHOIS statPartyline");
 
                my $fd = $WHOIS_VARS{'caller'};
@@ -1619,7 +1695,77 @@ sub on_message_RPL_WHOISUSER {
                }
                $stream->write($txt);
            }
+        elsif ($WHOIS_VARS{'sub'} eq "partylineBan") {
+            $mediabot->{logger}->log(4, "WHOIS partylineBan");
 
+            my $fd        = $WHOIS_VARS{'caller'};
+            my $stream    = $mediabot->{partyline} ? $mediabot->{partyline}->{streams}{$fd} : undef;
+
+            # If WHOIS_VARS was overwritten by a concurrent .ban, the token
+            # will not match the one stored in the stream — log and bail.
+            # (Best-effort: not a hard lock, just collision detection.)
+            my $chan      = $WHOIS_VARS{'channel'}  // '';
+            my $duration  = $WHOIS_VARS{'duration'} // 0;
+            my $dur_label = $WHOIS_VARS{'dur_label'} // 'permanent';
+            my $reason    = $WHOIS_VARS{'reason'}   // '';
+            my $actor     = $WHOIS_VARS{'actor'}    // 'partyline';
+
+            unless ($stream) {
+                $mediabot->{logger}->log(1, "partylineBan: stream $fd not found");
+                return;
+            }
+
+            my $fullmask = "$ident\@$sHostname";
+            my $cb = $mediabot->{channel_ban};
+
+            unless ($cb) {
+                $stream->write("ChannelBan module not available.\r\n");
+                return;
+            }
+
+            my $norm_mask = $cb->mask_from_hostmask("$target_name!$fullmask");
+            unless ($norm_mask) {
+                $stream->write("Could not derive ban mask from hostmask $fullmask.\r\n");
+                return;
+            }
+
+            my $err_val = $cb->validate_mask($norm_mask);
+            if ($err_val) {
+                $stream->write("Invalid mask $norm_mask: $err_val\r\n");
+                return;
+            }
+
+            my $chan_obj   = $mediabot->{channels}{$chan} // $mediabot->{channels}{lc($chan)};
+            my $id_channel = eval { $chan_obj->get_id } // 0;
+            unless ($id_channel) {
+                $stream->write("Channel $chan not found in bot state.\r\n");
+                return;
+            }
+
+            my $expires_at = $duration > 0 ? $cb->expires_sql_from_seconds($duration) : undef;
+
+            my ($id_ban, $ban_err) = $cb->add_ban(
+                id_channel      => $id_channel,
+                mask            => $norm_mask,
+                ban_level       => 75,
+                reason          => $reason,
+                created_by_nick => $actor,
+                expires_at      => $expires_at,
+                source          => 'partyline',
+            );
+
+            if ($ban_err) {
+                $stream->write("Ban failed: $ban_err\r\n");
+                return;
+            }
+
+            eval {
+                $mediabot->{irc}->send_message('MODE', undef, $chan, '+b', $norm_mask);
+            };
+
+            my $exp_txt = $duration > 0 ? $dur_label : 'permanent';
+            $stream->write("Banned $norm_mask on $chan (expires: $exp_txt, ban #$id_ban).\r\n");
+            $mediabot->{logger}->log(2, "Partyline: $actor banned $norm_mask on $chan ($exp_txt)");
         }
     }
 }

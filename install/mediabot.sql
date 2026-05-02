@@ -402,6 +402,25 @@ CREATE TABLE `USER` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
+-- USER_SEEN
+-- Tracks the last known activity per nick, persisted across restarts.
+-- One row per nick (PK). Updated by UPSERT on every tracked IRC event.
+-- ---------------------------------------------------------------------------
+CREATE TABLE `USER_SEEN` (
+  `nick`        VARCHAR(64)   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `channel`     VARCHAR(64)   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `userhost`    VARCHAR(128)  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `event_type`  ENUM('message','join','part','quit','nick') NOT NULL DEFAULT 'message',
+  `last_msg`    VARCHAR(512)  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `new_nick`    VARCHAR(64)   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `seen_at`     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`nick`),
+  KEY `idx_user_seen_seen_at` (`seen_at`),
+  KEY `idx_user_seen_channel` (`channel`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Last known activity for each nick - one row per nick';
+
+-- ---------------------------------------------------------------------------
 -- USER_CHANNEL
 -- ---------------------------------------------------------------------------
 CREATE TABLE `USER_CHANNEL` (

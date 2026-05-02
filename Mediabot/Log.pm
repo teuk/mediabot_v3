@@ -9,7 +9,8 @@ sub new {
 
     $self->{debug_level} = int($args{debug_level} // 0);  # valeur par défaut : 0
 
-    $self->{logfile}   = $args{logfile}  // undef;
+    $self->{logfile}      = $args{logfile}  // undef;
+    $self->{_write_count} = 0;   # throttle stat() calls in _maybe_rotate
     $self->{maxsize}   = $args{maxsize}  // 50 * 1024 * 1024; # 50 MB default
     $self->{max_files} = $args{max_files} // 5;               # keep 5 rotated files
 
@@ -36,6 +37,11 @@ sub _open_logfile {
 sub _maybe_rotate {
     my ($self) = @_;
     return unless $self->{logfile} && $self->{logfilehandle};
+
+    # Throttle: only call stat() every 100 writes to avoid syscall overhead
+    # on high-verbosity debug sessions.
+    $self->{_write_count} = ($self->{_write_count} // 0) + 1;
+    return if $self->{_write_count} % 100 != 0;
 
     my $size = -s $self->{logfile};
     return unless defined $size && $size >= $self->{maxsize};
