@@ -1700,10 +1700,34 @@ sub on_message_RPL_WHOISUSER {
 
             my $fd        = $WHOIS_VARS{'caller'};
             my $stream    = $mediabot->{partyline} ? $mediabot->{partyline}->{streams}{$fd} : undef;
+            my $session   = $mediabot->{partyline} ? $mediabot->{partyline}->{users}{$fd} : undef;
 
-            # If WHOIS_VARS was overwritten by a concurrent .ban, the token
-            # will not match the one stored in the stream — log and bail.
-            # (Best-effort: not a hard lock, just collision detection.)
+            # Guard against concurrent .ban calls overwriting WHOIS_VARS.
+            # Both the global WHOIS context and the Partyline session must carry
+            # the same one-shot token before we apply the ban.
+            my $whois_token   = $WHOIS_VARS{'token'} // '';
+            my $session_token = ($session && ref($session) eq 'HASH')
+                ? ($session->{pending_whois_token} // '')
+                : '';
+
+            unless ($whois_token ne '' && $session_token ne '' && $whois_token eq $session_token) {
+                $mediabot->{logger}->log(
+                    1,
+                    "partylineBan: WHOIS token mismatch for fd="
+                    . (defined($fd) ? $fd : 'undef')
+                    . " target=$target_name"
+                );
+
+                if ($stream) {
+                    $stream->write("WHOIS context changed before ban could be applied; please retry .ban.\r\n");
+                }
+
+                return;
+            }
+
+            delete $session->{pending_whois_token} if $session;
+            delete $session->{pending_whois_sub}   if $session;
+
             my $chan      = $WHOIS_VARS{'channel'}  // '';
             my $duration  = $WHOIS_VARS{'duration'} // 0;
             my $dur_label = $WHOIS_VARS{'dur_label'} // 'permanent';

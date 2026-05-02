@@ -298,15 +298,29 @@ sub mbQuoteSearch {
 
     my $MAXQUOTES = 50;
 
-    # B2: sanitize each word to prevent regex injection when echoing back.
-    # The SQL filter uses LIKE placeholders — no regex involved there.
-    my @words     = @tArgs;
-    my @safe_words = map { quotemeta($_) } @words;
+    # B1/B2: filter in SQL with LIKE placeholders, not Perl regexes.
+    # Escape LIKE wildcards so user input is treated literally:
+    #   %  -> \\%
+    #   _  -> \\_
+    #   \\ -> \\\\
+    my @words = grep { defined($_) && $_ ne '' } @tArgs;
 
-    # B1: filter in SQL with LIKE, one clause per word (AND logic).
-    # Each word is wrapped in % wildcards: "foo" -> "%foo%"
-    my $where_words = join(' AND ', map { 'quotetext LIKE ?' } @words);
-    my @binds_words = map { "%$_%" } @words;
+    unless (@words) {
+        botNotice($self, $sNick, "q [search or s] <text> [word2 ...]");
+        return;
+    }
+
+    my @like_words = map {
+        my $w = $_;
+        $w =~ s/\\/\\\\/g;
+        $w =~ s/%/\\%/g;
+        $w =~ s/_/\\_/g;
+        $w;
+    } @words;
+
+    # One LIKE clause per word (AND logic).
+    my $where_words = join(' AND ', map { q{q.quotetext LIKE ? ESCAPE '\\'} } @like_words);
+    my @binds_words = map { "%$_%" } @like_words;
 
     my $sQuery = "SELECT q.id_quotes, q.quotetext, q.id_user, q.ts
                   FROM QUOTES q
@@ -356,7 +370,7 @@ sub mbQuoteSearch {
 sub mbQuoteRand {
     my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-    # A4: avoid ORDER BY RAND() fullscan — count then pick a random offset.
+    # A4: avoid random SQL sort fullscan — count then pick a random offset.
     my $sth_count = $self->{dbh}->prepare(
         "SELECT COUNT(*) FROM QUOTES q
          JOIN CHANNEL c ON c.id_channel = q.id_channel

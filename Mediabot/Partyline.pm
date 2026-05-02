@@ -1715,7 +1715,13 @@ sub _cmd_ban {
     # Store context for the async WHOIS callback
     # Guard against concurrent .ban calls overwriting WHOIS_VARS.
     # Store a unique token; the callback checks it matches before proceeding.
-    my $ban_token = "partylineBan:${id}:" . time();
+    my $ban_token = "partylineBan:${id}:" . time() . ":" . int(rand(1_000_000));
+
+    # Keep the expected token on the Partyline session too.
+    # The async WHOIS callback must compare both sides before applying the ban.
+    $self->{users}{$id}{pending_whois_token} = $ban_token;
+    $self->{users}{$id}{pending_whois_sub}   = 'partylineBan';
+
     %{ $bot->{WHOIS_VARS} } = (
         nick      => $nick_target,
         sub       => 'partylineBan',

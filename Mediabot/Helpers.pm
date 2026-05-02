@@ -1008,10 +1008,24 @@ sub checkNickFlood {
     return 0 unless defined $nick && $nick ne '';
 
     my $now     = time();
-    my $window  = 5;    # seconds
-    my $max_cmd = 5;    # commands per window
+    my $window  = 5;     # seconds
+    my $max_cmd = 5;     # commands per window
+    my $ttl     = 60;    # cleanup stale nick flood states
 
-    my $state = $self->{_nick_flood}{$nick} //= { ts => $now, count => 0 };
+    my $nick_key = lc($nick);
+
+    $self->{_nick_flood} //= {};
+
+    # Cheap periodic cleanup, at most once per TTL.
+    if (!defined($self->{_nick_flood_last_cleanup}) || ($now - $self->{_nick_flood_last_cleanup}) >= $ttl) {
+        for my $k (keys %{ $self->{_nick_flood} }) {
+            my $ts = $self->{_nick_flood}{$k}{ts} // 0;
+            delete $self->{_nick_flood}{$k} if ($now - $ts) > $ttl;
+        }
+        $self->{_nick_flood_last_cleanup} = $now;
+    }
+
+    my $state = $self->{_nick_flood}{$nick_key} //= { ts => $now, count => 0 };
 
     if ($now - $state->{ts} >= $window) {
         # New window: reset
@@ -1022,7 +1036,7 @@ sub checkNickFlood {
 
     $state->{count}++;
     if ($state->{count} > $max_cmd) {
-        $self->{logger}->log(3, "NickFlood: $nick exceeded $max_cmd cmds in ${window}s");
+        $self->{logger}->log(3, "NickFlood: $nick_key exceeded $max_cmd cmds in ${window}s");
         return 1;  # flooding
     }
 

@@ -151,16 +151,14 @@ sub maybe_autologin {
 
     # Keep lightweight in-memory state in the auth object too
     $self->{logged_in}{$uid} = 1;
-    if ($self->{metrics} && $self->{metrics}->can('set')) {
-        $self->{metrics}->set('mediabot_auth_sessions_total',
-            scalar keys %{ $self->{sessions} });
-    }
     $self->{sessions}{lc $nick} = {
         id_user  => $uid,
         nickname => $nick,
         auth     => 1,
         hostmask => $fullmask,
     };
+
+    $self->_update_auth_session_metric();
 
     $self->_log(3, "AUTOLOGIN: success uid=$uid nick=$nick reason=$reason rows=$rows");
     return (1, $reason);
@@ -216,10 +214,7 @@ sub logout {
         my $uid = $self->{sessions}{$nick_lc}{id_user};
         delete $self->{logged_in}{$uid} if defined $uid;
         delete $self->{sessions}{$nick_lc};
-    if ($self->{metrics} && $self->{metrics}->can('set')) {
-        $self->{metrics}->set('mediabot_auth_sessions_total',
-            scalar keys %{ $self->{sessions} });
-    }
+        $self->_update_auth_session_metric();
         return 1;
     }
 
@@ -232,6 +227,8 @@ sub logout {
                 delete $self->{sessions}{$k};
             }
         }
+
+        $self->_update_auth_session_metric();
         return 1;
     }
 
@@ -242,6 +239,23 @@ sub logout {
 sub session_count {
     my ($self) = @_;
     return scalar keys %{ $self->{sessions} || {} };
+}
+
+# ------------------------------------------------------------------------------
+# Metrics helpers
+# ------------------------------------------------------------------------------
+
+sub _update_auth_session_metric {
+    my ($self) = @_;
+
+    return unless $self->{metrics} && $self->{metrics}->can('set');
+
+    $self->{metrics}->set(
+        'mediabot_auth_sessions_total',
+        scalar keys %{ $self->{sessions} || {} }
+    );
+
+    return 1;
 }
 
 # ------------------------------------------------------------------------------

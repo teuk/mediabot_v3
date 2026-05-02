@@ -44,6 +44,8 @@ sub strip_ctcp_delimiters {
 sub parse_ctcp_payload {
     my ($payload) = @_;
 
+    my $was_ctcp = (defined($payload) && $payload =~ /^\x01.*\x01$/s) ? 1 : 0;
+
     my $clean = strip_ctcp_delimiters($payload);
 
     return {
@@ -64,7 +66,7 @@ sub parse_ctcp_payload {
         if ($dcc->{type} ne 'invalid') {
             $dcc->{raw}     = $payload;
             $dcc->{payload} = $clean;
-            $dcc->{ctcp}    = 1;
+            $dcc->{ctcp}    = $was_ctcp;
             return $dcc;
         }
         # Bare /ctcp CHAT with no payload
@@ -85,7 +87,7 @@ sub parse_ctcp_payload {
         if ($dcc->{type} ne 'invalid') {
             $dcc->{raw}     = $payload;
             $dcc->{payload} = $clean;
-            $dcc->{ctcp}    = 1;
+            $dcc->{ctcp}    = $was_ctcp;
             return $dcc;
         }
     }
@@ -98,7 +100,7 @@ sub parse_ctcp_payload {
     if ($stripped->{type} ne 'invalid') {
         $stripped->{raw}     = $payload;
         $stripped->{payload} = $clean;
-        $stripped->{ctcp}    = 0;
+        $stripped->{ctcp}    = $was_ctcp;
         return $stripped;
     }
 

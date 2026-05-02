@@ -57,12 +57,14 @@ sub _maybe_rotate {
     }
     rename($base, "$base.1") if -f $base;
 
+    $self->{_write_count} = 0;
     $self->_open_logfile();
 }
 
 # Reopen log file (called on SIGHUP or .rehash)
 sub reopen_logfile {
     my ($self) = @_;
+    $self->{_write_count} = 0;
     $self->_open_logfile();
 }
 
