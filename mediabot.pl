@@ -414,7 +414,7 @@ $mediabot->setIrc($irc);
 
 my $sConnectionNick = $mediabot->getConnectionNick();
 my $sServerPass = $mediabot->getServerPass();
-my $sServerPassDisplay = ( $sServerPass eq "" ? "none defined" : $sServerPass );
+my $sServerPassDisplay = ( $sServerPass eq "" ? "none defined" : "configured (hidden)" );
 my $bNickTriggerCommand = $mediabot->getNickTrigger();
 $mediabot->{logger}->log(0,"Trying to connect to " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort() . " (pass : $sServerPassDisplay)");
 
@@ -1231,7 +1231,7 @@ sub on_message_ctcp_DCC {
     # ── TEMP DEBUG — dump all hints keys to find the right one ───────────────
     {
         my $who_dbg = $hints->{prefix_nick} // '?';
-        $mediabot->{logger}->log(0, "[CTCP_DCC_DEBUG] handler called from $who_dbg");
+        $mediabot->{logger}->log(4, "[CTCP_DCC_DEBUG] handler called from $who_dbg");
         for my $k (sort keys %{ $hints || {} }) {
             my $v = $hints->{$k} // 'undef';
             if (ref($v) eq 'ARRAY') {
@@ -1239,11 +1239,11 @@ sub on_message_ctcp_DCC {
             } elsif (ref($v)) {
                 $v = ref($v);
             }
-            $mediabot->{logger}->log(0, "[CTCP_DCC_DEBUG] hint $k=" . unpack('H*', "$v"));
+            $mediabot->{logger}->log(4, "[CTCP_DCC_DEBUG] hint $k=" . unpack('H*', "$v"));
         }
         # Also log the raw message string
         my $raw = eval { $message->as_string } // '';
-        $mediabot->{logger}->log(0, "[CTCP_DCC_DEBUG] raw_message_hex=" . unpack('H*', $raw));
+        $mediabot->{logger}->log(4, "[CTCP_DCC_DEBUG] raw_message_hex=" . unpack('H*', $raw));
     }
 
     my $who  = $hints->{prefix_nick}        // return;
@@ -1873,7 +1873,7 @@ sub reconnect {
     # Refresh connection-related variables from config
     $sConnectionNick     = $mediabot->getConnectionNick();
     $sServerPass         = $mediabot->getServerPass();
-    $sServerPassDisplay  = ( $sServerPass eq "" ? "none defined" : $sServerPass );
+    $sServerPassDisplay  = ( $sServerPass eq "" ? "none defined" : "configured (hidden)" );
     $bNickTriggerCommand = $mediabot->getNickTrigger();
 
     $mediabot->{logger}->log(0,"Trying to connect to " . $mediabot->getServerHostname() . ":" . $mediabot->getServerPort() . " (pass : $sServerPassDisplay)");
