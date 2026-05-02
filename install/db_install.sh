@@ -18,7 +18,8 @@ while getopts 'c:' opt; do
 done
 shift $((OPTIND-1))
 
-MYSQL_DB_CREATION_SCRIPT=mediabot.sql
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MYSQL_DB_CREATION_SCRIPT="${SCRIPT_DIR}/mediabot.sql"
 SCRIPT_LOGFILE=db_install.log
 
 # +-------------------------------------------------------------------------+
@@ -49,16 +50,20 @@ ts(){ date '+[%d/%m/%Y %H:%M:%S]'; }
 mysql_create_mediabot_db() {
     if [ "$CHECK_DB_EXISTENCE" == "$MYSQL_DB" ]; then
         message "Drop database $MYSQL_DB"
-        echo "DROP DATABASE IF EXISTS $MYSQL_DB" | mysql $MYSQL_PARAMS
+        printf "DROP DATABASE IF EXISTS `%s`;\n" "$MYSQL_DB" | mysql --default-character-set=utf8mb4 $MYSQL_PARAMS
         ok_failed $?
     fi
     message "Create database $MYSQL_DB"
-    echo "CREATE DATABASE $MYSQL_DB" | mysql $MYSQL_PARAMS
+    printf "CREATE DATABASE `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n" "$MYSQL_DB" | mysql --default-character-set=utf8mb4 $MYSQL_PARAMS
     ok_failed $?
 
     message "Create database structure"
-    if [ -f $MYSQL_DB_CREATION_SCRIPT ]; then
-        cat $MYSQL_DB_CREATION_SCRIPT | mysql $MYSQL_PARAMS $MYSQL_DB
+    if [ -f "$MYSQL_DB_CREATION_SCRIPT" ]; then
+        mysql --default-character-set=utf8mb4 $MYSQL_PARAMS "$MYSQL_DB" --show-warnings --execute="
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
+SET CHARACTER SET utf8mb4;
+SOURCE ${MYSQL_DB_CREATION_SCRIPT};
+"
         ok_failed $?
     else
         messageln "Could not find $MYSQL_DB_CREATION_SCRIPT"
@@ -89,6 +94,11 @@ MYSQL_DB=${MYSQL_DB:-$DEFAULT_DB}
 if [[ "$MYSQL_DB" == "mysql" ]]; then
     messageln "Mediabot db cannot be 'mysql'!"
     messageln "Exiting."
+    exit 1
+fi
+
+if [[ ! "$MYSQL_DB" =~ ^[A-Za-z0-9_]+$ ]]; then
+    messageln "Invalid database name '$MYSQL_DB'. Use only letters, numbers and underscore."
     exit 1
 fi
 
@@ -129,15 +139,15 @@ MYSQL_PARAMS="-u${MYSQL_USER}"
 [[ -n "$MYSQL_HOST" ]] && MYSQL_PARAMS+=" -h${MYSQL_HOST} -P${MYSQL_PORT}"
 [[ -n "$MYSQL_PASS" ]] && MYSQL_PARAMS+=" -p${MYSQL_PASS}"
 
-echo "MYSQL_PARAMS=${MYSQL_PARAMS}"
+messageln "MySQL root connection parameters prepared (password hidden)"
 
 # test connection
 message "Check connection to MySQL DB"
-echo exit | mysql ${MYSQL_PARAMS}
+echo exit | mysql --default-character-set=utf8mb4 ${MYSQL_PARAMS}
 ok_failed $?
 
 # check existence
-CHECK_DB_EXISTENCE=$(mysql ${MYSQL_PARAMS} --skip-column-names -e "SHOW DATABASES LIKE '$MYSQL_DB'")
+CHECK_DB_EXISTENCE=$(mysql --default-character-set=utf8mb4 ${MYSQL_PARAMS} --skip-column-names -e "SHOW DATABASES LIKE '$MYSQL_DB'")
 if [[ "$CHECK_DB_EXISTENCE" == "$MYSQL_DB" ]]; then
     messageln "Database $MYSQL_DB exists."
     message "Re-create it? (y/N) [N]: "
@@ -178,7 +188,7 @@ fi
 
 # ─── 1) CREATE (or ALTER) & GRANT & FLUSH in one shot ───────────────────
 messageln "Creating/updating '${MYSQL_DB_USER}'@'${AUTH_HOST}' and granting on ${MYSQL_DB}"
-mysql ${MYSQL_PARAMS} -e "
+mysql --default-character-set=utf8mb4 ${MYSQL_PARAMS} -e "
   CREATE USER IF NOT EXISTS '${MYSQL_DB_USER}'@'${AUTH_HOST}'
     IDENTIFIED BY '${MYSQL_DB_PASS}';
   ALTER USER '${MYSQL_DB_USER}'@'${AUTH_HOST}'
@@ -194,7 +204,7 @@ USER_MYSQL_PARAMS="-u${MYSQL_DB_USER} -p${MYSQL_DB_PASS}"
 [[ -n "$MYSQL_HOST" ]] && USER_MYSQL_PARAMS+=" -h${MYSQL_HOST} -P${MYSQL_PORT}"
 
 messageln "Verifying connection as ${MYSQL_DB_USER}…"
-if ! echo "SELECT 1;" | mysql ${USER_MYSQL_PARAMS} ${MYSQL_DB}; then
+if ! echo "SELECT 1;" | mysql --default-character-set=utf8mb4 ${USER_MYSQL_PARAMS} ${MYSQL_DB}; then
     ok_failed $? "User ${MYSQL_DB_USER} failed to connect"
     messageln "Dropping user '${MYSQL_DB_USER}'@'${AUTH_HOST}' due to verification failure"
     mysql ${MYSQL_PARAMS} -e "DROP USER '${MYSQL_DB_USER}'@'${AUTH_HOST}';"
@@ -203,7 +213,7 @@ fi
 ok_failed 0
 
 messageln "Database user creation completed."
-messageln "User '${MYSQL_DB_USER}'@'${AUTH_HOST}' created with password '${MYSQL_DB_PASS}'"
+messageln "User '${MYSQL_DB_USER}'@'${AUTH_HOST}' created/updated (password hidden)"
 
 
 
