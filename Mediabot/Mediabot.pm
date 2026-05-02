@@ -341,6 +341,13 @@ sub rehash_runtime_state {
     }
     push @done, 'logger';
 
+    # F4: update debug_level at runtime if logger supports it
+    my $new_level = $self->{conf}->get('main.MAIN_PROG_DEBUG') // 0;
+    if ($self->{logger} && $self->{logger}->can('set_level')) {
+        $self->{logger}->set_level(int($new_level));
+        $self->{logger}->log(2, "Rehash: debug_level updated to $new_level");
+    }
+
     unless ($self->rebuild_channel_cache()) {
         return;
     }

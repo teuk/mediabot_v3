@@ -9,13 +9,61 @@ sub new {
 
     $self->{debug_level} = int($args{debug_level} // 0);  # valeur par défaut : 0
 
-    if (defined $args{logfile}) {
-        open my $fh, '>>:utf8', $args{logfile} or die "Cannot open logfile $args{logfile}: $!";
-        $fh->autoflush(1);
-        $self->{logfilehandle} = $fh;
+    $self->{logfile}   = $args{logfile}  // undef;
+    $self->{maxsize}   = $args{maxsize}  // 50 * 1024 * 1024; # 50 MB default
+    $self->{max_files} = $args{max_files} // 5;               # keep 5 rotated files
+
+    if (defined $self->{logfile}) {
+        $self->_open_logfile();
     }
 
     return $self;
+}
+
+
+# Open (or reopen after rotation/rehash) the log file handle
+sub _open_logfile {
+    my ($self) = @_;
+    return unless $self->{logfile};
+    close($self->{logfilehandle}) if $self->{logfilehandle};
+    open my $fh, '>>:utf8', $self->{logfile}
+        or die "Cannot open logfile $self->{logfile}: $!";
+    $fh->autoflush(1);
+    $self->{logfilehandle} = $fh;
+}
+
+# Rotate log file when it exceeds maxsize bytes
+sub _maybe_rotate {
+    my ($self) = @_;
+    return unless $self->{logfile} && $self->{logfilehandle};
+
+    my $size = -s $self->{logfile};
+    return unless defined $size && $size >= $self->{maxsize};
+
+    # Rotate: rename .log -> .log.1 -> .log.2 ... (keep max_files)
+    my $base = $self->{logfile};
+    my $max  = $self->{max_files} // 5;
+
+    for my $i (reverse 1 .. $max - 1) {
+        my $src = "$base.$i";
+        my $dst = "$base." . ($i + 1);
+        rename($src, $dst) if -f $src;
+    }
+    rename($base, "$base.1") if -f $base;
+
+    $self->_open_logfile();
+}
+
+# Reopen log file (called on SIGHUP or .rehash)
+sub reopen_logfile {
+    my ($self) = @_;
+    $self->_open_logfile();
+}
+
+# Change debug level at runtime (used by .rehash)
+sub set_level {
+    my ($self, $level) = @_;
+    $self->{debug_level} = int($level // 0);
 }
 
 sub log {
@@ -62,8 +110,9 @@ sub log {
         print STDOUT $logline;
     }
 
-    # Write to logfile if enabled
+    # Write to logfile if enabled (rotate if needed)
     if (my $fh = $self->{logfilehandle}) {
+        $self->_maybe_rotate();
         print $fh $logline;
     }
 

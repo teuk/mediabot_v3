@@ -2,6 +2,7 @@ package Mediabot::Auth;
 use strict;
 use warnings;
 use Digest::SHA qw(sha1 sha1_hex);
+my $HAVE_BCRYPT = eval { require Crypt::Bcrypt; 1 } ? 1 : 0;
 use Scalar::Util qw(blessed);
 
 # ------------------------------------------------------------------------------
@@ -198,6 +199,43 @@ sub hostmask_matches {
     return (0, undef, undef, -1);
 }
 
+
+# logout($nick_or_uid) — remove in-memory session state on QUIT/PART/KICK
+# Call this from on_message_QUIT, on_message_PART, on_message_KICK handlers.
+sub logout {
+    my ($self, $nick_or_uid) = @_;
+    return unless defined $nick_or_uid;
+
+    # Try to clear by nick (lowercase)
+    my $nick_lc = lc($nick_or_uid);
+    if (exists $self->{sessions}{$nick_lc}) {
+        my $uid = $self->{sessions}{$nick_lc}{id_user};
+        delete $self->{logged_in}{$uid} if defined $uid;
+        delete $self->{sessions}{$nick_lc};
+        return 1;
+    }
+
+    # Try by numeric uid
+    if ($nick_or_uid =~ /^\d+$/) {
+        delete $self->{logged_in}{$nick_or_uid};
+        # Also sweep sessions hash for this uid
+        for my $k (keys %{ $self->{sessions} || {} }) {
+            if (($self->{sessions}{$k}{id_user} // '') == $nick_or_uid) {
+                delete $self->{sessions}{$k};
+            }
+        }
+        return 1;
+    }
+
+    return 0;
+}
+
+# session_count() — return number of in-memory authenticated sessions
+sub session_count {
+    my ($self) = @_;
+    return scalar keys %{ $self->{sessions} || {} };
+}
+
 # ------------------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------------------
@@ -356,6 +394,17 @@ sub _password_matches {
         my $hash1 = sha1_hex($clear);
         my $hash2 = sha1_hex(pack('H*',$hash1));
         return ($hash2 eq $stored ? 1 : 0, 'double_sha1_hex');
+    }
+
+    # BCrypt: $2b$, $2y$, $2a$ prefixes
+    if ($stored =~ /^\$2[aby]\$/) {
+        if ($HAVE_BCRYPT) {
+            my $ok = eval { Crypt::Bcrypt::bcrypt_check($clear, $stored) };
+            return $@ ? (0, 'bcrypt_check_error') : ($ok ? 1 : 0, 'bcrypt');
+        } else {
+            # Crypt::Bcrypt not installed — refuse rather than fall through
+            return (0, 'bcrypt_not_available');
+        }
     }
 
     # Fallback: compare plaintext (some historical rows)

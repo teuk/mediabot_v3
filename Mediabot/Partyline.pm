@@ -793,6 +793,7 @@ sub _close_session {
 
     delete $self->{users}{$id};
     delete $self->{streams}{$id};
+    delete $self->{"_eval_pending_$id"};  # clean up any pending .eval confirmation
 }
 
 
@@ -958,32 +959,6 @@ sub _handle_line {
     unless ($session->{authenticated}) {
         my $stage = $session->{auth_stage} || 'nick';
 
-        # ---- DCC CHAT auth stage: nick is pre-filled, only password needed --
-        if ($stage eq 'dcc_pass') {
-            my $login = $session->{pending_login} || '';
-
-            if ($login eq '') {
-                # Should never happen - nick is set by _init_dcc_session
-                $stream->write("Internal error: no nick set for DCC session.\r\n");
-                $stream->close_when_empty;
-                $self->_close_session($id);
-                return;
-            }
-
-            $self->_telnet_echo_on($stream);
-            $self->_do_login($stream, $id, $login, $line);
-
-            unless ($self->{users}{$id} && $self->{users}{$id}{authenticated}) {
-                # Wrong password - ask again
-                $self->{users}{$id}{auth_stage} = 'dcc_pass' if $self->{users}{$id};
-                if ($self->{streams}{$id}) {
-                    $stream->write("\r\nEnter your password.\r\n");
-                    $self->_telnet_echo_off($stream);
-                }
-            }
-            return;
-        }
-
         # Backward compatibility with the former syntax:
         # login <user> <password>
         if ($line =~ /^login\s+(\S+)\s+(\S+)$/i) {
@@ -1043,6 +1018,15 @@ sub _handle_line {
     }
 
     # ---- Authenticated : dispatch commands --------------------------------
+    # Record command in per-session history (max 10, skip .history itself)
+    if ($line =~ /^\./ && $line !~ /^\.history$/i) {
+        $self->{users}{$id}{history} //= [];
+        push @{ $self->{users}{$id}{history} }, $line;
+        if (scalar @{ $self->{users}{$id}{history} } > 10) {
+            shift @{ $self->{users}{$id}{history} };
+        }
+    }
+
     # Announce dot-commands to all other partyline users so every session
     # knows who triggered what, without needing to run .whom.
     if ($line =~ /^\./ && $line !~ /^\.quit$/i) {
@@ -1053,6 +1037,18 @@ sub _handle_line {
     if    ($line =~ /^\.ping$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.ping' }) if $self->{bot}->{metrics};
         $self->_cmd_ping($stream, $id)
+    }
+    elsif ($line =~ /^\.unban\s+(#\S+)\s+(\S+)$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.unban' }) if $self->{bot}->{metrics};
+        $self->_cmd_unban($stream, $id, $1, $2)
+    }
+    elsif ($line =~ /^\.topic\s+(#\S+)(?:\s+(.+))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.topic' }) if $self->{bot}->{metrics};
+        $self->_cmd_topic($stream, $id, $1, $2)
+    }
+    elsif ($line =~ /^\.history$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.history' }) if $self->{bot}->{metrics};
+        $self->_cmd_history($stream, $id)
     }
     elsif ($line =~ /^\.bans?\s+(#\S+)$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.bans' }) if $self->{bot}->{metrics};
@@ -1276,6 +1272,9 @@ sub _cmd_help {
       . "  .eval <perl>        - execute Perl in bot context (Owner, dangerous)\r\n"
       . "  .console [0-5|off]  - redirect bot log to this session\r\n"
       . "  .bans #chan         - list active channel bans\r\n"
+      . "  .unban #chan <mask|id> - remove an active ban\r\n"
+      . "  .topic #chan [text] - show or change channel topic\r\n"
+      . "  .history          - show last 10 commands this session\r\n"
       . "  .boot <handle>      - kick a user off the partyline (Owner)\r\n"
       . "  .motd [text|add <line>|clear]  - show/set/append/clear MOTD (Owner)\r\n"
       . "  .quit               - close this partyline session\r\n"
@@ -1652,6 +1651,131 @@ sub _cmd_bans {
     }
 }
 
+
+# ---------------------------------------------------------------------------
+# .unban #chan <mask|ban_id>  - remove an active ban (Master+)
+# ---------------------------------------------------------------------------
+sub _cmd_unban {
+    my ($self, $stream, $id, $chan, $target) = @_;
+
+    my $bot  = $self->{bot};
+    my $nick = $self->{users}{$id}{login} // 'unknown';
+
+    unless ($bot->{channel_ban} && $bot->{channel_ban}->can('mark_removed')) {
+        $stream->write("ChannelBan module not available.\r\n");
+        return;
+    }
+
+    unless (defined $chan && $chan =~ /^#/ && defined $target && $target ne '') {
+        $stream->write("Usage: .unban #channel <mask|ban_id>\r\n");
+        return;
+    }
+
+    my $dbh = $bot->{dbh};
+    my $sth = $dbh->prepare("SELECT id_channel FROM CHANNEL WHERE name = ? LIMIT 1");
+    unless ($sth && $sth->execute($chan)) {
+        $stream->write("DB error.\r\n");
+        return;
+    }
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+
+    unless ($row) {
+        $stream->write("Channel $chan not found in DB.\r\n");
+        return;
+    }
+
+    my $id_channel = $row->{id_channel};
+    my $level = $self->{users}{$id}{level};
+
+    # Resolve ban: by numeric id or by mask
+    my ($rows, $err, $mask_used);
+    if ($target =~ /^\d+$/) {
+        ($rows, $err) = $bot->{channel_ban}->mark_removed(
+            id_channel_ban => $target,
+            removed_by_nick => $nick,
+        );
+        $mask_used = "ban #$target";
+    } else {
+        ($rows, $err) = $bot->{channel_ban}->mark_removed(
+            id_channel => $id_channel,
+            mask       => $target,
+            removed_by_nick => $nick,
+        );
+        $mask_used = $target;
+    }
+
+    if ($err) {
+        $stream->write("Unban failed: $err\r\n");
+        return;
+    }
+
+    if (!$rows) {
+        $stream->write("No active ban found matching '$target' on $chan.\r\n");
+        return;
+    }
+
+    # Send MODE -b to IRC
+    eval {
+        $bot->{irc}->send_message('MODE', undef, $chan, '-b', $target)
+            if $target !~ /^\d+$/;
+    };
+
+    $bot->{logger}->log(2, "Partyline: $nick unbanned '$mask_used' on $chan");
+    $stream->write("Unbanned '$mask_used' on $chan.\r\n");
+    delete $self->{_stat_cache};   # invalidate .stat cache
+}
+
+# ---------------------------------------------------------------------------
+# .topic #chan [new topic]  - show or change channel topic (Master+)
+# ---------------------------------------------------------------------------
+sub _cmd_topic {
+    my ($self, $stream, $id, $chan, $topic) = @_;
+
+    my $bot  = $self->{bot};
+    my $nick = $self->{users}{$id}{login} // 'unknown';
+
+    unless ($bot->{irc} && $bot->{irc}->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    unless (defined $chan && $chan =~ /^#/) {
+        $stream->write("Usage: .topic #channel [new topic]\r\n");
+        return;
+    }
+
+    if (defined $topic && $topic ne '') {
+        # Set new topic
+        $bot->{irc}->send_message('TOPIC', undef, $chan, $topic);
+        $bot->{logger}->log(2, "Partyline: $nick set topic on $chan: $topic");
+        $stream->write("Topic set on $chan.\r\n");
+    } else {
+        # Request current topic via TOPIC (server will reply with 332)
+        $bot->{irc}->send_message('TOPIC', undef, $chan);
+        $stream->write("Topic request sent for $chan (check .console for server reply).\r\n");
+    }
+}
+
+# ---------------------------------------------------------------------------
+# .history  - show last 10 commands in this session
+# ---------------------------------------------------------------------------
+sub _cmd_history {
+    my ($self, $stream, $id) = @_;
+
+    my $hist = $self->{users}{$id}{history} // [];
+    unless (@$hist) {
+        $stream->write("No command history for this session.\r\n");
+        return;
+    }
+
+    $stream->write("Recent commands:\r\n");
+    my $i = 1;
+    for my $cmd (@$hist) {
+        $stream->write(sprintf("  %2d  %s\r\n", $i++, $cmd));
+    }
+}
+
 # .stat - for each known channel: joined?, nick count, owner, chansets
 # ---------------------------------------------------------------------------
 
@@ -1796,54 +1920,62 @@ sub _cmd_stat {
         return;
     }
 
+    # Batch-fetch owners and chansets in two queries instead of N×2.
+    # Results cached for 60 seconds to avoid hammering the DB on repeated .stat.
+    my $stat_cache_key = '_stat_cache';
+    my $stat_cache     = $self->{$stat_cache_key};
+    my %owners;
+    my %chansets;
+
+    if (!$stat_cache || (time() - ($stat_cache->{at} // 0)) > 60) {
+        # Owners: one query for all channels
+        my $sth_o = $dbh->prepare(
+            "SELECT uc.id_channel, u.nickname FROM USER u
+              JOIN USER_CHANNEL uc ON uc.id_user = u.id_user
+              WHERE uc.level = 500"
+        );
+        if ($sth_o && $sth_o->execute()) {
+            while (my $r = $sth_o->fetchrow_hashref) {
+                $owners{ $r->{id_channel} } //= $r->{nickname};
+            }
+            $sth_o->finish;
+        }
+
+        # Chansets: one query for all channels
+        my $sth_c = $dbh->prepare(
+            "SELECT cs.id_channel, cl.chanset FROM CHANSET_LIST cl
+              JOIN CHANNEL_SET cs ON cs.id_chanset_list = cl.id_chanset_list
+              ORDER BY cs.id_channel, cl.chanset"
+        );
+        if ($sth_c && $sth_c->execute()) {
+            while (my $r = $sth_c->fetchrow_hashref) {
+                $chansets{ $r->{id_channel} } //= '';
+                $chansets{ $r->{id_channel} } .= '+' . $r->{chanset} . ' ';
+            }
+            $sth_c->finish;
+        }
+
+        $self->{$stat_cache_key} = { at => time(), owners => \%owners, chansets => \%chansets };
+    } else {
+        %owners   = %{ $stat_cache->{owners}   // {} };
+        %chansets = %{ $stat_cache->{chansets} // {} };
+    }
+
     foreach my $chan_name (sort keys %$channels) {
         my $chan_obj   = $bot->{channels}{$chan_name};
         my $id_channel = eval { $chan_obj->get_id } // 0;
 
-        # --- joined? + nick count ---
         my @nicks      = $bot->gethChannelsNicksOnChan($chan_name);
         my $joined     = grep { lc($_) eq lc($bot_nick) } @nicks;
         my $nick_count = scalar @nicks;
         my $status     = $joined ? "joined" : "NOT joined";
 
-        # --- owner (USER_CHANNEL.level = 500) ---
-        my $owner = 'none';
-        if ($id_channel) {
-            my $sth = $dbh->prepare(
-                "SELECT u.nickname FROM USER u
-                 JOIN USER_CHANNEL uc ON uc.id_user = u.id_user
-                 WHERE uc.id_channel = ? AND uc.level = 500
-                 LIMIT 1"
-            );
-            if ($sth->execute($id_channel)) {
-                if (my $row = $sth->fetchrow_hashref) {
-                    $owner = $row->{nickname} if $row->{nickname};
-                }
-            }
-            $sth->finish;
-        }
-
-        # --- chansets ---
-        my $chansets = 'none';
-        if ($id_channel) {
-            my $sth = $dbh->prepare(
-                "SELECT cl.chanset FROM CHANSET_LIST cl
-                 JOIN CHANNEL_SET cs ON cs.id_chanset_list = cl.id_chanset_list
-                 WHERE cs.id_channel = ?
-                 ORDER BY cl.chanset"
-            );
-            if ($sth->execute($id_channel)) {
-                my @flags;
-                while (my $row = $sth->fetchrow_hashref) {
-                    push @flags, '+' . $row->{chanset} if $row->{chanset};
-                }
-                $chansets = join(' ', @flags) if @flags;
-            }
-            $sth->finish;
-        }
+        my $owner    = $owners{$id_channel}   // 'none';
+        my $chanset_str = $chansets{$id_channel} // 'none';
+        $chanset_str =~ s/\s+$//;
 
         $stream->write(sprintf("%-30s %-12s %-5d %-20s %s\r\n",
-            $chan_name, $status, $nick_count, $owner, $chansets));
+            $chan_name, $status, $nick_count, $owner, $chanset_str));
     }
 }
 
@@ -2081,9 +2213,13 @@ sub _cmd_eval {
 
     # One-step confirmation: check for pending eval
     my $pending_key = "_eval_pending_$id";
-    if (!$self->{$pending_key} || $self->{$pending_key}{code} ne $code) {
-        # First invocation: store and ask for confirmation
-        $self->{$pending_key} = { code => $code, at => time };
+    my $now_eval = time();
+    if (!$self->{$pending_key}
+        || $self->{$pending_key}{code} ne $code
+        || ($now_eval - ($self->{$pending_key}{at} // 0)) > 30)
+    {
+        # First invocation (or expired): store and ask for confirmation
+        $self->{$pending_key} = { code => $code, at => $now_eval };
         $stream->write("--- .eval confirmation required ---\r\n");
         $stream->write("Code: $code\r\n");
         $stream->write("Type the same .eval command again to execute.\r\n");

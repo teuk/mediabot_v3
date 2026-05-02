@@ -5,11 +5,12 @@ use warnings;
 use Config::Simple;
 
 sub new {
-    my ($class, $conf_ref, $file) = @_;
+    my ($class, $conf_ref, $file, %args) = @_;
     my $self = {
-        _conf => $conf_ref || {},
-        _file => $file,
-        _cfg  => undef,
+        _conf   => $conf_ref || {},
+        _file   => $file,
+        _cfg    => undef,
+        _logger => $args{logger} // undef,  # optional logger object
     };
 
     if ($file) {
@@ -27,7 +28,13 @@ sub get {
     # Warn at debug level 4 if the key doesn't exist in the conf
     # Helps diagnose missing configuration entries during development
     unless (exists $self->{_conf}{$key}) {
-        warn "Conf->get(): key '$key' not found in configuration\n" if $ENV{MEDIABOT_DEBUG_CONF};
+        if ($ENV{MEDIABOT_DEBUG_CONF}) {
+            if ($self->{_logger} && $self->{_logger}->can('log')) {
+                $self->{_logger}->log(4, "Conf->get(): key '$key' not found in configuration");
+            } else {
+                warn "Conf->get(): key '$key' not found in configuration\n";
+            }
+        }
     }
     return $self->{_conf}{$key};
 }
@@ -47,6 +54,12 @@ sub save {
 sub all {
     my ($self) = @_;
     return %{ $self->{_conf} };
+}
+
+# Attach a logger after construction (e.g. once Log object is available)
+sub set_logger {
+    my ($self, $logger) = @_;
+    $self->{_logger} = $logger;
 }
 
 1;

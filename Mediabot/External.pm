@@ -19,6 +19,7 @@ use HTML::Entities qw(decode_entities);
 use HTML::Entities '%entity2char';
 use IO::Socket::SSL;
 use HTTP::Tiny;
+use IO::Select;
 use String::IRC;
 use IPC::Open3;
 use Symbol qw(gensym);
@@ -489,6 +490,18 @@ sub displayWeather_ctx {
 
     # Save cache + reply
     $self->{_weather_cache}{$cache_key} = { ts => $now, text => $line };
+
+    # Evict cache entries older than ttl_stale to prevent unbounded growth.
+    # This runs lazily at write time rather than on a timer.
+    my $max_age = 900;  # 15 minutes (ttl_stale)
+    my $max_entries = 200;
+    my $cache_ref = $self->{_weather_cache};
+    if (scalar(keys %$cache_ref) > $max_entries) {
+        for my $k (keys %$cache_ref) {
+            delete $cache_ref->{$k}
+                if ($now - ($cache_ref->{$k}{ts} // 0)) > $max_age;
+        }
+    }
     botPrivmsg($self, $channel, $line);
     logBot($self, $ctx->message, $channel, "weather", $location);
 
@@ -616,19 +629,30 @@ sub _fetch_url_chromium_dumpdom {
     my $pid;
     my $stdout = '';
 
+    # NOTE: alarm()/SIGALRM is unsafe inside an IO::Async event loop — it can
+    # interrupt epoll_wait() mid-flight.  Use a watchdog waitpid() loop instead.
     my $ok = eval {
-        local $SIG{ALRM} = sub { die "ALARM\n" };
-        alarm $alarm_timeout;
-
         $pid = open3('/dev/null', my $out, $stderr, @cmd);
 
-        {
-            local $/;
-            $stdout = <$out> // '';
+        # Read with a non-blocking loop so we can enforce a wall-clock timeout
+        # without SIGALRM. Poll every 100ms, bail after $alarm_timeout seconds.
+        my $deadline = time() + $alarm_timeout;
+        my $sel = IO::Select->new($out);
+
+        while (1) {
+            my $remaining = $deadline - time();
+            last if $remaining <= 0;
+
+            if ($sel->can_read(0.1)) {
+                my $chunk;
+                my $n = sysread($out, $chunk, 65536);
+                last unless defined $n && $n > 0;
+                $stdout .= $chunk;
+            } elsif (time() >= $deadline) {
+                die "ALARM\n";
+            }
         }
         close($out);
-
-        alarm 0;
         1;
     };
 

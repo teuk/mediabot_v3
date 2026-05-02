@@ -147,8 +147,17 @@ sub render_prometheus {
 
     return "# Mediabot metrics disabled\n" unless $self->enabled;
 
+    # Cache the rendered output for 5 seconds to avoid redundant work on
+    # fast Prometheus scrape intervals or concurrent HTTP clients.
+    my $now = time();
+    if ($self->{_render_cache}
+        && ($now - ($self->{_render_cache_at} // 0)) < 5)
+    {
+        return $self->{_render_cache};
+    }
+
     # dynamic values refreshed at render time
-    $self->set('mediabot_uptime_seconds', time() - $self->{started});
+    $self->set('mediabot_uptime_seconds', $now - $self->{started});
 
     my @out;
 
@@ -174,7 +183,10 @@ sub render_prometheus {
         push @out, '';
     }
 
-    return join("\n", @out) . "\n";
+    my $rendered = join("\n", @out) . "\n";
+    $self->{_render_cache}    = $rendered;
+    $self->{_render_cache_at} = time();
+    return $rendered;
 }
 
 sub start_http_server {
