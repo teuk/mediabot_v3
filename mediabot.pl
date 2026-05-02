@@ -1186,29 +1186,6 @@ sub on_message_PRIVMSG {
             }
         }
 
-        # ── Eggdrop-style CTCP CHAT detection ────────────────────────────────
-        # Some IRC clients deliver:
-        #   /ctcp <botnick> CHAT
-        # as a private message payload "CHAT" after CTCP stripping.
-        if ($where !~ /^#/ && defined($what) && $what =~ /^CHAT\s*$/i) {
-            $mediabot->{logger}->log(2, "CTCP CHAT request from $who via private payload");
-            $mediabot->_handle_ctcp_chat_request($message, $who);
-            return undef;
-        }
-
-        # ── DCC CHAT detection ────────────────────────────────────────────────
-        # Net::Async::IRC strips \x01 and "DCC " before delivering to PRIVMSG.
-        # $what arrives as: "CHAT chat <ip_int> <port>" (active)
-        #                or "CHAT chat 0 0 <token>"     (passive)
-        # Only handle if sent directly to the bot (not a channel).
-        if ($where !~ /^#/ && defined($what) && $what =~ /^CHAT\s+chat\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s*$/i) {
-            my ($ip_int, $port, $token) = ($1, $2, $3);
-            $mediabot->{logger}->log(2, "DCC CHAT request from $who ip=$ip_int port=$port"
-                . (defined $token ? " token=$token" : ""));
-            $mediabot->_handle_dcc_chat_request($message, $who, $ip_int, $port, $token);
-            return undef;
-        }
-
         # Private message hide passwords
         unless ( $what =~ /^login|^register|^pass|^newpass|^ident/i) {
             if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
