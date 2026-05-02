@@ -23,7 +23,8 @@ use Mediabot::DB;
 use Mediabot::Channel;
 use Mediabot::Partyline;
 use Mediabot::ChannelBan;
-use Mediabot::DCC qw(parse_ctcp_payload parse_dcc_payload is_ctcp_chat is_dcc_chat);
+use Mediabot::DCC qw(parse_ctcp_payload parse_dcc_payload is_ctcp_chat is_dcc_chat
+                      is_dcc_active is_dcc_passive ip_int_to_ipv4);
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use IO::Async::Timer::Countdown;

@@ -56,7 +56,18 @@ sub parse_ctcp_payload {
     #   /ctcp <botnick> CHAT
     # delivered by some clients as:
     #   \x01CHAT\x01
-    if ($clean =~ /^CHAT$/i) {
+    # but some clients send the full DCC payload without the leading "DCC":
+    #   \x01CHAT chat <ip_int> <port>\x01
+    # Try parsing as DCC first, fall back to bare ctcp_chat.
+    if ($clean =~ /^CHAT(?:\s|$)/i) {
+        my $dcc = parse_dcc_chat_payload($clean);
+        if ($dcc->{type} ne 'invalid') {
+            $dcc->{raw}     = $payload;
+            $dcc->{payload} = $clean;
+            $dcc->{ctcp}    = 1;
+            return $dcc;
+        }
+        # Bare /ctcp CHAT with no payload
         return {
             type    => 'ctcp_chat',
             raw     => $payload,
@@ -136,8 +147,13 @@ sub parse_dcc_chat_payload {
 
     my ($ip_int, $port, $token) = ($1, $2, $3);
 
+    # Passive DCC CHAT: ip_int == 0 AND port == 0 (token is optional but
+    # usually present). A non-zero ip/port with a trailing token is NOT passive
+    # — it is a malformed or extended active offer; treat it as active.
     my $mode = 'active';
-    $mode = 'passive' if defined($token) || (defined($ip_int) && defined($port) && $ip_int == 0 && $port == 0);
+    if (defined($ip_int) && defined($port) && $ip_int == 0 && $port == 0) {
+        $mode = 'passive';
+    }
 
     return {
         type   => 'dcc_chat',

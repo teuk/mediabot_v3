@@ -16,6 +16,7 @@ use warnings;
 
 BEGIN {
     use FindBin qw($Bin);
+use File::Spec;
     unshift @INC, "$Bin/../lib";
     unshift @INC, "$Bin/../..";
 }
@@ -169,5 +170,27 @@ return sub {
 
         $assert->ok($r->{type} ne 'private_command',
             'regression: raw /dcc chat does not become private command dcc');
+    }
+
+    # -------------------------------------------------------------------------
+    # 5. on_message_ctcp_CHAT handler présent dans mediabot.pl
+    #    Protège contre la régression : si ce handler disparaît, les /ctcp CHAT
+    #    Eggdrop-style ne seront plus détectés.
+    # -------------------------------------------------------------------------
+    {
+        my $src_file = File::Spec->catfile($FindBin::Bin, '..', '..', 'mediabot.pl');
+        if (-f $src_file) {
+            open my $fh, '<', $src_file or die "Cannot read mediabot.pl: $!";
+            my $src = do { local $/; <$fh> };
+            close $fh;
+
+            $assert->ok($src =~ /on_message_ctcp_CHAT/,
+                'mediabot.pl : on_message_ctcp_CHAT enregistré dans le hash IRC');
+
+            $assert->ok($src =~ /sub on_message_ctcp_CHAT/,
+                'mediabot.pl : sub on_message_ctcp_CHAT définie');
+        } else {
+            $assert->ok(1, 'mediabot.pl not found at expected path - skip ctcp_CHAT check');
+        }
     }
 };

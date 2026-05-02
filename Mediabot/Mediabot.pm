@@ -1553,6 +1553,34 @@ sub process_expired_channel_bans {
     return $done;
 }
 
+
+# ---------------------------------------------------------------------------
+# _fetch_user_for_dcc($nick)
+#
+# Shared DB lookup for DCC CHAT validation.
+# Returns hashref {id_user, nickname, level, description} or undef.
+# ---------------------------------------------------------------------------
+sub _fetch_user_for_dcc {
+    my ($self, $nick) = @_;
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT u.id_user, u.nickname, ul.level, ul.description
+        FROM USER u
+        JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
+        WHERE u.nickname = ?
+        LIMIT 1
+    });
+
+    unless ($sth && $sth->execute($nick)) {
+        $self->{logger}->log(1, "DCC: DB error for nick '$nick' — " . ($DBI::errstr // 'unknown'));
+        return undef;
+    }
+
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+    return $row;
+}
+
 # ---------------------------------------------------------------------------
 # _handle_ctcp_chat_request($message, $nick)
 #
@@ -1573,24 +1601,10 @@ sub _handle_ctcp_chat_request {
         return;
     }
 
-    my $sth = $dbh->prepare(q{
-        SELECT u.id_user, u.nickname, ul.level, ul.description
-        FROM USER u
-        JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
-        WHERE u.nickname = ?
-        LIMIT 1
-    });
-
-    unless ($sth && $sth->execute($nick)) {
-        $logger->log(1, "CTCP CHAT from $nick: DB error - " . ($DBI::errstr // 'unknown'));
-        return;
-    }
-
-    my $row = $sth->fetchrow_hashref;
-    $sth->finish;
+    my $row = $self->_fetch_user_for_dcc($nick);
 
     unless ($row) {
-        $logger->log(2, "CTCP CHAT from $nick: unknown user - ignored");
+        $logger->log(2, "CTCP CHAT from $nick: unknown user or DB error - ignored");
         return;
     }
 
@@ -1607,7 +1621,7 @@ sub _handle_ctcp_chat_request {
         $nick, $row->{description}
     ));
 
-    $self->{partyline}->offer_dcc_chat($self, $nick);
+    $self->{partyline}->offer_dcc_chat($nick);
 }
 
 # ---------------------------------------------------------------------------
@@ -1641,24 +1655,10 @@ sub _handle_dcc_chat_request {
     }
 
     # ── Look up user in DB - must exist and have level <= 1 ─────────────────
-    my $sth = $dbh->prepare(q{
-        SELECT u.id_user, u.nickname, ul.level, ul.description
-        FROM USER u
-        JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
-        WHERE u.nickname = ?
-        LIMIT 1
-    });
-
-    unless ($sth && $sth->execute($nick)) {
-        $logger->log(1, "DCC CHAT from $nick: DB error - " . ($DBI::errstr // 'unknown'));
-        return;
-    }
-
-    my $row = $sth->fetchrow_hashref;
-    $sth->finish;
+    my $row = $self->_fetch_user_for_dcc($nick);
 
     unless ($row) {
-        $logger->log(2, "DCC CHAT from $nick: unknown user - ignored");
+        $logger->log(2, "DCC CHAT from $nick: unknown user or DB error - ignored");
         return;
     }
 

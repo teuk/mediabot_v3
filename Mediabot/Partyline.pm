@@ -23,8 +23,6 @@ package Mediabot::Partyline;
 
 use strict;
 use warnings;
-use POSIX qw(setsid);
-use File::Basename qw(dirname);
 use IO::Async::Listener;
 use IO::Async::Stream;
 use IO::Async::Timer::Countdown;
@@ -41,12 +39,13 @@ sub new {
     my ($class, %args) = @_;
 
     my $self = {
-        bot     => $args{bot},              # Mediabot object
-        loop    => $args{loop},             # IO::Async::Loop
-        port    => $args{port} || 23456,
-        streams => {},                      # fd => IO::Async::Stream
-        users   => {},                      # fd => { authenticated, login, level, level_desc }
-        motd    => $args{motd} || [],       # MOTD lines shown after login
+        bot        => $args{bot},           # Mediabot object
+        loop       => $args{loop},          # IO::Async::Loop
+        port       => $args{port} || 23456,
+        streams    => {},                   # fd => IO::Async::Stream
+        users      => {},                   # fd => { authenticated, login, level, level_desc }
+        motd       => $args{motd} || [],    # MOTD lines shown after login
+        dcc_offers => {},                   # key => pending DCC offer hash
     };
 
     bless $self, $class;
@@ -332,9 +331,9 @@ sub _dcc_offers_snapshot {
 #   4. On connection: init a DCC Partyline session
 # ---------------------------------------------------------------------------
 sub offer_dcc_chat {
-    my ($self, $bot, $nick) = @_;
+    my ($self, $nick) = @_;
 
-    $bot //= $self->{bot};
+    my $bot = $self->{bot};
 
     my $loop   = $self->{loop};
     my $logger = $bot->{logger};
@@ -410,7 +409,9 @@ sub offer_dcc_chat {
             # \001DCC CHAT chat <ip_int> <port>\001
             my $ctcp = "\001DCC CHAT chat $ip_int $listen_port\001";
 
-            $bot->botPrivmsg($nick, $ctcp);
+            # DCC CHAT offers must go via a raw PRIVMSG to avoid botPrivmsg()
+            # side effects (NoColors stripping, AntiFlood, Badword checks, LIVE log).
+            $bot->{irc}->send_message('PRIVMSG', undef, $nick, $ctcp);
 
             $logger->log(2, "CTCP CHAT: sent DCC CHAT offer to $nick ip_int=$ip_int port=$listen_port");
         },
@@ -521,8 +522,9 @@ sub accept_dcc_chat_passive {
             $logger->log(2, "DCC CHAT passive: listening on port $listen_port for $nick (token=$token)");
 
             # ── Send CTCP reply to client ─────────────────────────────────
-            my $ctcp = "DCC CHAT chat $ip_int $listen_port $token";
-            $bot->botPrivmsg($nick, $ctcp);
+            my $ctcp = "\001DCC CHAT chat $ip_int $listen_port $token\001";
+            # Raw PRIVMSG — bypass botPrivmsg() side effects for CTCP payloads.
+            $bot->{irc}->send_message('PRIVMSG', undef, $nick, $ctcp);
             $logger->log(2, "DCC CHAT passive: sent CTCP reply to $nick");
         },
 
@@ -549,8 +551,7 @@ sub accept_dcc_chat_passive {
 # _init_dcc_session($stream, $nick)
 #
 # Wire up a connected DCC CHAT stream as a Partyline session.
-# The nick is already known (from the CTCP request) so we skip the nick
-# prompt and go straight to password verification (stage 'dcc_pass').
+# Uses the standard nick → password flow (same as telnet).
 # A 60-second authentication timeout is enforced.
 # ---------------------------------------------------------------------------
 sub _init_dcc_session {
@@ -562,15 +563,15 @@ sub _init_dcc_session {
 
     $self->{users}{$id} = {
         authenticated  => 0,
-        login          => $nick,        # nick pre-filled from IRC identity
+        login          => '',
         level          => undef,
         level_desc     => '',
         rate_window    => time(),
         rate_count     => 0,
         login_failures => 0,
         console_level  => undef,
-        auth_stage     => 'dcc_pass',   # DCC-specific: skip nick prompt
-        pending_login  => $nick,
+        auth_stage     => 'nick',       # standard flow: nick then password
+        pending_login  => undef,
         is_dcc         => 1,
         peer_ip        => $peer_host,
         peer_host      => $self->_reverse_dns_timeout($peer_host, 2),
@@ -604,9 +605,9 @@ sub _init_dcc_session {
                 my $line = $1;
                 $line =~ s/\r$//;
 
-                # Mask password in logs
+                # Mask password in logs — mask on stage 'pass' (standard flow)
                 my $log_line = $line;
-                if (($self->{users}{$id}{auth_stage} // '') eq 'dcc_pass') {
+                if (($self->{users}{$id}{auth_stage} // '') eq 'pass') {
                     $log_line = '********';
                 }
                 else {
@@ -631,12 +632,12 @@ sub _init_dcc_session {
 
         on_closed => sub {
             $self->{bot}->{logger}->log(3, "DCC CHAT connection closed (fd=$id nick=$nick)");
-            my $authed_nick = ($self->{users}{$id} && $self->{users}{$id}{authenticated})
-                ? ($self->{users}{$id}{login} // '')
-                : '';
-            $self->_broadcast("*** " . $self->_display_nick($id) . " left the partyline (DCC disconnected). ***")
-                if $authed_nick;
+            # Capture display BEFORE _close_session deletes users{$id}
+            my $authed = $self->{users}{$id} && $self->{users}{$id}{authenticated};
+            my $display = $authed ? $self->_display_nick($id) : '';
             $self->_close_session($id);
+            $self->_broadcast("*** $display left the partyline (DCC disconnected). ***")
+                if $display;
         },
     );
 
@@ -648,10 +649,9 @@ sub _init_dcc_session {
         $self->{bot}->{metrics}->add('mediabot_partyline_sessions_current', 1);
     }
 
-    # Prompt for password immediately - nick is already known
+    # Standard login prompt — same flow as telnet
     $stream->write("DCC CHAT - Mediabot Partyline\r\n\r\n");
-    $stream->write("Hello $nick. Enter your password.\r\n");
-    $self->_telnet_echo_off($stream);
+    $stream->write("Please enter your nickname.\r\n");
 }
 
 sub _start_listener {
@@ -745,11 +745,11 @@ sub _start_listener {
                 },
                 on_closed => sub {
                     $self->{bot}->{logger}->log(3, "Partyline connection closed (fd=$id)");
-                    my $nick = ($self->{users}{$id} && $self->{users}{$id}{authenticated})
-                        ? ($self->{users}{$id}{login} // '')
-                        : '';
-                    $self->_broadcast("*** " . $self->_display_nick($id) . " left the partyline (disconnected). ***") if $nick;
+                    # Capture display BEFORE _close_session deletes users{$id}
+                    my $authed = $self->{users}{$id} && $self->{users}{$id}{authenticated};
+                    my $display = $authed ? $self->_display_nick($id) : '';
                     $self->_close_session($id);
+                    $self->_broadcast("*** $display left the partyline (disconnected). ***") if $display;
                 },
             );
 
@@ -799,13 +799,23 @@ sub _close_session {
 # ---------------------------------------------------------------------------
 # _reverse_dns_timeout($ip, $timeout)
 #
-# Resolve an IPv4 address to a hostname without blocking the partyline for too
-# long. Falls back to the original IP on timeout or lookup failure.
+# Resolve an IPv4 address to a hostname.
+#
+# NOTE: alarm()/SIGALRM-based timeouts are unsafe inside an IO::Async event
+# loop because SIGALRM can interrupt epoll_wait() or any in-flight socket I/O,
+# causing spurious "Interrupted system call" errors.
+#
+# We therefore attempt the lookup without a signal-based timeout.
+# gethostbyaddr() is a blocking call but its system-level timeout is typically
+# 5 seconds on Debian (controlled by /etc/resolv.conf 'timeout' option).
+# For the Partyline this is acceptable: connections are rare and the lookup
+# runs synchronously only at session setup.  If it proves to be a problem in
+# practice, migrate to $loop->resolver->getnameinfo() (async).
 # ---------------------------------------------------------------------------
 sub _reverse_dns_timeout {
     my ($self, $ip, $timeout) = @_;
 
-    $timeout ||= 2;
+    # $timeout parameter kept for API compatibility but no longer used.
 
     return $ip unless defined $ip && $ip ne '' && $ip ne 'unknown';
     return $ip unless $ip =~ /^\d{1,3}(?:\.\d{1,3}){3}$/;
@@ -813,18 +823,8 @@ sub _reverse_dns_timeout {
     my $packed = inet_aton($ip);
     return $ip unless $packed;
 
-    my $host;
-
-    eval {
-        local $SIG{ALRM} = sub { die "reverse dns timeout\n" };
-        alarm($timeout);
-        $host = gethostbyaddr($packed, AF_INET);
-        alarm(0);
-        1;
-    } or do {
-        alarm(0);
-        return $ip;
-    };
+    my $host = eval { scalar gethostbyaddr($packed, AF_INET) };
+    return $ip if $@;
 
     return $host if defined $host && $host ne '';
     return $ip;
@@ -938,16 +938,20 @@ sub _handle_line {
     my $session = $self->{users}{$id};
 
     # ---- Rate limiting : max 10 commands per 5 seconds -------------------
-    my $now = time();
-    if ($now - ($session->{rate_window} // $now) >= 5) {
-        $session->{rate_window} = $now;
-        $session->{rate_count}  = 0;
-    }
-    $session->{rate_count}++;
-    if ($session->{rate_count} > 10) {
-        $self->{bot}->{logger}->log(2, "Partyline: rate limit hit for fd=$id login=" . ($session->{login} || 'anon'));
-        $stream->write("Rate limit exceeded. Slow down.\r\n");
-        return;
+    # Exempted during authentication: nick/pass prompts must not be throttled.
+    # Brute-force on login is handled separately by login_failures counter.
+    if ($session->{authenticated}) {
+        my $now = time();
+        if ($now - ($session->{rate_window} // $now) >= 5) {
+            $session->{rate_window} = $now;
+            $session->{rate_count}  = 0;
+        }
+        $session->{rate_count}++;
+        if ($session->{rate_count} > 10) {
+            $self->{bot}->{logger}->log(2, "Partyline: rate limit hit for fd=$id login=" . ($session->{login} || 'anon'));
+            $stream->write("Rate limit exceeded. Slow down.\r\n");
+            return;
+        }
     }
 
         # ---- Not yet authenticated : Eggdrop-style login flow -----------------
@@ -1046,7 +1050,15 @@ sub _handle_line {
         $self->_broadcast("[${cmd_display}] $line", $id);
     }
 
-    if    ($line =~ /^\.help$/i) {
+    if    ($line =~ /^\.ping$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.ping' }) if $self->{bot}->{metrics};
+        $self->_cmd_ping($stream, $id)
+    }
+    elsif ($line =~ /^\.bans?\s+(#\S+)$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.bans' }) if $self->{bot}->{metrics};
+        $self->_cmd_bans($stream, $id, $1)
+    }
+    elsif ($line =~ /^\.help$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.help' }) if $self->{bot}->{metrics};
         $self->_cmd_help($stream, $id)
     }
@@ -1078,7 +1090,7 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.motd' }) if $self->{bot}->{metrics};
         $self->_cmd_motd($stream, $id, $1)
     }
-    elsif ($line =~ /^\.say\s+(#\S+)\s+(.+)$/i) {
+    elsif ($line =~ /^\.say\s+(\S+)\s+(.+)$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.say' }) if $self->{bot}->{metrics};
         $self->_cmd_say($stream, $id, $1, $2)
     }
@@ -1109,6 +1121,10 @@ sub _handle_line {
     elsif ($line =~ /^\.restart(?:\s+(.*))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.restart' }) if $self->{bot}->{metrics};
         $self->_cmd_restart($stream, $id, $1)
+    }
+    elsif ($line =~ /^\.eval\s+(.+)$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.eval' }) if $self->{bot}->{metrics};
+        $self->_cmd_eval($stream, $id, $1)
     }
     elsif ($line =~ /^\.die(?:\s+(.*))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.die' }) if $self->{bot}->{metrics};
@@ -1155,7 +1171,7 @@ sub _do_login {
     if ($failures >= $max_failures) {
         $bot->{logger}->log(1, "Partyline: too many login failures for fd=$id - closing connection");
         $stream->write("Too many authentication failures. Disconnecting.\r\n");
-        $stream->close_now;
+        $stream->close_when_empty;  # flush write before closing
         return;
     }
 
@@ -1246,8 +1262,9 @@ sub _cmd_help {
       . "  .stat               - channel status (owner, chansets, nick count)\r\n"
       . "  .dccstat            - show DCC Partyline listeners and sessions\r\n"
       . "  .whom               - list users currently on the partyline\r\n"
+      . "  .ping               - check partyline session is alive\r\n"
       . "  .match <handle>     - show user record (wildcards * ? allowed)\r\n"
-      . "  .say #chan <msg>    - send a message to a channel\r\n"
+      . "  .say <#chan|nick> <msg> - send a message to channel or user\r\n"
       . "  .who #chan          - list nicks present in a channel\r\n"
       . "  .join #chan [key]   - make the bot join a channel\r\n"
       . "  .part #chan         - make the bot part a channel\r\n"
@@ -1256,9 +1273,11 @@ sub _cmd_help {
       . "  .rehash             - reload configuration and runtime state\r\n"
       . "  .restart            - reconnect IRC without killing process (Owner)\r\n"
       . "  .die                - terminate bot process entirely (Owner only)\r\n"
+      . "  .eval <perl>        - execute Perl in bot context (Owner, dangerous)\r\n"
       . "  .console [0-5|off]  - redirect bot log to this session\r\n"
+      . "  .bans #chan         - list active channel bans\r\n"
       . "  .boot <handle>      - kick a user off the partyline (Owner)\r\n"
-      . "  .motd [text|clear]  - show or set message of the day (Owner)\r\n"
+      . "  .motd [text|add <line>|clear]  - show/set/append/clear MOTD (Owner)\r\n"
       . "  .quit               - close this partyline session\r\n"
       . "\r\n"
       . "Chat:\r\n"
@@ -1310,8 +1329,14 @@ sub _cmd_console {
 
     $logger->add_console_hook($id, $level, sub {
         my ($line) = @_;
-        return unless $self->{streams}{$id};
-        eval { $self->{streams}{$id}->write($line . "\r\n") };
+        my $s = $self->{streams}{$id};
+        return unless $s;
+        eval { $s->write($line . "\r\n") };
+        if ($@) {
+            # Stream gone — silently remove the hook so it stops firing
+            eval { $logger->remove_console_hook($id) };
+            $self->{users}{$id}{console_level} = undef if $self->{users}{$id};
+        }
     });
 
     $self->{users}{$id}{console_level} = $level;
@@ -1346,8 +1371,17 @@ sub _cmd_motd {
         return;
     }
 
+    # .motd add <line> — append a line to a multiline MOTD
+    if ($arg =~ /^add\s+(.+)$/i) {
+        push @{ $self->{motd} }, $1;
+        $stream->write("MOTD line added (" . scalar(@{ $self->{motd} }) . " line(s) total).\r\n");
+        $self->{bot}->{logger}->log(2, "Partyline: $nick added MOTD line: $1");
+        return;
+    }
+
+    # .motd <text> — replace entire MOTD with a single line
     $self->{motd} = [ $arg ];
-    $stream->write("MOTD set.\r\n");
+    $stream->write("MOTD set (1 line). Use '.motd add <line>' to append more.\r\n");
     $self->{bot}->{logger}->log(2, "Partyline: $nick set MOTD to: $arg");
 }
 
@@ -1439,8 +1473,8 @@ sub _cmd_match {
         GROUP BY u.id_user, u.nickname, u.auth, u.info1, u.info2,
                  ul.description, ul.level
         ORDER BY u.nickname
-        LIMIT 20
-    });
+        LIMIT 21
+    }); # fetch 21 to detect truncation (display only 20)
 
     unless ($sth->execute($sql_pat)) {
         $bot->{logger}->log(1, "Partyline .match SQL error: $DBI::errstr");
@@ -1468,6 +1502,8 @@ sub _cmd_match {
 
     if ($found == 0) {
         $stream->write("No match for '$pattern'.\r\n");
+    } elsif ($found > 20) {
+        $stream->write(sprintf("\r\nShowing first 20 matches for '%s' (more exist — narrow your search).\r\n", $pattern));
     } elsif ($found > 1) {
         $stream->write(sprintf("\r\n%d match(es) for '%s'.\r\n", $found, $pattern));
     }
@@ -1526,6 +1562,96 @@ sub _cmd_boot {
     $self->_close_session($target_id);
 }
 
+
+# ---------------------------------------------------------------------------
+# .ping - check if partyline session is still alive
+# ---------------------------------------------------------------------------
+sub _cmd_ping {
+    my ($self, $stream, $id) = @_;
+    my ($sec, $min, $hour) = localtime(time);
+    $stream->write(sprintf("PONG %02d:%02d:%02d\r\n", $hour, $min, $sec));
+}
+
+
+# ---------------------------------------------------------------------------
+# .bans [#chan] - list active bans (from ChannelBan) on a channel
+# ---------------------------------------------------------------------------
+sub _cmd_bans {
+    my ($self, $stream, $id, $chan) = @_;
+
+    my $bot = $self->{bot};
+
+    unless ($bot->{channel_ban} && $bot->{channel_ban}->can('list_active_bans')) {
+        $stream->write("ChannelBan module not available.\r\n");
+        return;
+    }
+
+    unless (defined $chan && $chan =~ /^#/) {
+        $stream->write("Usage: .bans #channel\r\n");
+        return;
+    }
+
+    # Resolve id_channel
+    my $dbh = $bot->{dbh};
+    my $sth = $dbh->prepare("SELECT id_channel FROM CHANNEL WHERE name = ? LIMIT 1");
+    unless ($sth && $sth->execute($chan)) {
+        $stream->write("DB error.\r\n");
+        return;
+    }
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+
+    unless ($row) {
+        $stream->write("Channel $chan not found in DB.\r\n");
+        return;
+    }
+
+    my $id_channel = $row->{id_channel};
+    my @bans = $bot->{channel_ban}->list_active_bans($id_channel);
+
+    unless (@bans) {
+        $stream->write("No active bans on $chan.\r\n");
+        return;
+    }
+
+    $stream->write(sprintf("%d active ban(s) on $chan:\r\n", scalar @bans));
+    $stream->write(sprintf("  %-4s %-30s %-8s %-16s %s\r\n",
+        "#", "Mask", "Level", "By", "Expires"));
+    $stream->write("  " . ("-" x 76) . "\r\n");
+
+    my $now_sth = $dbh->prepare('SELECT TIMESTAMPDIFF(SECOND, NOW(), ?) AS secs');
+
+    for my $ban (@bans) {
+        my $expires_txt = 'permanent';
+        if ($ban->{expires_at}) {
+            $now_sth->execute($ban->{expires_at});
+            my $r = $now_sth->fetchrow_hashref;
+            $now_sth->finish;
+            my $secs = ($r && defined $r->{secs} && $r->{secs} > 0) ? $r->{secs} : 0;
+            if ($secs > 0) {
+                my $d = int($secs / 86400);
+                my $h = int(($secs % 86400) / 3600);
+                my $m = int(($secs % 3600) / 60);
+                $expires_txt = '';
+                $expires_txt .= "${d}d " if $d;
+                $expires_txt .= "${h}h " if $h;
+                $expires_txt .= "${m}m"  if $m || (!$d && !$h);
+                $expires_txt =~ s/\s+$//;
+            } else {
+                $expires_txt = 'expiring soon';
+            }
+        }
+
+        $stream->write(sprintf("  %-4s %-30s %-8s %-16s %s\r\n",
+            $ban->{id_channel_ban} // '?',
+            $ban->{mask}           // '?',
+            $ban->{ban_level}      // '?',
+            $ban->{created_by_nick} // '?',
+            $expires_txt
+        ));
+    }
+}
+
 # .stat - for each known channel: joined?, nick count, owner, chansets
 # ---------------------------------------------------------------------------
 
@@ -1539,37 +1665,11 @@ sub _cmd_dccstat {
 
     my $public_ip = eval { $self->_resolve_dcc_public_ip($bot) } || '(not configured)';
 
-    my ($range_min, $range_max, $range_source);
-    for my $pair (
-        [ 'DCC_PORT_MIN',       'DCC_PORT_MAX',       'DCC_PORT_MIN/MAX' ],
-        [ 'main.DCC_PORT_MIN',  'main.DCC_PORT_MAX',  'main.DCC_PORT_MIN/MAX' ],
-        [ 'PARTYLINE_DCC_PORT_MIN',      'PARTYLINE_DCC_PORT_MAX',      'PARTYLINE_DCC_PORT_MIN/MAX' ],
-        [ 'main.PARTYLINE_DCC_PORT_MIN', 'main.PARTYLINE_DCC_PORT_MAX', 'main.PARTYLINE_DCC_PORT_MIN/MAX' ],
-    ) {
-        my ($kmin, $kmax, $label) = @$pair;
-        my ($vmin, $vmax);
-
-        eval { $vmin = $bot->{conf}->get($kmin); };
-        eval { $vmax = $bot->{conf}->get($kmax); };
-
-        next unless defined $vmin && defined $vmax;
-        next unless $vmin =~ /^\d+$/ && $vmax =~ /^\d+$/;
-
-        $range_min    = int($vmin);
-        $range_max    = int($vmax);
-        $range_source = $label;
-        last;
-    }
-
-    my $port_mode = 'OS ephemeral port';
-    if (defined $range_min && defined $range_max) {
-        if ($range_min >= 1 && $range_max <= 65535 && $range_min <= $range_max) {
-            $port_mode = "$range_min-$range_max ($range_source)";
-        }
-        else {
-            $port_mode = "invalid range $range_min-$range_max, falling back to OS ephemeral port";
-        }
-    }
+    # Use shared helpers to avoid duplicating config key lookup logic.
+    my $dcc_port  = eval { $self->_dcc_listen_port($bot) } // 0;
+    my $port_mode = $dcc_port > 0
+        ? "configured port $dcc_port (from DCC_PORT_MIN/MAX range)"
+        : 'OS ephemeral port';
 
     my $offers = eval { $self->_dcc_offers_snapshot } || [];
 
@@ -1690,7 +1790,13 @@ sub _cmd_stat {
         "Channel", "Status", "Nicks", "Owner", "Chansets"));
     $stream->write(("-" x 90) . "\r\n");
 
-    foreach my $chan_name (sort keys %{ $bot->{channels} }) {
+    my $channels = $bot->{channels};
+    unless ($channels && ref($channels) eq 'HASH' && %$channels) {
+        $stream->write("No channels known (bot not yet joined any channel).\r\n");
+        return;
+    }
+
+    foreach my $chan_name (sort keys %$channels) {
         my $chan_obj   = $bot->{channels}{$chan_name};
         my $id_channel = eval { $chan_obj->get_id } // 0;
 
@@ -1742,10 +1848,11 @@ sub _cmd_stat {
 }
 
 # ---------------------------------------------------------------------------
-# .say #chan <message>
+# .say <#chan|nick> <message>
+# Supports both channels (#chan) and private messages (nick).
 # ---------------------------------------------------------------------------
 sub _cmd_say {
-    my ($self, $stream, $id, $chan, $msg) = @_;
+    my ($self, $stream, $id, $target, $msg) = @_;
 
     my $bot  = $self->{bot};
     my $nick = $self->{users}{$id}{login};
@@ -1755,15 +1862,18 @@ sub _cmd_say {
         return;
     }
 
-    # Verify the bot is actually in that channel
-    my $chan_lc = lc($chan);
-    unless (exists $bot->{channels}{$chan} || exists $bot->{channels}{$chan_lc}) {
-        $stream->write("Warning: bot does not appear to be in $chan (sending anyway).\r\n");
+    if ($target =~ /^#/) {
+        # Channel message — verify bot presence (warn only, still send)
+        my $target_lc = lc($target);
+        unless (exists $bot->{channels}{$target} || exists $bot->{channels}{$target_lc}) {
+            $stream->write("Warning: bot does not appear to be in $target (sending anyway).\r\n");
+        }
     }
+    # No check needed for private messages — just send
 
-    $bot->botPrivmsg($chan, $msg);
-    $bot->{logger}->log(2, "Partyline: $nick sent to $chan: $msg");
-    $stream->write("-> $chan: $msg\r\n");
+    $bot->botPrivmsg($target, $msg);
+    $bot->{logger}->log(2, "Partyline: $nick sent to $target: $msg");
+    $stream->write("-> $target: $msg\r\n");
 }
 
 # ---------------------------------------------------------------------------
@@ -1941,6 +2051,90 @@ sub _cmd_restart {
     } else {
         $stream->write("ERR: restart_irc() not available.\r\n");
     }
+}
+
+
+# ---------------------------------------------------------------------------
+# .eval <perl code>  - Owner only
+#
+# Executes arbitrary Perl in the bot process context.
+# USE WITH EXTREME CAUTION: crashes and data corruption are possible.
+# Output is capped at 20 lines. Confirmation required before execution.
+# ---------------------------------------------------------------------------
+sub _cmd_eval {
+    my ($self, $stream, $id, $code) = @_;
+
+    my $bot   = $self->{bot};
+    my $nick  = $self->{users}{$id}{login} // 'unknown';
+    my $level = $self->{users}{$id}{level};
+
+    unless (defined($level) && $level == 0) {
+        $stream->write("Access denied: .eval requires Owner level.\r\n");
+        return;
+    }
+
+    unless (defined $code && $code =~ /\S/) {
+        $stream->write("Usage: .eval <perl code>\r\n");
+        $stream->write("WARNING: code runs in the bot process. Confirmation required.\r\n");
+        return;
+    }
+
+    # One-step confirmation: check for pending eval
+    my $pending_key = "_eval_pending_$id";
+    if (!$self->{$pending_key} || $self->{$pending_key}{code} ne $code) {
+        # First invocation: store and ask for confirmation
+        $self->{$pending_key} = { code => $code, at => time };
+        $stream->write("--- .eval confirmation required ---\r\n");
+        $stream->write("Code: $code\r\n");
+        $stream->write("Type the same .eval command again to execute.\r\n");
+        return;
+    }
+
+    # Second invocation with same code: execute
+    delete $self->{$pending_key};
+
+    $bot->{logger}->log(1, "Partyline: $nick executing eval: $code");
+    $self->_broadcast("[${nick}\@partyline] .eval $code", $id);
+
+    # Capture STDOUT and STDERR, limit output
+    my $output = '';
+    {
+        local *STDOUT;
+        open(STDOUT, '>>', \$output) or do {
+            $stream->write("Cannot capture STDOUT.\r\n");
+            return;
+        };
+        local *STDERR;
+        open(STDERR, '>>', \$output) or do {
+            $stream->write("Cannot capture STDERR.\r\n");
+            return;
+        };
+
+        eval { local $_ = undef; eval $code; };
+    }
+
+    my $err = $@;
+
+    my @lines = split /\n/, $output;
+    my $truncated = 0;
+    if (@lines > 20) {
+        @lines = @lines[0..19];
+        $truncated = 1;
+    }
+
+    $stream->write("--- eval output ---\r\n");
+    $stream->write("$_\r\n") for @lines;
+    $stream->write("[... output truncated at 20 lines ...]\r\n") if $truncated;
+
+    if ($err) {
+        $err =~ s/\n/ /g;
+        $stream->write("--- error ---\r\n");
+        $stream->write("$err\r\n");
+    } else {
+        $stream->write("--- ok ---\r\n");
+    }
+
+    $bot->{logger}->log(1, "Partyline: $nick eval completed" . ($err ? " with error: $err" : ""));
 }
 
 # ---------------------------------------------------------------------------
