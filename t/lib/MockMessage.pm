@@ -56,7 +56,8 @@ sub from_channel {
 # Message privé (query) : /msg botnick cmd arg1
 sub from_private {
     my ($class, %args) = @_;
-    my $nick = ($args{prefix} // 'testnick!testuser@testhost') =~ /^([^!]+)/ ? $1 : 'testnick';
+    my ($nick) = ($args{prefix} // 'testnick!testuser@testhost') =~ /^([^!]+)/;
+    $nick //= 'testnick';
     return $class->new(
         prefix  => $args{prefix} // 'testnick!testuser@testhost',
         params  => [ $nick ],

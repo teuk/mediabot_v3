@@ -27,6 +27,36 @@ use Mediabot::Context;
 use Mediabot::Command;
 use Mediabot::Log;
 
+# MockAuth inline — stub de Mediabot::Auth pour les tests
+{
+    package MockAuth;
+    sub new { bless { always_pass => $_[1] // 0 }, $_[0] }
+    # verify_credentials($id_user, $login, $password)
+    # Par défaut refuse tout. Passer always_pass=>1 pour tester les login réussis.
+    sub verify_credentials {
+        my ($self, $id_user, $login, $password) = @_;
+        return $self->{always_pass} ? 1 : 0;
+    }
+}
+
+# MockChannelBan inline — stub minimal de Mediabot::ChannelBan
+{
+    package MockChannelBan;
+    sub new { bless {}, $_[0] }
+    sub add_ban       { return (undef, 'MockChannelBan: not implemented') }
+    sub list_active_bans { return () }
+    sub mark_removed  { return (0, 'MockChannelBan: not implemented') }
+    sub expired_bans  { return () }
+    sub validate_mask { return undef }   # undef = valid
+    sub normalize_mask { return $_[1] }
+    sub mask_from_hostmask { return undef }
+    sub parse_duration { return (0, 'permanent', undef) }
+    sub parse_ban_level { return ($_[2], undef) }
+    sub looks_like_duration { return 0 }
+    sub looks_like_level    { return 0 }
+    sub min_ban_level { return 75 }
+}
+
 # MockConf inline : émule Mediabot::Conf sans Config::Simple
 {
     package MockConf;
@@ -67,6 +97,10 @@ sub new {
         replies => [],                  # capture des réponses IRC
         _mock_user => $args{mock_user}, # MockUser par défaut si pas de dbh
         Quit    => 0,
+        # Stubs indispensables pour les commandes ban/channel/auth
+        channels    => $args{channels}    // {},
+        channel_ban => $args{channel_ban} // MockChannelBan->new(),
+        auth        => $args{auth}        // MockAuth->new(),
     }, $class;
 
     return $self;
@@ -195,11 +229,38 @@ sub replied_with {
     return 0;
 }
 
+# Compte le nombre total de réponses
+sub count_replies {
+    my ($self) = @_;
+    return scalar @{ $self->{replies} };
+}
+
+# Vrai si aucune réponse ne matche ce pattern
+sub replied_none {
+    my ($self, $pattern) = @_;
+    for my $r ($self->replies) {
+        return 0 if $r->{text} =~ /$pattern/;
+    }
+    return 1;
+}
+
 # Remet les captures à zéro entre deux tests
 sub reset_replies {
     my ($self) = @_;
     $self->{replies} = [];
     $self->{irc}->reset_capture() if $self->{irc}->can('reset_capture');
+}
+
+# Permet d'injecter un vrai Mediabot::ChannelBan dans les tests avancés
+sub set_channel_ban {
+    my ($self, $cb) = @_;
+    $self->{channel_ban} = $cb;
+}
+
+# Permet d'injecter des channels mockés
+sub set_channels {
+    my ($self, $channels) = @_;
+    $self->{channels} = $channels;
 }
 
 1;

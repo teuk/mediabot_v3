@@ -57,7 +57,7 @@ sub parse_duration {
     $text =~ s/^\s+|\s+$//g;
 
     return (0, 'permanent', undef) if $text eq '';
-    return (0, 'permanent', undef) if $text =~ /^(?:0|perm|permanent|never)$/i;
+    return (0, 'permanent', undef) if $text =~ /^(?:perm|permanent|never)$/i;
 
     if ($text =~ /^(\d+)$/) {
         my $minutes = int($1);

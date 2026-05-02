@@ -84,7 +84,7 @@ Usage: perl t/test_live.pl [options]
   Base de données:
     --dbhost      <host>   Hôte MariaDB         (défaut: localhost)
     --dbport      <port>   Port MariaDB         (défaut: 3306)
-    --dbuser      <user>   Utilisateur MariaDB  (défaut: root)
+    --dbuser      <user>   Utilisateur MariaDB  (défaut: mediabot_test)
     --dbpass      <pass>   Mot de passe MariaDB (défaut: sudo mysql)
     --keep-db              Conserver mediabot_test après les tests
 
@@ -158,6 +158,8 @@ sub failed { $_[0]->{fail} }
 # Classe SpyClient — client IRC minimal (PING/PONG, JOIN, PRIVMSG, lecture)
 # ---------------------------------------------------------------------------
 package SpyClient;
+
+use Time::HiRes qw(time sleep);
 
 sub new {
     my ($class, %args) = @_;
@@ -409,11 +411,16 @@ $tpl =~ s/\{\{DBPORT\}\}/$opt_dbport/g;
 $tpl =~ s/\{\{LOGFILE\}\}/$log_file/g;
 $tpl =~ s/\{\{PARTYLINE_PORT\}\}/$partyline_port/g;
 
-# Mettre à jour le canal dans la DB
-my $channel_esc = $opt_channel;
-$channel_esc =~ s/'/\\'/g;
-mysql_cmd("UPDATE mediabot_test.CHANNEL SET name='$channel_esc' WHERE id_channel=1");
-mysql_cmd("UPDATE mediabot_test.SERVERS SET server_hostname='$opt_server:$opt_port' WHERE id_server=1");
+# Mettre à jour le canal et le serveur dans la DB via fichier temp (pas d'interpolation SQL)
+{
+    my $ch  = $opt_channel;
+    my $srv = "$opt_server:$opt_port";
+    # Échapper les apostrophes et backslashes pour SQL
+    $ch  =~ s/\\/\\\\/g; $ch  =~ s/'/\\'/g;
+    $srv =~ s/\\/\\\\/g; $srv =~ s/'/\\'/g;
+    mysql_cmd("UPDATE mediabot_test.CHANNEL SET name='$ch' WHERE id_channel=1");
+    mysql_cmd("UPDATE mediabot_test.SERVERS SET server_hostname='$srv' WHERE id_server=1");
+}
 
 write_file($conf_file, $tpl);
 print "  test.conf generated (botnick=$opt_botnick, channel=$opt_channel).\n";
@@ -453,7 +460,7 @@ print "  Spy connected (nick=$nick_final).\n";
 
 $spy->join_channel;
 my $spy_joined = $spy->wait_for(qr/JOIN.*\Q$opt_channel\E/i, 15);
-die "ERROR: Spy could not join $opt_channel\n" unless $spy_joined;
+unless ($spy_joined) { teardown(1); die "ERROR: Spy could not join $opt_channel\n"; }
 print "  Spy joined $opt_channel.\n";
 
 # ---------------------------------------------------------------------------

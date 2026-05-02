@@ -177,7 +177,7 @@ for my $file (@test_files) {
         next;
     }
     if (ref $code eq 'CODE') {
-        disable diagnostics if $diagnostics::VERSION;
+        eval { diagnostics->disable } if $diagnostics::VERSION;
         local $SIG{__WARN__} = sub {
             my $w = shift;
             return if $w =~ /uninitialized|redefine|prototype|only once/i;
