@@ -23,6 +23,7 @@ use File::Basename;
 use POSIX qw(strftime);
 
 binmode(STDOUT, ':encoding(UTF-8)');
+binmode(STDERR, ':encoding(UTF-8)');
 
 # Mediabot.pm charge "use diagnostics" qui formate les warnings longuement.
 # On le desactive juste avant chaque execution de closure (apres chargement).

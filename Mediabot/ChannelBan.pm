@@ -2,7 +2,6 @@ package Mediabot::ChannelBan;
 
 use strict;
 use warnings;
-use DBI;
 use POSIX qw(strftime);
 
 # =============================================================================

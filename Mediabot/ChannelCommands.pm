@@ -2294,6 +2294,7 @@ sub userShowcommandsChannel_ctx {
     botNotice($self, $nick, "Level 450: join chanset")    if ($is_admin || $level >= 450);
     botNotice($self, $nick, "Level 400: add del modinfo") if ($is_admin || $level >= 400);
     botNotice($self, $nick, "Level 100: op deop invite")  if ($is_admin || $level >= 100);
+    botNotice($self, $nick, "Level  75: ban kickban kb unban bans") if ($is_admin || $level >= 75);
     botNotice($self, $nick, "Level  50: kick topic")      if ($is_admin || $level >= 50);
     botNotice($self, $nick, "Level  25: voice devoice")   if ($is_admin || $level >= 25);
 
