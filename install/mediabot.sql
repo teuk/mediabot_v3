@@ -1,6 +1,6 @@
 -- =============================================================================
 --  mediabot_v3 — Full database schema
---  Updated: 2026-04 — Schema corrections vs production DB
+--  Updated: 2026-05 — Added CHANNEL_BAN table
 --
 --  Changes from previous version:
 --   - USER.hostmasks removed → replaced by USER_HOSTMASK table
@@ -16,12 +16,26 @@
 --   [2026-04] RESPONDERS: corrected columns (command/response → responder/answer/chance/hits)
 --   [2026-04] TIMEZONE: corrected column name (timezone → tz, aligned with prod and code)
 --   [2026-04] TIMERS: removed undeployed columns (id_channel, enabled) — kept as comments
+--   [2026-05] CHANNEL_BAN: added (persistent channel bans with expiration)
 --   [2026-04] PUBLIC_COMMANDS.active: already present in schema — apply to prod:
 --             ALTER TABLE PUBLIC_COMMANDS ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1;
 --
 --  Usage:
---   mysql -u root -p < install/mediabot.sql
---   (or sourced by install/db_install.sh and install/configure.pl)
+--   Open the MySQL/MariaDB client explicitly with UTF-8 enabled:
+--
+--     mysql -u root -p --default-character-set=utf8mb4
+--
+--   Then, from inside the MySQL/MariaDB prompt:
+--
+--     SET NAMES utf8mb4;
+--     SOURCE /path/to/mediabot_v3/install/mediabot.sql;
+--
+--   Example:
+--
+--     SOURCE /home/mediabot/mediabot_v3/install/mediabot.sql;
+--
+--   This avoids shell redirection charset ambiguity and keeps imports explicit.
+--   This file may also be sourced by install/db_install.sh and install/configure.pl.
 -- =============================================================================
 
 SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -97,6 +111,35 @@ CREATE TABLE `CHANNEL` (
   PRIMARY KEY (`id_channel`),
   UNIQUE KEY `name` (`name`),
   KEY `idx_channel_id_user` (`id_user`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- CHANNEL_BAN
+-- ---------------------------------------------------------------------------
+CREATE TABLE `CHANNEL_BAN` (
+  `id_channel_ban`  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_channel`      BIGINT UNSIGNED NOT NULL,
+  `mask`            VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `ban_level`       INT UNSIGNED NOT NULL DEFAULT 75,
+  `reason`          VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_by`      BIGINT UNSIGNED DEFAULT NULL,
+  `created_by_nick` VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `expires_at`      DATETIME DEFAULT NULL,
+  `active`          TINYINT(1) NOT NULL DEFAULT 1,
+  `removed_by`      BIGINT UNSIGNED DEFAULT NULL,
+  `removed_by_nick` VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `removed_at`      DATETIME DEFAULT NULL,
+  `remove_reason`   VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `source`          VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'irc',
+  PRIMARY KEY (`id_channel_ban`),
+  KEY `idx_channel_ban_channel_active`  (`id_channel`, `active`),
+  KEY `idx_channel_ban_channel_mask`    (`id_channel`, `mask`),
+  KEY `idx_channel_ban_active_expires`  (`active`, `expires_at`),
+  KEY `idx_channel_ban_channel_expires` (`id_channel`, `active`, `expires_at`),
+  KEY `idx_channel_ban_level`           (`ban_level`),
+  KEY `idx_channel_ban_created_by`      (`created_by`),
+  KEY `idx_channel_ban_removed_by`      (`removed_by`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
@@ -434,6 +477,11 @@ ALTER TABLE `BADWORDS`
 
 ALTER TABLE `CHANNEL`
   ADD CONSTRAINT `fk_channel_user` FOREIGN KEY (`id_user`) REFERENCES `USER` (`id_user`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+ALTER TABLE `CHANNEL_BAN`
+  ADD CONSTRAINT `fk_channel_ban_channel`    FOREIGN KEY (`id_channel`)  REFERENCES `CHANNEL` (`id_channel`) ON DELETE CASCADE    ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_channel_ban_created_by` FOREIGN KEY (`created_by`)  REFERENCES `USER`    (`id_user`)    ON DELETE SET NULL   ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_channel_ban_removed_by` FOREIGN KEY (`removed_by`)  REFERENCES `USER`    (`id_user`)    ON DELETE SET NULL   ON UPDATE CASCADE;
 
 ALTER TABLE `CHANNEL_FLOOD`
   ADD CONSTRAINT `fk_channel_flood_channel` FOREIGN KEY (`id_channel`) REFERENCES `CHANNEL` (`id_channel`) ON DELETE CASCADE ON UPDATE CASCADE;
