@@ -132,18 +132,37 @@ sub userLogin_ctx {
     }
 
 
-    # B2/A2: brute-force throttle — max 5 failed attempts per nick per 60s
+    # B2/A2: brute-force throttle — tracked by IRC nick AND DB username
+    # Protects the account even if the attacker changes nick between attempts.
     {
-        my $fail_key = lc($sNick);
         my $now      = time();
+        my $window   = 60;
+        my $max_fail = 5;
+
         $self->{_login_failures} //= {};
-        my $rec = $self->{_login_failures}{$fail_key} //= { ts => $now, count => 0 };
-        if ($now - $rec->{ts} >= 60) { $rec->{ts} = $now; $rec->{count} = 0; }
-        if ($rec->{count} >= 5) {
-            my $wait = 60 - ($now - $rec->{ts});
-            $self->{logger}->log(2, "Login throttle: $sNick blocked ($rec->{count} failures, ${wait}s remaining)");
-            botNotice($self, $sNick, "Too many failed login attempts. Please wait " . int($wait + 1) . " seconds.");
-            return;
+
+        # A3: periodic cleanup of expired entries (older than 2x window)
+        if (!$self->{_login_fail_cleanup} || ($now - $self->{_login_fail_cleanup}) >= 120) {
+            for my $k (keys %{ $self->{_login_failures} }) {
+                delete $self->{_login_failures}{$k}
+                    if ($now - ($self->{_login_failures}{$k}{ts} // 0)) > 120;
+            }
+            $self->{_login_fail_cleanup} = $now;
+        }
+
+        # Check both IRC nick and DB username
+        for my $fail_key (lc($sNick), lc($tArgs[0] // '')) {
+            next unless $fail_key ne '';
+            my $rec = $self->{_login_failures}{$fail_key} //= { ts => $now, count => 0 };
+            if ($now - $rec->{ts} >= $window) { $rec->{ts} = $now; $rec->{count} = 0; }
+            if ($rec->{count} >= $max_fail) {
+                my $wait = $window - ($now - $rec->{ts});
+                $self->{logger}->log(2,
+                    "Login throttle: key=$fail_key blocked ($rec->{count} failures, ${wait}s remaining)");
+                botNotice($self, $sNick,
+                    "Too many failed login attempts. Please wait " . int($wait + 1) . " seconds.");
+                return;
+            }
         }
     }
 
@@ -246,7 +265,8 @@ sub userLogin_ctx {
             );
             $desc;
         } // $level_id // "unknown";
-        delete $self->{_login_failures}{lc($sNick)};   # reset on success
+        delete $self->{_login_failures}{lc($sNick)};       # reset on success
+        delete $self->{_login_failures}{lc($typed_user)};  # reset target account too
         botNotice($self, $sNick, "Login successful as $db_nick (Level: $level_desc)");
         $self->{metrics}->inc('mediabot_auth_success_total') if $self->{metrics};
 
@@ -255,7 +275,10 @@ sub userLogin_ctx {
         logBot($self, $ctx->message, undef, "login", $typed_user, "Success");
     }
     else {
-        { my $r = ($self->{_login_failures}{lc($sNick)} //= {ts=>time(),count=>0}); $r->{count}++; }
+        for my $k (lc($sNick), lc($typed_user)) {
+            my $r = ($self->{_login_failures}{$k} //= {ts=>time(),count=>0});
+            $r->{count}++;
+        }
         botNotice($self, $sNick, "Login failed (Bad password).");
         $self->{metrics}->inc('mediabot_auth_failure_total') if $self->{metrics};
         my $msg = ($ctx->message->prefix // '') . " Failed login (Bad password)";

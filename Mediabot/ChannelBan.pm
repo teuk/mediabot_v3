@@ -277,7 +277,10 @@ sub _mask_matches_irc {
     $re =~ s/\\\*/.*/g;   # * -> .*
     $re =~ s/\\\?/./g;    # ? -> .
 
-    return scalar($hostmask =~ /^$re$/i);
+    # B4: wrap in eval to catch catastrophic backtracking on malformed masks
+    my $ok = eval { $hostmask =~ /^$re$/i };
+    return 0 if $@;
+    return $ok ? 1 : 0;
 }
 
 # ---------------------------------------------------------------------------
