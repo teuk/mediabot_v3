@@ -1050,6 +1050,10 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.ping' }) if $self->{bot}->{metrics};
         $self->_cmd_ping($stream, $id)
     }
+    elsif ($line =~ /^\.uptime$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.uptime' }) if $self->{bot}->{metrics};
+        $self->_cmd_uptime($stream, $id)
+    }
     elsif ($line =~ /^\.unban\s+(#\S+)\s+(\S+)$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.unban' }) if $self->{bot}->{metrics};
         $self->_cmd_unban($stream, $id, $1, $2)
@@ -1287,6 +1291,7 @@ sub _cmd_help {
       . "  .timers             - list all scheduled tasks\r\n"
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
+      . "  .uptime             - show bot and server uptime\r\n"
       . "  .match <handle>     - show user record (wildcards * ? allowed)\r\n"
       . "  .say <#chan|nick> <msg> - send a message to channel or user\r\n"
       . "  .who #chan          - list nicks present in a channel\r\n"
@@ -1437,13 +1442,15 @@ sub _send_motd {
 sub _cmd_whom {
     my ($self, $stream, $id) = @_;
 
-    my @lines;
+    my @rows;
     my $count = 0;
+    my $nick_width = length('Nick/Host');
 
     for my $fid (sort { $a <=> $b } keys %{ $self->{users} }) {
         my $u = $self->{users}{$fid};
         next unless $u && $u->{authenticated};
 
+        # Keep full IP visible. _display_nick only truncates reverse DNS.
         my $nick       = $self->_display_nick($fid, 48);
         my $level_desc = $u->{level_desc}   // '?';
         my $con_level  = defined $u->{console_level}
@@ -1451,8 +1458,16 @@ sub _cmd_whom {
             : "console:off";
         my $is_me      = ($fid == $id) ? " *" : "";
 
-        push @lines, sprintf("  %-14s  %-14s  fd=%-4d  %s%s",
-            $nick, $level_desc, $fid, $con_level, $is_me);
+        $nick_width = length($nick) if length($nick) > $nick_width;
+
+        push @rows, {
+            nick       => $nick,
+            level_desc => $level_desc,
+            fd         => $fid,
+            con_level  => $con_level,
+            is_me      => $is_me,
+        };
+
         $count++;
     }
 
@@ -1461,9 +1476,25 @@ sub _cmd_whom {
         return;
     }
 
+    $nick_width = 18 if $nick_width < 18;
+    $nick_width = 80 if $nick_width > 80;
+
+    my @lines;
+    for my $row (@rows) {
+        push @lines, sprintf("  %-*s  %-14s  fd=%-4d  %s%s",
+            $nick_width,
+            $row->{nick},
+            $row->{level_desc},
+            $row->{fd},
+            $row->{con_level},
+            $row->{is_me}
+        );
+    }
+
     $stream->write(sprintf("Partyline users (%d):\r\n", $count));
-    $stream->write("  Nick            Level           Socket  Console\r\n");
-    $stream->write("  " . ("-" x 60) . "\r\n");
+    $stream->write(sprintf("  %-*s  %-14s  %-7s %s\r\n",
+        $nick_width, "Nick/Host", "Level", "Socket", "Console"));
+    $stream->write("  " . ("-" x ($nick_width + 2 + 14 + 2 + 7 + 1 + 14)) . "\r\n");
     $stream->write("$_\r\n") for @lines;
 }
 
@@ -1707,12 +1738,81 @@ sub _cmd_timers {
 }
 
 # ---------------------------------------------------------------------------
+# _format_duration($seconds)
+# ---------------------------------------------------------------------------
+sub _format_duration {
+    my ($self, $seconds) = @_;
+
+    $seconds = 0 unless defined $seconds && $seconds =~ /^\d+(?:\.\d+)?$/;
+    $seconds = int($seconds);
+
+    my $days = int($seconds / 86400);
+    $seconds %= 86400;
+
+    my $hours = int($seconds / 3600);
+    $seconds %= 3600;
+
+    my $minutes = int($seconds / 60);
+    my $secs    = $seconds % 60;
+
+    my @parts;
+    push @parts, "${days}d" if $days;
+    push @parts, "${hours}h" if $hours;
+    push @parts, "${minutes}m" if $minutes;
+    push @parts, "${secs}s" if $secs || !@parts;
+
+    return join(' ', @parts);
+}
+
+# ---------------------------------------------------------------------------
 # .ping - check if partyline session is still alive
 # ---------------------------------------------------------------------------
 sub _cmd_ping {
     my ($self, $stream, $id) = @_;
     my ($sec, $min, $hour) = localtime(time);
     $stream->write(sprintf("PONG %02d:%02d:%02d\r\n", $hour, $min, $sec));
+}
+
+# ---------------------------------------------------------------------------
+# .uptime - show bot and server uptime from the Partyline
+# ---------------------------------------------------------------------------
+sub _cmd_uptime {
+    my ($self, $stream, $id) = @_;
+
+    my $bot = $self->{bot};
+    my $now = time();
+
+    my $bot_start = $bot->{iConnectionTimestamp}
+                 // eval { $bot->{metrics}->{started} }
+                 // $now;
+
+    my $bot_uptime = $now - $bot_start;
+    $bot_uptime = 0 if $bot_uptime < 0;
+
+    my $server_uptime = undef;
+    if (open my $fh, '<', '/proc/uptime') {
+        my $line = <$fh>;
+        close $fh;
+
+        if (defined $line && $line =~ /^(\d+(?:\.\d+)?)/) {
+            $server_uptime = int($1);
+        }
+    }
+
+    my $bot_name = eval { $bot->{conf}->get('main.MAIN_PROG_NAME') } || 'Mediabot';
+    my $version  = $bot->{main_prog_version} // '';
+
+    $stream->write("Uptime:\r\n");
+    $stream->write("  Bot     : " . $self->_format_duration($bot_uptime) . "\r\n");
+    $stream->write("  Process : pid $$\r\n");
+    $stream->write("  Name    : $bot_name" . ($version ne '' ? " v$version" : "") . "\r\n");
+
+    if (defined $server_uptime) {
+        $stream->write("  Server  : " . $self->_format_duration($server_uptime) . "\r\n");
+    }
+    else {
+        $stream->write("  Server  : unavailable\r\n");
+    }
 }
 
 
