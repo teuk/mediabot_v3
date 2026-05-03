@@ -83,13 +83,28 @@ sub getIdChannel {
 # Get user nickname/handle from user id
 sub get_channel_by_name {
     my ($self, $name) = @_;
-    my $sth = $self->{dbh}->prepare("SELECT id_channel FROM CHANNEL WHERE name = ?");
+
+    return undef unless defined($name) && $name ne '';
+
+    my $sql = "SELECT id_channel FROM CHANNEL WHERE name = ?";
+    my $sth = $self->{dbh}->prepare($sql);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "get_channel_by_name() SQL prepare error: $DBI::errstr Query: $sql")
+            if $self->{logger};
+        return undef;
+    }
+
     unless ($sth->execute($name)) {
+        $self->{logger}->log(1, "get_channel_by_name() SQL execute error: $DBI::errstr Query: $sql")
+            if $self->{logger};
         $sth->finish;
         return undef;
     }
+
     my $ref = $sth->fetchrow_hashref;
     $sth->finish;
+
     if ($ref) {
         require Mediabot::Channel;
         return Mediabot::Channel->new({
@@ -100,8 +115,10 @@ sub get_channel_by_name {
             irc    => $self->{irc},
         });
     }
+
     return undef;
 }
+
 
 # Get channel object by id
 sub getChannelById {
@@ -1997,6 +2014,7 @@ sub channelBans_ctx {
         );
     }
 
+    $sth_now->finish if $sth_now;  # B3: close handle after loop
     _channelban_reply($ctx, "Showing $count/" . scalar(@bans) . " active bans on $target_chan.");
     logBot($self, $ctx->message, $target_chan, "bans", $target_chan);
 
@@ -2878,7 +2896,7 @@ sub userAccessChannel_ctx {
                . " FROM USER"
                . " JOIN USER_CHANNEL ON USER_CHANNEL.id_user = USER.id_user"
                . " JOIN CHANNEL ON CHANNEL.id_channel = USER_CHANNEL.id_channel"
-               . " WHERE USER.nickname LIKE ? AND CHANNEL.name = ?";
+               . " WHERE USER.nickname = ? AND CHANNEL.name = ?";
 
     my $sth = $self->{dbh}->prepare($sQuery);
     unless ($sth && $sth->execute($target, $chan)) {
@@ -3357,7 +3375,7 @@ sub setChannelAntiFloodParams_ctx {
                    CHANNEL_FLOOD.timetowait
             FROM CHANNEL
             JOIN CHANNEL_FLOOD ON CHANNEL.id_channel = CHANNEL_FLOOD.id_channel
-            WHERE CHANNEL.name LIKE ?
+            WHERE CHANNEL.name = ?
         };
 
         my $sth = $self->{dbh}->prepare($sql);
@@ -3715,7 +3733,7 @@ sub setTMDBLangChannel_ctx {
 
 sub getTMDBLangChannel {
 	my ($self, $sChannel) = @_;
-	my $sQuery = "SELECT tmdb_lang FROM CHANNEL WHERE name LIKE ?";
+	my $sQuery = "SELECT tmdb_lang FROM CHANNEL WHERE name = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);

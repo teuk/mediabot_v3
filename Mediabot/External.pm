@@ -13,6 +13,7 @@ use Exporter 'import';
 use Encode qw(encode decode);
 use Try::Tiny;
 use Mediabot::Helpers;
+use Mediabot::ChannelCommands qw(getTMDBLangChannel);
 use JSON::MaybeXS;
 use URI::Escape qw(uri_escape_utf8 uri_escape);
 use HTML::Entities qw(decode_entities);
@@ -1464,7 +1465,7 @@ sub youtubeSearch_ctx {
 # Duration: ISO8601 "PT#H#M#S" -> "1h 02m 03s" / "3m 12s" / "45s"
 sub getFortniteId {
 	my ($self,$sUser) = @_;
-	my $sQuery = "SELECT fortniteid FROM USER WHERE nickname LIKE ?";
+	my $sQuery = "SELECT fortniteid FROM USER WHERE nickname = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sUser)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);

@@ -311,22 +311,33 @@ sub getUserhandle {
 sub getIdUser {
     my ($self, $sUserhandle) = @_;
 
-    my $id_user = undef;
+    return undef unless defined($sUserhandle) && $sUserhandle ne '';
+
     my $sQuery = "SELECT id_user FROM USER WHERE nickname = ?";
     my $sth = $self->{dbh}->prepare($sQuery);
 
-    unless ($sth->execute($sUserhandle)) {
-        $self->{logger}->log(1, "getIdUser() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+    unless ($sth) {
+        $self->{logger}->log(1, "getIdUser() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        return undef;
     }
-    else {
-        if (my $ref = $sth->fetchrow_hashref()) {
-            $id_user = $ref->{id_user};
-        }
+
+    unless ($sth->execute($sUserhandle)) {
+        $self->{logger}->log(1, "getIdUser() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        return undef;
+    }
+
+    my $id_user;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        $id_user = $ref->{id_user};
     }
 
     $sth->finish;
     return $id_user;
 }
+
 
 # Get channel object by name
 sub noticeConsoleChan {
@@ -643,53 +654,73 @@ sub joinChannel {
 
 # Join channels with auto_join enabled, except console
 sub checkUserLevel {
-	my ($self,$iUserLevel,$sLevelRequired) = @_;
-	$self->{logger}->log(4,"isUserLevel() $iUserLevel vs $sLevelRequired");
-	my $sQuery = "SELECT level FROM USER_LEVEL WHERE description like ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sLevelRequired)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $level = $ref->{'level'};
-			if ( $iUserLevel <= $level ) {
-				$sth->finish;
-				return 1;
-			}
-			else {
-				$sth->finish;
-				return 0;
-			}
-		}
-		else {
-			$sth->finish;
-			return 0;
-		}
-	}
+    my ($self, $iUserLevel, $sLevelRequired) = @_;
+
+    return 0 unless defined($iUserLevel);
+    return 0 unless defined($sLevelRequired) && $sLevelRequired ne '';
+
+    $self->{logger}->log(4, "checkUserLevel() $iUserLevel vs $sLevelRequired")
+        if $self->{logger};
+
+    my $sQuery = "SELECT level FROM USER_LEVEL WHERE description = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "checkUserLevel() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        return 0;
+    }
+
+    unless ($sth->execute($sLevelRequired)) {
+        $self->{logger}->log(1, "checkUserLevel() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        return 0;
+    }
+
+    my $ok = 0;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        my $level = $ref->{level};
+        $ok = 1 if defined($level) && $iUserLevel <= $level;
+    }
+
+    $sth->finish;
+    return $ok;
 }
 
+
+# Count the number of users in the database
 # Count the number of users in the database
 sub userCount {
-	my ($self) = @_;
-	my $sQuery = "SELECT count(*) as nbUser FROM USER";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute()) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			$self->{logger}->log(4,"userCount() " . $ref->{'nbUser'});
-			my $nbUser = $ref->{'nbUser'};
-			$sth->finish;
-			return($nbUser);
-		}
-		else {
-			$sth->finish;
-			return 0;
-		}
-	}
+    my ($self) = @_;
+
+    my $sQuery = "SELECT count(*) as nbUser FROM USER";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "userCount() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        return 0;
+    }
+
+    unless ($sth->execute()) {
+        $self->{logger}->log(1, "userCount() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        return 0;
+    }
+
+    my $nbUser = 0;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        $nbUser = $ref->{nbUser} // 0;
+        $self->{logger}->log(4, "userCount() $nbUser")
+            if $self->{logger};
+    }
+
+    $sth->finish;
+    return $nbUser;
 }
+
 
 sub getMessageHostmask {
 	my ($self,$message) = @_;
@@ -785,73 +816,112 @@ sub partChannel {
 
 # Check if a user has a specific level on a channel
 sub checkUserChannelLevel {
-	my ($self,$message,$sChannel,$id_user,$level) = @_;
-	my $sQuery = "SELECT level FROM CHANNEL JOIN USER_CHANNEL ON USER_CHANNEL.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ? AND USER_CHANNEL.id_user = ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel,$id_user)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $iLevel = $ref->{'level'};
-			if ( $iLevel >= $level ) {
-				$sth->finish;
-				return 1;
-			}
-			else {
-				$sth->finish;
-				return 0;
-			}
-		}
-		else {
-			$sth->finish;
-			return 0;
-		}
-	}	
+    my ($self, $message, $sChannel, $id_user, $level) = @_;
+
+    return 0 unless defined($sChannel) && $sChannel ne '';
+    return 0 unless defined($id_user)  && $id_user  ne '';
+    return 0 unless defined($level);
+
+    my $sQuery = "SELECT level FROM CHANNEL JOIN USER_CHANNEL ON USER_CHANNEL.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ? AND USER_CHANNEL.id_user = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "checkUserChannelLevel() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        return 0;
+    }
+
+    unless ($sth->execute($sChannel, $id_user)) {
+        $self->{logger}->log(1, "checkUserChannelLevel() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        return 0;
+    }
+
+    my $ok = 0;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        my $iLevel = $ref->{level};
+        $ok = 1 if defined($iLevel) && $iLevel >= $level;
+    }
+
+    $sth->finish;
+    return $ok;
 }
+
 
 # Join a channel (Administrator+ OR channel-level >= 450)
 sub getIdUserChannelLevel {
-	my ($self,$sUserHandle,$sChannel) = @_;
-	my $sQuery = "SELECT USER.id_user, USER_CHANNEL.level FROM CHANNEL JOIN USER_CHANNEL ON USER_CHANNEL.id_channel = CHANNEL.id_channel JOIN USER ON USER.id_user = USER_CHANNEL.id_user WHERE USER.nickname = ? AND CHANNEL.name = ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sUserHandle,$sChannel)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $id_user = $ref->{'id_user'};
-			my $level = $ref->{'level'};
-			$self->{logger}->log(4,"getIdUserChannelLevel() $id_user $level");
-			$sth->finish;
-			return ($id_user,$level);
-		}
-		else {
-			$sth->finish;
-			return (undef,undef);
-		}
-	}
+    my ($self, $sUserHandle, $sChannel) = @_;
+
+    return (undef, undef) unless defined($sUserHandle) && $sUserHandle ne '';
+    return (undef, undef) unless defined($sChannel)    && $sChannel    ne '';
+
+    my $sQuery = "SELECT USER.id_user, USER_CHANNEL.level FROM CHANNEL JOIN USER_CHANNEL ON USER_CHANNEL.id_channel = CHANNEL.id_channel JOIN USER ON USER.id_user = USER_CHANNEL.id_user WHERE USER.nickname = ? AND CHANNEL.name = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "getIdUserChannelLevel() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        return (undef, undef);
+    }
+
+    unless ($sth->execute($sUserHandle, $sChannel)) {
+        $self->{logger}->log(1, "getIdUserChannelLevel() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        return (undef, undef);
+    }
+
+    my ($id_user, $level) = (undef, undef);
+    if (my $ref = $sth->fetchrow_hashref()) {
+        $id_user = $ref->{id_user};
+        $level   = $ref->{level};
+        $self->{logger}->log(4, "getIdUserChannelLevel() $id_user $level")
+            if $self->{logger};
+    }
+
+    $sth->finish;
+    return ($id_user, $level);
 }
+
 
 # Give operator (+o) to a nick on a channel.
 # Requires: authenticated user AND (Administrator+ OR channel-level >= 100).
 sub getUserChannelLevelByName {
-	my ($self,$sChannel,$sHandle) = @_;
-	my $iChannelUserLevel = 0;
-	my $sQuery = "SELECT USER_CHANNEL.level FROM USER JOIN USER_CHANNEL ON USER_CHANNEL.id_user = USER.id_user JOIN CHANNEL ON CHANNEL.id_channel = USER_CHANNEL.id_channel WHERE CHANNEL.name = ? AND USER.nickname = ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel,$sHandle)) {
-		$self->{logger}->log(1,"getUserChannelLevelByName() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			$iChannelUserLevel = $ref->{'level'};
-		}
-		$self->{logger}->log(4,"getUserChannelLevelByName() iChannelUserLevel = $iChannelUserLevel");
-	}
-	$sth->finish;
-	return $iChannelUserLevel;
+    my ($self, $sChannel, $sHandle) = @_;
+
+    return 0 unless defined($sChannel) && $sChannel ne '';
+    return 0 unless defined($sHandle)  && $sHandle  ne '';
+
+    my $sQuery = "SELECT USER_CHANNEL.level FROM USER JOIN USER_CHANNEL ON USER_CHANNEL.id_user = USER.id_user JOIN CHANNEL ON CHANNEL.id_channel = USER_CHANNEL.id_channel WHERE CHANNEL.name = ? AND USER.nickname = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "getUserChannelLevelByName() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        return 0;
+    }
+
+    unless ($sth->execute($sChannel, $sHandle)) {
+        $self->{logger}->log(1, "getUserChannelLevelByName() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        return 0;
+    }
+
+    my $iChannelUserLevel = 0;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        $iChannelUserLevel = $ref->{level} // 0;
+    }
+
+    $sth->finish;
+
+    $self->{logger}->log(4, "getUserChannelLevelByName() iChannelUserLevel = $iChannelUserLevel")
+        if $self->{logger};
+
+    return $iChannelUserLevel;
 }
+
 
 sub setChannelAntiFlood {
 	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
@@ -955,51 +1025,72 @@ sub logBotAction {
     my $sUserhost = "";
     $sUserhost = $message->prefix if defined $message;
 
-    # Optional debug
     if (defined $sChannel) {
         $self->{logger}->log(5, "logBotAction() eventtype = $eventtype chan = $sChannel nick = $sNick text = $sText");
-    } else {
+    }
+    else {
         $self->{logger}->log(5, "logBotAction() eventtype = $eventtype nick = $sNick text = $sText");
     }
 
-    $self->{logger}->log(5, "logBotAction() prefix=" . ($message->prefix // "?") . " command=" . ($message->command // "?")) if defined($self->{logger}->{debug}) && $self->{logger}->{debug} >= 5;
+    $self->{logger}->log(5, "logBotAction() prefix=" . ($message->prefix // "?") . " command=" . ($message->command // "?"))
+        if defined($message) && defined($self->{logger}->{debug}) && $self->{logger}->{debug} >= 5;
 
     my $id_channel;
 
-    # Only look up channel ID if channel is defined (not for QUIT events)
     if (defined $sChannel) {
         my $sQuery = "SELECT id_channel FROM CHANNEL WHERE name = ?";
         my $sth = $self->{dbh}->prepare($sQuery);
 
+        unless ($sth) {
+            $self->{logger}->log(1, "logBotAction() SQL prepare error: $DBI::errstr Query: $sQuery")
+                if $self->{logger};
+            return;
+        }
+
         unless ($sth->execute($sChannel)) {
-            $self->{logger}->log(1, "logBotAction() SQL Error: $DBI::errstr Query: $sQuery");
+            $self->{logger}->log(1, "logBotAction() SQL execute error: $DBI::errstr Query: $sQuery")
+                if $self->{logger};
             $sth->finish;
             return;
         }
 
         my $ref = $sth->fetchrow_hashref();
         $sth->finish;
+
         unless ($ref) {
-            $self->{logger}->log(4, "logBotAction() channel not found: $sChannel");
+            $self->{logger}->log(4, "logBotAction() channel not found: $sChannel")
+                if $self->{logger};
             return;
         }
 
-        $id_channel = $ref->{'id_channel'};
+        $id_channel = $ref->{id_channel};
     }
 
-    # Perform the actual insert — ts will be auto-filled by MariaDB
     my $insert_query = <<'SQL';
 INSERT INTO CHANNEL_LOG (id_channel, event_type, nick, userhost, publictext)
 VALUES (?, ?, ?, ?, ?)
 SQL
 
     my $sth_insert = $self->{dbh}->prepare($insert_query);
-    unless ($sth_insert->execute($id_channel, $eventtype, $sNick, $sUserhost, $sText)) {
-        $self->{logger}->log(1, "logBotAction() SQL Insert Error: $DBI::errstr Query: $insert_query");
-    } else {
-        $self->{logger}->log(5, "logBotAction() inserted $eventtype event into CHANNEL_LOG");
+
+    unless ($sth_insert) {
+        $self->{logger}->log(1, "logBotAction() SQL insert prepare error: $DBI::errstr Query: $insert_query")
+            if $self->{logger};
+        return;
     }
+
+    unless ($sth_insert->execute($id_channel, $eventtype, $sNick, $sUserhost, $sText)) {
+        $self->{logger}->log(1, "logBotAction() SQL insert execute error: $DBI::errstr Query: $insert_query")
+            if $self->{logger};
+        $sth_insert->finish;
+        return;
+    }
+
+    $sth_insert->finish;
+    $self->{logger}->log(5, "logBotAction() inserted $eventtype event into CHANNEL_LOG")
+        if $self->{logger};
 }
+
 
 
 # Send a private message to a target
@@ -1313,19 +1404,21 @@ sub getDetailedVersion {
 sub getIdChannelSet {
     my ($self, $sChannel, $id_chanset_list) = @_;
 
-    # Basic sanity checks
     unless (defined $sChannel && $sChannel ne '') {
-        $self->{logger}->log(2, "⚠️ getIdChannelSet() called without a channel name");
+        $self->{logger}->log(2, "⚠️ getIdChannelSet() called without a channel name")
+            if $self->{logger};
         return undef;
     }
+
     unless (defined $id_chanset_list && $id_chanset_list ne '') {
-        $self->{logger}->log(2, "⚠️ getIdChannelSet() called without an id_chanset_list");
+        $self->{logger}->log(2, "⚠️ getIdChannelSet() called without an id_chanset_list")
+            if $self->{logger};
         return undef;
     }
 
-    $self->{logger}->log(4, "🔍 getIdChannelSet() searching for chanset_list_id=$id_chanset_list in channel '$sChannel'");
+    $self->{logger}->log(4, "🔍 getIdChannelSet() searching for chanset_list_id=$id_chanset_list in channel '$sChannel'")
+        if $self->{logger};
 
-    my $id_channel_set;
     my $sQuery = q{
         SELECT id_channel_set
         FROM CHANNEL_SET
@@ -1335,23 +1428,34 @@ sub getIdChannelSet {
 
     my $sth = $self->{dbh}->prepare($sQuery);
 
-    if (!$sth->execute($sChannel, $id_chanset_list)) {
-        # SQL execution failed
-        $self->{logger}->log(1, "❌ SQL Error in getIdChannelSet(): " . $DBI::errstr . " | Query: $sQuery");
+    unless ($sth) {
+        $self->{logger}->log(1, "❌ SQL prepare error in getIdChannelSet(): " . $DBI::errstr . " | Query: $sQuery")
+            if $self->{logger};
+        return undef;
+    }
+
+    unless ($sth->execute($sChannel, $id_chanset_list)) {
+        $self->{logger}->log(1, "❌ SQL execute error in getIdChannelSet(): " . $DBI::errstr . " | Query: $sQuery")
+            if $self->{logger};
+        $sth->finish;
+        return undef;
+    }
+
+    my $id_channel_set;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        $id_channel_set = $ref->{id_channel_set};
+        $self->{logger}->log(4, "✅ getIdChannelSet() found id_channel_set=$id_channel_set for channel '$sChannel' and chanset_list_id=$id_chanset_list")
+            if $self->{logger};
     }
     else {
-        if (my $ref = $sth->fetchrow_hashref()) {
-            $id_channel_set = $ref->{id_channel_set};
-            $self->{logger}->log(4, "✅ getIdChannelSet() found id_channel_set=$id_channel_set for channel '$sChannel' and chanset_list_id=$id_chanset_list");
-        }
-        else {
-            $self->{logger}->log(4, "ℹ️ getIdChannelSet() no matching record for channel '$sChannel' and chanset_list_id=$id_chanset_list");
-        }
+        $self->{logger}->log(4, "ℹ️ getIdChannelSet() no matching record for channel '$sChannel' and chanset_list_id=$id_chanset_list")
+            if $self->{logger};
     }
 
     $sth->finish;
     return $id_channel_set;
 }
+
 
 # Purge a channel from the bot: delete it and archive its data (Context-based) and Administrator only
 
@@ -1679,17 +1783,10 @@ sub mbDbCheckNickHostname_ctx {
     my $is_private = !defined($ctx->channel) || $ctx->channel eq '';
     my $dest_chan  = $ctx->channel;
 
-    # Optimization: use '=' when caller doesn't provide wildcards
-    my $use_like = ($search =~ /[%_]/) ? 1 : 0;
-
-    my $sql = $use_like ? <<'SQL' : <<'SQL';
-SELECT userhost, COUNT(*) AS hits
-FROM CHANNEL_LOG
-WHERE nick LIKE ?
-GROUP BY userhost
-ORDER BY hits DESC
-LIMIT 10
-SQL
+    # Exact nick lookup.
+    # checknick is not a wildcard search command: '%' and '_' must be treated
+    # as literal nick characters, not SQL LIKE wildcards.
+    my $sql = <<'SQL';
 SELECT userhost, COUNT(*) AS hits
 FROM CHANNEL_LOG
 WHERE nick = ?
@@ -2497,13 +2594,25 @@ sub mp3_ctx {
 
     # Build a LIKE pattern safely:
     #   - split on spaces
+    #   - escape SQL LIKE wildcards from user input
     #   - join with '%' so "foo bar" -> "%foo%bar%"
     #   - bind as param instead of interpolating raw
+    #
+    # Use ESCAPE '!' so literal %, _ and ! in the search are not treated as
+    # SQL wildcards.
     my @tokens = grep { length } split(/\s+/, $text);
-    my $pattern = '%' . join('%', @tokens) . '%';
+    my @safe_tokens = map {
+        my $t = $_;
+        $t =~ s/!/!!/g;
+        $t =~ s/%/!%/g;
+        $t =~ s/_/!_/g;
+        $t;
+    } @tokens;
+
+    my $pattern = '%' . join('%', @safe_tokens) . '%';
 
     # 1) Count matching MP3s
-    my $sql_count = "SELECT COUNT(*) AS nbMp3 FROM MP3 WHERE CONCAT(artist, ' ', title) LIKE ?";
+    my $sql_count = "SELECT COUNT(*) AS nbMp3 FROM MP3 WHERE CONCAT(artist, ' ', title) LIKE ? ESCAPE '!'";
     $self->{logger}->log(4, "mp3_ctx(): $sql_count (pattern=$pattern)");
     my $sth = $self->{dbh}->prepare($sql_count);
 
@@ -2525,7 +2634,7 @@ sub mp3_ctx {
 
     # 2) Fetch first matching result
     my $sql_first = "SELECT id_mp3, id_youtube, artist, title, folder, filename FROM MP3 ".
-                    "WHERE CONCAT(artist, ' ', title) LIKE ? LIMIT 1";
+                    "WHERE CONCAT(artist, ' ', title) LIKE ? ESCAPE '!' LIMIT 1";
     $self->{logger}->log(4, "mp3_ctx(): $sql_first (pattern=$pattern)");
     $sth = $self->{dbh}->prepare($sql_first);
 
@@ -2564,7 +2673,7 @@ sub mp3_ctx {
         # 3) If multiple matches, show up to 10 IDs
         if ($nbMp3 > 1) {
             my $sql_list = "SELECT id_mp3, id_youtube, artist, title, folder, filename ".
-                           "FROM MP3 WHERE CONCAT(artist, ' ', title) LIKE ? LIMIT 10";
+                           "FROM MP3 WHERE CONCAT(artist, ' ', title) LIKE ? ESCAPE '!' LIMIT 10";
             $self->{logger}->log(4, "mp3_ctx(): $sql_list (pattern=$pattern)");
             my $sth2 = $self->{dbh}->prepare($sql_list);
 
@@ -2845,12 +2954,31 @@ sub resolve_ctx {
 
 sub _tz_exists {
     my ($self, $tz) = @_;
-    my $sth = $self->{dbh}->prepare("SELECT tz FROM TIMEZONE WHERE tz LIKE ?");
-    unless ($sth->execute($tz)) { $sth->finish; return undef; }
+
+    return undef unless defined($tz) && $tz ne '';
+
+    my $sql = "SELECT tz FROM TIMEZONE WHERE tz = ?";
+    my $sth = $self->{dbh}->prepare($sql);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "_tz_exists() SQL prepare error: $DBI::errstr Query: $sql")
+            if $self->{logger};
+        return undef;
+    }
+
+    unless ($sth->execute($tz)) {
+        $self->{logger}->log(1, "_tz_exists() SQL execute error: $DBI::errstr Query: $sql")
+            if $self->{logger};
+        $sth->finish;
+        return undef;
+    }
+
     my $ref = $sth->fetchrow_hashref();
     $sth->finish;
+
     return $ref;
 }
+
 
 # Get a user's timezone
 
@@ -2897,24 +3025,35 @@ sub sethChannelNicks {
 
 
 sub getLevel {
-	my ($self,$sLevel) = @_;
-	my $sQuery = "SELECT level FROM USER_LEVEL WHERE description like ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sLevel)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $level = $ref->{'level'};
-			$sth->finish;
-			return $level;
-		}
-		else {
-			$sth->finish;
-			return undef;
-		}
-	}
+    my ($self, $sLevel) = @_;
+
+    return undef unless defined($sLevel) && $sLevel ne '';
+
+    my $sQuery = "SELECT level FROM USER_LEVEL WHERE description = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "getLevel() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        return undef;
+    }
+
+    unless ($sth->execute($sLevel)) {
+        $self->{logger}->log(1, "getLevel() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        return undef;
+    }
+
+    my $level;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        $level = $ref->{level};
+    }
+
+    $sth->finish;
+    return $level;
 }
+
 
 # Get user info by matching hostmask (for WHOIS response)
 # ---------------------------------------------------------------------------
@@ -2952,8 +3091,16 @@ sub get_user_from_whois {
     };
 
     my $sth = $self->{dbh}->prepare($sQuery);
+    unless ($sth) {
+        $self->{logger}->log(1, "get_user_from_whois() SQL prepare error: $DBI::errstr Query: $sQuery")
+            if $self->{logger};
+        return undef;
+    }
+
     unless ($sth->execute) {
-        $self->{logger}->log(1, "get_user_from_whois() SQL Error: $DBI::errstr");
+        $self->{logger}->log(1, "get_user_from_whois() SQL execute error: $DBI::errstr Query: $sQuery")
+            if $self->{logger};
+        $sth->finish;
         return undef;
     }
 
@@ -2983,13 +3130,23 @@ sub get_user_from_whois {
         my $sth2 = $self->{dbh}->prepare(
             "SELECT level, description FROM USER_LEVEL WHERE id_user_level = ?"
         );
-        if ($sth2->execute($best_ref->{id_user_level})) {
+
+        unless ($sth2) {
+            $self->{logger}->log(1, "get_user_from_whois() level SQL prepare error: $DBI::errstr")
+                if $self->{logger};
+        }
+        elsif ($sth2->execute($best_ref->{id_user_level})) {
             if (my $r2 = $sth2->fetchrow_hashref) {
                 $level      = $r2->{level};
                 $level_desc = $r2->{description};
             }
+            $sth2->finish;
         }
-        $sth2->finish;
+        else {
+            $self->{logger}->log(1, "get_user_from_whois() level SQL execute error: $DBI::errstr")
+                if $self->{logger};
+            $sth2->finish;
+        }
     }
 
     my $user = Mediabot::User->new({
@@ -3055,8 +3212,17 @@ sub getNickInfoWhois {
 
     my $sth = $self->{dbh}->prepare($sCheckQuery);
 
+    unless ($sth) {
+        $self->{logger}->log(1, "getNickInfoWhois() SQL prepare error : " . $DBI::errstr . " Query : " . $sCheckQuery)
+            if $self->{logger};
+        return (undef, undef, undef, undef, undef, undef, undef, undef);
+    }
+
     unless ($sth->execute) {
-        $self->{logger}->log(1, "getNickInfoWhois() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
+        $self->{logger}->log(1, "getNickInfoWhois() SQL execute error : " . $DBI::errstr . " Query : " . $sCheckQuery)
+            if $self->{logger};
+        $sth->finish;
+        return (undef, undef, undef, undef, undef, undef, undef, undef);
     }
     else {
         my $best_ref;
@@ -3091,16 +3257,22 @@ sub getNickInfoWhois {
             my $sGetLevelQuery = "SELECT level, description FROM USER_LEVEL WHERE id_user_level = ?";
             my $sth2 = $self->{dbh}->prepare($sGetLevelQuery);
 
-            unless ($sth2->execute($iMatchingUserLevelId)) {
-                $self->{logger}->log(0, "getNickInfoWhois() SQL Error : " . $DBI::errstr . " Query : " . $sGetLevelQuery);
+            unless ($sth2) {
+                $self->{logger}->log(1, "getNickInfoWhois() level SQL prepare error : " . $DBI::errstr . " Query : " . $sGetLevelQuery)
+                    if $self->{logger};
             }
-            else {
+            elsif ($sth2->execute($iMatchingUserLevelId)) {
                 while (my $ref2 = $sth2->fetchrow_hashref()) {
                     $iMatchingUserLevel     = $ref2->{level};
                     $iMatchingUserLevelDesc = $ref2->{description};
                 }
+                $sth2->finish;
             }
-            $sth2->finish;
+            else {
+                $self->{logger}->log(1, "getNickInfoWhois() level SQL execute error : " . $DBI::errstr . " Query : " . $sGetLevelQuery)
+                    if $self->{logger};
+                $sth2->finish;
+            }
         }
     }
 

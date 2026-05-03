@@ -1680,7 +1680,7 @@ sub on_message_RPL_WHOISUSER {
                         }
                         else {
                             $mediabot->botNotice($WHOIS_VARS{'caller'},"USER: $sMatchingUserHandle ACCESS: $iChannelUserLevelAccess");
-                            my $sQuery = "SELECT automode, greet FROM USER JOIN USER_CHANNEL ON USER_CHANNEL.id_user = USER.id_user JOIN CHANNEL ON CHANNEL.id_channel = USER_CHANNEL.id_channel WHERE USER.nickname LIKE ? AND CHANNEL.name = ?";
+                            my $sQuery = "SELECT automode, greet FROM USER JOIN USER_CHANNEL ON USER_CHANNEL.id_user = USER.id_user JOIN CHANNEL ON CHANNEL.id_channel = USER_CHANNEL.id_channel WHERE USER.nickname = ? AND CHANNEL.name = ?";
                             my $sth = $mediabot->{db}->ensure_connected()->prepare($sQuery);
                             unless ($sth->execute($sMatchingUserHandle,$WHOIS_VARS{'channel'})) {
                                 $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);

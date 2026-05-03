@@ -54,26 +54,34 @@ sub init_auth {
 
 
 # Get autologin status for a user handle (returns 1 if username='#AUTOLOGIN#', else 0)
+# Get autologin status for a user handle (returns 1 if username='#AUTOLOGIN#', else 0)
 sub getUserAutologin {
     my ($self, $sMatchingUserHandle) = @_;
+
+    return 0 unless defined($sMatchingUserHandle) && $sMatchingUserHandle ne '';
 
     my $sQuery = "SELECT 1 FROM USER WHERE nickname = ? AND username = '#AUTOLOGIN#'";
     my $sth = $self->{dbh}->prepare($sQuery);
 
+    unless ($sth) {
+        $self->{logger}->log(1, "getUserAutologin() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        return 0;
+    }
+
     unless ($sth->execute($sMatchingUserHandle)) {
-        $self->{logger}->log(1, "getUserAutologin() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+        $self->{logger}->log(1, "getUserAutologin() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        return 0;
     }
-    else {
-        if (my $ref = $sth->fetchrow_hashref()) {
-            $sth->finish;
-            return 1;
-        }
-        else {
-            $sth->finish;
-            return 0;
-        }
-    }
+
+    my $ok = $sth->fetchrow_hashref() ? 1 : 0;
+    $sth->finish;
+
+    return $ok;
 }
+
 
 # Get user id from user handle
 sub checkAuth {

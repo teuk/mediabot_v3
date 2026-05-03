@@ -1042,9 +1042,9 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.timers' }) if $self->{bot}->{metrics};
         $self->_cmd_timers($stream, $id)
     }
-    elsif ($line =~ /^\.schedule(?:\s+(.*))?$/i) {
+    elsif ($line =~ /^\.schedule(?:\s+(\S+)(?:\s+(\S+))?)?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.schedule' }) if $self->{bot}->{metrics};
-        $self->_cmd_schedule($stream, $id, $1)
+        $self->_cmd_schedule($stream, $id, $1, $2)
     }
     elsif ($line =~ /^\.log(?:\s+(\d+))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.log' }) if $self->{bot}->{metrics};
@@ -1054,17 +1054,10 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.uptime' }) if $self->{bot}->{metrics};
         $self->_cmd_uptime($stream, $id)
     }
-    elsif ($line =~ /^\.schedule\s+(\S+)\s+(\S+)$/i) {
-        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.schedule' }) if $self->{bot}->{metrics};
-        $self->_cmd_schedule($stream, $id, $1, $2)
-    }
+
     elsif ($line =~ /^\.ping$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.ping' }) if $self->{bot}->{metrics};
         $self->_cmd_ping($stream, $id)
-    }
-    elsif ($line =~ /^\.uptime$/i) {
-        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.uptime' }) if $self->{bot}->{metrics};
-        $self->_cmd_uptime($stream, $id)
     }
     elsif ($line =~ /^\.unban\s+(#\S+)\s+(\S+)$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.unban' }) if $self->{bot}->{metrics};
@@ -1738,7 +1731,7 @@ sub _cmd_log {
         return;
     }
 
-    open my $fh, '<', $logfile or do {
+    open my $fh, '<:utf8', $logfile or do {  # A1: log written in UTF-8
         $stream->write("Cannot open log file: $!\r\n");
         return;
     };
@@ -1797,123 +1790,6 @@ sub _cmd_timers {
     }
 }
 
-# ---------------------------------------------------------------------------
-# .schedule <list|status|start|stop|restart> [name]
-# Control registered scheduler tasks at runtime (Master+).
-# ---------------------------------------------------------------------------
-sub _cmd_schedule {
-    my ($self, $stream, $id, $args) = @_;
-
-    my $level = $self->{users}{$id}{level};
-
-    unless (defined($level) && $level <= 1) {
-        $stream->write("Access denied: .schedule requires Master or Owner level.\r\n");
-        return;
-    }
-
-    my $bot   = $self->{bot};
-    my $sched = $bot->{scheduler};
-
-    unless ($sched) {
-        $stream->write("Scheduler not available.\r\n");
-        return;
-    }
-
-    $args //= '';
-    $args =~ s/^\s+|\s+$//g;
-
-    if ($args eq '' || $args =~ /^(?:list|ls)$/i) {
-        return $self->_cmd_timers($stream, $id);
-    }
-
-    my ($action, $name) = split /\s+/, $args, 2;
-    $action = lc($action // '');
-    $name //= '';
-    $name =~ s/^\s+|\s+$//g;
-
-    unless ($action =~ /^(?:status|start|stop|restart)$/) {
-        $stream->write("Usage: .schedule list | status <name> | start <name> | stop <name> | restart <name>\r\n");
-        return;
-    }
-
-    unless ($name =~ /^[A-Za-z0-9_.:-]{1,64}$/) {
-        $stream->write("Invalid scheduler task name.\r\n");
-        return;
-    }
-
-    my $info;
-
-    if ($sched->can('task_info')) {
-        $info = eval { $sched->task_info($name) };
-    }
-    else {
-        my @infos = eval { $sched->all_info };
-        for my $candidate (@infos) {
-            next unless $candidate && ref($candidate) eq 'HASH';
-            if (($candidate->{name} // '') eq $name) {
-                $info = $candidate;
-                last;
-            }
-        }
-    }
-
-    unless ($info) {
-        $stream->write("No such scheduler task: $name\r\n");
-        return;
-    }
-
-    if ($action eq 'status') {
-        my $last = $info->{last_tick}
-            ? scalar localtime($info->{last_tick})
-            : 'never';
-
-        $stream->write("Scheduler task '$name': interval=$info->{interval}s active="
-            . ($info->{started} ? 'yes' : 'no')
-            . " ticks=$info->{ticks} last_tick=$last\r\n");
-        return;
-    }
-
-    my $ok = eval {
-        if ($action eq 'start') {
-            $sched->start($name);
-        }
-        elsif ($action eq 'stop') {
-            $sched->stop($name);
-        }
-        elsif ($action eq 'restart') {
-            $sched->stop($name);
-            $sched->start($name);
-        }
-
-        1;
-    };
-
-    unless ($ok) {
-        my $err = $@ || 'unknown scheduler error';
-        chomp $err;
-
-        $self->{bot}->{logger}->log(1, "Partyline .schedule $action $name failed: $err")
-            if $self->{bot}->{logger};
-
-        $stream->write("Scheduler action failed for '$name': $err\r\n");
-        return;
-    }
-
-    if ($action eq 'start') {
-        $stream->write("Scheduler task '$name' started.\r\n");
-        return;
-    }
-
-    if ($action eq 'stop') {
-        $stream->write("Scheduler task '$name' stopped.\r\n");
-        return;
-    }
-
-    if ($action eq 'restart') {
-        $stream->write("Scheduler task '$name' restarted.\r\n");
-        return;
-    }
-}
 
 # ---------------------------------------------------------------------------
 # _format_duration($seconds)
@@ -1943,27 +1819,6 @@ sub _format_duration {
 }
 
 
-# ---------------------------------------------------------------------------
-# .uptime  - show bot uptime
-# ---------------------------------------------------------------------------
-sub _cmd_uptime {
-    my ($self, $stream, $id) = @_;
-    my $bot   = $self->{bot};
-    my $start = eval { $bot->{metrics}->{started} } // time();
-    my $secs  = time() - $start;
-    my $d = int($secs / 86400);
-    my $h = int(($secs % 86400) / 3600);
-    my $m = int(($secs % 3600) / 60);
-    my $s = $secs % 60;
-    my $str = '';
-    $str .= "${d}d " if $d;
-    $str .= "${h}h " if $h;
-    $str .= "${m}m " if $m;
-    $str .= "${s}s";
-    $str =~ s/\s+$//;
-    $stream->write("Uptime: $str\r\n");
-}
-
 
 # ---------------------------------------------------------------------------
 # .schedule <start|stop> <name>  - control a Scheduler task at runtime
@@ -1978,20 +1833,58 @@ sub _cmd_schedule {
         return;
     }
 
-    unless (defined $action && defined $name) {
-        $stream->write("Usage: .schedule <start|stop> <task_name>\r\n");
-        $stream->write("Tasks: " . join(', ', $sched->task_names) . "\r\n");
+    my $act = lc($action // 'list');
+
+    # A3: list, status, start, stop
+    if ($act eq 'list' || !defined $action) {
+        my @infos = $sched->all_info;
+        unless (@infos) {
+            $stream->write("No scheduled tasks.\r\n");
+            return;
+        }
+        $stream->write(sprintf("%-28s %-8s %-8s %s\r\n", "Name", "Interval", "Status", "Ticks"));
+        $stream->write(("-" x 58) . "\r\n");
+        for my $t (@infos) {
+            $stream->write(sprintf("%-28s %-8s %-8s %d\r\n",
+                $t->{name}, "$t->{interval}s",
+                ($t->{started} ? "running" : "stopped"),
+                $t->{ticks}));
+        }
         return;
     }
 
-    if (lc($action) eq 'start') {
+    if ($act eq 'status') {
+        my $info = defined $name ? $sched->task_info($name) : undef;
+        unless ($info) {
+            $stream->write("Usage: .schedule status <task_name>\r\n");
+            $stream->write("Tasks: " . join(', ', $sched->task_names) . "\r\n");
+            return;
+        }
+        my $last = $info->{last_tick}
+            ? do { my @lt = localtime($info->{last_tick});
+                   sprintf("%02d:%02d:%02d", $lt[2], $lt[1], $lt[0]) }
+            : "never";
+        $stream->write("Task:     $info->{name}\r\n");
+        $stream->write("Interval: $info->{interval}s\r\n");
+        $stream->write("Status:   " . ($info->{started} ? "running" : "stopped") . "\r\n");
+        $stream->write("Ticks:    $info->{ticks}\r\n");
+        $stream->write("Last run: $last\r\n");
+        return;
+    }
+
+    unless (defined $name) {
+        $stream->write("Usage: .schedule <list|status|start|stop> [task_name]\r\n");
+        return;
+    }
+
+    if ($act eq 'start') {
         $sched->start($name);
         $stream->write("Task '$name' started.\r\n");
-    } elsif (lc($action) eq 'stop') {
+    } elsif ($act eq 'stop') {
         $sched->stop($name);
         $stream->write("Task '$name' stopped.\r\n");
     } else {
-        $stream->write("Unknown action '$action'. Use start or stop.\r\n");
+        $stream->write("Unknown action '$act'. Use: list status start stop\r\n");
     }
 }
 
@@ -2784,6 +2677,7 @@ sub _cmd_eval {
     $eval_timeout = 15 if $eval_timeout > 15;
 
     $bot->{logger}->log(1, "Partyline: $nick executing eval in subprocess timeout=${eval_timeout}s: $code");
+    eval { noticeConsoleChan($bot, "[partyline] $nick .eval: $code") };
     $self->_broadcast("[${nick}\@partyline] .eval $code", $id);
 
     my $pid = open(my $pipe, "-|");

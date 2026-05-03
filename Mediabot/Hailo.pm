@@ -58,7 +58,7 @@ sub get_hailo {
 # Clean up and exit the program (with proper Net::Async::IRC QUIT)
 sub is_hailo_excluded_nick {
 	my ($self,$nick) = @_;
-	my $sQuery = "SELECT 1 FROM HAILO_EXCLUSION_NICK WHERE nick LIKE ?";
+	my $sQuery = "SELECT 1 FROM HAILO_EXCLUSION_NICK WHERE nick = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($nick)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -346,7 +346,7 @@ sub hailo_status_ctx {
 # Get the Hailo chatter ratio for a specific channel
 sub get_hailo_channel_ratio {
 	my ($self,$sChannel) = @_;
-	my $sQuery = "SELECT HAILO_CHANNEL.ratio FROM HAILO_CHANNEL JOIN CHANNEL ON CHANNEL.id_channel = HAILO_CHANNEL.id_channel WHERE CHANNEL.name LIKE ?";
+	my $sQuery = "SELECT HAILO_CHANNEL.ratio FROM HAILO_CHANNEL JOIN CHANNEL ON CHANNEL.id_channel = HAILO_CHANNEL.id_channel WHERE CHANNEL.name = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);

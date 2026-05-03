@@ -41,25 +41,44 @@ our @EXPORT = qw(
 );
 
 sub dbLogoutUsers {
-	my ($self) = shift;
-	my $LOG = $self->{LOG};
-	my $dbh = $self->{dbh};
-	my $sLogoutQuery = "UPDATE USER SET auth=0 WHERE auth=1";
-	my $sth = $dbh->prepare($sLogoutQuery);
-	unless ($sth->execute) {
-		$self->{logger}->log(0,"dbLogoutUsers() SQL Error : " . $DBI::errstr . "(" . $DBI::err . ") Query : " . $sLogoutQuery);
-	}
-	else {	
-		$self->{logger}->log(1,"Logged out all users");
-	}
-	$sth->finish;
+    my ($self) = @_;
+
+    my $dbh = $self->{dbh};
+    unless ($dbh) {
+        $self->{logger}->log(1, "dbLogoutUsers() no database handle")
+            if $self->{logger};
+        return 0;
+    }
+
+    my $sLogoutQuery = "UPDATE USER SET auth=0 WHERE auth=1";
+    my $sth = $dbh->prepare($sLogoutQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "dbLogoutUsers() SQL prepare error : " . $DBI::errstr . " Query : " . $sLogoutQuery)
+            if $self->{logger};
+        return 0;
+    }
+
+    unless ($sth->execute()) {
+        $self->{logger}->log(1, "dbLogoutUsers() SQL execute error : " . $DBI::errstr . "(" . $DBI::err . ") Query : " . $sLogoutQuery)
+            if $self->{logger};
+        $sth->finish;
+        return 0;
+    }
+
+    $sth->finish;
+    $self->{logger}->log(1, "Logged out all users")
+        if $self->{logger};
+
+    return 1;
 }
+
 
 # Set server attribute
 sub getUserName {
-	my $self = shift;
-	my $conf = $self->{conf};
-	return $conf->get('connection.CONN_USERNAME');
+    my $self = shift;
+    my $conf = $self->{conf};
+    return $conf->get('connection.CONN_USERNAME');
 }
 
 # Get IRC real name from configuration
@@ -72,10 +91,16 @@ sub userOnJoin {
     if ($user) {
         # Check for channel-specific user settings (auto mode and greet)
         my $sql = "SELECT uc.*, c.* FROM USER_CHANNEL AS uc JOIN CHANNEL AS c ON c.id_channel = uc.id_channel WHERE c.name = ? AND uc.id_user = ?;";
-        $self->{logger}->log(4, $sql);
+        $self->{logger}->log(4, $sql)
+            if $self->{logger};
+
         my $sth = $self->{dbh}->prepare($sql);
 
-        if ($sth->execute($sChannel, $user->id)) {
+        unless ($sth) {
+            $self->{logger}->log(1, "userOnJoin() SQL prepare error: " . $DBI::errstr . " Query: $sql")
+                if $self->{logger};
+        }
+        elsif ($sth->execute($sChannel, $user->id)) {
             if (my $ref = $sth->fetchrow_hashref()) {
 
                 # Apply auto mode if defined
@@ -95,16 +120,28 @@ sub userOnJoin {
                     botPrivmsg($self, $sChannel, "($user->{nickname}) $greet");
                 }
             }
-        } else {
-            $self->{logger}->log(1, "userOnJoin() SQL Error: " . $DBI::errstr . " Query: $sql");
+
+            $sth->finish;
         }
-        $sth->finish;
+        else {
+            $self->{logger}->log(1, "userOnJoin() SQL execute error: " . $DBI::errstr . " Query: $sql")
+                if $self->{logger};
+            $sth->finish;
+        }
     }
 
     # Now check if the channel has a default notice to send on join
     my $sql_channel = "SELECT id_channel, notice FROM CHANNEL WHERE name = ?";
-    $self->{logger}->log(4, $sql_channel);
+    $self->{logger}->log(4, $sql_channel)
+        if $self->{logger};
+
     my $sth = $self->{dbh}->prepare($sql_channel);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "userOnJoin() channel SQL prepare error: " . $DBI::errstr . " Query: $sql_channel")
+            if $self->{logger};
+        return;
+    }
 
     if ($sth->execute($sChannel)) {
         if (my $ref = $sth->fetchrow_hashref()) {
@@ -113,56 +150,83 @@ sub userOnJoin {
                 botNotice($self, $sNick, $notice);
             }
         }
-    } else {
-        $self->{logger}->log(1, "userOnJoin() SQL Error: " . $DBI::errstr . " Query: $sql_channel");
+
+        $sth->finish;
+    }
+    else {
+        $self->{logger}->log(1, "userOnJoin() channel SQL execute error: " . $DBI::errstr . " Query: $sql_channel")
+            if $self->{logger};
+        $sth->finish;
     }
 
-    $sth->finish;
+    return;
 }
+
 
 # 🧙‍♂️ mbCommandPublic: The Sorting Hat of Mediabot – routes every incantation to the proper spell
 sub getIdUserLevel {
-	my ($self,$sLevel) = @_;
-	my $sQuery = "SELECT id_user_level FROM USER_LEVEL WHERE description like ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sLevel)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $id_user_level = $ref->{'id_user_level'};
-			$sth->finish;
-			return $id_user_level;
-		}
-		else {
-			$sth->finish;
-			return undef;
-		}
-	}
+    my ($self, $sLevel) = @_;
+
+    return undef unless defined($sLevel) && $sLevel ne '';
+
+    my $sQuery = "SELECT id_user_level FROM USER_LEVEL WHERE description = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "getIdUserLevel() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        return undef;
+    }
+
+    unless ($sth->execute($sLevel)) {
+        $self->{logger}->log(1, "getIdUserLevel() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        return undef;
+    }
+
+    my $id_user_level;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        $id_user_level = $ref->{id_user_level};
+    }
+
+    $sth->finish;
+    return $id_user_level;
 }
 
+
+# Get user level (numeric) from nickname (handle)
 # Get user level (numeric) from nickname (handle)
 sub getLevelUser {
     my ($self, $sUserHandle) = @_;
 
+    return undef unless defined($sUserHandle) && $sUserHandle ne '';
+
     my $sQuery = "SELECT USER_LEVEL.level FROM USER JOIN USER_LEVEL ON USER_LEVEL.id_user_level = USER.id_user_level WHERE USER.nickname = ?";
     my $sth = $self->{dbh}->prepare($sQuery);
 
+    unless ($sth) {
+        $self->{logger}->log(1, "getLevelUser() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        return undef;
+    }
+
     unless ($sth->execute($sUserHandle)) {
-        $self->{logger}->log(1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+        $self->{logger}->log(1, "getLevelUser() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        return undef;
     }
-    else {
-        if (my $ref = $sth->fetchrow_hashref()) {
-            my $level = $ref->{level};
-            $sth->finish;
-            return $level;
-        }
-        else {
-            $sth->finish;
-            return undef;
-        }
+
+    my $level;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        $level = $ref->{level};
     }
+
+    $sth->finish;
+    return $level;
 }
+
 
 sub userCstat_ctx {
     my ($ctx) = @_;
@@ -257,24 +321,35 @@ sub addUser_ctx {
 }
 
 sub getUserLevelDesc {
-	my ($self,$level) = @_;
-	my $sQuery = "SELECT description FROM USER_LEVEL WHERE level=?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($level)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $sDescription = $ref->{'description'};
-			$sth->finish;
-			return $sDescription;
-		}
-		else {
-			$sth->finish;
-			return undef;
-		}
-	}
+    my ($self, $level) = @_;
+
+    return undef unless defined($level) && $level ne '';
+
+    my $sQuery = "SELECT description FROM USER_LEVEL WHERE level = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "getUserLevelDesc() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        return undef;
+    }
+
+    unless ($sth->execute($level)) {
+        $self->{logger}->log(1, "getUserLevelDesc() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        return undef;
+    }
+
+    my $sDescription;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        $sDescription = $ref->{description};
+    }
+
+    $sth->finish;
+    return $sDescription;
 }
+
 
 # Context-based: Display user statistics to Master level users
 sub userStats_ctx {
@@ -497,24 +572,36 @@ sub addUserHost_ctx {
 
 # Context-based addchan command: add a new channel and register it with a user (Administrator only)
 sub getUserChannelLevel {
-	my ($self,$message,$sChannel,$id_user) = @_;
-	my $sQuery = "SELECT USER_CHANNEL.level FROM CHANNEL JOIN USER_CHANNEL ON USER_CHANNEL.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ? AND USER_CHANNEL.id_user = ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel,$id_user)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $iLevel = $ref->{'level'};
-			$sth->finish;
-			return $iLevel;
-		}
-		else {
-			$sth->finish;
-			return 0;
-		}
-	}	
+    my ($self, $message, $sChannel, $id_user) = @_;
+
+    return 0 unless defined($sChannel) && $sChannel ne '';
+    return 0 unless defined($id_user)  && $id_user  ne '';
+
+    my $sQuery = "SELECT USER_CHANNEL.level FROM CHANNEL JOIN USER_CHANNEL ON USER_CHANNEL.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ? AND USER_CHANNEL.id_user = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "getUserChannelLevel() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        return 0;
+    }
+
+    unless ($sth->execute($sChannel, $id_user)) {
+        $self->{logger}->log(1, "getUserChannelLevel() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        return 0;
+    }
+
+    my $iLevel = 0;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        $iLevel = $ref->{level} // 0;
+    }
+
+    $sth->finish;
+    return $iLevel;
 }
+
 
 # Delete a user from a channel
 # Requires: authenticated + (Administrator+ OR channel-level >= 400)

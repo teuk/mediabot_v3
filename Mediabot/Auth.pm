@@ -263,9 +263,12 @@ sub _update_auth_session_metric {
 # ------------------------------------------------------------------------------
 
 # Internal helper: resolve various user-like inputs to a user row hashref
+# Internal helper: resolve various user-like inputs to a user row hashref
 sub _resolve_user {
     my ($self, $user_like) = @_;
     my $dbh = $self->{dbh};
+
+    return (undef, "no_dbh") unless $dbh;
 
     # Already a hashref with required fields
     if (ref $user_like eq 'HASH' && exists $user_like->{id_user}) {
@@ -278,22 +281,26 @@ sub _resolve_user {
         my $nick = eval { $user_like->nickname } // eval { $user_like->{nickname} };
 
         if ($uid) {
-            my $sth = $dbh->prepare("SELECT id_user, nickname, username, auth FROM USER WHERE id_user = ?");
-            $sth->execute($uid);
-            my $row = $sth->fetchrow_hashref;
-            $sth->finish;
-            return (undef, "object_id_not_found:$uid") unless $row;
-            $row->{hostmasks} = _fetch_hostmasks($dbh, $row->{id_user});
+            my ($row, $err) = $self->_fetch_user_row(
+                "SELECT id_user, nickname, username, auth FROM USER WHERE id_user = ?",
+                $uid,
+                "object_id:$uid",
+            );
+
+            return (undef, $err) unless $row;
+            $row->{hostmasks} = _fetch_hostmasks($dbh, $row->{id_user}, $self->{logger});
             return ($row, undef);
         }
 
         if ($nick) {
-            my $sth = $dbh->prepare("SELECT id_user, nickname, username, auth FROM USER WHERE nickname = ?");
-            $sth->execute($nick);
-            my $row = $sth->fetchrow_hashref;
-            $sth->finish;
-            return (undef, "object_nick_not_found:$nick") unless $row;
-            $row->{hostmasks} = _fetch_hostmasks($dbh, $row->{id_user});
+            my ($row, $err) = $self->_fetch_user_row(
+                "SELECT id_user, nickname, username, auth FROM USER WHERE nickname = ?",
+                $nick,
+                "object_nick:$nick",
+            );
+
+            return (undef, $err) unless $row;
+            $row->{hostmasks} = _fetch_hostmasks($dbh, $row->{id_user}, $self->{logger});
             return ($row, undef);
         }
 
@@ -302,43 +309,91 @@ sub _resolve_user {
 
     # Scalar -> assume id first, then nickname
     if (defined $user_like && $user_like ne '') {
-        my ($sql_r, $val);
+        my ($sql_r, $val, $label);
+
         if ($user_like =~ /^\d+$/) {
             $sql_r = "SELECT id_user, nickname, username, auth FROM USER WHERE id_user = ?";
             $val   = $user_like;
+            $label = "scalar_id:$user_like";
         }
         else {
             $sql_r = "SELECT id_user, nickname, username, auth FROM USER WHERE nickname = ?";
             $val   = $user_like;
+            $label = "scalar_nick:$user_like";
         }
 
-        my $sth = $dbh->prepare($sql_r);
-        $sth->execute($val);
-        my $row = $sth->fetchrow_hashref;
-        $sth->finish;
+        my ($row, $err) = $self->_fetch_user_row($sql_r, $val, $label);
+        return (undef, $err) unless $row;
 
-        return (undef, "scalar_not_found:$user_like") unless $row;
-        $row->{hostmasks} = _fetch_hostmasks($dbh, $row->{id_user});
+        $row->{hostmasks} = _fetch_hostmasks($dbh, $row->{id_user}, $self->{logger});
         return ($row, undef);
     }
 
     return (undef, "undef_input");
 }
 
+
+
+sub _fetch_user_row {
+    my ($self, $sql, $value, $label) = @_;
+
+    my $dbh = $self->{dbh};
+    return (undef, "no_dbh") unless $dbh;
+
+    my $sth = $dbh->prepare($sql);
+    unless ($sth) {
+        $self->_log(0, "_resolve_user: prepare failed for $label: $DBI::errstr");
+        return (undef, "prepare_failed:$label");
+    }
+
+    unless ($sth->execute($value)) {
+        $self->_log(0, "_resolve_user: execute failed for $label: $DBI::errstr");
+        $sth->finish;
+        return (undef, "execute_failed:$label");
+    }
+
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+
+    return (undef, "not_found:$label") unless $row;
+    return ($row, undef);
+}
+
+
+# Returns (ok:boolean, why:string)
+# Internal helper: fetch comma-separated hostmasks from USER_HOSTMASK
 # Returns (ok:boolean, why:string)
 # Internal helper: fetch comma-separated hostmasks from USER_HOSTMASK
 sub _fetch_hostmasks {
-    my ($dbh, $id_user) = @_;
+    my ($dbh, $id_user, $logger) = @_;
+
     return '' unless $dbh && $id_user;
-    my $sth = $dbh->prepare("SELECT hostmask FROM USER_HOSTMASK WHERE id_user = ? ORDER BY id_user_hostmask");
-    return '' unless $sth && $sth->execute($id_user);
+
+    my $sql = "SELECT hostmask FROM USER_HOSTMASK WHERE id_user = ? ORDER BY id_user_hostmask";
+    my $sth = $dbh->prepare($sql);
+
+    unless ($sth) {
+        $logger->log(1, "_fetch_hostmasks() SQL prepare error: $DBI::errstr Query: $sql")
+            if $logger;
+        return '';
+    }
+
+    unless ($sth->execute($id_user)) {
+        $logger->log(1, "_fetch_hostmasks() SQL execute error: $DBI::errstr Query: $sql")
+            if $logger;
+        $sth->finish;
+        return '';
+    }
+
     my @masks;
     while (my $row = $sth->fetchrow_arrayref) {
         push @masks, $row->[0] if defined $row->[0] && $row->[0] ne '';
     }
+
     $sth->finish;
     return join(',', @masks);
 }
+
 
 sub _hostmask_candidates {
     my ($fullmask) = @_;

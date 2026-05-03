@@ -65,51 +65,86 @@ sub getMainTimerTick {
 }
 
 # Set IRC object
+# Set IRC object
 sub onStartTimers {
-	my $self = shift;
-	my %hTimers;
-	my $sQuery = "SELECT id_timers, name, duration, command FROM TIMERS";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute()) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		$self->{logger}->log(1,"Checking timers to set at startup");
-		my $i = 0;
-		while (my $ref = $sth->fetchrow_hashref()) {
-			my $id_timers = $ref->{'id_timers'};
-			my $name = $ref->{'name'};
-			my $duration = $ref->{'duration'};
-			my $command = $ref->{'command'};
-			my $sSecondText = ( $duration > 1 ? "seconds" : "second" );
-			$self->{logger}->log(1,"Timer $name - id : $id_timers - every $duration $sSecondText - command $command");
-			my $timer = IO::Async::Timer::Periodic->new(
-			    interval => $duration,
-			    on_tick => sub {
-			    	$self->{logger}->log(4,"Timer every $duration seconds : $command");
-					if ($self->{irc} && $self->{irc}->is_connected) {
-						$self->{irc}->write("$command\x0d\x0a");
-					} else {
-						$self->{logger}->log(1, "Timer $name skipped: bot not connected to IRC");
-					}
-					},
-			);
-			$hTimers{$name} = $timer;
-			$self->{loop}->add( $timer );
-			$timer->start;
-			$i++;
-		}
-		if ( $i ) {
-			my $sTimerText = ( $i > 1 ? "timers" : "timer" );
-			$self->{logger}->log(1,"$i active $sTimerText set at startup");
-		}
-		else {
-			$self->{logger}->log(1,"No timer to set at startup");
-		}
-	}
-	$sth->finish;
-	%{$self->{hTimers}} = %hTimers;
+    my $self = shift;
+
+    my %hTimers;
+    my $sQuery = "SELECT id_timers, name, duration, command FROM TIMERS";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "onStartTimers() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        %{$self->{hTimers}} = %hTimers;
+        return 0;
+    }
+
+    unless ($sth->execute()) {
+        $self->{logger}->log(1, "onStartTimers() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        %{$self->{hTimers}} = %hTimers;
+        return 0;
+    }
+
+    $self->{logger}->log(1, "Checking timers to set at startup")
+        if $self->{logger};
+
+    my $i = 0;
+
+    while (my $ref = $sth->fetchrow_hashref()) {
+        my $id_timers = $ref->{'id_timers'};
+        my $name      = $ref->{'name'};
+        my $duration  = $ref->{'duration'};
+        my $command   = $ref->{'command'};
+
+        next unless defined($name)     && $name ne '';
+        next unless defined($duration) && $duration =~ /^\d+$/ && $duration > 0;
+        next unless defined($command)  && $command ne '';
+
+        my $sSecondText = ($duration > 1 ? "seconds" : "second");
+        $self->{logger}->log(1, "Timer $name - id : $id_timers - every $duration $sSecondText - command $command")
+            if $self->{logger};
+
+        my $timer = IO::Async::Timer::Periodic->new(
+            interval => $duration,
+            on_tick  => sub {
+                $self->{logger}->log(4, "Timer every $duration seconds : $command")
+                    if $self->{logger};
+
+                if ($self->{irc} && $self->{irc}->is_connected) {
+                    $self->{irc}->write("$command\x0d\x0a");
+                }
+                else {
+                    $self->{logger}->log(1, "Timer $name skipped: bot not connected to IRC")
+                        if $self->{logger};
+                }
+            },
+        );
+
+        $hTimers{$name} = $timer;
+        $self->{loop}->add($timer);
+        $timer->start;
+        $i++;
+    }
+
+    $sth->finish;
+
+    if ($i) {
+        my $sTimerText = ($i > 1 ? "timers" : "timer");
+        $self->{logger}->log(1, "$i active $sTimerText set at startup")
+            if $self->{logger};
+    }
+    else {
+        $self->{logger}->log(1, "No timer to set at startup")
+            if $self->{logger};
+    }
+
+    %{$self->{hTimers}} = %hTimers;
+    return $i;
 }
+
 
 # Handle user join event
 sub dumpCmd_ctx {
@@ -312,12 +347,32 @@ sub mbTimers_ctx {
 
     my $count = 0;
     while (my $r = $sth->fetchrow_hashref) {
+        $count++;
         $self->botNotice($nick, "$r->{name} - every $r->{duration}s - $r->{command}");
         $count++;
     }
     $sth->finish;
 
     $self->botNotice($nick, "No active timers") unless $count;
+
+    # A2: also show Scheduler tasks
+    if ($self->{scheduler} && $self->{scheduler}->can('all_info')) {
+        my @tasks = $self->{scheduler}->all_info;
+        if (@tasks) {
+            $self->botNotice($nick, '--- Scheduler tasks ---');
+            for my $t (@tasks) {
+                my $last = $t->{last_tick}
+                    ? do { my @lt = localtime($t->{last_tick});
+                           sprintf('%02d:%02d:%02d', $lt[2], $lt[1], $lt[0]) }
+                    : 'never';
+                $self->botNotice($nick, sprintf('  %-28s every %ds  %-8s  ticks=%d  last=%s',
+                    $t->{name}, $t->{interval},
+                    ($t->{started} ? 'running' : 'stopped'),
+                    $t->{ticks}, $last));
+            }
+        }
+    }
+
     logBot($self, $ctx->message, undef, 'timers', undef);
 }
 
@@ -399,23 +454,33 @@ sub mbDbAddCommand_ctx {
 }
 
 # Get command category ID from description
+# Get command category ID from description
 sub getCommandCategory {
-	my ($self,$sCategory) = @_;
-	my $sQuery = "SELECT id_public_commands_category FROM PUBLIC_COMMANDS_CATEGORY WHERE description LIKE ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sCategory)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			return ($ref->{'id_public_commands_category'});
-		}
-		else {
-			return undef;
-		}
-	}
-	$sth->finish;
+    my ($self, $sCategory) = @_;
+
+    my $sQuery = "SELECT id_public_commands_category FROM PUBLIC_COMMANDS_CATEGORY WHERE description = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery);
+        return undef;
+    }
+
+    unless ($sth->execute($sCategory)) {
+        $self->{logger}->log(1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+        $sth->finish;
+        return undef;
+    }
+
+    my $id_category;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        $id_category = $ref->{id_public_commands_category};
+    }
+
+    $sth->finish;
+    return $id_category;
 }
+
 
 # Remove a public command from the database (Administrator+)
 # - Allowed if:
