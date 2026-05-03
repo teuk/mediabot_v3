@@ -55,6 +55,7 @@ sub new {
 
     $self->_declare('mediabot_auth_success_total',     'counter', 'Total successful bot auth events');
     $self->_declare('mediabot_auth_failure_total',     'counter', 'Total failed bot auth events');
+    $self->_declare('mediabot_auth_sessions_total',    'gauge',   'Current in-memory authenticated sessions');  # A8
 
     $self->_declare('mediabot_partyline_sessions_current', 'gauge',   'Current open Partyline sessions');
     $self->_declare('mediabot_partyline_logins_total',     'counter', 'Total successful Partyline logins');

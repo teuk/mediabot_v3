@@ -277,6 +277,11 @@ sub mbRehash_ctx {
 
     my $ok = $self->rehash_runtime_state();
 
+    # A6: re-attach the logger to Conf so warn() redirects correctly after reload
+    if ($ok && $self->{conf} && $self->{logger} && $self->{conf}->can('set_logger')) {
+        $self->{conf}->set_logger($self->{logger});
+    }
+
     if ($ok) {
         if (defined $channel && $channel ne '') {
             botPrivmsg($self, $channel, "($nick) Successfully rehashed");
@@ -302,12 +307,6 @@ sub mbRehash_ctx {
 # signature ($self, $message, $sNick, $sChannel, @tArgs) unchanged.
 # ---------------------------------------------------------------------------
 
-sub update_ctx {
-    my ($ctx) = @_;
-    return unless $ctx->require_level('Owner');
-    my $self = $ctx->bot;
-    $self->{logger}->log(4, "update_ctx(): Update TBD");
-}
 
 sub mbExec_ctx {
     my ($ctx) = @_;
@@ -384,9 +383,24 @@ sub mbExec_ctx {
     my $pfx = eval { $message->prefix } // $nick;
     noticeConsoleChan($self, "$pfx exec: $command");
 
-    # Execute command, pipe through tail -n 3 to reduce spam
-    my $shell = "$command | tail -n 3 2>&1";
-    open my $cmd_fh, "-|", $shell or do {
+    # Execute command with a hard timeout and sanitized output.
+    #
+    # This remains an Owner-only shell command, but the bot must not hang forever
+    # if the command blocks. Output is still limited to 3 lines, with IRC-hostile
+    # control characters stripped and long lines shortened.
+    my $exec_timeout = eval { $self->{conf}->get('main.EXEC_TIMEOUT_SECONDS') } || 8;
+    $exec_timeout = 8 unless defined($exec_timeout) && $exec_timeout =~ /^\d+$/;
+    $exec_timeout = 1  if $exec_timeout < 1;
+    $exec_timeout = 30 if $exec_timeout > 30;
+
+    my $timeout_bin = '/usr/bin/timeout';
+
+    my $shell = "$command 2>&1 | tail -n 3";
+    my @runner = (-x $timeout_bin)
+        ? ($timeout_bin, '--kill-after=2s', "${exec_timeout}s", 'sh', '-c', $shell)
+        : ('sh', '-c', $shell);
+
+    open my $cmd_fh, "-|", @runner or do {
         $self->{logger}->log(3, "mbExec_ctx: Failed to execute: $command");
         $send->("Execution failed.");
         return;
@@ -397,13 +411,30 @@ sub mbExec_ctx {
 
     while (my $line = <$cmd_fh>) {
         chomp $line;
+        $line =~ s/\r//g;
+
+        # Strip ASCII control characters except horizontal tab.
+        $line =~ s/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]//g;
+
+        if (length($line) > 350) {
+            $line = substr($line, 0, 347) . '...';
+        }
+
         $send->("$i: $line");
         $has_output = 1;
-        last if ++$i >= 3;    # double safety, even though tail already limits
+        last if ++$i >= 3;
     }
-    close $cmd_fh;
 
-    $send->("No output.") unless $has_output;
+    close $cmd_fh;
+    my $exit_status = $? >> 8;
+
+    if (-x $timeout_bin && ($exit_status == 124 || $exit_status == 137)) {
+        $send->("Command timed out after ${exec_timeout}s.");
+        $self->{logger}->log(2, "mbExec_ctx: command timed out after ${exec_timeout}s: $command");
+    }
+    elsif (!$has_output) {
+        $send->("No output.");
+    }
 
     # Log to ACTIONS_LOG as usual
     logBot($self, $message, ($channel // "(private)"), "exec", $command);

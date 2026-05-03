@@ -77,32 +77,38 @@ sub getUserAutologin {
 
 # Get user id from user handle
 sub checkAuth {
-	my ($self,$iUserId,$sUserHandle,$sPassword) = @_;
-	my $sHashedPw = make_password_hash($sPassword);
-	my $sCheckAuthQuery = "SELECT id_user FROM USER WHERE id_user = ? AND nickname = ? AND password = ?";
-	my $sth = $self->{dbh}->prepare($sCheckAuthQuery);
-	unless ($sth->execute($iUserId,$sUserHandle,$sHashedPw)) {
-		$self->{logger}->log(1,"checkAuth() SQL Error : " . $DBI::errstr . " Query : " . $sCheckAuthQuery);
-		return 0;
-	}
-	else {	
-		if (my $ref = $sth->fetchrow_hashref()) {
-			# Single UPDATE: set auth=1 and last_login in one statement
-			my $sQuery = "UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?";
-			my $sth2 = $self->{dbh}->prepare($sQuery);
-			unless ($sth2->execute($iUserId)) {
-				$self->{logger}->log(1,"checkAuth() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-				$sth2->finish;
-				return 0;
-			}
-			$sth2->finish;
-			return 1;
-		}
-		else {
-			return 0;
-		}
-	}
-	$sth->finish;
+    my ($self, $iUserId, $sUserHandle, $sPassword) = @_;
+
+    # B4: eval around make_password_hash in case import is broken
+    my $sHashedPw = eval { make_password_hash($sPassword) };
+    unless (defined $sHashedPw) {
+        $self->{logger}->log(1, "checkAuth() make_password_hash failed: $@");
+        return 0;
+    }
+
+    my $sth = $self->{dbh}->prepare(
+        "SELECT id_user FROM USER WHERE id_user = ? AND nickname = ? AND password = ?"
+    );
+    unless ($sth && $sth->execute($iUserId, $sUserHandle, $sHashedPw)) {
+        $self->{logger}->log(1, "checkAuth() SQL Error: $DBI::errstr");
+        return 0;
+    }
+
+    my $found = $sth->fetchrow_hashref;
+    $sth->finish;   # B1: always called — was dead on the undef path
+
+    unless ($found) { return 0; }
+
+    my $sth2 = $self->{dbh}->prepare(
+        "UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?"
+    );
+    unless ($sth2 && $sth2->execute($iUserId)) {
+        $self->{logger}->log(1, "checkAuth() UPDATE SQL Error: $DBI::errstr");
+        $sth2->finish if $sth2;
+        return 0;
+    }
+    $sth2->finish;
+    return 1;
 }
 
 # Context-based: Handle user login via private message (strictly DB nickname + password)
@@ -123,6 +129,22 @@ sub userLogin_ctx {
     unless (defined $tArgs[0] && $tArgs[0] ne "" && defined $tArgs[1] && $tArgs[1] ne "") {
         botNotice($self, $sNick, "Syntax error: /msg " . $self->{irc}->nick_folded . " login <username> <password>");
         return;
+    }
+
+
+    # B2/A2: brute-force throttle — max 5 failed attempts per nick per 60s
+    {
+        my $fail_key = lc($sNick);
+        my $now      = time();
+        $self->{_login_failures} //= {};
+        my $rec = $self->{_login_failures}{$fail_key} //= { ts => $now, count => 0 };
+        if ($now - $rec->{ts} >= 60) { $rec->{ts} = $now; $rec->{count} = 0; }
+        if ($rec->{count} >= 5) {
+            my $wait = 60 - ($now - $rec->{ts});
+            $self->{logger}->log(2, "Login throttle: $sNick blocked ($rec->{count} failures, ${wait}s remaining)");
+            botNotice($self, $sNick, "Too many failed login attempts. Please wait " . int($wait + 1) . " seconds.");
+            return;
+        }
     }
 
     my $typed_user = $tArgs[0];     # MUST match USER.nickname strictly (e.g., 'teuk')
@@ -155,6 +177,7 @@ sub userLogin_ctx {
     }
 
     unless (defined $id_user) {
+        { my $r = ($self->{_login_failures}{lc($sNick)} //= {ts=>time(),count=>0}); $r->{count}++; }
         botNotice($self, $sNick, "Login failed (Unknown user).");
         $self->{metrics}->inc('mediabot_auth_failure_total') if $self->{metrics};
         my $msg = ($ctx->message->prefix // '') . " Failed login (Unknown user: $typed_user)";
@@ -223,6 +246,7 @@ sub userLogin_ctx {
             );
             $desc;
         } // $level_id // "unknown";
+        delete $self->{_login_failures}{lc($sNick)};   # reset on success
         botNotice($self, $sNick, "Login successful as $db_nick (Level: $level_desc)");
         $self->{metrics}->inc('mediabot_auth_success_total') if $self->{metrics};
 
@@ -231,6 +255,7 @@ sub userLogin_ctx {
         logBot($self, $ctx->message, undef, "login", $typed_user, "Success");
     }
     else {
+        { my $r = ($self->{_login_failures}{lc($sNick)} //= {ts=>time(),count=>0}); $r->{count}++; }
         botNotice($self, $sNick, "Login failed (Bad password).");
         $self->{metrics}->inc('mediabot_auth_failure_total') if $self->{metrics};
         my $msg = ($ctx->message->prefix // '') . " Failed login (Bad password)";

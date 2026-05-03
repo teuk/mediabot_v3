@@ -264,8 +264,31 @@ sub validate_mask {
     return undef;
 }
 
+# ---------------------------------------------------------------------------
+# _mask_matches_irc($pattern, $hostmask)
+# Apply IRC-style wildcard matching (* and ?) to a ban mask pattern.
+# ---------------------------------------------------------------------------
+sub _mask_matches_irc {
+    my ($self, $pattern, $hostmask) = @_;
+    return 0 unless defined $pattern && defined $hostmask;
+
+    # Convert IRC glob to Perl regex
+    my $re = quotemeta($pattern);
+    $re =~ s/\\\*/.*/g;   # * -> .*
+    $re =~ s/\\\?/./g;    # ? -> .
+
+    return scalar($hostmask =~ /^$re$/i);
+}
+
+# ---------------------------------------------------------------------------
+# active_ban_for_mask($id_channel, $hostmask)
+#
+# B3/A3: check all active bans for the channel with IRC wildcard matching,
+# not SQL equality. The $hostmask argument is a full nick!ident@host string
+# (or a normalised mask). Returns the most specific matching ban row or undef.
+# ---------------------------------------------------------------------------
 sub active_ban_for_mask {
-    my ($self, $id_channel, $mask) = @_;
+    my ($self, $id_channel, $hostmask) = @_;
 
     my $sth = $self->{dbh}->prepare(q{
         SELECT
@@ -282,17 +305,22 @@ sub active_ban_for_mask {
             source
         FROM CHANNEL_BAN
         WHERE id_channel = ?
-          AND mask = ?
           AND active = 1
         ORDER BY id_channel_ban DESC
-        LIMIT 1
     });
 
-    $sth->execute($id_channel, $mask);
-    my $row = $sth->fetchrow_hashref;
+    $sth->execute($id_channel);
+    my $best;
+
+    while (my $row = $sth->fetchrow_hashref) {
+        if ($self->_mask_matches_irc($row->{mask}, $hostmask)) {
+            $best = $row;
+            last;   # most recent matching ban wins
+        }
+    }
     $sth->finish;
 
-    return $row;
+    return $best;
 }
 
 # -----------------------------------------------------------------------------

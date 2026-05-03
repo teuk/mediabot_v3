@@ -1034,7 +1034,11 @@ sub _handle_line {
         $self->_broadcast("[${cmd_display}] $line", $id);
     }
 
-    if    ($line =~ /^\.ping$/i) {
+    if    ($line =~ /^\.whois\s+(\S+)$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.whois' }) if $self->{bot}->{metrics};
+        $self->_cmd_whois($stream, $id, $1)
+    }
+    elsif ($line =~ /^\.ping$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.ping' }) if $self->{bot}->{metrics};
         $self->_cmd_ping($stream, $id)
     }
@@ -1270,6 +1274,7 @@ sub _cmd_help {
       . "  .stat               - channel status (owner, chansets, nick count)\r\n"
       . "  .dccstat            - show DCC Partyline listeners and sessions\r\n"
       . "  .whom               - list users currently on the partyline\r\n"
+      . "  .whois <nick>       - send WHOIS to IRC and display result\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .match <handle>     - show user record (wildcards * ? allowed)\r\n"
       . "  .say <#chan|nick> <msg> - send a message to channel or user\r\n"
@@ -1576,6 +1581,40 @@ sub _cmd_boot {
 }
 
 
+
+# ---------------------------------------------------------------------------
+# .whois <nick>  - send WHOIS and display result in the partyline session
+# Master+ only. The reply is captured via a console hook on the next
+# RPL_WHOISUSER (311), RPL_WHOISCHANNELS (319), and RPL_ENDOFWHOIS (318).
+# Because the WHOIS reply comes asynchronously, we store the session fd in a
+# lightweight state key and let the bot's on_message_RPL_WHOISUSER handler
+# write back to the stream.
+# ---------------------------------------------------------------------------
+sub _cmd_whois {
+    my ($self, $stream, $id, $target) = @_;
+
+    my $bot = $self->{bot};
+
+    unless ($bot->{irc} && $bot->{irc}->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    unless (defined $target && $target =~ /\S/) {
+        $stream->write("Usage: .whois <nick>\r\n");
+        return;
+    }
+
+    # Store the session fd so the WHOIS reply callback can write back here
+    $bot->{_partyline_whois_fd} = $id;
+    $bot->{_partyline_whois_nick} = $target;
+    $bot->{_partyline_whois_ts}   = time();
+
+    $bot->{irc}->send_message('WHOIS', undef, $target);
+    $stream->write("WHOIS sent for $target...\r\n");
+    $bot->{logger}->log(3, "Partyline: $id requested WHOIS for $target");
+}
+
 # ---------------------------------------------------------------------------
 # .ping - check if partyline session is still alive
 # ---------------------------------------------------------------------------
@@ -1738,6 +1777,7 @@ sub _cmd_ban {
     $bot->{irc}->send_message('WHOIS', undef, $nick_target);
     $bot->{logger}->log(2, "Partyline: $actor requested ban on $nick_target in $chan");
     $stream->write("WHOIS sent for $nick_target, ban will be applied on reply...\r\n");
+    delete $self->{_stat_cache};   # B5/A5: invalidate .stat cache on ban
 }
 
 # ---------------------------------------------------------------------------
