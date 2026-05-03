@@ -1870,7 +1870,8 @@ sub get_tmdb_info {
     my $response = $http->get($url);
 
     unless ($response->{success}) {
-        warn "get_tmdb_info() HTTP error: $response->{status} $response->{reason}";
+        # B4: standalone function, no $self — log to STDERR as fallback
+        warn "get_tmdb_info() HTTP error: $response->{status} $response->{reason}\n";
         return undef;
     }
 

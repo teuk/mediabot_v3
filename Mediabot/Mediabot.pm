@@ -1279,51 +1279,26 @@ sub mbUptime_ctx {
 
 sub mbHelp_ctx {
     my ($ctx) = @_;
+    my $self  = $ctx->bot;
+    my $nick  = $ctx->nick;
+    my $user  = $ctx->user;
+    my @args  = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $level = eval { $user->level } // 999;
 
-    my $self    = $ctx->bot;
-    my $nick    = $ctx->nick;
-    my $channel = $ctx->channel // '';
-    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    # A4: show commands filtered by user level
+    my @cmds_public = qw(help uptime status version date leet echo colors whoami
+                         seen q addquote weather resolve ban kickban unban bans);
+    my @cmds_master = qw(join part nick mode kick topic say timers log);
+    my @cmds_owner  = qw(die restart jump rehash addtimer remtimer eval);
 
-    my $wiki = "https://github.com/teuk/mediabot_v3/wiki";
+    my @available = @cmds_public;
+    push @available, @cmds_master if $level <= 1;
+    push @available, @cmds_owner  if $level == 0;
 
-    # Explicit wiki request: keep the external documentation easy to find.
-    if (@args && defined($args[0]) && $args[0] =~ /^(wiki|doc|docs|documentation)$/i) {
-        botNotice($self, $nick, "Mediabot documentation: $wiki");
-        return 1;
-    }
+    my %seen; @available = grep { !$seen{$_}++ } @available;
 
-    # If a channel is provided, reuse showcommands against that channel.
-    # Example:
-    #   !help #teuk
-    if (@args && defined($args[0]) && $args[0] =~ /^#/) {
-        return userShowcommandsChannel_ctx($ctx);
-    }
-
-    # No args: show level-filtered commands for the current channel when possible.
-    # This reuses the existing showcommands implementation, including auth and
-    # channel-level filtering.
-    unless (@args) {
-        if ($channel =~ /^#/) {
-            return userShowcommandsChannel_ctx($ctx);
-        }
-
-        botNotice($self, $nick, "Syntax: help #channel");
-        botNotice($self, $nick, "Documentation: $wiki");
-        return 1;
-    }
-
-    # Command-specific help is not fully documented inline yet. Provide useful
-    # pointers instead of pretending the command is unknown.
-    my $cmd = lc($args[0] // '');
-    $cmd =~ s/^\Q$self->{command_char}\E// if defined($self->{command_char}) && $self->{command_char} ne '';
-
-    botNotice($self, $nick, "Inline help for '$cmd' is not available yet.");
-    botNotice($self, $nick, "Try: showcmd $cmd");
-    botNotice($self, $nick, "Try: searchcmd $cmd");
-    botNotice($self, $nick, "Documentation: $wiki");
-
-    return 1;
+    botNotice($self, $nick, "Commands: " . join(', ', sort @available));
+    botNotice($self, $nick, "Full documentation: https://github.com/teuk/mediabot_v3/wiki");
 }
 
 

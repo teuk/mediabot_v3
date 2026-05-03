@@ -1948,6 +1948,9 @@ sub channelBans_ctx {
         return;
     }
 
+    # B3/A3: prepare once outside the loop — avoids N prepare() calls
+    my $sth_now = $self->{dbh}->prepare('SELECT TIMESTAMPDIFF(SECOND, NOW(), ?) AS secs');
+
     my $count = 0;
     for my $ban (@bans) {
         last if $count >= 10;
@@ -1956,11 +1959,10 @@ sub channelBans_ctx {
         my $expires_txt;
         if ($ban->{expires_at}) {
             # Calculate human-readable time remaining
-            # expires_at is a datetime string from MariaDB
-            my $sth_now = $self->{dbh}->prepare('SELECT TIMESTAMPDIFF(SECOND, NOW(), ?) AS secs');
+            # B3/A3: $sth_now must be prepared once before the loop, not here
+            # (prepared above; just execute and fetch)
             $sth_now->execute($ban->{expires_at});
             my $row = $sth_now->fetchrow_hashref;
-            $sth_now->finish;
             my $secs = ($row && defined $row->{secs}) ? $row->{secs} : 0;
 
             if ($secs <= 0) {

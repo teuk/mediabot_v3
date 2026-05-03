@@ -596,6 +596,9 @@ sub botNotice {
     # Nettoyer les retours à la ligne
     $text =~ s/[\r\n]+/ /g;
 
+    # B2/A2: troncature identique à botPrivmsg (limite IRC ~512 octets)
+    $text = substr($text, 0, 397) . '...' if length($text) > 400;
+
     # Encode en UTF-8 pour l'envoi IRC
     my $encoded_text = encode('UTF-8', $text);
 

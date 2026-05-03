@@ -1050,6 +1050,14 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.log' }) if $self->{bot}->{metrics};
         $self->_cmd_log($stream, $id, $1)
     }
+    elsif ($line =~ /^\.uptime$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.uptime' }) if $self->{bot}->{metrics};
+        $self->_cmd_uptime($stream, $id)
+    }
+    elsif ($line =~ /^\.schedule\s+(\S+)\s+(\S+)$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.schedule' }) if $self->{bot}->{metrics};
+        $self->_cmd_schedule($stream, $id, $1, $2)
+    }
     elsif ($line =~ /^\.ping$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.ping' }) if $self->{bot}->{metrics};
         $self->_cmd_ping($stream, $id)
@@ -1934,6 +1942,59 @@ sub _format_duration {
     return join(' ', @parts);
 }
 
+
+# ---------------------------------------------------------------------------
+# .uptime  - show bot uptime
+# ---------------------------------------------------------------------------
+sub _cmd_uptime {
+    my ($self, $stream, $id) = @_;
+    my $bot   = $self->{bot};
+    my $start = eval { $bot->{metrics}->{started} } // time();
+    my $secs  = time() - $start;
+    my $d = int($secs / 86400);
+    my $h = int(($secs % 86400) / 3600);
+    my $m = int(($secs % 3600) / 60);
+    my $s = $secs % 60;
+    my $str = '';
+    $str .= "${d}d " if $d;
+    $str .= "${h}h " if $h;
+    $str .= "${m}m " if $m;
+    $str .= "${s}s";
+    $str =~ s/\s+$//;
+    $stream->write("Uptime: $str\r\n");
+}
+
+
+# ---------------------------------------------------------------------------
+# .schedule <start|stop> <name>  - control a Scheduler task at runtime
+# ---------------------------------------------------------------------------
+sub _cmd_schedule {
+    my ($self, $stream, $id, $action, $name) = @_;
+    my $bot   = $self->{bot};
+    my $sched = $bot->{scheduler};
+
+    unless ($sched) {
+        $stream->write("Scheduler not available.\r\n");
+        return;
+    }
+
+    unless (defined $action && defined $name) {
+        $stream->write("Usage: .schedule <start|stop> <task_name>\r\n");
+        $stream->write("Tasks: " . join(', ', $sched->task_names) . "\r\n");
+        return;
+    }
+
+    if (lc($action) eq 'start') {
+        $sched->start($name);
+        $stream->write("Task '$name' started.\r\n");
+    } elsif (lc($action) eq 'stop') {
+        $sched->stop($name);
+        $stream->write("Task '$name' stopped.\r\n");
+    } else {
+        $stream->write("Unknown action '$action'. Use start or stop.\r\n");
+    }
+}
+
 # ---------------------------------------------------------------------------
 # .ping - check if partyline session is still alive
 # ---------------------------------------------------------------------------
@@ -2769,75 +2830,92 @@ sub _cmd_eval {
         exit 2;
     }
 
-    my @lines;
-    my $truncated = 0;
-    my $timed_out = 0;
-    my @errors;
+    # B1/A1: read pipe asynchronously via IO::Async::Stream so the parent
+    # event loop is not blocked while the child runs.
+    my $eval_ctx = {
+        lines     => [],
+        truncated => 0,
+        timed_out => 0,
+        errors    => [],
+    };
 
-    while (my $line = <$pipe>) {
-        chomp $line;
-        $line =~ s/\r//g;
+    # Watchdog: kill child if it runs past $eval_timeout (parent side)
+    my $watchdog = IO::Async::Timer::Countdown->new(
+        delay     => $eval_timeout,
+        on_expire => sub {
+            kill('TERM', $pid);
+            sleep(0.5);
+            kill('KILL', $pid);
+            $eval_ctx->{timed_out} = 1;
+            $stream->write("--- timeout ---\r\n") if $self->{streams}{$id};
+            $stream->write("Eval timed out after ${eval_timeout}s.\r\n") if $self->{streams}{$id};
+            $bot->{logger}->log(1, "Partyline: $nick eval timed out after ${eval_timeout}s");
+        },
+    );
+    $bot->{loop}->add($watchdog);
+    $watchdog->start;
 
-        if ($line =~ /^__MEDIABOT_EVAL_TIMEOUT__/) {
-            $timed_out = 1;
-            next;
-        }
+    my $io = IO::Async::Stream->new(
+        read_handle => $pipe,
+        on_read     => sub {
+            my ($s, $buffref, $eof) = @_;
+            while ($$buffref =~ s/^([^\n]*\n)//) {
+                my $line = $1;
+                chomp $line;
+                $line =~ s/\r//g;
 
-        if ($line =~ /^__MEDIABOT_EVAL_(?:ERROR|FATAL)__\s*(.*)$/) {
-            push @errors, $1;
-            next;
-        }
+                if ($line =~ /^__MEDIABOT_EVAL_TIMEOUT__/) {
+                    $eval_ctx->{timed_out} = 1;
+                    next;
+                }
+                if ($line =~ /^__MEDIABOT_EVAL_(?:ERROR|FATAL)__\s*(.*)$/) {
+                    push @{ $eval_ctx->{errors} }, $1;
+                    next;
+                }
+                $line =~ s/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]//g;
+                $line = substr($line, 0, 497) . '...' if length($line) > 500;
+                if (@{ $eval_ctx->{lines} } < 20) {
+                    push @{ $eval_ctx->{lines} }, $line;
+                } else {
+                    $eval_ctx->{truncated} = 1;
+                }
+            }
 
-        # Strip ASCII control chars except horizontal tab.
-        $line =~ s/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]//g;
+            if ($eof) {
+                eval { $watchdog->stop; $bot->{loop}->remove($watchdog) };
+                eval { $bot->{loop}->remove($s) };
+                waitpid($pid, 0);
 
-        if (length($line) > 500) {
-            $line = substr($line, 0, 497) . '...';
-        }
+                return unless $self->{streams}{$id};
 
-        if (@lines < 20) {
-            push @lines, $line;
-        }
-        else {
-            $truncated = 1;
-        }
-    }
+                $stream->write("--- eval output ---\r\n");
+                if (@{ $eval_ctx->{lines} }) {
+                    $stream->write("$_\r\n") for @{ $eval_ctx->{lines} };
+                } else {
+                    $stream->write("(no output)\r\n") unless @{ $eval_ctx->{errors} };
+                }
+                $stream->write("[... output truncated at 20 lines ...]\r\n")
+                    if $eval_ctx->{truncated};
 
-    close $pipe;
-    my $exit_status = $? >> 8;
-
-    $stream->write("--- eval output ---\r\n");
-
-    if (@lines) {
-        $stream->write("$_\r\n") for @lines;
-    }
-    else {
-        $stream->write("(no output)\r\n");
-    }
-
-    $stream->write("[... output truncated at 20 lines ...]\r\n") if $truncated;
-
-    if ($timed_out || $exit_status == 124) {
-        $stream->write("--- timeout ---\r\n");
-        $stream->write("Eval timed out after ${eval_timeout}s.\r\n");
-        $bot->{logger}->log(1, "Partyline: $nick eval timed out after ${eval_timeout}s");
-        return;
-    }
-
-    if (@errors) {
-        $stream->write("--- error ---\r\n");
-        for my $err (@errors) {
-            $err =~ s/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]//g;
-            $err = substr($err, 0, 497) . '...' if length($err) > 500;
-            $stream->write("$err\r\n");
-        }
-
-        $bot->{logger}->log(1, "Partyline: $nick eval completed with error: " . join(' | ', @errors));
-        return;
-    }
-
-    $stream->write("--- ok ---\r\n");
-    $bot->{logger}->log(1, "Partyline: $nick eval completed in subprocess");
+                if ($eval_ctx->{timed_out}) {
+                    # already written by watchdog
+                } elsif (@{ $eval_ctx->{errors} }) {
+                    $stream->write("--- error ---\r\n");
+                    for my $err (@{ $eval_ctx->{errors} }) {
+                        $err =~ s/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]//g;
+                        $stream->write("$err\r\n");
+                    }
+                    $bot->{logger}->log(1, "Partyline: $nick eval error: "
+                        . join(' | ', @{ $eval_ctx->{errors} }));
+                } else {
+                    $stream->write("--- ok ---\r\n");
+                    $bot->{logger}->log(1, "Partyline: $nick eval done");
+                }
+            }
+            return 0;
+        },
+    );
+    $bot->{loop}->add($io);
 }
 
 
