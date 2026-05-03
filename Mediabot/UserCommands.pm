@@ -949,6 +949,26 @@ sub mbSeen_ctx {
 
     my $targetNick = lc(shift @args);  # normalize for USER_SEEN PK lookup
 
+    # A6: check if the nick is currently online before hitting the DB
+    {
+        my %hChannelsNicks = %{ $self->gethChannelNicks() // {} };
+        for my $chan (sort keys %hChannelsNicks) {
+            my @nicks = $self->gethChannelsNicksOnChan($chan);
+            if (grep { lc($_) eq $targetNick } @nicks) {
+                my $dest_chan_early = $ctx->channel;
+                my $is_private_early = !defined($dest_chan_early) || $dest_chan_early eq '';
+                my $msg = "$targetNick is currently online on $chan.";
+                if ($is_private_early) {
+                    botNotice($self, $ctx->nick, $msg);
+                } else {
+                    botPrivmsg($self, $dest_chan_early, $msg);
+                }
+                logBot($self, $ctx->message, $dest_chan_early, "seen", $targetNick);
+                return 1;
+            }
+        }
+    }
+
     my $chan_for_part;
     if (@args && defined $args[0] && $args[0] =~ /^#/) {
         $chan_for_part = shift @args;

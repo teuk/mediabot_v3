@@ -3110,6 +3110,7 @@ sub channelAddBadword_ctx {
 
     if (my $ref = $sth->fetchrow_hashref()) {
         botNotice($self, $nick, "Badword [$ref->{id_badwords}] '$ref->{badword}' is already defined on $chan");
+        delete $self->{_badword_cache}{$chan};  # B1: invalidate botPrivmsg Badword cache
         logBot($self, $ctx->message, $chan, "addbadword", "$chan $badword");
         $sth->finish;
         return;
@@ -3224,6 +3225,7 @@ sub channelRemBadword_ctx {
         return;
     }
 
+    delete $self->{_badword_cache}{$chan};  # B1: invalidate botPrivmsg Badword cache
     botNotice($self, $nick, "Removed badword '$badword' from $chan");
     logBot($self, $ctx->message, $chan, "rembadword", "$chan $badword");
     $sth->finish;

@@ -19,7 +19,8 @@ const networkRoutes  = require('./routes/network');
 const quotesRoutes   = require('./routes/quotes');
 const commandsRoutes = require('./routes/commands');
 const usersRoutes    = require('./routes/users');
-const metricsRoutes  = require('./routes/metricsProxy');
+const metricsRoutes   = require('./routes/metricsProxy');
+const partylineRoutes = require('./routes/partyline');
 
 const app = express();
 

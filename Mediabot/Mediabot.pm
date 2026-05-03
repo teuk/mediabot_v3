@@ -1211,10 +1211,16 @@ sub mbCommandPublic {
         tmdblangset  => sub { setTMDBLangChannel_ctx($ctx) },
         debug        => sub { debug_ctx($ctx) },
         version      => sub { versionCheck($ctx) },
+        uptime       => sub { mbUptime_ctx($ctx) },
         help         => sub { mbHelp_ctx($ctx) },
         spike        => sub { $ctx->reply("https://teuk.org/In_Spike_Memory.jpg") },
         update       => sub { update_ctx($ctx) },
     );
+
+    # A4: track per-command usage in Prometheus
+    if ($self->{metrics}) {
+        $self->{metrics}->inc('mediabot_commands_by_name_total', { command => $cmd });
+    }
 
     # Dispatch known command
     if (my $handler = $command_map{$cmd}) {
@@ -1241,6 +1247,36 @@ sub mbCommandPublic {
 }
 
 # Handle help command
+
+# ---------------------------------------------------------------------------
+# mbUptime_ctx — !uptime
+# ---------------------------------------------------------------------------
+sub mbUptime_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $channel = $ctx->channel;
+
+    my $start = eval { $self->{metrics}->{started} }
+             // eval { $self->{conf}->get('main.MAIN_PROG_BIRTHDATE') }
+             // 0;
+
+    my $uptime_secs = time() - $start;
+    my $d = int($uptime_secs / 86400);
+    my $h = int(($uptime_secs % 86400) / 3600);
+    my $m = int(($uptime_secs % 3600) / 60);
+    my $s = $uptime_secs % 60;
+
+    my $uptime_str = '';
+    $uptime_str .= "${d}d " if $d;
+    $uptime_str .= "${h}h " if $h;
+    $uptime_str .= "${m}m " if $m;
+    $uptime_str .= "${s}s";
+    $uptime_str =~ s/\s+$//;
+
+    my $nick = eval { $self->{irc}->nick_folded } // 'mediabotv3';
+    botPrivmsg($self, $channel, "$nick has been up for $uptime_str.");
+}
+
 sub mbHelp_ctx {
     my ($ctx) = @_;
     my $self    = $ctx->bot;
@@ -1489,6 +1525,43 @@ sub getQuit {
 #   - if a channel cannot be resolved, it logs and skips
 #   - if MODE -b fails, it keeps the ban active for a later retry
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# purge_channel_log() — delete CHANNEL_LOG entries older than N days
+# ---------------------------------------------------------------------------
+sub purge_channel_log {
+    my ($self) = @_;
+    my $days = int(eval { $self->{conf}->get('main.CHANNEL_LOG_RETENTION_DAYS') } // 90);
+    return if $days <= 0;
+    my $sth = $self->{dbh}->prepare(
+        "DELETE FROM CHANNEL_LOG WHERE ts < DATE_SUB(NOW(), INTERVAL ? DAY)"
+    ) or return;
+    eval { $sth->execute($days) };
+    if ($@) { $self->{logger}->log(1, "purge_channel_log: $@"); return; }
+    my $rows = $sth->rows // 0;
+    $sth->finish;
+    $self->{logger}->log(2, "purge_channel_log: $rows row(s) deleted (>${days}d)") if $rows;
+    return $rows;
+}
+
+# ---------------------------------------------------------------------------
+# purge_user_seen() — delete USER_SEEN nicks not seen for N days
+# ---------------------------------------------------------------------------
+sub purge_user_seen {
+    my ($self) = @_;
+    my $days = int(eval { $self->{conf}->get('main.USER_SEEN_RETENTION_DAYS') } // 180);
+    return if $days <= 0;
+    my $sth = $self->{dbh}->prepare(
+        "DELETE FROM USER_SEEN WHERE seen_at < DATE_SUB(NOW(), INTERVAL ? DAY)"
+    ) or return;
+    eval { $sth->execute($days) };
+    if ($@) { $self->{logger}->log(1, "purge_user_seen: $@"); return; }
+    my $rows = $sth->rows // 0;
+    $sth->finish;
+    $self->{logger}->log(2, "purge_user_seen: $rows stale nick(s) purged (>${days}d)") if $rows;
+    return $rows;
+}
+
 sub process_expired_channel_bans {
     my ($self) = @_;
 

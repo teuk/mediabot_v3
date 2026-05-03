@@ -27,6 +27,7 @@ use Mediabot::DCC qw(parse_ctcp_payload parse_dcc_payload is_ctcp_chat is_dcc_ch
                       is_dcc_active is_dcc_passive ip_int_to_ipv4);
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
+use Mediabot::Scheduler;
 use IO::Async::Timer::Countdown;
 use Net::Async::IRC;
 use utf8;
@@ -369,45 +370,56 @@ $mediabot->{partyline} = $partyline;
 my $partyline_port = $mediabot->{partyline}->get_port;
 $mediabot->{logger}->log(4, "Partyline port is: $partyline_port");
 
-# Set up main timer
-my $timer = IO::Async::Timer::Periodic->new(
-    interval => 5,
-    on_tick  => \&on_timer_tick,
+# ── Centralised scheduler ────────────────────────────────────────────────────
+my $scheduler = Mediabot::Scheduler->new(
+    loop   => $loop,
+    logger => $mediabot->{logger},
 );
+$mediabot->{scheduler} = $scheduler;
+
+# Register and keep the main timer handle for setMainTimerTick compatibility
+my $timer = IO::Async::Timer::Periodic->new(interval => 5, on_tick => \&on_timer_tick);
 $mediabot->setMainTimerTick($timer);
 $loop->add($timer);
 $timer->start;
 
-# Set up channel hash refresh timer
-my $channel_hash_timer = IO::Async::Timer::Periodic->new(
-    interval => 60, # toutes les 60 secondes
-    on_tick  => sub {
-        $mediabot->refresh_channel_hashes;
-    },
+$scheduler->add(
+    name      => 'channel_cache_refresh',
+    interval  => 60,
+    cb        => sub { $mediabot->refresh_channel_hashes },
+    autostart => 1,
 );
-$channel_hash_timer->start;
-$loop->add($channel_hash_timer);
 
-# Set up channel ban expiration timer
-my $channel_ban_expire_timer = IO::Async::Timer::Periodic->new(
-    interval       => 60,
-    first_interval => 30,
-    on_tick        => sub {
+$scheduler->add(
+    name      => 'channel_log_purge',
+    interval  => 86400,
+    cb        => sub { $mediabot->purge_channel_log() },
+    autostart => 1,
+);
+
+$scheduler->add(
+    name      => 'user_seen_purge',
+    interval  => 86400,
+    cb        => sub { $mediabot->purge_user_seen() },
+    autostart => 1,
+);
+
+$scheduler->add(
+    name      => 'channel_ban_expire',
+    interval  => 60,
+    cb        => sub {
         my $removed = eval { $mediabot->process_expired_channel_bans };
         if ($@) {
-            my $err = $@;
-            $err =~ s/\s+/ /g;
+            (my $err = $@) =~ s/\s+/ /g;
             $mediabot->{logger}->log(1, "channelban: expiration timer failed: $err");
             return;
         }
-
         if ($removed && $removed > 0) {
-            $mediabot->{logger}->log(2, "channelban: expiration timer removed $removed expired ban(s)");
+            $mediabot->{logger}->log(2, "channelban: expiration timer removed $removed ban(s)");
         }
     },
+    autostart => 1,
 );
-$channel_ban_expire_timer->start;
-$loop->add($channel_ban_expire_timer);
 
 # Build IRC object and connect (initial connection)
 my ($irc, $bind_ip) = _build_irc($loop);

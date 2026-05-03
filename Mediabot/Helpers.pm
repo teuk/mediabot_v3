@@ -438,40 +438,63 @@ sub botPrivmsg {
         # Log output to console
         $self->{logger}->log(0, "[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
 
-        # Badword filtering
-        my $sQuery = "SELECT badword FROM CHANNEL JOIN BADWORDS ON BADWORDS.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ?";
-        my $sth = $self->{dbh}->prepare($sQuery);
+        # Badword filtering — B1/A1: cache per channel (TTL 5 min)
+        # Avoids one SQL query per outgoing message on busy channels.
+        {
+            my $now     = time();
+            my $ttl     = 300;   # 5 minutes
+            my $cache   = $self->{_badword_cache}{$sTo};
 
-        unless ($sth->execute($sTo)) {
-            $self->{logger}->log(1, "logBotAction() SQL Error : $DBI::errstr | Query : $sQuery");
-            $self->{metrics}->inc('mediabot_db_query_errors_total') if $self->{metrics};
-        } else {
-            while (my $ref = $sth->fetchrow_hashref()) {
-                my $sBadwordDb = $ref->{badword};
-                if (index(lc($sMsg), lc($sBadwordDb)) != -1) {
-                    logBotAction($self, undef, $eventtype, $self->{irc}->nick_folded, $sTo, "$sMsg (BADWORD : $sBadwordDb)");
-                    noticeConsoleChan($self, "Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
-                    $self->{logger}->log(3, "Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
+            if (!$cache || ($now - ($cache->{ts} // 0)) > $ttl) {
+                my $sth = $self->{dbh}->prepare(
+                    "SELECT badword FROM CHANNEL"
+                    . " JOIN BADWORDS ON BADWORDS.id_channel = CHANNEL.id_channel"
+                    . " WHERE CHANNEL.name = ?"
+                );
+                my @words;
+                if ($sth && $sth->execute($sTo)) {
+                    while (my $ref = $sth->fetchrow_hashref) {
+                        push @words, lc($ref->{badword}) if defined $ref->{badword};
+                    }
                     $sth->finish;
+                } else {
+                    $self->{logger}->log(1, "botPrivmsg() Badword SQL Error: $DBI::errstr");
+                    $self->{metrics}->inc('mediabot_db_query_errors_total') if $self->{metrics};
+                }
+                $self->{_badword_cache}{$sTo} = { ts => $now, words => \@words };
+                $cache = $self->{_badword_cache}{$sTo};
+            }
+
+            my $msg_lc = lc($sMsg);
+            for my $bw (@{ $cache->{words} // [] }) {
+                if (index($msg_lc, $bw) != -1) {
+                    logBotAction($self, undef, $eventtype, $self->{irc}->nick_folded, $sTo,
+                        "$sMsg (BADWORD : $bw)");
+                    noticeConsoleChan($self, "Badword : $bw blocked on channel $sTo ($sMsg)");
+                    $self->{logger}->log(3, "Badword : $bw blocked on channel $sTo ($sMsg)");
                     return;
                 }
             }
             logBotAction($self, undef, $eventtype, $self->{irc}->nick_folded, $sTo, $sMsg);
         }
-        $sth->finish;
     } else {
         # Private message
         $eventtype = "private";
         $self->{logger}->log(0, "-> *$sTo* $sMsg");
+        # A5: encoding, sanitisation and truncation applied uniformly below
     }
 
-    # Send actual message
+    # Send actual message — shared path for channel and private (A5)
     if (defined($sMsg) && $sMsg ne "") {
-        # Forcer en UTF-8 et nettoyer les retours à la ligne
-        if (utf8::is_utf8($sMsg)) {
-            $sMsg = encode("UTF-8", $sMsg);
-        }
+        # Encode and sanitise
+        $sMsg = encode("UTF-8", $sMsg) if utf8::is_utf8($sMsg);
         $sMsg =~ s/[\r\n]+/ /g;
+
+        # A4: IRC hard limit ~512 bytes; practical safe limit for PRIVMSG payload
+        # is ~400 chars to leave room for the prefix, command, and target.
+        if (length($sMsg) > 400) {
+            $sMsg = substr($sMsg, 0, 397) . '...';
+        }
 
         $self->{metrics}->inc('mediabot_privmsg_out_total') if $self->{metrics};
         $self->{irc}->do_PRIVMSG(target => $sTo, text => $sMsg);
@@ -1045,6 +1068,19 @@ sub checkNickFlood {
 
 sub checkAntiFlood {
 	my ($self, $sChannel) = @_;
+
+    # A7: periodic cleanup of stale flood state for inactive/parted channels
+    {
+        my $now = time();
+        if (!$self->{_antiflood_cleanup} || ($now - $self->{_antiflood_cleanup}) >= 300) {
+            for my $chan (keys %{ $self->{hLastMessage} // {} }) {
+                my $ts = $self->{hLastMessage}{$chan}{ts} // 0;
+                delete $self->{hLastMessage}{$chan} if ($now - $ts) > 300;
+            }
+            $self->{_antiflood_cleanup} = $now;
+        }
+    }
+
 
 	my $channel_obj = $self->{channels}{$sChannel};
 

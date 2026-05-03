@@ -1038,6 +1038,14 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.whois' }) if $self->{bot}->{metrics};
         $self->_cmd_whois($stream, $id, $1)
     }
+    elsif ($line =~ /^\.timers$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.timers' }) if $self->{bot}->{metrics};
+        $self->_cmd_timers($stream, $id)
+    }
+    elsif ($line =~ /^\.log(?:\s+(\d+))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.log' }) if $self->{bot}->{metrics};
+        $self->_cmd_log($stream, $id, $1)
+    }
     elsif ($line =~ /^\.ping$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.ping' }) if $self->{bot}->{metrics};
         $self->_cmd_ping($stream, $id)
@@ -1232,6 +1240,7 @@ sub _do_login {
     $self->{users}{$id}{login}         = $login;
     $self->{users}{$id}{level}         = $row->{level};
     $self->{users}{$id}{level_desc}    = $row->{description};
+    $self->{users}{$id}{auth_stage}    = undef;   # clear — stop masking log lines
 
     if ($bot->{metrics}) {
         $bot->{metrics}->inc('mediabot_partyline_logins_total');
@@ -1275,6 +1284,8 @@ sub _cmd_help {
       . "  .dccstat            - show DCC Partyline listeners and sessions\r\n"
       . "  .whom               - list users currently on the partyline\r\n"
       . "  .whois <nick>       - send WHOIS to IRC and display result\r\n"
+      . "  .timers             - list all scheduled tasks\r\n"
+      . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .match <handle>     - show user record (wildcards * ? allowed)\r\n"
       . "  .say <#chan|nick> <msg> - send a message to channel or user\r\n"
@@ -1322,7 +1333,8 @@ sub _cmd_console {
     if (!defined $arg || $arg eq '') {
         my $cur = $self->{users}{$id}{console_level};
         if (defined $cur) {
-            $stream->write("Console is ON at level $cur (0=INFO, 1=DEBUG1 … 5=DEBUG5).\r\n");
+            my $level_name = ("INFO","DEBUG1","DEBUG2","DEBUG3","DEBUG4","DEBUG5")[$cur] // "UNKNOWN";
+        $stream->write("Console is ON at level $cur ($level_name).\r\n");
         } else {
             $stream->write("Console is OFF. Use .console <0-5> to enable.\r\n");
         }
@@ -1613,6 +1625,85 @@ sub _cmd_whois {
     $bot->{irc}->send_message('WHOIS', undef, $target);
     $stream->write("WHOIS sent for $target...\r\n");
     $bot->{logger}->log(3, "Partyline: $id requested WHOIS for $target");
+}
+
+
+# ---------------------------------------------------------------------------
+# .log [n]  - show last N lines of the bot log (default: 20, max: 100)
+# ---------------------------------------------------------------------------
+sub _cmd_log {
+    my ($self, $stream, $id, $n_arg) = @_;
+
+    my $bot    = $self->{bot};
+    my $logger = $bot->{logger};
+
+    my $n = int($n_arg // 20);
+    $n = 20  if $n < 1;
+    $n = 100 if $n > 100;
+
+    my $logfile = eval { $logger->{logfile} };
+    unless ($logfile && -f $logfile) {
+        $stream->write("No log file configured or file not found.\r\n");
+        return;
+    }
+
+    open my $fh, '<', $logfile or do {
+        $stream->write("Cannot open log file: $!\r\n");
+        return;
+    };
+    my @lines = <$fh>;
+    close $fh;
+
+    my @tail = @lines > $n ? @lines[-$n..-1] : @lines;
+
+    $stream->write(sprintf("--- last %d line(s) of %s ---\r\n",
+        scalar @tail, $logfile));
+    for my $line (@tail) {
+        $line =~ s/[\r\n]+$//;
+        $stream->write("$line\r\n");
+    }
+    $stream->write("--- end ---\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .timers  - list all registered scheduler tasks (Master+)
+# ---------------------------------------------------------------------------
+sub _cmd_timers {
+    my ($self, $stream, $id) = @_;
+
+    my $bot   = $self->{bot};
+    my $sched = $bot->{scheduler};
+
+    unless ($sched) {
+        $stream->write("Scheduler not available.\r\n");
+        return;
+    }
+
+    my @infos = $sched->all_info;
+    unless (@infos) {
+        $stream->write("No scheduled tasks registered.\r\n");
+        return;
+    }
+
+    $stream->write(sprintf("%-30s %8s %8s %8s %s\r\n",
+        "Name", "Interval", "Ticks", "Active", "Last tick"));
+    $stream->write(("-" x 72) . "\r\n");
+
+    for my $info (@infos) {
+        my $last = $info->{last_tick}
+            ? do {
+                my @t = localtime($info->{last_tick});
+                sprintf("%02d:%02d:%02d", $t[2], $t[1], $t[0]);
+              }
+            : "never";
+        $stream->write(sprintf("%-30s %8ds %8d %8s %s\r\n",
+            $info->{name},
+            $info->{interval},
+            $info->{ticks},
+            $info->{started} ? "yes" : "no",
+            $last,
+        ));
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -2335,71 +2426,150 @@ sub _cmd_eval {
 
     unless (defined $code && $code =~ /\S/) {
         $stream->write("Usage: .eval <perl code>\r\n");
-        $stream->write("WARNING: code runs in the bot process. Confirmation required.\r\n");
+        $stream->write("WARNING: code runs in a forked subprocess. Confirmation required.\r\n");
         return;
     }
 
-    # One-step confirmation: check for pending eval
+    # One-step confirmation with hard 30-second expiry.
     my $pending_key = "_eval_pending_$id";
     my $now_eval = time();
+
     if (!$self->{$pending_key}
         || $self->{$pending_key}{code} ne $code
         || ($now_eval - ($self->{$pending_key}{at} // 0)) > 30)
     {
-        # First invocation (or expired): store and ask for confirmation
         $self->{$pending_key} = { code => $code, at => $now_eval };
         $stream->write("--- .eval confirmation required ---\r\n");
         $stream->write("Code: $code\r\n");
-        $stream->write("Type the same .eval command again to execute.\r\n");
+        $stream->write("Type the same .eval command again within 30 seconds to execute.\r\n");
         return;
     }
 
-    # Second invocation with same code: execute
     delete $self->{$pending_key};
 
-    $bot->{logger}->log(1, "Partyline: $nick executing eval: $code");
+    my $eval_timeout = eval { $bot->{conf}->get('main.PARTYLINE_EVAL_TIMEOUT_SECONDS') } || 5;
+    $eval_timeout = 5 unless defined($eval_timeout) && $eval_timeout =~ /^\d+$/;
+    $eval_timeout = 1  if $eval_timeout < 1;
+    $eval_timeout = 15 if $eval_timeout > 15;
+
+    $bot->{logger}->log(1, "Partyline: $nick executing eval in subprocess timeout=${eval_timeout}s: $code");
     $self->_broadcast("[${nick}\@partyline] .eval $code", $id);
 
-    # Capture STDOUT and STDERR, limit output
-    my $output = '';
-    {
-        local *STDOUT;
-        open(STDOUT, '>>', \$output) or do {
-            $stream->write("Cannot capture STDOUT.\r\n");
-            return;
-        };
-        local *STDERR;
-        open(STDERR, '>>', \$output) or do {
-            $stream->write("Cannot capture STDERR.\r\n");
-            return;
-        };
+    my $pid = open(my $pipe, "-|");
 
-        eval { local $_ = undef; eval $code; };
+    unless (defined $pid) {
+        $stream->write("Cannot fork eval subprocess.\r\n");
+        $bot->{logger}->log(1, "Partyline: failed to fork eval subprocess for $nick");
+        return;
     }
 
-    my $err = $@;
+    if ($pid == 0) {
+        # Child process. Never mutate the live bot from here: this is a forked copy.
+        eval {
+            open STDERR, '>&', \*STDOUT;
 
-    my @lines = split /\n/, $output;
+            local $SIG{ALRM} = sub { die "__MEDIABOT_EVAL_TIMEOUT__\n" };
+            alarm($eval_timeout);
+
+            local $_ = undef;
+            my $result = eval $code;
+            my $err = $@;
+
+            alarm(0);
+
+            if ($err) {
+                if ($err =~ /__MEDIABOT_EVAL_TIMEOUT__/) {
+                    print "__MEDIABOT_EVAL_TIMEOUT__\n";
+                    exit 124;
+                }
+
+                $err =~ s/\r?\n/ /g;
+                print "__MEDIABOT_EVAL_ERROR__ $err\n";
+                exit 2;
+            }
+
+            print "$result\n" if defined($result) && $result ne '';
+            exit 0;
+        };
+
+        my $fatal = $@ || 'unknown eval subprocess failure';
+        alarm(0);
+        $fatal =~ s/\r?\n/ /g;
+        print "__MEDIABOT_EVAL_FATAL__ $fatal\n";
+        exit 2;
+    }
+
+    my @lines;
     my $truncated = 0;
-    if (@lines > 20) {
-        @lines = @lines[0..19];
-        $truncated = 1;
+    my $timed_out = 0;
+    my @errors;
+
+    while (my $line = <$pipe>) {
+        chomp $line;
+        $line =~ s/\r//g;
+
+        if ($line =~ /^__MEDIABOT_EVAL_TIMEOUT__/) {
+            $timed_out = 1;
+            next;
+        }
+
+        if ($line =~ /^__MEDIABOT_EVAL_(?:ERROR|FATAL)__\s*(.*)$/) {
+            push @errors, $1;
+            next;
+        }
+
+        # Strip ASCII control chars except horizontal tab.
+        $line =~ s/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]//g;
+
+        if (length($line) > 500) {
+            $line = substr($line, 0, 497) . '...';
+        }
+
+        if (@lines < 20) {
+            push @lines, $line;
+        }
+        else {
+            $truncated = 1;
+        }
     }
+
+    close $pipe;
+    my $exit_status = $? >> 8;
 
     $stream->write("--- eval output ---\r\n");
-    $stream->write("$_\r\n") for @lines;
-    $stream->write("[... output truncated at 20 lines ...]\r\n") if $truncated;
 
-    if ($err) {
-        $err =~ s/\n/ /g;
-        $stream->write("--- error ---\r\n");
-        $stream->write("$err\r\n");
-    } else {
-        $stream->write("--- ok ---\r\n");
+    if (@lines) {
+        $stream->write("$_\r\n") for @lines;
+    }
+    else {
+        $stream->write("(no output)\r\n");
     }
 
-    $bot->{logger}->log(1, "Partyline: $nick eval completed" . ($err ? " with error: $err" : ""));
+    $stream->write("[... output truncated at 20 lines ...]\r\n") if $truncated;
+
+    if ($timed_out || $exit_status == 124) {
+        $stream->write("--- timeout ---\r\n");
+        $stream->write("Eval timed out after ${eval_timeout}s.\r\n");
+        $bot->{logger}->log(1, "Partyline: $nick eval timed out after ${eval_timeout}s");
+        return;
+    }
+
+    if (@errors) {
+        $stream->write("--- error ---\r\n");
+        for my $err (@errors) {
+            $err =~ s/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]//g;
+            $err = substr($err, 0, 497) . '...' if length($err) > 500;
+            $stream->write("$err\r\n");
+        }
+
+        $bot->{logger}->log(1, "Partyline: $nick eval completed with error: " . join(' | ', @errors));
+        return;
+    }
+
+    $stream->write("--- ok ---\r\n");
+    $bot->{logger}->log(1, "Partyline: $nick eval completed in subprocess");
 }
+
 
 # ---------------------------------------------------------------------------
 # .die

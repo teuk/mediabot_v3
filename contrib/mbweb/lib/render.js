@@ -54,6 +54,7 @@ function renderPage(title, body, req) {
   ${isMaster(user) ? `
     <a class="mbw-nav-pill elevated" href="${safeBase('/network')}">Network</a>
     <a class="mbw-nav-pill elevated" href="${safeBase('/users')}">Users</a>
+    ${user && user.level <= 1 ? `<a class="mbw-nav-pill elevated" href="${safeBase('/partyline')}">Partyline</a>` : ''}
   ` : ''}
 ` : ''}
       </div>

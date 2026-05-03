@@ -37,7 +37,11 @@ sub new {
     $self->_declare('mediabot_channel_nick_count',     'gauge',   'Current nick count seen in a channel');
     $self->_declare('mediabot_channel_autojoin',       'gauge',   'Whether a channel is configured as auto_join');
     $self->_declare('mediabot_channel_lines_in_total', 'counter', 'Total incoming public channel lines');
+    $self->_declare('mediabot_channel_bans_active',        'gauge',   'Current active bans per channel', ['channel']);
+    $self->_declare('mediabot_channel_bans_added_total',   'counter', 'Total bans added per channel',   ['channel']);
+    $self->_declare('mediabot_channel_bans_expired_total', 'counter', 'Total bans expired',             []);
     $self->_declare('mediabot_channel_commands_total', 'counter', 'Total public commands executed in a channel');
+    $self->_declare('mediabot_commands_by_name_total', 'counter', 'Total commands dispatched per command name', ['command']);
     $self->_declare('mediabot_channel_commands_by_name_total', 'counter', 'Total public commands executed in a channel by command');
 
     $self->_declare('mediabot_commands_public_total',  'counter', 'Total public IRC commands executed');
