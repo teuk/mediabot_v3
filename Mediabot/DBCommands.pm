@@ -1162,7 +1162,7 @@ sub mbDbSearchCommand_ctx {
     my $nick = $ctx->nick;
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    # Prefer output where the command was invoked
+    # Prefer output where the command was invoked.
     my $out_chan = '';
     my $ctx_chan = $ctx->channel // '';
     $out_chan = $ctx_chan if defined($ctx_chan) && $ctx_chan =~ /^#/;
@@ -1174,15 +1174,19 @@ sub mbDbSearchCommand_ctx {
 
     my $kw = $args[0];
 
-    # Escape LIKE wildcards so the keyword is treated literally
+    # Escape SQL LIKE wildcards so the keyword is treated literally.
+    # Use ESCAPE '!' instead of backslash because ESCAPE '\' is fragile with
+    # MariaDB/MySQL SQL string quoting.
     my $like = $kw;
-    $like =~ s/([\\%_])/\\$1/g;
+    $like =~ s/!/!!/g;
+    $like =~ s/%/!%/g;
+    $like =~ s/_/!_/g;
     $like = '%' . $like . '%';
 
     my $sql = q{
         SELECT command
         FROM PUBLIC_COMMANDS
-        WHERE action LIKE ? ESCAPE '\\'
+        WHERE action LIKE ? ESCAPE '!'
         ORDER BY hits DESC, command ASC
         LIMIT 50
     };
@@ -1200,34 +1204,55 @@ sub mbDbSearchCommand_ctx {
     }
     $sth->finish;
 
-    my $line;
-    if (!@cmds) {
-        $line = "keyword '$kw' not found in commands";
-    } else {
-        my $prefix  = "Commands containing '$kw': ";
-        my $max_len = 360; # conservative for IRC payload
-        $line = $prefix;
+    my $count = scalar(@cmds);
 
-        for my $c (@cmds) {
-            my $candidate = ($line eq $prefix) ? ($line . $c) : ($line . " " . $c);
-            if (length($candidate) > $max_len) {
-                $line .= "..." if length($line) + 3 <= $max_len;
-                last;
-            }
-            $line = $candidate;
+    if (!$count) {
+        my $line = "keyword '$kw' not found in commands";
+
+        if ($out_chan) {
+            botPrivmsg($self, $out_chan, $line);
+            logBot($self, $ctx->message, $out_chan, "searchcmd", $kw);
         }
+        else {
+            botNotice($self, $nick, $line);
+            logBot($self, $ctx->message, undef, "searchcmd", $kw);
+        }
+
+        return 0;
     }
 
+    my $summary = "Commands containing '$kw': $count result(s), showing max 50";
+
+    # Avoid flooding the channel with multi-line results. If searchcmd is called
+    # from a channel, keep a short summary there and send details by NOTICE.
     if ($out_chan) {
-        botPrivmsg($self, $out_chan, $line);
+        botPrivmsg($self, $out_chan, "$summary - details sent by notice to $nick");
         logBot($self, $ctx->message, $out_chan, "searchcmd", $kw);
-    } else {
-        botNotice($self, $nick, $line);
+    }
+    else {
+        botNotice($self, $nick, $summary);
         logBot($self, $ctx->message, undef, "searchcmd", $kw);
     }
 
-    return scalar(@cmds);
+    my $per_line = 5;
+    my $page     = 1;
+
+    while (@cmds) {
+        my @chunk = splice(@cmds, 0, $per_line);
+        my $line  = sprintf("searchcmd[%02d]: %s", $page, join(' ', @chunk));
+
+        # Conservative IRC payload limit.
+        if (length($line) > 360) {
+            $line = substr($line, 0, 357) . '...';
+        }
+
+        botNotice($self, $nick, $line);
+        $page++;
+    }
+
+    return $count;
 }
+
 
 # Display the number of commands owned by each user
 # Improvements:
