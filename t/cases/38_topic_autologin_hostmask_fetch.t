@@ -1,6 +1,6 @@
-# t/cases/18_searchcmd_pagination.t
+# t/cases/38_topic_autologin_hostmask_fetch.t
 # =============================================================================
-# Static regression checks for searchcmd paginated output and MariaDB-safe LIKE.
+# Static regression checks for topic autologin hostmask lookup.
 # =============================================================================
 
 use strict;
@@ -14,7 +14,7 @@ BEGIN {
 
 use File::Spec;
 
-sub _slurp_searchcmd_pagination {
+sub _slurp_topic_autologin {
     my ($path) = @_;
 
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
@@ -22,7 +22,7 @@ sub _slurp_searchcmd_pagination {
     return <$fh>;
 }
 
-sub _extract_sub_searchcmd_pagination {
+sub _extract_sub_topic_autologin {
     my ($src, $name) = @_;
 
     my $start = index($src, "sub $name");
@@ -50,11 +50,9 @@ sub _extract_sub_searchcmd_pagination {
                 $escape = 1;
                 next;
             }
-
             if ($c eq "'" && !$escape) {
                 $in_single = 0;
             }
-
             $escape = 0;
             next;
         }
@@ -64,11 +62,9 @@ sub _extract_sub_searchcmd_pagination {
                 $escape = 1;
                 next;
             }
-
             if ($c eq '"' && !$escape) {
                 $in_double = 0;
             }
-
             $escape = 0;
             next;
         }
@@ -106,71 +102,41 @@ sub _extract_sub_searchcmd_pagination {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_searchcmd_pagination(File::Spec->catfile('.', 'Mediabot', 'DBCommands.pm'));
-    my $func = _extract_sub_searchcmd_pagination($src, 'mbDbSearchCommand_ctx');
+    my $src  = _slurp_topic_autologin(File::Spec->catfile('.', 'Mediabot', 'ChannelCommands.pm'));
+    my $func = _extract_sub_topic_autologin($src, 'userTopicChannel');
 
     $assert->ok(
-        $func =~ /sub mbDbSearchCommand_ctx/,
-        'searchcmd function exists'
+        $func =~ /SELECT hostmask FROM USER_HOSTMASK WHERE id_user=\? ORDER BY id_user_hostmask/,
+        'topic autologin fetches hostmasks row-by-row'
     );
 
     $assert->ok(
-        $func =~ /LIMIT 50/,
-        'searchcmd keeps SQL LIMIT 50'
+        $func =~ /while \(my \(\$mask\) = \$hm_sth->fetchrow_array\)/,
+        'topic autologin iterates hostmask rows'
     );
 
     $assert->ok(
-        $func =~ /LIKE \? ESCAPE '!'/,
-        q{searchcmd uses MariaDB-safe SQL LIKE ESCAPE '!'}
+        $func =~ /push \@masks, \$mask/,
+        'topic autologin stores hostmasks in an array'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/!\/!!\/g/,
-        'searchcmd escapes the SQL LIKE escape character itself'
+        $func =~ /for my \$mask \(\@masks\)/,
+        'topic autologin matches against array of hostmasks'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/%\/!%\/g/,
-        'searchcmd escapes percent wildcard literally'
+        $func =~ /userTopicChannel\(\) hostmask SQL Error/,
+        'topic autologin logs hostmask SQL errors'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/_\/!_\/g/,
-        'searchcmd escapes underscore wildcard literally'
+        $func !~ /GROUP_CONCAT\(hostmask/,
+        'topic autologin no longer GROUP_CONCATs hostmasks'
     );
 
     $assert->ok(
-        $func =~ /my \$per_line = 5;/,
-        'searchcmd paginates at 5 commands per line'
-    );
-
-    $assert->ok(
-        $func =~ /searchcmd\[%02d\]/,
-        'searchcmd detail lines are numbered'
-    );
-
-    $assert->ok(
-        $func =~ /details sent by notice to \$nick/,
-        'searchcmd avoids multi-line channel flood'
-    );
-
-    $assert->ok(
-        $func =~ /botNotice\(\$self, \$nick, \$line\);/,
-        'searchcmd sends paginated details by notice'
-    );
-
-    $assert->ok(
-        $func !~ /ESCAPE '\\\\'/,
-        q{searchcmd no longer uses fragile ESCAPE '\'}
-    );
-
-    $assert->ok(
-        $func !~ /my \$max_len = 360/,
-        'searchcmd no longer uses old max_len single-line truncation'
-    );
-
-    $assert->ok(
-        $func !~ /\$line = \$prefix/,
-        'searchcmd no longer builds one huge prefix line'
+        $func !~ /split \/,\/, \(\$masks/,
+        'topic autologin no longer splits a comma-concatenated hostmask string'
     );
 };

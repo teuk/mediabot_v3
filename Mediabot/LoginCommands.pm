@@ -397,7 +397,24 @@ sub userPass {
         if (defined($user) && defined($user->nickname)) {
 
             my $sNewPassword = $tArgs[0];
-            my $sHashedNewPw = make_password_hash($sNewPassword);
+
+            my $sHashedNewPw;
+            my $hash_ok = eval {
+                $sHashedNewPw = make_password_hash($sNewPassword);
+                1;
+            };
+
+            unless ($hash_ok && defined $sHashedNewPw) {
+                my $err = $@ || 'make_password_hash returned undef';
+                chomp $err;
+
+                $self->{logger}->log(1, "userPass() make_password_hash failed: $err")
+                    if $self->{logger};
+
+                botNotice($self, $sNick, "Internal error (hash compute failed).");
+                logBot($self, $message, undef, "pass", "Failed - hash error");
+                return 0;
+            }
 my $sQuery = "UPDATE USER SET password=? WHERE id_user=?";
             my $sth = $self->{dbh}->prepare($sQuery);
 
@@ -456,7 +473,22 @@ sub userIdent {
 
 sub checkAuthByUser {
 	my ($self,$message,$sUserHandle,$sPassword) = @_;
-	my $sHashedPw = make_password_hash($sPassword);
+
+	my $sHashedPw;
+	my $hash_ok = eval {
+		$sHashedPw = make_password_hash($sPassword);
+		1;
+	};
+
+	unless ($hash_ok && defined $sHashedPw) {
+		my $err = $@ || 'make_password_hash returned undef';
+		chomp $err;
+
+		$self->{logger}->log(1, "checkAuthByUser() make_password_hash failed: $err")
+			if $self->{logger};
+
+		return (0,0);
+	}
 	my $sCheckAuthQuery = "SELECT id_user FROM USER WHERE nickname = ? AND password = ?";
 	my $sth = $self->{dbh}->prepare($sCheckAuthQuery);
 	unless ($sth->execute($sUserHandle,$sHashedPw)) {
@@ -476,6 +508,7 @@ sub checkAuthByUser {
 			$chk->execute($id_user, $sHostmask);
 			if ($chk->fetchrow_arrayref) {
 				$chk->finish;
+				$sth->finish;
 				return ($id_user, 1);
 			}
 			$chk->finish;
@@ -485,9 +518,12 @@ sub checkAuthByUser {
 				);
 				unless ($ins && $ins->execute($id_user, $sHostmask)) {
 					$self->{logger}->log(1,"checkAuthByUser() SQL Error : " . $DBI::errstr);
+					$ins->finish if $ins;
+					$sth->finish if $sth;
 					return (0,0);
 				}
 				$ins->finish;
+				$sth->finish;
 				return ($id_user,0);
 			}
 		}
@@ -544,15 +580,25 @@ sub userWhoAmI_ctx {
     if (my $ref = $sth->fetchrow_hashref()) {
         my $created    = $ref->{creation_date} // 'N/A';
         my $last_login = $ref->{last_login}    // 'never';
-        # Fetch hostmasks from USER_HOSTMASK
+        # Fetch hostmasks from USER_HOSTMASK.
+        # Do not GROUP_CONCAT everything into one huge IRC line: hostmasks can
+        # grow over time, so we paginate them below.
+        my @hostmasks;
         my $hm_sth2 = $self->{dbh}->prepare(
-            "SELECT GROUP_CONCAT(hostmask ORDER BY id_user_hostmask SEPARATOR ', ') AS hm FROM USER_HOSTMASK WHERE id_user=?"
+            "SELECT hostmask FROM USER_HOSTMASK WHERE id_user=? ORDER BY id_user_hostmask LIMIT 20"
         );
-        my $hostmasks = 'N/A';
+
         if ($hm_sth2 && $hm_sth2->execute($uid)) {
-            my $hm_ref2 = $hm_sth2->fetchrow_hashref;
-            $hostmasks = $hm_ref2->{hm} // 'N/A';
+            while (my $hm_ref2 = $hm_sth2->fetchrow_hashref) {
+                push @hostmasks, $hm_ref2->{hostmask}
+                    if defined($hm_ref2->{hostmask}) && $hm_ref2->{hostmask} ne '';
+            }
             $hm_sth2->finish;
+        }
+        else {
+            $self->{logger}->log(1, "userWhoAmI_ctx() hostmask SQL Error: $DBI::errstr")
+                if $self->{logger};
+            $hm_sth2->finish if $hm_sth2;
         }
         my $db_auth    = $ref->{auth}          ? 1 : 0;
 
@@ -569,8 +615,32 @@ sub userWhoAmI_ctx {
         my $info1 = eval { $user->info1 } // eval { $user->{info1} } // '';
         my $info2 = eval { $user->info2 } // eval { $user->{info2} } // '';
         botNotice($self, $nick,
-            "$pass_set | Status: $auth_status | AUTOLOGIN: $autologin | Masks: $hostmasks"
+            "$pass_set | Status: $auth_status | AUTOLOGIN: $autologin"
         );
+
+        if (@hostmasks) {
+            my $mask_count = scalar(@hostmasks);
+            botNotice($self, $nick, "Masks: $mask_count shown, max 20");
+
+            my $per_line = 2;
+            my $page     = 1;
+
+            while (@hostmasks) {
+                my @chunk = splice(@hostmasks, 0, $per_line);
+                my $line  = sprintf("whoami-masks[%02d]: %s", $page, join(' | ', @chunk));
+
+                if (length($line) > 360) {
+                    $line = substr($line, 0, 357) . '...';
+                }
+
+                botNotice($self, $nick, $line);
+                $page++;
+            }
+        }
+        else {
+            botNotice($self, $nick, "Masks: N/A");
+        }
+
         botNotice($self, $nick,
             "Created: $created | Last: $last_login"
             . ($info1 ne '' && $info1 ne 'N/A' ? " | $info1" : "")

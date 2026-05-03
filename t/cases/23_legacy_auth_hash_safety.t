@@ -1,6 +1,6 @@
-# t/cases/18_searchcmd_pagination.t
+# t/cases/23_legacy_auth_hash_safety.t
 # =============================================================================
-# Static regression checks for searchcmd paginated output and MariaDB-safe LIKE.
+# Static regression checks for legacy auth hash safety.
 # =============================================================================
 
 use strict;
@@ -14,7 +14,7 @@ BEGIN {
 
 use File::Spec;
 
-sub _slurp_searchcmd_pagination {
+sub _slurp_legacy_auth_hash {
     my ($path) = @_;
 
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
@@ -22,7 +22,7 @@ sub _slurp_searchcmd_pagination {
     return <$fh>;
 }
 
-sub _extract_sub_searchcmd_pagination {
+sub _extract_sub_legacy_auth_hash {
     my ($src, $name) = @_;
 
     my $start = index($src, "sub $name");
@@ -50,11 +50,9 @@ sub _extract_sub_searchcmd_pagination {
                 $escape = 1;
                 next;
             }
-
             if ($c eq "'" && !$escape) {
                 $in_single = 0;
             }
-
             $escape = 0;
             next;
         }
@@ -64,11 +62,9 @@ sub _extract_sub_searchcmd_pagination {
                 $escape = 1;
                 next;
             }
-
             if ($c eq '"' && !$escape) {
                 $in_double = 0;
             }
-
             $escape = 0;
             next;
         }
@@ -106,71 +102,58 @@ sub _extract_sub_searchcmd_pagination {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_searchcmd_pagination(File::Spec->catfile('.', 'Mediabot', 'DBCommands.pm'));
-    my $func = _extract_sub_searchcmd_pagination($src, 'mbDbSearchCommand_ctx');
+    my $src = _slurp_legacy_auth_hash(File::Spec->catfile('.', 'Mediabot', 'LoginCommands.pm'));
+
+    my $user_pass = _extract_sub_legacy_auth_hash($src, 'userPass');
+    my $ident     = _extract_sub_legacy_auth_hash($src, 'checkAuthByUser');
 
     $assert->ok(
-        $func =~ /sub mbDbSearchCommand_ctx/,
-        'searchcmd function exists'
+        $user_pass =~ /my \$hash_ok = eval \{/,
+        'userPass protects make_password_hash with eval'
     );
 
     $assert->ok(
-        $func =~ /LIMIT 50/,
-        'searchcmd keeps SQL LIMIT 50'
+        $user_pass =~ /userPass\(\) make_password_hash failed/,
+        'userPass logs password hash failures'
     );
 
     $assert->ok(
-        $func =~ /LIKE \? ESCAPE '!'/,
-        q{searchcmd uses MariaDB-safe SQL LIKE ESCAPE '!'}
+        $user_pass =~ /Internal error \(hash compute failed\)/,
+        'userPass reports hash failure cleanly'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/!\/!!\/g/,
-        'searchcmd escapes the SQL LIKE escape character itself'
+        $ident =~ /my \$hash_ok = eval \{/,
+        'checkAuthByUser protects make_password_hash with eval'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/%\/!%\/g/,
-        'searchcmd escapes percent wildcard literally'
+        $ident =~ /checkAuthByUser\(\) make_password_hash failed/,
+        'checkAuthByUser logs password hash failures'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/_\/!_\/g/,
-        'searchcmd escapes underscore wildcard literally'
+        $ident =~ /\$sth->finish;\s*return \(\$id_user,0\);/s,
+        'checkAuthByUser finishes main statement before success return'
     );
 
     $assert->ok(
-        $func =~ /my \$per_line = 5;/,
-        'searchcmd paginates at 5 commands per line'
+        $ident =~ /\$chk->finish;\s*\$sth->finish;\s*return \(\$id_user, 1\);/s,
+        'checkAuthByUser finishes main statement before existing-hostmask success return'
     );
 
     $assert->ok(
-        $func =~ /searchcmd\[%02d\]/,
-        'searchcmd detail lines are numbered'
+        $ident =~ /\$ins->finish if \$ins;\s*\$sth->finish if \$sth;\s*return \(0,0\);/s,
+        'checkAuthByUser finishes statements on insert error'
     );
 
     $assert->ok(
-        $func =~ /details sent by notice to \$nick/,
-        'searchcmd avoids multi-line channel flood'
+        $user_pass !~ /my \$sHashedNewPw = make_password_hash\(\$sNewPassword\);/,
+        'userPass no longer uses direct make_password_hash assignment'
     );
 
     $assert->ok(
-        $func =~ /botNotice\(\$self, \$nick, \$line\);/,
-        'searchcmd sends paginated details by notice'
-    );
-
-    $assert->ok(
-        $func !~ /ESCAPE '\\\\'/,
-        q{searchcmd no longer uses fragile ESCAPE '\'}
-    );
-
-    $assert->ok(
-        $func !~ /my \$max_len = 360/,
-        'searchcmd no longer uses old max_len single-line truncation'
-    );
-
-    $assert->ok(
-        $func !~ /\$line = \$prefix/,
-        'searchcmd no longer builds one huge prefix line'
+        $ident !~ /my \$sHashedPw = make_password_hash\(\$sPassword\);/,
+        'checkAuthByUser no longer uses direct make_password_hash assignment'
     );
 };

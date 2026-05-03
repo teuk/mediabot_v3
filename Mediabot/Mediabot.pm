@@ -1279,19 +1279,53 @@ sub mbUptime_ctx {
 
 sub mbHelp_ctx {
     my ($ctx) = @_;
-    my $self    = $ctx->bot;
-    my $channel = $ctx->channel;
-    my @args    = @{ $ctx->args };
 
-    if (defined $args[0] && $args[0] ne "") {
-        botPrivmsg($self, $channel,
-            "Help on command $args[0] is not available (unknown command ?). "
-            . "Please visit https://github.com/teuk/mediabot_v3/wiki");
-    } else {
-        botPrivmsg($self, $channel,
-            "Please visit https://github.com/teuk/mediabot_v3/wiki for full documentation on mediabot");
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel // '';
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $wiki = "https://github.com/teuk/mediabot_v3/wiki";
+
+    # Explicit wiki request: keep the external documentation easy to find.
+    if (@args && defined($args[0]) && $args[0] =~ /^(wiki|doc|docs|documentation)$/i) {
+        botNotice($self, $nick, "Mediabot documentation: $wiki");
+        return 1;
     }
+
+    # If a channel is provided, reuse showcommands against that channel.
+    # Example:
+    #   !help #teuk
+    if (@args && defined($args[0]) && $args[0] =~ /^#/) {
+        return userShowcommandsChannel_ctx($ctx);
+    }
+
+    # No args: show level-filtered commands for the current channel when possible.
+    # This reuses the existing showcommands implementation, including auth and
+    # channel-level filtering.
+    unless (@args) {
+        if ($channel =~ /^#/) {
+            return userShowcommandsChannel_ctx($ctx);
+        }
+
+        botNotice($self, $nick, "Syntax: help #channel");
+        botNotice($self, $nick, "Documentation: $wiki");
+        return 1;
+    }
+
+    # Command-specific help is not fully documented inline yet. Provide useful
+    # pointers instead of pretending the command is unknown.
+    my $cmd = lc($args[0] // '');
+    $cmd =~ s/^\Q$self->{command_char}\E// if defined($self->{command_char}) && $self->{command_char} ne '';
+
+    botNotice($self, $nick, "Inline help for '$cmd' is not available yet.");
+    botNotice($self, $nick, "Try: showcmd $cmd");
+    botNotice($self, $nick, "Try: searchcmd $cmd");
+    botNotice($self, $nick, "Documentation: $wiki");
+
+    return 1;
 }
+
 
 # Handle bot nick triggered messages - natural patterns + Hailo fallback
 sub mbHandleNickTriggered {
@@ -1540,7 +1574,13 @@ sub purge_channel_log {
     if ($@) { $self->{logger}->log(1, "purge_channel_log: $@"); return; }
     my $rows = $sth->rows // 0;
     $sth->finish;
-    $self->{logger}->log(2, "purge_channel_log: $rows row(s) deleted (>${days}d)") if $rows;
+
+    if ($rows) {
+        my $msg = "purge_channel_log: $rows row(s) deleted (>${days}d)";
+        $self->{logger}->log(2, $msg);
+        noticeConsoleChan($self, $msg);
+    }
+
     return $rows;
 }
 
@@ -1558,7 +1598,13 @@ sub purge_user_seen {
     if ($@) { $self->{logger}->log(1, "purge_user_seen: $@"); return; }
     my $rows = $sth->rows // 0;
     $sth->finish;
-    $self->{logger}->log(2, "purge_user_seen: $rows stale nick(s) purged (>${days}d)") if $rows;
+
+    if ($rows) {
+        my $msg = "purge_user_seen: $rows stale nick(s) purged (>${days}d)";
+        $self->{logger}->log(2, $msg);
+        noticeConsoleChan($self, $msg);
+    }
+
     return $rows;
 }
 

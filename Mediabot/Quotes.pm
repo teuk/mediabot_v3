@@ -299,10 +299,14 @@ sub mbQuoteSearch {
     my $MAXQUOTES = 50;
 
     # B1/B2: filter in SQL with LIKE placeholders, not Perl regexes.
-    # Escape LIKE wildcards so user input is treated literally:
-    #   %  -> \\%
-    #   _  -> \\_
-    #   \\ -> \\\\
+    # Escape LIKE wildcards so user input is treated literally.
+    #
+    # Use ESCAPE '!' instead of backslash because ESCAPE '\' is fragile with
+    # MariaDB/MySQL SQL string quoting.
+    #
+    #   !  -> !!
+    #   %  -> !%
+    #   _  -> !_
     my @words = grep { defined($_) && $_ ne '' } @tArgs;
 
     unless (@words) {
@@ -312,14 +316,14 @@ sub mbQuoteSearch {
 
     my @like_words = map {
         my $w = $_;
-        $w =~ s/\\/\\\\/g;
-        $w =~ s/%/\\%/g;
-        $w =~ s/_/\\_/g;
+        $w =~ s/!/!!/g;
+        $w =~ s/%/!%/g;
+        $w =~ s/_/!_/g;
         $w;
     } @words;
 
     # One LIKE clause per word (AND logic).
-    my $where_words = join(' AND ', map { q{q.quotetext LIKE ? ESCAPE '\\'} } @like_words);
+    my $where_words = join(' AND ', map { q{q.quotetext LIKE ? ESCAPE '!'} } @like_words);
     my @binds_words = map { "%$_%" } @like_words;
 
     my $sQuery = "SELECT q.id_quotes, q.quotetext, q.id_user, q.ts

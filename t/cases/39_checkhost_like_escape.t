@@ -1,6 +1,6 @@
-# t/cases/18_searchcmd_pagination.t
+# t/cases/39_checkhost_like_escape.t
 # =============================================================================
-# Static regression checks for searchcmd paginated output and MariaDB-safe LIKE.
+# Static regression checks for checkhost/checkhostchan SQL LIKE escaping.
 # =============================================================================
 
 use strict;
@@ -14,7 +14,7 @@ BEGIN {
 
 use File::Spec;
 
-sub _slurp_searchcmd_pagination {
+sub _slurp_checkhost_like_escape {
     my ($path) = @_;
 
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
@@ -22,7 +22,7 @@ sub _slurp_searchcmd_pagination {
     return <$fh>;
 }
 
-sub _extract_sub_searchcmd_pagination {
+sub _extract_sub_checkhost_like_escape {
     my ($src, $name) = @_;
 
     my $start = index($src, "sub $name");
@@ -50,11 +50,9 @@ sub _extract_sub_searchcmd_pagination {
                 $escape = 1;
                 next;
             }
-
             if ($c eq "'" && !$escape) {
                 $in_single = 0;
             }
-
             $escape = 0;
             next;
         }
@@ -64,11 +62,9 @@ sub _extract_sub_searchcmd_pagination {
                 $escape = 1;
                 next;
             }
-
             if ($c eq '"' && !$escape) {
                 $in_double = 0;
             }
-
             $escape = 0;
             next;
         }
@@ -106,71 +102,64 @@ sub _extract_sub_searchcmd_pagination {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_searchcmd_pagination(File::Spec->catfile('.', 'Mediabot', 'DBCommands.pm'));
-    my $func = _extract_sub_searchcmd_pagination($src, 'mbDbSearchCommand_ctx');
+    my $helpers = _slurp_checkhost_like_escape(File::Spec->catfile('.', 'Mediabot', 'Helpers.pm'));
+    my $chan    = _slurp_checkhost_like_escape(File::Spec->catfile('.', 'Mediabot', 'ChannelCommands.pm'));
+
+    my $checkhost     = _extract_sub_checkhost_like_escape($helpers, 'mbDbCheckHostnameNick_ctx');
+    my $checkhostchan = _extract_sub_checkhost_like_escape($chan,    'mbDbCheckHostnameNickChan_ctx');
 
     $assert->ok(
-        $func =~ /sub mbDbSearchCommand_ctx/,
-        'searchcmd function exists'
+        $checkhost =~ /userhost LIKE \? ESCAPE '!'/,
+        q{checkhost uses MariaDB-safe ESCAPE '!'}
     );
 
     $assert->ok(
-        $func =~ /LIMIT 50/,
-        'searchcmd keeps SQL LIMIT 50'
+        $checkhost =~ /\$host_like =~ s\/!\/!!\/g/,
+        'checkhost escapes LIKE escape character'
     );
 
     $assert->ok(
-        $func =~ /LIKE \? ESCAPE '!'/,
-        q{searchcmd uses MariaDB-safe SQL LIKE ESCAPE '!'}
+        $checkhost =~ /\$host_like =~ s\/%\/!%\/g/,
+        'checkhost escapes percent wildcard literally'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/!\/!!\/g/,
-        'searchcmd escapes the SQL LIKE escape character itself'
+        $checkhost =~ /\$host_like =~ s\/_\/!_\/g/,
+        'checkhost escapes underscore wildcard literally'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/%\/!%\/g/,
-        'searchcmd escapes percent wildcard literally'
+        $checkhost =~ /my \$mask = '%@' \. \$host_like/,
+        'checkhost uses escaped host in suffix mask'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/_\/!_\/g/,
-        'searchcmd escapes underscore wildcard literally'
+        $checkhostchan =~ /userhost LIKE \? ESCAPE '!'/,
+        q{checkhostchan uses MariaDB-safe ESCAPE '!'}
     );
 
     $assert->ok(
-        $func =~ /my \$per_line = 5;/,
-        'searchcmd paginates at 5 commands per line'
+        $checkhostchan =~ /\$hostname_like =~ s\/!\/!!\/g/,
+        'checkhostchan escapes LIKE escape character'
     );
 
     $assert->ok(
-        $func =~ /searchcmd\[%02d\]/,
-        'searchcmd detail lines are numbered'
+        $checkhostchan =~ /\$hostname_like =~ s\/%\/!%\/g/,
+        'checkhostchan escapes percent wildcard literally'
     );
 
     $assert->ok(
-        $func =~ /details sent by notice to \$nick/,
-        'searchcmd avoids multi-line channel flood'
+        $checkhostchan =~ /\$hostname_like =~ s\/_\/!_\/g/,
+        'checkhostchan escapes underscore wildcard literally'
     );
 
     $assert->ok(
-        $func =~ /botNotice\(\$self, \$nick, \$line\);/,
-        'searchcmd sends paginated details by notice'
+        $checkhostchan =~ /my \$mask = '%@' \. \$hostname_like/,
+        'checkhostchan uses escaped host in suffix mask'
     );
 
     $assert->ok(
-        $func !~ /ESCAPE '\\\\'/,
-        q{searchcmd no longer uses fragile ESCAPE '\'}
-    );
-
-    $assert->ok(
-        $func !~ /my \$max_len = 360/,
-        'searchcmd no longer uses old max_len single-line truncation'
-    );
-
-    $assert->ok(
-        $func !~ /\$line = \$prefix/,
-        'searchcmd no longer builds one huge prefix line'
+        $checkhostchan =~ /Nicks for host \$hostname on \$target_chan: \$count result\(s\), showing max 10/,
+        'checkhostchan summary matches SQL LIMIT 10'
     );
 };

@@ -1,6 +1,6 @@
-# t/cases/18_searchcmd_pagination.t
+# t/cases/34_partyline_match_hostmask_pagination.t
 # =============================================================================
-# Static regression checks for searchcmd paginated output and MariaDB-safe LIKE.
+# Static regression checks for Partyline .match hostmask pagination.
 # =============================================================================
 
 use strict;
@@ -14,7 +14,7 @@ BEGIN {
 
 use File::Spec;
 
-sub _slurp_searchcmd_pagination {
+sub _slurp_partyline_match {
     my ($path) = @_;
 
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
@@ -22,7 +22,7 @@ sub _slurp_searchcmd_pagination {
     return <$fh>;
 }
 
-sub _extract_sub_searchcmd_pagination {
+sub _extract_sub_partyline_match {
     my ($src, $name) = @_;
 
     my $start = index($src, "sub $name");
@@ -50,11 +50,9 @@ sub _extract_sub_searchcmd_pagination {
                 $escape = 1;
                 next;
             }
-
             if ($c eq "'" && !$escape) {
                 $in_single = 0;
             }
-
             $escape = 0;
             next;
         }
@@ -64,11 +62,9 @@ sub _extract_sub_searchcmd_pagination {
                 $escape = 1;
                 next;
             }
-
             if ($c eq '"' && !$escape) {
                 $in_double = 0;
             }
-
             $escape = 0;
             next;
         }
@@ -106,71 +102,56 @@ sub _extract_sub_searchcmd_pagination {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_searchcmd_pagination(File::Spec->catfile('.', 'Mediabot', 'DBCommands.pm'));
-    my $func = _extract_sub_searchcmd_pagination($src, 'mbDbSearchCommand_ctx');
+    my $src  = _slurp_partyline_match(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $func = _extract_sub_partyline_match($src, '_cmd_match');
 
     $assert->ok(
-        $func =~ /sub mbDbSearchCommand_ctx/,
-        'searchcmd function exists'
+        $func =~ /WHERE u\.nickname LIKE \? ESCAPE '!'/,
+        q{.match uses MariaDB-safe ESCAPE '!'}
     );
 
     $assert->ok(
-        $func =~ /LIMIT 50/,
-        'searchcmd keeps SQL LIMIT 50'
+        $func =~ /\$sql_pat =~ s\/!\/!!\/g/,
+        '.match escapes LIKE escape character'
     );
 
     $assert->ok(
-        $func =~ /LIKE \? ESCAPE '!'/,
-        q{searchcmd uses MariaDB-safe SQL LIKE ESCAPE '!'}
+        $func =~ /\$sql_pat =~ s\/%\/!%\/g/,
+        '.match escapes literal percent before wildcard conversion'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/!\/!!\/g/,
-        'searchcmd escapes the SQL LIKE escape character itself'
+        $func =~ /\$sql_pat =~ s\/_\/!_\/g/,
+        '.match escapes literal underscore before wildcard conversion'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/%\/!%\/g/,
-        'searchcmd escapes percent wildcard literally'
+        $func =~ /SELECT hostmask/,
+        '.match fetches hostmasks row-by-row'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/_\/!_\/g/,
-        'searchcmd escapes underscore wildcard literally'
+        $func =~ /LIMIT 20/,
+        '.match limits displayed hostmasks to 20'
     );
 
     $assert->ok(
-        $func =~ /my \$per_line = 5;/,
-        'searchcmd paginates at 5 commands per line'
+        $func =~ /Hosts\[%02d\]/,
+        '.match hostmask detail lines are numbered'
     );
 
     $assert->ok(
-        $func =~ /searchcmd\[%02d\]/,
-        'searchcmd detail lines are numbered'
+        $func =~ /my \$per_line = 2;/,
+        '.match paginates hostmasks at 2 per line'
     );
 
     $assert->ok(
-        $func =~ /details sent by notice to \$nick/,
-        'searchcmd avoids multi-line channel flood'
+        $func !~ /GROUP_CONCAT\(uh\.hostmask/,
+        '.match no longer GROUP_CONCATs all hostmasks'
     );
 
     $assert->ok(
-        $func =~ /botNotice\(\$self, \$nick, \$line\);/,
-        'searchcmd sends paginated details by notice'
-    );
-
-    $assert->ok(
-        $func !~ /ESCAPE '\\\\'/,
-        q{searchcmd no longer uses fragile ESCAPE '\'}
-    );
-
-    $assert->ok(
-        $func !~ /my \$max_len = 360/,
-        'searchcmd no longer uses old max_len single-line truncation'
-    );
-
-    $assert->ok(
-        $func !~ /\$line = \$prefix/,
-        'searchcmd no longer builds one huge prefix line'
+        $func !~ /Hosts\s+: %s/,
+        '.match no longer writes all hostmasks on one line'
     );
 };

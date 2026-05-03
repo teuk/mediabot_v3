@@ -140,37 +140,45 @@ sub channelList_ctx {
         return;
     }
 
-    # Build a single-line response, truncated with "..." if too long
-    my $prefix = "[#chan (users)] ";
-    my $line   = $prefix;
-
-    # Keep margin (IRC/notice overhead) — conservative
-    my $max_len = 400;
+    my @items;
 
     while (my $ref = $sth->fetchrow_hashref()) {
         my $name    = $ref->{name}    // next;
         my $nbUsers = $ref->{nbUsers} // 0;
 
-        my $chunk = "$name ($nbUsers) ";
-
-        if (length($line) + length($chunk) + 3 > $max_len) {  # +3 for "..."
-            $line =~ s/\s+$//;
-            $line .= " ...";
-            last;
-        }
-
-        $line .= $chunk;
+        push @items, "$name($nbUsers)";
     }
 
     $sth->finish;
 
-    # If no channels, still show something clean
-    $line = $prefix . "none" if $line eq $prefix;
+    unless (@items) {
+        botNotice($self, $nick, "No channel registered.");
+        logBot($self, $ctx->message, undef, "chanlist");
+        return 1;
+    }
 
-    botNotice($self, $nick, $line);
+    my $count = scalar(@items);
+    botNotice($self, $nick, "Registered channels: $count result(s)");
+
+    my $per_line = 8;
+    my $page     = 1;
+
+    while (@items) {
+        my @chunk = splice(@items, 0, $per_line);
+        my $line  = sprintf("chanlist[%02d]: %s", $page, join(' ', @chunk));
+
+        if (length($line) > 360) {
+            $line = substr($line, 0, 357) . '...';
+        }
+
+        botNotice($self, $nick, $line);
+        $page++;
+    }
+
     logBot($self, $ctx->message, undef, "chanlist");
     return 1;
 }
+
 
 # versionCheck() - sends version info in channel and alerts if update is available
 sub registerChannel {
@@ -2107,25 +2115,37 @@ sub userTopicChannel {
 
     # ---------- tentative d'auto-login si auth=0 ----------
     if (!$auth) {
-        my ($username, $masks) = ('','');
+        my ($username, @masks) = ('');
         eval {
             my $sth = $self->{dbh}->prepare("SELECT username FROM USER WHERE id_user=?");
             $sth->execute($uid);
             ($username) = $sth->fetchrow_array;
             $sth->finish;
-            # Fetch hostmasks from USER_HOSTMASK
+
+            # Fetch hostmasks row-by-row instead of GROUP_CONCATing everything
+            # into one large string.
             my $hm_sth = $self->{dbh}->prepare(
-                "SELECT GROUP_CONCAT(hostmask ORDER BY id_user_hostmask SEPARATOR ',') FROM USER_HOSTMASK WHERE id_user=?"
+                "SELECT hostmask FROM USER_HOSTMASK WHERE id_user=? ORDER BY id_user_hostmask"
             );
-            $hm_sth->execute($uid);
-            ($masks) = $hm_sth->fetchrow_array;
-            $hm_sth->finish;
-            $masks //= '';
+
+            if ($hm_sth && $hm_sth->execute($uid)) {
+                while (my ($mask) = $hm_sth->fetchrow_array) {
+                    next unless defined($mask) && $mask ne '';
+                    $mask =~ s/^\s+|\s+$//g;
+                    push @masks, $mask if $mask ne '';
+                }
+                $hm_sth->finish;
+            }
+            else {
+                $self->{logger}->log(1, "userTopicChannel() hostmask SQL Error: $DBI::errstr")
+                    if $self->{logger};
+                $hm_sth->finish if $hm_sth;
+            }
         };
 
         my $userhost = $prefix; $userhost =~ s/^.*?!(.+)$/$1/;
         my $matched_mask;
-        for my $mask (grep { length } map { my $x=$_; $x =~ s/^\s+|\s+$//g; $x } split /,/, ($masks//'') ) {
+        for my $mask (@masks) {
             my $re = do {
                 my $q = quotemeta($mask);
                 $q =~ s/\\\*/.*/g; # '*' -> '.*'
@@ -2711,7 +2731,7 @@ SELECT nick, COUNT(*) AS hits
 FROM CHANNEL_LOG
 WHERE id_channel = ?
   AND userhost IS NOT NULL
-  AND userhost LIKE ?
+  AND userhost LIKE ? ESCAPE '!'
 GROUP BY nick
 ORDER BY hits DESC
 LIMIT 10
@@ -2723,8 +2743,14 @@ SQL
         return;
     }
 
-    # Match host suffix inside full userhost like 'nick!ident@host'
-    my $mask = '%@' . $hostname;
+    # Match host suffix inside full userhost like 'nick!ident@host'.
+    # Escape user input so '%' and '_' are treated literally.
+    my $hostname_like = $hostname;
+    $hostname_like =~ s/!/!!/g;
+    $hostname_like =~ s/%/!%/g;
+    $hostname_like =~ s/_/!_/g;
+
+    my $mask = '%@' . $hostname_like;
 
     unless ($sth->execute($id_channel, $mask)) {
         $self->{logger}->log(1, "mbDbCheckHostnameNickChan_ctx() SQL Error: $DBI::errstr Query: $sql");
@@ -2740,18 +2766,44 @@ SQL
     }
     $sth->finish;
 
-    my $resp;
-    if (@rows) {
-        my $list = join(' | ', map { "$_->[0] ($_->[1])" } @rows);
-        $resp = "Nicks for host $hostname on $target_chan: $list";
-    } else {
-        $resp = "No result found for hostname $hostname on $target_chan.";
+    if (!@rows) {
+        my $resp = "No result found for hostname $hostname on $target_chan.";
+
+        if ($is_private) {
+            botNotice($self, $nick, $resp);
+        }
+        else {
+            botPrivmsg($self, $dest_chan, $resp);
+        }
+
+        logBot($self, $ctx->message, $dest_chan, "checkhostchan", $hostname);
+        return 1;
     }
 
+    my @items = map { "$_->[0]($_->[1])" } @rows;
+    my $count = scalar(@items);
+    my $summary = "Nicks for host $hostname on $target_chan: $count result(s), showing max 10";
+
     if ($is_private) {
-        botNotice($self, $nick, $resp);
-    } else {
-        botPrivmsg($self, $dest_chan, $resp);
+        botNotice($self, $nick, $summary);
+    }
+    else {
+        botPrivmsg($self, $dest_chan, "$summary - details sent by notice to $nick");
+    }
+
+    my $per_line = 5;
+    my $page     = 1;
+
+    while (@items) {
+        my @chunk = splice(@items, 0, $per_line);
+        my $line  = sprintf("checkhostchan[%02d]: %s", $page, join(' ', @chunk));
+
+        if (length($line) > 360) {
+            $line = substr($line, 0, 357) . '...';
+        }
+
+        botNotice($self, $nick, $line);
+        $page++;
     }
 
     logBot($self, $ctx->message, $dest_chan, "checkhostchan", $hostname);
@@ -2919,21 +2971,24 @@ sub channelNickList_ctx {
         return;
     }
 
-    # Avoid flooding / max line length: send in chunks
-    my $header = "Users on $target_chan (" . scalar(@nicks) . "): ";
-    my $maxlen = 380; # conservative for IRC
-    my $line   = $header;
+    # Paginated output: stable, readable, no silent truncation of the full list.
+    my $count = scalar(@nicks);
+    botNotice($self, $nick, "Users on $target_chan: $count result(s)");
 
-    for my $n (@nicks) {
-        my $add = $n . " ";
-        if (length($line) + length($add) > $maxlen) {
-            botNotice($self, $nick, $line);
-            $line = $header . $add;
-        } else {
-            $line .= $add;
+    my $per_line = 10;
+    my $page     = 1;
+
+    while (@nicks) {
+        my @chunk = splice(@nicks, 0, $per_line);
+        my $line  = sprintf("nicklist[%02d]: %s", $page, join(' ', @chunk));
+
+        if (length($line) > 360) {
+            $line = substr($line, 0, 357) . '...';
         }
+
+        botNotice($self, $nick, $line);
+        $page++;
     }
-    botNotice($self, $nick, $line) if $line ne $header;
 
     $self->{logger}->log(4, "nicklist $target_chan => " . scalar(@nicks) . " users");
     logBot($self, $ctx->message, undef, "nicklist", $target_chan);
@@ -3496,21 +3551,38 @@ sub mbChannelLog_ctx {
     # ---- Build SQL grep-like query ----
     # We search in CHANNEL_LOG / CHANNEL for the target channel,
     # optional nick, and optional pattern in publictext.
+    #
+    # Use ESCAPE '!' so user-supplied %, _ and ! are treated literally.
+    # For the text search, terms are still chained as:
+    #   %word1%word2%word3%
     my @where = (
-        'c.name = ?',                  # channel
-        'cl.publictext NOT LIKE ?',    # avoid matching qlog itself
+        'c.name = ?',                            # channel
+        q{cl.publictext NOT LIKE ? ESCAPE '!'},  # avoid matching qlog itself
     );
     my @bind  = ($target_chan, '%qlog%');
 
     if (defined $target_nick) {
-        push @where, 'cl.nick LIKE ?';
-        push @bind,  $target_nick;
+        my $nick_like = $target_nick;
+        $nick_like =~ s/!/!!/g;
+        $nick_like =~ s/%/!%/g;
+        $nick_like =~ s/_/!_/g;
+
+        push @where, q{cl.nick LIKE ? ESCAPE '!'};
+        push @bind,  $nick_like;
     }
 
     if (@terms) {
+        my @safe_terms = map {
+            my $t = $_;
+            $t =~ s/!/!!/g;
+            $t =~ s/%/!%/g;
+            $t =~ s/_/!_/g;
+            $t;
+        } @terms;
+
         # Build a LIKE pattern: word1%word2%word3 ...
-        my $pattern = '%' . join('%', @terms) . '%';
-        push @where, 'cl.publictext LIKE ?';
+        my $pattern = '%' . join('%', @safe_terms) . '%';
+        push @where, q{cl.publictext LIKE ? ESCAPE '!'};
         push @bind,  $pattern;
     }
 

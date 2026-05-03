@@ -1,6 +1,6 @@
-# t/cases/18_searchcmd_pagination.t
+# t/cases/29_checkhost_checknick_pagination.t
 # =============================================================================
-# Static regression checks for searchcmd paginated output and MariaDB-safe LIKE.
+# Static regression checks for checkhost/checknick paginated output.
 # =============================================================================
 
 use strict;
@@ -14,7 +14,7 @@ BEGIN {
 
 use File::Spec;
 
-sub _slurp_searchcmd_pagination {
+sub _slurp_checkhost_checknick {
     my ($path) = @_;
 
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
@@ -22,7 +22,7 @@ sub _slurp_searchcmd_pagination {
     return <$fh>;
 }
 
-sub _extract_sub_searchcmd_pagination {
+sub _extract_sub_checkhost_checknick {
     my ($src, $name) = @_;
 
     my $start = index($src, "sub $name");
@@ -106,71 +106,68 @@ sub _extract_sub_searchcmd_pagination {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_searchcmd_pagination(File::Spec->catfile('.', 'Mediabot', 'DBCommands.pm'));
-    my $func = _extract_sub_searchcmd_pagination($src, 'mbDbSearchCommand_ctx');
+    my $src = _slurp_checkhost_checknick(File::Spec->catfile('.', 'Mediabot', 'Helpers.pm'));
+
+    my $checknick = _extract_sub_checkhost_checknick($src, 'mbDbCheckNickHostname_ctx');
+    my $checkhost = _extract_sub_checkhost_checknick($src, 'mbDbCheckHostnameNick_ctx');
 
     $assert->ok(
-        $func =~ /sub mbDbSearchCommand_ctx/,
-        'searchcmd function exists'
+        $checknick =~ /Hostmasks for \$search: \$count result\(s\), showing max 10/,
+        'checknick has summary line'
     );
 
     $assert->ok(
-        $func =~ /LIMIT 50/,
-        'searchcmd keeps SQL LIMIT 50'
+        $checknick =~ /my \$per_line = 5;/,
+        'checknick paginates at 5 entries per line'
     );
 
     $assert->ok(
-        $func =~ /LIKE \? ESCAPE '!'/,
-        q{searchcmd uses MariaDB-safe SQL LIKE ESCAPE '!'}
+        $checknick =~ /checknick\[%02d\]/,
+        'checknick detail lines are numbered'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/!\/!!\/g/,
-        'searchcmd escapes the SQL LIKE escape character itself'
+        $checknick =~ /details sent by notice to \$nick/,
+        'checknick avoids multi-line channel flood'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/%\/!%\/g/,
-        'searchcmd escapes percent wildcard literally'
+        $checknick =~ /botNotice\(\$self, \$nick, \$line\);/,
+        'checknick sends paginated details by notice'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/_\/!_\/g/,
-        'searchcmd escapes underscore wildcard literally'
+        $checknick !~ /Hostmasks for \$search: \$list/,
+        'checknick no longer builds one huge list line'
     );
 
     $assert->ok(
-        $func =~ /my \$per_line = 5;/,
-        'searchcmd paginates at 5 commands per line'
+        $checkhost =~ /Nicks for host \$host: \$count result\(s\), showing max 20/,
+        'checkhost has summary line'
     );
 
     $assert->ok(
-        $func =~ /searchcmd\[%02d\]/,
-        'searchcmd detail lines are numbered'
+        $checkhost =~ /my \$per_line = 5;/,
+        'checkhost paginates at 5 entries per line'
     );
 
     $assert->ok(
-        $func =~ /details sent by notice to \$nick/,
-        'searchcmd avoids multi-line channel flood'
+        $checkhost =~ /checkhost\[%02d\]/,
+        'checkhost detail lines are numbered'
     );
 
     $assert->ok(
-        $func =~ /botNotice\(\$self, \$nick, \$line\);/,
-        'searchcmd sends paginated details by notice'
+        $checkhost =~ /details sent by notice to \$nick/,
+        'checkhost avoids multi-line channel flood'
     );
 
     $assert->ok(
-        $func !~ /ESCAPE '\\\\'/,
-        q{searchcmd no longer uses fragile ESCAPE '\'}
+        $checkhost =~ /botNotice\(\$self, \$nick, \$line\);/,
+        'checkhost sends paginated details by notice'
     );
 
     $assert->ok(
-        $func !~ /my \$max_len = 360/,
-        'searchcmd no longer uses old max_len single-line truncation'
-    );
-
-    $assert->ok(
-        $func !~ /\$line = \$prefix/,
-        'searchcmd no longer builds one huge prefix line'
+        $checkhost !~ /Nicks for host \$host: \$list/,
+        'checkhost no longer builds one huge list line'
     );
 };

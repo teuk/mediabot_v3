@@ -1,6 +1,6 @@
-# t/cases/18_searchcmd_pagination.t
+# t/cases/32_userinfo_hostmask_pagination.t
 # =============================================================================
-# Static regression checks for searchcmd paginated output and MariaDB-safe LIKE.
+# Static regression checks for userinfo hostmask pagination.
 # =============================================================================
 
 use strict;
@@ -14,7 +14,7 @@ BEGIN {
 
 use File::Spec;
 
-sub _slurp_searchcmd_pagination {
+sub _slurp_userinfo_hostmask {
     my ($path) = @_;
 
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
@@ -22,7 +22,7 @@ sub _slurp_searchcmd_pagination {
     return <$fh>;
 }
 
-sub _extract_sub_searchcmd_pagination {
+sub _extract_sub_userinfo_hostmask {
     my ($src, $name) = @_;
 
     my $start = index($src, "sub $name");
@@ -50,11 +50,9 @@ sub _extract_sub_searchcmd_pagination {
                 $escape = 1;
                 next;
             }
-
             if ($c eq "'" && !$escape) {
                 $in_single = 0;
             }
-
             $escape = 0;
             next;
         }
@@ -64,11 +62,9 @@ sub _extract_sub_searchcmd_pagination {
                 $escape = 1;
                 next;
             }
-
             if ($c eq '"' && !$escape) {
                 $in_double = 0;
             }
-
             $escape = 0;
             next;
         }
@@ -106,71 +102,41 @@ sub _extract_sub_searchcmd_pagination {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_searchcmd_pagination(File::Spec->catfile('.', 'Mediabot', 'DBCommands.pm'));
-    my $func = _extract_sub_searchcmd_pagination($src, 'mbDbSearchCommand_ctx');
+    my $src  = _slurp_userinfo_hostmask(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $func = _extract_sub_userinfo_hostmask($src, 'userInfo_ctx');
 
     $assert->ok(
-        $func =~ /sub mbDbSearchCommand_ctx/,
-        'searchcmd function exists'
+        $func =~ /SELECT hostmask FROM USER_HOSTMASK/,
+        'userinfo fetches hostmasks row-by-row'
     );
 
     $assert->ok(
-        $func =~ /LIMIT 50/,
-        'searchcmd keeps SQL LIMIT 50'
+        $func =~ /LIMIT 20/,
+        'userinfo limits displayed hostmasks to 20'
     );
 
     $assert->ok(
-        $func =~ /LIKE \? ESCAPE '!'/,
-        q{searchcmd uses MariaDB-safe SQL LIKE ESCAPE '!'}
+        $func =~ /userinfo-masks\[%02d\]/,
+        'userinfo hostmask detail lines are numbered'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/!\/!!\/g/,
-        'searchcmd escapes the SQL LIKE escape character itself'
+        $func =~ /my \$per_line = 2;/,
+        'userinfo paginates hostmasks at 2 per line'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/%\/!%\/g/,
-        'searchcmd escapes percent wildcard literally'
+        $func =~ /Hostmasks: \$mask_count shown, max 20/,
+        'userinfo has hostmask summary'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/_\/!_\/g/,
-        'searchcmd escapes underscore wildcard literally'
+        $func !~ /GROUP_CONCAT\(hostmask/,
+        'userinfo no longer GROUP_CONCATs all hostmasks into one line'
     );
 
     $assert->ok(
-        $func =~ /my \$per_line = 5;/,
-        'searchcmd paginates at 5 commands per line'
-    );
-
-    $assert->ok(
-        $func =~ /searchcmd\[%02d\]/,
-        'searchcmd detail lines are numbered'
-    );
-
-    $assert->ok(
-        $func =~ /details sent by notice to \$nick/,
-        'searchcmd avoids multi-line channel flood'
-    );
-
-    $assert->ok(
-        $func =~ /botNotice\(\$self, \$nick, \$line\);/,
-        'searchcmd sends paginated details by notice'
-    );
-
-    $assert->ok(
-        $func !~ /ESCAPE '\\\\'/,
-        q{searchcmd no longer uses fragile ESCAPE '\'}
-    );
-
-    $assert->ok(
-        $func !~ /my \$max_len = 360/,
-        'searchcmd no longer uses old max_len single-line truncation'
-    );
-
-    $assert->ok(
-        $func !~ /\$line = \$prefix/,
-        'searchcmd no longer builds one huge prefix line'
+        $func !~ /Hostmasks: \$hostmasks/,
+        'userinfo no longer injects all masks into one status line'
     );
 };

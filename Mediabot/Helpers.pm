@@ -1718,18 +1718,44 @@ SQL
     }
     $sth->finish;
 
-    my $resp;
-    if (@rows) {
-        my $list = join(' | ', map { "$_->[0] ($_->[1])" } @rows);
-        $resp = "Hostmasks for $search: $list";
-    } else {
-        $resp = "No result found for nick: $search";
+    if (!@rows) {
+        my $resp = "No result found for nick: $search";
+
+        if ($is_private) {
+            botNotice($self, $nick, $resp);
+        }
+        else {
+            botPrivmsg($self, $dest_chan, $resp);
+        }
+
+        logBot($self, $ctx->message, $dest_chan, "checknick", $search);
+        return 1;
     }
 
+    my @items = map { "$_->[0]($_->[1])" } @rows;
+    my $count = scalar(@items);
+    my $summary = "Hostmasks for $search: $count result(s), showing max 10";
+
     if ($is_private) {
-        botNotice($self, $nick, $resp);
-    } else {
-        botPrivmsg($self, $dest_chan, $resp);
+        botNotice($self, $nick, $summary);
+    }
+    else {
+        botPrivmsg($self, $dest_chan, "$summary - details sent by notice to $nick");
+    }
+
+    my $per_line = 5;
+    my $page     = 1;
+
+    while (@items) {
+        my @chunk = splice(@items, 0, $per_line);
+        my $line  = sprintf("checknick[%02d]: %s", $page, join(' ', @chunk));
+
+        if (length($line) > 360) {
+            $line = substr($line, 0, 357) . '...';
+        }
+
+        botNotice($self, $nick, $line);
+        $page++;
     }
 
     logBot($self, $ctx->message, $dest_chan, "checknick", $search);
@@ -1941,7 +1967,7 @@ sub mbDbCheckHostnameNick_ctx {
 SELECT nick, COUNT(*) AS hits
 FROM CHANNEL_LOG
 WHERE userhost IS NOT NULL
-  AND userhost LIKE ?
+  AND userhost LIKE ? ESCAPE '!'
 GROUP BY nick
 ORDER BY hits DESC
 LIMIT 20
@@ -1953,7 +1979,12 @@ SQL
         return;
     }
 
-    my $mask = '%@' . $host;
+    my $host_like = $host;
+    $host_like =~ s/!/!!/g;
+    $host_like =~ s/%/!%/g;
+    $host_like =~ s/_/!_/g;
+
+    my $mask = '%@' . $host_like;
 
     unless ($sth->execute($mask)) {
         $self->{logger}->log(1, "mbDbCheckHostnameNick_ctx() SQL Error: $DBI::errstr Query: $sql");
@@ -1969,18 +2000,44 @@ SQL
     }
     $sth->finish;
 
-    my $resp;
-    if (@rows) {
-        my $list = join(' | ', map { "$_->[0] ($_->[1])" } @rows);
-        $resp = "Nicks for host $host: $list";
-    } else {
-        $resp = "No result found for hostname $host.";
+    if (!@rows) {
+        my $resp = "No result found for hostname $host.";
+
+        if ($is_private) {
+            botNotice($self, $nick, $resp);
+        }
+        else {
+            botPrivmsg($self, $dest_chan, $resp);
+        }
+
+        logBot($self, $ctx->message, $dest_chan, "checkhost", $host);
+        return 1;
     }
 
+    my @items = map { "$_->[0]($_->[1])" } @rows;
+    my $count = scalar(@items);
+    my $summary = "Nicks for host $host: $count result(s), showing max 20";
+
     if ($is_private) {
-        botNotice($self, $nick, $resp);
-    } else {
-        botPrivmsg($self, $dest_chan, $resp);
+        botNotice($self, $nick, $summary);
+    }
+    else {
+        botPrivmsg($self, $dest_chan, "$summary - details sent by notice to $nick");
+    }
+
+    my $per_line = 5;
+    my $page     = 1;
+
+    while (@items) {
+        my @chunk = splice(@items, 0, $per_line);
+        my $line  = sprintf("checkhost[%02d]: %s", $page, join(' ', @chunk));
+
+        if (length($line) > 360) {
+            $line = substr($line, 0, 357) . '...';
+        }
+
+        botNotice($self, $nick, $line);
+        $page++;
     }
 
     logBot($self, $ctx->message, $dest_chan, "checkhost", $host);
@@ -2069,22 +2126,34 @@ sub whoTalk_ctx {
         return;
     }
 
-    # Build one-line summary with truncation
-    my @talkers = map { "$_->[0] ($_->[1])" } @rows;
-    my $prefix  = "Top talkers last hour on $target: ";
+    # Paginated output:
+    # - in-channel call: short public summary, details by NOTICE
+    # - private/off-channel call: summary and details by NOTICE
+    my @talkers = map { "$_->[0]($_->[1])" } @rows;
+    my $count   = scalar(@talkers);
+    my $summary = "Top talkers last hour on $target: $count result(s), showing max 20";
 
-    my $max_len = 360; # conservative for NOTICE/PRIVMSG payload
-    my $line = $prefix;
-    for my $t (@talkers) {
-        my $candidate = ($line eq $prefix) ? ($line . $t) : ($line . ", " . $t);
-        if (length($candidate) > $max_len) {
-            $line .= "..." if length($line) + 3 <= $max_len;
-            last;
-        }
-        $line = $candidate;
+    if ($out_chan) {
+        botPrivmsg($self, $out_chan, "$summary - details sent by notice to $nick");
+    }
+    else {
+        botNotice($self, $nick, $summary);
     }
 
-    $out_chan ? botPrivmsg($self, $out_chan, $line) : botNotice($self, $nick, $line);
+    my $per_line = 5;
+    my $page     = 1;
+
+    while (@talkers) {
+        my @chunk = splice(@talkers, 0, $per_line);
+        my $line  = sprintf("whotalk[%02d]: %s", $page, join(' ', @chunk));
+
+        if (length($line) > 360) {
+            $line = substr($line, 0, 357) . '...';
+        }
+
+        botNotice($self, $nick, $line);
+        $page++;
+    }
 
     # Optional gentle warning, but only if we are already speaking in-channel
     if ($out_chan && $rows[0][1] >= 25) {

@@ -48,10 +48,16 @@ return sub {
     $assert->ok($quotes_pm =~ /my \@like_words/,
         'Quotes.pm: quote search builds escaped LIKE words');
 
-    $assert->ok($quotes_pm =~ /s\/%\/\\\\%\/g/,
+    $assert->ok($quotes_pm =~ /q\.quotetext LIKE \? ESCAPE '!'/,
+        q{Quotes.pm: quote search uses MariaDB-safe ESCAPE '!'});
+
+    $assert->ok($quotes_pm =~ /s\/!\/!!\/g/,
+        'Quotes.pm: quote search escapes the LIKE escape character itself');
+
+    $assert->ok($quotes_pm =~ /s\/%\/!%\/g/,
         'Quotes.pm: quote search escapes percent wildcard');
 
-    $assert->ok($quotes_pm =~ /s\/_\/\\\\_\/g/,
+    $assert->ok($quotes_pm =~ /s\/_\/!_\/g/,
         'Quotes.pm: quote search escapes underscore wildcard');
 
     $assert->ok($quotes_pm !~ /\/\$sQuoteText\/i/,

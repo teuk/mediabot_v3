@@ -1,6 +1,6 @@
-# t/cases/18_searchcmd_pagination.t
+# t/cases/35_cstat_pagination.t
 # =============================================================================
-# Static regression checks for searchcmd paginated output and MariaDB-safe LIKE.
+# Static regression checks for cstat authenticated users pagination.
 # =============================================================================
 
 use strict;
@@ -14,7 +14,7 @@ BEGIN {
 
 use File::Spec;
 
-sub _slurp_searchcmd_pagination {
+sub _slurp_cstat_pagination {
     my ($path) = @_;
 
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
@@ -22,7 +22,7 @@ sub _slurp_searchcmd_pagination {
     return <$fh>;
 }
 
-sub _extract_sub_searchcmd_pagination {
+sub _extract_sub_cstat_pagination {
     my ($src, $name) = @_;
 
     my $start = index($src, "sub $name");
@@ -106,71 +106,51 @@ sub _extract_sub_searchcmd_pagination {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_searchcmd_pagination(File::Spec->catfile('.', 'Mediabot', 'DBCommands.pm'));
-    my $func = _extract_sub_searchcmd_pagination($src, 'mbDbSearchCommand_ctx');
+    my $src  = _slurp_cstat_pagination(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $func = _extract_sub_cstat_pagination($src, 'userCstat_ctx');
 
     $assert->ok(
-        $func =~ /sub mbDbSearchCommand_ctx/,
-        'searchcmd function exists'
+        $func =~ /Authenticated users: \$count result\(s\)/,
+        'cstat has summary line'
     );
 
     $assert->ok(
-        $func =~ /LIMIT 50/,
-        'searchcmd keeps SQL LIMIT 50'
-    );
-
-    $assert->ok(
-        $func =~ /LIKE \? ESCAPE '!'/,
-        q{searchcmd uses MariaDB-safe SQL LIKE ESCAPE '!'}
-    );
-
-    $assert->ok(
-        $func =~ /\$like =~ s\/!\/!!\/g/,
-        'searchcmd escapes the SQL LIKE escape character itself'
-    );
-
-    $assert->ok(
-        $func =~ /\$like =~ s\/%\/!%\/g/,
-        'searchcmd escapes percent wildcard literally'
-    );
-
-    $assert->ok(
-        $func =~ /\$like =~ s\/_\/!_\/g/,
-        'searchcmd escapes underscore wildcard literally'
+        $func =~ /Authenticated users: none/,
+        'cstat handles empty authenticated user list'
     );
 
     $assert->ok(
         $func =~ /my \$per_line = 5;/,
-        'searchcmd paginates at 5 commands per line'
+        'cstat paginates at 5 users per line'
     );
 
     $assert->ok(
-        $func =~ /searchcmd\[%02d\]/,
-        'searchcmd detail lines are numbered'
-    );
-
-    $assert->ok(
-        $func =~ /details sent by notice to \$nick/,
-        'searchcmd avoids multi-line channel flood'
+        $func =~ /cstat\[%02d\]/,
+        'cstat detail lines are numbered'
     );
 
     $assert->ok(
         $func =~ /botNotice\(\$self, \$nick, \$line\);/,
-        'searchcmd sends paginated details by notice'
+        'cstat sends paginated details by notice'
     );
 
     $assert->ok(
-        $func !~ /ESCAPE '\\\\'/,
-        q{searchcmd no longer uses fragile ESCAPE '\'}
+        $func =~ /ORDER BY USER_LEVEL\.level, USER\.nickname/,
+        'cstat output is sorted by level then nickname'
     );
 
     $assert->ok(
-        $func !~ /my \$max_len = 360/,
-        'searchcmd no longer uses old max_len single-line truncation'
+        $func !~ /Keep it one line/,
+        'cstat old one-line truncation comment is gone'
     );
 
     $assert->ok(
-        $func !~ /\$line = \$prefix/,
-        'searchcmd no longer builds one huge prefix line'
+        $func !~ /my \$max = 380/,
+        'cstat no longer uses old max length truncation'
+    );
+
+    $assert->ok(
+        $func !~ /Authenticated users: ' \. join/,
+        'cstat no longer builds one huge authenticated users line'
     );
 };

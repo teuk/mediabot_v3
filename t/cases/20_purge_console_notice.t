@@ -1,6 +1,9 @@
-# t/cases/18_searchcmd_pagination.t
+# t/cases/20_purge_console_notice.t
 # =============================================================================
-# Static regression checks for searchcmd paginated output and MariaDB-safe LIKE.
+# Static regression checks for purge visibility.
+#
+# Background purges should be visible to operators when they actually delete
+# rows, without spamming console when there is nothing to purge.
 # =============================================================================
 
 use strict;
@@ -14,7 +17,7 @@ BEGIN {
 
 use File::Spec;
 
-sub _slurp_searchcmd_pagination {
+sub _slurp_purge_console_notice {
     my ($path) = @_;
 
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
@@ -22,7 +25,7 @@ sub _slurp_searchcmd_pagination {
     return <$fh>;
 }
 
-sub _extract_sub_searchcmd_pagination {
+sub _extract_sub_purge_console_notice {
     my ($src, $name) = @_;
 
     my $start = index($src, "sub $name");
@@ -50,11 +53,9 @@ sub _extract_sub_searchcmd_pagination {
                 $escape = 1;
                 next;
             }
-
             if ($c eq "'" && !$escape) {
                 $in_single = 0;
             }
-
             $escape = 0;
             next;
         }
@@ -64,11 +65,9 @@ sub _extract_sub_searchcmd_pagination {
                 $escape = 1;
                 next;
             }
-
             if ($c eq '"' && !$escape) {
                 $in_double = 0;
             }
-
             $escape = 0;
             next;
         }
@@ -93,7 +92,6 @@ sub _extract_sub_searchcmd_pagination {
         }
         elsif ($c eq "}") {
             $depth--;
-
             if ($depth == 0) {
                 return substr($src, $start, $i - $start + 1);
             }
@@ -106,71 +104,38 @@ sub _extract_sub_searchcmd_pagination {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_searchcmd_pagination(File::Spec->catfile('.', 'Mediabot', 'DBCommands.pm'));
-    my $func = _extract_sub_searchcmd_pagination($src, 'mbDbSearchCommand_ctx');
+    my $src = _slurp_purge_console_notice(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
+
+    my $purge_log  = _extract_sub_purge_console_notice($src, 'purge_channel_log');
+    my $purge_seen = _extract_sub_purge_console_notice($src, 'purge_user_seen');
 
     $assert->ok(
-        $func =~ /sub mbDbSearchCommand_ctx/,
-        'searchcmd function exists'
+        $purge_log =~ /if \(\$rows\)/,
+        'purge_channel_log only reports when rows were deleted'
     );
 
     $assert->ok(
-        $func =~ /LIMIT 50/,
-        'searchcmd keeps SQL LIMIT 50'
+        $purge_log =~ /noticeConsoleChan\(\$self, \$msg\)/,
+        'purge_channel_log notifies console channel'
     );
 
     $assert->ok(
-        $func =~ /LIKE \? ESCAPE '!'/,
-        q{searchcmd uses MariaDB-safe SQL LIKE ESCAPE '!'}
+        $purge_log =~ /purge_channel_log: \$rows row\(s\) deleted/,
+        'purge_channel_log message includes deleted row count'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/!\/!!\/g/,
-        'searchcmd escapes the SQL LIKE escape character itself'
+        $purge_seen =~ /if \(\$rows\)/,
+        'purge_user_seen only reports when rows were deleted'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/%\/!%\/g/,
-        'searchcmd escapes percent wildcard literally'
+        $purge_seen =~ /noticeConsoleChan\(\$self, \$msg\)/,
+        'purge_user_seen notifies console channel'
     );
 
     $assert->ok(
-        $func =~ /\$like =~ s\/_\/!_\/g/,
-        'searchcmd escapes underscore wildcard literally'
-    );
-
-    $assert->ok(
-        $func =~ /my \$per_line = 5;/,
-        'searchcmd paginates at 5 commands per line'
-    );
-
-    $assert->ok(
-        $func =~ /searchcmd\[%02d\]/,
-        'searchcmd detail lines are numbered'
-    );
-
-    $assert->ok(
-        $func =~ /details sent by notice to \$nick/,
-        'searchcmd avoids multi-line channel flood'
-    );
-
-    $assert->ok(
-        $func =~ /botNotice\(\$self, \$nick, \$line\);/,
-        'searchcmd sends paginated details by notice'
-    );
-
-    $assert->ok(
-        $func !~ /ESCAPE '\\\\'/,
-        q{searchcmd no longer uses fragile ESCAPE '\'}
-    );
-
-    $assert->ok(
-        $func !~ /my \$max_len = 360/,
-        'searchcmd no longer uses old max_len single-line truncation'
-    );
-
-    $assert->ok(
-        $func !~ /\$line = \$prefix/,
-        'searchcmd no longer builds one huge prefix line'
+        $purge_seen =~ /purge_user_seen: \$rows stale nick\(s\) purged/,
+        'purge_user_seen message includes purged nick count'
     );
 };

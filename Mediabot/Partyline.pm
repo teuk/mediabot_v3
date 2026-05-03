@@ -1042,6 +1042,10 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.timers' }) if $self->{bot}->{metrics};
         $self->_cmd_timers($stream, $id)
     }
+    elsif ($line =~ /^\.schedule(?:\s+(.*))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.schedule' }) if $self->{bot}->{metrics};
+        $self->_cmd_schedule($stream, $id, $1)
+    }
     elsif ($line =~ /^\.log(?:\s+(\d+))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.log' }) if $self->{bot}->{metrics};
         $self->_cmd_log($stream, $id, $1)
@@ -1071,12 +1075,6 @@ sub _handle_line {
         my ($chan, $nick_t, $rest) = ($1, $2, $3 // '');
         my @rest_args = split /\s+/, $rest;
         $self->_cmd_ban($stream, $id, $chan, $nick_t, @rest_args)
-    }
-    elsif ($line =~ /^\.ban\s+(#\S+)\s+(\S+)(?:\s+(.*))?$/i) {
-        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.ban' }) if $self->{bot}->{metrics};
-        my ($chan_b, $nick_b, $rest_b) = ($1, $2, $3 // '');
-        my @rest_args_b = split(/\s+/, $rest_b);
-        $self->_cmd_ban($stream, $id, $chan_b, $nick_b, @rest_args_b)
     }
     elsif ($line =~ /^\.bans?\s+(#\S+)$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.bans' }) if $self->{bot}->{metrics};
@@ -1289,6 +1287,7 @@ sub _cmd_help {
       . "  .whom               - list users currently on the partyline\r\n"
       . "  .whois <nick>       - send WHOIS to IRC and display result\r\n"
       . "  .timers             - list all scheduled tasks\r\n"
+      . "  .schedule <list|status|start|stop|restart> [name] - control scheduler tasks\r\n"
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .uptime             - show bot and server uptime\r\n"
@@ -1305,7 +1304,6 @@ sub _cmd_help {
       . "  .eval <perl>        - execute Perl in bot context (Owner, dangerous)\r\n"
       . "  .console [0-5|off]  - redirect bot log to this session\r\n"
       . "  .ban #chan <nick> [duration] [reason] - ban a nick via WHOIS\r\n"
-      . "  .ban #chan <nick> [dur] [reason] - ban a nick (WHOIS lookup)\r\n"
       . "  .bans #chan         - list active channel bans\r\n"
       . "  .unban #chan <mask|id> - remove an active ban\r\n"
       . "  .topic #chan [text] - show or change channel topic\r\n"
@@ -1500,6 +1498,8 @@ sub _cmd_whom {
 
 # .match <handle> - show user record from database (Eggdrop whois-style)
 # Accepts exact handle or wildcard pattern (* and ?)
+# .match <handle> - show user record from database (Eggdrop whois-style)
+# Accepts exact handle or wildcard pattern (* and ?)
 sub _cmd_match {
     my ($self, $stream, $id, $pattern) = @_;
 
@@ -1511,8 +1511,13 @@ sub _cmd_match {
         return;
     }
 
-    # Convert Eggdrop-style wildcards to SQL LIKE wildcards
+    # Convert Eggdrop-style wildcards to SQL LIKE wildcards.
+    # This command intentionally supports wildcards, so * and ? become SQL
+    # wildcards. Escape SQL LIKE escape char and literal SQL wildcards first.
     my $sql_pat = $pattern;
+    $sql_pat =~ s/!/!!/g;
+    $sql_pat =~ s/%/!%/g;
+    $sql_pat =~ s/_/!_/g;
     $sql_pat =~ s/\*/%/g;
     $sql_pat =~ s/\?/_/g;
 
@@ -1524,30 +1529,28 @@ sub _cmd_match {
             u.info1,
             u.info2,
             ul.description  AS level_desc,
-            ul.level        AS level_num,
-            GROUP_CONCAT(uh.hostmask ORDER BY uh.id_user_hostmask SEPARATOR ' ')
-                AS hostmasks
+            ul.level        AS level_num
         FROM USER u
         JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
-        LEFT JOIN USER_HOSTMASK uh ON uh.id_user = u.id_user
-        WHERE u.nickname LIKE ?
-        GROUP BY u.id_user, u.nickname, u.auth, u.info1, u.info2,
-                 ul.description, ul.level
+        WHERE u.nickname LIKE ? ESCAPE '!'
         ORDER BY u.nickname
         LIMIT 21
     }); # fetch 21 to detect truncation (display only 20)
 
-    unless ($sth->execute($sql_pat)) {
+    unless ($sth && $sth->execute($sql_pat)) {
         $bot->{logger}->log(1, "Partyline .match SQL error: $DBI::errstr");
         $stream->write("Database error.\r\n");
+        $sth->finish if $sth;
         return;
     }
 
     my $found = 0;
+
     while (my $row = $sth->fetchrow_hashref) {
         $found++;
+        last if $found > 20;
+
         my $auth  = $row->{auth} ? "logged in" : "not logged in";
-        my $masks = $row->{hostmasks} // "(none)";
         my $info1 = $row->{info1}     // "";
         my $info2 = $row->{info2}     // "";
 
@@ -1555,20 +1558,69 @@ sub _cmd_match {
         $stream->write(sprintf("  Handle  : %s\r\n", $row->{nickname}));
         $stream->write(sprintf("  Level   : %s (%d)\r\n", $row->{level_desc}, $row->{level_num}));
         $stream->write(sprintf("  Status  : %s\r\n", $auth));
-        $stream->write(sprintf("  Hosts   : %s\r\n", $masks));
+
+        my @hostmasks;
+        my $hm_sth = $dbh->prepare(q{
+            SELECT hostmask
+            FROM USER_HOSTMASK
+            WHERE id_user = ?
+            ORDER BY id_user_hostmask
+            LIMIT 20
+        });
+
+        if ($hm_sth && $hm_sth->execute($row->{id_user})) {
+            while (my $hm = $hm_sth->fetchrow_hashref) {
+                push @hostmasks, $hm->{hostmask}
+                    if defined($hm->{hostmask}) && $hm->{hostmask} ne '';
+            }
+            $hm_sth->finish;
+        }
+        else {
+            $bot->{logger}->log(1, "Partyline .match hostmask SQL error: $DBI::errstr")
+                if $bot->{logger};
+            $hm_sth->finish if $hm_sth;
+        }
+
+        if (@hostmasks) {
+            my $mask_count = scalar(@hostmasks);
+            $stream->write(sprintf("  Hosts   : %d shown, max 20\r\n", $mask_count));
+
+            my $per_line = 2;
+            my $page     = 1;
+
+            while (@hostmasks) {
+                my @chunk = splice(@hostmasks, 0, $per_line);
+                my $line  = sprintf("  Hosts[%02d]: %s", $page, join(' | ', @chunk));
+
+                if (length($line) > 360) {
+                    $line = substr($line, 0, 357) . '...';
+                }
+
+                $stream->write($line . "\r\n");
+                $page++;
+            }
+        }
+        else {
+            $stream->write("  Hosts   : (none)\r\n");
+        }
+
         $stream->write(sprintf("  Info1   : %s\r\n", $info1)) if $info1 ne '';
         $stream->write(sprintf("  Info2   : %s\r\n", $info2)) if $info2 ne '';
     }
+
     $sth->finish;
 
     if ($found == 0) {
         $stream->write("No match for '$pattern'.\r\n");
-    } elsif ($found > 20) {
+    }
+    elsif ($found > 20) {
         $stream->write(sprintf("\r\nShowing first 20 matches for '%s' (more exist — narrow your search).\r\n", $pattern));
-    } elsif ($found > 1) {
+    }
+    elsif ($found > 1) {
         $stream->write(sprintf("\r\n%d match(es) for '%s'.\r\n", $found, $pattern));
     }
 }
+
 
 # .boot <handle> - kick a user off the partyline (Owner only)
 sub _cmd_boot {
@@ -1734,6 +1786,124 @@ sub _cmd_timers {
             $info->{started} ? "yes" : "no",
             $last,
         ));
+    }
+}
+
+# ---------------------------------------------------------------------------
+# .schedule <list|status|start|stop|restart> [name]
+# Control registered scheduler tasks at runtime (Master+).
+# ---------------------------------------------------------------------------
+sub _cmd_schedule {
+    my ($self, $stream, $id, $args) = @_;
+
+    my $level = $self->{users}{$id}{level};
+
+    unless (defined($level) && $level <= 1) {
+        $stream->write("Access denied: .schedule requires Master or Owner level.\r\n");
+        return;
+    }
+
+    my $bot   = $self->{bot};
+    my $sched = $bot->{scheduler};
+
+    unless ($sched) {
+        $stream->write("Scheduler not available.\r\n");
+        return;
+    }
+
+    $args //= '';
+    $args =~ s/^\s+|\s+$//g;
+
+    if ($args eq '' || $args =~ /^(?:list|ls)$/i) {
+        return $self->_cmd_timers($stream, $id);
+    }
+
+    my ($action, $name) = split /\s+/, $args, 2;
+    $action = lc($action // '');
+    $name //= '';
+    $name =~ s/^\s+|\s+$//g;
+
+    unless ($action =~ /^(?:status|start|stop|restart)$/) {
+        $stream->write("Usage: .schedule list | status <name> | start <name> | stop <name> | restart <name>\r\n");
+        return;
+    }
+
+    unless ($name =~ /^[A-Za-z0-9_.:-]{1,64}$/) {
+        $stream->write("Invalid scheduler task name.\r\n");
+        return;
+    }
+
+    my $info;
+
+    if ($sched->can('task_info')) {
+        $info = eval { $sched->task_info($name) };
+    }
+    else {
+        my @infos = eval { $sched->all_info };
+        for my $candidate (@infos) {
+            next unless $candidate && ref($candidate) eq 'HASH';
+            if (($candidate->{name} // '') eq $name) {
+                $info = $candidate;
+                last;
+            }
+        }
+    }
+
+    unless ($info) {
+        $stream->write("No such scheduler task: $name\r\n");
+        return;
+    }
+
+    if ($action eq 'status') {
+        my $last = $info->{last_tick}
+            ? scalar localtime($info->{last_tick})
+            : 'never';
+
+        $stream->write("Scheduler task '$name': interval=$info->{interval}s active="
+            . ($info->{started} ? 'yes' : 'no')
+            . " ticks=$info->{ticks} last_tick=$last\r\n");
+        return;
+    }
+
+    my $ok = eval {
+        if ($action eq 'start') {
+            $sched->start($name);
+        }
+        elsif ($action eq 'stop') {
+            $sched->stop($name);
+        }
+        elsif ($action eq 'restart') {
+            $sched->stop($name);
+            $sched->start($name);
+        }
+
+        1;
+    };
+
+    unless ($ok) {
+        my $err = $@ || 'unknown scheduler error';
+        chomp $err;
+
+        $self->{bot}->{logger}->log(1, "Partyline .schedule $action $name failed: $err")
+            if $self->{bot}->{logger};
+
+        $stream->write("Scheduler action failed for '$name': $err\r\n");
+        return;
+    }
+
+    if ($action eq 'start') {
+        $stream->write("Scheduler task '$name' started.\r\n");
+        return;
+    }
+
+    if ($action eq 'stop') {
+        $stream->write("Scheduler task '$name' stopped.\r\n");
+        return;
+    }
+
+    if ($action eq 'restart') {
+        $stream->write("Scheduler task '$name' restarted.\r\n");
+        return;
     }
 }
 

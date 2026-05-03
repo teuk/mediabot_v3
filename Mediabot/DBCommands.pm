@@ -360,7 +360,7 @@ sub mbDbAddCommand_ctx {
     }
 
     # Check duplicates
-    my $query_check = "SELECT command FROM PUBLIC_COMMANDS WHERE command LIKE ?";
+    my $query_check = "SELECT command FROM PUBLIC_COMMANDS WHERE command = ?";
     my $sth = $self->{dbh}->prepare($query_check);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query_check");
@@ -440,7 +440,7 @@ sub mbDbRemCommand_ctx {
 
     my $sCommand = shift @args;
 
-    my $query = "SELECT id_user, id_public_commands FROM PUBLIC_COMMANDS WHERE command LIKE ?";
+    my $query = "SELECT id_user, id_public_commands FROM PUBLIC_COMMANDS WHERE command = ?";
     my $sth = $self->{dbh}->prepare($query);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query");
@@ -515,7 +515,7 @@ sub mbDbModCommand {
     my $sType     = shift @tArgs;
     my $sCategory = shift @tArgs;
 
-    my $query = "SELECT id_public_commands, id_user FROM PUBLIC_COMMANDS WHERE command LIKE ?";
+    my $query = "SELECT id_public_commands, id_user FROM PUBLIC_COMMANDS WHERE command = ?";
     my $sth = $self->{dbh}->prepare($query);
     unless ($sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query");
@@ -591,7 +591,7 @@ sub mbDbModCommand_ctx {
     my $sType     = shift @args;
     my $sCategory = shift @args;
 
-    my $query = "SELECT id_public_commands, id_user FROM PUBLIC_COMMANDS WHERE command LIKE ?";
+    my $query = "SELECT id_public_commands, id_user FROM PUBLIC_COMMANDS WHERE command = ?";
     my $sth = $self->{dbh}->prepare($query);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query");
@@ -757,7 +757,7 @@ sub mbDbShowCommand_ctx {
         FROM PUBLIC_COMMANDS PC
         JOIN PUBLIC_COMMANDS_CATEGORY PCC
           ON PC.id_public_commands_category = PCC.id_public_commands_category
-        WHERE PC.command LIKE ?
+        WHERE PC.command = ?
         LIMIT 1
     };
 
@@ -810,7 +810,7 @@ sub mbDbCommand {
 	my ($self,$message,$sChannel,$sNick,$sCommand,@tArgs) = @_;
 	$self->{logger}->log(2,"Check SQL command : $sCommand");
 
-	my $sQuery = "SELECT id_public_commands, action, description, hits FROM PUBLIC_COMMANDS WHERE command LIKE ? AND active = 1";
+	my $sQuery = "SELECT id_public_commands, action, description, hits FROM PUBLIC_COMMANDS WHERE command = ? AND active = 1";
 	my $sth_sel = $self->{dbh}->prepare($sQuery);
 	unless ($sth_sel->execute($sCommand)) {
 		$self->{logger}->log(1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -941,14 +941,13 @@ sub mbCountCommand_ctx {
     my $self = $ctx->bot;
     my $nick = $ctx->nick;
 
-    # Prefer output where the command was invoked
     my $out_chan = '';
     my $ctx_chan = $ctx->channel // '';
     $out_chan = $ctx_chan if defined($ctx_chan) && $ctx_chan =~ /^#/;
 
-    # Total commands
     my $sql_total = "SELECT COUNT(*) AS nbCommands FROM PUBLIC_COMMANDS";
     my $sth = $self->{dbh}->prepare($sql_total);
+
     unless ($sth && $sth->execute()) {
         $self->{logger}->log(1, "mbCountCommand_ctx() SQL Error: $DBI::errstr Query: $sql_total");
         botNotice($self, $nick, "Internal error (SQL).");
@@ -961,7 +960,6 @@ sub mbCountCommand_ctx {
     }
     $sth->finish;
 
-    # Breakdown by category
     my $sql_cat = q{
         SELECT PCC.description AS category, COUNT(*) AS nbCommands
         FROM PUBLIC_COMMANDS PC
@@ -980,42 +978,60 @@ sub mbCountCommand_ctx {
 
     my @parts;
     while (my $r = $sth->fetchrow_hashref()) {
-        my $cat = $r->{category}  // next;
+        my $cat = $r->{category}   // next;
         my $nb  = $r->{nbCommands} // 0;
-        push @parts, "($cat $nb)";
+        push @parts, "$cat($nb)";
     }
     $sth->finish;
 
-    my $prefix = "$nb_total Commands in database: ";
-    my $line;
+    unless ($nb_total) {
+        my $line = "No command in database";
+
+        if ($out_chan) {
+            botPrivmsg($self, $out_chan, $line);
+            logBot($self, $ctx->message, $out_chan, "countcmd", undef);
+        }
+        else {
+            botNotice($self, $nick, $line);
+            logBot($self, $ctx->message, undef, "countcmd", undef);
+        }
+
+        return 0;
+    }
+
+    my $summary = "$nb_total command(s) in database";
 
     if (@parts) {
-        # Build one-line summary with truncation
-        my $max_len = 360; # conservative for PRIVMSG/NOTICE payload
-        $line = $prefix;
-
-        for my $p (@parts) {
-            my $candidate = ($line eq $prefix) ? ($line . $p) : ($line . " " . $p);
-            if (length($candidate) > $max_len) {
-                $line .= "..." if length($line) + 3 <= $max_len;
-                last;
-            }
-            $line = $candidate;
-        }
-    } else {
-        $line = "No command in database";
+        $summary .= ", " . scalar(@parts) . " categor(y/ies)";
     }
 
     if ($out_chan) {
-        botPrivmsg($self, $out_chan, $line);
+        botPrivmsg($self, $out_chan, "$summary - details sent by notice to $nick");
         logBot($self, $ctx->message, $out_chan, "countcmd", undef);
-    } else {
-        botNotice($self, $nick, $line);
+    }
+    else {
+        botNotice($self, $nick, $summary);
         logBot($self, $ctx->message, undef, "countcmd", undef);
+    }
+
+    my $per_line = 5;
+    my $page     = 1;
+
+    while (@parts) {
+        my @chunk = splice(@parts, 0, $per_line);
+        my $line  = sprintf("countcmd[%02d]: %s", $page, join(' ', @chunk));
+
+        if (length($line) > 360) {
+            $line = substr($line, 0, 357) . '...';
+        }
+
+        botNotice($self, $nick, $line);
+        $page++;
     }
 
     return $nb_total;
 }
+
 
 # topcmd — show top 20 public commands by hits
 # Context-based migration:
@@ -1028,7 +1044,7 @@ sub mbTopCommand_ctx {
     my $self = $ctx->bot;
     my $nick = $ctx->nick;
 
-    # Prefer output where the command was invoked
+    # Prefer output where the command was invoked.
     my $out_chan = '';
     my $ctx_chan = $ctx->channel // '';
     $out_chan = $ctx_chan if defined($ctx_chan) && $ctx_chan =~ /^#/;
@@ -1044,45 +1060,63 @@ sub mbTopCommand_ctx {
 
     my @items;
     my $rank = 0;
+
     while (my $r = $sth->fetchrow_hashref()) {
         my $cmd  = $r->{command} // next;
         my $hits = $r->{hits}    // 0;
         $rank++;
 
-        # Pretty compact: "1) hello(42)"
         push @items, $rank . ") " . $cmd . "(" . $hits . ")";
     }
+
     $sth->finish;
 
-    my $line;
-    if (@items) {
-        # Single line, safe truncation
-        my $prefix = "Top commands: ";
-        my $max_len = 360; # conservative for IRC payload
-        $line = $prefix;
+    unless (@items) {
+        my $line = "No top commands in database";
 
-        for my $it (@items) {
-            my $candidate = ($line eq $prefix) ? ($line . $it) : ($line . " | " . $it);
-            if (length($candidate) > $max_len) {
-                $line .= "..." if length($line) + 3 <= $max_len;
-                last;
-            }
-            $line = $candidate;
+        if ($out_chan) {
+            botPrivmsg($self, $out_chan, $line);
+            logBot($self, $ctx->message, $out_chan, "topcmd", undef);
         }
-    } else {
-        $line = "No top commands in database";
+        else {
+            botNotice($self, $nick, $line);
+            logBot($self, $ctx->message, undef, "topcmd", undef);
+        }
+
+        return 0;
     }
 
+    my $count = scalar(@items);
+    my $summary = "Top commands: $count result(s), showing max 20";
+
+    # Avoid flooding public channels with multi-line output.
     if ($out_chan) {
-        botPrivmsg($self, $out_chan, $line);
+        botPrivmsg($self, $out_chan, "$summary - details sent by notice to $nick");
         logBot($self, $ctx->message, $out_chan, "topcmd", undef);
-    } else {
-        botNotice($self, $nick, $line);
+    }
+    else {
+        botNotice($self, $nick, $summary);
         logBot($self, $ctx->message, undef, "topcmd", undef);
     }
 
-    return scalar(@items);
+    my $per_line = 5;
+    my $page     = 1;
+
+    while (@items) {
+        my @chunk = splice(@items, 0, $per_line);
+        my $line  = sprintf("topcmd[%02d]: %s", $page, join(' | ', @chunk));
+
+        if (length($line) > 360) {
+            $line = substr($line, 0, 357) . '...';
+        }
+
+        botNotice($self, $nick, $line);
+        $page++;
+    }
+
+    return $count;
 }
+
 
 # lastcmd — show last 10 public commands added (by creation_date desc)
 # Improvements:
@@ -1094,7 +1128,6 @@ sub mbLastCommand_ctx {
     my $self = $ctx->bot;
     my $nick = $ctx->nick;
 
-    # Prefer output where the command was invoked
     my $out_chan = '';
     my $ctx_chan = $ctx->channel // '';
     $out_chan = $ctx_chan if defined($ctx_chan) && $ctx_chan =~ /^#/;
@@ -1119,35 +1152,51 @@ sub mbLastCommand_ctx {
     }
     $sth->finish;
 
-    my $prefix = "Last commands in database: ";
-    my $line;
+    unless (@cmds) {
+        my $line = "No command found in database";
 
-    if (!@cmds) {
-        $line = "No command found in database";
-    } else {
-        my $max_len = 360; # conservative for IRC payload
-        $line = $prefix;
-
-        for my $c (@cmds) {
-            my $candidate = ($line eq $prefix) ? ($line . $c) : ($line . " " . $c);
-            if (length($candidate) > $max_len) {
-                $line .= "..." if length($line) + 3 <= $max_len;
-                last;
-            }
-            $line = $candidate;
+        if ($out_chan) {
+            botPrivmsg($self, $out_chan, $line);
+            logBot($self, $ctx->message, $out_chan, "lastcmd", undef);
         }
+        else {
+            botNotice($self, $nick, $line);
+            logBot($self, $ctx->message, undef, "lastcmd", undef);
+        }
+
+        return 0;
     }
 
+    my $count   = scalar(@cmds);
+    my $summary = "Last commands in database: $count result(s), showing max 10";
+
     if ($out_chan) {
-        botPrivmsg($self, $out_chan, $line);
+        botPrivmsg($self, $out_chan, "$summary - details sent by notice to $nick");
         logBot($self, $ctx->message, $out_chan, "lastcmd", undef);
-    } else {
-        botNotice($self, $nick, $line);
+    }
+    else {
+        botNotice($self, $nick, $summary);
         logBot($self, $ctx->message, undef, "lastcmd", undef);
     }
 
-    return scalar(@cmds);
+    my $per_line = 5;
+    my $page     = 1;
+
+    while (@cmds) {
+        my @chunk = splice(@cmds, 0, $per_line);
+        my $line  = sprintf("lastcmd[%02d]: %s", $page, join(' ', @chunk));
+
+        if (length($line) > 360) {
+            $line = substr($line, 0, 357) . '...';
+        }
+
+        botNotice($self, $nick, $line);
+        $page++;
+    }
+
+    return $count;
 }
+
 
 # searchcmd <keyword> — list public commands whose action contains <keyword>
 # Improvements vs legacy:
@@ -1275,6 +1324,7 @@ sub mbDbOwnersCommand_ctx {
         JOIN USER U ON PC.id_user = U.id_user
         GROUP BY U.nickname
         ORDER BY nbCommands DESC, U.nickname ASC
+        LIMIT 50
     };
 
     my $sth = $self->{dbh}->prepare($sql);
@@ -1289,38 +1339,57 @@ sub mbDbOwnersCommand_ctx {
         my $u  = $r->{nickname};
         my $nb = $r->{nbCommands} // 0;
         next unless defined $u && $u ne '';
+
         push @items, "$u($nb)";
     }
     $sth->finish;
 
-    my $msg;
-    if (!@items) {
-        $msg = "not found";
-    } else {
-        my $prefix  = "Number of commands by user: ";
-        my $max_len = 360;
-        $msg = $prefix;
+    unless (@items) {
+        my $line = "No command owner found";
 
-        for my $it (@items) {
-            my $candidate = ($msg eq $prefix) ? ($msg . $it) : ($msg . " " . $it);
-            if (length($candidate) > $max_len) {
-                $msg .= "..." if length($msg) + 3 <= $max_len;
-                last;
-            }
-            $msg = $candidate;
+        if ($out_chan) {
+            botPrivmsg($self, $out_chan, $line);
+            logBot($self, $ctx->message, $out_chan, "owncmd", undef);
         }
+        else {
+            botNotice($self, $nick, $line);
+            logBot($self, $ctx->message, undef, "owncmd", undef);
+        }
+
+        return 0;
     }
 
+    my $count   = scalar(@items);
+    my $summary = "Command owners: $count result(s), showing max 50";
+
+    # Avoid flooding public channels with multi-line output.
     if ($out_chan) {
-        botPrivmsg($self, $out_chan, $msg);
+        botPrivmsg($self, $out_chan, "$summary - details sent by notice to $nick");
         logBot($self, $ctx->message, $out_chan, "owncmd", undef);
-    } else {
-        botNotice($self, $nick, $msg);
+    }
+    else {
+        botNotice($self, $nick, $summary);
         logBot($self, $ctx->message, undef, "owncmd", undef);
     }
 
-    return scalar(@items);
+    my $per_line = 5;
+    my $page     = 1;
+
+    while (@items) {
+        my @chunk = splice(@items, 0, $per_line);
+        my $line  = sprintf("owncmd[%02d]: %s", $page, join(' ', @chunk));
+
+        if (length($line) > 360) {
+            $line = substr($line, 0, 357) . '...';
+        }
+
+        botNotice($self, $nick, $line);
+        $page++;
+    }
+
+    return $count;
 }
+
 
 # Temporarily disable (hold) a public command
 # Requires: authenticated + Administrator+
@@ -1472,7 +1541,7 @@ sub mbPopCommand_ctx {
     my $nick = $ctx->nick;
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    # Prefer output where the command was invoked
+    # Prefer output where the command was invoked.
     my $out_chan = '';
     my $ctx_chan = $ctx->channel // '';
     $out_chan = $ctx_chan if defined($ctx_chan) && $ctx_chan =~ /^#/;
@@ -1484,17 +1553,24 @@ sub mbPopCommand_ctx {
 
     my $target = $args[0];
 
+    # Treat the supplied nick/handle literally. LIKE is kept for collation and
+    # historical behavior, but SQL wildcards from user input are escaped.
+    my $like = $target;
+    $like =~ s/!/!!/g;
+    $like =~ s/%/!%/g;
+    $like =~ s/_/!_/g;
+
     my $sql = q{
         SELECT PC.command, PC.hits
         FROM USER U
         JOIN PUBLIC_COMMANDS PC ON U.id_user = PC.id_user
-        WHERE U.nickname LIKE ?
+        WHERE U.nickname LIKE ? ESCAPE '!'
         ORDER BY PC.hits DESC
         LIMIT 20
     };
 
     my $sth = $self->{dbh}->prepare($sql);
-    unless ($sth && $sth->execute($target)) {
+    unless ($sth && $sth->execute($like)) {
         $self->{logger}->log(1, "mbPopCommand_ctx() SQL Error: $DBI::errstr Query: $sql");
         botNotice($self, $nick, "Internal error (SQL).");
         return;
@@ -1502,47 +1578,68 @@ sub mbPopCommand_ctx {
 
     my @items;
     my $rank = 0;
+
     while (my $r = $sth->fetchrow_hashref()) {
         my $cmd  = $r->{command} // next;
         my $hits = $r->{hits}    // 0;
         $rank++;
+
         push @items, $rank . ") " . $cmd . "(" . $hits . ")";
     }
+
     $sth->finish;
 
-    my $line;
-    if (@items) {
-        my $prefix  = "Popular commands for $target: ";
-        my $max_len = 360; # conservative for IRC payload
-        $line = $prefix;
+    unless (@items) {
+        my $line = "No popular commands for $target";
 
-        for my $it (@items) {
-            my $candidate = ($line eq $prefix) ? ($line . $it) : ($line . " | " . $it);
-            if (length($candidate) > $max_len) {
-                $line .= "..." if length($line) + 3 <= $max_len;
-                last;
-            }
-            $line = $candidate;
+        if ($out_chan) {
+            botPrivmsg($self, $out_chan, $line);
+            logBot($self, $ctx->message, $out_chan, "popcmd", $target);
         }
-    } else {
-        $line = "No popular commands for $target";
+        else {
+            botNotice($self, $nick, $line);
+            logBot($self, $ctx->message, undef, "popcmd", $target);
+        }
+
+        return 0;
     }
 
+    my $count = scalar(@items);
+    my $summary = "Popular commands for $target: $count result(s), showing max 20";
+
+    # Avoid flooding public channels with multi-line output.
     if ($out_chan) {
-        botPrivmsg($self, $out_chan, $line);
+        botPrivmsg($self, $out_chan, "$summary - details sent by notice to $nick");
         logBot($self, $ctx->message, $out_chan, "popcmd", $target);
-    } else {
-        botNotice($self, $nick, $line);
+    }
+    else {
+        botNotice($self, $nick, $summary);
         logBot($self, $ctx->message, undef, "popcmd", $target);
     }
 
-    return scalar(@items);
+    my $per_line = 5;
+    my $page     = 1;
+
+    while (@items) {
+        my @chunk = splice(@items, 0, $per_line);
+        my $line  = sprintf("popcmd[%02d]: %s", $page, join(' | ', @chunk));
+
+        if (length($line) > 360) {
+            $line = substr($line, 0, 357) . '...';
+        }
+
+        botNotice($self, $nick, $line);
+        $page++;
+    }
+
+    return $count;
 }
+
 
 # Check if a timezone exists
 sub checkResponder {
 	my ($self,$message,$sNick,$sChannel,$sMsg,@tArgs) = @_;
-	my $sQuery = "SELECT RESPONDERS.answer, RESPONDERS.chance FROM RESPONDERS LEFT JOIN CHANNEL ON CHANNEL.id_channel = RESPONDERS.id_channel WHERE ((CHANNEL.name LIKE ? AND CHANNEL.id_channel IS NOT NULL) OR RESPONDERS.id_channel = 0) AND RESPONDERS.responder LIKE ?";
+	my $sQuery = "SELECT RESPONDERS.answer, RESPONDERS.chance FROM RESPONDERS LEFT JOIN CHANNEL ON CHANNEL.id_channel = RESPONDERS.id_channel WHERE ((CHANNEL.name = ? AND CHANNEL.id_channel IS NOT NULL) OR RESPONDERS.id_channel = 0) AND RESPONDERS.responder = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($sChannel,$sMsg)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -1561,7 +1658,7 @@ sub checkResponder {
 
 sub doResponder {
 	my ($self,$message,$sNick,$sChannel,$sMsg,@tArgs) = @_;
-	my $sQuery = "SELECT RESPONDERS.id_responders, RESPONDERS.answer, RESPONDERS.hits FROM RESPONDERS LEFT JOIN CHANNEL ON CHANNEL.id_channel = RESPONDERS.id_channel WHERE ((CHANNEL.name LIKE ? AND CHANNEL.id_channel IS NOT NULL) OR RESPONDERS.id_channel = 0) AND RESPONDERS.responder LIKE ?";
+	my $sQuery = "SELECT RESPONDERS.id_responders, RESPONDERS.answer, RESPONDERS.hits FROM RESPONDERS LEFT JOIN CHANNEL ON CHANNEL.id_channel = RESPONDERS.id_channel WHERE ((CHANNEL.name = ? AND CHANNEL.id_channel IS NOT NULL) OR RESPONDERS.id_channel = 0) AND RESPONDERS.responder = ?";
 	my $sth_sel = $self->{dbh}->prepare($sQuery);
 	unless ($sth_sel->execute($sChannel,$sMsg)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -1667,7 +1764,7 @@ sub addResponder_ctx {
     # Check if the responder already exists
     # ---------------------------------------
     my $sth = $self->{dbh}->prepare(
-        "SELECT answer, chance, hits FROM RESPONDERS WHERE id_channel = ? AND responder LIKE ?"
+        "SELECT answer, chance, hits FROM RESPONDERS WHERE id_channel = ? AND responder = ?"
     );
 
     unless ($sth->execute($id_channel, $responder)) {
@@ -1731,7 +1828,7 @@ sub addResponder_ctx {
 #
 # Notes:
 # - If #channel is omitted → global responder scope (id_channel = 0)
-# - Match is done on responder text (LIKE), same as addResponder()
+# - Match is done on responder text exactly, same as addResponder()
 sub delResponder_ctx {
     my ($ctx) = @_;
 
@@ -1800,7 +1897,7 @@ sub delResponder_ctx {
     my $sth = $self->{dbh}->prepare(
         "SELECT responder, answer, chance, hits
          FROM RESPONDERS
-         WHERE id_channel = ? AND responder LIKE ?"
+         WHERE id_channel = ? AND responder = ?"
     );
     unless ($sth && $sth->execute($id_channel, $responder)) {
         $self->{logger}->log(1, "delResponder_ctx() SQL Error (SELECT): $DBI::errstr");
@@ -1824,7 +1921,7 @@ sub delResponder_ctx {
     # ---------------------------------------
     $sth = $self->{dbh}->prepare(
         "DELETE FROM RESPONDERS
-         WHERE id_channel = ? AND responder LIKE ?"
+         WHERE id_channel = ? AND responder = ?"
     );
     unless ($sth && $sth->execute($id_channel, $responder)) {
         $self->{logger}->log(1, "delResponder_ctx() SQL Error (DELETE): $DBI::errstr");

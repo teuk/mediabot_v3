@@ -177,13 +177,14 @@ sub userCstat_ctx {
         SELECT USER.nickname, USER_LEVEL.description
         FROM USER JOIN USER_LEVEL ON USER_LEVEL.id_user_level = USER.id_user_level
         WHERE USER.auth = 1
-        ORDER BY USER_LEVEL.level
+        ORDER BY USER_LEVEL.level, USER.nickname
     };
 
     my $sth = $self->{dbh}->prepare($query);
-    unless ($sth->execute) {
+    unless ($sth && $sth->execute) {
         $self->{logger}->log(1, "userCstat_ctx() SQL Error: $DBI::errstr");
         botNotice($self, $nick, 'Internal error (DB query failed).');
+        $sth->finish if $sth;
         return;
     }
 
@@ -191,21 +192,38 @@ sub userCstat_ctx {
     while (my $ref = $sth->fetchrow_hashref()) {
         my $u = $ref->{nickname}    // '';
         my $d = $ref->{description} // '';
-        push @entries, "$u ($d)" if $u ne '';
+        push @entries, "$u($d)" if $u ne '';
     }
     $sth->finish;
 
-    my $line = 'Authenticated users: ' . join(' ', @entries);
-
-    # Keep it one line; truncate if too long
-    my $max = 380;  # keep headroom under IRC 512 bytes
-    if (length($line) > $max) {
-        $line = substr($line, 0, $max - 3) . '...';
+    unless (@entries) {
+        botNotice($self, $nick, "Authenticated users: none");
+        logBot($self, $ctx->message, undef, 'cstat', undef);
+        return 0;
     }
 
-    botNotice($self, $nick, $line);
+    my $count = scalar(@entries);
+    botNotice($self, $nick, "Authenticated users: $count result(s)");
+
+    my $per_line = 5;
+    my $page     = 1;
+
+    while (@entries) {
+        my @chunk = splice(@entries, 0, $per_line);
+        my $line  = sprintf("cstat[%02d]: %s", $page, join(' ', @chunk));
+
+        if (length($line) > 360) {
+            $line = substr($line, 0, 357) . '...';
+        }
+
+        botNotice($self, $nick, $line);
+        $page++;
+    }
+
     logBot($self, $ctx->message, undef, 'cstat', undef);
+    return $count;
 }
+
 
 # Context-based: Add a new user with a specified hostmask and optional level
 sub addUser_ctx {
@@ -340,15 +358,22 @@ sub userInfo_ctx {
         my $created     = $ref->{creation_date} // 'N/A';
         my $last_login  = $ref->{last_login}    // 'never';
 
+        my @hostmasks;
         my $hm_sth = $self->{dbh}->prepare(
-            "SELECT GROUP_CONCAT(hostmask ORDER BY id_user_hostmask SEPARATOR ', ') AS hm FROM USER_HOSTMASK WHERE id_user=?"
+            "SELECT hostmask FROM USER_HOSTMASK WHERE id_user=? ORDER BY id_user_hostmask LIMIT 20"
         );
 
-        my $hostmasks = 'none';
         if ($hm_sth && $hm_sth->execute($id_user)) {
-            my $hm_ref = $hm_sth->fetchrow_hashref;
-            $hostmasks = $hm_ref->{hm} // 'none';
+            while (my $hm_ref = $hm_sth->fetchrow_hashref) {
+                push @hostmasks, $hm_ref->{hostmask}
+                    if defined($hm_ref->{hostmask}) && $hm_ref->{hostmask} ne '';
+            }
             $hm_sth->finish;
+        }
+        else {
+            $self->{logger}->log(1, "userInfo_ctx() hostmask SQL Error: $DBI::errstr")
+                if $self->{logger};
+            $hm_sth->finish if $hm_sth;
         }
 
         my $password = $ref->{password};
@@ -366,10 +391,33 @@ sub userInfo_ctx {
             . ($username ne '' ? " | Username: $username" : "")
         );
         botNotice($self, $nick,
-            "Created: $created | Last login: $last_login | Hostmasks: $hostmasks"
+            "Created: $created | Last login: $last_login"
             . ($info1 ne '' ? " | Info1: $info1" : "")
             . ($info2 ne '' ? " | Info2: $info2" : "")
         );
+
+        if (@hostmasks) {
+            my $mask_count = scalar(@hostmasks);
+            botNotice($self, $nick, "Hostmasks: $mask_count shown, max 20");
+
+            my $per_line = 2;
+            my $page     = 1;
+
+            while (@hostmasks) {
+                my @chunk = splice(@hostmasks, 0, $per_line);
+                my $line  = sprintf("userinfo-masks[%02d]: %s", $page, join(' | ', @chunk));
+
+                if (length($line) > 360) {
+                    $line = substr($line, 0, 357) . '...';
+                }
+
+                botNotice($self, $nick, $line);
+                $page++;
+            }
+        }
+        else {
+            botNotice($self, $nick, "Hostmasks: none");
+        }
     }
     else {
         botNotice($self, $nick, "Unknown user $target");
@@ -774,22 +822,24 @@ SELECT event_type, publictext, COUNT(publictext) as hit
 FROM CHANNEL JOIN CHANNEL_LOG ON CHANNEL_LOG.id_channel = CHANNEL.id_channel
 WHERE (CHANNEL_LOG.event_type = 'public' OR CHANNEL_LOG.event_type = 'action')
   AND CHANNEL.name = ?
-  AND CHANNEL_LOG.nick LIKE ?
+  AND CHANNEL_LOG.nick LIKE ? ESCAPE '!'
 GROUP BY publictext
 ORDER BY hit DESC
 LIMIT 30
 SQL
 
+    my $target_nick_like = $target_nick;
+    $target_nick_like =~ s/!/!!/g;
+    $target_nick_like =~ s/%/!%/g;
+    $target_nick_like =~ s/_/!_/g;
+
     my $sth = $self->{dbh}->prepare($sql);
-    unless ($sth && $sth->execute($chan, $target_nick)) {
+    unless ($sth && $sth->execute($chan, $target_nick_like)) {
         $self->{logger}->log(1, "userTopSay_ctx() SQL Error: $DBI::errstr Query: $sql");
         return;
     }
 
-    my $response  = "$target_nick: ";
-    my $fullLine  = $response;
-    my $maxLength = 300;
-    my $i         = 0;
+    my @items;
 
     my @skip_patterns = (
         qr/^\s*$/,
@@ -817,29 +867,45 @@ SQL
 
         my $entry =
             ($event_type && $event_type eq 'action')
-            ? String::IRC->new("$text ($count) ")->bold
-            : "$text ($count) ";
+            ? String::IRC->new("$text ($count)")->bold
+            : "$text ($count)";
 
-        my $new_len = length($fullLine) + length($entry);
-        last if $new_len >= $maxLength;
-
-        $response .= $entry;
-        $fullLine .= $entry;
-        $i++;
+        push @items, $entry;
     }
 
-    if ($i > 0) {
-        if ($is_private) {
-            botNotice($self, $nick, $response);
-        } else {
-            botPrivmsg($self, $dest_chan, $response);
-        }
-    } else {
+    if (!@items) {
         my $msg = "No results.";
         if ($is_private) {
             botNotice($self, $nick, $msg);
-        } else {
+        }
+        else {
             botPrivmsg($self, $dest_chan, $msg);
+        }
+    }
+    else {
+        my $count   = scalar(@items);
+        my $summary = "Top sayings for $target_nick on $chan: $count result(s), showing max 30";
+
+        if ($is_private) {
+            botNotice($self, $nick, $summary);
+        }
+        else {
+            botPrivmsg($self, $dest_chan, "$summary - details sent by notice to $nick");
+        }
+
+        my $per_line = 3;
+        my $page     = 1;
+
+        while (@items) {
+            my @chunk = splice(@items, 0, $per_line);
+            my $line  = sprintf("topsay[%02d]: %s", $page, join(' | ', @chunk));
+
+            if (length($line) > 360) {
+                $line = substr($line, 0, 357) . '...';
+            }
+
+            botNotice($self, $nick, $line);
+            $page++;
         }
     }
 
