@@ -193,7 +193,28 @@ sub mbAddTimer_ctx {
         return;
     }
 
+    # Validate timer name before using it as hash key and DB unique name.
+    # TIMERS.name is VARCHAR(255), but keeping names short and predictable makes
+    # live administration safer and avoids ugly output/log lines.
+    unless ($name =~ /^[A-Za-z0-9_.-]{1,64}$/) {
+        $self->botNotice($nick, "Timer name must be 1-64 chars: letters, numbers, underscore, dash or dot");
+        return;
+    }
+
+    # Avoid accidental very tight loops and absurd intervals.
+    if ($interval < 5 || $interval > 86400) {
+        $self->botNotice($nick, "Timer interval must be between 5 and 86400 seconds");
+        return;
+    }
+
     my $cmd = join(' ', @raw);
+
+    # TIMERS.command is VARCHAR(255). Refuse too-long commands explicitly instead
+    # of relying on DB truncation/errors.
+    if (length($cmd) > 255) {
+        $self->botNotice($nick, "Timer command is too long (max 255 chars)");
+        return;
+    }
 
     # Validate IRC command: must start with a known safe IRC verb
     my @allowed_verbs = qw(PRIVMSG NOTICE JOIN PART TOPIC MODE KICK INVITE WHO WHOIS PING PONG);

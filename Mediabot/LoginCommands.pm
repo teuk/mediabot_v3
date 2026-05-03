@@ -196,7 +196,13 @@ sub userLogin_ctx {
     }
 
     unless (defined $id_user) {
-        { my $r = ($self->{_login_failures}{lc($sNick)} //= {ts=>time(),count=>0}); $r->{count}++; }
+        for my $k (lc($sNick), lc($typed_user)) {
+            next unless defined($k) && $k ne '';
+            my $r = ($self->{_login_failures}{$k} //= { ts => time(), count => 0 });
+            $r->{count}++;
+            $r->{ts} //= time();
+        }
+
         botNotice($self, $sNick, "Login failed (Unknown user).");
         $self->{metrics}->inc('mediabot_auth_failure_total') if $self->{metrics};
         my $msg = ($ctx->message->prefix // '') . " Failed login (Unknown user: $typed_user)";
@@ -211,8 +217,19 @@ sub userLogin_ctx {
     }
 
     # 2) Compute password hash using same algorithm as MariaDB PASSWORD()
-    my $calc_hash = make_password_hash($typed_pass);
-    unless (defined $calc_hash) {
+    my $calc_hash;
+    my $hash_ok = eval {
+        $calc_hash = make_password_hash($typed_pass);
+        1;
+    };
+
+    unless ($hash_ok && defined $calc_hash) {
+        my $err = $@ || 'make_password_hash returned undef';
+        chomp $err;
+
+        $self->{logger}->log(1, "login: password hash computation failed: $err")
+            if $self->{logger};
+
         botNotice($self, $sNick, "Internal error (hash compute failed).");
         return;
     }

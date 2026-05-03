@@ -113,6 +113,7 @@ sub on_message_RPL_WHOISCHANNELS;
 sub on_message_RPL_WHOISSERVER;
 sub on_message_RPL_WHOISIDLE;
 sub on_message_ERR_NICKNAMEINUSE;
+sub on_message_ERR_NOSUCHNICK;
 sub on_message_ERR_NEEDMOREPARAMS;
 sub on_message_RPL_INVITING;         # 341
 sub on_message_RPL_INVITELIST;       # 346
@@ -491,6 +492,7 @@ sub _build_irc {
         on_message_RPL_WHOISIDLE         => \&on_message_RPL_WHOISIDLE,
         on_message_RPL_ENDOFWHOIS        => \&on_message_RPL_ENDOFWHOIS,
         on_message_ERR_NICKNAMEINUSE     => \&on_message_ERR_NICKNAMEINUSE,
+        on_message_ERR_NOSUCHNICK        => \&on_message_ERR_NOSUCHNICK,
         on_message_RPL_INVITING          => \&on_message_RPL_INVITING,
         on_message_RPL_INVITELIST        => \&on_message_RPL_INVITELIST,
         on_message_RPL_ENDOFINVITELIST   => \&on_message_RPL_ENDOFINVITELIST,
@@ -1592,7 +1594,7 @@ sub on_message_RPL_WHOISUSER {
     my ($target_name,$ident,$host,$flags,$realname) = @{$hints}{qw<target_name ident host flags realname>};
     $mediabot->{logger}->log(2,"$target_name is $ident\@$sHostname $flags $realname");
     # B1/A1: route to Partyline if .whois was issued from a session
-    _partyline_whois_write("[311] $target_name $ident\@$sHostname * :$realname");
+    _partyline_whois_write($target_name, "[311] $target_name $ident\@$sHostname * :$realname");
     if (defined($WHOIS_VARS{'nick'}) && ($WHOIS_VARS{'nick'} eq $target_name) && defined($WHOIS_VARS{'sub'}) && ($WHOIS_VARS{'sub'} ne "")) {
         if ($WHOIS_VARS{'sub'} eq "userVerifyNick") {
                 $mediabot->{logger}->log(4,"WHOIS userVerifyNick");
@@ -1933,25 +1935,73 @@ sub on_message_RPL_ENDOFWHO {
 
 
 # ---------------------------------------------------------------------------
-# _partyline_whois_write($line) — internal
-# Write a WHOIS reply line to the active Partyline session, if any.
-# Clears the state if TTL (30s) is exceeded.
+# _partyline_whois_clear() — internal
+# Clear pending Partyline WHOIS state.
+# ---------------------------------------------------------------------------
+sub _partyline_whois_clear {
+    delete $mediabot->{$_} for qw(
+        _partyline_whois_fd
+        _partyline_whois_nick
+        _partyline_whois_ts
+    );
+}
+
+# ---------------------------------------------------------------------------
+# _partyline_whois_write($nick, $line, %opts) — internal
+# Write a WHOIS reply line to the active Partyline session, if it matches
+# the nick requested by that session.
+#
+# Options:
+#   clear => 1   clear pending state after writing
+#
+# This prevents an unrelated WHOIS reply from leaking into the Partyline
+# session that requested a different nick.
 # ---------------------------------------------------------------------------
 sub _partyline_whois_write {
-    my ($line) = @_;
-    my $fd  = $mediabot->{_partyline_whois_fd}  // return;
-    my $ts  = $mediabot->{_partyline_whois_ts}  // 0;
+    my ($nick, $line, %opts) = @_;
 
-    # A6: timeout — clean up stale state
+    my $fd      = $mediabot->{_partyline_whois_fd}   // return 0;
+    my $wanted  = $mediabot->{_partyline_whois_nick} // '';
+    my $ts      = $mediabot->{_partyline_whois_ts}   // 0;
+
+    # Timeout: clean up stale state.
     if (time() - $ts > 30) {
         $mediabot->{logger}->log(3, "Partyline .whois: timed out, clearing state");
-        delete $mediabot->{$_} for qw(_partyline_whois_fd _partyline_whois_nick _partyline_whois_ts);
-        return;
+        _partyline_whois_clear();
+        return 0;
+    }
+
+    $nick //= '';
+
+    if ($wanted ne '' && lc($nick) ne lc($wanted)) {
+        $mediabot->{logger}->log(
+            4,
+            "Partyline .whois: ignoring WHOIS line for $nick while waiting for $wanted"
+        );
+        return 0;
     }
 
     my $stream = eval { $mediabot->{partyline}->{streams}{$fd} };
-    return unless $stream;
+
+    unless ($stream) {
+        $mediabot->{logger}->log(3, "Partyline .whois: stream fd=$fd disappeared, clearing state");
+        _partyline_whois_clear();
+        return 0;
+    }
+
     eval { $stream->write($line . "\r\n") };
+
+    if ($@) {
+        my $err = $@;
+        chomp $err;
+        $mediabot->{logger}->log(1, "Partyline .whois: failed to write to fd=$fd: $err");
+        _partyline_whois_clear();
+        return 0;
+    }
+
+    _partyline_whois_clear() if $opts{clear};
+
+    return 1;
 }
 
 sub on_message_RPL_WHOISCHANNELS {
@@ -1964,7 +2014,7 @@ sub on_message_RPL_WHOISCHANNELS {
     # A5: log at DEBUG4 to avoid leaking secret/private channel names
     $mediabot->{logger}->log(4, "$nick on channels: $chans");
     # B1/A1: route to Partyline
-    _partyline_whois_write("[319] $nick :$chans") if $chans ne '';
+    _partyline_whois_write($nick, "[319] $nick :$chans") if $chans ne '';
 }
 
 sub on_message_RPL_WHOISSERVER {
@@ -1975,7 +2025,7 @@ sub on_message_RPL_WHOISSERVER {
     my $server = $args[2] // '';
     my $info   = $args[3] // '';
     $mediabot->{logger}->log(2, "$nick server $server ($info)");
-    _partyline_whois_write("[312] $nick $server :$info");
+    _partyline_whois_write($nick, "[312] $nick $server :$info");
 }
 
 sub on_message_RPL_WHOISIDLE {
@@ -1986,7 +2036,7 @@ sub on_message_RPL_WHOISIDLE {
     my $idle   = $args[2] // 0;
     my $signon = $args[3] // time;
     $mediabot->{logger}->log(2, "$nick idle for ${idle}s, signon: " . scalar localtime($signon));
-    _partyline_whois_write("[317] $nick idle=${idle}s signon=" . scalar localtime($signon));
+    _partyline_whois_write($nick, "[317] $nick idle=${idle}s signon=" . scalar localtime($signon));
 }
 
 sub on_message_RPL_ENDOFWHOIS {
@@ -1994,9 +2044,37 @@ sub on_message_RPL_ENDOFWHOIS {
     my $nick = ($message->args)[1] // '';
     $mediabot->{logger}->log(3, "WHOIS end for $nick");
     # B1/A1: send closing line and clear Partyline whois state
-    _partyline_whois_write("[318] $nick :End of WHOIS");
-    delete $mediabot->{$_} for qw(_partyline_whois_fd _partyline_whois_nick _partyline_whois_ts);
+    _partyline_whois_write($nick, "[318] $nick :End of WHOIS", clear => 1);
 }
+
+
+sub on_message_ERR_NOSUCHNICK {
+    my ($self, $message, $hints) = @_;
+
+    log_debug_args('on_message_ERR_NOSUCHNICK', $message);
+
+    my @args = $message->args;
+
+    # Typical numeric 401 shape:
+    #   <me> <nick> :No such nick/channel
+    my $nick   = $args[1] // '';
+    my $reason = $args[2] // 'No such nick/channel';
+
+    my $wanted = $mediabot->{_partyline_whois_nick};
+
+    # Only report loudly when the 401 belongs to an active Partyline .whois.
+    # Other ERR_NOSUCHNICK messages can happen during startup/service probing
+    # and should not look like operator-facing WHOIS failures.
+    if (defined($wanted) && lc($nick) eq lc($wanted)) {
+        $mediabot->{logger}->log(3, "Partyline WHOIS no such nick: $nick ($reason)");
+        _partyline_whois_write($nick, "[401] $nick :$reason", clear => 1);
+        return;
+    }
+
+    $mediabot->{logger}->log(4, "Ignoring unrelated ERR_NOSUCHNICK for $nick ($reason)");
+}
+
+
 
 sub on_message_ERR_NICKNAMEINUSE {
     my ($self, $message, $hints) = @_;
