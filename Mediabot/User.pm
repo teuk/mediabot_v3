@@ -206,7 +206,7 @@ sub create {
         return undef;
     }
 
-    $logger->log(1, "🆕 Creating user: nickname=$nickname, level=$level") if $logger;
+ $logger->log(1, " Creating user: nickname=$nickname, level=$level") if $logger;
 
     # Determine level ID
     my $level_id;
@@ -222,7 +222,7 @@ sub create {
     }
     unless ($level_id) {
         carp "Invalid level: $level";
-        $logger->log(1, "❌ Invalid level: $level") if $logger;
+ $logger->log(1, " Invalid level: $level") if $logger;
         return undef;
     }
 
@@ -231,7 +231,7 @@ sub create {
     $sth_check->execute($nickname);
     if (my $ref = $sth_check->fetchrow_hashref) {
         carp "User $nickname already exists (id_user: $ref->{id_user})";
-        $logger->log(1, "❌ User $nickname already exists (id_user: $ref->{id_user})") if $logger;
+ $logger->log(1, " User $nickname already exists (id_user: $ref->{id_user})") if $logger;
         return undef;
     }
     $sth_check->finish;
@@ -247,7 +247,7 @@ sub create {
     unless ($ok) {
         $sth_insert->finish;
         carp "Failed to insert user $nickname";
-        $logger->log(1, "❌ Failed to insert user $nickname") if $logger;
+ $logger->log(1, " Failed to insert user $nickname") if $logger;
         return undef;
     }
 
@@ -277,7 +277,7 @@ sub create {
     my $user_obj = $class->new($row);
     $user_obj->load_level($dbh);
 
-    $logger->log(1, "✅ User created: $nickname (id_user=" . $user_obj->id . ", level=" . $user_obj->level_description . ")") if $logger;
+ $logger->log(1, " User created: $nickname (id_user=" . $user_obj->id . ", level=" . $user_obj->level_description . ")") if $logger;
 
     return $user_obj;
 }

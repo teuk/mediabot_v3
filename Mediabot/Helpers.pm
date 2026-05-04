@@ -165,7 +165,7 @@ sub get_user_from_message {
     });
 
     unless ($sth->execute) {
-        $self->{logger}->log(1, "❌ get_user_from_message() SQL Error: $DBI::errstr");
+        $self->{logger}->log(1, " get_user_from_message() SQL Error: $DBI::errstr");
         return;
     }
 
@@ -343,20 +343,20 @@ sub getIdUser {
 sub noticeConsoleChan {
     my ($self, $sMsg) = @_;
 
-    $self->{logger}->log(4, "📢 noticeConsoleChan() called with message: $sMsg");
+    $self->{logger}->log(4, "noticeConsoleChan() called with message: $sMsg");
 
     my ($id_channel, $name, $chanmode, $key) = getConsoleChan($self);
 
-    $self->{logger}->log(4, "ℹ️ getConsoleChan() returned: id_channel=" . ($id_channel // 'undef') . ", name=" . 
+    $self->{logger}->log(4, "getConsoleChan() returned: id_channel=" . ($id_channel // 'undef') . ", name=" . 
         (defined $name ? $name : 'undef') . ", mode=" . 
         (defined $chanmode ? $chanmode : 'undef') . ", key=" . 
         (defined $key ? $key : 'undef'));
 
     if (defined $name && $name ne '') {
-        $self->{logger}->log(4, "✅ Sending notice to console channel: $name");
+        $self->{logger}->log(4, "Sending notice to console channel: $name");
         botNotice($self, $name, $sMsg);
     } else {
-        $self->{logger}->log(1, "⚠️ No console channel defined! Run ./configure to set up the bot.");
+        $self->{logger}->log(1, "No console channel defined! Run ./configure to set up the bot.");
     }
 }
 
@@ -395,7 +395,7 @@ sub logBot {
 
     # Execute the insert with bound parameters
     unless ($sth->execute($timestamp, $user_id, $channel_id, $hostmask, $action, $args_string)) {
-        $self->{logger}->log(0, "logBot() SQL error: $DBI::errstr — Query: $sql");
+        $self->{logger}->log(0, "logBot() SQL error: $DBI::errstr  Query: $sql");
         return;
     }
 
@@ -780,7 +780,7 @@ sub userAdd {
         $hm_sth->finish;
     }
 
-    $logger->log(1, "✅ userAdd() created user '$nickname' (id_user=$id, level_id=$level_id)");
+    $logger->log(1, "userAdd() created user '$nickname' (id_user=$id, level_id=$level_id)");
     return $id;
 }
 
@@ -1429,13 +1429,13 @@ sub getIdChannelSet {
     my $sth = $self->{dbh}->prepare($sQuery);
 
     unless ($sth) {
-        $self->{logger}->log(1, "❌ SQL prepare error in getIdChannelSet(): " . $DBI::errstr . " | Query: $sQuery")
+        $self->{logger}->log(1, " SQL prepare error in getIdChannelSet(): " . $DBI::errstr . " | Query: $sQuery")
             if $self->{logger};
         return undef;
     }
 
     unless ($sth->execute($sChannel, $id_chanset_list)) {
-        $self->{logger}->log(1, "❌ SQL execute error in getIdChannelSet(): " . $DBI::errstr . " | Query: $sQuery")
+        $self->{logger}->log(1, " SQL execute error in getIdChannelSet(): " . $DBI::errstr . " | Query: $sQuery")
             if $self->{logger};
         $sth->finish;
         return undef;
@@ -1476,7 +1476,7 @@ sub getIdChansetList {
 
     if (!$sth->execute($sChansetValue)) {
         # Log SQL error
-        $self->{logger}->log(1, "❌ SQL Error in getIdChansetList(): " . $DBI::errstr . " | Query: $sQuery");
+        $self->{logger}->log(1, " SQL Error in getIdChansetList(): " . $DBI::errstr . " | Query: $sQuery");
     }
     else {
         if (my $ref = $sth->fetchrow_hashref()) {

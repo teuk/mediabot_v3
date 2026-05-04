@@ -42,7 +42,7 @@ sub init_hailo {
 		);
 	};
 	if ($@) {
-		$self->{logger}->log(0, "❌ Hailo init failed: $@");
+		$self->{logger}->log(0, " Hailo init failed: $@");
 		$self->{hailo} = undef;
 		return;
 	}

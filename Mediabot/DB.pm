@@ -29,7 +29,7 @@ sub new {
     $self->{charset_mode} = $mode;
 
     unless ($dbname && $dbuser) {
-        $logger->log(0, "❌ Missing DB configuration: DDBNAME or DBUSER is undefined.");
+ $logger->log(0, " Missing DB configuration: DDBNAME or DBUSER is undefined.");
         $logger->log(0, "Check your [mysql] section in mediabot.conf");
         exit 1;
     }
@@ -51,7 +51,7 @@ sub new {
 
     my $dbh = DBI->connect($dsn, $dbuser, $dbpass, \%attrs);
     if (!$dbh) {
-        $logger->log(0, "❌ DBI connect failed: " . $DBI::errstr);
+ $logger->log(0, " DBI connect failed: " . $DBI::errstr);
         $logger->log(0, "Check your credentials in mediabot.conf");
         $logger->log(0, "Aborting startup.");
         exit 1;
@@ -103,7 +103,7 @@ sub _apply_session_charset {
         return;
     } else {
         # Valeur inattendue -> fallback utf8mb4
-        $logger->log(1, "Unknown CHARSET_MODE '$mode', falling back to utf8mb4");
+        $logger->log(0, "Unknown CHARSET_MODE '$mode', falling back to utf8mb4 — check [mysql] in mediabot.conf");
         @sql = (
             'SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci',
             'SET CHARACTER SET utf8mb4',
@@ -169,7 +169,7 @@ sub ensure_connected {
     # Quick path: handle exists and ping succeeds
     return $dbh if $dbh && eval { $dbh->ping };
 
-    $self->{logger}->log(1, "DB connection lost — reconnecting...") if $self->{logger};
+ $self->{logger}->log(1, "DB connection lost reconnecting...") if $self->{logger};
     $self->_connect;
     return $self->{dbh};
 }

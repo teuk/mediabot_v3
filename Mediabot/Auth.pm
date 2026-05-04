@@ -41,31 +41,49 @@ sub new {
 
 # verify_credentials($user_id_or_nick, $login_nickname, $clear_password)
 # Returns: boolean
+# verify_credentials($user_id_or_nick, $login_nickname, $clear_password)
+# Returns: boolean
 sub verify_credentials {
     my ($self, $user_id_or_nick, $login_nick, $clear) = @_;
     my $dbh = $self->{dbh};
 
-    # Resolve the user row
-    # Determine lookup key: numeric = id_user, otherwise nickname
+    unless ($dbh) {
+        $self->_log(0, "verify_credentials: no database handle");
+        return 0;
+    }
+
+    unless (defined($user_id_or_nick) && $user_id_or_nick ne '') {
+        $self->_log(2, "verify_credentials: empty user lookup key");
+        return 0;
+    }
+
+    # Resolve the user row.
+    # Determine lookup key: numeric = id_user, otherwise nickname.
     my ($sql, $val);
     if ($user_id_or_nick =~ /^\d+$/) {
         $sql = "SELECT id_user, nickname, password FROM USER WHERE id_user = ?";
         $val = $user_id_or_nick;
-    } else {
+    }
+    else {
         $sql = "SELECT id_user, nickname, password FROM USER WHERE nickname = ?";
         $val = $user_id_or_nick;
     }
-    my $row;
-    eval {
-        my $sth = $dbh->prepare($sql);
-        $sth->execute($val);
-        $row = $sth->fetchrow_hashref;
-        $sth->finish;
-    };
-    if ($@) {
-        $self->_log(0, "verify_credentials: DB error while fetching user ($val): $@");
+
+    my $sth = $dbh->prepare($sql);
+    unless ($sth) {
+        $self->_log(0, "verify_credentials: DB prepare error while fetching user ($val): $DBI::errstr");
         return 0;
     }
+
+    unless ($sth->execute($val)) {
+        $self->_log(0, "verify_credentials: DB execute error while fetching user ($val): $DBI::errstr");
+        $sth->finish;
+        return 0;
+    }
+
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+
     unless ($row) {
         $self->_log(2, "verify_credentials: no such user for '$val'");
         return 0;
@@ -83,15 +101,21 @@ sub verify_credentials {
 
     # Compare against multiple formats
     my ($ok, $why) = _password_matches($clear, $stored);
-    $self->_log(3, sprintf("🔐 verify_credentials: id=%s nick=%s login_nick=%s match=%s (%s)",
+    $self->_log(3, sprintf(" verify_credentials: id=%s nick=%s login_nick=%s match=%s (%s)",
                            $uid, $nick, ($login_nick//''), $ok ? 'YES' : 'NO', $why));
     return $ok ? 1 : 0;
 }
 
+
+# maybe_autologin($user_like, $fullmask) returns (boolean, reason_string)
 # maybe_autologin($user_like, $fullmask) returns (boolean, reason_string)
 sub maybe_autologin {
     my ($self, $user_like, $fullmask) = @_;
     my $dbh = $self->{dbh};
+
+    unless ($dbh) {
+        return (0, "no_dbh");
+    }
 
     my ($user, $err) = $self->_resolve_user($user_like);
     if (!$user) {
@@ -137,25 +161,31 @@ sub maybe_autologin {
         return (0, "autologin_disabled");
     }
 
-    my $rows = 0;
-    eval {
-        my $sth = $dbh->prepare("UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?");
-        $sth->execute($uid);
-        $rows = $sth->rows;
+    my $sql_update = "UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?";
+    my $sth = $dbh->prepare($sql_update);
+
+    unless ($sth) {
+        $self->_log(0, "AUTOLOGIN: DB prepare error while updating auth for uid=$uid: $DBI::errstr");
+        return (0, "db_update_prepare_failed");
+    }
+
+    unless ($sth->execute($uid)) {
+        $self->_log(0, "AUTOLOGIN: DB execute error while updating auth for uid=$uid: $DBI::errstr");
         $sth->finish;
-        1;
-    } or do {
-        $self->_log(0, "AUTOLOGIN: DB error while updating auth for uid=$uid: $@");
-        return (0, "db_update_failed");
-    };
+        return (0, "db_update_execute_failed");
+    }
+
+    my $rows = $sth->rows;
+    $sth->finish;
 
     # Keep lightweight in-memory state in the auth object too
     $self->{logged_in}{$uid} = 1;
     $self->{sessions}{lc $nick} = {
-        id_user  => $uid,
-        nickname => $nick,
-        auth     => 1,
-        hostmask => $fullmask,
+        id_user      => $uid,
+        nickname     => $nick,
+        auth         => 1,
+        hostmask     => $fullmask,
+        logged_in_at => time(),
     };
 
     $self->_update_auth_session_metric();
@@ -163,6 +193,7 @@ sub maybe_autologin {
     $self->_log(3, "AUTOLOGIN: success uid=$uid nick=$nick reason=$reason rows=$rows");
     return (1, $reason);
 }
+
 
 # Checks if the given full hostmask matches any of the stored hostmask patterns for the user.
 sub hostmask_matches {
@@ -508,6 +539,40 @@ sub _trim {
     $s =~ s/\s+$//;
     return $s;
 }
+
+
+# ---------------------------------------------------------------------------
+# cleanup_stale_sessions($max_age_secs)
+# Remove in-memory sessions older than $max_age_secs (default: 86400 = 24h).
+# Called from the Scheduler or on every autologin attempt.
+# ---------------------------------------------------------------------------
+sub cleanup_stale_sessions {
+    my ($self, $max_age) = @_;
+    $max_age //= 86400;
+    my $now  = time();
+    my $gone = 0;
+
+    for my $nick (keys %{ $self->{sessions} }) {
+        my $sess = $self->{sessions}{$nick};
+        my $age  = $now - ($sess->{logged_in_at} // $now);
+        if ($age > $max_age) {
+            my $uid = $sess->{id_user};
+            delete $self->{sessions}{$nick};
+            delete $self->{logged_in}{$uid} if defined $uid;
+            $gone++;
+        }
+    }
+
+    if ($gone) {
+        $self->_log(2, "cleanup_stale_sessions: removed $gone session(s) older than ${max_age}s");
+        if ($self->{metrics} && $self->{metrics}->can('set')) {
+            $self->{metrics}->set('mediabot_auth_sessions_total',
+                scalar keys %{ $self->{sessions} });
+        }
+    }
+    return $gone;
+}
+
 
 1;
 

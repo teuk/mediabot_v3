@@ -1639,15 +1639,198 @@ sub delUser_ctx {
         return;
     }
 
-    $self->{dbh}->do("DELETE FROM USER_CHANNEL  WHERE id_user=?", undef, $id_user);
-    $self->{dbh}->do("DELETE FROM USER_HOSTMASK WHERE id_user=?", undef, $id_user);
-    $self->{dbh}->do("DELETE FROM USER          WHERE id_user=?", undef, $id_user);
+    # A5: two-step confirmation — operator must confirm within 30s
+    my $confirm_key = "_deluser_pending_${nick}_${target}";
+    my $now_confirm = time();
+    if (!$self->{$confirm_key}
+        || ($now_confirm - ($self->{$confirm_key}{at} // 0)) > 30)
+    {
+        $self->{$confirm_key} = { at => $now_confirm };
+        botNotice($self, $nick,
+            "WARNING: This will permanently delete user '$target' (id=$id_user). "
+          . "Repeat the command within 30s to confirm.");
+        return;
+    }
+    delete $self->{$confirm_key};
+
+    # B2/B3/A2: atomic transaction + cascade + eval safety
+    my $dbh = $self->{dbh};
+    my $ok = eval {
+        $dbh->begin_work;
+        $dbh->do("DELETE FROM USER_CHANNEL  WHERE id_user=?", undef, $id_user);
+        $dbh->do("DELETE FROM USER_HOSTMASK WHERE id_user=?", undef, $id_user);
+        $dbh->do("DELETE FROM USER_SEEN     WHERE nick = ?",  undef, lc($target));
+        $dbh->do("DELETE FROM USER          WHERE id_user=?", undef, $id_user);
+        $dbh->commit;
+        1;
+    };
+    if (!$ok || $@) {
+        eval { $dbh->rollback };
+        $self->{logger}->log(0, "delUser_ctx: transaction failed for $target: $@");
+        botNotice($self, $nick, "Database error — user not deleted.");
+        return;
+    }
 
     my $msg = "User $target (id_user: $id_user) has been deleted";
+    $self->{logger}->log(0, "delUser_ctx: $msg (by $nick)");
     botNotice($self, $nick, $msg);
     logBot($self, $message, undef, "deluser", $msg);
 }
 
 # Get Fortnite ID for a user
+
+
+# ---------------------------------------------------------------------------
+# _birthday_add_ctx($ctx, $target, $date)
+# Set birthday for a user. Format: dd/mm  or  dd/mm/YYYY
+# ---------------------------------------------------------------------------
+sub _birthday_add_ctx {
+    my ($ctx, $target, $date) = @_;
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    unless (defined $target && $target ne '') {
+        botNotice($self, $nick, "Syntax: birthday add user <username> [dd/mm | dd/mm/YYYY]");
+        return;
+    }
+
+    # Validate and normalize date
+    my $normalized;
+    if (!defined $date || $date eq '') {
+        # No date — clear birthday
+        $normalized = undef;
+    } elsif ($date =~ m{^(\d{1,2})/(\d{1,2})(?:/(\d{4}))?$}) {
+        my ($d, $m, $y) = ($1, $2, $3);
+        if ($d < 1 || $d > 31 || $m < 1 || $m > 12) {
+            botNotice($self, $nick, "Invalid date: day must be 1-31, month 1-12.");
+            return;
+        }
+        $normalized = defined $y
+            ? sprintf("%04d-%02d-%02d", $y, $m, $d)
+            : sprintf("%02d-%02d", $m, $d);
+    } else {
+        botNotice($self, $nick, "Date format must be dd/mm or dd/mm/YYYY.");
+        return;
+    }
+
+    my $id_user = getIdUser($self, $target);
+    unless ($id_user) {
+        botNotice($self, $nick, "Unknown user: $target");
+        return;
+    }
+
+    my $sth = $self->{dbh}->prepare(
+        "UPDATE USER SET birthday = ? WHERE id_user = ?"
+    );
+    unless ($sth && $sth->execute($normalized, $id_user)) {
+        $self->{logger}->log(1, "_birthday_add_ctx() SQL error: $DBI::errstr");
+        botNotice($self, $nick, "Database error.");
+        return;
+    }
+    $sth->finish;
+
+    my $msg = defined $normalized
+        ? "Birthday set to $normalized for $target."
+        : "Birthday cleared for $target.";
+    botNotice($self, $nick, $msg);
+    logBot($self, $ctx->message, undef, "birthday add", "$target $normalized");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# _birthday_del_ctx($ctx, $target) — clear birthday for a user
+# ---------------------------------------------------------------------------
+sub _birthday_del_ctx {
+    my ($ctx, $target) = @_;
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    unless (defined $target && $target ne '') {
+        botNotice($self, $nick, "Syntax: birthday del user <username>");
+        return;
+    }
+
+    my $id_user = getIdUser($self, $target);
+    unless ($id_user) {
+        botNotice($self, $nick, "Unknown user: $target");
+        return;
+    }
+
+    my $sth = $self->{dbh}->prepare(
+        "UPDATE USER SET birthday = NULL WHERE id_user = ?"
+    );
+    unless ($sth && $sth->execute($id_user)) {
+        $self->{logger}->log(1, "_birthday_del_ctx() SQL error: $DBI::errstr");
+        botNotice($self, $nick, "Database error.");
+        return;
+    }
+    $sth->finish;
+
+    botNotice($self, $nick, "Birthday cleared for $target.");
+    logBot($self, $ctx->message, undef, "birthday del", $target);
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# _birthday_next_ctx($ctx) — list upcoming birthdays (next 30 days)
+# ---------------------------------------------------------------------------
+sub _birthday_next_ctx {
+    my ($ctx) = @_;
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    # Match birthdates like MM-DD or YYYY-MM-DD within the next 30 days
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT nickname, birthday
+        FROM USER
+        WHERE birthday IS NOT NULL AND birthday != ''
+        ORDER BY
+            CASE
+                WHEN SUBSTRING(birthday, 1, 2) REGEXP '^[0-9]{2}$'
+                    THEN LPAD(SUBSTRING(birthday, 1, 5), 5, '0')
+                ELSE SUBSTRING(birthday, 6, 5)
+            END
+    });
+    unless ($sth && $sth->execute) {
+        $self->{logger}->log(1, "_birthday_next_ctx() SQL error: $DBI::errstr");
+        botNotice($self, $nick, "Database error.");
+        return;
+    }
+
+    my @upcoming;
+    my $today = do {
+        my @t = localtime;
+        sprintf("%02d-%02d", $t[4]+1, $t[3]);  # MM-DD
+    };
+
+    while (my $row = $sth->fetchrow_hashref) {
+        my $bday = $row->{birthday};
+        # Normalize to MM-DD for comparison
+        my $mmdd = $bday =~ m{^\d{2}-\d{2}$}
+            ? $bday
+            : $bday =~ m{^\d{4}-(\d{2})-(\d{2})$}
+                ? "$1-$2"
+                : next;
+        # Rough 30-day window (string comparison works for MM-DD in same year)
+        push @upcoming, { nick => $row->{nickname}, bday => $bday, mmdd => $mmdd }
+            if $mmdd ge $today;
+    }
+    $sth->finish;
+
+    @upcoming = sort { $a->{mmdd} cmp $b->{mmdd} } @upcoming;
+    @upcoming = @upcoming[0..9] if @upcoming > 10;  # cap at 10
+
+    unless (@upcoming) {
+        botNotice($self, $nick, "No upcoming birthdays in the next 30 days.");
+        return 1;
+    }
+
+    botNotice($self, $nick, "Upcoming birthdays:");
+    for my $u (@upcoming) {
+        botNotice($self, $nick, "  $u->{nick} : $u->{bday}");
+    }
+    return 1;
+}
+
 
 1;

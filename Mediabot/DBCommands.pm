@@ -265,14 +265,67 @@ sub mbAddTimer_ctx {
         return;
     }
 
+    # Check DB too, not only runtime memory.
+    my $sql_check = "SELECT 1 FROM TIMERS WHERE name = ? LIMIT 1";
+    my $sth = $self->{dbh}->prepare($sql_check);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "mbAddTimer_ctx() SQL prepare error: $DBI::errstr Query: $sql_check")
+            if $self->{logger};
+        $self->botNotice($nick, "DB error while checking timer");
+        return;
+    }
+
+    unless ($sth->execute($name)) {
+        $self->{logger}->log(1, "mbAddTimer_ctx() SQL execute error: $DBI::errstr Query: $sql_check")
+            if $self->{logger};
+        $sth->finish;
+        $self->botNotice($nick, "DB error while checking timer");
+        return;
+    }
+
+    if ($sth->fetchrow_array) {
+        $sth->finish;
+        $self->botNotice($nick, "Timer $name already exists in database");
+        return;
+    }
+
+    $sth->finish;
+
+    # Insert into DB before starting the runtime timer. This avoids a memory-only
+    # timer if the database insert fails.
+    my $sql_insert = "INSERT INTO TIMERS (name, duration, command) VALUES (?,?,?)";
+    $sth = $self->{dbh}->prepare($sql_insert);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "mbAddTimer_ctx() SQL insert prepare error: $DBI::errstr Query: $sql_insert")
+            if $self->{logger};
+        $self->botNotice($nick, "DB error while adding timer");
+        return;
+    }
+
+    unless ($sth->execute($name, $interval, $cmd)) {
+        $self->{logger}->log(1, "mbAddTimer_ctx() SQL insert execute error: $DBI::errstr Query: $sql_insert")
+            if $self->{logger};
+        $sth->finish;
+        $self->botNotice($nick, "DB error while adding timer");
+        return;
+    }
+
+    $sth->finish;
+
     my $timer = IO::Async::Timer::Periodic->new(
         interval => $interval,
         on_tick  => sub {
-            $self->{logger}->log(4, "Timer [$name] tick: $cmd");
+            $self->{logger}->log(4, "Timer [$name] tick: $cmd")
+                if $self->{logger};
+
             if ($self->{irc} && $self->{irc}->is_connected) {
                 $self->{irc}->write("$cmd\x0d\x0a");
-            } else {
-                $self->{logger}->log(1, "Timer [$name] skipped: not connected to IRC");
+            }
+            else {
+                $self->{logger}->log(1, "Timer [$name] skipped: not connected to IRC")
+                    if $self->{logger};
             }
         },
     );
@@ -281,21 +334,13 @@ sub mbAddTimer_ctx {
     $timer->start;
     $self->{hTimers}{$name} = $timer;
 
-    eval {
-        $self->{dbh}->do(
-            "INSERT INTO TIMERS (name, duration, command) VALUES (?,?,?)",
-            undef, $name, $interval, $cmd
-        );
-        1;
-    } or do {
-        $self->{logger}->log(1, "SQL Error: $@ (INSERT INTO TIMERS)");
-        $self->botNotice($nick, "Timer $name added in memory, but DB insert failed");
-    };
-
     $self->botNotice($nick, "Timer $name added");
     logBot($self, $ctx->message, undef, 'addtimer', $name);
+    return 1;
 }
 
+
+# Handle remtimer command (Owner only, Context-based)
 # Handle remtimer command (Owner only, Context-based)
 sub mbRemTimer_ctx {
     my ($ctx) = @_;
@@ -310,25 +355,54 @@ sub mbRemTimer_ctx {
 
     $self->{hTimers} ||= {};
 
-    unless (defined $name && $name ne '' && exists $self->{hTimers}{$name}) {
-        $self->botNotice($nick, "Unknown timer " . (defined($name) ? $name : ''));
+    unless (defined $name && $name ne '') {
+        $self->botNotice($nick, "Syntax: remtimer <name>");
+        return;
+    }
+
+    unless (exists $self->{hTimers}{$name}) {
+        $self->botNotice($nick, "Unknown timer $name");
+        return;
+    }
+
+    # Delete from DB first. If DB deletion fails, keep the runtime timer running
+    # so runtime and restart state do not diverge.
+    my $sql_delete = "DELETE FROM TIMERS WHERE name = ?";
+    my $sth = $self->{dbh}->prepare($sql_delete);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "mbRemTimer_ctx() SQL delete prepare error: $DBI::errstr Query: $sql_delete")
+            if $self->{logger};
+        $self->botNotice($nick, "DB error while removing timer");
+        return;
+    }
+
+    unless ($sth->execute($name)) {
+        $self->{logger}->log(1, "mbRemTimer_ctx() SQL delete execute error: $DBI::errstr Query: $sql_delete")
+            if $self->{logger};
+        $sth->finish;
+        $self->botNotice($nick, "DB error while removing timer");
+        return;
+    }
+
+    my $rows = $sth->rows;
+    $sth->finish;
+
+    if (!defined($rows) || $rows < 1) {
+        $self->botNotice($nick, "Timer $name was running but not found in database");
         return;
     }
 
     $self->{loop}->remove($self->{hTimers}{$name});
     delete $self->{hTimers}{$name};
 
-    eval {
-        $self->{dbh}->do("DELETE FROM TIMERS WHERE name=?", undef, $name);
-        1;
-    } or do {
-        $self->{logger}->log(1, "SQL Error: $@ (DELETE FROM TIMERS)");
-    };
-
     $self->botNotice($nick, "Timer $name removed");
     logBot($self, $ctx->message, undef, 'remtimer', $name);
+    return 1;
 }
 
+
+# List all registered timers currently stored in the database (Owner only, Context-based)
 # List all registered timers currently stored in the database (Owner only, Context-based)
 sub mbTimers_ctx {
     my ($ctx) = @_;
@@ -338,43 +412,100 @@ sub mbTimers_ctx {
 
     return unless $ctx->require_level('Owner');
 
-    my $sth = $self->{dbh}->prepare("SELECT name, duration, command FROM TIMERS");
-    unless ($sth && $sth->execute) {
-        $self->{logger}->log(1, "SQL Error: $DBI::errstr - SELECT TIMERS");
+    my $sql = "SELECT name, duration, command FROM TIMERS ORDER BY name";
+    my $sth = $self->{dbh}->prepare($sql);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "mbTimers_ctx() SQL prepare error: $DBI::errstr Query: $sql")
+            if $self->{logger};
         $self->botNotice($nick, "DB error while reading timers");
         return;
     }
 
-    my $count = 0;
-    while (my $r = $sth->fetchrow_hashref) {
-        $count++;
-        $self->botNotice($nick, "$r->{name} - every $r->{duration}s - $r->{command}");
-        $count++;
+    unless ($sth->execute()) {
+        $self->{logger}->log(1, "mbTimers_ctx() SQL execute error: $DBI::errstr Query: $sql")
+            if $self->{logger};
+        $sth->finish;
+        $self->botNotice($nick, "DB error while reading timers");
+        return;
     }
+
+    my @timer_lines;
+
+    while (my $r = $sth->fetchrow_hashref) {
+        my $name     = $r->{name}     // '';
+        my $duration = $r->{duration} // 0;
+        my $command  = $r->{command}  // '';
+
+        next if $name eq '';
+
+        push @timer_lines, sprintf("%s - every %ss - %s", $name, $duration, $command);
+    }
+
     $sth->finish;
 
-    $self->botNotice($nick, "No active timers") unless $count;
+    my $count = scalar(@timer_lines);
 
-    # A2: also show Scheduler tasks
+    if ($count) {
+        $self->botNotice($nick, "DB timers: $count result(s)");
+
+        my $page = 1;
+        for my $line (@timer_lines) {
+            my $out = sprintf("timer[%02d]: %s", $page, $line);
+
+            if (length($out) > 360) {
+                $out = substr($out, 0, 357) . '...';
+            }
+
+            $self->botNotice($nick, $out);
+            $page++;
+        }
+    }
+    else {
+        $self->botNotice($nick, "No active timers");
+    }
+
+    # Also show Scheduler tasks when the runtime scheduler is available.
     if ($self->{scheduler} && $self->{scheduler}->can('all_info')) {
         my @tasks = $self->{scheduler}->all_info;
+
         if (@tasks) {
-            $self->botNotice($nick, '--- Scheduler tasks ---');
+            $self->botNotice($nick, "Scheduler tasks: " . scalar(@tasks) . " result(s)");
+
+            my $page = 1;
+
             for my $t (@tasks) {
                 my $last = $t->{last_tick}
-                    ? do { my @lt = localtime($t->{last_tick});
-                           sprintf('%02d:%02d:%02d', $lt[2], $lt[1], $lt[0]) }
+                    ? do {
+                        my @lt = localtime($t->{last_tick});
+                        sprintf('%02d:%02d:%02d', $lt[2], $lt[1], $lt[0]);
+                    }
                     : 'never';
-                $self->botNotice($nick, sprintf('  %-28s every %ds  %-8s  ticks=%d  last=%s',
-                    $t->{name}, $t->{interval},
+
+                my $line = sprintf(
+                    "schedule[%02d]: %-28s every %ds %-8s ticks=%d last=%s",
+                    $page,
+                    ($t->{name}     // ''),
+                    ($t->{interval} // 0),
                     ($t->{started} ? 'running' : 'stopped'),
-                    $t->{ticks}, $last));
+                    ($t->{ticks}    // 0),
+                    $last,
+                );
+
+                if (length($line) > 360) {
+                    $line = substr($line, 0, 357) . '...';
+                }
+
+                $self->botNotice($nick, $line);
+                $page++;
             }
         }
     }
 
     logBot($self, $ctx->message, undef, 'timers', undef);
+    return $count;
 }
+
 
 # Allows a user to set their IRC bot password.
 # Syntax: /msg <botnick> pass <new_password>
@@ -1282,8 +1413,16 @@ sub mbDbSearchCommand_ctx {
     $out_chan = $ctx_chan if defined($ctx_chan) && $ctx_chan =~ /^#/;
 
     unless (defined($args[0]) && $args[0] ne '') {
-        botNotice($self, $nick, "Syntax: searchcmd <keyword>");
+        botNotice($self, $nick, "Syntax: searchcmd <keyword> [limit=5]");
         return;
+    }
+
+    # A5: optional numeric limit as last arg (default 5, max 20)
+    my $search_limit = 5;
+    if (@args >= 2 && $args[-1] =~ /^\d+$/) {
+        $search_limit = int(pop @args);
+        $search_limit = 1  if $search_limit < 1;
+        $search_limit = 20 if $search_limit > 20;
     }
 
     my $kw = $args[0];
@@ -1599,6 +1738,8 @@ sub mbDbAddCategoryCommand_ctx {
 
 # Change the category of an existing public command
 # Requires: authenticated + Administrator+
+# Change the category of an existing public command
+# Requires: authenticated + Administrator+
 sub mbPopCommand_ctx {
     my ($ctx) = @_;
 
@@ -1618,25 +1759,30 @@ sub mbPopCommand_ctx {
 
     my $target = $args[0];
 
-    # Treat the supplied nick/handle literally. LIKE is kept for collation and
-    # historical behavior, but SQL wildcards from user input are escaped.
-    my $like = $target;
-    $like =~ s/!/!!/g;
-    $like =~ s/%/!%/g;
-    $like =~ s/_/!_/g;
-
+    # Exact user handle lookup.
+    # popcmd is not a wildcard search command: '%' and '_' must be literal.
     my $sql = q{
         SELECT PC.command, PC.hits
         FROM USER U
         JOIN PUBLIC_COMMANDS PC ON U.id_user = PC.id_user
-        WHERE U.nickname LIKE ? ESCAPE '!'
+        WHERE U.nickname = ?
         ORDER BY PC.hits DESC
         LIMIT 20
     };
 
     my $sth = $self->{dbh}->prepare($sql);
-    unless ($sth && $sth->execute($like)) {
-        $self->{logger}->log(1, "mbPopCommand_ctx() SQL Error: $DBI::errstr Query: $sql");
+
+    unless ($sth) {
+        $self->{logger}->log(1, "mbPopCommand_ctx() SQL prepare error: $DBI::errstr Query: $sql")
+            if $self->{logger};
+        botNotice($self, $nick, "Internal error (SQL).");
+        return;
+    }
+
+    unless ($sth->execute($target)) {
+        $self->{logger}->log(1, "mbPopCommand_ctx() SQL execute error: $DBI::errstr Query: $sql")
+            if $self->{logger};
+        $sth->finish;
         botNotice($self, $nick, "Internal error (SQL).");
         return;
     }
@@ -1699,6 +1845,7 @@ sub mbPopCommand_ctx {
 
     return $count;
 }
+
 
 
 # Check if a timezone exists
@@ -2513,10 +2660,10 @@ sub Yomomma_ctx {
 
         my $offset = int(rand($joke_count));
 
-        $sql = "SELECT id_yomomma, yomomma FROM YOMOMMA ORDER BY id_yomomma LIMIT 1 OFFSET $offset";
+        $sql = "SELECT id_yomomma, yomomma FROM YOMOMMA ORDER BY id_yomomma LIMIT 1 OFFSET ?";
         my $sth = $self->{dbh}->prepare($sql);
 
-        unless ($sth && $sth->execute()) {
+        unless ($sth && $sth->execute($offset)) {
             $self->{logger}->log(1, "Yomomma_ctx() SQL Error: $DBI::errstr | Query: $sql");
             botPrivmsg($self, $channel, "Not found");
             return;

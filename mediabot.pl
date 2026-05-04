@@ -624,6 +624,15 @@ sub on_timer_tick {
     $irc = undef if defined $irc && !defined $mediabot->{irc};
     $irc //= $mediabot->{irc};
 
+    # A4: sync $mediabot->{dbh} if DB.pm reconnected since last tick
+    if ($mediabot->{db}) {
+        my $live_dbh = eval { $mediabot->{db}->ensure_connected() };
+        if ($live_dbh && (!$mediabot->{dbh} || $live_dbh != $mediabot->{dbh})) {
+            $mediabot->{dbh} = $live_dbh;
+            $mediabot->{logger}->log(2, "on_timer_tick: dbh refreshed after DB reconnect");
+        }
+    }
+
     # Check connection status and reconnect if not connected
     # Grace period of 15s after login to let Net::Async::IRC finish CAP negotiation
     my $grace = (time - ($mediabot->getConnectionTimestamp() // 0)) < 15;
@@ -726,11 +735,11 @@ if (defined($mediabot->{conf}->get('main.RANDOM_QUOTE'))) {
                     JOIN USER u ON u.id_user = q.id_user
                     WHERE c.name = ?
                     ORDER BY q.id_quotes
-                    LIMIT 1 OFFSET $offset
+                    LIMIT 1 OFFSET ?
                 ";
                 my $sth2 = $mediabot->{db}->ensure_connected()->prepare($sQuery);
 
-                unless ($sth2 && $sth2->execute($curChannel)) {
+                unless ($sth2 && $sth2->execute($curChannel, $offset)) {
                     $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
                 }
                 else {

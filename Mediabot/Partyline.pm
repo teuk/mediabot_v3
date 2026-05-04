@@ -1731,6 +1731,12 @@ sub _cmd_log {
         return;
     }
 
+    # A6: re-check file existence just before open (may have been rotated)
+    unless (-f $logfile && -r $logfile) {
+        $stream->write("Log file not readable: $logfile\r\n");
+        return;
+    }
+
     open my $fh, '<:utf8', $logfile or do {  # A1: log written in UTF-8
         $stream->write("Cannot open log file: $!\r\n");
         return;
@@ -2677,7 +2683,13 @@ sub _cmd_eval {
     $eval_timeout = 15 if $eval_timeout > 15;
 
     $bot->{logger}->log(1, "Partyline: $nick executing eval in subprocess timeout=${eval_timeout}s: $code");
-    eval { noticeConsoleChan($bot, "[partyline] $nick .eval: $code") };
+    # A4: log code summary to consolechan (truncate long payloads)
+    {
+        my $summary = length($code) > 60
+            ? substr($code, 0, 57) . "..."
+            : $code;
+        eval { noticeConsoleChan($bot, "[partyline] $nick .eval (${\ length($code)}c): $summary") };
+    }
     $self->_broadcast("[${nick}\@partyline] .eval $code", $id);
 
     my $pid = open(my $pipe, "-|");

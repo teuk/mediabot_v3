@@ -710,7 +710,7 @@ sub dbCheckTables {
     $self->{logger}->log(4, "Checking database schema");
 
     unless (defined $dbh) {
-        $self->{logger}->log(0, "❌ No DBI handle found (dbh is undef). Aborting DB check.");
+ $self->{logger}->log(0, " No DBI handle found (dbh is undef). Aborting DB check.");
         $self->{logger}->log(0, "Check your database credentials in mediabot.conf and ensure the user has proper access.");
         clean_and_exit($self, 1);
     }
@@ -741,16 +741,16 @@ sub dbCheckTables {
 
     unless ($hm_exists) {
         $self->{logger}->log(0, "");
-        $self->{logger}->log(0, "═" x 65);
+ $self->{logger}->log(0, "" x 65);
         $self->{logger}->log(0, "  DATABASE MIGRATION REQUIRED");
-        $self->{logger}->log(0, "═" x 65);
+ $self->{logger}->log(0, "" x 65);
         $self->{logger}->log(0, "  The USER_HOSTMASK table is missing.");
         $self->{logger}->log(0, "  Your database schema needs to be migrated before");
         $self->{logger}->log(0, "  the bot can start.");
         $self->{logger}->log(0, "");
         $self->{logger}->log(0, "  Run as root:");
         $self->{logger}->log(0, "    sudo ./install/db_migrate.sh -c mediabot.conf");
-        $self->{logger}->log(0, "═" x 65);
+ $self->{logger}->log(0, "" x 65);
         $self->{logger}->log(0, "");
         clean_and_exit($self, 1);
     }
@@ -765,7 +765,7 @@ sub dbCheckTables {
     );
     $col_sth->execute;
     if ($col_sth->fetchrow_arrayref) {
-        $self->{logger}->log(0, "⚠ USER.hostmasks column still present (not yet renamed to hostmasks_legacy).");
+ $self->{logger}->log(0, " USER.hostmasks column still present (not yet renamed to hostmasks_legacy).");
         $self->{logger}->log(0, "  Run sudo ./install/db_migrate.sh -c mediabot.conf to complete migration.");
     }
     $col_sth->finish;
@@ -1542,7 +1542,8 @@ sub purge_channel_log {
     my ($self) = @_;
     my $days = int(eval { $self->{conf}->get('main.CHANNEL_LOG_RETENTION_DAYS') } // 90);
     return if $days <= 0;
-    my $sth = $self->{dbh}->prepare(
+    my $dbh = $self->{db} ? $self->{db}->ensure_connected() : $self->{dbh};
+    my $sth = $dbh->prepare(
         "DELETE FROM CHANNEL_LOG WHERE ts < DATE_SUB(NOW(), INTERVAL ? DAY)"
     ) or return;
     eval { $sth->execute($days) };
@@ -1566,7 +1567,8 @@ sub purge_user_seen {
     my ($self) = @_;
     my $days = int(eval { $self->{conf}->get('main.USER_SEEN_RETENTION_DAYS') } // 180);
     return if $days <= 0;
-    my $sth = $self->{dbh}->prepare(
+    my $dbh = $self->{db} ? $self->{db}->ensure_connected() : $self->{dbh};
+    my $sth = $dbh->prepare(
         "DELETE FROM USER_SEEN WHERE seen_at < DATE_SUB(NOW(), INTERVAL ? DAY)"
     ) or return;
     eval { $sth->execute($days) };
@@ -1708,7 +1710,7 @@ sub _fetch_user_for_dcc {
     });
 
     unless ($sth && $sth->execute($nick)) {
-        $self->{logger}->log(1, "DCC: DB error for nick '$nick' — " . ($DBI::errstr // 'unknown'));
+ $self->{logger}->log(1, "DCC: DB error for nick '$nick' " . ($DBI::errstr // 'unknown'));
         return undef;
     }
 

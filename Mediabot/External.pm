@@ -87,7 +87,7 @@ sub getYoutubeDetails {
 		}
 		my $yt_url = "https://www.googleapis.com/youtube/v3/videos"
 		           . "?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status";
-		my $http = HTTP::Tiny->new(timeout => 10);
+		my $http = _make_http(timeout => 10);
 		my $res  = $http->get($yt_url);
 		unless ($res->{success}) {
 			$self->{logger}->log(3,"getYoutubeDetails() HTTP error $res->{status} for $yt_url");
@@ -305,7 +305,7 @@ sub displayYoutubeDetails {
     my $url = "https://www.googleapis.com/youtube/v3/videos"
             . "?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status";
 
-    my $http     = HTTP::Tiny->new(timeout => 8);
+    my $http     = _make_http(timeout => 8);
     my $response = $http->get($url);
 
     unless ($response->{success}) {
@@ -1380,7 +1380,7 @@ sub youtubeSearch_ctx {
 
     my $json_search = '';
     {
-        my $http_s = HTTP::Tiny->new(timeout => 10);
+        my $http_s = _make_http(timeout => 10);
         my $res_s  = $http_s->get($search_url);
         unless ($res_s->{success}) {
             $self->{logger}->log(2, "youtubeSearch_ctx(): HTTP $res_s->{status} for search endpoint");
@@ -1416,7 +1416,7 @@ sub youtubeSearch_ctx {
 
     my $json_vid = '';
     {
-        my $http_v = HTTP::Tiny->new(timeout => 10);
+        my $http_v = _make_http(timeout => 10);
         my $res_v  = $http_v->get($videos_url);
         unless ($res_v->{success}) {
             $self->{logger}->log(2, "youtubeSearch_ctx(): HTTP $res_v->{status} for videos endpoint");
@@ -1558,7 +1558,7 @@ sub fortniteStats_ctx {
     # Call API
     my $url = "https://fortnite-api.com/v2/stats/br/v2/$account_id";
 
-    my $http = HTTP::Tiny->new(timeout => 10);
+    my $http = _make_http(timeout => 10);
     my $http_response = $http->get(
         $url,
         { headers => { 'Authorization' => $api_key } }
@@ -1705,7 +1705,7 @@ sub chatGPT {
     # --------------------------------------------------------------
     # call the API with HTTP::Tiny (non-blocking, no shell)
     # --------------------------------------------------------------
-    my $http = HTTP::Tiny->new(timeout => 30);
+    my $http = _make_http(timeout => 30);
     my $http_response = $http->request(
         'POST',
         CHATGPT_API_URL,
@@ -1867,7 +1867,7 @@ sub get_tmdb_info {
     my $encoded_query = uri_escape($query);
     my $url = "https://api.themoviedb.org/3/search/multi?api_key=$api_key&language=$lang&query=$encoded_query";
 
-    my $http     = HTTP::Tiny->new(timeout => 10);
+    my $http     = _make_http(timeout => 10);
     my $response = $http->get($url);
 
     unless ($response->{success}) {

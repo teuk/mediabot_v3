@@ -75,7 +75,7 @@ sub getChannel {
 # Get PID file path from configuration
 sub getIdChannel {
     my ($self, $sChannel) = @_;
-    $self->{logger}->log(1, "⚠️ getIdChannel() is deprecated. Use channel object instead.");
+ $self->{logger}->log(1, " getIdChannel() is deprecated. Use channel object instead.");
     return $self->{channels}{$sChannel} ? $self->{channels}{$sChannel}->get_id : undef;
 }
 
@@ -567,12 +567,12 @@ sub purgeChannel_ctx {
         return;
     }
 
-    $self->{logger}->log(1, "🗑️ $nick issued a purge command on $sChannel (id=$id_channel)");
+ $self->{logger}->log(1, " $nick issued a purge command on $sChannel (id=$id_channel)");
 
     # Retrieve channel info from DB
     my $sth = $self->{dbh}->prepare("SELECT auto_join, chanmode, description, `key` FROM CHANNEL WHERE id_channel = ?");
     unless ($sth && $sth->execute($id_channel)) {
-        $self->{logger}->log(1, "❌ SQL Error: $DBI::errstr while fetching channel info");
+ $self->{logger}->log(1, " SQL Error: $DBI::errstr while fetching channel info");
         Mediabot::botNotice($self, $nick, "SQL error while fetching channel info.");
         return;
     }
@@ -591,44 +591,45 @@ sub purgeChannel_ctx {
     my $chanmode  = defined $ref->{chanmode}    ? $ref->{chanmode}    : '';
     my $auto_join = defined $ref->{auto_join}   ? $ref->{auto_join}   : 0;
 
-    # Delete from CHANNEL
-    $sth = $self->{dbh}->prepare("DELETE FROM CHANNEL WHERE id_channel = ?");
-    unless ($sth && $sth->execute($id_channel)) {
-        $self->{logger}->log(1, "❌ SQL Error: $DBI::errstr while deleting CHANNEL");
-        Mediabot::botNotice($self, $nick, "SQL error while deleting channel.");
-        $sth->finish if $sth;
+    # B1/A1: atomic transaction — cascade all related tables
+    my $dbh = $self->{dbh};
+    my $purge_ok = eval {
+        $dbh->begin_work;
+
+        # Archive first (before deleting, so we have the data)
+        my $sth_arch = $dbh->prepare(q{
+            INSERT IGNORE INTO CHANNEL_PURGED
+                (id_channel, name, description, `key`, chanmode, auto_join, purged_by, purged_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+        });
+        $sth_arch->execute($id_channel, $sChannel, $desc, $ckey, $chanmode, $auto_join, $nick);
+        $sth_arch->finish;
+
+        # Cascade — order matters for FK constraints
+        for my $table (qw(CHANNEL_BAN CHANNEL_SET CHANNEL_LOG BADWORDS QUOTES USER_CHANNEL)) {
+            $dbh->do("DELETE FROM $table WHERE id_channel = ?", undef, $id_channel);
+        }
+
+        $dbh->do("DELETE FROM CHANNEL WHERE id_channel = ?", undef, $id_channel);
+
+        $dbh->commit;
+        1;
+    };
+
+    unless ($purge_ok) {
+        eval { $dbh->rollback };
+        $self->{logger}->log(0, "purgeChannel_ctx: transaction failed for $sChannel: $@");
+        Mediabot::botNotice($self, $nick, "Database error during purge — channel not deleted.");
         return;
     }
-    $sth->finish if $sth;
 
-    # Delete links
-    $sth = $self->{dbh}->prepare("DELETE FROM USER_CHANNEL WHERE id_channel = ?");
-    unless ($sth && $sth->execute($id_channel)) {
-        $self->{logger}->log(1, "❌ SQL Error: $DBI::errstr while deleting USER_CHANNEL");
-        Mediabot::botNotice($self, $nick, "SQL error while deleting channel links.");
-        $sth->finish if $sth;
-        return;
-    }
-    $sth->finish if $sth;
+    # B2: correct send_message syntax (undef prefix, channel as first param)
+    eval { $self->{irc}->send_message("PART", undef, $sChannel, "Channel purged by $nick") };
 
-    # Archive into CHANNEL_PURGED
-    $sth = $self->{dbh}->prepare(q{
-        INSERT INTO CHANNEL_PURGED
-            (id_channel, name, description, `key`, chanmode, auto_join, purged_by, purged_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
-    });
-    unless ($sth && $sth->execute($id_channel, $sChannel, $desc, $ckey, $chanmode, $auto_join, $nick)) {
-        $self->{logger}->log(1, "❌ SQL Error: $DBI::errstr while inserting into CHANNEL_PURGED");
-        Mediabot::botNotice($self, $nick, "SQL error while archiving channel purge.");
-        return;
-    }
-
-    # PART + memory cleanup
-    $self->{irc}->send_message("PART", $sChannel, "Channel purged by $nick");
+    # A5: delete from in-memory channel registry (only $sChannel, not stale $key)
     delete $self->{channels}{$sChannel};
-    delete $self->{channels}{$key};
+    delete $self->{channels}{lc($sChannel)};
 
-    # Log
     logBot($self, $ctx->message, undef, "purge", "$nick purged $sChannel (id_channel=$id_channel)");
     Mediabot::botNotice($self, $nick, "Channel $sChannel purged.");
 }
