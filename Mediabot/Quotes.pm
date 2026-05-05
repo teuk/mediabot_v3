@@ -152,141 +152,214 @@ sub _printQuoteSyntax {
 }
 
 # Add a new quote to the database for the specified channel
+# Add a new quote to the database for the specified channel
 sub mbQuoteAdd {
-	my ($self, $message, $iMatchingUserId, $sMatchingUserHandle, $sNick, $sChannel, @tArgs) = @_;
+    my ($self, $message, $iMatchingUserId, $sMatchingUserHandle, $sNick, $sChannel, @tArgs) = @_;
 
-	# Require at least one argument
-	unless (defined($tArgs[0]) && $tArgs[0] ne "") {
-		botNotice($self, $sNick, "q [add or a] text1 | text2 | ... | textn");
-		return;
-	}
+    unless (defined($tArgs[0]) && $tArgs[0] ne "") {
+        botNotice($self, $sNick, "q [add or a] text1 | text2 | ... | textn");
+        return;
+    }
 
-	my $sQuoteText = join(" ", @tArgs);
+    my $sQuoteText = join(" ", @tArgs);
 
-	# Check for existing quote on this channel
-	my $sQuery = "SELECT QUOTES.id_quotes FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? AND QUOTES.quotetext = ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel, $sQuoteText)) {
-		$self->{logger}->log(1, "SQL Error: $DBI::errstr | Query: $sQuery");
-		return;
-	}
+    my $sQuery = "SELECT QUOTES.id_quotes FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? AND QUOTES.quotetext = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
 
-	if (my $ref = $sth->fetchrow_hashref()) {
-		my $id_quotes = $ref->{'id_quotes'};
-		botPrivmsg($self, $sChannel, "Quote (id: $id_quotes) already exists");
-		logBot($self, $message, $sChannel, "q", @tArgs);
-		$sth->finish;
-		return;
-	}
-	$sth->finish;
+    unless ($sth) {
+        $self->{logger}->log(1, "mbQuoteAdd() SQL prepare error: $DBI::errstr | Query: $sQuery")
+            if $self->{logger};
+        botNotice($self, $sNick, "Database error while checking quote.");
+        return;
+    }
 
-	# Get channel object
-	my $channel_obj = $self->{channels}{$sChannel};
+    unless ($sth->execute($sChannel, $sQuoteText)) {
+        $self->{logger}->log(1, "mbQuoteAdd() SQL execute error: $DBI::errstr | Query: $sQuery")
+            if $self->{logger};
+        $sth->finish;
+        botNotice($self, $sNick, "Database error while checking quote.");
+        return;
+    }
 
-	unless (defined($channel_obj)) {
-		botNotice($self, $sNick, "Channel $sChannel is not registered to me");
-		return;
-	}
+    if (my $ref = $sth->fetchrow_hashref()) {
+        my $id_quotes = $ref->{'id_quotes'};
+        $sth->finish;
 
-	my $id_channel = $channel_obj->get_id;
+        botPrivmsg($self, $sChannel, "Quote (id: $id_quotes) already exists");
+        logBot($self, $message, $sChannel, "q", @tArgs);
+        return;
+    }
 
-	# Insert quote
-	$sQuery = "INSERT INTO QUOTES (id_channel, id_user, quotetext) VALUES (?, ?, ?)";
-	$sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($id_channel, ($iMatchingUserId && $iMatchingUserId =~ /^\d+$/ ? $iMatchingUserId : 0), $sQuoteText)) {
-		$self->{logger}->log(1, "SQL Error: $DBI::errstr | Query: $sQuery");
-	} else {
-		my $id_inserted = String::IRC->new($sth->{Database}->last_insert_id(undef, undef, undef, undef))->bold;
-		my $prefix = defined($sMatchingUserHandle) ? "($sMatchingUserHandle) " : "";
-		botPrivmsg($self, $sChannel, "$prefix" . "done. (id: $id_inserted)");
-		logBot($self, $message, $sChannel, "q add", @tArgs);
-	}
-	$sth->finish;
+    $sth->finish;
+
+    my $channel_obj = $self->{channels}{$sChannel} || $self->{channels}{lc($sChannel)};
+
+    unless (defined($channel_obj)) {
+        botNotice($self, $sNick, "Channel $sChannel is not registered to me");
+        return;
+    }
+
+    my $id_channel = $channel_obj->get_id;
+
+    $sQuery = "INSERT INTO QUOTES (id_channel, id_user, quotetext) VALUES (?, ?, ?)";
+    $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "mbQuoteAdd() SQL insert prepare error: $DBI::errstr | Query: $sQuery")
+            if $self->{logger};
+        botNotice($self, $sNick, "Database error while adding quote.");
+        return;
+    }
+
+    my $id_user = ($iMatchingUserId && $iMatchingUserId =~ /^\d+$/) ? $iMatchingUserId : 0;
+
+    unless ($sth->execute($id_channel, $id_user, $sQuoteText)) {
+        $self->{logger}->log(1, "mbQuoteAdd() SQL insert execute error: $DBI::errstr | Query: $sQuery")
+            if $self->{logger};
+        $sth->finish;
+        botNotice($self, $sNick, "Database error while adding quote.");
+        return;
+    }
+
+    $sth->finish;
+
+    my $id_inserted = $self->{dbh}->last_insert_id(undef, undef, undef, undef);
+    $id_inserted //= $self->{dbh}->{mysql_insertid};
+    $id_inserted //= '?';
+
+    my $id_bold = String::IRC->new($id_inserted)->bold;
+    my $prefix = defined($sMatchingUserHandle) ? "($sMatchingUserHandle) " : "";
+
+    botPrivmsg($self, $sChannel, "$prefix" . "done. (id: $id_bold)");
+    logBot($self, $message, $sChannel, "q add", @tArgs);
+    return $id_inserted;
 }
+
 
 
 sub mbQuoteDel {
-	my ($self,$message,$sMatchingUserHandle,$sNick,$sChannel,@tArgs) = @_;
-	my $id_quotes = $tArgs[0];
-	unless (defined($tArgs[0]) && ($tArgs[0] ne "") && ($id_quotes =~ /[0-9]+/)) {
-		botNotice($self,$sNick,"q [del or q] id");
-	}
-	else {
-		my $sQuery = "SELECT QUOTES.id_quotes FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? AND QUOTES.id_quotes = ?";
-		my $sth_sel = $self->{dbh}->prepare($sQuery);
-		unless ($sth_sel->execute($sChannel,$id_quotes)) {
-			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-			$sth_sel->finish;
-		}
-		else {
-			if (my $ref = $sth_sel->fetchrow_hashref()) {
-				$sth_sel->finish;
-				$sQuery = "DELETE FROM QUOTES WHERE id_quotes=?";
-				my $sth_del = $self->{dbh}->prepare($sQuery);
-				unless ($sth_del->execute($id_quotes)) {
-					$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-					$sth_del->finish;
-				}
-				else {
-					my $id_removed = String::IRC->new($id_quotes)->bold;
-					botPrivmsg($self,$sChannel,"($sMatchingUserHandle) deleted. (id: $id_removed)");
-					logBot($self,$message,$sChannel,"q del",@tArgs);
-				}
-				$sth_del->finish;
-			}
-			else {
-				$sth_sel->finish;
-				botPrivmsg($self,$sChannel,"Quote (id : $id_quotes) does not exist for channel $sChannel");
-			}
-		}
-	}
+    my ($self, $message, $sMatchingUserHandle, $sNick, $sChannel, @tArgs) = @_;
+
+    my $id_quotes = $tArgs[0];
+
+    unless (defined($id_quotes) && $id_quotes =~ /^\d+$/) {
+        botNotice($self, $sNick, "q [del or q] id");
+        return;
+    }
+
+    my $sQuery = "SELECT QUOTES.id_quotes FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? AND QUOTES.id_quotes = ?";
+    my $sth_sel = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth_sel) {
+        $self->{logger}->log(1, "mbQuoteDel() SQL prepare error: $DBI::errstr Query: $sQuery")
+            if $self->{logger};
+        botNotice($self, $sNick, "Database error while checking quote.");
+        return;
+    }
+
+    unless ($sth_sel->execute($sChannel, $id_quotes)) {
+        $self->{logger}->log(1, "mbQuoteDel() SQL execute error: $DBI::errstr Query: $sQuery")
+            if $self->{logger};
+        $sth_sel->finish;
+        botNotice($self, $sNick, "Database error while checking quote.");
+        return;
+    }
+
+    my $exists = $sth_sel->fetchrow_hashref();
+    $sth_sel->finish;
+
+    unless ($exists) {
+        botPrivmsg($self, $sChannel, "Quote (id : $id_quotes) does not exist for channel $sChannel");
+        return;
+    }
+
+    $sQuery = "DELETE FROM QUOTES WHERE id_quotes=?";
+    my $sth_del = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth_del) {
+        $self->{logger}->log(1, "mbQuoteDel() SQL delete prepare error: $DBI::errstr Query: $sQuery")
+            if $self->{logger};
+        botNotice($self, $sNick, "Database error while deleting quote.");
+        return;
+    }
+
+    unless ($sth_del->execute($id_quotes)) {
+        $self->{logger}->log(1, "mbQuoteDel() SQL delete execute error: $DBI::errstr Query: $sQuery")
+            if $self->{logger};
+        $sth_del->finish;
+        botNotice($self, $sNick, "Database error while deleting quote.");
+        return;
+    }
+
+    $sth_del->finish;
+
+    my $id_removed = String::IRC->new($id_quotes)->bold;
+    botPrivmsg($self, $sChannel, "($sMatchingUserHandle) deleted. (id: $id_removed)");
+    logBot($self, $message, $sChannel, "q del", @tArgs);
+
+    return 1;
 }
+
 
 sub mbQuoteView {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
-	my $id_quotes = $tArgs[0];
-	unless (defined($tArgs[0]) && ($tArgs[0] ne "") && ($id_quotes =~ /[0-9]+/)) {
-		botNotice($self,$sNick,"q [view or v] id");
-	}
-	else {
-		my $sQuery =
-			"SELECT QUOTES.id_quotes, QUOTES.quotetext, QUOTES.id_user, USER.nickname AS user_nickname ".
-			"FROM QUOTES ".
-			"JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel ".
-			"LEFT JOIN USER ON USER.id_user = QUOTES.id_user ".
-			"WHERE CHANNEL.name = ? AND QUOTES.id_quotes = ?";
-		my $sth = $self->{dbh}->prepare($sQuery);
-		unless ($sth->execute($sChannel,$id_quotes)) {
-			$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-		}
-		else {
-			if (my $ref = $sth->fetchrow_hashref()) {
-				my $id_quotes  = $ref->{'id_quotes'};
-				my $sQuoteText = $ref->{'quotetext'};
-				my $id_user    = $ref->{'id_user'};
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-				# 1) handle depuis la jointure USER
-				my $sUserhandle = $ref->{'user_nickname'};
+    my $id_quotes = $tArgs[0];
 
-				# 2) sinon on tente l'ancien getUserhandle()
-				if (!defined($sUserhandle) || $sUserhandle eq "") {
-					$sUserhandle = getUserhandle($self,$id_user);
-				}
+    unless (defined($id_quotes) && $id_quotes =~ /^\d+$/) {
+        botNotice($self, $sNick, "q [view or v] id");
+        return;
+    }
 
-				# 3) fallback final
-				$sUserhandle = (defined($sUserhandle) && ($sUserhandle ne "") ? $sUserhandle : "Unknown");
+    my $sQuery =
+        "SELECT QUOTES.id_quotes, QUOTES.quotetext, QUOTES.id_user, USER.nickname AS user_nickname ".
+        "FROM QUOTES ".
+        "JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel ".
+        "LEFT JOIN USER ON USER.id_user = QUOTES.id_user ".
+        "WHERE CHANNEL.name = ? AND QUOTES.id_quotes = ?";
 
-				my $id_q = String::IRC->new($id_quotes)->bold;
-				botPrivmsg($self,$sChannel,"($sUserhandle) [id: $id_q] $sQuoteText");
-				logBot($self,$message,$sChannel,"q view",@tArgs);
-			}
-			else {
-				botPrivmsg($self,$sChannel,"Quote (id : $id_quotes) does not exist for channel $sChannel");
-			}
-		}
-		$sth->finish;
-	}
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "mbQuoteView() SQL prepare error: $DBI::errstr Query: $sQuery")
+            if $self->{logger};
+        botNotice($self, $sNick, "Database error while reading quote.");
+        return;
+    }
+
+    unless ($sth->execute($sChannel, $id_quotes)) {
+        $self->{logger}->log(1, "mbQuoteView() SQL execute error: $DBI::errstr Query: $sQuery")
+            if $self->{logger};
+        $sth->finish;
+        botNotice($self, $sNick, "Database error while reading quote.");
+        return;
+    }
+
+    if (my $ref = $sth->fetchrow_hashref()) {
+        my $id_quotes  = $ref->{'id_quotes'};
+        my $sQuoteText = $ref->{'quotetext'};
+        my $id_user    = $ref->{'id_user'};
+
+        my $sUserhandle = $ref->{'user_nickname'};
+
+        if (!defined($sUserhandle) || $sUserhandle eq "") {
+            $sUserhandle = getUserhandle($self, $id_user);
+        }
+
+        $sUserhandle = (defined($sUserhandle) && ($sUserhandle ne "") ? $sUserhandle : "Unknown");
+
+        my $id_q = String::IRC->new($id_quotes)->bold;
+        botPrivmsg($self, $sChannel, "($sUserhandle) [id: $id_q] $sQuoteText");
+        logBot($self, $message, $sChannel, "q view", @tArgs);
+    }
+    else {
+        botPrivmsg($self, $sChannel, "Quote (id : $id_quotes) does not exist for channel $sChannel");
+    }
+
+    $sth->finish;
+    return 1;
 }
+
                 
 sub mbQuoteSearch {
     my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
@@ -298,15 +371,6 @@ sub mbQuoteSearch {
 
     my $MAXQUOTES = 50;
 
-    # B1/B2: filter in SQL with LIKE placeholders, not Perl regexes.
-    # Escape LIKE wildcards so user input is treated literally.
-    #
-    # Use ESCAPE '!' instead of backslash because ESCAPE '\' is fragile with
-    # MariaDB/MySQL SQL string quoting.
-    #
-    #   !  -> !!
-    #   %  -> !%
-    #   _  -> !_
     my @words = grep { defined($_) && $_ ne '' } @tArgs;
 
     unless (@words) {
@@ -322,7 +386,6 @@ sub mbQuoteSearch {
         $w;
     } @words;
 
-    # One LIKE clause per word (AND logic).
     my $where_words = join(' AND ', map { q{q.quotetext LIKE ? ESCAPE '!'} } @like_words);
     my @binds_words = map { "%$_%" } @like_words;
 
@@ -335,8 +398,18 @@ sub mbQuoteSearch {
                   LIMIT ?";
 
     my $sth = $self->{dbh}->prepare($sQuery);
-    unless ($sth && $sth->execute($sChannel, @binds_words, $MAXQUOTES + 1)) {
-        $self->{logger}->log(1, "mbQuoteSearch SQL error: $DBI::errstr");
+
+    unless ($sth) {
+        $self->{logger}->log(1, "mbQuoteSearch SQL prepare error: $DBI::errstr Query: $sQuery")
+            if $self->{logger};
+        botNotice($self, $sNick, "Database error during search.");
+        return;
+    }
+
+    unless ($sth->execute($sChannel, @binds_words, $MAXQUOTES + 1)) {
+        $self->{logger}->log(1, "mbQuoteSearch SQL execute error: $DBI::errstr Query: $sQuery")
+            if $self->{logger};
+        $sth->finish;
         botNotice($self, $sNick, "Database error during search.");
         return;
     }
@@ -345,45 +418,61 @@ sub mbQuoteSearch {
     while (my $ref = $sth->fetchrow_hashref) {
         push @rows, $ref;
     }
+
     $sth->finish;
 
     my $display_text = join(' ', @words);
 
     if (!@rows) {
         botPrivmsg($self, $sChannel, "No quote found matching \"$display_text\" on $sChannel");
-    } elsif (@rows > $MAXQUOTES) {
+    }
+    elsif (@rows > $MAXQUOTES) {
         botPrivmsg($self, $sChannel,
             "More than $MAXQUOTES quotes matching \"$display_text\" on $sChannel — please be more specific :)");
-    } else {
+    }
+    else {
         my $count = scalar @rows;
         my $id_list = join('|', map { $_->{id_quotes} } @rows);
         botPrivmsg($self, $sChannel,
             "$count quote(s) matching \"$display_text\" on $sChannel : $id_list");
 
-        # Show the most recent match in full
         my $last   = $rows[0];
         my $id_q   = String::IRC->new($last->{id_quotes})->bold;
         my $handle = getUserhandle($self, $last->{id_user}) || 'Unknown';
+
         botPrivmsg($self, $sChannel,
             "Last on $last->{ts} by $handle (id : $id_q) $last->{quotetext}");
     }
 
     logBot($self, $message, $sChannel, "q search", @tArgs);
+    return scalar(@rows);
 }
+
 
 sub mbQuoteRand {
     my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-    # A4: avoid random SQL sort fullscan — count then pick a random offset.
-    my $sth_count = $self->{dbh}->prepare(
-        "SELECT COUNT(*) FROM QUOTES q
+    my $sql_count = "SELECT COUNT(*) FROM QUOTES q
          JOIN CHANNEL c ON c.id_channel = q.id_channel
-         WHERE c.name = ?"
-    );
-    unless ($sth_count && $sth_count->execute($sChannel)) {
-        $self->{logger}->log(1, "mbQuoteRand count SQL error: $DBI::errstr");
+         WHERE c.name = ?";
+
+    my $sth_count = $self->{dbh}->prepare($sql_count);
+
+    unless ($sth_count) {
+        $self->{logger}->log(1, "mbQuoteRand count SQL prepare error: $DBI::errstr Query: $sql_count")
+            if $self->{logger};
+        botNotice($self, $sNick, "Database error while reading quotes.");
         return;
     }
+
+    unless ($sth_count->execute($sChannel)) {
+        $self->{logger}->log(1, "mbQuoteRand count SQL execute error: $DBI::errstr Query: $sql_count")
+            if $self->{logger};
+        $sth_count->finish;
+        botNotice($self, $sNick, "Database error while reading quotes.");
+        return;
+    }
+
     my ($count) = $sth_count->fetchrow_array;
     $sth_count->finish;
 
@@ -395,97 +484,132 @@ sub mbQuoteRand {
 
     my $offset = int(rand($count));
 
-    my $sth = $self->{dbh}->prepare(
-        "SELECT q.id_quotes, q.quotetext, q.id_user
+    my $sql = "SELECT q.id_quotes, q.quotetext, q.id_user
          FROM QUOTES q
          JOIN CHANNEL c ON c.id_channel = q.id_channel
          WHERE c.name = ?
-         LIMIT 1 OFFSET ?"
-    );
-    unless ($sth && $sth->execute($sChannel, $offset)) {
-        $self->{logger}->log(1, "mbQuoteRand SQL error: $DBI::errstr");
+         LIMIT 1 OFFSET ?";
+
+    my $sth = $self->{dbh}->prepare($sql);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "mbQuoteRand SQL prepare error: $DBI::errstr Query: $sql")
+            if $self->{logger};
+        botNotice($self, $sNick, "Database error while reading quote.");
+        return;
+    }
+
+    unless ($sth->execute($sChannel, $offset)) {
+        $self->{logger}->log(1, "mbQuoteRand SQL execute error: $DBI::errstr Query: $sql")
+            if $self->{logger};
+        $sth->finish;
+        botNotice($self, $sNick, "Database error while reading quote.");
         return;
     }
 
     if (my $ref = $sth->fetchrow_hashref) {
-        my $id_q      = String::IRC->new($ref->{id_quotes})->bold;
-        my $handle    = getUserhandle($self, $ref->{id_user}) || 'Unknown';
+        my $id_q   = String::IRC->new($ref->{id_quotes})->bold;
+        my $handle = getUserhandle($self, $ref->{id_user}) || 'Unknown';
+
         botPrivmsg($self, $sChannel, "($handle) [id: $id_q] $ref->{quotetext}");
-    } else {
+    }
+    else {
         botPrivmsg($self, $sChannel, "Quote database is empty for $sChannel");
     }
+
     $sth->finish;
     logBot($self, $message, $sChannel, "q random", @tArgs);
+    return 1;
 }
+
 
 sub mbQuoteStats {
-	my ($self,$message,$sNick,$sChannel,@tArgs) = @_;
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-	# Single query: COUNT + MIN + MAX in one pass
-	my $sQuery = "SELECT COUNT(*) AS nbQuotes,
-				UNIX_TIMESTAMP(MIN(ts)) AS minDate,
-				UNIX_TIMESTAMP(MAX(ts)) AS maxDate
-				FROM QUOTES
-				JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel
-				WHERE CHANNEL.name = ?";
+    my $sQuery = "SELECT COUNT(*) AS nbQuotes,
+                UNIX_TIMESTAMP(MIN(ts)) AS minDate,
+                UNIX_TIMESTAMP(MAX(ts)) AS maxDate
+                FROM QUOTES
+                JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel
+                WHERE CHANNEL.name = ?";
 
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-		$sth->finish;
-		return;
-	}
+    my $sth = $self->{dbh}->prepare($sQuery);
 
-	my $ref = $sth->fetchrow_hashref();
-	$sth->finish;
+    unless ($sth) {
+        $self->{logger}->log(1, "mbQuoteStats() SQL prepare error: " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        botNotice($self, $sNick, "Database error while reading quote stats.");
+        return;
+    }
 
-	unless ($ref) {
-		$self->{logger}->log(1,"mbQuoteStats() fetchrow failed");
-		return;
-	}
+    unless ($sth->execute($sChannel)) {
+        $self->{logger}->log(1, "mbQuoteStats() SQL execute error: " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        botNotice($self, $sNick, "Database error while reading quote stats.");
+        return;
+    }
 
-	my $nbQuotes = $ref->{'nbQuotes'} // 0;
-	if ($nbQuotes == 0) {
-		botPrivmsg($self,$sChannel,"Quote database is empty for $sChannel");
-		return;
-	}
+    my $ref = $sth->fetchrow_hashref();
+    $sth->finish;
 
-	my $minDate = $ref->{'minDate'};
-	my $maxDate = $ref->{'maxDate'};
+    unless ($ref) {
+        $self->{logger}->log(1, "mbQuoteStats() fetchrow failed")
+            if $self->{logger};
+        return;
+    }
 
-	my @int = (
-		[ 'second', 1                ],
-		[ 'minute', 60               ],
-		[ 'hour',   60*60            ],
-		[ 'day',    60*60*24         ],
-		[ 'week',   60*60*24*7       ],
-		[ 'month',  60*60*24*30.5    ],
-		[ 'year',   60*60*24*30.5*12 ],
-	);
+    my $nbQuotes = $ref->{'nbQuotes'} // 0;
+    if ($nbQuotes == 0) {
+        botPrivmsg($self, $sChannel, "Quote database is empty for $sChannel");
+        return;
+    }
 
-	my $elapsed_to_human = sub {
-		my ($d) = @_;
-		my @r;
-		my $i = $#int;
-		while ($i >= 0 && $d) {
-			if ($d / $int[$i]->[1] >= 1) {
-				push @r, sprintf "%d %s%s",
-					$d / $int[$i]->[1],
-					$int[$i]->[0],
-					(int($d / $int[$i]->[1]) > 1 ? 's' : '');
-			}
-			$d = int($d % $int[$i]->[1]);
-			$i--;
-		}
-		return join(", ", @r) || "just now";
-	};
+    my $minDate = $ref->{'minDate'};
+    my $maxDate = $ref->{'maxDate'};
 
-	my $minTimeAgo = $elapsed_to_human->(time() - $minDate);
-	my $maxTimeAgo = $elapsed_to_human->(time() - $maxDate);
+    my @int = (
+        [ 'second', 1                ],
+        [ 'minute', 60               ],
+        [ 'hour',   60*60            ],
+        [ 'day',    60*60*24         ],
+        [ 'month',  60*60*24*30      ],
+        [ 'year',   60*60*24*365     ],
+    );
 
-	botPrivmsg($self,$sChannel,"Quotes : $nbQuotes for channel $sChannel -- first : $minTimeAgo ago -- last : $maxTimeAgo ago");
-	logBot($self,$message,$sChannel,"q stats",@tArgs);
+    my $now = time();
+    my $oldest = defined($minDate) ? $now - $minDate : 0;
+    my $newest = defined($maxDate) ? $now - $maxDate : 0;
+
+    my $fmt_age = sub {
+        my ($age) = @_;
+        my $best = "0 second";
+
+        for my $i (reverse @int) {
+            my ($label, $secs) = @$i;
+            if ($age >= $secs) {
+                my $n = int($age / $secs);
+                $best = "$n $label" . ($n > 1 ? "s" : "");
+                last;
+            }
+        }
+
+        return $best;
+    };
+
+    my $oldest_txt = $fmt_age->($oldest);
+    my $newest_txt = $fmt_age->($newest);
+
+    botPrivmsg(
+        $self,
+        $sChannel,
+        "Quote stats for $sChannel: $nbQuotes quote(s), oldest $oldest_txt ago, newest $newest_txt ago"
+    );
+
+    logBot($self, $message, $sChannel, "q stats", @tArgs);
+    return $nbQuotes;
 }
+
 
 # Modify a user's global level, autologin status, or fortniteid (Context version)
 

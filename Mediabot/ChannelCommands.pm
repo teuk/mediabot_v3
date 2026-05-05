@@ -140,6 +140,14 @@ sub channelList_ctx {
     my $self = $ctx->bot;
     my $nick = $ctx->nick;
 
+    my $dbh = $self->{dbh};
+    unless ($dbh) {
+        $self->{logger}->log(1, "channelList_ctx() no database handle")
+            if $self->{logger};
+        botNotice($self, $nick, "Internal error (DB unavailable).");
+        return;
+    }
+
     my $sql = q{
         SELECT
             C.name AS name,
@@ -150,9 +158,19 @@ sub channelList_ctx {
         ORDER BY C.creation_date
     };
 
-    my $sth = $self->{dbh}->prepare($sql);
-    unless ($sth && $sth->execute()) {
-        $self->{logger}->log(1, "channelList_ctx() SQL Error: $DBI::errstr | Query: $sql");
+    my $sth = $dbh->prepare($sql);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "channelList_ctx() SQL prepare error: $DBI::errstr | Query: $sql")
+            if $self->{logger};
+        botNotice($self, $nick, "Internal error (query failed).");
+        return;
+    }
+
+    unless ($sth->execute()) {
+        $self->{logger}->log(1, "channelList_ctx() SQL execute error: $DBI::errstr | Query: $sql")
+            if $self->{logger};
+        $sth->finish;
         botNotice($self, $nick, "Internal error (query failed).");
         return;
     }
@@ -451,12 +469,22 @@ sub channelSet_ctx {
 
     # --- command handling ---
     if ($args[0] eq 'key') {
-        my $val = $args[1];
+        my $val = $args[1] // '';
+        # B3/A2: validate key — no spaces, max 64 chars
+        if ($val ne '' && ($val =~ /\s/ || length($val) > 64)) {
+            botNotice($self, $nick, "Invalid key: no spaces allowed, max 64 chars.");
+            return;
+        }
         $channel->set_key($val);
         botNotice($self, $nick, "Set $target_channel key $val");
     }
     elsif ($args[0] eq 'chanmode') {
-        my $val = $args[1];
+        my $val = $args[1] // '';
+        # B2/A2: validate chanmode — must be IRC mode string or empty
+        if ($val ne '' && ($val !~ /^[+-]?[a-zA-Z]+$/ || length($val) > 32)) {
+            botNotice($self, $nick, "Invalid chanmode '$val'. Use IRC mode format e.g. +nst");
+            return;
+        }
         $channel->set_chanmode($val);
         botNotice($self, $nick, "Set $target_channel chanmode $val");
     }
@@ -1986,13 +2014,15 @@ sub channelBans_ctx {
             if ($secs <= 0) {
                 $expires_txt = 'expiring soon';
             } else {
+                # A4: show human-readable delta instead of absolute date
                 my $d = int($secs / 86400);
                 my $h = int(($secs % 86400) / 3600);
                 my $m = int(($secs % 3600) / 60);
-                $expires_txt = '';
+                $expires_txt = 'in ';
                 $expires_txt .= "${d}d " if $d;
                 $expires_txt .= "${h}h " if $h;
                 $expires_txt .= "${m}m"  if $m || (!$d && !$h);
+                $expires_txt =~ s/\s+$//;
                 $expires_txt =~ s/\s+$//;
             }
         } else {
@@ -3690,6 +3720,12 @@ sub setTMDBLangChannel_ctx {
 
     unless (defined($lang) && $lang ne "") {
         botNotice($self, $nick, "Syntax: tmdblangset [#channel] <lang>  (ex: fr-FR, en-US)");
+        return;
+    }
+
+    # B2/A2: validate ISO 639-1 format (e.g. fr, en-US, fr-FR)
+    unless ($lang =~ /^[a-z]{2}(-[A-Z]{2})?$/) {
+        botNotice($self, $nick, "Invalid lang format '$lang'. Use ISO 639-1 e.g. fr or fr-FR.");
         return;
     }
 

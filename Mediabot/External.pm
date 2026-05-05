@@ -448,10 +448,10 @@ sub displayWeather_ctx {
     my $encoded = uri_escape_utf8($location);
     my $url = "https://wttr.in/$encoded?format=" . uri_escape_utf8($format) . "&m";
 
-    my $http = HTTP::Tiny->new(
-        timeout => 4,
-        agent   => "mediabot_v3 weather/1.0 (+https://teuk.org)",
-        verify_SSL => 1,
+    my $http = _make_http(
+        timeout    => 4,
+        agent      => "mediabot_v3 weather/1.0 (+https://teuk.org)",
+        verify_SSL => 1,   # B1/A3: override _make_http default (0) for weather
     );
 
     my $res = $http->get($url, {
@@ -1464,24 +1464,36 @@ sub youtubeSearch_ctx {
 
 # Duration: ISO8601 "PT#H#M#S" -> "1h 02m 03s" / "3m 12s" / "45s"
 sub getFortniteId {
-	my ($self,$sUser) = @_;
-	my $sQuery = "SELECT fortniteid FROM USER WHERE nickname = ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sUser)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $fortniteid = $ref->{'fortniteid'};
-			$sth->finish;
-			return $fortniteid;
-		}
-		else {
-			$sth->finish;
-			return undef;
-		}
-	}
+    my ($self, $sUser) = @_;
+
+    return undef unless defined($sUser) && $sUser ne '';
+    return undef unless $self->{dbh};
+
+    my $sQuery = "SELECT fortniteid FROM USER WHERE nickname = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "getFortniteId() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        return undef;
+    }
+
+    unless ($sth->execute($sUser)) {
+        $self->{logger}->log(1, "getFortniteId() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+            if $self->{logger};
+        $sth->finish;
+        return undef;
+    }
+
+    my $fortniteid;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        $fortniteid = $ref->{fortniteid};
+    }
+
+    $sth->finish;
+    return $fortniteid;
 }
+
 
 # Fortnite stats:
 #   f <username>

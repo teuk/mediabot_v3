@@ -643,7 +643,8 @@ sub userModinfo_ctx {
     my $channel = '';
     if (@args && defined $args[0] && $args[0] =~ /^#/) {
         $channel = shift @args;
-    } else {
+    }
+    else {
         my $ctx_chan = $ctx->channel // '';
         $channel = ($ctx_chan =~ /^#/) ? $ctx_chan : '';
     }
@@ -662,19 +663,24 @@ sub userModinfo_ctx {
 
     my $id_channel = eval { $channel_obj->get_id } || undef;
     unless (defined $id_channel) {
-        $self->{logger}->log(1, "userModinfo_ctx(): could not resolve id_channel for $channel");
+        $self->{logger}->log(1, "userModinfo_ctx(): could not resolve id_channel for $channel")
+            if $self->{logger};
         botNotice($self, $nick, "Internal error: channel id not found.");
         return;
     }
 
     # Minimal syntax: <type> <handle> <value...>
-    unless (defined $args[0] && $args[0] ne '' && defined $args[1] && $args[1] ne '' && defined $args[2] && $args[2] ne '') {
+    unless (
+        defined $args[0] && $args[0] ne '' &&
+        defined $args[1] && $args[1] ne '' &&
+        defined $args[2] && $args[2] ne ''
+    ) {
         userModinfoSyntax($self, $ctx->message, $nick, @args);
         return;
     }
 
-    my $type              = lc($args[0]);
-    my $target_handle     = $args[1];
+    my $type          = lc($args[0]);
+    my $target_handle = $args[1];
 
     # Admin check via User.pm hierarchy
     my $is_admin = eval { $user->has_level('Administrator') ? 1 : 0 } || 0;
@@ -682,42 +688,107 @@ sub userModinfo_ctx {
     # Determine issuer handle (best effort)
     my $issuer_handle = eval { $user->handle } || eval { $user->nickname } || $nick;
 
-    # Fetch issuer channel level + target channel level + target id_user (no ambiguous SQL)
-    my ($issuer_level, $target_level, $id_user_target) = (0, 0, undef);
+    my $fetch_channel_level = sub {
+        my ($handle) = @_;
 
-    eval {
-        my $sth_issuer = $self->{dbh}->prepare(q{
+        my $sql = q{
             SELECT uc.level
             FROM USER_CHANNEL uc
             JOIN USER u ON u.id_user = uc.id_user
             WHERE uc.id_channel = ?
               AND u.nickname = ?
             LIMIT 1
-        });
-        $sth_issuer->execute($id_channel, $issuer_handle);
-        ($issuer_level) = $sth_issuer->fetchrow_array;
-        $issuer_level ||= 0;
-        $sth_issuer->finish;
+        };
 
-        my $sth_target = $self->{dbh}->prepare(q{
+        my $sth = $self->{dbh}->prepare($sql);
+
+        unless ($sth) {
+            $self->{logger}->log(1, "userModinfo_ctx(): issuer SQL prepare error: $DBI::errstr Query: $sql")
+                if $self->{logger};
+            return (undef, "prepare");
+        }
+
+        unless ($sth->execute($id_channel, $handle)) {
+            $self->{logger}->log(1, "userModinfo_ctx(): issuer SQL execute error: $DBI::errstr Query: $sql")
+                if $self->{logger};
+            $sth->finish;
+            return (undef, "execute");
+        }
+
+        my ($level) = $sth->fetchrow_array;
+        $sth->finish;
+
+        $level ||= 0;
+        return ($level, undef);
+    };
+
+    my $fetch_target = sub {
+        my ($handle) = @_;
+
+        my $sql = q{
             SELECT u.id_user, uc.level
             FROM USER_CHANNEL uc
             JOIN USER u ON u.id_user = uc.id_user
             WHERE uc.id_channel = ?
               AND u.nickname = ?
             LIMIT 1
-        });
-        $sth_target->execute($id_channel, $target_handle);
-        ($id_user_target, $target_level) = $sth_target->fetchrow_array;
-        $target_level ||= 0;
-        $sth_target->finish;
+        };
 
-        1;
-    } or do {
-        $self->{logger}->log(1, "userModinfo_ctx(): DB lookup failed: $@");
+        my $sth = $self->{dbh}->prepare($sql);
+
+        unless ($sth) {
+            $self->{logger}->log(1, "userModinfo_ctx(): target SQL prepare error: $DBI::errstr Query: $sql")
+                if $self->{logger};
+            return (undef, undef, "prepare");
+        }
+
+        unless ($sth->execute($id_channel, $handle)) {
+            $self->{logger}->log(1, "userModinfo_ctx(): target SQL execute error: $DBI::errstr Query: $sql")
+                if $self->{logger};
+            $sth->finish;
+            return (undef, undef, "execute");
+        }
+
+        my ($id_user, $level) = $sth->fetchrow_array;
+        $sth->finish;
+
+        $level ||= 0;
+        return ($id_user, $level, undef);
+    };
+
+    my $run_update = sub {
+        my ($sql, @bind) = @_;
+
+        my $sth = $self->{dbh}->prepare($sql);
+
+        unless ($sth) {
+            $self->{logger}->log(1, "userModinfo_ctx(): update SQL prepare error: $DBI::errstr Query: $sql")
+                if $self->{logger};
+            return 0;
+        }
+
+        unless ($sth->execute(@bind)) {
+            $self->{logger}->log(1, "userModinfo_ctx(): update SQL execute error: $DBI::errstr Query: $sql")
+                if $self->{logger};
+            $sth->finish;
+            return 0;
+        }
+
+        $sth->finish;
+        return 1;
+    };
+
+    my ($issuer_level, $lookup_err) = $fetch_channel_level->($issuer_handle);
+    if ($lookup_err) {
         botNotice($self, $nick, "Internal error (DB lookup failed).");
         return;
-    };
+    }
+
+    my ($id_user_target, $target_level, $target_err) = $fetch_target->($target_handle);
+    if ($target_err) {
+        botNotice($self, $nick, "Internal error (DB lookup failed).");
+        return;
+    }
 
     unless (defined $id_user_target) {
         botNotice($self, $nick, "User $target_handle does not exist on $channel");
@@ -730,9 +801,11 @@ sub userModinfo_ctx {
     my $has_access = 0;
     if ($is_admin) {
         $has_access = 1;
-    } elsif ($type eq 'greet') {
+    }
+    elsif ($type eq 'greet') {
         $has_access = ($issuer_level >= 1) ? 1 : 0;
-    } else {
+    }
+    else {
         $has_access = ($issuer_level >= 400) ? 1 : 0;
     }
 
@@ -746,8 +819,8 @@ sub userModinfo_ctx {
         return;
     }
 
-    # Prevent modifying a user with equal/higher access than caller (unless admin)
-    # For greet: allow if issuer_level > 0 (matches your original intent)
+    # Prevent modifying a user with equal/higher access than caller, unless admin.
+    # For greet: allow if issuer_level > 0, matching the previous behavior.
     unless (
         $is_admin
         || ($issuer_level > $target_level)
@@ -757,83 +830,67 @@ sub userModinfo_ctx {
         return;
     }
 
-    my $sth;
-
-    # SWITCH
     if ($type eq 'automode') {
-
         my $mode = uc($args[2] // '');
+
         unless ($mode =~ /^(OP|VOICE|NONE)$/i) {
             userModinfoSyntax($self, $ctx->message, $nick, @args);
             return;
         }
 
         my $query = "UPDATE USER_CHANNEL SET automode=? WHERE id_user=? AND id_channel=?";
-        $sth = $self->{dbh}->prepare($query);
-        unless ($sth && $sth->execute($mode, $id_user_target, $id_channel)) {
-            $self->{logger}->log(1, "userModinfo_ctx(): SQL Error: $DBI::errstr Query: $query");
+        unless ($run_update->($query, $mode, $id_user_target, $id_channel)) {
             botNotice($self, $nick, "Internal error (DB update failed).");
             return;
         }
-        $sth->finish if $sth;
 
         botNotice($self, $nick, "Set automode $mode on $channel for $target_handle");
         logBot($self, $ctx->message, $channel, "modinfo", @args);
         return $id_channel;
-
-    } elsif ($type eq 'greet') {
-
-        # Keep your extra restriction:
-        # If caller < 400, they can only set THEIR OWN greet unless admin
+    }
+    elsif ($type eq 'greet') {
+        # If caller < 400, they can only set THEIR OWN greet unless admin.
         if (!$is_admin && $issuer_level < 400 && lc($target_handle) ne lc($issuer_handle)) {
             botNotice($self, $nick, "Your level does not allow you to perform this command.");
             return;
         }
 
-        # greet text is everything after: greet <handle> ...
         my @greet_parts = @args[ 2 .. $#args ];
         my $greet_msg = (scalar(@greet_parts) == 1 && defined($greet_parts[0]) && $greet_parts[0] =~ /none/i)
             ? undef
             : join(" ", @greet_parts);
 
         my $query = "UPDATE USER_CHANNEL SET greet=? WHERE id_user=? AND id_channel=?";
-        $sth = $self->{dbh}->prepare($query);
-        unless ($sth && $sth->execute($greet_msg, $id_user_target, $id_channel)) {
-            $self->{logger}->log(1, "userModinfo_ctx(): SQL Error: $DBI::errstr Query: $query");
+        unless ($run_update->($query, $greet_msg, $id_user_target, $id_channel)) {
             botNotice($self, $nick, "Internal error (DB update failed).");
             return;
         }
-        $sth->finish if $sth;
 
         botNotice($self, $nick, "Set greet (" . (defined $greet_msg ? $greet_msg : "none") . ") on $channel for $target_handle");
         logBot($self, $ctx->message, $channel, "modinfo", ("greet", $target_handle, @greet_parts));
         return $id_channel;
-
-    } elsif ($type eq 'level') {
-
+    }
+    elsif ($type eq 'level') {
         my $new_level = $args[2];
+
         unless (defined($new_level) && $new_level =~ /^\d+$/ && $new_level <= 500) {
             botNotice($self, $nick, "Cannot set user access higher than 500.");
             return;
         }
 
         my $query = "UPDATE USER_CHANNEL SET level=? WHERE id_user=? AND id_channel=?";
-        $sth = $self->{dbh}->prepare($query);
-        unless ($sth && $sth->execute($new_level, $id_user_target, $id_channel)) {
-            $self->{logger}->log(1, "userModinfo_ctx(): SQL Error: $DBI::errstr Query: $query");
+        unless ($run_update->($query, $new_level, $id_user_target, $id_channel)) {
             botNotice($self, $nick, "Internal error (DB update failed).");
             return;
         }
-        $sth->finish if $sth;
 
         botNotice($self, $nick, "Set level $new_level on $channel for $target_handle");
         logBot($self, $ctx->message, $channel, "modinfo", @args);
         return $id_channel;
-
-    } else {
-        userModinfoSyntax($self, $ctx->message, $nick, @args);
-        return;
     }
+
+    userModinfoSyntax($self, $ctx->message, $nick, @args);
+    return;
 }
 
 # Get user ID and level on a specific channel
@@ -1328,6 +1385,55 @@ sub mbModUser_ctx {
     my $handle = eval { $user->nickname } || $nick;
     my $level  = eval { $user->level };
 
+    # Local DB helpers for this command only.
+    my $select_one = sub {
+        my ($sql, @bind) = @_;
+
+        my $sth = $self->{dbh}->prepare($sql);
+
+        unless ($sth) {
+            $self->{logger}->log(1, "mbModUser_ctx() SQL prepare error: $DBI::errstr Query: $sql")
+                if $self->{logger};
+            return (undef, "prepare");
+        }
+
+        unless ($sth->execute(@bind)) {
+            $self->{logger}->log(1, "mbModUser_ctx() SQL execute error: $DBI::errstr Query: $sql")
+                if $self->{logger};
+            $sth->finish;
+            return (undef, "execute");
+        }
+
+        my $row = $sth->fetchrow_hashref();
+        $sth->finish;
+
+        return ($row, undef);
+    };
+
+    my $run_update = sub {
+        my ($sql, @bind) = @_;
+
+        my $sth = $self->{dbh}->prepare($sql);
+
+        unless ($sth) {
+            $self->{logger}->log(1, "mbModUser_ctx() update SQL prepare error: $DBI::errstr Query: $sql")
+                if $self->{logger};
+            return (0, "prepare");
+        }
+
+        unless ($sth->execute(@bind)) {
+            $self->{logger}->log(1, "mbModUser_ctx() update SQL execute error: $DBI::errstr Query: $sql")
+                if $self->{logger};
+            $sth->finish;
+            return (0, "execute");
+        }
+
+        my $rows = $sth->rows;
+        $sth->finish;
+
+        return ($rows, undef);
+    };
+
     # ---------------------------------------------------------
     # Arguments dispatch
     # moduser <user> level <Owner|Master|Administrator|User> [force]
@@ -1366,8 +1472,8 @@ sub mbModUser_ctx {
             return;
         }
 
-        my $target_level   = getLevel($self, $target_level_str);
-        my $current_level  = getLevelUser($self, $target_nick);
+        my $target_level  = getLevel($self, $target_level_str);
+        my $current_level = getLevelUser($self, $target_nick);
 
         # Safety: avoid accidental ownership transfer
         if ($target_level == 0 && $level == 0 && (!defined($args[1]) || $args[1] !~ /^force$/i)) {
@@ -1380,22 +1486,27 @@ sub mbModUser_ctx {
         if ($level < $current_level && $level < $target_level) {
             if ($target_level == $current_level) {
                 botNotice($self, $nick, "User $target_nick is already a global $target_level_str.");
-            } else {
+            }
+            else {
                 if (setUserLevel($self, $target_nick, getIdUserLevel($self, $target_level_str))) {
                     botNotice($self, $nick, "User $target_nick is now a global $target_level_str.");
                     logBot($self, $message, $channel, "moduser", @original_args_for_log);
-                } else {
+                }
+                else {
                     botNotice($self, $nick, "Could not set $target_nick as global $target_level_str.");
                 }
             }
-        } else {
+        }
+        else {
             my $target_desc = getUserLevelDesc($self, $current_level);
             if ($target_level == $current_level) {
                 botNotice($self, $nick, "You can't set $target_nick to $target_level_str: they're already $target_desc.");
-            } else {
+            }
+            else {
                 botNotice($self, $nick, "You can't set $target_nick ($target_desc) to $target_level_str.");
             }
         }
+
         return;
     }
 
@@ -1404,52 +1515,62 @@ sub mbModUser_ctx {
     # =========================================================
     elsif ($subcmd =~ /^autologin$/i) {
         my $arg = lc($args[0] // '');
+
         unless ($arg =~ /^(on|off)$/) {
             botNotice($self, $nick, "moduser $target_nick autologin <on|off>");
             return;
         }
 
-        my $sth;
+        my ($row, $err) = $select_one->(
+            "SELECT 1 FROM USER WHERE nickname = ? AND username = '#AUTOLOGIN#'",
+            $target_nick,
+        );
 
-        if ($arg eq 'on') {
-            $sth = $self->{dbh}->prepare("SELECT 1 FROM USER WHERE nickname = ? AND username = '#AUTOLOGIN#'");
-            $sth->execute($target_nick);
-            my $already_on = $sth->fetchrow_hashref();
-            $sth->finish;
-
-            if ($already_on) {
-                botNotice($self, $nick, "Autologin is already ON for $target_nick");
-            } else {
-                $sth = $self->{dbh}->prepare("UPDATE USER SET username = '#AUTOLOGIN#' WHERE nickname = ?");
-                if ($sth->execute($target_nick)) {
-                    $sth->finish;
-                    botNotice($self, $nick, "Set autologin ON for $target_nick");
-                    logBot($self, $message, $channel, "moduser", @original_args_for_log);
-                } else {
-                    $sth->finish;
-                }
-            }
-        } else {    # off
-            $sth = $self->{dbh}->prepare("SELECT 1 FROM USER WHERE nickname = ? AND username = '#AUTOLOGIN#'");
-            $sth->execute($target_nick);
-            my $is_on = $sth->fetchrow_hashref();
-            $sth->finish;
-
-            if ($is_on) {
-                $sth = $self->{dbh}->prepare("UPDATE USER SET username = NULL WHERE nickname = ?");
-                if ($sth->execute($target_nick)) {
-                    $sth->finish;
-                    botNotice($self, $nick, "Set autologin OFF for $target_nick");
-                    logBot($self, $message, $channel, "moduser", @original_args_for_log);
-                } else {
-                    $sth->finish;
-                }
-            } else {
-                botNotice($self, $nick, "Autologin is already OFF for $target_nick");
-            }
+        if ($err) {
+            botNotice($self, $nick, "Internal error (DB lookup failed).");
+            return;
         }
 
-        return;
+        if ($arg eq 'on') {
+            if ($row) {
+                botNotice($self, $nick, "Autologin is already ON for $target_nick");
+                return;
+            }
+
+            my ($rows, $upd_err) = $run_update->(
+                "UPDATE USER SET username = '#AUTOLOGIN#' WHERE nickname = ?",
+                $target_nick,
+            );
+
+            if ($upd_err) {
+                botNotice($self, $nick, "Internal error (DB update failed).");
+                return;
+            }
+
+            botNotice($self, $nick, "Set autologin ON for $target_nick");
+            logBot($self, $message, $channel, "moduser", @original_args_for_log);
+            return $rows;
+        }
+
+        # off
+        unless ($row) {
+            botNotice($self, $nick, "Autologin is already OFF for $target_nick");
+            return;
+        }
+
+        my ($rows, $upd_err) = $run_update->(
+            "UPDATE USER SET username = NULL WHERE nickname = ?",
+            $target_nick,
+        );
+
+        if ($upd_err) {
+            botNotice($self, $nick, "Internal error (DB update failed).");
+            return;
+        }
+
+        botNotice($self, $nick, "Set autologin OFF for $target_nick");
+        logBot($self, $message, $channel, "moduser", @original_args_for_log);
+        return $rows;
     }
 
     # =========================================================
@@ -1457,37 +1578,49 @@ sub mbModUser_ctx {
     # =========================================================
     elsif ($subcmd =~ /^fortniteid$/i) {
         my $fortniteid = $args[0] // '';
+
         unless ($fortniteid ne '') {
             botNotice($self, $nick, "moduser $target_nick fortniteid <id>");
             return;
         }
 
-        my $sth = $self->{dbh}->prepare("SELECT 1 FROM USER WHERE nickname = ? AND fortniteid = ?");
-        $sth->execute($target_nick, $fortniteid);
-        my $already_set = $sth->fetchrow_hashref();
-        $sth->finish;
+        my ($already_set, $err) = $select_one->(
+            "SELECT 1 FROM USER WHERE nickname = ? AND fortniteid = ?",
+            $target_nick,
+            $fortniteid,
+        );
+
+        if ($err) {
+            botNotice($self, $nick, "Internal error (DB lookup failed).");
+            return;
+        }
 
         if ($already_set) {
             botNotice($self, $nick, "fortniteid is already $fortniteid for $target_nick");
-        } else {
-            $sth = $self->{dbh}->prepare("UPDATE USER SET fortniteid = ? WHERE nickname = ?");
-            if ($sth->execute($fortniteid, $target_nick)) {
-                botNotice($self, $nick, "Set fortniteid $fortniteid for $target_nick");
-                logBot($self, $message, $channel, "fortniteid", @original_args_for_log);
-            }
+            return;
         }
 
-        $sth->finish;
-        return;
+        my ($rows, $upd_err) = $run_update->(
+            "UPDATE USER SET fortniteid = ? WHERE nickname = ?",
+            $fortniteid,
+            $target_nick,
+        );
+
+        if ($upd_err) {
+            botNotice($self, $nick, "Internal error (DB update failed).");
+            return;
+        }
+
+        botNotice($self, $nick, "Set fortniteid $fortniteid for $target_nick");
+        logBot($self, $message, $channel, "fortniteid", @original_args_for_log);
+        return $rows;
     }
 
     # =========================================================
     # Unknown subcommand
     # =========================================================
-    else {
-        botNotice($self, $nick, "Unknown moduser command: $subcmd");
-        return;
-    }
+    botNotice($self, $nick, "Unknown moduser command: $subcmd");
+    return;
 }
 
 # Helper: print moduser usage

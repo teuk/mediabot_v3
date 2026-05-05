@@ -1,0 +1,80 @@
+# t/cases/87_help_internal_vs_public_commands.t
+# =============================================================================
+# Static regression checks for help command classification.
+#
+# help <command> must distinguish:
+#   - internal dispatch commands
+#   - dynamic PUBLIC_COMMANDS entries
+#   - unknown commands
+# =============================================================================
+
+use strict;
+use warnings;
+
+BEGIN {
+    use FindBin qw($Bin);
+    unshift @INC, "$Bin/../lib";
+    unshift @INC, "$Bin/../..";
+}
+
+use File::Spec;
+
+sub _slurp_help_internal_vs_public {
+    my ($path) = @_;
+    open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
+    local $/;
+    return <$fh>;
+}
+
+return sub {
+    my ($assert) = @_;
+
+    my $src = _slurp_help_internal_vs_public(
+        File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm')
+    );
+
+    $assert->ok(
+        $src =~ /^sub\s+_mbHelpInternalCommands\s*\{/m,
+        'internal help table exists'
+    );
+
+    $assert->ok(
+        $src =~ /^sub\s+_mbHelpPublicCommandExists\s*\{/m,
+        'PUBLIC_COMMANDS lookup helper exists'
+    );
+
+    $assert->ok(
+        $src =~ /^sub\s+_mbHelpSendInternalCommand\s*\{/m,
+        'internal help sender exists'
+    );
+
+    $assert->ok(
+        $src =~ /weather\s*=>\s*\{\s*syntax\s*=>\s*'weather \[city\]'/s,
+        'weather has internal help syntax'
+    );
+
+    $assert->ok(
+        $src =~ /topic\s*=>\s*\{\s*syntax\s*=>\s*'topic #channel <topic>'/s,
+        'topic has internal help syntax'
+    );
+
+    $assert->ok(
+        $src =~ /showcmd\s*=>\s*\{\s*syntax\s*=>\s*'showcmd <command>'/s,
+        'showcmd has internal help syntax'
+    );
+
+    $assert->ok(
+        $src =~ /SELECT 1 FROM PUBLIC_COMMANDS WHERE command = \? LIMIT 1/,
+        'help checks PUBLIC_COMMANDS by exact command'
+    );
+
+    $assert->ok(
+        $src =~ /if \(my \$entry = \$internal\{\$cmd\}\).*?_mbHelpPublicCommandExists/s,
+        'help checks internal commands before PUBLIC_COMMANDS'
+    );
+
+    $assert->ok(
+        $src =~ /No internal help or PUBLIC_COMMANDS entry found/,
+        'unknown command fallback is explicit'
+    );
+};

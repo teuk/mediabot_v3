@@ -52,11 +52,17 @@ sub add {
     my $cb       = $args{cb}       // die("Scheduler::add: cb required\n");
     my $auto     = $args{autostart} // 0;
 
+    die("Scheduler: invalid task name\n")
+        unless defined($name) && $name =~ /^[A-Za-z0-9_.:-]{1,64}$/;
+
     die("Scheduler: task '$name' already registered\n")
         if exists $self->{_tasks}{$name};
 
-    die("Scheduler: interval must be > 0\n")
-        unless $interval > 0;
+    die("Scheduler: interval must be a positive integer\n")
+        unless defined($interval) && $interval =~ /^\d+$/ && $interval > 0;
+
+    die("Scheduler: cb must be a CODE reference\n")
+        unless ref($cb) eq 'CODE';
 
     my $task = {
         interval  => $interval,
@@ -73,7 +79,9 @@ sub add {
             $task->{ticks}++;
             $task->{last_tick} = time();
             $self->_log(4, "Scheduler: tick '$name' (#$task->{ticks})");
+
             eval { $cb->() };
+
             if ($@) {
                 (my $err = $@) =~ s/\s+/ /g;
                 $self->_log(1, "Scheduler: task '$name' error: $err");
@@ -85,44 +93,107 @@ sub add {
     $self->{_tasks}{$name} = $task;
     $self->{loop}->add($timer);
 
-    $self->start($name) if $auto;
+    if ($auto) {
+        unless ($self->start($name)) {
+            delete $self->{_tasks}{$name};
+            eval { $self->{loop}->remove($timer) };
+            die("Scheduler: failed to autostart '$name'\n");
+        }
+    }
+
     $self->_log(3, "Scheduler: registered '$name' (interval=${interval}s autostart=$auto)");
     return $self;
 }
+
 
 # ---------------------------------------------------------------------------
 # remove($name) — stop and unregister a task
 # ---------------------------------------------------------------------------
 sub remove {
     my ($self, $name) = @_;
-    my $task = $self->{_tasks}{$name} or return;
 
-    $self->stop($name);
-    eval { $self->{loop}->remove($task->{timer}) };
+    my $task = $self->{_tasks}{$name} or return 0;
+
+    $self->stop($name) if $task->{started};
+
+    my $ok = eval {
+        $self->{loop}->remove($task->{timer});
+        1;
+    };
+
+    if (!$ok) {
+        (my $err = $@ || 'unknown error') =~ s/\s+/ /g;
+        $self->_log(1, "Scheduler: failed to remove '$name': $err");
+        return 0;
+    }
+
     delete $self->{_tasks}{$name};
     $self->_log(3, "Scheduler: removed '$name'");
+    return 1;
 }
+
 
 # ---------------------------------------------------------------------------
 # start($name) / stop($name) — control individual tasks
 # ---------------------------------------------------------------------------
 sub start {
     my ($self, $name) = @_;
-    my $task = $self->{_tasks}{$name} or return;
-    return if $task->{started};
-    eval { $task->{timer}->start };
+
+    my $task = $self->{_tasks}{$name} or return 0;
+    return 1 if $task->{started};
+
+    my $ok = eval {
+        $task->{timer}->start;
+        1;
+    };
+
+    if (!$ok) {
+        (my $err = $@ || 'unknown error') =~ s/\s+/ /g;
+        $self->_log(1, "Scheduler: failed to start '$name': $err");
+        return 0;
+    }
+
     $task->{started} = 1;
     $self->_log(3, "Scheduler: started '$name'");
+    return 1;
 }
+
 
 sub stop {
     my ($self, $name) = @_;
-    my $task = $self->{_tasks}{$name} or return;
-    return unless $task->{started};
-    eval { $task->{timer}->stop };
+
+    my $task = $self->{_tasks}{$name} or return 0;
+    return 1 unless $task->{started};
+
+    my $ok = eval {
+        $task->{timer}->stop;
+        1;
+    };
+
+    if (!$ok) {
+        (my $err = $@ || 'unknown error') =~ s/\s+/ /g;
+        $self->_log(1, "Scheduler: failed to stop '$name': $err");
+        return 0;
+    }
+
     $task->{started} = 0;
     $self->_log(3, "Scheduler: stopped '$name'");
+    return 1;
 }
+
+
+sub restart {
+    my ($self, $name) = @_;
+
+    my $task = $self->{_tasks}{$name} or return 0;
+
+    return 0 unless $self->stop($name);
+    return 0 unless $self->start($name);
+
+    $self->_log(3, "Scheduler: restarted '$name'");
+    return 1;
+}
+
 
 # ---------------------------------------------------------------------------
 # start_all / stop_all

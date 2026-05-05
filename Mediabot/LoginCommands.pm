@@ -47,6 +47,7 @@ sub init_auth {
     $self->{auth} = Mediabot::Auth->new(
         dbh    => $self->{dbh},
         logger => $self->{logger},
+        bot    => $self,   # B1/A1: needed for noticeConsoleChan in cleanup_stale_sessions
     );
 
     $self->{logger}->log(1, "Authentication module initialized");
@@ -94,6 +95,13 @@ sub checkAuth {
         return 0;
     }
 
+    # A3: prefer Auth::verify_credentials (supports BCrypt) when available
+    if ($self->{auth} && $self->{auth}->can('verify_credentials')) {
+        my $ok = eval { $self->{auth}->verify_credentials($iUserId, $sUserHandle, $sPassword) };
+        return $ok ? 1 : 0;
+    }
+
+    # Fallback: legacy make_password_hash path (MD5/SHA)
     my $sth = $self->{dbh}->prepare(
         "SELECT id_user FROM USER WHERE id_user = ? AND nickname = ? AND password = ?"
     );
@@ -103,7 +111,7 @@ sub checkAuth {
     }
 
     my $found = $sth->fetchrow_hashref;
-    $sth->finish;   # B1: always called — was dead on the undef path
+    $sth->finish;
 
     unless ($found) { return 0; }
 
@@ -123,7 +131,7 @@ sub checkAuth {
 sub userLogin_ctx {
     my ($ctx) = @_;
 
-    my $self = $ctx->bot;
+    my $self  = $ctx->bot;
     my $sNick = $ctx->nick;
 
     my @tArgs = @{ $ctx->args // [] };
@@ -139,7 +147,6 @@ sub userLogin_ctx {
         return;
     }
 
-
     # B2/A2: brute-force throttle — tracked by IRC nick AND DB username
     # Protects the account even if the attacker changes nick between attempts.
     {
@@ -150,7 +157,7 @@ sub userLogin_ctx {
         $self->{_login_failures} //= {};
 
         # A3: periodic cleanup of expired entries (older than 2x window)
-        if (!$self->{_login_fail_cleanup} || ($now - $self->{_login_fail_cleanup}) >= 120) {
+        if (!$self->{_login_fail_cleanup} || ($now - ($self->{_login_fail_cleanup} // 0)) >= 120) {
             for my $k (keys %{ $self->{_login_failures} }) {
                 delete $self->{_login_failures}{$k}
                     if ($now - ($self->{_login_failures}{$k}{ts} // 0)) > 120;
@@ -159,16 +166,18 @@ sub userLogin_ctx {
         }
 
         # Check both IRC nick and DB username
-        for my $fail_key (lc($sNick), lc($tArgs[0] // '')) {
+        for my $fail_key (lc($sNick // ''), lc($tArgs[0] // '')) {
             next unless $fail_key ne '';
             my $rec = $self->{_login_failures}{$fail_key} //= { ts => $now, count => 0 };
-            if ($now - $rec->{ts} >= $window) { $rec->{ts} = $now; $rec->{count} = 0; }
+            if ($now - $rec->{ts} >= $window) {
+                $rec->{ts} = $now;
+                $rec->{count} = 0;
+            }
             if ($rec->{count} >= $max_fail) {
                 my $wait = $window - ($now - $rec->{ts});
-                $self->{logger}->log(2,
-                    "Login throttle: key=$fail_key blocked ($rec->{count} failures, ${wait}s remaining)");
-                botNotice($self, $sNick,
-                    "Too many failed login attempts. Please wait " . int($wait + 1) . " seconds.");
+                $self->{logger}->log(2, "Login throttle: key=$fail_key blocked ($rec->{count} failures, ${wait}s remaining)")
+                    if $self->{logger};
+                botNotice($self, $sNick, "Too many failed login attempts. Please wait " . int($wait + 1) . " seconds.");
                 return;
             }
         }
@@ -183,28 +192,67 @@ sub userLogin_ctx {
         return;
     }
 
-    # 1) Fetch account strictly by DB nickname
-    my ($id_user, $db_nick, $stored_hash, $level_id);
-    my $ok = eval {
-        my $sth = $dbh->prepare(q{
-            SELECT id_user, nickname, password, id_user_level
-            FROM USER
-            WHERE nickname = ?
-            LIMIT 1
-        });
-        $sth->execute($typed_user);
-        ($id_user, $db_nick, $stored_hash, $level_id) = $sth->fetchrow_array;
+    my $run_select_one = sub {
+        my ($sql, @bind) = @_;
+
+        my $sth = $dbh->prepare($sql);
+        unless ($sth) {
+            $self->{logger}->log(1, "userLogin_ctx() SQL prepare error: $DBI::errstr Query: $sql")
+                if $self->{logger};
+            return (undef, "prepare");
+        }
+
+        unless ($sth->execute(@bind)) {
+            $self->{logger}->log(1, "userLogin_ctx() SQL execute error: $DBI::errstr Query: $sql")
+                if $self->{logger};
+            $sth->finish;
+            return (undef, "execute");
+        }
+
+        my $row = $sth->fetchrow_hashref;
         $sth->finish;
-        1;
+
+        return ($row, undef);
     };
 
-    unless ($ok) {
+    my $run_update = sub {
+        my ($sql, @bind) = @_;
+
+        my $sth = $dbh->prepare($sql);
+        unless ($sth) {
+            $self->{logger}->log(1, "userLogin_ctx() update SQL prepare error: $DBI::errstr Query: $sql")
+                if $self->{logger};
+            return (0, "prepare");
+        }
+
+        unless ($sth->execute(@bind)) {
+            $self->{logger}->log(1, "userLogin_ctx() update SQL execute error: $DBI::errstr Query: $sql")
+                if $self->{logger};
+            $sth->finish;
+            return (0, "execute");
+        }
+
+        my $rows = $sth->rows;
+        $sth->finish;
+
+        return ($rows, undef);
+    };
+
+    # 1) Fetch account strictly by DB nickname
+    my ($row, $select_err) = $run_select_one->(q{
+        SELECT id_user, nickname, password, id_user_level
+        FROM USER
+        WHERE nickname = ?
+        LIMIT 1
+    }, $typed_user);
+
+    if ($select_err) {
         botNotice($self, $sNick, "Internal error (query failed).");
         return;
     }
 
-    unless (defined $id_user) {
-        for my $k (lc($sNick), lc($typed_user)) {
+    unless ($row) {
+        for my $k (lc($sNick // ''), lc($typed_user // '')) {
             next unless defined($k) && $k ne '';
             my $r = ($self->{_login_failures}{$k} //= { ts => time(), count => 0 });
             $r->{count}++;
@@ -213,11 +261,18 @@ sub userLogin_ctx {
 
         botNotice($self, $sNick, "Login failed (Unknown user).");
         $self->{metrics}->inc('mediabot_auth_failure_total') if $self->{metrics};
-        my $msg = ($ctx->message->prefix // '') . " Failed login (Unknown user: $typed_user)";
+
+        my $msg = (($ctx->message && $ctx->message->can('prefix')) ? ($ctx->message->prefix // '') : '')
+                . " Failed login (Unknown user: $typed_user)";
         $self->noticeConsoleChan($msg) if $self->can('noticeConsoleChan');
         logBot($self, $ctx->message, undef, "login", $typed_user, "Failed (Unknown user)");
         return;
     }
+
+    my $id_user     = $row->{id_user};
+    my $db_nick     = $row->{nickname};
+    my $stored_hash = $row->{password};
+    my $level_id    = $row->{id_user_level};
 
     unless (defined $stored_hash && $stored_hash ne "") {
         botNotice($self, $sNick, "Your password is not set. Use /msg " . $self->{irc}->nick_folded . " pass <password>");
@@ -244,73 +299,98 @@ sub userLogin_ctx {
 
     if ($stored_hash eq $calc_hash) {
         # 3) Mark authenticated and stamp last_login
-        eval {
-            $dbh->do('UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?', undef, $id_user);
-            1;
-        };
+        my ($rows, $upd_err) = $run_update->(
+            "UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?",
+            $id_user,
+        );
+
+        if ($upd_err) {
+            botNotice($self, $sNick, "Internal error (auth update failed).");
+            return;
+        }
 
         # 4) Register the caller's hostmask in USER_HOSTMASK if not already present
-        my $fullmask = $ctx->message->prefix // '';
+        my $fullmask = ($ctx->message && $ctx->message->can('prefix')) ? ($ctx->message->prefix // '') : '';
         my $hostmask = getMessageHostmask($self, $ctx->message);
+
         if ($hostmask && $hostmask ne '') {
-            eval {
-                my $chk = $dbh->prepare(
-                    "SELECT id_user_hostmask FROM USER_HOSTMASK WHERE id_user=? AND hostmask=? LIMIT 1"
+            my ($hm_row, $hm_err) = $run_select_one->(
+                "SELECT id_user_hostmask FROM USER_HOSTMASK WHERE id_user=? AND hostmask=? LIMIT 1",
+                $id_user,
+                $hostmask,
+            );
+
+            if ($hm_err) {
+                $self->{logger}->log(1, "login: failed to check hostmask registration for id_user=$id_user hostmask=$hostmask")
+                    if $self->{logger};
+            }
+            elsif (!$hm_row) {
+                my ($hm_rows, $hm_ins_err) = $run_update->(
+                    "INSERT INTO USER_HOSTMASK (id_user, hostmask) VALUES (?, ?)",
+                    $id_user,
+                    $hostmask,
                 );
-                $chk->execute($id_user, $hostmask);
-                my $exists = $chk->fetchrow_arrayref;
-                $chk->finish;
-                unless ($exists) {
-                    my $ins = $dbh->prepare(
-                        "INSERT INTO USER_HOSTMASK (id_user, hostmask) VALUES (?, ?)"
-                    );
-                    $ins->execute($id_user, $hostmask);
-                    $ins->finish;
-                    $self->{logger}->log(2, "login: registered hostmask '$hostmask' for id_user=$id_user");
+
+                if ($hm_ins_err) {
+                    $self->{logger}->log(1, "login: failed to register hostmask '$hostmask' for id_user=$id_user")
+                        if $self->{logger};
+                }
+                else {
+                    $self->{logger}->log(2, "login: registered hostmask '$hostmask' for id_user=$id_user")
+                        if $self->{logger};
                     clear_user_cache($self, $fullmask);
                 }
-                1;
-            };
-            if ($@) {
-                $self->{logger}->log(1, "login: failed to register hostmask: $@");
             }
         }
 
         # Best-effort in-memory flags (ignore if structure differs)
         eval {
-            $self->{auth}->{logged_in}{$id_user} = 1 if ref($self->{auth}) eq 'HASH' && ref($self->{auth}->{logged_in}) eq 'HASH';
-            $self->{auth}->{sessions}{lc $db_nick} = { id_user => $id_user, auth => 1 } if ref($self->{auth}) eq 'HASH' && ref($self->{auth}->{sessions}) eq 'HASH';
+            $self->{auth}->{logged_in}{$id_user} = 1
+                if ref($self->{auth}) eq 'HASH' && ref($self->{auth}->{logged_in}) eq 'HASH';
+            $self->{auth}->{sessions}{lc $db_nick} = { id_user => $id_user, auth => 1 }
+                if ref($self->{auth}) eq 'HASH' && ref($self->{auth}->{sessions}) eq 'HASH';
             1;
         };
 
-        # Résoudre la description du niveau depuis USER_LEVEL
-        my $level_desc = eval {
-            my ($desc) = $dbh->selectrow_array(
-                'SELECT description FROM USER_LEVEL WHERE id_user_level=?', undef, $level_id
-            );
-            $desc;
-        } // $level_id // "unknown";
-        delete $self->{_login_failures}{lc($sNick)};       # reset on success
-        delete $self->{_login_failures}{lc($typed_user)};  # reset target account too
+        # Resolve level description from USER_LEVEL
+        my $level_desc = $level_id // "unknown";
+        my ($level_row, $level_err) = $run_select_one->(
+            "SELECT description FROM USER_LEVEL WHERE id_user_level=?",
+            $level_id,
+        );
+
+        if (!$level_err && $level_row && defined $level_row->{description}) {
+            $level_desc = $level_row->{description};
+        }
+
+        delete $self->{_login_failures}{lc($sNick // '')};       # reset on success
+        delete $self->{_login_failures}{lc($typed_user // '')};  # reset target account too
+
         botNotice($self, $sNick, "Login successful as $db_nick (Level: $level_desc)");
         $self->{metrics}->inc('mediabot_auth_success_total') if $self->{metrics};
 
-        my $msg = ($ctx->message->prefix // '') . " Successful login as $db_nick (Level: $level_desc)";
+        my $msg = (($ctx->message && $ctx->message->can('prefix')) ? ($ctx->message->prefix // '') : '')
+                . " Successful login as $db_nick (Level: $level_desc)";
         $self->noticeConsoleChan($msg) if $self->can('noticeConsoleChan');
         logBot($self, $ctx->message, undef, "login", $typed_user, "Success");
     }
     else {
-        for my $k (lc($sNick), lc($typed_user)) {
-            my $r = ($self->{_login_failures}{$k} //= {ts=>time(),count=>0});
+        for my $k (lc($sNick // ''), lc($typed_user // '')) {
+            next unless $k ne '';
+            my $r = ($self->{_login_failures}{$k} //= { ts => time(), count => 0 });
             $r->{count}++;
         }
+
         botNotice($self, $sNick, "Login failed (Bad password).");
         $self->{metrics}->inc('mediabot_auth_failure_total') if $self->{metrics};
-        my $msg = ($ctx->message->prefix // '') . " Failed login (Bad password)";
+
+        my $msg = (($ctx->message && $ctx->message->can('prefix')) ? ($ctx->message->prefix // '') : '')
+                . " Failed login (Bad password)";
         $self->noticeConsoleChan($msg) if $self->can('noticeConsoleChan');
         logBot($self, $ctx->message, undef, "login", $typed_user, "Failed (Bad password)");
     }
 }
+
 
 
 # Context-based logout command
@@ -330,27 +410,45 @@ sub userLogout_ctx {
     my $uid      = eval { $user->id } // 0;
     my $username = eval { $user->nickname } // $nick;
 
-    eval {
-        $self->{dbh}->do(
-            "UPDATE USER SET auth=0 WHERE id_user=?",
-            undef, $uid
-        );
-        1;
-    } or do {
-        $self->{logger}->log(1, "userLogout_ctx() DB error: $@");
+    my $dbh = $self->{dbh};
+    unless ($dbh) {
+        $self->{logger}->log(1, "userLogout_ctx() no database handle")
+            if $self->{logger};
         botNotice($self, $nick, "Internal error during logout.");
         return;
-    };
+    }
+
+    my $sql = "UPDATE USER SET auth=0 WHERE id_user=?";
+    my $sth = $dbh->prepare($sql);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "userLogout_ctx() SQL prepare error: $DBI::errstr Query: $sql")
+            if $self->{logger};
+        botNotice($self, $nick, "Internal error during logout.");
+        return;
+    }
+
+    unless ($sth->execute($uid)) {
+        $self->{logger}->log(1, "userLogout_ctx() SQL execute error: $DBI::errstr Query: $sql")
+            if $self->{logger};
+        $sth->finish;
+        botNotice($self, $nick, "Internal error during logout.");
+        return;
+    }
+
+    $sth->finish;
 
     # Invalidate user cache so subsequent commands see auth=0 immediately
     my $logout_mask = eval { $ctx->message->prefix } // '';
     clear_user_cache($self, $logout_mask) if $logout_mask;
 
-    $self->{logger}->log(1, "logout: $username (id=$uid) logged out");
+    $self->{logger}->log(1, "logout: $username (id=$uid) logged out")
+        if $self->{logger};
     botNotice($self, $nick, "Logged out successfully.");
     logBot($self, $ctx->message, undef, "logout", $username);
     return 1;
 }
+
 
 # check user Level
 sub mbRegister_ctx {
@@ -480,67 +578,112 @@ sub userIdent {
 }
 
 sub checkAuthByUser {
-	my ($self,$message,$sUserHandle,$sPassword) = @_;
+    my ($self, $message, $sUserHandle, $sPassword) = @_;
 
-	my $sHashedPw;
-	my $hash_ok = eval {
-		$sHashedPw = make_password_hash($sPassword);
-		1;
-	};
+    return (0, 0) unless defined($sUserHandle) && $sUserHandle ne '';
+    return (0, 0) unless defined($sPassword)   && $sPassword   ne '';
 
-	unless ($hash_ok && defined $sHashedPw) {
-		my $err = $@ || 'make_password_hash returned undef';
-		chomp $err;
+    my $dbh = $self->{dbh};
+    unless ($dbh) {
+        $self->{logger}->log(1, "checkAuthByUser() no database handle")
+            if $self->{logger};
+        return (0, 0);
+    }
 
-		$self->{logger}->log(1, "checkAuthByUser() make_password_hash failed: $err")
-			if $self->{logger};
+    my $sHashedPw;
+    my $hash_ok = eval {
+        $sHashedPw = make_password_hash($sPassword);
+        1;
+    };
 
-		return (0,0);
-	}
-	my $sCheckAuthQuery = "SELECT id_user FROM USER WHERE nickname = ? AND password = ?";
-	my $sth = $self->{dbh}->prepare($sCheckAuthQuery);
-	unless ($sth->execute($sUserHandle,$sHashedPw)) {
-		$self->{logger}->log(1,"checkAuthByUser() SQL Error : " . $DBI::errstr . " Query : " . $sCheckAuthQuery);
-		$sth->finish;
-		return 0;
-	}
-	else {	
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $sHostmask = getMessageHostmask($self,$message);
-			$self->{logger}->log(3,"checkAuthByUser() Hostmask : $sHostmask to add to $sUserHandle");
-			my $id_user = $ref->{'id_user'};
-			# Check in USER_HOSTMASK
-			my $chk = $self->{dbh}->prepare(
-			    "SELECT id_user_hostmask FROM USER_HOSTMASK WHERE id_user=? AND hostmask=? LIMIT 1"
-			);
-			$chk->execute($id_user, $sHostmask);
-			if ($chk->fetchrow_arrayref) {
-				$chk->finish;
-				$sth->finish;
-				return ($id_user, 1);
-			}
-			$chk->finish;
-			{
-				my $ins = $self->{dbh}->prepare(
-				    "INSERT INTO USER_HOSTMASK (id_user, hostmask) VALUES (?, ?)"
-				);
-				unless ($ins && $ins->execute($id_user, $sHostmask)) {
-					$self->{logger}->log(1,"checkAuthByUser() SQL Error : " . $DBI::errstr);
-					$ins->finish if $ins;
-					$sth->finish if $sth;
-					return (0,0);
-				}
-				$ins->finish;
-				$sth->finish;
-				return ($id_user,0);
-			}
-		}
-		else {
-			$sth->finish;
-			return (0,0);
-		}
-	}
+    unless ($hash_ok && defined $sHashedPw) {
+        my $err = $@ || 'make_password_hash returned undef';
+        chomp $err;
+
+        $self->{logger}->log(1, "checkAuthByUser() make_password_hash failed: $err")
+            if $self->{logger};
+
+        return (0, 0);
+    }
+
+    my $sCheckAuthQuery = "SELECT id_user FROM USER WHERE nickname = ? AND password = ?";
+    my $sth = $dbh->prepare($sCheckAuthQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "checkAuthByUser() SQL prepare error: " . $DBI::errstr . " Query: " . $sCheckAuthQuery)
+            if $self->{logger};
+        return (0, 0);
+    }
+
+    unless ($sth->execute($sUserHandle, $sHashedPw)) {
+        $self->{logger}->log(1, "checkAuthByUser() SQL execute error: " . $DBI::errstr . " Query: " . $sCheckAuthQuery)
+            if $self->{logger};
+        $sth->finish;
+        return (0, 0);
+    }
+
+    my $ref = $sth->fetchrow_hashref();
+    unless ($ref) {
+        $sth->finish;
+        return (0, 0);
+    }
+
+    my $id_user = $ref->{id_user};
+    $sth->finish;
+
+    my $sHostmask = getMessageHostmask($self, $message);
+    unless (defined($sHostmask) && $sHostmask ne '') {
+        $self->{logger}->log(1, "checkAuthByUser() could not resolve hostmask for $sUserHandle")
+            if $self->{logger};
+        return (0, 0);
+    }
+
+    $self->{logger}->log(3, "checkAuthByUser() Hostmask : $sHostmask to add to $sUserHandle")
+        if $self->{logger};
+
+    my $sql_check_hostmask = "SELECT id_user_hostmask FROM USER_HOSTMASK WHERE id_user=? AND hostmask=? LIMIT 1";
+    my $chk = $dbh->prepare($sql_check_hostmask);
+
+    unless ($chk) {
+        $self->{logger}->log(1, "checkAuthByUser() hostmask SQL prepare error: " . $DBI::errstr . " Query: " . $sql_check_hostmask)
+            if $self->{logger};
+        return (0, 0);
+    }
+
+    unless ($chk->execute($id_user, $sHostmask)) {
+        $self->{logger}->log(1, "checkAuthByUser() hostmask SQL execute error: " . $DBI::errstr . " Query: " . $sql_check_hostmask)
+            if $self->{logger};
+        $chk->finish;
+        return (0, 0);
+    }
+
+    if ($chk->fetchrow_arrayref) {
+        $chk->finish;
+        return ($id_user, 1);
+    }
+
+    $chk->finish;
+
+    my $sql_insert_hostmask = "INSERT INTO USER_HOSTMASK (id_user, hostmask) VALUES (?, ?)";
+    my $ins = $dbh->prepare($sql_insert_hostmask);
+
+    unless ($ins) {
+        $self->{logger}->log(1, "checkAuthByUser() insert hostmask SQL prepare error: " . $DBI::errstr . " Query: " . $sql_insert_hostmask)
+            if $self->{logger};
+        return (0, 0);
+    }
+
+    unless ($ins->execute($id_user, $sHostmask)) {
+        $self->{logger}->log(1, "checkAuthByUser() insert hostmask SQL execute error: " . $DBI::errstr . " Query: " . $sql_insert_hostmask)
+            if $self->{logger};
+        $ins->finish;
+        return (0, 0);
+    }
+
+    $ins->finish;
+    return ($id_user, 0);
 }
+
 
 # Context-based cstat: one-line output, truncated with "..."
 sub userWhoAmI_ctx {
@@ -575,94 +718,122 @@ sub userWhoAmI_ctx {
     # Base line
     botNotice($self, $nick, "User: $uname (Id: $uid - $lvl_desc)");
 
+    my $dbh = $self->{dbh};
+    unless ($dbh) {
+        $self->{logger}->log(1, "userWhoAmI_ctx() no database handle")
+            if $self->{logger};
+        botNotice($self, $nick, "Internal error (DB unavailable).");
+        return;
+    }
+
     # Pull DB details (password set, created, last login, username)
     my $sql = "SELECT username, password, creation_date, last_login, auth FROM USER WHERE id_user=? LIMIT 1";
-    my $sth = $self->{dbh}->prepare($sql);
+    my $sth = $dbh->prepare($sql);
 
-    unless ($sth && $sth->execute($uid)) {
-        $self->{logger}->log(1, "userWhoAmI_ctx() SQL Error: $DBI::errstr | Query: $sql");
+    unless ($sth) {
+        $self->{logger}->log(1, "userWhoAmI_ctx() SQL prepare error: $DBI::errstr | Query: $sql")
+            if $self->{logger};
         botNotice($self, $nick, "Internal error (query failed).");
         return;
     }
 
-    if (my $ref = $sth->fetchrow_hashref()) {
-        my $created    = $ref->{creation_date} // 'N/A';
-        my $last_login = $ref->{last_login}    // 'never';
-        # Fetch hostmasks from USER_HOSTMASK.
-        # Do not GROUP_CONCAT everything into one huge IRC line: hostmasks can
-        # grow over time, so we paginate them below.
-        my @hostmasks;
-        my $hm_sth2 = $self->{dbh}->prepare(
-            "SELECT hostmask FROM USER_HOSTMASK WHERE id_user=? ORDER BY id_user_hostmask LIMIT 20"
-        );
-
-        if ($hm_sth2 && $hm_sth2->execute($uid)) {
-            while (my $hm_ref2 = $hm_sth2->fetchrow_hashref) {
-                push @hostmasks, $hm_ref2->{hostmask}
-                    if defined($hm_ref2->{hostmask}) && $hm_ref2->{hostmask} ne '';
-            }
-            $hm_sth2->finish;
-        }
-        else {
-            $self->{logger}->log(1, "userWhoAmI_ctx() hostmask SQL Error: $DBI::errstr")
-                if $self->{logger};
-            $hm_sth2->finish if $hm_sth2;
-        }
-        my $db_auth    = $ref->{auth}          ? 1 : 0;
-
-        # Password set: check the password field (NOT creation_date)
-        my $pass_set = (defined $ref->{password} && $ref->{password} ne '') ? "Password set" : "Password not set";
-
-        # AUTOLOGIN status
-        my $db_username = defined($ref->{username}) ? $ref->{username} : '';
-        my $autologin   = ($db_username eq '#AUTOLOGIN#') ? "ON" : "OFF";
-
-        my $auth_status = $db_auth ? "logged in" : "not logged in";
-
-        # Compact — 2 NOTICE lines to avoid Excess Flood
-        my $info1 = eval { $user->info1 } // eval { $user->{info1} } // '';
-        my $info2 = eval { $user->info2 } // eval { $user->{info2} } // '';
-        botNotice($self, $nick,
-            "$pass_set | Status: $auth_status | AUTOLOGIN: $autologin"
-        );
-
-        if (@hostmasks) {
-            my $mask_count = scalar(@hostmasks);
-            botNotice($self, $nick, "Masks: $mask_count shown, max 20");
-
-            my $per_line = 2;
-            my $page     = 1;
-
-            while (@hostmasks) {
-                my @chunk = splice(@hostmasks, 0, $per_line);
-                my $line  = sprintf("whoami-masks[%02d]: %s", $page, join(' | ', @chunk));
-
-                if (length($line) > 360) {
-                    $line = substr($line, 0, 357) . '...';
-                }
-
-                botNotice($self, $nick, $line);
-                $page++;
-            }
-        }
-        else {
-            botNotice($self, $nick, "Masks: N/A");
-        }
-
-        botNotice($self, $nick,
-            "Created: $created | Last: $last_login"
-            . ($info1 ne '' && $info1 ne 'N/A' ? " | $info1" : "")
-            . ($info2 ne '' && $info2 ne 'N/A' ? " | $info2" : "")
-        );
-    } else {
-        botNotice($self, $nick, "User record not found in database (id=$uid)");
+    unless ($sth->execute($uid)) {
+        $self->{logger}->log(1, "userWhoAmI_ctx() SQL execute error: $DBI::errstr | Query: $sql")
+            if $self->{logger};
+        $sth->finish;
+        botNotice($self, $nick, "Internal error (query failed).");
+        return;
     }
 
+    my $ref = $sth->fetchrow_hashref();
     $sth->finish;
+
+    unless ($ref) {
+        botNotice($self, $nick, "User record not found in database (id=$uid)");
+        logBot($self, $ctx->message, undef, "whoami");
+        return;
+    }
+
+    my $created    = $ref->{creation_date} // 'N/A';
+    my $last_login = $ref->{last_login}    // 'never';
+
+    # Fetch hostmasks from USER_HOSTMASK.
+    # Do not GROUP_CONCAT everything into one huge IRC line: hostmasks can
+    # grow over time, so we paginate them below.
+    my @hostmasks;
+    my $hm_sql = "SELECT hostmask FROM USER_HOSTMASK WHERE id_user=? ORDER BY id_user_hostmask LIMIT 20";
+    my $hm_sth = $dbh->prepare($hm_sql);
+
+    unless ($hm_sth) {
+        $self->{logger}->log(1, "userWhoAmI_ctx() hostmask SQL prepare error: $DBI::errstr | Query: $hm_sql")
+            if $self->{logger};
+    }
+    elsif (!$hm_sth->execute($uid)) {
+        $self->{logger}->log(1, "userWhoAmI_ctx() hostmask SQL execute error: $DBI::errstr | Query: $hm_sql")
+            if $self->{logger};
+        $hm_sth->finish;
+    }
+    else {
+        while (my $hm_ref = $hm_sth->fetchrow_hashref) {
+            push @hostmasks, $hm_ref->{hostmask}
+                if defined($hm_ref->{hostmask}) && $hm_ref->{hostmask} ne '';
+        }
+
+        $hm_sth->finish;
+    }
+
+    my $db_auth = $ref->{auth} ? 1 : 0;
+
+    # Password set: check the password field
+    my $pass_set = (defined $ref->{password} && $ref->{password} ne '') ? "Password set" : "Password not set";
+
+    # AUTOLOGIN status
+    my $db_username = defined($ref->{username}) ? $ref->{username} : '';
+    my $autologin   = ($db_username eq '#AUTOLOGIN#') ? "ON" : "OFF";
+
+    my $auth_status = $db_auth ? "logged in" : "not logged in";
+
+    # Compact — 2 NOTICE lines to avoid Excess Flood
+    my $info1 = eval { $user->info1 } // eval { $user->{info1} } // '';
+    my $info2 = eval { $user->info2 } // eval { $user->{info2} } // '';
+
+    botNotice($self, $nick, "$pass_set | Status: $auth_status | AUTOLOGIN: $autologin");
+
+    if (@hostmasks) {
+        my $mask_count = scalar(@hostmasks);
+        botNotice($self, $nick, "Masks: $mask_count shown, max 20");
+
+        my $per_line = 2;
+        my $page     = 1;
+
+        while (@hostmasks) {
+            my @chunk = splice(@hostmasks, 0, $per_line);
+            my $line  = sprintf("whoami-masks[%02d]: %s", $page, join(' | ', @chunk));
+
+            if (length($line) > 360) {
+                $line = substr($line, 0, 357) . '...';
+            }
+
+            botNotice($self, $nick, $line);
+            $page++;
+        }
+    }
+    else {
+        botNotice($self, $nick, "Masks: N/A");
+    }
+
+    botNotice(
+        $self,
+        $nick,
+        "Created: $created | Last: $last_login"
+        . ($info1 ne '' && $info1 ne 'N/A' ? " | $info1" : "")
+        . ($info2 ne '' && $info2 ne 'N/A' ? " | $info2" : "")
+    );
 
     logBot($self, $ctx->message, undef, "whoami");
     return 1;
 }
+
 
 # Add a new public command to the database (Administrator+)
 sub userPass_ctx {

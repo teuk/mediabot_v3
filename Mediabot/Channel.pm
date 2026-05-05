@@ -32,9 +32,13 @@ sub _log {
 sub _execute_update {
     my ($self, $sql, $binds, $label) = @_;
 
-    return 0 unless $self->{dbh};
+    # A5: prefer ensure_connected() to handle stale dbh after reconnect
+    my $dbh = ($self->{db} && $self->{db}->can('ensure_connected'))
+        ? $self->{db}->ensure_connected()
+        : $self->{dbh};
+    return 0 unless $dbh;
 
-    my $sth = $self->{dbh}->prepare($sql);
+    my $sth = $dbh->prepare($sql);
 
     unless ($sth) {
         $self->_log(1, "$label SQL prepare error: $DBI::errstr Query: $sql");
@@ -211,6 +215,11 @@ sub set_tmdb_lang {
 sub set_key {
     my ($self, $new_key) = @_;
     return 0 unless defined $new_key;
+    # A4: validate key — no spaces, max 64 chars
+    if ($new_key ne '' && ($new_key =~ /\s/ || length($new_key) > 64)) {
+        $self->_log(1, "set_key(): invalid key rejected (spaces or too long)");
+        return 0;
+    }
 
     my $ok = $self->_execute_update(
         "UPDATE CHANNEL SET `key`=? WHERE id_channel=?",
@@ -245,6 +254,11 @@ sub set_description {
 sub set_chanmode {
     my ($self, $new_chanmode) = @_;
     return 0 unless defined $new_chanmode;
+    # A4: validate chanmode — IRC mode string or empty, max 32 chars
+    if ($new_chanmode ne '' && ($new_chanmode !~ /^[+-]?[a-zA-Z]+$/ || length($new_chanmode) > 32)) {
+        $self->_log(1, "set_chanmode(): invalid mode rejected");
+        return 0;
+    }
 
     my $ok = $self->_execute_update(
         "UPDATE CHANNEL SET chanmode=? WHERE id_channel=?",

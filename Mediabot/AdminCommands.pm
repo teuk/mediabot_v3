@@ -12,7 +12,8 @@ use POSIX qw(strftime setsid);
 use Exporter 'import';
 use List::Util qw(min);
 use Mediabot::Helpers;
-use Memory::Usage;
+
+use Mediabot::Context;
 use Mediabot::Radio::Icecast;
 
 our @EXPORT = qw(
@@ -25,6 +26,8 @@ our @EXPORT = qw(
     mbStatus_ctx
     radioStatus_ctx
     radioMounts_ctx
+    displayRadioListeners_ctx
+    radioNext_ctx
     song_ctx
     update
     update_ctx
@@ -366,14 +369,24 @@ sub mbExec_ctx {
         return;
     }
 
+    # B1/A1: limit command length to prevent abuse
+    if (length($command) > 512) {
+        botNotice($self, $nick, "Command too long (max 512 chars).");
+        return;
+    }
+
     # Very basic safety guard for obviously destructive commands
+    # B1/A1: expanded safety blacklist — Owner-only but defence-in-depth
     if (
-        $command =~ /\brm\s+-rf\b/i
-        || $command =~ /:()\s*{\s*:|:&};:/   # old bash fork bomb
+        $command =~ /\brm\s+-rf\b/i                        # rm -rf
+        || $command =~ /\brm\s+-r\s+\//i                  # rm -r /
+        || $command =~ /:()\s*{\s*:|:&};:/                  # bash fork bomb
         || $command =~ /\bshutdown\b|\breboot\b/i
         || $command =~ /\bmkfs\b/i
         || $command =~ /\bdd\s+if=/i
         || $command =~ />\s*\/dev\/sd/i
+        || $command =~ /(?:curl|wget)\b.*\|\s*(?:bash|sh)\b/i  # download+exec
+        || $command =~ />\s*\/etc\/(?:passwd|shadow|sudoers)/i  # clobber system files
     ) {
         botNotice($self, $nick, "Don't be that evil!");
         return;
@@ -422,7 +435,12 @@ sub mbExec_ctx {
 
         $send->("$i: $line");
         $has_output = 1;
-        last if ++$i >= 3;
+
+        if (++$i >= 3) {
+            # B1/A1: /usr/bin/timeout handles child lifetime;
+            # just break — close() will return quickly once the pipe is drained
+            last;
+        }
     }
 
     close $cmd_fh;
@@ -530,7 +548,7 @@ sub radioStatus_ctx {
     return unless $ctx->require_level('Master');
 
     my $base_url      = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
-    my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || 'http://teuk.org:8000';
+    my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || $base_url;
     my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio160.mp3';
     my $timeout       = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
 
@@ -621,6 +639,113 @@ sub radioMounts_ctx {
     logBot($self, $ctx->message, undef, 'radiomounts', undef);
 }
 
+
+sub displayRadioListeners_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $conf = $self->{conf};
+
+    my $base_url      = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
+    my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || $base_url;
+    my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio160.mp3';
+    my $timeout       = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
+
+    $timeout = 5 unless defined $timeout && $timeout =~ /^\d+$/ && $timeout > 0;
+
+    my $radio = Mediabot::Radio::Icecast->new(
+        base_url => $base_url,
+        timeout  => $timeout,
+        logger   => $self->{logger},
+    );
+
+    my $info = $radio->get_summary(
+        primary_mount => $primary_mount,
+        public_base   => $public_base,
+    );
+
+    unless ($info->{ok}) {
+        my $msg = "Radio listeners error: " . ($info->{error} || 'unknown error');
+
+        if ($ctx->is_private) {
+            $ctx->reply_private($msg);
+        } else {
+            $ctx->reply($msg);
+        }
+
+        logBot($self, $ctx->message, undef, 'listeners', 'error');
+        return;
+    }
+
+    my $total           = defined $info->{total_listeners} ? $info->{total_listeners} : '?';
+    my $mount           = $info->{primary_mount} || $primary_mount;
+    my $mount_listeners = defined $info->{mount_listeners} ? $info->{mount_listeners} : '?';
+
+    my $msg = "Radio listeners: total=$total | $mount=$mount_listeners";
+
+    if ($ctx->is_private) {
+        $ctx->reply_private($msg);
+    } else {
+        $ctx->reply($msg);
+    }
+
+    logBot($self, $ctx->message, undef, 'listeners', undef);
+    return 1;
+}
+
+sub radioNext_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+
+    my $msg = "nextsong is not wired to a radio scheduler yet; current song follows.";
+
+    if ($ctx->is_private) {
+        $ctx->reply_private($msg);
+    } else {
+        $ctx->reply($msg);
+    }
+
+    logBot($self, $ctx->message, undef, 'nextsong', 'not_implemented');
+    return song_ctx($ctx);
+}
+
+sub update_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    return unless $ctx->require_level('Master');
+
+    my $script = 'install/deploy_update.sh';
+    my $msg = "The IRC update command is disabled for safety. Use ./$script manually from the mediabot_v3 directory.";
+
+    if ($ctx->is_private) {
+        $ctx->reply_private($msg);
+    } else {
+        botNotice($self, $nick, $msg);
+    }
+
+    logBot($self, $ctx->message, undef, 'update', 'disabled');
+    return 1;
+}
+
+sub update {
+    my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
+
+    my $ctx = Mediabot::Context->new(
+        bot     => $self,
+        message => $message,
+        nick    => $sNick,
+        channel => $sChannel,
+        command => 'update',
+        args    => \@tArgs,
+    );
+
+    return update_ctx($ctx);
+}
+
 sub song_ctx {
     my ($ctx) = @_;
 
@@ -628,7 +753,7 @@ sub song_ctx {
     my $conf = $self->{conf};
 
     my $base_url      = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
-    my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || 'http://teuk.org:8000';
+    my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || $base_url;
     my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio160.mp3';
     my $timeout       = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
 
@@ -657,7 +782,7 @@ sub song_ctx {
     }
 
     my $title      = defined $info->{title} && $info->{title} ne '' ? $info->{title} : 'unknown';
-    my $listen_url = $info->{listen_url} || 'http://teuk.org:8000/radio160.mp3';
+    my $listen_url = $info->{listen_url} || ($public_base . $primary_mount);
 
     my $msg =
           String::IRC->new('[ ')->white

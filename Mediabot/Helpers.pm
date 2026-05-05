@@ -24,6 +24,7 @@ use Digest::SHA qw(sha1 sha1_hex);
 use List::Util qw(min);
 use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
 use IO::Async::Timer::Countdown;
+use Encode qw(encode);
 
 our @EXPORT = qw(
     botNotice
@@ -569,13 +570,9 @@ sub botAction {
 			$self->{logger}->log(0,"-> *$sTo* $sMsg");
 		}
 		if (defined($sMsg) && ($sMsg ne "")) {
-			if (defined($sMsg) && utf8::is_utf8($sMsg)) {
-				$sMsg = Encode::encode("UTF-8", $sMsg);
-				$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $sMsg\1" );
-			}
-			else {
-				$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $sMsg\1" );
-			}
+			# B3: single encode path — avoid double-encode on pre-encoded bytes
+			$sMsg = encode("UTF-8", $sMsg) if utf8::is_utf8($sMsg);
+			$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $sMsg\1" );
 		}
 		else {
 			$self->{logger}->log(0,"botPrivmsg() ERROR no message specified to send to target");
@@ -586,7 +583,6 @@ sub botAction {
 	}
 }
 
-use Encode qw(encode);
 
 # Send a notice to a target (user or channel)
 sub botNotice {
@@ -1462,30 +1458,40 @@ sub getIdChannelSet {
 sub getIdChansetList {
     my ($self, $sChansetValue) = @_;
 
-    # Basic sanity check
     unless (defined $sChansetValue && $sChansetValue ne '') {
-        $self->{logger}->log(2, "⚠️ getIdChansetList() called without a chanset value");
+        $self->{logger}->log(2, "getIdChansetList() called without a chanset value")
+            if $self->{logger};
         return undef;
     }
 
-    $self->{logger}->log(4, "🔍 getIdChansetList() looking up chanset: '$sChansetValue'");
+    $self->{logger}->log(4, "getIdChansetList() looking up chanset: '$sChansetValue'")
+        if $self->{logger};
 
-    my $id_chanset_list;
     my $sQuery = "SELECT id_chanset_list FROM CHANSET_LIST WHERE chanset=?";
     my $sth = $self->{dbh}->prepare($sQuery);
 
-    if (!$sth->execute($sChansetValue)) {
-        # Log SQL error
-        $self->{logger}->log(1, " SQL Error in getIdChansetList(): " . $DBI::errstr . " | Query: $sQuery");
+    unless ($sth) {
+        $self->{logger}->log(1, "getIdChansetList() SQL prepare error: " . $DBI::errstr . " | Query: $sQuery")
+            if $self->{logger};
+        return undef;
+    }
+
+    unless ($sth->execute($sChansetValue)) {
+        $self->{logger}->log(1, "getIdChansetList() SQL execute error: " . $DBI::errstr . " | Query: $sQuery")
+            if $self->{logger};
+        $sth->finish;
+        return undef;
+    }
+
+    my $id_chanset_list;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        $id_chanset_list = $ref->{id_chanset_list};
+        $self->{logger}->log(4, "getIdChansetList() found id_chanset_list=$id_chanset_list for chanset '$sChansetValue'")
+            if $self->{logger};
     }
     else {
-        if (my $ref = $sth->fetchrow_hashref()) {
-            $id_chanset_list = $ref->{id_chanset_list};
-            $self->{logger}->log(4, "✅ getIdChansetList() found id_chanset_list=$id_chanset_list for chanset '$sChansetValue'");
-        }
-        else {
-            $self->{logger}->log(4, "ℹ️ getIdChansetList() no result found for chanset '$sChansetValue'");
-        }
+        $self->{logger}->log(4, "getIdChansetList() no result found for chanset '$sChansetValue'")
+            if $self->{logger};
     }
 
     $sth->finish;

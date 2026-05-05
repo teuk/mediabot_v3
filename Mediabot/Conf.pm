@@ -31,8 +31,9 @@ sub get {
         if ($ENV{MEDIABOT_DEBUG_CONF}) {
             if ($self->{_logger} && $self->{_logger}->can('log')) {
                 $self->{_logger}->log(4, "Conf->get(): key '$key' not found in configuration");
-            } else {
-                warn "Conf->get(): key '$key' not found in configuration\n";
+            } elsif (!$self->{_warned_no_logger}++) {
+                # A3: emit warn only once before logger is attached to avoid STDERR flood
+                warn "Conf->get(): key '$key' not found (no logger yet)\n";
             }
         }
     }

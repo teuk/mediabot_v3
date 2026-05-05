@@ -24,6 +24,13 @@ privilege-level management, and optional auto-login logic.
 
 =cut
 
+
+sub _log {
+    my ($logger, $level, $msg) = @_;
+    $logger->log($level, $msg) if $logger;
+}
+
+
 # Constructor
 sub new {
     my ($class, $args) = @_;
@@ -85,17 +92,35 @@ Will use stored DBH if available.
 sub load_level {
     my ($self, $dbh) = @_;
     $dbh //= $self->{dbh};
-    return unless $dbh && defined $self->{level_id};
 
-    my $sth = $dbh->prepare("SELECT level, description FROM USER_LEVEL WHERE id_user_level = ?");
-    if ($sth->execute($self->{level_id})) {
-        if (my $ref = $sth->fetchrow_hashref) {
-            $self->{level}      = $ref->{level};
-            $self->{level_desc} = $ref->{description};
-        }
+    return 0 unless $dbh && defined $self->{level_id};
+
+    my $sql = "SELECT level, description FROM USER_LEVEL WHERE id_user_level = ?";
+    my $sth = $dbh->prepare($sql);
+
+    unless ($sth) {
+        carp "load_level() SQL prepare error: $DBI::errstr";
+        return 0;
     }
+
+    unless ($sth->execute($self->{level_id})) {
+        carp "load_level() SQL execute error: $DBI::errstr";
+        $sth->finish;
+        return 0;
+    }
+
+    my $loaded = 0;
+
+    if (my $ref = $sth->fetchrow_hashref) {
+        $self->{level}      = $ref->{level};
+        $self->{level_desc} = $ref->{description};
+        $loaded = 1;
+    }
+
     $sth->finish;
+    return $loaded;
 }
+
 
 =head2 maybe_autologin($bot, $matched_hostmask)
 
@@ -206,81 +231,165 @@ sub create {
         return undef;
     }
 
- $logger->log(1, " Creating user: nickname=$nickname, level=$level") if $logger;
+    _log($logger, 1, " Creating user: nickname=$nickname, level=$level");
 
-    # Determine level ID
+    # Determine level ID.
     my $level_id;
     if ($level =~ /^\d+$/) {
         $level_id = $level;
-    } else {
-        my $sth = $dbh->prepare("SELECT id_user_level FROM USER_LEVEL WHERE description = ?");
-        $sth->execute($level);
+    }
+    else {
+        my $sql_level = "SELECT id_user_level FROM USER_LEVEL WHERE description = ?";
+        my $sth = $dbh->prepare($sql_level);
+
+        unless ($sth) {
+            carp "create() level SQL prepare error: $DBI::errstr";
+            _log($logger, 1, " create() level SQL prepare error: $DBI::errstr Query: $sql_level");
+            return undef;
+        }
+
+        unless ($sth->execute($level)) {
+            carp "create() level SQL execute error: $DBI::errstr";
+            _log($logger, 1, " create() level SQL execute error: $DBI::errstr Query: $sql_level");
+            $sth->finish;
+            return undef;
+        }
+
         if (my $ref = $sth->fetchrow_hashref) {
             $level_id = $ref->{id_user_level};
         }
+
         $sth->finish;
     }
+
     unless ($level_id) {
         carp "Invalid level: $level";
- $logger->log(1, " Invalid level: $level") if $logger;
+        _log($logger, 1, " Invalid level: $level");
         return undef;
     }
 
-    # Check if user exists
-    my $sth_check = $dbh->prepare("SELECT id_user FROM USER WHERE nickname = ?");
-    $sth_check->execute($nickname);
+    # Check if user exists.
+    my $sql_check = "SELECT id_user FROM USER WHERE nickname = ?";
+    my $sth_check = $dbh->prepare($sql_check);
+
+    unless ($sth_check) {
+        carp "create() duplicate-check SQL prepare error: $DBI::errstr";
+        _log($logger, 1, " create() duplicate-check SQL prepare error: $DBI::errstr Query: $sql_check");
+        return undef;
+    }
+
+    unless ($sth_check->execute($nickname)) {
+        carp "create() duplicate-check SQL execute error: $DBI::errstr";
+        _log($logger, 1, " create() duplicate-check SQL execute error: $DBI::errstr Query: $sql_check");
+        $sth_check->finish;
+        return undef;
+    }
+
     if (my $ref = $sth_check->fetchrow_hashref) {
         carp "User $nickname already exists (id_user: $ref->{id_user})";
- $logger->log(1, " User $nickname already exists (id_user: $ref->{id_user})") if $logger;
+        _log($logger, 1, " User $nickname already exists (id_user: $ref->{id_user})");
+        $sth_check->finish;
         return undef;
     }
+
     $sth_check->finish;
 
-    # Insert new user (no longer stores hostmasks in USER — they go in USER_HOSTMASK)
-    my $sth_insert = $dbh->prepare("
+    # Insert new user. Hostmasks are stored in USER_HOSTMASK.
+    my $sql_insert = q{
         INSERT INTO USER (nickname, password, username, id_user_level, info1, info2, auth)
         VALUES (?, ?, NULL, ?, ?, ?, 0)
-    ");
-    my $pass_db = defined $password ? $password : undef;
-    my $ok = $sth_insert->execute($nickname, $pass_db, $level_id, $info1, $info2);
+    };
 
-    unless ($ok) {
-        $sth_insert->finish;
-        carp "Failed to insert user $nickname";
- $logger->log(1, " Failed to insert user $nickname") if $logger;
+    my $sth_insert = $dbh->prepare($sql_insert);
+
+    unless ($sth_insert) {
+        carp "create() user insert SQL prepare error: $DBI::errstr";
+        _log($logger, 1, " create() user insert SQL prepare error: $DBI::errstr Query: $sql_insert");
         return undef;
     }
 
-    # Capture id immediately before any other statement
-    my $new_id = $sth_insert->{ Database }->last_insert_id(undef, undef, undef, undef);
-    $sth_insert->finish;
+    my $pass_db = defined $password ? $password : undef;
 
-    # Store hostmask in USER_HOSTMASK
-    if ($new_id && $hostmasks) {
-        for my $mask (grep { length } split /,/, $hostmasks) {
-            $mask =~ s/^\s+|\s+$//g;
-            my $hm = $dbh->prepare("INSERT INTO USER_HOSTMASK (id_user, hostmask) VALUES (?, ?)");
-            $hm->execute($new_id, $mask);
-            $hm->finish;
-        }
+    unless ($sth_insert->execute($nickname, $pass_db, $level_id, $info1, $info2)) {
+        carp "Failed to insert user $nickname";
+        _log($logger, 1, " Failed to insert user $nickname: $DBI::errstr");
+        $sth_insert->finish;
+        return undef;
     }
 
-    # Fetch the newly created user
-    my $sth_get = $dbh->prepare("SELECT id_user, nickname, password, username, id_user_level, auth, info1, info2 FROM USER WHERE nickname = ?");
-    $sth_get->execute($nickname);
+    $sth_insert->finish;
+
+    my $new_id = $dbh->last_insert_id(undef, undef, undef, undef);
+    $new_id //= $dbh->{mysql_insertid};
+
+    unless ($new_id) {
+        carp "Failed to retrieve id for newly created user $nickname";
+        _log($logger, 1, " Failed to retrieve id for newly created user $nickname");
+        return undef;
+    }
+
+    # Store hostmasks.
+    if ($hostmasks) {
+        my $sql_hostmask = "INSERT INTO USER_HOSTMASK (id_user, hostmask) VALUES (?, ?)";
+        my $hm = $dbh->prepare($sql_hostmask);
+
+        unless ($hm) {
+            carp "create() hostmask SQL prepare error: $DBI::errstr";
+            _log($logger, 1, " create() hostmask SQL prepare error: $DBI::errstr Query: $sql_hostmask");
+            return undef;
+        }
+
+        for my $mask (grep { length } split /,/, $hostmasks) {
+            $mask =~ s/^\s+|\s+$//g;
+            next if $mask eq '';
+
+            unless ($hm->execute($new_id, $mask)) {
+                carp "Failed to insert hostmask for user $nickname";
+                _log($logger, 1, " Failed to insert hostmask for user $nickname: $DBI::errstr");
+                $hm->finish;
+                return undef;
+            }
+        }
+
+        $hm->finish;
+    }
+
+    # Fetch the newly created user.
+    my $sql_get = "SELECT id_user, nickname, password, username, id_user_level, auth, info1, info2 FROM USER WHERE nickname = ?";
+    my $sth_get = $dbh->prepare($sql_get);
+
+    unless ($sth_get) {
+        carp "create() refetch SQL prepare error: $DBI::errstr";
+        _log($logger, 1, " create() refetch SQL prepare error: $DBI::errstr Query: $sql_get");
+        return undef;
+    }
+
+    unless ($sth_get->execute($nickname)) {
+        carp "create() refetch SQL execute error: $DBI::errstr";
+        _log($logger, 1, " create() refetch SQL execute error: $DBI::errstr Query: $sql_get");
+        $sth_get->finish;
+        return undef;
+    }
+
     my $row = $sth_get->fetchrow_hashref;
     $sth_get->finish;
 
     return undef unless $row;
+
     $row->{dbh} = $dbh;
 
     my $user_obj = $class->new($row);
     $user_obj->load_level($dbh);
 
- $logger->log(1, " User created: $nickname (id_user=" . $user_obj->id . ", level=" . $user_obj->level_description . ")") if $logger;
+    _log(
+        $logger,
+        1,
+        " User created: $nickname (id_user=" . $user_obj->id . ", level=" . ($user_obj->level_description // '') . ")"
+    );
 
     return $user_obj;
 }
+
 
 # Return true if user's level is >= required level
 # Hierarchy (lower is stronger):

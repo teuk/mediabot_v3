@@ -1987,7 +1987,10 @@ sub _cmd_bans {
         return;
     }
 
-    $stream->write(sprintf("%d active ban(s) on $chan:\r\n", scalar @bans));
+    # A4: show count shown vs total available
+    my $total_bans = scalar @bans;
+    my $shown_bans = $total_bans > 10 ? 10 : $total_bans;
+    $stream->write(sprintf("%d active ban(s) on $chan (showing %d):\r\n", $total_bans, $shown_bans));
     $stream->write(sprintf("  %-4s %-30s %-8s %-16s %s\r\n",
         "#", "Mask", "Level", "By", "Expires"));
     $stream->write("  " . ("-" x 76) . "\r\n");

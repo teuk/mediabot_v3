@@ -24,7 +24,6 @@ use Config::Simple;
 use Date::Parse;
 use DBI;
 use Switch;
-use Memory::Usage;
 use IO::Async::Timer::Periodic;
 use String::IRC;
 use POSIX qw(setsid strftime);
@@ -1141,6 +1140,8 @@ sub mbCommandPublic {
         showcommands => sub { userShowcommandsChannel_ctx($ctx) },
         chaninfo     => sub { userChannelInfo_ctx($ctx) },
         chanlist     => sub { channelList_ctx($ctx) },
+        channels     => sub { channelList_ctx($ctx) },
+        channellist  => sub { channelList_ctx($ctx) },
         whoami       => sub { userWhoAmI_ctx($ctx) },
         auth         => sub { userAuthNick_ctx($ctx) },
         verify       => sub { userVerifyNick_ctx($ctx) },
@@ -1277,30 +1278,312 @@ sub mbUptime_ctx {
     botPrivmsg($self, $channel, "$nick has been up for $uptime_str.");
 }
 
-sub mbHelp_ctx {
-    my ($ctx) = @_;
-    my $self  = $ctx->bot;
-    my $nick  = $ctx->nick;
-    my $user  = $ctx->user;
-    my @args  = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-    my $level = eval { $user->level } // 999;
+sub _mbHelpInternalCommands {
+    my %help;
 
-    # A4: show commands filtered by user level
-    my @cmds_public = qw(help uptime status version date leet echo colors whoami
-                         seen q addquote weather resolve ban kickban unban bans);
-    my @cmds_master = qw(join part nick mode kick topic say timers log);
-    my @cmds_owner  = qw(die restart jump rehash addtimer remtimer eval);
+    my $raw = <<'MEDIABOT_INTERNAL_HELP';
+access|access [#channel]|public|Show your access level on a channel.
+act|act #channel <text>|operator+|Send an IRC action to a channel through the bot.
+add|add #channel <nick> <level>|channel admin|Add or update a user access level on a channel.
+addbadword|addbadword #channel <word>|channel admin|Add a badword filter entry for a channel.
+addcatcmd|addcatcmd <category>|authorized|Create a PUBLIC_COMMANDS category.
+addchan|addchan #channel|admin|Add a channel to the bot configuration.
+addcmd|addcmd <category> <command> <action>|authorized|Create a dynamic command stored in PUBLIC_COMMANDS.
+addhost|addhost <nick> <hostmask>|admin|Add a hostmask to a known user.
+addresponder|addresponder <trigger> <response>|admin|Add an automatic responder.
+addtimer|addtimer <name> <seconds> <command>|admin|Add a bot timer.
+adduser|adduser <nick> <level>|admin|Create a bot user.
+antifloodset|antifloodset #channel <key> <value>|channel admin|Adjust anti-flood settings for a channel.
+auth|auth|public|Check or refresh your authentication status.
+ban|ban #channel <mask|nick> [duration]|operator+|Ban a mask or nick on a channel.
+bans|bans #channel|operator+|List known bans for a channel.
+birthdate|birthdate [nick]|public|Display a stored user birthdate.
+birthday|birthday [nick]|public|Display birthday information.
+chaninfo|chaninfo #channel|public|Show information about a bot channel.
+chanlist|chanlist|public|List channels known by the bot.
+channels|channels|public|Alias for chanlist.
+channellist|channellist|public|Alias for chanlist.
+chanset|chanset #channel <setting> <value>|channel admin|Change a channel setting.
+chanstatlines|chanstatlines #channel|public|Show channel line/statistics information.
+chcatcmd|chcatcmd <command> <category>|authorized|Move a dynamic command to another category.
+checkhost|checkhost <hostmask>|admin|Search users matching a hostmask.
+checkhostchan|checkhostchan #channel <hostmask>|admin|Search channel users matching a hostmask.
+checknick|checknick <nick>|admin|Search known hostmasks for a nick.
+chowncmd|chowncmd <command> <nick>|authorized|Change the owner of a dynamic PUBLIC_COMMANDS command.
+colors|colors|public|Display IRC color information.
+countcmd|countcmd|authorized|Count dynamic PUBLIC_COMMANDS entries.
+cstat|cstat #channel|public|Show channel statistics.
+date|date [timezone|user]|public|Display the current date/time for a timezone or user.
+debug|debug <level>|master|Change or display debug verbosity.
+del|del #channel <nick>|channel admin|Remove a user from channel access.
+delresponder|delresponder <trigger>|admin|Remove an automatic responder.
+deluser|deluser <nick>|admin|Delete a bot user.
+deop|deop #channel [nick]|operator+|Remove operator status on a channel.
+devoice|devoice #channel [nick]|operator+|Remove voice status on a channel.
+die|die [reason]|master|Ask the bot to quit.
+dump|dump|master|Dump internal debug information.
+echo|echo <text>|admin|Echo text for debugging.
+exec|exec <command>|master|Execute a shell command. Dangerous and admin-only.
+f|f <player>|public|Display Fortnite stats when configured.
+greet|greet [text]|public|Show or set a greeting.
+hailo_chatter|hailo_chatter [on|off]|admin|Control Hailo chatter behavior.
+hailo_ignore|hailo_ignore <nick>|admin|Ignore a nick for Hailo learning or replies.
+hailo_status|hailo_status|admin|Show Hailo status.
+hailo_unignore|hailo_unignore <nick>|admin|Remove a nick from the Hailo ignore list.
+help|help [#channel|command|docs]|public|Show command lists, internal command help, or documentation pointers.
+holdcmd|holdcmd <command> [on|off]|authorized|Put a dynamic command on hold or restore it.
+ident|ident <login> <password>|private|Legacy/private authentication helper.
+ignore|ignore <nick|mask>|admin|Add an ignore entry.
+ignores|ignores|admin|List ignore entries.
+invite|invite #channel <nick>|operator+|Invite a nick to a channel.
+join|join #channel|admin|Make the bot join a channel.
+kb|kb #channel <nick> [reason]|operator+|Alias for kickban.
+kick|kick #channel <nick> [reason]|operator+|Kick a user from a channel.
+kickban|kickban #channel <nick> [reason]|operator+|Kick and ban a user from a channel.
+lastcmd|lastcmd [limit]|authorized|Show recently used dynamic commands.
+lastcom|lastcom [nick]|public|Show recent command usage.
+leet|leet <text>|public|Convert text to leetspeak.
+listeners|listeners|public|Show Icecast listener counts.
+login|login <user> <password>|private|Authenticate with the bot.
+logout|logout|private|Logout from the bot.
+meteo|meteo [city]|public|Alias for weather.
+modcmd|modcmd <command> <new action>|authorized|Modify a dynamic PUBLIC_COMMANDS command.
+modinfo|modinfo <nick>|admin|Show moderation information about a user.
+moduser|moduser <nick> <field> <value>|admin|Modify a bot user.
+mp3|mp3 <query>|public|Search or display MP3/radio related information.
+msg|msg <nick|#channel> <text>|admin|Send a message through the bot.
+mvcmd|mvcmd <old> <new>|authorized|Rename a dynamic PUBLIC_COMMANDS command.
+nextsong|nextsong|public|Display next-song information when a scheduler is wired.
+nick|nick <newnick>|admin|Change the bot nickname.
+nicklist|nicklist #channel|public|List nicks currently known on a channel.
+op|op #channel [nick]|operator+|Give operator status on a channel.
+owncmd|owncmd [nick]|authorized|List dynamic commands owned by a user.
+part|part #channel [reason]|admin|Make the bot leave a channel.
+pass|pass <oldpass> <newpass>|private|Change your bot password.
+popcmd|popcmd|authorized|Show popular dynamic commands.
+purge|purge #channel|admin|Purge or reset channel runtime information.
+q|q [nick|search]|public|Display a quote.
+qlog|qlog #channel <query>|admin|Search channel logs.
+radiomounts|radiomounts|private|List Icecast mounts.
+radiostatus|radiostatus|private|Show Icecast status.
+register|register <owner> <password>|private|Register the first owner account.
+rehash|rehash|master|Reload bot configuration.
+rembadword|rembadword #channel <word>|channel admin|Remove a badword filter entry.
+remcmd|remcmd <command>|authorized|Remove a dynamic PUBLIC_COMMANDS command.
+remtimer|remtimer <name>|admin|Remove a bot timer.
+resolve|resolve <host|ip>|public|Resolve a hostname or IP address.
+rnick|rnick #channel|public|Pick a random nick from a channel.
+say|say #channel <text>|admin|Send a channel message through the bot.
+searchcmd|searchcmd <keyword> [limit]|public|Search dynamic PUBLIC_COMMANDS entries.
+seen|seen <nick>|public|Show when a nick was last seen.
+showcmd|showcmd <command>|public|Display a dynamic PUBLIC_COMMANDS command.
+showcommands|showcommands [#channel]|public|List commands available for your level on a channel.
+song|song|public|Show the current Icecast song or stream title.
+status|status|admin|Show bot runtime status.
+tellme|tellme <prompt>|public|Ask the configured ChatGPT/OpenAI integration.
+timers|timers|admin|List bot timers.
+tmdb|tmdb <movie or show>|public|Search TMDB when configured.
+tmdblangset|tmdblangset #channel <lang>|channel admin|Set TMDB language for a channel.
+topic|topic #channel <topic>|private/admin|Change the topic of a channel.
+topcmd|topcmd|authorized|Show most used dynamic commands.
+topsay|topsay [#channel]|public|Show top talkers.
+unban|unban #channel <mask|id>|operator+|Remove a ban from a channel.
+unignore|unignore <nick|mask>|admin|Remove an ignore entry.
+update|update|master|Disabled IRC update command. Use the deploy script manually.
+uptime|uptime|public|Show bot uptime.
+userinfo|userinfo <nick>|admin|Show information about a user.
+users|users|admin|List or count known users.
+verify|verify|public|Verify your authentication or account state.
+version|version|public|Show bot version.
+voice|voice #channel [nick]|operator+|Give voice on a channel.
+weather|weather [city]|public|Display weather information.
+whereis|whereis <nick>|public|Locate a nick or channel when known.
+whoami|whoami|public|Show who the bot thinks you are.
+whotalk|whotalk #channel|public|Show channel talk statistics.
+whotalks|whotalks #channel|public|Alias for whotalk.
+xlogin|xlogin <account>|public|Authenticate or check X login integration when configured.
+yomomma|yomomma|public|Return a yomomma joke.
+yt|yt <query>|public|Search YouTube when configured.
+MEDIABOT_INTERNAL_HELP
 
-    my @available = @cmds_public;
-    push @available, @cmds_master if $level <= 1;
-    push @available, @cmds_owner  if $level == 0;
+    for my $line (split /\n/, $raw) {
+        next if $line =~ /^\s*$/;
 
-    my %seen; @available = grep { !$seen{$_}++ } @available;
+        # Format is:
+        #   command|syntax|level|description
+        #
+        # The syntax itself may contain pipes, for example:
+        #   ban #channel <mask|nick> [duration]
+        #   date [timezone|user]
+        #
+        # So we parse from both ends instead of blindly using split(..., 4).
+        my @fields = split /\|/, $line;
+        my $cmd    = shift @fields;
+        my $desc   = pop @fields;
+        my $level  = pop @fields;
+        my $syntax = join('|', @fields);
 
-    botNotice($self, $nick, "Commands: " . join(', ', sort @available));
-    botNotice($self, $nick, "Full documentation: https://github.com/teuk/mediabot_v3/wiki");
+        next unless defined $cmd && length $cmd;
+
+        $help{lc $cmd} = {
+            syntax => defined($syntax) && length($syntax) ? $syntax : $cmd,
+            level  => defined($level)  && length($level)  ? $level  : 'unknown',
+            desc   => defined($desc)   && length($desc)   ? $desc   : 'No description available yet.',
+        };
+    }
+
+    return %help;
 }
 
+sub _mbHelpPublicCommandExists {
+    my ($self, $cmd) = @_;
+
+    return 0 unless defined $cmd && $cmd ne '';
+    return 0 unless $self && $self->{dbh};
+
+    my $sth = eval {
+        $self->{dbh}->prepare(
+            'SELECT 1 FROM PUBLIC_COMMANDS WHERE command = ? LIMIT 1'
+        );
+    };
+
+    return 0 unless $sth;
+
+    my $ok = eval {
+        $sth->execute($cmd);
+        1;
+    };
+
+    unless ($ok) {
+        eval { $sth->finish };
+        return 0;
+    }
+
+    my ($exists) = $sth->fetchrow_array;
+    $sth->finish;
+
+    return $exists ? 1 : 0;
+}
+
+sub _mbHelpSendInternalCommand {
+    my ($ctx, $cmd, $entry) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    botNotice($self, $nick, "Internal command: $cmd");
+    botNotice($self, $nick, "Syntax: " . ($entry->{syntax} // $cmd));
+    botNotice($self, $nick, "Level: " . ($entry->{level} // 'unknown'));
+    botNotice($self, $nick, "Description: " . ($entry->{desc} // 'No description available yet.'));
+
+    return 1;
+}
+
+sub _mbHelpSendChunkedList {
+    my ($self, $nick, $prefix, @items) = @_;
+
+    return unless @items;
+
+    my $max_len = 360;
+    my $line = $prefix;
+
+    for my $item (@items) {
+        my $piece = ($line eq $prefix) ? $item : ", $item";
+
+        if (length($line) + length($piece) > $max_len) {
+            botNotice($self, $nick, $line);
+            $line = $prefix . $item;
+        } else {
+            $line .= $piece;
+        }
+    }
+
+    botNotice($self, $nick, $line) if $line ne $prefix;
+
+    return 1;
+}
+
+sub _mbHelpSendInternalList {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    my %internal = _mbHelpInternalCommands();
+    my @commands = sort keys %internal;
+
+    my @public_like;
+    my @privileged;
+
+    for my $cmd (@commands) {
+        my $level = lc($internal{$cmd}->{level} // '');
+
+        if ($level =~ /^(?:public|private)$/) {
+            push @public_like, $cmd;
+        } else {
+            push @privileged, $cmd;
+        }
+    }
+
+    botNotice($self, $nick, "Internal commands help:");
+
+    _mbHelpSendChunkedList($self, $nick, "Public/private: ", @public_like);
+    _mbHelpSendChunkedList($self, $nick, "Privileged/admin: ", @privileged);
+
+    botNotice($self, $nick, "Use: help <command> for syntax and explanation.");
+    botNotice($self, $nick, "Dynamic PUBLIC_COMMANDS are still available through: showcommands #channel");
+
+    return 1;
+}
+
+sub mbHelp_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $first = defined $args[0] ? $args[0] : '';
+
+    if ($first =~ /^(?:wiki|doc|docs|documentation)$/i) {
+        botNotice($self, $nick, "Mediabot documentation: https://github.com/teuk/mediabot_v3/wiki");
+        return 1;
+    }
+
+    if ($first =~ /^(?:internal|internals|commands)$/i) {
+        return _mbHelpSendInternalList($ctx);
+    }
+
+    if ($first ne '' && $first !~ /^#/) {
+        my $cmd = lc $first;
+        my %internal = _mbHelpInternalCommands();
+
+        if (my $entry = $internal{$cmd}) {
+            return _mbHelpSendInternalCommand($ctx, $cmd, $entry);
+        }
+
+        if (_mbHelpPublicCommandExists($self, $cmd)) {
+            return mbDbShowCommand_ctx($ctx);
+        }
+
+        botNotice($self, $nick, "No internal help or PUBLIC_COMMANDS entry found for '$cmd'.");
+        botNotice($self, $nick, "Try: searchcmd $cmd");
+        botNotice($self, $nick, "Try: showcommands #channel");
+        botNotice($self, $nick, "Documentation: https://github.com/teuk/mediabot_v3/wiki");
+        return 1;
+    }
+
+    my $channel = $ctx->channel // '';
+
+    if ($first !~ /^#/ && $channel !~ /^#/) {
+        botNotice($self, $nick, "Syntax: help #channel");
+        botNotice($self, $nick, "You can also use: help docs");
+        botNotice($self, $nick, "For a specific internal command: help <command>");
+        return 1;
+    }
+
+    return userShowcommandsChannel_ctx($ctx);
+}
 
 # Handle bot nick triggered messages - natural patterns + Hailo fallback
 sub mbHandleNickTriggered {
@@ -1446,6 +1729,8 @@ sub mbCommandPrivate {
         showcommands => sub { userShowcommandsChannel_ctx($ctx) },
         chaninfo    => sub { userChannelInfo_ctx($ctx) },
         chanlist    => sub { channelList_ctx($ctx) },
+        channels    => sub { channelList_ctx($ctx) },
+        channellist => sub { channelList_ctx($ctx) },
         whoami      => sub { userWhoAmI_ctx($ctx) },
         auth        => sub { userAuthNick_ctx($ctx) },
         verify      => sub { userVerifyNick_ctx($ctx) },

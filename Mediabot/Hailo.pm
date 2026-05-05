@@ -56,26 +56,39 @@ sub get_hailo {
 }
 
 # Clean up and exit the program (with proper Net::Async::IRC QUIT)
+# Check whether Hailo should ignore a nick
 sub is_hailo_excluded_nick {
-	my ($self,$nick) = @_;
-	my $sQuery = "SELECT 1 FROM HAILO_EXCLUSION_NICK WHERE nick = ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($nick)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		my $sOutput = "";
-		if (my $ref = $sth->fetchrow_hashref()) {
-			$sth->finish;
-			return 1;
-		}
-		else {
-			$sth->finish;
-			return 0;
-		}
-	}
+    my ($self, $nick) = @_;
+
+    return 0 unless defined($nick) && $nick ne '';
+    return 0 unless $self->{dbh};
+
+    my $sQuery = "SELECT 1 FROM HAILO_EXCLUSION_NICK WHERE nick = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "is_hailo_excluded_nick() SQL prepare error: $DBI::errstr Query: $sQuery")
+            if $self->{logger};
+        return 0;
+    }
+
+    unless ($sth->execute($nick)) {
+        $self->{logger}->log(1, "is_hailo_excluded_nick() SQL execute error: $DBI::errstr Query: $sQuery")
+            if $self->{logger};
+        $sth->finish;
+        return 0;
+    }
+
+    my $excluded = $sth->fetchrow_hashref() ? 1 : 0;
+    $sth->finish;
+
+    return $excluded;
 }
 
+
+# hailo_ignore <nick>
+# Add a nick to HAILO_EXCLUSION_NICK so Hailo will ignore it
+# Requires: authenticated + Master
 # hailo_ignore <nick>
 # Add a nick to HAILO_EXCLUSION_NICK so Hailo will ignore it
 # Requires: authenticated + Master
@@ -88,7 +101,6 @@ sub hailo_ignore_ctx {
 
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    # --- Resolve user and permissions ---
     my $user = $ctx->user // eval { $self->get_user_from_message($message) };
 
     unless ($user && $user->is_authenticated) {
@@ -116,7 +128,6 @@ sub hailo_ignore_ctx {
         return;
     }
 
-    # --- Syntax and arguments ---
     unless (defined $args[0] && $args[0] ne '') {
         botNotice($self, $caller, "Syntax: hailo_ignore <nick>");
         return;
@@ -124,11 +135,21 @@ sub hailo_ignore_ctx {
 
     my $target_nick = $args[0];
 
-    # --- Check if nick is already ignored ---
     my $sql = "SELECT id_hailo_exclusion_nick FROM HAILO_EXCLUSION_NICK WHERE nick = ?";
     my $sth = $self->{dbh}->prepare($sql);
-    unless ($sth && $sth->execute($target_nick)) {
-        $self->{logger}->log(1, "hailo_ignore_ctx() SQL Error (SELECT): $DBI::errstr | Query: $sql");
+
+    unless ($sth) {
+        $self->{logger}->log(1, "hailo_ignore_ctx() SQL prepare error (SELECT): $DBI::errstr | Query: $sql")
+            if $self->{logger};
+        botNotice($self, $caller, "Database error while checking Hailo ignore for $target_nick.");
+        return;
+    }
+
+    unless ($sth->execute($target_nick)) {
+        $self->{logger}->log(1, "hailo_ignore_ctx() SQL execute error (SELECT): $DBI::errstr | Query: $sql")
+            if $self->{logger};
+        $sth->finish;
+        botNotice($self, $caller, "Database error while checking Hailo ignore for $target_nick.");
         return;
     }
 
@@ -137,16 +158,27 @@ sub hailo_ignore_ctx {
         botNotice($self, $caller, "Nick $target_nick is already ignored by Hailo (id $ref->{id_hailo_exclusion_nick}).");
         return;
     }
+
     $sth->finish;
 
-    # --- Insert new ignore entry ---
     $sql = "INSERT INTO HAILO_EXCLUSION_NICK (nick) VALUES (?)";
     $sth = $self->{dbh}->prepare($sql);
-    unless ($sth && $sth->execute($target_nick)) {
-        $self->{logger}->log(1, "hailo_ignore_ctx() SQL Error (INSERT): $DBI::errstr | Query: $sql");
+
+    unless ($sth) {
+        $self->{logger}->log(1, "hailo_ignore_ctx() SQL prepare error (INSERT): $DBI::errstr | Query: $sql")
+            if $self->{logger};
         botNotice($self, $caller, "Database error while adding Hailo ignore for $target_nick.");
         return;
     }
+
+    unless ($sth->execute($target_nick)) {
+        $self->{logger}->log(1, "hailo_ignore_ctx() SQL execute error (INSERT): $DBI::errstr | Query: $sql")
+            if $self->{logger};
+        $sth->finish;
+        botNotice($self, $caller, "Database error while adding Hailo ignore for $target_nick.");
+        return;
+    }
+
     $sth->finish;
 
     botNotice($self, $caller, "Hailo will now ignore nick $target_nick.");
@@ -155,6 +187,10 @@ sub hailo_ignore_ctx {
     return 1;
 }
 
+
+# hailo_unignore <nick>
+# Remove a nick from HAILO_EXCLUSION_NICK so Hailo will reply again
+# Requires: authenticated + Master
 # hailo_unignore <nick>
 # Remove a nick from HAILO_EXCLUSION_NICK so Hailo will reply again
 # Requires: authenticated + Master
@@ -168,7 +204,6 @@ sub hailo_unignore_ctx {
 
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    # --- Resolve user and permissions ---
     my $user = $ctx->user // eval { $self->get_user_from_message($message) };
 
     unless ($user && $user->is_authenticated) {
@@ -196,7 +231,6 @@ sub hailo_unignore_ctx {
         return;
     }
 
-    # --- Syntax and arguments ---
     unless (defined $args[0] && $args[0] ne '') {
         botNotice($self, $caller, "Syntax: hailo_unignore <nick>");
         return;
@@ -204,11 +238,20 @@ sub hailo_unignore_ctx {
 
     my $target_nick = $args[0];
 
-    # --- Check if nick is currently ignored ---
     my $sql = "SELECT id_hailo_exclusion_nick FROM HAILO_EXCLUSION_NICK WHERE nick = ?";
     my $sth = $self->{dbh}->prepare($sql);
-    unless ($sth && $sth->execute($target_nick)) {
-        $self->{logger}->log(1, "hailo_unignore_ctx() SQL Error (SELECT): $DBI::errstr | Query: $sql");
+
+    unless ($sth) {
+        $self->{logger}->log(1, "hailo_unignore_ctx() SQL prepare error (SELECT): $DBI::errstr | Query: $sql")
+            if $self->{logger};
+        botNotice($self, $caller, "Database error while checking Hailo ignore for $target_nick.");
+        return;
+    }
+
+    unless ($sth->execute($target_nick)) {
+        $self->{logger}->log(1, "hailo_unignore_ctx() SQL execute error (SELECT): $DBI::errstr | Query: $sql")
+            if $self->{logger};
+        $sth->finish;
         botNotice($self, $caller, "Database error while checking Hailo ignore for $target_nick.");
         return;
     }
@@ -223,14 +266,24 @@ sub hailo_unignore_ctx {
 
     my $id_excl = $row->{id_hailo_exclusion_nick};
 
-    # --- Delete ignore entry ---
     $sql = "DELETE FROM HAILO_EXCLUSION_NICK WHERE id_hailo_exclusion_nick = ?";
     $sth = $self->{dbh}->prepare($sql);
-    unless ($sth && $sth->execute($id_excl)) {
-        $self->{logger}->log(1, "hailo_unignore_ctx() SQL Error (DELETE): $DBI::errstr | Query: $sql");
+
+    unless ($sth) {
+        $self->{logger}->log(1, "hailo_unignore_ctx() SQL prepare error (DELETE): $DBI::errstr | Query: $sql")
+            if $self->{logger};
         botNotice($self, $caller, "Database error while removing Hailo ignore for $target_nick.");
         return;
     }
+
+    unless ($sth->execute($id_excl)) {
+        $self->{logger}->log(1, "hailo_unignore_ctx() SQL execute error (DELETE): $DBI::errstr | Query: $sql")
+            if $self->{logger};
+        $sth->finish;
+        botNotice($self, $caller, "Database error while removing Hailo ignore for $target_nick.");
+        return;
+    }
+
     $sth->finish;
 
     botNotice($self, $caller, "Hailo will no longer ignore nick $target_nick.");
@@ -238,6 +291,7 @@ sub hailo_unignore_ctx {
 
     return 1;
 }
+
 
 # hailo_status
 # Show Hailo brain statistics (tokens, expressions, links, etc.)
@@ -344,80 +398,127 @@ sub hailo_status_ctx {
 }
 
 # Get the Hailo chatter ratio for a specific channel
+# Get the Hailo chatter ratio for a specific channel
 sub get_hailo_channel_ratio {
-	my ($self,$sChannel) = @_;
-	my $sQuery = "SELECT HAILO_CHANNEL.ratio FROM HAILO_CHANNEL JOIN CHANNEL ON CHANNEL.id_channel = HAILO_CHANNEL.id_channel WHERE CHANNEL.name = ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel)) {
-		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	else {
-		if (my $ref = $sth->fetchrow_hashref()) {
-			my $ratio = $ref->{'ratio'};
-			$sth->finish;
-			return $ratio;
-		}
-		else {
-			$sth->finish;
-			return -1;
-		}
-	}
+    my ($self, $sChannel) = @_;
+
+    return -1 unless defined($sChannel) && $sChannel ne '';
+    return -1 unless $self->{dbh};
+
+    my $sQuery = "SELECT HAILO_CHANNEL.ratio FROM HAILO_CHANNEL JOIN CHANNEL ON CHANNEL.id_channel = HAILO_CHANNEL.id_channel WHERE CHANNEL.name = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "get_hailo_channel_ratio() SQL prepare error: $DBI::errstr Query: $sQuery")
+            if $self->{logger};
+        return -1;
+    }
+
+    unless ($sth->execute($sChannel)) {
+        $self->{logger}->log(1, "get_hailo_channel_ratio() SQL execute error: $DBI::errstr Query: $sQuery")
+            if $self->{logger};
+        $sth->finish;
+        return -1;
+    }
+
+    my $ratio = -1;
+    if (my $ref = $sth->fetchrow_hashref()) {
+        $ratio = $ref->{ratio};
+    }
+
+    $sth->finish;
+    return $ratio;
 }
+
 
 # Set the Hailo chatter ratio for a specific channel
+# Set the Hailo chatter ratio for a specific channel
 sub set_hailo_channel_ratio {
-	my ($self, $sChannel, $ratio) = @_;
+    my ($self, $sChannel, $ratio) = @_;
 
-	my $channel_obj = $self->{channels}{$sChannel};
+    return undef unless defined($sChannel) && $sChannel ne '';
+    return undef unless defined($ratio);
 
-	unless (defined $channel_obj) {
-		$self->{logger}->log(1, "set_hailo_channel_ratio() unknown channel: $sChannel");
-		return undef;
-	}
+    my $channel_obj = $self->{channels}{$sChannel} || $self->{channels}{lc($sChannel)};
 
-	my $id_channel = $channel_obj->get_id;
+    unless (defined $channel_obj) {
+        $self->{logger}->log(1, "set_hailo_channel_ratio() unknown channel: $sChannel")
+            if $self->{logger};
+        return undef;
+    }
 
-	# Check if HAILO_CHANNEL entry exists for this channel
-	my $sQuery = "SELECT ratio FROM HAILO_CHANNEL WHERE id_channel = ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
+    my $id_channel = $channel_obj->get_id;
 
-	unless ($sth->execute($id_channel)) {
-		$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
-		$sth->finish;
-		return undef;
-	}
+    unless (defined $id_channel) {
+        $self->{logger}->log(1, "set_hailo_channel_ratio() cannot resolve id_channel for $sChannel")
+            if $self->{logger};
+        return undef;
+    }
 
-	my $ref_check = $sth->fetchrow_hashref();
-	$sth->finish;
+    my $sQuery = "SELECT ratio FROM HAILO_CHANNEL WHERE id_channel = ?";
+    my $sth = $self->{dbh}->prepare($sQuery);
 
-	if ($ref_check) {
-		# Entry exists — update ratio
-		$sQuery = "UPDATE HAILO_CHANNEL SET ratio = ? WHERE id_channel = ?";
-		$sth = $self->{dbh}->prepare($sQuery);
+    unless ($sth) {
+        $self->{logger}->log(1, "set_hailo_channel_ratio() SQL prepare error (SELECT): $DBI::errstr | Query: $sQuery")
+            if $self->{logger};
+        return undef;
+    }
 
-		if ($sth->execute($ratio, $id_channel)) {
-			$sth->finish;
-			$self->{logger}->log(3, "set_hailo_channel_ratio updated hailo chatter ratio to $ratio for $sChannel");
-			return 0;
-		} else {
-			$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
-			return undef;
-		}
-	} else {
-		# No entry yet, insert new one
-		$sQuery = "INSERT INTO HAILO_CHANNEL (id_channel, ratio) VALUES (?, ?)";
-		$sth = $self->{dbh}->prepare($sQuery);
+    unless ($sth->execute($id_channel)) {
+        $self->{logger}->log(1, "set_hailo_channel_ratio() SQL execute error (SELECT): $DBI::errstr | Query: $sQuery")
+            if $self->{logger};
+        $sth->finish;
+        return undef;
+    }
 
-		if ($sth->execute($id_channel, $ratio)) {
-			$sth->finish;
-			$self->{logger}->log(3, "set_hailo_channel_ratio set hailo chatter ratio to $ratio for $sChannel");
-			return 0;
-		} else {
-			$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
-			return undef;
-		}
-	}
+    my $ref_check = $sth->fetchrow_hashref();
+    $sth->finish;
+
+    if ($ref_check) {
+        $sQuery = "UPDATE HAILO_CHANNEL SET ratio = ? WHERE id_channel = ?";
+        $sth = $self->{dbh}->prepare($sQuery);
+
+        unless ($sth) {
+            $self->{logger}->log(1, "set_hailo_channel_ratio() SQL prepare error (UPDATE): $DBI::errstr | Query: $sQuery")
+                if $self->{logger};
+            return undef;
+        }
+
+        unless ($sth->execute($ratio, $id_channel)) {
+            $self->{logger}->log(1, "set_hailo_channel_ratio() SQL execute error (UPDATE): $DBI::errstr | Query: $sQuery")
+                if $self->{logger};
+            $sth->finish;
+            return undef;
+        }
+
+        $sth->finish;
+        $self->{logger}->log(3, "set_hailo_channel_ratio updated hailo chatter ratio to $ratio for $sChannel")
+            if $self->{logger};
+        return 0;
+    }
+
+    $sQuery = "INSERT INTO HAILO_CHANNEL (id_channel, ratio) VALUES (?, ?)";
+    $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth) {
+        $self->{logger}->log(1, "set_hailo_channel_ratio() SQL prepare error (INSERT): $DBI::errstr | Query: $sQuery")
+            if $self->{logger};
+        return undef;
+    }
+
+    unless ($sth->execute($id_channel, $ratio)) {
+        $self->{logger}->log(1, "set_hailo_channel_ratio() SQL execute error (INSERT): $DBI::errstr | Query: $sQuery")
+            if $self->{logger};
+        $sth->finish;
+        return undef;
+    }
+
+    $sth->finish;
+    $self->{logger}->log(3, "set_hailo_channel_ratio set hailo chatter ratio to $ratio for $sChannel")
+        if $self->{logger};
+    return 0;
 }
+
 
 
 # hailo_chatter

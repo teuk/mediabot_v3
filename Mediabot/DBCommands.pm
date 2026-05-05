@@ -470,7 +470,9 @@ sub mbTimers_ctx {
         my @tasks = $self->{scheduler}->all_info;
 
         if (@tasks) {
-            $self->botNotice($nick, "Scheduler tasks: " . scalar(@tasks) . " result(s)");
+            # A5: tabular format for Scheduler tasks
+            $self->botNotice($nick, sprintf("%-28s %-8s %-8s %s", "Task", "Every", "Status", "Last run"));
+            $self->botNotice($nick, "-" x 58);
 
             my $page = 1;
 
@@ -535,8 +537,25 @@ sub mbDbAddCommand_ctx {
     }
 
     my $sCommand  = shift @args;
+
+    # B3/A2: validate command name
+    if (length($sCommand) > 64) {
+        botNotice($self, $nick, "Command name too long (max 64 chars).");
+        return;
+    }
+    if ($sCommand !~ /^[a-zA-Z0-9_-]+$/) {
+        botNotice($self, $nick, "Command name must be alphanumeric (a-z, 0-9, - _).");
+        return;
+    }
     my $sType     = shift @args;
     my $sCategory = shift @args;
+
+    # A3: validate action text AFTER sType and sCategory are removed from @args
+    my $action_text_check = join(' ', @args);
+    if (length($action_text_check) > 512) {
+        botNotice($self, $nick, "Action text too long (max 512 chars).");
+        return;
+    }
 
     # Resolve category
     my $id_cat = getCommandCategory($self, $sCategory);
@@ -1441,11 +1460,11 @@ sub mbDbSearchCommand_ctx {
         FROM PUBLIC_COMMANDS
         WHERE action LIKE ? ESCAPE '!'
         ORDER BY hits DESC, command ASC
-        LIMIT 50
+        LIMIT ?
     };
 
     my $sth = $self->{dbh}->prepare($sql);
-    unless ($sth && $sth->execute($like)) {
+    unless ($sth && $sth->execute($like, $search_limit)) {  # B1/A1: use $search_limit
         $self->{logger}->log(1, "mbDbSearchCommand_ctx() SQL Error: $DBI::errstr Query: $sql");
         botNotice($self, $nick, "Internal error (SQL).");
         return;
@@ -1703,6 +1722,12 @@ sub mbDbAddCategoryCommand_ctx {
     }
 
     my $category = $args[0];
+
+    # A3: validate category name
+    if (length($category) > 64 || $category !~ /^[\w\s-]+$/) {
+        botNotice($self, $nick, "Category name invalid (max 64 chars, alphanumeric/spaces/hyphens).");
+        return;
+    }
 
     # Check exists
     my $sth = $self->{dbh}->prepare(

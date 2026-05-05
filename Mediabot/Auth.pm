@@ -31,6 +31,7 @@ sub new {
         dbh    => $args{dbh},       # DBI handle
         logger => $args{logger},    # optional object with ->log($level,$msg)
         conf   => $args{conf} || {},# optional config hash
+        bot    => $args{bot},       # A1/B1: optional bot ref for noticeConsoleChan
     }, $class;
     return $self;
 }
@@ -565,6 +566,11 @@ sub cleanup_stale_sessions {
 
     if ($gone) {
         $self->_log(2, "cleanup_stale_sessions: removed $gone session(s) older than ${max_age}s");
+        # A5: also notify console channel if bot is connected
+        if ($self->{bot} && $self->{bot}->can("noticeConsoleChan")) {
+            eval { $self->{bot}->noticeConsoleChan(
+                "auth: $gone stale session(s) purged (max_age=${max_age}s)") };
+        }
         if ($self->{metrics} && $self->{metrics}->can('set')) {
             $self->{metrics}->set('mediabot_auth_sessions_total',
                 scalar keys %{ $self->{sessions} });

@@ -19,6 +19,13 @@ use POSIX qw(strftime);
 
 use constant MIN_BAN_LEVEL => 75;
 
+
+sub _log {
+    my ($self, $level, $msg) = @_;
+    $self->{logger}->log($level, $msg) if $self->{logger};
+}
+
+
 sub new {
     my ($class, %args) = @_;
 
@@ -293,7 +300,11 @@ sub _mask_matches_irc {
 sub active_ban_for_mask {
     my ($self, $id_channel, $hostmask) = @_;
 
-    my $sth = $self->{dbh}->prepare(q{
+    return undef unless $self->{dbh};
+    return undef unless defined($id_channel) && $id_channel ne '';
+    return undef unless defined($hostmask)   && $hostmask   ne '';
+
+    my $sql = q{
         SELECT
             id_channel_ban,
             id_channel,
@@ -310,9 +321,21 @@ sub active_ban_for_mask {
         WHERE id_channel = ?
           AND active = 1
         ORDER BY id_channel_ban DESC
-    });
+    };
 
-    $sth->execute($id_channel);
+    my $sth = $self->{dbh}->prepare($sql);
+
+    unless ($sth) {
+        $self->_log(1, "active_ban_for_mask() SQL prepare error: $DBI::errstr Query: $sql");
+        return undef;
+    }
+
+    unless ($sth->execute($id_channel)) {
+        $self->_log(1, "active_ban_for_mask() SQL execute error: $DBI::errstr Query: $sql");
+        $sth->finish;
+        return undef;
+    }
+
     my $best;
 
     while (my $row = $sth->fetchrow_hashref) {
@@ -321,10 +344,11 @@ sub active_ban_for_mask {
             last;   # most recent matching ban wins
         }
     }
-    $sth->finish;
 
+    $sth->finish;
     return $best;
 }
+
 
 # -----------------------------------------------------------------------------
 # add_ban(...)
@@ -336,6 +360,7 @@ sub add_ban {
     my $mask       = $args{mask};
     my $ban_level  = $args{ban_level} || MIN_BAN_LEVEL;
 
+    return (undef, "no database handle") unless $self->{dbh};
     return (undef, "missing id_channel") unless $id_channel;
     return (undef, "missing mask")       unless $mask;
 
@@ -347,7 +372,7 @@ sub add_ban {
         return (undef, "an active ban already exists for $mask (id $existing->{id_channel_ban})");
     }
 
-    my $sth = $self->{dbh}->prepare(q{
+    my $sql = q{
         INSERT INTO CHANNEL_BAN
             (
                 id_channel,
@@ -361,9 +386,16 @@ sub add_ban {
                 source
             )
         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-    });
+    };
 
-    $sth->execute(
+    my $sth = $self->{dbh}->prepare($sql);
+
+    unless ($sth) {
+        $self->_log(1, "add_ban() SQL prepare error: $DBI::errstr Query: $sql");
+        return (undef, "database prepare error");
+    }
+
+    unless ($sth->execute(
         $id_channel,
         $mask,
         $ban_level,
@@ -372,13 +404,20 @@ sub add_ban {
         $args{created_by_nick},
         $args{expires_at},
         $args{source} || 'irc',
-    );
+    )) {
+        $self->_log(1, "add_ban() SQL execute error: $DBI::errstr Query: $sql");
+        $sth->finish;
+        return (undef, "database execute error");
+    }
 
-    my $id = $self->{dbh}->{mysql_insertid};
     $sth->finish;
+
+    my $id = $self->{dbh}->last_insert_id(undef, undef, undef, undef);
+    $id //= $self->{dbh}->{mysql_insertid};
 
     return ($id, undef);
 }
+
 
 # -----------------------------------------------------------------------------
 # list_active_bans($id_channel)
@@ -386,7 +425,10 @@ sub add_ban {
 sub list_active_bans {
     my ($self, $id_channel) = @_;
 
-    my $sth = $self->{dbh}->prepare(q{
+    return () unless $self->{dbh};
+    return () unless defined($id_channel) && $id_channel ne '';
+
+    my $sql = q{
         SELECT
             id_channel_ban,
             id_channel,
@@ -403,9 +445,20 @@ sub list_active_bans {
         WHERE id_channel = ?
           AND active = 1
         ORDER BY id_channel_ban ASC
-    });
+    };
 
-    $sth->execute($id_channel);
+    my $sth = $self->{dbh}->prepare($sql);
+
+    unless ($sth) {
+        $self->_log(1, "list_active_bans() SQL prepare error: $DBI::errstr Query: $sql");
+        return ();
+    }
+
+    unless ($sth->execute($id_channel)) {
+        $self->_log(1, "list_active_bans() SQL execute error: $DBI::errstr Query: $sql");
+        $sth->finish;
+        return ();
+    }
 
     my @rows;
     while (my $row = $sth->fetchrow_hashref) {
@@ -413,9 +466,9 @@ sub list_active_bans {
     }
 
     $sth->finish;
-
     return @rows;
 }
+
 
 # -----------------------------------------------------------------------------
 # mark_removed(...)
@@ -426,6 +479,7 @@ sub mark_removed {
     my $id_channel = $args{id_channel};
     my $selector   = $args{selector};
 
+    return (0, "no database handle") unless $self->{dbh};
     return (0, "missing id_channel") unless $id_channel;
     return (0, "missing selector")   unless defined $selector && $selector ne '';
 
@@ -454,13 +508,23 @@ sub mark_removed {
     };
 
     my $sth = $self->{dbh}->prepare($sql);
-    $sth->execute(
+
+    unless ($sth) {
+        $self->_log(1, "mark_removed() SQL prepare error: $DBI::errstr Query: $sql");
+        return (0, "database prepare error");
+    }
+
+    unless ($sth->execute(
         $args{removed_by},
         $args{removed_by_nick},
         $args{remove_reason} || 'manual unban',
         $id_channel,
         @bind,
-    );
+    )) {
+        $self->_log(1, "mark_removed() SQL execute error: $DBI::errstr Query: $sql");
+        $sth->finish;
+        return (0, "database execute error");
+    }
 
     my $rows = $sth->rows;
     $sth->finish;
@@ -468,13 +532,16 @@ sub mark_removed {
     return ($rows, undef);
 }
 
+
 # -----------------------------------------------------------------------------
 # expired_bans()
 # -----------------------------------------------------------------------------
 sub expired_bans {
     my ($self) = @_;
 
-    my $sth = $self->{dbh}->prepare(q{
+    return () unless $self->{dbh};
+
+    my $sql = q{
         SELECT
             id_channel_ban,
             id_channel,
@@ -492,9 +559,20 @@ sub expired_bans {
           AND expires_at IS NOT NULL
           AND expires_at <= NOW()
         ORDER BY expires_at ASC
-    });
+    };
 
-    $sth->execute;
+    my $sth = $self->{dbh}->prepare($sql);
+
+    unless ($sth) {
+        $self->_log(1, "expired_bans() SQL prepare error: $DBI::errstr Query: $sql");
+        return ();
+    }
+
+    unless ($sth->execute()) {
+        $self->_log(1, "expired_bans() SQL execute error: $DBI::errstr Query: $sql");
+        $sth->finish;
+        return ();
+    }
 
     my @rows;
     while (my $row = $sth->fetchrow_hashref) {
@@ -502,9 +580,9 @@ sub expired_bans {
     }
 
     $sth->finish;
-
     return @rows;
 }
+
 
 1;
 

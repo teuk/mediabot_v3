@@ -65,7 +65,7 @@ sub new {
         my $sth = $dbh->prepare("SHOW VARIABLES LIKE 'collation_connection'");
         if ($sth->execute) {
             my (undef, $value) = $sth->fetchrow_array;
-            $logger->log(3, "⚙️  DB collation in use: $value");
+            $logger->log(3, "  DB collation in use: $value");
         }
         $sth->finish;
         1;
@@ -74,7 +74,7 @@ sub new {
     };
 
     $self->{dbh} = $dbh;
-    $logger->log(3, "✅ DBI connection successful");
+    $logger->log(3, " DBI connection successful");
 
     return $self;
 }
@@ -103,7 +103,7 @@ sub _apply_session_charset {
         return;
     } else {
         # Valeur inattendue -> fallback utf8mb4
-        $logger->log(0, "Unknown CHARSET_MODE '$mode', falling back to utf8mb4 — check [mysql] in mediabot.conf");
+        $logger->log(0, "Unknown CHARSET_MODE '$mode', falling back to utf8mb4 -- check [mysql] in mediabot.conf");
         @sql = (
             'SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci',
             'SET CHARACTER SET utf8mb4',

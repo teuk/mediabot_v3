@@ -332,7 +332,7 @@ if ($mediabot->{metrics}) {
         my $conf = $mediabot->{conf};
 
         my $base_url      = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
-        my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || 'http://teuk.org:8000';
+        my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || $base_url;
         my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio160.mp3';
         my $timeout       = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
 
@@ -395,6 +395,17 @@ $scheduler->add(
     name      => 'channel_log_purge',
     interval  => 86400,
     cb        => sub { $mediabot->purge_channel_log() },
+    autostart => 1,
+);
+
+$scheduler->add(
+    name      => 'auth_session_cleanup',
+    interval  => 3600,   # hourly — purge sessions older than 24h
+    cb        => sub {
+        if ($mediabot->{auth} && $mediabot->{auth}->can('cleanup_stale_sessions')) {
+            $mediabot->{auth}->cleanup_stale_sessions();
+        }
+    },
     autostart => 1,
 );
 
