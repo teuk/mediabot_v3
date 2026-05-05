@@ -209,7 +209,6 @@ chomp($line);
 if ( $line eq "" ) {
 	$line = "mediabot_";
 }
-print CONF "CONN_NICK_ALTERNATE=$line\n";
 
 log_message("Enter bot ident (username) [" . $ENV{'USER'} . "] : ");
 $line=<STDIN>;
@@ -226,6 +225,24 @@ if ( $line eq "" ) {
 	$line = "mediabot";
 }
 print CONF "CONN_IRCNAME=$line\n";
+
+log_message("Enter IRC server password (Enter to leave it empty) : ");
+$line=<STDIN>;
+chomp($line);
+unless(defined($line) && ($line ne "" )) {
+	log_messageln("No IRC server password specified");
+	$line = "";
+}
+print CONF "CONN_PASS=$line\n";
+
+log_message("Enter local bind IP (Enter to leave it empty) : ");
+$line=<STDIN>;
+chomp($line);
+unless(defined($line) && ($line ne "" )) {
+	log_messageln("No local bind IP specified");
+	$line = "";
+}
+print CONF "CONN_BIND_IP=$line\n";
 
 addConsoleChannelCheck();
 
@@ -281,7 +298,6 @@ if ( $line == 1 ) {
 	$line=<STDIN>;
 	chomp($line);
 	if ($line eq "" ) { $line ="users.undernet.org"; }
-	print CONF "UNET_CSERVICE_HOSTMASK=$line\n";
 	
 }
 elsif ( $line == 2 ) {

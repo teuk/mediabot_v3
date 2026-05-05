@@ -112,7 +112,7 @@ Depending on configuration and enabled features, Mediabot can provide:
 
 This section is intentionally explicit. It is meant to help someone install a clean Mediabot test instance on Debian 13 without guessing every Linux step.
 
-The examples assume this project directory:
+The examples assume this final project directory:
 
 ```text
 /home/mediabot/mediabot_v3
@@ -122,12 +122,15 @@ The normal installation flow is:
 
 1. install the minimal Debian packages needed to bootstrap the system;
 2. create the dedicated `mediabot` user;
-3. give that user **temporary sudo access** for setup;
+3. give that user **temporary sudo access** for setup only;
 4. download Mediabot;
-5. run `./configure`;
-6. configure the bot;
-7. test the bot in foreground;
-8. **remove the temporary sudo access before real IRC use**.
+5. create the MariaDB database and user;
+6. run `./configure`;
+7. review `mediabot.conf`;
+8. test the bot in foreground;
+9. register the first owner from IRC;
+10. connect to Partyline if enabled;
+11. remove the temporary sudo access before normal IRC use.
 
 ### 1. Bootstrap the system
 
@@ -143,6 +146,7 @@ apt install -y \
   jq \
   unzip \
   zip \
+  ca-certificates \
   build-essential \
   make \
   gcc \
@@ -151,31 +155,32 @@ apt install -y \
   mariadb-client
 
 systemctl enable --now mariadb
+systemctl status mariadb --no-pager -l
 ```
 
-### 2. Create the Mediabot user
+Optional, but useful during debugging:
+
+```bash
+apt install -y \
+  screen \
+  tmux \
+  htop \
+  lsof \
+  net-tools \
+  iproute2 \
+  dnsutils \
+  rsync
+```
+
+### 2. Create the dedicated Mediabot user
+
+Mediabot should not run as `root`.
 
 ```bash
 adduser mediabot
 ```
 
-### 3. Give temporary sudo access for installation
-
-`./configure` may need administrative rights, especially when installing Perl dependencies through CPAN or preparing system-level paths.
-
-Create a temporary sudoers file:
-
-```bash
-echo 'mediabot ALL=(ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/mediabot
-sudo chmod 440 /etc/sudoers.d/mediabot
-sudo visudo -cf /etc/sudoers.d/mediabot
-```
-
-This is intentionally temporary.
-
-Do **not** keep an IRC bot user with permanent passwordless sudo access.
-
-### 4. Switch to the Mediabot user
+Switch to the new user:
 
 ```bash
 su - mediabot
@@ -185,23 +190,43 @@ Check:
 
 ```bash
 whoami
-groups
 pwd
-sudo -n true && echo "temporary sudo OK"
 ```
 
 Expected result:
 
 ```text
 mediabot
-mediabot
 /home/mediabot
+```
+
+### 3. Give temporary sudo access during installation
+
+`./configure` may need administrative rights while installing dependencies or preparing the system. The recommended approach is temporary passwordless sudo during setup, then removal before the bot is used normally on IRC.
+
+As `root`, create the temporary sudoers rule:
+
+```bash
+echo 'mediabot ALL=(ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/mediabot
+sudo chmod 440 /etc/sudoers.d/mediabot
+sudo visudo -cf /etc/sudoers.d/mediabot
+```
+
+Back as `mediabot`, verify:
+
+```bash
+sudo -n true && echo "temporary sudo OK"
+```
+
+Expected result:
+
+```text
 temporary sudo OK
 ```
 
-The `groups` output may also contain `sudo` depending on how the local system was prepared, but the important check during install is that `sudo -n true` works.
+Do not keep this access after installation.
 
-### 5. Download Mediabot
+### 4. Download Mediabot
 
 For the stable release:
 
@@ -209,7 +234,8 @@ For the stable release:
 cd /home/mediabot
 wget https://teuk.org/downloads/mediabot/mediabot_v3-3.1.tar.gz
 tar xzf mediabot_v3-3.1.tar.gz
-cd mediabot_v3-3.1
+mv mediabot_v3-3.1 mediabot_v3
+cd mediabot_v3
 ```
 
 For the development tree:
@@ -220,38 +246,127 @@ git clone https://github.com/teuk/mediabot_v3.git
 cd mediabot_v3
 ```
 
-### 6. Run configure
-
-This is the important step.
-
-Run the project installer/configuration helper before trying to start the bot:
+Confirm that you are in the project root:
 
 ```bash
+pwd
+ls -la
+test -f mediabot.pl && test -f mediabot.sample.conf && echo "project tree OK"
+```
+
+Expected result:
+
+```text
+/home/mediabot/mediabot_v3
+project tree OK
+```
+
+### 5. Create the MariaDB database and user
+
+Run this as `root` or as a user allowed to administer MariaDB:
+
+```bash
+mysql -u root -p
+```
+
+Example SQL:
+
+```sql
+CREATE DATABASE mediabot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE USER 'mediabot'@'localhost' IDENTIFIED BY 'change-this-password';
+
+GRANT ALL PRIVILEGES ON mediabot.* TO 'mediabot'@'localhost';
+
+FLUSH PRIVILEGES;
+EXIT;
+```
+
+Test the account:
+
+```bash
+mysql -u mediabot -p mediabot
+```
+
+If the login works, leave the MariaDB client:
+
+```sql
+EXIT;
+```
+
+### 6. Run configure
+
+Run `./configure` from the project root as the `mediabot` user:
+
+```bash
+cd /home/mediabot/mediabot_v3
 ./configure
 ```
 
-If `./configure` installs CPAN modules or system-level components, the temporary sudo rule above allows it to complete cleanly without forcing the user to become `root` for the whole install.
+Answer the prompts carefully. If you are setting up a simple test bot, typical values are:
 
-After `./configure`, continue with the configuration file and startup checks below.
-
-### 7. Prepare the local configuration
-
-```bash
-cp conf/mediabot.sample.conf conf/mediabot.conf
-chmod 600 conf/mediabot.conf
-vi conf/mediabot.conf
+```text
+Database host: localhost
+Database port: 3306
+Database name: mediabot
+Database user: mediabot
+Database password: the password created above
+IRC server: irc.example.net
+Bot nickname: mediabot
+Username: mediabot
+Real name: Mediabot v3
+Network type: 1 for a generic IRC network
 ```
 
-At minimum, configure:
+For Libera-style NickServ authentication, use network type `2` and fill the Libera NickServ password when prompted.
 
-- database access;
-- IRC server;
-- bot nickname;
-- channels;
-- admin/owner information;
-- optional radio settings.
+After configure finishes, you should have a local config file such as:
 
-### 8. Check syntax and start in foreground
+```text
+mediabot.conf
+```
+
+### 7. Review the local configuration
+
+If you need to create the config manually or reset it from the sample:
+
+```bash
+cp mediabot.sample.conf mediabot.conf
+chmod 600 mediabot.conf
+vi mediabot.conf
+```
+
+At minimum, check these sections:
+
+```ini
+[mysql]
+MAIN_PROG_DBHOST=localhost
+MAIN_PROG_DBPORT=3306
+MAIN_PROG_DDBNAME=mediabot
+MAIN_PROG_DBUSER=mediabot
+MAIN_PROG_DBPASS=change-this-password
+CHARSET_MODE=utf8mb4
+
+[connection]
+CONN_SERVER_NETWORK=irc.example.net
+CONN_NICK=mediabot
+CONN_USERNAME=mediabot
+CONN_IRCNAME=Mediabot v3
+CONN_USERMODE=+iw
+CONN_NETWORK_TYPE=1
+CONN_PASS=
+CONN_BIND_IP=
+```
+
+Useful notes:
+
+- `CONN_PASS=` is optional and should stay empty unless the IRC server requires a server password.
+- `CONN_BIND_IP=` is optional and should stay empty unless you really need to bind outgoing IRC connections to a specific local source IP.
+- Do not commit your real `mediabot.conf`.
+
+### 8. Check syntax
+
+From the project root:
 
 ```bash
 perl -c mediabot.pl
@@ -263,30 +378,89 @@ Expected result:
 mediabot.pl syntax OK
 ```
 
-Then start manually first:
+Check all Perl modules:
 
 ```bash
-./start
+find Mediabot -name '*.pm' -print -exec perl -I. -c {} \;
 ```
 
-If you prefer to see the raw Perl entry point directly during debugging:
+### 9. Start in foreground first
+
+Do not start with systemd yet. First, run the bot in the foreground so errors are visible:
 
 ```bash
-perl --conf=mediabot.conf mediabot.pl
+cd /home/mediabot/mediabot_v3
+perl mediabot.pl --conf=mediabot.conf
 ```
 
-Do not create a systemd service until the foreground start works correctly.
+If the bot starts correctly, you should see connection and join activity in the terminal.
 
-### 9. Remove temporary sudo access
+Stop the foreground run with:
 
-After installation and tests, remove the temporary sudoers file:
+```text
+CTRL+C
+```
+
+When foreground mode works, daemon mode can be tested:
 
 ```bash
-sudo rm -f /etc/sudoers.d/mediabot
-sudo -k
+perl mediabot.pl --conf=mediabot.conf --daemon
 ```
 
-Verify from a fresh shell as `mediabot`:
+Then check logs:
+
+```bash
+ls -lh logs/
+tail -f logs/mediabot.log
+```
+
+If your log file name differs, inspect the `logs/` directory first.
+
+### 10. Register the first owner from IRC
+
+On a fresh setup, the first owner registration is done from IRC, not from Partyline.
+
+Once the bot is connected, send a private message from your IRC client:
+
+```text
+/msg mediabot register <owner> <password>
+```
+
+Replace `mediabot` with the actual bot nickname if you changed it.
+
+Keep the owner password safe.
+
+### 11. Connect to Partyline
+
+Only after the first owner exists, connect locally:
+
+```bash
+telnet localhost 23456
+```
+
+During deployment, use a console level to see what is happening:
+
+```text
+.console 2
+```
+
+or, for more detail:
+
+```text
+.console 3
+```
+
+### 12. Remove temporary sudo access
+
+After configure, dependency installation, database preparation, and foreground tests are complete, remove the temporary sudoers rule.
+
+As `root`:
+
+```bash
+rm -f /etc/sudoers.d/mediabot
+```
+
+Back as `mediabot`, verify from a fresh shell:
 
 ```bash
 sudo -n true && echo "ERROR: sudo still active" || echo "OK: no passwordless sudo"
@@ -298,9 +472,24 @@ Expected result:
 OK: no passwordless sudo
 ```
 
-This step is not optional for a real IRC deployment.
+This step is not optional for a real IRC deployment. A bot connected to IRC must not keep passwordless root privileges.
 
-A bot connected to IRC must not keep passwordless root privileges.
+### 13. Quick troubleshooting checklist
+
+If the bot does not start:
+
+```bash
+pwd
+ls -la
+perl -c mediabot.pl
+test -f mediabot.conf && echo "config exists"
+grep -nE '^(MAIN_PROG_DBHOST|MAIN_PROG_DDBNAME|MAIN_PROG_DBUSER|CONN_SERVER_NETWORK|CONN_NICK)=' mediabot.conf
+mysql -u mediabot -p mediabot
+tail -n 100 logs/*.log 2>/dev/null || true
+```
+
+If the bot connects but does not join channels, check your channel configuration and permissions in the database or via the documented admin commands.
+
 
 ---
 
@@ -421,7 +610,7 @@ Administrative rights should only be granted temporarily during installation, as
 
 ### Minimal bootstrap packages
 
-`./configure` is the main project entry point, but a fresh Debian system still needs a small bootstrap set first.
+`./configure` is the main project entry point, but a fresh Debian system still needs a small bootstrap set first. Run the package installation commands as `root`.
 
 ```bash
 apt update
@@ -585,52 +774,50 @@ mysql -u mediabot -p mediabot
 Copy the sample configuration:
 
 ```bash
-cp conf/mediabot.sample.conf conf/mediabot.conf
-chmod 600 conf/mediabot.conf
+cp mediabot.sample.conf mediabot.conf
+chmod 600 mediabot.conf
 ```
 
 Edit it:
 
 ```bash
-vi conf/mediabot.conf
+vi mediabot.conf
 ```
 
 At minimum, check the database, IRC, and optional radio settings.
 
-Example database and IRC baseline:
+Example database and IRC baseline using the real Mediabot sections:
 
 ```ini
-[database]
-DB_HOST=localhost
-DB_NAME=mediabot
-DB_USER=mediabot
-DB_PASS=change-this-password
+[mysql]
+MAIN_PROG_DBHOST=localhost
+MAIN_PROG_DBPORT=3306
+MAIN_PROG_DDBNAME=mediabot
+MAIN_PROG_DBUSER=mediabot
+MAIN_PROG_DBPASS=change-this-password
+CHARSET_MODE=utf8mb4
 
-[irc]
-SERVER=irc.example.net
-PORT=6667
-NICK=mediabot
-USERNAME=mediabot
-REALNAME=Mediabot v3
+[connection]
+CONN_SERVER_NETWORK=irc.example.net
+CONN_NICK=mediabot
+CONN_USERNAME=mediabot
+CONN_IRCNAME=Mediabot v3
+CONN_USERMODE=+iw
+CONN_NETWORK_TYPE=1
+CONN_PASS=
+CONN_BIND_IP=
 ```
 
 Example radio baseline for the Icecast JSON status flow:
 
 ```ini
 [radio]
-RADIO_PUB=900
-RADIO_PORT=8000
-RADIO_SOURCE=0
 YOUTUBEDL_INCOMING=/home/mediabot/mediabot_v3/mp3
-LIQUIDSOAP_PLAYLIST=plglob(dot)m3u
-RADIO_ADMINPASS=change-this-password
-LIQUIDSOAP_TELNET_PORT=1234
-RADIO_HOSTNAME=myradio.com
 YTDLP_PATH=/usr/local/bin/yt-dlp
-LIQUIDSOAP_TELNET_HOST=localhost
-RADIO_URL=radio.mp3
-RADIO_JSON=status-json.xsl
 
+# Icecast JSON status integration used by song/listeners/radiostatus/radiomounts.
+# STATUS_BASE_URL should usually be local/private.
+# PUBLIC_BASE_URL is what users should open in their browser/player.
 RADIO_ICECAST_STATUS_BASE_URL=http://127.0.0.1:8000
 RADIO_ICECAST_PUBLIC_BASE_URL=http://example.com:8000
 RADIO_ICECAST_TIMEOUT=5
@@ -848,7 +1035,7 @@ Useful sample files to keep in the repository:
 ```text
 contrib/icecast2/icecast-8000.sample.xml
 contrib/liquidsoap/radio-8000.sample.liq
-conf/mediabot.sample.conf
+mediabot.sample.conf
 ```
 
 The sample files should document the expected service layout without exposing real passwords.
@@ -1163,7 +1350,7 @@ Do not commit:
 Use sample files instead:
 
 ```text
-conf/mediabot.sample.conf
+mediabot.sample.conf
 contrib/icecast2/icecast-8000.sample.xml
 contrib/liquidsoap/radio-8000.sample.liq
 ```
