@@ -50,11 +50,11 @@ ts(){ date '+[%d/%m/%Y %H:%M:%S]'; }
 mysql_create_mediabot_db() {
     if [ "$CHECK_DB_EXISTENCE" == "$MYSQL_DB" ]; then
         message "Drop database $MYSQL_DB"
-        printf "DROP DATABASE IF EXISTS `%s`;\n" "$MYSQL_DB" | mysql ${MYSQL_PARAMS}
+        printf "DROP DATABASE IF EXISTS \`%s\`;\n" "$MYSQL_DB" | mysql ${MYSQL_PARAMS}
         ok_failed $?
     fi
     message "Create database $MYSQL_DB"
-    printf "CREATE DATABASE `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n" "$MYSQL_DB" | mysql ${MYSQL_PARAMS}
+    printf "CREATE DATABASE \`%s\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n" "$MYSQL_DB" | mysql ${MYSQL_PARAMS}
     ok_failed $?
 
     message "Create database structure"
