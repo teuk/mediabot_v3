@@ -2657,6 +2657,15 @@ sub _cmd_eval {
         return;
     }
 
+    my $eval_enabled = eval { $bot->{conf}->get('main.PARTYLINE_EVAL_ENABLED') } // 0;
+    $eval_enabled = 0 unless defined($eval_enabled) && $eval_enabled =~ /^(?:1|yes|true|on)$/i;
+
+    unless ($eval_enabled) {
+        $stream->write("Access denied: .eval is disabled by configuration.\r\n");
+        $stream->write("Set PARTYLINE_EVAL_ENABLED=1 in [main] to enable it.\r\n");
+        return;
+    }
+
     unless (defined $code && $code =~ /\S/) {
         $stream->write("Usage: .eval <perl code>\r\n");
         $stream->write("WARNING: code runs in a forked subprocess. Confirmation required.\r\n");

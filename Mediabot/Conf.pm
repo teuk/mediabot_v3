@@ -81,10 +81,10 @@ Mediabot::Conf - Magic configuration wrapper for Mediabot with read/write suppor
     my $conf = Mediabot::Conf->new(undef, '/path/to/config.conf');
 
     # Get a value
-    my $bot_name = $conf->get('main.bot_name');
+    my $bot_name = $conf->get('main.MAIN_PROG_NAME');
 
     # Set a value
-    $conf->set('main.bot_name', 'NewBot');
+    $conf->set('main.MAIN_PROG_NAME', 'NewBot');
 
     # Save changes back to the config file
     $conf->save();

@@ -241,7 +241,7 @@ print CONF "CONN_USERMODE=$line\n";
 # Configure network type section
 log_messageln("You can specify network type ");
 log_messageln("1 : Undernet (ircu)");
-log_messageln("2 : Freenode (ircd-seven)");
+log_messageln("2 : Libera (NickServ)");
 log_messageln("0 : Other");
 log_message("Enter network type [0] : ");
 $line=<STDIN>;
@@ -285,8 +285,8 @@ if ( $line == 1 ) {
 	
 }
 elsif ( $line == 2 ) {
-	log_messageln("Configure freenode section");
-	print CONF "[freenode]\n";
+	log_messageln("Configure Libera section");
+	print CONF "[libera]\n";
 	log_message("Enter NickServ service password (Enter to leave it empty) : ");
 	$line=<STDIN>;
 	chomp($line);
@@ -294,7 +294,7 @@ elsif ( $line == 2 ) {
 		log_messageln("No password specified");
 		$line = "";
 	}
-	print CONF "FREENODE_NICKSERV_PASSWORD=$line\n";
+	print CONF "LIBERA_NICKSERV_PASSWORD=$line\n";
 }
 
 # +---------------------------------------------------------------------------+
@@ -355,7 +355,7 @@ sub addIrcServer {
 	}
 	else {
 		$id_server = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
-		log_messageln("IRC Server $line added in SERVERS table with id : $id_server");
+		log_messageln("IRC Server $server_hostname added in SERVERS table with id : $id_server");
 	}
 	return $id_server;
 }

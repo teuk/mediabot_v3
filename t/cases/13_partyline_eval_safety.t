@@ -61,7 +61,7 @@ return sub {
 
     $assert->ok(
         $partyline =~ /PARTYLINE_EVAL_ENABLED/,
-        'Partyline.pm references PARTYLINE_EVAL_ENABLED'
+        'Partyline.pm references PARTYLINE_EVAL_ENABLED safety guard'
     );
 
     $assert->ok(

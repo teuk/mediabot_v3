@@ -448,9 +448,14 @@ sub displayWeather_ctx {
     my $encoded = uri_escape_utf8($location);
     my $url = "https://wttr.in/$encoded?format=" . uri_escape_utf8($format) . "&m";
 
+    my $project_url = eval { $self->{conf}->get('main.MAIN_PROG_URL') }
+        || 'https://github.com/teuk/mediabot_v3';
+
+    my $weather_agent = "mediabot_v3 weather/1.0 (+$project_url)";
+
     my $http = _make_http(
         timeout    => 4,
-        agent      => "mediabot_v3 weather/1.0 (+https://teuk.org)",
+        agent      => $weather_agent,
         verify_SSL => 1,   # B1/A3: override _make_http default (0) for weather
     );
 

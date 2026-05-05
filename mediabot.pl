@@ -795,9 +795,9 @@ sub on_message_NOTICE {
                 $mediabot->{logger}->log(0, "on_login(): joinChannels() called");
             }
         }
-        elsif (defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ( $mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 2 ) && defined($mediabot->{conf}->get('freenode.FREENODE_NICKSERV_PASSWORD')) && ($mediabot->{conf}->get('freenode.FREENODE_NICKSERV_PASSWORD') ne "")) {
+        elsif (defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ( $mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 2 ) && defined($mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD')) && ($mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD') ne "")) {
             if (($who eq "NickServ") && (($what =~ /This nickname is registered/) && defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 2))) {
-                $mediabot->botPrivmsg("NickServ","identify " . $mediabot->{conf}->get('freenode.FREENODE_NICKSERV_PASSWORD'));
+                $mediabot->botPrivmsg("NickServ","identify " . $mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD'));
                 $mediabot->joinChannels();
                 $mediabot->{logger}->log(0, "on_login(): joinChannels() called");
             }
@@ -821,7 +821,7 @@ sub on_login {
     $mediabot->setLastRandomQuote(time);
     $mediabot->onStartTimers();
     
-    # Undernet : authentication to channel service if credentials are defined
+    # Undernet: authentication to channel service if credentials are defined
     if (defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ( $mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 1 ) && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN') ne "") && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME') ne "") && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD') ne "")) {
         $mediabot->{logger}->log(0,"on_login() Logging to " . $mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN'));
         $mediabot->botPrivmsg($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN'),"login " . $mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME') . " "  . $mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD'));
@@ -858,7 +858,7 @@ sub on_login {
     }
 
     # Join other channels
-    unless ((($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 1) && ($mediabot->{conf}->get('connection.CONN_USERMODE') =~ /x/)) || (($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 2) && defined($mediabot->{conf}->get('freenode.FREENODE_NICKSERV_PASSWORD')) && ($mediabot->{conf}->get('freenode.FREENODE_NICKSERV_PASSWORD') ne ""))) {
+    unless ((($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 1) && ($mediabot->{conf}->get('connection.CONN_USERMODE') =~ /x/)) || (($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 2) && defined($mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD')) && ($mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD') ne ""))) {
         $mediabot->joinChannels();
     }
 }

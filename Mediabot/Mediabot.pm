@@ -609,7 +609,7 @@ sub clean_and_exit {
         if ($irc) {
             my $quit_msg = "Mediabot shutting down";
             if ($self->{conf} && $self->{conf}->can('get')) {
-                my $cfg = eval { $self->{conf}->get('IRC_QUIT_MESSAGE') };
+                my $cfg = eval { $self->{conf}->get('main.MAIN_PROG_QUIT_MSG') };
                 $quit_msg = $cfg if defined($cfg) && $cfg ne '';
             }
             $irc->can('do_QUIT') ? $irc->do_QUIT( reason => $quit_msg )
