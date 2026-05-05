@@ -28,6 +28,7 @@ use IO::Async::Stream;
 use IO::Async::Timer::Countdown;
 use Socket qw(unpack_sockaddr_in sockaddr_family inet_ntoa inet_aton AF_INET);
 use Scalar::Util qw(weaken);
+use Time::HiRes qw(usleep);
 
 our @EXPORT_OK = qw();
 
@@ -2762,7 +2763,7 @@ sub _cmd_eval {
         delay     => $eval_timeout,
         on_expire => sub {
             kill('TERM', $pid);
-            sleep(0.5);
+            usleep(500_000);
             kill('KILL', $pid);
             $eval_ctx->{timed_out} = 1;
             $stream->write("--- timeout ---\r\n") if $self->{streams}{$id};

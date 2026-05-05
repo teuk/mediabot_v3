@@ -30,8 +30,9 @@ sub getRadioCurrentListeners;
 
 # Check command line parameters
 my $result = GetOptions (
-        "host=s" => \$RADIO_HOSTNAME,
-        "port=s" => \$RADIO_PORT,
+        "host=s"   => \$RADIO_HOSTNAME,
+        "port=s"   => \$RADIO_PORT,
+        "source=i" => \$RADIO_SOURCE,
 );
 
 unless (defined($RADIO_HOSTNAME)) {
@@ -59,7 +60,7 @@ sub usage {
     if (defined($strErr)) {
             print STDERR "Error : " . $strErr . "\n";
     }
-    print STDERR "Usage: " . basename($0) . "--host <radio_hostname> --port <radio_port> [--source <radio_source default : 0]\n";
+    print STDERR "Usage: " . basename($0) . " --host <radio_hostname> --port <radio_port> [--source <radio_source default: 0>]\n";
     exit 4;
 }
 
@@ -76,10 +77,18 @@ sub getRadioCurrentListeners {
 		close ICECAST_STATUS_JSON;
 		chomp($line);
 		my $json = decode_json $line;
-		my @sources = $json->{'icestats'}{'source'};
-		#my %source = %{$sources[0][$RADIO_SOURCE]};
-		if (defined($sources[0])) {
-			my %source = %{$sources[0]};
+		my $sources = $json->{'icestats'}{'source'};
+		my $selected_source;
+
+		if (ref($sources) eq 'ARRAY') {
+			$selected_source = $sources->[$RADIO_SOURCE];
+		}
+		elsif (ref($sources) eq 'HASH') {
+			$selected_source = $sources;
+		}
+
+		if (defined($selected_source) && ref($selected_source) eq 'HASH') {
+			my %source = %{$selected_source};
 			if (defined($source{'listeners'})) {
 				return $source{'listeners'};
 			}

@@ -40,16 +40,16 @@ function ok_failed {
 }
 
 function wait_for_cmd {
-	local cmd="$1"
-	bash -c "$cmd" >>"${CPAN_LOGFILE}" 2>&1 &
-	WAIT_PID=$!
-	while [ -d "/proc/$WAIT_PID" ];
-	do
-		echo -n "."
-		sleep 5
-	done
-	echo -n " "
-	wait "$WAIT_PID"
+    "$@" >>"${CPAN_LOGFILE}" 2>&1 &
+    WAIT_PID=$!
+
+    while kill -0 "$WAIT_PID" 2>/dev/null; do
+        echo -n "."
+        sleep 5
+    done
+
+    echo -n " "
+    wait "$WAIT_PID"
 }
 
 function ensure_module {
@@ -59,7 +59,7 @@ function ensure_module {
     perl -M"$perl_module" -e "exit 0;" &>/dev/null
     if [ $? -ne 0 ]; then
         echo -n "Not found. Installing via cpan "
-        wait_for_cmd "./install_perl_module.sh '$perl_module'"
+        wait_for_cmd ./install_perl_module.sh "$perl_module"
         local rc=$?
 
         if [ "$rc" -ne 0 ]; then
@@ -125,18 +125,22 @@ for perl_module in "${PERL_MODULES[@]}"; do
     ensure_module "$perl_module"
 done
 
-messageln "Installing Hailo manually as fallback after CPAN attempt"
-wget https://cpan.metacpan.org/authors/id/A/AV/AVAR/Hailo-0.75.tar.gz
-tar xzf Hailo-0.75.tar.gz
-chown -R mediabot: Hailo-0.75
-cd Hailo-0.75 || exit 1
-perl Makefile.PL >>"../${CPAN_LOGFILE}" 2>&1
-ok_failed $?
-make >>"../${CPAN_LOGFILE}" 2>&1
-ok_failed $?
-make install >>"../${CPAN_LOGFILE}" 2>&1
-ok_failed $?
-cd .. || exit 1
+if ! perl -MHailo -e "exit 0;" &>/dev/null; then
+    messageln "Installing Hailo manually as fallback after CPAN attempt"
+    wget https://cpan.metacpan.org/authors/id/A/AV/AVAR/Hailo-0.75.tar.gz
+    tar xzf Hailo-0.75.tar.gz
+    chown -R mediabot: Hailo-0.75
+    cd Hailo-0.75 || exit 1
+    perl Makefile.PL >>"../${CPAN_LOGFILE}" 2>&1
+    ok_failed $?
+    make >>"../${CPAN_LOGFILE}" 2>&1
+    ok_failed $?
+    make install >>"../${CPAN_LOGFILE}" 2>&1
+    ok_failed $?
+    cd .. || exit 1
+else
+    messageln "Hailo already available, skipping manual fallback installation"
+fi
 
 # +-------------------------------------------------------------------------+
 # | CPAN VERIFY MODULES                                                     |

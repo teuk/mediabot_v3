@@ -27,7 +27,7 @@ use File::Slurp qw(read_file write_file);
 use IO::Socket::INET;
 use IO::Select;
 use POSIX qw(strftime WNOHANG);
-use Time::HiRes qw(sleep time);
+use Time::HiRes qw(time usleep);
 
 # ---------------------------------------------------------------------------
 # Options CLI
@@ -159,7 +159,6 @@ sub failed { $_[0]->{fail} }
 # ---------------------------------------------------------------------------
 package SpyClient;
 
-use Time::HiRes qw(time sleep);
 
 sub new {
     my ($class, %args) = @_;
@@ -632,7 +631,7 @@ sub teardown {
         while ($waited < 10) {
             my $res = waitpid($bot_pid, WNOHANG);
             last if $res == $bot_pid;
-            sleep(0.5);
+            usleep(500_000);
             $waited += 0.5;
         }
         # Force kill si toujours vivant

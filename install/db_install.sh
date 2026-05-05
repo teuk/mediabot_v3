@@ -241,11 +241,17 @@ chmod 600 "$MYSQL_APP_CNF"
 USER_MYSQL_PARAMS="--defaults-extra-file=${MYSQL_APP_CNF}"
 
 messageln "Verifying connection as ${MYSQL_DB_USER}…"
-if ! echo "SELECT 1;" | mysql ${USER_MYSQL_PARAMS} "${MYSQL_DB}"; then
-    ok_failed $? "User ${MYSQL_DB_USER} failed to connect"
+echo "SELECT 1;" | mysql ${USER_MYSQL_PARAMS} "${MYSQL_DB}"
+verify_rc=$?
+
+if [ "$verify_rc" -ne 0 ]; then
+    echo -e "Failed." | tee -a "$SCRIPT_LOGFILE"
+    echo "User ${MYSQL_DB_USER} failed to connect" | tee -a "$SCRIPT_LOGFILE"
     messageln "Dropping user '${MYSQL_DB_USER}'@'${AUTH_HOST}' due to verification failure"
     mysql ${MYSQL_PARAMS} -e "DROP USER '${MYSQL_DB_USER}'@'${AUTH_HOST}';"
     ok_failed $? "Failed to drop ${MYSQL_DB_USER}@${AUTH_HOST} after failure"
+    echo "Installation log is available in $SCRIPT_LOGFILE" | tee -a "$SCRIPT_LOGFILE"
+    exit "$verify_rc"
 fi
 ok_failed 0
 
@@ -257,7 +263,17 @@ messageln "User '${MYSQL_DB_USER}'@'${AUTH_HOST}' created/updated (password hidd
 # +-------------------------------------------------------------------------+
 # | [5] Write config file if asked                                           |
 # +-------------------------------------------------------------------------+
-if [[ -n "${CONFIG_FILE:-}" && -w "$CONFIG_FILE" ]]; then
+if [[ -n "${CONFIG_FILE:-}" ]]; then
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        messageln "Configuration file $CONFIG_FILE does not exist."
+        exit 1
+    fi
+
+    if [[ ! -w "$CONFIG_FILE" ]]; then
+        messageln "Configuration file $CONFIG_FILE is not writable."
+        exit 1
+    fi
+
     message "Configure $CONFIG_FILE [mysql] parameters"
     cat >>"$CONFIG_FILE" <<EOF
 
@@ -271,5 +287,7 @@ CHARSET_MODE=utf8mb4
 
 EOF
     ok_failed $?
+    messageln "Configuration file $CONFIG_FILE updated."
+else
+    messageln "No configuration file requested; skipping config update."
 fi
-messageln "Configuration file $CONFIG_FILE updated."

@@ -125,7 +125,7 @@ my $NETWORK_NAME=$line;
 # Create network if not exists and add irc server
 my $id_network;
 
-my $sQuery = "SELECT * FROM NETWORK WHERE network_name LIKE ?";
+my $sQuery = "SELECT id_network, network_name FROM NETWORK WHERE network_name LIKE ?";
 my $sth = $dbh->prepare($sQuery);
 unless ($sth->execute($line) ) {
 	log_messageln(0,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -137,7 +137,7 @@ else {
 		my $sDbNetworkName = $ref->{'network_name'};
 		log_messageln("Network '$sDbNetworkName' already exists in database table NETWORK, id : $id_network");
 		print CONF "CONN_SERVER_NETWORK=$sDbNetworkName\n";
-		$sQuery = "SELECT * FROM SERVERS WHERE id_network=?";
+		$sQuery = "SELECT server_hostname FROM SERVERS WHERE id_network=?";
 		$sth = $dbh->prepare($sQuery);
 		unless ($sth->execute($id_network) ) {
 			log_messageln(0,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -203,12 +203,6 @@ if ( $line eq "" ) {
 }
 print CONF "CONN_NICK=$line\n";
 
-log_message("Enter alternative nick [mediabot_] : ");
-$line=<STDIN>;
-chomp($line);
-if ( $line eq "" ) {
-	$line = "mediabot_";
-}
 
 log_message("Enter bot ident (username) [" . $ENV{'USER'} . "] : ");
 $line=<STDIN>;
@@ -377,7 +371,7 @@ sub addIrcServer {
 }
 
 sub addConsoleChannelCheck() {
-	my $sQuery = "SELECT * FROM CHANNEL WHERE description='console'";
+	my $sQuery = "SELECT id_channel, description FROM CHANNEL WHERE description='console'";
 	my $sth = $dbh->prepare($sQuery);
 	unless ($sth->execute()) {
 		log_messageln(0,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);

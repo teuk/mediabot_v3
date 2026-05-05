@@ -551,7 +551,7 @@ sub usage {
     if (defined($strErr)) {
         log_error("Error : " . $strErr);
     }
-    log_error("Usage: " . basename($0) . "--conf=<config_file> [--check] [--daemon] [--server=<hostname>]");
+    log_error("Usage: " . basename($0) . " --conf=<config_file> [--check] [--daemon] [--server=<hostname>]");
     exit 4;
 }
 

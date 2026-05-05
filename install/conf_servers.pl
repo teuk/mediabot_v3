@@ -96,11 +96,6 @@ unless (defined($MAIN_PROG_DDBNAME)) {
 	exit 3;
 }
 
-unless (defined($MAIN_PROG_DDBNAME)) {
-	log_messageln("MAIN_PROG_DDBNAME was not found in $CONFIG_FILE");
-	exit 3;
-}
-
 unless (defined($MAIN_PROG_DBUSER)) {
 	log_messageln("MAIN_PROG_DBUSER was not found in $CONFIG_FILE");
 	exit 4;
@@ -247,7 +242,7 @@ sub getNetworkInfos {
 	my ($sNetworkParam) = @_;
 	my $sNetworkName;
 	my $id_network;
-	my $sQuery = "SELECT * FROM NETWORK where network_name like ?";
+	my $sQuery = "SELECT id_network, network_name FROM NETWORK WHERE network_name LIKE ?";
 	my $sth = $dbh->prepare($sQuery);
 	unless ($sth->execute($sNetworkParam)) {
 		log_messageln("SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -305,14 +300,14 @@ sub addIrcServer {
 	}
 	else {
 		$id_server = $sth->{Database}->last_insert_id(undef, undef, undef, undef);
-		log_messageln("IRC Server $line added in SERVERS table with id : $id_server");
+		log_messageln("IRC Server $server_hostname added in SERVERS table with id : $id_server");
 	}
 	return $id_server;
 }
 
 sub getIrcServerId {
 	my ($sServerhostname) = @_;
-	my $sQuery = "SELECT * FROM SERVERS where server_hostname like ?";
+	my $sQuery = "SELECT id_server FROM SERVERS WHERE server_hostname LIKE ?";
 	my $sth = $dbh->prepare($sQuery);
 	unless ($sth->execute($sServerhostname)) {
 		log_messageln("SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -331,7 +326,7 @@ sub getIrcServerId {
 
 sub getIrcserversNetwork {
 	my ($id_network) = @_;
-	my $sQuery = "SELECT * FROM SERVERS where id_network=?";
+	my $sQuery = "SELECT id_server, server_hostname FROM SERVERS WHERE id_network=?";
 	my $sth = $dbh->prepare($sQuery);
 	unless ($sth->execute($id_network)) {
 		log_messageln("SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -413,7 +408,7 @@ sub menuServers {
 				$line=<STDIN>;
 				chomp($line);
 			}
-			my $sQuery = "SELECT * FROM SERVERS where id_server=?";
+			my $sQuery = "SELECT id_server FROM SERVERS WHERE id_server=?";
 			my $sth = $dbh->prepare($sQuery);
 			unless ($sth->execute($line)) {
 				log_messageln("SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
@@ -466,7 +461,7 @@ sub displayAll {
 	else {
 		log_messageln("Current network set : $CONN_SERVER_NETWORK");
 	}
-	my $sQuery = "SELECT * FROM NETWORK";
+	my $sQuery = "SELECT id_network, network_name FROM NETWORK";
 	my $sth = $dbh->prepare($sQuery);
 	unless ($sth->execute()) {
 		log_messageln("SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
