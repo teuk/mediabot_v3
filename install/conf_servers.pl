@@ -442,15 +442,53 @@ sub menuServers {
 }
 
 sub writeNetworkToConf {
-	my ($CONFIG_FILE,$sNetworkName) = @_;
-	unless (open SED, "sed -i -e 's/^CONN_SERVER_NETWORK=.*\$/CONN_SERVER_NETWORK=$sNetworkName/' $CONFIG_FILE |") {
-		log_messageln("Could not write CONN_SERVER_NETWORK to config file");
+	my ($CONFIG_FILE, $sNetworkName) = @_;
+
+	unless (defined($CONFIG_FILE) && $CONFIG_FILE ne '' && -f $CONFIG_FILE) {
+		log_messageln("Could not write CONN_SERVER_NETWORK to config file: missing config file");
 		exit 11;
 	}
-	else {
-		my $line=<SED>;
-		log_messageln("Set CONN_SERVER_NETWORK to $CONN_SERVER_NETWORK in config file");
+
+	unless (defined($sNetworkName) && $sNetworkName ne '') {
+		log_messageln("Could not write CONN_SERVER_NETWORK to config file: missing network name");
+		exit 11;
 	}
+
+	open my $in, '<:encoding(UTF-8)', $CONFIG_FILE or do {
+		log_messageln("Could not read $CONFIG_FILE: $!");
+		exit 11;
+	};
+
+	my @lines = <$in>;
+	close $in;
+
+	my $updated = 0;
+
+	for my $line (@lines) {
+		if ($line =~ /^CONN_SERVER_NETWORK=/) {
+			$line = "CONN_SERVER_NETWORK=$sNetworkName\n";
+			$updated = 1;
+			last;
+		}
+	}
+
+	unless ($updated) {
+		push @lines, "\n[connection]\n" unless grep { /^\[connection\]\s*$/ } @lines;
+		push @lines, "CONN_SERVER_NETWORK=$sNetworkName\n";
+	}
+
+	open my $out, '>:encoding(UTF-8)', $CONFIG_FILE or do {
+		log_messageln("Could not write $CONFIG_FILE: $!");
+		exit 11;
+	};
+
+	print {$out} @lines;
+	close $out or do {
+		log_messageln("Could not close $CONFIG_FILE after writing: $!");
+		exit 11;
+	};
+
+	log_messageln("Set CONN_SERVER_NETWORK to $sNetworkName in config file");
 }
 
 sub displayAll {

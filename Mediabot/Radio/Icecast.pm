@@ -11,9 +11,15 @@ our $VERSION = '0.02';
 sub new {
     my ($class, %args) = @_;
 
+    my $timeout = defined $args{timeout} ? $args{timeout} : 5;
+    $timeout =~ s/^\s+|\s+\z//g if defined $timeout;
+    $timeout = 5 unless defined($timeout) && $timeout =~ /^\d+(?:\.\d+)?\z/ && $timeout > 0;
+    $timeout = 1  if $timeout < 1;
+    $timeout = 30 if $timeout > 30;
+
     my $self = bless {
         base_url => $args{base_url} || 'http://127.0.0.1:8000',
-        timeout  => defined $args{timeout} ? $args{timeout} : 5,
+        timeout  => $timeout,
         logger   => $args{logger},
         ua       => undef,
     }, $class;
@@ -204,7 +210,8 @@ sub get_mounts {
     my @mounts;
 
     if (ref($sources) eq 'ARRAY') {
-        @mounts = map { $self->_normalize_mount($_) } @$sources;
+        @mounts = map { $self->_normalize_mount($_) }
+          grep { ref($_) eq 'HASH' } @$sources;
     }
     elsif (ref($sources) eq 'HASH') {
         @mounts = ($self->_normalize_mount($sources));
@@ -282,6 +289,12 @@ sub _fetch_icestats {
 sub _normalize_mount {
     my ($self, $src) = @_;
 
+    return {
+        mount => '',
+        title => '',
+        raw   => $src,
+    } unless ref($src) eq 'HASH';
+
     my $mount = '';
 
     if (defined $src->{listenurl} && $src->{listenurl} =~ m{https?://[^/]+(/.*)\z}) {
@@ -315,8 +328,15 @@ sub _normalize_mount {
 
 sub _num {
     my ($v) = @_;
+
     return 0 unless defined $v;
-    return ($v =~ /^\d+\z/) ? int($v) : 0;
+
+    $v =~ s/^\s+|\s+\z//g;
+    $v =~ s/,//g;
+
+    return 0 unless $v =~ /^\d+(?:\.\d+)?\z/;
+
+    return int($v);
 }
 
 sub _log {

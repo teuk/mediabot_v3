@@ -11,6 +11,7 @@ use File::Basename qw(dirname);
 use POSIX qw(strftime setsid);
 use Exporter 'import';
 use List::Util qw(min);
+use Sys::Hostname qw(hostname);
 use Mediabot::Helpers;
 
 use Mediabot::Context;
@@ -408,10 +409,14 @@ sub mbExec_ctx {
 
     my $timeout_bin = '/usr/bin/timeout';
 
+    unless (-x $timeout_bin) {
+        $self->{logger}->log(1, "mbExec_ctx: refusing to run exec without $timeout_bin");
+        $send->("Execution unavailable: $timeout_bin not found.");
+        return;
+    }
+
     my $shell = "$command 2>&1 | tail -n 3";
-    my @runner = (-x $timeout_bin)
-        ? ($timeout_bin, '--kill-after=2s', "${exec_timeout}s", 'sh', '-c', $shell)
-        : ('sh', '-c', $shell);
+    my @runner = ($timeout_bin, '--kill-after=2s', "${exec_timeout}s", 'sh', '-c', $shell);
 
     open my $cmd_fh, "-|", @runner or do {
         $self->{logger}->log(3, "mbExec_ctx: Failed to execute: $command");
@@ -486,26 +491,45 @@ sub mbStatus_ctx {
 
     # --- Server uptime ---
     my $server_uptime = 'Unavailable';
-    if (open my $fh_uptime, '-|', 'uptime') {
+    if (open my $fh_uptime, '<', '/proc/uptime') {
         if (defined(my $line = <$fh_uptime>)) {
-            chomp $line;
-            $server_uptime = $line;
+            my ($uptime_seconds) = split /\s+/, $line;
+            if (defined $uptime_seconds && $uptime_seconds =~ /^\d+(?:\.\d+)?$/) {
+                my $sys_uptime = int($uptime_seconds);
+                my $sys_days   = int($sys_uptime / 86400);
+                my $sys_hours  = int(($sys_uptime % 86400) / 3600);
+                my $sys_mins   = int(($sys_uptime % 3600) / 60);
+
+                $server_uptime = sprintf(
+                    'up %d days, %02d:%02d',
+                    $sys_days,
+                    $sys_hours,
+                    $sys_mins,
+                );
+            }
         }
         close $fh_uptime;
     } else {
-        $self->{logger}->log(1, "Could not execute 'uptime' command");
+        $self->{logger}->log(1, "Could not read /proc/uptime");
     }
 
     # --- OS Info ---
     my $uname = 'Unknown';
-    if (open my $fh_uname, '-|', 'uname -a') {
-        if (defined(my $line = <$fh_uname>)) {
-            chomp $line;
-            $uname = $line;
-        }
-        close $fh_uname;
+    my @uname_parts = eval { POSIX::uname() };
+
+    if (@uname_parts >= 5) {
+        my ($sysname, undef, $release, $version, $machine) = @uname_parts;
+        my $host = eval { hostname() } || 'unknown-host';
+
+        $uname = join ' ', grep { defined $_ && $_ ne '' } (
+            $sysname,
+            $host,
+            $release,
+            $version,
+            $machine,
+        );
     } else {
-        $self->{logger}->log(1, "Could not execute 'uname' command");
+        $self->{logger}->log(1, "POSIX::uname failed while building status output");
     }
 
     # --- Memory usage ---

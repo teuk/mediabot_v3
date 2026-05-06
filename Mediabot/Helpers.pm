@@ -17,6 +17,7 @@ use warnings;
 use Exporter 'import';
 use URI::Escape qw(uri_escape);
 use JSON::MaybeXS;
+use HTTP::Tiny;
 use Try::Tiny;
 use Socket;
 use POSIX qw(strftime);
@@ -1352,9 +1353,13 @@ sub getVersion {
     if ($local_version ne "Undefined") {
         $self->{logger}->log(1, "Checking latest version from GitHub...");
 
-        if (open my $gh, '-|', 'curl --connect-timeout 5 -f -s https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION') {
-            chomp($remote_version = <$gh>);
-            close $gh;
+        my $version_url = 'https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION';
+        my $response = HTTP::Tiny->new(timeout => 5)->get($version_url);
+
+        if ($response->{success}) {
+            $remote_version = $response->{content} // '';
+            $remote_version =~ s/\r?\n\z//;
+
             ($r_major, $r_minor, $r_type, $r_dev_info) = $self->getDetailedVersion($remote_version);
 
             if (defined $r_major && defined $r_minor && defined $r_type) {
@@ -1370,7 +1375,8 @@ sub getVersion {
                 $self->{logger}->log(1, "Unknown remote version format: $remote_version");
             }
         } else {
-            $self->{logger}->log(1, "Failed to fetch version from GitHub.");
+            my $status = defined $response->{status} ? $response->{status} : 'unknown';
+            $self->{logger}->log(1, "Failed to fetch version from GitHub: HTTP $status");
         }
     }
 
@@ -3367,26 +3373,22 @@ sub whereis {
 	unless (defined($userIP) && ($userIP =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/)) {
 		return "N/A";
 	}
-	my $fh_whereis;
-	unless (open $fh_whereis, "-|", "curl", "--connect-timeout", "3", "-f", "-s",
-	        "https://api.country.is/$userIP") {
-		return "N/A";
+	my $whereis_url = "https://api.country.is/$userIP";
+	my $response = HTTP::Tiny->new(timeout => 3)->get($whereis_url);
+
+	return "N/A" unless $response->{success};
+
+	my $line = $response->{content} // '';
+	return "N/A" unless $line ne '';
+
+	my $json = eval { decode_json $line };
+	if ($@ || !defined $json || ref($json) ne 'HASH') {
+		# Invalid JSON from geolocation API
+		return undef;
 	}
-	my $line;
-	if (defined($line=<$fh_whereis>)) {
-		close $fh_whereis;
-		chomp($line);
-		my $json = eval { decode_json $line };
-		if ($@ || !defined $json) {
-			# Invalid JSON from geolocation API
-			return undef;
-		}
-		my $country = $json->{'country'};
-		return defined($country) ? $country : undef;
-	}
-	else {
-		return "N/A";
-	}	
+
+	my $country = $json->{'country'};
+	return defined($country) ? $country : undef;
 }
 
 # whereis <nick>

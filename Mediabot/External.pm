@@ -6,7 +6,7 @@ package Mediabot::External;
 
 use strict;
 use warnings;
-use POSIX qw(strftime);
+use POSIX qw(strftime WNOHANG);
 use Time::HiRes qw(usleep);
 use List::Util qw(min);
 use Exporter 'import';
@@ -42,6 +42,7 @@ our @EXPORT = qw(
     _decode_html
     _extract_url
     _handle_applemusic
+    _handle_facebook
     _handle_generic_title
     _handle_instagram
     _handle_spotify
@@ -666,7 +667,21 @@ sub _fetch_url_chromium_dumpdom {
         my $err = $@ || 'unknown error';
         if ($pid) {
             eval { kill 'TERM', $pid };
-            waitpid($pid, 0);
+
+            my $reaped = 0;
+            for (1 .. 5) {
+                my $waited = waitpid($pid, WNOHANG);
+                if ($waited == $pid || $waited == -1) {
+                    $reaped = 1;
+                    last;
+                }
+                usleep(200_000);
+            }
+
+            unless ($reaped) {
+                eval { kill 'KILL', $pid };
+                waitpid($pid, 0);
+            }
         }
         $err =~ s/\s+$//;
         $self->{logger}->log(3, "_fetch_url_chromium_dumpdom() failed for $url: $err");
@@ -1224,6 +1239,217 @@ sub _handle_applemusic {
 }
 
 # ---------------------------------------------------------------------------
+# _facebook_url($url)
+# Normalize Facebook root URLs so they behave like browser/curl -L tests.
+# ---------------------------------------------------------------------------
+sub _facebook_url {
+    my ($url) = @_;
+
+    return undef unless defined $url && $url =~ m{^https?://(?:www\.)?facebook\.com(?:/|$)}i;
+
+    $url =~ s{^http://}{https://}i;
+    $url =~ s{^https://facebook\.com/?}{https://www.facebook.com/}i;
+
+    return $url;
+}
+
+# ---------------------------------------------------------------------------
+# _facebook_title_from_html($self, $html, $context)
+# Extract a usable Facebook title from HTML/DOM.
+# ---------------------------------------------------------------------------
+sub _facebook_title_from_html {
+    my ($self, $html, $context) = @_;
+
+    return undef unless defined $html && $html ne '';
+
+    my $title;
+
+    if ($html =~ /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i) {
+        $title = $1;
+    }
+    elsif ($html =~ /<meta\s+content=["']([^"']+)["']\s+property=["']og:title["']/i) {
+        $title = $1;
+    }
+    elsif ($html =~ /<title[^>]*>(.*?)<\/title>/si) {
+        $title = $1;
+    }
+
+    return undef unless defined $title && $title ne '';
+
+    $title = _decode_html($title);
+    $title =~ s/[\r\n\t]/ /g;
+    $title =~ s/\s{2,}/ /g;
+    $title =~ s/^\s+|\s+$//g;
+
+    return undef if $title eq '';
+    return undef if $title =~ /^\s*Facebook\s*$/i;
+    return undef if $title =~ /^(?:Log in|Se connecter|Connexion|Sign up|Inscription)\s*(?:to|à|sur)?\s*Facebook/i;
+    return undef if $title =~ /(?:log in|se connecter).*(?:Facebook)/i && length($title) < 80;
+
+    $self->{logger}->log(4, "_facebook_title_from_html() $context selected title='$title'");
+
+    return $title;
+}
+
+# ---------------------------------------------------------------------------
+# _facebook_fallback_title_from_url($url)
+# Last-resort label for Facebook URLs when both HTTP and Chromium only expose
+# a login shell or unusable generic title.
+# ---------------------------------------------------------------------------
+sub _facebook_fallback_title_from_url {
+    my ($url) = @_;
+
+    return undef unless defined $url && $url =~ m{^https?://(?:www\.)?facebook\.com(?:/|$)}i;
+
+    my $normalized = $url;
+    $normalized =~ s{^http://}{https://}i;
+    $normalized =~ s{^https://facebook\.com/?}{https://www.facebook.com/}i;
+
+    return 'Facebook' if $normalized =~ m{^https://www\.facebook\.com/?(?:[?#].*)?\z}i;
+
+    my $path = $normalized;
+    $path =~ s{^https://www\.facebook\.com/?}{}i;
+    $path =~ s/[?#].*\z//;
+    $path =~ s{/+\z}{};
+
+    return 'Facebook link' if $path eq '';
+
+    $path =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/eg;
+
+    my @parts = grep { defined $_ && $_ ne '' } split m{/+}, $path;
+
+    my $clean = sub {
+        my ($s) = @_;
+
+        return '' unless defined $s;
+
+        $s =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/eg;
+        $s =~ s/[._-]+/ /g;
+        $s =~ s/\s{2,}/ /g;
+        $s =~ s/^\s+|\s+\z//g;
+
+        return $s;
+    };
+
+    return 'Facebook reel'  if $path =~ m{^(?:reel|reels)/}i;
+    return 'Facebook video' if $path =~ m{^(?:watch|videos?)(?:/|\z)}i;
+    return 'Facebook photo' if $path =~ m{^(?:photo\.php|photo/|photos?)(?:/|\z)}i;
+    return 'Facebook story' if $path =~ m{^(?:stories|story\.php)(?:/|\z)}i;
+    return 'Facebook event' if $path =~ m{^events?/}i;
+
+    if (@parts >= 4 && lc($parts[0]) eq 'groups' && lc($parts[2]) eq 'posts') {
+        my $group = $clean->($parts[1]);
+        return $group ne '' ? "Facebook group post: $group" : 'Facebook group post';
+    }
+
+    if (@parts >= 2 && lc($parts[0]) eq 'groups') {
+        my $group = $clean->($parts[1]);
+        return $group ne '' ? "Facebook group: $group" : 'Facebook group';
+    }
+
+    if (@parts >= 3 && lc($parts[1]) eq 'posts') {
+        my $owner = $clean->($parts[0]);
+        return $owner ne '' ? "Facebook post by $owner" : 'Facebook post';
+    }
+
+    if (@parts >= 3 && lc($parts[1]) =~ /^videos?$/) {
+        my $owner = $clean->($parts[0]);
+        return $owner ne '' ? "Facebook video by $owner" : 'Facebook video';
+    }
+
+    if (@parts >= 1) {
+        my $owner = $clean->($parts[0]);
+
+        return 'Facebook link'
+            if $owner eq ''
+            || $owner =~ /^(?:permalink\.php|profile\.php|share|sharer|login|recover|help|marketplace)$/i;
+
+        return "Facebook: $owner";
+    }
+
+    return 'Facebook link';
+}
+
+# ---------------------------------------------------------------------------
+# _handle_facebook($self, $message, $nick, $channel, $url)
+# Facebook often behaves differently than generic sites.  Keep it out of the
+# generic title path and use a dedicated HTTP + Chromium fallback.
+# ---------------------------------------------------------------------------
+sub _handle_facebook {
+    my ($self, $message, $nick, $channel, $url) = @_;
+
+    my $fb_url = _facebook_url($url);
+    unless (defined $fb_url) {
+        $self->{logger}->log(4, "_handle_facebook() not a supported Facebook URL: " . ($url // '<undef>'));
+        return undef;
+    }
+
+    $self->{logger}->log(4, "_handle_facebook() start url=$fb_url");
+
+    my $title;
+
+    # Step 1: cheap HTTP fetch.  On your server, HTTP::Tiny follows
+    # facebook.com -> www.facebook.com and can receive a normal 200 page.
+    my $http = _make_http(
+        timeout  => 8,
+        max_size => 1024 * 1024,
+    );
+
+    my $res = $http->get($fb_url);
+
+    if ($res->{success}) {
+        my $content = _decode_http_content_utf8($self, $res->{content} // '', 'facebook-http');
+        my $len = length($content);
+        $self->{logger}->log(4, "_handle_facebook() HTTP fetched $len bytes for $fb_url");
+        $title = _facebook_title_from_html($self, $content, 'HTTP');
+    }
+    else {
+        $self->{logger}->log(4, "_handle_facebook() HTTP $res->{status} $res->{reason} for $fb_url");
+    }
+
+    # Step 2: Chromium fallback.  This is useful for Facebook shells where
+    # the initial HTML is present but the useful title is rendered or altered.
+    unless (defined $title && $title ne '') {
+        $self->{logger}->log(4, "_handle_facebook() falling back to Chromium rendered DOM");
+
+        my $dom = _fetch_url_chromium_dumpdom(
+            $self,
+            $fb_url,
+            virtual_time_budget => 4500,
+            alarm_timeout       => 14,
+            lang                => 'fr-FR',
+        );
+
+        if (defined $dom && $dom ne '') {
+            my $len = length($dom);
+            $self->{logger}->log(4, "_handle_facebook() Chromium DOM fetched $len bytes for $fb_url");
+            $title = _facebook_title_from_html($self, $dom, 'Chromium');
+        }
+    }
+
+    unless (defined $title && $title ne '') {
+        my $fallback_title = _facebook_fallback_title_from_url($fb_url);
+        if (defined $fallback_title && $fallback_title ne '') {
+            $title = $fallback_title;
+            $self->{logger}->log(4, "_handle_facebook() using URL fallback title '$title' for $fb_url");
+        }
+    }
+
+    unless (defined $title && $title ne '') {
+        $self->{logger}->log(3, "_handle_facebook() no usable title extracted for $fb_url");
+        return undef;
+    }
+
+    my $msg = String::IRC->new("[")->white('black');
+    $msg   .= String::IRC->new("Facebook")->white('blue');
+    $msg   .= String::IRC->new("]")->white('black');
+    $msg   .= " " . substr($title, 0, 300);
+
+    botPrivmsg($self, $channel, "($nick) $msg");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
 # _handle_generic_title($self, $message, $nick, $channel, $url)
 # Generic URL: fetch page, extract <title>. No HTML::Tree — regex is enough.
 # ---------------------------------------------------------------------------
@@ -1320,10 +1546,19 @@ sub displayUrlTitle {
         return _handle_applemusic($self, $message, $sNick, $sChannel, $url);
     }
 
-    # ── 5. Twitter / X — ignored silently ──────────────────────────────────
+    # ── 5. Facebook ────────────────────────────────────────────────────────
+    if ($url =~ m{https?://(?:www\.)?facebook\.com(?:/|$)}i) {
+        unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
+            $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Facebook)");
+            return undef;
+        }
+        return _handle_facebook($self, $message, $sNick, $sChannel, $url);
+    }
+
+    # ── 6. Twitter / X — ignored silently ──────────────────────────────────
     return undef if $url =~ m{https?://(?:www\.)?(?:twitter|x)\.com/}i;
 
-    # ── 6. Generic ─────────────────────────────────────────────────────────
+    # ── 7. Generic ─────────────────────────────────────────────────────────
     unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
         $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel");
         return undef;
@@ -1825,6 +2060,50 @@ sub _chatgpt_wrap {
 # Requires:
 #   - Logged in
 #   - Level >= Master
+# ---------------------------------------------------------------------------
+# _repair_utf8_mojibake($text)
+# Repair common IRC/client mojibake where UTF-8 bytes were decoded as CP1252.
+# Example:
+#   "piÃ¨ge de cristal" -> "piège de cristal"
+# The function is deliberately conservative: if conversion fails or does not
+# reduce suspicious mojibake markers, the original text is returned unchanged.
+# ---------------------------------------------------------------------------
+sub _repair_utf8_mojibake {
+    my ($text) = @_;
+
+    return $text unless defined $text;
+    return $text unless $text =~ /[ÃÂâ]/;
+
+    my $score = sub {
+        my ($s) = @_;
+        return 9999 unless defined $s;
+        return (() = $s =~ /[ÃÂâ�]/g);
+    };
+
+    # Best case: mojibake came from UTF-8 bytes decoded as Windows-1252.
+    # This repairs both accents and typographic punctuation:
+    #   piÃ¨ge        -> piège
+    #   Lâ€™Ã©tÃ©      -> L’été
+    my $fixed_cp1252 = eval {
+        decode('UTF-8', encode('Windows-1252', $text));
+    };
+
+    if (!$@ && defined($fixed_cp1252) && $score->($fixed_cp1252) < $score->($text)) {
+        return $fixed_cp1252;
+    }
+
+    # Fallback: mojibake came from UTF-8 bytes decoded as Latin-1.
+    my $fixed_latin1 = eval {
+        decode('UTF-8', pack('C*', map { ord($_) & 0xFF } split //, $text));
+    };
+
+    if (!$@ && defined($fixed_latin1) && $score->($fixed_latin1) < $score->($text)) {
+        return $fixed_latin1;
+    }
+
+    return $text;
+}
+
 sub mbTMDBSearch_ctx {
     my ($ctx) = @_;
 
@@ -1848,6 +2127,14 @@ sub mbTMDBSearch_ctx {
     }
 
     my $query = join(" ", @tArgs);
+    my $raw_query = $query;
+
+    $query = _repair_utf8_mojibake($query);
+
+    if ($query ne $raw_query) {
+        $self->{logger}->log(4, "mbTMDBSearch_ctx() repaired mojibake query '$raw_query' -> '$query'");
+    }
+
     my $lang  = getTMDBLangChannel($self, $channel) || 'en';
     $self->{logger}->log(4, "mbTMDBSearch_ctx() tmdb_lang for $channel is $lang");
 
@@ -1877,12 +2164,16 @@ sub mbTMDBSearch_ctx {
     botPrivmsg($self, $channel, $prefix . $overview);
 }
 
-# Get TMDB info using curl
+# Get TMDB info using HTTP::Tiny
 sub get_tmdb_info {
     my ($api_key, $lang, $query) = @_;
 
-    my $encoded_query = uri_escape($query);
-    my $url = "https://api.themoviedb.org/3/search/multi?api_key=$api_key&language=$lang&query=$encoded_query";
+    $lang = 'en-US'
+        unless defined($lang) && $lang =~ /^[A-Za-z]{2}(?:-[A-Za-z]{2})?\z/;
+
+    my $encoded_query = uri_escape_utf8($query);
+    my $encoded_lang  = uri_escape_utf8($lang);
+    my $url = "https://api.themoviedb.org/3/search/multi?api_key=$api_key&language=$encoded_lang&query=$encoded_query";
 
     my $http     = _make_http(timeout => 10);
     my $response = $http->get($url);
@@ -1896,10 +2187,15 @@ sub get_tmdb_info {
     my $data = eval { decode_json($response->{content}) };
     return undef if $@ || !ref($data) || !$data->{results} || !@{$data->{results}};
 
-    # Find the first movie or TV result
+    # Find the first movie or TV result.  Be defensive: API responses can
+    # contain partial entries, unexpected media types, or malformed data.
     my $result;
-    foreach my $item (@{$data->{results}}) {
-        next unless $item->{media_type} eq 'movie' || $item->{media_type} eq 'tv';
+    foreach my $item (@{ $data->{results} }) {
+        next unless ref($item) eq 'HASH';
+
+        my $media_type = $item->{media_type} // '';
+        next unless $media_type eq 'movie' || $media_type eq 'tv';
+
         $result = $item;
         last;
     }

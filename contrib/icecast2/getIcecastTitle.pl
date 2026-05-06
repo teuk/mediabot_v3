@@ -9,6 +9,7 @@ use diagnostics;
 use Getopt::Long;
 use File::Basename;
 use JSON;
+use HTTP::Tiny;
 
 # +---------------------------------------------------------------------------+
 # !          GLOBAL VARS                                                      !
@@ -69,12 +70,17 @@ sub getRadioCurrentSong {
 		print STDERR "RADIO_HOSTNAME not set";
 		return undef;
 	}
-	unless (open ICECAST_STATUS_JSON, "curl -f -s http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_JSON |") {
+	my $url = "http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_JSON";
+	my $response = HTTP::Tiny->new(timeout => 5)->get($url);
+
+	unless ($response->{success}) {
+		print STDERR "Error while retrieving JSON $url
+";
 		return "N/A";
 	}
-	my $line;
-	if (defined($line=<ICECAST_STATUS_JSON>)) {
-		close ICECAST_STATUS_JSON;
+
+	my $line = $response->{content};
+	if (defined($line) && $line ne "") {
 		chomp($line);
 		my $json = decode_json $line;
 		my $sources = $json->{'icestats'}{'source'};
