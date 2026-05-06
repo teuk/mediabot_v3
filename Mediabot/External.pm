@@ -1606,7 +1606,7 @@ sub youtubeSearch_ctx {
     }
 
     my $query_txt = join(" ", @args);
-    my $q_enc     = url_encode_utf8($query_txt);
+    my $q_enc     = uri_escape_utf8($query_txt);
 
     # ---------- 1) search endpoint (maxResults=1, type=video, fields réduits) ----------
     my $search_url =
@@ -1652,7 +1652,7 @@ sub youtubeSearch_ctx {
         . "?id=$video_id"
         . "&key=$APIKEY"
         . "&part=snippet,contentDetails,statistics"
-        . "&fields=items(snippet/title,contentDetails/duration,statistics/viewCount)";
+        . "&fields=items(snippet/title,snippet/channelTitle,contentDetails/duration,statistics/viewCount)";
 
     my $json_vid = '';
     {
@@ -1666,13 +1666,14 @@ sub youtubeSearch_ctx {
         $json_vid = $res_v->{content} // '';
     }
 
-    my ($title, $dur_iso, $views);
+    my ($title, $channel_title, $dur_iso, $views);
     eval {
         my $data = decode_json($json_vid);
         my $it   = $data->{items}[0] || {};
-        $title   = $it->{snippet}{title};
-        $dur_iso = $it->{contentDetails}{duration};
-        $views   = $it->{statistics}{viewCount};
+        $title         = $it->{snippet}{title};
+        $channel_title = $it->{snippet}{channelTitle};
+        $dur_iso       = $it->{contentDetails}{duration};
+        $views         = $it->{statistics}{viewCount};
         1;
     } or do {
         $self->{logger}->log(2, "youtubeSearch_ctx(): JSON decode/videos parse error: $@");
@@ -1680,22 +1681,40 @@ sub youtubeSearch_ctx {
         return;
     };
 
-    $title   //= '';
-    $dur_iso //= '';
-    $views   //= '';
+    $title         //= '';
+    $channel_title //= '';
+    $dur_iso       //= '';
+    $views         //= '';
+
+    if (($title         =~ tr/A-Z//) > 20) { $title         = ucfirst(lc($title)); }
+    if (($channel_title =~ tr/A-Z//) > 20) { $channel_title = ucfirst(lc($channel_title)); }
 
     my $dur_disp = _yt_format_duration($dur_iso);
     my $views_disp = ($views ne '' && $views =~ /^\d+$/) ? "views $views" : "views ?";
 
-    # ---------- output (safe colors) ----------
-    my $badge = _yt_badge();
-
+    # ---------- output: same colors as displayYoutubeDetails() ----------
     my $url = "https://www.youtube.com/watch?v=$video_id";
-    my $msg = "$badge $url";
-    $msg   .= " - $title" if $title ne '';
-    $msg   .= " - $dur_disp" if $dur_disp ne '';
-    $msg   .= " - $views_disp";
 
+    my $msg = _yt_label();
+    $msg   .= String::IRC->new(" $title ")->white('black') if $title ne '';
+
+    if ($dur_disp ne '') {
+        $msg .= String::IRC->new("- ")->orange('black');
+        $msg .= String::IRC->new("$dur_disp ")->grey('black');
+    }
+
+    $msg .= String::IRC->new("- ")->orange('black');
+    $msg .= String::IRC->new("$views_disp ")->grey('black');
+
+    if ($channel_title ne '') {
+        $msg .= String::IRC->new("- ")->orange('black');
+        $msg .= String::IRC->new("by $channel_title ")->grey('black');
+    }
+
+    $msg .= String::IRC->new("- ")->orange('black');
+    $msg .= String::IRC->new($url)->grey('black');
+
+    $msg =~ s/\r|\n//g;
     botPrivmsg($self, $chan, "($nick) $msg");
     logBot($self, $message, $chan, "yt", $query_txt);
 
