@@ -57,7 +57,7 @@ sub debug_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;   # may be undef for private
-    my @args    = @{ $ctx->args // [] };
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     my $irc_nick = $self->{irc}->nick_folded;
     my $conf     = $self->{conf};  # Mediabot::Conf object

@@ -2136,7 +2136,7 @@ sub chatGPT_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my $message = $ctx->message;
-    my @args    = @{ $ctx->args };
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     chatGPT($self, $message, $nick, $channel, @args);
 }
@@ -2213,7 +2213,21 @@ sub chatGPT {
 	# decode the JSON response
 	# --------------------------------------------------------------
 	my $data = eval { decode_json($response) };
-	if ($@ || !($data->{choices}[0]{message}{content} || '')) {
+	my $answer;
+
+	if (
+		!$@
+		&& ref($data) eq 'HASH'
+		&& ref($data->{choices}) eq 'ARRAY'
+		&& ref($data->{choices}[0]) eq 'HASH'
+		&& ref($data->{choices}[0]{message}) eq 'HASH'
+		&& defined($data->{choices}[0]{message}{content})
+		&& $data->{choices}[0]{message}{content} ne ''
+	) {
+		$answer = $data->{choices}[0]{message}{content};
+	}
+
+	if ($@ || !defined($answer) || $answer eq '') {
 		$self->{logger}->log( 0, 'chatGPT() chatGPT invalid JSON response');
 		$self->{logger}->log( 3, "chatGPT() Raw API response: $response");
 		$self->{logger}->log( 3, "chatGPT() JSON decode error: $@") if $@;
@@ -2221,8 +2235,6 @@ sub chatGPT {
 		botPrivmsg($self, $chan, "($nick) Could not read API response.");
 		return;
 	}
-
-	my $answer = $data->{choices}[0]{message}{content};
     $self->{logger}->log(4,"chatGPT() chatGPT raw answer: $answer");
 
     # -------- minimise PRIVMSG --------------------------------------
@@ -2336,7 +2348,7 @@ sub mbTMDBSearch_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
-    my @tArgs   = @{ $ctx->args };
+    my @tArgs   = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     my $conf = $self->{conf};
 
@@ -2411,7 +2423,11 @@ sub get_tmdb_info {
     }
 
     my $data = eval { decode_json($response->{content}) };
-    return undef if $@ || !ref($data) || !$data->{results} || !@{$data->{results}};
+    return undef
+        if $@
+        || ref($data) ne 'HASH'
+        || ref($data->{results}) ne 'ARRAY'
+        || !@{ $data->{results} };
 
     # Find the first movie or TV result.  Be defensive: API responses can
     # contain partial entries, unexpected media types, or malformed data.

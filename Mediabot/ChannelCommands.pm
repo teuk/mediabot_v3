@@ -435,7 +435,7 @@ sub channelSet_ctx {
     }
 
     # Permission: Administrator OR per-channel level >= 450
-    my $is_admin = $user->has_level($self, 'Administrator') ? 1 : 0;
+    my $is_admin = eval { $user->has_level('Administrator') ? 1 : 0 } || 0;
     my $is_chan  = checkUserChannelLevel($self, $ctx->message, $target_channel, $user->id, 450) ? 1 : 0;
 
     unless ($is_admin || $is_chan) {
@@ -3519,7 +3519,10 @@ sub getChannelOwner {
 # Backward compatible: leet($self, "text") or leet("text")
 sub userTopicChannel_ctx {
     my ($ctx) = @_;
-    userTopicChannel($ctx->bot, $ctx->message, $ctx->nick, $ctx->channel, @{ $ctx->args });
+
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    userTopicChannel($ctx->bot, $ctx->message, $ctx->nick, $ctx->channel, @args);
 }
 
 sub mbChannelLog_ctx {
@@ -3705,7 +3708,7 @@ sub setTMDBLangChannel_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my $message = $ctx->message;
-    my @args    = @{ $ctx->args };
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     # Syntax: tmdblangset [#channel] <lang>
     # Si le premier arg commence par #, c'est un channel cible explicite

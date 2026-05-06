@@ -20,7 +20,7 @@ use JSON::MaybeXS;
 use HTTP::Tiny;
 use Try::Tiny;
 use Socket;
-use POSIX qw(strftime);
+use POSIX qw(strftime WNOHANG);
 use Digest::SHA qw(sha1 sha1_hex);
 use List::Util qw(min);
 use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
@@ -2861,7 +2861,8 @@ sub mbEcho {
 
     my $self = $ctx->bot;
     my $chan = $ctx->channel;
-    my $text = join(' ', @{ $ctx->args // [] });
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $text = join(' ', @args);
 
     return unless length $text;
 
@@ -2888,7 +2889,7 @@ sub resolve_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
-    my @args    = @{ $ctx->args // [] };
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     # --- Syntax check ---
     unless (@args && defined $args[0] && $args[0] ne '') {
@@ -2947,7 +2948,22 @@ sub resolve_ctx {
             my $result = '';
             sysread($pipe, $result, 4096);
             close($pipe);
-            waitpid($child_pid, 0) if $child_pid;
+
+            if ($child_pid) {
+                my $waited = waitpid($child_pid, WNOHANG);
+
+                if ($waited == 0) {
+                    kill 'TERM', $child_pid;
+                    select(undef, undef, undef, 0.2);
+
+                    $waited = waitpid($child_pid, WNOHANG);
+
+                    if ($waited == 0) {
+                        kill 'KILL', $child_pid;
+                        waitpid($child_pid, 0);
+                    }
+                }
+            }
 
             my @ips = grep { /^\d/ } split /,/, ($result // '');
             if (@ips) {

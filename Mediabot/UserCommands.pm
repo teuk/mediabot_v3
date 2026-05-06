@@ -295,7 +295,7 @@ sub addUser_ctx {
 
     my $self = $ctx->bot;
     my $nick = $ctx->nick;
-    my @args = @{ $ctx->args // [] };
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     return unless $ctx->require_level("Master");
     my $user = $ctx->user;
@@ -1749,7 +1749,7 @@ sub delUser_ctx {
     my $self    = $ctx->bot;
     my $message = $ctx->message;
     my $nick    = $ctx->nick;
-    my @args    = @{ $ctx->args // [] };
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     # Remove caller nick if injected
     shift @args if @args && lc($args[0]) eq lc($nick);

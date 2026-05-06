@@ -134,7 +134,7 @@ sub userLogin_ctx {
     my $self  = $ctx->bot;
     my $sNick = $ctx->nick;
 
-    my @tArgs = @{ $ctx->args // [] };
+    my @tArgs = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     # If parser prepended caller nick: [caller, user, pass] -> shift caller
     if (@tArgs >= 3 && defined $sNick && $sNick ne '' && defined $tArgs[0] && lc($tArgs[0]) eq lc($sNick)) {
@@ -838,12 +838,18 @@ sub userWhoAmI_ctx {
 # Add a new public command to the database (Administrator+)
 sub userPass_ctx {
     my ($ctx) = @_;
-    userPass($ctx->bot, $ctx->message, $ctx->nick, @{ $ctx->args });
+
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    userPass($ctx->bot, $ctx->message, $ctx->nick, @args);
 }
 
 sub userIdent_ctx {
     my ($ctx) = @_;
-    userIdent($ctx->bot, $ctx->message, $ctx->nick, @{ $ctx->args });
+
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    userIdent($ctx->bot, $ctx->message, $ctx->nick, @args);
 }
 
 sub xLogin_ctx {
