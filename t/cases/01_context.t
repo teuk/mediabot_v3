@@ -59,14 +59,14 @@ return sub {
         $assert->ok(ref($a) eq 'ARRAY', 'Context->args() sans args = arrayref');
         $assert->is(scalar @$a, 0, 'Context->args() sans args = tableau vide');
 
-        # Args comme scalaire (cas dégénéré)
+        # Args comme scalaire (cas dégénéré) : ne doit pas devenir un argument valide
         my $ctx_scalar = Mediabot::Context->new(
             bot => $bot, message => $msg, nick => 'x', channel => '#x', command => 'test',
             args => 'single',
         );
         my $b = $ctx_scalar->args;
-        $assert->ok(ref($b) eq 'ARRAY', 'Context->args() scalaire wrappé en arrayref');
-        $assert->is($b->[0], 'single', 'Context->args() scalaire : valeur correcte');
+        $assert->ok(ref($b) eq 'ARRAY', 'Context->args() scalaire = arrayref');
+        $assert->is(scalar @$b, 0, 'Context->args() scalaire = tableau vide');
     }
 
     # -------------------------------------------------------------------------

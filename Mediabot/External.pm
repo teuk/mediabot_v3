@@ -121,6 +121,7 @@ sub getYoutubeDetails {
 					$self->{logger}->log(4,"getYoutubeDetails() title=" . ($hYoutubeItems{snippet}{localized}{title} // "?") . " duration=" . ($hYoutubeItems{contentDetails}{duration} // "?"));
 					$sViewCount = "views $hYoutubeItems{'statistics'}{'viewCount'}";
 					my $sTitleItem = $hYoutubeItems{'snippet'}{'localized'}{'title'};
+					$sTitle = $sTitleItem // "";
 					$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
 					$self->{logger}->log(4,"getYoutubeDetails() sDuration : $sDuration");
 					$sDuration =~ s/^PT//;
@@ -239,8 +240,8 @@ sub _youtube_html_fallback {
     }
 
     my $data = eval { decode_json($res->{content}) };
-    if ($@ || !ref $data) {
-        $self->{logger}->log(3, "_youtube_html_fallback() oEmbed JSON parse error: $@");
+    if ($@ || ref($data) ne 'HASH') {
+        $self->{logger}->log(3, "_youtube_html_fallback() oEmbed JSON parse/structure error: $@");
         return undef;
     }
 
@@ -332,19 +333,27 @@ sub displayYoutubeDetails {
         return undef;
     }
 
-    my @fTyoutubeItems = @{ $sYoutubeInfo->{items} // [] };
+    my @fTyoutubeItems = ref($sYoutubeInfo->{items}) eq 'ARRAY'
+        ? @{ $sYoutubeInfo->{items} }
+        : ();
+
     $self->{logger}->log(4, "displayYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
 
-    unless (@fTyoutubeItems && $fTyoutubeItems[0]) {
-        $self->{logger}->log(3, "displayYoutubeDetails() API returned no items for $sYoutubeId — trying HTML fallback");
+    unless (@fTyoutubeItems && ref($fTyoutubeItems[0]) eq 'HASH') {
+        $self->{logger}->log(3, "displayYoutubeDetails() API returned no usable items for $sYoutubeId — trying HTML fallback");
         return _youtube_html_fallback($self, $sNick, $sChannel, $sText, $sYoutubeId);
     }
 
-    my $item         = $fTyoutubeItems[0];
-    my $sViewCount   = "views " . ($item->{statistics}{viewCount} // '?');
-    my $sTitle       = $item->{snippet}{localized}{title}  // '';
-    my $schannelTitle = $item->{snippet}{channelTitle}     // '';
-    my $sDuration    = $item->{contentDetails}{duration}   // '';
+    my $item          = $fTyoutubeItems[0];
+    my $statistics    = ref($item->{statistics})     eq 'HASH' ? $item->{statistics}     : {};
+    my $snippet       = ref($item->{snippet})        eq 'HASH' ? $item->{snippet}        : {};
+    my $localized     = ref($snippet->{localized})   eq 'HASH' ? $snippet->{localized}   : {};
+    my $contentDetails = ref($item->{contentDetails}) eq 'HASH' ? $item->{contentDetails} : {};
+
+    my $sViewCount    = "views " . ($statistics->{viewCount} // '?');
+    my $sTitle        = $localized->{title}          // $snippet->{title} // '';
+    my $schannelTitle = $snippet->{channelTitle}     // '';
+    my $sDuration     = $contentDetails->{duration}  // '';
 
     $self->{logger}->log(4, "displayYoutubeDetails() sDuration : $sDuration");
     $self->{logger}->log(4, "displayYoutubeDetails() sViewCount : $sViewCount");
@@ -1782,21 +1791,8 @@ sub youtubeSearch_ctx {
     my $self    = $ctx->bot;
     my $message = $ctx->message;
     my $nick    = $ctx->nick;
-    my $chan    = $ctx->channel;  # undef si privé
+    my $chan    = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-
-    # Feature gate via chanset
-    my $id_chanset_list = getIdChansetList($self, "YoutubeSearch");
-    return unless defined($id_chanset_list) && $id_chanset_list ne "";
-
-    # en privé, on n’a pas de channel => on refuse (ou tu peux autoriser si tu veux)
-    unless (defined $chan && $chan ne '') {
-        botNotice($self, $nick, "yt can only be used in a channel (YoutubeSearch chanset scoped).");
-        return;
-    }
-
-    my $id_channel_set = getIdChannelSet($self, $chan, $id_chanset_list);
-    return unless defined($id_channel_set) && $id_channel_set ne "";
 
     # Args
     unless (@args && defined $args[0] && $args[0] ne "") {
@@ -1808,19 +1804,19 @@ sub youtubeSearch_ctx {
     my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
 
     unless (defined($APIKEY) && $APIKEY ne "") {
-        $self->{logger}->log(1, "youtubeSearch_ctx() YOUTUBE_APIKEY not set in ".$self->{config_file});
+        $self->{logger}->log(1, "youtubeSearch_ctx() YOUTUBE_APIKEY not set in " . $self->{config_file});
         return;
     }
 
     my $query_txt = join(" ", @args);
     my $q_enc     = uri_escape_utf8($query_txt);
 
-    # ---------- 1) search endpoint (maxResults=1, type=video, fields réduits) ----------
+    # ---------- 1) search endpoint: get up to 3 videos ----------
     my $search_url =
         "https://www.googleapis.com/youtube/v3/search"
         . "?part=snippet"
         . "&type=video"
-        . "&maxResults=1"
+        . "&maxResults=3"
         . "&q=$q_enc"
         . "&key=$APIKEY"
         . "&fields=items(id/videoId)";
@@ -1829,18 +1825,33 @@ sub youtubeSearch_ctx {
     {
         my $http_s = _make_http(timeout => 10);
         my $res_s  = $http_s->get($search_url);
+
         unless ($res_s->{success}) {
             $self->{logger}->log(2, "youtubeSearch_ctx(): HTTP $res_s->{status} for search endpoint");
             botPrivmsg($self, $chan, "($nick) YouTube: service unavailable (search).");
             return;
         }
+
         $json_search = $res_s->{content} // '';
     }
 
-    my $video_id;
+    my @video_ids;
     eval {
         my $data = decode_json($json_search);
-        $video_id = $data->{items}[0]{id}{videoId};
+
+        if (ref($data) eq 'HASH' && ref($data->{items}) eq 'ARRAY') {
+            for my $item (@{ $data->{items} }) {
+                next unless ref($item) eq 'HASH';
+                next unless ref($item->{id}) eq 'HASH';
+
+                my $video_id = $item->{id}{videoId};
+                next unless defined($video_id) && $video_id =~ /^[A-Za-z0-9_-]{11}\z/;
+
+                push @video_ids, $video_id;
+                last if @video_ids >= 3;
+            }
+        }
+
         1;
     } or do {
         $self->{logger}->log(2, "youtubeSearch_ctx(): JSON decode/search parse error: $@");
@@ -1848,85 +1859,128 @@ sub youtubeSearch_ctx {
         return;
     };
 
-    unless (defined $video_id && $video_id ne '') {
+    unless (@video_ids) {
         botPrivmsg($self, $chan, "($nick) YouTube: no result.");
         return;
     }
 
-    # ---------- 2) videos endpoint (fields réduits) ----------
+    # ---------- 2) videos endpoint: fetch metadata for selected IDs ----------
+    my $ids_enc = join(',', @video_ids);
+
     my $videos_url =
         "https://www.googleapis.com/youtube/v3/videos"
-        . "?id=$video_id"
+        . "?id=$ids_enc"
         . "&key=$APIKEY"
         . "&part=snippet,contentDetails,statistics"
-        . "&fields=items(snippet/title,snippet/channelTitle,contentDetails/duration,statistics/viewCount)";
+        . "&fields=items(id,snippet/title,snippet/channelTitle,contentDetails/duration,statistics/viewCount)";
 
     my $json_vid = '';
     {
         my $http_v = _make_http(timeout => 10);
         my $res_v  = $http_v->get($videos_url);
+
         unless ($res_v->{success}) {
             $self->{logger}->log(2, "youtubeSearch_ctx(): HTTP $res_v->{status} for videos endpoint");
-            botPrivmsg($self, $chan, "($nick) https://www.youtube.com/watch?v=$video_id");
+            botPrivmsg($self, $chan, "($nick) https://www.youtube.com/watch?v=$video_ids[0]");
             return;
         }
+
         $json_vid = $res_v->{content} // '';
     }
 
-    my ($title, $channel_title, $dur_iso, $views);
+    my %video_by_id;
     eval {
         my $data = decode_json($json_vid);
-        my $it   = $data->{items}[0] || {};
-        $title         = $it->{snippet}{title};
-        $channel_title = $it->{snippet}{channelTitle};
-        $dur_iso       = $it->{contentDetails}{duration};
-        $views         = $it->{statistics}{viewCount};
+
+        if (ref($data) eq 'HASH' && ref($data->{items}) eq 'ARRAY') {
+            for my $it (@{ $data->{items} }) {
+                next unless ref($it) eq 'HASH';
+
+                my $id = $it->{id};
+                next unless defined($id) && $id ne '';
+
+                my $snippet = ref($it->{snippet})        eq 'HASH' ? $it->{snippet}        : {};
+                my $details = ref($it->{contentDetails}) eq 'HASH' ? $it->{contentDetails} : {};
+                my $stats   = ref($it->{statistics})     eq 'HASH' ? $it->{statistics}     : {};
+
+                $video_by_id{$id} = {
+                    title         => $snippet->{title}        // '',
+                    channel_title => $snippet->{channelTitle} // '',
+                    duration      => $details->{duration}     // '',
+                    views         => $stats->{viewCount}      // '',
+                };
+            }
+        }
+
         1;
     } or do {
         $self->{logger}->log(2, "youtubeSearch_ctx(): JSON decode/videos parse error: $@");
-        botPrivmsg($self, $chan, "($nick) https://www.youtube.com/watch?v=$video_id");
+        botPrivmsg($self, $chan, "($nick) https://www.youtube.com/watch?v=$video_ids[0]");
         return;
     };
 
-    $title         //= '';
-    $channel_title //= '';
-    $dur_iso       //= '';
-    $views         //= '';
+    my @entries;
 
-    if (($title         =~ tr/A-Z//) > 20) { $title         = ucfirst(lc($title)); }
-    if (($channel_title =~ tr/A-Z//) > 20) { $channel_title = ucfirst(lc($channel_title)); }
+    for my $video_id (@video_ids) {
+        my $info = $video_by_id{$video_id};
+        next unless ref($info) eq 'HASH';
 
-    my $dur_disp = _yt_format_duration($dur_iso);
-    my $views_disp = ($views ne '' && $views =~ /^\d+$/) ? "views $views" : "views ?";
+        my $title         = $info->{title}         // '';
+        my $channel_title = $info->{channel_title} // '';
+        my $dur_iso       = $info->{duration}      // '';
+        my $views         = $info->{views}         // '';
 
-    # ---------- output: same colors as displayYoutubeDetails() ----------
-    my $url = "https://www.youtube.com/watch?v=$video_id";
+        if (($title         =~ tr/A-Z//) > 20) { $title         = ucfirst(lc($title)); }
+        if (($channel_title =~ tr/A-Z//) > 20) { $channel_title = ucfirst(lc($channel_title)); }
 
-    my $msg = _yt_label();
-    $msg   .= String::IRC->new(" $title ")->white('black') if $title ne '';
+        my $dur_disp   = _yt_format_duration($dur_iso);
+        my $views_disp = ($views ne '' && $views =~ /^\d+$/) ? "views $views" : "views ?";
+        my $url        = "https://www.youtube.com/watch?v=$video_id";
 
-    if ($dur_disp ne '') {
-        $msg .= String::IRC->new("- ")->orange('black');
-        $msg .= String::IRC->new("$dur_disp ")->grey('black');
+        my $entry = String::IRC->new(" $title ")->white('black');
+
+        if ($dur_disp ne '') {
+            $entry .= String::IRC->new("- ")->orange('black');
+            $entry .= String::IRC->new("$dur_disp ")->grey('black');
+        }
+
+        $entry .= String::IRC->new("- ")->orange('black');
+        $entry .= String::IRC->new("$views_disp ")->grey('black');
+
+        if ($channel_title ne '') {
+            $entry .= String::IRC->new("- ")->orange('black');
+            $entry .= String::IRC->new("by $channel_title ")->grey('black');
+        }
+
+        $entry .= String::IRC->new("- ")->orange('black');
+        $entry .= String::IRC->new($url)->grey('black');
+
+        push @entries, $entry;
+        last if @entries >= 3;
     }
 
-    $msg .= String::IRC->new("- ")->orange('black');
-    $msg .= String::IRC->new("$views_disp ")->grey('black');
-
-    if ($channel_title ne '') {
-        $msg .= String::IRC->new("- ")->orange('black');
-        $msg .= String::IRC->new("by $channel_title ")->grey('black');
+    unless (@entries) {
+        botPrivmsg($self, $chan, "($nick) YouTube: no result.");
+        return;
     }
 
-    $msg .= String::IRC->new("- ")->orange('black');
-    $msg .= String::IRC->new($url)->grey('black');
+    # ---------- output: same colors as displayYoutubeDetails(), one visible line per result ----------
+    for my $i (0 .. $#entries) {
+        my $rank = $i + 1;
+        my $msg  = _yt_label();
+        $msg    .= String::IRC->new(" $rank/" . scalar(@entries) . " ")->orange('black');
+        $msg    .= $entries[$i];
 
-    $msg =~ s/\r|\n//g;
-    botPrivmsg($self, $chan, "($nick) $msg");
+        $msg =~ s/\r|\n//g;
+
+        botPrivmsg($self, $chan, "($nick) $msg");
+    }
+
     logBot($self, $message, $chan, "yt", $query_txt);
 
     return 1;
 }
+
 
 # Duration: ISO8601 "PT#H#M#S" -> "1h 02m 03s" / "3m 12s" / "45s"
 sub getFortniteId {
@@ -2056,14 +2110,14 @@ sub fortniteStats_ctx {
     }
 
     my $data = eval { decode_json($json_details) };
-    if ($@ || !$data) {
-        $self->{logger}->log(3, "fortniteStats_ctx(): JSON decode error: $@");
+    if ($@ || ref($data) ne 'HASH') {
+        $self->{logger}->log(3, "fortniteStats_ctx(): JSON decode/structure error: $@");
         botPrivmsg($self, $reply_to, "Fortnite stats: unexpected API response.");
         return;
     }
 
     # API may return {status:..., error:...}
-    if (ref($data) eq 'HASH' && exists $data->{status} && $data->{status} != 200) {
+    if (exists $data->{status} && $data->{status} != 200) {
         my $err = $data->{error} // "API error";
         $self->{logger}->log(3, "fortniteStats_ctx(): API status=$data->{status} error=$err");
         botPrivmsg($self, $reply_to, "Fortnite stats: $err");
@@ -2076,13 +2130,32 @@ sub fortniteStats_ctx {
         return;
     }
 
-    my $account    = $payload->{account}    || {};
-    my $battlepass = $payload->{battlePass} || {};
+    my $account    = ref($payload->{account})    eq 'HASH' ? $payload->{account}    : {};
+    my $battlepass = ref($payload->{battlePass}) eq 'HASH' ? $payload->{battlePass} : {};
+    my $stats      = ref($payload->{stats})      eq 'HASH' ? $payload->{stats}      : {};
+    my $all_stats  = ref($stats->{all})          eq 'HASH' ? $stats->{all}          : {};
 
-    # Some payloads are nested differently depending on API versions / modes
-    my $overall = $payload->{stats}{all}{overall}
-              || $payload->{stats}{all}{overall}{solo}   # defensive (rare)
-              || {};
+    # Some payloads are nested differently depending on API versions / modes.
+    # Keep this defensive: API responses can be valid JSON but missing parts.
+    #
+    # Preferred:
+    #   stats.all.overall
+    #
+    # Fallback:
+    #   stats.all.solo / duo / trio / squad
+    my $overall = {};
+
+    if (ref($all_stats->{overall}) eq 'HASH') {
+        $overall = $all_stats->{overall};
+    }
+    else {
+        for my $mode (qw(solo duo trio squad)) {
+            next unless ref($all_stats->{$mode}) eq 'HASH';
+
+            $overall = $all_stats->{$mode};
+            last;
+        }
+    }
 
     my $name        = $account->{name}       // $target_name;
     my $matches     = $overall->{matches}    // 0;

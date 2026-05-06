@@ -534,12 +534,7 @@ sub hailo_chatter_ctx {
     my $channel = $ctx->channel;
     my $message = $ctx->message;
 
-    my @args = ();
-    if (ref($ctx->args) eq 'ARRAY') {
-        @args = @{ $ctx->args };
-    } elsif (defined $ctx->args) {
-        @args = ($ctx->args);
-    }
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     # --- Auth / permission checks (Master+) ---
     my $user = $ctx->user // eval { $self->get_user_from_message($message) };

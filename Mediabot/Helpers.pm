@@ -1596,12 +1596,7 @@ sub mbWhereis_ctx {
     my $message = $ctx->message;
 
     # Normalize args
-    my @args;
-    if (ref($ctx->args) eq 'ARRAY') {
-        @args = @{ $ctx->args };
-    } elsif (defined $ctx->args) {
-        @args = ($ctx->args);
-    }
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     unless (@args && defined $args[0] && $args[0] ne '') {
         botNotice($self, $nick, "Syntax: whereis <nick>");

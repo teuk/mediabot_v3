@@ -77,13 +77,13 @@ return sub {
 
     $assert->like(
         $search_body // '',
-        qr/fields=items\(snippet\/title,snippet\/channelTitle,contentDetails\/duration,statistics\/viewCount\)/,
-        'youtubeSearch_ctx requests channelTitle for matching link output'
+        qr/fields=items\(id,snippet\/title,snippet\/channelTitle,contentDetails\/duration,statistics\/viewCount\)/,
+        'youtubeSearch_ctx requests id and channelTitle for matching multi-result link output'
     );
 
     $assert->like(
         $search_body // '',
-        qr/my \$msg = _yt_label\(\);/,
+        qr/my \$msg\s+= _yt_label\(\);/,
         'youtubeSearch_ctx starts output with shared YouTube label'
     );
 

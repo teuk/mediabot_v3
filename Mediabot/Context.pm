@@ -62,14 +62,14 @@ sub nick    { $_[0]->{nick} }
 sub channel { $_[0]->{channel} }
 sub command { $_[0]->{command} }
 
-# Always return an arrayref for args
+# Always return an arrayref for args.
+# Invalid/non-ARRAY args are treated as an empty argument list.
 sub args {
     my ($self) = @_;
     my $args = $self->{args};
 
-    return []        unless defined $args;
-    return $args     if ref $args eq 'ARRAY';
-    return [ $args ];
+    return $args if ref($args) eq 'ARRAY';
+    return [];
 }
 
 # Return the Mediabot::Command object attached to this context (if any)

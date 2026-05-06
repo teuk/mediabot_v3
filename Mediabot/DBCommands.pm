@@ -1942,7 +1942,7 @@ sub addResponder_ctx {
     my $message = $ctx->message;
 
     # Extract arguments from Context
-    my @args = (ref $ctx->args eq 'ARRAY') ? @{ $ctx->args } : ();
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     # ---------------------------------------
     # User object + permissions
@@ -2074,7 +2074,7 @@ sub delResponder_ctx {
     my $message = $ctx->message;
 
     # Extract arguments
-    my @args = (ref $ctx->args eq 'ARRAY') ? @{ $ctx->args } : ();
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     # ---------------------------------------
     # User object + permissions (Master only)
@@ -2493,7 +2493,7 @@ sub lastCom_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $message = $ctx->message;
-    my @args    = (ref $ctx->args eq 'ARRAY') ? @{ $ctx->args } : ();
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     # ----------------------------------------
     # Resolve current user from Context
@@ -2637,8 +2637,7 @@ sub Yomomma_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
 
-    my @args = ();
-    @args = @{ $ctx->args } if ref($ctx->args) eq 'ARRAY';
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     # If the first argument is a positive integer, interpret it as an ID
     my $id;
