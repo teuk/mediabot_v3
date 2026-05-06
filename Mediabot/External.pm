@@ -44,6 +44,10 @@ our @EXPORT = qw(
     _handle_applemusic
     _handle_facebook
     _handle_generic_title
+    _x_url
+    _x_title_from_html
+    _x_fallback_title_from_url
+    _handle_x_twitter
     _handle_instagram
     _handle_spotify
     _is_youtube_url
@@ -1450,6 +1454,187 @@ sub _handle_facebook {
 }
 
 # ---------------------------------------------------------------------------
+# _x_url($url)
+# Normalize X/Twitter URLs so the dedicated handler has one canonical shape.
+# ---------------------------------------------------------------------------
+sub _x_url {
+    my ($url) = @_;
+
+    return undef unless defined $url && $url =~ m{^https?://(?:www\.)?(?:x|twitter)\.com(?:/|$)}i;
+
+    $url =~ s{^http://}{https://}i;
+    $url =~ s{^https://(?:www\.)?twitter\.com/}{https://x.com/}i;
+    $url =~ s{^https://www\.x\.com/}{https://x.com/}i;
+    $url =~ s{^https://x\.com/?}{https://x.com/}i;
+
+    return $url;
+}
+
+# ---------------------------------------------------------------------------
+# _x_title_from_html($self, $html, $context)
+# Extract a usable X/Twitter title from rendered DOM or HTML.
+# ---------------------------------------------------------------------------
+sub _x_title_from_html {
+    my ($self, $html, $context) = @_;
+
+    return undef unless defined $html && $html ne '';
+
+    my $title;
+
+    if ($html =~ /<meta\s+(?:property|name)=["'](?:og:title|twitter:title)["']\s+content=["']([^"']+)["']/i) {
+        $title = $1;
+    }
+    elsif ($html =~ /<meta\s+content=["']([^"']+)["']\s+(?:property|name)=["'](?:og:title|twitter:title)["']/i) {
+        $title = $1;
+    }
+    elsif ($html =~ /<title[^>]*>(.*?)<\/title>/si) {
+        $title = $1;
+    }
+
+    return undef unless defined $title && $title ne '';
+
+    $title = _decode_html($title);
+    $title =~ s/[\r\n\t]/ /g;
+    $title =~ s/\s{2,}/ /g;
+    $title =~ s/^\s+|\s+$//g;
+
+    return undef if $title eq '';
+    return undef if $title =~ /^(?:X|Twitter)$/i;
+    return undef if $title =~ /^(?:Log in|Se connecter|Sign in|Connexion)\s*(?:to|à|sur)?\s*(?:X|Twitter)/i;
+    return undef if $title =~ /(?:JavaScript is not available|This browser is no longer supported)/i;
+
+    $self->{logger}->log(4, "_x_title_from_html() $context selected title='$title'");
+
+    return $title;
+}
+
+# ---------------------------------------------------------------------------
+# _x_fallback_title_from_url($url)
+# Last-resort honest label when X only exposes a login shell.
+# ---------------------------------------------------------------------------
+sub _x_fallback_title_from_url {
+    my ($url) = @_;
+
+    my $x_url = _x_url($url);
+    return undef unless defined $x_url;
+
+    return 'X' if $x_url =~ m{^https://x\.com/?(?:[?#].*)?\z}i;
+
+    my $path = $x_url;
+    $path =~ s{^https://x\.com/?}{}i;
+    $path =~ s/[?#].*\z//;
+    $path =~ s{/+\z}{};
+
+    return 'X link' if $path eq '';
+
+    $path =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/eg;
+
+    my @parts = grep { defined $_ && $_ ne '' } split m{/+}, $path;
+
+    my $clean = sub {
+        my ($s) = @_;
+
+        return '' unless defined $s;
+
+        $s =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/eg;
+        $s =~ s/[._-]+/ /g;
+        $s =~ s/\s{2,}/ /g;
+        $s =~ s/^\s+|\s+\z//g;
+
+        return $s;
+    };
+
+    if (@parts >= 3 && lc($parts[1]) eq 'status') {
+        my $owner = $clean->($parts[0]);
+        return $owner ne '' ? "X post by \@$owner" : 'X post';
+    }
+
+    if (@parts >= 3 && lc($parts[1]) eq 'lists') {
+        my $owner = $clean->($parts[0]);
+        my $list  = $clean->($parts[2]);
+
+        return "X list by \@$owner: $list" if $owner ne '' && $list ne '';
+        return "X list by \@$owner"       if $owner ne '';
+        return 'X list';
+    }
+
+    if (@parts >= 2 && lc($parts[0]) eq 'i' && lc($parts[1]) eq 'communities') {
+        return 'X community';
+    }
+
+    if (@parts >= 1) {
+        my $owner = $clean->($parts[0]);
+
+        return 'X link'
+            if $owner eq ''
+            || $owner =~ /^(?:home|explore|search|notifications|messages|i|intent|share|login|logout|settings)$/i;
+
+        return "X profile: \@$owner";
+    }
+
+    return 'X link';
+}
+
+# ---------------------------------------------------------------------------
+# _handle_x_twitter($self, $message, $nick, $channel, $url)
+# X/Twitter is not a generic website for URL titles.  It often needs a rendered
+# DOM to expose useful metadata, and it may still only show a login shell.
+# ---------------------------------------------------------------------------
+sub _handle_x_twitter {
+    my ($self, $message, $nick, $channel, $url) = @_;
+
+    my $x_url = _x_url($url);
+    unless (defined $x_url) {
+        $self->{logger}->log(4, "_handle_x_twitter() not a supported X/Twitter URL: " . ($url // '<undef>'));
+        return undef;
+    }
+
+    $self->{logger}->log(4, "_handle_x_twitter() start url=$x_url");
+
+    my $title;
+
+    # X is rendered/client-heavy.  Go directly through Chromium, the same
+    # strategy used for stubborn Facebook shells.
+    my $dom = _fetch_url_chromium_dumpdom(
+        $self,
+        $x_url,
+        virtual_time_budget => 6500,
+        alarm_timeout       => 16,
+        lang                => 'fr-FR',
+    );
+
+    if (defined $dom && $dom ne '') {
+        my $len = length($dom);
+        $self->{logger}->log(4, "_handle_x_twitter() Chromium DOM fetched $len bytes for $x_url");
+        $title = _x_title_from_html($self, $dom, 'Chromium');
+    }
+    else {
+        $self->{logger}->log(4, "_handle_x_twitter() Chromium returned no usable DOM for $x_url");
+    }
+
+    unless (defined $title && $title ne '') {
+        my $fallback_title = _x_fallback_title_from_url($x_url);
+        if (defined $fallback_title && $fallback_title ne '') {
+            $title = $fallback_title;
+            $self->{logger}->log(4, "_handle_x_twitter() using URL fallback title '$title' for $x_url");
+        }
+    }
+
+    unless (defined $title && $title ne '') {
+        $self->{logger}->log(3, "_handle_x_twitter() no usable title extracted for $x_url");
+        return undef;
+    }
+
+    my $msg = String::IRC->new("[")->white('black');
+    $msg   .= String::IRC->new("X")->white('black');
+    $msg   .= String::IRC->new("]")->white('black');
+    $msg   .= " " . substr($title, 0, 300);
+
+    botPrivmsg($self, $channel, "($nick) $msg");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
 # _handle_generic_title($self, $message, $nick, $channel, $url)
 # Generic URL: fetch page, extract <title>. No HTML::Tree — regex is enough.
 # ---------------------------------------------------------------------------
@@ -1555,8 +1740,14 @@ sub displayUrlTitle {
         return _handle_facebook($self, $message, $sNick, $sChannel, $url);
     }
 
-    # ── 6. Twitter / X — ignored silently ──────────────────────────────────
-    return undef if $url =~ m{https?://(?:www\.)?(?:twitter|x)\.com/}i;
+    # ── 6. X / Twitter ─────────────────────────────────────────────────────
+    if ($url =~ m{https?://(?:www\.)?(?:x|twitter)\.com(?:/|$)}i) {
+        unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
+            $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (X/Twitter)");
+            return undef;
+        }
+        return _handle_x_twitter($self, $message, $sNick, $sChannel, $url);
+    }
 
     # ── 7. Generic ─────────────────────────────────────────────────────────
     unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
