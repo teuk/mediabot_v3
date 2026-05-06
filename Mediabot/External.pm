@@ -1268,13 +1268,18 @@ sub _facebook_title_from_html {
 
     my $title;
 
-    if ($html =~ /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i) {
-        $title = $1;
+    while ($html =~ /<meta\b([^>]*?)>/sig) {
+        my $attrs = $1;
+
+        next unless $attrs =~ /property=["']og:title["']/i;
+
+        if ($attrs =~ /\bcontent=["']([^"']+)["']/i) {
+            $title = $1;
+            last;
+        }
     }
-    elsif ($html =~ /<meta\s+content=["']([^"']+)["']\s+property=["']og:title["']/i) {
-        $title = $1;
-    }
-    elsif ($html =~ /<title[^>]*>(.*?)<\/title>/si) {
+
+    if (!defined($title) && $html =~ /<title[^>]*>(.*?)<\/title>/si) {
         $title = $1;
     }
 
@@ -1463,9 +1468,11 @@ sub _x_url {
     return undef unless defined $url && $url =~ m{^https?://(?:www\.)?(?:x|twitter)\.com(?:/|$)}i;
 
     $url =~ s{^http://}{https://}i;
-    $url =~ s{^https://(?:www\.)?twitter\.com/}{https://x.com/}i;
-    $url =~ s{^https://www\.x\.com/}{https://x.com/}i;
+    $url =~ s{^https://(?:www\.)?twitter\.com(?=/|$)}{https://x.com}i;
+    $url =~ s{^https://www\.x\.com(?=/|$)}{https://x.com}i;
     $url =~ s{^https://x\.com/?}{https://x.com/}i;
+
+    $url .= '/' if $url =~ m{^https://x\.com\z}i;
 
     return $url;
 }
@@ -1481,13 +1488,18 @@ sub _x_title_from_html {
 
     my $title;
 
-    if ($html =~ /<meta\s+(?:property|name)=["'](?:og:title|twitter:title)["']\s+content=["']([^"']+)["']/i) {
-        $title = $1;
+    while ($html =~ /<meta\b([^>]*?)>/sig) {
+        my $attrs = $1;
+
+        next unless $attrs =~ /(?:property|name)=["'](?:og:title|twitter:title)["']/i;
+
+        if ($attrs =~ /\bcontent=["']([^"']+)["']/i) {
+            $title = $1;
+            last;
+        }
     }
-    elsif ($html =~ /<meta\s+content=["']([^"']+)["']\s+(?:property|name)=["'](?:og:title|twitter:title)["']/i) {
-        $title = $1;
-    }
-    elsif ($html =~ /<title[^>]*>(.*?)<\/title>/si) {
+
+    if (!defined($title) && $html =~ /<title[^>]*>(.*?)<\/title>/si) {
         $title = $1;
     }
 
@@ -1544,7 +1556,11 @@ sub _x_fallback_title_from_url {
         return $s;
     };
 
-    if (@parts >= 3 && lc($parts[1]) eq 'status') {
+    if (@parts >= 3 && lc($parts[0]) eq 'i' && lc($parts[1]) eq 'web' && lc($parts[2]) eq 'status') {
+        return 'X post';
+    }
+
+    if (@parts >= 3 && lc($parts[1]) =~ /^status(?:es)?$/) {
         my $owner = $clean->($parts[0]);
         return $owner ne '' ? "X post by \@$owner" : 'X post';
     }
