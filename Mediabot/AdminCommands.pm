@@ -12,6 +12,9 @@ use POSIX qw(strftime setsid);
 use Exporter 'import';
 use List::Util qw(min);
 use Sys::Hostname qw(hostname);
+use HTTP::Tiny;
+use JSON qw(encode_json decode_json);
+use Time::HiRes qw(time);
 use Mediabot::Helpers;
 
 use Mediabot::Context;
@@ -19,6 +22,7 @@ use Mediabot::Radio::Icecast;
 
 our @EXPORT = qw(
     debug_ctx
+    openai_ctx
     mbExec_ctx
     mbJump
     mbQuit_ctx
@@ -51,6 +55,708 @@ sub mbQuit_ctx {
 }
 
 # Check if the user is logged in
+sub _openai_param_spec {
+    return {
+        api_url => {
+            key     => 'openai.API_URL',
+            default => 'https://api.openai.com/v1/chat/completions',
+            type    => 'url',
+            help    => 'HTTPS endpoint used by tellme/chatGPT',
+        },
+        model => {
+            key     => 'openai.MODEL',
+            default => 'gpt-4o-mini',
+            type    => 'model',
+            help    => 'OpenAI model name, for example gpt-4o-mini or gpt-4o',
+        },
+        fallback_model => {
+            key     => 'openai.FALLBACK_MODEL',
+            default => '',
+            type    => 'model',
+            help    => 'Optional fallback model used when the primary model is forbidden or unavailable',
+        },
+        system_prompt => {
+            key     => 'openai.SYSTEM_PROMPT',
+            default => 'You always answer in a helpful and serious way, precise and never start your answer with « Oh là là » when the answer is in French. Always respond using a maximum of 10 lines of text and line-based. There is one chance on two the answer contains emojis.',
+            type    => 'text',
+            min     => 10,
+            max     => 800,
+            help    => 'System prompt controlling tellme/chatGPT tone and behavior',
+        },
+        temperature => {
+            key     => 'openai.TEMPERATURE',
+            default => '0.7',
+            type    => 'float',
+            min     => 0,
+            max     => 2,
+            help    => 'Creativity/randomness, from 0 to 2',
+        },
+        max_tokens => {
+            key     => 'openai.MAX_TOKENS',
+            default => '400',
+            type    => 'int',
+            min     => 1,
+            max     => 4000,
+            help    => 'Maximum answer tokens requested from the API',
+        },
+        max_privmsg => {
+            key     => 'openai.MAX_PRIVMSG',
+            default => '4',
+            type    => 'int',
+            min     => 1,
+            max     => 8,
+            help    => 'Maximum IRC PRIVMSG lines sent for one answer',
+        },
+        wrap_bytes => {
+            key     => 'openai.WRAP_BYTES',
+            default => '400',
+            type    => 'int',
+            min     => 120,
+            max     => 450,
+            help    => 'Approximate IRC-safe split size in bytes',
+        },
+        sleep_us => {
+            key     => 'openai.SLEEP_US',
+            default => '750000',
+            type    => 'int',
+            min     => 0,
+            max     => 2000000,
+            help    => 'Delay between output lines, in microseconds',
+        },
+    };
+}
+
+sub _openai_param_alias {
+    my ($name) = @_;
+
+    return undef unless defined($name);
+
+    $name = lc($name);
+    $name =~ s/[-.]/_/g;
+
+    my %alias = (
+        url          => 'api_url',
+        apiurl       => 'api_url',
+        api_url      => 'api_url',
+        endpoint     => 'api_url',
+        model        => 'model',
+        fallback     => 'fallback_model',
+        fallback_model => 'fallback_model',
+        fallbackmodel  => 'fallback_model',
+        prompt       => 'system_prompt',
+        system      => 'system_prompt',
+        system_prompt => 'system_prompt',
+        systemprompt  => 'system_prompt',
+        temp         => 'temperature',
+        temperature  => 'temperature',
+        tokens       => 'max_tokens',
+        max_token    => 'max_tokens',
+        max_tokens   => 'max_tokens',
+        privmsg      => 'max_privmsg',
+        max_privmsg  => 'max_privmsg',
+        lines        => 'max_privmsg',
+        wrap         => 'wrap_bytes',
+        wrap_bytes   => 'wrap_bytes',
+        sleep        => 'sleep_us',
+        sleep_us     => 'sleep_us',
+        delay        => 'sleep_us',
+    );
+
+    return $alias{$name};
+}
+
+sub _openai_effective_value {
+    my ($self, $name) = @_;
+
+    my $spec = _openai_param_spec()->{$name};
+    return undef unless $spec;
+
+    my $value = $self->{conf}->get($spec->{key});
+    return defined($value) && $value ne '' ? $value : $spec->{default};
+}
+
+sub _openai_validate_value {
+    my ($name, $value) = @_;
+
+    my $spec = _openai_param_spec()->{$name};
+
+    return (0, "unknown OpenAI parameter") unless $spec;
+    return (0, "missing value") unless defined($value) && $value ne '';
+
+    if ($spec->{type} eq 'int') {
+        return (0, "$name must be an integer") unless $value =~ /^\d+\z/;
+
+        my $n = int($value);
+        return (0, "$name must be >= $spec->{min}") if defined($spec->{min}) && $n < $spec->{min};
+        return (0, "$name must be <= $spec->{max}") if defined($spec->{max}) && $n > $spec->{max};
+
+        return (1, "$n");
+    }
+
+    if ($spec->{type} eq 'float') {
+        return (0, "$name must be a number") unless $value =~ /^\d+(?:\.\d+)?\z/;
+
+        my $n = 0 + $value;
+        return (0, "$name must be >= $spec->{min}") if defined($spec->{min}) && $n < $spec->{min};
+        return (0, "$name must be <= $spec->{max}") if defined($spec->{max}) && $n > $spec->{max};
+
+        return (1, "$n");
+    }
+
+    if ($spec->{type} eq 'url') {
+        return (0, "$name must start with https://") unless $value =~ m{^https://}i;
+        return (0, "$name is too long") if length($value) > 250;
+
+        return (1, $value);
+    }
+
+    if ($spec->{type} eq 'model') {
+        return (0, "$name contains invalid characters") unless $value =~ /^[A-Za-z0-9._:-]+\z/;
+        return (0, "$name is too long") if length($value) > 80;
+
+        return (1, $value);
+    }
+
+    if ($spec->{type} eq 'text') {
+        $value =~ s/\r|\n/ /g;
+        $value =~ s/\s+/ /g;
+        $value =~ s/^\s+|\s+\z//g;
+
+        return (0, "$name is too short") if defined($spec->{min}) && length($value) < $spec->{min};
+        return (0, "$name is too long")  if defined($spec->{max}) && length($value) > $spec->{max};
+
+        return (1, $value);
+    }
+
+    return (0, "unsupported parameter type");
+}
+
+sub _openai_notice_status {
+    my ($self, $nick, $channel) = @_;
+
+    my $api_key = $self->{conf}->get('openai.API_KEY');
+    my $has_key = (defined($api_key) && $api_key ne '') ? 'yes' : 'no';
+
+    my $api_url     = _openai_effective_value($self, 'api_url');
+    my $model          = _openai_effective_value($self, 'model');
+    my $fallback_model = _openai_effective_value($self, 'fallback_model');
+    $fallback_model = '(disabled)' unless defined($fallback_model) && $fallback_model ne '';
+    my $temperature    = _openai_effective_value($self, 'temperature');
+    my $max_tokens  = _openai_effective_value($self, 'max_tokens');
+    my $max_privmsg = _openai_effective_value($self, 'max_privmsg');
+    my $wrap_bytes  = _openai_effective_value($self, 'wrap_bytes');
+    my $sleep_us      = _openai_effective_value($self, 'sleep_us');
+    my $system_prompt = _openai_effective_value($self, 'system_prompt');
+    my $system_prompt_len = length($system_prompt // '');
+
+    my $chan_state = 'not checked';
+    if (defined($channel) && $channel ne '') {
+        my $setlist = getIdChansetList($self, 'chatGPT') // '';
+        my $setid   = length($setlist) ? (getIdChannelSet($self, $channel, $setlist) // '') : '';
+        $chan_state = length($setid) ? 'enabled' : 'disabled';
+    }
+
+    botNotice($self, $nick, "OpenAI/tellme: API key present: $has_key");
+    botNotice($self, $nick, "OpenAI/tellme: model=$model fallback_model=$fallback_model api_url=$api_url");
+    botNotice($self, $nick, "OpenAI/tellme: temperature=$temperature max_tokens=$max_tokens max_privmsg=$max_privmsg wrap_bytes=$wrap_bytes sleep_us=$sleep_us system_prompt_len=$system_prompt_len");
+
+    if (defined($channel) && $channel ne '') {
+        botNotice($self, $nick, "OpenAI/tellme: channel $channel chatGPT chanset: $chan_state");
+    }
+}
+
+sub _openai_notice_help {
+    my ($self, $nick) = @_;
+
+    botNotice($self, $nick, "OpenAI admin syntax:");
+    botNotice($self, $nick, "openai status|config|help|defaults|profiles|test|models");
+    botNotice($self, $nick, "openai set <model|fallback_model|system_prompt|temperature|max_tokens|max_privmsg|wrap_bytes|sleep_us|api_url> <value>");
+    botNotice($self, $nick, "openai reset <model|fallback_model|system_prompt|temperature|max_tokens|max_privmsg|wrap_bytes|sleep_us|api_url>");
+    botNotice($self, $nick, "openai explain <parameter>");
+    botNotice($self, $nick, "openai test [prompt]");
+    botNotice($self, $nick, "openai models [filter]");
+    botNotice($self, $nick, "openai profiles");
+    botNotice($self, $nick, "openai profile <dev|compact|safe|default>");
+    botNotice($self, $nick, "API_KEY is intentionally not changeable from IRC; edit mediabot.conf for secrets.");
+}
+
+sub _openai_notice_defaults {
+    my ($self, $nick) = @_;
+
+    my $spec = _openai_param_spec();
+
+    for my $name (qw(model fallback_model temperature max_tokens max_privmsg wrap_bytes sleep_us api_url)) {
+        botNotice($self, $nick, "OpenAI default $name = $spec->{$name}{default}");
+    }
+
+    botNotice($self, $nick, "Recommended IRC dev profile: model=gpt-4o-mini temperature=0.6 max_tokens=700 max_privmsg=5 wrap_bytes=360 sleep_us=500000");
+}
+
+sub _openai_run_test {
+    my ($self, $nick, @prompt_args) = @_;
+
+    my $api_key = $self->{conf}->get('openai.API_KEY');
+
+    unless (defined($api_key) && $api_key ne '') {
+        botNotice($self, $nick, "OpenAI test: API key is missing.");
+        return;
+    }
+
+    my $api_url        = _openai_effective_value($self, 'api_url');
+    my $model          = _openai_effective_value($self, 'model');
+    my $fallback_model = _openai_effective_value($self, 'fallback_model');
+    my $temperature    = _openai_effective_value($self, 'temperature');
+
+    $fallback_model = ''
+        unless defined($fallback_model) && $fallback_model ne '';
+
+    my $prompt = join(' ', @prompt_args);
+    $prompt = 'Reply with exactly OK.' unless defined($prompt) && $prompt ne '';
+
+    my $http = HTTP::Tiny->new(timeout => 20);
+
+    my $build_payload = sub {
+        my ($selected_model) = @_;
+
+        return encode_json({
+            model       => $selected_model,
+            temperature => 0 + $temperature,
+            max_tokens  => 40,
+            messages    => [
+                {
+                    role    => 'system',
+                    content => 'You are a tiny API health check. Answer briefly.',
+                },
+                {
+                    role    => 'user',
+                    content => $prompt,
+                },
+            ],
+        });
+    };
+
+    my $send_test = sub {
+        my ($selected_model) = @_;
+
+        my $start = time();
+
+        my $res = $http->post(
+            $api_url,
+            {
+                headers => {
+                    'Authorization' => "Bearer $api_key",
+                    'Content-Type'  => 'application/json',
+                },
+                content => $build_payload->($selected_model),
+            }
+        );
+
+        my $elapsed_ms = int((time() - $start) * 1000);
+
+        return ($res, $elapsed_ms);
+    };
+
+    botNotice($self, $nick, "OpenAI test: model=$model fallback_model=" . ($fallback_model ne '' ? $fallback_model : '(disabled)') . " endpoint=$api_url");
+
+    my $request_model = $model;
+    my ($res, $elapsed_ms) = $send_test->($request_model);
+    my $fallback_tried = 0;
+
+    if (
+        !$res->{success}
+        && $fallback_model ne ''
+        && $fallback_model ne $request_model
+        && (($res->{status} // 0) == 400
+            || ($res->{status} // 0) == 403
+            || ($res->{status} // 0) == 404)
+    ) {
+        botNotice(
+            $self,
+            $nick,
+            "OpenAI test: primary model $request_model returned HTTP "
+            . ($res->{status} // 0) . " "
+            . ($res->{reason} // '')
+            . "; trying fallback $fallback_model"
+        );
+
+        $request_model = $fallback_model;
+        ($res, $elapsed_ms) = $send_test->($request_model);
+        $fallback_tried = 1;
+    }
+
+    my $status = $res->{status} // 0;
+    my $reason = $res->{reason} // '';
+
+    unless ($res->{success}) {
+        botNotice($self, $nick, "OpenAI test: HTTP $status $reason in ${elapsed_ms}ms for model=$request_model");
+
+        my $err = eval { decode_json($res->{content} // '') };
+
+        if (!$@ && ref($err) eq 'HASH' && ref($err->{error}) eq 'HASH' && defined($err->{error}{message})) {
+            my $msg = $err->{error}{message};
+            $msg =~ s/\s+/ /g;
+            $msg = substr($msg, 0, 320);
+            botNotice($self, $nick, "OpenAI test: error=$msg");
+        }
+
+        return;
+    }
+
+    my $data = eval { decode_json($res->{content} // '') };
+
+    unless (
+        !$@
+        && ref($data) eq 'HASH'
+        && ref($data->{choices}) eq 'ARRAY'
+        && ref($data->{choices}[0]) eq 'HASH'
+        && ref($data->{choices}[0]{message}) eq 'HASH'
+        && defined($data->{choices}[0]{message}{content})
+    ) {
+        botNotice($self, $nick, "OpenAI test: HTTP $status $reason in ${elapsed_ms}ms for model=$request_model, but response shape was unexpected.");
+        return;
+    }
+
+    my $answer = $data->{choices}[0]{message}{content};
+    $answer =~ s/\s+/ /g;
+    $answer = substr($answer, 0, 240);
+
+    botNotice($self, $nick, "OpenAI test: HTTP $status $reason in ${elapsed_ms}ms for model=$request_model");
+    botNotice($self, $nick, "OpenAI test: fallback used: " . ($fallback_tried ? 'yes' : 'no'));
+    botNotice($self, $nick, "OpenAI test: answer=$answer");
+
+    return 1;
+}
+
+
+sub _openai_profile_spec {
+    return {
+        dev => {
+            label => 'development / richer IRC answers',
+            values => {
+                model        => 'gpt-4o-mini',
+                temperature  => '0.6',
+                max_tokens   => '700',
+                max_privmsg  => '5',
+                wrap_bytes   => '360',
+                sleep_us     => '500000',
+            },
+        },
+        compact => {
+            label => 'shorter answers, lower IRC noise',
+            values => {
+                model        => 'gpt-4o-mini',
+                temperature  => '0.4',
+                max_tokens   => '350',
+                max_privmsg  => '3',
+                wrap_bytes   => '340',
+                sleep_us     => '600000',
+            },
+        },
+        safe => {
+            label => 'very conservative public-channel profile',
+            values => {
+                model        => 'gpt-4o-mini',
+                temperature  => '0.3',
+                max_tokens   => '300',
+                max_privmsg  => '3',
+                wrap_bytes   => '330',
+                sleep_us     => '750000',
+            },
+        },
+        default => {
+            label => 'built-in defaults',
+            values => {
+                model        => _openai_param_spec()->{model}{default},
+                temperature  => _openai_param_spec()->{temperature}{default},
+                max_tokens   => _openai_param_spec()->{max_tokens}{default},
+                max_privmsg  => _openai_param_spec()->{max_privmsg}{default},
+                wrap_bytes   => _openai_param_spec()->{wrap_bytes}{default},
+                sleep_us     => _openai_param_spec()->{sleep_us}{default},
+            },
+        },
+    };
+}
+
+sub _openai_notice_profiles {
+    my ($self, $nick) = @_;
+
+    my $profiles = _openai_profile_spec();
+
+    for my $name (qw(dev compact safe default)) {
+        my $profile = $profiles->{$name};
+
+        botNotice($self, $nick, "OpenAI profile $name: $profile->{label}");
+    }
+
+    botNotice($self, $nick, "Usage: openai profile <dev|compact|safe|default>");
+}
+
+sub _openai_apply_profile {
+    my ($self, $nick, $profile_name) = @_;
+
+    $profile_name = lc($profile_name // '');
+
+    my $profiles = _openai_profile_spec();
+    my $profile  = $profiles->{$profile_name};
+
+    unless ($profile) {
+        botNotice($self, $nick, "Syntax: openai profile <dev|compact|safe|default>");
+        _openai_notice_profiles($self, $nick);
+        return;
+    }
+
+    my $param_spec = _openai_param_spec();
+
+    for my $name (qw(model temperature max_tokens max_privmsg wrap_bytes sleep_us)) {
+        my $value = $profile->{values}{$name};
+        my $spec  = $param_spec->{$name};
+
+        next unless $spec;
+
+        my ($ok, $clean_or_error) = _openai_validate_value($name, $value);
+
+        unless ($ok) {
+            botNotice($self, $nick, "OpenAI profile $profile_name failed on $name: $clean_or_error");
+            return;
+        }
+
+        $self->{conf}->set($spec->{key}, $clean_or_error);
+    }
+
+    $self->{conf}->save();
+
+    botNotice($self, $nick, "OpenAI profile '$profile_name' applied: $profile->{label}");
+    botNotice($self, $nick, "OpenAI/tellme: profile values are used immediately for future requests.");
+
+    return 1;
+}
+
+sub _openai_models_url {
+    my ($self) = @_;
+
+    my $api_url = _openai_effective_value($self, 'api_url');
+    $api_url = 'https://api.openai.com/v1/chat/completions'
+        unless defined($api_url) && $api_url =~ m{^https://}i;
+
+    $api_url =~ s{/chat/completions\z}{/models};
+    $api_url =~ s{/responses\z}{/models};
+
+    return $api_url if $api_url =~ m{/models\z};
+
+    $api_url =~ s{/*\z}{};
+    $api_url =~ s{/v1(?:/.*)?\z}{/v1};
+
+    return "$api_url/models";
+}
+
+sub _openai_notice_models {
+    my ($self, $nick, @filter_args) = @_;
+
+    my $api_key = $self->{conf}->get('openai.API_KEY');
+
+    unless (defined($api_key) && $api_key ne '') {
+        botNotice($self, $nick, "OpenAI models: API key is missing.");
+        return;
+    }
+
+    my $filter = lc(join(' ', @filter_args));
+    $filter =~ s/^\s+|\s+\z//g;
+
+    my $models_url = _openai_models_url($self);
+
+    botNotice(
+        $self,
+        $nick,
+        "OpenAI models: querying $models_url"
+        . ($filter ne '' ? " filter='$filter'" : '')
+    );
+
+    my $http = HTTP::Tiny->new(timeout => 20);
+    my $res  = $http->get(
+        $models_url,
+        {
+            headers => {
+                'Authorization' => "Bearer $api_key",
+            },
+        }
+    );
+
+    my $status = $res->{status} // 0;
+    my $reason = $res->{reason} // '';
+
+    unless ($res->{success}) {
+        botNotice($self, $nick, "OpenAI models: HTTP $status $reason");
+
+        my $err = eval { decode_json($res->{content} // '') };
+        if (!$@ && ref($err) eq 'HASH' && ref($err->{error}) eq 'HASH' && defined($err->{error}{message})) {
+            my $msg = $err->{error}{message};
+            $msg =~ s/\s+/ /g;
+            $msg = substr($msg, 0, 320);
+            botNotice($self, $nick, "OpenAI models: error=$msg");
+        }
+
+        return;
+    }
+
+    my $data = eval { decode_json($res->{content} // '') };
+
+    unless (!$@ && ref($data) eq 'HASH' && ref($data->{data}) eq 'ARRAY') {
+        botNotice($self, $nick, "OpenAI models: unexpected response shape.");
+        return;
+    }
+
+    my @ids;
+    for my $item (@{ $data->{data} }) {
+        next unless ref($item) eq 'HASH';
+        next unless defined($item->{id}) && $item->{id} ne '';
+
+        my $id = $item->{id};
+        next if $filter ne '' && lc($id) !~ /\Q$filter\E/;
+
+        push @ids, $id;
+    }
+
+    @ids = sort @ids;
+
+    unless (@ids) {
+        botNotice($self, $nick, "OpenAI models: no model matched" . ($filter ne '' ? " '$filter'" : ''));
+        return;
+    }
+
+    my $total = scalar @ids;
+    my $limit = 12;
+    my @shown = @ids > $limit ? @ids[0 .. $limit - 1] : @ids;
+
+    botNotice($self, $nick, "OpenAI models: " . join(', ', @shown));
+
+    if ($total > $limit) {
+        botNotice($self, $nick, "OpenAI models: showing $limit of $total matches; narrow with: openai models <filter>");
+    }
+
+    return 1;
+}
+
+sub openai_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    return unless $ctx->require_level('Owner');
+
+    my $subcmd = lc(shift(@args) // 'status');
+
+    if ($subcmd eq 'status' || $subcmd eq 'config') {
+        _openai_notice_status($self, $nick, $channel);
+        botNotice($self, $nick, "OpenAI/tellme: use 'openai help' for set/reset commands.");
+        return 1;
+    }
+
+    if ($subcmd eq 'help') {
+        _openai_notice_help($self, $nick);
+        return 1;
+    }
+
+    if ($subcmd eq 'defaults') {
+        _openai_notice_defaults($self, $nick);
+        return 1;
+    }
+
+    if ($subcmd eq 'test' || $subcmd eq 'ping') {
+        _openai_run_test($self, $nick, @args);
+        return 1;
+    }
+
+    if ($subcmd eq 'models' || $subcmd eq 'model_list') {
+        _openai_notice_models($self, $nick, @args);
+        return 1;
+    }
+
+    if ($subcmd eq 'profiles') {
+        _openai_notice_profiles($self, $nick);
+        return 1;
+    }
+
+    if ($subcmd eq 'profile' || $subcmd eq 'preset') {
+        _openai_apply_profile($self, $nick, $args[0] // '');
+        return 1;
+    }
+
+    if ($subcmd eq 'explain') {
+        my $name = _openai_param_alias($args[0] // '');
+
+        unless ($name) {
+            botNotice($self, $nick, "Syntax: openai explain <parameter>");
+            return;
+        }
+
+        my $spec = _openai_param_spec()->{$name};
+
+        botNotice($self, $nick, "OpenAI $name: $spec->{help}");
+        botNotice($self, $nick, "OpenAI $name: config key=$spec->{key} default=$spec->{default}");
+
+        if (defined($spec->{min}) || defined($spec->{max})) {
+            botNotice($self, $nick, "OpenAI $name: range=$spec->{min}..$spec->{max}");
+        }
+
+        return 1;
+    }
+
+    if ($subcmd eq 'set') {
+        my $raw_name = shift(@args) // '';
+        my $name     = _openai_param_alias($raw_name);
+
+        unless ($name) {
+            botNotice($self, $nick, "Syntax: openai set <parameter> <value>");
+            botNotice($self, $nick, "Valid parameters: model fallback_model system_prompt temperature max_tokens max_privmsg wrap_bytes sleep_us api_url");
+            return;
+        }
+
+        my $value = join(' ', @args);
+
+        my ($ok, $clean_or_error) = _openai_validate_value($name, $value);
+        unless ($ok) {
+            botNotice($self, $nick, "OpenAI $name not changed: $clean_or_error");
+            return;
+        }
+
+        my $spec = _openai_param_spec()->{$name};
+
+        $self->{conf}->set($spec->{key}, $clean_or_error);
+        $self->{conf}->save();
+
+        botNotice($self, $nick, "OpenAI $name set to $clean_or_error");
+        botNotice($self, $nick, "OpenAI/tellme: new value is used immediately for future requests.");
+
+        return 1;
+    }
+
+    if ($subcmd eq 'reset') {
+        my $name = _openai_param_alias($args[0] // '');
+
+        unless ($name) {
+            botNotice($self, $nick, "Syntax: openai reset <parameter>");
+            botNotice($self, $nick, "Valid parameters: model fallback_model system_prompt temperature max_tokens max_privmsg wrap_bytes sleep_us api_url");
+            return;
+        }
+
+        my $spec = _openai_param_spec()->{$name};
+
+        $self->{conf}->set($spec->{key}, $spec->{default});
+        $self->{conf}->save();
+
+        botNotice($self, $nick, "OpenAI $name reset to default $spec->{default}");
+
+        return 1;
+    }
+
+    _openai_notice_help($self, $nick);
+    return;
+}
+
+
 sub debug_ctx {
     my ($ctx) = @_;
 

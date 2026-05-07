@@ -2201,6 +2201,47 @@ use constant {
 	CHATGPT_TRUNC_MSG    => ' [¯\_(ツ)_/¯ guess you can’t have everything…]',   # suffix when we truncate
 };
 
+use constant CHATGPT_SYSTEM_PROMPT =>
+    'You always answer in a helpful and serious way, precise and never start your answer with « Oh là là » when the answer is in French. Always respond using a maximum of 10 lines of text and line-based. There is one chance on two the answer contains emojis.';
+
+sub _chatgpt_conf_int {
+    my ($self, $key, $default, $min, $max) = @_;
+
+    my $value = $self->{conf}->get($key);
+
+    return $default unless defined($value) && $value =~ /^\d+\z/;
+
+    $value = int($value);
+    return $default if defined($min) && $value < $min;
+    return $default if defined($max) && $value > $max;
+
+    return $value;
+}
+
+sub _chatgpt_conf_float {
+    my ($self, $key, $default, $min, $max) = @_;
+
+    my $value = $self->{conf}->get($key);
+
+    return $default unless defined($value) && $value =~ /^\d+(?:\.\d+)?\z/;
+
+    $value = 0 + $value;
+    return $default if defined($min) && $value < $min;
+    return $default if defined($max) && $value > $max;
+
+    return $value;
+}
+
+sub _chatgpt_conf_string {
+    my ($self, $key, $default) = @_;
+
+    my $value = $self->{conf}->get($key);
+
+    return $default unless defined($value) && $value ne '';
+
+    return $value;
+}
+
 # chatGPT_ctx() — wrapper Context pour la commande publique !tellme
 sub chatGPT_ctx {
     my ($ctx) = @_;
@@ -2226,6 +2267,28 @@ sub chatGPT {
 	my $api_key = $self->{conf}->get('openai.API_KEY')
     	or ($self->{logger}->log(0,'chatGPT() openai.API_KEY missing'), return);
 
+    my $chatgpt_api_url     = _chatgpt_conf_string($self, 'openai.API_URL',     CHATGPT_API_URL);
+    my $chatgpt_model          = _chatgpt_conf_string($self, 'openai.MODEL',          CHATGPT_MODEL);
+    my $chatgpt_fallback_model = _chatgpt_conf_string($self, 'openai.FALLBACK_MODEL', '');
+    my $chatgpt_temperature    = _chatgpt_conf_float( $self, 'openai.TEMPERATURE',    CHATGPT_TEMPERATURE, 0, 2);
+    my $chatgpt_system_prompt  = _chatgpt_conf_string($self, 'openai.SYSTEM_PROMPT',  CHATGPT_SYSTEM_PROMPT);
+    $chatgpt_system_prompt =~ s/\r|\n/ /g;
+    $chatgpt_system_prompt = substr($chatgpt_system_prompt, 0, 800);
+    my $chatgpt_max_tokens  = _chatgpt_conf_int(   $self, 'openai.MAX_TOKENS',  CHATGPT_MAX_TOKENS,  1, 4000);
+    my $chatgpt_max_privmsg = _chatgpt_conf_int(   $self, 'openai.MAX_PRIVMSG', CHATGPT_MAX_PRIVMSG, 1, 8);
+    my $chatgpt_wrap_bytes  = _chatgpt_conf_int(   $self, 'openai.WRAP_BYTES',  CHATGPT_WRAP_BYTES,  120, 450);
+    my $chatgpt_sleep_us    = _chatgpt_conf_int(   $self, 'openai.SLEEP_US',    CHATGPT_SLEEP_US,    0, 2_000_000);
+
+    unless ($chatgpt_api_url =~ m{^https://}i) {
+        $self->{logger}->log(1, "chatGPT() invalid openai.API_URL, falling back to default");
+        $chatgpt_api_url = CHATGPT_API_URL;
+    }
+
+    if ($chatgpt_fallback_model ne '' && $chatgpt_fallback_model !~ /^[A-Za-z0-9._:-]+\z/) {
+        $self->{logger}->log(1, "chatGPT() invalid openai.FALLBACK_MODEL ignored");
+        $chatgpt_fallback_model = '';
+    }
+
     @args
         or (botNotice($self,$nick,'Syntax: tellme <prompt>'), return);
 
@@ -2240,39 +2303,83 @@ sub chatGPT {
     my $prompt = join ' ', @args;
     $self->{logger}->log(4,"chatGPT() chatGPT prompt: $prompt");
 
-    my $json = encode_json {
-        model       => CHATGPT_MODEL,
-        temperature => CHATGPT_TEMPERATURE,
-        max_tokens  => CHATGPT_MAX_TOKENS,
-        messages    => [
-            { role => 'system',
-              content =>
-                'You always answer in a helpfull and serious way , precise and never start your answer with « Oh là là » when the answer is in french, always respond using a maximum of 10 lines of text and line-based. There is one chance on two the answer contains emojis'
-            },
-            { role => 'user', content => $prompt },
-        ],
+    my $build_payload = sub {
+        my ($model) = @_;
+
+        return encode_json {
+            model       => $model,
+            temperature => $chatgpt_temperature,
+            max_tokens  => $chatgpt_max_tokens,
+            messages    => [
+                { role => 'system',
+                  content => $chatgpt_system_prompt
+                },
+                { role => 'user', content => $prompt },
+            ],
+        };
     };
 
     # --------------------------------------------------------------
     # call the API with HTTP::Tiny (non-blocking, no shell)
     # --------------------------------------------------------------
     my $http = _make_http(timeout => 30);
-    my $http_response = $http->request(
-        'POST',
-        CHATGPT_API_URL,
-        {
-            headers => {
-                'Content-Type'  => 'application/json',
-                'Authorization' => "Bearer $api_key",
-            },
-            content => $json,
-        }
-    );
+
+    my $send_request = sub {
+        my ($model) = @_;
+
+        return $http->request(
+            'POST',
+            $chatgpt_api_url,
+            {
+                headers => {
+                    'Content-Type'  => 'application/json',
+                    'Authorization' => "Bearer $api_key",
+                },
+                content => $build_payload->($model),
+            }
+        );
+    };
+
+    my $request_model  = $chatgpt_model;
+    my $http_response  = $send_request->($request_model);
+    my $fallback_tried = 0;
+
+    if (
+        !$http_response->{success}
+        && $chatgpt_fallback_model ne ''
+        && $chatgpt_fallback_model ne $request_model
+        && (($http_response->{status} // 0) == 400
+            || ($http_response->{status} // 0) == 403
+            || ($http_response->{status} // 0) == 404)
+    ) {
+        $self->{logger}->log(
+            1,
+            "chatGPT() primary model $request_model failed with HTTP "
+            . ($http_response->{status} // 0) . " "
+            . ($http_response->{reason} // '')
+            . "; retrying with fallback model $chatgpt_fallback_model"
+        );
+
+        $request_model  = $chatgpt_fallback_model;
+        $http_response  = $send_request->($request_model);
+        $fallback_tried = 1;
+    }
 
     unless ($http_response->{success}) {
-        $self->{logger}->log(1, "chatGPT() HTTP error: $http_response->{status} $http_response->{reason}");
+        $self->{logger}->log(
+            1,
+            "chatGPT() HTTP error: "
+            . ($http_response->{status} // 0) . " "
+            . ($http_response->{reason} // '')
+            . " model=$request_model"
+        );
+
         botPrivmsg($self, $chan, "($nick) Sorry, API did not answer.");
         return;
+    }
+
+    if ($fallback_tried) {
+        $self->{logger}->log(1, "chatGPT() fallback model succeeded: $request_model");
     }
 
     my $response = $http_response->{content};
@@ -2314,14 +2421,14 @@ sub chatGPT {
     $answer =~ s/[\r\n]+/ /g;    # strip CR/LF
     $answer =~ s/\s{2,}/ /g;     # squeeze spaces
 
-    my @chunk = _chatgpt_wrap($answer);           # word-safe
+    my @chunk = _chatgpt_wrap($answer, $chatgpt_wrap_bytes);           # word-safe
     # … after  my @chunk = _chatgpt_wrap($answer);
-    my $truncate   = @chunk > CHATGPT_MAX_PRIVMSG;
-    my $last       = $truncate ? CHATGPT_MAX_PRIVMSG-1 : $#chunk;
+    my $truncate   = @chunk > $chatgpt_max_privmsg;
+    my $last       = $truncate ? $chatgpt_max_privmsg - 1 : $#chunk;
 
     if ($truncate) {
         my $suff  = CHATGPT_TRUNC_MSG;                   # funny suffix
-        my $allow = CHATGPT_WRAP_BYTES - length($suff);  # bytes we can keep
+        my $allow = $chatgpt_wrap_bytes - length($suff);  # bytes we can keep
 
         if (length($chunk[$last]) > $allow) {            # always enforce room
             $chunk[$last] = substr($chunk[$last], 0, $allow);
@@ -2333,7 +2440,7 @@ sub chatGPT {
 
     for my $i (0..$last) {
         botPrivmsg($self,$chan,$chunk[$i]);
-        usleep(CHATGPT_SLEEP_US);
+        usleep($chatgpt_sleep_us);
     }
     $self->{logger}->log(4,"chatGPT() sent ".($last+1)." PRIVMSG");
 }
@@ -2342,23 +2449,27 @@ sub chatGPT {
 # helper: wrap text to ≤CHATGPT_WRAP_BYTES without splitting words
 # ------------------------------------------------------------------
 sub _chatgpt_wrap {
-    my ($txt) = @_;
+    my ($txt, $wrap_bytes) = @_;
+
+    $wrap_bytes = CHATGPT_WRAP_BYTES
+        unless defined($wrap_bytes) && $wrap_bytes =~ /^\d+\z/ && $wrap_bytes > 0;
+
     my @out;
 
     while (length $txt) {
 
         # If the remainder already fits, push and break
-        if (length($txt) <= CHATGPT_WRAP_BYTES) {
+        if (length($txt) <= $wrap_bytes) {
             push @out, $txt;
             last;
         }
 
         # Look ahead up to the limit
-        my $slice = substr($txt, 0, CHATGPT_WRAP_BYTES);
+        my $slice = substr($txt, 0, $wrap_bytes);
         my $break = rindex($slice, ' ');
 
         # If space found, split there; else hard split
-        $break = CHATGPT_WRAP_BYTES if $break == -1;
+        $break = $wrap_bytes if $break == -1;
 
         push @out, substr($txt, 0, $break, '');   # remove from $txt
         $txt =~ s/^\s+//;                         # trim leading spaces

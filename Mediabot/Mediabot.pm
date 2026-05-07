@@ -1206,6 +1206,7 @@ sub mbCommandPublic {
         f            => sub { fortniteStats_ctx($ctx) },
         xlogin       => sub { xLogin_ctx($ctx) },
         tellme       => sub { chatGPT_ctx($ctx) },
+        openai       => sub { openai_ctx($ctx) },
         yomomma      => sub { Yomomma_ctx($ctx) },
         resolve      => sub { resolve_ctx($ctx) },
         tmdb         => sub { mbTMDBSearch_ctx($ctx) },
@@ -1330,7 +1331,7 @@ hailo_chatter|hailo_chatter [on|off]|admin|Control Hailo chatter behavior.
 hailo_ignore|hailo_ignore <nick>|admin|Ignore a nick for Hailo learning or replies.
 hailo_status|hailo_status|admin|Show Hailo status.
 hailo_unignore|hailo_unignore <nick>|admin|Remove a nick from the Hailo ignore list.
-help|help [#channel|command|docs]|public|Show command lists, internal command help, or documentation pointers.
+help|help [#channel|command|docs|search <term>|level <level>]|public|Show command lists, search internal help, or documentation pointers.
 holdcmd|holdcmd <command> [on|off]|authorized|Put a dynamic command on hold or restore it.
 ident|ident <login> <password>|private|Legacy/private authentication helper.
 ignore|ignore <nick|mask>|admin|Add an ignore entry.
@@ -1381,6 +1382,7 @@ showcommands|showcommands [#channel]|public|List commands available for your lev
 song|song|public|Show the current Icecast song or stream title.
 status|status|admin|Show bot runtime status.
 tellme|tellme <prompt>|public|Ask the configured ChatGPT/OpenAI integration.
+openai|openai help|owner|Show and change safe OpenAI/tellme runtime settings.
 timers|timers|admin|List bot timers.
 tmdb|tmdb <movie or show>|public|Search TMDB when configured.
 tmdblangset|tmdblangset #channel <lang>|channel admin|Set TMDB language for a channel.
@@ -1425,7 +1427,10 @@ MEDIABOT_INTERNAL_HELP
 
         next unless defined $cmd && length $cmd;
 
-        $help{lc $cmd} = {
+        my $key = lc $cmd;
+        next if exists $help{$key};
+
+        $help{$key} = {
             syntax => defined($syntax) && length($syntax) ? $syntax : $cmd,
             level  => defined($level)  && length($level)  ? $level  : 'unknown',
             desc   => defined($desc)   && length($desc)   ? $desc   : 'No description available yet.',
@@ -1503,6 +1508,94 @@ sub _mbHelpSendChunkedList {
     return 1;
 }
 
+sub _mbHelpSendSearchResults {
+    my ($ctx, $term) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    $term //= '';
+    $term =~ s/^\s+|\s+\z//g;
+
+    unless ($term ne '') {
+        botNotice($self, $nick, "Syntax: help search <term>");
+        return 1;
+    }
+
+    my %internal = _mbHelpInternalCommands();
+    my @matches;
+
+    for my $cmd (sort keys %internal) {
+        my $entry = $internal{$cmd} || {};
+
+        my $haystack = join(
+            ' ',
+            $cmd,
+            $entry->{syntax} // '',
+            $entry->{level}  // '',
+            $entry->{desc}   // '',
+        );
+
+        next unless lc($haystack) =~ /\Q@{[lc($term)]}\E/;
+
+        push @matches, $cmd;
+    }
+
+    unless (@matches) {
+        botNotice($self, $nick, "No internal command help matched '$term'.");
+        botNotice($self, $nick, "Try: searchcmd $term");
+        return 1;
+    }
+
+    botNotice($self, $nick, "Internal help matches for '$term':");
+    _mbHelpSendChunkedList($self, $nick, "Matches: ", @matches[0 .. (@matches > 25 ? 24 : $#matches)]);
+
+    if (@matches > 25) {
+        botNotice($self, $nick, "Showing 25 of " . scalar(@matches) . " matches. Use a narrower term.");
+    }
+
+    botNotice($self, $nick, "Use: help <command> for syntax and explanation.");
+
+    return 1;
+}
+
+sub _mbHelpSendLevelResults {
+    my ($ctx, $level_query) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    $level_query //= '';
+    $level_query =~ s/^\s+|\s+\z//g;
+
+    unless ($level_query ne '') {
+        botNotice($self, $nick, "Syntax: help level <public|private|admin|owner|master|authorized|operator>");
+        return 1;
+    }
+
+    my %internal = _mbHelpInternalCommands();
+    my @matches;
+
+    for my $cmd (sort keys %internal) {
+        my $level = lc($internal{$cmd}->{level} // '');
+
+        next unless $level =~ /\Q@{[lc($level_query)]}\E/;
+
+        push @matches, $cmd;
+    }
+
+    unless (@matches) {
+        botNotice($self, $nick, "No internal command help matched level '$level_query'.");
+        return 1;
+    }
+
+    botNotice($self, $nick, "Internal commands for level '$level_query':");
+    _mbHelpSendChunkedList($self, $nick, "Commands: ", @matches);
+
+    return 1;
+}
+
+
 sub _mbHelpSendInternalList {
     my ($ctx) = @_;
 
@@ -1552,6 +1645,16 @@ sub mbHelp_ctx {
 
     if ($first =~ /^(?:internal|internals|commands)$/i) {
         return _mbHelpSendInternalList($ctx);
+    }
+
+    if ($first =~ /^(?:search|find|grep)$/i) {
+        my $term = join(' ', @args[1 .. $#args]);
+        return _mbHelpSendSearchResults($ctx, $term);
+    }
+
+    if ($first =~ /^(?:level|role)$/i) {
+        my $level_query = join(' ', @args[1 .. $#args]);
+        return _mbHelpSendLevelResults($ctx, $level_query);
     }
 
     if ($first ne '' && $first !~ /^#/) {

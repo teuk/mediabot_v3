@@ -7,6 +7,7 @@ package Mediabot::UserCommands;
 use strict;
 use warnings;
 use POSIX qw(strftime);
+use Time::Local qw(timegm);
 use List::Util qw(min);
 use Exporter 'import';
 use Try::Tiny;
@@ -408,7 +409,10 @@ sub userInfo_ctx {
             USER.nickname,
             USER.creation_date,
             USER.last_login,
-            USER.password,
+            CASE
+                WHEN USER.password IS NOT NULL AND USER.password <> '' THEN 1
+                ELSE 0
+            END AS has_password,
             USER.info1,
             USER.info2,
             USER.auth,
@@ -451,8 +455,8 @@ sub userInfo_ctx {
             $hm_sth->finish if $hm_sth;
         }
 
-        my $password = $ref->{password};
-        my $level    = defined $ref->{level}       ? $ref->{level}       : '?';
+        my $has_password = defined($ref->{has_password}) ? int($ref->{has_password}) : 0;
+        my $level        = defined $ref->{level}       ? $ref->{level}       : '?';
         my $level_d  = defined $ref->{description} ? $ref->{description} : '?';
         my $auth     = defined $ref->{auth}        ? $ref->{auth}        : 0;
         my $username = defined $ref->{username}    ? $ref->{username}    : '';
@@ -460,7 +464,7 @@ sub userInfo_ctx {
         my $info2    = defined $ref->{info2}       ? $ref->{info2}       : '';
 
         # Compact output — 2 NOTICE lines to avoid Excess Flood
-        my $pass_set = (defined($password) && $password ne '') ? 'yes' : 'no';
+        my $pass_set = $has_password ? 'yes' : 'no';
         botNotice($self, $nick,
             "[$id_user] $nickname | Level: $level_d | Auth: $auth | Pass: $pass_set"
             . ($username ne '' ? " | Username: $username" : "")
@@ -1157,27 +1161,10 @@ sub mbSeen_ctx {
         return;
     }
 
-    my $targetNick = lc(shift @args);  # normalize for USER_SEEN PK lookup
+    my $target_input = shift @args;
+    $target_input =~ s/^\s+|\s+\z//g;
 
-    # A6: check if the nick is currently online before hitting the DB
-    {
-        my %hChannelsNicks = %{ $self->gethChannelNicks() // {} };
-        for my $chan (sort keys %hChannelsNicks) {
-            my @nicks = $self->gethChannelsNicksOnChan($chan);
-            if (grep { lc($_) eq $targetNick } @nicks) {
-                my $dest_chan_early = $ctx->channel;
-                my $is_private_early = !defined($dest_chan_early) || $dest_chan_early eq '';
-                my $msg = "$targetNick is currently online on $chan.";
-                if ($is_private_early) {
-                    botNotice($self, $ctx->nick, $msg);
-                } else {
-                    botPrivmsg($self, $dest_chan_early, $msg);
-                }
-                logBot($self, $ctx->message, $dest_chan_early, "seen", $targetNick);
-                return 1;
-            }
-        }
-    }
+    my $targetNick = lc($target_input);  # normalize for USER_SEEN PK lookup
 
     my $chan_for_part;
     if (@args && defined $args[0] && $args[0] =~ /^#/) {
@@ -1189,6 +1176,33 @@ sub mbSeen_ctx {
 
     my $is_private = !defined($ctx->channel) || $ctx->channel eq '';
     my $dest_chan  = $ctx->channel;
+
+    # Check if the nick is currently online before hitting the DB.
+    # If seen <nick> #channel was requested, keep this online check scoped
+    # to that channel instead of reporting an unrelated channel.
+    {
+        my %hChannelsNicks = %{ $self->gethChannelNicks() // {} };
+
+        for my $chan (sort keys %hChannelsNicks) {
+            next if defined($chan_for_part) && lc($chan) ne lc($chan_for_part);
+
+            my @nicks = $self->gethChannelsNicksOnChan($chan);
+            my ($online_nick) = grep { lc($_) eq $targetNick } @nicks;
+
+            if (defined($online_nick) && $online_nick ne '') {
+                my $msg = "$online_nick is currently online on $chan.";
+
+                if ($is_private) {
+                    botNotice($self, $ctx->nick, $msg);
+                } else {
+                    botPrivmsg($self, $dest_chan, $msg);
+                }
+
+                logBot($self, $ctx->message, ($is_private ? undef : $dest_chan), "seen", $targetNick);
+                return 1;
+            }
+        }
+    }
 
     my $fmt_host = sub {
         my ($h) = @_; $h //= ''; $h =~ s/^.*!//; return $h;
@@ -1834,10 +1848,14 @@ sub _birthday_add_ctx {
         $normalized = undef;
     } elsif ($date =~ m{^(\d{1,2})/(\d{1,2})(?:/(\d{4}))?$}) {
         my ($d, $m, $y) = ($1, $2, $3);
-        if ($d < 1 || $d > 31 || $m < 1 || $m > 12) {
-            botNotice($self, $nick, "Invalid date: day must be 1-31, month 1-12.");
+
+        my $check_year = defined($y) ? $y : 2000; # leap year, allows 29/02 without storing a year
+
+        unless (_birthday_valid_date($check_year, $m, $d)) {
+            botNotice($self, $nick, "Invalid birthday date.");
             return;
         }
+
         $normalized = defined $y
             ? sprintf("%04d-%02d-%02d", $y, $m, $d)
             : sprintf("%02d-%02d", $m, $d);
@@ -1907,23 +1925,85 @@ sub _birthday_del_ctx {
 # ---------------------------------------------------------------------------
 # _birthday_next_ctx($ctx) — list upcoming birthdays (next 30 days)
 # ---------------------------------------------------------------------------
+sub _birthday_valid_date {
+    my ($year, $month, $day) = @_;
+
+    return 0 unless defined($year)  && $year  =~ /^\d{4}\z/;
+    return 0 unless defined($month) && $month =~ /^\d{1,2}\z/;
+    return 0 unless defined($day)   && $day   =~ /^\d{1,2}\z/;
+
+    return 0 if $month < 1 || $month > 12;
+    return 0 if $day   < 1 || $day   > 31;
+
+    my $epoch = eval { timegm(0, 0, 12, $day, $month - 1, $year) };
+    return 0 if $@ || !defined($epoch);
+
+    my @check = gmtime($epoch);
+
+    return (
+        $check[5] + 1900 == $year
+        && $check[4] + 1 == $month
+        && $check[3] == $day
+    ) ? 1 : 0;
+}
+
+sub _birthday_mmdd_from_value {
+    my ($birthday) = @_;
+
+    return undef unless defined($birthday) && $birthday ne '';
+
+    if ($birthday =~ m{^(\d{2})-(\d{2})\z}) {
+        return ($1, $2);
+    }
+
+    if ($birthday =~ m{^\d{4}-(\d{2})-(\d{2})\z}) {
+        return ($1, $2);
+    }
+
+    return undef;
+}
+
+sub _birthday_days_ahead {
+    my ($month, $day, $now) = @_;
+
+    $now //= time();
+
+    my @today = gmtime($now);
+    my $year  = $today[5] + 1900;
+
+    my $today_epoch = timegm(0, 0, 12, $today[3], $today[4], $year);
+
+    for my $offset (0 .. 4) {
+        my $candidate_year = $year + $offset;
+
+        next unless _birthday_valid_date($candidate_year, $month, $day);
+
+        my $candidate_epoch = timegm(0, 0, 12, $day, $month - 1, $candidate_year);
+        next if $candidate_epoch < $today_epoch;
+
+        return int(($candidate_epoch - $today_epoch) / 86400);
+    }
+
+    return undef;
+}
+
+# ---------------------------------------------------------------------------
+# _birthday_next_ctx($ctx) — list upcoming birthdays in the next 30 days
+# ---------------------------------------------------------------------------
 sub _birthday_next_ctx {
     my ($ctx) = @_;
+
     my $self = $ctx->bot;
     my $nick = $ctx->nick;
 
-    # Match birthdates like MM-DD or YYYY-MM-DD within the next 30 days
+    my $window_days = 30;
+
     my $sth = $self->{dbh}->prepare(q{
         SELECT nickname, birthday
         FROM USER
         WHERE birthday IS NOT NULL AND birthday != ''
-        ORDER BY
-            CASE
-                WHEN SUBSTRING(birthday, 1, 2) REGEXP '^[0-9]{2}$'
-                    THEN LPAD(SUBSTRING(birthday, 1, 5), 5, '0')
-                ELSE SUBSTRING(birthday, 6, 5)
-            END
     });
+
     unless ($sth && $sth->execute) {
         $self->{logger}->log(1, "_birthday_next_ctx() SQL error: $DBI::errstr");
         botNotice($self, $nick, "Database error.");
@@ -1931,39 +2011,51 @@ sub _birthday_next_ctx {
     }
 
     my @upcoming;
-    my $today = do {
-        my @t = localtime;
-        sprintf("%02d-%02d", $t[4]+1, $t[3]);  # MM-DD
-    };
+    my $now = time();
 
     while (my $row = $sth->fetchrow_hashref) {
-        my $bday = $row->{birthday};
-        # Normalize to MM-DD for comparison
-        my $mmdd = $bday =~ m{^\d{2}-\d{2}$}
-            ? $bday
-            : $bday =~ m{^\d{4}-(\d{2})-(\d{2})$}
-                ? "$1-$2"
-                : next;
-        # Rough 30-day window (string comparison works for MM-DD in same year)
-        push @upcoming, { nick => $row->{nickname}, bday => $bday, mmdd => $mmdd }
-            if $mmdd ge $today;
+        my ($month, $day) = _birthday_mmdd_from_value($row->{birthday});
+        next unless defined($month) && defined($day);
+
+        my $days_ahead = _birthday_days_ahead($month, $day, $now);
+        next unless defined($days_ahead);
+        next if $days_ahead > $window_days;
+
+        push @upcoming, {
+            nick       => $row->{nickname},
+            bday       => $row->{birthday},
+            mmdd       => sprintf("%02d-%02d", $month, $day),
+            days_ahead => $days_ahead,
+        };
     }
+
     $sth->finish;
 
-    @upcoming = sort { $a->{mmdd} cmp $b->{mmdd} } @upcoming;
-    @upcoming = @upcoming[0..9] if @upcoming > 10;  # cap at 10
+    @upcoming = sort {
+        $a->{days_ahead} <=> $b->{days_ahead}
+            || lc($a->{nick}) cmp lc($b->{nick})
+    } @upcoming;
+
+    @upcoming = @upcoming[0 .. 9] if @upcoming > 10;  # cap at 10
 
     unless (@upcoming) {
-        botNotice($self, $nick, "No upcoming birthdays in the next 30 days.");
+        botNotice($self, $nick, "No upcoming birthdays in the next $window_days days.");
         return 1;
     }
 
-    botNotice($self, $nick, "Upcoming birthdays:");
+    botNotice($self, $nick, "Upcoming birthdays in the next $window_days days:");
+
     for my $u (@upcoming) {
-        botNotice($self, $nick, "  $u->{nick} : $u->{bday}");
+        my $when = $u->{days_ahead} == 0
+            ? 'today'
+            : "in $u->{days_ahead}d";
+
+        botNotice($self, $nick, "  $u->{nick} : $u->{bday} ($when)");
     }
+
     return 1;
 }
+
 
 
 1;
