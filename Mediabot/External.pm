@@ -985,7 +985,7 @@ sub _handle_instagram {
 
     my $msg = String::IRC->new("[")->white('black');
     $msg   .= String::IRC->new("Instagram")->white('pink');
-    $msg   .= String::IRC->new("]")->white('black');
+    $msg   .= String::IRC->new("]")->white('black') . "\x0f";
     $msg   .= " " . substr($title, 0, 300);
 
     botPrivmsg($self, $channel, "($nick) $msg");
@@ -1094,7 +1094,7 @@ sub _handle_spotify {
 
     my $msg = String::IRC->new("[")->white('black');
     $msg   .= String::IRC->new("Spotify")->black('green');
-    $msg   .= String::IRC->new("]")->white('black');
+    $msg   .= String::IRC->new("]")->white('black') . "\x0f";
     $msg   .= " $display";
 
     botPrivmsg($self, $channel, "($nick) $msg");
@@ -1273,7 +1273,7 @@ sub _handle_applemusic {
 
     my $msg = String::IRC->new("[")->white('black');
     $msg   .= String::IRC->new("AppleMusic")->white('grey');
-    $msg   .= String::IRC->new("]")->white('black');
+    $msg   .= String::IRC->new("]")->white('black') . "\x0f";
     $msg   .= " $title";
 
     botPrivmsg($self, $channel, "($nick) $msg");
@@ -1489,7 +1489,7 @@ sub _handle_facebook {
 
     my $msg = String::IRC->new("[")->white('black');
     $msg   .= String::IRC->new("Facebook")->white('blue');
-    $msg   .= String::IRC->new("]")->white('black');
+    $msg   .= String::IRC->new("]")->white('black') . "\x0f";
     $msg   .= " " . substr($title, 0, 300);
 
     botPrivmsg($self, $channel, "($nick) $msg");
@@ -1681,7 +1681,7 @@ sub _handle_x_twitter {
 
     my $msg = String::IRC->new("[")->white('black');
     $msg   .= String::IRC->new("X")->white('black');
-    $msg   .= String::IRC->new("]")->white('black');
+    $msg   .= String::IRC->new("]")->white('black') . "\x0f";
     $msg   .= " " . substr($title, 0, 300);
 
     botPrivmsg($self, $channel, "($nick) $msg");
@@ -1721,7 +1721,7 @@ sub _handle_generic_title {
     return undef if $title eq '';
     return undef if $title =~ /The page is temporarily unavailable/i;
 
-    my $msg = String::IRC->new("URL Title from $nick:")->grey('black');
+    my $msg = String::IRC->new("URL Title from $nick:")->grey('black') . "\x0f";
     botPrivmsg($self, $channel, "$msg $title");
     return 1;
 }
