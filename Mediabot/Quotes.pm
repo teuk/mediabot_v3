@@ -163,6 +163,12 @@ sub mbQuoteAdd {
 
     my $sQuoteText = join(" ", @tArgs);
 
+    # B2/A2: limit quote text length
+    if (length($sQuoteText) > 512) {
+        botNotice($self, $sNick, "Quote text too long (max 512 chars).");
+        return;
+    }
+
     my $sQuery = "SELECT QUOTES.id_quotes FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? AND QUOTES.quotetext = ?";
     my $sth = $self->{dbh}->prepare($sQuery);
 

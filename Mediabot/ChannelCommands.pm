@@ -647,7 +647,7 @@ sub purgeChannel_ctx {
     unless ($purge_ok) {
         eval { $dbh->rollback };
         $self->{logger}->log(0, "purgeChannel_ctx: transaction failed for $sChannel: $@");
-        Mediabot::botNotice($self, $nick, "Database error during purge — channel not deleted.");
+ Mediabot::botNotice($self, $nick, "Database error during purge -- channel not deleted.");
         return;
     }
 
@@ -1987,12 +1987,15 @@ sub channelBans_ctx {
 
     return unless $self;
 
-    my @bans = $self->{channel_ban}->list_active_bans($id_channel);
+    # A3: fetch up to 11 — detect overflow without loading all bans into memory
+    my @bans = $self->{channel_ban}->list_active_bans($id_channel, 11);
 
     unless (@bans) {
         _channelban_reply($ctx, "No active bans on $target_chan.");
         return;
     }
+    my $has_more = scalar(@bans) > 10;
+    @bans = @bans[0..9] if $has_more;
 
     # B3/A3: prepare once outside the loop — avoids N prepare() calls
     my $sth_now = $self->{dbh}->prepare('SELECT TIMESTAMPDIFF(SECOND, NOW(), ?) AS secs');

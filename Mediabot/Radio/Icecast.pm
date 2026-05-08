@@ -26,7 +26,8 @@ sub new {
 
     $self->{base_url} =~ s{/\z}{};
 
-    $self->{ua} = HTTP::Tiny->new(
+    # B1/A1: accept pre-built ua handle (e.g. from External::_make_http)
+    $self->{ua} = $args{ua} // HTTP::Tiny->new(
         timeout => $self->{timeout},
         agent   => "Mediabot-Radio-Icecast/$VERSION",
     );

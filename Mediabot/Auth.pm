@@ -490,6 +490,10 @@ sub _password_matches {
     return (0, 'no_clear_password') unless defined $clear && length $clear;
     return (0, 'no_stored_password') unless defined $stored && length $stored;
 
+    # Supported hash formats (in order of check):
+    #   1. MySQL PASSWORD(): 41 chars, starts with '*', SHA1(SHA1(pass)) — legacy
+    #   2. BCrypt: starts with '$2y$' or '$2b$' — preferred for new accounts
+    # A2: SHA1 plain (legacy '#' prefix) is NOT supported — intentional security decision
     # MySQL old PASSWORD() format: 41 chars, starts with '*', uppercase hex of SHA1(SHA1(pass))
     if ($stored =~ /^\*[0-9A-F]{40}\z/) {
         my $hash1 = sha1($clear);

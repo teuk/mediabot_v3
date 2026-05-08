@@ -1814,7 +1814,7 @@ sub delUser_ctx {
     if (!$ok || $@) {
         eval { $dbh->rollback };
         $self->{logger}->log(0, "delUser_ctx: transaction failed for $target: $@");
-        botNotice($self, $nick, "Database error — user not deleted.");
+ botNotice($self, $nick, "Database error -- user not deleted.");
         return;
     }
 
@@ -1861,6 +1861,12 @@ sub _birthday_add_ctx {
             : sprintf("%02d-%02d", $m, $d);
     } else {
         botNotice($self, $nick, "Date format must be dd/mm or dd/mm/YYYY.");
+        return;
+    }
+
+    # A1: guard against oversized values before UPDATE
+    if (defined($normalized) && length($normalized) > 10) {
+        botNotice($self, $nick, "Internal error: date value too long.");
         return;
     }
 
@@ -1934,6 +1940,14 @@ sub _birthday_valid_date {
 
     return 0 if $month < 1 || $month > 12;
     return 0 if $day   < 1 || $day   > 31;
+
+    # B3/A3: validate days-per-month (use provided year or 2000 as leap-year reference)
+    my $check_year = (defined($year) && $year =~ /^\d{4}\z/) ? $year : 2000;
+    my @days_in_month = (0, 31,
+        ($check_year % 4 == 0 && ($check_year % 100 != 0 || $check_year % 400 == 0))
+            ? 29 : 28,
+        31, 30, 31, 30, 31, 31, 30, 31, 30, 31);
+    return 0 if $day > $days_in_month[$month];
 
     my $epoch = eval { timegm(0, 0, 12, $day, $month - 1, $year) };
     return 0 if $@ || !defined($epoch);

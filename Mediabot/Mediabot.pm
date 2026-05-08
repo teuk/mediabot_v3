@@ -2043,7 +2043,7 @@ sub process_expired_channel_bans {
             }
         }
         else {
-            $self->{logger}->log(2, "channelban: bot not on $channel_name — skipping MODE -b for expired ban #$id_ban, marking removed in DB");
+ $self->{logger}->log(2, "channelban: bot not on $channel_name -- skipping MODE -b for expired ban #$id_ban, marking removed in DB");
             $mode_ok = 1;   # proceed to DB cleanup
         }
 

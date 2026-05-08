@@ -1407,13 +1407,13 @@ sub getIdChannelSet {
     my ($self, $sChannel, $id_chanset_list) = @_;
 
     unless (defined $sChannel && $sChannel ne '') {
-        $self->{logger}->log(2, "⚠️ getIdChannelSet() called without a channel name")
+ $self->{logger}->log(2, " getIdChannelSet() called without a channel name")
             if $self->{logger};
         return undef;
     }
 
     unless (defined $id_chanset_list && $id_chanset_list ne '') {
-        $self->{logger}->log(2, "⚠️ getIdChannelSet() called without an id_chanset_list")
+ $self->{logger}->log(2, " getIdChannelSet() called without an id_chanset_list")
             if $self->{logger};
         return undef;
     }
@@ -2264,7 +2264,7 @@ sub whoTalk_ctx {
 
     # Optional gentle warning, but only if we are already speaking in-channel
     if ($out_chan && $rows[0][1] >= 25) {
-        botPrivmsg($self, $out_chan, "$rows[0][0]: please slow down a bit — you're flooding the channel.");
+ botPrivmsg($self, $out_chan, "$rows[0][0]: please slow down a bit -- you're flooding the channel.");
     }
 
     logBot($self, $ctx->message, undef, "whotalk", $target);
@@ -2905,7 +2905,7 @@ sub resolve_ctx {
 
         my $host = gethostbyaddr($packed, AF_INET);
         if ($host) {
-            botPrivmsg($self, $channel, "($nick) Reverse DNS → $input = $host");
+ botPrivmsg($self, $channel, "($nick) Reverse DNS -> $input = $host");
         } else {
             botPrivmsg($self, $channel, "($nick) No reverse DNS entry for $input");
         }
@@ -2962,7 +2962,7 @@ sub resolve_ctx {
 
             my @ips = grep { /^\d/ } split /,/, ($result // '');
             if (@ips) {
-                botPrivmsg($self, $channel, "($nick) $input → " . join(", ", @ips));
+ botPrivmsg($self, $channel, "($nick) $input -> " . join(", ", @ips));
             } else {
                 botPrivmsg($self, $channel, "($nick) Hostname could not be resolved: $input");
             }

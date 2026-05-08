@@ -1616,7 +1616,7 @@ sub _cmd_match {
         $stream->write("No match for '$pattern'.\r\n");
     }
     elsif ($found > 20) {
-        $stream->write(sprintf("\r\nShowing first 20 matches for '%s' (more exist — narrow your search).\r\n", $pattern));
+ $stream->write(sprintf("\r\nShowing first 20 matches for '%s' (more exist -- narrow your search).\r\n", $pattern));
     }
     elsif ($found > 1) {
         $stream->write(sprintf("\r\n%d match(es) for '%s'.\r\n", $found, $pattern));
@@ -1890,8 +1890,15 @@ sub _cmd_schedule {
     } elsif ($act eq 'stop') {
         $sched->stop($name);
         $stream->write("Task '$name' stopped.\r\n");
+    } elsif ($act eq 'restart') {
+        # A2: new Scheduler::restart() method
+        if ($sched->can('restart') && $sched->restart($name)) {
+            $stream->write("Task '$name' restarted.\r\n");
+        } else {
+ $stream->write("Could not restart '$name' -- task not found or already stopped.\r\n");
+        }
     } else {
-        $stream->write("Unknown action '$act'. Use: list status start stop\r\n");
+        $stream->write("Unknown action '$act'. Use: list status start stop restart\r\n");
     }
 }
 
@@ -1981,16 +1988,18 @@ sub _cmd_bans {
     }
 
     my $id_channel = $row->{id_channel};
-    my @bans = $bot->{channel_ban}->list_active_bans($id_channel);
+    # A2: fetch up to 11 to detect overflow without loading all bans
+    my @bans = $bot->{channel_ban}->list_active_bans($id_channel, 11);
 
     unless (@bans) {
         $stream->write("No active bans on $chan.\r\n");
         return;
     }
 
-    # A4: show count shown vs total available
-    my $total_bans = scalar @bans;
-    my $shown_bans = $total_bans > 10 ? 10 : $total_bans;
+    my $has_more  = scalar(@bans) > 10;
+    @bans = @bans[0..9] if $has_more;  # trim to 10
+    my $total_bans = scalar @bans + ($has_more ? 1 : 0);  # approximate
+    my $shown_bans = scalar @bans;
     $stream->write(sprintf("%d active ban(s) on $chan (showing %d):\r\n", $total_bans, $shown_bans));
     $stream->write(sprintf("  %-4s %-30s %-8s %-16s %s\r\n",
         "#", "Mask", "Level", "By", "Expires"));

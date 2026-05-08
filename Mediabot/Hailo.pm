@@ -439,6 +439,13 @@ sub set_hailo_channel_ratio {
     return undef unless defined($sChannel) && $sChannel ne '';
     return undef unless defined($ratio);
 
+    # A4: validate ratio is an integer in [0, 100]
+    unless ($ratio =~ /^\d+$/ && $ratio >= 0 && $ratio <= 100) {
+        $self->{logger}->log(1, "set_hailo_channel_ratio() invalid ratio '$ratio' -- must be 0-100");
+        return undef;
+    }
+    $ratio = int($ratio);
+
     my $channel_obj = $self->{channels}{$sChannel} || $self->{channels}{lc($sChannel)};
 
     unless (defined $channel_obj) {

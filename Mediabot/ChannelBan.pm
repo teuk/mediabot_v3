@@ -423,12 +423,15 @@ sub add_ban {
 # list_active_bans($id_channel)
 # -----------------------------------------------------------------------------
 sub list_active_bans {
-    my ($self, $id_channel) = @_;
+    my ($self, $id_channel, $limit) = @_;
 
     return () unless $self->{dbh};
     return () unless defined($id_channel) && $id_channel ne '';
 
-    my $sql = q{
+    # A1: optional $limit — avoids loading all bans into memory
+    my $_limit_sql = (defined $limit && $limit =~ /^\d+$/ && $limit > 0)
+        ? ' LIMIT ' . int($limit) : '';
+    my $sql = qq{
         SELECT
             id_channel_ban,
             id_channel,
@@ -444,7 +447,7 @@ sub list_active_bans {
         FROM CHANNEL_BAN
         WHERE id_channel = ?
           AND active = 1
-        ORDER BY id_channel_ban ASC
+        ORDER BY id_channel_ban ASC$_limit_sql
     };
 
     my $sth = $self->{dbh}->prepare($sql);

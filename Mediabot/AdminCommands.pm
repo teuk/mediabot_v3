@@ -313,7 +313,10 @@ sub _openai_run_test {
     my $prompt = join(' ', @prompt_args);
     $prompt = 'Reply with exactly OK.' unless defined($prompt) && $prompt ne '';
 
-    my $http = HTTP::Tiny->new(timeout => 20);
+    my $_openai_timeout = int(eval { $self->{conf}->get('openai.TIMEOUT') } // 20);
+    $_openai_timeout = 5 if $_openai_timeout < 5;   # A1: min 5s
+    $_openai_timeout = 60 if $_openai_timeout > 60; # A1: max 60s
+    my $http = External::_make_http(timeout => $_openai_timeout);  # A1: configurable via openai.TIMEOUT
 
     my $build_payload = sub {
         my ($selected_model) = @_;
@@ -359,7 +362,8 @@ sub _openai_run_test {
     botNotice($self, $nick, "OpenAI test: model=$model fallback_model=" . ($fallback_model ne '' ? $fallback_model : '(disabled)') . " endpoint=$api_url");
 
     my $request_model = $model;
-    my ($res, $elapsed_ms) = $send_test->($request_model);
+    my ($res, $elapsed_ms) = eval { $send_test->($request_model) };
+    if ($@) { botNotice($self, $nick, "OpenAI test: network error: $@"); return; }
     my $fallback_tried = 0;
 
     if (
@@ -380,7 +384,8 @@ sub _openai_run_test {
         );
 
         $request_model = $fallback_model;
-        ($res, $elapsed_ms) = $send_test->($request_model);
+        ($res, $elapsed_ms) = eval { $send_test->($request_model) };
+        if ($@) { botNotice($self, $nick, "OpenAI test: network error on fallback: $@"); return; }
         $fallback_tried = 1;
     }
 
@@ -571,7 +576,10 @@ sub _openai_notice_models {
         . ($filter ne '' ? " filter='$filter'" : '')
     );
 
-    my $http = HTTP::Tiny->new(timeout => 20);
+    my $_openai_timeout = int(eval { $self->{conf}->get('openai.TIMEOUT') } // 20);
+    $_openai_timeout = 5 if $_openai_timeout < 5;   # A1: min 5s
+    $_openai_timeout = 60 if $_openai_timeout > 60; # A1: max 60s
+    my $http = External::_make_http(timeout => $_openai_timeout);  # A1: configurable via openai.TIMEOUT
     my $res  = $http->get(
         $models_url,
         {
@@ -1288,6 +1296,7 @@ sub radioStatus_ctx {
         base_url => $base_url,
         timeout  => $timeout,
         logger   => $self->{logger},
+        ua       => External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
     );
 
     my $info = $radio->get_summary(
@@ -1336,6 +1345,7 @@ sub radioMounts_ctx {
         base_url => $base_url,
         timeout  => $timeout,
         logger   => $self->{logger},
+        ua       => External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
     );
 
     my $mounts = $radio->get_mounts();
@@ -1387,6 +1397,7 @@ sub displayRadioListeners_ctx {
         base_url => $base_url,
         timeout  => $timeout,
         logger   => $self->{logger},
+        ua       => External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
     );
 
     my $info = $radio->get_summary(
@@ -1493,8 +1504,11 @@ sub song_ctx {
         base_url => $base_url,
         timeout  => $timeout,
         logger   => $self->{logger},
+        ua       => External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
     );
 
+    # A3: get_summary() -> _fetch_icestats() -> HTTP GET is synchronous;
+    # bot blocks for up to $timeout seconds — acceptable for a local Icecast.
     my $info = $radio->get_summary(
         primary_mount => $primary_mount,
         public_base   => $public_base,

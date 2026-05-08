@@ -93,7 +93,7 @@ sub getYoutubeDetails {
 		my $yt_url = "https://www.googleapis.com/youtube/v3/videos"
 		           . "?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status";
 		my $http = _make_http(timeout => 10);
-		my $res  = $http->get($yt_url);
+		my $res  = eval { $http->get($yt_url); } // { success => 0, status => 0, reason => $@ };
 		unless ($res->{success}) {
 			$self->{logger}->log(3,"getYoutubeDetails() HTTP error $res->{status} for $yt_url");
 		}
@@ -228,7 +228,7 @@ sub _youtube_html_fallback {
                    . uri_escape_utf8($oembed_base);
 
     my $http = _make_http(timeout => 8, max_size => 64 * 1024);
-    my $res  = $http->get($oembed_url);
+    my $res  = eval { $http->get($oembed_url); } // { success => 0, status => 0, reason => $@ };
 
     unless ($res->{success}) {
         if (($res->{status} // 0) == 404) {
@@ -312,7 +312,7 @@ sub displayYoutubeDetails {
             . "?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status";
 
     my $http     = _make_http(timeout => 8);
-    my $response = $http->get($url);
+    my $response = eval { $http->get($url); } // { success => 0, status => 0, reason => $@ };
 
     unless ($response->{success}) {
         $self->{logger}->log(3, "displayYoutubeDetails() HTTP error $response->{status} for $sYoutubeId");
@@ -473,12 +473,12 @@ sub displayWeather_ctx {
         verify_SSL => 1,   # B1/A3: override _make_http default (0) for weather
     );
 
-    my $res = $http->get($url, {
+    my $res = eval { $http->get($url, {
         headers => {
             'Accept'          => 'text/plain',
             'Accept-Language' => 'fr-FR,fr;q=0.9,en;q=0.5',
         }
-    });
+    }) } // { success => 0, status => 0, reason => $@ };
 
     # Helper to use cached text when provider is flaky
     my $use_cache_or_msg = sub {
@@ -620,8 +620,15 @@ sub _fetch_url_chromium_dumpdom {
         return undef;
     }
 
-    my $virtual_time_budget = $opts{virtual_time_budget} // 3500;
-    my $alarm_timeout       = $opts{alarm_timeout}       // 12;
+    # A3: chromium timeouts configurable via conf (chromium.VIRTUAL_TIME_BUDGET / chromium.ALARM_TIMEOUT)
+    my $_default_vtb     = int(eval { $self->{conf}->get('chromium.VIRTUAL_TIME_BUDGET') } // 3500);
+    my $_default_alarm   = int(eval { $self->{conf}->get('chromium.ALARM_TIMEOUT') }       // 12);
+    $_default_vtb   = 1000  if $_default_vtb   < 1000;  # min 1s
+    $_default_vtb   = 30000 if $_default_vtb   > 30000; # max 30s
+    $_default_alarm = 5     if $_default_alarm  < 5;     # min 5s
+    $_default_alarm = 60    if $_default_alarm  > 60;    # max 60s
+    my $virtual_time_budget = $opts{virtual_time_budget} // $_default_vtb;
+    my $alarm_timeout       = $opts{alarm_timeout}       // $_default_alarm;
     my $lang                = $opts{lang}                // 'fr-FR';
     my $user_agent          = $opts{user_agent}          // 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36';
 
@@ -809,7 +816,7 @@ sub _handle_instagram {
         max_size => 1024 * 1024,
     );
 
-    my $res = $http->get($url);
+    my $res = eval { $http->get($url); } // { success => 0, status => 0, reason => $@ };
 
     if ($res->{success}) {
         my $content = _decode_http_content_utf8($self, $res->{content} // '', 'instagram-http');
@@ -980,7 +987,7 @@ sub _handle_spotify {
     # Step 1: cheap HTTP fetch first
     # ------------------------------------------------------------
     my $http = _make_http(max_size => 256 * 1024);
-    my $res  = $http->get($clean_url);
+    my $res  = eval { $http->get($clean_url); } // { success => 0, status => 0, reason => $@ };
 
     if ($res->{success}) {
         my $content = _decode_http_content_utf8($self, $res->{content} // '', 'spotify-http');
@@ -1087,7 +1094,7 @@ sub _handle_applemusic {
         timeout  => 12,
         max_size => 512 * 1024,
     );
-    my $res  = $http->get($url);
+    my $res  = eval { $http->get($url); } // { success => 0, status => 0, reason => $@ };
 
     if ($res->{success}) {
         my $content = _decode_http_content_utf8($self, $res->{content} // '', 'applemusic-http');
@@ -1413,7 +1420,7 @@ sub _handle_facebook {
         max_size => 1024 * 1024,
     );
 
-    my $res = $http->get($fb_url);
+    my $res = eval { $http->get($fb_url); } // { success => 0, status => 0, reason => $@ };
 
     if ($res->{success}) {
         my $content = _decode_http_content_utf8($self, $res->{content} // '', 'facebook-http');
@@ -1667,7 +1674,7 @@ sub _handle_generic_title {
     my ($self, $message, $nick, $channel, $url) = @_;
 
     my $http = _make_http();
-    my $res  = $http->get($url);
+    my $res  = eval { $http->get($url); } // { success => 0, status => 0, reason => $@ };
     unless ($res->{success}) {
         $self->{logger}->log(3, "_handle_generic_title() HTTP $res->{status} $res->{reason} for $url");
         return undef;
@@ -2091,10 +2098,10 @@ sub fortniteStats_ctx {
     my $url = "https://fortnite-api.com/v2/stats/br/v2/$account_id";
 
     my $http = _make_http(timeout => 10);
-    my $http_response = $http->get(
+    my $http_response = eval { $http->get(
         $url,
         { headers => { 'Authorization' => $api_key } }
-    );
+    ) } // { success => 0, status => 0, reason => $@ };
 
     unless ($http_response->{success}) {
         $self->{logger}->log(3, "fortniteStats_ctx(): HTTP error $http_response->{status} $http_response->{reason}");
@@ -2494,7 +2501,8 @@ sub _repair_utf8_mojibake {
     my ($text) = @_;
 
     return $text unless defined $text;
-    return $text unless $text =~ /[ÃÂâ]/;
+    # B3: broaden detection — double-UTF8 produces various high-byte sequences
+    return $text unless $text =~ /[\xC0-\xFF]{2,}|[ÃÂâÅÄÖÜ]/;
 
     my $score = sub {
         my ($s) = @_;
@@ -2598,7 +2606,7 @@ sub get_tmdb_info {
     my $url = "https://api.themoviedb.org/3/search/multi?api_key=$api_key&language=$encoded_lang&query=$encoded_query";
 
     my $http     = _make_http(timeout => 10);
-    my $response = $http->get($url);
+    my $response = eval { $http->get($url); } // { success => 0, status => 0, reason => $@ };
 
     unless ($response->{success}) {
         # B4: standalone function, no $self — log to STDERR as fallback
