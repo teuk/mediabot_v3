@@ -1360,7 +1360,7 @@ nicklist|nicklist #channel|public|List nicks currently known on a channel.
 op|op #channel [nick]|operator+|Give operator status on a channel.
 owncmd|owncmd [nick]|authorized|List dynamic commands owned by a user.
 part|part #channel [reason]|admin|Make the bot leave a channel.
-pass|pass <oldpass> <newpass>|private|Change your bot password.
+pass|pass <newpass>|pass <oldpass> <newpass>|private|Set first password, or change existing password with old password verification.
 popcmd|popcmd|authorized|Show popular dynamic commands.
 purge|purge #channel|admin|Purge or reset channel runtime information.
 q|q [nick|search]|public|Display a quote.

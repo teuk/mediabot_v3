@@ -152,13 +152,12 @@ sub getYoutubeDetails {
 					$self->{logger}->log(4,"getYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
 					
 					if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
-						my $sMsgSong .= String::IRC->new('You')->black('white');
-						$sMsgSong .= String::IRC->new('Tube')->white('red');
-						$sMsgSong .= String::IRC->new(" $sTitle ")->white('black');
-						$sMsgSong .= String::IRC->new("- ")->orange('black');
-						$sMsgSong .= String::IRC->new("$sDisplayDuration ")->grey('black');
-						$sMsgSong .= String::IRC->new("- ")->orange('black');
-						$sMsgSong .= String::IRC->new("$sViewCount")->grey('black');
+						my $sMsgSong = _yt_label();
+						$sMsgSong .= _yt_text(" $sTitle ");
+						$sMsgSong .= _yt_sep("- ");
+						$sMsgSong .= _yt_meta("$sDisplayDuration ");
+						$sMsgSong .= _yt_sep("- ");
+						$sMsgSong .= _yt_meta("$sViewCount");
 						$sMsgSong =~ s/\r//;
 						$sMsgSong =~ s/\n//;
 						return($sDururationSeconds,$sMsgSong);
@@ -259,10 +258,10 @@ sub _youtube_html_fallback {
     $self->{logger}->log(3, "_youtube_html_fallback() oEmbed title='$title' author='$author_name'");
 
     my $msg = _yt_label();
-    $msg .= String::IRC->new(" $title ")->white('black');
+    $msg .= _yt_text(" $title ");
     if ($author_name ne '') {
-        $msg .= String::IRC->new("- ")->orange('black');
-        $msg .= String::IRC->new("by $author_name")->grey('black');
+        $msg .= _yt_sep("- ");
+        $msg .= _yt_meta("by $author_name");
     }
 
     botPrivmsg($self, $channel, "($nick) $msg");
@@ -381,17 +380,14 @@ sub displayYoutubeDetails {
     if (($schannelTitle =~ tr/A-Z//) > 20) { $schannelTitle = ucfirst(lc($schannelTitle)); }
 
     # --- Formatage IRC coloré ---
-    my $sMsgSong = String::IRC->new('[')->white('black');
-    $sMsgSong   .= String::IRC->new('You')->black('white');
-    $sMsgSong   .= String::IRC->new('Tube')->white('red');
-    $sMsgSong   .= String::IRC->new(']')->white('black');
-    $sMsgSong   .= String::IRC->new(" $sTitle ")->white('black');
-    $sMsgSong   .= String::IRC->new("- ")->orange('black');
-    $sMsgSong   .= String::IRC->new("$sDisplayDuration ")->grey('black');
-    $sMsgSong   .= String::IRC->new("- ")->orange('black');
-    $sMsgSong   .= String::IRC->new("$sViewCount ")->grey('black');
-    $sMsgSong   .= String::IRC->new("- ")->orange('black');
-    $sMsgSong   .= String::IRC->new("by $schannelTitle")->grey('black');
+    my $sMsgSong = _yt_label();
+    $sMsgSong   .= _yt_text(" $sTitle ");
+    $sMsgSong   .= _yt_sep("- ");
+    $sMsgSong   .= _yt_meta("$sDisplayDuration ");
+    $sMsgSong   .= _yt_sep("- ");
+    $sMsgSong   .= _yt_meta("$sViewCount ");
+    $sMsgSong   .= _yt_sep("- ");
+    $sMsgSong   .= _yt_meta("by $schannelTitle");
 
     $sMsgSong =~ s/\r|\n//g;
     botPrivmsg($self, $sChannel, "($sNick) $sMsgSong");
@@ -543,12 +539,38 @@ sub displayWeather_ctx {
 # ---------------------------------------------------------------------------
 # _yt_label — shared YouTube IRC label
 # ---------------------------------------------------------------------------
+sub _irc_color {
+    my ($text, $fg) = @_;
+
+    $text = '' unless defined $text;
+    return $text unless defined $fg && $fg ne '';
+
+    # Foreground only. No background here.
+    # This keeps title, duration, views, channel and URL transparent.
+    return sprintf("\x03%02d", $fg) . $text . "\x0f";
+}
+
+sub _yt_text {
+    return _irc_color($_[0], 0);      # white foreground, transparent background
+}
+
+sub _yt_sep {
+    return _irc_color($_[0], 7);      # orange foreground, transparent background
+}
+
+sub _yt_meta {
+    return _irc_color($_[0], 14);     # grey foreground, transparent background
+}
+
 sub _yt_label {
-    my $label = String::IRC->new('[')->white('black');
-    $label   .= String::IRC->new('You')->black('white');
-    $label   .= String::IRC->new('Tube')->white('red');
-    $label   .= String::IRC->new(']')->white('black');
-    return $label;
+    # YouTube badge:
+    #   [You  => black foreground on white background
+    #   Tube  => white foreground on red background
+    #   ]     => black foreground on white background
+    #
+    # The reset at the end is mandatory: only the badge keeps a background.
+    # Everything after it must stay transparent.
+    return "\x0301,00[You\x0300,04Tube\x0301,00]\x0f";
 }
 
 # ---------------------------------------------------------------------------
@@ -1944,23 +1966,23 @@ sub youtubeSearch_ctx {
         my $views_disp = ($views ne '' && $views =~ /^\d+$/) ? "views $views" : "views ?";
         my $url        = "https://www.youtube.com/watch?v=$video_id";
 
-        my $entry = String::IRC->new(" $title ")->white('black');
+        my $entry = _yt_text(" $title ");
 
         if ($dur_disp ne '') {
-            $entry .= String::IRC->new("- ")->orange('black');
-            $entry .= String::IRC->new("$dur_disp ")->grey('black');
+            $entry .= _yt_sep("- ");
+            $entry .= _yt_meta("$dur_disp ");
         }
 
-        $entry .= String::IRC->new("- ")->orange('black');
-        $entry .= String::IRC->new("$views_disp ")->grey('black');
+        $entry .= _yt_sep("- ");
+        $entry .= _yt_meta("$views_disp ");
 
         if ($channel_title ne '') {
-            $entry .= String::IRC->new("- ")->orange('black');
-            $entry .= String::IRC->new("by $channel_title ")->grey('black');
+            $entry .= _yt_sep("- ");
+            $entry .= _yt_meta("by $channel_title ");
         }
 
-        $entry .= String::IRC->new("- ")->orange('black');
-        $entry .= String::IRC->new($url)->grey('black');
+        $entry .= _yt_sep("- ");
+        $entry .= _yt_meta($url);
 
         push @entries, $entry;
         last if @entries >= 3;
@@ -1975,7 +1997,7 @@ sub youtubeSearch_ctx {
     for my $i (0 .. $#entries) {
         my $rank = $i + 1;
         my $msg  = _yt_label();
-        $msg    .= String::IRC->new(" $rank/" . scalar(@entries) . " ")->orange('black');
+        $msg    .= _yt_sep(" $rank/" . scalar(@entries) . " ");
         $msg    .= $entries[$i];
 
         $msg =~ s/\r|\n//g;

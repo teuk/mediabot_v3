@@ -145,7 +145,6 @@ sub get_user_from_message {
         SELECT
             u.id_user,
             u.nickname,
-            u.password,
             u.username,
             u.id_user_level,
             u.auth,
@@ -157,7 +156,6 @@ sub get_user_from_message {
         GROUP BY
             u.id_user,
             u.nickname,
-            u.password,
             u.username,
             u.id_user_level,
             u.auth,
@@ -3103,13 +3101,12 @@ sub get_user_from_whois {
             u.nickname,
             u.id_user_level,
             u.auth,
-            u.password,
             u.info1,
             u.info2,
             GROUP_CONCAT(uh.hostmask ORDER BY uh.id_user_hostmask SEPARATOR ',') AS hostmasks
         FROM USER u
         LEFT JOIN USER_HOSTMASK uh ON uh.id_user = u.id_user
-        GROUP BY u.id_user, u.nickname, u.id_user_level, u.auth, u.password, u.info1, u.info2
+        GROUP BY u.id_user, u.nickname, u.id_user_level, u.auth, u.info1, u.info2
         ORDER BY u.id_user
     };
 
@@ -3175,7 +3172,6 @@ sub get_user_from_whois {
     my $user = Mediabot::User->new({
         id_user       => $best_ref->{id_user},
         nickname      => $best_ref->{nickname},
-        password      => $best_ref->{password},
         username      => $best_ref->{nickname},
         hostmasks     => $best_ref->{hostmasks},
         info1         => $best_ref->{info1},
@@ -3200,7 +3196,7 @@ sub getNickInfoWhois {
     my $iMatchingUserLevelDesc = undef;
     my $iMatchingUserAuth      = undef;
     my $sMatchingUserHandle    = undef;
-    my $sMatchingUserPasswd    = undef;
+    my $sMatchingUserPasswd    = undef; # legacy return slot, intentionally not populated
     my $sMatchingUserInfo1     = undef;
     my $sMatchingUserInfo2     = undef;
 
@@ -3216,7 +3212,6 @@ sub getNickInfoWhois {
             u.nickname,
             u.id_user_level,
             u.auth,
-            u.password,
             u.info1,
             u.info2,
             GROUP_CONCAT(uh.hostmask ORDER BY uh.id_user_hostmask SEPARATOR ',') AS hostmasks
@@ -3227,7 +3222,6 @@ sub getNickInfoWhois {
             u.nickname,
             u.id_user_level,
             u.auth,
-            u.password,
             u.info1,
             u.info2
         ORDER BY u.id_user
@@ -3270,7 +3264,6 @@ sub getNickInfoWhois {
             );
 
             $sMatchingUserHandle = $best_ref->{nickname};
-            $sMatchingUserPasswd = $best_ref->{password} if defined $best_ref->{password};
             $iMatchingUserId     = $best_ref->{id_user};
             $iMatchingUserAuth   = $best_ref->{auth};
             $sMatchingUserInfo1  = $best_ref->{info1} if defined $best_ref->{info1};
@@ -3320,9 +3313,6 @@ sub getNickInfoWhois {
     }
     if (defined($sMatchingUserHandle)) {
         $self->{logger}->log(4, "getNickInfoWhois() sMatchingUserHandle : $sMatchingUserHandle");
-    }
-    if (defined($sMatchingUserPasswd)) {
-        $self->{logger}->log(4, "getNickInfoWhois() sMatchingUserPasswd : $sMatchingUserPasswd");
     }
     if (defined($sMatchingUserInfo1)) {
         $self->{logger}->log(4, "getNickInfoWhois() sMatchingUserInfo1 : $sMatchingUserInfo1");

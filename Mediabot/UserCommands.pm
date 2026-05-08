@@ -1223,55 +1223,93 @@ sub mbSeen_ctx {
     };
 
     # --- 1. Check USER_SEEN first (persisted, covers messages + joins) ---
+    # If seen <nick> #channel was requested, keep the persisted lookup scoped
+    # to that channel too. Otherwise, keep the historical global lookup.
     my $seen_row;
     {
-        my $sth = $self->{dbh}->prepare(
-            "SELECT nick, channel, userhost, event_type, last_msg, new_nick,
-                    seen_at, UNIX_TIMESTAMP(seen_at) AS seen_uts
-             FROM USER_SEEN WHERE nick = ? LIMIT 1"
-        );
-        if ($sth && $sth->execute($targetNick)) {
+        my ($sql, @bind);
+
+        if (defined($chan_for_part) && $chan_for_part ne '') {
+            $sql = q{
+                SELECT nick, channel, userhost, event_type, last_msg, new_nick,
+                       seen_at, UNIX_TIMESTAMP(seen_at) AS seen_uts
+                FROM USER_SEEN
+                WHERE nick = ? AND channel = ?
+                LIMIT 1
+            };
+            @bind = ($targetNick, $chan_for_part);
+        }
+        else {
+            $sql = q{
+                SELECT nick, channel, userhost, event_type, last_msg, new_nick,
+                       seen_at, UNIX_TIMESTAMP(seen_at) AS seen_uts
+                FROM USER_SEEN
+                WHERE nick = ?
+                LIMIT 1
+            };
+            @bind = ($targetNick);
+        }
+
+        my $sth = $self->{dbh}->prepare($sql);
+        if ($sth && $sth->execute(@bind)) {
             $seen_row = $sth->fetchrow_hashref;
             $sth->finish;
         }
     }
 
-    # --- 2. Fallback: CHANNEL_LOG quit/part (older data pre-USER_SEEN) ---
-    my ($quit, $part);
+    # --- 2. Fallback: CHANNEL_LOG events (older data pre-USER_SEEN) ---
+    my ($quit, $part, $chanlog);
 
     unless ($seen_row) {
-        my $sth_quit = $self->{dbh}->prepare(
-            "SELECT ts, UNIX_TIMESTAMP(ts) AS uts, userhost, publictext
-             FROM CHANNEL_LOG
-             WHERE nick = ? AND event_type = 'quit'
-             ORDER BY ts DESC LIMIT 1"
-        );
-        if ($sth_quit && $sth_quit->execute($targetNick)) {
-            if (my $r = $sth_quit->fetchrow_hashref) {
-                $quit = { ts => $r->{ts}, uts => $r->{uts} // 0,
-                          host => $r->{userhost} // '', text => $r->{publictext} // '' };
-            }
-            $sth_quit->finish;
-        }
+        my $id_channel = 0;
 
         if (defined $chan_for_part) {
             my $channel_obj = $self->{channels}{$chan_for_part}
                            || $self->{channels}{lc($chan_for_part)};
-            my $id_channel = eval { $channel_obj->get_id } || 0;
-            if ($id_channel) {
-                my $sth_part = $self->{dbh}->prepare(
-                    "SELECT ts, UNIX_TIMESTAMP(ts) AS uts, userhost, publictext
-                     FROM CHANNEL_LOG
-                     WHERE id_channel = ? AND nick = ? AND event_type = 'part'
-                     ORDER BY ts DESC LIMIT 1"
-                );
-                if ($sth_part && $sth_part->execute($id_channel, $targetNick)) {
-                    if (my $r = $sth_part->fetchrow_hashref) {
-                        $part = { ts => $r->{ts}, uts => $r->{uts} // 0,
-                                  host => $r->{userhost} // '', text => $r->{publictext} // '' };
-                    }
-                    $sth_part->finish;
+            $id_channel = eval { $channel_obj->get_id } || 0;
+        }
+
+        if (defined($chan_for_part) && $id_channel) {
+            my $sth_chanlog = $self->{dbh}->prepare(
+                "SELECT ts, UNIX_TIMESTAMP(ts) AS uts, userhost, publictext, event_type
+                 FROM CHANNEL_LOG
+                 WHERE id_channel = ?
+                   AND nick = ?
+                   AND event_type IN ('message', 'join', 'part', 'quit')
+                 ORDER BY ts DESC LIMIT 1"
+            );
+
+            if ($sth_chanlog && $sth_chanlog->execute($id_channel, $targetNick)) {
+                if (my $r = $sth_chanlog->fetchrow_hashref) {
+                    $chanlog = {
+                        ts    => $r->{ts},
+                        uts   => $r->{uts} // 0,
+                        host  => $r->{userhost} // '',
+                        text  => $r->{publictext} // '',
+                        event => $r->{event_type} // 'message',
+                    };
                 }
+                $sth_chanlog->finish;
+            }
+        }
+        else {
+            my $sth_quit = $self->{dbh}->prepare(
+                "SELECT ts, UNIX_TIMESTAMP(ts) AS uts, userhost, publictext
+                 FROM CHANNEL_LOG
+                 WHERE nick = ? AND event_type = 'quit'
+                 ORDER BY ts DESC LIMIT 1"
+            );
+
+            if ($sth_quit && $sth_quit->execute($targetNick)) {
+                if (my $r = $sth_quit->fetchrow_hashref) {
+                    $quit = {
+                        ts   => $r->{ts},
+                        uts  => $r->{uts} // 0,
+                        host => $r->{userhost} // '',
+                        text => $r->{publictext} // '',
+                    };
+                }
+                $sth_quit->finish;
             }
         }
     }
@@ -1306,8 +1344,32 @@ sub mbSeen_ctx {
         } else {
             $msg = "$targetNick ($host) was last seen $ago ($ev)";
         }
+    } elsif ($chanlog) {
+        my $host = $fmt_host->($chanlog->{host});
+        my $txt  = $chanlog->{text} // '';
+        my $ev   = $chanlog->{event} // 'message';
+        my $ago  = $fmt_ago->($chanlog->{uts});
+
+        if ($ev eq 'message') {
+            $msg = "$targetNick ($host) was last seen $ago on $chan_for_part"
+                 . ($txt ne '' ? " saying: $txt" : '');
+        }
+        elsif ($ev eq 'join') {
+            $msg = "$targetNick ($host) was last seen joining $chan_for_part $ago";
+        }
+        elsif ($ev eq 'part') {
+            $msg = "$targetNick ($host) was last seen parting $chan_for_part $ago"
+                 . ($txt ne '' ? " ($txt)" : '');
+        }
+        elsif ($ev eq 'quit') {
+            $msg = "$targetNick ($host) was last seen quitting $ago"
+                 . ($txt ne '' ? " ($txt)" : '');
+        }
+        else {
+            $msg = "$targetNick ($host) was last seen $ago on $chan_for_part ($ev)";
+        }
     } elsif ($quit || $part) {
-        # Fallback CHANNEL_LOG path
+        # Fallback CHANNEL_LOG path for global seen lookup.
         my $quit_uts = $quit ? ($quit->{uts} // 0) : 0;
         my $part_uts = $part ? ($part->{uts} // 0) : 0;
         if ($part_uts && $part_uts >= $quit_uts && $chan_for_part) {

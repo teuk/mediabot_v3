@@ -238,9 +238,18 @@ sub userLogin_ctx {
         return ($rows, undef);
     };
 
-    # 1) Fetch account strictly by DB nickname
+    # 1) Fetch account strictly by DB nickname.
+    # Do not SELECT the password/hash here; credential verification belongs to
+    # Mediabot::Auth::verify_credentials().
     my ($row, $select_err) = $run_select_one->(q{
-        SELECT id_user, nickname, password, id_user_level
+        SELECT
+            id_user,
+            nickname,
+            CASE
+                WHEN password IS NOT NULL AND password <> '' THEN 1
+                ELSE 0
+            END AS has_password,
+            id_user_level
         FROM USER
         WHERE nickname = ?
         LIMIT 1
@@ -269,35 +278,25 @@ sub userLogin_ctx {
         return;
     }
 
-    my $id_user     = $row->{id_user};
-    my $db_nick     = $row->{nickname};
-    my $stored_hash = $row->{password};
-    my $level_id    = $row->{id_user_level};
+    my $id_user      = $row->{id_user};
+    my $db_nick      = $row->{nickname};
+    my $has_password = defined($row->{has_password}) ? int($row->{has_password}) : 0;
+    my $level_id     = $row->{id_user_level};
 
-    unless (defined $stored_hash && $stored_hash ne "") {
+    unless ($has_password) {
         botNotice($self, $sNick, "Your password is not set. Use /msg " . $self->{irc}->nick_folded . " pass <password>");
         return;
     }
 
-    # 2) Compute password hash using same algorithm as MariaDB PASSWORD()
-    my $calc_hash;
-    my $hash_ok = eval {
-        $calc_hash = make_password_hash($typed_pass);
-        1;
-    };
-
-    unless ($hash_ok && defined $calc_hash) {
-        my $err = $@ || 'make_password_hash returned undef';
-        chomp $err;
-
-        $self->{logger}->log(1, "login: password hash computation failed: $err")
+    unless ($self->{auth} && $self->{auth}->can('verify_credentials')) {
+        $self->{logger}->log(1, "userLogin_ctx() Auth module unavailable for credential verification")
             if $self->{logger};
-
-        botNotice($self, $sNick, "Internal error (hash compute failed).");
+        botNotice($self, $sNick, "Internal error (auth module unavailable).");
         return;
     }
 
-    if ($stored_hash eq $calc_hash) {
+    # 2) Verify credentials through Mediabot::Auth.
+    if ($self->{auth}->verify_credentials($id_user, $db_nick, $typed_pass)) {
         # 3) Mark authenticated and stamp last_login
         my ($rows, $upd_err) = $run_update->(
             "UPDATE USER SET auth=1, last_login=NOW() WHERE id_user=?",
@@ -494,64 +493,119 @@ sub mbRegister_ctx {
 sub userPass {
     my ($self, $message, $sNick, @tArgs) = @_;
 
-    # Ensure the password is provided
-    if (defined($tArgs[0]) && $tArgs[0] ne "") {
+    my $user = $self->get_user_from_message($message);
 
-        # Attempt to find the user associated with the IRC message
-        my $user = $self->get_user_from_message($message);
+    unless (defined($user) && defined($user->nickname)) {
+        my $msg = $message->prefix . " Failed pass command, unknown user $sNick (" . $message->prefix . ")";
+        noticeConsoleChan($self, $msg);
+        logBot($self, $message, undef, "pass", "Failed - unknown user $sNick");
+        botNotice($self, $sNick, "You must be known by the bot before setting a password.");
+        return 0;
+    }
 
-        if (defined($user) && defined($user->nickname)) {
+    my $uid = $user->id;
 
-            my $sNewPassword = $tArgs[0];
+    my $sth_current = $self->{dbh}->prepare(
+        "SELECT password FROM USER WHERE id_user = ? LIMIT 1"
+    );
 
-            my $sHashedNewPw;
-            my $hash_ok = eval {
-                $sHashedNewPw = make_password_hash($sNewPassword);
-                1;
-            };
+    unless ($sth_current && $sth_current->execute($uid)) {
+        $self->{logger}->log(1, "userPass() SQL error while reading current password: $DBI::errstr")
+            if $self->{logger};
+        botNotice($self, $sNick, "Internal error (password check failed).");
+        return 0;
+    }
 
-            unless ($hash_ok && defined $sHashedNewPw) {
-                my $err = $@ || 'make_password_hash returned undef';
-                chomp $err;
+    my ($stored_hash) = $sth_current->fetchrow_array;
+    $sth_current->finish;
 
-                $self->{logger}->log(1, "userPass() make_password_hash failed: $err")
-                    if $self->{logger};
+    my $has_password = defined($stored_hash) && $stored_hash ne '' ? 1 : 0;
 
-                botNotice($self, $sNick, "Internal error (hash compute failed).");
-                logBot($self, $message, undef, "pass", "Failed - hash error");
-                return 0;
-            }
-my $sQuery = "UPDATE USER SET password=? WHERE id_user=?";
-            my $sth = $self->{dbh}->prepare($sQuery);
+    my ($old_password, $new_password);
 
-            # Try to update the password in the database
-            unless ($sth->execute($sHashedNewPw, $user->id)) {
-                $self->{logger}->log(1, "SQL Error: $DBI::errstr - Query: $sQuery");
-                $sth->finish;
-                return 0;
-            } else {
-                # Log and notify success
-                my $msg = "userPass() Set password for $sNick (user_id: " . $user->id . ", host: " . $message->prefix . ")";
-                $self->{logger}->log(3, $msg);
-                noticeConsoleChan($self, $msg);
+    if ($has_password) {
+        ($old_password, $new_password) = @tArgs;
 
-                botNotice($self, $sNick, "Password set.");
-                botNotice($self, $sNick, "You may now login with /msg " . $self->{irc}->nick_folded . " login " . $user->nickname . " <password>");
-                logBot($self, $message, undef, "pass", "Success");
+        unless (defined($old_password) && $old_password ne '' && defined($new_password) && $new_password ne '') {
+            botNotice($self, $sNick, "Syntax: pass <oldpassword> <newpassword>");
+            return 0;
+        }
 
-                $sth->finish;
-                return 1;
-            }
+        my $old_hash;
+        my $old_hash_ok = eval {
+            $old_hash = make_password_hash($old_password);
+            1;
+        };
 
-        } else {
-            # Unknown user or hostmask not registered
-            my $msg = $message->prefix . " Failed pass command, unknown user $sNick (" . $message->prefix . ")";
-            noticeConsoleChan($self, $msg);
-            logBot($self, $message, undef, "pass", "Failed - unknown user $sNick");
+        unless ($old_hash_ok && defined($old_hash)) {
+            my $err = $@ || 'make_password_hash returned undef';
+            chomp $err;
+
+            $self->{logger}->log(1, "userPass() old password hash compute failed: $err")
+                if $self->{logger};
+
+            botNotice($self, $sNick, "Internal error (password check failed).");
+            logBot($self, $message, undef, "pass", "Failed - old hash error");
+            return 0;
+        }
+
+        unless ($stored_hash eq $old_hash) {
+            botNotice($self, $sNick, "Current password is invalid.");
+            logBot($self, $message, undef, "pass", "Failed - bad old password");
             return 0;
         }
     }
+    else {
+        ($new_password) = @tArgs;
+
+        unless (defined($new_password) && $new_password ne '') {
+            botNotice($self, $sNick, "Syntax: pass <newpassword>");
+            return 0;
+        }
+    }
+
+    my $sHashedNewPw;
+    my $hash_ok = eval {
+        $sHashedNewPw = make_password_hash($new_password);
+        1;
+    };
+
+    unless ($hash_ok && defined $sHashedNewPw) {
+        my $err = $@ || 'make_password_hash returned undef';
+        chomp $err;
+
+        $self->{logger}->log(1, "userPass() make_password_hash failed: $err")
+            if $self->{logger};
+
+        botNotice($self, $sNick, "Internal error (hash compute failed).");
+        logBot($self, $message, undef, "pass", "Failed - hash error");
+        return 0;
+    }
+
+    my $sQuery = "UPDATE USER SET password=? WHERE id_user=?";
+    my $sth = $self->{dbh}->prepare($sQuery);
+
+    unless ($sth && $sth->execute($sHashedNewPw, $uid)) {
+        $self->{logger}->log(1, "SQL Error: $DBI::errstr - Query: $sQuery")
+            if $self->{logger};
+        $sth->finish if $sth;
+        botNotice($self, $sNick, "Internal error (password update failed).");
+        return 0;
+    }
+
+    $sth->finish;
+
+    my $msg = "userPass() Set password for $sNick (user_id: $uid, host: " . $message->prefix . ")";
+    $self->{logger}->log(3, $msg) if $self->{logger};
+    noticeConsoleChan($self, $msg);
+
+    botNotice($self, $sNick, "Password set.");
+    botNotice($self, $sNick, "You may now login with /msg " . $self->{irc}->nick_folded . " login " . $user->nickname . " <password>");
+    logBot($self, $message, undef, "pass", "Success");
+
+    return 1;
 }
+
 
 
 sub userIdent {
@@ -726,8 +780,23 @@ sub userWhoAmI_ctx {
         return;
     }
 
-    # Pull DB details (password set, created, last login, username)
-    my $sql = "SELECT username, password, creation_date, last_login, auth FROM USER WHERE id_user=? LIMIT 1";
+    # Pull DB details.
+    # Do not SELECT the password/hash value here: whoami only needs to know
+    # whether a password exists.
+    my $sql = q{
+        SELECT
+            username,
+            CASE
+                WHEN password IS NOT NULL AND password <> '' THEN 1
+                ELSE 0
+            END AS has_password,
+            creation_date,
+            last_login,
+            auth
+        FROM USER
+        WHERE id_user = ?
+        LIMIT 1
+    };
     my $sth = $dbh->prepare($sql);
 
     unless ($sth) {
@@ -784,8 +853,9 @@ sub userWhoAmI_ctx {
 
     my $db_auth = $ref->{auth} ? 1 : 0;
 
-    # Password set: check the password field
-    my $pass_set = (defined $ref->{password} && $ref->{password} ne '') ? "Password set" : "Password not set";
+    # Password set: use the SQL boolean, never the password/hash value.
+    my $has_password = defined($ref->{has_password}) ? int($ref->{has_password}) : 0;
+    my $pass_set     = $has_password ? "Password set" : "Password not set";
 
     # AUTOLOGIN status
     my $db_username = defined($ref->{username}) ? $ref->{username} : '';

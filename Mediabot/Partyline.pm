@@ -1200,7 +1200,7 @@ sub _do_login {
     }
 
     my $sth = $dbh->prepare(
-        "SELECT u.id_user, u.nickname, u.password, ul.level, ul.description
+        "SELECT u.id_user, u.nickname, ul.level, ul.description
          FROM USER u
          JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
          WHERE u.nickname = ?"

@@ -16,6 +16,7 @@ use HTTP::Tiny;
 use JSON qw(encode_json decode_json);
 use Time::HiRes qw(time);
 use Mediabot::Helpers;
+use Mediabot::External ();
 
 use Mediabot::Context;
 use Mediabot::Radio::Icecast;
@@ -316,7 +317,7 @@ sub _openai_run_test {
     my $_openai_timeout = int(eval { $self->{conf}->get('openai.TIMEOUT') } // 20);
     $_openai_timeout = 5 if $_openai_timeout < 5;   # A1: min 5s
     $_openai_timeout = 60 if $_openai_timeout > 60; # A1: max 60s
-    my $http = External::_make_http(timeout => $_openai_timeout);  # A1: configurable via openai.TIMEOUT
+    my $http = Mediabot::External::_make_http(timeout => $_openai_timeout);  # A1: configurable via openai.TIMEOUT
 
     my $build_payload = sub {
         my ($selected_model) = @_;
@@ -579,7 +580,7 @@ sub _openai_notice_models {
     my $_openai_timeout = int(eval { $self->{conf}->get('openai.TIMEOUT') } // 20);
     $_openai_timeout = 5 if $_openai_timeout < 5;   # A1: min 5s
     $_openai_timeout = 60 if $_openai_timeout > 60; # A1: max 60s
-    my $http = External::_make_http(timeout => $_openai_timeout);  # A1: configurable via openai.TIMEOUT
+    my $http = Mediabot::External::_make_http(timeout => $_openai_timeout);  # A1: configurable via openai.TIMEOUT
     my $res  = $http->get(
         $models_url,
         {
@@ -1296,7 +1297,7 @@ sub radioStatus_ctx {
         base_url => $base_url,
         timeout  => $timeout,
         logger   => $self->{logger},
-        ua       => External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
+        ua       => Mediabot::External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
     );
 
     my $info = $radio->get_summary(
@@ -1345,7 +1346,7 @@ sub radioMounts_ctx {
         base_url => $base_url,
         timeout  => $timeout,
         logger   => $self->{logger},
-        ua       => External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
+        ua       => Mediabot::External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
     );
 
     my $mounts = $radio->get_mounts();
@@ -1397,7 +1398,7 @@ sub displayRadioListeners_ctx {
         base_url => $base_url,
         timeout  => $timeout,
         logger   => $self->{logger},
-        ua       => External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
+        ua       => Mediabot::External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
     );
 
     my $info = $radio->get_summary(
@@ -1504,7 +1505,7 @@ sub song_ctx {
         base_url => $base_url,
         timeout  => $timeout,
         logger   => $self->{logger},
-        ua       => External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
+        ua       => Mediabot::External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
     );
 
     # A3: get_summary() -> _fetch_icestats() -> HTTP GET is synchronous;
