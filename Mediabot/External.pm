@@ -1000,102 +1000,338 @@ sub _handle_instagram {
 sub _handle_spotify {
     my ($self, $message, $nick, $channel, $url) = @_;
 
-    # Strip query string (Spotify redirects work without it)
+    $self->{logger}->log(4, "_handle_spotify() start url=$url");
+
     (my $clean_url = $url) =~ s/\?.*$//;
 
-    my $display;
+    my ($spotify_type, $spotify_id) = $clean_url =~ m{
+        open\.spotify\.com/
+        (?:(?:intl-[a-z]{2})/)?
+        (track|album|playlist|episode|show|artist)
+        /([A-Za-z0-9]+)
+    }ix;
 
-    # ------------------------------------------------------------
-    # Step 1: cheap HTTP fetch first
-    # ------------------------------------------------------------
-    my $http = _make_http(max_size => 256 * 1024);
-    my $res  = eval { $http->get($clean_url); } // { success => 0, status => 0, reason => $@ };
-
-    if ($res->{success}) {
-        my $content = _decode_http_content_utf8($self, $res->{content} // '', 'spotify-http');
-
-        # Try og:title first
-        if ($content =~ /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i) {
-            $display = $1;
-        }
-        elsif ($content =~ /<meta\s+content=["']([^"']+)["']\s+property=["']og:title["']/i) {
-            $display = $1;
-        }
-
-        # Fallback: <title>
-        unless (defined $display && $display ne '') {
-            if ($content =~ /<title[^>]*>([^<]+)<\/title>/i) {
-                $display = $1;
-                $display =~ s/\s*\|\s*Spotify\s*$//i;
-            }
-        }
-
-        $display = _decode_html($display) if defined $display;
-
-        $self->{logger}->log(4, "_handle_spotify() HTTP title=" . (defined $display ? $display : '<undef>'));
-    }
-    else {
-        $self->{logger}->log(3, "_handle_spotify() HTTP $res->{status} $res->{reason} for $clean_url");
-    }
-
-    # ------------------------------------------------------------
-    # Step 2: Chromium fallback if HTTP title is missing or generic
-    # ------------------------------------------------------------
-    my $display_check = defined($display) ? $display : '';
-    $display_check =~ s/\s+/ /g;
-    $display_check =~ s/^\s+|\s+$//g;
-
-    if (!defined($display) || $display_check eq '' || $display_check =~ /spotify.*web player/i) {
-        $self->{logger}->log(4, "_handle_spotify() falling back to Chromium rendered DOM for $clean_url");
-
-        my $dom = _fetch_url_chromium_dumpdom($self, $clean_url);
-
-        if (defined $dom && $dom ne '') {
-            my $og_title;
-            my $title_tag;
-
-            if ($dom =~ /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i) {
-                $og_title = $1;
-            }
-            elsif ($dom =~ /<meta\s+content=["']([^"']+)["']\s+property=["']og:title["']/i) {
-                $og_title = $1;
-            }
-
-            if ($dom =~ /<title[^>]*>([^<]+)<\/title>/i) {
-                $title_tag = $1;
-                $title_tag =~ s/\s*\|\s*Spotify\s*$//i;
-            }
-
-            for ($og_title, $title_tag) {
-                $_ = _decode_html($_) if defined $_;
-            }
-
-            $self->{logger}->log(4, "_handle_spotify() Chromium og:title=" . (defined $og_title ? $og_title : '<undef>'));
-            $self->{logger}->log(4, "_handle_spotify() Chromium <title>=" . (defined $title_tag ? $title_tag : '<undef>'));
-
-            if (defined $og_title && $og_title ne '' && $og_title !~ /spotify.*web player/i) {
-                $display = $og_title;
-                $self->{logger}->log(4, "_handle_spotify() selected Chromium og:title");
-            }
-            elsif (defined $title_tag && $title_tag ne '' && $title_tag !~ /spotify.*web player/i) {
-                $display = $title_tag;
-                $self->{logger}->log(4, "_handle_spotify() selected Chromium <title>");
-            }
-        }
-    }
-
-    unless (defined $display && $display ne '') {
-        $self->{logger}->log(3, "_handle_spotify() could not extract title from $clean_url");
+    unless (defined $spotify_type && defined $spotify_id) {
+        $self->{logger}->log(3, "_handle_spotify() could not extract Spotify type/id from $clean_url");
         return undef;
     }
 
+    my %info = (
+        type => $spotify_type,
+    );
+
+    my $is_bad = sub {
+        my ($v) = @_;
+        return 1 unless defined $v;
+
+        $v = _decode_html($v);
+        $v =~ s/[\r\n\t]/ /g;
+        $v =~ s/\s+/ /g;
+        $v =~ s/^\s+|\s+$//g;
+
+        return 1 if $v eq '';
+        return 1 if $v =~ /^Spotify$/i;
+        return 1 if $v =~ /^Spotify\s*[–-]\s*Web Player$/i;
+        return 1 if $v =~ /^Spotify Web Player$/i;
+        return 1 if $v =~ /listening is everything/i;
+        return 0;
+    };
+
+    my $clean = sub {
+        my ($v) = @_;
+        return undef unless defined $v;
+
+        $v = _decode_html($v);
+        $v =~ s/\\u0026/&/g;
+        $v =~ s/\\\//\//g;
+        $v =~ s/\\"/"/g;
+        $v =~ s/[\r\n\t]/ /g;
+        $v =~ s/\s{2,}/ /g;
+        $v =~ s/^\s+|\s+$//g;
+
+        $v =~ s/\s*\|\s*Spotify\s*$//i;
+        $v =~ s/\s*[–-]\s*Spotify\s*$//i;
+        $v =~ s/\s*[–-]\s*song and lyrics by\s*/ - /i;
+
+        return undef if $is_bad->($v);
+        return $v;
+    };
+
+    my $set_once = sub {
+        my ($key, $value) = @_;
+        return unless defined $key;
+        return if defined $info{$key} && $info{$key} ne '';
+
+        my $v = $clean->($value);
+        return unless defined $v && $v ne '';
+
+        $info{$key} = $v;
+        $self->{logger}->log(4, "_handle_spotify() set $key='$v'");
+    };
+
+    my $format_iso_duration = sub {
+        my ($d) = @_;
+        return undef unless defined $d;
+
+        # Spotify/JSON-LD may expose ISO 8601 durations like PT3M34S.
+        if ($d =~ /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i) {
+            my ($h, $m, $s) = ($1 // 0, $2 // 0, $3 // 0);
+            return undef if !$h && !$m && !$s;
+
+            if ($h) {
+                return sprintf("%dh%02dm%02ds", $h, $m, $s);
+            }
+
+            return sprintf("%dm %02ds", $m, $s);
+        }
+
+        return undef;
+    };
+
+    my $extract_from_jsonish = sub {
+        my ($text, $context) = @_;
+        return unless defined $text && $text ne '';
+
+        # JSON-LD MusicRecording / MusicAlbum when available.
+        while ($text =~ m{<script[^>]+type=["']application/ld\+json["'][^>]*>(.*?)</script>}sig) {
+            my $json = $1;
+            $json = _decode_html($json);
+
+            my $data = eval { decode_json($json) };
+            next unless defined $data;
+
+            my @items = ref($data) eq 'ARRAY' ? @$data : ($data);
+
+            for my $item (@items) {
+                next unless ref($item) eq 'HASH';
+
+                $set_once->('title',  $item->{name});
+
+                if (ref($item->{byArtist}) eq 'HASH') {
+                    $set_once->('artist', $item->{byArtist}->{name});
+                }
+                elsif (ref($item->{byArtist}) eq 'ARRAY') {
+                    my @artists = grep { defined $_ && $_ ne '' }
+                                  map { ref($_) eq 'HASH' ? $_->{name} : $_ }
+                                  @{ $item->{byArtist} };
+                    $set_once->('artist', join(', ', @artists)) if @artists;
+                }
+
+                if (ref($item->{inAlbum}) eq 'HASH') {
+                    $set_once->('album', $item->{inAlbum}->{name});
+                }
+
+                if (defined $item->{duration}) {
+                    my $dur = $format_iso_duration->($item->{duration});
+                    $info{duration} = $dur if defined $dur && !defined $info{duration};
+                }
+
+                if (defined $item->{datePublished}) {
+                    $set_once->('released', $item->{datePublished});
+                }
+            }
+        }
+
+        # Generic Spotify JSON fragments. These are intentionally conservative:
+        # they only fill missing fields and avoid replacing better oEmbed/JSON-LD data.
+        if (!defined $info{title} && $text =~ /"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
+            my $name = $1;
+            $name =~ s/\\"/"/g;
+            $name =~ s/\\\\/\\/g;
+            $set_once->('title', $name);
+        }
+
+        if (!defined $info{artist}) {
+            if ($text =~ /"artists"\s*:\s*\[.*?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
+                my $artist = $1;
+                $artist =~ s/\\"/"/g;
+                $artist =~ s/\\\\/\\/g;
+                $set_once->('artist', $artist);
+            }
+            elsif ($text =~ /"byArtist"\s*:\s*\{.*?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
+                my $artist = $1;
+                $artist =~ s/\\"/"/g;
+                $artist =~ s/\\\\/\\/g;
+                $set_once->('artist', $artist);
+            }
+        }
+
+        if (!defined $info{album}) {
+            if ($text =~ /"album"\s*:\s*\{.*?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
+                my $album = $1;
+                $album =~ s/\\"/"/g;
+                $album =~ s/\\\\/\\/g;
+                $set_once->('album', $album);
+            }
+        }
+
+        $self->{logger}->log(4, "_handle_spotify() parsed JSON-ish metadata from $context");
+    };
+
+    my $extract_from_html = sub {
+        my ($html, $context) = @_;
+        return unless defined $html && $html ne '';
+
+        my ($og_title, $twitter_title, $title_tag, $description);
+
+        while ($html =~ /<meta\b([^>]*?)>/sig) {
+            my $attrs = $1;
+
+            if ($attrs =~ /(?:property|name)=["']og:title["']/i && $attrs =~ /\bcontent=["']([^"']+)["']/i) {
+                $og_title = $1;
+            }
+            elsif ($attrs =~ /(?:property|name)=["']twitter:title["']/i && $attrs =~ /\bcontent=["']([^"']+)["']/i) {
+                $twitter_title = $1;
+            }
+            elsif ($attrs =~ /(?:property|name)=["'](?:og:description|description|twitter:description)["']/i
+                && $attrs =~ /\bcontent=["']([^"']+)["']/i) {
+                $description = $1;
+            }
+        }
+
+        if ($html =~ /<title[^>]*>(.*?)<\/title>/si) {
+            $title_tag = $1;
+        }
+
+        for my $candidate ($og_title, $twitter_title, $title_tag) {
+            my $v = $clean->($candidate);
+            next unless defined $v && $v ne '';
+
+            # Common Spotify formats:
+            #   Song - song and lyrics by Artist
+            #   Song - Artist
+            if (!defined $info{title} && $v =~ /^(.+?)\s+-\s+(.+)$/) {
+                $set_once->('title',  $1);
+                $set_once->('artist', $2) unless $2 =~ /Spotify/i;
+            }
+            else {
+                $set_once->('title', $v);
+            }
+
+            last if defined $info{title};
+        }
+
+        my $desc = $clean->($description);
+        if (defined $desc && $desc ne '') {
+            # Try to pull useful info from descriptions without being too clever.
+            if (!defined $info{artist} && $desc =~ /\bby\s+([^.,|]+)(?:[.,|]|$)/i) {
+                $set_once->('artist', $1);
+            }
+            if (!defined $info{album} && $desc =~ /\bfrom\s+(?:the\s+)?(?:album|single)\s+([^.,|]+)(?:[.,|]|$)/i) {
+                $set_once->('album', $1);
+            }
+        }
+
+        $extract_from_jsonish->($html, $context);
+    };
+
+    my $http = _make_http(
+        timeout  => 10,
+        max_size => 1536 * 1024,
+    );
+
+    # Step 1: Spotify oEmbed.
+    {
+        my $oembed_url = "https://open.spotify.com/oembed?url=" . uri_escape_utf8($clean_url);
+        my $res = eval { $http->get($oembed_url); } // { success => 0, status => 0, reason => $@ };
+
+        if ($res->{success}) {
+            my $json = _decode_http_content_utf8($self, $res->{content} // '', 'spotify-oembed');
+            my $data = eval { decode_json($json) };
+
+            if (ref($data) eq 'HASH') {
+                $set_once->('title',  $data->{title});
+                $set_once->('artist', $data->{author_name});
+                $self->{logger}->log(4, "_handle_spotify() parsed oEmbed metadata");
+            }
+        }
+        else {
+            $self->{logger}->log(4, "_handle_spotify() oEmbed HTTP $res->{status} $res->{reason} for $oembed_url");
+        }
+    }
+
+    # Step 2: Spotify embed page. Useful when the public page is only the shell.
+    if (!defined $info{title} || !defined $info{artist} || !defined $info{album} || !defined $info{duration}) {
+        my $embed_url = "https://open.spotify.com/embed/$spotify_type/$spotify_id";
+        my $res = eval { $http->get($embed_url); } // { success => 0, status => 0, reason => $@ };
+
+        if ($res->{success}) {
+            my $content = _decode_http_content_utf8($self, $res->{content} // '', 'spotify-embed');
+            $self->{logger}->log(4, "_handle_spotify() embed fetched " . length($content) . " bytes");
+            $extract_from_html->($content, 'embed');
+        }
+        else {
+            $self->{logger}->log(4, "_handle_spotify() embed HTTP $res->{status} $res->{reason} for $embed_url");
+        }
+    }
+
+    # Step 3: normal Spotify page.
+    if (!defined $info{title} || !defined $info{artist} || !defined $info{album} || !defined $info{duration}) {
+        my $res = eval { $http->get($clean_url); } // { success => 0, status => 0, reason => $@ };
+
+        if ($res->{success}) {
+            my $content = _decode_http_content_utf8($self, $res->{content} // '', 'spotify-http');
+            $self->{logger}->log(4, "_handle_spotify() HTTP fetched " . length($content) . " bytes");
+            $extract_from_html->($content, 'HTTP');
+        }
+        else {
+            $self->{logger}->log(3, "_handle_spotify() HTTP $res->{status} $res->{reason} for $clean_url");
+        }
+    }
+
+    # Step 4: Chromium fallback when we still lack useful details.
+    if (!defined $info{title} || !defined $info{artist} || !defined $info{album} || !defined $info{duration}) {
+        $self->{logger}->log(4, "_handle_spotify() falling back to Chromium rendered DOM for $clean_url");
+
+        my $dom = _fetch_url_chromium_dumpdom(
+            $self,
+            $clean_url,
+            virtual_time_budget => 10000,
+            alarm_timeout       => 28,
+            lang                => 'fr-FR',
+        );
+
+        if (defined $dom && $dom ne '') {
+            $self->{logger}->log(4, "_handle_spotify() Chromium DOM fetched " . length($dom) . " bytes");
+            $extract_from_html->($dom, 'Chromium');
+        }
+    }
+
+    unless (defined $info{title} && !$is_bad->($info{title})) {
+        $self->{logger}->log(3, "_handle_spotify() could not extract a usable Spotify title from $clean_url");
+        return undef;
+    }
+
+    my @parts;
+
+    push @parts, $info{title};
+
+    if (defined $info{artist} && !$is_bad->($info{artist}) && $info{artist} ne $info{title}) {
+        push @parts, "by $info{artist}";
+    }
+
+    if (defined $info{album} && !$is_bad->($info{album}) && $info{album} ne $info{title}) {
+        push @parts, "album $info{album}";
+    }
+
+    if (defined $info{duration} && $info{duration} ne '') {
+        push @parts, $info{duration};
+    }
+
+    my $display = join(' - ', @parts);
     $display =~ s/\s+/ /g;
     $display =~ s/^\s+|\s+$//g;
+    $display = substr($display, 0, 300);
 
-    my $msg = String::IRC->new("[")->white('black');
-    $msg   .= String::IRC->new("Spotify")->black('green');
-    $msg   .= String::IRC->new("]")->white('black') . "\x0f";
-    $msg   .= " $display";
+    $self->{logger}->log(4, "_handle_spotify() final display='$display'");
+
+    # Badge unchanged.
+    my $badge = String::IRC->new("[")->white('black');
+    $badge   .= String::IRC->new("Spotify")->black('green');
+    $badge   .= String::IRC->new("]")->white('black');
+
+    # Hard IRC reset after the badge: only the badge keeps its background.
+    my $msg = "$badge\x0f $display";
 
     botPrivmsg($self, $channel, "($nick) $msg");
     return 1;
