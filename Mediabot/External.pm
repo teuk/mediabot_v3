@@ -57,149 +57,129 @@ our @EXPORT = qw(
 );
 
 sub getYoutubeDetails {
-	my ($self,$sText) = @_;
-	my $conf = $self->{conf};
-	my $sYoutubeId;
-	$self->{logger}->log(3,"getYoutubeDetails() $sText");
-	if ( $sText =~ /http.*:\/\/www\.youtube\..*\/watch.*v=/i ) {
-		$sYoutubeId = $sText;
-		$sYoutubeId =~ s/^.*watch.*v=//;
-		$sYoutubeId = substr($sYoutubeId,0,11);
-	}
-	elsif ( $sText =~ /http.*:\/\/m\.youtube\..*\/watch.*v=/i ) {
-		$sYoutubeId = $sText;
-		$sYoutubeId =~ s/^.*watch.*v=//;
-		$sYoutubeId = substr($sYoutubeId,0,11);
-	}
-	elsif ( $sText =~ /http.*:\/\/music\.youtube\..*\/watch.*v=/i ) {
-		$sYoutubeId = $sText;
-		$sYoutubeId =~ s/^.*watch.*v=//;
-		$sYoutubeId = substr($sYoutubeId,0,11);
-	}
-	elsif ( $sText =~ /http.*:\/\/youtu\.be.*/i ) {
-		$sYoutubeId = $sText;
-		$sYoutubeId =~ s/^.*youtu\.be\///;
-		$sYoutubeId = substr($sYoutubeId,0,11);
-	}
-	if (defined($sYoutubeId) && ( $sYoutubeId ne "" )) {
-		$self->{logger}->log(4,"getYoutubeDetails() sYoutubeId = $sYoutubeId");
-		my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
-		unless (defined($APIKEY) && ($APIKEY ne "")) {
-			$self->{logger}->log(1,"getYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
-			$self->{logger}->log(1,"getYoutubeDetails() section [main]");
-			$self->{logger}->log(1,"getYoutubeDetails() YOUTUBE_APIKEY=key");
-			return undef;
-		}
-		my $yt_url = "https://www.googleapis.com/youtube/v3/videos"
-		           . "?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status";
-		my $http = _make_http(timeout => 10);
-		my $res  = eval { $http->get($yt_url); } // { success => 0, status => 0, reason => $@ };
-		unless ($res->{success}) {
-			$self->{logger}->log(3,"getYoutubeDetails() HTTP error $res->{status} for $yt_url");
-		}
-		else {
-			my $sTitle;
-			my $sDuration;
-			my $sDururationSeconds;
-			my $sViewCount;
-			my $json_details = $res->{content};
-			$self->{logger}->log(5,"getYoutubeDetails() raw: $json_details");
-			if (defined($json_details) && ($json_details ne "")) {
-				$self->{logger}->log(4,"getYoutubeDetails() json_details : $json_details");
-				my $sYoutubeInfo = eval { decode_json $json_details };
-				if ($@ || !defined $sYoutubeInfo) {
-					$self->{logger}->log(3, "getYoutubeDetails() JSON decode error: $@");
-					return undef;
-				}
-				my %hYoutubeInfo = %$sYoutubeInfo;
-				my @tYoutubeItems = $hYoutubeInfo{'items'};
-				my @fTyoutubeItems = @{$tYoutubeItems[0]};
-				$self->{logger}->log(4,"getYoutubeDetails() tYoutubeItems length : " . $#fTyoutubeItems);
-				# Check items
-				if ( $#fTyoutubeItems >= 0 ) {
-					my %hYoutubeItems = %{$tYoutubeItems[0][0]};
-					$self->{logger}->log(4,"getYoutubeDetails() title=" . ($hYoutubeItems{snippet}{localized}{title} // "?") . " duration=" . ($hYoutubeItems{contentDetails}{duration} // "?"));
-					$sViewCount = "views $hYoutubeItems{'statistics'}{'viewCount'}";
-					my $sTitleItem = $hYoutubeItems{'snippet'}{'localized'}{'title'};
-					$sTitle = $sTitleItem // "";
-					$sDuration = $hYoutubeItems{'contentDetails'}{'duration'};
-					$self->{logger}->log(4,"getYoutubeDetails() sDuration : $sDuration");
-					$sDuration =~ s/^PT//;
-					my $sDisplayDuration;
-					my $sHour = $sDuration;
-					if ( $sHour =~ /H/ ) {
-						$sHour =~ s/H.*$//;
-						$sDisplayDuration .= "$sHour" . "h ";
-						$sDururationSeconds = $sHour * 3600;
-					}
-					my $sMin = $sDuration;
-					if ( $sMin =~ /M/ ) {
-						$sMin =~ s/^.*H//;
-						$sMin =~ s/M.*$//;
-						$sDisplayDuration .= "$sMin" . "mn ";
-						$sDururationSeconds += $sMin * 60;
-					}
-					my $sSec = $sDuration;
-					if ( $sSec =~ /S/ ) {
-						$sSec =~ s/^.*H//;
-						$sSec =~ s/^.*M//;
-						$sSec =~ s/S$//;
-						$sDisplayDuration .= "$sSec" . "s";
-						$sDururationSeconds += $sSec;
-					}
-					$self->{logger}->log(4,"getYoutubeDetails() sYoutubeInfo statistics duration : $sDisplayDuration");
-					$self->{logger}->log(4,"getYoutubeDetails() sYoutubeInfo statistics viewCount : $sViewCount");
-					$self->{logger}->log(4,"getYoutubeDetails() sYoutubeInfo statistics title : $sTitle");
-					
-					if (defined($sTitle) && ( $sTitle ne "" ) && defined($sDuration) && ( $sDuration ne "" ) && defined($sViewCount) && ( $sViewCount ne "" )) {
-						my $sMsgSong = _yt_label();
-						$sMsgSong .= _yt_text(" $sTitle ");
-						$sMsgSong .= _yt_sep("- ");
-						$sMsgSong .= _yt_meta("$sDisplayDuration ");
-						$sMsgSong .= _yt_sep("- ");
-						$sMsgSong .= _yt_meta("$sViewCount");
-						$sMsgSong =~ s/\r//;
-						$sMsgSong =~ s/\n//;
-						return($sDururationSeconds,$sMsgSong);
-					}
-					else {
-						$self->{logger}->log(4,"getYoutubeDetails() one of the youtube field is undef or empty");
-						if (defined($sTitle)) {
-							$self->{logger}->log(4,"getYoutubeDetails() sTitle=$sTitle");
-						}
-						else {
-							$self->{logger}->log(4,"getYoutubeDetails() sTitle is undefined");
-						}
-						
-						if (defined($sDuration)) {
-							$self->{logger}->log(4,"getYoutubeDetails() sDuration=$sDuration");
-						}
-						else {
-							$self->{logger}->log(3,"getYoutubeDetails() sDuration is undefined");
-						}
-						if (defined($sViewCount)) {
-							$self->{logger}->log(4,"getYoutubeDetails() sViewCount=$sViewCount");
-						}
-						else {
-							$self->{logger}->log(4,"getYoutubeDetails() sViewCount is undefined");
-						}
-					}
-				}
-				else {
-					$self->{logger}->log(3,"getYoutubeDetails() Invalid id : $sYoutubeId");
-					my $sNoticeMsg = "getYoutubeDetails() Invalid id : $sYoutubeId";
-					noticeConsoleChan($self,$sNoticeMsg);
-				}
-			}
-			else {
-				$self->{logger}->log(3,"getYoutubeDetails() empty response for: $yt_url");
-			}
-		}
-	}
-	else {
-		$self->{logger}->log(3,"getYoutubeDetails() sYoutubeId could not be determined");
-	}
-	return undef;
+    my ($self, $sText) = @_;
+
+    my $conf = $self->{conf};
+    my $sYoutubeId;
+
+    $self->{logger}->log(3, "getYoutubeDetails() $sText");
+
+    if ($sText =~ m{https?://(?:www\.|m\.|music\.)?youtube\.[^/]+/watch[^\s]*[?&]v=([A-Za-z0-9_-]{11})}i) {
+        $sYoutubeId = $1;
+    }
+    elsif ($sText =~ m{https?://(?:www\.|m\.)?youtube\.[^/]+/shorts/([A-Za-z0-9_-]{11})}i) {
+        $sYoutubeId = $1;
+    }
+    elsif ($sText =~ m{https?://(?:www\.|m\.)?youtube\.[^/]+/live/([A-Za-z0-9_-]{11})}i) {
+        $sYoutubeId = $1;
+    }
+    elsif ($sText =~ m{https?://(?:www\.)?youtube(?:-nocookie)?\.com/embed/([A-Za-z0-9_-]{11})}i) {
+        $sYoutubeId = $1;
+    }
+    elsif ($sText =~ m{https?://youtu\.be/([A-Za-z0-9_-]{11})}i) {
+        $sYoutubeId = $1;
+    }
+
+    unless (defined $sYoutubeId && $sYoutubeId ne '') {
+        $self->{logger}->log(3, "getYoutubeDetails() sYoutubeId could not be determined");
+        return undef;
+    }
+
+    $self->{logger}->log(4, "getYoutubeDetails() sYoutubeId = $sYoutubeId");
+
+    my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
+    unless (defined $APIKEY && $APIKEY ne '') {
+        $self->{logger}->log(1, "getYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
+        $self->{logger}->log(1, "getYoutubeDetails() section [main]");
+        $self->{logger}->log(1, "getYoutubeDetails() YOUTUBE_APIKEY=key");
+        return undef;
+    }
+
+    my $yt_url = "https://www.googleapis.com/youtube/v3/videos"
+               . "?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status";
+
+    my $http = _make_http(timeout => 10);
+    my $res  = eval { $http->get($yt_url); } // { success => 0, status => 0, reason => $@ };
+
+    unless ($res->{success}) {
+        $self->{logger}->log(3, "getYoutubeDetails() HTTP error $res->{status} for $yt_url");
+        return undef;
+    }
+
+    my $json_details = $res->{content};
+    unless (defined $json_details && $json_details ne '') {
+        $self->{logger}->log(3, "getYoutubeDetails() empty response for: $yt_url");
+        return undef;
+    }
+
+    $self->{logger}->log(5, "getYoutubeDetails() raw: $json_details");
+    $self->{logger}->log(5, "getYoutubeDetails() json_details : $json_details");
+
+    my $sYoutubeInfo = eval { decode_json($json_details) };
+    if ($@ || !ref($sYoutubeInfo)) {
+        $self->{logger}->log(3, "getYoutubeDetails() JSON decode error: $@");
+        return undef;
+    }
+
+    my @items = ref($sYoutubeInfo->{items}) eq 'ARRAY'
+        ? @{ $sYoutubeInfo->{items} }
+        : ();
+
+    $self->{logger}->log(4, "getYoutubeDetails() items length : " . scalar(@items));
+
+    unless (@items && ref($items[0]) eq 'HASH') {
+        $self->{logger}->log(3, "getYoutubeDetails() Invalid id or no usable item: $sYoutubeId");
+        noticeConsoleChan($self, "getYoutubeDetails() Invalid id : $sYoutubeId");
+        return undef;
+    }
+
+    my $item           = $items[0];
+    my $statistics     = ref($item->{statistics})     eq 'HASH' ? $item->{statistics}     : {};
+    my $snippet        = ref($item->{snippet})        eq 'HASH' ? $item->{snippet}        : {};
+    my $localized      = ref($snippet->{localized})   eq 'HASH' ? $snippet->{localized}   : {};
+    my $contentDetails = ref($item->{contentDetails}) eq 'HASH' ? $item->{contentDetails} : {};
+
+    my $sTitle     = $localized->{title} // $snippet->{title} // '';
+    my $sDuration  = $contentDetails->{duration} // '';
+    my $view_count = $statistics->{viewCount};
+
+    my $sViewCount = defined($view_count) && $view_count ne ''
+        ? "views $view_count"
+        : "views ?";
+
+    $self->{logger}->log(4, "getYoutubeDetails() title=" . ($sTitle || "?") . " duration=" . ($sDuration || "?"));
+    $self->{logger}->log(4, "getYoutubeDetails() sDuration : $sDuration");
+    $self->{logger}->log(4, "getYoutubeDetails() sViewCount : $sViewCount");
+    $self->{logger}->log(4, "getYoutubeDetails() sTitle : $sTitle");
+
+    unless ($sTitle ne '' && $sDuration ne '') {
+        $self->{logger}->log(4, "getYoutubeDetails() one of the youtube fields is undef or empty");
+        return undef;
+    }
+
+    my $sDisplayDuration = _yt_format_duration($sDuration);
+    my $duration_seconds = _yt_duration_seconds($sDuration);
+
+    unless ($sDisplayDuration ne '') {
+        $self->{logger}->log(4, "getYoutubeDetails() duration could not be formatted: $sDuration");
+        return undef;
+    }
+
+    if (($sTitle =~ tr/A-Z//) > 20) {
+        $sTitle = ucfirst(lc($sTitle));
+    }
+
+    my $sMsgSong = _yt_label();
+    $sMsgSong .= _yt_text(" $sTitle ");
+    $sMsgSong .= _yt_sep("- ");
+    $sMsgSong .= _yt_meta("$sDisplayDuration ");
+    $sMsgSong .= _yt_sep("- ");
+    $sMsgSong .= _yt_meta("$sViewCount");
+
+    $sMsgSong =~ s/\r//g;
+    $sMsgSong =~ s/\n//g;
+
+    return ($duration_seconds, $sMsgSong);
 }
 
 # Display Youtube details
@@ -324,7 +304,7 @@ sub displayYoutubeDetails {
         return undef;
     }
 
-    $self->{logger}->log(4, "displayYoutubeDetails() json_details : $json_details");
+    $self->{logger}->log(5, "displayYoutubeDetails() json_details : $json_details");
 
     my $sYoutubeInfo = eval { decode_json($json_details) };
     if ($@ || !ref($sYoutubeInfo)) {
@@ -562,6 +542,52 @@ sub _yt_meta {
     return _irc_color($_[0], 14);     # grey foreground, transparent background
 }
 
+sub _yt_format_duration {
+    my ($iso) = @_;
+
+    return '' unless defined $iso && $iso ne '';
+
+    my $raw = $iso;
+    $raw =~ s/^PT//i;
+
+    my ($h)   = $raw =~ /(\d+)H/i;
+    my ($m)   = $raw =~ /(\d+)M/i;
+    my ($sec) = $raw =~ /(\d+)S/i;
+
+    $h   ||= 0;
+    $m   ||= 0;
+    $sec ||= 0;
+
+    return '' if !$h && !$m && !$sec;
+
+    my $out = '';
+    $out .= "${h}h "   if $h;
+    $out .= "${m}mn "  if $m;
+    $out .= "${sec}s"  if $sec;
+    $out =~ s/\s+$//;
+
+    return $out;
+}
+
+sub _yt_duration_seconds {
+    my ($iso) = @_;
+
+    return 0 unless defined $iso && $iso ne '';
+
+    my $raw = $iso;
+    $raw =~ s/^PT//i;
+
+    my ($h) = $raw =~ /(\d+)H/i;
+    my ($m) = $raw =~ /(\d+)M/i;
+    my ($sec) = $raw =~ /(\d+)S/i;
+
+    $h   ||= 0;
+    $m   ||= 0;
+    $sec ||= 0;
+
+    return ($h * 3600) + ($m * 60) + $sec;
+}
+
 sub _yt_label {
     # YouTube badge:
     #   [You  => black foreground on white background
@@ -596,9 +622,24 @@ sub _make_http {
 sub _extract_url {
     my ($text) = @_;
     return undef unless defined $text;
-    $text =~ s/^.*?(https?:\/\/)/$1/i;
-    $text =~ s/\s+.*$//;
-    return $text;
+
+    # Keep the first HTTP(S) URL found in the message.
+    # Then strip common punctuation that users often type just after a link.
+    return undef unless $text =~ m{(https?://\S+)}i;
+
+    my $url = $1;
+
+    # Remove terminal punctuation that is almost never part of the URL in IRC
+    # messages. This fixes cases like:
+    #   https://example.org/foo).
+    #   https://example.org/foo,
+    #   https://example.org/foo]
+    $url =~ s/[)\].,!?;:]+$//;
+
+    # If the URL is wrapped in a single trailing quote, remove it.
+    $url =~ s/["']+$//;
+
+    return $url;
 }
 
 # ---------------------------------------------------------------------------
@@ -983,10 +1024,11 @@ sub _handle_instagram {
 
     $self->{logger}->log(4, "_handle_instagram() final title='$title'");
 
-    my $msg = String::IRC->new("[")->white('black');
-    $msg   .= String::IRC->new("Instagram")->white('pink');
-    $msg   .= String::IRC->new("]")->white('black') . "\x0f";
-    $msg   .= " " . substr($title, 0, 300);
+    my $badge = String::IRC->new("[")->white('black');
+    $badge   .= String::IRC->new("Instagram")->white('pink');
+    $badge   .= String::IRC->new("]")->white('black');
+
+    my $msg = "$badge\x0f " . substr($title, 0, 300);
 
     botPrivmsg($self, $channel, "($nick) $msg");
     return 1;
@@ -1069,106 +1111,37 @@ sub _handle_spotify {
         $self->{logger}->log(4, "_handle_spotify() set $key='$v'");
     };
 
-    my $format_iso_duration = sub {
+    my $duration_from_ms = sub {
+        my ($ms) = @_;
+        return undef unless defined $ms && $ms =~ /^\d+$/;
+
+        my $total = int($ms / 1000);
+        return undef if $total <= 0;
+
+        my $h = int($total / 3600);
+        my $m = int(($total % 3600) / 60);
+        my $s = $total % 60;
+
+        return sprintf("%dh%02dm%02ds", $h, $m, $s) if $h;
+        return sprintf("%dm %02ds", $m, $s);
+    };
+
+    my $duration_from_iso = sub {
         my ($d) = @_;
         return undef unless defined $d;
 
-        # Spotify/JSON-LD may expose ISO 8601 durations like PT3M34S.
         if ($d =~ /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i) {
             my ($h, $m, $s) = ($1 // 0, $2 // 0, $3 // 0);
             return undef if !$h && !$m && !$s;
 
-            if ($h) {
-                return sprintf("%dh%02dm%02ds", $h, $m, $s);
-            }
-
+            return sprintf("%dh%02dm%02ds", $h, $m, $s) if $h;
             return sprintf("%dm %02ds", $m, $s);
         }
 
         return undef;
     };
 
-    my $extract_from_jsonish = sub {
-        my ($text, $context) = @_;
-        return unless defined $text && $text ne '';
-
-        # JSON-LD MusicRecording / MusicAlbum when available.
-        while ($text =~ m{<script[^>]+type=["']application/ld\+json["'][^>]*>(.*?)</script>}sig) {
-            my $json = $1;
-            $json = _decode_html($json);
-
-            my $data = eval { decode_json($json) };
-            next unless defined $data;
-
-            my @items = ref($data) eq 'ARRAY' ? @$data : ($data);
-
-            for my $item (@items) {
-                next unless ref($item) eq 'HASH';
-
-                $set_once->('title',  $item->{name});
-
-                if (ref($item->{byArtist}) eq 'HASH') {
-                    $set_once->('artist', $item->{byArtist}->{name});
-                }
-                elsif (ref($item->{byArtist}) eq 'ARRAY') {
-                    my @artists = grep { defined $_ && $_ ne '' }
-                                  map { ref($_) eq 'HASH' ? $_->{name} : $_ }
-                                  @{ $item->{byArtist} };
-                    $set_once->('artist', join(', ', @artists)) if @artists;
-                }
-
-                if (ref($item->{inAlbum}) eq 'HASH') {
-                    $set_once->('album', $item->{inAlbum}->{name});
-                }
-
-                if (defined $item->{duration}) {
-                    my $dur = $format_iso_duration->($item->{duration});
-                    $info{duration} = $dur if defined $dur && !defined $info{duration};
-                }
-
-                if (defined $item->{datePublished}) {
-                    $set_once->('released', $item->{datePublished});
-                }
-            }
-        }
-
-        # Generic Spotify JSON fragments. These are intentionally conservative:
-        # they only fill missing fields and avoid replacing better oEmbed/JSON-LD data.
-        if (!defined $info{title} && $text =~ /"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
-            my $name = $1;
-            $name =~ s/\\"/"/g;
-            $name =~ s/\\\\/\\/g;
-            $set_once->('title', $name);
-        }
-
-        if (!defined $info{artist}) {
-            if ($text =~ /"artists"\s*:\s*\[.*?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
-                my $artist = $1;
-                $artist =~ s/\\"/"/g;
-                $artist =~ s/\\\\/\\/g;
-                $set_once->('artist', $artist);
-            }
-            elsif ($text =~ /"byArtist"\s*:\s*\{.*?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
-                my $artist = $1;
-                $artist =~ s/\\"/"/g;
-                $artist =~ s/\\\\/\\/g;
-                $set_once->('artist', $artist);
-            }
-        }
-
-        if (!defined $info{album}) {
-            if ($text =~ /"album"\s*:\s*\{.*?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
-                my $album = $1;
-                $album =~ s/\\"/"/g;
-                $album =~ s/\\\\/\\/g;
-                $set_once->('album', $album);
-            }
-        }
-
-        $self->{logger}->log(4, "_handle_spotify() parsed JSON-ish metadata from $context");
-    };
-
-    my $extract_from_html = sub {
+    my $extract_meta = sub {
         my ($html, $context) = @_;
         return unless defined $html && $html ne '';
 
@@ -1197,9 +1170,6 @@ sub _handle_spotify {
             my $v = $clean->($candidate);
             next unless defined $v && $v ne '';
 
-            # Common Spotify formats:
-            #   Song - song and lyrics by Artist
-            #   Song - Artist
             if (!defined $info{title} && $v =~ /^(.+?)\s+-\s+(.+)$/) {
                 $set_once->('title',  $1);
                 $set_once->('artist', $2) unless $2 =~ /Spotify/i;
@@ -1213,21 +1183,128 @@ sub _handle_spotify {
 
         my $desc = $clean->($description);
         if (defined $desc && $desc ne '') {
-            # Try to pull useful info from descriptions without being too clever.
-            if (!defined $info{artist} && $desc =~ /\bby\s+([^.,|]+)(?:[.,|]|$)/i) {
+            # Typical Spotify description examples:
+            #   Song · Artist · 2024
+            #   Album · Artist · 2024
+            #   Playlist · User · 50 songs
+            if ($desc =~ /\b(?:Song|Single|Album|EP|Playlist|Episode|Show)\s*[·-]\s*([^·|.-]+)\s*[·-]\s*(\d{4})/i) {
+                $set_once->('artist', $1);
+                $set_once->('year',   $2);
+            }
+            elsif ($desc =~ /\b(?:Song|Single|Album|EP)\s*[·-]\s*([^·|.-]+)/i) {
                 $set_once->('artist', $1);
             }
-            if (!defined $info{album} && $desc =~ /\bfrom\s+(?:the\s+)?(?:album|single)\s+([^.,|]+)(?:[.,|]|$)/i) {
+
+            if ($desc =~ /\bfrom\s+(?:the\s+)?(?:album|single)\s+([^.,|]+)(?:[.,|]|$)/i) {
                 $set_once->('album', $1);
             }
         }
 
-        $extract_from_jsonish->($html, $context);
+        $self->{logger}->log(4, "_handle_spotify() parsed meta from $context");
+    };
+
+    my $extract_jsonish = sub {
+        my ($text, $context) = @_;
+        return unless defined $text && $text ne '';
+
+        # JSON-LD first: cleanest metadata when Spotify exposes it.
+        while ($text =~ m{<script[^>]+type=["']application/ld\+json["'][^>]*>(.*?)</script>}sig) {
+            my $json = _decode_html($1);
+            my $data = eval { decode_json($json) };
+            next unless defined $data;
+
+            my @items = ref($data) eq 'ARRAY' ? @$data : ($data);
+
+            for my $item (@items) {
+                next unless ref($item) eq 'HASH';
+
+                $set_once->('title', $item->{name});
+
+                if (ref($item->{byArtist}) eq 'HASH') {
+                    $set_once->('artist', $item->{byArtist}->{name});
+                }
+                elsif (ref($item->{byArtist}) eq 'ARRAY') {
+                    my @artists = grep { defined $_ && $_ ne '' }
+                                  map { ref($_) eq 'HASH' ? $_->{name} : $_ }
+                                  @{ $item->{byArtist} };
+                    $set_once->('artist', join(', ', @artists)) if @artists;
+                }
+
+                if (ref($item->{inAlbum}) eq 'HASH') {
+                    $set_once->('album', $item->{inAlbum}->{name});
+                }
+
+                if (defined $item->{duration} && !defined $info{duration}) {
+                    my $d = $duration_from_iso->($item->{duration});
+                    $info{duration} = $d if defined $d;
+                }
+
+                $set_once->('year', $1) if defined($item->{datePublished}) && $item->{datePublished} =~ /^(\d{4})/;
+            }
+        }
+
+        # Conservative regex extraction from embedded Spotify data.
+        # Avoid using the first random "name" field as title: it can be junk.
+        if (!defined $info{title}) {
+            if ($text =~ /"track"\s*:\s*\{.{0,3000}?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
+                my $v = $1;
+                $v =~ s/\\"/"/g;
+                $v =~ s/\\\\/\\/g;
+                $set_once->('title', $v);
+            }
+            elsif ($text =~ /"type"\s*:\s*"track".{0,3000}?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
+                my $v = $1;
+                $v =~ s/\\"/"/g;
+                $v =~ s/\\\\/\\/g;
+                $set_once->('title', $v);
+            }
+        }
+
+        if (!defined $info{artist}) {
+            if ($text =~ /"artists"\s*:\s*\[(.{0,2000}?)\]/s) {
+                my $artists_blob = $1;
+                my @artists;
+
+                while ($artists_blob =~ /"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g) {
+                    my $v = $1;
+                    $v =~ s/\\"/"/g;
+                    $v =~ s/\\\\/\\/g;
+                    my $c = $clean->($v);
+                    push @artists, $c if defined $c && $c ne '';
+                }
+
+                $set_once->('artist', join(', ', @artists)) if @artists;
+            }
+        }
+
+        if (!defined $info{album}) {
+            if ($text =~ /"album"\s*:\s*\{.{0,2000}?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
+                my $v = $1;
+                $v =~ s/\\"/"/g;
+                $v =~ s/\\\\/\\/g;
+                $set_once->('album', $v);
+            }
+        }
+
+        if (!defined $info{year}) {
+            if ($text =~ /"release_date"\s*:\s*"(\d{4})/) {
+                $set_once->('year', $1);
+            }
+        }
+
+        if (!defined $info{duration}) {
+            if ($text =~ /"duration_ms"\s*:\s*(\d+)/) {
+                my $d = $duration_from_ms->($1);
+                $info{duration} = $d if defined $d;
+            }
+        }
+
+        $self->{logger}->log(4, "_handle_spotify() parsed JSON-ish metadata from $context");
     };
 
     my $http = _make_http(
         timeout  => 10,
-        max_size => 1536 * 1024,
+        max_size => 2 * 1024 * 1024,
     );
 
     # Step 1: Spotify oEmbed.
@@ -1242,6 +1319,7 @@ sub _handle_spotify {
             if (ref($data) eq 'HASH') {
                 $set_once->('title',  $data->{title});
                 $set_once->('artist', $data->{author_name});
+                $extract_jsonish->($json, 'oEmbed-json');
                 $self->{logger}->log(4, "_handle_spotify() parsed oEmbed metadata");
             }
         }
@@ -1250,15 +1328,16 @@ sub _handle_spotify {
         }
     }
 
-    # Step 2: Spotify embed page. Useful when the public page is only the shell.
-    if (!defined $info{title} || !defined $info{artist} || !defined $info{album} || !defined $info{duration}) {
+    # Step 2: Spotify embed page.
+    if (!defined $info{title} || !defined $info{artist} || !defined $info{album} || !defined $info{duration} || !defined $info{year}) {
         my $embed_url = "https://open.spotify.com/embed/$spotify_type/$spotify_id";
         my $res = eval { $http->get($embed_url); } // { success => 0, status => 0, reason => $@ };
 
         if ($res->{success}) {
             my $content = _decode_http_content_utf8($self, $res->{content} // '', 'spotify-embed');
             $self->{logger}->log(4, "_handle_spotify() embed fetched " . length($content) . " bytes");
-            $extract_from_html->($content, 'embed');
+            $extract_meta->($content, 'embed');
+            $extract_jsonish->($content, 'embed');
         }
         else {
             $self->{logger}->log(4, "_handle_spotify() embed HTTP $res->{status} $res->{reason} for $embed_url");
@@ -1266,21 +1345,22 @@ sub _handle_spotify {
     }
 
     # Step 3: normal Spotify page.
-    if (!defined $info{title} || !defined $info{artist} || !defined $info{album} || !defined $info{duration}) {
+    if (!defined $info{title} || !defined $info{artist} || !defined $info{album} || !defined $info{duration} || !defined $info{year}) {
         my $res = eval { $http->get($clean_url); } // { success => 0, status => 0, reason => $@ };
 
         if ($res->{success}) {
             my $content = _decode_http_content_utf8($self, $res->{content} // '', 'spotify-http');
             $self->{logger}->log(4, "_handle_spotify() HTTP fetched " . length($content) . " bytes");
-            $extract_from_html->($content, 'HTTP');
+            $extract_meta->($content, 'HTTP');
+            $extract_jsonish->($content, 'HTTP');
         }
         else {
             $self->{logger}->log(3, "_handle_spotify() HTTP $res->{status} $res->{reason} for $clean_url");
         }
     }
 
-    # Step 4: Chromium fallback when we still lack useful details.
-    if (!defined $info{title} || !defined $info{artist} || !defined $info{album} || !defined $info{duration}) {
+    # Step 4: Chromium fallback.
+    if (!defined $info{title} || !defined $info{artist} || !defined $info{album} || !defined $info{duration} || !defined $info{year}) {
         $self->{logger}->log(4, "_handle_spotify() falling back to Chromium rendered DOM for $clean_url");
 
         my $dom = _fetch_url_chromium_dumpdom(
@@ -1293,7 +1373,8 @@ sub _handle_spotify {
 
         if (defined $dom && $dom ne '') {
             $self->{logger}->log(4, "_handle_spotify() Chromium DOM fetched " . length($dom) . " bytes");
-            $extract_from_html->($dom, 'Chromium');
+            $extract_meta->($dom, 'Chromium');
+            $extract_jsonish->($dom, 'Chromium');
         }
     }
 
@@ -1303,7 +1384,6 @@ sub _handle_spotify {
     }
 
     my @parts;
-
     push @parts, $info{title};
 
     if (defined $info{artist} && !$is_bad->($info{artist}) && $info{artist} ne $info{title}) {
@@ -1312,6 +1392,10 @@ sub _handle_spotify {
 
     if (defined $info{album} && !$is_bad->($info{album}) && $info{album} ne $info{title}) {
         push @parts, "album $info{album}";
+    }
+
+    if (defined $info{year} && $info{year} =~ /^\d{4}$/) {
+        push @parts, $info{year};
     }
 
     if (defined $info{duration} && $info{duration} ne '') {
@@ -1507,10 +1591,11 @@ sub _handle_applemusic {
     $title =~ s/\s+/ /g;
     $title =~ s/^\s+|\s+$//g;
 
-    my $msg = String::IRC->new("[")->white('black');
-    $msg   .= String::IRC->new("AppleMusic")->white('grey');
-    $msg   .= String::IRC->new("]")->white('black') . "\x0f";
-    $msg   .= " $title";
+    my $badge = String::IRC->new("[")->white('black');
+    $badge   .= String::IRC->new("AppleMusic")->white('grey');
+    $badge   .= String::IRC->new("]")->white('black');
+
+    my $msg = "$badge\x0f $title";
 
     botPrivmsg($self, $channel, "($nick) $msg");
     return 1;
@@ -1723,10 +1808,11 @@ sub _handle_facebook {
         return undef;
     }
 
-    my $msg = String::IRC->new("[")->white('black');
-    $msg   .= String::IRC->new("Facebook")->white('blue');
-    $msg   .= String::IRC->new("]")->white('black') . "\x0f";
-    $msg   .= " " . substr($title, 0, 300);
+    my $badge = String::IRC->new("[")->white('black');
+    $badge   .= String::IRC->new("Facebook")->white('blue');
+    $badge   .= String::IRC->new("]")->white('black');
+
+    my $msg = "$badge\x0f " . substr($title, 0, 300);
 
     botPrivmsg($self, $channel, "($nick) $msg");
     return 1;
@@ -1915,13 +2001,52 @@ sub _handle_x_twitter {
         return undef;
     }
 
-    my $msg = String::IRC->new("[")->white('black');
-    $msg   .= String::IRC->new("X")->white('black');
-    $msg   .= String::IRC->new("]")->white('black') . "\x0f";
-    $msg   .= " " . substr($title, 0, 300);
+    my $badge = String::IRC->new("[")->white('black');
+    $badge   .= String::IRC->new("X")->white('black');
+    $badge   .= String::IRC->new("]")->white('black');
+
+    my $msg = "$badge\x0f " . substr($title, 0, 300);
 
     botPrivmsg($self, $channel, "($nick) $msg");
     return 1;
+}
+
+# ---------------------------------------------------------------------------
+# _clean_generic_url_title($title)
+# Normalize and reject useless generic browser/security/error titles.
+# ---------------------------------------------------------------------------
+sub _clean_generic_url_title {
+    my ($title) = @_;
+
+    return undef unless defined $title;
+
+    $title = _decode_html($title);
+    $title =~ s/[\r\n\t]/ /g;
+    $title =~ s/\s{2,}/ /g;
+    $title =~ s/^\s+|\s+$//g;
+
+    return undef if $title eq '';
+
+    # Browser / anti-bot / CDN / error shells. They are technically titles,
+    # but they are useless in an IRC UrlTitle response.
+    return undef if $title =~ /^\s*Just a moment\.{0,3}\s*$/i;
+    return undef if $title =~ /^\s*Attention Required!\s*\|\s*Cloudflare\s*$/i;
+    return undef if $title =~ /^\s*Access Denied\s*$/i;
+    return undef if $title =~ /^\s*403 Forbidden\s*$/i;
+    return undef if $title =~ /^\s*404 Not Found\s*$/i;
+    return undef if $title =~ /^\s*Page Not Found\s*$/i;
+    return undef if $title =~ /^\s*Not Found\s*$/i;
+    return undef if $title =~ /^\s*Error\s*$/i;
+    return undef if $title =~ /please enable javascript/i;
+    return undef if $title =~ /javascript is not available/i;
+    return undef if $title =~ /checking your browser/i;
+    return undef if $title =~ /one moment, please/i;
+    return undef if $title =~ /robot check/i;
+    return undef if $title =~ /verify you are human/i;
+
+    $title = substr($title, 0, 300);
+
+    return $title;
 }
 
 # ---------------------------------------------------------------------------
@@ -1931,34 +2056,69 @@ sub _handle_x_twitter {
 sub _handle_generic_title {
     my ($self, $message, $nick, $channel, $url) = @_;
 
-    my $http = _make_http();
+    my $http = _make_http(
+        timeout  => 8,
+        max_size => 768 * 1024,
+    );
+
     my $res  = eval { $http->get($url); } // { success => 0, status => 0, reason => $@ };
     unless ($res->{success}) {
         $self->{logger}->log(3, "_handle_generic_title() HTTP $res->{status} $res->{reason} for $url");
         return undef;
     }
 
-    my $content = _decode_http_content_utf8($self, $res->{content} // '', 'generic');
-    my $title;
-
-    if ($content =~ /<title[^>]*>(.*?)<\/title>/si) {
-        $title = $1;
+    my $content_type = '';
+    if (ref($res->{headers}) eq 'HASH') {
+        $content_type = $res->{headers}->{'content-type'} // $res->{headers}->{'Content-Type'} // '';
     }
 
-    unless (defined $title && $title ne '') {
-        $self->{logger}->log(4, "_handle_generic_title() no <title> found for $url");
+    if ($content_type ne ''
+        && $content_type !~ m{text/html|application/xhtml\+xml|application/xml|text/xml}i
+    ) {
+        $self->{logger}->log(4, "_handle_generic_title() skipped non-HTML content-type '$content_type' for $url");
         return undef;
     }
 
-    $title = _decode_html($title);
-    $title =~ s/[\r\n\t]/ /g;
-    $title =~ s/\s{2,}/ /g;
-    $title =~ s/^\s+|\s+$//g;
-    return undef if $title eq '';
-    return undef if $title =~ /The page is temporarily unavailable/i;
+    my $content = _decode_http_content_utf8($self, $res->{content} // '', 'generic');
+    my @candidates;
 
-    my $msg = String::IRC->new("URL Title from $nick:")->grey('black') . "\x0f";
-    botPrivmsg($self, $channel, "$msg $title");
+    # Prefer explicit social metadata when available.
+    while ($content =~ /<meta\b([^>]*?)>/sig) {
+        my $attrs = $1;
+
+        next unless $attrs =~ /(?:property|name)=["'](?:og:title|twitter:title)["']/i;
+
+        if ($attrs =~ /\bcontent=["']([^"']+)["']/i) {
+            push @candidates, $1;
+        }
+    }
+
+    if ($content =~ /<title[^>]*>(.*?)<\/title>/si) {
+        push @candidates, $1;
+    }
+
+    unless (@candidates) {
+        $self->{logger}->log(4, "_handle_generic_title() no title candidate found for $url");
+        return undef;
+    }
+
+    my $title;
+    for my $candidate (@candidates) {
+        my $clean = _clean_generic_url_title($candidate);
+        next unless defined $clean && $clean ne '';
+
+        $title = $clean;
+        last;
+    }
+
+    unless (defined $title && $title ne '') {
+        $self->{logger}->log(4, "_handle_generic_title() only useless/generic title candidates found for $url");
+        return undef;
+    }
+
+    # Keep historical label style, but hard-reset before the displayed title.
+    my $label = String::IRC->new("URL Title from $nick:")->grey('black');
+    botPrivmsg($self, $channel, "$label\x0f $title");
     return 1;
 }
 
@@ -2089,15 +2249,28 @@ sub youtubeSearch_ctx {
     my $json_search = '';
     {
         my $http_s = _make_http(timeout => 10);
-        my $res_s  = $http_s->get($search_url);
+        my $res_s  = eval { $http_s->get($search_url); }
+                  // { success => 0, status => 0, reason => $@ };
 
         unless ($res_s->{success}) {
-            $self->{logger}->log(2, "youtubeSearch_ctx(): HTTP $res_s->{status} for search endpoint");
+            $self->{logger}->log(
+                2,
+                "youtubeSearch_ctx(): HTTP "
+                . ($res_s->{status} // 0)
+                . " "
+                . ($res_s->{reason} // '')
+                . " for search endpoint"
+            );
             botPrivmsg($self, $chan, "($nick) YouTube: service unavailable (search).");
             return;
         }
 
         $json_search = $res_s->{content} // '';
+        unless ($json_search ne '') {
+            $self->{logger}->log(2, "youtubeSearch_ctx(): empty search response");
+            botPrivmsg($self, $chan, "($nick) YouTube: service unavailable (search).");
+            return;
+        }
     }
 
     my @video_ids;
@@ -2142,15 +2315,28 @@ sub youtubeSearch_ctx {
     my $json_vid = '';
     {
         my $http_v = _make_http(timeout => 10);
-        my $res_v  = $http_v->get($videos_url);
+        my $res_v  = eval { $http_v->get($videos_url); }
+                  // { success => 0, status => 0, reason => $@ };
 
         unless ($res_v->{success}) {
-            $self->{logger}->log(2, "youtubeSearch_ctx(): HTTP $res_v->{status} for videos endpoint");
+            $self->{logger}->log(
+                2,
+                "youtubeSearch_ctx(): HTTP "
+                . ($res_v->{status} // 0)
+                . " "
+                . ($res_v->{reason} // '')
+                . " for videos endpoint"
+            );
             botPrivmsg($self, $chan, "($nick) https://www.youtube.com/watch?v=$video_ids[0]");
             return;
         }
 
         $json_vid = $res_v->{content} // '';
+        unless ($json_vid ne '') {
+            $self->{logger}->log(2, "youtubeSearch_ctx(): empty videos response");
+            botPrivmsg($self, $chan, "($nick) https://www.youtube.com/watch?v=$video_ids[0]");
+            return;
+        }
     }
 
     my %video_by_id;
@@ -2247,7 +2433,8 @@ sub youtubeSearch_ctx {
 }
 
 
-# Duration: ISO8601 "PT#H#M#S" -> "1h 02m 03s" / "3m 12s" / "45s"
+# Return the Fortnite account id stored for a Mediabot user nickname.
+# This is used by fortniteStats_ctx() before calling fortnite-api.com.
 sub getFortniteId {
     my ($self, $sUser) = @_;
 
@@ -2566,7 +2753,7 @@ sub chatGPT {
     # payload preparation
     # --------------------------------------------------------------
     my $prompt = join ' ', @args;
-    $self->{logger}->log(4,"chatGPT() chatGPT prompt: $prompt");
+    $self->{logger}->log(5,"chatGPT() chatGPT prompt: $prompt");
 
     my $build_payload = sub {
         my ($model) = @_;
@@ -2592,17 +2779,19 @@ sub chatGPT {
     my $send_request = sub {
         my ($model) = @_;
 
-        return $http->request(
-            'POST',
-            $chatgpt_api_url,
-            {
-                headers => {
-                    'Content-Type'  => 'application/json',
-                    'Authorization' => "Bearer $api_key",
-                },
-                content => $build_payload->($model),
-            }
-        );
+        return eval {
+            $http->request(
+                'POST',
+                $chatgpt_api_url,
+                {
+                    headers => {
+                        'Content-Type'  => 'application/json',
+                        'Authorization' => "Bearer $api_key",
+                    },
+                    content => $build_payload->($model),
+                }
+            );
+        } // { success => 0, status => 0, reason => $@ };
     };
 
     my $request_model  = $chatgpt_model;
@@ -2674,13 +2863,13 @@ sub chatGPT {
 
 	if ($@ || !defined($answer) || $answer eq '') {
 		$self->{logger}->log( 0, 'chatGPT() chatGPT invalid JSON response');
-		$self->{logger}->log( 3, "chatGPT() Raw API response: $response");
+		$self->{logger}->log( 5, "chatGPT() Raw API response: $response");
 		$self->{logger}->log( 3, "chatGPT() JSON decode error: $@") if $@;
 		$self->{logger}->log( 3, "chatGPT() Missing expected content in response structure") unless $@;
 		botPrivmsg($self, $chan, "($nick) Could not read API response.");
 		return;
 	}
-    $self->{logger}->log(4,"chatGPT() chatGPT raw answer: $answer");
+    $self->{logger}->log(5,"chatGPT() chatGPT raw answer: $answer");
 
     # -------- minimise PRIVMSG --------------------------------------
     $answer =~ s/[\r\n]+/ /g;    # strip CR/LF
@@ -2826,7 +3015,7 @@ sub mbTMDBSearch_ctx {
     my $lang  = getTMDBLangChannel($self, $channel) || 'en';
     $self->{logger}->log(4, "mbTMDBSearch_ctx() tmdb_lang for $channel is $lang");
 
-    my $info = get_tmdb_info($api_key, $lang, $query);
+    my $info = get_tmdb_info($api_key, $lang, $query, $self->{logger});
     unless ($info) {
         botPrivmsg($self, $channel, "($nick) No results found for '$query'.");
         return;
@@ -2839,22 +3028,33 @@ sub mbTMDBSearch_ctx {
     my $rating   = defined($info->{vote_average}) ? sprintf("%.1f", $info->{vote_average}) : "?";
     my $type     = exists($info->{title}) ? "Movie" : "TV Series";
 
-    # Truncate overview to fit within MAXLEN (prefix takes ~40 chars)
-    my $maxlen   = $self->{conf}->get('main.MAIN_PROG_MAXLEN') || 400;
-    my $prefix   = "($nick) [$type] \"$title\" ($year) - Rating: $rating/10 - ";
-    my $overview_max = $maxlen - length($prefix) - 4; # 4 = "..." + margin
-    if (length($overview) > $overview_max) {
-        $overview = substr($overview, 0, $overview_max);
-        $overview =~ s/\s+\S*$//;  # backtrack to last complete word
-        $overview .= "...";
+    # Build the final IRC message first, then truncate the complete line.
+    # The old code truncated only the overview based on prefix length; when the
+    # prefix was long or MAIN_PROG_MAXLEN was too small, the computed overview
+    # budget could become negative and produce odd output.
+    my $maxlen = int(eval { $self->{conf}->get('main.MAIN_PROG_MAXLEN') } || 400);
+    $maxlen = 120 if $maxlen < 120;
+    $maxlen = 900 if $maxlen > 900;
+
+    my $prefix = "($nick) [$type] \"$title\" ($year) - Rating: $rating/10 - ";
+    my $reply  = $prefix . $overview;
+
+    if (length($reply) > $maxlen) {
+        my $cut = $maxlen - 3;
+        $cut = 1 if $cut < 1;
+
+        $reply = substr($reply, 0, $cut);
+        $reply =~ s/\s+\S*$// if length($reply) > 40;  # backtrack to last complete word when useful
+        $reply =~ s/[\s.,;:!?-]+\z//;
+        $reply .= "...";
     }
 
-    botPrivmsg($self, $channel, $prefix . $overview);
+    botPrivmsg($self, $channel, $reply);
 }
 
 # Get TMDB info using HTTP::Tiny
 sub get_tmdb_info {
-    my ($api_key, $lang, $query) = @_;
+    my ($api_key, $lang, $query, $logger) = @_;
 
     $lang = 'en-US'
         unless defined($lang) && $lang =~ /^[A-Za-z]{2}(?:-[A-Za-z]{2})?\z/;
@@ -2867,17 +3067,33 @@ sub get_tmdb_info {
     my $response = eval { $http->get($url); } // { success => 0, status => 0, reason => $@ };
 
     unless ($response->{success}) {
-        # B4: standalone function, no $self — log to STDERR as fallback
-        warn "get_tmdb_info() HTTP error: $response->{status} $response->{reason}\n";
+        my $status = $response->{status} // 0;
+        my $reason = $response->{reason} // '';
+
+        if ($logger) {
+            $logger->log(3, "get_tmdb_info() HTTP error: $status $reason");
+        }
+
         return undef;
     }
 
-    my $data = eval { decode_json($response->{content}) };
-    return undef
-        if $@
-        || ref($data) ne 'HASH'
-        || ref($data->{results}) ne 'ARRAY'
-        || !@{ $data->{results} };
+    my $content = $response->{content} // '';
+    unless ($content ne '') {
+        $logger->log(3, "get_tmdb_info() empty response") if $logger;
+        return undef;
+    }
+
+    my $data = eval { decode_json($content) };
+    if ($@ || ref($data) ne 'HASH') {
+        my $err = $@ || 'decoded response is not a HASH';
+        $logger->log(3, "get_tmdb_info() JSON decode error: $err") if $logger;
+        return undef;
+    }
+
+    unless (ref($data->{results}) eq 'ARRAY' && @{ $data->{results} }) {
+        $logger->log(4, "get_tmdb_info() no results in TMDB response") if $logger;
+        return undef;
+    }
 
     # Find the first movie or TV result.  Be defensive: API responses can
     # contain partial entries, unexpected media types, or malformed data.

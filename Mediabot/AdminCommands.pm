@@ -344,16 +344,18 @@ sub _openai_run_test {
 
         my $start = time();
 
-        my $res = $http->post(
-            $api_url,
-            {
-                headers => {
-                    'Authorization' => "Bearer $api_key",
-                    'Content-Type'  => 'application/json',
-                },
-                content => $build_payload->($selected_model),
-            }
-        );
+        my $res = eval {
+            $http->post(
+                $api_url,
+                {
+                    headers => {
+                        'Authorization' => "Bearer $api_key",
+                        'Content-Type'  => 'application/json',
+                    },
+                    content => $build_payload->($selected_model),
+                }
+            );
+        } // { success => 0, status => 0, reason => $@ };
 
         my $elapsed_ms = int((time() - $start) * 1000);
 
@@ -581,14 +583,16 @@ sub _openai_notice_models {
     $_openai_timeout = 5 if $_openai_timeout < 5;   # A1: min 5s
     $_openai_timeout = 60 if $_openai_timeout > 60; # A1: max 60s
     my $http = Mediabot::External::_make_http(timeout => $_openai_timeout);  # A1: configurable via openai.TIMEOUT
-    my $res  = $http->get(
-        $models_url,
-        {
-            headers => {
-                'Authorization' => "Bearer $api_key",
-            },
-        }
-    );
+    my $res  = eval {
+        $http->get(
+            $models_url,
+            {
+                headers => {
+                    'Authorization' => "Bearer $api_key",
+                },
+            }
+        );
+    } // { success => 0, status => 0, reason => $@ };
 
     my $status = $res->{status} // 0;
     my $reason = $res->{reason} // '';

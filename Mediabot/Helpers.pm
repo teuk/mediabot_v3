@@ -58,7 +58,6 @@ our @EXPORT = qw(
     mbWhereis_ctx
     displayBirthDate_ctx
     mbColors_ctx
-    _yt_format_duration
     mbDbCheckNickHostname_ctx
     sethChannelsNicksOnChan
     gethChannelNicks
@@ -73,7 +72,6 @@ our @EXPORT = qw(
     displayDate_ctx
     mp3_ctx
     isIgnored
-    _yt_badge
     sethChannelsNicksEndOnChan
     displayLeetString_ctx
     gethChannelsNicksOnChan
@@ -1352,7 +1350,8 @@ sub getVersion {
         $self->{logger}->log(1, "Checking latest version from GitHub...");
 
         my $version_url = 'https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION';
-        my $response = HTTP::Tiny->new(timeout => 5)->get($version_url);
+        my $response = eval { HTTP::Tiny->new(timeout => 5)->get($version_url); }
+                    // { success => 0, status => 0, reason => $@ };
 
         if ($response->{success}) {
             $remote_version = $response->{content} // '';
@@ -1719,29 +1718,6 @@ sub mbColors_ctx {
 # seen <nick> [#channel]
 # - In channel: defaults to current channel for part checks, replies in channel
 # - In private: you can pass an optional #channel; replies by notice
-
-sub _yt_format_duration {
-    my ($iso) = @_;
-    return '' unless defined $iso && $iso =~ /^PT/i;
-
-    my ($h,$m,$s) = (0,0,0);
-    $h = $1 if $iso =~ /(\d+)H/;
-    $m = $1 if $iso =~ /(\d+)M/;
-    $s = $1 if $iso =~ /(\d+)S/;
-
-    my @out;
-    push @out, sprintf("%dh", $h) if $h;
-    push @out, sprintf("%02dm", $m) if ($h || $m);
-    push @out, sprintf("%02ds", $s) if ($h || $m || $s);
-
-    # if no hours and minutes, show seconds even if zero
-    my $txt = join(' ', @out);
-    $txt =~ s/^00m\s+// if !$h; # “00m 12s” -> “12s”
-    $txt =~ s/\b00s$// if ($h || $m) && $s == 0; # optionnel: “3m 00s” -> “3m”
-    $txt =~ s/\s+$//;
-
-    return $txt;
-}
 
 # YouTube badge with safe colors
 
@@ -2769,17 +2745,6 @@ sub isIgnored {
 
 # List ignores
 
-sub _yt_badge {
-    my $plain = "[YouTube]";
-    return $plain unless eval { String::IRC->can('new') };
-
-    my $b = String::IRC->new('[')->bold;
-    $b   .= String::IRC->new('You')->bold;                  # neutre
-    $b   .= String::IRC->new('Tube')->bold->red;            # rouge (sans fond)
-    $b   .= String::IRC->new(']')->bold;
-    return "$b";
-}
-
 # Get the current song from the radio stream
 
 sub sethChannelsNicksEndOnChan {
@@ -3375,7 +3340,8 @@ sub whereis {
 		return "N/A";
 	}
 	my $whereis_url = "https://api.country.is/$userIP";
-	my $response = HTTP::Tiny->new(timeout => 3)->get($whereis_url);
+	my $response = eval { HTTP::Tiny->new(timeout => 3)->get($whereis_url); }
+	            // { success => 0, status => 0, reason => $@ };
 
 	return "N/A" unless $response->{success};
 
