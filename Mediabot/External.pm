@@ -147,8 +147,8 @@ sub getYoutubeDetails {
         ? "views $view_count"
         : "views ?";
 
+    # A4: single combined log entry (removed duplicate sDuration log)
     $self->{logger}->log(4, "getYoutubeDetails() title=" . ($sTitle || "?") . " duration=" . ($sDuration || "?"));
-    $self->{logger}->log(4, "getYoutubeDetails() sDuration : $sDuration");
     $self->{logger}->log(4, "getYoutubeDetails() sViewCount : $sViewCount");
     $self->{logger}->log(4, "getYoutubeDetails() sTitle : $sTitle");
 
@@ -334,10 +334,8 @@ sub displayYoutubeDetails {
     my $schannelTitle = $snippet->{channelTitle}     // '';
     my $sDuration     = $contentDetails->{duration}  // '';
 
-    $self->{logger}->log(4, "displayYoutubeDetails() sDuration : $sDuration");
-    $self->{logger}->log(4, "displayYoutubeDetails() sViewCount : $sViewCount");
-    $self->{logger}->log(4, "displayYoutubeDetails() sTitle : $sTitle");
-    $self->{logger}->log(4, "displayYoutubeDetails() schannelTitle : $schannelTitle");
+    # A2: single log entry for all YouTube fields
+    $self->{logger}->log(4, "displayYoutubeDetails() duration=$sDuration views=$sViewCount title=$sTitle channel=$schannelTitle");
 
     unless ($sTitle ne '' && $sDuration ne '' && $sViewCount ne '') {
         $self->{logger}->log(3, "displayYoutubeDetails() one of the youtube field is undef or empty");
@@ -521,6 +519,8 @@ sub displayWeather_ctx {
 # ---------------------------------------------------------------------------
 sub _irc_color {
     my ($text, $fg) = @_;
+    # A3: clamp fg to valid mIRC color range [0-15]
+    $fg = int($fg) % 16 if defined $fg && $fg =~ /^\d+$/;
 
     $text = '' unless defined $text;
     return $text unless defined $fg && $fg ne '';
@@ -531,7 +531,9 @@ sub _irc_color {
 }
 
 sub _yt_text {
-    return _irc_color($_[0], 0);      # white foreground, transparent background
+    # B1/A1: color 0 = white — invisible on light themes.
+    # Use 14 (grey) which is readable on both light and dark IRC backgrounds.
+    return _irc_color($_[0], 14);
 }
 
 sub _yt_sep {
@@ -2029,20 +2031,24 @@ sub _clean_generic_url_title {
 
     # Browser / anti-bot / CDN / error shells. They are technically titles,
     # but they are useless in an IRC UrlTitle response.
-    return undef if $title =~ /^\s*Just a moment\.{0,3}\s*$/i;
-    return undef if $title =~ /^\s*Attention Required!\s*\|\s*Cloudflare\s*$/i;
-    return undef if $title =~ /^\s*Access Denied\s*$/i;
-    return undef if $title =~ /^\s*403 Forbidden\s*$/i;
-    return undef if $title =~ /^\s*404 Not Found\s*$/i;
-    return undef if $title =~ /^\s*Page Not Found\s*$/i;
-    return undef if $title =~ /^\s*Not Found\s*$/i;
-    return undef if $title =~ /^\s*Error\s*$/i;
-    return undef if $title =~ /please enable javascript/i;
-    return undef if $title =~ /javascript is not available/i;
-    return undef if $title =~ /checking your browser/i;
-    return undef if $title =~ /one moment, please/i;
-    return undef if $title =~ /robot check/i;
-    return undef if $title =~ /verify you are human/i;
+    # A4: centralised list of bot-wall / error page patterns — easy to extend
+    my @_BLOCKED_TITLE_PATTERNS = (
+        qr/^\s*Just a moment\.{0,3}\s*$/i,
+        qr/^\s*Attention Required!\s*\|\s*Cloudflare\s*$/i,
+        qr/^\s*Access Denied\s*$/i,
+        qr/^\s*403 Forbidden\s*$/i,
+        qr/^\s*404 Not Found\s*$/i,
+        qr/^\s*Page Not Found\s*$/i,
+        qr/^\s*Not Found\s*$/i,
+        qr/^\s*Error\s*$/i,
+        qr/please enable javascript/i,
+        qr/javascript is not available/i,
+        qr/checking your browser/i,
+        qr/one moment, please/i,
+        qr/robot check/i,
+        qr/verify you are human/i,
+    );
+    return undef if grep { $title =~ $_ } @_BLOCKED_TITLE_PATTERNS;
 
     $title = substr($title, 0, 300);
 

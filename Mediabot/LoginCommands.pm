@@ -47,7 +47,8 @@ sub init_auth {
     $self->{auth} = Mediabot::Auth->new(
         dbh    => $self->{dbh},
         logger => $self->{logger},
-        bot    => $self,   # B1/A1: needed for noticeConsoleChan in cleanup_stale_sessions
+        bot    => $self,   # needed for noticeConsoleChan in cleanup_stale_sessions
+        conf   => $self->{conf},  # B1: consistency with User::maybe_autologin
     );
 
     $self->{logger}->log(1, "Authentication module initialized");

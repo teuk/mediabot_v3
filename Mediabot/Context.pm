@@ -94,16 +94,20 @@ sub channel_obj {
 # User access
 #----------------------------------------------------------------------
 
-# Return caller user object (cached)
+# Return caller user object (cached, including negative cache for undef)
+# B2/A2: use a flag to avoid repeated DB calls when user is not found
 sub user {
     my ($self) = @_;
-    return $self->{user} if $self->{user};
+
+    return $self->{user} if $self->{_user_fetched} && $self->{user};
+    return undef         if $self->{_user_fetched};  # negative cache
 
     my $bot     = $self->bot;
     my $message = $self->message;
 
     my $user = $bot->get_user_from_message($message);
-    $self->{user} = $user if $user;
+    $self->{user}         = $user;
+    $self->{_user_fetched} = 1;
     return $user;
 }
 
@@ -116,7 +120,9 @@ sub require_auth {
     my $nick    = $self->nick;
 
     my $user = $self->user;
-    return unless $user;
+    # A2: notify caller rather than failing silently
+    return $self->deny("You must be identified to use this command.")
+        unless $user;
 
     unless ($user->is_authenticated) {
         my $prefix = ($message && $message->can('prefix')) ? $message->prefix : '';
@@ -158,7 +164,8 @@ sub deny {
     my $bot = $self->{bot};
     return unless $bot;
 
-    $bot->botNotice($self->{nick}, $msg);
+    # B1/A3: guard against undef nick (timer/system context without a caller)
+    $bot->botNotice($self->{nick} // '', $msg);
 
     return;
 }
@@ -171,14 +178,23 @@ sub deny {
 sub reply {
     my ($self, $msg) = @_;
     my $bot = $self->{bot} or return;
-    $bot->botPrivmsg($self->{channel}, $msg);
+    # B1/A1: fallback to botNotice if no channel (private context)
+    if ($self->is_private || !defined($self->{channel}) || $self->{channel} eq '') {
+        $bot->botNotice($self->{nick}, $msg);
+    } else {
+        $bot->botPrivmsg($self->{channel}, $msg);
+    }
 }
 
 # Send a PRIVMSG to the channel (explicit public reply — alias of reply)
 sub reply_channel {
     my ($self, $msg) = @_;
     my $bot = $self->{bot} or return;
-    $bot->botPrivmsg($self->{channel}, $msg);
+    if ($self->is_private || !defined($self->{channel}) || $self->{channel} eq '') {
+        $bot->botNotice($self->{nick}, $msg);
+    } else {
+        $bot->botPrivmsg($self->{channel}, $msg);
+    }
 }
 
 # Send a NOTICE to the calling nick (private reply)
@@ -211,10 +227,11 @@ sub log {
     $logger->log($level, "$ctx_prefix :: $msg");
 }
 
-# Log at INFO level (0)
+# Log at INFO level (2 = DEBUG2 in production — avoids flooding prod logs)
+# A3: was level 0 (always shown); changed to 2 for context-level informational messages
 sub log_info {
     my ($self, $msg) = @_;
-    $self->log(0, $msg);
+    $self->log(2, $msg);
 }
 
 # Log at ERROR level (1)
