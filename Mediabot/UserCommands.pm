@@ -29,6 +29,8 @@ our @EXPORT = qw(
     getUserName
     mbModUser_ctx
     mbSeen_ctx
+    mbStats_ctx
+    mbTop_ctx
     setUserLevel
     userBirthday_ctx
     userCstat_ctx
@@ -2132,6 +2134,144 @@ sub _birthday_next_ctx {
     return 1;
 }
 
+
+
+
+# ---------------------------------------------------------------------------
+# mbStats_ctx — !stats [nick]
+# Show IRC activity stats for a nick: message count, last seen, join date.
+# ---------------------------------------------------------------------------
+sub mbStats_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $target = $args[0] ? lc($args[0]) : lc($nick);
+
+    # Message count + last message on this channel
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT COUNT(*) AS msg_count,
+               MAX(ts)  AS last_msg
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE cl.nick = ? AND c.name = ?
+    });
+    unless ($sth && $sth->execute($target, $channel)) {
+        botNotice($self, $nick, "Database error.");
+        return;
+    }
+    my $msg_row = $sth->fetchrow_hashref;
+    $sth->finish;
+
+    my $msg_count = $msg_row->{msg_count} // 0;
+    my $last_msg  = $msg_row->{last_msg}  // 'never';
+
+    # Last seen (USER_SEEN)
+    my $sth2 = $self->{dbh}->prepare(q{
+        SELECT seen_at, event_type FROM USER_SEEN WHERE nick = ? LIMIT 1
+    });
+    unless ($sth2 && $sth2->execute($target)) {
+        botNotice($self, $nick, "Database error.");
+        return;
+    }
+    my $seen_row  = $sth2->fetchrow_hashref;
+    $sth2->finish;
+
+    my $seen_at   = $seen_row->{seen_at}    // 'never';
+    my $seen_type = $seen_row->{event_type} // '';
+
+    # User level (if registered)
+    my $level_desc = '';
+    my $id_user    = getIdUser($self, $target);
+    if ($id_user) {
+        my $sth3 = $self->{dbh}->prepare(q{
+            SELECT ul.description
+            FROM USER u
+            JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
+            WHERE u.id_user = ?
+        });
+        if ($sth3 && $sth3->execute($id_user)) {
+            my $lvl = $sth3->fetchrow_hashref;
+            $level_desc = " (" . ($lvl->{description} // '?') . ")" if $lvl;
+            $sth3->finish;
+        }
+    }
+
+    # Format output
+    my $out = sprintf("%s%s: %d message%s on %s",
+        $target, $level_desc,
+        $msg_count, ($msg_count != 1 ? "s" : ""),
+        $channel
+    );
+    $out .= " | last msg: $last_msg"  if $msg_count > 0;
+    $out .= " | last seen: $seen_at ($seen_type)" if $seen_at ne 'never';
+    $out .= " | not in database" unless $id_user || $msg_count;
+
+    botPrivmsg($self, $channel, $out);
+    logBot($self, $ctx->message, $channel, "stats", $target);
+    return 1;
+}
+
+
+
+# ---------------------------------------------------------------------------
+# mbTop_ctx — !top [n]
+# Show the top N most active nicks on the current channel (default 5, max 10).
+# ---------------------------------------------------------------------------
+sub mbTop_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $n = 5;
+    if (@args && $args[0] =~ /^\d+$/) {
+        $n = int($args[0]);
+        $n = 1  if $n < 1;
+        $n = 10 if $n > 10;
+    }
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT cl.nick, COUNT(*) AS msg_count
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ?
+        GROUP BY cl.nick
+        ORDER BY msg_count DESC
+        LIMIT ?
+    });
+    unless ($sth && $sth->execute($channel, $n)) {
+        botNotice($self, $nick, "Database error.");
+        return;
+    }
+
+    my @rows;
+    while (my $row = $sth->fetchrow_hashref) {
+        push @rows, $row;
+    }
+    $sth->finish;
+
+    unless (@rows) {
+        botPrivmsg($self, $channel, "No data for $channel yet.");
+        return 1;
+    }
+
+    botPrivmsg($self, $channel, "Top $n on $channel:");
+    my $rank = 1;
+    for my $row (@rows) {
+        my $msgs = $row->{msg_count};
+        botPrivmsg($self, $channel, sprintf("  %d. %-16s %d msg%s",
+            $rank++, $row->{nick}, $msgs, ($msgs != 1 ? "s" : "")));
+    }
+
+    logBot($self, $ctx->message, $channel, "top", "$n");
+    return 1;
+}
 
 
 1;

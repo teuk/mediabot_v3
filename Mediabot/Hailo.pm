@@ -30,6 +30,7 @@ our @EXPORT = qw(
     hailo_chatter_ctx
     get_hailo_channel_ratio
     set_hailo_channel_ratio
+    check_birthdays_today
 );
 
 sub init_hailo {
@@ -655,5 +656,54 @@ sub hailo_chatter_ctx {
 }
 
 # whereis <hostname|IP>
+
+
+# ---------------------------------------------------------------------------
+# check_birthdays_today()
+# Called daily by the Scheduler. Posts birthday greetings on all auto-join
+# channels where the setting birthday_greetings = 1.
+# ---------------------------------------------------------------------------
+sub check_birthdays_today {
+    my ($self) = @_;
+
+    my $dbh = $self->{db} ? $self->{db}->ensure_connected() : $self->{dbh};
+    return unless $dbh;
+
+    my @t   = localtime;
+    my $mmdd = sprintf("%02d-%02d", $t[4]+1, $t[3]);  # MM-DD today
+
+    # Match both MM-DD and YYYY-MM-DD formats
+    my $sth = $dbh->prepare(q{
+        SELECT nickname, birthday
+        FROM USER
+        WHERE birthday IS NOT NULL
+          AND (birthday = ? OR birthday LIKE ?)
+    });
+    unless ($sth && $sth->execute($mmdd, "%-$mmdd")) {
+        $self->{logger}->log(1, "check_birthdays_today() SQL error: $DBI::errstr");
+        return;
+    }
+
+    my @bdays;
+    while (my $row = $sth->fetchrow_hashref) {
+        push @bdays, $row->{nickname};
+    }
+    $sth->finish;
+
+    return unless @bdays;
+
+    # Announce on all auto-join channels
+    for my $chan_name (keys %{ $self->{channels} || {} }) {
+        my $chan = $self->{channels}{$chan_name};
+        next unless $chan && $chan->auto_join;
+
+        for my $nick (@bdays) {
+            $self->{logger}->log(2, "Birthday: $nick on $chan_name");
+            Mediabot::Helpers::botPrivmsg($self, $chan_name,
+                "Happy Birthday, $nick! 4<3");
+        }
+    }
+}
+
 
 1;

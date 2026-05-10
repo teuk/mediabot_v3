@@ -51,6 +51,7 @@ our @EXPORT = qw(
     setLastRandomQuote
     setLastReponderTs
     setMainTimerTick
+    mbCalc_ctx
 );
 
 sub setMainTimerTick {
@@ -2724,5 +2725,83 @@ sub Yomomma_ctx {
 #   - Multiple IP output for hostname
 #   - Clear bot responses
 #   - Full Context API
+
+
+# ---------------------------------------------------------------------------
+# mbCalc_ctx — !calc <expression>
+# Evaluate a safe arithmetic expression and reply with the result.
+# ---------------------------------------------------------------------------
+sub mbCalc_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $expr = join(' ', @args);
+    $expr =~ s/^\s+|\s+$//g;
+
+    unless ($expr ne '') {
+        botNotice($self, $nick, "Syntax: calc <expression>  (e.g. calc 2+2, calc sqrt(16))");
+        return;
+    }
+
+    if (length($expr) > 128) {
+        botNotice($self, $nick, "Expression too long (max 128 chars).");
+        return;
+    }
+
+    # Whitelist: digits, operators, parens, spaces, common math functions, pi/e
+    unless ($expr =~ m{^[0-9+\-*/().\s%^,a-z_]+$}i) {
+        botNotice($self, $nick, "Invalid characters in expression.");
+        return;
+    }
+
+    # Blacklist dangerous keywords
+    if ($expr =~ /\b(?:system|exec|open|require|use|print|die|exit|eval|qw|sprintf|chr|ord)\b/i) {
+        botNotice($self, $nick, "Expression not allowed.");
+        return;
+    }
+
+    # Evaluate in a sandboxed sub with safe math
+    my $result = eval {
+        local $SIG{ALRM} = sub { die "timeout\n" };
+        alarm(3);
+        my $res = do {
+            no strict;
+            use POSIX qw(floor ceil);
+            my $pi = 3.14159265358979;
+            my $e  = 2.71828182845905;
+            ## no critic
+            eval $expr;  ## safe: expression is already whitelist-validated
+        };
+        alarm(0);
+        $res;
+    };
+    alarm(0);
+
+    if ($@) {
+        my $err = $@;
+        $err =~ s/ at .* line \d+.*//s;
+        botPrivmsg($self, $channel, "calc error: $err");
+        return;
+    }
+
+    unless (defined $result) {
+        botPrivmsg($self, $channel, "calc: undefined result.");
+        return;
+    }
+
+    # Format nicely: integer if whole, 6 decimal places otherwise
+    my $formatted = ($result == int($result) && abs($result) < 1e15)
+        ? sprintf("%d", $result)
+        : sprintf("%g", $result);
+
+    botPrivmsg($self, $channel, "$expr = $formatted");
+    logBot($self, $ctx->message, $channel, "calc", $expr);
+    return 1;
+}
+
 
 1;

@@ -78,7 +78,8 @@ sub _runtime_status_path {
 
     my $path = eval { $self->{bot}->{conf}->get('main.PARTYLINE_STATUS_JSON') };
     $path ||= $ENV{MEDIABOT_PARTYLINE_STATUS_JSON};
-    $path ||= '/run/mediabot/partyline_sessions.json';
+    # F4/fix: default to a path writable by the bot user
+    $path ||= ($ENV{HOME} // '/tmp') . '/mediabot-partyline.json';
 
     return $path;
 }
@@ -109,11 +110,30 @@ sub _runtime_status_payload {
         };
     }
 
+    # Bot nick + uptime
+    my $bot      = $self->{bot};
+    my $bot_nick = eval { $bot->{irc}->nick_folded } // '?';
+    my $start    = eval { $bot->{metrics}->{started} }
+                // eval { $bot->{conf}->get('main.MAIN_PROG_BIRTHDATE') }
+                // 0;
+    my $uptime_secs = time() - $start;
+    my $ud = int($uptime_secs / 86400);
+    my $uh = int(($uptime_secs % 86400) / 3600);
+    my $um = int(($uptime_secs % 3600) / 60);
+    my $us = $uptime_secs % 60;
+    my $uptime_str = '';
+    $uptime_str .= "${ud}d " if $ud;
+    $uptime_str .= "${uh}h " if $uh;
+    $uptime_str .= "${um}m " if $um;
+    $uptime_str .= "${us}s";
+    $uptime_str =~ s/\s+$//;
+
     return {
         ok           => 1,
         generated_at => time(),
         count        => scalar(@sessions),
         sessions     => \@sessions,
+        bot          => { nick => $bot_nick, uptime => $uptime_str },
     };
 }
 
@@ -1139,6 +1159,14 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.log' }) if $self->{bot}->{metrics};
         $self->_cmd_log($stream, $id, $1)
     }
+    elsif ($line =~ /^\.metrics$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.metrics' }) if $self->{bot}->{metrics};
+        $self->_cmd_metrics($stream, $id);
+    }
+    elsif ($line =~ /^\.status$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.status' }) if $self->{bot}->{metrics};
+        $self->_cmd_status($stream, $id);
+    }
     elsif ($line =~ /^\.uptime$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.uptime' }) if $self->{bot}->{metrics};
         $self->_cmd_uptime($stream, $id)
@@ -1383,6 +1411,8 @@ sub _cmd_help {
       . "  .schedule <list|status|start|stop|restart> [name] - control scheduler tasks\r\n"
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
+      . "  .metrics            - dump Prometheus metrics\r\n"
+      . "  .status             - show runtime session status\r\n"
       . "  .uptime             - show bot and server uptime\r\n"
       . "  .match <handle>     - show user record (wildcards * ? allowed)\r\n"
       . "  .say <#chan|nick> <msg> - send a message to channel or user\r\n"
@@ -1991,6 +2021,70 @@ sub _cmd_schedule {
     } else {
         $stream->write("Unknown action '$act'. Use: list status start stop restart\r\n");
     }
+}
+
+
+# ---------------------------------------------------------------------------
+# .status  - display the runtime status payload in the partyline session
+# ---------------------------------------------------------------------------
+sub _cmd_status {
+    my ($self, $stream, $id) = @_;
+
+    my $payload = eval { $self->_runtime_status_payload };
+    if ($@) {
+        $stream->write("Status unavailable: $@\r\n");
+        return;
+    }
+
+    my $sessions  = $payload->{sessions}  // [];
+    my $bot_info  = $payload->{bot}       // {};
+    my $ts        = $payload->{generated_at} // time();
+
+    $stream->write(sprintf("--- runtime status (generated %s) ---\r\n",
+        scalar localtime($ts)));
+    $stream->write(sprintf("Bot:      %s  uptime: %s\r\n",
+        $bot_info->{nick} // '?', $bot_info->{uptime} // '?'));
+    $stream->write(sprintf("Sessions: %d active\r\n", scalar @$sessions));
+
+    for my $s (@$sessions) {
+        my $lvl_display = $s->{level_desc} || $s->{level} // '?';
+        my $con_display = defined($s->{console_level}) && $s->{console_level} ne '' && $s->{console_level} ne '0'
+            ? $s->{console_level} : 'off';
+        $stream->write(sprintf("  %-16s  fd=%-4s  level=%-10s  console=%s\r\n",
+            $s->{login}  // '?',
+            $s->{fd}     // '?',
+            $lvl_display,
+            $con_display));
+    }
+    $stream->write("--- end ---\r\n");
+}
+
+
+# ---------------------------------------------------------------------------
+# .metrics  - dump current Prometheus metrics to the partyline session
+# ---------------------------------------------------------------------------
+sub _cmd_metrics {
+    my ($self, $stream, $id) = @_;
+
+    my $metrics = $self->{bot}->{metrics};
+    unless ($metrics && $metrics->can('render_prometheus')) {
+        $stream->write("Metrics not available.\r\n");
+        return;
+    }
+
+    my $rendered = eval { $metrics->render_prometheus };
+    if ($@) {
+        $stream->write("Metrics render error: $@\r\n");
+        return;
+    }
+
+    $stream->write("--- Prometheus metrics ---\r\n");
+    for my $line (split /\n/, $rendered) {
+        next if $line =~ /^#\s*(HELP|TYPE)/;   # skip metadata for compactness
+        next if $line =~ /^\s*$/;
+        $stream->write("$line\r\n");
+    }
+    $stream->write("--- end ---\r\n");
 }
 
 # ---------------------------------------------------------------------------

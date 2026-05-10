@@ -399,6 +399,13 @@ $scheduler->add(
 );
 
 $scheduler->add(
+    name      => 'birthday_check',
+    interval  => 86400,   # once per day
+    cb        => sub { $mediabot->check_birthdays_today() },
+    autostart => 1,
+);
+
+$scheduler->add(
     name      => 'auth_session_cleanup',
     interval  => 3600,   # hourly — purge sessions older than 24h
     cb        => sub {

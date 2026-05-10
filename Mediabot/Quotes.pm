@@ -26,6 +26,7 @@ our @EXPORT = qw(
     mbQuoteSearch
     mbQuoteRand
     mbQuoteStats
+    mbQuoteByNick
     _printQuoteSyntax
 );
 
@@ -618,5 +619,73 @@ sub mbQuoteStats {
 
 
 # Modify a user's global level, autologin status, or fortniteid (Context version)
+
+
+# ---------------------------------------------------------------------------
+# mbQuoteByNick — !quote <nick>
+# Return a random quote added by a specific nick.
+# ---------------------------------------------------------------------------
+sub mbQuoteByNick {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $sNick   = $ctx->nick;
+    my $sChannel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $targetNick = $args[0];
+
+    unless (defined $targetNick && $targetNick ne '') {
+        Mediabot::Helpers::botNotice($self, $sNick, "Syntax: quote <nick>");
+        return;
+    }
+
+    my $like = lc($targetNick) . '%';
+
+    # Count matching quotes
+    my $sth_count = $self->{dbh}->prepare(q{
+        SELECT COUNT(*) AS cnt
+        FROM QUOTES q
+        JOIN CHANNEL c ON c.id_channel = q.id_channel
+        JOIN USER    u ON u.id_user    = q.id_user
+        WHERE c.name = ? AND LOWER(u.nickname) LIKE ?
+    });
+    unless ($sth_count && $sth_count->execute($sChannel, $like)) {
+        $self->{logger}->log(1, "mbQuoteByNick() count SQL error: $DBI::errstr");
+        return undef;
+    }
+    my $cnt_row = $sth_count->fetchrow_hashref;
+    $sth_count->finish;
+    my $count = $cnt_row->{cnt} // 0;
+
+    unless ($count > 0) {
+        botNotice($self, $sNick, "No quotes from $targetNick on $sChannel.");
+        return undef;
+    }
+
+    my $offset = int(rand($count));
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT q.id_quotes, q.quotetext, u.nickname AS author
+        FROM QUOTES q
+        JOIN CHANNEL c ON c.id_channel = q.id_channel
+        JOIN USER    u ON u.id_user    = q.id_user
+        WHERE c.name = ? AND LOWER(u.nickname) LIKE ?
+        ORDER BY q.id_quotes
+        LIMIT 1 OFFSET ?
+    });
+    unless ($sth && $sth->execute($sChannel, $like, $offset)) {
+        $self->{logger}->log(1, "mbQuoteByNick() SQL error: $DBI::errstr");
+        return undef;
+    }
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+
+    return undef unless $row;
+
+    botPrivmsg($self, $sChannel,
+        sprintf("[%d] <%s> %s", $row->{id_quotes}, $row->{author}, $row->{quotetext}));
+    return 1;
+}
+
 
 1;
