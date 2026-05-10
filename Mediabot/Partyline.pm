@@ -29,6 +29,10 @@ use IO::Async::Timer::Countdown;
 use Socket qw(unpack_sockaddr_in sockaddr_family inet_ntoa inet_aton AF_INET);
 use Scalar::Util qw(weaken);
 use Time::HiRes qw(usleep);
+use JSON qw(encode_json);
+use File::Basename qw(dirname);
+use File::Path qw(make_path);
+use File::Temp qw(tempfile);
 
 our @EXPORT_OK = qw();
 
@@ -64,6 +68,86 @@ sub get_port {
     my ($self) = @_;
     return $self->{bot}->{conf}->get("main.PARTYLINE_PORT") || 23456;
 }
+
+# +---------------------------------------------------------------------------+
+# ! Runtime status export for mbweb                                           !
+# +---------------------------------------------------------------------------+
+
+sub _runtime_status_path {
+    my ($self) = @_;
+
+    my $path = eval { $self->{bot}->{conf}->get('main.PARTYLINE_STATUS_JSON') };
+    $path ||= $ENV{MEDIABOT_PARTYLINE_STATUS_JSON};
+    $path ||= '/run/mediabot/partyline_sessions.json';
+
+    return $path;
+}
+
+sub _runtime_status_payload {
+    my ($self) = @_;
+
+    my @sessions;
+
+    for my $fid (sort { $a <=> $b } keys %{ $self->{users} || {} }) {
+        my $u = $self->{users}{$fid} || next;
+        next unless $u->{authenticated};
+
+        my $connected_at = $u->{connected_at} || $u->{authenticated_at} || time();
+
+        push @sessions, {
+            fd             => 0 + $fid,
+            login          => $u->{login} // '',
+            level          => defined($u->{level}) ? 0 + $u->{level} : undef,
+            level_desc     => $u->{level_desc} // '',
+            display        => eval { $self->_display_nick($fid, 80) } || ($u->{login} // ''),
+            peer_host      => $u->{peer_host} // '',
+            session_type   => $u->{is_dcc} ? 'dcc' : 'telnet',
+            console_level  => defined($u->{console_level}) ? 0 + $u->{console_level} : undef,
+            connected_at   => 0 + $connected_at,
+            authenticated_at => 0 + ($u->{authenticated_at} || $connected_at),
+            age_seconds    => time() - $connected_at,
+        };
+    }
+
+    return {
+        ok           => 1,
+        generated_at => time(),
+        count        => scalar(@sessions),
+        sessions     => \@sessions,
+    };
+}
+
+sub _write_runtime_status {
+    my ($self) = @_;
+
+    my $path = $self->_runtime_status_path;
+    return unless defined($path) && $path ne '';
+
+    my $payload = $self->_runtime_status_payload;
+    my $json    = encode_json($payload);
+
+    my $dir = dirname($path);
+
+    eval {
+        make_path($dir) if defined($dir) && $dir ne '' && !-d $dir;
+
+        my ($fh, $tmp) = tempfile('.partyline-runtime-XXXXXX', DIR => $dir, UNLINK => 0);
+        print {$fh} $json;
+        print {$fh} "\n";
+        close($fh);
+
+        chmod 0640, $tmp;
+        rename($tmp, $path) or die "rename($tmp, $path): $!";
+    };
+
+    if ($@) {
+        my $err = $@;
+        chomp($err);
+        $self->{bot}->{logger}->log(2, "Partyline: could not write runtime status JSON '$path': $err")
+            if $self->{bot} && $self->{bot}->{logger};
+    }
+}
+
 
 # +---------------------------------------------------------------------------+
 # ! Internal : start TCP listener                                             !
@@ -571,6 +655,7 @@ sub _init_dcc_session {
         rate_count     => 0,
         login_failures => 0,
         console_level  => undef,
+        connected_at   => time(),
         auth_stage     => 'nick',       # standard flow: nick then password
         pending_login  => undef,
         is_dcc         => 1,
@@ -695,6 +780,7 @@ sub _start_listener {
                 login_failures => 0,
                 # Console: log level redirected to this session (undef = off)
                 console_level  => undef,
+                connected_at   => time(),
 
                 # Eggdrop-style authentication prompt state:
                 #   nick -> waiting for nickname
@@ -795,6 +881,8 @@ sub _close_session {
     delete $self->{users}{$id};
     delete $self->{streams}{$id};
     delete $self->{"_eval_pending_$id"};  # clean up any pending .eval confirmation
+
+    $self->_write_runtime_status();
 }
 
 
@@ -1245,6 +1333,9 @@ sub _do_login {
     $self->{users}{$id}{level}         = $row->{level};
     $self->{users}{$id}{level_desc}    = $row->{description};
     $self->{users}{$id}{auth_stage}    = undef;   # clear — stop masking log lines
+    $self->{users}{$id}{authenticated_at} = time();
+
+    $self->_write_runtime_status();
 
     if ($bot->{metrics}) {
         $bot->{metrics}->inc('mediabot_partyline_logins_total');

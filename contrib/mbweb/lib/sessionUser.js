@@ -6,6 +6,18 @@ const {
 } = require('./mediabotRepository');
 const { safeBase } = require('./config');
 
+function publicSessionUser(user) {
+  if (!user) return null;
+
+  return {
+    nickname:       user.nickname,
+    username:       user.username || null,
+    global_level:   user.global_level,
+    global_role:    user.global_role,
+    channels_count: user.channels_count || 0
+  };
+}
+
 function roleNameFromLevel(level) {
   const n = Number(level);
   if (n === 0) return 'Owner';
@@ -111,6 +123,7 @@ async function buildSessionUser(rawUser, levelCol) {
 }
 
 module.exports = {
+  publicSessionUser,
   roleNameFromLevel,
   requireLogin,
   requireFreshLogin,

@@ -5,13 +5,15 @@ const { config, safeBase } = require('../lib/config');
 const { escapeHtml, renderPage } = require('../lib/render');
 const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
-const { getRadioStatus } = require('../lib/radio');
+const { getCachedRadioStatus } = require('../lib/integrationCache');
 
 const router = express.Router();
 
 router.get('/api/radio/status', requireFreshLogin, async (req, res) => {
   try {
-    const radio = await getRadioStatus();
+    const radioResult = await getCachedRadioStatus({ force: req.query.refresh === '1' });
+    const radio = radioResult.value;
+    res.set('X-MBWeb-Cache', radioResult.cached ? 'HIT' : 'MISS');
     res.json({
       ok: true,
       radio
@@ -29,7 +31,8 @@ router.get('/radio', requireFreshLogin, async (req, res) => {
   let radio;
 
   try {
-    radio = await getRadioStatus();
+    const radioResult = await getCachedRadioStatus({ force: req.query.refresh === '1' });
+    radio = radioResult.value;
   } catch (err) {
     radio = {
       ok: false,

@@ -9,6 +9,25 @@ function normalizeBaseUrl(value) {
   return out.replace(/\/+$/, '');
 }
 
+
+function envInt(name, fallback, { min = 1, max = 65535 } = {}) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+
+  if (!/^[0-9]+$/.test(String(raw))) {
+    console.error(`[mbweb][config] FATAL: ${name} must be an integer, got: ${raw}`);
+    process.exit(1);
+  }
+
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n < min || n > max) {
+    console.error(`[mbweb][config] FATAL: ${name} must be between ${min} and ${max}, got: ${raw}`);
+    process.exit(1);
+  }
+
+  return n;
+}
+
 function csv(value) {
   return String(value || '')
     .split(',')
@@ -18,12 +37,12 @@ function csv(value) {
 
 const config = {
   host: process.env.MBWEB_HOST || '127.0.0.1',
-  port: parseInt(process.env.MBWEB_PORT || '4002', 10),
+  port: envInt('MBWEB_PORT', 4002, { min: 1, max: 65535 }),
   baseUrl: normalizeBaseUrl(process.env.MBWEB_BASE_URL || ''),
 
   db: {
     host: process.env.MBWEB_DB_HOST || 'localhost',
-    port: parseInt(process.env.MBWEB_DB_PORT || '3306', 10),
+    port: envInt('MBWEB_DB_PORT', 3306, { min: 1, max: 65535 }),
     user: process.env.MBWEB_DB_USER || 'mediabotv3',
     password: process.env.MBWEB_DB_PASS || '',
     database: process.env.MBWEB_DB_NAME || 'mediabotv3',
@@ -50,7 +69,7 @@ const config = {
 
   partyline: {
     host: process.env.MBWEB_PARTYLINE_HOST || '127.0.0.1',
-    port: parseInt(process.env.MBWEB_PARTYLINE_PORT || '23456', 10)
+    port: envInt('MBWEB_PARTYLINE_PORT', 23456, { min: 1, max: 65535 })
   },
 
   sessionSecret: process.env.MBWEB_SESSION_SECRET || 'CHANGE_ME'

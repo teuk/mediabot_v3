@@ -11,6 +11,19 @@ function parsePositiveInt(value, fallback, { min = 1, max = 1000 } = {}) {
   return Math.min(Math.max(n, min), max);
 }
 
+
+function parseRouteId(value) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const str = String(raw || '').trim();
+
+  if (!/^[1-9][0-9]{0,9}$/.test(str)) {
+    return null;
+  }
+
+  const n = Number(str);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
 function cleanSearch(value, { maxLength = 120 } = {}) {
   const raw = Array.isArray(value) ? value[0] : value;
   const out = String(raw || '').trim().replace(/\s+/g, ' ');
@@ -21,6 +34,7 @@ function cleanSearch(value, { maxLength = 120 } = {}) {
 }
 
 module.exports = {
+  parseRouteId,
   parsePositiveInt,
   cleanSearch
 };

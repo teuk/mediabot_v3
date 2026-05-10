@@ -21,6 +21,7 @@ const commandsRoutes = require('./routes/commands');
 const usersRoutes    = require('./routes/users');
 const metricsRoutes   = require('./routes/metricsProxy');
 const partylineRoutes = require('./routes/partyline');
+const diagnosticsRoutes = require('./routes/diagnostics');
 
 const app = express();
 
@@ -74,6 +75,7 @@ app.use(config.baseUrl, commandsRoutes);
 app.use(config.baseUrl, usersRoutes);
 app.use(config.baseUrl, metricsRoutes);
 app.use(config.baseUrl, partylineRoutes);
+app.use(config.baseUrl, diagnosticsRoutes);
 
 // ── 404 handler ───────────────────────────────────────────────────────────────
 app.use((req, res) => {

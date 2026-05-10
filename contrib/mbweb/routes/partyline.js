@@ -5,7 +5,9 @@ const { escapeHtml, renderPage } = require('../lib/render');
 const { requireFreshLogin } = require('../lib/sessionUser');
 const { isMaster } = require('../lib/permissions');
 const { parsePositiveInt } = require('../lib/requestParams');
-const { fetchMetrics, metricVal } = require('../lib/metrics');
+const { metricVal } = require('../lib/metrics');
+const { getCachedMetrics } = require('../lib/integrationCache');
+const { readPartylineRuntime } = require('../lib/partylineRuntime');
 const {
   getAuthenticatedDbUsers,
   getRecentChannelBans
@@ -20,6 +22,19 @@ function fmtDate(d) {
 function fmtRuntimeCount(value) {
   if (value === null || value === undefined) return 'runtime unavailable';
   return `${Number(value) || 0} runtime`;
+}
+
+function runtimeBadgeCount(runtimeFile, runtimeSessions) {
+  if (runtimeFile && runtimeFile.ok) {
+    return `${Number(runtimeFile.count) || 0} runtime`;
+  }
+
+  return fmtRuntimeCount(runtimeSessions);
+}
+
+function runtimeFreshLabel(runtimeFile) {
+  if (!runtimeFile || !runtimeFile.ok) return ' — unavailable';
+  return runtimeFile.stale ? ' — stale snapshot' : ' — fresh';
 }
 
 // ── /partyline – Partyline status page (Master+) ─────────────────────────────
@@ -42,12 +57,14 @@ router.get('/partyline', requireFreshLogin, async (req, res) => {
 
   let runtimeSessions = null;
   let runtimeMetricsStatus = 'Metrics endpoint unavailable';
+  let runtimeFile = await readPartylineRuntime();
   let dbUsers = [];
   let bans = [];
   let dbError = null;
 
   try {
-    const metrics = await fetchMetrics({ maxSamplesPerMetric: 20 });
+    const metricsResult = await getCachedMetrics({ maxSamplesPerMetric: 20, force: req.query.refresh === '1' });
+    const metrics = metricsResult.value;
     if (metrics) {
       const val = metricVal(metrics, 'mediabot_partyline_sessions_current');
       if (val !== null && val !== undefined) {
@@ -108,24 +125,59 @@ router.get('/partyline', requireFreshLogin, async (req, res) => {
     <h1>Partyline</h1>
     <p>Runtime Partyline overview, IRC/DB authentication state, and recent ChannelBan activity.</p>
   </div>
-  <span class="mbw-count-badge">${escapeHtml(fmtRuntimeCount(runtimeSessions))}</span>
+  <span class="mbw-count-badge">${escapeHtml(runtimeBadgeCount(runtimeFile, runtimeSessions))}</span>
 </section>
 
-<section class="mbw-card">
+<section class="mbw-card mbw-wide">
   <h2>Runtime Partyline Sessions</h2>
-  <p>
-    Current telnet/DCC Partyline sessions live inside the Perl bot process.
-    mbweb cannot list nicknames from memory directly yet.
-  </p>
   <p class="mbw-muted-cell">
-    ${escapeHtml(runtimeMetricsStatus)}
+    Source: ${escapeHtml(runtimeFile.path)}
+    ${runtimeFreshLabel(runtimeFile)}
+    ${runtimeFile.ageMs !== null && runtimeFile.ageMs !== undefined ? ` — Snapshot age: ${escapeHtml(String(Math.round(runtimeFile.ageMs / 1000)))}s` : ''}
   </p>
+
   <div class="mbw-metric-grid">
     <div class="mbw-metric-tile">
       <span>Runtime sessions</span>
+      <strong>${runtimeFile.ok ? escapeHtml(String(runtimeFile.count)) : '—'}</strong>
+    </div>
+    <div class="mbw-metric-tile">
+      <span>Metrics fallback</span>
       <strong>${runtimeSessions === null || runtimeSessions === undefined ? '—' : escapeHtml(String(runtimeSessions))}</strong>
     </div>
   </div>
+
+  ${runtimeFile.ok && runtimeFile.sessions.length ? `
+  <div class="mbw-table-wrap">
+    <table class="mbw-data-table">
+      <thead>
+        <tr>
+          <th>Login</th>
+          <th>Level</th>
+          <th>Type</th>
+          <th>Console</th>
+          <th>Host</th>
+          <th>Age</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${runtimeFile.sessions.map(s => `
+          <tr>
+            <td>${escapeHtml(s.login || '?')}</td>
+            <td>${escapeHtml(s.level_desc || String(s.level ?? '?'))}</td>
+            <td>${escapeHtml(s.session_type)}</td>
+            <td>${s.console_level === null ? 'off' : escapeHtml(String(s.console_level))}</td>
+            <td class="mono">${escapeHtml(s.peer_host || '')}</td>
+            <td>${s.age_seconds === null ? '—' : escapeHtml(String(Math.max(0, Math.round(s.age_seconds)))) + 's'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>` : `
+    <p class="mbw-muted-cell">
+      ${runtimeFile.ok ? 'No live authenticated Partyline sessions found in runtime JSON.' : escapeHtml(runtimeFile.error || 'Runtime file unavailable.')}
+    </p>
+  `}
 </section>
 
 ${dbError ? `<section class="mbw-card"><p class="error">${escapeHtml(dbError)}</p></section>` : ''}

@@ -6,7 +6,7 @@ const { escapeHtml, renderPage } = require('../lib/render');
 const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
 const { boolLabel } = require('../lib/viewHelpers');
-const { parsePositiveInt, cleanSearch } = require('../lib/requestParams');
+const { parsePositiveInt, parseRouteId, cleanSearch } = require('../lib/requestParams');
 const {
   getAllChannels,
   getUserChannels,
@@ -222,7 +222,7 @@ ${paginationBar(page, totalPages)}
 
 
 router.get('/api/channels/:id', requireFreshLogin, async (req, res) => {
-  const idChannel = Number(req.params.id);
+  const idChannel = parseRouteId(req.params.id);
 
   if (!Number.isInteger(idChannel) || idChannel <= 0) {
     return res.status(400).json({ ok: false, error: 'Invalid channel id' });
@@ -250,7 +250,7 @@ router.get('/api/channels/:id', requireFreshLogin, async (req, res) => {
 });
 
 router.get('/channels/:id', requireFreshLogin, async (req, res) => {
-  const idChannel = Number(req.params.id);
+  const idChannel = parseRouteId(req.params.id);
 
   if (!Number.isInteger(idChannel) || idChannel <= 0) {
     return res.status(400).send(renderPage('Invalid channel', `

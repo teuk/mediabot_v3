@@ -1,6 +1,7 @@
 'use strict';
 
 const { config } = require('./config');
+const { publicSessionUser } = require('./sessionUser');
 const { ping } = require('./db');
 const {
   getUserChannels,
@@ -43,7 +44,7 @@ async function getDashboardData(req) {
       users: null,
       channels: null
     },
-    me: req.session?.user || null,
+    me: publicSessionUser(req.session?.user),
     myChannels: [],
     generatedAt: new Date().toISOString()
   };
