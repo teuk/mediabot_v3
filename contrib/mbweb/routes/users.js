@@ -3,20 +3,21 @@
 const express = require('express');
 const { config, safeBase } = require('../lib/config');
 const { escapeHtml, renderPage } = require('../lib/render');
-const { requireLogin } = require('../lib/sessionUser');
+const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
 const { getAllUsersWithRoles, getUserChannelCountMap } = require('../lib/mediabotRepository');
+const { parsePositiveInt, cleanSearch } = require('../lib/requestParams');
 
 const router = express.Router();
 
-router.get('/api/users', requireLogin, async (req, res) => {
+router.get('/api/users', requireFreshLogin, async (req, res) => {
   if (!isMaster(req.session.user)) {
     return res.status(403).json({ ok: false, error: 'Forbidden' });
   }
 
-  const page    = Math.max(1, Number(req.query.page) || 1);
-  const perPage = Math.min(Number(req.query.per_page) || 50, 200);
-  const search  = req.query.q?.trim() || null;
+  const page    = parsePositiveInt(req.query.page, 1, { min: 1, max: 100000 });
+  const perPage = parsePositiveInt(req.query.per_page, 50, { min: 1, max: 200 });
+  const search  = cleanSearch(req.query.q);
 
   try {
     const [result, channelCounts] = await Promise.all([
@@ -43,7 +44,7 @@ router.get('/api/users', requireLogin, async (req, res) => {
   }
 });
 
-router.get('/users', requireLogin, async (req, res) => {
+router.get('/users', requireFreshLogin, async (req, res) => {
   if (!isMaster(req.session.user)) {
     return res.status(403).send(renderPage('Access denied', `
 <section class="mbw-card">
@@ -55,8 +56,8 @@ router.get('/users', requireLogin, async (req, res) => {
   }
 
   const PER_PAGE = 50;
-  const page     = Math.max(1, Number(req.query.page) || 1);
-  const search   = req.query.q?.trim() || null;
+  const page     = parsePositiveInt(req.query.page, 1, { min: 1, max: 100000 });
+  const search   = cleanSearch(req.query.q);
 
   function pageUrl(p) {
     const params = new URLSearchParams();

@@ -69,43 +69,73 @@ sub getRadioCurrentListeners {
 	unless (defined($RADIO_HOSTNAME) && ($RADIO_HOSTNAME ne "")) {
 		usage("RADIO_HOSTNAME not set");
 	}
+
+	unless (defined($RADIO_PORT) && ($RADIO_PORT ne "")) {
+		usage("RADIO_PORT not set");
+	}
+
+	unless (defined($RADIO_SOURCE) && $RADIO_SOURCE =~ /^\d+$/) {
+		print STDERR "Invalid --source value: must be a non-negative integer\n";
+		return "N/A";
+	}
+
 	my $url = "http://$RADIO_HOSTNAME:$RADIO_PORT/$RADIO_JSON";
-	my $response = HTTP::Tiny->new(timeout => 5)->get($url);
+	my $response = eval { HTTP::Tiny->new(timeout => 5)->get($url) }
+	            // { success => 0, status => 0, reason => $@ };
 
 	unless ($response->{success}) {
-		print STDERR "Error while retrieving JSON $url
-";
+		my $status = $response->{status} // 0;
+		my $reason = $response->{reason} // '';
+		print STDERR "Error while retrieving JSON $url: HTTP $status $reason\n";
 		return "N/A";
 	}
 
 	my $line = $response->{content};
-	if (defined($line) && $line ne "") {
-		chomp($line);
-		my $json = decode_json $line;
-		my $sources = $json->{'icestats'}{'source'};
-		my $selected_source;
-
-		if (ref($sources) eq 'ARRAY') {
-			$selected_source = $sources->[$RADIO_SOURCE];
-		}
-		elsif (ref($sources) eq 'HASH') {
-			$selected_source = $sources;
-		}
-
-		if (defined($selected_source) && ref($selected_source) eq 'HASH') {
-			my %source = %{$selected_source};
-			if (defined($source{'listeners'})) {
-				return $source{'listeners'};
-			}
-			else {
-				return "N/A";
-			}
-		}
-		else {
-			return undef;
-		}
-	}
-	else {
+	unless (defined($line) && $line ne "") {
+		print STDERR "Empty Icecast JSON response from $url\n";
 		return "N/A";
 	}
+
+	chomp($line);
+
+	my $json = eval { decode_json($line) };
+	if ($@ || ref($json) ne 'HASH') {
+		my $err = $@ || 'decoded JSON is not a HASH';
+		chomp($err);
+		print STDERR "Invalid Icecast JSON from $url: $err\n";
+		return "N/A";
+	}
+
+	my $icestats = ref($json->{'icestats'}) eq 'HASH' ? $json->{'icestats'} : undef;
+	unless (defined($icestats)) {
+		print STDERR "Invalid Icecast JSON from $url: missing icestats object\n";
+		return "N/A";
+	}
+
+	my $sources = $icestats->{'source'};
+	my $selected_source;
+
+	if (ref($sources) eq 'ARRAY') {
+		if ($RADIO_SOURCE > $#$sources) {
+			print STDERR "Invalid --source index $RADIO_SOURCE: Icecast returned only " . scalar(@{$sources}) . " source(s)\n";
+			return "N/A";
+		}
+
+		$selected_source = $sources->[$RADIO_SOURCE];
+	}
+	elsif (ref($sources) eq 'HASH') {
+		$selected_source = $sources;
+	}
+	else {
+		print STDERR "Invalid Icecast JSON from $url: missing source object/array\n";
+		return "N/A";
+	}
+
+	unless (defined($selected_source) && ref($selected_source) eq 'HASH') {
+		print STDERR "Invalid Icecast source selection for source index $RADIO_SOURCE\n";
+		return "N/A";
+	}
+
+	my $listeners = $selected_source->{'listeners'};
+	return defined($listeners) && $listeners ne "" ? $listeners : "N/A";
 }

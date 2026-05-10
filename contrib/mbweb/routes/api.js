@@ -10,7 +10,7 @@ const {
   isAdministrator
 } = require('../lib/permissions');
 const { getDashboardData } = require('../lib/dashboardData');
-const { requireLogin } = require('../lib/sessionUser');
+const { requireFreshLogin } = require('../lib/sessionUser');
 
 const router = express.Router();
 
@@ -26,7 +26,7 @@ router.get('/health', (req, res) => {
 
 // /api/status — Owner only
 // getDashboardData exposes db.user, db.host, db.name → not public
-router.get('/api/status', requireLogin, async (req, res) => {
+router.get('/api/status', requireFreshLogin, async (req, res) => {
   if (!isOwner(req.session.user)) {
     return res.status(403).json({ ok: false, error: 'Forbidden' });
   }
@@ -50,14 +50,22 @@ router.get('/api/status', requireLogin, async (req, res) => {
   }
 });
 
-router.get('/api/dashboard', requireLogin, async (req, res) => {
+router.get('/api/dashboard', requireFreshLogin, async (req, res) => {
   try {
     const data = await getDashboardData(req);
     const user = req.session.user;
 
+    const me = {
+      nickname:       user.nickname,
+      username:       user.username || null,
+      global_level:   user.global_level,
+      global_role:    user.global_role,
+      channels_count: user.channels_count || 0
+    };
+
     res.json({
       ok: true,
-      me: user,
+      me,
       role: {
         global_level:  user.global_level,
         global_role:   user.global_role,

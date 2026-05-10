@@ -3,13 +3,13 @@
 const express = require('express');
 const { config, safeBase } = require('../lib/config');
 const { escapeHtml, renderPage } = require('../lib/render');
-const { requireLogin } = require('../lib/sessionUser');
+const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
 const { getNetworks } = require('../lib/mediabotRepository');
 
 const router = express.Router();
 
-router.get('/api/network', requireLogin, async (req, res) => {
+router.get('/api/network', requireFreshLogin, async (req, res) => {
   if (!isMaster(req.session.user)) {
     return res.status(403).json({ ok: false, error: 'Forbidden' });
   }
@@ -23,7 +23,7 @@ router.get('/api/network', requireLogin, async (req, res) => {
   }
 });
 
-router.get('/network', requireLogin, async (req, res) => {
+router.get('/network', requireFreshLogin, async (req, res) => {
   if (!isMaster(req.session.user)) {
     return res.status(403).send(renderPage('Access denied', `
 <section class="mbw-card">

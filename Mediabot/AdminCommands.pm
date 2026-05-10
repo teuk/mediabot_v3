@@ -39,6 +39,41 @@ our @EXPORT = qw(
     update_ctx
 );
 
+sub _radio_icecast_config {
+    my ($self) = @_;
+
+    my $conf = $self->{conf};
+
+    my $base_url      = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
+    my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || $base_url;
+    my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio160.mp3';
+    my $timeout       = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
+
+    $timeout = 5 unless defined $timeout && $timeout =~ /^\d+$/ && $timeout > 0;
+
+    return {
+        base_url      => $base_url,
+        public_base   => $public_base,
+        primary_mount => $primary_mount,
+        timeout       => $timeout,
+    };
+}
+
+sub _radio_icecast_client {
+    my ($self) = @_;
+
+    my $cfg = _radio_icecast_config($self);
+
+    my $radio = Mediabot::Radio::Icecast->new(
+        base_url => $cfg->{base_url},
+        timeout  => $cfg->{timeout},
+        logger   => $self->{logger},
+        ua       => Mediabot::External::_make_http(timeout => $cfg->{timeout}, verify_SSL => 0),  # shared HTTP factory
+    );
+
+    return ($radio, $cfg);
+}
+
 sub mbQuit_ctx {
     my ($ctx) = @_;
 
@@ -1290,19 +1325,9 @@ sub radioStatus_ctx {
 
     return unless $ctx->require_level('Master');
 
-    my $base_url      = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
-    my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || $base_url;
-    my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio160.mp3';
-    my $timeout       = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
-
-    $timeout = 5 unless defined $timeout && $timeout =~ /^\d+$/ && $timeout > 0;
-
-    my $radio = Mediabot::Radio::Icecast->new(
-        base_url => $base_url,
-        timeout  => $timeout,
-        logger   => $self->{logger},
-        ua       => Mediabot::External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
-    );
+    my ($radio, $radio_cfg) = _radio_icecast_client($self);
+    my $public_base   = $radio_cfg->{public_base};
+    my $primary_mount = $radio_cfg->{primary_mount};
 
     my $info = $radio->get_summary(
         primary_mount => $primary_mount,
@@ -1342,16 +1367,7 @@ sub radioMounts_ctx {
 
     return unless $ctx->require_level('Master');
 
-    my $base_url = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
-    my $timeout  = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
-    $timeout = 5 unless defined $timeout && $timeout =~ /^\d+$/ && $timeout > 0;
-
-    my $radio = Mediabot::Radio::Icecast->new(
-        base_url => $base_url,
-        timeout  => $timeout,
-        logger   => $self->{logger},
-        ua       => Mediabot::External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
-    );
+    my ($radio) = _radio_icecast_client($self);
 
     my $mounts = $radio->get_mounts();
     unless ($mounts->{ok}) {
@@ -1391,19 +1407,9 @@ sub displayRadioListeners_ctx {
     my $self = $ctx->bot;
     my $conf = $self->{conf};
 
-    my $base_url      = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
-    my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || $base_url;
-    my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio160.mp3';
-    my $timeout       = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
-
-    $timeout = 5 unless defined $timeout && $timeout =~ /^\d+$/ && $timeout > 0;
-
-    my $radio = Mediabot::Radio::Icecast->new(
-        base_url => $base_url,
-        timeout  => $timeout,
-        logger   => $self->{logger},
-        ua       => Mediabot::External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
-    );
+    my ($radio, $radio_cfg) = _radio_icecast_client($self);
+    my $public_base   = $radio_cfg->{public_base};
+    my $primary_mount = $radio_cfg->{primary_mount};
 
     my $info = $radio->get_summary(
         primary_mount => $primary_mount,
@@ -1498,19 +1504,9 @@ sub song_ctx {
     my $self = $ctx->bot;
     my $conf = $self->{conf};
 
-    my $base_url      = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
-    my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || $base_url;
-    my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio160.mp3';
-    my $timeout       = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
-
-    $timeout = 5 unless defined $timeout && $timeout =~ /^\d+$/ && $timeout > 0;
-
-    my $radio = Mediabot::Radio::Icecast->new(
-        base_url => $base_url,
-        timeout  => $timeout,
-        logger   => $self->{logger},
-        ua       => Mediabot::External::_make_http(timeout => $timeout, verify_SSL => 0),  # A2: shared factory
-    );
+    my ($radio, $radio_cfg) = _radio_icecast_client($self);
+    my $public_base   = $radio_cfg->{public_base};
+    my $primary_mount = $radio_cfg->{primary_mount};
 
     # A3: get_summary() -> _fetch_icestats() -> HTTP GET is synchronous;
     # bot blocks for up to $timeout seconds — acceptable for a local Icecast.

@@ -3,18 +3,19 @@
 const express = require('express');
 const { config, safeBase } = require('../lib/config');
 const { escapeHtml, renderPage } = require('../lib/render');
-const { requireLogin } = require('../lib/sessionUser');
+const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
 const { getQuotes, getQuoteChannels } = require('../lib/mediabotRepository');
+const { parsePositiveInt, cleanSearch } = require('../lib/requestParams');
 
 const router = express.Router();
 
-router.get('/api/quotes', requireLogin, async (req, res) => {
+router.get('/api/quotes', requireFreshLogin, async (req, res) => {
   try {
-    const channel = req.query.channel || null;
-    const search  = req.query.q       || null;
-    const page    = Math.max(1, Number(req.query.page) || 1);
-    const perPage = Math.min(Number(req.query.per_page) || 50, 200);
+    const channel = cleanSearch(req.query.channel, { maxLength: 80 });
+    const search  = cleanSearch(req.query.q);
+    const page    = parsePositiveInt(req.query.page, 1, { min: 1, max: 100000 });
+    const perPage = parsePositiveInt(req.query.per_page, 50, { min: 1, max: 200 });
 
     const [result, channels] = await Promise.all([
       getQuotes({ channel, search, page, perPage }),
@@ -36,10 +37,10 @@ router.get('/api/quotes', requireLogin, async (req, res) => {
   }
 });
 
-router.get('/quotes', requireLogin, async (req, res) => {
-  const channel = req.query.channel || null;
-  const search  = req.query.q       || null;
-  const page    = Math.max(1, Number(req.query.page) || 1);
+router.get('/quotes', requireFreshLogin, async (req, res) => {
+  const channel = cleanSearch(req.query.channel, { maxLength: 80 });
+  const search  = cleanSearch(req.query.q);
+  const page    = parsePositiveInt(req.query.page, 1, { min: 1, max: 100000 });
   const perPage = 50;
 
   let result, channels;

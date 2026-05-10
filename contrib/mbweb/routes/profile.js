@@ -3,22 +3,30 @@
 const express = require('express');
 const { config, safeBase } = require('../lib/config');
 const { escapeHtml, renderPage } = require('../lib/render');
-const { requireLogin } = require('../lib/sessionUser');
+const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
 const { getUserWithGlobalRole, getUserChannels, getUserHostmasks } = require('../lib/mediabotRepository');
 
 const router = express.Router();
 
-router.get('/api/me', requireLogin, async (req, res) => {
+router.get('/api/me', requireFreshLogin, async (req, res) => {
   // B2 — wrap in try/catch so DB errors return JSON, not HTML 500
   try {
     const profile = await getUserWithGlobalRole(req.session.user.id_user);
     const channels = await getUserChannels(req.session.user.id_user);
     const hostmasks = await getUserHostmasks(req.session.user.id_user);
 
+    const me = {
+      nickname:       req.session.user.nickname,
+      username:       req.session.user.username || null,
+      global_level:   req.session.user.global_level,
+      global_role:    req.session.user.global_role,
+      channels_count: req.session.user.channels_count || 0
+    };
+
     res.json({
       ok: true,
-      me: req.session.user,
+      me,
       profile,
       channels,
       hostmasks
@@ -30,7 +38,7 @@ router.get('/api/me', requireLogin, async (req, res) => {
 });
 
 
-router.get('/profile', requireLogin, async (req, res) => {
+router.get('/profile', requireFreshLogin, async (req, res) => {
   // B2 — try/catch for DB errors
   let profile, hostmasks, channels;
   try {

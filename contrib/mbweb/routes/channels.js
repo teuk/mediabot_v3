@@ -3,9 +3,10 @@
 const express = require('express');
 const { config, safeBase } = require('../lib/config');
 const { escapeHtml, renderPage } = require('../lib/render');
-const { requireLogin } = require('../lib/sessionUser');
+const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
 const { boolLabel } = require('../lib/viewHelpers');
+const { parsePositiveInt, cleanSearch } = require('../lib/requestParams');
 const {
   getAllChannels,
   getUserChannels,
@@ -17,12 +18,12 @@ const {
 
 const router = express.Router();
 
-router.get('/api/channels', requireLogin, async (req, res) => {
+router.get('/api/channels', requireFreshLogin, async (req, res) => {
   try {
     const user    = req.session.user;
-    const page    = Math.max(1, Number(req.query.page) || 1);
-    const perPage = Math.min(Number(req.query.per_page) || 50, 200);
-    const search  = req.query.q?.trim() || null;
+    const page    = parsePositiveInt(req.query.page, 1, { min: 1, max: 100000 });
+    const perPage = parsePositiveInt(req.query.per_page, 50, { min: 1, max: 200 });
+    const search  = cleanSearch(req.query.q);
 
     const result = isMaster(user)
       ? await getAllChannels({ page, perPage, search })
@@ -44,11 +45,11 @@ router.get('/api/channels', requireLogin, async (req, res) => {
   }
 });
 
-router.get('/channels', requireLogin, async (req, res) => {
+router.get('/channels', requireFreshLogin, async (req, res) => {
   const user = req.session.user;
   const PER_PAGE = 50;
-  const page     = isMaster(user) ? Math.max(1, Number(req.query.page) || 1) : 1;
-  const search   = isMaster(user) ? (req.query.q?.trim() || null) : null;
+  const page     = isMaster(user) ? parsePositiveInt(req.query.page, 1, { min: 1, max: 100000 }) : 1;
+  const search   = isMaster(user) ? cleanSearch(req.query.q) : null;
 
   function pageUrl(p) {
     const params = new URLSearchParams();
@@ -220,7 +221,7 @@ ${paginationBar(page, totalPages)}
 });
 
 
-router.get('/api/channels/:id', requireLogin, async (req, res) => {
+router.get('/api/channels/:id', requireFreshLogin, async (req, res) => {
   const idChannel = Number(req.params.id);
 
   if (!Number.isInteger(idChannel) || idChannel <= 0) {
@@ -248,7 +249,7 @@ router.get('/api/channels/:id', requireLogin, async (req, res) => {
   }
 });
 
-router.get('/channels/:id', requireLogin, async (req, res) => {
+router.get('/channels/:id', requireFreshLogin, async (req, res) => {
   const idChannel = Number(req.params.id);
 
   if (!Number.isInteger(idChannel) || idChannel <= 0) {

@@ -236,16 +236,8 @@ sub _fetch_icestats {
 
     my $url = $self->{base_url} . '/status-json.xsl';
 
-    my $res = eval { $self->{ua}->get($url) };
-
-    if (!$res) {
-        my $err = $@ || 'unknown HTTP error';
-        $self->_log(1, "Icecast fetch failed for $url: $err");
-        return {
-            ok    => 0,
-            error => "HTTP request failed: $err",
-        };
-    }
+    my $res = eval { $self->{ua}->get($url) }
+           // { success => 0, status => 0, reason => $@ };
 
     if (!$res->{success}) {
         my $status = join ' ',
@@ -260,9 +252,18 @@ sub _fetch_icestats {
         };
     }
 
+    my $content = $res->{content} // '';
+    unless ($content ne '') {
+        $self->_log(1, "Icecast empty response for $url");
+        return {
+            ok    => 0,
+            error => "Empty Icecast response",
+        };
+    }
+
     my $decoded;
     eval {
-        $decoded = decode_json($res->{content});
+        $decoded = decode_json($content);
         1;
     } or do {
         my $err = $@ || 'unknown JSON error';

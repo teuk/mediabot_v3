@@ -1,12 +1,13 @@
 # t/cases/123_contrib_icecast_source_selection.t
 # =============================================================================
-# Regression checks for contrib Icecast helper scripts.
+# Regression checks for contrib Icecast --source selection.
 #
-# Icecast status-json.xsl may expose icestats.source either as:
-#   - a HASH when there is one mount;
-#   - an ARRAY when there are multiple mounts.
+# Icecast status-json.xsl can return:
+#   - icestats.source as an ARRAY when several mounts exist;
+#   - icestats.source as a HASH when only one mount exists.
 #
-# The --source index must be used only for ARRAY sources.
+# The helper scripts must validate icestats first, then read source into a
+# scalar, then select the requested source safely.
 # =============================================================================
 
 use strict;
@@ -20,7 +21,7 @@ BEGIN {
 
 use File::Spec;
 
-sub _slurp_contrib_icecast_source_selection {
+sub _slurp_123 {
     my ($path) = @_;
 
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
@@ -35,54 +36,72 @@ return sub {
         File::Spec->catfile('.', 'contrib', 'icecast2', 'getIcecastListeners.pl'),
         File::Spec->catfile('.', 'contrib', 'icecast2', 'getIcecastTitle.pl'),
     ) {
-        my $src = _slurp_contrib_icecast_source_selection($script);
+        my $src = _slurp_123($script);
 
         $assert->like(
             $src,
             qr/"source=i"\s*=>\s*\\\$RADIO_SOURCE/,
-            "$script accepts --source"
+            "$script accepts --source integer option"
         );
 
         $assert->like(
             $src,
-            qr/my\s+\$sources\s*=\s*\$json->\{'icestats'\}\{'source'\}/,
-            "$script reads icestats.source into a scalar"
+            qr/my\s+\$icestats\s*=\s*ref\(\$json->\{'icestats'\}\)\s+eq\s+'HASH'\s+\?\s+\$json->\{'icestats'\}\s+:\s+undef;/,
+            "$script validates icestats before reading source"
         );
 
         $assert->like(
             $src,
-            qr/ref\(\$sources\)\s+eq\s+'ARRAY'/,
+            qr/unless\s+\(defined\(\$icestats\)\)/,
+            "$script handles missing icestats"
+        );
+
+        $assert->like(
+            $src,
+            qr/my\s+\$sources\s*=\s*\$icestats->\{'source'\};/,
+            "$script reads icestats.source into a scalar after validation"
+        );
+
+        $assert->like(
+            $src,
+            qr/if\s+\(ref\(\$sources\)\s+eq\s+'ARRAY'\)/,
             "$script handles Icecast multi-source ARRAY output"
         );
 
         $assert->like(
             $src,
-            qr/\$selected_source\s*=\s*\$sources->\[\$RADIO_SOURCE\]/,
-            "$script uses RADIO_SOURCE as the ARRAY index"
+            qr/\$RADIO_SOURCE\s+>\s+\$#\$sources/,
+            "$script checks out-of-range source index"
         );
 
         $assert->like(
             $src,
-            qr/ref\(\$sources\)\s+eq\s+'HASH'/,
+            qr/\$selected_source\s*=\s*\$sources->\[\$RADIO_SOURCE\];/,
+            "$script selects requested source from ARRAY"
+        );
+
+        $assert->like(
+            $src,
+            qr/elsif\s+\(ref\(\$sources\)\s+eq\s+'HASH'\)/,
             "$script handles Icecast single-source HASH output"
         );
 
         $assert->like(
             $src,
-            qr/defined\(\$selected_source\)\s*&&\s*ref\(\$selected_source\)\s+eq\s+'HASH'/,
-            "$script only dereferences a valid selected HASH source"
+            qr/\$selected_source\s*=\s*\$sources;/,
+            "$script uses HASH source directly when Icecast returns one source"
+        );
+
+        $assert->like(
+            $src,
+            qr/unless\s+\(defined\(\$selected_source\)\s+&&\s+ref\(\$selected_source\)\s+eq\s+'HASH'\)/,
+            "$script validates selected source"
         );
 
         $assert->unlike(
             $src,
-            qr/my\s+\@sources\s*=\s*\$json->\{'icestats'\}\{'source'\}/,
-            "$script no longer stores icestats.source in a misleading array"
-        );
-
-        $assert->unlike(
-            $src,
-            qr/my\s+%source\s*=\s*%\{\$sources\[0\]\}/,
-            "$script no longer always uses source index 0"
+            qr/my\s+\$sources\s*=\s*\$json->\{'icestats'\}\{'source'\}/,
+            "$script no longer reads icestats.source without validating icestats"
         );
     }
 };

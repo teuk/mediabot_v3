@@ -24,6 +24,18 @@ function has(columns, name) {
   return columns.includes(name);
 }
 
+function positiveInt(value, fallback, { min = 0, max = 1000 } = {}) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return fallback;
+  return Math.min(Math.max(n, min), max);
+}
+
+function cleanRepoSearch(value, maxLength = 120) {
+  const out = String(value || '').trim().replace(/\s+/g, ' ');
+  return out ? out.slice(0, maxLength) : null;
+}
+
+
 async function getUserWithGlobalRole(idUser) {
   const userCols = await getColumns('USER');
   const levelCols = await getColumns('USER_LEVEL');
@@ -110,6 +122,10 @@ async function getUserChannels(idUser) {
 }
 
 async function getAllChannels({ page = 0, perPage = 0, search = null } = {}) {
+  page = positiveInt(page, 1, { min: 1, max: 100000 });
+  perPage = positiveInt(perPage, 0, { min: 0, max: 200 });
+  search = cleanRepoSearch(search);
+
   const channelCols = await getColumns('CHANNEL');
   if (!channelCols.length) return { rows: [], total: 0 };
 
@@ -294,6 +310,10 @@ async function getKnownChannelRelatedTables() {
 
 
 async function getAllUsersWithRoles({ page = 0, perPage = 0, search = null } = {}) {
+  page = positiveInt(page, 1, { min: 1, max: 100000 });
+  perPage = positiveInt(perPage, 0, { min: 0, max: 200 });
+  search = cleanRepoSearch(search);
+
   const userCols = await getColumns('USER');
   const levelCols = await getColumns('USER_LEVEL');
 
@@ -393,6 +413,10 @@ async function getCounts() {
 
 
 async function getCommands({ category = null, search = null, limit = 200 } = {}) {
+  category = cleanRepoSearch(category, 80);
+  search = cleanRepoSearch(search);
+  limit = positiveInt(limit, 200, { min: 1, max: 500 });
+
   // PUBLIC_COMMANDS joined with USER (author) and PUBLIC_COMMANDS_CATEGORY
   const [catExists, cmdExists] = await Promise.all([
     tableExists('PUBLIC_COMMANDS_CATEGORY'),
@@ -463,6 +487,11 @@ async function getCommandCategories() {
 
 
 async function getQuotes({ channel = null, search = null, page = 1, perPage = 50 } = {}) {
+  channel = cleanRepoSearch(channel, 80);
+  search = cleanRepoSearch(search);
+  page = positiveInt(page, 1, { min: 1, max: 100000 });
+  perPage = positiveInt(perPage, 50, { min: 1, max: 200 });
+
   if (!(await tableExists('QUOTES'))) return { rows: [], total: 0 };
 
   const quoteCols   = await getColumns('QUOTES');
@@ -596,6 +625,41 @@ async function getNetworks() {
   }));
 }
 
+async function getActivePartylineSessions() {
+  const [rows] = await pool.execute(`
+    SELECT u.nickname, ul.description AS level_desc,
+           u.last_login
+    FROM USER u
+    JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
+    WHERE u.auth = 1
+    ORDER BY u.last_login DESC
+  `);
+
+  return rows || [];
+}
+
+async function getAuthenticatedDbUsers() {
+  return getActivePartylineSessions();
+}
+
+
+async function getRecentChannelBans(limit = 20) {
+  limit = positiveInt(limit, 20, { min: 1, max: 100 });
+
+  const [rows] = await pool.execute(`
+    SELECT cb.id_channel_ban, cb.mask, cb.ban_level,
+           cb.reason, cb.created_by_nick, cb.created_at,
+           cb.expires_at, cb.active, c.name AS channel_name
+    FROM CHANNEL_BAN cb
+    JOIN CHANNEL c ON c.id_channel = cb.id_channel
+    ORDER BY cb.created_at DESC
+    LIMIT ?
+  `, [limit]);
+
+  return rows || [];
+}
+
+
 module.exports = {
   tableExists,
   getColumns,
@@ -615,5 +679,8 @@ module.exports = {
   getAllUsersWithRoles,
   getUserChannelCountMap,
   getUserHostmasks,
-  getCounts
+  getCounts,
+  getActivePartylineSessions,
+  getAuthenticatedDbUsers,
+  getRecentChannelBans
 };

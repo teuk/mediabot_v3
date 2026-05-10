@@ -2856,9 +2856,26 @@ sub resolve_ctx {
     }
 
     my $input = $args[0];
+    $input =~ s/^\s+|\s+$//g;
+
+    unless ($input ne '') {
+        botNotice($self, $nick, "Syntax: resolve <hostname|IP>");
+        return;
+    }
+
+    if (length($input) > 253) {
+        botPrivmsg($self, $channel, "($nick) Invalid hostname/IP: input is too long");
+        return;
+    }
 
     # --- Case 1: Input is IPv4 → reverse DNS ---
     if ($input =~ /^\d{1,3}(?:\.\d{1,3}){3}$/) {
+
+        my @octets = split /\./, $input;
+        unless (@octets == 4 && !grep { $_ > 255 } @octets) {
+            botPrivmsg($self, $channel, "($nick) Invalid IPv4 format: $input");
+            return;
+        }
 
         my $packed = inet_aton($input);
         unless ($packed) {
@@ -2878,6 +2895,13 @@ sub resolve_ctx {
     }
 
     # --- Case 2: hostname → IPv4 via open() pipe (non-blocking read) ---
+    # Validate the hostname before spawning the resolver child. This avoids
+    # wasting a subprocess on malformed input and keeps IRC replies cleaner.
+    unless ($input =~ /\A(?=.{1,253}\z)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?\z/) {
+        botPrivmsg($self, $channel, "($nick) Invalid hostname: $input");
+        return;
+    }
+
     # We spawn a child perl process that does the blocking gethostbyname lookup
     # and sends the result back via a pipe. The parent reads with a short timeout
     # so the IRC event loop is not blocked indefinitely.

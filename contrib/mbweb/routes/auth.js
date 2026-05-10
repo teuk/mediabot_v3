@@ -20,7 +20,7 @@ function csrfMiddleware(req, res, next) {
   const expected = req.session?._csrf;
 
   if (!token || !expected || token !== expected) {
-    console.warn('[mbweb][csrf] token mismatch from IP', req.ip);
+    console.warn('[mbweb][csrf] token mismatch');
     return res.redirect(safeBase('/login') + '?error=' + encodeURIComponent('Invalid or expired form token. Please try again.'));
   }
   next();
@@ -49,11 +49,10 @@ function loginRateLimiter(req, res, next) {
     const retryAfterSec = Math.ceil((entry.resetAt - now) / 1000);
     const retryMin = Math.ceil(retryAfterSec / 60);
 
-    console.warn(
-      '[mbweb][rate-limit] login blocked for IP',
-      ip,
-      `(attempt ${entry.count}, retry in ${retryMin}mn)`
-    );
+    console.warn('[mbweb][rate-limit] login blocked', JSON.stringify({
+      attempts: entry.count,
+      retryMin
+    }));
 
     return res.status(429).send(renderPage('Too many attempts', `
 <section class="mbw-card">
@@ -119,11 +118,9 @@ router.post('/login', loginRateLimiter, csrfMiddleware, async (req, res) => {
 
   logAuth('POST received', {
     url: req.originalUrl,
-    ip: req.ip,
     bodyKeys: Object.keys(req.body || {}),
-    login,
-    passwordProvided: password.length > 0,
-    passwordLen: password.length
+    loginProvided: Boolean(login),
+    passwordProvided: password.length > 0
   });
 
   if (!login || !password) {
@@ -136,9 +133,7 @@ router.post('/login', loginRateLimiter, csrfMiddleware, async (req, res) => {
     logAuth('auth result', {
       ok: result.ok,
       reason: result.reason || null,
-      method: result.method || null,
-      id_user: result.user?.id_user || null,
-      nickname: result.user?.nickname || null
+      method: result.method || null
     });
 
     if (!result.ok) {
@@ -164,8 +159,6 @@ router.post('/login', loginRateLimiter, csrfMiddleware, async (req, res) => {
     delete req.session._csrf; // CSRF token consumed
 
     logAuth('login success', {
-      id_user: req.session.user.id_user,
-      nickname: req.session.user.nickname,
       global_level: req.session.user.global_level,
       global_role: req.session.user.global_role,
       channels_count: req.session.user.channels_count

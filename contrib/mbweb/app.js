@@ -73,6 +73,7 @@ app.use(config.baseUrl, quotesRoutes);
 app.use(config.baseUrl, commandsRoutes);
 app.use(config.baseUrl, usersRoutes);
 app.use(config.baseUrl, metricsRoutes);
+app.use(config.baseUrl, partylineRoutes);
 
 // ── 404 handler ───────────────────────────────────────────────────────────────
 app.use((req, res) => {

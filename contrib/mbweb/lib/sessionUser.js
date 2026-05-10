@@ -49,6 +49,20 @@ function requireLogin(req, res, next) {
   next();
 }
 
+async function requireFreshLogin(req, res, next) {
+  if (!req.session?.user) {
+    return res.redirect(safeBase('/login') + '?error=' + encodeURIComponent('Login required.'));
+  }
+
+  try {
+    await refreshSessionUser(req);
+    return next();
+  } catch (err) {
+    console.error('[mbweb][session] fresh refresh failed:', err.message);
+    return next();
+  }
+}
+
 async function buildSessionUser(rawUser, levelCol) {
   let profile = null;
   let channels = [];
@@ -99,6 +113,7 @@ async function buildSessionUser(rawUser, levelCol) {
 module.exports = {
   roleNameFromLevel,
   requireLogin,
+  requireFreshLogin,
   buildSessionUser,
   refreshSessionUser
 };

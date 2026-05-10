@@ -1600,3 +1600,119 @@ pre {
   max-height: 300px;
   overflow-y: auto;
 }
+
+/* ---------------------------------------------------------------------------
+   Readability compact pass — 2026-05-10
+   Keep the visual identity, but reduce oversized text/padding in dashboards
+   and dense tables.
+--------------------------------------------------------------------------- */
+
+body {
+  font-size: 15px;
+}
+
+.mbw-page {
+  padding: 2.1rem 0 3rem;
+}
+
+.mbw-topbar {
+  padding-top: 0.65rem;
+  padding-bottom: 0.65rem;
+}
+
+.mbw-brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 13px;
+}
+
+.mbw-nav {
+  font-size: 0.88rem;
+  gap: 0.65rem;
+}
+
+.mbw-login-btn,
+.mbw-primary,
+.mbw-secondary,
+button {
+  min-height: 38px;
+  padding: 0.58rem 0.85rem;
+}
+
+.mbw-hero {
+  padding: 1.1rem 1.25rem;
+}
+
+h1 {
+  font-size: 1.12rem;
+  margin-bottom: 0.7rem;
+}
+
+h2 {
+  font-size: 1.02rem;
+}
+
+p {
+  line-height: 1.55;
+}
+
+.mbw-card {
+  padding: 1.05rem;
+}
+
+.mbw-big {
+  font-size: 1.28rem;
+}
+
+.mbw-data-table {
+  font-size: 0.86rem;
+  min-width: 920px;
+}
+
+.mbw-data-table th {
+  padding: 0.66rem 0.78rem;
+  font-size: 0.70rem;
+}
+
+.mbw-data-table td {
+  padding: 0.62rem 0.78rem;
+}
+
+.mbw-user-main strong,
+.mbw-radio-main strong {
+  font-size: 0.9rem;
+}
+
+.mbw-user-main small,
+.mbw-radio-main small,
+.mbw-muted-cell,
+.mbw-date-cell {
+  font-size: 0.76rem;
+}
+
+.mbw-role-chip,
+.mbw-status-pill,
+.mbw-count-badge,
+.mbw-table-action {
+  font-size: 0.74rem;
+}
+
+.mbw-form input,
+.mbw-search-input,
+.mbw-select {
+  min-height: 40px;
+  padding: 0.62rem 0.75rem;
+  font-size: 0.86rem;
+}
+
+.mbw-metric-tile {
+  padding: 0.55rem 0.7rem;
+}
+
+.mbw-metric-tile strong {
+  font-size: 1rem;
+}
+
+.mbw-metric-tile span {
+  font-size: 0.68rem;
+}

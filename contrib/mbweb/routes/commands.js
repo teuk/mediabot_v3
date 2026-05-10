@@ -3,17 +3,18 @@
 const express = require('express');
 const { config, safeBase } = require('../lib/config');
 const { escapeHtml, renderPage } = require('../lib/render');
-const { requireLogin } = require('../lib/sessionUser');
+const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
 const { getCommands, getCommandCategories } = require('../lib/mediabotRepository');
+const { parsePositiveInt, cleanSearch } = require('../lib/requestParams');
 
 const router = express.Router();
 
-router.get('/api/commands', requireLogin, async (req, res) => {
+router.get('/api/commands', requireFreshLogin, async (req, res) => {
   try {
-    const category = req.query.category || null;
-    const search   = req.query.q        || null;
-    const limit    = Math.min(Number(req.query.limit) || 200, 500);
+    const category = cleanSearch(req.query.category, { maxLength: 80 });
+    const search   = cleanSearch(req.query.q);
+    const limit    = parsePositiveInt(req.query.limit, 200, { min: 1, max: 500 });
 
     const [commands, categories] = await Promise.all([
       getCommands({ category, search, limit }),
@@ -27,9 +28,9 @@ router.get('/api/commands', requireLogin, async (req, res) => {
   }
 });
 
-router.get('/commands', requireLogin, async (req, res) => {
-  const category = req.query.category || null;
-  const search   = req.query.q        || null;
+router.get('/commands', requireFreshLogin, async (req, res) => {
+  const category = cleanSearch(req.query.category, { maxLength: 80 });
+  const search   = cleanSearch(req.query.q);
 
   let commands, categories;
 
