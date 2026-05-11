@@ -24,6 +24,7 @@ use IO::Select;
 use String::IRC;
 use IPC::Open3;
 use Symbol qw(gensym);
+use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
 
 our @EXPORT = qw(
     _chatgpt_wrap
@@ -685,17 +686,22 @@ sub _fetch_url_chromium_dumpdom {
         return undef;
     }
 
-    # A3: chromium timeouts configurable via conf (chromium.VIRTUAL_TIME_BUDGET / chromium.ALARM_TIMEOUT)
-    my $_default_vtb     = int(eval { $self->{conf}->get('chromium.VIRTUAL_TIME_BUDGET') } // 3500);
-    my $_default_alarm   = int(eval { $self->{conf}->get('chromium.ALARM_TIMEOUT') }       // 12);
-    $_default_vtb   = 1000  if $_default_vtb   < 1000;  # min 1s
-    $_default_vtb   = 30000 if $_default_vtb   > 30000; # max 30s
-    $_default_alarm = 5     if $_default_alarm  < 5;     # min 5s
-    $_default_alarm = 60    if $_default_alarm  > 60;    # max 60s
+    # Chromium timeouts configurable via conf.
+    my $_default_vtb   = int(eval { $self->{conf}->get('chromium.VIRTUAL_TIME_BUDGET') } // 3500);
+    my $_default_alarm = int(eval { $self->{conf}->get('chromium.ALARM_TIMEOUT') }       // 12);
+
+    $_default_vtb   = 1000  if $_default_vtb < 1000;
+    $_default_vtb   = 30000 if $_default_vtb > 30000;
+    $_default_alarm = 5     if $_default_alarm < 5;
+    $_default_alarm = 60    if $_default_alarm > 60;
+
     my $virtual_time_budget = $opts{virtual_time_budget} // $_default_vtb;
     my $alarm_timeout       = $opts{alarm_timeout}       // $_default_alarm;
     my $lang                = $opts{lang}                // 'fr-FR';
     my $user_agent          = $opts{user_agent}          // 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36';
+
+    my $max_stdout = int($opts{max_stdout} // (2 * 1024 * 1024));
+    my $max_stderr = int($opts{max_stderr} // (256 * 1024));
 
     my @cmd = (
         $chromium,
@@ -703,6 +709,14 @@ sub _fetch_url_chromium_dumpdom {
         '--disable-gpu',
         '--no-sandbox',
         '--disable-dev-shm-usage',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--disable-extensions',
+        '--disable-sync',
+        '--disable-notifications',
+        '--disable-popup-blocking',
+        '--mute-audio',
+        '--metrics-recording-only',
         '--disable-blink-features=AutomationControlled',
         '--window-size=1366,900',
         "--lang=$lang",
@@ -720,41 +734,73 @@ sub _fetch_url_chromium_dumpdom {
     my $stderr = gensym;
     my $pid;
     my $stdout = '';
+    my $stderr_txt = '';
 
-    # NOTE: alarm()/SIGALRM is unsafe inside an IO::Async event loop — it can
-    # interrupt epoll_wait() mid-flight.  Use a watchdog waitpid() loop instead.
     my $ok = eval {
         $pid = open3('/dev/null', my $out, $stderr, @cmd);
 
-        # Read with a non-blocking loop so we can enforce a wall-clock timeout
-        # without SIGALRM. Poll every 100ms, bail after $alarm_timeout seconds.
+        # Important:
+        # Chromium can write a lot to stderr. If stderr is not drained while
+        # stdout is being read, Chromium may block on a full stderr pipe and
+        # the wrapper eventually reports ALARM. Drain both pipes together.
+        for my $fh ($out, $stderr) {
+            my $flags = fcntl($fh, F_GETFL, 0);
+            fcntl($fh, F_SETFL, $flags | O_NONBLOCK) if defined $flags;
+        }
+
+        my $sel = IO::Select->new();
+        $sel->add($out);
+        $sel->add($stderr);
+
+        my %kind = (
+            fileno($out)    => 'stdout',
+            fileno($stderr) => 'stderr',
+        );
+
         my $deadline = time() + $alarm_timeout;
-        my $sel = IO::Select->new($out);
 
-        while (1) {
+        while ($sel->count) {
             my $remaining = $deadline - time();
-            last if $remaining <= 0;
+            die "ALARM\n" if $remaining <= 0;
 
-            if ($sel->can_read(0.1)) {
-                my $chunk;
-                my $n = sysread($out, $chunk, 65536);
-                last unless defined $n && $n > 0;
-                $stdout .= $chunk;
-            } elsif (time() >= $deadline) {
-                die "ALARM\n";
+            my @ready = $sel->can_read($remaining > 0.1 ? 0.1 : $remaining);
+            next unless @ready;
+
+            for my $fh (@ready) {
+                my $chunk = '';
+                my $n = sysread($fh, $chunk, 65536);
+
+                if (!defined $n) {
+                    next if $!{EAGAIN} || $!{EWOULDBLOCK} || $!{EINTR};
+                    die "read failed: $!\n";
+                }
+
+                if ($n == 0) {
+                    $sel->remove($fh);
+                    close($fh);
+                    next;
+                }
+
+                if (($kind{fileno($fh)} // '') eq 'stdout') {
+                    $stdout .= $chunk if length($stdout) < $max_stdout;
+                }
+                else {
+                    $stderr_txt .= $chunk if length($stderr_txt) < $max_stderr;
+                }
             }
         }
-        close($out);
+
         1;
     };
 
     if (!$ok) {
         my $err = $@ || 'unknown error';
+
         if ($pid) {
             eval { kill 'TERM', $pid };
 
             my $reaped = 0;
-            for (1 .. 5) {
+            for (1 .. 10) {
                 my $waited = waitpid($pid, WNOHANG);
                 if ($waited == $pid || $waited == -1) {
                     $reaped = 1;
@@ -768,19 +814,20 @@ sub _fetch_url_chromium_dumpdom {
                 waitpid($pid, 0);
             }
         }
+
         $err =~ s/\s+$//;
         $self->{logger}->log(3, "_fetch_url_chromium_dumpdom() failed for $url: $err");
+
+        if (defined $stderr_txt && $stderr_txt ne '') {
+            my $errlog = substr($stderr_txt, 0, 500);
+            $errlog =~ s/\s+/ /g;
+            $self->{logger}->log(4, "_fetch_url_chromium_dumpdom() stderr-before-fail=$errlog");
+        }
+
         return undef;
     }
 
-    my $stderr_txt = '';
-    {
-        local $/;
-        $stderr_txt = <$stderr> // '';
-    }
-    close($stderr);
-
-    waitpid($pid, 0);
+    waitpid($pid, 0) if $pid;
     my $rc = $? >> 8;
 
     eval {
@@ -1782,11 +1829,19 @@ sub _handle_facebook {
     unless (defined $title && $title ne '') {
         $self->{logger}->log(4, "_handle_facebook() falling back to Chromium rendered DOM");
 
+        my $fb_vtb = int(eval { $self->{conf}->get('chromium.FACEBOOK_VIRTUAL_TIME_BUDGET') } // 6500);
+        my $fb_alarm = int(eval { $self->{conf}->get('chromium.FACEBOOK_ALARM_TIMEOUT') } // 22);
+
+        $fb_vtb = 1000 if $fb_vtb < 1000;
+        $fb_vtb = 30000 if $fb_vtb > 30000;
+        $fb_alarm = 5 if $fb_alarm < 5;
+        $fb_alarm = 60 if $fb_alarm > 60;
+
         my $dom = _fetch_url_chromium_dumpdom(
             $self,
             $fb_url,
-            virtual_time_budget => 4500,
-            alarm_timeout       => 14,
+            virtual_time_budget => $fb_vtb,
+            alarm_timeout       => $fb_alarm,
             lang                => 'fr-FR',
         );
 
@@ -3121,3 +3176,4 @@ sub get_tmdb_info {
 
 
 1;
+
