@@ -657,6 +657,23 @@ sub mbQuoteByNick {
     $sth_count->finish;
     my $count = $cnt_row->{cnt} // 0;
 
+    # A4: fallback to fuzzy match if exact prefix not found
+    if ($count == 0) {
+        my $fuzzy_like = "%$targetNick%";
+        my $sth_fuz = $self->{dbh}->prepare(q{
+            SELECT COUNT(*) AS cnt
+            FROM QUOTES q
+            JOIN CHANNEL c ON c.id_channel = q.id_channel
+            JOIN USER    u ON u.id_user    = q.id_user
+            WHERE c.name = ? AND LOWER(u.nickname) LIKE ?
+        });
+        if ($sth_fuz && $sth_fuz->execute($sChannel, $fuzzy_like)) {
+            my $r = $sth_fuz->fetchrow_hashref;
+            $sth_fuz->finish;
+            $count = $r->{cnt} // 0;
+            $like  = $fuzzy_like if $count > 0;
+        }
+    }
     unless ($count > 0) {
         botNotice($self, $sNick, "No quotes from $targetNick on $sChannel.");
         return undef;

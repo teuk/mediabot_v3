@@ -31,6 +31,9 @@ our @EXPORT = qw(
     mbSeen_ctx
     mbStats_ctx
     mbTop_ctx
+    mb8ball_ctx
+    mbRemind_ctx
+    deliverReminders
     setUserLevel
     userBirthday_ctx
     userCstat_ctx
@@ -2169,6 +2172,22 @@ sub mbStats_ctx {
     my $msg_count = $msg_row->{msg_count} // 0;
     my $last_msg  = $msg_row->{last_msg}  // 'never';
 
+    # A1: total messages on channel for percentage
+    my $sth_tot = $self->{dbh}->prepare(q{
+        SELECT COUNT(*) AS total
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ?
+    });
+    my $total = 0;
+    if ($sth_tot && $sth_tot->execute($channel)) {
+        my $r = $sth_tot->fetchrow_hashref;
+        $total = $r->{total} // 0;
+        $sth_tot->finish;
+    }
+    my $pct = ($total > 0 && $msg_count > 0)
+        ? sprintf(" (%.1f%%)", 100 * $msg_count / $total) : '';
+
     # Last seen (USER_SEEN)
     my $sth2 = $self->{dbh}->prepare(q{
         SELECT seen_at, event_type FROM USER_SEEN WHERE nick = ? LIMIT 1
@@ -2201,10 +2220,10 @@ sub mbStats_ctx {
     }
 
     # Format output
-    my $out = sprintf("%s%s: %d message%s on %s",
+    my $out = sprintf("%s%s: %d message%s%s on %s",
         $target, $level_desc,
         $msg_count, ($msg_count != 1 ? "s" : ""),
-        $channel
+        $pct, $channel
     );
     $out .= " | last msg: $last_msg"  if $msg_count > 0;
     $out .= " | last seen: $seen_at ($seen_type)" if $seen_at ne 'never';
@@ -2236,6 +2255,20 @@ sub mbTop_ctx {
         $n = 10 if $n > 10;
     }
 
+    # A2: fetch total first for percentage
+    my $sth_tot = $self->{dbh}->prepare(q{
+        SELECT COUNT(*) AS total
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ?
+    });
+    my $total = 0;
+    if ($sth_tot && $sth_tot->execute($channel)) {
+        my $r = $sth_tot->fetchrow_hashref;
+        $total = $r->{total} // 0;
+        $sth_tot->finish;
+    }
+
     my $sth = $self->{dbh}->prepare(q{
         SELECT cl.nick, COUNT(*) AS msg_count
         FROM CHANNEL_LOG cl
@@ -2265,13 +2298,176 @@ sub mbTop_ctx {
     my $rank = 1;
     for my $row (@rows) {
         my $msgs = $row->{msg_count};
-        botPrivmsg($self, $channel, sprintf("  %d. %-16s %d msg%s",
-            $rank++, $row->{nick}, $msgs, ($msgs != 1 ? "s" : "")));
+        my $pct = $total > 0 ? sprintf(" (%.1f%%)", 100 * $msgs / $total) : "";
+        botPrivmsg($self, $channel, sprintf("  %d. %-16s %d msg%s%s",
+            $rank++, $row->{nick}, $msgs, ($msgs != 1 ? "s" : ""), $pct));
     }
 
     logBot($self, $ctx->message, $channel, "top", "$n");
     return 1;
 }
 
+
+# ---------------------------------------------------------------------------
+# mb8ball_ctx --- !8ball <question>
+# ---------------------------------------------------------------------------
+sub mb8ball_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $question = join(' ', @args);
+    $question =~ s/^\s+|\s+$//g;
+
+    unless ($question ne '') {
+        botNotice($self, $nick, "Syntax: 8ball <question>");
+        return;
+    }
+
+    my @answers = (
+        'It is certain.',
+        'It is decidedly so.',
+        'Without a doubt.',
+        'Yes, definitely.',
+        'You may rely on it.',
+        'As I see it, yes.',
+        'Most likely.',
+        'Outlook good.',
+        'Yes.',
+        'Signs point to yes.',
+        'Reply hazy, try again.',
+        'Ask again later.',
+        'Better not tell you now.',
+        'Cannot predict now.',
+        'Concentrate and ask again.',
+        "Don't count on it.",
+        'My reply is no.',
+        'My sources say no.',
+        'Outlook not so good.',
+        'Very doubtful.',
+    );
+
+    my $answer = $answers[int(rand(scalar @answers))];
+    botPrivmsg($self, $channel, "\x038\x02[8ball]\x0f $nick: $answer");
+    logBot($self, $ctx->message, $channel, '8ball', $question);
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbRemind_ctx --- !remind <nick> <message>
+# Store a memo in DB; deliver it next time the target nick speaks.
+# Requires table: CREATE TABLE REMINDERS (
+#   id_reminder INT AUTO_INCREMENT PRIMARY KEY,
+#   id_channel INT NOT NULL,
+#   from_nick VARCHAR(64) NOT NULL,
+#   to_nick VARCHAR(64) NOT NULL,
+#   message VARCHAR(512) NOT NULL,
+#   created_at DATETIME DEFAULT NOW(),
+#   delivered TINYINT DEFAULT 0
+# );
+# ---------------------------------------------------------------------------
+sub mbRemind_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $target  = shift @args;
+    my $message = join(' ', @args);
+    $message =~ s/^\s+|\s+$//g;
+
+    unless (defined $target && $target ne '' && $message ne '') {
+        botNotice($self, $nick, "Syntax: remind <nick> <message>");
+        return;
+    }
+
+    if (length($message) > 512) {
+        botNotice($self, $nick, "Message too long (max 512 chars).");
+        return;
+    }
+
+    if (lc($target) eq lc($nick)) {
+        botNotice($self, $nick, "You can't remind yourself.");
+        return;
+    }
+
+    # Fetch id_channel inline (getIdChannel is in ChannelCommands scope)
+    my $sth_chan = $self->{dbh}->prepare(
+        'SELECT id_channel FROM CHANNEL WHERE name = ?'
+    );
+    my $id_channel;
+    if ($sth_chan && $sth_chan->execute($channel)) {
+        my $r = $sth_chan->fetchrow_hashref;
+        $sth_chan->finish;
+        $id_channel = $r->{id_channel} if $r;
+    }
+    unless ($id_channel) {
+        botNotice($self, $nick, "Channel not found.");
+        return;
+    }
+
+    my $sth = $self->{dbh}->prepare(q{
+        INSERT INTO REMINDERS (id_channel, from_nick, to_nick, message)
+        VALUES (?, ?, ?, ?)
+    });
+    unless ($sth && $sth->execute($id_channel, $nick, lc($target), $message)) {
+        $self->{logger}->log(1, "mbRemind_ctx() SQL error: $DBI::errstr");
+        botNotice($self, $nick, "Database error.");
+        return;
+    }
+    $sth->finish;
+
+    botNotice($self, $nick, "Reminder set for $target.");
+    logBot($self, $ctx->message, $channel, 'remind', "$target: $message");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# deliverReminders($self, $nick, $channel)
+# Called from mbCommandPublic on every message; delivers pending reminders.
+# ---------------------------------------------------------------------------
+sub deliverReminders {
+    my ($self, $nick, $channel) = @_;
+
+    $self->{logger}->log(4, "deliverReminders() nick=$nick chan=$channel");
+    my $sth_dc = $self->{dbh}->prepare(
+        'SELECT id_channel FROM CHANNEL WHERE name = ?'
+    );
+    my $id_channel;
+    if ($sth_dc && $sth_dc->execute($channel)) {
+        my $r = $sth_dc->fetchrow_hashref;
+        $sth_dc->finish;
+        $id_channel = $r->{id_channel} if $r;
+    }
+    return unless $id_channel;
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT id_reminder, from_nick, message, created_at
+        FROM REMINDERS
+        WHERE id_channel = ? AND to_nick = ? AND delivered = 0
+        ORDER BY created_at ASC
+        LIMIT 3
+    });
+    return unless $sth && $sth->execute($id_channel, lc($nick));
+
+    my @pending;
+    while (my $row = $sth->fetchrow_hashref) { push @pending, $row; }
+    $sth->finish;
+    return unless @pending;
+
+    for my $r (@pending) {
+        botPrivmsg($self, $channel,
+            "$nick: reminder from $r->{from_nick} ($r->{created_at}): $r->{message}");
+        my $sth_up = $self->{dbh}->prepare(q{
+            UPDATE REMINDERS SET delivered = 1 WHERE id_reminder = ?
+        });
+        if ($sth_up) { $sth_up->execute($r->{id_reminder}); $sth_up->finish; }
+    }
+}
 
 1;

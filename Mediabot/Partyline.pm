@@ -1163,6 +1163,10 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.metrics' }) if $self->{bot}->{metrics};
         $self->_cmd_metrics($stream, $id);
     }
+    elsif ($line =~ /^\.channels$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.channels' }) if $self->{bot}->{metrics};
+        $self->_cmd_channels($stream, $id);
+    }
     elsif ($line =~ /^\.status$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.status' }) if $self->{bot}->{metrics};
         $self->_cmd_status($stream, $id);
@@ -1412,6 +1416,7 @@ sub _cmd_help {
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
+      . "  .channels           - list joined channels with stats\r\n"
       . "  .status             - show runtime session status\r\n"
       . "  .uptime             - show bot and server uptime\r\n"
       . "  .match <handle>     - show user record (wildcards * ? allowed)\r\n"
@@ -2056,6 +2061,16 @@ sub _cmd_status {
             $lvl_display,
             $con_display));
     }
+    # A5: joined channels summary
+    my $bot        = $self->{bot};
+    my $bot_nick_s = eval { $bot->{irc}->nick_folded } // '';
+    my $chans_s    = $bot->{channels} || {};
+    my @joined_s   = grep {
+        my @n = eval { $bot->gethChannelsNicksOnChan($_) };
+        grep { lc($_) eq lc($bot_nick_s) } @n;
+    } sort keys %$chans_s;
+    $stream->write(sprintf("Channels: %s\r\n",
+        @joined_s ? join(", ", @joined_s) : "(none)"));
     $stream->write("--- end ---\r\n");
 }
 
@@ -2085,6 +2100,58 @@ sub _cmd_metrics {
         $stream->write("$line\r\n");
     }
     $stream->write("--- end ---\r\n");
+}
+
+
+# ---------------------------------------------------------------------------
+# .channels  - list joined channels with nick count and owner
+# ---------------------------------------------------------------------------
+sub _cmd_channels {
+    my ($self, $stream, $id) = @_;
+
+    my $bot      = $self->{bot};
+    my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
+    my $chans    = $bot->{channels} || {};
+    my $dbh      = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+
+    my @names = sort keys %$chans;
+    unless (@names) {
+        $stream->write("No channels.\r\n");
+        return;
+    }
+
+    # Batch-fetch owners (level 500) for all channels
+    my %owners;
+    if ($dbh) {
+        my $sth_o = $dbh->prepare(
+            "SELECT uc.id_channel, u.nickname FROM USER u
+              JOIN USER_CHANNEL uc ON uc.id_user = u.id_user
+              WHERE uc.level = 500"
+        );
+        if ($sth_o && $sth_o->execute()) {
+            while (my $r = $sth_o->fetchrow_hashref) {
+                $owners{ $r->{id_channel} } //= $r->{nickname};
+            }
+            $sth_o->finish;
+        }
+    }
+
+    $stream->write(sprintf("%-20s %-8s %-6s %s\r\n", "Channel", "Status", "Nicks", "Owner"));
+    $stream->write("-" x 60 . "\r\n");
+
+    for my $name (@names) {
+        my $chan_obj   = $chans->{$name} or next;
+        my $id_channel = eval { $chan_obj->get_id } // 0;
+
+        # Use same method as .stat to detect joined + nick count
+        my @nicks      = eval { $bot->gethChannelsNicksOnChan($name) };
+        my $joined     = (grep { lc($_) eq lc($bot_nick) } @nicks) ? "joined" : "parted";
+        my $nick_count = scalar @nicks;
+        my $owner      = $owners{$id_channel} // 'none';
+
+        $stream->write(sprintf("%-20s %-8s %-6d %s\r\n",
+            $name, $joined, $nick_count, $owner));
+    }
 }
 
 # ---------------------------------------------------------------------------

@@ -2752,6 +2752,11 @@ sub mbCalc_ctx {
         return;
     }
 
+    # A3/fix2: substitute named constants before eval so 'pi' -> literal
+    $expr =~ s/\bpi\b/3.14159265358979/g;
+    $expr =~ s/\btau\b/6.28318530717959/g;
+    $expr =~ s/\be\b/2.71828182845905/g;
+
     # Whitelist: digits, operators, parens, spaces, common math functions, pi/e
     unless ($expr =~ m{^[0-9+\-*/().\s%^,a-z_]+$}i) {
         botNotice($self, $nick, "Invalid characters in expression.");
@@ -2770,9 +2775,15 @@ sub mbCalc_ctx {
         alarm(3);
         my $res = do {
             no strict;
+            # A3: extended math — trig + rounding functions
             use POSIX qw(floor ceil);
-            my $pi = 3.14159265358979;
-            my $e  = 2.71828182845905;
+            use POSIX qw(sin cos tan asin acos atan2 fmod pow);
+            my $pi  = 3.14159265358979;
+            my $e   = 2.71828182845905;
+            my $tau = 6.28318530717959;
+            sub round { int($_[0] + 0.5 * ($_[0] >= 0 ? 1 : -1)) }
+            sub deg2rad { $_[0] * 3.14159265358979 / 180 }  # A3/fix: no closure on \$pi
+            sub rad2deg { $_[0] * 180 / 3.14159265358979 }  # A3/fix: no closure on \$pi
             ## no critic
             eval $expr;  ## safe: expression is already whitelist-validated
         };

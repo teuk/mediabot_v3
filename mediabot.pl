@@ -1092,6 +1092,9 @@ sub on_message_PRIVMSG {
                 event_type => 'message',
                 last_msg   => $what,
             ) } if $sn;
+        # F13: deliver pending reminders on every public channel message
+        eval { Mediabot::UserCommands::deliverReminders($mediabot, $who, $where) };
+        if ($@) { $mediabot->{logger}->log(1, "deliverReminders error: $@"); }
         }
         if ($mediabot->{metrics}) {
             $mediabot->{metrics}->inc(
