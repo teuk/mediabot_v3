@@ -33,7 +33,14 @@ our @EXPORT = qw(
     mbTop_ctx
     mb8ball_ctx
     mbRemind_ctx
+    mbRemindList_ctx
+    mbRemindCancel_ctx
     deliverReminders
+    mbCalcLast_ctx
+    mbWordCount_ctx
+    mbAlias_ctx
+    mbStreak_ctx
+    mbSlap_ctx
     setUserLevel
     userBirthday_ctx
     userCstat_ctx
@@ -2156,8 +2163,9 @@ sub mbStats_ctx {
 
     # Message count + last message on this channel
     my $sth = $self->{dbh}->prepare(q{
-        SELECT COUNT(*) AS msg_count,
-               MAX(ts)  AS last_msg
+        SELECT COUNT(*)  AS msg_count,
+               MAX(ts)  AS last_msg,
+               MIN(ts)  AS first_seen
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE cl.nick = ? AND c.name = ?
@@ -2169,10 +2177,11 @@ sub mbStats_ctx {
     my $msg_row = $sth->fetchrow_hashref;
     $sth->finish;
 
-    my $msg_count = $msg_row->{msg_count} // 0;
-    my $last_msg  = $msg_row->{last_msg}  // 'never';
+    my $msg_count  = $msg_row->{msg_count}  // 0;
+    my $last_msg   = $msg_row->{last_msg}   // 'never';
+    my $first_seen = $msg_row->{first_seen} // undef;
 
-    # A1: total messages on channel for percentage
+    # A1: total messages on channel for percentage (global, no period filter)
     my $sth_tot = $self->{dbh}->prepare(q{
         SELECT COUNT(*) AS total
         FROM CHANNEL_LOG cl
@@ -2225,7 +2234,8 @@ sub mbStats_ctx {
         $msg_count, ($msg_count != 1 ? "s" : ""),
         $pct, $channel
     );
-    $out .= " | last msg: $last_msg"  if $msg_count > 0;
+    $out .= " | first seen: $first_seen" if $first_seen && $msg_count > 0;
+    $out .= " | last msg: $last_msg"   if $msg_count > 0;
     $out .= " | last seen: $seen_at ($seen_type)" if $seen_at ne 'never';
     $out .= " | not in database" unless $id_user || $msg_count;
 
@@ -2250,9 +2260,19 @@ sub mbTop_ctx {
 
     my $n = 5;
     if (@args && $args[0] =~ /^\d+$/) {
-        $n = int($args[0]);
+        $n = int(shift @args);
         $n = 1  if $n < 1;
         $n = 10 if $n > 10;
+    }
+
+    # A4: optional period filter e.g. !top 5 30d / 7d / 24h
+    my $period_sql  = '';
+    my $period_label = '';
+    if (@args && $args[0] =~ /^(\d+)(d|h)$/i) {
+        my ($val, $unit) = ($1, lc $2);
+        my $interval = $unit eq 'h' ? "$val HOUR" : "$val DAY";
+        $period_sql   = "AND cl.ts >= DATE_SUB(NOW(), INTERVAL $interval)";
+        $period_label = " (last ${val}${unit})";
     }
 
     # A2: fetch total first for percentage
@@ -2269,15 +2289,13 @@ sub mbTop_ctx {
         $sth_tot->finish;
     }
 
-    my $sth = $self->{dbh}->prepare(q{
-        SELECT cl.nick, COUNT(*) AS msg_count
-        FROM CHANNEL_LOG cl
-        JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ?
-        GROUP BY cl.nick
-        ORDER BY msg_count DESC
-        LIMIT ?
-    });
+    my $sth = $self->{dbh}->prepare(
+        "SELECT cl.nick, COUNT(*) AS msg_count"
+        . " FROM CHANNEL_LOG cl"
+        . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
+        . " WHERE c.name = ? $period_sql"
+        . " GROUP BY cl.nick ORDER BY msg_count DESC LIMIT ?"
+    );
     unless ($sth && $sth->execute($channel, $n)) {
         botNotice($self, $nick, "Database error.");
         return;
@@ -2294,7 +2312,7 @@ sub mbTop_ctx {
         return 1;
     }
 
-    botPrivmsg($self, $channel, "Top $n on $channel:");
+    botPrivmsg($self, $channel, "Top $n on $channel$period_label:");
     my $rank = 1;
     for my $row (@rows) {
         my $msgs = $row->{msg_count};
@@ -2468,6 +2486,297 @@ sub deliverReminders {
         });
         if ($sth_up) { $sth_up->execute($r->{id_reminder}); $sth_up->finish; }
     }
+}
+
+# ---------------------------------------------------------------------------
+# mbRemindList_ctx --- !remindlist
+# Show pending reminders sent by the calling nick.
+# ---------------------------------------------------------------------------
+sub mbRemindList_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT r.id_reminder, r.to_nick, r.message, r.created_at
+        FROM REMINDERS r
+        JOIN CHANNEL c ON c.id_channel = r.id_channel
+        WHERE r.from_nick = ? AND c.name = ? AND r.delivered = 0
+        ORDER BY r.created_at ASC
+    });
+    unless ($sth && $sth->execute($nick, $channel)) {
+        botNotice($self, $nick, 'Database error.');
+        return;
+    }
+    my @rows;
+    while (my $r = $sth->fetchrow_hashref) { push @rows, $r; }
+    $sth->finish;
+
+    unless (@rows) {
+        botNotice($self, $nick, 'No pending reminders.');
+        return 1;
+    }
+
+    botNotice($self, $nick, scalar(@rows) . ' pending reminder(s):');
+    for my $r (@rows) {
+        botNotice($self, $nick, sprintf('  #%d -> %s: "%s" (%s)',
+            $r->{id_reminder}, $r->{to_nick},
+            $r->{message}, $r->{created_at}));
+    }
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbRemindCancel_ctx --- !remind cancel <id>
+# Cancel a pending reminder by ID (must be from the calling nick).
+# ---------------------------------------------------------------------------
+sub mbRemindCancel_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $id = shift @args;
+    unless (defined $id && $id =~ /^\d+$/) {
+        botNotice($self, $nick, 'Syntax: remind cancel <id>  (see !remindlist)');
+        return;
+    }
+
+    my $sth = $self->{dbh}->prepare(q{
+        UPDATE REMINDERS SET delivered = 2
+        WHERE id_reminder = ? AND from_nick = ? AND delivered = 0
+    });
+    unless ($sth && $sth->execute($id, $nick)) {
+        botNotice($self, $nick, 'Database error.');
+        return;
+    }
+    my $rows = $sth->rows;
+    $sth->finish;
+
+    if ($rows > 0) {
+        botNotice($self, $nick, "Reminder #$id cancelled.");
+    } else {
+        botNotice($self, $nick, "Reminder #$id not found or already delivered.");
+    }
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbSlap_ctx --- !slap [nick]
+# Classic IRC slap via CTCP ACTION.
+# ---------------------------------------------------------------------------
+sub mbSlap_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $target = $args[0] // $nick;
+    $target = $nick if $target eq '';
+
+    my @weapons = (
+        'a large trout',
+        'a wet noodle',
+        'a rubber chicken',
+        'a copy of the Camel Book',
+        'a frozen pizza',
+        'a soggy newspaper',
+        'a 10kg bag of CPAN modules',
+        'a Perl regex manual',
+    );
+    my $weapon = $weapons[int(rand(scalar @weapons))];
+
+    botAction($self, $channel, "slaps $target with $weapon");
+    logBot($self, $ctx->message, $channel, 'slap', $target);
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbCalcLast_ctx --- !calclast [n]
+# Show the last N calc results for the calling nick (default 3).
+# ---------------------------------------------------------------------------
+sub mbCalcLast_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    my $history = $self->{_calc_history}{$nick} // [];
+    unless (@$history) {
+        botNotice($self, $nick, 'No calc history yet.');
+        return 1;
+    }
+    botNotice($self, $nick, 'Last calc(s):');
+    for my $entry (@$history) {
+        botNotice($self, $nick, "  $entry");
+    }
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbWordCount_ctx --- !wordcount [nick]
+# Count distinct words spoken by a nick on the channel.
+# ---------------------------------------------------------------------------
+sub mbWordCount_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $target  = $args[0] ? lc($args[0]) : lc($nick);
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT publictext FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE cl.nick = ? AND c.name = ? AND publictext IS NOT NULL
+    });
+    unless ($sth && $sth->execute($target, $channel)) {
+        botNotice($self, $nick, 'Database error.');
+        return;
+    }
+    my %words;
+    while (my ($text) = $sth->fetchrow_array) {
+        $words{lc $_}++ for split /\W+/, ($text // '');
+    }
+    $sth->finish;
+    delete $words{''};
+
+    my $total  = scalar keys %words;
+    my $msgs   = scalar grep { 1 } values %words;
+    botPrivmsg($self, $channel, "$target: $total distinct word(s) on $channel");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbAlias_ctx --- !alias <alias> <command>
+# Create/delete/list IRC command aliases (Owner only). Stored in BOT_ALIAS.
+# Requires: CREATE TABLE BOT_ALIAS (
+#   id_alias INT AUTO_INCREMENT PRIMARY KEY,
+#   alias VARCHAR(32) NOT NULL UNIQUE,
+#   command VARCHAR(64) NOT NULL,
+#   created_by VARCHAR(64),
+#   created_at DATETIME DEFAULT NOW()
+# ) ENGINE=InnoDB;
+# ---------------------------------------------------------------------------
+sub mbAlias_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    return unless $ctx->require_level('Owner');
+
+    my $subcmd = lc(shift @args // '');
+
+    if ($subcmd eq 'list') {
+        my $sth = $self->{dbh}->prepare('SELECT alias, command FROM BOT_ALIAS ORDER BY alias');
+        unless ($sth && $sth->execute()) {
+            botNotice($self, $nick, 'Database error.'); return;
+        }
+        my @rows;
+        while (my $r = $sth->fetchrow_hashref) { push @rows, $r; }
+        $sth->finish;
+        unless (@rows) { botNotice($self, $nick, 'No aliases defined.'); return 1; }
+        botNotice($self, $nick, $_->{alias} . ' => ' . $_->{command}) for @rows;
+        return 1;
+    }
+
+    if ($subcmd eq 'del') {
+        my $alias = lc(shift @args // '');
+        unless ($alias =~ /^[a-z0-9_-]+$/) {
+            botNotice($self, $nick, 'Syntax: alias del <alias>'); return;
+        }
+        my $sth = $self->{dbh}->prepare('DELETE FROM BOT_ALIAS WHERE alias = ?');
+        if ($sth && $sth->execute($alias) && $sth->rows > 0) {
+            $sth->finish;
+            delete $self->{_alias_cache}{$alias};
+            botNotice($self, $nick, "Alias '$alias' deleted.");
+        } else {
+            $sth->finish if $sth;
+            botNotice($self, $nick, "Alias '$alias' not found.");
+        }
+        return 1;
+    }
+
+    # alias set <alias> <command>
+    my $alias   = lc($subcmd);
+    my $command = lc(shift @args // '');
+    unless ($alias =~ /^[a-z0-9_-]{1,32}$/ && $command =~ /^[a-z0-9_-]{1,64}$/) {
+        botNotice($self, $nick, 'Syntax: alias <alias> <command> | alias del <alias> | alias list');
+        return;
+    }
+
+    my $sth = $self->{dbh}->prepare(q{
+        INSERT INTO BOT_ALIAS (alias, command, created_by)
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE command = VALUES(command), created_by = VALUES(created_by)
+    });
+    unless ($sth && $sth->execute($alias, $command, $nick)) {
+        botNotice($self, $nick, 'Database error.'); return;
+    }
+    $sth->finish;
+    $self->{_alias_cache}{$alias} = $command;
+    botNotice($self, $nick, "Alias '$alias' => '$command' set.");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbStreak_ctx --- !streak [nick]
+# Count consecutive days of activity on the channel.
+# ---------------------------------------------------------------------------
+sub mbStreak_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $target  = $args[0] ? lc($args[0]) : lc($nick);
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT DISTINCT DATE(ts) AS day
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE cl.nick = ? AND c.name = ?
+        ORDER BY day DESC
+        LIMIT 365
+    });
+    unless ($sth && $sth->execute($target, $channel)) {
+        botNotice($self, $nick, 'Database error.');
+        return;
+    }
+    my @days;
+    while (my ($day) = $sth->fetchrow_array) { push @days, $day; }
+    $sth->finish;
+
+    unless (@days) {
+        botPrivmsg($self, $channel, "$target: no activity found on $channel.");
+        return 1;
+    }
+
+    # Count consecutive days from most recent
+    my $streak = 1;
+    for my $i (1 .. $#days) {
+        use Time::Piece;
+        my $d1 = Time::Piece->strptime($days[$i-1], '%Y-%m-%d');
+        my $d2 = Time::Piece->strptime($days[$i],   '%Y-%m-%d');
+        last unless ($d1 - $d2)->days == 1;
+        $streak++;
+    }
+
+    botPrivmsg($self, $channel,
+        "$target: $streak consecutive day(s) active on $channel (most recent: $days[0])");
+    return 1;
 }
 
 1;

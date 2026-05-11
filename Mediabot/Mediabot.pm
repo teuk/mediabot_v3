@@ -1178,12 +1178,34 @@ sub mbCommandPublic {
         top          => sub { mbTop_ctx($ctx) },
         calc         => sub { mbCalc_ctx($ctx) },
         '8ball'      => sub { mb8ball_ctx($ctx) },
-        remind       => sub { mbRemind_ctx($ctx) },
+        remind       => sub {
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            if (@a && lc($a[0]) eq 'cancel') {
+                shift @{ $ctx->args };
+                mbRemindCancel_ctx($ctx);
+            } else { mbRemind_ctx($ctx) }
+        },
+        remindlist   => sub { mbRemindList_ctx($ctx) },
+        calclast     => sub { mbCalcLast_ctx($ctx) },
+        wordcount    => sub { mbWordCount_ctx($ctx) },
+        alias        => sub { mbAlias_ctx($ctx) },
+        streak       => sub { mbStreak_ctx($ctx) },
+        slap         => sub { mbSlap_ctx($ctx) },
         stats        => sub { mbStats_ctx($ctx) },
         top          => sub { mbTop_ctx($ctx) },
         calc         => sub { mbCalc_ctx($ctx) },
         '8ball'      => sub { mb8ball_ctx($ctx) },
-        remind       => sub { mbRemind_ctx($ctx) },
+        remind       => sub {
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            if (@a && lc($a[0]) eq 'cancel') { shift @{ $ctx->args }; mbRemindCancel_ctx($ctx); }
+            else { mbRemind_ctx($ctx) }
+        },
+        remindlist   => sub { mbRemindList_ctx($ctx) },
+        calclast     => sub { mbCalcLast_ctx($ctx) },
+        wordcount    => sub { mbWordCount_ctx($ctx) },
+        alias        => sub { mbAlias_ctx($ctx) },
+        streak       => sub { mbStreak_ctx($ctx) },
+        slap         => sub { mbSlap_ctx($ctx) },
         date         => sub { displayDate_ctx($ctx) },
         weather      => sub { displayWeather_ctx($ctx) },
         meteo        => sub { displayWeather_ctx($ctx) },

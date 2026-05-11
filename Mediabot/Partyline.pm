@@ -1163,6 +1163,10 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.metrics' }) if $self->{bot}->{metrics};
         $self->_cmd_metrics($stream, $id);
     }
+    elsif ($line =~ /^\.bcast\s+(.*)/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.bcast' }) if $self->{bot}->{metrics};
+        $self->_cmd_bcast($stream, $id, $1);
+    }
     elsif ($line =~ /^\.channels$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.channels' }) if $self->{bot}->{metrics};
         $self->_cmd_channels($stream, $id);
@@ -1416,6 +1420,7 @@ sub _cmd_help {
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
+      . "  .bcast <msg>        - broadcast to all joined channels (Master+)\r\n"
       . "  .channels           - list joined channels with stats\r\n"
       . "  .status             - show runtime session status\r\n"
       . "  .uptime             - show bot and server uptime\r\n"
@@ -2152,6 +2157,42 @@ sub _cmd_channels {
         $stream->write(sprintf("%-20s %-8s %-6d %s\r\n",
             $name, $joined, $nick_count, $owner));
     }
+}
+
+
+# ---------------------------------------------------------------------------
+# .bcast <message>  - broadcast a message to all joined channels (Master+)
+# ---------------------------------------------------------------------------
+sub _cmd_bcast {
+    my ($self, $stream, $id, $msg) = @_;
+
+    my $bot      = $self->{bot};
+    my $session  = $self->{sessions}{$id} // {};
+    my $level    = $session->{level} // 0;
+
+    unless (defined $level && $level <= 1) {  # Owner=0, Master=1 (inverted scale)
+        $stream->write("Permission denied (Master+ required).\r\n");
+        return;
+    }
+
+    unless (defined $msg && $msg =~ /\S/) {
+        $stream->write("Usage: .bcast <message>\r\n");
+        return;
+    }
+
+    my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
+    my $chans    = $bot->{channels} || {};
+    my $sent     = 0;
+
+    for my $name (sort keys %$chans) {
+        my @nicks = eval { $bot->gethChannelsNicksOnChan($name) };
+        next unless grep { lc($_) eq lc($bot_nick) } @nicks;
+        Mediabot::Helpers::botPrivmsg($bot, $name, "[broadcast] $msg");
+        $sent++;
+    }
+
+    $stream->write("Broadcast sent to $sent channel(s).\r\n");
+    $bot->{logger}->log(2, "Partyline: bcast from $session->{login}: $msg");
 }
 
 # ---------------------------------------------------------------------------

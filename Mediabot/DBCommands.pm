@@ -2809,6 +2809,11 @@ sub mbCalc_ctx {
         ? sprintf("%d", $result)
         : sprintf("%g", $result);
 
+    # A5: store in per-nick history (last 3)
+    $self->{_calc_history}{$nick} //= [];
+    unshift @{ $self->{_calc_history}{$nick} }, "$expr = $formatted";
+    splice @{ $self->{_calc_history}{$nick} }, 3;
+
     botPrivmsg($self, $channel, "$expr = $formatted");
     logBot($self, $ctx->message, $channel, "calc", $expr);
     return 1;
