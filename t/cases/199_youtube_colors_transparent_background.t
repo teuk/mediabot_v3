@@ -135,7 +135,7 @@ return sub {
     );
 
     for my $helper (
-        [ '_yt_text', 0 ],
+        [ '_yt_text', 14 ],
         [ '_yt_sep',  7 ],
         [ '_yt_meta', 14 ],
     ) {

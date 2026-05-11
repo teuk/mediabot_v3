@@ -155,9 +155,16 @@ messageln "Configure $CONFIG_FILE (Hit CTRL-C to abort and launch ./configure ag
 read -n 1 -s -r -p "[$(date +'%d/%m/%Y %H:%M:%S')] Press any key to continue"
 echo
 INSTALL_DIR=$(dirname $CONFIG_FILE)
+RUN_DIR="$INSTALL_DIR/run"
+
 messageln "The bot will be installed in $INSTALL_DIR with $CONFIG_FILE configuration file"
+messageln "Runtime files will be stored in $RUN_DIR"
 read -n 1 -s -r -p "[$(date +'%d/%m/%Y %H:%M:%S')] Press any key to continue"
 echo
+
+mkdir -p "$RUN_DIR"
+chmod 750 "$RUN_DIR"
+ok_failed $? "Unable to create runtime directory $RUN_DIR"
 
 echo "[main]
 MAIN_PROG_NAME=Mediabot
@@ -173,6 +180,7 @@ USER_SEEN_RETENTION_DAYS=180
 DCC_DEBUG_HINTS=0
 PARTYLINE_EVAL_ENABLED=0
 PARTYLINE_EVAL_TIMEOUT_SECONDS=5
+PARTYLINE_STATUS_JSON=$RUN_DIR/partyline_sessions.json
 MAIN_PROG_INITIAL_TRIGGER=1
 NICK_TRIGGER=1" >$CONFIG_FILE
 

@@ -1264,7 +1264,7 @@ sub on_message_PRIVMSG {
                 $mediabot->{logger}->log(
                     2,
                     "DCC CHAT request from $who via Mediabot::DCC parser ip=$ip_int port=$port"
-                    . (defined $token ? " token=$token" : "")
+                    . (defined $token ? " token_present=1" : "")
                 );
 
                 $mediabot->_handle_dcc_chat_request($message, $who, $ip_int, $port, $token);
@@ -1374,7 +1374,7 @@ sub on_message_ctcp_DCC {
         $mediabot->{logger}->log(
             2,
             "CTCP DCC CHAT request from $who via Mediabot::DCC parser ip=$ip_int port=$port"
-            . (defined $token ? " token=$token" : "")
+            . (defined $token ? " token_present=1" : "")
         );
 
         $mediabot->_handle_dcc_chat_request($message, $who, $ip_int, $port, $token);
