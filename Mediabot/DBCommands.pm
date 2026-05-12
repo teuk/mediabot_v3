@@ -2777,13 +2777,18 @@ sub mbCalc_ctx {
             no strict;
             # A3: extended math — trig + rounding functions
             use POSIX qw(floor ceil);
-            use POSIX qw(sin cos tan asin acos atan2 fmod pow);
             my $pi  = 3.14159265358979;
             my $e   = 2.71828182845905;
             my $tau = 6.28318530717959;
-            sub round { int($_[0] + 0.5 * ($_[0] >= 0 ? 1 : -1)) }
-            sub deg2rad { $_[0] * 3.14159265358979 / 180 }  # A3/fix: no closure on \$pi
-            sub rad2deg { $_[0] * 180 / 3.14159265358979 }  # A3/fix: no closure on \$pi
+
+            sub round   { int($_[0] + 0.5 * ($_[0] >= 0 ? 1 : -1)) }
+            sub tan     { sin($_[0]) / cos($_[0]) }
+            sub asin    { atan2($_[0], sqrt(1 - $_[0] * $_[0])) }
+            sub acos    { atan2(sqrt(1 - $_[0] * $_[0]), $_[0]) }
+            sub pow     { $_[0] ** $_[1] }
+            sub fmod    { $_[0] % $_[1] }
+            sub deg2rad { $_[0] * 3.14159265358979 / 180 }
+            sub rad2deg { $_[0] * 180 / 3.14159265358979 }
             ## no critic
             eval $expr;  ## safe: expression is already whitelist-validated
         };

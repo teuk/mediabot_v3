@@ -1217,47 +1217,6 @@ sub mbCommandPublic {
         pollstop     => sub { mbPollStop_ctx($ctx) },
         note         => sub { mbNote_ctx($ctx) },
         notes        => sub { mbNotes_ctx($ctx) },
-        stats        => sub { mbStats_ctx($ctx) },
-        top          => sub { mbTop_ctx($ctx) },
-        calc         => sub { mbCalc_ctx($ctx) },
-        '8ball'      => sub { mb8ball_ctx($ctx) },
-        remind       => sub {
-            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-            if (@a && lc($a[0]) eq 'cancel') { shift @{ $ctx->args }; mbRemindCancel_ctx($ctx); }
-            else { mbRemind_ctx($ctx) }
-        },
-        remindlist   => sub { mbRemindList_ctx($ctx) },
-        calclast     => sub { mbCalcLast_ctx($ctx) },
-        wordcount    => sub { mbWordCount_ctx($ctx) },
-        alias        => sub { mbAlias_ctx($ctx) },
-        streak       => sub { mbStreak_ctx($ctx) },
-        slap         => sub { mbSlap_ctx($ctx) },
-        karma        => sub { mbKarma_ctx($ctx) },
-        karmatop     => sub { mbKarmaTop_ctx($ctx) },
-        roll         => sub { mbRoll_ctx($ctx) },
-        flip         => sub { mbFlip_ctx($ctx) },
-        choose       => sub { mbChoose_ctx($ctx) },
-        morse        => sub { mbMorse_ctx($ctx) },
-        abbrev       => sub { mbAbbrev_ctx($ctx) },
-        compare      => sub { mbCompare_ctx($ctx) },
-        heatmap      => sub { mbHeatmap_ctx($ctx) },
-        monthstats   => sub { mbMonthStats_ctx($ctx) },
-        define       => sub { mbDefine_ctx($ctx) },
-        trivia       => sub { mbTrivia_ctx($ctx) },
-        triviascore  => sub { mbTriviaScore_ctx($ctx) },
-        active       => sub { mbActive_ctx($ctx) },
-        when         => sub { mbWhen_ctx($ctx) },
-        quotecount   => sub {
-            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-            mbQuoteCount_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },
-
-        last         => sub { mbLast_ctx($ctx) },
-        poll         => sub { mbPoll_ctx($ctx) },
-        vote         => sub { mbVote_ctx($ctx) },
-        pollresult   => sub { mbPollResult_ctx($ctx) },
-        pollstop     => sub { mbPollStop_ctx($ctx) },
-        note         => sub { mbNote_ctx($ctx) },
-        notes        => sub { mbNotes_ctx($ctx) },
         date         => sub { displayDate_ctx($ctx) },
         weather      => sub {
             my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();

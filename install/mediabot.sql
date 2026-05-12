@@ -1,6 +1,6 @@
 -- =============================================================================
 --  mediabot_v3 — Full database schema
---  Updated: 2026-05 — Added CHANNEL_BAN table
+--  Updated: 2026-05 — Added CHANNEL_BAN + REMINDERS/BOT_ALIAS/KARMA tables
 --
 --  Changes from previous version:
 --   - USER.hostmasks removed → replaced by USER_HOSTMASK table
@@ -17,6 +17,9 @@
 --   [2026-04] TIMEZONE: corrected column name (timezone → tz, aligned with prod and code)
 --   [2026-04] TIMERS: removed undeployed columns (id_channel, enabled) — kept as comments
 --   [2026-05] CHANNEL_BAN: added (persistent channel bans with expiration)
+--   [2026-05] REMINDERS: added (public/partyline reminders)
+--   [2026-05] BOT_ALIAS: added (owner-managed command aliases)
+--   [2026-05] KARMA: added (per-channel nick karma)
 --   [2026-04] PUBLIC_COMMANDS.active: already present in schema — apply to prod:
 --             ALTER TABLE PUBLIC_COMMANDS ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1;
 --
@@ -260,6 +263,52 @@ CREATE TABLE `IGNORES` (
   PRIMARY KEY (`id_ignores`),
   KEY `hostmask` (`hostmask`),
   KEY `idx_ignores_id_channel` (`id_channel`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- REMINDERS
+-- ---------------------------------------------------------------------------
+CREATE TABLE `REMINDERS` (
+  `id_reminder` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_channel`  BIGINT UNSIGNED NOT NULL,
+  `from_nick`   VARCHAR(64) NOT NULL,
+  `to_nick`     VARCHAR(64) NOT NULL,
+  `message`     VARCHAR(512) NOT NULL,
+  `created_at`  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `delivered`   TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id_reminder`),
+  KEY `idx_reminders_channel_to_delivered` (`id_channel`, `to_nick`, `delivered`),
+  KEY `idx_reminders_from_channel_delivered` (`from_nick`, `id_channel`, `delivered`),
+  KEY `idx_reminders_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- BOT_ALIAS
+-- ---------------------------------------------------------------------------
+CREATE TABLE `BOT_ALIAS` (
+  `id_alias`   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `alias`      VARCHAR(32) NOT NULL,
+  `command`    VARCHAR(64) NOT NULL,
+  `created_by` VARCHAR(64) DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_alias`),
+  UNIQUE KEY `uniq_bot_alias_alias` (`alias`),
+  KEY `idx_bot_alias_command` (`command`),
+  KEY `idx_bot_alias_created_by` (`created_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- KARMA
+-- ---------------------------------------------------------------------------
+CREATE TABLE `KARMA` (
+  `id_karma`   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_channel` BIGINT UNSIGNED NOT NULL,
+  `nick`       VARCHAR(64) NOT NULL,
+  `score`      INT NOT NULL DEFAULT 0,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_karma`),
+  UNIQUE KEY `uniq_karma_channel_nick` (`id_channel`, `nick`),
+  KEY `idx_karma_channel_score` (`id_channel`, `score`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
@@ -514,6 +563,12 @@ ALTER TABLE `CHANNEL_SET`
 
 ALTER TABLE `HAILO_CHANNEL`
   ADD CONSTRAINT `fk_hailo_channel_channel` FOREIGN KEY (`id_channel`) REFERENCES `CHANNEL` (`id_channel`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE `REMINDERS`
+  ADD CONSTRAINT `fk_reminders_channel` FOREIGN KEY (`id_channel`) REFERENCES `CHANNEL` (`id_channel`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE `KARMA`
+  ADD CONSTRAINT `fk_karma_channel` FOREIGN KEY (`id_channel`) REFERENCES `CHANNEL` (`id_channel`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 ALTER TABLE `MP3`
   ADD CONSTRAINT `fk_mp3_user` FOREIGN KEY (`id_user`) REFERENCES `USER` (`id_user`) ON DELETE CASCADE ON UPDATE CASCADE;
