@@ -41,6 +41,15 @@ our @EXPORT = qw(
     mbAlias_ctx
     mbStreak_ctx
     mbSlap_ctx
+    mbKarma_ctx
+    processKarma
+    mbLast_ctx
+    mbPoll_ctx
+    mbVote_ctx
+    mbPollResult_ctx
+    mbPollStop_ctx
+    mbNote_ctx
+    mbNotes_ctx
     setUserLevel
     userBirthday_ctx
     userCstat_ctx
@@ -2776,6 +2785,318 @@ sub mbStreak_ctx {
 
     botPrivmsg($self, $channel,
         "$target: $streak consecutive day(s) active on $channel (most recent: $days[0])");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbKarma_ctx --- !karma [nick]
+# Show karma for a nick. nick++ / nick-- in messages auto-increment.
+# Requires: CREATE TABLE KARMA (
+#   id_karma INT AUTO_INCREMENT PRIMARY KEY,
+#   id_channel INT NOT NULL,
+#   nick VARCHAR(64) NOT NULL,
+#   score INT DEFAULT 0,
+#   UNIQUE KEY uniq_chan_nick (id_channel, nick)
+# ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+# ---------------------------------------------------------------------------
+sub mbKarma_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $target  = $args[0] ? lc($args[0]) : lc($nick);
+
+    my $sth_chan = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+    my $id_channel;
+    if ($sth_chan && $sth_chan->execute($channel)) {
+        my $r = $sth_chan->fetchrow_hashref;
+        $sth_chan->finish;
+        $id_channel = $r->{id_channel} if $r;
+    }
+    return unless $id_channel;
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT score FROM KARMA WHERE id_channel = ? AND nick = ?
+    });
+    unless ($sth && $sth->execute($id_channel, $target)) {
+        botNotice($self, $nick, 'Database error.'); return;
+    }
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+
+    my $score = $row ? $row->{score} : 0;
+    my $sign  = $score > 0 ? '+' : '';
+    botPrivmsg($self, $channel, "$target: karma ${sign}${score}");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# processKarma($self, $nick, $channel, $text)
+# Called from on_message_PRIVMSG. Detects nick++ / nick-- patterns.
+# ---------------------------------------------------------------------------
+sub processKarma {
+    my ($self, $nick, $channel, $text) = @_;
+
+    # fix: [^\s+\-]+ avoids greedy \S+ consuming the ++ before the pattern can catch it
+    return unless defined $text && $text =~ /[^\s+\-]{2,}(\+\+|--)/;
+
+    my $sth_chan = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+    return unless $sth_chan && $sth_chan->execute($channel);
+    my $r = $sth_chan->fetchrow_hashref; $sth_chan->finish;
+    my $id_channel = $r ? $r->{id_channel} : undef;
+    return unless $id_channel;
+
+    while ($text =~ /([^\s+\-]{2,32})(\+\+|--)/g) {
+        my ($target, $op) = (lc($1), $2);
+        # Self-karma: block and notify
+        if ($target eq lc($nick) || $target eq lc(do { (my $t = $nick) =~ s/\[.*?\]//g; $t })) {
+            Mediabot::Helpers::botPrivmsg($self, $channel,
+                "$nick: you can't change your own karma.");
+            next;
+        }
+        my $delta = ($op eq '++') ? 1 : -1;
+        my $sth = $self->{dbh}->prepare(q{
+            INSERT INTO KARMA (id_channel, nick, score) VALUES (?, ?, ?)
+            ON DUPLICATE KEY UPDATE score = score + ?
+        });
+        next unless $sth && $sth->execute($id_channel, $target, $delta, $delta);
+        $sth->finish;
+
+        # Fetch updated score
+        my $sth2 = $self->{dbh}->prepare('SELECT score FROM KARMA WHERE id_channel = ? AND nick = ?');
+        if ($sth2 && $sth2->execute($id_channel, $target)) {
+            my $row = $sth2->fetchrow_hashref; $sth2->finish;
+            my $score = $row ? $row->{score} : $delta;
+            my $sign  = $score > 0 ? '+' : '';
+            Mediabot::Helpers::botPrivmsg($self, $channel,
+                "$target\'s karma: ${sign}${score}");
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# mbLast_ctx --- !last <nick>
+# Show the last message posted by a nick on the current channel.
+# ---------------------------------------------------------------------------
+sub mbLast_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    unless (@args && defined $args[0] && $args[0] ne '') {
+        botNotice($self, $nick, 'Syntax: last <nick>');
+        return;
+    }
+    my $target = lc($args[0]);
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT cl.publictext, cl.ts,
+               TIMESTAMPDIFF(MINUTE, cl.ts, NOW()) AS minutes_ago
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE cl.nick = ? AND c.name = ?
+          AND cl.publictext IS NOT NULL AND cl.publictext != ''
+        ORDER BY cl.ts DESC
+        LIMIT 1
+    });
+    unless ($sth && $sth->execute($target, $channel)) {
+        botNotice($self, $nick, 'Database error.'); return;
+    }
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+
+    unless ($row) {
+        botPrivmsg($self, $channel, "$target: no message found on $channel.");
+        return 1;
+    }
+
+    my $ago = $row->{minutes_ago};
+    my $ago_str = $ago < 60
+        ? "${ago}m ago"
+        : $ago < 1440
+            ? sprintf('%dh %dm ago', int($ago/60), $ago%60)
+            : sprintf('%dd %dh ago', int($ago/1440), int(($ago%1440)/60));
+
+    botPrivmsg($self, $channel,
+        "$target last said ($ago_str on $channel): \"$row->{publictext}\"");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbPoll_ctx --- !poll <question> | opt1 | opt2 ...
+# mbVote_ctx --- !vote <n>
+# mbPollResult_ctx --- !pollresult
+# mbPollStop_ctx --- !pollstop  (Master+)
+# In-memory polls, one active per channel.
+# ---------------------------------------------------------------------------
+sub mbPoll_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    return unless $ctx->require_level('Master');
+
+    my $raw = join(' ', @args);
+    my @parts = map { s/^\s+|\s+$//gr } split(/\|/, $raw);
+    unless (@parts >= 3) {
+        botNotice($self, $nick, 'Syntax: poll <question> | option1 | option2 ...');
+        return;
+    }
+
+    my $question = shift @parts;
+    $self->{_polls}{$channel} = {
+        question => $question,
+        options  => \@parts,
+        votes    => {},      # nick => option_index
+        started  => time(),
+        active   => 1,
+    };
+
+    my $opts = join('  ', map { '[' . ($_+1) . '] ' . $parts[$_] } 0..$#parts);
+    botPrivmsg($self, $channel, "Poll: \"$question\"  $opts  -- vote with !vote <n>");
+    return 1;
+}
+
+sub mbVote_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $poll = $self->{_polls}{$channel};
+    unless ($poll && $poll->{active}) {
+        botNotice($self, $nick, 'No active poll on this channel.'); return;
+    }
+
+    my $n = $args[0] // '';
+    unless ($n =~ /^\d+$/ && $n >= 1 && $n <= scalar @{ $poll->{options} }) {
+        botNotice($self, $nick, 'Vote: use !vote <number> (1 to ' . scalar(@{ $poll->{options} }) . ')');
+        return;
+    }
+
+    $poll->{votes}{lc $nick} = $n - 1;
+    my $choice = $poll->{options}[$n-1];
+    my $total  = scalar keys %{ $poll->{votes} };
+    botPrivmsg($self, $channel, "$nick voted for \"$choice\" ($total vote(s) cast)");
+    return 1;
+}
+
+sub mbPollResult_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    my $poll = $self->{_polls}{$channel};
+    unless ($poll) {
+        botNotice($self, $nick, 'No poll found for this channel.'); return;
+    }
+
+    my @options = @{ $poll->{options} };
+    my %counts;
+    $counts{ $poll->{votes}{$_} }++ for keys %{ $poll->{votes} };
+    my $total = scalar keys %{ $poll->{votes} };
+
+    my $status = $poll->{active} ? 'Active' : 'Closed';
+    botPrivmsg($self, $channel, "$status poll: \"$poll->{question}\" ($total vote(s))");
+    for my $i (0 .. $#options) {
+        my $c   = $counts{$i} // 0;
+        my $pct = $total > 0 ? sprintf('%.0f%%', 100 * $c / $total) : '0%';
+        botPrivmsg($self, $channel,
+            sprintf('  [%d] %-20s %d vote(s) (%s)', $i+1, $options[$i], $c, $pct));
+    }
+    return 1;
+}
+
+sub mbPollStop_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    return unless $ctx->require_level('Master');
+
+    my $poll = $self->{_polls}{$channel};
+    unless ($poll && $poll->{active}) {
+        botNotice($self, $nick, 'No active poll.'); return;
+    }
+    $poll->{active} = 0;
+    botPrivmsg($self, $channel, "Poll closed. Use !pollresult to see results.");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbNote_ctx --- !note <message>
+# mbNotes_ctx --- !notes [del <id>]
+# Personal notes stored in memory per nick.
+# ---------------------------------------------------------------------------
+sub mbNote_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $text = join(' ', @args);
+    $text =~ s/^\s+|\s+$//g;
+    unless ($text ne '') {
+        botNotice($self, $nick, 'Syntax: note <message>'); return;
+    }
+    if (length($text) > 256) {
+        botNotice($self, $nick, 'Note too long (max 256 chars).'); return;
+    }
+
+    $self->{_notes}{lc $nick} //= [];
+    if (scalar @{ $self->{_notes}{lc $nick} } >= 10) {
+        botNotice($self, $nick, 'Max 10 notes reached. Delete some with !notes del <id>.'); return;
+    }
+    push @{ $self->{_notes}{lc $nick} }, { id => time(), text => $text };
+    my $n = scalar @{ $self->{_notes}{lc $nick} };
+    botNotice($self, $nick, "Note saved (#$n total). Use !notes to list.");
+    return 1;
+}
+
+sub mbNotes_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $notes = $self->{_notes}{lc $nick} // [];
+
+    # !notes del <index>
+    if (@args && lc($args[0]) eq 'del') {
+        my $idx = ($args[1] // 1) - 1;
+        if ($idx >= 0 && $idx < scalar @$notes) {
+            splice @$notes, $idx, 1;
+            botNotice($self, $nick, 'Note deleted.');
+        } else {
+            botNotice($self, $nick, 'Note not found.');
+        }
+        return 1;
+    }
+
+    unless (@$notes) {
+        botNotice($self, $nick, 'No notes. Use !note <message> to add one.'); return 1;
+    }
+    botNotice($self, $nick, scalar(@$notes) . ' note(s):');
+    for my $i (0 .. $#$notes) {
+        botNotice($self, $nick, sprintf('  [%d] %s', $i+1, $notes->[$i]{text}));
+    }
     return 1;
 }
 

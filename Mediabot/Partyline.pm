@@ -1163,6 +1163,15 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.metrics' }) if $self->{bot}->{metrics};
         $self->_cmd_metrics($stream, $id);
     }
+    elsif ($line =~ /^\.top(?:\s+(.*))?$/i) {
+        $self->_cmd_top($stream, $id, $1 // '');
+    }
+    elsif ($line =~ /^\.remind\s+(.*)/i) {
+        $self->_cmd_remind($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.who\s+(\S+)/i) {
+        $self->_cmd_whochan($stream, $id, $1);
+    }
     elsif ($line =~ /^\.bcast\s+(.*)/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.bcast' }) if $self->{bot}->{metrics};
         $self->_cmd_bcast($stream, $id, $1);
@@ -1420,6 +1429,9 @@ sub _cmd_help {
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
+      . "  .top [#chan] [n]    - top nicks on a channel\r\n"
+      . "  .remind <nick> <msg> - set IRC reminder from partyline\r\n"
+      . "  .who <nick>         - find nick on joined channels\r\n"
       . "  .bcast <msg>        - broadcast to all joined channels (Master+)\r\n"
       . "  .channels           - list joined channels with stats\r\n"
       . "  .status             - show runtime session status\r\n"
@@ -2193,6 +2205,125 @@ sub _cmd_bcast {
 
     $stream->write("Broadcast sent to $sent channel(s).\r\n");
     $bot->{logger}->log(2, "Partyline: bcast from $session->{login}: $msg");
+}
+
+
+# ---------------------------------------------------------------------------
+# .who <nick>  - show which joined channels a nick is present on
+# ---------------------------------------------------------------------------
+sub _cmd_whochan {
+    my ($self, $stream, $id, $target) = @_;
+
+    my $bot      = $self->{bot};
+    my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
+
+    unless (defined $target && $target =~ /\S/) {
+        $stream->write("Usage: .who <nick>\r\n");
+        return;
+    }
+
+    my $chans   = $bot->{channels} || {};
+    my @found;
+
+    for my $name (sort keys %$chans) {
+        my @nicks = eval { $bot->gethChannelsNicksOnChan($name) };
+        next unless grep { lc($_) eq lc($bot_nick) } @nicks;  # only joined
+        if (grep { lc($_) eq lc($target) } @nicks) {
+            push @found, $name;
+        }
+    }
+
+    if (@found) {
+        $stream->write("$target is on: " . join(', ', @found) . "\r\n");
+    } else {
+        $stream->write("$target not found on any joined channel.\r\n");
+    }
+}
+
+
+# ---------------------------------------------------------------------------
+# .top [#chan] [n]  - top n nicks on a channel (default current/first, 5)
+# ---------------------------------------------------------------------------
+sub _cmd_top {
+    my ($self, $stream, $id, $args) = @_;
+
+    my $bot = $self->{bot};
+    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+    return unless $dbh;
+
+    my ($chan, $n) = ($args =~ /(#\S+)/i)
+        ? ($1, ($args =~ /(\d+)/)[0] // 5)
+        : (undef, ($args =~ /(\d+)/)[0] // 5);
+
+    unless ($chan) {
+        my @chans = sort keys %{ $bot->{channels} || {} };
+        $chan = $chans[0];
+    }
+    $n = 5 if !$n || $n < 1; $n = 10 if $n > 10;
+
+    my $sth = $dbh->prepare(
+        "SELECT cl.nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl"
+        . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
+        . " WHERE c.name = ? GROUP BY cl.nick ORDER BY cnt DESC LIMIT ?"
+    );
+    unless ($sth && $sth->execute($chan, $n)) {
+        $stream->write("DB error.\r\n"); return;
+    }
+    $stream->write("Top $n on $chan:\r\n");
+    my $rank = 1;
+    while (my $row = $sth->fetchrow_hashref) {
+        $stream->write(sprintf("  %2d. %-20s %d msgs\r\n",
+            $rank++, $row->{nick}, $row->{cnt}));
+    }
+    $sth->finish;
+}
+
+# ---------------------------------------------------------------------------
+# .remind <nick> <message>  - set a reminder from the Partyline
+# ---------------------------------------------------------------------------
+sub _cmd_remind {
+    my ($self, $stream, $id, $args) = @_;
+
+    my $bot = $self->{bot};
+    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+
+    my ($target, $message) = ($args =~ /^(\S+)\s+(.+)$/);
+    unless ($target && $message) {
+        $stream->write("Usage: .remind <nick> <message>\r\n"); return;
+    }
+
+    my $session  = $self->{users}{$id} // {};
+    my $from     = $session->{login} // '?';
+
+    # Use first joined channel
+    my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
+    my $chans    = $bot->{channels} || {};
+    my ($chan_name, $id_channel);
+    for my $name (sort keys %$chans) {
+        my @nicks = eval { $bot->gethChannelsNicksOnChan($name) };
+        if (grep { lc($_) eq lc($bot_nick) } @nicks) {
+            $chan_name = $name; last;
+        }
+    }
+    unless ($chan_name) { $stream->write("Bot not joined on any channel.\r\n"); return; }
+
+    unless ($dbh) { $stream->write("DB unavailable.\r\n"); return; }
+    my $sth_c = $dbh->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+    if ($sth_c && $sth_c->execute($chan_name)) {
+        my $r = $sth_c->fetchrow_hashref; $sth_c->finish;
+        $id_channel = $r ? $r->{id_channel} : undef;
+    }
+    unless ($id_channel) { $stream->write("Channel not found in DB.\r\n"); return; }
+
+    my $sth = $dbh->prepare(q{
+        INSERT INTO REMINDERS (id_channel, from_nick, to_nick, message) VALUES (?,?,?,?)
+    });
+    if ($sth && $sth->execute($id_channel, $from, lc($target), $message)) {
+        $sth->finish;
+        $stream->write("Reminder set for $target on $chan_name.\r\n");
+    } else {
+        $stream->write("DB error.\r\n");
+    }
 }
 
 # ---------------------------------------------------------------------------

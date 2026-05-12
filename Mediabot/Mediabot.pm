@@ -1191,6 +1191,14 @@ sub mbCommandPublic {
         alias        => sub { mbAlias_ctx($ctx) },
         streak       => sub { mbStreak_ctx($ctx) },
         slap         => sub { mbSlap_ctx($ctx) },
+        karma        => sub { mbKarma_ctx($ctx) },
+        last         => sub { mbLast_ctx($ctx) },
+        poll         => sub { mbPoll_ctx($ctx) },
+        vote         => sub { mbVote_ctx($ctx) },
+        pollresult   => sub { mbPollResult_ctx($ctx) },
+        pollstop     => sub { mbPollStop_ctx($ctx) },
+        note         => sub { mbNote_ctx($ctx) },
+        notes        => sub { mbNotes_ctx($ctx) },
         stats        => sub { mbStats_ctx($ctx) },
         top          => sub { mbTop_ctx($ctx) },
         calc         => sub { mbCalc_ctx($ctx) },
@@ -1206,6 +1214,14 @@ sub mbCommandPublic {
         alias        => sub { mbAlias_ctx($ctx) },
         streak       => sub { mbStreak_ctx($ctx) },
         slap         => sub { mbSlap_ctx($ctx) },
+        karma        => sub { mbKarma_ctx($ctx) },
+        last         => sub { mbLast_ctx($ctx) },
+        poll         => sub { mbPoll_ctx($ctx) },
+        vote         => sub { mbVote_ctx($ctx) },
+        pollresult   => sub { mbPollResult_ctx($ctx) },
+        pollstop     => sub { mbPollStop_ctx($ctx) },
+        note         => sub { mbNote_ctx($ctx) },
+        notes        => sub { mbNotes_ctx($ctx) },
         date         => sub { displayDate_ctx($ctx) },
         weather      => sub { displayWeather_ctx($ctx) },
         meteo        => sub { displayWeather_ctx($ctx) },
@@ -1309,7 +1325,22 @@ sub mbUptime_ctx {
     $uptime_str =~ s/\s+$//;
 
     my $nick = eval { $self->{irc}->nick_folded } // 'mediabotv3';
-    botPrivmsg($self, $channel, "$nick has been up for $uptime_str.");
+
+    # F23: enrich with RAM and load average
+    my ($rss_kb, $load) = (0, '');
+    if (open my $fh, '<', '/proc/self/status') {
+        while (<$fh>) { if (/^VmRSS:\s+(\d+)/) { $rss_kb = $1; last; } }
+        close $fh;
+    }
+    if (open my $fh2, '<', '/proc/loadavg') {
+        my $line = <$fh2>; close $fh2;
+        my @la = split /\s+/, ($line // '');
+        $load = "$la[0] $la[1] $la[2]" if @la >= 3;
+    }
+    my $mem_str  = $rss_kb ? sprintf('%.1f MB', $rss_kb/1024) : '?';
+    my $load_str = $load || '?';
+    botPrivmsg($self, $channel,
+        "$nick: up $uptime_str | RAM $mem_str | load $load_str");
 }
 
 sub _mbHelpInternalCommands {
