@@ -1097,6 +1097,8 @@ sub on_message_PRIVMSG {
         if ($@) { $mediabot->{logger}->log(1, "deliverReminders error: $@"); }
         # F24: detect nick++/nick-- karma
         eval { Mediabot::UserCommands::processKarma($mediabot, $who, $where, $what) };
+        # F38: check trivia answers on every public message
+        eval { Mediabot::UserCommands::checkTriviaAnswer($mediabot, $who, $where, $what) };
         }
         if ($mediabot->{metrics}) {
             $mediabot->{metrics}->inc(

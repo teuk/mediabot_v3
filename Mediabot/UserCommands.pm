@@ -49,6 +49,16 @@ our @EXPORT = qw(
     mbActive_ctx
     mbWhen_ctx
     mbWeatherCompare_ctx
+    mbChoose_ctx
+    mbMorse_ctx
+    mbAbbrev_ctx
+    mbCompare_ctx
+    mbHeatmap_ctx
+    mbMonthStats_ctx
+    mbDefine_ctx
+    mbTrivia_ctx
+    mbTriviaScore_ctx
+    checkTriviaAnswer
     mbLast_ctx
     mbPoll_ctx
     mbVote_ctx
@@ -3320,6 +3330,320 @@ sub mbWeatherCompare_ctx {
     }
 
     botPrivmsg($self, $channel, join('  ||  ', @parts));
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbChoose_ctx --- !choose <a> | <b> | <c>
+# ---------------------------------------------------------------------------
+sub mbChoose_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $raw = join(' ', @args);
+    my @opts = map { s/^\s+|\s+$//gr } split /\|/, $raw;
+    @opts = grep { $_ ne '' } @opts;
+    unless (@opts >= 2) {
+        botNotice($self, $nick, 'Syntax: choose <option1> | <option2> | ...  (at least 2)');
+        return;
+    }
+    my $choice = $opts[int(rand(scalar @opts))];
+    botPrivmsg($self, $channel, "$nick: I choose... $choice!");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbMorse_ctx --- !morse <text>
+# ---------------------------------------------------------------------------
+sub mbMorse_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $text = uc(join(' ', @args));
+    $text =~ s/^\s+|\s+$//g;
+    unless ($text ne '') { botNotice($self, $nick, 'Syntax: morse <text>'); return; }
+    if (length($text) > 80) { botNotice($self, $nick, 'Text too long (max 80 chars).'); return; }
+    my %code = (
+        A=>'.-',   B=>'-...',  C=>'-.-.',  D=>'-..',   E=>'.',
+        F=>'..-.',  G=>'--.',   H=>'....',  I=>'..',    J=>'.---',
+        K=>'-.-',   L=>'.-..',  M=>'--',    N=>'-.',    O=>'---',
+        P=>'.--.',  Q=>'--.-',  R=>'.-.',   S=>'...',   T=>'-',
+        U=>'..-',   V=>'...-',  W=>'.--',   X=>'-..-',  Y=>'-.--',
+        Z=>'--..',  '0'=>'-----','1'=>'.----','2'=>'..---','3'=>'...--',
+        '4'=>'....-','5'=>'.....','6'=>'-....','7'=>'--...','8'=>'---..',
+        '9'=>'----.',
+    );
+    my @words = split /\s+/, $text;
+    my @enc   = map {
+        join(' ', map { $code{$_} // '?' } split //, $_)
+    } @words;
+    my $result = join(' / ', @enc);
+    if (length($result) > 400) { $result = substr($result, 0, 397) . '...'; }
+    botPrivmsg($self, $channel, $result);
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbAbbrev_ctx --- !abbrev <text>
+# Extract initials to form an acronym.
+# ---------------------------------------------------------------------------
+sub mbAbbrev_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $text = join(' ', @args);
+    $text =~ s/^\s+|\s+$//g;
+    unless ($text ne '') { botNotice($self, $nick, 'Syntax: abbrev <text>'); return; }
+    my @words  = split /\s+/, $text;
+    my $abbrev = join('', map { uc(substr($_, 0, 1)) } @words);
+    botPrivmsg($self, $channel, "$nick: $abbrev");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbCompare_ctx --- !compare <nick1> <nick2>
+# ---------------------------------------------------------------------------
+sub mbCompare_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    unless (@args >= 2) {
+        botNotice($self, $nick, 'Syntax: compare <nick1> <nick2>'); return;
+    }
+    my ($t1, $t2) = (lc($args[0]), lc($args[1]));
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT cl.nick, COUNT(*) AS cnt
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.nick IN (?,?)
+        GROUP BY cl.nick
+    });
+    unless ($sth && $sth->execute($channel, $t1, $t2)) {
+        botNotice($self, $nick, 'Database error.'); return;
+    }
+    my %counts;
+    while (my $r = $sth->fetchrow_hashref) { $counts{$r->{nick}} = $r->{cnt}; }
+    $sth->finish;
+    my $c1 = $counts{$t1} // 0;
+    my $c2 = $counts{$t2} // 0;
+    my $diff = abs($c1 - $c2);
+    my $leader = $c1 > $c2 ? $t1 : $c1 < $c2 ? $t2 : undef;
+    my $verdict = $leader ? "$leader leads by $diff msg(s)" : 'tied!';
+    botPrivmsg($self, $channel,
+        "$t1: $c1 msg(s) | $t2: $c2 msg(s) | $verdict");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbHeatmap_ctx --- !heatmap [nick]
+# Activity by hour of day, ASCII bar chart.
+# ---------------------------------------------------------------------------
+sub mbHeatmap_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $target  = @args ? lc($args[0]) : lc($nick);
+    my $sth = $self->{dbh}->prepare(
+        'SELECT HOUR(cl.ts) AS h, COUNT(*) AS cnt'
+        . ' FROM CHANNEL_LOG cl'
+        . ' JOIN CHANNEL c ON c.id_channel = cl.id_channel'
+        . ' WHERE cl.nick = ? AND c.name = ?'
+        . ' GROUP BY HOUR(cl.ts) ORDER BY h'
+    );
+    unless ($sth && $sth->execute($target, $channel)) {
+        botNotice($self, $nick, 'Database error.'); return;
+    }
+    my @hours = (0) x 24;
+    while (my $r = $sth->fetchrow_hashref) { $hours[$r->{h}] = $r->{cnt}; }
+    $sth->finish;
+    my $max = (sort { $b <=> $a } @hours)[0] || 1;
+    # 6-hour blocks
+    my @blocks = ('00-05', '06-11', '12-17', '18-23');
+    botPrivmsg($self, $channel, "$target activity by hour on $channel:");
+    for my $b (0..3) {
+        my $label = $blocks[$b];
+        my @slice = @hours[$b*6 .. $b*6+5];
+        my $total = 0; $total += $_ for @slice;
+        my $bar_len = int(10 * $total / ($max * 6 || 1));
+        $bar_len = 1 if $total > 0 && $bar_len == 0;
+        my $bar = chr(0x2588) x $bar_len . chr(0x2591) x (10 - $bar_len);
+        botPrivmsg($self, $channel, sprintf('  %s  %s  %d msgs', $label, $bar, $total));
+    }
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbMonthStats_ctx --- !monthstats [nick]
+# Activity count per month for the last 12 months.
+# ---------------------------------------------------------------------------
+sub mbMonthStats_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $target  = @args ? lc($args[0]) : lc($nick);
+    my $sth = $self->{dbh}->prepare(
+        "SELECT DATE_FORMAT(cl.ts, '%Y-%m') AS ym, COUNT(*) AS cnt"
+        . ' FROM CHANNEL_LOG cl'
+        . ' JOIN CHANNEL c ON c.id_channel = cl.id_channel'
+        . ' WHERE cl.nick = ? AND c.name = ?'
+        . "   AND cl.ts >= DATE_SUB(NOW(), INTERVAL 12 MONTH)"
+        . ' GROUP BY ym ORDER BY ym'
+    );
+    unless ($sth && $sth->execute($target, $channel)) {
+        botNotice($self, $nick, 'Database error.'); return;
+    }
+    my @rows;
+    while (my $r = $sth->fetchrow_hashref) { push @rows, $r; }
+    $sth->finish;
+    unless (@rows) {
+        botPrivmsg($self, $channel, "$target: no data in last 12 months on $channel.");
+        return 1;
+    }
+    my $out = join('  ', map { "$_->{ym}:$_->{cnt}" } @rows);
+    botPrivmsg($self, $channel, "$target on $channel (last 12 months): $out");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbDefine_ctx --- !define <word>
+# Fetch definition from Wiktionary REST API.
+# ---------------------------------------------------------------------------
+sub mbDefine_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $word = join('_', @args);
+    $word =~ s/^\s+|\s+$//g;
+    unless ($word ne '') { botNotice($self, $nick, 'Syntax: define <word>'); return; }
+    if ($word =~ /[^\w\s-]/ || length($word) > 64) {
+        botNotice($self, $nick, 'Invalid word.'); return;
+    }
+    require URI::Escape;
+    my $encoded = URI::Escape::uri_escape_utf8($word);
+    my $url = "https://en.wiktionary.org/api/rest_v1/page/definition/$encoded";
+    my $http = Mediabot::External::_make_http(timeout => 8, verify_SSL => 1);
+    my $res  = eval { $http->get($url, { headers => { Accept => 'application/json' } }) }
+              // { success => 0 };
+    unless ($res->{success}) {
+        botPrivmsg($self, $channel, "define: could not fetch definition for '$word'.");
+        return;
+    }
+    require JSON;
+    my $data = eval { JSON::decode_json($res->{content}) };
+    unless ($data) {
+        botPrivmsg($self, $channel, "define: no result for '$word'."); return;
+    }
+    # First definition from first language block
+    my $first_lang = (values %$data)[0] // [];
+    my $first_def  = $first_lang->[0]{definitions}[0]{definition} // '';
+    $first_def =~ s/<[^>]+>//g;  # strip HTML
+    $first_def =~ s/^\s+|\s+$//g;
+    $first_def = substr($first_def, 0, 300) . '...' if length($first_def) > 300;
+    if ($first_def ne '') {
+        botPrivmsg($self, $channel, "$word: $first_def");
+    } else {
+        botPrivmsg($self, $channel, "define: no definition found for '$word'.");
+    }
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbTrivia_ctx --- !trivia
+# mbTriviaAnswer_ctx --- !answer <text> (or just speak in channel)
+# Simple trivia from Open Trivia DB (opentdb.com).
+# ---------------------------------------------------------------------------
+sub mbTrivia_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    if ($self->{_trivia}{$channel} && $self->{_trivia}{$channel}{active}) {
+        botNotice($self, $nick, 'A trivia question is already active. Answer it or wait.');
+        return;
+    }
+    my $http = Mediabot::External::_make_http(timeout => 8, verify_SSL => 1);
+    my $res  = eval { $http->get('https://opentdb.com/api.php?amount=1&type=multiple') }
+              // { success => 0 };
+    unless ($res->{success}) {
+        botPrivmsg($self, $channel, 'Trivia: could not fetch question.'); return;
+    }
+    require JSON;
+    my $data = eval { JSON::decode_json($res->{content}) };
+    my $q    = $data->{results}[0] or do {
+        botPrivmsg($self, $channel, 'Trivia: no question in response.'); return;
+    };
+    require HTML::Entities;
+    my $question = HTML::Entities::decode_entities($q->{question});
+    my $answer   = HTML::Entities::decode_entities($q->{correct_answer});
+    my @wrong    = map { HTML::Entities::decode_entities($_) } @{ $q->{incorrect_answers} };
+    my @choices  = (@wrong, $answer);
+    # Shuffle choices
+    for my $i (reverse 1 .. $#choices) {
+        my $j = int(rand($i + 1));
+        @choices[$i, $j] = @choices[$j, $i];
+    }
+    my $answer_lc = lc($answer);
+    $self->{_trivia}{$channel} = {
+        active   => 1,
+        answer   => $answer_lc,
+        answer_display => $answer,
+        started  => time(),
+        scores   => ($self->{_trivia}{$channel}{scores} // {}),
+    };
+    my $opts = join('  ', map { "[$_]" } @choices);
+    botPrivmsg($self, $channel, "Trivia ($q->{category}): $question");
+    botPrivmsg($self, $channel, "Choices: $opts -- reply with !answer <choice> or just say it (30s)");
+    # Set a timeout via Scheduler or alarm — simplified: check in PRIVMSG hook
+    $self->{_trivia}{$channel}{deadline} = time() + 30;
+    return 1;
+}
+
+# Called from on_message_PRIVMSG hook and !answer command
+sub checkTriviaAnswer {
+    my ($self, $nick, $channel, $text) = @_;
+    my $trivia = $self->{_trivia}{$channel};
+    return unless $trivia && $trivia->{active};
+    if (time() > $trivia->{deadline}) {
+        $trivia->{active} = 0;
+        Mediabot::Helpers::botPrivmsg($self, $channel,
+            "Time's up! The answer was: $trivia->{answer_display}");
+        return;
+    }
+    return unless lc($text) eq $trivia->{answer}
+               || lc($text) =~ /\Q$trivia->{answer}\E/;
+    $trivia->{active} = 0;
+    $trivia->{scores}{$nick} = ($trivia->{scores}{$nick} // 0) + 1;
+    my $score = $trivia->{scores}{$nick};
+    Mediabot::Helpers::botPrivmsg($self, $channel,
+        "Correct, $nick! The answer was: $trivia->{answer_display}  (score: $score)");
+}
+
+sub mbTriviaScore_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my $scores  = $self->{_trivia}{$channel}{scores} // {};
+    unless (%$scores) {
+        botPrivmsg($self, $channel, 'No trivia scores yet.'); return 1;
+    }
+    my @sorted = sort { $scores->{$b} <=> $scores->{$a} } keys %$scores;
+    my $top = join(', ', map { "$_:$scores->{$_}" } @sorted[0..($#sorted > 4 ? 4 : $#sorted)]);
+    botPrivmsg($self, $channel, "Trivia scores on $channel: $top");
     return 1;
 }
 

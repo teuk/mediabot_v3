@@ -1169,6 +1169,12 @@ sub _handle_line {
     elsif ($line =~ /^\.remind\s+(.*)/i) {
         $self->_cmd_remind($stream, $id, $1);
     }
+    elsif ($line =~ /^\.karma\s+(.*)/i) {
+        $self->_cmd_karma($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.reload$/i) {
+        $self->_cmd_reload($stream, $id);
+    }
     elsif ($line =~ /^\.seen\s+(\S+)/i) {
         $self->_cmd_seen($stream, $id, $1);
     }
@@ -1435,6 +1441,8 @@ sub _cmd_help {
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
+      . "  .karma <nick>       - show karma for a nick\r\n"
+      . "  .reload             - reload bot configuration (Owner)\r\n"
       . "  .seen <nick>        - last seen event for a nick\r\n"
       . "  .purgereminders     - clean up delivered reminders\r\n"
       . "  .top [#chan] [n]    - top nicks on a channel\r\n"
@@ -2383,6 +2391,65 @@ sub _cmd_purgereminders {
     }
     my $rows = $sth->rows; $sth->finish;
     $stream->write("Purged $rows reminder(s) older than 7 days.\r\n");
+}
+
+
+# ---------------------------------------------------------------------------
+# .karma <nick> [#chan]  - show karma from partyline
+# ---------------------------------------------------------------------------
+sub _cmd_karma {
+    my ($self, $stream, $id, $args) = @_;
+    my $bot = $self->{bot};
+    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+    return unless $dbh;
+    my ($target, $chan) = split /\s+/, ($args // ''), 2;
+    unless ($target) { $stream->write("Usage: .karma <nick> [#channel]\r\n"); return; }
+    unless ($chan) {
+        # Use first joined channel
+        my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
+        for my $name (sort keys %{ $bot->{channels} || {} }) {
+            my @n = eval { $bot->gethChannelsNicksOnChan($name) };
+            if (grep { lc($_) eq lc($bot_nick) } @n) { $chan = $name; last; }
+        }
+    }
+    unless ($chan) { $stream->write("No channel found.\r\n"); return; }
+    my $sth_c = $dbh->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+    my $id_channel;
+    if ($sth_c && $sth_c->execute($chan)) {
+        my $r = $sth_c->fetchrow_hashref; $sth_c->finish;
+        $id_channel = $r->{id_channel} if $r;
+    }
+    unless ($id_channel) { $stream->write("Channel $chan not found.\r\n"); return; }
+    my $sth = $dbh->prepare('SELECT score FROM KARMA WHERE id_channel = ? AND nick = ?');
+    unless ($sth && $sth->execute($id_channel, lc($target))) {
+        $stream->write("DB error.\r\n"); return;
+    }
+    my $row   = $sth->fetchrow_hashref; $sth->finish;
+    my $score = $row ? $row->{score} : 0;
+    my $sign  = $score > 0 ? '+' : '';
+    $stream->write("$target on $chan: karma ${sign}${score}\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .reload  - reload bot configuration (calls mbRehash_ctx equivalent)
+# ---------------------------------------------------------------------------
+sub _cmd_reload {
+    my ($self, $stream, $id) = @_;
+    my $session = $self->{users}{$id} // {};
+    unless (($session->{level} // 99) <= 0) {  # Owner only
+        $stream->write("Permission denied (Owner required).\r\n"); return;
+    }
+    my $bot = $self->{bot};
+    my $ok  = eval {
+        $bot->{conf}->load();
+        $bot->{logger}->log(2, "Partyline: config reloaded by $session->{login}");
+        1;
+    };
+    if ($ok) {
+        $stream->write("Configuration reloaded.\r\n");
+    } else {
+        $stream->write("Reload failed: $@\r\n");
+    }
 }
 
 # ---------------------------------------------------------------------------
