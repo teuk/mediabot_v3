@@ -1169,6 +1169,12 @@ sub _handle_line {
     elsif ($line =~ /^\.remind\s+(.*)/i) {
         $self->_cmd_remind($stream, $id, $1);
     }
+    elsif ($line =~ /^\.seen\s+(\S+)/i) {
+        $self->_cmd_seen($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.purgereminders$/i) {
+        $self->_cmd_purgereminders($stream, $id);
+    }
     elsif ($line =~ /^\.who\s+(\S+)/i) {
         $self->_cmd_whochan($stream, $id, $1);
     }
@@ -1429,6 +1435,8 @@ sub _cmd_help {
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
+      . "  .seen <nick>        - last seen event for a nick\r\n"
+      . "  .purgereminders     - clean up delivered reminders\r\n"
       . "  .top [#chan] [n]    - top nicks on a channel\r\n"
       . "  .remind <nick> <msg> - set IRC reminder from partyline\r\n"
       . "  .who <nick>         - find nick on joined channels\r\n"
@@ -2324,6 +2332,57 @@ sub _cmd_remind {
     } else {
         $stream->write("DB error.\r\n");
     }
+}
+
+
+# ---------------------------------------------------------------------------
+# .seen <nick>  - last seen event for a nick
+# ---------------------------------------------------------------------------
+sub _cmd_seen {
+    my ($self, $stream, $id, $target) = @_;
+
+    my $bot = $self->{bot};
+    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+
+    unless (defined $target && $target =~ /\S/) {
+        $stream->write("Usage: .seen <nick>\r\n"); return;
+    }
+
+    my $sth = $dbh->prepare(q{
+        SELECT nick, channel, event_type, seen_at, last_msg
+        FROM USER_SEEN WHERE nick = ? ORDER BY seen_at DESC LIMIT 1
+    });
+    unless ($sth && $sth->execute($target)) {
+        $stream->write("DB error.\r\n"); return;
+    }
+    my $row = $sth->fetchrow_hashref; $sth->finish;
+    unless ($row) {
+        $stream->write("$target: not found in seen log.\r\n"); return;
+    }
+    my $msg = $row->{last_msg} ? " saying: \"$row->{last_msg}\"" : '';
+    $stream->write("$target last seen $row->{seen_at} on $row->{channel}"
+        . " ($row->{event_type})$msg\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .purgereminders  - clean up delivered/cancelled reminders older than 7 days
+# ---------------------------------------------------------------------------
+sub _cmd_purgereminders {
+    my ($self, $stream, $id) = @_;
+
+    my $bot = $self->{bot};
+    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+
+    my $sth = $dbh->prepare(q{
+        DELETE FROM REMINDERS
+        WHERE delivered > 0
+          AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)
+    });
+    unless ($sth && $sth->execute()) {
+        $stream->write("DB error.\r\n"); return;
+    }
+    my $rows = $sth->rows; $sth->finish;
+    $stream->write("Purged $rows reminder(s) older than 7 days.\r\n");
 }
 
 # ---------------------------------------------------------------------------

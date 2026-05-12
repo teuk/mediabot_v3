@@ -1192,6 +1192,15 @@ sub mbCommandPublic {
         streak       => sub { mbStreak_ctx($ctx) },
         slap         => sub { mbSlap_ctx($ctx) },
         karma        => sub { mbKarma_ctx($ctx) },
+        karmatop     => sub { mbKarmaTop_ctx($ctx) },
+        roll         => sub { mbRoll_ctx($ctx) },
+        flip         => sub { mbFlip_ctx($ctx) },
+        active       => sub { mbActive_ctx($ctx) },
+        when         => sub { mbWhen_ctx($ctx) },
+        quotecount   => sub {
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            mbQuoteCount_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },
+
         last         => sub { mbLast_ctx($ctx) },
         poll         => sub { mbPoll_ctx($ctx) },
         vote         => sub { mbVote_ctx($ctx) },
@@ -1215,6 +1224,15 @@ sub mbCommandPublic {
         streak       => sub { mbStreak_ctx($ctx) },
         slap         => sub { mbSlap_ctx($ctx) },
         karma        => sub { mbKarma_ctx($ctx) },
+        karmatop     => sub { mbKarmaTop_ctx($ctx) },
+        roll         => sub { mbRoll_ctx($ctx) },
+        flip         => sub { mbFlip_ctx($ctx) },
+        active       => sub { mbActive_ctx($ctx) },
+        when         => sub { mbWhen_ctx($ctx) },
+        quotecount   => sub {
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            mbQuoteCount_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },
+
         last         => sub { mbLast_ctx($ctx) },
         poll         => sub { mbPoll_ctx($ctx) },
         vote         => sub { mbVote_ctx($ctx) },
@@ -1223,7 +1241,13 @@ sub mbCommandPublic {
         note         => sub { mbNote_ctx($ctx) },
         notes        => sub { mbNotes_ctx($ctx) },
         date         => sub { displayDate_ctx($ctx) },
-        weather      => sub { displayWeather_ctx($ctx) },
+        weather      => sub {
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            if (@a && lc($a[0]) eq 'compare') {
+                shift @{ $ctx->args };
+                mbWeatherCompare_ctx($ctx);
+            } else { displayWeather_ctx($ctx) }
+        },
         meteo        => sub { displayWeather_ctx($ctx) },
         addbadword   => sub { channelAddBadword_ctx($ctx) },
         rembadword   => sub { channelRemBadword_ctx($ctx) },
@@ -1238,7 +1262,18 @@ sub mbCommandPublic {
         delresponder => sub { delResponder_ctx($ctx) },
         lastcom      => sub { lastCom_ctx($ctx) },
         q            => sub { mbQuotes_ctx($ctx) },
-        quote        => sub { mbQuoteByNick($ctx) },
+        quote        => sub {
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            if (@a && lc($a[0]) eq 'add') {
+                shift @{ $ctx->args };
+                mbQuoteAdd($ctx->bot, $ctx->nick, $ctx->channel,
+                    join(' ', @{ $ctx->args }));
+            } elsif (@a && lc($a[0]) eq 'count') {
+                shift @{ $ctx->args };
+                my @r = @{ $ctx->args };
+                mbQuoteCount_ctx($ctx->bot, $ctx->nick, $ctx->channel, $r[0]);
+            } else { mbQuoteByNick($ctx) }
+        },
         moduser      => sub { mbModUser_ctx($ctx) },
         antifloodset => sub { setChannelAntiFloodParams_ctx($ctx) },
         leet         => sub { displayLeetString_ctx($ctx) },

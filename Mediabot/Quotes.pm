@@ -27,6 +27,7 @@ our @EXPORT = qw(
     mbQuoteRand
     mbQuoteStats
     mbQuoteByNick
+    mbQuoteCount_ctx
     _printQuoteSyntax
 );
 
@@ -704,5 +705,43 @@ sub mbQuoteByNick {
     return 1;
 }
 
+
+# ---------------------------------------------------------------------------
+# mbQuoteCount_ctx --- !quotecount [nick]
+# Count quotes by author on the channel.
+# ---------------------------------------------------------------------------
+sub mbQuoteCount_ctx {
+    my ($self, $sNick, $sChannel, $targetNick) = @_;
+
+    unless (defined $targetNick && $targetNick ne '') {
+        # Total for channel
+        my $sth = $self->{dbh}->prepare(q{
+            SELECT COUNT(*) AS cnt FROM QUOTES q
+            JOIN CHANNEL c ON c.id_channel = q.id_channel
+            WHERE c.name = ?
+        });
+        if ($sth && $sth->execute($sChannel)) {
+            my $r = $sth->fetchrow_hashref; $sth->finish;
+            botPrivmsg($self, $sChannel,
+                "$sChannel: " . ($r->{cnt} // 0) . " quote(s) total");
+        }
+        return 1;
+    }
+
+    my $like = lc($targetNick) . '%';
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT COUNT(*) AS cnt FROM QUOTES q
+        JOIN CHANNEL c ON c.id_channel = q.id_channel
+        JOIN USER u ON u.id_user = q.id_user
+        WHERE c.name = ? AND LOWER(u.nickname) LIKE ?
+    });
+    unless ($sth && $sth->execute($sChannel, $like)) {
+        botNotice($self, $sNick, 'Database error.'); return;
+    }
+    my $row = $sth->fetchrow_hashref; $sth->finish;
+    botPrivmsg($self, $sChannel,
+        "$targetNick: " . ($row->{cnt} // 0) . " quote(s) on $sChannel");
+    return 1;
+}
 
 1;

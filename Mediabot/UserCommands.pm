@@ -42,7 +42,13 @@ our @EXPORT = qw(
     mbStreak_ctx
     mbSlap_ctx
     mbKarma_ctx
+    mbKarmaTop_ctx
     processKarma
+    mbRoll_ctx
+    mbFlip_ctx
+    mbActive_ctx
+    mbWhen_ctx
+    mbWeatherCompare_ctx
     mbLast_ctx
     mbPoll_ctx
     mbVote_ctx
@@ -3097,6 +3103,223 @@ sub mbNotes_ctx {
     for my $i (0 .. $#$notes) {
         botNotice($self, $nick, sprintf('  [%d] %s', $i+1, $notes->[$i]{text}));
     }
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbKarmaTop_ctx --- !karmatop [n]
+# Show the top N karma scores on the channel.
+# ---------------------------------------------------------------------------
+sub mbKarmaTop_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $n = 5;
+    if (@args && $args[0] =~ /^\d+$/) {
+        $n = int($args[0]); $n = 1 if $n < 1; $n = 10 if $n > 10;
+    }
+
+    my $sth_chan = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+    my $id_channel;
+    if ($sth_chan && $sth_chan->execute($channel)) {
+        my $r = $sth_chan->fetchrow_hashref; $sth_chan->finish;
+        $id_channel = $r->{id_channel} if $r;
+    }
+    return unless $id_channel;
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT nick, score FROM KARMA
+        WHERE id_channel = ? ORDER BY score DESC LIMIT ?
+    });
+    unless ($sth && $sth->execute($id_channel, $n)) {
+        botNotice($self, $nick, 'Database error.'); return;
+    }
+    my @rows;
+    while (my $r = $sth->fetchrow_hashref) { push @rows, $r; }
+    $sth->finish;
+
+    unless (@rows) {
+        botPrivmsg($self, $channel, "No karma data for $channel yet.");
+        return 1;
+    }
+
+    botPrivmsg($self, $channel, "Karma top $n on $channel:");
+    my $rank = 1;
+    for my $r (@rows) {
+        my $sign = $r->{score} > 0 ? '+' : '';
+        botPrivmsg($self, $channel, sprintf('  %2d. %-20s %s%d',
+            $rank++, $r->{nick}, $sign, $r->{score}));
+    }
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbRoll_ctx --- !roll [NdN]
+# Roll dice. Defaults to 1d6. Supports NdN format.
+# ---------------------------------------------------------------------------
+sub mbRoll_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my ($num, $sides) = (1, 6);
+    if (@args && $args[0] =~ /^(\d+)d(\d+)$/i) {
+        ($num, $sides) = ($1, $2);
+        $num   = 1   if $num   < 1;  $num   = 10  if $num   > 10;
+        $sides = 2   if $sides < 2;  $sides = 100 if $sides > 100;
+    } elsif (@args && $args[0] =~ /^\d+$/) {
+        $sides = int($args[0]);
+        $sides = 2 if $sides < 2; $sides = 100 if $sides > 100;
+    }
+
+    my @results = map { int(rand($sides)) + 1 } 1..$num;
+    my $total   = 0; $total += $_ for @results;
+    my $label   = "${num}d${sides}";
+
+    if ($num == 1) {
+        botPrivmsg($self, $channel, "$nick rolled $label: $results[0]");
+    } else {
+        botPrivmsg($self, $channel, sprintf('%s rolled %s: [%s] = %d',
+            $nick, $label, join(', ', @results), $total));
+    }
+    logBot($self, $ctx->message, $channel, 'roll', $label);
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbFlip_ctx --- !flip
+# Flip a coin.
+# ---------------------------------------------------------------------------
+sub mbFlip_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    my $result = rand() < 0.5 ? 'Heads!' : 'Tails!';
+    botPrivmsg($self, $channel, "$nick flipped a coin: $result");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbActive_ctx --- !active [period]
+# List nicks active in the last N hours or days.
+# ---------------------------------------------------------------------------
+sub mbActive_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $interval = '24 HOUR';
+    my $label    = 'last 24h';
+    if (@args && $args[0] =~ /^(\d+)(d|h)$/i) {
+        my ($v, $u) = ($1, lc $2);
+        $interval = $u eq 'h' ? "$v HOUR" : "$v DAY";
+        $label    = "last ${v}${u}";
+    }
+
+    my $sth = $self->{dbh}->prepare(
+        "SELECT DISTINCT cl.nick FROM CHANNEL_LOG cl"
+        . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
+        . " WHERE c.name = ? AND cl.ts >= DATE_SUB(NOW(), INTERVAL $interval)"
+        . " ORDER BY cl.nick"
+    );
+    unless ($sth && $sth->execute($channel)) {
+        botNotice($self, $nick, 'Database error.'); return;
+    }
+    my @nicks;
+    while (my ($n) = $sth->fetchrow_array) { push @nicks, $n; }
+    $sth->finish;
+
+    if (@nicks) {
+        botPrivmsg($self, $channel,
+            "Active in $label on $channel: " . join(', ', @nicks)
+            . " (" . scalar(@nicks) . " nick(s))");
+    } else {
+        botPrivmsg($self, $channel, "No activity in $label on $channel.");
+    }
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbWhen_ctx --- !when <nick>
+# When did a nick first appear on the channel.
+# ---------------------------------------------------------------------------
+sub mbWhen_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    unless (@args && $args[0] ne '') {
+        botNotice($self, $nick, 'Syntax: when <nick>'); return;
+    }
+    my $target = lc($args[0]);
+
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT MIN(cl.ts) AS first_seen FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE cl.nick = ? AND c.name = ?
+    });
+    unless ($sth && $sth->execute($target, $channel)) {
+        botNotice($self, $nick, 'Database error.'); return;
+    }
+    my $row = $sth->fetchrow_hashref; $sth->finish;
+
+    if ($row && $row->{first_seen}) {
+        botPrivmsg($self, $channel,
+            "$target first seen on $channel: $row->{first_seen}");
+    } else {
+        botPrivmsg($self, $channel, "$target: no history found on $channel.");
+    }
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbWeatherCompare_ctx --- !weather compare <city1> <city2>
+# Fetch and display weather for two cities side by side.
+# ---------------------------------------------------------------------------
+sub mbWeatherCompare_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    unless (@args >= 2) {
+        botNotice($self, $nick, 'Syntax: weather compare <city1> <city2>');
+        return;
+    }
+
+    my ($city1, $city2) = ($args[0], $args[1]);
+
+    # Cache key is simply lc($location) — same as displayWeather_ctx line 419
+    my @parts;
+    for my $city ($city1, $city2) {
+        my $cache_key = lc($city);
+        my $cache     = $self->{_weather_cache}{$cache_key};
+        if ($cache && ($cache->{text} // '') ne '') {
+            push @parts, $cache->{text};
+        } else {
+            push @parts, "$city: no cached data (use !weather $city first)";
+        }
+    }
+
+    botPrivmsg($self, $channel, join('  ||  ', @parts));
     return 1;
 }
 
