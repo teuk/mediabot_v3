@@ -53,15 +53,6 @@ cd /home/mediabot/mediabot_v3 || exit 1
 perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
 ```
 
-For Undernet / mediabot3:
-
-```bash
-perl /home/mediabot/mediabot_v3/tools/check_schema_drift.pl \
-  --conf=/home/mediabot/mediabot3/mbundernet.conf \
-  --schema=/home/mediabot/mediabot_v3/install/mediabot.sql \
-  --strict
-```
-
 ## Rule
 
 Never start an upgraded bot against an old database without running the schema drift checker first.

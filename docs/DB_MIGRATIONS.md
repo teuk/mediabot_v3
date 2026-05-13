@@ -58,27 +58,6 @@ Then run the checker again:
 perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
 ```
 
-## Undernet / mediabot3
-
-For the Undernet instance:
-
-```text
-/home/mediabot/mediabot3
-/home/mediabot/mediabot3/mbundernet.conf
-```
-
-Check schema drift with:
-
-```bash
-cd /home/mediabot/mediabot3 || exit 1
-perl /home/mediabot/mediabot_v3/tools/check_schema_drift.pl \
-  --conf=/home/mediabot/mediabot3/mbundernet.conf \
-  --schema=/home/mediabot/mediabot_v3/install/mediabot.sql \
-  --strict
-```
-
-Apply migrations before starting a newly updated bot if the checker reports missing tables or columns.
-
 ## Useful commands
 
 Report-only mode:
