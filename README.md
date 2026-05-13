@@ -23,6 +23,7 @@ This README gives both:
 - [Install required Debian packages](#install-required-debian-packages)
 - [Run configure](#run-configure)
 - [Database setup](#database-setup)
+- [Database migrations and schema drift checks](#database-migrations-and-schema-drift-checks)
 - [Configuration](#configuration)
 - [First checks and first start](#first-checks-and-first-start)
 - [Remove temporary sudo access](#remove-temporary-sudo-access)
@@ -410,8 +411,7 @@ perl mediabot.pl --conf=mediabot.conf --daemon
 Then check logs:
 
 ```bash
-ls -lh logs/
-tail -f logs/mediabot.log
+tail -f mediabot.log
 ```
 
 If your log file name differs, inspect the `logs/` directory first.
@@ -767,6 +767,50 @@ Test access:
 mysql -u mediabot -p mediabot
 ```
 
+## Database migrations and schema drift checks
+
+Mediabot ships a reference schema in:
+
+```text
+install/mediabot.sql
+```
+
+Fresh installs should use that schema through the normal installer/configuration flow.
+
+For existing databases, especially long-running production instances, always check for schema drift before starting newly updated code:
+
+```bash
+cd /home/mediabot/mediabot_v3 || exit 1
+perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
+```
+
+If drift is detected, apply the appropriate SQL file from:
+
+```text
+install/migrations/
+```
+
+Use the interactive MySQL/MariaDB client with explicit charset handling:
+
+```bash
+mysql -u root -p --default-character-set=utf8mb4
+```
+
+Then inside the SQL client:
+
+```sql
+SET NAMES utf8mb4;
+USE mediabot;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/mediabot_fun_commands_migration_20260512.sql;
+```
+
+More details are available in:
+
+```text
+docs/DB_MIGRATIONS.md
+install/migrations/README.md
+```
+
 ---
 
 ## Configuration
@@ -845,7 +889,7 @@ mediabot.pl syntax OK
 Check all Perl modules in the `Mediabot/` directory:
 
 ```bash
-find Mediabot -name '*.pm' -print -exec perl -c {} \;
+find Mediabot -name '*.pm' -print -exec perl -I. -c {} \;
 ```
 
 ### Start in foreground
@@ -879,13 +923,7 @@ perl mediabot.pl --conf=mediabot.conf --daemon
 Then check the log from another terminal:
 
 ```bash
-tail -f logs/mediabot.log
-```
-
-If your log file name differs, list the available logs first:
-
-```bash
-ls -lh logs/
+tail -f mediabot.log
 ```
 
 ### Register the owner from IRC, then check Partyline
@@ -1137,7 +1175,7 @@ perl mediabot.pl --conf=mediabot.conf --daemon
 ### Check logs
 
 ```bash
-tail -f logs/mediabot.log
+tail -f mediabot.log
 ```
 
 ### Register owner, then connect to Partyline
@@ -1194,8 +1232,9 @@ Useful commands:
 
 ```bash
 perl -c mediabot.pl
-find Mediabot -name '*.pm' -print -exec perl -c {} \;
+find Mediabot -name '*.pm' -print -exec perl -I. -c {} \;
 mysql -u mediabot -p mediabot
+perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
 ps aux | grep '[m]ediabot'
 tail -n 100 logs/*.log
 sudo -n true && echo "ERROR: sudo still active" || echo "OK: no passwordless sudo"
@@ -1420,7 +1459,7 @@ mysql -u mediabot -p mediabot
 
 ```bash
 perl -c mediabot.pl
-find Mediabot -name '*.pm' -print -exec perl -c {} \;
+find Mediabot -name '*.pm' -print -exec perl -I. -c {} \;
 ```
 
 ### Check radio status
