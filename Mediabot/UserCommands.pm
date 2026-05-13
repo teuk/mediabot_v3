@@ -2222,6 +2222,27 @@ sub mbStats_ctx {
     my $pct = ($total > 0 && $msg_count > 0)
         ? sprintf(" (%.1f%%)", 100 * $msg_count / $total) : '';
 
+    # S7/fix: fetch karma score for inline display in !stats
+    my $karma_str = '';
+    {
+        my $dbh_k = eval { $self->{db}->ensure_connected } // $self->{dbh};  # C3/fix
+        my $sth_chan2 = $dbh_k->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+        if ($sth_chan2 && $sth_chan2->execute($channel)) {
+            my $rc = $sth_chan2->fetchrow_hashref; $sth_chan2->finish;
+            if ($rc) {
+                my $sth_k = $dbh_k->prepare(
+                    'SELECT score FROM KARMA WHERE id_channel = ? AND nick = ?');
+                if ($sth_k && $sth_k->execute($rc->{id_channel}, lc($target))) {
+                    my $kr = $sth_k->fetchrow_hashref; $sth_k->finish;
+                    if ($kr) {
+                        my $sign = $kr->{score} > 0 ? '+' : '';
+                        $karma_str = " | karma ${sign}$kr->{score}";
+                    }
+                }
+            }
+        }
+    }
+
     # Last seen (USER_SEEN)
     my $sth2 = $self->{dbh}->prepare(q{
         SELECT seen_at, event_type FROM USER_SEEN WHERE nick = ? LIMIT 1
@@ -2262,6 +2283,7 @@ sub mbStats_ctx {
     $out .= " | first seen: $first_seen" if $first_seen && $msg_count > 0;
     $out .= " | last msg: $last_msg"   if $msg_count > 0;
     $out .= " | last seen: $seen_at ($seen_type)" if $seen_at ne 'never';
+    $out .= $karma_str if $karma_str;
     $out .= " | not in database" unless $id_user || $msg_count;
 
     botPrivmsg($self, $channel, $out);
@@ -2478,7 +2500,10 @@ sub deliverReminders {
     my ($self, $nick, $channel) = @_;
 
     $self->{logger}->log(4, "deliverReminders() nick=$nick chan=$channel");
-    my $sth_dc = $self->{dbh}->prepare(
+    # S3/fix: ensure DB connection alive before using dbh
+    my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
+    return unless $dbh;
+    my $sth_dc = $dbh->prepare(
         'SELECT id_channel FROM CHANNEL WHERE name = ?'
     );
     my $id_channel;
@@ -2489,7 +2514,7 @@ sub deliverReminders {
     }
     return unless $id_channel;
 
-    my $sth = $self->{dbh}->prepare(q{
+    my $sth = $dbh->prepare(q{
         SELECT id_reminder, from_nick, message, created_at
         FROM REMINDERS
         WHERE id_channel = ? AND to_nick = ? AND delivered = 0
@@ -2506,7 +2531,7 @@ sub deliverReminders {
     for my $r (@pending) {
         botPrivmsg($self, $channel,
             "$nick: reminder from $r->{from_nick} ($r->{created_at}): $r->{message}");
-        my $sth_up = $self->{dbh}->prepare(q{
+        my $sth_up = $dbh->prepare(q{
             UPDATE REMINDERS SET delivered = 1 WHERE id_reminder = ?
         });
         if ($sth_up) { $sth_up->execute($r->{id_reminder}); $sth_up->finish; }
@@ -2701,6 +2726,18 @@ sub mbAlias_ctx {
 
     return unless $ctx->require_level('Owner');
 
+    # B6/fix: lazy-load alias cache from DB on first use
+    unless ($self->{_alias_cache_loaded}) {
+        my $sth_l = $self->{dbh}->prepare('SELECT alias, command FROM BOT_ALIAS');
+        if ($sth_l && $sth_l->execute()) {
+            while (my $r = $sth_l->fetchrow_hashref) {
+                $self->{_alias_cache}{ $r->{alias} } = $r->{command};
+            }
+            $sth_l->finish;
+        }
+        $self->{_alias_cache_loaded} = 1;
+    }
+
     my $subcmd = lc(shift @args // '');
 
     if ($subcmd eq 'list') {
@@ -2795,7 +2832,7 @@ sub mbStreak_ctx {
         use Time::Piece;
         my $d1 = Time::Piece->strptime($days[$i-1], '%Y-%m-%d');
         my $d2 = Time::Piece->strptime($days[$i],   '%Y-%m-%d');
-        last unless ($d1 - $d2)->days == 1;
+        last unless int(($d1 - $d2)->days + 0.5) == 1;  # B4/fix: ->days is float
         $streak++;
     }
 
@@ -2845,6 +2882,7 @@ sub mbKarma_ctx {
     my $score = $row ? $row->{score} : 0;
     my $sign  = $score > 0 ? '+' : '';
     botPrivmsg($self, $channel, "$target: karma ${sign}${score}");
+    logBot($self, $ctx->message, $channel, 'karma', $target);  # S2/fix
     return 1;
 }
 
@@ -2864,7 +2902,9 @@ sub processKarma {
     my $id_channel = $r ? $r->{id_channel} : undef;
     return unless $id_channel;
 
+    my $karma_hits = 0;  # C2/fix: cap at 3 karma changes per message
     while ($text =~ /([^\s+\-]{2,32})(\+\+|--)/g) {
+        last if ++$karma_hits > 3;
         my ($target, $op) = (lc($1), $2);
         # Self-karma: block and notify
         if ($target eq lc($nick) || $target eq lc(do { (my $t = $nick) =~ s/\[.*?\]//g; $t })) {
@@ -2973,11 +3013,13 @@ sub mbPoll_ctx {
         options  => \@parts,
         votes    => {},      # nick => option_index
         started  => time(),
+        deadline => time() + 300,  # B7/fix: 5-min auto-expiry
         active   => 1,
     };
 
     my $opts = join('  ', map { '[' . ($_+1) . '] ' . $parts[$_] } 0..$#parts);
     botPrivmsg($self, $channel, "Poll: \"$question\"  $opts  -- vote with !vote <n>");
+    logBot($self, $ctx->message, $channel, 'poll', $question);  # S2/fix
     return 1;
 }
 
@@ -2990,6 +3032,11 @@ sub mbVote_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     my $poll = $self->{_polls}{$channel};
+    if ($poll && $poll->{active} && time() > ($poll->{deadline} // 0)) {
+        $poll->{active} = 0;
+        botPrivmsg($self, $channel, 'Poll expired. Use !pollresult to see results.');
+        return;
+    }
     unless ($poll && $poll->{active}) {
         botNotice($self, $nick, 'No active poll on this channel.'); return;
     }
@@ -3004,6 +3051,7 @@ sub mbVote_ctx {
     my $choice = $poll->{options}[$n-1];
     my $total  = scalar keys %{ $poll->{votes} };
     botPrivmsg($self, $channel, "$nick voted for \"$choice\" ($total vote(s) cast)");
+    logBot($self, $ctx->message, $channel, 'vote', $choice);  # S2/fix
     return 1;
 }
 
@@ -3050,6 +3098,7 @@ sub mbPollStop_ctx {
     }
     $poll->{active} = 0;
     botPrivmsg($self, $channel, "Poll closed. Use !pollresult to see results.");
+    logBot($self, $ctx->message, $channel, 'pollstop', '');  # S2/fix
     return 1;
 }
 
@@ -3079,7 +3128,8 @@ sub mbNote_ctx {
     if (scalar @{ $self->{_notes}{lc $nick} } >= 10) {
         botNotice($self, $nick, 'Max 10 notes reached. Delete some with !notes del <id>.'); return;
     }
-    push @{ $self->{_notes}{lc $nick} }, { id => time(), text => $text };
+    my $note_id = scalar(@{ $self->{_notes}{lc $nick} }) + 1;  # C4/fix: ordinal, no time() collision
+    push @{ $self->{_notes}{lc $nick} }, { id => $note_id, text => $text };
     my $n = scalar @{ $self->{_notes}{lc $nick} };
     botNotice($self, $nick, "Note saved (#$n total). Use !notes to list.");
     return 1;
@@ -3243,7 +3293,7 @@ sub mbActive_ctx {
         "SELECT DISTINCT cl.nick FROM CHANNEL_LOG cl"
         . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
         . " WHERE c.name = ? AND cl.ts >= DATE_SUB(NOW(), INTERVAL $interval)"
-        . " ORDER BY cl.nick"
+        . " ORDER BY cl.nick LIMIT 30"  # B5/fix: cap nicks to avoid IRC line overflow
     );
     unless ($sth && $sth->execute($channel)) {
         botNotice($self, $nick, 'Database error.'); return;
@@ -3253,8 +3303,13 @@ sub mbActive_ctx {
     $sth->finish;
 
     if (@nicks) {
+        my $list = join(', ', @nicks);
+        # B5/fix: truncate to avoid IRC 512-byte limit
+        if (length($list) > 350) {
+            $list = substr($list, 0, 347) . '...';
+        }
         botPrivmsg($self, $channel,
-            "Active in $label on $channel: " . join(', ', @nicks)
+            "Active in $label on $channel: $list"
             . " (" . scalar(@nicks) . " nick(s))");
     } else {
         botPrivmsg($self, $channel, "No activity in $label on $channel.");
@@ -3551,6 +3606,8 @@ sub mbDefine_ctx {
     my $first_lang = (values %$data)[0] // [];
     my $first_def  = $first_lang->[0]{definitions}[0]{definition} // '';
     $first_def =~ s/<[^>]+>//g;  # strip HTML
+    require HTML::Entities;              # B2/fix: decode &amp; &#39; etc.
+    HTML::Entities::decode_entities($first_def);
     $first_def =~ s/^\s+|\s+$//g;
     $first_def = substr($first_def, 0, 300) . '...' if length($first_def) > 300;
     if ($first_def ne '') {
@@ -3609,6 +3666,7 @@ sub mbTrivia_ctx {
     botPrivmsg($self, $channel, "Choices: $opts -- reply with !answer <choice> or just say it (30s)");
     # Set a timeout via Scheduler or alarm — simplified: check in PRIVMSG hook
     $self->{_trivia}{$channel}{deadline} = time() + 30;
+    logBot($self, $ctx->message, $channel, 'trivia', $q->{category} // '');  # S2/fix
     return 1;
 }
 
@@ -3623,8 +3681,13 @@ sub checkTriviaAnswer {
             "Time's up! The answer was: $trivia->{answer_display}");
         return;
     }
-    return unless lc($text) eq $trivia->{answer}
-               || lc($text) =~ /\Q$trivia->{answer}\E/;
+    # B3/fix: guard against undef answer + wrap regex in eval
+    return unless defined $trivia->{answer};
+    my $matched = eval {
+        lc($text) eq $trivia->{answer}
+        || lc($text) =~ /\Q$trivia->{answer}\E/
+    };
+    return unless $matched;
     $trivia->{active} = 0;
     $trivia->{scores}{$nick} = ($trivia->{scores}{$nick} // 0) + 1;
     my $score = $trivia->{scores}{$nick};

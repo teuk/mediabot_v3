@@ -2195,8 +2195,8 @@ sub _cmd_bcast {
     my ($self, $stream, $id, $msg) = @_;
 
     my $bot      = $self->{bot};
-    my $session  = $self->{sessions}{$id} // {};
-    my $level    = $session->{level} // 0;
+    my $session  = $self->{users}{$id} // {};  # B1/fix: auth data in users{}, not sessions{}
+    my $level    = $session->{level} // 99;
 
     unless (defined $level && $level <= 1) {  # Owner=0, Master=1 (inverted scale)
         $stream->write("Permission denied (Master+ required).\r\n");

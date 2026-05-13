@@ -406,6 +406,25 @@ $scheduler->add(
 );
 
 $scheduler->add(
+    name      => 'reminder_purge',
+    interval  => 86400,   # S6: once per day — delete delivered/cancelled reminders older than 7 days
+    cb        => sub {
+        my $dbh = eval { $mediabot->{db}->ensure_connected } // $mediabot->{dbh};
+        return unless $dbh;
+        my $sth = $dbh->prepare(q{
+            DELETE FROM REMINDERS
+            WHERE delivered > 0
+              AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)
+        });
+        if ($sth && $sth->execute()) {
+            my $n = $sth->rows; $sth->finish;
+            $mediabot->{logger}->log(2, "reminder_purge: deleted $n reminder(s) older than 7 days");
+        }
+    },
+    autostart => 1,
+);
+
+$scheduler->add(
     name      => 'auth_session_cleanup',
     interval  => 3600,   # hourly — purge sessions older than 24h
     cb        => sub {

@@ -2781,6 +2781,8 @@ sub mbCalc_ctx {
             my $e   = 2.71828182845905;
             my $tau = 6.28318530717959;
 
+            # C1/fix: suppress 'redefined' warning — inner subs re-declared each call
+            no warnings 'redefine';
             sub round   { int($_[0] + 0.5 * ($_[0] >= 0 ? 1 : -1)) }
             sub tan     { sin($_[0]) / cos($_[0]) }
             sub asin    { atan2($_[0], sqrt(1 - $_[0] * $_[0])) }
