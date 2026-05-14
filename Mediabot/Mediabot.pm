@@ -1231,7 +1231,15 @@ sub mbCommandPublic {
         ignores      => sub { IgnoresList_ctx($ctx) },
         ignore       => sub { addIgnore_ctx($ctx) },
         unignore     => sub { delIgnore_ctx($ctx) },
-        yt           => sub { youtubeSearch_ctx($ctx) },
+        yt           => sub {
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            if (@a && lc($a[0]) eq 'search') {
+                shift @{ $ctx->args };
+                ytSearch_ctx($ctx);
+            } else {
+                youtubeSearch_ctx($ctx);
+            }
+        },
         song         => sub { song_ctx($ctx) },
         listeners    => sub { displayRadioListeners_ctx($ctx) },
         nextsong     => sub { radioNext_ctx($ctx) },
@@ -1268,6 +1276,7 @@ sub mbCommandPublic {
         xlogin       => sub { xLogin_ctx($ctx) },
         tellme       => sub { chatGPT_ctx($ctx) },
         openai       => sub { openai_ctx($ctx) },
+        ai           => sub { claude_ctx($ctx) },
         yomomma      => sub { Yomomma_ctx($ctx) },
         resolve      => sub { resolve_ctx($ctx) },
         tmdb         => sub { mbTMDBSearch_ctx($ctx) },
@@ -1947,6 +1956,7 @@ sub mbCommandPrivate {
         moduser     => sub { mbModUser_ctx($ctx) },
         antifloodset => sub { setChannelAntiFloodParams_ctx($ctx) },
         rehash      => sub { mbRehash_ctx($ctx) },
+        ai           => sub { claude_ctx($ctx) },  # P4: !ai in private (no chanset gate)
     );
 
     if (my $handler = $command_table{$sCommand}) {

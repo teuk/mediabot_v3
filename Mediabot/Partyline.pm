@@ -1169,6 +1169,9 @@ sub _handle_line {
     elsif ($line =~ /^\.remind\s+(.*)/i) {
         $self->_cmd_remind($stream, $id, $1);
     }
+    elsif ($line =~ /^\.stats(?:\s+(.*?))?$/i) {
+        $self->_cmd_stats($stream, $id, $1);
+    }
     elsif ($line =~ /^\.karma\s+(.*)/i) {
         $self->_cmd_karma($stream, $id, $1);
     }
@@ -1441,6 +1444,7 @@ sub _cmd_help {
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
+      . "  .stats [#chan]      - top 3 speakers + karma for a channel\r\n"
       . "  .karma <nick>       - show karma for a nick\r\n"
       . "  .reload             - reload bot configuration (Owner)\r\n"
       . "  .seen <nick>        - last seen event for a nick\r\n"
@@ -2450,6 +2454,82 @@ sub _cmd_reload {
     } else {
         $stream->write("Reload failed: $@\r\n");
     }
+}
+
+
+# ---------------------------------------------------------------------------
+# .stats [#chan]  - top 3 msgs + karma top 3 for a channel
+# ---------------------------------------------------------------------------
+sub _cmd_stats {
+    my ($self, $stream, $id, $args) = @_;
+
+    my $bot = $self->{bot};
+    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+    return unless $dbh;
+
+    # Determine channel
+    my $chan;
+    if (defined $args && $args =~ /^(#\S+)/) {
+        $chan = $1;
+    } else {
+        # Default: first joined channel
+        my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
+        for my $name (sort keys %{ $bot->{channels} || {} }) {
+            my @n = eval { $bot->gethChannelsNicksOnChan($name) };
+            if (grep { lc($_) eq lc($bot_nick) } @n) { $chan = $name; last; }
+        }
+    }
+    unless ($chan) { $stream->write("No channel. Usage: .stats [#channel]\r\n"); return; }
+
+    $stream->write("Stats for $chan:\r\n");
+    $stream->write("-" x 40 . "\r\n");
+
+    # Top 3 messages
+    my $sth_top = $dbh->prepare(
+        "SELECT cl.nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl"
+        . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
+        . " WHERE c.name = ? GROUP BY cl.nick ORDER BY cnt DESC LIMIT 3"
+    );
+    if ($sth_top && $sth_top->execute($chan)) {
+        $stream->write("  Top speakers:\r\n");
+        my $rank = 1;
+        while (my $r = $sth_top->fetchrow_hashref) {
+            $stream->write(sprintf("    %d. %-20s %d msgs\r\n",
+                $rank++, $r->{nick}, $r->{cnt}));
+        }
+        $sth_top->finish;
+    }
+
+    # Top 3 karma
+    my $sth_chan = $dbh->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+    my $id_channel;
+    if ($sth_chan && $sth_chan->execute($chan)) {
+        my $r = $sth_chan->fetchrow_hashref; $sth_chan->finish;
+        $id_channel = $r->{id_channel} if $r;
+    }
+    if ($id_channel) {
+        my $sth_k = $dbh->prepare(q{
+            SELECT nick, score FROM KARMA
+            WHERE id_channel = ? AND score != 0
+            ORDER BY score DESC LIMIT 3
+        });
+        if ($sth_k && $sth_k->execute($id_channel)) {
+            my @krows;
+            while (my $r = $sth_k->fetchrow_hashref) { push @krows, $r; }
+            $sth_k->finish;
+            if (@krows) {
+                $stream->write("  Top karma:\r\n");
+                for my $r (@krows) {
+                    my $sign = $r->{score} > 0 ? '+' : '';
+                    $stream->write(sprintf("    %-20s %s%d\r\n",
+                        $r->{nick}, $sign, $r->{score}));
+                }
+            } else {
+                $stream->write("  No karma data yet.\r\n");
+            }
+        }
+    }
+    $stream->write("-" x 40 . "\r\n");
 }
 
 # ---------------------------------------------------------------------------

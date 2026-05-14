@@ -6,6 +6,8 @@ package Mediabot::External;
 
 use strict;
 use warnings;
+use constant YT_CACHE_TTL => 300;  # S5: YouTube result cache TTL (seconds)
+
 use POSIX qw(strftime WNOHANG);
 use Time::HiRes qw(usleep);
 use List::Util qw(min);
@@ -30,6 +32,9 @@ our @EXPORT = qw(
     _chatgpt_wrap
     chatGPT
     chatGPT_ctx
+    claudeAI
+    claude_ctx
+    ytSearch_ctx
     displayUrlTitle
     displayWeather_ctx
     displayYoutubeDetails
@@ -280,6 +285,16 @@ sub displayYoutubeDetails {
 
     $self->{logger}->log(4, "displayYoutubeDetails() sYoutubeId = $sYoutubeId");
 
+
+    # S5/cache: serve from cache if fresh (TTL = YT_CACHE_TTL seconds)
+    my $now = time();
+    my $yt_cache = $self->{_yt_cache}{$sYoutubeId};
+    if ($yt_cache && ($now - $yt_cache->{ts}) < YT_CACHE_TTL) {
+        $self->{logger}->log(4, "displayYoutubeDetails() cache hit for $sYoutubeId");
+        botPrivmsg($self, $sChannel, "($sNick) $yt_cache->{msg}");
+        return 1;
+    }
+
     my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
     unless (defined($APIKEY) && $APIKEY ne '') {
         $self->{logger}->log(1, "displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
@@ -369,6 +384,15 @@ sub displayYoutubeDetails {
     $sMsgSong   .= _yt_meta("by $schannelTitle");
 
     $sMsgSong =~ s/\r|\n//g;
+
+    # S5/cache: store result
+    $self->{_yt_cache}{$sYoutubeId} = { ts => time(), msg => $sMsgSong };
+    # Evict entries older than YT_CACHE_TTL * 10 to prevent unbounded growth
+    for my $vid (keys %{ $self->{_yt_cache} // {} }) {
+        delete $self->{_yt_cache}{$vid}
+            if (time() - ($self->{_yt_cache}{$vid}{ts} // 0)) > YT_CACHE_TTL * 10;
+    }
+
     botPrivmsg($self, $sChannel, "($sNick) $sMsgSong");
 
     return 1;
@@ -2703,6 +2727,7 @@ sub fortniteStats_ctx {
 # ------------------------------------------------------------------
 # CONSTANTS (all prefixed with CHATGPT_)
 # ------------------------------------------------------------------
+
 use constant {
     CHATGPT_API_URL      => 'https://api.openai.com/v1/chat/completions',
     CHATGPT_MODEL        => 'gpt-4o-mini',
@@ -2712,6 +2737,17 @@ use constant {
     CHATGPT_WRAP_BYTES   => 400,     # safe IRC payload length
     CHATGPT_SLEEP_US     => 750_000, # µs between PRIVMSG
 	CHATGPT_TRUNC_MSG    => ' [¯\_(ツ)_/¯ guess you can’t have everything…]',   # suffix when we truncate
+
+    # --- Anthropic / Claude ---
+    CLAUDE_API_URL       => 'https://api.anthropic.com/v1/messages',
+    CLAUDE_API_VERSION   => '2023-06-01',
+    CLAUDE_MODEL         => 'claude-haiku-4-5-20251001',
+    CLAUDE_MAX_TOKENS    => 400,
+    CLAUDE_MAX_PRIVMSG   => 4,
+    CLAUDE_WRAP_BYTES    => 400,
+    CLAUDE_SLEEP_US      => 750_000,
+    CLAUDE_SYSTEM_PROMPT => 'You are a helpful IRC assistant. Be concise.',
+    CLAUDE_TRUNC_MSG     => ' [truncated]',
 };
 
 use constant CHATGPT_SYSTEM_PROMPT =>
@@ -3175,5 +3211,242 @@ sub get_tmdb_info {
 # --- Helpers DEBUG ------------------------------------------------------------
 
 
-1;
+# ------------------------------------------------------------------
+# claude_ctx() — Context wrapper for !ai command
+# ------------------------------------------------------------------
+sub claude_ctx {
+    my ($ctx) = @_;
 
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my $message = $ctx->message;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    # P2: !ai reset — clear conversation history for this nick+channel
+    if (@args && lc($args[0]) eq 'reset') {
+        my $hist_key = "$nick\x00$channel";
+        delete $self->{_claude_history}{$hist_key};
+        botNotice($self, $nick, 'Conversation history cleared.');
+        return 1;
+    }
+
+    claudeAI($self, $message, $nick, $channel, @args);
+}
+
+# ------------------------------------------------------------------
+# claudeAI() — send a prompt to Anthropic Claude and reply on IRC
+# ------------------------------------------------------------------
+sub claudeAI {
+    my ($self, $message, $nick, $chan, @args) = @_;
+
+    # Config: anthropic.API_KEY required
+    my $api_key = _chatgpt_conf_string($self, 'anthropic.API_KEY', '')
+        or ($self->{logger}->log(0, 'claudeAI() anthropic.API_KEY missing'), return);
+
+    my $api_url     = _chatgpt_conf_string($self, 'anthropic.API_URL',
+                                            CLAUDE_API_URL);
+    my $api_version = _chatgpt_conf_string($self, 'anthropic.API_VERSION',
+                                            CLAUDE_API_VERSION);
+    my $model       = _chatgpt_conf_string($self, 'anthropic.MODEL',
+                                            CLAUDE_MODEL);
+    my $max_tokens  = _chatgpt_conf_int($self, 'anthropic.MAX_TOKENS',
+                                         CLAUDE_MAX_TOKENS, 1, 4000);
+    my $max_privmsg = _chatgpt_conf_int($self, 'anthropic.MAX_PRIVMSG',
+                                         CLAUDE_MAX_PRIVMSG, 1, 10);
+    my $wrap_bytes  = _chatgpt_conf_int($self, 'anthropic.WRAP_BYTES',
+                                         CLAUDE_WRAP_BYTES, 100, 480);
+    my $sleep_us    = _chatgpt_conf_int($self, 'anthropic.SLEEP_US',
+                                         CLAUDE_SLEEP_US, 0, 5_000_000);
+    my $sys_prompt  = _chatgpt_conf_string($self, 'anthropic.SYSTEM_PROMPT',
+                                            CLAUDE_SYSTEM_PROMPT);
+    $sys_prompt =~ s/[\r\n]/ /g;
+    $sys_prompt = substr($sys_prompt, 0, 800);
+
+    @args or (botNotice($self, $nick, 'Syntax: ai <prompt>'), return);
+
+    # opt-in check: chanset 'Claude' must be enabled on the channel
+    # (same pattern as chatGPT gate — 'chanset +Claude' per channel)
+    # If 'Claude' chanset doesn't exist in DB, feature is always-on.
+    return unless _chanset_ok($self, $chan, 'Claude');
+
+    my $prompt = join ' ', @args;
+    $self->{logger}->log(5, "claudeAI() prompt: $prompt");
+
+    # P2: build conversation history (max 3 exchanges = 6 messages)
+    my $hist_key  = "$nick\x00$chan";
+    my $history   = $self->{_claude_history}{$hist_key} //= [];
+    push @$history, { role => 'user', content => $prompt };
+    # Keep only last 6 messages (3 user + 3 assistant)
+    splice @$history, 0, @$history - 6 if @$history > 6;
+
+    # Anthropic API payload with conversation history
+    my $payload = eval { encode_json({
+        model      => $model,
+        max_tokens => $max_tokens,
+        system     => $sys_prompt,
+        messages   => $history,
+    }) };
+    unless ($payload) {
+        $self->{logger}->log(1, "claudeAI() payload encode error: $@");
+        botPrivmsg($self, $chan, "($nick) Internal error building request.");
+        return;
+    }
+
+    my $http = _make_http(timeout => 30);
+    my $res  = eval {
+        $http->request('POST', $api_url, {
+            headers => {
+                'Content-Type'      => 'application/json',
+                'x-api-key'         => $api_key,
+                'anthropic-version' => $api_version,
+            },
+            content => $payload,
+        });
+    } // { success => 0, status => 0, reason => $@ };
+
+    unless ($res->{success}) {
+        $self->{logger}->log(1,
+            'claudeAI() HTTP error: ' . ($res->{status}//0)
+            . ' ' . ($res->{reason}//'') . " model=$model");
+        $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};  # P5
+        botPrivmsg($self, $chan, "($nick) Sorry, Claude did not answer.");
+        return;
+    }
+
+    # Anthropic response: {content: [{type:'text', text:'...'}], ...}
+    my $data   = eval { decode_json($res->{content} // '') };
+    my $answer = eval {
+        ref($data)                       eq 'HASH'  &&
+        ref($data->{content})            eq 'ARRAY' &&
+        ref($data->{content}[0])         eq 'HASH'  &&
+        $data->{content}[0]{type}        eq 'text'  &&
+        length($data->{content}[0]{text} // '') > 0
+        ? $data->{content}[0]{text} : undef
+    };
+
+    unless (defined $answer && $answer ne '') {
+        $self->{logger}->log(1, 'claudeAI() unexpected response structure');
+        $self->{logger}->log(5, 'claudeAI() raw: ' . ($res->{content} // '(empty)'));
+        botPrivmsg($self, $chan, "($nick) Could not read Claude response.");
+        return;
+    }
+    $self->{logger}->log(5, "claudeAI() raw answer: $answer");
+
+    # P2: store assistant reply in history
+    push @$history, { role => 'assistant', content => $answer };
+    splice @$history, 0, @$history - 6 if @$history > 6;
+
+    # Sanitise and wrap — reuse _chatgpt_wrap
+    $answer =~ s/[\r\n]+/ /g;
+    $answer =~ s/\s{2,}/ /g;
+
+    my @chunk    = _chatgpt_wrap($answer, $wrap_bytes);
+    my $truncate = @chunk > $max_privmsg;
+    my $last     = $truncate ? $max_privmsg - 1 : $#chunk;
+
+    if ($truncate) {
+        my $suff  = CLAUDE_TRUNC_MSG;
+        my $allow = $wrap_bytes - length($suff);
+        if (length($chunk[$last]) > $allow) {
+            $chunk[$last] = substr($chunk[$last], 0, $allow);
+            $chunk[$last] =~ s/\s+\S*$//;
+            $chunk[$last] =~ s/\s+$//;
+        }
+        $chunk[$last] .= $suff;
+    }
+
+    for my $i (0 .. $last) {
+        botPrivmsg($self, $chan, $chunk[$i]);
+        usleep($sleep_us);
+    }
+    $self->{logger}->log(4, 'claudeAI() sent ' . ($last+1) . ' PRIVMSG');
+    # P5: increment Prometheus counter on success
+    $self->{metrics}->inc('mediabot_claude_requests_total') if $self->{metrics};
+}
+
+# ---------------------------------------------------------------------------
+# ytSearch_ctx --- !yt search <query>
+# Search YouTube via Data API v3 and return top 3 results.
+# ---------------------------------------------------------------------------
+sub ytSearch_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    return unless _chanset_ok($self, $channel, 'Youtube');
+
+    my $query = join(' ', @args);
+    $query =~ s/^\s+|\s+$//g;
+    unless ($query ne '') {
+        botNotice($self, $nick, 'Syntax: yt search <query>');
+        return;
+    }
+    if (length($query) > 128) {
+        botNotice($self, $nick, 'Query too long (max 128 chars).');
+        return;
+    }
+
+    my $APIKEY = $self->{conf}->get('main.YOUTUBE_APIKEY');
+    unless (defined $APIKEY && $APIKEY ne '') {
+        $self->{logger}->log(1, 'ytSearch_ctx() YOUTUBE_APIKEY not set');
+        botNotice($self, $nick, 'YouTube API key not configured.');
+        return;
+    }
+
+    require URI::Escape;
+    my $encoded = URI::Escape::uri_escape_utf8($query);
+    my $url = "https://www.googleapis.com/youtube/v3/search"
+            . "?part=snippet&type=video&maxResults=3"
+            . "&q=$encoded&key=$APIKEY";
+
+    my $http = _make_http(timeout => 8);
+    my $res  = eval { $http->get($url) } // { success => 0 };
+    unless ($res->{success}) {
+        $self->{logger}->log(3, 'ytSearch_ctx() HTTP error: ' . ($res->{status} // 0));
+        botPrivmsg($self, $channel, "($nick) YouTube search unavailable.");
+        return;
+    }
+
+    my $data = eval { decode_json($res->{content} // '') };
+    unless (ref($data) eq 'HASH' && ref($data->{items}) eq 'ARRAY') {
+        $self->{logger}->log(3, 'ytSearch_ctx() unexpected response structure');
+        botPrivmsg($self, $channel, "($nick) No results.");
+        return;
+    }
+
+    my @items = @{ $data->{items} };
+    unless (@items) {
+        botPrivmsg($self, $channel, "($nick) No results for: $query");
+        return;
+    }
+
+    botPrivmsg($self, $channel,
+        _yt_label() . _yt_text(" Search: $query ") . _yt_sep('-- ' . scalar(@items) . ' result(s)'));
+    my $rank = 1;
+    for my $item (@items) {
+        next unless ref($item) eq 'HASH'
+                 && ref($item->{snippet}) eq 'HASH'
+                 && ref($item->{id})      eq 'HASH';
+        my $vid_id  = $item->{id}{videoId}    // next;
+        my $title   = $item->{snippet}{title} // '?';
+        my $channel_title = $item->{snippet}{channelTitle} // '?';
+        # Normalise ALL-CAPS titles
+        if (($title =~ tr/A-Z//) > 20) { $title = ucfirst(lc($title)); }
+        my $line = _yt_sep("[$rank] ")
+                 . _yt_text(" $title ")
+                 . _yt_sep('- ')
+                 . _yt_meta("by $channel_title ")
+                 . _yt_sep('- ')
+                 . _yt_meta("https://youtu.be/$vid_id");
+        botPrivmsg($self, $channel, $line);
+        $rank++;
+    }
+    logBot($self, $ctx->message, $channel, 'yt_search', $query);
+    return 1;
+}
+
+1;
