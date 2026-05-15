@@ -3256,7 +3256,19 @@ sub claude_ctx {
 # claudeAI() — send a prompt to Anthropic Claude and reply on IRC
 # ------------------------------------------------------------------
 sub claudeAI {
+    # R1: optional $output_fn callback — called instead of botPrivmsg for each line
+    # Signature: claudeAI($self, $message, $nick, $chan, @args)
+    #        or: claudeAI($self, $message, $nick, $chan, $output_fn_ref, @args)
     my ($self, $message, $nick, $chan, @args) = @_;
+    my $output_fn;
+    if (@args && ref($args[0]) eq 'CODE') {
+        $output_fn = shift @args;
+    }
+    my $_out = sub {
+        my ($text) = @_;
+        if ($output_fn) { $output_fn->($text); }
+        else            { botPrivmsg($self, $chan, $text); }
+    };
 
     # Config: anthropic.API_KEY required
     my $api_key = _chatgpt_conf_string($self, 'anthropic.API_KEY', '')
@@ -3291,6 +3303,25 @@ sub claudeAI {
     my $prompt = join ' ', @args;
     $self->{logger}->log(5, "claudeAI() prompt: $prompt");
 
+    # R2: per-nick rate limiting — max 5 requests per 60 seconds
+    unless ($output_fn) {  # skip rate limit for Partyline (already authenticated)
+        my $rl_key = lc($nick) . "\x00$chan";
+        my $now    = time();
+        $self->{_claude_ratelimit} //= {};
+        my $rl = $self->{_claude_ratelimit}{$rl_key} //= { count => 0, window => $now };
+        # Reset window if older than 60s
+        if ($now - $rl->{window} >= 60) {
+            $rl->{count}  = 0;
+            $rl->{window} = $now;
+        }
+        if (++$rl->{count} > 5) {
+            my $wait = 60 - ($now - $rl->{window});
+            botNotice($self, $nick, "Rate limit: please wait ${wait}s before using !ai again.");
+            $self->{metrics}->inc('mediabot_claude_ratelimit_total') if $self->{metrics};
+            return;
+        }
+    }
+
     # P2: build conversation history (max 3 exchanges = 6 messages)
     my $hist_key  = "$nick\x00$chan";
     my $history   = $self->{_claude_history}{$hist_key} //= [];
@@ -3307,7 +3338,7 @@ sub claudeAI {
     }) };
     unless ($payload) {
         $self->{logger}->log(1, "claudeAI() payload encode error: $@");
-        botPrivmsg($self, $chan, "($nick) Internal error building request.");
+        $_out->("($nick) Internal error building request.");
         return;
     }
 
@@ -3319,7 +3350,7 @@ sub claudeAI {
         $self->{logger}->log(4, 'claudeAI() prompt cache hit');
         my @chunk   = _chatgpt_wrap($pcache->{answer}, $wrap_bytes);
         my $last    = @chunk > $max_privmsg ? $max_privmsg - 1 : $#chunk;
-        botPrivmsg($self, $chan, $chunk[$_]) for 0..$last;
+        $_out->($chunk[$_]) for 0..$last;
         # Still update history with cached answer
         push @$history, { role => 'assistant', content => $pcache->{answer} };
         splice @$history, 0, @$history - 6 if @$history > 6;
@@ -3343,7 +3374,7 @@ sub claudeAI {
             'claudeAI() HTTP error: ' . ($res->{status}//0)
             . ' ' . ($res->{reason}//'') . " model=$model");
         $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};  # P5
-        botPrivmsg($self, $chan, "($nick) Sorry, Claude did not answer.");
+        $_out->("($nick) Sorry, Claude did not answer.");
         return;
     }
 
@@ -3361,7 +3392,7 @@ sub claudeAI {
     unless (defined $answer && $answer ne '') {
         $self->{logger}->log(1, 'claudeAI() unexpected response structure');
         $self->{logger}->log(5, 'claudeAI() raw: ' . ($res->{content} // '(empty)'));
-        botPrivmsg($self, $chan, "($nick) Could not read Claude response.");
+        $_out->("($nick) Could not read Claude response.");
         return;
     }
     $self->{logger}->log(5, "claudeAI() raw answer: $answer");
@@ -3397,8 +3428,8 @@ sub claudeAI {
     }
 
     for my $i (0 .. $last) {
-        botPrivmsg($self, $chan, $chunk[$i]);
-        usleep($sleep_us);
+        $_out->($chunk[$i]);
+        usleep($sleep_us) unless $output_fn;  # no sleep for Partyline
     }
     $self->{logger}->log(4, 'claudeAI() sent ' . ($last+1) . ' PRIVMSG');
     # P5: increment Prometheus counter on success

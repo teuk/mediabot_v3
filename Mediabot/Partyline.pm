@@ -2548,6 +2548,13 @@ sub _cmd_ai {
         $stream->write("Usage: .ai <prompt>\r\n"); return;
     }
 
+    # R1: use $output_fn callback — no monkey-patching needed
+    my $output_fn = sub {
+        my ($text) = @_;
+        $text =~ s/[\r\n]+$//;
+        $stream->write("[Claude] $text\r\n");
+    };
+
     # Resolve first joined channel for context
     my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
     my $chan;
@@ -2557,44 +2564,16 @@ sub _cmd_ai {
     }
     $chan //= 'partyline';
 
-    my $session  = $self->{users}{$id} // {};
-    my $pl_nick  = $session->{login} // 'partyline';
+    my $session = $self->{users}{$id} // {};
+    my $pl_nick = $session->{login} // 'partyline';
 
-    # Capture bot output to partyline stream
-    # Monkey-patch botPrivmsg temporarily — use a local sub
-    my @captured;
-    {
-        no warnings 'redefine';
-        local *Mediabot::Helpers::botPrivmsg = sub {
-            my ($self_inner, $target, $text) = @_;
-            push @captured, $text;
-        };
-
-        # Build a minimal fake context
-        require Mediabot::Context;
-        my $fake_msg = bless {
-            prefix => "$pl_nick!partyline\@localhost",
-            params => [$bot_nick, $prompt],
-        }, 'Protocol::IRC::Message';
-
-        # Call claudeAI directly
-        eval {
-            Mediabot::External::claudeAI($bot, $fake_msg, $pl_nick, $chan,
-                split(/\s+/, $prompt));
-        };
-        $stream->write("Error: $@\r\n") if $@;
-    }
-
-    for my $line (@captured) {
-        $line =~ s/[\r\n]+$//;
-        $stream->write("[Claude] $line\r\n");
-    }
-    $stream->write("(no response)\r\n") unless @captured;
+    eval {
+        Mediabot::External::claudeAI($bot, undef, $pl_nick, $chan,
+            $output_fn, split(/\s+/, $prompt));
+    };
+    $stream->write("Error: $@\r\n") if $@;
 }
 
-# ---------------------------------------------------------------------------
-# .ping - check if partyline session is still alive
-# ---------------------------------------------------------------------------
 sub _cmd_ping {
     my ($self, $stream, $id) = @_;
     my ($sec, $min, $hour) = localtime(time);
