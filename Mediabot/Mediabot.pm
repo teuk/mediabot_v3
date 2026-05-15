@@ -1497,6 +1497,60 @@ whotalks|whotalks #channel|public|Alias for whotalk.
 xlogin|xlogin <account>|public|Authenticate or check X login integration when configured.
 yomomma|yomomma|public|Return a yomomma joke.
 yt|yt <query>|public|Search YouTube when configured.
+
+# --- Wave IV-V commands added 2025-2026 ---
+# Fun / random
+8ball|8ball <question>|public|Ask the Magic 8-ball a yes/no question.
+choose|choose <a> | <b> | ...|public|Choose randomly among pipe-separated options.
+flip|flip|public|Flip a coin (heads or tails).
+morse|morse <text>|public|Encode text in Morse code.
+roll|roll [NdN]|public|Roll dice. Defaults to 1d6. Supports NdN format (e.g. 2d6, 1d20).
+slap|slap [nick]|public|Slap a nick with a random object via CTCP ACTION.
+
+# Analytics / stats
+abbrev|abbrev <text>|public|Generate an acronym from the initials of each word.
+active|active [period]|public|List nicks active in the last N hours or days (e.g. 24h, 7d).
+calclast|calclast|public|Show your last !calc results (session memory).
+compare|compare <nick1> <nick2>|public|Compare message counts between two nicks on the channel.
+heatmap|heatmap [nick]|public|Show hourly activity chart as ASCII bars.
+monthstats|monthstats [nick]|public|Show activity count per month for the last 12 months.
+streak|streak [nick]|public|Show consecutive days of activity on the channel.
+when|when <nick>|public|Show when a nick first appeared on the channel.
+wordcount|wordcount [nick]|public|Count distinct words spoken by a nick on the channel.
+
+# Karma
+karma|karma [nick]|public|Show karma score for a nick. Use nick++ or nick-- to vote.
+karmatop|karmatop [n]|public|Show the top N karma scores on the channel (default 5).
+
+# Reminders
+remindlist|remindlist|public|List your pending reminders on this channel.
+
+# Quotes
+quotecount|quotecount [nick]|public|Count quotes by author on the channel.
+
+# Notes (in-memory, reset on restart)
+note|note <message>|public|Save a personal note (max 10, in-memory).
+notes|notes [del <n>]|public|List or delete personal notes.
+
+# Polls
+poll|poll <question> \| opt1 \| opt2|master|Start a channel poll (options separated by | ).
+pollresult|pollresult|public|Show current or last poll results.
+pollstop|pollstop|master|Close the active poll.
+vote|vote <n>|public|Vote for option N in the active poll.
+
+# Trivia
+trivia|trivia|public|Start a trivia question from Open Trivia DB (30s to answer).
+triviascore|triviascore|public|Show trivia scores for the current channel session.
+
+# Dictionary / external
+define|define <word>|public|Look up a word definition from Wiktionary.
+
+# AI
+ai|ai <prompt>|public|Ask Claude (Anthropic) a question. Requires Claude chanset. ai reset clears history, ai history shows context.
+
+# Misc
+last|last <nick>|public|Show the last message posted by a nick on this channel.
+alias|alias <alias> <command>|owner|Create or manage IRC command aliases (alias list, alias del <alias>).
 MEDIABOT_INTERNAL_HELP
 
     for my $line (split /\n/, $raw) {

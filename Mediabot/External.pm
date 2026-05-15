@@ -2748,6 +2748,7 @@ use constant {
     CLAUDE_SLEEP_US      => 750_000,
     CLAUDE_SYSTEM_PROMPT => 'You are a helpful IRC assistant. Be concise.',
     CLAUDE_TRUNC_MSG     => ' [truncated]',
+    CLAUDE_MAX_HISTORY   => 6,  # A1: default max messages in conversation history
 };
 
 use constant CHATGPT_SYSTEM_PROMPT =>
@@ -3223,6 +3224,25 @@ sub claude_ctx {
     my $message = $ctx->message;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
+    # A4: !ai quota — show remaining requests in current rate limit window
+    if (@args && lc($args[0]) eq 'quota') {
+        my $rl_key = lc($nick) . "\x00$channel";
+        my $now    = time();
+        my $rl     = $self->{_claude_ratelimit}{$rl_key};
+        if (!$rl || ($now - ($rl->{window} // 0)) >= 60) {
+            botNotice($self, $nick, "AI quota: 5/5 requests available (window not started).");
+        } else {
+            my $used = $rl->{count} // 0;
+            my $remaining = 5 - $used;
+            $remaining = 0 if $remaining < 0;
+            my $wait = 60 - ($now - $rl->{window});
+            botNotice($self, $nick,
+                "AI quota: $remaining/5 request(s) remaining"
+                . " (window resets in ${wait}s)");
+        }
+        return 1;
+    }
+
     # F50: !ai history — show current conversation context
     if (@args && lc($args[0]) eq 'history') {
         my $hist_key = "$nick\x00$channel";
@@ -3292,13 +3312,18 @@ sub claudeAI {
                                             CLAUDE_SYSTEM_PROMPT);
     $sys_prompt =~ s/[\r\n]/ /g;
     $sys_prompt = substr($sys_prompt, 0, 800);
+    # A1: configurable history depth (in messages, must be even: user+assistant pairs)
+    my $max_history = _chatgpt_conf_int($self, 'anthropic.MAX_HISTORY',
+                                         CLAUDE_MAX_HISTORY, 2, 20);
+    $max_history += 1 if $max_history % 2 != 0;  # ensure even number
 
     @args or (botNotice($self, $nick, 'Syntax: ai <prompt>'), return);
 
     # opt-in check: chanset 'Claude' must be enabled on the channel
-    # (same pattern as chatGPT gate — 'chanset +Claude' per channel)
-    # If 'Claude' chanset doesn't exist in DB, feature is always-on.
-    return unless _chanset_ok($self, $chan, 'Claude');
+    # Skipped for Partyline (output_fn set — already authenticated operator)
+    unless ($output_fn) {
+        return unless _chanset_ok($self, $chan, 'Claude');
+    }
 
     my $prompt = join ' ', @args;
     $self->{logger}->log(5, "claudeAI() prompt: $prompt");
@@ -3327,7 +3352,7 @@ sub claudeAI {
     my $history   = $self->{_claude_history}{$hist_key} //= [];
     push @$history, { role => 'user', content => $prompt };
     # Keep only last 6 messages (3 user + 3 assistant)
-    splice @$history, 0, @$history - 6 if @$history > 6;
+    splice @$history, 0, @$history - $max_history if @$history > $max_history;
 
     # Anthropic API payload with conversation history
     my $payload = eval { encode_json({
@@ -3353,7 +3378,7 @@ sub claudeAI {
         $_out->($chunk[$_]) for 0..$last;
         # Still update history with cached answer
         push @$history, { role => 'assistant', content => $pcache->{answer} };
-        splice @$history, 0, @$history - 6 if @$history > 6;
+        splice @$history, 0, @$history - $max_history if @$history > $max_history;
         return 1;
     }
 
@@ -3406,7 +3431,7 @@ sub claudeAI {
         delete $self->{_claude_prompt_cache}{$k}
             if (time() - ($self->{_claude_prompt_cache}{$k}{ts} // 0)) > 120;
     }
-    splice @$history, 0, @$history - 6 if @$history > 6;
+    splice @$history, 0, @$history - $max_history if @$history > $max_history;
 
     # Sanitise and wrap — reuse _chatgpt_wrap
     $answer =~ s/[\r\n]+/ /g;
@@ -3461,6 +3486,17 @@ sub ytSearch_ctx {
         return;
     }
 
+    # A2: serve from cache if fresh (TTL = YT_CACHE_TTL seconds)
+    my $search_cache_key = 'search:' . lc($query);
+    my $sc = $self->{_yt_cache}{$search_cache_key};
+    if ($sc && (time() - $sc->{ts}) < YT_CACHE_TTL) {
+        $self->{logger}->log(4, "ytSearch_ctx() cache hit for '$query'");
+        for my $line (@{ $sc->{lines} // [] }) {
+            botPrivmsg($self, $channel, $line);
+        }
+        return 1;
+    }
+
     my $APIKEY = $self->{conf}->get('main.YOUTUBE_APIKEY');
     unless (defined $APIKEY && $APIKEY ne '') {
         $self->{logger}->log(1, 'ytSearch_ctx() YOUTUBE_APIKEY not set');
@@ -3495,8 +3531,9 @@ sub ytSearch_ctx {
         return;
     }
 
-    botPrivmsg($self, $channel,
-        _yt_label() . _yt_text(" Search: $query ") . _yt_sep('-- ' . scalar(@items) . ' result(s)'));
+    my @_yt_search_lines;  # A2: accumulate output lines for cache
+    push @_yt_search_lines,
+        _yt_label() . _yt_text(" Search: $query ") . _yt_sep('-- ' . scalar(@items) . ' result(s)');
 
     # F51: fetch duration + view count via videos endpoint
     my %vid_meta;
@@ -3546,9 +3583,13 @@ sub ytSearch_ctx {
                  . _yt_meta("by $channel_title$dur_part$vw_part ")
                  . _yt_sep('- ')
                  . _yt_meta("https://youtu.be/$vid_id");
-        botPrivmsg($self, $channel, $line);
+        push @_yt_search_lines, $line;
         $rank++;
     }
+
+    # A2: flush accumulated lines and store in cache
+    botPrivmsg($self, $channel, $_) for @_yt_search_lines;
+    $self->{_yt_cache}{$search_cache_key} = { ts => time(), lines => \@_yt_search_lines };
     logBot($self, $ctx->message, $channel, 'yt_search', $query);
     return 1;
 }

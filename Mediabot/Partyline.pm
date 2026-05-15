@@ -1447,7 +1447,7 @@ sub _cmd_help {
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
-      . "  .ai <prompt>        - ask Claude a question\r\n"
+      . "  .ai <prompt>        - ask Claude (use .ai reset or .ai history)\r\n"
       . "  .stats [#chan]      - top 3 speakers + karma for a channel\r\n"
       . "  .karma <nick>       - show karma for a nick\r\n"
       . "  .reload             - reload bot configuration (Owner)\r\n"
@@ -2545,17 +2545,13 @@ sub _cmd_ai {
 
     my $bot = $self->{bot};
     unless (defined $prompt && $prompt =~ /\S/) {
-        $stream->write("Usage: .ai <prompt>\r\n"); return;
+        $stream->write("Usage: .ai <prompt> | .ai reset | .ai history\r\n"); return;
     }
 
-    # R1: use $output_fn callback — no monkey-patching needed
-    my $output_fn = sub {
-        my ($text) = @_;
-        $text =~ s/[\r\n]+$//;
-        $stream->write("[Claude] $text\r\n");
-    };
+    my $session = $self->{users}{$id} // {};
+    my $pl_nick = $session->{login} // 'partyline';
 
-    # Resolve first joined channel for context
+    # A3: resolve channel for shared history key (Partyline nick + fixed scope)
     my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
     my $chan;
     for my $name (sort keys %{ $bot->{channels} || {} }) {
@@ -2564,8 +2560,37 @@ sub _cmd_ai {
     }
     $chan //= 'partyline';
 
-    my $session = $self->{users}{$id} // {};
-    my $pl_nick = $session->{login} // 'partyline';
+    # A3: .ai reset — clear history for this Partyline session
+    if (lc($prompt) eq 'reset') {
+        my $hist_key = "$pl_nick\x00$chan";
+        delete $bot->{_claude_history}{$hist_key};
+        $stream->write("Conversation history cleared.\r\n");
+        return;
+    }
+
+    # A3: .ai history — show current context
+    if (lc($prompt) eq 'history') {
+        my $hist_key = "$pl_nick\x00$chan";
+        my $history  = $bot->{_claude_history}{$hist_key} // [];
+        unless (@$history) {
+            $stream->write("No conversation history.\r\n"); return;
+        }
+        $stream->write(scalar(@$history) . " message(s) in context:\r\n");
+        for my $msg (@$history) {
+            my $role    = $msg->{role}    // '?';
+            my $content = $msg->{content} // '';
+            $content = substr($content, 0, 120) . '...' if length($content) > 120;
+            $stream->write("  [$role] $content\r\n");
+        }
+        return;
+    }
+
+    # R1: use $output_fn callback — no monkey-patching needed
+    my $output_fn = sub {
+        my ($text) = @_;
+        $text =~ s/[\r\n]+$//;
+        $stream->write("[Claude] $text\r\n");
+    };
 
     eval {
         Mediabot::External::claudeAI($bot, undef, $pl_nick, $chan,

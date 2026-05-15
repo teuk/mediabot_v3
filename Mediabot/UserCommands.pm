@@ -3595,7 +3595,10 @@ sub mbDefine_ctx {
     }
     require URI::Escape;
     my $encoded = URI::Escape::uri_escape_utf8($word);
-    my $url = "https://en.wiktionary.org/api/rest_v1/page/definition/$encoded";
+    # A5: language configurable via main.DEFINE_LANG (default: en)
+    my $lang = eval { $self->{conf}->get('main.DEFINE_LANG') } // 'en';
+    $lang = 'en' unless $lang =~ /^[a-z]{2,5}$/;  # safety: valid lang code only
+    my $url = "https://$lang.wiktionary.org/api/rest_v1/page/definition/$encoded";
     my $http = Mediabot::External::_make_http(timeout => 8, verify_SSL => 1);
     my $res  = eval { $http->get($url, { headers => { Accept => 'application/json' } }) }
               // { success => 0 };
@@ -3617,9 +3620,10 @@ sub mbDefine_ctx {
     $first_def =~ s/^\s+|\s+$//g;
     $first_def = substr($first_def, 0, 300) . '...' if length($first_def) > 300;
     if ($first_def ne '') {
-        botPrivmsg($self, $channel, "$word: $first_def");
+        my $lang_tag = $lang ne 'en' ? " [$lang]" : '';
+        botPrivmsg($self, $channel, "$word$lang_tag: $first_def");
     } else {
-        botPrivmsg($self, $channel, "define: no definition found for '$word'.");
+        botPrivmsg($self, $channel, "define: no definition found for '$word' in $lang.wiktionary.");
     }
     return 1;
 }

@@ -1935,7 +1935,8 @@ sub on_message_ERROR {
 sub on_message_KILL {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_KILL', $message);
-    my ($killer, $victim, $reason) = @{ $message->args };
+    my @kill_args = eval { @{ $message->args // [] } } // ();
+    my ($killer, $victim, $reason) = @kill_args;
     $mediabot->{logger}->log(0, "Killed by $killer: $reason - will reconnect.");
 
     if ($mediabot->getQuit()) {
@@ -1952,7 +1953,8 @@ sub on_message_KILL {
 sub on_message_SERVER {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_SERVER', $message);
-    $mediabot->{logger}->log(1, "SERVER message: " . join(" ", @{ $message->args }));
+    my @srv_args = eval { @{ $message->args // [] } } // ();
+    $mediabot->{logger}->log(1, "SERVER message: " . join(" ", @srv_args));
 }
 
 # Numeric 332 RPL_TOPIC
@@ -1980,7 +1982,8 @@ sub on_message_RPL_TOPICWHOTIME {
 sub on_message_RPL_LIST {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_LIST', $message);
-    my ($chan, $users, $topic) = @{ $message->args };
+    my @list_args = eval { @{ $message->args // [] } } // ();
+    my ($chan, $users, $topic) = @list_args;
     $mediabot->{logger}->log(2, "Channel $chan ($users users): $topic");
 }
 
@@ -1991,7 +1994,8 @@ sub on_message_RPL_LISTEND {
 sub on_message_RPL_WHOREPLY {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_WHOREPLY', $message);
-    $mediabot->{logger}->log(2, "WHO reply: " . join(" ", @{ $message->args }));
+    my @who_args = eval { @{ $message->args // [] } } // ();
+    $mediabot->{logger}->log(2, "WHO reply: " . join(" ", @who_args));
 }
 
 sub on_message_RPL_ENDOFWHO {
@@ -2153,27 +2157,29 @@ sub on_message_ERR_NICKNAMEINUSE {
 sub on_message_RPL_MYINFO {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_MYINFO', $message);
-    my @a = @{$message->args};
+    my @a = eval { @{ $message->args // [] } } // ();
     $mediabot->{logger}->log(4,"Server info: host=$a[0], ver=$a[1], umodes=$a[2], cmodes=$a[3]");
 }
 
 sub on_message_RPL_ISUPPORT {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_ISUPPORT', $message);
-    $mediabot->{logger}->log(5, "ISUPPORT tokens: " . join(' ', @{$message->args}));
+    $mediabot->{logger}->log(5, "ISUPPORT tokens: " . join(' ', (eval { @{ $message->args // [] } } // ())));
 }
 
 sub on_message_RPL_INVITING {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_INVITING', $message);
-    my ($nick, $channel) = @{$message->args}[1,2];
+    my @_margs_2172 = eval { @{ $message->args // [] } } // ();
+    my ($nick, $channel) = @_margs_2172[1,2];
     $mediabot->{logger}->log(2, "You have been invited: $nick -> $channel");
 }
 
 sub on_message_RPL_INVITELIST {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_INVITELIST', $message);
-    my ($channel, $nick) = @{$message->args}[1,2];
+    my @_margs_2179 = eval { @{ $message->args // [] } } // ();
+    my ($channel, $nick) = @_margs_2179[1,2];
     $mediabot->{logger}->log(4, "Invite list for $channel: $nick");
 }
 
@@ -2187,7 +2193,8 @@ sub on_message_RPL_ENDOFINVITELIST {
 sub on_message_ERR_NEEDMOREPARAMS {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_ERR_NEEDMOREPARAMS', $message);
-    my ($me, $cmd) = @{$message->args}[0,1];
+    my @_margs_2193 = eval { @{ $message->args // [] } } // ();
+    my ($me, $cmd) = @_margs_2193[0,1];
     $mediabot->{logger}->log(1, "ERR_NEEDMOREPARAMS for $cmd - vérifiez la syntaxe.");
 }
 
