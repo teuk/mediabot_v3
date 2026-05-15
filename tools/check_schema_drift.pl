@@ -26,6 +26,7 @@ use Cwd qw(abs_path);
 my $base_dir = abs_path(File::Spec->catdir($Bin, '..')) || File::Spec->catdir($Bin, '..');
 
 my %opt = (
+    driver             => $ENV{MEDIABOT_DB_DRIVER} // 'auto',
     host               => $ENV{MEDIABOT_DB_HOST}   // 'localhost',
     port               => $ENV{MEDIABOT_DB_PORT}   // 3306,
     socket             => $ENV{MEDIABOT_DB_SOCKET} // '',
@@ -44,6 +45,7 @@ my %opt = (
 );
 
 GetOptions(
+    'driver=s'           => \$opt{driver},
     'host=s'             => \$opt{host},
     'port=i'             => \$opt{port},
     'socket=s'           => \$opt{socket},
@@ -169,6 +171,7 @@ Usage:
 
 Options:
   --conf <file>          Read DB settings from a Mediabot config file
+  --driver <name>        DBI driver: auto, mysql, or MariaDB (default: auto)
   --host <host>          DB host (default: localhost)
   --port <port>          DB port (default: 3306)
   --socket <path>        DB Unix socket, optional
@@ -255,12 +258,27 @@ sub defined_non_empty {
 sub connect_db {
     my ($opt) = @_;
 
+    my $driver = resolve_dbi_driver($opt->{driver});
+
     my @dsn = (
-        'DBI:mysql:database=' . $opt->{db},
-        'host=' . $opt->{host},
-        'port=' . $opt->{port},
+        "DBI:$driver:database=" . $opt->{db},
     );
-    push @dsn, 'mysql_socket=' . $opt->{socket} if defined_non_empty($opt->{socket});
+
+    if (defined_non_empty($opt->{socket})) {
+        push @dsn, 'mysql_socket=' . $opt->{socket};
+    }
+    else {
+        push @dsn, 'host=' . $opt->{host};
+
+        # DBD::MariaDB treats host=localhost as a local socket connection and
+        # refuses an explicit port in that mode:
+        #   "port cannot be specified when host is localhost or embedded"
+        #
+        # Keep the port for TCP hosts such as 127.0.0.1 or remote DB hosts.
+        my $is_localhost = !defined_non_empty($opt->{host}) || $opt->{host} eq 'localhost';
+        push @dsn, 'port=' . $opt->{port}
+            unless $driver eq 'MariaDB' && $is_localhost;
+    }
 
     my %attrs = (
         RaiseError => 1,
@@ -268,20 +286,41 @@ sub connect_db {
         AutoCommit => 1,
     );
 
-    if (($opt->{charset} // '') eq 'utf8mb4') {
-        $attrs{mysql_enable_utf8mb4} = 1;
-    } elsif (($opt->{charset} // '') eq 'utf8') {
-        $attrs{mysql_enable_utf8} = 1;
-    }
-
     my $dbh = DBI->connect(join(';', @dsn), $opt->{user}, $opt->{pass}, \%attrs)
-        or die "DB connect failed: $DBI::errstr\n";
+        or die "DB connect failed using DBD::$driver: $DBI::errstr\n";
 
+    # Keep charset handling driver-neutral.
+    # DBD::mysql and DBD::MariaDB do not support the same connect attributes
+    # on every Debian/Perl version, so use SET NAMES after connection.
     if (($opt->{charset} // '') =~ /\A(?:utf8mb4|utf8|latin1)\z/i) {
         $dbh->do('SET NAMES ' . $opt->{charset});
     }
 
+    $opt->{resolved_driver} = $driver;
+
     return $dbh;
+}
+
+sub resolve_dbi_driver {
+    my ($wanted) = @_;
+    $wanted //= 'auto';
+
+    my %available = map { $_ => 1 } DBI->available_drivers(0);
+
+    if ($wanted ne 'auto') {
+        return $wanted if $available{$wanted};
+
+        my @drivers = sort keys %available;
+        die "Error: requested DBD::$wanted is not installed. Available DBI drivers: "
+          . join(', ', @drivers) . "\n";
+    }
+
+    return 'mysql'   if $available{mysql};
+    return 'MariaDB' if $available{MariaDB};
+
+    my @drivers = sort keys %available;
+    die "Error: neither DBD::mysql nor DBD::MariaDB is installed. Available DBI drivers: "
+      . join(', ', @drivers) . "\n";
 }
 
 sub parse_schema_file {
@@ -422,6 +461,7 @@ sub normalize_live_column_def {
 sub print_header {
     my ($opt) = @_;
     print "Connected  : $opt->{db}\@$opt->{host}:$opt->{port}\n";
+    print "DBI driver : " . ($opt->{resolved_driver} // $opt->{driver} // 'auto') . "\n";
     print "User       : $opt->{user}\n";
     print "Charset    : $opt->{charset}\n";
     print "Schema ref : $opt->{schema}\n";
