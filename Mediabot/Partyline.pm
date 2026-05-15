@@ -1169,6 +1169,9 @@ sub _handle_line {
     elsif ($line =~ /^\.remind\s+(.*)/i) {
         $self->_cmd_remind($stream, $id, $1);
     }
+    elsif ($line =~ /^\.quota(?:\s+(.*))?$/i) {
+        $self->_cmd_quota($stream, $id, $1);
+    }
     elsif ($line =~ /^\.ai\s+(.*)/i) {
         $self->_cmd_ai($stream, $id, $1);
     }
@@ -1447,7 +1450,9 @@ sub _cmd_help {
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
-      . "  .ai <prompt>        - ask Claude (use .ai reset or .ai history)\r\n"
+      . "  .ai <prompt>        - ask Claude (subcommands: reset, history)\r\n"
+      . "  .quota [nick]       - show Claude rate limit (all or specific nick)\r\n"
+      . "  .ai quota           - show your own Claude rate limit\r\n"
       . "  .stats [#chan]      - top 3 speakers + karma for a channel\r\n"
       . "  .karma <nick>       - show karma for a nick\r\n"
       . "  .reload             - reload bot configuration (Owner)\r\n"
@@ -2597,6 +2602,51 @@ sub _cmd_ai {
             $output_fn, split(/\s+/, $prompt));
     };
     $stream->write("Error: $@\r\n") if $@;
+}
+
+# ---------------------------------------------------------------------------
+# _cmd_quota [nick]  - show Claude rate limit status from Partyline
+# ---------------------------------------------------------------------------
+sub _cmd_quota {
+    my ($self, $stream, $id, $args) = @_;
+    my $bot = $self->{bot};
+    my $now = time();
+    if (!defined $args || $args !~ /\S/) {
+        my $rl = $bot->{_claude_ratelimit} // {};
+        unless (%$rl) { $stream->write("No active rate limit windows.\r\n"); return; }
+        $stream->write("Active Claude rate limit windows:\r\n");
+        for my $key (sort keys %$rl) {
+            my $entry = $rl->{$key};
+            next if ($now - ($entry->{window} // 0)) >= 60;
+            my ($nick_k, $chan_k) = split /\x00/, $key, 2;
+            my $used = $entry->{count} // 0;
+            my $remaining = 5 - $used; $remaining = 0 if $remaining < 0;
+            my $wait = 60 - ($now - $entry->{window});
+            $stream->write(sprintf("  %-20s %-15s %d/5 req (%ds left)\r\n",
+                $nick_k, $chan_k, $used, $wait));
+        }
+        return;
+    }
+    my $target = lc($args); $target =~ s/^\s+|\s+\$//g;
+    my $rl = $bot->{_claude_ratelimit} // {};
+    my @found;
+    for my $key (sort keys %$rl) {
+        my ($nick_k, $chan_k) = split /\x00/, $key, 2;
+        next unless lc($nick_k) eq $target;
+        my $entry = $rl->{$key};
+        next if ($now - ($entry->{window} // 0)) >= 60;
+        my $used = $entry->{count} // 0;
+        my $remaining = 5 - $used; $remaining = 0 if $remaining < 0;
+        my $wait = 60 - ($now - $entry->{window});
+        push @found, sprintf("  %-15s %d/5 req — %d remaining (%ds left)",
+            $chan_k, $used, $remaining, $wait);
+    }
+    if (@found) {
+        $stream->write("Claude quota for $target:\r\n");
+        $stream->write("$_\r\n") for @found;
+    } else {
+        $stream->write("No active rate limit for '$target'.\r\n");
+    }
 }
 
 sub _cmd_ping {

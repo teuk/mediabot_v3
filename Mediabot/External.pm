@@ -3224,9 +3224,26 @@ sub claude_ctx {
     my $message = $ctx->message;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
+    # I2: !ai persona <text> — set custom system prompt for this nick+channel
+    if (@args && lc($args[0]) eq 'persona') {
+        shift @args;
+        my $hist_key = lc($nick) . "\x00" . (defined $channel ? $channel : '__private__');
+        if (@args) {
+            my $persona = join(' ', @args);
+            $persona = substr($persona, 0, 400);  # cap at 400 chars
+            $self->{_claude_persona}{$hist_key} = $persona;
+            botNotice($self, $nick, "Persona set: $persona");
+        } else {
+            delete $self->{_claude_persona}{$hist_key};
+            botNotice($self, $nick, 'Persona cleared — using default system prompt.');
+        }
+        return 1;
+    }
+
     # A4: !ai quota — show remaining requests in current rate limit window
     if (@args && lc($args[0]) eq 'quota') {
-        my $rl_key = lc($nick) . "\x00$channel";
+        # B13/fix: $channel can be undef in private — use a stable key
+        my $rl_key = lc($nick) . '\x00' . (defined $channel ? $channel : '__private__');
         my $now    = time();
         my $rl     = $self->{_claude_ratelimit}{$rl_key};
         if (!$rl || ($now - ($rl->{window} // 0)) >= 60) {
@@ -3312,6 +3329,11 @@ sub claudeAI {
                                             CLAUDE_SYSTEM_PROMPT);
     $sys_prompt =~ s/[\r\n]/ /g;
     $sys_prompt = substr($sys_prompt, 0, 800);
+    # I2: per-nick persona overrides global system prompt
+    my $persona_key = lc($nick) . "\x00" . (defined $chan ? $chan : '__private__');
+    if (my $persona = $self->{_claude_persona}{$persona_key}) {
+        $sys_prompt = $persona;
+    }
     # A1: configurable history depth (in messages, must be even: user+assistant pairs)
     my $max_history = _chatgpt_conf_int($self, 'anthropic.MAX_HISTORY',
                                          CLAUDE_MAX_HISTORY, 2, 20);

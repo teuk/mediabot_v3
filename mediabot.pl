@@ -398,6 +398,69 @@ $scheduler->add(
     autostart => 1,
 );
 
+
+$scheduler->add(
+    name      => 'daily_channel_report',
+    interval  => 86400,   # I5: once per day — top 3 msgs + karma per channel
+    cb        => sub {
+        my $dbh = eval { $mediabot->{db}->ensure_connected } // $mediabot->{dbh};
+        return unless $dbh;
+
+        for my $chan (sort keys %{ $mediabot->{channels} // {} }) {
+            # Top 3 speakers (last 24h)
+            my $sth_msgs = $dbh->prepare(q{
+                SELECT cl.nick, COUNT(*) AS cnt
+                FROM CHANNEL_LOG cl
+                JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                WHERE c.name = ?
+                  AND cl.ts >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+                GROUP BY cl.nick ORDER BY cnt DESC LIMIT 3
+            });
+            my @top_msgs;
+            if ($sth_msgs && $sth_msgs->execute($chan)) {
+                my $rank = 1;
+                while (my $r = $sth_msgs->fetchrow_hashref) {
+                    push @top_msgs, "$rank. $r->{nick} ($r->{cnt})";
+                    $rank++;
+                }
+                $sth_msgs->finish;
+            }
+
+            # Top 3 karma
+            my $sth_chan = $dbh->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+            my $id_chan;
+            if ($sth_chan && $sth_chan->execute($chan)) {
+                my $r = $sth_chan->fetchrow_hashref; $sth_chan->finish;
+                $id_chan = $r->{id_channel} if $r;
+            }
+            my @top_karma;
+            if ($id_chan) {
+                my $sth_k = $dbh->prepare(q{
+                    SELECT nick, score FROM KARMA
+                    WHERE id_channel = ? AND score != 0
+                    ORDER BY score DESC LIMIT 3
+                });
+                if ($sth_k && $sth_k->execute($id_chan)) {
+                    while (my $r = $sth_k->fetchrow_hashref) {
+                        my $sign = $r->{score} > 0 ? '+' : '';
+                        push @top_karma, "$r->{nick} (${sign}$r->{score})";
+                    }
+                    $sth_k->finish;
+                }
+            }
+
+            next unless @top_msgs || @top_karma;
+
+            my $msg_str   = @top_msgs  ? join(' | ', @top_msgs)  : '(no activity)';
+            my $karma_str = @top_karma ? join(' | ', @top_karma) : '(no karma)';
+            Mediabot::Helpers::botPrivmsg($mediabot, $chan,
+                "📊 Daily report — Top speakers: $msg_str  ·  Top karma: $karma_str");
+            $mediabot->{logger}->log(2, "daily_channel_report sent to $chan");
+        }
+    },
+    autostart => 1,
+);
+
 $scheduler->add(
     name      => 'birthday_check',
     interval  => 86400,   # once per day

@@ -43,6 +43,7 @@ our @EXPORT = qw(
     mbSlap_ctx
     mbKarma_ctx
     mbKarmaTop_ctx
+    mbKarmaHist_ctx
     processKarma
     mbRoll_ctx
     mbFlip_ctx
@@ -2929,8 +2930,60 @@ sub processKarma {
             my $sign  = $score > 0 ? '+' : '';
             Mediabot::Helpers::botPrivmsg($self, $channel,
                 "$target\'s karma: ${sign}${score}");
+        # I4: append to in-memory karma log (ring buffer, max 20 per channel)
+        my $klog = $self->{_karma_log}{$channel} //= [];
+        push @$klog, {
+            ts    => time(),
+            nick  => $target,
+            delta => ($op eq '++' ? '+1' : '-1'),
+            score => $score,
+            from  => $nick,
+        };
+        splice @$klog, 0, @$klog - 20 if @$klog > 20;
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# mbKarmaHist_ctx --- !karmahist [nick]
+# Show the last karma changes on the channel (optionally filtered by nick).
+# ---------------------------------------------------------------------------
+sub mbKarmaHist_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $filter  = @args ? lc($args[0]) : undef;
+
+    my $klog    = $self->{_karma_log}{$channel} // [];
+    unless (@$klog) {
+        botPrivmsg($self, $channel, "$nick: no karma history yet on $channel.");
+        return 1;
+    }
+
+    my @entries = reverse @$klog;  # most recent first
+    if ($filter) {
+        @entries = grep { lc($_->{nick}) eq $filter } @entries;
+        unless (@entries) {
+            botPrivmsg($self, $channel, "$nick: no karma history for '$filter' on $channel.");
+            return 1;
+        }
+    }
+    @entries = @entries[0..4] if @entries > 5;  # show last 5
+
+    my $label = $filter ? "karma history for $filter" : "recent karma changes";
+    botPrivmsg($self, $channel, "$nick: $label on $channel:");
+    for my $e (@entries) {
+        my $sign  = $e->{score} > 0 ? '+' : '';
+        my $delta = $e->{delta};
+        my $ago   = _seconds_to_human(time() - $e->{ts});
+        botPrivmsg($self, $channel,
+            "  $e->{nick} $delta (now ${sign}$e->{score}) by $e->{from} — $ago ago");
+    }
+    logBot($self, $ctx->message, $channel, 'karmahist', $filter // '');
+    return 1;
 }
 
 # ---------------------------------------------------------------------------

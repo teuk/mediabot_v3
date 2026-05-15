@@ -1193,6 +1193,7 @@ sub mbCommandPublic {
         slap         => sub { mbSlap_ctx($ctx) },
         karma        => sub { mbKarma_ctx($ctx) },
         karmatop     => sub { mbKarmaTop_ctx($ctx) },
+        karmahist    => sub { mbKarmaHist_ctx($ctx) },
         roll         => sub { mbRoll_ctx($ctx) },
         flip         => sub { mbFlip_ctx($ctx) },
         choose       => sub { mbChoose_ctx($ctx) },
@@ -1521,6 +1522,7 @@ wordcount|wordcount [nick]|public|Count distinct words spoken by a nick on the c
 # Karma
 karma|karma [nick]|public|Show karma score for a nick. Use nick++ or nick-- to vote.
 karmatop|karmatop [n]|public|Show the top N karma scores on the channel (default 5).
+karmahist|karmahist [nick]|public|Show the last 5 karma changes on the channel (optionally filtered by nick).
 
 # Reminders
 remindlist|remindlist|public|List your pending reminders on this channel.
@@ -1546,7 +1548,7 @@ triviascore|triviascore|public|Show trivia scores for the current channel sessio
 define|define <word>|public|Look up a word definition from Wiktionary.
 
 # AI
-ai|ai <prompt>|public|Ask Claude (Anthropic) a question. Requires Claude chanset. ai reset clears history, ai history shows context.
+ai|ai <prompt>|public|Ask Claude (Anthropic). Subcommands: ai reset, ai history, ai quota, ai persona <text>. Requires Claude chanset.
 
 # Misc
 last|last <nick>|public|Show the last message posted by a nick on this channel.
