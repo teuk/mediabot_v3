@@ -18,6 +18,7 @@ perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
 
 ```text
 mediabot_fun_commands_migration_20260512.sql
+20260515_claude_chanset.sql
 ```
 
 This migration adds schema support for newer fun/user commands, including:

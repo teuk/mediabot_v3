@@ -50,6 +50,7 @@ Then inside the SQL client:
 SET NAMES utf8mb4;
 USE mediabot;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/mediabot_fun_commands_migration_20260512.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260515_claude_chanset.sql;
 ```
 
 Then run the checker again:
@@ -103,3 +104,5 @@ Before applying migrations to a production database:
 3. apply migrations with `SET NAMES utf8mb4`;
 4. run `tools/check_schema_drift.pl --strict`;
 5. only then restart the bot.
+
+Note: `tools/check_schema_drift.pl` checks schema structure. Reference data migrations such as `20260515_claude_chanset.sql` must still be applied when upgrading an existing database.

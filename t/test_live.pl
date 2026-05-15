@@ -5,7 +5,7 @@
 #
 #  Ce runner :
 #    1. Vérifie la connectivité IRC (fail hard si KO)
-#    2. Crée la base mediabot_test depuis t/live/schema_test.sql
+#    2. Crée la base mediabot_test depuis install/mediabot.sql + t/live/fixtures.sql
 #    3. Génère t/live/test.conf depuis t/live/test.conf.tpl
 #    4. Lance le bot en subprocess (fork+exec)
 #    5. Connecte un client spy IRC pour observer les réponses
@@ -109,15 +109,17 @@ $opt_spynick ||= "mbspy_$rand_suffix";
 # ---------------------------------------------------------------------------
 my $base_dir    = "$FindBin::Bin";
 my $live_dir    = "$base_dir/live";
-my $schema_file = "$live_dir/schema_test.sql";
+my $schema_file  = "$base_dir/../install/mediabot.sql";
+my $fixture_file = "$live_dir/fixtures.sql";
 my $tpl_file    = "$live_dir/test.conf.tpl";
 my $conf_file   = "$live_dir/test.conf";
 my $log_file    = "$live_dir/bot.log";
 my $bot_script  = "$base_dir/../mediabot.pl";
 my $cases_dir   = "$live_dir";
 
-die "ERROR: $schema_file not found\n" unless -f $schema_file;
-die "ERROR: $tpl_file not found\n"    unless -f $tpl_file;
+die "ERROR: $schema_file not found\n"  unless -f $schema_file;
+die "ERROR: $fixture_file not found\n" unless -f $fixture_file;
+die "ERROR: $tpl_file not found\n"     unless -f $tpl_file;
 die "ERROR: $bot_script not found\n"  unless -f $bot_script;
 
 # ---------------------------------------------------------------------------
@@ -376,10 +378,14 @@ die "ERROR: Failed to grant privileges:\n$out\n" unless $ok;
 mysql_cmd("FLUSH PRIVILEGES");
 print "  Database mediabot_test created (user: mediabot_test, no password).\n";
 
-# Charger le schéma
+# Charger le schéma de référence puis les fixtures live
 ($ok, $out) = mysql_cmd_file('mediabot_test', $schema_file);
-die "ERROR: Failed to load schema:\n$out\n" unless $ok;
-print "  Schema loaded.\n";
+die "ERROR: Failed to load reference schema:\n$out\n" unless $ok;
+print "  Reference schema loaded from install/mediabot.sql.\n";
+
+($ok, $out) = mysql_cmd_file('mediabot_test', $fixture_file);
+die "ERROR: Failed to load live fixtures:\n$out\n" unless $ok;
+print "  Live fixtures loaded.\n";
 
 # ---------------------------------------------------------------------------
 # Étape 3 : trouver un port libre pour Partyline
