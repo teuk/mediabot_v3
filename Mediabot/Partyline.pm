@@ -1169,6 +1169,9 @@ sub _handle_line {
     elsif ($line =~ /^\.remind\s+(.*)/i) {
         $self->_cmd_remind($stream, $id, $1);
     }
+    elsif ($line =~ /^\.ai\s+(.*)/i) {
+        $self->_cmd_ai($stream, $id, $1);
+    }
     elsif ($line =~ /^\.stats(?:\s+(.*?))?$/i) {
         $self->_cmd_stats($stream, $id, $1);
     }
@@ -1444,6 +1447,7 @@ sub _cmd_help {
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
+      . "  .ai <prompt>        - ask Claude a question\r\n"
       . "  .stats [#chan]      - top 3 speakers + karma for a channel\r\n"
       . "  .karma <nick>       - show karma for a nick\r\n"
       . "  .reload             - reload bot configuration (Owner)\r\n"
@@ -2530,6 +2534,62 @@ sub _cmd_stats {
         }
     }
     $stream->write("-" x 40 . "\r\n");
+}
+
+
+# ---------------------------------------------------------------------------
+# .ai <prompt>  - send a prompt to Claude from the Partyline
+# ---------------------------------------------------------------------------
+sub _cmd_ai {
+    my ($self, $stream, $id, $prompt) = @_;
+
+    my $bot = $self->{bot};
+    unless (defined $prompt && $prompt =~ /\S/) {
+        $stream->write("Usage: .ai <prompt>\r\n"); return;
+    }
+
+    # Resolve first joined channel for context
+    my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
+    my $chan;
+    for my $name (sort keys %{ $bot->{channels} || {} }) {
+        my @n = eval { $bot->gethChannelsNicksOnChan($name) };
+        if (grep { lc($_) eq lc($bot_nick) } @n) { $chan = $name; last; }
+    }
+    $chan //= 'partyline';
+
+    my $session  = $self->{users}{$id} // {};
+    my $pl_nick  = $session->{login} // 'partyline';
+
+    # Capture bot output to partyline stream
+    # Monkey-patch botPrivmsg temporarily — use a local sub
+    my @captured;
+    {
+        no warnings 'redefine';
+        local *Mediabot::Helpers::botPrivmsg = sub {
+            my ($self_inner, $target, $text) = @_;
+            push @captured, $text;
+        };
+
+        # Build a minimal fake context
+        require Mediabot::Context;
+        my $fake_msg = bless {
+            prefix => "$pl_nick!partyline\@localhost",
+            params => [$bot_nick, $prompt],
+        }, 'Protocol::IRC::Message';
+
+        # Call claudeAI directly
+        eval {
+            Mediabot::External::claudeAI($bot, $fake_msg, $pl_nick, $chan,
+                split(/\s+/, $prompt));
+        };
+        $stream->write("Error: $@\r\n") if $@;
+    }
+
+    for my $line (@captured) {
+        $line =~ s/[\r\n]+$//;
+        $stream->write("[Claude] $line\r\n");
+    }
+    $stream->write("(no response)\r\n") unless @captured;
 }
 
 # ---------------------------------------------------------------------------

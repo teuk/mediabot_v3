@@ -1360,8 +1360,14 @@ sub mbUptime_ctx {
     }
     my $mem_str  = $rss_kb ? sprintf('%.1f MB', $rss_kb/1024) : '?';
     my $load_str = $load || '?';
+    # F54: add Claude request counter from Prometheus metrics
+    my $claude_str = '';
+    if ($self->{metrics}) {
+        my $reqs = eval { $self->{metrics}->get('mediabot_claude_requests_total') } // 0;
+        $claude_str = " | AI $reqs req(s)" if $reqs;
+    }
     botPrivmsg($self, $channel,
-        "$nick: up $uptime_str | RAM $mem_str | load $load_str");
+        "$nick: up $uptime_str | RAM $mem_str | load $load_str$claude_str");
 }
 
 sub _mbHelpInternalCommands {

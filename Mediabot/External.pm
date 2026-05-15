@@ -3223,6 +3223,24 @@ sub claude_ctx {
     my $message = $ctx->message;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
+    # F50: !ai history — show current conversation context
+    if (@args && lc($args[0]) eq 'history') {
+        my $hist_key = "$nick\x00$channel";
+        my $history  = $self->{_claude_history}{$hist_key} // [];
+        unless (@$history) {
+            botNotice($self, $nick, 'No conversation history.');
+            return 1;
+        }
+        botNotice($self, $nick, scalar(@$history) . ' message(s) in context:');
+        for my $msg (@$history) {
+            my $role    = $msg->{role}    // '?';
+            my $content = $msg->{content} // '';
+            $content = substr($content, 0, 120) . '...' if length($content) > 120;
+            botNotice($self, $nick, "  [$role] $content");
+        }
+        return 1;
+    }
+
     # P2: !ai reset — clear conversation history for this nick+channel
     if (@args && lc($args[0]) eq 'reset') {
         my $hist_key = "$nick\x00$channel";
@@ -3293,6 +3311,21 @@ sub claudeAI {
         return;
     }
 
+    # F53: prompt cache — same exact prompt answered within 60s → skip API
+    require Digest::MD5;
+    my $prompt_key = Digest::MD5::md5_hex(lc($prompt));
+    my $pcache     = $self->{_claude_prompt_cache}{$prompt_key};
+    if ($pcache && (time() - $pcache->{ts}) < 60) {
+        $self->{logger}->log(4, 'claudeAI() prompt cache hit');
+        my @chunk   = _chatgpt_wrap($pcache->{answer}, $wrap_bytes);
+        my $last    = @chunk > $max_privmsg ? $max_privmsg - 1 : $#chunk;
+        botPrivmsg($self, $chan, $chunk[$_]) for 0..$last;
+        # Still update history with cached answer
+        push @$history, { role => 'assistant', content => $pcache->{answer} };
+        splice @$history, 0, @$history - 6 if @$history > 6;
+        return 1;
+    }
+
     my $http = _make_http(timeout => 30);
     my $res  = eval {
         $http->request('POST', $api_url, {
@@ -3335,6 +3368,13 @@ sub claudeAI {
 
     # P2: store assistant reply in history
     push @$history, { role => 'assistant', content => $answer };
+    # F53: cache this prompt→answer pair (TTL 60s)
+    $self->{_claude_prompt_cache}{$prompt_key} = { ts => time(), answer => $answer };
+    # Evict entries older than 120s
+    for my $k (keys %{ $self->{_claude_prompt_cache} // {} }) {
+        delete $self->{_claude_prompt_cache}{$k}
+            if (time() - ($self->{_claude_prompt_cache}{$k}{ts} // 0)) > 120;
+    }
     splice @$history, 0, @$history - 6 if @$history > 6;
 
     # Sanitise and wrap — reuse _chatgpt_wrap
@@ -3426,6 +3466,36 @@ sub ytSearch_ctx {
 
     botPrivmsg($self, $channel,
         _yt_label() . _yt_text(" Search: $query ") . _yt_sep('-- ' . scalar(@items) . ' result(s)'));
+
+    # F51: fetch duration + view count via videos endpoint
+    my %vid_meta;
+    my @vid_ids = grep { defined $_ } map { ref($_->{id}) eq 'HASH' ? $_->{id}{videoId} : undef } @items;
+    if (@vid_ids) {
+        my $ids_param = join(',', map { URI::Escape::uri_escape_utf8($_) } @vid_ids);
+        my $meta_url  = "https://www.googleapis.com/youtube/v3/videos"
+                      . "?part=contentDetails,statistics&id=$ids_param&key=$APIKEY";
+        my $mres = eval { $http->get($meta_url) } // { success => 0 };
+        if ($mres->{success}) {
+            my $mdata = eval { decode_json($mres->{content} // '') };
+            if (ref($mdata) eq 'HASH' && ref($mdata->{items}) eq 'ARRAY') {
+                for my $v (@{ $mdata->{items} }) {
+                    my $vid = $v->{id} // next;
+                    # Parse ISO 8601 duration: PT4M13S → 4:13
+                    my $dur = $v->{contentDetails}{duration} // '';
+                    my ($h,$m,$s) = ($dur =~ /(\d+)H/,$dur =~ /(\d+)M/,$dur =~ /(\d+)S/);
+                    ($h,$m,$s) = ($h//0, $m//0, $s//0);
+                    my $dur_str = $h ? sprintf('%d:%02d:%02d',$h,$m,$s) : sprintf('%d:%02d',$m,$s);
+                    # View count
+                    my $views = $v->{statistics}{viewCount} // 0;
+                    my $views_str = $views >= 1_000_000 ? sprintf('%.1fM', $views/1_000_000)
+                                 : $views >= 1_000      ? sprintf('%.0fK', $views/1_000)
+                                 : $views;
+                    $vid_meta{$vid} = { dur => $dur_str, views => $views_str };
+                }
+            }
+        }
+    }
+
     my $rank = 1;
     for my $item (@items) {
         next unless ref($item) eq 'HASH'
@@ -3436,10 +3506,13 @@ sub ytSearch_ctx {
         my $channel_title = $item->{snippet}{channelTitle} // '?';
         # Normalise ALL-CAPS titles
         if (($title =~ tr/A-Z//) > 20) { $title = ucfirst(lc($title)); }
+        my $meta     = $vid_meta{$vid_id} // {};
+        my $dur_part = $meta->{dur}   ? ' [' . $meta->{dur}   . ']' : '';
+        my $vw_part  = $meta->{views} ? ' ' .  $meta->{views} . ' views' : '';
         my $line = _yt_sep("[$rank] ")
                  . _yt_text(" $title ")
                  . _yt_sep('- ')
-                 . _yt_meta("by $channel_title ")
+                 . _yt_meta("by $channel_title$dur_part$vw_part ")
                  . _yt_sep('- ')
                  . _yt_meta("https://youtu.be/$vid_id");
         botPrivmsg($self, $channel, $line);

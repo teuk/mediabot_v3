@@ -2838,6 +2838,7 @@ sub mbStreak_ctx {
 
     botPrivmsg($self, $channel,
         "$target: $streak consecutive day(s) active on $channel (most recent: $days[0])");
+    logBot($self, $ctx->message, $channel, 'streak', $target);  # Q1
     return 1;
 }
 
@@ -3080,6 +3081,7 @@ sub mbPollResult_ctx {
         botPrivmsg($self, $channel,
             sprintf('  [%d] %-20s %d vote(s) (%s)', $i+1, $options[$i], $c, $pct));
     }
+    logBot($self, $ctx->message, $channel, 'pollresult', '');  # Q1
     return 1;
 }
 
@@ -3249,7 +3251,7 @@ sub mbRoll_ctx {
         botPrivmsg($self, $channel, sprintf('%s rolled %s: [%s] = %d',
             $nick, $label, join(', ', @results), $total));
     }
-    logBot($self, $ctx->message, $channel, 'roll', $label);
+    logBot($self, $ctx->message, $channel, 'roll', $label);  # Q1 (already present)
     return 1;
 }
 
@@ -3266,6 +3268,7 @@ sub mbFlip_ctx {
 
     my $result = rand() < 0.5 ? 'Heads!' : 'Tails!';
     botPrivmsg($self, $channel, "$nick flipped a coin: $result");
+    logBot($self, $ctx->message, $channel, 'flip', $result);  # Q1
     return 1;
 }
 
@@ -3350,6 +3353,7 @@ sub mbWhen_ctx {
     } else {
         botPrivmsg($self, $channel, "$target: no history found on $channel.");
     }
+    logBot($self, $ctx->message, $channel, 'when', $target);  # Q1
     return 1;
 }
 
@@ -3406,6 +3410,7 @@ sub mbChoose_ctx {
     }
     my $choice = $opts[int(rand(scalar @opts))];
     botPrivmsg($self, $channel, "$nick: I choose... $choice!");
+    logBot($self, $ctx->message, $channel, 'choose', $choice);  # Q1
     return 1;
 }
 
@@ -3458,6 +3463,7 @@ sub mbAbbrev_ctx {
     my @words  = split /\s+/, $text;
     my $abbrev = join('', map { uc(substr($_, 0, 1)) } @words);
     botPrivmsg($self, $channel, "$nick: $abbrev");
+    logBot($self, $ctx->message, $channel, 'abbrev', $abbrev);  # Q1
     return 1;
 }
 
@@ -3707,6 +3713,7 @@ sub mbTriviaScore_ctx {
     my @sorted = sort { $scores->{$b} <=> $scores->{$a} } keys %$scores;
     my $top = join(', ', map { "$_:$scores->{$_}" } @sorted[0..($#sorted > 4 ? 4 : $#sorted)]);
     botPrivmsg($self, $channel, "Trivia scores on $channel: $top");
+    logBot($self, $ctx->message, $channel, 'triviascore', '');  # Q1
     return 1;
 }
 

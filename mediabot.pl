@@ -983,6 +983,12 @@ sub on_message_NICK {
     # Track last seen on NICK change
     {
         my ($sNick_n, $sIdent_n, $sHost_n) = $mediabot->getMessageNickIdentHost($message);
+    # Q2: purge Claude history for old nick on NICK change
+    if (defined $sNick_n && $mediabot->{_claude_history}) {
+        my $prefix = lc($sNick_n) . "\x00";
+        delete $mediabot->{_claude_history}{$_}
+            for grep { index($_, $prefix) == 0 } keys %{ $mediabot->{_claude_history} };
+    }
         eval { $mediabot->updateUserSeen(
             nick       => $old_nick,
             channel    => '',
@@ -1018,6 +1024,12 @@ sub on_message_QUIT {
     my ($text) = @{$hints}{qw<text>};
     unless(defined($text)) { $text="";}
     my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
+    # Q2: purge Claude conversation history on QUIT
+    if (defined $sNick && $mediabot->{_claude_history}) {
+        my $prefix = lc($sNick) . "\x00";
+        delete $mediabot->{_claude_history}{$_}
+            for grep { index($_, $prefix) == 0 } keys %{ $mediabot->{_claude_history} };
+    }
     if (defined($text) && ($text ne "")) {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
             $mediabot->{logger}->log(0,"[LIVE] * Quits: $sNick ($sIdent\@$sHost) ($text)");
