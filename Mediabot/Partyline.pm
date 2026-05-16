@@ -1169,6 +1169,9 @@ sub _handle_line {
     elsif ($line =~ /^\.remind\s+(.*)/i) {
         $self->_cmd_remind($stream, $id, $1);
     }
+    elsif ($line =~ /^\.karmahist(?:\s+(.*?))?$/i) {
+        $self->_cmd_karmahist($stream, $id, $1);
+    }
     elsif ($line =~ /^\.persona(?:\s+(.*))?$/i) {
         $self->_cmd_persona($stream, $id, $1);
     }
@@ -1454,6 +1457,7 @@ sub _cmd_help {
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: reset, history)\r\n"
+      . "  .karmahist [nick]   - show karma history for a channel or nick\r\n"
       . "  .persona [nick]     - view/clear Claude persona (all or specific nick)\r\n"
       . "  .quota [nick]       - show Claude rate limit (all or specific nick)\r\n"
       . "  .ai quota           - show your own Claude rate limit\r\n"
@@ -2609,6 +2613,51 @@ sub _cmd_ai {
 }
 
 
+
+# ---------------------------------------------------------------------------
+# .karmahist [nick]  — show karma history from Partyline (K5)
+# ---------------------------------------------------------------------------
+sub _cmd_karmahist {
+    my ($self, $stream, $id, $args) = @_;
+    my $bot    = $self->{bot};
+    my $filter = (defined $args && $args =~ /\S/) ? lc($args) : undef;
+    $filter =~ s/^\s+|\s+$//g if $filter;
+
+    # Resolve first active channel
+    my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
+    my $chan;
+    for my $name (sort keys %{ $bot->{channels} || {} }) {
+        my @n = eval { $bot->gethChannelsNicksOnChan($name) };
+        if (grep { lc($_) eq lc($bot_nick) } @n) { $chan = $name; last; }
+    }
+    unless ($chan) {
+        $stream->write("Not on any channel.\r\n"); return;
+    }
+
+    my $klog = $bot->{_karma_log}{$chan} // [];
+    unless (@$klog) {
+        $stream->write("No karma history for $chan.\r\n"); return;
+    }
+
+    my @entries = reverse @$klog;
+    if ($filter) {
+        @entries = grep { lc($_->{nick}) eq $filter } @entries;
+        unless (@entries) {
+            $stream->write("No karma history for '$filter' on $chan.\r\n"); return;
+        }
+    }
+    @entries = @entries[0..9] if @entries > 10;  # max 10 in PL
+
+    my $label = $filter ? "Karma history for $filter" : "Recent karma changes";
+    $stream->write("$label on $chan:\r\n");
+    for my $e (@entries) {
+        my $sign = $e->{score} > 0 ? '+' : '';
+        my $ago  = Mediabot::UserCommands::_seconds_to_human(time() - $e->{ts});
+        $stream->write(sprintf("  %-20s %s (now %s%d) by %-15s %s ago\r\n",
+            $e->{nick}, $e->{delta}, $sign, $e->{score}, $e->{from}, $ago));
+    }
+}
+
 # ---------------------------------------------------------------------------
 # _cmd_persona [nick [#chan]]  — view/clear persona from Partyline
 # I7: operators can inspect any nick's Claude persona
@@ -2752,6 +2801,17 @@ sub _cmd_uptime {
     else {
         $stream->write("  Server  : unavailable\r\n");
     }
+
+    # J1: Claude stats in .uptime output
+    my $claude_reqs   = eval { $bot->{metrics}->get('mediabot_claude_requests_total') } // 0;
+    my $claude_errs   = eval { $bot->{metrics}->get('mediabot_claude_errors_total') } // 0;
+    my $claude_rl     = eval { $bot->{metrics}->get('mediabot_claude_ratelimit_total') } // 0;
+    my $persona_count = scalar keys %{ $bot->{_claude_persona} // {} };
+    my $hist_count    = scalar keys %{ $bot->{_claude_history}  // {} };
+    $stream->write("Claude AI:\r\n");
+    $stream->write("  Requests : $claude_reqs (errors: $claude_errs, ratelimited: $claude_rl)\r\n");
+    $stream->write("  Personas : $persona_count active\r\n");
+    $stream->write("  History  : $hist_count active session(s)\r\n");
 }
 
 

@@ -2393,6 +2393,9 @@ sub mb8ball_ctx {
         return;
     }
 
+    # J3: French answers if main.LANG = fr
+    my $lang_8b = eval { $self->{conf}->get('main.LANG') } // 'en';
+
     my @answers = (
         'It is certain.',
         'It is decidedly so.',
@@ -2415,6 +2418,30 @@ sub mb8ball_ctx {
         'Outlook not so good.',
         'Very doubtful.',
     );
+    my @answers_fr = (
+        'C\'est certain.',
+        'C\'est absolument Ã§a.',
+        'Sans aucun doute.',
+        'Oui, dÃ©finitivement.',
+        'Tu peux compter dessus.',
+        'Comme je le vois, oui.',
+        'TrÃ¨s probablement.',
+        'Les perspectives sont bonnes.',
+        'Oui.',
+        'Les signes indiquent que oui.',
+        'Flou, essaie encore.',
+        'Demande plus tard.',
+        'Mieux vaut ne pas te le dire maintenant.',
+        'Je ne peux pas prÃ©dire Ã§a.',
+        'Concentre-toi et redemande.',
+        'N\'y compte pas.',
+        'Ma rÃ©ponse est non.',
+        'Mes sources disent non.',
+        'Les perspectives ne sont pas bonnes.',
+        'TrÃ¨s douteux.',
+    );
+    @answers = @answers_fr if $lang_8b eq 'fr';
+
 
     my $answer = $answers[int(rand(scalar @answers))];
     botPrivmsg($self, $channel, "\x038\x02[8ball]\x0f $nick: $answer");
@@ -2443,12 +2470,60 @@ sub mbRemind_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
+    # K1: subcommands list and cancel
+    if (@args && lc($args[0]) eq 'list') {
+        my $sth_l = $self->{dbh}->prepare(q{
+            SELECT r.id, r.to_nick, r.message, r.created_at
+            FROM REMINDERS r
+            JOIN CHANNEL c ON c.id_channel = r.id_channel
+            WHERE c.name = ? AND r.from_nick = ? AND r.delivered = 0
+            ORDER BY r.id ASC LIMIT 10
+        });
+        if ($sth_l && $sth_l->execute($channel, lc($nick))) {
+            my @rows;
+            while (my $r = $sth_l->fetchrow_hashref) { push @rows, $r; }
+            $sth_l->finish;
+            if (@rows) {
+                botNotice($self, $nick, 'Pending reminders:');
+                for my $r (@rows) {
+                    botNotice($self, $nick,
+                        "  [#$r->{id}] for $r->{to_nick}: $r->{message}");
+                }
+            } else {
+                botNotice($self, $nick, 'No pending reminders.');
+            }
+        }
+        return 1;
+    }
+
+    if (@args && lc($args[0]) eq 'cancel') {
+        my $id = $args[1];
+        unless (defined $id && $id =~ /^\d+$/) {
+            botNotice($self, $nick, 'Syntax: remind cancel <id>  (use remind list)');
+            return;
+        }
+        my $sth_del = $self->{dbh}->prepare(q{
+            DELETE FROM REMINDERS
+            WHERE id = ? AND from_nick = ? AND delivered = 0
+        });
+        if ($sth_del && $sth_del->execute($id, lc($nick))) {
+            my $rows = $sth_del->rows; $sth_del->finish;
+            if ($rows > 0) {
+                botNotice($self, $nick, "Reminder #$id cancelled.");
+                logBot($self, $ctx->message, $channel, 'remind_cancel', $id);
+            } else {
+                botNotice($self, $nick, "Reminder #$id not found or already delivered.");
+            }
+        }
+        return 1;
+    }
+
     my $target  = shift @args;
     my $message = join(' ', @args);
     $message =~ s/^\s+|\s+$//g;
 
     unless (defined $target && $target ne '' && $message ne '') {
-        botNotice($self, $nick, "Syntax: remind <nick> <message>");
+        botNotice($self, $nick, "Syntax: remind <nick> <message>  |  remind list  |  remind cancel <id>");
         return;
     }
 
@@ -3513,10 +3588,12 @@ sub mbChoose_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     my $raw = join(' ', @args);
-    my @opts = map { s/^\s+|\s+$//gr } split /\|/, $raw;
+    # J2: accept both | and ' ou ' (French) as separator
+    my $sep = $raw =~ /\|/ ? '\|' : '\s+ou\s+';
+    my @opts = map { my $o = $_; $o =~ s/^\s+|\s+$//g; $o } split /$sep/, $raw;
     @opts = grep { $_ ne '' } @opts;
     unless (@opts >= 2) {
-        botNotice($self, $nick, 'Syntax: choose <option1> | <option2> | ...  (at least 2)');
+        botNotice($self, $nick, 'Syntax: choose <a> | <b>  or  choose <a> ou <b>  (at least 2)');
         return;
     }
     my $choice = $opts[int(rand(scalar @opts))];
@@ -3786,7 +3863,10 @@ sub mbTrivia_ctx {
     botPrivmsg($self, $channel, "Trivia ($q->{category}): $question");
     botPrivmsg($self, $channel, "Choices: $opts -- reply with !answer <choice> or just say it (30s)");
     # Set a timeout via Scheduler or alarm — simplified: check in PRIVMSG hook
-    $self->{_trivia}{$channel}{deadline} = time() + 30;
+    # K3: configurable timeout (main.TRIVIA_TIMEOUT, default 30s)
+    my $trivia_timeout = eval { int($self->{conf}->get('main.TRIVIA_TIMEOUT') // 30) } // 30;
+    $trivia_timeout = 30 unless $trivia_timeout > 0 && $trivia_timeout <= 120;
+    $self->{_trivia}{$channel}{deadline} = time() + $trivia_timeout;
     logBot($self, $ctx->message, $channel, 'trivia', $q->{category} // '');  # S2/fix
     return 1;
 }

@@ -3224,6 +3224,13 @@ sub claude_ctx {
     my $message = $ctx->message;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
+    # K6: !ai model — show current Claude model
+    if (@args && lc($args[0]) eq 'model') {
+        my $model = _chatgpt_conf_string($self, 'anthropic.MODEL', CLAUDE_MODEL);
+        botNotice($self, $nick, "Current Claude model: $model");
+        return 1;
+    }
+
     # I2: !ai persona — manage per-nick system prompt
     # I6: improved: no args or 'show' → display current; 'clear' → remove
     if (@args && lc($args[0]) eq 'persona') {
@@ -3547,8 +3554,11 @@ sub ytSearch_ctx {
 
     require URI::Escape;
     my $encoded = URI::Escape::uri_escape_utf8($query);
+    # K4: configurable result count (main.YT_SEARCH_RESULTS, default 3, max 5)
+    my $yt_max = eval { int($self->{conf}->get('main.YT_SEARCH_RESULTS') // 3) } // 3;
+    $yt_max = 3 unless $yt_max >= 1 && $yt_max <= 5;
     my $url = "https://www.googleapis.com/youtube/v3/search"
-            . "?part=snippet&type=video&maxResults=3"
+            . "?part=snippet&type=video&maxResults=$yt_max"
             . "&q=$encoded&key=$APIKEY";
 
     my $http = _make_http(timeout => 8);
