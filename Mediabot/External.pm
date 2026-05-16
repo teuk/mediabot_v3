@@ -3224,18 +3224,37 @@ sub claude_ctx {
     my $message = $ctx->message;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    # I2: !ai persona <text> — set custom system prompt for this nick+channel
+    # I2: !ai persona — manage per-nick system prompt
+    # I6: improved: no args or 'show' → display current; 'clear' → remove
     if (@args && lc($args[0]) eq 'persona') {
         shift @args;
-        my $hist_key = lc($nick) . "\x00" . (defined $channel ? $channel : '__private__');
-        if (@args) {
-            my $persona = join(' ', @args);
-            $persona = substr($persona, 0, 400);  # cap at 400 chars
-            $self->{_claude_persona}{$hist_key} = $persona;
-            botNotice($self, $nick, "Persona set: $persona");
+        my $persona_key = lc($nick) . "\x00" . (defined $channel ? $channel : '__private__');
+        my $subcmd = @args ? lc($args[0]) : 'show';
+
+        if ($subcmd eq 'clear') {
+            delete $self->{_claude_persona}{$persona_key};
+            botNotice($self, $nick, 'Persona cleared -- using default system prompt.');  # B17/fix: ASCII only
+        } elsif ($subcmd eq 'show' && @args <= 1 && ($args[0]//'') eq 'show') {
+            my $current = $self->{_claude_persona}{$persona_key};
+            if ($current) {
+                botNotice($self, $nick, "Current persona: $current");
+            } else {
+                botNotice($self, $nick, 'No persona set -- using default system prompt.');
+            }
+        } elsif (!@args) {
+            # No args at all: show current persona  (I6)
+            my $current = $self->{_claude_persona}{$persona_key};
+            if ($current) {
+                botNotice($self, $nick, "Current persona: $current");
+            } else {
+                botNotice($self, $nick, 'No persona set -- using default system prompt.');
+            }
         } else {
-            delete $self->{_claude_persona}{$hist_key};
-            botNotice($self, $nick, 'Persona cleared — using default system prompt.');
+            # Has args and not 'clear'/'show' — set new persona
+            my $persona = join(' ', @args);
+            $persona = substr($persona, 0, 400);
+            $self->{_claude_persona}{$persona_key} = $persona;
+            botNotice($self, $nick, "Persona set: $persona");
         }
         return 1;
     }

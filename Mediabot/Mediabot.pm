@@ -1548,7 +1548,7 @@ triviascore|triviascore|public|Show trivia scores for the current channel sessio
 define|define <word>|public|Look up a word definition from Wiktionary.
 
 # AI
-ai|ai <prompt>|public|Ask Claude (Anthropic). Subcommands: ai reset, ai history, ai quota, ai persona <text>. Requires Claude chanset.
+ai|ai <prompt>|public|Ask Claude (Anthropic). Subcommands: ai reset (clear history), ai history (show context), ai quota (remaining req), ai persona <text> (set system prompt). Requires Claude chanset.
 
 # Misc
 last|last <nick>|public|Show the last message posted by a nick on this channel.

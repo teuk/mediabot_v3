@@ -1169,6 +1169,9 @@ sub _handle_line {
     elsif ($line =~ /^\.remind\s+(.*)/i) {
         $self->_cmd_remind($stream, $id, $1);
     }
+    elsif ($line =~ /^\.persona(?:\s+(.*))?$/i) {
+        $self->_cmd_persona($stream, $id, $1);
+    }
     elsif ($line =~ /^\.quota(?:\s+(.*))?$/i) {
         $self->_cmd_quota($stream, $id, $1);
     }
@@ -1451,6 +1454,7 @@ sub _cmd_help {
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: reset, history)\r\n"
+      . "  .persona [nick]     - view/clear Claude persona (all or specific nick)\r\n"
       . "  .quota [nick]       - show Claude rate limit (all or specific nick)\r\n"
       . "  .ai quota           - show your own Claude rate limit\r\n"
       . "  .stats [#chan]      - top 3 speakers + karma for a channel\r\n"
@@ -2602,6 +2606,59 @@ sub _cmd_ai {
             $output_fn, split(/\s+/, $prompt));
     };
     $stream->write("Error: $@\r\n") if $@;
+}
+
+
+# ---------------------------------------------------------------------------
+# _cmd_persona [nick [#chan]]  — view/clear persona from Partyline
+# I7: operators can inspect any nick's Claude persona
+# ---------------------------------------------------------------------------
+sub _cmd_persona {
+    my ($self, $stream, $id, $args) = @_;
+    my $bot = $self->{bot};
+    my $personas = $bot->{_claude_persona} // {};
+
+    # No args — list all active personas
+    unless (defined $args && $args =~ /\S/) {
+        unless (%$personas) {
+            $stream->write("No active personas.\r\n"); return;
+        }
+        $stream->write("Active Claude personas:\r\n");
+        for my $key (sort keys %$personas) {
+            my ($nick_k, $chan_k) = split /\x00/, $key, 2;
+            my $text = substr($personas->{$key}, 0, 60);
+            $stream->write(sprintf("  %-15s %-12s %s...\r\n", $nick_k, $chan_k, $text));
+        }
+        return;
+    }
+
+    # .persona <nick> [#chan] [clear]
+    my @parts  = split /\s+/, $args, 3;
+    my $target = lc($parts[0]);
+    my $chan   = $parts[1] && $parts[1] =~ /^#/ ? $parts[1] : undef;
+    my $subcmd = $chan ? ($parts[2] // '') : ($parts[1] // '');
+
+    # Find matching keys
+    my @keys = grep {
+        my ($n,$c) = split /\x00/, $_, 2;
+        lc($n) eq $target && (!$chan || lc($c) eq lc($chan))
+    } keys %$personas;
+
+    unless (@keys) {
+        $stream->write("No persona found for '$target'" . ($chan ? " on $chan" : '') . ".\r\n");
+        return;
+    }
+
+    if (lc($subcmd) eq 'clear') {
+        delete $personas->{$_} for @keys;
+        $stream->write("Persona cleared for $target (" . scalar(@keys) . " entr" . (@keys == 1 ? 'y' : 'ies') . ").\r\n");
+    } else {
+        $stream->write("Persona(s) for $target:\r\n");
+        for my $key (@keys) {
+            my ($n, $c) = split /\x00/, $key, 2;
+            $stream->write("  [$c] $personas->{$key}\r\n");
+        }
+    }
 }
 
 # ---------------------------------------------------------------------------

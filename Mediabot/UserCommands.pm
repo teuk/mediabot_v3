@@ -93,13 +93,13 @@ sub dbLogoutUsers {
     my $sth = $dbh->prepare($sLogoutQuery);
 
     unless ($sth) {
-        $self->{logger}->log(1, "dbLogoutUsers() SQL prepare error : " . $DBI::errstr . " Query : " . $sLogoutQuery)
+        $self->{logger}->log(1, "dbLogoutUsers() SQL prepare error : " . $DBI::errstrstr . " Query : " . $sLogoutQuery)
             if $self->{logger};
         return 0;
     }
 
     unless ($sth->execute()) {
-        $self->{logger}->log(1, "dbLogoutUsers() SQL execute error : " . $DBI::errstr . "(" . $DBI::err . ") Query : " . $sLogoutQuery)
+        $self->{logger}->log(1, "dbLogoutUsers() SQL execute error : " . $DBI::errstrstr . "(" . $DBI::errstr . ") Query : " . $sLogoutQuery)
             if $self->{logger};
         $sth->finish;
         return 0;
@@ -136,7 +136,7 @@ sub userOnJoin {
         my $sth = $self->{dbh}->prepare($sql);
 
         unless ($sth) {
-            $self->{logger}->log(1, "userOnJoin() SQL prepare error: " . $DBI::errstr . " Query: $sql")
+            $self->{logger}->log(1, "userOnJoin() SQL prepare error: " . $DBI::errstrstr . " Query: $sql")
                 if $self->{logger};
         }
         elsif ($sth->execute($sChannel, $user->id)) {
@@ -163,7 +163,7 @@ sub userOnJoin {
             $sth->finish;
         }
         else {
-            $self->{logger}->log(1, "userOnJoin() SQL execute error: " . $DBI::errstr . " Query: $sql")
+            $self->{logger}->log(1, "userOnJoin() SQL execute error: " . $DBI::errstrstr . " Query: $sql")
                 if $self->{logger};
             $sth->finish;
         }
@@ -177,7 +177,7 @@ sub userOnJoin {
     my $sth = $self->{dbh}->prepare($sql_channel);
 
     unless ($sth) {
-        $self->{logger}->log(1, "userOnJoin() channel SQL prepare error: " . $DBI::errstr . " Query: $sql_channel")
+        $self->{logger}->log(1, "userOnJoin() channel SQL prepare error: " . $DBI::errstrstr . " Query: $sql_channel")
             if $self->{logger};
         return;
     }
@@ -193,7 +193,7 @@ sub userOnJoin {
         $sth->finish;
     }
     else {
-        $self->{logger}->log(1, "userOnJoin() channel SQL execute error: " . $DBI::errstr . " Query: $sql_channel")
+        $self->{logger}->log(1, "userOnJoin() channel SQL execute error: " . $DBI::errstrstr . " Query: $sql_channel")
             if $self->{logger};
         $sth->finish;
     }
@@ -212,13 +212,13 @@ sub getIdUserLevel {
     my $sth = $self->{dbh}->prepare($sQuery);
 
     unless ($sth) {
-        $self->{logger}->log(1, "getIdUserLevel() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+        $self->{logger}->log(1, "getIdUserLevel() SQL prepare error : " . $DBI::errstrstr . " Query : " . $sQuery)
             if $self->{logger};
         return undef;
     }
 
     unless ($sth->execute($sLevel)) {
-        $self->{logger}->log(1, "getIdUserLevel() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+        $self->{logger}->log(1, "getIdUserLevel() SQL execute error : " . $DBI::errstrstr . " Query : " . $sQuery)
             if $self->{logger};
         $sth->finish;
         return undef;
@@ -245,13 +245,13 @@ sub getLevelUser {
     my $sth = $self->{dbh}->prepare($sQuery);
 
     unless ($sth) {
-        $self->{logger}->log(1, "getLevelUser() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+        $self->{logger}->log(1, "getLevelUser() SQL prepare error : " . $DBI::errstrstr . " Query : " . $sQuery)
             if $self->{logger};
         return undef;
     }
 
     unless ($sth->execute($sUserHandle)) {
-        $self->{logger}->log(1, "getLevelUser() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+        $self->{logger}->log(1, "getLevelUser() SQL execute error : " . $DBI::errstrstr . " Query : " . $sQuery)
             if $self->{logger};
         $sth->finish;
         return undef;
@@ -285,7 +285,7 @@ sub userCstat_ctx {
 
     my $sth = $self->{dbh}->prepare($query);
     unless ($sth && $sth->execute) {
-        $self->{logger}->log(1, "userCstat_ctx() SQL Error: $DBI::errstr");
+        $self->{logger}->log(1, "userCstat_ctx() SQL Error: $DBI::errstrstr");
         botNotice($self, $nick, 'Internal error (DB query failed).');
         $sth->finish if $sth;
         return;
@@ -368,13 +368,13 @@ sub getUserLevelDesc {
     my $sth = $self->{dbh}->prepare($sQuery);
 
     unless ($sth) {
-        $self->{logger}->log(1, "getUserLevelDesc() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+        $self->{logger}->log(1, "getUserLevelDesc() SQL prepare error : " . $DBI::errstrstr . " Query : " . $sQuery)
             if $self->{logger};
         return undef;
     }
 
     unless ($sth->execute($level)) {
-        $self->{logger}->log(1, "getUserLevelDesc() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+        $self->{logger}->log(1, "getUserLevelDesc() SQL execute error : " . $DBI::errstrstr . " Query : " . $sQuery)
             if $self->{logger};
         $sth->finish;
         return undef;
@@ -465,7 +465,7 @@ sub userInfo_ctx {
 
     my $sth = $self->{dbh}->prepare($sQuery);
     unless ($sth && $sth->execute($target)) {
-        $self->{logger}->log(1, "userInfo_ctx() SQL Error: $DBI::errstr | Query: $sQuery");
+        $self->{logger}->log(1, "userInfo_ctx() SQL Error: $DBI::errstrstr | Query: $sQuery");
         return;
     }
 
@@ -488,7 +488,7 @@ sub userInfo_ctx {
             $hm_sth->finish;
         }
         else {
-            $self->{logger}->log(1, "userInfo_ctx() hostmask SQL Error: $DBI::errstr")
+            $self->{logger}->log(1, "userInfo_ctx() hostmask SQL Error: $DBI::errstrstr")
                 if $self->{logger};
             $hm_sth->finish if $hm_sth;
         }
@@ -582,7 +582,7 @@ sub addUserHost_ctx {
         "SELECT id_user_hostmask FROM USER_HOSTMASK WHERE id_user=? AND hostmask=? LIMIT 1"
     );
     unless ($chk && $chk->execute($id_user, $new_hostmask)) {
-        $self->{logger}->log(1, "addUserHost_ctx() SQL Error: $DBI::errstr");
+        $self->{logger}->log(1, "addUserHost_ctx() SQL Error: $DBI::errstrstr");
         return;
     }
     if ($chk->fetchrow_arrayref) {
@@ -599,7 +599,7 @@ sub addUserHost_ctx {
         "INSERT INTO USER_HOSTMASK (id_user, hostmask) VALUES (?, ?)"
     );
     unless ($ins && $ins->execute($id_user, $new_hostmask)) {
-        $self->{logger}->log(1, "addUserHost_ctx() SQL Insert Error: $DBI::errstr");
+        $self->{logger}->log(1, "addUserHost_ctx() SQL Insert Error: $DBI::errstrstr");
         return;
     }
     $ins->finish;
@@ -623,13 +623,13 @@ sub getUserChannelLevel {
     my $sth = $self->{dbh}->prepare($sQuery);
 
     unless ($sth) {
-        $self->{logger}->log(1, "getUserChannelLevel() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+        $self->{logger}->log(1, "getUserChannelLevel() SQL prepare error : " . $DBI::errstrstr . " Query : " . $sQuery)
             if $self->{logger};
         return 0;
     }
 
     unless ($sth->execute($sChannel, $id_user)) {
-        $self->{logger}->log(1, "getUserChannelLevel() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
+        $self->{logger}->log(1, "getUserChannelLevel() SQL execute error : " . $DBI::errstrstr . " Query : " . $sQuery)
             if $self->{logger};
         $sth->finish;
         return 0;
@@ -745,13 +745,13 @@ sub userModinfo_ctx {
         my $sth = $self->{dbh}->prepare($sql);
 
         unless ($sth) {
-            $self->{logger}->log(1, "userModinfo_ctx(): issuer SQL prepare error: $DBI::errstr Query: $sql")
+            $self->{logger}->log(1, "userModinfo_ctx(): issuer SQL prepare error: $DBI::errstrstr Query: $sql")
                 if $self->{logger};
             return (undef, "prepare");
         }
 
         unless ($sth->execute($id_channel, $handle)) {
-            $self->{logger}->log(1, "userModinfo_ctx(): issuer SQL execute error: $DBI::errstr Query: $sql")
+            $self->{logger}->log(1, "userModinfo_ctx(): issuer SQL execute error: $DBI::errstrstr Query: $sql")
                 if $self->{logger};
             $sth->finish;
             return (undef, "execute");
@@ -779,13 +779,13 @@ sub userModinfo_ctx {
         my $sth = $self->{dbh}->prepare($sql);
 
         unless ($sth) {
-            $self->{logger}->log(1, "userModinfo_ctx(): target SQL prepare error: $DBI::errstr Query: $sql")
+            $self->{logger}->log(1, "userModinfo_ctx(): target SQL prepare error: $DBI::errstrstr Query: $sql")
                 if $self->{logger};
             return (undef, undef, "prepare");
         }
 
         unless ($sth->execute($id_channel, $handle)) {
-            $self->{logger}->log(1, "userModinfo_ctx(): target SQL execute error: $DBI::errstr Query: $sql")
+            $self->{logger}->log(1, "userModinfo_ctx(): target SQL execute error: $DBI::errstrstr Query: $sql")
                 if $self->{logger};
             $sth->finish;
             return (undef, undef, "execute");
@@ -804,13 +804,13 @@ sub userModinfo_ctx {
         my $sth = $self->{dbh}->prepare($sql);
 
         unless ($sth) {
-            $self->{logger}->log(1, "userModinfo_ctx(): update SQL prepare error: $DBI::errstr Query: $sql")
+            $self->{logger}->log(1, "userModinfo_ctx(): update SQL prepare error: $DBI::errstrstr Query: $sql")
                 if $self->{logger};
             return 0;
         }
 
         unless ($sth->execute(@bind)) {
-            $self->{logger}->log(1, "userModinfo_ctx(): update SQL execute error: $DBI::errstr Query: $sql")
+            $self->{logger}->log(1, "userModinfo_ctx(): update SQL execute error: $DBI::errstrstr Query: $sql")
                 if $self->{logger};
             $sth->finish;
             return 0;
@@ -1021,7 +1021,7 @@ SQL
 
     my $sth = $self->{dbh}->prepare($sql);
     unless ($sth && $sth->execute($chan, $target_nick_like)) {
-        $self->{logger}->log(1, "userTopSay_ctx() SQL Error: $DBI::errstr Query: $sql");
+        $self->{logger}->log(1, "userTopSay_ctx() SQL Error: $DBI::errstrstr Query: $sql");
         return;
     }
 
@@ -1162,7 +1162,7 @@ SQL
 
     my $sth = $self->{dbh}->prepare($sql);
     unless ($sth && $sth->execute($target_chan, $greet_nick)) {
-        $self->{logger}->log(1, "userGreet_ctx() SQL Error: $DBI::errstr Query: $sql");
+        $self->{logger}->log(1, "userGreet_ctx() SQL Error: $DBI::errstrstr Query: $sql");
         $say->("Database error while fetching greet for $greet_nick on $target_chan.");
         return;
     }
@@ -1506,13 +1506,13 @@ sub mbModUser_ctx {
         my $sth = $self->{dbh}->prepare($sql);
 
         unless ($sth) {
-            $self->{logger}->log(1, "mbModUser_ctx() SQL prepare error: $DBI::errstr Query: $sql")
+            $self->{logger}->log(1, "mbModUser_ctx() SQL prepare error: $DBI::errstrstr Query: $sql")
                 if $self->{logger};
             return (undef, "prepare");
         }
 
         unless ($sth->execute(@bind)) {
-            $self->{logger}->log(1, "mbModUser_ctx() SQL execute error: $DBI::errstr Query: $sql")
+            $self->{logger}->log(1, "mbModUser_ctx() SQL execute error: $DBI::errstrstr Query: $sql")
                 if $self->{logger};
             $sth->finish;
             return (undef, "execute");
@@ -1530,13 +1530,13 @@ sub mbModUser_ctx {
         my $sth = $self->{dbh}->prepare($sql);
 
         unless ($sth) {
-            $self->{logger}->log(1, "mbModUser_ctx() update SQL prepare error: $DBI::errstr Query: $sql")
+            $self->{logger}->log(1, "mbModUser_ctx() update SQL prepare error: $DBI::errstrstr Query: $sql")
                 if $self->{logger};
             return (0, "prepare");
         }
 
         unless ($sth->execute(@bind)) {
-            $self->{logger}->log(1, "mbModUser_ctx() update SQL execute error: $DBI::errstr Query: $sql")
+            $self->{logger}->log(1, "mbModUser_ctx() update SQL execute error: $DBI::errstrstr Query: $sql")
                 if $self->{logger};
             $sth->finish;
             return (0, "execute");
@@ -1753,7 +1753,7 @@ sub setUserLevel {
     my $sth = $self->{dbh}->prepare($sQuery);
 
     unless ($sth->execute($id_user_level, $sUser)) {
-        $self->{logger}->log(1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+        $self->{logger}->log(1, "SQL Error : " . $DBI::errstrstr . " Query : " . $sQuery);
         $sth->finish;
         return 0;
     }
@@ -1790,7 +1790,7 @@ sub userBirthday_ctx {
 
         my $sth = $self->{dbh}->prepare("SELECT birthday FROM USER WHERE nickname = ?");
         unless ($sth && $sth->execute($target)) {
-            $self->{logger}->log(1, "userBirthday_ctx() SQL Error: $DBI::errstr");
+            $self->{logger}->log(1, "userBirthday_ctx() SQL Error: $DBI::errstrstr");
             return;
         }
 
@@ -1980,7 +1980,7 @@ sub _birthday_add_ctx {
         "UPDATE USER SET birthday = ? WHERE id_user = ?"
     );
     unless ($sth && $sth->execute($normalized, $id_user)) {
-        $self->{logger}->log(1, "_birthday_add_ctx() SQL error: $DBI::errstr");
+        $self->{logger}->log(1, "_birthday_add_ctx() SQL error: $DBI::errstrstr");
         botNotice($self, $nick, "Database error.");
         return;
     }
@@ -2017,7 +2017,7 @@ sub _birthday_del_ctx {
         "UPDATE USER SET birthday = NULL WHERE id_user = ?"
     );
     unless ($sth && $sth->execute($id_user)) {
-        $self->{logger}->log(1, "_birthday_del_ctx() SQL error: $DBI::errstr");
+        $self->{logger}->log(1, "_birthday_del_ctx() SQL error: $DBI::errstrstr");
         botNotice($self, $nick, "Database error.");
         return;
     }
@@ -2119,7 +2119,7 @@ sub _birthday_next_ctx {
     });
 
     unless ($sth && $sth->execute) {
-        $self->{logger}->log(1, "_birthday_next_ctx() SQL error: $DBI::errstr");
+        $self->{logger}->log(1, "_birthday_next_ctx() SQL error: $DBI::errstrstr");
         botNotice($self, $nick, "Database error.");
         return;
     }
@@ -2482,7 +2482,7 @@ sub mbRemind_ctx {
         VALUES (?, ?, ?, ?)
     });
     unless ($sth && $sth->execute($id_channel, $nick, lc($target), $message)) {
-        $self->{logger}->log(1, "mbRemind_ctx() SQL error: $DBI::errstr");
+        $self->{logger}->log(1, "mbRemind_ctx() SQL error: $DBI::errstrstr");
         botNotice($self, $nick, "Database error.");
         return;
     }
@@ -2940,8 +2940,37 @@ sub processKarma {
             from  => $nick,
         };
         splice @$klog, 0, @$klog - 20 if @$klog > 20;
+        # I8: persist to KARMA_LOG if table exists (graceful — skip on error)
+        eval {
+            my $sth_log = $self->{dbh}->prepare(q{
+                INSERT IGNORE INTO KARMA_LOG
+                    (id_channel, nick, delta, from_nick, score, ts)
+                VALUES (?, ?, ?, ?, ?, NOW())
+            });
+            $sth_log->execute($id_channel, $target,
+                ($op eq '++' ? 1 : -1), $nick, $score);
+            $sth_log->finish;
+        };  # silently ignore if KARMA_LOG table doesn't exist yet
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# _seconds_to_human($secs) — convert seconds to '3h 14m' style string
+# B19/fix: was missing, caused crash in mbKarmaHist_ctx
+# ---------------------------------------------------------------------------
+sub _seconds_to_human {
+    my ($secs) = @_;
+    $secs = int($secs // 0);
+    return '0s' unless $secs > 0;
+    my $d = int($secs / 86400); $secs %= 86400;
+    my $h = int($secs / 3600);  $secs %= 3600;
+    my $m = int($secs / 60);    $secs %= 60;
+    my $s = $secs;
+    return "${d}d ${h}h" if $d;
+    return "${h}h ${m}m" if $h;
+    return "${m}m ${s}s" if $m;
+    return "${s}s";
 }
 
 # ---------------------------------------------------------------------------
@@ -2957,7 +2986,36 @@ sub mbKarmaHist_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     my $filter  = @args ? lc($args[0]) : undef;
 
-    my $klog    = $self->{_karma_log}{$channel} // [];
+    # I8: try DB first, fall back to in-memory ring buffer
+    my @db_entries;
+    eval {
+        my $sth_ch = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+        if ($sth_ch && $sth_ch->execute($channel)) {
+            my $rc = $sth_ch->fetchrow_hashref; $sth_ch->finish;
+            if ($rc) {
+                my $sth_hl = $self->{dbh}->prepare(q{
+                    SELECT nick, delta, from_nick, score,
+                           UNIX_TIMESTAMP(ts) AS ts
+                    FROM KARMA_LOG WHERE id_channel = ?
+                    ORDER BY ts DESC LIMIT 20
+                });
+                if ($sth_hl && $sth_hl->execute($rc->{id_channel})) {
+                    while (my $r = $sth_hl->fetchrow_hashref) {
+                        push @db_entries, {
+                            nick  => $r->{nick},
+                            delta => ($r->{delta} > 0 ? '+1' : '-1'),
+                            from  => $r->{from_nick},
+                            score => $r->{score},
+                            ts    => $r->{ts},
+                        };
+                    }
+                    $sth_hl->finish;
+                }
+            }
+        }
+    };  # silently fall back to in-memory if KARMA_LOG not available
+    my $klog_mem = $self->{_karma_log}{$channel} // [];
+    my $klog = @db_entries ? \@db_entries : $klog_mem;
     unless (@$klog) {
         botPrivmsg($self, $channel, "$nick: no karma history yet on $channel.");
         return 1;
