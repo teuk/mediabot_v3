@@ -1525,6 +1525,7 @@ karmatop|karmatop [n]|public|Show the top N karma scores on the channel (default
 karmahist|karmahist [nick]|public|Show the last 5 karma changes on the channel (optionally filtered by nick).
 
 # Reminders
+remind|remind <nick> <msg>|public|Set a reminder. Also: remind list, remind cancel <id>.
 remindlist|remindlist|public|List your pending reminders on this channel.
 
 # Quotes

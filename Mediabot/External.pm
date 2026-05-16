@@ -3642,6 +3642,8 @@ sub ytSearch_ctx {
     botPrivmsg($self, $channel, $_) for @_yt_search_lines;
     $self->{_yt_cache}{$search_cache_key} = { ts => time(), lines => \@_yt_search_lines };
     logBot($self, $ctx->message, $channel, 'yt_search', $query);
+    # L3: Prometheus counter for !yt search
+    $self->{metrics}->inc('mediabot_ytsearch_requests_total') if $self->{metrics};
     return 1;
 }
 

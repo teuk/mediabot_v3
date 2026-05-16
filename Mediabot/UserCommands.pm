@@ -2442,6 +2442,31 @@ sub mb8ball_ctx {
     );
     @answers = @answers_fr if $lang_8b eq 'fr';
 
+    # L2: Spanish answers if main.LANG = es
+    my @answers_es = (
+        'Definitivamente sÃ­.',
+        'Por supuesto.',
+        'Sin ninguna duda.',
+        'SÃ­, definitivamente.',
+        'Puedes contar con ello.',
+        'Las perspectivas son buenas.',
+        'Muy probablemente.',
+        'SÃ­.',
+        'Los indicios apuntan que sÃ­.',
+        'Como yo lo veo, sÃ­.',
+        'La respuesta es incierta, intenta de nuevo.',
+        'Pregunta mÃ¡s tarde.',
+        'Mejor no responderte ahora.',
+        'No puedo predecirlo.',
+        'ConcÃ©ntrate y pregunta de nuevo.',
+        'No cuentes con ello.',
+        'Mi respuesta es no.',
+        'Mis fuentes dicen que no.',
+        'Las perspectivas no son buenas.',
+        'Muy dudoso.',
+    );
+    @answers = @answers_es if $lang_8b eq 'es';
+
 
     my $answer = $answers[int(rand(scalar @answers))];
     botPrivmsg($self, $channel, "\x038\x02[8ball]\x0f $nick: $answer");
@@ -3116,6 +3141,8 @@ sub mbKarmaHist_ctx {
             "  $e->{nick} $delta (now ${sign}$e->{score}) by $e->{from} — $ago ago");
     }
     logBot($self, $ctx->message, $channel, 'karmahist', $filter // '');
+    # L3: Prometheus counter for !karmahist
+    $self->{metrics}->inc('mediabot_karmahist_requests_total') if $self->{metrics};
     return 1;
 }
 

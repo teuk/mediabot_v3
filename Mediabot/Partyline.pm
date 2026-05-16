@@ -1169,6 +1169,9 @@ sub _handle_line {
     elsif ($line =~ /^\.remind\s+(.*)/i) {
         $self->_cmd_remind($stream, $id, $1);
     }
+    elsif ($line =~ /^\.remind(?:\s+(.*))?$/i) {
+        $self->_cmd_remind($stream, $id, $1);
+    }
     elsif ($line =~ /^\.karmahist(?:\s+(.*?))?$/i) {
         $self->_cmd_karmahist($stream, $id, $1);
     }
@@ -1457,6 +1460,7 @@ sub _cmd_help {
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: reset, history)\r\n"
+      . "  .remind <nick> <#chan> <msg> - set a reminder from Partyline\r\n"
       . "  .karmahist [nick]   - show karma history for a channel or nick\r\n"
       . "  .persona [nick]     - view/clear Claude persona (all or specific nick)\r\n"
       . "  .quota [nick]       - show Claude rate limit (all or specific nick)\r\n"
