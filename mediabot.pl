@@ -400,6 +400,37 @@ $scheduler->add(
 
 
 $scheduler->add(
+    name      => 'claude_history_purge',
+    interval  => 3600,  # N3: every hour, purge Claude history/persona for offline nicks
+    cb        => sub {
+        my %online_nicks;
+        for my $chan (keys %{ $mediabot->{channels} // {} }) {
+            my @nicks = eval { $mediabot->gethChannelsNicksOnChan($chan) } // ();
+            $online_nicks{lc($_)} = 1 for @nicks;
+        }
+        my $purged_h = 0;
+        for my $key (keys %{ $mediabot->{_claude_history} // {} }) {
+            my ($nick_k) = split /\x00/, $key, 2;
+            unless ($online_nicks{lc($nick_k)}) {
+                delete $mediabot->{_claude_history}{$key};
+                $purged_h++;
+            }
+        }
+        my $purged_p = 0;
+        for my $key (keys %{ $mediabot->{_claude_persona} // {} }) {
+            my ($nick_k) = split /\x00/, $key, 2;
+            unless ($online_nicks{lc($nick_k)}) {
+                delete $mediabot->{_claude_persona}{$key};
+                $purged_p++;
+            }
+        }
+        $mediabot->{logger}->log(3, "claude_history_purge: $purged_h history, $purged_p persona orphan(s) removed")
+            if $purged_h + $purged_p > 0;
+    },
+    autostart => 1,
+);
+
+$scheduler->add(
     name      => 'daily_channel_report',
     interval  => 86400,   # I5: once per day — top 3 msgs + karma per channel
     cb        => sub {

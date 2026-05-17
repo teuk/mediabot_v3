@@ -3224,6 +3224,18 @@ sub claude_ctx {
     my $message = $ctx->message;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
+    # R5: !ai stats — show Claude usage statistics
+    if (@args && lc($args[0]) eq 'stats') {
+        my $reqs = eval { $self->{metrics}->get('mediabot_claude_requests_total') } // 0;
+        my $errs = eval { $self->{metrics}->get('mediabot_claude_errors_total') }   // 0;
+        my $rl   = eval { $self->{metrics}->get('mediabot_claude_ratelimit_total') } // 0;
+        my $hist_count = scalar keys %{ $self->{_claude_history}      // {} };
+        my $pers_count = scalar keys %{ $self->{_claude_persona}      // {} };
+        botNotice($self, $nick, "Claude stats: $reqs req(s), $errs error(s), $rl rate-limited");
+        botNotice($self, $nick, "Active: $hist_count history session(s), $pers_count persona(s)");
+        return 1;
+    }
+
     # K6: !ai model — show current Claude model
     if (@args && lc($args[0]) eq 'model') {
         my $model = _chatgpt_conf_string($self, 'anthropic.MODEL', CLAUDE_MODEL);
@@ -3294,12 +3306,18 @@ sub claude_ctx {
             botNotice($self, $nick, 'No conversation history.');
             return 1;
         }
-        botNotice($self, $nick, scalar(@$history) . ' message(s) in context:');
-        for my $msg (@$history) {
+        my $hist_count = scalar(@$history);
+        botNotice($self, $nick, "$hist_count message(s) in context"
+            . ($hist_count > 6 ? ' (showing last 6):' : ':'));
+        # Q3: show only last 6 entries to avoid flooding
+        my @display = $hist_count > 6 ? @{$history}[-6..-1] : @$history;
+        for my $msg (@display) {
             my $role    = $msg->{role}    // '?';
             my $content = $msg->{content} // '';
-            $content = substr($content, 0, 120) . '...' if length($content) > 120;
-            botNotice($self, $nick, "  [$role] $content");
+            $content = substr($content, 0, 100) . '...' if length($content) > 100;
+            # T2: include timestamp if present in history entry
+            my $ts_tag  = $msg->{ts} ? ' [' . scalar(localtime($msg->{ts})) . ']' : '';
+            botNotice($self, $nick, "  [$role]$ts_tag $content");
         }
         return 1;
     }
@@ -3480,6 +3498,13 @@ sub claudeAI {
             if (time() - ($self->{_claude_prompt_cache}{$k}{ts} // 0)) > 120;
     }
     splice @$history, 0, @$history - $max_history if @$history > $max_history;
+
+    # P2: optionally prefix response with model name
+    my $show_model = _chatgpt_conf_int($self, 'anthropic.SHOW_MODEL', 0, 0, 1);
+    if ($show_model) {
+        my $model_short = $model =~ s/claude-//r =~ s/-\d{8,}//r;
+        $answer = "[$model_short] $answer";
+    }
 
     # Sanitise and wrap — reuse _chatgpt_wrap
     $answer =~ s/[\r\n]+/ /g;

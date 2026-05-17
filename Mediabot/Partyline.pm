@@ -1169,6 +1169,24 @@ sub _handle_line {
     elsif ($line =~ /^\.remind\s+(.*)/i) {
         $self->_cmd_remind($stream, $id, $1);
     }
+    elsif ($line =~ /^\.aistats$/i) {
+        my $bot  = $self->{bot};
+        my $reqs = eval { $bot->{metrics}->get('mediabot_claude_requests_total') } // 0;
+        my $errs = eval { $bot->{metrics}->get('mediabot_claude_errors_total') }   // 0;
+        my $rl   = eval { $bot->{metrics}->get('mediabot_claude_ratelimit_total') } // 0;
+        my $hc   = scalar keys %{ $bot->{_claude_history} // {} };
+        my $pc   = scalar keys %{ $bot->{_claude_persona}  // {} };
+        $stream->write("Claude: $reqs req(s), $errs err(s), $rl rl — $hc hist, $pc persona\r\n");
+    }
+    elsif ($line =~ /^\.top(?:\s+(\d+))?$/i) {
+        $self->_cmd_top($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.seen\s+(\S+)/i) {
+        $self->_cmd_seen($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.dbstats$/i) {
+        $self->_cmd_dbstats($stream, $id);
+    }
     elsif ($line =~ /^\.remind(?:\s+(.*))?$/i) {
         $self->_cmd_remind($stream, $id, $1);
     }
@@ -1460,6 +1478,10 @@ sub _cmd_help {
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: reset, history)\r\n"
+      . "  .aistats            - show Claude AI usage stats\r\n"
+      . "  .top [n]            - top N speakers across all channels (default 5)\r\n"
+      . "  .seen <nick>        - last activity for a nick in channel logs\r\n"
+      . "  .dbstats            - show DB connection and query stats\r\n"
       . "  .remind <nick> <#chan> <msg> - set a reminder from Partyline\r\n"
       . "  .karmahist [nick]   - show karma history for a channel or nick\r\n"
       . "  .persona [nick]     - view/clear Claude persona (all or specific nick)\r\n"
@@ -3737,6 +3759,30 @@ sub _cmd_die {
 
     $bot->{Quit} = 1;
     $bot->{irc}->send_message("QUIT", undef, $msg);
+}
+
+
+sub _cmd_dbstats {
+    my ($self, $stream, $id) = @_;
+    my $bot = $self->{bot};
+    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+    unless ($dbh) { $stream->write("DB not connected.\r\n"); return; }
+    my %stats;
+    for my $like ('Questions', 'Slow_queries', 'Threads_connected') {
+        my $sth = eval { $dbh->prepare("SHOW STATUS LIKE '$like'") };
+        if ($sth && $sth->execute()) {
+            while (my $r = $sth->fetchrow_arrayref) { $stats{$r->[0]} = $r->[1]; }
+            $sth->finish;
+        }
+    }
+    my $db_name = eval { ($dbh->selectrow_array('SELECT DATABASE()'))[0] } // '?';
+    $stream->write("DB stats ($db_name):\r\n");
+    $stream->write(sprintf("  Threads : %s | Questions : %s | Slow : %s\r\n",
+        $stats{Threads_connected}//'N/A', $stats{Questions}//'N/A', $stats{Slow_queries}//'N/A'));
+    my $reqs = eval { $bot->{metrics}->get('mediabot_claude_requests_total') } // 0;
+    my $yts  = eval { $bot->{metrics}->get('mediabot_ytsearch_requests_total') } // 0;
+    my $kh   = eval { $bot->{metrics}->get('mediabot_karmahist_requests_total') } // 0;
+    $stream->write("Bot: Claude=$reqs YTsearch=$yts KarmaHist=$kh\r\n");
 }
 
 1;

@@ -2562,6 +2562,21 @@ sub mbRemind_ctx {
         return;
     }
 
+    # Q2: parse optional delay prefix — 'dans 2h', 'in 30m', 'dans 1h30'
+    my $delay_secs = 0;
+    if ($message =~ s/^(?:dans|in)\s+(\d+)h(?:(\d+)m)?\s+//i) {
+        $delay_secs = $1 * 3600 + ($2 // 0) * 60;
+    } elsif ($message =~ s/^(?:dans|in)\s+(\d+)m\s+//i) {
+        $delay_secs = $1 * 60;
+    } elsif ($message =~ s/^tomorrow\s+//i) {
+        $delay_secs = 86400;
+    }
+    if ($delay_secs > 0) {
+        # Prefix message with delivery timestamp so deliverReminders can filter
+        my $deliver_at = time() + $delay_secs;
+        $message = "[at:$deliver_at] $message";
+    }
+
     # Fetch id_channel inline (getIdChannel is in ChannelCommands scope)
     my $sth_chan = $self->{dbh}->prepare(
         'SELECT id_channel FROM CHANNEL WHERE name = ?'
@@ -2588,7 +2603,11 @@ sub mbRemind_ctx {
     }
     $sth->finish;
 
-    botNotice($self, $nick, "Reminder set for $target.");
+    # S2: include delay info in confirmation
+    my $delay_info = $delay_secs > 0
+        ? ' (due in ' . Mediabot::UserCommands::_seconds_to_human($delay_secs) . ')'
+        : '';
+    botNotice($self, $nick, "Reminder set for $target$delay_info.");
     logBot($self, $ctx->message, $channel, 'remind', "$target: $message");
     return 1;
 }
@@ -2601,6 +2620,10 @@ sub deliverReminders {
     my ($self, $nick, $channel) = @_;
 
     $self->{logger}->log(4, "deliverReminders() nick=$nick chan=$channel");
+    # Q2: helper to check if a remind message has a future [at:TS] tag
+    # Returns undef if not yet due, or stripped message if due/no tag
+    # (Inline — not a separate sub to avoid scope issues)
+
     # S3/fix: ensure DB connection alive before using dbh
     my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
     return unless $dbh;
@@ -2630,6 +2653,11 @@ sub deliverReminders {
     return unless @pending;
 
     for my $r (@pending) {
+        # Q2: skip reminders with [at:TS] tag if not yet due
+        if ($r->{message} =~ /^\[at:(\d+)\]/) {
+            next if time() < $1;
+            $r->{message} =~ s/^\[at:\d+\]\s*//;
+        }
         botPrivmsg($self, $channel,
             "$nick: reminder from $r->{from_nick} ($r->{created_at}): $r->{message}");
         my $sth_up = $dbh->prepare(q{
@@ -2672,9 +2700,17 @@ sub mbRemindList_ctx {
 
     botNotice($self, $nick, scalar(@rows) . ' pending reminder(s):');
     for my $r (@rows) {
+        # T5: show remaining delay if [at:TS] tag in message
+        my $msg_t5 = $r->{message} // '';
+        my $due_t5 = '';
+        if ($msg_t5 =~ /^\[at:(\d+)\]\s*/) {
+            my $sl = $1 - time();
+            $due_t5 = $sl > 0 ? ' [due in ' . _seconds_to_human($sl) . ']' : ' [overdue]';
+            $msg_t5 =~ s/^\[at:\d+\]\s*//;
+        }
         botNotice($self, $nick, sprintf('  #%d -> %s: "%s" (%s)',
-            $r->{id_reminder}, $r->{to_nick},
-            $r->{message}, $r->{created_at}));
+            $r->{id_reminder}, $r->{to_nick} . $due_t5,
+            $msg_t5, $r->{created_at}));
     }
     return 1;
 }
@@ -2782,6 +2818,37 @@ sub mbWordCount_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    # S4: !karma log [nick] — show karma history from in-memory ring buffer
+    if (@args && lc($args[0]) eq 'log') {
+        shift @args;
+        my $filter = @args ? lc($args[0]) : undef;
+        my $klog   = $self->{_karma_log}{$channel} // [];
+        unless (@$klog) {
+            botPrivmsg($self, $channel, "$nick: no karma history on $channel."); return 1;
+        }
+        my @entries = reverse @$klog;
+        @entries = grep { lc($_->{nick}) eq $filter } @entries if $filter;
+        @entries = @entries[0..4] if @entries > 5;
+        unless (@entries) {
+            botPrivmsg($self, $channel, "$nick: no karma history for '$filter'."); return 1;
+        }
+        for my $e (@entries) {
+            my $sign = $e->{score} > 0 ? '+' : '';
+            my $ago  = _seconds_to_human(time() - $e->{ts});
+            botPrivmsg($self, $channel,
+                "  $e->{nick} $e->{delta} (now ${sign}$e->{score}) by $e->{from} — $ago ago");
+        }
+        return 1;
+    }
+
+    # P1: !karma top [n] — alias for !karmatop
+    if (@args && lc($args[0]) eq 'top') {
+        shift @args;
+        $ctx->{_args} = \@args;
+        return mbKarmaTop_ctx($ctx);
+    }
+
     my $target  = $args[0] ? lc($args[0]) : lc($nick);
 
     my $sth = $self->{dbh}->prepare(q{
@@ -3028,8 +3095,25 @@ sub processKarma {
             my $row = $sth2->fetchrow_hashref; $sth2->finish;
             my $score = $row ? $row->{score} : $delta;
             my $sign  = $score > 0 ? '+' : '';
-            Mediabot::Helpers::botPrivmsg($self, $channel,
-                "$target\'s karma: ${sign}${score}");
+
+            # T4: compute rank on channel
+            my $rank_str = '';
+            eval {
+                my $sth_rank = $self->{dbh}->prepare(
+                    'SELECT COUNT(*)+1 AS rank FROM KARMA WHERE id_channel=? AND score>?'
+                );
+                if ($sth_rank && $sth_rank->execute($id_channel, $score)) {
+                    my $rr = $sth_rank->fetchrow_hashref;
+                    $sth_rank->finish;
+                    $rank_str = " (rank #$rr->{rank})" if $rr && defined $rr->{rank};
+                }
+            };
+
+            Mediabot::Helpers::botPrivmsg(
+                $self,
+                $channel,
+                "$target\'s karma: ${sign}${score}${rank_str}"
+            );
         # I4: append to in-memory karma log (ring buffer, max 20 per channel)
         my $klog = $self->{_karma_log}{$channel} //= [];
         push @$klog, {
@@ -3394,6 +3478,9 @@ sub mbKarmaTop_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     my $n = 5;
+        # Q5: 'bottom' subcommand shows lowest karma scores
+        my $bottom_mode = (@args && lc($args[0]) eq 'bottom') ? 1 : 0;
+        shift @args if $bottom_mode;
     if (@args && $args[0] =~ /^\d+$/) {
         $n = int($args[0]); $n = 1 if $n < 1; $n = 10 if $n > 10;
     }
@@ -3408,7 +3495,7 @@ sub mbKarmaTop_ctx {
 
     my $sth = $self->{dbh}->prepare(q{
         SELECT nick, score FROM KARMA
-        WHERE id_channel = ? ORDER BY score DESC LIMIT ?
+        WHERE id_channel = ? ORDER BY score " . ($bottom_mode ? 'ASC' : 'DESC') . " LIMIT ?
     });
     unless ($sth && $sth->execute($id_channel, $n)) {
         botNotice($self, $nick, 'Database error.'); return;
@@ -3828,7 +3915,11 @@ sub mbDefine_ctx {
     }
     # First definition from first language block
     my $first_lang = (values %$data)[0] // [];
-    my $first_def  = $first_lang->[0]{definitions}[0]{definition} // '';
+    my $first_entry = $first_lang->[0] // {};
+    my $first_def   = $first_entry->{definitions}[0]{definition} // '';
+    # P4: extract part of speech
+    my $pos = $first_entry->{partOfSpeech} // '';
+    $pos =~ s/^\s+|\s+$//g;
     $first_def =~ s/<[^>]+>//g;  # strip HTML
     require HTML::Entities;              # B2/fix: decode &amp; &#39; etc.
     HTML::Entities::decode_entities($first_def);
@@ -3836,7 +3927,8 @@ sub mbDefine_ctx {
     $first_def = substr($first_def, 0, 300) . '...' if length($first_def) > 300;
     if ($first_def ne '') {
         my $lang_tag = $lang ne 'en' ? " [$lang]" : '';
-        botPrivmsg($self, $channel, "$word$lang_tag: $first_def");
+        my $pos_tag  = $pos ? " ($pos)" : '';
+        botPrivmsg($self, $channel, "$word$lang_tag$pos_tag: $first_def");
     } else {
         botPrivmsg($self, $channel, "define: no definition found for '$word' in $lang.wiktionary.");
     }

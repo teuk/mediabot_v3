@@ -98,7 +98,7 @@ sub get_channel_by_name {
     unless ($sth->execute($name)) {
         $self->{logger}->log(1, "get_channel_by_name() SQL execute error: $DBI::errstr Query: $sql")
             if $self->{logger};
-        $sth->finish;
+        # B26cc/fix: execute failed, no open cursor
         return undef;
     }
 
@@ -170,7 +170,7 @@ sub channelList_ctx {
     unless ($sth->execute()) {
         $self->{logger}->log(1, "channelList_ctx() SQL execute error: $DBI::errstr | Query: $sql")
             if $self->{logger};
-        $sth->finish;
+        # B26cc/fix: execute failed, no open cursor
         botNotice($self, $nick, "Internal error (query failed).");
         return;
     }
@@ -222,7 +222,7 @@ sub registerChannel {
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth->execute($id_user,$id_channel)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-		$sth->finish;
+		# B26cc/fix: execute failed, no open cursor
 		return 0;
 	}
 	else {

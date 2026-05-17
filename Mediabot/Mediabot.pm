@@ -1524,11 +1524,11 @@ wordcount|wordcount [nick]|public|Count distinct words spoken by a nick on the c
 
 # Karma
 karma|karma [nick]|public|Show karma score for a nick. Use nick++ or nick-- to vote.
-karmatop|karmatop [n]|public|Show the top N karma scores on the channel (default 5).
+karmatop|karmatop [n]|public|Show the top N karma scores (default 5). Use 'karmatop bottom [n]' for lowest scores.
 karmahist|karmahist [nick]|public|Show the last 5 karma changes on the channel (optionally filtered by nick).
 
 # Reminders
-remind|remind <nick> <msg>|public|Set a reminder. Also: remind list, remind cancel <id>.
+remind|remind <nick> <msg>|public|Set a reminder. Delay prefix: 'dans 2h', 'in 30m', 'tomorrow'. Also: remind list, remind cancel <id>.
 remindlist|remindlist|public|List your pending reminders on this channel.
 
 # Quotes

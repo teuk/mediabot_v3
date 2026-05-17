@@ -184,7 +184,7 @@ sub mbQuoteAdd {
     unless ($sth->execute($sChannel, $sQuoteText)) {
         $self->{logger}->log(1, "mbQuoteAdd() SQL execute error: $DBI::errstr | Query: $sQuery")
             if $self->{logger};
-        $sth->finish;
+        # B26ext/fix: execute failed, no open cursor
         botNotice($self, $sNick, "Database error while checking quote.");
         return;
     }
@@ -224,7 +224,7 @@ sub mbQuoteAdd {
     unless ($sth->execute($id_channel, $id_user, $sQuoteText)) {
         $self->{logger}->log(1, "mbQuoteAdd() SQL insert execute error: $DBI::errstr | Query: $sQuery")
             if $self->{logger};
-        $sth->finish;
+        # B26ext/fix: execute failed, no open cursor
         botNotice($self, $sNick, "Database error while adding quote.");
         return;
     }
@@ -268,7 +268,7 @@ sub mbQuoteDel {
     unless ($sth_sel->execute($sChannel, $id_quotes)) {
         $self->{logger}->log(1, "mbQuoteDel() SQL execute error: $DBI::errstr Query: $sQuery")
             if $self->{logger};
-        $sth_sel->finish;
+        # B26ext/fix: execute failed, no open cursor
         botNotice($self, $sNick, "Database error while checking quote.");
         return;
     }
@@ -294,7 +294,7 @@ sub mbQuoteDel {
     unless ($sth_del->execute($id_quotes)) {
         $self->{logger}->log(1, "mbQuoteDel() SQL delete execute error: $DBI::errstr Query: $sQuery")
             if $self->{logger};
-        $sth_del->finish;
+        # B26ext/fix: execute failed, no open cursor
         botNotice($self, $sNick, "Database error while deleting quote.");
         return;
     }
@@ -338,7 +338,7 @@ sub mbQuoteView {
     unless ($sth->execute($sChannel, $id_quotes)) {
         $self->{logger}->log(1, "mbQuoteView() SQL execute error: $DBI::errstr Query: $sQuery")
             if $self->{logger};
-        $sth->finish;
+        # B26ext/fix: execute failed, no open cursor
         botNotice($self, $sNick, "Database error while reading quote.");
         return;
     }
@@ -417,7 +417,7 @@ sub mbQuoteSearch {
     unless ($sth->execute($sChannel, @binds_words, $MAXQUOTES + 1)) {
         $self->{logger}->log(1, "mbQuoteSearch SQL execute error: $DBI::errstr Query: $sQuery")
             if $self->{logger};
-        $sth->finish;
+        # B26ext/fix: execute failed, no open cursor
         botNotice($self, $sNick, "Database error during search.");
         return;
     }
@@ -476,7 +476,7 @@ sub mbQuoteRand {
     unless ($sth_count->execute($sChannel)) {
         $self->{logger}->log(1, "mbQuoteRand count SQL execute error: $DBI::errstr Query: $sql_count")
             if $self->{logger};
-        $sth_count->finish;
+        # B26ext/fix: execute failed, no open cursor
         botNotice($self, $sNick, "Database error while reading quotes.");
         return;
     }
@@ -510,7 +510,7 @@ sub mbQuoteRand {
     unless ($sth->execute($sChannel, $offset)) {
         $self->{logger}->log(1, "mbQuoteRand SQL execute error: $DBI::errstr Query: $sql")
             if $self->{logger};
-        $sth->finish;
+        # B26ext/fix: execute failed, no open cursor
         botNotice($self, $sNick, "Database error while reading quote.");
         return;
     }
@@ -553,7 +553,8 @@ sub mbQuoteStats {
     unless ($sth->execute($sChannel)) {
         $self->{logger}->log(1, "mbQuoteStats() SQL execute error: " . $DBI::errstr . " Query : " . $sQuery)
             if $self->{logger};
-        $sth->finish;
+        # B26/fix: execute failed, no cursor open — finish removed
+
         botNotice($self, $sNick, "Database error while reading quote stats.");
         return;
     }
@@ -697,7 +698,7 @@ sub mbQuoteByNick {
     }
     unless ($sth->execute($sChannel, $like, $offset)) {
         $self->{logger}->log(1, "mbQuoteByNick() SQL execute error: $DBI::errstr");
-        $sth->finish;
+        # B26ext/fix: execute failed, no open cursor
         return undef;
     }
     my $row = $sth->fetchrow_hashref;
@@ -749,7 +750,7 @@ sub mbQuoteCount_ctx {
     unless ($sth->execute($sChannel, $like)) {
         $self->{logger}->log(1, "mbQuoteCount_ctx() SQL execute error: $DBI::errstr")
             if $self->{logger};
-        $sth->finish;
+        # B26ext/fix: execute failed, no open cursor
         botNotice($self, $sNick, 'Database error.');
         return;
     }
