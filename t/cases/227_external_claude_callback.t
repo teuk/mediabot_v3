@@ -38,8 +38,9 @@ return sub {
     my ($assert) = @_;
 
     my $src      = _slurp_227(File::Spec->catfile('.', 'Mediabot', 'External.pm'));
+    my $pl_src   = _slurp_227(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
     my $ai_body  = _extract_sub_227($src, 'claudeAI');
-    my $pl_body  = _extract_sub_227($src, '_cmd_ai');
+    my $pl_body  = _extract_sub_227($pl_src, '_cmd_ai');
 
     $assert->ok(defined $ai_body && $ai_body ne '', 'claudeAI body found');
 
@@ -47,11 +48,11 @@ return sub {
     $assert->like($ai_body // '', qr/ref.*output_fn.*CODE|ref.*args.*CODE/s,
         'claudeAI detects CODE ref as output_fn');
 
-    $assert->like($ai_body // '', qr/my \\$_out\s*=/,
+    $assert->like($ai_body // '', qr/my \$_out\s*=/,
         'claudeAI defines $_out dispatcher');
 
     # $_out used instead of direct botPrivmsg for output
-    $assert->like($ai_body // '', qr/\\$_out->.*chunk/,
+    $assert->like($ai_body // '', qr/\$_out->.*chunk/,
         'claudeAI sends chunks via $_out');
 
     # Partyline _cmd_ai uses callback — no monkey-patch

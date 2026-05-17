@@ -1512,6 +1512,9 @@ slap|slap [nick]|public|Slap a nick with a random object via CTCP ACTION.
 abbrev|abbrev <text>|public|Generate an acronym from the initials of each word.
 active|active [period]|public|List nicks active in the last N hours or days (e.g. 24h, 7d).
 calclast|calclast|public|Show your last !calc results (session memory).
+calc|calc <expression>|public|Evaluate a safe calculator expression.
+stats|stats [nick]|public|Show channel/user statistics.
+top|top [limit]|public|Show top channel activity statistics.
 compare|compare <nick1> <nick2>|public|Compare message counts between two nicks on the channel.
 heatmap|heatmap [nick]|public|Show hourly activity chart as ASCII bars.
 monthstats|monthstats [nick]|public|Show activity count per month for the last 12 months.

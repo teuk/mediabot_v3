@@ -67,6 +67,6 @@ return sub {
         'claude_ctx clears history on reset');
 
     # Messages sent as array (not single object)
-    $assert->like($ai_body // '', qr/messages\s*=>\s*\\$history/,
+    $assert->like($ai_body // '', qr/messages\s*=>\s*\$history/,
         'claudeAI sends full history array as messages');
 };

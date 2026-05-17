@@ -130,7 +130,7 @@ return sub {
 
     $assert->like(
         $tmdb_body // '',
-        qr/get_tmdb_info\(\$api_key, \$lang, \$query\)/,
-        'mbTMDBSearch_ctx sends the repaired query to get_tmdb_info'
+        qr/get_tmdb_info\(\$api_key, \$lang, \$query, \$self->\{logger\}\)/,
+        'mbTMDBSearch_ctx sends the repaired query and logger to get_tmdb_info'
     );
 };

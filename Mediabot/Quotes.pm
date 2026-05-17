@@ -691,8 +691,13 @@ sub mbQuoteByNick {
         ORDER BY q.id_quotes
         LIMIT 1 OFFSET ?
     });
-    unless ($sth && $sth->execute($sChannel, $like, $offset)) {
-        $self->{logger}->log(1, "mbQuoteByNick() SQL error: $DBI::errstr");
+    unless ($sth) {
+        $self->{logger}->log(1, "mbQuoteByNick() SQL prepare error: $DBI::errstr");
+        return undef;
+    }
+    unless ($sth->execute($sChannel, $like, $offset)) {
+        $self->{logger}->log(1, "mbQuoteByNick() SQL execute error: $DBI::errstr");
+        $sth->finish;
         return undef;
     }
     my $row = $sth->fetchrow_hashref;
@@ -735,8 +740,18 @@ sub mbQuoteCount_ctx {
         JOIN USER u ON u.id_user = q.id_user
         WHERE c.name = ? AND LOWER(u.nickname) LIKE ?
     });
-    unless ($sth && $sth->execute($sChannel, $like)) {
-        botNotice($self, $sNick, 'Database error.'); return;
+    unless ($sth) {
+        $self->{logger}->log(1, "mbQuoteCount_ctx() SQL prepare error: $DBI::errstr")
+            if $self->{logger};
+        botNotice($self, $sNick, 'Database error.');
+        return;
+    }
+    unless ($sth->execute($sChannel, $like)) {
+        $self->{logger}->log(1, "mbQuoteCount_ctx() SQL execute error: $DBI::errstr")
+            if $self->{logger};
+        $sth->finish;
+        botNotice($self, $sNick, 'Database error.');
+        return;
     }
     my $row = $sth->fetchrow_hashref; $sth->finish;
     botPrivmsg($self, $sChannel,

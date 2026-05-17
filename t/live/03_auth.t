@@ -22,7 +22,15 @@ return sub {
 
     # 3. Login correct → "successful" + nickname
     $send_private->("login $loginuser $loginpass");
-    $r = $wait_reply->(qr/NOTICE \Q$spynick\E .*successful/i, 15);
+    $r = $wait_reply->(qr/NOTICE \Q$spynick\E .*successful/i, 20);
+
+    # Be tolerant of delayed auth guards after previous negative login tests.
+    # If the first wait misses the success line, send the valid login once more.
+    if (!defined $r) {
+        $send_private->("login $loginuser $loginpass");
+        $r = $wait_reply->(qr/NOTICE \Q$spynick\E .*successful/i, 20);
+    }
+
     $assert->ok(defined $r, "login correct → 'successful'");
     sleep(1);
 

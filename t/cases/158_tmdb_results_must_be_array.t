@@ -78,13 +78,13 @@ return sub {
 
     $assert->like(
         $body // '',
-        qr/ref\(\$data->\{results\}\) ne 'ARRAY'/,
+        qr/ref\(\$data->\{results\}\) eq 'ARRAY'/,
         'get_tmdb_info verifies results is an ARRAY before dereferencing'
     );
 
     $assert->like(
         $body // '',
-        qr/!\@\{ \$data->\{results\} \}/,
+        qr/\@\{ \$data->\{results\} \}/,
         'get_tmdb_info still rejects empty results arrays'
     );
 

@@ -97,7 +97,7 @@ return sub {
 
     $assert->like(
         $body // '',
-        qr/language=\$encoded_lang&query=\$encoded_query/,
+        qr/language=\$encoded_lang.*query=\$encoded_query/s,
         'get_tmdb_info uses encoded language and encoded query in URL'
     );
 

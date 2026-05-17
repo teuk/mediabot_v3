@@ -931,7 +931,8 @@ sub on_login {
     # First join the console channel from the populated channels
     my $console_channel;
     foreach my $chan (values %{ $mediabot->{channels} }) {
-        if ($chan->get_description eq 'console') {
+        my $desc = eval { $chan->get_description } // '';
+        if ($desc eq 'console') {
             $console_channel = $chan;
             last;
         }

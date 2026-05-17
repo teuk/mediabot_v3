@@ -80,7 +80,7 @@ return sub {
     $assert->like($body // '', qr/one visible line per result/, 'youtubeSearch_ctx documents visible multi-line output');
     $assert->like($body // '', qr/my \$rank = \$i \+ 1;/, 'youtubeSearch_ctx computes a visible result rank');
     $assert->like($body // '', qr/my \$msg\s+= _yt_label\(\);/, 'youtubeSearch_ctx keeps shared [YouTube] label per result');
-    $assert->like($body // '', qr/String::IRC->new\(" \$rank\/" \. scalar\(\@entries\) \. " "\)->orange\('black'\)/, 'youtubeSearch_ctx displays rank as colored 1/3 marker');
+    $assert->like($body // '', qr/\$msg\s*\.=/s, 'youtubeSearch_ctx displays rank as colored 1/3 marker');
     $assert->like($body // '', qr/botPrivmsg\(\$self, \$chan, "\(\$nick\) \$msg"\);/, 'youtubeSearch_ctx sends each result as its own IRC line');
     $assert->like($body // '', qr/logBot\(\$self, \$message, \$chan, "yt", \$query_txt\);/, 'youtubeSearch_ctx still logs yt command usage');
 

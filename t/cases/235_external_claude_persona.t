@@ -35,7 +35,7 @@ return sub {
         'claudeAI applies per-nick persona override');
     $assert->like($ai_body // '', qr/_claude_persona/,
         'claudeAI reads _claude_persona for override');
-    $assert->like($ai_body // '', qr/sys_prompt = \\$persona/,
+    $assert->like($ai_body // '', qr/sys_prompt = \$persona/,
         'claudeAI replaces sys_prompt with persona when set');
 
     # Help entry

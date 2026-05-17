@@ -50,9 +50,15 @@ return sub {
     $assert->like($body // '', qr{googleapis\.com/youtube/v3/search},
         'ytSearch_ctx queries YouTube search endpoint');
 
-    # Must limit to 3 results
-    $assert->like($body // '', qr/maxResults=3/,
-        'ytSearch_ctx requests 3 results');
+    # Must default to 3 results while allowing a guarded config override.
+    $assert->like($body // '', qr/YT_SEARCH_RESULTS/,
+        'ytSearch_ctx reads configurable YT_SEARCH_RESULTS');
+    $assert->like($body // '', qr/\/\/ 3/,
+        'ytSearch_ctx keeps default result count at 3');
+    $assert->like($body // '', qr/\$yt_max\s*=\s*3\s+unless\s+\$yt_max\s*>=\s*1\s*&&\s*\$yt_max\s*<=\s*5/,
+        'ytSearch_ctx guards result count between 1 and 5');
+    $assert->like($body // '', qr/maxResults=\$yt_max/,
+        'ytSearch_ctx uses configured result count in search URL');
 
     # Must use eval around HTTP
     $assert->like($body // '', qr/eval\s*\{.*http.*get/s,

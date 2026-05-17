@@ -17,6 +17,9 @@
 
 use strict;
 use warnings;
+
+# Provided by t/test_live.pl when live tests are run in verbose mode.
+our $opt_verbose;
 use IO::Socket::INET;
 use IO::Select;
 use Time::HiRes qw(time sleep);
@@ -40,17 +43,7 @@ return sub {
 
     $assert->ok(defined $partyline_port && $partyline_port =~ /^\d+$/, "PARTYLINE_PORT lu depuis test.conf");
 
-    my $dbh = DBI->connect(
-        "DBI:mysql:database=$db_name;host=$db_host;port=$db_port",
-        $db_user,
-        $db_pass,
-        {
-            RaiseError => 1,
-            PrintError => 0,
-            AutoCommit => 1,
-            mysql_enable_utf8mb4 => 1,
-        }
-    );
+    my $dbh = _connect_live_db($db_name, $db_host, $db_port, $db_user, $db_pass);
 
     $assert->ok(defined $dbh, "Connexion DBI à la base de test");
 
@@ -75,7 +68,10 @@ return sub {
     $assert->ok(defined $line, "Connexion Partyline OK (banner reçu)");
 
     $pl->send_line("login $loginuser $loginpass");
-    $line = $pl->wait_for(qr/Authenticated as \Q$loginuser\E/i, 10);
+    $line = $pl->wait_for(
+        qr/(?:Authenticated as \Q$loginuser\E|Hey\s+\Q$loginuser\E|You are authenticated as)/i,
+        10
+    );
     $assert->ok(defined $line, "Login Partyline OK pour $loginuser");
 
     _drain_partyline($pl, 1.5);
@@ -153,6 +149,44 @@ sub _read_simple_ini {
     close $fh;
     return %cfg;
 }
+
+
+sub _connect_live_db {
+    my ($db_name, $db_host, $db_port, $db_user, $db_pass) = @_;
+
+    my %available = map { $_ => 1 } DBI->available_drivers(0);
+
+    my $driver =
+        $available{mysql}   ? 'mysql'   :
+        $available{MariaDB} ? 'MariaDB' :
+        die "Neither DBD::mysql nor DBD::MariaDB is available\n";
+
+    my @dsn = ("DBI:$driver:database=$db_name");
+
+    my $is_localhost = !defined($db_host) || $db_host eq '' || $db_host eq 'localhost';
+
+    push @dsn, "host=$db_host"
+        if defined($db_host) && $db_host ne '';
+
+    push @dsn, "port=$db_port"
+        unless $driver eq 'MariaDB' && $is_localhost;
+
+    my $dbh = DBI->connect(
+        join(';', @dsn),
+        $db_user,
+        $db_pass,
+        {
+            RaiseError => 1,
+            PrintError => 0,
+            AutoCommit => 1,
+        }
+    );
+
+    $dbh->do('SET NAMES utf8mb4');
+
+    return $dbh;
+}
+
 
 sub _fetch_user_level {
     my ($dbh, $nick) = @_;
@@ -276,7 +310,7 @@ sub wait_for {
         return $line if $line =~ $pattern;
     }
 
-    if (@seen && !$main::opt_verbose) {
+    if (@seen && !$opt_verbose) {
         print "  [DEBUG] Partyline timeout - lignes reçues :\n";
         print "    $_\n" for @seen;
     }

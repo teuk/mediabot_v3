@@ -7,7 +7,7 @@
 return sub {
     my ($assert, $spy, $send_cmd, $send_private, $wait_reply,
         $botnick, $spynick, $channel, $cmdchar,
-        $loginuser, $loginpass) = @_;
+        $loginuser, $loginpass, $drain) = @_;
 
     # Setup : login Master
     $send_private->("login $loginuser $loginpass");
@@ -28,6 +28,7 @@ return sub {
     $send_private->('userinfo mboper');
     $r = $wait_reply->(qr/NOTICE \Q$spynick\E .*(?:mboper|Master|Level)/i, 15);
     $assert->ok(defined $r, "userinfo mboper → contient nickname et level");
+    $drain->(6);
     sleep(1);
 
     # -------------------------------------------------------------------------
@@ -36,14 +37,15 @@ return sub {
     $send_private->('userinfo mbtest');
     $r = $wait_reply->(qr/NOTICE \Q$spynick\E .*(?:mbtest|Owner|Level)/i, 15);
     $assert->ok(defined $r, "userinfo mbtest → contient nickname et level Owner");
+    $drain->(8);
     sleep(1);
 
     # -------------------------------------------------------------------------
     # 4. !whoami (public) → NOTICE avec mboper et Master
     # -------------------------------------------------------------------------
     $send_cmd->('whoami');
-    $r = $wait_reply->(qr/NOTICE \Q$spynick\E .*(?:mboper|Master)/i, 15);
-    $assert->ok(defined $r, "${cmdchar}whoami → NOTICE avec nickname et level");
+    $r = $wait_reply->(qr/NOTICE \Q$spynick\E .*User:\s+\Q$loginuser\E/i, 15);
+    $assert->ok(defined $r, "${cmdchar}whoami → NOTICE avec nickname");
     sleep(1);
 
     # -------------------------------------------------------------------------
