@@ -49,6 +49,8 @@ Then inside the SQL client:
 ```sql
 SET NAMES utf8mb4;
 USE mediabot;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260502_channel_ban.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260502_user_seen.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/mediabot_fun_commands_migration_20260512.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260515_claude_chanset.sql;
 ```
@@ -58,6 +60,19 @@ Then run the checker again:
 ```bash
 perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
 ```
+
+## Migration order
+
+For an existing database, apply migrations in this order unless a later release note says otherwise:
+
+```text
+20260502_channel_ban.sql
+20260502_user_seen.sql
+mediabot_fun_commands_migration_20260512.sql
+20260515_claude_chanset.sql
+```
+
+`tools/check_schema_drift.pl` checks schema structure. Reference-data migrations such as `20260515_claude_chanset.sql` must still be applied when upgrading an existing database.
 
 ## Useful commands
 
