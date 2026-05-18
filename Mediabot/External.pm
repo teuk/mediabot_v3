@@ -3224,6 +3224,18 @@ sub claude_ctx {
     my $message = $ctx->message;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
+    # U8: !ai forget — clear only the caller's own history on this channel
+    if (@args && lc($args[0]) eq 'forget') {
+        my $hist_key = lc($nick) . "\x00" . (defined $channel ? $channel : '__private__');
+        my $had = exists $self->{_claude_history}{$hist_key} ? 1 : 0;
+        delete $self->{_claude_history}{$hist_key};
+        delete $self->{_claude_persona}{$hist_key};
+        botNotice($self, $nick, $had
+            ? 'Your Claude history and persona have been cleared.'
+            : 'No active Claude session found for you on this channel.');
+        return 1;
+    }
+
     # R5: !ai stats — show Claude usage statistics
     if (@args && lc($args[0]) eq 'stats') {
         my $reqs = eval { $self->{metrics}->get('mediabot_claude_requests_total') } // 0;
@@ -3394,19 +3406,22 @@ sub claudeAI {
     my $prompt = join ' ', @args;
     $self->{logger}->log(5, "claudeAI() prompt: $prompt");
 
-    # R2: per-nick rate limiting — max 5 requests per 60 seconds
+    # R2: per-nick rate limiting — W2: configurable via anthropic.RATE_MAX / RATE_WINDOW
     unless ($output_fn) {  # skip rate limit for Partyline (already authenticated)
+        my $rate_max    = eval { int($self->{conf}->get('anthropic.RATE_MAX')    // 5)  } // 5;
+        my $rate_window = eval { int($self->{conf}->get('anthropic.RATE_WINDOW') // 60) } // 60;
+        $rate_max    = 1   if $rate_max < 1;
+        $rate_window = 10  if $rate_window < 10;
         my $rl_key = lc($nick) . "\x00$chan";
         my $now    = time();
         $self->{_claude_ratelimit} //= {};
         my $rl = $self->{_claude_ratelimit}{$rl_key} //= { count => 0, window => $now };
-        # Reset window if older than 60s
-        if ($now - $rl->{window} >= 60) {
+        if ($now - $rl->{window} >= $rate_window) {
             $rl->{count}  = 0;
             $rl->{window} = $now;
         }
-        if (++$rl->{count} > 5) {
-            my $wait = 60 - ($now - $rl->{window});
+        if (++$rl->{count} > $rate_max) {
+            my $wait = $rate_window - ($now - $rl->{window});
             botNotice($self, $nick, "Rate limit: please wait ${wait}s before using !ai again.");
             $self->{metrics}->inc('mediabot_claude_ratelimit_total') if $self->{metrics};
             return;

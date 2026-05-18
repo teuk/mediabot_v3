@@ -1184,6 +1184,18 @@ sub _handle_line {
     elsif ($line =~ /^\.seen\s+(\S+)/i) {
         $self->_cmd_seen($stream, $id, $1);
     }
+    elsif ($line =~ /^\.kick\s+(.*)/i) {
+        $self->_cmd_kick($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.flushcooldown(?:\s+(.*?))?$/i) {
+        $self->_cmd_flushcooldown($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.kick\s+(.*)/i) {
+        $self->_cmd_kick($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.flushcooldown(?:\s+(.*?))?$/i) {
+        $self->_cmd_flushcooldown($stream, $id, $1);
+    }
     elsif ($line =~ /^\.dbstats$/i) {
         $self->_cmd_dbstats($stream, $id);
     }
@@ -1216,6 +1228,9 @@ sub _handle_line {
     }
     elsif ($line =~ /^\.purgereminders$/i) {
         $self->_cmd_purgereminders($stream, $id);
+    }
+    elsif ($line =~ /^\.who\s+(#\S+)/i) {
+        $self->_cmd_who_chan($stream, $id, $1);
     }
     elsif ($line =~ /^\.who\s+(\S+)/i) {
         $self->_cmd_whochan($stream, $id, $1);
@@ -1481,6 +1496,8 @@ sub _cmd_help {
       . "  .aistats            - show Claude AI usage stats\r\n"
       . "  .top [n]            - top N speakers across all channels (default 5)\r\n"
       . "  .seen <nick>        - last activity for a nick in channel logs\r\n"
+      . "  .kick <nick> <#chan> [reason] - kick a nick from channel\r\n"
+      . "  .flushcooldown [#chan]        - clear karma anti-spam cooldown\r\n"
       . "  .dbstats            - show DB connection and query stats\r\n"
       . "  .remind <nick> <#chan> <msg> - set a reminder from Partyline\r\n"
       . "  .karmahist [nick]   - show karma history for a channel or nick\r\n"
@@ -3761,6 +3778,71 @@ sub _cmd_die {
     $bot->{irc}->send_message("QUIT", undef, $msg);
 }
 
+
+sub _cmd_who_chan {
+    my ($self, $stream, $id, $args) = @_;
+    my $bot  = $self->{bot};
+    my $chan  = (defined $args && $args =~ /^(#\S+)/) ? $1 : undef;
+    unless ($chan) { $stream->write("Usage: .who <#channel>\r\n"); return; }
+    my @nicks = eval { $bot->gethChannelsNicksOnChan($chan) };
+    unless (@nicks) {
+        $stream->write("No nicks found on $chan (not joined or empty).\r\n"); return;
+    }
+    $stream->write(scalar(@nicks) . " nick(s) on $chan:\r\n");
+    # Try to show level for each nick
+    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+    my %levels;
+    if ($dbh) {
+        eval {
+            my $sth = $dbh->prepare(q{
+                SELECT u.nick, l.level FROM USER u
+                JOIN USER_CHANNEL uc ON uc.id_user = u.id_user
+                JOIN CHANNEL c ON c.id_channel = uc.id_channel
+                JOIN LEVEL l ON l.id_level = uc.id_level
+                WHERE c.name = ?
+            });
+            if ($sth && $sth->execute($chan)) {
+                while (my $r = $sth->fetchrow_hashref) {
+                    $levels{lc $r->{nick}} = $r->{level};
+                }
+                $sth->finish;
+            }
+        };
+    }
+    my @lines;
+    for my $nick (sort @nicks) {
+        my $lvl = $levels{lc $nick} ? " [" . $levels{lc $nick} . "]" : '';
+        push @lines, "$nick$lvl";
+    }
+    # Output in chunks of 8
+    while (my @chunk = splice @lines, 0, 8) {
+        $stream->write('  ' . join('  ', @chunk) . "\r\n");
+    }
+}
+
+sub _cmd_kick {
+    my ($self, $stream, $id, $args) = @_;
+    unless (defined $args && $args =~ /^(\S+)\s+(#\S+)(?:\s+(.*))?$/) {
+        $stream->write("Usage: .kick <nick> <#channel> [reason]\r\n"); return;
+    }
+    my ($target, $chan, $reason) = ($1, $2, $3 // 'Kicked by operator');
+    my $bot = $self->{bot};
+    eval { $bot->{irc}->send_message('KICK', undef, $chan, $target, $reason) };
+    if ($@) { $stream->write("Error: $@\r\n"); }
+    else    { $stream->write("Kicked $target from $chan ($reason)\r\n"); }
+}
+
+sub _cmd_flushcooldown {
+    my ($self, $stream, $id, $args) = @_;
+    my $bot = $self->{bot};
+    if (defined $args && $args =~ /^(#\S+)$/) {
+        delete $bot->{_karma_cooldown}{$1};
+        $stream->write("Karma cooldown cleared for $1.\r\n");
+    } else {
+        $bot->{_karma_cooldown} = {};
+        $stream->write("All karma cooldowns cleared.\r\n");
+    }
+}
 
 sub _cmd_dbstats {
     my ($self, $stream, $id) = @_;

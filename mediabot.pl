@@ -400,6 +400,42 @@ $scheduler->add(
 
 
 $scheduler->add(
+    name      => 'health_check',
+    interval  => 21600,  # W6: every 6 hours
+    cb        => sub {
+        my $uptime = time() - ($mediabot->{metrics}->{started} // time());
+        my $d = int($uptime/86400); my $h = int(($uptime%86400)/3600);
+        my $m = int(($uptime%3600)/60);
+        my $uptime_str = "${d}d ${h}h ${m}m";
+        my $hist_count = scalar keys %{ $mediabot->{_claude_history} // {} };
+        my $cd_count   = scalar keys %{ $mediabot->{_karma_cooldown}  // {} };
+        my $db_ok = eval { $mediabot->{db}->ensure_connected; 1 } // 0;
+        $mediabot->{logger}->log(3,
+            "[health_check] uptime=$uptime_str db=" . ($db_ok ? 'ok' : 'FAIL')
+            . " claude_sessions=$hist_count karma_cooldowns=$cd_count"
+        ) if $mediabot->{logger};
+    },
+    autostart => 1,
+);
+
+$scheduler->add(
+    name      => 'karma_log_purge',
+    interval  => 86400,  # V6: daily purge of KARMA_LOG older than 90 days
+    cb        => sub {
+        my $dbh = eval { $mediabot->{db}->ensure_connected } // $mediabot->{dbh};
+        return unless $dbh;
+        eval {
+            my $sth = $dbh->prepare(
+                'DELETE FROM KARMA_LOG WHERE ts < NOW() - INTERVAL 90 DAY');
+            $sth->execute; $sth->finish;
+            $mediabot->{logger}->log(3, 'karma_log_purge: old KARMA_LOG entries removed')
+                if $mediabot->{logger};
+        };  # graceful: table may not exist
+    },
+    autostart => 1,
+);
+
+$scheduler->add(
     name      => 'claude_history_purge',
     interval  => 3600,  # N3: every hour, purge Claude history/persona for offline nicks
     cb        => sub {
@@ -426,6 +462,49 @@ $scheduler->add(
         }
         $mediabot->{logger}->log(3, "claude_history_purge: $purged_h history, $purged_p persona orphan(s) removed")
             if $purged_h + $purged_p > 0;
+    },
+    autostart => 1,
+);
+
+$scheduler->add(
+    name      => 'weekly_channel_report',
+    interval  => 604800,  # U7: every 7 days
+    cb        => sub {
+        for my $chan (sort keys %{ $mediabot->{channels} // {} }) {
+            my $dbh = eval { $mediabot->{db}->ensure_connected } // $mediabot->{dbh};
+            next unless $dbh;
+            my (@top_msg, @top_karma);
+            eval {
+                my $sth = $dbh->prepare(q{
+                    SELECT nick, COUNT(*) AS cnt FROM CHANNEL_LOG
+                    JOIN CHANNEL c USING (id_channel)
+                    WHERE c.name = ? AND ts >= NOW() - INTERVAL 7 DAY
+                    GROUP BY nick ORDER BY cnt DESC LIMIT 3
+                });
+                if ($sth && $sth->execute($chan)) {
+                    while (my $r = $sth->fetchrow_hashref) { push @top_msg, "$r->{nick}($r->{cnt})" }
+                    $sth->finish;
+                }
+                my $sth2 = $dbh->prepare(q{
+                    SELECT k.nick, k.score FROM KARMA k
+                    JOIN CHANNEL c ON c.id_channel = k.id_channel
+                    WHERE c.name = ? ORDER BY k.score DESC LIMIT 3
+                });
+                if ($sth2 && $sth2->execute($chan)) {
+                    while (my $r = $sth2->fetchrow_hashref) {
+                        my $sign = $r->{score} > 0 ? '+' : ''; push @top_karma, "$r->{nick}(${sign}$r->{score})"
+                    }
+                    $sth2->finish;
+                }
+            };
+            next unless @top_msg || @top_karma;
+            my $msg_str   = @top_msg   ? join(' | ', @top_msg)   : 'N/A';
+            my $karma_str = @top_karma ? join(' | ', @top_karma) : 'N/A';
+            Mediabot::Helpers::botPrivmsg($mediabot, $chan,
+                "\x{2728} Weekly report — Top speakers (7d): $msg_str");
+            Mediabot::Helpers::botPrivmsg($mediabot, $chan,
+                "\x{2728} Weekly report — Top karma: $karma_str");
+        }
     },
     autostart => 1,
 );

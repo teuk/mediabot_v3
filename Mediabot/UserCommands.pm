@@ -2495,6 +2495,31 @@ sub mbRemind_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
+    # V9: !remind show — see reminders set FOR the caller (by others)
+    if (@args && lc($args[0]) eq 'show') {
+        my $sth_s = $self->{dbh}->prepare(q{
+            SELECT r.id, r.from_nick, r.message, r.created_at
+            FROM REMINDERS r
+            JOIN CHANNEL c ON c.id_channel = r.id_channel
+            WHERE c.name = ? AND r.to_nick = ? AND r.delivered = 0
+            ORDER BY r.id ASC LIMIT 10
+        });
+        if ($sth_s && $sth_s->execute($channel, lc($nick))) {
+            my @rows;
+            while (my $r = $sth_s->fetchrow_hashref) { push @rows, $r; }
+            $sth_s->finish;
+            if (@rows) {
+                botNotice($self, $nick, 'Reminders set for you:');
+                for my $r (@rows) {
+                    botNotice($self, $nick, "  [#$r->{id}] from $r->{from_nick}: $r->{message}");
+                }
+            } else {
+                botNotice($self, $nick, 'No pending reminders set for you.');
+            }
+        }
+        return 1;
+    }
+
     # K1: subcommands list and cancel
     if (@args && lc($args[0]) eq 'list') {
         my $sth_l = $self->{dbh}->prepare(q{
@@ -3081,6 +3106,15 @@ sub processKarma {
                 "$nick: you can't change your own karma.");
             next;
         }
+        # U6: anti-spam cooldown — 30s between votes targeting the same nick
+        my $cd_key = lc($nick) . ':' . lc($target);
+        if (time() - ($self->{_karma_cooldown}{$channel}{$cd_key} // 0) < 30) {
+            my $wait = 30 - (time() - ($self->{_karma_cooldown}{$channel}{$cd_key} // 0));
+            Mediabot::Helpers::botPrivmsg($self, $channel,
+                "$nick: wait ${wait}s before voting for $target again.");
+            next;
+        }
+        $self->{_karma_cooldown}{$channel}{$cd_key} = time();
         my $delta = ($op eq '++') ? 1 : -1;
         my $sth = $self->{dbh}->prepare(q{
             INSERT INTO KARMA (id_channel, nick, score) VALUES (?, ?, ?)
@@ -3284,6 +3318,31 @@ sub mbLast_ctx {
 # ---------------------------------------------------------------------------
 # mbPoll_ctx --- !poll <question> | opt1 | opt2 ...
 # mbVote_ctx --- !vote <n>
+
+# ---------------------------------------------------------------------------
+# mbPollStatus_ctx --- !pollstatus  (W8)
+# Show live poll results without closing the poll.
+# ---------------------------------------------------------------------------
+sub mbPollStatus_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my $poll = $self->{_polls}{$channel};
+    unless ($poll && $poll->{active}) {
+        botPrivmsg($self, $channel, 'No active poll.'); return 1;
+    }
+    my $total = scalar keys %{ $poll->{votes} };
+    botPrivmsg($self, $channel, "\"$poll->{question}\" -- $total vote(s) so far:");
+    for my $idx (0 .. $#{ $poll->{options} }) {
+        my $cnt = scalar grep { $_ == $idx } values %{ $poll->{votes} };
+        my $pct = $total > 0 ? int($cnt * 100 / $total) : 0;
+        botPrivmsg($self, $channel, sprintf('  [%d] %s: %d (%d%%)',
+            $idx+1, $poll->{options}[$idx], $cnt, $pct));
+    }
+    return 1;
+}
+
 # mbPollResult_ctx --- !pollresult
 # mbPollStop_ctx --- !pollstop  (Master+)
 # In-memory polls, one active per channel.
@@ -3299,6 +3358,12 @@ sub mbPoll_ctx {
     return unless $ctx->require_level('Master');
 
     my $raw = join(' ', @args);
+    # V2: optional leading number sets poll timeout (10–3600s, default 300)
+    my $poll_timeout = 300;
+    if ($raw =~ s/^(\d+)\s+//) {
+        $poll_timeout = int($1); $poll_timeout = 10 if $poll_timeout < 10;
+        $poll_timeout = 3600 if $poll_timeout > 3600;
+    }
     my @parts = map { s/^\s+|\s+$//gr } split(/\|/, $raw);
     unless (@parts >= 3) {
         botNotice($self, $nick, 'Syntax: poll <question> | option1 | option2 ...');
@@ -3311,7 +3376,7 @@ sub mbPoll_ctx {
         options  => \@parts,
         votes    => {},      # nick => option_index
         started  => time(),
-        deadline => time() + 300,  # B7/fix: 5-min auto-expiry
+        deadline => time() + $poll_timeout,  # V2: configurable timeout
         active   => 1,
     };
 
@@ -3349,6 +3414,15 @@ sub mbVote_ctx {
     my $choice = $poll->{options}[$n-1];
     my $total  = scalar keys %{ $poll->{votes} };
     botPrivmsg($self, $channel, "$nick voted for \"$choice\" ($total vote(s) cast)");
+    # U3: show live tally after each vote
+    my @tally;
+    for my $idx (0 .. $#{ $poll->{options} }) {
+        my $cnt = scalar grep { $_ == $idx } values %{ $poll->{votes} };
+        my $pct = $total > 0 ? int($cnt * 100 / $total) : 0;
+        push @tally, sprintf('[%d] %s: %d (%d%%)',
+            $idx+1, $poll->{options}[$idx], $cnt, $pct);
+    }
+    botPrivmsg($self, $channel, 'Live tally: ' . join('  ', @tally));
     logBot($self, $ctx->message, $channel, 'vote', $choice);  # S2/fix
     return 1;
 }
@@ -3416,8 +3490,22 @@ sub mbNote_ctx {
 
     my $text = join(' ', @args);
     $text =~ s/^\s+|\s+$//g;
+    # W7: !note search <mot> — search through notes
+    if ($text =~ /^search\s+(.+)/i) {
+        my $query = lc($1);
+        my $notes = $self->{_notes}{$nick} // [];
+        my @hits = grep { lc($_) =~ /\Q$query\E/ } @$notes;
+        unless (@hits) {
+            botNotice($self, $nick, "No notes matching '$query'."); return 1;
+        }
+        botNotice($self, $nick, scalar(@hits) . " note(s) matching '$query':");
+        for my $i (0..$#hits) {
+            botNotice($self, $nick, "  [" . ($i+1) . "] $hits[$i]");
+        }
+        return 1;
+    }
     unless ($text ne '') {
-        botNotice($self, $nick, 'Syntax: note <message>'); return;
+        botNotice($self, $nick, 'Syntax: note <message>  or  note search <word>'); return;
     }
     if (length($text) > 256) {
         botNotice($self, $nick, 'Note too long (max 256 chars).'); return;
@@ -3461,6 +3549,48 @@ sub mbNotes_ctx {
     botNotice($self, $nick, scalar(@$notes) . ' note(s):');
     for my $i (0 .. $#$notes) {
         botNotice($self, $nick, sprintf('  [%d] %s', $i+1, $notes->[$i]{text}));
+    }
+    return 1;
+}
+
+
+# ---------------------------------------------------------------------------
+# mbKarmaReset_ctx --- !karmareset <nick>  (V3)
+# Reset a nick's karma to 0. Requires Admin level.
+# ---------------------------------------------------------------------------
+sub mbKarmaReset_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    return unless $ctx->require_level('Master');
+
+    my $target = lc($args[0] // '');
+    unless ($target) {
+        botNotice($self, $nick, 'Syntax: karmareset <nick>'); return;
+    }
+
+    my $sth_c = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+    return unless $sth_c && $sth_c->execute($channel);
+    my $rc = $sth_c->fetchrow_hashref; $sth_c->finish;
+    return unless $rc;
+
+    my $sth = $self->{dbh}->prepare(q{
+        UPDATE KARMA SET score = 0
+        WHERE id_channel = ? AND nick = ?
+    });
+    unless ($sth && $sth->execute($rc->{id_channel}, $target)) {
+        # V3: B26-pattern: execute failed, no open cursor
+        botNotice($self, $nick, 'Database error.'); return;
+    }
+    my $rows = $sth->rows; $sth->finish;
+    if ($rows > 0) {
+        Mediabot::Helpers::botPrivmsg($self, $channel,
+            "$nick reset karma for $target to 0.");
+        logBot($self, $ctx->message, $channel, 'karmareset', $target);
+    } else {
+        botNotice($self, $nick, "No karma entry found for '$target' on $channel.");
     }
     return 1;
 }
@@ -3704,8 +3834,17 @@ sub mbChoose_ctx {
     my $raw = join(' ', @args);
     # J2: accept both | and ' ou ' (French) as separator
     my $sep = $raw =~ /\|/ ? '\|' : '\s+ou\s+';
-    my @opts = map { my $o = $_; $o =~ s/^\s+|\s+$//g; $o } split /$sep/, $raw;
-    @opts = grep { $_ ne '' } @opts;
+    my @raw_opts = map { my $o = $_; $o =~ s/^\s+|\s+$//g; $o } split /$sep/, $raw;
+    @raw_opts = grep { $_ ne '' } @raw_opts;
+    # U5: weighted choice — 'pizza:3' means pizza appears 3x in pool
+    my @opts;
+    for my $opt (@raw_opts) {
+        if ($opt =~ /^(.+?):(\d+)$/ && $2 >= 1 && $2 <= 20) {
+            push @opts, ($1) x $2;
+        } else {
+            push @opts, $opt;
+        }
+    }
     unless (@opts >= 2) {
         botNotice($self, $nick, 'Syntax: choose <a> | <b>  or  choose <a> ou <b>  (at least 2)');
         return;
@@ -3945,9 +4084,27 @@ sub mbTrivia_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    # V1: !trivia start N — multi-round mode with cumulative scores
+    if (@args && lc($args[0]) eq 'start' && $args[1] && $args[1] =~ /^(\d+)$/) {
+        my $rounds = int($args[1]); $rounds = 1 if $rounds < 1; $rounds = 20 if $rounds > 20;
+        $self->{_trivia}{$channel}{multi_total}  = $rounds;
+        $self->{_trivia}{$channel}{multi_current} = 0;
+        $self->{_trivia}{$channel}{scores} = {};
+        botPrivmsg($self, $channel, "Trivia: starting $rounds-round game! Scores reset.");
+        @args = ();  # fall through to normal question fetch
+    }
+
     if ($self->{_trivia}{$channel} && $self->{_trivia}{$channel}{active}) {
         botNotice($self, $nick, 'A trivia question is already active. Answer it or wait.');
         return;
+    }
+    # V1: increment round counter
+    if ($self->{_trivia}{$channel}{multi_total}) {
+        $self->{_trivia}{$channel}{multi_current}++;
+        my $cur = $self->{_trivia}{$channel}{multi_current};
+        my $tot = $self->{_trivia}{$channel}{multi_total};
+        botPrivmsg($self, $channel, "Round $cur/$tot:");
     }
     my $http = Mediabot::External::_make_http(timeout => 8, verify_SSL => 1);
     my $res  = eval { $http->get('https://opentdb.com/api.php?amount=1&type=multiple') }
@@ -4013,6 +4170,22 @@ sub checkTriviaAnswer {
     my $score = $trivia->{scores}{$nick};
     Mediabot::Helpers::botPrivmsg($self, $channel,
         "Correct, $nick! The answer was: $trivia->{answer_display}  (score: $score)");
+    # W1: show intermediate scores in multi-round mode
+    if ($trivia->{multi_total}) {
+        my $cur = $trivia->{multi_current} // 0;
+        my $tot = $trivia->{multi_total};
+        my %sc  = %{ $trivia->{scores} // {} };
+        my @sboard = map { "$_:$sc{$_}" }
+                     sort { $sc{$b} <=> $sc{$a} } keys %sc;
+        Mediabot::Helpers::botPrivmsg($self, $channel,
+            "Scores after round $cur/$tot: " . join('  ', @sboard[0..($#sboard > 4 ? 4 : $#sboard)]));
+        if ($cur >= $tot) {
+            Mediabot::Helpers::botPrivmsg($self, $channel,
+                "Game over! Final scores: " . join('  ', @sboard));
+            delete $trivia->{multi_total};
+            delete $trivia->{multi_current};
+        }
+    }
 }
 
 sub mbTriviaScore_ctx {
