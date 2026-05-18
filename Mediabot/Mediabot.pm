@@ -1194,6 +1194,9 @@ sub mbCommandPublic {
         karma        => sub { mbKarma_ctx($ctx) },
         karmatop     => sub { mbKarmaTop_ctx($ctx) },
         karmareset   => sub { mbKarmaReset_ctx($ctx) },
+        karmadiff    => sub { mbKarmaDiff_ctx($ctx) },
+        triviastop   => sub { mbTriviaStop_ctx($ctx) },
+        pollextend   => sub { mbPollExtend_ctx($ctx) },
         karmahist    => sub { mbKarmaHist_ctx($ctx) },
         roll         => sub { mbRoll_ctx($ctx) },
         flip         => sub { mbFlip_ctx($ctx) },
@@ -1216,6 +1219,8 @@ sub mbCommandPublic {
         poll         => sub { mbPoll_ctx($ctx) },
         vote         => sub { mbVote_ctx($ctx) },
         pollresult   => sub { mbPollResult_ctx($ctx) },
+        pollstatus   => sub { mbPollStatus_ctx($ctx) },
+        unvote       => sub { mbUnvote_ctx($ctx) },
         pollstop     => sub { mbPollStop_ctx($ctx) },
         note         => sub { mbNote_ctx($ctx) },
         notes        => sub { mbNotes_ctx($ctx) },
@@ -1503,7 +1508,7 @@ yt|yt <query>|public|Search YouTube when configured.
 # --- Wave IV-V commands added 2025-2026 ---
 # Fun / random
 8ball|8ball <question>|public|Ask the Magic 8-ball a yes/no question.
-choose|choose <a> | <b>|public|Pick a random option. Weight with 'option:N' (e.g. pizza:3). Also accepts 'ou'.
+choose|choose <a> | <b>|public|Random pick. Weight: 'opt:N'. Separator 'ou'. Subcommands: last, history.
 flip|flip|public|Flip a coin (heads or tails).
 morse|morse <text>|public|Encode text in Morse code.
 roll|roll [NdN]|public|Roll dice. Defaults to 1d6. Supports NdN format (e.g. 2d6, 1d20).
@@ -1525,36 +1530,40 @@ wordcount|wordcount [nick]|public|Count distinct words spoken by a nick on the c
 
 # Karma
 karma|karma [nick]|public|Show karma. Subcommands: karma top [n], karma log [nick]. 30s cooldown per target.
+karmadiff|karmadiff [nick]|public|Show karma delta for nick in the last 24h.
 karmareset|karmareset <nick>|master|Reset a nick's karma to 0 on this channel.
 karmatop|karmatop [n]|public|Show the top N karma scores (default 5). Use 'karmatop bottom [n]' for lowest scores.
 karmahist|karmahist [nick]|public|Show the last 5 karma changes on the channel (optionally filtered by nick).
 
 # Reminders
-remind|remind <nick> <msg>|public|Set a reminder. Delay: 'dans 2h', 'in 30m', 'tomorrow'. Subcommands: list, cancel <id>, show.
+remind|remind [!] <nick> <msg>|public|Set reminder. '!' = urgent ([!] prefix). Delay: 'dans 2h', 'in 30m'. Also: list, cancel, show.
 remindlist|remindlist|public|List your pending reminders on this channel.
 
 # Quotes
 quotecount|quotecount [nick]|public|Count quotes by author on the channel.
 
 # Notes (in-memory, reset on restart)
-note|note <message>|public|Save a personal note (max 10, in-memory).
+note|note <msg>|public|Save a note (max 10). Subcommands: search <word>, export.
 notes|notes [del <n>]|public|List or delete personal notes.
 
 # Polls
 poll|poll [secs] <q> | opt1 | opt2|public|Start a poll. Optional timeout in seconds (default 300). Requires Master.
+pollextend|pollextend <secs>|public|Extend the current poll timer by N seconds (10-600).
 pollresult|pollresult|public|Show current or last poll results.
 pollstop|pollstop|master|Close the active poll.
+unvote|unvote|public|Cancel your vote in the current poll.
 vote|vote <n>|public|Vote in the current poll. Shows live tally after each vote (U3).
 
 # Trivia
-trivia|trivia [start N]|public|Start a trivia question. Use 'trivia start N' for a multi-round game (N up to 20).
+triviastop|triviastop|master|Stop the active trivia game on this channel.
+trivia|trivia [cat] [start N]|public|Trivia. Optional category (e.g. 'trivia science'). 'start N' for multi-round.
 triviascore|triviascore|public|Show trivia scores for the current channel session.
 
 # Dictionary / external
 define|define <word>|public|Look up a word definition from Wiktionary.
 
 # AI
-ai|ai <prompt>|public|Ask Claude. Subcommands: reset, history, quota, persona, model, stats, forget, clear all (Owner).
+ai|ai <prompt>|public|Ask Claude. Subcommands: reset, history, quota, persona, model, stats, forget, pin, relay, summary [n], clear all (Owner).
 
 # Misc
 last|last <nick>|public|Show the last message posted by a nick on this channel.

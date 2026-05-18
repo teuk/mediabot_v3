@@ -3248,6 +3248,77 @@ sub claude_ctx {
         return 1;
     }
 
+    # Z2: !ai summary [n] — summarise last N messages from CHANNEL_LOG
+    if (@args && lc($args[0]) eq 'summary') {
+        shift @args;
+        my $n_msgs = (@args && $args[0] =~ /^(\d+)$/) ? int($args[0]) : 10;
+        $n_msgs = 5 if $n_msgs < 5; $n_msgs = 50 if $n_msgs > 50;
+        my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
+        unless ($dbh && defined $channel) {
+            botNotice($self, $nick, 'Not available in private or DB not connected.'); return;
+        }
+        my $sth = $dbh->prepare(q{
+            SELECT cl.nick, cl.text FROM CHANNEL_LOG cl
+            JOIN CHANNEL c ON c.id_channel = cl.id_channel
+            WHERE c.name = ? AND cl.text IS NOT NULL
+            ORDER BY cl.id DESC LIMIT ?
+        });
+        unless ($sth && $sth->execute($channel, $n_msgs)) {
+            botNotice($self, $nick, 'DB error.'); return;
+        }
+        my @rows;
+        while (my $r = $sth->fetchrow_hashref) { unshift @rows, "$r->{nick}: $r->{text}"; }
+        $sth->finish;
+        unless (@rows) {
+            botNotice($self, $nick, "No recent messages found on $channel."); return;
+        }
+        my $transcript = join("\n", @rows);
+        my $summary_prompt = "Summarise this IRC conversation in 2-3 sentences:\n$transcript";
+        # Call Claude with injected prompt, output as notice to caller
+        return claudeAI($self, $ctx->message, $nick, undef,
+            sub { botNotice($self, $nick, \$_[0]) }, $summary_prompt);
+    }
+
+    # Y1: !ai relay <#chan> <prompt> — relay response to a channel (from private)
+    if (@args >= 2 && lc($args[0]) eq 'relay' && $args[1] =~ /^#/) {
+        shift @args;
+        my $relay_chan = shift @args;
+        unless (exists $self->{channels}{$relay_chan}) {
+            botNotice($self, $nick, "Not on channel $relay_chan."); return;
+        }
+        # Override channel and re-enter claudeAI with relay channel
+        my $ctx_relay = bless { %$ctx, _channel => $relay_chan }, ref($ctx);
+        return claudeAI($self, $ctx_relay->message // $ctx->message,
+            $nick, $relay_chan, undef, @args);
+    }
+
+    # X1: !ai pin <msg> — pin a message always injected into context
+    if (@args && lc($args[0]) eq 'pin') {
+        shift @args;
+        my $pin_key = lc($nick) . "\x00" . (defined $channel ? $channel : '__private__');
+        if (@args) {
+            my $pinned = join(' ', @args);
+            $pinned = substr($pinned, 0, 300);
+            $self->{_claude_pinned}{$pin_key} = $pinned;
+            botNotice($self, $nick, "Pinned context: $pinned");
+        } else {
+            my $current = $self->{_claude_pinned}{$pin_key};
+            if ($current) {
+                botNotice($self, $nick, "Pinned: $current");
+            } else {
+                botNotice($self, $nick, 'No pinned context.');
+            }
+        }
+        return 1;
+    }
+    # X1: !ai pin clear — remove pinned context
+    if (@args >= 2 && lc($args[0]) eq 'pin' && lc($args[1]) eq 'clear') {
+        my $pin_key = lc($nick) . "\x00" . (defined $channel ? $channel : '__private__');
+        delete $self->{_claude_pinned}{$pin_key};
+        botNotice($self, $nick, 'Pinned context cleared.');
+        return 1;
+    }
+
     # K6: !ai model — show current Claude model
     if (@args && lc($args[0]) eq 'model') {
         my $model = _chatgpt_conf_string($self, 'anthropic.MODEL', CLAUDE_MODEL);
@@ -3389,6 +3460,11 @@ sub claudeAI {
     my $persona_key = lc($nick) . "\x00" . (defined $chan ? $chan : '__private__');
     if (my $persona = $self->{_claude_persona}{$persona_key}) {
         $sys_prompt = $persona;
+    }
+    # X1: prepend pinned context to system prompt if set
+    my $pin_key_x1 = lc($nick) . "\x00" . (defined $chan ? $chan : '__private__');
+    if (my $pinned = $self->{_claude_pinned}{$pin_key_x1}) {
+        $sys_prompt = "[Always remember: $pinned] $sys_prompt";
     }
     # A1: configurable history depth (in messages, must be even: user+assistant pairs)
     my $max_history = _chatgpt_conf_int($self, 'anthropic.MAX_HISTORY',

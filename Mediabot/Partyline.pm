@@ -1229,6 +1229,9 @@ sub _handle_line {
     elsif ($line =~ /^\.purgereminders$/i) {
         $self->_cmd_purgereminders($stream, $id);
     }
+    elsif ($line =~ /^\.nickinfo\s+(\S+)/i) {
+        $self->_cmd_nickinfo($stream, $id, $1);
+    }
     elsif ($line =~ /^\.who\s+(#\S+)/i) {
         $self->_cmd_who_chan($stream, $id, $1);
     }
@@ -1333,6 +1336,18 @@ sub _handle_line {
     elsif ($line =~ /^\.raw\s+(.+)$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.raw' }) if $self->{bot}->{metrics};
         $self->_cmd_raw($stream, $id, $1)
+    }
+    elsif ($line =~ /^\.reloadconf$/i) {
+        my $bot = $self->{bot};
+        eval {
+            if ($bot->{conf} && $bot->{conf}->can('reload')) {
+                $bot->{conf}->reload;
+                $stream->write("Config reloaded.\r\n");
+            } else {
+                $stream->write("Config object has no reload method.\r\n");
+            }
+        };
+        $stream->write("Error: $@\r\n") if $@;
     }
     elsif ($line =~ /^\.rehash$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.rehash' }) if $self->{bot}->{metrics};
@@ -1496,6 +1511,7 @@ sub _cmd_help {
       . "  .aistats            - show Claude AI usage stats\r\n"
       . "  .top [n]            - top N speakers across all channels (default 5)\r\n"
       . "  .seen <nick>        - last activity for a nick in channel logs\r\n"
+      . "  .nickinfo <nick>    - show DB info for a registered nick\r\n"
       . "  .kick <nick> <#chan> [reason] - kick a nick from channel\r\n"
       . "  .flushcooldown [#chan]        - clear karma anti-spam cooldown\r\n"
       . "  .dbstats            - show DB connection and query stats\r\n"
@@ -1523,6 +1539,7 @@ sub _cmd_help {
       . "  .part #chan         - make the bot part a channel\r\n"
       . "  .nick <newnick>     - change the bot's nick\r\n"
       . "  .raw <IRC command>  - send a raw IRC command (Owner only)\r\n"
+      . "  .reloadconf         - reload config file without restart\r\n"
       . "  .rehash             - reload configuration and runtime state\r\n"
       . "  .restart            - reconnect IRC without killing process (Owner)\r\n"
       . "  .die                - terminate bot process entirely (Owner only)\r\n"
@@ -3779,6 +3796,39 @@ sub _cmd_die {
 }
 
 
+sub _cmd_nickinfo {
+    my ($self, $stream, $id, $args) = @_;
+    unless (defined $args && $args =~ /^(\S+)$/) {
+        $stream->write("Usage: .nickinfo <nick>\r\n"); return;
+    }
+    my $target = lc($1);
+    my $bot = $self->{bot};
+    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+    return unless $dbh;
+    my $sth = $dbh->prepare(q{
+        SELECT u.nick, u.id_user, u.email,
+               GROUP_CONCAT(DISTINCT h.hostname ORDER BY h.hostname SEPARATOR ' | ') AS hosts,
+               MAX(ls.login_at) AS last_login
+        FROM USER u
+        LEFT JOIN USER_HOST h  ON h.id_user  = u.id_user
+        LEFT JOIN USER_LOG  ls ON ls.id_user = u.id_user
+        WHERE LOWER(u.nick) = ?
+        GROUP BY u.id_user
+    });
+    unless ($sth && $sth->execute($target)) {
+        $stream->write("DB error.\r\n"); return;
+    }
+    my $r = $sth->fetchrow_hashref; $sth->finish;
+    unless ($r) {
+        $stream->write("$target: not found in DB.\r\n"); return;
+    }
+    $stream->write("Nick     : $r->{nick}\r\n");
+    $stream->write("ID       : $r->{id_user}\r\n");
+    $stream->write("Email    : " . ($r->{email}  // 'N/A') . "\r\n");
+    $stream->write("Hosts    : " . ($r->{hosts}  // 'none') . "\r\n");
+    $stream->write("Last login: " . ($r->{last_login} // 'never') . "\r\n");
+}
+
 sub _cmd_who_chan {
     my ($self, $stream, $id, $args) = @_;
     my $bot  = $self->{bot};
@@ -3835,7 +3885,17 @@ sub _cmd_kick {
 sub _cmd_flushcooldown {
     my ($self, $stream, $id, $args) = @_;
     my $bot = $self->{bot};
-    if (defined $args && $args =~ /^(#\S+)$/) {
+    # Z6: support targeted nick+chan clear: .flushcooldown <nick> <#chan>
+    if (defined $args && $args =~ /^(\S+)\s+(#\S+)$/) {
+        my ($target, $chan) = (lc($1), $2);
+        my $cd_key = "$target:" . lc($chan);  # matches U6 format
+        if (exists $bot->{_karma_cooldown}{$chan}{$cd_key}) {
+            delete $bot->{_karma_cooldown}{$chan}{$cd_key};
+            $stream->write("Karma cooldown cleared for $target on $chan.\r\n");
+        } else {
+            $stream->write("No active cooldown for $target on $chan.\r\n");
+        }
+    } elsif (defined $args && $args =~ /^(#\S+)$/) {
         delete $bot->{_karma_cooldown}{$1};
         $stream->write("Karma cooldown cleared for $1.\r\n");
     } else {
