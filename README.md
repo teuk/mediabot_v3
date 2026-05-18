@@ -638,6 +638,7 @@ Some dependencies may be installed by Debian packages, while others may be handl
 apt install -y \
   libdbi-perl \
   libdbd-mysql-perl \
+  libdbd-mariadb-perl \
   libjson-perl \
   libjson-xs-perl \
   libwww-perl \
@@ -801,8 +802,14 @@ Then inside the SQL client:
 ```sql
 SET NAMES utf8mb4;
 USE mediabot;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260502_channel_ban.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260502_user_seen.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/mediabot_fun_commands_migration_20260512.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260515_claude_chanset.sql;
 ```
+
+
+Note: `tools/check_schema_drift.pl` checks schema structure. Reference-data migrations such as `20260515_claude_chanset.sql` must still be applied when upgrading an existing database.
 
 More details are available in:
 
