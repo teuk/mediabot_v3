@@ -3248,22 +3248,49 @@ sub claude_ctx {
         return 1;
     }
 
+    # BB8: !ai models — list known Claude models
+    if (@args && lc($args[0]) eq 'models') {
+        my @known = qw(
+            claude-opus-4-6
+            claude-sonnet-4-6
+            claude-haiku-4-5-20251001
+        );
+        my $current = _chatgpt_conf_string($self, 'anthropic.MODEL', 'claude-sonnet-4-6');
+        my @labeled = map { $_ eq $current ? "$_ (current)" : $_ } @known;
+        botNotice($self, $nick, 'Available Claude models: ' . join('  |  ', @labeled));
+        return 1;
+    }
+
     # Z2: !ai summary [n] — summarise last N messages from CHANNEL_LOG
     if (@args && lc($args[0]) eq 'summary') {
         shift @args;
-        my $n_msgs = (@args && $args[0] =~ /^(\d+)$/) ? int($args[0]) : 10;
+        # AA2: optional nick filter — !ai summary 10 teuk
+        my $n_msgs = (@args && $args[0] =~ /^(\d+)$/) ? int(shift @args) : 10;
         $n_msgs = 5 if $n_msgs < 5; $n_msgs = 50 if $n_msgs > 50;
+        my $filter_nick = (@args && $args[0] !~ /^\d/) ? lc(shift @args) : undef;
         my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
         unless ($dbh && defined $channel) {
             botNotice($self, $nick, 'Not available in private or DB not connected.'); return;
         }
-        my $sth = $dbh->prepare(q{
-            SELECT cl.nick, cl.text FROM CHANNEL_LOG cl
-            JOIN CHANNEL c ON c.id_channel = cl.id_channel
-            WHERE c.name = ? AND cl.text IS NOT NULL
-            ORDER BY cl.id DESC LIMIT ?
-        });
-        unless ($sth && $sth->execute($channel, $n_msgs)) {
+        my ($sth, @bind);
+        if ($filter_nick) {
+            $sth = $dbh->prepare(q{
+                SELECT cl.nick, cl.text FROM CHANNEL_LOG cl
+                JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                WHERE c.name = ? AND LOWER(cl.nick) = ? AND cl.text IS NOT NULL
+                ORDER BY cl.id DESC LIMIT ?
+            });
+            @bind = ($channel, $filter_nick, $n_msgs);
+        } else {
+            $sth = $dbh->prepare(q{
+                SELECT cl.nick, cl.text FROM CHANNEL_LOG cl
+                JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                WHERE c.name = ? AND cl.text IS NOT NULL
+                ORDER BY cl.id DESC LIMIT ?
+            });
+            @bind = ($channel, $n_msgs);
+        }
+        unless ($sth && $sth->execute(@bind)) {
             botNotice($self, $nick, 'DB error.'); return;
         }
         my @rows;
@@ -3273,10 +3300,11 @@ sub claude_ctx {
             botNotice($self, $nick, "No recent messages found on $channel."); return;
         }
         my $transcript = join("\n", @rows);
-        my $summary_prompt = "Summarise this IRC conversation in 2-3 sentences:\n$transcript";
+        my $who_str = $filter_nick ? " by $filter_nick" : "";
+        my $summary_prompt = "Summarise this IRC conversation${who_str} in 2-3 sentences:\n$transcript";
         # Call Claude with injected prompt, output as notice to caller
         return claudeAI($self, $ctx->message, $nick, undef,
-            sub { botNotice($self, $nick, \$_[0]) }, $summary_prompt);
+            sub { botNotice($self, $nick, $_[0]) }, $summary_prompt);  # B3/fix: was \$_[0] (ref instead of value)
     }
 
     # Y1: !ai relay <#chan> <prompt> — relay response to a channel (from private)

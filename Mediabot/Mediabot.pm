@@ -1195,7 +1195,12 @@ sub mbCommandPublic {
         karmatop     => sub { mbKarmaTop_ctx($ctx) },
         karmareset   => sub { mbKarmaReset_ctx($ctx) },
         karmadiff    => sub { mbKarmaDiff_ctx($ctx) },
+        seen         => sub { mbSeen_ctx($ctx) },
+        karmgraph    => sub { mbKarmaGraph_ctx($ctx) },
         triviastop   => sub { mbTriviaStop_ctx($ctx) },
+        karmainfo    => sub { mbKarmaInfo_ctx($ctx) },
+        triviareset  => sub { mbTriviaReset_ctx($ctx) },
+        triviatop    => sub { mbTriviaTop_ctx($ctx) },
         pollextend   => sub { mbPollExtend_ctx($ctx) },
         karmahist    => sub { mbKarmaHist_ctx($ctx) },
         roll         => sub { mbRoll_ctx($ctx) },
@@ -1529,7 +1534,9 @@ when|when <nick>|public|Show when a nick first appeared on the channel.
 wordcount|wordcount [nick]|public|Count distinct words spoken by a nick on the channel.
 
 # Karma
-karma|karma [nick]|public|Show karma. Subcommands: karma top [n], karma log [nick]. 30s cooldown per target.
+karma|karma [nick]|public|Show karma+rank. Subcommands: top, bottom, log, diff, graph [nick] (sparkline 7d).
+karmainfo|karmainfo <nick>|public|Detailed karma stats: received, given, top voter.
+karmgraph|karmgraph [nick]|public|ASCII sparkline of karma changes over the last 7 days.
 karmadiff|karmadiff [nick]|public|Show karma delta for nick in the last 24h.
 karmareset|karmareset <nick>|master|Reset a nick's karma to 0 on this channel.
 karmatop|karmatop [n]|public|Show the top N karma scores (default 5). Use 'karmatop bottom [n]' for lowest scores.
@@ -1543,11 +1550,11 @@ remindlist|remindlist|public|List your pending reminders on this channel.
 quotecount|quotecount [nick]|public|Count quotes by author on the channel.
 
 # Notes (in-memory, reset on restart)
-note|note <msg>|public|Save a note (max 10). Subcommands: search <word>, export.
+note|note <msg>|public|Save a note (persistent in DB, max 10). Subcommands: search <w>, export.
 notes|notes [del <n>]|public|List or delete personal notes.
 
 # Polls
-poll|poll [secs] <q> | opt1 | opt2|public|Start a poll. Optional timeout in seconds (default 300). Requires Master.
+poll|poll [secs] [weighted] <q> | opt1[:N] | opt2|public|Start a poll. 'weighted' enables weighted options (opt:N).
 pollextend|pollextend <secs>|public|Extend the current poll timer by N seconds (10-600).
 pollresult|pollresult|public|Show current or last poll results.
 pollstop|pollstop|master|Close the active poll.
@@ -1555,15 +1562,18 @@ unvote|unvote|public|Cancel your vote in the current poll.
 vote|vote <n>|public|Vote in the current poll. Shows live tally after each vote (U3).
 
 # Trivia
-triviastop|triviastop|master|Stop the active trivia game on this channel.
-trivia|trivia [cat] [start N]|public|Trivia. Optional category (e.g. 'trivia science'). 'start N' for multi-round.
+triviareset|triviareset <nick>|master|Reset a nick's trivia score in DB.
+triviatop|triviatop [n]|public|Show top trivia scores from DB (hall of fame, max 15).
+triviastop|triviatop|triviatop [n]|public|Show top trivia scores from DB (hall of fame, max 15).
+triviastop|master|Stop the active trivia game on this channel.
+trivia|trivia [cat] [start N]|public|Trivia. 'start N' for multi-round. 'triviatop [n]' for hall of fame.
 triviascore|triviascore|public|Show trivia scores for the current channel session.
 
 # Dictionary / external
 define|define <word>|public|Look up a word definition from Wiktionary.
 
 # AI
-ai|ai <prompt>|public|Ask Claude. Subcommands: reset, history, quota, persona, model, stats, forget, pin, relay, summary [n], clear all (Owner).
+ai|ai <prompt>|public|Ask Claude. Subcommands: summary [n] [nick], pin, relay, forget, models, reset, history.
 
 # Misc
 last|last <nick>|public|Show the last message posted by a nick on this channel.
@@ -1890,9 +1900,20 @@ sub mbHandleNickTriggered {
 
             $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
 
-            my $sAnswer = $hailo->learn_reply($what);
-
-            if (defined $sAnswer && $sAnswer ne "" && $sAnswer !~ /^\Q$what\E\s*\.$/i) {
+            # AA5+AA6: timeout + metrics around Hailo brain call
+            $self->{metrics}->inc('mediabot_hailo_learn_reply_total') if $self->{metrics};
+            my $sAnswer = eval {
+                local $SIG{ALRM} = sub { die "Hailo timeout\n" };
+                alarm(5);
+                my $r = $hailo->learn_reply($what);
+                alarm(0);
+                $r;
+            };
+            alarm(0);  # ensure alarm is cleared even on exception
+            if ($@) {
+                $self->{logger}->log(1, "AA5: Hailo learn_reply timeout or error: $@");
+                $self->{metrics}->inc('mediabot_hailo_timeout_total') if $self->{metrics};
+            } elsif (defined $sAnswer && $sAnswer ne '' && $sAnswer !~ /^\Q$what\E\s*\.$/i) {
                 $self->{logger}->log(4, "learn_reply $what from $sNick : $sAnswer");
                 botPrivmsg($self, $sChannel, $sAnswer);
             }

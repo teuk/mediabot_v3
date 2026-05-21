@@ -70,6 +70,20 @@ sub new {
     $self->_declare('mediabot_channels_managed',       'gauge',   'Current number of managed channels');
     $self->_declare('mediabot_users_known',            'gauge',   'Current number of known users');
 
+    # AA6: game and interaction metrics
+    $self->_declare('mediabot_trivia_rounds_total',    'counter', 'Total trivia rounds completed (correct answers)');
+    $self->_declare('mediabot_trivia_timeouts_total',  'counter', 'Total trivia rounds ended by timeout');
+    $self->_declare('mediabot_trivia_db_saves_total',  'counter', 'Total trivia scores persisted to DB (AA1)');
+    $self->_declare('mediabot_poll_created_total',     'counter', 'Total polls started');
+    $self->_declare('mediabot_poll_closed_total',      'counter', 'Total polls closed via !pollresult');
+    $self->_declare('mediabot_poll_votes_total',       'counter', 'Total votes cast across all polls');
+    $self->_declare('mediabot_poll_duration_seconds',  'gauge',   'Duration in seconds of the last closed poll');
+    $self->_declare('mediabot_karma_votes_total',      'counter', 'Total karma votes cast (++ and --)');
+    $self->_declare('mediabot_karma_selfvote_blocked', 'counter', 'Total self-vote attempts blocked (Y2)');
+    $self->_declare('mediabot_karma_cooldown_blocked', 'counter', 'Total karma votes blocked by cooldown (U6)');
+    $self->_declare('mediabot_hailo_learn_reply_total','counter', 'Total Hailo learn_reply calls');
+    $self->_declare('mediabot_hailo_timeout_total',    'counter', 'Total Hailo learn_reply timeouts (AA5)');
+
     # Defaults
     if ($self->enabled) {
         $self->set('mediabot_up', 1);

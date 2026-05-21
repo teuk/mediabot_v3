@@ -530,6 +530,27 @@ CREATE TABLE `YOMOMMA` (
   PRIMARY KEY (`id_yomomma`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `TRIVIA_SCORES` (
+  `id_channel`    BIGINT UNSIGNED NOT NULL,
+  `nick`          VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `score`         BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `last_correct`  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY     (`id_channel`, `nick`),
+  KEY `idx_trivia_scores_channel_score` (`id_channel`, `score`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Persistent trivia scores per nick per channel (AA1)';
+
+-- NOTE — persistent user notes (BB1)
+CREATE TABLE `NOTE` (
+  `id_note`    BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `nick`       VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `text`       VARCHAR(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_note`),
+  KEY `idx_note_nick` (`nick`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Persistent user notes saved via !note command (BB1)';
+
 -- ===========================================================================
 -- FOREIGN KEYS
 -- ===========================================================================
@@ -569,6 +590,9 @@ ALTER TABLE `REMINDERS`
 
 ALTER TABLE `KARMA`
   ADD CONSTRAINT `fk_karma_channel` FOREIGN KEY (`id_channel`) REFERENCES `CHANNEL` (`id_channel`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE `TRIVIA_SCORES`
+  ADD CONSTRAINT `fk_trivia_scores_channel` FOREIGN KEY (`id_channel`) REFERENCES `CHANNEL` (`id_channel`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 ALTER TABLE `MP3`
   ADD CONSTRAINT `fk_mp3_user` FOREIGN KEY (`id_user`) REFERENCES `USER` (`id_user`) ON DELETE CASCADE ON UPDATE CASCADE;

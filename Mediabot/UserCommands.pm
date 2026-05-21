@@ -3123,6 +3123,7 @@ sub processKarma {
     if (lc($nick) eq lc($target)) {
         Mediabot::Helpers::botPrivmsg($self, $channel,
             "$nick: you can't vote for yourself.");
+        $self->{metrics}->inc('mediabot_karma_selfvote_blocked') if $self->{metrics};
         next;
     }
 
@@ -3135,6 +3136,7 @@ sub processKarma {
             next;
         }
         $self->{_karma_cooldown}{$channel}{$cd_key} = time();
+    $self->{metrics}->inc('mediabot_karma_votes_total') if $self->{metrics};  # AA6
         my $delta = ($op eq '++') ? 1 : -1;
         my $sth = $self->{dbh}->prepare(q{
             INSERT INTO KARMA (id_channel, nick, score) VALUES (?, ?, ?)
@@ -3421,6 +3423,9 @@ sub mbPoll_ctx {
     my $raw = join(' ', @args);
     # V2: optional leading number sets poll timeout (10–3600s, default 300)
     my $poll_timeout = 300;
+    # BB7: optional 'weighted' keyword enables weighted voting mode
+    my $poll_weighted = 0;
+    if ($raw =~ s/^weighted\s+//i) { $poll_weighted = 1; }
     if ($raw =~ s/^(\d+)\s+//) {
         $poll_timeout = int($1); $poll_timeout = 10 if $poll_timeout < 10;
         $poll_timeout = 3600 if $poll_timeout > 3600;
@@ -3434,15 +3439,26 @@ sub mbPoll_ctx {
     my $question = shift @parts;
     # Z10: Prometheus counter for poll creation
     $self->{metrics}->inc('mediabot_poll_created_total') if $self->{metrics};
+    # BB7: build weighted option list
+    my @weighted_parts;
+    for my $opt (@parts) {
+        if ($poll_weighted && $opt =~ /^(.+?):(\d+)$/ && $2 >= 1 && $2 <= 10) {
+            push @weighted_parts, { label => $1, weight => int($2) };
+        } else {
+            push @weighted_parts, { label => $opt, weight => 1 };
+        }
+    }
+    $self->{metrics}->inc('mediabot_poll_created_total') if $self->{metrics};
     $self->{_polls}{$channel} = {
         question => $question,
-        options  => \@parts,
-        votes    => {},      # nick => option_index
+        options  => [ map { $_->{label}  } @weighted_parts ],
+        weights  => [ map { $_->{weight} } @weighted_parts ],
+        weighted => $poll_weighted,
+        votes    => {},
         started  => time(),
         deadline => time() + $poll_timeout,  # V2: configurable timeout
         active   => 1,
     };
-
     my $opts = join('  ', map { '[' . ($_+1) . '] ' . $parts[$_] } 0..$#parts);
     botPrivmsg($self, $channel, "Poll: \"$question\"  $opts  -- vote with !vote <n>");
     logBot($self, $ctx->message, $channel, 'poll', $question);  # S2/fix
@@ -3593,9 +3609,17 @@ sub mbNote_ctx {
     if (scalar @{ $self->{_notes}{lc $nick} } >= 10) {
         botNotice($self, $nick, 'Max 10 notes reached. Delete some with !notes del <id>.'); return;
     }
-    my $note_id = scalar(@{ $self->{_notes}{lc $nick} }) + 1;  # C4/fix: ordinal, no time() collision
+    my $note_id = scalar(@{ $self->{_notes}{lc $nick} }) + 1;  # C4/fix: ordinal
     push @{ $self->{_notes}{lc $nick} }, { id => $note_id, text => $text };
     my $n = scalar @{ $self->{_notes}{lc $nick} };
+    # BB1: persist note to DB
+    eval {
+        my $sth = $self->{dbh}->prepare(
+            'INSERT INTO NOTE (nick, text) VALUES (?, ?)'
+        );
+        $sth->execute(lc($nick), $text) if $sth; $sth->finish if $sth;
+    };
+    $self->{logger}->log(1, "BB1: NOTE insert failed: $@") if $@;
     botNotice($self, $nick, "Note saved (#$n total). Use !notes to list.");
     return 1;
 }
@@ -3607,13 +3631,35 @@ sub mbNotes_ctx {
     my $nick    = $ctx->nick;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
+    # BB1: load from DB if memory is empty (e.g. after restart)
+    unless (@{ $self->{_notes}{lc $nick} // [] }) {
+        eval {
+            my $sth = $self->{dbh}->prepare(
+                'SELECT id_note, text FROM NOTE WHERE nick = ? ORDER BY id_note ASC LIMIT 10'
+            );
+            if ($sth && $sth->execute(lc($nick))) {
+                my @db_notes;
+                while (my $r = $sth->fetchrow_hashref) {
+                    push @db_notes, { id => $r->{id_note}, text => $r->{text} };
+                }
+                $sth->finish;
+                $self->{_notes}{lc $nick} = \@db_notes if @db_notes;
+            }
+        };
+    }
     my $notes = $self->{_notes}{lc $nick} // [];
 
     # !notes del <index>
     if (@args && lc($args[0]) eq 'del') {
         my $idx = ($args[1] // 1) - 1;
         if ($idx >= 0 && $idx < scalar @$notes) {
+            my $del_id = $notes->[$idx]{id};
             splice @$notes, $idx, 1;
+            # BB1: delete from DB
+            eval {
+                my $sth = $self->{dbh}->prepare('DELETE FROM NOTE WHERE nick = ? AND id_note = ?');
+                $sth->execute(lc($nick), $del_id) if $sth; $sth->finish if $sth;
+            };
             botNotice($self, $nick, 'Note deleted.');
         } else {
             botNotice($self, $nick, 'Note not found.');
@@ -3636,6 +3682,100 @@ sub mbNotes_ctx {
 # mbKarmaReset_ctx --- !karmareset <nick>  (V3)
 # Reset a nick's karma to 0. Requires Admin level.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# mbKarmaInfo_ctx --- !karmainfo <nick>  (BB5)
+# Show detailed karma stats for a nick from _karma_log.
+# ---------------------------------------------------------------------------
+sub mbKarmaInfo_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $target  = @args ? lc($args[0]) : lc($nick);
+    my $klog    = $self->{_karma_log}{$channel} // [];
+    my @entries = grep { lc($_->{nick}) eq $target } @$klog;
+    unless (@entries) {
+        botPrivmsg($self, $channel, "$target: no karma activity in log."); return 1;
+    }
+    my ($received_pos, $received_neg, $given_pos, $given_neg) = (0,0,0,0);
+    my %givers;
+    for my $e (@entries) {
+        if ($e->{delta} eq '+1') { $received_pos++; }
+        else                     { $received_neg++; }
+        $givers{$e->{giver}}++ if $e->{giver};
+    }
+    my @given = grep { lc(($_->{giver} // '')) eq $target } @$klog;
+    for my $e (@given) {
+        if ($e->{delta} eq '+1') { $given_pos++; }
+        else                     { $given_neg++; }
+    }
+    my $top_giver = (sort { $givers{$b} <=> $givers{$a} } keys %givers)[0] // 'nobody';
+    my $net_received = $received_pos - $received_neg;
+    my $sign = $net_received >= 0 ? '+' : '';
+    botPrivmsg($self, $channel,
+        "karmainfo $target: received ${sign}${net_received} "
+        . "(+${received_pos}/-${received_neg})"
+        . " | given: +${given_pos}/-${given_neg}"
+        . " | top voter: $top_giver");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbKarmaGraph_ctx --- !karma graph [nick]  (AA4)
+# ASCII sparkline of karma changes over the last 7 days (from _karma_log).
+# ---------------------------------------------------------------------------
+sub mbKarmaGraph_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    # Remove 'graph' keyword if called as '!karma graph'
+    shift @args if (@args && lc($args[0]) eq 'graph');
+    my $target  = @args ? lc($args[0]) : lc($nick);
+    my $klog    = $self->{_karma_log}{$channel} // [];
+    my $now     = time();
+    my $days    = 7;
+    # Build a bucket per day (today=6, yesterday=5, ... 7 days ago=0)
+    my @buckets = (0) x $days;
+    for my $entry (@$klog) {
+        next unless lc($entry->{nick}) eq $target;
+        my $age_days = int(($now - $entry->{ts}) / 86400);
+        next if $age_days >= $days;
+        my $bucket = $days - 1 - $age_days;  # most recent = rightmost
+        $buckets[$bucket] += ($entry->{delta} eq '+1' ? 1 : -1);
+    }
+    # Check if any activity
+    unless (grep { $_ != 0 } @buckets) {
+        botPrivmsg($self, $channel,
+            "$target: no karma activity in the last ${days} days.");
+        return 1;
+    }
+    # Sparkline: map delta to block chars
+    # ▁▂▃▄▅▆▇█ for positive, ▼ for negative, · for zero
+    my @spark_pos = ('\x{2581}','\x{2582}','\x{2583}','\x{2584}',
+                     '\x{2585}','\x{2586}','\x{2587}','\x{2588}');
+    my $max = (sort { $b <=> $a } map { abs($_) } @buckets)[0] || 1;
+    my $spark = '';
+    for my $v (@buckets) {
+        if ($v == 0)    { $spark .= '\xb7'; }   # middle dot
+        elsif ($v < 0)  { $spark .= '\x{25bc}'; }  # ▼
+        else {
+            my $idx = int(($v / $max) * 7);  # 0..7
+            $spark .= $spark_pos[$idx];
+        }
+    }
+    my $total = 0; $total += ($_ eq '+1' ? 1 : -1)
+        for map { $_->{delta} } grep { lc($_->{nick}) eq $target
+            && $now - $_->{ts} < $days * 86400 } @$klog;
+    my $sign = $total >= 0 ? '+' : '';
+    botPrivmsg($self, $channel,
+        "karma graph $target (7d) $spark  net: ${sign}${total}");
+    return 1;
+}
+
 sub mbKarmaReset_ctx {
     my ($ctx) = @_;
     my $self    = $ctx->bot;
@@ -4266,11 +4406,12 @@ sub mbTrivia_ctx {
     }
     my $answer_lc = lc($answer);
     $self->{_trivia}{$channel} = {
-        active   => 1,
-        answer   => $answer_lc,
+        active      => 1,
+        answer      => $answer_lc,
         answer_display => $answer,
-        started  => time(),
-        scores   => ($self->{_trivia}{$channel}{scores} // {}),
+        started     => time(),
+        hint_given  => 0,   # B2/fix: reset hint_given for each new question
+        scores      => ($self->{_trivia}{$channel}{scores} // {}),
     };
     my $opts = join('  ', map { "[$_]" } @choices);
     botPrivmsg($self, $channel, "Trivia ($q->{category}): $question");
@@ -4314,6 +4455,26 @@ sub checkTriviaAnswer {
     $trivia->{active} = 0;
     $trivia->{scores}{$nick} = ($trivia->{scores}{$nick} // 0) + 1;
     # X10: Prometheus counter for correct trivia answers
+    # AA1: persist trivia score in DB (TRIVIA_SCORES table)
+    eval {
+        my $sth_c = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+        if ($sth_c && $sth_c->execute($channel)) {
+            my $rc = $sth_c->fetchrow_hashref; $sth_c->finish;
+            if ($rc) {
+                my $sth_u = $self->{dbh}->prepare(q{
+                    INSERT INTO TRIVIA_SCORES (id_channel, nick, score, last_correct)
+                    VALUES (?, ?, 1, NOW())
+                    ON DUPLICATE KEY UPDATE score = score + 1, last_correct = NOW()
+                });
+                if ($sth_u) { $sth_u->execute($rc->{id_channel}, lc($nick)); $sth_u->finish; }
+            }
+        }
+    };
+    if ($@) {
+        $self->{logger}->log(1, "AA1: TRIVIA_SCORES persist failed: $@");
+    } else {
+        $self->{metrics}->inc('mediabot_trivia_db_saves_total') if $self->{metrics};
+    }
     $self->{metrics}->inc('mediabot_trivia_correct_total') if $self->{metrics};
     my $score = $trivia->{scores}{$nick};
     Mediabot::Helpers::botPrivmsg($self, $channel,
@@ -4334,6 +4495,83 @@ sub checkTriviaAnswer {
             delete $trivia->{multi_current};
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# mbTriviaTop_ctx --- !triviatop [n]  (AA1)
+# Show top trivia scores from DB (persistent across sessions).
+# ---------------------------------------------------------------------------
+sub mbTriviaTop_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $limit   = (@args && $args[0] =~ /^(\d+)$/) ? int($args[0]) : 5;
+    $limit = 1 if $limit < 1; $limit = 15 if $limit > 15;
+    my $sth_c = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+    unless ($sth_c && $sth_c->execute($channel)) {
+        botPrivmsg($self, $channel, 'DB error.'); return;
+    }
+    my $rc = $sth_c->fetchrow_hashref; $sth_c->finish;
+    unless ($rc) { botPrivmsg($self, $channel, 'Channel not found.'); return; }
+    my $sth = $self->{dbh}->prepare(q{
+        SELECT nick, score, last_correct
+        FROM TRIVIA_SCORES
+        WHERE id_channel = ?
+        ORDER BY score DESC LIMIT ?
+    });
+    unless ($sth && $sth->execute($rc->{id_channel}, $limit)) {
+        botPrivmsg($self, $channel, 'DB error.'); return;
+    }
+    my @ranked; my $i = 1;
+    while (my $r = $sth->fetchrow_hashref) {
+        push @ranked, "#${i}. $r->{nick}: $r->{score}";
+        $i++;
+    }
+    $sth->finish;
+    unless (@ranked) {
+        botPrivmsg($self, $channel, 'No trivia scores in DB yet.'); return 1;
+    }
+    botPrivmsg($self, $channel, "Trivia hall of fame ($channel): " . join('  ', @ranked));
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbTriviaReset_ctx --- !triviareset <nick>  (BB10)
+# Reset a nick's trivia score in DB. Requires Master.
+# ---------------------------------------------------------------------------
+sub mbTriviaReset_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    return unless $ctx->require_level('Master');
+    my $target = lc($args[0] // '');
+    unless ($target) {
+        botNotice($self, $nick, 'Syntax: triviareset <nick>'); return;
+    }
+    my $sth_c = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+    unless ($sth_c && $sth_c->execute($channel)) {
+        botNotice($self, $nick, 'DB error.'); return;
+    }
+    my $rc = $sth_c->fetchrow_hashref; $sth_c->finish;
+    unless ($rc) { botNotice($self, $nick, 'Channel not found.'); return; }
+    my $sth = $self->{dbh}->prepare(
+        'DELETE FROM TRIVIA_SCORES WHERE id_channel = ? AND nick = ?'
+    );
+    unless ($sth && $sth->execute($rc->{id_channel}, $target)) {
+        botNotice($self, $nick, 'DB error.'); return;
+    }
+    my $rows = $sth->rows; $sth->finish;
+    if ($rows > 0) {
+        Mediabot::Helpers::botPrivmsg($self, $channel,
+            "$nick reset trivia score for $target.");
+    } else {
+        botNotice($self, $nick, "No trivia score found for '$target' on $channel.");
+    }
+    return 1;
 }
 
 sub mbTriviaStop_ctx {

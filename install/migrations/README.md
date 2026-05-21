@@ -21,9 +21,10 @@ perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
 20260502_user_seen.sql
 mediabot_fun_commands_migration_20260512.sql
 20260515_claude_chanset.sql
+20260521_trivia_scores_note.sql
 ```
 
-The migration set adds channel-ban tracking, user seen/activity tracking, Claude chanset reference data, and schema support for newer fun/user commands, including:
+The migration set adds channel-ban tracking, user seen/activity tracking, Claude chanset reference data, schema support for newer fun/user commands, and persistent trivia scores and user notes, including:
 
 ```text
 CHANNEL_BAN
@@ -31,9 +32,11 @@ USER_SEEN
 REMINDERS
 BOT_ALIAS
 KARMA
+TRIVIA_SCORES
+NOTE
 ```
 
-These tables are used by reminder, alias and karma-related code paths.
+These tables are used by reminder, alias, karma, trivia and note-related code paths.
 
 ## Recommended application method
 
@@ -52,6 +55,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260502_channel_ban.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260502_user_seen.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/mediabot_fun_commands_migration_20260512.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260515_claude_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260521_trivia_scores_note.sql;
 ```
 
 Afterwards:

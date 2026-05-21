@@ -2074,6 +2074,7 @@ sub channelUnban_ctx {
     my $sth;
     my $row;
 
+    # B1/fix: test prepare + execute dans les deux branches
     if ($selector =~ /^\d+$/) {
         $sth = $self->{dbh}->prepare(q{
             SELECT id_channel_ban, mask, ban_level
@@ -2083,7 +2084,11 @@ sub channelUnban_ctx {
               AND active = 1
             LIMIT 1
         });
-        $sth->execute($id_channel, $selector);
+        unless ($sth && $sth->execute($id_channel, $selector)) {
+            _channelban_reply($ctx, 'DB error (by id).');
+            $self->{logger}->log(1, "channelUnban_ctx: execute error: $DBI::errstr");
+            return;
+        }
     }
     else {
         $sth = $self->{dbh}->prepare(q{
@@ -2095,7 +2100,11 @@ sub channelUnban_ctx {
             ORDER BY id_channel_ban DESC
             LIMIT 1
         });
-        $sth->execute($id_channel, $selector);
+        unless ($sth && $sth->execute($id_channel, $selector)) {
+            _channelban_reply($ctx, 'DB error (by mask).');
+            $self->{logger}->log(1, "channelUnban_ctx: execute error: $DBI::errstr");
+            return;
+        }
     }
 
     $row = $sth->fetchrow_hashref if $sth;

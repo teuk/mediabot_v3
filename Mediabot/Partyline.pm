@@ -1229,6 +1229,9 @@ sub _handle_line {
     elsif ($line =~ /^\.purgereminders$/i) {
         $self->_cmd_purgereminders($stream, $id);
     }
+    elsif ($line =~ /^\.logs\s+(.*)/i) {
+        $self->_cmd_chanlog($stream, $id, $1);
+    }
     elsif ($line =~ /^\.nickinfo\s+(\S+)/i) {
         $self->_cmd_nickinfo($stream, $id, $1);
     }
@@ -1511,6 +1514,7 @@ sub _cmd_help {
       . "  .aistats            - show Claude AI usage stats\r\n"
       . "  .top [n]            - top N speakers across all channels (default 5)\r\n"
       . "  .seen <nick>        - last activity for a nick in channel logs\r\n"
+      . "  .logs <#chan> [n]   - show last N lines from CHANNEL_LOG (default 10)\r\n"
       . "  .nickinfo <nick>    - show DB info for a registered nick\r\n"
       . "  .kick <nick> <#chan> [reason] - kick a nick from channel\r\n"
       . "  .flushcooldown [#chan]        - clear karma anti-spam cooldown\r\n"
@@ -2250,21 +2254,51 @@ sub _cmd_channels {
         }
     }
 
-    $stream->write(sprintf("%-20s %-8s %-6s %s\r\n", "Channel", "Status", "Nicks", "Owner"));
-    $stream->write("-" x 60 . "\r\n");
+    # AA3: also fetch Hailo flag and DB user count per channel
+    my (%hailo_flags, %db_users);
+    if ($dbh) {
+        my $sth_h = $dbh->prepare(
+            "SELECT c.name, cs.value FROM CHANNEL c
+              JOIN CHANNEL_SET cs ON cs.id_channel = c.id_channel
+              JOIN CHANSET_LIST cl ON cl.id_chanset_list = cs.id_chanset_list
+              WHERE cl.name = 'Hailo'"
+        );
+        if ($sth_h && $sth_h->execute()) {
+            while (my $r = $sth_h->fetchrow_hashref) {
+                $hailo_flags{$r->{name}} = $r->{value};
+            }
+            $sth_h->finish;
+        }
+        my $sth_u = $dbh->prepare(
+            "SELECT c.name, COUNT(*) AS cnt FROM USER_CHANNEL uc
+              JOIN CHANNEL c ON c.id_channel = uc.id_channel
+              GROUP BY uc.id_channel"
+        );
+        if ($sth_u && $sth_u->execute()) {
+            while (my $r = $sth_u->fetchrow_hashref) {
+                $db_users{$r->{name}} = $r->{cnt};
+            }
+            $sth_u->finish;
+        }
+    }
+
+    $stream->write(sprintf("%-22s %-8s %-5s %-5s %-6s %s\r\n",
+        'Channel', 'Status', 'IRC', 'DB', 'Hailo', 'Owner'));
+    $stream->write("-" x 70 . "\r\n");
 
     for my $name (@names) {
         my $chan_obj   = $chans->{$name} or next;
         my $id_channel = eval { $chan_obj->get_id } // 0;
 
-        # Use same method as .stat to detect joined + nick count
         my @nicks      = eval { $bot->gethChannelsNicksOnChan($name) };
-        my $joined     = (grep { lc($_) eq lc($bot_nick) } @nicks) ? "joined" : "parted";
+        my $joined     = (grep { lc($_) eq lc($bot_nick) } @nicks) ? 'joined' : 'parted';
         my $nick_count = scalar @nicks;
         my $owner      = $owners{$id_channel} // 'none';
+        my $hailo      = exists $hailo_flags{$name} ? ($hailo_flags{$name} ? 'on' : 'off') : '-';
+        my $db_cnt     = $db_users{$name} // 0;
 
-        $stream->write(sprintf("%-20s %-8s %-6d %s\r\n",
-            $name, $joined, $nick_count, $owner));
+        $stream->write(sprintf("%-22s %-8s %-5d %-5d %-6s %s\r\n",
+            $name, $joined, $nick_count, $db_cnt, $hailo, $owner));
     }
 }
 
@@ -3796,6 +3830,35 @@ sub _cmd_die {
 }
 
 
+sub _cmd_chanlog {
+    my ($self, $stream, $id, $args) = @_;
+    unless (defined $args && $args =~ /^(#\S+)(?:\s+(\d+))?/) {
+        $stream->write("Usage: .logs <#channel> [n]  (default n=10, max 50)\r\n"); return;
+    }
+    my ($chan, $n) = ($1, int($2 // 10));
+    $n = 10 if $n < 1; $n = 50 if $n > 50;
+    my $bot = $self->{bot};
+    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+    return unless $dbh;
+    my $sth = $dbh->prepare(q{
+        SELECT cl.ts, cl.nick, cl.text FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.text IS NOT NULL
+        ORDER BY cl.id DESC LIMIT ?
+    });
+    unless ($sth && $sth->execute($chan, $n)) {
+        $stream->write("DB error.\r\n"); return;
+    }
+    my @rows;
+    while (my $r = $sth->fetchrow_hashref) { unshift @rows, $r; }
+    $sth->finish;
+    unless (@rows) { $stream->write("No logs found for $chan.\r\n"); return; }
+    $stream->write("Last " . scalar(@rows) . " lines on $chan:\r\n");
+    for my $r (@rows) {
+        my $ts = substr($r->{ts} // '', 11, 5);  # HH:MM
+        $stream->write(sprintf("[%s] <%s> %s\r\n", $ts, $r->{nick}, $r->{text}));
+    }
+}
 sub _cmd_nickinfo {
     my ($self, $stream, $id, $args) = @_;
     unless (defined $args && $args =~ /^(\S+)$/) {
