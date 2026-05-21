@@ -1187,11 +1187,17 @@ sub _handle_line {
     elsif ($line =~ /^\.kick\s+(.*)/i) {
         $self->_cmd_kick($stream, $id, $1);
     }
+    elsif ($line =~ /^\.floodstatus$/i) {
+        $self->_cmd_floodstatus($stream, $id, undef);
+    }
     elsif ($line =~ /^\.flushcooldown(?:\s+(.*?))?$/i) {
         $self->_cmd_flushcooldown($stream, $id, $1);
     }
     elsif ($line =~ /^\.kick\s+(.*)/i) {
         $self->_cmd_kick($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.floodstatus$/i) {
+        $self->_cmd_floodstatus($stream, $id, undef);
     }
     elsif ($line =~ /^\.flushcooldown(?:\s+(.*?))?$/i) {
         $self->_cmd_flushcooldown($stream, $id, $1);
@@ -1517,6 +1523,7 @@ sub _cmd_help {
       . "  .logs <#chan> [n]   - show last N lines from CHANNEL_LOG (default 10)\r\n"
       . "  .nickinfo <nick>    - show DB info for a registered nick\r\n"
       . "  .kick <nick> <#chan> [reason] - kick a nick from channel\r\n"
+      . "  .floodstatus                 - show live antiflood state (AF1/AF3/AF4)\r\n"
       . "  .flushcooldown [#chan]        - clear karma anti-spam cooldown\r\n"
       . "  .dbstats            - show DB connection and query stats\r\n"
       . "  .remind <nick> <#chan> <msg> - set a reminder from Partyline\r\n"
@@ -3943,6 +3950,60 @@ sub _cmd_kick {
     eval { $bot->{irc}->send_message('KICK', undef, $chan, $target, $reason) };
     if ($@) { $stream->write("Error: $@\r\n"); }
     else    { $stream->write("Kicked $target from $chan ($reason)\r\n"); }
+}
+
+sub _cmd_floodstatus {
+    my ($self, $stream, $id, $args) = @_;
+    my $bot = $self->{bot};
+    my $now = time();
+
+    # AF1: checkAntiFlood in-memory state
+    $stream->write("--- Channel antiflood (AF1 — output guard) ---\r\n");
+    my $af = $bot->{_af} // {};
+    if (%$af) {
+        for my $chan (sort keys %$af) {
+            my $st = $af->{$chan};
+            my $sil = $st->{silenced_until} // 0;
+            my $status = ($sil && $now < $sil)
+                ? sprintf('SILENCED (%ds remaining)', $sil - $now)
+                : sprintf('%d msgs in window', $st->{nbmsg} // 0);
+            $stream->write(sprintf("  %-22s %s\r\n", $chan, $status));
+        }
+    } else {
+        $stream->write("  (no active output flood state)\r\n");
+    }
+
+    # AF4: checkChanFlood in-memory state
+    $stream->write("--- Channel flood (AF4 — input guard) ---\r\n");
+    my $cf = $bot->{_chan_flood} // {};
+    if (%$cf) {
+        for my $chan (sort keys %$cf) {
+            my $st = $cf->{$chan};
+            my $sil = $st->{silenced_until} // 0;
+            my $cnt = scalar @{ $st->{hits} // [] };
+            my $status = ($sil && $now < $sil)
+                ? sprintf('SILENCED (%ds remaining)', $sil - $now)
+                : sprintf('%d cmds in window', $cnt);
+            $stream->write(sprintf("  %-22s %s\r\n", $chan, $status));
+        }
+    } else {
+        $stream->write("  (no active input flood state)\r\n");
+    }
+
+    # AF3: per-nick flood state
+    $stream->write("--- Per-nick flood (AF3) ---\r\n");
+    my $nf = $bot->{_nick_flood} // {};
+    my @throttled = sort grep {
+        scalar @{ $nf->{$_}{hits} // [] } >= 3
+    } keys %$nf;
+    if (@throttled) {
+        for my $nick (@throttled) {
+            my $cnt = scalar @{ $nf->{$nick}{hits} // [] };
+            $stream->write(sprintf("  %-20s %d cmds in window\r\n", $nick, $cnt));
+        }
+    } else {
+        $stream->write("  (no active nick flood state)\r\n");
+    }
 }
 
 sub _cmd_flushcooldown {

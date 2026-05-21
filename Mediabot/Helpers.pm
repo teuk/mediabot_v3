@@ -52,6 +52,7 @@ our @EXPORT = qw(
     make_password_hash
     checkAntiFlood
     checkNickFlood
+    checkChanFlood
     getIdChannelSet
     getIdChansetList
     evalAction
@@ -1114,41 +1115,142 @@ sub versionCheck {
 # Max 5 commands per 5 seconds, independent of channel AntiFlood.
 # Returns 1 if the nick is flooding (caller should silently drop), 0 if ok.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# checkChanFlood($self, $channel) → 1 si le canal est en flood, 0 sinon  (AF4)
+#
+# Rate limiter GLOBAL par canal — compte toutes les commandes bot reçues
+# sur ce canal, toutes sources confondues. Purement en mémoire, zéro DB.
+#
+# Paramètres (hardcodés, ajustables sans schéma) :
+#   WINDOW    : 10s  — fenêtre glissante
+#   MAX_CMDS  : 8    — commandes max toutes sources dans la fenêtre
+#   SILENCE   : 30s  — durée du silencing du canal en cas de flood
+#   NOTIFY    : 60s  — délai min entre deux notifications console
+#
+# Cas d'usage : #quebec — plusieurs nicks invoquent le bot en rafale,
+# ce qui déclenche un burst de réponses. Ce guard bloque les ENTRÉES
+# avant même que botPrivmsg soit appelé.
+# ---------------------------------------------------------------------------
+sub _af_conf_int {
+    my ($self, $key, $default, $min, $max) = @_;
+
+    my $value = eval { $self->{conf}->get("antiflood.$key") };
+
+    $value = $default
+        if !defined $value || $value eq '' || $value !~ /^\d+$/;
+
+    $value = int($value);
+
+    $value = $min if defined $min && $value < $min;
+    $value = $max if defined $max && $value > $max;
+
+    return $value;
+}
+
+sub checkChanFlood {
+    my ($self, $channel) = @_;
+    return 0 unless defined $channel && $channel =~ /^#/;
+
+    my $now       = time();
+    my $window    = _af_conf_int($self, 'CHANFLOOD_WINDOW', 10, 1, 3600);
+    my $max_cmds  = _af_conf_int($self, 'CHANFLOOD_MAX_COMMANDS', 8, 1, 1000);
+    my $silence   = _af_conf_int($self, 'CHANFLOOD_SILENCE', 30, 1, 86400);
+    my $notify_cd = _af_conf_int($self, 'CHANFLOOD_NOTIFY_COOLDOWN', 60, 1, 86400);
+
+    my $st = $self->{_chan_flood}{$channel} //= {
+        hits          => [],
+        silenced_until => 0,
+        notified_at   => 0,
+    };
+
+    # Silenced?
+    if ($st->{silenced_until} && $now < $st->{silenced_until}) {
+        return 1;
+    }
+    # Silence lifted
+    if ($st->{silenced_until} && $now >= $st->{silenced_until}) {
+        $self->{logger}->log(1, "checkChanFlood/AF4: silence lifted on $channel");
+        $st->{silenced_until} = 0;
+        $st->{hits}           = [];
+    }
+
+    # Sliding window: push + prune
+    push @{ $st->{hits} }, $now;
+    @{ $st->{hits} } = grep { ($now - $_) < $window } @{ $st->{hits} };
+
+    my $count = scalar @{ $st->{hits} };
+
+    if ($count > $max_cmds) {
+        $st->{silenced_until} = $now + $silence;
+        $self->{logger}->log(1,
+            "checkChanFlood/AF4: $channel — $count cmds in last ${window}s "
+            . "(max $max_cmds) — silencing ${silence}s");
+        if (($now - $st->{notified_at}) >= $notify_cd) {
+            $st->{notified_at} = $now;
+            noticeConsoleChan($self,
+                "Chan flood detected on $channel ($count cmds/${window}s) "
+                . "— silencing ${silence}s (AF4)");
+        }
+        $self->{metrics}->inc('mediabot_chanflood_blocks_total')
+            if $self->{metrics};
+        return 1;
+    }
+
+    return 0;
+}
+
+
 sub checkNickFlood {
-    my ($self, $nick) = @_;
+    # AF2: notify user once per throttle period (not silently drop)
+    # AF3: sliding window (ring buffer of timestamps) instead of fixed window
+    my ($self, $nick, $channel) = @_;
     return 0 unless defined $nick && $nick ne '';
 
     my $now     = time();
-    my $window  = 5;     # seconds
-    my $max_cmd = 5;     # commands per window
-    my $ttl     = 60;    # cleanup stale nick flood states
+    my $window  = _af_conf_int($self, 'NICKFLOOD_WINDOW', 5, 1, 3600);
+    my $max_cmd = _af_conf_int($self, 'NICKFLOOD_MAX_COMMANDS', 5, 1, 1000);
+    my $ttl     = _af_conf_int($self, 'NICKFLOOD_STATE_TTL', 120, 10, 86400);
+    my $notify_cooldown = _af_conf_int($self, 'NICKFLOOD_NOTIFY_COOLDOWN', 30, 1, 86400);
 
     my $nick_key = lc($nick);
 
     $self->{_nick_flood} //= {};
 
-    # Cheap periodic cleanup, at most once per TTL.
-    if (!defined($self->{_nick_flood_last_cleanup}) || ($now - $self->{_nick_flood_last_cleanup}) >= $ttl) {
+    # Cheap periodic cleanup
+    if (!defined($self->{_nick_flood_last_cleanup})
+            || ($now - $self->{_nick_flood_last_cleanup}) >= $ttl) {
         for my $k (keys %{ $self->{_nick_flood} }) {
-            my $ts = $self->{_nick_flood}{$k}{ts} // 0;
-            delete $self->{_nick_flood}{$k} if ($now - $ts) > $ttl;
+            my $st = $self->{_nick_flood}{$k};
+            my $last = @{ $st->{hits} // [] } ? $st->{hits}[-1] : 0;
+            delete $self->{_nick_flood}{$k} if ($now - $last) > $ttl;
         }
         $self->{_nick_flood_last_cleanup} = $now;
     }
 
-    my $state = $self->{_nick_flood}{$nick_key} //= { ts => $now, count => 0 };
+    my $state = $self->{_nick_flood}{$nick_key} //= { hits => [], notified_at => 0 };
 
-    if ($now - $state->{ts} >= $window) {
-        # New window: reset
-        $state->{ts}    = $now;
-        $state->{count} = 1;
-        return 0;
-    }
+    # AF3: sliding window — push current ts, drop entries outside the window
+    push @{ $state->{hits} }, $now;
+    @{ $state->{hits} } = grep { ($now - $_) < $window } @{ $state->{hits} };
 
-    $state->{count}++;
-    if ($state->{count} > $max_cmd) {
-        $self->{logger}->log(3, "NickFlood: $nick_key exceeded $max_cmd cmds in ${window}s");
-        return 1;  # flooding
+    my $count = scalar @{ $state->{hits} };
+
+    if ($count > $max_cmd) {
+        $self->{logger}->log(3,
+            "NickFlood/AF3: $nick_key — $count cmds in last ${window}s (max $max_cmd)");
+        $self->{metrics}->inc('mediabot_nickflood_blocks_total')
+            if $self->{metrics};
+
+        # AF2: notify the user — at most once per notify_cooldown
+        if (defined $channel
+                && ($now - ($state->{notified_at} // 0)) >= $notify_cooldown) {
+            $state->{notified_at} = $now;
+            my $wait = $window - ($now - $state->{hits}[0]);
+            $wait = 1 if $wait < 1;
+            botNotice($self, $nick,
+                "You are sending commands too fast. Please wait ${wait}s.");
+        }
+        return 1;
     }
 
     return 0;
@@ -1157,132 +1259,117 @@ sub checkNickFlood {
 sub checkAntiFlood {
 	my ($self, $sChannel) = @_;
 
-    # A7: periodic cleanup of stale flood state for inactive/parted channels
+    # AF1: in-memory antiflood — zero DB queries per outgoing message.
+    # DB params (nbmsg_max, duration, timetowait) are cached for 60s.
+    # Flood counters live entirely in $self->{_af}{$sChannel}.
+
+    my $now = time();
+
+    # --- Params cache ---
+    # CHANNEL_FLOOD values remain DB-backed, but the refresh TTL is config-backed.
+    my $params_ttl = _af_conf_int($self, 'OUTPUT_PARAMS_CACHE_TTL', 60, 5, 86400);
+    my $pc = $self->{_af_params}{$sChannel} // {};
+    if (!$pc->{ts} || ($now - $pc->{ts}) >= $params_ttl) {
+        my $channel_obj = $self->{channels}{$sChannel};
+        unless (defined $channel_obj) {
+            $self->{logger}->log(1, "checkAntiFlood() unknown channel: $sChannel");
+            return 0;
+        }
+        my $id_channel = $channel_obj->get_id;
+        my $sth = $self->{dbh}->prepare(
+            "SELECT nbmsg_max, duration, timetowait FROM CHANNEL_FLOOD WHERE id_channel = ?"
+        );
+        if ($sth && $sth->execute($id_channel)) {
+            my $ref = $sth->fetchrow_hashref;
+            $sth->finish;
+            if ($ref) {
+                $self->{_af_params}{$sChannel} = {
+                    ts          => $now,
+                    nbmsg_max   => $ref->{nbmsg_max}  // 5,
+                    duration    => $ref->{duration}    // 30,
+                    timetowait  => $ref->{timetowait}  // 300,
+                    id_channel  => $id_channel,
+                };
+                $pc = $self->{_af_params}{$sChannel};
+            } else {
+                # No CHANNEL_FLOOD row — AntiFlood not configured, allow all
+                return 0;
+            }
+        } else {
+            $self->{logger}->log(1, "checkAntiFlood() DB error: $DBI::errstr");
+            return 0;
+        }
+    }
+
+    my $nbmsg_max  = $pc->{nbmsg_max}  // 5;
+    my $duration   = $pc->{duration}   // 30;
+    my $timetowait = $pc->{timetowait} // 300;
+
+    # --- In-memory flood state ---
+    my $st = $self->{_af}{$sChannel} //= { nbmsg => 0, first => $now, silenced_until => 0 };
+
+    # Silenced? Check expiry
+    if ($st->{silenced_until} && $now < $st->{silenced_until}) {
+        $self->{logger}->log(3,
+            "checkAntiFlood() silenced $sChannel until "
+            . ($st->{silenced_until} - $now) . "s remaining");
+        return 1;
+    }
+
+    # Silence lifted?
+    if ($st->{silenced_until} && $now >= $st->{silenced_until}) {
+        $self->{logger}->log(1, "checkAntiFlood() silence lifted on $sChannel");
+        $st->{nbmsg}          = 0;
+        $st->{first}          = $now;
+        $st->{silenced_until} = 0;
+    }
+
+    # Window expired? Reset
+    if (($now - $st->{first}) >= $duration) {
+        $st->{nbmsg} = 0;
+        $st->{first} = $now;
+    }
+
+    $st->{nbmsg}++;
+
+    if ($st->{nbmsg} > $nbmsg_max) {
+        unless ($st->{silenced_until}) {
+            $st->{silenced_until} = $now + $timetowait;
+            $self->{logger}->log(1,
+                "checkAntiFlood() AF1: flooding on $sChannel — "
+                . "$st->{nbmsg} msgs in " . ($now - $st->{first})
+                . "s (max $nbmsg_max/$duration s) — silencing ${timetowait}s");
+            noticeConsoleChan($self,
+                "Anti-flood activated on $sChannel ($st->{nbmsg} msgs in "
+                . ($now - $st->{first}) . "s) — silenced for ${timetowait}s");
+            $self->{metrics}->inc('mediabot_antiflood_blocks_total')
+                if $self->{metrics};
+        }
+        return 1;
+    }
+
+    # A7: periodic cleanup of stale flood state
     {
-        my $now = time();
-        if (!$self->{_antiflood_cleanup} || ($now - $self->{_antiflood_cleanup}) >= 300) {
-            for my $chan (keys %{ $self->{hLastMessage} // {} }) {
-                my $ts = $self->{hLastMessage}{$chan}{ts} // 0;
-                delete $self->{hLastMessage}{$chan} if ($now - $ts) > 300;
+        my $state_ttl       = _af_conf_int($self, 'OUTPUT_STATE_TTL', 300, 30, 86400);
+        my $params_state_ttl = _af_conf_int($self, 'OUTPUT_PARAMS_STATE_TTL', 600, 30, 86400);
+
+        if (!$self->{_antiflood_cleanup} || ($now - $self->{_antiflood_cleanup}) >= $state_ttl) {
+            for my $chan (keys %{ $self->{_af} // {} }) {
+                my $s = $self->{_af}{$chan};
+                delete $self->{_af}{$chan}
+                    if (!$s->{silenced_until} && ($now - ($s->{first} // 0)) > $state_ttl);
+            }
+            # Also clean params cache
+            for my $chan (keys %{ $self->{_af_params} // {} }) {
+                delete $self->{_af_params}{$chan}
+                    if ($now - ($self->{_af_params}{$chan}{ts} // 0)) > $params_state_ttl;
             }
             $self->{_antiflood_cleanup} = $now;
         }
     }
 
-
-	my $channel_obj = $self->{channels}{$sChannel};
-
-	unless (defined $channel_obj) {
-		$self->{logger}->log(1, "checkAntiFlood() unknown channel: $sChannel");
-		return 0;
-	}
-
-	my $id_channel = $channel_obj->get_id;
-	my $sQuery = "SELECT duration, first, latest, nbmsg, nbmsg_max, notification, timetowait FROM CHANNEL_FLOOD WHERE id_channel = ?";
-	my $sth = $self->{dbh}->prepare($sQuery);
-
-	unless ($sth->execute($id_channel)) {
-		$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
-		# B26h/fix: execute failed — cursor not open
-		return 0;
-	}
-
-	if (my $ref = $sth->fetchrow_hashref()) {
-		my $nbmsg       = $ref->{'nbmsg'};
-		my $nbmsg_max   = $ref->{'nbmsg_max'};
-		my $duration    = $ref->{'duration'};
-		my $first       = $ref->{'first'};
-		my $latest      = $ref->{'latest'};
-		my $timetowait  = $ref->{'timetowait'};
-		my $notification = $ref->{'notification'};
-		my $currentTs   = time;
-
-		my $deltaDb = ($latest - $first);
-		my $delta   = ($currentTs - $first);
-
-		if ($nbmsg == 0) {
-			$nbmsg++;
-			$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?, first=?, latest=? WHERE id_channel=?";
-			my $sth = $self->{dbh}->prepare($sQuery);
-			unless ($sth->execute($nbmsg, $currentTs, $currentTs, $id_channel)) {
-				$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
-			} else {
-				my $sLatest = strftime("%Y-%m-%d %H-%M-%S", localtime($currentTs));
-				$self->{logger}->log(4, "checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
-				return 0;
-			}
-			$sth->finish if $sth;
-		} else {
-			if ($deltaDb <= $duration) {
-				if ($nbmsg < $nbmsg_max) {
-					$nbmsg++;
-					$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?, latest=? WHERE id_channel=?";
-					my $sth = $self->{dbh}->prepare($sQuery);
-					unless ($sth->execute($nbmsg, $currentTs, $id_channel)) {
-						$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
-					} else {
-						my $sLatest = strftime("%Y-%m-%d %H-%M-%S", localtime($currentTs));
-						$self->{logger}->log(4, "checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max set latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds");
-						return 0;
-					}
-					$sth->finish if $sth;
-				} else {
-					my $sLatest = strftime("%Y-%m-%d %H-%M-%S", localtime($currentTs));
-					my $endTs = $latest + $timetowait;
-
-					if ($currentTs > $endTs) {
-						$nbmsg = 1;
-						$self->{logger}->log(1, "checkAntiFlood() End of antiflood for channel $sChannel");
-						$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?, first=?, latest=?, notification=? WHERE id_channel=?";
-						my $sth = $self->{dbh}->prepare($sQuery);
-						unless ($sth->execute($nbmsg, $currentTs, $currentTs, 0, $id_channel)) {
-							$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
-						} else {
-							my $sLatest = strftime("%Y-%m-%d %H-%M-%S", localtime($currentTs));
-							$self->{logger}->log(4, "checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
-							return 0;
-						}
-						$sth->finish if $sth;
-					} else {
-						if (!$notification) {
-							$sQuery = "UPDATE CHANNEL_FLOOD SET notification=? WHERE id_channel=?";
-							my $sth = $self->{dbh}->prepare($sQuery);
-							unless ($sth->execute(1, $id_channel)) {
-								$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
-							} else {
-								$self->{logger}->log(4, "checkAntiFlood() Antiflood notification set to DB for $sChannel");
-								noticeConsoleChan($self, "Anti flood activated on channel $sChannel $nbmsg messages in less than $duration seconds, waiting $timetowait seconds to deactivate");
-							}
-							$sth->finish if $sth;
-						}
-						$self->{logger}->log(4, "checkAntiFlood() msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max latest current : $sLatest ($currentTs) in db, deltaDb = $deltaDb seconds endTs = $endTs " . ($endTs - $currentTs) . " seconds left");
-						$self->{logger}->log(1, "checkAntiFlood() Antiflood is active for channel $sChannel wait " . ($endTs - $currentTs) . " seconds");
-						return 1;
-					}
-				}
-			} else {
-				$nbmsg = 1;
-				$self->{logger}->log(1, "checkAntiFlood() End of antiflood for channel $sChannel");
-				$sQuery = "UPDATE CHANNEL_FLOOD SET nbmsg=?, first=?, latest=?, notification=? WHERE id_channel=?";
-				my $sth = $self->{dbh}->prepare($sQuery);
-				unless ($sth->execute($nbmsg, $currentTs, $currentTs, 0, $id_channel)) {
-					$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
-				} else {
-					my $sLatest = strftime("%Y-%m-%d %H-%M-%S", localtime($currentTs));
-					$self->{logger}->log(4, "checkAntiFlood() First msg nbmsg : $nbmsg nbmsg_max : $nbmsg_max first and latest current : $sLatest ($currentTs)");
-					return 0;
-				}
-				$sth->finish if $sth;
-			}
-		}
-	} else {
-		$self->{logger}->log(1, "checkAntiFlood() could not find record in CHANNEL_FLOOD for channel $sChannel (id_channel : $id_channel)");
-	}
-
-	$sth->finish;
-	return 0;
+    return 0;
 }
-
 # Set or display anti-flood parameters for a given channel (Context version)
 sub leet {
     my ($maybe_self, @rest) = @_;

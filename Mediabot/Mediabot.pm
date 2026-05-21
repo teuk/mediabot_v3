@@ -1053,8 +1053,10 @@ sub joinChannels {
 sub mbCommandPublic {
     my ($self, $message, $sChannel, $sNick, $botNickTriggered, $sCommand, @tArgs) = @_;
 
-    # Per-nick flood protection — silently drop if flooding
-    return if checkNickFlood($self, $sNick);
+    # AF4: global per-channel rate limit — all nicks combined
+    return if checkChanFlood($self, $sChannel);
+    # Per-nick flood protection (AF2: notify, AF3: sliding window)
+    return if checkNickFlood($self, $sNick, $sChannel);
 
     # Normalize command once
     my $cmd = lc $sCommand;
@@ -1926,8 +1928,10 @@ sub mbHandleNickTriggered {
 sub mbCommandPrivate {
     my ($self, $message, $sNick, $sCommand, @tArgs) = @_;
 
-    # Per-nick flood protection — silently drop if flooding
-    return if checkNickFlood($self, $sNick);
+    # Antiflood note:
+    # AF4/checkChanFlood is intentionally public-channel only.
+    # Private commands have no channel context here and include login/admin
+    # workflows that should not be silently blocked by a channel flood guard.
 
     # Normalize command - q and Q are the same
     $sCommand = lc $sCommand;

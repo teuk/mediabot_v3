@@ -68,6 +68,10 @@ sub new {
     $self->_declare('mediabot_db_query_errors_total',  'counter', 'Total database query errors');
     $self->_declare('mediabot_timers_current',         'gauge',   'Current number of active timers');
     $self->_declare('mediabot_channels_managed',       'gauge',   'Current number of managed channels');
+    # AF: antiflood metrics
+    $self->_declare('mediabot_antiflood_blocks_total',  'counter', 'Bot output silenced by checkAntiFlood (AF1)');
+    $self->_declare('mediabot_nickflood_blocks_total',  'counter', 'Commands dropped by per-nick flood guard (AF3)');
+    $self->_declare('mediabot_chanflood_blocks_total',  'counter', 'Commands dropped by per-channel flood guard (AF4)');
     $self->_declare('mediabot_users_known',            'gauge',   'Current number of known users');
 
     # AA6: game and interaction metrics
