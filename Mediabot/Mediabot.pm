@@ -2445,6 +2445,22 @@ sub _handle_ctcp_chat_request {
 # Validates the requesting user (must be known in DB with level <= 1),
 # then delegates the actual TCP connection to Partyline->accept_dcc_chat().
 # ---------------------------------------------------------------------------
+
+sub _dcc_token_hint {
+    my ($token) = @_;
+
+    return 'none' unless defined $token && $token ne '';
+
+    my $s = "$token";
+    return 'redacted' if length($s) <= 4;
+
+    my $prefix = substr($s, 0, 2);
+    my $suffix = substr($s, -2);
+
+    return $prefix . '...' . $suffix;
+}
+
+
 sub _handle_dcc_chat_request {
     my ($self, $message, $nick, $ip_int, $port, $token) = @_;
 
@@ -2486,9 +2502,10 @@ sub _handle_dcc_chat_request {
 
     # ── Delegate to Partyline ────────────────────────────────────────────────
     if ($is_passive) {
+        my $token_hint = _dcc_token_hint($token);
         $logger->log(2, sprintf(
             "DCC CHAT from %s (level=%s): passive mode - token=%s",
-            $nick, $row->{description}, $token
+            $nick, $row->{description}, $token_hint
         ));
         $self->{partyline}->accept_dcc_chat_passive($nick, $token);
     }

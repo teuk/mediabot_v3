@@ -638,7 +638,7 @@ sub botNotice {
 sub joinChannel {
 	my ($self,$channel,$key) = @_;
 	if (defined($key) && ($key ne "")) {
-		$self->{logger}->log(1,"Trying to join $channel with key $key");
+		$self->{logger}->log(1,"Trying to join $channel with key [redacted]");
 		$self->{irc}->send_message("JOIN", undef, ($channel,$key));
 	}
 	else {

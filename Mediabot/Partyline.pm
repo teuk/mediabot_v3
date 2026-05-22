@@ -555,6 +555,22 @@ sub offer_dcc_chat {
 #   3. Wait for the client to connect (60s timeout)
 #   4. On connection: close the listener, init DCC session normally
 # ---------------------------------------------------------------------------
+
+sub _dcc_token_hint {
+    my ($token) = @_;
+
+    return 'none' unless defined $token && $token ne '';
+
+    my $s = "$token";
+    return 'redacted' if length($s) <= 4;
+
+    my $prefix = substr($s, 0, 2);
+    my $suffix = substr($s, -2);
+
+    return $prefix . '...' . $suffix;
+}
+
+
 sub accept_dcc_chat_passive {
     my ($self, $nick, $token) = @_;
 
@@ -573,7 +589,7 @@ sub accept_dcc_chat_passive {
     # Convert dotted-quad to 32-bit int for the CTCP reply
     my $ip_int = unpack('N', inet_aton($public_ip));
 
-    $logger->log(2, "DCC CHAT passive from $nick: listening on $public_ip token=$token");
+    $logger->log(2, "DCC CHAT passive from $nick: listening on $public_ip token=" . _dcc_token_hint($token));
 
     # ── Open ephemeral listener ───────────────────────────────────────────────
     if (my $pending = $self->_dcc_pending_offer_for_nick($nick)) {
@@ -604,7 +620,7 @@ sub accept_dcc_chat_passive {
             $self->_dcc_offer_mark_connected('passive_chat', $nick);
             $self->_dcc_offer_remove('passive_chat', $nick);
 
-            $logger->log(2, "DCC CHAT passive: $nick connected (token=$token)");
+            $logger->log(2, "DCC CHAT passive: $nick connected (token=" . _dcc_token_hint($token) . ")");
 
             # Stop accepting new connections
             eval { $loop->remove($listener) };
@@ -625,7 +641,7 @@ sub accept_dcc_chat_passive {
             my ($listener) = @_;
             $listen_port = $listener->read_handle->sockport;
             $self->_dcc_offer_register('passive_chat', $nick, $listen_port, $public_ip, $listener);
-            $logger->log(2, "DCC CHAT passive: listening on port $listen_port for $nick (token=$token)");
+            $logger->log(2, "DCC CHAT passive: listening on port $listen_port for $nick (token=" . _dcc_token_hint($token) . ")");
 
             # ── Send CTCP reply to client ─────────────────────────────────
             my $ctcp = "\001DCC CHAT chat $ip_int $listen_port $token\001";
@@ -645,7 +661,7 @@ sub accept_dcc_chat_passive {
         delay     => 60,
         on_expire => sub {
             return if $connected;
-            $logger->log(2, "DCC CHAT passive: timeout waiting for $nick (token=$token)");
+            $logger->log(2, "DCC CHAT passive: timeout waiting for $nick (token=" . _dcc_token_hint($token) . ")");
             eval { $loop->remove($listener) };
         },
     );
@@ -3504,8 +3520,8 @@ sub _cmd_join {
         eval { $bot->refresh_channel_nicklist($chan) };
     }
 
-    $bot->{logger}->log(2, "Partyline: $nick requested JOIN $chan" . ($key ? " (key: $key)" : ""));
-    $stream->write("Joining $chan" . ($key ? " with key $key" : "") . "...\r\n");
+    $bot->{logger}->log(2, "Partyline: $nick requested JOIN $chan" . ($key ? " (key: [redacted])" : ""));
+    $stream->write("Joining $chan" . ($key ? " with key [redacted]" : "") . "...\r\n");
 }
 
 # ---------------------------------------------------------------------------
