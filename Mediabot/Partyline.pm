@@ -1206,27 +1206,6 @@ sub _handle_line {
     elsif ($line =~ /^\.flushcooldown(?:\s+(.*?))?$/i) {
         $self->_cmd_flushcooldown($stream, $id, $1);
     }
-    elsif ($line =~ /^\.kick\s+(.*)/i) {
-        $self->_cmd_kick($stream, $id, $1);
-    }
-    elsif ($line =~ /^\.unmute\s+(.*)/i) {
-        $self->_cmd_unmute($stream, $id, $1);
-    }
-    elsif ($line =~ /^\.floodset\s+(.*)/i) {
-        $self->_cmd_floodset($stream, $id, $1);
-    }
-    elsif ($line =~ /^\.cmdcooldown\s+(.*)/i) {
-        $self->_cmd_cmdcooldown($stream, $id, $1);
-    }
-    elsif ($line =~ /^\.netsplit$/i) {
-        $self->_cmd_netsplit($stream, $id, undef);
-    }
-    elsif ($line =~ /^\.floodstatus$/i) {
-        $self->_cmd_floodstatus($stream, $id, undef);
-    }
-    elsif ($line =~ /^\.flushcooldown(?:\s+(.*?))?$/i) {
-        $self->_cmd_flushcooldown($stream, $id, $1);
-    }
     elsif ($line =~ /^\.dbstats$/i) {
         $self->_cmd_dbstats($stream, $id);
     }

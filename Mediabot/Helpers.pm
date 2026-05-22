@@ -54,7 +54,6 @@ our @EXPORT = qw(
     checkNickFlood
     checkChanFlood
     checkCmdCooldown
-    checkCmdCooldown
     getIdChannelSet
     getIdChansetList
     evalAction

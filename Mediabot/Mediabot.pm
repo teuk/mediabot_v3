@@ -25,6 +25,7 @@ use Date::Parse;
 use DBI;
 use Switch;
 use IO::Async::Timer::Periodic;
+use IO::Async::Timer::Countdown;
 use String::IRC;
 use POSIX qw(setsid strftime);
 use DateTime;
@@ -1028,13 +1029,40 @@ sub getMessageNickIdentHost {
 sub joinChannels {
     my ($self) = @_;
 
-    my $i = 0;
-    foreach my $chan (values %{ $self->{channels} }) {
-        next unless $chan->get_auto_join;
-        next if ($chan->get_description // '') eq 'console';
+    my @channels = sort {
+        (($a->get_name // '') cmp ($b->get_name // ''))
+    } grep {
+        $_->get_auto_join && (($_->get_description // '') ne 'console')
+    } values %{ $self->{channels} // {} };
 
-        $i++ == 0 and $self->{logger}->log( 0, "Auto join channels");
+    if (!@channels) {
+        $self->{logger}->log(0, "No channel to auto join");
+        return;
+    }
 
+    $self->{logger}->log(0, "Auto join channels");
+
+    my $loop = eval { $self->getLoop } // undef;
+
+    # NS3: avoid a JOIN burst after reconnect/netsplit.
+    # Keep timer refs so Countdown timers are not garbage-collected.
+    for my $old (@{ delete $self->{_join_timers} // [] }) {
+        eval { $old->stop if $old->can('stop') };
+        eval { $loop->remove($old) if $loop };
+    }
+    for my $old (@{ delete $self->{_join_who_timers} // [] }) {
+        eval { $old->stop if $old->can('stop') };
+        eval { $loop->remove($old) if $loop };
+    }
+
+    $self->{_join_timers}     = [];
+    $self->{_join_who_timers} = [];
+
+    my $join_step = 1.5;
+    my $who_delay = 3;
+
+    for my $idx (0 .. $#channels) {
+        my $chan = $channels[$idx];
         my $name = $chan->get_name;
         my $key  = $chan->get_key;
 
@@ -1042,11 +1070,60 @@ sub joinChannels {
             $self->{metrics}->set('mediabot_channel_autojoin', 1, { channel => $name });
         }
 
-        joinChannel($self, $name, $key);
-        $self->{logger}->log( 2, "Joining channel $name");
-    }
+        my $do_join = sub {
+            return unless $self->{irc};
 
-    $i == 0 and $self->{logger}->log( 0, "No channel to auto join");
+            joinChannel($self, $name, $key);
+            $self->{logger}->log(2, "NS3: joining channel $name (throttled)");
+
+            $self->{metrics}->inc('mediabot_netsplit_rejoins_total', { channel => $name })
+                if $self->{metrics};
+
+            # NS4: refresh nicklist quickly after JOIN instead of waiting for
+            # the periodic nicklist refresh interval.
+            if ($loop) {
+                my $who_timer;
+                $who_timer = IO::Async::Timer::Countdown->new(
+                    delay => $who_delay,
+                    on_expire => sub {
+                        eval {
+                            $self->{irc}->send_message('WHO', undef, $name)
+                                if $self->{irc} && $self->{irc}->is_connected;
+                        };
+                        $self->{logger}->log(4, "NS4: WHO requested for $name after JOIN")
+                            if $self->{logger};
+                        @{ $self->{_join_who_timers} // [] } =
+                            grep { $_ != $who_timer } @{ $self->{_join_who_timers} // [] };
+                    },
+                );
+                push @{ $self->{_join_who_timers} }, $who_timer;
+                $loop->add($who_timer);
+                $who_timer->start;
+            }
+        };
+
+        my $delay = $idx * $join_step;
+
+        if ($loop && $delay > 0) {
+            my $timer;
+            $timer = IO::Async::Timer::Countdown->new(
+                delay => $delay,
+                on_expire => sub {
+                    $do_join->();
+                    @{ $self->{_join_timers} // [] } =
+                        grep { $_ != $timer } @{ $self->{_join_timers} // [] };
+                },
+            );
+            push @{ $self->{_join_timers} }, $timer;
+            $loop->add($timer);
+            $timer->start;
+
+            $self->{logger}->log(2, sprintf("NS3: scheduled JOIN %s in %.1fs", $name, $delay));
+        }
+        else {
+            $do_join->();
+        }
+    }
 }
 
 # Handle public commands
@@ -1211,7 +1288,6 @@ sub mbCommandPublic {
         karmatop     => sub { mbKarmaTop_ctx($ctx) },
         karmareset   => sub { mbKarmaReset_ctx($ctx) },
         karmadiff    => sub { mbKarmaDiff_ctx($ctx) },
-        seen         => sub { mbSeen_ctx($ctx) },
         karmgraph    => sub { mbKarmaGraph_ctx($ctx) },
         triviastop   => sub { mbTriviaStop_ctx($ctx) },
         karmainfo    => sub { mbKarmaInfo_ctx($ctx) },
@@ -1573,6 +1649,7 @@ notes|notes [del <n>]|public|List or delete personal notes.
 poll|poll [secs] [weighted] <q> | opt1[:N] | opt2|public|Start a poll. 'weighted' enables weighted options (opt:N).
 pollextend|pollextend <secs>|public|Extend the current poll timer by N seconds (10-600).
 pollresult|pollresult|public|Show current or last poll results.
+pollstatus|pollstatus|public|Show the current poll status without closing it.
 pollstop|pollstop|master|Close the active poll.
 unvote|unvote|public|Cancel your vote in the current poll.
 vote|vote <n>|public|Vote in the current poll. Shows live tally after each vote (U3).
@@ -1580,8 +1657,7 @@ vote|vote <n>|public|Vote in the current poll. Shows live tally after each vote 
 # Trivia
 triviareset|triviareset <nick>|master|Reset a nick's trivia score in DB.
 triviatop|triviatop [n]|public|Show top trivia scores from DB (hall of fame, max 15).
-triviastop|triviatop|triviatop [n]|public|Show top trivia scores from DB (hall of fame, max 15).
-triviastop|master|Stop the active trivia game on this channel.
+triviastop|triviastop|master|Stop the active trivia game on this channel.
 trivia|trivia [cat] [start N]|public|Trivia. 'categories' to list. Named cats: science, history, music, film, tv...
 triviascore|triviascore|public|Show trivia scores for the current channel session.
 
@@ -1589,7 +1665,7 @@ triviascore|triviascore|public|Show trivia scores for the current channel sessio
 define|define <word>|public|Look up a word definition from Wiktionary.
 
 # AI
-ai|ai <prompt>|public|Ask Claude. Cache 60s per channel. Subcommands: summary, pin, relay, forget, models, reset, history.
+ai|ai <prompt>|public|Ask Claude. Cache 60s per channel. Subcommands: summary, pin, relay, forget, models, reset, history, ai persona.
 
 # Misc
 last|last <nick>|public|Show the last message posted by a nick on this channel.
