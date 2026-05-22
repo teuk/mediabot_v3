@@ -53,6 +53,8 @@ our @EXPORT = qw(
     checkAntiFlood
     checkNickFlood
     checkChanFlood
+    checkCmdCooldown
+    checkCmdCooldown
     getIdChannelSet
     getIdChansetList
     evalAction
@@ -1147,14 +1149,59 @@ sub _af_conf_int {
     return $value;
 }
 
+# ---------------------------------------------------------------------------
+# checkCmdCooldown($self, $channel, $cmd, [$seconds]) → 0 OK, N secs restant (CC1)
+#
+# Per-command, per-channel cooldown for expensive commands (!ai, !trivia).
+# Entirely in memory. Default cooldowns:
+#   ai      → 10s per channel
+#   trivia  → 5s per channel
+#   poll    → 0s (no cooldown — managed by poll active flag)
+#
+# Operators (.chanset) can override via _cmd_cooldown config (CC2).
+# ---------------------------------------------------------------------------
+sub checkCmdCooldown {
+    my ($self, $channel, $cmd, $override_secs) = @_;
+    return 0 unless defined $channel && $channel =~ /^#/ && defined $cmd;
+
+    # Default cooldowns per command (seconds)
+    my %defaults = (
+        ai      => 10,
+        trivia  => 5,
+        openai  => 10,
+    );
+    # CC2: per-channel override via .cmdcooldown takes priority
+    my $chan_conf = defined $channel
+        ? ($self->{_cmd_cooldown_conf}{$channel}{lc $cmd} // undef)
+        : undef;
+    my $cooldown = defined $override_secs ? $override_secs
+                 : defined $chan_conf      ? $chan_conf
+                 : ($defaults{lc $cmd} // 0);
+    return 0 if $cooldown <= 0;
+
+    my $now = time();
+    my $key = lc($cmd) . ':' . lc($channel);
+    my $last = $self->{_cmd_cooldown}{$key} // 0;
+    my $elapsed = $now - $last;
+
+    if ($elapsed < $cooldown) {
+        return $cooldown - $elapsed;  # seconds remaining
+    }
+    $self->{_cmd_cooldown}{$key} = $now;
+    return 0;
+}
+
+
 sub checkChanFlood {
     my ($self, $channel) = @_;
     return 0 unless defined $channel && $channel =~ /^#/;
 
     my $now       = time();
-    my $window    = _af_conf_int($self, 'CHANFLOOD_WINDOW', 10, 1, 3600);
-    my $max_cmds  = _af_conf_int($self, 'CHANFLOOD_MAX_COMMANDS', 8, 1, 1000);
-    my $silence   = _af_conf_int($self, 'CHANFLOOD_SILENCE', 30, 1, 86400);
+    # CC2: per-channel overrides set by .floodset take priority
+    my $conf_ov   = $self->{_chan_flood_conf}{$channel} // {};
+    my $window    = $conf_ov->{window}  // _af_conf_int($self, 'CHANFLOOD_WINDOW', 10, 1, 3600);
+    my $max_cmds  = $conf_ov->{max}     // _af_conf_int($self, 'CHANFLOOD_MAX_COMMANDS', 8, 1, 1000);
+    my $silence   = $conf_ov->{silence} // _af_conf_int($self, 'CHANFLOOD_SILENCE', 30, 1, 86400);
     my $notify_cd = _af_conf_int($self, 'CHANFLOOD_NOTIFY_COOLDOWN', 60, 1, 86400);
 
     my $st = $self->{_chan_flood}{$channel} //= {
@@ -1207,6 +1254,15 @@ sub checkNickFlood {
     return 0 unless defined $nick && $nick ne '';
 
     my $now     = time();
+
+    # CC3/AF7: check temp mute (set by strike counter)
+    my $mute_until = $self->{_nick_mute}{lc $nick} // 0;
+    if ($mute_until > $now) {
+        $self->{logger}->log(3, "NickFlood/AF7: " . lc($nick) . " is muted");
+        return 1;  # silently drop — user was already notified
+    } elsif ($mute_until) {
+        delete $self->{_nick_mute}{lc $nick};  # expired, clean up
+    }
     my $window  = _af_conf_int($self, 'NICKFLOOD_WINDOW', 5, 1, 3600);
     my $max_cmd = _af_conf_int($self, 'NICKFLOOD_MAX_COMMANDS', 5, 1, 1000);
     my $ttl     = _af_conf_int($self, 'NICKFLOOD_STATE_TTL', 120, 10, 86400);
@@ -1240,6 +1296,18 @@ sub checkNickFlood {
             "NickFlood/AF3: $nick_key — $count cmds in last ${window}s (max $max_cmd)");
         $self->{metrics}->inc('mediabot_nickflood_blocks_total')
             if $self->{metrics};
+
+        # CC3/AF7: consecutive strike counter — 3 strikes → temp ignore 5min
+        $state->{strikes} = ($state->{strikes} // 0) + 1;
+        if ($state->{strikes} >= 3) {
+            my $mute_until = $now + 300;  # 5 minutes
+            $self->{_nick_mute}{$nick_key} = $mute_until;
+            $state->{strikes} = 0;
+            $self->{logger}->log(1,
+                "NickFlood/AF7: $nick_key auto-muted for 300s after 3 strikes");
+            $self->{metrics}->inc('mediabot_nickflood_mutes_total')
+                if $self->{metrics};
+        }
 
         # AF2: notify the user — at most once per notify_cooldown
         if (defined $channel

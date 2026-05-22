@@ -3489,6 +3489,31 @@ sub claudeAI {
     if (my $persona = $self->{_claude_persona}{$persona_key}) {
         $sys_prompt = $persona;
     }
+    # DD1: check claudeAI prompt cache before calling API (uses F53 _claude_prompt_cache)
+    unless ($output_fn) {
+        my $dd1_prompt  = join(' ', @args);
+        my $dd1_key     = lc($dd1_prompt);
+        my $dd1_cached  = $self->{_claude_prompt_cache}{$dd1_key};
+        if ($dd1_cached && (time() - $dd1_cached->{ts}) < 60) {
+            $self->{logger}->log(3, "DD1: Claude cache hit — skipping API call");
+            my @chunk = Mediabot::External::_chatgpt_wrap($dd1_cached->{answer}, 400);
+            botPrivmsg($self, $chan, $_) for @chunk;
+            return 1;
+        }
+    }
+
+    # DD5: auto-reset persona if channel has been inactive > 1h
+    if (defined $chan) {
+        my $last_ai = $self->{_ai_last_active}{$persona_key} // 0;
+        if ($last_ai && (time() - $last_ai) > 3600) {
+            delete $self->{_claude_persona}{$persona_key};
+            $self->{logger}->log(3,
+                "DD5: persona auto-reset for $persona_key (inactive " .
+                int((time() - $last_ai)/60) . "min)");
+        }
+        $self->{_ai_last_active}{$persona_key} = time();
+    }
+
     # X1: prepend pinned context to system prompt if set
     my $pin_key_x1 = lc($nick) . "\x00" . (defined $chan ? $chan : '__private__');
     if (my $pinned = $self->{_claude_pinned}{$pin_key_x1}) {

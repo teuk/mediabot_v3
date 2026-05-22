@@ -1061,6 +1061,20 @@ sub mbCommandPublic {
     # Normalize command once
     my $cmd = lc $sCommand;
 
+    # DD2: per-command invocation counter
+    $self->{metrics}->inc_label('mediabot_command_total', $cmd)
+        if $self->{metrics} && $self->{metrics}->can('inc_label');
+
+    # CC1: per-command cooldown for expensive commands
+    {
+        my $wait = checkCmdCooldown($self, $sChannel, $cmd);
+        if ($wait > 0) {
+            botNotice($self, $sNick,
+                "!$cmd is cooling down on $sChannel — wait ${wait}s.");
+            return;
+        }
+    }
+
     # Build Context once for all handlers
     my $ctx = Mediabot::Context->new(
         bot     => $self,
@@ -1515,7 +1529,7 @@ yt|yt <query>|public|Search YouTube when configured.
 # --- Wave IV-V commands added 2025-2026 ---
 # Fun / random
 8ball|8ball <question>|public|Ask the Magic 8-ball a yes/no question.
-choose|choose <a> | <b>|public|Random pick. Weight: 'opt:N'. Separator 'ou'. Subcommands: last, history.
+choose|choose <a>|b>|public|Random pick. Weight opt:N. 'ou' separator. Deduplicates identical options.
 flip|flip|public|Flip a coin (heads or tails).
 morse|morse <text>|public|Encode text in Morse code.
 roll|roll [NdN]|public|Roll dice. Defaults to 1d6. Supports NdN format (e.g. 2d6, 1d20).
@@ -1546,7 +1560,7 @@ karmahist|karmahist [nick]|public|Show the last 5 karma changes on the channel (
 
 # Reminders
 remind|remind [!] <nick> <msg>|public|Set reminder. '!' = urgent ([!] prefix). Delay: 'dans 2h', 'in 30m'. Also: list, cancel, show.
-remindlist|remindlist|public|List your pending reminders on this channel.
+remindlist|remindlist|public|List your pending reminders with remaining time and urgent flag.
 
 # Quotes
 quotecount|quotecount [nick]|public|Count quotes by author on the channel.
@@ -1568,14 +1582,14 @@ triviareset|triviareset <nick>|master|Reset a nick's trivia score in DB.
 triviatop|triviatop [n]|public|Show top trivia scores from DB (hall of fame, max 15).
 triviastop|triviatop|triviatop [n]|public|Show top trivia scores from DB (hall of fame, max 15).
 triviastop|master|Stop the active trivia game on this channel.
-trivia|trivia [cat] [start N]|public|Trivia. 'start N' for multi-round. 'triviatop [n]' for hall of fame.
+trivia|trivia [cat] [start N]|public|Trivia. 'categories' to list. Named cats: science, history, music, film, tv...
 triviascore|triviascore|public|Show trivia scores for the current channel session.
 
 # Dictionary / external
 define|define <word>|public|Look up a word definition from Wiktionary.
 
 # AI
-ai|ai <prompt>|public|Ask Claude. Subcommands: summary [n] [nick], pin, relay, forget, models, reset, history.
+ai|ai <prompt>|public|Ask Claude. Cache 60s per channel. Subcommands: summary, pin, relay, forget, models, reset, history.
 
 # Misc
 last|last <nick>|public|Show the last message posted by a nick on this channel.
@@ -1935,6 +1949,16 @@ sub mbCommandPrivate {
 
     # Normalize command - q and Q are the same
     $sCommand = lc $sCommand;
+
+    # CC1: per-command cooldown for expensive commands
+    {
+        my $wait = checkCmdCooldown($self, undef, $sCommand);
+        if ($wait > 0) {
+            botNotice($self, $sNick,
+                "!$sCommand is cooling down — wait ${wait}s.");
+            return;
+        }
+    }
 
     # Build Context once, used by all handlers
     my $ctx = Mediabot::Context->new(

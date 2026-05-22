@@ -72,6 +72,9 @@ sub new {
     $self->_declare('mediabot_antiflood_blocks_total',  'counter', 'Bot output silenced by checkAntiFlood (AF1)');
     $self->_declare('mediabot_nickflood_blocks_total',  'counter', 'Commands dropped by per-nick flood guard (AF3)');
     $self->_declare('mediabot_chanflood_blocks_total',  'counter', 'Commands dropped by per-channel flood guard (AF4)');
+    $self->_declare('mediabot_nickflood_mutes_total',   'counter', 'Nick auto-mutes triggered by 3-strike rule (CC3/AF7)');
+    $self->_declare('mediabot_cmdcooldown_blocks_total','counter', 'Commands blocked by per-cmd cooldown (CC1)');
+    $self->_declare('mediabot_karma_brigade_blocks',    'counter', 'Karma votes blocked by anti-brigade (DD9)');
     $self->_declare('mediabot_users_known',            'gauge',   'Current number of known users');
 
     # AA6: game and interaction metrics

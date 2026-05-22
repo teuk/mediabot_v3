@@ -2726,19 +2726,23 @@ sub mbRemindList_ctx {
         return 1;
     }
 
-    botNotice($self, $nick, scalar(@rows) . ' pending reminder(s):');
+    # CC7: enriched listing — remaining time + urgent flag
+    my $total = scalar(@rows);
+    botNotice($self, $nick, "$total pending reminder(s) you have set:");
     for my $r (@rows) {
-        # T5: show remaining delay if [at:TS] tag in message
-        my $msg_t5 = $r->{message} // '';
-        my $due_t5 = '';
-        if ($msg_t5 =~ /^\[at:(\d+)\]\s*/) {
+        my $msg = $r->{message} // '';
+        my $urgent = ($msg =~ /^\[!\]/) ? ' [URGENT]' : '';
+        my $due_str = '';
+        if ($msg =~ /^\[at:(\d+)\]\s*/) {
             my $sl = $1 - time();
-            $due_t5 = $sl > 0 ? ' [due in ' . _seconds_to_human($sl) . ']' : ' [overdue]';
-            $msg_t5 =~ s/^\[at:\d+\]\s*//;
+            $due_str = $sl > 0
+                ? ' [in ' . _seconds_to_human($sl) . ']'
+                : ' [overdue ' . _seconds_to_human(-$sl) . ' ago]';
+            $msg =~ s/^\[at:\d+\]\s*//;
         }
-        botNotice($self, $nick, sprintf('  #%d -> %s: "%s" (%s)',
-            $r->{id_reminder}, $r->{to_nick} . $due_t5,
-            $msg_t5, $r->{created_at}));
+        $msg =~ s/^\[!\]\s*//;  # strip urgent prefix from display
+        botNotice($self, $nick, sprintf('  #%d -> %s%s: "%s"%s',
+            $r->{id_reminder}, $r->{to_nick}, $due_str, $msg, $urgent));
     }
     return 1;
 }
@@ -3119,7 +3123,26 @@ sub processKarma {
                 "$nick: you can't change your own karma.");
             next;
         }
-        # Y2: explicit anti-self-vote guard with clear message
+        # DD9: anti-brigade guard — >5 different nicks voting for same target in 30s → block
+    {
+        my $now = time();
+        my $brigade_key = "brigade:$target:$channel";
+        my $brigade     = $self->{_karma_brigade}{$brigade_key} //= { hits => [], warned => 0 };
+        push @{ $brigade->{hits} }, $now;
+        @{ $brigade->{hits} } = grep { ($now - $_) < 30 } @{ $brigade->{hits} };
+        if (scalar @{ $brigade->{hits} } > 5) {
+            unless ($brigade->{warned}) {
+                $brigade->{warned} = 1;
+                Mediabot::Helpers::botPrivmsg($self, $channel,
+                    "Karma brigade detected for $target — votes temporarily blocked.");
+                $self->{logger}->log(1, "DD9: karma brigade on $target in $channel");
+            }
+            next;
+        }
+        $brigade->{warned} = 0 if scalar @{ $brigade->{hits} } <= 2;
+    }
+
+    # Y2: explicit anti-self-vote guard with clear message
     if (lc($nick) eq lc($target)) {
         Mediabot::Helpers::botPrivmsg($self, $channel,
             "$nick: you can't vote for yourself.");
@@ -4105,6 +4128,16 @@ sub mbChoose_ctx {
     my $sep = $raw =~ /\|/ ? '\|' : '\s+ou\s+';
     my @raw_opts = map { my $o = $_; $o =~ s/^\s+|\s+$//g; $o } split /$sep/, $raw;
     @raw_opts = grep { $_ ne '' } @raw_opts;
+    # DD8: deduplicate options (case-insensitive, preserve first occurrence)
+    {
+        my %seen;
+        my @deduped = grep { !$seen{lc $_}++ } @raw_opts;
+        if (scalar @deduped < scalar @raw_opts) {
+            my $removed = scalar(@raw_opts) - scalar(@deduped);
+            botNotice($self, $nick, "Note: $removed duplicate option(s) removed.");
+        }
+        @raw_opts = @deduped;
+    }
     # U5: weighted choice — 'pizza:3' means pizza appears 3x in pool
     my @opts;
     for my $opt (@raw_opts) {
@@ -4373,8 +4406,27 @@ sub mbTrivia_ctx {
         botNotice($self, $nick, 'A trivia question is already active. Answer it or wait.');
         return;
     }
-    # X5: optional category filter — !trivia <category>
+    # CC4: named category map — !trivia <name> maps to Open Trivia DB category ID
+    my %trivia_cats = (
+        general    => 9,  science    => 17, computers  => 18,
+        maths      => 19, math       => 19, sports     => 21,
+        geography  => 22, history    => 23, politics   => 24,
+        art        => 25, celebrities=> 26, animals    => 27,
+        vehicles   => 28, comics     => 29, gadgets    => 30,
+        anime      => 31, manga      => 31, cartoons   => 32,
+        tv         => 14, television => 14, music      => 12,
+        film       => 11, movies     => 11, books      => 10,
+        mythology  => 20, nature     => 27,
+    );
+    # !trivia categories — show available category names
+    if (@args && lc($args[0]) eq 'categories') {
+        botPrivmsg($self, $channel,
+            'Trivia categories: ' . join(', ', sort keys %trivia_cats));
+        return 1;
+    }
+    # X5: optional category filter
     my $trivia_cat = (@args && $args[0] !~ /^\d/) ? lc(shift @args) : undef;
+    my $trivia_cat_id = defined $trivia_cat ? ($trivia_cats{$trivia_cat} // undef) : undef;
 
     # V1: increment round counter
     if ($self->{_trivia}{$channel}{multi_total}) {
@@ -4384,7 +4436,10 @@ sub mbTrivia_ctx {
         botPrivmsg($self, $channel, "Round $cur/$tot:");
     }
     my $http = Mediabot::External::_make_http(timeout => 8, verify_SSL => 1);
-    my $res  = eval { $http->get('https://opentdb.com/api.php?amount=1&type=multiple') }
+    # CC4: build URL with optional category ID
+    my $trivia_url = 'https://opentdb.com/api.php?amount=1&type=multiple';
+    $trivia_url .= "&category=$trivia_cat_id" if defined $trivia_cat_id;
+    my $res  = eval { $http->get($trivia_url) }
               // { success => 0 };
     unless ($res->{success}) {
         botPrivmsg($self, $channel, 'Trivia: could not fetch question.'); return;
@@ -4411,6 +4466,7 @@ sub mbTrivia_ctx {
         answer_display => $answer,
         started     => time(),
         hint_given  => 0,   # B2/fix: reset hint_given for each new question
+        category    => ($q->{category} // undef),  # DD6: store for timeout display
         scores      => ($self->{_trivia}{$channel}{scores} // {}),
     };
     my $opts = join('  ', map { "[$_]" } @choices);
@@ -4432,8 +4488,10 @@ sub checkTriviaAnswer {
     return unless $trivia && $trivia->{active};
     if (time() > $trivia->{deadline}) {
         $trivia->{active} = 0;
+        # DD6: enriched timeout message with category
+        my $cat_str = $trivia->{category} ? " ($trivia->{category})" : '';
         Mediabot::Helpers::botPrivmsg($self, $channel,
-            "Time's up! The answer was: $trivia->{answer_display}");
+            "Time's up! The answer was: $trivia->{answer_display}${cat_str}");
         $self->{metrics}->inc('mediabot_trivia_timeout_total') if $self->{metrics};
         return;
     }

@@ -1188,6 +1188,15 @@ sub _handle_line {
     elsif ($line =~ /^\.kick\s+(.*)/i) {
         $self->_cmd_kick($stream, $id, $1);
     }
+    elsif ($line =~ /^\.unmute\s+(.*)/i) {
+        $self->_cmd_unmute($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.floodset\s+(.*)/i) {
+        $self->_cmd_floodset($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.cmdcooldown\s+(.*)/i) {
+        $self->_cmd_cmdcooldown($stream, $id, $1);
+    }
     elsif ($line =~ /^\.floodstatus$/i) {
         $self->_cmd_floodstatus($stream, $id, undef);
     }
@@ -1196,6 +1205,15 @@ sub _handle_line {
     }
     elsif ($line =~ /^\.kick\s+(.*)/i) {
         $self->_cmd_kick($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.unmute\s+(.*)/i) {
+        $self->_cmd_unmute($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.floodset\s+(.*)/i) {
+        $self->_cmd_floodset($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.cmdcooldown\s+(.*)/i) {
+        $self->_cmd_cmdcooldown($stream, $id, $1);
     }
     elsif ($line =~ /^\.floodstatus$/i) {
         $self->_cmd_floodstatus($stream, $id, undef);
@@ -1524,6 +1542,9 @@ sub _cmd_help {
       . "  .logs <#chan> [n]   - show last N lines from CHANNEL_LOG (default 10)\r\n"
       . "  .nickinfo <nick>    - show DB info for a registered nick\r\n"
       . "  .kick <nick> <#chan> [reason] - kick a nick from channel\r\n"
+      . "  .unmute <nick>               - lift a CC3/AF7 temporary nick mute\r\n"
+      . "  .floodset <#chan> [w] [n] [s]- override AF4 params (window/max/silence)\r\n"
+      . "  .cmdcooldown <#chan> <cmd> <s>- set per-cmd cooldown in seconds (CC1)\r\n"
       . "  .floodstatus                 - show live antiflood state (AF1/AF3/AF4)\r\n"
       . "  .flushcooldown [#chan]        - clear karma anti-spam cooldown\r\n"
       . "  .dbstats            - show DB connection and query stats\r\n"
@@ -2391,31 +2412,50 @@ sub _cmd_whochan {
 # .top [#chan] [n]  - top n nicks on a channel (default current/first, 5)
 # ---------------------------------------------------------------------------
 sub _cmd_top {
+    # CC6: .top [n] — top per channel; .top all [n] — all channels combined
     my ($self, $stream, $id, $args) = @_;
 
     my $bot = $self->{bot};
     my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
     return unless $dbh;
 
-    my ($chan, $n) = ($args =~ /(#\S+)/i)
-        ? ($1, ($args =~ /(\d+)/)[0] // 5)
-        : (undef, ($args =~ /(\d+)/)[0] // 5);
-
-    unless ($chan) {
+    my $all_chans = (defined $args && $args =~ /\ball\b/i);
+    my ($chan, $n);
+    if ($all_chans) {
+        $n = ($args =~ /(\d+)/)[0] // 5;
+    } elsif ($args =~ /(#\S+)/i) {
+        $chan = $1;
+        $n    = ($args =~ /(\d+)/)[0] // 5;
+    } else {
         my @chans = sort keys %{ $bot->{channels} || {} };
         $chan = $chans[0];
+        $n    = ($args =~ /(\d+)/)[0] // 5;
     }
-    $n = 5 if !$n || $n < 1; $n = 10 if $n > 10;
+    $n = 5 if !$n || $n < 1; $n = 15 if $n > 15;
 
-    my $sth = $dbh->prepare(
-        "SELECT cl.nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl"
-        . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
-        . " WHERE c.name = ? GROUP BY cl.nick ORDER BY cnt DESC LIMIT ?"
-    );
-    unless ($sth && $sth->execute($chan, $n)) {
-        $stream->write("DB error.\r\n"); return;
+    my ($sth, $label);
+    if ($all_chans) {
+        # CC6: aggregate across all channels
+        $sth = $dbh->prepare(
+            "SELECT cl.nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl"
+            . " GROUP BY cl.nick ORDER BY cnt DESC LIMIT ?"
+        );
+        unless ($sth && $sth->execute($n)) {
+            $stream->write("DB error.\r\n"); return;
+        }
+        $label = "Top $n speakers (all channels)";
+    } else {
+        $sth = $dbh->prepare(
+            "SELECT cl.nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl"
+            . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
+            . " WHERE c.name = ? GROUP BY cl.nick ORDER BY cnt DESC LIMIT ?"
+        );
+        unless ($sth && $sth->execute($chan, $n)) {
+            $stream->write("DB error.\r\n"); return;
+        }
+        $label = "Top $n on $chan";
     }
-    $stream->write("Top $n on $chan:\r\n");
+    $stream->write("$label:\r\n");
     my $rank = 1;
     while (my $row = $sth->fetchrow_hashref) {
         $stream->write(sprintf("  %2d. %-20s %d msgs\r\n",
@@ -3960,6 +4000,65 @@ sub _cmd_kick {
     else    { $stream->write("Kicked $target from $chan ($reason)\r\n"); }
 }
 
+sub _cmd_unmute {
+    # CC3: manually lift a temp mute set by AF7
+    my ($self, $stream, $id, $args) = @_;
+    unless (defined $args && $args =~ /^(\S+)/) {
+        $stream->write("Usage: .unmute <nick>\r\n"); return;
+    }
+    my $target = lc($1);
+    my $bot = $self->{bot};
+    if (exists $bot->{_nick_mute}{$target}) {
+        delete $bot->{_nick_mute}{$target};
+        $stream->write("AF7 mute lifted for $target.\r\n");
+    } else {
+        $stream->write("$target is not muted.\r\n");
+    }
+}
+
+sub _cmd_floodset {
+    my ($self, $stream, $id, $args) = @_;
+    my $bot = $self->{bot};
+    unless (defined $args && $args =~ /^(#\S+)(?:\s+(\d+)(?:\s+(\d+)(?:\s+(\d+))?)?)?/) {
+        $stream->write("Usage: .floodset <#chan> [window] [max_cmds] [silence_secs]\r\n");
+        $stream->write("  Defaults: window=10 max=8 silence=30\r\n");
+        $stream->write("  Example: .floodset #quebec 10 4 60\r\n");
+        return;
+    }
+    my ($chan, $window, $max, $silence) = ($1, $2, $3, $4);
+    # Store overrides in memory — used by checkChanFlood via _chan_flood_conf
+    $bot->{_chan_flood_conf}{$chan} = {
+        window  => defined $window  ? int($window)  : undef,
+        max     => defined $max     ? int($max)      : undef,
+        silence => defined $silence ? int($silence)  : undef,
+    };
+    # Also reset current flood state for this channel
+    delete $bot->{_chan_flood}{$chan};
+    my $conf = $bot->{_chan_flood_conf}{$chan};
+    my $w = $conf->{window}  // '(default)';
+    my $m = $conf->{max}     // '(default)';
+    my $s = $conf->{silence} // '(default)';
+    $stream->write("CC2: floodset $chan — window=$w max=$m silence=$s\r\n");
+    $stream->write("Current flood state reset.\r\n");
+}
+
+sub _cmd_cmdcooldown {
+    # CC2: set per-command cooldown for a channel: .cmdcooldown #chan <cmd> <secs>
+    my ($self, $stream, $id, $args) = @_;
+    my $bot = $self->{bot};
+    unless (defined $args && $args =~ /^(#\S+)\s+(\w+)\s+(\d+)$/) {
+        $stream->write("Usage: .cmdcooldown <#chan> <cmd> <seconds>\r\n");
+        $stream->write("  Example: .cmdcooldown #quebec ai 20\r\n");
+        return;
+    }
+    my ($chan, $cmd, $secs) = ($1, lc($2), int($3));
+    $secs = 0 if $secs < 0; $secs = 3600 if $secs > 3600;
+    $bot->{_cmd_cooldown_conf}{$chan}{$cmd} = $secs;
+    # Reset any active cooldown for this cmd+chan
+    delete $bot->{_cmd_cooldown}{"$cmd:" . lc($chan)};
+    $stream->write("CC2: cooldown for !$cmd on $chan set to ${secs}s\r\n");
+}
+
 sub _cmd_floodstatus {
     my ($self, $stream, $id, $args) = @_;
     my $bot = $self->{bot};
@@ -3996,6 +4095,19 @@ sub _cmd_floodstatus {
         }
     } else {
         $stream->write("  (no active input flood state)\r\n");
+    }
+
+    # CC3: temp-muted nicks
+    $stream->write("--- Temp mutes (CC3/AF7) ---\r\n");
+    my $mutes = $bot->{_nick_mute} // {};
+    my @active_mutes = sort grep { ($mutes->{$_} // 0) > $now } keys %$mutes;
+    if (@active_mutes) {
+        for my $nick (@active_mutes) {
+            $stream->write(sprintf("  %-20s muted (%ds remaining)\r\n",
+                $nick, $mutes->{$nick} - $now));
+        }
+    } else {
+        $stream->write("  (no active mutes)\r\n");
     }
 
     # AF3: per-nick flood state
