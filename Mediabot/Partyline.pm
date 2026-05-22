@@ -30,6 +30,7 @@ use Socket qw(unpack_sockaddr_in sockaddr_family inet_ntoa inet_aton AF_INET);
 use Scalar::Util qw(weaken);
 use Time::HiRes qw(usleep);
 use JSON qw(encode_json);
+use Encode qw(encode);
 use File::Basename qw(dirname);
 use File::Path qw(make_path);
 use File::Temp qw(tempfile);
@@ -1617,7 +1618,14 @@ sub _cmd_console {
         my ($line) = @_;
         my $s = $self->{streams}{$id};
         return unless $s;
-        eval { $s->write($line . "\r\n") };
+
+        # IO::Async::Stream ultimately uses syswrite(), which expects bytes.
+        # Logger lines may contain real Perl Unicode characters coming from
+        # IRC output, e.g. heatmap bars (█/░), titles, emojis, etc.
+        # Encode only at the transport boundary so IRC rendering stays intact.
+        my $wire = encode('UTF-8', ($line // '') . "\r\n");
+
+        eval { $s->write($wire) };
         if ($@) {
             # Stream gone — silently remove the hook so it stops firing
             eval { $logger->remove_console_hook($id) };
