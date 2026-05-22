@@ -453,14 +453,16 @@ sub channelSet_ctx {
         return;
     }
 
-    # Resolve channel object (hash is usually keyed in lowercase)
+    # Resolve channel object.
+    # Historical caches may be keyed either by the exact DB channel name
+    # (#WatchDog.Test) or by lowercase (#watchdog.test). Accept both.
     my $k = lc($target_channel);
-    unless (exists $self->{channels}{$k} && $self->{channels}{$k}) {
+    my $channel = $self->{channels}{$target_channel} || $self->{channels}{$k};
+
+    unless ($channel) {
         botNotice($self, $nick, "Unknown channel $target_channel");
         return;
     }
-
-    my $channel    = $self->{channels}{$k};
     my $id_channel = eval { $channel->get_id } // undef;
     unless ($id_channel) {
         botNotice($self, $nick, "Internal error: channel id unavailable for $target_channel");

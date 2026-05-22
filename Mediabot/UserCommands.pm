@@ -431,7 +431,10 @@ sub userInfo_ctx {
 
     my $self = $ctx->bot;
     my $nick = $ctx->nick;
-    $ctx->require_level('Master') or return;
+
+    # Global Administrator+ is allowed to inspect user information.
+    # The internal help table already documents userinfo as admin-level.
+    $ctx->require_level('Administrator') or return;
 
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     my $target = $args[0] // '';
