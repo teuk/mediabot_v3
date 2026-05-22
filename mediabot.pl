@@ -1059,7 +1059,40 @@ sub on_login {
 
     # Join other channels
     unless ((($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 1) && ($mediabot->{conf}->get('connection.CONN_USERMODE') =~ /x/)) || (($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 2) && defined($mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD')) && ($mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD') ne ""))) {
-        $mediabot->joinChannels();
+        # NS3: throttled JOIN flood prevention — stagger joins every 1.5s
+        # Prevents server-side flood kick on large channel lists after a split.
+        my @chans_to_join = sort grep {
+            my $c = $mediabot->{channels}{$_};
+            $c && $c->get_auto_join
+            && (($c->get_description // '') ne 'console')
+        } keys %{ $mediabot->{channels} // {} };
+        my $join_delay = 0;
+        for my $chan_name (@chans_to_join) {
+            my $c = $mediabot->{channels}{$chan_name};
+            my $key = $c->get_key // '';
+            $join_delay += 1500;  # 1.5s between each JOIN
+            my $jt = IO::Async::Timer::Countdown->new(
+                delay => $join_delay / 1000,
+                on_expire => sub {
+                    $mediabot->{logger}->log(1, "NS3: joining $chan_name (throttled)");
+                    eval { $mediabot->joinChannel($chan_name, $key) };
+                    # NS4: schedule WHO after join to sync nicklist
+                    my $who_t = IO::Async::Timer::Countdown->new(
+                        delay     => 3,
+                        on_expire => sub {
+                            eval { $irc->send_message('WHO', undef, $chan_name) }
+                                if $irc && $irc->is_connected;
+                            $mediabot->{logger}->log(2, "NS4: WHO sent for $chan_name after join");
+                        },
+                    );
+                    $loop->add($who_t);
+                    $who_t->start;
+                },
+            );
+            $loop->add($jt);
+            $jt->start;
+        }
+        $mediabot->{logger}->log(1, 'NS3: scheduled ' . scalar(@chans_to_join) . ' throttled joins (' . ($join_delay/1000) . 's total)');
     }
 }
 
@@ -1198,6 +1231,26 @@ sub on_message_QUIT {
     my ($text) = @{$hints}{qw<text>};
     unless(defined($text)) { $text="";}
     my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
+
+    # NS1: detect netsplit QUIT — message matches "server1.net server2.net"
+    # During a netsplit, dozens of QUITs arrive with this pattern.
+    # Skip expensive DB operations (logBotAction, updateUserSeen) for these.
+    my $is_netsplit = ($text =~ /^\S+\.\S+\s+\S+\.\S+$/);
+    if ($is_netsplit) {
+        $mediabot->{logger}->log(2, "NS1: netsplit QUIT suppressed for $sNick (msg: $text)");
+        # NS5: do NOT purge Claude history on netsplit QUITs — user will rejoin
+        # Only remove from in-memory nicklist (fast, no DB)
+        for my $sChannel (keys %hChannelsNicks) {
+            $mediabot->channelNicksRemove($sChannel, $sNick);
+        }
+        # Track netsplit counter
+        $mediabot->{_netsplit_quit_count} = ($mediabot->{_netsplit_quit_count} // 0) + 1;
+        $mediabot->{metrics}->inc('mediabot_netsplit_quits_total')
+            if $mediabot->{metrics};
+        return;
+    }
+
+    # NS5: only purge Claude history for genuine QUITs (not netsplits)
     # Q2: purge Claude conversation history on QUIT
     if (defined $sNick && $mediabot->{_claude_history}) {
         my $prefix = lc($sNick) . "\x00";
@@ -1216,7 +1269,7 @@ sub on_message_QUIT {
         }
         $mediabot->logBotAction($message,"quit",$sNick,undef,"");
     }
-    # Track last seen on QUIT
+    # Track last seen on genuine QUIT
     eval { $mediabot->updateUserSeen(
         nick       => $sNick,
         channel    => '',
@@ -1228,7 +1281,7 @@ sub on_message_QUIT {
     for my $sChannel (keys %hChannelsNicks) {
         $mediabot->channelNicksRemove($sChannel,$sNick);
     }
-    # Clear in-memory auth session on QUIT
+    # Clear in-memory auth session on genuine QUIT
     eval { $mediabot->{auth}->logout($sNick) } if $mediabot->{auth};
 }
 
@@ -2399,6 +2452,17 @@ sub reconnect {
         eval { $loop->remove($irc) };
         $irc = undef;
     }
+
+    # NS2: clear in-memory antiflood/cooldown state on reconnect
+    # Silenced channels must be reset — they may be joinable again after the split.
+    $mediabot->{_af}              = {};  # AF1: outgoing flood state
+    $mediabot->{_af_params}       = {};  # AF1: params cache
+    $mediabot->{_chan_flood}       = {};  # AF4: input flood state
+    $mediabot->{_nick_flood}       = {};  # AF3: per-nick flood state
+    $mediabot->{_nick_mute}        = {};  # CC3: auto-mutes
+    $mediabot->{_cmd_cooldown}     = {};  # CC1: command cooldowns
+    $mediabot->{_netsplit_quit_count} = 0;  # NS1: counter
+    $mediabot->{logger}->log(1, 'NS2: antiflood/cooldown state cleared on reconnect');
 
     # Rebuild nicklist timers on the current loop
     $mediabot->setup_channel_nicklist_timers();

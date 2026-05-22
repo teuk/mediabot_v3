@@ -1197,6 +1197,9 @@ sub _handle_line {
     elsif ($line =~ /^\.cmdcooldown\s+(.*)/i) {
         $self->_cmd_cmdcooldown($stream, $id, $1);
     }
+    elsif ($line =~ /^\.netsplit$/i) {
+        $self->_cmd_netsplit($stream, $id, undef);
+    }
     elsif ($line =~ /^\.floodstatus$/i) {
         $self->_cmd_floodstatus($stream, $id, undef);
     }
@@ -1214,6 +1217,9 @@ sub _handle_line {
     }
     elsif ($line =~ /^\.cmdcooldown\s+(.*)/i) {
         $self->_cmd_cmdcooldown($stream, $id, $1);
+    }
+    elsif ($line =~ /^\.netsplit$/i) {
+        $self->_cmd_netsplit($stream, $id, undef);
     }
     elsif ($line =~ /^\.floodstatus$/i) {
         $self->_cmd_floodstatus($stream, $id, undef);
@@ -1545,6 +1551,7 @@ sub _cmd_help {
       . "  .unmute <nick>               - lift a CC3/AF7 temporary nick mute\r\n"
       . "  .floodset <#chan> [w] [n] [s]- override AF4 params (window/max/silence)\r\n"
       . "  .cmdcooldown <#chan> <cmd> <s>- set per-cmd cooldown in seconds (CC1)\r\n"
+      . "  .netsplit                    - show netsplit state and channel nicklist status\r\n"
       . "  .floodstatus                 - show live antiflood state (AF1/AF3/AF4)\r\n"
       . "  .flushcooldown [#chan]        - clear karma anti-spam cooldown\r\n"
       . "  .dbstats            - show DB connection and query stats\r\n"
@@ -4027,10 +4034,17 @@ sub _cmd_floodset {
     }
     my ($chan, $window, $max, $silence) = ($1, $2, $3, $4);
     # Store overrides in memory — used by checkChanFlood via _chan_flood_conf
+    # A-68-1: clamp override values to sane minimums (matches checkChanFlood)
+    my $safe_window  = defined $window  ? (int($window)  >= 1 ? int($window)  : 1) : undef;
+    my $safe_max     = defined $max     ? (int($max)     >= 1 ? int($max)     : 1) : undef;
+    my $safe_silence = defined $silence ? (int($silence) >= 1 ? int($silence) : 1) : undef;
+    if ((defined $window && int($window) < 1) || (defined $max && int($max) < 1)) {
+        $stream->write("Warning: values below 1 clamped to 1.\r\n");
+    }
     $bot->{_chan_flood_conf}{$chan} = {
-        window  => defined $window  ? int($window)  : undef,
-        max     => defined $max     ? int($max)      : undef,
-        silence => defined $silence ? int($silence)  : undef,
+        window  => $safe_window,
+        max     => $safe_max,
+        silence => $safe_silence,
     };
     # Also reset current flood state for this channel
     delete $bot->{_chan_flood}{$chan};
@@ -4052,11 +4066,32 @@ sub _cmd_cmdcooldown {
         return;
     }
     my ($chan, $cmd, $secs) = ($1, lc($2), int($3));
-    $secs = 0 if $secs < 0; $secs = 3600 if $secs > 3600;
+    $secs = 0 if $secs < 0; $secs = 3600 if $secs > 3600;  # A-68-2: clamp range
     $bot->{_cmd_cooldown_conf}{$chan}{$cmd} = $secs;
     # Reset any active cooldown for this cmd+chan
     delete $bot->{_cmd_cooldown}{"$cmd:" . lc($chan)};
     $stream->write("CC2: cooldown for !$cmd on $chan set to ${secs}s\r\n");
+}
+
+sub _cmd_netsplit {
+    # NS: show current netsplit state
+    my ($self, $stream, $id, $args) = @_;
+    my $bot = $self->{bot};
+    my $now = time();
+    my $count = $bot->{_netsplit_quit_count} // 0;
+    $stream->write("--- Netsplit state ---\r\n");
+    $stream->write("  Netsplit QUITs since last reconnect: $count\r\n");
+    # Show antiflood state that was reset
+    my $af_chans = scalar keys %{ $bot->{_af} // {} };
+    my $cf_chans = scalar keys %{ $bot->{_chan_flood} // {} };
+    $stream->write("  AF1 channels in state: $af_chans\r\n");
+    $stream->write("  AF4 channels in state: $cf_chans\r\n");
+    # Channel nicklist freshness
+    $stream->write("\r\n--- Channel nicklist status ---\r\n");
+    for my $chan (sort keys %{ $bot->{channels} // {} }) {
+        my @nicks = eval { $bot->gethChannelsNicksOnChan($chan) };
+        $stream->write(sprintf("  %-22s %d nicks\r\n", $chan, scalar @nicks));
+    }
 }
 
 sub _cmd_floodstatus {

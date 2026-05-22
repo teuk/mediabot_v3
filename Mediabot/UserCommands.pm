@@ -4644,6 +4644,9 @@ sub mbTriviaStop_ctx {
     }
     $trivia->{active} = 0;
     delete $trivia->{multi_total}; delete $trivia->{multi_current};
+    # B-68-2/fix: clear scores and hint so next game starts clean
+    delete $trivia->{scores};
+    $trivia->{hint_given} = 0;
     Mediabot::Helpers::botPrivmsg($self, $channel,
         "Trivia stopped by $nick. Answer: $trivia->{answer_display}");
     return 1;

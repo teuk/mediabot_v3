@@ -1185,6 +1185,9 @@ sub checkCmdCooldown {
     my $elapsed = $now - $last;
 
     if ($elapsed < $cooldown) {
+        # A-68-3: track cooldown blocks in Prometheus
+        $self->{metrics}->inc('mediabot_cmdcooldown_blocks_total')
+            if $self->{metrics};
         return $cooldown - $elapsed;  # seconds remaining
     }
     $self->{_cmd_cooldown}{$key} = $now;
@@ -1199,9 +1202,10 @@ sub checkChanFlood {
     my $now       = time();
     # CC2: per-channel overrides set by .floodset take priority
     my $conf_ov   = $self->{_chan_flood_conf}{$channel} // {};
-    my $window    = $conf_ov->{window}  // _af_conf_int($self, 'CHANFLOOD_WINDOW', 10, 1, 3600);
-    my $max_cmds  = $conf_ov->{max}     // _af_conf_int($self, 'CHANFLOOD_MAX_COMMANDS', 8, 1, 1000);
-    my $silence   = $conf_ov->{silence} // _af_conf_int($self, 'CHANFLOOD_SILENCE', 30, 1, 86400);
+    # B-68-3/fix: clamp CC2 overrides to sane minimums (0 would cause logic errors)
+    my $window    = do { my $v = $conf_ov->{window};  defined($v) ? (int($v) >= 1 ? int($v) : 1) : _af_conf_int($self, 'CHANFLOOD_WINDOW', 10, 1, 3600) };
+    my $max_cmds  = do { my $v = $conf_ov->{max};     defined($v) ? (int($v) >= 1 ? int($v) : 1) : _af_conf_int($self, 'CHANFLOOD_MAX_COMMANDS', 8, 1, 1000) };
+    my $silence   = do { my $v = $conf_ov->{silence}; defined($v) ? (int($v) >= 1 ? int($v) : 1) : _af_conf_int($self, 'CHANFLOOD_SILENCE', 30, 1, 86400) };
     my $notify_cd = _af_conf_int($self, 'CHANFLOOD_NOTIFY_COOLDOWN', 60, 1, 86400);
 
     my $st = $self->{_chan_flood}{$channel} //= {
@@ -2842,6 +2846,7 @@ sub mp3_ctx {
         botPrivmsg($self, $channel, "($nick mp3 search) unexpected error, please try again");
     }
 
+    $sth->finish if $sth;  # B-68-1/fix: ensure sth_first cursor is closed
     return;
 }
 
