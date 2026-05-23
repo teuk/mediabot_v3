@@ -75,6 +75,8 @@ sub new {
     # NS: netsplit metrics
     $self->_declare('mediabot_netsplit_quits_total',    'counter', 'QUIT messages identified as netsplit (NS1)');
     $self->_declare('mediabot_netsplit_rejoins_total',  'counter', 'Netsplit NETJOIN events detected (NS4)');
+    # FF10: uptime gauge
+    $self->_declare('mediabot_uptime_seconds',          'gauge',   'Bot uptime in seconds (FF10)');
     $self->_declare('mediabot_nickflood_mutes_total',   'counter', 'Nick auto-mutes triggered by 3-strike rule (CC3/AF7)');
     $self->_declare('mediabot_cmdcooldown_blocks_total','counter', 'Commands blocked by per-cmd cooldown (CC1)');
     $self->_declare('mediabot_karma_brigade_blocks',    'counter', 'Karma votes blocked by anti-brigade (DD9)');

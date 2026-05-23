@@ -35,6 +35,7 @@ our @EXPORT = qw(
     mbRemind_ctx
     mbRemindList_ctx
     mbRemindCancel_ctx
+    mbRemindSnooze_ctx
     deliverReminders
     mbCalcLast_ctx
     mbWordCount_ctx
@@ -77,6 +78,18 @@ our @EXPORT = qw(
     userOnJoin
     userStats_ctx
     userTopSay_ctx
+    mbKarmaWatch_ctx
+    mbKarmaDiff_ctx
+    mbKarmaGraph_ctx
+    mbKarmaInfo_ctx
+    mbKarmaReset_ctx
+    mbPollExtend_ctx
+    mbPollStatus_ctx
+    mbPollVoters_ctx
+    mbTriviaReset_ctx
+    mbTriviaStop_ctx
+    mbTriviaTop_ctx
+    mbUnvote_ctx
 );
 
 sub dbLogoutUsers {
@@ -2750,6 +2763,63 @@ sub mbRemindList_ctx {
     return 1;
 }
 
+
+# ---------------------------------------------------------------------------
+# mbRemindSnooze_ctx --- !remindsnooze <id> <+delay>  (FF7)
+# Postpone a pending reminder. Delay format: 1h, 30m, 2h30m, 1d.
+# ---------------------------------------------------------------------------
+sub mbRemindSnooze_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my ($id, $delay_str) = (shift @args, shift @args);
+    unless (defined $id && $id =~ /^\d+$/ && defined $delay_str) {
+        botNotice($self, $nick, 'Syntax: remindsnooze <id> <delay>  (e.g. 10 30m or 3 2h)');
+        return;
+    }
+    # Parse delay: 1h30m, 45m, 2d, etc.
+    my $secs = 0;
+    $secs += $1 * 86400 if $delay_str =~ /(\d+)d/;
+    $secs += $1 * 3600  if $delay_str =~ /(\d+)h/;
+    $secs += $1 * 60    if $delay_str =~ /(\d+)m/;
+    $secs += $1         if $delay_str =~ /(\d+)s/;
+    unless ($secs > 0) {
+        botNotice($self, $nick, "Invalid delay '$delay_str'. Use 1h, 30m, 2h30m, 1d...");
+        return;
+    }
+    my $new_ts = time() + $secs;
+
+    # Keep snooze SQL simple and portable: fetch current message, rewrite the
+    # [at:TS] prefix in Perl, then update the message with a normal placeholder.
+    my $sth2 = $self->{dbh}->prepare(
+        'UPDATE REMINDERS SET message = ? WHERE id_reminder = ? AND from_nick = ? AND delivered = 0'
+    );
+    # Fetch current message first
+    my $sth_get = $self->{dbh}->prepare(
+        'SELECT message FROM REMINDERS WHERE id_reminder = ? AND from_nick = ? AND delivered = 0'
+    );
+    unless ($sth_get && $sth_get->execute($id, lc($nick))) {
+        botNotice($self, $nick, 'DB error.'); return;
+    }
+    my $row = $sth_get->fetchrow_hashref; $sth_get->finish;
+    unless ($row) {
+        botNotice($self, $nick, "Reminder #$id not found or already delivered."); return;
+    }
+    my $msg = $row->{message} // '';
+    $msg =~ s/^\[at:\d+\]\s*//;  # strip existing timestamp tag
+    my $new_msg = "[at:$new_ts] $msg";
+    unless ($sth2 && $sth2->execute($new_msg, $id, lc($nick))) {
+        botNotice($self, $nick, 'DB error updating reminder.'); return;
+    }
+    $sth2->finish;
+    my $hm = sprintf('%dh%02dm', int($secs/3600), int(($secs%3600)/60));
+    botNotice($self, $nick, "Reminder #$id snoozed for $hm.");
+    return 1;
+}
+
 # ---------------------------------------------------------------------------
 # mbRemindCancel_ctx --- !remind cancel <id>
 # Cancel a pending reminder by ID (must be from the calling nick).
@@ -2763,8 +2833,21 @@ sub mbRemindCancel_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     my $id = shift @args;
+    # EE6: !remindcancel all — cancel all pending reminders set by caller
+    if (defined $id && lc($id) eq 'all') {
+        my $sth_a = $self->{dbh}->prepare(q{
+            UPDATE REMINDERS SET delivered = 1
+            WHERE from_nick = ? AND delivered = 0
+        });
+        unless ($sth_a && $sth_a->execute(lc($nick))) {
+            botNotice($self, $nick, 'DB error.'); return;
+        }
+        my $rows = $sth_a->rows; $sth_a->finish;
+        botNotice($self, $nick, "$rows pending reminder(s) cancelled.");
+        return 1;
+    }
     unless (defined $id && $id =~ /^\d+$/) {
-        botNotice($self, $nick, 'Syntax: remind cancel <id>  (see !remindlist)');
+        botNotice($self, $nick, 'Syntax: remind cancel <id>|all  (see !remindlist)');
         return;
     }
 
@@ -3163,6 +3246,15 @@ sub processKarma {
         }
         $self->{_karma_cooldown}{$channel}{$cd_key} = time();
     $self->{metrics}->inc('mediabot_karma_votes_total') if $self->{metrics};  # AA6
+    # FF1: notify watchers of this karma change
+    for my $watcher (keys %{ $self->{_karma_watch} // {} }) {
+        my $wlist = $self->{_karma_watch}{$watcher} // [];
+        if (grep { $_ eq $target } @$wlist) {
+            my $verb = ($2 eq '++') ? 'received ++' : 'received --';
+            Mediabot::Helpers::botNotice($self, $watcher,
+                "[karmawatch] $target $verb karma from $nick on $channel");
+        }
+    }
         my $delta = ($op eq '++') ? 1 : -1;
         my $sth = $self->{dbh}->prepare(q{
             INSERT INTO KARMA (id_channel, nick, score) VALUES (?, ?, ?)
@@ -3366,6 +3458,39 @@ sub mbLast_ctx {
 # ---------------------------------------------------------------------------
 # mbPoll_ctx --- !poll <question> | opt1 | opt2 ...
 # mbVote_ctx --- !vote <n>
+
+
+# ---------------------------------------------------------------------------
+# mbPollVoters_ctx --- !pollvoters  (EE7)
+# Show detailed vote breakdown. Requires Master level.
+# ---------------------------------------------------------------------------
+sub mbPollVoters_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    return unless $ctx->require_level('Master');
+    my $poll = $self->{_polls}{$channel};
+    unless ($poll && %{ $poll->{votes} // {} }) {
+        botNotice($self, $nick, 'No poll or no votes on this channel.'); return 1;
+    }
+    botNotice($self, $nick,
+        "Vote breakdown for \"$poll->{question}\":");
+    # Group voters by option index
+    my %by_opt;
+    for my $voter (sort keys %{ $poll->{votes} }) {
+        my $idx = $poll->{votes}{$voter};
+        push @{ $by_opt{$idx} }, $voter;
+    }
+    for my $idx (sort { $a <=> $b } keys %by_opt) {
+        my $label   = $poll->{options}[$idx] // "option $idx";
+        my @voters  = @{ $by_opt{$idx} };
+        botNotice($self, $nick,
+            sprintf('  [%d] %s (%d): %s',
+                $idx+1, $label, scalar @voters, join(', ', @voters)));
+    }
+    return 1;
+}
 
 # ---------------------------------------------------------------------------
 # mbPollStatus_ctx --- !pollstatus  (W8)
@@ -3599,13 +3724,23 @@ sub mbNote_ctx {
 
     my $text = join(' ', @args);
     $text =~ s/^\s+|\s+$//g;
+    # FF5: enforce max note length (200 chars)
+    if (length($text) > 200) {
+        botNotice($self, $nick,
+            sprintf('Note too long (%d chars, max 200). Please shorten it.', length($text)));
+        return 1;
+    }
     # Y3: !note export — send all notes in one private message
     if ($text =~ /^export$/i) {
-        my $notes = $self->{_notes}{$nick} // [];
+        my $notes = $self->{_notes}{lc $nick} // [];
         unless (@$notes) {
             botNotice($self, $nick, 'No notes to export.'); return 1;
         }
-        my $export = join(' | ', map { ($_ + 1) . ". $notes->[$_]" } 0..$#$notes);
+        my $export = join(' | ', map {
+            my $n = $notes->[$_];
+            my $txt = ref($n) eq 'HASH' ? ($n->{text} // '') : ($n // '');
+            ($_ + 1) . ". $txt"
+        } 0..$#$notes);
         botNotice($self, $nick, "Notes: $export");
         return 1;
     }
@@ -3613,24 +3748,27 @@ sub mbNote_ctx {
     # W7: !note search <mot> — search through notes
     if ($text =~ /^search\s+(.+)/i) {
         my $query = lc($1);
-        my $notes = $self->{_notes}{$nick} // [];
-        my @hits = grep { lc($_) =~ /\Q$query\E/ } @$notes;
+        my $notes = $self->{_notes}{lc $nick} // [];
+        my @hits = grep {
+            my $txt = ref($_) eq 'HASH' ? ($_->{text} // '') : ($_ // '');
+            lc($txt) =~ /\Q$query\E/
+        } @$notes;
+
         unless (@hits) {
             botNotice($self, $nick, "No notes matching '$query'."); return 1;
         }
+
         botNotice($self, $nick, scalar(@hits) . " note(s) matching '$query':");
         for my $i (0..$#hits) {
-            botNotice($self, $nick, "  [" . ($i+1) . "] $hits[$i]");
+            my $n = $hits[$i];
+            my $txt = ref($n) eq 'HASH' ? ($n->{text} // '') : ($n // '');
+            botNotice($self, $nick, "  [" . ($i+1) . "] $txt");
         }
         return 1;
     }
     unless ($text ne '') {
         botNotice($self, $nick, 'Syntax: note <message>  or  note search <word>'); return;
     }
-    if (length($text) > 256) {
-        botNotice($self, $nick, 'Note too long (max 256 chars).'); return;
-    }
-
     $self->{_notes}{lc $nick} //= [];
     if (scalar @{ $self->{_notes}{lc $nick} } >= 10) {
         botNotice($self, $nick, 'Max 10 notes reached. Delete some with !notes del <id>.'); return;
@@ -3708,6 +3846,52 @@ sub mbNotes_ctx {
 # mbKarmaReset_ctx --- !karmareset <nick>  (V3)
 # Reset a nick's karma to 0. Requires Admin level.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# mbKarmaWatch_ctx --- !karmawatch [nick]  (FF1)
+# Watch a nick's karma changes — receive a NOTICE when someone votes for them.
+# !karmawatch         → toggle watch on yourself
+# !karmawatch <nick>  → toggle watch on that nick
+# !karmawatch list    → show your active watches
+# ---------------------------------------------------------------------------
+sub mbKarmaWatch_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    # !karmawatch list
+    if (@args && lc($args[0]) eq 'list') {
+        my $watching = $self->{_karma_watch}{lc $nick} // [];
+        unless (@$watching) {
+            botNotice($self, $nick, 'You are not watching any karma targets.');
+            return 1;
+        }
+        botNotice($self, $nick, 'You are watching: ' . join(', ', @$watching));
+        return 1;
+    }
+
+    my $target = @args ? lc($args[0]) : lc($nick);
+    my $watchers = $self->{_karma_watch}{lc $nick} //= [];
+
+    # Toggle: add if not watching, remove if already watching
+    my $idx = do { my $i = 0; my $found = -1;
+        for (@$watchers) { $found = $i if $_ eq $target; $i++; } $found };
+    if ($idx >= 0) {
+        splice @$watchers, $idx, 1;
+        botNotice($self, $nick, "Stopped watching karma for $target.");
+    } else {
+        if (scalar @$watchers >= 5) {
+            botNotice($self, $nick, 'Max 5 watches reached. Remove one first (!karmawatch <nick> to toggle off).');
+            return 1;
+        }
+        push @$watchers, $target;
+        botNotice($self, $nick, "Now watching karma for $target. You will be notified of any votes.");
+    }
+    return 1;
+}
 
 # ---------------------------------------------------------------------------
 # mbKarmaInfo_ctx --- !karmainfo <nick>  (BB5)
@@ -3897,10 +4081,10 @@ sub mbKarmaTop_ctx {
     }
     return unless $id_channel;
 
-    my $sth = $self->{dbh}->prepare(q{
-        SELECT nick, score FROM KARMA
-        WHERE id_channel = ? ORDER BY score " . ($bottom_mode ? 'ASC' : 'DESC') . " LIMIT ?
-    });
+    my $order = $bottom_mode ? 'ASC' : 'DESC';
+    my $sth = $self->{dbh}->prepare(
+        "SELECT nick, score FROM KARMA WHERE id_channel = ? ORDER BY score $order LIMIT ?"
+    );
     unless ($sth && $sth->execute($id_channel, $n)) {
         botNotice($self, $nick, 'Database error.'); return;
     }
@@ -3913,12 +4097,25 @@ sub mbKarmaTop_ctx {
         return 1;
     }
 
-    botPrivmsg($self, $channel, "Karma top $n on $channel:");
+    # EE1: compute 24h delta per nick from _karma_log ring buffer
+    my $klog    = $self->{_karma_log}{$channel} // [];
+    my $now_ee1 = time();
+    my %delta24;
+    for my $e (@$klog) {
+        next unless ($now_ee1 - ($e->{ts} // 0)) < 86400;
+        $delta24{lc($e->{nick})} += (($e->{delta} // '') eq '+1' ? 1 : -1);
+    }
+    my $label = $bottom_mode ? "Karma bottom $n" : "Karma top $n";
+    botPrivmsg($self, $channel, "$label on $channel:");
     my $rank = 1;
     for my $r (@rows) {
         my $sign = $r->{score} > 0 ? '+' : '';
-        botPrivmsg($self, $channel, sprintf('  %2d. %-20s %s%d',
-            $rank++, $r->{nick}, $sign, $r->{score}));
+        my $d    = $delta24{lc($r->{nick})} // 0;
+        my $dstr = $d > 0 ? " (\x{2191}${d}today)"
+                 : $d < 0 ? " (\x{2193}" . abs($d) . "today)"
+                 : '';
+        botPrivmsg($self, $channel, sprintf('  %2d. %-20s %s%d%s',
+            $rank++, $r->{nick}, $sign, $r->{score}, $dstr));
     }
     return 1;
 }
@@ -4149,6 +4346,11 @@ sub mbChoose_ctx {
         } else {
             push @opts, $opt;
         }
+    }
+    # B-69-1/fix: guard against empty pool after dedup+weight
+    unless (@opts) {
+        botNotice($self, $nick, 'No valid options remain after deduplication.');
+        return 1;
     }
     unless (@opts >= 2) {
         botNotice($self, $nick, 'Syntax: choose <a> | <b>  or  choose <a> ou <b>  (at least 2)');

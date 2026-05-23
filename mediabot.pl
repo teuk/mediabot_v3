@@ -410,6 +410,13 @@ $scheduler->add(
         my $hist_count = scalar keys %{ $mediabot->{_claude_history} // {} };
         my $cd_count   = scalar keys %{ $mediabot->{_karma_cooldown}  // {} };
         my $db_ok = eval { $mediabot->{db}->ensure_connected; 1 } // 0;
+        # FF10: update uptime gauge outside the log string construction.
+        eval {
+            my $up = time() - ($mediabot->{_start_time} // time());
+            $mediabot->{metrics}->set('mediabot_uptime_seconds', $up)
+                if $mediabot->{metrics} && $mediabot->{metrics}->can('set');
+        };
+
         $mediabot->{logger}->log(3,
             "[health_check] uptime=$uptime_str db=" . ($db_ok ? 'ok' : 'FAIL')
             . " claude_sessions=$hist_count karma_cooldowns=$cd_count"
@@ -646,6 +653,7 @@ my $login = _do_login($irc, $bind_ip);
 eval { $login->get }; if ($@) { my $err = $@; $err =~ s/\n/ /g; $mediabot->{logger}->log(0, "Login Future failed: $err"); $mediabot->clean_and_exit(1); }
 
 # Start main loop
+$mediabot->{_start_time} = time();  # FF10: bot start time
 $loop->run;
 
 # +---------------------------------------------------------------------------+

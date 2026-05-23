@@ -1290,6 +1290,8 @@ sub mbCommandPublic {
         karmadiff    => sub { mbKarmaDiff_ctx($ctx) },
         karmgraph    => sub { mbKarmaGraph_ctx($ctx) },
         triviastop   => sub { mbTriviaStop_ctx($ctx) },
+        karmawatch   => sub { mbKarmaWatch_ctx($ctx) },
+        remindsnooze => sub { mbRemindSnooze_ctx($ctx) },
         karmainfo    => sub { mbKarmaInfo_ctx($ctx) },
         triviareset  => sub { mbTriviaReset_ctx($ctx) },
         triviatop    => sub { mbTriviaTop_ctx($ctx) },
@@ -1317,6 +1319,7 @@ sub mbCommandPublic {
         vote         => sub { mbVote_ctx($ctx) },
         pollresult   => sub { mbPollResult_ctx($ctx) },
         pollstatus   => sub { mbPollStatus_ctx($ctx) },
+        pollvoters   => sub { mbPollVoters_ctx($ctx) },
         unvote       => sub { mbUnvote_ctx($ctx) },
         pollstop     => sub { mbPollStop_ctx($ctx) },
         note         => sub { mbNote_ctx($ctx) },
@@ -1605,7 +1608,7 @@ yt|yt <query>|public|Search YouTube when configured.
 # --- Wave IV-V commands added 2025-2026 ---
 # Fun / random
 8ball|8ball <question>|public|Ask the Magic 8-ball a yes/no question.
-choose|choose <a>|b>|public|Random pick. Weight opt:N. 'ou' separator. Deduplicates identical options.
+choose|choose <a> | <b>|public|Random pick. Weight opt:N. Deduplicates (empty result → error).
 flip|flip|public|Flip a coin (heads or tails).
 morse|morse <text>|public|Encode text in Morse code.
 roll|roll [NdN]|public|Roll dice. Defaults to 1d6. Supports NdN format (e.g. 2d6, 1d20).
@@ -1627,6 +1630,7 @@ wordcount|wordcount [nick]|public|Count distinct words spoken by a nick on the c
 
 # Karma
 karma|karma [nick]|public|Show karma+rank. Subcommands: top, bottom, log, diff, graph [nick] (sparkline 7d).
+karmawatch|karmawatch [nick]|public|Watch a nick's karma. Get notified on any vote (max 5 watches). Toggle on/off.
 karmainfo|karmainfo <nick>|public|Detailed karma stats: received, given, top voter.
 karmgraph|karmgraph [nick]|public|ASCII sparkline of karma changes over the last 7 days.
 karmadiff|karmadiff [nick]|public|Show karma delta for nick in the last 24h.
@@ -1635,21 +1639,24 @@ karmatop|karmatop [n]|public|Show the top N karma scores (default 5). Use 'karma
 karmahist|karmahist [nick]|public|Show the last 5 karma changes on the channel (optionally filtered by nick).
 
 # Reminders
-remind|remind [!] <nick> <msg>|public|Set reminder. '!' = urgent ([!] prefix). Delay: 'dans 2h', 'in 30m'. Also: list, cancel, show.
-remindlist|remindlist|public|List your pending reminders with remaining time and urgent flag.
+remind|remind [!] <nick> <msg>|public|Set reminder. Subcommands: list, cancel <id>|all, show.
+remindsnooze|remindsnooze <id> <delay>|public|Snooze a reminder by 30m, 2h, 1d etc.
+remindlist|public|List your pending reminders with remaining time and urgent flag.
 
 # Quotes
 quotecount|quotecount [nick]|public|Count quotes by author on the channel.
+quote|quote [nick] | quote add <text> | quote count [nick]|public|Quote alias: fetch by nick, add a quote, or count quotes.
 
 # Notes (in-memory, reset on restart)
-note|note <msg>|public|Save a note (persistent in DB, max 10). Subcommands: search <w>, export.
+note|note <msg>|public|Save a note (max 200 chars, max 10). !notes to list/del/search/export.
 notes|notes [del <n>]|public|List or delete personal notes.
 
 # Polls
 poll|poll [secs] [weighted] <q> | opt1[:N] | opt2|public|Start a poll. 'weighted' enables weighted options (opt:N).
 pollextend|pollextend <secs>|public|Extend the current poll timer by N seconds (10-600).
 pollresult|pollresult|public|Show current or last poll results.
-pollstatus|pollstatus|public|Show the current poll status without closing it.
+pollvoters|pollvoters|master|Show who voted for what in the current poll.
+pollstatus|public|Show the current poll status without closing it.
 pollstop|pollstop|master|Close the active poll.
 unvote|unvote|public|Cancel your vote in the current poll.
 vote|vote <n>|public|Vote in the current poll. Shows live tally after each vote (U3).
@@ -1665,9 +1672,10 @@ triviascore|triviascore|public|Show trivia scores for the current channel sessio
 define|define <word>|public|Look up a word definition from Wiktionary.
 
 # AI
-ai|ai <prompt>|public|Ask Claude. Cache 60s per channel. Subcommands: summary, pin, relay, forget, models, reset, history, ai persona.
+ai|ai <prompt>|public|Ask Claude. Subcommands: summary, pin, relay, forget, models, stats, reset, history, ai persona.
 
 # Misc
+spike|spike|public|Show Spike memorial image.
 last|last <nick>|public|Show the last message posted by a nick on this channel.
 alias|alias <alias> <command>|owner|Create or manage IRC command aliases (alias list, alias del <alias>).
 MEDIABOT_INTERNAL_HELP

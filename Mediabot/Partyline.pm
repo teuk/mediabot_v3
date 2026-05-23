@@ -1207,6 +1207,9 @@ sub _handle_line {
     elsif ($line =~ /^\.unmute\s+(.*)/i) {
         $self->_cmd_unmute($stream, $id, $1);
     }
+    elsif ($line =~ /^\.kv\s+(.*)/i) {
+        $self->_cmd_kv($stream, $id, $1);
+    }
     elsif ($line =~ /^\.floodset\s+(.*)/i) {
         $self->_cmd_floodset($stream, $id, $1);
     }
@@ -1544,6 +1547,7 @@ sub _cmd_help {
       . "  .nickinfo <nick>    - show DB info for a registered nick\r\n"
       . "  .kick <nick> <#chan> [reason] - kick a nick from channel\r\n"
       . "  .unmute <nick>               - lift a CC3/AF7 temporary nick mute\r\n"
+      . "  .kv set|get|del|list [key] [val]- persistent in-memory key-value store\r\n"
       . "  .floodset <#chan> [w] [n] [s]- override AF4 params (window/max/silence)\r\n"
       . "  .cmdcooldown <#chan> <cmd> <s>- set per-cmd cooldown in seconds (CC1)\r\n"
       . "  .netsplit                    - show netsplit state and channel nicklist status\r\n"
@@ -3451,6 +3455,36 @@ sub _cmd_stat {
         $stream->write(sprintf("%-30s %-12s %-5d %-20s %s\r\n",
             $chan_name, $status, $nick_count, $owner, $chanset_str));
     }
+
+    # EE3: bottom section — uptime, Claude sessions, memory, AF state
+    $stream->write(("=" x 90) . "\r\n");
+    my $started  = $bot->{metrics} ? ($bot->{metrics}{started} // time()) : time();
+    my $uptime   = time() - $started;
+    my $ud = int($uptime/86400); my $uh = int(($uptime%86400)/3600);
+    my $um = int(($uptime%3600)/60);  my $us = $uptime%60;
+    $stream->write(sprintf("Uptime: %dd %02dh%02dm%02ds\r\n", $ud,$uh,$um,$us));
+
+    my $claude_sessions = scalar keys %{ $bot->{_claude_history} // {} };
+    my $ai_cache        = scalar keys %{ $bot->{_claude_prompt_cache} // {} };
+    $stream->write("Claude: $claude_sessions active session(s), $ai_cache cached prompt(s)\r\n");
+
+    my $mutes   = scalar grep { ($bot->{_nick_mute}{$_} // 0) > time() }
+                        keys %{ $bot->{_nick_mute} // {} };
+    my $sil_af  = scalar grep { ($_->{silenced_until} // 0) > time() }
+                        values %{ $bot->{_af} // {} };
+    my $sil_cf  = scalar grep { ($_->{silenced_until} // 0) > time() }
+                        values %{ $bot->{_chan_flood} // {} };
+    $stream->write("Flood: $sil_af chan(s) AF-silenced, $sil_cf chan(s) CF-silenced, "
+                 . "$mutes nick(s) muted\r\n");
+
+    if (eval { require Scalar::Util::Numeric; 1 } || 1) {
+        my $mem = 0;
+        if (open my $fh, '<', '/proc/self/status') {
+            while (<$fh>) { if (/^VmRSS:\s+(\d+)/) { $mem = int($1/1024); last; } }
+            close $fh;
+        }
+        $stream->write("Memory: ${mem} MB RSS\r\n") if $mem;
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -3979,10 +4013,27 @@ sub _cmd_who_chan {
             }
         };
     }
+    # FF3: fetch IRC modes (op/voice) from the IRC channel object
+    my %irc_flag;
+    eval {
+        my $irc = $bot->{irc};
+        if ($irc && $irc->is_connected) {
+            my $irc_chan = $irc->channel($chan);
+            if ($irc_chan) {
+                for my $n ($irc_chan->nicks) {
+                    my $mode = $irc_chan->mode_for_nick($n) // '';
+                    $irc_flag{lc($n->nick)} = $mode =~ /o/ ? '@'
+                                           : $mode =~ /v/ ? '+'
+                                           : '';
+                }
+            }
+        }
+    };
     my @lines;
     for my $nick (sort @nicks) {
-        my $lvl = $levels{lc $nick} ? " [" . $levels{lc $nick} . "]" : '';
-        push @lines, "$nick$lvl";
+        my $flag = $irc_flag{lc $nick} // '';
+        my $lvl  = $levels{lc $nick}   ? " [" . $levels{lc $nick} . "]" : '';
+        push @lines, "$flag$nick$lvl";
     }
     # Output in chunks of 8
     while (my @chunk = splice @lines, 0, 8) {
@@ -4018,6 +4069,53 @@ sub _cmd_unmute {
     }
 }
 
+sub _cmd_kv {
+    # FF8: in-memory key-value store — .kv set <key> <val>  .kv get <key>  .kv del <key>  .kv list
+    my ($self, $stream, $id, $args) = @_;
+    my $bot = $self->{bot};
+    unless (defined $args && $args =~ /^(\w+)(?:\s+(\S+)(?:\s+(.*))?)?/) {
+        $stream->write("Usage: .kv set <key> <value>  |  .kv get <key>  |  .kv del <key>  |  .kv list\r\n");
+        return;
+    }
+    my ($op, $key, $val) = (lc($1), $2, $3);
+    my $store = $bot->{_kv} //= {};
+    if ($op eq 'set') {
+        unless (defined $key && defined $val) {
+            $stream->write("Usage: .kv set <key> <value>\r\n"); return;
+        }
+        $store->{$key} = $val;
+        $stream->write("kv: $key = $val\r\n");
+    } elsif ($op eq 'get') {
+        unless (defined $key) {
+            $stream->write("Usage: .kv get <key>\r\n"); return;
+        }
+        if (exists $store->{$key}) {
+            $stream->write("kv: $key = $store->{$key}\r\n");
+        } else {
+            $stream->write("kv: key '$key' not found.\r\n");
+        }
+    } elsif ($op eq 'del') {
+        unless (defined $key) {
+            $stream->write("Usage: .kv del <key>\r\n"); return;
+        }
+        if (delete $store->{$key}) {
+            $stream->write("kv: '$key' deleted.\r\n");
+        } else {
+            $stream->write("kv: key '$key' not found.\r\n");
+        }
+    } elsif ($op eq 'list') {
+        unless (%$store) {
+            $stream->write("kv: store is empty.\r\n"); return;
+        }
+        $stream->write("kv store (" . scalar(keys %$store) . " entries):\r\n");
+        for my $k (sort keys %$store) {
+            $stream->write("  $k = $store->{$k}\r\n");
+        }
+    } else {
+        $stream->write("kv: unknown op '$op'. Use set/get/del/list.\r\n");
+    }
+}
+
 sub _cmd_floodset {
     my ($self, $stream, $id, $args) = @_;
     my $bot = $self->{bot};
@@ -4036,10 +4134,13 @@ sub _cmd_floodset {
     if ((defined $window && int($window) < 1) || (defined $max && int($max) < 1)) {
         $stream->write("Warning: values below 1 clamped to 1.\r\n");
     }
+    # FF6: optional warn-only mode — bot warns but does not silence
+    my $warn_only = ($args && $args =~ /\bwarn.?only\b/i) ? 1 : 0;
     $bot->{_chan_flood_conf}{$chan} = {
-        window  => $safe_window,
-        max     => $safe_max,
-        silence => $safe_silence,
+        window    => $safe_window,
+        max       => $safe_max,
+        silence   => $safe_silence,
+        warn_only => $warn_only,
     };
     # Also reset current flood state for this channel
     delete $bot->{_chan_flood}{$chan};
@@ -4047,7 +4148,8 @@ sub _cmd_floodset {
     my $w = $conf->{window}  // '(default)';
     my $m = $conf->{max}     // '(default)';
     my $s = $conf->{silence} // '(default)';
-    $stream->write("CC2: floodset $chan — window=$w max=$m silence=$s\r\n");
+    my $wo = $bot->{_chan_flood_conf}{$chan}{warn_only} ? ' warn-only' : '';
+    $stream->write("CC2: floodset $chan — window=$w max=$m silence=$s${wo}\r\n");
     $stream->write("Current flood state reset.\r\n");
 }
 
