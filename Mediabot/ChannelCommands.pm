@@ -528,8 +528,12 @@ sub channelSet_ctx {
             }
 
             my $sth = $self->{dbh}->prepare("INSERT INTO CHANNEL_SET (id_channel, id_chanset_list) VALUES (?, ?)");
-            $sth->execute($id_channel, $id_chanset_list);
-            $sth->finish if $sth;
+            # F1/fix: guard execute return
+            if ($sth && $sth->execute($id_channel, $id_chanset_list)) {
+                $sth->finish;
+            } else {
+                $self->{logger}->log(1, "channelSet_ctx INSERT failed: $DBI::errstr");
+            }
 
             botNotice($self, $nick, "Chanset +$chanset applied to $target_channel");
 
@@ -544,8 +548,12 @@ sub channelSet_ctx {
             }
 
             my $sth = $self->{dbh}->prepare("DELETE FROM CHANNEL_SET WHERE id_channel_set=?");
-            $sth->execute($id_channel_set);
-            $sth->finish if $sth;
+            # F1/fix: guard execute return (DELETE)
+            if ($sth && $sth->execute($id_channel_set)) {
+                $sth->finish;
+            } else {
+                $self->{logger}->log(1, "channelSet_ctx DELETE failed: $DBI::errstr");
+            }
 
             botNotice($self, $nick, "Chanset -$chanset removed from $target_channel");
         }
@@ -2012,9 +2020,12 @@ sub channelBans_ctx {
             # Calculate human-readable time remaining
             # B3/A3: $sth_now must be prepared once before the loop, not here
             # (prepared above; just execute and fetch)
-            $sth_now->execute($ban->{expires_at});
-            my $row = $sth_now->fetchrow_hashref;
-            my $secs = ($row && defined $row->{secs}) ? $row->{secs} : 0;
+            # G1/fix: guard undef $sth_now (prepare may fail when DB is down)
+            my $secs = 0;
+            if ($sth_now && $sth_now->execute($ban->{expires_at})) {
+                my $row = $sth_now->fetchrow_hashref;
+                $secs = ($row && defined $row->{secs}) ? $row->{secs} : 0;
+            }
 
             if ($secs <= 0) {
                 $expires_txt = 'expiring soon';

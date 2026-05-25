@@ -1473,8 +1473,9 @@ sub _set_user_tz {
     my ($self, $nick, $tz) = @_;
 
     my $sth = $self->{dbh}->prepare("UPDATE USER SET tz=? WHERE nickname = ?");
-    my $ok = $sth->execute($tz, $nick);
-    $sth->finish;
+    # C3/fix: guard prepare result before execute
+    my $ok = ($sth && $sth->execute($tz, $nick)) ? 1 : 0;
+    $sth->finish if $sth;
 
     return $ok;
 }
@@ -1484,8 +1485,9 @@ sub _del_user_tz {
     my ($self, $nick) = @_;
 
     my $sth = $self->{dbh}->prepare("UPDATE USER SET tz=NULL WHERE nickname = ?");
-    my $ok = $sth->execute($nick);
-    $sth->finish;
+    # C3/fix: guard prepare result before execute
+    my $ok = ($sth && $sth->execute($nick)) ? 1 : 0;
+    $sth->finish if $sth;
 
     return $ok;
 }
@@ -2707,7 +2709,13 @@ sub deliverReminders {
         my $sth_up = $dbh->prepare(q{
             UPDATE REMINDERS SET delivered = 1 WHERE id_reminder = ?
         });
-        if ($sth_up) { $sth_up->execute($r->{id_reminder}); $sth_up->finish; }
+            # C2/fix: test execute return to log delivery failures
+            if ($sth_up) {
+                unless ($sth_up->execute($r->{id_reminder})) {
+                    $self->{logger}->log(1, "deliverReminders: UPDATE failed for id=$r->{id_reminder}: $DBI::errstr");
+                }
+                $sth_up->finish;
+            }
     }
 }
 
@@ -2747,7 +2755,7 @@ sub mbRemindList_ctx {
     botNotice($self, $nick, "$total pending reminder(s) you have set:");
     for my $r (@rows) {
         my $msg = $r->{message} // '';
-        my $urgent = ($msg =~ /^\[!\]/) ? ' [URGENT]' : '';
+        # BX-12/fix: strip [at:TS] FIRST, then detect [!] urgent flag
         my $due_str = '';
         if ($msg =~ /^\[at:(\d+)\]\s*/) {
             my $sl = $1 - time();
@@ -2756,6 +2764,7 @@ sub mbRemindList_ctx {
                 : ' [overdue ' . _seconds_to_human(-$sl) . ' ago]';
             $msg =~ s/^\[at:\d+\]\s*//;
         }
+        my $urgent = ($msg =~ /^\[!\]/) ? ' [URGENT]' : '';  # detect after at: strip
         $msg =~ s/^\[!\]\s*//;  # strip urgent prefix from display
         botNotice($self, $nick, sprintf('  #%d -> %s%s: "%s"%s',
             $r->{id_reminder}, $r->{to_nick}, $due_str, $msg, $urgent));
@@ -3146,6 +3155,31 @@ sub mbKarma_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    # NEW: explicit karma vote syntax — !karma + <nick> or !karma - <nick>
+    # Replaces the fragile nick++/nick-- auto-detection (triggered on e.g. Notepad++).
+    if (@args >= 2 && ($args[0] eq '+' || $args[0] eq '-' || $args[0] eq '++' || $args[0] eq '--')) {
+        my $op     = ($args[0] eq '+' || $args[0] eq '++') ? '++' : '--';
+        my $ktarget = lc($args[1]);
+        # Reject self-karma
+        if ($ktarget eq lc($nick) || $ktarget eq lc(do { (my $t=$nick)=~s/\[.*?\]//g;$t })) {
+            botPrivmsg($self, $channel, "$nick: you can't change your own karma.");
+            return 1;
+        }
+        # Verify nick is present on channel
+        my @chan_nicks = eval { $self->gethChannelsNicksOnChan($channel) };
+        my $present = grep { lc($_) eq $ktarget || lc(do{(my $t=$_)=~s/\[.*?\]//g;$t}) eq $ktarget } @chan_nicks;
+        unless ($present) {
+            botPrivmsg($self, $channel, "$nick: $ktarget is not on this channel.");
+            return 1;
+        }
+        # Route through processKarma with a synthetic text
+        my $synthetic = "$ktarget$op";
+        eval { processKarma($self, $nick, $channel, $synthetic) };
+        botNotice($self, $nick, "Error: $@") if $@;
+        return 1;
+    }
+
     my $target  = $args[0] ? lc($args[0]) : lc($nick);
 
     my $sth_chan = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
@@ -3199,10 +3233,21 @@ sub processKarma {
     my $id_channel = $r ? $r->{id_channel} : undef;
     return unless $id_channel;
 
+    # NOTE: nick++/nick-- auto-detection is kept but gated:
+    #   1. The ++ or -- must be at end-of-word (not followed by non-space/non-punct)
+    #   2. The target nick must be present on the channel
+    # Use '!karma + <nick>' for reliable explicit votes.
     my $karma_hits = 0;  # C2/fix: cap at 3 karma changes per message
-    while ($text =~ /([^\s+\-]{2,32})(\+\+|--)/g) {
+    my @chan_nicks_pk = eval { $self->gethChannelsNicksOnChan($channel) };
+    while ($text =~ /([^\s+\-]{2,32})(\+\+|--)(?![\w+\-])/g) {
         last if ++$karma_hits > 3;
         my ($target, $op) = (lc($1), $2);
+        # PRESENCE CHECK: target must be on the channel
+        my $on_chan = grep {
+            lc($_) eq $target
+            || lc(do { (my $t = $_) =~ s/\[.*?\]//g; $t }) eq $target
+        } @chan_nicks_pk;
+        unless ($on_chan) { next; }  # silently skip — not on channel
         # Self-karma: block and notify
         if ($target eq lc($nick) || $target eq lc(do { (my $t = $nick) =~ s/\[.*?\]//g; $t })) {
             Mediabot::Helpers::botPrivmsg($self, $channel,
@@ -3247,10 +3292,11 @@ sub processKarma {
         $self->{_karma_cooldown}{$channel}{$cd_key} = time();
     $self->{metrics}->inc('mediabot_karma_votes_total') if $self->{metrics};  # AA6
     # FF1: notify watchers of this karma change
+    # B2/fix: use $op (captured at loop start) not $2 (regex global — stale)
     for my $watcher (keys %{ $self->{_karma_watch} // {} }) {
         my $wlist = $self->{_karma_watch}{$watcher} // [];
         if (grep { $_ eq $target } @$wlist) {
-            my $verb = ($2 eq '++') ? 'received ++' : 'received --';
+            my $verb = ($op eq '++') ? 'received ++' : 'received --';
             Mediabot::Helpers::botNotice($self, $watcher,
                 "[karmawatch] $target $verb karma from $nick on $channel");
         }
@@ -3977,9 +4023,13 @@ sub mbKarmaGraph_ctx {
             $spark .= $spark_pos[$idx];
         }
     }
-    my $total = 0; $total += ($_ eq '+1' ? 1 : -1)
-        for map { $_->{delta} } grep { lc($_->{nick}) eq $target
-            && $now - $_->{ts} < $days * 86400 } @$klog;
+    # B5/fix: guard against undef delta in _karma_log entries
+    my $total = 0;
+    $total += (($_ // '') eq '+1' ? 1 : -1)
+        for map { $_->{delta} } grep {
+            defined $_->{delta} && lc($_->{nick}) eq $target
+            && $now - ($_->{ts} // 0) < $days * 86400
+        } @$klog;
     my $sign = $total >= 0 ? '+' : '';
     botPrivmsg($self, $channel,
         "karma graph $target (7d) $spark  net: ${sign}${total}");
@@ -4352,8 +4402,12 @@ sub mbChoose_ctx {
         botNotice($self, $nick, 'No valid options remain after deduplication.');
         return 1;
     }
+    # BX-5/fix: better message when only 1 option remains
     unless (@opts >= 2) {
-        botNotice($self, $nick, 'Syntax: choose <a> | <b>  or  choose <a> ou <b>  (at least 2)');
+        my $msg = scalar(@opts) == 1
+            ? "Only one option left after deduplication — nothing to choose from."
+            : 'Syntax: choose <a> | <b>  or  choose <a> ou <b>  (at least 2 options).';
+        botNotice($self, $nick, $msg);
         return;
     }
     my $choice = $opts[int(rand(scalar @opts))];

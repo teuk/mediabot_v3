@@ -2575,35 +2575,95 @@ sub _cmd_purgereminders {
 # ---------------------------------------------------------------------------
 sub _cmd_karma {
     my ($self, $stream, $id, $args) = @_;
+
     my $bot = $self->{bot};
     my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
-    return unless $dbh;
+
+    unless ($dbh) {
+        $stream->write("DB error.\r\n");
+        return;
+    }
+
     my ($target, $chan) = split /\s+/, ($args // ''), 2;
-    unless ($target) { $stream->write("Usage: .karma <nick> [#channel]\r\n"); return; }
-    unless ($chan) {
-        # Use first joined channel
-        my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
-        for my $name (sort keys %{ $bot->{channels} || {} }) {
-            my @n = eval { $bot->gethChannelsNicksOnChan($name) };
-            if (grep { lc($_) eq lc($bot_nick) } @n) { $chan = $name; last; }
+    unless ($target) {
+        $stream->write("Usage: .karma <nick> [#channel]\r\n");
+        return;
+    }
+
+    my $target_lc = lc($target);
+
+    # Explicit channel: keep old useful behavior and show zero if no row exists.
+    if (defined $chan && $chan =~ /^#/) {
+        my $sth_c = $dbh->prepare(
+            'SELECT id_channel, name FROM CHANNEL WHERE LOWER(name) = LOWER(?)'
+        );
+
+        unless ($sth_c && $sth_c->execute($chan)) {
+            $stream->write("DB error.\r\n");
+            return;
         }
+
+        my $c = $sth_c->fetchrow_hashref;
+        $sth_c->finish;
+
+        unless ($c && $c->{id_channel}) {
+            $stream->write("Channel $chan not found.\r\n");
+            return;
+        }
+
+        my $sth = $dbh->prepare(
+            'SELECT score FROM KARMA WHERE id_channel = ? AND nick = ?'
+        );
+
+        unless ($sth && $sth->execute($c->{id_channel}, $target_lc)) {
+            $stream->write("DB error.\r\n");
+            return;
+        }
+
+        my $row = $sth->fetchrow_hashref;
+        $sth->finish;
+
+        my $score = $row ? ($row->{score} // 0) : 0;
+        my $sign  = $score > 0 ? '+' : '';
+
+        $stream->write("$target on $c->{name}: karma ${sign}${score}\r\n");
+        return;
     }
-    unless ($chan) { $stream->write("No channel found.\r\n"); return; }
-    my $sth_c = $dbh->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
-    my $id_channel;
-    if ($sth_c && $sth_c->execute($chan)) {
-        my $r = $sth_c->fetchrow_hashref; $sth_c->finish;
-        $id_channel = $r->{id_channel} if $r;
+
+    # No explicit channel: show only non-zero karma across all channels.
+    # This avoids the old misleading behavior: first joined channel, often 0.
+    my $sth = $dbh->prepare(q{
+        SELECT c.name AS channel, k.score AS score
+        FROM KARMA k
+        JOIN CHANNEL c ON c.id_channel = k.id_channel
+        WHERE LOWER(k.nick) = ?
+          AND k.score <> 0
+        ORDER BY ABS(k.score) DESC, k.score DESC, c.name ASC
+    });
+
+    unless ($sth && $sth->execute($target_lc)) {
+        $stream->write("DB error.\r\n");
+        return;
     }
-    unless ($id_channel) { $stream->write("Channel $chan not found.\r\n"); return; }
-    my $sth = $dbh->prepare('SELECT score FROM KARMA WHERE id_channel = ? AND nick = ?');
-    unless ($sth && $sth->execute($id_channel, lc($target))) {
-        $stream->write("DB error.\r\n"); return;
+
+    my @rows;
+    while (my $r = $sth->fetchrow_hashref) {
+        push @rows, $r;
     }
-    my $row   = $sth->fetchrow_hashref; $sth->finish;
-    my $score = $row ? $row->{score} : 0;
-    my $sign  = $score > 0 ? '+' : '';
-    $stream->write("$target on $chan: karma ${sign}${score}\r\n");
+    $sth->finish;
+
+    unless (@rows) {
+        $stream->write("$target has no karma on any channel.\r\n");
+        return;
+    }
+
+    $stream->write("Karma for $target:\r\n");
+    for my $r (@rows) {
+        my $score = $r->{score} // 0;
+        my $sign  = $score > 0 ? '+' : '';
+        $stream->write(sprintf("  %-25s %s%d\r\n",
+            $r->{channel} // '?', $sign, $score));
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -2713,38 +2773,76 @@ sub _cmd_ai {
 
     my $bot = $self->{bot};
     unless (defined $prompt && $prompt =~ /\S/) {
-        $stream->write("Usage: .ai <prompt> | .ai reset | .ai history\r\n"); return;
+        $stream->write("Usage: .ai <prompt> | .ai reset | .ai history | .ai quota | .ai stats | .ai models | .ai forget | .ai pin [clear|text] | .ai summary [n]\r\n");
+        return;
     }
+
+    $prompt =~ s/^\s+|\s+$//g;
 
     my $session = $self->{users}{$id} // {};
     my $pl_nick = $session->{login} // 'partyline';
 
-    # A3: resolve channel for shared history key (Partyline nick + fixed scope)
+    # Resolve a stable Partyline AI scope. We use the first active joined
+    # channel when possible, otherwise a dedicated partyline scope.
     my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
     my $chan;
     for my $name (sort keys %{ $bot->{channels} || {} }) {
         my @n = eval { $bot->gethChannelsNicksOnChan($name) };
-        if (grep { lc($_) eq lc($bot_nick) } @n) { $chan = $name; last; }
+        if (grep { lc($_) eq lc($bot_nick) } @n) {
+            $chan = $name;
+            last;
+        }
     }
     $chan //= 'partyline';
 
-    # A3: .ai reset — clear history for this Partyline session
-    if (lc($prompt) eq 'reset') {
+    my ($subcmd, $rest) = split /\s+/, $prompt, 2;
+    $subcmd = lc($subcmd // '');
+    $rest //= '';
+
+    # .ai reset — clear history for this Partyline AI scope.
+    if ($subcmd eq 'reset') {
         my $hist_key = "$pl_nick\x00$chan";
         delete $bot->{_claude_history}{$hist_key};
         $stream->write("Conversation history cleared.\r\n");
         return;
     }
 
-    # A3: .ai history — show current context
-    if (lc($prompt) eq 'history') {
+    # .ai forget — clear history, persona and pinned context for this scope.
+    if ($subcmd eq 'forget') {
+        my $hist_key_raw = "$pl_nick\x00$chan";
+        my $hist_key_lc  = lc($pl_nick) . "\x00$chan";
+
+        my $had = 0;
+        for my $key ($hist_key_raw, $hist_key_lc) {
+            $had ||= exists $bot->{_claude_history}{$key};
+            $had ||= exists $bot->{_claude_persona}{$key};
+            $had ||= exists $bot->{_claude_pinned}{$key};
+
+            delete $bot->{_claude_history}{$key};
+            delete $bot->{_claude_persona}{$key};
+            delete $bot->{_claude_pinned}{$key};
+        }
+
+        $stream->write($had
+            ? "Claude history, persona and pinned context cleared for $pl_nick on $chan.\r\n"
+            : "No active Claude session found for $pl_nick on $chan.\r\n");
+        return;
+    }
+
+    # .ai history — show current context.
+    if ($subcmd eq 'history') {
         my $hist_key = "$pl_nick\x00$chan";
         my $history  = $bot->{_claude_history}{$hist_key} // [];
+
         unless (@$history) {
-            $stream->write("No conversation history.\r\n"); return;
+            $stream->write("No conversation history.\r\n");
+            return;
         }
+
         $stream->write(scalar(@$history) . " message(s) in context:\r\n");
-        for my $msg (@$history) {
+        my @display = @$history > 6 ? @{$history}[-6..-1] : @$history;
+
+        for my $msg (@display) {
             my $role    = $msg->{role}    // '?';
             my $content = $msg->{content} // '';
             $content = substr($content, 0, 120) . '...' if length($content) > 120;
@@ -2753,7 +2851,137 @@ sub _cmd_ai {
         return;
     }
 
-    # R1: use $output_fn callback — no monkey-patching needed
+    # .ai quota — show own Claude rate limit.
+    if ($subcmd eq 'quota') {
+        return $self->_cmd_quota($stream, $id, lc($pl_nick));
+    }
+
+    # .ai stats — same idea as .aistats, but available as a real .ai subcommand.
+    if ($subcmd eq 'stats') {
+        my $reqs = eval { $bot->{metrics}->get('mediabot_claude_requests_total') } // 0;
+        my $errs = eval { $bot->{metrics}->get('mediabot_claude_errors_total') }   // 0;
+        my $rl   = eval { $bot->{metrics}->get('mediabot_claude_ratelimit_total') } // 0;
+        my $hc   = scalar keys %{ $bot->{_claude_history} // {} };
+        my $pc   = scalar keys %{ $bot->{_claude_persona} // {} };
+        my $pin  = scalar keys %{ $bot->{_claude_pinned}  // {} };
+
+        $stream->write("Claude stats:\r\n");
+        $stream->write("  Requests     : $reqs\r\n");
+        $stream->write("  Errors       : $errs\r\n");
+        $stream->write("  Rate-limited : $rl\r\n");
+        $stream->write("  Histories    : $hc\r\n");
+        $stream->write("  Personas     : $pc\r\n");
+        $stream->write("  Pinned ctx   : $pin\r\n");
+        return;
+    }
+
+    # .ai model / .ai models — show known model list and current config.
+    if ($subcmd eq 'model' || $subcmd eq 'models') {
+        my @known = qw(
+            claude-opus-4-6
+            claude-sonnet-4-6
+            claude-haiku-4-5-20251001
+        );
+
+        my $current = eval { $bot->{conf}->get('anthropic.MODEL') } || 'unknown';
+        my @labeled = map { $_ eq $current ? "$_ (current)" : $_ } @known;
+
+        $stream->write("Current Claude model: $current\r\n");
+        $stream->write("Known Claude models:\r\n");
+        $stream->write("  $_\r\n") for @labeled;
+        return;
+    }
+
+    # .ai pin            — show pinned context
+    # .ai pin clear      — clear pinned context
+    # .ai pin <text>     — set pinned context
+    if ($subcmd eq 'pin') {
+        my $pin_key = lc($pl_nick) . "\x00$chan";
+        my $action = $rest;
+        $action =~ s/^\s+|\s+$//g;
+
+        if ($action eq '') {
+            my $current = $bot->{_claude_pinned}{$pin_key};
+            $stream->write($current
+                ? "Pinned context for $pl_nick on $chan: $current\r\n"
+                : "No pinned context for $pl_nick on $chan.\r\n");
+            return;
+        }
+
+        if (lc($action) eq 'clear') {
+            delete $bot->{_claude_pinned}{$pin_key};
+            $stream->write("Pinned context cleared for $pl_nick on $chan.\r\n");
+            return;
+        }
+
+        my $pinned = substr($action, 0, 300);
+        $bot->{_claude_pinned}{$pin_key} = $pinned;
+        $stream->write("Pinned context set for $pl_nick on $chan: $pinned\r\n");
+        return;
+    }
+
+    # .ai summary [n] — summarize recent CHANNEL_LOG messages for the resolved scope.
+    if ($subcmd eq 'summary') {
+        my $n_msgs = ($rest =~ /^\s*(\d+)/) ? int($1) : 10;
+        $n_msgs = 5  if $n_msgs < 5;
+        $n_msgs = 50 if $n_msgs > 50;
+
+        if (!defined $chan || $chan eq 'partyline') {
+            $stream->write("No IRC channel available for summary.\r\n");
+            return;
+        }
+
+        my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+        unless ($dbh) {
+            $stream->write("DB error.\r\n");
+            return;
+        }
+
+        my $sth = $dbh->prepare(q{
+            SELECT cl.nick, cl.publictext AS text
+            FROM CHANNEL_LOG cl
+            JOIN CHANNEL c ON c.id_channel = cl.id_channel
+            WHERE c.name = ?
+              AND cl.publictext IS NOT NULL
+              AND cl.publictext <> ''
+            ORDER BY cl.id_channel_log DESC
+            LIMIT ?
+        });
+
+        unless ($sth && $sth->execute($chan, $n_msgs)) {
+            $stream->write("DB error.\r\n");
+            return;
+        }
+
+        my @rows;
+        while (my $r = $sth->fetchrow_hashref) {
+            unshift @rows, "$r->{nick}: $r->{text}";
+        }
+        $sth->finish;
+
+        unless (@rows) {
+            $stream->write("No recent messages found on $chan.\r\n");
+            return;
+        }
+
+        my $transcript = join("\n", @rows);
+        my $summary_prompt = "Summarise this IRC conversation from $chan in 2-3 sentences:\n$transcript";
+
+        my $output_fn = sub {
+            my ($text) = @_;
+            $text =~ s/[\r\n]+$//;
+            $stream->write("[Claude] $text\r\n");
+        };
+
+        eval {
+            Mediabot::External::claudeAI($bot, undef, $pl_nick, $chan,
+                $output_fn, $summary_prompt);
+        };
+        $stream->write("Error: $@\r\n") if $@;
+        return;
+    }
+
+    # Normal .ai <prompt> path.
     my $output_fn = sub {
         my ($text) = @_;
         $text =~ s/[\r\n]+$//;

@@ -1234,9 +1234,10 @@ sub checkChanFlood {
         # FF6: warn-only mode — notify but do not actually silence
         my $warn_only = $self->{_chan_flood_conf}{$channel}{warn_only} // 0;
         $st->{silenced_until} = $warn_only ? 0 : ($now + $silence);
+        # B4/fix: log message reflects actual mode (warn-only vs silencing)
         $self->{logger}->log(1,
             "checkChanFlood/AF4: $channel — $count cmds in last ${window}s "
-            . "(max $max_cmds) — silencing ${silence}s");
+            . "(max $max_cmds) — " . ($warn_only ? 'warn-only' : "silencing ${silence}s"));
         if (($now - $st->{notified_at}) >= $notify_cd) {
             $st->{notified_at} = $now;
             noticeConsoleChan($self,

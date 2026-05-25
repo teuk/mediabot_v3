@@ -3497,7 +3497,12 @@ sub claudeAI {
         if ($dd1_cached && (time() - $dd1_cached->{ts}) < 60) {
             $self->{logger}->log(3, "DD1: Claude cache hit — skipping API call");
             my @chunk = Mediabot::External::_chatgpt_wrap($dd1_cached->{answer}, 400);
-            botPrivmsg($self, $chan, $_) for @chunk;
+            # DD1/fix: $chan may be undef in private context — use botNotice then
+            if (defined $chan) {
+                botPrivmsg($self, $chan, $_) for @chunk;
+            } else {
+                botNotice($self, $nick, $_) for @chunk;
+            }
             return 1;
         }
     }
@@ -3577,9 +3582,12 @@ sub claudeAI {
         return;
     }
 
-    # F53: prompt cache — same exact prompt answered within 60s → skip API
+    # F53: prompt cache — same exact prompt answered within 60s → skip API.
+    # Digest::MD5 works on bytes, not Perl wide-character strings.
+    # IRC logs/prompts may contain UTF-8 text, accents, emojis or block chars,
+    # so encode explicitly before hashing.
     require Digest::MD5;
-    my $prompt_key = Digest::MD5::md5_hex(lc($prompt));
+    my $prompt_key = Digest::MD5::md5_hex(encode('UTF-8', lc($prompt // '')));
     my $pcache     = $self->{_claude_prompt_cache}{$prompt_key};
     if ($pcache && (time() - $pcache->{ts}) < 60) {
         $self->{logger}->log(4, 'claudeAI() prompt cache hit');

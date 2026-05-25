@@ -1361,8 +1361,8 @@ sub on_message_PRIVMSG {
         # F13: deliver pending reminders on every public channel message
         eval { Mediabot::UserCommands::deliverReminders($mediabot, $who, $where) };
         if ($@) { $mediabot->{logger}->log(1, "deliverReminders error: $@"); }
-        # F24: detect nick++/nick-- karma
-        eval { Mediabot::UserCommands::processKarma($mediabot, $who, $where, $what) };
+        # F24: nick++/nick-- auto-detection DISABLED — use '!karma + <nick>' / '!karma - <nick>'
+        # eval { Mediabot::UserCommands::processKarma($mediabot, $who, $where, $what) };
         # F38: check trivia answers on every public message
         eval { Mediabot::UserCommands::checkTriviaAnswer($mediabot, $who, $where, $what) };
         }

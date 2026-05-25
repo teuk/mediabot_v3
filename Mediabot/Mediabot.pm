@@ -1629,7 +1629,7 @@ when|when <nick>|public|Show when a nick first appeared on the channel.
 wordcount|wordcount [nick]|public|Count distinct words spoken by a nick on the channel.
 
 # Karma
-karma|karma [nick]|public|Show karma+rank. Subcommands: top, bottom, log, diff, graph [nick] (sparkline 7d).
+karma|karma [+/-/++/--] [nick]|public|Show karma or vote: !karma + <nick> / !karma - <nick>. Requires nick on channel.
 karmawatch|karmawatch [nick]|public|Watch a nick's karma. Get notified on any vote (max 5 watches). Toggle on/off.
 karmainfo|karmainfo <nick>|public|Detailed karma stats: received, given, top voter.
 karmgraph|karmgraph [nick]|public|ASCII sparkline of karma changes over the last 7 days.
