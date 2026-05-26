@@ -95,7 +95,7 @@ sub get_channel_by_name {
         return undef;
     }
 
-    unless ($sth->execute($name)) {
+    unless ($sth && $sth->execute($name)) {
         $self->{logger}->log(1, "get_channel_by_name() SQL execute error: $DBI::errstr Query: $sql")
             if $self->{logger};
         # B26cc/fix: execute failed, no open cursor
@@ -167,7 +167,7 @@ sub channelList_ctx {
         return;
     }
 
-    unless ($sth->execute()) {
+    unless ($sth && $sth->execute()) {
         $self->{logger}->log(1, "channelList_ctx() SQL execute error: $DBI::errstr | Query: $sql")
             if $self->{logger};
         # B26cc/fix: execute failed, no open cursor
@@ -220,7 +220,7 @@ sub registerChannel {
 	my ($self,$message,$sNick,$id_channel,$id_user) = @_;
 	my $sQuery = "INSERT INTO USER_CHANNEL (id_user,id_channel,level) VALUES (?,?,500)";
 	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($id_user,$id_channel)) {
+	unless ($sth && $sth->execute($id_user,$id_channel)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 		# B26cc/fix: execute failed, no open cursor
 		return 0;
@@ -2828,7 +2828,7 @@ SQL
 
     my $mask = '%@' . $hostname_like;
 
-    unless ($sth->execute($id_channel, $mask)) {
+    unless ($sth && $sth->execute($id_channel, $mask)) {
         $self->{logger}->log(1, "mbDbCheckHostnameNickChan_ctx() SQL Error: $DBI::errstr Query: $sql");
         return;
     }
@@ -3530,7 +3530,7 @@ sub getChannelOwner {
 	my $sQuery = "SELECT USER.nickname FROM USER JOIN USER_CHANNEL ON USER_CHANNEL.id_user = USER.id_user WHERE USER_CHANNEL.id_channel = ? AND USER_CHANNEL.level = 500";
 	my $sth = $self->{dbh}->prepare($sQuery);
 
-	unless ($sth->execute($id_channel)) {
+	unless ($sth && $sth->execute($id_channel)) {
 		$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
 		return undef;
 	}
@@ -3785,7 +3785,7 @@ sub setTMDBLangChannel_ctx {
 
     my $sQuery = "UPDATE CHANNEL SET tmdb_lang = ? WHERE id_channel = ?";
     my $sth    = $self->{dbh}->prepare($sQuery);
-    unless ($sth->execute($lang, $id_channel)) {
+    unless ($sth && $sth->execute($lang, $id_channel)) {
         $self->{logger}->log(1, "SQL Error: " . $DBI::errstr . " Query: " . $sQuery);
         botNotice($self, $nick, "Database error while updating tmdb_lang.");
         return;
@@ -3800,7 +3800,7 @@ sub getTMDBLangChannel {
 	my ($self, $sChannel) = @_;
 	my $sQuery = "SELECT tmdb_lang FROM CHANNEL WHERE name = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel)) {
+	unless ($sth && $sth->execute($sChannel)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {

@@ -2052,13 +2052,18 @@ sub _handle_x_twitter {
 
     # X is rendered/client-heavy.  Go directly through Chromium, the same
     # strategy used for stubborn Facebook shells.
-    my $dom = _fetch_url_chromium_dumpdom(
+    # XT1/fix: eval around chromium call — external process may die/timeout
+    my $dom = eval { _fetch_url_chromium_dumpdom(
         $self,
         $x_url,
         virtual_time_budget => 6500,
         alarm_timeout       => 16,
         lang                => 'fr-FR',
-    );
+    ) };
+    if ($@) {
+        $self->{logger}->log(1, "_handle_x_twitter() chromium error: $@");
+        return undef;
+    }
 
     if (defined $dom && $dom ne '') {
         my $len = length($dom);
@@ -2220,76 +2225,85 @@ sub displayUrlTitle {
     $self->{logger}->log(4, "displayUrlTitle() RAW input: $sText");
 
     my $url = _extract_url($sText);
-    unless (defined $url && $url =~ /^https?:\/\//i) {
-        $self->{logger}->log(4, "displayUrlTitle() no valid URL found in: $sText");
-        return undef;
-    }
-
-    $self->{logger}->log(4, "displayUrlTitle() URL: $url");
-
-    # ── 1. YouTube ─────────────────────────────────────────────────────────
-    # All YouTube URL variants (watch, shorts, live, youtu.be, nocookie, m., music.)
-    my $yt_id = _is_youtube_url($url);
-    if (defined $yt_id) {
-        unless (_chanset_ok($self, $sChannel, 'Youtube')) {
-            $self->{logger}->log(4, "displayUrlTitle() YouTube chanset not enabled on $sChannel");
+    my $captured_url = $url // '(unknown)';  # DU1/fix: capture before eval scope
+    my $result = eval {
+    
+        unless (defined $url && $url =~ /^https?:\/\//i) {
+            $self->{logger}->log(4, "displayUrlTitle() no valid URL found in: $sText");
             return undef;
         }
-        # Delegate to displayYoutubeDetails which uses the YouTube Data API v3
-        return displayYoutubeDetails($self, $message, $sNick, $sChannel, $url);
-    }
-
-    # ── 2. Instagram ───────────────────────────────────────────────────────
-    if ($url =~ /instagram\.com/i) {
+    
+        $self->{logger}->log(4, "displayUrlTitle() URL: $url");
+    
+        # ── 1. YouTube ─────────────────────────────────────────────────────────
+        # All YouTube URL variants (watch, shorts, live, youtu.be, nocookie, m., music.)
+        my $yt_id = _is_youtube_url($url);
+        if (defined $yt_id) {
+            unless (_chanset_ok($self, $sChannel, 'Youtube')) {
+                $self->{logger}->log(4, "displayUrlTitle() YouTube chanset not enabled on $sChannel");
+                return undef;
+            }
+            # Delegate to displayYoutubeDetails which uses the YouTube Data API v3
+            return displayYoutubeDetails($self, $message, $sNick, $sChannel, $url);
+        }
+    
+        # ── 2. Instagram ───────────────────────────────────────────────────────
+        if ($url =~ /instagram\.com/i) {
+            unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
+                $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Instagram)");
+                return undef;
+            }
+            return _handle_instagram($self, $message, $sNick, $sChannel, $url);
+        }
+    
+        # ── 3. Spotify ─────────────────────────────────────────────────────────
+        if ($url =~ /open\.spotify\.com/i) {
+            unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
+                $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Spotify)");
+                return undef;
+            }
+            return _handle_spotify($self, $message, $sNick, $sChannel, $url);
+        }
+    
+        # ── 4. Apple Music ─────────────────────────────────────────────────────
+        if ($url =~ /music\.apple\.com/i) {
+            unless (_chanset_ok($self, $sChannel, 'AppleMusic')) {
+                $self->{logger}->log(4, "displayUrlTitle() AppleMusic chanset not enabled on $sChannel");
+                return undef;
+            }
+            return _handle_applemusic($self, $message, $sNick, $sChannel, $url);
+        }
+    
+        # ── 5. Facebook ────────────────────────────────────────────────────────
+        if ($url =~ m{https?://(?:www\.)?facebook\.com(?:/|$)}i) {
+            unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
+                $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Facebook)");
+                return undef;
+            }
+            return _handle_facebook($self, $message, $sNick, $sChannel, $url);
+        }
+    
+        # ── 6. X / Twitter ─────────────────────────────────────────────────────
+        if ($url =~ m{https?://(?:www\.)?(?:x|twitter)\.com(?:/|$)}i) {
+            unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
+                $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (X/Twitter)");
+                return undef;
+            }
+            return _handle_x_twitter($self, $message, $sNick, $sChannel, $url);
+        }
+    
+        # ── 7. Generic ─────────────────────────────────────────────────────────
         unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
-            $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Instagram)");
+            $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel");
             return undef;
         }
-        return _handle_instagram($self, $message, $sNick, $sChannel, $url);
+        return _handle_generic_title($self, $message, $sNick, $sChannel, $url);
+    };
+    if ($@) {
+        $self->{logger}->log(1, "displayUrlTitle() error for $captured_url: $@");
     }
+    return $result;
 
-    # ── 3. Spotify ─────────────────────────────────────────────────────────
-    if ($url =~ /open\.spotify\.com/i) {
-        unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
-            $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Spotify)");
-            return undef;
-        }
-        return _handle_spotify($self, $message, $sNick, $sChannel, $url);
-    }
-
-    # ── 4. Apple Music ─────────────────────────────────────────────────────
-    if ($url =~ /music\.apple\.com/i) {
-        unless (_chanset_ok($self, $sChannel, 'AppleMusic')) {
-            $self->{logger}->log(4, "displayUrlTitle() AppleMusic chanset not enabled on $sChannel");
-            return undef;
-        }
-        return _handle_applemusic($self, $message, $sNick, $sChannel, $url);
-    }
-
-    # ── 5. Facebook ────────────────────────────────────────────────────────
-    if ($url =~ m{https?://(?:www\.)?facebook\.com(?:/|$)}i) {
-        unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
-            $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Facebook)");
-            return undef;
-        }
-        return _handle_facebook($self, $message, $sNick, $sChannel, $url);
-    }
-
-    # ── 6. X / Twitter ─────────────────────────────────────────────────────
-    if ($url =~ m{https?://(?:www\.)?(?:x|twitter)\.com(?:/|$)}i) {
-        unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
-            $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (X/Twitter)");
-            return undef;
-        }
-        return _handle_x_twitter($self, $message, $sNick, $sChannel, $url);
-    }
-
-    # ── 7. Generic ─────────────────────────────────────────────────────────
-    unless (_chanset_ok($self, $sChannel, 'UrlTitle')) {
-        $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel");
-        return undef;
-    }
-    return _handle_generic_title($self, $message, $sNick, $sChannel, $url);
 }
 
 # debug [0-5]
@@ -3546,7 +3560,7 @@ sub claudeAI {
         my $rate_window = eval { int($self->{conf}->get('anthropic.RATE_WINDOW') // 60) } // 60;
         $rate_max    = 1   if $rate_max < 1;
         $rate_window = 10  if $rate_window < 10;
-        my $rl_key = lc($nick) . "\x00$chan";
+        my $rl_key = lc($nick) . "\x00" . ($chan // "__private__");  # CL1/fix: $chan may be undef in PM
         my $now    = time();
         $self->{_claude_ratelimit} //= {};
         my $rl = $self->{_claude_ratelimit}{$rl_key} //= { count => 0, window => $now };

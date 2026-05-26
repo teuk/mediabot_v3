@@ -330,7 +330,7 @@ sub active_ban_for_mask {
         return undef;
     }
 
-    unless ($sth->execute($id_channel)) {
+    unless ($sth && $sth->execute($id_channel)) {
         $self->_log(1, "active_ban_for_mask() SQL execute error: $DBI::errstr Query: $sql");
         $sth->finish;
         return undef;
@@ -395,7 +395,7 @@ sub add_ban {
         return (undef, "database prepare error");
     }
 
-    unless ($sth->execute(
+    unless ($sth && $sth->execute(
         $id_channel,
         $mask,
         $ban_level,
@@ -457,7 +457,7 @@ sub list_active_bans {
         return ();
     }
 
-    unless ($sth->execute($id_channel)) {
+    unless ($sth && $sth->execute($id_channel)) {
         $self->_log(1, "list_active_bans() SQL execute error: $DBI::errstr Query: $sql");
         $sth->finish;
         return ();
@@ -517,7 +517,7 @@ sub mark_removed {
         return (0, "database prepare error");
     }
 
-    unless ($sth->execute(
+    unless ($sth && $sth->execute(
         $args{removed_by},
         $args{removed_by_nick},
         $args{remove_reason} || 'manual unban',
@@ -571,7 +571,7 @@ sub expired_bans {
         return ();
     }
 
-    unless ($sth->execute()) {
+    unless ($sth && $sth->execute()) {
         $self->_log(1, "expired_bans() SQL execute error: $DBI::errstr Query: $sql");
         $sth->finish;
         return ();

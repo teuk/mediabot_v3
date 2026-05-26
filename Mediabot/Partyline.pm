@@ -4,9 +4,9 @@ package Mediabot::Partyline;
 # ! Mediabot::Partyline                                                       !
 # ! TCP telnet-style partyline for bot administration                        !
 # !                                                                           !
-# ! Access : telnet <host> <PARTYLINE_PORT>  or  nc <host> <PARTYLINE_PORT>  !
+# ! Access : telnet <host> <PARTYLINE_PORT>, DCC CHAT or CTCP CHAT       !
 # !                                                                           !
-# ! Authentication : login <user> <password>                                 !
+# ! Authentication : interactive nickname/password prompt                    !
 # ! Required global level : Master (or above)                                !
 # !                                                                           !
 # ! Commands :                                                                !
@@ -31,6 +31,7 @@ use Scalar::Util qw(weaken);
 use Time::HiRes qw(usleep);
 use JSON qw(encode_json);
 use Encode qw(encode);
+use Mediabot::External ();
 use File::Basename qw(dirname);
 use File::Path qw(make_path);
 use File::Temp qw(tempfile);
@@ -1449,7 +1450,7 @@ sub _do_login {
          WHERE u.nickname = ?"
     );
 
-    unless ($sth->execute($login)) {
+    unless ($sth && $sth->execute($login)) {
         $bot->{logger}->log(1, "Partyline: SQL error on login query: " . $DBI::errstr);
         $stream->write("Internal error during authentication.\r\n");
         return;
@@ -1539,7 +1540,7 @@ sub _cmd_help {
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
-      . "  .ai <prompt>        - ask Claude (subcommands: reset, history)\r\n"
+      . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary)\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"
       . "  .top [n]            - top N speakers across all channels (default 5)\r\n"
       . "  .seen <nick>        - last activity for a nick in channel logs\r\n"
@@ -1560,7 +1561,7 @@ sub _cmd_help {
       . "  .quota [nick]       - show Claude rate limit (all or specific nick)\r\n"
       . "  .ai quota           - show your own Claude rate limit\r\n"
       . "  .stats [#chan]      - top 3 speakers + karma for a channel\r\n"
-      . "  .karma <nick>       - show karma for a nick\r\n"
+      . "  .karma <nick> [#chan] - show karma for a nick\r\n"
       . "  .reload             - reload bot configuration (Owner)\r\n"
       . "  .seen <nick>        - last seen event for a nick\r\n"
       . "  .purgereminders     - clean up delivered reminders\r\n"
@@ -3254,10 +3255,13 @@ sub _cmd_bans {
     for my $ban (@bans) {
         my $expires_txt = 'permanent';
         if ($ban->{expires_at}) {
-            $now_sth->execute($ban->{expires_at});
-            my $r = $now_sth->fetchrow_hashref;
-            $now_sth->finish;
-            my $secs = ($r && defined $r->{secs} && $r->{secs} > 0) ? $r->{secs} : 0;
+            # G1/fix: guard undef $now_sth (prepare may fail when DB is down)
+            my $secs = 0;
+            if ($now_sth && $now_sth->execute($ban->{expires_at})) {
+                my $r = $now_sth->fetchrow_hashref;
+                $now_sth->finish;
+                $secs = ($r && defined $r->{secs} && $r->{secs} > 0) ? $r->{secs} : 0;
+            }
             if ($secs > 0) {
                 my $d = int($secs / 86400);
                 my $h = int(($secs % 86400) / 3600);

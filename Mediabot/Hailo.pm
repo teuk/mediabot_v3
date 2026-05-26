@@ -73,7 +73,7 @@ sub is_hailo_excluded_nick {
         return 0;
     }
 
-    unless ($sth->execute($nick)) {
+    unless ($sth && $sth->execute($nick)) {
         $self->{logger}->log(1, "is_hailo_excluded_nick() SQL execute error: $DBI::errstr Query: $sQuery")
             if $self->{logger};
         $sth->finish;
@@ -146,7 +146,7 @@ sub hailo_ignore_ctx {
         return;
     }
 
-    unless ($sth->execute($target_nick)) {
+    unless ($sth && $sth->execute($target_nick)) {
         $self->{logger}->log(1, "hailo_ignore_ctx() SQL execute error (SELECT): $DBI::errstr | Query: $sql")
             if $self->{logger};
         $sth->finish;
@@ -172,7 +172,7 @@ sub hailo_ignore_ctx {
         return;
     }
 
-    unless ($sth->execute($target_nick)) {
+    unless ($sth && $sth->execute($target_nick)) {
         $self->{logger}->log(1, "hailo_ignore_ctx() SQL execute error (INSERT): $DBI::errstr | Query: $sql")
             if $self->{logger};
         $sth->finish;
@@ -249,7 +249,7 @@ sub hailo_unignore_ctx {
         return;
     }
 
-    unless ($sth->execute($target_nick)) {
+    unless ($sth && $sth->execute($target_nick)) {
         $self->{logger}->log(1, "hailo_unignore_ctx() SQL execute error (SELECT): $DBI::errstr | Query: $sql")
             if $self->{logger};
         $sth->finish;
@@ -277,7 +277,7 @@ sub hailo_unignore_ctx {
         return;
     }
 
-    unless ($sth->execute($id_excl)) {
+    unless ($sth && $sth->execute($id_excl)) {
         $self->{logger}->log(1, "hailo_unignore_ctx() SQL execute error (DELETE): $DBI::errstr | Query: $sql")
             if $self->{logger};
         $sth->finish;
@@ -415,7 +415,7 @@ sub get_hailo_channel_ratio {
         return -1;
     }
 
-    unless ($sth->execute($sChannel)) {
+    unless ($sth && $sth->execute($sChannel)) {
         $self->{logger}->log(1, "get_hailo_channel_ratio() SQL execute error: $DBI::errstr Query: $sQuery")
             if $self->{logger};
         $sth->finish;
@@ -472,7 +472,7 @@ sub set_hailo_channel_ratio {
         return undef;
     }
 
-    unless ($sth->execute($id_channel)) {
+    unless ($sth && $sth->execute($id_channel)) {
         $self->{logger}->log(1, "set_hailo_channel_ratio() SQL execute error (SELECT): $DBI::errstr | Query: $sQuery")
             if $self->{logger};
         $sth->finish;
@@ -492,7 +492,7 @@ sub set_hailo_channel_ratio {
             return undef;
         }
 
-        unless ($sth->execute($ratio, $id_channel)) {
+        unless ($sth && $sth->execute($ratio, $id_channel)) {
             $self->{logger}->log(1, "set_hailo_channel_ratio() SQL execute error (UPDATE): $DBI::errstr | Query: $sQuery")
                 if $self->{logger};
             $sth->finish;
@@ -514,7 +514,7 @@ sub set_hailo_channel_ratio {
         return undef;
     }
 
-    unless ($sth->execute($id_channel, $ratio)) {
+    unless ($sth && $sth->execute($id_channel, $ratio)) {
         $self->{logger}->log(1, "set_hailo_channel_ratio() SQL execute error (INSERT): $DBI::errstr | Query: $sQuery")
             if $self->{logger};
         $sth->finish;

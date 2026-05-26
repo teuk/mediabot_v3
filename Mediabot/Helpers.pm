@@ -164,7 +164,7 @@ sub get_user_from_message {
         ORDER BY u.id_user
     });
 
-    unless ($sth->execute) {
+    unless ($sth && $sth->execute) {
         $self->{logger}->log(1, " get_user_from_message() SQL Error: $DBI::errstr");
         return;
     }
@@ -545,7 +545,7 @@ sub botAction {
 				$self->{logger}->log(0,"[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
 				my $sQuery = "SELECT badword FROM CHANNEL JOIN BADWORDS ON BADWORDS.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ?";
 				my $sth = $self->{dbh}->prepare($sQuery);
-				unless ($sth->execute($sTo) ) {
+				unless ($sth && $sth->execute($sTo) ) {
 					$self->{logger}->log(1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 				}
 				else {
@@ -751,8 +751,9 @@ sub userAdd {
     push @bind, ($username, $level_id);
 
     my $sth = $dbh->prepare($sql);
-    my $ok  = $sth->execute(@bind);
-    $sth->finish;
+    # H3/fix: guard undef $sth
+    my $ok  = ($sth && $sth->execute(@bind)) ? 1 : 0;
+    $sth->finish if $sth;
 
     unless ($ok) {
         $logger->log(1, "userAdd() INSERT failed: $DBI::errstr");
@@ -933,7 +934,7 @@ sub setChannelAntiFlood {
 	my $sQuery = "SELECT duration, first, latest, nbmsg, nbmsg_max, notification, timetowait FROM CHANNEL_FLOOD WHERE id_channel = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
 
-	unless ($sth->execute($id_channel)) {
+	unless ($sth && $sth->execute($id_channel)) {
 		$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
 		# B26h/fix: execute failed — cursor not open
 		return;
@@ -952,7 +953,7 @@ sub setChannelAntiFlood {
 		$sth->finish if $sth;  # B26h/fix2: close 1st sth before reuse
 		$sth = $self->{dbh}->prepare($sQuery);
 
-		unless ($sth->execute($id_channel)) {
+		unless ($sth && $sth->execute($id_channel)) {
 			$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
 			# B26h/fix: execute failed — cursor not open
 			return;
@@ -964,7 +965,7 @@ sub setChannelAntiFlood {
 		$sQuery = "SELECT duration, first, latest, nbmsg, nbmsg_max, notification, timetowait FROM CHANNEL_FLOOD WHERE id_channel = ?";
 		my $sth2 = $self->{dbh}->prepare($sQuery);
 
-		unless ($sth2->execute($id_channel)) {
+		unless ($sth2 && $sth2->execute($id_channel)) {
 			$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
 		} elsif (my $ref = $sth2->fetchrow_hashref()) {
 			my $nbmsg_max = $ref->{'nbmsg_max'};
@@ -1043,7 +1044,7 @@ sub logBotAction {
             return;
         }
 
-        unless ($sth->execute($sChannel)) {
+        unless ($sth && $sth->execute($sChannel)) {
             $self->{logger}->log(1, "logBotAction() SQL execute error: $DBI::errstr Query: $sQuery")
                 if $self->{logger};
             # B26h/fix: execute failed — cursor not open
@@ -2234,7 +2235,7 @@ SQL
 
     my $mask = '%@' . $host_like;
 
-    unless ($sth->execute($mask)) {
+    unless ($sth && $sth->execute($mask)) {
         $self->{logger}->log(1, "mbDbCheckHostnameNick_ctx() SQL Error: $DBI::errstr Query: $sql");
         return;
     }
@@ -2871,7 +2872,7 @@ sub isIgnored {
 
 	my $sCheckQuery = "SELECT hostmask FROM IGNORES WHERE id_channel = 0";
 	my $sth = $self->{dbh}->prepare($sCheckQuery);
-	unless ($sth->execute ) {
+	unless ($sth && $sth->execute ) {
 		$self->{logger}->log(1,"isIgnored() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
 	}
 	else {	
@@ -2891,7 +2892,7 @@ sub isIgnored {
 
 	$sCheckQuery = "SELECT IGNORES.hostmask FROM IGNORES JOIN CHANNEL ON CHANNEL.id_channel = IGNORES.id_channel WHERE CHANNEL.name = ?";
 	$sth = $self->{dbh}->prepare($sCheckQuery);
-	unless ($sth->execute($sChannel)) {
+	unless ($sth && $sth->execute($sChannel)) {
 		$self->{logger}->log(1,"isIgnored() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
 	}
 	else {	

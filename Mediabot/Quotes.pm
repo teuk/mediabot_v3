@@ -181,7 +181,7 @@ sub mbQuoteAdd {
         return;
     }
 
-    unless ($sth->execute($sChannel, $sQuoteText)) {
+    unless ($sth && $sth->execute($sChannel, $sQuoteText)) {
         $self->{logger}->log(1, "mbQuoteAdd() SQL execute error: $DBI::errstr | Query: $sQuery")
             if $self->{logger};
         # B26ext/fix: execute failed, no open cursor
@@ -221,7 +221,7 @@ sub mbQuoteAdd {
 
     my $id_user = ($iMatchingUserId && $iMatchingUserId =~ /^\d+$/) ? $iMatchingUserId : 0;
 
-    unless ($sth->execute($id_channel, $id_user, $sQuoteText)) {
+    unless ($sth && $sth->execute($id_channel, $id_user, $sQuoteText)) {
         $self->{logger}->log(1, "mbQuoteAdd() SQL insert execute error: $DBI::errstr | Query: $sQuery")
             if $self->{logger};
         # B26ext/fix: execute failed, no open cursor
@@ -335,7 +335,7 @@ sub mbQuoteView {
         return;
     }
 
-    unless ($sth->execute($sChannel, $id_quotes)) {
+    unless ($sth && $sth->execute($sChannel, $id_quotes)) {
         $self->{logger}->log(1, "mbQuoteView() SQL execute error: $DBI::errstr Query: $sQuery")
             if $self->{logger};
         # B26ext/fix: execute failed, no open cursor
@@ -414,7 +414,7 @@ sub mbQuoteSearch {
         return;
     }
 
-    unless ($sth->execute($sChannel, @binds_words, $MAXQUOTES + 1)) {
+    unless ($sth && $sth->execute($sChannel, @binds_words, $MAXQUOTES + 1)) {
         $self->{logger}->log(1, "mbQuoteSearch SQL execute error: $DBI::errstr Query: $sQuery")
             if $self->{logger};
         # B26ext/fix: execute failed, no open cursor
@@ -507,7 +507,7 @@ sub mbQuoteRand {
         return;
     }
 
-    unless ($sth->execute($sChannel, $offset)) {
+    unless ($sth && $sth->execute($sChannel, $offset)) {
         $self->{logger}->log(1, "mbQuoteRand SQL execute error: $DBI::errstr Query: $sql")
             if $self->{logger};
         # B26ext/fix: execute failed, no open cursor
@@ -550,7 +550,7 @@ sub mbQuoteStats {
         return;
     }
 
-    unless ($sth->execute($sChannel)) {
+    unless ($sth && $sth->execute($sChannel)) {
         $self->{logger}->log(1, "mbQuoteStats() SQL execute error: " . $DBI::errstr . " Query : " . $sQuery)
             if $self->{logger};
         # B26/fix: execute failed, no cursor open — finish removed
@@ -696,7 +696,7 @@ sub mbQuoteByNick {
         $self->{logger}->log(1, "mbQuoteByNick() SQL prepare error: $DBI::errstr");
         return undef;
     }
-    unless ($sth->execute($sChannel, $like, $offset)) {
+    unless ($sth && $sth->execute($sChannel, $like, $offset)) {
         $self->{logger}->log(1, "mbQuoteByNick() SQL execute error: $DBI::errstr");
         # B26ext/fix: execute failed, no open cursor
         return undef;
@@ -747,7 +747,7 @@ sub mbQuoteCount_ctx {
         botNotice($self, $sNick, 'Database error.');
         return;
     }
-    unless ($sth->execute($sChannel, $like)) {
+    unless ($sth && $sth->execute($sChannel, $like)) {
         $self->{logger}->log(1, "mbQuoteCount_ctx() SQL execute error: $DBI::errstr")
             if $self->{logger};
         # B26ext/fix: execute failed, no open cursor

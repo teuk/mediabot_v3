@@ -556,7 +556,7 @@ sub populateChannels {
 
     my $sQuery = "SELECT id_channel, name, description, topic, tmdb_lang, `key`, auto_join FROM CHANNEL";
     my $sth = $self->{dbh}->prepare($sQuery);
-    unless ($sth->execute()) {
+    unless ($sth && $sth->execute()) {
         $self->{logger}->log( 1, "SQL Error: " . $DBI::errstr . " Query: $sQuery");
         return;
     }
@@ -686,7 +686,7 @@ sub dbConnect {
         "SET COLLATION_CONNECTION = 'utf8_general_ci'"
     ) {
         my $sth = $dbh->prepare($sql);
-        unless ($sth->execute()) {
+        unless ($sth && $sth->execute()) {
             $self->{logger}->log( 1, "dbConnect() SQL Error: $DBI::errstr Query: $sql");
         }
         $sth->finish;
@@ -717,7 +717,7 @@ sub dbCheckTables {
 
     # Check USER table exists
     my $sth = $dbh->prepare("SELECT 1 FROM USER LIMIT 1");
-    unless ($sth->execute) {
+    unless ($sth && $sth->execute) {
         $self->{logger}->log(0, "dbCheckTables() SQL Error: $DBI::errstr ($DBI::err)");
         if (defined($DBI::err) && $DBI::err == 1146) {
             $self->{logger}->log(0, "USER table does not exist. Check your database installation.");
@@ -929,7 +929,7 @@ sub refresh_channel_hashes {
 
     my $sQuery = "SELECT name, description, topic, tmdb_lang, `key` FROM CHANNEL";
     my $sth = $self->{dbh}->prepare($sQuery);
-    unless ($sth->execute()) {
+    unless ($sth && $sth->execute()) {
         $self->{logger}->log(1, "SQL Error: " . $DBI::errstr . " Query: $sQuery");
         return;
     }

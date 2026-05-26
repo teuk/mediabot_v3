@@ -555,7 +555,7 @@ $scheduler->add(
                 my $sth_k = $dbh->prepare(q{
                     SELECT nick, score FROM KARMA
                     WHERE id_channel = ? AND score != 0
-                    ORDER BY score DESC LIMIT 3
+                    ORDER BY ABS(score) DESC LIMIT 3  -- DR1/fix: include negative scores
                 });
                 if ($sth_k && $sth_k->execute($id_chan)) {
                     while (my $r = $sth_k->fetchrow_hashref) {
