@@ -570,6 +570,7 @@ sub mbDbAddCommand_ctx {
     my $sth = $self->{dbh}->prepare($query_check);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query_check");
+        $sth->finish if $sth;
         return;
     }
 
@@ -660,6 +661,7 @@ sub mbDbRemCommand_ctx {
     my $sth = $self->{dbh}->prepare($query);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query");
+        $sth->finish if $sth;
         return;
     }
 
@@ -687,6 +689,7 @@ sub mbDbRemCommand_ctx {
     my $sth_del = $self->{dbh}->prepare($delete_query);
     unless ($sth_del && $sth_del->execute($id_public_commands)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $delete_query");
+        $sth_del->finish if $sth_del;
         return;
     }
     $sth_del->finish;
@@ -735,6 +738,7 @@ sub mbDbModCommand {
     my $sth = $self->{dbh}->prepare($query);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query");
+        $sth->finish if $sth;
         return;
     }
 
@@ -757,15 +761,16 @@ sub mbDbModCommand {
 
             my $update_query = "UPDATE PUBLIC_COMMANDS SET id_public_commands_category=?, action=? WHERE id_public_commands=?";
             my $sth_upd = $self->{dbh}->prepare($update_query);
-            unless ($sth_upd->execute($id_cat, $sAction, $id_command)) {
+            unless ($sth_upd && $sth_upd->execute($id_cat, $sAction, $id_command)) {
                 $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $update_query");
+                $sth_upd->finish if $sth_upd;
 				$sth->finish;  # DM1/fix: finish before early return — prevent cursor leak
                 return;
             }
 
             botNotice($self, $sNick, "Command $sCommand modified");
             logBot($self, $message, undef, "modcmd", ("Command $sCommand modified"));
-            $sth_upd->finish;
+            $sth_upd->finish if $sth_upd;
         } else {
             botNotice($self, $sNick, "$sCommand command belongs to another user");
         }
@@ -813,6 +818,7 @@ sub mbDbModCommand_ctx {
     my $sth = $self->{dbh}->prepare($query);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query");
+        $sth->finish if $sth;
         return;
     }
 
@@ -848,9 +854,10 @@ sub mbDbModCommand_ctx {
     my $sth_upd = $self->{dbh}->prepare($update_query);
     unless ($sth_upd && $sth_upd->execute($id_cat, $sAction, $id_command)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $update_query");
+        $sth_upd->finish if $sth_upd;
         return;
     }
-    $sth_upd->finish;
+    $sth_upd->finish if $sth_upd;
 
     botNotice($self, $nick, "Command $sCommand modified");
     logBot($self, $ctx->message, undef, "modcmd", ("Command $sCommand modified"));
@@ -893,6 +900,7 @@ sub mbChownCommand_ctx {
     my $sth = $self->{dbh}->prepare($cmd_query);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $cmd_query");
+        $sth->finish if $sth;
         return;
     }
 
@@ -918,6 +926,7 @@ sub mbChownCommand_ctx {
     $sth = $self->{dbh}->prepare($user_query);
     unless ($sth && $sth->execute($sTargetUser)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $user_query");
+        $sth->finish if $sth;
         return;
     }
 
@@ -937,9 +946,10 @@ sub mbChownCommand_ctx {
     $sth = $self->{dbh}->prepare($update_query);
     unless ($sth && $sth->execute($id_new_user, $id_cmd)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $update_query");
+        $sth->finish if $sth;
         return;
     }
-    $sth->finish;
+    $sth->finish if $sth;
 
     my $msg = "Changed owner of command $sCommand ($old_nickname -> $sTargetUser)";
     botNotice($self, $nick, $msg);
@@ -982,6 +992,7 @@ sub mbDbShowCommand_ctx {
     my $sth = $self->{dbh}->prepare($sQuery);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $sQuery");
+        $sth->finish if $sth;
         return;
     }
 
@@ -1030,9 +1041,9 @@ sub mbDbCommand {
 
 	my $sQuery = "SELECT id_public_commands, action, description, hits FROM PUBLIC_COMMANDS WHERE command = ? AND active = 1";
 	my $sth_sel = $self->{dbh}->prepare($sQuery);
-	unless ($sth_sel->execute($sCommand)) {
+	unless ($sth_sel && $sth_sel->execute($sCommand)) {
 		$self->{logger}->log(1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-		$sth_sel->finish;
+		$sth_sel->finish if $sth_sel;
 		return 0;
 	}
 
@@ -1047,12 +1058,12 @@ sub mbDbCommand {
 
 	$sQuery = "UPDATE PUBLIC_COMMANDS SET hits=? WHERE id_public_commands=?";
 	my $sth_upd = $self->{dbh}->prepare($sQuery);
-	unless ($sth_upd->execute($hits,$id_public_commands)) {
+	unless ($sth_upd && $sth_upd->execute($hits,$id_public_commands)) {
 		$self->{logger}->log(1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-		$sth_upd->finish;
+		$sth_upd->finish if $sth_upd;
 		return 0;
 	}
-	$sth_upd->finish;
+	$sth_upd->finish if $sth_upd;
 
 	$self->{logger}->log(2,"SQL command found : $sCommand description : $description action : $action");
 	my ($actionType,$actionTo,$actionDo) = split(/ /,$action,3);
@@ -1099,6 +1110,7 @@ sub mbDbMvCommand_ctx {
     my $sth = $self->{dbh}->prepare("SELECT 1 FROM PUBLIC_COMMANDS WHERE command = ? LIMIT 1");
     unless ($sth && $sth->execute($new_cmd)) {
         $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: SELECT exists(new_cmd)");
+        $sth->finish if $sth;
         return;
     }
     if (my $existing = $sth->fetchrow_arrayref) {
@@ -1112,6 +1124,7 @@ sub mbDbMvCommand_ctx {
     $sth = $self->{dbh}->prepare("SELECT id_public_commands, id_user FROM PUBLIC_COMMANDS WHERE command = ? LIMIT 1");
     unless ($sth && $sth->execute($old_cmd)) {
         $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: SELECT for $old_cmd");
+        $sth->finish if $sth;
         return;
     }
 
@@ -1138,9 +1151,10 @@ sub mbDbMvCommand_ctx {
     unless ($sth && $sth->execute($new_cmd, $id_cmd)) {
         $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: UPDATE to $new_cmd");
         botNotice($self, $nick, "Failed to rename $old_cmd to $new_cmd. Does $new_cmd already exist?");
+        $sth->finish if $sth;
         return;
     }
-    $sth->finish;
+    $sth->finish if $sth;
 
     botNotice($self, $nick, "Command $old_cmd has been renamed to $new_cmd.");
     logBot($self, $ctx->message, undef, "mvcmd", "Command $old_cmd renamed to $new_cmd");
@@ -1169,6 +1183,7 @@ sub mbCountCommand_ctx {
     unless ($sth && $sth->execute()) {
         $self->{logger}->log(1, "mbCountCommand_ctx() SQL Error: $DBI::errstr Query: $sql_total");
         botNotice($self, $nick, "Internal error (SQL).");
+        $sth->finish if $sth;
         return;
     }
 
@@ -1191,6 +1206,7 @@ sub mbCountCommand_ctx {
     unless ($sth && $sth->execute()) {
         $self->{logger}->log(1, "mbCountCommand_ctx() SQL Error: $DBI::errstr Query: $sql_cat");
         botNotice($self, $nick, "Internal error (SQL).");
+        $sth->finish if $sth;
         return;
     }
 
@@ -1273,6 +1289,7 @@ sub mbTopCommand_ctx {
     unless ($sth && $sth->execute()) {
         $self->{logger}->log(1, "mbTopCommand_ctx() SQL Error: $DBI::errstr Query: $sql");
         botNotice($self, $nick, "Internal error (SQL).");
+        $sth->finish if $sth;
         return;
     }
 
@@ -1361,6 +1378,7 @@ sub mbLastCommand_ctx {
     unless ($sth && $sth->execute()) {
         $self->{logger}->log(1, "mbLastCommand_ctx() SQL Error: $DBI::errstr Query: $sql");
         botNotice($self, $nick, "Internal error (SQL).");
+        $sth->finish if $sth;
         return;
     }
 
@@ -1470,6 +1488,7 @@ sub mbDbSearchCommand_ctx {
     unless ($sth && $sth->execute($like, $search_limit)) {  # B1/A1: use $search_limit
         $self->{logger}->log(1, "mbDbSearchCommand_ctx() SQL Error: $DBI::errstr Query: $sql");
         botNotice($self, $nick, "Internal error (SQL).");
+        $sth->finish if $sth;
         return;
     }
 
@@ -1557,6 +1576,7 @@ sub mbDbOwnersCommand_ctx {
     unless ($sth && $sth->execute()) {
         $self->{logger}->log(1, "mbDbOwnersCommand_ctx() SQL Error: $DBI::errstr Query: $sql");
         botNotice($self, $nick, "Internal error (SQL).");
+        $sth->finish if $sth;
         return;
     }
 
@@ -1658,6 +1678,7 @@ sub mbDbHoldCommand_ctx {
     unless ($sth && $sth->execute($cmd)) {
         $self->{logger}->log(1, "mbDbHoldCommand_ctx() SQL Error: $DBI::errstr Query: SELECT for holdcmd");
         botNotice($self, $nick, "Database error while checking command.");
+        $sth->finish if $sth;
         return;
     }
 
@@ -1681,9 +1702,10 @@ sub mbDbHoldCommand_ctx {
     unless ($sth && $sth->execute($id)) {
         $self->{logger}->log(1, "mbDbHoldCommand_ctx() SQL Error: $DBI::errstr Query: UPDATE holdcmd");
         botNotice($self, $nick, "Failed to put command '$cmd' on hold.");
+        $sth->finish if $sth;
         return;
     }
-    $sth->finish;
+    $sth->finish if $sth;
 
     botNotice($self, $nick, "Command '$cmd' has been placed on hold.");
     logBot($self, $ctx->message, $ctx->channel, "holdcmd", "Command '$cmd' deactivated");
@@ -1739,6 +1761,7 @@ sub mbDbAddCategoryCommand_ctx {
     unless ($sth && $sth->execute($category)) {
         $self->{logger}->log(1, "mbDbAddCategoryCommand_ctx() SQL Error: $DBI::errstr Query: SELECT category");
         botNotice($self, $nick, "Database error while checking category.");
+        $sth->finish if $sth;
         return;
     }
 
@@ -1754,9 +1777,10 @@ sub mbDbAddCategoryCommand_ctx {
     unless ($sth && $sth->execute($category)) {
         $self->{logger}->log(1, "mbDbAddCategoryCommand_ctx() SQL Error: $DBI::errstr Query: INSERT category");
         botNotice($self, $nick, "Failed to add category '$category'.");
+        $sth->finish if $sth;
         return;
     }
-    $sth->finish;
+    $sth->finish if $sth;
 
     botNotice($self, $nick, "Category '$category' successfully added.");
     logBot($self, $ctx->message, $ctx->channel, "addcatcmd", "Category '$category' added");
@@ -1893,7 +1917,7 @@ sub checkResponder {
 			return $iChance;
 		}
 	}
-	$sth->finish;
+	$sth->finish if $sth;
 	return 100;
 }
 
@@ -1901,9 +1925,9 @@ sub doResponder {
 	my ($self,$message,$sNick,$sChannel,$sMsg,@tArgs) = @_;
 	my $sQuery = "SELECT RESPONDERS.id_responders, RESPONDERS.answer, RESPONDERS.hits FROM RESPONDERS LEFT JOIN CHANNEL ON CHANNEL.id_channel = RESPONDERS.id_channel WHERE ((CHANNEL.name = ? AND CHANNEL.id_channel IS NOT NULL) OR RESPONDERS.id_channel = 0) AND RESPONDERS.responder = ?";
 	my $sth_sel = $self->{dbh}->prepare($sQuery);
-	unless ($sth_sel->execute($sChannel,$sMsg)) {
+	unless ($sth_sel && $sth_sel->execute($sChannel,$sMsg)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-		$sth_sel->finish;
+		$sth_sel->finish if $sth_sel;
 		return 0;
 	}
 
@@ -1920,13 +1944,13 @@ sub doResponder {
 
 	$sQuery = "UPDATE RESPONDERS SET hits=? WHERE id_responders=?";
 	my $sth_upd = $self->{dbh}->prepare($sQuery);
-	unless ($sth_upd->execute($hits,$id_responders)) {
+	unless ($sth_upd && $sth_upd->execute($hits,$id_responders)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
 		$self->{logger}->log(4,"$hits hits for $sMsg");
 	}
-	$sth_upd->finish;
+	$sth_upd->finish if $sth_upd;
 	setLastReponderTs($self,time);
 	return 1;
 }
@@ -2010,6 +2034,7 @@ sub addResponder_ctx {
 
     unless ($sth && $sth->execute($id_channel, $responder)) {
         $self->{logger}->log(1, "SQL Error: $DBI::errstr");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2036,10 +2061,11 @@ sub addResponder_ctx {
 
     unless ($sth && $sth->execute($id_channel, (100 - $chance), $responder, $answer)) {
         $self->{logger}->log(1, "SQL Error: $DBI::errstr");
+        $sth->finish if $sth;
         return;
     }
 
-    $sth->finish;
+    $sth->finish if $sth;
 
     # ---------------------------------------
     # Display + log
@@ -2142,6 +2168,7 @@ sub delResponder_ctx {
     );
     unless ($sth && $sth->execute($id_channel, $responder)) {
         $self->{logger}->log(1, "delResponder_ctx() SQL Error (SELECT): $DBI::errstr");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2167,11 +2194,12 @@ sub delResponder_ctx {
     unless ($sth && $sth->execute($id_channel, $responder)) {
         $self->{logger}->log(1, "delResponder_ctx() SQL Error (DELETE): $DBI::errstr");
         botNotice($self, $nick, "Failed to delete responder '$responder' in $scope.");
+        $sth->finish if $sth;
         return;
     }
 
     my $deleted = $sth->rows;
-    $sth->finish;
+    $sth->finish if $sth;
 
     my $extra = '';
     if (@rows == 1) {
@@ -2266,6 +2294,7 @@ sub IgnoresList_ctx {
     my $sth = $self->{dbh}->prepare($sql);
     unless ($sth && $sth->execute($id_channel)) {
         $self->{logger}->log(1, "IgnoresList_ctx() SQL Error: $DBI::errstr Query: $sql");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2367,6 +2396,7 @@ sub addIgnore_ctx {
     my $sth = $self->{dbh}->prepare($sql_chk);
     unless ($sth && $sth->execute($id_channel, $hostmask)) {
         $self->{logger}->log(1, "addIgnore_ctx() SQL Error: $DBI::errstr Query: $sql_chk");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2383,11 +2413,12 @@ sub addIgnore_ctx {
     $sth = $self->{dbh}->prepare($sql_ins);
     unless ($sth && $sth->execute($id_channel, $hostmask)) {
         $self->{logger}->log(1, "addIgnore_ctx() SQL Error: $DBI::errstr Query: $sql_ins");
+        $sth->finish if $sth;
         return;
     }
 
     my $new_id = eval { $sth->{mysql_insertid} } // "?";
-    $sth->finish;
+    $sth->finish if $sth;
 
     botNotice($self, $nick, "Added ignore ID $new_id $hostmask on $label");
     logBot($self, $ctx->message, $log_chan, "ignore", "add $label $hostmask");
@@ -2463,6 +2494,7 @@ sub delIgnore_ctx {
     my $sth = $self->{dbh}->prepare($sql_chk);
     unless ($sth && $sth->execute($id_channel, $hostmask)) {
         $self->{logger}->log(1, "delIgnore_ctx() SQL Error: $DBI::errstr Query: $sql_chk");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2480,9 +2512,10 @@ sub delIgnore_ctx {
     $sth = $self->{dbh}->prepare($sql_del);
     unless ($sth && $sth->execute($id_channel, $hostmask)) {
         $self->{logger}->log(1, "delIgnore_ctx() SQL Error: $DBI::errstr Query: $sql_del");
+        $sth->finish if $sth;
         return;
     }
-    $sth->finish;
+    $sth->finish if $sth;
 
     botNotice($self, $nick, "Deleted ignore ID $ref->{id_ignores} $hostmask on $label");
     logBot($self, $ctx->message, $log_chan, "unignore", "del $label $hostmask");
@@ -2564,6 +2597,7 @@ sub lastCom_ctx {
     unless ($sth && $sth->execute()) {
         $self->{logger}->log(1, "lastCom_ctx() SQL Error: $DBI::errstr | Query: $sql");
         botNotice($self, $nick, "Database error during lastcom query.");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2660,6 +2694,7 @@ sub Yomomma_ctx {
         unless ($sth && $sth->execute(@bind)) {
             $self->{logger}->log(1, "Yomomma_ctx() SQL Error: $DBI::errstr | Query: $sql");
             botPrivmsg($self, $channel, "Not found");
+            $sth->finish if $sth;
             return;
         }
 
@@ -2674,6 +2709,7 @@ sub Yomomma_ctx {
         unless ($sth_count && $sth_count->execute()) {
             $self->{logger}->log(1, "Yomomma_ctx() SQL Error: $DBI::errstr | Query: $count_sql");
             botPrivmsg($self, $channel, "Not found");
+            $sth_count->finish if $sth_count;
             return;
         }
 
@@ -2694,6 +2730,7 @@ sub Yomomma_ctx {
         unless ($sth && $sth->execute($offset)) {
             $self->{logger}->log(1, "Yomomma_ctx() SQL Error: $DBI::errstr | Query: $sql");
             botPrivmsg($self, $channel, "Not found");
+            $sth->finish if $sth;
             return;
         }
 
