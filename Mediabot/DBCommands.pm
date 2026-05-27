@@ -733,7 +733,7 @@ sub mbDbModCommand {
 
     my $query = "SELECT id_public_commands, id_user FROM PUBLIC_COMMANDS WHERE command = ?";
     my $sth = $self->{dbh}->prepare($query);
-    unless ($sth->execute($sCommand)) {
+    unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query");
         return;
     }
@@ -746,6 +746,7 @@ sub mbDbModCommand {
             my $id_cat = getCommandCategory($self, $sCategory);
             unless (defined $id_cat) {
                 botNotice($self, $sNick, "Unknown category : $sCategory");
+				$sth->finish;  # DM1/fix: finish before early return — prevent cursor leak
                 return;
             }
 
@@ -758,6 +759,7 @@ sub mbDbModCommand {
             my $sth_upd = $self->{dbh}->prepare($update_query);
             unless ($sth_upd->execute($id_cat, $sAction, $id_command)) {
                 $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $update_query");
+				$sth->finish;  # DM1/fix: finish before early return — prevent cursor leak
                 return;
             }
 
@@ -1879,7 +1881,7 @@ sub checkResponder {
 	my ($self,$message,$sNick,$sChannel,$sMsg,@tArgs) = @_;
 	my $sQuery = "SELECT RESPONDERS.answer, RESPONDERS.chance FROM RESPONDERS LEFT JOIN CHANNEL ON CHANNEL.id_channel = RESPONDERS.id_channel WHERE ((CHANNEL.name = ? AND CHANNEL.id_channel IS NOT NULL) OR RESPONDERS.id_channel = 0) AND RESPONDERS.responder = ?";
 	my $sth = $self->{dbh}->prepare($sQuery);
-	unless ($sth->execute($sChannel,$sMsg)) {
+	unless ($sth && $sth->execute($sChannel,$sMsg)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
 	}
 	else {
@@ -1887,6 +1889,7 @@ sub checkResponder {
 			my $sAnswer = $ref->{'answer'};
 			my $iChance = $ref->{'chance'};
 			$self->{logger}->log(4,"checkResponder() Found answer $sAnswer for $sMsg with chance " . (100-$iChance) ." %");
+			$sth->finish;  # CR1/fix: finish before early return
 			return $iChance;
 		}
 	}
@@ -2005,7 +2008,7 @@ sub addResponder_ctx {
         "SELECT answer, chance, hits FROM RESPONDERS WHERE id_channel = ? AND responder = ?"
     );
 
-    unless ($sth->execute($id_channel, $responder)) {
+    unless ($sth && $sth->execute($id_channel, $responder)) {
         $self->{logger}->log(1, "SQL Error: $DBI::errstr");
         return;
     }
@@ -2031,7 +2034,7 @@ sub addResponder_ctx {
          VALUES (?, ?, ?, ?)"
     );
 
-    unless ($sth->execute($id_channel, (100 - $chance), $responder, $answer)) {
+    unless ($sth && $sth->execute($id_channel, (100 - $chance), $responder, $answer)) {
         $self->{logger}->log(1, "SQL Error: $DBI::errstr");
         return;
     }

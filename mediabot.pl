@@ -917,7 +917,7 @@ if (defined($mediabot->{conf}->get('main.RANDOM_QUOTE'))) {
     elsif ((time - $mediabot->getLastRandomQuote()) > $randomQuoteDelay ) {
         my $sQuery = "SELECT CHANNEL.name FROM CHANNEL JOIN CHANNEL_SET ON CHANNEL_SET.id_channel=CHANNEL.id_channel JOIN CHANSET_LIST ON CHANSET_LIST.id_chanset_list=CHANNEL_SET.id_chanset_list WHERE CHANSET_LIST.chanset = 'RandomQuote'";
         my $sth = $mediabot->{db}->ensure_connected()->prepare($sQuery);
-        unless ($sth->execute()) {
+        unless ($sth && $sth->execute()) {
             $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
         }
         else {
@@ -1941,7 +1941,7 @@ sub on_message_RPL_WHOISUSER {
                         else {
                             my $sQuery = "UPDATE USER SET auth=1 WHERE nickname=?";
                             my $sth = $mediabot->{db}->ensure_connected()->prepare($sQuery);
-                            unless ($sth->execute($sMatchingUserHandle)) {
+                            unless ($sth && $sth->execute($sMatchingUserHandle)) {
                                 $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
                             }
                             else {
@@ -1982,7 +1982,7 @@ sub on_message_RPL_WHOISUSER {
                             $mediabot->botNotice($WHOIS_VARS{'caller'},"USER: $sMatchingUserHandle ACCESS: $iChannelUserLevelAccess");
                             my $sQuery = "SELECT automode, greet FROM USER JOIN USER_CHANNEL ON USER_CHANNEL.id_user = USER.id_user JOIN CHANNEL ON CHANNEL.id_channel = USER_CHANNEL.id_channel WHERE USER.nickname = ? AND CHANNEL.name = ?";
                             my $sth = $mediabot->{db}->ensure_connected()->prepare($sQuery);
-                            unless ($sth->execute($sMatchingUserHandle,$WHOIS_VARS{'channel'})) {
+                            unless ($sth && $sth->execute($sMatchingUserHandle,$WHOIS_VARS{'channel'})) {
                                 $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
                             }
                             else {

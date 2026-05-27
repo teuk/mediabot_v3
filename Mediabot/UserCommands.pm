@@ -2704,18 +2704,20 @@ sub deliverReminders {
             next if time() < $1;
             $r->{message} =~ s/^\[at:\d+\]\s*//;
         }
-        botPrivmsg($self, $channel,
-            "$nick: reminder from $r->{from_nick} ($r->{created_at}): $r->{message}");
+        # H/fix: mark delivered BEFORE sending — prevents double delivery on crash
         my $sth_up = $dbh->prepare(q{
             UPDATE REMINDERS SET delivered = 1 WHERE id_reminder = ?
         });
-            # C2/fix: test execute return to log delivery failures
-            if ($sth_up) {
-                unless ($sth_up->execute($r->{id_reminder})) {
-                    $self->{logger}->log(1, "deliverReminders: UPDATE failed for id=$r->{id_reminder}: $DBI::errstr");
-                }
-                $sth_up->finish;
+        # C2/fix: test execute return
+        if ($sth_up) {
+            unless ($sth_up->execute($r->{id_reminder})) {
+                $self->{logger}->log(1, "deliverReminders: UPDATE failed for id=$r->{id_reminder}: $DBI::errstr");
+                next;  # skip send if we can't mark delivered
             }
+            $sth_up->finish;
+        } else { next; }  # can't prepare → skip
+        botPrivmsg($self, $channel,
+            "$nick: reminder from $r->{from_nick} ($r->{created_at}): $r->{message}");
     }
 }
 
@@ -3421,10 +3423,22 @@ sub mbKarmaHist_ctx {
             }
         }
     };  # silently fall back to in-memory if KARMA_LOG not available
-    my $klog_mem = $self->{_karma_log}{$channel} // [];
-    my $klog = @db_entries ? \@db_entries : $klog_mem;
+    # KH1/fix: in PM, search in-memory log across all channels
+    my $kh_chan = (defined $channel && $channel =~ /^#/) ? $channel : undef;
+    my @klog_mem_entries;
+    if ($kh_chan) {
+        @klog_mem_entries = @{ $self->{_karma_log}{$kh_chan} // [] };
+    } else {
+        for my $ch (keys %{ $self->{_karma_log} // {} }) {
+            push @klog_mem_entries, @{ $self->{_karma_log}{$ch} // [] };
+        }
+    }
+    my @klog_combined = @db_entries ? @db_entries : @klog_mem_entries;
+    my $klog = \@klog_combined;
+    my $kh_reply = $kh_chan // $nick;
     unless (@$klog) {
-        botPrivmsg($self, $channel, "$nick: no karma history yet on $channel.");
+        botPrivmsg($self, $kh_reply,
+            "$nick: no karma history yet" . ($kh_chan ? " on $channel" : '') . ".");
         return 1;
     }
 
@@ -3432,19 +3446,19 @@ sub mbKarmaHist_ctx {
     if ($filter) {
         @entries = grep { lc($_->{nick}) eq $filter } @entries;
         unless (@entries) {
-            botPrivmsg($self, $channel, "$nick: no karma history for '$filter' on $channel.");
+            botPrivmsg($self, $kh_reply, "$nick: no karma history for '$filter' on $channel.");
             return 1;
         }
     }
     @entries = @entries[0..4] if @entries > 5;  # show last 5
 
     my $label = $filter ? "karma history for $filter" : "recent karma changes";
-    botPrivmsg($self, $channel, "$nick: $label on $channel:");
+    botPrivmsg($self, $kh_reply, "$nick: $label on $channel:");
     for my $e (@entries) {
         my $sign  = $e->{score} > 0 ? '+' : '';
         my $delta = $e->{delta};
         my $ago   = _seconds_to_human(time() - $e->{ts});
-        botPrivmsg($self, $channel,
+        botPrivmsg($self, $kh_reply,
             "  $e->{nick} $delta (now ${sign}$e->{score}) by $e->{from} — $ago ago");
     }
     logBot($self, $ctx->message, $channel, 'karmahist', $filter // '');
@@ -3953,27 +3967,50 @@ sub mbKarmaInfo_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     my $target  = @args ? lc($args[0]) : lc($nick);
-    my $klog    = $self->{_karma_log}{$channel} // [];
-    my @entries = grep { lc($_->{nick}) eq $target } @$klog;
+    # KI1/fix: karmainfo works in PM — use $channel if public, else nick-scoped log
+    my $klog_chan = (defined $channel && $channel =~ /^#/) ? $channel : undef;
+    my @entries;
+    if ($klog_chan) {
+        my $klog = $self->{_karma_log}{$klog_chan} // [];
+        @entries = grep { lc($_->{nick}) eq $target } @$klog;
+    } else {
+        # PM: search across all channels
+        for my $ch (keys %{ $self->{_karma_log} // {} }) {
+            push @entries, grep { lc($_->{nick}) eq $target }
+                @{ $self->{_karma_log}{$ch} // [] };
+        }
+    }
+    my $reply_to = $klog_chan // $nick;
     unless (@entries) {
-        botPrivmsg($self, $channel, "$target: no karma activity in log."); return 1;
+        botPrivmsg($self, $reply_to, "$target: no karma activity in log."); return 1;
     }
     my ($received_pos, $received_neg, $given_pos, $given_neg) = (0,0,0,0);
     my %givers;
     for my $e (@entries) {
-        if ($e->{delta} eq '+1') { $received_pos++; }
-        else                     { $received_neg++; }
-        $givers{$e->{giver}}++ if $e->{giver};
+        if (($e->{delta} // '') eq '+1') { $received_pos++; }  # B24/fix
+        else                             { $received_neg++; }
+        $givers{$e->{from} // $e->{giver} // ''}++  # B23/fix: field is 'from' not 'giver'
+            if ($e->{from} // $e->{giver} // '');
     }
-    my @given = grep { lc(($_->{giver} // '')) eq $target } @$klog;
+    # KI1/fix2: use all_entries (collected across channels) for @given too
+    my @all_entries_for_given;
+    if ($klog_chan) {
+        @all_entries_for_given = @{ $self->{_karma_log}{$klog_chan} // [] };
+    } else {
+        for my $ch (keys %{ $self->{_karma_log} // {} }) {
+            push @all_entries_for_given, @{ $self->{_karma_log}{$ch} // [] };
+        }
+    }
+    my @given = grep { lc(($_->{from} // $_->{giver} // '')) eq $target } @all_entries_for_given;
+    # B23/fix: _karma_log uses 'from' key, not 'giver'
     for my $e (@given) {
-        if ($e->{delta} eq '+1') { $given_pos++; }
-        else                     { $given_neg++; }
+        if (($e->{delta} // '') eq '+1') { $given_pos++; }  # B24/fix
+        else                             { $given_neg++; }
     }
     my $top_giver = (sort { $givers{$b} <=> $givers{$a} } keys %givers)[0] // 'nobody';
     my $net_received = $received_pos - $received_neg;
     my $sign = $net_received >= 0 ? '+' : '';
-    botPrivmsg($self, $channel,
+    botPrivmsg($self, $reply_to,
         "karmainfo $target: received ${sign}${net_received} "
         . "(+${received_pos}/-${received_neg})"
         . " | given: +${given_pos}/-${given_neg}"
@@ -3990,6 +4027,11 @@ sub mbKarmaGraph_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
+    # KG1/fix: sparkline requires a public channel context
+    unless (defined $channel && $channel =~ /^#/) {
+        botNotice($self, $nick, '!karmgraph requires a channel context. Use it in a channel.');
+        return 1;
+    }
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     # Remove 'graph' keyword if called as '!karma graph'
     shift @args if (@args && lc($args[0]) eq 'graph');
@@ -4089,18 +4131,28 @@ sub mbKarmaDiff_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     my $target  = @args ? lc($args[0]) : lc($nick);
-    my $klog    = $self->{_karma_log}{$channel} // [];
-    my $now     = time();
-    my $since   = $now - 86400;  # last 24h
-    my @entries = grep { lc($_->{nick}) eq $target && $_->{ts} >= $since } @$klog;
+    # KD1/fix: search across all channels in PM (same pattern as KI1/fix)
+    my $kd_chan = (defined $channel && $channel =~ /^#/) ? $channel : undef;
+    my @kd_entries_all;
+    if ($kd_chan) {
+        push @kd_entries_all, @{ $self->{_karma_log}{$kd_chan} // [] };
+    } else {
+        for my $ch (keys %{ $self->{_karma_log} // {} }) {
+            push @kd_entries_all, @{ $self->{_karma_log}{$ch} // [] };
+        }
+    }
+    my $now   = time();
+    my $since = $now - 86400;  # last 24h
+    my @entries = grep { lc($_->{nick}) eq $target && ($_->{ts} // 0) >= $since } @kd_entries_all;
+    my $reply_to_kd = $kd_chan // $nick;
     unless (@entries) {
-        botPrivmsg($self, $channel,
+        botPrivmsg($self, $reply_to_kd,
             "$target: no karma changes in the last 24h."); return 1;
     }
     my $delta = 0;
-    $delta += ($_->{delta} eq '+1' ? 1 : -1) for @entries;
+    $delta += (($_ ->{delta} // '') eq '+1' ? 1 : -1) for @entries;  # KD2/fix: delta guard
     my $sign  = $delta > 0 ? '+' : '';
-    botPrivmsg($self, $channel,
+    botPrivmsg($self, $reply_to_kd,
         "$target: karma changed by ${sign}${delta} in the last 24h (" .
         scalar(@entries) . " vote(s)).");
     logBot($self, $ctx->message, $channel, 'karmadiff', $target);
