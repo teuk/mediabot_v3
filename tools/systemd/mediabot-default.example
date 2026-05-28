@@ -1,0 +1,12 @@
+# Example: /etc/default/mediabot-dev
+#
+# This file is loaded by mediabot@.service.
+# Instance name comes from systemctl start mediabot@<instance>.
+#
+# Example:
+#   systemctl start mediabot@dev
+#   -> loads /etc/default/mediabot-dev
+
+BOT_DIR=/home/mediabot/mediabot_v3
+BOT_BIN=/home/mediabot/mediabot_v3/mediabot.pl
+BOT_CONF=/home/mediabot/mediabot_v3/mediabot.conf

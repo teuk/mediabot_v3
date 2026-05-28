@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<USAGE
+Usage:
+  $0 <instance> start
+  $0 <instance> stop
+  $0 <instance> restart
+  $0 <instance> status
+  $0 <instance> logs
+  $0 <instance> tail
+  $0 <instance> pause <duration>
+  $0 <instance> enable
+  $0 <instance> disable
+  $0 list
+
+Examples:
+  $0 dev restart
+  $0 undernet logs
+  $0 undernet pause 10m
+  $0 list
+USAGE
+}
+
+if [[ "${1:-}" == "list" ]]; then
+  systemctl list-units 'mediabot@*.service' --all --no-pager
+  exit 0
+fi
+
+instance="${1:-}"
+cmd="${2:-}"
+duration="${3:-}"
+
+if [[ -z "$instance" || -z "$cmd" ]]; then
+  usage
+  exit 1
+fi
+
+unit="mediabot@${instance}.service"
+
+case "$cmd" in
+  start)
+    sudo systemctl start "$unit"
+    ;;
+
+  stop)
+    sudo systemctl stop "$unit"
+    ;;
+
+  restart)
+    sudo systemctl restart "$unit"
+    ;;
+
+  status)
+    sudo systemctl status "$unit" --no-pager
+    ;;
+
+  logs|tail)
+    journalctl -u "$unit" -f
+    ;;
+
+  enable)
+    sudo systemctl enable "$unit"
+    ;;
+
+  disable)
+    sudo systemctl disable "$unit"
+    ;;
+
+  pause)
+    if [[ -z "$duration" ]]; then
+      echo "Missing duration, example: $0 $instance pause 10m"
+      exit 1
+    fi
+
+    echo "Stopping $unit"
+    sudo systemctl stop "$unit"
+
+    echo "Scheduling restart in $duration"
+    sudo systemd-run \
+      --unit="mediabot-resume-${instance}" \
+      --on-active="$duration" \
+      /bin/systemctl start "$unit"
+    ;;
+
+  *)
+    usage
+    exit 1
+    ;;
+esac

@@ -1,0 +1,31 @@
+[Unit]
+Description=Mediabot v3 IRC bot instance (%i)
+After=network-online.target
+Wants=network-online.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=mediabot
+Group=mediabot
+
+EnvironmentFile=/etc/default/mediabot-%i
+
+WorkingDirectory=/
+SyslogIdentifier=mediabot-%i
+
+ExecStart=/bin/bash -lc 'cd "$BOT_DIR" && exec /usr/bin/stdbuf -oL -eL /usr/bin/perl "$BOT_BIN" --conf="$BOT_CONF"'
+
+Restart=on-failure
+RestartSec=10s
+
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
