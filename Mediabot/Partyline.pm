@@ -2049,46 +2049,10 @@ sub _cmd_log {
 # ---------------------------------------------------------------------------
 sub _cmd_timers {
     my ($self, $stream, $id) = @_;
-
-    my $bot   = $self->{bot};
-    my $sched = $bot->{scheduler};
-
-    unless ($sched) {
-        $stream->write("Scheduler not available.\r\n");
-        return;
-    }
-
-    my @infos = $sched->all_info;
-    unless (@infos) {
-        $stream->write("No scheduled tasks registered.\r\n");
-        return;
-    }
-
-    $stream->write(sprintf("%-30s %8s %8s %8s %s\r\n",
-        "Name", "Interval", "Ticks", "Active", "Last tick"));
-    $stream->write(("-" x 72) . "\r\n");
-
-    for my $info (@infos) {
-        my $last = $info->{last_tick}
-            ? do {
-                my @t = localtime($info->{last_tick});
-                sprintf("%02d:%02d:%02d", $t[2], $t[1], $t[0]);
-              }
-            : "never";
-        $stream->write(sprintf("%-30s %8ds %8d %8s %s\r\n",
-            $info->{name},
-            $info->{interval},
-            $info->{ticks},
-            $info->{started} ? "yes" : "no",
-            $last,
-        ));
-    }
+    # V1: delegate to _cmd_schedule list — single source of truth with next_run
+    return $self->_cmd_schedule($stream, $id, 'list', undef);
 }
 
-
-# ---------------------------------------------------------------------------
-# _format_duration($seconds)
-# ---------------------------------------------------------------------------
 sub _format_duration {
     my ($self, $seconds) = @_;
 
@@ -2118,6 +2082,24 @@ sub _format_duration {
 # ---------------------------------------------------------------------------
 # .schedule <start|stop> <name>  - control a Scheduler task at runtime
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# _seconds_to_human($secs) — format a duration as '3h 25m 12s' (SL1)
+# ---------------------------------------------------------------------------
+sub _seconds_to_human {
+    my ($secs) = @_;
+    $secs = int($secs // 0);
+    return '0s' unless $secs > 0;
+    my $d = int($secs / 86400); $secs %= 86400;
+    my $h = int($secs / 3600);  $secs %= 3600;
+    my $m = int($secs / 60);    $secs %= 60;
+    my $s = $secs;
+    return "${d}d ${h}h"  if $d;
+    return "${h}h ${m}m"  if $h;
+    return "${m}m ${s}s"  if $m;
+    return "${s}s";
+}
+
 sub _cmd_schedule {
     my ($self, $stream, $id, $action, $name) = @_;
     my $bot   = $self->{bot};
@@ -2137,13 +2119,42 @@ sub _cmd_schedule {
             $stream->write("No scheduled tasks.\r\n");
             return;
         }
-        $stream->write(sprintf("%-28s %-8s %-8s %s\r\n", "Name", "Interval", "Status", "Ticks"));
-        $stream->write(("-" x 58) . "\r\n");
+        # SL1: afficher l'heure du prochain déclenchement
+        my $now = time();
+        $stream->write(sprintf("%-28s %-9s %-8s %-6s %s\r\n",
+            'Name', 'Interval', 'Status', 'Ticks', 'Next run'));
+        $stream->write(("-" x 70) . "\r\n");
         for my $t (@infos) {
-            $stream->write(sprintf("%-28s %-8s %-8s %d\r\n",
+            my $next_str;
+            if (!$t->{started}) {
+                $next_str = 'stopped';
+            } else {
+                # MB75-R1: base = latest of last_tick/start_time.
+                # After a stop/start, last_tick may be older than the current start_time.
+                my $base = 0;
+                if (($t->{last_tick} // 0) > ($t->{start_time} // 0)) {
+                    $base = $t->{last_tick};
+                } elsif (($t->{start_time} // 0) > 0) {
+                    $base = $t->{start_time};
+                }
+                if ($base > 0) {
+                    my $next = $base + $t->{interval};
+                    my $diff = $next - $now;
+                    if ($diff <= 0) {
+                        $next_str = 'imminent';
+                    } else {
+                        my @nt = localtime($next);
+                        $next_str = sprintf('%02d:%02d:%02d (in %s)',
+                            $nt[2], $nt[1], $nt[0], _seconds_to_human($diff));
+                    }
+                } else {
+                    $next_str = 'soon';
+                }
+            }
+            $stream->write(sprintf("%-28s %-9s %-8s %-6d %s\r\n",
                 $t->{name}, "$t->{interval}s",
-                ($t->{started} ? "running" : "stopped"),
-                $t->{ticks}));
+                ($t->{started} ? 'running' : 'stopped'),
+                $t->{ticks}, $next_str));
         }
         return;
     }
@@ -2155,15 +2166,45 @@ sub _cmd_schedule {
             $stream->write("Tasks: " . join(', ', $sched->task_names) . "\r\n");
             return;
         }
-        my $last = $info->{last_tick}
-            ? do { my @lt = localtime($info->{last_tick});
-                   sprintf("%02d:%02d:%02d", $lt[2], $lt[1], $lt[0]) }
-            : "never";
+        my $last;
+        if ($info->{last_tick}) {
+            my @lt = localtime($info->{last_tick});
+            my $ago = time() - $info->{last_tick};
+            # V5: show how long ago the last run was
+            $last = sprintf("%02d:%02d:%02d (%s ago)",
+                $lt[2], $lt[1], $lt[0], _seconds_to_human($ago));
+        } else {
+            $last = 'never';
+        }
         $stream->write("Task:     $info->{name}\r\n");
         $stream->write("Interval: $info->{interval}s\r\n");
         $stream->write("Status:   " . ($info->{started} ? "running" : "stopped") . "\r\n");
         $stream->write("Ticks:    $info->{ticks}\r\n");
         $stream->write("Last run: $last\r\n");
+        my $next_run_s;
+        if (!$info->{started}) {
+            $next_run_s = 'n/a (stopped)';
+        } else {
+            # MB75-R1: base = latest of last_tick/start_time.
+            # After a stop/start, last_tick may be older than the current start_time.
+            my $base = 0;
+            if (($info->{last_tick} // 0) > ($info->{start_time} // 0)) {
+                $base = $info->{last_tick};
+            } elsif (($info->{start_time} // 0) > 0) {
+                $base = $info->{start_time};
+            }
+            if ($base > 0) {
+                my $next = $base + $info->{interval};
+                my $diff = $next - time();
+                if ($diff <= 0) { $next_run_s = 'imminent'; }
+                else {
+                    my @nt = localtime($next);
+                    $next_run_s = sprintf('%02d:%02d:%02d (in %s)',
+                        $nt[2], $nt[1], $nt[0], _seconds_to_human($diff));  # SL1
+                }
+            } else { $next_run_s = 'soon'; }
+        }
+        $stream->write("Next run: $next_run_s\r\n");
         return;
     }
 
@@ -2431,13 +2472,48 @@ sub _cmd_top {
     my ($chan, $n);
     if ($all_chans) {
         $n = ($args =~ /(\d+)/)[0] // 5;
-    } elsif ($args =~ /(#\S+)/i) {
+    } elsif (defined $args && $args =~ /(#\S+)/i) {
         $chan = $1;
         $n    = ($args =~ /(\d+)/)[0] // 5;
+    } elsif (!defined $args || $args !~ /\S/) {
+        # V10b: no channel specified → run top for each joined channel
+        my @chans = sort keys %{ $bot->{channels} || {} };
+        $n = 5;
+        for my $c (@chans) {
+            my $sth_c = $dbh->prepare(
+                'SELECT cl.nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl'
+                . ' JOIN CHANNEL ch ON ch.id_channel = cl.id_channel'
+                . ' WHERE ch.name = ? GROUP BY cl.nick ORDER BY cnt DESC LIMIT ?');
+            unless ($sth_c && $sth_c->execute($c, $n)) {
+                $sth_c->finish if $sth_c;
+                next;
+            }
+
+            my $sth_t = $dbh->prepare(
+                'SELECT COUNT(*) AS t FROM CHANNEL_LOG cl'
+                . ' JOIN CHANNEL ch ON ch.id_channel = cl.id_channel'
+                . ' WHERE ch.name = ?');
+            my $tot = 0;
+            if ($sth_t && $sth_t->execute($c)) {
+                my $r = $sth_t->fetchrow_hashref;
+                $tot = $r->{t} // 0;
+            }
+            $sth_t->finish if $sth_t;
+            $stream->write("Top $n on $c:\r\n");
+            my $rank = 1;
+            while (my $row = $sth_c->fetchrow_hashref) {
+                my $pct = $tot > 0
+                    ? sprintf(' (%.1f%%)', 100 * $row->{cnt} / $tot) : '';
+                $stream->write(sprintf("  %2d. %-20s %d msgs%s\r\n",
+                    $rank++, $row->{nick}, $row->{cnt}, $pct));
+            }
+            $sth_c->finish;
+        }
+        return;
     } else {
+        $n = ($args =~ /(\d+)/)[0] // 5;
         my @chans = sort keys %{ $bot->{channels} || {} };
         $chan = $chans[0];
-        $n    = ($args =~ /(\d+)/)[0] // 5;
     }
     $n = 5 if !$n || $n < 1; $n = 15 if $n > 15;
 
@@ -2463,11 +2539,30 @@ sub _cmd_top {
         }
         $label = "Top $n on $chan";
     }
+    # V10: fetch total for percentage
+    my $total_pl;
+    {
+        my $sth_t = $all_chans
+            ? $dbh->prepare('SELECT COUNT(*) AS t FROM CHANNEL_LOG')
+            : $dbh->prepare('SELECT COUNT(*) AS t FROM CHANNEL_LOG cl'
+                          . ' JOIN CHANNEL c ON c.id_channel = cl.id_channel'
+                          . ' WHERE c.name = ?');
+        if ($sth_t) {
+            my $ok = $all_chans ? $sth_t->execute : $sth_t->execute($chan);
+            if ($ok) {
+                my $r = $sth_t->fetchrow_hashref;
+                $total_pl = $r->{t} // 0;
+            }
+            $sth_t->finish;
+        }
+    }
     $stream->write("$label:\r\n");
     my $rank = 1;
     while (my $row = $sth->fetchrow_hashref) {
-        $stream->write(sprintf("  %2d. %-20s %d msgs\r\n",
-            $rank++, $row->{nick}, $row->{cnt}));
+        my $pct = ($total_pl && $total_pl > 0)
+            ? sprintf(' (%.1f%%)', 100 * $row->{cnt} / $total_pl) : '';
+        $stream->write(sprintf("  %2d. %-20s %d msgs%s\r\n",
+            $rank++, $row->{nick}, $row->{cnt}, $pct));
     }
     $sth->finish;
 }

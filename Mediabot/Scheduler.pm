@@ -65,12 +65,13 @@ sub add {
         unless ref($cb) eq 'CODE';
 
     my $task = {
-        interval  => $interval,
-        cb        => $cb,
-        started   => 0,
-        ticks     => 0,
-        last_tick => 0,
-        timer     => undef,
+        interval   => $interval,
+        cb         => $cb,
+        started    => 0,
+        ticks      => 0,
+        last_tick  => 0,
+        start_time => 0,  # SL1: set when task is started
+        timer      => undef,
     };
 
     my $timer = IO::Async::Timer::Periodic->new(
@@ -153,7 +154,10 @@ sub start {
         return 0;
     }
 
-    $task->{started} = 1;
+    $task->{started}    = 1;
+    # MB75-R1: record the current start time every time the task starts.
+    # last_tick remains available as the last actual run timestamp.
+    $task->{start_time} = time();
     $self->_log(3, "Scheduler: started '$name'");
     return 1;
 }
@@ -223,11 +227,12 @@ sub task_info {
     my ($self, $name) = @_;
     my $task = $self->{_tasks}{$name} or return undef;
     return {
-        name      => $name,
-        interval  => $task->{interval},
-        started   => $task->{started},
-        ticks     => $task->{ticks},
-        last_tick => $task->{last_tick},
+        name       => $name,
+        interval   => $task->{interval},
+        started    => $task->{started},
+        ticks      => $task->{ticks},
+        last_tick  => $task->{last_tick},
+        start_time => $task->{start_time} // 0,  # SL1
     };
 }
 

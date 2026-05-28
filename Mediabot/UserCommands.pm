@@ -1290,6 +1290,8 @@ sub mbSeen_ctx {
         my ($uts) = @_;
         my $secs = time() - ($uts // 0);
         return 'just now' if $secs < 5;
+        # V7: show seconds for small intervals (avoids '0m ago')
+        return "${secs}s ago" if $secs < 60;
         my $d = int($secs / 86400);
         my $h = int(($secs % 86400) / 3600);
         my $m = int(($secs % 3600) / 60);
@@ -2232,14 +2234,21 @@ sub mbStats_ctx {
 
     my $target = $args[0] ? lc($args[0]) : lc($nick);
 
-    # Message count + last message on this channel
+    # Message count + last real message on this channel.
+    # MB75-S1: exclude the stats command itself from the aggregate, otherwise
+    # "m stats" immediately becomes the user's last message and always shows 0h ago.
     my $sth = $self->{dbh}->prepare(q{
         SELECT COUNT(*)  AS msg_count,
                MAX(ts)  AS last_msg,
                MIN(ts)  AS first_seen
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE cl.nick = ? AND c.name = ?
+        WHERE LOWER(cl.nick) = LOWER(?)
+          AND c.name = ?
+          AND NOT (
+              LOWER(TRIM(COALESCE(cl.publictext, ''))) REGEXP '^m[[:space:]]+stats([[:space:]]|$)'
+              OR LOWER(TRIM(COALESCE(cl.publictext, ''))) REGEXP '^!stats([[:space:]]|$)'
+          )
     });
     unless ($sth && $sth->execute($target, $channel)) {
         botNotice($self, $nick, "Database error.");
@@ -2254,11 +2263,16 @@ sub mbStats_ctx {
     my $first_seen = $msg_row->{first_seen} // undef;
 
     # A1: total messages on channel for percentage (global, no period filter)
+    # Keep the denominator aligned with the user aggregate above.
     my $sth_tot = $self->{dbh}->prepare(q{
         SELECT COUNT(*) AS total
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ?
+          AND NOT (
+              LOWER(TRIM(COALESCE(cl.publictext, ''))) REGEXP '^m[[:space:]]+stats([[:space:]]|$)'
+              OR LOWER(TRIM(COALESCE(cl.publictext, ''))) REGEXP '^!stats([[:space:]]|$)'
+          )
     });
     my $total = 0;
     if ($sth_tot && $sth_tot->execute($channel)) {
@@ -2302,8 +2316,9 @@ sub mbStats_ctx {
     my $seen_row  = $sth2->fetchrow_hashref;
     $sth2->finish;
 
-    my $seen_at   = $seen_row->{seen_at}    // 'never';
-    my $seen_type = $seen_row->{event_type} // '';
+    # MB75-R5: USER_SEEN may have no row for this nick.
+    my $seen_at   = $seen_row ? ($seen_row->{seen_at}    // 'never') : 'never';
+    my $seen_type = $seen_row ? ($seen_row->{event_type} // '')      : '';
 
     # User level (if registered)
     my $level_desc = '';
@@ -2328,9 +2343,37 @@ sub mbStats_ctx {
         $msg_count, ($msg_count != 1 ? "s" : ""),
         $pct, $channel
     );
-    $out .= " | first seen: $first_seen" if $first_seen && $msg_count > 0;
-    $out .= " | last msg: $last_msg"   if $msg_count > 0;
-    $out .= " | last seen: $seen_at ($seen_type)" if $seen_at ne 'never';
+    # V6: helper to compute '(X ago)' from a SQL timestamp string
+    my $_ago = sub {
+        my ($ts) = @_;
+        return '' unless defined $ts && $ts =~ /^\d{4}-\d{2}-\d{2}/;
+        require Time::Local;
+        my ($y,$mo,$d,$h,$mi,$s) = $ts =~ /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2}):(\d{2}))?$/;
+        $h //= 12; $mi //= 0; $s //= 0;
+        my $epoch = eval { Time::Local::timelocal($s,$mi,$h,$d,$mo-1,$y-1900) };
+        return '' unless $epoch;
+        my $diff = time() - $epoch;
+        return '' if $diff < 0;
+        my $dy = int($diff/31536000); $diff %= 31536000;
+        my $dm = int($diff/2592000);  $diff %= 2592000;
+        my $dd = int($diff/86400);    $diff %= 86400;
+        my $dh = int($diff/3600);
+        my $str = $dy  ? "${dy}y ${dm}m"
+                : $dm  ? "${dm}m ${dd}d"
+                : $dd  ? "${dd}d ${dh}h"
+                :        int((time()-$epoch)/3600) . 'h';
+        return " ($str ago)";
+    };
+    $out .= " | first seen: $first_seen" . $_ago->($first_seen) if $first_seen && $msg_count > 0;
+    $out .= " | last msg: $last_msg" . $_ago->($last_msg)       if $msg_count > 0;
+
+    # MB75-S1: when a user asks for their own stats, USER_SEEN may already
+    # have been updated by the current command, so it is misleading and always
+    # reads as "0h ago". Keep it for stats about another nick.
+    my $show_seen = (lc($target // '') ne lc($nick // '')) ? 1 : 0;
+    $out .= " | last seen: $seen_at ($seen_type)" . $_ago->($seen_at)
+        if $show_seen && $seen_at ne 'never';
+
     $out .= $karma_str if $karma_str;
     $out .= " | not in database" unless $id_user || $msg_count;
 
@@ -2370,13 +2413,13 @@ sub mbTop_ctx {
         $period_label = " (last ${val}${unit})";
     }
 
-    # A2: fetch total first for percentage
-    my $sth_tot = $self->{dbh}->prepare(q{
-        SELECT COUNT(*) AS total
-        FROM CHANNEL_LOG cl
-        JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ?
-    });
+    # A2: fetch total for percentage — V8: scope to same period as the top query
+    my $sth_tot = $self->{dbh}->prepare(
+        "SELECT COUNT(*) AS total"
+        . " FROM CHANNEL_LOG cl"
+        . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
+        . " WHERE c.name = ? $period_sql"
+    );
     my $total = 0;
     if ($sth_tot && $sth_tot->execute($channel)) {
         my $r = $sth_tot->fetchrow_hashref;
@@ -3030,9 +3073,17 @@ sub mbWordCount_ctx {
     $sth->finish;
     delete $words{''};
 
-    my $total  = scalar keys %words;
-    my $msgs   = scalar grep { 1 } values %words;
-    botPrivmsg($self, $channel, "$target: $total distinct word(s) on $channel");
+    # V9/MB75-R4: show top 5 most frequent useful words.
+    # Filter short words before selecting the top 5, otherwise common short
+    # tokens can occupy the whole top list and then be discarded.
+    my $distinct = scalar keys %words;
+    my @word_candidates = grep { defined($_) && length($_) >= 3 } keys %words;
+    my @top5 = (sort { $words{$b} <=> $words{$a} || $a cmp $b } @word_candidates)[0..4];
+    @top5 = grep { defined($_) } @top5;
+    my $top_str = @top5
+        ? '  | top words: ' . join(', ', map { "$_ ($words{$_})" } @top5)
+        : '';
+    botPrivmsg($self, $channel, "$target: $distinct distinct word(s) on $channel$top_str");
     return 1;
 }
 
@@ -3168,8 +3219,22 @@ sub mbStreak_ctx {
         $streak++;
     }
 
+    # V14: compute best streak (max consecutive run in full history)
+    my $best = $streak;  # current is at least as good as best from start
+    my $cur_run = 1;
+    for my $i (1 .. $#days) {
+        my $d1 = Time::Piece->strptime($days[$i-1], '%Y-%m-%d');
+        my $d2 = Time::Piece->strptime($days[$i],   '%Y-%m-%d');
+        if (int(($d1 - $d2)->days + 0.5) == 1) {
+            $cur_run++;
+            $best = $cur_run if $cur_run > $best;
+        } else {
+            $cur_run = 1;
+        }
+    }
+    my $best_str = $best > $streak ? "  (best ever: ${best}d)" : '';
     botPrivmsg($self, $channel,
-        "$target: $streak consecutive day(s) active on $channel (most recent: $days[0])");
+        "$target: $streak consecutive day(s) active on $channel (most recent: $days[0])$best_str");
     logBot($self, $ctx->message, $channel, 'streak', $target);  # Q1
     return 1;
 }
@@ -3204,14 +3269,30 @@ sub mbKarma_ctx {
             botPrivmsg($self, $dest, "$nick: you can't change your own karma.");
             return 1;
         }
-        # F1/fix: only verify presence on public channels (not in PM)
-        if (defined $channel && $channel =~ /^#/) {
-            my @chan_nicks = eval { $self->gethChannelsNicksOnChan($channel) };
-            my $present = grep { lc($_) eq $ktarget || lc(do{(my $t=$_)=~s/\[.*?\]//g;$t}) eq $ktarget } @chan_nicks;
-            unless ($present) {
-                botPrivmsg($self, $channel, "$nick: $ktarget is not on this channel.");
-                return 1;
-            }
+        # MB75-R3: explicit karma votes require a registered public channel.
+        unless (defined $channel && $channel =~ /^#/) {
+            botNotice($self, $nick, "$nick: use !karma + <nick> or !karma - <nick> in a registered channel.");
+            return 1;
+        }
+
+        my $sth_vote_chan = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+        my $vote_id_channel;
+        if ($sth_vote_chan && $sth_vote_chan->execute($channel)) {
+            my $vote_chan_row = $sth_vote_chan->fetchrow_hashref;
+            $vote_id_channel = $vote_chan_row->{id_channel} if $vote_chan_row;
+        }
+        $sth_vote_chan->finish if $sth_vote_chan;
+
+        unless ($vote_id_channel) {
+            botNotice($self, $nick, "$nick: this channel is not registered.");
+            return 1;
+        }
+
+        my @chan_nicks = eval { $self->gethChannelsNicksOnChan($channel) };
+        my $present = grep { lc($_) eq $ktarget || lc(do{(my $t=$_)=~s/\[.*?\]//g;$t}) eq $ktarget } @chan_nicks;
+        unless ($present) {
+            botPrivmsg($self, $channel, "$nick: $ktarget is not on this channel.");
+            return 1;
         }
         # Route through processKarma with a synthetic text
         my $synthetic = "$ktarget$op";
@@ -3229,7 +3310,14 @@ sub mbKarma_ctx {
         $sth_chan->finish;
         $id_channel = $r->{id_channel} if $r;
     }
-    return unless $id_channel;
+    # U1/fix: informative message instead of silent return when channel not registered
+    unless ($id_channel) {
+        my $dest = (defined $channel && $channel =~ /^#/) ? $channel : $nick;
+        botNotice($self, $dest, defined $channel && $channel =~ /^#/
+            ? "$nick: this channel is not registered."
+            : "$nick: use !karma in a registered channel.");
+        return 1;
+    }
 
     my $sth = $self->{dbh}->prepare(q{
         SELECT score FROM KARMA WHERE id_channel = ? AND nick = ?
@@ -3493,7 +3581,9 @@ sub mbKarmaHist_ctx {
     @entries = @entries[0..4] if @entries > 5;  # show last 5
 
     my $label = $filter ? "karma history for $filter" : "recent karma changes";
-    botPrivmsg($self, $kh_reply, "$nick: $label on $channel:");
+    # U4/fix: use $kh_chan (not $channel which is nick in PM)
+    my $on_str = $kh_chan ? " on $kh_chan" : '';
+    botPrivmsg($self, $kh_reply, "$nick: $label$on_str:");
     for my $e (@entries) {
         my $sign  = $e->{score} > 0 ? '+' : '';
         my $delta = $e->{delta};
@@ -4047,14 +4137,24 @@ sub mbKarmaInfo_ctx {
         if (($e->{delta} // '') eq '+1') { $given_pos++; }  # B24/fix
         else                             { $given_neg++; }
     }
-    my $top_giver = (sort { $givers{$b} <=> $givers{$a} } keys %givers)[0] // 'nobody';
+    # U2/fix: deterministic sort on ties (lc nick), show giver vote count
+    my ($top_giver, $top_giver_count);
+    if (%givers) {
+        my @sorted_givers = sort {
+            $givers{$b} <=> $givers{$a} || lc($a) cmp lc($b)
+        } keys %givers;
+        $top_giver       = $sorted_givers[0];
+        $top_giver_count = $givers{$top_giver};
+    } else {
+        $top_giver = 'nobody'; $top_giver_count = 0;
+    }
     my $net_received = $received_pos - $received_neg;
     my $sign = $net_received >= 0 ? '+' : '';
     botPrivmsg($self, $reply_to,
         "karmainfo $target: received ${sign}${net_received} "
         . "(+${received_pos}/-${received_neg})"
         . " | given: +${given_pos}/-${given_neg}"
-        . " | top voter: $top_giver");
+        . " | top voter: $top_giver" . ($top_giver_count ? " (${top_giver_count}x)" : ''));
     return 1;
 }
 
@@ -4257,8 +4357,8 @@ sub mbKarmaTop_ctx {
     for my $r (@rows) {
         my $sign = $r->{score} > 0 ? '+' : '';
         my $d    = $delta24{lc($r->{nick})} // 0;
-        my $dstr = $d > 0 ? " (\x{2191}${d}today)"
-                 : $d < 0 ? " (\x{2193}" . abs($d) . "today)"
+        my $dstr = $d > 0 ? " (\x{2191}${d} today)"
+                 : $d < 0 ? " (\x{2193}" . abs($d) . " today)"
                  : '';
         botPrivmsg($self, $channel, sprintf('  %2d. %-20s %s%d%s',
             $rank++, $r->{nick}, $sign, $r->{score}, $dstr));
@@ -4395,8 +4495,24 @@ sub mbWhen_ctx {
     my $row = $sth->fetchrow_hashref; $sth->finish;
 
     if ($row && $row->{first_seen}) {
+        # V3: show age alongside raw date
+        my $age_str = '';
+        if ($row->{first_seen} =~ /^(\d{4})-(\d{2})-(\d{2})/) {
+            require Time::Local;
+            my ($y,$mo,$d) = ($1,$2,$3);
+            my $then = eval { Time::Local::timelocal(0,0,12,$d,$mo-1,$y-1900) };
+            if ($then) {
+                my $age   = int((time() - $then) / 86400);
+                my $years = int($age / 365); $age -= $years * 365;
+                my $months= int($age / 30);  $age -= $months * 30;
+                my $days  = $age;
+                if    ($years)  { $age_str = " (${years}y ${months}m ago)"; }
+                elsif ($months) { $age_str = " (${months}m ${days}d ago)"; }
+                else            { $age_str = " (${days}d ago)"; }
+            }
+        }
         botPrivmsg($self, $channel,
-            "$target first seen on $channel: $row->{first_seen}");
+            "$target first seen on $channel: $row->{first_seen}$age_str");
     } else {
         botPrivmsg($self, $channel, "$target: no history found on $channel.");
     }
@@ -4633,7 +4749,10 @@ sub mbHeatmap_ctx {
     my $max = (sort { $b <=> $a } @hours)[0] || 1;
     # 6-hour blocks
     my @blocks = ('00-05', '06-11', '12-17', '18-23');
-    botPrivmsg($self, $channel, "$target activity by hour on $channel:");
+    my $grand_total = 0; $grand_total += $_ for @hours;
+    # V15: afficher le total de messages en en-tête
+    botPrivmsg($self, $channel,
+        "$target activity by hour on $channel ($grand_total msgs total):");
     for my $b (0..3) {
         my $label = $blocks[$b];
         my @slice = @hours[$b*6 .. $b*6+5];
@@ -4675,8 +4794,21 @@ sub mbMonthStats_ctx {
         botPrivmsg($self, $channel, "$target: no data in last 12 months on $channel.");
         return 1;
     }
-    my $out = join('  ', map { "$_->{ym}:$_->{cnt}" } @rows);
-    botPrivmsg($self, $channel, "$target on $channel (last 12 months): $out");
+    # V11: sparkline visuelle par mois
+    my $max_m = (sort { $b <=> $a } map { $_->{cnt} } @rows)[0] || 1;
+    my @parts;
+    for my $r (@rows) {
+        my $bar_len = int(5 * $r->{cnt} / $max_m);
+        $bar_len = 1 if $r->{cnt} > 0 && $bar_len == 0;
+        my $bar = chr(0x2588) x $bar_len . chr(0x2591) x (5 - $bar_len);
+        push @parts, "$r->{ym} $bar $r->{cnt}";
+    }
+    botPrivmsg($self, $channel, "$target on $channel (last 12 months):");
+    # Envoyer sur 2 lignes max (6 mois par ligne) — V11b: splice évite les undef
+    my @line1 = splice(@parts, 0, 6);
+    my @line2 = @parts;
+    botPrivmsg($self, $channel, '  ' . join('  ', @line1)) if @line1;
+    botPrivmsg($self, $channel, '  ' . join('  ', @line2)) if @line2;
     return 1;
 }
 
