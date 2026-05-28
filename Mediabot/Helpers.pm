@@ -325,7 +325,7 @@ sub getIdUser {
     unless ($sth->execute($sUserhandle)) {
         $self->{logger}->log(1, "getIdUser() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
             if $self->{logger};
-        # B26h/fix: execute failed — cursor not open
+        $sth->finish;
         return undef;
     }
 
@@ -396,6 +396,7 @@ sub logBot {
     # Execute the insert with bound parameters
     unless ($sth->execute($timestamp, $user_id, $channel_id, $hostmask, $action, $args_string)) {
         $self->{logger}->log(0, "logBot() SQL error: $DBI::errstr  Query: $sql");
+        $sth->finish;
         return;
     }
 
@@ -669,7 +670,7 @@ sub checkUserLevel {
     unless ($sth->execute($sLevelRequired)) {
         $self->{logger}->log(1, "checkUserLevel() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
             if $self->{logger};
-        # B26h/fix: execute failed — cursor not open
+        $sth->finish;
         return 0;
     }
 
@@ -701,7 +702,7 @@ sub userCount {
     unless ($sth->execute()) {
         $self->{logger}->log(1, "userCount() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
             if $self->{logger};
-        # B26h/fix: execute failed — cursor not open
+        $sth->finish;
         return 0;
     }
 
@@ -772,8 +773,14 @@ sub userAdd {
         my $hm_sth = $dbh->prepare(
             "INSERT INTO USER_HOSTMASK (id_user, hostmask) VALUES (?, ?)"
         );
-        $hm_sth->execute($id, $hostmask);
-        $hm_sth->finish;
+
+        unless ($hm_sth && $hm_sth->execute($id, $hostmask)) {
+            $logger->log(1, "userAdd() USER_HOSTMASK insert failed for id_user=$id: " . ($DBI::errstr || 'unknown DBI error'));
+            $hm_sth->finish if $hm_sth;
+        }
+        else {
+            $hm_sth->finish;
+        }
     }
 
     $logger->log(1, "userAdd() created user '$nickname' (id_user=$id, level_id=$level_id)");
@@ -830,7 +837,7 @@ sub checkUserChannelLevel {
     unless ($sth->execute($sChannel, $id_user)) {
         $self->{logger}->log(1, "checkUserChannelLevel() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
             if $self->{logger};
-        # B26h/fix: execute failed — cursor not open
+        $sth->finish;
         return 0;
     }
 
@@ -864,7 +871,7 @@ sub getIdUserChannelLevel {
     unless ($sth->execute($sUserHandle, $sChannel)) {
         $self->{logger}->log(1, "getIdUserChannelLevel() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
             if $self->{logger};
-        # B26h/fix: execute failed — cursor not open
+        $sth->finish;
         return (undef, undef);
     }
 
@@ -901,7 +908,7 @@ sub getUserChannelLevelByName {
     unless ($sth->execute($sChannel, $sHandle)) {
         $self->{logger}->log(1, "getUserChannelLevelByName() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
             if $self->{logger};
-        # B26h/fix: execute failed — cursor not open
+        $sth->finish;
         return 0;
     }
 
@@ -936,7 +943,7 @@ sub setChannelAntiFlood {
 
 	unless ($sth && $sth->execute($id_channel)) {
 		$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
-		# B26h/fix: execute failed — cursor not open
+		$sth->finish if $sth;
 		return;
 	}
 
@@ -955,7 +962,7 @@ sub setChannelAntiFlood {
 
 		unless ($sth && $sth->execute($id_channel)) {
 			$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
-			# B26h/fix: execute failed — cursor not open
+			$sth->finish if $sth;
 			return;
 		}
 
@@ -977,7 +984,7 @@ sub setChannelAntiFlood {
 			botNotice($self, $sNick, "Something funky happened, could not find record id_channel_flood : $id_channel_flood in Table CHANNEL_FLOOD for channel $sChannel (id_channel : $id_channel)");
 		}
 
-		$sth2->finish;
+		$sth2->finish if $sth2;
 	}
 
 	$sth->finish;
@@ -1047,7 +1054,7 @@ sub logBotAction {
         unless ($sth && $sth->execute($sChannel)) {
             $self->{logger}->log(1, "logBotAction() SQL execute error: $DBI::errstr Query: $sQuery")
                 if $self->{logger};
-            # B26h/fix: execute failed — cursor not open
+            $sth->finish if $sth;
             return;
         }
 
@@ -1079,7 +1086,7 @@ SQL
     unless ($sth_insert->execute($id_channel, $eventtype, $sNick, $sUserhost, $sText)) {
         $self->{logger}->log(1, "logBotAction() SQL insert execute error: $DBI::errstr Query: $insert_query")
             if $self->{logger};
-        # B26h/fix: execute failed — cursor not open
+        $sth_insert->finish;
         return;
     }
 
@@ -1604,7 +1611,7 @@ sub getIdChannelSet {
     unless ($sth->execute($sChannel, $id_chanset_list)) {
         $self->{logger}->log(1, " SQL execute error in getIdChannelSet(): " . $DBI::errstr . " | Query: $sQuery")
             if $self->{logger};
-        # B26h/fix: execute failed — cursor not open
+        $sth->finish;
         return undef;
     }
 
@@ -1650,7 +1657,7 @@ sub getIdChansetList {
     unless ($sth->execute($sChansetValue)) {
         $self->{logger}->log(1, "getIdChansetList() SQL execute error: " . $DBI::errstr . " | Query: $sQuery")
             if $self->{logger};
-        # B26h/fix: execute failed — cursor not open
+        $sth->finish;
         return undef;
     }
 
@@ -1952,6 +1959,7 @@ SQL
 
     unless ($sth->execute($search)) {
         $self->{logger}->log(1, "mbDbCheckNickHostname_ctx() SQL Error: $DBI::errstr Query: $sql");
+        $sth->finish;
         return;
     }
 
@@ -2065,7 +2073,11 @@ sub updateUserSeen {
             seen_at    = NOW()
     }) or return;
 
-    eval { $sth->execute($nick, $channel, $userhost, $event_type, $last_msg, $new_nick) };
+    eval {
+        unless ($sth->execute($nick, $channel, $userhost, $event_type, $last_msg, $new_nick)) {
+            die $DBI::errstr || 'unknown DBI error';
+        }
+    };
     $self->{logger}->log(3, "updateUserSeen: $@") if $@ && $self->{logger};
     $sth->finish;
 }
@@ -2237,6 +2249,7 @@ SQL
 
     unless ($sth && $sth->execute($mask)) {
         $self->{logger}->log(1, "mbDbCheckHostnameNick_ctx() SQL Error: $DBI::errstr Query: $sql");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2348,6 +2361,7 @@ sub whoTalk_ctx {
     unless ($sth && $sth->execute($target_lc)) {
         $self->{logger}->log(1, "whoTalk_ctx() SQL Error: $DBI::errstr Query: $sql");
         botNotice($self, $nick, "Internal error (SQL).");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2666,6 +2680,7 @@ sub mp3_ctx {
         unless ($sth && $sth->execute()) {
             $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sql");
             botPrivmsg($self, $channel, "($nick mp3 count) unexpected error") if $channel;
+            $sth->finish if $sth;
             return;
         }
 
@@ -2695,6 +2710,7 @@ sub mp3_ctx {
         my $sth = $self->{dbh}->prepare($sql);
         unless ($sth && $sth->execute($id)) {
             $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sql");
+            $sth->finish if $sth;
             return;
         }
 
@@ -2768,6 +2784,7 @@ sub mp3_ctx {
     my $nbMp3 = 0;
     unless ($sth && $sth->execute($pattern)) {
         $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sql_count");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2789,7 +2806,7 @@ sub mp3_ctx {
 
     unless ($sth && $sth->execute($pattern)) {
         $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sql_first");
-        # B26h/fix: execute failed — cursor not open
+        $sth->finish if $sth;
         return;
     }
 
@@ -3148,7 +3165,7 @@ sub _tz_exists {
     unless ($sth->execute($tz)) {
         $self->{logger}->log(1, "_tz_exists() SQL execute error: $DBI::errstr Query: $sql")
             if $self->{logger};
-        # B26h/fix: execute failed — cursor not open
+        $sth->finish;
         return undef;
     }
 
@@ -3220,7 +3237,7 @@ sub getLevel {
     unless ($sth->execute($sLevel)) {
         $self->{logger}->log(1, "getLevel() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
             if $self->{logger};
-        # B26h/fix: execute failed — cursor not open
+        $sth->finish;
         return undef;
     }
 

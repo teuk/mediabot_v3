@@ -681,6 +681,7 @@ sub check_birthdays_today {
     });
     unless ($sth && $sth->execute($mmdd, "%-$mmdd")) {
         $self->{logger}->log(1, "check_birthdays_today() SQL error: $DBI::errstr");
+        $sth->finish if $sth;
         return;
     }
 

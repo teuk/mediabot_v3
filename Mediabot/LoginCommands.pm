@@ -74,7 +74,7 @@ sub getUserAutologin {
     unless ($sth->execute($sMatchingUserHandle)) {
         $self->{logger}->log(1, "getUserAutologin() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
             if $self->{logger};
-        # B26lc/fix: execute failed — cursor not open
+        $sth->finish;
         return 0;
     }
 
@@ -108,6 +108,7 @@ sub checkAuth {
     );
     unless ($sth && $sth->execute($iUserId, $sUserHandle, $sHashedPw)) {
         $self->{logger}->log(1, "checkAuth() SQL Error: $DBI::errstr");
+        $sth->finish if $sth;
         return 0;
     }
 
@@ -121,7 +122,7 @@ sub checkAuth {
     );
     unless ($sth2 && $sth2->execute($iUserId)) {
         $self->{logger}->log(1, "checkAuth() UPDATE SQL Error: $DBI::errstr");
-        # B26lc/fix: execute failed — cursor not open
+        $sth2->finish if $sth2;
         return 0;
     }
     $sth2->finish;
@@ -206,7 +207,7 @@ sub userLogin_ctx {
         unless ($sth->execute(@bind)) {
             $self->{logger}->log(1, "userLogin_ctx() SQL execute error: $DBI::errstr Query: $sql")
                 if $self->{logger};
-            # B26lc/fix: execute failed — cursor not open
+            $sth->finish;
             return (undef, "execute");
         }
 
@@ -229,7 +230,7 @@ sub userLogin_ctx {
         unless ($sth->execute(@bind)) {
             $self->{logger}->log(1, "userLogin_ctx() update SQL execute error: $DBI::errstr Query: $sql")
                 if $self->{logger};
-            # B26lc/fix: execute failed — cursor not open
+            $sth->finish;
             return (0, "execute");
         }
 
@@ -431,7 +432,7 @@ sub userLogout_ctx {
     unless ($sth->execute($uid)) {
         $self->{logger}->log(1, "userLogout_ctx() SQL execute error: $DBI::errstr Query: $sql")
             if $self->{logger};
-        # B26lc/fix: execute failed — cursor not open
+        $sth->finish;
         botNotice($self, $nick, "Internal error during logout.");
         return;
     }
@@ -513,6 +514,7 @@ sub userPass {
     unless ($sth_current && $sth_current->execute($uid)) {
         $self->{logger}->log(1, "userPass() SQL error while reading current password: $DBI::errstr")
             if $self->{logger};
+        $sth_current->finish if $sth_current;
         botNotice($self, $sNick, "Internal error (password check failed).");
         return 0;
     }
@@ -589,7 +591,7 @@ sub userPass {
     unless ($sth && $sth->execute($sHashedNewPw, $uid)) {
         $self->{logger}->log(1, "SQL Error: $DBI::errstr - Query: $sQuery")
             if $self->{logger};
-        # B26lc/fix: execute failed — cursor not open
+        $sth->finish if $sth;
         botNotice($self, $sNick, "Internal error (password update failed).");
         return 0;
     }
@@ -673,7 +675,7 @@ sub checkAuthByUser {
     unless ($sth->execute($sUserHandle, $sHashedPw)) {
         $self->{logger}->log(1, "checkAuthByUser() SQL execute error: " . $DBI::errstr . " Query: " . $sCheckAuthQuery)
             if $self->{logger};
-        # B26lc/fix: execute failed — cursor not open
+        $sth->finish;
         return (0, 0);
     }
 
@@ -810,7 +812,7 @@ sub userWhoAmI_ctx {
     unless ($sth->execute($uid)) {
         $self->{logger}->log(1, "userWhoAmI_ctx() SQL execute error: $DBI::errstr | Query: $sql")
             if $self->{logger};
-        # B26lc/fix: execute failed — cursor not open
+        $sth->finish;
         botNotice($self, $nick, "Internal error (query failed).");
         return;
     }

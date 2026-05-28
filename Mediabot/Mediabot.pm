@@ -558,6 +558,7 @@ sub populateChannels {
     my $sth = $self->{dbh}->prepare($sQuery);
     unless ($sth && $sth->execute()) {
         $self->{logger}->log( 1, "SQL Error: " . $DBI::errstr . " Query: $sQuery");
+        $sth->finish if $sth;
         return;
     }
 
@@ -931,6 +932,7 @@ sub refresh_channel_hashes {
     my $sth = $self->{dbh}->prepare($sQuery);
     unless ($sth && $sth->execute()) {
         $self->{logger}->log(1, "SQL Error: " . $DBI::errstr . " Query: $sQuery");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2395,6 +2397,7 @@ sub _fetch_user_for_dcc {
 
     unless ($sth && $sth->execute($nick)) {
  $self->{logger}->log(1, "DCC: DB error for nick '$nick' " . ($DBI::errstr // 'unknown'));
+        $sth->finish if $sth;
         return undef;
     }
 

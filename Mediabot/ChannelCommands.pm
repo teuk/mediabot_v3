@@ -98,7 +98,7 @@ sub get_channel_by_name {
     unless ($sth && $sth->execute($name)) {
         $self->{logger}->log(1, "get_channel_by_name() SQL execute error: $DBI::errstr Query: $sql")
             if $self->{logger};
-        # B26cc/fix: execute failed, no open cursor
+        $sth->finish if $sth;
         return undef;
     }
 
@@ -170,7 +170,7 @@ sub channelList_ctx {
     unless ($sth && $sth->execute()) {
         $self->{logger}->log(1, "channelList_ctx() SQL execute error: $DBI::errstr | Query: $sql")
             if $self->{logger};
-        # B26cc/fix: execute failed, no open cursor
+        $sth->finish if $sth;
         botNotice($self, $nick, "Internal error (query failed).");
         return;
     }
@@ -222,7 +222,7 @@ sub registerChannel {
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth && $sth->execute($id_user,$id_channel)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-		# B26cc/fix: execute failed, no open cursor
+		$sth->finish if $sth;
 		return 0;
 	}
 	else {
@@ -612,6 +612,7 @@ sub purgeChannel_ctx {
     unless ($sth && $sth->execute($id_channel)) {
  $self->{logger}->log(1, " SQL Error: $DBI::errstr while fetching channel info");
         Mediabot::botNotice($self, $nick, "SQL error while fetching channel info.");
+        $sth->finish if $sth;
         return;
     }
 
@@ -640,15 +641,24 @@ sub purgeChannel_ctx {
                 (id_channel, name, description, `key`, chanmode, auto_join, purged_by, purged_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
         });
-        $sth_arch->execute($id_channel, $sChannel, $desc, $ckey, $chanmode, $auto_join, $nick);
-        $sth_arch->finish;
+
+        unless ($sth_arch && $sth_arch->execute($id_channel, $sChannel, $desc, $ckey, $chanmode, $auto_join, $nick)) {
+            my $err = $DBI::errstr || 'unknown DBI error';
+            $sth_arch->finish if $sth_arch;
+            die "archive CHANNEL_PURGED failed: $err";
+        }
+        $sth_arch->finish if $sth_arch;
 
         # Cascade — order matters for FK constraints
         for my $table (qw(CHANNEL_BAN CHANNEL_SET CHANNEL_LOG BADWORDS QUOTES USER_CHANNEL)) {
-            $dbh->do("DELETE FROM $table WHERE id_channel = ?", undef, $id_channel);
+            my $rv = $dbh->do("DELETE FROM $table WHERE id_channel = ?", undef, $id_channel);
+            die "delete from $table failed: " . ($DBI::errstr || 'unknown DBI error')
+                unless defined $rv;
         }
 
-        $dbh->do("DELETE FROM CHANNEL WHERE id_channel = ?", undef, $id_channel);
+        my $rv = $dbh->do("DELETE FROM CHANNEL WHERE id_channel = ?", undef, $id_channel);
+        die "delete from CHANNEL failed: " . ($DBI::errstr || 'unknown DBI error')
+            unless defined $rv;
 
         $dbh->commit;
         1;
@@ -925,13 +935,24 @@ sub channelAddUser_ctx {
             LIMIT 1
         });
 
+        die "prepare USER_CHANNEL level lookup failed: " . ($DBI::errstr || 'unknown DBI error')
+            unless $sth;
+
         # caller
-        $sth->execute($id_channel, $user->id);
+        unless ($sth->execute($id_channel, $user->id)) {
+            my $err = $DBI::errstr || 'unknown DBI error';
+            $sth->finish;
+            die "execute USER_CHANNEL caller level lookup failed: $err";
+        }
         ($caller_chan_level) = $sth->fetchrow_array;
         $caller_chan_level ||= 0;
 
         # target
-        $sth->execute($id_channel, $id_target_user);
+        unless ($sth->execute($id_channel, $id_target_user)) {
+            my $err = $DBI::errstr || 'unknown DBI error';
+            $sth->finish;
+            die "execute USER_CHANNEL target level lookup failed: $err";
+        }
         ($target_chan_level) = $sth->fetchrow_array;
         $target_chan_level ||= 0;
 
@@ -975,6 +996,7 @@ sub channelAddUser_ctx {
     unless ($sth && $sth->execute($id_target_user, $id_channel, $target_level)) {
         $self->{logger}->log(1, "channelAddUser_ctx(): SQL Error: $DBI::errstr while inserting USER_CHANNEL");
         botNotice($self, $nick, "Internal error (DB insert failed).");
+        $sth->finish if $sth;
         return;
     }
     $sth->finish if $sth;
@@ -1063,13 +1085,24 @@ sub channelDelUser_ctx {
             LIMIT 1
         });
 
+        die "prepare USER_CHANNEL level lookup failed: " . ($DBI::errstr || 'unknown DBI error')
+            unless $sth;
+
         # issuer
-        $sth->execute($id_channel, $user->id);
+        unless ($sth->execute($id_channel, $user->id)) {
+            my $err = $DBI::errstr || 'unknown DBI error';
+            $sth->finish;
+            die "execute USER_CHANNEL issuer level lookup failed: $err";
+        }
         ($issuer_level) = $sth->fetchrow_array;
         $issuer_level ||= 0;
 
         # target
-        $sth->execute($id_channel, $id_target);
+        unless ($sth->execute($id_channel, $id_target)) {
+            my $err = $DBI::errstr || 'unknown DBI error';
+            $sth->finish;
+            die "execute USER_CHANNEL target level lookup failed: $err";
+        }
         ($target_level) = $sth->fetchrow_array;
         $target_level ||= 0;
 
@@ -1110,6 +1143,7 @@ sub channelDelUser_ctx {
     unless ($sth && $sth->execute($id_target, $id_channel)) {
         $self->{logger}->log(1, "channelDelUser_ctx(): SQL Error: $DBI::errstr");
         botNotice($self, $nick, "Internal error (DB delete failed).");
+        $sth->finish if $sth;
         return;
     }
     $sth->finish if $sth;
@@ -1733,6 +1767,7 @@ sub _channelban_known_target_level {
     });
 
     unless ($sth && $sth->execute($channel, $target)) {
+        $sth->finish if $sth;
         return;
     }
 
@@ -1761,6 +1796,7 @@ sub _channelban_latest_hostmask_for_nick {
     });
 
     unless ($sth && $sth->execute($channel, $nick)) {
+        $sth->finish if $sth;
         return;
     }
 
@@ -2100,6 +2136,7 @@ sub channelUnban_ctx {
         unless ($sth && $sth->execute($id_channel, $selector)) {
             _channelban_reply($ctx, 'DB error (by id).');
             $self->{logger}->log(1, "channelUnban_ctx: execute error: $DBI::errstr");
+            $sth->finish if $sth;
             return;
         }
     }
@@ -2116,6 +2153,7 @@ sub channelUnban_ctx {
         unless ($sth && $sth->execute($id_channel, $selector)) {
             _channelban_reply($ctx, 'DB error (by mask).');
             $self->{logger}->log(1, "channelUnban_ctx: execute error: $DBI::errstr");
+            $sth->finish if $sth;
             return;
         }
     }
@@ -2194,9 +2232,14 @@ sub userTopicChannel {
         my ($username, @masks) = ('');
         eval {
             my $sth = $self->{dbh}->prepare("SELECT username FROM USER WHERE id_user=?");
-            $sth->execute($uid);
+            unless ($sth && $sth->execute($uid)) {
+                $self->{logger}->log(1, "userTopicChannel() username SQL Error: $DBI::errstr")
+                    if $self->{logger};
+                $sth->finish if $sth;
+                die "username lookup failed";
+            }
             ($username) = $sth->fetchrow_array;
-            $sth->finish;
+            $sth->finish if $sth;
 
             # Fetch hostmasks row-by-row instead of GROUP_CONCATing everything
             # into one large string.
@@ -2461,6 +2504,7 @@ sub userChannelInfo_ctx {
     unless ($sth1 && $sth1->execute($id_channel)) {
         $self->{logger}->log(1, "userChannelInfo_ctx() SQL Error: $DBI::errstr | Query: $sql1");
         botNotice($self, $nick, "Internal error (query failed).");
+        $sth1->finish if $sth1;
         return;
     }
 
@@ -2599,6 +2643,7 @@ sub channelStatLines_ctx {
     unless ($sth && $sth->execute($target_channel)) {
         $self->{logger}->log(1, "SQL Error: $DBI::errstr Query: $sql");
         botNotice($self, $nick, "Internal error (SQL).");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2667,6 +2712,7 @@ sub mbDbChangeCategoryCommand_ctx {
     unless ($sth && $sth->execute($category_name)) {
         $self->{logger}->log(1, "mbDbChangeCategoryCommand_ctx() SQL Error: $DBI::errstr Query: SELECT category");
         botNotice($self, $nick, "Database error while checking category.");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2685,6 +2731,7 @@ sub mbDbChangeCategoryCommand_ctx {
     unless ($sth && $sth->execute($command_name)) {
         $self->{logger}->log(1, "mbDbChangeCategoryCommand_ctx() SQL Error: $DBI::errstr Query: SELECT command");
         botNotice($self, $nick, "Database error while checking command.");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2703,9 +2750,10 @@ sub mbDbChangeCategoryCommand_ctx {
     unless ($sth && $sth->execute($category_id, $command_name)) {
         $self->{logger}->log(1, "mbDbChangeCategoryCommand_ctx() SQL Error: $DBI::errstr Query: UPDATE command category");
         botNotice($self, $nick, "Failed to update category for '$command_name'.");
+        $sth->finish if $sth;
         return;
     }
-    $sth->finish;
+    $sth->finish if $sth;
 
     botNotice($self, $nick, "Category changed to '$category_name' for command '$command_name'.");
     logBot($self, $ctx->message, $ctx->channel, "chcatcmd", "Changed category to '$category_name' for '$command_name'");
@@ -2830,6 +2878,7 @@ SQL
 
     unless ($sth && $sth->execute($id_channel, $mask)) {
         $self->{logger}->log(1, "mbDbCheckHostnameNickChan_ctx() SQL Error: $DBI::errstr Query: $sql");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2957,6 +3006,7 @@ sub userAccessChannel_ctx {
     my $sth = $self->{dbh}->prepare($sQuery);
     unless ($sth && $sth->execute($target, $chan)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $sQuery");
+        $sth->finish if $sth;
         return;
     }
 
@@ -3236,6 +3286,7 @@ sub channelAddBadword_ctx {
     );
     unless ($sth && $sth->execute($id_channel, $badword)) {
         $self->{logger}->log(1, "channelAddBadword_ctx() SQL Error: $DBI::errstr");
+        $sth->finish if $sth;
         return;
     }
 
@@ -3252,12 +3303,13 @@ sub channelAddBadword_ctx {
     $sth = $self->{dbh}->prepare("INSERT INTO BADWORDS (id_channel, badword) VALUES (?, ?)");
     unless ($sth && $sth->execute($id_channel, $badword)) {
         $self->{logger}->log(1, "channelAddBadword_ctx() SQL Error: $DBI::errstr");
+        $sth->finish if $sth;
         return;
     }
 
     botNotice($self, $nick, "Added badword '$badword' to $chan");
     logBot($self, $ctx->message, $chan, "addbadword", "$chan $badword");
-    $sth->finish;
+    $sth->finish if $sth;
 
     return 1;
 }
@@ -3335,6 +3387,7 @@ sub channelRemBadword_ctx {
     my $sth = $self->{dbh}->prepare($sql_sel);
     unless ($sth && $sth->execute($id_channel, $badword)) {
         $self->{logger}->log(1, "channelRemBadword_ctx() SQL Error: $DBI::errstr Query: $sql_sel");
+        $sth->finish if $sth;
         return;
     }
 
@@ -3353,13 +3406,14 @@ sub channelRemBadword_ctx {
     $sth = $self->{dbh}->prepare($sql_del);
     unless ($sth && $sth->execute($id_badwords)) {
         $self->{logger}->log(1, "channelRemBadword_ctx() SQL Error: $DBI::errstr Query: $sql_del");
+        $sth->finish if $sth;
         return;
     }
 
     delete $self->{_badword_cache}{$chan};  # B1: invalidate botPrivmsg Badword cache
     botNotice($self, $nick, "Removed badword '$badword' from $chan");
     logBot($self, $ctx->message, $chan, "rembadword", "$chan $badword");
-    $sth->finish;
+    $sth->finish if $sth;
 
     return 1;
 }
@@ -3437,6 +3491,7 @@ sub setChannelAntiFloodParams_ctx {
         my $sth = $self->{dbh}->prepare($sql);
         unless ($sth && $sth->execute($target_channel)) {
             $self->{logger}->log(1, "SQL Error: $DBI::errstr");
+            $sth->finish if $sth;
             return;
         }
 
@@ -3532,6 +3587,7 @@ sub getChannelOwner {
 
 	unless ($sth && $sth->execute($id_channel)) {
 		$self->{logger}->log(1, "SQL Error : $DBI::errstr | Query : $sQuery");
+		$sth->finish if $sth;
 		return undef;
 	}
 
@@ -3682,6 +3738,7 @@ sub mbChannelLog_ctx {
     my $sth = $self->{dbh}->prepare($sql);
     unless ($sth && $sth->execute(@bind)) {
         $self->{logger}->log(1, "mbChannelLog_ctx() SQL Error: $DBI::errstr | Query: $sql");
+        $sth->finish if $sth;
         return;
     }
 
@@ -3788,9 +3845,10 @@ sub setTMDBLangChannel_ctx {
     unless ($sth && $sth->execute($lang, $id_channel)) {
         $self->{logger}->log(1, "SQL Error: " . $DBI::errstr . " Query: " . $sQuery);
         botNotice($self, $nick, "Database error while updating tmdb_lang.");
+        $sth->finish if $sth;
         return;
     }
-    $sth->finish;
+    $sth->finish if $sth;
 
     botNotice($self, $nick, "tmdb_lang set to '$lang' for $target_channel");
     logBot($self, $message, $target_channel, "tmdblangset", ($target_channel, $lang));
@@ -3802,6 +3860,8 @@ sub getTMDBLangChannel {
 	my $sth = $self->{dbh}->prepare($sQuery);
 	unless ($sth && $sth->execute($sChannel)) {
 		$self->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+		$sth->finish if $sth;
+		return undef;
 	}
 	else {
 		if (my $ref = $sth->fetchrow_hashref()) {

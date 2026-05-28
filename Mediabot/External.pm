@@ -3305,7 +3305,9 @@ sub claude_ctx {
             @bind = ($channel, $n_msgs);
         }
         unless ($sth && $sth->execute(@bind)) {
-            botNotice($self, $nick, 'DB error.'); return;
+            $sth->finish if $sth;
+            botNotice($self, $nick, 'DB error.');
+            return;
         }
         my @rows;
         while (my $r = $sth->fetchrow_hashref) { unshift @rows, "$r->{nick}: $r->{text}"; }

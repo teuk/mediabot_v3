@@ -412,30 +412,49 @@ sub userStats_ctx {
     my $bot  = $ctx->bot;
     my $nick = $ctx->nick;
 
-    my $sth = $bot->{dbh}->prepare(
-        "SELECT COUNT(*) AS nbUsers FROM USER"
-    );
-    $sth->execute;
+    my $sql_total = "SELECT COUNT(*) AS nbUsers FROM USER";
+    my $sth = $bot->{dbh}->prepare($sql_total);
+
+    unless ($sth && $sth->execute()) {
+        $bot->{logger}->log(1, "userStats_ctx() SQL error: $DBI::errstr Query: $sql_total")
+            if $bot->{logger};
+        $sth->finish if $sth;
+        $bot->botNotice($nick, "Internal error while reading user statistics.");
+        return;
+    }
+
     my ($total) = $sth->fetchrow_array;
     $sth->finish;
 
+    $total //= 0;
     $bot->botNotice($nick, "Number of users: $total");
 
-    $sth = $bot->{dbh}->prepare(
-        "SELECT description, COUNT(*) 
-         FROM USER 
-         JOIN USER_LEVEL USING(id_user_level)
-         GROUP BY description
-         ORDER BY level"
-    );
-    $sth->execute;
+    my $sql_levels = q{
+        SELECT description, COUNT(*)
+        FROM USER
+        JOIN USER_LEVEL USING(id_user_level)
+        GROUP BY description
+        ORDER BY level
+    };
+
+    $sth = $bot->{dbh}->prepare($sql_levels);
+
+    unless ($sth && $sth->execute()) {
+        $bot->{logger}->log(1, "userStats_ctx() SQL error: $DBI::errstr Query: $sql_levels")
+            if $bot->{logger};
+        $sth->finish if $sth;
+        $bot->botNotice($nick, "Internal error while reading user level statistics.");
+        return;
+    }
 
     while (my ($desc, $count) = $sth->fetchrow_array) {
+        $desc  //= 'Unknown';
+        $count //= 0;
         $bot->botNotice($nick, "$desc ($count)");
     }
+
     $sth->finish;
 }
-
 
 # Context-based userinfo command (Master only)
 sub userInfo_ctx {
@@ -482,6 +501,7 @@ sub userInfo_ctx {
     my $sth = $self->{dbh}->prepare($sQuery);
     unless ($sth && $sth->execute($target)) {
         $self->{logger}->log(1, "userInfo_ctx() SQL Error: $DBI::errstr | Query: $sQuery");
+        $sth->finish if $sth;
         return;
     }
 
@@ -599,6 +619,7 @@ sub addUserHost_ctx {
     );
     unless ($chk && $chk->execute($id_user, $new_hostmask)) {
         $self->{logger}->log(1, "addUserHost_ctx() SQL Error: $DBI::errstr");
+        $chk->finish if $chk;
         return;
     }
     if ($chk->fetchrow_arrayref) {
@@ -616,6 +637,7 @@ sub addUserHost_ctx {
     );
     unless ($ins && $ins->execute($id_user, $new_hostmask)) {
         $self->{logger}->log(1, "addUserHost_ctx() SQL Insert Error: $DBI::errstr");
+        $ins->finish if $ins;
         return;
     }
     $ins->finish;
@@ -1038,6 +1060,7 @@ SQL
     my $sth = $self->{dbh}->prepare($sql);
     unless ($sth && $sth->execute($chan, $target_nick_like)) {
         $self->{logger}->log(1, "userTopSay_ctx() SQL Error: $DBI::errstr Query: $sql");
+        $sth->finish if $sth;
         return;
     }
 
@@ -1180,6 +1203,7 @@ SQL
     unless ($sth && $sth->execute($target_chan, $greet_nick)) {
         $self->{logger}->log(1, "userGreet_ctx() SQL Error: $DBI::errstr Query: $sql");
         $say->("Database error while fetching greet for $greet_nick on $target_chan.");
+        $sth->finish if $sth;
         return;
     }
 
@@ -1809,6 +1833,7 @@ sub userBirthday_ctx {
         my $sth = $self->{dbh}->prepare("SELECT birthday FROM USER WHERE nickname = ?");
         unless ($sth && $sth->execute($target)) {
             $self->{logger}->log(1, "userBirthday_ctx() SQL Error: $DBI::errstr");
+            $sth->finish if $sth;
             return;
         }
 
@@ -2000,6 +2025,7 @@ sub _birthday_add_ctx {
     unless ($sth && $sth->execute($normalized, $id_user)) {
         $self->{logger}->log(1, "_birthday_add_ctx() SQL error: $DBI::errstr");
         botNotice($self, $nick, "Database error.");
+        $sth->finish if $sth;
         return;
     }
     $sth->finish;
@@ -2037,6 +2063,7 @@ sub _birthday_del_ctx {
     unless ($sth && $sth->execute($id_user)) {
         $self->{logger}->log(1, "_birthday_del_ctx() SQL error: $DBI::errstr");
         botNotice($self, $nick, "Database error.");
+        $sth->finish if $sth;
         return;
     }
     $sth->finish;
@@ -2216,6 +2243,7 @@ sub mbStats_ctx {
     });
     unless ($sth && $sth->execute($target, $channel)) {
         botNotice($self, $nick, "Database error.");
+        $sth->finish if $sth;
         return;
     }
     my $msg_row = $sth->fetchrow_hashref;
@@ -2268,6 +2296,7 @@ sub mbStats_ctx {
     });
     unless ($sth2 && $sth2->execute($target)) {
         botNotice($self, $nick, "Database error.");
+        $sth2->finish if $sth2;
         return;
     }
     my $seen_row  = $sth2->fetchrow_hashref;
@@ -2364,6 +2393,7 @@ sub mbTop_ctx {
     );
     unless ($sth && $sth->execute($channel, $n)) {
         botNotice($self, $nick, "Database error.");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2712,6 +2742,7 @@ sub deliverReminders {
         if ($sth_up) {
             unless ($sth_up->execute($r->{id_reminder})) {
                 $self->{logger}->log(1, "deliverReminders: UPDATE failed for id=$r->{id_reminder}: $DBI::errstr");
+                $sth_up->finish;
                 next;  # skip send if we can't mark delivered
             }
             $sth_up->finish;
@@ -2741,6 +2772,7 @@ sub mbRemindList_ctx {
     });
     unless ($sth && $sth->execute($nick, $channel)) {
         botNotice($self, $nick, 'Database error.');
+        $sth->finish if $sth;
         return;
     }
     my @rows;
@@ -2868,6 +2900,7 @@ sub mbRemindCancel_ctx {
     });
     unless ($sth && $sth->execute($id, $nick)) {
         botNotice($self, $nick, 'Database error.');
+        $sth->finish if $sth;
         return;
     }
     my $rows = $sth->rows;
@@ -2987,6 +3020,7 @@ sub mbWordCount_ctx {
     });
     unless ($sth && $sth->execute($target, $channel)) {
         botNotice($self, $nick, 'Database error.');
+        $sth->finish if $sth;
         return;
     }
     my %words;
@@ -3040,7 +3074,7 @@ sub mbAlias_ctx {
     if ($subcmd eq 'list') {
         my $sth = $self->{dbh}->prepare('SELECT alias, command FROM BOT_ALIAS ORDER BY alias');
         unless ($sth && $sth->execute()) {
-            botNotice($self, $nick, 'Database error.'); return;
+            botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
         }
         my @rows;
         while (my $r = $sth->fetchrow_hashref) { push @rows, $r; }
@@ -3081,7 +3115,7 @@ sub mbAlias_ctx {
         ON DUPLICATE KEY UPDATE command = VALUES(command), created_by = VALUES(created_by)
     });
     unless ($sth && $sth->execute($alias, $command, $nick)) {
-        botNotice($self, $nick, 'Database error.'); return;
+        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
     }
     $sth->finish;
     $self->{_alias_cache}{$alias} = $command;
@@ -3112,6 +3146,7 @@ sub mbStreak_ctx {
     });
     unless ($sth && $sth->execute($target, $channel)) {
         botNotice($self, $nick, 'Database error.');
+        $sth->finish if $sth;
         return;
     }
     my @days;
@@ -3200,7 +3235,7 @@ sub mbKarma_ctx {
         SELECT score FROM KARMA WHERE id_channel = ? AND nick = ?
     });
     unless ($sth && $sth->execute($id_channel, $target)) {
-        botNotice($self, $nick, 'Database error.'); return;
+        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
     }
     my $row = $sth->fetchrow_hashref;
     $sth->finish;
@@ -3356,9 +3391,14 @@ sub processKarma {
                     (id_channel, nick, delta, from_nick, score, ts)
                 VALUES (?, ?, ?, ?, ?, NOW())
             });
-            $sth_log->execute($id_channel, $target,
-                ($op eq '++' ? 1 : -1), $nick, $score);
-            $sth_log->finish;
+
+            if ($sth_log && $sth_log->execute($id_channel, $target,
+                    ($op eq '++' ? 1 : -1), $nick, $score)) {
+                $sth_log->finish;
+            }
+            else {
+                $sth_log->finish if $sth_log;
+            }
         };  # silently ignore if KARMA_LOG table doesn't exist yet
         }
     }
@@ -3496,7 +3536,7 @@ sub mbLast_ctx {
         LIMIT 1
     });
     unless ($sth && $sth->execute($target, $channel)) {
-        botNotice($self, $nick, 'Database error.'); return;
+        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
     }
     my $row = $sth->fetchrow_hashref;
     $sth->finish;
@@ -4106,7 +4146,7 @@ sub mbKarmaReset_ctx {
     });
     unless ($sth && $sth->execute($rc->{id_channel}, $target)) {
         # V3: B26-pattern: execute failed, no open cursor
-        botNotice($self, $nick, 'Database error.'); return;
+        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
     }
     my $rows = $sth->rows; $sth->finish;
     if ($rows > 0) {
@@ -4192,7 +4232,7 @@ sub mbKarmaTop_ctx {
         "SELECT nick, score FROM KARMA WHERE id_channel = ? ORDER BY score $order LIMIT ?"
     );
     unless ($sth && $sth->execute($id_channel, $n)) {
-        botNotice($self, $nick, 'Database error.'); return;
+        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
     }
     my @rows;
     while (my $r = $sth->fetchrow_hashref) { push @rows, $r; }
@@ -4306,7 +4346,7 @@ sub mbActive_ctx {
         . " ORDER BY cl.nick LIMIT 30"  # B5/fix: cap nicks to avoid IRC line overflow
     );
     unless ($sth && $sth->execute($channel)) {
-        botNotice($self, $nick, 'Database error.'); return;
+        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
     }
     my @nicks;
     while (my ($n) = $sth->fetchrow_array) { push @nicks, $n; }
@@ -4350,7 +4390,7 @@ sub mbWhen_ctx {
         WHERE cl.nick = ? AND c.name = ?
     });
     unless ($sth && $sth->execute($target, $channel)) {
-        botNotice($self, $nick, 'Database error.'); return;
+        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
     }
     my $row = $sth->fetchrow_hashref; $sth->finish;
 
@@ -4551,7 +4591,7 @@ sub mbCompare_ctx {
         GROUP BY cl.nick
     });
     unless ($sth && $sth->execute($channel, $t1, $t2)) {
-        botNotice($self, $nick, 'Database error.'); return;
+        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
     }
     my %counts;
     while (my $r = $sth->fetchrow_hashref) { $counts{$r->{nick}} = $r->{cnt}; }
@@ -4585,7 +4625,7 @@ sub mbHeatmap_ctx {
         . ' GROUP BY HOUR(cl.ts) ORDER BY h'
     );
     unless ($sth && $sth->execute($target, $channel)) {
-        botNotice($self, $nick, 'Database error.'); return;
+        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
     }
     my @hours = (0) x 24;
     while (my $r = $sth->fetchrow_hashref) { $hours[$r->{h}] = $r->{cnt}; }
@@ -4626,7 +4666,7 @@ sub mbMonthStats_ctx {
         . ' GROUP BY ym ORDER BY ym'
     );
     unless ($sth && $sth->execute($target, $channel)) {
-        botNotice($self, $nick, 'Database error.'); return;
+        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
     }
     my @rows;
     while (my $r = $sth->fetchrow_hashref) { push @rows, $r; }
@@ -4839,7 +4879,13 @@ sub checkTriviaAnswer {
                     VALUES (?, ?, 1, NOW())
                     ON DUPLICATE KEY UPDATE score = score + 1, last_correct = NOW()
                 });
-                if ($sth_u) { $sth_u->execute($rc->{id_channel}, lc($nick)); $sth_u->finish; }
+                if ($sth_u) {
+                    unless ($sth_u->execute($rc->{id_channel}, lc($nick))) {
+                        $self->{logger}->log(1, "TRIVIA_SCORES persist execute failed: $DBI::errstr")
+                            if $self->{logger};
+                    }
+                    $sth_u->finish;
+                }
             }
         }
     };
@@ -4884,7 +4930,7 @@ sub mbTriviaTop_ctx {
     $limit = 1 if $limit < 1; $limit = 15 if $limit > 15;
     my $sth_c = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
     unless ($sth_c && $sth_c->execute($channel)) {
-        botPrivmsg($self, $channel, 'DB error.'); return;
+        botPrivmsg($self, $channel, 'DB error.'); $sth_c->finish if $sth_c; return;
     }
     my $rc = $sth_c->fetchrow_hashref; $sth_c->finish;
     unless ($rc) { botPrivmsg($self, $channel, 'Channel not found.'); return; }
@@ -4895,7 +4941,7 @@ sub mbTriviaTop_ctx {
         ORDER BY score DESC LIMIT ?
     });
     unless ($sth && $sth->execute($rc->{id_channel}, $limit)) {
-        botPrivmsg($self, $channel, 'DB error.'); return;
+        botPrivmsg($self, $channel, 'DB error.'); $sth->finish if $sth; return;
     }
     my @ranked; my $i = 1;
     while (my $r = $sth->fetchrow_hashref) {
@@ -4927,7 +4973,7 @@ sub mbTriviaReset_ctx {
     }
     my $sth_c = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
     unless ($sth_c && $sth_c->execute($channel)) {
-        botNotice($self, $nick, 'DB error.'); return;
+        botNotice($self, $nick, 'DB error.'); $sth_c->finish if $sth_c; return;
     }
     my $rc = $sth_c->fetchrow_hashref; $sth_c->finish;
     unless ($rc) { botNotice($self, $nick, 'Channel not found.'); return; }
@@ -4935,7 +4981,7 @@ sub mbTriviaReset_ctx {
         'DELETE FROM TRIVIA_SCORES WHERE id_channel = ? AND nick = ?'
     );
     unless ($sth && $sth->execute($rc->{id_channel}, $target)) {
-        botNotice($self, $nick, 'DB error.'); return;
+        botNotice($self, $nick, 'DB error.'); $sth->finish if $sth; return;
     }
     my $rows = $sth->rows; $sth->finish;
     if ($rows > 0) {

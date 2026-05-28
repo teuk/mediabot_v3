@@ -1453,6 +1453,7 @@ sub _do_login {
     unless ($sth && $sth->execute($login)) {
         $bot->{logger}->log(1, "Partyline: SQL error on login query: " . $DBI::errstr);
         $stream->write("Internal error during authentication.\r\n");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2448,7 +2449,7 @@ sub _cmd_top {
             . " GROUP BY cl.nick ORDER BY cnt DESC LIMIT ?"
         );
         unless ($sth && $sth->execute($n)) {
-            $stream->write("DB error.\r\n"); return;
+            $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
         }
         $label = "Top $n speakers (all channels)";
     } else {
@@ -2458,7 +2459,7 @@ sub _cmd_top {
             . " WHERE c.name = ? GROUP BY cl.nick ORDER BY cnt DESC LIMIT ?"
         );
         unless ($sth && $sth->execute($chan, $n)) {
-            $stream->write("DB error.\r\n"); return;
+            $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
         }
         $label = "Top $n on $chan";
     }
@@ -2538,7 +2539,7 @@ sub _cmd_seen {
         FROM USER_SEEN WHERE nick = ? ORDER BY seen_at DESC LIMIT 1
     });
     unless ($sth && $sth->execute($target)) {
-        $stream->write("DB error.\r\n"); return;
+        $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
     }
     my $row = $sth->fetchrow_hashref; $sth->finish;
     unless ($row) {
@@ -2564,7 +2565,7 @@ sub _cmd_purgereminders {
           AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)
     });
     unless ($sth && $sth->execute()) {
-        $stream->write("DB error.\r\n"); return;
+        $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
     }
     my $rows = $sth->rows; $sth->finish;
     $stream->write("Purged $rows reminder(s) older than 7 days.\r\n");
@@ -2601,6 +2602,7 @@ sub _cmd_karma {
 
         unless ($sth_c && $sth_c->execute($chan)) {
             $stream->write("DB error.\r\n");
+            $sth_c->finish if $sth_c;
             return;
         }
 
@@ -2618,6 +2620,7 @@ sub _cmd_karma {
 
         unless ($sth && $sth->execute($c->{id_channel}, $target_lc)) {
             $stream->write("DB error.\r\n");
+            $sth->finish if $sth;
             return;
         }
 
@@ -2644,6 +2647,7 @@ sub _cmd_karma {
 
     unless ($sth && $sth->execute($target_lc)) {
         $stream->write("DB error.\r\n");
+        $sth->finish if $sth;
         return;
     }
 
@@ -2951,6 +2955,7 @@ sub _cmd_ai {
 
         unless ($sth && $sth->execute($chan, $n_msgs)) {
             $stream->write("DB error.\r\n");
+            $sth->finish if $sth;
             return;
         }
 
@@ -3222,6 +3227,7 @@ sub _cmd_bans {
     my $sth = $dbh->prepare("SELECT id_channel FROM CHANNEL WHERE name = ? LIMIT 1");
     unless ($sth && $sth->execute($chan)) {
         $stream->write("DB error.\r\n");
+        $sth->finish if $sth;
         return;
     }
     my $row = $sth->fetchrow_hashref;
@@ -3385,6 +3391,7 @@ sub _cmd_unban {
     my $sth = $dbh->prepare("SELECT id_channel FROM CHANNEL WHERE name = ? LIMIT 1");
     unless ($sth && $sth->execute($chan)) {
         $stream->write("DB error.\r\n");
+        $sth->finish if $sth;
         return;
     }
     my $row = $sth->fetchrow_hashref;
@@ -4170,7 +4177,7 @@ sub _cmd_chanlog {
         ORDER BY cl.id DESC LIMIT ?
     });
     unless ($sth && $sth->execute($chan, $n)) {
-        $stream->write("DB error.\r\n"); return;
+        $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
     }
     my @rows;
     while (my $r = $sth->fetchrow_hashref) { unshift @rows, $r; }
@@ -4202,7 +4209,7 @@ sub _cmd_nickinfo {
         GROUP BY u.id_user
     });
     unless ($sth && $sth->execute($target)) {
-        $stream->write("DB error.\r\n"); return;
+        $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
     }
     my $r = $sth->fetchrow_hashref; $sth->finish;
     unless ($r) {
