@@ -415,7 +415,8 @@
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
-          }
+          },
+          "legendFormat": "{{instance_name}} / {{channel}}"
         }
       ],
       "fieldConfig": {
