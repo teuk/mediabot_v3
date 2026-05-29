@@ -20,6 +20,7 @@ use Mediabot::External ();
 
 use Mediabot::Context;
 use Mediabot::Radio::Icecast;
+use Mediabot::Liquidsoap;
 
 our @EXPORT = qw(
     debug_ctx
@@ -35,6 +36,10 @@ our @EXPORT = qw(
     displayRadioListeners_ctx
     radioNext_ctx
     song_ctx
+    radioQueue_ctx
+    radioPush_ctx
+    radioSkip_ctx
+    radioFlush_ctx
     update
     update_ctx
 );
@@ -1058,12 +1063,10 @@ sub mbRehash_ctx {
     }
 }
 
-# Play a radio request
-# ---------------------------------------------------------------------------
-# Radio command wrappers — Context-based shims over legacy handlers.
-# The legacy subs (playRadio, rplayRadio, etc.) keep their original
-# signature ($self, $message, $sNick, $sChannel, @tArgs) unchanged.
-# ---------------------------------------------------------------------------
+# Generic authenticated exec command.
+# Historical playRadio/rplayRadio comments were removed from here because
+# Liquidsoap queue control now lives in the radioQueue/radioPush/radioSkip
+# context handlers below.
 
 
 sub mbExec_ctx {
@@ -1461,6 +1464,187 @@ sub radioNext_ctx {
     logBot($self, $ctx->message, undef, 'nextsong', 'not_implemented');
     return song_ctx($ctx);
 }
+
+
+sub _liquidsoap_config_value {
+    my ($self, $short, $default) = @_;
+
+    my $conf = $self->{conf};
+    return $default unless $conf && $conf->can('get');
+
+    my $v = $conf->get("radio.$short");
+    $v = $conf->get($short) unless defined($v) && $v ne '';
+
+    return defined($v) && $v ne '' ? $v : $default;
+}
+
+sub _liquidsoap_client {
+    my ($self) = @_;
+
+    my $host = _liquidsoap_config_value($self, 'LIQUIDSOAP_TELNET_HOST', '127.0.0.1');
+    my $port = _liquidsoap_config_value($self, 'LIQUIDSOAP_TELNET_PORT', 1235);
+    my $qid  = _liquidsoap_config_value($self, 'LIQUIDSOAP_QUEUE_ID',  'mediabot_queue');
+
+    $port = 1235 unless defined($port) && $port =~ /^\d+$/ && $port > 0;
+
+    return Mediabot::Liquidsoap->new(
+        host     => $host,
+        port     => int($port),
+        queue_id => $qid,
+        timeout  => 5,
+        logger   => $self->{logger},
+    );
+}
+
+sub _radio_notice_lines {
+    my ($ctx, $prefix, $text, $max_lines) = @_;
+
+    $max_lines ||= 8;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    $text = '' unless defined $text;
+    $text =~ s/\r//g;
+
+    my @raw_lines = grep { defined($_) && $_ ne '' } split(/\n/, $text);
+    my @lines = grep { $_ !~ /^\s*(?:END|Bye!)\s*$/ } @raw_lines;
+
+    unless (@lines) {
+        botNotice($self, $nick, "$prefix: empty");
+        return;
+    }
+
+    my $shown = 0;
+    for my $line (@lines) {
+        botNotice($self, $nick, "$prefix: $line");
+        $shown++;
+        last if $shown >= $max_lines;
+    }
+
+    my $remaining = @lines - $shown;
+    botNotice($self, $nick, "$prefix: ... ($remaining more line(s))")
+        if $remaining > 0;
+}
+
+sub radioQueue_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    return unless $ctx->require_level('Master');
+
+    my $liq = _liquidsoap_client($self);
+    my ($ok, $response) = $liq->queue();
+
+    unless ($ok) {
+        botNotice($self, $nick, "Liquidsoap queue error: $response");
+        logBot($self, $ctx->message, undef, 'radioqueue', 'error');
+        return;
+    }
+
+    _radio_notice_lines($ctx, 'Liquidsoap queue', $response, 10);
+    logBot($self, $ctx->message, undef, 'radioqueue', undef);
+    return 1;
+}
+
+sub radioPush_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    return unless $ctx->require_level('Master');
+
+    my $uri = join(' ', @args);
+    $uri =~ s/^\s+|\s+$//g;
+
+    unless ($uri ne '') {
+        botNotice($self, $nick, "Syntax: radiopush <absolute-local-mp3-path>");
+        return;
+    }
+
+    unless ($uri =~ m{^/}) {
+        botNotice($self, $nick, "radiopush currently expects an absolute local file path.");
+        return;
+    }
+
+    if ($uri =~ /\s/) {
+        botNotice($self, $nick, "radiopush does not support whitespace in file paths yet.");
+        return;
+    }
+
+    unless (-r $uri) {
+        botNotice($self, $nick, "radiopush: file is not readable: $uri");
+        return;
+    }
+
+    my $liq = _liquidsoap_client($self);
+    my ($ok, $response) = $liq->push($uri);
+
+    unless ($ok) {
+        botNotice($self, $nick, "Liquidsoap push error: $response");
+        logBot($self, $ctx->message, undef, 'radiopush', 'error', $uri);
+        return;
+    }
+
+    botNotice($self, $nick, "Liquidsoap push sent: $uri");
+    _radio_notice_lines($ctx, 'Liquidsoap', $response, 4);
+
+    logBot($self, $ctx->message, undef, 'radiopush', $uri);
+    return 1;
+}
+
+sub radioSkip_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    return unless $ctx->require_level('Master');
+
+    my $liq = _liquidsoap_client($self);
+    my ($ok, $response) = $liq->skip();
+
+    unless ($ok) {
+        botNotice($self, $nick, "Liquidsoap skip error: $response");
+        logBot($self, $ctx->message, undef, 'radioskip', 'error');
+        return;
+    }
+
+    botNotice($self, $nick, "Liquidsoap skip sent.");
+    _radio_notice_lines($ctx, 'Liquidsoap', $response, 4);
+
+    logBot($self, $ctx->message, undef, 'radioskip', undef);
+    return 1;
+}
+
+sub radioFlush_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    return unless $ctx->require_level('Master');
+
+    my $liq = _liquidsoap_client($self);
+    my ($ok, $response) = $liq->flush_and_skip();
+
+    unless ($ok) {
+        botNotice($self, $nick, "Liquidsoap flush error: $response");
+        logBot($self, $ctx->message, undef, 'radioflush', 'error');
+        return;
+    }
+
+    botNotice($self, $nick, "Liquidsoap flush_and_skip sent.");
+    _radio_notice_lines($ctx, 'Liquidsoap', $response, 4);
+
+    logBot($self, $ctx->message, undef, 'radioflush', undef);
+    return 1;
+}
+
 
 sub update_ctx {
     my ($ctx) = @_;
