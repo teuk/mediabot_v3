@@ -1283,6 +1283,15 @@ sub mbTopCommand_ctx {
     my $ctx_chan = $ctx->channel // '';
     $out_chan = $ctx_chan if defined($ctx_chan) && $ctx_chan =~ /^#/;
 
+    # IMP26: fetch total hits to compute percentages
+    my $total_hits = 0;
+    {
+        my $sth_tot = $self->{dbh}->prepare(q{SELECT SUM(hits) AS t FROM PUBLIC_COMMANDS});
+        if ($sth_tot && $sth_tot->execute) {
+            my $r = $sth_tot->fetchrow_hashref; $total_hits = $r->{t} // 0;
+            $sth_tot->finish;
+        }
+    }
     my $sql = "SELECT command, hits FROM PUBLIC_COMMANDS ORDER BY hits DESC LIMIT 20";
     my $sth = $self->{dbh}->prepare($sql);
 
@@ -1301,7 +1310,9 @@ sub mbTopCommand_ctx {
         my $hits = $r->{hits}    // 0;
         $rank++;
 
-        push @items, $rank . ") " . $cmd . "(" . $hits . ")";
+        my $pct_str = $total_hits > 0
+            ? sprintf(" %.1f%%", 100 * $hits / $total_hits) : "";
+        push @items, $rank . ") " . $cmd . "(" . $hits . $pct_str . ")";
     }
 
     $sth->finish;
@@ -1367,8 +1378,9 @@ sub mbLastCommand_ctx {
     my $ctx_chan = $ctx->channel // '';
     $out_chan = $ctx_chan if defined($ctx_chan) && $ctx_chan =~ /^#/;
 
+    # IMP27: also fetch creation_date to show 'X ago'
     my $sql = q{
-        SELECT command
+        SELECT command, creation_date
         FROM PUBLIC_COMMANDS
         ORDER BY creation_date DESC
         LIMIT 10
@@ -1384,7 +1396,22 @@ sub mbLastCommand_ctx {
 
     my @cmds;
     while (my $r = $sth->fetchrow_hashref()) {
-        push @cmds, $r->{command} if defined $r->{command} && $r->{command} ne '';
+        if (defined $r->{command} && $r->{command} ne '') {
+            # IMP27: compute 'X ago' from creation_date
+            my $age_s = '';
+            if ($r->{creation_date} && $r->{creation_date} =~ /^(\d{4})-(\d{2})-(\d{2})/) {
+                require Time::Local;
+                my ($y,$mo,$d) = ($1,$2,$3);
+                my $ep = eval { Time::Local::timelocal(0,0,12,$d,$mo-1,$y-1900) };
+                if ($ep) {
+                    my $diff = time() - $ep;
+                    $age_s = $diff >= 86400
+                        ? sprintf(' (%dd ago)', int($diff/86400))
+                        : sprintf(' (%dh ago)', int($diff/3600));
+                }
+            }
+            push @cmds, $r->{command} . $age_s;
+        }
     }
     $sth->finish;
 

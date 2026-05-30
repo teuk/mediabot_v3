@@ -2253,6 +2253,16 @@ sub _cmd_status {
     $stream->write(sprintf("Bot:      %s  uptime: %s\r\n",
         $bot_info->{nick} // '?', $bot_info->{uptime} // '?'));
     $stream->write(sprintf("Sessions: %d active\r\n", scalar @$sessions));
+    # IMP24: add global AF status
+    my $bot_s = $self->{bot};
+    my $gaf = $bot_s->{_global_af} // {};
+    if (($gaf->{silenced_until} // 0) > time()) {
+        my $rem = $gaf->{silenced_until} - time();
+        $stream->write("GlobalAF: SILENCED for ${rem}s\r\n");
+    } else {
+        my $hits = scalar @{ $gaf->{hits} // [] };
+        $stream->write("GlobalAF: ok ($hits msgs in window)\r\n");
+    }
 
     for my $s (@$sessions) {
         my $lvl_display = $s->{level_desc} || $s->{level} // '?';
@@ -2296,11 +2306,22 @@ sub _cmd_metrics {
         return;
     }
 
-    $stream->write("--- Prometheus metrics ---\r\n");
+    # IMP23: show only non-zero metrics, sorted, with category grouping
+    my %grouped;
     for my $line (split /\n/, $rendered) {
-        next if $line =~ /^#\s*(HELP|TYPE)/;   # skip metadata for compactness
-        next if $line =~ /^\s*$/;
-        $stream->write("$line\r\n");
+        next if $line =~ /^#/ || $line =~ /^\s*$/;
+        if ($line =~ /^(\w+?)(?:\{[^}]*\})?\s+([\d.e+\-]+)/) {
+            my ($metric, $val) = ($1, $2);
+            next if $val == 0;          # IMP23: skip zeroes
+            my ($cat) = $metric =~ /^([^_]+(?:_[^_]+)?)_/;
+            $cat //= 'other';
+            push @{ $grouped{$cat} }, $line;
+        }
+    }
+    $stream->write("--- Prometheus metrics (non-zero) ---\r\n");
+    for my $cat (sort keys %grouped) {
+        $stream->write("[$cat]\r\n");
+        $stream->write("  $_ \r\n") for @{ $grouped{$cat} };
     }
     $stream->write("--- end ---\r\n");
 }
@@ -2939,7 +2960,12 @@ sub _cmd_ai {
             return;
         }
 
-        $stream->write(scalar(@$history) . " message(s) in context:\r\n");
+        # IMP13: also show estimated size in chars
+        my $hist_chars = 0;
+        $hist_chars += length($_->{content} // '') for @$history;
+        my $hist_exchanges = int(scalar(@$history) / 2);
+        $stream->write(scalar(@$history) . " message(s) in context"
+            . " ($hist_exchanges exchange(s), ~${hist_chars} chars):\r\n");
         my @display = @$history > 6 ? @{$history}[-6..-1] : @$history;
 
         for my $msg (@display) {
@@ -3014,9 +3040,14 @@ sub _cmd_ai {
             return;
         }
 
-        my $pinned = substr($action, 0, 300);
+        # IMP9: raised to 500 chars max (was 300), warn if truncated
+        my $was_long = length($action) > 500;
+        my $pinned   = $was_long ? substr($action, 0, 500) : $action;
         $bot->{_claude_pinned}{$pin_key} = $pinned;
-        $stream->write("Pinned context set for $pl_nick on $chan: $pinned\r\n");
+        my $notice = $was_long
+            ? "Pinned context set (truncated to 500 chars): $pinned"
+            : "Pinned context set: $pinned";
+        $stream->write("$notice\r\n");
         return;
     }
 
@@ -3157,10 +3188,21 @@ sub _cmd_persona {
             $stream->write("No active personas.\r\n"); return;
         }
         $stream->write("Active Claude personas:\r\n");
+        my $now_p = time();
         for my $key (sort keys %$personas) {
             my ($nick_k, $chan_k) = split /\x00/, $key, 2;
-            my $text = substr($personas->{$key}, 0, 60);
-            $stream->write(sprintf("  %-15s %-12s %s...\r\n", $nick_k, $chan_k, $text));
+            my $text = substr($personas->{$key}, 0, 55);
+            # IMP25: show time since last use from _ai_last_active
+            my $last_ts = $bot->{_ai_last_active}{$key} // 0;
+            my $age_str = '';
+            if ($last_ts > 0) {
+                my $diff = $now_p - $last_ts;
+                $age_str = $diff >= 3600
+                    ? sprintf(' (%dh%02dm ago)', int($diff/3600), int(($diff%3600)/60))
+                    : sprintf(' (%dm ago)', int($diff/60));
+            }
+            $stream->write(sprintf("  %-15s %-12s %s...%s\r\n",
+                $nick_k, $chan_k, $text, $age_str));
         }
         return;
     }
@@ -3801,6 +3843,15 @@ sub _cmd_stat {
     my $claude_sessions = scalar keys %{ $bot->{_claude_history} // {} };
     my $ai_cache        = scalar keys %{ $bot->{_claude_prompt_cache} // {} };
     $stream->write("Claude: $claude_sessions active session(s), $ai_cache cached prompt(s)\r\n");
+
+    # IMP18: IRC command totals from Prometheus counters
+    if ($bot->{metrics}) {
+        my $cmds_pub  = eval { $bot->{metrics}->get('mediabot_commands_total') } // 0;
+        my $cmds_pl   = eval { $bot->{metrics}->get('mediabot_commands_partyline_total') } // 0;
+        my $msgs_out  = eval { $bot->{metrics}->get('mediabot_privmsg_out_total') } // 0;
+        $stream->write("Commands: ${cmds_pub} IRC public, ${cmds_pl} partyline\r\n");
+        $stream->write("Messages: ${msgs_out} PRIVMSG sent\r\n");
+    }
 
     my $mutes   = scalar grep { ($bot->{_nick_mute}{$_} // 0) > time() }
                         keys %{ $bot->{_nick_mute} // {} };

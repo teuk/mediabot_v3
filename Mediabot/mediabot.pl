@@ -467,6 +467,15 @@ $scheduler->add(
                 $purged_p++;
             }
         }
+        # IMP12: also purge _ai_last_active and stale URL display cache
+        for my $key (keys %{ $mediabot->{_ai_last_active} // {} }) {
+            my ($nick_k) = split /\x00/, $key, 2;
+            delete $mediabot->{_ai_last_active}{$key}
+                unless $online_nicks{lc($nick_k)};
+        }
+        { my $c = $mediabot->{_url_display_cache} // {};
+          my $ct = time();
+          delete @{$c}{grep { ($c->{$_}//0) < $ct - 600 } keys %$c}; }
         $mediabot->{logger}->log(3, "claude_history_purge: $purged_h history, $purged_p persona orphan(s) removed")
             if $purged_h + $purged_p > 0;
     },
@@ -1690,7 +1699,7 @@ sub on_message_LIST {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_LIST', $message);
     my ($target_name) = @{$hints}{qw<target_name>};
-    $mediabot->{logger}->log(4,"on_message_LIST() $target_name");
+    $mediabot->{logger}->log(2,"on_message_LIST() $target_name");
 }
 
 sub on_message_RPL_NAMEREPLY {
@@ -1850,21 +1859,21 @@ sub on_message_001 {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_001', $message);
     my ($text) = @{$hints}{qw<text>};
-    $mediabot->{logger}->log(4,"001 $text");
+    $mediabot->{logger}->log(2,"001 $text");
 }
         
 sub on_message_002 {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_002', $message);
     my ($text) = @{$hints}{qw<text>};
-    $mediabot->{logger}->log(4,"002 $text");
+    $mediabot->{logger}->log(2,"002 $text");
 }
         
 sub on_message_003 {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_003', $message);
     my ($text) = @{$hints}{qw<text>};
-    $mediabot->{logger}->log(4,"003 $text");
+    $mediabot->{logger}->log(2,"003 $text");
 }
         
 # Numeric 004 - Server version/info
@@ -1876,7 +1885,7 @@ sub on_message_004 {
     my $version = $args[1] // '<unknown>';
     my $user_modes = $args[2] // '';
     my $chan_modes = $args[3] // '';
-    $mediabot->{logger}->log(4, "004 server=$server version=$version user_modes=$user_modes chan_modes=$chan_modes");
+    $mediabot->{logger}->log(0, "004 server=$server version=$version user_modes=$user_modes chan_modes=$chan_modes");
 }
         
 # Numeric 005 - ISUPPORT
@@ -1886,7 +1895,7 @@ sub on_message_005 {
     my @args = $message->args;
     shift @args; # Remove nickname (first arg)
     my $features = join(" ", @args);
-    $mediabot->{logger}->log(4, "005 $features");
+    $mediabot->{logger}->log(2, "005 $features");
 }
         
 sub on_motd {
@@ -1894,7 +1903,7 @@ sub on_motd {
     log_debug_args('on_motd', $message);
     my @motd_lines = @{$hints}{qw<motd>};
     foreach my $line (@{$motd_lines[0]}) {
-        $mediabot->{logger}->log(4,"-motd- $line");
+        $mediabot->{logger}->log(2,"-motd- $line");
     }
 }
     
@@ -2237,30 +2246,18 @@ sub on_message_RPL_LIST {
 }
 
 sub on_message_RPL_LISTEND {
-    $mediabot->{logger}->log(4, "End of channel list.");
+    $mediabot->{logger}->log(2, "End of channel list.");
 }
 
 sub on_message_RPL_WHOREPLY {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_WHOREPLY', $message);
-
     my @who_args = eval { @{ $message->args // [] } } // ();
-
-    # WHO replies can be very noisy during joins/reconnects. They are useful
-    # when debugging presence/userhost state, but not at DEBUG2. Also avoid
-    # logging a useless "WHO reply:" line when the IRC library exposes no
-    # parsed args for this numeric.
-    if (@who_args) {
-        $mediabot->{logger}->log(4, "WHO reply: " . join(" ", @who_args));
-    }
-    else {
-        $mediabot->{logger}->log(5, "WHO reply received without parsed args.");
-    }
+    $mediabot->{logger}->log(2, "WHO reply: " . join(" ", @who_args));
 }
 
 sub on_message_RPL_ENDOFWHO {
-    # End-of-WHO is routine IRC noise; keep it out of DEBUG2.
-    $mediabot->{logger}->log(4, "End of WHO list.");
+    $mediabot->{logger}->log(2, "End of WHO list.");
 }
 
 

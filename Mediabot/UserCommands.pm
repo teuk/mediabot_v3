@@ -2589,11 +2589,11 @@ sub mbRemind_ctx {
     # V9: !remind show — see reminders set FOR the caller (by others)
     if (@args && lc($args[0]) eq 'show') {
         my $sth_s = $self->{dbh}->prepare(q{
-            SELECT r.id, r.from_nick, r.message, r.created_at
+            SELECT r.id_reminder, r.from_nick, r.message, r.created_at
             FROM REMINDERS r
             JOIN CHANNEL c ON c.id_channel = r.id_channel
             WHERE c.name = ? AND r.to_nick = ? AND r.delivered = 0
-            ORDER BY r.id ASC LIMIT 10
+            ORDER BY r.id_reminder ASC LIMIT 10
         });
         if ($sth_s && $sth_s->execute($channel, lc($nick))) {
             my @rows;
@@ -2602,7 +2602,7 @@ sub mbRemind_ctx {
             if (@rows) {
                 botNotice($self, $nick, 'Reminders set for you:');
                 for my $r (@rows) {
-                    botNotice($self, $nick, "  [#$r->{id}] from $r->{from_nick}: $r->{message}");
+                    botNotice($self, $nick, "  [#$r->{id_reminder}] from $r->{from_nick}: $r->{message}");
                 }
             } else {
                 botNotice($self, $nick, 'No pending reminders set for you.');
@@ -2614,11 +2614,11 @@ sub mbRemind_ctx {
     # K1: subcommands list and cancel
     if (@args && lc($args[0]) eq 'list') {
         my $sth_l = $self->{dbh}->prepare(q{
-            SELECT r.id, r.to_nick, r.message, r.created_at
+            SELECT r.id_reminder, r.to_nick, r.message, r.created_at
             FROM REMINDERS r
             JOIN CHANNEL c ON c.id_channel = r.id_channel
             WHERE c.name = ? AND r.from_nick = ? AND r.delivered = 0
-            ORDER BY r.id ASC LIMIT 10
+            ORDER BY r.id_reminder ASC LIMIT 10
         });
         if ($sth_l && $sth_l->execute($channel, lc($nick))) {
             my @rows;
@@ -2628,7 +2628,7 @@ sub mbRemind_ctx {
                 botNotice($self, $nick, 'Pending reminders:');
                 for my $r (@rows) {
                     botNotice($self, $nick,
-                        "  [#$r->{id}] for $r->{to_nick}: $r->{message}");
+                        "  [#$r->{id_reminder}] for $r->{to_nick}: $r->{message}");
                 }
             } else {
                 botNotice($self, $nick, 'No pending reminders.');
@@ -2645,7 +2645,7 @@ sub mbRemind_ctx {
         }
         my $sth_del = $self->{dbh}->prepare(q{
             DELETE FROM REMINDERS
-            WHERE id = ? AND from_nick = ? AND delivered = 0
+            WHERE id_reminder = ? AND from_nick = ? AND delivered = 0
         });
         if ($sth_del && $sth_del->execute($id, lc($nick))) {
             my $rows = $sth_del->rows; $sth_del->finish;
@@ -2669,6 +2669,23 @@ sub mbRemind_ctx {
     unless (defined $target && $target ne '' && $message ne '') {
         botNotice($self, $nick, "Syntax: remind <nick> <message>  |  remind list  |  remind cancel <id>");
         return;
+    }
+
+    # IMP8: limit pending reminders per sender (max 10) to prevent spam
+    {
+        my $sth_cnt = $self->{dbh}->prepare(q{
+            SELECT COUNT(*) AS cnt FROM REMINDERS
+            WHERE from_nick = ? AND delivered = 0
+        });
+        if ($sth_cnt && $sth_cnt->execute(lc($nick))) {
+            my $r = $sth_cnt->fetchrow_hashref;
+            $sth_cnt->finish;
+            if (($r->{cnt} // 0) >= 10) {
+                botNotice($self, $nick,
+                    "You already have 10 pending reminders. Cancel some before adding more.");
+                return 1;
+            }
+        }
     }
 
     if (length($message) > 512) {
@@ -2790,8 +2807,23 @@ sub deliverReminders {
             }
             $sth_up->finish;
         } else { next; }  # can't prepare → skip
+        # IMP15: show how long ago the reminder was set
+        my $ago_str = '';
+        if ($r->{created_at} && $r->{created_at} =~ /^(\d{4})-(\d{2})-(\d{2})/) {
+            require Time::Local;
+            my ($y,$mo,$d) = ($1,$2,$3);
+            my $epoch = eval { Time::Local::timelocal(0,0,12,$d,$mo-1,$y-1900) };
+            if ($epoch) {
+                my $diff = time() - $epoch;
+                my $dy = int($diff/31536000); my $dm = int(($diff%31536000)/2592000);
+                my $dd = int(($diff%2592000)/86400);
+                $ago_str = $dy  ? ", ${dy}y ${dm}m ago"
+                         : $dm  ? ", ${dm}m ${dd}d ago"
+                         : $dd  ? ", ${dd}d ago" : '';
+            }
+        }
         botPrivmsg($self, $channel,
-            "$nick: reminder from $r->{from_nick} ($r->{created_at}): $r->{message}");
+            "$nick: reminder from $r->{from_nick} ($r->{created_at}$ago_str): $r->{message}");
     }
 }
 
@@ -3471,7 +3503,7 @@ sub processKarma {
             score => $score,
             from  => $nick,
         };
-        splice @$klog, 0, @$klog - 20 if @$klog > 20;
+        splice @$klog, 0, @$klog - 500 if @$klog > 500;  # IMP3: 500 entries (was 20)
         # I8: persist to KARMA_LOG if table exists (graceful — skip on error)
         eval {
             my $sth_log = $self->{dbh}->prepare(q{
@@ -3897,7 +3929,22 @@ sub mbPollStop_ctx {
     }
     $poll->{active} = 0;
     $self->{metrics}->inc('mediabot_poll_closed_total') if $self->{metrics};  # Z10
-    botPrivmsg($self, $channel, "Poll closed. Use !pollresult to see results.");
+    # IMP14: show top result immediately when poll closes
+    my $votes  = $poll->{votes}  // {};
+    my $opts   = $poll->{options} // [];
+    my $total  = scalar(keys %$votes);
+    if ($total > 0) {
+        my %tally;
+        $tally{$votes->{$_}}++ for keys %$votes;
+        my ($winner) = sort { ($tally{$b}//0) <=> ($tally{$a}//0) } keys %tally;
+        my $w_count  = $tally{$winner} // 0;
+        my $pct      = int(100 * $w_count / $total);
+        botPrivmsg($self, $channel,
+            "Poll closed ($total vote(s)). Winner: $winner "
+            . "($w_count/$total, ${pct}%). Use !pollresult for details.");
+    } else {
+        botPrivmsg($self, $channel, "Poll closed. No votes cast.");
+    }
     logBot($self, $ctx->message, $channel, 'pollstop', '');  # S2/fix
     return 1;
 }
@@ -4062,7 +4109,22 @@ sub mbKarmaWatch_ctx {
             botNotice($self, $nick, 'You are not watching any karma targets.');
             return 1;
         }
-        botNotice($self, $nick, 'You are watching: ' . join(', ', @$watching));
+        # IMP19: show current karma score for each watched nick
+        my @watch_with_scores;
+        for my $wt (@$watching) {
+            my $score_str = '';
+            for my $ch (keys %{ $self->{_karma_log} // {} }) {
+                my $klog = $self->{_karma_log}{$ch} // [];
+                my ($last) = grep { lc($_->{nick}) eq lc($wt) } reverse @$klog;
+                if ($last && defined $last->{score}) {
+                    my $sc = $last->{score};
+                    $score_str = $sc >= 0 ? "+$sc" : "$sc";
+                    last;
+                }
+            }
+            push @watch_with_scores, $score_str ne '' ? "$wt ($score_str)" : $wt;
+        }
+        botNotice($self, $nick, 'You are watching: ' . join(', ', @watch_with_scores));
         return 1;
     }
 
@@ -4150,8 +4212,13 @@ sub mbKarmaInfo_ctx {
     }
     my $net_received = $received_pos - $received_neg;
     my $sign = $net_received >= 0 ? '+' : '';
+    # IMP6: show current score from last known log entry
+    my $last_score = @entries ? $entries[-1]{score} : undef;
+    my $score_str  = defined $last_score
+        ? ' [score: ' . ($last_score >= 0 ? "+$last_score" : "$last_score") . ']'
+        : '';
     botPrivmsg($self, $reply_to,
-        "karmainfo $target: received ${sign}${net_received} "
+        "karmainfo $target$score_str: received ${sign}${net_received} "
         . "(+${received_pos}/-${received_neg})"
         . " | given: +${given_pos}/-${given_neg}"
         . " | top voter: $top_giver" . ($top_giver_count ? " (${top_giver_count}x)" : ''));
@@ -4759,7 +4826,15 @@ sub mbHeatmap_ctx {
         my $total = 0; $total += $_ for @slice;
         my $bar_len = int(10 * $total / ($max * 6 || 1));
         $bar_len = 1 if $total > 0 && $bar_len == 0;
-        my $bar = chr(0x2588) x $bar_len . chr(0x2591) x (10 - $bar_len);
+        # IMP22: IRC color codes — intensity: green < yellow < red
+        my $ratio = $max > 0 ? $total / $max : 0;
+        my $irc_color = $ratio >= 0.75 ? "\x0304"  # red
+                      : $ratio >= 0.40 ? "\x0308"  # yellow
+                      : $ratio >  0    ? "\x0303"  # green
+                      :                  '';       # no color if 0
+        my $reset = $irc_color ne '' ? "\x0f" : '';
+        my $bar = $irc_color . chr(0x2588) x $bar_len . $reset
+                . chr(0x2591) x (10 - $bar_len);
         botPrivmsg($self, $channel, sprintf('  %s  %s  %d msgs', $label, $bar, $total));
     }
     return 1;
@@ -5155,8 +5230,15 @@ sub mbTriviaScore_ctx {
         botPrivmsg($self, $channel, 'No trivia scores yet.'); return 1;
     }
     my @sorted = sort { $scores->{$b} <=> $scores->{$a} } keys %$scores;
-    my $top = join(', ', map { "$_:$scores->{$_}" } @sorted[0..($#sorted > 4 ? 4 : $#sorted)]);
-    botPrivmsg($self, $channel, "Trivia scores on $channel: $top");
+    # IMP17: also show total correct answers this session
+    my $total_correct = 0; $total_correct += $scores->{$_} for keys %$scores;
+    my $top = join(', ', map {
+        my $pct = $total_correct > 0
+            ? sprintf(' (%.0f%%)', 100*$scores->{$_}/$total_correct) : '';
+        "$_: $scores->{$_}$pct"
+    } @sorted[0..($#sorted > 4 ? 4 : $#sorted)]);
+    botPrivmsg($self, $channel,
+        "Trivia scores on $channel ($total_correct total): $top");
     logBot($self, $ctx->message, $channel, 'triviascore', '');  # Q1
     return 1;
 }

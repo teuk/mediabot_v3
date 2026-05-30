@@ -420,6 +420,14 @@ sub botPrivmsg {
 
     return unless defined($sTo);
 
+    # Guard before any formatting/chanset/badword work. Some callers may fail
+    # upstream and pass an empty payload; do not let that create noisy
+    # uninitialized warnings in NoColors/badword/log paths.
+    unless (defined($sMsg) && $sMsg ne '') {
+        $self->{logger}->log(0, "botPrivmsg() ERROR no message specified to send to target");
+        return;
+    }
+
     my $eventtype = "public";
 
     if ($sTo =~ /^#/) {
@@ -498,20 +506,40 @@ sub botPrivmsg {
 
     # Send actual message — shared path for channel and private (A5)
     if (defined($sMsg) && $sMsg ne "") {
-        # Encode and sanitise
-        $sMsg = encode("UTF-8", $sMsg) if utf8::is_utf8($sMsg);
+        # Sanitise first while the string is still a Perl character string.
+        # IMP5/fix: split before UTF-8 encoding so substr() never cuts a
+        # multi-byte character in half (accents, emojis, █/░ bars, etc.).
         $sMsg =~ s/[\r\n]+/ /g;
 
-        # A4: IRC hard limit ~512 bytes; practical safe limit for PRIVMSG payload
-        # is ~400 chars to leave room for the prefix, command, and target.
+        # IRC hard limit is ~512 bytes. 400 characters keeps the historical
+        # Mediabot behavior and leaves room for prefix/target overhead.  The
+        # final encode happens per chunk below.
+        my @chunks;
         if (length($sMsg) > 400) {
-            $sMsg = substr($sMsg, 0, 397) . '...';
+            my $buf = $sMsg;
+            while (length($buf) > 400) {
+                my $cut = 400;
+                if (substr($buf, 0, 400) =~ /^(.{200,399}\s)/s) {
+                    $cut = length($1);
+                }
+                push @chunks, substr($buf, 0, $cut);
+                $buf = substr($buf, $cut);
+                $buf =~ s/^\s+//;
+            }
+            push @chunks, $buf if length($buf);
+        }
+        else {
+            @chunks = ($sMsg);
         }
 
-        $self->{metrics}->inc('mediabot_privmsg_out_total') if $self->{metrics};
-        $self->{irc}->do_PRIVMSG(target => $sTo, text => $sMsg);
+        for my $chunk (@chunks) {
+            next unless defined($chunk) && $chunk ne '';
+            $chunk = encode("UTF-8", $chunk) if utf8::is_utf8($chunk);
+            $self->{metrics}->inc('mediabot_privmsg_out_total') if $self->{metrics};
+            $self->{irc}->do_PRIVMSG(target => $sTo, text => $chunk);
+        }
     } else {
-        $self->{logger}->log(0, "botPrivmsg() ERROR no message specified to send to target");
+        $self->{logger}->log(0, "botAction() ERROR no message specified to send to target");
     }
 }
 
@@ -521,6 +549,10 @@ sub botPrivmsg {
 sub botAction {
 	my ($self,$sTo,$sMsg) = @_;
 	if (defined($sTo)) {
+		unless (defined($sMsg) && $sMsg ne "") {
+			$self->{logger}->log(0,"botAction() ERROR no message specified to send to target");
+			return;
+		}
 		my $eventtype = "public";
 		if (substr($sTo, 0, 1) eq '#') {
 				my $id_chanset_list = getIdChansetList($self,"NoColors");
@@ -600,40 +632,56 @@ sub botNotice {
 
     $self->{logger}->log(4, "[DEBUG] botNotice() called with target='$target', text='$text'");
 
-    # Nettoyer les retours à la ligne
-    $text =~ s/[\r\n]+/ /g;
+    # Keep NOTICE behavior aligned with botPrivmsg:
+    # - sanitize newlines;
+    # - split long messages instead of truncating them;
+    # - split before UTF-8 encoding so accents, emojis and IRC bar chars are
+    #   never cut in the middle of a multi-byte sequence.
+    $text =~ s/[
+]+/ /g;
 
-    # B2/A2: troncature identique à botPrivmsg (limite IRC ~512 octets)
-    $text = substr($text, 0, 397) . '...' if length($text) > 400;
+    my @chunks;
+    if (length($text) > 400) {
+        my $buf = $text;
+        while (length($buf) > 400) {
+            my $cut = 400;
+            if (substr($buf, 0, 400) =~ /^(.{200,399}\s)/s) {
+                $cut = length($1);
+            }
+            push @chunks, substr($buf, 0, $cut);
+            $buf = substr($buf, $cut);
+            $buf =~ s/^\s+//;
+        }
+        push @chunks, $buf if length($buf);
+    }
+    else {
+        @chunks = ($text);
+    }
 
-    # Encode en UTF-8 pour l'envoi IRC
-    my $encoded_text = encode('UTF-8', $text);
+    for my $chunk (@chunks) {
+        next unless defined($chunk) && $chunk ne '';
 
-    $self->{logger}->log(4, "[DEBUG] botNotice() sending encoded text length=" . length($encoded_text));
+        my $encoded_text = utf8::is_utf8($chunk) ? encode('UTF-8', $chunk) : $chunk;
 
-    # Envoi du NOTICE
-    $self->{metrics}->inc('mediabot_notice_out_total') if $self->{metrics};
-    $self->{irc}->do_NOTICE(
-        target => $target,
-        text   => $encoded_text
-    );
+        $self->{logger}->log(4, "[DEBUG] botNotice() sending encoded text length=" . length($encoded_text));
 
-    # Log interne (version lisible)
-    $self->{logger}->log(0, "-> -$target- $text");
+        # Envoi du NOTICE
+        $self->{metrics}->inc('mediabot_notice_out_total') if $self->{metrics};
+        $self->{irc}->do_NOTICE(
+            target => $target,
+            text   => $encoded_text
+        );
 
-    # Si c'est un channel NOTICE, log dans l'action log
-    if ($target =~ /^#/) {
-        $self->{logger}->log(4, "[DEBUG] botNotice() target is a channel, logging to action log");
-        logBotAction($self, undef, "notice", $self->{irc}->nick_folded, $target, $text);
+        # Log interne (version lisible)
+        $self->{logger}->log(0, "-> -$target- $chunk");
+
+        # Si c'est un channel NOTICE, log dans l'action log
+        if ($target =~ /^#/) {
+            $self->{logger}->log(4, "[DEBUG] botNotice() target is a channel, logging to action log");
+            logBotAction($self, undef, "notice", $self->{irc}->nick_folded, $target, $chunk);
+        }
     }
 }
-
-
-
-
-
-
-
 
 # Join a channel with an optional key
 sub joinChannel {
@@ -1341,6 +1389,29 @@ sub checkNickFlood {
 sub checkAntiFlood {
 	my ($self, $sChannel) = @_;
 
+    # IMP7: cross-channel global rate limit per bot-output
+    # A bot could send to N channels at full per-channel speed — cap globally.
+    {
+        my $now_g = time();
+        my $g     = $self->{_global_af} //= { hits => [], silenced_until => 0 };
+        if ($g->{silenced_until} > $now_g) {
+            my $wait = $g->{silenced_until} - $now_g;
+            $self->{logger}->log(3, "checkAntiFlood() global silence ${wait}s remaining");
+            return 1;
+        }
+        # IMP16: configurable global sliding window via OUTPUT_GLOBAL_* conf keys
+        my $g_window  = _af_conf_int($self, 'OUTPUT_GLOBAL_WINDOW',  10, 5, 60);
+        my $g_max     = _af_conf_int($self, 'OUTPUT_GLOBAL_MAX_MSG', 20, 5, 200);
+        my $g_silence = _af_conf_int($self, 'OUTPUT_GLOBAL_SILENCE', 15, 5, 120);
+        @{ $g->{hits} } = grep { ($now_g - $_) < $g_window } @{ $g->{hits} };
+        push @{ $g->{hits} }, $now_g;
+        if (@{ $g->{hits} } > $g_max) {
+            $g->{silenced_until} = $now_g + $g_silence;
+            $self->{logger}->log(2, "checkAntiFlood() global flood — silencing ${g_silence}s");
+            return 1;
+        }
+    }
+
     # AF1: in-memory antiflood — zero DB queries per outgoing message.
     # DB params (nbmsg_max, duration, timetowait) are cached for 60s.
     # Flood counters live entirely in $self->{_af}{$sChannel}.
@@ -1681,7 +1752,28 @@ sub getIdChansetList {
 
 sub evalAction {
 	my ($self,$message,$sNick,$sChannel,$sCommand,$actionDo,@tArgs) = @_;
+
+	$actionDo = '' unless defined $actionDo;
+	$sNick    = '' unless defined $sNick;
+	$sChannel = '' unless defined $sChannel;
+	$sCommand = '' unless defined $sCommand;
+
 	$self->{logger}->log(4,"evalAction() $sCommand / $actionDo");
+
+	# IMP21/fix: process long, explicit placeholders before legacy short
+	# placeholders. Otherwise %nick% is partially consumed by %n and
+	# %channel% is partially consumed by %c.
+	if ( $actionDo =~ /%(?:nick|channel|date|time)%/ ) {
+		my @t = localtime(time);
+		my $date_str = sprintf('%04d-%02d-%02d', $t[5]+1900, $t[4]+1, $t[3]);
+		my $time_str = sprintf('%02d:%02d', $t[2], $t[1]);
+
+		$actionDo =~ s/%nick%/$sNick/g;
+		$actionDo =~ s/%channel%/$sChannel/g;
+		$actionDo =~ s/%date%/$date_str/g;
+		$actionDo =~ s/%time%/$time_str/g;
+	}
+
 	if (defined($tArgs[0])) {
 		my $sArgs = join(" ",@tArgs);
 		$actionDo =~ s/%n/$sArgs/g;
@@ -1702,7 +1794,7 @@ sub evalAction {
 		$sCommandWithSpaces =~ s/_/ /g;
 		$actionDo =~ s/%s/$sCommandWithSpaces/g;
 	}
-	unless ( $actionDo =~ /%b/ ) {
+	if ( $actionDo =~ /%b/ ) {
 		my $iTrueFalse = int(rand(2));
 		if ( $iTrueFalse == 1 ) {
 			$actionDo =~ s/%b/true/g;
@@ -1757,7 +1849,6 @@ sub evalAction {
 	$actionDo = join(" ",@tActionDo);
 	return $actionDo;
 }
-
 
 sub mbWhereis_ctx {
     my ($ctx) = @_;

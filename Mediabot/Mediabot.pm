@@ -1148,8 +1148,13 @@ sub mbCommandPublic {
     {
         my $wait = checkCmdCooldown($self, $sChannel, $cmd);
         if ($wait > 0) {
+            # IMP11: human-readable wait time
+            my $wait_str = $wait >= 60
+                ? do { my $m = int($wait/60); my $s = $wait%60;
+                       $s ? "${m}m ${s}s" : "${m}m"; }
+                : "${wait}s";
             botNotice($self, $sNick,
-                "!$cmd is cooling down on $sChannel — wait ${wait}s.");
+                "!$cmd is cooling down on $sChannel — wait $wait_str.");
             return;
         }
     }
@@ -2262,8 +2267,13 @@ sub mbCommandPrivate {
     {
         my $wait = checkCmdCooldown($self, undef, $sCommand);
         if ($wait > 0) {
+            # IMP11
+            my $wait_str2 = $wait >= 60
+                ? do { my $m = int($wait/60); my $s = $wait%60;
+                       $s ? "${m}m ${s}s" : "${m}m"; }
+                : "${wait}s";
             botNotice($self, $sNick,
-                "!$sCommand is cooling down — wait ${wait}s.");
+                "!$sCommand is cooling down — wait $wait_str2.");
             return;
         }
     }

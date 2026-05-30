@@ -1102,6 +1102,7 @@ sub _handle_instagram {
     $badge   .= String::IRC->new("]")->white('black');
 
     my $msg = "$badge\x0f " . substr($title, 0, 300);
+    # IMP10: store in cache
 
     botPrivmsg($self, $channel, "($nick) $msg");
     return 1;
@@ -1894,6 +1895,7 @@ sub _handle_facebook {
     $badge   .= String::IRC->new("]")->white('black');
 
     my $msg = "$badge\x0f " . substr($title, 0, 300);
+    # IMP10: store in cache
 
     botPrivmsg($self, $channel, "($nick) $msg");
     return 1;
@@ -2048,6 +2050,30 @@ sub _handle_x_twitter {
 
     $self->{logger}->log(4, "_handle_x_twitter() start url=$x_url");
 
+    # IMP10: cache x_twitter result (TTL 10 min) — Chromium is expensive
+    my $tw_cache     = $self->{_x_twitter_cache} //= {};
+    my $tw_cache_key = lc($url);
+    my $tw_now       = time();
+    if (my $cached = $tw_cache->{$tw_cache_key}) {
+        if ($tw_now - ($cached->{ts} // 0) < 600) {
+            $self->{logger}->log(4, "_handle_x_twitter() serving from cache: $url");
+
+            # IMP10/fix: replay the cached IRC message.
+            # Older mb76 code cached only result => 1, which made cache hits silent.
+            if (defined($cached->{msg}) && $cached->{msg} ne '') {
+                botPrivmsg($self, $channel, "($nick) $cached->{msg}");
+                return 1;
+            }
+
+            # Backward-compatible cleanup for any stale in-memory entries created
+            # by the old code during the same process lifetime.
+            delete $tw_cache->{$tw_cache_key};
+        }
+        else {
+            delete $tw_cache->{$tw_cache_key};
+        }
+    }
+
     my $title;
 
     # X is rendered/client-heavy.  Go directly through Chromium, the same
@@ -2092,6 +2118,11 @@ sub _handle_x_twitter {
     $badge   .= String::IRC->new("]")->white('black');
 
     my $msg = "$badge\x0f " . substr($title, 0, 300);
+
+    # IMP10/fix: cache the formatted message, not just a boolean.
+    # That way repeated X/Twitter URLs avoid Chromium but still produce the same
+    # user-visible IRC output when the generic URL anti-repeat cache allows it.
+    $tw_cache->{$tw_cache_key} = { ts => time(), msg => $msg };
 
     botPrivmsg($self, $channel, "($nick) $msg");
     return 1;
@@ -2226,10 +2257,53 @@ sub displayUrlTitle {
 
     my $url = _extract_url($sText);
     my $captured_url = $url // '(unknown)';  # DU1/fix: capture before eval scope
+
+    # IMP1: anti-repetition cache — skip if same URL posted in same channel < 5 min ago
+    if (defined $url) {
+        my $cache_key  = lc($url) . "\x00" . ($sChannel // '');
+        my $cache      = $self->{_url_display_cache} //= {};
+        my $now        = time();
+        my $url_ttl    = 300;  # 5 minutes
+        # Purge stale entries (max once per 60s to avoid per-message cost)
+        if (($self->{_url_cache_last_purge} // 0) < $now - 60) {
+            my @stale = grep { ($cache->{$_} // 0) < $now - $url_ttl } keys %$cache;
+            delete @{$cache}{@stale};
+            $self->{_url_cache_last_purge} = $now;
+        }
+        if (($cache->{$cache_key} // 0) >= $now - $url_ttl) {
+            $self->{logger}->log(4, "displayUrlTitle() skipping repeated URL: $url");
+            return undef;
+        }
+        $cache->{$cache_key} = $now;
+    }
+
     my $result = eval {
     
         unless (defined $url && $url =~ /^https?:\/\//i) {
             $self->{logger}->log(4, "displayUrlTitle() no valid URL found in: $sText");
+            return undef;
+        }
+
+        # IMP2/polish: skip obvious private/internal literal hosts before any
+        # network fetch. This is a lightweight guard, not a full SSRF firewall:
+        # it intentionally avoids DNS resolution here.
+        if ($url =~ m{^https?://
+                (?:
+                    localhost(?:[/:]|\z)
+                  | 0\.0\.0\.0(?:[/:]|\z)
+                  | 127\.\d+\.\d+\.\d+(?:[/:]|\z)
+                  | 10\.\d+\.\d+\.\d+(?:[/:]|\z)
+                  | 172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+(?:[/:]|\z)
+                  | 192\.168\.\d+\.\d+(?:[/:]|\z)
+                  | 169\.254\.\d+\.\d+(?:[/:]|\z)
+                  | \[(?: ::1
+                       | fc[0-9a-f]{2}:[0-9a-f:]+
+                       | fd[0-9a-f]{2}:[0-9a-f:]+
+                       | fe80:[0-9a-f:]+
+                    )\](?:[/:]|\z)
+                )
+            }xi) {
+            $self->{logger}->log(4, "displayUrlTitle() skipping private/internal URL: $url");
             return undef;
         }
     
@@ -3526,7 +3600,12 @@ sub claudeAI {
     # DD5: auto-reset persona if channel has been inactive > 1h
     if (defined $chan) {
         my $last_ai = $self->{_ai_last_active}{$persona_key} // 0;
-        if ($last_ai && (time() - $last_ai) > 3600) {
+        # IMP4: TTL configurable via anthropic.PERSONA_TTL_HOURS (default 1h)
+        my $persona_ttl = do {
+            my $h = eval { $self->{conf}->get('anthropic.PERSONA_TTL_HOURS') } // 1;
+            int(($h || 1) * 3600);
+        };
+        if ($last_ai && (time() - $last_ai) > $persona_ttl) {
             delete $self->{_claude_persona}{$persona_key};
             $self->{logger}->log(3,
                 "DD5: persona auto-reset for $persona_key (inactive " .
