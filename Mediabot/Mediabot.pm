@@ -1350,9 +1350,19 @@ sub mbCommandPublic {
             }
         },
         song         => sub { song_ctx($ctx) },
+        radiostatus  => sub { radioStatus_ctx($ctx) },
+        radiomounts  => sub { radioMounts_ctx($ctx) },
         listeners    => sub { displayRadioListeners_ctx($ctx) },
         nextsong     => sub { radioNext_ctx($ctx) },
+        play         => sub { radioPlay_ctx($ctx) },
+        radioimport  => sub { radioImport_ctx($ctx) },
+        radioimportdir => sub { radioImportDir_ctx($ctx) },
         radioqueue   => sub { radioQueue_ctx($ctx) },
+        radiocheck  => sub { radioCheck_ctx($ctx) },
+        radiocache  => sub { radioCache_ctx($ctx) },
+        radiocacheprune => sub { radioCachePrune_ctx($ctx) },
+        radiodlstatus => sub { radioDlStatus_ctx($ctx) },
+        radiodlcancel => sub { radioDlCancel_ctx($ctx) },
         radiopush    => sub { radioPush_ctx($ctx) },
         radioskip    => sub { radioSkip_ctx($ctx) },
         radioflush   => sub { radioFlush_ctx($ctx) },
@@ -1398,6 +1408,10 @@ sub mbCommandPublic {
         version      => sub { versionCheck($ctx) },
         uptime       => sub { mbUptime_ctx($ctx) },
         help         => sub { mbHelp_ctx($ctx) },
+        commands     => sub {
+            $ctx->{args} = [ 'commands' ];
+            mbHelp_ctx($ctx);
+        },
         spike        => sub { $ctx->reply("https://teuk.org/In_Spike_Memory.jpg") },
         update       => sub { update_ctx($ctx) },
     );
@@ -1536,6 +1550,7 @@ hailo_ignore|hailo_ignore <nick>|admin|Ignore a nick for Hailo learning or repli
 hailo_status|hailo_status|admin|Show Hailo status.
 hailo_unignore|hailo_unignore <nick>|admin|Remove a nick from the Hailo ignore list.
 help|help [#channel|command|docs|search <term>|level <level>]|public|Show command lists, search internal help, or documentation pointers.
+commands|commands|public|Alias for help commands.
 holdcmd|holdcmd <command> [on|off]|authorized|Put a dynamic command on hold or restore it.
 ident|ident <login> <password>|private|Legacy/private authentication helper.
 ignore|ignore <nick|mask>|admin|Add an ignore entry.
@@ -1556,6 +1571,18 @@ modcmd|modcmd <command> <new action>|authorized|Modify a dynamic PUBLIC_COMMANDS
 modinfo|modinfo <nick>|admin|Show moderation information about a user.
 moduser|moduser <nick> <field> <value>|admin|Modify a bot user.
 mp3|mp3 <query>|public|Search or display MP3/radio related information.
+play|play <query>|public|Queue a cached/downloaded radio track via Liquidsoap. Master-only during rollout.
+radioqueue|radioqueue|public|Show the Liquidsoap Mediabot request queue. Master-only.
+radiocheck|radiocheck|public|Check local radio cache, yt-dlp, cookies, Liquidsoap, and Icecast configuration. Master-only.
+radiocache|radiocache|public|Show MP3 cache database/file consistency summary. Master-only.
+radiocacheprune|radiocacheprune [confirm]|public|Dry-run or delete MP3 cache rows whose files are missing. Master-only.
+radiodlstatus|radiodlstatus|public|Show current non-blocking yt-dlp download status. Master-only.
+radiodlcancel|radiodlcancel|public|Cancel the current non-blocking yt-dlp download. Master-only.
+radiopush|radiopush <absolute-mp3-path>|public|Push a local MP3 file into the Liquidsoap Mediabot queue. Master-only.
+radioimport|radioimport <absolute-mp3-path> [artist - title]|public|Index a local MP3 file into the radio cache. Master-only.
+radioimportdir|radioimportdir [directory]|public|Index all readable MP3 files from a local directory into the radio cache. Master-only.
+radioskip|radioskip|public|Skip the current Liquidsoap queue item. Master-only.
+radioflush|radioflush|public|Flush the Liquidsoap queue and skip. Master-only.
 msg|msg <nick|#channel> <text>|admin|Send a message through the bot.
 mvcmd|mvcmd <old> <new>|authorized|Rename a dynamic PUBLIC_COMMANDS command.
 nextsong|nextsong|public|Display next-song information when a scheduler is wired.
@@ -1569,8 +1596,8 @@ popcmd|popcmd|authorized|Show popular dynamic commands.
 purge|purge #channel|admin|Purge or reset channel runtime information.
 q|q [nick|search]|public|Display a quote.
 qlog|qlog #channel <query>|admin|Search channel logs.
-radiomounts|radiomounts|private|List Icecast mounts.
-radiostatus|radiostatus|private|Show Icecast status.
+radiomounts|radiomounts|public|List Icecast mounts.
+radiostatus|radiostatus|public|Show Icecast status.
 register|register <owner> <password>|private|Register the first owner account.
 rehash|rehash|master|Reload bot configuration.
 rembadword|rembadword #channel <word>|channel admin|Remove a badword filter entry.
@@ -1786,6 +1813,76 @@ sub _mbHelpSendChunkedList {
     return 1;
 }
 
+
+sub _mbHelpBuildChunkedList {
+    my ($prefix, @items) = @_;
+
+    return () unless @items;
+
+    my $max_len = 360;
+    my @lines;
+    my $line = $prefix;
+
+    for my $item (@items) {
+        my $piece = ($line eq $prefix) ? $item : ", $item";
+
+        if (length($line) + length($piece) > $max_len) {
+            push @lines, $line;
+            $line = $prefix . $item;
+        } else {
+            $line .= $piece;
+        }
+    }
+
+    push @lines, $line if $line ne $prefix;
+
+    return @lines;
+}
+
+sub _mbHelpSendNoticeQueue {
+    my ($self, $nick, @lines) = @_;
+
+    return 1 unless @lines;
+
+    my $loop = $self->{loop};
+    my $delay_step = 1.5;   # gentle enough for Undernet notices
+    my $max_lines = 14;     # safety guard for accidental huge help output
+
+    if (@lines > $max_lines) {
+        @lines = (@lines[0 .. $max_lines - 1], "... output truncated, use help search <term> or help <command>");
+    }
+
+    unless ($loop) {
+        botNotice($self, $nick, $_) for @lines;
+        return 1;
+    }
+
+    $self->{_mb_help_notice_timers} ||= [];
+
+    for my $i (0 .. $#lines) {
+        my $line = $lines[$i];
+
+        my $timer;
+        $timer = IO::Async::Timer::Countdown->new(
+            delay => $i * $delay_step,
+            on_expire => sub {
+                botNotice($self, $nick, $line);
+                eval { $loop->remove($timer) };
+            },
+        );
+
+        push @{ $self->{_mb_help_notice_timers} }, $timer;
+        $loop->add($timer);
+        $timer->start;
+    }
+
+    if (@{ $self->{_mb_help_notice_timers} } > 100) {
+        splice @{ $self->{_mb_help_notice_timers} }, 0, @{ $self->{_mb_help_notice_timers} } - 50;
+    }
+
+    return 1;
+}
+
 sub _mbHelpSendSearchResults {
     my ($ctx, $term) = @_;
 
@@ -1874,37 +1971,157 @@ sub _mbHelpSendLevelResults {
 }
 
 
-sub _mbHelpSendInternalList {
+sub _mbHelpCategoryForCommand {
+    my ($cmd, $entry) = @_;
+
+    my $level  = lc($entry->{level}  // '');
+    my $syntax = lc($entry->{syntax} // '');
+    my $desc   = lc($entry->{desc}   // '');
+    my $hay    = "$cmd $syntax $level $desc";
+
+    return 'radio' if $hay =~ /\b(?:radio|song|mp3|icecast|liquidsoap|listener|yt|youtube|tmdb|play|queue)\b/;
+    return 'dynamic' if $hay =~ /\b(?:cmd|public_commands|category|timer|responder)\b/
+        || $cmd =~ /cmd$/ || $cmd =~ /^(?:addcmd|modcmd|remcmd|showcmd|showcommands|searchcmd|topcmd|popcmd|lastcmd|countcmd|owncmd|chowncmd|mvcmd|holdcmd|addcatcmd|chcatcmd|addtimer|remtimer|timers|addresponder|delresponder)$/;
+    return 'moderation' if $hay =~ /\b(?:ban|kick|ignore|voice|op|deop|devoice|invite|topic|mode)\b/;
+    return 'channel' if $hay =~ /\b(?:channel|chan|access|chanset|owner)\b/
+        || $cmd =~ /^(?:add|del|access|chan|channels|chanlist|channellist|chaninfo|chanset|addchan|part|join|purge|nicklist)$/;
+    return 'auth' if $hay =~ /\b(?:login|logout|password|pass|auth|register|verify|hostmask|whoami|ident|xlogin|user)\b/;
+    return 'stats' if $hay =~ /\b(?:stats|stat|seen|top|log|lines|talk|date|weather|meteo|resolve|whereis)\b/;
+    return 'ai_fun' if $hay =~ /\b(?:hailo|openai|chatgpt|claude|tellme|quote|joke|dice|leet|yomomma|greet|birthday|birthdate|q)\b/;
+    return 'admin' if $level =~ /\b(?:admin|master|owner|authorized)\b/
+        || $hay =~ /\b(?:debug|exec|rehash|die|dump|update|status|version|nick)\b/;
+
+    return 'general';
+}
+
+sub _mbHelpCategoryLabels {
+    return (
+        general    => 'General/status',
+        auth       => 'Auth/users',
+        channel    => 'Channels/access',
+        moderation => 'Moderation',
+        dynamic    => 'Dynamic commands',
+        radio      => 'Radio/media',
+        stats      => 'Stats/logs/tools',
+        ai_fun     => 'AI/fun/quotes',
+        admin      => 'Admin/ops',
+    );
+}
+
+sub _mbHelpCategoryAliases {
+    return (
+        general    => 'general',
+        status     => 'general',
+        auth       => 'auth',
+        users      => 'auth',
+        user       => 'auth',
+        channel    => 'channel',
+        channels   => 'channel',
+        access     => 'channel',
+        moderation => 'moderation',
+        mod        => 'moderation',
+        dynamic    => 'dynamic',
+        commands   => 'dynamic',
+        cmd        => 'dynamic',
+        radio      => 'radio',
+        media      => 'radio',
+        stats      => 'stats',
+        logs       => 'stats',
+        tools      => 'stats',
+        ai         => 'ai_fun',
+        fun        => 'ai_fun',
+        quotes     => 'ai_fun',
+        admin      => 'admin',
+        ops        => 'admin',
+    );
+}
+
+sub _mbHelpBuildCategories {
+    my %internal = _mbHelpInternalCommands();
+
+    my %cats;
+    for my $cmd (sort keys %internal) {
+        my $cat = _mbHelpCategoryForCommand($cmd, $internal{$cmd});
+        push @{ $cats{$cat} }, $cmd;
+    }
+
+    return %cats;
+}
+
+sub _mbHelpSendCategoryIndex {
     my ($ctx) = @_;
 
     my $self = $ctx->bot;
     my $nick = $ctx->nick;
 
-    my %internal = _mbHelpInternalCommands();
-    my @commands = sort keys %internal;
+    my %cats = _mbHelpBuildCategories();
+    my %labels = _mbHelpCategoryLabels();
 
-    my @public_like;
-    my @privileged;
+    my @order = qw(general auth channel moderation dynamic radio stats ai_fun admin);
 
-    for my $cmd (@commands) {
-        my $level = lc($internal{$cmd}->{level} // '');
-
-        if ($level =~ /^(?:public|private)$/) {
-            push @public_like, $cmd;
-        } else {
-            push @privileged, $cmd;
-        }
+    my @lines;
+    push @lines, "Internal command categories:";
+    for my $cat (@order) {
+        my $count = scalar @{ $cats{$cat} || [] };
+        next unless $count;
+        push @lines, sprintf("  %-10s - %s (%d command%s)",
+            $cat,
+            $labels{$cat} || $cat,
+            $count,
+            $count == 1 ? '' : 's',
+        );
     }
 
-    botNotice($self, $nick, "Internal commands help:");
+    push @lines, "Use: help commands <category>  Example: help commands radio";
+    push @lines, "Other filters: help search <term> / help level <level> / help <command>";
 
-    _mbHelpSendChunkedList($self, $nick, "Public/private: ", @public_like);
-    _mbHelpSendChunkedList($self, $nick, "Privileged/admin: ", @privileged);
+    return _mbHelpSendNoticeQueue($self, $nick, @lines);
+}
 
-    botNotice($self, $nick, "Use: help <command> for syntax and explanation.");
-    botNotice($self, $nick, "Dynamic PUBLIC_COMMANDS are still available through: showcommands #channel");
+sub _mbHelpSendCategoryCommands {
+    my ($ctx, $category) = @_;
 
-    return 1;
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    $category //= '';
+    $category =~ s/^\s+|\s+$//g;
+    $category = lc $category;
+    $category =~ s/[\s-]+/_/g;
+
+    my %aliases = _mbHelpCategoryAliases();
+    $category = $aliases{$category} if exists $aliases{$category};
+
+    my %cats = _mbHelpBuildCategories();
+    my %labels = _mbHelpCategoryLabels();
+
+    unless ($category ne '' && exists $cats{$category}) {
+        botNotice($self, $nick, "Unknown help category '$category'. Use: help commands");
+        return 1;
+    }
+
+    my @cmds = @{ $cats{$category} || [] };
+
+    my @lines;
+    push @lines, "Internal commands category: " . ($labels{$category} || $category);
+    push @lines, _mbHelpBuildChunkedList("Commands: ", @cmds);
+    push @lines, "Use: help <command> for syntax/details.";
+
+    return _mbHelpSendNoticeQueue($self, $nick, @lines);
+}
+
+
+sub _mbHelpSendInternalList {
+    my ($ctx, $category) = @_;
+
+    $category //= '';
+    $category =~ s/^\s+|\s+$//g;
+
+    if ($category ne '') {
+        return _mbHelpSendCategoryCommands($ctx, $category);
+    }
+
+    return _mbHelpSendCategoryIndex($ctx);
 }
 
 sub mbHelp_ctx {
@@ -1922,7 +2139,8 @@ sub mbHelp_ctx {
     }
 
     if ($first =~ /^(?:internal|internals|commands)$/i) {
-        return _mbHelpSendInternalList($ctx);
+        my $category = join(' ', @args[1 .. $#args]);
+        return _mbHelpSendInternalList($ctx, $category);
     }
 
     if ($first =~ /^(?:search|find|grep)$/i) {
@@ -2108,6 +2326,12 @@ sub mbCommandPrivate {
         say         => sub { sayChannel_ctx($ctx) },
         act         => sub { actChannel_ctx($ctx) },
         song        => sub { song_ctx($ctx) },
+        play        => sub { radioPlay_ctx($ctx) },
+        radioimport => sub { radioImport_ctx($ctx) },
+        commands    => sub {
+            $ctx->{args} = [ 'commands' ];
+            mbHelp_ctx($ctx);
+        },
         radioqueue  => sub { radioQueue_ctx($ctx) },
         radiopush   => sub { radioPush_ctx($ctx) },
         radioskip   => sub { radioSkip_ctx($ctx) },

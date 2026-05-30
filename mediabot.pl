@@ -333,7 +333,7 @@ if ($mediabot->{metrics}) {
 
         my $base_url      = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
         my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || $base_url;
-        my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio160.mp3';
+        my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio.mp3';
         my $timeout       = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
 
         $timeout = 5 unless defined $timeout && $timeout =~ /^\d+$/ && $timeout > 0;
@@ -1377,10 +1377,17 @@ sub on_message_PRIVMSG {
             $mediabot->{logger}->log(0,"[LIVE] $where: <$who> $what");
         }
         
-        my $line = $what;
+        my $line = defined($what) ? $what : '';
         $line =~ s/^\s+//;
+        $line =~ s/\s+$//;
+
+        # Ignore blank / whitespace-only IRC messages.
+        # Without this guard, split() leaves $sCommand undefined and later
+        # substr()/eq checks emit warnings in the daemon logs.
+        return undef if $line eq '';
+
         my ($sCommand,@tArgs) = split(/\s+/,$line);
-        if (substr($sCommand, 0, 1) eq $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR')){
+        if (defined($sCommand) && substr($sCommand, 0, 1) eq $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR')){
             $sCommand = substr($sCommand,1);
             $sCommand =~ tr/A-Z/a-z/;
             if (defined($sCommand) && ($sCommand ne "")) {
@@ -1553,7 +1560,14 @@ sub on_message_PRIVMSG {
                 $mediabot->{logger}->log(0,"[LIVE] $where: <$who> $what");
             }
         }
-        my ($sCommand,@tArgs) = split(/\s+/,$what);
+        my $private_line = defined($what) ? $what : '';
+        $private_line =~ s/^\s+//;
+        $private_line =~ s/\s+$//;
+
+        # Ignore blank / whitespace-only private IRC messages.
+        return undef if $private_line eq '';
+
+        my ($sCommand,@tArgs) = split(/\s+/,$private_line);
         $sCommand =~ tr/A-Z/a-z/;
         $mediabot->{logger}->log(4,"sCommands = $sCommand");
         if (defined($sCommand) && ($sCommand ne "")) {

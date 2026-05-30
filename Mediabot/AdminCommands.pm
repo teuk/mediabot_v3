@@ -21,6 +21,7 @@ use Mediabot::External ();
 use Mediabot::Context;
 use Mediabot::Radio::Icecast;
 use Mediabot::Liquidsoap;
+use Mediabot::Radio::Request;
 
 our @EXPORT = qw(
     debug_ctx
@@ -40,9 +41,122 @@ our @EXPORT = qw(
     radioPush_ctx
     radioSkip_ctx
     radioFlush_ctx
+    radioPlay_ctx
+    radioImport_ctx
+    radioImportDir_ctx
+    radioCheck_ctx
+    radioCache_ctx
+    radioCachePrune_ctx
+    radioDlStatus_ctx
+    radioDlCancel_ctx
     update
     update_ctx
 );
+
+
+sub _radio_irc_text {
+    my ($text, @ops) = @_;
+
+    $text = '' unless defined $text;
+
+    my $out = $text;
+
+    eval {
+        require String::IRC;
+
+        my $irc = String::IRC->new($text);
+
+        for my $op (@ops) {
+            next unless defined $op;
+
+            if (ref($op) eq 'ARRAY') {
+                my ($method, @args) = @$op;
+                next unless defined $method && $method ne '';
+                next unless $irc->can($method);
+                $irc = $irc->$method(@args);
+            }
+            else {
+                next unless $op ne '';
+                next unless $irc->can($op);
+                $irc = $irc->$op();
+            }
+        }
+
+        $out = "$irc";
+        1;
+    } or do {
+        # Never break an IRC command because of formatting.
+        $out = $text;
+    };
+
+    return $out;
+}
+
+
+sub _radio_irc_orange_text {
+    my ($text, %opts) = @_;
+
+    $text = '' unless defined $text;
+
+    # IRC/mIRC color 07 is orange. We use raw IRC codes here because
+    # String::IRC does not always expose an orange() helper depending on version.
+    my $prefix = "\x0307";
+    $prefix .= "\x02" if $opts{bold};
+    $prefix .= "\x1F" if $opts{underline};
+
+    return $prefix . $text . "\x0F";
+}
+
+sub _radio_format_song_line {
+    my (%args) = @_;
+
+    my $listen_url = defined $args{listen_url} && $args{listen_url} ne ''
+        ? $args{listen_url}
+        : 'unknown-url';
+
+    my $title = defined $args{title} && $args{title} ne ''
+        ? $args{title}
+        : 'unknown';
+
+    # Capsule-like style, close to mediacaps, but without a [ LIVE ! ] suffix.
+    # No heavy background on the main text: stays readable on dark and light IRC clients.
+    return
+          _radio_irc_orange_text('[ ', bold => 1)
+        . _radio_irc_orange_text($listen_url, underline => 1)
+        . _radio_irc_orange_text(' ]', bold => 1)
+        . _radio_irc_text('  -  ', 'white')
+        . _radio_irc_orange_text('[ ', bold => 1)
+        . _radio_irc_text($title, 'grey')
+        . _radio_irc_orange_text(' ]', bold => 1);
+}
+
+sub _radio_format_listeners_line {
+    my (%args) = @_;
+
+    my $total = defined $args{total} ? $args{total} : '?';
+    my $mount = defined $args{mount} && $args{mount} ne ''
+        ? $args{mount}
+        : '/radio.mp3';
+    my $mount_listeners = defined $args{mount_listeners} ? $args{mount_listeners} : '?';
+
+    # This deliberately uses only small red capsules, similar to mediacaps.
+    # White-on-red is readable on both dark and light clients; the fallback is plain text.
+    return
+          _radio_irc_text('◖◗◖', ['white', 'red'], 'bold')
+        . _radio_irc_text(' ( There are )-', 'white')
+        . _radio_irc_text('( ', 'white')
+        . _radio_irc_text($total, ['white', 'red'], 'bold')
+        . _radio_irc_text(' )-', 'white')
+        . _radio_irc_text('( Listeners', 'white')
+        . _radio_irc_text(' on ', 'grey')
+        . _radio_irc_text($mount, 'yellow')
+        . _radio_irc_text(':', 'white')
+        . _radio_irc_text($mount_listeners, ['white', 'red'], 'bold')
+        . _radio_irc_text(' ) ', 'white')
+        . _radio_irc_text('◗◖◗', ['white', 'red'], 'bold');
+}
+
+
 
 sub _radio_icecast_config {
     my ($self) = @_;
@@ -51,7 +165,7 @@ sub _radio_icecast_config {
 
     my $base_url      = $conf->get('radio.RADIO_ICECAST_STATUS_BASE_URL') || 'http://127.0.0.1:8000';
     my $public_base   = $conf->get('radio.RADIO_ICECAST_PUBLIC_BASE_URL') || $base_url;
-    my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio160.mp3';
+    my $primary_mount = $conf->get('radio.RADIO_ICECAST_PRIMARY_MOUNT')    || '/radio.mp3';
     my $timeout       = $conf->get('radio.RADIO_ICECAST_TIMEOUT');
 
     $timeout = 5 unless defined $timeout && $timeout =~ /^\d+$/ && $timeout > 0;
@@ -1436,7 +1550,11 @@ sub displayRadioListeners_ctx {
     my $mount           = $info->{primary_mount} || $primary_mount;
     my $mount_listeners = defined $info->{mount_listeners} ? $info->{mount_listeners} : '?';
 
-    my $msg = "Radio listeners: total=$total | $mount=$mount_listeners";
+    my $msg = _radio_format_listeners_line(
+        total           => $total,
+        mount           => $mount,
+        mount_listeners => $mount_listeners,
+    );
 
     if ($ctx->is_private) {
         $ctx->reply_private($msg);
@@ -1527,6 +1645,511 @@ sub _radio_notice_lines {
         if $remaining > 0;
 }
 
+
+
+
+sub radioImportDir_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    return unless $ctx->require_level('Master');
+
+    my $dir = join(' ', @args);
+    $dir =~ s/^\s+|\s+$//g;
+
+    my $user = $ctx->user;
+    my $uid  = eval { $user->id } || 0;
+
+    my $radio = Mediabot::Radio::Request->new(bot => $self);
+    my ($ok, $res) = $radio->import_directory(
+        dir     => $dir,
+        id_user => $uid,
+        limit   => 500,
+    );
+
+    unless ($ok) {
+        botNotice($self, $nick, "Radio importdir failed: $res");
+        logBot($self, $ctx->message, undef, 'radioimportdir', 'failed', $dir);
+        return;
+    }
+
+    botNotice(
+        $self,
+        $nick,
+        "radioimportdir OK: scanned=$res->{seen}, imported_or_updated=$res->{imported}, failed=$res->{failed}, dir=$res->{dir}"
+    );
+
+    botNotice($self, $nick, "Radio importdir: stopped at safety limit $res->{limit}") if $res->{truncated};
+
+    if ($res->{examples} && @{ $res->{examples} }) {
+        botNotice($self, $nick, "Radio importdir examples: " . join(' | ', @{ $res->{examples} }));
+    }
+
+    logBot($self, $ctx->message, undef, 'radioimportdir', $res->{dir});
+    return 1;
+}
+
+
+sub radioImport_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    return unless $ctx->require_level('Master');
+
+    unless (@args) {
+        botNotice($self, $nick, "Syntax: radioimport <absolute-mp3-path> [artist - title]");
+        return;
+    }
+
+    my $path = shift @args;
+    my $label = join(' ', @args);
+    $label =~ s/^\s+|\s+$//g;
+
+    unless ($path =~ m{^/}) {
+        botNotice($self, $nick, "Radio import: expected an absolute local MP3 path.");
+        return;
+    }
+
+    my ($artist, $title) = ('', '');
+    if ($label ne '') {
+        if ($label =~ /^(.+?)\s+-\s+(.+)$/) {
+            ($artist, $title) = ($1, $2);
+        }
+        else {
+            $title = $label;
+        }
+    }
+
+    my $user = $ctx->user;
+    my $uid  = eval { $user->id } || 0;
+
+    my $radio = Mediabot::Radio::Request->new(bot => $self);
+    my ($ok, $res) = $radio->import_local_file(
+        path    => $path,
+        artist  => $artist,
+        title   => $title,
+        id_user => $uid,
+    );
+
+    unless ($ok) {
+        botNotice($self, $nick, "Radio import failed: $res");
+        logBot($self, $ctx->message, undef, 'radioimport', 'failed', $path);
+        return;
+    }
+
+    botNotice(
+        $self,
+        $nick,
+        "radioimport OK: id=$res->{id_mp3} $res->{artist} - $res->{title}"
+    );
+
+    logBot($self, $ctx->message, undef, 'radioimport', $res->{path});
+    return 1;
+}
+
+
+sub radioPlay_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    # First implementation is intentionally Master-only to avoid turning
+    # a dev radio stack into a public download endpoint by accident.
+    return unless $ctx->require_level('Master');
+
+    my $query = join(' ', @args);
+    $query =~ s/^\s+|\s+$//g;
+
+    unless ($query ne '') {
+        botNotice($self, $nick, "Syntax: play <artist/title/search>");
+        return;
+    }
+
+    my $user = $ctx->user;
+    my $uid  = eval { $user->id } || 0;
+
+    my $radio = Mediabot::Radio::Request->new(bot => $self);
+    return $radio->play(
+        ctx     => $ctx,
+        query   => $query,
+        id_user => $uid,
+    );
+}
+
+
+
+sub radioDlCancel_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    return unless $ctx->require_level('Master');
+
+    my $job = $self->{_radio_request_download};
+
+    unless ($job && $job->{active}) {
+        botNotice($self, $nick, "Radio download: nothing to cancel, no active yt-dlp job.");
+        logBot($self, $ctx->message, undef, 'radiodlcancel', 'idle');
+        return 1;
+    }
+
+    my $pid   = $job->{pid};
+    my $query = $job->{query} // 'unknown request';
+
+    unless ($pid && $pid =~ /^\d+$/) {
+        $self->{_radio_request_download} = {};
+        botNotice($self, $nick, "Radio download: cleared invalid internal job state.");
+        logBot($self, $ctx->message, undef, 'radiodlcancel', 'cleared-invalid-state');
+        return 1;
+    }
+
+    my $alive = kill(0, $pid) ? 1 : 0;
+
+    if ($alive) {
+        kill 'TERM', $pid;
+        sleep 1;
+
+        if (kill(0, $pid)) {
+            kill 'KILL', $pid;
+        }
+
+        waitpid($pid, 0);
+    }
+
+    for my $tmp ($job->{stdout}, $job->{stderr}) {
+        next unless defined($tmp) && $tmp ne '';
+        unlink $tmp if -e $tmp;
+    }
+
+    $self->{_radio_request_download} = {};
+
+    botNotice($self, $nick, "Radio download: cancelled job: $query");
+    logBot($self, $ctx->message, undef, 'radiodlcancel', $query);
+    return 1;
+}
+
+
+sub radioDlStatus_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    return unless $ctx->require_level('Master');
+
+    my $job = $self->{_radio_request_download};
+
+    unless ($job && $job->{active}) {
+        botNotice($self, $nick, "Radio download: idle, no active yt-dlp job.");
+        logBot($self, $ctx->message, undef, 'radiodlstatus', 'idle');
+        return 1;
+    }
+
+    my $query   = $job->{query}   // 'unknown request';
+    my $pid     = $job->{pid}     // '?';
+    my $started = $job->{started} // time();
+    my $age     = int(time() - $started);
+
+    my $timeout = _liquidsoap_config_value($self, 'YTDLP_TIMEOUT', 180);
+    $timeout = 180 unless defined($timeout) && $timeout =~ /^\d+$/ && $timeout >= 30;
+
+    my $stdout = $job->{stdout} // '';
+    my $stderr = $job->{stderr} // '';
+
+    my $alive = 'unknown';
+    if ($pid && $pid =~ /^\d+$/) {
+        $alive = kill(0, $pid) ? 'yes' : 'no';
+    }
+
+    botNotice($self, $nick, "Radio download: active query='$query'");
+    botNotice($self, $nick, "Radio download: pid=$pid alive=$alive age=${age}s timeout=${timeout}s");
+
+    if ($stderr && -r $stderr) {
+        my $size = -s $stderr || 0;
+        botNotice($self, $nick, "Radio download: stderr=$stderr (${size} bytes)");
+    }
+
+    if ($stdout && -r $stdout) {
+        my $size = -s $stdout || 0;
+        botNotice($self, $nick, "Radio download: stdout=$stdout (${size} bytes)");
+    }
+
+    logBot($self, $ctx->message, undef, 'radiodlstatus', "active pid=$pid age=$age query=$query");
+    return 1;
+}
+
+
+sub radioCachePrune_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    return unless $ctx->require_level('Master');
+
+    my $confirm = (@args && lc($args[0] // '') eq 'confirm') ? 1 : 0;
+
+    my $dbh = $self->{dbh};
+    unless ($dbh) {
+        botNotice($self, $nick, "Radio cache prune: database handle unavailable.");
+        return;
+    }
+
+    my $sth = $dbh->prepare(q{
+        SELECT id_mp3, folder, filename, artist, title
+        FROM MP3
+        ORDER BY id_mp3
+    });
+
+    unless ($sth && $sth->execute()) {
+        botNotice($self, $nick, "Radio cache prune: database query failed.");
+        $sth->finish if $sth;
+        return;
+    }
+
+    my @missing;
+    while (my $r = $sth->fetchrow_hashref) {
+        my $folder   = $r->{folder}   // '';
+        my $filename = $r->{filename} // '';
+        my $path = ($folder ne '' && $filename ne '') ? "$folder/$filename" : '';
+
+        next if $path ne '' && -r $path;
+
+        push @missing, {
+            id_mp3 => $r->{id_mp3},
+            label  => (($r->{artist} // 'Unknown') . " - " . ($r->{title} // $filename // '?')),
+            path   => $path || '(empty path)',
+        };
+    }
+
+    $sth->finish;
+
+    unless (@missing) {
+        botNotice($self, $nick, "Radio cache prune: no missing MP3 cache rows found.");
+        logBot($self, $ctx->message, undef, 'radiocacheprune', 'none');
+        return 1;
+    }
+
+    unless ($confirm) {
+        my @examples = map { "#" . $_->{id_mp3} . " " . $_->{label} } @missing[0 .. (@missing < 3 ? $#missing : 2)];
+        botNotice($self, $nick, "Radio cache prune dry-run: " . scalar(@missing) . " missing row(s).");
+        botNotice($self, $nick, "Radio cache prune examples: " . join(' | ', @examples)) if @examples;
+        botNotice($self, $nick, "Radio cache prune: dry-run only. To delete these DB rows: radiocacheprune confirm");
+        logBot($self, $ctx->message, undef, 'radiocacheprune', 'dry-run', scalar(@missing));
+        return 1;
+    }
+
+    my $del = $dbh->prepare("DELETE FROM MP3 WHERE id_mp3 = ?");
+    unless ($del) {
+        botNotice($self, $nick, "Radio cache prune: delete prepare failed.");
+        return;
+    }
+
+    my $deleted = 0;
+    for my $row (@missing) {
+        unless ($del->execute($row->{id_mp3})) {
+            $self->{logger}->log(1, "radiocacheprune delete failed for id_mp3=$row->{id_mp3}: $DBI::errstr")
+                if $self->{logger};
+            next;
+        }
+        $deleted += $del->rows || 0;
+    }
+
+    $del->finish;
+
+    botNotice($self, $nick, "Radio cache prune: deleted $deleted missing MP3 row(s).");
+    logBot($self, $ctx->message, undef, 'radiocacheprune', 'deleted', $deleted);
+    return 1;
+}
+
+
+sub radioCache_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    return unless $ctx->require_level('Master');
+
+    my $incoming = _liquidsoap_config_value($self, 'YOUTUBEDL_INCOMING', '');
+    my $dbh = $self->{dbh};
+
+    unless ($dbh) {
+        botNotice($self, $nick, "Radio cache: database handle unavailable.");
+        return;
+    }
+
+    my ($db_total, $db_readable, $db_missing) = (0, 0, 0);
+    my @missing_examples;
+
+    my $sth = $dbh->prepare(q{
+        SELECT id_mp3, folder, filename, artist, title
+        FROM MP3
+        ORDER BY id_mp3 DESC
+    });
+
+    unless ($sth && $sth->execute()) {
+        botNotice($self, $nick, "Radio cache: database query failed.");
+        $sth->finish if $sth;
+        return;
+    }
+
+    while (my $r = $sth->fetchrow_hashref) {
+        $db_total++;
+
+        my $folder   = $r->{folder}   // '';
+        my $filename = $r->{filename} // '';
+        my $path = ($folder ne '' && $filename ne '') ? "$folder/$filename" : '';
+
+        if ($path ne '' && -r $path) {
+            $db_readable++;
+        }
+        else {
+            $db_missing++;
+            push @missing_examples, "#" . ($r->{id_mp3} // '?') . " " . (($r->{artist} // 'Unknown') . " - " . ($r->{title} // $filename // '?'))
+                if @missing_examples < 3;
+        }
+    }
+
+    $sth->finish;
+
+    my $fs_mp3 = 0;
+    my $fs_readable = 0;
+
+    if (defined($incoming) && $incoming ne '' && -d $incoming) {
+        require File::Find;
+        File::Find::find(
+            {
+                wanted => sub {
+                    return unless -f $_;
+                    return unless $_ =~ /\.mp3\z/i;
+                    $fs_mp3++;
+                    $fs_readable++ if -r $_;
+                },
+                no_chdir => 1,
+            },
+            $incoming,
+        );
+    }
+
+    botNotice($self, $nick, "Radio cache: DB rows=$db_total, readable=$db_readable, missing=$db_missing");
+    botNotice($self, $nick, "Radio cache dir: " . (($incoming && -d $incoming) ? "$incoming mp3=$fs_mp3 readable=$fs_readable" : "not available (" . ($incoming || 'undefined') . ")"));
+
+    if (@missing_examples) {
+        botNotice($self, $nick, "Radio cache missing examples: " . join(' | ', @missing_examples));
+    }
+
+    botNotice($self, $nick, "Use: radioimport <file> or radioimportdir [directory] to populate/update the cache.");
+
+    logBot($self, $ctx->message, undef, 'radiocache', "db=$db_total readable=$db_readable missing=$db_missing");
+    return 1;
+}
+
+
+sub radioCheck_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    return unless $ctx->require_level('Master');
+
+    my $incoming = _liquidsoap_config_value($self, 'YOUTUBEDL_INCOMING', '');
+    my $download_enabled = _liquidsoap_config_value($self, 'RADIO_DOWNLOAD_ENABLED', 0);
+    my $ytdlp    = _liquidsoap_config_value($self, 'YTDLP_PATH', '/usr/bin/yt-dlp');
+    my $cookies  = _liquidsoap_config_value($self, 'YTDLP_COOKIES_FILE', '');
+    my $remote_components = _liquidsoap_config_value($self, 'YTDLP_REMOTE_COMPONENTS', '');
+    my $timeout  = _liquidsoap_config_value($self, 'YTDLP_TIMEOUT', 180);
+
+    my $download_status =
+        (defined($download_enabled) && $download_enabled =~ /^(?:1|yes|true|on|enabled)$/i)
+        ? 'enabled'
+        : 'disabled';
+
+    my $host = _liquidsoap_config_value($self, 'LIQUIDSOAP_TELNET_HOST', '127.0.0.1');
+    my $port = _liquidsoap_config_value($self, 'LIQUIDSOAP_TELNET_PORT', 1235);
+    my $qid  = _liquidsoap_config_value($self, 'LIQUIDSOAP_QUEUE_ID',  'mediabot_queue');
+
+    my @lines;
+
+    push @lines, "Radio check:";
+
+    if (defined($incoming) && $incoming ne '' && -d $incoming && -w $incoming) {
+        push @lines, "incoming: OK writable ($incoming)";
+    }
+    else {
+        push @lines, "incoming: FAIL not writable or missing (" . ($incoming || 'undefined') . ")";
+    }
+
+    push @lines, "downloads: $download_status";
+
+    if (defined($ytdlp) && $ytdlp ne '' && -x $ytdlp) {
+        my $version = '';
+        if (open my $fh, '-|', $ytdlp, '--version') {
+            $version = <$fh> // '';
+            close $fh;
+            chomp $version;
+        }
+        $version = 'version unknown' unless defined($version) && $version ne '';
+        push @lines, "yt-dlp: OK $version ($ytdlp)";
+    }
+    else {
+        push @lines, "yt-dlp: FAIL not executable (" . ($ytdlp || 'undefined') . ")";
+    }
+
+    if (defined($cookies) && $cookies ne '') {
+        if (-r $cookies) {
+            my $cookie_size = -s $cookies || 0;
+            my $cookie_age_days = int(-M $cookies);
+            push @lines, "cookies: OK readable ($cookies, ${cookie_size} bytes, age=${cookie_age_days}d)";
+        }
+        else {
+            push @lines, "cookies: configured but not readable/missing ($cookies)";
+        }
+    }
+    else {
+        push @lines, "cookies: not configured";
+    }
+
+    push @lines, "yt-dlp remote components: " . ($remote_components || "not configured");
+    push @lines, "yt-dlp timeout: $timeout seconds";
+
+    my $liq = _liquidsoap_client($self);
+    my ($ok, $response) = $liq->queue();
+
+    if ($ok) {
+        push @lines, "Liquidsoap: OK $host:$port queue=$qid";
+    }
+    else {
+        push @lines, "Liquidsoap: FAIL $host:$port queue=$qid error=$response";
+    }
+
+    my $status_base = _liquidsoap_config_value($self, 'RADIO_ICECAST_STATUS_BASE_URL', '');
+    my $public_base = _liquidsoap_config_value($self, 'RADIO_ICECAST_PUBLIC_BASE_URL', '');
+    my $mount       = _liquidsoap_config_value($self, 'RADIO_ICECAST_PRIMARY_MOUNT', '');
+
+    push @lines, "Icecast status base: " . ($status_base || 'undefined');
+    push @lines, "Icecast public stream: " . (($public_base && $mount) ? "$public_base$mount" : 'undefined');
+
+    for my $line (@lines) {
+        botNotice($self, $nick, $line);
+    }
+
+    logBot($self, $ctx->message, undef, 'radiocheck', ($ok ? 'ok' : 'liquidsoap-failed'));
+    return 1;
+}
+
+
 sub radioQueue_ctx {
     my ($ctx) = @_;
 
@@ -1539,7 +2162,7 @@ sub radioQueue_ctx {
     my ($ok, $response) = $liq->queue();
 
     unless ($ok) {
-        botNotice($self, $nick, "Liquidsoap queue error: $response");
+        botNotice($self, $nick, "Radio: queue check failed: Liquidsoap error: $response");
         logBot($self, $ctx->message, undef, 'radioqueue', 'error');
         return;
     }
@@ -1567,17 +2190,17 @@ sub radioPush_ctx {
     }
 
     unless ($uri =~ m{^/}) {
-        botNotice($self, $nick, "radiopush currently expects an absolute local file path.");
+        botNotice($self, $nick, "Radio: radiopush expects an absolute local MP3 path.");
         return;
     }
 
     if ($uri =~ /\s/) {
-        botNotice($self, $nick, "radiopush does not support whitespace in file paths yet.");
+        botNotice($self, $nick, "Radio: radiopush does not support spaces in file paths yet.");
         return;
     }
 
     unless (-r $uri) {
-        botNotice($self, $nick, "radiopush: file is not readable: $uri");
+        botNotice($self, $nick, "Radio: radiopush file is not readable: $uri");
         return;
     }
 
@@ -1585,12 +2208,12 @@ sub radioPush_ctx {
     my ($ok, $response) = $liq->push($uri);
 
     unless ($ok) {
-        botNotice($self, $nick, "Liquidsoap push error: $response");
+        botNotice($self, $nick, "Radio: Liquidsoap push failed: $response");
         logBot($self, $ctx->message, undef, 'radiopush', 'error', $uri);
         return;
     }
 
-    botNotice($self, $nick, "Liquidsoap push sent: $uri");
+    botNotice($self, $nick, "Radio: queued local file through Liquidsoap: $uri");
     _radio_notice_lines($ctx, 'Liquidsoap', $response, 4);
 
     logBot($self, $ctx->message, undef, 'radiopush', $uri);
@@ -1609,12 +2232,12 @@ sub radioSkip_ctx {
     my ($ok, $response) = $liq->skip();
 
     unless ($ok) {
-        botNotice($self, $nick, "Liquidsoap skip error: $response");
+        botNotice($self, $nick, "Radio: Liquidsoap skip failed: $response");
         logBot($self, $ctx->message, undef, 'radioskip', 'error');
         return;
     }
 
-    botNotice($self, $nick, "Liquidsoap skip sent.");
+    botNotice($self, $nick, "Radio: skip command sent to Liquidsoap.");
     _radio_notice_lines($ctx, 'Liquidsoap', $response, 4);
 
     logBot($self, $ctx->message, undef, 'radioskip', undef);
@@ -1633,12 +2256,12 @@ sub radioFlush_ctx {
     my ($ok, $response) = $liq->flush_and_skip();
 
     unless ($ok) {
-        botNotice($self, $nick, "Liquidsoap flush error: $response");
+        botNotice($self, $nick, "Radio: Liquidsoap flush failed: $response");
         logBot($self, $ctx->message, undef, 'radioflush', 'error');
         return;
     }
 
-    botNotice($self, $nick, "Liquidsoap flush_and_skip sent.");
+    botNotice($self, $nick, "Radio: queue flushed and current track skipped.");
     _radio_notice_lines($ctx, 'Liquidsoap', $response, 4);
 
     logBot($self, $ctx->message, undef, 'radioflush', undef);
@@ -1713,12 +2336,10 @@ sub song_ctx {
     my $title      = defined $info->{title} && $info->{title} ne '' ? $info->{title} : 'unknown';
     my $listen_url = $info->{listen_url} || ($public_base . $primary_mount);
 
-    my $msg =
-          String::IRC->new('[ ')->white
-        . String::IRC->new($listen_url)->blue->underline
-        . String::IRC->new(' ] - [ ')->white
-        . String::IRC->new($title)->yellow
-        . String::IRC->new(' ]')->white;
+    my $msg = _radio_format_song_line(
+        listen_url => $listen_url,
+        title      => $title,
+    );
 
     if ($ctx->is_private) {
         $ctx->reply_private($msg);

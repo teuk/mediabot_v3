@@ -116,7 +116,7 @@ sub get_now_playing {
 sub get_primary_mount_status {
     my ($self, %args) = @_;
 
-    my $primary_mount = $args{primary_mount} || '/radio160.mp3';
+    my $primary_mount = $args{primary_mount} || '/radio.mp3';
     my $public_base   = $args{public_base}   || $self->{base_url};
 
     $public_base =~ s{/\z}{};
@@ -168,7 +168,7 @@ sub get_primary_mount_status {
 sub get_summary {
     my ($self, %args) = @_;
 
-    my $primary_mount = $args{primary_mount} || '/radio160.mp3';
+    my $primary_mount = $args{primary_mount} || '/radio.mp3';
     my $public_base   = $args{public_base}   || $self->{base_url};
 
     $public_base =~ s{/\z}{};
