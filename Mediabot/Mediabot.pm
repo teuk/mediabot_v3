@@ -1214,6 +1214,7 @@ sub mbCommandPublic {
         status       => sub { mbStatus_ctx($ctx) },
         echo         => sub { mbEcho($ctx) },
         adduser      => sub { addUser_ctx($ctx) },
+        useradd      => sub { addUser_ctx($ctx) }, # legacy alias
         deluser      => sub { delUser_ctx($ctx) },
         users        => sub { userStats_ctx($ctx) },
         userinfo     => sub { userInfo_ctx($ctx) },
@@ -1519,7 +1520,8 @@ addcmd|addcmd <category> <command> <action>|authorized|Create a dynamic command 
 addhost|addhost <nick> <hostmask>|admin|Add a hostmask to a known user.
 addresponder|addresponder <trigger> <response>|admin|Add an automatic responder.
 addtimer|addtimer <name> <seconds> <command>|admin|Add a bot timer.
-adduser|adduser <nick> <level>|admin|Create a bot user.
+adduser|adduser <handle> [-n] <hostmask> [level]|admin|Create a bot user.
+useradd|useradd <handle> [-n] <hostmask> [level]|admin|Legacy alias for adduser.
 antifloodset|antifloodset #channel <key> <value>|channel admin|Adjust anti-flood settings for a channel.
 auth|auth|public|Check or refresh your authentication status.
 ban|ban #channel <mask|nick> [duration]|operator+|Ban a mask or nick on a channel.
@@ -2354,6 +2356,7 @@ sub mbCommandPrivate {
         radioskip   => sub { radioSkip_ctx($ctx) },
         radioflush  => sub { radioFlush_ctx($ctx) },
         adduser     => sub { addUser_ctx($ctx) },
+        useradd     => sub { addUser_ctx($ctx) }, # legacy alias
         deluser     => sub { delUser_ctx($ctx) },
         users       => sub { userStats_ctx($ctx) },
         cstat       => sub { userCstat_ctx($ctx) },
