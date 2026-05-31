@@ -148,12 +148,16 @@ sub channelList_ctx {
         return;
     }
 
+    # BB2: also fetch active chansets for each channel
     my $sql = q{
         SELECT
             C.name AS name,
-            COUNT(UC.id_user) AS nbUsers
+            COUNT(DISTINCT UC.id_user) AS nbUsers,
+            GROUP_CONCAT(DISTINCT CL.chanset ORDER BY CL.chanset SEPARATOR ',') AS chansets
         FROM CHANNEL C
         LEFT JOIN USER_CHANNEL UC ON UC.id_channel = C.id_channel
+        LEFT JOIN CHANNEL_SET CS ON CS.id_channel = C.id_channel
+        LEFT JOIN CHANSET_LIST CL ON CL.id_chanset_list = CS.id_chanset_list
         GROUP BY C.id_channel, C.name, C.creation_date
         ORDER BY C.creation_date
     };
@@ -181,7 +185,10 @@ sub channelList_ctx {
         my $name    = $ref->{name}    // next;
         my $nbUsers = $ref->{nbUsers} // 0;
 
-        push @items, "$name($nbUsers)";
+        my $csets = $ref->{chansets} // '';
+        my $cset_str = $csets ne '' ? "+$csets" : '';
+        $cset_str =~ s/,/,+/g if $cset_str;  # +foo,+bar
+        push @items, $cset_str ne '' ? "$name($nbUsers)[$cset_str]" : "$name($nbUsers)";
     }
 
     $sth->finish;

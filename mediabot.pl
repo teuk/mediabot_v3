@@ -467,6 +467,15 @@ $scheduler->add(
                 $purged_p++;
             }
         }
+        # IMP12: also purge _ai_last_active and stale URL display cache
+        for my $key (keys %{ $mediabot->{_ai_last_active} // {} }) {
+            my ($nick_k) = split /\x00/, $key, 2;
+            delete $mediabot->{_ai_last_active}{$key}
+                unless $online_nicks{lc($nick_k)};
+        }
+        { my $c = $mediabot->{_url_display_cache} // {};
+          my $ct = time();
+          delete @{$c}{grep { ($c->{$_}//0) < $ct - 600 } keys %$c}; }
         $mediabot->{logger}->log(3, "claude_history_purge: $purged_h history, $purged_p persona orphan(s) removed")
             if $purged_h + $purged_p > 0;
     },

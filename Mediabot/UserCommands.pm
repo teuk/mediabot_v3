@@ -2451,7 +2451,9 @@ sub mbTop_ctx {
         return 1;
     }
 
-    botPrivmsg($self, $channel, "Top $n on $channel$period_label:");
+    # V2: show total messages in header
+    my $total_hdr_str = $total > 0 ? " ($total msgs)" : "";
+    botPrivmsg($self, $channel, "Top $n on $channel$period_label$total_hdr_str:");
     my $rank = 1;
     for my $row (@rows) {
         my $msgs = $row->{msg_count};
@@ -2460,6 +2462,29 @@ sub mbTop_ctx {
             $rank++, $row->{nick}, $msgs, ($msgs != 1 ? "s" : ""), $pct));
     }
 
+    # V10: show caller's rank if not in top-N — only on a registered channel
+    my $chan_ok = defined $channel && $channel =~ /^#/;
+    if ($total > 0 && $chan_ok) {
+        my $sth_r = $self->{dbh}->prepare(
+            "SELECT COUNT(*)+1 AS rank, SUM(CASE WHEN cl.nick=? THEN 1 ELSE 0 END) AS mine"
+          . " FROM (SELECT nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl2"
+          .        " JOIN CHANNEL c2 ON c2.id_channel=cl2.id_channel"
+          .        " WHERE c2.name=? $period_sql GROUP BY nick) AS sub"
+          . " WHERE sub.cnt > (SELECT COUNT(*) FROM CHANNEL_LOG cl3"
+          .                   " JOIN CHANNEL c3 ON c3.id_channel=cl3.id_channel"
+          .                   " WHERE c3.name=? $period_sql AND cl3.nick=?)"
+        );
+        if ($sth_r && $sth_r->execute($nick, $channel, $channel, $nick)) {
+            my $r = $sth_r->fetchrow_hashref; $sth_r->finish;
+            my $rank = $r->{rank} // 0;
+            my $mine = $r->{mine} // 0;
+            if ($rank > $n && $mine > 0) {
+                my $pct_me = $total > 0 ? sprintf('%.1f%%', 100*$mine/$total) : '0%';
+                botPrivmsg($self, $channel,
+                    "  (your rank: #$rank — $mine msg(s), $pct_me)");
+            }
+        }
+    }
     logBot($self, $ctx->message, $channel, "top", "$n");
     return 1;
 }
@@ -3163,7 +3188,9 @@ sub mbAlias_ctx {
         while (my $r = $sth->fetchrow_hashref) { push @rows, $r; }
         $sth->finish;
         unless (@rows) { botNotice($self, $nick, 'No aliases defined.'); return 1; }
-        botNotice($self, $nick, $_->{alias} . ' => ' . $_->{command}) for @rows;
+        # W7: show total count in header
+        botNotice($self, $nick, scalar(@rows) . ' alias(es) defined:');
+        botNotice($self, $nick, "  $_->{alias} => $_->{command}") for @rows;
         return 1;
     }
 
@@ -4217,9 +4244,13 @@ sub mbKarmaInfo_ctx {
     my $score_str  = defined $last_score
         ? ' [score: ' . ($last_score >= 0 ? "+$last_score" : "$last_score") . ']'
         : '';
+    # V1: positivity ratio — must be computed BEFORE the botPrivmsg call
+    my $recv_total = $received_pos + $received_neg;
+    my $pct_pos    = $recv_total > 0 ? int(100 * $received_pos / $recv_total) : 0;
+    my $pct_str    = $recv_total > 0 ? ", ${pct_pos}% \x{2191}" : "";
     botPrivmsg($self, $reply_to,
         "karmainfo $target$score_str: received ${sign}${net_received} "
-        . "(+${received_pos}/-${received_neg})"
+        . "(+${received_pos}/-${received_neg}${pct_str})"
         . " | given: +${given_pos}/-${given_neg}"
         . " | top voter: $top_giver" . ($top_giver_count ? " (${top_giver_count}x)" : ''));
     return 1;
@@ -4307,18 +4338,29 @@ sub mbKarmaReset_ctx {
     my $rc = $sth_c->fetchrow_hashref; $sth_c->finish;
     return unless $rc;
 
+    # W3: read current score before reset for informative message
+    my $old_score = 0;
+    {
+        my $sth_sc = $self->{dbh}->prepare(
+            'SELECT score FROM KARMA WHERE id_channel = ? AND nick = ?');
+        if ($sth_sc && $sth_sc->execute($rc->{id_channel}, $target)) {
+            my $r = $sth_sc->fetchrow_hashref;
+            $old_score = $r->{score} // 0 if $r;
+            $sth_sc->finish;
+        }
+    }
     my $sth = $self->{dbh}->prepare(q{
         UPDATE KARMA SET score = 0
         WHERE id_channel = ? AND nick = ?
     });
     unless ($sth && $sth->execute($rc->{id_channel}, $target)) {
-        # V3: B26-pattern: execute failed, no open cursor
         botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
     }
     my $rows = $sth->rows; $sth->finish;
     if ($rows > 0) {
+        my $was = $old_score >= 0 ? "+$old_score" : "$old_score";
         Mediabot::Helpers::botPrivmsg($self, $channel,
-            "$nick reset karma for $target to 0.");
+            "$nick reset karma for $target to 0 (was $was).");
         logBot($self, $ctx->message, $channel, 'karmareset', $target);
     } else {
         botNotice($self, $nick, "No karma entry found for '$target' on $channel.");
@@ -4695,7 +4737,10 @@ sub mbChoose_ctx {
     my $ch = $self->{_choose_history}{$channel} //= [];
     push @$ch, $choice;
     splice @$ch, 0, @$ch - 5 if @$ch > 5;
-    botPrivmsg($self, $channel, "$nick: I choose... $choice!");
+    # V3: show number of options for context
+    my $n_opts = scalar @opts;
+    botPrivmsg($self, $channel,
+        "$nick: I choose... $choice!" . ($n_opts > 2 ? " (1 of $n_opts options)" : ""));
     logBot($self, $ctx->message, $channel, 'choose', $choice);  # Q1
     return 1;
 }
@@ -4784,8 +4829,12 @@ sub mbCompare_ctx {
     my $diff = abs($c1 - $c2);
     my $leader = $c1 > $c2 ? $t1 : $c1 < $c2 ? $t2 : undef;
     my $verdict = $leader ? "$leader leads by $diff msg(s)" : 'tied!';
+    # V9: add relative % to compare output
+    my $tot_c = $c1 + $c2;
+    my $p1 = $tot_c > 0 ? int(100*$c1/$tot_c) : 0;
+    my $p2 = $tot_c > 0 ? 100 - $p1 : 0;
     botPrivmsg($self, $channel,
-        "$t1: $c1 msg(s) | $t2: $c2 msg(s) | $verdict");
+        "$t1: $c1 msg(s) ($p1%) | $t2: $c2 msg(s) ($p2%) | $verdict");
     return 1;
 }
 
@@ -4836,6 +4885,16 @@ sub mbHeatmap_ctx {
         my $bar = $irc_color . chr(0x2588) x $bar_len . $reset
                 . chr(0x2591) x (10 - $bar_len);
         botPrivmsg($self, $channel, sprintf('  %s  %s  %d msgs', $label, $bar, $total));
+    }
+    # V7: show peak hour
+    my $peak_slot = 0;
+    for my $s (1..3) { $peak_slot = $s if ($hours[$s*6] // 0) > ($hours[$peak_slot*6] // 0); }
+    my @slot_labels = ("00-05", "06-11", "12-17", "18-23");
+    my @slot_totals = map { my $s=$_; my $t=0; $t += ($hours[$s*6+$_] // 0) for 0..5; $t } 0..3;
+    my ($peak_idx) = sort { $slot_totals[$b] <=> $slot_totals[$a] } 0..3;
+    if ($slot_totals[$peak_idx] > 0) {
+        botPrivmsg($self, $channel,
+            "  Peak activity: $slot_labels[$peak_idx] ($slot_totals[$peak_idx] msgs)");
     }
     return 1;
 }

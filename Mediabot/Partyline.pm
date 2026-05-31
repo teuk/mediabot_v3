@@ -1148,7 +1148,9 @@ sub _handle_line {
     # Record command in per-session history (max 10, skip .history itself)
     if ($line =~ /^\./ && $line !~ /^\.history$/i) {
         $self->{users}{$id}{history} //= [];
-        push @{ $self->{users}{$id}{history} }, $line;
+        # Z8: store with timestamp for .history display
+        my @_ht = localtime(time); my $_hts = sprintf('%02d:%02d', $_ht[2], $_ht[1]);
+        push @{ $self->{users}{$id}{history} }, "$_hts $line";
         if (scalar @{ $self->{users}{$id}{history} } > 10) {
             shift @{ $self->{users}{$id}{history} };
         }
@@ -2952,6 +2954,21 @@ sub _cmd_ai {
 
     # .ai history — show current context.
     if ($subcmd eq 'history') {
+        # AA15: 'history clear [nick]' — wipe history
+        if (defined $rest && $rest =~ /^clear(?:\s+(\S+))?$/i) {
+            my $tgt = defined $1 ? lc($1) : $pl_nick;
+            my $cleared = 0;
+            for my $k (keys %{ $bot->{_claude_history} // {} }) {
+                my ($nk) = split /\x00/, $k, 2;
+                if (lc($nk) eq $tgt) {
+                    delete $bot->{_claude_history}{$k};
+                    delete $bot->{_ai_last_active}{$k} if $bot->{_ai_last_active};
+                    $cleared++;
+                }
+            }
+            $stream->write("Cleared $cleared history session(s) for $tgt\r\n");
+            return;
+        }
         my $hist_key = "$pl_nick\x00$chan";
         my $history  = $bot->{_claude_history}{$hist_key} // [];
 
@@ -3021,6 +3038,22 @@ sub _cmd_ai {
     # .ai pin            — show pinned context
     # .ai pin clear      — clear pinned context
     # .ai pin <text>     — set pinned context
+    if ($subcmd eq 'pin' && (($rest // '') =~ /^list$/i || ($rest // '') eq '')) {
+        # AA10: '.ai pin list' or '.ai pin' alone → list all active pins
+        if (($rest // '') =~ /^list$/i || ($rest // '') eq '') {
+            my $pins = $bot->{_claude_pinned} // {};
+            unless (%$pins) { $stream->write("No active pins.\r\n"); }
+            else {
+                $stream->write("Active Claude pins:\r\n");
+                for my $key (sort keys %$pins) {
+                    my ($nk,$ck) = split /\x00/, $key, 2;
+                    $stream->write(sprintf("  %-15s %-12s %.60s\r\n",
+                        $nk, $ck, $pins->{$key}));
+                }
+            }
+            return;
+        }
+    }
     if ($subcmd eq 'pin') {
         my $pin_key = lc($pl_nick) . "\x00$chan";
         my $action = $rest;
@@ -3243,41 +3276,84 @@ sub _cmd_quota {
     my ($self, $stream, $id, $args) = @_;
     my $bot = $self->{bot};
     my $now = time();
+
+    # Keep .quota aligned with claudeAI() rate-limit settings.
+    my $rate_max = eval { int($bot->{conf}->get('anthropic.RATE_MAX') // 5) } // 5;
+    my $rate_window = eval { int($bot->{conf}->get('anthropic.RATE_WINDOW') // 60) } // 60;
+    $rate_max = 1 if $rate_max < 1;
+    $rate_window = 10 if $rate_window < 10;
+
+    my $fmt_wait = sub {
+        my ($wait) = @_;
+        $wait = int($wait // 0);
+        $wait = 0 if $wait < 0;
+        return $wait >= 60
+            ? sprintf('%dm %ds', int($wait/60), $wait % 60)
+            : "${wait}s";
+    };
+
     if (!defined $args || $args !~ /\S/) {
         my $rl = $bot->{_claude_ratelimit} // {};
-        unless (%$rl) { $stream->write("No active rate limit windows.\r\n"); return; }
-        $stream->write("Active Claude rate limit windows:\r\n");
+        unless (%$rl) {
+            $stream->write("No active rate limit windows.
+");
+            return;
+        }
+
+        $stream->write("Active Claude rate limit windows:
+");
         for my $key (sort keys %$rl) {
             my $entry = $rl->{$key};
-            next if ($now - ($entry->{window} // 0)) >= 60;
-            my ($nick_k, $chan_k) = split /\x00/, $key, 2;
+            next if ($now - ($entry->{window} // 0)) >= $rate_window;
+
+            my ($nick_k, $chan_k) = split / /, $key, 2;
             my $used = $entry->{count} // 0;
-            my $remaining = 5 - $used; $remaining = 0 if $remaining < 0;
-            my $wait = 60 - ($now - $entry->{window});
-            $stream->write(sprintf("  %-20s %-15s %d/5 req (%ds left)\r\n",
-                $nick_k, $chan_k, $used, $wait));
+            my $remaining = $rate_max - $used;
+            $remaining = 0 if $remaining < 0;
+
+            my $wait = $rate_window - ($now - ($entry->{window} // $now));
+            my $wait_h = $fmt_wait->($wait);
+
+            $stream->write(sprintf("  %-20s %-15s %d/%d req (%s left)
+",
+                $nick_k, $chan_k, $used, $rate_max, $wait_h));
         }
         return;
     }
-    my $target = lc($args); $target =~ s/^\s+|\s+\$//g;
+
+    my $target = lc($args);
+    $target =~ s/^\s+|\s+$//g;
+
     my $rl = $bot->{_claude_ratelimit} // {};
     my @found;
+
     for my $key (sort keys %$rl) {
-        my ($nick_k, $chan_k) = split /\x00/, $key, 2;
+        my ($nick_k, $chan_k) = split / /, $key, 2;
         next unless lc($nick_k) eq $target;
+
         my $entry = $rl->{$key};
-        next if ($now - ($entry->{window} // 0)) >= 60;
+        next if ($now - ($entry->{window} // 0)) >= $rate_window;
+
         my $used = $entry->{count} // 0;
-        my $remaining = 5 - $used; $remaining = 0 if $remaining < 0;
-        my $wait = 60 - ($now - $entry->{window});
-        push @found, sprintf("  %-15s %d/5 req — %d remaining (%ds left)",
-            $chan_k, $used, $remaining, $wait);
+        my $remaining = $rate_max - $used;
+        $remaining = 0 if $remaining < 0;
+
+        my $wait = $rate_window - ($now - ($entry->{window} // $now));
+        my $wait_h = $fmt_wait->($wait);
+
+        push @found, sprintf("  %-15s %d/%d req — %d remaining (%s left)",
+            $chan_k, $used, $rate_max, $remaining, $wait_h);
     }
+
     if (@found) {
-        $stream->write("Claude quota for $target:\r\n");
-        $stream->write("$_\r\n") for @found;
-    } else {
-        $stream->write("No active rate limit for '$target'.\r\n");
+        $stream->write("Claude quota for $target:
+");
+        $stream->write("$_
+") for @found;
+    }
+    else {
+        $stream->write("No active rate limit for '$target'.
+");
     }
 }
 
@@ -3692,12 +3768,16 @@ sub _cmd_dccstat {
         my $now = time;
         for my $o (@$offers) {
             my $age = $now - ($o->{created_at} || $now);
-            $stream->write(sprintf("  %-12s %-14s %-16s %-8s %ss\r\n",
+            # Z4: human-readable age for DCC offers
+            my $age_h = $age >= 60
+                ? sprintf('%dm %ds', int($age/60), $age%60)
+                : "${age}s";
+            $stream->write(sprintf("  %-12s %-14s %-16s %-8s %s\r\n",
                 $o->{type}      || '?',
                 $o->{nick}      || '?',
                 $o->{public_ip} || '?',
                 $o->{port}      || '?',
-                $age
+                $age_h
             ));
         }
 
@@ -4331,7 +4411,16 @@ sub _cmd_chanlog {
     unless (@rows) { $stream->write("No logs found for $chan.\r\n"); return; }
     $stream->write("Last " . scalar(@rows) . " lines on $chan:\r\n");
     for my $r (@rows) {
-        my $ts = substr($r->{ts} // '', 11, 5);  # HH:MM
+        # X9: show full date if entry is not from today
+        my $raw_ts = $r->{ts} // '';
+        my $ts;
+        if ($raw_ts =~ /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/) {
+            my ($date, $hhmm) = ($1, $2);
+            my $today = do { my @t=localtime(time); sprintf('%04d-%02d-%02d',$t[5]+1900,$t[4]+1,$t[3]); };
+            $ts = $date eq $today ? $hhmm : "$date $hhmm";
+        } else {
+            $ts = substr($raw_ts, 11, 5);
+        }
         $stream->write(sprintf("[%s] <%s> %s\r\n", $ts, $r->{nick}, $r->{text}));
     }
 }
@@ -4365,7 +4454,18 @@ sub _cmd_nickinfo {
     $stream->write("ID       : $r->{id_user}\r\n");
     $stream->write("Email    : " . ($r->{email}  // 'N/A') . "\r\n");
     $stream->write("Hosts    : " . ($r->{hosts}  // 'none') . "\r\n");
-    $stream->write("Last login: " . ($r->{last_login} // 'never') . "\r\n");
+    # Y1: compute age of last login
+    my $ll = $r->{last_login} // '';
+    if ($ll =~ /^(\d{4})-(\d{2})-(\d{2})/) {
+        require Time::Local;
+        my ($y,$mo,$d) = ($1,$2,$3);
+        my $ep = eval { Time::Local::timelocal(0,0,12,$d,$mo-1,$y-1900) };
+        if ($ep) {
+            my $diff = int((time()-$ep)/86400);
+            $ll .= $diff > 0 ? " (${diff}d ago)" : " (today)";
+        }
+    }
+    $stream->write("Last login: " . ($ll || 'never') . "\r\n");
 }
 
 sub _cmd_who_chan {
@@ -4415,7 +4515,12 @@ sub _cmd_who_chan {
         }
     };
     my @lines;
-    for my $nick (sort @nicks) {
+    # Y6: sort by level desc (highest first), then alphabetically
+    my @sorted_nicks = sort {
+        ($levels{lc $b} // 0) <=> ($levels{lc $a} // 0)
+        || lc($a) cmp lc($b)
+    } @nicks;
+    for my $nick (@sorted_nicks) {
         my $flag = $irc_flag{lc $nick} // '';
         my $lvl  = $levels{lc $nick}   ? " [" . $levels{lc $nick} . "]" : '';
         push @lines, "$flag$nick$lvl";
@@ -4542,9 +4647,24 @@ sub _cmd_cmdcooldown {
     # CC2: set per-command cooldown for a channel: .cmdcooldown #chan <cmd> <secs>
     my ($self, $stream, $id, $args) = @_;
     my $bot = $self->{bot};
-    unless (defined $args && $args =~ /^(#\S+)\s+(\w+)\s+(\d+)$/) {
+    # V15: no args → list active cooldowns
+    unless (defined $args && $args =~ /\S/) {
+        my $conf = $bot->{_cmd_cooldown_conf} // {};
+        unless (%$conf) {
+            $stream->write("No cooldowns configured.\r\n"); return;
+        }
+        $stream->write("Active cooldowns:\r\n");
+        for my $ch (sort keys %$conf) {
+            for my $cmd (sort keys %{ $conf->{$ch} }) {
+                my $secs = $conf->{$ch}{$cmd};
+                $stream->write(sprintf("  %-20s %-12s %ds\r\n", $ch, "!$cmd", $secs));
+            }
+        }
+        return;
+    }
+    unless ($args =~ /^(#\S+)\s+(\w+)\s+(\d+)$/) {
         $stream->write("Usage: .cmdcooldown <#chan> <cmd> <seconds>\r\n");
-        $stream->write("  Example: .cmdcooldown #quebec ai 20\r\n");
+        $stream->write("  Example: .cmdcooldown #boulets ai 20\r\n");
         return;
     }
     my ($chan, $cmd, $secs) = ($1, lc($2), int($3));
@@ -4562,7 +4682,16 @@ sub _cmd_netsplit {
     my $now = time();
     my $count = $bot->{_netsplit_quit_count} // 0;
     $stream->write("--- Netsplit state ---\r\n");
-    $stream->write("  Netsplit QUITs since last reconnect: $count\r\n");
+    # BB5: show time since last netsplit event if available
+    my $ns_ts = $bot->{_netsplit_last_ts} // 0;
+    my $ns_age_str = '';
+    if ($ns_ts > 0) {
+        my $ns_diff = time() - $ns_ts;
+        $ns_age_str = $ns_diff >= 3600
+            ? sprintf(' (last: %dh%02dm ago)', int($ns_diff/3600), int(($ns_diff%3600)/60))
+            : sprintf(' (last: %dm%02ds ago)', int($ns_diff/60), $ns_diff%60);
+    }
+    $stream->write("  Netsplit QUITs since last reconnect: $count$ns_age_str\r\n");
     # Show antiflood state that was reset
     my $af_chans = scalar keys %{ $bot->{_af} // {} };
     my $cf_chans = scalar keys %{ $bot->{_chan_flood} // {} };
@@ -4582,6 +4711,13 @@ sub _cmd_floodstatus {
     my $now = time();
 
     # AF1: checkAntiFlood in-memory state
+    # V8: show global AF state first
+    my $gaf = $bot->{_global_af} // {};
+    my $gaf_hits = scalar @{ $gaf->{hits} // [] };
+    my $gaf_sil  = ($gaf->{silenced_until} // 0) > time()
+        ? sprintf(" SILENCED %ds", $gaf->{silenced_until} - time()) : '';
+    $stream->write("--- Global AF (IMP7/IMP16) ---\r\n");
+    $stream->write(sprintf("  hits in window: %d%s\r\n", $gaf_hits, $gaf_sil));
     $stream->write("--- Channel antiflood (AF1 — output guard) ---\r\n");
     my $af = $bot->{_af} // {};
     if (%$af) {

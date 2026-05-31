@@ -345,7 +345,14 @@ sub displayYoutubeDetails {
     my $localized     = ref($snippet->{localized})   eq 'HASH' ? $snippet->{localized}   : {};
     my $contentDetails = ref($item->{contentDetails}) eq 'HASH' ? $item->{contentDetails} : {};
 
-    my $sViewCount    = "views " . ($statistics->{viewCount} // '?');
+    # Z5: format view count in human-readable form (1.2M, 45k, etc.)
+    my $raw_views = $statistics->{viewCount} // 0;
+    my $sViewCount = "views " . do {
+        if    ($raw_views >= 1_000_000) { sprintf("%.1fM", $raw_views / 1_000_000) }
+        elsif ($raw_views >= 1_000)     { sprintf("%.1fk", $raw_views / 1_000) }
+        elsif ($raw_views > 0)          { $raw_views }
+        else                            { "?" }
+    };
     my $sTitle        = $localized->{title}          // $snippet->{title} // '';
     my $schannelTitle = $snippet->{channelTitle}     // '';
     my $sDuration     = $contentDetails->{duration}  // '';
@@ -2238,7 +2245,16 @@ sub _handle_generic_title {
     }
 
     # Keep historical label style, but hard-reset before the displayed title.
-    my $label = String::IRC->new("URL Title from $nick:")->grey('black');
+    # Y4: include domain in badge for context
+    my $domain = '';
+    if ($url =~ m{^https?://([^/?#]+)}i) {
+        $domain = $1;
+        $domain =~ s/^www\.//i;
+        $domain = substr($domain, 0, 30);  # cap length
+    }
+    my $label = String::IRC->new("URL")->grey('black');
+    $label   .= String::IRC->new(" $domain")->white('black') if $domain;
+    $label   .= String::IRC->new(" $nick:")->grey('black');
     botPrivmsg($self, $channel, "$label\x0f $title");
     return 1;
 }
@@ -2558,7 +2574,15 @@ sub youtubeSearch_ctx {
         if (($channel_title =~ tr/A-Z//) > 20) { $channel_title = ucfirst(lc($channel_title)); }
 
         my $dur_disp   = _yt_format_duration($dur_iso);
-        my $views_disp = ($views ne '' && $views =~ /^\d+$/) ? "views $views" : "views ?";
+        # BB4: human-readable view count (same as Z5 for displayYoutubeDetails)
+        my $views_disp = do {
+            if ($views ne '' && $views =~ /^(\d+)$/) {
+                my $v = $1;
+                'views ' . ($v >= 1_000_000 ? sprintf('%.1fM', $v/1_000_000)
+                         : $v >= 1_000     ? sprintf('%.1fk', $v/1_000)
+                         :                   $v);
+            } else { 'views ?' }
+        };
         my $url        = "https://www.youtube.com/watch?v=$video_id";
 
         my $entry = _yt_text(" $title ");
@@ -3484,17 +3508,39 @@ sub claude_ctx {
         # B13/fix: $channel can be undef in private — use a stable key
         my $rl_key = lc($nick) . '\x00' . (defined $channel ? $channel : '__private__');
         my $now    = time();
-        my $rl     = $self->{_claude_ratelimit}{$rl_key};
-        if (!$rl || ($now - ($rl->{window} // 0)) >= 60) {
-            botNotice($self, $nick, "AI quota: 5/5 requests available (window not started).");
-        } else {
+
+        # mb81/polish: keep !ai quota aligned with claudeAI() configurable
+        # rate limit. Do not hardcode 5 requests / 60 seconds here.
+        my $rate_max = eval { int($self->{conf}->get('anthropic.RATE_MAX') // 5) } // 5;
+        my $rate_window = eval { int($self->{conf}->get('anthropic.RATE_WINDOW') // 60) } // 60;
+        $rate_max = 1 if $rate_max < 1;
+        $rate_window = 10 if $rate_window < 10;
+
+        my $fmt_wait = sub {
+            my ($wait) = @_;
+            $wait = int($wait // 0);
+            $wait = 0 if $wait < 0;
+            return $wait >= 60
+                ? sprintf('%dm %ds', int($wait / 60), $wait % 60)
+                : "${wait}s";
+        };
+
+        my $rl = $self->{_claude_ratelimit}{$rl_key};
+
+        if (!$rl || ($now - ($rl->{window} // 0)) >= $rate_window) {
+            botNotice($self, $nick, "AI quota: $rate_max/$rate_max requests available (window not started).");
+        }
+        else {
             my $used = $rl->{count} // 0;
-            my $remaining = 5 - $used;
+            my $remaining = $rate_max - $used;
             $remaining = 0 if $remaining < 0;
-            my $wait = 60 - ($now - $rl->{window});
+
+            my $wait = $rate_window - ($now - ($rl->{window} // $now));
+            my $wait_h = $fmt_wait->($wait);
+
             botNotice($self, $nick,
-                "AI quota: $remaining/5 request(s) remaining"
-                . " (window resets in ${wait}s)");
+                "AI quota: $remaining/$rate_max request(s) remaining"
+                . " (window resets in $wait_h)");
         }
         return 1;
     }
@@ -3564,6 +3610,11 @@ sub claudeAI {
                                             CLAUDE_MODEL);
     my $max_tokens  = _chatgpt_conf_int($self, 'anthropic.MAX_TOKENS',
                                          CLAUDE_MAX_TOKENS, 1, 4000);
+    # W6: temperature configurable (0.0 = deterministic, 1.0 = creative, default 1.0)
+    my $temperature = do {
+        my $t = eval { $self->{conf}->get('anthropic.TEMPERATURE') } // 1.0;
+        $t < 0 ? 0.0 : $t > 1.0 ? 1.0 : $t + 0;  # clamp 0..1
+    };
     my $max_privmsg = _chatgpt_conf_int($self, 'anthropic.MAX_PRIVMSG',
                                          CLAUDE_MAX_PRIVMSG, 1, 10);
     my $wrap_bytes  = _chatgpt_conf_int($self, 'anthropic.WRAP_BYTES',
@@ -3667,7 +3718,8 @@ sub claudeAI {
     # Anthropic API payload with conversation history
     my $payload = eval { encode_json({
         model      => $model,
-        max_tokens => $max_tokens,
+        max_tokens  => $max_tokens,
+            temperature => $temperature + 0,  # W6: configurable via anthropic.TEMPERATURE
         system     => $sys_prompt,
         messages   => $history,
     }) };
@@ -3695,6 +3747,11 @@ sub claudeAI {
         return 1;
     }
 
+    # AA8/V14: log model + history size
+    my $_aa8_h = scalar @$history;
+    my $_aa8_c = 0; $_aa8_c += length($_->{content}//'') for @$history;
+    $self->{logger}->log(3, "claudeAI() \x2192 $model for $chan / $nick"
+        . " [hist: $_aa8_h msg(s), ~$_aa8_c chars]");
     my $http = _make_http(timeout => 30);
     my $res  = eval {
         $http->request('POST', $api_url, {

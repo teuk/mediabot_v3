@@ -1508,10 +1508,12 @@ sub radioMounts_ctx {
         my $description = defined $m->{description} && $m->{description} ne '' ? $m->{description} : 'n/a';
         my $listenurl   = defined $m->{listenurl} && $m->{listenurl} ne '' ? $m->{listenurl} : 'n/a';
 
-        botNotice(
-            $self, $nick,
-            "$mount | ${bitrate}k | listeners=$listeners | title=$title | desc=$description | url=$listenurl"
-        );
+        # BB6: compact format, drop redundant desc, keep listenurl
+        botNotice($self, $nick,
+            sprintf("%s | %sk | %s listener%s | %s",
+                $mount, $bitrate,
+                $listeners, ($listeners eq '1' ? '' : 's'),
+                ($title ne 'no title' ? $title : $listenurl)));
     }
 
     logBot($self, $ctx->message, undef, 'radiomounts', undef);
@@ -1871,7 +1873,11 @@ sub radioDlStatus_ctx {
     }
 
     botNotice($self, $nick, "Radio download: active query='$query'");
-    botNotice($self, $nick, "Radio download: pid=$pid alive=$alive age=${age}s timeout=${timeout}s");
+    # X8: human-readable age
+    my $age_h = $age >= 60
+        ? sprintf('%dm %ds', int($age/60), $age%60)
+        : "${age}s";
+    botNotice($self, $nick, "Radio download: pid=$pid alive=$alive age=$age_h timeout=${timeout}s");
 
     if ($stderr && -r $stderr) {
         my $size = -s $stderr || 0;

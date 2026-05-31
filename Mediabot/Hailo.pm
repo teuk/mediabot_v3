@@ -376,7 +376,11 @@ sub hailo_status_ctx {
         if (defined $tokens && $tokens > 0 && defined $prev && defined $next) {
             my $total_links = $prev + $next;
             my $avg_links   = sprintf("%.2f", $total_links / $tokens);
-            $extra = " | total_links=$total_links, avg_links_per_token=$avg_links";
+            # Y3: human-readable format for Hailo brain stats
+            my $size_k = int($tokens / 1000);
+            $extra = $size_k > 0
+                ? sprintf(' | ~%dk tokens, %.1f links/token', $size_k, $avg_links)
+                : sprintf(' | %d tokens, %.1f links/token', $tokens, $avg_links);
         }
     }
     else {

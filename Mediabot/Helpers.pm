@@ -532,6 +532,11 @@ sub botPrivmsg {
             @chunks = ($sMsg);
         }
 
+        # AA14: log when message was split for debug
+        if (scalar(@chunks) > 1) {
+            $self->{logger}->log(4, 'botPrivmsg: split into '
+                . scalar(@chunks) . ' chunks for ' . ($sTo // '?'));
+        }
         for my $chunk (@chunks) {
             next unless defined($chunk) && $chunk ne '';
             $chunk = encode("UTF-8", $chunk) if utf8::is_utf8($chunk);
@@ -1405,7 +1410,11 @@ sub checkAntiFlood {
         my $g_silence = _af_conf_int($self, 'OUTPUT_GLOBAL_SILENCE', 15, 5, 120);
         @{ $g->{hits} } = grep { ($now_g - $_) < $g_window } @{ $g->{hits} };
         push @{ $g->{hits} }, $now_g;
-        if (@{ $g->{hits} } > $g_max) {
+        # V4: debug log current hit count
+        my $hit_count = scalar @{ $g->{hits} };
+        $self->{logger}->log(4, "checkAntiFlood() global: $hit_count/$g_max msgs in ${g_window}s window")
+            if $hit_count > int($g_max * 0.7);  # only log when >70% of threshold
+        if ($hit_count > $g_max) {
             $g->{silenced_until} = $now_g + $g_silence;
             $self->{logger}->log(2, "checkAntiFlood() global flood — silencing ${g_silence}s");
             return 1;

@@ -1022,7 +1022,29 @@ sub mbDbShowCommand_ctx {
             $sth2->finish if $sth2;
         }
 
-        botNotice($self, $nick, "Command : $sCommand Author : $sUserHandle Created : $sCreationDate");
+        # W8: show creation date age
+
+        my $created_str = $ref->{creation_date} // '';
+
+        if ($created_str =~ /^(\d{4})-(\d{2})-(\d{2})/) {
+
+            require Time::Local;
+
+            my ($y,$mo,$d) = ($1,$2,$3);
+
+            my $ep = eval { Time::Local::timelocal(0,0,12,$d,$mo-1,$y-1900) };
+
+            if ($ep) {
+
+                my $diff = int((time()-$ep)/86400);
+
+                $created_str .= $diff > 0 ? " (${diff}d ago)" : " (today)";
+
+            }
+
+        }
+
+        botNotice($self, $nick, "Command : $sCommand Author : $sUserHandle Created : $created_str");
                 botNotice($self, $nick, "$sHitsWord Category : $sCategory Status : $status Action : $sAction");
     } else {
         botNotice($self, $nick, "$sCommand command does not exist");
@@ -1311,7 +1333,7 @@ sub mbTopCommand_ctx {
         $rank++;
 
         my $pct_str = $total_hits > 0
-            ? sprintf(" %.1f%%", 100 * $hits / $total_hits) : "";
+            ? sprintf(", %.1f%%", 100 * $hits / $total_hits) : "";
         push @items, $rank . ") " . $cmd . "(" . $hits . $pct_str . ")";
     }
 
@@ -1397,17 +1419,28 @@ sub mbLastCommand_ctx {
     my @cmds;
     while (my $r = $sth->fetchrow_hashref()) {
         if (defined $r->{command} && $r->{command} ne '') {
-            # IMP27: compute 'X ago' from creation_date
+            # IMP27/polish: compute readable age from creation_date.
+            # Avoid unhelpful output such as "0h ago" for recent commands.
             my $age_s = '';
-            if ($r->{creation_date} && $r->{creation_date} =~ /^(\d{4})-(\d{2})-(\d{2})/) {
+            if ($r->{creation_date} && $r->{creation_date} =~ /^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/) {
                 require Time::Local;
-                my ($y,$mo,$d) = ($1,$2,$3);
-                my $ep = eval { Time::Local::timelocal(0,0,12,$d,$mo-1,$y-1900) };
+                my ($y,$mo,$d,$h,$mi,$sec) = ($1,$2,$3,$4,$5,$6);
+                $h //= 12; $mi //= 0; $sec //= 0;
+                my $ep = eval { Time::Local::timelocal($sec,$mi,$h,$d,$mo-1,$y-1900) };
                 if ($ep) {
                     my $diff = time() - $ep;
-                    $age_s = $diff >= 86400
-                        ? sprintf(' (%dd ago)', int($diff/86400))
-                        : sprintf(' (%dh ago)', int($diff/3600));
+                    if ($diff >= 86400) {
+                        $age_s = sprintf(' (%dd ago)', int($diff/86400));
+                    }
+                    elsif ($diff >= 3600) {
+                        $age_s = sprintf(' (%dh ago)', int($diff/3600));
+                    }
+                    elsif ($diff >= 60) {
+                        $age_s = sprintf(' (%dm ago)', int($diff/60));
+                    }
+                    elsif ($diff >= 0) {
+                        $age_s = ' (just now)';
+                    }
                 }
             }
             push @cmds, $r->{command} . $age_s;
@@ -1504,7 +1537,7 @@ sub mbDbSearchCommand_ctx {
     $like = '%' . $like . '%';
 
     my $sql = q{
-        SELECT command
+        SELECT command, hits
         FROM PUBLIC_COMMANDS
         WHERE action LIKE ? ESCAPE '!'
         ORDER BY hits DESC, command ASC
@@ -1521,7 +1554,11 @@ sub mbDbSearchCommand_ctx {
 
     my @cmds;
     while (my $r = $sth->fetchrow_hashref()) {
-        push @cmds, $r->{command} if defined $r->{command} && $r->{command} ne '';
+        if (defined $r->{command} && $r->{command} ne '') {
+            # X10: show hits alongside command name
+            my $h = $r->{hits} // 0;
+            push @cmds, $h > 0 ? "$r->{command}($h)" : $r->{command};
+        }
     }
     $sth->finish;
 
@@ -1542,7 +1579,7 @@ sub mbDbSearchCommand_ctx {
         return 0;
     }
 
-    my $summary = "Commands containing '$kw': $count result(s), showing max 50";
+    my $summary = "Commands containing '$kw': $count result(s), showing max $search_limit";
 
     # Avoid flooding the channel with multi-line results. If searchcmd is called
     # from a channel, keep a short summary there and send details by NOTICE.
