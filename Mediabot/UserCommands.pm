@@ -363,11 +363,32 @@ sub addUser_ctx {
     my $user = $ctx->user;
     return unless $user;
 
+    # Optional -n flag: notify the added IRC nick.
+    #
+    # Supported forms:
+    #   adduser <nick> <hostmask> [level]
+    #   adduser <nick> -n <hostmask> [level]
+    #   adduser -n <nick> <hostmask> [level]
+    #
+    # When -n is used, we do not blindly NOTICE the nick. We first verify that
+    # the nick is currently visible in one of the bot's channel nicklists and
+    # that the last known USER_SEEN userhost matches the provided hostmask.
+    my $notify_added_user = 0;
+    @args = grep {
+        if (defined($_) && $_ eq '-n') {
+            $notify_added_user = 1;
+            0;
+        }
+        else {
+            1;
+        }
+    } @args;
+
     my ($name, $mask, $level) = @args;
     $level //= 'User';
 
     unless ($name && $mask && $mask =~ /@/) {
-        botNotice($self, $nick, "Syntax: adduser <nick> <hostmask> [level]");
+        botNotice($self, $nick, "Syntax: adduser <nick> [-n] <hostmask> [level]");
         return;
     }
 
@@ -377,9 +398,107 @@ sub addUser_ctx {
     }
 
     my $id = userAdd($self, $mask, $name, undef, $level);
+    unless ($id) {
+        botNotice($self, $nick, "Unable to add user $name");
+        return;
+    }
+
     botNotice($self, $nick, "User $name added (id=$id, level=$level)");
 
+    if ($notify_added_user) {
+        my $warning = _adduser_notify_online_guard($self, $name, $mask, $level);
+
+        if (defined($warning) && $warning ne '') {
+            $self->{logger}->log(1, $warning) if $self->{logger};
+
+            my (undef, $console_chan) = eval { $self->getConsoleChan() };
+            if (defined($console_chan) && $console_chan ne '') {
+                botNotice($self, $console_chan, "WARNING: $warning");
+            }
+
+            botNotice($self, $nick, "User $name added, but not notified: $warning");
+        }
+        else {
+            # Use the stored Mediabot nickname as the login handle, Eggdrop-style.
+            # The IRC nick that receives the NOTICE may differ in case or form, but
+            # the login command must use the nickname stored in the USER table.
+            my $login_handle = $name;
+
+            botNotice(
+                $self,
+                $name,
+                "You have been added as a Mediabot user with level $level. "
+              . "Please set your password with: /msg mediabot pass my_fonky_password "
+              . "then login with: /msg mediabot login $login_handle my_fonky_password"
+            );
+
+            botNotice($self, $nick, "User $name notified with password/login instructions.");
+        }
+    }
+
     logBot($self, $ctx->message, undef, "adduser", $name);
+}
+
+sub _adduser_irc_glob_match {
+    my ($pattern, $value) = @_;
+    return 0 unless defined($pattern) && defined($value);
+
+    my $re = quotemeta($pattern);
+    $re =~ s/\\*/.*/g;
+    $re =~ s/\\?/./g;
+
+    my $ok = eval { $value =~ /^$re$/i };
+    return $ok ? 1 : 0;
+}
+
+sub _adduser_notify_online_guard {
+    my ($self, $name, $mask, $level) = @_;
+
+    $name //= '';
+    $mask //= '';
+
+    my @online_channels;
+    for my $chan (keys %{ $self->{channels} // {} }) {
+        my @nicks = eval { $self->gethChannelsNicksOnChan($chan) } // ();
+        if (grep { defined($_) && lc($_) eq lc($name) } @nicks) {
+            push @online_channels, $chan;
+        }
+    }
+
+    unless (@online_channels) {
+        return "adduser -n requested for '$name', but that nick is not currently visible in the bot nicklists";
+    }
+
+    my $seen;
+    if ($self->{dbh}) {
+        my $sth = $self->{dbh}->prepare(q{
+            SELECT nick, channel, userhost, event_type, seen_at
+            FROM USER_SEEN
+            WHERE LOWER(nick) = LOWER(?)
+            LIMIT 1
+        });
+
+        if ($sth && $sth->execute($name)) {
+            $seen = $sth->fetchrow_hashref;
+            $sth->finish;
+        }
+        else {
+            $sth->finish if $sth;
+        }
+    }
+
+    my $userhost = $seen->{userhost} // '';
+    unless ($userhost ne '') {
+        return "adduser -n requested for '$name', but no USER_SEEN userhost is available to validate hostmask '$mask'";
+    }
+
+    my $fullmask = "$name!$userhost";
+
+    unless (_adduser_irc_glob_match($mask, $fullmask) || _adduser_irc_glob_match($mask, $userhost)) {
+        return "adduser -n requested for '$name', but current hostmask '$fullmask' does not match configured mask '$mask'";
+    }
+
+    return undef;
 }
 
 sub getUserLevelDesc {
