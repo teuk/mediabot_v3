@@ -335,7 +335,11 @@ sub mbAddTimer_ctx {
     $timer->start;
     $self->{hTimers}{$name} = $timer;
 
-    $self->botNotice($nick, "Timer $name added");
+    # LL4: human-readable duration in confirmation
+    my $dur_h = $interval >= 3600 ? sprintf("%dh%02dm", int($interval/3600), int(($interval%3600)/60))
+              : $interval >= 60   ? sprintf("%dm%02ds", int($interval/60), $interval%60)
+              :                     "${interval}s";
+    $self->botNotice($nick, "Timer $name added (every $dur_h): $cmd");
     logBot($self, $ctx->message, undef, 'addtimer', $name);
     return 1;
 }
@@ -440,7 +444,11 @@ sub mbTimers_ctx {
 
         next if $name eq '';
 
-        push @timer_lines, sprintf("%s - every %ss - %s", $name, $duration, $command);
+        # JJ1: human-readable duration
+        my $dur_h = $duration >= 3600 ? sprintf("%dh%02dm", int($duration/3600), int(($duration%3600)/60))
+                  : $duration >= 60   ? sprintf("%dm%02ds", int($duration/60), $duration%60)
+                  :                     "${duration}s";
+        push @timer_lines, sprintf("%s - every %s - %s", $name, $dur_h, $command);
     }
 
     $sth->finish;
@@ -845,7 +853,19 @@ sub mbDbModCommand_ctx {
         return;
     }
 
-    botNotice($self, $nick, "Modifying command $sCommand [$sType] " . join(" ", @args));
+    # HH7: fetch current action before overwriting for informative log
+    my $old_action = '';
+    {
+        my $sth_old = $self->{dbh}->prepare(
+            "SELECT action FROM PUBLIC_COMMANDS WHERE command = ?");
+        if ($sth_old && $sth_old->execute($sCommand)) {
+            my $r = $sth_old->fetchrow_hashref;
+            $old_action = $r->{action} // '' if $r;
+            $sth_old->finish;
+        }
+    }
+    my $old_str = $old_action ne '' ? " (was: $old_action)" : '';
+    botNotice($self, $nick, "Modifying command $sCommand [$sType]$old_str");
 
     my $sAction = ($sType =~ /^message$/i) ? "PRIVMSG %c " : "ACTION %c ";
     $sAction .= join(" ", @args);
@@ -1059,7 +1079,8 @@ sub mbDbShowCommand_ctx {
 # Show the number of lines sent on a channel during the last hour (Administrator+)
 sub mbDbCommand {
 	my ($self,$message,$sChannel,$sNick,$sCommand,@tArgs) = @_;
-	$self->{logger}->log(2,"Check SQL command : $sCommand");
+	# CC19: log command dispatch with context
+	$self->{logger}->log(3,"mbDbCommand: !$sCommand on $sChannel by $sNick");
 
 	my $sQuery = "SELECT id_public_commands, action, description, hits FROM PUBLIC_COMMANDS WHERE command = ? AND active = 1";
 	my $sth_sel = $self->{dbh}->prepare($sQuery);
@@ -1275,7 +1296,9 @@ sub mbCountCommand_ctx {
 
     while (@parts) {
         my @chunk = splice(@parts, 0, $per_line);
-        my $line  = sprintf("countcmd[%02d]: %s", $page, join(' ', @chunk));
+        # KK3: show page number and count in header
+        my $line  = sprintf("countcmd[%02d/%02d]: %s",
+            $page, int(scalar(@parts)/$per_line)+1, join(' ', @chunk));
 
         if (length($line) > 360) {
             $line = substr($line, 0, 357) . '...';
@@ -1627,6 +1650,10 @@ sub mbDbOwnersCommand_ctx {
     my $ctx_chan = $ctx->channel // '';
     $out_chan = $ctx_chan if defined($ctx_chan) && $ctx_chan =~ /^#/;
 
+    # KK4: get total command count for % display
+    my $total_cmds = 0;
+    { my $sth_t = $self->{dbh}->prepare('SELECT COUNT(*) FROM PUBLIC_COMMANDS');
+      if ($sth_t && $sth_t->execute) { ($total_cmds) = $sth_t->fetchrow_array; $sth_t->finish; } }
     my $sql = q{
         SELECT U.nickname AS nickname, COUNT(PC.command) AS nbCommands
         FROM PUBLIC_COMMANDS PC
@@ -1650,7 +1677,8 @@ sub mbDbOwnersCommand_ctx {
         my $nb = $r->{nbCommands} // 0;
         next unless defined $u && $u ne '';
 
-        push @items, "$u($nb)";
+        my $ownpct = $total_cmds > 0 ? sprintf(',%.0f%%', 100*$nb/$total_cmds) : '';
+        push @items, "$u($nb$ownpct)";  # KK4
     }
     $sth->finish;
 

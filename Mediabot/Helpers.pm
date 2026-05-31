@@ -1248,7 +1248,12 @@ sub checkCmdCooldown {
         # A-68-3: track cooldown blocks in Prometheus
         $self->{metrics}->inc('mediabot_cmdcooldown_blocks_total')
             if $self->{metrics};
-        return $cooldown - $elapsed;  # seconds remaining
+        # CC16: debug log when cooldown blocks a command
+        my $wait_cd = $cooldown - $elapsed;
+        $self->{logger}->log(3,
+            "checkCmdCooldown() blocking !$cmd on $channel — ${wait_cd}s remaining")
+            if $self->{logger};
+        return $wait_cd;
     }
     $self->{_cmd_cooldown}{$key} = $now;
     return 0;
@@ -2508,7 +2513,9 @@ sub whoTalk_ctx {
 
     while (@talkers) {
         my @chunk = splice(@talkers, 0, $per_line);
-        my $line  = sprintf("whotalk[%02d]: %s", $page, join(' ', @chunk));
+        # KK5: show as "nick:N" pairs
+        my $line  = sprintf("whotalk[%02d]: %s", $page,
+            join('  ', map { "$_->[0]:$_->[1]" } @chunk));
 
         if (length($line) > 360) {
             $line = substr($line, 0, 357) . '...';
@@ -3171,7 +3178,7 @@ sub resolve_ctx {
 
         my $host = gethostbyaddr($packed, AF_INET);
         if ($host) {
- botPrivmsg($self, $channel, "($nick) Reverse DNS -> $input = $host");
+    botPrivmsg($self, $channel, "($nick) $input => $host");  # JJ5
         } else {
             botPrivmsg($self, $channel, "($nick) No reverse DNS entry for $input");
         }
@@ -3235,7 +3242,7 @@ sub resolve_ctx {
 
             my @ips = grep { /^\d/ } split /,/, ($result // '');
             if (@ips) {
- botPrivmsg($self, $channel, "($nick) $input -> " . join(", ", @ips));
+    botPrivmsg($self, $channel, "($nick) $input => " . join(", ", @ips));  # JJ5
             } else {
                 botPrivmsg($self, $channel, "($nick) Hostname could not be resolved: $input");
             }

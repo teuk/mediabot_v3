@@ -1498,8 +1498,11 @@ sub mbUptime_ctx {
         my $reqs = eval { $self->{metrics}->get('mediabot_claude_requests_total') } // 0;
         $claude_str = " | AI $reqs req(s)" if $reqs;
     }
+    # LL1: compute since string before botPrivmsg
+    my @_st = localtime($start);
+    my $since_str = sprintf(' (since %02d:%02d)', $_st[2], $_st[1]);
     botPrivmsg($self, $channel,
-        "$nick: up $uptime_str | RAM $mem_str | load $load_str$claude_str");
+        "$nick: up $uptime_str$since_str | RAM $mem_str | load $load_str$claude_str");
 }
 
 sub _mbHelpInternalCommands {
@@ -2262,6 +2265,10 @@ sub mbCommandPrivate {
 
     # Normalize command - q and Q are the same
     $sCommand = lc $sCommand;
+
+    # DD5: log private command dispatch at DEBUG3
+    $self->{logger}->log(3, "mbCommandPrivate: !$sCommand from $sNick")
+        if $self->{logger} && $sCommand ne 'q';
 
     # CC1: per-command cooldown for expensive commands
     {

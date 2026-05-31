@@ -319,7 +319,17 @@ sub userCstat_ctx {
     }
 
     my $count = scalar(@entries);
-    botNotice($self, $nick, "Authenticated users: $count result(s)");
+    # JJ3: group by level — parse 'nick(Level)' format in @entries
+    my %by_level;
+    for my $e (@entries) {
+        my ($lvl) = $e =~ /\(([^)]+)\)$/;
+        $by_level{$lvl // 'Unknown'}++ if defined $lvl;
+    }
+    my $level_summary = %by_level
+        ? join(', ', map { "$_:$by_level{$_}" } sort keys %by_level)
+        : '';
+    my $summary_str = $level_summary ? " ($level_summary)" : '';
+    botNotice($self, $nick, "Authenticated users: $count$summary_str");
 
     my $per_line = 5;
     my $page     = 1;
@@ -427,7 +437,6 @@ sub userStats_ctx {
     $sth->finish;
 
     $total //= 0;
-    $bot->botNotice($nick, "Number of users: $total");
 
     my $sql_levels = q{
         SELECT description, COUNT(*)
@@ -447,10 +456,17 @@ sub userStats_ctx {
         return;
     }
 
+    # II10: collect levels and display as one-liner
+    my @level_parts;
     while (my ($desc, $count) = $sth->fetchrow_array) {
         $desc  //= 'Unknown';
         $count //= 0;
-        $bot->botNotice($nick, "$desc ($count)");
+        push @level_parts, "$desc:$count";
+    }
+    if (@level_parts) {
+        $bot->botNotice($nick, "Users: $total total — " . join(', ', @level_parts));
+    } else {
+        $bot->botNotice($nick, "Users: $total total");
     }
 
     $sth->finish;
@@ -2377,6 +2393,18 @@ sub mbStats_ctx {
     $out .= $karma_str if $karma_str;
     $out .= " | not in database" unless $id_user || $msg_count;
 
+    # CC17: add global rank on channel
+    if ($msg_count > 0 && $total > 0) {
+        my $sth_cc17 = $self->{dbh}->prepare(
+            "SELECT COUNT(DISTINCT sub.nick)+1 AS rank FROM"
+          . " (SELECT cl2.nick, COUNT(*) AS cnt"
+          .  " FROM CHANNEL_LOG cl2 JOIN CHANNEL c2 ON c2.id_channel=cl2.id_channel"
+          .  " WHERE c2.name=? GROUP BY cl2.nick HAVING cnt>?) sub");
+        if ($sth_cc17 && $sth_cc17->execute($channel, $msg_count)) {
+            my $r17 = $sth_cc17->fetchrow_hashref; $sth_cc17->finish;
+            $out .= " | rank: #" . ($r17->{rank} // '?');
+        }
+    }
     botPrivmsg($self, $channel, $out);
     logBot($self, $ctx->message, $channel, "stats", $target);
     return 1;
@@ -3062,7 +3090,8 @@ sub mbCalcLast_ctx {
         botNotice($self, $nick, 'No calc history yet.');
         return 1;
     }
-    botNotice($self, $nick, 'Last calc(s):');
+    # JJ6: show count in header
+    botNotice($self, $nick, 'Last ' . scalar(@$history) . ' calc(s):');
     for my $entry (@$history) {
         botNotice($self, $nick, "  $entry");
     }
@@ -3642,7 +3671,11 @@ sub mbKarmaHist_ctx {
     my $label = $filter ? "karma history for $filter" : "recent karma changes";
     # U4/fix: use $kh_chan (not $channel which is nick in PM)
     my $on_str = $kh_chan ? " on $kh_chan" : '';
-    botPrivmsg($self, $kh_reply, "$nick: $label$on_str:");
+    # GG1: add +/- vote summary in header
+    my $kh_pos = scalar grep { ($_->{delta}//"") eq "+1" } @entries;
+    my $kh_neg = scalar(@entries) - $kh_pos;
+    my $kh_summary = @entries ? " (+$kh_pos/-$kh_neg)" : "";
+    botPrivmsg($self, $kh_reply, "$nick: $label$on_str$kh_summary:");
     for my $e (@entries) {
         my $sign  = $e->{score} > 0 ? '+' : '';
         my $delta = $e->{delta};
@@ -3702,8 +3735,13 @@ sub mbLast_ctx {
             ? sprintf('%dh %dm ago', int($ago/60), $ago%60)
             : sprintf('%dd %dh ago', int($ago/1440), int(($ago%1440)/60));
 
+    # FF9: add exact time to the ago string
+    my $time_exact = "";
+    if ($row->{ts} && $row->{ts} =~ /\d{4}-\d{2}-\d{2} (\d{2}:\d{2})/) {
+        $time_exact = ", $1";
+    }
     botPrivmsg($self, $channel,
-        "$target last said ($ago_str on $channel): \"$row->{publictext}\"");
+        "$target last said ($ago_str${time_exact} on $channel): \"$row->{publictext}\"");
     return 1;
 }
 
@@ -3930,7 +3968,14 @@ sub mbPollResult_ctx {
     my $total = scalar keys %{ $poll->{votes} };
 
     my $status = $poll->{active} ? 'Active' : 'Closed';
-    botPrivmsg($self, $channel, "$status poll: \"$poll->{question}\" ($total vote(s))");
+    # DD8: show winner prominently
+    my ($winner_opt) = sort { ($counts{$b}//0) <=> ($counts{$a}//0) } keys %counts;
+    my $winner_str = '';
+    if (defined $winner_opt && $total > 0) {
+        my $wpct = sprintf('%.0f%%', 100*($counts{$winner_opt}//0)/$total);
+        $winner_str = "  Winner: $winner_opt ($wpct)";
+    }
+    botPrivmsg($self, $channel, "$status poll: \"$poll->{question}\" ($total vote(s))$winner_str");
     for my $i (0 .. $#options) {
         my $c   = $counts{$i} // 0;
         my $pct = $total > 0 ? sprintf('%.0f%%', 100 * $c / $total) : '0%';
@@ -4025,7 +4070,9 @@ sub mbNote_ctx {
             botNotice($self, $nick, "No notes matching '$query'."); return 1;
         }
 
-        botNotice($self, $nick, scalar(@hits) . " note(s) matching '$query':");
+        # II17: show count + search term
+        botNotice($self, $nick, scalar(@hits) . "/" . scalar(@$notes)
+            . " note(s) matching '$query':");
         for my $i (0..$#hits) {
             my $n = $hits[$i];
             my $txt = ref($n) eq 'HASH' ? ($n->{text} // '') : ($n // '');
@@ -4241,6 +4288,13 @@ sub mbKarmaInfo_ctx {
     my $sign = $net_received >= 0 ? '+' : '';
     # IMP6: show current score from last known log entry
     my $last_score = @entries ? $entries[-1]{score} : undef;
+    # II15: find oldest entry for 'since' info
+    my $oldest_ts = @entries ? (sort { $a->{ts} <=> $b->{ts} } @entries)[0]{ts} : 0;
+    my $since_str = '';
+    if ($oldest_ts) {
+        my $age_d = int((time() - $oldest_ts) / 86400);
+        $since_str = " (last ${age_d}d in log)" if $age_d > 0;
+    }
     my $score_str  = defined $last_score
         ? ' [score: ' . ($last_score >= 0 ? "+$last_score" : "$last_score") . ']'
         : '';
@@ -4249,7 +4303,7 @@ sub mbKarmaInfo_ctx {
     my $pct_pos    = $recv_total > 0 ? int(100 * $received_pos / $recv_total) : 0;
     my $pct_str    = $recv_total > 0 ? ", ${pct_pos}% \x{2191}" : "";
     botPrivmsg($self, $reply_to,
-        "karmainfo $target$score_str: received ${sign}${net_received} "
+        "karmainfo $target$score_str$since_str: received ${sign}${net_received} "
         . "(+${received_pos}/-${received_neg}${pct_str})"
         . " | given: +${given_pos}/-${given_neg}"
         . " | top voter: $top_giver" . ($top_giver_count ? " (${top_giver_count}x)" : ''));
@@ -4401,9 +4455,21 @@ sub mbKarmaDiff_ctx {
     my $delta = 0;
     $delta += (($_ ->{delta} // '') eq '+1' ? 1 : -1) for @entries;  # KD2/fix: delta guard
     my $sign  = $delta > 0 ? '+' : '';
+    # CC11: fetch current score from _karma_log (in-memory, no DB query)
+    my $cur_score_cc11 = undef;
+    for my $ch_cc11 (keys %{ $self->{_karma_log} // {} }) {
+        my $klog_cc11 = $self->{_karma_log}{$ch_cc11} // [];
+        my ($last_e) = grep { lc($_->{nick}) eq lc($target) } reverse @$klog_cc11;
+        if ($last_e && defined $last_e->{score}) {
+            $cur_score_cc11 = $last_e->{score}; last;
+        }
+    }
+    my $score_info = defined $cur_score_cc11
+        ? ', score: ' . ($cur_score_cc11 >= 0 ? "+$cur_score_cc11" : "$cur_score_cc11")
+        : '';
     botPrivmsg($self, $reply_to_kd,
-        "$target: karma changed by ${sign}${delta} in the last 24h (" .
-        scalar(@entries) . " vote(s)).");
+        "$target: karma changed by ${sign}${delta} in the last 24h ("
+        . scalar(@entries) . " vote(s)$score_info).");
     logBot($self, $ctx->message, $channel, 'karmadiff', $target);
     return 1;
 }
@@ -4549,20 +4615,21 @@ sub mbActive_ctx {
     }
 
     my $sth = $self->{dbh}->prepare(
-        "SELECT DISTINCT cl.nick FROM CHANNEL_LOG cl"
+        "SELECT cl.nick, COUNT(*) AS mc FROM CHANNEL_LOG cl"
         . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
         . " WHERE c.name = ? AND cl.ts >= DATE_SUB(NOW(), INTERVAL $interval)"
-        . " ORDER BY cl.nick LIMIT 30"  # B5/fix: cap nicks to avoid IRC line overflow
+        . " GROUP BY cl.nick ORDER BY mc DESC LIMIT 30"  # EE9
     );
     unless ($sth && $sth->execute($channel)) {
         botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
     }
     my @nicks;
-    while (my ($n) = $sth->fetchrow_array) { push @nicks, $n; }
+    while (my ($n, $mc) = $sth->fetchrow_array) { push @nicks, [$n, $mc]; }
     $sth->finish;
 
     if (@nicks) {
-        my $list = join(', ', @nicks);
+        # EE9: format as 'nick(msg_count)' pairs
+        my $list = join(', ', map { ref $_ ? "$_->[0]($_->[1])" : $_ } @nicks);
         # B5/fix: truncate to avoid IRC 512-byte limit
         if (length($list) > 350) {
             $list = substr($list, 0, 347) . '...';
@@ -4593,8 +4660,9 @@ sub mbWhen_ctx {
     }
     my $target = lc($args[0]);
 
+    # HH10: also count total messages for richer output
     my $sth = $self->{dbh}->prepare(q{
-        SELECT MIN(cl.ts) AS first_seen FROM CHANNEL_LOG cl
+        SELECT MIN(cl.ts) AS first_seen, COUNT(*) AS total_msgs FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE cl.nick = ? AND c.name = ?
     });
@@ -4620,8 +4688,10 @@ sub mbWhen_ctx {
                 else            { $age_str = " (${days}d ago)"; }
             }
         }
+        my $tot_msgs = $row->{total_msgs} // 0;
+        my $msgs_str = $tot_msgs > 0 ? ", $tot_msgs msg(s)" : "";
         botPrivmsg($self, $channel,
-            "$target first seen on $channel: $row->{first_seen}$age_str");
+            "$target first seen on $channel: $row->{first_seen}$age_str$msgs_str");
     } else {
         botPrivmsg($self, $channel, "$target: no history found on $channel.");
     }
@@ -4793,7 +4863,9 @@ sub mbAbbrev_ctx {
     unless ($text ne '') { botNotice($self, $nick, 'Syntax: abbrev <text>'); return; }
     my @words  = split /\s+/, $text;
     my $abbrev = join('', map { uc(substr($_, 0, 1)) } @words);
-    botPrivmsg($self, $channel, "$nick: $abbrev");
+    # HH1: show source word count for context
+    my $wcount = scalar @words;
+    botPrivmsg($self, $channel, "$nick: $abbrev ($wcount word(s))");
     logBot($self, $ctx->message, $channel, 'abbrev', $abbrev);  # Q1
     return 1;
 }
@@ -4833,8 +4905,11 @@ sub mbCompare_ctx {
     my $tot_c = $c1 + $c2;
     my $p1 = $tot_c > 0 ? int(100*$c1/$tot_c) : 0;
     my $p2 = $tot_c > 0 ? 100 - $p1 : 0;
+    # FF15: compute absolute difference before botPrivmsg
+    my $diff_c   = abs($c1 - $c2);
+    my $diff_str = $diff_c > 0 ? " by $diff_c msg(s)" : "";
     botPrivmsg($self, $channel,
-        "$t1: $c1 msg(s) ($p1%) | $t2: $c2 msg(s) ($p2%) | $verdict");
+        "$t1: $c1 msg(s) ($p1%) | $t2: $c2 msg(s) ($p2%) | $verdict$diff_str");
     return 1;
 }
 
@@ -5210,15 +5285,22 @@ sub mbTriviaTop_ctx {
         botPrivmsg($self, $channel, 'DB error.'); $sth->finish if $sth; return;
     }
     my @ranked; my $i = 1;
+    my @raw;  # JJ2: collect all rows first to compute total
     while (my $r = $sth->fetchrow_hashref) {
-        push @ranked, "#${i}. $r->{nick}: $r->{score}";
-        $i++;
+        push @raw, { nick => $r->{nick}, score => $r->{score}//0 };
     }
     $sth->finish;
+    my $t_tot = 0; $t_tot += $_->{score} for @raw;
+    for my $r (@raw) {
+        my $pct = $t_tot > 0 ? sprintf(' (%.0f%%)', 100*$r->{score}/$t_tot) : '';
+        push @ranked, "#${i}. $r->{nick}: $r->{score}$pct";
+        $i++;
+    }
     unless (@ranked) {
         botPrivmsg($self, $channel, 'No trivia scores in DB yet.'); return 1;
     }
     botPrivmsg($self, $channel, "Trivia hall of fame ($channel): " . join('  ', @ranked));
+    return 1;
     return 1;
 }
 

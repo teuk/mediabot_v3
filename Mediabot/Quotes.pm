@@ -608,12 +608,9 @@ sub mbQuoteStats {
     my $oldest_txt = $fmt_age->($oldest);
     my $newest_txt = $fmt_age->($newest);
 
-    botPrivmsg(
-        $self,
-        $sChannel,
-        "Quote stats for $sChannel: $nbQuotes quote(s), oldest $oldest_txt ago, newest $newest_txt ago"
-    );
-
+    botPrivmsg($self, $sChannel,
+        # LL2: compact format
+        "Quotes on $sChannel: $nbQuotes total \x{2014} oldest $oldest_txt ago, latest $newest_txt ago");
     logBot($self, $message, $sChannel, "q stats", @tArgs);
     return $nbQuotes;
 }

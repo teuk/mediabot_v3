@@ -1467,9 +1467,9 @@ sub radioStatus_ctx {
     my $title           = defined $info->{title} && $info->{title} ne '' ? $info->{title} : 'unknown';
     my $listen_url      = $info->{listen_url}      || '?';
 
-    botNotice($self, $nick, "Icecast $host | $server_id | sources=$sources | listeners=$total_listeners");
-    botNotice($self, $nick, "Primary mount: $mount (${bitrate}k, ${mount_listeners} listeners)");
-    botNotice($self, $nick, "Now playing: $title");
+    # GG7: compact format — 2 notices instead of 4
+    botNotice($self, $nick,
+        "Icecast $host | $mount | ${bitrate}k | $mount_listeners listener(s) | $title");
     botNotice($self, $nick, "Listen: $listen_url");
 
     logBot($self, $ctx->message, undef, 'radiostatus', undef);

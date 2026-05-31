@@ -2153,8 +2153,13 @@ sub _cmd_schedule {
                     $next_str = 'soon';
                 }
             }
+            # GG5: human-readable interval
+            my $iv = $t->{interval} // 0;
+            my $iv_str = $iv >= 3600 ? sprintf("%dh%02dm", int($iv/3600), int(($iv%3600)/60))
+                       : $iv >= 60   ? sprintf("%dm%02ds", int($iv/60), $iv%60)
+                       :               "${iv}s";
             $stream->write(sprintf("%-28s %-9s %-8s %-6d %s\r\n",
-                $t->{name}, "$t->{interval}s",
+                $t->{name}, $iv_str,
                 ($t->{started} ? 'running' : 'stopped'),
                 $t->{ticks}, $next_str));
         }
@@ -2923,6 +2928,32 @@ sub _cmd_ai {
     $rest //= '';
 
     # .ai reset — clear history for this Partyline AI scope.
+    # DD9: .ai status — show session + char + persona counts
+
+    if ($subcmd eq 'status') {
+
+        my $hist  = $bot->{_claude_history} // {};
+
+        my $pins  = $bot->{_claude_pinned}  // {};
+
+        my $n_h = scalar keys %$hist;
+
+        my $n_p = scalar keys %$pins;
+
+        my $n_per = scalar keys %{ $bot->{_claude_persona} // {} };
+
+        my $chars = 0;
+
+        $chars += length($_->{content}//'') for map { @{ $hist->{$_} // [] } } keys %$hist;
+
+        my $ck = $chars > 1000 ? sprintf('~%.1fk chars', $chars/1000) : "$chars chars";
+
+        $stream->write("Claude: $n_h session(s) ($ck), $n_p pinned, $n_per persona(s).\r\n");
+
+        return;
+
+    }
+
     if ($subcmd eq 'reset') {
         my $hist_key = "$pl_nick\x00$chan";
         delete $bot->{_claude_history}{$hist_key};
@@ -2981,8 +3012,13 @@ sub _cmd_ai {
         my $hist_chars = 0;
         $hist_chars += length($_->{content} // '') for @$history;
         my $hist_exchanges = int(scalar(@$history) / 2);
-        $stream->write(scalar(@$history) . " message(s) in context"
-            . " ($hist_exchanges exchange(s), ~${hist_chars} chars):\r\n");
+        # CC20: show exchanges + char count
+        my $_cc20_chars = 0;
+        $_cc20_chars += length($_->{content}//'') for @$history;
+        my $_cc20_ex = int(scalar(@$history)/2);
+        $stream->write(scalar(@$history)
+            . " message(s) in context"
+            . " ($_cc20_ex exchange(s), ~$_cc20_chars chars):\r\n");
         my @display = @$history > 6 ? @{$history}[-6..-1] : @$history;
 
         for my $msg (@display) {
@@ -3277,7 +3313,7 @@ sub _cmd_quota {
     my $bot = $self->{bot};
     my $now = time();
 
-    # Keep .quota aligned with claudeAI() rate-limit settings.
+    # Keep .quota aligned with claudeAI() / !ai quota rate-limit settings.
     my $rate_max = eval { int($bot->{conf}->get('anthropic.RATE_MAX') // 5) } // 5;
     my $rate_window = eval { int($bot->{conf}->get('anthropic.RATE_WINDOW') // 60) } // 60;
     $rate_max = 1 if $rate_max < 1;
@@ -3292,31 +3328,37 @@ sub _cmd_quota {
             : "${wait}s";
     };
 
+    my $fmt_reset = sub {
+        my ($entry) = @_;
+        return '' unless $entry && defined $entry->{window};
+        my $reset_at = $entry->{window} + $rate_window;
+        my @rt = localtime($reset_at);
+        return sprintf('resets %02d:%02d', $rt[2], $rt[1]);
+    };
+
     if (!defined $args || $args !~ /\S/) {
         my $rl = $bot->{_claude_ratelimit} // {};
         unless (%$rl) {
-            $stream->write("No active rate limit windows.
-");
+            $stream->write("No active rate limit windows.\r\n");
             return;
         }
 
-        $stream->write("Active Claude rate limit windows:
-");
+        $stream->write("Active Claude rate limit windows:\r\n");
         for my $key (sort keys %$rl) {
             my $entry = $rl->{$key};
             next if ($now - ($entry->{window} // 0)) >= $rate_window;
 
-            my ($nick_k, $chan_k) = split / /, $key, 2;
+            my ($nick_k, $chan_k) = split /\x00/, $key, 2;
             my $used = $entry->{count} // 0;
             my $remaining = $rate_max - $used;
             $remaining = 0 if $remaining < 0;
 
             my $wait = $rate_window - ($now - ($entry->{window} // $now));
             my $wait_h = $fmt_wait->($wait);
+            my $reset_str = $fmt_reset->($entry);
 
-            $stream->write(sprintf("  %-20s %-15s %d/%d req (%s left)
-",
-                $nick_k, $chan_k, $used, $rate_max, $wait_h));
+            $stream->write(sprintf("  %-20s %-15s %d/%d req (%s left, %s)\r\n",
+                $nick_k, $chan_k, $used, $rate_max, $wait_h, $reset_str));
         }
         return;
     }
@@ -3328,7 +3370,7 @@ sub _cmd_quota {
     my @found;
 
     for my $key (sort keys %$rl) {
-        my ($nick_k, $chan_k) = split / /, $key, 2;
+        my ($nick_k, $chan_k) = split /\x00/, $key, 2;
         next unless lc($nick_k) eq $target;
 
         my $entry = $rl->{$key};
@@ -3340,20 +3382,18 @@ sub _cmd_quota {
 
         my $wait = $rate_window - ($now - ($entry->{window} // $now));
         my $wait_h = $fmt_wait->($wait);
+        my $reset_str = $fmt_reset->($entry);
 
-        push @found, sprintf("  %-15s %d/%d req — %d remaining (%s left)",
-            $chan_k, $used, $rate_max, $remaining, $wait_h);
+        push @found, sprintf("  %-15s %d/%d req — %d remaining (%s left, %s)",
+            $chan_k, $used, $rate_max, $remaining, $wait_h, $reset_str);
     }
 
     if (@found) {
-        $stream->write("Claude quota for $target:
-");
-        $stream->write("$_
-") for @found;
+        $stream->write("Claude quota for $target:\r\n");
+        $stream->write("$_\r\n") for @found;
     }
     else {
-        $stream->write("No active rate limit for '$target'.
-");
+        $stream->write("No active rate limit for '$target'.\r\n");
     }
 }
 
@@ -4657,7 +4697,11 @@ sub _cmd_cmdcooldown {
         for my $ch (sort keys %$conf) {
             for my $cmd (sort keys %{ $conf->{$ch} }) {
                 my $secs = $conf->{$ch}{$cmd};
-                $stream->write(sprintf("  %-20s %-12s %ds\r\n", $ch, "!$cmd", $secs));
+                # HH9: human-readable cooldown duration
+                my $cd_str = $secs >= 60
+                    ? sprintf("%dm%02ds", int($secs/60), $secs%60)
+                    : "${secs}s";
+                $stream->write(sprintf("  %-20s %-12s %s\r\n", $ch, "!$cmd", $cd_str));
             }
         }
         return;
@@ -4672,7 +4716,10 @@ sub _cmd_cmdcooldown {
     $bot->{_cmd_cooldown_conf}{$chan}{$cmd} = $secs;
     # Reset any active cooldown for this cmd+chan
     delete $bot->{_cmd_cooldown}{"$cmd:" . lc($chan)};
-    $stream->write("CC2: cooldown for !$cmd on $chan set to ${secs}s\r\n");
+    # HH16: human-readable confirmation
+    my $secs_h = $secs >= 60 ? sprintf("%dm%02ds", int($secs/60), $secs%60) : "${secs}s";
+    my $action_str = $secs == 0 ? "removed" : "set to $secs_h";
+    $stream->write("Cooldown for !$cmd on $chan $action_str.\r\n");
 }
 
 sub _cmd_netsplit {
