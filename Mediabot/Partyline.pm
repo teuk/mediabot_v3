@@ -2474,111 +2474,96 @@ sub _cmd_whochan {
 # .top [#chan] [n]  - top n nicks on a channel (default current/first, 5)
 # ---------------------------------------------------------------------------
 sub _cmd_top {
-    # CC6: .top [n] — top per channel; .top all [n] — all channels combined
+    # Safe Partyline top:
+    #   .top              -> usage only, no implicit full scan
+    #   .top #chan [n]   -> top N on explicit channel
+    #   .top all [n]     -> explicit all-channel aggregate
     my ($self, $stream, $id, $args) = @_;
 
     my $bot = $self->{bot};
     my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
-    return unless $dbh;
-
-    my $all_chans = (defined $args && $args =~ /\ball\b/i);
-    my ($chan, $n);
-    if ($all_chans) {
-        $n = ($args =~ /(\d+)/)[0] // 5;
-    } elsif (defined $args && $args =~ /(#\S+)/i) {
-        $chan = $1;
-        $n    = ($args =~ /(\d+)/)[0] // 5;
-    } elsif (!defined $args || $args !~ /\S/) {
-        # V10b: no channel specified → run top for each joined channel
-        my @chans = sort keys %{ $bot->{channels} || {} };
-        $n = 5;
-        for my $c (@chans) {
-            my $sth_c = $dbh->prepare(
-                'SELECT cl.nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl'
-                . ' JOIN CHANNEL ch ON ch.id_channel = cl.id_channel'
-                . ' WHERE ch.name = ? GROUP BY cl.nick ORDER BY cnt DESC LIMIT ?');
-            unless ($sth_c && $sth_c->execute($c, $n)) {
-                $sth_c->finish if $sth_c;
-                next;
-            }
-
-            my $sth_t = $dbh->prepare(
-                'SELECT COUNT(*) AS t FROM CHANNEL_LOG cl'
-                . ' JOIN CHANNEL ch ON ch.id_channel = cl.id_channel'
-                . ' WHERE ch.name = ?');
-            my $tot = 0;
-            if ($sth_t && $sth_t->execute($c)) {
-                my $r = $sth_t->fetchrow_hashref;
-                $tot = $r->{t} // 0;
-            }
-            $sth_t->finish if $sth_t;
-            $stream->write("Top $n on $c:\r\n");
-            my $rank = 1;
-            while (my $row = $sth_c->fetchrow_hashref) {
-                my $pct = $tot > 0
-                    ? sprintf(' (%.1f%%)', 100 * $row->{cnt} / $tot) : '';
-                $stream->write(sprintf("  %2d. %-20s %d msgs%s\r\n",
-                    $rank++, $row->{nick}, $row->{cnt}, $pct));
-            }
-            $sth_c->finish;
-        }
+    unless ($dbh) {
+        $stream->write("DB unavailable.\r\n");
         return;
-    } else {
-        $n = ($args =~ /(\d+)/)[0] // 5;
-        my @chans = sort keys %{ $bot->{channels} || {} };
-        $chan = $chans[0];
     }
-    $n = 5 if !$n || $n < 1; $n = 15 if $n > 15;
+
+    if (!defined($args) || $args !~ /\S/) {
+        $stream->write("Usage: .top <#chan> [n] or .top all [n] (default n=5, max=15)\r\n");
+        $stream->write("Example: .top #teuk 10\r\n");
+        return;
+    }
+
+    my $all_chans = ($args =~ /\ball\b/i) ? 1 : 0;
+    my ($chan) = ($args =~ /(#\S+)/i);
+    my ($n) = ($args =~ /(\d+)/);
+    $n //= 5;
+    $n = 5  if !$n || $n < 1;
+    $n = 15 if $n > 15;
+
+    unless ($all_chans || (defined($chan) && $chan =~ /^#/)) {
+        $stream->write("Usage: .top <#chan> [n] or .top all [n] (default n=5, max=15)\r\n");
+        $stream->write("Example: .top #teuk 10\r\n");
+        return;
+    }
 
     my ($sth, $label);
     if ($all_chans) {
-        # CC6: aggregate across all channels
         $sth = $dbh->prepare(
             "SELECT cl.nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl"
             . " GROUP BY cl.nick ORDER BY cnt DESC LIMIT ?"
         );
         unless ($sth && $sth->execute($n)) {
-            $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
+            $stream->write("DB error.\r\n");
+            $sth->finish if $sth;
+            return;
         }
         $label = "Top $n speakers (all channels)";
-    } else {
+    }
+    else {
         $sth = $dbh->prepare(
             "SELECT cl.nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl"
             . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
             . " WHERE c.name = ? GROUP BY cl.nick ORDER BY cnt DESC LIMIT ?"
         );
         unless ($sth && $sth->execute($chan, $n)) {
-            $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
+            $stream->write("DB error.\r\n");
+            $sth->finish if $sth;
+            return;
         }
         $label = "Top $n on $chan";
     }
-    # V10: fetch total for percentage
-    my $total_pl;
-    {
-        my $sth_t = $all_chans
-            ? $dbh->prepare('SELECT COUNT(*) AS t FROM CHANNEL_LOG')
-            : $dbh->prepare('SELECT COUNT(*) AS t FROM CHANNEL_LOG cl'
-                          . ' JOIN CHANNEL c ON c.id_channel = cl.id_channel'
-                          . ' WHERE c.name = ?');
-        if ($sth_t) {
-            my $ok = $all_chans ? $sth_t->execute : $sth_t->execute($chan);
-            if ($ok) {
-                my $r = $sth_t->fetchrow_hashref;
-                $total_pl = $r->{t} // 0;
-            }
-            $sth_t->finish;
+
+    my $total_pl = 0;
+    my $sth_t = $all_chans
+        ? $dbh->prepare('SELECT COUNT(*) AS t FROM CHANNEL_LOG')
+        : $dbh->prepare('SELECT COUNT(*) AS t FROM CHANNEL_LOG cl'
+                      . ' JOIN CHANNEL c ON c.id_channel = cl.id_channel'
+                      . ' WHERE c.name = ?');
+
+    if ($sth_t) {
+        my $ok = $all_chans ? $sth_t->execute : $sth_t->execute($chan);
+        if ($ok) {
+            my $r = $sth_t->fetchrow_hashref;
+            $total_pl = $r->{t} // 0;
         }
+        $sth_t->finish;
     }
+
     $stream->write("$label:\r\n");
+
     my $rank = 1;
     while (my $row = $sth->fetchrow_hashref) {
         my $pct = ($total_pl && $total_pl > 0)
-            ? sprintf(' (%.1f%%)', 100 * $row->{cnt} / $total_pl) : '';
+            ? sprintf(' (%.1f%%)', 100 * $row->{cnt} / $total_pl)
+            : '';
+
         $stream->write(sprintf("  %2d. %-20s %d msgs%s\r\n",
             $rank++, $row->{nick}, $row->{cnt}, $pct));
     }
+
     $sth->finish;
 }
+
 
 # ---------------------------------------------------------------------------
 # .remind <nick> <message>  - set a reminder from the Partyline
