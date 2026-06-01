@@ -458,9 +458,10 @@ sub mbTimers_ctx {
     if ($count) {
         $self->botNotice($nick, "DB timers: $count result(s)");
 
+        my $total_pages = $count;  # one timer per line
         my $page = 1;
         for my $line (@timer_lines) {
-            my $out = sprintf("timer[%02d]: %s", $page, $line);
+            my $out = sprintf("timer[%02d/%02d]: %s", $page, $total_pages, $line);
 
             if (length($out) > 360) {
                 $out = substr($out, 0, 357) . '...';
@@ -762,7 +763,17 @@ sub mbDbModCommand {
                 return;
             }
 
-            botNotice($self, $sNick, "Modifying command $sCommand [$sType] " . join(" ", @tArgs));
+            # KK7: show old action (was:) for safety, consistent with ctx modern version
+            my $old_action = '';
+            my $sth_old = $self->{dbh}->prepare(
+                "SELECT action FROM PUBLIC_COMMANDS WHERE id_public_commands = ?");
+            if ($sth_old && $sth_old->execute($id_command)) {
+                my $r = $sth_old->fetchrow_hashref;
+                $old_action = $r->{action} // '' if $r;
+                $sth_old->finish;
+            }
+            my $old_str = $old_action ne '' ? " (was: $old_action)" : '';
+            botNotice($self, $sNick, "Modifying command $sCommand [$sType]$old_str");
 
             my $sAction = $sType =~ /^message$/i ? "PRIVMSG %c " : "ACTION %c ";
             $sAction .= join(" ", @tArgs);
@@ -1292,13 +1303,14 @@ sub mbCountCommand_ctx {
     }
 
     my $per_line = 5;
+    my $total_pages = int((scalar(@parts) + $per_line - 1) / $per_line);
     my $page     = 1;
 
     while (@parts) {
         my @chunk = splice(@parts, 0, $per_line);
         # KK3: show page number and count in header
         my $line  = sprintf("countcmd[%02d/%02d]: %s",
-            $page, int(scalar(@parts)/$per_line)+1, join(' ', @chunk));
+            $page, $total_pages, join(' ', @chunk));
 
         if (length($line) > 360) {
             $line = substr($line, 0, 357) . '...';
@@ -1710,12 +1722,13 @@ sub mbDbOwnersCommand_ctx {
         logBot($self, $ctx->message, undef, "owncmd", undef);
     }
 
-    my $per_line = 5;
-    my $page     = 1;
+    my $per_line    = 5;
+    my $total_pages = int(($count + $per_line - 1) / $per_line);
+    my $page        = 1;
 
     while (@items) {
         my @chunk = splice(@items, 0, $per_line);
-        my $line  = sprintf("owncmd[%02d]: %s", $page, join(' ', @chunk));
+        my $line  = sprintf("owncmd[%02d/%02d]: %s", $page, $total_pages, join(' ', @chunk));
 
         if (length($line) > 360) {
             $line = substr($line, 0, 357) . '...';

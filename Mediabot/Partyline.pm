@@ -1184,22 +1184,15 @@ sub _handle_line {
         $self->_cmd_metrics($stream, $id);
     }
     elsif ($line =~ /^\.top(?:\s+(.*))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.top' }) if $self->{bot}->{metrics};
         $self->_cmd_top($stream, $id, $1 // '');
     }
-    elsif ($line =~ /^\.remind\s+(.*)/i) {
+    elsif ($line =~ /^\.remind(?:\s+(.*))?$/i) {
         $self->_cmd_remind($stream, $id, $1);
     }
     elsif ($line =~ /^\.aistats$/i) {
-        my $bot  = $self->{bot};
-        my $reqs = eval { $bot->{metrics}->get('mediabot_claude_requests_total') } // 0;
-        my $errs = eval { $bot->{metrics}->get('mediabot_claude_errors_total') }   // 0;
-        my $rl   = eval { $bot->{metrics}->get('mediabot_claude_ratelimit_total') } // 0;
-        my $hc   = scalar keys %{ $bot->{_claude_history} // {} };
-        my $pc   = scalar keys %{ $bot->{_claude_persona}  // {} };
-        $stream->write("Claude: $reqs req(s), $errs err(s), $rl rl — $hc hist, $pc persona\r\n");
-    }
-    elsif ($line =~ /^\.top(?:\s+(\d+))?$/i) {
-        $self->_cmd_top($stream, $id, $1);
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.aistats' }) if $self->{bot}->{metrics};
+        $self->_cmd_ai($stream, $id, 'stats');
     }
     elsif ($line =~ /^\.seen\s+(\S+)/i) {
         $self->_cmd_seen($stream, $id, $1);
@@ -1231,9 +1224,6 @@ sub _handle_line {
     elsif ($line =~ /^\.dbstats$/i) {
         $self->_cmd_dbstats($stream, $id);
     }
-    elsif ($line =~ /^\.remind(?:\s+(.*))?$/i) {
-        $self->_cmd_remind($stream, $id, $1);
-    }
     elsif ($line =~ /^\.karmahist(?:\s+(.*?))?$/i) {
         $self->_cmd_karmahist($stream, $id, $1);
     }
@@ -1255,9 +1245,6 @@ sub _handle_line {
     elsif ($line =~ /^\.reload$/i) {
         $self->_cmd_reload($stream, $id);
     }
-    elsif ($line =~ /^\.seen\s+(\S+)/i) {
-        $self->_cmd_seen($stream, $id, $1);
-    }
     elsif ($line =~ /^\.purgereminders$/i) {
         $self->_cmd_purgereminders($stream, $id);
     }
@@ -1268,9 +1255,11 @@ sub _handle_line {
         $self->_cmd_nickinfo($stream, $id, $1);
     }
     elsif ($line =~ /^\.who\s+(#\S+)/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.who' }) if $self->{bot}->{metrics};
         $self->_cmd_who_chan($stream, $id, $1);
     }
     elsif ($line =~ /^\.who\s+(\S+)/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.who' }) if $self->{bot}->{metrics};
         $self->_cmd_whochan($stream, $id, $1);
     }
     elsif ($line =~ /^\.bcast\s+(.*)/i) {
@@ -1351,10 +1340,6 @@ sub _handle_line {
     elsif ($line =~ /^\.say\s+(\S+)\s+(.+)$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.say' }) if $self->{bot}->{metrics};
         $self->_cmd_say($stream, $id, $1, $2)
-    }
-    elsif ($line =~ /^\.who\s+(#\S+)$/i) {
-        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.who' }) if $self->{bot}->{metrics};
-        $self->_cmd_who($stream, $id, $1)
     }
     elsif ($line =~ /^\.join\s+(#\S+)(?:\s+(\S+))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.join' }) if $self->{bot}->{metrics};
@@ -2931,27 +2916,16 @@ sub _cmd_ai {
     # DD9: .ai status — show session + char + persona counts
 
     if ($subcmd eq 'status') {
-
-        my $hist  = $bot->{_claude_history} // {};
-
-        my $pins  = $bot->{_claude_pinned}  // {};
-
-        my $n_h = scalar keys %$hist;
-
-        my $n_p = scalar keys %$pins;
-
-        my $n_per = scalar keys %{ $bot->{_claude_persona} // {} };
-
-        my $chars = 0;
-
+        my $hist    = $bot->{_claude_history} // {};
+        my $pins    = $bot->{_claude_pinned}  // {};
+        my $n_h     = scalar keys %$hist;
+        my $n_p     = scalar keys %$pins;
+        my $n_per   = scalar keys %{ $bot->{_claude_persona} // {} };
+        my $chars   = 0;
         $chars += length($_->{content}//'') for map { @{ $hist->{$_} // [] } } keys %$hist;
-
         my $ck = $chars > 1000 ? sprintf('~%.1fk chars', $chars/1000) : "$chars chars";
-
         $stream->write("Claude: $n_h session(s) ($ck), $n_p pinned, $n_per persona(s).\r\n");
-
         return;
-
     }
 
     if ($subcmd eq 'reset') {
@@ -3344,7 +3318,11 @@ sub _cmd_quota {
         }
 
         $stream->write("Active Claude rate limit windows:\r\n");
-        for my $key (sort keys %$rl) {
+        # A6: sort by nick then channel for readable output
+        for my $key (sort {
+                (split /\x00/, $a, 2)[0] cmp (split /\x00/, $b, 2)[0]
+                || $a cmp $b
+            } keys %$rl) {
             my $entry = $rl->{$key};
             next if ($now - ($entry->{window} // 0)) >= $rate_window;
 

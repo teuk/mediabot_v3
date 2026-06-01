@@ -4105,12 +4105,13 @@ sub mbPollResult_ctx {
     my $total = scalar keys %{ $poll->{votes} };
 
     my $status = $poll->{active} ? 'Active' : 'Closed';
-    # DD8: show winner prominently
+    # DD8: show winner prominently — winner_opt is an option index (0-based)
     my ($winner_opt) = sort { ($counts{$b}//0) <=> ($counts{$a}//0) } keys %counts;
     my $winner_str = '';
     if (defined $winner_opt && $total > 0) {
+        my $winner_label = $options[$winner_opt] // "option $winner_opt";
         my $wpct = sprintf('%.0f%%', 100*($counts{$winner_opt}//0)/$total);
-        $winner_str = "  Winner: $winner_opt ($wpct)";
+        $winner_str = "  Winner: $winner_label ($wpct)";
     }
     botPrivmsg($self, $channel, "$status poll: \"$poll->{question}\" ($total vote(s))$winner_str");
     for my $i (0 .. $#options) {
@@ -5042,11 +5043,8 @@ sub mbCompare_ctx {
     my $tot_c = $c1 + $c2;
     my $p1 = $tot_c > 0 ? int(100*$c1/$tot_c) : 0;
     my $p2 = $tot_c > 0 ? 100 - $p1 : 0;
-    # FF15: compute absolute difference before botPrivmsg
-    my $diff_c   = abs($c1 - $c2);
-    my $diff_str = $diff_c > 0 ? " by $diff_c msg(s)" : "";
     botPrivmsg($self, $channel,
-        "$t1: $c1 msg(s) ($p1%) | $t2: $c2 msg(s) ($p2%) | $verdict$diff_str");
+        "$t1: $c1 msg(s) ($p1%) | $t2: $c2 msg(s) ($p2%) | $verdict");
     return 1;
 }
 
@@ -5437,7 +5435,6 @@ sub mbTriviaTop_ctx {
         botPrivmsg($self, $channel, 'No trivia scores in DB yet.'); return 1;
     }
     botPrivmsg($self, $channel, "Trivia hall of fame ($channel): " . join('  ', @ranked));
-    return 1;
     return 1;
 }
 

@@ -876,12 +876,13 @@ sub userWhoAmI_ctx {
         my $mask_count = scalar(@hostmasks);
         botNotice($self, $nick, "Masks: $mask_count shown, max 20");
 
-        my $per_line = 2;
-        my $page     = 1;
+        my $per_line    = 2;
+        my $total_pages = int((scalar(@hostmasks) + $per_line - 1) / $per_line);
+        my $page        = 1;
 
         while (@hostmasks) {
             my @chunk = splice(@hostmasks, 0, $per_line);
-            my $line  = sprintf("whoami-masks[%02d]: %s", $page, join(' | ', @chunk));
+            my $line  = sprintf("whoami-masks[%02d/%02d]: %s", $page, $total_pages, join(' | ', @chunk));
 
             if (length($line) > 360) {
                 $line = substr($line, 0, 357) . '...';

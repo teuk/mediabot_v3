@@ -644,11 +644,14 @@ sub _yt_label {
 # ---------------------------------------------------------------------------
 sub _make_http {
     my (%opts) = @_;
+    # verify_SSL defaults to 0 for OVH/Kimsufi compatibility but caller can override (e.g. weather)
+    my $verify = exists $opts{verify_SSL} ? $opts{verify_SSL} : 0;
+    my %ssl_opts = $verify ? () : (SSL_options => { SSL_verify_mode => 0 });
     return HTTP::Tiny->new(
         timeout    => $opts{timeout}  // 8,
         agent      => $opts{agent}    // 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
-        verify_SSL => 0,
-        SSL_options => { SSL_verify_mode => 0 },
+        verify_SSL => $verify,
+        %ssl_opts,
         max_size   => $opts{max_size} // 512 * 1024,
     );
 }
@@ -943,6 +946,14 @@ sub _handle_instagram {
 
     $self->{logger}->log(4, "_handle_instagram() start url=$url");
 
+    # IMP10: serve from cache if fresh (TTL 10 min)
+    my $ig_cached = $self->{_instagram_cache}{lc($url)};
+    if ($ig_cached && (time() - ($ig_cached->{ts} // 0)) < 600) {
+        $self->{logger}->log(4, "_handle_instagram() cache hit for $url");
+        botPrivmsg($self, $channel, "($nick) $ig_cached->{msg}");
+        return 1;
+    }
+
     my ($shortcode) = $url =~ m{/(?:p|reel|tv)/([^/?#]+)/?};
     unless (defined $shortcode && $shortcode ne '') {
         $self->{logger}->log(3, "_handle_instagram() could not extract shortcode from $url");
@@ -1109,7 +1120,8 @@ sub _handle_instagram {
     $badge   .= String::IRC->new("]")->white('black');
 
     my $msg = "$badge\x0f " . substr($title, 0, 300);
-    # IMP10: store in cache
+    # IMP10: cache the result (TTL 10 min) to avoid redundant Chromium fetches
+    $self->{_instagram_cache}{lc($url)} = { ts => time(), msg => $msg };
 
     botPrivmsg($self, $channel, "($nick) $msg");
     return 1;
@@ -1835,6 +1847,14 @@ sub _handle_facebook {
 
     $self->{logger}->log(4, "_handle_facebook() start url=$fb_url");
 
+    # IMP10: serve from cache if fresh (TTL 10 min)
+    my $fb_cached = $self->{_facebook_cache}{lc($fb_url)};
+    if ($fb_cached && (time() - ($fb_cached->{ts} // 0)) < 600) {
+        $self->{logger}->log(4, "_handle_facebook() cache hit for $fb_url");
+        botPrivmsg($self, $channel, "($nick) $fb_cached->{msg}");
+        return 1;
+    }
+
     my $title;
 
     # Step 1: cheap HTTP fetch.  On your server, HTTP::Tiny follows
@@ -1902,7 +1922,8 @@ sub _handle_facebook {
     $badge   .= String::IRC->new("]")->white('black');
 
     my $msg = "$badge\x0f " . substr($title, 0, 300);
-    # IMP10: store in cache
+    # IMP10: cache the result (TTL 10 min) to avoid redundant Chromium fetches
+    $self->{_facebook_cache}{lc($fb_url)} = { ts => time(), msg => $msg };
 
     botPrivmsg($self, $channel, "($nick) $msg");
     return 1;
@@ -3434,16 +3455,26 @@ sub claude_ctx {
             $nick, $relay_chan, undef, @args);
     }
 
-    # X1: !ai pin <msg> — pin a message always injected into context
+    # X1: !ai pin [clear|<text>] — manage pinned context
     if (@args && lc($args[0]) eq 'pin') {
         shift @args;
         my $pin_key = lc($nick) . "\x00" . (defined $channel ? $channel : '__private__');
+
+        # !ai pin clear
+        if (@args && lc($args[0]) eq 'clear') {
+            delete $self->{_claude_pinned}{$pin_key};
+            botNotice($self, $nick, 'Pinned context cleared.');
+            return 1;
+        }
+
+        # !ai pin <text>
         if (@args) {
             my $pinned = join(' ', @args);
             $pinned = substr($pinned, 0, 300);
             $self->{_claude_pinned}{$pin_key} = $pinned;
             botNotice($self, $nick, "Pinned context: $pinned");
         } else {
+            # !ai pin alone → show current
             my $current = $self->{_claude_pinned}{$pin_key};
             if ($current) {
                 botNotice($self, $nick, "Pinned: $current");
@@ -3451,13 +3482,6 @@ sub claude_ctx {
                 botNotice($self, $nick, 'No pinned context.');
             }
         }
-        return 1;
-    }
-    # X1: !ai pin clear — remove pinned context
-    if (@args >= 2 && lc($args[0]) eq 'pin' && lc($args[1]) eq 'clear') {
-        my $pin_key = lc($nick) . "\x00" . (defined $channel ? $channel : '__private__');
-        delete $self->{_claude_pinned}{$pin_key};
-        botNotice($self, $nick, 'Pinned context cleared.');
         return 1;
     }
 
@@ -3506,7 +3530,7 @@ sub claude_ctx {
     # A4: !ai quota — show remaining requests in current rate limit window
     if (@args && lc($args[0]) eq 'quota') {
         # B13/fix: $channel can be undef in private — use a stable key
-        my $rl_key = lc($nick) . '\x00' . (defined $channel ? $channel : '__private__');
+        my $rl_key = lc($nick) . "\x00" . (defined $channel ? $channel : '__private__');
         my $now    = time();
 
         # mb81/polish: keep !ai quota aligned with claudeAI() configurable
@@ -3929,10 +3953,13 @@ sub ytSearch_ctx {
                 for my $v (@{ $mdata->{items} }) {
                     my $vid = $v->{id} // next;
                     # Parse ISO 8601 duration: PT4M13S → 4:13
+                    # Each capture is independent to avoid list-context shift when a group is absent.
                     my $dur = $v->{contentDetails}{duration} // '';
-                    my ($h,$m,$s) = ($dur =~ /(\d+)H/,$dur =~ /(\d+)M/,$dur =~ /(\d+)S/);
-                    ($h,$m,$s) = ($h//0, $m//0, $s//0);
-                    my $dur_str = $h ? sprintf('%d:%02d:%02d',$h,$m,$s) : sprintf('%d:%02d',$m,$s);
+                    my ($h) = ($dur =~ /(\d+)H/);
+                    my ($m) = ($dur =~ /(\d+)M/);
+                    my ($s) = ($dur =~ /(\d+)S/);
+                    ($h, $m, $s) = ($h // 0, $m // 0, $s // 0);
+                    my $dur_str = $h ? sprintf('%d:%02d:%02d', $h, $m, $s) : sprintf('%d:%02d', $m, $s);
                     # View count
                     my $views = $v->{statistics}{viewCount} // 0;
                     my $views_str = $views >= 1_000_000 ? sprintf('%.1fM', $views/1_000_000)

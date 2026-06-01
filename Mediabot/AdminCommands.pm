@@ -1403,23 +1403,20 @@ sub mbStatus_ctx {
         $self->{logger}->log(1, "POSIX::uname failed while building status output");
     }
 
-    # --- Memory usage ---
+    # --- Memory usage via /proc/self/status (reliable on Debian/Linux, no CPAN dep) ---
     my ($vm, $rss, $shared, $data) = ('?', '?', '?', '?');
     eval {
-        require Memory::Usage;
-        my $mu = Memory::Usage->new();
-        $mu->record('Memory stats');
-        my @mem_state = $mu->state();
-        if (@mem_state && ref $mem_state[0][0] eq 'ARRAY') {
-            my @values = @{ $mem_state[0][0] };
-            $vm     = sprintf('%.2f', $values[2] / 1024) if defined $values[2];
-            $rss    = sprintf('%.2f', $values[3] / 1024) if defined $values[3];
-            $shared = sprintf('%.2f', $values[4] / 1024) if defined $values[4];
-            $data   = sprintf('%.2f', $values[6] / 1024) if defined $values[6];
+        open my $fh_mem, '<', '/proc/self/status' or die "cannot open /proc/self/status: $!";
+        while (my $line = <$fh_mem>) {
+            $rss    = sprintf('%.2f', $1 / 1024) if $line =~ /^VmRSS:\s+(\d+)\s+kB/i;
+            $vm     = sprintf('%.2f', $1 / 1024) if $line =~ /^VmSize:\s+(\d+)\s+kB/i;
+            $data   = sprintf('%.2f', $1 / 1024) if $line =~ /^VmData:\s+(\d+)\s+kB/i;
+            $shared = sprintf('%.2f', $1 / 1024) if $line =~ /^VmLib:\s+(\d+)\s+kB/i;
         }
+        close $fh_mem;
         1;
     } or do {
-        $self->{logger}->log(1, "Memory::Usage failed: $@");
+        $self->{logger}->log(1, "Memory stats via /proc/self/status failed: $@");
     };
 
     botNotice(

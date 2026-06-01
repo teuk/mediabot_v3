@@ -649,7 +649,8 @@ sub hailo_chatter_ctx {
         return;
     }
 
-    if ($ret) {
+    # set_hailo_channel_ratio returns 0 on success and undef on error
+    if (defined $ret) {
         botNotice($self, $nick, "HailoChatter's ratio is now set to ${ratio}% on $target_chan");
         logBot($self, $message, $target_chan, "hailo_chatter", "set $target_chan $ratio");
         return 1;

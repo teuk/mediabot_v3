@@ -202,12 +202,13 @@ sub channelList_ctx {
     my $count = scalar(@items);
     botNotice($self, $nick, "Registered channels: $count result(s)");
 
-    my $per_line = 8;
-    my $page     = 1;
+    my $per_line    = 8;
+    my $total_pages = int(($count + $per_line - 1) / $per_line);
+    my $page        = 1;
 
     while (@items) {
         my @chunk = splice(@items, 0, $per_line);
-        my $line  = sprintf("chanlist[%02d]: %s", $page, join(' ', @chunk));
+        my $line  = sprintf("chanlist[%02d/%02d]: %s", $page, $total_pages, join(' ', @chunk));
 
         if (length($line) > 360) {
             $line = substr($line, 0, 357) . '...';
@@ -2047,7 +2048,8 @@ sub channelBans_ctx {
         _channelban_reply($ctx, "No active bans on $target_chan.");
         return;
     }
-    my $has_more = scalar(@bans) > 10;
+    my $total_fetched = scalar(@bans);
+    my $has_more = $total_fetched > 10;
     @bans = @bans[0..9] if $has_more;
 
     # B3/A3: prepare once outside the loop — avoids N prepare() calls
@@ -2082,7 +2084,6 @@ sub channelBans_ctx {
                 $expires_txt .= "${h}h " if $h;
                 $expires_txt .= "${m}m"  if $m || (!$d && !$h);
                 $expires_txt =~ s/\s+$//;
-                $expires_txt =~ s/\s+$//;
             }
         } else {
             $expires_txt = 'permanent';
@@ -2105,7 +2106,8 @@ sub channelBans_ctx {
     }
 
     $sth_now->finish if $sth_now;  # B3: close handle after loop
-    _channelban_reply($ctx, "Showing $count/" . scalar(@bans) . " active bans on $target_chan.");
+    my $more_txt = $has_more ? " (more bans exist, showing first $count)" : '';
+    _channelban_reply($ctx, "Showing $count active ban(s) on $target_chan.$more_txt");
     logBot($self, $ctx->message, $target_chan, "bans", $target_chan);
 
     return scalar(@bans);
@@ -2923,12 +2925,13 @@ SQL
         botPrivmsg($self, $dest_chan, "$summary - details sent by notice to $nick");
     }
 
-    my $per_line = 5;
-    my $page     = 1;
+    my $per_line    = 5;
+    my $total_pages = int((scalar(@items) + $per_line - 1) / $per_line);
+    my $page        = 1;
 
     while (@items) {
         my @chunk = splice(@items, 0, $per_line);
-        my $line  = sprintf("checkhostchan[%02d]: %s", $page, join(' ', @chunk));
+        my $line  = sprintf("checkhostchan[%02d/%02d]: %s", $page, $total_pages, join(' ', @chunk));
 
         if (length($line) > 360) {
             $line = substr($line, 0, 357) . '...';
@@ -3108,12 +3111,13 @@ sub channelNickList_ctx {
     my $count = scalar(@nicks);
     botNotice($self, $nick, "Users on $target_chan: $count result(s)");
 
-    my $per_line = 10;
-    my $page     = 1;
+    my $per_line    = 10;
+    my $total_pages = int((scalar(@nicks) + $per_line - 1) / $per_line);
+    my $page        = 1;
 
     while (@nicks) {
         my @chunk = splice(@nicks, 0, $per_line);
-        my $line  = sprintf("nicklist[%02d]: %s", $page, join(' ', @chunk));
+        my $line  = sprintf("nicklist[%02d/%02d]: %s", $page, $total_pages, join(' ', @chunk));
 
         if (length($line) > 360) {
             $line = substr($line, 0, 357) . '...';
@@ -3841,8 +3845,14 @@ sub setTMDBLangChannel_ctx {
         }
     }
 
-    my $id_channel = getIdChannel($self, $target_channel);
-    unless (defined($id_channel)) {
+    my $channel_obj_tmdb = $self->{channels}{$target_channel}
+                        || $self->{channels}{lc($target_channel)};
+    unless ($channel_obj_tmdb) {
+        botNotice($self, $nick, "Unknown channel: $target_channel");
+        return;
+    }
+    my $id_channel = eval { $channel_obj_tmdb->get_id };
+    unless (defined $id_channel) {
         botNotice($self, $nick, "Unknown channel: $target_channel");
         return;
     }

@@ -642,8 +642,7 @@ sub botNotice {
     # - split long messages instead of truncating them;
     # - split before UTF-8 encoding so accents, emojis and IRC bar chars are
     #   never cut in the middle of a multi-byte sequence.
-    $text =~ s/[
-]+/ /g;
+    $text =~ s/[\r\n]+/ /g;
 
     my @chunks;
     if (length($text) > 400) {
@@ -2105,12 +2104,13 @@ SQL
         botPrivmsg($self, $dest_chan, "$summary - details sent by notice to $nick");
     }
 
-    my $per_line = 5;
-    my $page     = 1;
+    my $per_line    = 5;
+    my $total_pages = int((scalar(@items) + $per_line - 1) / $per_line);
+    my $page        = 1;
 
     while (@items) {
         my @chunk = splice(@items, 0, $per_line);
-        my $line  = sprintf("checknick[%02d]: %s", $page, join(' ', @chunk));
+        my $line  = sprintf("checknick[%02d/%02d]: %s", $page, $total_pages, join(' ', @chunk));
 
         if (length($line) > 360) {
             $line = substr($line, 0, 357) . '...';
@@ -2392,12 +2392,13 @@ SQL
         botPrivmsg($self, $dest_chan, "$summary - details sent by notice to $nick");
     }
 
-    my $per_line = 5;
-    my $page     = 1;
+    my $per_line    = 5;
+    my $total_pages = int((scalar(@items) + $per_line - 1) / $per_line);
+    my $page        = 1;
 
     while (@items) {
         my @chunk = splice(@items, 0, $per_line);
-        my $line  = sprintf("checkhost[%02d]: %s", $page, join(' ', @chunk));
+        my $line  = sprintf("checkhost[%02d/%02d]: %s", $page, $total_pages, join(' ', @chunk));
 
         if (length($line) > 360) {
             $line = substr($line, 0, 357) . '...';
@@ -2513,9 +2514,9 @@ sub whoTalk_ctx {
 
     while (@talkers) {
         my @chunk = splice(@talkers, 0, $per_line);
-        # KK5: show as "nick:N" pairs
+        # KK5: @talkers contains strings like "nick(N)" — join directly
         my $line  = sprintf("whotalk[%02d]: %s", $page,
-            join('  ', map { "$_->[0]:$_->[1]" } @chunk));
+            join('  ', @chunk));
 
         if (length($line) > 360) {
             $line = substr($line, 0, 357) . '...';
