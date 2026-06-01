@@ -1358,6 +1358,7 @@ sub on_message_PRIVMSG {
     if ( substr($where,0,1) eq '#' ) {
         # Message on channel
         # Track last seen on public message
+        # mb85-B1 / mb86-port: bloc updateUserSeen fermé avant deliverReminders
         {
             my ($sn,$si,$sh) = $mediabot->getMessageNickIdentHost($message);
             eval { $mediabot->updateUserSeen(
@@ -1367,14 +1368,15 @@ sub on_message_PRIVMSG {
                 event_type => 'message',
                 last_msg   => $what,
             ) } if $sn;
+        }
         # F13: deliver pending reminders on every public channel message
         eval { Mediabot::UserCommands::deliverReminders($mediabot, $who, $where) };
         if ($@) { $mediabot->{logger}->log(1, "deliverReminders error: $@"); }
         # F24: nick++/nick-- auto-detection DISABLED — use '!karma + <nick>' / '!karma - <nick>'
         # eval { Mediabot::UserCommands::processKarma($mediabot, $who, $where, $what) };
-        # F38: check trivia answers on every public message
+        # F38: check trivia answers on every public message — $@ distinct (mb85-B1)
         eval { Mediabot::UserCommands::checkTriviaAnswer($mediabot, $who, $where, $what) };
-        }
+        if ($@) { $mediabot->{logger}->log(1, "checkTriviaAnswer error: $@"); }
         if ($mediabot->{metrics}) {
             $mediabot->{metrics}->inc(
                 'mediabot_channel_lines_in_total',

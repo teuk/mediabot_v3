@@ -8,6 +8,7 @@ use strict;
 use warnings;
 use POSIX qw(strftime);
 use Time::Local qw(timegm);
+use Time::Piece;
 use List::Util qw(min);
 use Exporter 'import';
 use Try::Tiny;
@@ -1388,7 +1389,7 @@ sub mbSeen_ctx {
     @args = grep { defined && $_ ne '' } @args;
 
     unless (@args) {
-        botNotice($self, $nick, "Syntax: seen <nick> [#channel]");
+        botNotice($self, $nick, "Syntax: seen <nick> [#channel]  (wildcard: seen teu*)");
         return;
     }
 
@@ -1396,6 +1397,62 @@ sub mbSeen_ctx {
     $target_input =~ s/^\s+|\s+\z//g;
 
     my $targetNick = lc($target_input);  # normalize for USER_SEEN PK lookup
+
+    # mb86-IMP1: wildcard support — seen teu* → liste jusqu'à 5 nicks correspondants
+    if ($target_input =~ /[*?]/) {
+        my $is_private = !defined($ctx->channel) || $ctx->channel eq '';
+        my $dest       = $is_private ? $nick : ($ctx->channel);
+        # Convertir le glob IRC (*=%) en LIKE SQL
+        (my $like_pat = lc($target_input)) =~ s/\*/%/g;
+        $like_pat =~ s/\?/_/g;
+        # Sécurité : caractères LIKE spéciaux dans la partie non-glob
+        $like_pat =~ s/([%_\\])/\\$1/g if $like_pat !~ /[%_]/;  # déjà fait ci-dessus
+        my $chan_for_wc;
+        if (@args && defined $args[0] && $args[0] =~ /^#/) {
+            $chan_for_wc = shift @args;
+        } else {
+            my $cc = $ctx->channel // '';
+            $chan_for_wc = ($cc =~ /^#/) ? $cc : undef;
+        }
+        my ($sql_wc, @bind_wc);
+        if ($chan_for_wc) {
+            $sql_wc = q{
+                SELECT nick, channel, seen_at, event_type
+                FROM USER_SEEN
+                WHERE nick LIKE ? AND channel = ?
+                ORDER BY seen_at DESC LIMIT 5
+            };
+            @bind_wc = ($like_pat, $chan_for_wc);
+        } else {
+            $sql_wc = q{
+                SELECT nick, channel, seen_at, event_type
+                FROM USER_SEEN
+                WHERE nick LIKE ?
+                ORDER BY seen_at DESC LIMIT 5
+            };
+            @bind_wc = ($like_pat);
+        }
+        my $sth_wc = $self->{dbh}->prepare($sql_wc);
+        unless ($sth_wc && $sth_wc->execute(@bind_wc)) {
+            botNotice($self, $nick, 'Database error.'); return;
+        }
+        my @wc_rows;
+        while (my $r = $sth_wc->fetchrow_hashref) { push @wc_rows, $r; }
+        $sth_wc->finish;
+        unless (@wc_rows) {
+            my $scope = $chan_for_wc ? " on $chan_for_wc" : '';
+            botNotice($self, $nick, "No nicks matching '$target_input'$scope.");
+            return 1;
+        }
+        my $count = scalar @wc_rows;
+        botNotice($self, $nick, "$count nick(s) matching '$target_input':");
+        for my $r (@wc_rows) {
+            botNotice($self, $nick, sprintf('  %s — last seen %s on %s (%s)',
+                $r->{nick}, $r->{seen_at}, $r->{channel}, $r->{event_type}));
+        }
+        logBot($self, $ctx->message, ($is_private ? undef : $dest), 'seen', $target_input);
+        return 1;
+    }
 
     my $chan_for_part;
     if (@args && defined $args[0] && $args[0] =~ /^#/) {
@@ -1468,16 +1525,20 @@ sub mbSeen_ctx {
                        seen_at, UNIX_TIMESTAMP(seen_at) AS seen_uts
                 FROM USER_SEEN
                 WHERE nick = ? AND channel = ?
+                ORDER BY seen_at DESC
                 LIMIT 1
             };
             @bind = ($targetNick, $chan_for_part);
         }
         else {
+            # mb86-B3: ORDER BY seen_at DESC — sans ORDER BY, MariaDB retourne
+            # une ligne arbitraire quand le nick est présent sur plusieurs canaux
             $sql = q{
                 SELECT nick, channel, userhost, event_type, last_msg, new_nick,
                        seen_at, UNIX_TIMESTAMP(seen_at) AS seen_uts
                 FROM USER_SEEN
                 WHERE nick = ?
+                ORDER BY seen_at DESC
                 LIMIT 1
             };
             @bind = ($targetNick);
@@ -2459,7 +2520,8 @@ sub mbStats_ctx {
 
     # Last seen (USER_SEEN)
     my $sth2 = $self->{dbh}->prepare(q{
-        SELECT seen_at, event_type FROM USER_SEEN WHERE nick = ? LIMIT 1
+        SELECT seen_at, event_type FROM USER_SEEN WHERE nick = ?
+        ORDER BY seen_at DESC LIMIT 1
     });
     unless ($sth2 && $sth2->execute($target)) {
         botNotice($self, $nick, "Database error.");
@@ -2568,25 +2630,66 @@ sub mbTop_ctx {
         $n = 10 if $n > 10;
     }
 
-    # A4: optional period filter e.g. !top 5 30d / 7d / 24h
-    my $period_sql  = '';
-    my $period_label = '';
-    if (@args && $args[0] =~ /^(\d+)(d|h)$/i) {
-        my ($val, $unit) = ($1, lc $2);
-        my $interval = $unit eq 'h' ? "$val HOUR" : "$val DAY";
-        $period_sql   = "AND cl.ts >= DATE_SUB(NOW(), INTERVAL $interval)";
-        $period_label = " (last ${val}${unit})";
+    # mb91-IMP1: !top bots — mode inverse: montrer uniquement les bots détectés
+    # !top nobots — exclure les bots connus du classement (défaut implicite si conf BOT_NICKS)
+    my $bots_mode    = 0;   # 1=show only bots, -1=exclude bots
+    my $bots_filter  = '';
+    my @bot_list;
+    if (@args && lc($args[0]) eq 'bots') {
+        shift @args; $bots_mode = 1;
+    } elsif (@args && lc($args[0]) eq 'nobots') {
+        shift @args; $bots_mode = -1;
+    }
+    # Charger la liste des bots depuis la conf (main.BOT_NICKS = "bot1,bot2,...")
+    if ($bots_mode != 0) {
+        my $conf_bots = eval { $self->{conf}->get('main.BOT_NICKS') } // '';
+        @bot_list = map { lc(s/^\s+|\s+$//gr) } split /,/, $conf_bots if $conf_bots;
+        # Toujours inclure le nick du bot lui-même
+        my $bot_nick = eval { $self->{irc}->nick_folded } // '';
+        push @bot_list, lc($bot_nick) if $bot_nick;
+        if (@bot_list) {
+            my $placeholders = join(',', ('?') x @bot_list);
+            if ($bots_mode == -1) {
+                $bots_filter = "AND LOWER(cl.nick) NOT IN ($placeholders)";
+            } else {
+                $bots_filter = "AND LOWER(cl.nick) IN ($placeholders)";
+            }
+        }
     }
 
-    # A2: fetch total for percentage — V8: scope to same period as the top query
+    # A4: optional period filter — Nd/Nh + today/yesterday/week (mb91-IMP1)
+    my $period_sql  = '';
+    my $period_label = '';
+    if (@args) {
+        my $p = lc($args[0]);
+        if ($p eq 'today') {
+            $period_sql   = "AND DATE(cl.ts) = CURDATE()";
+            $period_label = " (today)";
+        } elsif ($p eq 'yesterday') {
+            $period_sql   = "AND DATE(cl.ts) = CURDATE() - INTERVAL 1 DAY";
+            $period_label = " (yesterday)";
+        } elsif ($p eq 'week') {
+            $period_sql   = "AND cl.ts >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)";
+            $period_label = " (this week)";
+        } elsif ($p =~ /^(\d+)(d|h)$/i) {
+            my ($val, $unit) = ($1, lc $2);
+            my $interval = $unit eq 'h' ? "$val HOUR" : "$val DAY";
+            $period_sql   = "AND cl.ts >= DATE_SUB(NOW(), INTERVAL $interval)";
+            $period_label = " (last ${val}${unit})";
+        }
+    }
+
+    my @bind_base = ($channel, @bot_list);
+
+    # A2: fetch total for percentage
     my $sth_tot = $self->{dbh}->prepare(
         "SELECT COUNT(*) AS total"
         . " FROM CHANNEL_LOG cl"
         . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
-        . " WHERE c.name = ? $period_sql"
+        . " WHERE c.name = ? $bots_filter $period_sql"
     );
     my $total = 0;
-    if ($sth_tot && $sth_tot->execute($channel)) {
+    if ($sth_tot && $sth_tot->execute(@bind_base)) {
         my $r = $sth_tot->fetchrow_hashref;
         $total = $r->{total} // 0;
         $sth_tot->finish;
@@ -2596,10 +2699,10 @@ sub mbTop_ctx {
         "SELECT cl.nick, COUNT(*) AS msg_count"
         . " FROM CHANNEL_LOG cl"
         . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
-        . " WHERE c.name = ? $period_sql"
+        . " WHERE c.name = ? $bots_filter $period_sql"
         . " GROUP BY cl.nick ORDER BY msg_count DESC LIMIT ?"
     );
-    unless ($sth && $sth->execute($channel, $n)) {
+    unless ($sth && $sth->execute(@bind_base, $n)) {
         botNotice($self, $nick, "Database error.");
         $sth->finish if $sth;
         return;
@@ -2618,7 +2721,8 @@ sub mbTop_ctx {
 
     # V2: show total messages in header
     my $total_hdr_str = $total > 0 ? " ($total msgs)" : "";
-    botPrivmsg($self, $channel, "Top $n on $channel$period_label$total_hdr_str:");
+    my $bots_label = $bots_mode == 1 ? ' [bots]' : $bots_mode == -1 ? ' [no bots]' : '';
+    botPrivmsg($self, $channel, "Top $n on $channel$period_label$bots_label$total_hdr_str:");
     my $rank = 1;
     for my $row (@rows) {
         my $msgs = $row->{msg_count};
@@ -2627,26 +2731,26 @@ sub mbTop_ctx {
             $rank++, $row->{nick}, $msgs, ($msgs != 1 ? "s" : ""), $pct));
     }
 
-    # V10: show caller's rank if not in top-N — only on a registered channel
+    # V10: show caller's rank if not in top-N
     my $chan_ok = defined $channel && $channel =~ /^#/;
-    if ($total > 0 && $chan_ok) {
+    if ($total > 0 && $chan_ok && $bots_mode != 1) {
         my $sth_r = $self->{dbh}->prepare(
             "SELECT COUNT(*)+1 AS rank, SUM(CASE WHEN cl.nick=? THEN 1 ELSE 0 END) AS mine"
           . " FROM (SELECT nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl2"
           .        " JOIN CHANNEL c2 ON c2.id_channel=cl2.id_channel"
-          .        " WHERE c2.name=? $period_sql GROUP BY nick) AS sub"
+          .        " WHERE c2.name=? $bots_filter $period_sql GROUP BY nick) AS sub"
           . " WHERE sub.cnt > (SELECT COUNT(*) FROM CHANNEL_LOG cl3"
           .                   " JOIN CHANNEL c3 ON c3.id_channel=cl3.id_channel"
-          .                   " WHERE c3.name=? $period_sql AND cl3.nick=?)"
+          .                   " WHERE c3.name=? $bots_filter $period_sql AND cl3.nick=?)"
         );
-        if ($sth_r && $sth_r->execute($nick, $channel, $channel, $nick)) {
+        if ($sth_r && $sth_r->execute(lc($nick), $channel, @bot_list, $channel, @bot_list, lc($nick))) {
             my $r = $sth_r->fetchrow_hashref; $sth_r->finish;
-            my $rank = $r->{rank} // 0;
-            my $mine = $r->{mine} // 0;
-            if ($rank > $n && $mine > 0) {
+            my $my_rank = $r->{rank} // 0;
+            my $mine    = $r->{mine} // 0;
+            if ($my_rank > $n && $mine > 0) {
                 my $pct_me = $total > 0 ? sprintf('%.1f%%', 100*$mine/$total) : '0%';
                 botPrivmsg($self, $channel,
-                    "  (your rank: #$rank — $mine msg(s), $pct_me)");
+                    "  (your rank: #$my_rank — $mine msg(s), $pct_me)");
             }
         }
     }
@@ -2778,14 +2882,27 @@ sub mbRemind_ctx {
 
     # V9: !remind show — see reminders set FOR the caller (by others)
     if (@args && lc($args[0]) eq 'show') {
-        my $sth_s = $self->{dbh}->prepare(q{
-            SELECT r.id_reminder, r.from_nick, r.message, r.created_at
-            FROM REMINDERS r
-            JOIN CHANNEL c ON c.id_channel = r.id_channel
-            WHERE c.name = ? AND r.to_nick = ? AND r.delivered = 0
-            ORDER BY r.id_reminder ASC LIMIT 10
-        });
-        if ($sth_s && $sth_s->execute($channel, lc($nick))) {
+        my ($sth_s, @bind_s);
+        if (defined $channel && $channel =~ /^#/) {
+            $sth_s = $self->{dbh}->prepare(q{
+                SELECT r.id_reminder, r.from_nick, r.message, r.created_at
+                FROM REMINDERS r
+                JOIN CHANNEL c ON c.id_channel = r.id_channel
+                WHERE c.name = ? AND r.to_nick = ? AND r.delivered = 0
+                ORDER BY r.id_reminder ASC LIMIT 10
+            });
+            @bind_s = ($channel, lc($nick));
+        } else {
+            # mb90-B1: en PM, chercher sur tous les canaux
+            $sth_s = $self->{dbh}->prepare(q{
+                SELECT r.id_reminder, r.from_nick, r.message, r.created_at
+                FROM REMINDERS r
+                WHERE r.to_nick = ? AND r.delivered = 0
+                ORDER BY r.id_reminder ASC LIMIT 10
+            });
+            @bind_s = (lc($nick));
+        }
+        if ($sth_s && $sth_s->execute(@bind_s)) {
             my @rows;
             while (my $r = $sth_s->fetchrow_hashref) { push @rows, $r; }
             $sth_s->finish;
@@ -2803,14 +2920,27 @@ sub mbRemind_ctx {
 
     # K1: subcommands list and cancel
     if (@args && lc($args[0]) eq 'list') {
-        my $sth_l = $self->{dbh}->prepare(q{
-            SELECT r.id_reminder, r.to_nick, r.message, r.created_at
-            FROM REMINDERS r
-            JOIN CHANNEL c ON c.id_channel = r.id_channel
-            WHERE c.name = ? AND r.from_nick = ? AND r.delivered = 0
-            ORDER BY r.id_reminder ASC LIMIT 10
-        });
-        if ($sth_l && $sth_l->execute($channel, lc($nick))) {
+        my ($sth_l, @bind_l);
+        if (defined $channel && $channel =~ /^#/) {
+            $sth_l = $self->{dbh}->prepare(q{
+                SELECT r.id_reminder, r.to_nick, r.message, r.created_at
+                FROM REMINDERS r
+                JOIN CHANNEL c ON c.id_channel = r.id_channel
+                WHERE c.name = ? AND r.from_nick = ? AND r.delivered = 0
+                ORDER BY r.id_reminder ASC LIMIT 10
+            });
+            @bind_l = ($channel, lc($nick));
+        } else {
+            # mb90-B1: en PM, chercher sur tous les canaux
+            $sth_l = $self->{dbh}->prepare(q{
+                SELECT r.id_reminder, r.to_nick, r.message, r.created_at
+                FROM REMINDERS r
+                WHERE r.from_nick = ? AND r.delivered = 0
+                ORDER BY r.id_reminder ASC LIMIT 10
+            });
+            @bind_l = (lc($nick));
+        }
+        if ($sth_l && $sth_l->execute(@bind_l)) {
             my @rows;
             while (my $r = $sth_l->fetchrow_hashref) { push @rows, $r; }
             $sth_l->finish;
@@ -2851,13 +2981,70 @@ sub mbRemind_ctx {
 
     # X6: !remind ! <nick> <msg> — high-priority reminder
     my $remind_urgent = (@args && $args[0] eq '!') ? do { shift @args; 1 } : 0;
+
+    # mb87-IMP1: !remind daily HH:MM <msg> — rappel récurrent quotidien (auto-recréé à la livraison)
+    my $remind_daily = 0;
+    my $daily_hhmm   = '';
+    if (@args && lc($args[0]) eq 'daily') {
+        shift @args;
+        if (@args && $args[0] =~ /^(\d{1,2}):(\d{2})$/) {
+            my ($hh, $mm) = (int($1), int($2));
+            if ($hh < 24 && $mm < 60) {
+                $daily_hhmm  = sprintf('%02d:%02d', $hh, $mm);
+                $remind_daily = 1;
+                shift @args;
+            } else {
+                botNotice($self, $nick, "Invalid time for daily remind. Use: remind daily HH:MM <nick> <msg>");
+                return;
+            }
+        } else {
+            botNotice($self, $nick, "Syntax: remind daily HH:MM <nick> <message>");
+            return;
+        }
+    }
+
+    # mb90-IMP1: !remind weekly <DOW> HH:MM <nick> <msg> — rappel récurrent hebdomadaire
+    my $remind_weekly = 0;
+    my $weekly_dow    = '';   # 0=Sun..6=Sat
+    my $weekly_hhmm   = '';
+    if (@args && lc($args[0]) eq 'weekly') {
+        shift @args;
+        my %dow_map = ( sun => 0, mon => 1, tue => 2, wed => 3, thu => 4, fri => 5, sat => 6,
+                        sunday=>0, monday=>1, tuesday=>2, wednesday=>3, thursday=>4, friday=>5, saturday=>6,
+                        lun=>1, mar=>2, mer=>3, jeu=>4, ven=>5, sam=>6, dim=>0 );
+        if (@args && exists $dow_map{lc($args[0])}) {
+            $weekly_dow = $dow_map{lc(shift @args)};
+            if (@args && $args[0] =~ /^(\d{1,2}):(\d{2})$/) {
+                my ($hh, $mm) = (int($1), int($2));
+                if ($hh < 24 && $mm < 60) {
+                    $weekly_hhmm  = sprintf('%02d:%02d', $hh, $mm);
+                    $remind_weekly = 1;
+                    shift @args;
+                } else {
+                    botNotice($self, $nick, "Invalid time. Use: remind weekly <day> HH:MM <nick> <msg>");
+                    return;
+                }
+            } else {
+                botNotice($self, $nick, "Syntax: remind weekly <day> HH:MM <nick> <msg>  (day: mon, tue, wed...)");
+                return;
+            }
+        } else {
+            botNotice($self, $nick, "Syntax: remind weekly <day> HH:MM <nick> <msg>  (day: mon, tue, wed...)");
+            return;
+        }
+    }
+
     my $target  = shift @args;
     my $message = join(' ', @args);
     $message =~ s/^\s+|\s+$//g;
     $message = '[!] ' . $message if $remind_urgent;
+    # mb87-IMP1: tag daily pour réinsertion automatique lors de la livraison
+    $message = "[daily:$daily_hhmm] $message" if $remind_daily;
+    # mb90-IMP1: tag weekly pour réinsertion hebdomadaire
+    $message = "[weekly:$weekly_dow:$weekly_hhmm] $message" if $remind_weekly;
 
     unless (defined $target && $target ne '' && $message ne '') {
-        botNotice($self, $nick, "Syntax: remind <nick> <message>  |  remind list  |  remind cancel <id>");
+        botNotice($self, $nick, "Syntax: remind <nick> <msg>  |  remind daily HH:MM <nick> <msg>  |  remind weekly <day> HH:MM <nick> <msg>  |  remind list  |  remind cancel <id>");
         return;
     }
 
@@ -2888,14 +3075,69 @@ sub mbRemind_ctx {
         return;
     }
 
-    # Q2: parse optional delay prefix — 'dans 2h', 'in 30m', 'dans 1h30'
+    # mb92-B3: valider que le nick destinataire est connu (nicklist canal OU USER_SEEN)
+    # On évite de créer des reminders pour des nicks fantômes mal orthographiés.
+    {
+        my $target_known = 0;
+        # 1. Vérifier la nicklist en mémoire (le plus rapide)
+        if (defined $channel && $channel =~ /^#/) {
+            my @chan_nicks = eval { $self->gethChannelsNicksOnChan($channel) };
+            $target_known = 1 if grep { defined($_) && lc($_) eq lc($target) } @chan_nicks;
+        }
+        # 2. Sinon, vérifier USER_SEEN (nick a déjà parlé sur un canal commun)
+        unless ($target_known) {
+            my $sth_seen = $self->{dbh}->prepare(
+                'SELECT 1 FROM USER_SEEN WHERE nick = ? LIMIT 1'
+            );
+            if ($sth_seen && $sth_seen->execute(lc($target))) {
+                $target_known = 1 if $sth_seen->fetchrow_array;
+                $sth_seen->finish;
+            }
+        }
+        # 3. Sinon, vérifier la table USER (nick enregistré)
+        unless ($target_known) {
+            my $sth_user = $self->{dbh}->prepare(
+                'SELECT 1 FROM USER WHERE nickname = ? LIMIT 1'
+            );
+            if ($sth_user && $sth_user->execute(lc($target))) {
+                $target_known = 1 if $sth_user->fetchrow_array;
+                $sth_user->finish;
+            }
+        }
+        unless ($target_known) {
+            botNotice($self, $nick,
+                "Unknown nick '$target'. The remind was not created.");
+            return;
+        }
+    }
+
+    # Q2: parse optional delay prefix — 'dans 2h', 'in 30m', 'dans 1h30', 'at HH:MM', 'in Nd/Nw'
     my $delay_secs = 0;
     if ($message =~ s/^(?:dans|in)\s+(\d+)h(?:(\d+)m)?\s+//i) {
         $delay_secs = $1 * 3600 + ($2 // 0) * 60;
     } elsif ($message =~ s/^(?:dans|in)\s+(\d+)m\s+//i) {
         $delay_secs = $1 * 60;
+    } elsif ($message =~ s/^(?:dans|in)\s+(\d+)d\s+//i) {
+        # mb87-B1: support 'in Nd' (jours)
+        $delay_secs = $1 * 86400;
+    } elsif ($message =~ s/^(?:dans|in)\s+(\d+)w\s+//i) {
+        # mb87-B1: support 'in Nw' (semaines)
+        $delay_secs = $1 * 7 * 86400;
     } elsif ($message =~ s/^tomorrow\s+//i) {
         $delay_secs = 86400;
+    } elsif ($message =~ s/^at\s+(\d{1,2}):(\d{2})\s+//i) {
+        # mb87-B1: 'at HH:MM' — prochaine occurrence de l'heure (aujourd'hui ou demain)
+        my ($hh, $mm) = (int($1), int($2));
+        if ($hh < 24 && $mm < 60) {
+            my @now = localtime(time());
+            my $today_delta = ($hh * 3600 + $mm * 60)
+                            - ($now[2] * 3600 + $now[1] * 60 + $now[0]);
+            # Si < 60s dans le futur, reporter à demain (évite un remind quasi-immédiat)
+            $delay_secs = $today_delta > 60 ? $today_delta : $today_delta + 86400;
+        } else {
+            botNotice($self, $nick, "Invalid time. Use: at HH:MM (00:00-23:59)");
+            return;
+        }
     }
     if ($delay_secs > 0) {
         # Prefix message with delivery timestamp so deliverReminders can filter
@@ -2922,7 +3164,7 @@ sub mbRemind_ctx {
         INSERT INTO REMINDERS (id_channel, from_nick, to_nick, message)
         VALUES (?, ?, ?, ?)
     });
-    unless ($sth && $sth->execute($id_channel, $nick, lc($target), $message)) {
+    unless ($sth && $sth->execute($id_channel, lc($nick), lc($target), $message)) {
         $self->{logger}->log(1, "mbRemind_ctx() SQL error: $DBI::errstr");
         botNotice($self, $nick, "Database error.");
         return;
@@ -2980,9 +3222,17 @@ sub deliverReminders {
 
     for my $r (@pending) {
         # Q2: skip reminders with [at:TS] tag if not yet due
-        if ($r->{message} =~ /^\[at:(\d+)\]/) {
-            next if time() < $1;
-            $r->{message} =~ s/^\[at:\d+\]\s*//;
+        # mb91-B1: le tag [at:TS] peut être précédé de [daily:...] ou [weekly:...]
+        # Format réinséré: "[daily:09:00] [at:TS] texte" — on cherche partout dans les préfixes
+        my $at_ts;
+        if ($r->{message} =~ /\[at:(\d+)\]/) {
+            $at_ts = $1;
+        }
+        if (defined $at_ts) {
+            next if time() < $at_ts;
+            # Strip tous les [at:TS] du message avant livraison
+            $r->{message} =~ s/\s*\[at:\d+\]\s*/ /g;
+            $r->{message} =~ s/^\s+|\s+$//g;
         }
         # H/fix: mark delivered BEFORE sending — prevents double delivery on crash
         my $sth_up = $dbh->prepare(q{
@@ -3012,10 +3262,74 @@ sub deliverReminders {
                          : $dd  ? ", ${dd}d ago" : '';
             }
         }
+        # mb91-B1: strip les tags récurrents du message affiché
+        my $display_msg = $r->{message};
+        my $recur_tag = '';
+        if ($display_msg =~ s/^\[daily:(\d{2}:\d{2})\]\s*//) {
+            $recur_tag = " [daily $1]";
+        } elsif ($display_msg =~ s/^\[weekly:(\d):(\d{2}:\d{2})\]\s*//) {
+            my @dn = qw(Sun Mon Tue Wed Thu Fri Sat);
+            $recur_tag = " [weekly $dn[$1] $2]";
+        }
         botPrivmsg($self, $channel,
-            "$nick: reminder from $r->{from_nick} ($r->{created_at}$ago_str): $r->{message}");
-    }
-}
+            "$nick: reminder from $r->{from_nick} ($r->{created_at}$ago_str)$recur_tag: $display_msg");
+
+        # mb87-IMP1 / mb88-R1: si le remind est daily, le re-créer pour le lendemain
+        # mb90-IMP1: si le remind est weekly, le re-créer pour la semaine suivante
+        # Guard: ne réinsérer que si delivered=1 (livré normalement), pas delivered=2 (annulé)
+        my $was_cancelled = 0;
+        {
+            my $sth_chk = $dbh->prepare('SELECT delivered FROM REMINDERS WHERE id_reminder = ?');
+            if ($sth_chk && $sth_chk->execute($r->{id_reminder})) {
+                my $chk = $sth_chk->fetchrow_hashref; $sth_chk->finish;
+                $was_cancelled = 1 if $chk && ($chk->{delivered} // 0) == 2;
+            }
+        }
+        if (!$was_cancelled && $r->{message} =~ /^\[daily:(\d{2}:\d{2})\]\s*(.*)/) {
+            my ($hhmm, $real_msg) = ($1, $2);
+            my ($hh, $mm) = split /:/, $hhmm;
+            my @now = localtime(time());
+            my $today_delta = ($hh * 3600 + $mm * 60)
+                            - ($now[2] * 3600 + $now[1] * 60 + $now[0]);
+            my $next_secs   = $today_delta > 60 ? $today_delta : $today_delta + 86400;
+            my $next_ts     = time() + $next_secs;
+            my $next_msg    = "[daily:$hhmm] [at:$next_ts] $real_msg";
+            eval {
+                my $sth_daily = $dbh->prepare(q{
+                    INSERT INTO REMINDERS (id_channel, from_nick, to_nick, message)
+                    VALUES (?, ?, ?, ?)
+                });
+                $sth_daily->execute($id_channel, $r->{from_nick}, lc($nick), $next_msg)
+                    if $sth_daily;
+                $sth_daily->finish if $sth_daily;
+            };
+            $self->{logger}->log(3, "daily remind re-scheduled for $nick at $hhmm (next: $next_ts)")
+                unless $@;
+        } elsif (!$was_cancelled && $r->{message} =~ /^\[weekly:(\d):(\d{2}:\d{2})\]\s*(.*)/) {
+            # mb90-IMP1: réinsertion hebdomadaire — calcul du prochain occurrence du DOW+HH:MM
+            my ($target_dow, $hhmm, $real_msg) = ($1, $2, $3);
+            my ($hh, $mm) = split /:/, $hhmm;
+            my @now    = localtime(time());
+            my $cur_dow = $now[6];  # 0=Sun..6=Sat
+            my $days_ahead = ($target_dow - $cur_dow + 7) % 7;
+            $days_ahead = 7 if $days_ahead == 0;  # même jour → semaine suivante
+            my $day_secs    = $days_ahead * 86400;
+            my $time_offset = ($hh * 3600 + $mm * 60) - ($now[2] * 3600 + $now[1] * 60 + $now[0]);
+            my $next_ts     = time() + $day_secs + $time_offset;
+            my $next_msg    = "[weekly:$target_dow:$hhmm] [at:$next_ts] $real_msg";
+            eval {
+                my $sth_wk = $dbh->prepare(q{
+                    INSERT INTO REMINDERS (id_channel, from_nick, to_nick, message)
+                    VALUES (?, ?, ?, ?)
+                });
+                $sth_wk->execute($id_channel, $r->{from_nick}, lc($nick), $next_msg) if $sth_wk;
+                $sth_wk->finish if $sth_wk;
+            };
+            $self->{logger}->log(3, "weekly remind re-scheduled for $nick at dow=$target_dow $hhmm (next: $next_ts)")
+                unless $@;
+        }  # end recurring remind block
+    }  # end for @pending
+}  # end sub deliverReminders
 
 # ---------------------------------------------------------------------------
 # mbRemindList_ctx --- !remindlist
@@ -3028,14 +3342,27 @@ sub mbRemindList_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
 
-    my $sth = $self->{dbh}->prepare(q{
-        SELECT r.id_reminder, r.to_nick, r.message, r.created_at
-        FROM REMINDERS r
-        JOIN CHANNEL c ON c.id_channel = r.id_channel
-        WHERE r.from_nick = ? AND c.name = ? AND r.delivered = 0
-        ORDER BY r.created_at ASC
-    });
-    unless ($sth && $sth->execute($nick, $channel)) {
+    my ($sth, @bind_rl);
+    if (defined $channel && $channel =~ /^#/) {
+        $sth = $self->{dbh}->prepare(q{
+            SELECT r.id_reminder, r.to_nick, r.message, r.created_at
+            FROM REMINDERS r
+            JOIN CHANNEL c ON c.id_channel = r.id_channel
+            WHERE r.from_nick = ? AND c.name = ? AND r.delivered = 0
+            ORDER BY r.created_at ASC
+        });
+        @bind_rl = (lc($nick), $channel);
+    } else {
+        # mb90-B1: en PM, afficher tous les reminders cross-canal
+        $sth = $self->{dbh}->prepare(q{
+            SELECT r.id_reminder, r.to_nick, r.message, r.created_at
+            FROM REMINDERS r
+            WHERE r.from_nick = ? AND r.delivered = 0
+            ORDER BY r.created_at ASC
+        });
+        @bind_rl = (lc($nick));
+    }
+    unless ($sth && $sth->execute(@bind_rl)) {
         botNotice($self, $nick, 'Database error.');
         $sth->finish if $sth;
         return;
@@ -3054,19 +3381,29 @@ sub mbRemindList_ctx {
     botNotice($self, $nick, "$total pending reminder(s) you have set:");
     for my $r (@rows) {
         my $msg = $r->{message} // '';
-        # BX-12/fix: strip [at:TS] FIRST, then detect [!] urgent flag
+        # mb90-B2: strip [daily:HH:MM] et [weekly:DOW:HH:MM] FIRST et noter séparément
+        my $daily_tag = '';
+        if ($msg =~ s/^\[daily:(\d{2}:\d{2})\]\s*//) {
+            $daily_tag = " [daily $1]";
+        } elsif ($msg =~ s/^\[weekly:(\d):(\d{2}:\d{2})\]\s*//) {
+            my @dow_names = qw(Sun Mon Tue Wed Thu Fri Sat);
+            $daily_tag = " [weekly $dow_names[$1] $2]";
+        }
+        # BX-12/fix: strip [at:TS], detect remaining [at:TS] (après daily)
         my $due_str = '';
-        if ($msg =~ /^\[at:(\d+)\]\s*/) {
+        $msg =~ s/\s*\[at:(\d+)\]\s*/ /g;  # strip tous les [at:TS]
+        $msg =~ s/^\s+|\s+$//g;
+        # Recalculer due_str depuis le message original si [at:TS] présent
+        if ($r->{message} =~ /\[at:(\d+)\]/) {
             my $sl = $1 - time();
             $due_str = $sl > 0
                 ? ' [in ' . _seconds_to_human($sl) . ']'
                 : ' [overdue ' . _seconds_to_human(-$sl) . ' ago]';
-            $msg =~ s/^\[at:\d+\]\s*//;
         }
-        my $urgent = ($msg =~ /^\[!\]/) ? ' [URGENT]' : '';  # detect after at: strip
-        $msg =~ s/^\[!\]\s*//;  # strip urgent prefix from display
-        botNotice($self, $nick, sprintf('  #%d -> %s%s: "%s"%s',
-            $r->{id_reminder}, $r->{to_nick}, $due_str, $msg, $urgent));
+        my $urgent = ($msg =~ /^\[!\]/) ? ' [URGENT]' : '';
+        $msg =~ s/^\[!\]\s*//;
+        botNotice($self, $nick, sprintf('  #%d -> %s%s%s: "%s"%s',
+            $r->{id_reminder}, $r->{to_nick}, $due_str, $daily_tag, $msg, $urgent));
     }
     return 1;
 }
@@ -3117,7 +3454,11 @@ sub mbRemindSnooze_ctx {
         botNotice($self, $nick, "Reminder #$id not found or already delivered."); return;
     }
     my $msg = $row->{message} // '';
-    $msg =~ s/^\[at:\d+\]\s*//;  # strip existing timestamp tag
+    # mb88-R2: strip [at:TS] où qu'il soit dans le message (pas seulement en début)
+    # Cas daily: "[daily:09:00] [at:1234] texte" → strip le [at:...] interne aussi
+    $msg =~ s/^\[at:\d+\]\s*//;       # strip en début (cas standard)
+    $msg =~ s/\s*\[at:\d+\]\s*/ /g;   # strip partout ailleurs (cas daily + snooze)
+    $msg =~ s/^\s+|\s+$//g;           # trim
     my $new_msg = "[at:$new_ts] $msg";
     unless ($sth2 && $sth2->execute($new_msg, $id, lc($nick))) {
         botNotice($self, $nick, 'DB error updating reminder.'); return;
@@ -3227,10 +3568,15 @@ sub mbCalcLast_ctx {
         botNotice($self, $nick, 'No calc history yet.');
         return 1;
     }
-    # JJ6: show count in header
-    botNotice($self, $nick, 'Last ' . scalar(@$history) . ' calc(s):');
+    # mb89-B1: envoyer en channel si appelé publiquement, en NOTICE si privé
+    my $is_public = defined $channel && $channel =~ /^#/;
+    my $send = $is_public
+        ? sub { botPrivmsg($self, $channel, $_[0]) }
+        : sub { botNotice($self, $nick, $_[0]) };
+
+    $send->('Last ' . scalar(@$history) . ' calc(s) for ' . $nick . ':');
     for my $entry (@$history) {
-        botNotice($self, $nick, "  $entry");
+        $send->("  $entry");
     }
     return 1;
 }
@@ -3247,42 +3593,27 @@ sub mbWordCount_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    # S4: !karma log [nick] — show karma history from in-memory ring buffer
-    if (@args && lc($args[0]) eq 'log') {
-        shift @args;
-        my $filter = @args ? lc($args[0]) : undef;
-        my $klog   = $self->{_karma_log}{$channel} // [];
-        unless (@$klog) {
-            botPrivmsg($self, $channel, "$nick: no karma history on $channel."); return 1;
-        }
-        my @entries = reverse @$klog;
-        @entries = grep { lc($_->{nick}) eq $filter } @entries if $filter;
-        @entries = @entries[0..4] if @entries > 5;
-        unless (@entries) {
-            botPrivmsg($self, $channel, "$nick: no karma history for '$filter'."); return 1;
-        }
-        for my $e (@entries) {
-            my $sign = $e->{score} > 0 ? '+' : '';
-            my $ago  = _seconds_to_human(time() - $e->{ts});
-            botPrivmsg($self, $channel,
-                "  $e->{nick} $e->{delta} (now ${sign}$e->{score}) by $e->{from} — $ago ago");
-        }
-        return 1;
-    }
+    # mb85-B3: !karma log et !karma top étaient mal routés ici — déplacés dans mbKarma_ctx
 
-    # P1: !karma top [n] — alias for !karmatop
-    if (@args && lc($args[0]) eq 'top') {
-        shift @args;
-        $ctx->{_args} = \@args;
-        return mbKarmaTop_ctx($ctx);
+    # mb92/polish: wordcount is channel-scoped because it joins CHANNEL_LOG
+    # with CHANNEL by c.name. Refuse private/undefined context cleanly instead
+    # of executing the query with an undef channel or trying to PRIVMSG undef.
+    unless (defined($channel) && $channel =~ /^#/) {
+        botNotice($self, $nick, "wordcount must be used from a channel.");
+        return 1;
     }
 
     my $target  = $args[0] ? lc($args[0]) : lc($nick);
 
-    my $sth = $self->{dbh}->prepare(q{
+    # mb92-B1: LIMIT 50000 — sans LIMIT la requête peut charger des millions de lignes
+    # et bloquer le bot. Note affichée si tronqué.
+    my $ROW_LIMIT = 50_000;
+    my $sth = $self->{dbh}->prepare(qq{
         SELECT publictext FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE cl.nick = ? AND c.name = ? AND publictext IS NOT NULL
+        ORDER BY cl.id DESC
+        LIMIT $ROW_LIMIT
     });
     unless ($sth && $sth->execute($target, $channel)) {
         botNotice($self, $nick, 'Database error.');
@@ -3290,15 +3621,15 @@ sub mbWordCount_ctx {
         return;
     }
     my %words;
+    my $rows_read = 0;
     while (my ($text) = $sth->fetchrow_array) {
+        $rows_read++;
         $words{lc $_}++ for split /\W+/, ($text // '');
     }
     $sth->finish;
     delete $words{''};
 
     # V9/MB75-R4: show top 5 most frequent useful words.
-    # Filter short words before selecting the top 5, otherwise common short
-    # tokens can occupy the whole top list and then be discarded.
     my $distinct = scalar keys %words;
     my @word_candidates = grep { defined($_) && length($_) >= 3 } keys %words;
     my @top5 = (sort { $words{$b} <=> $words{$a} || $a cmp $b } @word_candidates)[0..4];
@@ -3306,7 +3637,9 @@ sub mbWordCount_ctx {
     my $top_str = @top5
         ? '  | top words: ' . join(', ', map { "$_ ($words{$_})" } @top5)
         : '';
-    botPrivmsg($self, $channel, "$target: $distinct distinct word(s) on $channel$top_str");
+    # mb92-B1: avertir si le résultat est tronqué
+    my $trunc_note = $rows_read >= $ROW_LIMIT ? " [last 50k msgs]" : "";
+    botPrivmsg($self, $channel, "$target: $distinct distinct word(s) on $channel$trunc_note$top_str");
     return 1;
 }
 
@@ -3437,7 +3770,6 @@ sub mbStreak_ctx {
     # Count consecutive days from most recent
     my $streak = 1;
     for my $i (1 .. $#days) {
-        use Time::Piece;
         my $d1 = Time::Piece->strptime($days[$i-1], '%Y-%m-%d');
         my $d2 = Time::Piece->strptime($days[$i],   '%Y-%m-%d');
         last unless int(($d1 - $d2)->days + 0.5) == 1;  # B4/fix: ->days is float
@@ -3458,8 +3790,40 @@ sub mbStreak_ctx {
         }
     }
     my $best_str = $best > $streak ? "  (best ever: ${best}d)" : '';
+
+    # mb85-IMP1 / mb92-B2: rang du streak — cache TTL 5min pour éviter la sous-requête coûteuse
+    my $rank_str  = '';
+    my $cache_key = "streak_rank:$channel:$target:$streak";
+    my $cached    = $self->{_streak_rank_cache}{$cache_key};
+    if ($cached && (time() - $cached->{ts}) < 300) {
+        $rank_str = $cached->{rank_str};
+    } else {
+        eval {
+            my $sth_r2 = $self->{dbh}->prepare(q{
+                SELECT COUNT(DISTINCT sub.nick) AS ahead
+                FROM (
+                    SELECT cl.nick, COUNT(DISTINCT DATE(cl.ts)) AS days_active
+                    FROM CHANNEL_LOG cl
+                    JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                    WHERE c.name = ?
+                      AND cl.nick != ?
+                      AND DATE(cl.ts) >= CURDATE() - INTERVAL 365 DAY
+                    GROUP BY cl.nick
+                ) sub
+                WHERE sub.days_active > ?
+            });
+            if ($sth_r2 && $sth_r2->execute($channel, $target, $streak)) {
+                my $rrow = $sth_r2->fetchrow_hashref; $sth_r2->finish;
+                if ($rrow && defined $rrow->{ahead}) {
+                    $rank_str = "  rank #" . ($rrow->{ahead} + 1);
+                }
+            }
+        };
+        $self->{_streak_rank_cache}{$cache_key} = { ts => time(), rank_str => $rank_str };
+    }
+
     botPrivmsg($self, $channel,
-        "$target: $streak consecutive day(s) active on $channel (most recent: $days[0])$best_str");
+        "$target: $streak consecutive day(s) active on $channel (most recent: $days[0])$best_str$rank_str");
     logBot($self, $ctx->message, $channel, 'streak', $target);  # Q1
     return 1;
 }
@@ -3482,6 +3846,36 @@ sub mbKarma_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    # mb85-B3: !karma log [nick] — déplacé ici depuis mbWordCount_ctx (S4)
+    if (@args && lc($args[0]) eq 'log') {
+        shift @args;
+        my $filter = @args ? lc($args[0]) : undef;
+        my $klog   = $self->{_karma_log}{$channel} // [];
+        unless (@$klog) {
+            botPrivmsg($self, $channel, "$nick: no karma history on $channel."); return 1;
+        }
+        my @entries = reverse @$klog;
+        @entries = grep { lc($_->{nick}) eq $filter } @entries if $filter;
+        @entries = @entries[0..4] if @entries > 5;
+        unless (@entries) {
+            botPrivmsg($self, $channel, "$nick: no karma history for '$filter'."); return 1;
+        }
+        for my $e (@entries) {
+            my $sign = $e->{score} > 0 ? '+' : '';
+            my $ago  = _seconds_to_human(time() - $e->{ts});
+            botPrivmsg($self, $channel,
+                "  $e->{nick} $e->{delta} (now ${sign}$e->{score}) by $e->{from} — $ago ago");
+        }
+        return 1;
+    }
+
+    # mb85-B3: !karma top [n] — déplacé ici depuis mbWordCount_ctx (P1)
+    if (@args && lc($args[0]) eq 'top') {
+        shift @args;
+        $ctx->{args} = \@args;
+        return mbKarmaTop_ctx($ctx);
+    }
 
     # NEW: explicit karma vote syntax — !karma + <nick> or !karma - <nick>
     # Replaces the fragile nick++/nick-- auto-detection (triggered on e.g. Notepad++).
@@ -3601,10 +3995,11 @@ sub processKarma {
             || lc(do { (my $t = $_) =~ s/\[.*?\]//g; $t }) eq $target
         } @chan_nicks_pk;
         unless ($on_chan) { next; }  # silently skip — not on channel
-        # Self-karma: block and notify
+        # Self-karma: block and notify — mb86-B4: metrics ajoutées ici, check Y2 redondant supprimé
         if ($target eq lc($nick) || $target eq lc(do { (my $t = $nick) =~ s/\[.*?\]//g; $t })) {
             Mediabot::Helpers::botPrivmsg($self, $channel,
                 "$nick: you can't change your own karma.");
+            $self->{metrics}->inc('mediabot_karma_selfvote_blocked') if $self->{metrics};
             next;
         }
         # DD9: anti-brigade guard — >5 different nicks voting for same target in 30s → block
@@ -3624,14 +4019,6 @@ sub processKarma {
             next;
         }
         $brigade->{warned} = 0 if scalar @{ $brigade->{hits} } <= 2;
-    }
-
-    # Y2: explicit anti-self-vote guard with clear message
-    if (lc($nick) eq lc($target)) {
-        Mediabot::Helpers::botPrivmsg($self, $channel,
-            "$nick: you can't vote for yourself.");
-        $self->{metrics}->inc('mediabot_karma_selfvote_blocked') if $self->{metrics};
-        next;
     }
 
     # U6: anti-spam cooldown — 30s between votes targeting the same nick
@@ -4015,8 +4402,6 @@ sub mbPoll_ctx {
     }
 
     my $question = shift @parts;
-    # Z10: Prometheus counter for poll creation
-    $self->{metrics}->inc('mediabot_poll_created_total') if $self->{metrics};
     # BB7: build weighted option list
     my @weighted_parts;
     for my $opt (@parts) {
@@ -4026,7 +4411,8 @@ sub mbPoll_ctx {
             push @weighted_parts, { label => $opt, weight => 1 };
         }
     }
-    $self->{metrics}->inc('mediabot_poll_created_total') if $self->{metrics};
+    # mb84-B3: supprimé le double inc() de poll_created_total (était appelé avant et après @weighted_parts)
+    $self->{metrics}->inc('mediabot_poll_created_total') if $self->{metrics};  # Z10
     $self->{_polls}{$channel} = {
         question => $question,
         options  => [ map { $_->{label}  } @weighted_parts ],
@@ -4037,7 +4423,9 @@ sub mbPoll_ctx {
         deadline => time() + $poll_timeout,  # V2: configurable timeout
         active   => 1,
     };
-    my $opts = join('  ', map { '[' . ($_+1) . '] ' . $parts[$_] } 0..$#parts);
+    # mb84-B3b: $opts utilisait @parts (après shift question) au lieu des labels @weighted_parts
+    my @opt_labels = map { $_->{label} } @weighted_parts;
+    my $opts = join('  ', map { '[' . ($_+1) . '] ' . $opt_labels[$_] } 0..$#opt_labels);
     botPrivmsg($self, $channel, "Poll: \"$question\"  $opts  -- vote with !vote <n>");
     logBot($self, $ctx->message, $channel, 'poll', $question);  # S2/fix
     return 1;
@@ -4225,17 +4613,22 @@ sub mbNote_ctx {
     if (scalar @{ $self->{_notes}{lc $nick} } >= 10) {
         botNotice($self, $nick, 'Max 10 notes reached. Delete some with !notes del <id>.'); return;
     }
-    my $note_id = scalar(@{ $self->{_notes}{lc $nick} }) + 1;  # C4/fix: ordinal
-    push @{ $self->{_notes}{lc $nick} }, { id => $note_id, text => $text };
-    my $n = scalar @{ $self->{_notes}{lc $nick} };
-    # BB1: persist note to DB
+    # BB1: persist note to DB — mb84-B8: récupérer last_insert_id pour stocker le vrai id DB
+    my $db_note_id = undef;
     eval {
         my $sth = $self->{dbh}->prepare(
             'INSERT INTO NOTE (nick, text) VALUES (?, ?)'
         );
-        $sth->execute(lc($nick), $text) if $sth; $sth->finish if $sth;
+        if ($sth && $sth->execute(lc($nick), $text)) {
+            $db_note_id = $self->{dbh}->last_insert_id(undef, undef, 'NOTE', 'id_note');
+        }
+        $sth->finish if $sth;
     };
     $self->{logger}->log(1, "BB1: NOTE insert failed: $@") if $@;
+    # mb84-B8: utiliser l'id DB réel; fallback sur ordinal si INSERT a échoué
+    my $note_id = $db_note_id // (scalar(@{ $self->{_notes}{lc $nick} }) + 1);
+    push @{ $self->{_notes}{lc $nick} }, { id => $note_id, text => $text };
+    my $n = scalar @{ $self->{_notes}{lc $nick} };
     botNotice($self, $nick, "Note saved (#$n total). Use !notes to list.");
     return 1;
 }
@@ -4487,13 +4880,14 @@ sub mbKarmaGraph_ctx {
     }
     # Sparkline: map delta to block chars
     # ▁▂▃▄▅▆▇█ for positive, ▼ for negative, · for zero
-    my @spark_pos = ('\x{2581}','\x{2582}','\x{2583}','\x{2584}',
-                     '\x{2585}','\x{2586}','\x{2587}','\x{2588}');
+    # mb84-B4: single-quoted \x{NNNN} ne sont pas interpolées en Perl → double-quotes requises
+    my @spark_pos = ("\x{2581}","\x{2582}","\x{2583}","\x{2584}",
+                     "\x{2585}","\x{2586}","\x{2587}","\x{2588}");
     my $max = (sort { $b <=> $a } map { abs($_) } @buckets)[0] || 1;
     my $spark = '';
     for my $v (@buckets) {
-        if ($v == 0)    { $spark .= '\xb7'; }   # middle dot
-        elsif ($v < 0)  { $spark .= '\x{25bc}'; }  # ▼
+        if ($v == 0)    { $spark .= "\xb7"; }          # middle dot ·
+        elsif ($v < 0)  { $spark .= "\x{25bc}"; }      # ▼
         else {
             my $idx = int(($v / $max) * 7);  # 0..7
             $spark .= $spark_pos[$idx];
@@ -4572,7 +4966,23 @@ sub mbKarmaDiff_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     my $target  = @args ? lc($args[0]) : lc($nick);
-    # KD1/fix: search across all channels in PM (same pattern as KI1/fix)
+
+    # mb89-IMP1: fenêtre temporelle configurable — 6h, 12h, 24h (défaut), 7d
+    my $window_secs  = 86400;
+    my $window_label = '24h';
+    if (@args >= 2) {
+        my $w = lc($args[1]);
+        if    ($w eq '6h')  { $window_secs = 21600;  $window_label = '6h';  }
+        elsif ($w eq '12h') { $window_secs = 43200;  $window_label = '12h'; }
+        elsif ($w eq '24h') { $window_secs = 86400;  $window_label = '24h'; }
+        elsif ($w eq '7d')  { $window_secs = 604800; $window_label = '7d';  }
+        else {
+            botNotice($self, $nick, "Unknown window '$w'. Use: 6h 12h 24h 7d");
+            return;
+        }
+    }
+
+    # KD1/fix: search across all channels in PM
     my $kd_chan = (defined $channel && $channel =~ /^#/) ? $channel : undef;
     my @kd_entries_all;
     if ($kd_chan) {
@@ -4583,31 +4993,46 @@ sub mbKarmaDiff_ctx {
         }
     }
     my $now   = time();
-    my $since = $now - 86400;  # last 24h
+    my $since = $now - $window_secs;
     my @entries = grep { lc($_->{nick}) eq $target && ($_->{ts} // 0) >= $since } @kd_entries_all;
     my $reply_to_kd = $kd_chan // $nick;
     unless (@entries) {
         botPrivmsg($self, $reply_to_kd,
-            "$target: no karma changes in the last 24h."); return 1;
+            "$target: no karma changes in the last $window_label."); return 1;
     }
     my $delta = 0;
-    $delta += (($_ ->{delta} // '') eq '+1' ? 1 : -1) for @entries;  # KD2/fix: delta guard
+    $delta += (($_ ->{delta} // '') eq '+1' ? 1 : -1) for @entries;
     my $sign  = $delta > 0 ? '+' : '';
-    # CC11: fetch current score from _karma_log (in-memory, no DB query)
-    my $cur_score_cc11 = undef;
-    for my $ch_cc11 (keys %{ $self->{_karma_log} // {} }) {
-        my $klog_cc11 = $self->{_karma_log}{$ch_cc11} // [];
-        my ($last_e) = grep { lc($_->{nick}) eq lc($target) } reverse @$klog_cc11;
+
+    # mb89-IMP1: top 3 givers dans la fenêtre
+    my %givers_w;
+    for my $e (@entries) {
+        my $g = $e->{from} // $e->{giver} // '';
+        $givers_w{$g}++ if $g;
+    }
+    my @top_givers = (sort { $givers_w{$b} <=> $givers_w{$a} || $a cmp $b }
+                      keys %givers_w)[0..2];
+    @top_givers = grep { defined } @top_givers;
+    my $givers_str = @top_givers
+        ? '  | by: ' . join(', ', map { "$_($givers_w{$_})" } @top_givers)
+        : '';
+
+    # CC11: fetch current score
+    my $cur_score = undef;
+    for my $ch (keys %{ $self->{_karma_log} // {} }) {
+        my $klog = $self->{_karma_log}{$ch} // [];
+        my ($last_e) = grep { lc($_->{nick}) eq lc($target) } reverse @$klog;
         if ($last_e && defined $last_e->{score}) {
-            $cur_score_cc11 = $last_e->{score}; last;
+            $cur_score = $last_e->{score}; last;
         }
     }
-    my $score_info = defined $cur_score_cc11
-        ? ', score: ' . ($cur_score_cc11 >= 0 ? "+$cur_score_cc11" : "$cur_score_cc11")
+    my $score_info = defined $cur_score
+        ? ', score: ' . ($cur_score >= 0 ? "+$cur_score" : "$cur_score")
         : '';
+
     botPrivmsg($self, $reply_to_kd,
-        "$target: karma changed by ${sign}${delta} in the last 24h ("
-        . scalar(@entries) . " vote(s)$score_info).");
+        "$target: karma ${sign}${delta} in last $window_label ("
+        . scalar(@entries) . " vote(s)$score_info)$givers_str");
     logBot($self, $ctx->message, $channel, 'karmadiff', $target);
     return 1;
 }
@@ -4691,27 +5116,75 @@ sub mbRoll_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
+    # mb85-IMP2: !roll history — show last 5 rolls on this channel
+    if (@args && lc($args[0]) eq 'history') {
+        my $hist = $self->{_roll_history}{$channel} // [];
+        unless (@$hist) {
+            botPrivmsg($self, $channel, "$nick: no roll history on $channel."); return 1;
+        }
+        botPrivmsg($self, $channel, 'Last rolls: ' . join('  |  ', reverse @$hist));
+        return 1;
+    }
+
     my ($num, $sides) = (1, 6);
+    my $modifier = 0;   # mb85-IMP2: +N / -N bonus
+    my $adv_mode = '';  # 'adv', 'dis', or ''
+
     if (@args && $args[0] =~ /^(\d+)d(\d+)$/i) {
         ($num, $sides) = ($1, $2);
-        $num   = 1   if $num   < 1;  $num   = 10  if $num   > 10;
+        $num   = 1   if $num   < 1;  $num   = 20  if $num   > 20;
         $sides = 2   if $sides < 2;  $sides = 100 if $sides > 100;
     } elsif (@args && $args[0] =~ /^\d+$/) {
         $sides = int($args[0]);
         $sides = 2 if $sides < 2; $sides = 100 if $sides > 100;
     }
 
-    my @results = map { int(rand($sides)) + 1 } 1..$num;
-    my $total   = 0; $total += $_ for @results;
-    my $label   = "${num}d${sides}";
-
-    if ($num == 1) {
-        botPrivmsg($self, $channel, "$nick rolled $label: $results[0]");
-    } else {
-        botPrivmsg($self, $channel, sprintf('%s rolled %s: [%s] = %d',
-            $nick, $label, join(', ', @results), $total));
+    # mb85-IMP2: parse trailing modifier (+N/-N) and adv/dis keyword
+    for my $extra (@args[1..$#args]) {
+        if ($extra =~ /^([+-]\d+)$/) {
+            $modifier = int($1);
+            $modifier =  100 if $modifier >  100;
+            $modifier = -100 if $modifier < -100;
+        } elsif ($extra =~ /^adv(?:antage)?$/i)    { $adv_mode = 'adv'; }
+        elsif  ($extra =~ /^dis(?:advantage)?$/i)  { $adv_mode = 'dis'; }
     }
-    logBot($self, $ctx->message, $channel, 'roll', $label);  # Q1 (already present)
+
+    my @results = map { int(rand($sides)) + 1 } 1..$num;
+    my $label   = "${num}d${sides}";
+    my $out;
+
+    if ($adv_mode && $num == 1) {
+        # adv/dis: roll twice, keep highest/lowest
+        my $r2   = int(rand($sides)) + 1;
+        my $kept = $adv_mode eq 'adv'
+            ? ($results[0] >= $r2 ? $results[0] : $r2)
+            : ($results[0] <= $r2 ? $results[0] : $r2);
+        my $drop = $adv_mode eq 'adv'
+            ? ($results[0] < $r2  ? $results[0] : $r2)
+            : ($results[0] > $r2  ? $results[0] : $r2);
+        my $total = $kept + $modifier;
+        my $mod_str = $modifier ? sprintf(' %+d = %d', $modifier, $total) : '';
+        $out = sprintf('%s rolled %s (%s): [%d, ~~%d~~]%s  → %d',
+            $nick, $label, $adv_mode, $kept, $drop, $mod_str, $total);
+    } elsif ($num == 1) {
+        my $total = $results[0] + $modifier;
+        my $mod_str = $modifier ? sprintf(' %+d = %d', $modifier, $total) : '';
+        $out = "$nick rolled $label: $results[0]$mod_str";
+    } else {
+        my $sum = 0; $sum += $_ for @results;
+        my $total = $sum + $modifier;
+        my $mod_str = $modifier ? sprintf(' %+d = %d', $modifier, $total) : " = $sum";
+        $out = sprintf('%s rolled %s: [%s]%s',
+            $nick, $label, join(', ', @results), $mod_str);
+    }
+
+    # mb85-IMP2: keep rolling history (last 5 per channel)
+    my $rh = $self->{_roll_history}{$channel} //= [];
+    push @$rh, $out;
+    splice @$rh, 0, @$rh - 5 if @$rh > 5;
+
+    botPrivmsg($self, $channel, $out);
+    logBot($self, $ctx->message, $channel, 'roll', $label);
     return 1;
 }
 
@@ -4725,10 +5198,51 @@ sub mbFlip_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    my $result = rand() < 0.5 ? 'Heads!' : 'Tails!';
-    botPrivmsg($self, $channel, "$nick flipped a coin: $result");
-    logBot($self, $ctx->message, $channel, 'flip', $result);  # Q1
+    # mb85-IMP3: !flip stats — show heads/tails counts on this channel
+    if (@args && lc($args[0]) eq 'stats') {
+        my $fs = $self->{_flip_stats}{$channel} // { h => 0, t => 0 };
+        my $total = $fs->{h} + $fs->{t};
+        unless ($total) {
+            botPrivmsg($self, $channel, "$nick: no flips yet on $channel."); return 1;
+        }
+        botPrivmsg($self, $channel, sprintf(
+            '%s flip stats on %s: %d Heads (%.0f%%)  %d Tails (%.0f%%)  — %d total',
+            $nick, $channel,
+            $fs->{h}, 100*$fs->{h}/$total,
+            $fs->{t}, 100*$fs->{t}/$total,
+            $total));
+        return 1;
+    }
+
+    # mb85-IMP3: !flip N — multi-flip (max 10)
+    my $n = 1;
+    if (@args && $args[0] =~ /^(\d+)$/) {
+        $n = int($1); $n = 1 if $n < 1; $n = 10 if $n > 10;
+    }
+
+    my @results;
+    my $fs = $self->{_flip_stats}{$channel} //= { h => 0, t => 0 };
+    for (1..$n) {
+        my $r = rand() < 0.5 ? 'H' : 'T';
+        push @results, $r;
+        $r eq 'H' ? $fs->{h}++ : $fs->{t}++;
+    }
+
+    if ($n == 1) {
+        my $word = $results[0] eq 'H' ? 'Heads!' : 'Tails!';
+        botPrivmsg($self, $channel, "$nick flipped a coin: $word");
+    } else {
+        my $heads = scalar grep { $_ eq 'H' } @results;
+        my $tails = $n - $heads;
+        my $seq   = join('', @results);
+        $seq      =~ s/H/H/g; $seq =~ s/T/T/g;
+        botPrivmsg($self, $channel, sprintf(
+            '%s flipped %d coins: %s  (%d H, %d T)',
+            $nick, $n, $seq, $heads, $tails));
+    }
+    logBot($self, $ctx->message, $channel, 'flip', join('', @results));
     return 1;
 }
 
@@ -4746,17 +5260,40 @@ sub mbActive_ctx {
 
     my $interval = '24 HOUR';
     my $label    = 'last 24h';
-    if (@args && $args[0] =~ /^(\d+)(d|h)$/i) {
-        my ($v, $u) = ($1, lc $2);
-        $interval = $u eq 'h' ? "$v HOUR" : "$v DAY";
-        $label    = "last ${v}${u}";
+    my $use_date_filter = 0;
+    my $date_filter = '';
+
+    if (@args) {
+        my $p = lc($args[0]);
+        if ($p eq 'today') {
+            # mb90-IMP2: activité du jour courant (depuis minuit)
+            $date_filter     = "DATE(cl.ts) = CURDATE()";
+            $use_date_filter = 1;
+            $label           = 'today';
+        } elsif ($p eq 'yesterday') {
+            $date_filter     = "DATE(cl.ts) = CURDATE() - INTERVAL 1 DAY";
+            $use_date_filter = 1;
+            $label           = 'yesterday';
+        } elsif ($p eq 'week') {
+            $date_filter     = "cl.ts >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)";
+            $use_date_filter = 1;
+            $label           = 'this week';
+        } elsif ($p =~ /^(\d+)(d|h)$/i) {
+            my ($v, $u) = ($1, lc $2);
+            $interval = $u eq 'h' ? "$v HOUR" : "$v DAY";
+            $label    = "last ${v}${u}";
+        }
     }
+
+    my $where_clause = $use_date_filter
+        ? "c.name = ? AND $date_filter"
+        : "c.name = ? AND cl.ts >= DATE_SUB(NOW(), INTERVAL $interval)";
 
     my $sth = $self->{dbh}->prepare(
         "SELECT cl.nick, COUNT(*) AS mc FROM CHANNEL_LOG cl"
         . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
-        . " WHERE c.name = ? AND cl.ts >= DATE_SUB(NOW(), INTERVAL $interval)"
-        . " GROUP BY cl.nick ORDER BY mc DESC LIMIT 30"  # EE9
+        . " WHERE $where_clause"
+        . " GROUP BY cl.nick ORDER BY mc DESC LIMIT 30"
     );
     unless ($sth && $sth->execute($channel)) {
         botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
@@ -5018,14 +5555,42 @@ sub mbCompare_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     unless (@args >= 2) {
-        botNotice($self, $nick, 'Syntax: compare <nick1> <nick2>'); return;
+        botNotice($self, $nick, 'Syntax: compare <nick1> <nick2> [Nd|Nw|Nm|all]  (ex: 7d 4w 3m)');
+        return;
     }
     my ($t1, $t2) = (lc($args[0]), lc($args[1]));
-    my $sth = $self->{dbh}->prepare(q{
+
+    # mb86-IMP2: période optionnelle — 7d, 4w, 3m, 1y, all (défaut: all)
+    my ($period_sql, $period_label) = ('', 'all time');
+    if (@args >= 3) {
+        my $p = lc($args[2]);
+        if ($p =~ /^(\d+)d$/) {
+            $period_sql   = "AND cl.ts >= NOW() - INTERVAL $1 DAY";
+            $period_label = "last ${1}d";
+        } elsif ($p =~ /^(\d+)w$/) {
+            my $days = $1 * 7;
+            $period_sql   = "AND cl.ts >= NOW() - INTERVAL $days DAY";
+            $period_label = "last ${1}w";
+        } elsif ($p =~ /^(\d+)m$/) {
+            $period_sql   = "AND cl.ts >= NOW() - INTERVAL $1 MONTH";
+            $period_label = "last ${1}m";
+        } elsif ($p =~ /^(\d+)y$/) {
+            $period_sql   = "AND cl.ts >= NOW() - INTERVAL $1 YEAR";
+            $period_label = "last ${1}y";
+        } elsif ($p eq 'all') {
+            # explicit all — no filter
+        } else {
+            botNotice($self, $nick, "Unknown period '$p'. Use: 7d, 4w, 3m, 1y, all");
+            return;
+        }
+    }
+
+    my $sth = $self->{dbh}->prepare(qq{
         SELECT cl.nick, COUNT(*) AS cnt
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.nick IN (?,?)
+        $period_sql
         GROUP BY cl.nick
     });
     unless ($sth && $sth->execute($channel, $t1, $t2)) {
@@ -5039,12 +5604,11 @@ sub mbCompare_ctx {
     my $diff = abs($c1 - $c2);
     my $leader = $c1 > $c2 ? $t1 : $c1 < $c2 ? $t2 : undef;
     my $verdict = $leader ? "$leader leads by $diff msg(s)" : 'tied!';
-    # V9: add relative % to compare output
     my $tot_c = $c1 + $c2;
     my $p1 = $tot_c > 0 ? int(100*$c1/$tot_c) : 0;
     my $p2 = $tot_c > 0 ? 100 - $p1 : 0;
     botPrivmsg($self, $channel,
-        "$t1: $c1 msg(s) ($p1%) | $t2: $c2 msg(s) ($p2%) | $verdict");
+        "[$period_label] $t1: $c1 msg(s) ($p1%) | $t2: $c2 msg(s) ($p2%) | $verdict");
     return 1;
 }
 
@@ -5096,9 +5660,8 @@ sub mbHeatmap_ctx {
                 . chr(0x2591) x (10 - $bar_len);
         botPrivmsg($self, $channel, sprintf('  %s  %s  %d msgs', $label, $bar, $total));
     }
-    # V7: show peak hour
-    my $peak_slot = 0;
-    for my $s (1..3) { $peak_slot = $s if ($hours[$s*6] // 0) > ($hours[$peak_slot*6] // 0); }
+    # V7: show peak time slot
+    # mb84-B6: supprimé $peak_slot (code mort et calcul incorrect) — $peak_idx via @slot_totals est correct
     my @slot_labels = ("00-05", "06-11", "12-17", "18-23");
     my @slot_totals = map { my $s=$_; my $t=0; $t += ($hours[$s*6+$_] // 0) for 0..5; $t } 0..3;
     my ($peak_idx) = sort { $slot_totals[$b] <=> $slot_totals[$a] } 0..3;
@@ -5119,6 +5682,59 @@ sub mbMonthStats_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    # mb90-IMP3: !monthstats nick1 vs nick2 — mode comparaison côte à côte
+    my ($t1, $t2);
+    if (@args >= 3 && lc($args[1]) eq 'vs') {
+        ($t1, $t2) = (lc($args[0]), lc($args[2]));
+    }
+
+    if (defined $t1 && defined $t2) {
+        # Fetch counts for both nicks per month
+        my $sth = $self->{dbh}->prepare(
+            "SELECT DATE_FORMAT(cl.ts, '%Y-%m') AS ym, cl.nick, COUNT(*) AS cnt"
+            . ' FROM CHANNEL_LOG cl'
+            . ' JOIN CHANNEL c ON c.id_channel = cl.id_channel'
+            . ' WHERE cl.nick IN (?,?) AND c.name = ?'
+            . '   AND cl.ts >= DATE_SUB(NOW(), INTERVAL 12 MONTH)'
+            . ' GROUP BY ym, cl.nick ORDER BY ym'
+        );
+        unless ($sth && $sth->execute($t1, $t2, $channel)) {
+            botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
+        }
+        my %by_month;
+        while (my $r = $sth->fetchrow_hashref) {
+            $by_month{$r->{ym}}{$r->{nick}} = $r->{cnt};
+        }
+        $sth->finish;
+        unless (%by_month) {
+            botPrivmsg($self, $channel, "No data found for $t1 or $t2 on $channel."); return 1;
+        }
+        my $max_c = 1;
+        for my $ym (keys %by_month) {
+            for my $n (keys %{ $by_month{$ym} }) {
+                $max_c = $by_month{$ym}{$n} if $by_month{$ym}{$n} > $max_c;
+            }
+        }
+        botPrivmsg($self, $channel, "$t1 vs $t2 on $channel (last 12 months):");
+        my @parts;
+        for my $ym (sort keys %by_month) {
+            my $c1 = $by_month{$ym}{$t1} // 0;
+            my $c2 = $by_month{$ym}{$t2} // 0;
+            my $b1 = int(4 * $c1 / $max_c); $b1 = 1 if $c1 > 0 && $b1 == 0;
+            my $b2 = int(4 * $c2 / $max_c); $b2 = 1 if $c2 > 0 && $b2 == 0;
+            my $bar1 = chr(0x2588) x $b1 . chr(0x2591) x (4-$b1);
+            my $bar2 = chr(0x2588) x $b2 . chr(0x2591) x (4-$b2);
+            push @parts, "$ym $bar1/$bar2";
+        }
+        my @line1 = splice(@parts, 0, 6);
+        my @line2 = @parts;
+        botPrivmsg($self, $channel, "  $t1//$t2 — " . join('  ', @line1)) if @line1;
+        botPrivmsg($self, $channel, '  ' . join('  ', @line2)) if @line2;
+        return 1;
+    }
+
+    # Mode normal — un seul nick
     my $target  = @args ? lc($args[0]) : lc($nick);
     my $sth = $self->{dbh}->prepare(
         "SELECT DATE_FORMAT(cl.ts, '%Y-%m') AS ym, COUNT(*) AS cnt"
@@ -5148,7 +5764,6 @@ sub mbMonthStats_ctx {
         push @parts, "$r->{ym} $bar $r->{cnt}";
     }
     botPrivmsg($self, $channel, "$target on $channel (last 12 months):");
-    # Envoyer sur 2 lignes max (6 mois par ligne) — V11b: splice évite les undef
     my @line1 = splice(@parts, 0, 6);
     my @line2 = @parts;
     botPrivmsg($self, $channel, '  ' . join('  ', @line1)) if @line1;
@@ -5198,8 +5813,8 @@ sub mbDefine_ctx {
     my $pos = $first_entry->{partOfSpeech} // '';
     $pos =~ s/^\s+|\s+$//g;
     $first_def =~ s/<[^>]+>//g;  # strip HTML
-    require HTML::Entities;              # B2/fix: decode &amp; &#39; etc.
-    HTML::Entities::decode_entities($first_def);
+    require HTML::Entities;
+    $first_def = HTML::Entities::decode_entities($first_def);  # mb84-B5: assigner la valeur de retour
     $first_def =~ s/^\s+|\s+$//g;
     $first_def = substr($first_def, 0, 300) . '...' if length($first_def) > 300;
     if ($first_def ne '') {
@@ -5291,14 +5906,18 @@ sub mbTrivia_ctx {
         @choices[$i, $j] = @choices[$j, $i];
     }
     my $answer_lc = lc($answer);
+    # mb84-B1: preserve multi-round state and scores across question resets
+    my $_prev     = $self->{_trivia}{$channel} // {};
     $self->{_trivia}{$channel} = {
-        active      => 1,
-        answer      => $answer_lc,
+        active         => 1,
+        answer         => $answer_lc,
         answer_display => $answer,
-        started     => time(),
-        hint_given  => 0,   # B2/fix: reset hint_given for each new question
-        category    => ($q->{category} // undef),  # DD6: store for timeout display
-        scores      => ($self->{_trivia}{$channel}{scores} // {}),
+        started        => time(),
+        hint_given     => 0,   # B2/fix: reset hint_given for each new question
+        category       => ($q->{category} // undef),  # DD6: store for timeout display
+        scores         => ($_prev->{scores}       // {}),
+        multi_total    => $_prev->{multi_total},       # mb84-B1: carry over round count
+        multi_current  => $_prev->{multi_current},     # mb84-B1: carry over current round
     };
     my $opts = join('  ', map { "[$_]" } @choices);
     botPrivmsg($self, $channel, "Trivia ($q->{category}): $question");
@@ -5307,6 +5926,7 @@ sub mbTrivia_ctx {
     # K3: configurable timeout (main.TRIVIA_TIMEOUT, default 30s)
     my $trivia_timeout = eval { int($self->{conf}->get('main.TRIVIA_TIMEOUT') // 30) } // 30;
     $trivia_timeout = 30 unless $trivia_timeout > 0 && $trivia_timeout <= 120;
+    $self->{_trivia}{$channel}{timeout}  = $trivia_timeout;  # mb84-B2: stocker pour le hint
     $self->{_trivia}{$channel}{deadline} = time() + $trivia_timeout;
     logBot($self, $ctx->message, $channel, 'trivia', $q->{category} // '');  # S2/fix
     return 1;

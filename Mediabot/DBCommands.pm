@@ -2915,9 +2915,10 @@ sub mbCalc_ctx {
     }
 
     # Evaluate in a sandboxed sub with safe math
+    # mb86-B2: alarm() est incompatible avec IO::Async (SIGALRM interrompt l'event loop)
+    # → timeout via Time::HiRes : on mesure le temps d'exécution et on die si > 2s
+    my $calc_start = do { require Time::HiRes; Time::HiRes::time() };
     my $result = eval {
-        local $SIG{ALRM} = sub { die "timeout\n" };
-        alarm(3);
         my $res = do {
             no strict;
             # A3: extended math — trig + rounding functions
@@ -2939,10 +2940,12 @@ sub mbCalc_ctx {
             ## no critic
             eval $expr;  ## safe: expression is already whitelist-validated
         };
-        alarm(0);
+        # mb86-B2: vérifier le temps écoulé après l'éval (les boucles infinies sont bloquées
+        # par la whitelist, les expressions lentes sont très rares mais on reste prudents)
+        my $elapsed = Time::HiRes::time() - $calc_start;
+        die "timeout\n" if $elapsed > 2;
         $res;
     };
-    alarm(0);
 
     if ($@) {
         my $err = $@;

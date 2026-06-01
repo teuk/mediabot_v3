@@ -1132,6 +1132,155 @@ sub _handle_instagram {
 # Parses <title> from Spotify page. Format: "Song - artist | Spotify"
 # Also handles albums, playlists, podcasts via og:title.
 # ---------------------------------------------------------------------------
+
+# mb89-R1: helpers extraits de _handle_spotify pour lisibilité
+# ---------------------------------------------------------------------------
+
+# _spotify_is_bad($v) — retourne 1 si la valeur est inutilisable (vide, générique Spotify)
+sub _spotify_is_bad {
+    my ($v) = @_;
+    return 1 unless defined $v;
+    $v = _decode_html($v);
+    $v =~ s/[\r\n\t]/ /g; $v =~ s/\s+/ /g; $v =~ s/^\s+|\s+$//g;
+    return 1 if $v eq '';
+    return 1 if $v =~ /^Spotify$/i;
+    return 1 if $v =~ /^Spotify\s*[–-]\s*Web Player$/i;
+    return 1 if $v =~ /^Spotify Web Player$/i;
+    return 1 if $v =~ /listening is everything/i;
+    return 0;
+}
+
+# _spotify_clean($v) — nettoie une valeur Spotify (HTML, escapes, suffixes)
+sub _spotify_clean {
+    my ($v) = @_;
+    return undef unless defined $v;
+    $v = _decode_html($v);
+    $v =~ s/\\u0026/&/g; $v =~ s/\\\//\//g; $v =~ s/\\"/"/g;
+    $v =~ s/[\r\n\t]/ /g; $v =~ s/\s{2,}/ /g; $v =~ s/^\s+|\s+$//g;
+    $v =~ s/\s*\|\s*Spotify\s*$//i;
+    $v =~ s/\s*[–-]\s*Spotify\s*$//i;
+    $v =~ s/\s*[–-]\s*song and lyrics by\s*/ - /i;
+    return undef if _spotify_is_bad($v);
+    return $v;
+}
+
+# _spotify_duration_from_ms($ms) — convertit des millisecondes en "Xm Ys"
+sub _spotify_duration_from_ms {
+    my ($ms) = @_;
+    return undef unless defined $ms && $ms =~ /^\d+$/;
+    my $total = int($ms / 1000); return undef if $total <= 0;
+    my $h = int($total / 3600); my $m = int(($total % 3600) / 60); my $s = $total % 60;
+    return sprintf("%dh%02dm%02ds", $h, $m, $s) if $h;
+    return sprintf("%dm %02ds", $m, $s);
+}
+
+# _spotify_duration_from_iso($d) — convertit ISO 8601 duration en "Xm Ys"
+sub _spotify_duration_from_iso {
+    my ($d) = @_;
+    return undef unless defined $d;
+    if ($d =~ /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i) {
+        my ($h, $m, $s) = ($1 // 0, $2 // 0, $3 // 0);
+        return undef if !$h && !$m && !$s;
+        return sprintf("%dh%02dm%02ds", $h, $m, $s) if $h;
+        return sprintf("%dm %02ds", $m, $s);
+    }
+    return undef;
+}
+
+# _spotify_extract_meta($self, \%info, $html, $context)
+# Parse les balises <meta> og:title / twitter:title / description depuis le HTML.
+sub _spotify_extract_meta {
+    my ($self, $info, $html, $context) = @_;
+    return unless defined $html && $html ne '';
+    my ($og_title, $twitter_title, $title_tag, $description);
+    while ($html =~ /<meta\b([^>]*?)>/sig) {
+        my $attrs = $1;
+        if ($attrs =~ /(?:property|name)=["']og:title["']/i && $attrs =~ /\bcontent=["']([^"']+)["']/i) {
+            $og_title = $1;
+        } elsif ($attrs =~ /(?:property|name)=["']twitter:title["']/i && $attrs =~ /\bcontent=["']([^"']+)["']/i) {
+            $twitter_title = $1;
+        } elsif ($attrs =~ /(?:property|name)=["'](?:og:description|description|twitter:description)["']/i
+            && $attrs =~ /\bcontent=["']([^"']+)["']/i) {
+            $description = $1;
+        }
+    }
+    if ($html =~ /<title[^>]*>(.*?)<\/title>/si) { $title_tag = $1; }
+    for my $candidate ($og_title, $twitter_title, $title_tag) {
+        my $v = _spotify_clean($candidate); next unless defined $v && $v ne '';
+        if (!defined $info->{title} && $v =~ /^(.+?)\s+-\s+(.+)$/) {
+            $info->{title}  //= _spotify_clean($1);
+            $info->{artist} //= _spotify_clean($2) unless ($2 // '') =~ /Spotify/i;
+        } else { $info->{title} //= $v; }
+        last if defined $info->{title};
+    }
+    my $desc = _spotify_clean($description);
+    if (defined $desc && $desc ne '') {
+        if ($desc =~ /\b(?:Song|Single|Album|EP|Playlist|Episode|Show)\s*[·-]\s*([^·|.-]+)\s*[·-]\s*(\d{4})/i) {
+            $info->{artist} //= _spotify_clean($1); $info->{year} //= $2;
+        } elsif ($desc =~ /\b(?:Song|Single|Album|EP)\s*[·-]\s*([^·|.-]+)/i) {
+            $info->{artist} //= _spotify_clean($1);
+        }
+        if ($desc =~ /\bfrom\s+(?:the\s+)?(?:album|single)\s+([^.,|]+)(?:[.,|]|$)/i) {
+            $info->{album} //= _spotify_clean($1);
+        }
+    }
+    $self->{logger}->log(4, "_handle_spotify() parsed meta from $context");
+}
+
+# _spotify_extract_jsonish($self, \%info, $text, $context)
+# Parse JSON-LD et regex conservateurs depuis le HTML Spotify.
+sub _spotify_extract_jsonish {
+    my ($self, $info, $text, $context) = @_;
+    return unless defined $text && $text ne '';
+    # JSON-LD
+    while ($text =~ m{<script[^>]+type=["']application/ld\+json["'][^>]*>(.*?)</script>}sig) {
+        my $json = _decode_html($1);
+        my $data = eval { decode_json($json) }; next unless defined $data;
+        my @items = ref($data) eq 'ARRAY' ? @$data : ($data);
+        for my $item (@items) {
+            next unless ref($item) eq 'HASH';
+            $info->{title} //= _spotify_clean($item->{name});
+            if (ref($item->{byArtist}) eq 'HASH') {
+                $info->{artist} //= _spotify_clean($item->{byArtist}{name});
+            } elsif (ref($item->{byArtist}) eq 'ARRAY') {
+                my @a = grep { defined && $_ ne '' }
+                        map { ref $_ eq 'HASH' ? _spotify_clean($_->{name}) : _spotify_clean($_) }
+                        @{ $item->{byArtist} };
+                $info->{artist} //= join(', ', @a) if @a;
+            }
+            if (ref($item->{inAlbum}) eq 'HASH') { $info->{album} //= _spotify_clean($item->{inAlbum}{name}); }
+            if (defined $item->{duration} && !defined $info->{duration}) {
+                $info->{duration} = _spotify_duration_from_iso($item->{duration});
+            }
+            $info->{year} //= $1 if defined($item->{datePublished}) && $item->{datePublished} =~ /^(\d{4})/;
+        }
+    }
+    # Conservative regex fallbacks
+    if (!defined $info->{title}) {
+        if ($text =~ /"track"\s*:\s*\{.{0,3000}?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
+            (my $v = $1) =~ s/\\"/"/g; $info->{title} = _spotify_clean($v);
+        } elsif ($text =~ /"type"\s*:\s*"track".{0,3000}?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
+            (my $v = $1) =~ s/\\"/"/g; $info->{title} = _spotify_clean($v);
+        }
+    }
+    if (!defined $info->{artist} && $text =~ /"artists"\s*:\s*\[(.{0,2000}?)\]/s) {
+        my $blob = $1; my @a;
+        while ($blob =~ /"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g) {
+            (my $v = $1) =~ s/\\"/"/g; my $c = _spotify_clean($v); push @a, $c if defined $c && $c ne '';
+        }
+        $info->{artist} //= join(', ', @a) if @a;
+    }
+    if (!defined $info->{album} && $text =~ /"album"\s*:\s*\{.{0,2000}?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
+        (my $v = $1) =~ s/\\"/"/g; $info->{album} = _spotify_clean($v);
+    }
+    $info->{year} //= $1 if !defined $info->{year} && $text =~ /"release_date"\s*:\s*"(\d{4})/;
+    if (!defined $info->{duration} && $text =~ /"duration_ms"\s*:\s*(\d+)/) {
+        $info->{duration} = _spotify_duration_from_ms($1);
+    }
+    $self->{logger}->log(4, "_handle_spotify() parsed JSON-ish metadata from $context");
+}
+
+# ---------------------------------------------------------------------------
 sub _handle_spotify {
     my ($self, $message, $nick, $channel, $url) = @_;
 
@@ -1151,363 +1300,91 @@ sub _handle_spotify {
         return undef;
     }
 
-    my %info = (
-        type => $spotify_type,
-    );
+    my %info = (type => $spotify_type);
 
-    my $is_bad = sub {
-        my ($v) = @_;
-        return 1 unless defined $v;
+    my $http = _make_http(timeout => 10, max_size => 2 * 1024 * 1024);
 
-        $v = _decode_html($v);
-        $v =~ s/[\r\n\t]/ /g;
-        $v =~ s/\s+/ /g;
-        $v =~ s/^\s+|\s+$//g;
-
-        return 1 if $v eq '';
-        return 1 if $v =~ /^Spotify$/i;
-        return 1 if $v =~ /^Spotify\s*[–-]\s*Web Player$/i;
-        return 1 if $v =~ /^Spotify Web Player$/i;
-        return 1 if $v =~ /listening is everything/i;
-        return 0;
-    };
-
-    my $clean = sub {
-        my ($v) = @_;
-        return undef unless defined $v;
-
-        $v = _decode_html($v);
-        $v =~ s/\\u0026/&/g;
-        $v =~ s/\\\//\//g;
-        $v =~ s/\\"/"/g;
-        $v =~ s/[\r\n\t]/ /g;
-        $v =~ s/\s{2,}/ /g;
-        $v =~ s/^\s+|\s+$//g;
-
-        $v =~ s/\s*\|\s*Spotify\s*$//i;
-        $v =~ s/\s*[–-]\s*Spotify\s*$//i;
-        $v =~ s/\s*[–-]\s*song and lyrics by\s*/ - /i;
-
-        return undef if $is_bad->($v);
-        return $v;
-    };
-
-    my $set_once = sub {
-        my ($key, $value) = @_;
-        return unless defined $key;
-        return if defined $info{$key} && $info{$key} ne '';
-
-        my $v = $clean->($value);
-        return unless defined $v && $v ne '';
-
-        $info{$key} = $v;
-        $self->{logger}->log(4, "_handle_spotify() set $key='$v'");
-    };
-
-    my $duration_from_ms = sub {
-        my ($ms) = @_;
-        return undef unless defined $ms && $ms =~ /^\d+$/;
-
-        my $total = int($ms / 1000);
-        return undef if $total <= 0;
-
-        my $h = int($total / 3600);
-        my $m = int(($total % 3600) / 60);
-        my $s = $total % 60;
-
-        return sprintf("%dh%02dm%02ds", $h, $m, $s) if $h;
-        return sprintf("%dm %02ds", $m, $s);
-    };
-
-    my $duration_from_iso = sub {
-        my ($d) = @_;
-        return undef unless defined $d;
-
-        if ($d =~ /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i) {
-            my ($h, $m, $s) = ($1 // 0, $2 // 0, $3 // 0);
-            return undef if !$h && !$m && !$s;
-
-            return sprintf("%dh%02dm%02ds", $h, $m, $s) if $h;
-            return sprintf("%dm %02ds", $m, $s);
-        }
-
-        return undef;
-    };
-
-    my $extract_meta = sub {
-        my ($html, $context) = @_;
-        return unless defined $html && $html ne '';
-
-        my ($og_title, $twitter_title, $title_tag, $description);
-
-        while ($html =~ /<meta\b([^>]*?)>/sig) {
-            my $attrs = $1;
-
-            if ($attrs =~ /(?:property|name)=["']og:title["']/i && $attrs =~ /\bcontent=["']([^"']+)["']/i) {
-                $og_title = $1;
-            }
-            elsif ($attrs =~ /(?:property|name)=["']twitter:title["']/i && $attrs =~ /\bcontent=["']([^"']+)["']/i) {
-                $twitter_title = $1;
-            }
-            elsif ($attrs =~ /(?:property|name)=["'](?:og:description|description|twitter:description)["']/i
-                && $attrs =~ /\bcontent=["']([^"']+)["']/i) {
-                $description = $1;
-            }
-        }
-
-        if ($html =~ /<title[^>]*>(.*?)<\/title>/si) {
-            $title_tag = $1;
-        }
-
-        for my $candidate ($og_title, $twitter_title, $title_tag) {
-            my $v = $clean->($candidate);
-            next unless defined $v && $v ne '';
-
-            if (!defined $info{title} && $v =~ /^(.+?)\s+-\s+(.+)$/) {
-                $set_once->('title',  $1);
-                $set_once->('artist', $2) unless $2 =~ /Spotify/i;
-            }
-            else {
-                $set_once->('title', $v);
-            }
-
-            last if defined $info{title};
-        }
-
-        my $desc = $clean->($description);
-        if (defined $desc && $desc ne '') {
-            # Typical Spotify description examples:
-            #   Song · Artist · 2024
-            #   Album · Artist · 2024
-            #   Playlist · User · 50 songs
-            if ($desc =~ /\b(?:Song|Single|Album|EP|Playlist|Episode|Show)\s*[·-]\s*([^·|.-]+)\s*[·-]\s*(\d{4})/i) {
-                $set_once->('artist', $1);
-                $set_once->('year',   $2);
-            }
-            elsif ($desc =~ /\b(?:Song|Single|Album|EP)\s*[·-]\s*([^·|.-]+)/i) {
-                $set_once->('artist', $1);
-            }
-
-            if ($desc =~ /\bfrom\s+(?:the\s+)?(?:album|single)\s+([^.,|]+)(?:[.,|]|$)/i) {
-                $set_once->('album', $1);
-            }
-        }
-
-        $self->{logger}->log(4, "_handle_spotify() parsed meta from $context");
-    };
-
-    my $extract_jsonish = sub {
-        my ($text, $context) = @_;
-        return unless defined $text && $text ne '';
-
-        # JSON-LD first: cleanest metadata when Spotify exposes it.
-        while ($text =~ m{<script[^>]+type=["']application/ld\+json["'][^>]*>(.*?)</script>}sig) {
-            my $json = _decode_html($1);
-            my $data = eval { decode_json($json) };
-            next unless defined $data;
-
-            my @items = ref($data) eq 'ARRAY' ? @$data : ($data);
-
-            for my $item (@items) {
-                next unless ref($item) eq 'HASH';
-
-                $set_once->('title', $item->{name});
-
-                if (ref($item->{byArtist}) eq 'HASH') {
-                    $set_once->('artist', $item->{byArtist}->{name});
-                }
-                elsif (ref($item->{byArtist}) eq 'ARRAY') {
-                    my @artists = grep { defined $_ && $_ ne '' }
-                                  map { ref($_) eq 'HASH' ? $_->{name} : $_ }
-                                  @{ $item->{byArtist} };
-                    $set_once->('artist', join(', ', @artists)) if @artists;
-                }
-
-                if (ref($item->{inAlbum}) eq 'HASH') {
-                    $set_once->('album', $item->{inAlbum}->{name});
-                }
-
-                if (defined $item->{duration} && !defined $info{duration}) {
-                    my $d = $duration_from_iso->($item->{duration});
-                    $info{duration} = $d if defined $d;
-                }
-
-                $set_once->('year', $1) if defined($item->{datePublished}) && $item->{datePublished} =~ /^(\d{4})/;
-            }
-        }
-
-        # Conservative regex extraction from embedded Spotify data.
-        # Avoid using the first random "name" field as title: it can be junk.
-        if (!defined $info{title}) {
-            if ($text =~ /"track"\s*:\s*\{.{0,3000}?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
-                my $v = $1;
-                $v =~ s/\\"/"/g;
-                $v =~ s/\\\\/\\/g;
-                $set_once->('title', $v);
-            }
-            elsif ($text =~ /"type"\s*:\s*"track".{0,3000}?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
-                my $v = $1;
-                $v =~ s/\\"/"/g;
-                $v =~ s/\\\\/\\/g;
-                $set_once->('title', $v);
-            }
-        }
-
-        if (!defined $info{artist}) {
-            if ($text =~ /"artists"\s*:\s*\[(.{0,2000}?)\]/s) {
-                my $artists_blob = $1;
-                my @artists;
-
-                while ($artists_blob =~ /"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g) {
-                    my $v = $1;
-                    $v =~ s/\\"/"/g;
-                    $v =~ s/\\\\/\\/g;
-                    my $c = $clean->($v);
-                    push @artists, $c if defined $c && $c ne '';
-                }
-
-                $set_once->('artist', join(', ', @artists)) if @artists;
-            }
-        }
-
-        if (!defined $info{album}) {
-            if ($text =~ /"album"\s*:\s*\{.{0,2000}?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
-                my $v = $1;
-                $v =~ s/\\"/"/g;
-                $v =~ s/\\\\/\\/g;
-                $set_once->('album', $v);
-            }
-        }
-
-        if (!defined $info{year}) {
-            if ($text =~ /"release_date"\s*:\s*"(\d{4})/) {
-                $set_once->('year', $1);
-            }
-        }
-
-        if (!defined $info{duration}) {
-            if ($text =~ /"duration_ms"\s*:\s*(\d+)/) {
-                my $d = $duration_from_ms->($1);
-                $info{duration} = $d if defined $d;
-            }
-        }
-
-        $self->{logger}->log(4, "_handle_spotify() parsed JSON-ish metadata from $context");
-    };
-
-    my $http = _make_http(
-        timeout  => 10,
-        max_size => 2 * 1024 * 1024,
-    );
-
-    # Step 1: Spotify oEmbed.
+    # Step 1: Spotify oEmbed
     {
         my $oembed_url = "https://open.spotify.com/oembed?url=" . uri_escape_utf8($clean_url);
-        my $res = eval { $http->get($oembed_url); } // { success => 0, status => 0, reason => $@ };
-
+        my $res = eval { $http->get($oembed_url) } // { success => 0, status => 0, reason => $@ };
         if ($res->{success}) {
             my $json = _decode_http_content_utf8($self, $res->{content} // '', 'spotify-oembed');
             my $data = eval { decode_json($json) };
-
             if (ref($data) eq 'HASH') {
-                $set_once->('title',  $data->{title});
-                $set_once->('artist', $data->{author_name});
-                $extract_jsonish->($json, 'oEmbed-json');
+                $info{title}  //= _spotify_clean($data->{title});
+                $info{artist} //= _spotify_clean($data->{author_name});
+                _spotify_extract_jsonish($self, \%info, $json, 'oEmbed-json');
                 $self->{logger}->log(4, "_handle_spotify() parsed oEmbed metadata");
             }
-        }
-        else {
+        } else {
             $self->{logger}->log(4, "_handle_spotify() oEmbed HTTP $res->{status} $res->{reason} for $oembed_url");
         }
     }
 
-    # Step 2: Spotify embed page.
-    if (!defined $info{title} || !defined $info{artist} || !defined $info{album} || !defined $info{duration} || !defined $info{year}) {
+    # Step 2: Spotify embed page
+    unless (defined $info{title} && defined $info{artist} && defined $info{album}
+         && defined $info{duration} && defined $info{year}) {
         my $embed_url = "https://open.spotify.com/embed/$spotify_type/$spotify_id";
-        my $res = eval { $http->get($embed_url); } // { success => 0, status => 0, reason => $@ };
-
+        my $res = eval { $http->get($embed_url) } // { success => 0, status => 0, reason => $@ };
         if ($res->{success}) {
             my $content = _decode_http_content_utf8($self, $res->{content} // '', 'spotify-embed');
             $self->{logger}->log(4, "_handle_spotify() embed fetched " . length($content) . " bytes");
-            $extract_meta->($content, 'embed');
-            $extract_jsonish->($content, 'embed');
-        }
-        else {
-            $self->{logger}->log(4, "_handle_spotify() embed HTTP $res->{status} $res->{reason} for $embed_url");
+            _spotify_extract_meta($self, \%info, $content, 'embed');
+            _spotify_extract_jsonish($self, \%info, $content, 'embed');
+        } else {
+            $self->{logger}->log(4, "_handle_spotify() embed HTTP $res->{status} $res->{reason}");
         }
     }
 
-    # Step 3: normal Spotify page.
-    if (!defined $info{title} || !defined $info{artist} || !defined $info{album} || !defined $info{duration} || !defined $info{year}) {
-        my $res = eval { $http->get($clean_url); } // { success => 0, status => 0, reason => $@ };
-
+    # Step 3: normal Spotify page
+    unless (defined $info{title} && defined $info{artist} && defined $info{album}
+         && defined $info{duration} && defined $info{year}) {
+        my $res = eval { $http->get($clean_url) } // { success => 0, status => 0, reason => $@ };
         if ($res->{success}) {
             my $content = _decode_http_content_utf8($self, $res->{content} // '', 'spotify-http');
             $self->{logger}->log(4, "_handle_spotify() HTTP fetched " . length($content) . " bytes");
-            $extract_meta->($content, 'HTTP');
-            $extract_jsonish->($content, 'HTTP');
-        }
-        else {
+            _spotify_extract_meta($self, \%info, $content, 'HTTP');
+            _spotify_extract_jsonish($self, \%info, $content, 'HTTP');
+        } else {
             $self->{logger}->log(3, "_handle_spotify() HTTP $res->{status} $res->{reason} for $clean_url");
         }
     }
 
-    # Step 4: Chromium fallback.
-    if (!defined $info{title} || !defined $info{artist} || !defined $info{album} || !defined $info{duration} || !defined $info{year}) {
-        $self->{logger}->log(4, "_handle_spotify() falling back to Chromium rendered DOM for $clean_url");
-
-        my $dom = _fetch_url_chromium_dumpdom(
-            $self,
-            $clean_url,
-            virtual_time_budget => 10000,
-            alarm_timeout       => 28,
-            lang                => 'fr-FR',
-        );
-
+    # Step 4: Chromium fallback
+    unless (defined $info{title} && defined $info{artist} && defined $info{album}
+         && defined $info{duration} && defined $info{year}) {
+        $self->{logger}->log(4, "_handle_spotify() falling back to Chromium for $clean_url");
+        my $dom = _fetch_url_chromium_dumpdom($self, $clean_url,
+            virtual_time_budget => 10000, alarm_timeout => 28, lang => 'fr-FR');
         if (defined $dom && $dom ne '') {
             $self->{logger}->log(4, "_handle_spotify() Chromium DOM fetched " . length($dom) . " bytes");
-            $extract_meta->($dom, 'Chromium');
-            $extract_jsonish->($dom, 'Chromium');
+            _spotify_extract_meta($self, \%info, $dom, 'Chromium');
+            _spotify_extract_jsonish($self, \%info, $dom, 'Chromium');
         }
     }
 
-    unless (defined $info{title} && !$is_bad->($info{title})) {
+    unless (defined $info{title} && !_spotify_is_bad($info{title})) {
         $self->{logger}->log(3, "_handle_spotify() could not extract a usable Spotify title from $clean_url");
         return undef;
     }
 
     my @parts;
     push @parts, $info{title};
-
-    if (defined $info{artist} && !$is_bad->($info{artist}) && $info{artist} ne $info{title}) {
-        push @parts, "by $info{artist}";
-    }
-
-    if (defined $info{album} && !$is_bad->($info{album}) && $info{album} ne $info{title}) {
-        push @parts, "album $info{album}";
-    }
-
-    if (defined $info{year} && $info{year} =~ /^\d{4}$/) {
-        push @parts, $info{year};
-    }
-
-    if (defined $info{duration} && $info{duration} ne '') {
-        push @parts, $info{duration};
-    }
+    push @parts, "by $info{artist}"  if defined $info{artist} && !_spotify_is_bad($info{artist}) && $info{artist} ne $info{title};
+    push @parts, "album $info{album}" if defined $info{album}  && !_spotify_is_bad($info{album})  && $info{album}  ne $info{title};
+    push @parts, $info{year}         if defined $info{year}     && $info{year}     =~ /^\d{4}$/;
+    push @parts, $info{duration}     if defined $info{duration} && $info{duration} ne '';
 
     my $display = join(' - ', @parts);
-    $display =~ s/\s+/ /g;
-    $display =~ s/^\s+|\s+$//g;
+    $display =~ s/\s+/ /g; $display =~ s/^\s+|\s+$//g;
     $display = substr($display, 0, 300);
 
     $self->{logger}->log(4, "_handle_spotify() final display='$display'");
 
-    # Badge unchanged.
     my $badge = String::IRC->new("[")->white('black');
     $badge   .= String::IRC->new("Spotify")->black('green');
     $badge   .= String::IRC->new("]")->white('black');
-
-    # Hard IRC reset after the badge: only the badge keeps its background.
     my $msg = "$badge\x0f $display";
 
     botPrivmsg($self, $channel, "($nick) $msg");
@@ -3384,22 +3261,68 @@ sub claude_ctx {
     # BB8: !ai models — list known Claude models
     if (@args && lc($args[0]) eq 'models') {
         my @known = qw(
+            claude-opus-4-8
+            claude-opus-4-7
             claude-opus-4-6
             claude-sonnet-4-6
             claude-haiku-4-5-20251001
         );
-        my $current = _chatgpt_conf_string($self, 'anthropic.MODEL', 'claude-sonnet-4-6');
+        # mb84-B7: utiliser CLAUDE_MODEL comme fallback (cohérent avec le reste de claudeAI)
+        my $current = _chatgpt_conf_string($self, 'anthropic.MODEL', CLAUDE_MODEL);
         my @labeled = map { $_ eq $current ? "$_ (current)" : $_ } @known;
         botNotice($self, $nick, 'Available Claude models: ' . join('  |  ', @labeled));
         return 1;
     }
 
-    # Z2: !ai summary [n] — summarise last N messages from CHANNEL_LOG
+    # Z2: !ai summary [n|today|yesterday|week|last|Nd] [nick] — summarise from CHANNEL_LOG
     if (@args && lc($args[0]) eq 'summary') {
         shift @args;
-        # AA2: optional nick filter — !ai summary 10 teuk
+
+        # mb86-IMP3 / mb87-IMP2 / mb91-IMP2: modes de filtre temporel
+        my $date_filter = '';
+        my $date_label  = '';
+        if (@args && lc($args[0]) eq 'last') {
+            # mb91-IMP2: résumé depuis le dernier appel !ai summary sur ce canal
+            shift @args;
+            my $last_key = "summary_last:$channel";
+            my $last_ts  = $self->{_claude_summary_ts}{$last_key} // 0;
+            if ($last_ts > 0) {
+                $date_filter = "AND cl.ts > FROM_UNIXTIME($last_ts)";
+                my $mins = int((time() - $last_ts) / 60);
+                $date_label  = $mins >= 60
+                    ? sprintf(' (last %dh%02dm)', int($mins/60), $mins%60)
+                    : " (last ${mins}m)";
+            } else {
+                $date_filter = "AND DATE(cl.ts) = CURDATE()";
+                $date_label  = ' (today — no previous summary found)';
+            }
+        } elsif (@args && lc($args[0]) eq 'today') {
+            shift @args;
+            $date_filter = "AND DATE(cl.ts) = CURDATE()";
+            $date_label  = ' (today)';
+        } elsif (@args && lc($args[0]) eq 'yesterday') {
+            shift @args;
+            $date_filter = "AND DATE(cl.ts) = CURDATE() - INTERVAL 1 DAY";
+            $date_label  = ' (yesterday)';
+        } elsif (@args && lc($args[0]) eq 'week') {
+            # mb87-IMP2: résumé de la semaine courante (lundi → aujourd'hui)
+            shift @args;
+            $date_filter = "AND cl.ts >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)";
+            $date_label  = ' (this week)';
+        } elsif (@args && $args[0] =~ /^(\d+)d$/i) {
+            # mb87-IMP2: !ai summary 7d — N derniers jours
+            my $days = int($1); shift @args;
+            $days = 1 if $days < 1; $days = 30 if $days > 30;
+            $date_filter = "AND cl.ts >= NOW() - INTERVAL $days DAY";
+            $date_label  = " (last ${days}d)";
+        }
+
+        # AA2: optional count (ignoré quand date_filter actif, mais toujours parsé)
         my $n_msgs = (@args && $args[0] =~ /^(\d+)$/) ? int(shift @args) : 10;
         $n_msgs = 5 if $n_msgs < 5; $n_msgs = 50 if $n_msgs > 50;
+        # With date filter: lift the limit to 200 (couvre une journée/semaine chargée)
+        $n_msgs = 200 if $date_filter;
+
         my $filter_nick = (@args && $args[0] !~ /^\d/) ? lc(shift @args) : undef;
         my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
         unless ($dbh && defined $channel) {
@@ -3407,18 +3330,20 @@ sub claude_ctx {
         }
         my ($sth, @bind);
         if ($filter_nick) {
-            $sth = $dbh->prepare(q{
+            $sth = $dbh->prepare(qq{
                 SELECT cl.nick, cl.text FROM CHANNEL_LOG cl
                 JOIN CHANNEL c ON c.id_channel = cl.id_channel
                 WHERE c.name = ? AND LOWER(cl.nick) = ? AND cl.text IS NOT NULL
+                $date_filter
                 ORDER BY cl.id DESC LIMIT ?
             });
             @bind = ($channel, $filter_nick, $n_msgs);
         } else {
-            $sth = $dbh->prepare(q{
+            $sth = $dbh->prepare(qq{
                 SELECT cl.nick, cl.text FROM CHANNEL_LOG cl
                 JOIN CHANNEL c ON c.id_channel = cl.id_channel
                 WHERE c.name = ? AND cl.text IS NOT NULL
+                $date_filter
                 ORDER BY cl.id DESC LIMIT ?
             });
             @bind = ($channel, $n_msgs);
@@ -3432,14 +3357,19 @@ sub claude_ctx {
         while (my $r = $sth->fetchrow_hashref) { unshift @rows, "$r->{nick}: $r->{text}"; }
         $sth->finish;
         unless (@rows) {
-            botNotice($self, $nick, "No recent messages found on $channel."); return;
+            botNotice($self, $nick, "No messages found on $channel$date_label."); return;
         }
         my $transcript = join("\n", @rows);
-        my $who_str = $filter_nick ? " by $filter_nick" : "";
-        my $summary_prompt = "Summarise this IRC conversation${who_str} in 2-3 sentences:\n$transcript";
+        my $who_str    = $filter_nick ? " by $filter_nick" : "";
+        my $n_found    = scalar @rows;
+        # mb91-IMP2: mémoriser le timestamp pour le mode !ai summary last
+        if (defined $channel) {
+            $self->{_claude_summary_ts}{"summary_last:$channel"} = time();
+        }
+        my $summary_prompt = "Summarise this IRC conversation${who_str}${date_label} ($n_found messages) in 2-3 sentences:\n$transcript";
         # Call Claude with injected prompt, output as notice to caller
         return claudeAI($self, $ctx->message, $nick, undef,
-            sub { botNotice($self, $nick, $_[0]) }, $summary_prompt);  # B3/fix: was \$_[0] (ref instead of value)
+            sub { botNotice($self, $nick, $_[0]) }, $summary_prompt);
     }
 
     # Y1: !ai relay <#chan> <prompt> — relay response to a channel (from private)
@@ -3736,96 +3666,33 @@ sub claudeAI {
     my $hist_key  = "$nick\x00$chan";
     my $history   = $self->{_claude_history}{$hist_key} //= [];
     push @$history, { role => 'user', content => $prompt };
-    # Keep only last 6 messages (3 user + 3 assistant)
+    # Keep only last N messages (user+assistant pairs)
     splice @$history, 0, @$history - $max_history if @$history > $max_history;
 
-    # Anthropic API payload with conversation history
-    my $payload = eval { encode_json({
-        model      => $model,
+    # mb87-R1: appel HTTP + parsing extraits dans _claude_send_and_parse
+    # mb88-R3: passer output_fn pour que le chemin cache-hit l'utilise aussi
+    my $answer = _claude_send_and_parse($self, {
+        api_url     => $api_url,
+        api_key     => $api_key,
+        api_version => $api_version,
+        model       => $model,
         max_tokens  => $max_tokens,
-            temperature => $temperature + 0,  # W6: configurable via anthropic.TEMPERATURE
-        system     => $sys_prompt,
-        messages   => $history,
-    }) };
-    unless ($payload) {
-        $self->{logger}->log(1, "claudeAI() payload encode error: $@");
-        $_out->("($nick) Internal error building request.");
-        return;
-    }
-
-    # F53: prompt cache — same exact prompt answered within 60s → skip API.
-    # Digest::MD5 works on bytes, not Perl wide-character strings.
-    # IRC logs/prompts may contain UTF-8 text, accents, emojis or block chars,
-    # so encode explicitly before hashing.
-    require Digest::MD5;
-    my $prompt_key = Digest::MD5::md5_hex(encode('UTF-8', lc($prompt // '')));
-    my $pcache     = $self->{_claude_prompt_cache}{$prompt_key};
-    if ($pcache && (time() - $pcache->{ts}) < 60) {
-        $self->{logger}->log(4, 'claudeAI() prompt cache hit');
-        my @chunk   = _chatgpt_wrap($pcache->{answer}, $wrap_bytes);
-        my $last    = @chunk > $max_privmsg ? $max_privmsg - 1 : $#chunk;
-        $_out->($chunk[$_]) for 0..$last;
-        # Still update history with cached answer
-        push @$history, { role => 'assistant', content => $pcache->{answer} };
-        splice @$history, 0, @$history - $max_history if @$history > $max_history;
-        return 1;
-    }
-
-    # AA8/V14: log model + history size
-    my $_aa8_h = scalar @$history;
-    my $_aa8_c = 0; $_aa8_c += length($_->{content}//'') for @$history;
-    $self->{logger}->log(3, "claudeAI() \x2192 $model for $chan / $nick"
-        . " [hist: $_aa8_h msg(s), ~$_aa8_c chars]");
-    my $http = _make_http(timeout => 30);
-    my $res  = eval {
-        $http->request('POST', $api_url, {
-            headers => {
-                'Content-Type'      => 'application/json',
-                'x-api-key'         => $api_key,
-                'anthropic-version' => $api_version,
-            },
-            content => $payload,
-        });
-    } // { success => 0, status => 0, reason => $@ };
-
-    unless ($res->{success}) {
-        $self->{logger}->log(1,
-            'claudeAI() HTTP error: ' . ($res->{status}//0)
-            . ' ' . ($res->{reason}//'') . " model=$model");
-        $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};  # P5
-        $_out->("($nick) Sorry, Claude did not answer.");
-        return;
-    }
-
-    # Anthropic response: {content: [{type:'text', text:'...'}], ...}
-    my $data   = eval { decode_json($res->{content} // '') };
-    my $answer = eval {
-        ref($data)                       eq 'HASH'  &&
-        ref($data->{content})            eq 'ARRAY' &&
-        ref($data->{content}[0])         eq 'HASH'  &&
-        $data->{content}[0]{type}        eq 'text'  &&
-        length($data->{content}[0]{text} // '') > 0
-        ? $data->{content}[0]{text} : undef
-    };
-
-    unless (defined $answer && $answer ne '') {
-        $self->{logger}->log(1, 'claudeAI() unexpected response structure');
-        $self->{logger}->log(5, 'claudeAI() raw: ' . ($res->{content} // '(empty)'));
-        $_out->("($nick) Could not read Claude response.");
-        return;
-    }
-    $self->{logger}->log(5, "claudeAI() raw answer: $answer");
-
-    # P2: store assistant reply in history
-    push @$history, { role => 'assistant', content => $answer };
-    # F53: cache this prompt→answer pair (TTL 60s)
-    $self->{_claude_prompt_cache}{$prompt_key} = { ts => time(), answer => $answer };
-    # Evict entries older than 120s
-    for my $k (keys %{ $self->{_claude_prompt_cache} // {} }) {
-        delete $self->{_claude_prompt_cache}{$k}
-            if (time() - ($self->{_claude_prompt_cache}{$k}{ts} // 0)) > 120;
-    }
-    splice @$history, 0, @$history - $max_history if @$history > $max_history;
+        temperature => $temperature,
+        sys_prompt  => $sys_prompt,
+        history     => $history,
+        prompt      => $prompt,
+        prompt_key  => do {
+            require Digest::MD5;
+            Digest::MD5::md5_hex(encode('UTF-8', lc($prompt // '')));
+        },
+        wrap_bytes  => $wrap_bytes,
+        max_privmsg => $max_privmsg,
+        max_history => $max_history,
+        nick        => $nick,
+        chan         => $chan,
+        output_fn   => $output_fn,  # mb88-R3: nécessaire pour cache-hit via callback
+    });
+    return unless defined $answer;
 
     # P2: optionally prefix response with model name
     my $show_model = _chatgpt_conf_int($self, 'anthropic.SHOW_MODEL', 0, 0, 1);
@@ -3860,6 +3727,112 @@ sub claudeAI {
     $self->{logger}->log(4, 'claudeAI() sent ' . ($last+1) . ' PRIVMSG');
     # P5: increment Prometheus counter on success
     $self->{metrics}->inc('mediabot_claude_requests_total') if $self->{metrics};
+}
+
+# ---------------------------------------------------------------------------
+# mb87-R1: _claude_send_and_parse — extrait de claudeAI() pour lisibilité
+# Gère le cache prompt, l'appel HTTP Anthropic et le parsing de la réponse.
+# Retourne la réponse texte ou undef en cas d'erreur.
+# ---------------------------------------------------------------------------
+sub _claude_send_and_parse {
+    my ($self, $p) = @_;
+    my ($api_url, $api_key, $api_version, $model, $max_tokens, $temperature,
+        $sys_prompt, $history, $prompt, $prompt_key, $wrap_bytes, $max_privmsg,
+        $max_history, $nick, $chan, $output_fn) =
+        @{$p}{qw(api_url api_key api_version model max_tokens temperature
+                  sys_prompt history prompt prompt_key wrap_bytes max_privmsg
+                  max_history nick chan output_fn)};
+
+    # mb88-R3: _out utilise output_fn si disponible, sinon botPrivmsg/botNotice
+    my $_out_sub = sub {
+        my ($text) = @_;
+        if ($output_fn) { $output_fn->($text); }
+        elsif (defined $chan) { botPrivmsg($self, $chan, $text); }
+        else                  { botNotice($self, $nick, $text); }
+    };
+
+    # F53: prompt cache — same exact prompt answered within 60s → skip API
+    my $pcache = $self->{_claude_prompt_cache}{$prompt_key};
+    if ($pcache && (time() - $pcache->{ts}) < 60) {
+        $self->{logger}->log(4, 'claudeAI() prompt cache hit');
+        my @chunk = _chatgpt_wrap($pcache->{answer}, $wrap_bytes);
+        my $last  = @chunk > $max_privmsg ? $max_privmsg - 1 : $#chunk;
+        $_out_sub->($chunk[$_]) for 0..$last;
+        push @$history, { role => 'assistant', content => $pcache->{answer} };
+        splice @$history, 0, @$history - $max_history if @$history > $max_history;
+        return undef;  # already sent, caller should not re-send
+    }
+
+    # Anthropic API payload
+    my $payload = eval { encode_json({
+        model       => $model,
+        max_tokens  => $max_tokens,
+        temperature => $temperature + 0,
+        system      => $sys_prompt,
+        messages    => $history,
+    }) };
+    unless ($payload) {
+        $self->{logger}->log(1, "claudeAI() payload encode error: $@");
+        $_out_sub->("($nick) Internal error building request.");
+        return undef;
+    }
+
+    # AA8/V14: log model + history size
+    my $_h = scalar @$history;
+    my $_c = 0; $_c += length($_->{content}//'') for @$history;
+    $self->{logger}->log(3, "claudeAI() \x{2192} $model for $chan / $nick [hist: $_h msg(s), ~$_c chars]");
+
+    my $http = _make_http(timeout => 30);
+    my $res  = eval {
+        $http->request('POST', $api_url, {
+            headers => {
+                'Content-Type'      => 'application/json',
+                'x-api-key'         => $api_key,
+                'anthropic-version' => $api_version,
+            },
+            content => $payload,
+        });
+    } // { success => 0, status => 0, reason => $@ };
+
+    unless ($res->{success}) {
+        $self->{logger}->log(1,
+            'claudeAI() HTTP error: ' . ($res->{status}//0)
+            . ' ' . ($res->{reason}//'') . " model=$model");
+        $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
+        $_out_sub->("($nick) Sorry, Claude did not answer.");
+        return undef;
+    }
+
+    my $data   = eval { decode_json($res->{content} // '') };
+    my $answer = eval {
+        ref($data)                       eq 'HASH'  &&
+        ref($data->{content})            eq 'ARRAY' &&
+        ref($data->{content}[0])         eq 'HASH'  &&
+        $data->{content}[0]{type}        eq 'text'  &&
+        length($data->{content}[0]{text} // '') > 0
+        ? $data->{content}[0]{text} : undef
+    };
+
+    unless (defined $answer && $answer ne '') {
+        $self->{logger}->log(1, 'claudeAI() unexpected response structure');
+        $self->{logger}->log(5, 'claudeAI() raw: ' . ($res->{content} // '(empty)'));
+        $_out_sub->("($nick) Could not read Claude response.");
+        return undef;
+    }
+    $self->{logger}->log(5, "claudeAI() raw answer: $answer");
+
+    # P2: store assistant reply in history
+    push @$history, { role => 'assistant', content => $answer };
+    # F53: cache this prompt→answer pair (TTL 60s)
+    $self->{_claude_prompt_cache}{$prompt_key} = { ts => time(), answer => $answer };
+    # Evict entries older than 120s
+    for my $k (keys %{ $self->{_claude_prompt_cache} // {} }) {
+        delete $self->{_claude_prompt_cache}{$k}
+            if (time() - ($self->{_claude_prompt_cache}{$k}{ts} // 0)) > 120;
+    }
+    splice @$history, 0, @$history - $max_history if @$history > $max_history;
+
+    return $answer;
 }
 
 # ---------------------------------------------------------------------------

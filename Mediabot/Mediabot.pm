@@ -1128,6 +1128,33 @@ sub joinChannels {
     }
 }
 
+# mb86-R1: _dispatch_radio — sous-handler centralisé pour toutes les commandes radio
+# Évite de dupliquer 17 entrées sub { handler($ctx) } dans la dispatch table.
+sub _dispatch_radio {
+    my ($ctx, $cmd) = @_;
+    my %radio_map = (
+        song            => \&song_ctx,
+        radiostatus     => \&radioStatus_ctx,
+        radiomounts     => \&radioMounts_ctx,
+        listeners       => \&displayRadioListeners_ctx,
+        nextsong        => \&radioNext_ctx,
+        play            => \&radioPlay_ctx,
+        radioimport     => \&radioImport_ctx,
+        radioimportdir  => \&radioImportDir_ctx,
+        radioqueue      => \&radioQueue_ctx,
+        radiocheck      => \&radioCheck_ctx,
+        radiocache      => \&radioCache_ctx,
+        radiocacheprune => \&radioCachePrune_ctx,
+        radiodlstatus   => \&radioDlStatus_ctx,
+        radiodlcancel   => \&radioDlCancel_ctx,
+        radiopush       => \&radioPush_ctx,
+        radioskip       => \&radioSkip_ctx,
+        radioflush      => \&radioFlush_ctx,
+    );
+    my $handler = $radio_map{$cmd};
+    return $handler->($ctx) if $handler;
+}
+
 # Handle public commands
 sub mbCommandPublic {
     my ($self, $message, $sChannel, $sNick, $botNickTriggered, $sCommand, @tArgs) = @_;
@@ -1355,23 +1382,24 @@ sub mbCommandPublic {
                 youtubeSearch_ctx($ctx);
             }
         },
-        song         => sub { song_ctx($ctx) },
-        radiostatus  => sub { radioStatus_ctx($ctx) },
-        radiomounts  => sub { radioMounts_ctx($ctx) },
-        listeners    => sub { displayRadioListeners_ctx($ctx) },
-        nextsong     => sub { radioNext_ctx($ctx) },
-        play         => sub { radioPlay_ctx($ctx) },
-        radioimport  => sub { radioImport_ctx($ctx) },
-        radioimportdir => sub { radioImportDir_ctx($ctx) },
-        radioqueue   => sub { radioQueue_ctx($ctx) },
-        radiocheck  => sub { radioCheck_ctx($ctx) },
-        radiocache  => sub { radioCache_ctx($ctx) },
-        radiocacheprune => sub { radioCachePrune_ctx($ctx) },
-        radiodlstatus => sub { radioDlStatus_ctx($ctx) },
-        radiodlcancel => sub { radioDlCancel_ctx($ctx) },
-        radiopush    => sub { radioPush_ctx($ctx) },
-        radioskip    => sub { radioSkip_ctx($ctx) },
-        radioflush   => sub { radioFlush_ctx($ctx) },
+        # mb86-R1: commandes radio regroupées via _dispatch_radio
+        song           => sub { _dispatch_radio($ctx, $cmd) },
+        radiostatus    => sub { _dispatch_radio($ctx, $cmd) },
+        radiomounts    => sub { _dispatch_radio($ctx, $cmd) },
+        listeners      => sub { _dispatch_radio($ctx, $cmd) },
+        nextsong       => sub { _dispatch_radio($ctx, $cmd) },
+        play           => sub { _dispatch_radio($ctx, $cmd) },
+        radioimport    => sub { _dispatch_radio($ctx, $cmd) },
+        radioimportdir => sub { _dispatch_radio($ctx, $cmd) },
+        radioqueue     => sub { _dispatch_radio($ctx, $cmd) },
+        radiocheck     => sub { _dispatch_radio($ctx, $cmd) },
+        radiocache     => sub { _dispatch_radio($ctx, $cmd) },
+        radiocacheprune => sub { _dispatch_radio($ctx, $cmd) },
+        radiodlstatus  => sub { _dispatch_radio($ctx, $cmd) },
+        radiodlcancel  => sub { _dispatch_radio($ctx, $cmd) },
+        radiopush      => sub { _dispatch_radio($ctx, $cmd) },
+        radioskip      => sub { _dispatch_radio($ctx, $cmd) },
+        radioflush     => sub { _dispatch_radio($ctx, $cmd) },
         addresponder => sub { addResponder_ctx($ctx) },
         delresponder => sub { delResponder_ctx($ctx) },
         lastcom      => sub { lastCom_ctx($ctx) },
