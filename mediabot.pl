@@ -1204,15 +1204,15 @@ sub on_message_NICK {
             $mediabot->{logger}->log(0,"[LIVE] * $old_nick is now known as $new_nick");
         }
     }
-    # Track last seen on NICK change
+    # Track last seen on NICK change + purge Claude history for old nick
     {
         my ($sNick_n, $sIdent_n, $sHost_n) = $mediabot->getMessageNickIdentHost($message);
-    # Q2: purge Claude history for old nick on NICK change
-    if (defined $sNick_n && $mediabot->{_claude_history}) {
-        my $prefix = lc($sNick_n) . "\x00";
-        delete $mediabot->{_claude_history}{$_}
-            for grep { index($_, $prefix) == 0 } keys %{ $mediabot->{_claude_history} };
-    }
+        # Q2: purge Claude history for old nick on NICK change
+        if (defined $sNick_n && $mediabot->{_claude_history}) {
+            my $prefix = lc($sNick_n) . "\x00";
+            delete $mediabot->{_claude_history}{$_}
+                for grep { index($_, $prefix) == 0 } keys %{ $mediabot->{_claude_history} };
+        }
         eval { $mediabot->updateUserSeen(
             nick       => $old_nick,
             channel    => '',

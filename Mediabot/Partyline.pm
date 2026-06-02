@@ -2595,6 +2595,38 @@ sub _cmd_remind {
     unless ($chan_name) { $stream->write("Bot not joined on any channel.\r\n"); return; }
 
     unless ($dbh) { $stream->write("DB unavailable.\r\n"); return; }
+
+    # mb93-B3: valider le nick destinataire (cohérence avec mb92-B3 dans UserCommands)
+    {
+        my $target_known = 0;
+        # Vérifier nicklist en mémoire sur tous les canaux
+        my $chans_chk = $bot->{channels} // {};
+        for my $cname (keys %$chans_chk) {
+            my @nicks = eval { $bot->gethChannelsNicksOnChan($cname) };
+            if (grep { defined($_) && lc($_) eq lc($target) } @nicks) {
+                $target_known = 1; last;
+            }
+        }
+        unless ($target_known) {
+            my $sth_seen = $dbh->prepare('SELECT 1 FROM USER_SEEN WHERE nick = ? LIMIT 1');
+            if ($sth_seen && $sth_seen->execute(lc($target))) {
+                $target_known = 1 if $sth_seen->fetchrow_array;
+                $sth_seen->finish;
+            }
+        }
+        unless ($target_known) {
+            my $sth_user = $dbh->prepare('SELECT 1 FROM USER WHERE nickname = ? LIMIT 1');
+            if ($sth_user && $sth_user->execute(lc($target))) {
+                $target_known = 1 if $sth_user->fetchrow_array;
+                $sth_user->finish;
+            }
+        }
+        unless ($target_known) {
+            $stream->write("Unknown nick '$target'. Remind not created.\r\n");
+            return;
+        }
+    }
+
     my $sth_c = $dbh->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
     if ($sth_c && $sth_c->execute($chan_name)) {
         my $r = $sth_c->fetchrow_hashref; $sth_c->finish;
@@ -2624,14 +2656,40 @@ sub _cmd_seen {
     my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
 
     unless (defined $target && $target =~ /\S/) {
-        $stream->write("Usage: .seen <nick>\r\n"); return;
+        $stream->write("Usage: .seen <nick>  (wildcard: .seen teu*)\r\n"); return;
+    }
+
+    # mb94-B1: support wildcard (* → %, ? → _) comme mbSeen_ctx IRC
+    if ($target =~ /[*?]/) {
+        (my $like = lc($target)) =~ s/\*/%/g;
+        $like =~ s/\?/_/g;
+        my $sth = $dbh->prepare(q{
+            SELECT nick, channel, event_type, seen_at
+            FROM USER_SEEN WHERE nick LIKE ?
+            ORDER BY seen_at DESC LIMIT 5
+        });
+        unless ($sth && $sth->execute($like)) {
+            $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
+        }
+        my @rows;
+        while (my $r = $sth->fetchrow_hashref) { push @rows, $r; }
+        $sth->finish;
+        unless (@rows) {
+            $stream->write("No nicks matching '$target'.\r\n"); return;
+        }
+        for my $r (@rows) {
+            $stream->write(sprintf("  %-20s  %s  on %s  (%s)\r\n",
+                $r->{nick}, $r->{seen_at}, $r->{channel}, $r->{event_type}));
+        }
+        return;
     }
 
     my $sth = $dbh->prepare(q{
         SELECT nick, channel, event_type, seen_at, last_msg
         FROM USER_SEEN WHERE nick = ? ORDER BY seen_at DESC LIMIT 1
     });
-    unless ($sth && $sth->execute($target)) {
+    # mb100-B1: USER_SEEN stocke les nicks en lc() — normaliser $target
+    unless ($sth && $sth->execute(lc($target))) {
         $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
     }
     my $row = $sth->fetchrow_hashref; $sth->finish;
@@ -4400,10 +4458,10 @@ sub _cmd_chanlog {
     my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
     return unless $dbh;
     my $sth = $dbh->prepare(q{
-        SELECT cl.ts, cl.nick, cl.text FROM CHANNEL_LOG cl
+        SELECT cl.ts, cl.nick, cl.publictext AS text FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.text IS NOT NULL
-        ORDER BY cl.id DESC LIMIT ?
+        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        ORDER BY cl.id_channel_log DESC LIMIT ?
     });
     unless ($sth && $sth->execute($chan, $n)) {
         $stream->write("DB error.\r\n"); $sth->finish if $sth; return;

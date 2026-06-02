@@ -3595,24 +3595,63 @@ sub mbWordCount_ctx {
 
     # mb85-B3: !karma log et !karma top étaient mal routés ici — déplacés dans mbKarma_ctx
 
-    # mb92/polish: wordcount is channel-scoped because it joins CHANNEL_LOG
-    # with CHANNEL by c.name. Refuse private/undefined context cleanly instead
-    # of executing the query with an undef channel or trying to PRIVMSG undef.
+    # mb92/polish: wordcount is channel-scoped
     unless (defined($channel) && $channel =~ /^#/) {
         botNotice($self, $nick, "wordcount must be used from a channel.");
         return 1;
     }
 
-    my $target  = $args[0] ? lc($args[0]) : lc($nick);
+    # mb94-IMP1 / mb100-IMP1 / mb100-polish:
+    # Supported forms:
+    #   !wordcount
+    #   !wordcount <nick>
+    #   !wordcount <period>
+    #   !wordcount <nick> <period>
+    # where <period> is today/yesterday/week/Nd/Nh.
+    my $period_re = qr/^(?:today|yesterday|week|\d+[dh])$/i;
 
-    # mb92-B1: LIMIT 50000 — sans LIMIT la requête peut charger des millions de lignes
-    # et bloquer le bot. Note affichée si tronqué.
+    my $target = lc($nick);
+    my $period_arg;
+
+    if (@args) {
+        if (defined($args[0]) && $args[0] =~ $period_re) {
+            $period_arg = lc($args[0]);
+        }
+        else {
+            $target = lc($args[0]);
+            $period_arg = lc($args[1]) if defined($args[1]) && $args[1] =~ $period_re;
+        }
+    }
+
+    my $period_sql   = '';
+    my $period_label = '';
+    if (defined($period_arg) && $period_arg ne '') {
+        my $p = $period_arg;
+        if ($p eq 'today') {
+            $period_sql   = "AND DATE(cl.ts) = CURDATE()";
+            $period_label = " (today)";
+        } elsif ($p eq 'yesterday') {
+            $period_sql   = "AND DATE(cl.ts) = CURDATE() - INTERVAL 1 DAY";
+            $period_label = " (yesterday)";
+        } elsif ($p eq 'week') {
+            $period_sql   = "AND cl.ts >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)";
+            $period_label = " (this week)";
+        } elsif ($p =~ /^(\d+)(d|h)$/i) {
+            my ($val, $unit) = ($1, lc $2);
+            my $interval = $unit eq 'h' ? "$val HOUR" : "$val DAY";
+            $period_sql   = "AND cl.ts >= DATE_SUB(NOW(), INTERVAL $interval)";
+            $period_label = " (last ${val}${unit})";
+        }
+    }
+
+    # mb92-B1: LIMIT 50000
     my $ROW_LIMIT = 50_000;
     my $sth = $self->{dbh}->prepare(qq{
         SELECT publictext FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE cl.nick = ? AND c.name = ? AND publictext IS NOT NULL
-        ORDER BY cl.id DESC
+        $period_sql
+        ORDER BY cl.id_channel_log DESC
         LIMIT $ROW_LIMIT
     });
     unless ($sth && $sth->execute($target, $channel)) {
@@ -3639,7 +3678,7 @@ sub mbWordCount_ctx {
         : '';
     # mb92-B1: avertir si le résultat est tronqué
     my $trunc_note = $rows_read >= $ROW_LIMIT ? " [last 50k msgs]" : "";
-    botPrivmsg($self, $channel, "$target: $distinct distinct word(s) on $channel$trunc_note$top_str");
+    botPrivmsg($self, $channel, "$target: $distinct distinct word(s) on $channel$period_label$trunc_note$top_str");
     return 1;
 }
 
@@ -3743,7 +3782,14 @@ sub mbStreak_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-    my $target  = $args[0] ? lc($args[0]) : lc($nick);
+
+    # mb94-IMP2: !streak teuk all — forcer recalcul sans cache
+    my $force_refresh = 0;
+    if (@args >= 2 && lc($args[-1]) eq 'all') {
+        $force_refresh = 1;
+        pop @args;
+    }
+    my $target = $args[0] ? lc($args[0]) : lc($nick);
 
     my $sth = $self->{dbh}->prepare(q{
         SELECT DISTINCT DATE(ts) AS day
@@ -3795,6 +3841,9 @@ sub mbStreak_ctx {
     my $rank_str  = '';
     my $cache_key = "streak_rank:$channel:$target:$streak";
     my $cached    = $self->{_streak_rank_cache}{$cache_key};
+    # mb94-IMP2: invalider le cache si !streak all
+    delete $self->{_streak_rank_cache}{$cache_key} if $force_refresh;
+    $cached = undef if $force_refresh;
     if ($cached && (time() - $cached->{ts}) < 300) {
         $rank_str = $cached->{rank_str};
     } else {
@@ -3822,8 +3871,9 @@ sub mbStreak_ctx {
         $self->{_streak_rank_cache}{$cache_key} = { ts => time(), rank_str => $rank_str };
     }
 
+    my $refresh_note = $force_refresh ? " [live]" : "";
     botPrivmsg($self, $channel,
-        "$target: $streak consecutive day(s) active on $channel (most recent: $days[0])$best_str$rank_str");
+        "$target: $streak consecutive day(s) active on $channel (most recent: $days[0])$best_str$rank_str$refresh_note");
     logBot($self, $ctx->message, $channel, 'streak', $target);  # Q1
     return 1;
 }

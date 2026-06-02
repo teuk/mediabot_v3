@@ -345,7 +345,7 @@ sub mbQuoteView {
 
     if (my $ref = $sth->fetchrow_hashref()) {
         my $id_quotes  = $ref->{'id_quotes'};
-        my $sQuoteText = $ref->{'quotetext'};
+        my $sQuoteText = $ref->{'quotetext'} // '';
         my $id_user    = $ref->{'id_user'};
 
         my $sUserhandle = $ref->{'user_nickname'};
@@ -356,8 +356,12 @@ sub mbQuoteView {
 
         $sUserhandle = (defined($sUserhandle) && ($sUserhandle ne "") ? $sUserhandle : "Unknown");
 
+        # mb94-B3: extrait tronqué cohérent avec mbQuoteRand et mbQuoteSearch
+        my $excerpt = $sQuoteText;
+        $excerpt = substr($excerpt, 0, 300) . '...' if length($excerpt) > 300;
+
         my $id_q = String::IRC->new($id_quotes)->bold;
-        botPrivmsg($self, $sChannel, "($sUserhandle) [id: $id_q] $sQuoteText");
+        botPrivmsg($self, $sChannel, "($sUserhandle) [id: $id_q] $excerpt");
         logBot($self, $message, $sChannel, "q view", @tArgs);
     }
     else {
@@ -439,17 +443,32 @@ sub mbQuoteSearch {
             "More than $MAXQUOTES quotes matching \"$display_text\" on $sChannel — please be more specific :)");
     }
     else {
-        my $count = scalar @rows;
-        my $id_list = join('|', map { $_->{id_quotes} } @rows);
+        # mb93-IMP3: trier par pertinence (nb de mots matchés + fréquence)
+        my @scored = map {
+            my $qt = lc($_->{quotetext} // '');
+            my $score = 0;
+            $score += () = $qt =~ /\Q$_\E/gi for map { lc } @words;
+            { %$_, _score => $score };
+        } @rows;
+        @scored = sort { $b->{_score} <=> $a->{_score} || $b->{id_quotes} <=> $a->{id_quotes} } @scored;
+
+        my $count  = scalar @rows;
+        my $id_list = join('|', map { $_->{id_quotes} } @scored[0..($count > 10 ? 9 : $count-1)]);
+        $id_list .= ' ...' if $count > 10;
         botPrivmsg($self, $sChannel,
             "$count quote(s) matching \"$display_text\" on $sChannel : $id_list");
 
-        my $last   = $rows[0];
-        my $id_q   = String::IRC->new($last->{id_quotes})->bold;
-        my $handle = getUserhandle($self, $last->{id_user}) || 'Unknown';
+        # Afficher la plus pertinente
+        my $best   = $scored[0];
+        my $id_q   = String::IRC->new($best->{id_quotes})->bold;
+        my $handle = getUserhandle($self, $best->{id_user}) || 'Unknown';
+
+        # mb93-IMP3: extrait — afficher jusqu'à 200 chars avec "..." si tronqué
+        my $excerpt = $best->{quotetext} // '';
+        $excerpt = substr($excerpt, 0, 200) . '...' if length($excerpt) > 200;
 
         botPrivmsg($self, $sChannel,
-            "Last on $last->{ts} by $handle (id : $id_q) $last->{quotetext}");
+            "Best match on $best->{ts} by $handle (id : $id_q) $excerpt");
     }
 
     logBot($self, $message, $sChannel, "q search", @tArgs);
@@ -492,10 +511,24 @@ sub mbQuoteRand {
 
     my $offset = int(rand($count));
 
+    # mb94-B2: éviter de retomber deux fois de suite sur la même quote
+    # Ring buffer en mémoire: _quote_last_rand{$sChannel} = id de la dernière quote affichée
+    my $last_id = $self->{_quote_last_rand}{$sChannel};
+    if (defined $last_id && $count > 1) {
+        # Regénérer l'offset jusqu'à obtenir une quote différente (max 5 essais)
+        for (1..5) {
+            my $candidate_offset = int(rand($count));
+            last if $candidate_offset != $offset;  # premier essai OK
+            $offset = $candidate_offset;
+        }
+        # Vérification post-fetch ci-dessous
+    }
+
     my $sql = "SELECT q.id_quotes, q.quotetext, q.id_user
          FROM QUOTES q
          JOIN CHANNEL c ON c.id_channel = q.id_channel
          WHERE c.name = ?
+         ORDER BY q.id_quotes
          LIMIT 1 OFFSET ?";
 
     my $sth = $self->{dbh}->prepare($sql);
@@ -516,10 +549,14 @@ sub mbQuoteRand {
     }
 
     if (my $ref = $sth->fetchrow_hashref) {
+        # mb94-B2: si malgré tout on retombe sur la même (count==1 ou malchance), on affiche quand même
+        $self->{_quote_last_rand}{$sChannel} = $ref->{id_quotes};
         my $id_q   = String::IRC->new($ref->{id_quotes})->bold;
         my $handle = getUserhandle($self, $ref->{id_user}) || 'Unknown';
-
-        botPrivmsg($self, $sChannel, "($handle) [id: $id_q] $ref->{quotetext}");
+        # mb93: extrait tronqué cohérent avec mbQuoteView (max 300 chars)
+        my $text = $ref->{quotetext} // '';
+        $text = substr($text, 0, 300) . '...' if length($text) > 300;
+        botPrivmsg($self, $sChannel, "($handle) [id: $id_q] $text");
     }
     else {
         botPrivmsg($self, $sChannel, "Quote database is empty for $sChannel");
@@ -608,9 +645,28 @@ sub mbQuoteStats {
     my $oldest_txt = $fmt_age->($oldest);
     my $newest_txt = $fmt_age->($newest);
 
+    # mb93-IMP1: top contributeur
+    my $top_contrib_str = '';
+    {
+        my $sth_top = $self->{dbh}->prepare(q{
+            SELECT u.nickname, COUNT(*) AS cnt
+            FROM QUOTES q
+            JOIN CHANNEL c ON c.id_channel = q.id_channel
+            LEFT JOIN USER u ON u.id = q.id_user
+            WHERE c.name = ?
+            GROUP BY q.id_user ORDER BY cnt DESC LIMIT 1
+        });
+        if ($sth_top && $sth_top->execute($sChannel)) {
+            my $r = $sth_top->fetchrow_hashref; $sth_top->finish;
+            if ($r && $r->{cnt} > 0) {
+                my $who = $r->{nickname} // 'Anonymous';
+                $top_contrib_str = " \x{2014} top: $who ($r->{cnt})";
+            }
+        }
+    }
+
     botPrivmsg($self, $sChannel,
-        # LL2: compact format
-        "Quotes on $sChannel: $nbQuotes total \x{2014} oldest $oldest_txt ago, latest $newest_txt ago");
+        "Quotes on $sChannel: $nbQuotes total \x{2014} oldest $oldest_txt ago, latest $newest_txt ago$top_contrib_str");
     logBot($self, $message, $sChannel, "q stats", @tArgs);
     return $nbQuotes;
 }

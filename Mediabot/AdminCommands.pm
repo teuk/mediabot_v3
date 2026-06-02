@@ -1427,6 +1427,28 @@ sub mbStatus_ctx {
     botNotice($self, $nick, "Server: $uname");
     botNotice($self, $nick, "Server uptime: $server_uptime");
 
+    # mb93-IMP2: info Scheduler
+    if ($self->{scheduler} && $self->{scheduler}->can('all_info')) {
+        my @tasks = $self->{scheduler}->all_info;
+        if (@tasks) {
+            my $now_s = time();
+            my @running = grep { $_->{started} } @tasks;
+            my @stopped = grep { !$_->{started} } @tasks;
+            botNotice($self, $nick,
+                sprintf("Scheduler: %d task(s) — %d running, %d stopped",
+                    scalar @tasks, scalar @running, scalar @stopped));
+            for my $t (sort { $a->{name} cmp $b->{name} } @running) {
+                my $last = $t->{last_tick}
+                    ? sprintf('%ds ago', $now_s - $t->{last_tick})
+                    : 'never';
+                botNotice($self, $nick, sprintf("  %-30s  every %4ds  ticks: %d  last: %s",
+                    $t->{name}, $t->{interval}, $t->{ticks}, $last));
+            }
+        } else {
+            botNotice($self, $nick, "Scheduler: no tasks registered.");
+        }
+    }
+
     logBot($self, $ctx->message, undef, 'status', undef);
 }
 
