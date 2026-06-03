@@ -1323,6 +1323,7 @@ sub displayUrlTitle {
                 return undef;
             }
             # Delegate to Mediabot::External::displayYoutubeDetails which uses the YouTube Data API v3
+            eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'youtube' }) if $self->{metrics}; };
             return Mediabot::External::displayYoutubeDetails($self, $message, $sNick, $sChannel, $url);
         }
     
@@ -1332,6 +1333,7 @@ sub displayUrlTitle {
                 $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Instagram)");
                 return undef;
             }
+            eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'instagram' }) if $self->{metrics}; };
             return _handle_instagram($self, $message, $sNick, $sChannel, $url);
         }
     
@@ -1341,6 +1343,7 @@ sub displayUrlTitle {
                 $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Spotify)");
                 return undef;
             }
+            eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'spotify' }) if $self->{metrics}; };
             return Mediabot::External::_handle_spotify($self, $message, $sNick, $sChannel, $url);
         }
     
@@ -1350,6 +1353,7 @@ sub displayUrlTitle {
                 $self->{logger}->log(4, "displayUrlTitle() AppleMusic chanset not enabled on $sChannel");
                 return undef;
             }
+            eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'applemusic' }) if $self->{metrics}; };
             return _handle_applemusic($self, $message, $sNick, $sChannel, $url);
         }
     
@@ -1359,6 +1363,7 @@ sub displayUrlTitle {
                 $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Facebook)");
                 return undef;
             }
+            eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'facebook' }) if $self->{metrics}; };
             return _handle_facebook($self, $message, $sNick, $sChannel, $url);
         }
     
@@ -1368,6 +1373,7 @@ sub displayUrlTitle {
                 $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (X/Twitter)");
                 return undef;
             }
+            eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'x_twitter' }) if $self->{metrics}; };
             return _handle_x_twitter($self, $message, $sNick, $sChannel, $url);
         }
     
@@ -1376,6 +1382,7 @@ sub displayUrlTitle {
             $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel");
             return undef;
         }
+        eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'generic' }) if $self->{metrics}; };
         return _handle_generic_title($self, $message, $sNick, $sChannel, $url);
     };
     if ($@) {

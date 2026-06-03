@@ -3504,7 +3504,7 @@ sub mbRemindCancel_ctx {
         UPDATE REMINDERS SET delivered = 2
         WHERE id_reminder = ? AND from_nick = ? AND delivered = 0
     });
-    unless ($sth && $sth->execute($id, $nick)) {
+    unless ($sth && $sth->execute($id, lc($nick))) {
         botNotice($self, $nick, 'Database error.');
         $sth->finish if $sth;
         return;
@@ -3608,10 +3608,11 @@ sub mbWordCount_ctx {
     #   !wordcount <period>
     #   !wordcount <nick> <period>
     # where <period> is today/yesterday/week/Nd/Nh.
-    my $period_re = qr/^(?:today|yesterday|week|\d+[dh])$/i;
+    my $period_re = qr/^(?:today|yesterday|week|all|\d+[dh])$/i;
 
     my $target = lc($nick);
     my $period_arg;
+    my $no_limit = 0;  # mb102-IMP2: option all = pas de LIMIT
 
     if (@args) {
         if (defined($args[0]) && $args[0] =~ $period_re) {
@@ -3636,6 +3637,10 @@ sub mbWordCount_ctx {
         } elsif ($p eq 'week') {
             $period_sql   = "AND cl.ts >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)";
             $period_label = " (this week)";
+        } elsif ($p eq 'all') {
+            # mb102-IMP2: pas de LIMIT — peut être lent sur gros datasets
+            $no_limit     = 1;
+            $period_label = " (all time, no limit — may be slow)";
         } elsif ($p =~ /^(\d+)(d|h)$/i) {
             my ($val, $unit) = ($1, lc $2);
             my $interval = $unit eq 'h' ? "$val HOUR" : "$val DAY";
@@ -3644,15 +3649,16 @@ sub mbWordCount_ctx {
         }
     }
 
-    # mb92-B1: LIMIT 50000
+    # mb92-B1: LIMIT 50000 par défaut — mb102-IMP2: désactivé si option 'all'
     my $ROW_LIMIT = 50_000;
+    my $limit_clause = $no_limit ? '' : "LIMIT $ROW_LIMIT";
     my $sth = $self->{dbh}->prepare(qq{
         SELECT publictext FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE cl.nick = ? AND c.name = ? AND publictext IS NOT NULL
         $period_sql
         ORDER BY cl.id_channel_log DESC
-        LIMIT $ROW_LIMIT
+        $limit_clause
     });
     unless ($sth && $sth->execute($target, $channel)) {
         botNotice($self, $nick, 'Database error.');
@@ -3677,7 +3683,7 @@ sub mbWordCount_ctx {
         ? '  | top words: ' . join(', ', map { "$_ ($words{$_})" } @top5)
         : '';
     # mb92-B1: avertir si le résultat est tronqué
-    my $trunc_note = $rows_read >= $ROW_LIMIT ? " [last 50k msgs]" : "";
+    my $trunc_note = (!$no_limit && $rows_read >= $ROW_LIMIT) ? " [last 50k msgs]" : "";
     botPrivmsg($self, $channel, "$target: $distinct distinct word(s) on $channel$period_label$trunc_note$top_str");
     return 1;
 }
@@ -4232,6 +4238,7 @@ sub mbKarmaHist_ctx {
         return 1;
     }
 
+    my $kh_source = @db_entries ? '' : ' [memory]';
     my @entries = reverse @$klog;  # most recent first
     if ($filter) {
         @entries = grep { lc($_->{nick}) eq $filter } @entries;
@@ -4249,7 +4256,7 @@ sub mbKarmaHist_ctx {
     my $kh_pos = scalar grep { ($_->{delta}//"") eq "+1" } @entries;
     my $kh_neg = scalar(@entries) - $kh_pos;
     my $kh_summary = @entries ? " (+$kh_pos/-$kh_neg)" : "";
-    botPrivmsg($self, $kh_reply, "$nick: $label$on_str$kh_summary:");
+    botPrivmsg($self, $kh_reply, "$nick: $label$on_str$kh_summary$kh_source:");
     for my $e (@entries) {
         my $sign  = $e->{score} > 0 ? '+' : '';
         my $delta = $e->{delta};
@@ -4264,8 +4271,8 @@ sub mbKarmaHist_ctx {
 }
 
 # ---------------------------------------------------------------------------
-# mbLast_ctx --- !last <nick>
-# Show the last message posted by a nick on the current channel.
+# mbLast_ctx --- !last <nick> [n]
+# Show the last N messages posted by a nick on the current channel. Max 5.
 # ---------------------------------------------------------------------------
 sub mbLast_ctx {
     my ($ctx) = @_;
@@ -4276,12 +4283,20 @@ sub mbLast_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     unless (@args && defined $args[0] && $args[0] ne '') {
-        botNotice($self, $nick, 'Syntax: last <nick>');
+        botNotice($self, $nick, 'Syntax: last <nick> [n]  (n = 1-5, default 1)');
         return;
     }
     my $target = lc($args[0]);
 
-    my $sth = $self->{dbh}->prepare(q{
+    # mb107-IMP2: option [n] — afficher les N derniers messages (max 5)
+    my $limit = 1;
+    if (defined $args[1] && $args[1] =~ /^(\d+)$/) {
+        $limit = int($1);
+        $limit = 1 if $limit < 1;
+        $limit = 5 if $limit > 5;
+    }
+
+    my $sth = $self->{dbh}->prepare(qq{
         SELECT cl.publictext, cl.ts,
                TIMESTAMPDIFF(MINUTE, cl.ts, NOW()) AS minutes_ago
         FROM CHANNEL_LOG cl
@@ -4289,33 +4304,49 @@ sub mbLast_ctx {
         WHERE cl.nick = ? AND c.name = ?
           AND cl.publictext IS NOT NULL AND cl.publictext != ''
         ORDER BY cl.ts DESC
-        LIMIT 1
+        LIMIT $limit
     });
     unless ($sth && $sth->execute($target, $channel)) {
         botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
     }
-    my $row = $sth->fetchrow_hashref;
+    my @rows;
+    while (my $row = $sth->fetchrow_hashref) { push @rows, $row; }
     $sth->finish;
 
-    unless ($row) {
+    unless (@rows) {
         botPrivmsg($self, $channel, "$target: no message found on $channel.");
         return 1;
     }
 
-    my $ago = $row->{minutes_ago};
-    my $ago_str = $ago < 60
-        ? "${ago}m ago"
-        : $ago < 1440
-            ? sprintf('%dh %dm ago', int($ago/60), $ago%60)
-            : sprintf('%dd %dh ago', int($ago/1440), int(($ago%1440)/60));
+    my $fmt_ago = sub {
+        my ($ago) = @_;
+        return $ago < 60
+            ? "${ago}m ago"
+            : $ago < 1440
+                ? sprintf('%dh %dm ago', int($ago/60), $ago%60)
+                : sprintf('%dd %dh ago', int($ago/1440), int(($ago%1440)/60));
+    };
 
-    # FF9: add exact time to the ago string
-    my $time_exact = "";
-    if ($row->{ts} && $row->{ts} =~ /\d{4}-\d{2}-\d{2} (\d{2}:\d{2})/) {
-        $time_exact = ", $1";
+    if ($limit == 1) {
+        my $row = $rows[0];
+        my $ago_str   = $fmt_ago->($row->{minutes_ago});
+        my $time_exact = '';
+        if ($row->{ts} && $row->{ts} =~ /\d{4}-\d{2}-\d{2} (\d{2}:\d{2})/) {
+            $time_exact = ", $1";
+        }
+        botPrivmsg($self, $channel,
+            "$target last said ($ago_str${time_exact} on $channel): \"$row->{publictext}\"");
+    } else {
+        botPrivmsg($self, $channel, "Last ${\scalar(@rows)} message(s) from $target on $channel:");
+        for my $row (reverse @rows) {
+            my $ago_str = $fmt_ago->($row->{minutes_ago});
+            my $time_exact = '';
+            if ($row->{ts} && $row->{ts} =~ /\d{4}-\d{2}-\d{2} (\d{2}:\d{2})/) {
+                $time_exact = " [$1]";
+            }
+            botPrivmsg($self, $channel, "  ($ago_str$time_exact) $row->{publictext}");
+        }
     }
-    botPrivmsg($self, $channel,
-        "$target last said ($ago_str${time_exact} on $channel): \"$row->{publictext}\"");
     return 1;
 }
 
@@ -5015,19 +5046,66 @@ sub mbKarmaDiff_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    # mb109-IMP1: !karmadiff all [period] — top 5 variations sur la période
+    if (@args && lc($args[0]) eq 'all') {
+        shift @args;
+        my $window_secs  = 86400;
+        my $window_label = '24h';
+        if (@args && $args[0] =~ /^(\d+)(d|h)$/) {
+            my ($val, $unit) = ($1, $2);
+            $window_secs  = $unit eq 'h' ? $val * 3600 : $val * 86400;
+            $window_secs  = 3600    if $window_secs < 3600;
+            $window_secs  = 2592000 if $window_secs > 2592000;
+            $window_label = "${val}${unit}";
+        }
+        my $kd_chan = (defined $channel && $channel =~ /^#/) ? $channel : undef;
+        my @all_entries;
+        if ($kd_chan) {
+            @all_entries = @{ $self->{_karma_log}{$kd_chan} // [] };
+        } else {
+            for my $ch (keys %{ $self->{_karma_log} // {} }) {
+                push @all_entries, @{ $self->{_karma_log}{$ch} // [] };
+            }
+        }
+        my $now   = time();
+        my $since = $now - $window_secs;
+        my %deltas;
+        for my $e (grep { ($_->{ts} // 0) >= $since } @all_entries) {
+            $deltas{lc($e->{nick})} += (($e->{delta} // '') eq '+1' ? 1 : -1);
+        }
+        unless (%deltas) {
+            botPrivmsg($self, $kd_chan // $nick, "No karma activity in the last $window_label.");
+            return 1;
+        }
+        my @sorted = (sort { abs($deltas{$b}) <=> abs($deltas{$a}) || $a cmp $b } keys %deltas)[0..4];
+        @sorted = grep { defined } @sorted;
+        my @parts = map {
+            my $d = $deltas{$_};
+            my $sign = $d > 0 ? '+' : '';
+            "$_: ${sign}${d}"
+        } @sorted;
+        botPrivmsg($self, $kd_chan // $nick,
+            "Karma top movers (last $window_label): " . join('  |  ', @parts));
+        return 1;
+    }
+
     my $target  = @args ? lc($args[0]) : lc($nick);
 
-    # mb89-IMP1: fenêtre temporelle configurable — 6h, 12h, 24h (défaut), 7d
+    # mb89-IMP1 / mb108-IMP2: fenêtre temporelle configurable
+    # Formes acceptées : 6h, 12h, 24h (défaut), 7d — et maintenant toute forme Nd/Nh
     my $window_secs  = 86400;
     my $window_label = '24h';
     if (@args >= 2) {
         my $w = lc($args[1]);
-        if    ($w eq '6h')  { $window_secs = 21600;  $window_label = '6h';  }
-        elsif ($w eq '12h') { $window_secs = 43200;  $window_label = '12h'; }
-        elsif ($w eq '24h') { $window_secs = 86400;  $window_label = '24h'; }
-        elsif ($w eq '7d')  { $window_secs = 604800; $window_label = '7d';  }
-        else {
-            botNotice($self, $nick, "Unknown window '$w'. Use: 6h 12h 24h 7d");
+        if ($w =~ /^(\d+)(d|h)$/) {
+            my ($val, $unit) = ($1, $2);
+            $window_secs  = $unit eq 'h' ? $val * 3600 : $val * 86400;
+            $window_secs  = 3600    if $window_secs < 3600;    # min 1h
+            $window_secs  = 2592000 if $window_secs > 2592000; # max 30d
+            $window_label = "${val}${unit}";
+        } else {
+            botNotice($self, $nick, "Unknown window '$w'. Use: 6h 12h 24h 7d 30d ...");
             return;
         }
     }
@@ -5328,6 +5406,13 @@ sub mbActive_ctx {
             $date_filter     = "cl.ts >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)";
             $use_date_filter = 1;
             $label           = 'this week';
+        } elsif ($p eq 'month') {
+            $date_filter     = "YEAR(cl.ts) = YEAR(CURDATE()) AND MONTH(cl.ts) = MONTH(CURDATE())";
+            $use_date_filter = 1;
+            $label           = 'this month';
+        } elsif ($p eq 'now') {
+            $interval = '60 MINUTE';
+            $label    = 'last 60min';
         } elsif ($p =~ /^(\d+)(d|h)$/i) {
             my ($v, $u) = ($1, lc $2);
             $interval = $u eq 'h' ? "$v HOUR" : "$v DAY";
@@ -5365,6 +5450,22 @@ sub mbActive_ctx {
     } else {
         botPrivmsg($self, $channel, "No activity in $label on $channel.");
     }
+
+    # mb105-IMP1: pour le mode 'now', ajouter aussi les nicks présents en ce moment (nicklist mémoire)
+    if ($label eq 'last 60min') {
+        my @online = eval { $self->gethChannelsNicksOnChan($channel) };
+        if (@online) {
+            my $active_set = { map { lc($_->[0]) => 1 } @nicks };
+            my @online_only = grep { !$active_set->{lc($_)} } @online;
+            if (@online_only) {
+                my $silent = join(', ', sort @online_only);
+                $silent = substr($silent, 0, 350) . '...' if length($silent) > 350;
+                botPrivmsg($self, $channel,
+                    "Present but silent in last 60min: $silent (" . scalar(@online_only) . " nick(s))");
+            }
+        }
+    }
+
     return 1;
 }
 
@@ -5888,6 +5989,88 @@ sub mbTrivia_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    # mb104-IMP1: !trivia reset [nick] — réinitialiser score
+    # Sans nick : reset all (Owner only). Avec nick : délègue à mbTriviaReset_ctx (Master)
+    if (@args && lc($args[0]) eq 'reset') {
+        if (@args > 1) {
+            # Reset un nick spécifique — niveau Master suffit (mbTriviaReset_ctx)
+            my @new_args = @args[1..$#args];
+            $ctx->{args} = \@new_args;
+            return mbTriviaReset_ctx($ctx);
+        }
+        # Reset all — Owner only
+        return unless $ctx->require_level('Owner');
+        my $sth_c = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+        unless ($sth_c && $sth_c->execute($channel)) {
+            botNotice($self, $nick, 'DB error.'); return;
+        }
+        my $rc = $sth_c->fetchrow_hashref; $sth_c->finish;
+        unless ($rc) { botNotice($self, $nick, 'Channel not found.'); return; }
+        my $sth = $self->{dbh}->prepare('DELETE FROM TRIVIA_SCORES WHERE id_channel = ?');
+        unless ($sth && $sth->execute($rc->{id_channel})) {
+            botNotice($self, $nick, 'DB error.'); $sth->finish if $sth; return;
+        }
+        my $rows = $sth->rows; $sth->finish;
+        botPrivmsg($self, $channel, "All trivia scores reset on $channel ($rows row(s) deleted).");
+        return 1;
+    }
+
+
+    if (@args && lc($args[0]) eq 'myscore') {
+        my $target = @args > 1 ? lc($args[1]) : lc($nick);
+        my $sth_ms = $self->{dbh}->prepare(q{
+            SELECT ts.score, ts.last_correct,
+                   (SELECT COUNT(*)+1 FROM TRIVIA_SCORES ts2
+                    JOIN CHANNEL c2 ON c2.id_channel = ts2.id_channel
+                    WHERE c2.name = ? AND ts2.score > ts.score) AS rank
+            FROM TRIVIA_SCORES ts
+            JOIN CHANNEL c ON c.id_channel = ts.id_channel
+            WHERE c.name = ? AND ts.nick = ?
+        });
+        unless ($sth_ms && $sth_ms->execute($channel, $channel, $target)) {
+            botNotice($self, $nick, 'DB error.'); return;
+        }
+        my $r = $sth_ms->fetchrow_hashref; $sth_ms->finish;
+        unless ($r) {
+            botPrivmsg($self, $channel, "$target has no trivia score on $channel yet."); return 1;
+        }
+        botPrivmsg($self, $channel, sprintf(
+            "Trivia score for %s on %s: %d correct answer(s)  |  rank #%d  |  last: %s",
+            $target, $channel, $r->{score}, $r->{rank}, $r->{last_correct} // '?'));
+        return 1;
+    }
+
+
+    if (@args && lc($args[0]) eq 'leaderboard') {
+        my $limit = (defined $args[1] && $args[1] =~ /^\d+$/) ? int($args[1]) : 5;
+        $limit = 1  if $limit < 1;
+        $limit = 10 if $limit > 10;
+        my $sth_lb = $self->{dbh}->prepare(q{
+            SELECT ts.nick, ts.score, ts.last_correct
+            FROM TRIVIA_SCORES ts
+            JOIN CHANNEL c ON c.id_channel = ts.id_channel
+            WHERE c.name = ?
+            ORDER BY ts.score DESC, ts.last_correct DESC
+            LIMIT ?
+        });
+        unless ($sth_lb && $sth_lb->execute($channel, $limit)) {
+            botNotice($self, $nick, 'DB error fetching leaderboard.'); return;
+        }
+        my @lb;
+        while (my $r = $sth_lb->fetchrow_hashref) { push @lb, $r; }
+        $sth_lb->finish;
+        unless (@lb) {
+            botPrivmsg($self, $channel, "No trivia scores yet on $channel."); return 1;
+        }
+        botPrivmsg($self, $channel, "Trivia leaderboard on $channel (top $limit):");
+        my $rank = 1;
+        for my $r (@lb) {
+            botPrivmsg($self, $channel, sprintf("  %d. %-20s %d correct answer(s)  (last: %s)",
+                $rank++, $r->{nick}, $r->{score}, $r->{last_correct} // '?'));
+        }
+        return 1;
+    }
+
     # V1: !trivia start N — multi-round mode with cumulative scores
     if (@args && lc($args[0]) eq 'start' && $args[1] && $args[1] =~ /^(\d+)$/) {
         my $rounds = int($args[1]); $rounds = 1 if $rounds < 1; $rounds = 20 if $rounds > 20;
@@ -5921,8 +6104,14 @@ sub mbTrivia_ctx {
         return 1;
     }
     # X5: optional category filter
-    my $trivia_cat = (@args && $args[0] !~ /^\d/) ? lc(shift @args) : undef;
+    my $trivia_cat = (@args && $args[0] !~ /^\d/ && $args[0] !~ /^(?:easy|medium|hard)$/i) ? lc(shift @args) : undef;
     my $trivia_cat_id = defined $trivia_cat ? ($trivia_cats{$trivia_cat} // undef) : undef;
+
+    # mb105-IMP2: optional difficulty filter — easy / medium / hard
+    my $trivia_diff;
+    if (@args && $args[0] =~ /^(?:easy|medium|hard)$/i) {
+        $trivia_diff = lc(shift @args);
+    }
 
     # V1: increment round counter
     if ($self->{_trivia}{$channel}{multi_total}) {
@@ -5932,9 +6121,10 @@ sub mbTrivia_ctx {
         botPrivmsg($self, $channel, "Round $cur/$tot:");
     }
     my $http = Mediabot::External::_make_http(timeout => 8, verify_SSL => 1);
-    # CC4: build URL with optional category ID
+    # CC4: build URL with optional category ID + difficulty
     my $trivia_url = 'https://opentdb.com/api.php?amount=1&type=multiple';
     $trivia_url .= "&category=$trivia_cat_id" if defined $trivia_cat_id;
+    $trivia_url .= "&difficulty=$trivia_diff" if defined $trivia_diff;
     my $res  = eval { $http->get($trivia_url) }
               // { success => 0 };
     unless ($res->{success}) {
@@ -5964,13 +6154,23 @@ sub mbTrivia_ctx {
         answer_display => $answer,
         started        => time(),
         hint_given     => 0,   # B2/fix: reset hint_given for each new question
-        category       => ($q->{category} // undef),  # DD6: store for timeout display
+        category       => ($q->{category}   // undef),  # DD6: store for timeout display
+        difficulty     => ($q->{difficulty} // undef),  # mb107-IMP1: store for correct reply
         scores         => ($_prev->{scores}       // {}),
         multi_total    => $_prev->{multi_total},       # mb84-B1: carry over round count
         multi_current  => $_prev->{multi_current},     # mb84-B1: carry over current round
     };
     my $opts = join('  ', map { "[$_]" } @choices);
-    botPrivmsg($self, $channel, "Trivia ($q->{category}): $question");
+    # mb106-IMP1: tag de difficulté dans la question
+    my $diff_tag = '';
+    if (defined $q->{difficulty} && $q->{difficulty} ne '') {
+        my %diff_colors = ( easy => "\x0303", medium => "\x0308", hard => "\x0304" );
+        my $dl = lc($q->{difficulty});
+        my $col = $diff_colors{$dl} // '';
+        $diff_tag = " ${col}[" . uc($dl) . "]\x0f" if $col;
+        $diff_tag = " [" . uc($dl) . "]" unless $col;
+    }
+    botPrivmsg($self, $channel, "Trivia$diff_tag ($q->{category}): $question");
     botPrivmsg($self, $channel, "Choices: $opts -- reply with !answer <choice> or just say it (30s)");
     # Set a timeout via Scheduler or alarm — simplified: check in PRIVMSG hook
     # K3: configurable timeout (main.TRIVIA_TIMEOUT, default 30s)
@@ -5989,10 +6189,17 @@ sub checkTriviaAnswer {
     return unless $trivia && $trivia->{active};
     if (time() > $trivia->{deadline}) {
         $trivia->{active} = 0;
-        # DD6: enriched timeout message with category
-        my $cat_str = $trivia->{category} ? " ($trivia->{category})" : '';
+        # DD6: enriched timeout message with category + mb108-IMP1: difficulty
+        my $cat_str  = $trivia->{category}   ? " ($trivia->{category})"  : '';
+        my $diff_str = '';
+        if (defined $trivia->{difficulty} && $trivia->{difficulty} ne '') {
+            my %dc = ( easy => "\x0303", medium => "\x0308", hard => "\x0304" );
+            my $dl = lc($trivia->{difficulty});
+            my $c  = $dc{$dl} // '';
+            $diff_str = $c ? " ${c}[" . uc($dl) . "]\x0f" : " [" . uc($dl) . "]";
+        }
         Mediabot::Helpers::botPrivmsg($self, $channel,
-            "Time's up! The answer was: $trivia->{answer_display}${cat_str}");
+            "Time's up!$diff_str The answer was: $trivia->{answer_display}${cat_str}");
         $self->{metrics}->inc('mediabot_trivia_timeout_total') if $self->{metrics};
         return;
     }
@@ -6042,8 +6249,15 @@ sub checkTriviaAnswer {
     }
     $self->{metrics}->inc('mediabot_trivia_correct_total') if $self->{metrics};
     my $score = $trivia->{scores}{$nick};
+    my $diff_str = '';
+    if (defined $trivia->{difficulty} && $trivia->{difficulty} ne '') {
+        my %diff_colors = ( easy => "\x0303", medium => "\x0308", hard => "\x0304" );
+        my $dl  = lc($trivia->{difficulty});
+        my $col = $diff_colors{$dl} // '';
+        $diff_str = $col ? " ${col}[" . uc($dl) . "]\x0f" : " [" . uc($dl) . "]";
+    }
     Mediabot::Helpers::botPrivmsg($self, $channel,
-        "Correct, $nick! The answer was: $trivia->{answer_display}  (score: $score)");
+        "Correct, $nick!$diff_str The answer was: $trivia->{answer_display}  (score: $score)");
     # W1: show intermediate scores in multi-round mode
     if ($trivia->{multi_total}) {
         my $cur = $trivia->{multi_current} // 0;

@@ -58,6 +58,49 @@ sub new {
 
 =head2 Accessors
 
+Read-only attribute accessors for the User object.
+
+=over 4
+
+=item B<id>
+
+Returns the numeric user ID (C<id_user> in DB).
+
+=item B<nickname>
+
+Returns the user's registered nickname (primary identifier).
+
+=item B<username>
+
+Returns the login username (may differ from nickname).
+
+=item B<password>
+
+Returns the hashed password (MD5 or bcrypt depending on config).
+
+=item B<info1>, B<info2>
+
+Returns optional free-text info fields stored in the USER table.
+
+=item B<level>
+
+Returns the privilege level string (e.g. C<"Master">, C<"Administrator">,
+C<"Owner">, C<"Voice">, C<"User">).
+
+=item B<level_description>
+
+Returns the human-readable description of the privilege level.
+
+=item B<is_authenticated>
+
+Returns C<1> if the user is currently logged in, C<0> otherwise.
+
+=item B<hostmasks>
+
+Returns an arrayref of known hostmasks for this user (from USER_HOSTMASK).
+
+=back
+
 =cut
 
 sub id                { $_[0]->{id} }
@@ -198,6 +241,20 @@ sub handle {
 =head1 AUTHOR
 
 Christophe <teuk@teuk.org>
+
+=head2 handle
+
+    my $handle = $user->handle;
+
+Alias for C<nickname>. Returns the user's nickname.
+
+=head2 has_level($required_level)
+
+    $user->has_level('Master');   # 1 if Master or above
+    $user->has_level('Administrator');
+
+Returns C<1> if the user's privilege level is sufficient for C<$required_level>.
+Level hierarchy (ascending privilege): C<User> < C<Administrator> < C<Master> < C<Owner>.
 
 =cut
 

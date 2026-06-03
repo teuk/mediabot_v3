@@ -559,19 +559,46 @@ sub claude_ctx {
         return 1;
     }
 
-    # BB8: !ai models — list known Claude models
+    # BB8: !ai models — list Claude models (mb103-IMP2: appel API dynamique avec fallback statique)
     if (@args && lc($args[0]) eq 'models') {
-        my @known = qw(
+        my $current = _chatgpt_conf_string($self, 'anthropic.MODEL', CLAUDE_MODEL);
+        my $api_key = _chatgpt_conf_string($self, 'anthropic.API_KEY', '');
+
+        my @fetched;
+        if ($api_key ne '') {
+            eval {
+                my $http = Mediabot::External::_make_http(timeout => 8);
+                my $res  = $http->get(
+                    CLAUDE_API_URL =~ s{/messages$}{/models}r,
+                    { headers => {
+                        'x-api-key'         => $api_key,
+                        'anthropic-version' => CLAUDE_API_VERSION,
+                    }}
+                );
+                if ($res->{success}) {
+                    my $data = decode_json($res->{content});
+                    if (ref($data->{data}) eq 'ARRAY') {
+                        @fetched = map { $_->{id} }
+                                   grep { ref($_) eq 'HASH' && $_->{id} =~ /^claude-/i }
+                                   @{ $data->{data} };
+                    }
+                }
+            };
+            $self->{logger}->log(3, "!ai models API error: $@") if $@;
+        }
+
+        my @known = @fetched ? @fetched : qw(
             claude-opus-4-8
             claude-opus-4-7
             claude-opus-4-6
             claude-sonnet-4-6
             claude-haiku-4-5-20251001
         );
-        # mb84-B7: utiliser CLAUDE_MODEL comme fallback (cohérent avec le reste de claudeAI)
-        my $current = _chatgpt_conf_string($self, 'anthropic.MODEL', CLAUDE_MODEL);
+
         my @labeled = map { $_ eq $current ? "$_ (current)" : $_ } @known;
-        Mediabot::Helpers::botNotice($self, $nick, 'Available Claude models: ' . join('  |  ', @labeled));
+        my $source  = @fetched ? ' [live]' : ' [static]';
+        Mediabot::Helpers::botNotice($self, $nick,
+            "Available Claude models$source: " . join('  |  ', @labeled));
         return 1;
     }
 
@@ -667,6 +694,9 @@ sub claude_ctx {
         if (defined $channel) {
             $self->{_claude_summary_ts}{"summary_last:$channel"} = time();
         }
+        # mb108-IMP4: notifier immédiatement le nb de messages analysés (feedback avant l'appel API)
+        Mediabot::Helpers::botNotice($self, $nick,
+            "Summarising $n_found message(s)${who_str}${date_label} on $channel...");
         my $summary_prompt = "Summarise this IRC conversation${who_str}${date_label} ($n_found messages) in 2-3 sentences:\n$transcript";
         # Call Claude with injected prompt, output as notice to caller
         return claudeAI($self, $ctx->message, $nick, undef,

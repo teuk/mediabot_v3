@@ -4494,15 +4494,14 @@ sub _cmd_nickinfo {
     my $bot = $self->{bot};
     my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
     return unless $dbh;
+    # mb109-B1: USER a 'nickname' pas 'nick', pas de email/USER_LOG/USER_HOST
     my $sth = $dbh->prepare(q{
-        SELECT u.nick, u.id_user, u.email,
-               GROUP_CONCAT(DISTINCT h.hostname ORDER BY h.hostname SEPARATOR ' | ') AS hosts,
-               MAX(ls.login_at) AS last_login
+        SELECT u.nickname, u.id_user, u.username, u.info1, u.info2,
+               u.birthday, u.last_login,
+               ul.description AS level
         FROM USER u
-        LEFT JOIN USER_HOST h  ON h.id_user  = u.id_user
-        LEFT JOIN USER_LOG  ls ON ls.id_user = u.id_user
-        WHERE LOWER(u.nick) = ?
-        GROUP BY u.id_user
+        JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
+        WHERE LOWER(u.nickname) = ?
     });
     unless ($sth && $sth->execute($target)) {
         $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
@@ -4511,10 +4510,13 @@ sub _cmd_nickinfo {
     unless ($r) {
         $stream->write("$target: not found in DB.\r\n"); return;
     }
-    $stream->write("Nick     : $r->{nick}\r\n");
+    $stream->write("Nick     : $r->{nickname}\r\n");
     $stream->write("ID       : $r->{id_user}\r\n");
-    $stream->write("Email    : " . ($r->{email}  // 'N/A') . "\r\n");
-    $stream->write("Hosts    : " . ($r->{hosts}  // 'none') . "\r\n");
+    $stream->write("Level    : " . ($r->{level}    // 'N/A') . "\r\n");
+    $stream->write("Username : " . ($r->{username} // 'N/A') . "\r\n");
+    $stream->write("Info1    : " . ($r->{info1}    // 'N/A') . "\r\n") if $r->{info1};
+    $stream->write("Info2    : " . ($r->{info2}    // 'N/A') . "\r\n") if $r->{info2};
+    $stream->write("Birthday : " . ($r->{birthday} // 'N/A') . "\r\n") if $r->{birthday};
     # Y1: compute age of last login
     my $ll = $r->{last_login} // '';
     if ($ll =~ /^(\d{4})-(\d{2})-(\d{2})/) {
@@ -4528,7 +4530,6 @@ sub _cmd_nickinfo {
     }
     $stream->write("Last login: " . ($ll || 'never') . "\r\n");
 }
-
 sub _cmd_who_chan {
     my ($self, $stream, $id, $args) = @_;
     my $bot  = $self->{bot};
@@ -4544,16 +4545,17 @@ sub _cmd_who_chan {
     my %levels;
     if ($dbh) {
         eval {
+            # mb109-B1: USER a 'nickname' pas 'nick'
             my $sth = $dbh->prepare(q{
-                SELECT u.nick, l.level FROM USER u
+                SELECT u.nickname, ul.description AS level FROM USER u
                 JOIN USER_CHANNEL uc ON uc.id_user = u.id_user
                 JOIN CHANNEL c ON c.id_channel = uc.id_channel
-                JOIN LEVEL l ON l.id_level = uc.id_level
+                JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
                 WHERE c.name = ?
             });
             if ($sth && $sth->execute($chan)) {
                 while (my $r = $sth->fetchrow_hashref) {
-                    $levels{lc $r->{nick}} = $r->{level};
+                    $levels{lc $r->{nickname}} = $r->{level};
                 }
                 $sth->finish;
             }

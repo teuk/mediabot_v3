@@ -1224,6 +1224,9 @@ sub on_message_NICK {
 
     # Change nick in %hChannelsNicks
     for my $sChannel (keys %hChannelsNicks) {
+        # mb107-B2: guard contre canal dont la nicklist n'est pas un ARRAY
+        next unless defined $hChannelsNicks{$sChannel}
+                 && ref($hChannelsNicks{$sChannel}) eq 'ARRAY';
         my $index;
         for ($index=0;$index<=$#{$hChannelsNicks{$sChannel}};$index++ ) {
             my $currentNick = ${$hChannelsNicks{$sChannel}}[$index];
@@ -1234,6 +1237,9 @@ sub on_message_NICK {
         }
     }
     $mediabot->sethChannelNicks(\%hChannelsNicks);
+    # mb108-IMP3: Prometheus counter — nick changes
+    $mediabot->{metrics}->inc('mediabot_nick_changes_total')
+        if $mediabot->{metrics};
     $mediabot->logBotAction($message,"nick",$old_nick,undef,$new_nick);
 }
 
@@ -1343,6 +1349,9 @@ sub on_message_PART {
         $mediabot->{metrics}->set('mediabot_channel_joined', 0, { channel => $target_name });
         $mediabot->{metrics}->set('mediabot_current_channels',
             scalar(keys %{ $mediabot->{channels} || {} }));
+    } elsif ($mediabot->{metrics}) {
+        # mb109-IMP2: Prometheus counter — other nick parts
+        $mediabot->{metrics}->inc('mediabot_parts_total', { channel => $target_name });
     }
 }
 
@@ -1853,6 +1862,9 @@ sub on_message_JOIN {
 
         push @{$hChannelsNicks{$target_name}}, $sNick;
         $mediabot->sethChannelNicks(\%hChannelsNicks);
+        # mb109-IMP2: Prometheus counter — other nick joins
+        $mediabot->{metrics}->inc('mediabot_joins_total', { channel => $target_name })
+            if $mediabot->{metrics};
     }
     $mediabot->logBotAction($message,"join",$sNick,$target_name,"");
 }

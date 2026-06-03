@@ -3129,7 +3129,10 @@ sub getRandomNick {
 	if (defined($self->{hChannelsNicks})) {
 		%hChannelsNicks = %{$self->{hChannelsNicks}};
 	}
-	my @tChannelNicks = @{$hChannelsNicks{$sChannel}};
+    # mb106-B1: guard contre canal inexistant ou liste vide
+    my $nicks_ref = $hChannelsNicks{$sChannel};
+    return '' unless defined $nicks_ref && ref($nicks_ref) eq 'ARRAY' && @$nicks_ref;
+	my @tChannelNicks = @$nicks_ref;
 	my $sRandomNick = $tChannelNicks[rand @tChannelNicks];
 	return $sRandomNick;
 }
@@ -3626,6 +3629,10 @@ sub channelNicksRemove {
 	if (defined($self->{hChannelsNicks})) {
 		%hChannelsNicks = %{$self->{hChannelsNicks}};
 	}
+    # mb107-B1: guard contre canal inexistant ou liste vide
+    return unless defined $hChannelsNicks{$sChannel}
+               && ref($hChannelsNicks{$sChannel}) eq 'ARRAY'
+               && @{$hChannelsNicks{$sChannel}};
 	my $index;
 	for ($index=0;$index<=$#{$hChannelsNicks{$sChannel}};$index++ ) {
 		my $currentNick = @{$hChannelsNicks{$sChannel}}[$index];

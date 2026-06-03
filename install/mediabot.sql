@@ -20,6 +20,7 @@
 --   [2026-05] REMINDERS: added (public/partyline reminders)
 --   [2026-05] BOT_ALIAS: added (owner-managed command aliases)
 --   [2026-05] KARMA: added (per-channel nick karma)
+--   [2026-06] KARMA_LOG: added (persistent karma vote history)
 --   [2026-04] PUBLIC_COMMANDS.active: already present in schema — apply to prod:
 --             ALTER TABLE PUBLIC_COMMANDS ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1;
 --
@@ -314,6 +315,28 @@ CREATE TABLE `KARMA` (
 -- ---------------------------------------------------------------------------
 -- MP3
 -- ---------------------------------------------------------------------------
+-- ---------------------------------------------------------------------------
+-- KARMA_LOG
+-- ---------------------------------------------------------------------------
+CREATE TABLE `KARMA_LOG` (
+  `id_karma_log` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_channel`   BIGINT UNSIGNED NOT NULL,
+  `nick`         VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL
+                 COMMENT 'Nick whose karma changed (lowercase)',
+  `delta`        TINYINT NOT NULL COMMENT '+1 or -1',
+  `from_nick`    VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL
+                 COMMENT 'Nick who cast the vote (lowercase)',
+  `score`        BIGINT NOT NULL DEFAULT 0
+                 COMMENT 'Karma score after the vote',
+  `ts`           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                 COMMENT 'Vote timestamp',
+  PRIMARY KEY (`id_karma_log`),
+  KEY `idx_karma_log_channel_nick` (`id_channel`, `nick`),
+  KEY `idx_karma_log_channel_ts`   (`id_channel`, `ts`),
+  KEY `idx_karma_log_from_nick`    (`from_nick`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Persistent history of karma votes per channel (I8)';
+
 CREATE TABLE `MP3` (
   `id_mp3`      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `id_user`     BIGINT UNSIGNED NOT NULL,
@@ -593,6 +616,10 @@ ALTER TABLE `KARMA`
 
 ALTER TABLE `TRIVIA_SCORES`
   ADD CONSTRAINT `fk_trivia_scores_channel` FOREIGN KEY (`id_channel`) REFERENCES `CHANNEL` (`id_channel`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE `KARMA_LOG`
+  ADD CONSTRAINT `fk_karma_log_channel` FOREIGN KEY (`id_channel`) REFERENCES `CHANNEL` (`id_channel`) ON DELETE CASCADE ON UPDATE CASCADE;
+
 
 ALTER TABLE `MP3`
   ADD CONSTRAINT `fk_mp3_user` FOREIGN KEY (`id_user`) REFERENCES `USER` (`id_user`) ON DELETE CASCADE ON UPDATE CASCADE;
