@@ -91,10 +91,37 @@ sub new {
     $self->_declare('mediabot_poll_votes_total',       'counter', 'Total votes cast across all polls');
     $self->_declare('mediabot_poll_duration_seconds',  'gauge',   'Duration in seconds of the last closed poll');
     $self->_declare('mediabot_karma_votes_total',      'counter', 'Total karma votes cast (++ and --)');
+    $self->_declare('mediabot_karmahist_requests_total','counter', 'Total !karmahist requests');
     $self->_declare('mediabot_karma_selfvote_blocked', 'counter', 'Total self-vote attempts blocked (Y2)');
     $self->_declare('mediabot_karma_cooldown_blocked', 'counter', 'Total karma votes blocked by cooldown (U6)');
     $self->_declare('mediabot_hailo_learn_reply_total','counter', 'Total Hailo learn_reply calls');
     $self->_declare('mediabot_hailo_timeout_total',    'counter', 'Total Hailo learn_reply timeouts (AA5)');
+
+    # mb102-mb109: métriques ajoutées lors des passes d'amélioration
+    $self->_declare('mediabot_urltitle_requests_total', 'counter',
+        'Total URL title lookups by type (mb102-IMP3)', ['type']);
+    $self->_declare('mediabot_ytsearch_requests_total', 'counter',
+        'Total YouTube search requests (L3)');
+    $self->_declare('mediabot_claude_requests_total',   'counter',
+        'Total Claude API requests');
+    $self->_declare('mediabot_claude_errors_total',     'counter',
+        'Total Claude API errors');
+    $self->_declare('mediabot_claude_ratelimit_total',  'counter',
+        'Total Claude API rate-limit hits');
+    $self->_declare('mediabot_nick_changes_total',      'counter',
+        'Total NICK changes seen (mb108-IMP3)');
+    $self->_declare('mediabot_joins_total',             'counter',
+        'Total JOIN events by channel (mb109-IMP2)', ['channel']);
+    $self->_declare('mediabot_parts_total',             'counter',
+        'Total PART events by channel (mb109-IMP2)', ['channel']);
+    $self->_declare('mediabot_trivia_correct_total',    'counter',
+        'Total correct trivia answers');
+    $self->_declare('mediabot_trivia_timeout_total',    'counter',
+        'Total trivia timeouts');
+    $self->_declare('mediabot_trivia_questions_total',  'counter',
+        'Total trivia questions asked (mb111-IMP3)');
+    $self->_declare('mediabot_wordcount_requests_total','counter',
+        'Total !wordcount requests (mb115 polish)');
 
     # Defaults
     if ($self->enabled) {

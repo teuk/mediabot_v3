@@ -543,6 +543,10 @@ sub channelSet_ctx {
                 $self->{logger}->log(1, "channelSet_ctx INSERT failed: $DBI::errstr");
             }
 
+            # mb111-IMP1: invalider le cache TTL de getIdChannelSet
+            my $ck = "$target_channel\x00$id_chanset_list";
+            delete $self->{_chanset_cache}{$ck};
+
             botNotice($self, $nick, "Chanset +$chanset applied to $target_channel");
 
             # Keep legacy side effects
@@ -562,6 +566,9 @@ sub channelSet_ctx {
             } else {
                 $self->{logger}->log(1, "channelSet_ctx DELETE failed: $DBI::errstr");
             }
+
+            # mb111-IMP1: invalider le cache TTL de getIdChannelSet
+            delete $self->{_chanset_cache}{"$target_channel\x00$id_chanset_list"};
 
             botNotice($self, $nick, "Chanset -$chanset removed from $target_channel");
         }
@@ -1009,6 +1016,9 @@ sub channelAddUser_ctx {
     }
     $sth->finish if $sth;
 
+    # mb112-IMP2: invalider le cache checkUserChannelLevel pour ce user/chan
+    delete $self->{_uchan_level_cache}{"$id_target_user\x00$channel"};
+
     $self->{logger}->log(1, "$nick added $target_handle to $channel at level $target_level");
     logBot($self, $ctx->message, $channel, "add", $channel, $target_handle, $target_level);
 
@@ -1155,6 +1165,9 @@ sub channelDelUser_ctx {
         return;
     }
     $sth->finish if $sth;
+
+    # mb112-IMP2: invalider le cache checkUserChannelLevel pour ce user/chan
+    delete $self->{_uchan_level_cache}{"$id_target\x00$channel"};
 
     logBot($self, $ctx->message, $channel, "del", $channel, $target_handle);
     botNotice($self, $nick, "User $target_handle removed from $channel");

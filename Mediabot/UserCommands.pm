@@ -3595,6 +3595,8 @@ sub mbWordCount_ctx {
 
     # mb85-B3: !karma log et !karma top étaient mal routés ici — déplacés dans mbKarma_ctx
 
+    $self->{metrics}->inc('mediabot_wordcount_requests_total') if $self->{metrics};
+
     # mb92/polish: wordcount is channel-scoped
     unless (defined($channel) && $channel =~ /^#/) {
         botNotice($self, $nick, "wordcount must be used from a channel.");
@@ -3684,7 +3686,36 @@ sub mbWordCount_ctx {
         : '';
     # mb92-B1: avertir si le résultat est tronqué
     my $trunc_note = (!$no_limit && $rows_read >= $ROW_LIMIT) ? " [last 50k msgs]" : "";
-    botPrivmsg($self, $channel, "$target: $distinct distinct word(s) on $channel$period_label$trunc_note$top_str");
+
+    # mb114/mb115: activity rank among nicks on this channel.
+    # Only calculate it for the unfiltered/default mode. Period filters and
+    # 'all' can already be expensive, so they deliberately skip this extra query.
+    #
+    # This is an activity-rank proxy based on logged line count, not an exact
+    # distinct-word rank for every nick. The exact distinct-word rank would need
+    # a much heavier full-channel tokenization pass.
+    my $rank_str = '';
+    unless (defined($period_arg) && $period_arg ne '') {
+        my $sth_rank = $self->{dbh}->prepare(qq{
+            SELECT COUNT(*) + 1 AS rank_pos FROM (
+                SELECT cl2.nick
+                FROM CHANNEL_LOG cl2
+                JOIN CHANNEL c2 ON c2.id_channel = cl2.id_channel
+                WHERE c2.name = ?
+                  AND cl2.nick != ?
+                  AND cl2.publictext IS NOT NULL
+                GROUP BY cl2.nick
+                HAVING COUNT(*) > ?
+            ) sub_q
+        });
+        if ($sth_rank && $sth_rank->execute($channel, $target, $rows_read)) {
+            my $r = $sth_rank->fetchrow_hashref;
+            $rank_str = "  | activity rank: #$r->{rank_pos}" if $r && defined $r->{rank_pos};
+            $sth_rank->finish;
+        }
+    }
+
+    botPrivmsg($self, $channel, "$target: $distinct distinct word(s) on $channel$period_label$trunc_note$rank_str$top_str");
     return 1;
 }
 
@@ -4844,23 +4875,46 @@ sub mbKarmaInfo_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-    my $target  = @args ? lc($args[0]) : lc($nick);
+    my $target  = @args ? lc(shift @args) : lc($nick);
+
+    # mb113-IMP1: mode 'all' — recherche cross-canal
+    my $all_chans = 0;
+    if (@args && lc($args[0]) eq 'all') {
+        $all_chans = 1;
+        shift @args;
+    }
+
+    # mb112-IMP1: période optionnelle Nd/Nh — borner le ring buffer
+    my $window_secs;
+    my $window_label = '';
+    if (@args && $args[0] =~ /^(\d+)(d|h)$/i) {
+        my ($val, $unit) = ($1, lc $2);
+        $window_secs  = $unit eq 'h' ? $val * 3600 : $val * 86400;
+        $window_secs  = 3600    if $window_secs < 3600;
+        $window_secs  = 2592000 if $window_secs > 2592000;
+        $window_label = " (last ${val}${unit})";
+        shift @args;
+    }
+    my $since = defined $window_secs ? time() - $window_secs : 0;
+
     # KI1/fix: karmainfo works in PM — use $channel if public, else nick-scoped log
-    my $klog_chan = (defined $channel && $channel =~ /^#/) ? $channel : undef;
+    # mb113-IMP1: mode 'all' force la recherche cross-canal
+    my $klog_chan = (!$all_chans && defined $channel && $channel =~ /^#/) ? $channel : undef;
     my @entries;
     if ($klog_chan) {
         my $klog = $self->{_karma_log}{$klog_chan} // [];
-        @entries = grep { lc($_->{nick}) eq $target } @$klog;
+        @entries = grep { lc($_->{nick}) eq $target && ($_->{ts}//0) >= $since } @$klog;
     } else {
-        # PM: search across all channels
+        # PM ou mode all: search across all channels
         for my $ch (keys %{ $self->{_karma_log} // {} }) {
-            push @entries, grep { lc($_->{nick}) eq $target }
+            push @entries, grep { lc($_->{nick}) eq $target && ($_->{ts}//0) >= $since }
                 @{ $self->{_karma_log}{$ch} // [] };
         }
     }
-    my $reply_to = $klog_chan // $nick;
+    my $all_label  = $all_chans ? ' (all channels)' : '';
+    my $reply_to   = $klog_chan // $nick;
     unless (@entries) {
-        botPrivmsg($self, $reply_to, "$target: no karma activity in log."); return 1;
+        botPrivmsg($self, $reply_to, "$target: no karma activity in log$window_label$all_label."); return 1;
     }
     my ($received_pos, $received_neg, $given_pos, $given_neg) = (0,0,0,0);
     my %givers;
@@ -4915,7 +4969,7 @@ sub mbKarmaInfo_ctx {
     my $pct_pos    = $recv_total > 0 ? int(100 * $received_pos / $recv_total) : 0;
     my $pct_str    = $recv_total > 0 ? ", ${pct_pos}% \x{2191}" : "";
     botPrivmsg($self, $reply_to,
-        "karmainfo $target$score_str$since_str: received ${sign}${net_received} "
+        "karmainfo $target$score_str$since_str [memory]$window_label$all_label: received ${sign}${net_received} "
         . "(+${received_pos}/-${received_neg}${pct_str})"
         . " | given: +${given_pos}/-${given_neg}"
         . " | top voter: $top_giver" . ($top_giver_count ? " (${top_giver_count}x)" : ''));
@@ -6172,6 +6226,8 @@ sub mbTrivia_ctx {
     }
     botPrivmsg($self, $channel, "Trivia$diff_tag ($q->{category}): $question");
     botPrivmsg($self, $channel, "Choices: $opts -- reply with !answer <choice> or just say it (30s)");
+    # mb111-IMP3: compteur Prometheus — questions posées
+    $self->{metrics}->inc('mediabot_trivia_questions_total') if $self->{metrics};
     # Set a timeout via Scheduler or alarm — simplified: check in PRIVMSG hook
     # K3: configurable timeout (main.TRIVIA_TIMEOUT, default 30s)
     my $trivia_timeout = eval { int($self->{conf}->get('main.TRIVIA_TIMEOUT') // 30) } // 30;

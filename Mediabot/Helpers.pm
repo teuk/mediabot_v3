@@ -707,33 +707,24 @@ sub checkUserLevel {
     return 0 unless defined($iUserLevel);
     return 0 unless defined($sLevelRequired) && $sLevelRequired ne '';
 
-    $self->{logger}->log(4, "checkUserLevel() $iUserLevel vs $sLevelRequired")
+    # mb111-IMP4: cache la table USER_LEVEL (statique — change jamais en runtime)
+    unless ($self->{_user_level_cache}) {
+        my $sth = $self->{dbh}->prepare("SELECT description, level FROM USER_LEVEL");
+        if ($sth && $sth->execute) {
+            while (my $r = $sth->fetchrow_hashref) {
+                $self->{_user_level_cache}{lc($r->{description})} = $r->{level};
+            }
+            $sth->finish;
+        }
+    }
+
+    my $required_level = $self->{_user_level_cache}{lc($sLevelRequired)};
+    return 0 unless defined $required_level;
+
+    $self->{logger}->log(4, "checkUserLevel() $iUserLevel vs $sLevelRequired ($required_level)")
         if $self->{logger};
 
-    my $sQuery = "SELECT level FROM USER_LEVEL WHERE description = ?";
-    my $sth = $self->{dbh}->prepare($sQuery);
-
-    unless ($sth) {
-        $self->{logger}->log(1, "checkUserLevel() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
-            if $self->{logger};
-        return 0;
-    }
-
-    unless ($sth->execute($sLevelRequired)) {
-        $self->{logger}->log(1, "checkUserLevel() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
-            if $self->{logger};
-        $sth->finish;
-        return 0;
-    }
-
-    my $ok = 0;
-    if (my $ref = $sth->fetchrow_hashref()) {
-        my $level = $ref->{level};
-        $ok = 1 if defined($level) && $iUserLevel <= $level;
-    }
-
-    $sth->finish;
-    return $ok;
+    return ($iUserLevel <= $required_level) ? 1 : 0;
 }
 
 
@@ -877,6 +868,19 @@ sub checkUserChannelLevel {
     return 0 unless defined($id_user)  && $id_user  ne '';
     return 0 unless defined($level);
 
+    # mb112-IMP2: cache TTL 60s — le niveau canal change rarement
+    my $cache_key = "$id_user\x00$sChannel";
+    my $now       = time();
+    my $ttl       = 60;
+    my $cached_level;
+    if (exists $self->{_uchan_level_cache}{$cache_key}) {
+        my $entry = $self->{_uchan_level_cache}{$cache_key};
+        if (($now - $entry->{ts}) < $ttl) {
+            $cached_level = $entry->{val};
+            return (defined $cached_level && $cached_level >= $level) ? 1 : 0;
+        }
+    }
+
     my $sQuery = "SELECT level FROM CHANNEL JOIN USER_CHANNEL ON USER_CHANNEL.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ? AND USER_CHANNEL.id_user = ?";
     my $sth = $self->{dbh}->prepare($sQuery);
 
@@ -896,7 +900,11 @@ sub checkUserChannelLevel {
     my $ok = 0;
     if (my $ref = $sth->fetchrow_hashref()) {
         my $iLevel = $ref->{level};
+        # Stocker dans le cache
+        $self->{_uchan_level_cache}{$cache_key} = { ts => $now, val => $iLevel };
         $ok = 1 if defined($iLevel) && $iLevel >= $level;
+    } else {
+        $self->{_uchan_level_cache}{$cache_key} = { ts => $now, val => undef };
     }
 
     $sth->finish;
@@ -1674,7 +1682,18 @@ sub getIdChannelSet {
         return undef;
     }
 
-    $self->{logger}->log(4, "🔍 getIdChannelSet() searching for chanset_list_id=$id_chanset_list in channel '$sChannel'")
+    # mb110-IMP1: cache TTL 120s — évite 2 requêtes SQL par botPrivmsg sur canal actif
+    my $cache_key = "$sChannel\x00$id_chanset_list";
+    my $now       = time();
+    my $ttl       = 120;
+    if (exists $self->{_chanset_cache}{$cache_key}) {
+        my $entry = $self->{_chanset_cache}{$cache_key};
+        if (($now - $entry->{ts}) < $ttl) {
+            return $entry->{val};
+        }
+    }
+
+    $self->{logger}->log(4, "getIdChannelSet() DB lookup chan=$sChannel id_chanset=$id_chanset_list")
         if $self->{logger};
 
     my $sQuery = q{
@@ -1702,15 +1721,13 @@ sub getIdChannelSet {
     my $id_channel_set;
     if (my $ref = $sth->fetchrow_hashref()) {
         $id_channel_set = $ref->{id_channel_set};
-        $self->{logger}->log(4, "✅ getIdChannelSet() found id_channel_set=$id_channel_set for channel '$sChannel' and chanset_list_id=$id_chanset_list")
-            if $self->{logger};
-    }
-    else {
-        $self->{logger}->log(4, "ℹ️ getIdChannelSet() no matching record for channel '$sChannel' and chanset_list_id=$id_chanset_list")
-            if $self->{logger};
     }
 
     $sth->finish;
+
+    # Stocker dans le cache (même si undef — canal sans ce chanset)
+    $self->{_chanset_cache}{$cache_key} = { ts => $now, val => $id_channel_set };
+
     return $id_channel_set;
 }
 

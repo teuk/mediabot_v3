@@ -3985,12 +3985,14 @@ sub _cmd_stat {
     my $ai_cache        = scalar keys %{ $bot->{_claude_prompt_cache} // {} };
     $stream->write("Claude: $claude_sessions active session(s), $ai_cache cached prompt(s)\r\n");
 
-    # IMP18: IRC command totals from Prometheus counters
+    # IMP18/mb115: IRC command totals from real Prometheus counters.
+    # Use public + private command counters; there is no aggregate IRC counter.
     if ($bot->{metrics}) {
-        my $cmds_pub  = eval { $bot->{metrics}->get('mediabot_commands_total') } // 0;
+        my $cmds_pub  = eval { $bot->{metrics}->get('mediabot_commands_public_total') } // 0;
+        my $cmds_priv = eval { $bot->{metrics}->get('mediabot_commands_private_total') } // 0;
         my $cmds_pl   = eval { $bot->{metrics}->get('mediabot_commands_partyline_total') } // 0;
         my $msgs_out  = eval { $bot->{metrics}->get('mediabot_privmsg_out_total') } // 0;
-        $stream->write("Commands: ${cmds_pub} IRC public, ${cmds_pl} partyline\r\n");
+        $stream->write("Commands: ${cmds_pub} IRC public, ${cmds_priv} IRC private, ${cmds_pl} partyline\r\n");
         $stream->write("Messages: ${msgs_out} PRIVMSG sent\r\n");
     }
 
