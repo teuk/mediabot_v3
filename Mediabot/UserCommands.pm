@@ -91,6 +91,17 @@ our @EXPORT = qw(
     mbTriviaStop_ctx
     mbTriviaTop_ctx
     mbUnvote_ctx
+    mbAchievements_ctx
+    mbProfil_ctx
+    mbRadar_ctx
+    mbDashboard_ctx
+    mbDuel_ctx
+    mbHoroscope_ctx
+    mbCompat_ctx
+    mbQuotegame_ctx
+    checkQuotegameAnswer
+    mbMood_ctx
+
 );
 
 sub dbLogoutUsers {
@@ -3716,6 +3727,12 @@ sub mbWordCount_ctx {
     }
 
     botPrivmsg($self, $channel, "$target: $distinct distinct word(s) on $channel$period_label$trunc_note$rank_str$top_str");
+
+    # mb115: hook achievements wordcount
+    if ($self->{achievements}) {
+        eval { $self->{achievements}->check_wordcount($target, $channel, $distinct) };
+        if ($@) { $self->{logger}->log(1, "achievements check_wordcount error: $@"); }
+    }
     return 1;
 }
 
@@ -4161,6 +4178,20 @@ sub processKarma {
                 $channel,
                 "$target\'s karma: ${sign}${score}${rank_str}"
             );
+
+        # mb115: hook achievements karma (positifs : score atteint, gift_giver pour le donneur)
+        if ($self->{achievements}) {
+            # Pour gift_giver, on compte les +1 donnés par $nick sur le canal — via ring buffer
+            my $given_pos = 0;
+            for my $e (@{ $self->{_karma_log}{$channel} // [] }) {
+                $given_pos++ if defined $e->{from} && lc($e->{from}) eq lc($nick) && ($e->{delta} // '') eq '+1';
+            }
+            eval {
+                $self->{achievements}->check_karma($target, $channel, $score, $nick, $given_pos);
+            };
+            if ($@) { $self->{logger}->log(1, "achievements check_karma error: $@"); }
+        }
+
         # I4: append to in-memory karma log (ring buffer, max 20 per channel)
         my $klog = $self->{_karma_log}{$channel} //= [];
         push @$klog, {
@@ -6314,6 +6345,15 @@ sub checkTriviaAnswer {
     }
     Mediabot::Helpers::botPrivmsg($self, $channel,
         "Correct, $nick!$diff_str The answer was: $trivia->{answer_display}  (score: $score)");
+
+    # mb115: hook achievements trivia (score atteint, sniper si réponse < 3s)
+    if ($self->{achievements}) {
+        my $response_time = (time() - ($trivia->{started} // time())) || 0;
+        eval {
+            $self->{achievements}->check_trivia($nick, $channel, $score, $response_time);
+        };
+        if ($@) { $self->{logger}->log(1, "achievements check_trivia error: $@"); }
+    }
     # W1: show intermediate scores in multi-round mode
     if ($trivia->{multi_total}) {
         my $cur = $trivia->{multi_current} // 0;
@@ -6455,6 +6495,1540 @@ sub mbTriviaScore_ctx {
     botPrivmsg($self, $channel,
         "Trivia scores on $channel ($total_correct total): $top");
     logBot($self, $ctx->message, $channel, 'triviascore', '');  # Q1
+    return 1;
+}
+
+# =============================================================================
+# mb115: Achievements / Profil / Radar
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# mbAchievements_ctx --- !achievements [nick|list|all|top]
+# ---------------------------------------------------------------------------
+sub mbAchievements_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $ach = $self->{achievements};
+    unless ($ach) {
+        botNotice($self, $nick, 'Achievements system not initialized.'); return;
+    }
+
+    my $defs = $ach->list_definitions;
+
+    # !achievements list  → liste tous les achievements possibles
+    if (@args && lc($args[0]) eq 'list') {
+        my @order = qw(common uncommon rare epic legendary);
+        my %by_rarity;
+        for my $id (keys %$defs) {
+            push @{ $by_rarity{ $defs->{$id}{rarity} } }, $id;
+        }
+        for my $r (@order) {
+            next unless $by_rarity{$r};
+            my $col = $ach->rarity_color($r);
+            my $rst = $col ? "\x0f" : '';
+            my $count = scalar @{ $by_rarity{$r} };
+            botPrivmsg($self, $nick, "${col}\x02" . uc($r) . "\x02${rst} ($count):");
+            for my $id (sort @{ $by_rarity{$r} }) {
+                my $a = $defs->{$id};
+                botPrivmsg($self, $nick,
+                    "  $a->{emoji} \x02$a->{name}\x02 — $a->{desc}");
+            }
+        }
+        botPrivmsg($self, $nick, "Total: " . scalar(keys %$defs) . " achievements available.");
+        return 1;
+    }
+
+    # !achievements top  → classement par nombre d'achievements
+    if (@args && lc($args[0]) eq 'top') {
+        my $counts = $ach->count_all_nicks;
+        unless (%$counts) {
+            botPrivmsg($self, $channel, 'No achievements unlocked yet.'); return 1;
+        }
+        my @sorted = sort { $counts->{$b} <=> $counts->{$a} || $a cmp $b } keys %$counts;
+        my $top    = scalar @sorted > 10 ? 10 : scalar @sorted;
+        my @parts;
+        for my $i (0..$top-1) {
+            my $n = $sorted[$i];
+            push @parts, "$n:$counts->{$n}";
+        }
+        botPrivmsg($self, $channel, "🏆 Top achievement hunters: " . join('  |  ', @parts));
+        return 1;
+    }
+
+    # !achievements all [nick]  → cross-canal
+    my $cross = 0;
+    if (@args && lc($args[0]) eq 'all') {
+        $cross = 1; shift @args;
+    }
+    my $target = @args ? lc(shift @args) : lc($nick);
+
+    my $unlocked = $cross
+        ? $ach->get_for_nick_all($target)
+        : $ach->get_for_nick($target, $channel);
+
+    my $reply_to = ($channel =~ /^#/) ? $channel : $nick;
+
+    unless (%$unlocked) {
+        my $scope = $cross ? '(all channels)' : "on $channel";
+        botPrivmsg($self, $reply_to,
+            "$target has no achievements unlocked yet $scope. Try \x02!achievements list\x02.");
+        return 1;
+    }
+
+    # Ordre d'affichage : par rareté décroissante
+    my %rarity_rank = (legendary => 5, epic => 4, rare => 3, uncommon => 2, common => 1);
+    my @sorted_ids = sort {
+        ($rarity_rank{ $defs->{$b}{rarity} // 'common' } // 0)
+        <=>
+        ($rarity_rank{ $defs->{$a}{rarity} // 'common' } // 0)
+        || $a cmp $b
+    } keys %$unlocked;
+
+    my $scope_str = $cross ? ' (all channels)' : '';
+    botPrivmsg($self, $reply_to,
+        "🏆 \x02$target\x02 — " . scalar(@sorted_ids) . " / " . scalar(keys %$defs)
+        . " achievements$scope_str:");
+
+    # Afficher par groupes de 4 par ligne pour ne pas flooder
+    my @cells;
+    for my $id (@sorted_ids) {
+        my $a   = $defs->{$id} or next;
+        my $col = $ach->rarity_color($a->{rarity});
+        my $rst = $col ? "\x0f" : '';
+        push @cells, "$a->{emoji} ${col}$a->{name}${rst}";
+    }
+    while (@cells) {
+        my @chunk = splice(@cells, 0, 4);
+        botPrivmsg($self, $reply_to, '  ' . join('  |  ', @chunk));
+    }
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbProfil_ctx --- !profil [nick]
+# Fiche d'identité complète d'un nick sur le canal courant.
+# ---------------------------------------------------------------------------
+sub mbProfil_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $target  = @args ? lc(shift @args) : lc($nick);
+
+    unless ($channel && $channel =~ /^#/) {
+        botNotice($self, $nick, 'Syntax: !profil [nick]  (must be in a channel)'); return;
+    }
+
+    my $dbh = $self->{dbh};
+    my %stats;
+
+    # 1. Compte total + premier message + dernier message
+    my $sth = $dbh->prepare(q{
+        SELECT COUNT(*) AS msgs,
+               MIN(cl.ts) AS first_ts,
+               MAX(cl.ts) AS last_ts,
+               TIMESTAMPDIFF(DAY, MIN(cl.ts), NOW()) AS days_seen
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.nick = ?
+          AND cl.publictext IS NOT NULL
+    });
+    if ($sth && $sth->execute($channel, $target)) {
+        my $r = $sth->fetchrow_hashref; $sth->finish;
+        $stats{msgs}      = $r->{msgs}      // 0;
+        $stats{first_ts}  = $r->{first_ts}  // '';
+        $stats{last_ts}   = $r->{last_ts}   // '';
+        $stats{days_seen} = $r->{days_seen} // 0;
+    }
+
+    if (($stats{msgs} // 0) == 0) {
+        botPrivmsg($self, $channel, "🚫 $target: no activity recorded on $channel.");
+        return 1;
+    }
+
+    # 2. Karma (depuis KARMA table)
+    my $sth_k = $dbh->prepare(q{
+        SELECT k.score
+        FROM KARMA k
+        JOIN CHANNEL c ON c.id_channel = k.id_channel
+        WHERE c.name = ? AND k.nick = ?
+    });
+    if ($sth_k && $sth_k->execute($channel, $target)) {
+        my $r = $sth_k->fetchrow_hashref; $sth_k->finish;
+        $stats{karma} = $r ? ($r->{score} // 0) : 0;
+    }
+
+    # 3. Rank activité (proxy: nb de nicks plus actifs)
+    my $sth_r = $dbh->prepare(q{
+        SELECT COUNT(*) + 1 AS rank_pos FROM (
+            SELECT cl2.nick
+            FROM CHANNEL_LOG cl2
+            JOIN CHANNEL c2 ON c2.id_channel = cl2.id_channel
+            WHERE c2.name = ?
+              AND cl2.nick != ?
+              AND cl2.publictext IS NOT NULL
+            GROUP BY cl2.nick
+            HAVING COUNT(*) > ?
+        ) sub_q
+    });
+    if ($sth_r && $sth_r->execute($channel, $target, $stats{msgs})) {
+        my $r = $sth_r->fetchrow_hashref; $sth_r->finish;
+        $stats{rank} = $r ? ($r->{rank_pos} // 0) : 0;
+    }
+
+    # 4. Heure de pointe + bloc le plus actif
+    my $sth_h = $dbh->prepare(q{
+        SELECT HOUR(cl.ts) AS h, COUNT(*) AS c
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.nick = ?
+          AND cl.publictext IS NOT NULL
+        GROUP BY HOUR(cl.ts)
+    });
+    my @hours = (0) x 24;
+    if ($sth_h && $sth_h->execute($channel, $target)) {
+        while (my $r = $sth_h->fetchrow_hashref) { $hours[$r->{h}] = $r->{c}; }
+        $sth_h->finish;
+    }
+    my $peak_h = 0; my $peak_c = 0;
+    for my $h (0..23) { if ($hours[$h] > $peak_c) { $peak_c = $hours[$h]; $peak_h = $h; } }
+    $stats{peak_hour}   = $peak_h;
+    $stats{peak_count}  = $peak_c;
+
+    # Mini sparkline 24h (4 blocs de 6h)
+    my @blocks = (0) x 4;
+    for my $h (0..23) { $blocks[ int($h/6) ] += $hours[$h]; }
+    my $max_block = (sort { $b <=> $a } @blocks)[0] || 1;
+    my @glyphs = ("\x{2581}","\x{2582}","\x{2583}","\x{2584}","\x{2585}","\x{2586}","\x{2587}","\x{2588}");
+    my $spark = '';
+    for my $b (@blocks) {
+        my $ratio = $b / $max_block;
+        my $idx   = int($ratio * 7);
+        $idx = 0 if $idx < 0; $idx = 7 if $idx > 7;
+        $spark .= $glyphs[$idx];
+    }
+
+    # 5. Trivia score
+    my $sth_t = $dbh->prepare(q{
+        SELECT ts.score
+        FROM TRIVIA_SCORES ts
+        JOIN CHANNEL c ON c.id_channel = ts.id_channel
+        WHERE c.name = ? AND ts.nick = ?
+    });
+    if ($sth_t && $sth_t->execute($channel, $target)) {
+        my $r = $sth_t->fetchrow_hashref; $sth_t->finish;
+        $stats{trivia} = $r ? ($r->{score} // 0) : 0;
+    }
+
+    # 6. Achievements
+    my $ach_count = 0;
+    my $ach_total = 0;
+    if ($self->{achievements}) {
+        my $unl = $self->{achievements}->get_for_nick($target, $channel);
+        $ach_count = scalar keys %$unl;
+        $ach_total = scalar keys %{ $self->{achievements}->list_definitions };
+    }
+
+    # 7. Formats lisibles
+    my $first_s = ($stats{first_ts} && $stats{first_ts} =~ /^(\d{4}-\d{2}-\d{2})/) ? $1 : '?';
+    my $last_ago = '?';
+    if ($stats{last_ts} && $stats{last_ts} =~ /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/) {
+        require Time::Local;
+        my $ep = eval { Time::Local::timelocal($6,$5,$4,$3,$2-1,$1-1900) };
+        if ($ep) {
+            my $diff = time() - $ep;
+            $last_ago = $diff < 60        ? "${diff}s ago"
+                      : $diff < 3600      ? sprintf('%dm ago',  int($diff/60))
+                      : $diff < 86400     ? sprintf('%dh ago',  int($diff/3600))
+                      :                     sprintf('%dd ago',  int($diff/86400));
+        }
+    }
+
+    # 8. Karma sign (vert/rouge)
+    my $karma_sign = '0';
+    if (defined $stats{karma}) {
+        $karma_sign = $stats{karma} > 0 ? "\x0303+$stats{karma}\x0f"
+                    : $stats{karma} < 0 ? "\x0304$stats{karma}\x0f"
+                    :                     '0';
+    }
+
+    # 9. Affichage final — 3 lignes condensées et stylées
+    my $rank_str = $stats{rank} ? "#$stats{rank}" : '?';
+    my $reply_to = $channel;
+
+    botPrivmsg($self, $reply_to,
+        "\x{2550}\x{2550}\x{2550} \x02$target\x02 on $channel \x{2550}\x{2550}\x{2550}  "
+        . "joined $first_s \x{B7} last $last_ago");
+
+    botPrivmsg($self, $reply_to,
+        sprintf("  \x{1F4AC} %s msgs (rank %s, %dd seen)  \x{B7}  \x{1F31F} karma %s  \x{B7}  \x{1F9E0} trivia %s",
+            _fmt_n($stats{msgs}), $rank_str, $stats{days_seen} // 0,
+            $karma_sign, $stats{trivia} // 0));
+
+    my $peak_label = sprintf('%02dh-%02dh', $stats{peak_hour}, ($stats{peak_hour}+1)%24);
+    botPrivmsg($self, $reply_to,
+        sprintf("  \x{1F4C8} 24h: %s  \x{B7}  peak %s (%d msgs)  \x{B7}  \x{1F3C6} %d/%d",
+            $spark, $peak_label, $stats{peak_count} // 0,
+            $ach_count, $ach_total));
+
+    return 1;
+}
+
+# Helper : formate les grands nombres (1234 → 1.2k, 12345 → 12k)
+sub _fmt_n {
+    my ($n) = @_;
+    return '?' unless defined $n;
+    return $n          if $n < 1000;
+    return sprintf('%.1fk', $n/1000)  if $n < 10_000;
+    return sprintf('%dk',   int($n/1000)) if $n < 1_000_000;
+    return sprintf('%.1fM', $n/1_000_000);
+}
+
+# ---------------------------------------------------------------------------
+# mbRadar_ctx --- !radar
+# Détecte les anomalies d'activité sur le canal :
+#   - spike (activité dernière heure >> moyenne 24h)
+#   - silence (canal très calme depuis >X min)
+#   - newcomers (nicks vus pour la 1ère fois dans les dernières 24h)
+#   - ghosts (nicks présents en nicklist mais silencieux > 6h)
+#   - karma vortex (votes karma soudains)
+#   - loudest talkers (top 3 dernière heure)
+# ---------------------------------------------------------------------------
+sub mbRadar_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    unless ($channel && $channel =~ /^#/) {
+        botNotice($self, $nick, 'Syntax: !radar  [Nd]  (must be in a channel)'); return;
+    }
+
+    # mb116: mode étendu — !radar 7d  vue historique sur N jours
+    my $hist_days;
+    if (@args && $args[0] =~ /^(\d+)d$/i) {
+        $hist_days = $1; $hist_days = 30 if $hist_days > 30; $hist_days = 1 if $hist_days < 1;
+    }
+
+    my $dbh = $self->{dbh};
+    my @lines;
+
+    if (defined $hist_days) {
+        # Mode historique : sparkline d'activité quotidienne sur N jours + extrêmes
+        my $sth_d = $dbh->prepare(qq{
+            SELECT DATE(cl.ts) AS d, COUNT(*) AS c
+            FROM CHANNEL_LOG cl
+            JOIN CHANNEL c ON c.id_channel = cl.id_channel
+            WHERE c.name = ?
+              AND cl.publictext IS NOT NULL
+              AND cl.ts >= NOW() - INTERVAL $hist_days DAY
+            GROUP BY DATE(cl.ts)
+            ORDER BY d
+        });
+        my %by_day;
+        if ($sth_d && $sth_d->execute($channel)) {
+            while (my $r = $sth_d->fetchrow_hashref) { $by_day{$r->{d}} = $r->{c}; }
+            $sth_d->finish;
+        }
+        unless (%by_day) {
+            botPrivmsg($self, $channel, "\x{1F4E1} \x02Radar\x02 $channel: no data in last ${hist_days}d");
+            return 1;
+        }
+        my @sorted_days = sort keys %by_day;
+        my @counts      = map { $by_day{$_} } @sorted_days;
+        my $max = (sort { $b <=> $a } @counts)[0] || 1;
+        my $sum = 0; $sum += $_ for @counts;
+        my $avg = $sum / scalar(@counts);
+        my @glyphs = ("\x{2581}","\x{2582}","\x{2583}","\x{2584}","\x{2585}","\x{2586}","\x{2587}","\x{2588}");
+        my $spark = '';
+        for my $c (@counts) {
+            my $idx = int(($c / $max) * 7);
+            $idx = 0 if $idx < 0; $idx = 7 if $idx > 7;
+            $spark .= $glyphs[$idx];
+        }
+        # Best & worst day
+        my ($best_d) = sort { $by_day{$b} <=> $by_day{$a} } keys %by_day;
+        my ($worst_d) = sort { $by_day{$a} <=> $by_day{$b} } keys %by_day;
+        botPrivmsg($self, $channel, "\x{1F4E1} \x02Radar\x02 $channel (last ${hist_days}d):");
+        botPrivmsg($self, $channel,
+            sprintf("  \x{1F4C8} %s  \x{B7}  total %s msgs  \x{B7}  avg %.0f/d",
+                $spark, _fmt_n($sum), $avg));
+        botPrivmsg($self, $channel,
+            sprintf("  \x{1F389} best:  %s (%s msgs)  \x{B7}  \x{1F614} worst: %s (%s msgs)",
+                $best_d, _fmt_n($by_day{$best_d}),
+                $worst_d, _fmt_n($by_day{$worst_d})));
+        return 1;
+    }
+
+    # Mode standard (par défaut) — diagnostic temps réel
+    # 1. Activity rate — dernière heure vs moyenne 24h
+    my $sth_r = $dbh->prepare(q{
+        SELECT
+            SUM(IF(cl.ts >= NOW() - INTERVAL  1 HOUR, 1, 0)) AS last_h,
+            SUM(IF(cl.ts >= NOW() - INTERVAL 24 HOUR, 1, 0)) AS last_24h
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.publictext IS NOT NULL
+    });
+    my ($last_h, $avg_h, $last_24h) = (0, 0, 0);
+    if ($sth_r && $sth_r->execute($channel)) {
+        my $r = $sth_r->fetchrow_hashref; $sth_r->finish;
+        $last_h   = $r->{last_h}   // 0;
+        $last_24h = $r->{last_24h} // 0;
+        $avg_h    = $last_24h / 24;
+    }
+
+    my $rate_emoji = "\x{3030}\x{FE0F}";
+    my $rate_msg   = "calm";
+    if ($avg_h > 0) {
+        my $ratio = $last_h / ($avg_h || 1);
+        if    ($ratio >= 3.0) { $rate_emoji = "\x{1F525}"; $rate_msg = sprintf("SPIKE x%.1f", $ratio); }
+        elsif ($ratio >= 2.0) { $rate_emoji = "\x{1F4C8}"; $rate_msg = sprintf("busy x%.1f", $ratio); }
+        elsif ($ratio <= 0.2) { $rate_emoji = "\x{1F319}"; $rate_msg = sprintf("quiet x%.1f", $ratio); }
+        else                  { $rate_emoji = "\x{3030}\x{FE0F}"; $rate_msg = sprintf("normal x%.1f", $ratio); }
+    }
+
+    push @lines, sprintf('%s rate: %d msgs/last-hour (avg %.0f/h over 24h) - %s',
+        $rate_emoji, $last_h, $avg_h, $rate_msg);
+
+    # 2. Last message ago
+    my $sth_l = $dbh->prepare(q{
+        SELECT TIMESTAMPDIFF(MINUTE, MAX(cl.ts), NOW()) AS m
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.publictext IS NOT NULL
+    });
+    if ($sth_l && $sth_l->execute($channel)) {
+        my $r = $sth_l->fetchrow_hashref; $sth_l->finish;
+        my $m = $r->{m} // 0;
+        if ($m > 30) {
+            my $silent_emoji = $m > 360 ? "\x{1F997}" : "\x{1F634}";
+            push @lines, sprintf('%s last public msg: %s ago',
+                $silent_emoji,
+                ($m < 60 ? "${m}m"
+                 : $m < 1440 ? sprintf('%dh%dm', int($m/60), $m%60)
+                 : sprintf('%dd%dh', int($m/1440), int(($m%1440)/60))));
+        }
+    }
+
+    # 3. Newcomers — premières activités dans les dernières 24h
+    my $sth_n = $dbh->prepare(q{
+        SELECT cl.nick, MIN(cl.ts) AS first
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ?
+          AND cl.publictext IS NOT NULL
+        GROUP BY cl.nick
+        HAVING first >= NOW() - INTERVAL 24 HOUR
+        ORDER BY first ASC
+        LIMIT 10
+    });
+    if ($sth_n && $sth_n->execute($channel)) {
+        my @newbies;
+        while (my $r = $sth_n->fetchrow_hashref) { push @newbies, $r->{nick}; }
+        $sth_n->finish;
+        if (@newbies) {
+            my $list = join(', ', @newbies);
+            $list = substr($list, 0, 200) . '...' if length($list) > 200;
+            push @lines, sprintf("\x{1F195} newcomers (24h): %s", $list);
+        }
+    }
+
+    # 4. Ghosts — nicks en nicklist mais silencieux > 6h
+    my @nicks_on_chan = eval { $self->gethChannelsNicksOnChan($channel) };
+    if (@nicks_on_chan) {
+        my $bot_nick = eval { $self->{irc}->nick_folded } // '';
+        my @candidates = grep { lc($_) ne lc($bot_nick) } @nicks_on_chan;
+        my @ghosts;
+        if (@candidates) {
+            my $ph = join(',', ('?') x scalar(@candidates));
+            my $sth_g = $dbh->prepare(qq{
+                SELECT cl.nick, MAX(cl.ts) AS last_ts,
+                       TIMESTAMPDIFF(HOUR, MAX(cl.ts), NOW()) AS hours_silent
+                FROM CHANNEL_LOG cl
+                JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                WHERE c.name = ?
+                  AND cl.nick IN ($ph)
+                  AND cl.publictext IS NOT NULL
+                GROUP BY cl.nick
+            });
+            my %last_seen;
+            if ($sth_g && $sth_g->execute($channel, @candidates)) {
+                while (my $r = $sth_g->fetchrow_hashref) {
+                    $last_seen{lc($r->{nick})} = $r->{hours_silent} // 9999;
+                }
+                $sth_g->finish;
+            }
+            for my $n (@candidates) {
+                my $h = $last_seen{lc($n)} // 9999;
+                push @ghosts, "$n (${h}h)" if $h >= 6;
+            }
+            @ghosts = sort {
+                my ($ah) = $a =~ /\((\d+)h\)/;
+                my ($bh) = $b =~ /\((\d+)h\)/;
+                ($bh // 0) <=> ($ah // 0)
+            } @ghosts;
+            @ghosts = @ghosts[0..4] if @ghosts > 5;
+            push @lines, "\x{1F47B} silent ghosts: " . join(', ', @ghosts) if @ghosts;
+        }
+    }
+
+    # 5. Karma vortex — récent karma activity > 5 votes dernière heure
+    my $klog = $self->{_karma_log}{$channel} // [];
+    my $now = time();
+    my $recent_karma = scalar grep { ($_->{ts}//0) >= $now - 3600 } @$klog;
+    if ($recent_karma >= 5) {
+        my $kpos = scalar grep { ($_->{ts}//0) >= $now-3600 && ($_->{delta}//'') eq '+1' } @$klog;
+        my $kneg = $recent_karma - $kpos;
+        push @lines, sprintf("\x{26A1} karma vortex (1h): %d votes (+%d / -%d)",
+            $recent_karma, $kpos, $kneg);
+    }
+
+    # 6. Top talkers dernière heure
+    if ($last_h > 0) {
+        my $sth_tp = $dbh->prepare(q{
+            SELECT cl.nick, COUNT(*) AS c
+            FROM CHANNEL_LOG cl
+            JOIN CHANNEL c ON c.id_channel = cl.id_channel
+            WHERE c.name = ?
+              AND cl.ts >= NOW() - INTERVAL 1 HOUR
+              AND cl.publictext IS NOT NULL
+            GROUP BY cl.nick
+            ORDER BY c DESC
+            LIMIT 3
+        });
+        if ($sth_tp && $sth_tp->execute($channel)) {
+            my @talkers;
+            while (my $r = $sth_tp->fetchrow_hashref) {
+                push @talkers, "$r->{nick}:$r->{c}";
+            }
+            $sth_tp->finish;
+            push @lines, sprintf("\x{1F399}\x{FE0F} loudest (1h): %s", join('  ', @talkers)) if @talkers;
+        }
+    }
+
+    botPrivmsg($self, $channel, "\x{1F4E1} \x02Radar\x02 on $channel:");
+    botPrivmsg($self, $channel, "  $_") for @lines;
+    return 1;
+}
+
+# =============================================================================
+# mb116: Dashboard / Duel / Horoscope
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# mbDashboard_ctx --- !dashboard / !chanstats
+# Tableau de bord complet du canal courant : activité, top contributeurs,
+# top mots, sparkline 7 jours, karma vortex, ambiance globale.
+# ---------------------------------------------------------------------------
+sub mbDashboard_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    unless ($channel && $channel =~ /^#/) {
+        botNotice($self, $nick, 'Syntax: !dashboard  (must be in a channel)'); return;
+    }
+
+    my $dbh = $self->{dbh};
+
+    # 1. Vue globale — total msgs, distinct nicks, période
+    my $sth = $dbh->prepare(q{
+        SELECT COUNT(*) AS total,
+               COUNT(DISTINCT cl.nick) AS nicks,
+               MIN(cl.ts) AS since,
+               TIMESTAMPDIFF(DAY, MIN(cl.ts), NOW()) AS days
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.publictext IS NOT NULL
+    });
+    my %g;
+    if ($sth && $sth->execute($channel)) {
+        my $r = $sth->fetchrow_hashref; $sth->finish;
+        %g = %$r if $r;
+    }
+    my $total = $g{total} // 0;
+    if ($total == 0) {
+        botPrivmsg($self, $channel, "🚫 No public activity recorded on $channel yet.");
+        return 1;
+    }
+    my $since_s = ($g{since} && $g{since} =~ /^(\d{4}-\d{2}-\d{2})/) ? $1 : '?';
+    my $days    = $g{days} // 1; $days = 1 if $days < 1;
+    my $msgs_per_day = sprintf('%.0f', $total / $days);
+
+    # 2. Top 5 contributeurs
+    my $sth_t = $dbh->prepare(q{
+        SELECT cl.nick, COUNT(*) AS c
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        GROUP BY cl.nick
+        ORDER BY c DESC
+        LIMIT 5
+    });
+    my @top5;
+    if ($sth_t && $sth_t->execute($channel)) {
+        while (my $r = $sth_t->fetchrow_hashref) {
+            push @top5, sprintf('%s:%s', $r->{nick}, _fmt_n($r->{c}));
+        }
+        $sth_t->finish;
+    }
+
+    # 3. Activité par jour (sparkline 7 jours, jour le plus actif)
+    my $sth_d = $dbh->prepare(q{
+        SELECT DATE(cl.ts) AS d, COUNT(*) AS c
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.publictext IS NOT NULL
+          AND cl.ts >= NOW() - INTERVAL 7 DAY
+        GROUP BY DATE(cl.ts)
+        ORDER BY d
+    });
+    my @days7 = (0) x 7;
+    my $today_epoch = time();
+    if ($sth_d && $sth_d->execute($channel)) {
+        while (my $r = $sth_d->fetchrow_hashref) {
+            # offset depuis aujourd'hui
+            if ($r->{d} =~ /^(\d{4})-(\d{2})-(\d{2})/) {
+                require Time::Local;
+                my $ep = eval { Time::Local::timelocal(0,0,12,$3,$2-1,$1-1900) };
+                next unless $ep;
+                my $offset = int(($today_epoch - $ep) / 86400);
+                $offset = 0 if $offset < 0; $offset = 6 if $offset > 6;
+                $days7[6 - $offset] = $r->{c};   # oldest left, today right
+            }
+        }
+        $sth_d->finish;
+    }
+    my $max7 = (sort { $b <=> $a } @days7)[0] || 1;
+    my @glyphs = ("\x{2581}","\x{2582}","\x{2583}","\x{2584}","\x{2585}","\x{2586}","\x{2587}","\x{2588}");
+    my $spark_d = '';
+    for my $d (@days7) {
+        my $idx = int(($d / $max7) * 7);
+        $idx = 0 if $idx < 0; $idx = 7 if $idx > 7;
+        $spark_d .= $glyphs[$idx];
+    }
+
+    # 4. Heatmap globale 24h
+    my $sth_h = $dbh->prepare(q{
+        SELECT HOUR(cl.ts) AS h, COUNT(*) AS c
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.publictext IS NOT NULL
+          AND cl.ts >= NOW() - INTERVAL 30 DAY
+        GROUP BY HOUR(cl.ts)
+    });
+    my @hours = (0) x 24;
+    if ($sth_h && $sth_h->execute($channel)) {
+        while (my $r = $sth_h->fetchrow_hashref) { $hours[$r->{h}] = $r->{c}; }
+        $sth_h->finish;
+    }
+    my $max_h = (sort { $b <=> $a } @hours)[0] || 1;
+    my $spark_h = '';
+    for my $h (0..23) {
+        my $idx = int(($hours[$h] / $max_h) * 7);
+        $idx = 0 if $idx < 0; $idx = 7 if $idx > 7;
+        $spark_h .= $glyphs[$idx];
+    }
+    my $peak_h = 0; my $peak_c = 0;
+    for my $h (0..23) { if ($hours[$h] > $peak_c) { $peak_c = $hours[$h]; $peak_h = $h; } }
+
+    # 5. Karma vortex — top giver / top receiver des 7 derniers jours (ring buffer)
+    my $klog = $self->{_karma_log}{$channel} // [];
+    my $since_ts = time() - 7*86400;
+    my %givers; my %receivers; my $kpos = 0; my $kneg = 0;
+    for my $e (@$klog) {
+        next unless ($e->{ts} // 0) >= $since_ts;
+        $kpos++ if ($e->{delta} // '') eq '+1';
+        $kneg++ if ($e->{delta} // '') eq '-1';
+        $givers{ $e->{from} }++   if $e->{from};
+        $receivers{ $e->{nick} }++ if $e->{nick};
+    }
+    my ($top_giver)    = sort { $givers{$b}    <=> $givers{$a} }    keys %givers;
+    my ($top_receiver) = sort { $receivers{$b} <=> $receivers{$a} } keys %receivers;
+
+    # 6. Achievements totaux unlock sur ce canal
+    my $ach_unlocked = 0;
+    if ($self->{achievements}) {
+        for my $key (keys %{ $self->{achievements}{data} // {} }) {
+            my ($n, $ch) = split /\x00/, $key, 2;
+            next unless defined $ch && $ch eq $channel;
+            $ach_unlocked += scalar keys %{ $self->{achievements}{data}{$key} };
+        }
+    }
+
+    # 7. Active right now (nicks ayant parlé dans les 60 dernières min)
+    my $sth_n = $dbh->prepare(q{
+        SELECT COUNT(DISTINCT cl.nick) AS c
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.publictext IS NOT NULL
+          AND cl.ts >= NOW() - INTERVAL 60 MINUTE
+    });
+    my $active_now = 0;
+    if ($sth_n && $sth_n->execute($channel)) {
+        my $r = $sth_n->fetchrow_hashref; $sth_n->finish;
+        $active_now = $r ? ($r->{c} // 0) : 0;
+    }
+
+    # 8. Affichage
+    my $peak_label = sprintf('%02dh', $peak_h);
+    botPrivmsg($self, $channel,
+        "\x{2550}\x{2550}\x{2550} \x02Dashboard\x02 $channel \x{2550}\x{2550}\x{2550}  "
+        . "since $since_s \x{B7} $days days \x{B7} avg ${msgs_per_day}/d");
+
+    botPrivmsg($self, $channel,
+        sprintf("  \x{1F4AC} %s msgs from %s nicks  \x{B7}  \x{1F50A} %d active in last 60min",
+            _fmt_n($total), _fmt_n($g{nicks} // 0), $active_now));
+
+    botPrivmsg($self, $channel,
+        sprintf("  \x{1F451} top: %s", @top5 ? join("  ", @top5) : "n/a"));
+
+    botPrivmsg($self, $channel,
+        sprintf("  \x{1F4C5} 7d: %s  \x{B7}  \x{1F567} 24h: %s  peak %s (%s)",
+            $spark_d, $spark_h, $peak_label, _fmt_n($peak_c)));
+
+    if (%givers || %receivers) {
+        botPrivmsg($self, $channel,
+            sprintf("  \x{2728} karma 7d: +%d/-%d  \x{B7}  giver: %s  \x{B7}  receiver: %s",
+                $kpos, $kneg,
+                $top_giver    // 'n/a',
+                $top_receiver // 'n/a'));
+    }
+
+    if ($self->{achievements}) {
+        my $defs_count = scalar keys %{ $self->{achievements}->list_definitions };
+        botPrivmsg($self, $channel,
+            sprintf("  \x{1F3C6} achievements unlocked on $channel: %d  \x{B7}  catalogue: %d available",
+                $ach_unlocked, $defs_count));
+    }
+
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbDuel_ctx --- !duel <nick>
+# Mini-jeu : roll de d20 chacun, le gagnant prend +1 karma, le perdant -1.
+# Cooldown 24h par paire de nicks (ordre indépendant). Égalité = redite.
+# ---------------------------------------------------------------------------
+sub mbDuel_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    unless ($channel && $channel =~ /^#/) {
+        botNotice($self, $nick, 'Syntax: !duel <nick>  (must be in a channel)'); return;
+    }
+
+    # !duel stats [nick] — affichage des stats personnelles
+    if (@args && lc($args[0]) eq 'stats') {
+        shift @args;
+        my $target = @args ? lc(shift @args) : lc($nick);
+        my $stats = $self->{_duel_stats}{$channel}{$target} // {};
+        my $w = $stats->{wins}   // 0;
+        my $l = $stats->{losses} // 0;
+        my $tot = $w + $l;
+        my $wr = $tot > 0 ? sprintf('%.0f%%', 100*$w/$tot) : 'n/a';
+        botPrivmsg($self, $channel,
+            "\x{2694}\x{FE0F} $target duel record on $channel: $w win(s) / $l loss(es) (winrate $wr)");
+        return 1;
+    }
+
+    # !duel top — classement des duellistes
+    if (@args && lc($args[0]) eq 'top') {
+        my $tbl = $self->{_duel_stats}{$channel} // {};
+        unless (%$tbl) {
+            botPrivmsg($self, $channel, 'No duels recorded on this channel yet.'); return 1;
+        }
+        my @sorted = sort {
+            ($tbl->{$b}{wins} // 0) <=> ($tbl->{$a}{wins} // 0)
+            || $a cmp $b
+        } keys %$tbl;
+        my @top = @sorted > 5 ? @sorted[0..4] : @sorted;
+        my @parts;
+        for my $n (@top) {
+            my $w = $tbl->{$n}{wins}   // 0;
+            my $l = $tbl->{$n}{losses} // 0;
+            push @parts, "$n: ${w}W/${l}L";
+        }
+        botPrivmsg($self, $channel, "\x{2694}\x{FE0F} Top duellists: " . join('  |  ', @parts));
+        return 1;
+    }
+
+    my $target = $args[0];
+    unless (defined $target && $target ne '') {
+        botNotice($self, $nick, 'Syntax: !duel <nick>  |  !duel stats [nick]  |  !duel top');
+        return;
+    }
+    $target = lc($target);
+
+    if (lc($nick) eq $target) {
+        botPrivmsg($self, $channel, "$nick: you can't duel yourself \x{1F614}");
+        return 1;
+    }
+
+    # Vérifier que le target est sur le canal
+    my @nicks_on = eval { $self->gethChannelsNicksOnChan($channel) };
+    my $bot_nick = eval { $self->{irc}->nick_folded } // '';
+    unless (grep { lc($_) eq $target } @nicks_on) {
+        botPrivmsg($self, $channel, "$nick: $target is not on $channel");
+        return 1;
+    }
+    if (lc($target) eq lc($bot_nick)) {
+        botPrivmsg($self, $channel,
+            "\x{1F916} I don't duel mortals (I would always roll natural 20)");
+        return 1;
+    }
+
+    # Cooldown 24h par paire — ordre indépendant
+    my $pair_key = join("\x00", sort (lc($nick), $target));
+    my $now = time();
+    my $cooldown_until = $self->{_duel_cooldown}{$channel}{$pair_key} // 0;
+    if ($cooldown_until > $now) {
+        my $wait = $cooldown_until - $now;
+        my $wait_str = $wait < 60 ? "${wait}s"
+                     : $wait < 3600 ? sprintf('%dm', int($wait/60))
+                     : sprintf('%dh%dm', int($wait/3600), int(($wait%3600)/60));
+        botPrivmsg($self, $channel,
+            "\x{1F570}\x{FE0F} $nick vs $target: cooldown active ($wait_str remaining)");
+        return 1;
+    }
+
+    # Roll de d20
+    my $r1 = int(rand(20)) + 1;
+    my $r2 = int(rand(20)) + 1;
+
+    # Critique 20 -> +5 bonus, fumble 1 -> -3 malus
+    my $b1 = ''; my $b2 = '';
+    if ($r1 == 20) { $r1 += 5; $b1 = " \x{1F525}CRIT"; }
+    if ($r2 == 20) { $r2 += 5; $b2 = " \x{1F525}CRIT"; }
+    if ($r1 == 1)  { $r1 -= 3; $b1 = " \x{1F4A5}FUMBLE"; }
+    if ($r2 == 1)  { $r2 -= 3; $b2 = " \x{1F4A5}FUMBLE"; }
+
+    botPrivmsg($self, $channel,
+        "\x{2694}\x{FE0F} \x02$nick\x02 (\x{1F3B2}$r1$b1) vs \x02$target\x02 (\x{1F3B2}$r2$b2)");
+
+    # Égalité
+    if ($r1 == $r2) {
+        botPrivmsg($self, $channel, "\x{1F91D} Draw! No cooldown applied, try again.");
+        return 1;
+    }
+
+    my $winner = $r1 > $r2 ? lc($nick) : $target;
+    my $loser  = $r1 > $r2 ? $target   : lc($nick);
+
+    # Apply karma changes via in-DB update (sans passer par mbKarma_ctx → pour éviter double event)
+    my $dbh = $self->{dbh};
+    my $id_channel = 0;
+    my $sth_c = $dbh->prepare("SELECT id_channel FROM CHANNEL WHERE name = ?");
+    if ($sth_c && $sth_c->execute($channel)) {
+        my $r = $sth_c->fetchrow_hashref; $sth_c->finish;
+        $id_channel = $r ? $r->{id_channel} : 0;
+    }
+
+    if ($id_channel) {
+        # +1 winner
+        my $sth_w = $dbh->prepare(q{
+            INSERT INTO KARMA (id_channel, nick, score) VALUES (?, ?, 1)
+            ON DUPLICATE KEY UPDATE score = score + 1
+        });
+        $sth_w->execute($id_channel, $winner) if $sth_w;
+        $sth_w->finish if $sth_w;
+
+        # -1 loser
+        my $sth_l = $dbh->prepare(q{
+            INSERT INTO KARMA (id_channel, nick, score) VALUES (?, ?, -1)
+            ON DUPLICATE KEY UPDATE score = score - 1
+        });
+        $sth_l->execute($id_channel, $loser) if $sth_l;
+        $sth_l->finish if $sth_l;
+    }
+
+    # Update in-memory stats
+    $self->{_duel_stats}{$channel}{$winner}{wins}++;
+    $self->{_duel_stats}{$channel}{$loser}{losses}++;
+
+    # Detect underdog : winner avait 5 losses consécutives avant
+    my $win_streak = $self->{_duel_streak}{$channel}{$winner} // 0;
+    my $loss_streak_loser = $self->{_duel_streak}{$channel}{$loser} // 0;
+    # Si winner avait un streak négatif (= consecutive losses), comme un compteur dans la même var
+    my $underdog_streak = 0;
+    if (($self->{_duel_last_result}{$channel}{$winner} // '') eq 'loss') {
+        $underdog_streak = -1 * ($self->{_duel_streak}{$channel}{$winner} // 0);
+    }
+    $self->{_duel_last_result}{$channel}{$winner} = 'win';
+    $self->{_duel_last_result}{$channel}{$loser}  = 'loss';
+    # Streak counter : positif si win consec, négatif si loss consec
+    if (($self->{_duel_last_result}{$channel}{$winner} // '') eq 'win'
+        && ($self->{_duel_streak}{$channel}{$winner} // 0) >= 0) {
+        $self->{_duel_streak}{$channel}{$winner}++;
+    } else {
+        $self->{_duel_streak}{$channel}{$winner} = 1;
+    }
+    $self->{_duel_streak}{$channel}{$loser}--;
+
+    # Set cooldown 24h
+    $self->{_duel_cooldown}{$channel}{$pair_key} = $now + 24*3600;
+
+    # Annonce résultat
+    botPrivmsg($self, $channel,
+        sprintf("\x{1F3C6} \x02%s\x02 wins! (+1 karma to %s, -1 to %s)  \x{2022}  cooldown 24h",
+            $winner, $winner, $loser));
+
+    # Hooks achievements
+    if ($self->{achievements}) {
+        my $wins = $self->{_duel_stats}{$channel}{$winner}{wins} // 0;
+        eval { $self->{achievements}->check_duel($winner, $channel, $wins, $underdog_streak) };
+        if ($@) { $self->{logger}->log(1, "achievements check_duel error: $@") }
+        # Karma achievements potentiellement aussi
+        my $sth_s = $dbh->prepare("SELECT score FROM KARMA WHERE id_channel=? AND nick=?");
+        if ($sth_s && $sth_s->execute($id_channel, $winner)) {
+            my $r = $sth_s->fetchrow_hashref; $sth_s->finish;
+            if ($r) {
+                eval { $self->{achievements}->check_karma($winner, $channel, $r->{score}, undef, undef) };
+            }
+        }
+    }
+
+    # Metrics
+    $self->{metrics}->inc('mediabot_duel_total', { channel => $channel }) if $self->{metrics};
+
+    logBot($self, $ctx->message, $channel, 'duel', "$nick vs $target -> $winner");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbHoroscope_ctx --- !horoscope [nick]
+# Horoscope IRC déterministe en français. Seed = nick + date.
+# Compteur de consultations en mémoire (achievement star_gazer).
+# ---------------------------------------------------------------------------
+sub mbHoroscope_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $target  = @args ? lc(shift @args) : lc($nick);
+
+    my $reply_to = ($channel && $channel =~ /^#/) ? $channel : $nick;
+
+    # Seed déterministe : nick + date du jour
+    my @lt = localtime(time);
+    my $date_key = sprintf('%04d-%02d-%02d', $lt[5]+1900, $lt[4]+1, $lt[3]);
+    my $seed = 0;
+    $seed = ($seed * 31 + ord($_)) & 0xFFFFFFFF for split //, ($target . ':' . $date_key);
+    srand($seed);
+
+    # Pools (FR — canal francophone, Christophe préfère le français)
+    my @humeurs = (
+        "lumineuse \x{1F31E}", "mystérieuse \x{1F315}", "espiègle \x{1F608}",
+        "philosophe \x{1F914}", "tranchante \x{2694}\x{FE0F}", "rêveuse \x{2601}\x{FE0F}",
+        "indomptable \x{1F981}", "fluide \x{1F30A}", "explosive \x{1F4A5}",
+        "feutrée \x{1F436}", "stoïque \x{1F5FF}", "magnétique \x{1F9F2}",
+    );
+
+    my @evenements = (
+        "Un café partagé deviendra mémorable.",
+        "Quelqu'un te citera de travers, ne corrige pas.",
+        "Un vieux fichier de conf répondra enfin à une question d'hier.",
+        "Mefie-toi du backup que tu n'as pas vérifié.",
+        "Une commande tapée trop vite t'apprendra quelque chose.",
+        "Quelqu'un te demandera ton avis sur du Perl — résiste, parle de Tcl.",
+        "Un nick que tu n'as pas vu depuis 2 ans dira bonjour.",
+        "Un grep négligé révèlera une perle cachée dans tes logs.",
+        "Une notification ignorée ce matin reviendra t'embêter ce soir.",
+        "L'éditeur que tu fuis va finir par te séduire — c'est non.",
+        "Un fail2ban silencieux te sauvera la mise.",
+        "Le DNS aura ses humeurs : prévois un dig.",
+        "Une fenêtre tmux oubliée contient une réponse précieuse.",
+        "Quelqu'un fera un join sans saluer, mais te lira attentivement.",
+        "Un /msg arrivé avant ton premier café sera mal interprété.",
+        "Un cron jamais déclenché va exiger ton attention.",
+        "Une typo glissée dans un README te suivra plus longtemps que de raison.",
+    );
+
+    my @recommandations = (
+        "ne refuse pas le café qu'on te tend",
+        "commit avant de partir manger",
+        "fais un git pull avant d'ouvrir vi",
+        "lance un htop : tu y verras quelque chose d'intéressant",
+        "tape !active et lis attentivement les rangs",
+        "envoie un sosreport pour le plaisir",
+        "réponds à un ping que tu avais ignoré",
+        "rejoins #boulets même si c'est calme",
+        "écris dans BUGFIX_mb83.md au moins une ligne",
+        "ne touche pas à iptables après 22h",
+        "lis le man d'un outil que tu crois maîtriser",
+        "salue Gwen en passant",
+    );
+
+    my @attentions = (
+        "un cron qui s'emballe",
+        "une regex un peu trop gourmande",
+        "une PR qui dort depuis trop longtemps",
+        "un disque /var qui grimpe en silence",
+        "un certificat qui te lâche dans 3 jours",
+        "une dépendance CPAN désuète",
+        "un \"force push\" dont tu te souviendras",
+        "un kill -9 qui paraissait nécessaire",
+        "un sudo tapé trop vite",
+        "un rollback que tu auras oublié de tester",
+    );
+
+    my @couleurs = qw(turquoise carmin indigo or pourpre ardoise émeraude saphir cuivre ivoire);
+    my @chiffres = (3, 7, 11, 13, 17, 21, 23, 42, 47, 77, 100, 666);
+    my @glyphs   = ("\x{2728}", "\x{1F31F}", "\x{1F319}", "\x{1F525}", "\x{2604}\x{FE0F}",
+                    "\x{1F30C}", "\x{1F52E}", "\x{26A1}", "\x{1F300}");
+
+    # Tirages
+    my $humeur   = $humeurs[ int(rand @humeurs) ];
+    my $event    = $evenements[ int(rand @evenements) ];
+    my $reco     = $recommandations[ int(rand @recommandations) ];
+    my $attention = $attentions[ int(rand @attentions) ];
+    my $couleur  = $couleurs[ int(rand @couleurs) ];
+    my $chiffre  = $chiffres[ int(rand @chiffres) ];
+    my $glyph    = $glyphs[ int(rand @glyphs) ];
+    # Pourcentage chance — biais positif léger
+    my $chance   = 35 + int(rand 60);  # 35..94
+
+    # Restore real randomness for the rest of the process
+    srand();
+
+    # Affichage 3 lignes
+    botPrivmsg($self, $reply_to,
+        "$glyph \x02Horoscope du $date_key pour $target\x02 \x{2014} humeur $humeur");
+    botPrivmsg($self, $reply_to,
+        "  $event");
+    botPrivmsg($self, $reply_to,
+        sprintf("  Conseil : %s. Méfiance : %s.", $reco, $attention));
+    botPrivmsg($self, $reply_to,
+        sprintf("  \x{1F3B2} Chiffre %d \x{B7} \x{1F3A8} couleur %s \x{B7} \x{1F340} chance %d%%",
+            $chiffre, $couleur, $chance));
+
+    # Compteur consultations + hook achievement
+    $self->{_horoscope_count}{$nick}++;
+    if ($self->{achievements} && $channel =~ /^#/) {
+        my $count = $self->{_horoscope_count}{$nick} // 0;
+        eval { $self->{achievements}->check_horoscope($nick, $channel, $count) };
+        if ($@) { $self->{logger}->log(1, "achievements check_horoscope error: $@") }
+    }
+
+    $self->{metrics}->inc('mediabot_horoscope_total') if $self->{metrics};
+    return 1;
+}
+
+# =============================================================================
+# mb117: Compat / Quotegame / Mood
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# mbCompat_ctx --- !compat <nick1> <nick2>
+# Calcul d'affinité IRC multi-dimensionnel.
+#
+# 4 dimensions :
+#   1. Recouvrement horaire (intersection des heures actives)   - 30 pts
+#   2. Vocabulaire commun (jaccard sur top 100 mots)           - 30 pts
+#   3. Échanges karma mutuels (ring buffer)                     - 20 pts
+#   4. Co-présence (msgs envoyés dans les 5min suivant l'autre) - 20 pts
+#
+# Score 0-100% avec interprétation textuelle.
+# ---------------------------------------------------------------------------
+sub mbCompat_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    unless ($channel && $channel =~ /^#/) {
+        botNotice($self, $nick, 'Syntax: !compat <nick1> [nick2]  (must be in a channel)'); return;
+    }
+    unless (@args >= 1) {
+        botNotice($self, $nick, 'Syntax: !compat <nick1> [nick2]');
+        return;
+    }
+
+    my $n1 = lc($args[0]);
+    my $n2 = @args >= 2 ? lc($args[1]) : lc($nick);
+
+    if ($n1 eq $n2) {
+        botPrivmsg($self, $channel, "$nick: a nick has 100% compatibility with itself \x{1F9D8}");
+        return 1;
+    }
+
+    my $dbh = $self->{dbh};
+
+    # === Dimension 1 : Recouvrement horaire (24 buckets) ====================
+    my $sth_h = $dbh->prepare(q{
+        SELECT cl.nick, HOUR(cl.ts) AS h, COUNT(*) AS c
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.nick IN (?, ?)
+          AND cl.publictext IS NOT NULL
+        GROUP BY cl.nick, HOUR(cl.ts)
+    });
+    my %hours = ($n1 => [(0)x24], $n2 => [(0)x24]);
+    my %total_msgs = ($n1 => 0, $n2 => 0);
+    if ($sth_h && $sth_h->execute($channel, $n1, $n2)) {
+        while (my $r = $sth_h->fetchrow_hashref) {
+            my $who = lc($r->{nick});
+            next unless exists $hours{$who};
+            $hours{$who}[$r->{h}] = $r->{c};
+            $total_msgs{$who} += $r->{c};
+        }
+        $sth_h->finish;
+    }
+
+    if ($total_msgs{$n1} == 0 || $total_msgs{$n2} == 0) {
+        my $absent = $total_msgs{$n1} == 0 ? $n1 : $n2;
+        botPrivmsg($self, $channel, "\x{1F50D} $absent: no activity recorded on $channel.");
+        return 1;
+    }
+
+    # Normalise et calcule overlap (formule : 1 - 0.5*sum(|p1-p2|))
+    my @p1 = map { $hours{$n1}[$_] / $total_msgs{$n1} } 0..23;
+    my @p2 = map { $hours{$n2}[$_] / $total_msgs{$n2} } 0..23;
+    my $diff = 0;
+    $diff += abs($p1[$_] - $p2[$_]) for 0..23;
+    my $hour_overlap = 1.0 - ($diff / 2.0);  # 0..1
+    my $hour_score   = int($hour_overlap * 30);
+
+    # === Dimension 2 : Vocabulaire commun (jaccard sur top 100 mots) =========
+    # Fenêtre : derniers 50k msgs par nick pour rester rapide
+    my %words;
+    for my $who ($n1, $n2) {
+        my $sth_w = $dbh->prepare(q{
+            SELECT cl.publictext
+            FROM CHANNEL_LOG cl
+            JOIN CHANNEL c ON c.id_channel = cl.id_channel
+            WHERE c.name = ? AND cl.nick = ?
+              AND cl.publictext IS NOT NULL
+            ORDER BY cl.ts DESC
+            LIMIT 5000
+        });
+        my %w_counts;
+        if ($sth_w && $sth_w->execute($channel, $who)) {
+            while (my $r = $sth_w->fetchrow_arrayref) {
+                my $txt = lc($r->[0] // '');
+                $txt =~ s/[^\w\s\x{00C0}-\x{017F}]/ /g;
+                for my $w (split /\s+/, $txt) {
+                    next unless length($w) >= 4;
+                    $w_counts{$w}++;
+                }
+            }
+            $sth_w->finish;
+        }
+        # Garder top 100 mots
+        my @top = (sort { $w_counts{$b} <=> $w_counts{$a} } keys %w_counts)[0..99];
+        @top = grep { defined } @top;
+        $words{$who} = { map { $_ => 1 } @top };
+    }
+    my $intersect = 0;
+    my $union     = 0;
+    my %all_words = map { $_ => 1 } (keys %{$words{$n1}}, keys %{$words{$n2}});
+    for my $w (keys %all_words) {
+        $union++;
+        $intersect++ if $words{$n1}{$w} && $words{$n2}{$w};
+    }
+    my $jaccard    = $union > 0 ? $intersect / $union : 0;
+    my $vocab_score = int($jaccard * 30);
+
+    # === Dimension 3 : Échanges karma mutuels (ring buffer) =================
+    my $klog = $self->{_karma_log}{$channel} // [];
+    my $karma_n1_to_n2 = 0; my $karma_n2_to_n1 = 0;
+    my $karma_n1_to_n2_pos = 0; my $karma_n2_to_n1_pos = 0;
+    for my $e (@$klog) {
+        my $from = lc($e->{from} // '');
+        my $to   = lc($e->{nick} // '');
+        my $delta = $e->{delta} // '';
+        if    ($from eq $n1 && $to eq $n2) { $karma_n1_to_n2++; $karma_n1_to_n2_pos++ if $delta eq '+1' }
+        elsif ($from eq $n2 && $to eq $n1) { $karma_n2_to_n1++; $karma_n2_to_n1_pos++ if $delta eq '+1' }
+    }
+    my $karma_score = 0;
+    if ($karma_n1_to_n2 + $karma_n2_to_n1 > 0) {
+        # Réciprocité : si les deux donnent → bonus
+        my $reciprocity = ($karma_n1_to_n2 > 0 && $karma_n2_to_n1 > 0) ? 1.0 : 0.5;
+        my $positivity  = ($karma_n1_to_n2_pos + $karma_n2_to_n1_pos)
+                        / ($karma_n1_to_n2 + $karma_n2_to_n1);
+        my $volume      = ($karma_n1_to_n2 + $karma_n2_to_n1) >= 10 ? 1.0 : (($karma_n1_to_n2 + $karma_n2_to_n1) / 10);
+        $karma_score = int(20 * $reciprocity * $positivity * $volume);
+    }
+
+    # === Dimension 4 : Co-présence (msgs dans 5min suivant l'autre) ==========
+    # Requête : compter les paires de messages adjacents (n1 puis n2 dans 5min, et inversement)
+    my $sth_co = $dbh->prepare(q{
+        SELECT cl.nick, UNIX_TIMESTAMP(cl.ts) AS u
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.nick IN (?, ?)
+          AND cl.publictext IS NOT NULL
+          AND cl.ts >= NOW() - INTERVAL 90 DAY
+        ORDER BY cl.ts ASC
+    });
+    my $copresence = 0;
+    if ($sth_co && $sth_co->execute($channel, $n1, $n2)) {
+        my $last_nick = '';
+        my $last_ts   = 0;
+        while (my $r = $sth_co->fetchrow_hashref) {
+            my $cur = lc($r->{nick});
+            if ($last_nick ne '' && $last_nick ne $cur && ($r->{u} - $last_ts) <= 300) {
+                $copresence++;
+            }
+            $last_nick = $cur;
+            $last_ts   = $r->{u};
+        }
+        $sth_co->finish;
+    }
+    # 100 paires d'échanges proches = 20 points max
+    my $copres_score = $copresence >= 100 ? 20 : int($copresence / 5);
+
+    # === Score final =========================================================
+    my $total_score = $hour_score + $vocab_score + $karma_score + $copres_score;
+    $total_score = 100 if $total_score > 100;
+    $total_score = 0   if $total_score < 0;
+
+    # Interprétation
+    my ($verdict, $emoji) =
+          $total_score >= 85 ? ('moitiés indissociables',       "\x{1F495}")
+        : $total_score >= 70 ? ('âmes sœurs IRC',               "\x{1F49E}")
+        : $total_score >= 55 ? ('complices solides',            "\x{1F91D}")
+        : $total_score >= 40 ? ('complices à temps partiel',    "\x{1F60A}")
+        : $total_score >= 25 ? ('interactions limitées',        "\x{1F44B}")
+        : $total_score >= 10 ? ('chemins qui se croisent',      "\x{1F914}")
+        :                       ('deux mondes parallèles',       "\x{1F30C}");
+
+    # Barre de progression Unicode
+    my $bar_filled = int($total_score / 5);   # 0..20
+    my $bar = "\x{2588}" x $bar_filled . "\x{2591}" x (20 - $bar_filled);
+
+    botPrivmsg($self, $channel,
+        sprintf("%s \x02%s\x02 \x{2194} \x02%s\x02 : \x02%d%%\x02  %s",
+            $emoji, $n1, $n2, $total_score, $verdict));
+    botPrivmsg($self, $channel, "  [$bar]");
+    botPrivmsg($self, $channel,
+        sprintf("  \x{1F551} hours %d/30  \x{B7}  \x{1F4DD} vocab %d/30  \x{B7}  "
+              . "\x{2728} karma %d/20  \x{B7}  \x{1F500} co-presence %d/20",
+            $hour_score, $vocab_score, $karma_score, $copres_score));
+
+    # Détails enrichis
+    my @details;
+    push @details, sprintf("%d common words", $intersect) if $intersect > 0;
+    push @details, sprintf("%d karma exchanges", $karma_n1_to_n2 + $karma_n2_to_n1) if ($karma_n1_to_n2 + $karma_n2_to_n1) > 0;
+    push @details, sprintf("%d adjacent msg pairs (90d)", $copresence) if $copresence > 0;
+    botPrivmsg($self, $channel, "  " . join("  \x{B7}  ", @details)) if @details;
+
+    # Hook achievement
+    $self->{_compat_count}{$nick}++;
+    if ($self->{achievements}) {
+        my $cnt = $self->{_compat_count}{$nick} // 0;
+        eval { $self->{achievements}->check_compat($nick, $channel, $cnt) };
+        if ($@) { $self->{logger}->log(1, "achievements check_compat error: $@") }
+    }
+
+    $self->{metrics}->inc('mediabot_compat_total', { channel => $channel }) if $self->{metrics};
+    logBot($self, $ctx->message, $channel, 'compat', "$n1 vs $n2 = $total_score%");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbQuotegame_ctx --- !quotegame [stop|top]
+# Devine qui a dit la quote. État partagé en mémoire par canal.
+# Réponses validées via checkQuotegameAnswer() appelé depuis on_message_PRIVMSG.
+# ---------------------------------------------------------------------------
+sub mbQuotegame_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    unless ($channel && $channel =~ /^#/) {
+        botNotice($self, $nick, 'Syntax: !quotegame  (must be in a channel)'); return;
+    }
+
+    # !quotegame stop
+    if (@args && lc($args[0]) eq 'stop') {
+        my $qg = $self->{_quotegame}{$channel};
+        if ($qg && $qg->{active}) {
+            $qg->{active} = 0;
+            botPrivmsg($self, $channel,
+                "\x{1F6D1} Quotegame stopped. Answer was: \x02$qg->{author}\x02");
+        } else {
+            botPrivmsg($self, $channel, 'No active quotegame.');
+        }
+        return 1;
+    }
+
+    # !quotegame top
+    if (@args && lc($args[0]) eq 'top') {
+        my $scores = $self->{_quotegame}{$channel}{scores} // {};
+        unless (%$scores) {
+            botPrivmsg($self, $channel, 'No quotegame scores yet on this channel.'); return 1;
+        }
+        my @sorted = sort { $scores->{$b} <=> $scores->{$a} || $a cmp $b } keys %$scores;
+        my $top = scalar @sorted > 5 ? 5 : scalar @sorted;
+        my @parts = map { "$_:" . $scores->{$_} } @sorted[0..$top-1];
+        botPrivmsg($self, $channel, "\x{1F4DC} Quote detectives: " . join('  |  ', @parts));
+        return 1;
+    }
+
+    # Vérifier qu'il n'y a pas déjà une question active
+    my $qg = $self->{_quotegame}{$channel};
+    if ($qg && $qg->{active}) {
+        botPrivmsg($self, $channel,
+            "\x{23F3} Quotegame already in progress (use \x02!quotegame stop\x02 to abort).");
+        return 1;
+    }
+
+    # Récupérer une quote aléatoire qui n'est PAS de l'auteur du bot
+    # Et idéalement d'un user encore actif (au moins 1 msg dans CHANNEL_LOG)
+    my $dbh = $self->{dbh};
+    my $sth = $dbh->prepare(q{
+        SELECT q.id_quotes, q.quotetext, u.nickname AS author
+        FROM QUOTES q
+        JOIN CHANNEL c ON c.id_channel = q.id_channel
+        JOIN USER    u ON u.id_user    = q.id_user
+        WHERE c.name = ? AND LENGTH(q.quotetext) >= 20
+        ORDER BY RAND()
+        LIMIT 1
+    });
+    unless ($sth && $sth->execute($channel)) {
+        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
+    }
+    my $row = $sth->fetchrow_hashref; $sth->finish;
+    unless ($row && $row->{quotetext}) {
+        botPrivmsg($self, $channel, 'No quotes long enough for the game on this channel.');
+        return 1;
+    }
+
+    # Préserver les scores cumulés
+    my $prev_scores = ($qg && $qg->{scores}) ? $qg->{scores} : {};
+    $self->{_quotegame}{$channel} = {
+        active     => 1,
+        id_quote   => $row->{id_quotes},
+        author     => $row->{author},
+        author_lc  => lc($row->{author}),
+        started    => time(),
+        deadline   => time() + 60,
+        scores     => $prev_scores,
+    };
+
+    # Masquer toute occurrence du nom de l'auteur dans la quote
+    my $masked = $row->{quotetext};
+    my $author_lc = lc($row->{author});
+    $masked =~ s/\b\Q$row->{author}\E\b/???/gi;
+    $masked =~ s/\b\Q$author_lc\E\b/???/gi;
+
+    botPrivmsg($self, $channel,
+        "\x{1F4DC} \x02Quotegame!\x02 Who said: \"\x02$masked\x02\"  \x{2014}  60s to answer with the nick");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# checkQuotegameAnswer --- appelé depuis on_message_PRIVMSG (canal public)
+# Validation déclenchée par tout message contenant un nick — peu coûteux.
+# ---------------------------------------------------------------------------
+sub checkQuotegameAnswer {
+    my ($self, $sNick, $sChannel, $sMsg) = @_;
+    return unless defined $sChannel && $sChannel =~ /^#/;
+    my $qg = $self->{_quotegame}{$sChannel} or return;
+    return unless $qg->{active};
+
+    # Timeout passé
+    if (time() > $qg->{deadline}) {
+        $qg->{active} = 0;
+        Mediabot::Helpers::botPrivmsg($self, $sChannel,
+            "\x{23F0} Time's up! The answer was: \x02$qg->{author}\x02");
+        return;
+    }
+
+    return unless defined $sMsg && $sMsg ne '';
+
+    # Le message contient-il le nick de l'auteur ?
+    # On évite que l'auteur lui-même réponde "moi"
+    return if lc($sNick) eq $qg->{author_lc};
+
+    my $msg_lc = lc($sMsg);
+    if ($msg_lc =~ /\b\Q$qg->{author_lc}\E\b/) {
+        $qg->{active} = 0;
+        $qg->{scores}{$sNick}++;
+        my $score = $qg->{scores}{$sNick};
+        my $elapsed = time() - $qg->{started};
+        Mediabot::Helpers::botPrivmsg($self, $sChannel,
+            sprintf("\x{1F3AF} Correct, \x02%s\x02! It was \x02%s\x02 (in %ds, score: %d)",
+                $sNick, $qg->{author}, $elapsed, $score));
+
+        # Hook achievement
+        if ($self->{achievements}) {
+            eval { $self->{achievements}->check_quotegame($sNick, $sChannel, $score) };
+        }
+        $self->{metrics}->inc('mediabot_quotegame_correct_total') if $self->{metrics};
+    }
+}
+
+# ---------------------------------------------------------------------------
+# mbMood_ctx --- !mood
+# Détection d'humeur du canal sur la dernière heure.
+# Patterns FR + EN.
+# ---------------------------------------------------------------------------
+sub mbMood_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    unless ($channel && $channel =~ /^#/) {
+        botNotice($self, $nick, 'Syntax: !mood  (must be in a channel)'); return;
+    }
+
+    my $dbh = $self->{dbh};
+    my $sth = $dbh->prepare(q{
+        SELECT cl.publictext
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ?
+          AND cl.publictext IS NOT NULL
+          AND cl.ts >= NOW() - INTERVAL 60 MINUTE
+    });
+    unless ($sth && $sth->execute($channel)) {
+        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
+    }
+
+    # Patterns FR/EN
+    my @positive = qw(
+        lol mdr ptdr xptdr haha hehe hihi yep ouais ouaip oui yes yep yeah
+        merci thanks thx genial cool super excellent parfait nice top
+        bravo felicitations clap kiff like love amour content heureux
+        happy great awesome wonderful incroyable formidable bien sympa
+    );
+    my @negative = qw(
+        putain merde chiant ridicule nul fail rate raté echec chiotte
+        wtf wtf fuck fck damn shit hell hate deteste enfer pourri craignos
+        catastrophe desastre horrible affreux relou pitié non nope nah ouch
+        bof beurk dégueu degueu degu rage furieux furax énervé enerve
+    );
+    my @question = qw(qui quoi pourquoi pourquoi comment quand quand ou où);
+
+    my %pos_h = map { $_ => 1 } @positive;
+    my %neg_h = map { $_ => 1 } @negative;
+    my %q_h   = map { $_ => 1 } @question;
+
+    my $pos = 0; my $neg = 0; my $questions = 0;
+    my $exclam = 0; my $total_msgs = 0;
+    my %emoji_count;
+
+    # Emoji regex Unicode — minimal set (les principaux)
+    my $emoji_re = qr/[\x{1F600}-\x{1F64F}\x{1F300}-\x{1F5FF}\x{1F680}-\x{1F6FF}\x{2600}-\x{26FF}\x{2700}-\x{27BF}]/;
+
+    while (my $r = $sth->fetchrow_arrayref) {
+        my $txt = $r->[0] // '';
+        $total_msgs++;
+        $exclam += () = $txt =~ /!/g;
+        $questions++ if $txt =~ /\?/;
+        # Compter les emojis
+        while ($txt =~ /($emoji_re)/g) { $emoji_count{$1}++ }
+        # Tokeniser
+        my $lower = lc($txt);
+        $lower =~ s/[^\w\s\x{00C0}-\x{017F}]/ /g;
+        for my $w (split /\s+/, $lower) {
+            next unless length($w) >= 2;
+            $pos++       if $pos_h{$w};
+            $neg++       if $neg_h{$w};
+            $questions++ if $q_h{$w};
+        }
+    }
+    $sth->finish;
+
+    if ($total_msgs == 0) {
+        botPrivmsg($self, $channel,
+            "\x{1F321}\x{FE0F} Mood $channel (last 60min): silence total \x{1F507}");
+        return 1;
+    }
+
+    # Score : ratio positif - ratio négatif, normalisé sur (-1, +1) puis projeté en %
+    my $total_sent = $pos + $neg;
+    my $pos_ratio  = $total_sent > 0 ? $pos / $total_sent : 0.5;
+
+    my ($mood_label, $mood_emoji);
+    if    ($pos_ratio >= 0.80) { $mood_label = 'euphoric';    $mood_emoji = "\x{1F31F}"; }
+    elsif ($pos_ratio >= 0.65) { $mood_label = 'joyful';      $mood_emoji = "\x{2600}\x{FE0F}"; }
+    elsif ($pos_ratio >= 0.55) { $mood_label = 'positive';    $mood_emoji = "\x{1F600}"; }
+    elsif ($pos_ratio >= 0.45) { $mood_label = 'balanced';    $mood_emoji = "\x{2696}\x{FE0F}"; }
+    elsif ($pos_ratio >= 0.35) { $mood_label = 'tense';       $mood_emoji = "\x{1F62C}"; }
+    elsif ($pos_ratio >= 0.20) { $mood_label = 'grumpy';      $mood_emoji = "\x{1F614}"; }
+    else                        { $mood_label = 'apocalyptic'; $mood_emoji = "\x{1F4A2}"; }
+    if ($total_sent == 0) { $mood_label = 'neutral'; $mood_emoji = "\x{1F636}"; }
+
+    # Energy : volume + exclamations
+    my $energy_label;
+    if    ($total_msgs >= 200) { $energy_label = "very high \x{26A1}"; }
+    elsif ($total_msgs >= 80)  { $energy_label = "high \x{1F525}"; }
+    elsif ($total_msgs >= 30)  { $energy_label = 'medium'; }
+    elsif ($total_msgs >= 5)   { $energy_label = "low \x{1F634}"; }
+    else                        { $energy_label = "very low \x{1F636}"; }
+
+    # Top emoji
+    my $top_emoji = '';
+    if (%emoji_count) {
+        my ($e) = sort { $emoji_count{$b} <=> $emoji_count{$a} } keys %emoji_count;
+        $top_emoji = sprintf("top emoji: %s\x{D7}%d", $e, $emoji_count{$e});
+    }
+
+    # Score 0-100%
+    my $mood_pct = int($pos_ratio * 100);
+
+    botPrivmsg($self, $channel,
+        sprintf("\x{1F321}\x{FE0F} Mood %s (last 60min): %s \x02%s\x02 %d%%  \x{B7}  energy: %s (%d msgs)",
+            $channel, $mood_emoji, $mood_label, $mood_pct, $energy_label, $total_msgs));
+
+    my @details;
+    push @details, "$pos positives"   if $pos > 0;
+    push @details, "$neg negatives"   if $neg > 0;
+    push @details, "$questions ?"     if $questions > 0;
+    push @details, "$exclam !"        if $exclam > 0;
+    push @details, $top_emoji         if $top_emoji;
+    botPrivmsg($self, $channel, "  " . join(' | ', @details)) if @details;
+
+    # Hook achievement
+    $self->{_mood_count}{$nick}++;
+    if ($self->{achievements}) {
+        my $cnt = $self->{_mood_count}{$nick} // 0;
+        eval { $self->{achievements}->check_mood($nick, $channel, $cnt) };
+        if ($@) { $self->{logger}->log(1, "achievements check_mood error: $@") }
+    }
+
+    # Hook polyphony — coûteux (scan multi-channels) — déclenché 1x toutes les 30min/nick
+    if ($self->{achievements}) {
+        my $now = time();
+        my $last = $self->{_polyphony_check_ts}{$nick} // 0;
+        if (($now - $last) > 1800) {
+            $self->{_polyphony_check_ts}{$nick} = $now;
+            my $sth_p = $dbh->prepare(q{
+                SELECT COUNT(DISTINCT c.name) AS n
+                FROM CHANNEL_LOG cl
+                JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                WHERE cl.nick = ?
+                  AND cl.publictext IS NOT NULL
+            });
+            if ($sth_p && $sth_p->execute($nick)) {
+                my $r = $sth_p->fetchrow_hashref; $sth_p->finish;
+                if ($r) {
+                    eval { $self->{achievements}->check_polyphony($nick, $channel, $r->{n}) };
+                }
+            }
+        }
+    }
+
+    $self->{metrics}->inc('mediabot_mood_total', { channel => $channel }) if $self->{metrics};
     return 1;
 }
 

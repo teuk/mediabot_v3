@@ -1345,6 +1345,27 @@ sub mbCommandPublic {
         triviascore  => sub { mbTriviaScore_ctx($ctx) },
         active       => sub { mbActive_ctx($ctx) },
         when         => sub { mbWhen_ctx($ctx) },
+        # mb115: système d'achievements + profil + radar
+        achievements => sub { mbAchievements_ctx($ctx) },
+        achievs      => sub { mbAchievements_ctx($ctx) },   # alias court
+        profil       => sub { mbProfil_ctx($ctx) },
+        profile      => sub { mbProfil_ctx($ctx) },          # alias en anglais
+        radar        => sub { mbRadar_ctx($ctx) },
+
+        # mb116: dashboard de canal + duel + horoscope
+        dashboard    => sub { mbDashboard_ctx($ctx) },
+        chanstats    => sub { mbDashboard_ctx($ctx) },        # alias
+        duel         => sub { mbDuel_ctx($ctx) },
+        horoscope    => sub { mbHoroscope_ctx($ctx) },
+        horo         => sub { mbHoroscope_ctx($ctx) },        # alias court
+
+        # mb117: compat + quotegame + mood
+        compat       => sub { mbCompat_ctx($ctx) },
+        affinity     => sub { mbCompat_ctx($ctx) },           # alias EN
+        quotegame    => sub { mbQuotegame_ctx($ctx) },
+        qg           => sub { mbQuotegame_ctx($ctx) },        # alias court
+        mood         => sub { mbMood_ctx($ctx) },
+        ambiance     => sub { mbMood_ctx($ctx) },             # alias FR
         quotecount   => sub {
             my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
             mbQuoteCount_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },

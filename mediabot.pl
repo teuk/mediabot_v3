@@ -18,6 +18,7 @@ use Mediabot::Mediabot;
 use Mediabot::Conf;
 use Mediabot::Log;
 use Mediabot::Metrics;
+use Mediabot::Achievements;
 use Mediabot::Radio::Icecast;
 use Mediabot::DB;
 use Mediabot::Channel;
@@ -326,6 +327,15 @@ $mediabot->{metrics}->set_build_info(
     network => $mediabot->{conf}->get('connection.CONN_SERVER_NETWORK') || 'unknown',
     nick    => $mediabot->{conf}->get('connection.CONN_NICK') || 'unknown',
 );
+
+# mb115: Initialize Achievements system
+# Stockage JSON persistant — pas de modif schéma DB
+$mediabot->{achievements} = Mediabot::Achievements->new(
+    path   => $mediabot->{conf}->get('main.ACHIEVEMENTS_PATH') || 'var/achievements.json',
+    logger => $mediabot->{logger},
+    bot    => $mediabot,
+);
+$mediabot->{logger}->log(0, "Achievements: system initialized");
 
 if ($mediabot->{metrics}) {
     $mediabot->{metrics}->set_radio_status_provider(sub {
@@ -1386,6 +1396,14 @@ sub on_message_PRIVMSG {
         # F38: check trivia answers on every public message — $@ distinct (mb85-B1)
         eval { Mediabot::UserCommands::checkTriviaAnswer($mediabot, $who, $where, $what) };
         if ($@) { $mediabot->{logger}->log(1, "checkTriviaAnswer error: $@"); }
+        # mb117: check quotegame answers (same flow, very cheap if no active game)
+        eval { Mediabot::UserCommands::checkQuotegameAnswer($mediabot, $who, $where, $what) };
+        if ($@) { $mediabot->{logger}->log(1, "checkQuotegameAnswer error: $@"); }
+        # mb115: hook achievements (msg-based) — limité par cache 5min en interne
+        if ($mediabot->{achievements}) {
+            eval { $mediabot->{achievements}->check_msg($who, $where) };
+            if ($@) { $mediabot->{logger}->log(1, "achievements check_msg error: $@"); }
+        }
         if ($mediabot->{metrics}) {
             $mediabot->{metrics}->inc(
                 'mediabot_channel_lines_in_total',

@@ -120,6 +120,24 @@ sub new {
         'Total trivia timeouts');
     $self->_declare('mediabot_trivia_questions_total',  'counter',
         'Total trivia questions asked (mb111-IMP3)');
+
+    # mb115: système d'achievements
+    $self->_declare('mediabot_achievements_unlocked_total', 'counter',
+        'Total achievements unlocked by id (mb115)', ['achievement']);
+
+    # mb116: nouvelles commandes ludiques
+    $self->_declare('mediabot_duel_total', 'counter',
+        'Total duels played by channel (mb116)', ['channel']);
+    $self->_declare('mediabot_horoscope_total', 'counter',
+        'Total horoscope consultations (mb116)');
+
+    # mb117: compat, quotegame, mood
+    $self->_declare('mediabot_compat_total', 'counter',
+        'Total compatibility checks (mb117)', ['channel']);
+    $self->_declare('mediabot_quotegame_correct_total', 'counter',
+        'Total quotegame correct answers (mb117)');
+    $self->_declare('mediabot_mood_total', 'counter',
+        'Total mood readings by channel (mb117)', ['channel']);
     $self->_declare('mediabot_wordcount_requests_total','counter',
         'Total !wordcount requests (mb115 polish)');
 
