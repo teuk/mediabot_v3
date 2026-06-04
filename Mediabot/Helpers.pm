@@ -1667,6 +1667,36 @@ sub getDetailedVersion {
 
 # Get the debug level from the configuration
 
+# ---------------------------------------------------------------------------
+# mb118-IMP3: chanset_enabled($self, $channel, $chanset_name, %opts)
+#
+# Helper utilitaire pour vérifier de manière compacte si un chanset est actif
+# sur un canal. Factorise le pattern :
+#   getIdChansetList -> getIdChannelSet -> bool
+#
+# Options:
+#   default      => 0|1   valeur si chanset absent de CHANSET_LIST
+#                         (legacy/backward-compat). Défaut: 0.
+#
+# Retour: 1 si actif, 0 sinon.
+#
+# Exemples:
+#   chanset_enabled($self, $chan, 'AchievementAnnounce', default => 1)
+#   chanset_enabled($self, $chan, 'Games')
+# ---------------------------------------------------------------------------
+sub chanset_enabled {
+    my ($self, $channel, $chanset_name, %opts) = @_;
+    return 0 unless defined $channel && $channel =~ /^#/ && defined $chanset_name;
+
+    my $default = exists $opts{default} ? $opts{default} : 0;
+
+    my $id_chanset = getIdChansetList($self, $chanset_name);
+    return $default unless defined $id_chanset && $id_chanset ne '';
+
+    my $id_channel_set = getIdChannelSet($self, $channel, $id_chanset);
+    return $id_channel_set ? 1 : 0;
+}
+
 sub getIdChannelSet {
     my ($self, $sChannel, $id_chanset_list) = @_;
 
@@ -1743,6 +1773,15 @@ sub getIdChansetList {
         return undef;
     }
 
+    # mb118-B1: cache statique — la table CHANSET_LIST ne change pas en runtime.
+    # Chargement lazy au premier appel, puis hit mémoire pour les appels suivants.
+    # `exists` au lieu de `defined` car on cache aussi les "not found" (= undef)
+    # pour éviter le SELECT répété sur un chanset inexistant.
+    my $cache_key = lc($sChansetValue);
+    if (exists $self->{_chansetlist_cache}{$cache_key}) {
+        return $self->{_chansetlist_cache}{$cache_key};
+    }
+
     $self->{logger}->log(4, "getIdChansetList() looking up chanset: '$sChansetValue'")
         if $self->{logger};
 
@@ -1774,6 +1813,8 @@ sub getIdChansetList {
     }
 
     $sth->finish;
+    # Stocker dans le cache (même si undef — évite le SELECT répété)
+    $self->{_chansetlist_cache}{$cache_key} = $id_chanset_list;
     return $id_chanset_list;
 }
 

@@ -138,6 +138,10 @@ sub new {
         'Total quotegame correct answers (mb117)');
     $self->_declare('mediabot_mood_total', 'counter',
         'Total mood readings by channel (mb117)', ['channel']);
+
+    # mb118: chronos / leaderboard tracked indirectly via other counters
+    $self->_declare('mediabot_chronos_total', 'counter',
+        'Total chronos timeline displays (mb118)', ['channel']);
     $self->_declare('mediabot_wordcount_requests_total','counter',
         'Total !wordcount requests (mb115 polish)');
 

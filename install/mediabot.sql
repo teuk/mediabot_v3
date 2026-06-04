@@ -680,7 +680,9 @@ INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES
 (11, 'chatGPT'),
 (12, 'AppleMusic'),
 (13, 'RandomQuote'),
-(14, 'Claude');
+(14, 'Claude'),
+(15, 'AchievementAnnounce'),
+(16, 'Games');
 
 --
 -- PUBLIC_COMMANDS_CATEGORY — default categories

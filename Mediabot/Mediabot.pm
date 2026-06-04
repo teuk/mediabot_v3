@@ -1366,6 +1366,14 @@ sub mbCommandPublic {
         qg           => sub { mbQuotegame_ctx($ctx) },        # alias court
         mood         => sub { mbMood_ctx($ctx) },
         ambiance     => sub { mbMood_ctx($ctx) },             # alias FR
+
+        # mb118: leaderboard + chronos
+        leaderboard  => sub { mbLeaderboard_ctx($ctx) },
+        lb           => sub { mbLeaderboard_ctx($ctx) },      # alias court
+        top          => sub { mbLeaderboard_ctx($ctx) },      # alias intuitif
+        chronos      => sub { mbChronos_ctx($ctx) },
+        chrono       => sub { mbChronos_ctx($ctx) },          # alias court
+        timeline     => sub { mbChronos_ctx($ctx) },          # alias EN
         quotecount   => sub {
             my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
             mbQuoteCount_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },

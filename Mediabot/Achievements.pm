@@ -339,19 +339,38 @@ sub unlock {
     $self->save(1);
 
     # Notification IRC
+    #
+    # mb119: public achievement announcements are intentionally gated by
+    # +AchievementAnnounce. Achievements themselves are still unlocked and
+    # persisted even when the channel does not announce them publicly.
+    #
+    # Backward compatibility: if the chanset is not present in CHANSET_LIST yet,
+    # keep the historical behavior and announce. Once the migration below adds
+    # the chanset, channels must explicitly opt in with:
+    #   chanset #channel +AchievementAnnounce
     if ($self->{bot} && defined $channel && $channel =~ /^#/) {
-        my $a = $ACH{$id};
-        my $col = $RARITY_COLOR{$a->{rarity}} // '';
-        my $rst = $col ? "\x0f" : '';
-        # Affiche : 🏆 Achievement Unlocked! teuk → 🌟 Karma Star (uncommon)
         require Mediabot::Helpers;
-        eval {
-            Mediabot::Helpers::botPrivmsg(
-                $self->{bot}, $channel,
-                "\x02🏆 Achievement Unlocked!\x02 $nick → "
-              . $a->{emoji} . " ${col}" . $a->{name} . "${rst} (" . $a->{rarity} . ")"
+        # mb118: utilise le helper chanset_enabled (default=1 pour backward compat)
+        my $announce = eval {
+            Mediabot::Helpers::chanset_enabled(
+                $self->{bot}, $channel, 'AchievementAnnounce',
+                default => 1,
             );
-        };
+        } // 1;
+
+        if ($announce) {
+            my $a = $ACH{$id};
+            my $col = $RARITY_COLOR{$a->{rarity}} // '';
+            my $rst = $col ? "\x0f" : '';
+            # Affiche : 🏆 Achievement Unlocked! teuk → 🌟 Karma Star (uncommon)
+            eval {
+                Mediabot::Helpers::botPrivmsg(
+                    $self->{bot}, $channel,
+                    "\x02🏆 Achievement Unlocked!\x02 $nick → "
+                  . $a->{emoji} . " ${col}" . $a->{name} . "${rst} (" . $a->{rarity} . ")"
+                );
+            };
+        }
     }
 
     if ($self->{bot} && $self->{bot}{metrics}) {
@@ -432,6 +451,32 @@ sub check_msg {
             my $morn  = 0; $morn  += ($by_h{$_} // 0) for (6..8);
             $self->unlock($nick, $channel, 'night_owl')  if $night >= 50;
             $self->unlock($nick, $channel, 'early_bird') if $morn  >= 50;
+        }
+    }
+
+    # mb118-IMP4: hook polyphony — check 1× / heure / nick. Compte les canaux
+    # publics où le nick a parlé. Déplacé ici depuis mbMood_ctx pour ne plus
+    # dépendre d'un trigger explicite.
+    if (!exists $self->get_for_nick($nick, $channel)->{polyphony}) {
+        my $now_p = time();
+        my $last_p = $self->{_polyphony_check_ts}{lc($nick)} // 0;
+        if (($now_p - $last_p) >= 3600) {
+            $self->{_polyphony_check_ts}{lc($nick)} = $now_p;
+            my $sth_p = eval {
+                $dbh->prepare(q{
+                    SELECT COUNT(DISTINCT c.name) AS n
+                    FROM CHANNEL_LOG cl
+                    JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                    WHERE cl.nick = ?
+                      AND cl.publictext IS NOT NULL
+                      AND c.name LIKE '#%'
+                })
+            };
+            if ($sth_p && $sth_p->execute($nick)) {
+                my $r = $sth_p->fetchrow_hashref; $sth_p->finish;
+                $self->unlock($nick, $channel, 'polyphony')
+                    if $r && ($r->{n} // 0) >= 5;
+            }
         }
     }
 }

@@ -101,6 +101,8 @@ our @EXPORT = qw(
     mbQuotegame_ctx
     checkQuotegameAnswer
     mbMood_ctx
+    mbLeaderboard_ctx
+    mbChronos_ctx
 
 );
 
@@ -7229,6 +7231,12 @@ sub mbDuel_ctx {
         botNotice($self, $nick, 'Syntax: !duel <nick>  (must be in a channel)'); return;
     }
 
+    # mb118-IMP2: gate par chanset +Games (default=1 backward compat)
+    unless (Mediabot::Helpers::chanset_enabled($self, $channel, 'Games', default => 1)) {
+        botNotice($self, $nick, "Games are disabled on $channel (chanset -Games)");
+        return;
+    }
+
     # !duel stats [nick] — affichage des stats personnelles
     if (@args && lc($args[0]) eq 'stats') {
         shift @args;
@@ -7421,6 +7429,14 @@ sub mbHoroscope_ctx {
 
     my $reply_to = ($channel && $channel =~ /^#/) ? $channel : $nick;
 
+    # mb118-IMP2: gate par chanset +Games sur canal public (PM toujours autorisé)
+    if ($channel && $channel =~ /^#/) {
+        unless (Mediabot::Helpers::chanset_enabled($self, $channel, 'Games', default => 1)) {
+            botNotice($self, $nick, "Games are disabled on $channel (chanset -Games)");
+            return;
+        }
+    }
+
     # Seed déterministe : nick + date du jour
     my @lt = localtime(time);
     my $date_key = sprintf('%04d-%02d-%02d', $lt[5]+1900, $lt[4]+1, $lt[3]);
@@ -7552,6 +7568,13 @@ sub mbCompat_ctx {
     unless ($channel && $channel =~ /^#/) {
         botNotice($self, $nick, 'Syntax: !compat <nick1> [nick2]  (must be in a channel)'); return;
     }
+
+    # mb118-IMP2: gate par chanset +Games
+    unless (Mediabot::Helpers::chanset_enabled($self, $channel, 'Games', default => 1)) {
+        botNotice($self, $nick, "Games are disabled on $channel (chanset -Games)");
+        return;
+    }
+
     unless (@args >= 1) {
         botNotice($self, $nick, 'Syntax: !compat <nick1> [nick2]');
         return;
@@ -7753,6 +7776,14 @@ sub mbQuotegame_ctx {
 
     unless ($channel && $channel =~ /^#/) {
         botNotice($self, $nick, 'Syntax: !quotegame  (must be in a channel)'); return;
+    }
+
+    # mb118-IMP2: gate par chanset +Games (sauf stop/top: lecture toujours OK)
+    if (!(@args && lc($args[0] // '') =~ /^(stop|top)$/)) {
+        unless (Mediabot::Helpers::chanset_enabled($self, $channel, 'Games', default => 1)) {
+            botNotice($self, $nick, "Games are disabled on $channel (chanset -Games)");
+            return;
+        }
     }
 
     # !quotegame stop
@@ -8006,29 +8037,350 @@ sub mbMood_ctx {
         if ($@) { $self->{logger}->log(1, "achievements check_mood error: $@") }
     }
 
-    # Hook polyphony — coûteux (scan multi-channels) — déclenché 1x toutes les 30min/nick
-    if ($self->{achievements}) {
-        my $now = time();
-        my $last = $self->{_polyphony_check_ts}{$nick} // 0;
-        if (($now - $last) > 1800) {
-            $self->{_polyphony_check_ts}{$nick} = $now;
-            my $sth_p = $dbh->prepare(q{
-                SELECT COUNT(DISTINCT c.name) AS n
-                FROM CHANNEL_LOG cl
-                JOIN CHANNEL c ON c.id_channel = cl.id_channel
-                WHERE cl.nick = ?
-                  AND cl.publictext IS NOT NULL
-            });
-            if ($sth_p && $sth_p->execute($nick)) {
-                my $r = $sth_p->fetchrow_hashref; $sth_p->finish;
-                if ($r) {
-                    eval { $self->{achievements}->check_polyphony($nick, $channel, $r->{n}) };
-                }
+    # Note: le check polyphony a été déplacé dans Achievements::check_msg (mb118)
+    # pour ne plus dépendre d'un trigger explicite via !mood.
+
+    $self->{metrics}->inc('mediabot_mood_total', { channel => $channel }) if $self->{metrics};
+    return 1;
+}
+
+# =============================================================================
+# mb118: Leaderboard / Chronos
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# mbLeaderboard_ctx --- !leaderboard [msgs|karma|trivia|duels|achievs]
+# Classement consolidé multi-métriques du canal courant.
+# Par défaut : affiche le top 3 dans chaque catégorie.
+# ---------------------------------------------------------------------------
+sub mbLeaderboard_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    unless ($channel && $channel =~ /^#/) {
+        botNotice($self, $nick, 'Syntax: !leaderboard [msgs|karma|trivia|duels|achievs]'); return;
+    }
+
+    my $only = @args ? lc($args[0]) : '';
+    my $dbh  = $self->{dbh};
+
+    # --- Top 3 messages -----------------------------------------------------
+    my @msgs_top;
+    if (!$only || $only eq 'msgs') {
+        my $sth = $dbh->prepare(q{
+            SELECT cl.nick, COUNT(*) AS msg_count
+            FROM CHANNEL_LOG cl
+            JOIN CHANNEL c ON c.id_channel = cl.id_channel
+            WHERE c.name = ? AND cl.publictext IS NOT NULL
+            GROUP BY cl.nick
+            ORDER BY msg_count DESC
+            LIMIT 3
+        });
+        if ($sth && $sth->execute($channel)) {
+            while (my $r = $sth->fetchrow_hashref) {
+                push @msgs_top, [$r->{nick}, $r->{msg_count}];
+            }
+            $sth->finish;
+        }
+    }
+
+    # --- Top 3 karma --------------------------------------------------------
+    my @karma_top;
+    if (!$only || $only eq 'karma') {
+        my $sth = $dbh->prepare(q{
+            SELECT k.nick, k.score
+            FROM KARMA k
+            JOIN CHANNEL c ON c.id_channel = k.id_channel
+            WHERE c.name = ?
+            ORDER BY k.score DESC
+            LIMIT 3
+        });
+        if ($sth && $sth->execute($channel)) {
+            while (my $r = $sth->fetchrow_hashref) {
+                push @karma_top, [$r->{nick}, $r->{score}];
+            }
+            $sth->finish;
+        }
+    }
+
+    # --- Top 3 trivia -------------------------------------------------------
+    my @trivia_top;
+    if (!$only || $only eq 'trivia') {
+        my $sth = $dbh->prepare(q{
+            SELECT ts.nick, ts.score
+            FROM TRIVIA_SCORES ts
+            JOIN CHANNEL c ON c.id_channel = ts.id_channel
+            WHERE c.name = ?
+            ORDER BY ts.score DESC
+            LIMIT 3
+        });
+        if ($sth && $sth->execute($channel)) {
+            while (my $r = $sth->fetchrow_hashref) {
+                push @trivia_top, [$r->{nick}, $r->{score}];
+            }
+            $sth->finish;
+        }
+    }
+
+    # --- Top 3 duels (mémoire) ----------------------------------------------
+    my @duel_top;
+    if (!$only || $only eq 'duels' || $only eq 'duel') {
+        my $dst = $self->{_duel_stats}{$channel} // {};
+        my @sorted = sort {
+            ($dst->{$b}{wins} // 0) <=> ($dst->{$a}{wins} // 0)
+            || $a cmp $b
+        } keys %$dst;
+        for my $n (@sorted[0..2]) {
+            next unless defined $n;
+            push @duel_top, [$n, ($dst->{$n}{wins} // 0)];
+        }
+    }
+
+    # --- Top 3 achievements -------------------------------------------------
+    my @ach_top;
+    if (!$only || $only eq 'achievs' || $only eq 'achievements') {
+        if ($self->{achievements}) {
+            my %counts_on_chan;
+            for my $key (keys %{ $self->{achievements}{data} // {} }) {
+                my ($n, $ch) = split /\x00/, $key, 2;
+                next unless defined $ch && $ch eq $channel;
+                $counts_on_chan{$n} = scalar keys %{ $self->{achievements}{data}{$key} };
+            }
+            my @sorted = sort {
+                $counts_on_chan{$b} <=> $counts_on_chan{$a}
+                || $a cmp $b
+            } keys %counts_on_chan;
+            for my $n (@sorted[0..2]) {
+                next unless defined $n;
+                push @ach_top, [$n, $counts_on_chan{$n}];
             }
         }
     }
 
-    $self->{metrics}->inc('mediabot_mood_total', { channel => $channel }) if $self->{metrics};
+    # --- Format des médailles ----------------------------------------------
+    my @medals = ("\x{1F947}", "\x{1F948}", "\x{1F949}");   # 🥇 🥈 🥉
+    my $fmt_top = sub {
+        my ($top, $label) = @_;
+        return undef unless @$top;
+        my @parts;
+        for my $i (0..$#{$top}) {
+            my ($n, $v) = @{$top->[$i]};
+            push @parts, "$medals[$i] $n ($v)";
+        }
+        return "$label  " . join('  ', @parts);
+    };
+
+    botPrivmsg($self, $channel,
+        "\x{1F3C5} \x02Leaderboard\x02 $channel"
+        . ($only ? " [$only]" : ''));
+
+    my $any = 0;
+    if (my $l = $fmt_top->(\@msgs_top,   "\x{1F4AC}  msgs   :"))   { botPrivmsg($self, $channel, "  $l"); $any++; }
+    if (my $l = $fmt_top->(\@karma_top,  "\x{1F31F}  karma  :"))   { botPrivmsg($self, $channel, "  $l"); $any++; }
+    if (my $l = $fmt_top->(\@trivia_top, "\x{1F9E0}  trivia :"))   { botPrivmsg($self, $channel, "  $l"); $any++; }
+    if (my $l = $fmt_top->(\@duel_top,   "\x{2694}\x{FE0F}  duels  :")) { botPrivmsg($self, $channel, "  $l"); $any++; }
+    if (my $l = $fmt_top->(\@ach_top,    "\x{1F3C6}  achievs:"))   { botPrivmsg($self, $channel, "  $l"); $any++; }
+
+    botPrivmsg($self, $channel, "  (no data yet)") unless $any;
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbChronos_ctx --- !chronos
+# Chronologie ASCII des événements marquants du canal :
+#   - premier message du canal
+#   - jour record (plus de messages)
+#   - heure record (plus de messages dans une heure)
+#   - dernier message
+#   - karma all-time leader
+#   - trivia all-time champion
+#   - première mention de chaque "veteran" (top 5 messages)
+# ---------------------------------------------------------------------------
+sub mbChronos_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    unless ($channel && $channel =~ /^#/) {
+        botNotice($self, $nick, 'Syntax: !chronos  (must be in a channel)'); return;
+    }
+
+    my $dbh = $self->{dbh};
+
+    # 1. Premier message du canal (avec auteur)
+    my $sth1 = $dbh->prepare(q{
+        SELECT cl.nick, cl.ts, cl.publictext
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        ORDER BY cl.ts ASC
+        LIMIT 1
+    });
+    my $first;
+    if ($sth1 && $sth1->execute($channel)) {
+        $first = $sth1->fetchrow_hashref; $sth1->finish;
+    }
+    unless ($first) {
+        botPrivmsg($self, $channel, "\x{1F4DC} No history found on $channel.");
+        return 1;
+    }
+
+    # 2. Dernier message
+    my $sth2 = $dbh->prepare(q{
+        SELECT cl.nick, cl.ts
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        ORDER BY cl.ts DESC
+        LIMIT 1
+    });
+    my $last;
+    if ($sth2 && $sth2->execute($channel)) {
+        $last = $sth2->fetchrow_hashref; $sth2->finish;
+    }
+
+    # 3. Jour record
+    my $sth3 = $dbh->prepare(q{
+        SELECT DATE(cl.ts) AS d, COUNT(*) AS c
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        GROUP BY DATE(cl.ts)
+        ORDER BY c DESC
+        LIMIT 1
+    });
+    my $best_day;
+    if ($sth3 && $sth3->execute($channel)) {
+        $best_day = $sth3->fetchrow_hashref; $sth3->finish;
+    }
+
+    # 4. Heure record
+    my $sth4 = $dbh->prepare(q{
+        SELECT DATE_FORMAT(cl.ts, '%Y-%m-%d %H:00') AS h, COUNT(*) AS c
+        FROM CHANNEL_LOG cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        GROUP BY DATE_FORMAT(cl.ts, '%Y-%m-%d %H:00')
+        ORDER BY c DESC
+        LIMIT 1
+    });
+    my $best_hour;
+    if ($sth4 && $sth4->execute($channel)) {
+        $best_hour = $sth4->fetchrow_hashref; $sth4->finish;
+    }
+
+    # 5. Karma all-time leader
+    my $sth5 = $dbh->prepare(q{
+        SELECT k.nick, k.score
+        FROM KARMA k
+        JOIN CHANNEL c ON c.id_channel = k.id_channel
+        WHERE c.name = ?
+        ORDER BY k.score DESC
+        LIMIT 1
+    });
+    my $karma_leader;
+    if ($sth5 && $sth5->execute($channel)) {
+        $karma_leader = $sth5->fetchrow_hashref; $sth5->finish;
+    }
+
+    # 6. Trivia champion
+    my $sth6 = $dbh->prepare(q{
+        SELECT ts.nick, ts.score
+        FROM TRIVIA_SCORES ts
+        JOIN CHANNEL c ON c.id_channel = ts.id_channel
+        WHERE c.name = ?
+        ORDER BY ts.score DESC
+        LIMIT 1
+    });
+    my $trivia_champ;
+    if ($sth6 && $sth6->execute($channel)) {
+        $trivia_champ = $sth6->fetchrow_hashref; $sth6->finish;
+    }
+
+    # 7. Total quotes
+    my $sth7 = $dbh->prepare(q{
+        SELECT COUNT(*) AS c
+        FROM QUOTES q
+        JOIN CHANNEL c ON c.id_channel = q.id_channel
+        WHERE c.name = ?
+    });
+    my $quote_count = 0;
+    if ($sth7 && $sth7->execute($channel)) {
+        my $r = $sth7->fetchrow_hashref; $sth7->finish;
+        $quote_count = $r ? ($r->{c} // 0) : 0;
+    }
+
+    # === Affichage ASCII timeline ============================================
+    my $first_d = ($first->{ts} =~ /^(\d{4}-\d{2}-\d{2})/) ? $1 : '?';
+    my $last_d  = ($last && $last->{ts} =~ /^(\d{4}-\d{2}-\d{2})/) ? $1 : '?';
+
+    botPrivmsg($self, $channel,
+        "\x{1F4DC} \x02Chronos\x02 $channel \x{2014} a saga in chapters");
+
+    # Premier message (avec extrait tronqué)
+    my $first_text = $first->{publictext} // '';
+    $first_text = substr($first_text, 0, 60) . '...' if length($first_text) > 60;
+    botPrivmsg($self, $channel,
+        "  \x{1F30C}  \x02$first_d\x02  Genesis  \x{2014}  $first->{nick}: \"$first_text\"");
+
+    # Jour record
+    if ($best_day) {
+        botPrivmsg($self, $channel,
+            sprintf("  \x{1F389}  \x02%s\x02  Peak day  \x{2014}  %s messages in 24h",
+                $best_day->{d}, _fmt_n($best_day->{c})));
+    }
+
+    # Heure record
+    if ($best_hour) {
+        botPrivmsg($self, $channel,
+            sprintf("  \x{1F525}  \x02%s\x02  Peak hour  \x{2014}  %s messages in 60min",
+                $best_hour->{h}, _fmt_n($best_hour->{c})));
+    }
+
+    # Karma leader
+    if ($karma_leader) {
+        botPrivmsg($self, $channel,
+            sprintf("  \x{1F451}  \x02all-time\x02  Karma king  \x{2014}  %s (%+d)",
+                $karma_leader->{nick}, $karma_leader->{score}));
+    }
+
+    # Trivia champion
+    if ($trivia_champ && $trivia_champ->{score} > 0) {
+        botPrivmsg($self, $channel,
+            sprintf("  \x{1F9E0}  \x02all-time\x02  Trivia champion  \x{2014}  %s (%s correct)",
+                $trivia_champ->{nick}, _fmt_n($trivia_champ->{score})));
+    }
+
+    # Quotes
+    if ($quote_count > 0) {
+        botPrivmsg($self, $channel,
+            sprintf("  \x{1F4DD}  \x02all-time\x02  Quote vault  \x{2014}  %s quote(s) preserved",
+                _fmt_n($quote_count)));
+    }
+
+    # Last message
+    if ($last) {
+        my $last_ago = '?';
+        if ($last->{ts} =~ /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/) {
+            require Time::Local;
+            my $ep = eval { Time::Local::timelocal($6,$5,$4,$3,$2-1,$1-1900) };
+            if ($ep) {
+                my $diff = time() - $ep;
+                $last_ago = $diff < 60        ? "${diff}s ago"
+                          : $diff < 3600      ? sprintf('%dm ago',  int($diff/60))
+                          : $diff < 86400     ? sprintf('%dh ago',  int($diff/3600))
+                          :                     sprintf('%dd ago',  int($diff/86400));
+            }
+        }
+        botPrivmsg($self, $channel,
+            "  \x{1F4CD}  \x02$last_d\x02  Now  \x{2014}  last activity $last_ago ($last->{nick})");
+    }
+
+    $self->{metrics}->inc('mediabot_chronos_total', { channel => $channel }) if $self->{metrics};
     return 1;
 }
 
