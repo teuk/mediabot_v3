@@ -75,9 +75,11 @@ $opt{schema} = File::Spec->rel2abs($opt{schema});
 die "Error: --db is required, or use --conf, or set MEDIABOT_DB\n" unless defined_non_empty($opt{db});
 die "Error: schema file not found: $opt{schema}\n" unless -f $opt{schema};
 
-my $ref  = parse_schema_file($opt{schema});
-my $dbh  = connect_db(\%opt);
-my $live = fetch_live_schema($dbh, $opt{db});
+my $ref      = parse_schema_file($opt{schema});
+my $ref_data = parse_reference_data_from_schema($opt{schema});
+my $dbh      = connect_db(\%opt);
+my $live     = fetch_live_schema($dbh, $opt{db});
+my $live_data = fetch_live_reference_data($dbh, $opt{db}, $ref_data, $live);
 $dbh->disconnect;
 
 my (@issues, @clean);
@@ -132,6 +134,8 @@ if (!$opt{ignore_extra}) {
             unless exists $ref->{$t};
     }
 }
+
+compare_reference_data($ref_data, $live_data, \@issues);
 
 print_header(\%opt) unless $opt{quiet};
 print_generated_migration($ref, \@issues) if $opt{generate_migration} && @issues;
@@ -340,18 +344,26 @@ sub parse_schema_file {
         my ($create_sql, $tname, $body) = ($1, $2, $3);
         my %cols;
 
-        for my $line (split /\n/, $body) {
-            $line =~ s/^\s+//;
-            $line =~ s/\s+\z//;
-            $line =~ s/,\s*\z//;
+        for my $item (split_create_table_items($body)) {
+            $item =~ s/^\s+//;
+            $item =~ s/\s+\z//;
+            $item =~ s/,\s*\z//;
+            next unless length $item;
 
-            next unless length $line;
-            next if $line =~ /^(PRIMARY|UNIQUE|KEY|INDEX|CONSTRAINT|FOREIGN)\b/i;
+            # Table constraints/indexes are not columns.
+            next if is_table_constraint($item);
 
-            if ($line =~ /^`?([A-Za-z0-9_]+)`?\s+(.+)\z/i) {
+            if ($item =~ /^`([^`]+)`\s+(.+)\z/si || $item =~ /^([A-Za-z_][A-Za-z0-9_]*)\s+(.+)\z/si) {
                 my ($col, $def) = ($1, $2);
+
+                # Guard against parser mistakes: COMMENT/DEFAULT/KEY/etc. are
+                # attributes or constraint keywords, never valid missing columns
+                # in our schema reference.
+                next if is_reserved_or_attribute_identifier($col);
+
                 $def =~ s/\s+/ /g;
                 $def =~ s/^\s+|\s+\z//g;
+
                 $cols{$col} = {
                     definition => $def,
                     raw        => "`$col` $def",
@@ -366,6 +378,367 @@ sub parse_schema_file {
     }
 
     return \%tables;
+}
+
+
+sub parse_reference_data_from_schema {
+    my ($file) = @_;
+
+    open my $fh, '<', $file or die "Cannot open schema $file: $!\n";
+    my $content = do { local $/; <$fh> };
+    close $fh;
+
+    $content =~ s{/[*].*?[*]/}{}gs;
+    $content =~ s/^\s*--.*$//gm;
+    $content =~ s/^\s*#.*$//gm;
+
+    my %data;
+
+    # Reference-data drift is intentionally limited. We only compare seed rows
+    # that are operational settings, not user/content tables.
+    #
+    # CHANSET_LIST is static reference data used by runtime gates such as
+    # +AchievementAnnounce and +Games. Missing rows do not show up as structure
+    # drift, but they break feature gates at runtime.
+    while ($content =~ /INSERT\s+INTO\s+`?CHANSET_LIST`?\s*[(]([^)]*)[)]\s*VALUES\s*(.*?);/gsi) {
+        my ($cols_raw, $values_raw) = ($1, $2);
+
+        my @cols = map {
+            my $c = $_;
+            $c =~ s/`//g;
+            $c =~ s/^\s+|\s+\z//g;
+            $c;
+        } split /,/, $cols_raw;
+
+        my %pos;
+        for my $i (0 .. $#cols) {
+            $pos{ $cols[$i] } = $i;
+        }
+
+        next unless exists $pos{id_chanset_list} && exists $pos{chanset};
+
+        for my $row (split_values_rows($values_raw)) {
+            my @vals = split_sql_values($row);
+            next unless @vals > $pos{chanset};
+
+            my $id      = clean_sql_scalar($vals[ $pos{id_chanset_list} ]);
+            my $chanset = clean_sql_scalar($vals[ $pos{chanset} ]);
+
+            next unless defined_non_empty($id) && defined_non_empty($chanset);
+            next unless $id =~ /\A\d+\z/;
+
+            $data{CHANSET_LIST}{by_name}{lc $chanset} = {
+                id      => 0 + $id,
+                chanset => $chanset,
+            };
+        }
+    }
+
+    return \%data;
+}
+
+sub split_values_rows {
+    my ($values) = @_;
+
+    my @rows;
+    my $buf = '';
+    my $quote = '';
+    my $paren = 0;
+    my $len = length($values);
+
+    for (my $i = 0; $i < $len; $i++) {
+        my $ch = substr($values, $i, 1);
+        my $next = $i + 1 < $len ? substr($values, $i + 1, 1) : '';
+
+        if ($quote) {
+            $buf .= $ch;
+            if ($ch eq $quote) {
+                if ($next eq $quote) {
+                    $buf .= $next;
+                    $i++;
+                }
+                else {
+                    $quote = '';
+                }
+            }
+            elsif ($ch eq '\\' && $next ne '') {
+                $buf .= $next;
+                $i++;
+            }
+            next;
+        }
+
+        if ($ch eq "'" || $ch eq '"') {
+            $quote = $ch;
+            $buf .= $ch;
+            next;
+        }
+
+        if ($ch eq '(') {
+            $paren++;
+            $buf .= $ch;
+            next;
+        }
+
+        if ($ch eq ')') {
+            $paren-- if $paren > 0;
+            $buf .= $ch;
+
+            if ($paren == 0 && $buf =~ /\S/) {
+                push @rows, $buf;
+                $buf = '';
+            }
+            next;
+        }
+
+        next if $paren == 0 && $ch =~ /[,\s]/;
+
+        $buf .= $ch;
+    }
+
+    return @rows;
+}
+
+sub split_sql_values {
+    my ($row) = @_;
+    $row =~ s/^\s*[(]\s*//;
+    $row =~ s/\s*[)]\s*\z//;
+
+    my @vals;
+    my $buf = '';
+    my $quote = '';
+    my $paren = 0;
+    my $len = length($row);
+
+    for (my $i = 0; $i < $len; $i++) {
+        my $ch = substr($row, $i, 1);
+        my $next = $i + 1 < $len ? substr($row, $i + 1, 1) : '';
+
+        if ($quote) {
+            $buf .= $ch;
+            if ($ch eq $quote) {
+                if ($next eq $quote) {
+                    $buf .= $next;
+                    $i++;
+                }
+                else {
+                    $quote = '';
+                }
+            }
+            elsif ($ch eq '\\' && $next ne '') {
+                $buf .= $next;
+                $i++;
+            }
+            next;
+        }
+
+        if ($ch eq "'" || $ch eq '"') {
+            $quote = $ch;
+            $buf .= $ch;
+            next;
+        }
+
+        if ($ch eq '(') {
+            $paren++;
+            $buf .= $ch;
+            next;
+        }
+
+        if ($ch eq ')') {
+            $paren-- if $paren > 0;
+            $buf .= $ch;
+            next;
+        }
+
+        if ($ch eq ',' && $paren == 0) {
+            push @vals, $buf;
+            $buf = '';
+            next;
+        }
+
+        $buf .= $ch;
+    }
+
+    push @vals, $buf if length $buf || @vals;
+    return @vals;
+}
+
+sub clean_sql_scalar {
+    my ($v) = @_;
+    return undef unless defined $v;
+
+    $v =~ s/^\s+|\s+\z//g;
+    return undef if $v =~ /\ANULL\z/i;
+
+    if ($v =~ /\A'(.*)'\z/s) {
+        $v = $1;
+        $v =~ s/''/'/g;
+        $v =~ s/\\'/'/g;
+        $v =~ s/\\\\/\\/g;
+    }
+    elsif ($v =~ /\A"(.*)"\z/s) {
+        $v = $1;
+        $v =~ s/""/"/g;
+        $v =~ s/\\"/"/g;
+        $v =~ s/\\\\/\\/g;
+    }
+
+    return $v;
+}
+
+sub fetch_live_reference_data {
+    my ($dbh, $db, $ref_data, $live_schema) = @_;
+
+    my %data;
+
+    if ($ref_data->{CHANSET_LIST} && $live_schema->{CHANSET_LIST}) {
+        my $sth = $dbh->prepare(
+            q{SELECT id_chanset_list, chanset
+              FROM CHANSET_LIST
+              ORDER BY id_chanset_list}
+        );
+
+        eval {
+            $sth->execute;
+            while (my $row = $sth->fetchrow_hashref) {
+                my $name = $row->{chanset};
+                next unless defined_non_empty($name);
+                $data{CHANSET_LIST}{by_name}{lc $name} = {
+                    id      => 0 + ($row->{id_chanset_list} // 0),
+                    chanset => $name,
+                };
+            }
+            $sth->finish;
+            1;
+        } or do {
+            $data{CHANSET_LIST}{error} = $@ || 'unknown CHANSET_LIST read error';
+        };
+    }
+
+    return \%data;
+}
+
+sub compare_reference_data {
+    my ($ref_data, $live_data, $issues) = @_;
+
+    if ($ref_data->{CHANSET_LIST}) {
+        my $live_by_name = $live_data->{CHANSET_LIST}{by_name} // {};
+
+        for my $lc_name (sort {
+            ($ref_data->{CHANSET_LIST}{by_name}{$a}{id} // 0)
+                <=>
+            ($ref_data->{CHANSET_LIST}{by_name}{$b}{id} // 0)
+        } keys %{ $ref_data->{CHANSET_LIST}{by_name} }) {
+            next if exists $live_by_name->{$lc_name};
+
+            my $row = $ref_data->{CHANSET_LIST}{by_name}{$lc_name};
+            push @$issues, {
+                kind    => 'missing_chanset',
+                table   => 'CHANSET_LIST',
+                column  => undef,
+                id      => $row->{id},
+                chanset => $row->{chanset},
+                text    => sprintf(
+                    "  MISSING DATA    CHANSET_LIST.%s  (id %d in schema seed, absent from DB)",
+                    $row->{chanset},
+                    $row->{id},
+                ),
+            };
+        }
+    }
+}
+
+sub sql_quote {
+    my ($s) = @_;
+    $s //= '';
+    $s =~ s/'/''/g;
+    return "'$s'";
+}
+
+
+sub split_create_table_items {
+    my ($body) = @_;
+
+    my @items;
+    my $buf = '';
+    my $quote = '';
+    my $paren = 0;
+    my $len = length($body);
+
+    for (my $i = 0; $i < $len; $i++) {
+        my $ch = substr($body, $i, 1);
+        my $next = $i + 1 < $len ? substr($body, $i + 1, 1) : '';
+
+        if ($quote) {
+            $buf .= $ch;
+
+            # SQL escapes quotes as doubled quotes inside strings.
+            if ($ch eq $quote) {
+                if ($next eq $quote) {
+                    $buf .= $next;
+                    $i++;
+                }
+                else {
+                    $quote = '';
+                }
+            }
+            elsif ($ch eq '\\' && $next ne '') {
+                # Keep escaped character with the string.
+                $buf .= $next;
+                $i++;
+            }
+
+            next;
+        }
+
+        if ($ch eq "'" || $ch eq '"' || $ch eq '`') {
+            $quote = $ch;
+            $buf .= $ch;
+            next;
+        }
+
+        if ($ch eq '(') {
+            $paren++;
+            $buf .= $ch;
+            next;
+        }
+
+        if ($ch eq ')') {
+            $paren-- if $paren > 0;
+            $buf .= $ch;
+            next;
+        }
+
+        if ($ch eq ',' && $paren == 0) {
+            push @items, $buf if $buf =~ /\S/;
+            $buf = '';
+            next;
+        }
+
+        $buf .= $ch;
+    }
+
+    push @items, $buf if $buf =~ /\S/;
+    return @items;
+}
+
+sub is_table_constraint {
+    my ($item) = @_;
+    return $item =~ /^\s*(?:PRIMARY|UNIQUE|KEY|INDEX|FULLTEXT|SPATIAL|CONSTRAINT|FOREIGN|CHECK)\b/i;
+}
+
+sub is_reserved_or_attribute_identifier {
+    my ($name) = @_;
+    return 0 unless defined $name;
+
+    my %reserved = map { $_ => 1 } qw(
+        ADD ALTER AND AS BY CHARACTER CHARSET CHECK COLLATE COLUMN COMMENT CONSTRAINT
+        CREATE DEFAULT DELETE DROP ENGINE ENUM FOREIGN FROM INDEX INSERT INT INTEGER
+        KEY NOT NULL ON PRIMARY REFERENCES SELECT SET TABLE TIMESTAMP UNIQUE UPDATE
+        VALUES VARCHAR WHERE
+    );
+
+    return $reserved{ uc $name } ? 1 : 0;
 }
 
 sub normalize_create_table {
@@ -474,7 +847,7 @@ sub print_header {
 
 sub print_generated_migration {
     my ($ref, $issues) = @_;
-    print "=== GENERATED MIGRATION SQL ===\n";
+    print "-- === GENERATED MIGRATION SQL ===\n";
     print "-- Auto-generated by tools/check_schema_drift.pl on " . scalar(localtime) . "\n";
     print "-- Review carefully before applying.\n";
     print "-- This output intentionally avoids DROP statements.\n";
@@ -487,8 +860,23 @@ sub print_generated_migration {
             print $ref->{$t}{create}, "\n\n";
         } elsif ($issue->{kind} eq 'missing_column') {
             my ($t, $c) = ($issue->{table}, $issue->{column});
+
+            if (is_reserved_or_attribute_identifier($c)) {
+                print "-- Skipped suspicious missing column `$t`.`$c`: looks like a SQL keyword/attribute; review parser/schema manually.\n";
+                next;
+            }
+
             my $def = $ref->{$t}{columns}{$c}{raw} // "`$c` VARCHAR(255) DEFAULT NULL";
             print "ALTER TABLE `$t` ADD COLUMN $def;\n";
+        } elsif ($issue->{kind} eq 'missing_chanset') {
+            my $id = 0 + ($issue->{id} // 0);
+            my $name = $issue->{chanset} // '';
+            print "-- Missing CHANSET_LIST row: $name\n";
+            print "INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`)\n";
+            print "SELECT $id, " . sql_quote($name) . "\n";
+            print "WHERE NOT EXISTS (\n";
+            print "  SELECT 1 FROM `CHANSET_LIST` WHERE `chanset` = " . sql_quote($name) . "\n";
+            print ");\n";
         } elsif ($issue->{kind} eq 'extra_table') {
             print "-- Extra table `$issue->{table}` exists in DB only. No DROP generated.\n";
         } elsif ($issue->{kind} eq 'extra_column') {
