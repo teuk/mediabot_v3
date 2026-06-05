@@ -1387,6 +1387,11 @@ sub mbCommandPublic {
         chronos      => sub { mbChronos_ctx($ctx) },
         chrono       => sub { mbChronos_ctx($ctx) },          # alias court
         timeline     => sub { mbChronos_ctx($ctx) },          # alias EN
+        features     => sub { mbFeatures_ctx($ctx) },
+        capabilities => sub { mbFeatures_ctx($ctx) },
+        caps         => sub { mbFeatures_ctx($ctx) },
+        observatory  => sub { mbObservatory_ctx($ctx) },
+        obs          => sub { mbObservatory_ctx($ctx) },
         quotecount   => sub {
             my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
             mbQuoteCount_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },
@@ -1774,6 +1779,36 @@ pollstop|pollstop|master|Close the active poll.
 unvote|unvote|public|Cancel your vote in the current poll.
 vote|vote <n>|public|Vote in the current poll. Shows live tally after each vote (U3).
 
+# Social / channel memory
+achievements|achievements [nick|list|all|top]|public|Show achievements for yourself, a nick, the catalogue or the top unlocks.
+achievs|achievs [nick|list|all|top]|public|Alias for achievements.
+profil|profil [nick]|public|Show a compact channel profile for a nick.
+profile|profile [nick]|public|Alias for profil.
+radar|radar [Nd]|public|Show current or historical channel activity radar.
+dashboard|dashboard|public|Show a compact dashboard for the current channel.
+chanstats|chanstats|public|Alias for dashboard.
+leaderboard|leaderboard [msgs|karma|trivia|duels|achievs] [24h|7d|30d]|public|Show channel rankings, optionally limited to recent msgs/karma.
+lb|lb [msgs|karma|trivia|duels|achievs] [24h|7d|30d]|public|Alias for leaderboard.
+chronos|chronos [short|full]|public|Show a compact or full narrative timeline of the current channel.
+chrono|chrono [short|full]|public|Alias for chronos.
+timeline|timeline [short|full]|public|Alias for chronos.
+features|features|public|Show active channel capabilities and important chansets.
+capabilities|capabilities|public|Alias for features.
+caps|caps|public|Alias for features.
+observatory|observatory|public|Show a compact live channel and bot status view.
+obs|obs|public|Alias for observatory.
+mood|mood|public|Read the current channel mood from recent messages.
+ambiance|ambiance|public|Alias for mood.
+
+# Games / playful commands
+duel|duel <nick>|public|Challenge a present nick to a d20 duel. Gated by chanset +Games.
+horoscope|horoscope [nick]|public|Show a deterministic daily IRC horoscope. Public use is gated by +Games.
+horo|horo [nick]|public|Alias for horoscope.
+compat|compat <nick1> [nick2]|public|Compare IRC affinity between two nicks. Gated by +Games.
+affinity|affinity <nick1> [nick2]|public|Alias for compat.
+quotegame|quotegame [stop|top]|public|Guess who said a stored quote. Uses a proactive 60s timer. Gated by +Games.
+qg|qg [stop|top]|public|Alias for quotegame.
+
 # Trivia
 triviareset|triviareset <nick>|master|Reset a nick's trivia score in DB.
 triviatop|triviatop [n]|public|Show top trivia scores from DB (hall of fame, max 15).
@@ -2059,6 +2094,10 @@ sub _mbHelpCategoryForCommand {
     my $desc   = lc($entry->{desc}   // '');
     my $hay    = "$cmd $syntax $level $desc";
 
+    return 'social' if $cmd =~ /^(?:achievements|achievs|profil|profile|radar|dashboard|chanstats|leaderboard|lb|chronos|chrono|timeline|features|capabilities|caps|observatory|obs|mood|ambiance)$/;
+    return 'games' if $cmd =~ /^(?:duel|horoscope|horo|compat|affinity|quotegame|qg)$/;
+    return 'settings' if $cmd =~ /^(?:chanset)$/;
+
     return 'radio' if $hay =~ /\b(?:radio|song|mp3|icecast|liquidsoap|listener|yt|youtube|tmdb|play|queue)\b/;
     return 'dynamic' if $hay =~ /\b(?:cmd|public_commands|category|timer|responder)\b/
         || $cmd =~ /cmd$/ || $cmd =~ /^(?:addcmd|modcmd|remcmd|showcmd|showcommands|searchcmd|topcmd|popcmd|lastcmd|countcmd|owncmd|chowncmd|mvcmd|holdcmd|addcatcmd|chcatcmd|addtimer|remtimer|timers|addresponder|delresponder)$/;
@@ -2083,6 +2122,9 @@ sub _mbHelpCategoryLabels {
         dynamic    => 'Dynamic commands',
         radio      => 'Radio/media',
         stats      => 'Stats/logs/tools',
+        social     => 'Social/channel memory',
+        games      => 'Games/playful commands',
+        settings   => 'Chansets/settings',
         ai_fun     => 'AI/fun/quotes',
         admin      => 'Admin/ops',
     );
@@ -2108,6 +2150,17 @@ sub _mbHelpCategoryAliases {
         stats      => 'stats',
         logs       => 'stats',
         tools      => 'stats',
+        social     => 'social',
+        memory     => 'social',
+        profile    => 'social',
+        profiles   => 'social',
+        games      => 'games',
+        game       => 'games',
+        playful    => 'games',
+        chanset    => 'settings',
+        chansets   => 'settings',
+        settings   => 'settings',
+        flags      => 'settings',
         ai         => 'ai_fun',
         fun        => 'ai_fun',
         quotes     => 'ai_fun',
@@ -2137,7 +2190,7 @@ sub _mbHelpSendCategoryIndex {
     my %cats = _mbHelpBuildCategories();
     my %labels = _mbHelpCategoryLabels();
 
-    my @order = qw(general auth channel moderation dynamic radio stats ai_fun admin);
+    my @order = qw(general auth channel moderation dynamic radio stats social games settings ai_fun admin);
 
     my @lines;
     push @lines, "Internal command categories:";
@@ -2204,6 +2257,32 @@ sub _mbHelpSendInternalList {
     return _mbHelpSendCategoryIndex($ctx);
 }
 
+
+sub _mbHelpSendChansetsTopic {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    my @lines = (
+        "Chansets / channel behavior flags:",
+        "  Syntax: chanset #channel +Name / chanset #channel -Name",
+        "  +AchievementAnnounce : publicly announce achievement unlocks. Without it, achievements still unlock silently.",
+        "  +Games               : allow playful public commands: duel, horoscope, compat, quotegame.",
+        "  +UrlTitle            : enable URL title fetching.",
+        "  +Youtube             : enable YouTube URL details.",
+        "  +YoutubeSearch       : enable YouTube search commands.",
+        "  +RandomQuote         : enable random quote behavior.",
+        "  +Claude              : enable Claude-related behavior if configured.",
+        "  +NoColors            : strip colors from bot output where supported.",
+        "  +AntiFlood           : enable channel anti-flood checks.",
+        "Use: help commands settings  /  help chansets  /  help chanset",
+    );
+
+    return _mbHelpSendNoticeQueue($self, $nick, @lines);
+}
+
+
 sub mbHelp_ctx {
     my ($ctx) = @_;
 
@@ -2221,6 +2300,23 @@ sub mbHelp_ctx {
     if ($first =~ /^(?:internal|internals|commands)$/i) {
         my $category = join(' ', @args[1 .. $#args]);
         return _mbHelpSendInternalList($ctx, $category);
+    }
+
+    # mb123: direct themed help shortcuts for the new social/game layer.
+    if ($first =~ /^(?:social|memory|profiles?)$/i) {
+        return _mbHelpSendInternalList($ctx, 'social');
+    }
+
+    if ($first =~ /^(?:games?|playful)$/i) {
+        return _mbHelpSendInternalList($ctx, 'games');
+    }
+
+    if ($first =~ /^(?:chansets?|settings|flags)$/i) {
+        return _mbHelpSendChansetsTopic($ctx);
+    }
+
+    if ($first =~ /^(?:stats|logs|tools)$/i) {
+        return _mbHelpSendInternalList($ctx, 'stats');
     }
 
     if ($first =~ /^(?:search|find|grep)$/i) {

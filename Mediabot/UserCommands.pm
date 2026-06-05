@@ -103,6 +103,8 @@ our @EXPORT = qw(
     mbMood_ctx
     mbLeaderboard_ctx
     mbChronos_ctx
+    mbFeatures_ctx
+    mbObservatory_ctx
 
 );
 
@@ -7785,6 +7787,78 @@ sub mbCompat_ctx {
 }
 
 # ---------------------------------------------------------------------------
+# _quotegame_cancel_timer / _quotegame_start_timer
+# mb122: proactive quotegame timeout. The old lazy timeout still remains as a
+# safety net in checkQuotegameAnswer(), but a real IO::Async countdown now
+# announces the answer after 60 seconds even if nobody talks.
+# ---------------------------------------------------------------------------
+sub _quotegame_cancel_timer {
+    my ($self, $channel) = @_;
+    return unless $self && defined $channel;
+
+    my $qg = $self->{_quotegame}{$channel} or return;
+
+    my $timer = delete $qg->{timer};
+    delete $qg->{timer_token};
+
+    return unless $timer;
+
+    my $loop = eval { $self->getLoop } || $self->{loop};
+    eval { $timer->stop if $timer->can('stop') };
+    eval { $loop->remove($timer) if $loop };
+}
+
+sub _quotegame_start_timer {
+    my ($self, $channel, $token, $delay) = @_;
+    return unless $self && defined $channel && defined $token;
+
+    $delay ||= 60;
+
+    my $loop = eval { $self->getLoop } || $self->{loop};
+    unless ($loop) {
+        eval {
+            $self->{logger}->log(2, "Quotegame: no IO::Async loop available, keeping lazy timeout only");
+        };
+        return;
+    }
+
+    require IO::Async::Timer::Countdown;
+
+    _quotegame_cancel_timer($self, $channel);
+
+    my $timer;
+    $timer = IO::Async::Timer::Countdown->new(
+        delay => $delay,
+        on_expire => sub {
+            my $qg = $self->{_quotegame}{$channel} or return;
+            return unless $qg->{active};
+            return unless defined($qg->{timer_token}) && $qg->{timer_token} eq $token;
+
+            $qg->{active} = 0;
+            delete $qg->{timer};
+            delete $qg->{timer_token};
+
+            my $author = defined($qg->{author}) ? $qg->{author} : 'unknown';
+            Mediabot::Helpers::botPrivmsg(
+                $self,
+                $channel,
+                "\x{23F0} Time's up! The answer was: \x02$author\x02"
+            );
+
+            my $loop_now = eval { $self->getLoop } || $self->{loop};
+            eval { $loop_now->remove($timer) if $loop_now && $timer };
+        },
+    );
+
+    $self->{_quotegame}{$channel}{timer}       = $timer;
+    $self->{_quotegame}{$channel}{timer_token} = $token;
+
+    $loop->add($timer);
+    $timer->start;
+}
+
+
+# ---------------------------------------------------------------------------
 # mbQuotegame_ctx --- !quotegame [stop|top]
 # Devine qui a dit la quote. État partagé en mémoire par canal.
 # Réponses validées via checkQuotegameAnswer() appelé depuis on_message_PRIVMSG.
@@ -7812,6 +7886,7 @@ sub mbQuotegame_ctx {
     if (@args && lc($args[0]) eq 'stop') {
         my $qg = $self->{_quotegame}{$channel};
         if ($qg && $qg->{active}) {
+            _quotegame_cancel_timer($self, $channel);
             $qg->{active} = 0;
             botPrivmsg($self, $channel,
                 "\x{1F6D1} Quotegame stopped. Answer was: \x02$qg->{author}\x02");
@@ -7872,6 +7947,7 @@ sub mbQuotegame_ctx {
         author_lc  => lc($row->{author}),
         started    => time(),
         deadline   => time() + 60,
+        token      => join(':', $channel, ($row->{id_quotes} // 0), time(), int(rand(1_000_000))),
         scores     => $prev_scores,
     };
 
@@ -7883,6 +7959,9 @@ sub mbQuotegame_ctx {
 
     botPrivmsg($self, $channel,
         "\x{1F4DC} \x02Quotegame!\x02 Who said: \"\x02$masked\x02\"  \x{2014}  60s to answer with the nick");
+
+    _quotegame_start_timer($self, $channel, $self->{_quotegame}{$channel}{token}, 60);
+
     return 1;
 }
 
@@ -7898,6 +7977,7 @@ sub checkQuotegameAnswer {
 
     # Timeout passé
     if (time() > $qg->{deadline}) {
+        _quotegame_cancel_timer($self, $sChannel);
         $qg->{active} = 0;
         Mediabot::Helpers::botPrivmsg($self, $sChannel,
             "\x{23F0} Time's up! The answer was: \x02$qg->{author}\x02");
@@ -7912,6 +7992,7 @@ sub checkQuotegameAnswer {
 
     my $msg_lc = lc($sMsg);
     if ($msg_lc =~ /\b\Q$qg->{author_lc}\E\b/) {
+        _quotegame_cancel_timer($self, $sChannel);
         $qg->{active} = 0;
         $qg->{scores}{$sNick}++;
         my $score = $qg->{scores}{$sNick};
@@ -8075,6 +8156,7 @@ sub mbMood_ctx {
 # Classement consolidé multi-métriques du canal courant.
 # Par défaut : affiche le top 3 dans chaque catégorie.
 # ---------------------------------------------------------------------------
+
 sub mbLeaderboard_ctx {
     my ($ctx) = @_;
     my $self    = $ctx->bot;
@@ -8083,20 +8165,94 @@ sub mbLeaderboard_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     unless ($channel && $channel =~ /^#/) {
-        botNotice($self, $nick, 'Syntax: !leaderboard [msgs|karma|trivia|duels|achievs]'); return;
+        botNotice($self, $nick, 'Syntax: !leaderboard [msgs|karma|trivia|duels|achievs] [24h|7d|30d]');
+        return 1;
     }
 
-    my $only = @args ? lc($args[0]) : '';
-    my $dbh  = $self->{dbh};
+    my %cat_alias = (
+        msg          => 'msgs',
+        msgs         => 'msgs',
+        message      => 'msgs',
+        messages     => 'msgs',
+        karma        => 'karma',
+        trivia       => 'trivia',
+        duel         => 'duels',
+        duels        => 'duels',
+        achiev       => 'achievs',
+        achievs      => 'achievs',
+        achievement  => 'achievs',
+        achievements => 'achievs',
+        all          => '',
+        alltime      => '',
+        total        => '',
+    );
+
+    my $only = '';
+    my $period_arg = '';
+
+    for my $arg (@args) {
+        next unless defined $arg && $arg ne '';
+        my $a = lc($arg);
+
+        if ($a =~ /^\d+[hdw]$/) {
+            $period_arg = $a;
+            next;
+        }
+
+        if (exists $cat_alias{$a}) {
+            $only = $cat_alias{$a};
+            next;
+        }
+
+        botNotice($self, $nick, 'Syntax: !leaderboard [msgs|karma|trivia|duels|achievs] [24h|7d|30d]');
+        return 1;
+    }
+
+    my ($period_label, $period_num, $period_unit_sql) = ('', undef, undef);
+    if ($period_arg ne '' && $period_arg =~ /^(\d+)([hdw])$/) {
+        my ($n, $unit) = ($1, $2);
+        if ($n < 1 || $n > 365) {
+            botNotice($self, $nick, 'Leaderboard period must be between 1 and 365 units.');
+            return 1;
+        }
+
+        if ($unit eq 'h') {
+            $period_num      = $n;
+            $period_unit_sql = 'HOUR';
+            $period_label    = "${n}h";
+        }
+        elsif ($unit eq 'd') {
+            $period_num      = $n;
+            $period_unit_sql = 'DAY';
+            $period_label    = "${n}d";
+        }
+        else {
+            $period_num      = $n * 7;
+            $period_unit_sql = 'DAY';
+            $period_label    = "${n}w";
+        }
+    }
+
+    if ($period_arg ne '' && $only && $only !~ /^(?:msgs|karma)$/) {
+        botNotice($self, $nick, 'Period filters are currently supported for leaderboard msgs and karma only.');
+        return 1;
+    }
+
+    my $dbh = $self->{dbh};
+
+    my $period_suffix = $period_label ? " last $period_label" : '';
+    my $cl_period_sql = $period_label ? " AND cl.ts >= NOW() - INTERVAL $period_num $period_unit_sql" : '';
+    my $kl_period_sql = $period_label ? " AND kl.ts >= NOW() - INTERVAL $period_num $period_unit_sql" : '';
 
     # --- Top 3 messages -----------------------------------------------------
     my @msgs_top;
     if (!$only || $only eq 'msgs') {
-        my $sth = $dbh->prepare(q{
+        my $sth = $dbh->prepare(qq{
             SELECT cl.nick, COUNT(*) AS msg_count
             FROM CHANNEL_LOG cl
             JOIN CHANNEL c ON c.id_channel = cl.id_channel
             WHERE c.name = ? AND cl.publictext IS NOT NULL
+              $cl_period_sql
             GROUP BY cl.nick
             ORDER BY msg_count DESC
             LIMIT 3
@@ -8112,25 +8268,50 @@ sub mbLeaderboard_ctx {
     # --- Top 3 karma --------------------------------------------------------
     my @karma_top;
     if (!$only || $only eq 'karma') {
-        my $sth = $dbh->prepare(q{
-            SELECT k.nick, k.score
-            FROM KARMA k
-            JOIN CHANNEL c ON c.id_channel = k.id_channel
-            WHERE c.name = ?
-            ORDER BY k.score DESC
-            LIMIT 3
-        });
-        if ($sth && $sth->execute($channel)) {
-            while (my $r = $sth->fetchrow_hashref) {
-                push @karma_top, [$r->{nick}, $r->{score}];
+        if ($period_label) {
+            my $sth = $dbh->prepare(qq{
+                SELECT kl.nick, SUM(kl.delta) AS score
+                FROM KARMA_LOG kl
+                JOIN CHANNEL c ON c.id_channel = kl.id_channel
+                WHERE c.name = ?
+                  $kl_period_sql
+                GROUP BY kl.nick
+                HAVING score <> 0
+                ORDER BY score DESC, kl.nick ASC
+                LIMIT 3
+            });
+            if ($sth && $sth->execute($channel)) {
+                while (my $r = $sth->fetchrow_hashref) {
+                    push @karma_top, [$r->{nick}, sprintf('%+d', $r->{score} || 0)];
+                }
+                $sth->finish;
             }
-            $sth->finish;
+        }
+        else {
+            my $sth = $dbh->prepare(q{
+                SELECT k.nick, k.score
+                FROM KARMA k
+                JOIN CHANNEL c ON c.id_channel = k.id_channel
+                WHERE c.name = ?
+                ORDER BY k.score DESC
+                LIMIT 3
+            });
+            if ($sth && $sth->execute($channel)) {
+                while (my $r = $sth->fetchrow_hashref) {
+                    push @karma_top, [$r->{nick}, $r->{score}];
+                }
+                $sth->finish;
+            }
         }
     }
 
+    # Period mode without an explicit category deliberately reports only sources
+    # with reliable timestamps.
+    my $show_alltime_sections = !$period_label;
+
     # --- Top 3 trivia -------------------------------------------------------
     my @trivia_top;
-    if (!$only || $only eq 'trivia') {
+    if ($show_alltime_sections && (!$only || $only eq 'trivia')) {
         my $sth = $dbh->prepare(q{
             SELECT ts.nick, ts.score
             FROM TRIVIA_SCORES ts
@@ -8149,7 +8330,7 @@ sub mbLeaderboard_ctx {
 
     # --- Top 3 duels (mémoire) ----------------------------------------------
     my @duel_top;
-    if (!$only || $only eq 'duels' || $only eq 'duel') {
+    if ($show_alltime_sections && (!$only || $only eq 'duels')) {
         my $dst = $self->{_duel_stats}{$channel} // {};
         my @sorted = sort {
             ($dst->{$b}{wins} // 0) <=> ($dst->{$a}{wins} // 0)
@@ -8163,7 +8344,7 @@ sub mbLeaderboard_ctx {
 
     # --- Top 3 achievements -------------------------------------------------
     my @ach_top;
-    if (!$only || $only eq 'achievs' || $only eq 'achievements') {
+    if ($show_alltime_sections && (!$only || $only eq 'achievs')) {
         if ($self->{achievements}) {
             my %counts_on_chan;
             for my $key (keys %{ $self->{achievements}{data} // {} }) {
@@ -8197,18 +8378,24 @@ sub mbLeaderboard_ctx {
 
     botPrivmsg($self, $channel,
         "\x{1F3C5} \x02Leaderboard\x02 $channel"
-        . ($only ? " [$only]" : ''));
+        . ($only ? " [$only]" : '')
+        . ($period_suffix ? " [$period_suffix]" : ''));
 
     my $any = 0;
-    if (my $l = $fmt_top->(\@msgs_top,   "\x{1F4AC}  msgs   :"))   { botPrivmsg($self, $channel, "  $l"); $any++; }
-    if (my $l = $fmt_top->(\@karma_top,  "\x{1F31F}  karma  :"))   { botPrivmsg($self, $channel, "  $l"); $any++; }
+    if (my $l = $fmt_top->(\@msgs_top,   "\x{1F4AC}  msgs$period_suffix   :")) { botPrivmsg($self, $channel, "  $l"); $any++; }
+    if (my $l = $fmt_top->(\@karma_top,  "\x{1F31F}  karma$period_suffix  :")) { botPrivmsg($self, $channel, "  $l"); $any++; }
     if (my $l = $fmt_top->(\@trivia_top, "\x{1F9E0}  trivia :"))   { botPrivmsg($self, $channel, "  $l"); $any++; }
     if (my $l = $fmt_top->(\@duel_top,   "\x{2694}\x{FE0F}  duels  :")) { botPrivmsg($self, $channel, "  $l"); $any++; }
     if (my $l = $fmt_top->(\@ach_top,    "\x{1F3C6}  achievs:"))   { botPrivmsg($self, $channel, "  $l"); $any++; }
 
+    if ($period_label && !$only) {
+        botPrivmsg($self, $channel, "  \x{2139} Period mode shows timestamped categories only: msgs and karma.");
+    }
+
     botPrivmsg($self, $channel, "  (no data yet)") unless $any;
     return 1;
 }
+
 
 # ---------------------------------------------------------------------------
 # mbChronos_ctx --- !chronos
@@ -8226,9 +8413,17 @@ sub mbChronos_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     unless ($channel && $channel =~ /^#/) {
-        botNotice($self, $nick, 'Syntax: !chronos  (must be in a channel)'); return;
+        botNotice($self, $nick, 'Syntax: !chronos [short|full]  (must be in a channel)'); return;
+    }
+
+    my $mode = @args ? lc($args[0] // '') : 'full';
+    if ($mode eq 'brief') { $mode = 'short'; }
+    if ($mode ne '' && $mode ne 'short' && $mode ne 'full') {
+        botNotice($self, $nick, 'Syntax: !chronos [short|full]');
+        return 1;
     }
 
     my $dbh = $self->{dbh};
@@ -8340,6 +8535,26 @@ sub mbChronos_ctx {
     my $first_d = ($first->{ts} =~ /^(\d{4}-\d{2}-\d{2})/) ? $1 : '?';
     my $last_d  = ($last && $last->{ts} =~ /^(\d{4}-\d{2}-\d{2})/) ? $1 : '?';
 
+    if ($mode eq 'short') {
+        my $genesis = $first->{nick} // '?';
+        my $last_nick = ($last && $last->{nick}) ? $last->{nick} : '?';
+
+        my @parts;
+        push @parts, "genesis $first_d by $genesis";
+        push @parts, "peak day $best_day->{d} (" . _fmt_n($best_day->{c}) . " msgs)" if $best_day;
+        push @parts, "karma king $karma_leader->{nick} (" . sprintf('%+d', $karma_leader->{score}) . ")" if $karma_leader;
+        push @parts, "trivia $trivia_champ->{nick} (" . _fmt_n($trivia_champ->{score}) . ")" if $trivia_champ && $trivia_champ->{score} > 0;
+        push @parts, _fmt_n($quote_count) . " quote(s)" if $quote_count > 0;
+
+        botPrivmsg($self, $channel,
+            "\x{1F4DC} \x02Chronos\x02 $channel \x{2014} " . join('  |  ', @parts));
+        botPrivmsg($self, $channel,
+            "\x{1F4CD} now: last activity $last_d by $last_nick  |  use: chronos full");
+
+        $self->{metrics}->inc('mediabot_chronos_total', { channel => $channel }) if $self->{metrics};
+        return 1;
+    }
+
     botPrivmsg($self, $channel,
         "\x{1F4DC} \x02Chronos\x02 $channel \x{2014} a saga in chapters");
 
@@ -8403,6 +8618,185 @@ sub mbChronos_ctx {
     }
 
     $self->{metrics}->inc('mediabot_chronos_total', { channel => $channel }) if $self->{metrics};
+    return 1;
+}
+
+
+# ---------------------------------------------------------------------------
+# mbFeatures_ctx --- !features / !capabilities / !caps
+# Compact channel capabilities view. No schema change: reads existing chansets,
+# runtime objects and known modules.
+# ---------------------------------------------------------------------------
+sub _mbFeatures_chanset_state {
+    my ($self, $channel, $name, %opts) = @_;
+
+    my $default = exists $opts{default} ? $opts{default} : 0;
+    my $id = eval { Mediabot::Helpers::getIdChansetList($self, $name) };
+
+    return $default ? 'on (legacy default)' : 'missing'
+        unless defined $id && $id ne '';
+
+    my $set = eval { Mediabot::Helpers::getIdChannelSet($self, $channel, $id) };
+    return $set ? 'on' : 'off';
+}
+
+sub mbFeatures_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel // '';
+
+    unless ($channel =~ /^#/) {
+        botNotice($self, $nick, 'Syntax: features  (must be used in a channel)');
+        return 1;
+    }
+
+    my $ach_defs = 0;
+    eval {
+        $ach_defs = scalar keys %{ $self->{achievements}->list_definitions }
+            if $self->{achievements};
+        1;
+    };
+
+    my $ach_announce = _mbFeatures_chanset_state($self, $channel, 'AchievementAnnounce', default => 0);
+    my $games        = _mbFeatures_chanset_state($self, $channel, 'Games', default => 1);
+    my $urltitle     = _mbFeatures_chanset_state($self, $channel, 'UrlTitle', default => 0);
+    my $youtube      = _mbFeatures_chanset_state($self, $channel, 'Youtube', default => 0);
+    my $ytsearch     = _mbFeatures_chanset_state($self, $channel, 'YoutubeSearch', default => 0);
+    my $randomquote  = _mbFeatures_chanset_state($self, $channel, 'RandomQuote', default => 0);
+    my $claude       = _mbFeatures_chanset_state($self, $channel, 'Claude', default => 0);
+    my $nocolors     = _mbFeatures_chanset_state($self, $channel, 'NoColors', default => 0);
+    my $antiflood    = _mbFeatures_chanset_state($self, $channel, 'AntiFlood', default => 0);
+
+    my $metrics = $self->{metrics} ? 'on' : 'off';
+    my $radio = 'unknown';
+    eval {
+        my $enabled = $self->{conf}->get('radio.ENABLED');
+        $radio = (defined $enabled && $enabled =~ /^(?:1|yes|true|on)$/i) ? 'on' : 'off';
+        1;
+    };
+
+    my @lines = (
+        "\x{1F52D} Capabilities for $channel",
+        "  \x{1F3C6} achievements: " . ($self->{achievements} ? 'on' : 'off')
+            . "  | announce: $ach_announce"
+            . "  | catalogue: $ach_defs",
+        "  \x{1F3B2} games: $games  | commands: duel, horoscope, compat, quotegame",
+        "  \x{1F517} links: UrlTitle=$urltitle  Youtube=$youtube  YoutubeSearch=$ytsearch",
+        "  \x{1F4AC} social memory: profil/radar/dashboard/leaderboard/chronos/mood available",
+        "  \x{1F916} integrations: Claude=$claude  RandomQuote=$randomquote  Radio=$radio",
+        "  \x{1F6E1} safety/output: AntiFlood=$antiflood  NoColors=$nocolors  Metrics=$metrics",
+        "  Help: help social / help games / help chansets",
+    );
+
+    for my $line (@lines) {
+        botNotice($self, $nick, $line);
+    }
+
+    return 1;
+}
+
+
+# ---------------------------------------------------------------------------
+# mbObservatory_ctx --- !observatory / !obs
+# A compact public state view for the current channel. No schema change.
+# ---------------------------------------------------------------------------
+sub _mbObservatory_uptime {
+    my $seconds = time() - $^T;
+    $seconds = 0 if $seconds < 0;
+
+    my $days = int($seconds / 86400);
+    $seconds %= 86400;
+    my $hours = int($seconds / 3600);
+    $seconds %= 3600;
+    my $mins = int($seconds / 60);
+
+    return sprintf('%dd %02dh', $days, $hours) if $days > 0;
+    return sprintf('%dh %02dm', $hours, $mins) if $hours > 0;
+    return sprintf('%dm', $mins);
+}
+
+sub _mbObservatory_energy_label {
+    my ($msgs) = @_;
+    $msgs ||= 0;
+
+    return 'silent'   if $msgs == 0;
+    return 'quiet'    if $msgs < 10;
+    return 'awake'    if $msgs < 40;
+    return 'lively'   if $msgs < 120;
+    return 'storming';
+}
+
+sub mbObservatory_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel // '';
+
+    unless ($channel =~ /^#/) {
+        botNotice($self, $nick, 'Syntax: observatory  (must be used in a channel)');
+        return 1;
+    }
+
+    my $dbh = $self->{dbh};
+
+    my ($msgs_1h, $nicks_1h) = (0, 0);
+    eval {
+        my $sth = $dbh->prepare(q{
+            SELECT COUNT(*) AS msgs, COUNT(DISTINCT cl.nick) AS nicks
+            FROM CHANNEL_LOG cl
+            JOIN CHANNEL c ON c.id_channel = cl.id_channel
+            WHERE c.name = ?
+              AND cl.publictext IS NOT NULL
+              AND cl.ts >= NOW() - INTERVAL 60 MINUTE
+        });
+        if ($sth && $sth->execute($channel)) {
+            my $r = $sth->fetchrow_hashref || {};
+            $msgs_1h = $r->{msgs}  || 0;
+            $nicks_1h = $r->{nicks} || 0;
+            $sth->finish;
+        }
+        1;
+    };
+
+    my $ach_defs = 0;
+    eval {
+        $ach_defs = scalar keys %{ $self->{achievements}->list_definitions }
+            if $self->{achievements};
+        1;
+    };
+
+    my $games        = _mbFeatures_chanset_state($self, $channel, 'Games', default => 1);
+    my $announce     = _mbFeatures_chanset_state($self, $channel, 'AchievementAnnounce', default => 0);
+    my $urltitle     = _mbFeatures_chanset_state($self, $channel, 'UrlTitle', default => 0);
+    my $claude       = _mbFeatures_chanset_state($self, $channel, 'Claude', default => 0);
+    my $antiflood    = _mbFeatures_chanset_state($self, $channel, 'AntiFlood', default => 0);
+
+    my $metrics = $self->{metrics} ? 'on' : 'off';
+    my $energy  = _mbObservatory_energy_label($msgs_1h);
+    my $uptime  = _mbObservatory_uptime();
+
+    botPrivmsg($self, $channel,
+        "\x{1F52D} \x02Observatory\x02 $channel \x{2014} alive $uptime"
+      . "  | games $games"
+      . "  | achievements " . ($self->{achievements} ? 'on' : 'off')
+      . " ($ach_defs)"
+      . "  | announce $announce"
+    );
+
+    botPrivmsg($self, $channel,
+        "\x{1FAC0} last hour: " . _fmt_n($msgs_1h) . " msg(s) / " . _fmt_n($nicks_1h) . " nick(s)"
+      . "  | energy $energy"
+      . "  | UrlTitle $urltitle"
+      . "  | Claude $claude"
+      . "  | AntiFlood $antiflood"
+      . "  | metrics $metrics"
+    );
+
+    $self->{metrics}->inc('mediabot_observatory_total', { channel => $channel }) if $self->{metrics};
+
     return 1;
 }
 

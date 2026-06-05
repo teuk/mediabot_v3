@@ -142,6 +142,8 @@ sub new {
     # mb118: chronos / leaderboard tracked indirectly via other counters
     $self->_declare('mediabot_chronos_total', 'counter',
         'Total chronos timeline displays (mb118)', ['channel']);
+    $self->_declare('mediabot_observatory_total', 'counter',
+        'Total observatory status displays (mb126)', ['channel']);
     $self->_declare('mediabot_wordcount_requests_total','counter',
         'Total !wordcount requests (mb115 polish)');
 

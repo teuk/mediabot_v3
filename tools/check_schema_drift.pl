@@ -400,7 +400,7 @@ sub parse_reference_data_from_schema {
     # CHANSET_LIST is static reference data used by runtime gates such as
     # +AchievementAnnounce and +Games. Missing rows do not show up as structure
     # drift, but they break feature gates at runtime.
-    while ($content =~ /INSERT\s+INTO\s+`?CHANSET_LIST`?\s*[(]([^)]*)[)]\s*VALUES\s*(.*?);/gsi) {
+    while ($content =~ /INSERT\s+(?:IGNORE\s+)?INTO\s+`?CHANSET_LIST`?\s*[(]([^)]*)[)]\s*VALUES\s*(.*?);/gsi) {
         my ($cols_raw, $values_raw) = ($1, $2);
 
         my @cols = map {
