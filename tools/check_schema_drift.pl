@@ -591,7 +591,10 @@ sub fetch_live_reference_data {
 
     my %data;
 
-    if ($ref_data->{CHANSET_LIST} && $live_schema->{CHANSET_LIST}) {
+    if ($ref_data->{CHANSET_LIST} && !$live_schema->{CHANSET_LIST}) {
+        $data{CHANSET_LIST}{table_missing} = 1;
+    }
+    elsif ($ref_data->{CHANSET_LIST} && $live_schema->{CHANSET_LIST}) {
         my $sth = $dbh->prepare(
             q{SELECT id_chanset_list, chanset
               FROM CHANSET_LIST
@@ -622,6 +625,8 @@ sub compare_reference_data {
     my ($ref_data, $live_data, $issues) = @_;
 
     if ($ref_data->{CHANSET_LIST}) {
+        return if $live_data->{CHANSET_LIST}{table_missing};
+
         my $live_by_name = $live_data->{CHANSET_LIST}{by_name} // {};
 
         for my $lc_name (sort {
@@ -688,6 +693,34 @@ sub split_create_table_items {
                 $i++;
             }
 
+            next;
+        }
+
+        # mb120-B1: SQL line comment outside any string (-- ... \n)
+        # MySQL/MariaDB requires a whitespace (or EOL) after `--` for it to
+        # count as a comment. We follow that rule to avoid eating legitimate
+        # `--` in expressions like `a--b` (which is invalid SQL anyway, but
+        # keeps the parser conservative).
+        if ($ch eq '-' && $next eq '-') {
+            my $third = $i + 2 < $len ? substr($body, $i + 2, 1) : "\n";
+            if ($third =~ /\s/ || $third eq '') {
+                # Skip until end of line (or end of body)
+                my $nl = index($body, "\n", $i + 2);
+                if ($nl < 0) {
+                    $i = $len;  # consume rest of body
+                } else {
+                    $i = $nl;   # next iteration will start at \n
+                }
+                next;
+            }
+        }
+
+        # MySQL also accepts # comments. Treat them like line comments outside
+        # quoted strings/backticks, but preserve # inside strings or identifiers.
+        if ($ch eq '#') {
+            $i++;
+            $i++ while $i < $len && substr($body, $i, 1) ne "\n";
+            $buf .= "\n";
             next;
         }
 

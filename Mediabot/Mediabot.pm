@@ -620,6 +620,18 @@ sub clean_and_exit {
         1;
     };
 
+    # --- mb120-B2: flush des achievements avant le shutdown ---
+    # Le save() est habituellement debounce 10s — sans flush forcé au shutdown,
+    # les unlocks récents (< 10s avant le SIGTERM) seraient perdus.
+    eval {
+        if ($self->{achievements} && $self->{achievements}->can('save')) {
+            $self->{achievements}->save(1);   # force = bypass debounce
+            $self->{logger}->log(3, "Achievements: final save() before exit")
+                if $self->{logger} && $self->{logger}->can('log');
+        }
+        1;
+    };
+
     # --- DB: safe disconnect ---
     eval {
         if (defined $self->{dbh} && $self->{dbh}) {
@@ -1368,9 +1380,10 @@ sub mbCommandPublic {
         ambiance     => sub { mbMood_ctx($ctx) },             # alias FR
 
         # mb118: leaderboard + chronos
+        # Keep the historical !top command mapped to mbTop_ctx above.
+        # Leaderboard aliases are !leaderboard and !lb.
         leaderboard  => sub { mbLeaderboard_ctx($ctx) },
         lb           => sub { mbLeaderboard_ctx($ctx) },      # alias court
-        top          => sub { mbLeaderboard_ctx($ctx) },      # alias intuitif
         chronos      => sub { mbChronos_ctx($ctx) },
         chrono       => sub { mbChronos_ctx($ctx) },          # alias court
         timeline     => sub { mbChronos_ctx($ctx) },          # alias EN

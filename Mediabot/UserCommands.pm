@@ -7365,24 +7365,46 @@ sub mbDuel_ctx {
     $self->{_duel_stats}{$channel}{$winner}{wins}++;
     $self->{_duel_stats}{$channel}{$loser}{losses}++;
 
-    # Detect underdog : winner avait 5 losses consécutives avant
-    my $win_streak = $self->{_duel_streak}{$channel}{$winner} // 0;
-    my $loss_streak_loser = $self->{_duel_streak}{$channel}{$loser} // 0;
-    # Si winner avait un streak négatif (= consecutive losses), comme un compteur dans la même var
-    my $underdog_streak = 0;
-    if (($self->{_duel_last_result}{$channel}{$winner} // '') eq 'loss') {
-        $underdog_streak = -1 * ($self->{_duel_streak}{$channel}{$winner} // 0);
-    }
+    # mb120-B3: tracking streak corrigé.
+    #
+    # Avant : le test `if (last_result eq 'win')` était évalué APRÈS qu'on vient
+    # de mettre 'win' dans cette variable -> toujours vrai (test mort). Et le
+    # streak du loser était simplement décrementé sans tenir compte de la
+    # transition (un loser qui sortait d'une série de wins gardait son streak+).
+    #
+    # Convention du streak :
+    #   > 0  : nombre de victoires consecutives
+    #   < 0  : nombre de defaites consecutives
+    #
+    # Detection underdog (gagner apres 5 defaites consecutives) :
+    #   - on regarde le streak du winner *avant* l'update
+    #   - si <= -5, c'est un underdog
+    my $prev_winner_result = $self->{_duel_last_result}{$channel}{$winner};
+    my $prev_loser_result  = $self->{_duel_last_result}{$channel}{$loser};
+    my $prev_winner_streak = $self->{_duel_streak}{$channel}{$winner} // 0;
+
+    # Calcul d'eligibilite underdog AVANT update
+    my $underdog_streak = $prev_winner_streak < 0 ? -$prev_winner_streak : 0;
+
+    # Update last_result
     $self->{_duel_last_result}{$channel}{$winner} = 'win';
     $self->{_duel_last_result}{$channel}{$loser}  = 'loss';
-    # Streak counter : positif si win consec, négatif si loss consec
-    if (($self->{_duel_last_result}{$channel}{$winner} // '') eq 'win'
-        && ($self->{_duel_streak}{$channel}{$winner} // 0) >= 0) {
+
+    # Update streak winner
+    if (defined $prev_winner_result && $prev_winner_result eq 'win') {
         $self->{_duel_streak}{$channel}{$winner}++;
     } else {
+        # Premier duel OU transition loss -> win
         $self->{_duel_streak}{$channel}{$winner} = 1;
     }
-    $self->{_duel_streak}{$channel}{$loser}--;
+
+    # Update streak loser
+    if (defined $prev_loser_result && $prev_loser_result eq 'loss') {
+        $self->{_duel_streak}{$channel}{$loser}--;
+    } else {
+        # Premier duel OU transition win -> loss
+        $self->{_duel_streak}{$channel}{$loser} = -1;
+    }
 
     # Set cooldown 24h
     $self->{_duel_cooldown}{$channel}{$pair_key} = $now + 24*3600;
