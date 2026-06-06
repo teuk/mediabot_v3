@@ -394,12 +394,16 @@ sub _start_download {
     }
 
     $bot->{_radio_request_download} = {
-        active  => 1,
-        pid     => $pid,
-        query   => $query,
-        started => time(),
-        stdout  => $stdout,
-        stderr  => $stderr,
+        active           => 1,
+        pid              => $pid,
+        query            => $query,
+        started          => time(),
+        stdout           => $stdout,
+        stderr           => $stderr,
+        loop             => $loop,
+        timer            => undef,
+        cancel_requested => 0,
+        term_sent_at     => undef,
     };
 
     $self->_say($ctx, "Radio: download/search started: $query");
@@ -408,28 +412,35 @@ sub _start_download {
     $timer = IO::Async::Timer::Countdown->new(
         delay => 1,
         on_expire => sub {
+            my $job = $bot->{_radio_request_download} || {};
+
+            # mb125: if an admin cancelled the job and removed the timer, do not
+            # run the normal completion path later from a stale closure.
+            if (!$job->{active} || $job->{cancel_requested} || (($job->{pid} // 0) != $pid)) {
+                eval { $loop->remove($timer) };
+                return;
+            }
+
             my $res = waitpid($pid, WNOHANG);
 
             if ($res == 0) {
-                my $started = $bot->{_radio_request_download}->{started} // time();
+                my $started = $job->{started} // time();
+
                 if ((time() - $started) > $timeout) {
-                    kill 'TERM', $pid;
-                    sleep 1;
-                    kill 'KILL', $pid;
-                    waitpid($pid, 0);
+                    # Non-blocking timeout escalation:
+                    # first tick sends TERM, later tick sends KILL if needed.
+                    if (!$job->{term_sent_at}) {
+                        kill 'TERM', $pid;
+                        $job->{term_sent_at} = time();
+                        $timer->start;
+                        return;
+                    }
 
-                    eval { $loop->remove($timer) };
-                    $bot->{_radio_request_download} = {};
+                    if ((time() - $job->{term_sent_at}) >= 1) {
+                        kill 'KILL', $pid if kill(0, $pid);
+                    }
 
-                    $self->_finish_download(
-                        ctx      => $ctx,
-                        query    => $query,
-                        id_user  => $uid,
-                        stdout   => $stdout,
-                        stderr   => $stderr,
-                        exitcode => 124,
-                        timedout => 1,
-                    );
+                    $timer->start;
                     return;
                 }
 
@@ -451,6 +462,9 @@ sub _start_download {
             );
         },
     );
+
+    $bot->{_radio_request_download}->{timer} = $timer;
+    $bot->{_radio_request_download}->{loop}  = $loop;
 
     $loop->add($timer);
     $timer->start;

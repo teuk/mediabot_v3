@@ -8,9 +8,10 @@ package Mediabot::AdminCommands;
 use strict;
 use warnings;
 use File::Basename qw(dirname);
-use POSIX qw(strftime setsid);
+use POSIX qw(strftime setsid WNOHANG);
 use Exporter 'import';
 use List::Util qw(min);
+use IO::Async::Timer::Countdown;
 use Sys::Hostname qw(hostname);
 use HTTP::Tiny;
 use JSON qw(encode_json decode_json);
@@ -1833,30 +1834,71 @@ sub radioDlCancel_ctx {
         return 1;
     }
 
-    my $alive = kill(0, $pid) ? 1 : 0;
+    # mb125: prevent the Radio::Request polling timer from firing after cancel.
+    $job->{cancel_requested} = 1;
 
-    if ($alive) {
-        kill 'TERM', $pid;
-        sleep 1;
+    if (my $poll_timer = delete $job->{timer}) {
+        my $poll_loop = delete($job->{loop}) || $self->{loop};
+        eval { $poll_timer->stop if $poll_timer->can('stop') };
+        eval { $poll_loop->remove($poll_timer) if $poll_loop };
+    }
 
-        if (kill(0, $pid)) {
-            kill 'KILL', $pid;
+    my $cleanup = sub {
+        my ($reason) = @_;
+
+        for my $tmp ($job->{stdout}, $job->{stderr}) {
+            next unless defined($tmp) && $tmp ne '';
+            unlink $tmp if -e $tmp;
         }
 
-        waitpid($pid, 0);
+        $self->{_radio_request_download} = {};
+        botNotice($self, $nick, "Radio download: cancelled job: $query");
+        logBot($self, $ctx->message, undef, 'radiodlcancel', $reason || $query);
+    };
+
+    my $alive = kill(0, $pid) ? 1 : 0;
+
+    unless ($alive) {
+        waitpid($pid, WNOHANG);
+        $cleanup->($query);
+        return 1;
     }
 
-    for my $tmp ($job->{stdout}, $job->{stderr}) {
-        next unless defined($tmp) && $tmp ne '';
-        unlink $tmp if -e $tmp;
+    kill 'TERM', $pid;
+    botNotice($self, $nick, "Radio download: cancelling job: $query");
+
+    my $loop = $self->{loop};
+
+    unless ($loop) {
+        # Last-resort fallback. Keep it non-blocking: escalate immediately and
+        # reap opportunistically instead of sleeping inside the IRC loop.
+        kill 'KILL', $pid if kill(0, $pid);
+        waitpid($pid, WNOHANG);
+        $cleanup->($query);
+        return 1;
     }
 
-    $self->{_radio_request_download} = {};
+    my $kill_timer;
+    $kill_timer = IO::Async::Timer::Countdown->new(
+        delay => 1,
+        on_expire => sub {
+            if (kill(0, $pid)) {
+                kill 'KILL', $pid;
+            }
 
-    botNotice($self, $nick, "Radio download: cancelled job: $query");
-    logBot($self, $ctx->message, undef, 'radiodlcancel', $query);
+            waitpid($pid, WNOHANG);
+
+            eval { $loop->remove($kill_timer) if $kill_timer };
+            $cleanup->($query);
+        },
+    );
+
+    $loop->add($kill_timer);
+    $kill_timer->start;
+
     return 1;
 }
+
 
 
 sub radioDlStatus_ctx {
