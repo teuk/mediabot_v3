@@ -2495,7 +2495,17 @@ sub _cmd_top {
 
     my $all_chans = ($args =~ /\ball\b/i) ? 1 : 0;
     my ($chan) = ($args =~ /(#\S+)/i);
-    my ($n) = ($args =~ /(\d+)/);
+
+    # mb122-B2: avant ce fix, ($args =~ /(\d+)/) matchait le PREMIER chiffre
+    # rencontre, donc `.top #chan42 10` produisait n=42 (clampe a 15).
+    # On retire d'abord le nom du canal et le mot "all" pour ne considerer
+    # que les arguments numeriques restants.
+    my $args_for_n = $args;
+    $args_for_n =~ s/#\S+//g;
+    $args_for_n =~ s/\ball\b//gi;
+    # mb124-B4: only accept standalone numeric tokens as n.
+    # Avoid treating arbitrary words such as foo10bar as a valid limit.
+    my ($n) = ($args_for_n =~ /(?:^|\s)(\d+)(?=\s|$)/);
     $n //= 5;
     $n = 5  if !$n || $n < 1;
     $n = 15 if $n > 15;

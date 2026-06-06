@@ -7952,10 +7952,19 @@ sub mbQuotegame_ctx {
     };
 
     # Masquer toute occurrence du nom de l'auteur dans la quote
+    # mb121-B2: les nicks IRC peuvent contenir [ ] \ ^ _ ` { } | -
+    # qui ne sont pas word chars Perl -> \b ne borde pas correctement
+    # les nicks type [teuk], __user__, etc. On utilise des assertions
+    # personnalisees basees sur le character class IRC (RFC 2812).
     my $masked = $row->{quotetext};
     my $author_lc = lc($row->{author});
-    $masked =~ s/\b\Q$row->{author}\E\b/???/gi;
-    $masked =~ s/\b\Q$author_lc\E\b/???/gi;
+    # nick chars IRC: lettres, chiffres, et certains specials. Les borders sont
+    # "tout ce qui n'est PAS un nick char" (ou debut/fin de string).
+    my $nick_char = qr/[A-Za-z0-9\[\]\\^_`{}|\-]/;
+    $masked =~ s/(?<!$nick_char)\Q$row->{author}\E(?!$nick_char)/???/gi;
+    # 2e passe sur la version lowercase au cas ou \Q...\E ne matche pas
+    # case-insensitively pour des caracteres non-ASCII (defensif).
+    $masked =~ s/(?<!$nick_char)\Q$author_lc\E(?!$nick_char)/???/gi;
 
     botPrivmsg($self, $channel,
         "\x{1F4DC} \x02Quotegame!\x02 Who said: \"\x02$masked\x02\"  \x{2014}  60s to answer with the nick");
@@ -7990,8 +7999,11 @@ sub checkQuotegameAnswer {
     # On évite que l'auteur lui-même réponde "moi"
     return if lc($sNick) eq $qg->{author_lc};
 
+    # mb121-B2: meme correction qu'a la creation de la quote -- les nicks IRC
+    # contenant [ ] _ \ ^ { } | ne sont pas bornes correctement par \b.
+    my $nick_char = qr/[A-Za-z0-9\[\]\\^_`{}|\-]/;
     my $msg_lc = lc($sMsg);
-    if ($msg_lc =~ /\b\Q$qg->{author_lc}\E\b/) {
+    if ($msg_lc =~ /(?<!$nick_char)\Q$qg->{author_lc}\E(?!$nick_char)/) {
         _quotegame_cancel_timer($self, $sChannel);
         $qg->{active} = 0;
         $qg->{scores}{$sNick}++;
@@ -8211,8 +8223,20 @@ sub mbLeaderboard_ctx {
     my ($period_label, $period_num, $period_unit_sql) = ('', undef, undef);
     if ($period_arg ne '' && $period_arg =~ /^(\d+)([hdw])$/) {
         my ($n, $unit) = ($1, $2);
-        if ($n < 1 || $n > 365) {
-            botNotice($self, $nick, 'Leaderboard period must be between 1 and 365 units.');
+        if ($n < 1) {
+            botNotice($self, $nick, 'Leaderboard period must be at least 1 unit.');
+            return 1;
+        }
+
+        # mb121-B1: clamp on the converted value (hours or days), not on the
+        # raw input. Without this, `100w` would generate INTERVAL 700 DAY which
+        # bypasses the intended 365-day ceiling.
+        my $max_units = $unit eq 'h' ? 365 * 24       # ~1 year in hours
+                       : $unit eq 'd' ? 365           # 1 year in days
+                       :                52;           # 1 year in weeks (52w = 364d)
+        if ($n > $max_units) {
+            botNotice($self, $nick,
+                "Leaderboard period must be <= ${max_units}${unit} (1 year cap).");
             return 1;
         }
 
@@ -8779,7 +8803,7 @@ sub mbObservatory_ctx {
     my $uptime  = _mbObservatory_uptime();
 
     botPrivmsg($self, $channel,
-        "\x{1F52D} \x02Observatory\x02 $channel \x{2014} alive $uptime"
+        "\x{1F52D} \x02Observatory\x02 $channel \x{2014} process up $uptime"
       . "  | games $games"
       . "  | achievements " . ($self->{achievements} ? 'on' : 'off')
       . " ($ach_defs)"

@@ -535,20 +535,19 @@ sub claude_ctx {
     my $message = $ctx->message;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    # U8: !ai forget — clear only the caller's own history/persona on this channel
+    # U8: !ai forget — clear only the caller's own history on this channel
     if (@args && lc($args[0]) eq 'forget') {
-        # mb123: history keys are case-sensitive and stored with the raw IRC nick,
-        # while persona keys are deliberately lower-cased. Keep both conventions.
+        # mb122-B3: l'historique est ecrit ligne 1001 avec "$nick\x00..."
+        # (case-sensitive) alors que le persona est stocke avec lc($nick).
+        # Avant ce fix, le forget utilisait lc($nick) pour les deux et donc
+        # ne supprimait pas l'historique des utilisateurs avec majuscules.
         my $chan_part   = (defined $channel ? $channel : '__private__');
-        my $hist_key    = "$nick\x00$chan_part";
-        my $persona_key = lc($nick) . "\x00" . $chan_part;
-
+        my $hist_key    = "$nick\x00$chan_part";                # case-sensitive comme write
+        my $persona_key = lc($nick) . "\x00" . $chan_part;      # lc comme write
         my $had = (exists $self->{_claude_history}{$hist_key}
                 || exists $self->{_claude_persona}{$persona_key}) ? 1 : 0;
-
         delete $self->{_claude_history}{$hist_key};
         delete $self->{_claude_persona}{$persona_key};
-
         Mediabot::Helpers::botNotice($self, $nick, $had
             ? 'Your Claude history and persona have been cleared.'
             : 'No active Claude session found for you on this channel.');

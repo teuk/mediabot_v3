@@ -64,6 +64,19 @@ sub is_hailo_excluded_nick {
     return 0 unless defined($nick) && $nick ne '';
     return 0 unless $self->{dbh};
 
+    # mb122-B1: cache TTL 30s. La table HAILO_EXCLUSION_NICK utilise
+    # utf8mb4_unicode_ci (case-insensitive cote DB), donc on peut cacher
+    # par lc($nick) sans craindre les ratages de casse.
+    my $cache_key = lc($nick);
+    my $now       = time();
+    my $ttl       = 30;
+    if (exists $self->{_hailo_excl_cache}{$cache_key}) {
+        my $entry = $self->{_hailo_excl_cache}{$cache_key};
+        if (($now - $entry->{ts}) < $ttl) {
+            return $entry->{val};
+        }
+    }
+
     my $sQuery = "SELECT 1 FROM HAILO_EXCLUSION_NICK WHERE nick = ?";
     my $sth = $self->{dbh}->prepare($sQuery);
 
@@ -82,6 +95,8 @@ sub is_hailo_excluded_nick {
 
     my $excluded = $sth->fetchrow_hashref() ? 1 : 0;
     $sth->finish;
+
+    $self->{_hailo_excl_cache}{$cache_key} = { val => $excluded, ts => $now };
 
     return $excluded;
 }
@@ -181,6 +196,9 @@ sub hailo_ignore_ctx {
     }
 
     $sth->finish;
+
+    # mb122-B1: invalidate cache after INSERT
+    delete $self->{_hailo_excl_cache}{ lc($target_nick) };
 
     botNotice($self, $caller, "Hailo will now ignore nick $target_nick.");
     logBot($self, $message, $ctx->channel, "hailo_ignore", $target_nick);
@@ -286,6 +304,9 @@ sub hailo_unignore_ctx {
     }
 
     $sth->finish;
+
+    # mb122-B1: invalidate cache after DELETE
+    delete $self->{_hailo_excl_cache}{ lc($target_nick) };
 
     botNotice($self, $caller, "Hailo will no longer ignore nick $target_nick.");
     logBot($self, $message, $chan, "hailo_unignore", $target_nick);
