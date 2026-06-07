@@ -153,26 +153,73 @@ sub getUserName {
 sub userOnJoin {
     my ($self, $message, $sChannel, $sNick) = @_;
 
+    # mb123-B1 (defensive): early return if $sChannel is not a valid channel.
+    # Avant ce fix, un appel avec un $sChannel vide ou bizarre pouvait quand
+    # meme essayer de fetcher un notice (Q2) avec un WHERE name = '' qui
+    # retourne 0 rows. Inoffensif mais bruite les logs.
+    unless (defined $sChannel && $sChannel ne '' && $sChannel =~ /^[#&!+]/) {
+        $self->{logger}->log(2,
+            "userOnJoin() bogus channel arg: " . (defined $sChannel ? "'$sChannel'" : '(undef)'))
+            if $self->{logger};
+        return;
+    }
+    unless (defined $sNick && $sNick ne '') {
+        $self->{logger}->log(2, "userOnJoin() missing nick")
+            if $self->{logger};
+        return;
+    }
+
     # Try to match user from the IRC message
     my $user = $self->get_user_from_message($message);
 
+    $self->{logger}->log(4,
+        "userOnJoin() channel='$sChannel' nick='$sNick' user_id="
+        . ($user ? $user->id : '(none)'))
+        if $self->{logger};
+
+    # mb123-B1: notice retrouve, soit via Q1 (user connu), soit via Q2.
+    # On utilise une variable unique pour eviter toute confusion sur la
+    # provenance du texte de notice.
+    my $channel_notice;
+    my $channel_notice_fetched = 0;
+
     if ($user) {
-        # Check for channel-specific user settings (auto mode and greet)
-        my $sql = "SELECT uc.*, c.* FROM USER_CHANNEL AS uc JOIN CHANNEL AS c ON c.id_channel = uc.id_channel WHERE c.name = ? AND uc.id_user = ?;";
-        $self->{logger}->log(4, $sql)
+        # mb123-B1: SELECT precis au lieu de "uc.*, c.*".
+        #
+        # Avant ce fix, "SELECT uc.*, c.*" ramenait toutes les colonnes des
+        # deux tables. Resultats indesirables :
+        #   - uc.id_user et c.id_user portent le meme nom mais des valeurs
+        #     differentes (le user qui join VS l'owner du canal). Le
+        #     fetchrow_hashref ecrasait le premier par le second.
+        #   - On gaspillait 13 colonnes (description, key, chanmode, topic, ...)
+        #     pour n'en utiliser que 3 (greet, automode, notice).
+        #
+        # On selectionne maintenant explicitement les trois colonnes utiles
+        # avec des alias non-ambigus.
+        my $sql = q{
+            SELECT uc.greet     AS uc_greet,
+                   uc.automode  AS uc_automode,
+                   c.notice     AS c_notice
+            FROM USER_CHANNEL AS uc
+            JOIN CHANNEL      AS c ON c.id_channel = uc.id_channel
+            WHERE c.name = ? AND uc.id_user = ?
+        };
+
+        $self->{logger}->log(4, "userOnJoin() Q1 bind: name='$sChannel' id_user=" . $user->id)
             if $self->{logger};
 
         my $sth = $self->{dbh}->prepare($sql);
 
         unless ($sth) {
-            $self->{logger}->log(1, "userOnJoin() SQL prepare error: " . $DBI::errstr . " Query: $sql")
+            $self->{logger}->log(1,
+                "userOnJoin() SQL prepare error: " . $DBI::errstr . " Query: $sql")
                 if $self->{logger};
         }
         elsif ($sth->execute($sChannel, $user->id)) {
             if (my $ref = $sth->fetchrow_hashref()) {
 
                 # Apply auto mode if defined
-                my $auto_mode = $ref->{automode};
+                my $auto_mode = $ref->{uc_automode};
                 if (defined $auto_mode && $auto_mode ne '') {
                     if ($auto_mode eq 'OP') {
                         $self->{irc}->send_message("MODE", undef, ($sChannel, "+o", $sNick));
@@ -183,48 +230,68 @@ sub userOnJoin {
                 }
 
                 # Send greet message to channel if defined
-                my $greet = $ref->{greet};
+                my $greet = $ref->{uc_greet};
                 if (defined $greet && $greet ne '') {
                     botPrivmsg($self, $sChannel, "($user->{nickname}) $greet");
                 }
+
+                # mb123-B1: on a deja le notice ici, pas besoin de Q2.
+                # Cela elimine un round-trip et garantit que le notice
+                # provient bien du *meme* canal que celui matche par Q1.
+                $channel_notice         = $ref->{c_notice};
+                $channel_notice_fetched = 1;
             }
 
             $sth->finish;
         }
         else {
-            $self->{logger}->log(1, "userOnJoin() SQL execute error: " . $DBI::errstr . " Query: $sql")
+            $self->{logger}->log(1,
+                "userOnJoin() SQL execute error: " . $DBI::errstr . " Query: $sql")
                 if $self->{logger};
             $sth->finish;
         }
     }
 
-    # Now check if the channel has a default notice to send on join
-    my $sql_channel = "SELECT id_channel, notice FROM CHANNEL WHERE name = ?";
-    $self->{logger}->log(4, $sql_channel)
-        if $self->{logger};
+    # Q2: only if we didn't already fetch the notice in Q1.
+    # This is the case for unknown users (no $user object) or known users
+    # without a USER_CHANNEL row for this channel.
+    unless ($channel_notice_fetched) {
+        my $sql_channel = "SELECT notice FROM CHANNEL WHERE name = ?";
 
-    my $sth = $self->{dbh}->prepare($sql_channel);
-
-    unless ($sth) {
-        $self->{logger}->log(1, "userOnJoin() channel SQL prepare error: " . $DBI::errstr . " Query: $sql_channel")
+        $self->{logger}->log(4, "userOnJoin() Q2 bind: name='$sChannel'")
             if $self->{logger};
-        return;
-    }
 
-    if ($sth->execute($sChannel)) {
-        if (my $ref = $sth->fetchrow_hashref()) {
-            my $notice = $ref->{notice};
-            if (defined $notice && $notice ne '') {
-                botNotice($self, $sNick, $notice);
-            }
+        my $sth = $self->{dbh}->prepare($sql_channel);
+
+        unless ($sth) {
+            $self->{logger}->log(1,
+                "userOnJoin() channel SQL prepare error: " . $DBI::errstr . " Query: $sql_channel")
+                if $self->{logger};
+            return;
         }
 
-        $sth->finish;
+        if ($sth->execute($sChannel)) {
+            if (my $ref = $sth->fetchrow_hashref()) {
+                $channel_notice = $ref->{notice};
+            }
+            $sth->finish;
+        }
+        else {
+            $self->{logger}->log(1,
+                "userOnJoin() channel SQL execute error: " . $DBI::errstr . " Query: $sql_channel")
+                if $self->{logger};
+            $sth->finish;
+            return;
+        }
     }
-    else {
-        $self->{logger}->log(1, "userOnJoin() channel SQL execute error: " . $DBI::errstr . " Query: $sql_channel")
+
+    # Send the notice to the user who just joined.
+    # mb123-B1: log explicitly which channel's notice is being sent and to whom.
+    if (defined $channel_notice && $channel_notice ne '') {
+        $self->{logger}->log(3,
+            "userOnJoin() sending '$sChannel' notice to '$sNick'")
             if $self->{logger};
-        $sth->finish;
+        botNotice($self, $sNick, $channel_notice);
     }
 
     return;
@@ -1417,11 +1484,18 @@ sub mbSeen_ctx {
     if ($target_input =~ /[*?]/) {
         my $is_private = !defined($ctx->channel) || $ctx->channel eq '';
         my $dest       = $is_private ? $nick : ($ctx->channel);
-        # Convertir le glob IRC (*=%) en LIKE SQL
-        (my $like_pat = lc($target_input)) =~ s/\*/%/g;
-        $like_pat =~ s/\?/_/g;
-        # Sécurité : caractères LIKE spéciaux dans la partie non-glob
-        $like_pat =~ s/([%_\\])/\\$1/g if $like_pat !~ /[%_]/;  # déjà fait ci-dessus
+        # mb127-B3: convert IRC glob (*, ?) to SQL LIKE while escaping literal
+        # LIKE metacharacters from the user input. Without ESCAPE, nicks such
+        # as "bob_foo*" made "_" behave as a wildcard.
+        my $like_pat = '';
+        for my $ch (split //, lc($target_input)) {
+            if    ($ch eq '*') { $like_pat .= '%';  }
+            elsif ($ch eq '?') { $like_pat .= '_';  }
+            elsif ($ch eq '!') { $like_pat .= '!!'; }
+            elsif ($ch eq '%') { $like_pat .= '!%'; }
+            elsif ($ch eq '_') { $like_pat .= '!_'; }
+            else               { $like_pat .= $ch;  }
+        }
         my $chan_for_wc;
         if (@args && defined $args[0] && $args[0] =~ /^#/) {
             $chan_for_wc = shift @args;
@@ -1434,7 +1508,7 @@ sub mbSeen_ctx {
             $sql_wc = q{
                 SELECT nick, channel, seen_at, event_type
                 FROM USER_SEEN
-                WHERE nick LIKE ? AND channel = ?
+                WHERE nick LIKE ? ESCAPE '!' AND channel = ?
                 ORDER BY seen_at DESC LIMIT 5
             };
             @bind_wc = ($like_pat, $chan_for_wc);
@@ -1442,7 +1516,7 @@ sub mbSeen_ctx {
             $sql_wc = q{
                 SELECT nick, channel, seen_at, event_type
                 FROM USER_SEEN
-                WHERE nick LIKE ?
+                WHERE nick LIKE ? ESCAPE '!'
                 ORDER BY seen_at DESC LIMIT 5
             };
             @bind_wc = ($like_pat);

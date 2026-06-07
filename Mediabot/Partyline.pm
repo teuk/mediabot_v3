@@ -2669,13 +2669,21 @@ sub _cmd_seen {
         $stream->write("Usage: .seen <nick>  (wildcard: .seen teu*)\r\n"); return;
     }
 
-    # mb94-B1: support wildcard (* → %, ? → _) comme mbSeen_ctx IRC
+    # mb94-B1 / mb127-B3: support wildcard (* -> %, ? -> _) while escaping
+    # literal SQL LIKE metacharacters from the user input.
     if ($target =~ /[*?]/) {
-        (my $like = lc($target)) =~ s/\*/%/g;
-        $like =~ s/\?/_/g;
+        my $like = '';
+        for my $ch (split //, lc($target)) {
+            if    ($ch eq '*') { $like .= '%';  }
+            elsif ($ch eq '?') { $like .= '_';  }
+            elsif ($ch eq '!') { $like .= '!!'; }
+            elsif ($ch eq '%') { $like .= '!%'; }
+            elsif ($ch eq '_') { $like .= '!_'; }
+            else               { $like .= $ch;  }
+        }
         my $sth = $dbh->prepare(q{
             SELECT nick, channel, event_type, seen_at
-            FROM USER_SEEN WHERE nick LIKE ?
+            FROM USER_SEEN WHERE nick LIKE ? ESCAPE '!'
             ORDER BY seen_at DESC LIMIT 5
         });
         unless ($sth && $sth->execute($like)) {

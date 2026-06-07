@@ -689,9 +689,46 @@ sub purgeChannel_ctx {
     # B2: correct send_message syntax (undef prefix, channel as first param)
     eval { $self->{irc}->send_message("PART", undef, $sChannel, "Channel purged by $nick") };
 
-    # A5: delete from in-memory channel registry (only $sChannel, not stale $key)
+    # A5/B1: delete from in-memory channel registry and every channel-scoped cache.
+    # The DB transaction removed CHANNEL_SET/BADWORDS/USER_CHANNEL/etc.; keep runtime
+    # memory in sync so the purged channel cannot survive through TTL caches.
+    my @purged_channel_keys = ($sChannel, lc($sChannel));
+
     delete $self->{channels}{$sChannel};
     delete $self->{channels}{lc($sChannel)};
+
+    if (my $hn = eval { $self->gethChannelNicks }) {
+        if (ref($hn) eq 'HASH') {
+            delete $hn->{$sChannel};
+            delete $hn->{lc($sChannel)};
+            eval { $self->sethChannelNicks($hn) };
+        }
+    }
+
+    for my $chan_key (@purged_channel_keys) {
+        delete $self->{_badword_cache}{$chan_key}      if $self->{_badword_cache};
+        delete $self->{_af_params}{$chan_key}          if $self->{_af_params};
+        delete $self->{_chan_flood}{$chan_key}         if $self->{_chan_flood};
+        delete $self->{_chan_flood_conf}{$chan_key}    if $self->{_chan_flood_conf};
+        delete $self->{_cmd_cooldown}{$chan_key}       if $self->{_cmd_cooldown};
+        delete $self->{_cmd_cooldown_conf}{$chan_key}  if $self->{_cmd_cooldown_conf};
+    }
+
+    if ($self->{_chanset_cache}) {
+        for my $ck (keys %{ $self->{_chanset_cache} }) {
+            delete $self->{_chanset_cache}{$ck}
+                if index($ck, "$sChannel\x00") == 0 || index($ck, lc($sChannel) . "\x00") == 0;
+        }
+    }
+
+    if ($self->{_uchan_level_cache}) {
+        for my $ck (keys %{ $self->{_uchan_level_cache} }) {
+            delete $self->{_uchan_level_cache}{$ck}
+                if $ck =~ /\x00\Q$sChannel\E\z/i;
+        }
+    }
+
+    $self->{logger}->log(3, "purgeChannel_ctx(): cleared runtime caches for $sChannel");
 
     logBot($self, $ctx->message, undef, "purge", "$nick purged $sChannel (id_channel=$id_channel)");
     Mediabot::botNotice($self, $nick, "Channel $sChannel purged.");

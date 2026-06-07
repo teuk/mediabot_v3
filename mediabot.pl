@@ -1196,6 +1196,37 @@ sub on_message_MODE {
     }
 }
 
+
+# ---------------------------------------------------------------------------
+# purge_claude_session_for_nick
+# mb126-B2: Claude history keys are case-sensitive and use the raw IRC nick,
+# while persona/activity keys are lower-cased. Keep both conventions when
+# cleaning runtime memory on real QUIT/NICK.
+# ---------------------------------------------------------------------------
+sub purge_claude_session_for_nick {
+    my ($bot, $nick) = @_;
+    return unless $bot && defined($nick) && $nick ne '';
+
+    my $hist_prefix    = "$nick\x00";
+    my $persona_prefix = lc($nick) . "\x00";
+
+    if ($bot->{_claude_history}) {
+        delete $bot->{_claude_history}{$_}
+            for grep { index($_, $hist_prefix) == 0 } keys %{ $bot->{_claude_history} };
+    }
+
+    if ($bot->{_claude_persona}) {
+        delete $bot->{_claude_persona}{$_}
+            for grep { index($_, $persona_prefix) == 0 } keys %{ $bot->{_claude_persona} };
+    }
+
+    if ($bot->{_ai_last_active}) {
+        delete $bot->{_ai_last_active}{$_}
+            for grep { index($_, $persona_prefix) == 0 } keys %{ $bot->{_ai_last_active} };
+    }
+}
+
+
 sub on_message_NICK {
     my ($self,$message,$hints) = @_;
 
@@ -1217,12 +1248,8 @@ sub on_message_NICK {
     # Track last seen on NICK change + purge Claude history for old nick
     {
         my ($sNick_n, $sIdent_n, $sHost_n) = $mediabot->getMessageNickIdentHost($message);
-        # Q2: purge Claude history for old nick on NICK change
-        if (defined $sNick_n && $mediabot->{_claude_history}) {
-            my $prefix = lc($sNick_n) . "\x00";
-            delete $mediabot->{_claude_history}{$_}
-                for grep { index($_, $prefix) == 0 } keys %{ $mediabot->{_claude_history} };
-        }
+        # mb126-B2: purge Claude history/persona/activity for the old nick.
+        purge_claude_session_for_nick($mediabot, $old_nick);
         eval { $mediabot->updateUserSeen(
             nick       => $old_nick,
             channel    => '',
@@ -1283,13 +1310,9 @@ sub on_message_QUIT {
         return;
     }
 
-    # NS5: only purge Claude history for genuine QUITs (not netsplits)
-    # Q2: purge Claude conversation history on QUIT
-    if (defined $sNick && $mediabot->{_claude_history}) {
-        my $prefix = lc($sNick) . "\x00";
-        delete $mediabot->{_claude_history}{$_}
-            for grep { index($_, $prefix) == 0 } keys %{ $mediabot->{_claude_history} };
-    }
+    # NS5/mb126-B2: only purge Claude history/persona/activity for genuine QUITs
+    # (not netsplits). History uses raw nick; persona/activity use lc(nick).
+    purge_claude_session_for_nick($mediabot, $sNick);
     if (defined($text) && ($text ne "")) {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
             $mediabot->{logger}->log(0,"[LIVE] * Quits: $sNick ($sIdent\@$sHost) ($text)");

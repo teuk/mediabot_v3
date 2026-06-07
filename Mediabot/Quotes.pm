@@ -509,27 +509,46 @@ sub mbQuoteRand {
         return;
     }
 
-    my $offset = int(rand($count));
-
-    # mb94-B2: éviter de retomber deux fois de suite sur la même quote
-    # Ring buffer en mémoire: _quote_last_rand{$sChannel} = id de la dernière quote affichée
+    # mb124-B1: anti-doublon corrige.
+    #
+    # Avant ce fix, le code generait $offset = int(rand($count)), puis essayait
+    # de "boucler tant qu'on retombe sur la meme quote" en comparant deux
+    # offsets random entre eux :
+    #
+    #     for (1..5) {
+    #         my $candidate_offset = int(rand($count));
+    #         last if $candidate_offset != $offset;   # WTF
+    #         $offset = $candidate_offset;
+    #     }
+    #
+    # Ce test compare random vs random sans aucun lien avec $last_id, donc
+    # la prevention "deux fois de suite la meme quote" ne fonctionnait pas.
+    # On exclut maintenant $last_id directement dans la requete SQL.
     my $last_id = $self->{_quote_last_rand}{$sChannel};
-    if (defined $last_id && $count > 1) {
-        # Regénérer l'offset jusqu'à obtenir une quote différente (max 5 essais)
-        for (1..5) {
-            my $candidate_offset = int(rand($count));
-            last if $candidate_offset != $offset;  # premier essai OK
-            $offset = $candidate_offset;
-        }
-        # Vérification post-fetch ci-dessous
-    }
+    my $exclude_last = (defined $last_id && $count > 1) ? 1 : 0;
 
-    my $sql = "SELECT q.id_quotes, q.quotetext, q.id_user
-         FROM QUOTES q
-         JOIN CHANNEL c ON c.id_channel = q.id_channel
-         WHERE c.name = ?
-         ORDER BY q.id_quotes
-         LIMIT 1 OFFSET ?";
+    # On utilise count - 1 pour le random si on exclut, sinon count.
+    my $effective_count = $exclude_last ? ($count - 1) : $count;
+    $effective_count = 1 if $effective_count < 1;   # garde-fou
+    my $offset = int(rand($effective_count));
+
+    my $sql = $exclude_last
+        ? "SELECT q.id_quotes, q.quotetext, q.id_user
+             FROM QUOTES q
+             JOIN CHANNEL c ON c.id_channel = q.id_channel
+             WHERE c.name = ? AND q.id_quotes != ?
+             ORDER BY q.id_quotes
+             LIMIT 1 OFFSET ?"
+        : "SELECT q.id_quotes, q.quotetext, q.id_user
+             FROM QUOTES q
+             JOIN CHANNEL c ON c.id_channel = q.id_channel
+             WHERE c.name = ?
+             ORDER BY q.id_quotes
+             LIMIT 1 OFFSET ?";
+
+    my @bind = $exclude_last
+        ? ($sChannel, $last_id, $offset)
+        : ($sChannel, $offset);
 
     my $sth = $self->{dbh}->prepare($sql);
 
@@ -540,7 +559,7 @@ sub mbQuoteRand {
         return;
     }
 
-    unless ($sth && $sth->execute($sChannel, $offset)) {
+    unless ($sth && $sth->execute(@bind)) {
         $self->{logger}->log(1, "mbQuoteRand SQL execute error: $DBI::errstr Query: $sql")
             if $self->{logger};
         $sth->finish if $sth;
@@ -549,7 +568,8 @@ sub mbQuoteRand {
     }
 
     if (my $ref = $sth->fetchrow_hashref) {
-        # mb94-B2: si malgré tout on retombe sur la même (count==1 ou malchance), on affiche quand même
+        # mb124-B1: id_quotes ne peut plus etre egal a $last_id grace au
+        # filtre SQL, donc on memorise sans risque de doublon.
         $self->{_quote_last_rand}{$sChannel} = $ref->{id_quotes};
         my $id_q   = String::IRC->new($ref->{id_quotes})->bold;
         my $handle = getUserhandle($self, $ref->{id_user}) || 'Unknown';
@@ -693,7 +713,17 @@ sub mbQuoteByNick {
         return;
     }
 
-    my $like = lc($targetNick) . '%';
+    # mb124-B2: escape SQL LIKE wildcards (_ et %) avant de construire la
+    # pattern. Sans ce fix, un nick comme "bob_" matche "boba", "bobx", etc.
+    # parce que `_` est interprete comme un wildcard SQL (un caractere
+    # quelconque). Or `_` est un caractere valide dans les nicks IRC.
+    # On utilise ESCAPE '!' (cf. mbDbSearchCommand_ctx dans DBCommands.pm).
+    my $target_lc = lc($targetNick);
+    my $target_esc = $target_lc;
+    $target_esc =~ s/!/!!/g;
+    $target_esc =~ s/%/!%/g;
+    $target_esc =~ s/_/!_/g;
+    my $like = $target_esc . '%';
 
     # Count matching quotes
     my $sth_count = $self->{dbh}->prepare(q{
@@ -701,7 +731,7 @@ sub mbQuoteByNick {
         FROM QUOTES q
         JOIN CHANNEL c ON c.id_channel = q.id_channel
         JOIN USER    u ON u.id_user    = q.id_user
-        WHERE c.name = ? AND LOWER(u.nickname) LIKE ?
+        WHERE c.name = ? AND LOWER(u.nickname) LIKE ? ESCAPE '!'
     });
     unless ($sth_count && $sth_count->execute($sChannel, $like)) {
         $self->{logger}->log(1, "mbQuoteByNick() count SQL error: $DBI::errstr");
@@ -714,13 +744,14 @@ sub mbQuoteByNick {
 
     # A4: fallback to fuzzy match if exact prefix not found
     if ($count == 0) {
-        my $fuzzy_like = "%$targetNick%";
+        # mb124-B2: meme escape pour la pattern fuzzy
+        my $fuzzy_like = '%' . $target_esc . '%';
         my $sth_fuz = $self->{dbh}->prepare(q{
             SELECT COUNT(*) AS cnt
             FROM QUOTES q
             JOIN CHANNEL c ON c.id_channel = q.id_channel
             JOIN USER    u ON u.id_user    = q.id_user
-            WHERE c.name = ? AND LOWER(u.nickname) LIKE ?
+            WHERE c.name = ? AND LOWER(u.nickname) LIKE ? ESCAPE '!'
         });
         if ($sth_fuz && $sth_fuz->execute($sChannel, $fuzzy_like)) {
             my $r = $sth_fuz->fetchrow_hashref;
@@ -741,7 +772,7 @@ sub mbQuoteByNick {
         FROM QUOTES q
         JOIN CHANNEL c ON c.id_channel = q.id_channel
         JOIN USER    u ON u.id_user    = q.id_user
-        WHERE c.name = ? AND LOWER(u.nickname) LIKE ?
+        WHERE c.name = ? AND LOWER(u.nickname) LIKE ? ESCAPE '!'
         ORDER BY q.id_quotes
         LIMIT 1 OFFSET ?
     });
@@ -772,7 +803,7 @@ sub mbQuoteByNick {
                 FROM QUOTES q
                 JOIN CHANNEL c ON c.id_channel = q.id_channel
                 JOIN USER    u ON u.id_user    = q.id_user
-                WHERE c.name = ? AND LOWER(u.nickname) LIKE ?
+                WHERE c.name = ? AND LOWER(u.nickname) LIKE ? ESCAPE '!'
                 ORDER BY q.id_quotes
                 LIMIT 1 OFFSET ?
             });
@@ -817,12 +848,18 @@ sub mbQuoteCount_ctx {
         return 1;
     }
 
-    my $like = lc($targetNick) . '%';
+    # mb124-B2: escape SQL LIKE wildcards (idem mbQuoteByNick)
+    my $target_lc = lc($targetNick);
+    my $target_esc = $target_lc;
+    $target_esc =~ s/!/!!/g;
+    $target_esc =~ s/%/!%/g;
+    $target_esc =~ s/_/!_/g;
+    my $like = $target_esc . '%';
     my $sth = $self->{dbh}->prepare(q{
         SELECT COUNT(*) AS cnt FROM QUOTES q
         JOIN CHANNEL c ON c.id_channel = q.id_channel
         JOIN USER u ON u.id_user = q.id_user
-        WHERE c.name = ? AND LOWER(u.nickname) LIKE ?
+        WHERE c.name = ? AND LOWER(u.nickname) LIKE ? ESCAPE '!'
     });
     unless ($sth) {
         $self->{logger}->log(1, "mbQuoteCount_ctx() SQL prepare error: $DBI::errstr")
