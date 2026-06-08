@@ -6,6 +6,7 @@ use warnings;
 use IO::Socket::INET;
 use IO::Async::Listener;
 use JSON::MaybeXS qw(encode_json);
+use Encode qw(encode_utf8);   # mb129-B3: Content-Length doit etre en bytes
 
 sub new {
     my ($class, %args) = @_;
@@ -326,14 +327,23 @@ sub start_http_server {
                             $ctype  = 'text/plain; charset=utf-8';
                         }
 
+                        # mb129-B3: Content-Length doit etre en bytes, pas en
+                        # caracteres. length($body) sur une string flag UTF-8
+                        # retourne le nombre de chars, ce qui sous-evalue la
+                        # taille si $body contient du non-ASCII (ex. canal
+                        # "#cafe" stocke comme "#caf\x{e9}" -> length=5 mais
+                        # encode_utf8 -> 6 bytes). On encode explicitement et
+                        # on envoie les bytes sur le wire.
+                        my $body_bytes = encode_utf8($body);
+
                         my $resp = join(
                             "\r\n",
                             "HTTP/1.1 $status",
                             "Content-Type: $ctype",
-                            "Content-Length: " . length($body),
+                            "Content-Length: " . length($body_bytes),
                             "Connection: close",
                             "",
-                            $body
+                            $body_bytes
                         );
 
                         $stream->write($resp);

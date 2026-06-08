@@ -119,8 +119,15 @@ sub log {
     }
 
     # Write to logfile if enabled (rotate if needed)
+    # mb130-B1: rotation AVANT capture du fh. Avant ce fix, on capturait
+    # $fh = $self->{logfilehandle}, puis _maybe_rotate() pouvait renommer
+    # le fichier et reouvrir $self->{logfilehandle} sur le nouveau path —
+    # mais le print utilisait la VIEILLE reference $fh qui pointait encore
+    # vers le fichier maintenant nomme ".log.1". Resultat : la 100eme
+    # ecriture apres rotation atterrissait dans le fichier rotate au lieu
+    # du nouveau .log.
+    $self->_maybe_rotate() if $self->{logfile} && $self->{logfilehandle};
     if (my $fh = $self->{logfilehandle}) {
-        $self->_maybe_rotate();
         print $fh $logline;
     }
 

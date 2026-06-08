@@ -394,6 +394,17 @@ sub addChannel_ctx {
         botNotice($self, $nick, "Channel $sChannel added and linked to $sUser.");
     }
 
+    # mb129-B1: setup_channel_nicklist_timers est appele uniquement au demarrage
+    # et a chaque reconnect IRC. Sans intervention ici, un canal ajoute via
+    # !chanadd n'aura pas de timer de refresh nicklist jusqu'au prochain
+    # reconnect. On (re)lance la passe complete pour inclure le nouveau canal.
+    # Note : la fn fait stop_all + recreation, donc tous les timers existants
+    # sont reset proprement (interval identique, decalage temporel mineur).
+    eval { $self->setup_channel_nicklist_timers() };
+    if ($@) {
+        $self->{logger}->log(1, "addChannel_ctx(): setup_channel_nicklist_timers() failed: $@");
+    }
+
     logBot($self, $ctx->message, undef, "addchan", $sChannel, $sUser);
     noticeConsoleChan($self, $ctx->message->prefix . " addchan command: added $sChannel (id_channel: $id_channel) linked to $sUser");
 
@@ -705,6 +716,13 @@ sub purgeChannel_ctx {
         }
     }
 
+    # mb129-B2: arreter le timer nicklist du canal purge. Sans ce stop, le
+    # timer continue a envoyer un NAMES sur un canal ou le bot n'est plus,
+    # ce qui pollue les logs et compte vers les limites du serveur.
+    eval { $self->stop_channel_nicklist_timer($sChannel) };
+    eval { $self->stop_channel_nicklist_timer(lc($sChannel)) }
+        if lc($sChannel) ne $sChannel;
+
     for my $chan_key (@purged_channel_keys) {
         delete $self->{_badword_cache}{$chan_key}      if $self->{_badword_cache};
         delete $self->{_af_params}{$chan_key}          if $self->{_af_params};
@@ -727,6 +745,51 @@ sub purgeChannel_ctx {
                 if $ck =~ /\x00\Q$sChannel\E\z/i;
         }
     }
+
+    # mb128-B2: caches additionnels oublies par le fix initial mb125-B1.
+    # Tous indexes par nom de canal directement, ou par "channel:nick".
+    for my $chan_key (@purged_channel_keys) {
+        delete $self->{_quote_last_rand}{$chan_key}  if $self->{_quote_last_rand};
+        delete $self->{_quotegame}{$chan_key}        if $self->{_quotegame};
+        delete $self->{_karma_log}{$chan_key}        if $self->{_karma_log};
+
+        # _duel_* (mb116) : cle channel
+        for my $duel_cache (qw(_duel_stats _duel_cooldown _duel_streak _duel_last_result)) {
+            delete $self->{$duel_cache}{$chan_key} if $self->{$duel_cache};
+        }
+    }
+
+    # _quote_bynick_last: cle composite "channel:nick"
+    if ($self->{_quote_bynick_last}) {
+        for my $bk (keys %{ $self->{_quote_bynick_last} }) {
+            my $colon = index($bk, ':');
+            next if $colon < 0;
+            my $bk_chan = substr($bk, 0, $colon);
+            delete $self->{_quote_bynick_last}{$bk}
+                if $bk_chan eq $sChannel || lc($bk_chan) eq lc($sChannel);
+        }
+    }
+
+    # _karma_brigade: cle "brigade:target:channel"
+    if ($self->{_karma_brigade}) {
+        for my $bk (keys %{ $self->{_karma_brigade} }) {
+            # Format "brigade:<target>:<channel>", channel apres le dernier ':'
+            my $last_colon = rindex($bk, ':');
+            next if $last_colon < 0;
+            my $bk_chan = substr($bk, $last_colon + 1);
+            delete $self->{_karma_brigade}{$bk}
+                if $bk_chan eq $sChannel || lc($bk_chan) eq lc($sChannel);
+        }
+    }
+
+    # _karma_cooldown: cle channel a 1er niveau, "$nick:$target" a 2e
+    if ($self->{_karma_cooldown}) {
+        for my $chan_key (@purged_channel_keys) {
+            delete $self->{_karma_cooldown}{$chan_key};
+        }
+    }
+
+    delete $self->{_ignore_cache}; # mb131-B4: purge may remove channel-scoped IGNORES rows
 
     $self->{logger}->log(3, "purgeChannel_ctx(): cleared runtime caches for $sChannel");
 
@@ -809,6 +872,16 @@ sub channelPart_ctx {
     # Execute: call the LEGACY partChannel() that actually parts on IRC
     $self->{logger}->log(1, "$nick issued a part $target command");
     partChannel($self, $target, "At the request of " . ($user->nickname // $nick));
+
+    # mb129-B2: arreter le timer nicklist tant qu'on n'est pas dans le canal.
+    # Sans ce stop, le timer envoie un NAMES sur un canal ou le bot n'est plus
+    # present (le serveur peut repondre publiquement si le canal n'est pas +s,
+    # mais c'est inutile et bruite les logs). Le timer sera recree au prochain
+    # !join via channelJoin_ctx (cf. setup_channel_nicklist_timers).
+    eval { $self->stop_channel_nicklist_timer($target) };
+    eval { $self->stop_channel_nicklist_timer(lc($target)) }
+        if lc($target) ne $target;
+
     logBot($self, $ctx->message, $target, "part", "At the request of " . ($user->nickname // $nick));
 }
 
@@ -898,6 +971,15 @@ sub channelJoin_ctx {
     # Execute JOIN (with key if any)
     $self->{logger}->log(1, "$nick issued a join $target command");
     joinChannel($self, $target, (defined($key) && $key ne '' ? $key : undef));
+
+    # mb129-B2: relancer setup_channel_nicklist_timers pour creer le timer
+    # du canal qu'on vient de rejoindre (channelPart_ctx l'a arrete). Pour
+    # un canal deja present dans channels{} la fn stop_all + recreate avec
+    # l'interval identique. Cas typique : !part #chan puis !join #chan.
+    eval { $self->setup_channel_nicklist_timers() };
+    if ($@) {
+        $self->{logger}->log(1, "channelJoin_ctx(): setup_channel_nicklist_timers() failed: $@");
+    }
 
     logBot($self, $ctx->message, $target, "join", "");
 }

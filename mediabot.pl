@@ -1377,7 +1377,31 @@ sub on_message_PART {
     ) };
 
     # Clear in-memory auth session on PART (only for other nicks, not the bot itself)
-    eval { $mediabot->{auth}->logout($sNick) } if $mediabot->{auth} && $sNick ne $self->nick;
+    # mb128-B1: ne logout que si le user n'est plus present sur AUCUN canal partage
+    # avec le bot. Avant ce fix, un user authentifie qui PART d'un seul canal
+    # (parmi plusieurs partages avec le bot) etait logout globalement. Trop severe :
+    # il reste sur l'IRC et possiblement sur d'autres canaux ou son auth est
+    # legitime. NOTE: channelNicksRemove ci-dessus a deja retire le nick de
+    # $target_name, donc on cherche le user dans les AUTRES canaux.
+    if ($mediabot->{auth} && $sNick ne $self->nick) {
+        my $still_present = 0;
+        my $hn = eval { $mediabot->gethChannelNicks() };
+        if (ref($hn) eq 'HASH') {
+            my $lc_target = lc($sNick);
+            OUTER: for my $chan (keys %$hn) {
+                next unless ref($hn->{$chan}) eq 'ARRAY';
+                for my $n (@{ $hn->{$chan} }) {
+                    if (lc($n) eq $lc_target) {
+                        $still_present = 1;
+                        last OUTER;
+                    }
+                }
+            }
+        }
+        unless ($still_present) {
+            eval { $mediabot->{auth}->logout($sNick) };
+        }
+    }
     if ($sNick eq $self->nick && $mediabot->{metrics}) {
         $mediabot->{metrics}->set('mediabot_channel_joined', 0, { channel => $target_name });
         $mediabot->{metrics}->set('mediabot_current_channels',

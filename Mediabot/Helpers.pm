@@ -415,6 +415,59 @@ sub logBot {
 
 # Log bot action into the CHANNEL_LOG table
 # Handles JOIN, PART, PUBLIC, ACTION, NOTICE, KICK, QUIT, etc.
+# ---------------------------------------------------------------------------
+# _redact_irc_service_secret_for_log
+# mb133-B7: keep outbound private-message logs safe across PRIVMSG/ACTION/NOTICE.
+# The original message must remain unchanged for the IRC wire; only log copies
+# are redacted.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# _is_irc_channel_target
+# mb135-B9: IRC channels are not only "#channel". RFC-style channel prefixes
+# include #, &, ! and +. Keep outbound helper classification consistent.
+# ---------------------------------------------------------------------------
+sub _is_irc_channel_target {
+    my ($target) = @_;
+    return defined($target) && $target =~ /^[#&!+]/ ? 1 : 0;
+}
+
+
+sub _redact_irc_service_secret_for_log {
+    my ($msg) = @_;
+
+    return $msg unless defined($msg) && $msg ne '';
+
+    my $log_msg = $msg;
+
+    if ($log_msg =~ /^(identify|id|login|register|auth|ghost|recover|release|set\s+password)\b/i) {
+        my @parts = split /\s+/, $log_msg;
+        my $verb = lc($parts[0] // '');
+
+        if ($verb eq 'identify' || $verb eq 'id') {
+            if (@parts >= 3) { $parts[-1] = '****'; }
+            elsif (@parts >= 2) { $parts[1] = '****'; }
+        }
+        elsif ($verb eq 'login' || $verb eq 'auth'
+            || $verb eq 'ghost' || $verb eq 'recover' || $verb eq 'release')
+        {
+            $parts[2] = '****' if @parts >= 3;
+        }
+        elsif ($verb eq 'set' && lc($parts[1] // '') eq 'password') {
+            $parts[2] = '****' if @parts >= 3;
+        }
+        else {
+            # register <pass> <email> : pass is arg #1, email is not secret
+            $parts[1] = '****' if @parts >= 2;
+        }
+
+        $log_msg = join(' ', @parts);
+    }
+
+    return $log_msg;
+}
+
+
 sub botPrivmsg {
     my ($self, $sTo, $sMsg) = @_;
 
@@ -430,7 +483,7 @@ sub botPrivmsg {
 
     my $eventtype = "public";
 
-    if ($sTo =~ /^#/) {
+    if (_is_irc_channel_target($sTo)) {
         # Channel mode
 
         # NoColors chanset check
@@ -480,6 +533,7 @@ sub botPrivmsg {
                 } else {
                     $self->{logger}->log(1, "botPrivmsg() Badword SQL Error: $DBI::errstr");
                     $self->{metrics}->inc('mediabot_db_query_errors_total') if $self->{metrics};
+                    $sth->finish if $sth; # mb135-B10: match botAction cleanup on execute errors
                 }
                 $self->{_badword_cache}{$sTo} = { ts => $now, words => \@words };
                 $cache = $self->{_badword_cache}{$sTo};
@@ -500,7 +554,14 @@ sub botPrivmsg {
     } else {
         # Private message
         $eventtype = "private";
-        $self->{logger}->log(0, "-> *$sTo* $sMsg");
+        # mb130-B2: redact password in log for NickServ-like service commands.
+        # Avant ce fix, on_login() faisait botPrivmsg("NickServ", "identify
+        # mypass") ou botPrivmsg("X", "login user pass") qui etait loggue
+        # textuellement au niveau 0 (toujours actif) -> password Undernet/
+        # Libera/etc. en clair dans le log file. Tout admin avec acces
+        # lecture au log pouvait recuperer les credentials.
+        my $log_msg = _redact_irc_service_secret_for_log($sMsg);
+        $self->{logger}->log(0, "-> *$sTo* $log_msg");
         # A5: encoding, sanitisation and truncation applied uniformly below
     }
 
@@ -559,7 +620,7 @@ sub botAction {
 			return;
 		}
 		my $eventtype = "public";
-		if (substr($sTo, 0, 1) eq '#') {
+		if (_is_irc_channel_target($sTo)) {
 				my $id_chanset_list = getIdChansetList($self,"NoColors");
 				if (defined($id_chanset_list) && ($id_chanset_list ne "")) {
 					$self->{logger}->log(4,"botAction() check chanset NoColors, id_chanset_list = $id_chanset_list");
@@ -581,30 +642,54 @@ sub botAction {
 					}
 				}
 				$self->{logger}->log(0,"[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
-				my $sQuery = "SELECT badword FROM CHANNEL JOIN BADWORDS ON BADWORDS.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ?";
-				my $sth = $self->{dbh}->prepare($sQuery);
-				unless ($sth && $sth->execute($sTo) ) {
-					$self->{logger}->log(1,"logBotAction() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-				}
-				else {
-					while (my $ref = $sth->fetchrow_hashref()) {
-						my $sBadwordDb = $ref->{'badword'};
-						my $sBadwordLc = lc $sBadwordDb;
-						my $sMsgLc = lc $sMsg;
-						if (index($sMsgLc, $sBadwordLc) != -1) {
-							logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,"$sMsg (BADWORD : $sBadwordDb)");
-							noticeConsoleChan($self,"Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
-							$self->{logger}->log(3,"Badword : $sBadwordDb blocked on channel $sTo ($sMsg)");
+
+				# mb134-B8: keep botAction aligned with botPrivmsg for outgoing
+				# badword checks. The old path queried BADWORDS on every ACTION
+				# and did not finish the statement handle on the no-badword path.
+				# Reuse the same short-lived per-channel cache used by botPrivmsg.
+				{
+					my $now     = time();
+					my $ttl     = 300;
+					my $cache   = $self->{_badword_cache}{$sTo};
+
+					if (!$cache || ($now - ($cache->{ts} // 0)) > $ttl) {
+						my $sQuery = "SELECT badword FROM CHANNEL JOIN BADWORDS ON BADWORDS.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ?";
+						my $sth = $self->{dbh}->prepare($sQuery);
+						my @words;
+
+						if ($sth && $sth->execute($sTo)) {
+							while (my $ref = $sth->fetchrow_hashref()) {
+								push @words, lc($ref->{badword}) if defined $ref->{badword};
+							}
 							$sth->finish;
+						}
+						else {
+							$self->{logger}->log(1,"botAction() Badword SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
+							$self->{metrics}->inc('mediabot_db_query_errors_total') if $self->{metrics};
+							$sth->finish if $sth;
+						}
+
+						$self->{_badword_cache}{$sTo} = { ts => $now, words => \@words };
+						$cache = $self->{_badword_cache}{$sTo};
+					}
+
+					my $sMsgLc = lc $sMsg;
+					for my $bw (@{ $cache->{words} // [] }) {
+						if (index($sMsgLc, $bw) != -1) {
+							logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,"$sMsg (BADWORD : $bw)");
+							noticeConsoleChan($self,"Badword : $bw blocked on channel $sTo ($sMsg)");
+							$self->{logger}->log(3,"Badword : $bw blocked on channel $sTo ($sMsg)");
 							return;
 						}
 					}
+
 					logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,$sMsg);
 				}
 		}
 		else {
 			$eventtype = "private";
-			$self->{logger}->log(0,"-> *$sTo* $sMsg");
+			my $log_msg = _redact_irc_service_secret_for_log($sMsg);
+			$self->{logger}->log(0,"-> *$sTo* $log_msg");
 		}
 		if (defined($sMsg) && ($sMsg ne "")) {
 			# B3: single encode path — avoid double-encode on pre-encoded bytes
@@ -676,11 +761,15 @@ sub botNotice {
             text   => $encoded_text
         );
 
-        # Log interne (version lisible)
-        $self->{logger}->log(0, "-> -$target- $chunk");
+        # Log interne (version lisible). mb133-B7: redact private NOTICE logs
+        # too, for consistency with PRIVMSG/ACTION service-secret handling.
+        my $log_chunk = _is_irc_channel_target($target)
+            ? $chunk
+            : _redact_irc_service_secret_for_log($chunk);
+        $self->{logger}->log(0, "-> -$target- $log_chunk");
 
         # Si c'est un channel NOTICE, log dans l'action log
-        if ($target =~ /^#/) {
+        if (_is_irc_channel_target($target)) {
             $self->{logger}->log(4, "[DEBUG] botNotice() target is a channel, logging to action log");
             logBotAction($self, undef, "notice", $self->{irc}->nick_folded, $target, $chunk);
         }
@@ -3041,59 +3130,94 @@ sub mp3_ctx {
     return;
 }
 
-# Check if a message should be ignored based on the IGNORES table (both channel-specific and global ignores)
+# Check if a message should be ignored based on the IGNORES table
+# (both channel-specific and global ignores).
 sub isIgnored {
-	my ($self,$message,$sChannel,$sNick,$sMsg)	= @_;
+    my ($self,$message,$sChannel,$sNick,$sMsg) = @_;
 
-	return 0 unless $message;
+    return 0 unless $message;
 
-	require Mediabot::Auth;
-	$self->{auth} ||= Mediabot::Auth->new(
-		dbh    => $self->{dbh},
-		logger => $self->{logger},
-	);
+    require Mediabot::Auth;
+    $self->{auth} ||= Mediabot::Auth->new(
+        dbh    => $self->{dbh},
+        logger => $self->{logger},
+    );
 
-	my $sCheckQuery = "SELECT hostmask FROM IGNORES WHERE id_channel = 0";
-	my $sth = $self->{dbh}->prepare($sCheckQuery);
-	unless ($sth && $sth->execute ) {
-		$self->{logger}->log(1,"isIgnored() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
-	}
-	else {	
-		while (my $ref = $sth->fetchrow_hashref()) {
-			my $stored = $ref->{'hostmask'} // '';
-			my ($ok, $matched_mask) = $self->{auth}->hostmask_matches({ hostmasks => $stored }, $message->prefix);
+    my $now = time();
+    my $ttl = 30; # mb131-B4: short TTL, invalidated explicitly by ignore/unignore
 
-			if ($ok) {
-				$self->{logger}->log(4,"isIgnored() (allchans/private) $matched_mask matches " . $message->prefix);
-				$self->{logger}->log(1,"[IGNORED] " . $stored . " (allchans/private) " . ((substr($sChannel,0,1) eq '#') ? "$sChannel:" : "") . "<$sNick> $sMsg");
-				$sth->finish;
-				return 1;
-			}
-		}
-	}
-	$sth->finish;
+    $self->{_ignore_cache} ||= {};
 
-	$sCheckQuery = "SELECT IGNORES.hostmask FROM IGNORES JOIN CHANNEL ON CHANNEL.id_channel = IGNORES.id_channel WHERE CHANNEL.name = ?";
-	$sth = $self->{dbh}->prepare($sCheckQuery);
-	unless ($sth && $sth->execute($sChannel)) {
-		$self->{logger}->log(1,"isIgnored() SQL Error : " . $DBI::errstr . " Query : " . $sCheckQuery);
-	}
-	else {	
-		while (my $ref = $sth->fetchrow_hashref()) {
-			my $stored = $ref->{'hostmask'} // '';
-			my ($ok, $matched_mask) = $self->{auth}->hostmask_matches({ hostmasks => $stored }, $message->prefix);
+    my $load_ignores = sub {
+        my ($cache_key, $sql, @bind) = @_;
 
-			if ($ok) {
-				$self->{logger}->log(4,"isIgnored() $matched_mask matches " . $message->prefix);
-				$self->{logger}->log(1,"[IGNORED] " . $stored . " $sChannel:<$sNick> $sMsg");
-				$sth->finish;
-				return 1;
-			}
-		}
-	}
-	$sth->finish;
-	return 0;
+        my $cached = $self->{_ignore_cache}{$cache_key};
+        if ($cached && ($now - ($cached->{ts} // 0)) < $ttl) {
+            return @{ $cached->{masks} || [] };
+        }
+
+        my @masks;
+        my $sth = $self->{dbh}->prepare($sql);
+        unless ($sth && $sth->execute(@bind)) {
+            $self->{logger}->log(1, "isIgnored() SQL Error : " . $DBI::errstr . " Query : " . $sql);
+            $sth->finish if $sth;
+            return ();
+        }
+
+        while (my $ref = $sth->fetchrow_hashref()) {
+            push @masks, ($ref->{hostmask} // '');
+        }
+        $sth->finish if $sth;
+
+        $self->{_ignore_cache}{$cache_key} = {
+            ts    => $now,
+            masks => \@masks,
+        };
+
+        return @masks;
+    };
+
+    my @global_masks = $load_ignores->(
+        'global',
+        'SELECT hostmask FROM IGNORES WHERE id_channel = 0'
+    );
+
+    for my $stored (@global_masks) {
+        my ($ok, $matched_mask) = $self->{auth}->hostmask_matches({ hostmasks => $stored }, $message->prefix);
+
+        if ($ok) {
+            $self->{logger}->log(4,"isIgnored() (allchans/private) $matched_mask matches " . $message->prefix);
+            my $chan_label = (defined($sChannel) && $sChannel =~ /^[#&!+]/) ? "$sChannel:" : "";
+            $self->{logger}->log(1,"[IGNORED] " . $stored . " (allchans/private) " . $chan_label . "<$sNick> $sMsg");
+            return 1;
+        }
+    }
+
+    # mb132-B6: channel-scoped ignores are meaningful only for real IRC
+    # channels. Private messages already use global ignores above. Avoid an
+    # unnecessary CHANNEL join with undef/empty channel and avoid noisy warnings.
+    return 0 unless defined($sChannel) && $sChannel =~ /^[#&!+]/;
+
+    my $channel_key = lc($sChannel);
+    my @channel_masks = $load_ignores->(
+        "chan\x00$channel_key",
+        'SELECT IGNORES.hostmask FROM IGNORES JOIN CHANNEL ON CHANNEL.id_channel = IGNORES.id_channel WHERE CHANNEL.name = ?',
+        $sChannel
+    );
+
+    for my $stored (@channel_masks) {
+        my ($ok, $matched_mask) = $self->{auth}->hostmask_matches({ hostmasks => $stored }, $message->prefix);
+
+        if ($ok) {
+            $self->{logger}->log(4,"isIgnored() $matched_mask matches " . $message->prefix);
+            $self->{logger}->log(1,"[IGNORED] " . $stored . " $sChannel:<$sNick> $sMsg");
+            return 1;
+        }
+    }
+
+    return 0;
 }
+
 
 # List ignores
 

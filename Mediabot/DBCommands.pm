@@ -2525,6 +2525,8 @@ sub addIgnore_ctx {
     my $new_id = eval { $sth->{mysql_insertid} } // "?";
     $sth->finish if $sth;
 
+    delete $self->{_ignore_cache}; # mb131-B4: IGNORES changed, invalidate hot-path cache
+
     botNotice($self, $nick, "Added ignore ID $new_id $hostmask on $label");
     logBot($self, $ctx->message, $log_chan, "ignore", "add $label $hostmask");
 
@@ -2621,6 +2623,8 @@ sub delIgnore_ctx {
         return;
     }
     $sth->finish if $sth;
+
+    delete $self->{_ignore_cache}; # mb131-B4: IGNORES changed, invalidate hot-path cache
 
     botNotice($self, $nick, "Deleted ignore ID $ref->{id_ignores} $hostmask on $label");
     logBot($self, $ctx->message, $log_chan, "unignore", "del $label $hostmask");
