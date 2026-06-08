@@ -4188,19 +4188,42 @@ sub processKarma {
     {
         my $now = time();
         my $brigade_key = "brigade:$target:$channel";
-        my $brigade     = $self->{_karma_brigade}{$brigade_key} //= { hits => [], warned => 0 };
-        push @{ $brigade->{hits} }, $now;
-        @{ $brigade->{hits} } = grep { ($now - $_) < 30 } @{ $brigade->{hits} };
-        if (scalar @{ $brigade->{hits} } > 5) {
+        # mb140-B1: tracker les NICKS DISTINCTS au lieu des hits bruts.
+        # Avant ce fix, brigade->{hits} etait un arrayref de timestamps qui
+        # comptait toutes les tentatives de vote, meme celles deja bloquees
+        # par le cooldown anti-spam plus bas. Resultat : un seul user qui
+        # spam-vote 6 fois en 30s declenchait le message "Karma brigade
+        # detected for X — votes temporarily blocked" alors qu'il n'y a
+        # qu'un seul voteur (deja bloque par cooldown). Le commentaire dit
+        # bien ">5 different nicks", mais le code ne distinguait pas.
+        # On utilise maintenant un hashref { lc(nick) => last_ts } pour
+        # compter les voteurs distincts dans la fenetre de 30s.
+        my $brigade = $self->{_karma_brigade}{$brigade_key}
+            //= { nicks => {}, warned => 0 };
+        # mb140-B1 migration: ancien format (arrayref hits) -> nouveau (hash nicks)
+        if (ref($brigade->{hits}) eq 'ARRAY' && !$brigade->{nicks}) {
+            $brigade->{nicks} = {};
+            delete $brigade->{hits};
+        }
+        $brigade->{nicks}{lc($nick)} = $now;
+        # Purge entries older than 30s
+        for my $k (keys %{ $brigade->{nicks} }) {
+            delete $brigade->{nicks}{$k}
+                if ($now - $brigade->{nicks}{$k}) >= 30;
+        }
+        my $distinct_voters = scalar keys %{ $brigade->{nicks} };
+        if ($distinct_voters > 5) {
             unless ($brigade->{warned}) {
                 $brigade->{warned} = 1;
                 Mediabot::Helpers::botPrivmsg($self, $channel,
                     "Karma brigade detected for $target — votes temporarily blocked.");
-                $self->{logger}->log(1, "DD9: karma brigade on $target in $channel");
+                $self->{logger}->log(1,
+                    "DD9: karma brigade on $target in $channel ($distinct_voters distinct voters)");
             }
+            $self->{metrics}->inc('mediabot_karma_brigade_blocks') if $self->{metrics};
             next;
         }
-        $brigade->{warned} = 0 if scalar @{ $brigade->{hits} } <= 2;
+        $brigade->{warned} = 0 if $distinct_voters <= 2;
     }
 
     # U6: anti-spam cooldown — 30s between votes targeting the same nick
