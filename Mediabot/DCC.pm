@@ -140,7 +140,15 @@ sub parse_dcc_chat_payload {
     # stripping the DCC token:
     #   CHAT chat <ip_int> <port>
     #   CHAT chat 0 0 <token>
-    unless ($payload =~ /^CHAT\s+chat\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s*$/i) {
+    #
+    # mb142-B2: le token de passive DCC est OPAQUE et est typiquement
+    # alphanumerique/hex chez les clients modernes (mIRC, HexChat, irssi,
+    # KVIrc). Avant ce fix, on n'acceptait que `(\d+)` ce qui rejetait
+    # les tokens hex et marquait le payload comme 'invalid', cassant
+    # silencieusement le DCC CHAT passive de la majorite des clients.
+    # Le token reste valide pour un set de chars safe (alphanumerique +
+    # '._-' usuels dans les ID generes).
+    unless ($payload =~ m{^CHAT\s+chat\s+(\d+)\s+(\d+)(?:\s+([A-Za-z0-9._-]+))?\s*$}i) {
         return {
             type    => 'invalid',
             payload => $payload,

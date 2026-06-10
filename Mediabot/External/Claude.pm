@@ -542,15 +542,23 @@ sub claude_ctx {
         my $chan_part   = (defined $channel ? $channel : '__private__');
         my $hist_key    = "$nick\x00$chan_part";
         my $persona_key = lc($nick) . "\x00" . $chan_part;
+        # mb141-B1: "forget" must clear every in-memory AI session state.
+        # History uses the raw IRC nick, while persona/pinned/last_active use
+        # lc(nick). Keep both key conventions deliberately.
+        my $aux_key     = lc($nick) . "\x00" . $chan_part;
 
         my $had = (exists $self->{_claude_history}{$hist_key}
-                || exists $self->{_claude_persona}{$persona_key}) ? 1 : 0;
+                || exists $self->{_claude_persona}{$persona_key}
+                || exists $self->{_claude_pinned}{$aux_key}
+                || exists $self->{_ai_last_active}{$aux_key}) ? 1 : 0;
 
         delete $self->{_claude_history}{$hist_key};
         delete $self->{_claude_persona}{$persona_key};
+        delete $self->{_claude_pinned}{$aux_key};
+        delete $self->{_ai_last_active}{$aux_key};
 
         Mediabot::Helpers::botNotice($self, $nick, $had
-            ? 'Your Claude history and persona have been cleared.'
+            ? 'Your Claude history, persona and pinned context have been cleared.'
             : 'No active Claude session found for you on this channel.');
         return 1;
     }
@@ -1034,6 +1042,19 @@ sub claudeAI {
         chan         => $chan,
         output_fn   => $output_fn,  # mb88-R3: nécessaire pour cache-hit via callback
     });
+
+    # mb141-B2: if the API call failed before an assistant answer was appended,
+    # rollback the user message we just pushed. Cache hits append an assistant
+    # internally before returning undef, so the last role tells both cases apart.
+    if (!defined $answer
+        && ref($history) eq 'ARRAY'
+        && @$history
+        && ($history->[-1]{role} // '') eq 'user')
+    {
+        pop @$history;
+        $self->{logger}->log(4,
+            "claudeAI() rollback orphan user msg in history (key=$hist_key)");
+    }
     return unless defined $answer;
 
     # P2: optionally prefix response with model name

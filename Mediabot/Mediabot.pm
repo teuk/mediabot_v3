@@ -2896,10 +2896,12 @@ sub _handle_dcc_chat_request {
     my $logger = $self->{logger};
     my $dbh    = $self->{dbh};
 
-    # ── Detect passive DCC CHAT (ip=0 port=0 token=N) ───────────────────────
+    # ── Detect passive DCC CHAT (ip=0 port=0 token=opaque-safe-id) ───────────────────────
+    # mb142-B2: token alphanumerique accepte, pas seulement numerique
     my $is_passive = (defined $ip_int && $ip_int == 0
                    && defined $port   && $port   == 0
-                   && defined $token  && $token  =~ /^\d+$/);
+                   && defined $token  && length($token) > 0
+                   && $token =~ /^[A-Za-z0-9._-]+$/);
 
     # ── Sanity check on port (active mode only) ──────────────────────────────
     unless ($is_passive || (defined $port && $port >= 1024 && $port <= 65535)) {

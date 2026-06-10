@@ -549,7 +549,7 @@ sub offer_dcc_chat {
 # accept_dcc_chat_passive($bot, $nick, $token)
 #
 # Handle passive DCC CHAT (RFC-style reverse DCC).
-# The client sent ip=0 port=0 token=N meaning it wants US to listen and
+# The client sent ip=0 port=0 token=opaque-safe-id meaning it wants US to listen and
 # it will connect to us. We:
 #   1. Open a temporary TCP listener on an ephemeral port
 #   2. Send back to the client: CTCP DCC CHAT chat <our_ip_int> <port> <token>
