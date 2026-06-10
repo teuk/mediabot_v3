@@ -480,6 +480,7 @@ sub offer_dcc_chat {
     my $listener;
     my $listen_port;
     my $connected = 0;
+    my $timeout; # mb145-B1: stopped/removed as soon as the DCC client connects
 
     $listener = IO::Async::Listener->new(
         on_stream => sub {
@@ -489,6 +490,16 @@ sub offer_dcc_chat {
             $connected = 1;
             $self->_dcc_offer_mark_connected('ctcp_chat', $nick);
             $self->_dcc_offer_remove('ctcp_chat', $nick);
+
+            # mb145-B1: the client connected, so the pending-offer timeout is
+            # no longer useful. Stop/remove it now instead of keeping the
+            # countdown closure alive until the original 60s expiry.
+            if ($timeout) {
+                eval {
+                    $timeout->stop if $timeout->can('stop');
+                    $loop->remove($timeout);
+                };
+            }
 
             $logger->log(2, "CTCP CHAT: $nick connected to offered DCC CHAT");
 
@@ -526,11 +537,17 @@ sub offer_dcc_chat {
         on_listen_error => sub {
             $logger->log(1, "CTCP CHAT: listen error for $nick - $_[1]");
             $self->_dcc_offer_remove('ctcp_chat', $nick);
+            if ($timeout) {
+                eval {
+                    $timeout->stop if $timeout->can('stop');
+                    $loop->remove($timeout);
+                };
+            }
             eval { $loop->remove($listener) };
         },
     );
 
-    my $timeout = IO::Async::Timer::Countdown->new(
+    $timeout = IO::Async::Timer::Countdown->new(
         delay     => 60,
         on_expire => sub {
             return if $connected;
@@ -611,6 +628,7 @@ sub accept_dcc_chat_passive {
     my $listener;
     my $listen_port;
     my $connected = 0;
+    my $timeout; # mb145-B1: stopped/removed as soon as the passive DCC client connects
 
     $listener = IO::Async::Listener->new(
         on_stream => sub {
@@ -620,6 +638,15 @@ sub accept_dcc_chat_passive {
             $connected = 1;
             $self->_dcc_offer_mark_connected('passive_chat', $nick);
             $self->_dcc_offer_remove('passive_chat', $nick);
+
+            # mb145-B1: passive client connected, so cancel the 60s listener
+            # timeout immediately instead of keeping its closure alive.
+            if ($timeout) {
+                eval {
+                    $timeout->stop if $timeout->can('stop');
+                    $loop->remove($timeout);
+                };
+            }
 
             $logger->log(2, "DCC CHAT passive: $nick connected (token=" . _dcc_token_hint($token) . ")");
 
@@ -653,16 +680,27 @@ sub accept_dcc_chat_passive {
 
         on_listen_error => sub {
             $logger->log(1, "DCC CHAT passive: listen error for $nick - $_[1]");
+            $self->_dcc_offer_remove('passive_chat', $nick);
+            if ($timeout) {
+                eval {
+                    $timeout->stop if $timeout->can('stop');
+                    $loop->remove($timeout);
+                };
+            }
             eval { $loop->remove($listener) };
         },
     );
 
     # ── 60-second timeout - close listener if client never connects ───────────
-    my $timeout = IO::Async::Timer::Countdown->new(
+    $timeout = IO::Async::Timer::Countdown->new(
         delay     => 60,
         on_expire => sub {
             return if $connected;
             $logger->log(2, "DCC CHAT passive: timeout waiting for $nick (token=" . _dcc_token_hint($token) . ")");
+            # mb146-B1: when a passive DCC offer times out, remove the pending
+            # offer entry too. Otherwise _dcc_pending_offer_for_nick() keeps
+            # refusing future DCC attempts for this nick even after listener close.
+            $self->_dcc_offer_remove('passive_chat', $nick);
             eval { $loop->remove($listener) };
         },
     );
@@ -719,6 +757,7 @@ sub _init_dcc_session {
     );
     $loop->add($timeout_timer);
     $timeout_timer->start;
+    $self->{users}{$id}{auth_timeout_timer} = $timeout_timer if $self->{users}{$id}; # mb147-B1
 
     $stream->configure(
         on_read => sub {
@@ -895,12 +934,41 @@ sub _start_listener {
     )->get;
 }
 
+
+# ---------------------------------------------------------------------------
+# _cancel_auth_timeout($id)
+#
+# Stop and remove the DCC authentication timeout timer attached to a session.
+# This is intentionally safe for normal telnet sessions where no timer exists.
+# ---------------------------------------------------------------------------
+sub _cancel_auth_timeout {
+    my ($self, $id) = @_;
+
+    return unless defined $id;
+    return unless $self->{users}{$id};
+
+    my $timer = delete $self->{users}{$id}{auth_timeout_timer};
+    return unless $timer;
+
+    eval {
+        $timer->stop if $timer->can('stop');
+        $self->{loop}->remove($timer) if $self->{loop};
+    };
+
+    return;
+}
+
+
 # +---------------------------------------------------------------------------+
 # ! Internal : clean up a session                                             !
 # +---------------------------------------------------------------------------+
 
 sub _close_session {
     my ($self, $id) = @_;
+
+    # mb147-B1: close/disconnect before auth must not leave the 60s DCC auth
+    # timeout scheduled until expiry.
+    $self->_cancel_auth_timeout($id);
 
     if ($self->{bot}->{metrics}) {
         my $current = $self->{bot}->{metrics}->get('mediabot_partyline_sessions_current');
@@ -1478,6 +1546,9 @@ sub _do_login {
     $self->{users}{$id}{level_desc}    = $row->{description};
     $self->{users}{$id}{auth_stage}    = undef;   # clear — stop masking log lines
     $self->{users}{$id}{authenticated_at} = time();
+
+    # mb147-B1: authentication succeeded, so the DCC auth timeout is obsolete.
+    $self->_cancel_auth_timeout($id);
 
     $self->_write_runtime_status();
 

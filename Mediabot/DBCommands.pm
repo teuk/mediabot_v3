@@ -47,6 +47,7 @@ our @EXPORT = qw(
     mbTopCommand_ctx
     msgCmd_ctx
     onStartTimers
+    _stop_all_runtime_db_timers
     setLastCommandTs
     setLastRandomQuote
     setLastReponderTs
@@ -55,21 +56,49 @@ our @EXPORT = qw(
 );
 
 sub setMainTimerTick {
-	my ($self,$timer) = @_;
-	$self->{main_timer_tick} = $timer;
+    my ($self, $timer) = @_;
+    $self->{main_timer_tick} = $timer;
 }
 
-# Set refresh channel hashes
+# Return the main periodic timer handle used by reconnect() cleanup.
 sub getMainTimerTick {
-	my $self = shift;
-	return $self->{maint_timer_tick};
+    my $self = shift;
+    # mb149-B1: this must match setMainTimerTick(). The old key
+    # 'maint_timer_tick' was a typo and made reconnect() unable to stop
+    # the previous 5-second main timer before creating a fresh one.
+    return $self->{main_timer_tick};
 }
+
+# Stop all runtime DB timers currently registered in hTimers.
+# mb150-B1: onStartTimers() is called on every IRC login/reconnect. Without
+# stopping the old Periodic timers first, each reconnect can duplicate every
+# DB-backed timer and make scheduled commands fire multiple times.
+sub _stop_all_runtime_db_timers {
+    my ($self) = @_;
+
+    my $timers = $self->{hTimers};
+    $self->{hTimers} = {};
+
+    return unless ref($timers) eq 'HASH';
+
+    for my $name (keys %$timers) {
+        my $timer = $timers->{$name} or next;
+        eval { $timer->stop if $timer->can('stop') };
+        eval { $self->{loop}->remove($timer) if $self->{loop} };
+    }
+
+    return;
+}
+
 
 # Set IRC object
 # Set IRC object
 sub onStartTimers {
     my $self = shift;
 
+    # mb151-B1: build the fresh timer set first. Do not stop current runtime
+    # timers before the DB load succeeds, otherwise a transient DB error during
+    # reconnect would silently disable all DB-backed timers.
     my %hTimers;
     my $sQuery = "SELECT id_timers, name, duration, command FROM TIMERS";
     my $sth = $self->{dbh}->prepare($sQuery);
@@ -77,7 +106,7 @@ sub onStartTimers {
     unless ($sth) {
         $self->{logger}->log(1, "onStartTimers() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
             if $self->{logger};
-        %{$self->{hTimers}} = %hTimers;
+        # mb151-B1: keep existing runtime timers alive if DB reload cannot start.
         return 0;
     }
 
@@ -85,7 +114,7 @@ sub onStartTimers {
         $self->{logger}->log(1, "onStartTimers() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
             if $self->{logger};
         $sth->finish;
-        %{$self->{hTimers}} = %hTimers;
+        # mb151-B1: keep existing runtime timers alive if DB reload fails.
         return 0;
     }
 
@@ -142,6 +171,9 @@ sub onStartTimers {
             if $self->{logger};
     }
 
+    # mb151-B1: DB reload succeeded. Now replace old runtime timers atomically:
+    # stop/remove the old registered timers, then publish the freshly built set.
+    $self->_stop_all_runtime_db_timers();
     %{$self->{hTimers}} = %hTimers;
     return $i;
 }
@@ -394,12 +426,28 @@ sub mbRemTimer_ctx {
     $sth->finish;
 
     if (!defined($rows) || $rows < 1) {
-        $self->botNotice($nick, "Timer $name was running but not found in database");
-        return;
+        # mb148-B1: runtime says the timer exists, but the DB row is already
+        # absent. The old code returned here and left the Periodic timer alive
+        # forever in this process. Align runtime with DB and stop it anyway.
+        my $timer = delete $self->{hTimers}{$name};
+        if ($timer) {
+            eval { $timer->stop if $timer->can('stop') };
+            eval { $self->{loop}->remove($timer) if $self->{loop} };
+        }
+
+        $self->botNotice($nick, "Timer $name removed from runtime (not found in database)");
+        logBot($self, $ctx->message, undef, 'remtimer', $name);
+        return 1;
     }
 
-    $self->{loop}->remove($self->{hTimers}{$name});
-    delete $self->{hTimers}{$name};
+    my $timer = delete $self->{hTimers}{$name};
+    if ($timer) {
+        # mb148-B2: stop the Periodic timer before removing it from the loop.
+        # remove() detaches it from IO::Async, but stop() also clears its active
+        # running state and avoids keeping a live periodic object around.
+        eval { $timer->stop if $timer->can('stop') };
+        eval { $self->{loop}->remove($timer) if $self->{loop} };
+    }
 
     $self->botNotice($nick, "Timer $name removed");
     logBot($self, $ctx->message, undef, 'remtimer', $name);

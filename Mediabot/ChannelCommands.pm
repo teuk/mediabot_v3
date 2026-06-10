@@ -501,9 +501,10 @@ sub channelSet_ctx {
     }
     elsif ($args[0] eq 'chanmode') {
         my $val = $args[1] // '';
-        # B2/A2: validate chanmode — must be IRC mode string or empty
-        if ($val ne '' && ($val !~ /^[+-]?[a-zA-Z]+$/ || length($val) > 32)) {
-            botNotice($self, $nick, "Invalid chanmode '$val'. Use IRC mode format e.g. +nst");
+        # mb143-B2: validate chanmode — accepter modes IRC mixtes (+stn-k, +ms-Lr)
+        # Ancien regex /^[+-]?[a-zA-Z]+$/ rejetait les modes legitimes mixed.
+        if ($val ne '' && ($val !~ /^([+-][a-zA-Z]+)+$/ || length($val) > 32)) {
+            botNotice($self, $nick, "Invalid chanmode '$val'. Use IRC mode format e.g. +nst or +stn-k");
             return;
         }
         $channel->set_chanmode($val);

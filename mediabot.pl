@@ -1166,8 +1166,32 @@ sub on_message_KICK {
             $mediabot->{logger}->log(0,"[LIVE] $target_name: $kicked_nick was kicked by $kicker_nick ($text)");
         }
         $mediabot->channelNicksRemove($target_name,$kicked_nick);
-        # Clear in-memory auth session for the kicked nick
-        eval { $mediabot->{auth}->logout($kicked_nick) } if $mediabot->{auth};
+        # mb144-B1: ne logout que si le user kick n'est plus present sur AUCUN
+        # autre canal partage avec le bot. Avant ce fix, on faisait logout
+        # global des qu'un user etait kick d'UN canal, exactement comme
+        # avant mb128-B1 pour PART. Le user kick est encore sur IRC et
+        # peut etre legitimement present sur d'autres canaux ou son auth
+        # doit perdurer. channelNicksRemove ci-dessus a deja retire le nick
+        # du canal kick, donc on cherche dans les AUTRES canaux.
+        if ($mediabot->{auth}) {
+            my $still_present = 0;
+            my $hn = eval { $mediabot->gethChannelNicks() };
+            if (ref($hn) eq 'HASH') {
+                my $lc_target = lc($kicked_nick);
+                OUTER_KICK: for my $chan (keys %$hn) {
+                    next unless ref($hn->{$chan}) eq 'ARRAY';
+                    for my $n (@{ $hn->{$chan} }) {
+                        if (lc($n) eq $lc_target) {
+                            $still_present = 1;
+                            last OUTER_KICK;
+                        }
+                    }
+                }
+            }
+            unless ($still_present) {
+                eval { $mediabot->{auth}->logout($kicked_nick) };
+            }
+        }
     }
     $mediabot->logBotAction($message,"kick",$kicker_nick,$target_name,"$kicked_nick ($text)");
 }
@@ -1223,6 +1247,18 @@ sub purge_claude_session_for_nick {
     if ($bot->{_ai_last_active}) {
         delete $bot->{_ai_last_active}{$_}
             for grep { index($_, $persona_prefix) == 0 } keys %{ $bot->{_ai_last_active} };
+    }
+
+    # mb143-B1: purger aussi _claude_pinned (pin context, key lc(nick)\x00chan).
+    # Avant ce fix, sur QUIT/NICK on purgeait history+persona+last_active mais
+    # pas le pin. Si Bob QUIT (vraie deconnexion, pas netsplit), son pin
+    # context restait actif. Quand un autre user (ou Bob via un nouveau
+    # hostmask non-autologin) reprenait le nick `bob`, il heritait du pin
+    # de l'ancien Bob. C'est l'analogue automatique du bug mb141-B1 que
+    # nous avions fixe pour la commande explicite `!ai forget`.
+    if ($bot->{_claude_pinned}) {
+        delete $bot->{_claude_pinned}{$_}
+            for grep { index($_, $persona_prefix) == 0 } keys %{ $bot->{_claude_pinned} };
     }
 }
 

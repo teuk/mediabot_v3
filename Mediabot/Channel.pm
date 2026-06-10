@@ -254,8 +254,12 @@ sub set_description {
 sub set_chanmode {
     my ($self, $new_chanmode) = @_;
     return 0 unless defined $new_chanmode;
-    # A4: validate chanmode — IRC mode string or empty, max 32 chars
-    if ($new_chanmode ne '' && ($new_chanmode !~ /^[+-]?[a-zA-Z]+$/ || length($new_chanmode) > 32)) {
+    # mb143-B2: validation chanmode IRC. Le regex precedent /^[+-]?[a-zA-Z]+$/
+    # n'acceptait qu'UN seul prefix +/- suivi de lettres, rejetant les modes
+    # mixtes standards comme "+stn-k" (set s,t,n et unset k) ou "+ms-Lr".
+    # Ces formes sont legitimes RFC 2812 / IRCv3. Le nouveau regex accepte
+    # une ou plusieurs sequences {+/-}lettres, avec longueur totale plafonnee.
+    if ($new_chanmode ne '' && ($new_chanmode !~ /^([+-][a-zA-Z]+)+$/ || length($new_chanmode) > 32)) {
         $self->_log(1, "set_chanmode(): invalid mode rejected");
         return 0;
     }
