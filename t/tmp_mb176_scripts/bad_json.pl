@@ -1,0 +1,1 @@
+print qq/not json/;

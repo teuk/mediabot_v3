@@ -934,23 +934,23 @@ sub claudeAI {
     if (my $persona = $self->{_claude_persona}{$persona_key}) {
         $sys_prompt = $persona;
     }
-    # DD1: check claudeAI prompt cache before calling API (uses F53 _claude_prompt_cache)
-    unless ($output_fn) {
-        my $dd1_prompt  = join(' ', @args);
-        my $dd1_key     = lc($dd1_prompt);
-        my $dd1_cached  = $self->{_claude_prompt_cache}{$dd1_key};
-        if ($dd1_cached && (time() - $dd1_cached->{ts}) < 60) {
-            $self->{logger}->log(3, "DD1: Claude cache hit — skipping API call");
-            my @chunk = Mediabot::External::_chatgpt_wrap($dd1_cached->{answer}, 400);
-            # DD1/fix: $chan may be undef in private context — use Mediabot::Helpers::botNotice then
-            if (defined $chan) {
-                Mediabot::Helpers::botPrivmsg($self, $chan, $_) for @chunk;
-            } else {
-                Mediabot::Helpers::botNotice($self, $nick, $_) for @chunk;
-            }
-            return 1;
-        }
-    }
+    # mb163-B1: le bloc "DD1 prompt cache" qui se trouvait ici a ete supprime.
+    #
+    # Il lisait $self->{_claude_prompt_cache}{lc($prompt)} alors que le cache
+    # F53 (dans _claude_send_and_parse) ecrit sous la cle
+    # md5_hex(lc($prompt) ...) -> les formats ne matchaient jamais, le check
+    # etait du code mort depuis son introduction.
+    #
+    # Il ne faut PAS le "reparer" en alignant les cles : ce bloc s'executait
+    # AVANT le check chanset Claude et AVANT le rate limit per-nick, et ne
+    # maintenait pas l'history (ni push user ni push assistant). Un cache-hit
+    # ici aurait donc permis de faire repondre le bot sur un canal ou Claude
+    # est desactive (chanset -Claude), de contourner le rate limit, et aurait
+    # desynchronise l'historique de conversation.
+    #
+    # Le cache F53 dans _claude_send_and_parse fait deja ce travail au bon
+    # endroit : apres le chanset check, apres le rate limit, et avec une
+    # gestion correcte de l'history.
 
     # DD5: auto-reset persona if channel has been inactive > 1h
     if (defined $chan) {
@@ -1033,7 +1033,18 @@ sub claudeAI {
         prompt      => $prompt,
         prompt_key  => do {
             require Digest::MD5;
-            Digest::MD5::md5_hex(encode('UTF-8', lc($prompt // '')));
+            # mb163-B2: inclure le system prompt EFFECTIF (qui contient le
+            # persona override et le pin context prepend) dans la cle de
+            # cache. Avant ce fix, la cle etait md5(lc(prompt)) seule :
+            # si Alice (persona pirate, pin "my pet is Talos") posait une
+            # question, sa reponse personnalisee etait cachee 60s et servie
+            # telle quelle a Bob posant la meme question — reponse dans le
+            # mauvais style ET fuite possible du contenu du pin d'Alice.
+            # Deux users ne partagent desormais un cache-hit que s'ils ont
+            # le MEME system prompt effectif (cas typique : aucun des deux
+            # n'a de persona/pin -> dedup utile preservee).
+            Digest::MD5::md5_hex(encode('UTF-8',
+                lc($prompt // '') . "\x00" . ($sys_prompt // '')));
         },
         wrap_bytes  => $wrap_bytes,
         max_privmsg => $max_privmsg,

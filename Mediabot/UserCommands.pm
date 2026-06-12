@@ -3132,6 +3132,38 @@ sub mbRemind_ctx {
     # mb90-IMP1: tag weekly pour réinsertion hebdomadaire
     $message = "[weekly:$weekly_dow:$weekly_hhmm] $message" if $remind_weekly;
 
+    # mb161-B2: calculer la PREMIERE occurrence des le depart.
+    #
+    # Avant ce fix, un `!remind daily 09:00 bob standup` cree a 14h00
+    # n'inserait AUCUN tag [at:TS] -> deliverReminders le delivrait
+    # immediatement (des que bob parlait, ex. 14h05) au lieu d'attendre
+    # 09:00 le lendemain. Seules les RE-insertions (apres premiere
+    # livraison) portaient le [at:TS] correct. Idem weekly : cree un mardi
+    # pour 'weekly mon 10:00', il partait le mardi meme au premier message.
+    #
+    # On reutilise exactement la meme logique de calcul que la reinsertion
+    # dans deliverReminders pour garantir la coherence.
+    if ($remind_daily) {
+        my ($hh, $mm) = split /:/, $daily_hhmm;
+        my @now = localtime(time());
+        my $today_delta = ($hh * 3600 + $mm * 60)
+                        - ($now[2] * 3600 + $now[1] * 60 + $now[0]);
+        my $next_secs = $today_delta > 60 ? $today_delta : $today_delta + 86400;
+        my $first_ts  = time() + $next_secs;
+        $message =~ s/^(\[daily:\d{2}:\d{2}\])\s*/$1 [at:$first_ts] /;
+    }
+    elsif ($remind_weekly) {
+        my ($hh, $mm) = split /:/, $weekly_hhmm;
+        my @now     = localtime(time());
+        my $cur_dow = $now[6];  # 0=Sun..6=Sat
+        my $days_ahead  = ($weekly_dow - $cur_dow + 7) % 7;
+        my $time_offset = ($hh * 3600 + $mm * 60) - ($now[2] * 3600 + $now[1] * 60 + $now[0]);
+        # Meme jour : si l'heure est deja passee (ou < 60s), reporter d'une semaine
+        $days_ahead = 7 if $days_ahead == 0 && $time_offset <= 60;
+        my $first_ts = time() + ($days_ahead * 86400) + $time_offset;
+        $message =~ s/^(\[weekly:\d:\d{2}:\d{2}\])\s*/$1 [at:$first_ts] /;
+    }
+
     unless (defined $target && $target ne '' && $message ne '') {
         botNotice($self, $nick, "Syntax: remind <nick> <msg>  |  remind daily HH:MM <nick> <msg>  |  remind weekly <day> HH:MM <nick> <msg>  |  remind list  |  remind cancel <id>");
         return;
@@ -3261,9 +3293,17 @@ sub mbRemind_ctx {
     $sth->finish;
 
     # S2: include delay info in confirmation
-    my $delay_info = $delay_secs > 0
-        ? ' (due in ' . Mediabot::UserCommands::_seconds_to_human($delay_secs) . ')'
-        : '';
+    # mb161-IMP1: pour daily/weekly, afficher la premiere occurrence calculee
+    # (le [at:TS] insere par mb161-B2) au lieu d'un message generique.
+    my $delay_info = '';
+    if ($delay_secs > 0) {
+        $delay_info = ' (due in ' . Mediabot::UserCommands::_seconds_to_human($delay_secs) . ')';
+    }
+    elsif (($remind_daily || $remind_weekly) && $message =~ /\[at:(\d+)\]/) {
+        my $first_in = $1 - time();
+        $delay_info = ' (first delivery in ' . Mediabot::UserCommands::_seconds_to_human($first_in) . ')'
+            if $first_in > 0;
+    }
     botNotice($self, $nick, "Reminder set for $target$delay_info.");
     logBot($self, $ctx->message, $channel, 'remind', "$target: $message");
     return 1;
@@ -3295,31 +3335,48 @@ sub deliverReminders {
     }
     return unless $id_channel;
 
+    # mb161-B1: scan large puis filtrer, au lieu de LIMIT 3 brut.
+    #
+    # Avant ce fix, le SELECT prenait les 3 plus anciens reminders pending
+    # (ORDER BY created_at ASC LIMIT 3) PUIS filtrait les [at:TS] non-dus en
+    # Perl. Si les 3 plus anciens etaient tous des reminders programmes dans
+    # le futur (daily/weekly re-crees, ou 'remind in 7d'), ils monopolisaient
+    # les 3 slots a chaque appel -> les reminders normaux plus recents
+    # n'etaient JAMAIS delivres tant que les anciens n'etaient pas dus
+    # (famine pouvant durer des jours).
+    #
+    # On scanne maintenant jusqu'a 20 rows et on ne delivre que les 3
+    # premiers DUS, ce qui preserve la limite anti-flood de 3 par message.
     my $sth = $dbh->prepare(q{
         SELECT id_reminder, from_nick, message, created_at
         FROM REMINDERS
         WHERE id_channel = ? AND to_nick = ? AND delivered = 0
         ORDER BY created_at ASC
-        LIMIT 3
+        LIMIT 20
     });
     return unless $sth && $sth->execute($id_channel, lc($nick));
 
-    my @pending;
-    while (my $row = $sth->fetchrow_hashref) { push @pending, $row; }
+    my @candidates;
+    while (my $row = $sth->fetchrow_hashref) { push @candidates, $row; }
     $sth->finish;
+    return unless @candidates;
+
+    # mb161-B1: filtrer les non-dus AVANT de constituer la liste de livraison.
+    my @pending;
+    for my $row (@candidates) {
+        if ($row->{message} =~ /\[at:(\d+)\]/) {
+            next if time() < $1;   # pas encore du -> on ne le compte pas
+        }
+        push @pending, $row;
+        last if @pending >= 3;     # limite anti-flood preservee
+    }
     return unless @pending;
 
     for my $r (@pending) {
-        # Q2: skip reminders with [at:TS] tag if not yet due
-        # mb91-B1: le tag [at:TS] peut être précédé de [daily:...] ou [weekly:...]
-        # Format réinséré: "[daily:09:00] [at:TS] texte" — on cherche partout dans les préfixes
-        my $at_ts;
+        # mb161-B1: le skip des non-dus est desormais fait en amont (boucle
+        # @candidates). Ici on strip seulement les tags [at:TS] du message
+        # avant livraison.
         if ($r->{message} =~ /\[at:(\d+)\]/) {
-            $at_ts = $1;
-        }
-        if (defined $at_ts) {
-            next if time() < $at_ts;
-            # Strip tous les [at:TS] du message avant livraison
             $r->{message} =~ s/\s*\[at:\d+\]\s*/ /g;
             $r->{message} =~ s/^\s+|\s+$//g;
         }
@@ -4564,12 +4621,32 @@ sub mbPollStatus_ctx {
         botPrivmsg($self, $channel, 'No active poll.'); return 1;
     }
     my $total = scalar keys %{ $poll->{votes} };
-    botPrivmsg($self, $channel, "\"$poll->{question}\" -- $total vote(s) so far:");
+    # mb160-B1: appliquer les poids en mode weighted (BB7).
+    my $weighted = $poll->{weighted} ? 1 : 0;
+    my $weights  = $poll->{weights}  || [];
+    my $weighted_label = $weighted ? ' [weighted]' : '';
+    botPrivmsg($self, $channel, "\"$poll->{question}\"${weighted_label} -- $total vote(s) so far:");
+    my $weighted_total = 0;
+    if ($weighted) {
+        for my $idx (0 .. $#{ $poll->{options} }) {
+            my $voters = scalar grep { $_ == $idx } values %{ $poll->{votes} };
+            my $w      = $weights->[$idx] // 1;
+            $weighted_total += $voters * $w;
+        }
+    }
     for my $idx (0 .. $#{ $poll->{options} }) {
-        my $cnt = scalar grep { $_ == $idx } values %{ $poll->{votes} };
-        my $pct = $total > 0 ? int($cnt * 100 / $total) : 0;
-        botPrivmsg($self, $channel, sprintf('  [%d] %s: %d (%d%%)',
-            $idx+1, $poll->{options}[$idx], $cnt, $pct));
+        my $voters = scalar grep { $_ == $idx } values %{ $poll->{votes} };
+        if ($weighted) {
+            my $w     = $weights->[$idx] // 1;
+            my $score = $voters * $w;
+            my $pct   = $weighted_total > 0 ? int($score * 100 / $weighted_total) : 0;
+            botPrivmsg($self, $channel, sprintf('  [%d] %s (x%d): %d=%d (%d%%)',
+                $idx+1, $poll->{options}[$idx], $w, $voters, $score, $pct));
+        } else {
+            my $pct = $total > 0 ? int($voters * 100 / $total) : 0;
+            botPrivmsg($self, $channel, sprintf('  [%d] %s: %d (%d%%)',
+                $idx+1, $poll->{options}[$idx], $voters, $pct));
+        }
     }
     return 1;
 }
@@ -4707,12 +4784,33 @@ sub mbVote_ctx {
     $self->{metrics}->inc('mediabot_poll_votes_total') if $self->{metrics};
 
     # U3: show live tally after each vote
+    # mb160-B1: appliquer les poids quand le poll est en mode weighted (BB7).
+    # Avant ce fix, $poll->{weights} etait stocke a la creation mais jamais
+    # consulte dans tally/result/status -> mode 'weighted' completement dead.
+    my $weighted = $poll->{weighted} ? 1 : 0;
+    my $weights  = $poll->{weights}  || [];
     my @tally;
+    my $weighted_total = 0;
+    if ($weighted) {
+        for my $idx (0 .. $#{ $poll->{options} }) {
+            my $voters = scalar grep { $_ == $idx } values %{ $poll->{votes} };
+            my $w = $weights->[$idx] // 1;
+            $weighted_total += $voters * $w;
+        }
+    }
     for my $idx (0 .. $#{ $poll->{options} }) {
-        my $cnt = scalar grep { $_ == $idx } values %{ $poll->{votes} };
-        my $pct = $total > 0 ? int($cnt * 100 / $total) : 0;
-        push @tally, sprintf('[%d] %s: %d (%d%%)',
-            $idx+1, $poll->{options}[$idx], $cnt, $pct);
+        my $voters = scalar grep { $_ == $idx } values %{ $poll->{votes} };
+        if ($weighted) {
+            my $w     = $weights->[$idx] // 1;
+            my $score = $voters * $w;
+            my $pct   = $weighted_total > 0 ? int($score * 100 / $weighted_total) : 0;
+            push @tally, sprintf('[%d] %s (x%d): %d=%d (%d%%)',
+                $idx+1, $poll->{options}[$idx], $w, $voters, $score, $pct);
+        } else {
+            my $pct = $total > 0 ? int($voters * 100 / $total) : 0;
+            push @tally, sprintf('[%d] %s: %d (%d%%)',
+                $idx+1, $poll->{options}[$idx], $voters, $pct);
+        }
     }
     botPrivmsg($self, $channel, 'Live tally: ' . join('  ', @tally));
     logBot($self, $ctx->message, $channel, 'vote', $choice);  # S2/fix
@@ -4736,21 +4834,59 @@ sub mbPollResult_ctx {
     $counts{ $poll->{votes}{$_} }++ for keys %{ $poll->{votes} };
     my $total = scalar keys %{ $poll->{votes} };
 
+    # mb160-B1: appliquer les poids en mode weighted (BB7). Sans cette
+    # branche, le mode 'weighted' du poll etait sans effet : les poids
+    # etaient parses et stockes mais jamais utilises dans le tally ni la
+    # determination du gagnant.
+    my $weighted = $poll->{weighted} ? 1 : 0;
+    my $weights  = $poll->{weights}  || [];
+    my %weighted_scores;
+    my $weighted_total = 0;
+    if ($weighted) {
+        for my $idx (0 .. $#options) {
+            my $voters = $counts{$idx} // 0;
+            my $w      = $weights->[$idx] // 1;
+            $weighted_scores{$idx} = $voters * $w;
+            $weighted_total += $voters * $w;
+        }
+    }
+
     my $status = $poll->{active} ? 'Active' : 'Closed';
     # DD8: show winner prominently — winner_opt is an option index (0-based)
-    my ($winner_opt) = sort { ($counts{$b}//0) <=> ($counts{$a}//0) } keys %counts;
+    # mb160-B1: en mode weighted, le gagnant est determine par le score
+    # pondere, pas par le nombre de voteurs.
+    my ($winner_opt) = $weighted
+        ? sort { ($weighted_scores{$b} // 0) <=> ($weighted_scores{$a} // 0) } keys %weighted_scores
+        : sort { ($counts{$b} // 0) <=> ($counts{$a} // 0) } keys %counts;
     my $winner_str = '';
     if (defined $winner_opt && $total > 0) {
         my $winner_label = $options[$winner_opt] // "option $winner_opt";
-        my $wpct = sprintf('%.0f%%', 100*($counts{$winner_opt}//0)/$total);
-        $winner_str = "  Winner: $winner_label ($wpct)";
+        if ($weighted && $weighted_total > 0) {
+            my $wpct = sprintf('%.0f%%', 100 * ($weighted_scores{$winner_opt} // 0) / $weighted_total);
+            $winner_str = "  Winner: $winner_label ($wpct weighted)";
+        } else {
+            my $wpct = sprintf('%.0f%%', 100 * ($counts{$winner_opt} // 0) / $total);
+            $winner_str = "  Winner: $winner_label ($wpct)";
+        }
     }
-    botPrivmsg($self, $channel, "$status poll: \"$poll->{question}\" ($total vote(s))$winner_str");
+    my $weighted_label = $weighted ? ' [weighted]' : '';
+    botPrivmsg($self, $channel, "$status poll${weighted_label}: \"$poll->{question}\" ($total vote(s))$winner_str");
     for my $i (0 .. $#options) {
         my $c   = $counts{$i} // 0;
-        my $pct = $total > 0 ? sprintf('%.0f%%', 100 * $c / $total) : '0%';
-        botPrivmsg($self, $channel,
-            sprintf('  [%d] %-20s %d vote(s) (%s)', $i+1, $options[$i], $c, $pct));
+        if ($weighted) {
+            my $w     = $weights->[$i] // 1;
+            my $score = $weighted_scores{$i} // 0;
+            my $pct   = $weighted_total > 0
+                ? sprintf('%.0f%%', 100 * $score / $weighted_total)
+                : '0%';
+            botPrivmsg($self, $channel,
+                sprintf('  [%d] %-20s (x%d) %d vote(s) = %d (%s)',
+                    $i+1, $options[$i], $w, $c, $score, $pct));
+        } else {
+            my $pct = $total > 0 ? sprintf('%.0f%%', 100 * $c / $total) : '0%';
+            botPrivmsg($self, $channel,
+                sprintf('  [%d] %-20s %d vote(s) (%s)', $i+1, $options[$i], $c, $pct));
+        }
     }
     logBot($self, $ctx->message, $channel, 'pollresult', '');  # Q1
     return 1;

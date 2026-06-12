@@ -171,6 +171,12 @@ $mediabot->{logger} = Mediabot::Log->new(
 init_signals($mediabot->{logger});
 
 
+# mb172-B1: optional trusted Perl plugin autoload. This is disabled unless
+# plugins.AUTOLOAD (or compatible flat key) is explicitly truthy in config.
+my $plugin_load_report = $mediabot->load_configured_plugins_if_enabled();
+$mediabot->log_plugin_load_report($plugin_load_report);
+
+
 # Check config
 if ( $MAIN_PROG_CHECK_CONFIG != 0 ) {
     $mediabot->dumpConfig();
@@ -1107,8 +1113,15 @@ sub on_login {
                     my $who_t = IO::Async::Timer::Countdown->new(
                         delay     => 3,
                         on_expire => sub {
-                            eval { $irc->send_message('WHO', undef, $chan_name) }
-                                if $irc && $irc->is_connected;
+                            # mb160-B2: $irc etait undef ici (defini lexicalement
+                            # dans _build_irc() seulement). Donc le test
+                            # `if $irc && $irc->is_connected` etait toujours
+                            # false et WHO n'etait jamais envoye -> nicklist
+                            # post-join cassee sur le path NS3 throttle.
+                            # Fix : utiliser $mediabot->{irc} qui est defini.
+                            my $bot_irc = $mediabot->{irc};
+                            eval { $bot_irc->send_message('WHO', undef, $chan_name) }
+                                if $bot_irc && $bot_irc->is_connected;
                             $mediabot->{logger}->log(2, "NS4: WHO sent for $chan_name after join");
                         },
                     );

@@ -153,9 +153,10 @@ sub onStartTimers {
             },
         );
 
+        # mb164-B1: stage the fresh timer object only. Do not add/start it yet.
+        # We only publish the fresh timer set after the whole reload path has
+        # succeeded, otherwise a partial reload can leave untracked live timers.
         $hTimers{$name} = $timer;
-        $self->{loop}->add($timer);
-        $timer->start;
         $i++;
     }
 
@@ -171,8 +172,38 @@ sub onStartTimers {
             if $self->{logger};
     }
 
-    # mb151-B1: DB reload succeeded. Now replace old runtime timers atomically:
-    # stop/remove the old registered timers, then publish the freshly built set.
+    # mb151-B1/mb164-B1: DB reload succeeded. Add/start every fresh timer
+    # before stopping the old runtime set. If this pre-commit step fails,
+    # cleanup the fresh staged timers and keep the old timers alive.
+    my @started_fresh;
+    for my $timer_name (sort keys %hTimers) {
+        my $timer = $hTimers{$timer_name} or next;
+
+        my $ok = eval {
+            $self->{loop}->add($timer) if $self->{loop};
+            $timer->start;
+            1;
+        };
+
+        unless ($ok) {
+            my $err = $@ || 'unknown error';
+            $err =~ s/\s+/ /g;
+            $self->{logger}->log(1, "onStartTimers() failed to start fresh timer $timer_name: $err")
+                if $self->{logger};
+
+            for my $started (@started_fresh) {
+                eval { $started->stop if $started->can('stop') };
+                eval { $self->{loop}->remove($started) if $self->{loop} };
+            }
+
+            return 0;
+        }
+
+        push @started_fresh, $timer;
+    }
+
+    # All fresh timers are alive. Now stop/remove the old registered timers and
+    # publish the fresh set.
     $self->_stop_all_runtime_db_timers();
     %{$self->{hTimers}} = %hTimers;
     return $i;

@@ -3424,6 +3424,13 @@ sub channelAddBadword_ctx {
         return;
     }
 
+    # mb162-B1: cle de cache canonique. Le cache _badword_cache est keye par
+    # le nom de canal tel qu'utilise par botPrivmsg ($sTo = nom canonique en
+    # memoire). Si l'utilisateur tape `addbadword #CHAN foo` alors que le
+    # canal est connu comme #chan, un delete avec la casse tapee raterait
+    # la cle. On normalise via le channel_obj deja resolu.
+    my $canon_chan = eval { $channel_obj->get_name } || $chan;
+
     # Already exists?
     my $sth = $self->{dbh}->prepare(
         "SELECT id_badwords, badword FROM BADWORDS WHERE id_channel=? AND badword=?"
@@ -3435,8 +3442,12 @@ sub channelAddBadword_ctx {
     }
 
     if (my $ref = $sth->fetchrow_hashref()) {
+        # mb162-B1: pas d'invalidation de cache ici — rien n'a change en DB.
+        # L'ancien code invalidait le cache dans CETTE branche (no-op) et
+        # oubliait de le faire apres l'INSERT (la branche qui change les
+        # donnees). Resultat : un badword fraichement ajoute n'etait pas
+        # filtre pendant jusqu'a 5 minutes (TTL du cache botPrivmsg).
         botNotice($self, $nick, "Badword [$ref->{id_badwords}] '$ref->{badword}' is already defined on $chan");
-        delete $self->{_badword_cache}{$chan};  # B1: invalidate botPrivmsg Badword cache
         logBot($self, $ctx->message, $chan, "addbadword", "$chan $badword");
         $sth->finish;
         return;
@@ -3450,6 +3461,12 @@ sub channelAddBadword_ctx {
         $sth->finish if $sth;
         return;
     }
+
+    # mb162-B1: invalider le cache botPrivmsg APRES l'insertion reussie, pour
+    # que le nouveau badword soit filtre immediatement (au lieu d'attendre
+    # l'expiration du TTL 5 min).
+    delete $self->{_badword_cache}{$canon_chan};
+    delete $self->{_badword_cache}{$chan} if $chan ne $canon_chan;
 
     botNotice($self, $nick, "Added badword '$badword' to $chan");
     logBot($self, $ctx->message, $chan, "addbadword", "$chan $badword");
@@ -3554,7 +3571,11 @@ sub channelRemBadword_ctx {
         return;
     }
 
-    delete $self->{_badword_cache}{$chan};  # B1: invalidate botPrivmsg Badword cache
+    # mb162-B1: invalidation avec cle canonique (meme raison que addbadword:
+    # le cache est keye par le nom canonique utilise par botPrivmsg).
+    my $canon_chan = eval { $channel_obj->get_name } || $chan;
+    delete $self->{_badword_cache}{$canon_chan};
+    delete $self->{_badword_cache}{$chan} if $chan ne $canon_chan;
     botNotice($self, $nick, "Removed badword '$badword' from $chan");
     logBot($self, $ctx->message, $chan, "rembadword", "$chan $badword");
     $sth->finish if $sth;
@@ -3699,6 +3720,19 @@ sub setChannelAntiFloodParams_ctx {
 
     if ($sth->execute($max_msg, $period_sec, $wait_sec, $id_channel)) {
         $sth->finish;
+
+        # mb162-B2: invalider le cache runtime de checkAntiFlood. Sans ca,
+        # les nouveaux parametres ne prenaient effet qu'a l'expiration du
+        # TTL du cache _af_params (OUTPUT_PARAMS_CACHE_TTL, 60s par defaut
+        # mais configurable jusqu'a 24h) — silencieusement. On invalide la
+        # cle canonique ET la casse tapee, plus _chan_flood_conf (overrides
+        # per-channel de checkChanFlood) par coherence.
+        my $canon_chan = eval { $channel_obj->get_name } || $target_channel;
+        for my $k ($canon_chan, $target_channel) {
+            delete $self->{_af_params}{$k}       if $self->{_af_params};
+            delete $self->{_chan_flood_conf}{$k} if $self->{_chan_flood_conf};
+        }
+
         botNotice(
             $self,
             $nick,

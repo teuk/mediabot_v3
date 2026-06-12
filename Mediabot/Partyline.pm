@@ -1251,6 +1251,10 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.metrics' }) if $self->{bot}->{metrics};
         $self->_cmd_metrics($stream, $id);
     }
+    elsif ($line =~ /^\.plugins(?:\s+(.*))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.plugins' }) if $self->{bot}->{metrics};
+        $self->_cmd_plugins($stream, $id, $1);
+    }
     elsif ($line =~ /^\.top(?:\s+(.*))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.top' }) if $self->{bot}->{metrics};
         $self->_cmd_top($stream, $id, $1 // '');
@@ -1583,6 +1587,81 @@ sub _do_login {
 # +---------------------------------------------------------------------------+
 
 # ---------------------------------------------------------------------------
+# .plugins [loaded|config] - read-only PluginManager visibility
+sub _cmd_plugins {
+    my ($self, $stream, $id, $arg) = @_;
+
+    $arg //= '';
+    $arg =~ s/^\s+|\s+$//g;
+    my $mode = lc($arg || 'summary');
+
+    my $bot = $self->{bot};
+    unless ($bot && $bot->can('plugin_manager') && $bot->plugin_manager) {
+        $stream->write("PluginManager: not initialized\r\n");
+        return;
+    }
+
+    my $pm = $bot->plugin_manager;
+
+    # mb173-B1: partyline visibility for the new plugin foundation. This command
+    # is read-only: it does not load, unload, enable, or disable anything.
+    my $autoload = eval { $bot->can('plugin_autoload_enabled') ? $bot->plugin_autoload_enabled : 0 } ? 'enabled' : 'disabled';
+    my @all      = eval { $pm->list } ? $pm->list : ();
+    my @enabled  = eval { $pm->list(enabled => 1) } ? $pm->list(enabled => 1) : ();
+    my @disabled = eval { $pm->list(enabled => 0) } ? $pm->list(enabled => 0) : ();
+
+    if ($mode eq 'config') {
+        $stream->write("Plugin config:\r\n");
+        $stream->write("  autoload: $autoload\r\n");
+
+        if ($bot && $bot->can('plugin_autoload_enabled') && !$bot->plugin_autoload_enabled) {
+            $stream->write("  boot loading: skipped unless plugins.AUTOLOAD=1 (or compatible key)\r\n");
+        }
+        else {
+            $stream->write("  boot loading: enabled by configuration gate\r\n");
+        }
+
+        $stream->write("  plugin list keys: plugins.ENABLED, plugins.PLUGINS, PLUGINS_ENABLED, PLUGINS\r\n");
+        $stream->write("  module safety: Perl module names only, no paths\r\n");
+        return;
+    }
+
+    if ($mode ne 'summary' && $mode ne 'loaded') {
+        $stream->write("Usage: .plugins [loaded|config]\r\n");
+        return;
+    }
+
+    $stream->write("PluginManager:\r\n");
+    $stream->write("  autoload: $autoload\r\n");
+    $stream->write("  registered: " . scalar(@all) . "\r\n");
+    $stream->write("  enabled: " . scalar(@enabled) . "\r\n");
+    $stream->write("  disabled: " . scalar(@disabled) . "\r\n");
+
+    if (!@all) {
+        $stream->write("  plugins: none loaded\r\n");
+        return;
+    }
+
+    $stream->write("Loaded plugins:\r\n");
+    for my $entry (@all) {
+        next unless ref($entry) eq 'HASH';
+
+        my $name    = $entry->{name}    // '(unknown)';
+        my $module  = $entry->{module}  // '-';
+        my $version = defined $entry->{version} ? $entry->{version} : '-';
+        my $state   = $entry->{enabled} ? 'enabled' : 'disabled';
+        my $desc    = $entry->{description} // '';
+
+        $stream->write("  - $name [$state] module=$module version=$version");
+        $stream->write(" - $desc") if length $desc;
+        $stream->write("\r\n");
+    }
+
+    return;
+}
+
+
+
 # .help
 # ---------------------------------------------------------------------------
 sub _cmd_help {
@@ -1599,6 +1678,7 @@ sub _cmd_help {
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
+      . "  .plugins [loaded|config] - show plugin manager/autoload status\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary)\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"
       . "  .top [n]            - top N speakers across all channels (default 5)\r\n"

@@ -10,6 +10,11 @@ use Mediabot::Conf;
 use Mediabot::Log;
 use Mediabot::Context;
 use Mediabot::Command;
+use Mediabot::CommandRegistry;
+use Mediabot::EventBus;
+use Mediabot::PluginManager;
+use Mediabot::ScriptRunner;
+use Mediabot::ScriptActionRunner;
 use Mediabot::Hailo;
 use Mediabot::Quotes;
 use Mediabot::LoginCommands;
@@ -69,8 +74,29 @@ sub new {
         conf                    => $args->{conf}             // undef,
         channels                => {},
         channel_nicklist_timers => {},
+        command_registry        => Mediabot::CommandRegistry->new(),
+        event_bus               => Mediabot::EventBus->new(),
+        plugin_manager          => undef,
+        script_runner           => undef,
+        script_action_runner    => undef,
         WHOIS_VARS              => {},
     }, $class;
+
+    # mb169-B1: create PluginManager after bless so it can hold a safe reference
+    # to the Mediabot object. It loads no plugin by default.
+    $self->{plugin_manager} = Mediabot::PluginManager->new(bot => $self);
+
+    # mb174-B1: create ScriptRunner foundation. It does not execute scripts yet;
+    # it only provides validation and JSON protocol helpers for future plugins.
+    $self->{script_runner} = Mediabot::ScriptRunner->new(bot => $self);
+
+    # mb177-B1: create dry-run ScriptActionRunner. It validates script-returned
+    # actions but does not apply side effects yet.
+    $self->{script_action_runner} = Mediabot::ScriptActionRunner->new(bot => $self);
+
+    # mb166-B1: seed the first low-risk built-in commands into the registry.
+    # The old dispatch tables are still kept as fallback.
+    $self->_register_builtin_public_core_commands();
 
     # Minimal logging setup
     require Mediabot::Log;
@@ -80,6 +106,304 @@ sub new {
     );
 
     return $self;
+}
+
+
+
+
+
+
+
+sub _conf_get_first_local {
+    my ($self, @keys) = @_;
+
+    my $conf = $self->{conf};
+    return undef unless $conf;
+
+    for my $key (@keys) {
+        next unless defined $key && length $key;
+
+        my $value;
+        my $ok = eval {
+            if (ref($conf) eq 'HASH') {
+                $value = $conf->{$key};
+            }
+            elsif ($conf->can('get')) {
+                $value = $conf->get($key);
+            }
+            1;
+        };
+
+        next unless $ok;
+        return $value if defined $value && length "$value";
+    }
+
+    return undef;
+}
+
+sub _truthy_config_value {
+    my ($value) = @_;
+
+    return 0 unless defined $value;
+    my $v = lc "$value";
+    $v =~ s/^\s+|\s+$//g;
+
+    return 1 if $v =~ /\A(?:1|yes|true|on|enabled)\z/;
+    return 0;
+}
+
+# Controlled boot-time plugin loading gate.
+# mb172-B1: plugins are loaded at boot only when explicitly enabled in config.
+sub plugin_autoload_enabled {
+    my ($self) = @_;
+
+    my $value = $self->_conf_get_first_local(
+        'plugins.AUTOLOAD',
+        'plugins.autoload',
+        'plugins.ENABLED_AUTOLOAD',
+        'PLUGIN_AUTOLOAD',
+        'PLUGINS_AUTOLOAD',
+    );
+
+    return _truthy_config_value($value);
+}
+
+sub load_configured_plugins_if_enabled {
+    my ($self, %opts) = @_;
+
+    unless ($self->plugin_autoload_enabled) {
+        return {
+            skipped => 1,
+            reason  => 'plugin autoload disabled',
+            loaded  => [],
+            errors  => [],
+            invalid => [],
+        };
+    }
+
+    my $report = $self->load_configured_plugins(%opts);
+    $report->{skipped} = 0 if ref($report) eq 'HASH';
+
+    return $report;
+}
+
+sub log_plugin_load_report {
+    my ($self, $report) = @_;
+
+    return unless ref($report) eq 'HASH';
+
+    if ($report->{skipped}) {
+        $self->{logger}->log(3, "Plugin autoload skipped: " . ($report->{reason} || 'disabled'))
+            if $self->{logger};
+        return 1;
+    }
+
+    my $loaded = ref($report->{loaded}) eq 'ARRAY' ? scalar @{ $report->{loaded} } : 0;
+    $self->{logger}->log(1, "Plugin autoload: loaded $loaded plugin(s)")
+        if $self->{logger};
+
+    if (ref($report->{invalid}) eq 'ARRAY') {
+        for my $invalid (@{ $report->{invalid} }) {
+            $self->{logger}->log(1, "Plugin autoload: invalid module name '$invalid'")
+                if $self->{logger};
+        }
+    }
+
+    if (ref($report->{errors}) eq 'ARRAY') {
+        for my $err (@{ $report->{errors} }) {
+            next unless ref($err) eq 'HASH';
+            my $module = $err->{module} || 'unknown';
+            my $msg    = $err->{error}  || 'unknown error';
+            $self->{logger}->log(1, "Plugin autoload: failed to load $module: $msg")
+                if $self->{logger};
+        }
+    }
+
+    return 1;
+}
+
+
+# Explicit plugin loading entry point for future boot integration.
+# mb170-B1 does not call this automatically from the constructor.
+sub load_configured_plugins {
+    my ($self, %opts) = @_;
+
+    my $manager = $self->plugin_manager;
+    return {
+        loaded  => [],
+        errors  => [ { error => 'plugin manager is not initialized' } ],
+        invalid => [],
+    } unless $manager && $manager->can('load_configured_plugins');
+
+    return $manager->load_configured_plugins($self->{conf}, %opts);
+}
+
+
+
+
+# Return the script action runner foundation used to validate script results.
+sub script_action_runner {
+    my ($self) = @_;
+    return $self->{script_action_runner};
+}
+
+# Short alias for script action runner access.
+sub script_actions {
+    my ($self) = @_;
+    return $self->{script_action_runner};
+}
+
+
+# Return the external script runner foundation used by future plugin work.
+sub script_runner {
+    my ($self) = @_;
+    return $self->{script_runner};
+}
+
+# Short alias for script runner access.
+sub scripts {
+    my ($self) = @_;
+    return $self->{script_runner};
+}
+
+
+# Return the plugin manager foundation used by future plugin work.
+sub plugin_manager {
+    my ($self) = @_;
+    return $self->{plugin_manager};
+}
+
+# Short alias for plugin manager access.
+sub plugins {
+    my ($self) = @_;
+    return $self->{plugin_manager};
+}
+
+
+# Return the minimal event bus foundation used by future plugin/hook work.
+sub event_bus {
+    my ($self) = @_;
+    return $self->{event_bus};
+}
+
+# Short alias for event bus access.
+sub events {
+    my ($self) = @_;
+    return $self->{event_bus};
+}
+
+
+
+# Emit an internal event through EventBus and log listener errors without
+# changing the caller's normal control flow.
+sub emit_event_report {
+    my ($self, $event, @args) = @_;
+
+    my $bus = $self->event_bus;
+    return {
+        event  => $event,
+        ran    => 0,
+        errors => [],
+    } unless $bus && $bus->can('emit_report');
+
+    my $report = eval { $bus->emit_report($event, @args) };
+    if (!$report) {
+        my $err = $@ || 'unknown EventBus error';
+        $err =~ s/\s+/ /g;
+        $self->{logger}->log(1, "EventBus '$event' failed: $err")
+            if $self->{logger};
+        return {
+            event  => $event,
+            ran    => 0,
+            errors => [ { event => $event, error => $err } ],
+        };
+    }
+
+    if (ref($report) eq 'HASH' && ref($report->{errors}) eq 'ARRAY' && @{ $report->{errors} }) {
+        for my $e (@{ $report->{errors} }) {
+            next unless ref($e) eq 'HASH';
+            my $who = $e->{name} || $e->{plugin} || 'anonymous-listener';
+            my $err = $e->{error} || 'unknown listener error';
+            $self->{logger}->log(1, "EventBus '$event' listener '$who' failed: $err")
+                if $self->{logger};
+        }
+    }
+
+    return $report;
+}
+
+
+# Register the first small batch of built-in public commands in the new
+# CommandRegistry. mb166-B1 deliberately starts with low-risk core/help commands
+# and keeps the historical dispatch table as fallback.
+sub _register_builtin_public_core_commands {
+    my ($self) = @_;
+
+    return 1 if $self->{_builtin_public_core_commands_registered};
+
+    my $registry = $self->commands;
+    return 0 unless $registry;
+
+    $registry->register_command(
+        name        => 'version',
+        source      => 'public',
+        category    => 'core',
+        description => 'Show Mediabot version information',
+        handler     => sub {
+            my ($ctx) = @_;
+            versionCheck($ctx);
+        },
+    );
+
+    $registry->register_command(
+        name        => 'uptime',
+        source      => 'public',
+        category    => 'core',
+        description => 'Show Mediabot uptime',
+        handler     => sub {
+            my ($ctx) = @_;
+            mbUptime_ctx($ctx);
+        },
+    );
+
+    $registry->register_command(
+        name        => 'help',
+        source      => 'public',
+        category    => 'core',
+        description => 'Show command help',
+        handler     => sub {
+            my ($ctx) = @_;
+            mbHelp_ctx($ctx);
+        },
+    );
+
+    $registry->register_command(
+        name        => 'commands',
+        source      => 'public',
+        category    => 'core',
+        description => 'List available commands',
+        handler     => sub {
+            my ($ctx) = @_;
+            $ctx->{args} = [ 'commands' ];
+            mbHelp_ctx($ctx);
+        },
+    );
+
+    $self->{_builtin_public_core_commands_registered} = 1;
+    return 1;
+}
+
+
+# Return the command registry foundation used by future plugin/dispatch work.
+sub command_registry {
+    my ($self) = @_;
+    return $self->{command_registry};
+}
+
+# Short alias for command registry access.
+sub commands {
+    my ($self) = @_;
+    return $self->{command_registry};
 }
 
 
@@ -1217,6 +1541,11 @@ sub mbCommandPublic {
         source  => 'public',
     );
 
+    # mb168-B1: first low-risk EventBus integration point. This only observes
+    # public commands after Context/Command construction; with no listeners it
+    # is a no-op, and listener failures are reported but never break dispatch.
+    $self->emit_event_report('public_command_observed', $ctx);
+
     if ($self->{metrics} && defined $cmd && length $cmd) {
         $self->{metrics}->inc(
             'mediabot_commands_public_total',
@@ -1502,7 +1831,21 @@ sub mbCommandPublic {
         $self->{metrics}->inc('mediabot_commands_by_name_total', { command => $cmd });
     }
 
-    # Dispatch known command
+    # mb166-B1: first real use of CommandRegistry for a small low-risk core
+    # public command group. The legacy %command_map remains immediately below
+    # as compatibility fallback for every command not yet migrated.
+    if (my $handler = $self->commands->handler_for($cmd, 'public')) {
+        $self->{logger}->log(4, "PUBLIC(registry): $sNick triggered $sCommand on $sChannel");
+        eval { $handler->($ctx) };
+        if ($@) {
+            $self->{logger}->log(1, "PUBLIC registry command '$cmd' error: $@");
+            $self->{metrics}->inc('mediabot_command_errors_total', { command => $cmd })
+                if $self->{metrics};
+        }
+        return;
+    }
+
+    # Dispatch known command through the historical table.
     if (my $handler = $command_map{$cmd}) {
         $self->{logger}->log(4, "PUBLIC: $sNick triggered $sCommand on $sChannel");
         eval { $handler->() };
