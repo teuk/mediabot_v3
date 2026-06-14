@@ -92,9 +92,11 @@ my $case = sub {
     $assert->($src =~ /mb175-B1: execution plan only/,
         'ScriptRunner source contains mb175 marker');
     $assert->($src =~ /does not spawn/,
-        'ScriptRunner source documents no spawn yet');
-    $assert->($src !~ /\bsystem\s*\(|\bexec\s*\(|open3|IPC::Open3|qx\//,
-        'ScriptRunner still does not execute external commands');
+        'build_execution_plan still documents no spawn');
+    $assert->($src =~ /IPC::Open3/ && $src =~ /\bopen3\s*\(/,
+        'ScriptRunner keeps guarded argv-style subprocess execution');
+    $assert->($src !~ /\bsystem\s*\(|\bexec\s*\(|\bqx\s*(?:\/|\(|\{)/,
+        'ScriptRunner still avoids shell-oriented execution');
 };
 
 if (caller) { return $case; }

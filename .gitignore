@@ -41,3 +41,17 @@ t/live/test.conf
 # OS
 .DS_Store
 
+
+# MB211 local/generated artifacts for safe commits
+__pycache__/
+*/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+t/tmp_mb*_scripts/
+docs/mb[0-9][0-9][0-9]_*.md
+mb[0-9][0-9][0-9]_*.md
+mb[0-9][0-9][0-9]_*.sh
+mb[0-9][0-9][0-9]_*_bundle.zip
+fix_mb*.sh
+snap_mediabot*.sh

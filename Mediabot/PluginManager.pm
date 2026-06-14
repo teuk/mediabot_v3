@@ -175,18 +175,39 @@ sub _split_plugin_list {
 
     return () unless defined $value;
 
-    my @items = split /[,\s]+/, $value;
-    my @plugins;
+    # mb193-B2: Config::Simple may return ARRAY refs for comma-separated
+    # configuration values. Flatten nested ARRAY refs before applying the
+    # historical comma/whitespace split logic.
+    my @queue = ($value);
+    my @raw;
 
-    for my $item (@items) {
-        next unless defined $item;
-        $item =~ s/^\s+|\s+$//g;
-        next unless length $item;
-        push @plugins, $item;
+    while (@queue) {
+        my $entry = shift @queue;
+        next unless defined $entry;
+
+        if (ref($entry) eq 'ARRAY') {
+            unshift @queue, @$entry;
+            next;
+        }
+
+        push @raw, $entry;
     }
 
-    return @plugins;
+    my @items;
+    for my $entry (@raw) {
+        push @items, split /[,\s]+/, "$entry";
+    }
+
+    @items = map {
+        my $v = $_;
+        $v =~ s/^\s+|\s+$//g;
+        $v;
+    } @items;
+
+    return grep { length $_ } @items;
 }
+
+
 
 sub _conf_get_first {
     my ($conf, @keys) = @_;

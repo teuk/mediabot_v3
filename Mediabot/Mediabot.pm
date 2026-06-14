@@ -241,6 +241,51 @@ sub load_configured_plugins {
 
 
 
+
+# Run an external script through ScriptRunner, then validate its returned actions
+# through ScriptActionRunner without applying any real side effect.
+sub run_script_actions_dry {
+    my ($self, $script_path, $event, %data) = @_;
+
+    my $script_runner = $self->script_runner;
+    my $action_runner = $self->script_action_runner;
+
+    return {
+        ok      => 0,
+        dry_run => 1,
+        error   => 'script runner is not initialized',
+    } unless $script_runner && $script_runner->can('run_script');
+
+    return {
+        ok      => 0,
+        dry_run => 1,
+        error   => 'script action runner is not initialized',
+    } unless $action_runner && $action_runner->can('apply_actions_dry');
+
+    # mb178-B1: full dry-run pipeline only. External script execution is allowed
+    # through ScriptRunner, but the resulting actions are only validated/planned.
+    # No IRC message, DB write, timer creation or runtime mutation is applied here.
+    my $script_result = $script_runner->run_script($script_path, $event, %data);
+    my $context = {
+        event   => $event,
+        channel => $data{channel},
+        target  => $data{target},
+        nick    => $data{nick},
+        command => $data{command},
+        args    => $data{args},
+    };
+
+    my $action_plan = $action_runner->apply_actions_dry($script_result, $context);
+
+    return {
+        ok            => ($script_result->{ok} && $action_plan->{ok}) ? 1 : 0,
+        dry_run       => 1,
+        script_result => $script_result,
+        action_plan   => $action_plan,
+    };
+}
+
+
 # Return the script action runner foundation used to validate script results.
 sub script_action_runner {
     my ($self) = @_;
@@ -1546,6 +1591,8 @@ sub mbCommandPublic {
     # is a no-op, and listener failures are reported but never break dispatch.
     $self->emit_event_report('public_command_observed', $ctx);
 
+    my $scriptdryrun_handled = eval { $ctx->{scriptdryrun_handled} } ? 1 : 0;
+
     if ($self->{metrics} && defined $cmd && length $cmd) {
         $self->{metrics}->inc(
             'mediabot_commands_public_total',
@@ -1563,6 +1610,12 @@ sub mbCommandPublic {
                 { channel => $sChannel, command => $cmd }
             );
         }
+    }
+
+    if ($scriptdryrun_handled) {
+        $self->{logger}->log(4, "PUBLIC(scriptdryrun): $sNick triggered $sCommand on $sChannel")
+            if $self->{logger};
+        return;
     }
 
     # ---------------------------------------------------------------------------

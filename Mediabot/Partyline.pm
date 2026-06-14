@@ -1255,6 +1255,10 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.plugins' }) if $self->{bot}->{metrics};
         $self->_cmd_plugins($stream, $id, $1);
     }
+    elsif ($line =~ /^\.scriptdryrun(?:\s+(.*))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.scriptdryrun' }) if $self->{bot}->{metrics};
+        $self->_cmd_scriptdryrun($stream, $id, $1);
+    }
     elsif ($line =~ /^\.top(?:\s+(.*))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.top' }) if $self->{bot}->{metrics};
         $self->_cmd_top($stream, $id, $1 // '');
@@ -1587,6 +1591,268 @@ sub _do_login {
 # +---------------------------------------------------------------------------+
 
 # ---------------------------------------------------------------------------
+# .scriptdryrun [status|last|config] - read-only ScriptDryRun plugin visibility
+sub _cmd_scriptdryrun {
+    my ($self, $stream, $id, $arg) = @_;
+
+    $arg //= '';
+    $arg =~ s/^\s+|\s+$//g;
+    my $mode = lc($arg || 'status');
+
+    my $bot = $self->{bot};
+    unless ($bot && $bot->can('plugin_manager') && $bot->plugin_manager) {
+        $stream->write("ScriptDryRun: PluginManager not initialized\r\n");
+        return;
+    }
+
+    my $pm = $bot->plugin_manager;
+    my $plugin = eval { $pm->object_for('Mediabot::Plugin::ScriptDryRun') };
+
+    # mb180-B1: read-only partyline visibility for the ScriptDryRun bridge.
+    # This command never loads plugins, executes scripts, applies actions,
+    # sends IRC messages, creates timers or touches the database.
+    if ($mode eq 'config') {
+        $stream->write("ScriptDryRun config:\r\n");
+        $stream->write("  plugin module: Mediabot::Plugin::ScriptDryRun\r\n");
+        $stream->write("  script path keys:\r\n");
+        $stream->write("    plugins.ScriptDryRun.SCRIPT\r\n");
+        $stream->write("    plugins.ScriptDryRun.script\r\n");
+        $stream->write("    plugins.script_dryrun.SCRIPT\r\n");
+        $stream->write("    plugins.script_dryrun.script\r\n");
+        $stream->write("    SCRIPT_DRYRUN_SCRIPT\r\n");
+        $stream->write("    SCRIPT_DRYRUN_PATH\r\n");
+        $stream->write("  command filter keys:\r\n");
+        $stream->write("    plugins.ScriptDryRun.COMMANDS\r\n");
+        $stream->write("    plugins.ScriptDryRun.commands\r\n");
+        $stream->write("    plugins.script_dryrun.COMMANDS\r\n");
+        $stream->write("    plugins.script_dryrun.commands\r\n");
+        $stream->write("    SCRIPT_DRYRUN_COMMANDS\r\n");
+        $stream->write("  command route keys:\r\n");
+        $stream->write("    plugins.ScriptDryRun.ROUTES\r\n");
+        $stream->write("    plugins.ScriptDryRun.routes\r\n");
+        $stream->write("    plugins.script_dryrun.ROUTES\r\n");
+        $stream->write("    plugins.script_dryrun.routes\r\n");
+        $stream->write("    SCRIPT_DRYRUN_ROUTES\r\n");
+        $stream->write("  route format: command=script, other=script2\r\n");
+        $stream->write("  command filter: optional allow-list, empty means all commands\r\n");
+        $stream->write("  command routes: optional command-to-script map\r\n");
+        $stream->write("  action mode keys:\r\n");
+        $stream->write("    plugins.ScriptDryRun.ACTION_MODE\r\n");
+        $stream->write("    plugins.ScriptDryRun.action_mode\r\n");
+        $stream->write("    plugins.script_dryrun.ACTION_MODE\r\n");
+        $stream->write("    plugins.script_dryrun.action_mode\r\n");
+        $stream->write("    SCRIPT_DRYRUN_ACTION_MODE\r\n");
+        $stream->write("  allowed IRC keys:\r\n");
+        $stream->write("    plugins.ScriptDryRun.ALLOW_IRC\r\n");
+        $stream->write("    plugins.ScriptDryRun.allow_irc\r\n");
+        $stream->write("    plugins.script_dryrun.ALLOW_IRC\r\n");
+        $stream->write("    plugins.script_dryrun.allow_irc\r\n");
+        $stream->write("    SCRIPT_DRYRUN_ALLOW_IRC\r\n");
+        $stream->write("  apply scope guard keys:\r\n");
+        $stream->write("    plugins.ScriptDryRun.APPLY_REQUIRE_SCOPE\r\n");
+        $stream->write("    plugins.ScriptDryRun.apply_require_scope\r\n");
+        $stream->write("    plugins.script_dryrun.APPLY_REQUIRE_SCOPE\r\n");
+        $stream->write("    plugins.script_dryrun.apply_require_scope\r\n");
+        $stream->write("    SCRIPT_DRYRUN_APPLY_REQUIRE_SCOPE\r\n");
+        $stream->write("  action modes: dry-run, apply\r\n");
+        $stream->write("  IRC output requires: ACTION_MODE=apply and ALLOW_IRC=yes\r\n");
+        $stream->write("  apply scope guard: when enabled, ACTION_MODE=apply requires COMMANDS or ROUTES\r\n");
+        return;
+    }
+
+    if ($mode ne 'status' && $mode ne 'last') {
+        $stream->write("Usage: .scriptdryrun [status|last|config]\r\n");
+        return;
+    }
+
+    unless ($plugin) {
+        $stream->write("ScriptDryRun: not loaded\r\n");
+        $stream->write("  hint: load Mediabot::Plugin::ScriptDryRun explicitly or enable plugin autoload\r\n");
+        return;
+    }
+
+    my $script_path = eval { $plugin->script_path };
+    my $observed    = eval { $plugin->observed_public } || 0;
+    my $skipped     = eval { $plugin->skipped_public } || 0;
+    my $filtered    = eval { $plugin->can('filtered_public') ? $plugin->filtered_public : 0 } || 0;
+    my $filter_on   = eval { $plugin->can('command_filter_enabled') ? $plugin->command_filter_enabled : 0 } ? 1 : 0;
+    my @filter_list = eval { $plugin->can('command_filter_list') ? $plugin->command_filter_list : () };
+    my $routes_on   = eval { $plugin->can('command_routes_enabled') ? $plugin->command_routes_enabled : 0 } ? 1 : 0;
+    my @route_list  = eval { $plugin->can('command_route_list') ? $plugin->command_route_list : () };
+    my $route_map   = eval { $plugin->can('command_routes') ? $plugin->command_routes : {} };
+    $route_map = {} unless ref($route_map) eq 'HASH';
+    my $action_mode = eval { $plugin->can('action_mode') ? $plugin->action_mode : 'dry-run' } || 'dry-run';
+    my $allow_irc   = eval { $plugin->can('allow_irc') ? $plugin->allow_irc : 0 } ? 1 : 0;
+    my $scope_guard = eval { $plugin->can('apply_require_scope') ? $plugin->apply_require_scope : 0 } ? 1 : 0;
+    my $scope_restricted = eval { $plugin->can('apply_scope_is_restricted') ? $plugin->apply_scope_is_restricted : 0 } ? 1 : 0;
+    my $scope_warning = eval { $plugin->can('apply_scope_warning') ? $plugin->apply_scope_warning : undef };
+    my $last_error  = eval { $plugin->last_error };
+    my $last_result = eval { $plugin->last_result };
+
+    $stream->write("ScriptDryRun:\r\n");
+    $stream->write("  loaded: yes\r\n");
+    $stream->write("  script: " . (defined($script_path) && length("$script_path") ? $script_path : 'not configured') . "\r\n");
+    $stream->write("  observed_public: $observed\r\n");
+    $stream->write("  skipped_public: $skipped\r\n");
+    $stream->write("  filtered_public: $filtered\r\n");
+    # mb183-B1: include ScriptDryRun command filter visibility in read-only partyline status.
+    $stream->write("  command_filter: " . ($filter_on ? 'enabled' : 'disabled') . "\r\n");
+    if ($filter_on) {
+        my $filter_text = @filter_list ? join(',', @filter_list) : 'none';
+        $stream->write("  allowed_commands: $filter_text\r\n");
+    }
+    # mb185-B1: include ScriptDryRun command route visibility in read-only partyline status.
+    $stream->write("  command_routes: " . ($routes_on ? 'enabled' : 'disabled') . "\r\n");
+    if ($routes_on) {
+        my @route_pairs = map { $_ . '=' . ($route_map->{$_} // '') } @route_list;
+        my $route_text = @route_pairs ? join(',', @route_pairs) : 'none';
+        $stream->write("  route_map: $route_text\r\n");
+    }
+    # mb188-B1: expose ScriptDryRun ACTION_MODE / ALLOW_IRC state in read-only partyline status.
+    $stream->write("  action_mode: $action_mode\r\n");
+    $stream->write("  allow_irc: " . ($allow_irc ? 'yes' : 'no') . "\r\n");
+    # mb190-B1: expose ScriptDryRun apply-scope guard state without executing scripts.
+    $stream->write("  apply_require_scope: " . ($scope_guard ? 'yes' : 'no') . "\r\n");
+    $stream->write("  apply_scope_restricted: " . ($scope_restricted ? 'yes' : 'no') . "\r\n");
+    if (defined $scope_warning && length "$scope_warning") {
+        $scope_warning =~ s/[\r\n]+/ /g;
+        $stream->write("  apply_scope_warning: $scope_warning\r\n");
+    }
+
+    if (defined $last_error && length "$last_error") {
+        $last_error =~ s/[\r\n]+/ /g;
+        $stream->write("  last_error: $last_error\r\n");
+    }
+
+    unless ($last_result && ref($last_result) eq 'HASH') {
+        $stream->write("  last_result: none\r\n");
+        return;
+    }
+
+    my $script_result = $last_result->{script_result} || {};
+    my $action_plan   = $last_result->{action_plan}   || {};
+
+    $stream->write("  last_result_ok: " . ($last_result->{ok} ? 'yes' : 'no') . "\r\n");
+    $stream->write("  dry_run: " . ($last_result->{dry_run} ? 'yes' : 'no') . "\r\n");
+
+    if ($mode eq 'status') {
+        my $planned = ref($action_plan->{planned}) eq 'ARRAY' ? scalar @{ $action_plan->{planned} } : 0;
+        my $errors  = ref($action_plan->{errors})  eq 'ARRAY' ? scalar @{ $action_plan->{errors} }  : 0;
+        my $applied = ref($action_plan->{applied}) eq 'ARRAY' ? scalar @{ $action_plan->{applied} } : 0;
+        my $apply_errors = ref($action_plan->{apply_errors}) eq 'ARRAY' ? scalar @{ $action_plan->{apply_errors} } : 0;
+        my $has_apply_result = exists $action_plan->{applied_ok} || $applied || $apply_errors;
+
+        $stream->write("  script_ok: " . ($script_result->{ok} ? 'yes' : 'no') . "\r\n");
+        $stream->write("  action_plan_ok: " . ($action_plan->{ok} ? 'yes' : 'no') . "\r\n");
+        $stream->write("  planned_actions: $planned\r\n");
+        $stream->write("  action_errors: $errors\r\n");
+        # mb191-B1: expose ScriptActionRunner apply results in read-only partyline status.
+        if ($has_apply_result) {
+            $stream->write("  applied_ok: " . ($action_plan->{applied_ok} ? 'yes' : 'no') . "\r\n");
+            $stream->write("  applied_actions: $applied\r\n");
+            $stream->write("  apply_errors: $apply_errors\r\n");
+        }
+        return;
+    }
+
+    my $timeout = $script_result->{timeout} ? 'yes' : 'no';
+    my $exit = defined($script_result->{exit_code}) ? $script_result->{exit_code} : 'n/a';
+    my $planned = ref($action_plan->{planned}) eq 'ARRAY' ? $action_plan->{planned} : [];
+    my $errors  = ref($action_plan->{errors})  eq 'ARRAY' ? $action_plan->{errors}  : [];
+    my $applied = ref($action_plan->{applied}) eq 'ARRAY' ? $action_plan->{applied} : [];
+    my $apply_errors = ref($action_plan->{apply_errors}) eq 'ARRAY' ? $action_plan->{apply_errors} : [];
+    my $has_apply_result = exists $action_plan->{applied_ok} || @$applied || @$apply_errors;
+
+    $stream->write("  script_ok: " . ($script_result->{ok} ? 'yes' : 'no') . "\r\n");
+    $stream->write("  script_timeout: $timeout\r\n");
+    $stream->write("  script_exit_code: $exit\r\n");
+    $stream->write("  command_filter: " . ($filter_on ? 'enabled' : 'disabled') . "\r\n");
+    if ($filter_on) {
+        my $filter_text = @filter_list ? join(',', @filter_list) : 'none';
+        $stream->write("  allowed_commands: $filter_text\r\n");
+    }
+    $stream->write("  command_routes: " . ($routes_on ? 'enabled' : 'disabled') . "\r\n");
+    if ($routes_on) {
+        my @route_pairs = map { $_ . '=' . ($route_map->{$_} // '') } @route_list;
+        my $route_text = @route_pairs ? join(',', @route_pairs) : 'none';
+        $stream->write("  route_map: $route_text\r\n");
+    }
+    $stream->write("  action_mode: $action_mode\r\n");
+    $stream->write("  allow_irc: " . ($allow_irc ? 'yes' : 'no') . "\r\n");
+    $stream->write("  apply_require_scope: " . ($scope_guard ? 'yes' : 'no') . "\r\n");
+    $stream->write("  apply_scope_restricted: " . ($scope_restricted ? 'yes' : 'no') . "\r\n");
+    if (defined $scope_warning && length "$scope_warning") {
+        $scope_warning =~ s/[\r\n]+/ /g;
+        $stream->write("  apply_scope_warning: $scope_warning\r\n");
+    }
+    $stream->write("  planned_actions:\r\n");
+
+    if (!@$planned) {
+        $stream->write("    none\r\n");
+    }
+    else {
+        my $idx = 0;
+        for my $action (@$planned) {
+            $idx++;
+            my $type = defined($action->{type}) ? $action->{type} : '?';
+            my $target = defined($action->{target}) ? $action->{target} : '';
+            my $text = defined($action->{text}) ? $action->{text} : '';
+            $text =~ s/[\r\n]+/ /g;
+            $text = substr($text, 0, 160) . '...' if length($text) > 160;
+            $stream->write("    $idx. type=$type target=$target text=$text\r\n");
+        }
+    }
+
+    $stream->write("  action_errors:\r\n");
+    if (!@$errors) {
+        $stream->write("    none\r\n");
+    }
+    else {
+        for my $err (@$errors) {
+            my $index = defined($err->{index}) ? $err->{index} : '?';
+            my $msg = defined($err->{error}) ? $err->{error} : 'unknown error';
+            $msg =~ s/[\r\n]+/ /g;
+            $stream->write("    index=$index error=$msg\r\n");
+        }
+    }
+
+    if ($has_apply_result) {
+        $stream->write("  applied_ok: " . ($action_plan->{applied_ok} ? 'yes' : 'no') . "\r\n");
+
+        $stream->write("  applied_actions:\r\n");
+        if (!@$applied) {
+            $stream->write("    none\r\n");
+        }
+        else {
+            for my $item (@$applied) {
+                my $index = defined($item->{index}) ? $item->{index} : '?';
+                my $type = defined($item->{type}) ? $item->{type} : '?';
+                my $target = defined($item->{target}) ? $item->{target} : '';
+                $target =~ s/[\r\n]+/ /g;
+                $stream->write("    index=$index type=$type target=$target\r\n");
+            }
+        }
+
+        $stream->write("  apply_errors:\r\n");
+        if (!@$apply_errors) {
+            $stream->write("    none\r\n");
+        }
+        else {
+            for my $err (@$apply_errors) {
+                my $index = defined($err->{index}) ? $err->{index} : '?';
+                my $type = defined($err->{type}) ? $err->{type} : '?';
+                my $msg = defined($err->{error}) ? $err->{error} : 'unknown error';
+                $msg =~ s/[\r\n]+/ /g;
+                $stream->write("    index=$index type=$type error=$msg\r\n");
+            }
+        }
+    }
+
+    return;
+}
+
+
+# ---------------------------------------------------------------------------
 # .plugins [loaded|config] - read-only PluginManager visibility
 sub _cmd_plugins {
     my ($self, $stream, $id, $arg) = @_;
@@ -1679,6 +1945,7 @@ sub _cmd_help {
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
       . "  .plugins [loaded|config] - show plugin manager/autoload status\r\n"
+      . "  .scriptdryrun [status|last|config] - show ScriptDryRun plugin dry-run status\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary)\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"
       . "  .top [n]            - top N speakers across all channels (default 5)\r\n"

@@ -10,6 +10,9 @@ use IO::Select ();
 use Symbol qw(gensym);
 use POSIX qw(WNOHANG);
 use Time::HiRes qw(time sleep);
+use Cwd ();
+use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
+use Errno ();
 
 # ---------------------------------------------------------------------------
 # Mediabot::ScriptRunner
@@ -99,7 +102,35 @@ sub validate_script_path {
     my $lang = $self->language_for($p);
     return (0, 'unsupported script extension') unless defined $lang;
 
-    return (1, undef, $lang, $self->{script_dir} . '/' . $p);
+    my $full_path = $self->{script_dir} . '/' . $p;
+
+    # mb221-B1: containment check against symlink escape. The lexical checks
+    # above stop textual traversal ('..', absolute, backslash), but a symlink
+    # placed inside script_dir can still point outside it. Resolve the real
+    # path of both the script and script_dir and require the script to live
+    # under script_dir. We only enforce this when the file actually exists:
+    # a not-yet-created script stays allowed at validation time and will fail
+    # cleanly later at exec.
+    if (-e $full_path) {
+        my $real_script = Cwd::abs_path($full_path);
+        my $real_dir    = Cwd::abs_path($self->{script_dir});
+
+        if (!defined $real_script || !defined $real_dir) {
+            return (0, 'unable to resolve script path');
+        }
+
+        # Normalize to a trailing slash so a prefix match cannot be fooled by
+        # a sibling directory sharing the same prefix (e.g. scripts vs scripts2).
+        my $dir_prefix = $real_dir;
+        $dir_prefix .= '/' unless $dir_prefix =~ m{/\z};
+
+        unless ($real_script eq $real_dir
+             || index($real_script, $dir_prefix) == 0) {
+            return (0, 'script path escapes script directory');
+        }
+    }
+
+    return (1, undef, $lang, $full_path);
 }
 
 sub build_event_payload {
@@ -120,6 +151,31 @@ sub encode_event_payload {
     return encode_json($payload || {});
 }
 
+sub _normalized_response_errors {
+    my ($errors, $fallback) = @_;
+
+    my @out;
+
+    if (ref($errors) eq 'ARRAY') {
+        for my $err (@$errors) {
+            next unless defined $err;
+            my $text = "$err";
+            $text =~ s/[\r\n]+/ /g;
+            $text =~ s/^\s+|\s+$//g;
+            push @out, $text if length $text;
+        }
+    }
+    elsif (defined $errors) {
+        my $text = "$errors";
+        $text =~ s/[\r\n]+/ /g;
+        $text =~ s/^\s+|\s+$//g;
+        push @out, $text if length $text;
+    }
+
+    push @out, $fallback || 'script response reported failure' unless @out;
+    return \@out;
+}
+
 sub decode_script_response {
     my ($self, $json) = @_;
 
@@ -138,6 +194,35 @@ sub decode_script_response {
             errors  => [ "invalid JSON response: $err" ],
             actions => [],
         };
+    }
+
+    # mb226-B1: respect a script-declared failure before trusting actions.
+    # Older demo scripts may omit ok/errors entirely, so absence of ok remains
+    # the legacy success-by-valid-actions contract. But if a script explicitly
+    # returns ok=false or returns errors, the response is failed and no actions
+    # are exposed to the action layer.
+    if (exists $decoded->{ok} && !$decoded->{ok}) {
+        return {
+            ok      => 0,
+            errors  => _normalized_response_errors($decoded->{errors}, 'script response reported failure'),
+            actions => [],
+        };
+    }
+
+    if (defined $decoded->{errors}) {
+        return {
+            ok      => 0,
+            errors  => [ 'errors must be an array' ],
+            actions => [],
+        } unless ref($decoded->{errors}) eq 'ARRAY';
+
+        if (@{ $decoded->{errors} }) {
+            return {
+                ok      => 0,
+                errors  => _normalized_response_errors($decoded->{errors}, 'script response reported errors'),
+                actions => [],
+            };
+        }
     }
 
     my $actions = $decoded->{actions};
@@ -325,11 +410,62 @@ sub run_plan {
 
     local $SIG{PIPE} = 'IGNORE';
 
-    eval {
-        print {$child_in} $stdin if defined $stdin && length $stdin;
-        close $child_in;
-        1;
-    };
+    my $deadline = time() + $timeout;
+
+    # mb221-B2: deadline-bounded, non-blocking stdin write. A blocking
+    # print to the child's stdin can deadlock the whole bot if the child never
+    # drains stdin while filling its own stdout (the parent blocks on print
+    # before the read loop's deadline ever starts). Today the payload is a tiny
+    # JSON envelope so this is not reachable, but we harden it now so a future
+    # larger payload cannot reintroduce the unbounded-hang class we just closed
+    # in mb220. If the child will not accept stdin before the deadline, treat it
+    # as a timeout and kill it.
+    my $stdin_timed_out = 0;
+    if (defined $stdin && length $stdin) {
+        my $wsel = IO::Select->new($child_in);
+        my $offset = 0;
+        my $len    = length $stdin;
+
+        eval {
+            my $flags = fcntl($child_in, F_GETFL, 0);
+            fcntl($child_in, F_SETFL, $flags | O_NONBLOCK) if defined $flags;
+            1;
+        };
+
+        while ($offset < $len) {
+            if (time() > $deadline) { $stdin_timed_out = 1; last; }
+
+            my @ready = $wsel->can_write(0.10);
+            next unless @ready;
+
+            my $wrote = syswrite($child_in, $stdin, $len - $offset, $offset);
+            if (!defined $wrote) {
+                # EAGAIN/EWOULDBLOCK -> retry; any other error -> stop writing.
+                next if $!{EAGAIN} || $!{EWOULDBLOCK};
+                last;
+            }
+            $offset += $wrote;
+        }
+    }
+    eval { close $child_in; 1; };
+
+    if ($stdin_timed_out) {
+        kill 'TERM', $pid;
+        sleep 0.2;
+        if (waitpid($pid, WNOHANG) == 0) {
+            kill 'KILL', $pid;
+            waitpid($pid, 0);
+        }
+        eval { close $child_out; 1; };
+        eval { close $child_err; 1; };
+        return {
+            ok       => 0,
+            timeout  => 1,
+            stdout   => '',
+            stderr   => '',
+            response => { ok => 0, errors => [ 'script timed out' ], actions => [] },
+        };
+    }
 
     my $selector = IO::Select->new();
     $selector->add($child_out);
@@ -340,7 +476,6 @@ sub run_plan {
     my $stdout_truncated = 0;
     my $stderr_truncated = 0;
     my $timed_out = 0;
-    my $deadline = time() + $timeout;
     my $already_waited = 0;
     my $wait_status = undef;
 
@@ -390,8 +525,32 @@ sub run_plan {
     }
 
     if (!$already_waited) {
-        waitpid($pid, 0);
-        $wait_status = $?;
+        # mb220-B1: bounded reap. A script can close stdout+stderr (which ends
+        # the select loop immediately at EOF) yet keep running — e.g. a script
+        # that does close STDOUT then close STDERR then sleeps for an hour. An
+        # unconditional waitpid($pid, 0) here would block the entire bot until
+        # that child exits on its own, completely defeating the timeout that is
+        # the whole point of ScriptRunner. Reap against the same deadline and
+        # escalate TERM -> KILL if it is exceeded.
+        while (1) {
+            my $w = waitpid($pid, WNOHANG);
+            if ($w == $pid) { $wait_status = $?; last; }
+            if ($w == -1)   { $wait_status = 0; last; }  # child already gone
+
+            if (time() > $deadline) {
+                $timed_out = 1;
+                kill 'TERM', $pid;
+                sleep 0.2;
+                if (waitpid($pid, WNOHANG) == 0) {
+                    kill 'KILL', $pid;
+                    waitpid($pid, 0);
+                }
+                $wait_status = $?;
+                last;
+            }
+
+            sleep 0.05;
+        }
     }
 
     my $exit_code = $timed_out ? undef : (($wait_status >> 8) & 0xff);
