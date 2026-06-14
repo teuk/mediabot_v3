@@ -64,6 +64,50 @@ sub once {
     return $self->on($event, $callback, %opts);
 }
 
+sub off {
+    my ($self, $event, $entry) = @_;
+
+    my $name = _event_name($event);
+    return 0 unless defined $name;
+    return 0 unless ref($entry) eq 'HASH';
+    return 0 unless exists $self->{listeners}{$name};
+
+    # mb242-B1: listener entries returned by on()/once() can now be removed by
+    # exact entry reference. Plugin replacement needs this so an old plugin
+    # instance can unregister only its own EventBus listener without touching
+    # the replacement listener registered during reload.
+    my $removed = 0;
+    my @keep;
+    for my $current (@{ $self->{listeners}{$name} || [] }) {
+        if (ref($current) eq 'HASH' && "$current" eq "$entry") {
+            $removed++;
+            next;
+        }
+        push @keep, $current;
+    }
+
+    if (@keep) {
+        $self->{listeners}{$name} = \@keep;
+    }
+    else {
+        delete $self->{listeners}{$name};
+    }
+
+    return $removed;
+}
+
+sub _drop_once_entries_from_current_list {
+    my ($self, $name, $snapshot) = @_;
+
+    return unless defined $name && ref($snapshot) eq 'ARRAY';
+
+    my %drop = map { ("$_" => 1) } grep { ref($_) eq 'HASH' && $_->{once} } @$snapshot;
+    return unless %drop;
+
+    my @current = @{ $self->{listeners}{$name} || [] };
+    $self->{listeners}{$name} = [ grep { !$drop{"$_"} } @current ];
+}
+
 sub emit {
     my ($self, $event, @args) = @_;
 
@@ -73,7 +117,6 @@ sub emit {
 
     my @listeners = @{ $self->{listeners}{$name} };
     my $ran = 0;
-    my @keep;
 
     for my $entry (@listeners) {
         eval {
@@ -82,10 +125,13 @@ sub emit {
         };
 
         $ran++;
-        push @keep, $entry unless $entry->{once};
     }
 
-    $self->{listeners}{$name} = \@keep;
+    # mb230-B2: do not rebuild the listener list from the initial snapshot.
+    # A plugin may register a listener while an event is being emitted. The new
+    # listener must not run in the current emit, but it must remain registered for
+    # the next one. Only one-shot listeners from the snapshot are removed.
+    $self->_drop_once_entries_from_current_list($name, \@listeners);
     return $ran;
 }
 
@@ -101,7 +147,6 @@ sub emit_report {
 
     my @listeners = @{ $self->{listeners}{$name} };
     my @errors;
-    my @keep;
     my $ran = 0;
 
     for my $entry (@listeners) {
@@ -122,11 +167,11 @@ sub emit_report {
                 error  => $err,
             };
         }
-
-        push @keep, $entry unless $entry->{once};
     }
 
-    $self->{listeners}{$name} = \@keep;
+    # mb230-B2: preserve listeners registered during emit_report as well.
+    # Only once-listeners that were part of the snapshot are removed.
+    $self->_drop_once_entries_from_current_list($name, \@listeners);
 
     return {
         event  => $name,

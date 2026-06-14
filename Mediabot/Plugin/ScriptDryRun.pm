@@ -23,6 +23,7 @@ sub register {
     my $self = bless {
         bot             => $bot,
         manager         => $opts{manager},
+        plugin_name     => $opts{name} || __PACKAGE__,
         script_path     => _conf_get_first(
             $bot ? $bot->{conf} : undef,
             'plugins.ScriptDryRun.SCRIPT',
@@ -84,6 +85,12 @@ sub register {
         last_error      => undef,
     }, $class;
 
+    # mb261-B1: SCRIPT is a single script path, not a list-like option.
+    # Config loaders can still hand us ARRAY refs; normalize to the first
+    # meaningful scalar value here so we never pass ARRAY(...)/HASH(...) to
+    # ScriptRunner path validation or route fallback.
+    $self->{script_path} = _first_config_scalar($self->{script_path});
+
     # mb182-B1: optional command allow-list for the ScriptDryRun bridge.
     # Empty or missing filter keeps the previous behavior: observe all commands.
     $self->{command_filter} = _make_command_filter($self->{command_filter_raw});
@@ -99,12 +106,19 @@ sub register {
     $self->{action_mode} = _normalize_action_mode($self->{action_mode_raw});
     $self->{allow_irc}   = _truthy($self->{allow_irc_raw});
 
-    # mb189-B1: optional extra safety gate. When enabled, ACTION_MODE=apply is
-    # refused unless COMMANDS or ROUTES restrict the public-command scope.
-    $self->{apply_require_scope} = _truthy($self->{apply_require_scope_raw});
+    # mb189-B1 + A3 (mb225): optional extra safety gate, now ENABLED BY DEFAULT.
+    # When enabled, ACTION_MODE=apply is refused unless COMMANDS or ROUTES
+    # restrict the public-command scope. An operator can still opt out
+    # explicitly with APPLY_REQUIRE_SCOPE=no. This closes the dangerous path
+    # where an unscoped apply-mode config would apply actions for every command.
+    $self->{apply_require_scope} = _truthy_with_default($self->{apply_require_scope_raw}, 1);
 
     if ($bot && $bot->can('events') && $bot->events) {
-        $bot->events->on(
+        # mb242-B2: keep the EventBus listener entry so a replaced plugin
+        # instance can unregister its own observer without removing the new
+        # replacement listener. This keeps PluginManager replace reloads from
+        # accumulating duplicate ScriptDryRun observers.
+        $self->{listener_entry} = $bot->events->on(
             public_command_observed => sub {
                 my ($ctx) = @_;
                 return $self->observe_public_command($ctx);
@@ -115,6 +129,43 @@ sub register {
     }
 
     return $self;
+}
+
+sub unregister {
+    my ($self, %opts) = @_;
+
+    my $entry = $self->{listener_entry};
+    return 0 unless ref($entry) eq 'HASH';
+
+    my $bot = $self->{bot};
+    return 0 unless $bot && $bot->can('events') && $bot->events && $bot->events->can('off');
+
+    my $removed = eval { $bot->events->off(public_command_observed => $entry) } || 0;
+    delete $self->{listener_entry} if $removed;
+
+    return $removed;
+}
+
+sub plugin_enabled {
+    my ($self) = @_;
+
+    # mb245-B1: a loaded EventBus listener must still honour PluginManager's
+    # enabled flag.  PluginManager::disable() only flips manager metadata; it
+    # does not rebuild EventBus subscriptions.  Without this guard, a disabled
+    # ScriptDryRun plugin could keep intercepting public commands through its
+    # existing listener.  If the plugin is not manager-registered (direct unit
+    # construction), keep the historical fail-open behaviour.
+    my $manager = $self->{manager};
+    return 1 unless $manager && eval { $manager->can('is_enabled') };
+
+    my $name = $self->{plugin_name} || __PACKAGE__;
+    my $registered = eval { $manager->can('plugin') ? $manager->plugin($name) : undef };
+    return 1 unless $registered;
+
+    my $enabled = eval { $manager->is_enabled($name) };
+    return 1 if $@;
+
+    return $enabled ? 1 : 0;
 }
 
 sub _conf_get_first {
@@ -162,6 +213,48 @@ sub _truthy {
     return 0;
 }
 
+# A3 (mb225): like _truthy, but distinguishes "not configured at all" (return
+# the supplied default) from an explicit true/false. Used so a safety gate can
+# default to enabled while still honoring an explicit opt-out.
+sub _truthy_with_default {
+    my ($value, $default) = @_;
+
+    for my $candidate (_flatten_config_values($value)) {
+        next unless defined $candidate;
+
+        my $v = lc "$candidate";
+        $v =~ s/^\s+|\s+$//g;
+        next unless length $v;
+
+        return 1 if $v =~ /\A(?:1|yes|true|on|enabled|enable)\z/;
+        return 0 if $v =~ /\A(?:0|no|false|off|disabled|disable)\z/;
+    }
+
+    return $default ? 1 : 0;
+}
+
+
+sub _first_config_scalar {
+    my ($value) = @_;
+
+    # mb261-B2: only plain scalar config values can become SCRIPT paths.
+    # COMMANDS/ROUTES are list-like and keep ARRAY support elsewhere, but SCRIPT
+    # must never be left as an ARRAY/HASH ref that later stringifies into
+    # ARRAY(0x...) or HASH(0x...) at the ScriptRunner boundary.
+    for my $candidate (_flatten_config_values($value)) {
+        next unless defined $candidate;
+        next if ref($candidate);
+
+        my $v = "$candidate";
+        $v =~ s/^\s+|\s+$//g;
+        next unless length $v;
+
+        return $v;
+    }
+
+    return undef;
+}
+
 sub _normalize_action_mode {
     my ($value) = @_;
 
@@ -203,6 +296,10 @@ sub _flatten_config_values {
             unshift @queue, @$entry;
             next;
         }
+
+        # mb261-B3: skip non-ARRAY refs instead of stringifying HASH(...) or
+        # blessed config objects into COMMANDS/ROUTES/booleans/SCRIPT helpers.
+        next if ref($entry);
 
         push @out, $entry;
     }
@@ -462,6 +559,12 @@ sub observe_public_command {
 
     my $bot = $self->{bot};
 
+    unless ($self->plugin_enabled) {
+        $self->{skipped_public}++;
+        $self->{last_error} = 'ScriptDryRun plugin is disabled';
+        return undef;
+    }
+
     unless ($bot && $bot->can('run_script_actions_dry')) {
         $self->{last_error} = 'bot cannot run script actions dry';
         return undef;
@@ -490,15 +593,38 @@ sub observe_public_command {
         return undef;
     }
 
+    # mb238-B1: do not mark a public command as handled in apply mode until
+    # the apply runtime is actually available.  Without this guard, a bad boot
+    # order or a partially initialized bot could swallow a routed script command
+    # before ScriptRunner/ScriptActionRunner were ready, preventing the legacy
+    # dispatcher from seeing the command and leaving the user with silence.
+    if ($self->action_mode eq 'apply') {
+        unless ($bot->can('script_runner') && $bot->script_runner && $bot->script_runner->can('run_script')) {
+            $self->{skipped_public}++;
+            $self->{last_error} = 'script runner is not initialized';
+            return undef;
+        }
+
+        unless ($bot->can('script_action_runner') && $bot->script_action_runner && $bot->script_action_runner->can('apply_actions')) {
+            $self->{skipped_public}++;
+            $self->{last_error} = 'script action runner cannot apply actions';
+            return undef;
+        }
+    }
+
     # mb196-B1: log before running the external script. If the script blocks or
     # times out, this line appears immediately and gives us the accepted route.
     $self->_log_bot(4, "PUBLIC(scriptdryrun): accepted command=$command script=$script_path mode=" . $self->action_mode . " allow_irc=" . $self->allow_irc);
 
-    # mb194-B1: once ScriptDryRun accepts a command through COMMANDS/ROUTES and
-    # finds a script for it, it owns that public command. This prevents the
-    # legacy DB/fallback path from logging "Public command ... not found" after a
-    # dry-run or apply-mode script command such as "m pyhello".
-    _ctx_mark_scriptdryrun_handled($ctx, undef, undef);
+    # mb194-B1 + A2 (mb225): once ScriptDryRun finds a script it runs it, but it
+    # only OWNS the public command (suppressing the legacy dispatcher) when the
+    # command is EXPLICITLY scoped via ROUTES or COMMANDS. A bare SCRIPT fallback
+    # with neither still runs for observation, but must not swallow arbitrary
+    # public commands — otherwise every public command would be intercepted and
+    # the legacy "command not found" path would never run (R1 footgun, present
+    # even in dry-run mode where _ctx_mark_scriptdryrun_handled was reached).
+    my $owns_command = $self->_command_is_scoped($command);
+    _ctx_mark_scriptdryrun_handled($ctx, undef, undef) if $owns_command;
 
     my %data = (
         channel => _ctx_value($ctx, 'channel', 'target'),
@@ -513,16 +639,6 @@ sub observe_public_command {
     my $apply_started_at;
 
     if ($self->action_mode eq 'apply') {
-        unless ($bot->can('script_runner') && $bot->script_runner && $bot->script_runner->can('run_script')) {
-            $self->{last_error} = 'script runner is not initialized';
-            return undef;
-        }
-
-        unless ($bot->can('script_action_runner') && $bot->script_action_runner && $bot->script_action_runner->can('apply_actions')) {
-            $self->{last_error} = 'script action runner cannot apply actions';
-            return undef;
-        }
-
         $run_started_at = time();
         my $script_result = $bot->script_runner->run_script(
             $script_path,
@@ -578,7 +694,7 @@ sub observe_public_command {
 
     $self->{last_result} = $result;
     $self->{last_error}  = undef;
-    _ctx_mark_scriptdryrun_handled($ctx, $result, undef);
+    _ctx_mark_scriptdryrun_handled($ctx, $result, undef) if $owns_command;
 
     return $result;
 }
@@ -697,6 +813,21 @@ sub command_allowed {
     }
 
     return defined($self->{script_path}) && length("$self->{script_path}") ? 1 : 0;
+}
+
+# A2 (mb225): true only when the command is explicitly scoped (routed or in the
+# COMMANDS allow-list). Used to decide whether ScriptDryRun OWNS the public
+# command (i.e. suppresses the legacy dispatcher). A bare SCRIPT fallback alone
+# never owns a command.
+sub _command_is_scoped {
+    my ($self, $command) = @_;
+
+    my $normalized = _normalize_command_name($command);
+    return 0 unless length $normalized;
+
+    return 1 if $self->command_routes->{$normalized};
+    return 1 if $self->command_filter->{$normalized};
+    return 0;
 }
 
 

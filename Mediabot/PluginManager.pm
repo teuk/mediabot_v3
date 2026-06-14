@@ -4,6 +4,8 @@ use strict;
 use warnings;
 use utf8;
 
+use Scalar::Util qw(refaddr);
+
 # ---------------------------------------------------------------------------
 # Mediabot::PluginManager
 # ---------------------------------------------------------------------------
@@ -35,6 +37,22 @@ sub plugin_dir {
     return $self->{plugin_dir};
 }
 
+sub _same_plugin_object {
+    my ($left, $right) = @_;
+
+    # mb258-B1: plugin lifecycle identity must be reference identity, not
+    # stringification. Plugin objects may overload stringification; two
+    # different objects can stringify to the same value and must still be
+    # treated as different instances for unregister/replace cleanup.
+    return 0 unless ref($left) && ref($right);
+
+    my $left_id  = eval { refaddr($left) };
+    my $right_id = eval { refaddr($right) };
+
+    return 0 unless defined $left_id && defined $right_id;
+    return $left_id == $right_id ? 1 : 0;
+}
+
 sub _name {
     my ($name) = @_;
     return undef unless defined $name;
@@ -53,6 +71,16 @@ sub register_plugin {
         die "PluginManager: plugin '$name' already registered\n";
     }
 
+    # mb247-B1: direct register_plugin(..., replace => 1) must also clean the
+    # replaced plugin object's runtime hooks.  load_perl_module() already has
+    # a deferred cleanup path because it must avoid destructive pre-cleanup if
+    # require/register fails; direct register_plugin() has no such load phase,
+    # so the old object can be unregistered immediately after the replacement
+    # entry is installed.
+    my $previous_entry = ($args{replace} && exists $self->{plugins}{$name})
+        ? $self->{plugins}{$name}
+        : undef;
+
     my $entry = {
         name        => $name,
         module      => $args{module},
@@ -68,6 +96,30 @@ sub register_plugin {
     }
 
     $self->{plugins}{$name} = $entry;
+
+    # mb248-B1: a same-object replace is a metadata refresh, not an unload.
+    # If register_plugin(..., replace => 1) is called with the exact same
+    # plugin object that is already registered, calling unregister() here would
+    # tear down the still-current object's EventBus listener. Only clean up when
+    # the replacement object is different from the previous one.
+    my $previous_object = $previous_entry ? $previous_entry->{object} : undef;
+    my $replacement_object = $entry->{object};
+    my $replacement_is_same_object = _same_plugin_object($previous_object, $replacement_object);
+
+    if ($previous_entry
+        && !$args{defer_unregister_cleanup}
+        && ref($previous_object)
+        && !$replacement_is_same_object
+        && eval { $previous_object->can('unregister') }) {
+        my $ok = eval { $previous_object->unregister(manager => $self); 1 };
+        if (!$ok) {
+            my $err = $@ || 'plugin unregister failed';
+            $err =~ s/[\r\n\0]+/ /g;
+            $err =~ s/^\s+|\s+$//g;
+            $entry->{metadata}{replace_cleanup_error} = substr($err, 0, 240);
+        }
+    }
+
     return $entry;
 }
 
@@ -82,6 +134,22 @@ sub unregister_plugin {
     my $key = _name($name);
     return 0 unless defined $key;
     return 0 unless exists $self->{plugins}{$key};
+
+    my $entry = $self->{plugins}{$key};
+
+    # mb244-B1: explicit plugin unregister must also give the plugin object a
+    # chance to remove runtime hooks such as EventBus listeners.  MB242 already
+    # cleaned the replace=>1 path; this closes the direct unregister_plugin()
+    # path so a disabled/unloaded plugin cannot leave ghost observers behind.
+    if ($entry && ref($entry->{object}) && eval { $entry->{object}->can('unregister') }) {
+        my $ok = eval { $entry->{object}->unregister(manager => $self); 1 };
+        if (!$ok) {
+            my $err = $@ || 'plugin unregister failed';
+            $err =~ s/[\r\n\0]+/ /g;
+            $err =~ s/^\s+|\s+$//g;
+            $entry->{metadata}{unregister_error} = substr($err, 0, 240);
+        }
+    }
 
     delete $self->{plugins}{$key};
     @{ $self->{order} } = grep { $_ ne $key } @{ $self->{order} };
@@ -320,6 +388,26 @@ sub load_perl_module {
     die "PluginManager: invalid module name '$module'\n"
         unless _valid_module_name($module);
 
+    my $name = $opts{name} || $module;
+    my $key  = _name($name);
+    die "PluginManager: missing plugin name\n" unless defined $key;
+
+    # mb233-B1: reject duplicate plugin loads before require/register. A plugin
+    # module may perform registration side effects from its register() method,
+    # for example adding EventBus listeners. The old flow called register()
+    # first and only rejected the duplicate in register_plugin(), which meant a
+    # failed duplicate load could still leave runtime side effects behind.
+    die "PluginManager: plugin '$key' already registered\n"
+        if exists $self->{plugins}{$key} && !$opts{replace};
+
+    # mb242-B3: when replacing a plugin, remember the old object so it can
+    # unregister its own runtime hooks after the replacement has registered.
+    # This keeps reloads from accumulating EventBus listeners while avoiding a
+    # destructive pre-cleanup if the new module fails to load/register.
+    my $previous_entry = ($opts{replace} && exists $self->{plugins}{$key})
+        ? $self->{plugins}{$key}
+        : undef;
+
     my $file = $module;
     $file =~ s{::}{/}g;
     $file .= '.pm';
@@ -331,14 +419,17 @@ sub load_perl_module {
 
     die "PluginManager: failed to load $module: $@\n" unless $ok;
 
-    my $name = $opts{name} || $module;
-
     my $object;
     if ($module->can('register')) {
-        $object = $module->register($self->{bot}, manager => $self);
+        # mb245-B2: tell the plugin the manager-facing name used for this
+        # registration.  Plugins such as ScriptDryRun can then honour the
+        # PluginManager enabled/disabled flag even when loaded under a custom
+        # explicit name.  This does not change the historical default module
+        # name registration path.
+        $object = $module->register($self->{bot}, manager => $self, name => $name);
     }
 
-    return $self->register_plugin(
+    my $entry = $self->register_plugin(
         name        => $name,
         module      => $module,
         object      => $object,
@@ -347,7 +438,32 @@ sub load_perl_module {
         enabled     => exists $opts{enabled} ? $opts{enabled} : 1,
         metadata    => $opts{metadata},
         replace     => $opts{replace},
+        defer_unregister_cleanup => 1,
     );
+
+    # mb249-B1: load_perl_module(..., replace => 1) must mirror the
+    # same-object guard already present in direct register_plugin(). Some
+    # plugins may return a singleton/current object from register(); in that
+    # case the replacement is only a metadata refresh and calling unregister()
+    # on the previous object would tear down the still-current plugin hooks.
+    my $previous_object = $previous_entry ? $previous_entry->{object} : undef;
+    my $replacement_object = $entry->{object};
+    my $replacement_is_same_object = _same_plugin_object($previous_object, $replacement_object);
+
+    if ($previous_entry
+        && ref($previous_object)
+        && !$replacement_is_same_object
+        && eval { $previous_object->can('unregister') }) {
+        my $ok = eval { $previous_object->unregister(manager => $self); 1 };
+        if (!$ok) {
+            my $err = $@ || 'plugin unregister failed';
+            $err =~ s/[\r\n\0]+/ /g;
+            $err =~ s/^\s+|\s+$//g;
+            $entry->{metadata}{replace_cleanup_error} = substr($err, 0, 240);
+        }
+    }
+
+    return $entry;
 }
 
 1;

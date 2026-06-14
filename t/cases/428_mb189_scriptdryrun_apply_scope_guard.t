@@ -224,8 +224,11 @@ my $case = sub {
     $bot_legacy->plugin_manager->load_perl_module('Mediabot::Plugin::ScriptDryRun');
     my $legacy = $bot_legacy->plugin_manager->object_for('Mediabot::Plugin::ScriptDryRun');
 
-    $assert->(!$legacy->apply_require_scope,
-        'APPLY_REQUIRE_SCOPE defaults to false for backward compatibility');
+    # A3 (mb225): APPLY_REQUIRE_SCOPE now defaults to ENABLED. An unscoped
+    # apply-mode config (SCRIPT only, no COMMANDS/ROUTES) is therefore refused
+    # by the scope guard by default.
+    $assert->($legacy->apply_require_scope,
+        'APPLY_REQUIRE_SCOPE defaults to enabled (A3 mb225 security default)');
 
     $bot_legacy->events->emit_report('public_command_observed', {
         channel => '#teuk',
@@ -234,10 +237,12 @@ my $case = sub {
         args    => [],
     });
 
-    $assert->($legacy->last_result && $legacy->last_result->{ok},
-        'legacy unscoped apply mode still runs when APPLY_REQUIRE_SCOPE is not enabled');
-    $assert->(@{ $irc_legacy->sent } == 1,
-        'legacy unscoped apply mode still sends IRC when allow_irc is enabled');
+    $assert->(!($legacy->last_result && $legacy->last_result->{ok}),
+        'unscoped apply mode no longer runs the pipeline by default (A3 mb225)');
+    $assert->(@{ $irc_legacy->sent } == 0,
+        'unscoped apply mode no longer sends IRC by default (A3 mb225)');
+    $assert->($legacy->last_error && $legacy->last_error =~ /requires COMMANDS or ROUTES/,
+        'unscoped apply mode records the scope-guard error by default (A3 mb225)');
 
     my $src_file = File::Spec->catfile($root, 'Mediabot', 'Plugin', 'ScriptDryRun.pm');
     open my $sfh, '<', $src_file

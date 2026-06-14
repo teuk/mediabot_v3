@@ -39,11 +39,27 @@ sub new {
     $max_stdout = 1024    if $max_stdout < 1024;
     $max_stdout = 1048576 if $max_stdout > 1048576;
 
+    # mb246-B1: keep stdin bounded at the runner boundary too. Normal
+    # ScriptDryRun payloads are tiny IRC event envelopes, but run_plan() is a
+    # public internal execution boundary and can receive handcrafted plans in
+    # tests or future plugins. Refuse oversized stdin before spawning a child.
+    # The upper bound stays above the historical mb221 stress payload so that
+    # the deadline-bounded nonblocking stdin path remains covered by tests.
+    my $max_stdin = defined $args{max_stdin_bytes} ? int($args{max_stdin_bytes}) : 4194304;
+    $max_stdin = 1024    if $max_stdin < 1024;
+    $max_stdin = 4194304 if $max_stdin > 4194304;
+
+    my $max_actions = defined $args{max_actions} ? int($args{max_actions}) : 20;
+    $max_actions = 1  if $max_actions < 1;
+    $max_actions = 50 if $max_actions > 50;
+
     return bless {
         bot              => $args{bot},
         script_dir       => $script_dir,
         timeout          => $timeout,
         max_stdout_bytes => $max_stdout,
+        max_stdin_bytes  => $max_stdin,
+        max_actions      => $max_actions,
         allowed_actions  => {
             reply  => 1,
             notice => 1,
@@ -71,6 +87,16 @@ sub timeout {
 sub max_stdout_bytes {
     my ($self) = @_;
     return $self->{max_stdout_bytes};
+}
+
+sub max_stdin_bytes {
+    my ($self) = @_;
+    return $self->{max_stdin_bytes} || 65536;
+}
+
+sub max_actions {
+    my ($self) = @_;
+    return $self->{max_actions} || 20;
 }
 
 sub language_for {
@@ -104,33 +130,54 @@ sub validate_script_path {
 
     my $full_path = $self->{script_dir} . '/' . $p;
 
-    # mb221-B1: containment check against symlink escape. The lexical checks
-    # above stop textual traversal ('..', absolute, backslash), but a symlink
-    # placed inside script_dir can still point outside it. Resolve the real
-    # path of both the script and script_dir and require the script to live
-    # under script_dir. We only enforce this when the file actually exists:
-    # a not-yet-created script stays allowed at validation time and will fail
-    # cleanly later at exec.
-    if (-e $full_path) {
-        my $real_script = Cwd::abs_path($full_path);
-        my $real_dir    = Cwd::abs_path($self->{script_dir});
-
-        if (!defined $real_script || !defined $real_dir) {
-            return (0, 'unable to resolve script path');
-        }
-
-        # Normalize to a trailing slash so a prefix match cannot be fooled by
-        # a sibling directory sharing the same prefix (e.g. scripts vs scripts2).
-        my $dir_prefix = $real_dir;
-        $dir_prefix .= '/' unless $dir_prefix =~ m{/\z};
-
-        unless ($real_script eq $real_dir
-             || index($real_script, $dir_prefix) == 0) {
-            return (0, 'script path escapes script directory');
-        }
-    }
+    # mb221-B1 + A4 (mb225): containment check against symlink escape, for both
+    # existing and not-yet-created scripts. The lexical checks above stop
+    # textual traversal ('..', absolute, backslash), but a symlink placed inside
+    # script_dir (the script file itself, OR an intermediate directory) can
+    # still point outside it. We resolve the deepest existing path along
+    # full_path (the file if present, else its nearest existing ancestor
+    # directory) and require it to remain within script_dir. Resolving the
+    # ancestor closes the TOCTOU gap where a symlinked subdirectory is created
+    # before the script file (mb221 only checked when the file existed).
+    my ($contained, $cerr) = $self->_path_within_script_dir($full_path);
+    return (0, $cerr) unless $contained;
 
     return (1, undef, $lang, $full_path);
+}
+
+# A4 (mb225): true when full_path resolves within script_dir, resolving
+# symlinks. Works even if the script file does not exist yet by checking its
+# deepest existing ancestor directory.
+sub _path_within_script_dir {
+    my ($self, $full_path) = @_;
+
+    my $real_dir = Cwd::abs_path($self->{script_dir});
+    return (0, 'unable to resolve script path') unless defined $real_dir;
+
+    my $dir_prefix = $real_dir;
+    $dir_prefix .= '/' unless $dir_prefix =~ m{/\z};
+
+    # Walk up to the deepest existing path component.
+    my $probe = $full_path;
+    while (length $probe && !-e $probe) {
+        my $next = $probe;
+        $next =~ s{/[^/]+/?\z}{};
+        last if !length $next || $next eq $probe;
+        $probe = $next;
+    }
+
+    # Nothing exists to resolve (script_dir itself missing): lexical checks
+    # already passed, let the later exec fail cleanly.
+    return (1, undef) unless length $probe && -e $probe;
+
+    my $real_probe = Cwd::abs_path($probe);
+    return (0, 'unable to resolve script path') unless defined $real_probe;
+
+    unless (index($real_probe . '/', $dir_prefix) == 0) {
+        return (0, 'script path escapes script directory');
+    }
+
+    return (1, undef);
 }
 
 sub build_event_payload {
@@ -151,24 +198,63 @@ sub encode_event_payload {
     return encode_json($payload || {});
 }
 
+
+sub _decode_ok_field {
+    my ($value) = @_;
+
+    # mb252-B1: if a script chooses to declare an explicit top-level ok field,
+    # keep that field to the JSON contract: a real JSON boolean, or the legacy
+    # numeric 0/1 scalar.  Arrays/objects/strings such as "true" must not become
+    # truthy by Perl accident and allow actions to pass as successful output.
+    if (ref($value)) {
+        return (1, $value ? 1 : 0) if eval { $value->isa('JSON::PP::Boolean') };
+        return (0, undef);
+    }
+
+    return (1, 0) if defined $value && "$value" eq '0';
+    return (1, 1) if defined $value && "$value" eq '1';
+
+    return (0, undef);
+}
+
+sub _script_error_text {
+    my ($err) = @_;
+
+    return '' unless defined $err;
+
+
+    # mb256-B1: script response diagnostics are part of the JSON contract.
+    # Error entries must be scalar text values; arrays/objects must not be
+    # stringified into HASH or ARRAY memory-address placeholders and then shown
+    # in logs, partyline status, or action-layer diagnostics.
+    return '' if ref($err);
+    my $text = "$err";
+    $text =~ s/[\r\n\0]+/ /g;
+    $text =~ s/^\s+|\s+$//g;
+    $text = substr($text, 0, 240) if length($text) > 240;
+
+    return $text;
+}
+
 sub _normalized_response_errors {
     my ($errors, $fallback) = @_;
 
+    # mb239-B1: keep script-declared failure details bounded. A compact JSON
+    # response can contain a very large errors array even when stdout itself is
+    # capped. Preserve useful diagnostics, but never expose an unbounded error
+    # list to ScriptActionRunner, partyline rendering, or logs.
     my @out;
+    my $max_errors = 20;
 
     if (ref($errors) eq 'ARRAY') {
         for my $err (@$errors) {
-            next unless defined $err;
-            my $text = "$err";
-            $text =~ s/[\r\n]+/ /g;
-            $text =~ s/^\s+|\s+$//g;
+            last if @out >= $max_errors;
+            my $text = _script_error_text($err);
             push @out, $text if length $text;
         }
     }
     elsif (defined $errors) {
-        my $text = "$errors";
-        $text =~ s/[\r\n]+/ /g;
-        $text =~ s/^\s+|\s+$//g;
+        my $text = _script_error_text($errors);
         push @out, $text if length $text;
     }
 
@@ -196,17 +282,47 @@ sub decode_script_response {
         };
     }
 
+    # mb253-B1: optional response protocol guard. Legacy scripts may omit
+    # protocol to stay compatible, but if a script declares a protocol it must
+    # be the exact Mediabot script protocol. This prevents future protocol
+    # variants or nested JSON values from being accepted accidentally.
+    if (exists $decoded->{protocol}) {
+        return {
+            ok      => 0,
+            errors  => [ 'protocol must be scalar' ],
+            actions => [],
+        } if ref($decoded->{protocol});
+
+        my $protocol = "$decoded->{protocol}";
+        $protocol =~ s/^\s+|\s+$//g;
+
+        return {
+            ok      => 0,
+            errors  => [ 'unsupported script response protocol' ],
+            actions => [],
+        } unless $protocol eq 'mediabot-script-v1';
+    }
+
     # mb226-B1: respect a script-declared failure before trusting actions.
     # Older demo scripts may omit ok/errors entirely, so absence of ok remains
     # the legacy success-by-valid-actions contract. But if a script explicitly
     # returns ok=false or returns errors, the response is failed and no actions
     # are exposed to the action layer.
-    if (exists $decoded->{ok} && !$decoded->{ok}) {
+    if (exists $decoded->{ok}) {
+        my ($ok_field_valid, $ok_field_value) = _decode_ok_field($decoded->{ok});
         return {
             ok      => 0,
-            errors  => _normalized_response_errors($decoded->{errors}, 'script response reported failure'),
+            errors  => [ 'ok must be a JSON boolean or 0/1 scalar' ],
             actions => [],
-        };
+        } unless $ok_field_valid;
+
+        if (!$ok_field_value) {
+            return {
+                ok      => 0,
+                errors  => _normalized_response_errors($decoded->{errors}, 'script response reported failure'),
+                actions => [],
+            };
+        }
     }
 
     if (defined $decoded->{errors}) {
@@ -236,6 +352,19 @@ sub decode_script_response {
         actions => [],
     } unless ref($actions) eq 'ARRAY';
 
+    # mb237-B1: cap the number of actions accepted from one external script
+    # response. The stdout byte cap limits raw data size, but a compact JSON
+    # response could still ask Mediabot to plan/apply a large number of IRC/log
+    # actions. Keep the protocol bounded: one script invocation may only return
+    # a small, predictable action list.
+    if (@$actions > $self->max_actions) {
+        return {
+            ok      => 0,
+            errors  => [ 'too many actions in script response' ],
+            actions => [],
+        };
+    }
+
     my @valid;
     my @errors;
 
@@ -248,12 +377,24 @@ sub decode_script_response {
         }
 
         my $type = $action->{type};
+
+        # mb254-B1: keep action type itself in the JSON scalar contract.
+        # ScriptActionRunner also validates action fields later, but ScriptRunner
+        # is the protocol boundary that decides which actions are exposed at all.
+        # Do not stringify ARRAY/HASH/boolean objects into ARRAY(0x...) or HASH(0x...)
+        # while classifying action types.
+        if (ref($type)) {
+            push @errors, "action[$idx] type must be scalar";
+            next;
+        }
+
         if (!defined $type || !length "$type") {
             push @errors, "action[$idx] missing type";
             next;
         }
 
         $type = lc "$type";
+        $type =~ s/^\s+|\s+$//g;
         if (!$self->{allowed_actions}{$type}) {
             push @errors, "action[$idx] unsupported type '$type'";
             next;
@@ -323,6 +464,7 @@ sub build_execution_plan {
         command          => \@command,
         stdin            => $json,
         timeout          => $self->{timeout},
+        max_stdin_bytes  => $self->{max_stdin_bytes},
         max_stdout_bytes => $self->{max_stdout_bytes},
     };
 }
@@ -356,37 +498,111 @@ sub _append_capped {
     $$buffer_ref .= $chunk;
 }
 
+sub _run_plan_failure {
+    my ($error) = @_;
+    $error = 'invalid execution plan' unless defined $error && length "$error";
+
+    return {
+        ok       => 0,
+        error    => $error,
+        timeout  => 0,
+        stdout   => '',
+        stderr   => '',
+        response => { ok => 0, errors => [ $error ], actions => [] },
+    };
+}
+
+sub _argv_same {
+    my ($left, $right) = @_;
+
+    return 0 unless ref($left) eq 'ARRAY' && ref($right) eq 'ARRAY';
+    return 0 unless @$left == @$right;
+
+    for my $idx (0 .. $#$left) {
+        return 0 unless defined $left->[$idx] && defined $right->[$idx];
+        return 0 unless "$left->[$idx]" eq "$right->[$idx]";
+    }
+
+    return 1;
+}
+
+sub _validate_execution_plan_for_run {
+    my ($self, $plan) = @_;
+
+    return 'invalid execution plan'
+        unless ref($plan) eq 'HASH' && $plan->{ok};
+
+    # mb241-B1: run_plan is an execution boundary, not only a helper for plans
+    # produced by build_execution_plan.  A future internal caller must not be
+    # able to hand it an arbitrary argv such as a shell command.  Re-validate
+    # the script path and require the argv to be exactly the interpreter plus
+    # the validated script path.
+    return 'missing script in execution plan'
+        unless defined $plan->{script} && length "$plan->{script}";
+
+    my ($ok, $err, $language, $full_path) = $self->validate_script_path($plan->{script});
+    return $err unless $ok;
+
+    my $plan_language = defined $plan->{language} ? lc "$plan->{language}" : '';
+    $plan_language =~ s/^\s+|\s+$//g;
+    return 'execution plan language mismatch'
+        unless length($plan_language) && $plan_language eq $language;
+
+    my $plan_full_path = defined $plan->{full_path} ? "$plan->{full_path}" : '';
+    return 'execution plan full path mismatch'
+        unless length($plan_full_path) && $plan_full_path eq $full_path;
+
+    my $interp = $self->interpreter_for_language($language);
+    return "no interpreter configured for language '$language'"
+        unless $interp && ref($interp) eq 'ARRAY' && @$interp;
+
+    my @expected = (@$interp, $full_path);
+    return 'execution plan command must be an array'
+        unless ref($plan->{command}) eq 'ARRAY';
+
+    return 'execution plan command does not match validated script path'
+        unless _argv_same($plan->{command}, \@expected);
+
+    return undef;
+}
+
 sub run_plan {
     my ($self, $plan) = @_;
 
-    return {
-        ok       => 0,
-        error    => 'invalid execution plan',
-        timeout  => 0,
-        stdout   => '',
-        stderr   => '',
-        response => { ok => 0, errors => [ 'invalid execution plan' ], actions => [] },
-    } unless ref($plan) eq 'HASH' && $plan->{ok};
+    my $plan_error = $self->_validate_execution_plan_for_run($plan);
+    return _run_plan_failure($plan_error) if defined $plan_error;
 
-    my @cmd = @{ $plan->{command} || [] };
-    return {
-        ok       => 0,
-        error    => 'empty command argv',
-        timeout  => 0,
-        stdout   => '',
-        stderr   => '',
-        response => { ok => 0, errors => [ 'empty command argv' ], actions => [] },
-    } unless @cmd;
+    my @cmd = @{ $plan->{command} };
+
+    # mb257-B1: stdin is part of the internal execution-plan contract and
+    # must be scalar bytes/text.  Do not stringify ARRAY/HASH refs into
+    # ARRAY(0x...) or HASH(0x...) and feed that to an external process.
+    return _run_plan_failure('stdin must be scalar')
+        if exists $plan->{stdin} && ref($plan->{stdin});
 
     my $stdin      = defined $plan->{stdin} ? $plan->{stdin} : '';
     my $timeout    = defined $plan->{timeout} ? int($plan->{timeout}) : $self->{timeout};
+    my $max_stdin  = defined $plan->{max_stdin_bytes} ? int($plan->{max_stdin_bytes}) : $self->{max_stdin_bytes};
     my $max_stdout = defined $plan->{max_stdout_bytes} ? int($plan->{max_stdout_bytes}) : $self->{max_stdout_bytes};
     my $max_stderr = defined $plan->{max_stderr_bytes} ? int($plan->{max_stderr_bytes}) : $self->{max_stdout_bytes};
 
     $timeout    = 1       if $timeout < 1;
     $timeout    = 30      if $timeout > 30;
+    $max_stdin  = 1024    if $max_stdin < 1024;
+    $max_stdin  = 4194304 if $max_stdin > 4194304;
     $max_stdout = 1024    if $max_stdout < 1024;
+    $max_stdout = 1048576 if $max_stdout > 1048576;
     $max_stderr = 1024    if $max_stderr < 1024;
+    $max_stderr = 1048576 if $max_stderr > 1048576;
+
+    if (defined $stdin && length($stdin) > $max_stdin) {
+        return _run_plan_failure('stdin too large');
+    }
+
+    # mb236-B1: clamp runtime output caps even when run_plan() receives a
+    # handcrafted execution plan. build_execution_plan() already creates sane
+    # limits, but tests, plugins or future internal callers can pass a plan
+    # directly. Never let max_stdout_bytes/max_stderr_bytes become unbounded.
 
     # mb176-B1: real subprocess execution, but still with the boundaries laid by
     # mb174/mb175: validated path, argv array only, no shell, JSON stdin,
@@ -579,7 +795,17 @@ sub run_script {
     my $plan = $self->run_dry($script_path, $event, %data);
     return $plan unless ref($plan) eq 'HASH' && $plan->{ok};
 
-    return $self->run_plan($plan);
+    my $result = $self->run_plan($plan);
+
+    # A5 (mb225): expose the resolved language and validated absolute path in
+    # the result for observability (.scriptdryrun last, logs). Additive fields;
+    # callers that ignore them are unaffected.
+    if (ref($result) eq 'HASH') {
+        $result->{lang}          = $plan->{language}  if defined $plan->{language};
+        $result->{resolved_path} = $plan->{full_path} if defined $plan->{full_path};
+    }
+
+    return $result;
 }
 
 

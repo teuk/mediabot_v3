@@ -56,6 +56,7 @@ sub register_command {
         unless ref($handler) eq 'CODE';
 
     my @aliases;
+    my %seen_alias;
     if (defined $args{aliases}) {
         die "CommandRegistry: aliases for '$name' must be an ARRAY reference\n"
             unless ref($args{aliases}) eq 'ARRAY';
@@ -64,6 +65,7 @@ sub register_command {
             my $a = _name($alias);
             next unless defined $a;
             next if $a eq $name;
+            next if $seen_alias{$a}++;
             push @aliases, $a;
         }
     }
@@ -71,14 +73,40 @@ sub register_command {
     $self->{commands}{$source} ||= {};
     $self->{aliases}{$source}  ||= {};
 
-    if (exists $self->{commands}{$source}{$name} && !$args{replace}) {
+    my $replacing_existing = exists $self->{commands}{$source}{$name} ? 1 : 0;
+    if ($replacing_existing && !$args{replace}) {
         die "CommandRegistry: command '$name' already registered for source '$source'\n";
     }
 
+    # mb230-B1: replacing a command must not leave stale aliases behind, and
+    # replace must not steal aliases/canonical names owned by another command.
+    # This matters for plugins because a reload can legitimately replace a
+    # command definition with a new alias set; old aliases must disappear instead
+    # of continuing to dispatch to the replaced command.
+    #
+    # mb231-B1: failed replacements must be atomic. Validate the new alias set
+    # before deleting aliases from the currently registered command. Otherwise a
+    # plugin reload that tries to replace a command with a conflicting alias could
+    # die halfway through and leave the old command alive but stripped of its old
+    # aliases. That would be a silent command-dispatch regression.
     for my $alias (@aliases) {
+        if (exists $self->{commands}{$source}{$alias} && $alias ne $name) {
+            die "CommandRegistry: alias '$alias' conflicts with command '$alias' for source '$source'
+";
+        }
+
         my $existing = $self->{aliases}{$source}{$alias};
-        if (defined $existing && $existing ne $name && !$args{replace}) {
-            die "CommandRegistry: alias '$alias' already points to '$existing' for source '$source'\n";
+        if (defined $existing && $existing ne $name) {
+            die "CommandRegistry: alias '$alias' already points to '$existing' for source '$source'
+";
+        }
+    }
+
+    if ($replacing_existing && $args{replace}) {
+        for my $alias (keys %{ $self->{aliases}{$source} }) {
+            delete $self->{aliases}{$source}{$alias}
+                if defined $self->{aliases}{$source}{$alias}
+                && $self->{aliases}{$source}{$alias} eq $name;
         }
     }
 
