@@ -53,9 +53,36 @@ sub _same_plugin_object {
     return $left_id == $right_id ? 1 : 0;
 }
 
+
+sub _plugin_error_text {
+    my ($err, $fallback) = @_;
+
+    # mb279-B1: plugin lifecycle diagnostics are rendered to operators and
+    # commit/preflight reports. Perl can die with HASH/ARRAY/blessed refs; do
+    # not stringify those into HASH(...)/ARRAY(...) placeholders. Keep useful
+    # scalar errors single-line and bounded, otherwise use a stable fallback.
+    $fallback ||= 'plugin error';
+    return $fallback unless defined $err;
+    return $fallback if ref($err);
+
+    my $text = "$err";
+    $text =~ s/[\r\n\0]+/ /g;
+    $text =~ s/\s+/ /g;
+    $text =~ s/^\s+|\s+$//g;
+
+    return $fallback unless length $text;
+    return substr($text, 0, 240);
+}
+
 sub _name {
     my ($name) = @_;
+
+    # mb276-B1: plugin names are plugin-manager identifiers, not arbitrary
+    # Perl references.  Do not let ARRAY/HASH/blessed refs stringify into
+    # pseudo plugin names such as ARRAY(0x...) or HASH(0x...).
     return undef unless defined $name;
+    return undef if ref($name);
+
     $name =~ s/^\s+|\s+$//g;
     return undef unless length $name;
     return lc $name;
@@ -63,6 +90,8 @@ sub _name {
 
 sub register_plugin {
     my ($self, %args) = @_;
+
+    die "PluginManager: plugin name must be scalar\n" if ref($args{name});
 
     my $name = _name($args{name});
     die "PluginManager: missing plugin name\n" unless defined $name;
@@ -113,10 +142,7 @@ sub register_plugin {
         && eval { $previous_object->can('unregister') }) {
         my $ok = eval { $previous_object->unregister(manager => $self); 1 };
         if (!$ok) {
-            my $err = $@ || 'plugin unregister failed';
-            $err =~ s/[\r\n\0]+/ /g;
-            $err =~ s/^\s+|\s+$//g;
-            $entry->{metadata}{replace_cleanup_error} = substr($err, 0, 240);
+            $entry->{metadata}{replace_cleanup_error} = _plugin_error_text($@, 'plugin unregister failed');
         }
     }
 
@@ -144,10 +170,7 @@ sub unregister_plugin {
     if ($entry && ref($entry->{object}) && eval { $entry->{object}->can('unregister') }) {
         my $ok = eval { $entry->{object}->unregister(manager => $self); 1 };
         if (!$ok) {
-            my $err = $@ || 'plugin unregister failed';
-            $err =~ s/[\r\n\0]+/ /g;
-            $err =~ s/^\s+|\s+$//g;
-            $entry->{metadata}{unregister_error} = substr($err, 0, 240);
+            $entry->{metadata}{unregister_error} = _plugin_error_text($@, 'plugin unregister failed');
         }
     }
 
@@ -234,7 +257,12 @@ sub count {
 sub _valid_module_name {
     my ($module) = @_;
 
-    return 0 unless defined $module && length $module;
+    # mb276-B2: module names are Perl module identifiers and must be scalars.
+    # Reject references before regex validation so diagnostics do not contain
+    # stringified ARRAY(...)/HASH(...) pseudo module names.
+    return 0 unless defined $module;
+    return 0 if ref($module);
+    return 0 unless length $module;
     return $module =~ /\A[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*\z/ ? 1 : 0;
 }
 
@@ -258,6 +286,12 @@ sub _split_plugin_list {
             next;
         }
 
+        # mb266-B1: plugin list configuration is a scalar/list contract.  A
+        # HASH/blessed ref must not be stringified into HASH(0x...) and reported
+        # as an invalid plugin module, nor should it be considered meaningful by
+        # fallback selection.  Keep ARRAY support, skip every other reference.
+        next if ref($entry);
+
         push @raw, $entry;
     }
 
@@ -276,6 +310,15 @@ sub _split_plugin_list {
 }
 
 
+sub _plugin_conf_has_meaningful_scalar {
+    my ($value) = @_;
+
+    # mb266-B2: fallback-key selection must use the same scalar/list contract as
+    # _split_plugin_list().  Empty ARRAY refs and HASH/blessed refs from an early
+    # config spelling must not mask a later legacy/alias key that contains the
+    # real plugin list.
+    return scalar(_split_plugin_list($value)) ? 1 : 0;
+}
 
 sub _conf_get_first {
     my ($conf, @keys) = @_;
@@ -297,7 +340,7 @@ sub _conf_get_first {
         };
 
         next unless $ok;
-        return $value if defined $value && length "$value";
+        return $value if _plugin_conf_has_meaningful_scalar($value);
     }
 
     return undef;
@@ -360,8 +403,7 @@ sub load_configured_plugins {
             push @loaded, $entry;
         }
         else {
-            my $err = $@ || 'unknown plugin load error';
-            $err =~ s/\s+/ /g;
+            my $err = _plugin_error_text($@, 'unknown plugin load error');
             push @errors, {
                 module => $module,
                 error  => $err,
@@ -381,6 +423,8 @@ sub load_configured_plugins {
 sub load_perl_module {
     my ($self, $module, %opts) = @_;
 
+    die "PluginManager: module name must be scalar\n" if ref($module);
+
     die "PluginManager: missing module name\n"
         unless defined $module && length $module;
 
@@ -389,6 +433,8 @@ sub load_perl_module {
         unless _valid_module_name($module);
 
     my $name = $opts{name} || $module;
+    die "PluginManager: plugin name must be scalar\n" if ref($name);
+
     my $key  = _name($name);
     die "PluginManager: missing plugin name\n" unless defined $key;
 
@@ -417,7 +463,7 @@ sub load_perl_module {
         1;
     };
 
-    die "PluginManager: failed to load $module: $@\n" unless $ok;
+    die "PluginManager: failed to load $module: " . _plugin_error_text($@, 'require failed') . "\n" unless $ok;
 
     my $object;
     if ($module->can('register')) {
@@ -426,7 +472,16 @@ sub load_perl_module {
         # PluginManager enabled/disabled flag even when loaded under a custom
         # explicit name.  This does not change the historical default module
         # name registration path.
-        $object = $module->register($self->{bot}, manager => $self, name => $name);
+        # mb279-B2: plugin register() may die with a HASH/ARRAY/blessed ref.
+        # Convert that boundary failure into a scalar diagnostic before it can
+        # be stringified by load_configured_plugins() or direct callers.
+        my $registered = eval {
+            $object = $module->register($self->{bot}, manager => $self, name => $name);
+            1;
+        };
+        die "PluginManager: failed to register $module: " . _plugin_error_text($@, 'plugin register failed') . "
+"
+            unless $registered;
     }
 
     my $entry = $self->register_plugin(
@@ -456,10 +511,7 @@ sub load_perl_module {
         && eval { $previous_object->can('unregister') }) {
         my $ok = eval { $previous_object->unregister(manager => $self); 1 };
         if (!$ok) {
-            my $err = $@ || 'plugin unregister failed';
-            $err =~ s/[\r\n\0]+/ /g;
-            $err =~ s/^\s+|\s+$//g;
-            $entry->{metadata}{replace_cleanup_error} = substr($err, 0, 240);
+            $entry->{metadata}{replace_cleanup_error} = _plugin_error_text($@, 'plugin unregister failed');
         }
     }
 

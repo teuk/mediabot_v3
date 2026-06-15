@@ -10,6 +10,7 @@ use IO::Select ();
 use Symbol qw(gensym);
 use POSIX qw(WNOHANG);
 use Time::HiRes qw(time sleep);
+use Scalar::Util qw(looks_like_number);
 use Cwd ();
 use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
 use Errno ();
@@ -24,20 +25,51 @@ use Errno ();
 # Python or Tcl scripts to be run out-of-process.
 # ---------------------------------------------------------------------------
 
+sub _constructor_script_dir {
+    my ($value) = @_;
+
+    # mb283-B1: script_dir is the root of the external Perl/Python/Tcl
+    # execution boundary.  Keep it as plain scalar path text at construction
+    # time; do not let ARRAY/HASH/blessed refs stringify into fake directories
+    # such as ARRAY(0x...) or overloaded paths before containment checks run.
+    return 'plugins/scripts' unless defined $value;
+    return 'plugins/scripts' if ref($value);
+
+    my $dir = "$value";
+    $dir =~ s/^\s+|\s+$//g;
+
+    return length($dir) ? $dir : 'plugins/scripts';
+}
+
+sub _constructor_positive_int {
+    my ($value, $default, $min, $max) = @_;
+
+    # mb286-B1: constructor limits are execution-boundary knobs.  They must
+    # stay plain numeric scalars; do not let ARRAY/HASH/blessed refs stringify
+    # or numify through int(), which can emit warnings, invoke overloads, and
+    # accidentally clamp to a different runtime limit.
+    my $number = $default;
+    if (defined $value && !ref($value)) {
+        my $raw = "$value";
+        $raw =~ s/^\s+|\s+$//g;
+        $number = int($raw) if length($raw) && looks_like_number($raw);
+    }
+
+    $number = int($number);
+    $number = $min if $number < $min;
+    $number = $max if $number > $max;
+
+    return $number;
+}
+
 sub new {
     my ($class, %args) = @_;
 
-    my $script_dir = defined $args{script_dir} && length $args{script_dir}
-        ? $args{script_dir}
-        : 'plugins/scripts';
+    my $script_dir = _constructor_script_dir($args{script_dir});
 
-    my $timeout = defined $args{timeout} ? int($args{timeout}) : 3;
-    $timeout = 1  if $timeout < 1;
-    $timeout = 30 if $timeout > 30;
+    my $timeout = _constructor_positive_int($args{timeout}, 3, 1, 30);
 
-    my $max_stdout = defined $args{max_stdout_bytes} ? int($args{max_stdout_bytes}) : 65536;
-    $max_stdout = 1024    if $max_stdout < 1024;
-    $max_stdout = 1048576 if $max_stdout > 1048576;
+    my $max_stdout = _constructor_positive_int($args{max_stdout_bytes}, 65536, 1024, 1048576);
 
     # mb246-B1: keep stdin bounded at the runner boundary too. Normal
     # ScriptDryRun payloads are tiny IRC event envelopes, but run_plan() is a
@@ -45,13 +77,9 @@ sub new {
     # tests or future plugins. Refuse oversized stdin before spawning a child.
     # The upper bound stays above the historical mb221 stress payload so that
     # the deadline-bounded nonblocking stdin path remains covered by tests.
-    my $max_stdin = defined $args{max_stdin_bytes} ? int($args{max_stdin_bytes}) : 4194304;
-    $max_stdin = 1024    if $max_stdin < 1024;
-    $max_stdin = 4194304 if $max_stdin > 4194304;
+    my $max_stdin = _constructor_positive_int($args{max_stdin_bytes}, 4194304, 1024, 4194304);
 
-    my $max_actions = defined $args{max_actions} ? int($args{max_actions}) : 20;
-    $max_actions = 1  if $max_actions < 1;
-    $max_actions = 50 if $max_actions > 50;
+    my $max_actions = _constructor_positive_int($args{max_actions}, 20, 1, 50);
 
     return bless {
         bot              => $args{bot},
@@ -104,6 +132,13 @@ sub language_for {
 
     return undef unless defined $path;
 
+    # mb280-B1: language detection is part of the script execution boundary.
+    # Accept only plain scalar path text here as well, not ARRAY/HASH/blessed
+    # refs that happen to stringify to a supported extension. validate_script_path()
+    # already enforces this for normal execution; this keeps the direct helper API
+    # under the same Perl/Python/Tcl scalar contract.
+    return undef if ref($path);
+
     return 'perl'   if $path =~ /\.pl\z/i;
     return 'python' if $path =~ /\.py\z/i;
     return 'tcl'    if $path =~ /\.tcl\z/i;
@@ -114,7 +149,14 @@ sub language_for {
 sub validate_script_path {
     my ($self, $path) = @_;
 
-    return (0, 'missing script path') unless defined $path && length $path;
+    return (0, 'missing script path') unless defined $path;
+
+    # mb273-B1: script paths are execution-boundary identifiers and must be
+    # plain scalar relative paths.  Do not allow ARRAY/HASH/blessed refs to
+    # stringify into ARRAY(...), HASH(...), or overloaded path text before the
+    # lexical and symlink containment checks run.
+    return (0, 'script path must be scalar') if ref($path);
+    return (0, 'missing script path') unless length "$path";
 
     my $p = "$path";
     $p =~ s/^\s+|\s+$//g;
@@ -157,18 +199,23 @@ sub _path_within_script_dir {
     my $dir_prefix = $real_dir;
     $dir_prefix .= '/' unless $dir_prefix =~ m{/\z};
 
-    # Walk up to the deepest existing path component.
+    # Walk up to the deepest existing OR symlink path component.
+    # mb265-B1: a broken symlink is not true for -e, but it is still a path
+    # component that can later be repointed outside script_dir.  Stop on -l as
+    # well as -e so broken symlink ancestors cannot be skipped and accidentally
+    # accepted as a safe not-yet-created child path.
     my $probe = $full_path;
-    while (length $probe && !-e $probe) {
+    while (length $probe && !-e $probe && !-l $probe) {
         my $next = $probe;
         $next =~ s{/[^/]+/?\z}{};
         last if !length $next || $next eq $probe;
         $probe = $next;
     }
 
-    # Nothing exists to resolve (script_dir itself missing): lexical checks
-    # already passed, let the later exec fail cleanly.
-    return (1, undef) unless length $probe && -e $probe;
+    # Nothing exists to resolve (beyond script_dir): lexical checks already
+    # passed, let the later exec fail cleanly.  Broken symlinks do not reach
+    # this branch because -l is true and are rejected below when abs_path fails.
+    return (1, undef) unless length $probe && (-e $probe || -l $probe);
 
     my $real_probe = Cwd::abs_path($probe);
     return (0, 'unable to resolve script path') unless defined $real_probe;
@@ -180,22 +227,93 @@ sub _path_within_script_dir {
     return (1, undef);
 }
 
+sub _normalize_event_name {
+    my ($event) = @_;
+
+    # mb271-B1: event is a JSON protocol field sent to external scripts. It
+    # must be a scalar token, not a HASH/ARRAY/blessed object stringified or
+    # encoded into the event slot. Keep invalid internal caller input harmless
+    # by falling back to the stable legacy event name "unknown".
+    return 'unknown' unless defined $event;
+    return 'unknown' if ref($event);
+
+    my $value = "$event";
+    $value =~ s/^\s+|\s+$//g;
+
+    return 'unknown' unless length $value;
+    return 'unknown' if $value =~ /[\r\n\0]/;
+    return 'unknown' if $value =~ /\s/;
+    return 'unknown' unless $value =~ /\A[A-Za-z0-9_.:-]+\z/;
+
+    return $value;
+}
+
+sub _normalize_event_data_value {
+    my ($value) = @_;
+
+    # mb289-B1: data fields inside the external Perl/Python/Tcl JSON envelope
+    # must stay simple and predictable. Normal ScriptDryRun traffic already sends
+    # scalar channel/target/nick/command fields plus an args ARRAY of scalars, but
+    # direct run_script()/build_event_payload() callers can hand nested HASH refs,
+    # objects, or arrays containing refs. Do not expose arbitrary Perl structures
+    # to external scripts or let JSON::PP encode blessed internals by accident.
+    return undef unless defined $value;
+
+    if (ref($value) eq 'ARRAY') {
+        my @clean;
+        for my $item (@$value) {
+            next unless defined $item;
+            next if ref($item);
+            push @clean, "$item";
+        }
+        return \@clean;
+    }
+
+    return undef if ref($value);
+    return "$value";
+}
+
+sub _normalize_event_data {
+    my (%data) = @_;
+
+    my %clean;
+    for my $key (keys %data) {
+        next unless defined $key;
+        next if ref($key);
+        my $safe_key = "$key";
+        next unless length $safe_key;
+        next if $safe_key =~ /[\r\n\0]/;
+        $clean{$safe_key} = _normalize_event_data_value($data{$key});
+    }
+
+    return %clean;
+}
+
 sub build_event_payload {
     my ($self, $event, %data) = @_;
 
-    $event = 'unknown' unless defined $event && length $event;
+    $event = _normalize_event_name($event);
+    my %safe_data = _normalize_event_data(%data);
 
     return {
         protocol => 'mediabot-script-v1',
         event    => $event,
-        data     => \%data,
+        data     => \%safe_data,
     };
 }
 
 sub encode_event_payload {
     my ($self, $payload) = @_;
 
-    return encode_json($payload || {});
+    # mb287-B1: this helper is the last JSON encoder before data crosses the
+    # external Perl/Python/Tcl stdin boundary.  build_execution_plan() already
+    # rejects non-object payloads, but direct helper callers must not be able to
+    # encode JSON arrays/scalars or stringify overloaded objects into the script
+    # protocol. Keep undef as the historical empty-object fallback.
+    my $payload_object = _execution_payload_object($payload);
+    $payload_object = {} unless defined $payload_object;
+
+    return encode_json($payload_object);
 }
 
 
@@ -416,13 +534,33 @@ sub interpreter_for_language {
 
     return undef unless defined $language;
 
+    # mb280-B2: interpreter selection must be keyed by a plain scalar language
+    # token. Do not accept overloaded objects or other refs that stringify to
+    # "perl", "python" or "tcl". The argv handed to open3() must come from
+    # trusted scalar protocol values only.
+    return undef if ref($language);
+
     my $lang = lc "$language";
+    $lang =~ s/^\s+|\s+$//g;
 
     return [ $^X ]       if $lang eq 'perl';
     return [ 'python3' ] if $lang eq 'python';
     return [ 'tclsh' ]   if $lang eq 'tcl';
 
     return undef;
+}
+
+sub _execution_payload_object {
+    my ($payload) = @_;
+
+    # mb285-B1: the external Perl/Python/Tcl protocol stdin is a JSON object
+    # envelope.  build_event_payload() always creates a HASH ref, but direct
+    # internal callers can hand build_execution_plan() scalars, ARRAY refs or
+    # blessed objects.  Reject those before JSON::PP can encode a non-object
+    # payload or stringify overloaded data into the script boundary.
+    return {} unless defined $payload;
+    return undef unless ref($payload) eq 'HASH';
+    return $payload;
 }
 
 sub build_execution_plan {
@@ -449,7 +587,17 @@ sub build_execution_plan {
         };
     }
 
-    my $json = $self->encode_event_payload($payload || {});
+    my $payload_object = _execution_payload_object($payload);
+    unless ($payload_object) {
+        return {
+            ok      => 0,
+            error   => 'payload must be object',
+            actions => [],
+            command => [],
+        };
+    }
+
+    my $json = $self->encode_event_payload($payload_object);
 
     # mb175-B1: execution plan only. This is intentionally a dry-run contract:
     # it prepares the argv/stdin/limits we will use later, but does not spawn.
@@ -512,6 +660,36 @@ sub _run_plan_failure {
     };
 }
 
+
+sub _validate_stdin_json_object {
+    my ($stdin) = @_;
+
+    # mb288-B1: run_plan() is the last boundary before open3() hands STDIN to
+    # an external Perl/Python/Tcl script.  build_execution_plan() and
+    # encode_event_payload() now produce object envelopes, but a handcrafted
+    # internal execution plan could still provide scalar non-JSON, JSON arrays,
+    # or JSON scalars.  Refuse those before spawning the child so every script
+    # receives the same protocol shape: one JSON object.
+    return 'stdin must be JSON object' unless defined $stdin && length $stdin;
+
+    my $decoded = eval { decode_json($stdin) };
+    return 'stdin must be JSON object' if $@ || ref($decoded) ne 'HASH';
+
+    return undef;
+}
+
+sub _execution_plan_scalar {
+    my ($value) = @_;
+
+    # mb278-B1: execution plans are an internal but security-sensitive boundary.
+    # Do not allow script identities, language names, full paths, or argv entries
+    # to be Perl references that stringify into apparently valid values.  The
+    # subprocess layer must only receive plain scalar argv components.
+    return 0 unless defined $value;
+    return 0 if ref($value);
+    return 1;
+}
+
 sub _argv_same {
     my ($left, $right) = @_;
 
@@ -519,7 +697,8 @@ sub _argv_same {
     return 0 unless @$left == @$right;
 
     for my $idx (0 .. $#$left) {
-        return 0 unless defined $left->[$idx] && defined $right->[$idx];
+        return 0 unless _execution_plan_scalar($left->[$idx]);
+        return 0 unless _execution_plan_scalar($right->[$idx]);
         return 0 unless "$left->[$idx]" eq "$right->[$idx]";
     }
 
@@ -537,17 +716,27 @@ sub _validate_execution_plan_for_run {
     # able to hand it an arbitrary argv such as a shell command.  Re-validate
     # the script path and require the argv to be exactly the interpreter plus
     # the validated script path.
+    # mb278-B2: reject references before any stringification in the execution
+    # identity fields.  validate_script_path() also rejects script refs, but this
+    # keeps run_plan() diagnostics explicit and avoids length/string comparison
+    # on ARRAY/HASH/blessed values.
+    return 'script path must be scalar'
+        if exists $plan->{script} && ref($plan->{script});
     return 'missing script in execution plan'
         unless defined $plan->{script} && length "$plan->{script}";
 
     my ($ok, $err, $language, $full_path) = $self->validate_script_path($plan->{script});
     return $err unless $ok;
 
+    return 'execution plan language must be scalar'
+        if exists $plan->{language} && ref($plan->{language});
     my $plan_language = defined $plan->{language} ? lc "$plan->{language}" : '';
     $plan_language =~ s/^\s+|\s+$//g;
     return 'execution plan language mismatch'
         unless length($plan_language) && $plan_language eq $language;
 
+    return 'execution plan full path must be scalar'
+        if exists $plan->{full_path} && ref($plan->{full_path});
     my $plan_full_path = defined $plan->{full_path} ? "$plan->{full_path}" : '';
     return 'execution plan full path mismatch'
         unless length($plan_full_path) && $plan_full_path eq $full_path;
@@ -560,6 +749,14 @@ sub _validate_execution_plan_for_run {
     return 'execution plan command must be an array'
         unless ref($plan->{command}) eq 'ARRAY';
 
+    # mb278-B3: argv entries are passed to open3() and must be plain scalars.
+    # Reject ARRAY/HASH/blessed refs even if they overload stringification to
+    # the expected interpreter or script path.
+    for my $arg (@{ $plan->{command} }) {
+        return 'execution plan command arguments must be scalar'
+            unless _execution_plan_scalar($arg);
+    }
+
     return 'execution plan command does not match validated script path'
         unless _argv_same($plan->{command}, \@expected);
 
@@ -571,6 +768,15 @@ sub run_plan {
 
     my $plan_error = $self->_validate_execution_plan_for_run($plan);
     return _run_plan_failure($plan_error) if defined $plan_error;
+
+    # mb272-B1: runtime execution limits are part of the run_plan contract.
+    # They may be overridden by a handcrafted internal plan, but they must stay
+    # plain scalar values.  Do not let ARRAY/HASH refs stringify through int()
+    # and emit warnings or silently clamp into a different runtime boundary.
+    for my $limit_key (qw(timeout max_stdin_bytes max_stdout_bytes max_stderr_bytes)) {
+        return _run_plan_failure("$limit_key must be scalar")
+            if exists $plan->{$limit_key} && ref($plan->{$limit_key});
+    }
 
     my @cmd = @{ $plan->{command} };
 
@@ -597,6 +803,10 @@ sub run_plan {
 
     if (defined $stdin && length($stdin) > $max_stdin) {
         return _run_plan_failure('stdin too large');
+    }
+
+    if (my $stdin_error = _validate_stdin_json_object($stdin)) {
+        return _run_plan_failure($stdin_error);
     }
 
     # mb236-B1: clamp runtime output caps even when run_plan() receives a

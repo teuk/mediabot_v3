@@ -4,6 +4,8 @@ use strict;
 use warnings;
 use utf8;
 
+use Scalar::Util qw(looks_like_number);
+
 # ---------------------------------------------------------------------------
 # Mediabot::ScriptActionRunner
 # ---------------------------------------------------------------------------
@@ -14,22 +16,37 @@ use utf8;
 # not send IRC messages, create timers, touch DB, or mutate runtime state yet.
 # ---------------------------------------------------------------------------
 
+sub _constructor_positive_int {
+    my ($value, $default, $min, $max) = @_;
+
+    # mb286-B2: action-runner constructor limits control the application side of
+    # external script output.  Keep them scalar numeric only; malformed refs
+    # should fall back to safe defaults instead of being stringified/numified by
+    # int() and producing warnings or surprising clamps.
+    my $number = $default;
+    if (defined $value && !ref($value)) {
+        my $raw = "$value";
+        $raw =~ s/^\s+|\s+$//g;
+        $number = int($raw) if length($raw) && looks_like_number($raw);
+    }
+
+    $number = int($number);
+    $number = $min if $number < $min;
+    $number = $max if $number > $max;
+
+    return $number;
+}
+
 sub new {
     my ($class, %args) = @_;
 
-    my $max_text_length = defined $args{max_text_length} ? int($args{max_text_length}) : 400;
-    $max_text_length = 32   if $max_text_length < 32;
-    $max_text_length = 2000 if $max_text_length > 2000;
+    my $max_text_length = _constructor_positive_int($args{max_text_length}, 400, 32, 2000);
 
-    my $max_actions = defined $args{max_actions} ? int($args{max_actions}) : 20;
-    $max_actions = 1  if $max_actions < 1;
-    $max_actions = 50 if $max_actions > 50;
+    my $max_actions = _constructor_positive_int($args{max_actions}, 20, 1, 50);
 
     # A1 (mb225): plafond configurable des diagnostics d'erreur, par coherence
     # avec max_actions. Defaut 20 (comportement historique inchange).
-    my $max_errors = defined $args{max_errors} ? int($args{max_errors}) : 20;
-    $max_errors = 1   if $max_errors < 1;
-    $max_errors = 100 if $max_errors > 100;
+    my $max_errors = _constructor_positive_int($args{max_errors}, 20, 1, 100);
 
     return bless {
         bot             => $args{bot},
@@ -94,15 +111,27 @@ sub _context_default_target {
 
     return undef unless $context;
 
+    # mb270-B1: context default targets are part of the action-layer contract.
+    # A malformed ARRAY/HASH value in channel must not mask a scalar target
+    # fallback, and object methods returning refs must not be stringified into
+    # ARRAY(...)/HASH(...) before _bounded_target() sees them.
     if (ref($context) eq 'HASH') {
-        return $context->{channel} if defined $context->{channel} && length $context->{channel};
-        return $context->{target}  if defined $context->{target}  && length $context->{target};
+        for my $key (qw(channel target)) {
+            my $value = $context->{$key};
+            next unless _is_plain_scalar($value);
+
+            my $safe = _trim($value);
+            return $safe if length $safe;
+        }
     }
 
     for my $method (qw(channel target reply_target)) {
         next unless eval { $context->can($method) };
         my $value = eval { $context->$method() };
-        return $value if defined $value && length "$value";
+        next unless _is_plain_scalar($value);
+
+        my $safe = _trim($value);
+        return $safe if length $safe;
     }
 
     return undef;
@@ -489,10 +518,19 @@ sub _failed_script_result_errors {
     # empty.
     my @specific;
 
-    push @specific, $script_result->{error}
-        if defined $script_result->{error}
-        && !ref($script_result->{error})
-        && length "$script_result->{error}";
+    # mb290-B1: a top-level script_result.error is an execution-boundary
+    # diagnostic, not arbitrary Perl data. Direct/legacy callers may bypass
+    # ScriptRunner and hand ScriptActionRunner a HASH/ARRAY/blessed object here.
+    # Keep the error contract scalar-only and never stringify overloaded objects
+    # while collecting diagnostics.
+    if (exists $script_result->{error}) {
+        if (ref($script_result->{error})) {
+            push @specific, 'top-level error must be scalar';
+        }
+        elsif (defined $script_result->{error} && length "$script_result->{error}") {
+            push @specific, $script_result->{error};
+        }
+    }
 
     push @specific, 'script timed out'
         if $script_result->{timeout};
@@ -518,9 +556,15 @@ sub _failed_script_result_errors {
             unless $resp_valid;
     }
 
-    # Scalar entries from response.errors are specific diagnostics. Non-scalar
-    # (HASH/ARRAY) entries are dropped here, never stringified (mb256-B2).
-    if ($response && ref($response->{errors}) eq 'ARRAY') {
+    # mb267-B1: response.errors is also a failure signal for legacy/direct
+    # ScriptActionRunner callers, even when response.ok is absent.  ScriptRunner
+    # already closes actions when errors is non-empty; keep the direct action
+    # boundary consistent so a hand-built { response => { errors => [...],
+    # actions => [...] } } cannot plan/apply actions by omission of ok.
+    if ($response && exists $response->{errors} && ref($response->{errors}) ne 'ARRAY') {
+        push @specific, 'response errors must be an array';
+    }
+    elsif ($response && ref($response->{errors}) eq 'ARRAY') {
         for my $err (@{ $response->{errors} }) {
             last if @specific >= $max_errors;
             my $text = _safe_error_text($err);
@@ -578,7 +622,14 @@ sub _script_result_failed {
     # ok flag is not a failure by itself when a response/actions payload exists.
     return 1 unless ref($script_result) eq 'HASH';
     return 1 if $script_result->{timeout};
-    return 1 if defined $script_result->{error} && length "$script_result->{error}";
+
+    # mb290-B2: treat any non-scalar top-level error as a failed script result
+    # without stringifying it. This keeps direct action-layer callers aligned with
+    # the scalar JSON diagnostic contract enforced by ScriptRunner.
+    if (exists $script_result->{error}) {
+        return 1 if ref($script_result->{error});
+        return 1 if defined $script_result->{error} && length "$script_result->{error}";
+    }
 
     if (exists $script_result->{ok}) {
         my ($valid, $ok_value) = _decode_ok_flag_for_action_layer($script_result->{ok});
@@ -592,6 +643,15 @@ sub _script_result_failed {
     if ($response && exists $response->{ok}) {
         my ($valid, $ok_value) = _decode_ok_flag_for_action_layer($response->{ok});
         return 1 unless $valid && $ok_value;
+    }
+
+    # mb267-B2: keep ScriptActionRunner aligned with ScriptRunner for legacy
+    # direct callers. A response carrying errors is failed even if response.ok
+    # is omitted. A non-array errors field is malformed and must also close the
+    # action layer. Empty errors remains compatible and does not fail by itself.
+    if ($response && exists $response->{errors}) {
+        return 1 unless ref($response->{errors}) eq 'ARRAY';
+        return 1 if @{ $response->{errors} };
     }
 
     return 0;

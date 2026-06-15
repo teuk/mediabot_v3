@@ -188,10 +188,30 @@ sub _conf_get_first {
         };
 
         next unless $ok;
-        return $value if defined $value && length "$value";
+        return $value if _conf_value_has_meaningful_scalar($value);
     }
 
     return undef;
+}
+
+sub _conf_value_has_meaningful_scalar {
+    my ($value) = @_;
+
+    # mb264-B1: config fallback selection must not rely on Perl ref
+    # stringification. An empty ARRAY ref or a HASH ref in the first key must
+    # not mask a later legacy/alias key that contains the real value. Keep
+    # ARRAY support for Config::Simple list-like values, but require at least
+    # one meaningful flattened scalar before accepting the candidate key.
+    for my $candidate (_flatten_config_values($value)) {
+        next unless defined $candidate;
+        next if ref($candidate);
+
+        my $v = "$candidate";
+        $v =~ s/^\s+|\s+$//g;
+        return 1 if length $v;
+    }
+
+    return 0;
 }
 
 sub _truthy {
@@ -328,9 +348,25 @@ sub _normalize_command_name {
 
     return '' unless defined $command;
 
-    my $value = lc "$command";
+    # mb268-B1: command names are protocol/control values, not arbitrary JSON or
+    # Perl structures.  Do not stringify ARRAY/HASH/blessed refs into values such
+    # as ARRAY(0x...) and then let a fallback SCRIPT observe/apply them as if they
+    # were real IRC commands.
+    # mb281-B1: keep the command token single-line and single-token before it can
+    # drive ScriptDryRun routing, logging, ownership, or the JSON payload sent to
+    # external Perl/Python/Tcl scripts. Real IRC commands are separated from args
+    # before this point, so embedded whitespace/control bytes are malformed.
+    return '' if ref($command);
+
+    my $raw = "$command";
+    return '' if $raw =~ /[\r\n\0]/;
+
+    my $value = lc $raw;
     $value =~ s/^\s+|\s+$//g;
     $value =~ s/^[.!]+//;
+
+    return '' unless length $value;
+    return '' if $value =~ /\s/;
 
     return $value;
 }
@@ -513,40 +549,77 @@ sub _action_plan_summary {
 sub _ctx_command {
     my ($ctx) = @_;
 
-    my $command = _ctx_value($ctx, 'command', 'cmd');
-    return $command if defined $command && length "$command";
+    # mb269-B1: command/cmd are scalar protocol fields.  A malformed ref in
+    # the preferred key must not mask a scalar fallback key, and must never be
+    # stringified into ARRAY(...)/HASH(...) before command filtering/routing.
+    for my $name (qw(command cmd)) {
+        my $value = _ctx_value($ctx, $name);
+        return "$value" if defined $value && !ref($value) && length "$value";
+    }
 
     my $cmd_obj = _ctx_value($ctx, 'command_obj');
     if ($cmd_obj) {
         for my $method (qw(name command cmd)) {
             next unless eval { $cmd_obj->can($method) };
             my $value = eval { $cmd_obj->$method() };
-            return $value if defined $value && length "$value";
+            return "$value" if defined $value && !ref($value) && length "$value";
         }
 
         my $hash_value = eval { $cmd_obj->{name} };
-        return $hash_value if defined $hash_value && length "$hash_value";
+        return "$hash_value" if defined $hash_value && !ref($hash_value) && length "$hash_value";
     }
 
     return undef;
 }
 
+sub _ctx_scalar_value {
+    my ($ctx, @names) = @_;
+
+    # mb269-B2: public-command envelope fields sent to external scripts must be
+    # scalar text values.  Ignore refs and continue to fallback aliases instead
+    # of JSON-encoding nested Perl structures or dying on blessed objects.
+    for my $name (@names) {
+        my $value = _ctx_value($ctx, $name);
+        return "$value" if defined $value && !ref($value) && length "$value";
+    }
+
+    return undef;
+}
+
+sub _sanitize_ctx_args {
+    my ($args) = @_;
+
+    return [] unless ref($args) eq 'ARRAY';
+
+    my @clean;
+    for my $arg (@$args) {
+        next unless defined $arg;
+        next if ref($arg);
+        push @clean, "$arg";
+    }
+
+    return \@clean;
+}
+
 sub _ctx_args {
     my ($ctx) = @_;
 
+    # mb269-B3: command arguments are an array of scalar strings in the external
+    # script JSON envelope.  Keep valid scalars, drop ARRAY/HASH/blessed refs,
+    # and let command_obj/hash fallbacks work when the first source is malformed.
     my $args = _ctx_value($ctx, 'args');
-    return $args if ref($args) eq 'ARRAY';
+    return _sanitize_ctx_args($args) if ref($args) eq 'ARRAY';
 
     my $cmd_obj = _ctx_value($ctx, 'command_obj');
     if ($cmd_obj) {
         for my $method (qw(args argv)) {
             next unless eval { $cmd_obj->can($method) };
             my $value = eval { $cmd_obj->$method() };
-            return $value if ref($value) eq 'ARRAY';
+            return _sanitize_ctx_args($value) if ref($value) eq 'ARRAY';
         }
 
         my $hash_value = eval { $cmd_obj->{args} };
-        return $hash_value if ref($hash_value) eq 'ARRAY';
+        return _sanitize_ctx_args($hash_value) if ref($hash_value) eq 'ARRAY';
     }
 
     return [];
@@ -570,16 +643,27 @@ sub observe_public_command {
         return undef;
     }
 
-    my $command = _ctx_command($ctx);
+    my $raw_command = _ctx_command($ctx);
+
+    # mb284-B1: command_allowed(), script_for_command(), and _command_is_scoped()
+    # already classify commands through _normalize_command_name().  Use that same
+    # canonical token for the rest of the observer flow too, so external
+    # Perl/Python/Tcl scripts receive the command that was actually authorized
+    # instead of raw context text such as "  !PyHello  ".
+    my $command = _normalize_command_name($raw_command);
     unless ($self->command_allowed($command)) {
-        my $name = defined($command) && length("$command") ? "$command" : '<empty>';
+        my $name = length($command) ? $command : '<empty>';
         $self->{filtered_public}++;
         $self->{skipped_public}++;
         $self->{last_error} = "command '$name' not allowed by ScriptDryRun filter";
         return undef;
     }
 
-    if (my $scope_warning = $self->apply_scope_warning) {
+    # mb263-B1: observe_public_command must pass the current command to
+    # apply_scope_warning().  MB262 correctly made the guard command-aware,
+    # but the runtime call site still invoked it without arguments, causing
+    # valid scoped apply commands to be rejected in the real observer path.
+    if (my $scope_warning = $self->apply_scope_warning($command)) {
         $self->{skipped_public}++;
         $self->{last_error} = $scope_warning;
         return undef;
@@ -616,20 +700,25 @@ sub observe_public_command {
     # times out, this line appears immediately and gives us the accepted route.
     $self->_log_bot(4, "PUBLIC(scriptdryrun): accepted command=$command script=$script_path mode=" . $self->action_mode . " allow_irc=" . $self->allow_irc);
 
-    # mb194-B1 + A2 (mb225): once ScriptDryRun finds a script it runs it, but it
-    # only OWNS the public command (suppressing the legacy dispatcher) when the
-    # command is EXPLICITLY scoped via ROUTES or COMMANDS. A bare SCRIPT fallback
-    # with neither still runs for observation, but must not swallow arbitrary
-    # public commands — otherwise every public command would be intercepted and
-    # the legacy "command not found" path would never run (R1 footgun, present
-    # even in dry-run mode where _ctx_mark_scriptdryrun_handled was reached).
-    my $owns_command = $self->_command_is_scoped($command);
+    # mb194-B1 + A2 (mb225) + mb226-B1: ScriptDryRun runs the resolved script,
+    # but OWNERSHIP (suppressing the legacy dispatcher) must stay consistent
+    # with whether the run has side effects:
+    #   - dry-run mode: only OWN explicitly scoped commands (ROUTES/COMMANDS).
+    #     An unscoped bare-SCRIPT command still runs for observation but does
+    #     not suppress the legacy "command not found" path (R1 footgun fix).
+    #   - apply mode: if we are about to APPLY a script's IRC/log actions, we
+    #     MUST also own the command. Otherwise an unscoped command would have
+    #     its fallback script applied AND be dispatched by the legacy handler —
+    #     a double execution (duplicate IRC). mb226-B1 closes that: in apply
+    #     mode, running implies owning.
+    my $owns_command = $self->_command_is_scoped($command)
+        || ($self->action_mode eq 'apply');
     _ctx_mark_scriptdryrun_handled($ctx, undef, undef) if $owns_command;
 
     my %data = (
-        channel => _ctx_value($ctx, 'channel', 'target'),
-        target  => _ctx_value($ctx, 'target', 'channel'),
-        nick    => _ctx_value($ctx, 'nick', 'sender'),
+        channel => _ctx_scalar_value($ctx, 'channel', 'target'),
+        target  => _ctx_scalar_value($ctx, 'target', 'channel'),
+        nick    => _ctx_scalar_value($ctx, 'nick', 'sender'),
         command => $command,
         args    => _ctx_args($ctx),
     );
@@ -726,13 +815,20 @@ sub apply_scope_is_restricted {
 }
 
 sub apply_scope_warning {
-    my ($self) = @_;
+    my ($self, $command) = @_;
 
     return undef unless $self->action_mode eq 'apply';
     return undef unless $self->apply_require_scope;
-    return undef if $self->apply_scope_is_restricted;
 
-    return 'ACTION_MODE=apply requires COMMANDS or ROUTES when APPLY_REQUIRE_SCOPE is enabled';
+    # mb262-B1: APPLY_REQUIRE_SCOPE must protect the CURRENT command, not only
+    # the global plugin configuration.  A config such as ROUTES=foo=... plus a
+    # fallback SCRIPT is globally "restricted", but command "bar" is still not
+    # explicitly scoped.  In apply mode that fallback would apply script actions
+    # for an unscoped command.  Reject it unless the operator explicitly opts out
+    # with APPLY_REQUIRE_SCOPE=no.
+    return undef if defined($command) && $self->_command_is_scoped($command);
+
+    return 'ACTION_MODE=apply requires COMMANDS or ROUTES matching the current command when APPLY_REQUIRE_SCOPE is enabled';
 }
 
 

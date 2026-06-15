@@ -152,8 +152,11 @@ my $case = sub {
         'default dry-run mode does not apply script log action');
 
     my ($bot_apply_no_irc, $irc_no, $logger_no) = make_bot(
-        'plugins.ScriptDryRun.SCRIPT'      => 'mode_ok.pl',
-        'plugins.ScriptDryRun.ACTION_MODE' => 'apply',
+        'plugins.ScriptDryRun.SCRIPT'              => 'mode_ok.pl',
+        'plugins.ScriptDryRun.ACTION_MODE'         => 'apply',
+        # mb226: APPLY_REQUIRE_SCOPE defaults to enabled since A3 (mb225); this
+        # block exercises a bare-SCRIPT apply, so it opts out explicitly.
+        'plugins.ScriptDryRun.APPLY_REQUIRE_SCOPE' => 'no',
     );
 
     $bot_apply_no_irc->plugin_manager->load_perl_module('Mediabot::Plugin::ScriptDryRun');
@@ -182,9 +185,11 @@ my $case = sub {
         'apply mode without allow_irc applies script log action');
 
     my ($bot_apply_irc, $irc_yes, $logger_yes) = make_bot(
-        'plugins.ScriptDryRun.SCRIPT'      => 'mode_ok.pl',
-        'plugins.ScriptDryRun.ACTION_MODE' => 'apply',
-        'plugins.ScriptDryRun.ALLOW_IRC'   => 'yes',
+        'plugins.ScriptDryRun.SCRIPT'              => 'mode_ok.pl',
+        'plugins.ScriptDryRun.ACTION_MODE'         => 'apply',
+        'plugins.ScriptDryRun.ALLOW_IRC'           => 'yes',
+        # mb226: bare-SCRIPT apply opts out of the A3 (mb225) scope requirement.
+        'plugins.ScriptDryRun.APPLY_REQUIRE_SCOPE' => 'no',
     );
 
     $bot_apply_irc->plugin_manager->load_perl_module('Mediabot::Plugin::ScriptDryRun');

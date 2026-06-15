@@ -4,6 +4,8 @@ use strict;
 use warnings;
 use utf8;
 
+use Scalar::Util qw(refaddr);
+
 # ---------------------------------------------------------------------------
 # Mediabot::EventBus
 # ---------------------------------------------------------------------------
@@ -25,11 +27,70 @@ sub new {
 
 sub _event_name {
     my ($event) = @_;
+
+    # mb275-B1: EventBus event names are plugin-facing identifiers and must
+    # remain plain scalars.  Do not let ARRAY/HASH/blessed refs stringify into
+    # pseudo-events such as ARRAY(0x...) at the plugin boundary.
     return undef unless defined $event;
+    return undef if ref($event);
+
     $event =~ s/^\s+|\s+$//g;
     return undef unless length $event;
     $event =~ s/\s+/_/g;
     return lc $event;
+}
+
+sub _listener_meta_text {
+    my ($value) = @_;
+
+    # mb275-B2: listener metadata is rendered in emit_report() diagnostics.
+    # Keep useful scalar text, but never expose HASH(...)/ARRAY(...) by
+    # stringifying plugin-supplied references.
+    return undef unless defined $value;
+    return undef if ref($value);
+    $value =~ s/[\r\n\0]+/ /g;
+    $value =~ s/^\s+|\s+$//g;
+    return length($value) ? $value : undef;
+}
+
+sub _listener_priority {
+    my ($value) = @_;
+
+    # mb275-B3: priority is numeric ordering data; a bad ref should not trigger
+    # Perl's implicit ref stringification warnings.
+    return 0 unless defined $value;
+    return 0 if ref($value);
+    return int($value);
+}
+
+sub _listener_error_text {
+    my ($value) = @_;
+
+    # mb277-B1: listener exceptions are rendered in emit_report() diagnostics.
+    # Perl allows dying with refs/objects; returning those directly would leak
+    # structured values into the EventBus report. Keep diagnostics scalar,
+    # bounded and single-line, just like the script bridge diagnostics.
+    return 'unknown listener error' unless defined $value;
+    return 'unknown listener error' if ref($value);
+
+    $value =~ s/[\r\n\0]+/ /g;
+    $value =~ s/\s+/ /g;
+    $value =~ s/^\s+|\s+$//g;
+    return 'unknown listener error' unless length $value;
+    return substr($value, 0, 240);
+}
+
+sub _same_listener_entry {
+    my ($left, $right) = @_;
+
+    # mb275-B4: listener cleanup must use reference identity.  Stringifying
+    # refs is fragile and inconsistent with PluginManager's refaddr()-based
+    # lifecycle checks.
+    return 0 unless ref($left) && ref($right);
+    my $left_id  = eval { refaddr($left) };
+    my $right_id = eval { refaddr($right) };
+    return 0 unless defined $left_id && defined $right_id;
+    return $left_id == $right_id ? 1 : 0;
 }
 
 sub on {
@@ -42,9 +103,9 @@ sub on {
 
     my $entry = {
         cb       => $callback,
-        name     => $opts{name},
-        plugin   => $opts{plugin},
-        priority => defined $opts{priority} ? int($opts{priority}) : 0,
+        name     => _listener_meta_text($opts{name}),
+        plugin   => _listener_meta_text($opts{plugin}),
+        priority => _listener_priority($opts{priority}),
         once     => $opts{once} ? 1 : 0,
     };
 
@@ -69,7 +130,7 @@ sub off {
 
     my $name = _event_name($event);
     return 0 unless defined $name;
-    return 0 unless ref($entry) eq 'HASH';
+    return 0 unless ref($entry);
     return 0 unless exists $self->{listeners}{$name};
 
     # mb242-B1: listener entries returned by on()/once() can now be removed by
@@ -79,7 +140,7 @@ sub off {
     my $removed = 0;
     my @keep;
     for my $current (@{ $self->{listeners}{$name} || [] }) {
-        if (ref($current) eq 'HASH' && "$current" eq "$entry") {
+        if (_same_listener_entry($current, $entry)) {
             $removed++;
             next;
         }
@@ -101,11 +162,19 @@ sub _drop_once_entries_from_current_list {
 
     return unless defined $name && ref($snapshot) eq 'ARRAY';
 
-    my %drop = map { ("$_" => 1) } grep { ref($_) eq 'HASH' && $_->{once} } @$snapshot;
+    my %drop;
+    for my $entry (@$snapshot) {
+        next unless ref($entry) && $entry->{once};
+        my $id = eval { refaddr($entry) };
+        $drop{$id} = 1 if defined $id;
+    }
     return unless %drop;
 
     my @current = @{ $self->{listeners}{$name} || [] };
-    $self->{listeners}{$name} = [ grep { !$drop{"$_"} } @current ];
+    $self->{listeners}{$name} = [ grep {
+        my $id = eval { refaddr($_) };
+        !(defined $id && $drop{$id});
+    } @current ];
 }
 
 sub emit {
@@ -158,8 +227,7 @@ sub emit_report {
         $ran++;
 
         if (!$ok) {
-            my $err = $@ || 'unknown listener error';
-            $err =~ s/\s+/ /g;
+            my $err = _listener_error_text($@);
             push @errors, {
                 event  => $name,
                 name   => $entry->{name},

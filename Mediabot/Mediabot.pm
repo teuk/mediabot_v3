@@ -114,6 +114,48 @@ sub new {
 
 
 
+sub _flatten_local_config_values {
+    my ($value) = @_;
+
+    return () unless defined $value;
+
+    # mb282-B1: boot-time plugin autoload config follows the same scalar/list
+    # contract as PluginManager and ScriptDryRun config. Config::Simple can hand
+    # section values back as ARRAY refs; keep ARRAY support, but never stringify
+    # HASH/blessed refs into HASH(...)/Object(...) pseudo values.
+    my @queue = ($value);
+    my @out;
+
+    while (@queue) {
+        my $entry = shift @queue;
+        next unless defined $entry;
+
+        if (ref($entry) eq 'ARRAY') {
+            unshift @queue, @$entry;
+            next;
+        }
+
+        next if ref($entry);
+        push @out, $entry;
+    }
+
+    return @out;
+}
+
+sub _local_conf_value_has_meaningful_scalar {
+    my ($value) = @_;
+
+    for my $candidate (_flatten_local_config_values($value)) {
+        next unless defined $candidate;
+
+        my $v = "$candidate";
+        $v =~ s/^\s+|\s+$//g;
+        return 1 if length $v;
+    }
+
+    return 0;
+}
+
 sub _conf_get_first_local {
     my ($self, @keys) = @_;
 
@@ -135,7 +177,7 @@ sub _conf_get_first_local {
         };
 
         next unless $ok;
-        return $value if defined $value && length "$value";
+        return $value if _local_conf_value_has_meaningful_scalar($value);
     }
 
     return undef;
@@ -144,11 +186,17 @@ sub _conf_get_first_local {
 sub _truthy_config_value {
     my ($value) = @_;
 
-    return 0 unless defined $value;
-    my $v = lc "$value";
-    $v =~ s/^\s+|\s+$//g;
+    for my $candidate (_flatten_local_config_values($value)) {
+        next unless defined $candidate;
 
-    return 1 if $v =~ /\A(?:1|yes|true|on|enabled)\z/;
+        my $v = lc "$candidate";
+        $v =~ s/^\s+|\s+$//g;
+        next unless length $v;
+
+        return 1 if $v =~ /\A(?:1|yes|true|on|enabled|enable)\z/;
+        return 0 if $v =~ /\A(?:0|no|false|off|disabled|disable)\z/;
+    }
+
     return 0;
 }
 

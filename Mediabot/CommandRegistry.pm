@@ -26,15 +26,32 @@ sub new {
 
 sub _source {
     my ($source) = @_;
-    $source = 'public' unless defined $source && length $source;
+
+    # mb274-B1: command registry source names are plugin-facing protocol
+    # identifiers and must be plain scalars.  A plugin must not be able to
+    # register or look up commands under ARRAY(...)/HASH(...) pseudo-sources by
+    # passing Perl references that get stringified accidentally.
+    return undef if ref($source);
+
+    $source = 'public' unless defined $source;
+    $source =~ s/^\s+|\s+$//g;
+    $source = 'public' unless length $source;
+
     return lc $source;
 }
 
 sub _name {
     my ($name) = @_;
+
+    # mb274-B2: command and alias names must be plain scalars too.  Invalid
+    # plugin input should be rejected for canonical command names and ignored
+    # for optional aliases, never stringified into ARRAY(...)/HASH(...).
     return undef unless defined $name;
+    return undef if ref($name);
+
     $name =~ s/^\s+|\s+$//g;
     return undef unless length $name;
+
     return lc $name;
 }
 
@@ -46,10 +63,13 @@ sub register {
 sub register_command {
     my ($self, %args) = @_;
 
+    die "CommandRegistry: command name must be scalar\n" if ref($args{name});
+
     my $name = _name($args{name});
     die "CommandRegistry: missing command name\n" unless defined $name;
 
     my $source = _source($args{source});
+    die "CommandRegistry: command source must be scalar\n" unless defined $source;
 
     my $handler = $args{handler};
     die "CommandRegistry: handler for '$name' must be a CODE reference\n"
@@ -139,6 +159,7 @@ sub command_for {
     return undef unless defined $cmd;
 
     my $src = _source($source);
+    return undef unless defined $src;
 
     my $canonical = $cmd;
     if (exists $self->{aliases}{$src} && exists $self->{aliases}{$src}{$cmd}) {
@@ -175,9 +196,15 @@ sub aliases_for {
 sub list {
     my ($self, $source) = @_;
 
-    my @sources = defined $source && length $source
-        ? (_source($source))
-        : sort keys %{ $self->{commands} };
+    my @sources;
+    if (defined $source) {
+        my $src = _source($source);
+        return () unless defined $src;
+        @sources = ($src);
+    }
+    else {
+        @sources = sort keys %{ $self->{commands} };
+    }
 
     my @entries;
     for my $src (@sources) {
@@ -191,7 +218,12 @@ sub list {
 
 sub count {
     my ($self, $source) = @_;
-    return scalar $self->list($source);
+
+    # mb274-B3: force list context before scalar count. If list() returns an
+    # empty list in scalar context (for example an invalid non-scalar source),
+    # Perl can produce undef instead of 0. Keep count() numeric and quiet.
+    my @entries = $self->list($source);
+    return scalar @entries;
 }
 
 1;
