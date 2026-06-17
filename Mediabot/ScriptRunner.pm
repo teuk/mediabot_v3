@@ -18,11 +18,12 @@ use Errno ();
 # ---------------------------------------------------------------------------
 # Mediabot::ScriptRunner
 # ---------------------------------------------------------------------------
-# mb174-B1: external script runner foundation.
+# External Perl/Python/Tcl execution boundary for the mediabot-script-v1 protocol.
 #
-# This module deliberately does not execute external scripts yet. It defines the
-# safety boundary and JSON protocol helpers we will need before allowing Perl,
-# Python or Tcl scripts to be run out-of-process.
+# ScriptRunner validates script paths and interpreters, builds the JSON envelope,
+# executes scripts out-of-process without a shell, enforces timeout/I/O limits and
+# validates the JSON response. It does not itself send IRC messages or apply the
+# returned actions; that responsibility belongs to ScriptActionRunner.
 # ---------------------------------------------------------------------------
 
 sub _constructor_script_dir {
@@ -71,10 +72,18 @@ sub new {
 
     my $max_stdout = _constructor_positive_int($args{max_stdout_bytes}, 65536, 1024, 1048576);
 
+    # mb280-B1: max_stderr_bytes is a first-class runtime cap, like
+    # max_stdout_bytes. Before this it was never read at construction time
+    # (silently ignored) and run_plan() fell back to the stdout instance cap for
+    # stderr, so stderr could not be capped independently. Default matches the
+    # stdout cap (64 KiB) so existing behavior is unchanged.
+    my $max_stderr = _constructor_positive_int($args{max_stderr_bytes}, 65536, 1024, 1048576);
+
     # mb246-B1: keep stdin bounded at the runner boundary too. Normal
     # ScriptDryRun payloads are tiny IRC event envelopes, but run_plan() is a
-    # public internal execution boundary and can receive handcrafted plans in
-    # tests or future plugins. Refuse oversized stdin before spawning a child.
+    # public internal execution boundary and can receive handcrafted plans from
+    # tests or other trusted internal callers. Refuse oversized stdin before
+    # spawning a child.
     # The upper bound stays above the historical mb221 stress payload so that
     # the deadline-bounded nonblocking stdin path remains covered by tests.
     my $max_stdin = _constructor_positive_int($args{max_stdin_bytes}, 4194304, 1024, 4194304);
@@ -86,6 +95,7 @@ sub new {
         script_dir       => $script_dir,
         timeout          => $timeout,
         max_stdout_bytes => $max_stdout,
+        max_stderr_bytes => $max_stderr,
         max_stdin_bytes  => $max_stdin,
         max_actions      => $max_actions,
         allowed_actions  => {
@@ -115,6 +125,11 @@ sub timeout {
 sub max_stdout_bytes {
     my ($self) = @_;
     return $self->{max_stdout_bytes};
+}
+
+sub max_stderr_bytes {
+    my ($self) = @_;
+    return $self->{max_stderr_bytes};
 }
 
 sub max_stdin_bytes {
@@ -614,6 +629,7 @@ sub build_execution_plan {
         timeout          => $self->{timeout},
         max_stdin_bytes  => $self->{max_stdin_bytes},
         max_stdout_bytes => $self->{max_stdout_bytes},
+        max_stderr_bytes => $self->{max_stderr_bytes},
     };
 }
 
@@ -790,7 +806,7 @@ sub run_plan {
     my $timeout    = defined $plan->{timeout} ? int($plan->{timeout}) : $self->{timeout};
     my $max_stdin  = defined $plan->{max_stdin_bytes} ? int($plan->{max_stdin_bytes}) : $self->{max_stdin_bytes};
     my $max_stdout = defined $plan->{max_stdout_bytes} ? int($plan->{max_stdout_bytes}) : $self->{max_stdout_bytes};
-    my $max_stderr = defined $plan->{max_stderr_bytes} ? int($plan->{max_stderr_bytes}) : $self->{max_stdout_bytes};
+    my $max_stderr = defined $plan->{max_stderr_bytes} ? int($plan->{max_stderr_bytes}) : $self->{max_stderr_bytes};
 
     $timeout    = 1       if $timeout < 1;
     $timeout    = 30      if $timeout > 30;

@@ -26,7 +26,11 @@ sub register {
     }, $class;
 
     if ($bot && $bot->can('events') && $bot->events) {
-        $bot->events->on(
+        # mb285-B1: keep the listener entry so unregister() can remove it on
+        # plugin reload/replace. Without this the EventBus listener would leak as
+        # a ghost on every reload, and the closure below (which captures $self,
+        # which holds $bot) would keep a reference cycle alive.
+        $self->{listener_entry} = $bot->events->on(
             public_command_observed => sub {
                 my ($ctx) = @_;
                 $self->{observed_public}++;
@@ -41,6 +45,22 @@ sub register {
     }
 
     return $self;
+}
+
+# mb285-B1: mirror Mediabot::Plugin::ScriptDryRun — a plugin that registers an
+# EventBus listener MUST be able to remove it, so PluginManager's reload/replace
+# (and explicit unregister) does not accumulate ghost listeners or leak the
+# plugin object through the listener->$self->$bot reference cycle.
+sub unregister {
+    my ($self, %opts) = @_;
+
+    my $bot   = $self->{bot};
+    my $entry = $self->{listener_entry};
+    return 0 unless $bot && $bot->can('events') && $bot->events && $entry;
+
+    my $removed = eval { $bot->events->off(public_command_observed => $entry) } || 0;
+    delete $self->{listener_entry} if $removed;
+    return $removed ? 1 : 0;
 }
 
 sub observed_public {

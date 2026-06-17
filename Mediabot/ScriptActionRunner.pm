@@ -9,11 +9,12 @@ use Scalar::Util qw(looks_like_number);
 # ---------------------------------------------------------------------------
 # Mediabot::ScriptActionRunner
 # ---------------------------------------------------------------------------
-# mb177-B1: safe action applier foundation for ScriptRunner results.
+# Validator, planner and explicitly gated applier for ScriptRunner results.
 #
-# This module deliberately performs dry-run planning only. It validates actions
-# returned by external scripts and converts them into a structured plan. It does
-# not send IRC messages, create timers, touch DB, or mutate runtime state yet.
+# apply_actions_dry() validates script-returned actions and builds a structured
+# plan without side effects. apply_actions() can apply log/reply/notice actions
+# only when apply => 1; IRC output also requires allow_irc => 1. Timer actions are
+# still rejected as not implemented, and this module never writes to the DB.
 # ---------------------------------------------------------------------------
 
 sub _constructor_positive_int {
@@ -280,7 +281,10 @@ sub validate_action {
 sub plan_actions {
     my ($self, $actions, $context) = @_;
 
-    $actions ||= [];
+    # MB296: an omitted actions field remains compatible with an empty action
+    # list, but false scalar values such as 0, "0" or "" are malformed JSON
+    # contracts and must not be silently converted into [] by ||=.
+    $actions = [] unless defined $actions;
     return {
         ok      => 0,
         planned => [],
@@ -395,9 +399,9 @@ sub apply_actions {
 
     my $plan = $self->apply_actions_dry($script_result, $context);
 
-    # mb186-B1: real action application is behind an explicit gate.
-    # Default remains dry-run. IRC output requires apply => 1 AND allow_irc => 1.
-    # This method is not wired to ScriptDryRun automatically.
+    # mb186-B1: real action application remains behind explicit gates.
+    # ScriptDryRun calls this method only in ACTION_MODE=apply; IRC output still requires both
+    # apply => 1 and allow_irc => 1. Without apply, the validated plan is returned.
     return $plan unless $apply;
 
     my @applied;
@@ -676,7 +680,10 @@ sub apply_actions_dry {
     my $response = ref($script_result) eq 'HASH' ? $script_result->{response} : undef;
     my $actions  = ref($response) eq 'HASH' ? $response->{actions} : undef;
 
-    my $plan = $self->plan_actions($actions || [], $context);
+    # Preserve the distinction between a missing actions field and a malformed
+    # false scalar value. plan_actions() handles undef as the compatible empty
+    # list and rejects every defined non-array value.
+    my $plan = $self->plan_actions($actions, $context);
     $plan->{dry_run} = 1;
 
     return $plan;

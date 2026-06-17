@@ -1634,8 +1634,9 @@ sub _cmd_scriptdryrun {
         $stream->write("    plugins.script_dryrun.routes\r\n");
         $stream->write("    SCRIPT_DRYRUN_ROUTES\r\n");
         $stream->write("  route format: command=script, other=script2\r\n");
-        $stream->write("  command filter: optional allow-list, empty means all commands\r\n");
-        $stream->write("  command routes: optional command-to-script map\r\n");
+        $stream->write("  command filter: optional explicit allow-list\r\n");
+        $stream->write("  command routes: mapped commands are explicitly scoped and authorized\r\n");
+        $stream->write("  SCRIPT fallback: used only when no route matches; keep scoped in apply mode\r\n");
         $stream->write("  action mode keys:\r\n");
         $stream->write("    plugins.ScriptDryRun.ACTION_MODE\r\n");
         $stream->write("    plugins.ScriptDryRun.action_mode\r\n");
@@ -1869,8 +1870,8 @@ sub _cmd_plugins {
 
     my $pm = $bot->plugin_manager;
 
-    # mb173-B1: partyline visibility for the new plugin foundation. This command
-    # is read-only: it does not load, unload, enable, or disable anything.
+    # Read-only Partyline visibility for the active PluginManager state. This
+    # command does not load, unload, enable, or disable anything.
     my $autoload = eval { $bot->can('plugin_autoload_enabled') ? $bot->plugin_autoload_enabled : 0 } ? 'enabled' : 'disabled';
     my @all      = eval { $pm->list } ? $pm->list : ();
     my @enabled  = eval { $pm->list(enabled => 1) } ? $pm->list(enabled => 1) : ();
@@ -1887,7 +1888,8 @@ sub _cmd_plugins {
             $stream->write("  boot loading: enabled by configuration gate\r\n");
         }
 
-        $stream->write("  plugin list keys: plugins.ENABLED, plugins.PLUGINS, PLUGINS_ENABLED, PLUGINS\r\n");
+        $stream->write("  autoload keys: plugins.AUTOLOAD, plugins.autoload, plugins.ENABLED_AUTOLOAD, PLUGIN_AUTOLOAD, PLUGINS_AUTOLOAD\r\n");
+        $stream->write("  plugin list keys: plugins.ENABLED, plugins.enabled, plugins.PLUGINS, plugins.plugins, PLUGINS_ENABLED, PLUGIN_ENABLED, PLUGINS\r\n");
         $stream->write("  module safety: Perl module names only, no paths\r\n");
         return;
     }
@@ -1945,7 +1947,7 @@ sub _cmd_help {
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
       . "  .plugins [loaded|config] - show plugin manager/autoload status\r\n"
-      . "  .scriptdryrun [status|last|config] - show ScriptDryRun plugin dry-run status\r\n"
+      . "  .scriptdryrun [status|last|config] - show external script bridge status and last run\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary)\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"
       . "  .top [n]            - top N speakers across all channels (default 5)\r\n"

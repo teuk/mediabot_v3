@@ -10,11 +10,14 @@ our $VERSION = '0.001';
 # ---------------------------------------------------------------------------
 # Mediabot::Plugin::ScriptDryRun
 # ---------------------------------------------------------------------------
-# mb179-B1: trusted in-process Perl bridge from EventBus to ScriptRunner.
+# Trusted in-process bridge from EventBus to external Perl/Python/Tcl scripts.
 #
-# This plugin listens to public_command_observed and calls
-# $bot->run_script_actions_dry(...). It deliberately never applies actions.
-# It is an integration bridge and a safety proof, not an IRC feature yet.
+# The historical ScriptDryRun name is retained for configuration and partyline
+# compatibility, but the plugin now supports two explicit modes:
+#   - dry-run: execute the script and validate/plan its returned actions only;
+#   - apply: execute the script and pass validated actions to ScriptActionRunner.
+# IRC reply/notice output additionally requires ALLOW_IRC=yes, and apply mode is
+# scoped by COMMANDS/ROUTES when APPLY_REQUIRE_SCOPE is enabled (the default).
 # ---------------------------------------------------------------------------
 
 sub register {
@@ -95,9 +98,9 @@ sub register {
     # Empty or missing filter keeps the previous behavior: observe all commands.
     $self->{command_filter} = _make_command_filter($self->{command_filter_raw});
 
-    # mb184-B1: optional command-to-script route map. This lets one trusted
-    # ScriptDryRun plugin dispatch different commands to different Perl/Python/Tcl
-    # scripts while keeping the same dry-run safety boundary.
+    # Optional command-to-script route map. One trusted bridge instance can
+    # dispatch different commands to different Perl/Python/Tcl scripts while
+    # keeping the same path, protocol, scope and action-application guards.
     $self->{command_routes} = _make_command_routes($self->{command_routes_raw});
 
     # mb187-B1: explicit action mode gate. Default is dry-run. Real application

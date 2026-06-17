@@ -112,8 +112,10 @@ my $case = sub {
         'config output has header');
     $assert->($config =~ /plugins\.ScriptDryRun\.SCRIPT/,
         'config output lists config keys');
-    $assert->($config =~ /action mode: dry-run only/,
-        'config output states dry-run only');
+    $assert->(scalar($config =~ /action modes: dry-run, apply/),
+        'config output lists dry-run and apply modes');
+    $assert->(scalar($config =~ /IRC output requires: ACTION_MODE=apply and ALLOW_IRC=yes/),
+        'config output documents the IRC apply gate');
 
     my $none_party = bless {
         bot => FakeBot->new(FakePluginManager->new(undef)),

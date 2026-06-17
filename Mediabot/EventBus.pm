@@ -9,12 +9,12 @@ use Scalar::Util qw(refaddr);
 # ---------------------------------------------------------------------------
 # Mediabot::EventBus
 # ---------------------------------------------------------------------------
-# mb167-B1: minimal internal event bus foundation.
+# Active internal event bus used by core hooks and trusted plugins.
 #
-# This module deliberately does not change current Mediabot behavior yet.
-# It is the second architectural brick after CommandRegistry. It will allow
-# future core code, internal plugins and controlled script runners to subscribe
-# to events such as public_message, join, part, timer, url_detected, shutdown...
+# Listeners can subscribe with metadata and priority; emit_report() isolates
+# listener failures and reports them without stopping the remaining listeners.
+# The current public_command_observed event powers plugin observation and the
+# external-script bridge, while the same API remains available for more events.
 # ---------------------------------------------------------------------------
 
 sub new {
@@ -171,10 +171,22 @@ sub _drop_once_entries_from_current_list {
     return unless %drop;
 
     my @current = @{ $self->{listeners}{$name} || [] };
-    $self->{listeners}{$name} = [ grep {
+    my @kept = grep {
         my $id = eval { refaddr($_) };
         !(defined $id && $drop{$id});
-    } @current ];
+    } @current;
+
+    # mb281-B1: when dropping one-shot listeners empties an event, remove the
+    # event key entirely (like off() does). Leaving an empty ARRAY ref behind
+    # makes events() report a phantom event that has zero listeners, which is
+    # inconsistent with off()/clear() and surprising to callers enumerating
+    # active events.
+    if (@kept) {
+        $self->{listeners}{$name} = \@kept;
+    }
+    else {
+        delete $self->{listeners}{$name};
+    }
 }
 
 sub emit {

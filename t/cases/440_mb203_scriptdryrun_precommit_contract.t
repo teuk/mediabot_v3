@@ -82,7 +82,7 @@ for my $marker (
 }
 
 for my $marker (
-    'mb186-B1: real action application is behind an explicit gate',
+    'mb186-B1: real action application remains behind explicit gates',
     'mb199-B1:',
     'mb200-B1:',
 ) {

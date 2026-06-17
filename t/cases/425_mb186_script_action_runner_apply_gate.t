@@ -150,8 +150,8 @@ my $case = sub {
     my $src = do { local $/; <$fh> };
     close $fh;
 
-    $assert->($src =~ /mb186-B1: real action application is behind an explicit gate/,
-        'ScriptActionRunner source contains mb186 marker');
+    $assert->(scalar($src =~ /mb186-B1: real action application remains behind explicit gates/),
+        'ScriptActionRunner source keeps the explicit apply-gate marker');
     $assert->($src =~ /allow_irc/,
         'ScriptActionRunner source uses allow_irc gate');
     $assert->($src =~ /send_message\(\$command, undef, \$action->\{target\}, \$action->\{text\}\)/,

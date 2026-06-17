@@ -130,12 +130,14 @@ EOS
     my $plugin_src = do { local $/; <$pfh> };
     close $pfh;
 
-    $assert->($plugin_src =~ /mb179-B1: trusted in-process Perl bridge from EventBus to ScriptRunner/,
-        'ScriptDryRun source contains mb179 marker');
+    $assert->(scalar($plugin_src =~ /Trusted in-process bridge from EventBus to external Perl\/Python\/Tcl scripts/),
+        'ScriptDryRun source documents the active multilingual bridge');
     $assert->($plugin_src =~ /public_command_observed/,
         'ScriptDryRun listens to public_command_observed');
-    $assert->($plugin_src =~ /run_script_actions_dry/,
-        'ScriptDryRun calls dry-run script pipeline');
+    $assert->(scalar($plugin_src =~ /run_script_actions_dry/),
+        'ScriptDryRun keeps the dry-run script pipeline');
+    $assert->(scalar($plugin_src =~ /apply_actions/),
+        'ScriptDryRun also wires explicitly gated apply mode');
     $assert->($plugin_src !~ /send_privmsg|send_notice|send_message|dbh->|prepare\(|INSERT|UPDATE|DELETE/,
         'ScriptDryRun does not send IRC messages or touch DB');
 };

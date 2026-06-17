@@ -119,8 +119,8 @@ my $case = sub {
         my $src = do { local $/; <$fh> };
         close $fh;
 
-        $assert->($src =~ /mb181-B1|mb198-B1/,
-            "example script $file contains external script example marker");
+        $assert->(scalar($src =~ /mediabot-script-v1/),
+            "example script $file documents the mediabot-script-v1 protocol");
         $assert->($src !~ /\bsystem\s*\(|\bexec\s*\(|qx\/|rm\s+-rf|curl\s+/,
             "example script $file does not contain dangerous shell helpers");
     }

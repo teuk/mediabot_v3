@@ -1,20 +1,32 @@
+#!/usr/bin/env perl
 use strict;
 use warnings;
 use utf8;
 use JSON::PP qw(decode_json encode_json);
 
-# mb181-B1: example external Perl script for the Mediabot ScriptRunner protocol.
-# It reads a mediabot-script-v1 JSON envelope on STDIN and prints JSON actions
-# on STDOUT. The actions are meant to pass through ScriptActionRunner.
+# Minimal Perl reference script for the mediabot-script-v1 protocol.
+#
+# It reads one JSON object from STDIN and returns reply/log actions on STDOUT.
+# The script does not decide whether those actions are only planned or really
+# applied: ACTION_MODE, ALLOW_IRC and APPLY_REQUIRE_SCOPE belong to the trusted
+# Mediabot bridge configuration.
 
 my $input = do { local $/; <STDIN> };
-my $payload = eval { decode_json($input || '{}') } || {};
+my $payload = eval { decode_json($input || '{}') };
+$payload = {} unless ref($payload) eq 'HASH';
 
-my $command = $payload->{data}{command} || 'unknown';
-my $channel = $payload->{data}{channel} || $payload->{data}{target} || '';
+my $data = ref($payload->{data}) eq 'HASH' ? $payload->{data} : {};
+my $command = defined($data->{command}) && !ref($data->{command}) && length($data->{command})
+    ? $data->{command}
+    : 'unknown';
+my $channel = defined($data->{channel}) && !ref($data->{channel}) && length($data->{channel})
+    ? $data->{channel}
+    : (defined($data->{target}) && !ref($data->{target}) ? $data->{target} : '');
 
 print encode_json({
-    actions => [
+    protocol => 'mediabot-script-v1',
+    ok       => JSON::PP::true,
+    actions  => [
         {
             type   => 'reply',
             target => $channel,
@@ -23,7 +35,7 @@ print encode_json({
         {
             type  => 'log',
             level => 'info',
-            text  => 'Perl example script produced a dry-run action plan',
+            text  => 'Perl example script produced an action plan',
         },
     ],
 });

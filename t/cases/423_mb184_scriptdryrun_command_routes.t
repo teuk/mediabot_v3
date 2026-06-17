@@ -179,8 +179,8 @@ my $case = sub {
     my $src = do { local $/; <$sfh> };
     close $sfh;
 
-    $assert->($src =~ /mb184-B1: optional command-to-script route map/,
-        'ScriptDryRun source contains mb184 marker');
+    $assert->(scalar($src =~ /Optional command-to-script route map/),
+        'ScriptDryRun source documents command-to-script routing');
     $assert->($src =~ /plugins\.ScriptDryRun\.ROUTES/,
         'ScriptDryRun source documents ROUTES config key');
     $assert->($src =~ /script_for_command/,

@@ -9,11 +9,12 @@ use Scalar::Util qw(refaddr);
 # ---------------------------------------------------------------------------
 # Mediabot::PluginManager
 # ---------------------------------------------------------------------------
-# mb169-B1: minimal plugin manager foundation.
+# Active manager for trusted in-process Perl plugins.
 #
-# This module deliberately loads no plugin by default. It gives Mediabot a
-# central place to register trusted in-process Perl plugins later, and a clear
-# boundary before we add any external Perl/Python/Tcl ScriptRunner support.
+# It owns registration, replacement, unregister cleanup and configuration-driven
+# loading behind Mediabot's explicit plugins.AUTOLOAD boot gate. External
+# Perl/Python/Tcl scripts stay out of process: ScriptDryRun delegates them to
+# ScriptRunner across the mediabot-script-v1 boundary.
 # ---------------------------------------------------------------------------
 
 sub new {
@@ -386,9 +387,8 @@ sub configured_modules_from_conf {
 sub load_configured_plugins {
     my ($self, $conf, %opts) = @_;
 
-    # This method is intentionally explicit. Mediabot does not call it from the
-    # constructor in mb170, so no plugin is loaded unless the core later decides
-    # to opt in at a controlled boot point.
+    # Explicit configuration-loading entry point. The constructor never autoloads;
+    # Mediabot calls this method only after the plugins.AUTOLOAD boot gate passes.
     my $parsed = $self->configured_modules_from_conf($conf, %opts);
     my @modules = @{ $parsed->{modules} || [] };
     my @loaded;
@@ -479,8 +479,8 @@ sub load_perl_module {
             $object = $module->register($self->{bot}, manager => $self, name => $name);
             1;
         };
-        die "PluginManager: failed to register $module: " . _plugin_error_text($@, 'plugin register failed') . "
-"
+        die "PluginManager: failed to register $module: "
+          . _plugin_error_text($@, 'plugin register failed') . "\n"
             unless $registered;
     }
 

@@ -86,12 +86,12 @@ sub new {
     # to the Mediabot object. It loads no plugin by default.
     $self->{plugin_manager} = Mediabot::PluginManager->new(bot => $self);
 
-    # mb174-B1: create ScriptRunner foundation. It does not execute scripts yet;
-    # it only provides validation and JSON protocol helpers for future plugins.
+    # External script runtime: validates and executes trusted Perl/Python/Tcl
+    # scripts through the bounded mediabot-script-v1 JSON protocol.
     $self->{script_runner} = Mediabot::ScriptRunner->new(bot => $self);
 
-    # mb177-B1: create dry-run ScriptActionRunner. It validates script-returned
-    # actions but does not apply side effects yet.
+    # Action layer: validates/plans every script response and can apply the
+    # explicitly gated reply/notice/log actions used by ScriptDryRun apply mode.
     $self->{script_action_runner} = Mediabot::ScriptActionRunner->new(bot => $self);
 
     # mb166-B1: seed the first low-risk built-in commands into the registry.
@@ -334,7 +334,7 @@ sub run_script_actions_dry {
 }
 
 
-# Return the script action runner foundation used to validate script results.
+# Return the active script action validator/applier.
 sub script_action_runner {
     my ($self) = @_;
     return $self->{script_action_runner};
@@ -347,7 +347,7 @@ sub script_actions {
 }
 
 
-# Return the external script runner foundation used by future plugin work.
+# Return the active external Perl/Python/Tcl script runtime.
 sub script_runner {
     my ($self) = @_;
     return $self->{script_runner};
@@ -360,7 +360,7 @@ sub scripts {
 }
 
 
-# Return the plugin manager foundation used by future plugin work.
+# Return the active plugin manager.
 sub plugin_manager {
     my ($self) = @_;
     return $self->{plugin_manager};
@@ -373,7 +373,7 @@ sub plugins {
 }
 
 
-# Return the minimal event bus foundation used by future plugin/hook work.
+# Return the active internal event bus used by hooks and plugins.
 sub event_bus {
     my ($self) = @_;
     return $self->{event_bus};
@@ -487,7 +487,7 @@ sub _register_builtin_public_core_commands {
 }
 
 
-# Return the command registry foundation used by future plugin/dispatch work.
+# Return the active command registry used by built-ins and plugin dispatch.
 sub command_registry {
     my ($self) = @_;
     return $self->{command_registry};

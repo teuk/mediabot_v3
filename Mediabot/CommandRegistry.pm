@@ -7,12 +7,12 @@ use utf8;
 # ---------------------------------------------------------------------------
 # Mediabot::CommandRegistry
 # ---------------------------------------------------------------------------
-# mb165-B1: small, standalone command registry foundation.
+# Active command registry used alongside Mediabot's legacy dispatch tables.
 #
-# This module deliberately does not change the existing Mediabot dispatch yet.
-# It provides the stable API needed to move commands out of hard-coded dispatch
-# hashes later, and eventually to let internal plugins/scripts register commands
-# without editing Mediabot.pm.
+# It stores canonical public/private commands, aliases, metadata and handlers.
+# Mediabot consults it first for migrated commands, then keeps the legacy tables
+# as a compatibility fallback for commands not registered here yet. Trusted
+# in-process plugins can use the same validated registration API.
 # ---------------------------------------------------------------------------
 
 sub new {

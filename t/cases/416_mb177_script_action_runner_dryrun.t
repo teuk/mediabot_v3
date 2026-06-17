@@ -119,10 +119,10 @@ my $case = sub {
     my $src = do { local $/; <$fh> };
     close $fh;
 
-    $assert->($src =~ /mb177-B1: safe action applier foundation/,
-        'ScriptActionRunner source contains mb177 marker');
-    $assert->($src =~ /dry-run planning only/,
-        'ScriptActionRunner source documents dry-run only');
+    $assert->(scalar($src =~ /Validator, planner and explicitly gated applier/),
+        'ScriptActionRunner source documents its active validator/applier role');
+    $assert->(scalar($src =~ /apply_actions\(\) can apply log\/reply\/notice actions/),
+        'ScriptActionRunner source documents explicitly gated apply mode');
     $assert->($src =~ /allow_irc/,
         'ScriptActionRunner keeps IRC output behind allow_irc gate');
     $assert->($src =~ /send_message/,

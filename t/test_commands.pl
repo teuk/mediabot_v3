@@ -59,6 +59,29 @@ USAGE
 # ---- Classe d'assertion -----------------------------------------------------
 package Assert;
 
+# Legacy MB12x-MB20x case files receive an assertion callback and invoke it as
+# $assert->($condition, $description), while newer cases use the Assert object
+# methods directly. Make the same object callable so the static runner supports
+# both test styles.
+use overload
+    '&{}' => sub {
+        my ($self) = @_;
+        return sub {
+            my (@args) = @_;
+
+            # A failed regex evaluated in list context contributes an empty
+            # list, leaving only the description. Treat that shape as failure
+            # instead of accepting a truthy description as an unnamed pass.
+            if (@args == 1 && defined $args[0] && $args[0] !~ /\A(?:0|1)\z/) {
+                $self->fail($args[0]);
+                return;
+            }
+
+            $self->ok($args[0], $args[1]);
+        };
+    },
+    fallback => 1;
+
 sub new {
     my ($class, %args) = @_;
     return bless { verbose => $args{verbose} // 0, pass => 0, fail => 0 }, $class;
@@ -171,6 +194,10 @@ for my $file (@test_files) {
     my $name = basename($file);
     print "\n[ $name ]\n";
 
+    # FindBin was initialized for this runner. Legacy loaded cases expect $Bin
+    # to be their own t/cases directory, so localize it around do().
+    local $FindBin::Bin = dirname($file);
+    local $FindBin::RealBin = $FindBin::Bin;
     my $code = do $file;
     if ($@) {
         print "  ERREUR de chargement : $@\n";
