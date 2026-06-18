@@ -2,7 +2,7 @@
 # =============================================================================
 # Regression checks for youtubeSearch_ctx().
 #
-# External.pm imports uri_escape_utf8 from URI::Escape, not url_encode_utf8
+# External/YouTube.pm imports uri_escape_utf8 from URI::Escape, not url_encode_utf8
 # from URL::Encode.  youtubeSearch_ctx must not call an undefined helper.
 # =============================================================================
 
@@ -60,7 +60,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_youtube_search_encoding(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm')
     );
 
     my $body = _extract_sub_body_youtube_search_encoding($src, 'youtubeSearch_ctx');
@@ -72,8 +72,8 @@ return sub {
 
     $assert->like(
         $src,
-        qr/^use URI::Escape qw\(uri_escape_utf8 uri_escape\);$/m,
-        'External.pm imports uri_escape_utf8'
+        qr/^use URI::Escape qw\(uri_escape_utf8\);$/m,
+        'External/YouTube.pm imports uri_escape_utf8'
     );
 
     $assert->like(

@@ -38,7 +38,7 @@ sub _extract_sub_222 {
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_222(File::Spec->catfile('.', 'Mediabot', 'External.pm'));
+    my $src = _slurp_222(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
 
     # Claude chanset gate uses _chanset_ok helper
     my $body = _extract_sub_222($src, 'claudeAI');
@@ -52,13 +52,12 @@ return sub {
 
     # Must be checked BEFORE the HTTP call
     my $gate_pos = index($body // '', '_chanset_ok');
-    my $http_pos = index($body // '', '->request(');
+    my $http_pos = index($body // '', 'my $answer = _claude_send_and_parse');
     $assert->ok($gate_pos >= 0 && $http_pos >= 0 && $gate_pos < $http_pos,
-        'chanset gate comes before HTTP request in claudeAI');
+        'chanset gate comes before the Anthropic helper call in claudeAI');
 
-    # _chanset_ok must be exported
-    $assert->like($src, qr/our\s+\@EXPORT.*_chanset_ok/s,
-        '_chanset_ok is in @EXPORT');
+    $assert->like($body // '', qr/Mediabot::External::_chanset_ok/,
+        'claudeAI uses the shared top-level chanset helper explicitly');
 
     # chatGPT also has a gate (regression check)
     my $gpt_body = _extract_sub_222($src, 'chatGPT');

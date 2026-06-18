@@ -100,7 +100,7 @@ sub _extract_sub_fortniteid_safety {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_fortniteid_safety(File::Spec->catfile('.', 'Mediabot', 'External.pm'));
+    my $src  = _slurp_fortniteid_safety(File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm'));
     my $func = _extract_sub_fortniteid_safety($src, 'getFortniteId');
 
     $assert->ok(

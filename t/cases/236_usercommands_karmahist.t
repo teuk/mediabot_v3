@@ -1,6 +1,6 @@
 # t/cases/236_usercommands_karmahist.t
 # =============================================================================
-# Verify !karmahist and karma log ring buffer in processKarma (I4).
+# Verify !karmahist and karma log history buffer in processKarma (I4/IMP3).
 # =============================================================================
 use strict; use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
@@ -21,8 +21,8 @@ return sub {
         'processKarma has I4 karma log comment');
     $assert->like($pk // '', qr/_karma_log/,
         'processKarma appends to _karma_log');
-    $assert->like($pk // '', qr/splice\s+\@\$klog,\s*0,\s*\@\$klog\s*-\s*20\s+if\s+\@\$klog\s*>\s*20/s,
-        'processKarma caps ring buffer at 20 entries');
+    $assert->like($pk // '', qr/splice\s+\@\$klog,\s*0,\s*\@\$klog\s*-\s*500\s+if\s+\@\$klog\s*>\s*500/s,
+        'processKarma caps karma history at 500 entries');
     $assert->like($pk // '', qr/ts.*time\(\)|time\(\).*ts/,
         'processKarma stores timestamp in log entry');
     $assert->like($pk // '', qr/from.*nick|nick.*from/,

@@ -8,7 +8,7 @@ it supports both a no-side-effect **dry-run** mode and an explicitly gated
 ## What users can do
 
 Once an administrator enables routes, IRC users invoke external commands exactly
-like normal Mediabot commands. The repository ships six examples:
+like normal Mediabot commands. The repository ships seven examples:
 
 | Command route | Language | Purpose |
 |---|---|---|
@@ -18,9 +18,10 @@ like normal Mediabot commands. The repository ships six examples:
 | `proll` | Python | bounded dice roller |
 | `p8ball` | Tcl | Magic 8-Ball |
 | `pchoose` | Perl | random choice helper |
+| `pcalc` | Python | safe AST-based arithmetic calculator |
 
 The `p` aliases are intentional. Mediabot already has richer internal `roll`,
-`8ball` and `choose` commands; routing the same names in apply mode would shadow
+`8ball`, `choose` and `calc` commands; routing the same names in apply mode would shadow
 those handlers.
 
 ## Configuration
@@ -31,8 +32,8 @@ AUTOLOAD=1
 ENABLED=Mediabot::Plugin::ScriptDryRun
 
 [plugins.ScriptDryRun]
-COMMANDS=hello,pyhello,tclhello,proll,p8ball,pchoose
-ROUTES=hello=examples/hello_perl.pl, pyhello=examples/hello_python.py, tclhello=examples/hello_tcl.tcl, proll=examples/roll.py, p8ball=examples/eightball.tcl, pchoose=examples/choose.pl
+COMMANDS=hello,pyhello,tclhello,proll,p8ball,pchoose,pcalc
+ROUTES=hello=examples/hello_perl.pl, pyhello=examples/hello_python.py, tclhello=examples/hello_tcl.tcl, proll=examples/roll.py, p8ball=examples/eightball.tcl, pchoose=examples/choose.pl, pcalc=examples/calc.py
 ACTION_MODE=apply
 ALLOW_IRC=yes
 APPLY_REQUIRE_SCOPE=yes

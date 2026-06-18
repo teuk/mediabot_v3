@@ -97,6 +97,10 @@ sub _result {
         my $info = $extra ? " ($extra)" : '';
         print "  [FAIL] $desc$info\n";
     }
+
+    # MB301: assertion methods must behave like Test::More predicates so
+    # constructs such as ok(...) or diag(...) work predictably.
+    return $ok ? 1 : 0;
 }
 
 sub ok {
@@ -135,6 +139,16 @@ sub unlike {
 
 sub pass { $_[0]->_result(1, $_[1] // '(pass)') }
 sub fail { $_[0]->_result(0, $_[1] // '(fail)') }
+
+sub diag {
+    my ($self, @parts) = @_;
+    my $text = join('', map { defined($_) ? $_ : 'undef' } @parts);
+    $text =~ s/\r\n?/\n/g;
+    $text =~ s/\n\z//;
+    $text =~ s/^/# /mg;
+    print "$text\n" if length $text;
+    return 0;
+}
 
 sub total  { $_[0]->{pass} + $_[0]->{fail} }
 sub passed { $_[0]->{pass} }
@@ -211,7 +225,20 @@ for my $file (@test_files) {
             return if $w =~ /uninitialized|redefine|prototype|only once/i;
             warn $w;
         };
-        $code->($assert, \&make_bot, \&make_msg_chan, \&make_msg_priv);
+        # MB301: a broken case must fail that case, not abort the whole runner.
+        my $executed = eval {
+            $code->($assert, \&make_bot, \&make_msg_chan, \&make_msg_priv);
+            1;
+        };
+
+        if (!$executed) {
+            my $err = $@ || 'unknown test execution error';
+            $err =~ s/\r\n?/\n/g;
+            $err =~ s/\s+\z//;
+            $err =~ s/\n/\n  /g;
+            print "  ERREUR d'execution : $err\n";
+            $assert->fail("$name: execution");
+        }
     } else {
         print "  (pas de sous-routine retournee, skip)\n";
     }

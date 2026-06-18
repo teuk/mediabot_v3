@@ -121,8 +121,8 @@ EOS
 
     $assert->($skip_plugin->observed_public == 1 && $skip_plugin->skipped_public == 1,
         'ScriptDryRun skips safely when no script is configured');
-    $assert->($skip_plugin->last_error =~ /no script configured/,
-        'ScriptDryRun records missing script configuration error');
+    $assert->($skip_plugin->last_error =~ /not allowed by ScriptDryRun filter/,
+        'ScriptDryRun rejects an unconfigured command before script resolution');
 
     my $plugin_file = File::Spec->catfile($root, 'Mediabot', 'Plugin', 'ScriptDryRun.pm');
     open my $pfh, '<', $plugin_file

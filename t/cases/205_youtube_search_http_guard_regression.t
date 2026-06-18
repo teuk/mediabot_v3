@@ -3,7 +3,7 @@
 # Regression checks for youtubeSearch_ctx() HTTP guards.
 #
 # Both YouTube API calls must be protected with eval just like the rest of
-# Mediabot::External network code. Empty responses must be handled before JSON
+# Mediabot::External::YouTube network code. Empty responses must be handled before JSON
 # decoding.
 # =============================================================================
 
@@ -106,7 +106,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_205(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm')
     );
 
     my $body = _extract_sub_205($src, 'youtubeSearch_ctx');

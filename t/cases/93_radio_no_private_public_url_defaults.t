@@ -66,19 +66,19 @@ return sub {
         'song fallback listen URL is built from public_base and primary_mount'
     );
 
-    my $readme = _slurp_radio_no_private_defaults(
-        File::Spec->catfile('.', 'README.md')
+    my $sample = _slurp_radio_no_private_defaults(
+        File::Spec->catfile('.', 'mediabot.sample.conf')
     );
 
     $assert->like(
-        $readme,
+        $sample,
         qr/RADIO_ICECAST_PUBLIC_BASE_URL=http:\/\/example\.com:8000/,
-        'README radio example uses example.com for public Icecast URL'
+        'sample config uses example.com for public Icecast URL'
     );
 
     $assert->unlike(
-        $readme,
+        $sample,
         qr/RADIO_ICECAST_PUBLIC_BASE_URL=http:\/\/teuk\.org:8000/,
-        'README radio example does not expose a private Icecast public URL'
+        'sample config does not expose a private Icecast public URL'
     );
 };

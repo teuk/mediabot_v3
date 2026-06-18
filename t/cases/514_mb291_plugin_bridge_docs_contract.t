@@ -29,6 +29,7 @@ my $hello_perl = slurp('plugins/scripts/examples/hello_perl.pl');
 my $hello_python = slurp('plugins/scripts/examples/hello_python.py');
 my $hello_tcl = slurp('plugins/scripts/examples/hello_tcl.tcl');
 my $roll = slurp('plugins/scripts/examples/roll.py');
+my $calc = slurp('plugins/scripts/examples/calc.py');
 
 unlike($bridge, qr/deliberately never applies actions|not an IRC feature yet/,
     'ScriptDryRun header no longer describes the obsolete dry-run-only bridge');
@@ -57,13 +58,13 @@ for my $pair (
 unlike($roll, qr/tools\/mb_plugin_dev\.pl/,
     'roll example no longer references a missing development tool');
 like($sample, qr/AUTOLOAD=0/, 'sample config keeps plugin autoload disabled by default');
-like($sample, qr/COMMANDS=hello,pyhello,tclhello,proll,p8ball,pchoose/,
+like($sample, qr/COMMANDS=hello,pyhello,tclhello,proll,p8ball,pchoose,pcalc/,
     'sample config documents all conflict-safe routes');
 like($sample, qr/ACTION_MODE=apply.*ALLOW_IRC=yes.*APPLY_REQUIRE_SCOPE=yes/s,
     'sample config documents the guarded live mode');
 like($readme, qr/Mediabot external script plugins/,
     'external plugin README exists');
-like($readme, qr/`proll`.*`p8ball`.*`pchoose`/s,
+like($readme, qr/`proll`.*`p8ball`.*`pchoose`.*`pcalc`/s,
     'README explains conflict-safe aliases');
 
 require Mediabot::ScriptRunner;
@@ -86,6 +87,15 @@ my $ar = Mediabot::ScriptActionRunner->new;
     my $plan = $ar->apply_actions_dry($r, { channel => '#teuk' });
     like($plan->{planned}[0]{text}, qr/\bpchoose\b/, 'choose usage reflects routed alias');
     unlike($plan->{planned}[0]{text}, qr/!choose\b/, 'choose usage does not advertise the internal command');
+}
+
+
+{
+    my $r = $sr->run_script('calc.py', 'public_command',
+        channel => '#teuk', nick => 'teuk', command => 'pcalc', args => []);
+    my $plan = $ar->apply_actions_dry($r, { channel => '#teuk' });
+    like($plan->{planned}[0]{text}, qr/\bpcalc\b/, 'calculator usage reflects routed alias');
+    unlike($plan->{planned}[0]{text}, qr/!calc\b/, 'calculator usage does not advertise the internal command');
 }
 
 SKIP: {

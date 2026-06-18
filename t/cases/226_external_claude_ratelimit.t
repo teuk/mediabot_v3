@@ -37,7 +37,7 @@ sub _extract_sub_226 {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_226(File::Spec->catfile('.', 'Mediabot', 'External.pm'));
+    my $src  = _slurp_226(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
     my $body = _extract_sub_226($src, 'claudeAI');
 
     $assert->ok(defined $body && $body ne '', 'claudeAI body found');

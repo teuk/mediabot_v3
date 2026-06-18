@@ -58,7 +58,7 @@ my @important_cmds = qw(
     obs
 );
 
-my $planned = 13 + scalar(@important_cmds);
+my $planned = 18 + scalar(@important_cmds);
 say "1..$planned";
 
 my $tests = 0;

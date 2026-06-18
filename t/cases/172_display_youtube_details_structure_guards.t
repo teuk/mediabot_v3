@@ -61,7 +61,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_display_youtube_guards(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm')
     );
 
     my $body = _extract_sub_body_display_youtube_guards($src, 'displayYoutubeDetails');

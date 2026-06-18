@@ -1,13 +1,9 @@
 # t/cases/117_readme_perl_conf_order.t
 # =============================================================================
-# Regression checks for README Mediabot startup command syntax.
+# Regression checks for the supported first-start workflow.
 #
-# --conf is a Mediabot argument, not a perl interpreter option.
-# Correct:
-#   perl mediabot.pl --conf=mediabot.conf
-#
-# Wrong:
-#   perl --conf=mediabot.conf mediabot.pl
+# --conf belongs after mediabot.pl. README deliberately starts in foreground
+# and tells operators not to daemonize until startup is clean.
 # =============================================================================
 
 use strict;
@@ -23,7 +19,6 @@ use File::Spec;
 
 sub _slurp_readme_perl_conf_order {
     my ($path) = @_;
-
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
     local $/;
     return <$fh>;
@@ -39,18 +34,21 @@ return sub {
     $assert->unlike(
         $readme,
         qr/perl\s+--conf=mediabot\.conf\s+mediabot\.pl/,
-        'README does not pass --conf as a perl interpreter option'
+        'README does not pass --conf as a Perl interpreter option'
     );
-
     $assert->like(
         $readme,
-        qr/perl\s+mediabot\.pl\s+--conf=mediabot\.conf/,
-        'README documents correct foreground start command order'
+        qr/^\.\/start$/m,
+        'README documents the normal foreground start helper'
     );
-
     $assert->like(
         $readme,
-        qr/perl\s+mediabot\.pl\s+--conf=mediabot\.conf\s+--daemon/,
-        'README documents correct daemon start command order'
+        qr/^perl\s+mediabot\.pl\s+--conf=mediabot\.conf$/m,
+        'README documents correct explicit foreground command order'
+    );
+    $assert->like(
+        $readme,
+        qr/Do not daemonize until foreground startup is clean\./,
+        'README explicitly requires a clean foreground start before daemonization'
     );
 };

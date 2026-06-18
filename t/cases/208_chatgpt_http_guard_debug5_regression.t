@@ -105,7 +105,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_208(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm')
     );
 
     my $body = _extract_sub_208($src, 'chatGPT');

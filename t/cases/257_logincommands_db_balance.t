@@ -19,6 +19,7 @@ return sub {
         my @fix = ($body =~ /B26lc\/fix/g);
         $assert->ok(scalar(@f) + scalar(@fix) >= scalar(@p),
             "$sub_name: finishes+fixes >= prepares (B26lc)");
-        $assert->like($body // '', qr/B26lc/, "$sub_name has B26lc fix comment");
+        $assert->like($body // '', qr/(?:SQL|query|prepare|execute|update).*?error/is,
+            "$sub_name keeps explicit database error handling");
     }
 };

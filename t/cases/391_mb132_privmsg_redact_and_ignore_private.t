@@ -67,8 +67,8 @@ my $case = sub {
     my $src = do { local $/; <$hfh> };
     close $hfh;
 
-    $assert->($src =~ /mb132-B5: redact IRC service credentials/,
-        'botPrivmsg contains mb132-B5 redaction comment');
+    $assert->($src =~ /my \$log_msg = _redact_irc_service_secret_for_log\(\$sMsg\);/,
+        'botPrivmsg redacts private service credentials before logging');
     $assert->($src =~ /\$verb eq 'identify' \|\| \$verb eq 'id'/,
         'identify and id are handled explicitly');
     $assert->($src =~ /\$parts\[-1\] = '\*\*\*\*'/,

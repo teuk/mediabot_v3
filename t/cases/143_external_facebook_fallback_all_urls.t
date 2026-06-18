@@ -59,7 +59,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_facebook_fallback_all_urls(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm')
     );
 
     my $fallback_body = _extract_sub_body_facebook_fallback_all_urls($src, '_facebook_fallback_title_from_url');

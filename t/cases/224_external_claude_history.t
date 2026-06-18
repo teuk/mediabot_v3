@@ -37,13 +37,15 @@ sub _extract_sub_224 {
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_224(File::Spec->catfile('.', 'Mediabot', 'External.pm'));
+    my $src = _slurp_224(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
 
     my $ai_body    = _extract_sub_224($src, 'claudeAI');
     my $ctx_body   = _extract_sub_224($src, 'claude_ctx');
+    my $send_body  = _extract_sub_224($src, '_claude_send_and_parse');
 
     $assert->ok(defined $ai_body  && $ai_body  ne '', 'claudeAI body found');
     $assert->ok(defined $ctx_body && $ctx_body ne '', 'claude_ctx body found');
+    $assert->ok(defined $send_body && $send_body ne '', '_claude_send_and_parse body found');
 
     # History storage
     $assert->like($ai_body // '', qr/_claude_history/,
@@ -52,7 +54,7 @@ return sub {
     $assert->like($ai_body // '', qr/role.*user.*content.*prompt/s,
         'claudeAI pushes user message into history');
 
-    $assert->like($ai_body // '', qr/role.*assistant.*content.*answer/s,
+    $assert->like($send_body // '', qr/role.*assistant.*content.*answer/s,
         'claudeAI stores assistant reply in history');
 
     # History cap
@@ -67,6 +69,6 @@ return sub {
         'claude_ctx clears history on reset');
 
     # Messages sent as array (not single object)
-    $assert->like($ai_body // '', qr/messages\s*=>\s*\$history/,
+    $assert->like($send_body // '', qr/messages\s*=>\s*\$history/,
         'claudeAI sends full history array as messages');
 };

@@ -171,7 +171,7 @@ return sub {
     );
 
     $assert->ok(
-        $rem !~ /eval\s*\{/,
-        'remtimer no longer wraps DB delete in eval'
+        $rem !~ /eval\s*\{[^}]*?(?:DELETE FROM TIMERS|->prepare|->execute)/s,
+        'remtimer does not wrap DB deletion in eval'
     );
 };

@@ -84,7 +84,7 @@ EOS
     close $fh;
 }
 
-sub make_bot {
+my $make_bot = sub {
     my (%conf) = @_;
 
     my $root = File::Spec->catdir($Bin, '..', '..');
@@ -113,7 +113,7 @@ sub make_bot {
     );
 
     return ($bot, $irc, $logger);
-}
+};
 
 my $case = sub {
     my ($assert) = @_;
@@ -124,7 +124,7 @@ my $case = sub {
     eval { require 'Mediabot/Mediabot.pm'; 1 }
         or do { $assert->(0, "cannot load Mediabot/Mediabot.pm: $@"); return; };
 
-    my ($bot_dry, $irc_dry, $logger_dry) = make_bot(
+    my ($bot_dry, $irc_dry, $logger_dry) = $make_bot->(
         'plugins.ScriptDryRun.SCRIPT' => 'mode_ok.pl',
     );
 
@@ -151,7 +151,7 @@ my $case = sub {
     $assert->(count_logger_text($logger_dry, 'apply-mode-log') == 0,
         'default dry-run mode does not apply script log action');
 
-    my ($bot_apply_no_irc, $irc_no, $logger_no) = make_bot(
+    my ($bot_apply_no_irc, $irc_no, $logger_no) = $make_bot->(
         'plugins.ScriptDryRun.SCRIPT'              => 'mode_ok.pl',
         'plugins.ScriptDryRun.ACTION_MODE'         => 'apply',
         # mb226: APPLY_REQUIRE_SCOPE defaults to enabled since A3 (mb225); this
@@ -184,7 +184,7 @@ my $case = sub {
     $assert->(count_logger_text($logger_no, 'apply-mode-log') == 1,
         'apply mode without allow_irc applies script log action');
 
-    my ($bot_apply_irc, $irc_yes, $logger_yes) = make_bot(
+    my ($bot_apply_irc, $irc_yes, $logger_yes) = $make_bot->(
         'plugins.ScriptDryRun.SCRIPT'              => 'mode_ok.pl',
         'plugins.ScriptDryRun.ACTION_MODE'         => 'apply',
         'plugins.ScriptDryRun.ALLOW_IRC'           => 'yes',
@@ -215,7 +215,7 @@ my $case = sub {
     $assert->(count_logger_text($logger_yes, 'apply-mode-log') == 1,
         'apply mode with allow_irc applies script log action');
 
-    my ($bot_bad, $irc_bad, $logger_bad) = make_bot(
+    my ($bot_bad, $irc_bad, $logger_bad) = $make_bot->(
         'plugins.ScriptDryRun.SCRIPT'      => 'mode_ok.pl',
         'plugins.ScriptDryRun.ACTION_MODE' => 'bogus',
         'plugins.ScriptDryRun.ALLOW_IRC'   => 'on',

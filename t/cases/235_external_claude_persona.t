@@ -12,7 +12,7 @@ sub _sub { my($s,$n)=@_; my $re=qr/^[ \t]*sub[ \t]+\Q$n\E\b[^{]*\{/m;
     return substr($s,$st,$p+1-$st) if $d==0; $p++} undef }
 return sub {
     my ($assert) = @_;
-    my $src  = _slurp(File::Spec->catfile('.', 'Mediabot', 'External.pm'));
+    my $src  = _slurp(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
 
     # claude_ctx routing
     my $ctx_body = _sub($src, 'claude_ctx');

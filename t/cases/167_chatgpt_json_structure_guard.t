@@ -61,7 +61,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_chatgpt_json_guard(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm')
     );
 
     my $body = _extract_sub_body_chatgpt_json_guard($src, 'chatGPT');

@@ -60,7 +60,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_external_x_handler(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm')
     );
 
     my $display_body = _extract_sub_body_external_x_handler($src, 'displayUrlTitle');

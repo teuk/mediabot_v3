@@ -120,8 +120,8 @@ my $case = sub {
     my $pl_src = do { local $/; <$pfh> };
     close $pfh;
 
-    $assert->($pl_src =~ /mb194-B1: once ScriptDryRun accepts a command/,
-        'ScriptDryRun source contains mb194 marker');
+    $assert->($pl_src =~ /mb194-B1\b.*ScriptDryRun runs the resolved script/,
+        'ScriptDryRun source documents routed-command ownership');
     $assert->($pl_src =~ /scriptdryrun_handled/,
         'ScriptDryRun source writes scriptdryrun_handled marker');
     $assert->($mb_src =~ /PUBLIC\(scriptdryrun\)/,

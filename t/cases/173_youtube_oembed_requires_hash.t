@@ -61,7 +61,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_youtube_oembed_guard(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm')
     );
 
     my $body = _extract_sub_body_youtube_oembed_guard($src, '_youtube_html_fallback');

@@ -110,7 +110,7 @@ my $case = sub {
         'config output lists plugins.ScriptDryRun.COMMANDS');
     $assert->($config =~ /SCRIPT_DRYRUN_COMMANDS/,
         'config output lists flat SCRIPT_DRYRUN_COMMANDS');
-    $assert->($config =~ /optional allow-list/,
+    $assert->($config =~ /optional(?: explicit)? allow-list/,
         'config output explains optional allow-list behavior');
 
     my $disabled_plugin = FakeScriptDryRunPlugin->new(

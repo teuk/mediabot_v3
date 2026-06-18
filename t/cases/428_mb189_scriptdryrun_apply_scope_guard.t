@@ -83,7 +83,7 @@ EOS
     close $fh;
 }
 
-sub make_bot {
+my $make_bot = sub {
     my (%conf) = @_;
 
     my $root = File::Spec->catdir($Bin, '..', '..');
@@ -112,7 +112,7 @@ sub make_bot {
     );
 
     return ($bot, $irc, $logger);
-}
+};
 
 my $case = sub {
     my ($assert) = @_;
@@ -123,7 +123,7 @@ my $case = sub {
     eval { require 'Mediabot/Mediabot.pm'; 1 }
         or do { $assert->(0, "cannot load Mediabot/Mediabot.pm: $@"); return; };
 
-    my ($bot_guarded, $irc_guarded, $logger_guarded) = make_bot(
+    my ($bot_guarded, $irc_guarded, $logger_guarded) = $make_bot->(
         'plugins.ScriptDryRun.SCRIPT'              => 'scope_ok.pl',
         'plugins.ScriptDryRun.ACTION_MODE'         => 'apply',
         'plugins.ScriptDryRun.ALLOW_IRC'           => 'yes',
@@ -160,7 +160,7 @@ my $case = sub {
     $assert->(count_logger_text($logger_guarded, 'scope-guard-log') == 0,
         'guarded unscoped apply mode applies no script log actions');
 
-    my ($bot_commands, $irc_commands, $logger_commands) = make_bot(
+    my ($bot_commands, $irc_commands, $logger_commands) = $make_bot->(
         'plugins.ScriptDryRun.SCRIPT'              => 'scope_ok.pl',
         'plugins.ScriptDryRun.COMMANDS'            => 'demo',
         'plugins.ScriptDryRun.ACTION_MODE'         => 'apply',
@@ -188,7 +188,7 @@ my $case = sub {
     $assert->(count_logger_text($logger_commands, 'scope-guard-log') == 1,
         'guarded apply mode with COMMANDS applies script log action');
 
-    my ($bot_routes, $irc_routes, $logger_routes) = make_bot(
+    my ($bot_routes, $irc_routes, $logger_routes) = $make_bot->(
         'plugins.ScriptDryRun.ROUTES'              => 'demo=scope_ok.pl',
         'plugins.ScriptDryRun.ACTION_MODE'         => 'apply',
         'plugins.ScriptDryRun.ALLOW_IRC'           => 'yes',
@@ -215,7 +215,7 @@ my $case = sub {
     $assert->(count_logger_text($logger_routes, 'scope-guard-log') == 1,
         'guarded apply mode with ROUTES applies script log action');
 
-    my ($bot_legacy, $irc_legacy, $logger_legacy) = make_bot(
+    my ($bot_legacy, $irc_legacy, $logger_legacy) = $make_bot->(
         'plugins.ScriptDryRun.SCRIPT'      => 'scope_ok.pl',
         'plugins.ScriptDryRun.ACTION_MODE' => 'apply',
         'plugins.ScriptDryRun.ALLOW_IRC'   => 'yes',
@@ -250,8 +250,8 @@ my $case = sub {
     my $src = do { local $/; <$sfh> };
     close $sfh;
 
-    $assert->($src =~ /mb189-B1: optional extra safety gate/,
-        'ScriptDryRun source contains mb189 marker');
+    $assert->($src =~ /mb189-B1\b.*optional extra safety gate/,
+        'ScriptDryRun source documents the mb189 apply-scope guard');
     $assert->($src =~ /APPLY_REQUIRE_SCOPE/,
         'ScriptDryRun source documents APPLY_REQUIRE_SCOPE keys');
     $assert->($src =~ /apply_scope_warning/,

@@ -61,7 +61,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_179(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm')
     );
 
     my $sample = _slurp_179('mediabot.sample.conf');

@@ -59,7 +59,7 @@ sub _extract_sub_body_186 {
 return sub {
     my ($assert) = @_;
 
-    my $external = _slurp_186(File::Spec->catfile('.', 'Mediabot', 'External.pm'));
+    my $external = _slurp_186(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
     my $admin    = _slurp_186(File::Spec->catfile('.', 'Mediabot', 'AdminCommands.pm'));
     my $sample   = _slurp_186('mediabot.sample.conf');
 
@@ -72,7 +72,7 @@ return sub {
     $assert->like(
         $external,
         qr/CHATGPT_SYSTEM_PROMPT/,
-        'External.pm defines CHATGPT_SYSTEM_PROMPT default'
+        'External/Claude.pm defines CHATGPT_SYSTEM_PROMPT default'
     );
 
     $assert->like(

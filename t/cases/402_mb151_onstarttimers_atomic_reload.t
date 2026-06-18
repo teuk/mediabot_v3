@@ -36,7 +36,7 @@ my $case = sub {
     $assert->($start !~ /SQL execute error.*?%\{\$self->\{hTimers\}\} = %hTimers.*?return 0;/s,
         'execute failure no longer clears hTimers');
 
-    $assert->($start =~ /DB reload succeeded\. Now replace old runtime timers atomically.*?\$self->_stop_all_runtime_db_timers\(\);\s*%\{\$self->\{hTimers\}\} = %hTimers;\s*return \$i;/s,
+    $assert->($start =~ /All fresh timers are alive\. Now stop\/remove the old registered timers and.*?\$self->_stop_all_runtime_db_timers\(\);\s*%\{\$self->\{hTimers\}\}\s*=\s*%hTimers;\s*return \$i;/s,
         'successful reload stops old timers only at commit point');
 
     my $idx_stop = index($start, '$self->_stop_all_runtime_db_timers();');

@@ -59,7 +59,7 @@ sub _extract_sub_body_182 {
 return sub {
     my ($assert) = @_;
 
-    my $external = _slurp_182(File::Spec->catfile('.', 'Mediabot', 'External.pm'));
+    my $external = _slurp_182(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
     my $admin    = _slurp_182(File::Spec->catfile('.', 'Mediabot', 'AdminCommands.pm'));
     my $sample   = _slurp_182('mediabot.sample.conf');
 

@@ -109,20 +109,30 @@ return sub {
         'legacy update wrapper is defined exactly once'
     );
 
-    my %public_dispatch = (
+    my %public_radio_dispatch = (
         listeners => 'displayRadioListeners_ctx',
         nextsong  => 'radioNext_ctx',
         song      => 'song_ctx',
-        update    => 'update_ctx',
     );
 
-    while (my ($cmd, $func) = each %public_dispatch) {
+    while (my ($cmd, $func) = each %public_radio_dispatch) {
         $assert->like(
             $core,
-            qr/^\s*\Q$cmd\E\s*=>\s*sub\s*\{\s*\Q$func\E\(\$ctx\)\s*\},/m,
-            "public dispatch $cmd routes to $func"
+            qr/^\s*\Q$cmd\E\s*=>\s*sub\s*\{\s*_dispatch_radio\(\$ctx,\s*\$cmd\)\s*\},/m,
+            "public dispatch $cmd routes through _dispatch_radio"
+        );
+        $assert->like(
+            $core,
+            qr/^\s*\Q$cmd\E\s*=>\s*\\&\Q$func\E,/m,
+            "_dispatch_radio maps $cmd to $func"
         );
     }
+
+    $assert->like(
+        $core,
+        qr/^\s*update\s*=>\s*sub\s*\{\s*update_ctx\(\$ctx\)\s*\},/m,
+        'public dispatch update routes to update_ctx'
+    );
 
     my %private_dispatch = (
         radiostatus => 'radioStatus_ctx',

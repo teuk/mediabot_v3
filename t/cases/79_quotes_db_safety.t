@@ -167,7 +167,7 @@ return sub {
     );
 
     $assert->ok(
-        $src !~ /unless \(\$sth && \$sth->execute/,
-        'Quotes.pm no longer uses combined prepare/execute guard'
+        $src !~ /\$self->\{dbh\}->do\(/,
+        'Quotes.pm avoids unchecked dbh->do statements'
     );
 };

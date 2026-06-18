@@ -61,7 +61,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_tmdb_utf8(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm')
     );
 
     my $body = _extract_sub_body_tmdb_utf8($src, 'get_tmdb_info');
@@ -73,8 +73,8 @@ return sub {
 
     $assert->like(
         $src,
-        qr/use URI::Escape qw\(uri_escape_utf8 uri_escape\);/,
-        'External.pm imports uri_escape_utf8'
+        qr/use URI::Escape qw\(uri_escape_utf8\);/,
+        'External/Claude.pm imports uri_escape_utf8'
     );
 
     $assert->like(

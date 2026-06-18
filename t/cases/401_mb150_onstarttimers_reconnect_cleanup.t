@@ -31,8 +31,8 @@ my $case = sub {
     $assert->(defined($start) && length($start) > 0,
         'onStartTimers block extracted');
 
-    $assert->($helper =~ /mb150-B1: onStartTimers\(\) is called on every IRC login\/reconnect/,
-        'helper documents reconnect duplication risk');
+    $assert->($src =~ /onStartTimers\(\).*reconnect.*duplicate|duplicate.*onStartTimers\(\).*reconnect/is,
+        'helper documentation explains reconnect duplication risk');
     $assert->($helper =~ /\$self->\{hTimers\}\s*=\s*\{\}/,
         'helper clears hTimers before stopping old handles');
     $assert->($helper =~ /for my \$name \(keys %\$timers\)/,

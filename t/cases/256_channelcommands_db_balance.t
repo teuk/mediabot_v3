@@ -12,32 +12,31 @@ return sub {
     my ($assert) = @_;
     my $src = _slurp(File::Spec->catfile('.','Mediabot','ChannelCommands.pm'));
 
-    # get_channel_by_name: 1p/1f after B26cc fix
     my $gcbn = _sub($src, 'get_channel_by_name');
     $assert->ok(defined $gcbn, 'get_channel_by_name sub found');
-    my @p1 = ($gcbn =~ /->prepare\(/g);
-    my @f1 = ($gcbn =~ /->finish/g);
-    $assert->is(scalar(@f1), scalar(@p1),
-        'get_channel_by_name: finish count equals prepare count (B26cc)');
-    $assert->like($gcbn // '', qr/B26cc/, 'get_channel_by_name has B26cc fix comment');
+    $assert->like($gcbn // '', qr/unless \(\$sth\).*?return undef;/s,
+        'get_channel_by_name handles prepare failure');
+    $assert->like($gcbn // '', qr/unless \(\$sth && \$sth->execute\(\$name\)\).*?\$sth->finish if \$sth;.*?return undef;/s,
+        'get_channel_by_name finishes statement on execute failure');
+    $assert->like($gcbn // '', qr/fetchrow_hashref;.*?\$sth->finish;/s,
+        'get_channel_by_name finishes statement on success');
 
-    # channelList_ctx: 1p/1f
     my $cl = _sub($src, 'channelList_ctx');
     $assert->ok(defined $cl, 'channelList_ctx sub found');
-    my @p2 = ($cl =~ /->prepare\(/g);
-    my @f2 = ($cl =~ /->finish/g);
-    $assert->is(scalar(@f2), scalar(@p2),
-        'channelList_ctx: finish count equals prepare count (B26cc)');
+    $assert->like($cl // '', qr/unless \(\$sth\).*?SQL prepare error/s,
+        'channelList_ctx handles prepare failure');
+    $assert->like($cl // '', qr/unless \(\$sth && \$sth->execute\(\)\).*?\$sth->finish if \$sth;/s,
+        'channelList_ctx finishes statement on execute failure');
+    $assert->like($cl // '', qr/while \(my \$ref = \$sth->fetchrow_hashref\(\)\).*?\$sth->finish;/s,
+        'channelList_ctx finishes statement after reading rows');
 
-    # registerChannel: 1p/1f
     my $rc = _sub($src, 'registerChannel');
     $assert->ok(defined $rc, 'registerChannel sub found');
-    my @p3 = ($rc =~ /->prepare\(/g);
-    my @f3 = ($rc =~ /->finish/g);
-    $assert->is(scalar(@f3), scalar(@p3),
-        'registerChannel: finish count equals prepare count (B26cc)');
+    $assert->like($rc // '', qr/unless \(\$sth && \$sth->execute\(\$id_user,\$id_channel\)\).*?\$sth->finish if \$sth;/s,
+        'registerChannel finishes statement on execute failure');
+    $assert->like($rc // '', qr/else \{.*?\$sth->finish;.*?return 1;/s,
+        'registerChannel finishes statement on success');
 
-    # channelUnban_ctx: 2p/1f is intentional (if/else exclusive prepares)
     my $cu = _sub($src, 'channelUnban_ctx');
     $assert->ok(defined $cu, 'channelUnban_ctx sub found');
     $assert->like($cu // '', qr/finish if \$sth/,

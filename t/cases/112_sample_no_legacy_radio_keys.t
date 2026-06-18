@@ -1,10 +1,10 @@
 # t/cases/112_sample_no_legacy_radio_keys.t
 # =============================================================================
-# Regression checks for mediabot.sample.conf [radio].
+# Regression checks for the current mediabot.sample.conf [radio] contract.
 #
-# The official sample config should document the current Icecast radio keys.
-# Old radio/liquidsoap keys are no longer read by the current Mediabot radio
-# commands and should not appear as active sample configuration.
+# Icecast status keys and Liquidsoap queue-control keys are both active today.
+# Historical single-stream keys that are no longer read must stay out of the
+# public sample.
 # =============================================================================
 
 use strict;
@@ -18,17 +18,15 @@ BEGIN {
 
 use File::Spec;
 
-sub _slurp_sample_no_legacy_radio {
+sub _slurp_sample_radio_contract {
     my ($path) = @_;
-
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
     local $/;
     return <$fh>;
 }
 
-sub _section_body_sample_no_legacy_radio {
+sub _section_body_sample_radio_contract {
     my ($src, $section) = @_;
-
     my ($body) = $src =~ /^\[\Q$section\E\]\s*\n(.*?)(?=^\[[^\]]+\]\s*$|\z)/ms;
     return $body;
 }
@@ -36,37 +34,41 @@ sub _section_body_sample_no_legacy_radio {
 return sub {
     my ($assert) = @_;
 
-    my $sample = _slurp_sample_no_legacy_radio(
+    my $sample = _slurp_sample_radio_contract(
         File::Spec->catfile('.', 'mediabot.sample.conf')
     );
+    my $radio = _section_body_sample_radio_contract($sample, 'radio');
 
-    my $radio = _section_body_sample_no_legacy_radio($sample, 'radio');
-
-    my $runtime = _slurp_sample_no_legacy_radio(
+    my $admin = _slurp_sample_radio_contract(
         File::Spec->catfile('.', 'Mediabot', 'AdminCommands.pm')
-    ) . "\n" . _slurp_sample_no_legacy_radio(
+    );
+    my $request = _slurp_sample_radio_contract(
+        File::Spec->catfile('.', 'Mediabot', 'Radio', 'Request.pm')
+    );
+    my $runtime = $admin . "\n" . $request . "\n" . _slurp_sample_radio_contract(
         File::Spec->catfile('.', 'mediabot.pl')
     );
 
-    $assert->ok(
-        defined $radio,
-        'sample config has a [radio] section'
-    );
+    $assert->ok(defined $radio, 'sample config has a [radio] section');
 
     for my $key (
-        qw(
-            YOUTUBEDL_INCOMING=/tmp
-            YTDLP_PATH=/usr/bin/yt-dlp
-            RADIO_ICECAST_STATUS_BASE_URL=http://127.0.0.1:8000
-            RADIO_ICECAST_PUBLIC_BASE_URL=http://example.com:8000
-            RADIO_ICECAST_TIMEOUT=5
-            RADIO_ICECAST_PRIMARY_MOUNT=/radio160.mp3
-        )
+        'YOUTUBEDL_INCOMING=/tmp',
+        'RADIO_DOWNLOAD_ENABLED=0',
+        'YTDLP_PATH=/usr/bin/yt-dlp',
+        'YTDLP_TIMEOUT=180',
+        'YTDLP_REMOTE_COMPONENTS=ejs:github',
+        'LIQUIDSOAP_TELNET_HOST=127.0.0.1',
+        'LIQUIDSOAP_TELNET_PORT=1235',
+        'LIQUIDSOAP_QUEUE_ID=mediabot_queue',
+        'RADIO_ICECAST_STATUS_BASE_URL=http://127.0.0.1:8000',
+        'RADIO_ICECAST_PUBLIC_BASE_URL=http://example.com:8000',
+        'RADIO_ICECAST_TIMEOUT=5',
+        'RADIO_ICECAST_PRIMARY_MOUNT=/radio.mp3',
     ) {
         $assert->like(
             $radio // '',
             qr/^\Q$key\E$/m,
-            "sample [radio] documents modern $key"
+            "sample [radio] documents current $key"
         );
     }
 
@@ -79,20 +81,27 @@ return sub {
             RADIO_PUB
             RADIO_URL
             LIQUIDSOAP_PLAYLIST
-            LIQUIDSOAP_TELNET_PORT
-            LIQUIDSOAP_TELNET_HOST
         )
     ) {
         $assert->unlike(
             $radio // '',
             qr/^\Q$legacy_key\E=/m,
-            "sample [radio] no longer defines legacy $legacy_key"
+            "sample [radio] does not define retired $legacy_key"
         );
-
         $assert->unlike(
             $runtime,
-            qr/get\('radio\.\Q$legacy_key\E'\)/,
-            "runtime does not read radio.$legacy_key"
+            qr/(?:get|_conf_value|_liquidsoap_config_value)\([^\n]*['"]\Q$legacy_key\E['"]/,
+            "runtime does not read retired $legacy_key"
+        );
+    }
+
+    for my $liquidsoap_key (
+        qw(LIQUIDSOAP_TELNET_HOST LIQUIDSOAP_TELNET_PORT LIQUIDSOAP_QUEUE_ID)
+    ) {
+        $assert->like(
+            $runtime,
+            qr/['"]\Q$liquidsoap_key\E['"]/,
+            "runtime reads current Liquidsoap key $liquidsoap_key"
         );
     }
 
@@ -111,9 +120,5 @@ return sub {
         );
     }
 
-    $assert->unlike(
-        $radio // '',
-        qr/teuk\.org/,
-        'sample [radio] does not expose a private domain'
-    );
+    $assert->unlike($radio // '', qr/teuk\.org/, 'sample [radio] does not expose a private domain');
 };

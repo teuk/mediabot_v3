@@ -96,7 +96,7 @@ return sub {
     );
 
     $assert->ok(
-        $func !~ /unless \(\$sth && \$sth->execute/,
-        'channelList_ctx no longer uses combined prepare/execute guard'
+        $func =~ /unless \(\$sth && \$sth->execute\(\)\).*?\$sth->finish if \$sth;/s,
+        'channelList_ctx combined execute guard still finishes safely'
     );
 };

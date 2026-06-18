@@ -63,7 +63,7 @@ my $case = sub {
 
     $assert->($src =~ /mb193-B2: Config::Simple may return ARRAY refs/,
         'PluginManager source contains mb193 marker');
-    $assert->($src =~ /ref\(\$value\) eq 'ARRAY'/,
+    $assert->($src =~ /ref\(\$(?:value|entry)\) eq 'ARRAY'/,
         'PluginManager explicitly handles ARRAY ref values');
     $assert->($src !~ /system\s*\(|qx\//,
         'PluginManager array config fix does not introduce shell execution');

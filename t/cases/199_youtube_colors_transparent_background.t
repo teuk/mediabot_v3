@@ -107,7 +107,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_199(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm')
     );
 
     my $irc_color = _extract_sub_199($src, '_irc_color');

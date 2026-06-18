@@ -37,7 +37,7 @@ sub _extract_sub_223 {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_223(File::Spec->catfile('.', 'Mediabot', 'External.pm'));
+    my $src  = _slurp_223(File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm'));
     my $body = _extract_sub_223($src, 'ytSearch_ctx');
 
     $assert->ok(defined $body && $body ne '', 'ytSearch_ctx sub found');

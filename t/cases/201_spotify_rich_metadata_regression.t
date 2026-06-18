@@ -29,23 +29,28 @@ sub _slurp_201 {
 sub _extract_spotify_body_201 {
     my ($src) = @_;
 
-    my $start_marker = 'sub _handle_spotify {';
-    my $next_marker  = '# _handle_applemusic';
+    return undef unless $src =~ /^sub\s+_handle_spotify\s*\{/mg;
 
-    my $start = index($src, $start_marker);
-    return undef if $start < 0;
+    my $start = $-[0];
+    my $pos   = pos($src);
+    my $depth = 1;
 
-    my $end = index($src, $next_marker, $start);
-    return undef if $end < 0;
+    while ($pos < length($src)) {
+        my $ch = substr($src, $pos, 1);
+        $depth++ if $ch eq '{';
+        $depth-- if $ch eq '}';
+        return substr($src, $start, $pos + 1 - $start) if $depth == 0;
+        $pos++;
+    }
 
-    return substr($src, $start, $end - $start);
+    return undef;
 }
 
 return sub {
     my ($assert) = @_;
 
     my $src = _slurp_201(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Spotify.pm')
     );
 
     my $body = _extract_spotify_body_201($src);
@@ -71,13 +76,13 @@ return sub {
     );
 
     $assert->like(
-        $body // '',
+        $src,
         qr/Web Player/i,
         'Spotify explicitly rejects Spotify Web Player shell title'
     );
 
     $assert->like(
-        $body // '',
+        $src,
         qr/duration_ms|duration_from_ms|format_iso_duration|duration_from_iso/,
         'Spotify tries to extract duration'
     );

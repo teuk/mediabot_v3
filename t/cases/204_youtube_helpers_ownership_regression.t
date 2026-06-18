@@ -2,7 +2,7 @@
 # =============================================================================
 # Regression checks for YouTube helper ownership.
 #
-# YouTube-specific rendering helpers belong to Mediabot::External. They must not
+# YouTube-specific rendering helpers belong to Mediabot::External::YouTube. They must not
 # be exported by Mediabot::Helpers, otherwise importing Helpers into External can
 # cause subroutine redefinition warnings and stale formatting behavior.
 # =============================================================================
@@ -30,7 +30,7 @@ return sub {
     my ($assert) = @_;
 
     my $helpers = _slurp_204(File::Spec->catfile('.', 'Mediabot', 'Helpers.pm'));
-    my $external = _slurp_204(File::Spec->catfile('.', 'Mediabot', 'External.pm'));
+    my $external = _slurp_204(File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm'));
 
     $assert->unlike(
         $helpers,
@@ -54,7 +54,7 @@ return sub {
         $assert->like(
             $external,
             qr/^\s*sub\s+\Q$sub\E\b/m,
-            "External.pm owns $sub"
+            "External/YouTube.pm owns $sub"
         );
     }
 };

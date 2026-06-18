@@ -30,7 +30,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_212(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm')
     );
 
     $assert->unlike(
@@ -41,7 +41,7 @@ return sub {
 
     $assert->like(
         $src,
-        qr/# Return the Fortnite account id stored for a Mediabot user nickname\.\n# This is used by fortniteStats_ctx\(\) before calling fortnite-api\.com\.\nsub getFortniteId \{/,
+        qr/# Return the Fortnite account id stored for a Mediabot user nickname\.\n# This is used by fortniteStats_ctx\(\) before calling fortnite-api\.com\.\n\s*sub getFortniteId \{/,
         'getFortniteId has an accurate Fortnite-specific comment'
     );
 

@@ -60,7 +60,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_tmdb_results_array_guard(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm')
     );
 
     my $body = _extract_sub_body_tmdb_results_array_guard($src, 'get_tmdb_info');

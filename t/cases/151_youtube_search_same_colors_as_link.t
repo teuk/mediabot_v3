@@ -45,7 +45,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_151(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm')
     );
 
     my $label_body = _extract_between_151(

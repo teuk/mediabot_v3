@@ -134,7 +134,7 @@ return sub {
     );
 
     $assert->ok(
-        index($start, '$task->{started} = 1') > index($start, 'if (!$ok)'),
+        $start =~ /if \(!\$ok\).*?\$task->\{started\}\s*=\s*1/s,
         'Scheduler::start updates started only after successful start'
     );
 
@@ -149,7 +149,7 @@ return sub {
     );
 
     $assert->ok(
-        index($stop, '$task->{started} = 0') > index($stop, 'if (!$ok)'),
+        $stop =~ /if \(!\$ok\).*?\$task->\{started\}\s*=\s*0/s,
         'Scheduler::stop updates started only after successful stop'
     );
 

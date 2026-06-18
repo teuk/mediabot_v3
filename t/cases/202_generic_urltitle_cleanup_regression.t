@@ -44,7 +44,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_202(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm')
     );
 
     my $extract_url = _extract_between_202(
@@ -154,8 +154,20 @@ return sub {
 
     $assert->like(
         $generic // '',
-        qr/my\s+\$label\s*=\s*String::IRC->new\("URL Title from \$nick:"\)->grey\('black'\);/,
-        '_handle_generic_title keeps historical label style'
+        qr/my\s+\$label\s*=\s*String::IRC->new\("URL"\)->grey\('black'\);/,
+        '_handle_generic_title starts the current URL badge'
+    );
+
+    $assert->like(
+        $generic // '',
+        qr/\$label\s+\.=\s+String::IRC->new\(" \$domain"\)->white\('black'\) if \$domain;/,
+        '_handle_generic_title can add the current domain to the badge'
+    );
+
+    $assert->like(
+        $generic // '',
+        qr/\$label\s+\.=\s+String::IRC->new\(" \$nick:"\)->grey\('black'\);/,
+        '_handle_generic_title keeps the nick in the current badge'
     );
 
     $assert->like(
@@ -166,7 +178,7 @@ return sub {
 
     $assert->unlike(
         $generic // '',
-        qr/my\s+\$msg\s*=\s*String::IRC->new\("URL Title from \$nick:"\)->grey\('black'\)/,
-        '_handle_generic_title no longer appends displayed title through msg object'
+        qr/my\s+\$msg\s*=\s*String::IRC->new\(/,
+        '_handle_generic_title no longer appends displayed title through a msg object'
     );
 };

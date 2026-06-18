@@ -37,7 +37,7 @@ sub _extract_sub_227 {
 return sub {
     my ($assert) = @_;
 
-    my $src      = _slurp_227(File::Spec->catfile('.', 'Mediabot', 'External.pm'));
+    my $src      = _slurp_227(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
     my $pl_src   = _slurp_227(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
     my $ai_body  = _extract_sub_227($src, 'claudeAI');
     my $pl_body  = _extract_sub_227($pl_src, '_cmd_ai');

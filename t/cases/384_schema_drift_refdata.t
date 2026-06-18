@@ -100,11 +100,19 @@ SQL
     my @missing = grep { $_->{kind} eq 'missing_chanset' } @issues;
     $assert->(@missing == 2, "two missing chansets detected");
     $assert->(
-        grep { $_->{chanset} eq 'Games' && $_->{id} == 16 } @missing,
+        scalar(grep {
+            ref($_) eq 'HASH'
+                && ($_->{chanset} // '') eq 'Games'
+                && ($_->{id} // 0) == 16
+        } @missing) == 1,
         "missing Games detected with id 16"
     );
     $assert->(
-        grep { $_->{chanset} eq "Weird 'Quoted' Chanset" && $_->{id} == 17 } @missing,
+        scalar(grep {
+            ref($_) eq 'HASH'
+                && ($_->{chanset} // '') eq "Weird 'Quoted' Chanset"
+                && ($_->{id} // 0) == 17
+        } @missing) == 1,
         "missing quoted chanset detected with id 17"
     );
 

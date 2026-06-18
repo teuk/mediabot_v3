@@ -60,7 +60,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_external_chromium_timeout(
-        File::Spec->catfile('.', 'Mediabot', 'External.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm')
     );
 
     my $body = _extract_sub_body_external_chromium_timeout($src, '_fetch_url_chromium_dumpdom');
@@ -72,8 +72,8 @@ return sub {
 
     $assert->like(
         $src,
-        qr/^use POSIX qw\(strftime WNOHANG\);$/m,
-        'External.pm imports WNOHANG'
+        qr/^use POSIX qw\(WNOHANG\);$/m,
+        'External/URL.pm imports WNOHANG'
     );
 
     $assert->like(
