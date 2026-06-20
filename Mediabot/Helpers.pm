@@ -25,6 +25,7 @@ use Digest::SHA qw(sha1 sha1_hex);
 use List::Util qw(min);
 use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
 use IO::Async::Timer::Countdown;
+use IO::Async::Stream;
 use Encode qw(encode);
 
 our @EXPORT = qw(
@@ -3328,7 +3329,6 @@ sub resolve_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    # --- Syntax check ---
     unless (@args && defined $args[0] && $args[0] ne '') {
         botNotice($self, $nick, "Syntax: resolve <hostname|IP>");
         return;
@@ -3347,48 +3347,59 @@ sub resolve_ctx {
         return;
     }
 
-    # --- Case 1: Input is IPv4 → reverse DNS ---
-    if ($input =~ /^\d{1,3}(?:\.\d{1,3}){3}$/) {
+    my $mode;
 
+    if ($input =~ /^\d{1,3}(?:\.\d{1,3}){3}$/) {
         my @octets = split /\./, $input;
+
         unless (@octets == 4 && !grep { $_ > 255 } @octets) {
             botPrivmsg($self, $channel, "($nick) Invalid IPv4 format: $input");
             return;
         }
 
-        my $packed = inet_aton($input);
-        unless ($packed) {
-            botPrivmsg($self, $channel, "($nick) Invalid IPv4 format: $input");
+        $mode = 'reverse';
+    }
+    else {
+        unless ($input =~ /\A(?=.{1,253}\z)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?\z/) {
+            botPrivmsg($self, $channel, "($nick) Invalid hostname: $input");
             return;
         }
 
-        my $host = gethostbyaddr($packed, AF_INET);
-        if ($host) {
-    botPrivmsg($self, $channel, "($nick) $input => $host");  # JJ5
-        } else {
-            botPrivmsg($self, $channel, "($nick) No reverse DNS entry for $input");
+        $mode = 'forward';
+    }
+
+    # MB311: both forward and reverse DNS are potentially blocking libc calls.
+    # Run either lookup in a child and consume its pipe as soon as data arrives,
+    # rather than blocking the IRC loop or waiting a fixed three seconds before
+    # checking a lookup that may already have completed.
+    my $resolver_code = q{
+        use Socket;
+
+        my ($mode, $value) = @ARGV;
+
+        if ($mode eq 'reverse') {
+            my $packed = inet_aton($value);
+            my $host = $packed ? gethostbyaddr($packed, AF_INET) : undef;
+            print defined($host) ? $host : '';
+            exit 0;
         }
 
-        logBot($self, $ctx->message, $channel, "resolve", $input);
-        return;
-    }
+        my @answer = gethostbyname($value);
+        if (@answer) {
+            my %seen;
+            my @ips = grep { !$seen{$_}++ }
+                map { Socket::inet_ntoa($_) } @answer[4 .. $#answer];
+            print join(',', @ips);
+        }
+    };
 
-    # --- Case 2: hostname → IPv4 via open() pipe (non-blocking read) ---
-    # Validate the hostname before spawning the resolver child. This avoids
-    # wasting a subprocess on malformed input and keeps IRC replies cleaner.
-    unless ($input =~ /\A(?=.{1,253}\z)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?\z/) {
-        botPrivmsg($self, $channel, "($nick) Invalid hostname: $input");
-        return;
-    }
-
-    # We spawn a child perl process that does the blocking gethostbyname lookup
-    # and sends the result back via a pipe. The parent reads with a short timeout
-    # so the IRC event loop is not blocked indefinitely.
-    my $msg = $ctx->message;
-
-    my $child_pid = open(my $pipe, '-|', $^X, '-e',
-        'use Socket; my $h=$ARGV[0]; my @a=gethostbyname($h); ' .
-        'print @a ? join(",", map{Socket::inet_ntoa($_)}@a[4..$#a]) : ""',
+    my $child_pid = open(
+        my $pipe,
+        '-|',
+        $^X,
+        '-e',
+        $resolver_code,
+        $mode,
         $input,
     );
 
@@ -3397,44 +3408,204 @@ sub resolve_ctx {
         return;
     }
 
-    # Set pipe to non-blocking
-    my $flags = fcntl($pipe, F_GETFL, 0) || 0;
-    fcntl($pipe, F_SETFL, $flags | O_NONBLOCK);
-
-    # Schedule result collection after 3s via timer
     my $loop = $self->getLoop;
-    $loop->add(IO::Async::Timer::Countdown->new(
-        delay     => 3,
-        on_expire => sub {
-            my $result = '';
-            sysread($pipe, $result, 4096);
-            close($pipe);
+    my $msg  = $ctx->message;
 
-            if ($child_pid) {
+    my $state = {
+        output       => '',
+        pipe_eof     => 0,
+        child_done   => 0,
+        finalized    => 0,
+        timed_out    => 0,
+        wait_status  => undef,
+        term_sent    => 0,
+        kill_sent    => 0,
+    };
+
+    my ($stream, $timeout_timer, $kill_timer, $reap_timer);
+    my ($finish, $schedule_reap);
+
+    my $remove_timer = sub {
+        my ($timer) = @_;
+        return unless $timer;
+
+        eval { $timer->stop };
+        eval { $loop->remove($timer) };
+    };
+
+    $finish = sub {
+        return if $state->{finalized};
+        return unless $state->{child_done};
+        return unless $state->{pipe_eof} || $state->{timed_out};
+
+        $state->{finalized} = 1;
+
+        $remove_timer->($timeout_timer);
+        $remove_timer->($kill_timer);
+        $remove_timer->($reap_timer);
+
+        eval { $loop->remove($stream) } if $stream;
+        eval { close $pipe };
+
+        my $reply;
+
+        if ($state->{timed_out}) {
+            $reply = "($nick) DNS lookup timed out for: $input";
+        }
+        else {
+            my $status = $state->{wait_status} // 0;
+            my $signal = $status & 127;
+            my $exit   = ($status >> 8) & 255;
+
+            if ($signal || $exit != 0) {
+                $reply = "($nick) DNS lookup failed for: $input";
+            }
+            elsif ($mode eq 'reverse') {
+                my $host = $state->{output} // '';
+                $host =~ s/[\r\n]+\z//;
+                $host =~ s/^\s+|\s+$//g;
+
+                $reply = length($host)
+                    ? "($nick) $input => $host"
+                    : "($nick) No reverse DNS entry for $input";
+            }
+            else {
+                my %seen;
+                my @ips = grep {
+                    /^\d{1,3}(?:\.\d{1,3}){3}\z/ && !$seen{$_}++
+                } split /,/, ($state->{output} // '');
+
+                $reply = @ips
+                    ? "($nick) $input => " . join(', ', @ips)
+                    : "($nick) Hostname could not be resolved: $input";
+            }
+        }
+
+        botPrivmsg($self, $channel, $reply);
+        eval { logBot($self, $msg, $channel, "resolve", $input) };
+
+        # Break lexical callback cycles once the request is complete.
+        $finish        = undef;
+        $schedule_reap = undef;
+    };
+
+    $schedule_reap = sub {
+        return if $state->{finalized} || $state->{child_done};
+        return if $reap_timer;
+
+        $reap_timer = IO::Async::Timer::Countdown->new(
+            delay     => 0.05,
+            on_expire => sub {
+                my $expired = $reap_timer;
+                $reap_timer = undef;
+                $remove_timer->($expired);
+
+                return if $state->{finalized};
+
                 my $waited = waitpid($child_pid, WNOHANG);
 
-                if ($waited == 0) {
-                    kill 'TERM', $child_pid;
-                    select(undef, undef, undef, 0.2);
-
-                    $waited = waitpid($child_pid, WNOHANG);
-
-                    if ($waited == 0) {
-                        kill 'KILL', $child_pid;
-                        waitpid($child_pid, 0);
-                    }
+                if ($waited == $child_pid) {
+                    $state->{wait_status} = $?;
+                    $state->{child_done}  = 1;
+                    $finish->();
+                    return;
                 }
+
+                if ($waited == -1) {
+                    # The child was already collected elsewhere. Preserve any
+                    # pipe output and finish without treating this as success
+                    # or failure solely from an unavailable wait status.
+                    $state->{wait_status} = 0;
+                    $state->{child_done}  = 1;
+                    $finish->();
+                    return;
+                }
+
+                $schedule_reap->();
+            },
+        );
+
+        $loop->add($reap_timer);
+        $reap_timer->start;
+    };
+
+    $timeout_timer = IO::Async::Timer::Countdown->new(
+        delay     => 3,
+        on_expire => sub {
+            return if $state->{finalized};
+
+            $state->{timed_out} = 1;
+
+            unless ($state->{term_sent}) {
+                kill 'TERM', $child_pid;
+                $state->{term_sent} = 1;
             }
 
-            my @ips = grep { /^\d/ } split /,/, ($result // '');
-            if (@ips) {
-    botPrivmsg($self, $channel, "($nick) $input => " . join(", ", @ips));  # JJ5
-            } else {
-                botPrivmsg($self, $channel, "($nick) Hostname could not be resolved: $input");
-            }
-            eval { logBot($self, $msg, $channel, "resolve", $input) };
+            $schedule_reap->();
+
+            $kill_timer = IO::Async::Timer::Countdown->new(
+                delay     => 0.2,
+                on_expire => sub {
+                    return if $state->{finalized} || $state->{child_done};
+
+                    my $waited = waitpid($child_pid, WNOHANG);
+
+                    if ($waited == $child_pid) {
+                        $state->{wait_status} = $?;
+                        $state->{child_done}  = 1;
+                        $finish->();
+                        return;
+                    }
+
+                    if ($waited == -1) {
+                        $state->{wait_status} = 0;
+                        $state->{child_done}  = 1;
+                        $finish->();
+                        return;
+                    }
+
+                    unless ($state->{kill_sent}) {
+                        kill 'KILL', $child_pid;
+                        $state->{kill_sent} = 1;
+                    }
+
+                    $schedule_reap->();
+                },
+            );
+
+            $loop->add($kill_timer);
+            $kill_timer->start;
         },
-    )->start);
+    );
+
+    $loop->add($timeout_timer);
+    $timeout_timer->start;
+
+    $stream = IO::Async::Stream->new(
+        read_handle => $pipe,
+        on_read     => sub {
+            my ($io, $buffref, $eof) = @_;
+
+            if (length $$buffref) {
+                my $remaining = 4096 - length($state->{output});
+
+                if ($remaining > 0) {
+                    $state->{output} .= substr($$buffref, 0, $remaining);
+                }
+
+                $$buffref = '';
+            }
+
+            if ($eof && !$state->{pipe_eof}++) {
+                eval { $loop->remove($io) };
+                $schedule_reap->();
+            }
+
+            return 0;
+        },
+    );
+
+    $loop->add($stream);
 
     return 1;
 }
@@ -3828,41 +3999,60 @@ sub channelNicksRemove {
 
 
 sub whereis {
-	my ($self,$sHostname) = @_;
-	my $userIP;
-	$self->{logger}->log(4,"whereis() $sHostname");
-	if ( $sHostname =~ /users.undernet.org$/ ) {
-		return "on an Undernet hidden host ;)";
-	}
-	unless ( $sHostname =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/ ) {
-		my $packed_ip = gethostbyname("$sHostname");
-		if (defined $packed_ip) {
-			$userIP = inet_ntoa($packed_ip);
-		}
-	}
-	else {
-		$userIP = $sHostname;
-	}
-	unless (defined($userIP) && ($userIP =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/)) {
-		return "N/A";
-	}
-	my $whereis_url = "https://api.country.is/$userIP";
-	my $response = eval { HTTP::Tiny->new(timeout => 3)->get($whereis_url); }
-	            // { success => 0, status => 0, reason => $@ };
+    my ($self, $sHostname) = @_;
 
-	return "N/A" unless $response->{success};
+    $self->{logger}->log(4, "whereis() " . (defined($sHostname) && !ref($sHostname) ? $sHostname : ''))
+        if $self->{logger};
 
-	my $line = $response->{content} // '';
-	return "N/A" unless $line ne '';
+    # MB314: whereis() is consumed directly by the WHOIS callback, so it must
+    # always return a defined printable value. Reject references and blank input
+    # before they can stringify into ARRAY(...)/HASH(...) hostnames.
+    return 'N/A' unless defined($sHostname) && !ref($sHostname);
 
-	my $json = eval { decode_json $line };
-	if ($@ || !defined $json || ref($json) ne 'HASH') {
-		# Invalid JSON from geolocation API
-		return undef;
-	}
+    $sHostname =~ s/^\s+|\s+$//g;
+    return 'N/A' if $sHostname eq '';
 
-	my $country = $json->{'country'};
-	return defined($country) ? $country : undef;
+    if ($sHostname =~ /(?:^|\.)users\.undernet\.org\z/i) {
+        return 'on an Undernet hidden host ;)';
+    }
+
+    my $userIP;
+
+    if ($sHostname =~ /\A\d{1,3}(?:\.\d{1,3}){3}\z/) {
+        # inet_aton validates each octet and canonicalizes the IPv4 address.
+        my $packed_ip = inet_aton($sHostname);
+        return 'N/A' unless defined $packed_ip;
+        $userIP = inet_ntoa($packed_ip);
+    }
+    else {
+        my $packed_ip = gethostbyname($sHostname);
+        return 'N/A' unless defined $packed_ip;
+        $userIP = inet_ntoa($packed_ip);
+    }
+
+    return 'N/A'
+        unless defined($userIP)
+            && $userIP =~ /\A\d{1,3}(?:\.\d{1,3}){3}\z/;
+
+    my $whereis_url = "https://api.country.is/$userIP";
+    my $response = eval { HTTP::Tiny->new(timeout => 3)->get($whereis_url); }
+                // { success => 0, status => 0, reason => $@ };
+
+    return "N/A" unless ref($response) eq 'HASH';
+    return "N/A" unless $response->{success};
+
+    my $line = $response->{content} // '';
+    return 'N/A' unless $line ne '';
+
+    my $json = eval { decode_json $line };
+    return 'N/A'
+        if $@ || !defined($json) || ref($json) ne 'HASH';
+
+    my $country = $json->{country};
+    return 'N/A' unless defined($country) && !ref($country);
+
+    $country =~ s/^\s+|\s+$//g;
+    return $country ne '' ? $country : 'N/A';
 }
 
 # whereis <nick>

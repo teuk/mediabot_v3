@@ -150,8 +150,8 @@ return sub {
 
     $assert->like(
         $chatgpt_body // '',
-        qr/usleep\(\$chatgpt_sleep_us\);/,
-        'chatGPT uses configured sleep delay'
+        qr/_queue_irc_chunks\(\s*\$self,\s*\$chan,\s*\\\@out_chunks,\s*\$chatgpt_sleep_us/s,
+        'chatGPT passes configured pacing delay to the asynchronous IRC queue'
     );
 
     $assert->like(

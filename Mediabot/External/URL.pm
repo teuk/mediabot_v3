@@ -98,6 +98,62 @@ sub _decode_http_content_utf8 {
     return $decoded;
 }
 
+# Wait for Chromium without allowing a child that closed its pipes early to
+# block the whole IRC event loop indefinitely. Returns:
+#   ($waited_pid, $raw_wait_status, $timed_out, $error)
+sub _wait_chromium_child {
+    my ($pid, $deadline) = @_;
+
+    return (-1, undef, 0, 'missing child pid')
+        unless defined($pid) && $pid > 0;
+
+    $deadline = time() unless defined $deadline;
+
+    while (1) {
+        my $waited = waitpid($pid, WNOHANG);
+
+        return ($waited, $?, 0, '') if $waited == $pid;
+        return (-1, undef, 0, "waitpid failed: $!") if $waited == -1;
+
+        last if time() >= $deadline;
+        usleep(50_000);
+    }
+
+    # The pipes are closed but the child is still alive at the request
+    # deadline. Give TERM a short grace period, then escalate to KILL.
+    kill 'TERM', $pid;
+    my $term_deadline = time() + 0.50;
+
+    while (time() < $term_deadline) {
+        my $waited = waitpid($pid, WNOHANG);
+
+        return ($waited, $?, 1, '') if $waited == $pid;
+        return (-1, undef, 1, "waitpid failed after TERM: $!") if $waited == -1;
+
+        usleep(50_000);
+    }
+
+    kill 'KILL', $pid;
+    my $waited = waitpid($pid, 0);
+
+    return ($waited, $?, 1, '') if $waited == $pid;
+    return (-1, undef, 1, "waitpid failed after KILL: $!");
+}
+
+# Convert Perl's raw wait status to a conventional process result. A child
+# killed by a signal stores that signal in the low bits, so `$status >> 8`
+# alone incorrectly reports success (0).
+sub _decode_chromium_wait_status {
+    my ($status) = @_;
+    $status = 0 unless defined $status;
+
+    my $signal = $status & 127;
+    my $exit   = ($status >> 8) & 255;
+
+    return (128 + $signal, $signal) if $signal;
+    return ($exit, 0);
+}
+
 sub _fetch_url_chromium_dumpdom {
     my ($self, $url, %opts) = @_;
     return undef unless defined $url && $url ne '';
@@ -157,6 +213,7 @@ sub _fetch_url_chromium_dumpdom {
     my $pid;
     my $stdout = '';
     my $stderr_txt = '';
+    my $deadline = time() + $alarm_timeout;
 
     my $ok = eval {
         $pid = open3('/dev/null', my $out, $stderr, @cmd);
@@ -178,8 +235,6 @@ sub _fetch_url_chromium_dumpdom {
             fileno($out)    => 'stdout',
             fileno($stderr) => 'stderr',
         );
-
-        my $deadline = time() + $alarm_timeout;
 
         while ($sel->count) {
             my $remaining = $deadline - time();
@@ -249,8 +304,32 @@ sub _fetch_url_chromium_dumpdom {
         return undef;
     }
 
-    waitpid($pid, 0) if $pid;
-    my $rc = $? >> 8;
+    # MB308: stdout/stderr reaching EOF does not guarantee that Chromium
+    # itself has exited. Reap it only within the original request deadline so
+    # a child that closes both pipes and keeps running cannot freeze Mediabot.
+    my ($waited, $wait_status, $reap_timedout, $wait_error)
+        = _wait_chromium_child($pid, $deadline);
+
+    if ($waited != $pid) {
+        $wait_error ||= 'unknown waitpid failure';
+        $self->{logger}->log(3,
+            "_fetch_url_chromium_dumpdom() could not reap chromium pid=$pid for $url: $wait_error");
+        return undef;
+    }
+
+    my ($rc, $signal) = _decode_chromium_wait_status($wait_status);
+
+    if ($reap_timedout) {
+        $self->{logger}->log(3,
+            "_fetch_url_chromium_dumpdom() chromium exceeded alarm timeout after closing its pipes for $url");
+        return undef;
+    }
+
+    if ($signal) {
+        $self->{logger}->log(3,
+            "_fetch_url_chromium_dumpdom() chromium terminated by signal $signal for $url");
+        return undef;
+    }
 
     eval {
         $stdout = decode('UTF-8', $stdout, 1);
@@ -260,7 +339,7 @@ sub _fetch_url_chromium_dumpdom {
     };
 
     my $len = length($stdout // '');
-    $self->{logger}->log(4, "_fetch_url_chromium_dumpdom() rc=$rc bytes=$len for $url");
+    $self->{logger}->log(4, "_fetch_url_chromium_dumpdom() rc=$rc signal=$signal bytes=$len for $url");
 
     if (defined $stderr_txt && $stderr_txt ne '') {
         my $errlog = substr($stderr_txt, 0, 500);

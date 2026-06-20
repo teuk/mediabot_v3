@@ -10,7 +10,11 @@ use Scalar::Util qw(blessed);
 # ------------------------------------------------------------------------------
 sub _log {
     my ($self, $level, $msg) = @_;
-    $level ||= 3; # 0=ERROR 1=WARN 2=INFO 3=DEBUG
+
+    # MB304: level 0 is a valid and important severity. Using ||= here
+    # changed every level-0 authentication error into DEBUG (3), which could
+    # hide failures whenever the runtime debug level was below 3.
+    $level = 3 unless defined $level; # 0=ERROR 1=WARN 2=INFO 3=DEBUG
     if ($self->{logger} && $self->{logger}->can('log')) {
         $self->{logger}->log($level, $msg);
     } else {

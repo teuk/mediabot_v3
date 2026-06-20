@@ -410,24 +410,53 @@ sub _log {
     my ($self, $level, $msg) = @_;
     return unless $self->{logger};
 
-    # Normalize level: accept numeric (0,1,2…) or symbolic ('INFO','ERROR',…)
-    my %_sym = ( INFO => 0, DEBUG => 2, WARN => 1, WARNING => 1, ERROR => 1 );
-    my $numeric_level = (defined $level && $level =~ /^[0-9]+$/)
-        ? $level
-        : ($_sym{ uc($level // '') } // 1);
+    # MB305: Mediabot::Log uses level 0 for messages that must remain visible
+    # even when MAIN_PROG_DEBUG=0. Metrics errors used to map to level 1 and
+    # could therefore hide a bind failure or a radio-status provider failure.
+    # Keep numeric levels unchanged and normalize symbolic levels explicitly.
+    my $symbolic = (defined($level) && $level !~ /^[0-9]+$/)
+        ? uc($level)
+        : undef;
+
+    my %symbolic_level = (
+        INFO    => 0,
+        ERROR   => 0,
+        WARN    => 1,
+        WARNING => 1,
+        DEBUG   => 2,
+    );
+
+    my $numeric_level = (defined($level) && $level =~ /^[0-9]+$/)
+        ? int($level)
+        : ($symbolic_level{$symbolic // ''} // 1);
 
     if ($self->{logger}->can('log')) {
         eval { $self->{logger}->log($numeric_level, $msg); };
         return;
     }
 
-    # Fallback for loggers that only expose named methods
-    if ($numeric_level == 0 && $self->{logger}->can('info')) {
+    # Fallback for loggers exposing named methods only. Preserve the semantic
+    # meaning of the symbolic level instead of inferring it from debug depth.
+    if (defined($symbolic) && $symbolic =~ /^(?:ERROR|WARN|WARNING)$/) {
+        if ($self->{logger}->can('error')) {
+            eval { $self->{logger}->error($msg); };
+            return;
+        }
+    }
+
+    if (defined($symbolic) && $symbolic eq 'DEBUG') {
+        if ($self->{logger}->can('debug')) {
+            eval { $self->{logger}->debug($msg); };
+            return;
+        }
+    }
+
+    if ($self->{logger}->can('info')) {
         eval { $self->{logger}->info($msg); };
         return;
     }
 
-    if ($numeric_level >= 1 && $self->{logger}->can('error')) {
+    if ($self->{logger}->can('error')) {
         eval { $self->{logger}->error($msg); };
         return;
     }

@@ -1808,6 +1808,21 @@ sub radioPlay_ctx {
 
 
 
+sub _radio_cancel_try_reap {
+    my ($pid) = @_;
+
+    return ('invalid', undef)
+        unless defined($pid) && $pid =~ /^\d+\z/ && $pid > 0;
+
+    my $waited = waitpid($pid, WNOHANG);
+
+    return ('running', undef) if $waited == 0;
+    return ('reaped', $?)     if $waited == $pid;
+    return ('gone', undef)    if $waited == -1;
+
+    return ('unexpected', undef);
+}
+
 sub radioDlCancel_ctx {
     my ($ctx) = @_;
 
@@ -1834,66 +1849,161 @@ sub radioDlCancel_ctx {
         return 1;
     }
 
-    # mb125: prevent the Radio::Request polling timer from firing after cancel.
-    $job->{cancel_requested} = 1;
+    my $loop = $self->{loop};
 
-    if (my $poll_timer = delete $job->{timer}) {
-        my $poll_loop = delete($job->{loop}) || $self->{loop};
-        eval { $poll_timer->stop if $poll_timer->can('stop') };
-        eval { $poll_loop->remove($poll_timer) if $poll_loop };
-    }
+    my $remove_timer = sub {
+        my ($key) = @_;
+
+        my $timer = delete $job->{$key};
+        return unless $timer;
+
+        eval { $timer->stop if $timer->can('stop') };
+        eval { $loop->remove($timer) if $loop };
+    };
 
     my $cleanup = sub {
         my ($reason) = @_;
+
+        return if $job->{cancel_cleanup_done};
+        $job->{cancel_cleanup_done} = 1;
+
+        $remove_timer->('cancel_kill_timer');
+        $remove_timer->('cancel_reap_timer');
 
         for my $tmp ($job->{stdout}, $job->{stderr}) {
             next unless defined($tmp) && $tmp ne '';
             unlink $tmp if -e $tmp;
         }
 
-        $self->{_radio_request_download} = {};
+        my $current = $self->{_radio_request_download};
+        if (ref($current) eq 'HASH' && $current == $job) {
+            $self->{_radio_request_download} = {};
+        }
+
         botNotice($self, $nick, "Radio download: cancelled job: $query");
-        logBot($self, $ctx->message, undef, 'radiodlcancel', $reason || $query);
+        logBot(
+            $self,
+            $ctx->message,
+            undef,
+            'radiodlcancel',
+            $reason || 'cancelled-reaped',
+            $query,
+        );
     };
 
-    my $alive = kill(0, $pid) ? 1 : 0;
+    my $try_finish = sub {
+        my ($state) = _radio_cancel_try_reap($pid);
 
-    unless ($alive) {
-        waitpid($pid, WNOHANG);
-        $cleanup->($query);
+        if ($state eq 'reaped' || $state eq 'gone') {
+            $cleanup->("cancel-$state");
+            return 1;
+        }
+
+        return 0;
+    };
+
+    # A repeated cancel command must not install a second set of timers.
+    if ($job->{cancel_requested}) {
+        return 1 if $try_finish->();
+
+        my $phase = $job->{cancel_phase} // 'in-progress';
+        botNotice(
+            $self,
+            $nick,
+            "Radio download: cancellation already in progress "
+                . "(pid=$pid, phase=$phase): $query"
+        );
+        logBot(
+            $self,
+            $ctx->message,
+            undef,
+            'radiodlcancel',
+            'already-in-progress',
+            $query,
+        );
         return 1;
     }
+
+    # Prevent the normal Radio::Request polling timer from racing the cancel
+    # path. Temporary files and active job state are kept until waitpid confirms
+    # that the child is reaped.
+    $job->{cancel_requested} = 1;
+    $job->{cancel_phase}     = 'term';
+
+    if (my $poll_timer = delete $job->{timer}) {
+        my $poll_loop = delete($job->{loop}) || $loop;
+        eval { $poll_timer->stop if $poll_timer->can('stop') };
+        eval { $poll_loop->remove($poll_timer) if $poll_loop };
+    }
+
+    return 1 if $try_finish->();
 
     kill 'TERM', $pid;
     botNotice($self, $nick, "Radio download: cancelling job: $query");
 
-    my $loop = $self->{loop};
-
     unless ($loop) {
-        # Last-resort fallback. Keep it non-blocking: escalate immediately and
-        # reap opportunistically instead of sleeping inside the IRC loop.
-        kill 'KILL', $pid if kill(0, $pid);
-        waitpid($pid, WNOHANG);
-        $cleanup->($query);
+        # A running bot normally always has an IO::Async loop. In this emergency
+        # fallback, escalate immediately and perform only a short bounded reap
+        # attempt. If the process still cannot be reaped, keep the job state
+        # instead of falsely reporting successful cancellation.
+        kill 'KILL', $pid;
+        $job->{cancel_phase} = 'kill';
+
+        my $deadline = time() + 1;
+        while (time() < $deadline) {
+            return 1 if $try_finish->();
+            select undef, undef, undef, 0.05;
+        }
+
+        botNotice(
+            $self,
+            $nick,
+            "Radio download: kill sent, but child reaping is still pending "
+                . "(pid=$pid): $query"
+        );
+        logBot(
+            $self,
+            $ctx->message,
+            undef,
+            'radiodlcancel',
+            'kill-sent-reap-pending',
+            $query,
+        );
         return 1;
     }
+
+    my $reap_timer;
+    $reap_timer = IO::Async::Timer::Countdown->new(
+        delay => 0.10,
+        on_expire => sub {
+            return if $job->{cancel_cleanup_done};
+            return if $try_finish->();
+
+            $reap_timer->start;
+        },
+    );
 
     my $kill_timer;
     $kill_timer = IO::Async::Timer::Countdown->new(
         delay => 1,
         on_expire => sub {
-            if (kill(0, $pid)) {
-                kill 'KILL', $pid;
-            }
+            return if $job->{cancel_cleanup_done};
+            return if $try_finish->();
 
-            waitpid($pid, WNOHANG);
+            kill 'KILL', $pid;
+            $job->{cancel_phase} = 'kill';
 
             eval { $loop->remove($kill_timer) if $kill_timer };
-            $cleanup->($query);
+            delete $job->{cancel_kill_timer};
         },
     );
 
+    $job->{cancel_reap_timer} = $reap_timer;
+    $job->{cancel_kill_timer} = $kill_timer;
+
+    $loop->add($reap_timer);
     $loop->add($kill_timer);
+    $reap_timer->start;
     $kill_timer->start;
 
     return 1;
@@ -1933,12 +2043,25 @@ sub radioDlStatus_ctx {
         $alive = kill(0, $pid) ? 'yes' : 'no';
     }
 
-    botNotice($self, $nick, "Radio download: active query='$query'");
-    # X8: human-readable age
+    my $state = $job->{cancel_requested} ? 'cancelling' : 'active';
+    my $phase = $job->{cancel_phase};
+
+    botNotice($self, $nick, "Radio download: $state query='$query'");
+
     my $age_h = $age >= 60
         ? sprintf('%dm %ds', int($age/60), $age%60)
         : "${age}s";
-    botNotice($self, $nick, "Radio download: pid=$pid alive=$alive age=$age_h timeout=${timeout}s");
+
+    my $phase_text = defined($phase) && $phase ne ''
+        ? " cancel_phase=$phase"
+        : '';
+
+    botNotice(
+        $self,
+        $nick,
+        "Radio download: pid=$pid alive=$alive age=$age_h "
+            . "timeout=${timeout}s$phase_text"
+    );
 
     if ($stderr && -r $stderr) {
         my $size = -s $stderr || 0;
@@ -1950,7 +2073,13 @@ sub radioDlStatus_ctx {
         botNotice($self, $nick, "Radio download: stdout=$stdout (${size} bytes)");
     }
 
-    logBot($self, $ctx->message, undef, 'radiodlstatus', "active pid=$pid age=$age query=$query");
+    logBot(
+        $self,
+        $ctx->message,
+        undef,
+        'radiodlstatus',
+        "$state pid=$pid age=$age query=$query"
+    );
     return 1;
 }
 

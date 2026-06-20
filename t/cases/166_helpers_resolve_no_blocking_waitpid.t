@@ -1,10 +1,10 @@
 # t/cases/166_helpers_resolve_no_blocking_waitpid.t
 # =============================================================================
-# Regression checks for Helpers::resolve_ctx().
+# MB311 regression checks for Helpers::resolve_ctx().
 #
-# resolve_ctx() spawns a child process for potentially blocking DNS lookups.
-# The parent timeout path must not block on waitpid($pid, 0) if the child is
-# still stuck. It should use WNOHANG and escalate TERM/KILL if needed.
+# Both forward and reverse DNS run in a child process. Timeout escalation and
+# child collection must remain asynchronous so the IRC loop never sleeps or
+# blocks in waitpid().
 # =============================================================================
 
 use strict;
@@ -21,7 +21,9 @@ use File::Spec;
 sub _slurp_helpers_resolve_waitpid {
     my ($path) = @_;
 
-    open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
+    open my $fh, '<:encoding(UTF-8)', $path
+        or die "cannot read $path: $!";
+
     local $/;
     return <$fh>;
 }
@@ -78,38 +80,50 @@ return sub {
     );
 
     $assert->like(
+        $src,
+        qr/^use IO::Async::Stream;$/m,
+        'Helpers.pm imports IO::Async::Stream'
+    );
+
+    $assert->like(
         $body // '',
-        qr/waitpid\(\$child_pid, WNOHANG\)/,
+        qr/waitpid\(\$child_pid,\s*WNOHANG\)/,
         'resolve_ctx uses non-blocking waitpid'
     );
 
     $assert->like(
         $body // '',
         qr/kill 'TERM', \$child_pid;/,
-        'resolve_ctx sends TERM to stuck resolver child'
+        'resolve_ctx sends TERM to a stuck resolver child'
     );
 
     $assert->like(
         $body // '',
-        qr/select\(undef, undef, undef, 0\.2\);/,
-        'resolve_ctx waits briefly after TERM'
+        qr/delay\s*=>\s*0\.2/,
+        'resolve_ctx schedules the TERM-to-KILL grace period asynchronously'
     );
 
     $assert->like(
         $body // '',
         qr/kill 'KILL', \$child_pid;/,
-        'resolve_ctx escalates to KILL when resolver child remains'
+        'resolve_ctx escalates to KILL when the resolver child remains'
     );
 
     $assert->unlike(
         $body // '',
-        qr/waitpid\(\$child_pid, 0\) if \$child_pid;/,
-        'resolve_ctx no longer blocks immediately on waitpid after timeout'
+        qr/(?:sleep|usleep|select)\s*\(/,
+        'resolve_ctx does not sleep inside the event loop'
+    );
+
+    $assert->unlike(
+        $body // '',
+        qr/waitpid\(\$child_pid,\s*0\)/,
+        'resolve_ctx has no unconditional blocking waitpid'
     );
 
     $assert->like(
         $body // '',
-        qr/IO::Async::Timer::Countdown->new/,
-        'resolve_ctx still uses an async timer for DNS lookup collection'
+        qr/IO::Async::Stream->new/,
+        'resolve_ctx consumes lookup output asynchronously'
     );
 };

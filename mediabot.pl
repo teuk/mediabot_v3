@@ -2159,12 +2159,27 @@ sub on_message_RPL_WHOISUSER {
             }
         elsif ($WHOIS_VARS{'sub'} eq "mbWhereis") {
                 $mediabot->{logger}->log(4,"WHOIS mbWhereis");
+
                 my $country = $mediabot->whereis($sHostname);
-                if (defined($country)) {
-                    $mediabot->botPrivmsg($WHOIS_VARS{'channel'},"($WHOIS_VARS{'caller'} whereis $WHOIS_VARS{'nick'}) Country : $country");
+                $country = 'N/A'
+                    unless defined($country) && !ref($country) && $country ne '';
+
+                # MB314: a private whereis request has no channel. Reply to the
+                # original caller instead of passing undef to botPrivmsg().
+                my $reply_target = defined($WHOIS_VARS{'channel'})
+                                && $WHOIS_VARS{'channel'} ne ''
+                    ? $WHOIS_VARS{'channel'}
+                    : $WHOIS_VARS{'caller'};
+
+                if (defined($reply_target) && $reply_target ne '') {
+                    $mediabot->botPrivmsg(
+                        $reply_target,
+                        "($WHOIS_VARS{'caller'} whereis $WHOIS_VARS{'nick'}) Country : $country"
+                    );
                 }
                 else {
-                    $mediabot->botPrivmsg($WHOIS_VARS{'channel'},"($WHOIS_VARS{'caller'} whereis $WHOIS_VARS{'nick'}) Country : $country");
+                    $mediabot->{logger}->log(1,
+                        "WHOIS mbWhereis: no reply target for $target_name");
                 }
             }
         elsif ($WHOIS_VARS{'sub'} eq "statPartyline") {

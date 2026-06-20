@@ -4852,15 +4852,31 @@ sub mbPollResult_ctx {
     }
 
     my $status = $poll->{active} ? 'Active' : 'Closed';
-    # DD8: show winner prominently — winner_opt is an option index (0-based)
-    # mb160-B1: en mode weighted, le gagnant est determine par le score
-    # pondere, pas par le nombre de voteurs.
-    my ($winner_opt) = $weighted
-        ? sort { ($weighted_scores{$b} // 0) <=> ($weighted_scores{$a} // 0) } keys %weighted_scores
-        : sort { ($counts{$b} // 0) <=> ($counts{$a} // 0) } keys %counts;
+    # DD8/MB306: show the winning label prominently and keep ties
+    # deterministic. The previous sort started from hash keys, so equal scores
+    # could select a different winner from one process to another.
+    my @winner_opts;
+    if ($total > 0) {
+        my $best_score = -1;
+        for my $idx (0 .. $#options) {
+            my $score = $weighted
+                ? ($weighted_scores{$idx} // 0)
+                : ($counts{$idx} // 0);
+
+            if ($score > $best_score) {
+                $best_score = $score;
+                @winner_opts = ($idx);
+            }
+            elsif ($score == $best_score) {
+                push @winner_opts, $idx;
+            }
+        }
+    }
+
     my $winner_str = '';
-    if (defined $winner_opt && $total > 0) {
-        my $winner_label = $options[$winner_opt] // "option $winner_opt";
+    if (@winner_opts == 1) {
+        my $winner_opt   = $winner_opts[0];
+        my $winner_label = $options[$winner_opt] // 'option ' . ($winner_opt + 1);
         if ($weighted && $weighted_total > 0) {
             my $wpct = sprintf('%.0f%%', 100 * ($weighted_scores{$winner_opt} // 0) / $weighted_total);
             $winner_str = "  Winner: $winner_label ($wpct weighted)";
@@ -4868,6 +4884,12 @@ sub mbPollResult_ctx {
             my $wpct = sprintf('%.0f%%', 100 * ($counts{$winner_opt} // 0) / $total);
             $winner_str = "  Winner: $winner_label ($wpct)";
         }
+    }
+    elsif (@winner_opts > 1) {
+        my @winner_labels = map {
+            $options[$_] // 'option ' . ($_ + 1)
+        } @winner_opts;
+        $winner_str = '  Tie: ' . join(', ', @winner_labels);
     }
     my $weighted_label = $weighted ? ' [weighted]' : '';
     botPrivmsg($self, $channel, "$status poll${weighted_label}: \"$poll->{question}\" ($total vote(s))$winner_str");
@@ -4906,20 +4928,74 @@ sub mbPollStop_ctx {
         botNotice($self, $nick, 'No active poll.'); return;
     }
     $poll->{active} = 0;
-    $self->{metrics}->inc('mediabot_poll_closed_total') if $self->{metrics};  # Z10
-    # IMP14: show top result immediately when poll closes
-    my $votes  = $poll->{votes}  // {};
-    my $opts   = $poll->{options} // [];
-    my $total  = scalar(keys %$votes);
+    $self->{metrics}->inc('mediabot_poll_closed_total') if $self->{metrics};
+
+    # MB306: keep !pollstop consistent with !pollresult.
+    # The old code announced the zero-based option index as the winner and
+    # ignored weighted poll scores entirely.
+    my $votes    = $poll->{votes}   // {};
+    my $opts     = $poll->{options} // [];
+    my $weights  = $poll->{weights} // [];
+    my $weighted = $poll->{weighted} ? 1 : 0;
+    my $total    = scalar(keys %$votes);
+
+    my $duration = int(time() - ($poll->{started} // time()));
+    $duration = 0 if $duration < 0;
+    $self->{metrics}->set('mediabot_poll_duration_seconds', $duration)
+        if $self->{metrics};
+
     if ($total > 0) {
-        my %tally;
-        $tally{$votes->{$_}}++ for keys %$votes;
-        my ($winner) = sort { ($tally{$b}//0) <=> ($tally{$a}//0) } keys %tally;
-        my $w_count  = $tally{$winner} // 0;
-        my $pct      = int(100 * $w_count / $total);
-        botPrivmsg($self, $channel,
-            "Poll closed ($total vote(s)). Winner: $winner "
-            . "($w_count/$total, ${pct}%). Use !pollresult for details.");
+        my %counts;
+        $counts{$votes->{$_}}++ for keys %$votes;
+
+        my %scores;
+        my $score_total = 0;
+        for my $idx (0 .. $#$opts) {
+            my $voters = $counts{$idx} // 0;
+            my $weight = $weights->[$idx] // 1;
+            my $score  = $weighted ? ($voters * $weight) : $voters;
+            $scores{$idx} = $score;
+            $score_total += $score;
+        }
+
+        my $best_score = -1;
+        my @winners;
+        for my $idx (0 .. $#$opts) {
+            my $score = $scores{$idx} // 0;
+            if ($score > $best_score) {
+                $best_score = $score;
+                @winners = ($idx);
+            }
+            elsif ($score == $best_score) {
+                push @winners, $idx;
+            }
+        }
+
+        if (@winners > 1) {
+            my @labels = map { $opts->[$_] // 'option ' . ($_ + 1) } @winners;
+            my $basis = $weighted ? 'weighted score' : 'votes';
+            botPrivmsg($self, $channel,
+                "Poll closed ($total vote(s)). Tie on $basis: "
+                . join(', ', @labels)
+                . ". Use !pollresult for details.");
+        }
+        else {
+            my $winner       = $winners[0];
+            my $winner_label = $opts->[$winner] // 'option ' . ($winner + 1);
+            my $winner_votes = $counts{$winner} // 0;
+            my $winner_score = $scores{$winner} // 0;
+            my $pct = $score_total > 0
+                ? int(100 * $winner_score / $score_total)
+                : 0;
+
+            my $details = $weighted
+                ? "$winner_votes vote(s), weighted score $winner_score/$score_total, ${pct}%"
+                : "$winner_votes/$total, ${pct}%";
+
+            botPrivmsg($self, $channel,
+                "Poll closed ($total vote(s)). Winner: $winner_label "
+                . "($details). Use !pollresult for details.");
+        }
     } else {
         botPrivmsg($self, $channel, "Poll closed. No votes cast.");
     }

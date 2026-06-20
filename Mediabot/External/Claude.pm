@@ -14,7 +14,6 @@ use strict;
 use warnings;
 use Exporter 'import';
 use Encode qw(encode decode);
-use Time::HiRes qw(usleep);
 use JSON::MaybeXS;
 use URI::Escape qw(uri_escape_utf8);
 
@@ -101,6 +100,160 @@ sub _chatgpt_conf_string {
     return $default unless defined($value) && $value ne '';
 
     return $value;
+}
+
+# Queue IRC chunks without sleeping inside the IO::Async event loop.
+#
+# Batches are serialized per target so a second AI answer cannot interleave
+# with a response that is still being paced. The first chunk is sent
+# immediately; the configured delay applies only between subsequent chunks.
+# When no usable event loop exists (notably lightweight tests), preserve
+# compatibility by sending the batch immediately without a blocking sleep.
+sub _queue_irc_chunks {
+    my ($self, $target, $chunks, $sleep_us, $label) = @_;
+
+    return 0 unless ref($chunks) eq 'ARRAY';
+
+    my @payload = grep {
+        defined($_) && $_ ne ''
+    } @$chunks;
+
+    return 0 unless @payload;
+
+    my $queued_count = scalar @payload;
+
+    $sleep_us = 0
+        unless defined($sleep_us) && $sleep_us =~ /^\d+\z/;
+
+    $label = 'AI'
+        unless defined($label) && $label ne '';
+
+    my $loop = eval {
+        (ref($self) && $self->can('getLoop'))
+            ? $self->getLoop
+            : undef;
+    };
+
+    $loop ||= eval { $self->{loop} };
+
+    my $can_schedule = $loop
+        && eval { $loop->can('add') }
+        && $sleep_us > 0
+        && @payload > 1;
+
+    unless ($can_schedule) {
+        Mediabot::Helpers::botPrivmsg($self, $target, $_) for @payload;
+        return $queued_count;
+    }
+
+    require IO::Async::Timer::Countdown;
+
+    my $key = defined($target) && $target ne ''
+        ? lc($target)
+        : '__unknown__';
+
+    my $queues = $self->{_external_ai_output_queues} //= {};
+    my $state  = $queues->{$key} //= {
+        active  => 0,
+        batches => [],
+        timer   => undef,
+        current => undef,
+    };
+
+    push @{ $state->{batches} }, {
+        chunks => \@payload,
+        delay  => $sleep_us / 1_000_000,
+        label  => $label,
+    };
+
+    return $queued_count if $state->{active};
+
+    $state->{active} = 1;
+
+    my ($pump, $schedule);
+
+    my $cleanup = sub {
+        my ($timer) = @_;
+        return unless $timer;
+
+        eval { $timer->stop if $timer->can('stop') };
+        eval { $loop->remove($timer) };
+    };
+
+    $schedule = sub {
+        my ($delay) = @_;
+
+        my $timer;
+        $timer = IO::Async::Timer::Countdown->new(
+            delay     => $delay,
+            on_expire => sub {
+                $cleanup->($timer);
+                $state->{timer} = undef;
+                $pump->();
+            },
+        );
+
+        $state->{timer} = $timer;
+        $loop->add($timer);
+        $timer->start;
+    };
+
+    $pump = sub {
+        my $batch = $state->{current};
+
+        unless ($batch) {
+            $batch = shift @{ $state->{batches} };
+            $state->{current} = $batch if $batch;
+        }
+
+        unless ($batch) {
+            delete $queues->{$key};
+            $pump     = undef;
+            $schedule = undef;
+            return;
+        }
+
+        my $chunk = shift @{ $batch->{chunks} };
+
+        if (defined($chunk) && $chunk ne '') {
+            my $ok = eval {
+                Mediabot::Helpers::botPrivmsg($self, $target, $chunk);
+                1;
+            };
+
+            unless ($ok) {
+                my $error = $@ || 'unknown send error';
+                $error =~ s/\s+/ /g;
+                eval {
+                    $self->{logger}->log(
+                        1,
+                        "$batch->{label} paced output failed for $target: $error"
+                    );
+                };
+            }
+        }
+
+        if (@{ $batch->{chunks} }) {
+            $schedule->($batch->{delay});
+            return;
+        }
+
+        $state->{current} = undef;
+
+        if (@{ $state->{batches} }) {
+            # Preserve ordering between consecutive replies on the same target.
+            $schedule->($batch->{delay});
+            return;
+        }
+
+        delete $queues->{$key};
+        $pump     = undef;
+        $schedule = undef;
+    };
+
+    $pump->();
+
+    return $queued_count;
 }
 
 # chatGPT_ctx() — wrapper Context pour la commande publique !tellme
@@ -301,11 +454,15 @@ sub chatGPT {
         $chunk[$last] .= $suff;                          # now safe to append
     }
 
-    for my $i (0..$last) {
-        Mediabot::Helpers::botPrivmsg($self,$chan,$chunk[$i]);
-        usleep($chatgpt_sleep_us);
-    }
-    $self->{logger}->log(4,"chatGPT() sent ".($last+1)." PRIVMSG");
+    my @out_chunks = @chunk[0 .. $last];
+    my $queued = _queue_irc_chunks(
+        $self,
+        $chan,
+        \@out_chunks,
+        $chatgpt_sleep_us,
+        'chatGPT',
+    );
+    $self->{logger}->log(4, "chatGPT() queued $queued PRIVMSG");
 }
 
 # ------------------------------------------------------------------
@@ -1094,11 +1251,24 @@ sub claudeAI {
         $chunk[$last] .= $suff;
     }
 
-    for my $i (0 .. $last) {
-        $_out->($chunk[$i]);
-        usleep($sleep_us) unless $output_fn;  # no sleep for Partyline
+    if ($output_fn) {
+        # Partyline callbacks are already non-IRC and must remain synchronous.
+        for my $i (0 .. $last) {
+            $_out->($chunk[$i]);
+        }
+        $self->{logger}->log(4, 'claudeAI() sent ' . ($last+1) . ' callback line(s)');
     }
-    $self->{logger}->log(4, 'claudeAI() sent ' . ($last+1) . ' PRIVMSG');
+    else {
+        my @out_chunks = @chunk[0 .. $last];
+        my $queued = _queue_irc_chunks(
+            $self,
+            $chan,
+            \@out_chunks,
+            $sleep_us,
+            'claudeAI',
+        );
+        $self->{logger}->log(4, "claudeAI() queued $queued PRIVMSG");
+    }
     # P5: increment Prometheus counter on success
     $self->{metrics}->inc('mediabot_claude_requests_total') if $self->{metrics};
 }

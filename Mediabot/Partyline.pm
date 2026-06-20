@@ -26,9 +26,9 @@ use warnings;
 use IO::Async::Listener;
 use IO::Async::Stream;
 use IO::Async::Timer::Countdown;
+use POSIX qw(WNOHANG);
 use Socket qw(unpack_sockaddr_in sockaddr_family inet_ntoa inet_aton AF_INET);
 use Scalar::Util qw(weaken);
-use Time::HiRes qw(usleep);
 use JSON qw(encode_json);
 use Encode qw(encode);
 use Mediabot::External ();
@@ -736,9 +736,10 @@ sub _init_dcc_session {
         pending_login  => undef,
         is_dcc         => 1,
         peer_ip        => $peer_host,
-        peer_host      => $self->_reverse_dns_timeout($peer_host, 2),
+        peer_host      => $peer_host,
     };
     $self->{streams}{$id} = $stream;
+    $self->_schedule_reverse_dns_lookup($id, $peer_host, 2);
 
     # ── Authentication timeout: 60 seconds ───────────────────────────────────
     my $timeout_timer = IO::Async::Timer::Countdown->new(
@@ -841,7 +842,6 @@ sub _start_listener {
             };
 
             my $peer_ip = $peer_host;
-            my $peer_rdns = $self->_reverse_dns_timeout($peer_ip, 2);
 
             $self->{users}{$id} = {
                 authenticated  => 0,
@@ -849,7 +849,7 @@ sub _start_listener {
                 level          => undef,
                 level_desc     => '',
                 peer_ip        => $peer_ip,
-                peer_host      => $peer_rdns,
+                peer_host      => $peer_ip,
                 # Rate limiting: max 10 commands per 5 seconds
                 rate_window    => time(),
                 rate_count     => 0,
@@ -866,6 +866,7 @@ sub _start_listener {
                 pending_login  => undef,
             };
             $self->{streams}{$id} = $stream;
+            $self->_schedule_reverse_dns_lookup($id, $peer_ip, 2);
 
             $stream->configure(
                 on_read => sub {
@@ -995,35 +996,266 @@ sub _close_session {
 # ---------------------------------------------------------------------------
 # _reverse_dns_timeout($ip, $timeout)
 #
-# Resolve an IPv4 address to a hostname.
-#
-# NOTE: alarm()/SIGALRM-based timeouts are unsafe inside an IO::Async event
-# loop because SIGALRM can interrupt epoll_wait() or any in-flight socket I/O,
-# causing spurious "Interrupted system call" errors.
-#
-# We therefore attempt the lookup without a signal-based timeout.
-# gethostbyaddr() is a blocking call but its system-level timeout is typically
-# 5 seconds on Debian (controlled by /etc/resolv.conf 'timeout' option).
-# For the Partyline this is acceptable: connections are rare and the lookup
-# runs synchronously only at session setup.  If it proves to be a problem in
-# practice, migrate to $loop->resolver->getnameinfo() (async).
+# Compatibility wrapper kept for older callers/tests. Reverse DNS must never
+# run synchronously in the IO::Async process, so this helper now returns the
+# validated IP immediately. New session code uses _schedule_reverse_dns_lookup()
+# to update peer_host asynchronously.
 # ---------------------------------------------------------------------------
 sub _reverse_dns_timeout {
     my ($self, $ip, $timeout) = @_;
 
-    # $timeout parameter kept for API compatibility but no longer used.
-
-    return $ip unless defined $ip && $ip ne '' && $ip ne 'unknown';
-    return $ip unless $ip =~ /^\d{1,3}(?:\.\d{1,3}){3}$/;
-
-    my $packed = inet_aton($ip);
-    return $ip unless $packed;
-
-    my $host = eval { scalar gethostbyaddr($packed, AF_INET) };
-    return $ip if $@;
-
-    return $host if defined $host && $host ne '';
+    return 'unknown' unless defined $ip && $ip ne '';
     return $ip;
+}
+
+
+# ---------------------------------------------------------------------------
+# _schedule_reverse_dns_lookup($session_id, $ip, $timeout)
+#
+# MB313: gethostbyaddr() is a potentially blocking libc resolver call. Run it
+# in a short-lived child, read its pipe through IO::Async, and keep the original
+# IP visible until a valid hostname is available. Session identity is guarded
+# with a unique lookup key so an old callback cannot update a reused fd.
+# ---------------------------------------------------------------------------
+sub _schedule_reverse_dns_lookup {
+    my ($self, $id, $ip, $timeout) = @_;
+
+    return 0 unless defined $id;
+    return 0 unless $self->{users}{$id};
+    return 0 unless defined $ip && $ip =~ /^\d{1,3}(?:\.\d{1,3}){3}$/;
+    return 0 unless inet_aton($ip);
+
+    my $loop = $self->{loop};
+    return 0 unless $loop;
+
+    $timeout = 2 unless defined($timeout) && $timeout =~ /^\d+(?:\.\d+)?$/;
+    $timeout = 0.25 if $timeout < 0.25;
+    $timeout = 10   if $timeout > 10;
+
+    my $resolver_code = <<'RESOLVER';
+use strict;
+use warnings;
+use Socket qw(inet_aton AF_INET);
+
+my $ip = shift // '';
+my $packed = inet_aton($ip);
+exit 2 unless $packed;
+
+my $host = gethostbyaddr($packed, AF_INET);
+if (defined $host && $host ne '') {
+    $host =~ s/[\r\n\0]+//g;
+    print substr($host, 0, 253);
+}
+RESOLVER
+
+    my $child_pid = open(
+        my $pipe,
+        '-|',
+        $^X,
+        '-e',
+        $resolver_code,
+        $ip,
+    );
+
+    unless (defined $child_pid) {
+        $self->{bot}->{logger}->log(3,
+            "Partyline reverse DNS: could not spawn lookup for $ip")
+            if $self->{bot} && $self->{bot}->{logger};
+        return 0;
+    }
+
+    my $lookup_key = join(':', $id, ++$self->{_reverse_dns_lookup_serial});
+    my $session_ref = $self->{users}{$id};
+    $session_ref->{reverse_dns_lookup_key} = $lookup_key;
+
+    my $state = {
+        output      => '',
+        pipe_eof    => 0,
+        child_done  => 0,
+        finalized   => 0,
+        timed_out   => 0,
+        wait_status => undef,
+        term_sent   => 0,
+        kill_sent   => 0,
+        session_ref => $session_ref,
+        session_id  => $id,
+        lookup_key  => $lookup_key,
+        ip          => $ip,
+    };
+
+    $self->{_reverse_dns_lookups}{$lookup_key} = $state;
+
+    my ($stream, $timeout_timer, $kill_timer, $reap_timer);
+    my ($finish, $schedule_reap);
+
+    my $remove_timer = sub {
+        my ($timer) = @_;
+        return unless $timer;
+
+        eval { $timer->stop if $timer->can('stop') };
+        eval { $loop->remove($timer) };
+    };
+
+    $finish = sub {
+        return if $state->{finalized};
+        return unless $state->{child_done};
+        return unless $state->{pipe_eof} || $state->{timed_out};
+
+        $state->{finalized} = 1;
+
+        $remove_timer->($timeout_timer);
+        $remove_timer->($kill_timer);
+        $remove_timer->($reap_timer);
+
+        eval { $loop->remove($stream) } if $stream;
+        eval { close $pipe };
+
+        my $current = $self->{users}{ $state->{session_id} };
+        my $same_session = $current
+            && $current == $state->{session_ref}
+            && ($current->{reverse_dns_lookup_key} // '') eq $state->{lookup_key};
+
+        if ($same_session) {
+            delete $current->{reverse_dns_lookup_key};
+
+            my $status = $state->{wait_status} // 0;
+            my $signal = $status & 127;
+            my $exit   = ($status >> 8) & 255;
+
+            my $host = $state->{output} // '';
+            $host =~ s/[\r\n\0]+//g;
+            $host =~ s/^\s+|\s+$//g;
+
+            if (!$state->{timed_out}
+                && !$signal
+                && $exit == 0
+                && length($host)
+                && length($host) <= 253) {
+                $current->{peer_host} = $host;
+                $self->_write_runtime_status()
+                    if $current->{authenticated};
+            }
+        }
+
+        delete $self->{_reverse_dns_lookups}{ $state->{lookup_key} };
+
+        $finish        = undef;
+        $schedule_reap = undef;
+    };
+
+    $schedule_reap = sub {
+        return if $state->{finalized} || $state->{child_done};
+        return if $reap_timer;
+
+        $reap_timer = IO::Async::Timer::Countdown->new(
+            delay     => 0.05,
+            on_expire => sub {
+                my $expired = $reap_timer;
+                $reap_timer = undef;
+                $remove_timer->($expired);
+
+                return if $state->{finalized};
+
+                my $waited = waitpid($child_pid, WNOHANG);
+
+                if ($waited == $child_pid) {
+                    $state->{wait_status} = $?;
+                    $state->{child_done}  = 1;
+                    $finish->();
+                    return;
+                }
+
+                if ($waited == -1) {
+                    $state->{wait_status} = 0;
+                    $state->{child_done}  = 1;
+                    $finish->();
+                    return;
+                }
+
+                $schedule_reap->();
+            },
+        );
+
+        $loop->add($reap_timer);
+        $reap_timer->start;
+    };
+
+    $timeout_timer = IO::Async::Timer::Countdown->new(
+        delay     => $timeout,
+        on_expire => sub {
+            return if $state->{finalized};
+
+            $state->{timed_out} = 1;
+
+            unless ($state->{term_sent}) {
+                kill 'TERM', $child_pid;
+                $state->{term_sent} = 1;
+            }
+
+            $schedule_reap->();
+
+            $kill_timer = IO::Async::Timer::Countdown->new(
+                delay     => 0.2,
+                on_expire => sub {
+                    return if $state->{finalized} || $state->{child_done};
+
+                    my $waited = waitpid($child_pid, WNOHANG);
+
+                    if ($waited == $child_pid) {
+                        $state->{wait_status} = $?;
+                        $state->{child_done}  = 1;
+                        $finish->();
+                        return;
+                    }
+
+                    if ($waited == -1) {
+                        $state->{wait_status} = 0;
+                        $state->{child_done}  = 1;
+                        $finish->();
+                        return;
+                    }
+
+                    unless ($state->{kill_sent}) {
+                        kill 'KILL', $child_pid;
+                        $state->{kill_sent} = 1;
+                    }
+
+                    $schedule_reap->();
+                },
+            );
+
+            $loop->add($kill_timer);
+            $kill_timer->start;
+        },
+    );
+
+    $loop->add($timeout_timer);
+    $timeout_timer->start;
+
+    $stream = IO::Async::Stream->new(
+        read_handle => $pipe,
+        on_read     => sub {
+            my ($io, $buffref, $eof) = @_;
+
+            if (length $$buffref) {
+                my $remaining = 1024 - length($state->{output});
+                $state->{output} .= substr($$buffref, 0, $remaining)
+                    if $remaining > 0;
+                $$buffref = '';
+            }
+
+            if ($eof && !$state->{pipe_eof}++) {
+                eval { $loop->remove($io) };
+                $schedule_reap->();
+            }
+
+            return 0;
+        },
+    );
+
+    $loop->add($stream);
+
+    return 1;
 }
 
 
@@ -4770,35 +5002,178 @@ sub _cmd_eval {
         exit 2;
     }
 
-    # B1/A1: read pipe asynchronously via IO::Async::Stream so the parent
-    # event loop is not blocked while the child runs.
+    # MB309: read the eval pipe asynchronously and reap the child without
+    # ever blocking the IRC loop. User-supplied eval code can close STDOUT and
+    # continue running; EOF on the pipe therefore does not prove process exit.
     my $eval_ctx = {
-        lines     => [],
-        truncated => 0,
-        timed_out => 0,
-        errors    => [],
+        lines            => [],
+        truncated        => 0,
+        timed_out        => 0,
+        timeout_reported => 0,
+        errors           => [],
+        finalized        => 0,
+        pipe_eof         => 0,
+        wait_status      => undef,
     };
 
-    # Watchdog: kill child if it runs past $eval_timeout (parent side)
-    my $watchdog = IO::Async::Timer::Countdown->new(
+    my ($watchdog, $kill_timer, $reap_timer, $io);
+    my ($finalize, $schedule_reap);
+
+    my $remove_timer = sub {
+        my ($timer_ref) = @_;
+        return unless $timer_ref && $$timer_ref;
+
+        my $timer = $$timer_ref;
+        $$timer_ref = undef;
+        eval { $timer->stop if $timer->can('stop') };
+        eval { $bot->{loop}->remove($timer) };
+    };
+
+    my $report_timeout = sub {
+        return if $eval_ctx->{timeout_reported}++;
+
+        if ($self->{streams}{$id}) {
+            $stream->write("--- timeout ---\r\n");
+            $stream->write("Eval timed out after ${eval_timeout}s.\r\n");
+        }
+
+        $bot->{logger}->log(1,
+            "Partyline: $nick eval timed out after ${eval_timeout}s");
+    };
+
+    $finalize = sub {
+        return if $eval_ctx->{finalized}++;
+
+        $remove_timer->(\$watchdog);
+        $remove_timer->(\$kill_timer);
+        $remove_timer->(\$reap_timer);
+        eval { $bot->{loop}->remove($io) if $io };
+
+        if ($eval_ctx->{timed_out}) {
+            $report_timeout->();
+            return;
+        }
+
+        my $status = $eval_ctx->{wait_status};
+        if (defined $status) {
+            my $signal = $status & 127;
+            my $exit   = ($status >> 8) & 255;
+
+            if ($signal && !@{ $eval_ctx->{errors} }) {
+                push @{ $eval_ctx->{errors} },
+                    "eval subprocess terminated by signal $signal";
+            }
+            elsif ($exit != 0 && !@{ $eval_ctx->{errors} }) {
+                push @{ $eval_ctx->{errors} },
+                    "eval subprocess exited with status $exit";
+            }
+        }
+
+        return unless $self->{streams}{$id};
+
+        $stream->write("--- eval output ---\r\n");
+        if (@{ $eval_ctx->{lines} }) {
+            $stream->write("$_\r\n") for @{ $eval_ctx->{lines} };
+        }
+        else {
+            $stream->write("(no output)\r\n")
+                unless @{ $eval_ctx->{errors} };
+        }
+
+        $stream->write("[... output truncated at 20 lines ...]\r\n")
+            if $eval_ctx->{truncated};
+
+        if (@{ $eval_ctx->{errors} }) {
+            $stream->write("--- error ---\r\n");
+            for my $err (@{ $eval_ctx->{errors} }) {
+                $err =~ s/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]//g;
+                $stream->write("$err\r\n");
+            }
+            $bot->{logger}->log(1, "Partyline: $nick eval error: "
+                . join(' | ', @{ $eval_ctx->{errors} }));
+        }
+        else {
+            $stream->write("--- ok ---\r\n");
+            $bot->{logger}->log(1, "Partyline: $nick eval done");
+        }
+    };
+
+    $schedule_reap = sub {
+        return if $eval_ctx->{finalized};
+        return if $reap_timer;
+
+        my $waited = waitpid($pid, WNOHANG);
+        if ($waited == $pid) {
+            $eval_ctx->{wait_status} = $?;
+            $finalize->();
+            return;
+        }
+
+        if ($waited == -1) {
+            push @{ $eval_ctx->{errors} }, "waitpid failed: $!"
+                unless $eval_ctx->{timed_out};
+            $finalize->();
+            return;
+        }
+
+        $reap_timer = IO::Async::Timer::Countdown->new(
+            delay     => 0.05,
+            on_expire => sub {
+                my $expired = $reap_timer;
+                $reap_timer = undef;
+                eval { $bot->{loop}->remove($expired) if $expired };
+                $schedule_reap->();
+            },
+        );
+        $bot->{loop}->add($reap_timer);
+        $reap_timer->start;
+    };
+
+    # Parent-side watchdog. TERM and KILL are separated by an asynchronous
+    # grace timer; no sleep/usleep is allowed in the IO::Async event loop.
+    $watchdog = IO::Async::Timer::Countdown->new(
         delay     => $eval_timeout,
         on_expire => sub {
-            kill('TERM', $pid);
-            usleep(500_000);
-            kill('KILL', $pid);
+            return if $eval_ctx->{finalized};
+
             $eval_ctx->{timed_out} = 1;
-            $stream->write("--- timeout ---\r\n") if $self->{streams}{$id};
-            $stream->write("Eval timed out after ${eval_timeout}s.\r\n") if $self->{streams}{$id};
-            $bot->{logger}->log(1, "Partyline: $nick eval timed out after ${eval_timeout}s");
+            $report_timeout->();
+            kill 'TERM', $pid;
+            $schedule_reap->();
+
+            $kill_timer = IO::Async::Timer::Countdown->new(
+                delay     => 0.5,
+                on_expire => sub {
+                    return if $eval_ctx->{finalized};
+
+                    my $waited = waitpid($pid, WNOHANG);
+                    if ($waited == $pid) {
+                        $eval_ctx->{wait_status} = $?;
+                        $finalize->();
+                        return;
+                    }
+
+                    if ($waited == -1) {
+                        $finalize->();
+                        return;
+                    }
+
+                    kill 'KILL', $pid;
+                    $schedule_reap->();
+                },
+            );
+            $bot->{loop}->add($kill_timer);
+            $kill_timer->start;
         },
     );
     $bot->{loop}->add($watchdog);
     $watchdog->start;
 
-    my $io = IO::Async::Stream->new(
+    $io = IO::Async::Stream->new(
         read_handle => $pipe,
         on_read     => sub {
             my ($s, $buffref, $eof) = @_;
+
             while ($$buffref =~ s/^([^\n]*\n)//) {
                 my $line = $1;
                 chomp $line;
@@ -4812,46 +5187,40 @@ sub _cmd_eval {
                     push @{ $eval_ctx->{errors} }, $1;
                     next;
                 }
+
                 $line =~ s/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]//g;
-                $line = substr($line, 0, 497) . '...' if length($line) > 500;
+                $line = substr($line, 0, 497) . '...'
+                    if length($line) > 500;
+
                 if (@{ $eval_ctx->{lines} } < 20) {
                     push @{ $eval_ctx->{lines} }, $line;
-                } else {
+                }
+                else {
                     $eval_ctx->{truncated} = 1;
                 }
             }
 
-            if ($eof) {
-                eval { $watchdog->stop; $bot->{loop}->remove($watchdog) };
-                eval { $bot->{loop}->remove($s) };
-                waitpid($pid, 0);
-
-                return unless $self->{streams}{$id};
-
-                $stream->write("--- eval output ---\r\n");
-                if (@{ $eval_ctx->{lines} }) {
-                    $stream->write("$_\r\n") for @{ $eval_ctx->{lines} };
-                } else {
-                    $stream->write("(no output)\r\n") unless @{ $eval_ctx->{errors} };
-                }
-                $stream->write("[... output truncated at 20 lines ...]\r\n")
-                    if $eval_ctx->{truncated};
-
-                if ($eval_ctx->{timed_out}) {
-                    # already written by watchdog
-                } elsif (@{ $eval_ctx->{errors} }) {
-                    $stream->write("--- error ---\r\n");
-                    for my $err (@{ $eval_ctx->{errors} }) {
-                        $err =~ s/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]//g;
-                        $stream->write("$err\r\n");
+            if ($eof && !$eval_ctx->{pipe_eof}++) {
+                # Preserve a final line that is not newline-terminated.
+                if (length $$buffref) {
+                    my $line = $$buffref;
+                    $$buffref = '';
+                    $line =~ s/\r//g;
+                    $line =~ s/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]//g;
+                    $line = substr($line, 0, 497) . '...'
+                        if length($line) > 500;
+                    if (@{ $eval_ctx->{lines} } < 20) {
+                        push @{ $eval_ctx->{lines} }, $line;
                     }
-                    $bot->{logger}->log(1, "Partyline: $nick eval error: "
-                        . join(' | ', @{ $eval_ctx->{errors} }));
-                } else {
-                    $stream->write("--- ok ---\r\n");
-                    $bot->{logger}->log(1, "Partyline: $nick eval done");
+                    else {
+                        $eval_ctx->{truncated} = 1;
+                    }
                 }
+
+                eval { $bot->{loop}->remove($s) };
+                $schedule_reap->();
             }
+
             return 0;
         },
     );

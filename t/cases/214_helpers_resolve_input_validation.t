@@ -154,13 +154,13 @@ return sub {
 
     $assert->like(
         $body // '',
-        qr/gethostbyname\(\$h\)/,
+        qr/gethostbyname\(\$value\)/,
         'resolve_ctx still resolves valid hostnames in child process'
     );
 
     $assert->like(
         $body // '',
-        qr/open\(my \$pipe,\s*'-\|',\s*\$\^X,\s*'-e'/,
+        qr/open\(\s*my \$pipe,\s*'-\|',\s*\$\^X,\s*'-e',\s*\$resolver_code,\s*\$mode,\s*\$input/s,
         'resolve_ctx still uses safe argument-list open for child perl'
     );
 };

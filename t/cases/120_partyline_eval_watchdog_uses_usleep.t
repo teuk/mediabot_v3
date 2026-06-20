@@ -1,104 +1,58 @@
 # t/cases/120_partyline_eval_watchdog_uses_usleep.t
 # =============================================================================
-# Regression checks for Partyline .eval watchdog timing.
+# MB309 regression checks for Partyline .eval watchdog timing.
 #
-# Perl sleep() is not the right tool for a fractional 0.5 second delay.
-# The watchdog should give the eval child a real short grace period after TERM
-# before sending KILL, using Time::HiRes::usleep().
+# The grace period between TERM and KILL must be asynchronous. Sleeping inside
+# an IO::Async callback blocks every other IRC/partyline event.
 # =============================================================================
 
 use strict;
 use warnings;
 
-BEGIN {
-    use FindBin qw($Bin);
-    unshift @INC, "$Bin/../lib";
-    unshift @INC, "$Bin/../..";
-}
-
 use File::Spec;
 
-sub _slurp_partyline_watchdog_sleep {
+sub _slurp_partyline_watchdog_mb309 {
     my ($path) = @_;
-
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
     local $/;
     return <$fh>;
 }
 
-sub _extract_sub_body_partyline_watchdog_sleep {
+sub _extract_sub_body_partyline_watchdog_mb309 {
     my ($src, $sub_name) = @_;
-
     my $start_re = qr/^sub\s+\Q$sub_name\E\s*\{/m;
     return undef unless $src =~ /$start_re/g;
 
     my $start = pos($src);
     my $depth = 1;
     my $pos   = $start;
-    my $len   = length($src);
-
-    while ($pos < $len) {
+    while ($pos < length($src)) {
         my $char = substr($src, $pos, 1);
-
-        if ($char eq '{') {
-            $depth++;
-        }
-        elsif ($char eq '}') {
-            $depth--;
-            if ($depth == 0) {
-                return substr($src, $start, $pos - $start);
-            }
-        }
-
+        $depth++ if $char eq '{';
+        $depth-- if $char eq '}';
+        return substr($src, $start, $pos - $start) if $depth == 0;
         $pos++;
     }
-
     return undef;
 }
 
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_partyline_watchdog_sleep(
+    my $src = _slurp_partyline_watchdog_mb309(
         File::Spec->catfile('.', 'Mediabot', 'Partyline.pm')
     );
+    my $body = _extract_sub_body_partyline_watchdog_mb309($src, '_cmd_eval');
 
-    my $body = _extract_sub_body_partyline_watchdog_sleep($src, '_cmd_eval');
-
-    $assert->ok(
-        defined $body,
-        '_cmd_eval body found'
-    );
-
-    $assert->like(
-        $src,
-        qr/^use Time::HiRes qw\(usleep\);$/m,
-        'Partyline.pm imports Time::HiRes usleep'
-    );
-
-    $assert->unlike(
-        $src,
-        qr/sleep\(0\.5\)/,
-        'Partyline.pm no longer uses sleep(0.5)'
-    );
-
-    $assert->ok(
-        index($body // '', "kill('TERM', \$pid);") >= 0,
-        'eval watchdog sends TERM to child'
-    );
-
-    $assert->ok(
-        index($body // '', 'usleep(500_000);') >= 0,
-        'eval watchdog waits 500ms with usleep'
-    );
-
-    $assert->ok(
-        index($body // '', "kill('KILL', \$pid);") >= 0,
-        'eval watchdog escalates to KILL after grace period'
-    );
-
-    $assert->ok(
-        index($body // '', "kill('TERM', \$pid);\n            usleep(500_000);\n            kill('KILL', \$pid);") >= 0,
-        'TERM/usleep/KILL order is preserved'
-    );
+    $assert->ok(defined $body, '_cmd_eval body found');
+    $assert->unlike($src, qr/^use Time::HiRes qw\(usleep\);$/m,
+        'Partyline.pm no longer imports usleep');
+    $assert->unlike($body // '', qr/\busleep\s*\(/,
+        'eval watchdog never sleeps inside the event loop');
+    $assert->like($body // '', qr/kill\s+'TERM',\s*\$pid/,
+        'eval watchdog sends TERM to the child');
+    $assert->like($body // '', qr/delay\s*=>\s*0\.5/,
+        'TERM-to-KILL grace period uses an asynchronous 500ms timer');
+    $assert->like($body // '', qr/kill\s+'KILL',\s*\$pid/,
+        'eval watchdog escalates to KILL when required');
 };

@@ -404,6 +404,7 @@ sub _start_download {
         timer            => undef,
         cancel_requested => 0,
         term_sent_at     => undef,
+        timed_out        => 0,
     };
 
     $self->_say($ctx, "Radio: download/search started: $query");
@@ -427,6 +428,12 @@ sub _start_download {
                 my $started = $job->{started} // time();
 
                 if ((time() - $started) > $timeout) {
+                    # MB307: remember that this completion path is a timeout.
+                    # A process killed by a signal has a zero high-byte exit
+                    # status, so `$? >> 8` alone would incorrectly look like
+                    # success and produce a misleading "no MP3" message.
+                    $job->{timed_out} = 1;
+
                     # Non-blocking timeout escalation:
                     # first tick sends TERM, later tick sends KILL if needed.
                     if (!$job->{term_sent_at}) {
@@ -448,10 +455,34 @@ sub _start_download {
                 return;
             }
 
+            # Capture the child status immediately: later cleanup code may
+            # execute callbacks or other operations that should not be allowed
+            # to obscure the wait status returned by waitpid().
+            my $wait_status = $?;
+            my $timedout    = $job->{timed_out} ? 1 : 0;
+
             eval { $loop->remove($timer) };
             $bot->{_radio_request_download} = {};
 
-            my $exit = $? >> 8;
+            if ($res < 0) {
+                my $wait_error = $! || 'unknown waitpid error';
+                $self->_logger(0, "waitpid failed for yt-dlp pid=$pid: $wait_error");
+                $self->_finish_download(
+                    ctx      => $ctx,
+                    query    => $query,
+                    id_user  => $uid,
+                    stdout   => $stdout,
+                    stderr   => $stderr,
+                    exitcode => 255,
+                    timedout => $timedout,
+                );
+                return;
+            }
+
+            my ($exit, $signal) = _decode_wait_status($wait_status, $timedout);
+            $self->_logger(2, "yt-dlp pid=$pid ended from signal $signal")
+                if $signal && !$timedout;
+
             $self->_finish_download(
                 ctx      => $ctx,
                 query    => $query,
@@ -459,6 +490,7 @@ sub _start_download {
                 stdout   => $stdout,
                 stderr   => $stderr,
                 exitcode => $exit,
+                timedout => $timedout,
             );
         },
     );
@@ -509,6 +541,25 @@ sub _read_file {
     close $fh;
 
     return length($text) > $limit ? substr($text, 0, $limit) : $text;
+}
+
+# Decode Perl's raw child wait status into a conventional exit code.
+# Signal-terminated children encode the signal in the low bits, which means
+# simply shifting by eight incorrectly returns zero. Timeout is represented by
+# 124, matching the conventional `timeout(1)` status.
+sub _decode_wait_status {
+    my ($wait_status, $timedout) = @_;
+
+    $wait_status = 0 unless defined $wait_status;
+    $timedout = $timedout ? 1 : 0;
+
+    my $signal   = $wait_status & 127;
+    my $exitcode = $wait_status >> 8;
+
+    return (124, $signal) if $timedout;
+    return (128 + $signal, $signal) if $signal;
+
+    return ($exitcode, 0);
 }
 
 sub _info_json_path_for_mp3 {
