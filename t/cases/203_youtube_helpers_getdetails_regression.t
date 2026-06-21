@@ -2,7 +2,7 @@
 # =============================================================================
 # Regression checks for YouTube helpers and getYoutubeDetails().
 #
-# youtubeSearch_ctx() uses _yt_format_duration(), so the helper must exist.
+# _youtube_search_format_entry() uses _yt_format_duration(), so the helper must exist.
 # getYoutubeDetails() is used by radio/play helpers and must not blindly
 # dereference malformed YouTube API responses.
 # =============================================================================
@@ -59,8 +59,8 @@ return sub {
 
     $assert->like(
         $src,
-        qr/my\s+\$dur_disp\s+=\s+_yt_format_duration\(\$dur_iso\);/,
-        'youtubeSearch_ctx uses the shared YouTube duration formatter'
+        qr/my\s+\$dur_disp\s*=\s*_yt_format_duration\(\$info->\{duration\}\s*\/\/\s*''\);/,
+        'YouTube search formatter uses the shared duration helper'
     );
 
     my $body = _extract_between_203(

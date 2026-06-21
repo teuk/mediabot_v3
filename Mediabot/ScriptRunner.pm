@@ -966,6 +966,23 @@ sub run_plan {
         }
     }
 
+    # mb315-B1: close any pipe ends still registered in the selector before the
+    # bounded reap loop below. Three paths reach the end of execution and only
+    # two of them released the pipes promptly: the normal completion path closes
+    # child_out/child_err on EOF (read == 0) inside the loop, and the sibling
+    # stdin-timeout path closes them explicitly before its early return. The
+    # read-loop timeout branch, by contrast, breaks out of the loop with both
+    # handles still open and then enters the reap loop, which can sleep up to the
+    # deadline — holding the pipe FDs open the whole time. The lexical handles do
+    # get auto-closed when run_plan() returns (nothing escapes the sub), so this
+    # is not a cross-call descriptor leak; it is a consistency/hygiene fix that
+    # frees the pipes immediately and matches the other two paths instead of
+    # relying on scope-exit GC ordering between $selector and the handles.
+    for my $fh ($selector->handles) {
+        $selector->remove($fh);
+        eval { close $fh; 1; };
+    }
+
     if (!$already_waited) {
         # mb220-B1: bounded reap. A script can close stdout+stderr (which ends
         # the select loop immediately at EOF) yet keep running — e.g. a script

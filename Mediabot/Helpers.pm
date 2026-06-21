@@ -50,6 +50,7 @@ our @EXPORT = qw(
     userCount
     getDetailedVersion
     getVersion
+    getVersion_async
     make_password_hash
     checkAntiFlood
     checkNickFlood
@@ -89,6 +90,7 @@ our @EXPORT = qw(
     getNickInfoWhois
     channelNicksRemove
     whereis
+    whereis_async
     getConsoleChan
     leet
     logBotAction
@@ -1251,20 +1253,34 @@ SQL
 sub versionCheck {
     my ($ctx) = @_;
 
-    my $self = $ctx->bot;
-    my $conf = $self->{conf};
-
-    my ($local_version, $remote_version) = $self->getVersion();
-
+    my $self     = $ctx->bot;
+    my $conf     = $self->{conf};
     my $bot_name = $conf->get('main.MAIN_PROG_NAME');
-    my $sMsg = "$bot_name version: $local_version";
+    my $message  = $ctx->message;
 
-    if ($remote_version ne "Undefined" && $remote_version ne $local_version) {
-        $sMsg .= " (update available: $remote_version)";
-    }
+    # MB317: GitHub/DNS access must not run inside the IRC callback. Capture the
+    # command context now and build the reply when the async worker completes.
+    return getVersion_async(
+        $self,
+        sub {
+            my ($local_version, $remote_version) = @_;
 
-    $ctx->reply($sMsg);
-    logBot($self, $ctx->message, undef, "version", undef);
+            $local_version  = 'Undefined'
+                unless defined($local_version) && !ref($local_version) && $local_version ne '';
+            $remote_version = 'Undefined'
+                unless defined($remote_version) && !ref($remote_version) && $remote_version ne '';
+
+            $self->{main_prog_version} = $local_version;
+
+            my $sMsg = "$bot_name version: $local_version";
+            if ($remote_version ne 'Undefined' && $remote_version ne $local_version) {
+                $sMsg .= " (update available: $remote_version)";
+            }
+
+            $ctx->reply($sMsg);
+            logBot($self, $message, undef, 'version', undef);
+        },
+    );
 }
 
 # 🧙‍♂️ Handle private commands with centralized dispatching and full command set.
@@ -1738,6 +1754,267 @@ sub getVersion {
     return ($local_version, $remote_version);
 }
 
+{
+    package Mediabot::Helpers::_SilentLogger;
+    sub log { return 1 }
+}
+
+# MB317: the public `version` command must not perform GitHub/DNS I/O inside
+# the IRC callback. Keep getVersion() synchronous for startup and explicit
+# callers, but expose a child-backed asynchronous wrapper for runtime commands.
+sub getVersion_async {
+    my ($self, $callback, %opts) = @_;
+
+    return 0 unless ref($callback) eq 'CODE';
+
+    my $timeout = $opts{timeout};
+    $timeout = 7
+        unless defined($timeout)
+            && !ref($timeout)
+            && $timeout =~ /\A\d+(?:\.\d+)?\z/;
+    $timeout = 0.1 if $timeout < 0.1;
+    $timeout = 20  if $timeout > 20;
+
+    my $loop = eval { $self->getLoop };
+    $loop ||= $self->{loop} if ref($self);
+
+    # Compatibility path for startup tests or callers without IO::Async.
+    # It intentionally keeps the historical synchronous behavior only when
+    # no usable event loop exists.
+    unless ($loop && $loop->can('add') && $loop->can('remove')) {
+        my ($local, $remote) = eval { getVersion($self) };
+        $local  = 'Undefined' unless defined($local)  && !ref($local)  && $local ne '';
+        $remote = 'Undefined' unless defined($remote) && !ref($remote) && $remote ne '';
+        eval { $callback->($local, $remote); 1; };
+        return 1;
+    }
+
+    my $child_pid = open(my $pipe, '-|');
+
+    unless (defined $child_pid) {
+        eval { $callback->('Undefined', 'Undefined'); 1; };
+        return 1;
+    }
+
+    if ($child_pid == 0) {
+        # Suppress duplicate version logs from the forked worker and avoid
+        # inherited bot/DB/IRC destructors when the child finishes.
+        local $self->{logger} = bless {}, 'Mediabot::Helpers::_SilentLogger';
+
+        my ($local, $remote) = eval { getVersion($self) };
+        $local  = 'Undefined' unless defined($local)  && !ref($local)  && $local ne '';
+        $remote = 'Undefined' unless defined($remote) && !ref($remote) && $remote ne '';
+        $local  = substr($local,  0, 256);
+        $remote = substr($remote, 0, 256);
+
+        my $payload = eval { encode_json([$local, $remote]) };
+        $payload = '["Undefined","Undefined"]'
+            unless defined($payload) && !ref($payload) && $payload ne '';
+
+        my $offset = 0;
+        local $SIG{PIPE} = 'IGNORE';
+        binmode(STDOUT, ':raw');
+
+        while ($offset < length($payload)) {
+            my $written = syswrite(
+                STDOUT,
+                $payload,
+                length($payload) - $offset,
+                $offset,
+            );
+
+            next if !defined($written) && $!{EINTR};
+            last unless defined($written) && $written > 0;
+            $offset += $written;
+        }
+
+        POSIX::_exit(0);
+    }
+
+    my $state = {
+        output      => '',
+        pipe_eof    => 0,
+        child_done  => 0,
+        finalized   => 0,
+        timed_out   => 0,
+        wait_failed => 0,
+        wait_status => undef,
+        term_sent   => 0,
+        kill_sent   => 0,
+    };
+
+    my ($stream, $timeout_timer, $kill_timer, $reap_timer);
+    my ($finish, $schedule_reap);
+
+    my $remove_timer = sub {
+        my ($timer) = @_;
+        return unless $timer;
+        eval { $timer->stop };
+        eval { $loop->remove($timer) };
+    };
+
+    $finish = sub {
+        return if $state->{finalized};
+        return unless $state->{child_done};
+        return unless $state->{pipe_eof} || $state->{timed_out};
+
+        $state->{finalized} = 1;
+
+        $remove_timer->($timeout_timer);
+        $remove_timer->($kill_timer);
+        $remove_timer->($reap_timer);
+        eval { $loop->remove($stream) } if $stream;
+        eval { close $pipe };
+
+        my ($local, $remote) = ('Undefined', 'Undefined');
+
+        unless ($state->{timed_out} || $state->{wait_failed}) {
+            my $status = $state->{wait_status} // 0;
+            my $signal = $status & 127;
+            my $exit   = ($status >> 8) & 255;
+
+            if (!$signal && $exit == 0) {
+                my $decoded = eval { decode_json($state->{output} // '') };
+                if (!$@ && ref($decoded) eq 'ARRAY' && @$decoded >= 2) {
+                    my ($candidate_local, $candidate_remote) = @$decoded[0, 1];
+                    $local = $candidate_local
+                        if defined($candidate_local)
+                            && !ref($candidate_local)
+                            && $candidate_local ne ''
+                            && length($candidate_local) <= 256;
+                    $remote = $candidate_remote
+                        if defined($candidate_remote)
+                            && !ref($candidate_remote)
+                            && $candidate_remote ne ''
+                            && length($candidate_remote) <= 256;
+                }
+            }
+        }
+
+        my $callback_ok = eval { $callback->($local, $remote); 1; };
+        if (!$callback_ok && $self && $self->{logger}) {
+            my $error = $@ || 'unknown callback failure';
+            $error =~ s/\s+/ /g;
+            $self->{logger}->log(1, "getVersion_async callback failed: $error");
+        }
+
+        $finish        = undef;
+        $schedule_reap = undef;
+    };
+
+    $schedule_reap = sub {
+        return if $state->{finalized} || $state->{child_done};
+        return if $reap_timer;
+
+        $reap_timer = IO::Async::Timer::Countdown->new(
+            delay     => 0.05,
+            on_expire => sub {
+                my $expired = $reap_timer;
+                $reap_timer = undef;
+                $remove_timer->($expired);
+
+                return if $state->{finalized};
+
+                my $waited = waitpid($child_pid, WNOHANG);
+
+                if ($waited == $child_pid) {
+                    $state->{wait_status} = $?;
+                    $state->{child_done}  = 1;
+                    $finish->();
+                    return;
+                }
+
+                if ($waited == -1) {
+                    $state->{wait_failed} = 1;
+                    $state->{child_done}  = 1;
+                    $finish->();
+                    return;
+                }
+
+                $schedule_reap->();
+            },
+        );
+
+        $loop->add($reap_timer);
+        $reap_timer->start;
+    };
+
+    $timeout_timer = IO::Async::Timer::Countdown->new(
+        delay     => $timeout,
+        on_expire => sub {
+            return if $state->{finalized};
+
+            $state->{timed_out} = 1;
+
+            unless ($state->{term_sent}) {
+                kill 'TERM', $child_pid;
+                $state->{term_sent} = 1;
+            }
+
+            $schedule_reap->();
+
+            $kill_timer = IO::Async::Timer::Countdown->new(
+                delay     => 0.2,
+                on_expire => sub {
+                    return if $state->{finalized} || $state->{child_done};
+
+                    my $waited = waitpid($child_pid, WNOHANG);
+
+                    if ($waited == $child_pid) {
+                        $state->{wait_status} = $?;
+                        $state->{child_done}  = 1;
+                        $finish->();
+                        return;
+                    }
+
+                    if ($waited == -1) {
+                        $state->{wait_failed} = 1;
+                        $state->{child_done}  = 1;
+                        $finish->();
+                        return;
+                    }
+
+                    unless ($state->{kill_sent}) {
+                        kill 'KILL', $child_pid;
+                        $state->{kill_sent} = 1;
+                    }
+
+                    $schedule_reap->();
+                },
+            );
+
+            $loop->add($kill_timer);
+            $kill_timer->start;
+        },
+    );
+
+    $loop->add($timeout_timer);
+    $timeout_timer->start;
+
+    $stream = IO::Async::Stream->new(
+        read_handle => $pipe,
+        on_read     => sub {
+            my ($io, $buffref, $eof) = @_;
+
+            if (length $$buffref) {
+                my $remaining = 1024 - length($state->{output});
+                $state->{output} .= substr($$buffref, 0, $remaining)
+                    if $remaining > 0;
+                $$buffref = '';
+            }
+
+            if ($eof && !$state->{pipe_eof}++) {
+                eval { $loop->remove($io) };
+                $schedule_reap->();
+            }
+
+            return 0;
+        },
+    );
+
+    $loop->add($stream);
+    return 1;
+}
 # getDetailedVersion – parses a version string and returns its components
 
 sub getDetailedVersion {
@@ -4055,6 +4332,248 @@ sub whereis {
     return $country ne '' ? $country : 'N/A';
 }
 
+
+# MB316: run the potentially blocking hostname lookup and country.is request in
+# a child process. The parent consumes the tiny result pipe through IO::Async so
+# a slow resolver or remote API cannot freeze IRC processing.
+sub whereis_async {
+    my ($self, $sHostname, $callback, %opts) = @_;
+
+    return 0 unless ref($callback) eq 'CODE';
+
+    my $timeout = $opts{timeout};
+    $timeout = 5
+        unless defined($timeout)
+            && !ref($timeout)
+            && $timeout =~ /\A\d+(?:\.\d+)?\z/;
+    $timeout = 0.1 if $timeout < 0.1;
+    $timeout = 15  if $timeout > 15;
+
+    my $loop = eval { $self->getLoop };
+    $loop ||= $self->{loop} if ref($self) eq 'HASH' || ref($self);
+
+    # Lightweight tests and emergency callers may not have an IO::Async loop.
+    # Keep compatibility without introducing a sleep or an unbounded wait.
+    unless ($loop && $loop->can('add') && $loop->can('remove')) {
+        my $country = whereis($self, $sHostname);
+        $country = 'N/A'
+            unless defined($country) && !ref($country) && $country ne '';
+        eval { $callback->($country); 1; };
+        return 1;
+    }
+
+    my $child_pid = open(my $pipe, '-|');
+
+    unless (defined $child_pid) {
+        eval { $callback->('N/A'); 1; };
+        return 1;
+    }
+
+    if ($child_pid == 0) {
+        # Do not run inherited bot/DB/IRC destructors in the forked child.
+        # The synchronous helper needs no bot state beyond an optional logger.
+        my $country = eval { whereis({}, $sHostname) };
+        $country = 'N/A'
+            unless defined($country) && !ref($country) && $country ne '';
+        $country = substr($country, 0, 128);
+
+        my $payload = Encode::encode('UTF-8', $country);
+        my $offset  = 0;
+        local $SIG{PIPE} = 'IGNORE';
+        binmode(STDOUT, ':raw');
+
+        while ($offset < length($payload)) {
+            my $written = syswrite(
+                STDOUT,
+                $payload,
+                length($payload) - $offset,
+                $offset,
+            );
+
+            next if !defined($written) && $!{EINTR};
+            last unless defined($written) && $written > 0;
+            $offset += $written;
+        }
+
+        POSIX::_exit(0);
+    }
+
+    my $state = {
+        output      => '',
+        pipe_eof    => 0,
+        child_done  => 0,
+        finalized   => 0,
+        timed_out   => 0,
+        wait_failed => 0,
+        wait_status => undef,
+        term_sent   => 0,
+        kill_sent   => 0,
+    };
+
+    my ($stream, $timeout_timer, $kill_timer, $reap_timer);
+    my ($finish, $schedule_reap);
+
+    my $remove_timer = sub {
+        my ($timer) = @_;
+        return unless $timer;
+        eval { $timer->stop };
+        eval { $loop->remove($timer) };
+    };
+
+    $finish = sub {
+        return if $state->{finalized};
+        return unless $state->{child_done};
+        return unless $state->{pipe_eof} || $state->{timed_out};
+
+        $state->{finalized} = 1;
+
+        $remove_timer->($timeout_timer);
+        $remove_timer->($kill_timer);
+        $remove_timer->($reap_timer);
+        eval { $loop->remove($stream) } if $stream;
+        eval { close $pipe };
+
+        my $country = 'N/A';
+
+        unless ($state->{timed_out} || $state->{wait_failed}) {
+            my $status = $state->{wait_status} // 0;
+            my $signal = $status & 127;
+            my $exit   = ($status >> 8) & 255;
+
+            if (!$signal && $exit == 0) {
+                my $candidate = $state->{output} // '';
+                $candidate =~ s/[\r\n]+\z//;
+                $candidate =~ s/^\s+|\s+$//g;
+                $country = $candidate
+                    if $candidate ne '' && length($candidate) <= 128;
+            }
+        }
+
+        my $callback_ok = eval { $callback->($country); 1; };
+        if (!$callback_ok && $self && $self->{logger}) {
+            my $error = $@ || 'unknown callback failure';
+            $error =~ s/\s+/ /g;
+            $self->{logger}->log(1, "whereis_async callback failed: $error");
+        }
+
+        # Break lexical callback cycles after completion.
+        $finish        = undef;
+        $schedule_reap = undef;
+    };
+
+    $schedule_reap = sub {
+        return if $state->{finalized} || $state->{child_done};
+        return if $reap_timer;
+
+        $reap_timer = IO::Async::Timer::Countdown->new(
+            delay     => 0.05,
+            on_expire => sub {
+                my $expired = $reap_timer;
+                $reap_timer = undef;
+                $remove_timer->($expired);
+
+                return if $state->{finalized};
+
+                my $waited = waitpid($child_pid, WNOHANG);
+
+                if ($waited == $child_pid) {
+                    $state->{wait_status} = $?;
+                    $state->{child_done}  = 1;
+                    $finish->();
+                    return;
+                }
+
+                if ($waited == -1) {
+                    $state->{wait_failed} = 1;
+                    $state->{child_done}  = 1;
+                    $finish->();
+                    return;
+                }
+
+                $schedule_reap->();
+            },
+        );
+
+        $loop->add($reap_timer);
+        $reap_timer->start;
+    };
+
+    $timeout_timer = IO::Async::Timer::Countdown->new(
+        delay     => $timeout,
+        on_expire => sub {
+            return if $state->{finalized};
+
+            $state->{timed_out} = 1;
+
+            unless ($state->{term_sent}) {
+                kill 'TERM', $child_pid;
+                $state->{term_sent} = 1;
+            }
+
+            $schedule_reap->();
+
+            $kill_timer = IO::Async::Timer::Countdown->new(
+                delay     => 0.2,
+                on_expire => sub {
+                    return if $state->{finalized} || $state->{child_done};
+
+                    my $waited = waitpid($child_pid, WNOHANG);
+
+                    if ($waited == $child_pid) {
+                        $state->{wait_status} = $?;
+                        $state->{child_done}  = 1;
+                        $finish->();
+                        return;
+                    }
+
+                    if ($waited == -1) {
+                        $state->{wait_failed} = 1;
+                        $state->{child_done}  = 1;
+                        $finish->();
+                        return;
+                    }
+
+                    unless ($state->{kill_sent}) {
+                        kill 'KILL', $child_pid;
+                        $state->{kill_sent} = 1;
+                    }
+
+                    $schedule_reap->();
+                },
+            );
+
+            $loop->add($kill_timer);
+            $kill_timer->start;
+        },
+    );
+
+    $loop->add($timeout_timer);
+    $timeout_timer->start;
+
+    $stream = IO::Async::Stream->new(
+        read_handle => $pipe,
+        on_read     => sub {
+            my ($io, $buffref, $eof) = @_;
+
+            if (length $$buffref) {
+                my $remaining = 256 - length($state->{output});
+                $state->{output} .= substr($$buffref, 0, $remaining)
+                    if $remaining > 0;
+                $$buffref = '';
+            }
+
+            if ($eof && !$state->{pipe_eof}++) {
+                eval { $loop->remove($io) };
+                $schedule_reap->();
+            }
+
+            return 0;
+        },
+    );
+
+    $loop->add($stream);
+    return 1;
+}
 # whereis <nick>
 # Triggers a WHOIS and lets the WHOIS handler call whereis() on the hostname/IP.
 

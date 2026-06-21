@@ -228,6 +228,13 @@ return sub {
 
     # -------------------------------------------------------------------------
     # 12. _log — niveaux symboliques et numériques (C1 regression test)
+    #
+    # MB305: la sévérité symbolique ERROR mappe désormais sur le niveau 0
+    # (toujours visible, même avec MAIN_PROG_DEBUG=0), et non plus sur 1 comme
+    # au temps du fix C1. Un échec de bind ou de provider radio ne doit jamais
+    # être masqué. Comportement faisant foi : t/cases/527_mb305_metrics_log_severity.t
+    # (attendu numérique 0,0,1,2,4 pour ERROR,INFO,WARN,DEBUG,4). Cette assertion
+    # était restée sur l'ancien mapping ERROR→1 et n'avait pas suivi MB305.
     # -------------------------------------------------------------------------
     {
         # Logger qui capture les niveaux reçus via référence
@@ -250,7 +257,7 @@ return sub {
         $assert->ok(scalar(@captured) == 4, '_log: 4 appels capturés');
 
         $assert->is($captured[0]{level}, 0, '_log("INFO") → niveau 0');
-        $assert->is($captured[1]{level}, 1, '_log("ERROR") → niveau 1');
+        $assert->is($captured[1]{level}, 0, '_log("ERROR") → niveau 0 (MB305: toujours visible)');
         $assert->is($captured[2]{level}, 0, '_log(0) → niveau 0 inchangé');
         $assert->is($captured[3]{level}, 1, '_log(1) → niveau 1 inchangé');
     }

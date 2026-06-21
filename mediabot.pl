@@ -2160,21 +2160,31 @@ sub on_message_RPL_WHOISUSER {
         elsif ($WHOIS_VARS{'sub'} eq "mbWhereis") {
                 $mediabot->{logger}->log(4,"WHOIS mbWhereis");
 
-                my $country = $mediabot->whereis($sHostname);
-                $country = 'N/A'
-                    unless defined($country) && !ref($country) && $country ne '';
-
-                # MB314: a private whereis request has no channel. Reply to the
-                # original caller instead of passing undef to botPrivmsg().
-                my $reply_target = defined($WHOIS_VARS{'channel'})
-                                && $WHOIS_VARS{'channel'} ne ''
+                # MB316: capture the request context before starting the
+                # asynchronous DNS/API lookup. WHOIS_VARS is shared mutable state
+                # and may be replaced by a later WHOIS command before the callback.
+                my $whereis_caller = $WHOIS_VARS{'caller'} // '';
+                my $whereis_nick   = $WHOIS_VARS{'nick'}   // $target_name;
+                my $reply_target   = defined($WHOIS_VARS{'channel'})
+                                  && $WHOIS_VARS{'channel'} ne ''
                     ? $WHOIS_VARS{'channel'}
-                    : $WHOIS_VARS{'caller'};
+                    : $whereis_caller;
 
                 if (defined($reply_target) && $reply_target ne '') {
-                    $mediabot->botPrivmsg(
-                        $reply_target,
-                        "($WHOIS_VARS{'caller'} whereis $WHOIS_VARS{'nick'}) Country : $country"
+                    $mediabot->whereis_async(
+                        $sHostname,
+                        sub {
+                            my ($country) = @_;
+                            $country = 'N/A'
+                                unless defined($country)
+                                    && !ref($country)
+                                    && $country ne '';
+
+                            $mediabot->botPrivmsg(
+                                $reply_target,
+                                "($whereis_caller whereis $whereis_nick) Country : $country"
+                            );
+                        },
                     );
                 }
                 else {

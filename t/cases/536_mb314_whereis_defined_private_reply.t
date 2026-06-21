@@ -95,8 +95,8 @@ return sub {
 
     $assert->like(
         $branch // '',
-        qr/my\s+\$reply_target\s*=.*?\?\s*\$WHOIS_VARS\{'channel'\}.*?:\s*\$WHOIS_VARS\{'caller'\}/s,
-        'private whereis replies fall back to the original caller'
+        qr/my\s+\$whereis_caller\s*=\s*\$WHOIS_VARS\{'caller'\}.*?my\s+\$reply_target\s*=.*?\?\s*\$WHOIS_VARS\{'channel'\}.*?:\s*\$whereis_caller/s,
+        'private whereis replies fall back to the captured original caller'
     );
 
     $assert->like(

@@ -26,6 +26,7 @@ our @EXPORT_OK = qw(
     _yt_text
     _yt_sep
     _yt_meta
+    _yt_link
     _yt_format_duration
     _yt_duration_seconds
     _yt_label
@@ -342,13 +343,13 @@ sub displayYoutubeDetails {
     }
 
     # --- Formatage de la durée (PT1H23M45S) ---
-    my $sDisplayDuration = '';
-    my $raw = $sDuration;
-    $raw =~ s/^PT//;
-    if ($raw =~ /(\d+)H/) { $sDisplayDuration .= "${1}h "; }
-    if ($raw =~ /(\d+)M/) { $sDisplayDuration .= "${1}mn "; }
-    if ($raw =~ /(\d+)S/) { $sDisplayDuration .= "${1}s"; }
-    $sDisplayDuration =~ s/\s+$//;
+    # mb315-R1: utilise le helper partagé _yt_format_duration au lieu de re-coder
+    # le parse ISO 8601 à la main. getYoutubeDetails() et youtubeSearch_ctx()
+    # passaient déjà par le helper ; displayYoutubeDetails() était le dernier
+    # chemin à dupliquer la logique (mêmes regex H/M/M/S, même libellé "mn", même
+    # strip final), donc le seul exposé à une divergence future "fix d'un côté,
+    # oublié de l'autre". Sortie identique pour toutes les durées YouTube réelles.
+    my $sDisplayDuration = _yt_format_duration($sDuration);
 
     $self->{logger}->log(4, "displayYoutubeDetails() sDisplayDuration : $sDisplayDuration");
 
@@ -359,8 +360,18 @@ sub displayYoutubeDetails {
     # --- Formatage IRC coloré ---
     my $sMsgSong = _yt_label();
     $sMsgSong   .= _yt_text(" $sTitle ");
-    $sMsgSong   .= _yt_sep("- ");
-    $sMsgSong   .= _yt_meta("$sDisplayDuration ");
+
+    # mb315-R2: n'affiche le bloc durée que si elle est non vide. _yt_format_duration
+    # renvoie '' pour une durée nulle (PT0S), ce que YouTube renvoie pour un live en
+    # cours ou une première. Sans cette garde on obtiendrait un slot vide encadré de
+    # séparateurs orphelins (« Titre -  - views … »). youtubeSearch_ctx() applique
+    # déjà exactement la même garde ; on aligne displayYoutubeDetails() dessus, ce qui
+    # rend l'affichage des lives propre au passage.
+    if (defined $sDisplayDuration && $sDisplayDuration ne '') {
+        $sMsgSong .= _yt_sep("- ");
+        $sMsgSong .= _yt_meta("$sDisplayDuration ");
+    }
+
     $sMsgSong   .= _yt_sep("- ");
     $sMsgSong   .= _yt_meta("$sViewCount ");
     $sMsgSong   .= _yt_sep("- ");
@@ -558,6 +569,17 @@ sub _yt_meta {
 }
 
 
+# MB324: YouTube search URLs use a foreground-only blue plus underline.
+# No background color is set, so the link remains readable on light and dark
+# IRC themes. The final reset clears both color and underline cleanly.
+sub _yt_link {
+    my ($url) = @_;
+    $url = '' unless defined $url;
+
+    return "\x0302\x1F" . $url . "\x0F";
+}
+
+
 sub _yt_format_duration {
     my ($iso) = @_;
 
@@ -660,236 +682,627 @@ sub _is_youtube_url {
 # Parses Instagram page for a title. Instagram's
 # ---------------------------------------------------------------------------
 
-sub youtubeSearch_ctx {
-    my ($ctx) = @_;
+# Parse the YouTube search endpoint without performing network I/O.
+sub _youtube_search_parse_ids {
+    my ($content) = @_;
 
-    my $self    = $ctx->bot;
-    my $message = $ctx->message;
-    my $nick    = $ctx->nick;
-    my $chan    = $ctx->channel;
-    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    return [] unless defined($content) && !ref($content) && $content ne '';
 
-    # Args
-    unless (@args && defined $args[0] && $args[0] ne "") {
-        Mediabot::Helpers::botNotice($self, $nick, "Syntax: yt <search>");
-        return;
+    require JSON::PP;
+    my $data = eval { JSON::PP::decode_json($content) };
+    return [] if $@ || ref($data) ne 'HASH' || ref($data->{items}) ne 'ARRAY';
+
+    my (@ids, %seen);
+    for my $item (@{ $data->{items} }) {
+        next unless ref($item) eq 'HASH' && ref($item->{id}) eq 'HASH';
+
+        my $video_id = $item->{id}{videoId};
+        next unless defined($video_id)
+            && !ref($video_id)
+            && $video_id =~ /\A[A-Za-z0-9_-]{11}\z/;
+        next if $seen{$video_id}++;
+
+        push @ids, $video_id;
+        last if @ids >= 3;
     }
 
-    my $conf   = $self->{conf};
-    my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
+    return \@ids;
+}
 
-    unless (defined($APIKEY) && $APIKEY ne "") {
-        $self->{logger}->log(1, "youtubeSearch_ctx() YOUTUBE_APIKEY not set in " . $self->{config_file});
-        return;
-    }
+# Parse the metadata endpoint and keep only requested video IDs.
+sub _youtube_search_parse_videos {
+    my ($content, $requested_ids) = @_;
 
-    my $query_txt = join(" ", @args);
-    my $q_enc     = uri_escape_utf8($query_txt);
+    return {} unless defined($content) && !ref($content) && $content ne '';
+    return {} unless ref($requested_ids) eq 'ARRAY';
 
-    # ---------- 1) search endpoint: get up to 3 videos ----------
-    my $search_url =
-        "https://www.googleapis.com/youtube/v3/search"
-        . "?part=snippet"
-        . "&type=video"
-        . "&maxResults=3"
-        . "&q=$q_enc"
-        . "&key=$APIKEY"
-        . "&fields=items(id/videoId)";
+    my %wanted = map { $_ => 1 } grep {
+        defined($_) && !ref($_) && /\A[A-Za-z0-9_-]{11}\z/
+    } @$requested_ids;
 
-    my $json_search = '';
-    {
-        my $http_s = Mediabot::External::_make_http(timeout => 10);
-        my $res_s  = eval { $http_s->get($search_url); }
-                  // { success => 0, status => 0, reason => $@ };
-
-        unless ($res_s->{success}) {
-            $self->{logger}->log(
-                2,
-                "youtubeSearch_ctx(): HTTP "
-                . ($res_s->{status} // 0)
-                . " "
-                . ($res_s->{reason} // '')
-                . " for search endpoint"
-            );
-            Mediabot::Helpers::botPrivmsg($self, $chan, "($nick) YouTube: service unavailable (search).");
-            return;
-        }
-
-        $json_search = $res_s->{content} // '';
-        unless ($json_search ne '') {
-            $self->{logger}->log(2, "youtubeSearch_ctx(): empty search response");
-            Mediabot::Helpers::botPrivmsg($self, $chan, "($nick) YouTube: service unavailable (search).");
-            return;
-        }
-    }
-
-    my @video_ids;
-    eval {
-        my $data = decode_json($json_search);
-
-        if (ref($data) eq 'HASH' && ref($data->{items}) eq 'ARRAY') {
-            for my $item (@{ $data->{items} }) {
-                next unless ref($item) eq 'HASH';
-                next unless ref($item->{id}) eq 'HASH';
-
-                my $video_id = $item->{id}{videoId};
-                next unless defined($video_id) && $video_id =~ /^[A-Za-z0-9_-]{11}\z/;
-
-                push @video_ids, $video_id;
-                last if @video_ids >= 3;
-            }
-        }
-
-        1;
-    } or do {
-        $self->{logger}->log(2, "youtubeSearch_ctx(): JSON decode/search parse error: $@");
-        Mediabot::Helpers::botPrivmsg($self, $chan, "($nick) YouTube: no result.");
-        return;
-    };
-
-    unless (@video_ids) {
-        Mediabot::Helpers::botPrivmsg($self, $chan, "($nick) YouTube: no result.");
-        return;
-    }
-
-    # ---------- 2) videos endpoint: fetch metadata for selected IDs ----------
-    my $ids_enc = join(',', @video_ids);
-
-    my $videos_url =
-        "https://www.googleapis.com/youtube/v3/videos"
-        . "?id=$ids_enc"
-        . "&key=$APIKEY"
-        . "&part=snippet,contentDetails,statistics"
-        . "&fields=items(id,snippet/title,snippet/channelTitle,contentDetails/duration,statistics/viewCount)";
-
-    my $json_vid = '';
-    {
-        my $http_v = Mediabot::External::_make_http(timeout => 10);
-        my $res_v  = eval { $http_v->get($videos_url); }
-                  // { success => 0, status => 0, reason => $@ };
-
-        unless ($res_v->{success}) {
-            $self->{logger}->log(
-                2,
-                "youtubeSearch_ctx(): HTTP "
-                . ($res_v->{status} // 0)
-                . " "
-                . ($res_v->{reason} // '')
-                . " for videos endpoint"
-            );
-            Mediabot::Helpers::botPrivmsg($self, $chan, "($nick) https://www.youtube.com/watch?v=$video_ids[0]");
-            return;
-        }
-
-        $json_vid = $res_v->{content} // '';
-        unless ($json_vid ne '') {
-            $self->{logger}->log(2, "youtubeSearch_ctx(): empty videos response");
-            Mediabot::Helpers::botPrivmsg($self, $chan, "($nick) https://www.youtube.com/watch?v=$video_ids[0]");
-            return;
-        }
-    }
+    require JSON::PP;
+    my $data = eval { JSON::PP::decode_json($content) };
+    return {} if $@ || ref($data) ne 'HASH' || ref($data->{items}) ne 'ARRAY';
 
     my %video_by_id;
-    eval {
-        my $data = decode_json($json_vid);
+    for my $item (@{ $data->{items} }) {
+        next unless ref($item) eq 'HASH';
 
-        if (ref($data) eq 'HASH' && ref($data->{items}) eq 'ARRAY') {
-            for my $it (@{ $data->{items} }) {
-                next unless ref($it) eq 'HASH';
+        my $id = $item->{id};
+        next unless defined($id) && !ref($id) && $wanted{$id};
 
-                my $id = $it->{id};
-                next unless defined($id) && $id ne '';
+        my $snippet = ref($item->{snippet})        eq 'HASH' ? $item->{snippet}        : {};
+        my $details = ref($item->{contentDetails}) eq 'HASH' ? $item->{contentDetails} : {};
+        my $stats   = ref($item->{statistics})     eq 'HASH' ? $item->{statistics}     : {};
 
-                my $snippet = ref($it->{snippet})        eq 'HASH' ? $it->{snippet}        : {};
-                my $details = ref($it->{contentDetails}) eq 'HASH' ? $it->{contentDetails} : {};
-                my $stats   = ref($it->{statistics})     eq 'HASH' ? $it->{statistics}     : {};
+        my $title = $snippet->{title};
+        $title = '' unless defined($title) && !ref($title);
 
-                $video_by_id{$id} = {
-                    title         => $snippet->{title}        // '',
-                    channel_title => $snippet->{channelTitle} // '',
-                    duration      => $details->{duration}     // '',
-                    views         => $stats->{viewCount}      // '',
+        my $channel_title = $snippet->{channelTitle};
+        $channel_title = '' unless defined($channel_title) && !ref($channel_title);
+
+        my $duration = $details->{duration};
+        $duration = '' unless defined($duration) && !ref($duration);
+
+        my $views = $stats->{viewCount};
+        $views = '' unless defined($views) && !ref($views) && $views =~ /\A\d+\z/;
+
+        $video_by_id{$id} = {
+            id            => $id,
+            title         => $title,
+            channel_title => $channel_title,
+            duration      => $duration,
+            views         => $views,
+        };
+    }
+
+    return \%video_by_id;
+}
+
+# Perform both YouTube API calls synchronously. Runtime commands invoke this
+# helper only inside _youtube_search_fetch_async().
+sub _youtube_search_fetch_sync {
+    my ($api_key, $query_txt) = @_;
+
+    return { ok => 0, status => 'invalid_request' }
+        unless defined($api_key) && !ref($api_key) && $api_key ne ''
+            && defined($query_txt) && !ref($query_txt) && $query_txt ne '';
+
+    my $q_enc = uri_escape_utf8($query_txt);
+    my $search_url =
+        'https://www.googleapis.com/youtube/v3/search'
+        . '?part=snippet'
+        . '&type=video'
+        . '&maxResults=3'
+        . "&q=$q_enc"
+        . "&key=$api_key"
+        . '&fields=items(id/videoId)';
+
+    my $http_s = Mediabot::External::_make_http(
+        timeout  => 10,
+        max_size => 256 * 1024,
+    );
+    my $res_s = eval { $http_s->get($search_url) }
+        // { success => 0, status => 0, reason => $@ };
+
+    unless (ref($res_s) eq 'HASH' && $res_s->{success}) {
+        return {
+            ok     => 0,
+            status => 'search_unavailable',
+            detail => join(' ', grep { defined($_) && $_ ne '' }
+                ($res_s->{status} // 0, $res_s->{reason} // '')),
+        };
+    }
+
+    my $video_ids = _youtube_search_parse_ids($res_s->{content} // '');
+    return { ok => 0, status => 'no_result' }
+        unless @$video_ids;
+
+    my $ids_enc = join(',', @$video_ids);
+    my $videos_url =
+        'https://www.googleapis.com/youtube/v3/videos'
+        . "?id=$ids_enc"
+        . "&key=$api_key"
+        . '&part=snippet,contentDetails,statistics'
+        . '&fields=items(id,snippet/title,snippet/channelTitle,contentDetails/duration,statistics/viewCount)';
+
+    my $http_v = Mediabot::External::_make_http(
+        timeout  => 10,
+        max_size => 512 * 1024,
+    );
+    my $res_v = eval { $http_v->get($videos_url) }
+        // { success => 0, status => 0, reason => $@ };
+
+    unless (ref($res_v) eq 'HASH' && $res_v->{success}) {
+        return {
+            ok           => 0,
+            status       => 'metadata_unavailable',
+            fallback_url => "https://www.youtube.com/watch?v=$video_ids->[0]",
+            detail       => join(' ', grep { defined($_) && $_ ne '' }
+                ($res_v->{status} // 0, $res_v->{reason} // '')),
+        };
+    }
+
+    my $video_by_id = _youtube_search_parse_videos(
+        $res_v->{content} // '',
+        $video_ids,
+    );
+
+    my @entries = map { $video_by_id->{$_} }
+        grep { ref($video_by_id->{$_}) eq 'HASH' }
+        @$video_ids;
+
+    return {
+        ok           => 0,
+        status       => 'metadata_unavailable',
+        fallback_url => "https://www.youtube.com/watch?v=$video_ids->[0]",
+        detail       => 'no usable metadata returned',
+    } unless @entries;
+
+    return {
+        ok      => 1,
+        status  => 'ok',
+        entries => \@entries,
+    };
+}
+
+# MB320: the public YouTube search command must not perform two sequential
+# Google API requests inside the IRC event loop. Run the blocking work in a
+# child, consume a bounded JSON result asynchronously, and invoke the callback
+# exactly once.
+sub _youtube_search_fetch_async {
+    my ($self, $api_key, $query_txt, $callback, %opts) = @_;
+
+    return 0 unless ref($callback) eq 'CODE';
+
+    my $timeout = $opts{timeout};
+    $timeout = 22
+        unless defined($timeout)
+            && !ref($timeout)
+            && $timeout =~ /\A\d+(?:\.\d+)?\z/;
+    $timeout = 0.1 if $timeout < 0.1;
+    $timeout = 30  if $timeout > 30;
+
+    my $loop = eval { $self->getLoop };
+    $loop ||= $self->{loop} if ref($self);
+
+    my $fallback = { ok => 0, status => 'worker_failed' };
+
+    unless ($loop && $loop->can('add') && $loop->can('remove')) {
+        my $result = eval { _youtube_search_fetch_sync($api_key, $query_txt) };
+        $result = $fallback unless ref($result) eq 'HASH';
+        eval { $callback->($result); 1 };
+        return 1;
+    }
+
+    # MB321: IO::Async owns SIGCHLD/process collection. Register the child with
+    # watch_process() instead of polling waitpid() ourselves; otherwise the
+    # loop and this helper can race to reap the same PID and turn a successful
+    # worker into an immediate, detail-free worker_failed result.
+    unless ($loop->can('watch_process')) {
+        my $result = {
+            ok     => 0,
+            status => 'worker_setup_failed',
+            detail => 'IO::Async loop does not support watch_process',
+        };
+        eval { $callback->($result); 1 };
+        return 1;
+    }
+
+    require IO::Async::Stream;
+    require IO::Async::Timer::Countdown;
+    require JSON::PP;
+    require POSIX;
+
+    my $child_pid = open(my $pipe, '-|');
+
+    unless (defined $child_pid) {
+        my $detail = $! || 'fork/pipe setup failed';
+        eval {
+            $callback->({
+                ok     => 0,
+                status => 'worker_setup_failed',
+                detail => "$detail",
+            });
+            1;
+        };
+        return 1;
+    }
+
+    if ($child_pid == 0) {
+        my $result = eval { _youtube_search_fetch_sync($api_key, $query_txt) };
+        if ($@) {
+            my $error = $@;
+            $error =~ s/\s+/ /g;
+            $result = {
+                ok     => 0,
+                status => 'worker_exception',
+                detail => $error,
+            };
+        }
+        $result = $fallback unless ref($result) eq 'HASH';
+
+        my $payload = eval { JSON::PP::encode_json($result) };
+        if (!defined($payload) || ref($payload) || $payload eq '') {
+            my $error = $@ || 'JSON encoding failed';
+            $error =~ s/\s+/ /g;
+            $payload = JSON::PP::encode_json({
+                ok     => 0,
+                status => 'worker_encode_failed',
+                detail => $error,
+            });
+        }
+        $payload = JSON::PP::encode_json({
+            ok     => 0,
+            status => 'worker_payload_too_large',
+            detail => 'worker payload exceeded 64 KiB',
+        }) if length($payload) > 64 * 1024;
+
+        my $offset = 0;
+        local $SIG{PIPE} = 'IGNORE';
+        binmode(STDOUT, ':raw');
+
+        while ($offset < length($payload)) {
+            my $written = syswrite(
+                STDOUT,
+                $payload,
+                length($payload) - $offset,
+                $offset,
+            );
+
+            next if !defined($written) && $!{EINTR};
+            last unless defined($written) && $written > 0;
+            $offset += $written;
+        }
+
+        POSIX::_exit(0);
+    }
+
+    my $state = {
+        output      => '',
+        pipe_eof    => 0,
+        child_done  => 0,
+        finalized   => 0,
+        timed_out   => 0,
+        wait_status => undef,
+        term_sent   => 0,
+        kill_sent   => 0,
+    };
+
+    my ($stream, $timeout_timer, $kill_timer);
+    my $finish;
+
+    my $remove_timer = sub {
+        my ($timer) = @_;
+        return unless $timer;
+        eval { $timer->stop };
+        eval { $loop->remove($timer) };
+    };
+
+    $finish = sub {
+        return if $state->{finalized};
+        return unless $state->{child_done};
+        return unless $state->{pipe_eof} || $state->{timed_out};
+
+        $state->{finalized} = 1;
+
+        $remove_timer->($timeout_timer);
+        $remove_timer->($kill_timer);
+        eval { $loop->remove($stream) } if $stream;
+        eval { close $pipe };
+
+        my $result = $fallback;
+        my $status = $state->{wait_status} // 0;
+        my $signal = $status & 127;
+        my $exit   = ($status >> 8) & 255;
+
+        if ($state->{timed_out}) {
+            $result = {
+                ok     => 0,
+                status => 'worker_timeout',
+                detail => "YouTube worker timed out (exit=$exit signal=$signal)",
+            };
+        }
+        elsif ($signal || $exit != 0) {
+            $result = {
+                ok     => 0,
+                status => 'worker_failed',
+                detail => "YouTube worker exited abnormally (exit=$exit signal=$signal)",
+            };
+        }
+        else {
+            my $decoded = eval {
+                JSON::PP::decode_json($state->{output} // '')
+            };
+
+            if (!$@ && ref($decoded) eq 'HASH'
+                    && defined($decoded->{status})
+                    && !ref($decoded->{status})) {
+                $result = $decoded;
+            }
+            else {
+                my $error = $@ || 'invalid or empty worker payload';
+                $error =~ s/\s+/ /g;
+                $result = {
+                    ok     => 0,
+                    status => 'worker_decode_failed',
+                    detail => $error,
                 };
             }
         }
 
-        1;
-    } or do {
-        $self->{logger}->log(2, "youtubeSearch_ctx(): JSON decode/videos parse error: $@");
-        Mediabot::Helpers::botPrivmsg($self, $chan, "($nick) https://www.youtube.com/watch?v=$video_ids[0]");
-        return;
+        my $callback_ok = eval { $callback->($result); 1 };
+        if (!$callback_ok && $self && ref($self) && $self->{logger}) {
+            my $error = $@ || 'unknown callback failure';
+            $error =~ s/\s+/ /g;
+            $self->{logger}->log(1, "YouTube search async callback failed: $error");
+        }
+
+        $finish = undef;
     };
 
-    my @entries;
+    my $watch_ok = eval {
+        $loop->watch_process(
+            $child_pid,
+            sub {
+                my ($pid, $wait_status) = @_;
+                return if $state->{finalized};
+                return unless defined($pid) && $pid == $child_pid;
 
-    for my $video_id (@video_ids) {
-        my $info = $video_by_id{$video_id};
-        next unless ref($info) eq 'HASH';
+                $state->{wait_status} = $wait_status;
+                $state->{child_done}  = 1;
+                $finish->();
+            },
+        );
+        1;
+    };
 
-        my $title         = $info->{title}         // '';
-        my $channel_title = $info->{channel_title} // '';
-        my $dur_iso       = $info->{duration}      // '';
-        my $views         = $info->{views}         // '';
+    unless ($watch_ok) {
+        my $error = $@ || 'watch_process registration failed';
+        $error =~ s/\s+/ /g;
 
-        if (($title         =~ tr/A-Z//) > 20) { $title         = ucfirst(lc($title)); }
-        if (($channel_title =~ tr/A-Z//) > 20) { $channel_title = ucfirst(lc($channel_title)); }
-
-        my $dur_disp   = _yt_format_duration($dur_iso);
-        # BB4: human-readable view count (same as Z5 for displayYoutubeDetails)
-        my $views_disp = do {
-            if ($views ne '' && $views =~ /^(\d+)$/) {
-                my $v = $1;
-                'views ' . ($v >= 1_000_000 ? sprintf('%.1fM', $v/1_000_000)
-                         : $v >= 1_000     ? sprintf('%.1fk', $v/1_000)
-                         :                   $v);
-            } else { 'views ?' }
+        kill 'TERM', $child_pid;
+        eval { close $pipe };
+        eval {
+            $callback->({
+                ok     => 0,
+                status => 'worker_setup_failed',
+                detail => $error,
+            });
+            1;
         };
-        my $url        = "https://www.youtube.com/watch?v=$video_id";
-
-        my $entry = _yt_text(" $title ");
-
-        if ($dur_disp ne '') {
-            $entry .= _yt_sep("- ");
-            $entry .= _yt_meta("$dur_disp ");
-        }
-
-        $entry .= _yt_sep("- ");
-        $entry .= _yt_meta("$views_disp ");
-
-        if ($channel_title ne '') {
-            $entry .= _yt_sep("- ");
-            $entry .= _yt_meta("by $channel_title ");
-        }
-
-        $entry .= _yt_sep("- ");
-        $entry .= _yt_meta($url);
-
-        push @entries, $entry;
-        last if @entries >= 3;
+        return 1;
     }
 
-    unless (@entries) {
-        Mediabot::Helpers::botPrivmsg($self, $chan, "($nick) YouTube: no result.");
-        return;
-    }
+    $timeout_timer = IO::Async::Timer::Countdown->new(
+        delay     => $timeout,
+        on_expire => sub {
+            return if $state->{finalized} || $state->{child_done};
 
-    # ---------- output: same colors as displayYoutubeDetails(), one visible line per result ----------
-    for my $i (0 .. $#entries) {
-        my $rank = $i + 1;
-        my $msg  = _yt_label();
-        $msg    .= _yt_sep(" $rank/" . scalar(@entries) . " ");
-        $msg    .= $entries[$i];
+            $state->{timed_out} = 1;
 
-        $msg =~ s/\r|\n//g;
+            unless ($state->{term_sent}) {
+                kill 'TERM', $child_pid;
+                $state->{term_sent} = 1;
+            }
 
-        Mediabot::Helpers::botPrivmsg($self, $chan, "($nick) $msg");
-    }
+            $kill_timer = IO::Async::Timer::Countdown->new(
+                delay     => 0.5,
+                on_expire => sub {
+                    return if $state->{finalized} || $state->{child_done};
 
-    Mediabot::Helpers::logBot($self, $message, $chan, "yt", $query_txt);
+                    unless ($state->{kill_sent}) {
+                        kill 'KILL', $child_pid;
+                        $state->{kill_sent} = 1;
+                    }
+                },
+            );
 
+            $loop->add($kill_timer);
+            $kill_timer->start;
+        },
+    );
+
+    $loop->add($timeout_timer);
+    $timeout_timer->start;
+
+    $stream = IO::Async::Stream->new(
+        read_handle => $pipe,
+        on_read     => sub {
+            my ($io, $buffref, $eof) = @_;
+
+            if (length $$buffref) {
+                my $remaining = (64 * 1024) - length($state->{output});
+                $state->{output} .= substr($$buffref, 0, $remaining)
+                    if $remaining > 0;
+                $$buffref = '';
+            }
+
+            if ($eof && !$state->{pipe_eof}++) {
+                eval { $loop->remove($io) };
+                $finish->();
+            }
+
+            return 0;
+        },
+    );
+
+    $loop->add($stream);
     return 1;
 }
 
+sub _youtube_search_format_entry {
+    my ($info) = @_;
+    return '' unless ref($info) eq 'HASH';
+
+    my $video_id = $info->{id};
+    return '' unless defined($video_id)
+        && !ref($video_id)
+        && $video_id =~ /\A[A-Za-z0-9_-]{11}\z/;
+
+    my $title = $info->{title};
+    $title = '' unless defined($title) && !ref($title);
+
+    my $channel_title = $info->{channel_title};
+    $channel_title = '' unless defined($channel_title) && !ref($channel_title);
+
+    if (($title =~ tr/A-Z//) > 20) {
+        $title = ucfirst(lc($title));
+    }
+    if (($channel_title =~ tr/A-Z//) > 20) {
+        $channel_title = ucfirst(lc($channel_title));
+    }
+
+    my $dur_disp = _yt_format_duration($info->{duration} // '');
+    my $views = $info->{views};
+    my $views_disp = 'views ?';
+    if (defined($views) && !ref($views) && $views =~ /\A\d+\z/) {
+        $views_disp = 'views ' . (
+            $views >= 1_000_000 ? sprintf('%.1fM', $views / 1_000_000)
+          : $views >= 1_000     ? sprintf('%.1fk', $views / 1_000)
+          :                       $views
+        );
+    }
+
+    my $entry = _yt_text(" $title ");
+
+    if ($dur_disp ne '') {
+        $entry .= _yt_sep('- ');
+        $entry .= _yt_meta("$dur_disp ");
+    }
+
+    $entry .= _yt_sep('- ');
+    $entry .= _yt_meta("$views_disp ");
+
+    if ($channel_title ne '') {
+        $entry .= _yt_sep('- ');
+        $entry .= _yt_meta("by $channel_title ");
+    }
+
+    $entry .= _yt_sep('- ');
+    $entry .= _yt_link("https://www.youtube.com/watch?v=$video_id");
+
+    $entry =~ s/[\r\n]+//g;
+    return $entry;
+}
+
+sub youtubeSearch_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    unless (@args && defined($args[0]) && $args[0] ne '') {
+        $ctx->reply_private('Syntax: yt <search>');
+        return;
+    }
+
+    my $api_key = $self->{conf}->get('main.YOUTUBE_APIKEY');
+    unless (defined($api_key) && $api_key ne '') {
+        $self->{logger}->log(
+            1,
+            'youtubeSearch_ctx() YOUTUBE_APIKEY not set in '
+                . $self->{config_file},
+        );
+        $ctx->reply_private('YouTube: API key is not configured.');
+        return;
+    }
+
+    my $query_txt   = join(' ', @args);
+    my $log_message = $ctx->message;
+    my $log_channel = $ctx->channel // $nick // '';
+
+    # MB323: restore the proven synchronous transport after the MB320/MB321
+    # worker regression, and keep the MB320 parsers, size caps, formatting,
+    # Context routing and defensive result validation.
+    my $result = eval {
+        _youtube_search_fetch_sync($api_key, $query_txt)
+    };
+
+    if ($@) {
+        my $error = $@;
+        $error =~ s/\s+/ /g;
+        $result = {
+            ok     => 0,
+            status => 'search_exception',
+            detail => $error,
+        };
+    }
+
+    unless (ref($result) eq 'HASH') {
+        $result = {
+            ok     => 0,
+            status => 'search_failed',
+            detail => 'invalid search helper result',
+        };
+    }
+
+    my $status = $result->{status} // 'search_failed';
+    my $detail = $result->{detail};
+    if (defined($detail) && !ref($detail) && $detail ne ''
+            && $self->{logger}) {
+        $detail =~ s/\s+/ /g;
+        $self->{logger}->log(
+            2,
+            "youtubeSearch_ctx(): $status: $detail",
+        );
+    }
+
+    if (!$result->{ok}) {
+        if ($status eq 'no_result') {
+            $ctx->reply("($nick) YouTube: no result.");
+            return 1;
+        }
+
+        my $fallback_url = $result->{fallback_url};
+        if (defined($fallback_url)
+                && !ref($fallback_url)
+                && $fallback_url =~ m{\Ahttps://www\.youtube\.com/watch\?v=[A-Za-z0-9_-]{11}\z}) {
+            $ctx->reply("($nick) $fallback_url");
+            return 1;
+        }
+
+        $ctx->reply("($nick) YouTube: service unavailable (search).");
+        return 1;
+    }
+
+    my $entries = $result->{entries};
+    unless (ref($entries) eq 'ARRAY') {
+        $ctx->reply("($nick) YouTube: no result.");
+        return 1;
+    }
+
+    my @formatted;
+    for my $info (@$entries) {
+        my $entry = _youtube_search_format_entry($info);
+        push @formatted, $entry if $entry ne '';
+        last if @formatted >= 3;
+    }
+
+    unless (@formatted) {
+        $ctx->reply("($nick) YouTube: no result.");
+        return 1;
+    }
+
+    for my $i (0 .. $#formatted) {
+        my $rank = $i + 1;
+        my $msg  = _yt_label();
+        $msg    .= _yt_sep(' ' . $rank . '/' . scalar(@formatted) . ' ');
+        $msg    .= $formatted[$i];
+        $ctx->reply("($nick) $msg");
+    }
+
+    Mediabot::Helpers::logBot(
+        $self,
+        $log_message,
+        $log_channel,
+        'yt',
+        $query_txt,
+    );
+
+    return 1;
+}
 
 # Return the Fortnite account id stored for a Mediabot user nickname.
 # This is used by fortniteStats_ctx() before calling fortnite-api.com.

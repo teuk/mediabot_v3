@@ -2,7 +2,9 @@ package Mediabot;
  
 use strict;
 use warnings;
-use diagnostics;
+# mb315-C1: 'use diagnostics' retiré. Pragma de debug coûteux en prod (charge
+# tout perldiag, verbeux sur chaque warning) ; t/test_commands.pl le désactivait
+# déjà explicitement après chargement. strict + warnings ci-dessus suffisent.
 use Mediabot::Auth;
 use Mediabot::User;
 use Mediabot::Channel;
@@ -28,7 +30,8 @@ use Time::HiRes qw(usleep);
 use Config::Simple;
 use Date::Parse;
 use DBI;
-use Switch;
+# mb315-C2: 'use Switch' retiré. Aucun bloc switch/case dans le module ; Switch
+# est un source-filter déprécié (risque de parsing) chargé pour rien.
 use IO::Async::Timer::Periodic;
 use IO::Async::Timer::Countdown;
 use String::IRC;
@@ -43,7 +46,11 @@ use HTML::Entities '%entity2char';
 #use MP3::Tag;
 use File::Basename;
 use Encode;
-use Moose;
+# mb315-C3: 'use Moose' retiré. L'objet Mediabot est construit par bless manuel
+# (sub new) ; aucun keyword Moose (has/extends/with/before/after/around/meta) ni
+# méthode Moose::Object n'est utilisé. blessed/confess ne sont pas appelés ici, et
+# croak vient de Carp (importé plus bas). Retire l'arbre de deps Moose et accélère
+# le démarrage du bot.
 use Hailo;
 use Socket;
 use JSON::MaybeXS;

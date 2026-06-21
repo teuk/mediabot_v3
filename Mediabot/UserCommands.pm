@@ -6321,58 +6321,802 @@ sub mbMonthStats_ctx {
 }
 
 # ---------------------------------------------------------------------------
+# _define_pick_entry($data, $preferred_lang)
+# Select a usable Wiktionary entry deterministically. The REST response is a
+# hash keyed by language; using `values %$data` made the chosen language depend
+# on Perl hash order whenever several language blocks were returned.
+# ---------------------------------------------------------------------------
+sub _define_pick_entry {
+    my ($data, $preferred_lang) = @_;
+
+    return unless ref($data) eq 'HASH';
+
+    my @keys;
+    if (defined($preferred_lang)
+            && !ref($preferred_lang)
+            && exists $data->{$preferred_lang}) {
+        push @keys, $preferred_lang;
+    }
+
+    push @keys, grep {
+        !defined($preferred_lang) || $_ ne $preferred_lang
+    } sort keys %$data;
+
+    for my $lang_key (@keys) {
+        my $entries = $data->{$lang_key};
+        next unless ref($entries) eq 'ARRAY';
+
+        for my $entry (@$entries) {
+            next unless ref($entry) eq 'HASH';
+
+            my $definitions = $entry->{definitions};
+            next unless ref($definitions) eq 'ARRAY';
+
+            for my $definition (@$definitions) {
+                next unless ref($definition) eq 'HASH';
+
+                my $text = $definition->{definition};
+                next unless defined($text) && !ref($text) && $text ne '';
+
+                return ($entry, $text, $lang_key);
+            }
+        }
+    }
+
+    return;
+}
+
+# Perform the existing Wiktionary lookup synchronously. Runtime IRC commands
+# call it only from _define_lookup_async(); the synchronous form remains useful
+# for lightweight tests and callers without a usable IO::Async loop.
+sub _define_lookup_sync {
+    my ($self, $word, $lang) = @_;
+
+    return 'define: invalid lookup.'
+        unless defined($word) && !ref($word) && $word ne '';
+
+    $lang = 'en'
+        unless defined($lang) && !ref($lang) && $lang =~ /\A[a-z]{2,5}\z/;
+
+    require URI::Escape;
+    my $encoded = URI::Escape::uri_escape_utf8($word);
+    my $url = "https://$lang.wiktionary.org/api/rest_v1/page/definition/$encoded";
+
+    my $http = Mediabot::External::_make_http(
+        timeout    => 8,
+        verify_SSL => 1,
+        max_size   => 512 * 1024,
+    );
+
+    my $res = eval {
+        $http->get($url, { headers => { Accept => 'application/json' } });
+    } // { success => 0 };
+
+    return "define: could not fetch definition for '$word'."
+        unless ref($res) eq 'HASH' && $res->{success};
+
+    require JSON;
+    my $data = eval { JSON::decode_json($res->{content} // '') };
+
+    return "define: no result for '$word'."
+        if $@ || ref($data) ne 'HASH';
+
+    my ($entry, $first_def, $entry_lang) = _define_pick_entry($data, $lang);
+
+    return "define: no definition found for '$word' in $lang.wiktionary."
+        unless $entry && defined($first_def);
+
+    my $pos = $entry->{partOfSpeech};
+    $pos = '' unless defined($pos) && !ref($pos);
+    $pos =~ s/^\s+|\s+$//g;
+
+    $first_def =~ s/<[^>]+>//g;
+
+    require HTML::Entities;
+    $first_def = HTML::Entities::decode_entities($first_def);
+    $first_def =~ s/[\r\n\t]+/ /g;
+    $first_def =~ s/\s{2,}/ /g;
+    $first_def =~ s/^\s+|\s+$//g;
+    $first_def = substr($first_def, 0, 300) . '...'
+        if length($first_def) > 300;
+
+    return "define: no definition found for '$word' in $lang.wiktionary."
+        if $first_def eq '';
+
+    $entry_lang = $lang
+        unless defined($entry_lang) && !ref($entry_lang) && $entry_lang ne '';
+
+    my $lang_tag = $entry_lang ne 'en' ? " [$entry_lang]" : '';
+    my $pos_tag  = $pos ne '' ? " ($pos)" : '';
+
+    return "$word$lang_tag$pos_tag: $first_def";
+}
+
+# MB318: Wiktionary HTTP and DNS work must not run in the IRC event loop.
+# Execute the existing synchronous lookup in a forked child and consume its
+# bounded result through IO::Async.
+sub _define_lookup_async {
+    my ($self, $word, $lang, $callback, %opts) = @_;
+
+    return 0 unless ref($callback) eq 'CODE';
+
+    my $timeout = $opts{timeout};
+    $timeout = 10
+        unless defined($timeout)
+            && !ref($timeout)
+            && $timeout =~ /\A\d+(?:\.\d+)?\z/;
+    $timeout = 0.1 if $timeout < 0.1;
+    $timeout = 20  if $timeout > 20;
+
+    my $loop = eval { $self->getLoop };
+    $loop ||= $self->{loop} if ref($self);
+
+    my $fallback = "define: could not fetch definition for '$word'.";
+
+    # Compatibility path for lightweight tests or emergency callers without a
+    # usable IO::Async loop. The normal runtime path always uses the child.
+    unless ($loop && $loop->can('add') && $loop->can('remove')) {
+        my $message = eval { _define_lookup_sync($self, $word, $lang) };
+        $message = $fallback
+            unless defined($message) && !ref($message) && $message ne '';
+        eval { $callback->($message); 1; };
+        return 1;
+    }
+
+    require IO::Async::Stream;
+    require IO::Async::Timer::Countdown;
+    require JSON::PP;
+
+    my $child_pid = open(my $pipe, '-|');
+
+    unless (defined $child_pid) {
+        eval { $callback->($fallback); 1; };
+        return 1;
+    }
+
+    if ($child_pid == 0) {
+        my $message = eval { _define_lookup_sync({}, $word, $lang) };
+        $message = $fallback
+            unless defined($message) && !ref($message) && $message ne '';
+        $message = substr($message, 0, 1024);
+
+        my $payload = eval { JSON::PP::encode_json({ message => $message }) };
+        $payload = JSON::PP::encode_json({ message => $fallback })
+            unless defined($payload) && !ref($payload) && $payload ne '';
+
+        my $offset = 0;
+        local $SIG{PIPE} = 'IGNORE';
+        binmode(STDOUT, ':raw');
+
+        while ($offset < length($payload)) {
+            my $written = syswrite(
+                STDOUT,
+                $payload,
+                length($payload) - $offset,
+                $offset,
+            );
+
+            next if !defined($written) && $!{EINTR};
+            last unless defined($written) && $written > 0;
+            $offset += $written;
+        }
+
+        POSIX::_exit(0);
+    }
+
+    my $state = {
+        output      => '',
+        pipe_eof    => 0,
+        child_done  => 0,
+        finalized   => 0,
+        timed_out   => 0,
+        wait_failed => 0,
+        wait_status => undef,
+        term_sent   => 0,
+        kill_sent   => 0,
+    };
+
+    my ($stream, $timeout_timer, $kill_timer, $reap_timer);
+    my ($finish, $schedule_reap);
+
+    my $remove_timer = sub {
+        my ($timer) = @_;
+        return unless $timer;
+        eval { $timer->stop };
+        eval { $loop->remove($timer) };
+    };
+
+    $finish = sub {
+        return if $state->{finalized};
+        return unless $state->{child_done};
+        return unless $state->{pipe_eof} || $state->{timed_out};
+
+        $state->{finalized} = 1;
+
+        $remove_timer->($timeout_timer);
+        $remove_timer->($kill_timer);
+        $remove_timer->($reap_timer);
+        eval { $loop->remove($stream) } if $stream;
+        eval { close $pipe };
+
+        my $message = $fallback;
+
+        unless ($state->{timed_out} || $state->{wait_failed}) {
+            my $status = $state->{wait_status} // 0;
+            my $signal = $status & 127;
+            my $exit   = ($status >> 8) & 255;
+
+            if (!$signal && $exit == 0) {
+                my $decoded = eval { JSON::PP::decode_json($state->{output} // '') };
+                if (!$@ && ref($decoded) eq 'HASH') {
+                    my $candidate = $decoded->{message};
+                    $message = $candidate
+                        if defined($candidate)
+                            && !ref($candidate)
+                            && $candidate ne ''
+                            && length($candidate) <= 1024;
+                }
+            }
+        }
+
+        my $callback_ok = eval { $callback->($message); 1; };
+        if (!$callback_ok && $self && ref($self) && $self->{logger}) {
+            my $error = $@ || 'unknown callback failure';
+            $error =~ s/\s+/ /g;
+            $self->{logger}->log(1, "define async callback failed: $error");
+        }
+
+        $finish        = undef;
+        $schedule_reap = undef;
+    };
+
+    $schedule_reap = sub {
+        return if $state->{finalized} || $state->{child_done};
+        return if $reap_timer;
+
+        $reap_timer = IO::Async::Timer::Countdown->new(
+            delay     => 0.05,
+            on_expire => sub {
+                my $expired = $reap_timer;
+                $reap_timer = undef;
+                $remove_timer->($expired);
+
+                return if $state->{finalized};
+
+                my $waited = waitpid($child_pid, POSIX::WNOHANG());
+
+                if ($waited == $child_pid) {
+                    $state->{wait_status} = $?;
+                    $state->{child_done}  = 1;
+                    $finish->();
+                    return;
+                }
+
+                if ($waited == -1) {
+                    $state->{wait_failed} = 1;
+                    $state->{child_done}  = 1;
+                    $finish->();
+                    return;
+                }
+
+                $schedule_reap->();
+            },
+        );
+
+        $loop->add($reap_timer);
+        $reap_timer->start;
+    };
+
+    $timeout_timer = IO::Async::Timer::Countdown->new(
+        delay     => $timeout,
+        on_expire => sub {
+            return if $state->{finalized};
+
+            $state->{timed_out} = 1;
+
+            unless ($state->{term_sent}) {
+                kill 'TERM', $child_pid;
+                $state->{term_sent} = 1;
+            }
+
+            $schedule_reap->();
+
+            $kill_timer = IO::Async::Timer::Countdown->new(
+                delay     => 0.2,
+                on_expire => sub {
+                    return if $state->{finalized} || $state->{child_done};
+
+                    my $waited = waitpid($child_pid, POSIX::WNOHANG());
+
+                    if ($waited == $child_pid) {
+                        $state->{wait_status} = $?;
+                        $state->{child_done}  = 1;
+                        $finish->();
+                        return;
+                    }
+
+                    if ($waited == -1) {
+                        $state->{wait_failed} = 1;
+                        $state->{child_done}  = 1;
+                        $finish->();
+                        return;
+                    }
+
+                    unless ($state->{kill_sent}) {
+                        kill 'KILL', $child_pid;
+                        $state->{kill_sent} = 1;
+                    }
+
+                    $schedule_reap->();
+                },
+            );
+
+            $loop->add($kill_timer);
+            $kill_timer->start;
+        },
+    );
+
+    $loop->add($timeout_timer);
+    $timeout_timer->start;
+
+    $stream = IO::Async::Stream->new(
+        read_handle => $pipe,
+        on_read     => sub {
+            my ($io, $buffref, $eof) = @_;
+
+            if (length $$buffref) {
+                my $remaining = 4096 - length($state->{output});
+                $state->{output} .= substr($$buffref, 0, $remaining)
+                    if $remaining > 0;
+                $$buffref = '';
+            }
+
+            if ($eof && !$state->{pipe_eof}++) {
+                eval { $loop->remove($io) };
+                $schedule_reap->();
+            }
+
+            return 0;
+        },
+    );
+
+    $loop->add($stream);
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
 # mbDefine_ctx --- !define <word>
-# Fetch definition from Wiktionary REST API.
+# Fetch a definition from Wiktionary without blocking the IRC event loop.
 # ---------------------------------------------------------------------------
 sub mbDefine_ctx {
     my ($ctx) = @_;
-    my $self    = $ctx->bot;
-    my $nick    = $ctx->nick;
-    my $channel = $ctx->channel;
-    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $self = $ctx->bot;
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
     my $word = join('_', @args);
     $word =~ s/^\s+|\s+$//g;
-    unless ($word ne '') { botNotice($self, $nick, 'Syntax: define <word>'); return; }
-    if ($word =~ /[^\w\s-]/ || length($word) > 64) {
-        botNotice($self, $nick, 'Invalid word.'); return;
-    }
-    require URI::Escape;
-    my $encoded = URI::Escape::uri_escape_utf8($word);
-    # A5: language configurable via main.DEFINE_LANG (default: en)
-    my $lang = eval { $self->{conf}->get('main.DEFINE_LANG') } // 'en';
-    $lang = 'en' unless $lang =~ /^[a-z]{2,5}$/;  # safety: valid lang code only
-    my $url = "https://$lang.wiktionary.org/api/rest_v1/page/definition/$encoded";
-    my $http = Mediabot::External::_make_http(timeout => 8, verify_SSL => 1);
-    my $res  = eval { $http->get($url, { headers => { Accept => 'application/json' } }) }
-              // { success => 0 };
-    unless ($res->{success}) {
-        botPrivmsg($self, $channel, "define: could not fetch definition for '$word'.");
+
+    unless ($word ne '') {
+        $ctx->reply_private('Syntax: define <word>');
         return;
     }
-    require JSON;
-    my $data = eval { JSON::decode_json($res->{content}) };
-    unless ($data) {
-        botPrivmsg($self, $channel, "define: no result for '$word'."); return;
+
+    if ($word =~ /[^\w\s-]/ || length($word) > 64) {
+        $ctx->reply_private('Invalid word.');
+        return;
     }
-    # First definition from first language block
-    my $first_lang = (values %$data)[0] // [];
-    my $first_entry = $first_lang->[0] // {};
-    my $first_def   = $first_entry->{definitions}[0]{definition} // '';
-    # P4: extract part of speech
-    my $pos = $first_entry->{partOfSpeech} // '';
-    $pos =~ s/^\s+|\s+$//g;
-    $first_def =~ s/<[^>]+>//g;  # strip HTML
-    require HTML::Entities;
-    $first_def = HTML::Entities::decode_entities($first_def);  # mb84-B5: assigner la valeur de retour
-    $first_def =~ s/^\s+|\s+$//g;
-    $first_def = substr($first_def, 0, 300) . '...' if length($first_def) > 300;
-    if ($first_def ne '') {
-        my $lang_tag = $lang ne 'en' ? " [$lang]" : '';
-        my $pos_tag  = $pos ? " ($pos)" : '';
-        botPrivmsg($self, $channel, "$word$lang_tag$pos_tag: $first_def");
-    } else {
-        botPrivmsg($self, $channel, "define: no definition found for '$word' in $lang.wiktionary.");
+
+    my $lang = eval { $self->{conf}->get('main.DEFINE_LANG') } // 'en';
+    $lang = 'en' unless $lang =~ /\A[a-z]{2,5}\z/;
+
+    return _define_lookup_async(
+        $self,
+        $word,
+        $lang,
+        sub {
+            my ($message) = @_;
+            $message = "define: could not fetch definition for '$word'."
+                unless defined($message) && !ref($message) && $message ne '';
+            $ctx->reply($message);
+        },
+    );
+}
+
+
+# ---------------------------------------------------------------------------
+# _trivia_parse_api_content($json)
+# Validate and normalize one Open Trivia DB multiple-choice question.
+# This pure helper keeps malformed remote data away from the live game state.
+# ---------------------------------------------------------------------------
+sub _trivia_parse_api_content {
+    my ($content) = @_;
+
+    return unless defined($content) && !ref($content);
+    return if length($content) == 0 || length($content) > 64 * 1024;
+
+    require JSON::PP;
+    my $data = eval { JSON::PP::decode_json($content) };
+    return if $@ || ref($data) ne 'HASH';
+
+    return if defined($data->{response_code})
+        && (!defined($data->{response_code})
+            || ref($data->{response_code})
+            || $data->{response_code} !~ /\A\d+\z/
+            || int($data->{response_code}) != 0);
+
+    my $results = $data->{results};
+    return unless ref($results) eq 'ARRAY' && @$results;
+
+    my $question = $results->[0];
+    return unless ref($question) eq 'HASH';
+
+    my $question_text = $question->{question};
+    my $correct       = $question->{correct_answer};
+    my $incorrect     = $question->{incorrect_answers};
+
+    return unless defined($question_text)
+        && !ref($question_text)
+        && $question_text ne ''
+        && length($question_text) <= 2048;
+
+    return unless defined($correct)
+        && !ref($correct)
+        && $correct ne ''
+        && length($correct) <= 512;
+
+    return unless ref($incorrect) eq 'ARRAY'
+        && @$incorrect >= 1
+        && @$incorrect <= 10;
+
+    my @wrong;
+    for my $answer (@$incorrect) {
+        return unless defined($answer)
+            && !ref($answer)
+            && $answer ne ''
+            && length($answer) <= 512;
+        push @wrong, $answer;
     }
+
+    my $category = $question->{category};
+    $category = 'Unknown'
+        unless defined($category)
+            && !ref($category)
+            && $category ne ''
+            && length($category) <= 256;
+
+    my $difficulty = $question->{difficulty};
+    $difficulty = ''
+        unless defined($difficulty)
+            && !ref($difficulty)
+            && $difficulty =~ /\A(?:easy|medium|hard)\z/i;
+
+    return {
+        question          => $question_text,
+        correct_answer    => $correct,
+        incorrect_answers => \@wrong,
+        category          => $category,
+        difficulty        => lc($difficulty),
+    };
+}
+
+# Perform the existing Open Trivia DB request synchronously. Runtime IRC
+# commands call it only from _trivia_fetch_async(); keeping the network work in
+# one small helper also gives lightweight callers a controlled fallback.
+sub _trivia_fetch_sync {
+    my ($category_id, $difficulty) = @_;
+
+    $category_id = undef
+        unless defined($category_id)
+            && !ref($category_id)
+            && $category_id =~ /\A\d+\z/
+            && $category_id >= 9
+            && $category_id <= 32;
+
+    $difficulty = undef
+        unless defined($difficulty)
+            && !ref($difficulty)
+            && $difficulty =~ /\A(?:easy|medium|hard)\z/i;
+
+    my $url = 'https://opentdb.com/api.php?amount=1&type=multiple';
+    $url .= '&category=' . int($category_id) if defined $category_id;
+    $url .= '&difficulty=' . lc($difficulty) if defined $difficulty;
+
+    my $http = Mediabot::External::_make_http(
+        timeout    => 8,
+        verify_SSL => 1,
+        max_size   => 64 * 1024,
+    );
+
+    my $response = eval {
+        $http->get($url, {
+            headers => {
+                Accept => 'application/json',
+            },
+        });
+    };
+
+    return {
+        ok    => 0,
+        error => 'fetch',
+    } unless ref($response) eq 'HASH' && $response->{success};
+
+    my $question = _trivia_parse_api_content($response->{content});
+
+    return {
+        ok    => 0,
+        error => 'response',
+    } unless ref($question) eq 'HASH';
+
+    return {
+        ok       => 1,
+        question => $question,
+    };
+}
+
+# MB319: Open Trivia DB HTTP and DNS work must not run in the IRC event loop.
+# Execute the synchronous request in a forked child and consume its bounded JSON
+# result through IO::Async.
+sub _trivia_fetch_async {
+    my ($self, $category_id, $difficulty, $callback, %opts) = @_;
+
+    return 0 unless ref($callback) eq 'CODE';
+
+    my $timeout = $opts{timeout};
+    $timeout = 10
+        unless defined($timeout)
+            && !ref($timeout)
+            && $timeout =~ /\A\d+(?:\.\d+)?\z/;
+    $timeout = 0.1 if $timeout < 0.1;
+    $timeout = 20  if $timeout > 20;
+
+    my $loop = eval { $self->getLoop };
+    $loop ||= $self->{loop} if ref($self);
+
+    my $fallback = {
+        ok    => 0,
+        error => 'fetch',
+    };
+
+    # Compatibility path for lightweight tests or emergency callers without a
+    # usable event loop. Normal runtime always uses the forked child.
+    unless ($loop && $loop->can('add') && $loop->can('remove')) {
+        my $result = eval {
+            _trivia_fetch_sync($category_id, $difficulty);
+        };
+        $result = $fallback unless ref($result) eq 'HASH';
+        eval { $callback->($result); 1; };
+        return 1;
+    }
+
+    require IO::Async::Stream;
+    require IO::Async::Timer::Countdown;
+    require JSON::PP;
+
+    my $child_pid = open(my $pipe, '-|');
+
+    unless (defined $child_pid) {
+        eval { $callback->($fallback); 1; };
+        return 1;
+    }
+
+    if ($child_pid == 0) {
+        my $result = eval {
+            _trivia_fetch_sync($category_id, $difficulty);
+        };
+        $result = $fallback unless ref($result) eq 'HASH';
+
+        my $payload = eval { JSON::PP::encode_json($result) };
+        $payload = JSON::PP::encode_json($fallback)
+            unless defined($payload) && !ref($payload) && $payload ne '';
+        $payload = substr($payload, 0, 8192);
+
+        my $offset = 0;
+        local $SIG{PIPE} = 'IGNORE';
+        binmode(STDOUT, ':raw');
+
+        while ($offset < length($payload)) {
+            my $written = syswrite(
+                STDOUT,
+                $payload,
+                length($payload) - $offset,
+                $offset,
+            );
+
+            next if !defined($written) && $!{EINTR};
+            last unless defined($written) && $written > 0;
+            $offset += $written;
+        }
+
+        POSIX::_exit(0);
+    }
+
+    my $state = {
+        output      => '',
+        pipe_eof    => 0,
+        child_done  => 0,
+        finalized   => 0,
+        timed_out   => 0,
+        wait_failed => 0,
+        wait_status => undef,
+        term_sent   => 0,
+        kill_sent   => 0,
+    };
+
+    my ($stream, $timeout_timer, $kill_timer, $reap_timer);
+    my ($finish, $schedule_reap);
+
+    my $remove_timer = sub {
+        my ($timer) = @_;
+        return unless $timer;
+        eval { $timer->stop };
+        eval { $loop->remove($timer) };
+    };
+
+    $finish = sub {
+        return if $state->{finalized};
+        return unless $state->{child_done};
+        return unless $state->{pipe_eof} || $state->{timed_out};
+
+        $state->{finalized} = 1;
+
+        $remove_timer->($timeout_timer);
+        $remove_timer->($kill_timer);
+        $remove_timer->($reap_timer);
+        eval { $loop->remove($stream) } if $stream;
+        eval { close $pipe };
+
+        my $result = $fallback;
+
+        unless ($state->{timed_out} || $state->{wait_failed}) {
+            my $status = $state->{wait_status} // 0;
+            my $signal = $status & 127;
+            my $exit   = ($status >> 8) & 255;
+
+            if (!$signal && $exit == 0) {
+                my $decoded = eval {
+                    JSON::PP::decode_json($state->{output} // '');
+                };
+
+                if (!$@ && ref($decoded) eq 'HASH') {
+                    if ($decoded->{ok}) {
+                        my $question = $decoded->{question};
+                        $result = $decoded
+                            if ref($question) eq 'HASH'
+                                && defined($question->{question})
+                                && !ref($question->{question})
+                                && defined($question->{correct_answer})
+                                && !ref($question->{correct_answer})
+                                && ref($question->{incorrect_answers}) eq 'ARRAY';
+                    }
+                    else {
+                        $result = $decoded;
+                    }
+                }
+            }
+        }
+
+        my $callback_ok = eval { $callback->($result); 1; };
+        if (!$callback_ok && $self && ref($self) && $self->{logger}) {
+            my $error = $@ || 'unknown callback failure';
+            $error =~ s/\s+/ /g;
+            $self->{logger}->log(1, "trivia async callback failed: $error");
+        }
+
+        $finish        = undef;
+        $schedule_reap = undef;
+    };
+
+    $schedule_reap = sub {
+        return if $state->{finalized} || $state->{child_done};
+        return if $reap_timer;
+
+        $reap_timer = IO::Async::Timer::Countdown->new(
+            delay     => 0.05,
+            on_expire => sub {
+                my $expired = $reap_timer;
+                $reap_timer = undef;
+                $remove_timer->($expired);
+
+                return if $state->{finalized};
+
+                my $waited = waitpid($child_pid, POSIX::WNOHANG());
+
+                if ($waited == $child_pid) {
+                    $state->{wait_status} = $?;
+                    $state->{child_done}  = 1;
+                    $finish->();
+                    return;
+                }
+
+                if ($waited == -1) {
+                    $state->{wait_failed} = 1;
+                    $state->{child_done}  = 1;
+                    $finish->();
+                    return;
+                }
+
+                $schedule_reap->();
+            },
+        );
+
+        $loop->add($reap_timer);
+        $reap_timer->start;
+    };
+
+    $timeout_timer = IO::Async::Timer::Countdown->new(
+        delay     => $timeout,
+        on_expire => sub {
+            return if $state->{finalized};
+
+            $state->{timed_out} = 1;
+
+            unless ($state->{term_sent}) {
+                kill 'TERM', $child_pid;
+                $state->{term_sent} = 1;
+            }
+
+            $schedule_reap->();
+
+            $kill_timer = IO::Async::Timer::Countdown->new(
+                delay     => 0.2,
+                on_expire => sub {
+                    return if $state->{finalized} || $state->{child_done};
+
+                    my $waited = waitpid($child_pid, POSIX::WNOHANG());
+
+                    if ($waited == $child_pid) {
+                        $state->{wait_status} = $?;
+                        $state->{child_done}  = 1;
+                        $finish->();
+                        return;
+                    }
+
+                    if ($waited == -1) {
+                        $state->{wait_failed} = 1;
+                        $state->{child_done}  = 1;
+                        $finish->();
+                        return;
+                    }
+
+                    unless ($state->{kill_sent}) {
+                        kill 'KILL', $child_pid;
+                        $state->{kill_sent} = 1;
+                    }
+
+                    $schedule_reap->();
+                },
+            );
+
+            $loop->add($kill_timer);
+            $kill_timer->start;
+        },
+    );
+
+    $loop->add($timeout_timer);
+    $timeout_timer->start;
+
+    $stream = IO::Async::Stream->new(
+        read_handle => $pipe,
+        on_read     => sub {
+            my ($io, $buffref, $eof) = @_;
+
+            if (length $$buffref) {
+                my $remaining = 16 * 1024 - length($state->{output});
+                $state->{output} .= substr($$buffref, 0, $remaining)
+                    if $remaining > 0;
+                $$buffref = '';
+            }
+
+            if ($eof && !$state->{pipe_eof}++) {
+                eval { $loop->remove($io) };
+                $schedule_reap->();
+            }
+
+            return 0;
+        },
+    );
+
+    $loop->add($stream);
     return 1;
 }
 
@@ -6469,20 +7213,6 @@ sub mbTrivia_ctx {
         return 1;
     }
 
-    # V1: !trivia start N — multi-round mode with cumulative scores
-    if (@args && lc($args[0]) eq 'start' && $args[1] && $args[1] =~ /^(\d+)$/) {
-        my $rounds = int($args[1]); $rounds = 1 if $rounds < 1; $rounds = 20 if $rounds > 20;
-        $self->{_trivia}{$channel}{multi_total}  = $rounds;
-        $self->{_trivia}{$channel}{multi_current} = 0;
-        $self->{_trivia}{$channel}{scores} = {};
-        botPrivmsg($self, $channel, "Trivia: starting $rounds-round game! Scores reset.");
-        @args = ();  # fall through to normal question fetch
-    }
-
-    if ($self->{_trivia}{$channel} && $self->{_trivia}{$channel}{active}) {
-        botNotice($self, $nick, 'A trivia question is already active. Answer it or wait.');
-        return;
-    }
     # CC4: named category map — !trivia <name> maps to Open Trivia DB category ID
     my %trivia_cats = (
         general    => 9,  science    => 17, computers  => 18,
@@ -6495,91 +7225,246 @@ sub mbTrivia_ctx {
         film       => 11, movies     => 11, books      => 10,
         mythology  => 20, nature     => 27,
     );
-    # !trivia categories — show available category names
+
+    # !trivia categories remains available even while a question is active.
     if (@args && lc($args[0]) eq 'categories') {
         botPrivmsg($self, $channel,
             'Trivia categories: ' . join(', ', sort keys %trivia_cats));
         return 1;
     }
-    # X5: optional category filter
-    my $trivia_cat = (@args && $args[0] !~ /^\d/ && $args[0] !~ /^(?:easy|medium|hard)$/i) ? lc(shift @args) : undef;
-    my $trivia_cat_id = defined $trivia_cat ? ($trivia_cats{$trivia_cat} // undef) : undef;
 
-    # mb105-IMP2: optional difficulty filter — easy / medium / hard
+    if ($self->{_trivia}{$channel} && $self->{_trivia}{$channel}{active}) {
+        botNotice($self, $nick, 'A trivia question is already active. Answer it or wait.');
+        return;
+    }
+
+    if ($self->{_trivia_fetch}{$channel}) {
+        botNotice($self, $nick, 'A trivia question request is already in progress.');
+        return 1;
+    }
+
+    # V1/MB319: start a multi-round game only after active and pending guards.
+    # The previous order reset the multi-round state even when another question
+    # was still active.
+    if (@args && lc($args[0]) eq 'start' && $args[1] && $args[1] =~ /^(\d+)$/) {
+        my $rounds = int($args[1]);
+        $rounds = 1  if $rounds < 1;
+        $rounds = 20 if $rounds > 20;
+
+        $self->{_trivia}{$channel}{multi_total}   = $rounds;
+        $self->{_trivia}{$channel}{multi_current} = 0;
+        $self->{_trivia}{$channel}{scores}        = {};
+
+        botPrivmsg($self, $channel,
+            "Trivia: starting $rounds-round game! Scores reset.");
+
+        @args = ();
+    }
+
+    # Optional named category filter.
+    my $trivia_cat = (
+        @args
+        && $args[0] !~ /^\d/
+        && $args[0] !~ /^(?:easy|medium|hard)$/i
+    ) ? lc(shift @args) : undef;
+
+    my $trivia_cat_id = defined($trivia_cat)
+        ? $trivia_cats{$trivia_cat}
+        : undef;
+
+    if (defined($trivia_cat) && !defined($trivia_cat_id)) {
+        botNotice(
+            $self,
+            $nick,
+            "Unknown trivia category '$trivia_cat'. Use !trivia categories.",
+        );
+        return 1;
+    }
+
+    # Optional difficulty filter.
     my $trivia_diff;
     if (@args && $args[0] =~ /^(?:easy|medium|hard)$/i) {
         $trivia_diff = lc(shift @args);
     }
 
-    # V1: increment round counter
-    if ($self->{_trivia}{$channel}{multi_total}) {
-        $self->{_trivia}{$channel}{multi_current}++;
-        my $cur = $self->{_trivia}{$channel}{multi_current};
-        my $tot = $self->{_trivia}{$channel}{multi_total};
-        botPrivmsg($self, $channel, "Round $cur/$tot:");
-    }
-    my $http = Mediabot::External::_make_http(timeout => 8, verify_SSL => 1);
-    # CC4: build URL with optional category ID + difficulty
-    my $trivia_url = 'https://opentdb.com/api.php?amount=1&type=multiple';
-    $trivia_url .= "&category=$trivia_cat_id" if defined $trivia_cat_id;
-    $trivia_url .= "&difficulty=$trivia_diff" if defined $trivia_diff;
-    my $res  = eval { $http->get($trivia_url) }
-              // { success => 0 };
-    unless ($res->{success}) {
-        botPrivmsg($self, $channel, 'Trivia: could not fetch question.'); return;
-    }
-    require JSON;
-    my $data = eval { JSON::decode_json($res->{content}) };
-    my $q    = $data->{results}[0] or do {
-        botPrivmsg($self, $channel, 'Trivia: no question in response.'); return;
+    my $request_token = join(
+        ':',
+        $$,
+        time(),
+        ++$self->{_trivia_fetch_sequence},
+    );
+
+    $self->{_trivia_fetch}{$channel} = {
+        token        => $request_token,
+        requested_by => $nick,
+        started      => time(),
     };
-    require HTML::Entities;
-    my $question = HTML::Entities::decode_entities($q->{question});
-    my $answer   = HTML::Entities::decode_entities($q->{correct_answer});
-    my @wrong    = map { HTML::Entities::decode_entities($_) } @{ $q->{incorrect_answers} };
-    my @choices  = (@wrong, $answer);
-    # Shuffle choices
-    for my $i (reverse 1 .. $#choices) {
-        my $j = int(rand($i + 1));
-        @choices[$i, $j] = @choices[$j, $i];
-    }
-    my $answer_lc = lc($answer);
-    # mb84-B1: preserve multi-round state and scores across question resets
-    my $_prev     = $self->{_trivia}{$channel} // {};
-    $self->{_trivia}{$channel} = {
-        active         => 1,
-        answer         => $answer_lc,
-        answer_display => $answer,
-        started        => time(),
-        hint_given     => 0,   # B2/fix: reset hint_given for each new question
-        category       => ($q->{category}   // undef),  # DD6: store for timeout display
-        difficulty     => ($q->{difficulty} // undef),  # mb107-IMP1: store for correct reply
-        scores         => ($_prev->{scores}       // {}),
-        multi_total    => $_prev->{multi_total},       # mb84-B1: carry over round count
-        multi_current  => $_prev->{multi_current},     # mb84-B1: carry over current round
-    };
-    my $opts = join('  ', map { "[$_]" } @choices);
-    # mb106-IMP1: tag de difficulté dans la question
-    my $diff_tag = '';
-    if (defined $q->{difficulty} && $q->{difficulty} ne '') {
-        my %diff_colors = ( easy => "\x0303", medium => "\x0308", hard => "\x0304" );
-        my $dl = lc($q->{difficulty});
-        my $col = $diff_colors{$dl} // '';
-        $diff_tag = " ${col}[" . uc($dl) . "]\x0f" if $col;
-        $diff_tag = " [" . uc($dl) . "]" unless $col;
-    }
-    botPrivmsg($self, $channel, "Trivia$diff_tag ($q->{category}): $question");
-    botPrivmsg($self, $channel, "Choices: $opts -- reply with !answer <choice> or just say it (30s)");
-    # mb111-IMP3: compteur Prometheus — questions posées
-    $self->{metrics}->inc('mediabot_trivia_questions_total') if $self->{metrics};
-    # Set a timeout via Scheduler or alarm — simplified: check in PRIVMSG hook
-    # K3: configurable timeout (main.TRIVIA_TIMEOUT, default 30s)
-    my $trivia_timeout = eval { int($self->{conf}->get('main.TRIVIA_TIMEOUT') // 30) } // 30;
-    $trivia_timeout = 30 unless $trivia_timeout > 0 && $trivia_timeout <= 120;
-    $self->{_trivia}{$channel}{timeout}  = $trivia_timeout;  # mb84-B2: stocker pour le hint
-    $self->{_trivia}{$channel}{deadline} = time() + $trivia_timeout;
-    logBot($self, $ctx->message, $channel, 'trivia', $q->{category} // '');  # S2/fix
-    return 1;
+
+    my $log_message = $ctx->message;
+
+    return _trivia_fetch_async(
+        $self,
+        $trivia_cat_id,
+        $trivia_diff,
+        sub {
+            my ($result) = @_;
+
+            my $pending = $self->{_trivia_fetch}{$channel};
+            return unless $pending
+                && defined($pending->{token})
+                && $pending->{token} eq $request_token;
+
+            delete $self->{_trivia_fetch}{$channel};
+            delete $self->{_trivia_fetch}
+                unless keys %{ $self->{_trivia_fetch} // {} };
+
+            unless (ref($result) eq 'HASH'
+                    && $result->{ok}
+                    && ref($result->{question}) eq 'HASH') {
+                botPrivmsg($self, $channel,
+                    'Trivia: could not fetch question.');
+                return;
+            }
+
+            # A different internal path may have activated a question while the
+            # fetch was in flight. Never overwrite live game state.
+            if ($self->{_trivia}{$channel}
+                    && $self->{_trivia}{$channel}{active}) {
+                $self->{logger}->log(
+                    1,
+                    "Discarding stale trivia result for $channel: "
+                    . 'a question became active while fetching',
+                ) if $self->{logger};
+                return;
+            }
+
+            my $q = $result->{question};
+
+            require HTML::Entities;
+
+            my $question = HTML::Entities::decode_entities(
+                $q->{question} // '',
+            );
+            my $answer = HTML::Entities::decode_entities(
+                $q->{correct_answer} // '',
+            );
+
+            my @wrong = map {
+                HTML::Entities::decode_entities($_)
+            } @{ $q->{incorrect_answers} // [] };
+
+            for ($question, $answer, @wrong) {
+                $_ = '' unless defined($_) && !ref($_);
+                s/[\r\n\t]+/ /g;
+                s/\s{2,}/ /g;
+                s/^\s+|\s+$//g;
+            }
+
+            unless ($question ne '' && $answer ne '' && @wrong) {
+                botPrivmsg($self, $channel,
+                    'Trivia: no usable question in response.');
+                return;
+            }
+
+            my @choices = (@wrong, $answer);
+
+            # Shuffle choices.
+            for my $i (reverse 1 .. $#choices) {
+                my $j = int(rand($i + 1));
+                @choices[$i, $j] = @choices[$j, $i];
+            }
+
+            my $_prev = $self->{_trivia}{$channel} // {};
+            my $multi_total   = $_prev->{multi_total};
+            my $multi_current = $_prev->{multi_current} // 0;
+
+            # MB319: increment and announce the round only after a usable
+            # question has been fetched. Failed HTTP/API requests no longer
+            # consume a round.
+            if ($multi_total) {
+                $multi_current++;
+                botPrivmsg(
+                    $self,
+                    $channel,
+                    "Round $multi_current/$multi_total:",
+                );
+            }
+
+            my $trivia_timeout = eval {
+                int($self->{conf}->get('main.TRIVIA_TIMEOUT') // 30)
+            } // 30;
+            $trivia_timeout = 30
+                unless $trivia_timeout > 0 && $trivia_timeout <= 120;
+
+            my $category = $q->{category};
+            $category = 'Unknown'
+                unless defined($category)
+                    && !ref($category)
+                    && $category ne '';
+
+            my $difficulty = $q->{difficulty};
+            $difficulty = ''
+                unless defined($difficulty)
+                    && !ref($difficulty)
+                    && $difficulty =~ /\A(?:easy|medium|hard)\z/i;
+            $difficulty = lc($difficulty);
+
+            $self->{_trivia}{$channel} = {
+                active         => 1,
+                answer         => lc($answer),
+                answer_display => $answer,
+                started        => time(),
+                hint_given     => 0,
+                category       => $category,
+                difficulty     => $difficulty,
+                scores         => ($_prev->{scores} // {}),
+                multi_total    => $multi_total,
+                multi_current  => $multi_current,
+                timeout        => $trivia_timeout,
+                deadline       => time() + $trivia_timeout,
+            };
+
+            my $opts = join('  ', map { "[$_]" } @choices);
+
+            my $diff_tag = '';
+            if ($difficulty ne '') {
+                my %diff_colors = (
+                    easy   => "\x0303",
+                    medium => "\x0308",
+                    hard   => "\x0304",
+                );
+                my $color = $diff_colors{$difficulty} // '';
+                $diff_tag = $color
+                    ? " ${color}[" . uc($difficulty) . "]\x0f"
+                    : " [" . uc($difficulty) . "]";
+            }
+
+            botPrivmsg(
+                $self,
+                $channel,
+                "Trivia$diff_tag ($category): $question",
+            );
+            botPrivmsg(
+                $self,
+                $channel,
+                "Choices: $opts -- reply with !answer <choice> "
+                . "or just say it (${trivia_timeout}s)",
+            );
+
+            $self->{metrics}->inc('mediabot_trivia_questions_total')
+                if $self->{metrics};
+
+            logBot(
+                $self,
+                $log_message,
+                $channel,
+                'trivia',
+                $category,
+            );
+
+            return 1;
+        },
+    );
 }
 
 # Called from on_message_PRIVMSG hook and !answer command
@@ -6773,18 +7658,48 @@ sub mbTriviaStop_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
+
     return unless $ctx->require_level('Master');
+
+    my $pending = delete $self->{_trivia_fetch}{$channel};
+    delete $self->{_trivia_fetch}
+        if $self->{_trivia_fetch}
+            && !keys %{ $self->{_trivia_fetch} };
+
     my $trivia = $self->{_trivia}{$channel};
+
     unless ($trivia && $trivia->{active}) {
-        botNotice($self, $nick, 'No active trivia on this channel.'); return 1;
+        if ($pending) {
+            botNotice(
+                $self,
+                $nick,
+                'Pending trivia question request cancelled.',
+            );
+        }
+        else {
+            botNotice(
+                $self,
+                $nick,
+                'No active trivia on this channel.',
+            );
+        }
+        return 1;
     }
+
     $trivia->{active} = 0;
-    delete $trivia->{multi_total}; delete $trivia->{multi_current};
-    # B-68-2/fix: clear scores and hint so next game starts clean
+    delete $trivia->{multi_total};
+    delete $trivia->{multi_current};
+
+    # B-68-2/fix: clear scores and hint so next game starts clean.
     delete $trivia->{scores};
     $trivia->{hint_given} = 0;
-    Mediabot::Helpers::botPrivmsg($self, $channel,
-        "Trivia stopped by $nick. Answer: $trivia->{answer_display}");
+
+    Mediabot::Helpers::botPrivmsg(
+        $self,
+        $channel,
+        "Trivia stopped by $nick. Answer: $trivia->{answer_display}",
+    );
+
     return 1;
 }
 
