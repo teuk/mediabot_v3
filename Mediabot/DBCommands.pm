@@ -10,6 +10,7 @@ use POSIX qw(strftime);
 use List::Util qw(min);
 use Exporter 'import';
 use Mediabot::Helpers;
+use Mediabot::SafeCalc qw(evaluate_expression format_result);
 
 our @EXPORT = qw(
     IgnoresList_ctx
@@ -2971,88 +2972,51 @@ sub mbCalc_ctx {
     $expr =~ s/^\s+|\s+$//g;
 
     unless ($expr ne '') {
-        botNotice($self, $nick, "Syntax: calc <expression>  (e.g. calc 2+2, calc sqrt(16))");
+        $ctx->reply_private("Syntax: calc <expression>  (e.g. calc 2+2, calc sqrt(16))");
         return;
     }
 
     if (length($expr) > 128) {
-        botNotice($self, $nick, "Expression too long (max 128 chars).");
+        $ctx->reply_private("Expression too long (max 128 chars).");
         return;
     }
 
-    # A3/fix2: substitute named constants before eval so 'pi' -> literal
-    $expr =~ s/\bpi\b/3.14159265358979/g;
-    $expr =~ s/\btau\b/6.28318530717959/g;
-    $expr =~ s/\be\b/2.71828182845905/g;
-
-    # Whitelist: digits, operators, parens, spaces, common math functions, pi/e
-    unless ($expr =~ m{^[0-9+\-*/().\s%^,a-z_]+$}i) {
-        botNotice($self, $nick, "Invalid characters in expression.");
-        return;
-    }
-
-    # Blacklist dangerous keywords
-    if ($expr =~ /\b(?:system|exec|open|require|use|print|die|exit|eval|qw|sprintf|chr|ord)\b/i) {
-        botNotice($self, $nick, "Expression not allowed.");
-        return;
-    }
-
-    # Evaluate in a sandboxed sub with safe math
-    # mb86-B2: alarm() est incompatible avec IO::Async (SIGALRM interrompt l'event loop)
-    # → timeout via Time::HiRes : on mesure le temps d'exécution et on die si > 2s
-    my $calc_start = do { require Time::HiRes; Time::HiRes::time() };
-    my $result = eval {
-        my $res = do {
-            no strict;
-            # A3: extended math — trig + rounding functions
-            use POSIX qw(floor ceil);
-            my $pi  = 3.14159265358979;
-            my $e   = 2.71828182845905;
-            my $tau = 6.28318530717959;
-
-            # C1/fix: suppress 'redefined' warning — inner subs re-declared each call
-            no warnings 'redefine';
-            sub round   { int($_[0] + 0.5 * ($_[0] >= 0 ? 1 : -1)) }
-            sub tan     { sin($_[0]) / cos($_[0]) }
-            sub asin    { atan2($_[0], sqrt(1 - $_[0] * $_[0])) }
-            sub acos    { atan2(sqrt(1 - $_[0] * $_[0]), $_[0]) }
-            sub pow     { $_[0] ** $_[1] }
-            sub fmod    { $_[0] % $_[1] }
-            sub deg2rad { $_[0] * 3.14159265358979 / 180 }
-            sub rad2deg { $_[0] * 180 / 3.14159265358979 }
-            ## no critic
-            eval $expr;  ## safe: expression is already whitelist-validated
-        };
-        # mb86-B2: vérifier le temps écoulé après l'éval (les boucles infinies sont bloquées
-        # par la whitelist, les expressions lentes sont très rares mais on reste prudents)
-        my $elapsed = Time::HiRes::time() - $calc_start;
-        die "timeout\n" if $elapsed > 2;
-        $res;
+    # mb330-B1: the internal calculator no longer evaluates user-controlled
+    # Perl source. Mediabot::SafeCalc tokenizes and parses a strict arithmetic
+    # grammar containing only numbers, constants, operators and explicitly
+    # supported math functions. No identifier can reach Perl's evaluator.
+    my ($result, $error);
+    my $ok = eval {
+        $result = evaluate_expression($expr);
+        1;
     };
 
-    if ($@) {
-        my $err = $@;
-        $err =~ s/ at .* line \d+.*//s;
-        botPrivmsg($self, $channel, "calc error: $err");
+    unless ($ok) {
+        $error = $@ || 'Invalid expression.';
+        $error =~ s/\s+at\s+.*?\s+line\s+\d+.*\z//s;
+        $error =~ s/\s+\z//;
+
+        if ($error =~ /\A(?:Expression not allowed|Invalid characters in expression)\.?\z/) {
+            $ctx->reply_private($error);
+        }
+        else {
+            $ctx->reply("calc error: $error");
+        }
         return;
     }
 
-    unless (defined $result) {
-        botPrivmsg($self, $channel, "calc: undefined result.");
-        return;
-    }
+    my $formatted = format_result($result);
 
-    # Format nicely: integer if whole, 6 decimal places otherwise
-    my $formatted = ($result == int($result) && abs($result) < 1e15)
-        ? sprintf("%d", $result)
-        : sprintf("%g", $result);
-
-    # A5: store in per-nick history (last 3)
+    # Preserve the expression exactly as the user typed it. The previous
+    # implementation substituted pi/tau/e with long decimal literals before
+    # displaying and storing history, making otherwise simple results noisy.
     $self->{_calc_history}{$nick} //= [];
     unshift @{ $self->{_calc_history}{$nick} }, "$expr = $formatted";
     splice @{ $self->{_calc_history}{$nick} }, 3;
 
-    botPrivmsg($self, $channel, "$expr = $formatted");
+    # mb331-B2: Context routes public results to the channel and private
+    # commands back to the requesting nick instead of dropping an undef target.
+    $ctx->reply("$expr = $formatted");
     logBot($self, $ctx->message, $channel, "calc", $expr);
     return 1;
 }

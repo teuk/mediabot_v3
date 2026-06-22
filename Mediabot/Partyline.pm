@@ -32,6 +32,7 @@ use Scalar::Util qw(weaken);
 use JSON qw(encode_json);
 use Encode qw(encode);
 use Mediabot::External ();
+use Mediabot::DCC qw(validate_dcc_active_target);
 use File::Basename qw(dirname);
 use File::Path qw(make_path);
 use File::Temp qw(tempfile);
@@ -189,8 +190,22 @@ sub accept_dcc_chat {
     my $loop = $self->{loop};
     my $bot  = $self->{bot};
 
-    # Convert 32-bit integer IP to dotted-quad
-    my $ip = join('.', unpack('C4', pack('N', $ip_int)));
+    # MB332-B1 defense in depth: validate again at the network sink. The
+    # primary IRC handler already rejects unsafe destinations, but keeping the
+    # guard here protects future/internal callers of accept_dcc_chat().
+    my ($target_ok, $ip, $target_reason)
+        = validate_dcc_active_target($ip_int, $port);
+
+    unless ($target_ok) {
+        my $safe_ip   = defined($ip)   ? $ip   : 'invalid';
+        my $safe_port = defined($port) ? $port : 'undef';
+        $bot->{logger}->log(
+            1,
+            "DCC CHAT: refusing unsafe target for $nick at "
+            . "$safe_ip:$safe_port reason=$target_reason"
+        );
+        return;
+    }
 
     $bot->{logger}->log(2, "DCC CHAT: connecting to $nick at $ip:$port");
 
@@ -554,12 +569,19 @@ sub offer_dcc_chat {
 
             $logger->log(2, "CTCP CHAT: timeout waiting for $nick to connect");
             $self->_dcc_offer_remove('ctcp_chat', $nick);
-            eval { $loop->remove($listener) };
+            eval { $loop->remove($listener) } if $listener;
+            eval { $loop->remove($timeout) }  if $timeout;
         },
     );
 
     $loop->add($timeout);
     $timeout->start;
+
+    # MB337-B1: the loop and pending-offer registry own the live objects.
+    # Keep only weak lexical references inside their callbacks so removing
+    # a listener/timeout before expiry cannot leave a closure reference cycle.
+    weaken($listener);
+    weaken($timeout);
 }
 
 # ---------------------------------------------------------------------------
@@ -701,11 +723,18 @@ sub accept_dcc_chat_passive {
             # offer entry too. Otherwise _dcc_pending_offer_for_nick() keeps
             # refusing future DCC attempts for this nick even after listener close.
             $self->_dcc_offer_remove('passive_chat', $nick);
-            eval { $loop->remove($listener) };
+            eval { $loop->remove($listener) } if $listener;
+            eval { $loop->remove($timeout) }  if $timeout;
         },
     );
     $loop->add($timeout);
     $timeout->start;
+
+    # MB337-B1: the loop and pending-offer registry own the live objects.
+    # Keep only weak lexical references inside their callbacks so removing
+    # a listener/timeout before expiry cannot leave a closure reference cycle.
+    weaken($listener);
+    weaken($timeout);
 }
 
 # ---------------------------------------------------------------------------

@@ -471,6 +471,86 @@ sub _redact_irc_service_secret_for_log {
 }
 
 
+# mb325-B1: découpage de message sûr en octets pour PRIVMSG/NOTICE.
+#
+# botPrivmsg() et botNotice() découpaient tous deux à 400 *caractères* puis
+# encodaient chaque chunk en UTF-8 juste avant l'envoi. Le commentaire affirmait
+# que découper avant l'encodage évitait de couper un caractère multi-octets en
+# deux — vrai, mais 400 caractères ≠ 400 octets : du texte accentué (é/è/à =
+# 2 octets) ou des emojis (4 octets) produisaient un chunk de 500 à 1600 octets,
+# dépassant la limite IRC d'environ 512 octets. Le serveur tronquait alors la
+# ligne — et coupait, lui, en plein milieu d'une séquence UTF-8, exactement le
+# défaut qu'on prétendait éviter. La logique était de plus dupliquée dans les
+# deux chemins jumeaux (classe de bug récurrente « fix d'un côté, oublié de
+# l'autre »).
+#
+# Ce helper partagé découpe sur des frontières de caractères (donc jamais au
+# milieu d'un multi-octets) tout en garantissant que chaque chunk, une fois
+# transmis, tient dans le budget d'octets. Il respecte le flag utf8 du scalaire :
+#   - chaîne de caractères (is_utf8 vrai)  -> coût = longueur UTF-8 du codepoint
+#   - chaîne d'octets déjà encodée (faux)  -> coût = 1 octet par élément
+# ce qui correspond exactement à ce que font do_PRIVMSG/do_NOTICE en aval
+# (encode("UTF-8", ...) seulement si utf8::is_utf8). Pour de l'ASCII, le résultat
+# est identique octet pour octet à l'ancien découpage (équivalence vérifiée).
+sub _split_text_for_irc {
+    my ($text, $max_bytes) = @_;
+
+    return () unless defined($text) && $text ne '';
+
+    $max_bytes = 400
+        unless defined($max_bytes) && $max_bytes =~ /^\d+$/ && $max_bytes >= 16;
+
+    # Sanitise newlines defensively (callers already do this; idempotent here).
+    $text =~ s/[\r\n]+/ /g;
+
+    my $is_chars = utf8::is_utf8($text);
+    my $cost = $is_chars
+        ? sub { my $o = ord($_[0]); $o < 0x80 ? 1 : $o < 0x800 ? 2 : $o < 0x10000 ? 3 : 4 }
+        : sub { 1 };
+
+    my $wire_bytes = sub {
+        return utf8::is_utf8($_[0]) ? length(encode("UTF-8", $_[0])) : length($_[0]);
+    };
+
+    # Fast path: whole message already fits on the wire.
+    return ($text) if $wire_bytes->($text) <= $max_bytes;
+
+    my @chunks;
+    my $buf = $text;
+
+    while ($wire_bytes->($buf) > $max_bytes) {
+        # Largest leading character count whose encoded form fits the budget.
+        my $bytes = 0;
+        my $n     = 0;
+        for my $ch (split //, $buf) {
+            my $cb = $cost->($ch);
+            last if $bytes + $cb > $max_bytes;
+            $bytes += $cb;
+            $n++;
+        }
+        $n = 1 if $n < 1;    # always make progress, even if one char > budget
+
+        my $prefix = substr($buf, 0, $n);
+
+        # Prefer breaking at the last whitespace, but not before half the prefix,
+        # mirroring the historical .{200,399}\s word-wrap behaviour.
+        if ($prefix =~ /^(.*\s)\S+\z/s) {
+            my $ws = $1;
+            $prefix = $ws if length($ws) >= int($n / 2) && length($ws) >= 1;
+        }
+
+        my $cut = length($prefix);
+        $cut = $n if $cut < 1;
+
+        push @chunks, substr($buf, 0, $cut);
+        $buf = substr($buf, $cut);
+        $buf =~ s/^\s+//;
+    }
+
+    push @chunks, $buf if length($buf);
+    return @chunks;
+}
+
 sub botPrivmsg {
     my ($self, $sTo, $sMsg) = @_;
 
@@ -575,26 +655,12 @@ sub botPrivmsg {
         # multi-byte character in half (accents, emojis, █/░ bars, etc.).
         $sMsg =~ s/[\r\n]+/ /g;
 
-        # IRC hard limit is ~512 bytes. 400 characters keeps the historical
-        # Mediabot behavior and leaves room for prefix/target overhead.  The
-        # final encode happens per chunk below.
-        my @chunks;
-        if (length($sMsg) > 400) {
-            my $buf = $sMsg;
-            while (length($buf) > 400) {
-                my $cut = 400;
-                if (substr($buf, 0, 400) =~ /^(.{200,399}\s)/s) {
-                    $cut = length($1);
-                }
-                push @chunks, substr($buf, 0, $cut);
-                $buf = substr($buf, $cut);
-                $buf =~ s/^\s+//;
-            }
-            push @chunks, $buf if length($buf);
-        }
-        else {
-            @chunks = ($sMsg);
-        }
+        # IRC hard limit is ~512 bytes. mb325-B1: split on a byte budget (not a
+        # character count) so accented text and emojis can never push a chunk
+        # past the wire limit; the encode happens per chunk below. 400 bytes
+        # keeps the historical headroom for prefix/target overhead.
+        my @chunks = _split_text_for_irc($sMsg, 400);
+        @chunks = ($sMsg) unless @chunks;
 
         # AA14: log when message was split for debug
         if (scalar(@chunks) > 1) {
@@ -695,9 +761,22 @@ sub botAction {
 			$self->{logger}->log(0,"-> *$sTo* $log_msg");
 		}
 		if (defined($sMsg) && ($sMsg ne "")) {
-			# B3: single encode path — avoid double-encode on pre-encoded bytes
-			$sMsg = encode("UTF-8", $sMsg) if utf8::is_utf8($sMsg);
-			$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $sMsg\1" );
+			# mb327-B1: découpe les ACTIONs longues sur le même budget d'octets que
+			# botPrivmsg/botNotice (helper partagé _split_text_for_irc). Sans ça, un
+			# /me accentué/emoji dépassait ~512 octets : le serveur tronquait la ligne
+			# ET perdait le \1 final, corrompant le CTCP ACTION. Le budget texte est
+			# réduit de l'overhead du wrapper "\1ACTION \1" (9 octets) pour que la
+			# ligne émise reste dans la même enveloppe qu'un PRIVMSG. Chaque chunk est
+			# ré-emballé en ACTION distinct. Le découpage se fait avant l'encodage
+			# UTF-8 (sur la chaîne de caractères) pour ne jamais couper un multi-octets.
+			my $action_overhead = length("\1ACTION \1");   # 9
+			my @chunks = _split_text_for_irc($sMsg, 400 - $action_overhead);
+			@chunks = ($sMsg) unless @chunks;
+			for my $chunk (@chunks) {
+				next unless defined($chunk) && $chunk ne "";
+				my $payload = utf8::is_utf8($chunk) ? encode("UTF-8", $chunk) : $chunk;
+				$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $payload\1" );
+			}
 		}
 		else {
 			$self->{logger}->log(0,"botPrivmsg() ERROR no message specified to send to target");
@@ -730,25 +809,14 @@ sub botNotice {
     # - split long messages instead of truncating them;
     # - split before UTF-8 encoding so accents, emojis and IRC bar chars are
     #   never cut in the middle of a multi-byte sequence.
+    # mb325-B1: byte-aware split shared with botPrivmsg. Splitting on a 400-byte
+    # budget (instead of 400 characters) keeps accents/emojis/IRC bar chars from
+    # pushing a NOTICE past the ~512-byte wire limit; the per-chunk encode below
+    # is unchanged. Char-boundary safety is preserved by the helper.
     $text =~ s/[\r\n]+/ /g;
 
-    my @chunks;
-    if (length($text) > 400) {
-        my $buf = $text;
-        while (length($buf) > 400) {
-            my $cut = 400;
-            if (substr($buf, 0, 400) =~ /^(.{200,399}\s)/s) {
-                $cut = length($1);
-            }
-            push @chunks, substr($buf, 0, $cut);
-            $buf = substr($buf, $cut);
-            $buf =~ s/^\s+//;
-        }
-        push @chunks, $buf if length($buf);
-    }
-    else {
-        @chunks = ($text);
-    }
+    my @chunks = _split_text_for_irc($text, 400);
+    @chunks = ($text) unless @chunks;
 
     for my $chunk (@chunks) {
         next unless defined($chunk) && $chunk ne '';
@@ -960,8 +1028,13 @@ sub checkUserChannelLevel {
     return 0 unless defined($id_user)  && $id_user  ne '';
     return 0 unless defined($level);
 
-    # mb112-IMP2: cache TTL 60s — le niveau canal change rarement
-    my $cache_key = "$id_user\x00$sChannel";
+    # mb328-B1: clé de cache normalisée en minuscules sur le nom de canal. Les
+    # canaux IRC sont insensibles à la casse (et le SQL matche en collation _ci),
+    # mais la clé brute "$id\x00$sChannel" différenciait #Foo et #foo. Les
+    # invalidations par-utilisateur de channelAddUser/DelUser (match exact)
+    # rataient alors l'entrée stockée sous une autre casse → niveau de privilège
+    # périmé jusqu'à 60s (TTL). On canonicalise ici ET côté invalidation.
+    my $cache_key = "$id_user\x00" . lc($sChannel);
     my $now       = time();
     my $ttl       = 60;
     my $cached_level;

@@ -3705,25 +3705,33 @@ sub mbSlap_ctx {
 sub mbCalcLast_ctx {
     my ($ctx) = @_;
 
-    my $self    = $ctx->bot;
-    my $nick    = $ctx->nick;
-    my $channel = $ctx->channel;
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    my $limit = 3;
+    if (@args) {
+        unless (@args == 1 && defined($args[0]) && $args[0] =~ /\A[1-3]\z/) {
+            $ctx->reply_private('Syntax: calclast [1-3]');
+            return 1;
+        }
+        $limit = int($args[0]);
+    }
 
     my $history = $self->{_calc_history}{$nick} // [];
     unless (@$history) {
-        botNotice($self, $nick, 'No calc history yet.');
+        $ctx->reply_private('No calc history yet.');
         return 1;
     }
-    # mb89-B1: envoyer en channel si appelé publiquement, en NOTICE si privé
-    my $is_public = defined $channel && $channel =~ /^#/;
-    my $send = $is_public
-        ? sub { botPrivmsg($self, $channel, $_[0]) }
-        : sub { botNotice($self, $nick, $_[0]) };
 
-    $send->('Last ' . scalar(@$history) . ' calc(s) for ' . $nick . ':');
-    for my $entry (@$history) {
-        $send->("  $entry");
+    # mb331-B3: the documented optional count is now honored. Context keeps
+    # the same public/private routing without duplicating transport logic.
+    my $shown = min($limit, scalar(@$history));
+    $ctx->reply('Last ' . $shown . ' calc(s) for ' . $nick . ':');
+    for my $index (0 .. $shown - 1) {
+        $ctx->reply('  ' . $history->[$index]);
     }
+
     return 1;
 }
 
@@ -9054,23 +9062,31 @@ sub _quotegame_start_timer {
     $timer = IO::Async::Timer::Countdown->new(
         delay => $delay,
         on_expire => sub {
-            my $qg = $self->{_quotegame}{$channel} or return;
-            return unless $qg->{active};
-            return unless defined($qg->{timer_token}) && $qg->{timer_token} eq $token;
-
-            $qg->{active} = 0;
-            delete $qg->{timer};
-            delete $qg->{timer_token};
-
-            my $author = defined($qg->{author}) ? $qg->{author} : 'unknown';
-            Mediabot::Helpers::botPrivmsg(
-                $self,
-                $channel,
-                "\x{23F0} Time's up! The answer was: \x02$author\x02"
-            );
-
             my $loop_now = eval { $self->getLoop } || $self->{loop};
+
+            my $qg = $self->{_quotegame}{$channel};
+            if ($qg && $qg->{active}
+                    && defined($qg->{timer_token})
+                    && $qg->{timer_token} eq $token) {
+
+                $qg->{active} = 0;
+                delete $qg->{timer};
+                delete $qg->{timer_token};
+
+                my $author = defined($qg->{author}) ? $qg->{author} : 'unknown';
+                Mediabot::Helpers::botPrivmsg(
+                    $self,
+                    $channel,
+                    "\x{23F0} Time's up! The answer was: \x02$author\x02"
+                );
+            }
+
+            # mb326-B1: toujours libérer ce timer (retrait du loop + rupture du
+            # cycle closure<->timer), y compris sur le chemin "stale/superseded"
+            # (token remplacé par un nouveau round) qui faisait auparavant un
+            # return sec et laissait le timer dans le loop ET dans le cycle.
             eval { $loop_now->remove($timer) if $loop_now && $timer };
+            undef $timer;
         },
     );
 

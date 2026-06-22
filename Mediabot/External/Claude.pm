@@ -190,6 +190,9 @@ sub _queue_irc_chunks {
                 $cleanup->($timer);
                 $state->{timer} = undef;
                 $pump->();
+                # mb326-B1: rompre le cycle closure<->timer (le slot hash est vidé
+                # mais le lexical capturé maintenait l'objet en vie).
+                undef $timer;
             },
         );
 

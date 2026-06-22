@@ -20,7 +20,9 @@ use MockMessage;
 use MockUser;
 use Getopt::Long;
 use File::Basename;
+use Cwd qw(getcwd);
 use POSIX qw(strftime);
+use TAP::Parser;
 
 binmode(STDOUT, ':encoding(UTF-8)');
 binmode(STDERR, ':encoding(UTF-8)');
@@ -186,6 +188,129 @@ sub make_msg_priv {
     );
 }
 
+# mb333-B1: Some historical case files are standalone TAP programs. They call exit()
+# directly instead of returning a closure when loaded through do(). Loading one
+# of those files in the runner process terminates the whole suite immediately,
+# skips every later case, and can return success before the runner prints its
+# final summary. MB333 isolates such cases in a subprocess and merges their TAP
+# counts into the normal Assert totals.
+sub _case_requires_isolation {
+    my ($file) = @_;
+
+    open my $fh, '<:encoding(UTF-8)', $file
+        or return (1, "cannot inspect $file: $!");
+    local $/;
+    my $src = <$fh>;
+    close $fh;
+
+    return (1, 'empty or unreadable test source')
+        unless defined $src && length $src;
+
+    # MB335: classify by the file contract, not by words that may appear in
+    # quoted probe programs. Native runner cases return a closure directly.
+    return (0, 'runner closure')
+        if $src =~ /^\s*return\s+sub\s*\{/m;
+
+    # Hybrid cases expose a closure when loaded by this runner and execute a
+    # standalone TAP footer only when called directly.
+    return (0, 'caller-guarded runner closure')
+        if $src =~ /^\s*my\s+\$[A-Za-z_]\w*\s*=\s*sub\s*\{/m
+        && $src =~ /\b(?:if|unless)\s*\(\s*caller(?:\s*\(\s*\))?\s*\)/;
+
+    # Test::More/Test2 and historical TAP scripts must run in their own Perl
+    # process so their plan/done_testing/exit state cannot contaminate the
+    # custom Assert runner or any later case.
+    return (1, 'standalone TAP contract');
+}
+
+sub _run_isolated_tap_case {
+    my ($file, $name, $assert) = @_;
+
+    my $project_root = "$FindBin::Bin/..";
+
+    my $pid = open(my $child, '-|');
+    unless (defined $pid) {
+        $assert->fail("$name: isolated launch - cannot fork: $!");
+        return;
+    }
+
+    if ($pid == 0) {
+        open STDERR, '>&', STDOUT
+            or POSIX::_exit(254);
+        chdir $project_root
+            or do {
+                print "Bail out! cannot chdir to $project_root: $!\n";
+                POSIX::_exit(254);
+            };
+        no warnings 'exec';
+        exec(
+            $^X,
+            "-I$FindBin::Bin/lib",
+            "-I$project_root",
+            $file,
+        );
+        print "Bail out! cannot exec $file: $!\n";
+        POSIX::_exit(254);
+    }
+
+    local $/;
+    my $output = <$child> // '';
+    my $closed = close $child;
+    my $status = $?;
+
+    print $output;
+
+    my $parser = TAP::Parser->new({ source => \$output });
+    my ($tap_pass, $tap_fail, $tap_tests) = (0, 0, 0);
+
+    while (my $result = $parser->next) {
+        next unless $result->is_test;
+        $tap_tests++;
+        if ($result->is_ok) {
+            $tap_pass++;
+        }
+        else {
+            $tap_fail++;
+        }
+    }
+
+    $assert->{pass} += $tap_pass;
+    $assert->{fail} += $tap_fail;
+
+    my @parse_errors = $parser->parse_errors;
+
+    # Several historical standalone scripts emit valid ok/not-ok lines but no
+    # explicit plan. Preserve that legacy contract when assertions were seen;
+    # every other TAP parse error remains fatal.
+    my @fatal_parse_errors = grep {
+        !($tap_tests > 0 && /No plan found in TAP output/)
+    } @parse_errors;
+
+    if (@fatal_parse_errors) {
+        my $detail = join('; ', @fatal_parse_errors);
+        $assert->fail("$name: isolated TAP parse", $detail);
+    }
+    elsif ($tap_tests == 0) {
+        $assert->fail("$name: isolated TAP", 'no TAP assertions found');
+    }
+
+    my $signal = $status & 127;
+    my $exit   = $status >> 8;
+
+    if ($signal) {
+        $assert->fail("$name: isolated process - terminated by signal $signal");
+    }
+    elsif (!$closed || $exit != 0) {
+        # A normal failing TAP case already contributes its not-ok assertions.
+        # Add a process-level failure only when TAP did not explain the exit.
+        if ($tap_fail == 0 && !@fatal_parse_errors) {
+            $assert->fail("$name: isolated process - exit status $exit");
+        }
+    }
+
+    return 1;
+}
+
 # ---- Chargement des cas de test ---------------------------------------------
 
 my $assert   = Assert->new(verbose => $opt_verbose);
@@ -196,7 +321,13 @@ my $cases_dir  = "$FindBin::Bin/cases";
 my @test_files = sort glob("$cases_dir/*.t");
 
 if ($opt_filter) {
-    @test_files = grep { basename($_) =~ /$opt_filter/i } @test_files;
+    my $filter_re = eval { qr/$opt_filter/i };
+    if (!$filter_re) {
+        my $err = $@ || 'unknown regex error';
+        $err =~ s/\s+\z//;
+        die "Invalid --filter regex '$opt_filter': $err\n";
+    }
+    @test_files = grep { basename($_) =~ $filter_re } @test_files;
 }
 
 if (!@test_files) {
@@ -207,6 +338,13 @@ if (!@test_files) {
 for my $file (@test_files) {
     my $name = basename($file);
     print "\n[ $name ]\n";
+
+    my ($isolate, $isolate_reason) = _case_requires_isolation($file);
+    if ($isolate) {
+        print "  (isolated standalone TAP case: $isolate_reason)\n" if $opt_verbose;
+        _run_isolated_tap_case($file, $name, $assert);
+        next;
+    }
 
     # FindBin was initialized for this runner. Legacy loaded cases expect $Bin
     # to be their own t/cases directory, so localize it around do().

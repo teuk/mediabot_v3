@@ -82,7 +82,7 @@ return sub {
     $assert->like($async // '', qr/64 \* 1024/,
         'child output is bounded');
 
-    $assert->like($command // '', qr/MB322: emergency runtime restoration/,
+    $assert->like($command // '', qr/MB32[23]: (?:emergency runtime restoration|restore the proven synchronous transport)/,
         'production fallback is documented');
     $assert->like($command // '', qr/_youtube_search_fetch_sync\(\$api_key,\s*\$query_txt\)/,
         'live command uses the proven transport path');

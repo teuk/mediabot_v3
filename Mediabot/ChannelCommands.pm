@@ -1136,8 +1136,10 @@ sub channelAddUser_ctx {
     }
     $sth->finish if $sth;
 
-    # mb112-IMP2: invalider le cache checkUserChannelLevel pour ce user/chan
-    delete $self->{_uchan_level_cache}{"$id_target_user\x00$channel"};
+    # mb112-IMP2 / mb328-B1: invalider le cache checkUserChannelLevel pour ce
+    # user/chan. Clé normalisée en minuscules (cf. checkUserChannelLevel) pour
+    # ne pas rater une entrée stockée sous une autre casse de canal.
+    delete $self->{_uchan_level_cache}{"$id_target_user\x00" . lc($channel)};
 
     $self->{logger}->log(1, "$nick added $target_handle to $channel at level $target_level");
     logBot($self, $ctx->message, $channel, "add", $channel, $target_handle, $target_level);
@@ -1286,8 +1288,9 @@ sub channelDelUser_ctx {
     }
     $sth->finish if $sth;
 
-    # mb112-IMP2: invalider le cache checkUserChannelLevel pour ce user/chan
-    delete $self->{_uchan_level_cache}{"$id_target\x00$channel"};
+    # mb112-IMP2 / mb328-B1: invalider le cache checkUserChannelLevel pour ce
+    # user/chan. Clé normalisée en minuscules (cf. checkUserChannelLevel).
+    delete $self->{_uchan_level_cache}{"$id_target\x00" . lc($channel)};
 
     logBot($self, $ctx->message, $channel, "del", $channel, $target_handle);
     botNotice($self, $nick, "User $target_handle removed from $channel");

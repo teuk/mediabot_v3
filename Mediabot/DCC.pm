@@ -14,6 +14,7 @@ our @EXPORT_OK = qw(
     is_dcc_active
     is_dcc_passive
     ip_int_to_ipv4
+    validate_dcc_active_target
 );
 
 # =============================================================================
@@ -216,6 +217,53 @@ sub ip_int_to_ipv4 {
         (($ip_int >> 8)  & 255),
         ($ip_int & 255),
     );
+}
+
+# validate_dcc_active_target($ip_int, $port)
+#
+# MB332-B1: active DCC CHAT asks the bot to open an outbound TCP connection to
+# an address supplied by IRC. Validate that destination centrally before any
+# socket is opened. Private, loopback, link-local, carrier-grade NAT,
+# documentation, benchmark, multicast and reserved destinations are rejected
+# so DCC cannot be used as an SSRF/port-scanning primitive against networks
+# reachable from the bot host.
+#
+# Returns: (ok, dotted_ipv4_or_undef, reason)
+sub validate_dcc_active_target {
+    my ($ip_int, $port) = @_;
+
+    my $ip = ip_int_to_ipv4($ip_int);
+    return (0, undef, 'invalid_ipv4_integer') unless defined $ip;
+
+    return (0, $ip, 'invalid_port')
+        unless defined($port)
+            && !ref($port)
+            && $port =~ /^\d+$/
+            && $port >= 1024
+            && $port <= 65535;
+
+    my @octet = split /\./, $ip;
+    return (0, $ip, 'invalid_ipv4') unless @octet == 4;
+
+    my ($a, $b, $c, $d) = @octet;
+
+    return (0, $ip, 'unspecified')     if $a == 0;
+    return (0, $ip, 'private')         if $a == 10;
+    return (0, $ip, 'shared_cgnat')    if $a == 100 && $b >= 64 && $b <= 127;
+    return (0, $ip, 'loopback')        if $a == 127;
+    return (0, $ip, 'link_local')      if $a == 169 && $b == 254;
+    return (0, $ip, 'private')         if $a == 172 && $b >= 16 && $b <= 31;
+    return (0, $ip, 'ietf_protocol')   if $a == 192 && $b == 0 && $c == 0;
+    return (0, $ip, 'documentation')   if $a == 192 && $b == 0 && $c == 2;
+    return (0, $ip, 'private')         if $a == 192 && $b == 168;
+    return (0, $ip, 'deprecated_6to4') if $a == 192 && $b == 88 && $c == 99;
+    return (0, $ip, 'benchmark')       if $a == 198 && ($b == 18 || $b == 19);
+    return (0, $ip, 'documentation')   if $a == 198 && $b == 51 && $c == 100;
+    return (0, $ip, 'documentation')   if $a == 203 && $b == 0 && $c == 113;
+    return (0, $ip, 'multicast')       if $a >= 224 && $a <= 239;
+    return (0, $ip, 'reserved')        if $a >= 240;
+
+    return (1, $ip, 'ok');
 }
 
 1;

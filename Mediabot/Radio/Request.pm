@@ -8,6 +8,7 @@ use File::Spec;
 use File::Find qw(find);
 use IO::Async::Timer::Countdown;
 use POSIX qw(WNOHANG);
+use Scalar::Util qw(weaken);
 use DBI;
 use JSON::PP qw(decode_json);
 use Time::HiRes qw(time);
@@ -419,6 +420,7 @@ sub _start_download {
             # run the normal completion path later from a stale closure.
             if (!$job->{active} || $job->{cancel_requested} || (($job->{pid} // 0) != $pid)) {
                 eval { $loop->remove($timer) };
+                undef $timer;   # mb326-B1: rompre le cycle closure<->timer (chemin terminal stale)
                 return;
             }
 
@@ -462,6 +464,7 @@ sub _start_download {
             my $timedout    = $job->{timed_out} ? 1 : 0;
 
             eval { $loop->remove($timer) };
+            undef $timer;   # mb326-B1: rompre le cycle closure<->timer (chemin terminal complétion)
             $bot->{_radio_request_download} = {};
 
             if ($res < 0) {
@@ -499,6 +502,12 @@ sub _start_download {
     $bot->{_radio_request_download}->{loop}  = $loop;
 
     $loop->add($timer);
+
+    # MB336-B1: the job hash and loop keep the timer alive while it is active.
+    # Keep only a weak captured lexical so an admin cancellation that removes
+    # the timer before on_expire runs cannot leave a closure<->timer cycle.
+    weaken($timer);
+
     $timer->start;
 
     logBot($bot, $ctx->message, $ctx->channel, 'play', 'download-start', $query);

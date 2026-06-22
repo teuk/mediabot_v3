@@ -24,6 +24,7 @@ use Mediabot::Helpers;
 use Mediabot::ChannelCommands;
 use Mediabot::UserCommands;
 use Mediabot::External;
+use Mediabot::DCC qw(validate_dcc_active_target);
 use Mediabot::DBCommands;
 use Mediabot::AdminCommands;
 use Time::HiRes qw(usleep);
@@ -1532,6 +1533,14 @@ sub joinChannels {
                             if $self->{logger};
                         @{ $self->{_join_who_timers} // [] } =
                             grep { $_ != $who_timer } @{ $self->{_join_who_timers} // [] };
+                        # mb326-B1: retirer du loop et rompre le cycle closure<->timer.
+                        # on_expire ne retirait pas le Countdown firé du loop (il y
+                        # restait inerte) et la closure capturait $who_timer ->
+                        # double rétention (loop + cycle) jamais libérée. Le nettoyage
+                        # NS3 en tête de routine ne les voit plus (auto-retirés du
+                        # tableau ci-dessus), d'où accumulation sur un bot long-running.
+                        eval { $loop->remove($who_timer) } if $loop;
+                        undef $who_timer;
                     },
                 );
                 push @{ $self->{_join_who_timers} }, $who_timer;
@@ -1550,6 +1559,10 @@ sub joinChannels {
                     $do_join->();
                     @{ $self->{_join_timers} // [] } =
                         grep { $_ != $timer } @{ $self->{_join_timers} // [] };
+                    # mb326-B1: même correctif que les WHO timers — retirer du loop
+                    # et rompre le cycle closure<->timer pour éviter la fuite.
+                    eval { $loop->remove($timer) } if $loop;
+                    undef $timer;
                 },
             );
             push @{ $self->{_join_timers} }, $timer;
@@ -2186,7 +2199,7 @@ slap|slap [nick]|public|Slap a nick with a random object via CTCP ACTION.
 # Analytics / stats
 abbrev|abbrev <text>|public|Generate an acronym from the initials of each word.
 active|active [period]|public|List nicks active in the last N hours or days (e.g. 24h, 7d).
-calclast|calclast|public|Show your last !calc results (session memory).
+calclast|calclast [1-3]|public|Show your most recent !calc results (session memory).
 calc|calc <expression>|public|Evaluate a safe calculator expression.
 stats|stats [nick]|public|Show channel/user statistics.
 top|top [limit]|public|Show top channel activity statistics.
@@ -2434,6 +2447,11 @@ sub _mbHelpSendNoticeQueue {
             on_expire => sub {
                 botNotice($self, $nick, $line);
                 eval { $loop->remove($timer) };
+                # mb326-B1: rompre le cycle de référence closure<->timer. Sans ce
+                # undef, la closure on_expire capture $timer et $timer détient la
+                # closure : refcount jamais nul même après loop->remove et splice
+                # du tableau de suivi -> un objet timer fuit par ligne de help.
+                undef $timer;
             },
         );
 
@@ -3354,10 +3372,25 @@ sub _handle_dcc_chat_request {
                    && defined $token  && length($token) > 0
                    && $token =~ /^[A-Za-z0-9._-]+$/);
 
-    # ── Sanity check on port (active mode only) ──────────────────────────────
-    unless ($is_passive || (defined $port && $port >= 1024 && $port <= 65535)) {
-        $logger->log(1, "DCC CHAT from $nick: invalid port $port - ignored");
-        return;
+    # MB332-B1: an active DCC request controls an outbound connection made by
+    # the bot. Validate both the 32-bit address and the destination class before
+    # looking up the user or delegating to Partyline. Passive DCC keeps its
+    # historical token-based flow and does not provide an outbound target here.
+    my ($active_target_ok, $active_ip, $active_target_reason) = (1, undef, 'passive');
+    unless ($is_passive) {
+        ($active_target_ok, $active_ip, $active_target_reason)
+            = validate_dcc_active_target($ip_int, $port);
+
+        unless ($active_target_ok) {
+            my $safe_ip = defined($active_ip) ? $active_ip : 'invalid';
+            my $safe_port = defined($port) ? $port : 'undef';
+            $logger->log(
+                1,
+                "DCC CHAT from $nick: rejected active target "
+                . "$safe_ip:$safe_port reason=$active_target_reason"
+            );
+            return;
+        }
     }
 
     # ── Partyline must be available ──────────────────────────────────────────
@@ -3393,8 +3426,8 @@ sub _handle_dcc_chat_request {
     }
     else {
         $logger->log(2, sprintf(
-            "DCC CHAT from %s (level=%s): active mode - ip_int=%d port=%d",
-            $nick, $row->{description}, $ip_int, $port
+            "DCC CHAT from %s (level=%s): active mode - target=%s:%d",
+            $nick, $row->{description}, $active_ip, $port
         ));
         $self->{partyline}->accept_dcc_chat($nick, $ip_int, $port);
     }

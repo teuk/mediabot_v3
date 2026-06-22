@@ -11,6 +11,7 @@ use File::Basename qw(dirname);
 use POSIX qw(strftime setsid WNOHANG);
 use Exporter 'import';
 use List::Util qw(min);
+use Scalar::Util qw(weaken);
 use IO::Async::Timer::Countdown;
 use Sys::Hostname qw(hostname);
 use HTTP::Tiny;
@@ -2003,6 +2004,14 @@ sub radioDlCancel_ctx {
 
     $loop->add($reap_timer);
     $loop->add($kill_timer);
+
+    # MB336-B1: the job and IO::Async loop are the strong owners. The timer
+    # callbacks must not keep their own timer alive through the captured
+    # lexical after cancellation cleanup removes those owners. Weakening the
+    # lexicals also covers timers removed before their callback ever fires.
+    weaken($reap_timer);
+    weaken($kill_timer);
+
     $reap_timer->start;
     $kill_timer->start;
 
