@@ -6,22 +6,40 @@ It is designed for real IRC operations and long-term use: channel administration
 
 ---
 
+## Community
+
+**[Report a bug](https://github.com/teuk/mediabot_v3/issues/new?template=bug_report.md) · [Request a feature](https://github.com/teuk/mediabot_v3/issues/new?template=feature_request.md) · [Ask a question](https://github.com/teuk/mediabot_v3/discussions) · [Contribute](CONTRIBUTING.md) · [Get support](SUPPORT.md)**
+
+Live IRC community chat:
+
+* **Network:** EpiKnet
+* **Server:** `irc.epiknet.org`
+* **Port:** `6697`
+* **Encryption:** SSL/TLS
+* **Channel:** `#i/o`
+
+Contributions of all sizes are welcome, including code, documentation, tests, plugins, translations, installation feedback, and testing on additional IRC networks.
+
+Use GitHub Issues for reproducible bugs and concrete feature requests. Use GitHub Discussions for installation questions, general support, and ideas that still need discussion.
+
+---
+
 ## Documentation first
 
 The README gives the essential path to install and validate Mediabot.
 
 The full documentation lives in the GitHub wiki:
 
-- [Mediabot v3 Wiki](https://github.com/teuk/mediabot_v3/wiki)
-- [Installation](https://github.com/teuk/mediabot_v3/wiki/Installation)
-- [Configuration](https://github.com/teuk/mediabot_v3/wiki/Configuration)
-- [Database model](https://github.com/teuk/mediabot_v3/wiki/Database-model)
-- [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands)
-- [Private and admin commands](https://github.com/teuk/mediabot_v3/wiki/Private-and-admin-commands)
-- [Partyline](https://github.com/teuk/mediabot_v3/wiki/Partyline)
-- [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing)
-- [Troubleshooting](https://github.com/teuk/mediabot_v3/wiki/Troubleshooting)
-- [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes)
+* [Mediabot v3 Wiki](https://github.com/teuk/mediabot_v3/wiki)
+* [Installation](https://github.com/teuk/mediabot_v3/wiki/Installation)
+* [Configuration](https://github.com/teuk/mediabot_v3/wiki/Configuration)
+* [Database model](https://github.com/teuk/mediabot_v3/wiki/Database-model)
+* [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands)
+* [Private and admin commands](https://github.com/teuk/mediabot_v3/wiki/Private-and-admin-commands)
+* [Partyline](https://github.com/teuk/mediabot_v3/wiki/Partyline)
+* [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing)
+* [Troubleshooting](https://github.com/teuk/mediabot_v3/wiki/Troubleshooting)
+* [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes)
 
 If something in this README is not enough, go to the wiki. The wiki is the operational reference.
 
@@ -31,8 +49,8 @@ If something in this README is not enough, go to the wiki. The wiki is the opera
 
 Mediabot follows a simple versioning rule:
 
-- **odd minor versions** are stable releases;
-- **even minor versions** are development / beta lines.
+* **odd minor versions** are stable releases;
+* **even minor versions** are development / beta lines.
 
 Examples:
 
@@ -52,18 +70,18 @@ Use the Git tree if you want to test or contribute to the current development li
 
 Depending on configuration and enabled integrations, Mediabot can provide:
 
-- IRC channel administration;
-- user, level, and hostmask management;
-- public utility commands;
-- private/admin commands;
-- URL title handling;
-- YouTube, TMDB, media, and radio helpers;
-- reminders, notes, polls, karma, trivia, quotes, and other IRC tools;
-- antiflood guards for busy channels;
-- netsplit/reconnect hardening;
-- Partyline TCP/DCC admin interface;
-- Prometheus metrics;
-- test harnesses for static and live validation.
+* IRC channel administration;
+* user, level, and hostmask management;
+* public utility commands;
+* private/admin commands;
+* URL title handling;
+* YouTube, TMDB, media, and radio helpers;
+* reminders, notes, polls, karma, trivia, quotes, and other IRC tools;
+* antiflood guards for busy channels;
+* netsplit/reconnect hardening;
+* Partyline TCP/DCC admin interface;
+* Prometheus metrics;
+* test harnesses for static and live validation.
 
 ---
 
@@ -71,7 +89,7 @@ Depending on configuration and enabled integrations, Mediabot can provide:
 
 The full install guide is here:
 
-- [Installation](https://github.com/teuk/mediabot_v3/wiki/Installation)
+* [Installation](https://github.com/teuk/mediabot_v3/wiki/Installation)
 
 This section is only the essential path.
 
@@ -157,8 +175,8 @@ The installer creates a minimal `mediabot.conf` and handles initial setup.
 
 If `./configure` detects that the target database exists and asks whether it should recreate it:
 
-- answer **yes** for a brand new install database;
-- answer **no** for an existing production or historical database.
+* answer **yes** for a brand new install database;
+* answer **no** for an existing production or historical database.
 
 `mediabot.sample.conf` is a reference file. Use it to add optional or newer settings that `./configure` does not yet generate.
 
@@ -206,8 +224,8 @@ Existing production databases may need migrations. Do not blindly apply every mi
 
 See:
 
-- [Database model](https://github.com/teuk/mediabot_v3/wiki/Database-model)
-- [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes)
+* [Database model](https://github.com/teuk/mediabot_v3/wiki/Database-model)
+* [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes)
 
 ---
 
@@ -260,7 +278,7 @@ OK: logs written successfully
 
 See:
 
-- [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing)
+* [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing)
 
 ---
 
@@ -284,11 +302,11 @@ Do not daemonize until foreground startup is clean.
 
 Watch for:
 
-- missing Perl modules;
-- database errors;
-- IRC connection errors;
-- charset warnings;
-- missing config keys.
+* missing Perl modules;
+* database errors;
+* IRC connection errors;
+* charset warnings;
+* missing config keys.
 
 ---
 
@@ -359,7 +377,7 @@ Once authenticated, Partyline commands start with a dot:
 
 See:
 
-- [Partyline](https://github.com/teuk/mediabot_v3/wiki/Partyline)
+* [Partyline](https://github.com/teuk/mediabot_v3/wiki/Partyline)
 
 ---
 
@@ -369,13 +387,13 @@ The generated `mediabot.conf` is local runtime configuration.
 
 Important rules:
 
-- do not commit `mediabot.conf`;
-- do not commit real API keys;
-- do not commit real database passwords;
-- do not commit IRC passwords;
-- keep `PARTYLINE_STATUS_JSON` unique per bot instance;
-- keep `METRICS_PORT` unique when multiple bots run on the same host;
-- review `CHARSET_MODE` carefully on legacy databases.
+* do not commit `mediabot.conf`;
+* do not commit real API keys;
+* do not commit real database passwords;
+* do not commit IRC passwords;
+* keep `PARTYLINE_STATUS_JSON` unique per bot instance;
+* keep `METRICS_PORT` unique when multiple bots run on the same host;
+* review `CHARSET_MODE` carefully on legacy databases.
 
 For fresh installs, `CHARSET_MODE=utf8mb4` is recommended.
 
@@ -383,7 +401,7 @@ For old production databases, especially historical IRC instances, review charse
 
 See:
 
-- [Configuration](https://github.com/teuk/mediabot_v3/wiki/Configuration)
+* [Configuration](https://github.com/teuk/mediabot_v3/wiki/Configuration)
 
 ---
 
@@ -431,6 +449,12 @@ A bot connected to IRC must not have passwordless root access.
 
 Recent versions also avoid logging some runtime secrets such as DCC passive tokens and channel JOIN keys.
 
+For security vulnerabilities, do not open a public Issue or disclose the problem in a public IRC channel.
+
+Use GitHub's private vulnerability reporting feature and read:
+
+* [Security policy](.github/SECURITY.md)
+
 ---
 
 ## Troubleshooting
@@ -456,23 +480,45 @@ or instance-specific log paths.
 
 Common issues are documented here:
 
-- [Troubleshooting](https://github.com/teuk/mediabot_v3/wiki/Troubleshooting)
+* [Troubleshooting](https://github.com/teuk/mediabot_v3/wiki/Troubleshooting)
 
 ---
 
 ## Useful links
 
-- [Repository](https://github.com/teuk/mediabot_v3)
-- [Wiki](https://github.com/teuk/mediabot_v3/wiki)
-- [Installation](https://github.com/teuk/mediabot_v3/wiki/Installation)
-- [Configuration](https://github.com/teuk/mediabot_v3/wiki/Configuration)
-- [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing)
-- [Troubleshooting](https://github.com/teuk/mediabot_v3/wiki/Troubleshooting)
+### Documentation
+
+* [Repository](https://github.com/teuk/mediabot_v3)
+* [Wiki](https://github.com/teuk/mediabot_v3/wiki)
+* [Installation](https://github.com/teuk/mediabot_v3/wiki/Installation)
+* [Configuration](https://github.com/teuk/mediabot_v3/wiki/Configuration)
+* [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing)
+* [Troubleshooting](https://github.com/teuk/mediabot_v3/wiki/Troubleshooting)
+
+### Community
+
+* [Report a bug](https://github.com/teuk/mediabot_v3/issues/new?template=bug_report.md)
+* [Request a feature](https://github.com/teuk/mediabot_v3/issues/new?template=feature_request.md)
+* [GitHub Discussions](https://github.com/teuk/mediabot_v3/discussions)
+* [Support guidelines](SUPPORT.md)
+* [Contribution guidelines](CONTRIBUTING.md)
+* [Code of Conduct](CODE_OF_CONDUCT.md)
+* [Security policy](.github/SECURITY.md)
+
+### Live IRC support
+
+* **Network:** EpiKnet
+* **Server:** `irc.epiknet.org`
+* **Port:** `6697`
+* **Encryption:** SSL/TLS
+* **Channel:** `#i/o`
 
 ---
 
 ## License
 
+Mediabot v3 is distributed under the GNU General Public License version 3.
+
 See:
 
-- [LICENSE.md](LICENSE.md)
+* [LICENSE.md](LICENSE.md)
