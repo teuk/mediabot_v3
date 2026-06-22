@@ -527,8 +527,8 @@ Common issues are documented here:
 
 ## License
 
-Mediabot v3 is distributed under the GNU General Public License version 3.
+Mediabot v3 is free software licensed under the **GNU General Public License version 3 or later**.
 
-See:
+SPDX license identifier: `GPL-3.0-or-later`
 
-* [LICENSE.md](LICENSE.md)
+See [LICENSE.md](LICENSE.md) for the complete GNU GPL version 3 license text.
