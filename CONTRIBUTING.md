@@ -229,7 +229,7 @@ Before submitting, verify that:
 
 Do not publish security vulnerabilities, exposed credentials or private infrastructure details in a public Issue, Discussion or IRC channel.
 
-A private security reporting procedure will be documented separately in `SECURITY.md`.
+Use GitHub's private vulnerability reporting feature and see `.github/SECURITY.md` for the complete security reporting procedure.
 
 ## License
 
