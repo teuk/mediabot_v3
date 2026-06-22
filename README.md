@@ -4,6 +4,16 @@
 
 It is designed for real IRC operations and long-term use: channel administration, user and hostmask management, public commands, database-backed features, URL/media helpers, radio helpers, antiflood protection, observability, and a dedicated TCP admin interface called **Partyline**.
 
+<p align="center">
+  <a href="docs/mediabot.png">
+    <img src="docs/mediabot.png" alt="Illustrated WeeChat view of Mediabot v3 running on the #i/o community channel">
+  </a>
+</p>
+
+<p align="center">
+  <em>Illustrated WeeChat-style view of Mediabot v3 running on #i/o. The conversation is fictional.</em>
+</p>
+
 ---
 
 ## Community
