@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Ask a question
+    url: https://github.com/teuk/mediabot_v3/discussions
+    about: Ask for installation help, configuration advice or general Mediabot support.
+
+  - name: Live IRC community chat
+    url: https://www.epiknet.org/
+    about: Join #i/o on the EpiKnet IRC network for live discussion and quick help.
