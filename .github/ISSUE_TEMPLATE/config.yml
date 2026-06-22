@@ -7,4 +7,4 @@ contact_links:
 
   - name: Live IRC community chat
     url: https://www.epiknet.org/
-    about: Join #i/o on the EpiKnet IRC network for live discussion and quick help.
+    about: Connect to irc.epiknet.org on port 6697 with SSL/TLS, then join #i/o.
