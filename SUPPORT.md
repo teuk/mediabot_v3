@@ -67,7 +67,7 @@ IRC conversations are useful for diagnosis and discussion, but confirmed bugs sh
 
 Do not report security vulnerabilities or exposed credentials in a public GitHub Issue or Discussion.
 
-A dedicated private security reporting procedure will be documented separately.
+Use GitHub's private vulnerability reporting feature and see `.github/SECURITY.md` for the complete security reporting procedure.
 
 ## Contributions
 
@@ -82,4 +82,5 @@ Contributions are welcome, including:
 * translations;
 * code review and testing on additional IRC networks.
 
-Contribution guidelines will be available in `CONTRIBUTING.md`.
+See `CONTRIBUTING.md` for the complete contribution guidelines.
+
