@@ -60,8 +60,21 @@ sub command_exists {
     return system('sh', '-c', "command -v '$cmd' >/dev/null 2>&1") == 0 ? 1 : 0;
 }
 
-ok(command_exists('python3'), 'python3 interpreter is available');
-ok(command_exists('tclsh'),   'tclsh interpreter is available');
+# mb338-B1: les interpréteurs Python/Tcl sont des dépendances de runtime
+# OPTIONNELLES. Le reste de la suite SKIP proprement quand une dépendance
+# optionnelle manque (cf. 404_mb165, 412_mb173, 413_mb174) ; ce smoke-test
+# échouait DUR sur leur absence, rendant la suite non-portable (CI / box sans
+# tclsh). On skippe désormais l'interpréteur absent et on n'exerce que les
+# langages réellement disponibles. Dans l'environnement de prod (Python + Tcl
+# installés) les trois cas tournent comme avant — aucune perte de couverture.
+my $have_py  = command_exists('python3');
+my $have_tcl = command_exists('tclsh');
+
+if ($have_py) { ok(1, 'python3 interpreter is available'); }
+else { print "ok - python3 interpreter is available # SKIP python3 not installed\n"; }
+
+if ($have_tcl) { ok(1, 'tclsh interpreter is available'); }
+else { print "ok - tclsh interpreter is available # SKIP tclsh not installed\n"; }
 
 my $bot = MB198::FakeBot->new;
 my $runner = Mediabot::ScriptRunner->new(
@@ -72,11 +85,15 @@ my $runner = Mediabot::ScriptRunner->new(
 );
 my $applier = Mediabot::ScriptActionRunner->new(bot => $bot);
 
+# Perl est toujours disponible (l'interpréteur qui exécute ce test) ; Python et
+# Tcl ne sont ajoutés que s'ils sont présents.
 my @cases = (
     [ hello    => 'examples/hello_perl.pl',   'Perl script bridge OK for command: hello' ],
-    [ pyhello  => 'examples/hello_python.py', 'Python script bridge OK for command: pyhello' ],
-    [ tclhello => 'examples/hello_tcl.tcl',   'Tcl script bridge OK for command: tclhello' ],
 );
+push @cases, [ pyhello  => 'examples/hello_python.py', 'Python script bridge OK for command: pyhello' ]
+    if $have_py;
+push @cases, [ tclhello => 'examples/hello_tcl.tcl',   'Tcl script bridge OK for command: tclhello' ]
+    if $have_tcl;
 
 my $message_count = 0;
 
@@ -130,7 +147,8 @@ for my $case (@cases) {
 }
 
 my @logs = $bot->{logger}->logs;
-ok(@logs == 3, 'three log actions were applied');
+ok(@logs == scalar(@cases),
+   'one log action per executed script (' . scalar(@cases) . ' run)');
 
 if (@fail) {
     print "FAILED: @fail\n";

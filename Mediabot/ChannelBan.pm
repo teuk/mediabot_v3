@@ -372,6 +372,14 @@ sub add_ban {
         return (undef, "an active ban already exists for $mask (id $existing->{id_channel_ban})");
     }
 
+    # mb350-B1: l'expiration est calculée EN SQL (NOW() + INTERVAL ? SECOND) au
+    # lieu d'une chaîne pré-formatée côté Perl via localtime. Avant, expires_at
+    # était écrit avec l'horloge du process Perl, puis comparé à NOW() côté
+    # MariaDB (expired_bans) : si le fuseau de la session SQL diffère du fuseau
+    # système (ex. DB en UTC, ou déplacée en conteneur), les bans temporisés
+    # duraient trop/pas assez. En le calculant côté serveur, les deux côtés
+    # partagent la même horloge. expires_seconds = nombre de secondes, ou undef
+    # pour un ban permanent (NOW() + INTERVAL NULL SECOND => NULL en MySQL).
     my $sql = q{
         INSERT INTO CHANNEL_BAN
             (
@@ -385,7 +393,7 @@ sub add_ban {
                 active,
                 source
             )
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+        VALUES (?, ?, ?, ?, ?, ?, (NOW() + INTERVAL ? SECOND), 1, ?)
     };
 
     my $sth = $self->{dbh}->prepare($sql);
@@ -395,6 +403,12 @@ sub add_ban {
         return (undef, "database prepare error");
     }
 
+    # Rétro-compat : si un appelant fournit encore expires_seconds non défini mais
+    # un ancien expires_at, on retombe sur "permanent" (NULL) — les deux appelants
+    # internes passent désormais expires_seconds.
+    my $expires_seconds = $args{expires_seconds};
+    $expires_seconds = undef unless defined($expires_seconds) && $expires_seconds =~ /^\d+$/ && $expires_seconds > 0;
+
     unless ($sth && $sth->execute(
         $id_channel,
         $mask,
@@ -402,7 +416,7 @@ sub add_ban {
         $args{reason},
         $args{created_by},
         $args{created_by_nick},
-        $args{expires_at},
+        $expires_seconds,
         $args{source} || 'irc',
     )) {
         $self->_log(1, "add_ban() SQL execute error: $DBI::errstr Query: $sql");

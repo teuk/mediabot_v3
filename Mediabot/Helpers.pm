@@ -761,6 +761,15 @@ sub botAction {
 			$self->{logger}->log(0,"-> *$sTo* $log_msg");
 		}
 		if (defined($sMsg) && ($sMsg ne "")) {
+			# mb344-B1: neutraliser les sauts de ligne AVANT l'envoi, comme le
+			# font déjà botPrivmsg (mb325) et botNotice. Sans ça, un ACTION
+			# contenant un CR/LF (p.ex. titre d'URL ou texte relayé) terminait la
+			# ligne IRC prématurément : le reste devenait une commande IRC injectée
+			# (\1ACTION x\r\nPRIVMSG #autre :... \1). Le commentaire mb134-B8 disait
+			# pourtant "keep botAction aligned with botPrivmsg" — l'alignement CRLF
+			# manquait. _split_text_for_irc ne retire pas les \r\n, d'où ce fix.
+			$sMsg =~ s/[\r\n]+/ /g;
+
 			# mb327-B1: découpe les ACTIONs longues sur le même budget d'octets que
 			# botPrivmsg/botNotice (helper partagé _split_text_for_irc). Sans ça, un
 			# /me accentué/emoji dépassait ~512 octets : le serveur tronquait la ligne

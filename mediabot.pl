@@ -11,7 +11,7 @@ BEGIN {push @INC, '.';}
 use strict;
 use warnings;
 use diagnostics;
-use POSIX qw/setsid strftime/;
+use POSIX qw/setsid strftime mktime/;
 use Getopt::Long;
 use File::Basename;
 use Mediabot::Mediabot;
@@ -388,6 +388,109 @@ my $partyline_port = $mediabot->{partyline}->get_port;
 $mediabot->{logger}->log(4, "Partyline port is: $partyline_port");
 
 # ── Centralised scheduler ────────────────────────────────────────────────────
+
+# mb353-B1: calculs calendaires pour les rapports daily/weekly.
+#
+# Contrairement à mb351, on ne renvoie plus un simple délai fondé sur 86400s.
+# On renvoie l'epoch du PROCHAIN créneau local. Le Scheduler rappelle le helper
+# après chaque exécution et réarme un one-shot : les changements DST sont donc
+# absorbés au prochain tick au lieu de laisser une dérive jusqu'au redémarrage.
+sub _local_epoch_for_day_offset {
+    my ($now, $days_ahead, $hour, $min) = @_;
+
+    # mb355-B1: advance the CALENDAR date, not the epoch by N * 86400.
+    # A fall-back day can last 25 hours: adding 86400 seconds from Sunday
+    # 00:30 may still land on Sunday 23:30, which made the weekly helper use
+    # the wrong date (and in one case skip the coming Monday entirely).
+    # POSIX::mktime normalises an out-of-range tm_mday while respecting the
+    # local timezone and DST rules.
+    my @base = localtime($now);
+    my $epoch = mktime(
+        0,
+        $min,
+        $hour,
+        $base[3] + $days_ahead,
+        $base[4],
+        $base[5],
+        0,
+        0,
+        -1,
+    );
+
+    die "cannot calculate local calendar epoch\n"
+        unless defined($epoch) && $epoch >= 0;
+
+    return int($epoch);
+}
+
+sub _next_daily_epoch {
+    my ($now, $hour, $min) = @_;
+    $now  = time() unless defined $now;
+    $hour = 0      unless defined $hour;
+    $min  = 0      unless defined $min;
+
+    for my $days_ahead (0 .. 2) {
+        my $epoch = eval {
+            _local_epoch_for_day_offset($now, $days_ahead, $hour, $min)
+        };
+        return $epoch if defined($epoch) && $epoch > $now;
+    }
+
+    die "cannot calculate next daily report epoch\n";
+}
+
+sub _next_weekly_epoch {
+    my ($now, $target_wday, $hour, $min) = @_;
+    $now         = time() unless defined $now;
+    $target_wday = 1      unless defined $target_wday;
+    $hour        = 0      unless defined $hour;
+    $min         = 0      unless defined $min;
+
+    my @lt = localtime($now);
+    my $days_ahead = ($target_wday - $lt[6]) % 7;
+
+    for my $extra_week (0 .. 1) {
+        my $offset = $days_ahead + ($extra_week * 7);
+        my $epoch = eval {
+            _local_epoch_for_day_offset($now, $offset, $hour, $min)
+        };
+        return $epoch if defined($epoch) && $epoch > $now;
+    }
+
+    die "cannot calculate next weekly report epoch\n";
+}
+
+# mb354-B1: report wall-clock slots are configurable. Values are read once at
+# startup, validated by Mediabot::Conf and logged with the effective process
+# timezone. Existing installations keep the historical defaults.
+my $report_daily_hour = eval {
+    $mediabot->{conf}->get_int('main.REPORT_DAILY_HOUR',
+        default => 0, min => 0, max => 23)
+} // 0;
+my $report_daily_minute = eval {
+    $mediabot->{conf}->get_int('main.REPORT_DAILY_MINUTE',
+        default => 0, min => 0, max => 59)
+} // 0;
+my $report_weekly_wday = eval {
+    $mediabot->{conf}->get_int('main.REPORT_WEEKLY_WDAY',
+        default => 1, min => 0, max => 6)
+} // 1;
+my $report_weekly_hour = eval {
+    $mediabot->{conf}->get_int('main.REPORT_WEEKLY_HOUR',
+        default => 0, min => 0, max => 23)
+} // 0;
+my $report_weekly_minute = eval {
+    $mediabot->{conf}->get_int('main.REPORT_WEEKLY_MINUTE',
+        default => 0, min => 0, max => 59)
+} // 0;
+my $report_timezone = strftime('%Z %z', localtime(time()));
+$mediabot->{logger}->log(2, sprintf(
+    'Report schedule: daily=%02d:%02d weekly=wday%d %02d:%02d timezone=%s',
+    $report_daily_hour, $report_daily_minute,
+    $report_weekly_wday, $report_weekly_hour, $report_weekly_minute,
+    $report_timezone,
+));
+
 my $scheduler = Mediabot::Scheduler->new(
     loop   => $loop,
     logger => $mediabot->{logger},
@@ -501,30 +604,46 @@ $scheduler->add(
 $scheduler->add(
     name      => 'weekly_channel_report',
     interval  => 604800,  # U7: every 7 days
+    next_run_cb => sub {
+        _next_weekly_epoch(
+            $_[0], $report_weekly_wday,
+            $report_weekly_hour, $report_weekly_minute,
+        )
+    },  # mb353-B1 / mb354-B1
     cb        => sub {
         for my $chan (sort keys %{ $mediabot->{channels} // {} }) {
             my $dbh = eval { $mediabot->{db}->ensure_connected } // $mediabot->{dbh};
             next unless $dbh;
             my (@top_msg, @top_karma);
             eval {
+                # mb346-B1: ne compter que les vrais messages (cf. daily).
                 my $sth = $dbh->prepare(q{
-                    SELECT nick, COUNT(*) AS cnt FROM CHANNEL_LOG
+                    SELECT cl.nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl
                     JOIN CHANNEL c USING (id_channel)
-                    WHERE c.name = ? AND ts >= NOW() - INTERVAL 7 DAY
-                    GROUP BY nick ORDER BY cnt DESC LIMIT 3
+                    WHERE c.name = ?
+                      AND cl.event_type IN ('public','action')
+                      AND cl.ts >= NOW() - INTERVAL 7 DAY
+                    GROUP BY cl.nick ORDER BY cnt DESC LIMIT 3
                 });
                 if ($sth && $sth->execute($chan)) {
                     while (my $r = $sth->fetchrow_hashref) { push @top_msg, "$r->{nick}($r->{cnt})" }
                     $sth->finish;
                 }
+                # mb346-B1: karma hebdo = VARIATION nette des 7 derniers jours
+                # (SUM(delta) de KARMA_LOG), pas le score cumulé all-time de KARMA
+                # (qui n'a aucune borne de temps et rendait le "Weekly" faux).
                 my $sth2 = $dbh->prepare(q{
-                    SELECT k.nick, k.score FROM KARMA k
-                    JOIN CHANNEL c ON c.id_channel = k.id_channel
-                    WHERE c.name = ? ORDER BY k.score DESC LIMIT 3
+                    SELECT kl.nick, SUM(kl.delta) AS net FROM KARMA_LOG kl
+                    JOIN CHANNEL c ON c.id_channel = kl.id_channel
+                    WHERE c.name = ? AND kl.ts >= NOW() - INTERVAL 7 DAY
+                    GROUP BY kl.nick HAVING net <> 0
+                    ORDER BY ABS(net) DESC LIMIT 3
                 });
                 if ($sth2 && $sth2->execute($chan)) {
                     while (my $r = $sth2->fetchrow_hashref) {
-                        my $sign = $r->{score} > 0 ? '+' : ''; push @top_karma, "$r->{nick}(${sign}$r->{score})"
+                        my $net  = $r->{net} // 0;
+                        my $sign = $net > 0 ? '+' : '';
+                        push @top_karma, "$r->{nick}(${sign}$net)";
                     }
                     $sth2->finish;
                 }
@@ -535,7 +654,7 @@ $scheduler->add(
             Mediabot::Helpers::botPrivmsg($mediabot, $chan,
                 "\x{2728} Weekly report — Top speakers (7d): $msg_str");
             Mediabot::Helpers::botPrivmsg($mediabot, $chan,
-                "\x{2728} Weekly report — Top karma: $karma_str");
+                "\x{2728} Weekly report — Top karma (7d): $karma_str");
         }
     },
     autostart => 1,
@@ -544,17 +663,28 @@ $scheduler->add(
 $scheduler->add(
     name      => 'daily_channel_report',
     interval  => 86400,   # I5: once per day — top 3 msgs + karma per channel
+    next_run_cb => sub {
+        _next_daily_epoch(
+            $_[0], $report_daily_hour, $report_daily_minute,
+        )
+    },  # mb353-B1 / mb354-B1
     cb        => sub {
         my $dbh = eval { $mediabot->{db}->ensure_connected } // $mediabot->{dbh};
         return unless $dbh;
 
         for my $chan (sort keys %{ $mediabot->{channels} // {} }) {
             # Top 3 speakers (last 24h)
+            # mb346-B1: ne compter que les vrais messages. Sans le filtre
+            # event_type, COUNT(*) incluait join/part/quit/mode/kick/notice :
+            # un nick qui rejoint/quitte en boucle ressortait "top speaker" sans
+            # avoir parlé. On s'aligne sur la convention du reste du code
+            # (event_type IN ('public','action'), cf. !words / seen).
             my $sth_msgs = $dbh->prepare(q{
                 SELECT cl.nick, COUNT(*) AS cnt
                 FROM CHANNEL_LOG cl
                 JOIN CHANNEL c ON c.id_channel = cl.id_channel
                 WHERE c.name = ?
+                  AND cl.event_type IN ('public','action')
                   AND cl.ts >= DATE_SUB(NOW(), INTERVAL 1 DAY)
                 GROUP BY cl.nick ORDER BY cnt DESC LIMIT 3
             });
@@ -577,15 +707,26 @@ $scheduler->add(
             }
             my @top_karma;
             if ($id_chan) {
+                # mb346-B1: le karma "du jour" doit être la VARIATION nette des
+                # dernières 24h, pas le score cumulé de toujours. KARMA.score est
+                # le total all-time : l'afficher sous "Daily report" était faux.
+                # On somme les deltas horodatés de KARMA_LOG sur la fenêtre 24h
+                # (table déjà alimentée par !karma, purgée à 90j). Repli gracieux
+                # si KARMA_LOG est absente (les guards $sth/execute suffisent).
                 my $sth_k = $dbh->prepare(q{
-                    SELECT nick, score FROM KARMA
-                    WHERE id_channel = ? AND score != 0
-                    ORDER BY ABS(score) DESC LIMIT 3  -- DR1/fix: include negative scores
+                    SELECT nick, SUM(delta) AS net
+                    FROM KARMA_LOG
+                    WHERE id_channel = ?
+                      AND ts >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+                    GROUP BY nick
+                    HAVING net <> 0
+                    ORDER BY ABS(net) DESC LIMIT 3
                 });
                 if ($sth_k && $sth_k->execute($id_chan)) {
                     while (my $r = $sth_k->fetchrow_hashref) {
-                        my $sign = $r->{score} > 0 ? '+' : '';
-                        push @top_karma, "$r->{nick} (${sign}$r->{score})";
+                        my $net  = $r->{net} // 0;
+                        my $sign = $net > 0 ? '+' : '';
+                        push @top_karma, "$r->{nick} (${sign}$net)";
                     }
                     $sth_k->finish;
                 }
@@ -594,9 +735,9 @@ $scheduler->add(
             next unless @top_msgs || @top_karma;
 
             my $msg_str   = @top_msgs  ? join(' | ', @top_msgs)  : '(no activity)';
-            my $karma_str = @top_karma ? join(' | ', @top_karma) : '(no karma)';
+            my $karma_str = @top_karma ? join(' | ', @top_karma) : '(no karma change)';
             Mediabot::Helpers::botPrivmsg($mediabot, $chan,
-                "📊 Daily report — Top speakers: $msg_str  ·  Top karma: $karma_str");
+                "📊 Daily report — Top speakers (24h): $msg_str  ·  Top karma (24h): $karma_str");
             $mediabot->{logger}->log(2, "daily_channel_report sent to $chan");
         }
     },
@@ -2289,15 +2430,14 @@ sub on_message_RPL_WHOISUSER {
                 return;
             }
 
-            my $expires_at = $duration > 0 ? $cb->expires_sql_from_seconds($duration) : undef;
-
+            # mb350-B1: secondes -> expiration calculée côté SQL (une seule horloge)
             my ($id_ban, $ban_err) = $cb->add_ban(
                 id_channel      => $id_channel,
                 mask            => $norm_mask,
                 ban_level       => 75,
                 reason          => $reason,
                 created_by_nick => $actor,
-                expires_at      => $expires_at,
+                expires_seconds => ($duration > 0 ? $duration : undef),
                 source          => 'partyline',
             );
 

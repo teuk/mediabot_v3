@@ -11,6 +11,11 @@ use Time::Local qw(timegm);
 use Time::Piece;
 use List::Util qw(min);
 use Exporter 'import';
+
+# mb348-B1: les statistiques basees sur CHANNEL_LOG filtrent les VRAIS messages
+# via event_type IN ('public','action'), et non l'ancien faux proxy
+# publictext IS NOT NULL (qui comptait aussi join/part/kick/mode/topic/notice).
+# Le viewer de log brut .logs (_cmd_chanlog) reste volontairement non filtre.
 use Try::Tiny;
 use Mediabot::Helpers;
 
@@ -3811,7 +3816,7 @@ sub mbWordCount_ctx {
     my $sth = $self->{dbh}->prepare(qq{
         SELECT publictext FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE cl.nick = ? AND c.name = ? AND publictext IS NOT NULL
+        WHERE cl.nick = ? AND c.name = ? AND event_type IN ('public','action')
         $period_sql
         ORDER BY cl.id_channel_log DESC
         $limit_clause
@@ -3857,7 +3862,7 @@ sub mbWordCount_ctx {
                 JOIN CHANNEL c2 ON c2.id_channel = cl2.id_channel
                 WHERE c2.name = ?
                   AND cl2.nick != ?
-                  AND cl2.publictext IS NOT NULL
+                  AND cl2.event_type IN ('public','action')
                 GROUP BY cl2.nick
                 HAVING COUNT(*) > ?
             ) sub_q
@@ -4530,7 +4535,7 @@ sub mbLast_ctx {
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE cl.nick = ? AND c.name = ?
-          AND cl.publictext IS NOT NULL AND cl.publictext != ''
+          AND cl.event_type IN ('public','action') AND cl.publictext != ''
         ORDER BY cl.ts DESC
         LIMIT $limit
     });
@@ -7506,9 +7511,17 @@ sub checkTriviaAnswer {
     }
     # B3/fix: guard against undef answer + wrap regex in eval
     return unless defined $trivia->{answer};
+    # mb339-B1: la branche "contient la réponse" faisait un match SOUS-CHAÎNE brut
+    # (lc($text) =~ /\Qanswer\E/), donc un mot plus long contenant la réponse
+    # validait à tort (réponse "war" gagnée par "warsaw"), et une mention
+    # incidente terminait la manche. On borne désormais la réponse par des
+    # frontières alphanumériques, comme le fait déjà checkQuotegameAnswer pour
+    # l'auteur (mb121-B2) : "the answer is paris" / "paris!" gagnent toujours,
+    # mais "warsaw" ne valide plus "war".
+    my $answer = $trivia->{answer};
     my $matched = eval {
-        lc($text) eq $trivia->{answer}
-        || lc($text) =~ /\Q$trivia->{answer}\E/
+        lc($text) eq $answer
+        || lc($text) =~ /(?<![A-Za-z0-9])\Q$answer\E(?![A-Za-z0-9])/
     };
     return unless $matched;
     $trivia->{active} = 0;
@@ -7872,7 +7885,7 @@ sub mbProfil_ctx {
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.nick = ?
-          AND cl.publictext IS NOT NULL
+          AND cl.event_type IN ('public','action')
     });
     if ($sth && $sth->execute($channel, $target)) {
         my $r = $sth->fetchrow_hashref; $sth->finish;
@@ -7907,7 +7920,7 @@ sub mbProfil_ctx {
             JOIN CHANNEL c2 ON c2.id_channel = cl2.id_channel
             WHERE c2.name = ?
               AND cl2.nick != ?
-              AND cl2.publictext IS NOT NULL
+              AND cl2.event_type IN ('public','action')
             GROUP BY cl2.nick
             HAVING COUNT(*) > ?
         ) sub_q
@@ -7923,7 +7936,7 @@ sub mbProfil_ctx {
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.nick = ?
-          AND cl.publictext IS NOT NULL
+          AND cl.event_type IN ('public','action')
         GROUP BY HOUR(cl.ts)
     });
     my @hours = (0) x 24;
@@ -8062,7 +8075,7 @@ sub mbRadar_ctx {
             FROM CHANNEL_LOG cl
             JOIN CHANNEL c ON c.id_channel = cl.id_channel
             WHERE c.name = ?
-              AND cl.publictext IS NOT NULL
+              AND cl.event_type IN ('public','action')
               AND cl.ts >= NOW() - INTERVAL $hist_days DAY
             GROUP BY DATE(cl.ts)
             ORDER BY d
@@ -8110,7 +8123,7 @@ sub mbRadar_ctx {
             SUM(IF(cl.ts >= NOW() - INTERVAL 24 HOUR, 1, 0)) AS last_24h
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        WHERE c.name = ? AND cl.event_type IN ('public','action')
     });
     my ($last_h, $avg_h, $last_24h) = (0, 0, 0);
     if ($sth_r && $sth_r->execute($channel)) {
@@ -8138,7 +8151,7 @@ sub mbRadar_ctx {
         SELECT TIMESTAMPDIFF(MINUTE, MAX(cl.ts), NOW()) AS m
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        WHERE c.name = ? AND cl.event_type IN ('public','action')
     });
     if ($sth_l && $sth_l->execute($channel)) {
         my $r = $sth_l->fetchrow_hashref; $sth_l->finish;
@@ -8159,7 +8172,7 @@ sub mbRadar_ctx {
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ?
-          AND cl.publictext IS NOT NULL
+          AND cl.event_type IN ('public','action')
         GROUP BY cl.nick
         HAVING first >= NOW() - INTERVAL 24 HOUR
         ORDER BY first ASC
@@ -8191,7 +8204,7 @@ sub mbRadar_ctx {
                 JOIN CHANNEL c ON c.id_channel = cl.id_channel
                 WHERE c.name = ?
                   AND cl.nick IN ($ph)
-                  AND cl.publictext IS NOT NULL
+                  AND cl.event_type IN ('public','action')
                 GROUP BY cl.nick
             });
             my %last_seen;
@@ -8234,7 +8247,7 @@ sub mbRadar_ctx {
             JOIN CHANNEL c ON c.id_channel = cl.id_channel
             WHERE c.name = ?
               AND cl.ts >= NOW() - INTERVAL 1 HOUR
-              AND cl.publictext IS NOT NULL
+              AND cl.event_type IN ('public','action')
             GROUP BY cl.nick
             ORDER BY c DESC
             LIMIT 3
@@ -8283,7 +8296,7 @@ sub mbDashboard_ctx {
                TIMESTAMPDIFF(DAY, MIN(cl.ts), NOW()) AS days
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        WHERE c.name = ? AND cl.event_type IN ('public','action')
     });
     my %g;
     if ($sth && $sth->execute($channel)) {
@@ -8304,7 +8317,7 @@ sub mbDashboard_ctx {
         SELECT cl.nick, COUNT(*) AS c
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        WHERE c.name = ? AND cl.event_type IN ('public','action')
         GROUP BY cl.nick
         ORDER BY c DESC
         LIMIT 5
@@ -8322,7 +8335,7 @@ sub mbDashboard_ctx {
         SELECT DATE(cl.ts) AS d, COUNT(*) AS c
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        WHERE c.name = ? AND cl.event_type IN ('public','action')
           AND cl.ts >= NOW() - INTERVAL 7 DAY
         GROUP BY DATE(cl.ts)
         ORDER BY d
@@ -8357,7 +8370,7 @@ sub mbDashboard_ctx {
         SELECT HOUR(cl.ts) AS h, COUNT(*) AS c
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        WHERE c.name = ? AND cl.event_type IN ('public','action')
           AND cl.ts >= NOW() - INTERVAL 30 DAY
         GROUP BY HOUR(cl.ts)
     });
@@ -8405,7 +8418,7 @@ sub mbDashboard_ctx {
         SELECT COUNT(DISTINCT cl.nick) AS c
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        WHERE c.name = ? AND cl.event_type IN ('public','action')
           AND cl.ts >= NOW() - INTERVAL 60 MINUTE
     });
     my $active_now = 0;
@@ -8852,7 +8865,7 @@ sub mbCompat_ctx {
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.nick IN (?, ?)
-          AND cl.publictext IS NOT NULL
+          AND cl.event_type IN ('public','action')
         GROUP BY cl.nick, HOUR(cl.ts)
     });
     my %hours = ($n1 => [(0)x24], $n2 => [(0)x24]);
@@ -8890,7 +8903,7 @@ sub mbCompat_ctx {
             FROM CHANNEL_LOG cl
             JOIN CHANNEL c ON c.id_channel = cl.id_channel
             WHERE c.name = ? AND cl.nick = ?
-              AND cl.publictext IS NOT NULL
+              AND cl.event_type IN ('public','action')
             ORDER BY cl.ts DESC
             LIMIT 5000
         });
@@ -8949,7 +8962,7 @@ sub mbCompat_ctx {
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.nick IN (?, ?)
-          AND cl.publictext IS NOT NULL
+          AND cl.event_type IN ('public','action')
           AND cl.ts >= NOW() - INTERVAL 90 DAY
         ORDER BY cl.ts ASC
     });
@@ -9282,7 +9295,7 @@ sub mbMood_ctx {
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ?
-          AND cl.publictext IS NOT NULL
+          AND cl.event_type IN ('public','action')
           AND cl.ts >= NOW() - INTERVAL 60 MINUTE
     });
     unless ($sth && $sth->execute($channel)) {
@@ -9515,7 +9528,7 @@ sub mbLeaderboard_ctx {
             SELECT cl.nick, COUNT(*) AS msg_count
             FROM CHANNEL_LOG cl
             JOIN CHANNEL c ON c.id_channel = cl.id_channel
-            WHERE c.name = ? AND cl.publictext IS NOT NULL
+            WHERE c.name = ? AND cl.event_type IN ('public','action')
               $cl_period_sql
             GROUP BY cl.nick
             ORDER BY msg_count DESC
@@ -9697,7 +9710,7 @@ sub mbChronos_ctx {
         SELECT cl.nick, cl.ts, cl.publictext
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        WHERE c.name = ? AND cl.event_type IN ('public','action')
         ORDER BY cl.ts ASC
         LIMIT 1
     });
@@ -9715,7 +9728,7 @@ sub mbChronos_ctx {
         SELECT cl.nick, cl.ts
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        WHERE c.name = ? AND cl.event_type IN ('public','action')
         ORDER BY cl.ts DESC
         LIMIT 1
     });
@@ -9729,7 +9742,7 @@ sub mbChronos_ctx {
         SELECT DATE(cl.ts) AS d, COUNT(*) AS c
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        WHERE c.name = ? AND cl.event_type IN ('public','action')
         GROUP BY DATE(cl.ts)
         ORDER BY c DESC
         LIMIT 1
@@ -9744,7 +9757,7 @@ sub mbChronos_ctx {
         SELECT DATE_FORMAT(cl.ts, '%Y-%m-%d %H:00') AS h, COUNT(*) AS c
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        WHERE c.name = ? AND cl.event_type IN ('public','action')
         GROUP BY DATE_FORMAT(cl.ts, '%Y-%m-%d %H:00')
         ORDER BY c DESC
         LIMIT 1
@@ -10013,7 +10026,7 @@ sub mbObservatory_ctx {
             FROM CHANNEL_LOG cl
             JOIN CHANNEL c ON c.id_channel = cl.id_channel
             WHERE c.name = ?
-              AND cl.publictext IS NOT NULL
+              AND cl.event_type IN ('public','action')
               AND cl.ts >= NOW() - INTERVAL 60 MINUTE
         });
         if ($sth && $sth->execute($channel)) {

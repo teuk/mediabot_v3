@@ -159,11 +159,24 @@ my $runner = Mediabot::ScriptRunner->new(
 );
 my $applier = Mediabot::ScriptActionRunner->new(bot => $runtime_bot);
 
+# mb338-B1: Python/Tcl sont des dépendances de runtime OPTIONNELLES. Ce smoke
+# échouait DUR quand tclsh (ou python3) était absent, rendant la suite
+# non-portable. On n'exerce que les langages réellement disponibles ; en prod
+# (Python + Tcl présents) les trois cas tournent comme avant.
+my $command_exists = sub {
+    my ($cmd) = @_;
+    return system('sh', '-c', "command -v '$cmd' >/dev/null 2>&1") == 0 ? 1 : 0;
+};
+my $have_py  = $command_exists->('python3');
+my $have_tcl = $command_exists->('tclsh');
+
 my @cases = (
     [ hello    => 'examples/hello_perl.pl',   'Perl script bridge OK for command: hello' ],
-    [ pyhello  => 'examples/hello_python.py', 'Python script bridge OK for command: pyhello' ],
-    [ tclhello => 'examples/hello_tcl.tcl',   'Tcl script bridge OK for command: tclhello' ],
 );
+push @cases, [ pyhello  => 'examples/hello_python.py', 'Python script bridge OK for command: pyhello' ]
+    if $have_py;
+push @cases, [ tclhello => 'examples/hello_tcl.tcl',   'Tcl script bridge OK for command: tclhello' ]
+    if $have_tcl;
 
 my $expected_messages = 0;
 for my $case (@cases) {
@@ -199,7 +212,8 @@ for my $case (@cases) {
 }
 
 my @logs = $runtime_bot->{logger}->logs;
-ok(@logs == 3, 'three log actions applied across Perl/Python/Tcl smoke');
+ok(@logs == scalar(@cases),
+   'one log action per executed script across available languages (' . scalar(@cases) . ' run)');
 
 print "1..$tests\n";
 if (@fail) {

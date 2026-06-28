@@ -74,7 +74,7 @@ sub mbQuotes_ctx {
         return mbQuoteAdd($self, $message, $uid, $handle, $nick, $channel, @args)
             if $subcmd =~ /^(add|a)$/;
 
-        return mbQuoteDel($self, $message, $handle, $nick, $channel, @args)
+        return mbQuoteDel($self, $message, $uid, $user, $handle, $nick, $channel, @args)
             if $subcmd =~ /^(del|d)$/;
 
         return mbQuoteView($self, $message, $nick, $channel, @args)
@@ -246,7 +246,7 @@ sub mbQuoteAdd {
 
 
 sub mbQuoteDel {
-    my ($self, $message, $sMatchingUserHandle, $sNick, $sChannel, @tArgs) = @_;
+    my ($self, $message, $caller_uid, $caller_user, $sMatchingUserHandle, $sNick, $sChannel, @tArgs) = @_;
 
     my $id_quotes = $tArgs[0];
 
@@ -255,7 +255,8 @@ sub mbQuoteDel {
         return;
     }
 
-    my $sQuery = "SELECT QUOTES.id_quotes FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? AND QUOTES.id_quotes = ?";
+    # mb342-B1: récupérer aussi l'auteur (id_user) pour le contrôle de permission.
+    my $sQuery = "SELECT QUOTES.id_quotes, QUOTES.id_user FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? AND QUOTES.id_quotes = ?";
     my $sth_sel = $self->{dbh}->prepare($sQuery);
 
     unless ($sth_sel) {
@@ -278,6 +279,46 @@ sub mbQuoteDel {
 
     unless ($exists) {
         botPrivmsg($self, $sChannel, "Quote (id : $id_quotes) does not exist for channel $sChannel");
+        return;
+    }
+
+    # mb342-B1: durcissement de la permission de suppression.
+    #
+    # Avant ce fix, tout compte authentifié de niveau "User" (le plus bas)
+    # pouvait supprimer N'IMPORTE QUELLE quote du canal — incohérent avec le
+    # reste du bot, où les opérations destructives exigent un niveau élevé
+    # (channelDelUser >= 400, ban >= 75, purge Owner). La suppression de quote
+    # est destructive et irréversible.
+    #
+    # mb354-B1: le seuil canal est configurable (défaut 100, borné 0..500).
+    # On autorise désormais la suppression si l'appelant est :
+    #   - l'AUTEUR de la quote (id_user), OU
+    #   - Administrator+ au niveau global, OU
+    #   - de niveau-canal >= seuil configuré (défaut 100) sur ce canal.
+    # Sinon : refus. Les quotes anonymes (id_user = 0) ne matchent aucun auteur
+    # et requièrent donc un Admin+ ou le niveau-canal configuré.
+    my $author_id = $exists->{id_user};
+    my $quote_delete_level = eval {
+        $self->{conf}->get_int(
+            'main.QUOTE_DELETE_CHANNEL_LEVEL',
+            default => 100, min => 0, max => 500,
+        )
+    } // 100;
+    my $is_admin  = (eval { $caller_user && $caller_user->has_level('Administrator') }) ? 1 : 0;
+    my $is_author = (defined($caller_uid) && $caller_uid ne ''
+                     && defined($author_id)
+                     && "$caller_uid" eq "$author_id") ? 1 : 0;
+    my $has_chan_priv = 0;
+    if (!$is_admin && !$is_author && defined($caller_uid) && $caller_uid ne '') {
+        $has_chan_priv =
+            checkUserChannelLevel($self, $message, $sChannel, $caller_uid, $quote_delete_level) ? 1 : 0;
+    }
+
+    unless ($is_admin || $is_author || $has_chan_priv) {
+        my $who = defined($sMatchingUserHandle) ? $sMatchingUserHandle : $sNick;
+        noticeConsoleChan($self, "$who quote del refused (id=$id_quotes on $sChannel): not author, channel-level < $quote_delete_level, not Administrator");
+        botNotice($self, $sNick,
+            "You can only delete your own quotes here (or need channel level >= $quote_delete_level, or Administrator).");
         return;
     }
 

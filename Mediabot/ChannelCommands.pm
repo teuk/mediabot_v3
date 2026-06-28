@@ -2089,7 +2089,7 @@ sub _channelban_apply {
         return;
     }
 
-    my $expires_at = $self->{channel_ban}->expires_sql_from_seconds($duration_seconds);
+    # mb350-B1: on passe les secondes ; l'expiration est calculée côté SQL.
     my $issuer     = eval { $user->nickname } || $nick;
     my $uid        = eval { $user->id } || undef;
     my $reason     = $parsed->{reason};
@@ -2101,7 +2101,7 @@ sub _channelban_apply {
         reason          => $reason,
         created_by      => $uid,
         created_by_nick => $issuer,
-        expires_at      => $expires_at,
+        expires_seconds => $duration_seconds,
         source          => 'irc',
     );
 

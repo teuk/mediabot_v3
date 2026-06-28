@@ -847,6 +847,43 @@ sub _init_dcc_session {
     $stream->write("Please enter your nickname.\r\n");
 }
 
+sub _peer_ip_from_handle {
+    # mb340-B1: capture l'IP distante du socket, IPv4 ET IPv6.
+    #
+    # L'ancien code ne gérait que AF_INET (inet_ntoa) : une connexion telnet
+    # IPv6 au partyline retombait sur 'unknown' (visible dans .whom et les logs).
+    # Le bot tourne sur OVH/Kimsufi où l'IPv6 est courant.
+    #
+    # Tout est défensif : la branche IPv6 utilise des symboles pleinement
+    # qualifiés (Socket::AF_INET6 / unpack_sockaddr_in6 / inet_ntop) gardés par
+    # un test de disponibilité, et l'ensemble est sous eval. Sur une plateforme
+    # sans support IPv6 dans Socket, on retombe proprement sur 'unknown' comme
+    # avant — aucun risque de compilation, le chemin IPv4 est inchangé.
+    my ($handle) = @_;
+
+    my $ip = 'unknown';
+    return $ip unless $handle;
+
+    eval {
+        my $pn = $handle->peername;
+        if ($pn) {
+            my $fam = sockaddr_family($pn);
+            if ($fam == AF_INET) {
+                my (undef, $addr) = unpack_sockaddr_in($pn);
+                $ip = inet_ntoa($addr);
+            }
+            elsif (defined(&Socket::AF_INET6) && $fam == Socket::AF_INET6()) {
+                my (undef, $addr6) = Socket::unpack_sockaddr_in6($pn);
+                my $str = eval { Socket::inet_ntop(Socket::AF_INET6(), $addr6) };
+                $ip = $str if defined($str) && $str ne '';
+            }
+        }
+        1;
+    };
+
+    return $ip;
+}
+
 sub _start_listener {
     my ($self) = @_;
 
@@ -861,14 +898,8 @@ sub _start_listener {
             my ($stream) = @_;
             my $id = fileno($stream->read_handle);
 
-            my $peer_host = 'unknown';
-            eval {
-                my $pn = $stream->read_handle->peername;
-                if ($pn && sockaddr_family($pn) == AF_INET) {
-                    my (undef, $addr) = unpack_sockaddr_in($pn);
-                    $peer_host = inet_ntoa($addr);
-                }
-            };
+            # mb340-B1: capture IPv4 ET IPv6 (l'ancien inline ne gérait qu'AF_INET).
+            my $peer_host = _peer_ip_from_handle($stream->read_handle);
 
             my $peer_ip = $peer_host;
 
@@ -1751,19 +1782,128 @@ sub _handle_line {
 # ! Internal : authentication                                                 !
 # +---------------------------------------------------------------------------+
 
+# mb343-B1: suivi anti-brute-force du login partyline PAR IP.
+#
+# Le compteur login_failures est porté par connexion (fd) : un attaquant qui se
+# reconnecte repart à zéro, ce qui annule la protection. On ajoute un suivi par
+# IP distante (peer_ip, fiable IPv4+IPv6 depuis mb340) qui PERSISTE à travers les
+# reconnexions, dans une fenêtre temporelle. La clé est l'IP (jamais le login),
+# pour ne JAMAIS verrouiller un compte légitime (pas de lockout-DoS).
+#
+# Helpers purs (opèrent sur la map passée) -> faciles à tester unitairement.
+sub _pl_bf_blocked {
+    my ($map, $ip, $now, $max, $window) = @_;
+    return 0 unless defined($ip) && $ip ne '' && ref($map) eq 'HASH';
+    my $e = $map->{$ip} or return 0;
+    return 0 if !defined($e->{first_ts}) || ($now - $e->{first_ts}) >= $window;  # fenêtre expirée
+    return (($e->{count} // 0) >= $max) ? 1 : 0;
+}
+
+sub _pl_bf_record {
+    my ($map, $ip, $now, $window, $max_entries) = @_;
+    return unless defined($ip) && $ip ne '' && ref($map) eq 'HASH';
+
+    # mb352-B1: la limite annoncée doit être une vraie borne, pas seulement un
+    # déclencheur de purge des entrées expirées. Valeur par défaut conservée pour
+    # les anciens appelants/tests ; _do_login passe explicitement la limite.
+    $max_entries = 1024
+        unless defined($max_entries) && $max_entries =~ /^\d+$/ && $max_entries > 0;
+
+    my $e = $map->{$ip};
+    if (ref($e) ne 'HASH'
+            || !defined($e->{first_ts})
+            || ($now - $e->{first_ts}) >= $window) {
+        $map->{$ip} = { count => 1, first_ts => $now };   # nouvelle fenêtre
+    }
+    else {
+        $e->{count} = ($e->{count} // 0) + 1;
+    }
+
+    # Purger d'abord les entrées expirées ou mal formées. Le bucket courant est
+    # conservé : il vient d'être enregistré et ne doit pas être évincé par sa
+    # propre tentative.
+    for my $k (keys %$map) {
+        next if $k eq $ip;
+        my $ek = $map->{$k};
+        delete $map->{$k}
+            if ref($ek) ne 'HASH'
+            || !defined($ek->{first_ts})
+            || ($now - $ek->{first_ts}) >= $window;
+    }
+
+    # Si toutes les entrées sont encore actives, retirer les plus anciennes
+    # jusqu'à respecter réellement la borne. Le tri lexical rend les égalités
+    # de timestamp déterministes et facilite les diagnostics/tests.
+    if (keys(%$map) > $max_entries) {
+        my @oldest = sort {
+            (($map->{$a}{first_ts} // 0) <=> ($map->{$b}{first_ts} // 0))
+                || ($a cmp $b)
+        } grep { $_ ne $ip } keys %$map;
+
+        while (keys(%$map) > $max_entries && @oldest) {
+            delete $map->{shift @oldest};
+        }
+    }
+    return;
+}
+
+sub _pl_bf_clear {
+    my ($map, $ip) = @_;
+    return unless defined($ip) && $ip ne '' && ref($map) eq 'HASH';
+    delete $map->{$ip};
+    return;
+}
+
 sub _do_login {
     my ($self, $stream, $id, $login, $password) = @_;
 
     my $bot = $self->{bot};
     my $dbh = $bot->{dbh};
 
-    # Brute-force protection
-    my $max_failures = 5;
+    # mb354-B1: policy is configurable, with safe defaults and hard bounds.
+    # Missing/malformed values fall back; numeric outliers are clamped by Conf.
+    my $max_failures = eval {
+        $bot->{conf}->get_int(
+            'main.PARTYLINE_LOGIN_MAX_FAILURES',
+            default => 5, min => 1, max => 100,
+        )
+    } // 5;
     my $failures = $self->{users}{$id}{login_failures} // 0;
     if ($failures >= $max_failures) {
         $bot->{logger}->log(1, "Partyline: too many login failures for fd=$id - closing connection");
         $stream->write("Too many authentication failures. Disconnecting.\r\n");
         $stream->close_when_empty;  # flush write before closing
+        return;
+    }
+
+    # mb343-B1: brute-force par IP (persiste à travers les reconnexions).
+    my $bf_map    = ($self->{_pl_login_fail_by_ip} //= {});
+    my $bf_now    = time();
+    my $bf_max = eval {
+        $bot->{conf}->get_int(
+            'main.PARTYLINE_LOGIN_IP_MAX_FAILURES',
+            default => 15, min => 1, max => 1000,
+        )
+    } // 15;
+    my $bf_window = eval {
+        $bot->{conf}->get_int(
+            'main.PARTYLINE_LOGIN_IP_WINDOW_SECONDS',
+            default => 600, min => 30, max => 86400,
+        )
+    } // 600;
+    my $bf_entries = eval {
+        $bot->{conf}->get_int(
+            'main.PARTYLINE_LOGIN_IP_MAX_ENTRIES',
+            default => 1024, min => 16, max => 65536,
+        )
+    } // 1024;
+    my $bf_ip     = $self->{users}{$id}{peer_ip} // '';
+    $bf_ip = '' if $bf_ip eq 'unknown';   # IP inconnue -> repli sur le compteur par-connexion
+
+    if ($bf_ip ne '' && _pl_bf_blocked($bf_map, $bf_ip, $bf_now, $bf_max, $bf_window)) {
+        $bot->{logger}->log(1, "Partyline: address $bf_ip temporarily blocked (brute-force) - closing fd=$id");
+        $stream->write("Too many authentication failures from your address. Try again later.\r\n");
+        $stream->close_when_empty;
         return;
     }
 
@@ -1787,6 +1927,7 @@ sub _do_login {
     unless ($row) {
         $bot->{logger}->log(2, "Partyline: unknown user '$login' (fd=$id)");
         $self->{users}{$id}{login_failures}++;
+        _pl_bf_record($bf_map, $bf_ip, $bf_now, $bf_window, $bf_entries) if $bf_ip ne '';   # mb343-B1
         $stream->write("Authentication failed.\r\n");
         return;
     }
@@ -1794,6 +1935,7 @@ sub _do_login {
     unless ($bot->{auth}->verify_credentials($row->{id_user}, $login, $password)) {
         $bot->{logger}->log(2, "Partyline: bad password for '$login' (fd=$id)");
         $self->{users}{$id}{login_failures}++;
+        _pl_bf_record($bf_map, $bf_ip, $bf_now, $bf_window, $bf_entries) if $bf_ip ne '';   # mb343-B1
         $stream->write("Authentication failed.\r\n");
         return;
     }
@@ -1802,12 +1944,14 @@ sub _do_login {
     unless (defined($row->{level}) && $row->{level} <= 1) {
         $bot->{logger}->log(2, "Partyline: '$login' level=" . ($row->{level} // 'undef') . " insufficient (fd=$id)");
         $self->{users}{$id}{login_failures}++;
+        _pl_bf_record($bf_map, $bf_ip, $bf_now, $bf_window, $bf_entries) if $bf_ip ne '';   # mb343-B1
         $stream->write("Access denied: Master level or above required.\r\n");
         return;
     }
 
     # Reset counter on success
     $self->{users}{$id}{login_failures} = 0;
+    _pl_bf_clear($bf_map, $bf_ip) if $bf_ip ne '';   # mb343-B1: succès -> on oublie les échecs de cette IP
 
     $self->{users}{$id}{authenticated} = 1;
     $self->{users}{$id}{login}         = $login;
@@ -2773,6 +2917,14 @@ sub _cmd_schedule {
     my $bot   = $self->{bot};
     my $sched = $bot->{scheduler};
 
+    # mb356-B2: keep the control command explicitly restricted even though the
+    # current Partyline login gate already requires Master or Owner.
+    my $level = $self->{users}{$id}{level};
+    unless (defined($level) && $level <= 1) {
+        $stream->write("Access denied: .schedule requires Master or Owner level.\r\n");
+        return;
+    }
+
     unless ($sched) {
         $stream->write("Scheduler not available.\r\n");
         return;
@@ -2780,46 +2932,56 @@ sub _cmd_schedule {
 
     my $act = lc($action // 'list');
 
-    # A3: list, status, start, stop
+    my $find_info = sub {
+        my ($wanted) = @_;
+        return undef unless defined($wanted) && $wanted ne '';
+
+        if ($sched->can('task_info')) {
+            return $sched->task_info($wanted);
+        }
+
+        for my $info ($sched->all_info) {
+            return $info if $info && ($info->{name} // '') eq $wanted;
+        }
+        return undef;
+    };
+
     if ($act eq 'list' || !defined $action) {
         my @infos = $sched->all_info;
         unless (@infos) {
             $stream->write("No scheduled tasks.\r\n");
             return;
         }
-        # SL1: afficher l'heure du prochain déclenchement
+
         my $now = time();
         $stream->write(sprintf("%-28s %-9s %-8s %-6s %s\r\n",
             'Name', 'Interval', 'Status', 'Ticks', 'Next run'));
         $stream->write(("-" x 70) . "\r\n");
+
         for my $t (@infos) {
             my $next_str;
             if (!$t->{started}) {
                 $next_str = 'stopped';
-            } else {
-                # MB75-R1: base = latest of last_tick/start_time.
-                # After a stop/start, last_tick may be older than the current start_time.
-                my $base = 0;
-                if (($t->{last_tick} // 0) > ($t->{start_time} // 0)) {
-                    $base = $t->{last_tick};
-                } elsif (($t->{start_time} // 0) > 0) {
-                    $base = $t->{start_time};
-                }
-                if ($base > 0) {
-                    my $next = $base + $t->{interval};
+            }
+            else {
+                my $next = $t->{next_run} // 0;
+                if ($next > 0) {
                     my $diff = $next - $now;
                     if ($diff <= 0) {
                         $next_str = 'imminent';
-                    } else {
+                    }
+                    else {
                         my @nt = localtime($next);
-                        $next_str = sprintf('%02d:%02d:%02d (in %s)',
+                        $next_str = sprintf('%04d-%02d-%02d %02d:%02d:%02d (in %s)',
+                            $nt[5] + 1900, $nt[4] + 1, $nt[3],
                             $nt[2], $nt[1], $nt[0], _seconds_to_human($diff));
                     }
-                } else {
+                }
+                else {
                     $next_str = 'soon';
                 }
             }
-            # GG5: human-readable interval
+
             my $iv = $t->{interval} // 0;
             my $iv_str = $iv >= 3600 ? sprintf("%dh%02dm", int($iv/3600), int(($iv%3600)/60))
                        : $iv >= 60   ? sprintf("%dm%02ds", int($iv/60), $iv%60)
@@ -2833,75 +2995,111 @@ sub _cmd_schedule {
     }
 
     if ($act eq 'status') {
-        my $info = defined $name ? $sched->task_info($name) : undef;
+        my $info = $find_info->($name);
         unless ($info) {
             $stream->write("Usage: .schedule status <task_name>\r\n");
             $stream->write("Tasks: " . join(', ', $sched->task_names) . "\r\n");
             return;
         }
+
         my $last;
         if ($info->{last_tick}) {
             my @lt = localtime($info->{last_tick});
             my $ago = time() - $info->{last_tick};
-            # V5: show how long ago the last run was
             $last = sprintf("%02d:%02d:%02d (%s ago)",
                 $lt[2], $lt[1], $lt[0], _seconds_to_human($ago));
-        } else {
+        }
+        else {
             $last = 'never';
         }
+
         $stream->write("Task:     $info->{name}\r\n");
+        $stream->write("Mode:     " . ($info->{mode} // 'periodic') . "\r\n");
         $stream->write("Interval: $info->{interval}s\r\n");
         $stream->write("Status:   " . ($info->{started} ? "running" : "stopped") . "\r\n");
         $stream->write("Ticks:    $info->{ticks}\r\n");
         $stream->write("Last run: $last\r\n");
+
         my $next_run_s;
         if (!$info->{started}) {
             $next_run_s = 'n/a (stopped)';
-        } else {
-            # MB75-R1: base = latest of last_tick/start_time.
-            # After a stop/start, last_tick may be older than the current start_time.
-            my $base = 0;
-            if (($info->{last_tick} // 0) > ($info->{start_time} // 0)) {
-                $base = $info->{last_tick};
-            } elsif (($info->{start_time} // 0) > 0) {
-                $base = $info->{start_time};
-            }
-            if ($base > 0) {
-                my $next = $base + $info->{interval};
+        }
+        else {
+            my $next = $info->{next_run} // 0;
+            if ($next > 0) {
                 my $diff = $next - time();
-                if ($diff <= 0) { $next_run_s = 'imminent'; }
+                if ($diff <= 0) {
+                    $next_run_s = 'imminent';
+                }
                 else {
                     my @nt = localtime($next);
-                    $next_run_s = sprintf('%02d:%02d:%02d (in %s)',
-                        $nt[2], $nt[1], $nt[0], _seconds_to_human($diff));  # SL1
+                    $next_run_s = sprintf('%04d-%02d-%02d %02d:%02d:%02d (in %s)',
+                        $nt[5] + 1900, $nt[4] + 1, $nt[3],
+                        $nt[2], $nt[1], $nt[0], _seconds_to_human($diff));
                 }
-            } else { $next_run_s = 'soon'; }
+            }
+            else {
+                $next_run_s = 'soon';
+            }
         }
         $stream->write("Next run: $next_run_s\r\n");
         return;
     }
 
-    unless (defined $name) {
-        $stream->write("Usage: .schedule <list|status|start|stop> [task_name]\r\n");
+    unless (defined $name && $name ne '') {
+        $stream->write("Usage: .schedule <list|status|start|stop|restart> [task_name]\r\n");
         return;
     }
 
-    if ($act eq 'start') {
-        $sched->start($name);
-        $stream->write("Task '$name' started.\r\n");
-    } elsif ($act eq 'stop') {
-        $sched->stop($name);
-        $stream->write("Task '$name' stopped.\r\n");
-    } elsif ($act eq 'restart') {
-        # A2: new Scheduler::restart() method
-        if ($sched->can('restart') && $sched->restart($name)) {
-            $stream->write("Task '$name' restarted.\r\n");
-        } else {
- $stream->write("Could not restart '$name' -- task not found or already stopped.\r\n");
-        }
-    } else {
+    unless ($act eq 'start' || $act eq 'stop' || $act eq 'restart') {
         $stream->write("Unknown action '$act'. Use: list status start stop restart\r\n");
+        return;
     }
+
+    my $before = $find_info->($name);
+    unless ($before) {
+        $stream->write("Scheduler task '$name' not found.\r\n");
+        return;
+    }
+
+    if ($act eq 'start' && $before->{started}) {
+        $stream->write("Task '$name' is already running.\r\n");
+        return;
+    }
+
+    if ($act eq 'stop' && !$before->{started}) {
+        $stream->write("Task '$name' is already stopped.\r\n");
+        return;
+    }
+
+    my $ok = eval {
+        if ($act eq 'start') {
+            $sched->start($name);
+        }
+        elsif ($act eq 'stop') {
+            $sched->stop($name);
+        }
+        else {
+            $sched->restart($name);
+        }
+    };
+
+    if ($@ || !$ok) {
+        my $err = $@ || 'scheduler returned failure';
+        $err =~ s/\s+/ /g;
+        $bot->{logger}->log(1,
+            "Partyline .schedule $act $name failed: $err") if $bot->{logger};
+        $stream->write("Scheduler action failed for '$name' ($act).\r\n");
+        return;
+    }
+
+    my $verb = $act eq 'start' ? 'started'
+             : $act eq 'stop'  ? 'stopped'
+             :                   'restarted';
+    $bot->{logger}->log(2,
+        "Scheduler task '$name' $verb from Partyline") if $bot->{logger};
+    $stream->write("Task '$name' $verb.\r\n");
+    return;
 }
 
 
@@ -3853,12 +4051,14 @@ sub _cmd_ai {
             return;
         }
 
+        # mb348-B1: contexte IA = vraie conversation -> event_type IN ('public','action')
+        # (et non publictext IS NOT NULL qui inclut join/part/kick/mode/topic).
         my $sth = $dbh->prepare(q{
             SELECT cl.nick, cl.publictext AS text
             FROM CHANNEL_LOG cl
             JOIN CHANNEL c ON c.id_channel = cl.id_channel
             WHERE c.name = ?
-              AND cl.publictext IS NOT NULL
+              AND cl.event_type IN ('public','action')
               AND cl.publictext <> ''
             ORDER BY cl.id_channel_log DESC
             LIMIT ?
@@ -5295,10 +5495,14 @@ sub _cmd_chanlog {
     my $bot = $self->{bot};
     my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
     return unless $dbh;
+    # mb349-B1: .logs affiche un log de CONVERSATION ([ts] <nick> texte), donc on
+    # ne montre que les vrais messages (event_type IN ('public','action')) et plus
+    # publictext IS NOT NULL, qui faisait apparaître join/part/kick/mode/topic
+    # comme si le nick les avait "dits" (ex. <bob> +o alice).
     my $sth = $dbh->prepare(q{
         SELECT cl.ts, cl.nick, cl.publictext AS text FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.publictext IS NOT NULL
+        WHERE c.name = ? AND cl.event_type IN ('public','action')
         ORDER BY cl.id_channel_log DESC LIMIT ?
     });
     unless ($sth && $sth->execute($chan, $n)) {

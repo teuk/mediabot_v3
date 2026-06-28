@@ -1,6 +1,6 @@
 # t/cases/21_partyline_schedule_control.t
 # =============================================================================
-# Static regression checks for Partyline .schedule control.
+# Regression checks for Partyline .schedule control and truthful feedback.
 # =============================================================================
 
 use strict;
@@ -16,7 +16,6 @@ use File::Spec;
 
 sub _slurp_partyline_schedule {
     my ($path) = @_;
-
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
     local $/;
     return <$fh>;
@@ -25,79 +24,53 @@ sub _slurp_partyline_schedule {
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_partyline_schedule(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
-
-    $assert->ok(
-        $src =~ /\.schedule\(\?:\\s\+\(\.\*\)\)\?\$/,
-        'Partyline dispatches .schedule'
+    my $src = _slurp_partyline_schedule(
+        File::Spec->catfile('.', 'Mediabot', 'Partyline.pm')
     );
 
-    $assert->ok(
-        $src =~ /sub _cmd_schedule/,
-        'Partyline implements _cmd_schedule'
-    );
-
-    $assert->ok(
-        $src =~ /Access denied: \.schedule requires Master or Owner level/,
-        '.schedule is restricted to Master or Owner'
-    );
-
-    $assert->ok(
-        $src =~ /status <name> \| start <name> \| stop <name> \| restart <name>/,
-        '.schedule usage documents supported actions'
-    );
-
-    $assert->ok(
-        $src =~ /\$sched->can\('task_info'\)/,
-        '.schedule uses task_info when available'
-    );
-
-    $assert->ok(
-        $src =~ /\$sched->all_info/,
-        '.schedule falls back to all_info when task_info is unavailable'
-    );
-
-    $assert->ok(
-        $src =~ /Partyline \.schedule \$action \$name failed/,
-        '.schedule logs scheduler action failures'
-    );
-
-    $assert->ok(
-        $src =~ /Scheduler action failed for '\$name'/,
-        '.schedule reports scheduler action failures to the Partyline'
-    );
-
-    $assert->ok(
-        $src =~ /\$sched->start\(\$name\)/,
-        '.schedule can start tasks'
-    );
-
-    $assert->ok(
-        $src =~ /\$sched->stop\(\$name\)/,
-        '.schedule can stop tasks'
-    );
-
-    $assert->ok(
-        $src =~ /Scheduler task '\$name' restarted/,
-        '.schedule can restart tasks'
-    );
-
-    $assert->ok(
-        $src =~ /\.schedule <list\|status\|start\|stop\|restart>/,
-        '.help documents .schedule'
-    );
+    $assert->like($src, qr/elsif \(\$line =~ \/\^\\\.schedule/,
+        'Partyline dispatches .schedule');
+    $assert->like($src, qr/sub _cmd_schedule/,
+        'Partyline implements _cmd_schedule');
+    $assert->like($src,
+        qr/Access denied: \.schedule requires Master or Owner level/,
+        '.schedule is restricted to Master or Owner');
+    $assert->like($src,
+        qr/Usage: \.schedule <list\|status\|start\|stop\|restart>/,
+        '.schedule usage documents all supported actions');
+    $assert->like($src, qr/\$sched->can\('task_info'\)/,
+        '.schedule uses task_info when available');
+    $assert->like($src, qr/for my \$info \(\$sched->all_info\)/,
+        '.schedule has an all_info fallback');
+    $assert->like($src,
+        qr/Partyline \.schedule \$act \$name failed/,
+        '.schedule logs scheduler action failures');
+    $assert->like($src,
+        qr/Scheduler action failed for '\$name' \(\$act\)/,
+        '.schedule reports scheduler action failures');
+    $assert->like($src, qr/\$sched->start\(\$name\)/,
+        '.schedule checks the result of start');
+    $assert->like($src, qr/\$sched->stop\(\$name\)/,
+        '.schedule checks the result of stop');
+    $assert->like($src, qr/\$sched->restart\(\$name\)/,
+        '.schedule checks the result of restart');
+    $assert->like($src, qr/is already running/,
+        '.schedule reports an already-running task');
+    $assert->like($src, qr/is already stopped/,
+        '.schedule reports an already-stopped task');
+    $assert->like($src, qr/Scheduler task '\$name' not found/,
+        '.schedule reports an unknown task');
+    $assert->like($src, qr/Scheduler task '\$name' \$verb from Partyline/,
+        '.schedule logs successful lifecycle actions');
+    $assert->like($src,
+        qr/\.schedule <list\|status\|start\|stop\|restart>/,
+        '.help documents .schedule');
 
     my $ban_dispatch_count = () = $src =~ /_cmd_ban\(\$stream, \$id/g;
-    $assert->is(
-        $ban_dispatch_count,
-        1,
-        'Partyline has only one .ban dispatch block'
-    );
+    $assert->is($ban_dispatch_count, 1,
+        'Partyline has only one .ban dispatch block');
 
     my $ban_help_count = () = $src =~ /^\s*\.\s*"\s+\.ban #chan <nick>/mg;
-    $assert->is(
-        $ban_help_count,
-        1,
-        'Partyline help has only one real .ban help line'
-    );
+    $assert->is($ban_help_count, 1,
+        'Partyline help has only one real .ban help line');
 };

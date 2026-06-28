@@ -409,6 +409,12 @@ sub check_msg {
     $self->{_msg_check_ts}{$cache_key} = $now;
 
     # Compte les messages du nick sur le canal
+    # mb347-B1: ne compter que les VRAIS messages. publictext IS NOT NULL est un
+    # faux filtre : logBotAction stocke publictext verbatim, donc join/part (''),
+    # kick/mode/topic/notice (texte) ont tous un publictext NON-NULL et étaient
+    # comptés comme des messages -> chatterbox/megaphone/night_owl/polyphony
+    # gonflés (on débloquait "chatterbox" en rejoignant 1000×). On s'aligne sur
+    # la convention "a parlé" = event_type IN ('public','action').
     my $dbh = $bot->{dbh} or return;
     my $sth = eval {
         $dbh->prepare(q{
@@ -416,7 +422,7 @@ sub check_msg {
             FROM CHANNEL_LOG cl
             JOIN CHANNEL    c  ON c.id_channel = cl.id_channel
             WHERE c.name = ? AND cl.nick = ?
-              AND cl.publictext IS NOT NULL
+              AND cl.event_type IN ('public','action')
         })
     };
     return unless $sth && $sth->execute($channel, $nick);
@@ -439,7 +445,7 @@ sub check_msg {
                 FROM CHANNEL_LOG cl
                 JOIN CHANNEL c ON c.id_channel = cl.id_channel
                 WHERE c.name = ? AND cl.nick = ?
-                  AND cl.publictext IS NOT NULL
+                  AND cl.event_type IN ('public','action')   -- mb347-B1
                 GROUP BY HOUR(cl.ts)
             })
         };
@@ -468,7 +474,7 @@ sub check_msg {
                     FROM CHANNEL_LOG cl
                     JOIN CHANNEL c ON c.id_channel = cl.id_channel
                     WHERE cl.nick = ?
-                      AND cl.publictext IS NOT NULL
+                      AND cl.event_type IN ('public','action')   -- mb347-B1
                       AND c.name LIKE '#%'
                 })
             };

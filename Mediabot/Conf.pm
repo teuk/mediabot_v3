@@ -40,6 +40,34 @@ sub get {
     return $self->{_conf}{$key};
 }
 
+# Return a validated integer configuration value.
+# - malformed/missing values fall back to default;
+# - numeric values outside the accepted range are clamped.
+sub get_int {
+    my ($self, $key, %opts) = @_;
+
+    die("Conf->get_int(): default required for '$key'\n")
+        unless exists $opts{default};
+
+    my $default = int($opts{default});
+    my $min     = exists($opts{min}) ? int($opts{min}) : undef;
+    my $max     = exists($opts{max}) ? int($opts{max}) : undef;
+
+    die("Conf->get_int(): min cannot be greater than max for '$key'\n")
+        if defined($min) && defined($max) && $min > $max;
+
+    my $raw = $self->get($key);
+    return $default if !defined($raw) || ref($raw);
+
+    $raw =~ s/^\s+|\s+$//g;
+    return $default unless $raw =~ /^[+-]?\d+$/;
+
+    my $value = int($raw);
+    $value = $min if defined($min) && $value < $min;
+    $value = $max if defined($max) && $value > $max;
+    return $value;
+}
+
 sub set {
     my ($self, $key, $value) = @_;
     $self->{_conf}{$key} = $value;

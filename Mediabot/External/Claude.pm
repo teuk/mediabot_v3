@@ -13,6 +13,11 @@ package Mediabot::External::Claude;
 use strict;
 use warnings;
 use Exporter 'import';
+
+# mb348-B1: les statistiques basees sur CHANNEL_LOG filtrent les VRAIS messages
+# via event_type IN ('public','action'), et non l'ancien faux proxy
+# publictext IS NOT NULL (qui comptait aussi join/part/kick/mode/topic/notice).
+# Le viewer de log brut .logs (_cmd_chanlog) reste volontairement non filtre.
 use Encode qw(encode decode);
 use JSON::MaybeXS;
 use URI::Escape qw(uri_escape_utf8);
@@ -837,7 +842,7 @@ sub claude_ctx {
             $sth = $dbh->prepare(qq{
                 SELECT cl.nick, cl.publictext AS text FROM CHANNEL_LOG cl
                 JOIN CHANNEL c ON c.id_channel = cl.id_channel
-                WHERE c.name = ? AND LOWER(cl.nick) = ? AND cl.publictext IS NOT NULL
+                WHERE c.name = ? AND LOWER(cl.nick) = ? AND cl.event_type IN ('public','action')
                 $date_filter
                 ORDER BY cl.id_channel_log DESC LIMIT ?
             });
@@ -846,7 +851,7 @@ sub claude_ctx {
             $sth = $dbh->prepare(qq{
                 SELECT cl.nick, cl.publictext AS text FROM CHANNEL_LOG cl
                 JOIN CHANNEL c ON c.id_channel = cl.id_channel
-                WHERE c.name = ? AND cl.publictext IS NOT NULL
+                WHERE c.name = ? AND cl.event_type IN ('public','action')
                 $date_filter
                 ORDER BY cl.id_channel_log DESC LIMIT ?
             });
@@ -1176,8 +1181,18 @@ sub claudeAI {
     my $hist_key  = "$nick\x00$chan_for_hist";
     my $history   = $self->{_claude_history}{$hist_key} //= [];
     push @$history, { role => 'user', content => $prompt };
-    # Keep only last N messages (user+assistant pairs)
+    # Keep only last N messages (user+assistant pairs).
+    # mb345-B1: l'API Anthropic exige que le 1er message soit role=user. Après le
+    # push du message user juste au-dessus, l'historique a une longueur IMPAIRE ;
+    # comme max_history est pair (forcé l.~1140), le débordement retiré par
+    # l'avant est impair, donc la troncature enlevait le 'user' de tête et
+    # laissait l'historique COMMENÇANT par 'assistant'. L'appel suivant partait
+    # alors avec un assistant en tête -> HTTP 400, et !ai restait cassé jusqu'au
+    # reset du persona (~1h). On retire donc tout message non-user resté en tête
+    # après la troncature, pour garantir l'invariant user-first (et l'alternance,
+    # la séquence étant sinon strictement alternée).
     splice @$history, 0, @$history - $max_history if @$history > $max_history;
+    shift @$history while @$history && ($history->[0]{role} // '') ne 'user';
 
     # mb87-R1: appel HTTP + parsing extraits dans _claude_send_and_parse
     # mb88-R3: passer output_fn pour que le chemin cache-hit l'utilise aussi
