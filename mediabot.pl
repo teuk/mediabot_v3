@@ -334,6 +334,13 @@ $mediabot->{metrics}->set_build_info(
     nick    => $mediabot->{conf}->get('connection.CONN_NICK') || 'unknown',
 );
 
+# mb362-B1: Auth is created before the IO::Async loop and Metrics object. Attach
+# Metrics now and synchronise mediabot_auth_sessions_total instead of leaving
+# the otherwise implemented Auth gauge permanently disconnected.
+if ($mediabot->{auth} && $mediabot->{auth}->can('set_metrics')) {
+    $mediabot->{auth}->set_metrics($mediabot->{metrics});
+}
+
 # mb115: Initialize Achievements system
 # Stockage JSON persistant — pas de modif schéma DB
 $mediabot->{achievements} = Mediabot::Achievements->new(

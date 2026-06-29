@@ -8,6 +8,8 @@ use IO::Async::Listener;
 use JSON::MaybeXS qw(encode_json);
 use Encode qw(encode_utf8);   # mb129-B3: Content-Length doit etre en bytes
 
+use constant MAX_HTTP_HEADER_BYTES => 16 * 1024;
+
 sub new {
     my ($class, %args) = @_;
 
@@ -272,6 +274,69 @@ sub render_prometheus {
     return $rendered;
 }
 
+# mb364-B1: keep the tiny embedded HTTP server bounded. Prometheus and the
+# radio-status endpoint only need a small request header; accepting an
+# unterminated header forever lets a slow/malicious client grow the process
+# buffer without limit.
+sub _http_request_state {
+    my ($self, $buffer, $eof) = @_;
+
+    $buffer = '' unless defined $buffer;
+
+    return 'too_large' if length($buffer) > MAX_HTTP_HEADER_BYTES;
+    return 'complete'  if $buffer =~ /\r?\n\r?\n/s || $eof;
+    return 'incomplete';
+}
+
+sub _http_response_bytes {
+    my ($self, $status, $body, $ctype) = @_;
+
+    $status ||= '500 Internal Server Error';
+    $body   = '' unless defined $body;
+    $ctype  ||= 'text/plain; charset=utf-8';
+
+    # mb129-B3: Content-Length must describe bytes, not Perl characters.
+    my $body_bytes = encode_utf8($body);
+
+    return join(
+        "\r\n",
+        "HTTP/1.1 $status",
+        "Content-Type: $ctype",
+        "Content-Length: " . length($body_bytes),
+        "Connection: close",
+        "",
+        $body_bytes
+    );
+}
+
+sub _route_http_request {
+    my ($self, $buffer) = @_;
+
+    my ($method, $path) = ($buffer // '') =~ m{^([A-Z]+)\s+(\S+)\s+HTTP/}m;
+
+    if (($method || '') eq 'GET' && ($path || '') eq '/metrics') {
+        return $self->_http_response_bytes(
+            '200 OK',
+            $self->render_prometheus(),
+            'text/plain; version=0.0.4; charset=utf-8',
+        );
+    }
+
+    if (($method || '') eq 'GET' && ($path || '') eq '/api/radio/status') {
+        return $self->_http_response_bytes(
+            '200 OK',
+            $self->render_radio_status_json(),
+            'application/json; charset=utf-8',
+        );
+    }
+
+    return $self->_http_response_bytes(
+        '404 Not Found',
+        "Not Found\n",
+        'text/plain; charset=utf-8',
+    );
+}
+
 sub start_http_server {
     my ($self) = @_;
     return unless $self->enabled;
@@ -297,58 +362,37 @@ sub start_http_server {
         on_stream => sub {
             my ($listener, $stream) = @_;
 
-            my $buffer = '';
+            my $buffer    = '';
+            my $responded = 0;
 
             $stream->configure(
                 on_read => sub {
                     my ($stream, $buffref, $eof) = @_;
 
+                    return 0 if $responded;
+
                     $buffer .= $$buffref;
                     $$buffref = '';
 
-                    if ($buffer =~ /\r?\n\r?\n/s || $eof) {
-                        my ($method, $path) = $buffer =~ m{^([A-Z]+)\s+(\S+)\s+HTTP/}m;
+                    my $state = $self->_http_request_state($buffer, $eof);
+                    return 0 if $state eq 'incomplete';
 
-                        my ($status, $body, $ctype);
+                    $responded = 1;
 
-                        if (($method || '') eq 'GET' && ($path || '') eq '/metrics') {
-                            $status = '200 OK';
-                            $body   = $self->render_prometheus();
-                            $ctype  = 'text/plain; version=0.0.4; charset=utf-8';
-                        }
-                        elsif (($method || '') eq 'GET' && ($path || '') eq '/api/radio/status') {
-                            $status = '200 OK';
-                            $body   = $self->render_radio_status_json();
-                            $ctype  = 'application/json; charset=utf-8';
-                        }
-                        else {
-                            $status = '404 Not Found';
-                            $body   = "Not Found\n";
-                            $ctype  = 'text/plain; charset=utf-8';
-                        }
+                    my $resp = $state eq 'too_large'
+                        ? $self->_http_response_bytes(
+                            '431 Request Header Fields Too Large',
+                            "Request Header Fields Too Large\n",
+                            'text/plain; charset=utf-8',
+                        )
+                        : $self->_route_http_request($buffer);
 
-                        # mb129-B3: Content-Length doit etre en bytes, pas en
-                        # caracteres. length($body) sur une string flag UTF-8
-                        # retourne le nombre de chars, ce qui sous-evalue la
-                        # taille si $body contient du non-ASCII (ex. canal
-                        # "#cafe" stocke comme "#caf\x{e9}" -> length=5 mais
-                        # encode_utf8 -> 6 bytes). On encode explicitement et
-                        # on envoie les bytes sur le wire.
-                        my $body_bytes = encode_utf8($body);
+                    $stream->write($resp);
+                    $stream->close_when_empty;
 
-                        my $resp = join(
-                            "\r\n",
-                            "HTTP/1.1 $status",
-                            "Content-Type: $ctype",
-                            "Content-Length: " . length($body_bytes),
-                            "Connection: close",
-                            "",
-                            $body_bytes
-                        );
-
-                        $stream->write($resp);
-                        $stream->close_when_empty;
-                    }
+                    # Release the request bytes immediately; a slow client must
+                    # not keep the already-answered header alive until teardown.
+                    $buffer = '';
 
                     return 0;
                 },

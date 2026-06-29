@@ -58,6 +58,14 @@ sub command {
     return (0, 'empty Liquidsoap command')
         unless defined($command) && $command ne '';
 
+    # mb363-B1: the Liquidsoap telnet protocol is line-oriented. A CR/LF in a
+    # queue id, URI or future caller-supplied command would terminate the
+    # intended line and inject another command before the automatic `quit`.
+    # Reject the whole request before opening a socket; do not silently strip
+    # bytes and accidentally queue a path different from the one requested.
+    return (0, 'unsafe Liquidsoap command: CR, LF and NUL are not allowed')
+        if $command =~ /[\r\n\x00]/;
+
     my $host    = $self->{host};
     my $port    = $self->{port};
     my $timeout = $self->{timeout};

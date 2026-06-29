@@ -194,8 +194,9 @@ sub maybe_autologin {
     $bot->{auth} ||= Mediabot::Auth->new(
         dbh    => $bot->{dbh},
         logger => $bot->{logger},
-        bot    => $bot,          # needed for noticeConsoleChan
-        conf   => $bot->{conf},  # A3: consistency with LoginCommands::init_auth
+        bot     => $bot,          # needed for noticeConsoleChan
+        conf    => $bot->{conf},  # A3: consistency with LoginCommands::init_auth
+        metrics => $bot->{metrics}, # mb362-B1: keep lazy Auth metrics-aware
     );
 
     my ($did, $why) = $bot->{auth}->maybe_autologin($user, ($prefix // ''));

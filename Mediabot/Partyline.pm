@@ -23,6 +23,7 @@ package Mediabot::Partyline;
 
 use strict;
 use warnings;
+use bytes ();
 use IO::Async::Listener;
 use IO::Async::Stream;
 use IO::Async::Timer::Countdown;
@@ -38,6 +39,9 @@ use File::Path qw(make_path);
 use File::Temp qw(tempfile);
 
 our @EXPORT_OK = qw();
+
+# mb366-B1: keep unauthenticated Telnet/DCC input bounded while waiting for LF.
+use constant MAX_PARTYLINE_LINE_BYTES => 4 * 1024;
 
 # +---------------------------------------------------------------------------+
 # ! Constructor                                                               !
@@ -738,6 +742,137 @@ sub accept_dcc_chat_passive {
 }
 
 # ---------------------------------------------------------------------------
+# _extract_input_lines($buffref)
+#
+# mb366-B1: IO::Async keeps unread bytes in the supplied buffer.  Both Telnet
+# and DCC previously waited for LF without a maximum, so an unauthenticated
+# peer could grow the bot process indefinitely by sending one endless line.
+# Return (ARRAYREF lines, too_long_bool) and clear an oversized remainder.
+# ---------------------------------------------------------------------------
+sub _extract_input_lines {
+    my ($self, $buffref) = @_;
+
+    return ([], 0) unless ref($buffref) eq 'SCALAR';
+
+    my @lines;
+    while ($$buffref =~ s/^([^\n]*)\n//) {
+        my $line = $1;
+        $line =~ s/\r$//;
+
+        if (bytes::length($line) > MAX_PARTYLINE_LINE_BYTES) {
+            $$buffref = '';
+            return (\@lines, 1);
+        }
+
+        push @lines, $line;
+    }
+
+    # A CR immediately before a future LF is framing, not command content.
+    # Allow exactly MAX bytes plus that one pending CR.
+    my $pending = $$buffref;
+    $pending =~ s/\r$//;
+    if (bytes::length($pending) > MAX_PARTYLINE_LINE_BYTES) {
+        $$buffref = '';
+        return (\@lines, 1);
+    }
+
+    return (\@lines, 0);
+}
+
+# ---------------------------------------------------------------------------
+# _reject_oversized_input($stream, $id, $transport)
+# ---------------------------------------------------------------------------
+sub _reject_oversized_input {
+    my ($self, $stream, $id, $transport) = @_;
+
+    $transport = 'Partyline' unless defined($transport) && length($transport);
+
+    my $logger = eval { $self->{bot}->{logger} };
+    eval {
+        $logger->log(
+            1,
+            "$transport: input line exceeds " . MAX_PARTYLINE_LINE_BYTES
+                . " bytes for fd=$id; closing session"
+        );
+    } if $logger && $logger->can('log');
+
+    eval { $stream->write("Input line too long.\r\n") }
+        if $stream && $stream->can('write');
+    eval { $stream->close_when_empty }
+        if $stream && $stream->can('close_when_empty');
+
+    $self->_close_session($id);
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# _dispatch_line_safely($stream, $id, $line, $transport)
+#
+# mb365-B1: Partyline commands may throw because of a DB/runtime failure. Keep
+# the useful exception details in the server log, but never echo $@ to a Telnet
+# or DCC client: it may contain filesystem paths, SQL text or module internals,
+# including before authentication has completed.
+# ---------------------------------------------------------------------------
+sub _dispatch_line_safely {
+    my ($self, $stream, $id, $line, $transport) = @_;
+
+    $transport = 'Partyline' unless defined($transport) && length($transport);
+
+    my $ok = eval {
+        $self->_handle_line($stream, $id, $line);
+        1;
+    };
+
+    return 1 if $ok;
+
+    my $err = $@ || 'unknown error';
+    return $self->_report_operation_error(
+        $stream,
+        "$transport exception",
+        'Internal error.',
+        $err,
+    );
+}
+
+# ---------------------------------------------------------------------------
+# _report_operation_error($stream, $log_label, $client_message, $error)
+#
+# mb367-B1: individual Partyline commands sometimes catch their own exceptions
+# before the outer mb365 dispatcher can see them. Keep diagnostic details in
+# the server log, but send only a stable, context-specific message to the
+# Telnet/DCC client. Error reporting itself must never raise a second exception.
+# ---------------------------------------------------------------------------
+sub _report_operation_error {
+    my ($self, $stream, $log_label, $client_message, $error) = @_;
+
+    $log_label = 'Partyline operation failed'
+        unless defined($log_label) && length($log_label);
+    $log_label =~ s/[\r\n]+/ /g;
+    $log_label =~ s/^\s+|\s+$//g;
+
+    my $err = defined($error) && length($error) ? $error : 'unknown error';
+    $err =~ s/[\r\n]+/ /g;
+    $err =~ s/^\s+|\s+$//g;
+    $err = 'unknown error' unless length($err);
+
+    my $reply = defined($client_message) && length($client_message)
+        ? $client_message
+        : 'Internal error.';
+    $reply =~ s/[\r\n]+/ /g;
+    $reply =~ s/^\s+|\s+$//g;
+    $reply = 'Internal error.' unless length($reply);
+
+    my $logger = eval { $self->{bot}->{logger} };
+    eval { $logger->log(1, "$log_label: $err") }
+        if $logger && $logger->can('log');
+
+    eval { $stream->write("$reply\r\n") }
+        if $stream && $stream->can('write');
+
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
 # _init_dcc_session($stream, $nick)
 #
 # Wire up a connected DCC CHAT stream as a Partyline session.
@@ -793,11 +928,9 @@ sub _init_dcc_session {
         on_read => sub {
             my ($stream, $buffref, $eof) = @_;
 
-            # DCC CHAT uses bare LF or CRLF - no TELNET IAC sequences
-            while ($$buffref =~ s/^([^\n]*)\n//) {
-                my $line = $1;
-                $line =~ s/\r$//;
-
+            # DCC CHAT uses bare LF or CRLF - no TELNET IAC sequences.
+            my ($lines, $too_long) = $self->_extract_input_lines($buffref);
+            for my $line (@$lines) {
                 # Mask password in logs — mask on stage 'pass' (standard flow)
                 my $log_line = $line;
                 if (($self->{users}{$id}{auth_stage} // '') eq 'pass') {
@@ -808,12 +941,11 @@ sub _init_dcc_session {
                 }
 
                 $self->{bot}->{logger}->log(3, "DCC CHAT <- \'$log_line\' (fd=$id nick=$nick)");
-                eval { $self->_handle_line($stream, $id, $line) };
-                if ($@) {
-                    $self->{bot}->{logger}->log(1, "DCC CHAT exception: $@");
-                    $stream->write("Internal error.\r\n");
-                }
+                $self->_dispatch_line_safely($stream, $id, $line, 'DCC CHAT');
             }
+
+            return $self->_reject_oversized_input($stream, $id, 'DCC CHAT')
+                if $too_long;
 
             if ($eof) {
                 $self->{bot}->{logger}->log(3, "DCC CHAT EOF (fd=$id nick=$nick)");
@@ -936,10 +1068,8 @@ sub _start_listener {
                     # after we toggle ECHO for password input.
                     $$buffref = $self->_strip_telnet_iac($$buffref);
 
-                    while ($$buffref =~ s/^([^\n]*)\n//) {
-                        my $line = $1;
-                        $line =~ s/\r$//;
-
+                    my ($lines, $too_long) = $self->_extract_input_lines($buffref);
+                    for my $line (@$lines) {
                         # Never log clear-text partyline passwords.
                         my $log_line = $line;
                         if (($self->{users}{$id}{auth_stage} // '') eq 'pass') {
@@ -952,14 +1082,11 @@ sub _start_listener {
                         }
 
                         $self->{bot}->{logger}->log(3, "Partyline <- '$log_line' (fd=$id)");
-                        eval {
-                            $self->_handle_line($stream, $id, $line);
-                        };
-                        if ($@) {
-                            $self->{bot}->{logger}->log(1, "Partyline exception: $@");
-                            $stream->write("Internal error: $@\r\n");
-                        }
+                        $self->_dispatch_line_safely($stream, $id, $line, 'Partyline');
                     }
+
+                    return $self->_reject_oversized_input($stream, $id, 'Partyline')
+                        if $too_long;
 
                     if ($eof) {
                         $self->{bot}->{logger}->log(3, "Partyline EOF (fd=$id)");
@@ -1027,11 +1154,23 @@ sub _cancel_auth_timeout {
 sub _close_session {
     my ($self, $id) = @_;
 
+    return 0 unless defined $id;
+
+    # mb366-B2: EOF, on_closed, .quit, .boot and forced input rejection can
+    # converge on the same fd.  Only the first close owns the session metric;
+    # later callbacks must be harmless no-ops instead of decrementing another
+    # live user's gauge value.
+    my $had_user   = exists $self->{users}{$id};
+    my $had_stream = exists $self->{streams}{$id};
+    my $eval_key   = "_eval_pending_$id";
+    my $had_eval   = exists $self->{$eval_key};
+    return 0 unless $had_user || $had_stream || $had_eval;
+
     # mb147-B1: close/disconnect before auth must not leave the 60s DCC auth
     # timeout scheduled until expiry.
-    $self->_cancel_auth_timeout($id);
+    $self->_cancel_auth_timeout($id) if $had_user;
 
-    if ($self->{bot}->{metrics}) {
+    if ($had_user && $self->{bot}->{metrics}) {
         my $current = $self->{bot}->{metrics}->get('mediabot_partyline_sessions_current');
         $current = 0 unless defined $current;
         if ($current > 0) {
@@ -1040,16 +1179,17 @@ sub _close_session {
     }
 
     # Remove console hook from logger if active
-    if ($self->{bot} && $self->{bot}->{logger}
+    if ($had_user && $self->{bot} && $self->{bot}->{logger}
         && $self->{bot}->{logger}->can('remove_console_hook')) {
         $self->{bot}->{logger}->remove_console_hook($id);
     }
 
     delete $self->{users}{$id};
     delete $self->{streams}{$id};
-    delete $self->{"_eval_pending_$id"};  # clean up any pending .eval confirmation
+    delete $self->{$eval_key};  # clean up any pending .eval confirmation
 
     $self->_write_runtime_status();
+    return 1;
 }
 
 
@@ -1726,16 +1866,7 @@ sub _handle_line {
         $self->_cmd_raw($stream, $id, $1)
     }
     elsif ($line =~ /^\.reloadconf$/i) {
-        my $bot = $self->{bot};
-        eval {
-            if ($bot->{conf} && $bot->{conf}->can('reload')) {
-                $bot->{conf}->reload;
-                $stream->write("Config reloaded.\r\n");
-            } else {
-                $stream->write("Config object has no reload method.\r\n");
-            }
-        };
-        $stream->write("Error: $@\r\n") if $@;
+        $self->_cmd_reloadconf($stream, $id);
     }
     elsif ($line =~ /^\.rehash$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.rehash' }) if $self->{bot}->{metrics};
@@ -3111,7 +3242,13 @@ sub _cmd_status {
 
     my $payload = eval { $self->_runtime_status_payload };
     if ($@) {
-        $stream->write("Status unavailable: $@\r\n");
+        my $err = $@;
+        $self->_report_operation_error(
+            $stream,
+            'Partyline .status failed',
+            'Status unavailable.',
+            $err,
+        );
         return;
     }
 
@@ -3173,7 +3310,13 @@ sub _cmd_metrics {
 
     my $rendered = eval { $metrics->render_prometheus };
     if ($@) {
-        $stream->write("Metrics render error: $@\r\n");
+        my $err = $@;
+        $self->_report_operation_error(
+            $stream,
+            'Partyline .metrics failed',
+            'Metrics render error.',
+            $err,
+        );
         return;
     }
 
@@ -3719,8 +3862,45 @@ sub _cmd_karma {
     }
 }
 
+# mb368-B1: one checked path for both Partyline configuration reload commands.
+# Mediabot::Conf exposes reload(), not the historical/non-existent load().
+sub _reload_configuration_file {
+    my ($self) = @_;
+
+    my $conf = $self->{bot}{conf};
+    die "configuration object unavailable\n" unless $conf;
+    die "configuration object has no reload method\n"
+        unless $conf->can('reload');
+
+    my $ok = $conf->reload();
+    die "configuration reload returned failure\n" unless $ok;
+
+    return 1;
+}
+
 # ---------------------------------------------------------------------------
-# .reload  - reload bot configuration (calls mbRehash_ctx equivalent)
+# .reloadconf  - reload only the configuration file in place
+# ---------------------------------------------------------------------------
+sub _cmd_reloadconf {
+    my ($self, $stream, $id) = @_;
+
+    my $ok = eval { $self->_reload_configuration_file() };
+    if ($ok) {
+        $stream->write("Configuration reloaded.\r\n");
+        return 1;
+    }
+
+    my $err = $@ || 'configuration reload returned failure';
+    return $self->_report_operation_error(
+        $stream,
+        'Partyline .reloadconf failed',
+        'Configuration reload failed.',
+        $err,
+    );
+}
+
+# ---------------------------------------------------------------------------
+# .reload  - Owner-only alias for an in-place configuration file reload
 # ---------------------------------------------------------------------------
 sub _cmd_reload {
     my ($self, $stream, $id) = @_;
@@ -3728,17 +3908,26 @@ sub _cmd_reload {
     unless (($session->{level} // 99) <= 0) {  # Owner only
         $stream->write("Permission denied (Owner required).\r\n"); return;
     }
-    my $bot = $self->{bot};
-    my $ok  = eval {
-        $bot->{conf}->load();
-        $bot->{logger}->log(2, "Partyline: config reloaded by $session->{login}");
-        1;
-    };
+
+    my $ok = eval { $self->_reload_configuration_file() };
     if ($ok) {
+        my $logger = $self->{bot}{logger};
+        eval {
+            $logger->log(2, "Partyline: config reloaded by " . ($session->{login} // '?'))
+                if $logger && $logger->can('log');
+            1;
+        };
         $stream->write("Configuration reloaded.\r\n");
-    } else {
-        $stream->write("Reload failed: $@\r\n");
+        return 1;
     }
+
+    my $err = $@ || 'configuration reload returned failure';
+    return $self->_report_operation_error(
+        $stream,
+        'Partyline .reload failed',
+        'Reload failed.',
+        $err,
+    );
 }
 
 
@@ -4094,7 +4283,15 @@ sub _cmd_ai {
             Mediabot::External::claudeAI($bot, undef, $pl_nick, $chan,
                 $output_fn, $summary_prompt);
         };
-        $stream->write("Error: $@\r\n") if $@;
+        if ($@) {
+            my $err = $@;
+            $self->_report_operation_error(
+                $stream,
+                'Partyline .ai summary failed',
+                'AI request failed.',
+                $err,
+            );
+        }
         return;
     }
 
@@ -4109,7 +4306,15 @@ sub _cmd_ai {
         Mediabot::External::claudeAI($bot, undef, $pl_nick, $chan,
             $output_fn, split(/\s+/, $prompt));
     };
-    $stream->write("Error: $@\r\n") if $@;
+    if ($@) {
+        my $err = $@;
+        $self->_report_operation_error(
+            $stream,
+            'Partyline .ai failed',
+            'AI request failed.',
+            $err,
+        );
+    }
 }
 
 
@@ -5644,8 +5849,18 @@ sub _cmd_kick {
     my ($target, $chan, $reason) = ($1, $2, $3 // 'Kicked by operator');
     my $bot = $self->{bot};
     eval { $bot->{irc}->send_message('KICK', undef, $chan, $target, $reason) };
-    if ($@) { $stream->write("Error: $@\r\n"); }
-    else    { $stream->write("Kicked $target from $chan ($reason)\r\n"); }
+    if ($@) {
+        my $err = $@;
+        $self->_report_operation_error(
+            $stream,
+            'Partyline .kick failed',
+            'Kick failed.',
+            $err,
+        );
+    }
+    else {
+        $stream->write("Kicked $target from $chan ($reason)\r\n");
+    }
 }
 
 sub _cmd_unmute {

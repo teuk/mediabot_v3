@@ -140,8 +140,9 @@ sub get_user_from_message {
     require Mediabot::User;
 
     $self->{auth} ||= Mediabot::Auth->new(
-        dbh    => $self->{dbh},
-        logger => $self->{logger},
+        dbh     => $self->{dbh},
+        logger  => $self->{logger},
+        metrics => $self->{metrics}, # mb362-B1: preserve Auth gauge on lazy init
     );
 
     my $sth = $self->{dbh}->prepare(q{
@@ -3499,8 +3500,9 @@ sub isIgnored {
 
     require Mediabot::Auth;
     $self->{auth} ||= Mediabot::Auth->new(
-        dbh    => $self->{dbh},
-        logger => $self->{logger},
+        dbh     => $self->{dbh},
+        logger  => $self->{logger},
+        metrics => $self->{metrics}, # mb362-B1: preserve Auth gauge on lazy init
     );
 
     my $now = time();
@@ -4089,8 +4091,9 @@ sub get_user_from_whois {
     require Mediabot::Auth;
 
     $self->{auth} ||= Mediabot::Auth->new(
-        dbh    => $self->{dbh},
-        logger => $self->{logger},
+        dbh     => $self->{dbh},
+        logger  => $self->{logger},
+        metrics => $self->{metrics}, # mb362-B1: preserve Auth gauge on lazy init
     );
 
     my $sQuery = q{
@@ -4200,8 +4203,9 @@ sub getNickInfoWhois {
 
     require Mediabot::Auth;
     $self->{auth} ||= Mediabot::Auth->new(
-        dbh    => $self->{dbh},
-        logger => $self->{logger},
+        dbh     => $self->{dbh},
+        logger  => $self->{logger},
+        metrics => $self->{metrics}, # mb362-B1: preserve Auth gauge on lazy init
     );
 
     my $sCheckQuery = q{

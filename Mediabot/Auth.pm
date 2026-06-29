@@ -32,11 +32,17 @@ sub _log {
 sub new {
     my ($class, %args) = @_;
     my $self = bless {
-        dbh    => $args{dbh},       # DBI handle
-        logger => $args{logger},    # optional object with ->log($level,$msg)
-        conf   => $args{conf} || {},# optional config hash
-        bot    => $args{bot},       # A1/B1: optional bot ref for noticeConsoleChan
+        dbh     => $args{dbh},       # DBI handle
+        logger  => $args{logger},    # optional object with ->log($level,$msg)
+        conf    => $args{conf} || {},# optional config hash
+        bot     => $args{bot},       # A1/B1: optional bot ref for noticeConsoleChan
+        metrics => $args{metrics},   # mb362-B1: optional Metrics object, may be attached later
     }, $class;
+
+    # mb362-B1: alternate construction paths may already have Metrics ready.
+    # Publish an explicit zero immediately instead of waiting for a login/logout.
+    $self->set_metrics($args{metrics}) if $args{metrics};
+
     return $self;
 }
 
@@ -275,6 +281,22 @@ sub logout {
 sub session_count {
     my ($self) = @_;
     return scalar keys %{ $self->{sessions} || {} };
+}
+
+# mb362-B1: Auth is initialized before Mediabot::Metrics in the main startup
+# sequence because Metrics needs the IO::Async loop. Allow the metrics object to
+# be attached afterwards and immediately publish the current session count.
+sub set_metrics {
+    my ($self, $metrics) = @_;
+
+    unless ($metrics && ref($metrics) && $metrics->can('set')) {
+        $self->{metrics} = undef;
+        return 0;
+    }
+
+    $self->{metrics} = $metrics;
+    $self->_update_auth_session_metric();
+    return 1;
 }
 
 # ------------------------------------------------------------------------------

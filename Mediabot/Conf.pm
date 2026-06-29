@@ -13,14 +13,42 @@ sub new {
         _logger => $args{logger} // undef,  # optional logger object
     };
 
-    if ($file) {
-        my $cfg = Config::Simple->new(filename => $file);
-        $self->{_cfg}  = $cfg;
-        $self->{_conf} = { $cfg->vars() }; # sync initial values
-    }
-
     bless $self, $class;
+
+    # mb368-B1: initial file loading and runtime reload now share the same
+    # atomic path.  The in-memory configuration is replaced only after a new
+    # Config::Simple object has been created and read successfully.
+    $self->reload() if $file;
+
     return $self;
+}
+
+sub reload {
+    my ($self) = @_;
+
+    my $file = $self->{_file};
+    die "Conf->reload(): no configuration file associated with this object\n"
+        unless defined($file) && length($file);
+    die "Conf->reload(): configuration file '$file' does not exist\n"
+        unless -e $file;
+    die "Conf->reload(): configuration file '$file' is not readable\n"
+        unless -r $file;
+
+    my $cfg = Config::Simple->new(filename => $file);
+    die "Conf->reload(): failed to parse configuration file '$file'\n"
+        unless $cfg;
+
+    my %fresh = $cfg->vars();
+
+    # Commit only after the complete replacement state has been prepared.
+    $self->{_cfg}  = $cfg;
+    $self->{_conf} = \%fresh;
+
+    # A changed file may contain a different invalid/clamped value.  Let the
+    # diagnostic deduplicator report the new state once after the reload.
+    $self->{_get_int_diag_seen} = {};
+
+    return 1;
 }
 
 sub get {
@@ -162,6 +190,13 @@ internal hash mirror for convenience.
 Creates a new configuration object. If a config file path is provided, it will
 be read using L<Config::Simple>. All keys/values will be stored internally and
 can later be written back.
+
+=head2 reload
+
+Atomically rereads the configuration file associated with this object.  The
+current in-memory values remain untouched if the new file cannot be opened or
+parsed.  Dies with a descriptive error when the object has no backing file or
+the reload fails.
 
 =head2 get($key)
 
