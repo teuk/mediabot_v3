@@ -43,6 +43,10 @@ sub get {
 # Return a validated integer configuration value.
 # - malformed/missing values fall back to default;
 # - numeric values outside the accepted range are clamped.
+# mb358-B1: émet un diagnostic (dédupliqué) quand une valeur PRÉSENTE est
+# malformée ou doit être clampée, pour que l'admin repère une erreur de config.
+# L'absence de clé reste silencieuse ici (get() la trace déjà en debug niveau 4)
+# et la dédup évite tout spam (get_int peut être appelé à chaque login/tick).
 sub get_int {
     my ($self, $key, %opts) = @_;
 
@@ -59,13 +63,39 @@ sub get_int {
     my $raw = $self->get($key);
     return $default if !defined($raw) || ref($raw);
 
-    $raw =~ s/^\s+|\s+$//g;
-    return $default unless $raw =~ /^[+-]?\d+$/;
+    (my $trimmed = $raw) =~ s/^\s+|\s+$//g;
+    unless ($trimmed =~ /^[+-]?\d+$/) {
+        $self->_get_int_diag("$key|bad|$trimmed", 2,
+            "Conf: '$key' = '$raw' is not an integer; using default $default");
+        return $default;
+    }
 
-    my $value = int($raw);
-    $value = $min if defined($min) && $value < $min;
-    $value = $max if defined($max) && $value > $max;
+    my $value = int($trimmed);
+    if (defined($min) && $value < $min) {
+        $self->_get_int_diag("$key|low|$value", 2,
+            "Conf: '$key' = $value is below minimum $min; clamped to $min");
+        $value = $min;
+    }
+    elsif (defined($max) && $value > $max) {
+        $self->_get_int_diag("$key|high|$value", 2,
+            "Conf: '$key' = $value is above maximum $max; clamped to $max");
+        $value = $max;
+    }
     return $value;
+}
+
+# mb358-B1: journalise un diagnostic get_int une seule fois par signature
+# (clé|type|valeur). Reste utile (l'admin voit le problème) sans spammer les logs
+# si la même valeur fautive est relue en boucle. Une valeur fautive DIFFÉRENTE
+# (ou un autre type de problème) re-déclenche un log.
+sub _get_int_diag {
+    my ($self, $sig, $level, $msg) = @_;
+    my $logger = $self->{_logger};
+    return unless $logger && $logger->can('log');
+    my $seen = ($self->{_get_int_diag_seen} //= {});
+    return if $seen->{$sig}++;
+    $logger->log($level, $msg);
+    return;
 }
 
 sub set {

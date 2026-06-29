@@ -611,10 +611,14 @@ $scheduler->add(
         )
     },  # mb353-B1 / mb354-B1
     cb        => sub {
+        my $logger = $mediabot->{logger};
         for my $chan (sort keys %{ $mediabot->{channels} // {} }) {
             my $dbh = eval { $mediabot->{db}->ensure_connected } // $mediabot->{dbh};
             next unless $dbh;
             my (@top_msg, @top_karma);
+            # mb357-B1: chaque section dans son propre eval -> un échec "speakers"
+            # ne prive plus le canal de son "karma" (et inversement). Départage
+            # déterministe (nick ASC) pour des ex æquo stables d'un run à l'autre.
             eval {
                 # mb346-B1: ne compter que les vrais messages (cf. daily).
                 my $sth = $dbh->prepare(q{
@@ -623,21 +627,26 @@ $scheduler->add(
                     WHERE c.name = ?
                       AND cl.event_type IN ('public','action')
                       AND cl.ts >= NOW() - INTERVAL 7 DAY
-                    GROUP BY cl.nick ORDER BY cnt DESC LIMIT 3
+                    GROUP BY cl.nick ORDER BY cnt DESC, cl.nick ASC LIMIT 3
                 });
                 if ($sth && $sth->execute($chan)) {
                     while (my $r = $sth->fetchrow_hashref) { push @top_msg, "$r->{nick}($r->{cnt})" }
                     $sth->finish;
                 }
+                1;
+            } or do {
+                (my $e = $@ || 'error') =~ s/\s+/ /g;
+                $logger->log(1, "weekly_channel_report: speakers section failed for $chan: $e");
+            };
+            eval {
                 # mb346-B1: karma hebdo = VARIATION nette des 7 derniers jours
-                # (SUM(delta) de KARMA_LOG), pas le score cumulé all-time de KARMA
-                # (qui n'a aucune borne de temps et rendait le "Weekly" faux).
+                # (SUM(delta) de KARMA_LOG), pas le score cumulé all-time de KARMA.
                 my $sth2 = $dbh->prepare(q{
                     SELECT kl.nick, SUM(kl.delta) AS net FROM KARMA_LOG kl
                     JOIN CHANNEL c ON c.id_channel = kl.id_channel
                     WHERE c.name = ? AND kl.ts >= NOW() - INTERVAL 7 DAY
                     GROUP BY kl.nick HAVING net <> 0
-                    ORDER BY ABS(net) DESC LIMIT 3
+                    ORDER BY ABS(net) DESC, kl.nick ASC LIMIT 3
                 });
                 if ($sth2 && $sth2->execute($chan)) {
                     while (my $r = $sth2->fetchrow_hashref) {
@@ -647,6 +656,10 @@ $scheduler->add(
                     }
                     $sth2->finish;
                 }
+                1;
+            } or do {
+                (my $e = $@ || 'error') =~ s/\s+/ /g;
+                $logger->log(1, "weekly_channel_report: karma section failed for $chan: $e");
             };
             next unless @top_msg || @top_karma;
             my $msg_str   = @top_msg   ? join(' | ', @top_msg)   : 'N/A';
@@ -671,74 +684,92 @@ $scheduler->add(
     cb        => sub {
         my $dbh = eval { $mediabot->{db}->ensure_connected } // $mediabot->{dbh};
         return unless $dbh;
+        my $logger = $mediabot->{logger};
 
         for my $chan (sort keys %{ $mediabot->{channels} // {} }) {
-            # Top 3 speakers (last 24h)
-            # mb346-B1: ne compter que les vrais messages. Sans le filtre
-            # event_type, COUNT(*) incluait join/part/quit/mode/kick/notice :
-            # un nick qui rejoint/quitte en boucle ressortait "top speaker" sans
-            # avoir parlé. On s'aligne sur la convention du reste du code
-            # (event_type IN ('public','action'), cf. !words / seen).
-            my $sth_msgs = $dbh->prepare(q{
-                SELECT cl.nick, COUNT(*) AS cnt
-                FROM CHANNEL_LOG cl
-                JOIN CHANNEL c ON c.id_channel = cl.id_channel
-                WHERE c.name = ?
-                  AND cl.event_type IN ('public','action')
-                  AND cl.ts >= DATE_SUB(NOW(), INTERVAL 1 DAY)
-                GROUP BY cl.nick ORDER BY cnt DESC LIMIT 3
-            });
-            my @top_msgs;
-            if ($sth_msgs && $sth_msgs->execute($chan)) {
-                my $rank = 1;
-                while (my $r = $sth_msgs->fetchrow_hashref) {
-                    push @top_msgs, "$rank. $r->{nick} ($r->{cnt})";
-                    $rank++;
-                }
-                $sth_msgs->finish;
-            }
-
-            # Top 3 karma
-            my $sth_chan = $dbh->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
-            my $id_chan;
-            if ($sth_chan && $sth_chan->execute($chan)) {
-                my $r = $sth_chan->fetchrow_hashref; $sth_chan->finish;
-                $id_chan = $r->{id_channel} if $r;
-            }
-            my @top_karma;
-            if ($id_chan) {
-                # mb346-B1: le karma "du jour" doit être la VARIATION nette des
-                # dernières 24h, pas le score cumulé de toujours. KARMA.score est
-                # le total all-time : l'afficher sous "Daily report" était faux.
-                # On somme les deltas horodatés de KARMA_LOG sur la fenêtre 24h
-                # (table déjà alimentée par !karma, purgée à 90j). Repli gracieux
-                # si KARMA_LOG est absente (les guards $sth/execute suffisent).
-                my $sth_k = $dbh->prepare(q{
-                    SELECT nick, SUM(delta) AS net
-                    FROM KARMA_LOG
-                    WHERE id_channel = ?
-                      AND ts >= DATE_SUB(NOW(), INTERVAL 1 DAY)
-                    GROUP BY nick
-                    HAVING net <> 0
-                    ORDER BY ABS(net) DESC LIMIT 3
-                });
-                if ($sth_k && $sth_k->execute($id_chan)) {
-                    while (my $r = $sth_k->fetchrow_hashref) {
-                        my $net  = $r->{net} // 0;
-                        my $sign = $net > 0 ? '+' : '';
-                        push @top_karma, "$r->{nick} (${sign}$net)";
+            # mb357-B1: isolation PAR CANAL — une erreur DB sur un canal (coupure,
+            # RaiseError, table absente…) ne doit plus avorter toute la boucle et
+            # priver les canaux suivants de leur rapport.
+            eval {
+                my @top_msgs;
+                # --- Section "speakers" (isolée) ---------------------------
+                # mb346-B1: ne compter que les vrais messages (event_type IN
+                # ('public','action'), cf. !words / seen).
+                # mb357-B1: départage déterministe (cl.nick ASC) pour que les
+                # ex æquo et la coupe à LIMIT 3 soient stables d'un run à l'autre.
+                eval {
+                    my $sth_msgs = $dbh->prepare(q{
+                        SELECT cl.nick, COUNT(*) AS cnt
+                        FROM CHANNEL_LOG cl
+                        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                        WHERE c.name = ?
+                          AND cl.event_type IN ('public','action')
+                          AND cl.ts >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+                        GROUP BY cl.nick ORDER BY cnt DESC, cl.nick ASC LIMIT 3
+                    });
+                    if ($sth_msgs && $sth_msgs->execute($chan)) {
+                        my $rank = 1;
+                        while (my $r = $sth_msgs->fetchrow_hashref) {
+                            push @top_msgs, "$rank. $r->{nick} ($r->{cnt})";
+                            $rank++;
+                        }
+                        $sth_msgs->finish;
                     }
-                    $sth_k->finish;
+                    1;
+                } or do {
+                    (my $e = $@ || 'error') =~ s/\s+/ /g;
+                    $logger->log(1, "daily_channel_report: speakers section failed for $chan: $e");
+                };
+
+                my @top_karma;
+                # --- Section "karma" (isolée) ------------------------------
+                # mb346-B1: karma du jour = VARIATION nette des 24h (SUM(delta)
+                # de KARMA_LOG), pas le cumul all-time de KARMA.
+                # mb357-B1: départage déterministe (nick ASC).
+                eval {
+                    my $sth_chan = $dbh->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+                    my $id_chan;
+                    if ($sth_chan && $sth_chan->execute($chan)) {
+                        my $r = $sth_chan->fetchrow_hashref; $sth_chan->finish;
+                        $id_chan = $r->{id_channel} if $r;
+                    }
+                    if ($id_chan) {
+                        my $sth_k = $dbh->prepare(q{
+                            SELECT nick, SUM(delta) AS net
+                            FROM KARMA_LOG
+                            WHERE id_channel = ?
+                              AND ts >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+                            GROUP BY nick
+                            HAVING net <> 0
+                            ORDER BY ABS(net) DESC, nick ASC LIMIT 3
+                        });
+                        if ($sth_k && $sth_k->execute($id_chan)) {
+                            while (my $r = $sth_k->fetchrow_hashref) {
+                                my $net  = $r->{net} // 0;
+                                my $sign = $net > 0 ? '+' : '';
+                                push @top_karma, "$r->{nick} (${sign}$net)";
+                            }
+                            $sth_k->finish;
+                        }
+                    }
+                    1;
+                } or do {
+                    (my $e = $@ || 'error') =~ s/\s+/ /g;
+                    $logger->log(1, "daily_channel_report: karma section failed for $chan: $e");
+                };
+
+                if (@top_msgs || @top_karma) {
+                    my $msg_str   = @top_msgs  ? join(' | ', @top_msgs)  : '(no activity)';
+                    my $karma_str = @top_karma ? join(' | ', @top_karma) : '(no karma change)';
+                    Mediabot::Helpers::botPrivmsg($mediabot, $chan,
+                        "📊 Daily report — Top speakers (24h): $msg_str  ·  Top karma (24h): $karma_str");
+                    $logger->log(2, "daily_channel_report sent to $chan");
                 }
-            }
-
-            next unless @top_msgs || @top_karma;
-
-            my $msg_str   = @top_msgs  ? join(' | ', @top_msgs)  : '(no activity)';
-            my $karma_str = @top_karma ? join(' | ', @top_karma) : '(no karma change)';
-            Mediabot::Helpers::botPrivmsg($mediabot, $chan,
-                "📊 Daily report — Top speakers (24h): $msg_str  ·  Top karma (24h): $karma_str");
-            $mediabot->{logger}->log(2, "daily_channel_report sent to $chan");
+                1;
+            } or do {
+                (my $e = $@ || 'error') =~ s/\s+/ /g;
+                $logger->log(1, "daily_channel_report: channel $chan failed: $e");
+            };
         }
     },
     autostart => 1,
@@ -1722,15 +1753,19 @@ sub on_message_PRIVMSG {
                     my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);
                     if (defined($id_channel_set)) {
                         unless ($mediabot->is_hailo_excluded_nick($who) || (substr($what, 0, 1) eq "!") || (substr($what, 0, 1) eq $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR'))) {
-                            my $hailo = $mediabot->get_hailo();
-                            $what =~ s/$sCurrentNick//g;
-                            $what =~ s/^\s+//g;
-                            $what =~ s/\s+$//g;
-                            $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
-                            my $sAnswer = $hailo->learn_reply($what);
-                            if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
-                                $mediabot->{logger}->log(4,"Hailo current nick learn_reply $what from $who : $sAnswer");
-                                $mediabot->botPrivmsg($where,$sAnswer);
+                            # mb361-B1: a failed Hailo initialization must not
+                            # crash this IRC callback. Skip the path cleanly.
+                            my $hailo = $mediabot->get_hailo_runtime();
+                            if ($hailo) {
+                                $what =~ s/$sCurrentNick//g;
+                                $what =~ s/^\s+//g;
+                                $what =~ s/\s+$//g;
+                                $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
+                                my $sAnswer = $hailo->learn_reply($what);
+                                if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
+                                    $mediabot->{logger}->log(4,"Hailo current nick learn_reply $what from $who : $sAnswer");
+                                    $mediabot->botPrivmsg($where,$sAnswer);
+                                }
                             }
                         }
                     }
@@ -1742,12 +1777,16 @@ sub on_message_PRIVMSG {
                     my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);
                     if (defined($id_channel_set)) {
                         unless ($mediabot->is_hailo_excluded_nick($who) || (substr($what, 0, 1) eq "!") || (substr($what, 0, 1) eq $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR'))) {
-                            my $hailo = $mediabot->get_hailo();
-                            $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
-                            my $sAnswer = $hailo->learn_reply($what);
-                            if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
-                                $mediabot->{logger}->log(4,"HailoChatter learn_reply $what from $who : $sAnswer");
-                                $mediabot->botPrivmsg($where,$sAnswer);
+                            # mb361-B1: unavailable Hailo is a disabled feature,
+                            # not a fatal message-processing error.
+                            my $hailo = $mediabot->get_hailo_runtime();
+                            if ($hailo) {
+                                $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
+                                my $sAnswer = $hailo->learn_reply($what);
+                                if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
+                                    $mediabot->{logger}->log(4,"HailoChatter learn_reply $what from $who : $sAnswer");
+                                    $mediabot->botPrivmsg($where,$sAnswer);
+                                }
                             }
                         }
                     }
@@ -1764,10 +1803,14 @@ sub on_message_PRIVMSG {
                             my $num;
                             $num++ while $what =~ /\S+/g;
                             if (($num >= $min_words) && ($num <= $max_words)) {
-                                my $hailo = $mediabot->get_hailo();
-                                $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
-                                $hailo->learn($what);
-                                $mediabot->{logger}->log(4,"learnt $what from $who");
+                                # mb361-B1: learning is optional when the brain
+                                # could not be initialized. Keep the bot online.
+                                my $hailo = $mediabot->get_hailo_runtime();
+                                if ($hailo) {
+                                    $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
+                                    $hailo->learn($what);
+                                    $mediabot->{logger}->log(4,"learnt $what from $who");
+                                }
                             }
                             else {
                                 $mediabot->{logger}->log(4,"word count is out of range to learn $what from $who");

@@ -1367,13 +1367,23 @@ sub _claude_send_and_parse {
     }
 
     my $data   = eval { decode_json($res->{content} // '') };
+    # mb359-B1: parcourir TOUS les blocs de content et concaténer ceux de type
+    # 'text', au lieu de ne lire que content[0]. L'API Anthropic peut renvoyer
+    # plusieurs blocs et placer un bloc non-text en tête (p.ex. un bloc 'thinking'
+    # si le raisonnement étendu est actif, ou 'tool_use') : l'ancien code, qui
+    # exigeait content[0]{type} eq 'text', répondait alors "Could not read Claude
+    # response" à tort alors qu'un bloc texte existait plus loin dans le tableau.
     my $answer = eval {
-        ref($data)                       eq 'HASH'  &&
-        ref($data->{content})            eq 'ARRAY' &&
-        ref($data->{content}[0])         eq 'HASH'  &&
-        $data->{content}[0]{type}        eq 'text'  &&
-        length($data->{content}[0]{text} // '') > 0
-        ? $data->{content}[0]{text} : undef
+        return undef unless ref($data) eq 'HASH' && ref($data->{content}) eq 'ARRAY';
+        my @texts;
+        for my $blk (@{ $data->{content} }) {
+            next unless ref($blk) eq 'HASH'
+                     && ($blk->{type} // '') eq 'text'
+                     && defined $blk->{text};
+            push @texts, $blk->{text};
+        }
+        my $joined = join('', @texts);
+        length($joined) > 0 ? $joined : undef;
     };
 
     unless (defined $answer && $answer ne '') {

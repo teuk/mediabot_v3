@@ -124,9 +124,9 @@ sub getYoutubeDetails {
     my $sDuration  = $contentDetails->{duration} // '';
     my $view_count = $statistics->{viewCount};
 
-    my $sViewCount = defined($view_count) && $view_count ne ''
-        ? "views $view_count"
-        : "views ?";
+    # mb360-R1: vues lisibles (1.2M/45k) via le helper partagé, au lieu du nombre
+    # brut — cohérent avec displayYoutubeDetails.
+    my $sViewCount = "views " . _yt_format_views($view_count);
 
     # A4: single combined log entry (removed duplicate sDuration log)
     $self->{logger}->log(4, "getYoutubeDetails() title=" . ($sTitle || "?") . " duration=" . ($sDuration || "?"));
@@ -322,14 +322,10 @@ sub displayYoutubeDetails {
     my $localized     = ref($snippet->{localized})   eq 'HASH' ? $snippet->{localized}   : {};
     my $contentDetails = ref($item->{contentDetails}) eq 'HASH' ? $item->{contentDetails} : {};
 
-    # Z5: format view count in human-readable form (1.2M, 45k, etc.)
+    # Z5 / mb360-R1: vues en format lisible (1.2M, 45k, etc.) via le helper
+    # partagé _yt_format_views (sortie identique à l'ancien bloc inline).
     my $raw_views = $statistics->{viewCount} // 0;
-    my $sViewCount = "views " . do {
-        if    ($raw_views >= 1_000_000) { sprintf("%.1fM", $raw_views / 1_000_000) }
-        elsif ($raw_views >= 1_000)     { sprintf("%.1fk", $raw_views / 1_000) }
-        elsif ($raw_views > 0)          { $raw_views }
-        else                            { "?" }
-    };
+    my $sViewCount = "views " . _yt_format_views($raw_views);
     my $sTitle        = $localized->{title}          // $snippet->{title} // '';
     my $schannelTitle = $snippet->{channelTitle}     // '';
     my $sDuration     = $contentDetails->{duration}  // '';
@@ -579,6 +575,22 @@ sub _yt_link {
     return "\x0302\x1F" . $url . "\x0F";
 }
 
+
+# mb360-R1: formatage des vues YouTube partagé (1.2M / 45k / brut / "?").
+# getYoutubeDetails() affichait le nombre BRUT ("views 1234567") tandis que
+# displayYoutubeDetails() le formatait en lisible (1.2M, 45k) : deux rendus
+# différents pour la même donnée, et un risque de divergence "fix d'un côté,
+# oublié de l'autre" — exactement ce que _yt_format_duration a réglé pour la
+# durée (mb315-R1). On centralise ici la logique (identique à celle, inline,
+# de displayYoutubeDetails). Renvoie uniquement la valeur formatée, sans le
+# préfixe "views " (laissé aux appelants).
+sub _yt_format_views {
+    my ($raw) = @_;
+    return '?' unless defined($raw) && $raw =~ /^\d+$/ && $raw > 0;
+    return sprintf('%.1fM', $raw / 1_000_000) if $raw >= 1_000_000;
+    return sprintf('%.1fk', $raw / 1_000)     if $raw >= 1_000;
+    return $raw;
+}
 
 sub _yt_format_duration {
     my ($iso) = @_;

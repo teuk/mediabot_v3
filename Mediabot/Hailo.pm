@@ -23,6 +23,7 @@ use Hailo;
 our @EXPORT = qw(
     init_hailo
     get_hailo
+    get_hailo_runtime
     is_hailo_excluded_nick
     hailo_ignore_ctx
     hailo_unignore_ctx
@@ -48,12 +49,33 @@ sub init_hailo {
 		return;
 	}
 	$self->{hailo} = $hailo;
+	delete $self->{_hailo_runtime_unavailable_logged};
 }
 
 # Get the Hailo object
 sub get_hailo {
 	my ($self) = shift;
 	return $self->{hailo};
+}
+
+# mb361-B1: runtime paths must tolerate an unavailable Hailo brain. init_hailo()
+# already logs the initialization failure; this helper adds at most one concise
+# runtime diagnostic and lets message handling continue without dereferencing
+# undef or misclassifying the failure as a timeout.
+sub get_hailo_runtime {
+    my ($self) = @_;
+
+    my $hailo = get_hailo($self);
+    return $hailo if $hailo;
+
+    unless ($self->{_hailo_runtime_unavailable_logged}) {
+        $self->{_hailo_runtime_unavailable_logged} = 1;
+        $self->{logger}->log(2,
+            "Hailo runtime unavailable; skipping reply and learning paths")
+            if $self->{logger};
+    }
+
+    return undef;
 }
 
 # Clean up and exit the program (with proper Net::Async::IRC QUIT)

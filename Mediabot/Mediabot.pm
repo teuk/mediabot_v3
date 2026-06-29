@@ -2863,7 +2863,11 @@ sub mbHandleNickTriggered {
             || $what =~ /^[!]/
             || $what =~ /^@{[$self->{conf}->get('main.MAIN_PROG_CMD_CHAR')]}/
         ) {
-            my $hailo        = get_hailo($self);
+            # mb361-B1: Hailo initialization is allowed to fail without taking
+            # IRC message handling down or incrementing the timeout metric.
+            my $hailo = get_hailo_runtime($self);
+            return unless $hailo;
+
             my $sCurrentNick = $self->{irc}->nick_folded;
             $what =~ s/\Q$sCurrentNick\E//g;
 
