@@ -92,6 +92,33 @@ sub _stop_all_runtime_db_timers {
 }
 
 
+# mb369-B1: écriture IRC sûre d'une commande de TIMER.
+# Une commande de timer est UNE ligne IRC. Comme elle provient de la table
+# TIMERS (potentiellement alimentée hors du flux IRC normal : édition directe,
+# import, restauration…), on refuse de l'envoyer si elle contient CR, LF ou NUL,
+# qui permettraient d'injecter des commandes IRC supplémentaires à chaque tick
+# du timer. Défense en profondeur alignée sur botPrivmsg/botNotice/botAction
+# (mb344) et le client Liquidsoap (mb363). Le cas légitime (commande mono-ligne)
+# n'est pas affecté.
+sub _timer_irc_write {
+    my ($self, $cmd, $name) = @_;
+    $name = defined($name) ? $name : '?';
+
+    unless ($self->{irc} && $self->{irc}->is_connected) {
+        $self->{logger}->log(1, "Timer [$name] skipped: bot not connected to IRC")
+            if $self->{logger};
+        return;
+    }
+    if (!defined($cmd) || $cmd =~ /[\r\n\x00]/) {
+        $self->{logger}->log(1,
+            "Timer [$name]: command contains CR/LF/NUL, refusing to send (possible IRC injection)")
+            if $self->{logger};
+        return;
+    }
+    $self->{irc}->write("$cmd\x0d\x0a");
+    return 1;
+}
+
 # Set IRC object
 # Set IRC object
 sub onStartTimers {
@@ -144,13 +171,8 @@ sub onStartTimers {
                 $self->{logger}->log(4, "Timer every $duration seconds : $command")
                     if $self->{logger};
 
-                if ($self->{irc} && $self->{irc}->is_connected) {
-                    $self->{irc}->write("$command\x0d\x0a");
-                }
-                else {
-                    $self->{logger}->log(1, "Timer $name skipped: bot not connected to IRC")
-                        if $self->{logger};
-                }
+                # mb369-B1: écriture via le helper qui refuse CR/LF/NUL.
+                $self->_timer_irc_write($command, $name);
             },
         );
 
@@ -385,13 +407,8 @@ sub mbAddTimer_ctx {
             $self->{logger}->log(4, "Timer [$name] tick: $cmd")
                 if $self->{logger};
 
-            if ($self->{irc} && $self->{irc}->is_connected) {
-                $self->{irc}->write("$cmd\x0d\x0a");
-            }
-            else {
-                $self->{logger}->log(1, "Timer [$name] skipped: not connected to IRC")
-                    if $self->{logger};
-            }
+            # mb369-B1: écriture via le helper qui refuse CR/LF/NUL.
+            $self->_timer_irc_write($cmd, $name);
         },
     );
 

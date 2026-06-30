@@ -32,6 +32,8 @@ our @EXPORT = qw(
     get_hailo_channel_ratio
     set_hailo_channel_ratio
     check_birthdays_today
+    hailo_record_activity
+    hailo_should_chatter
 );
 
 sub init_hailo {
@@ -575,12 +577,105 @@ sub set_hailo_channel_ratio {
 }
 
 
+# =============================================================================
+# mb370-B1 — Décision de chatter HailoChatter : taux ADAPTATIF au débit du canal.
+#
+# Avant, la décision (dans mediabot.pl) était `rand(100) >= ratio`, ce qui était :
+#   (a) INVERSÉ — ratio=97 donnait ~3 % de réponses au lieu de 97 % ;
+#   (b) AVEUGLE AU DÉBIT — une probabilité par-message fixe inonde un canal très
+#       actif et reste muette sur un canal calme.
+#
+# Désormais le `ratio` (0-100, stocké en base, INCHANGÉ) reste la cible, et la
+# probabilité EFFECTIVE est modulée par le débit récent du canal :
+#   - canal au rythme de référence ou plus calme  -> proba effective = ratio ;
+#   - canal plus rapide que la référence           -> proba réduite
+#     proportionnellement (ref/count), avec un plancher -> anti-flood.
+#
+# Tout l'état de débit est EN MÉMOIRE (aucune table, aucune colonne ajoutée).
+# Paramètres réglables via [hailo] (get_int, défauts = comportement de référence) :
+#   HAILO_CHATTER_RATE_WINDOW     fenêtre de mesure du débit, en secondes (60)
+#   HAILO_CHATTER_REFERENCE_MSGS  nb de messages/fenêtre au-delà duquel on bride (10)
+#   HAILO_CHATTER_MIN_FACTOR_PCT  plancher du facteur, en % (10) -> proba mini = ratio*10%
+# =============================================================================
+
+# Enregistre un message de conversation sur un canal (pour le calcul de débit).
+# À appeler pour CHAQUE message public conversationnel.
+sub hailo_record_activity {
+    my ($self, $channel) = @_;
+    return unless defined($channel) && $channel ne '';
+    my $now = time();
+    my $buf = ($self->{_hailo_activity}{$channel} //= []);
+    push @$buf, $now;
+    # Bornage mémoire : on ne conserve que la dernière heure, et au plus 600 entrées.
+    my $cutoff = $now - 3600;
+    shift @$buf while @$buf && $buf->[0] < $cutoff;
+    splice(@$buf, 0, scalar(@$buf) - 600) if @$buf > 600;
+    return;
+}
+
+# Nombre de messages enregistrés dans la fenêtre des $window dernières secondes.
+sub _hailo_recent_count {
+    my ($self, $channel, $window) = @_;
+    my $buf = $self->{_hailo_activity}{$channel} or return 0;
+    my $cutoff = time() - $window;
+    my $n = 0;
+    for my $ts (@$buf) { $n++ if $ts >= $cutoff; }
+    return $n;
+}
+
+# Lecture entière de config avec repli (utilise get_int si dispo).
+sub _hailo_conf_int {
+    my ($self, $key, $default, $min, $max) = @_;
+    my $conf = $self->{conf};
+    return $default unless $conf && $conf->can('get_int');
+    return $conf->get_int($key, default => $default, min => $min, max => $max);
+}
+
+# Probabilité effective (0-100) modulée par le débit récent du canal.
+sub _hailo_effective_pct {
+    my ($self, $channel, $base) = @_;
+    return 0 if !defined($base) || $base <= 0;
+    $base = 100 if $base > 100;
+
+    my $window = _hailo_conf_int($self, 'hailo.HAILO_CHATTER_RATE_WINDOW',    60,  5, 3600);
+    my $ref    = _hailo_conf_int($self, 'hailo.HAILO_CHATTER_REFERENCE_MSGS', 10,  1, 10000);
+    my $minpct = _hailo_conf_int($self, 'hailo.HAILO_CHATTER_MIN_FACTOR_PCT', 10,  1, 100);
+
+    my $count  = _hailo_recent_count($self, $channel, $window);
+    # Facteur de débit : 1.0 jusqu'à la référence, puis décroît en ref/count.
+    my $factor = ($count <= $ref) ? 1.0 : ($ref / $count);
+    my $floor  = $minpct / 100;
+    $factor = $floor if $factor < $floor;
+
+    my $eff = $base * $factor;
+    $eff = 100 if $eff > 100;
+    $eff = 0   if $eff < 0;
+    return $eff;
+}
+
+# Décision finale : le bot doit-il chatter (HailoChatter) sur ce canal maintenant ?
+# Renvoie 0 si le canal n'a pas de ratio configuré (-1) -> on retombe sur la
+# branche d'apprentissage, comme avant.
+sub hailo_should_chatter {
+    my ($self, $channel) = @_;
+    my $ratio = $self->get_hailo_channel_ratio($channel);
+    return 0 unless defined($ratio) && $ratio >= 0;   # -1 = non configuré
+    my $eff = _hailo_effective_pct($self, $channel, $ratio);
+    return (rand(100) < $eff) ? 1 : 0;
+}
+
+
 
 # hailo_chatter
 # Get or set Hailo chatter ratio for a given channel.
 # - Query: hailo_chatter [#channel]
 # - Set:   hailo_chatter [#channel] <ratio 0-100>
-# Stored ratio is still "inverted" (100 - user_ratio) to keep legacy behaviour.
+#
+# mb371-B1: since mb370 the value stored in HAILO_CHANNEL.ratio is the direct
+# user-facing reply percentage.  The command must therefore read and write the
+# same value.  Keeping the former `100 - ratio` conversion here would undo the
+# mb370 runtime fix (for example, asking for 97% would store 3 and chatter at
+# roughly 3% on a calm channel).
 sub hailo_chatter_ctx {
     my ($ctx) = @_;
 
@@ -645,11 +740,10 @@ sub hailo_chatter_ctx {
         if (!defined $stored_ratio || $stored_ratio == -1) {
             botNotice($self, $nick, "No Hailo chatter ratio set for $target_chan (using default behaviour).");
         } else {
-            my $user_ratio = 100 - $stored_ratio;    # keep legacy inversion
             botNotice(
                 $self,
                 $nick,
-                "Hailo chatter reply chance on $target_chan is currently ${user_ratio}%."
+                "Hailo chatter reply chance on $target_chan is currently ${stored_ratio}%."
             );
         }
         logBot($self, $message, $target_chan, "hailo_chatter", "show $target_chan");
@@ -682,10 +776,9 @@ sub hailo_chatter_ctx {
         return;
     }
 
-    # Legacy internal representation: store 100 - ratio
-    my $internal_ratio = 100 - $ratio;
-
-    my $ret = eval { set_hailo_channel_ratio($self, $target_chan, $internal_ratio) };
+    # mb371-B1: store the direct user-facing percentage.  The adaptive runtime
+    # consumes this same value as its base probability.
+    my $ret = eval { set_hailo_channel_ratio($self, $target_chan, $ratio) };
     if ($@) {
         $self->{logger}->log(1, "hailo_chatter_ctx(): set_hailo_channel_ratio died: $@");
         botNotice($self, $nick, "Internal error while setting Hailo chatter ratio.");

@@ -345,14 +345,40 @@ sub userLogin_ctx {
             }
         }
 
-        # Best-effort in-memory flags (ignore if structure differs)
-        eval {
-            $self->{auth}->{logged_in}{$id_user} = 1
-                if ref($self->{auth}) eq 'HASH' && ref($self->{auth}->{logged_in}) eq 'HASH';
-            $self->{auth}->{sessions}{lc $db_nick} = { id_user => $id_user, auth => 1 }
-                if ref($self->{auth}) eq 'HASH' && ref($self->{auth}->{sessions}) eq 'HASH';
+        # mb372-B1: register the live IRC nickname through the real Auth API.
+        # The former direct hash write used the DB handle as key, so QUIT/PART/
+        # KICK callbacks using the live nick could not close the session.
+        my $auth_state_ok = eval {
+            die "set_logged_in failed"
+                unless $self->{auth}->set_logged_in($id_user, 1);
+            die "set_session_user failed"
+                unless $self->{auth}->set_session_user($sNick, {
+                    id_user        => $id_user,
+                    nickname       => $db_nick,
+                    irc_nick       => $sNick,
+                    id_user_level  => $level_id,
+                    auth           => 1,
+                    hostmask       => $fullmask,
+                    logged_in_at   => time(),
+                });
             1;
         };
+        unless ($auth_state_ok) {
+            my $err = $@ || 'Auth session registration failed';
+            $err =~ s/\s+/ /g;
+            $self->{logger}->log(1, "login: failed to register live Auth session for '$sNick': $err")
+                if $self->{logger};
+
+            # Do not leave persistent auth=1 behind when the in-memory session
+            # could not be established.
+            $run_update->("UPDATE USER SET auth=0 WHERE id_user=?", $id_user);
+            botNotice($self, $sNick, "Internal error (auth session unavailable).");
+            return;
+        }
+
+        # The same prefix may have been cached as auth=0 immediately before the
+        # login command.  Drop it now so the next command sees auth=1 at once.
+        clear_user_cache($self, $fullmask) if $fullmask;
 
         # Resolve level description from USER_LEVEL
         my $level_desc = $level_id // "unknown";
@@ -439,6 +465,11 @@ sub userLogout_ctx {
     }
 
     $sth->finish;
+
+    # mb372-B1: clear the live Auth session and metrics as well.  The SQL update
+    # above already persisted auth=0, hence skip_db avoids a duplicate UPDATE.
+    eval { $self->{auth}->logout($nick, skip_db => 1) }
+        if $self->{auth} && $self->{auth}->can('logout');
 
     # Invalidate user cache so subsequent commands see auth=0 immediately
     my $logout_mask = eval { $ctx->message->prefix } // '';
@@ -1077,7 +1108,8 @@ sub _ensure_logged_in_state {
                 hostmask       => $fullmask,
             })
         };
-        eval { $self->{auth}->update_last_login($uid) };
+        # last_login is stamped by the real login/autologin SQL path.  Merely
+        # rebuilding in-memory state must not write it again on every message.
     }
 
     $self->{logged_in}{$uid}           = 1;

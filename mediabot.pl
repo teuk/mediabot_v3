@@ -1735,8 +1735,10 @@ sub on_message_PRIVMSG {
         }
         else {
             my $sCurrentNick = $self->nick_folded;
+            # mb370-B1: enregistre le débit de conversation du canal (en mémoire)
+            # pour piloter le taux de chatter HailoChatter adaptatif.
+            $mediabot->hailo_record_activity($where);
             my $luckyShot = rand(100);
-            my $luckyShotHailoChatter = rand(100);
             if ( $luckyShot >= $mediabot->checkResponder($message,$who,$where,$what,@tArgs) ) {
                 $mediabot->{logger}->log(4,"Found responder [$where] for $what with luckyShot : $luckyShot");
                 $mediabot->{logger}->log(4,"I have a lucky shot to answer for $what");
@@ -1778,7 +1780,7 @@ sub on_message_PRIVMSG {
                     }
                 }
             }
-            elsif ( ($mediabot->get_hailo_channel_ratio($where) != -1) && ($luckyShotHailoChatter >= $mediabot->get_hailo_channel_ratio($where)) ) {
+            elsif ( $mediabot->hailo_should_chatter($where) ) {
                 my $id_chanset_list = $mediabot->getIdChansetList("HailoChatter");
                 if (defined($id_chanset_list)) {
                     my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);

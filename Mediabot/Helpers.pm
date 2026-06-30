@@ -142,6 +142,7 @@ sub get_user_from_message {
     $self->{auth} ||= Mediabot::Auth->new(
         dbh     => $self->{dbh},
         logger  => $self->{logger},
+        bot     => $self,            # mb372-B1: allow logout to invalidate bot caches
         metrics => $self->{metrics}, # mb362-B1: preserve Auth gauge on lazy init
     );
 
@@ -3502,6 +3503,7 @@ sub isIgnored {
     $self->{auth} ||= Mediabot::Auth->new(
         dbh     => $self->{dbh},
         logger  => $self->{logger},
+        bot     => $self,            # mb372-B1: allow logout to invalidate bot caches
         metrics => $self->{metrics}, # mb362-B1: preserve Auth gauge on lazy init
     );
 
@@ -4093,6 +4095,7 @@ sub get_user_from_whois {
     $self->{auth} ||= Mediabot::Auth->new(
         dbh     => $self->{dbh},
         logger  => $self->{logger},
+        bot     => $self,            # mb372-B1: allow logout to invalidate bot caches
         metrics => $self->{metrics}, # mb362-B1: preserve Auth gauge on lazy init
     );
 
@@ -4205,6 +4208,7 @@ sub getNickInfoWhois {
     $self->{auth} ||= Mediabot::Auth->new(
         dbh     => $self->{dbh},
         logger  => $self->{logger},
+        bot     => $self,            # mb372-B1: allow logout to invalidate bot caches
         metrics => $self->{metrics}, # mb362-B1: preserve Auth gauge on lazy init
     );
 

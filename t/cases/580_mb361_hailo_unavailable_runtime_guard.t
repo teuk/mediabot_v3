@@ -83,7 +83,9 @@ return sub {
     $assert->is($runtime_calls, 3,
         'les trois chemins legacy utilisent le helper sûr');
 
-    my $runtime_start = index($main, 'my $luckyShotHailoChatter');
+    # mb370: l'ancien ancrage 'my $luckyShotHailoChatter' a été supprimé (décision
+    # de chatter déplacée dans hailo_should_chatter). On ancre sur le début du bloc.
+    my $runtime_start = index($main, 'my $luckyShot = rand(100)');
     my $runtime_end   = index($main, 'if ((ord(substr($what,0,1))', $runtime_start);
     my $runtime_block = ($runtime_start >= 0 && $runtime_end > $runtime_start)
         ? substr($main, $runtime_start, $runtime_end - $runtime_start)
@@ -112,14 +114,14 @@ return sub {
     $assert->like($nick_block, qr/mb361-B1/,
         'tag mb361-B1 présent dans Mediabot.pm');
 
-    # --- 5. Ratio HailoChatter explicitement préservé --------------------
-    my $user_chance = 3;
-    my $stored      = 100 - $user_chance;
-    my $hits        = scalar grep { $_ >= $stored } 0 .. 99;
+    # --- 5. Ratio HailoChatter direct après mb370/mb371 -----------------
+    my $user_chance = 97;
+    my $stored      = $user_chance;
+    my $hits        = scalar grep { $_ < $stored } 0 .. 99;
     $assert->is($stored, 97,
-        '3 % utilisateur est stocké comme seuil interne 97');
-    $assert->is($hits, 3,
-        'rand 0..99 >= 97 donne exactement 3 valeurs sur 100');
-    $assert->like($hailo_src, qr/store 100 - ratio|store 100 - \$ratio|100 - \$ratio/i,
-        'le code documente/conserve l’inversion legacy');
+        '97 % utilisateur est stocké directement comme 97');
+    $assert->is($hits, 97,
+        'rand 0..99 < 97 donne exactement 97 valeurs sur 100');
+    $assert->unlike($hailo_src, qr/100\s*-\s*\$(?:stored_ratio|ratio)/,
+        'la commande ne réintroduit aucune inversion legacy');
 };

@@ -189,19 +189,23 @@ sub maybe_autologin {
     my $rows = $sth->rows;
     $sth->finish;
 
-    # Keep lightweight in-memory state in the auth object too
-    $self->{logged_in}{$uid} = 1;
-    $self->{sessions}{lc $nick} = {
+    # mb372-B1: keep the session under the live IRC nickname, not only under
+    # the registered database handle. QUIT/PART/KICK callbacks receive the
+    # live nick and must be able to close the exact session later.
+    my ($irc_nick) = ($fullmask // '') =~ /^([^!]+)/;
+    $irc_nick = $nick unless defined($irc_nick) && $irc_nick ne '';
+
+    $self->set_logged_in($uid, 1);
+    $self->set_session_user($irc_nick, {
         id_user      => $uid,
         nickname     => $nick,
+        irc_nick     => $irc_nick,
         auth         => 1,
         hostmask     => $fullmask,
         logged_in_at => time(),
-    };
+    });
 
-    $self->_update_auth_session_metric();
-
-    $self->_log(3, "AUTOLOGIN: success uid=$uid nick=$nick reason=$reason rows=$rows");
+    $self->_log(3, "AUTOLOGIN: success uid=$uid nick=$nick irc_nick=$irc_nick reason=$reason rows=$rows");
     return (1, $reason);
 }
 
@@ -244,37 +248,57 @@ sub hostmask_matches {
 }
 
 
-# logout($nick_or_uid) — remove in-memory session state on QUIT/PART/KICK
-# Call this from on_message_QUIT, on_message_PART, on_message_KICK handlers.
+# logout($nick_or_uid, %opts) — close the live IRC session and, when the
+# account has no other live session, clear USER.auth as well.
+#
+# mb372-B1: the former implementation only removed an in-memory hash entry.
+# USER.auth stayed at 1, so get_user_from_message() could recreate authenticated
+# state after a genuine QUIT/PART/KICK. It also keyed explicit logins by the DB
+# handle instead of the live IRC nick, making many disconnects miss the session.
 sub logout {
-    my ($self, $nick_or_uid) = @_;
-    return unless defined $nick_or_uid;
+    my ($self, $nick_or_uid, %opts) = @_;
+    return 0 unless defined $nick_or_uid;
 
-    # Try to clear by nick (lowercase)
-    my $nick_lc = lc($nick_or_uid);
-    if (exists $self->{sessions}{$nick_lc}) {
-        my $uid = $self->{sessions}{$nick_lc}{id_user};
-        delete $self->{logged_in}{$uid} if defined $uid;
-        delete $self->{sessions}{$nick_lc};
-        $self->_update_auth_session_metric();
-        return 1;
+    my $sessions = $self->{sessions} ||= {};
+    my @keys;
+    my $uid;
+
+    if (!ref($nick_or_uid) && $nick_or_uid =~ /^\d+$/) {
+        $uid = 0 + $nick_or_uid;
+        @keys = grep {
+            defined($sessions->{$_}{id_user})
+                && $sessions->{$_}{id_user} =~ /^\d+$/
+                && $sessions->{$_}{id_user} == $uid
+        } keys %$sessions;
+    }
+    else {
+        my $needle = lc("$nick_or_uid");
+        @keys = grep {
+            my $sess = $sessions->{$_} || {};
+            lc($_) eq $needle
+                || lc($sess->{irc_nick} // '') eq $needle
+        } keys %$sessions;
+
+        $uid = $sessions->{$keys[0]}{id_user} if @keys;
     }
 
-    # Try by numeric uid
-    if ($nick_or_uid =~ /^\d+$/) {
-        delete $self->{logged_in}{$nick_or_uid};
-        # Also sweep sessions hash for this uid
-        for my $k (keys %{ $self->{sessions} || {} }) {
-            if (($self->{sessions}{$k}{id_user} // '') == $nick_or_uid) {
-                delete $self->{sessions}{$k};
-            }
-        }
+    # A numeric logout is also a valid request when only the legacy logged_in
+    # flag exists and no session hash survived.
+    my $had_state = @keys || (defined($uid) && exists($self->{logged_in}{$uid}));
 
-        $self->_update_auth_session_metric();
-        return 1;
+    for my $key (@keys) {
+        my $sess = delete $sessions->{$key};
+        $self->_invalidate_bot_session($key, $sess);
     }
 
-    return 0;
+    if (defined $uid && !$self->_has_session_for_uid($uid)) {
+        delete $self->{logged_in}{$uid};
+        $self->_set_db_auth($uid, 0) unless $opts{skip_db};
+        $self->_invalidate_bot_uid($uid);
+    }
+
+    $self->_update_auth_session_metric() if $had_state || @keys;
+    return $had_state ? 1 : 0;
 }
 
 # session_count() — return number of in-memory authenticated sessions
@@ -296,6 +320,143 @@ sub set_metrics {
 
     $self->{metrics} = $metrics;
     $self->_update_auth_session_metric();
+    return 1;
+}
+
+# is_logged_in_id($uid) — API already expected by LoginCommands.
+# Before mb372 those calls were hidden inside eval and silently failed because
+# the methods did not exist.
+sub is_logged_in_id {
+    my ($self, $uid) = @_;
+    return 0 unless defined($uid) && !ref($uid) && $uid =~ /^\d+$/;
+    return $self->{logged_in}{$uid} ? 1 : 0;
+}
+
+sub set_logged_in {
+    my ($self, $uid, $value) = @_;
+    return 0 unless defined($uid) && !ref($uid) && $uid =~ /^\d+$/;
+
+    if ($value) {
+        $self->{logged_in}{$uid} = 1;
+    }
+    else {
+        delete $self->{logged_in}{$uid};
+    }
+
+    return 1;
+}
+
+sub set_session_user {
+    my ($self, $irc_nick, $session) = @_;
+    return 0 unless defined($irc_nick) && !ref($irc_nick) && $irc_nick ne '';
+    return 0 unless ref($session) eq 'HASH';
+
+    my $uid = $session->{id_user};
+    return 0 unless defined($uid) && !ref($uid) && $uid =~ /^\d+$/;
+
+    my $key = lc($irc_nick);
+    my $old = $self->{sessions}{$key};
+    my $old_uid = ref($old) eq 'HASH' ? $old->{id_user} : undef;
+
+    my %copy = %$session;
+    $copy{irc_nick}     = $irc_nick;
+    $copy{auth}         = 1 unless defined $copy{auth};
+    $copy{logged_in_at} = time() unless defined $copy{logged_in_at};
+
+    $self->{sessions}{$key} = \%copy;
+    $self->{logged_in}{$uid} = 1;
+
+    # If the same live IRC nickname changes account, do not leave the previous
+    # account authenticated forever after its only session was overwritten.
+    if (defined($old_uid) && "$old_uid" =~ /^\d+$/ && $old_uid != $uid) {
+        $self->_invalidate_bot_session($key, $old);
+        unless ($self->_has_session_for_uid($old_uid)) {
+            delete $self->{logged_in}{$old_uid};
+            $self->_set_db_auth($old_uid, 0);
+            $self->_invalidate_bot_uid($old_uid);
+        }
+    }
+
+    $self->_update_auth_session_metric();
+    return 1;
+}
+
+# mb372-B1: return true when another live session still represents the account.
+sub _has_session_for_uid {
+    my ($self, $uid) = @_;
+    return 0 unless defined $uid;
+
+    for my $sess (values %{ $self->{sessions} || {} }) {
+        next unless ref($sess) eq 'HASH';
+        return 1 if defined($sess->{id_user})
+            && "$sess->{id_user}" =~ /^\d+$/
+            && $sess->{id_user} == $uid;
+    }
+
+    return 0;
+}
+
+sub _set_db_auth {
+    my ($self, $uid, $value) = @_;
+    my $dbh = $self->{dbh};
+    return undef unless $dbh;
+    return 0 unless defined($uid) && "$uid" =~ /^\d+$/;
+
+    my $sth = eval { $dbh->prepare("UPDATE USER SET auth=? WHERE id_user=?") };
+    unless ($sth) {
+        my $err = $@ || $DBI::errstr || 'prepare failed';
+        $err =~ s/\s+/ /g;
+        $self->_log(1, "Auth logout DB prepare failed for uid=$uid: $err");
+        return 0;
+    }
+
+    my $ok = eval { $sth->execute($value ? 1 : 0, $uid) };
+    unless ($ok) {
+        my $err = $@ || $DBI::errstr || 'execute failed';
+        $err =~ s/\s+/ /g;
+        eval { $sth->finish };
+        $self->_log(1, "Auth logout DB execute failed for uid=$uid: $err");
+        return 0;
+    }
+
+    eval { $sth->finish };
+    return 1;
+}
+
+sub _invalidate_bot_session {
+    my ($self, $key, $sess) = @_;
+    my $bot = $self->{bot};
+    return unless $bot;
+
+    my $hostmask = ref($sess) eq 'HASH' ? ($sess->{hostmask} // '') : '';
+
+    if ($bot->can('clear_user_cache')) {
+        eval {
+            if ($hostmask ne '') {
+                $bot->clear_user_cache($hostmask);
+            }
+            else {
+                $bot->clear_user_cache();
+            }
+            1;
+        };
+    }
+
+    for my $slot (qw(logged_in_by_nick sessions users_by_nick)) {
+        next unless ref($bot->{$slot}) eq 'HASH';
+        delete $bot->{$slot}{$key};
+    }
+
+    return 1;
+}
+
+sub _invalidate_bot_uid {
+    my ($self, $uid) = @_;
+    my $bot = $self->{bot};
+    return unless $bot;
+
+    delete $bot->{logged_in}{$uid} if ref($bot->{logged_in}) eq 'HASH';
+    delete $bot->{users_by_id}{$uid} if ref($bot->{users_by_id}) eq 'HASH';
     return 1;
 }
 
@@ -582,16 +743,27 @@ sub cleanup_stale_sessions {
     $max_age //= 86400;
     my $now  = time();
     my $gone = 0;
+    my %affected_uid;
 
-    for my $nick (keys %{ $self->{sessions} }) {
+    for my $nick (keys %{ $self->{sessions} || {} }) {
         my $sess = $self->{sessions}{$nick};
-        my $age  = $now - ($sess->{logged_in_at} // $now);
-        if ($age > $max_age) {
-            my $uid = $sess->{id_user};
-            delete $self->{sessions}{$nick};
-            delete $self->{logged_in}{$uid} if defined $uid;
-            $gone++;
-        }
+        next unless ref($sess) eq 'HASH';
+
+        my $age = $now - ($sess->{logged_in_at} // $now);
+        next unless $age > $max_age;
+
+        my $uid = $sess->{id_user};
+        delete $self->{sessions}{$nick};
+        $affected_uid{$uid} = 1 if defined $uid;
+        $self->_invalidate_bot_session($nick, $sess);
+        $gone++;
+    }
+
+    for my $uid (keys %affected_uid) {
+        next if $self->_has_session_for_uid($uid);
+        delete $self->{logged_in}{$uid};
+        $self->_set_db_auth($uid, 0);
+        $self->_invalidate_bot_uid($uid);
     }
 
     if ($gone) {
@@ -601,10 +773,7 @@ sub cleanup_stale_sessions {
             eval { $self->{bot}->noticeConsoleChan(
                 "auth: $gone stale session(s) purged (max_age=${max_age}s)") };
         }
-        if ($self->{metrics} && $self->{metrics}->can('set')) {
-            $self->{metrics}->set('mediabot_auth_sessions_total',
-                scalar keys %{ $self->{sessions} });
-        }
+        $self->_update_auth_session_metric();
     }
     return $gone;
 }
