@@ -382,6 +382,56 @@ sub set_session_user {
 }
 
 # mb372-B1: return true when another live session still represents the account.
+# mb377-B1: re-key an authenticated session when the live IRC nickname
+# changes.  The NICK event does not end the IRC connection, so it must preserve
+# the account authentication while replacing the old live-nick key.  Without
+# this migration, a later QUIT under the new nickname cannot find the session;
+# the stale old-nick session then keeps USER.auth set indefinitely.
+sub rename_session {
+    my ($self, $old_nick, $new_nick, %opts) = @_;
+
+    return 0 unless defined($old_nick) && !ref($old_nick) && $old_nick ne '';
+    return 0 unless defined($new_nick) && !ref($new_nick) && $new_nick ne '';
+
+    my $sessions = ($self->{sessions} //= {});
+    my $old_key  = lc($old_nick);
+    my $new_key  = lc($new_nick);
+
+    my $source_key;
+    if (ref($sessions->{$old_key}) eq 'HASH') {
+        $source_key = $old_key;
+    }
+    else {
+        ($source_key) = grep {
+            my $sess = $sessions->{$_};
+            ref($sess) eq 'HASH'
+                && lc($sess->{irc_nick} // '') eq $old_key
+        } keys %$sessions;
+    }
+
+    return 0 unless defined $source_key;
+
+    my $session = delete $sessions->{$source_key};
+    return 0 unless ref($session) eq 'HASH';
+
+    # Remove old live-nick/cache aliases before publishing the new session.
+    $self->_invalidate_bot_session($source_key, $session);
+
+    my %copy = %$session;
+    $copy{irc_nick} = $new_nick;
+
+    if (exists $opts{hostmask} && defined($opts{hostmask}) && !ref($opts{hostmask})) {
+        $copy{hostmask} = $opts{hostmask};
+    }
+    elsif (defined($copy{hostmask}) && !ref($copy{hostmask})) {
+        $copy{hostmask} =~ s/^[^!]+!/$new_nick!/;
+    }
+
+    # set_session_user() also handles a stale destination nickname safely and
+    # keeps the Auth session gauge aligned with the final session map.
+    return $self->set_session_user($new_nick, \%copy);
+}
+
 sub _has_session_for_uid {
     my ($self, $uid) = @_;
     return 0 unless defined $uid;

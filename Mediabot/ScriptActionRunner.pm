@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 
 use Scalar::Util qw(looks_like_number);
+use Encode qw(encode);
 
 # ---------------------------------------------------------------------------
 # Mediabot::ScriptActionRunner
@@ -380,8 +381,16 @@ sub _send_irc_action {
 
     my $command = $action->{type} eq 'notice' ? 'NOTICE' : 'PRIVMSG';
 
+    # mb359-B1: encode script-generated IRC text to UTF-8 bytes before it
+    # reaches IO::Async::Stream. JSON decoders return Perl character strings;
+    # handing a wide-character scalar directly to send_message() eventually
+    # reaches syswrite() and can terminate the bot on non-ASCII output.
+    # Already encoded byte strings remain unchanged.
+    my $wire_text = $action->{text};
+    $wire_text = encode('UTF-8', $wire_text) if utf8::is_utf8($wire_text);
+
     my $ok = eval {
-        $irc->send_message($command, undef, $action->{target}, $action->{text});
+        $irc->send_message($command, undef, $action->{target}, $wire_text);
         1;
     };
 

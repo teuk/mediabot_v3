@@ -1476,6 +1476,32 @@ sub on_message_NICK {
     # Track last seen on NICK change + purge Claude history for old nick
     {
         my ($sNick_n, $sIdent_n, $sHost_n) = $mediabot->getMessageNickIdentHost($message);
+        # mb377-B1: a NICK change preserves the IRC connection. Move any
+        # authenticated session to the new live nickname so a later QUIT/PART/
+        # KICK can close the correct session and clear persistent USER.auth.
+        if ($mediabot->{auth} && $old_nick && $new_nick) {
+            my $new_fullmask = $new_nick;
+            $new_fullmask .= "!$sIdent_n" if defined($sIdent_n) && $sIdent_n ne '';
+            $new_fullmask .= "\@$sHost_n" if defined($sHost_n) && $sHost_n ne '';
+
+            my $renamed = eval {
+                $mediabot->{auth}->rename_session(
+                    $old_nick,
+                    $new_nick,
+                    hostmask => $new_fullmask,
+                );
+            };
+            if ($@) {
+                (my $err = $@) =~ s/\s+/ /g;
+                $mediabot->{logger}->log(1,
+                    "Auth session rename failed for $old_nick -> $new_nick: $err");
+            }
+            elsif ($renamed) {
+                $mediabot->{logger}->log(3,
+                    "Auth session renamed $old_nick -> $new_nick");
+            }
+        }
+
         # mb126-B2: purge Claude history/persona/activity for the old nick.
         purge_claude_session_for_nick($mediabot, $old_nick);
         eval { $mediabot->updateUserSeen(
