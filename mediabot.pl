@@ -1756,7 +1756,11 @@ sub on_message_PRIVMSG {
                     $resp_timer->start;
                 }
             }
-            elsif ($what =~ /$sCurrentNick/i) {
+            # mb373-B1: match du pseudo LITTÉRAL (\Q..\E) — un pseudo IRC peut
+            # contenir des métacaractères regex ([ ] \ ` ^ { } |), qui faussaient
+            # la détection (ex. "bot|x" => match de "x" partout) ou la faisaient
+            # planter (ex. "Med[bot" => regex invalide).
+            elsif ($what =~ /\Q$sCurrentNick\E/i) {
                 my $id_chanset_list = $mediabot->getIdChansetList("Hailo");
                 if (defined($id_chanset_list)) {
                     my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);
@@ -1766,7 +1770,11 @@ sub on_message_PRIVMSG {
                             # crash this IRC callback. Skip the path cleanly.
                             my $hailo = $mediabot->get_hailo_runtime();
                             if ($hailo) {
-                                $what =~ s/$sCurrentNick//g;
+                                # mb373-B1: le pseudo peut contenir des caractères
+                                # spéciaux regex (IRC autorise [ ] \ ` ^ { } | ) :
+                                # on le retire LITTÉRALEMENT (\Q..\E), sinon un
+                                # pseudo comme "bot|x" ou "Med[bot" faussait/plantait.
+                                $what =~ s/\Q$sCurrentNick\E//gi;
                                 $what =~ s/^\s+//g;
                                 $what =~ s/\s+$//g;
                                 $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });

@@ -227,6 +227,19 @@ sub get {
     return $entry->{values}{$key};
 }
 
+# mb375-R1: échappement du texte des lignes "# HELP" selon la spec d'exposition
+# Prometheus (antislash -> \\, saut de ligne -> \n). Les VALEURS de label étaient
+# déjà échappées, mais pas le HELP : un antislash ou un retour à la ligne dans un
+# help rendait la ligne malformée et pouvait casser TOUT le scrape (pas seulement
+# la métrique concernée). Défense en profondeur pour la stack Prometheus/Grafana.
+sub _escape_help_text {
+    my ($s) = @_;
+    return '' unless defined $s;
+    $s =~ s/\\/\\\\/g;   # antislash d'abord
+    $s =~ s/\n/\\n/g;    # puis les sauts de ligne
+    return $s;
+}
+
 sub render_prometheus {
     my ($self) = @_;
 
@@ -250,8 +263,8 @@ sub render_prometheus {
         my $m = $self->{metrics}{$name};
         next unless $m;
 
-        push @out, sprintf("# HELP %s %s", $name, $m->{help});
-        push @out, sprintf("# TYPE %s %s", $name, $m->{type});
+        push @out, sprintf("# HELP %s %s", $name, _escape_help_text($m->{help}));
+        push @out, sprintf("# TYPE %s %s", $name, (defined($m->{type}) && $m->{type} ne '') ? $m->{type} : 'untyped');
 
         my $values = $m->{values} || {};
         for my $label_key (sort keys %$values) {

@@ -451,15 +451,16 @@ sub chatGPT {
     my $last       = $truncate ? $chatgpt_max_privmsg - 1 : $#chunk;
 
     if ($truncate) {
-        my $suff  = CHATGPT_TRUNC_MSG;                   # funny suffix
-        my $allow = $chatgpt_wrap_bytes - length($suff);  # bytes we can keep
-
-        if (length($chunk[$last]) > $allow) {            # always enforce room
-            $chunk[$last] = substr($chunk[$last], 0, $allow);
-            $chunk[$last] =~ s/\s+\S*$//;                # backtrack to prev word
-            $chunk[$last] =~ s/\s+$//;                   # trim trailing spaces
-        }
-        $chunk[$last] .= $suff;                          # now safe to append
+        # mb376-B1: le wrap MB374 est byte-safe, mais l'ancien ajout du suffixe
+        # recalculait encore la place avec length()/substr() en CARACTÈRES. Le
+        # suffixe ChatGPT contient lui-même de l'UTF-8, donc la dernière ligne
+        # pouvait dépasser WRAP_BYTES, être re-découpée par botPrivmsg et faire
+        # mentir MAX_PRIVMSG. Un seul helper garantit désormais le budget final.
+        $chunk[$last] = _fit_truncation_suffix(
+            $chunk[$last],
+            CHATGPT_TRUNC_MSG,
+            $chatgpt_wrap_bytes,
+        );
     }
 
     my @out_chunks = @chunk[0 .. $last];
@@ -482,27 +483,80 @@ sub _chatgpt_wrap {
     $wrap_bytes = CHATGPT_WRAP_BYTES
         unless defined($wrap_bytes) && $wrap_bytes =~ /^\d+\z/ && $wrap_bytes > 0;
 
-    my @out;
+    # mb374-R1: budgétise en OCTETS (limite réelle du fil IRC), pas en caractères.
+    # Avant, ce wrap comptait des CARACTÈRES via length()/substr() : un texte
+    # accentué (français !) ou des emojis produisaient des chunks qui, une fois
+    # encodés en UTF-8, dépassaient le budget. Conséquences : (a) botPrivmsg les
+    # re-découpait en aval, et (b) le plafond MAX_PRIVMSG ne correspondait pas au
+    # nombre réel de lignes envoyées sur le fil (une réponse accentuée pouvait
+    # dépasser le nombre de messages voulu). On délègue au découpeur byte-safe
+    # partagé (_split_text_for_irc, mb325) — déjà utilisé par botPrivmsg — pour un
+    # comportement unique et correct.
+    return Mediabot::Helpers::_split_text_for_irc($txt, $wrap_bytes);
+}
 
-    while (length $txt) {
 
-        # If the remainder already fits, push and break
-        if (length($txt) <= $wrap_bytes) {
-            push @out, $txt;
-            last;
-        }
+# Return the number of bytes that the IRC layer will put on the wire. Character
+# strings are UTF-8 encoded downstream; byte strings are already encoded and
+# must not be encoded a second time. This mirrors _split_text_for_irc (mb325).
+sub _irc_wire_bytes {
+    my ($text) = @_;
+    return 0 unless defined $text;
+    return utf8::is_utf8($text)
+        ? length(encode('UTF-8', $text))
+        : length($text);
+}
 
-        # Look ahead up to the limit
-        my $slice = substr($txt, 0, $wrap_bytes);
-        my $break = rindex($slice, ' ');
+# Return a byte-bounded prefix using the same shared splitter as normal IRC
+# wrapping. Tiny defensive budgets are handled locally because the shared
+# helper deliberately normalises values below 16 bytes.
+sub _irc_prefix_for_budget {
+    my ($text, $max_bytes) = @_;
+    return '' unless defined($text) && length($text);
+    return '' unless defined($max_bytes) && $max_bytes =~ /^\d+\z/ && $max_bytes > 0;
+    return $text if _irc_wire_bytes($text) <= $max_bytes;
 
-        # If space found, split there; else hard split
-        $break = $wrap_bytes if $break == -1;
-
-        push @out, substr($txt, 0, $break, '');   # remove from $txt
-        $txt =~ s/^\s+//;                         # trim leading spaces
+    if ($max_bytes >= 16) {
+        my @chunks = Mediabot::Helpers::_split_text_for_irc($text, $max_bytes);
+        return $chunks[0] // '';
     }
-    return @out;
+
+    my ($prefix, $used) = ('', 0);
+    for my $ch (split //, $text) {
+        my $cost = _irc_wire_bytes($ch);
+        last if $used + $cost > $max_bytes;
+        $prefix .= $ch;
+        $used += $cost;
+    }
+    return $prefix;
+}
+
+# mb376-B1: append a truncation suffix while keeping the COMPLETE resulting
+# line inside the configured IRC byte budget. Both OpenAI and Anthropic use the
+# same helper so MAX_PRIVMSG continues to describe the real number of lines sent.
+sub _fit_truncation_suffix {
+    my ($text, $suffix, $max_bytes) = @_;
+
+    $text   = '' unless defined $text;
+    $suffix = '' unless defined $suffix;
+    $max_bytes = CHATGPT_WRAP_BYTES
+        unless defined($max_bytes) && $max_bytes =~ /^\d+\z/ && $max_bytes > 0;
+
+    $text   =~ s/[\r\n]+/ /g;
+    $suffix =~ s/[\r\n]+/ /g;
+
+    my $suffix_bytes = _irc_wire_bytes($suffix);
+
+    # Defensive fallback for a future suffix larger than the whole budget.
+    # Current suffixes are comfortably below the configured minimums.
+    return _irc_prefix_for_budget($suffix, $max_bytes)
+        if $suffix_bytes > $max_bytes;
+
+    my $allow  = $max_bytes - $suffix_bytes;
+    my $prefix = _irc_prefix_for_budget($text, $allow);
+    $prefix =~ s/\s+$//;
+
+    return $prefix . $suffix;
 }
 
 # xlogin
@@ -1259,14 +1313,14 @@ sub claudeAI {
     my $last     = $truncate ? $max_privmsg - 1 : $#chunk;
 
     if ($truncate) {
-        my $suff  = CLAUDE_TRUNC_MSG;
-        my $allow = $wrap_bytes - length($suff);
-        if (length($chunk[$last]) > $allow) {
-            $chunk[$last] = substr($chunk[$last], 0, $allow);
-            $chunk[$last] =~ s/\s+\S*$//;
-            $chunk[$last] =~ s/\s+$//;
-        }
-        $chunk[$last] .= $suff;
+        # mb376-B1: même garantie byte-safe que le chemin OpenAI, afin que le
+        # suffixe de troncature fasse partie du budget et non d'un ajout après
+        # coup susceptible de créer une ligne IRC supplémentaire.
+        $chunk[$last] = _fit_truncation_suffix(
+            $chunk[$last],
+            CLAUDE_TRUNC_MSG,
+            $wrap_bytes,
+        );
     }
 
     if ($output_fn) {
