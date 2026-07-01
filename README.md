@@ -49,6 +49,7 @@ The full documentation lives in the GitHub wiki:
 * [Partyline](https://github.com/teuk/mediabot_v3/wiki/Partyline)
 * [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing)
 * [Troubleshooting](https://github.com/teuk/mediabot_v3/wiki/Troubleshooting)
+* [Local configure wizard reference](docs/CONFIGURE.md)
 * [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes)
 
 If something in this README is not enough, go to the wiki. The wiki is the operational reference.
@@ -181,14 +182,27 @@ cd /home/mediabot/mediabot_v3 || exit 1
 ./configure
 ```
 
-The installer creates a minimal `mediabot.conf` and handles initial setup.
+`mediabot.sample.conf` is a reference file. The installer now generates a
+complete `mediabot.conf` directly from it, including all active safe defaults.
+It never enables Partyline eval.
 
-If `./configure` detects that the target database exists and asks whether it should recreate it:
+On a fresh installation it creates the database, installs dependencies,
+configures IRC/network data and validates schema drift.
 
-* answer **yes** for a brand new install database;
-* answer **no** for an existing production or historical database.
+On an existing installation it creates a timestamped backup, preserves current
+and custom values, adds missing defaults, normalizes duplicate INI keys and
+offers the database drift/migration workflow without automatically applying
+generated SQL.
 
-`mediabot.sample.conf` is a reference file. Use it to add optional or newer settings that `./configure` does not yet generate.
+Useful maintenance modes:
+
+```bash
+./configure --config mediabot.conf --sync-only
+./configure --config mediabot.conf --drift-only
+```
+
+See [`docs/CONFIGURE.md`](docs/CONFIGURE.md) for the complete fresh/existing
+workflow and safety rules.
 
 ### 5. Review `mediabot.conf`
 

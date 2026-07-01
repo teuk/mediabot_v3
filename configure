@@ -1,241 +1,355 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# +-------------------------------------------------------------------------+
-# | Mediabot configuration                                                  |
-# +-------------------------------------------------------------------------+
+# mb378-R1: complete sample-driven fresh/existing configuration workflow.
 
-if [ $(id -u) -eq 0 ]; then
-	echo "This script must not be run as root user"
-	echo "Create a non-privileges user to run configure script ex: mediabot"
-	exit 1
-fi
+set -Eeuo pipefail
+umask 077
 
-cd install
-if [ $? -ne 0 ]; then
-	echo "Run ./$(basename $0) in its directory"
-	exit 2
-fi
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_DIR="$APP_DIR/install"
+SAMPLE_CONF="$APP_DIR/mediabot.sample.conf"
+CONFIG_HELPER="$INSTALL_DIR/configure_config.pl"
+DRIFT_TOOL="$APP_DIR/tools/check_schema_drift.pl"
+LOG_FILE="$APP_DIR/configure.log"
 
-SCRIPT_LOGFILE=configure.log
+CONFIG_FILE=""
+LEGACY_SERVER_CONF=""
+LEGACY_LIST=0
+SYNC_ONLY=0
+SKIP_DB=0
+SKIP_CPAN=0
+DRIFT_ONLY=0
+ASSUME_YES=0
 
-# +-------------------------------------------------------------------------+
-# | Functions                                                               |
-# +-------------------------------------------------------------------------+
-function messageln {
-    if [ ! -z "$1" ]; then
-        echo "[$(date +'%d/%m/%Y %H:%M:%S')] $*" | tee -a $SCRIPT_LOGFILE
+usage() {
+    cat <<EOF
+Mediabot v3 configuration wizard
+
+Usage:
+  ./configure [options]
+
+Options:
+  -c, --config <file>   Configuration file (default: $APP_DIR/mediabot.conf)
+      --sync-only       Synchronize/complete the config and stop
+      --skip-db         Skip database creation/drift checks
+      --skip-cpan       Skip Perl module installation
+      --drift-only      Run database drift workflow only
+  -y, --yes             Accept safe default answers where supported
+  -s <file>             Legacy server configuration mode
+  -l                    List servers in legacy -s mode
+  -h, --help            Show this help
+
+Fresh installation:
+  - generates a complete config from mediabot.sample.conf;
+  - keeps PARTYLINE_EVAL_ENABLED=0;
+  - creates the database and application user;
+  - installs Perl dependencies;
+  - configures IRC/network data;
+  - validates schema drift.
+
+Existing installation:
+  - creates a timestamped backup;
+  - preserves existing values and custom keys;
+  - adds missing defaults from mediabot.sample.conf;
+  - normalizes duplicate sections/keys atomically;
+  - offers schema drift reporting and official migrations;
+  - never applies generated SQL automatically.
+EOF
+}
+
+log() {
+    local line="[$(date +'%d/%m/%Y %H:%M:%S')] $*"
+    printf '%s\n' "$line" | tee -a "$LOG_FILE"
+}
+
+fail() {
+    log "ERROR: $*"
+    exit 1
+}
+
+need_cmd() {
+    command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
+}
+
+ask_yes_no() {
+    local prompt="$1"
+    local default="${2:-y}"
+    local answer
+    if [[ "$ASSUME_YES" -eq 1 ]]; then
+        [[ "$default" == "y" ]]
+        return
     fi
-}
- 
-function message {
-    if [ ! -z "$1" ]; then
-        echo -n "[$(date +'%d/%m/%Y %H:%M:%S')] $* " | tee -a $SCRIPT_LOGFILE
-    fi
-}
- 
-function ok_failed {
-    if [ ! -z "$1" ] && [ $1 -eq 0 ]; then
-        echo "OK" | tee -a $SCRIPT_LOGFILE
-    else
-    	RETVALUE=$1
-      echo -e " Failed. "
-      if [ ! -z "$2" ]; then
-      	shift
-      	echo "$*"
-      fi
-      echo -e "Installation log is available in $SCRIPT_LOGFILE" | tee -a $SCRIPT_LOGFILE
-      exit $RETVALUE
-    fi
-}
-
-function usage {
-	if [ ! -z "$1" ]; then
-		messageln "Error : $1"
-  fi
-  messageln "configure help:"
-  messageln "-h                         show this help"
-  messageln "-s <configuration_file>    configure servers"
-  messageln "-l                         list all networks/servers (requires -s)"
-  exit 1
-}
-
-# +-------------------------------------------------------------------------+
-# | Check command line parameters                                           |
-# +-------------------------------------------------------------------------+
-
-while getopts 'lhs:' opt; do
-        case $opt in
-        				l)			OPTSFOUND=1
-                        CONFIG_LIST=1
-                        ;;
-                h)			OPTSFOUND=1
-                        usage
-                        ;;
-                s)			OPTSFOUND=1
-                				CONF_FILE=${OPTARG}
-                				if [ "$(echo $CONF_FILE | cut -c1)" != "/" ]; then
-                        	CONF_FILE=../$CONF_FILE
-                        fi
-                        ;;
-                \?)			usage "Invalid option"
-                        ;;
+    while true; do
+        if [[ "$default" == "y" ]]; then
+            read -r -p "[$(date +'%d/%m/%Y %H:%M:%S')] $prompt [Y/n]: " answer
+            answer="${answer:-y}"
+        else
+            read -r -p "[$(date +'%d/%m/%Y %H:%M:%S')] $prompt [y/N]: " answer
+            answer="${answer:-n}"
+        fi
+        case "$answer" in
+            y|Y|yes|YES) return 0 ;;
+            n|N|no|NO) return 1 ;;
         esac
+    done
+}
+
+absolute_path() {
+    local path="$1"
+    if [[ "$path" = /* ]]; then
+        printf '%s\n' "$path"
+    else
+        printf '%s/%s\n' "$PWD" "$path"
+    fi
+}
+
+make_overlay() {
+    mktemp /tmp/mediabot_configure_overlay.XXXXXX
+}
+
+merge_overlay() {
+    local overlay="$1"
+    perl "$CONFIG_HELPER" \
+        --sample "$SAMPLE_CONF" \
+        --config "$CONFIG_FILE" \
+        --mode merge \
+        --overlay "$overlay" \
+        --backup-dir "$CONFIG_DIR/config-backups"
+}
+
+get_conf() {
+    perl "$CONFIG_HELPER" --config "$CONFIG_FILE" --get "$1"
+}
+
+run_drift_workflow() {
+    [[ "$SKIP_DB" -eq 0 ]] || return 0
+    [[ -f "$CONFIG_FILE" ]] || fail "Cannot check database drift without $CONFIG_FILE"
+
+    log "Running database schema/reference-data drift check"
+    set +e
+    perl "$DRIFT_TOOL" --conf "$CONFIG_FILE"
+    local rc=$?
+    set -e
+
+    if [[ "$rc" -eq 0 ]]; then
+        log "Database schema is in sync"
+        return 0
+    fi
+
+    if [[ "$rc" -ne 1 ]]; then
+        log "Drift checker could not complete (exit $rc). Check DB credentials and Perl DBI drivers."
+        return "$rc"
+    fi
+
+    local stamp preview
+    stamp="$(date +'%Y%m%d_%H%M%S')"
+    preview="$RUN_DIR/schema_drift_${stamp}.txt"
+    log "Drift detected. Writing a review-only report to $preview"
+    set +e
+    perl "$DRIFT_TOOL" --conf "$CONFIG_FILE" --generate-migration >"$preview" 2>&1
+    set -e
+
+    printf '\nOfficial migration files (oldest first):\n'
+    mapfile -t migrations < <(find "$INSTALL_DIR/migrations" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)
+    local i
+    for i in "${!migrations[@]}"; do
+        printf '  %2d) %s\n' "$((i + 1))" "${migrations[$i]}"
+    done
+    printf '\nGenerated SQL is never applied automatically. Review the report first.\n'
+
+    if [[ "${#migrations[@]}" -gt 0 ]] && ask_yes_no "Open the guided official-migration selector now?" "n"; then
+        local db_name choice selected
+        db_name="$(get_conf mysql.MAIN_PROG_DDBNAME)"
+        while true; do
+            read -r -p "Select migration number (Enter to stop): " choice
+            [[ -n "$choice" ]] || break
+            [[ "$choice" =~ ^[0-9]+$ ]] || { printf 'Invalid number.\n'; continue; }
+            (( choice >= 1 && choice <= ${#migrations[@]} )) || { printf 'Out of range.\n'; continue; }
+            selected="${migrations[$((choice - 1))]}"
+            printf 'Database : %s\nMigration: %s\n' "$db_name" "$selected"
+            if ask_yes_no "Apply this official migration with the root MySQL account?" "n"; then
+                sudo "$INSTALL_DIR/db_migrate.sh" "$db_name" "install/migrations/$selected" root
+            fi
+        done
+        log "Re-running drift check after guided migration step"
+        perl "$DRIFT_TOOL" --conf "$CONFIG_FILE" --strict
+    else
+        log "No migration applied. Review $preview and install/migrations/ before starting an upgraded bot."
+    fi
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -c|--config)
+            [[ $# -ge 2 ]] || fail "$1 requires a file"
+            CONFIG_FILE="$2"
+            shift 2
+            ;;
+        --sync-only) SYNC_ONLY=1; shift ;;
+        --skip-db) SKIP_DB=1; shift ;;
+        --skip-cpan) SKIP_CPAN=1; shift ;;
+        --drift-only) DRIFT_ONLY=1; shift ;;
+        -y|--yes) ASSUME_YES=1; shift ;;
+        -s)
+            [[ $# -ge 2 ]] || fail "-s requires a configuration file"
+            LEGACY_SERVER_CONF="$2"
+            shift 2
+            ;;
+        -l) LEGACY_LIST=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) fail "Unknown option: $1" ;;
+    esac
 done
-shift $(( $OPTIND-1 ))
 
-if [ ! -z "$CONFIG_LIST" ] && [ -z "$CONF_FILE" ]; then
-	usage "Missing -s <configuration_file> parameter"
+if [[ -n "$LEGACY_SERVER_CONF" ]]; then
+    LEGACY_SERVER_CONF="$(absolute_path "$LEGACY_SERVER_CONF")"
+    [[ -f "$LEGACY_SERVER_CONF" ]] || fail "$LEGACY_SERVER_CONF does not exist"
+    args=(--conf="$LEGACY_SERVER_CONF")
+    [[ "$LEGACY_LIST" -eq 1 ]] && args+=(--list)
+    exec "$INSTALL_DIR/conf_servers.pl" "${args[@]}"
+fi
+[[ "$LEGACY_LIST" -eq 0 ]] || fail "-l requires -s <configuration_file>"
+
+[[ "$(id -u)" -ne 0 ]] || fail "Run this wizard as the dedicated non-root Mediabot user, not root"
+[[ -f "$SAMPLE_CONF" ]] || fail "Missing $SAMPLE_CONF"
+[[ -x "$CONFIG_HELPER" ]] || fail "Missing executable $CONFIG_HELPER"
+
+need_cmd perl
+need_cmd mysql
+need_cmd sudo
+need_cmd mktemp
+need_cmd find
+
+cd "$APP_DIR"
+: >"$LOG_FILE" || fail "Cannot write $LOG_FILE"
+chmod 600 "$LOG_FILE"
+
+if [[ -z "$CONFIG_FILE" ]]; then
+    default_conf="$APP_DIR/mediabot.conf"
+    if [[ "$ASSUME_YES" -eq 1 ]]; then
+        CONFIG_FILE="$default_conf"
+    else
+        read -r -p "[$(date +'%d/%m/%Y %H:%M:%S')] Configuration file [$default_conf]: " CONFIG_FILE
+        CONFIG_FILE="${CONFIG_FILE:-$default_conf}"
+    fi
+fi
+CONFIG_FILE="$(absolute_path "$CONFIG_FILE")"
+CONFIG_DIR="$(dirname "$CONFIG_FILE")"
+RUN_DIR="$CONFIG_DIR/run"
+mkdir -p "$RUN_DIR" "$CONFIG_DIR/config-backups"
+chmod 750 "$RUN_DIR" "$CONFIG_DIR/config-backups"
+
+if [[ "$DRIFT_ONLY" -eq 1 ]]; then
+    [[ -f "$CONFIG_FILE" ]] || fail "Configuration not found: $CONFIG_FILE"
+    run_drift_workflow
+    exit 0
 fi
 
-if [ ! -z "$CONF_FILE" ]; then
-	if [ ! -f $CONF_FILE ]; then
-		usage "$CONF_FILE does not exist"
-	else
-		if [ ! -z "$CONFIG_LIST" ]; then
-			./conf_servers.pl --conf=$CONF_FILE --list
-		else
-			./conf_servers.pl --conf=$CONF_FILE
-		fi
-	fi
-	exit $?
+if [[ -f "$CONFIG_FILE" ]]; then
+    INSTALL_MODE="existing"
+    log "Existing installation detected: $CONFIG_FILE"
+else
+    INSTALL_MODE="fresh"
+    log "Fresh installation detected: $CONFIG_FILE"
 fi
 
-# +-------------------------------------------------------------------------+
-# | Check required package                                                  |
-# +-------------------------------------------------------------------------+
-message "Check if sudo is available"
-which sudo &>/dev/null
-ok_failed $? "You should install sudo on your system before installation."
+DEFAULTS_FILE="$(make_overlay)"
+OVERLAY_FILE="$(make_overlay)"
+cleanup() {
+    rm -f "${DEFAULTS_FILE:-}" "${OVERLAY_FILE:-}"
+}
+trap cleanup EXIT
+chmod 600 "$DEFAULTS_FILE" "$OVERLAY_FILE"
 
-message "Check if perl is available"
-which perl &>/dev/null
-ok_failed $? "You should install perl on your system before installation."
+YTDLP_PATH="$(command -v yt-dlp 2>/dev/null || true)"
+YTDLP_PATH="${YTDLP_PATH:-/usr/local/bin/yt-dlp}"
+cat >"$DEFAULTS_FILE" <<EOF
+main.MAIN_PID_FILE=$CONFIG_DIR/mediabot.pid
+main.MAIN_LOG_FILE=$CONFIG_DIR/mediabot.log
+main.PARTYLINE_STATUS_JSON=$RUN_DIR/partyline_sessions.json
+main.MAIN_PROG_BIRTHDATE=$(date +%s)
+radio.YTDLP_PATH=$YTDLP_PATH
+EOF
 
-message "Check if cpan is available"
-which cpan &>/dev/null
-ok_failed $? "You should install cpan utility on your system before installation."
-
-message "Check if make is available"
-which make &>/dev/null
-ok_failed $? "You should install make utility on your system before installation."
-
-message "Check if gcc is available"
-which gcc &>/dev/null
-ok_failed $? "You should install gcc compiler on your system before installation."
-
-message "Check if mysql is available"
-which mysql &>/dev/null
-ok_failed $? "You should install MySQL server and client (at least client) on your system before installation."
-
-message "Check if curl is available"
-which curl &>/dev/null
-ok_failed $? "You should install curl utility on your system before installation."
-
-# +-------------------------------------------------------------------------+
-# | Configure                                                               |
-# +-------------------------------------------------------------------------+
-messageln "This script will assume that you will install the bot in the same location of config file"
-messageln "Choose config file location where you want to install the bot"
-CONFIG_FILE=$(dirname $(pwd))/mediabot.conf
-message "Enter config file absolute path in current directory (Hit enter for '$CONFIG_FILE') :"
-read myresp
-if [ ! -z "$myresp" ]; then
-    CONFIG_FILE=$myresp
-fi
-while [ "${CONFIG_FILE:0:1}" != "/" ]
-	do
-		message "Please enter an absolute path : "
-		read myresp
-		if [ ! -z "$myresp" ]; then
-		    CONFIG_FILE=$myresp
-		fi
-	done
-	
-messageln "Configure $CONFIG_FILE (Hit CTRL-C to abort and launch ./configure again to change"
-read -n 1 -s -r -p "[$(date +'%d/%m/%Y %H:%M:%S')] Press any key to continue"
-echo
-INSTALL_DIR=$(dirname $CONFIG_FILE)
-RUN_DIR="$INSTALL_DIR/run"
-
-messageln "The bot will be installed in $INSTALL_DIR with $CONFIG_FILE configuration file"
-messageln "Runtime files will be stored in $RUN_DIR"
-read -n 1 -s -r -p "[$(date +'%d/%m/%Y %H:%M:%S')] Press any key to continue"
-echo
-
-mkdir -p "$RUN_DIR"
-chmod 750 "$RUN_DIR"
-ok_failed $? "Unable to create runtime directory $RUN_DIR"
-
-echo "[main]
-MAIN_PROG_NAME=Mediabot
-MAIN_PID_FILE=$INSTALL_DIR/mediabot.pid
-MAIN_LOG_FILE=$INSTALL_DIR/mediabot.log
-MAIN_PROG_BIRTHDATE=$(date +%s)
-MAIN_PROG_URL=http://www.domain.tld/mediabot
-MAIN_PROG_QUIT_MSG=So long and thanks for all the fish !
-MAIN_PROG_DEBUG=0
-MAIN_PROG_MAXLEN=400
-CHANNEL_LOG_RETENTION_DAYS=90
-USER_SEEN_RETENTION_DAYS=180
-DCC_DEBUG_HINTS=0
-PARTYLINE_EVAL_ENABLED=0
-PARTYLINE_EVAL_TIMEOUT_SECONDS=5
-PARTYLINE_STATUS_JSON=$RUN_DIR/partyline_sessions.json
-MAIN_PROG_INITIAL_TRIGGER=1
-NICK_TRIGGER=1" >$CONFIG_FILE
-
-MAIN_PROG_CMD_CHAR='!'
-message "Enter a prefix char to reply to commands on channels [!] :"
-read myresp
-if [ ! -z "$myresp" ]; then
-    MAIN_PROG_CMD_CHAR=$myresp
-fi
-while [ ${#MAIN_PROG_CMD_CHAR} -ne 1 ]
-	do
-		message "Enter a prefix char to reply to commands on channels [!] :"
-		read myresp
-		if [ ! -z "$myresp" ]; then
-		    MAIN_PROG_CMD_CHAR=$myresp
-		fi
-	done
-echo "MAIN_PROG_CMD_CHAR=$MAIN_PROG_CMD_CHAR
-
-[metrics]
-METRICS_ENABLED=0
-METRICS_BIND=127.0.0.1
-METRICS_PORT=9108
-
-" >>$CONFIG_FILE
-
-# +-------------------------------------------------------------------------+
-# | Configure MySQL Database                                                |
-# +-------------------------------------------------------------------------+
-messageln "Database installation must be run with sudo (as root user)"
-sudo ./db_install.sh -c $CONFIG_FILE
-ok_failed $? "Errors while configuring database"
-
-# +-------------------------------------------------------------------------+
-# | Configure Perl Modules                                                  |
-# +-------------------------------------------------------------------------+
-messageln "Perl modules installation must be run with sudo (as root user). This may take a long time (especially for DateTime and Moose/Hailo module), please be patient"
-messageln "Note : if you'd like to follow modules installation you can tail -f install/cpan_install_details.log in a separate terminal, let's go !"
-read -n 1 -s -r -p "[$(date +'%d/%m/%Y %H:%M:%S')] Press any key to continue"
-echo
-sudo ./cpan_install.sh
-RETVAL=$?
-if [ $RETVAL -ne 0 ]; then
-	messageln "Errors while installing perl modules"
-	exit $RETVAL
+if [[ "$INSTALL_MODE" == "fresh" ]]; then
+    command_char='!'
+    if [[ "$ASSUME_YES" -eq 0 ]]; then
+        while true; do
+            read -r -p "[$(date +'%d/%m/%Y %H:%M:%S')] IRC command prefix [!]: " command_char
+            command_char="${command_char:-!}"
+            [[ "${#command_char}" -eq 1 ]] && [[ "$command_char" != $'\n' ]] && break
+            printf 'Enter exactly one character.\n'
+        done
+    fi
+    cat >"$OVERLAY_FILE" <<EOF
+main.MAIN_PROG_CMD_CHAR=$command_char
+main.PARTYLINE_EVAL_ENABLED=0
+EOF
+    perl "$CONFIG_HELPER" \
+        --sample "$SAMPLE_CONF" \
+        --config "$CONFIG_FILE" \
+        --mode fresh \
+        --defaults "$DEFAULTS_FILE" \
+        --overlay "$OVERLAY_FILE"
+else
+    perl "$CONFIG_HELPER" \
+        --sample "$SAMPLE_CONF" \
+        --config "$CONFIG_FILE" \
+        --mode merge \
+        --defaults "$DEFAULTS_FILE" \
+        --backup-dir "$CONFIG_DIR/config-backups"
 fi
 
-# +-------------------------------------------------------------------------+
-# | Configure IRC Connection                                                |
-# +-------------------------------------------------------------------------+
-./configure.pl --conf=$CONFIG_FILE
-RETVAL=$?
-if [ $RETVAL -ne 0 ]; then
-	messageln "Errors while configuring connection"
-	exit $RETVAL
+chmod 600 "$CONFIG_FILE"
+
+EVAL_VALUE="$(get_conf main.PARTYLINE_EVAL_ENABLED 2>/dev/null || printf '0')"
+if [[ "$EVAL_VALUE" != "0" ]]; then
+    log "WARNING: PARTYLINE_EVAL_ENABLED=$EVAL_VALUE is dangerous and is never enabled by this wizard."
+    if ask_yes_no "Disable Partyline eval now?" "y"; then
+        printf 'main.PARTYLINE_EVAL_ENABLED=0\n' >"$OVERLAY_FILE"
+        merge_overlay "$OVERLAY_FILE"
+    fi
 fi
 
-messageln "Configuration completed."
+log "Auditing configuration coverage against mediabot.sample.conf"
+perl "$CONFIG_HELPER" --sample "$SAMPLE_CONF" --config "$CONFIG_FILE" --mode audit
+
+if [[ "$SYNC_ONLY" -eq 1 ]]; then
+    log "Configuration synchronization completed (--sync-only)"
+    exit 0
+fi
+
+if [[ "$INSTALL_MODE" == "fresh" ]]; then
+    if [[ "$SKIP_DB" -eq 0 ]]; then
+        log "Fresh install: creating/configuring the database"
+        sudo "$INSTALL_DIR/db_install.sh" -c "$CONFIG_FILE"
+    fi
+
+    if [[ "$SKIP_CPAN" -eq 0 ]]; then
+        log "Installing required Perl modules (this may take a while)"
+        sudo "$INSTALL_DIR/cpan_install.sh"
+    fi
+
+    log "Configuring IRC network, server and console channel"
+    perl "$INSTALL_DIR/configure.pl" --conf="$CONFIG_FILE"
+    run_drift_workflow
+else
+    if [[ "$SKIP_CPAN" -eq 0 ]] && ask_yes_no "Run the Perl dependency installer/update?" "n"; then
+        sudo "$INSTALL_DIR/cpan_install.sh"
+    fi
+
+    run_drift_workflow || true
+
+    if ask_yes_no "Review/update IRC network and console-channel settings?" "n"; then
+        perl "$INSTALL_DIR/configure.pl" --conf="$CONFIG_FILE"
+    fi
+fi
+
+log "Final strict configuration audit"
+perl "$CONFIG_HELPER" --sample "$SAMPLE_CONF" --config "$CONFIG_FILE" --mode audit --strict
+
+log "Configuration completed"
+log "Config file : $CONFIG_FILE"
+log "Backups     : $CONFIG_DIR/config-backups"
+log "Runtime dir : $RUN_DIR"
+log "Next check  : perl tools/check_schema_drift.pl --conf='$CONFIG_FILE' --strict"

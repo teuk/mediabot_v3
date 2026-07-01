@@ -1,4 +1,6 @@
 #!/bin/bash
+
+# mb378-R1: update [mysql] atomically through configure_config.pl.
 # chatGPT you should have told me to comment this but keep searching :) and yes you removed mysql_create_mediabot_db function...
 #set -euo pipefail
 
@@ -151,7 +153,7 @@ chmod 600 "$MYSQL_ROOT_CNF"
 MYSQL_PARAMS="--defaults-extra-file=${MYSQL_ROOT_CNF}"
 
 cleanup_mysql_cnf() {
-    rm -f "${MYSQL_ROOT_CNF:-}" "${MYSQL_APP_CNF:-}"
+    rm -f "${MYSQL_ROOT_CNF:-}" "${MYSQL_APP_CNF:-}" "${CONFIG_OVERLAY:-}"
 }
 trap cleanup_mysql_cnf EXIT
 
@@ -261,7 +263,7 @@ messageln "User '${MYSQL_DB_USER}'@'${AUTH_HOST}' created/updated (password hidd
 
 
 # +-------------------------------------------------------------------------+
-# | [5] Write config file if asked                                           |
+# | [5] Update config atomically if asked                                    |
 # +-------------------------------------------------------------------------+
 if [[ -n "${CONFIG_FILE:-}" ]]; then
     if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -274,20 +276,38 @@ if [[ -n "${CONFIG_FILE:-}" ]]; then
         exit 1
     fi
 
-    message "Configure $CONFIG_FILE [mysql] parameters"
-    cat >>"$CONFIG_FILE" <<EOF
+    CONFIG_HELPER="${SCRIPT_DIR}/configure_config.pl"
+    SAMPLE_CONF="${SCRIPT_DIR}/../mediabot.sample.conf"
+    if [[ ! -x "$CONFIG_HELPER" || ! -f "$SAMPLE_CONF" ]]; then
+        messageln "Atomic configuration helper or sample file is missing."
+        exit 1
+    fi
 
-[mysql]
-MAIN_PROG_DDBNAME=$MYSQL_DB
-MAIN_PROG_DBUSER=$MYSQL_DB_USER
-MAIN_PROG_DBPASS=$MYSQL_DB_PASS
-MAIN_PROG_DBHOST=$MYSQL_HOST
-MAIN_PROG_DBPORT=$MYSQL_PORT
-CHARSET_MODE=utf8mb4
-
+    CONFIG_DB_HOST="${HOST_IN:-localhost}"
+    CONFIG_DB_PORT="${MYSQL_PORT:-3306}"
+    CONFIG_OVERLAY="$(mktemp /tmp/mediabot_db_config.XXXXXX)"
+    chmod 600 "$CONFIG_OVERLAY"
+    cat >"$CONFIG_OVERLAY" <<EOF
+mysql.MAIN_PROG_DDBNAME=$MYSQL_DB
+mysql.MAIN_PROG_DBUSER=$MYSQL_DB_USER
+mysql.MAIN_PROG_DBPASS=$MYSQL_DB_PASS
+mysql.MAIN_PROG_DBHOST=$CONFIG_DB_HOST
+mysql.MAIN_PROG_DBPORT=$CONFIG_DB_PORT
+mysql.CHARSET_MODE=utf8mb4
 EOF
-    ok_failed $?
+
+    message "Update $CONFIG_FILE [mysql] parameters atomically"
+    perl "$CONFIG_HELPER" \
+        --sample "$SAMPLE_CONF" \
+        --config "$CONFIG_FILE" \
+        --mode merge \
+        --overlay "$CONFIG_OVERLAY" \
+        --backup-dir "$(dirname "$CONFIG_FILE")/config-backups"
+    update_rc=$?
+    rm -f "$CONFIG_OVERLAY"
+    ok_failed "$update_rc"
     messageln "Configuration file $CONFIG_FILE updated."
+    messageln "No duplicate [mysql] section was appended."
 else
     messageln "No configuration file requested; skipping config update."
 fi

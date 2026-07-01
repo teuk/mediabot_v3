@@ -16,6 +16,8 @@ my $source = <$cfh>;
 close $cfh;
 
 like($source, qr/mb297-B1: keep the staged-secret scanner precise/, 'commit.sh contains MB297 marker');
+like($source, qr/mb379-B1: allow recognised runtime-generated credentials/, 'commit.sh contains MB379 runtime-generation marker');
+like($source, qr/runtime_generated_credential_re\s*=\s*re\.compile/, 'scanner has narrow runtime-generated credential matcher');
 like($source, qr/credential_key_re\s*=\s*re\.compile/, 'scanner has dedicated credential-key matcher');
 like($source, qr/Match credential \*key endings\*/, 'scanner documents exact key-ending behavior');
 unlike($source, qr/\(\?:pass\(\?:word\)\?\|dbpass\|adminpass\|api_\?key\|apikey\|token\|secret\|/, 'old broad substring matcher is gone');
@@ -50,6 +52,7 @@ for my $rel (
     'Mediabot/Mediabot.pm',
     'Mediabot/Partyline.pm',
     'commit.sh',
+    'install/db_install.sh',
 ) {
     my $file = File::Spec->catfile($root, split m{/}, $rel);
     my ($rc, $out) = run_scanner($file, $rel);
@@ -71,6 +74,8 @@ MAX_TOKENS=400
 TOKEN_TTL=3600
 PASSWORD_COLUMNS=password
 AUTH_TOKEN_TTL=120
+DEFAULT_DB_PASS=$(tr -dc '[:alnum:]' </dev/urandom | fold -w12 | head -n1)
+API_TOKEN=$(openssl rand -hex 32)
 API_KEY=
 DBPASS=<YOUR_DB_PASSWORD>
 SESSION_SECRET=CHANGE_ME_WITH_A_LONG_RANDOM_SECRET
@@ -84,6 +89,7 @@ my @bad = (
     [ 'api_key.conf', "API_KEY=real-secret-value-123456789\n" ],
     [ 'dbpass.conf', "MAIN_PROG_DBPASS=correct-horse-battery-staple\n" ],
     [ 'auth_token.conf', "AUTH_TOKEN=token-value-that-is-not-a-placeholder\n" ],
+    [ 'fake_dynamic.sh', "PASSWORD=\$(printf 'hardcoded-secret-value')\n" ],
     [ 'private_key.txt', "-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n" ],
     [ 'openai.txt', "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz1234567890\n" ],
 );
