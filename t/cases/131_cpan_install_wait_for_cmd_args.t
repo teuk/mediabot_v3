@@ -3,8 +3,9 @@
 # Regression checks for install/cpan_install.sh wait_for_cmd().
 #
 # wait_for_cmd should execute commands through argv, not through a manually
-# quoted shell string. Since cpan_install.sh is launched from inside install/,
-# install_perl_module.sh must be called as ./install_perl_module.sh.
+# quoted shell string. Since mb380 made cpan_install.sh independent from the
+# caller's working directory, the helper must be invoked through INSTALL_HELPER,
+# which is anchored to SCRIPT_DIR.
 # =============================================================================
 
 use strict;
@@ -57,10 +58,13 @@ return sub {
         'wait_for_cmd returns the child process status through wait'
     );
 
+    # mb383: mb380 switched the call from the caller-relative
+    # ./install_perl_module.sh path to INSTALL_HELPER, which is resolved under
+    # SCRIPT_DIR and therefore remains stable from every working directory.
     $assert->like(
         $src,
-        qr/wait_for_cmd \.\/install_perl_module\.sh "\$perl_module"/,
-        'ensure_module calls install_perl_module.sh relative to install/'
+        qr/wait_for_cmd "\$INSTALL_HELPER" "\$perl_module"/,
+        'ensure_module invokes the helper through the SCRIPT_DIR-anchored INSTALL_HELPER path'
     );
 
     $assert->unlike(

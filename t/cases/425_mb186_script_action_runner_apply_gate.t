@@ -154,8 +154,11 @@ my $case = sub {
         'ScriptActionRunner source keeps the explicit apply-gate marker');
     $assert->($src =~ /allow_irc/,
         'ScriptActionRunner source uses allow_irc gate');
-    $assert->($src =~ /send_message\(\$command, undef, \$action->\{target\}, \$action->\{text\}\)/,
-        'ScriptActionRunner sends IRC through send_message argv-style call');
+    # mb383: send_message now receives $wire_text, the UTF-8 encoded payload
+    # that prevents a wide-character scalar from reaching syswrite(). The call
+    # remains argv-style and keeps the existing apply gate unchanged.
+    $assert->($src =~ /send_message\(\$command, undef, \$action->\{target\}, \$wire_text\)/,
+        'ScriptActionRunner sends IRC through send_message argv-style call (wire-encoded text)');
     $assert->($src !~ /dbh->|prepare\(|INSERT|UPDATE|DELETE|system\s*\(|qx\//,
         'ScriptActionRunner apply gate does not touch DB or shell');
 };

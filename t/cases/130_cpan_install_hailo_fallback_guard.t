@@ -57,9 +57,11 @@ return sub {
         'manual Hailo fallback still downloads the pinned Hailo archive'
     );
 
+    # mb383: mb380 resolves CPAN_LOGFILE under $SCRIPT_DIR, so the fallback
+    # no longer prepends "../" relative to the caller's working directory.
     $assert->like(
         $src,
-        qr/make install >>"\.\.\/\$\{CPAN_LOGFILE\}" 2>&1/,
+        qr/make install >>"\$CPAN_LOGFILE" 2>&1/,
         'manual Hailo fallback still runs make install when needed'
     );
 
