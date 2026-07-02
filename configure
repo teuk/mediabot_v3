@@ -214,11 +214,18 @@ fi
 [[ -f "$SAMPLE_CONF" ]] || fail "Missing $SAMPLE_CONF"
 [[ -x "$CONFIG_HELPER" ]] || fail "Missing executable $CONFIG_HELPER"
 
+# mb380-B1: validate the historical CPAN build toolchain before touching DB/config state.
 need_cmd perl
+need_cmd cpan
+need_cmd make
+need_cmd gcc
 need_cmd mysql
 need_cmd sudo
 need_cmd mktemp
 need_cmd find
+if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    fail "Required download command not found: install curl or wget before running configure"
+fi
 
 cd "$APP_DIR"
 : >"$LOG_FILE" || fail "Cannot write $LOG_FILE"

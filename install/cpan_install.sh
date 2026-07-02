@@ -1,13 +1,30 @@
 #!/bin/bash
 set -u
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+INSTALL_HELPER="$SCRIPT_DIR/install_perl_module.sh"
+SCRIPT_LOGFILE="$SCRIPT_DIR/cpan_install.log"
+CPAN_LOGFILE="$SCRIPT_DIR/cpan_install_details.log"
+
+cd "$SCRIPT_DIR" || {
+    echo "Unable to enter installer directory: $SCRIPT_DIR" >&2
+    exit 1
+}
+
 if [ "$(id -u)" -ne 0 ]; then
 	echo "This script must be run as root user"
 	exit 1
 fi
 
-SCRIPT_LOGFILE=cpan_install.log
-CPAN_LOGFILE=cpan_install_details.log
+if [ ! -x "$INSTALL_HELPER" ]; then
+    echo "Missing executable Perl installer helper: $INSTALL_HELPER" >&2
+    exit 1
+fi
+
+if ! command -v cpan >/dev/null 2>&1; then
+    echo "The CPAN client is required but was not found in PATH." >&2
+    exit 1
+fi
 
 # +-------------------------------------------------------------------------+
 # | Functions                                                               |
@@ -34,7 +51,8 @@ function ok_failed {
       	    shift
       	    echo "$*"
         fi
-        echo -e "Installation log is available in $SCRIPT_LOGFILE" | tee -a "$SCRIPT_LOGFILE"
+        echo -e "Summary log: $SCRIPT_LOGFILE" | tee -a "$SCRIPT_LOGFILE"
+        echo -e "Detailed CPAN log: $CPAN_LOGFILE" | tee -a "$SCRIPT_LOGFILE"
         exit "$RETVALUE"
     fi
 }
@@ -59,7 +77,7 @@ function ensure_module {
     perl -M"$perl_module" -e "exit 0;" &>/dev/null
     if [ $? -ne 0 ]; then
         echo -n "Not found. Installing via cpan "
-        wait_for_cmd ./install_perl_module.sh "$perl_module"
+        wait_for_cmd "$INSTALL_HELPER" "$perl_module"
         local rc=$?
 
         if [ "$rc" -ne 0 ]; then
@@ -76,6 +94,7 @@ function ensure_module {
     fi
 }
 
+# mb380-B1: anchor all helper/log/fallback paths to this script directory.
 # +-------------------------------------------------------------------------+
 # | CPAN MODULES INSTALL                                                    |
 # +-------------------------------------------------------------------------+

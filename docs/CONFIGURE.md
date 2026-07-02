@@ -76,6 +76,22 @@ Example:
 ./configure --config /home/mediabot/mediabot_v3/mediabot.conf
 ```
 
+
+### CPAN execution directory
+
+The Perl dependency installer remains **100% CPAN-based**. It resolves its own
+`install/` directory before invoking `install_perl_module.sh`, so it works
+whether called from the repository root, from `install/`, or through `sudo`.
+Summary and detailed logs are always written to:
+
+```text
+install/cpan_install.log
+install/cpan_install_details.log
+```
+
+The main wizard checks `cpan`, `make`, `gcc`, and a download tool before it
+creates or updates the database.
+
 ## Database drift workflow
 
 For an existing database, the wizard runs:
