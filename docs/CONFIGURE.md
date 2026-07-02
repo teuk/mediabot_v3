@@ -92,6 +92,19 @@ install/cpan_install_details.log
 The main wizard checks `cpan`, `make`, `gcc`, and a download tool before it
 creates or updates the database.
 
+CPAN is executed with `umask 022` so modules installed under `/usr/local` remain
+readable and traversable by the dedicated Mediabot account. Installer logs stay private in mode `0600` and are returned to the user who invoked the installer through `sudo`.
+
+After the root-side CPAN phase, the complete module set is checked again as the
+non-root Mediabot runtime user:
+
+```bash
+install/cpan_install.sh --verify-only
+```
+
+This second pass catches permission problems that a root-only verification
+cannot see, before the IRC/database configuration assistant continues.
+
 ## Database drift workflow
 
 For an existing database, the wizard runs:

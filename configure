@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 # mb378-R1: complete sample-driven fresh/existing configuration workflow.
+# mb381-B1: CPAN permissions and runtime-user verification.
 
 set -Eeuo pipefail
 umask 077
@@ -69,6 +70,16 @@ fail() {
 
 need_cmd() {
     command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
+}
+
+install_perl_dependencies() {
+    log "Installing required Perl modules with CPAN (this may take a while)"
+    sudo "$INSTALL_DIR/cpan_install.sh"
+
+    # mb381-B1: the root-side CPAN check cannot detect unreadable site-library
+    # paths. Verify the same module set again as the dedicated Mediabot user.
+    log "Verifying Perl modules as the Mediabot runtime user"
+    "$INSTALL_DIR/cpan_install.sh" --verify-only         || fail "Perl modules were installed but are not readable by the Mediabot runtime user"
 }
 
 ask_yes_no() {
@@ -333,8 +344,7 @@ if [[ "$INSTALL_MODE" == "fresh" ]]; then
     fi
 
     if [[ "$SKIP_CPAN" -eq 0 ]]; then
-        log "Installing required Perl modules (this may take a while)"
-        sudo "$INSTALL_DIR/cpan_install.sh"
+        install_perl_dependencies
     fi
 
     log "Configuring IRC network, server and console channel"
@@ -342,7 +352,7 @@ if [[ "$INSTALL_MODE" == "fresh" ]]; then
     run_drift_workflow
 else
     if [[ "$SKIP_CPAN" -eq 0 ]] && ask_yes_no "Run the Perl dependency installer/update?" "n"; then
-        sudo "$INSTALL_DIR/cpan_install.sh"
+        install_perl_dependencies
     fi
 
     run_drift_workflow || true
