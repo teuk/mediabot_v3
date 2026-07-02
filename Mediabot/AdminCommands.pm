@@ -1338,6 +1338,84 @@ sub mbExec_ctx {
     return 1;
 }
 
+# mb382-B2: pack optional Scheduler details into a bounded number of NOTICE
+# lines.  The default status path never emits one line per task.
+sub _status_scheduler_detail_lines {
+    my ($tasks_ref, %opts) = @_;
+
+    my @tasks = ref($tasks_ref) eq 'ARRAY' ? @$tasks_ref : ();
+    return () unless @tasks;
+
+    my $now       = defined($opts{now})       ? $opts{now}       : time();
+    my $max_lines = defined($opts{max_lines}) ? $opts{max_lines} : 3;
+    my $max_chars = defined($opts{max_chars}) ? $opts{max_chars} : 350;
+
+    $max_lines = 1 if $max_lines < 1;
+    $max_chars = 80 if $max_chars < 80;
+
+    my @entries;
+    for my $task (sort { ($a->{name} // '') cmp ($b->{name} // '') } @tasks) {
+        next unless ref($task) eq 'HASH';
+
+        my $name     = $task->{name} // 'unnamed';
+        my $interval = $task->{interval} // 0;
+        my $ticks    = $task->{ticks} // 0;
+        my $state    = $task->{started} ? 'run' : 'stop';
+        my $last     = $task->{last_tick}
+            ? sprintf('%ds', $now - $task->{last_tick})
+            : 'never';
+
+        push @entries, sprintf('%s=%s/%ss/t%s/last:%s',
+            $name, $state, $interval, $ticks, $last);
+    }
+
+    return () unless @entries;
+
+    my @lines;
+    my $prefix  = 'Scheduler tasks: ';
+    my $current = $prefix;
+    my $used    = 0;
+
+    ENTRY:
+    for my $entry (@entries) {
+        my $candidate = $current eq $prefix
+            ? $prefix . $entry
+            : $current . ' | ' . $entry;
+
+        if (length($candidate) <= $max_chars) {
+            $current = $candidate;
+            $used++;
+            next ENTRY;
+        }
+
+        if ($current ne $prefix) {
+            push @lines, $current;
+            last ENTRY if @lines >= $max_lines;
+        }
+
+        $current = $prefix . $entry;
+        $used++;
+    }
+
+    push @lines, $current
+        if @lines < $max_lines && $current ne $prefix
+            && (!@lines || $lines[-1] ne $current);
+
+    if ($used < @entries && @lines) {
+        my $more = scalar(@entries) - $used;
+        my $tail = " | +$more more";
+
+        if (length($lines[-1] . $tail) <= $max_chars) {
+            $lines[-1] .= $tail;
+        }
+        else {
+            $lines[-1] = substr($lines[-1], 0, $max_chars - length($tail)) . $tail;
+        }
+    }
+
+    return @lines;
+}
+
 # Get the harbor ID from LIQUIDSOAP telnet server
 sub mbStatus_ctx {
     my ($ctx) = @_;
@@ -1421,34 +1499,71 @@ sub mbStatus_ctx {
         $self->{logger}->log(1, "Memory stats via /proc/self/status failed: $@");
     };
 
-    botNotice(
-        $self, $nick,
-        $self->{conf}->get('main.MAIN_PROG_NAME') . " v" . $self->{main_prog_version} . " Uptime: $uptime_str"
-    );
-    botNotice($self, $nick, "Memory usage (VM ${vm}MB) (Resident ${rss}MB) (Shared ${shared}MB) (Data+Stack ${data}MB)");
-    botNotice($self, $nick, "Server: $uname");
-    botNotice($self, $nick, "Server uptime: $server_uptime");
+    # mb382-B2: keep the normal status reply to a three-NOTICE budget.
+    # One NOTICE per Scheduler task caused immediate Excess Flood disconnects.
+    my $args = $ctx->args;
+    my $status_mode = lc($args->[0] // '');
+    my $show_scheduler_details =
+        $status_mode eq 'full'
+        || $status_mode eq 'scheduler'
+        || $status_mode eq 'tasks';
 
-    # mb93-IMP2: info Scheduler
+    my $prog_name = $self->{conf}->get('main.MAIN_PROG_NAME') // 'Mediabot';
+    botNotice(
+        $self,
+        $nick,
+        "$prog_name v$self->{main_prog_version} | bot up $uptime_str"
+          . " | RAM RSS ${rss}MB, VM ${vm}MB"
+    );
+    botNotice(
+        $self,
+        $nick,
+        "Server: $uname | uptime $server_uptime"
+    );
+
+    # mb93-IMP2 / mb382-B2: compact Scheduler summary by default.  Explicit
+    # "status full", "status scheduler" or "status tasks" remains bounded to
+    # three additional detail lines.
     if ($self->{scheduler} && $self->{scheduler}->can('all_info')) {
-        my @tasks = $self->{scheduler}->all_info;
+        my @tasks = grep { ref($_) eq 'HASH' } $self->{scheduler}->all_info;
+
         if (@tasks) {
-            my $now_s = time();
             my @running = grep { $_->{started} } @tasks;
             my @stopped = grep { !$_->{started} } @tasks;
-            botNotice($self, $nick,
-                sprintf("Scheduler: %d task(s) — %d running, %d stopped",
-                    scalar @tasks, scalar @running, scalar @stopped));
-            for my $t (sort { $a->{name} cmp $b->{name} } @running) {
-                my $last = $t->{last_tick}
-                    ? sprintf('%ds ago', $now_s - $t->{last_tick})
-                    : 'never';
-                botNotice($self, $nick, sprintf("  %-30s  every %4ds  ticks: %d  last: %s",
-                    $t->{name}, $t->{interval}, $t->{ticks}, $last));
+
+            my $summary = sprintf(
+                "Scheduler: %d total | %d running | %d stopped",
+                scalar(@tasks),
+                scalar(@running),
+                scalar(@stopped),
+            );
+
+            if (@stopped) {
+                my $stopped_names = join(',', map { $_->{name} // 'unnamed' } @stopped);
+                $summary .= " | stopped: $stopped_names";
             }
-        } else {
+            elsif (!$show_scheduler_details) {
+                $summary .= " | details: status full";
+            }
+
+            botNotice($self, $nick, $summary);
+
+            if ($show_scheduler_details) {
+                my @detail_lines = _status_scheduler_detail_lines(
+                    \@tasks,
+                    now       => time(),
+                    max_lines => 3,
+                    max_chars => 350,
+                );
+                botNotice($self, $nick, $_) for @detail_lines;
+            }
+        }
+        else {
             botNotice($self, $nick, "Scheduler: no tasks registered.");
         }
+    }
+    else {
+        botNotice($self, $nick, "Scheduler: unavailable.");
     }
 
     logBot($self, $ctx->message, undef, 'status', undef);

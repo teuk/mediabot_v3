@@ -1004,10 +1004,35 @@ sub log_message {
     }
 }
 
+# mb382-B1: Net::Async::IRC/Protocol::IRC expose message args as a list.
+# Calling ->args in scalar context returns the argument count (for example 1),
+# not an ARRAY reference. Keep one compatibility shim for current list-returning
+# messages and older/test doubles that return a single ARRAY reference.
+sub _irc_message_args {
+    my ($message) = @_;
+
+    return () unless defined $message && ref($message);
+    return () unless eval { $message->can('args') };
+
+    my @args;
+    my $ok = eval {
+        @args = $message->args;
+        1;
+    };
+
+    return () unless $ok;
+
+    if (@args == 1 && ref($args[0]) eq 'ARRAY') {
+        return @{ $args[0] };
+    }
+
+    return @args;
+}
+
 sub log_debug_args {
     my ($context, $message) = @_;
     return unless defined $message && ref($message) && $mediabot;
-    my @args = eval { @{ $message->args // [] } };
+    my @args = _irc_message_args($message);
     my $args_str = join(', ', map { defined $_ ? "'$_'" : 'undef' } @args);
     $mediabot->{logger}->log(5, "$context args: [$args_str]");
 }
@@ -1186,7 +1211,7 @@ sub on_message_NOTICE {
     log_debug_args('on_message_NOTICE', $message);
     my ($who, $what) = @{$hints}{qw<prefix_name text>};
     my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
-    my @tArgs = $message->args;
+    my @tArgs = _irc_message_args($message);
     if (defined($who) && ($who ne "")) {
         if (defined($tArgs[0]) && (substr($tArgs[0],0,1) eq '#')) {
             $mediabot->{logger}->log(0,"-$who:" . $tArgs[0] . "- $what");
@@ -1394,7 +1419,7 @@ sub on_message_MODE {
     log_debug_args('on_message_MODE', $message);
     my ($target_name,$modechars,$modeargs) = @{$hints}{qw<target_name modechars modeargs>};
     my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
-    my @tArgs = $message->args;
+    my @tArgs = _irc_message_args($message);
     if ( substr($target_name,0,1) eq '#' ) {
         shift @tArgs;
         my $sModes = $tArgs[0];
@@ -1603,7 +1628,7 @@ sub on_message_PART {
     unless (defined($text)) { $text = ""; }
 
     my ($sNick, $sIdent, $sHost) = $mediabot->getMessageNickIdentHost($message);
-    my @tArgs = $message->args;
+    my @tArgs = _irc_message_args($message);
     shift @tArgs;
 
     if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
@@ -2059,7 +2084,7 @@ sub on_message_RPL_NAMEREPLY {
 
     log_debug_args('on_message_RPL_NAMEREPLY', $message);
 
-    my @args = $message->args;
+    my @args = _irc_message_args($message);
     my ($target_name) = @{$hints}{qw<target_name>};
 
     return unless defined $target_name && $target_name ne '';
@@ -2090,7 +2115,7 @@ sub on_message_RPL_ENDOFNAMES {
 
     log_debug_args('on_message_RPL_ENDOFNAMES', $message);
 
-    my @args = $message->args;
+    my @args = _irc_message_args($message);
     my $channel = $args[1] // '<unknown>';
 
     $mediabot->{logger}->log(4, "on_message_RPL_ENDOFNAMES() $channel");
@@ -2235,7 +2260,7 @@ sub on_message_003 {
 sub on_message_004 {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_004', $message);
-    my @args = $message->args;
+    my @args = _irc_message_args($message);
     my $server = $args[0] // '<unknown>';
     my $version = $args[1] // '<unknown>';
     my $user_modes = $args[2] // '';
@@ -2247,7 +2272,7 @@ sub on_message_004 {
 sub on_message_005 {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_005', $message);
-    my @args = $message->args;
+    my @args = _irc_message_args($message);
     shift @args; # Remove nickname (first arg)
     my $features = join(" ", @args);
     $mediabot->{logger}->log(4, "005 $features");
@@ -2267,7 +2292,7 @@ sub on_message_RPL_WHOISUSER {
     log_debug_args('on_message_RPL_WHOISUSER', $message);
     my $whois_ref = $mediabot->getWhoisVar();
     my %WHOIS_VARS = (ref($whois_ref) eq 'HASH') ? %{$whois_ref} : ();
-    my @tArgs = $message->args;
+    my @tArgs = _irc_message_args($message);
     my $sHostname = $tArgs[3];
     my ($target_name,$ident,$host,$flags,$realname) = @{$hints}{qw<target_name ident host flags realname>};
     $mediabot->{logger}->log(2,"$target_name is $ident\@$sHostname $flags $realname");
@@ -2429,8 +2454,7 @@ sub on_message_RPL_WHOISUSER {
                    return;
                }
 
-               my $args_ref = $message->args;
-               my @args = ref($args_ref) eq 'ARRAY' ? @$args_ref : ();
+               my @args = _irc_message_args($message);
                my $channels_str = $args[2] // "";
 
                my %joined = map { $_ => 1 } grep { /^#/ } split /\s+/, $channels_str;
@@ -2546,7 +2570,8 @@ sub on_message_RPL_WHOISUSER {
 sub on_message_ERROR {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_ERROR', $message);
-    my $err_msg = join(" ", @{ $message->args // [] });
+    my @error_args = _irc_message_args($message);
+    my $err_msg = @error_args ? join(" ", @error_args) : 'IRC connection closed';
     $mediabot->{logger}->log(0, "ERROR from server: $err_msg");
 
     if ($mediabot->getQuit()) {
@@ -2572,7 +2597,7 @@ sub on_message_ERROR {
 sub on_message_KILL {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_KILL', $message);
-    my @kill_args = eval { @{ $message->args // [] } } // ();
+    my @kill_args = _irc_message_args($message);
     my ($killer, $victim, $reason) = @kill_args;
     $mediabot->{logger}->log(0, "Killed by $killer: $reason - will reconnect.");
 
@@ -2590,7 +2615,7 @@ sub on_message_KILL {
 sub on_message_SERVER {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_SERVER', $message);
-    my @srv_args = eval { @{ $message->args // [] } } // ();
+    my @srv_args = _irc_message_args($message);
     $mediabot->{logger}->log(1, "SERVER message: " . join(" ", @srv_args));
 }
 
@@ -2598,7 +2623,7 @@ sub on_message_SERVER {
 sub on_message_RPL_TOPIC {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_TOPIC', $message);
-    my @args = $message->args;
+    my @args = _irc_message_args($message);
     my $channel = $args[1] // '<unknown>';
     my $topic   = $args[2] // '<none>';
     $mediabot->{logger}->log(1, "Topic for $channel: $topic");
@@ -2608,7 +2633,7 @@ sub on_message_RPL_TOPIC {
 sub on_message_RPL_TOPICWHOTIME {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_TOPICWHOTIME', $message);
-    my @args = $message->args;
+    my @args = _irc_message_args($message);
     my $channel = $args[1] // '<unknown>';
     my $setter  = $args[2] // '<unknown>';
     my $ts      = $args[3] // time;
@@ -2619,7 +2644,7 @@ sub on_message_RPL_TOPICWHOTIME {
 sub on_message_RPL_LIST {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_LIST', $message);
-    my @list_args = eval { @{ $message->args // [] } } // ();
+    my @list_args = _irc_message_args($message);
     my ($chan, $users, $topic) = @list_args;
     $mediabot->{logger}->log(2, "Channel $chan ($users users): $topic");
 }
@@ -2632,7 +2657,7 @@ sub on_message_RPL_WHOREPLY {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_WHOREPLY', $message);
 
-    my @who_args = eval { @{ $message->args // [] } } // ();
+    my @who_args = _irc_message_args($message);
 
     # WHO replies can be very noisy during joins/reconnects. They are useful
     # when debugging presence/userhost state, but not at DEBUG2. Also avoid
@@ -2725,7 +2750,7 @@ sub _partyline_whois_write {
 sub on_message_RPL_WHOISCHANNELS {
     my ($self, $message, $hints) = @_;
 
-    my @args = $message->args;
+    my @args = _irc_message_args($message);
     my $nick  = $args[1] // '<undef>';
     my $chans = $args[2] // '';
 
@@ -2738,7 +2763,7 @@ sub on_message_RPL_WHOISCHANNELS {
 sub on_message_RPL_WHOISSERVER {
     my ($self, $message, $hints) = @_;
 
-    my @args   = $message->args;
+    my @args   = _irc_message_args($message);
     my $nick   = $args[1] // '';
     my $server = $args[2] // '';
     my $info   = $args[3] // '';
@@ -2749,7 +2774,7 @@ sub on_message_RPL_WHOISSERVER {
 sub on_message_RPL_WHOISIDLE {
     my ($self, $message, $hints) = @_;
 
-    my @args   = $message->args;
+    my @args   = _irc_message_args($message);
     my $nick   = $args[1] // '';
     my $idle   = $args[2] // 0;
     my $signon = $args[3] // time;
@@ -2759,7 +2784,8 @@ sub on_message_RPL_WHOISIDLE {
 
 sub on_message_RPL_ENDOFWHOIS {
     my ($self, $message, $hints) = @_;
-    my $nick = ($message->args)[1] // '';
+    my @args = _irc_message_args($message);
+    my $nick = $args[1] // '';
     $mediabot->{logger}->log(3, "WHOIS end for $nick");
     # B1/A1: send closing line and clear Partyline whois state
     _partyline_whois_write($nick, "[318] $nick :End of WHOIS", clear => 1);
@@ -2771,7 +2797,7 @@ sub on_message_ERR_NOSUCHNICK {
 
     log_debug_args('on_message_ERR_NOSUCHNICK', $message);
 
-    my @args = $message->args;
+    my @args = _irc_message_args($message);
 
     # Typical numeric 401 shape:
     #   <me> <nick> :No such nick/channel
@@ -2797,7 +2823,8 @@ sub on_message_ERR_NOSUCHNICK {
 sub on_message_ERR_NICKNAMEINUSE {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_ERR_NICKNAMEINUSE', $message);
-    my $conflict = $message->args->[1] // '';
+    my @args = _irc_message_args($message);
+    my $conflict = $args[1] // '';
     my $new_nick = $self->nick_folded . "_";
     $self->change_nick($new_nick);
     $mediabot->{logger}->log(0, "Nick \"$conflict\" in use, switched to $new_nick");
@@ -2806,20 +2833,20 @@ sub on_message_ERR_NICKNAMEINUSE {
 sub on_message_RPL_MYINFO {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_MYINFO', $message);
-    my @a = eval { @{ $message->args // [] } } // ();
+    my @a = _irc_message_args($message);
     $mediabot->{logger}->log(4,"Server info: host=$a[0], ver=$a[1], umodes=$a[2], cmodes=$a[3]");
 }
 
 sub on_message_RPL_ISUPPORT {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_ISUPPORT', $message);
-    $mediabot->{logger}->log(5, "ISUPPORT tokens: " . join(' ', (eval { @{ $message->args // [] } } // ())));
+    $mediabot->{logger}->log(5, "ISUPPORT tokens: " . join(' ', _irc_message_args($message)));
 }
 
 sub on_message_RPL_INVITING {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_INVITING', $message);
-    my @_margs_2172 = eval { @{ $message->args // [] } } // ();
+    my @_margs_2172 = _irc_message_args($message);
     my ($nick, $channel) = @_margs_2172[1,2];
     $mediabot->{logger}->log(2, "You have been invited: $nick -> $channel");
 }
@@ -2827,7 +2854,7 @@ sub on_message_RPL_INVITING {
 sub on_message_RPL_INVITELIST {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_INVITELIST', $message);
-    my @_margs_2179 = eval { @{ $message->args // [] } } // ();
+    my @_margs_2179 = _irc_message_args($message);
     my ($channel, $nick) = @_margs_2179[1,2];
     $mediabot->{logger}->log(4, "Invite list for $channel: $nick");
 }
@@ -2835,14 +2862,15 @@ sub on_message_RPL_INVITELIST {
 sub on_message_RPL_ENDOFINVITELIST {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_RPL_ENDOFINVITELIST', $message);
-    my $channel = $message->args->[1];
+    my @args = _irc_message_args($message);
+    my $channel = $args[1] // '';
     $mediabot->{logger}->log(4, "End of invite list for $channel");
 }
 
 sub on_message_ERR_NEEDMOREPARAMS {
     my ($self, $message, $hints) = @_;
     log_debug_args('on_message_ERR_NEEDMOREPARAMS', $message);
-    my @_margs_2193 = eval { @{ $message->args // [] } } // ();
+    my @_margs_2193 = _irc_message_args($message);
     my ($me, $cmd) = @_margs_2193[0,1];
     $mediabot->{logger}->log(1, "ERR_NEEDMOREPARAMS for $cmd - vérifiez la syntaxe.");
 }

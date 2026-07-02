@@ -120,13 +120,13 @@ return sub {
 
     $assert->like(
         $body // '',
-        qr/botNotice\(\$self, \$nick, "Server: \$uname"\)/,
-        'mbStatus_ctx still reports Server uname line'
+        qr/"Server: \$uname \| uptime \$server_uptime"/,
+        'mbStatus_ctx reports uname and server uptime in one compact line'
     );
 
     $assert->like(
         $body // '',
-        qr/botNotice\(\$self, \$nick, "Server uptime: \$server_uptime"\)/,
-        'mbStatus_ctx still reports server uptime line'
+        qr/details: status full/,
+        'mbStatus_ctx advertises the bounded detailed Scheduler mode'
     );
 };
