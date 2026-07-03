@@ -92,6 +92,15 @@ install/cpan_install_details.log
 The main wizard checks `cpan`, `make`, `gcc`, and a download tool before it
 creates or updates the database.
 
+The runtime uses the `DBD::MariaDB` CPAN driver. If that module is not already
+installed, the wizard also requires `mariadb_config` or `mysql_config` so CPAN
+can compile it. On Debian, `libmariadb-dev` provides the required native client
+headers and build metadata. It is not a Perl module package; Perl dependencies
+remain installed by CPAN.
+
+Do not use Debian packages such as `libdbi-perl`, `libdbd-mariadb-perl` or
+`libdbd-mysql-perl` as substitutes for the supported CPAN dependency phase.
+
 CPAN is executed with `umask 022` so modules installed under `/usr/local` remain
 readable and traversable by the dedicated Mediabot account. Installer logs stay private in mode `0600` and are returned to the user who invoked the installer through `sudo`.
 

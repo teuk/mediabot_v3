@@ -119,18 +119,25 @@ apt install -y \
   unzip \
   zip \
   ca-certificates \
+  perl \
   build-essential \
   make \
   gcc \
   pkg-config \
   mariadb-server \
   mariadb-client \
-  libdbi-perl \
-  libdbd-mariadb-perl \
-  libdbd-mysql-perl
+  libmariadb-dev
 
 systemctl enable --now mariadb
 ```
+
+`libmariadb-dev` provides the MariaDB Connector/C headers and `mariadb_config`
+needed to compile the CPAN driver. It is a native build dependency, not a Perl
+module package.
+
+Do not install `libdbi-perl`, `libdbd-mariadb-perl` or
+`libdbd-mysql-perl` for the supported installation path. `./configure` installs
+and verifies `DBI`, `DBD::MariaDB` and the remaining Perl modules through CPAN.
 
 Optional but useful:
 

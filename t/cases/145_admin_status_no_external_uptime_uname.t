@@ -126,6 +126,24 @@ return sub {
 
     $assert->like(
         $body // '',
+        qr/my \$runtime_version = \$self->\{main_prog_version\}/,
+        'mbStatus_ctx reads the cached runtime version explicitly'
+    );
+
+    $assert->like(
+        $body // '',
+        qr/lc\(\$runtime_version\) ne 'undefined'/,
+        'mbStatus_ctx rejects the Undefined sentinel'
+    );
+
+    $assert->like(
+        $body // '',
+        qr/\$runtime_version = 'unknown'/,
+        'mbStatus_ctx uses a stable unknown fallback rather than an empty value'
+    );
+
+    $assert->like(
+        $body // '',
         qr/details: status full/,
         'mbStatus_ctx advertises the bounded detailed Scheduler mode'
     );

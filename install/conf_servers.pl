@@ -224,10 +224,13 @@ sub log_messageln_wots {
 
 sub dbConnect {
 	my ($dbname,$dbhost,$dbport,$dbuser,$dbpasswd) = @_;
-	my $connectionInfo="DBI:mysql:database=$dbname;$dbhost:$dbport";   # Database connection string
+	$dbhost = 'localhost' unless defined($dbhost) && length($dbhost);
+	$dbport = 3306 unless defined($dbport) && $dbport =~ /^\d+$/;
+	my $tcp_host = ($dbhost eq 'localhost') ? '127.0.0.1' : $dbhost;
+	my $connectionInfo="DBI:MariaDB:database=$dbname;host=$tcp_host;port=$dbport";
 	my $dbh;                                                   				 # Database handle
 	
-	unless ( $dbh = DBI->connect($connectionInfo,$dbuser,$dbpasswd) ) {
+	unless ( $dbh = DBI->connect($connectionInfo,$dbuser,$dbpasswd, { RaiseError => 0, PrintError => 0 }) ) {
 	        log_messageln("dbConnect() DBI Error : " . $DBI::errstr);
 	        log_messageln("dbConnect() DBI Native error code : " . $DBI::err);
 	        if ( defined( $DBI::err ) ) {

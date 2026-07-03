@@ -34,6 +34,7 @@ use JSON qw(encode_json);
 use Encode qw(encode);
 use Mediabot::External ();
 use Mediabot::DCC qw(validate_dcc_active_target);
+use Mediabot::Helpers qw(getProcessStartTimestamp);
 use File::Basename qw(dirname);
 use File::Path qw(make_path);
 use File::Temp qw(tempfile);
@@ -4537,9 +4538,7 @@ sub _cmd_uptime {
     my $bot = $self->{bot};
     my $now = time();
 
-    my $bot_start = $bot->{iConnectionTimestamp}
-                 // eval { $bot->{metrics}->{started} }
-                 // $now;
+    my $bot_start = getProcessStartTimestamp($bot, $now);
 
     my $bot_uptime = $now - $bot_start;
     $bot_uptime = 0 if $bot_uptime < 0;

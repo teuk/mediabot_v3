@@ -1427,7 +1427,8 @@ sub mbStatus_ctx {
     return unless $ctx->require_level('Master');
 
     # --- Bot Uptime ---
-    my $uptime = time - ($self->{iConnectionTimestamp} // time);
+    my $uptime = time - getProcessStartTimestamp($self);
+    $uptime = 0 if $uptime < 0;
     my $days    = int($uptime / 86400);
     my $hours   = sprintf('%02d', int(($uptime % 86400) / 3600));
     my $minutes = sprintf('%02d', int(($uptime % 3600) / 60));
@@ -1509,10 +1510,17 @@ sub mbStatus_ctx {
         || $status_mode eq 'tasks';
 
     my $prog_name = $self->{conf}->get('main.MAIN_PROG_NAME') // 'Mediabot';
+    my $runtime_version = $self->{main_prog_version};
+    $runtime_version = 'unknown'
+        unless defined($runtime_version)
+            && !ref($runtime_version)
+            && $runtime_version ne ''
+            && lc($runtime_version) ne 'undefined';
+
     botNotice(
         $self,
         $nick,
-        "$prog_name v$self->{main_prog_version} | bot up $uptime_str"
+        "$prog_name v$runtime_version | bot up $uptime_str"
           . " | RAM RSS ${rss}MB, VM ${vm}MB"
     );
     botNotice(

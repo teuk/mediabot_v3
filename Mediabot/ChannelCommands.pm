@@ -2506,8 +2506,7 @@ sub userShowcommandsChannel_ctx {
     # If we can't resolve a user, show only public commands
     my $user = $ctx->user;
     unless ($user) {
-        botNotice($self, $nick, $public_line);
-        return;
+        return queueBotNotices($self, $nick, $public_line);
     }
 
     # Require authentication to show level-dependent commands
@@ -2519,28 +2518,26 @@ sub userShowcommandsChannel_ctx {
         noticeConsoleChan($self, $notice);
         logBot($self, $ctx->message, $ctx->channel, "showcommands", @args);
 
-        botNotice(
-            $self, $nick,
+        return queueBotNotices(
+            $self,
+            $nick,
             "You must be logged to see available commands for your level - /msg "
-            . $self->{irc}->nick_folded
-            . " login username password"
+                . $self->{irc}->nick_folded
+                . " login username password",
+            $public_line,
         );
-        botNotice($self, $nick, $public_line);
-        return;
     }
 
-    # Resolve target channel:
-    # - If first arg is a #channel, use it
-    # - Else fallback to ctx->channel if it's a #channel
+    # Resolve target channel using all standard IRC channel prefixes.
     my $target = '';
-    if (@args && defined $args[0] && $args[0] =~ /^#/) {
+    if (@args && isIrcChannelTarget($args[0])) {
         $target = shift @args;
     } else {
         my $ctx_chan = $ctx->channel // '';
-        $target = ($ctx_chan =~ /^#/) ? $ctx_chan : '';
+        $target = isIrcChannelTarget($ctx_chan) ? $ctx_chan : '';
     }
 
-    unless ($target =~ /^#/) {
+    unless (isIrcChannelTarget($target)) {
         botNotice($self, $nick, "Syntax: showcommands #channel");
         return;
     }
@@ -2548,9 +2545,12 @@ sub userShowcommandsChannel_ctx {
     # If the bot doesn't know this channel, don't try DB lookups (avoid noisy SQL)
     my $channel_obj = $self->{channels}{$target} || $self->{channels}{lc($target)};
     unless ($channel_obj) {
-        botNotice($self, $nick, "Channel $target does not exist");
-        botNotice($self, $nick, $public_line);
-        return;
+        return queueBotNotices(
+            $self,
+            $nick,
+            "Channel $target does not exist",
+            $public_line,
+        );
     }
 
     # Global admin?
@@ -2562,8 +2562,6 @@ sub userShowcommandsChannel_ctx {
     noticeConsoleChan($self, ($ctx->message && $ctx->message->can('prefix') ? $ctx->message->prefix : $nick) . " showcommands on $target");
     logBot($self, $ctx->message, $target, "showcommands", $target);
 
-    botNotice($self, $nick, $header);
-
     # Get user handle for channel-level lookup
     my $handle = eval { $user->handle }
               || eval { $user->nickname }
@@ -2573,19 +2571,17 @@ sub userShowcommandsChannel_ctx {
     my (undef, $level) = eval { getIdUserChannelLevel($self, $handle, $target) };
     $level //= 0;
 
-    # Show commands by channel level (admin bypasses)
-    botNotice($self, $nick, "Level 500: part")            if ($is_admin || $level >= 500);
-    botNotice($self, $nick, "Level 450: join chanset")    if ($is_admin || $level >= 450);
-    botNotice($self, $nick, "Level 400: add del modinfo") if ($is_admin || $level >= 400);
-    botNotice($self, $nick, "Level 100: op deop invite")  if ($is_admin || $level >= 100);
-    botNotice($self, $nick, "Level  75: ban kickban kb unban bans") if ($is_admin || $level >= 75);
-    botNotice($self, $nick, "Level  50: kick topic")      if ($is_admin || $level >= 50);
-    botNotice($self, $nick, "Level  25: voice devoice")   if ($is_admin || $level >= 25);
+    my @lines = ($header);
+    push @lines, "Level 500: part"            if ($is_admin || $level >= 500);
+    push @lines, "Level 450: join chanset"    if ($is_admin || $level >= 450);
+    push @lines, "Level 400: add del modinfo" if ($is_admin || $level >= 400);
+    push @lines, "Level 100: op deop invite"  if ($is_admin || $level >= 100);
+    push @lines, "Level  75: ban kickban kb unban bans" if ($is_admin || $level >= 75);
+    push @lines, "Level  50: kick topic"      if ($is_admin || $level >= 50);
+    push @lines, "Level  25: voice devoice"   if ($is_admin || $level >= 25);
+    push @lines, $public_line;
 
-    # Always show public commands
-    botNotice($self, $nick, $public_line);
-
-    return 1;
+    return queueBotNotices($self, $nick, @lines);
 }
 
 # Show detailed info about a registered channel (Context-based)

@@ -66,6 +66,7 @@ sub catch_hup;
 sub catch_term;
 sub catch_int;
 sub reconnect;
+sub _reset_irc_reconnect_state;
 sub getVersion;
 sub _build_irc;
 
@@ -183,34 +184,15 @@ if ( $MAIN_PROG_CHECK_CONFIG != 0 ) {
     $mediabot->clean_and_exit(0);
 }
 
-# Retrieve PID file path and stored PID
-my $pidfile = $mediabot->getPidFile();
-my $pid     = $mediabot->getPidFromFile();
+# MB390-B1: PID ownership is acquired atomically after daemonisation (or
+# immediately in foreground mode).  The process keeps the advisory lock until
+# clean shutdown, closing the duplicate-start race in the old read/kill/write
+# sequence.
 
-if (defined $pid && $pid =~ /^\d+$/) {
-    
-    # kill 0 just tests "does this process exist and can I signal it?"
-    if (kill 0, $pid) {
-        # process is alive
-        $mediabot->{logger}->log(0, "Mediabot is already running with PID $pid.");
-        $mediabot->{logger}->log(0, "Either kill process $pid or remove stale PID file: $pidfile");
-        $mediabot->clean_and_exit(1);
-    }
-    else {
-        # PID file is stale; remove it so a new instance can start
-        if (unlink $pidfile) {
-            $mediabot->{logger}->log(1, "Removed stale PID file: $pidfile");
-        }
-        else {
-            $mediabot->{logger}->log(0, "Could not remove stale PID file '$pidfile': $!");
-            $mediabot->{logger}->log(0, "Please remove it manually before restarting.");
-            $mediabot->clean_and_exit(1);
-        }
-    }
-}
-
-
-($MAIN_PROG_VERSION,$MAIN_GIT_VERSION) = $mediabot->getVersion();
+# MB389: startup must be deterministic and independent of DNS/GitHub.
+# Remote release checks are performed only by the explicit `version` command.
+$MAIN_PROG_VERSION = $mediabot->getLocalVersion();
+$MAIN_GIT_VERSION  = 'Undefined';
 
 
 
@@ -255,16 +237,16 @@ if ($MAIN_PROG_DAEMON) {
         $mediabot->clean_and_exit(1);
     }
 
-    # Write the PID file
-    if ($mediabot->writePidFile()) {
-        $mediabot->{logger}->log(1, "PID file written to " . $mediabot->getPidFile());
-    } else {
-        $mediabot->{logger}->log(0, "Failed to write PID file, aborting.");
-        $mediabot->clean_and_exit(1);
-    }
-
     $mediabot->{logger}->log(1, "Daemon process started successfully.");
 }
+
+# Acquire the final process PID after fork/setsid in daemon mode and
+# immediately in foreground/systemd mode.
+unless ($mediabot->acquirePidFile()) {
+    $mediabot->{logger}->log(0, "Failed to acquire PID file, aborting.");
+    $mediabot->clean_and_exit(1);
+}
+$mediabot->{logger}->log(1, "PID file locked at " . $mediabot->getPidFile());
 
 my $sStartedMode = ( $MAIN_PROG_DAEMON ? "background" : "foreground");
 my $MAIN_PROG_DEBUG = $mediabot->getDebugLevel();
@@ -1029,10 +1011,48 @@ sub _irc_message_args {
     return @args;
 }
 
+# mb384-B1: keep inbound private payloads out of debug logs.  Login,
+# password and passive-DCC tokens are credentials even when printed as hex.
+sub _irc_target_is_channel {
+    my ($target) = @_;
+    return defined($target) && $target =~ /^[#&!+]/ ? 1 : 0;
+}
+
+sub _private_payload_log_summary {
+    my ($text) = @_;
+
+    $text = '' unless defined $text;
+    my $bytes = utf8::is_utf8($text)
+        ? length(encode('UTF-8', $text))
+        : length($text);
+
+    return "[private payload redacted bytes=$bytes]";
+}
+
+sub _private_message_is_sensitive {
+    my ($text) = @_;
+
+    return 0 unless defined $text;
+
+    $text =~ s/^\s+//;
+    my ($command, $arg1) = split /\s+/, lc($text), 3;
+    return 0 unless defined $command && $command ne '';
+
+    return 1 if $command =~ /^(?:login|register|pass|newpass|ident|identify|auth|xlogin|setpass|password|ghost|recover|release)$/;
+    return 1 if $command eq 'set' && defined($arg1) && $arg1 eq 'password';
+
+    return 0;
+}
+
 sub log_debug_args {
-    my ($context, $message) = @_;
+    my ($context, $message, %options) = @_;
     return unless defined $message && ref($message) && $mediabot;
+
     my @args = _irc_message_args($message);
+    if ($options{redact_last_arg} && @args) {
+        $args[-1] = _private_payload_log_summary($args[-1]);
+    }
+
     my $args_str = join(', ', map { defined $_ ? "'$_'" : 'undef' } @args);
     $mediabot->{logger}->log(5, "$context args: [$args_str]");
 }
@@ -1057,15 +1077,6 @@ sub on_timer_tick {
 
     $mediabot->{logger}->log(5, "on_timer_tick() params: " . scalar(@params) . " args");
     $mediabot->{logger}->log(5,"on_timer_tick() tick");
-    
-    # Update pid file
-    my $sPidFilename = $mediabot->{conf}->get('main.MAIN_PID_FILE');
-    if (open my $pid_fh, '>', $sPidFilename) {
-        print $pid_fh "$$";
-        close $pid_fh;
-    } else {
-        log_error("Could not open $sPidFilename for writing: $!");
-    }
     
     # Sync $irc with $mediabot->{irc} in case restart_irc() cleared it
     $irc = undef if defined $irc && !defined $mediabot->{irc};
@@ -1213,7 +1224,7 @@ sub on_message_NOTICE {
     my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
     my @tArgs = _irc_message_args($message);
     if (defined($who) && ($who ne "")) {
-        if (defined($tArgs[0]) && (substr($tArgs[0],0,1) eq '#')) {
+        if (defined($tArgs[0]) && _irc_target_is_channel($tArgs[0])) {
             $mediabot->{logger}->log(0,"-$who:" . $tArgs[0] . "- $what");
             $mediabot->logBotAction($message,"notice",$sNick,$tArgs[0],$what);
         }
@@ -1342,9 +1353,15 @@ sub on_login {
 
 sub on_private {
     my ($self,$message,$hints) = @_;
-    log_debug_args('on_private', $message);
     my ($who, $what) = @{$hints}{qw<prefix_name text>};
-    $mediabot->{logger}->log(2,"on_private() -$who- $what");
+
+    # on_message_text can be emitted in addition to on_message_PRIVMSG. Never
+    # duplicate a private command or credential in this generic callback log.
+    log_debug_args('on_private', $message, redact_last_arg => 1);
+    $mediabot->{logger}->log(
+        2,
+        "on_private() -" . ($who // '?') . "- " . _private_payload_log_summary($what)
+    );
 }
 
 sub on_message_INVITE {
@@ -1420,7 +1437,7 @@ sub on_message_MODE {
     my ($target_name,$modechars,$modeargs) = @{$hints}{qw<target_name modechars modeargs>};
     my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
     my @tArgs = _irc_message_args($message);
-    if ( substr($target_name,0,1) eq '#' ) {
+    if (_irc_target_is_channel($target_name)) {
         shift @tArgs;
         my $sModes = $tArgs[0];
         shift @tArgs;
@@ -1694,13 +1711,20 @@ sub on_message_PART {
 sub on_message_PRIVMSG {
     my ($self, $message, $hints) = @_;
 
-    log_debug_args('on_message_PRIVMSG', $message);
     my ($who, $where, $what) = @{$hints}{qw<prefix_nick targets text>};
+    my $is_channel = _irc_target_is_channel($where);
+
+    log_debug_args(
+        'on_message_PRIVMSG',
+        $message,
+        redact_last_arg => ($is_channel ? 0 : 1),
+    );
+
     if ( $mediabot->isIgnored($message,$where,$who,$what)) {
         return undef;
     }
     $mediabot->{metrics}->inc('mediabot_privmsg_in_total') if $mediabot->{metrics};
-    if ( substr($where,0,1) eq '#' ) {
+    if ($is_channel) {
         # Message on channel
         # Track last seen on public message
         # mb85-B1 / mb86-port: bloc updateUserSeen fermé avant deliverReminders
@@ -1898,11 +1922,17 @@ sub on_message_PRIVMSG {
         }
     }
     else {
-        # DCC/CTCP DEBUG - visible only at high debug level
-        my $what_for_hex = defined($what) ? $what : '';
+        # Private-message diagnostics must never contain the payload. Hex is
+        # reversible and previously exposed login passwords and passive-DCC
+        # tokens at debug level 4.
+        my $private_parse = parse_ctcp_payload($what);
+        my $private_type  = $private_parse->{type} // 'unknown';
         $mediabot->{logger}->log(4, sprintf(
-            "[DCC_DEBUG] what_hex='%s' where='%s' who='%s'",
-            unpack('H*', $what_for_hex), $where, $who
+            "[PRIVATE_DEBUG] type=%s where='%s' who='%s' %s",
+            $private_type,
+            defined($where) ? $where : '?',
+            defined($who)   ? $who   : '?',
+            _private_payload_log_summary($what),
         ));
 
         # DCC/CTCP parser module path.
@@ -1913,8 +1943,8 @@ sub on_message_PRIVMSG {
         #   \x01DCC CHAT chat <ip_int> <port>\x01
         #   \x01DCC CHAT chat 0 0 <token>\x01
         #   CHAT chat <ip_int> <port>
-        if ($where !~ /^#/ && defined($what)) {
-            my $dcc_parse = parse_ctcp_payload($what);
+        if (!$is_channel && defined($what)) {
+            my $dcc_parse = $private_parse;
 
             if (is_ctcp_chat($dcc_parse)) {
                 $mediabot->{logger}->log(2, "CTCP CHAT request from $who via Mediabot::DCC parser");
@@ -1930,7 +1960,7 @@ sub on_message_PRIVMSG {
                 $mediabot->{logger}->log(
                     2,
                     "DCC CHAT request from $who via Mediabot::DCC parser ip=$ip_int port=$port"
-                    . (defined $token ? " token_present=1" : "")
+                    . (defined($token) && $token ne '' ? " token_present=1" : "")
                 );
 
                 $mediabot->_handle_dcc_chat_request($message, $who, $ip_int, $port, $token);
@@ -1940,9 +1970,17 @@ sub on_message_PRIVMSG {
 
 
 
-        # Private message hide passwords
-        unless ( $what =~ /^login|^register|^pass|^newpass|^ident/i) {
-            if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
+        # Keep ordinary private-message visibility, but never log credential
+        # commands. Match the first command token exactly so leading spaces and
+        # aliases such as xlogin/identify cannot bypass the guard.
+        if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
+            if (_private_message_is_sensitive($what)) {
+                $mediabot->{logger}->log(
+                    0,
+                    "[LIVE] $where: <$who> " . _private_payload_log_summary($what)
+                );
+            }
+            else {
                 $mediabot->{logger}->log(0,"[LIVE] $where: <$who> $what");
             }
         }
@@ -1987,7 +2025,7 @@ sub on_message_ctcp_CHAT {
     my $to  = ($hints->{targets} // [])->[0] // '';
 
     # Only handle CTCP CHAT directed to the bot, not a channel.
-    return if $to =~ /^#/;
+    return if _irc_target_is_channel($to);
 
     $mediabot->{logger}->log(2, "CTCP CHAT request from $who");
 
@@ -2008,17 +2046,30 @@ sub on_message_ctcp_DCC {
         $mediabot->{logger}->log(4, "[CTCP_DCC_DEBUG] handler called from $who_dbg");
 
         for my $k (sort keys %{ $hints || {} }) {
-            my $v = $hints->{$k} // 'undef';
-            if (ref($v) eq 'ARRAY') {
-                $v = '[' . join(',', @$v) . ']';
-            } elsif (ref($v)) {
-                $v = ref($v);
+            my $v = $hints->{$k};
+            my $description;
+
+            if ($k eq 'prefix_nick') {
+                $description = defined($v) ? $v : 'undef';
             }
-            $mediabot->{logger}->log(4, "[CTCP_DCC_DEBUG] hint $k=" . unpack('H*', "$v"));
+            elsif ($k eq 'targets' && ref($v) eq 'ARRAY') {
+                $description = '[' . join(',', @$v) . ']';
+            }
+            elsif (ref($v)) {
+                $description = ref($v);
+            }
+            else {
+                $description = _private_payload_log_summary($v);
+            }
+
+            $mediabot->{logger}->log(4, "[CTCP_DCC_DEBUG] hint $k=$description");
         }
 
         my $raw = eval { $message->as_string } // '';
-        $mediabot->{logger}->log(4, "[CTCP_DCC_DEBUG] raw_message_hex=" . unpack('H*', $raw));
+        $mediabot->{logger}->log(
+            4,
+            "[CTCP_DCC_DEBUG] raw_message=" . _private_payload_log_summary($raw)
+        );
     }
 
     my $who  = $hints->{prefix_nick}        // return;
@@ -2032,12 +2083,17 @@ sub on_message_ctcp_DCC {
             // '';
 
     # Only handle DCC CHAT directed to the bot (not to a channel)
-    return if $to =~ /^#/;
+    return if _irc_target_is_channel($to);
 
     my $dcc_parse = parse_dcc_payload($args);
-    my $payload   = $dcc_parse->{payload} // $args;
+    my $dcc_type = $dcc_parse->{type} // 'invalid';
+    my $dcc_mode = $dcc_parse->{mode} // 'unknown';
+    my $token_present = defined($dcc_parse->{token}) && $dcc_parse->{token} ne '' ? 1 : 0;
 
-    $mediabot->{logger}->log(3, "CTCP DCC from $who: '$payload'");
+    $mediabot->{logger}->log(
+        3,
+        "CTCP DCC from $who: type=$dcc_type mode=$dcc_mode token_present=$token_present"
+    );
 
     if (is_dcc_chat($dcc_parse)) {
         my $ip_int = $dcc_parse->{ip_int};
@@ -2047,13 +2103,13 @@ sub on_message_ctcp_DCC {
         $mediabot->{logger}->log(
             2,
             "CTCP DCC CHAT request from $who via Mediabot::DCC parser ip=$ip_int port=$port"
-            . (defined $token ? " token_present=1" : "")
+            . (defined($token) && $token ne '' ? " token_present=1" : "")
         );
 
         $mediabot->_handle_dcc_chat_request($message, $who, $ip_int, $port, $token);
     }
     else {
-        $mediabot->{logger}->log(2, "DCC from $who: unhandled DCC type '$payload' - ignored");
+        $mediabot->{logger}->log(2, "DCC from $who: unhandled DCC type '$dcc_type' - ignored");
     }
 
     return undef;
@@ -2875,6 +2931,19 @@ sub on_message_ERR_NEEDMOREPARAMS {
     $mediabot->{logger}->log(1, "ERR_NEEDMOREPARAMS for $cmd - vérifiez la syntaxe.");
 }
 
+# MB390-B2: every completed reconnect attempt must release all lifecycle
+# guards.  The successful path previously left irc_reconnect_in_progress set
+# forever, preventing a second network loss from ever scheduling a reconnect.
+sub _reset_irc_reconnect_state {
+    my ($bot) = @_;
+    return 0 unless $bot;
+
+    $bot->{irc_restart_in_progress}   = 0;
+    $bot->{irc_reconnect_requested}   = 0;
+    $bot->{irc_reconnect_in_progress} = 0;
+    return 1;
+}
+
 sub reconnect {
     return if $mediabot->{irc_reconnect_in_progress};
 
@@ -2961,17 +3030,14 @@ sub reconnect {
         $err =~ s/\n/ /g;
         $mediabot->{logger}->log(0, "Login Future failed: $err");
 
-        # Allow another reconnect attempt later
-        $mediabot->{irc_restart_in_progress} = 0;
-        $mediabot->{irc_reconnect_requested} = 0;
-        $mediabot->{irc_reconnect_in_progress} = 0;
+        # Allow another reconnect attempt later.
+        _reset_irc_reconnect_state($mediabot);
 
         $mediabot->{logger}->log(0, "reconnect(): completed");
         return;
     }
 
-    $mediabot->{irc_restart_in_progress} = 0;
-    $mediabot->{irc_reconnect_requested} = 0;
+    _reset_irc_reconnect_state($mediabot);
 
     $mediabot->{logger}->log(0, "reconnect(): completed");
 
@@ -2990,7 +3056,7 @@ sub catch_hup {
 
 sub catch_term {
     my ($signal) = @_;
-    log_message(0,"Received SIGTERM (Ctrl+C). Initiating clean shutdown.");
+    log_message(0,"Received SIGTERM. Initiating clean shutdown.");
     $mediabot && $mediabot->clean_and_exit(0);
     exit 0;
 }

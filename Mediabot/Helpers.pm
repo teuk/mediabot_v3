@@ -23,10 +23,14 @@ use Socket;
 use POSIX qw(strftime WNOHANG);
 use Digest::SHA qw(sha1 sha1_hex);
 use List::Util qw(min);
+use Scalar::Util qw(refaddr);
 use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
 use IO::Async::Timer::Countdown;
 use IO::Async::Stream;
 use Encode qw(encode);
+use Cwd qw(abs_path);
+use File::Basename qw(dirname);
+use File::Spec;
 
 our @EXPORT = qw(
     botNotice
@@ -49,8 +53,12 @@ our @EXPORT = qw(
     userAdd
     userCount
     getDetailedVersion
+    getLocalVersion
     getVersion
     getVersion_async
+    getProcessStartTimestamp
+    isIrcChannelTarget
+    queueBotNotices
     make_password_hash
     checkAntiFlood
     checkNickFlood
@@ -437,6 +445,120 @@ sub _is_irc_channel_target {
     return defined($target) && $target =~ /^[#&!+]/ ? 1 : 0;
 }
 
+# MB391: public wrapper used by Context and command modules. Keep the RFC-style
+# channel-prefix contract in one place for release-critical reply routing.
+sub isIrcChannelTarget {
+    return _is_irc_channel_target(@_);
+}
+
+# Return the process start timestamp used by every user-facing uptime command.
+# The IRC connection timestamp is only a compatibility fallback: reconnecting
+# must not reset the advertised bot/process uptime.
+sub getProcessStartTimestamp {
+    my ($self, $now) = @_;
+
+    $now = time()
+        unless defined($now) && !ref($now) && $now =~ /\A\d+(?:\.\d+)?\z/;
+
+    my @candidates = (
+        eval { $self->{metrics}->{started} },
+        eval { $self->{_start_time} },
+        eval { $self->{iConnectionTimestamp} },
+    );
+
+    for my $candidate (@candidates) {
+        next unless defined($candidate) && !ref($candidate);
+        next unless $candidate =~ /\A\d+(?:\.\d+)?\z/;
+        next if $candidate <= 0 || $candidate > $now + 1;
+        return 0 + $candidate;
+    }
+
+    return 0 + $now;
+}
+
+# Queue NOTICE lines through the IO::Async loop so help/command listings cannot
+# generate a release-blocking burst. Multiple callers share the same pending
+# queue: a second help request is scheduled after already queued lines.
+sub queueBotNotices {
+    my ($self, $nick, @lines) = @_;
+
+    @lines = map { defined($_) && !ref($_) ? "$_" : () } @lines;
+    return 1 unless @lines;
+
+    my $max_lines = 16;
+    if (@lines > $max_lines) {
+        @lines = (
+            @lines[0 .. $max_lines - 2],
+            '... output truncated; use help search <term> or help <command>',
+        );
+    }
+
+    my $loop = eval { $self->getLoop };
+    $loop ||= $self->{loop} if ref($self);
+
+    unless ($loop && $loop->can('add') && $loop->can('remove')) {
+        botNotice($self, $nick, $_) for @lines;
+        return 1;
+    }
+
+    my $delay_step = 1.5;
+    $self->{_notice_queue_timers} ||= [];
+    my $timers = $self->{_notice_queue_timers};
+    my $base_delay = scalar(grep { defined $_ } @$timers) * $delay_step;
+
+    for my $i (0 .. $#lines) {
+        my $line = $lines[$i];
+        my $timer;
+
+        $timer = IO::Async::Timer::Countdown->new(
+            delay => $base_delay + ($i * $delay_step),
+            on_expire => sub {
+                botNotice($self, $nick, $line);
+                eval { $loop->remove($timer) };
+                my $expired_id = refaddr($timer);
+                @$timers = grep {
+                    defined($_) && ref($_) && refaddr($_) != $expired_id
+                } @$timers;
+                undef $timer;
+            },
+        );
+
+        push @$timers, $timer;
+        my $started = eval {
+            $loop->add($timer);
+            $timer->start;
+            1;
+        };
+
+        unless ($started) {
+            my $failed_id = refaddr($timer);
+            @$timers = grep {
+                defined($_) && ref($_) && refaddr($_) != $failed_id
+            } @$timers;
+            botNotice($self, $nick, $line);
+            undef $timer;
+        }
+    }
+
+    return 1;
+}
+
+
+# ---------------------------------------------------------------------------
+# _sanitize_irc_text
+# mb386-B1: normalise outbound IRC text before any log, database history,
+# badword check or wire split. CR/LF could previously forge extra log lines
+# because botPrivmsg() and botAction() only flattened them immediately before
+# sending. NUL was not removed at all. Keep the visible payload and every
+# recorded copy identical by replacing all forbidden line controls up front.
+# ---------------------------------------------------------------------------
+sub _sanitize_irc_text {
+    my ($text) = @_;
+    return $text unless defined $text;
+    $text =~ s/[\r\n\x00]+/ /g;
+    return $text;
+}
+
 
 sub _redact_irc_service_secret_for_log {
     my ($msg) = @_;
@@ -502,8 +624,9 @@ sub _split_text_for_irc {
     $max_bytes = 400
         unless defined($max_bytes) && $max_bytes =~ /^\d+$/ && $max_bytes >= 16;
 
-    # Sanitise newlines defensively (callers already do this; idempotent here).
-    $text =~ s/[\r\n]+/ /g;
+    # Defence in depth: callers sanitise before logging/history, while the
+    # splitter also protects direct future callers.
+    $text = _sanitize_irc_text($text);
 
     my $is_chars = utf8::is_utf8($text);
     my $cost = $is_chars
@@ -566,6 +689,11 @@ sub botPrivmsg {
         return;
     }
 
+    # mb386-B1: sanitise before logs, badword filtering, CHANNEL_LOG history
+    # and wire splitting so every representation is identical and log-line
+    # injection through CR/LF/NUL is impossible.
+    $sMsg = _sanitize_irc_text($sMsg);
+
     my $eventtype = "public";
 
     if (_is_irc_channel_target($sTo)) {
@@ -592,9 +720,6 @@ sub botPrivmsg {
                 return undef if checkAntiFlood($self, $sTo);  # Already refactored
             }
         }
-
-        # Log output to console
-        $self->{logger}->log(0, "[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
 
         # Badword filtering — B1/A1: cache per channel (TTL 5 min)
         # Avoids one SQL query per outgoing message on busy channels.
@@ -627,8 +752,9 @@ sub botPrivmsg {
             my $msg_lc = lc($sMsg);
             for my $bw (@{ $cache->{words} // [] }) {
                 if (index($msg_lc, $bw) != -1) {
-                    logBotAction($self, undef, $eventtype, $self->{irc}->nick_folded, $sTo,
-                        "$sMsg (BADWORD : $bw)");
+                    # mb387-B1: a rejected payload was never sent, therefore it
+                    # must not appear as a normal LIVE line or CHANNEL_LOG event.
+                    # Keep the explicit operational diagnostic only.
                     noticeConsoleChan($self, "Badword : $bw blocked on channel $sTo ($sMsg)");
                     $self->{logger}->log(3, "Badword : $bw blocked on channel $sTo ($sMsg)");
                     return;
@@ -636,6 +762,10 @@ sub botPrivmsg {
             }
             logBotAction($self, undef, $eventtype, $self->{irc}->nick_folded, $sTo, $sMsg);
         }
+
+        # mb387-B1: LIVE means accepted for wire delivery. Log it only after
+        # AntiFlood and badword checks have both allowed the message.
+        $self->{logger}->log(0, "[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
     } else {
         # Private message
         $eventtype = "private";
@@ -652,11 +782,8 @@ sub botPrivmsg {
 
     # Send actual message — shared path for channel and private (A5)
     if (defined($sMsg) && $sMsg ne "") {
-        # Sanitise first while the string is still a Perl character string.
-        # IMP5/fix: split before UTF-8 encoding so substr() never cuts a
-        # multi-byte character in half (accents, emojis, █/░ bars, etc.).
-        $sMsg =~ s/[\r\n]+/ /g;
-
+        # Split while the string is still a Perl character string so
+        # substr() never cuts a multi-byte character in half.
         # IRC hard limit is ~512 bytes. mb325-B1: split on a byte budget (not a
         # character count) so accented text and emojis can never push a chunk
         # past the wire limit; the encode happens per chunk below. 400 bytes
@@ -690,6 +817,11 @@ sub botAction {
 			$self->{logger}->log(0,"botAction() ERROR no message specified to send to target");
 			return;
 		}
+
+		# mb386-B1: keep logs, CHANNEL_LOG history and the wire payload on the
+		# same sanitised text. This runs before channel/private classification.
+		$sMsg = _sanitize_irc_text($sMsg);
+
 		my $eventtype = "public";
 		if (_is_irc_channel_target($sTo)) {
 				my $id_chanset_list = getIdChansetList($self,"NoColors");
@@ -712,8 +844,6 @@ sub botAction {
 						}
 					}
 				}
-				$self->{logger}->log(0,"[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
-
 				# mb134-B8: keep botAction aligned with botPrivmsg for outgoing
 				# badword checks. The old path queried BADWORDS on every ACTION
 				# and did not finish the statement handle on the no-badword path.
@@ -747,7 +877,8 @@ sub botAction {
 					my $sMsgLc = lc $sMsg;
 					for my $bw (@{ $cache->{words} // [] }) {
 						if (index($sMsgLc, $bw) != -1) {
-							logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,"$sMsg (BADWORD : $bw)");
+							# mb387-B1: rejected ACTIONs are diagnostics, not sent
+							# conversation events. Do not forge LIVE/history entries.
 							noticeConsoleChan($self,"Badword : $bw blocked on channel $sTo ($sMsg)");
 							$self->{logger}->log(3,"Badword : $bw blocked on channel $sTo ($sMsg)");
 							return;
@@ -756,6 +887,9 @@ sub botAction {
 
 					logBotAction($self,undef,$eventtype,$self->{irc}->nick_folded,$sTo,$sMsg);
 				}
+
+				# mb387-B1: only accepted ACTIONs are represented as LIVE output.
+				$self->{logger}->log(0,"[LIVE] $sTo:<" . $self->{irc}->nick_folded . "> $sMsg");
 		}
 		else {
 			$eventtype = "private";
@@ -763,14 +897,8 @@ sub botAction {
 			$self->{logger}->log(0,"-> *$sTo* $log_msg");
 		}
 		if (defined($sMsg) && ($sMsg ne "")) {
-			# mb344-B1: neutraliser les sauts de ligne AVANT l'envoi, comme le
-			# font déjà botPrivmsg (mb325) et botNotice. Sans ça, un ACTION
-			# contenant un CR/LF (p.ex. titre d'URL ou texte relayé) terminait la
-			# ligne IRC prématurément : le reste devenait une commande IRC injectée
-			# (\1ACTION x\r\nPRIVMSG #autre :... \1). Le commentaire mb134-B8 disait
-			# pourtant "keep botAction aligned with botPrivmsg" — l'alignement CRLF
-			# manquait. _split_text_for_irc ne retire pas les \r\n, d'où ce fix.
-			$sMsg =~ s/[\r\n]+/ /g;
+			# mb386-B1 performs CR/LF/NUL normalisation before every log/history
+			# path; only byte-aware ACTION splitting remains here.
 
 			# mb327-B1: découpe les ACTIONs longues sur le même budget d'octets que
 			# botPrivmsg/botNotice (helper partagé _split_text_for_irc). Sans ça, un
@@ -813,8 +941,6 @@ sub botNotice {
         return;
     }
 
-    $self->{logger}->log(4, "[DEBUG] botNotice() called with target='$target', text='$text'");
-
     # Keep NOTICE behavior aligned with botPrivmsg:
     # - sanitize newlines;
     # - split long messages instead of truncating them;
@@ -824,10 +950,33 @@ sub botNotice {
     # budget (instead of 400 characters) keeps accents/emojis/IRC bar chars from
     # pushing a NOTICE past the ~512-byte wire limit; the per-chunk encode below
     # is unchanged. Char-boundary safety is preserved by the helper.
-    $text =~ s/[\r\n]+/ /g;
+    $text = _sanitize_irc_text($text);
+
+    my $is_channel_target = _is_irc_channel_target($target);
+
+    # mb385-B1: private NOTICEs were redacted in the normal level-0 log, but the
+    # earlier level-4 diagnostic still printed the original text verbatim.
+    # Redact the complete private message before both debug logging and splitting
+    # its log copy. Redacting each wire chunk independently is unsafe because a
+    # long service command can put the secret in a later chunk that no longer
+    # starts with "identify", "login", etc.
+    my $safe_log_text = $is_channel_target
+        ? $text
+        : _redact_irc_service_secret_for_log($text);
+
+    $self->{logger}->log(
+        4,
+        "[DEBUG] botNotice() called with target='$target', text='$safe_log_text'"
+    );
 
     my @chunks = _split_text_for_irc($text, 400);
     @chunks = ($text) unless @chunks;
+
+    my @private_log_chunks;
+    unless ($is_channel_target) {
+        @private_log_chunks = _split_text_for_irc($safe_log_text, 400);
+        @private_log_chunks = ($safe_log_text) unless @private_log_chunks;
+    }
 
     for my $chunk (@chunks) {
         next unless defined($chunk) && $chunk ne '';
@@ -843,17 +992,20 @@ sub botNotice {
             text   => $encoded_text
         );
 
-        # Log interne (version lisible). mb133-B7: redact private NOTICE logs
-        # too, for consistency with PRIVMSG/ACTION service-secret handling.
-        my $log_chunk = _is_irc_channel_target($target)
-            ? $chunk
-            : _redact_irc_service_secret_for_log($chunk);
-        $self->{logger}->log(0, "-> -$target- $log_chunk");
-
-        # Si c'est un channel NOTICE, log dans l'action log
-        if (_is_irc_channel_target($target)) {
+        if ($is_channel_target) {
+            # Channel logs and action history retain the original visible text.
+            $self->{logger}->log(0, "-> -$target- $chunk");
             $self->{logger}->log(4, "[DEBUG] botNotice() target is a channel, logging to action log");
             logBotAction($self, undef, "notice", $self->{irc}->nick_folded, $target, $chunk);
+        }
+    }
+
+    # Private logs use the already-redacted complete-message copy. This keeps
+    # credentials masked even when the wire message required several chunks.
+    unless ($is_channel_target) {
+        for my $log_chunk (@private_log_chunks) {
+            next unless defined($log_chunk) && $log_chunk ne '';
+            $self->{logger}->log(0, "-> -$target- $log_chunk");
         }
     }
 }
@@ -1333,38 +1485,192 @@ SQL
 
 
 
+# MB388: version identity must not depend on the process working directory.
+# Resolve the repository root from this module once, while the source tree is
+# still available, and keep a stable absolute path to VERSION.
+my $HELPERS_SOURCE_FILE = abs_path(__FILE__) || File::Spec->rel2abs(__FILE__);
+my $MEDIABOT_ROOT_DIR   = dirname(dirname($HELPERS_SOURCE_FILE));
+my $LOCAL_VERSION_FILE  = File::Spec->catfile($MEDIABOT_ROOT_DIR, 'VERSION');
+
+sub _usable_local_version {
+    my ($value) = @_;
+
+    return undef unless defined($value) && !ref($value);
+
+    $value = "$value";
+    $value =~ s/^\s+|\s+$//g;
+
+    return undef if $value eq '' || lc($value) eq 'undefined';
+    return $value;
+}
+
+sub _cached_local_version {
+    my ($self) = @_;
+    return 'Undefined' unless ref($self);
+    return _usable_local_version($self->{main_prog_version}) // 'Undefined';
+}
+
+sub _read_local_version {
+    my ($self) = @_;
+
+    if (open my $fh, '<', $LOCAL_VERSION_FILE) {
+        my $value = <$fh>;
+        close $fh;
+
+        return _usable_local_version($value) // 'Undefined';
+    }
+
+    $self->{logger}->log(
+        1,
+        "Unable to read local VERSION file '$LOCAL_VERSION_FILE': $!",
+    ) if $self && $self->{logger};
+
+    return 'Undefined';
+}
+
+# MB389: startup identity is local-only. Reading VERSION must never trigger
+# DNS, GitHub or any other public-network dependency.
+sub getLocalVersion {
+    my ($self) = @_;
+
+    $self->{logger}->log(1, "Reading local version from $LOCAL_VERSION_FILE...")
+        if $self && $self->{logger};
+
+    my $local_version = _read_local_version($self);
+    my $usable = _usable_local_version($local_version)
+        // _usable_local_version($self->{main_prog_version});
+
+    if (defined $usable) {
+        $self->{main_prog_version} = $usable if ref($self);
+        return $usable;
+    }
+
+    return 'Undefined';
+}
+
+sub _version_parts {
+    my ($value) = @_;
+    $value = _usable_local_version($value);
+    return undef unless defined $value;
+
+    if ($value =~ /\A(\d+)\.(\d+)\z/) {
+        return {
+            major => 0 + $1,
+            minor => 0 + $2,
+            stage => 1,       # stable is newer than devel at the same base
+            type  => 'stable',
+            dev   => undef,
+        };
+    }
+
+    if ($value =~ /\A(\d+)\.(\d+)dev[-_]?(\d[\d_]*)\z/) {
+        my ($major, $minor, $dev) = ($1, $2, $3);
+        $dev =~ s/_//g;
+        $dev =~ s/\A0+(?=\d)//;
+
+        return {
+            major => 0 + $major,
+            minor => 0 + $minor,
+            stage => 0,
+            type  => 'devel',
+            dev   => $dev,
+        };
+    }
+
+    return undef;
+}
+
+sub _compare_digit_strings {
+    my ($left, $right) = @_;
+    $left  = '0' unless defined($left)  && $left  ne '';
+    $right = '0' unless defined($right) && $right ne '';
+
+    return length($left) <=> length($right)
+        if length($left) != length($right);
+    return $left cmp $right;
+}
+
+# Return -1 when left is older, 0 when equal, 1 when left is newer, and undef
+# when either version does not follow Mediabot's stable/devel format.
+sub _compare_mediabot_versions {
+    my ($left, $right) = @_;
+
+    my $l = _version_parts($left);
+    my $r = _version_parts($right);
+    return undef unless $l && $r;
+
+    return $l->{major} <=> $r->{major} if $l->{major} != $r->{major};
+    return $l->{minor} <=> $r->{minor} if $l->{minor} != $r->{minor};
+    return $l->{stage} <=> $r->{stage} if $l->{stage} != $r->{stage};
+
+    return 0 if $l->{stage} == 1;
+    return _compare_digit_strings($l->{dev}, $r->{dev});
+}
+
 # Send a private message to a target
 sub versionCheck {
     my ($ctx) = @_;
 
     my $self     = $ctx->bot;
     my $conf     = $self->{conf};
-    my $bot_name = $conf->get('main.MAIN_PROG_NAME');
+    my $bot_name = $conf->get('main.MAIN_PROG_NAME') // 'Mediabot';
     my $message  = $ctx->message;
 
-    # MB317: GitHub/DNS access must not run inside the IRC callback. Capture the
-    # command context now and build the reply when the async worker completes.
-    return getVersion_async(
+    # MB391: the core identity command must answer immediately from the local
+    # source of truth. GitHub remains an optional asynchronous follow-up and can
+    # never delay or suppress the basic version reply.
+    my $local_version = _usable_local_version(_cached_local_version($self))
+        // _usable_local_version(getLocalVersion($self))
+        // 'unknown';
+
+    $self->{main_prog_version} = $local_version
+        if $local_version ne 'unknown';
+
+    $ctx->reply("$bot_name version: $local_version");
+    logBot($self, $message, undef, 'version', undef);
+
+    getVersion_async(
         $self,
         sub {
-            my ($local_version, $remote_version) = @_;
+            my ($worker_local, $remote_version) = @_;
 
-            $local_version  = 'Undefined'
-                unless defined($local_version) && !ref($local_version) && $local_version ne '';
-            $remote_version = 'Undefined'
-                unless defined($remote_version) && !ref($remote_version) && $remote_version ne '';
+            $worker_local = _usable_local_version($worker_local)
+                // _usable_local_version($local_version)
+                // 'unknown';
+            $remote_version = _usable_local_version($remote_version);
 
-            $self->{main_prog_version} = $local_version;
-
-            my $sMsg = "$bot_name version: $local_version";
-            if ($remote_version ne 'Undefined' && $remote_version ne $local_version) {
-                $sMsg .= " (update available: $remote_version)";
+            if ($local_version eq 'unknown' && $worker_local ne 'unknown') {
+                $local_version = $worker_local;
+                $self->{main_prog_version} = $worker_local;
+                $ctx->reply("$bot_name version: $worker_local");
             }
 
-            $ctx->reply($sMsg);
-            logBot($self, $message, undef, 'version', undef);
+            return unless defined $remote_version;
+
+            my $comparison = _compare_mediabot_versions(
+                $local_version,
+                $remote_version,
+            );
+
+            if (!defined $comparison) {
+                $ctx->reply(
+                    "$bot_name repository version format unknown: $remote_version"
+                );
+            }
+            elsif ($comparison < 0) {
+                $ctx->reply(
+                    "$bot_name update available: $remote_version (local: $local_version)"
+                );
+            }
+            elsif ($comparison > 0) {
+                $ctx->reply(
+                    "$bot_name local build newer than repository: $local_version (repository: $remote_version)"
+                );
+            }
         },
     );
+
+    return 1;
 }
 
 # 🧙‍♂️ Handle private commands with centralized dispatching and full command set.
@@ -1784,15 +2090,11 @@ sub getVersion {
     my ($c_major, $c_minor, $c_type, $c_dev_info);
     my ($r_major, $r_minor, $r_type, $r_dev_info);
 
-    $self->{logger}->log(1, "Reading local version from VERSION file...");
-
-    # Read local VERSION file
-    if (open my $fh, '<', 'VERSION') {
-        chomp($local_version = <$fh>);
-        close $fh;
+    # MB389: explicit remote checks reuse the same local-only identity helper
+    # used by startup, then perform GitHub I/O only for the remote half.
+    $local_version = getLocalVersion($self);
+    if ($local_version ne 'Undefined') {
         ($c_major, $c_minor, $c_type, $c_dev_info) = $self->getDetailedVersion($local_version);
-    } else {
-        $self->{logger}->log(1, "Unable to read local VERSION file.");
     }
 
     if (defined $c_major && defined $c_minor && defined $c_type) {
@@ -1820,10 +2122,22 @@ sub getVersion {
                 my $suffix = $r_dev_info ? "($r_dev_info)" : '';
                 $self->{logger}->log(1, "-> GitHub $r_type version $r_major.$r_minor $suffix");
 
-                if ($local_version eq $remote_version) {
+                my $comparison = _compare_mediabot_versions(
+                    $local_version,
+                    $remote_version,
+                );
+
+                if (!defined $comparison) {
+                    $self->{logger}->log(1, "Unable to compare local and GitHub version formats.");
+                }
+                elsif ($comparison == 0) {
                     $self->{logger}->log(1, "Mediabot is up to date.");
-                } else {
+                }
+                elsif ($comparison < 0) {
                     $self->{logger}->log(1, "Update available: $r_type version $r_major.$r_minor $suffix");
+                }
+                else {
+                    $self->{logger}->log(1, "Local Mediabot build is newer than GitHub: $local_version > $remote_version");
                 }
             } else {
                 $self->{logger}->log(1, "Unknown remote version format: $remote_version");
@@ -1834,7 +2148,10 @@ sub getVersion {
         }
     }
 
-    $self->{main_prog_version} = $local_version;
+    # Never replace a valid cached runtime version with an error sentinel.
+    $self->{main_prog_version} = $local_version
+        if _usable_local_version($local_version);
+
     return ($local_version, $remote_version);
 }
 
@@ -1850,6 +2167,9 @@ sub getVersion_async {
     my ($self, $callback, %opts) = @_;
 
     return 0 unless ref($callback) eq 'CODE';
+
+    # Preserve the last known local identity across every worker failure path.
+    my $fallback_local = _cached_local_version($self);
 
     my $timeout = $opts{timeout};
     $timeout = 7
@@ -1867,8 +2187,10 @@ sub getVersion_async {
     # no usable event loop exists.
     unless ($loop && $loop->can('add') && $loop->can('remove')) {
         my ($local, $remote) = eval { getVersion($self) };
-        $local  = 'Undefined' unless defined($local)  && !ref($local)  && $local ne '';
-        $remote = 'Undefined' unless defined($remote) && !ref($remote) && $remote ne '';
+        $local  = _usable_local_version($local)
+            // _usable_local_version($fallback_local)
+            // 'Undefined';
+        $remote = _usable_local_version($remote) // 'Undefined';
         eval { $callback->($local, $remote); 1; };
         return 1;
     }
@@ -1876,7 +2198,7 @@ sub getVersion_async {
     my $child_pid = open(my $pipe, '-|');
 
     unless (defined $child_pid) {
-        eval { $callback->('Undefined', 'Undefined'); 1; };
+        eval { $callback->($fallback_local, 'Undefined'); 1; };
         return 1;
     }
 
@@ -1886,8 +2208,10 @@ sub getVersion_async {
         local $self->{logger} = bless {}, 'Mediabot::Helpers::_SilentLogger';
 
         my ($local, $remote) = eval { getVersion($self) };
-        $local  = 'Undefined' unless defined($local)  && !ref($local)  && $local ne '';
-        $remote = 'Undefined' unless defined($remote) && !ref($remote) && $remote ne '';
+        $local  = _usable_local_version($local)
+            // _usable_local_version($fallback_local)
+            // 'Undefined';
+        $remote = _usable_local_version($remote) // 'Undefined';
         $local  = substr($local,  0, 256);
         $remote = substr($remote, 0, 256);
 
@@ -1950,7 +2274,7 @@ sub getVersion_async {
         eval { $loop->remove($stream) } if $stream;
         eval { close $pipe };
 
-        my ($local, $remote) = ('Undefined', 'Undefined');
+        my ($local, $remote) = ($fallback_local, 'Undefined');
 
         unless ($state->{timed_out} || $state->{wait_failed}) {
             my $status = $state->{wait_status} // 0;
@@ -1961,16 +2285,13 @@ sub getVersion_async {
                 my $decoded = eval { decode_json($state->{output} // '') };
                 if (!$@ && ref($decoded) eq 'ARRAY' && @$decoded >= 2) {
                     my ($candidate_local, $candidate_remote) = @$decoded[0, 1];
-                    $local = $candidate_local
-                        if defined($candidate_local)
-                            && !ref($candidate_local)
-                            && $candidate_local ne ''
-                            && length($candidate_local) <= 256;
-                    $remote = $candidate_remote
-                        if defined($candidate_remote)
-                            && !ref($candidate_remote)
-                            && $candidate_remote ne ''
-                            && length($candidate_remote) <= 256;
+                    my $usable_local  = _usable_local_version($candidate_local);
+                    my $usable_remote = _usable_local_version($candidate_remote);
+
+                    $local = $usable_local
+                        if defined($usable_local) && length($usable_local) <= 256;
+                    $remote = $usable_remote
+                        if defined($usable_remote) && length($usable_remote) <= 256;
                 }
             }
         }
@@ -2104,16 +2425,15 @@ sub getVersion_async {
 sub getDetailedVersion {
     my ($self, $version_string) = @_;
 
-    # Expecting version format like: 3.0 or 3.0dev-20250614_192031
-    if ($version_string =~ /^(\d+)\.(\d+)$/) {
-        # Stable version
-        return ($1, $2, "stable", undef);
-    } elsif ($version_string =~ /^(\d+)\.(\d+)dev[-_]?([\d_]+)$/) {
-        # Dev version like 3.0dev-20250614_192031
-        return ($1, $2, "devel", $3);
-    } else {
-        return (undef, undef, undef, undef);
-    }
+    my $parts = _version_parts($version_string);
+    return (undef, undef, undef, undef) unless $parts;
+
+    return (
+        $parts->{major},
+        $parts->{minor},
+        $parts->{type},
+        $parts->{dev},
+    );
 }
 
 # Get the debug level from the configuration

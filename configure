@@ -73,6 +73,16 @@ need_cmd() {
 }
 
 install_perl_dependencies() {
+    # MB393: DBD::MariaDB is a compiled CPAN module used by the runtime DSN.
+    # If it is not already installed, require the Connector/C build metadata
+    # before any root-side CPAN work starts.
+    if ! perl -MDBD::MariaDB -e 'exit 0;' >/dev/null 2>&1; then
+        if ! command -v mariadb_config >/dev/null 2>&1 \
+            && ! command -v mysql_config >/dev/null 2>&1; then
+            fail "DBD::MariaDB must be built by CPAN; install the MariaDB client development files (Debian: libmariadb-dev), not a packaged Perl DBD driver"
+        fi
+    fi
+
     log "Installing required Perl modules with CPAN (this may take a while)"
     sudo "$INSTALL_DIR/cpan_install.sh"
 

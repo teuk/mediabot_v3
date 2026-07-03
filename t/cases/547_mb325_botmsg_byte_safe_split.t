@@ -61,18 +61,27 @@ return sub {
         File::Spec->catfile('.', 'Mediabot', 'Helpers.pm')
     );
 
+    my $sanitize_text = _extract_sub_547($src, '_sanitize_irc_text');
     my $sub_text = _extract_sub_547($src, '_split_text_for_irc');
+    $assert->ok(
+        defined $sanitize_text && $sanitize_text ne '',
+        '_sanitize_irc_text source extracted'
+    );
     $assert->ok(
         defined $sub_text && $sub_text ne '',
         '_split_text_for_irc source extrait'
     );
 
-    my $split;
-    {
-        no strict; no warnings;
-        $split = eval "package T547; use Encode qw(encode); $sub_text; \\&T547::_split_text_for_irc";
-    }
-    $assert->ok(ref($split) eq 'CODE', '_split_text_for_irc compilé en isolation');
+    my $compiled = eval qq{
+        package T547;
+        use Encode qw(encode);
+        $sanitize_text
+        $sub_text
+        1;
+    };
+    $assert->ok($compiled, '_split_text_for_irc compiled in isolation');
+    return unless $compiled;
+    my $split = \&T547::_split_text_for_irc;
 
     # --- 1. ASCII court : un seul chunk inchangé ---------------------------
     my @c = $split->('hello world', 400);

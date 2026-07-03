@@ -21,6 +21,7 @@ use Mediabot::Hailo;
 use Mediabot::Quotes;
 use Mediabot::LoginCommands;
 use Mediabot::Helpers;
+use Mediabot::ProcessLock;
 use Mediabot::ChannelCommands;
 use Mediabot::UserCommands;
 use Mediabot::External;
@@ -910,16 +911,46 @@ sub getPidFile {
 	return $self->{conf}->get('main.MAIN_PID_FILE');
 }
 
-# Write the current process ID to the PID file
+# MB390-B1: acquire and retain an advisory PID lock for the whole process
+# lifetime.  ProcessLock also recognises legacy live PID files that predate the
+# lock protocol.
+sub acquirePidFile {
+    my ($self) = @_;
+    return 1 if $self->{pid_file_lock};
+
+    my $lock = Mediabot::ProcessLock->new(
+        path => $self->getPidFile(),
+        pid  => $$,
+    );
+
+    unless ($lock->acquire()) {
+        my $error = $lock->error() // 'unknown PID lock error';
+        $self->{logger}->log(0, "Failed to acquire PID file: $error");
+        return 0;
+    }
+
+    $self->{pid_file_lock} = $lock;
+    return 1;
+}
+
+# Historical public name retained for callers outside the main program.
 sub writePidFile {
     my ($self) = @_;
-    my $pidfile = $self->getPidFile();
-    open my $fh, '>', $pidfile or do {
-        $self->{logger}->log(0, "Failed to write PID file '$pidfile': $!");
+    return $self->acquirePidFile();
+}
+
+sub releasePidFile {
+    my ($self) = @_;
+    my $lock = delete $self->{pid_file_lock};
+    return 1 unless $lock;
+
+    unless ($lock->release()) {
+        my $error = $lock->error() // 'unknown PID release error';
+        $self->{logger}->log(1, "Failed to release PID file: $error")
+            if $self->{logger};
         return 0;
-    };
-    print $fh $$;
-    close $fh;
+    }
+
     return 1;
 }
 
@@ -1066,6 +1097,13 @@ sub clean_and_exit {
                 eval { $dbh->disconnect(); 1 };
             }
         }
+        1;
+    };
+
+    # --- MB390-B1: release the process-lifetime PID lock and remove only
+    # the PID file still owned by this process. ---
+    eval {
+        $self->releasePidFile() if $self->can('releasePidFile');
         1;
     };
 
@@ -1998,13 +2036,10 @@ sub mbCommandPublic {
 sub mbUptime_ctx {
     my ($ctx) = @_;
     my $self    = $ctx->bot;
-    my $channel = $ctx->channel;
-
-    my $start = eval { $self->{metrics}->{started} }
-             // eval { $self->{conf}->get('main.MAIN_PROG_BIRTHDATE') }
-             // 0;
+    my $start = getProcessStartTimestamp($self);
 
     my $uptime_secs = time() - $start;
+    $uptime_secs = 0 if $uptime_secs < 0;
     my $d = int($uptime_secs / 86400);
     my $h = int(($uptime_secs % 86400) / 3600);
     my $m = int(($uptime_secs % 3600) / 60);
@@ -2041,8 +2076,9 @@ sub mbUptime_ctx {
     # LL1: compute since string before botPrivmsg
     my @_st = localtime($start);
     my $since_str = sprintf(' (since %02d:%02d)', $_st[2], $_st[1]);
-    botPrivmsg($self, $channel,
-        "$nick: up $uptime_str$since_str | RAM $mem_str | load $load_str$claude_str");
+    $ctx->reply(
+        "$nick: up $uptime_str$since_str | RAM $mem_str | load $load_str$claude_str"
+    );
 }
 
 sub _mbHelpInternalCommands {
@@ -2420,51 +2456,7 @@ sub _mbHelpBuildChunkedList {
 
 sub _mbHelpSendNoticeQueue {
     my ($self, $nick, @lines) = @_;
-
-    return 1 unless @lines;
-
-    my $loop = $self->{loop};
-    my $delay_step = 1.5;   # gentle enough for Undernet notices
-    my $max_lines = 14;     # safety guard for accidental huge help output
-
-    if (@lines > $max_lines) {
-        @lines = (@lines[0 .. $max_lines - 1], "... output truncated, use help search <term> or help <command>");
-    }
-
-    unless ($loop) {
-        botNotice($self, $nick, $_) for @lines;
-        return 1;
-    }
-
-    $self->{_mb_help_notice_timers} ||= [];
-
-    for my $i (0 .. $#lines) {
-        my $line = $lines[$i];
-
-        my $timer;
-        $timer = IO::Async::Timer::Countdown->new(
-            delay => $i * $delay_step,
-            on_expire => sub {
-                botNotice($self, $nick, $line);
-                eval { $loop->remove($timer) };
-                # mb326-B1: rompre le cycle de référence closure<->timer. Sans ce
-                # undef, la closure on_expire capture $timer et $timer détient la
-                # closure : refcount jamais nul même après loop->remove et splice
-                # du tableau de suivi -> un objet timer fuit par ligne de help.
-                undef $timer;
-            },
-        );
-
-        push @{ $self->{_mb_help_notice_timers} }, $timer;
-        $loop->add($timer);
-        $timer->start;
-    }
-
-    if (@{ $self->{_mb_help_notice_timers} } > 100) {
-        splice @{ $self->{_mb_help_notice_timers} }, 0, @{ $self->{_mb_help_notice_timers} } - 50;
-    }
-
-    return 1;
+    return queueBotNotices($self, $nick, @lines);
 }
 
 sub _mbHelpSendSearchResults {
@@ -2798,7 +2790,7 @@ sub mbHelp_ctx {
         return _mbHelpSendLevelResults($ctx, $level_query);
     }
 
-    if ($first ne '' && $first !~ /^#/) {
+    if ($first ne '' && !isIrcChannelTarget($first)) {
         my $cmd = lc $first;
         my %internal = _mbHelpInternalCommands();
 
@@ -2819,7 +2811,7 @@ sub mbHelp_ctx {
 
     my $channel = $ctx->channel // '';
 
-    if ($first !~ /^#/ && $channel !~ /^#/) {
+    if (!isIrcChannelTarget($first) && !isIrcChannelTarget($channel)) {
         botNotice($self, $nick, "Syntax: help #channel");
         botNotice($self, $nick, "You can also use: help docs");
         botNotice($self, $nick, "For a specific internal command: help <command>");

@@ -28,10 +28,12 @@ my $case = sub {
         'botPrivmsg uses shared channel target detection');
     $assert->($action_block =~ /if \(_is_irc_channel_target\(\$sTo\)\) \{/,
         'botAction uses shared channel target detection');
-    $assert->($notice_block =~ /_is_irc_channel_target\(\$target\)\s*\?\s*\$chunk\s*:\s*_redact_irc_service_secret_for_log\(\$chunk\)/s,
+    $assert->($notice_block =~ /my \$is_channel_target = _is_irc_channel_target\(\$target\)/,
+        'botNotice caches shared channel target detection');
+    $assert->($notice_block =~ /my \$safe_log_text = \$is_channel_target\s*\?\s*\$text\s*:\s*_redact_irc_service_secret_for_log\(\$text\)/s,
         'botNotice uses shared channel target detection for private redaction');
-    $assert->($notice_block =~ /if \(_is_irc_channel_target\(\$target\)\) \{/,
-        'botNotice uses shared channel target detection for action log');
+    $assert->($notice_block =~ /if \(\$is_channel_target\) \{/,
+        'botNotice uses cached channel target detection for action log');
 
     $assert->($privmsg_block !~ /if \(\$sTo =~ \/\^#\//,
         'botPrivmsg old # only detection is gone');

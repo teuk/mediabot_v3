@@ -41,7 +41,7 @@ return sub {
     # 1. mediabot.pl must use the shared parser module
     # -------------------------------------------------------------------------
     my $has_import = ($src =~ /use\s+Mediabot::DCC\s+qw\([^)]*\bparse_ctcp_payload\b[^)]*\);/) ? 1 : 0;
-    my $has_parse_call = ($src =~ /my\s+\$dcc_parse\s*=\s*parse_ctcp_payload\(\$what\);/) ? 1 : 0;
+    my $has_parse_call = ($src =~ /my\s+\$(?:dcc_parse|private_parse)\s*=\s*parse_ctcp_payload\(\$what\);/) ? 1 : 0;
     my $has_ctcp_log = ($src =~ /CTCP CHAT request from \$who via Mediabot::DCC parser/) ? 1 : 0;
     my $has_dcc_log = ($src =~ /DCC CHAT request from \$who via Mediabot::DCC parser ip=\$ip_int port=\$port/) ? 1 : 0;
 
@@ -82,7 +82,7 @@ return sub {
         'on_message_ctcp_DCC logs Mediabot::DCC parser path');
 
     $assert->is($has_dcc_debug_hints, 1,
-        'CTCP DCC raw debug is gated by DCC_DEBUG_HINTS');
+        'CTCP DCC diagnostics are gated by DCC_DEBUG_HINTS');
 
     # -------------------------------------------------------------------------
     # 2. Parser module path must run before private command logging.

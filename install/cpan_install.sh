@@ -44,6 +44,7 @@ PERL_MODULES=(
   "Config::Simple"
   "Date::Parse"
   "DBI"
+  "DBD::MariaDB"
   "Switch"
   "Memory::Usage"
   "String::IRC"
@@ -111,6 +112,22 @@ fi
 if ! command -v cpan >/dev/null 2>&1; then
     echo "The CPAN client is required but was not found in PATH." >&2
     exit 1
+fi
+
+# MB393: the runtime DSN is DBI:MariaDB, so a fresh CPAN-only installation
+# must be able to build DBD::MariaDB instead of silently relying on a Debian
+# Perl package.  The module needs the MariaDB/MySQL client development tool.
+if ! perl -MDBD::MariaDB -e 'exit 0;' >/dev/null 2>&1; then
+    if ! command -v mariadb_config >/dev/null 2>&1 \
+        && ! command -v mysql_config >/dev/null 2>&1; then
+        cat >&2 <<'EOF'
+DBD::MariaDB is required by the Mediabot runtime but is not installed.
+CPAN needs MariaDB/MySQL client development headers to build it.
+On Debian, install the non-Perl build dependency libmariadb-dev, then rerun configure.
+Do not install libdbd-mariadb-perl as a replacement for the CPAN phase.
+EOF
+        exit 1
+    fi
 fi
 
 # Keep build logs private even though module installation itself uses umask 022.

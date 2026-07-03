@@ -1,7 +1,7 @@
 # t/live/01_connect.t
 # =============================================================================
 #  Connexion et identité du bot
-#  Vérifie : JOIN effectif, nick exact via WHOIS, version contient "3.0"
+#  Vérifie : JOIN effectif, nick exact via WHOIS, identité de version locale
 # =============================================================================
 
 return sub {
@@ -15,8 +15,8 @@ return sub {
     my $r = $wait_reply->(qr/311 \Q$spynick\E \Q$botnick\E/i, 15);
     $assert->ok(defined $r, "WHOIS confirme le nick exact '$botnick'");
 
-    # 2. !version → PRIVMSG sur le canal contenant "3.0"
+    # 2. !version → PRIVMSG immédiat contenant une identité de version
     $send_cmd->('version');
     $r = $wait_reply->(qr/PRIVMSG \Q$channel\E .*(?:Mediabot|3\.)/i, 15);
-    $assert->ok(defined $r, "${cmdchar}version → PRIVMSG canal contenant '3.0'");
+    $assert->ok(defined $r, "${cmdchar}version → PRIVMSG canal contenant une version");
 };

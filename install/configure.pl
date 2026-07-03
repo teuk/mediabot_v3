@@ -161,9 +161,8 @@ sub cfg {
 
 sub resolve_driver {
     my %available = map { $_ => 1 } DBI->available_drivers(0);
-    return 'mysql' if $available{mysql};
     return 'MariaDB' if $available{MariaDB};
-    die "Neither DBD::mysql nor DBD::MariaDB is installed\n";
+    die "DBD::MariaDB is required by the Mediabot runtime; run ./configure without --skip-cpan\n";
 }
 
 sub dbConnect {

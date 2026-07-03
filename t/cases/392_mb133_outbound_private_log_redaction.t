@@ -81,8 +81,17 @@ my $case = sub {
         'botAction private log uses shared helper');
 
     my $bot_notice_block = ($src =~ /sub botNotice \{(.*?)sub joinChannel \{/s) ? $1 : '';
-    $assert->($bot_notice_block =~ /_redact_irc_service_secret_for_log\(\$chunk\)/,
-        'botNotice private log uses shared helper');
+    $assert->($bot_notice_block =~ /my \$safe_log_text = \$is_channel_target\s*\? \$text\s*:\s*_redact_irc_service_secret_for_log\(\$text\)/s,
+        'botNotice redacts the complete private message before logging');
+
+    $assert->($bot_notice_block =~ /text='\$safe_log_text'/,
+        'botNotice debug log uses the redacted private copy');
+
+    $assert->($bot_notice_block !~ /text='\$text'/,
+        'botNotice debug log no longer prints the raw private text');
+
+    $assert->($bot_notice_block =~ /\@private_log_chunks = _split_text_for_irc\(\$safe_log_text, 400\)/,
+        'botNotice splits the already-redacted private log copy');
 
     $assert->($bot_notice_block =~ /logBotAction\(\$self, undef, "notice", \$self->\{irc\}->nick_folded, \$target, \$chunk\)/,
         'channel NOTICE action log still uses original chunk');
