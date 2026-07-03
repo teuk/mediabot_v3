@@ -112,19 +112,19 @@ return sub {
 
     $assert->like(
         $sync // '',
-        qr/_trivia_parse_api_content\(\$response->\{content\}\)/,
-        'remote JSON is validated before it leaves the worker'
+        qr/_trivia_parse_api_content\(\s*\$content,\s*\\%meta\s*,?\s*\)/s,
+        'remote JSON is validated and API metadata is preserved before it leaves the worker'
     );
 
     $assert->like(
         $async // '',
-        qr/open\(my\s+\$pipe,\s*'-\|'\)/,
-        'blocking trivia work runs in a child process'
+        qr/my\s+\(\s*\$pipe,\s*\$child_write\s*\)\s*;\s*unless\s*\(\s*pipe\(\$pipe,\s*\$child_write\)\s*\).*?my\s+\$child_pid\s*=\s*fork\(\)/s,
+        'blocking trivia work runs in an ordinary pipe/fork child process'
     );
 
     $assert->like(
         $async // '',
-        qr/_trivia_fetch_sync\(\$category_id,\s*\$difficulty\)/,
+        qr/_trivia_fetch_sync\(\s*\$category_id,\s*\$difficulty,.*?progress_cb\s*=>/s,
         'child reuses the guarded synchronous request implementation'
     );
 
@@ -143,13 +143,19 @@ return sub {
     $assert->like(
         $async // '',
         qr/IO::Async::Timer::Countdown->new/,
-        'timeout and child reaping use asynchronous timers'
+        'worker timeout and kill escalation use asynchronous timers'
     );
 
     $assert->like(
         $async // '',
-        qr/waitpid\(\$child_pid,\s*POSIX::WNOHANG\(\)\)/,
-        'trivia worker is reaped non-blockingly'
+        qr/\$loop->watch_process\(\s*\$child_pid/s,
+        'trivia worker is registered with IO::Async process watching'
+    );
+
+    $assert->like(
+        $async // '',
+        qr/my \(\$pid, \$wait_status\) = \@_/,
+        'process watcher receives the child wait status'
     );
 
     $assert->like(
@@ -176,10 +182,18 @@ return sub {
         'async trivia helper contains no blocking select delay'
     );
 
+    my $async_code = $async // '';
+    $async_code =~ s/#.*$//mg;
+    $assert->unlike(
+        $async_code,
+        qr/\bwaitpid\s*\(/,
+        'async trivia helper contains no manual waitpid race'
+    );
+
     $assert->unlike(
         $async // '',
-        qr/waitpid\s*\(\s*\$child_pid\s*,\s*0\s*\)/,
-        'async trivia helper contains no blocking waitpid'
+        qr/POSIX::WNOHANG/,
+        'async trivia helper no longer polls child state manually'
     );
 
     $assert->like(

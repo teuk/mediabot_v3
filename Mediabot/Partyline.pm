@@ -121,7 +121,7 @@ sub _runtime_status_payload {
     # Bot nick + uptime
     my $bot      = $self->{bot};
     my $bot_nick = eval { $bot->{irc}->nick_folded } // '?';
-    my $start    = eval { $bot->{metrics}->{started} }
+    my $start    = eval { $bot->{metrics} ? $bot->{metrics}->{started} : undef }  # mb384-B1: pas d'autoviv
                 // eval { $bot->{conf}->get('main.MAIN_PROG_BIRTHDATE') }
                 // 0;
     my $uptime_secs = time() - $start;

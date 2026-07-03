@@ -511,7 +511,7 @@ $scheduler->add(
     name      => 'health_check',
     interval  => 21600,  # W6: every 6 hours
     cb        => sub {
-        my $uptime = time() - ($mediabot->{metrics}->{started} // time());
+        my $uptime = time() - (($mediabot->{metrics} ? $mediabot->{metrics}->{started} : undef) // time());  # mb384-B1: pas d'autoviv
         my $d = int($uptime/86400); my $h = int(($uptime%86400)/3600);
         my $m = int(($uptime%3600)/60);
         my $uptime_str = "${d}d ${h}h ${m}m";

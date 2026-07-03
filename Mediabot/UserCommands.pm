@@ -6677,6 +6677,8 @@ sub _define_lookup_async {
         on_read     => sub {
             my ($io, $buffref, $eof) = @_;
 
+            return 0 if $state->{finalized};
+
             if (length $$buffref) {
                 my $remaining = 4096 - length($state->{output});
                 $state->{output} .= substr($$buffref, 0, $remaining)
@@ -6742,51 +6744,94 @@ sub mbDefine_ctx {
 # This pure helper keeps malformed remote data away from the live game state.
 # ---------------------------------------------------------------------------
 sub _trivia_parse_api_content {
-    my ($content) = @_;
+    my ($content, $meta) = @_;
 
-    return unless defined($content) && !ref($content);
-    return if length($content) == 0 || length($content) > 64 * 1024;
+    $meta = undef unless ref($meta) eq 'HASH';
+
+    unless (defined($content) && !ref($content)) {
+        $meta->{error} = 'content_type' if $meta;
+        return;
+    }
+
+    if (length($content) == 0 || length($content) > 64 * 1024) {
+        $meta->{error} = 'content_size' if $meta;
+        return;
+    }
 
     require JSON::PP;
     my $data = eval { JSON::PP::decode_json($content) };
-    return if $@ || ref($data) ne 'HASH';
+    if ($@ || ref($data) ne 'HASH') {
+        $meta->{error} = 'json' if $meta;
+        return;
+    }
 
-    return if defined($data->{response_code})
-        && (!defined($data->{response_code})
-            || ref($data->{response_code})
-            || $data->{response_code} !~ /\A\d+\z/
-            || int($data->{response_code}) != 0);
+    if (exists $data->{response_code}) {
+        my $response_code = $data->{response_code};
+
+        unless (defined($response_code)
+                && !ref($response_code)
+                && $response_code =~ /\A\d+\z/) {
+            $meta->{error} = 'response_code' if $meta;
+            return;
+        }
+
+        $response_code = int($response_code);
+        $meta->{response_code} = $response_code if $meta;
+
+        if ($response_code != 0) {
+            $meta->{error} = 'api_response' if $meta;
+            return;
+        }
+    }
 
     my $results = $data->{results};
-    return unless ref($results) eq 'ARRAY' && @$results;
+    unless (ref($results) eq 'ARRAY' && @$results) {
+        $meta->{error} = 'results' if $meta;
+        return;
+    }
 
     my $question = $results->[0];
-    return unless ref($question) eq 'HASH';
+    unless (ref($question) eq 'HASH') {
+        $meta->{error} = 'question_type' if $meta;
+        return;
+    }
 
     my $question_text = $question->{question};
     my $correct       = $question->{correct_answer};
     my $incorrect     = $question->{incorrect_answers};
 
-    return unless defined($question_text)
-        && !ref($question_text)
-        && $question_text ne ''
-        && length($question_text) <= 2048;
+    unless (defined($question_text)
+            && !ref($question_text)
+            && $question_text ne ''
+            && length($question_text) <= 2048) {
+        $meta->{error} = 'question_text' if $meta;
+        return;
+    }
 
-    return unless defined($correct)
-        && !ref($correct)
-        && $correct ne ''
-        && length($correct) <= 512;
+    unless (defined($correct)
+            && !ref($correct)
+            && $correct ne ''
+            && length($correct) <= 512) {
+        $meta->{error} = 'correct_answer' if $meta;
+        return;
+    }
 
-    return unless ref($incorrect) eq 'ARRAY'
-        && @$incorrect >= 1
-        && @$incorrect <= 10;
+    unless (ref($incorrect) eq 'ARRAY'
+            && @$incorrect >= 1
+            && @$incorrect <= 10) {
+        $meta->{error} = 'incorrect_answers' if $meta;
+        return;
+    }
 
     my @wrong;
     for my $answer (@$incorrect) {
-        return unless defined($answer)
-            && !ref($answer)
-            && $answer ne ''
-            && length($answer) <= 512;
+        unless (defined($answer)
+                && !ref($answer)
+                && $answer ne ''
+                && length($answer) <= 512) {
+            $meta->{error} = 'incorrect_answer' if $meta;
+            return;
+        }
         push @wrong, $answer;
     }
 
@@ -6803,6 +6848,8 @@ sub _trivia_parse_api_content {
             && !ref($difficulty)
             && $difficulty =~ /\A(?:easy|medium|hard)\z/i;
 
+    delete $meta->{error} if $meta;
+
     return {
         question          => $question_text,
         correct_answer    => $correct,
@@ -6812,11 +6859,46 @@ sub _trivia_parse_api_content {
     };
 }
 
-# Perform the existing Open Trivia DB request synchronously. Runtime IRC
-# commands call it only from _trivia_fetch_async(); keeping the network work in
-# one small helper also gives lightweight callers a controlled fallback.
+# Perform the Open Trivia DB request synchronously. Runtime IRC commands call
+# it only from _trivia_fetch_async(), so the bounded retry below runs in the
+# forked worker and never blocks the IRC event loop.
 sub _trivia_fetch_sync {
-    my ($category_id, $difficulty) = @_;
+    my ($category_id, $difficulty, %opts) = @_;
+
+    require Time::HiRes;
+
+    my $started_at = Time::HiRes::time();
+    my $elapsed_ms = sub {
+        return int((Time::HiRes::time() - $started_at) * 1000 + 0.5);
+    };
+    my $clean_detail = sub {
+        my ($value, $limit) = @_;
+        $limit ||= 240;
+        return '' unless defined($value) && !ref($value);
+        $value =~ s/[\r\n\0]+/ /g;
+        $value =~ s/\s{2,}/ /g;
+        $value =~ s/^\s+|\s+$//g;
+        return substr($value, 0, $limit);
+    };
+    my $progress_cb = ref($opts{progress_cb}) eq 'CODE'
+        ? $opts{progress_cb}
+        : undef;
+    my $progress = sub {
+        my ($stage, %fields) = @_;
+        return unless $progress_cb;
+        return unless defined($stage) && !ref($stage)
+            && $stage =~ /\A[a-z_]+\z/;
+        my %event = (
+            stage      => $stage,
+            elapsed_ms => $elapsed_ms->(),
+        );
+        for my $field (keys %fields) {
+            my $value = $fields{$field};
+            next unless defined($value) && !ref($value);
+            $event{$field} = $value;
+        }
+        eval { $progress_cb->(\%event); 1; };
+    };
 
     $category_id = undef
         unless defined($category_id)
@@ -6834,53 +6916,341 @@ sub _trivia_fetch_sync {
     $url .= '&category=' . int($category_id) if defined $category_id;
     $url .= '&difficulty=' . lc($difficulty) if defined $difficulty;
 
-    my $http = Mediabot::External::_make_http(
-        timeout    => 8,
-        verify_SSL => 1,
-        max_size   => 64 * 1024,
-    );
+    my $hard_timeout = $opts{hard_timeout};
+    $hard_timeout = 7
+        unless defined($hard_timeout)
+            && !ref($hard_timeout)
+            && $hard_timeout =~ /\A\d+(?:\.\d+)?\z/;
+    $hard_timeout = 0.1 if $hard_timeout < 0.1;
+    $hard_timeout = 12  if $hard_timeout > 12;
 
-    my $response = eval {
-        $http->get($url, {
-            headers => {
-                Accept => 'application/json',
-            },
-        });
-    };
+    my $http = $opts{http};
+    unless ($http && ref($http) && $http->can('get')) {
+        $progress->('http_client_start');
+        my $made = eval {
+            Mediabot::External::_make_http(
+                timeout    => 8,
+                verify_SSL => 1,
+                max_size   => 64 * 1024,
+            );
+        };
+
+        if ($@ || !$made || !ref($made) || !$made->can('get')) {
+            $progress->('http_client_failed');
+            return {
+                ok         => 0,
+                error      => 'http_setup',
+                stage      => 'http_client',
+                detail     => $clean_detail->($@ || 'HTTP client creation failed'),
+                elapsed_ms => $elapsed_ms->(),
+            };
+        }
+
+        $http = $made;
+        $progress->('http_client_ready');
+    }
+    else {
+        $progress->('http_client_injected');
+    }
+
+    my $sleep_cb = ref($opts{sleep_cb}) eq 'CODE'
+        ? $opts{sleep_cb}
+        : sub {
+            my ($seconds) = @_;
+            Time::HiRes::sleep($seconds);
+        };
+
+    my $max_attempts = $opts{max_attempts};
+    $max_attempts = 2
+        unless defined($max_attempts)
+            && !ref($max_attempts)
+            && $max_attempts =~ /\A\d+\z/;
+    $max_attempts = 1 if $max_attempts < 1;
+    $max_attempts = 2 if $max_attempts > 2;
+
+    ATTEMPT:
+    for my $attempt (1 .. $max_attempts) {
+        my $attempt_started = Time::HiRes::time();
+        my ($response, $request_error);
+        my $alarm_marker = '__MEDIABOT_TRIVIA_HTTP_DEADLINE__';
+
+        $progress->('http_get_start', attempt => $attempt);
+
+        {
+            local $@;
+            local $SIG{ALRM} = sub { die "$alarm_marker\n" };
+            Time::HiRes::alarm($hard_timeout);
+            $response = eval {
+                $http->get($url, {
+                    headers => {
+                        Accept => 'application/json',
+                    },
+                });
+            };
+            $request_error = $@;
+            Time::HiRes::alarm(0);
+        }
+
+        my $attempt_elapsed_ms = int(
+            (Time::HiRes::time() - $attempt_started) * 1000 + 0.5
+        );
+
+        if (defined($request_error) && $request_error ne '') {
+            if ($request_error =~ /\Q$alarm_marker\E/) {
+                $progress->(
+                    'http_get_timeout',
+                    attempt            => $attempt,
+                    attempt_elapsed_ms => $attempt_elapsed_ms,
+                );
+                return {
+                    ok                 => 0,
+                    error              => 'http_timeout',
+                    stage              => 'http_get',
+                    attempts           => $attempt,
+                    detail             => 'hard request deadline exceeded',
+                    attempt_elapsed_ms => $attempt_elapsed_ms,
+                    elapsed_ms         => $elapsed_ms->(),
+                };
+            }
+
+            $progress->(
+                'http_get_exception',
+                attempt            => $attempt,
+                attempt_elapsed_ms => $attempt_elapsed_ms,
+            );
+            return {
+                ok                 => 0,
+                error              => 'http_exception',
+                stage              => 'http_get',
+                attempts           => $attempt,
+                detail             => $clean_detail->($request_error),
+                attempt_elapsed_ms => $attempt_elapsed_ms,
+                elapsed_ms         => $elapsed_ms->(),
+            };
+        }
+
+        my $status = ref($response) eq 'HASH'
+            && defined($response->{status})
+            && !ref($response->{status})
+            && $response->{status} =~ /\A\d+\z/
+                ? int($response->{status})
+                : undef;
+
+        my $headers = ref($response) eq 'HASH'
+            && ref($response->{headers}) eq 'HASH'
+                ? $response->{headers}
+                : {};
+        my $content_type = $clean_detail->(
+            $headers->{'content-type'} // $headers->{'Content-Type'} // '',
+            120,
+        );
+        my $content = ref($response) eq 'HASH'
+            && defined($response->{content})
+            && !ref($response->{content})
+                ? $response->{content}
+                : '';
+        my $content_bytes = length($content);
+        my $http_rate_limited = defined($status) && $status == 429;
+
+        $progress->(
+            'http_get_done',
+            attempt            => $attempt,
+            status             => (defined($status) ? $status : 0),
+            success            => (ref($response) eq 'HASH' && $response->{success}) ? 1 : 0,
+            content_bytes      => $content_bytes,
+            attempt_elapsed_ms => $attempt_elapsed_ms,
+        );
+
+        unless (ref($response) eq 'HASH' && $response->{success}) {
+            if ($http_rate_limited && $attempt < $max_attempts) {
+                my $delay = exists($opts{retry_delay})
+                    ? $opts{retry_delay}
+                    : 5.25 + rand(0.75);
+                $delay = 5.25
+                    unless defined($delay)
+                        && !ref($delay)
+                        && $delay =~ /\A\d+(?:\.\d+)?\z/
+                        && $delay >= 5.1
+                        && $delay <= 8;
+
+                $progress->(
+                    'rate_limit_wait_start',
+                    attempt => $attempt,
+                    status  => $status,
+                    delay_ms => int($delay * 1000 + 0.5),
+                );
+                my $slept = eval { $sleep_cb->($delay); 1; };
+                return {
+                    ok                 => 0,
+                    error              => 'retry_wait',
+                    stage              => 'rate_limit_wait',
+                    attempts           => $attempt,
+                    status             => $status,
+                    content_type       => $content_type,
+                    content_bytes      => $content_bytes,
+                    attempt_elapsed_ms => $attempt_elapsed_ms,
+                    elapsed_ms         => $elapsed_ms->(),
+                    detail             => $clean_detail->($@ || 'retry wait failed'),
+                } unless $slept;
+
+                $progress->('rate_limit_wait_done', attempt => $attempt);
+                next ATTEMPT;
+            }
+
+            my $reason = ref($response) eq 'HASH'
+                ? $clean_detail->($response->{reason}, 160)
+                : '';
+
+            return {
+                ok                 => 0,
+                error              => $http_rate_limited ? 'rate_limit' : 'http',
+                stage              => 'http_response',
+                attempts           => $attempt,
+                status             => $status,
+                reason             => $reason,
+                content_type       => $content_type,
+                content_bytes      => $content_bytes,
+                attempt_elapsed_ms => $attempt_elapsed_ms,
+                elapsed_ms         => $elapsed_ms->(),
+            };
+        }
+
+        $progress->('api_parse_start', attempt => $attempt);
+        my %meta;
+        my $question = _trivia_parse_api_content(
+            $content,
+            \%meta,
+        );
+
+        if (ref($question) eq 'HASH') {
+            $progress->('api_parse_ok', attempt => $attempt);
+            return {
+                ok                 => 1,
+                question           => $question,
+                attempts           => $attempt,
+                status             => $status,
+                content_type       => $content_type,
+                content_bytes      => $content_bytes,
+                attempt_elapsed_ms => $attempt_elapsed_ms,
+                elapsed_ms         => $elapsed_ms->(),
+            };
+        }
+
+        my $response_code = $meta{response_code};
+        my $api_rate_limited = defined($response_code)
+            && $response_code == 5;
+
+        $progress->(
+            'api_parse_failed',
+            attempt       => $attempt,
+            response_code => (defined($response_code) ? $response_code : -1),
+            parse_error   => ($meta{error} // 'unknown'),
+        );
+
+        if ($api_rate_limited && $attempt < $max_attempts) {
+            # Open Trivia DB limits one request per public IP every five
+            # seconds. Separate Mediabot instances on the same host can race,
+            # so retry once with a small jitter inside this forked worker.
+            my $delay = exists($opts{retry_delay})
+                ? $opts{retry_delay}
+                : 5.25 + rand(0.75);
+            $delay = 5.25
+                unless defined($delay)
+                    && !ref($delay)
+                    && $delay =~ /\A\d+(?:\.\d+)?\z/
+                    && $delay >= 5.1
+                    && $delay <= 8;
+
+            $progress->(
+                'rate_limit_wait_start',
+                attempt       => $attempt,
+                response_code => $response_code,
+                delay_ms      => int($delay * 1000 + 0.5),
+            );
+            my $slept = eval { $sleep_cb->($delay); 1; };
+            return {
+                ok                 => 0,
+                error              => 'retry_wait',
+                stage              => 'rate_limit_wait',
+                attempts           => $attempt,
+                status             => $status,
+                response_code      => $response_code,
+                parse_error        => $meta{error},
+                content_type       => $content_type,
+                content_bytes      => $content_bytes,
+                attempt_elapsed_ms => $attempt_elapsed_ms,
+                elapsed_ms         => $elapsed_ms->(),
+                detail             => $clean_detail->($@ || 'retry wait failed'),
+            } unless $slept;
+
+            $progress->('rate_limit_wait_done', attempt => $attempt);
+            next ATTEMPT;
+        }
+
+        return {
+            ok                 => 0,
+            error              => $api_rate_limited ? 'rate_limit' : 'response',
+            stage              => 'api_parse',
+            attempts           => $attempt,
+            status             => $status,
+            response_code      => $response_code,
+            parse_error        => $meta{error},
+            content_type       => $content_type,
+            content_bytes      => $content_bytes,
+            attempt_elapsed_ms => $attempt_elapsed_ms,
+            elapsed_ms         => $elapsed_ms->(),
+        };
+    }
 
     return {
-        ok    => 0,
-        error => 'fetch',
-    } unless ref($response) eq 'HASH' && $response->{success};
-
-    my $question = _trivia_parse_api_content($response->{content});
-
-    return {
-        ok    => 0,
-        error => 'response',
-    } unless ref($question) eq 'HASH';
-
-    return {
-        ok       => 1,
-        question => $question,
+        ok         => 0,
+        error      => 'fetch',
+        stage      => 'attempt_loop',
+        elapsed_ms => $elapsed_ms->(),
     };
 }
 
 # MB319: Open Trivia DB HTTP and DNS work must not run in the IRC event loop.
 # Execute the synchronous request in a forked child and consume its bounded JSON
-# result through IO::Async.
+# result through IO::Async. MB394 extends the child budget for one rate-limit
+# retry. MB395 registers the worker with watch_process(), because IO::Async owns
+# SIGCHLD collection; manual waitpid polling can race the loop and discard a
+# successful child as a detail-free fetch failure.
 sub _trivia_fetch_async {
     my ($self, $category_id, $difficulty, $callback, %opts) = @_;
 
     return 0 unless ref($callback) eq 'CODE';
 
+    require Time::HiRes;
+
     my $timeout = $opts{timeout};
-    $timeout = 10
+    # The child has a seven-second hard wall around each HTTP attempt and may
+    # wait once for the Open Trivia DB IP window. Keep the outer worker budget
+    # larger, while still guaranteeing a callback when child notification fails.
+    $timeout = 24
         unless defined($timeout)
             && !ref($timeout)
             && $timeout =~ /\A\d+(?:\.\d+)?\z/;
     $timeout = 0.1 if $timeout < 0.1;
-    $timeout = 20  if $timeout > 20;
+    $timeout = 30  if $timeout > 30;
+
+    my $debug_label = defined($opts{debug_label})
+        && !ref($opts{debug_label})
+            ? $opts{debug_label}
+            : '';
+    $debug_label =~ s/[\r\n\0]+/ /g;
+    $debug_label =~ s/\s{2,}/ /g;
+    $debug_label = substr($debug_label, 0, 240);
+
+    my $debug_log = sub {
+        my ($level, $message) = @_;
+        return unless $self && ref($self) && $self->{logger};
+        $message = '' unless defined($message) && !ref($message);
+        $message =~ s/[\r\n\0]+/ /g;
+        $message =~ s/\s{2,}/ /g;
+        $message = substr($message, 0, 1000);
+        $self->{logger}->log($level, "trivia worker $message");
+    };
 
     my $loop = eval { $self->getLoop };
     $loop ||= $self->{loop} if ref($self);
@@ -6888,15 +7258,43 @@ sub _trivia_fetch_async {
     my $fallback = {
         ok    => 0,
         error => 'fetch',
+        stage => 'async_fallback',
     };
 
     # Compatibility path for lightweight tests or emergency callers without a
     # usable event loop. Normal runtime always uses the forked child.
     unless ($loop && $loop->can('add') && $loop->can('remove')) {
+        $debug_log->(2, "sync fallback label=$debug_label reason=no_event_loop");
         my $result = eval {
             _trivia_fetch_sync($category_id, $difficulty);
         };
+        if ($@) {
+            my $error = $@;
+            $error =~ s/[\r\n\0]+/ /g;
+            $error =~ s/\s{2,}/ /g;
+            $result = {
+                ok     => 0,
+                error  => 'worker_exception',
+                stage  => 'sync_fallback',
+                detail => substr($error, 0, 240),
+            };
+        }
         $result = $fallback unless ref($result) eq 'HASH';
+        eval { $callback->($result); 1; };
+        return 1;
+    }
+
+    # IO::Async owns SIGCHLD/process collection. Use an ordinary pipe plus fork
+    # and register that PID explicitly. A magic open '-|' filehandle can reap
+    # its child while being closed at EOF, racing the IO::Async process watcher.
+    unless ($loop->can('watch_process')) {
+        my $result = {
+            ok     => 0,
+            error  => 'worker_setup',
+            stage  => 'process_watch',
+            detail => 'IO::Async loop does not support watch_process',
+        };
+        $debug_log->(1, "setup failed label=$debug_label detail=$result->{detail}");
         eval { $callback->($result); 1; };
         return 1;
     }
@@ -6904,59 +7302,166 @@ sub _trivia_fetch_async {
     require IO::Async::Stream;
     require IO::Async::Timer::Countdown;
     require JSON::PP;
+    require POSIX;
 
-    my $child_pid = open(my $pipe, '-|');
+    my $worker_started = Time::HiRes::time();
+    $debug_log->(
+        3,
+        sprintf(
+            'start label=%s category=%s difficulty=%s timeout=%.1fs',
+            ($debug_label ne '' ? $debug_label : '-'),
+            (defined($category_id) ? $category_id : 'any'),
+            (defined($difficulty) ? $difficulty : 'any'),
+            $timeout,
+        ),
+    );
+
+    my ($pipe, $child_write);
+    unless (pipe($pipe, $child_write)) {
+        my $detail = $! || 'pipe setup failed';
+        $detail =~ s/[\r\n\0]+/ /g;
+        $detail =~ s/\s{2,}/ /g;
+        my $result = {
+            ok     => 0,
+            error  => 'worker_setup',
+            stage  => 'pipe',
+            detail => substr("$detail", 0, 240),
+        };
+        $debug_log->(1, "setup failed label=$debug_label detail=$result->{detail}");
+        eval { $callback->($result); 1; };
+        return 1;
+    }
+
+    my $child_pid = fork();
 
     unless (defined $child_pid) {
-        eval { $callback->($fallback); 1; };
+        my $detail = $! || 'fork failed';
+        $detail =~ s/[\r\n\0]+/ /g;
+        $detail =~ s/\s{2,}/ /g;
+        eval { close $pipe };
+        eval { close $child_write };
+        my $result = {
+            ok     => 0,
+            error  => 'worker_setup',
+            stage  => 'fork',
+            detail => substr("$detail", 0, 240),
+        };
+        $debug_log->(1, "setup failed label=$debug_label detail=$result->{detail}");
+        eval { $callback->($result); 1; };
         return 1;
     }
 
     if ($child_pid == 0) {
-        my $result = eval {
-            _trivia_fetch_sync($category_id, $difficulty);
+        eval { close $pipe };
+        binmode($child_write, ':raw');
+        local $SIG{PIPE} = 'IGNORE';
+        local $SIG{TERM} = 'DEFAULT';
+        local $SIG{INT}  = 'DEFAULT';
+        local $SIG{HUP}  = 'DEFAULT';
+
+        my $write_record = sub {
+            my ($record) = @_;
+            return 0 unless ref($record) eq 'HASH';
+            my $payload = eval { JSON::PP::encode_json($record) };
+            return 0 unless defined($payload) && !ref($payload);
+            $payload .= "\n";
+            return 0 if length($payload) > 20 * 1024;
+
+            my $offset = 0;
+            while ($offset < length($payload)) {
+                my $written = syswrite(
+                    $child_write,
+                    $payload,
+                    length($payload) - $offset,
+                    $offset,
+                );
+                next if !defined($written) && $!{EINTR};
+                return 0 unless defined($written) && $written > 0;
+                $offset += $written;
+            }
+            return 1;
         };
+
+        my $result = eval {
+            _trivia_fetch_sync(
+                $category_id,
+                $difficulty,
+                progress_cb => sub {
+                    my ($event) = @_;
+                    return unless ref($event) eq 'HASH';
+                    $write_record->({
+                        type  => 'progress',
+                        event => $event,
+                    });
+                },
+            );
+        };
+        if ($@) {
+            my $error = $@;
+            $error =~ s/[\r\n\0]+/ /g;
+            $error =~ s/\s{2,}/ /g;
+            $result = {
+                ok     => 0,
+                error  => 'worker_exception',
+                stage  => 'sync_worker',
+                detail => substr($error, 0, 240),
+            };
+        }
         $result = $fallback unless ref($result) eq 'HASH';
 
-        my $payload = eval { JSON::PP::encode_json($result) };
-        $payload = JSON::PP::encode_json($fallback)
-            unless defined($payload) && !ref($payload) && $payload ne '';
-        $payload = substr($payload, 0, 8192);
-
-        my $offset = 0;
-        local $SIG{PIPE} = 'IGNORE';
-        binmode(STDOUT, ':raw');
-
-        while ($offset < length($payload)) {
-            my $written = syswrite(
-                STDOUT,
-                $payload,
-                length($payload) - $offset,
-                $offset,
-            );
-
-            next if !defined($written) && $!{EINTR};
-            last unless defined($written) && $written > 0;
-            $offset += $written;
+        my $final_record = {
+            type   => 'result',
+            result => $result,
+        };
+        my $final_probe = eval { JSON::PP::encode_json($final_record) };
+        if (!defined($final_probe) || ref($final_probe)) {
+            $final_record = {
+                type   => 'result',
+                result => {
+                    ok     => 0,
+                    error  => 'worker_encode',
+                    stage  => 'json_encode',
+                    detail => 'could not encode final worker record',
+                },
+            };
         }
+        elsif (length($final_probe) > 20 * 1024) {
+            $final_record = {
+                type   => 'result',
+                result => {
+                    ok            => 0,
+                    error         => 'worker_payload',
+                    stage         => 'payload_limit',
+                    payload_bytes => length($final_probe),
+                },
+            };
+        }
+        $write_record->($final_record);
 
+        eval { close $child_write };
         POSIX::_exit(0);
     }
 
+    eval { close $child_write };
+
     my $state = {
-        output      => '',
+        read_buffer => '',
+        output_bytes => 0,
         pipe_eof    => 0,
         child_done  => 0,
         finalized   => 0,
         timed_out   => 0,
-        wait_failed => 0,
+        force_finish => 0,
         wait_status => undef,
         term_sent   => 0,
         kill_sent   => 0,
+        last_stage  => 'worker_started',
+        result      => undef,
+        protocol_error => undef,
     };
 
-    my ($stream, $timeout_timer, $kill_timer, $reap_timer);
-    my ($finish, $schedule_reap);
+    my ($stream, $timeout_timer, $kill_timer, $force_timer);
+    my $finish;
 
     my $remove_timer = sub {
         my ($timer) = @_;
@@ -6965,48 +7470,190 @@ sub _trivia_fetch_async {
         eval { $loop->remove($timer) };
     };
 
+    my $clean_trace_value = sub {
+        my ($value, $limit) = @_;
+        $limit ||= 120;
+        return '' unless defined($value) && !ref($value);
+        $value =~ s/[\r\n\0]+/ /g;
+        $value =~ s/\s{2,}/ /g;
+        $value =~ s/^\s+|\s+$//g;
+        return substr($value, 0, $limit);
+    };
+
+    my $handle_record = sub {
+        my ($line) = @_;
+        return if $state->{finalized};
+
+        if (!defined($line) || ref($line) || length($line) > 20 * 1024) {
+            $state->{protocol_error} ||= 'record_size';
+            return;
+        }
+
+        my $record = eval { JSON::PP::decode_json($line) };
+        if ($@ || ref($record) ne 'HASH') {
+            $state->{protocol_error} ||= 'record_json';
+            return;
+        }
+
+        my $type = $record->{type};
+        if (defined($type) && !ref($type) && $type eq 'progress') {
+            my $event = $record->{event};
+            unless (ref($event) eq 'HASH') {
+                $state->{protocol_error} ||= 'progress_shape';
+                return;
+            }
+
+            my $stage = $clean_trace_value->($event->{stage}, 64);
+            return unless $stage =~ /\A[a-z_]+\z/;
+            $state->{last_stage} = $stage;
+
+            my @trace = (
+                'progress',
+                'label=' . ($debug_label ne '' ? $debug_label : '-'),
+                "pid=$child_pid",
+                "stage=$stage",
+            );
+            for my $field (qw(attempt elapsed_ms attempt_elapsed_ms status success content_bytes response_code parse_error delay_ms)) {
+                next unless exists($event->{$field})
+                    && defined($event->{$field})
+                    && !ref($event->{$field});
+                my $value = $clean_trace_value->($event->{$field}, 80);
+                push @trace, "$field=$value" if $value ne '';
+            }
+            $debug_log->(4, join(' ', @trace));
+            return;
+        }
+
+        if (defined($type) && !ref($type) && $type eq 'result') {
+            if (ref($record->{result}) eq 'HASH') {
+                $state->{result} = $record->{result};
+                return;
+            }
+            $state->{protocol_error} ||= 'result_shape';
+            return;
+        }
+
+        $state->{protocol_error} ||= 'record_type';
+    };
+
+    my $drain_records = sub {
+        while ($state->{read_buffer} =~ s/\A([^\n]*)\n//) {
+            $handle_record->($1);
+        }
+        if (length($state->{read_buffer}) > 20 * 1024) {
+            $state->{protocol_error} ||= 'buffer_limit';
+            $state->{read_buffer} = '';
+        }
+    };
+
     $finish = sub {
         return if $state->{finalized};
-        return unless $state->{child_done};
+        return unless $state->{child_done} || $state->{force_finish};
         return unless $state->{pipe_eof} || $state->{timed_out};
 
         $state->{finalized} = 1;
 
         $remove_timer->($timeout_timer);
         $remove_timer->($kill_timer);
-        $remove_timer->($reap_timer);
+        $remove_timer->($force_timer);
         eval { $loop->remove($stream) } if $stream;
         eval { close $pipe };
 
-        my $result = $fallback;
+        my $elapsed = int(
+            (Time::HiRes::time() - $worker_started) * 1000 + 0.5
+        );
+        my $status = $state->{wait_status} // 0;
+        my $output_bytes = $state->{output_bytes};
+        my $signal = $status & 127;
+        my $exit   = ($status >> 8) & 255;
+        my $result;
 
-        unless ($state->{timed_out} || $state->{wait_failed}) {
-            my $status = $state->{wait_status} // 0;
-            my $signal = $status & 127;
-            my $exit   = ($status >> 8) & 255;
-
-            if (!$signal && $exit == 0) {
-                my $decoded = eval {
-                    JSON::PP::decode_json($state->{output} // '');
-                };
-
-                if (!$@ && ref($decoded) eq 'HASH') {
-                    if ($decoded->{ok}) {
-                        my $question = $decoded->{question};
-                        $result = $decoded
-                            if ref($question) eq 'HASH'
-                                && defined($question->{question})
-                                && !ref($question->{question})
-                                && defined($question->{correct_answer})
-                                && !ref($question->{correct_answer})
-                                && ref($question->{incorrect_answers}) eq 'ARRAY';
-                    }
-                    else {
-                        $result = $decoded;
-                    }
-                }
-            }
+        if ($state->{timed_out}) {
+            $result = {
+                ok                  => 0,
+                error               => 'worker_timeout',
+                stage               => 'async_timeout',
+                last_stage          => $state->{last_stage},
+                worker_exit         => $exit,
+                worker_signal       => $signal,
+                worker_output_bytes => $output_bytes,
+                worker_elapsed_ms   => $elapsed,
+                forced_completion   => $state->{force_finish} ? 1 : 0,
+            };
         }
+        elsif ($signal || $exit != 0) {
+            $result = {
+                ok                  => 0,
+                error               => 'worker_failed',
+                stage               => 'process_exit',
+                last_stage          => $state->{last_stage},
+                worker_exit         => $exit,
+                worker_signal       => $signal,
+                worker_output_bytes => $output_bytes,
+                worker_elapsed_ms   => $elapsed,
+            };
+        }
+        elsif ($state->{protocol_error}) {
+            $result = {
+                ok                  => 0,
+                error               => 'worker_decode',
+                stage               => 'record_protocol',
+                detail              => $state->{protocol_error},
+                last_stage          => $state->{last_stage},
+                worker_exit         => $exit,
+                worker_signal       => $signal,
+                worker_output_bytes => $output_bytes,
+                worker_elapsed_ms   => $elapsed,
+            };
+        }
+        elsif (ref($state->{result}) eq 'HASH') {
+            $result = $state->{result};
+            $result->{worker_exit} = $exit
+                unless exists $result->{worker_exit};
+            $result->{worker_signal} = $signal
+                unless exists $result->{worker_signal};
+            $result->{worker_output_bytes} = $output_bytes
+                unless exists $result->{worker_output_bytes};
+            $result->{worker_elapsed_ms} = $elapsed
+                unless exists $result->{worker_elapsed_ms};
+            $result->{last_stage} = $state->{last_stage}
+                unless exists $result->{last_stage};
+        }
+        else {
+            $result = {
+                ok                  => 0,
+                error               => 'worker_decode',
+                stage               => 'missing_result',
+                detail              => 'worker exited without a final result record',
+                last_stage          => $state->{last_stage},
+                worker_exit         => $exit,
+                worker_signal       => $signal,
+                worker_output_bytes => $output_bytes,
+                worker_elapsed_ms   => $elapsed,
+            };
+        }
+
+        my @trace = (
+            'complete',
+            'label=' . ($debug_label ne '' ? $debug_label : '-'),
+            "pid=$child_pid",
+            'result=' . ($result->{ok} ? 'ok' : ($result->{error} // 'unknown')),
+            'stage=' . ($result->{stage} // '-'),
+            'last_stage=' . ($result->{last_stage} // '-'),
+            "elapsed_ms=$elapsed",
+            "output_bytes=$output_bytes",
+            "exit=$exit",
+            "signal=$signal",
+            'forced=' . ($state->{force_finish} ? 1 : 0),
+        );
+        for my $field (qw(attempts status response_code parse_error content_type content_bytes elapsed_ms)) {
+            next unless exists($result->{$field})
+                && defined($result->{$field})
+                && !ref($result->{$field});
+            my $value = $clean_trace_value->($result->{$field}, 120);
+            push @trace, "$field=$value" if $value ne '';
+        }
+        $debug_log->($result->{ok} ? 3 : 2, join(' ', @trace));
 
         my $callback_ok = eval { $callback->($result); 1; };
         if (!$callback_ok && $self && ref($self) && $self->{logger}) {
@@ -7015,93 +7662,104 @@ sub _trivia_fetch_async {
             $self->{logger}->log(1, "trivia async callback failed: $error");
         }
 
-        $finish        = undef;
-        $schedule_reap = undef;
+        $finish = undef;
     };
 
-    $schedule_reap = sub {
-        return if $state->{finalized} || $state->{child_done};
-        return if $reap_timer;
-
-        $reap_timer = IO::Async::Timer::Countdown->new(
-            delay     => 0.05,
-            on_expire => sub {
-                my $expired = $reap_timer;
-                $reap_timer = undef;
-                $remove_timer->($expired);
-
+    my $watch_ok = eval {
+        $loop->watch_process(
+            $child_pid,
+            sub {
+                my ($pid, $wait_status) = @_;
+                return unless defined($pid) && $pid == $child_pid;
                 return if $state->{finalized};
 
-                my $waited = waitpid($child_pid, POSIX::WNOHANG());
-
-                if ($waited == $child_pid) {
-                    $state->{wait_status} = $?;
-                    $state->{child_done}  = 1;
-                    $finish->();
-                    return;
-                }
-
-                if ($waited == -1) {
-                    $state->{wait_failed} = 1;
-                    $state->{child_done}  = 1;
-                    $finish->();
-                    return;
-                }
-
-                $schedule_reap->();
+                $state->{wait_status} = $wait_status;
+                $state->{child_done}  = 1;
+                $debug_log->(
+                    4,
+                    "exit observed label=$debug_label pid=$child_pid status=$wait_status",
+                );
+                $finish->();
             },
         );
-
-        $loop->add($reap_timer);
-        $reap_timer->start;
+        1;
     };
+
+    unless ($watch_ok) {
+        my $error = $@ || 'watch_process registration failed';
+        $error =~ s/[\r\n\0]+/ /g;
+        $error =~ s/\s{2,}/ /g;
+
+        my $sent = kill 'TERM', $child_pid;
+        eval { close $pipe };
+        my $result = {
+            ok     => 0,
+            error  => 'worker_setup',
+            stage  => 'watch_process',
+            detail => substr($error, 0, 240),
+        };
+        $debug_log->(1, "setup failed label=$debug_label pid=$child_pid term_delivered=$sent detail=$result->{detail}");
+        eval { $callback->($result); 1; };
+        return 1;
+    }
 
     $timeout_timer = IO::Async::Timer::Countdown->new(
         delay     => $timeout,
         on_expire => sub {
-            return if $state->{finalized};
+            return if $state->{finalized} || $state->{child_done};
 
             $state->{timed_out} = 1;
-
+            my $sent = 0;
             unless ($state->{term_sent}) {
-                kill 'TERM', $child_pid;
+                $sent = kill 'TERM', $child_pid;
                 $state->{term_sent} = 1;
             }
-
-            $schedule_reap->();
+            my $errno = $sent ? '-' : $clean_trace_value->("$!", 120);
+            $debug_log->(
+                2,
+                "timeout label=$debug_label pid=$child_pid after=${timeout}s "
+                . "last_stage=$state->{last_stage} sending=TERM delivered=$sent errno=$errno",
+            );
 
             $kill_timer = IO::Async::Timer::Countdown->new(
-                delay     => 0.2,
+                delay     => 0.5,
                 on_expire => sub {
                     return if $state->{finalized} || $state->{child_done};
 
-                    my $waited = waitpid($child_pid, POSIX::WNOHANG());
-
-                    if ($waited == $child_pid) {
-                        $state->{wait_status} = $?;
-                        $state->{child_done}  = 1;
-                        $finish->();
-                        return;
-                    }
-
-                    if ($waited == -1) {
-                        $state->{wait_failed} = 1;
-                        $state->{child_done}  = 1;
-                        $finish->();
-                        return;
-                    }
-
+                    my $kill_sent = 0;
                     unless ($state->{kill_sent}) {
-                        kill 'KILL', $child_pid;
+                        $kill_sent = kill 'KILL', $child_pid;
                         $state->{kill_sent} = 1;
                     }
+                    my $kill_errno = $kill_sent ? '-' : $clean_trace_value->("$!", 120);
+                    $debug_log->(
+                        1,
+                        "timeout escalation label=$debug_label pid=$child_pid "
+                        . "last_stage=$state->{last_stage} sending=KILL "
+                        . "delivered=$kill_sent errno=$kill_errno",
+                    );
+                },
+            );
 
-                    $schedule_reap->();
+            $force_timer = IO::Async::Timer::Countdown->new(
+                delay     => 1.5,
+                on_expire => sub {
+                    return if $state->{finalized};
+                    $state->{force_finish} = 1;
+                    $debug_log->(
+                        1,
+                        "timeout forced completion label=$debug_label pid=$child_pid "
+                        . "child_done=$state->{child_done} pipe_eof=$state->{pipe_eof} "
+                        . "last_stage=$state->{last_stage}",
+                    );
+                    $finish->();
                 },
             );
 
             $loop->add($kill_timer);
             $kill_timer->start;
+            $loop->add($force_timer);
+            $force_timer->start;
         },
     );
 
@@ -7114,15 +7772,24 @@ sub _trivia_fetch_async {
             my ($io, $buffref, $eof) = @_;
 
             if (length $$buffref) {
-                my $remaining = 16 * 1024 - length($state->{output});
-                $state->{output} .= substr($$buffref, 0, $remaining)
-                    if $remaining > 0;
+                $state->{output_bytes} += length($$buffref);
+                $state->{read_buffer} .= $$buffref;
                 $$buffref = '';
+                $drain_records->();
             }
 
             if ($eof && !$state->{pipe_eof}++) {
+                if (length($state->{read_buffer})) {
+                    $handle_record->($state->{read_buffer});
+                    $state->{read_buffer} = '';
+                }
                 eval { $loop->remove($io) };
-                $schedule_reap->();
+                $debug_log->(
+                    4,
+                    "pipe EOF label=$debug_label pid=$child_pid "
+                    . "child_done=$state->{child_done} last_stage=$state->{last_stage}",
+                );
+                $finish->() if $finish;
             }
 
             return 0;
@@ -7315,6 +7982,16 @@ sub mbTrivia_ctx {
 
     my $log_message = $ctx->message;
 
+    if ($self->{logger}) {
+        my $cat_log = defined($trivia_cat_id) ? $trivia_cat_id : 'any';
+        my $diff_log = defined($trivia_diff) ? $trivia_diff : 'any';
+        $self->{logger}->log(
+            3,
+            "trivia request queued channel=$channel nick=$nick "
+            . "token=$request_token category=$cat_log difficulty=$diff_log",
+        );
+    }
+
     return _trivia_fetch_async(
         $self,
         $trivia_cat_id,
@@ -7334,9 +8011,89 @@ sub mbTrivia_ctx {
             unless (ref($result) eq 'HASH'
                     && $result->{ok}
                     && ref($result->{question}) eq 'HASH') {
-                botPrivmsg($self, $channel,
-                    'Trivia: could not fetch question.');
+                my $error = ref($result) eq 'HASH'
+                    && defined($result->{error})
+                    && !ref($result->{error})
+                        ? $result->{error}
+                        : 'unknown';
+
+                my @details = ("error=$error");
+                if (ref($result) eq 'HASH') {
+                    my %numeric = (
+                        attempts            => 'attempts',
+                        status              => 'http_status',
+                        response_code       => 'api_code',
+                        content_bytes       => 'content_bytes',
+                        attempt_elapsed_ms  => 'attempt_ms',
+                        elapsed_ms          => 'fetch_ms',
+                        worker_exit         => 'worker_exit',
+                        worker_signal       => 'worker_signal',
+                        worker_output_bytes => 'worker_output_bytes',
+                        worker_elapsed_ms   => 'worker_ms',
+                        forced_completion    => 'forced',
+                    );
+
+                    for my $field (sort keys %numeric) {
+                        next unless defined($result->{$field})
+                            && !ref($result->{$field})
+                            && $result->{$field} =~ /\A\d+\z/;
+                        push @details, $numeric{$field} . '=' . int($result->{$field});
+                    }
+
+                    for my $spec (
+                        [stage        => 'stage',        qr/\A[a-z_]+\z/, 64],
+                        [last_stage   => 'last_stage',   qr/\A[a-z_]+\z/, 64],
+                        [parse_error  => 'parse',        qr/\A[a-z_]+\z/, 64],
+                        [content_type => 'content_type', undef,              120],
+                        [reason       => 'reason',       undef,              160],
+                        [detail       => 'detail',       undef,              240],
+                    ) {
+                        my ($field, $label, $pattern, $limit) = @$spec;
+                        next unless defined($result->{$field})
+                            && !ref($result->{$field});
+                        my $value = $result->{$field};
+                        $value =~ s/[\r\n\0]+/ /g;
+                        $value =~ s/\s{2,}/ /g;
+                        $value =~ s/^\s+|\s+$//g;
+                        next if $pattern && $value !~ $pattern;
+                        $value = substr($value, 0, $limit);
+                        push @details, "$label=$value" if $value ne '';
+                    }
+                }
+
+                $self->{logger}->log(
+                    1,
+                    "trivia fetch failed for $channel token=$request_token: "
+                    . join(' ', @details),
+                ) if $self->{logger};
+
+                my $message = $error eq 'rate_limit'
+                    ? 'Trivia: the question service is rate-limiting this server. Please retry in a few seconds.'
+                    : $error eq 'http_timeout'
+                        ? 'Trivia: the question service request timed out. Details were logged.'
+                        : $error =~ /\A(?:http|http_exception|http_setup)\z/
+                            ? 'Trivia: the question service is temporarily unreachable.'
+                            : $error eq 'worker_timeout'
+                            ? 'Trivia: the question request timed out. Details were logged.'
+                            : $error =~ /\Aworker_/
+                                ? 'Trivia: the question worker failed. Details were logged.'
+                                : $error eq 'response'
+                                    ? 'Trivia: the question service returned an unusable response. Details were logged.'
+                                    : 'Trivia: could not fetch question. Details were logged.';
+
+                botPrivmsg($self, $channel, $message);
                 return;
+            }
+
+            if (defined($result->{attempts})
+                    && !ref($result->{attempts})
+                    && $result->{attempts} =~ /\A\d+\z/
+                    && $result->{attempts} > 1
+                    && $self->{logger}) {
+                $self->{logger}->log(
+                    3,
+                    "trivia fetch recovered after rate-limit retry for $channel",
+                );
             }
 
             # A different internal path may have activated a question while the
@@ -7477,6 +8234,7 @@ sub mbTrivia_ctx {
 
             return 1;
         },
+        debug_label => "channel=$channel token=$request_token requested_by=$nick",
     );
 }
 

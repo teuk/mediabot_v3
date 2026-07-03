@@ -461,7 +461,11 @@ sub getProcessStartTimestamp {
         unless defined($now) && !ref($now) && $now =~ /\A\d+(?:\.\d+)?\z/;
 
     my @candidates = (
-        eval { $self->{metrics}->{started} },
+        # mb384-B1: NE PAS autovivifier $self->{metrics} en {} non blessé si undef.
+        # L'accès hash ->{started} sur un undef crée {} (truthy), ce qui faisait
+        # ensuite passer tous les gardes "if $self->{metrics}" et planter les
+        # appels $self->{metrics}->inc(...) ("method inc on unblessed reference").
+        eval { $self->{metrics} ? $self->{metrics}->{started} : undef },
         eval { $self->{_start_time} },
         eval { $self->{iConnectionTimestamp} },
     );

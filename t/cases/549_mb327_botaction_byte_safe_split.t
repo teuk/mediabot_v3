@@ -77,10 +77,14 @@ return sub {
 
     # --- 2. Contrat fonctionnel via le helper réel -----------------------
     my $sub_text = _extract_sub_549($src, '_split_text_for_irc');
+    # mb384: _split_text_for_irc appelle désormais _sanitize_irc_text ; on doit
+    # donc extraire aussi cette dépendance dans le package isolé T549, sinon
+    # "Undefined subroutine &T549::_sanitize_irc_text".
+    my $sanitize_text = _extract_sub_549($src, '_sanitize_irc_text');
     my $split;
     {
         no strict; no warnings;
-        $split = eval "package T549; use Encode qw(encode); $sub_text; \\&T549::_split_text_for_irc";
+        $split = eval "package T549; use Encode qw(encode); $sanitize_text; $sub_text; \\&T549::_split_text_for_irc";
     }
     $assert->ok(ref($split) eq 'CODE', '_split_text_for_irc compilé en isolation');
 
