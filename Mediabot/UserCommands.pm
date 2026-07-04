@@ -7,7 +7,7 @@ package Mediabot::UserCommands;
 use strict;
 use warnings;
 use POSIX qw(strftime);
-use Time::Local qw(timegm);
+use Time::Local qw(timegm timelocal);
 use Time::Piece;
 use List::Util qw(min);
 use Exporter 'import';
@@ -976,7 +976,7 @@ sub userModinfo_ctx {
     }
 
     # Ensure channel object exists (case-insensitive)
-    my $channel_obj = $self->{channels}{$channel} || $self->{channels}{lc($channel)};
+    my $channel_obj = $self->{channels}{lc $channel} || $self->{channels}{lc($channel)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $channel does not exist");
         return;
@@ -1652,7 +1652,7 @@ sub mbSeen_ctx {
         my $id_channel = 0;
 
         if (defined $chan_for_part) {
-            my $channel_obj = $self->{channels}{$chan_for_part}
+            my $channel_obj = $self->{channels}{lc $chan_for_part}
                            || $self->{channels}{lc($chan_for_part)};
             $id_channel = eval { $channel_obj->get_id } || 0;
         }
@@ -2437,20 +2437,31 @@ sub _birthday_days_ahead {
 
     $now //= time();
 
-    my @today = gmtime($now);
+    # mb399-B1: calendrier LOCAL, cohérent avec l'annonce automatique
+    # (check_birthdays_today utilise localtime). Avant, ce helper comptait en
+    # gmtime : sur un serveur en Europe/Paris, entre minuit et 01:00/02:00
+    # locales, "!birthday next" affichait "in 1d" un anniversaire qui était
+    # déjà "today" (et déjà annoncé sur le canal).
+    my @today = localtime($now);
     my $year  = $today[5] + 1900;
 
-    my $today_epoch = timegm(0, 0, 12, $today[3], $today[4], $year);
+    my $today_epoch = timelocal(0, 0, 12, $today[3], $today[4], $year);
 
     for my $offset (0 .. 4) {
         my $candidate_year = $year + $offset;
 
         next unless _birthday_valid_date($candidate_year, $month, $day);
 
-        my $candidate_epoch = timegm(0, 0, 12, $day, $month - 1, $candidate_year);
+        my $candidate_epoch = eval {
+            timelocal(0, 0, 12, $day, $month - 1, $candidate_year)
+        };
+        next unless defined $candidate_epoch;
         next if $candidate_epoch < $today_epoch;
 
-        return int(($candidate_epoch - $today_epoch) / 86400);
+        # mb399-B1: ARRONDI au plus proche, pas troncature : un midi->midi
+        # local vaut 23 h le jour du passage à l'heure d'été (82800 s), que
+        # int() tronquerait à 0 jour.
+        return int(($candidate_epoch - $today_epoch) / 86400 + 0.5);
     }
 
     return undef;
@@ -2595,9 +2606,10 @@ sub mbStats_ctx {
     my $karma_str = '';
     {
         my $dbh_k = eval { $self->{db}->ensure_connected } // $self->{dbh};  # C3/fix
-        my $sth_chan2 = $dbh_k->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
-        if ($sth_chan2 && $sth_chan2->execute($channel)) {
-            my $rc = $sth_chan2->fetchrow_hashref; $sth_chan2->finish;
+        # mb414-R1: id canal via le helper central (cache d'abord, mb411).
+        my $cid_ks = Mediabot::Helpers::channel_id_cached($self, $channel);
+        {
+            my $rc = defined($cid_ks) ? { id_channel => $cid_ks } : undef;
             if ($rc) {
                 my $sth_k = $dbh_k->prepare(
                     'SELECT score FROM KARMA WHERE id_channel = ? AND nick = ?');
@@ -3272,15 +3284,8 @@ sub mbRemind_ctx {
     }
 
     # Fetch id_channel inline (getIdChannel is in ChannelCommands scope)
-    my $sth_chan = $self->{dbh}->prepare(
-        'SELECT id_channel FROM CHANNEL WHERE name = ?'
-    );
-    my $id_channel;
-    if ($sth_chan && $sth_chan->execute($channel)) {
-        my $r = $sth_chan->fetchrow_hashref;
-        $sth_chan->finish;
-        $id_channel = $r->{id_channel} if $r;
-    }
+    # mb414-R1: id canal via le helper central (cache d'abord, mb411).
+    my $id_channel = Mediabot::Helpers::channel_id_cached($self, $channel);
     unless ($id_channel) {
         botNotice($self, $nick, "Channel not found.");
         return;
@@ -3329,15 +3334,8 @@ sub deliverReminders {
     # S3/fix: ensure DB connection alive before using dbh
     my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
     return unless $dbh;
-    my $sth_dc = $dbh->prepare(
-        'SELECT id_channel FROM CHANNEL WHERE name = ?'
-    );
-    my $id_channel;
-    if ($sth_dc && $sth_dc->execute($channel)) {
-        my $r = $sth_dc->fetchrow_hashref;
-        $sth_dc->finish;
-        $id_channel = $r->{id_channel} if $r;
-    }
+    # mb414-R1: id canal via le helper central (cache d'abord, mb411).
+    my $id_channel = Mediabot::Helpers::channel_id_cached($self, $channel);
     return unless $id_channel;
 
     # mb161-B1: scan large puis filtrer, au lieu de LIMIT 3 brut.
@@ -4146,13 +4144,20 @@ sub mbKarma_ctx {
             return 1;
         }
 
-        my $sth_vote_chan = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+        # mb410-R1: id du canal depuis le cache interne (clé canonique lc,
+        # mb407) — plus de SELECT par vote. La DB reste le repli si le canal
+        # n'est pas (encore) dans le cache.
         my $vote_id_channel;
-        if ($sth_vote_chan && $sth_vote_chan->execute($channel)) {
-            my $vote_chan_row = $sth_vote_chan->fetchrow_hashref;
-            $vote_id_channel = $vote_chan_row->{id_channel} if $vote_chan_row;
+        my $vote_chan_obj = $self->{channels}{lc $channel};
+        $vote_id_channel = $vote_chan_obj->get_id if $vote_chan_obj;
+        unless ($vote_id_channel) {
+            my $sth_vote_chan = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+            if ($sth_vote_chan && $sth_vote_chan->execute($channel)) {
+                my $vote_chan_row = $sth_vote_chan->fetchrow_hashref;
+                $vote_id_channel = $vote_chan_row->{id_channel} if $vote_chan_row;
+            }
+            $sth_vote_chan->finish if $sth_vote_chan;
         }
-        $sth_vote_chan->finish if $sth_vote_chan;
 
         unless ($vote_id_channel) {
             botNotice($self, $nick, "$nick: this channel is not registered.");
@@ -4174,12 +4179,17 @@ sub mbKarma_ctx {
 
     my $target  = $args[0] ? lc($args[0]) : lc($nick);
 
-    my $sth_chan = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+    # mb410-R1: id du canal depuis le cache interne (mb407), SELECT en repli.
     my $id_channel;
-    if ($sth_chan && $sth_chan->execute($channel)) {
-        my $r = $sth_chan->fetchrow_hashref;
-        $sth_chan->finish;
-        $id_channel = $r->{id_channel} if $r;
+    my $kchan_obj = $self->{channels}{lc $channel};
+    $id_channel = $kchan_obj->get_id if $kchan_obj;
+    unless ($id_channel) {
+        my $sth_chan = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
+        if ($sth_chan && $sth_chan->execute($channel)) {
+            my $r = $sth_chan->fetchrow_hashref;
+            $sth_chan->finish;
+            $id_channel = $r->{id_channel} if $r;
+        }
     }
     # U1/fix: informative message instead of silent return when channel not registered
     unless ($id_channel) {
@@ -4226,10 +4236,8 @@ sub processKarma {
     # fix: [^\s+\-]+ avoids greedy \S+ consuming the ++ before the pattern can catch it
     return unless defined $text && $text =~ /[^\s+\-]{2,}(\+\+|--)/;
 
-    my $sth_chan = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
-    return unless $sth_chan && $sth_chan->execute($channel);
-    my $r = $sth_chan->fetchrow_hashref; $sth_chan->finish;
-    my $id_channel = $r ? $r->{id_channel} : undef;
+    # mb413-R1: id canal via le helper central (cache d'abord, mb411).
+    my $id_channel = Mediabot::Helpers::channel_id_cached($self, $channel);
     return unless $id_channel;
 
     # NOTE: nick++/nick-- auto-detection is kept but gated:
@@ -4427,9 +4435,10 @@ sub mbKarmaHist_ctx {
     # I8: try DB first, fall back to in-memory ring buffer
     my @db_entries;
     eval {
-        my $sth_ch = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
-        if ($sth_ch && $sth_ch->execute($channel)) {
-            my $rc = $sth_ch->fetchrow_hashref; $sth_ch->finish;
+        # mb414-R1: id canal via le helper central (cache d'abord, mb411).
+        my $cid_kl = Mediabot::Helpers::channel_id_cached($self, $channel);
+        {
+            my $rc = defined($cid_kl) ? { id_channel => $cid_kl } : undef;
             if ($rc) {
                 my $sth_hl = $self->{dbh}->prepare(q{
                     SELECT nick, delta, from_nick, score,
@@ -5411,10 +5420,10 @@ sub mbKarmaReset_ctx {
         botNotice($self, $nick, 'Syntax: karmareset <nick>'); return;
     }
 
-    my $sth_c = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
-    return unless $sth_c && $sth_c->execute($channel);
-    my $rc = $sth_c->fetchrow_hashref; $sth_c->finish;
-    return unless $rc;
+    # mb411-R1: id canal via le helper central (cache d'abord).
+    my $cid_kr = Mediabot::Helpers::channel_id_cached($self, $channel);
+    return unless defined $cid_kr;
+    my $rc = { id_channel => $cid_kr };
 
     # W3: read current score before reset for informative message
     my $old_score = 0;
@@ -5596,12 +5605,8 @@ sub mbKarmaTop_ctx {
         $n = int($args[0]); $n = 1 if $n < 1; $n = 10 if $n > 10;
     }
 
-    my $sth_chan = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
-    my $id_channel;
-    if ($sth_chan && $sth_chan->execute($channel)) {
-        my $r = $sth_chan->fetchrow_hashref; $sth_chan->finish;
-        $id_channel = $r->{id_channel} if $r;
-    }
+    # mb413-R1: id canal via le helper central (cache d'abord, mb411).
+    my $id_channel = Mediabot::Helpers::channel_id_cached($self, $channel);
     return unless $id_channel;
 
     my $order = $bottom_mode ? 'ASC' : 'DESC';
@@ -7822,12 +7827,10 @@ sub mbTrivia_ctx {
         }
         # Reset all — Owner only
         return unless $ctx->require_level('Owner');
-        my $sth_c = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
-        unless ($sth_c && $sth_c->execute($channel)) {
-            botNotice($self, $nick, 'DB error.'); return;
-        }
-        my $rc = $sth_c->fetchrow_hashref; $sth_c->finish;
-        unless ($rc) { botNotice($self, $nick, 'Channel not found.'); return; }
+        # mb413-R1: id canal via le helper central (cache d'abord, mb411).
+        my $cid_tda = Mediabot::Helpers::channel_id_cached($self, $channel);
+        unless (defined $cid_tda) { botNotice($self, $nick, 'Channel not found.'); return; }
+        my $rc = { id_channel => $cid_tda };
         my $sth = $self->{dbh}->prepare('DELETE FROM TRIVIA_SCORES WHERE id_channel = ?');
         unless ($sth && $sth->execute($rc->{id_channel})) {
             botNotice($self, $nick, 'DB error.'); $sth->finish if $sth; return;
@@ -8264,7 +8267,17 @@ sub checkTriviaAnswer {
             && $trivia->{deadline} - time() < ($trivia->{timeout} // 30) / 2) {
         $trivia->{hint_given} = 1;
         my $ans = $trivia->{answer} // '';
-        my $hint = substr($ans, 0, 1) . ('_' x (length($ans) - 1));
+        # mb402-R1: préserver la STRUCTURE de la réponse dans l'indice. Avant,
+        # tout sauf la première lettre devenait '_', espaces compris :
+        # "emile zola" -> "e_________" (le joueur ignorait qu'il y a 2 mots).
+        # On ne masque que les caractères de mot ; espaces, tirets et
+        # apostrophes restent visibles : "e____ ____", "r___ '_' ____".
+        my $hint = '';
+        if (length $ans) {
+            my $rest = substr($ans, 1);
+            $rest =~ s/[^\s'\-]/_/g;
+            $hint = substr($ans, 0, 1) . $rest;
+        }
         Mediabot::Helpers::botPrivmsg($self, $channel, "Hint: $hint");
     }
     # B3/fix: guard against undef answer + wrap regex in eval
@@ -8287,9 +8300,10 @@ sub checkTriviaAnswer {
     # X10: Prometheus counter for correct trivia answers
     # AA1: persist trivia score in DB (TRIVIA_SCORES table)
     eval {
-        my $sth_c = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
-        if ($sth_c && $sth_c->execute($channel)) {
-            my $rc = $sth_c->fetchrow_hashref; $sth_c->finish;
+        # mb413-R1: id canal via le helper central (cache d'abord, mb411).
+        my $cid_tsi = Mediabot::Helpers::channel_id_cached($self, $channel);
+        {
+            my $rc = defined($cid_tsi) ? { id_channel => $cid_tsi } : undef;
             if ($rc) {
                 my $sth_u = $self->{dbh}->prepare(q{
                     INSERT INTO TRIVIA_SCORES (id_channel, nick, score, last_correct)
@@ -8361,12 +8375,10 @@ sub mbTriviaTop_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     my $limit   = (@args && $args[0] =~ /^(\d+)$/) ? int($args[0]) : 5;
     $limit = 1 if $limit < 1; $limit = 15 if $limit > 15;
-    my $sth_c = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
-    unless ($sth_c && $sth_c->execute($channel)) {
-        botPrivmsg($self, $channel, 'DB error.'); $sth_c->finish if $sth_c; return;
-    }
-    my $rc = $sth_c->fetchrow_hashref; $sth_c->finish;
-    unless ($rc) { botPrivmsg($self, $channel, 'Channel not found.'); return; }
+    # mb411-R1: id canal via le helper central (cache d'abord).
+    my $cid_tt = Mediabot::Helpers::channel_id_cached($self, $channel);
+    unless (defined $cid_tt) { botPrivmsg($self, $channel, 'Channel not found.'); return; }
+    my $rc = { id_channel => $cid_tt };
     my $sth = $self->{dbh}->prepare(q{
         SELECT nick, score, last_correct
         FROM TRIVIA_SCORES
@@ -8410,12 +8422,10 @@ sub mbTriviaReset_ctx {
     unless ($target) {
         botNotice($self, $nick, 'Syntax: triviareset <nick>'); return;
     }
-    my $sth_c = $self->{dbh}->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
-    unless ($sth_c && $sth_c->execute($channel)) {
-        botNotice($self, $nick, 'DB error.'); $sth_c->finish if $sth_c; return;
-    }
-    my $rc = $sth_c->fetchrow_hashref; $sth_c->finish;
-    unless ($rc) { botNotice($self, $nick, 'Channel not found.'); return; }
+    # mb411-R1: id canal via le helper central (cache d'abord).
+    my $cid_ts = Mediabot::Helpers::channel_id_cached($self, $channel);
+    unless (defined $cid_ts) { botNotice($self, $nick, 'Channel not found.'); return; }
+    my $rc = { id_channel => $cid_ts };
     my $sth = $self->{dbh}->prepare(
         'DELETE FROM TRIVIA_SCORES WHERE id_channel = ? AND nick = ?'
     );
@@ -9341,12 +9351,8 @@ sub mbDuel_ctx {
 
     # Apply karma changes via in-DB update (sans passer par mbKarma_ctx → pour éviter double event)
     my $dbh = $self->{dbh};
-    my $id_channel = 0;
-    my $sth_c = $dbh->prepare("SELECT id_channel FROM CHANNEL WHERE name = ?");
-    if ($sth_c && $sth_c->execute($channel)) {
-        my $r = $sth_c->fetchrow_hashref; $sth_c->finish;
-        $id_channel = $r ? $r->{id_channel} : 0;
-    }
+    # mb414-R1: id canal via le helper central (cache d'abord, mb411).
+    my $id_channel = Mediabot::Helpers::channel_id_cached($self, $channel) // 0;
 
     if ($id_channel) {
         # +1 winner

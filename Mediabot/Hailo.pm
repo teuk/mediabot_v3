@@ -496,7 +496,7 @@ sub set_hailo_channel_ratio {
     }
     $ratio = int($ratio);
 
-    my $channel_obj = $self->{channels}{$sChannel} || $self->{channels}{lc($sChannel)};
+    my $channel_obj = $self->{channels}{lc $sChannel} || $self->{channels}{lc($sChannel)};
 
     unless (defined $channel_obj) {
         $self->{logger}->log(1, "set_hailo_channel_ratio() unknown channel: $sChannel")
@@ -836,7 +836,7 @@ sub check_birthdays_today {
 
     # Announce on all auto-join channels
     for my $chan_name (keys %{ $self->{channels} || {} }) {
-        my $chan = $self->{channels}{$chan_name};
+        my $chan = $self->{channels}{lc $chan_name};
         next unless $chan && $chan->auto_join;
 
         for my $nick (@bdays) {

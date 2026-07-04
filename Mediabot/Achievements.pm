@@ -253,6 +253,12 @@ sub _load {
     my $data = eval { JSON::PP->new->utf8(0)->decode($json) };
     if ($@) {
         $self->_log(1, "Achievements: JSON decode error: $@");
+        # mb400-B1: préserver le fichier illisible avant qu'un futur save()
+        # (qui repartira d'un data vide) ne l'écrase définitivement.
+        my $backup = $self->{path} . '.corrupt-' . time();
+        if (rename $self->{path}, $backup) {
+            $self->_log(1, "Achievements: corrupt data preserved as $backup");
+        }
         return;
     }
     $self->{data} = $data if ref $data eq 'HASH';
@@ -272,8 +278,23 @@ sub save {
         my $json = JSON::PP->new->utf8(0)->pretty->canonical->encode($self->{data});
         my $tmp  = "$self->{path}.tmp";
         open my $fh, '>:utf8', $tmp or die "open $tmp: $!";
-        print $fh $json;
-        close $fh;
+        # mb400-B1: vérifier print ET close avant le rename. Sur disque plein
+        # (ENOSPC), print/close échouent silencieusement sinon : le tmp TRONQUÉ
+        # était renommé par-dessus le fichier de données -> JSON invalide ->
+        # au redémarrage _load() échoue -> data={} -> le save() suivant écrase
+        # définitivement tout l'historique achievements. En vérifiant ici, le
+        # tmp incomplet n'est jamais promu et le fichier principal reste intact.
+        print {$fh} $json or do {
+            my $err = $!;
+            close $fh;
+            unlink $tmp;
+            die "write $tmp: $err";
+        };
+        close $fh or do {
+            my $err = $!;
+            unlink $tmp;
+            die "close $tmp: $err";
+        };
         rename $tmp, $self->{path} or die "rename: $!";
     };
     if ($@) {

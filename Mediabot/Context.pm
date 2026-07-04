@@ -87,7 +87,7 @@ sub channel_obj {
     my ($self) = @_;
     my $bot  = $self->{bot}  or return undef;
     my $chan = $self->{channel} or return undef;
-    return $bot->{channels}{$chan} // undef;
+    return $bot->{channels}{lc $chan} // undef;
 }
 
 #----------------------------------------------------------------------

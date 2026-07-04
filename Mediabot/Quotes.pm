@@ -200,7 +200,7 @@ sub mbQuoteAdd {
 
     $sth->finish;
 
-    my $channel_obj = $self->{channels}{$sChannel} || $self->{channels}{lc($sChannel)};
+    my $channel_obj = $self->{channels}{lc $sChannel} || $self->{channels}{lc($sChannel)};
 
     unless (defined($channel_obj)) {
         botNotice($self, $sNick, "Channel $sChannel is not registered to me");

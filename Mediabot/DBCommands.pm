@@ -2199,7 +2199,7 @@ sub addResponder_ctx {
 
     if (@args && $args[0] =~ /^#/) {
         $target_chan = shift @args;
-        my $chan_obj = $self->{channels}{$target_chan} || $self->{channels}{lc $target_chan};
+        my $chan_obj = $self->{channels}{lc $target_chan} || $self->{channels}{lc $target_chan};
 
         unless ($chan_obj) {
             botNotice($self, $nick, "$target_chan is not registered.");
@@ -2337,7 +2337,7 @@ sub delResponder_ctx {
     if (@args && defined $args[0] && $args[0] =~ /^#/) {
         $target_chan = shift @args;
 
-        my $chan_obj = $self->{channels}{$target_chan} || $self->{channels}{lc $target_chan};
+        my $chan_obj = $self->{channels}{lc $target_chan} || $self->{channels}{lc $target_chan};
         unless ($chan_obj) {
             botNotice($self, $nick, "$target_chan is not registered.");
             return;
@@ -2476,7 +2476,7 @@ sub IgnoresList_ctx {
     if (@args && defined $args[0] && $args[0] =~ /^#/) {
         my $target = shift @args;
 
-        my $chan_obj = $self->{channels}{$target} || $self->{channels}{lc($target)};
+        my $chan_obj = $self->{channels}{lc $target} || $self->{channels}{lc($target)};
         unless ($chan_obj) {
             botNotice($self, $nick, "Channel $target is not registered");
             return;
@@ -2567,7 +2567,7 @@ sub addIgnore_ctx {
     if (@args && defined $args[0] && $args[0] =~ /^#/) {
         my $chan_name = shift @args;
 
-        my $chan_obj = $self->{channels}{$chan_name} || $self->{channels}{lc($chan_name)};
+        my $chan_obj = $self->{channels}{lc $chan_name} || $self->{channels}{lc($chan_name)};
         unless ($chan_obj) {
             botNotice($self, $nick, "Channel $chan_name is not registered");
             return;
@@ -2667,7 +2667,7 @@ sub delIgnore_ctx {
     if (@args && defined $args[0] && $args[0] =~ /^#/) {
         my $chan_name = shift @args;
 
-        my $chan_obj = $self->{channels}{$chan_name} || $self->{channels}{lc($chan_name)};
+        my $chan_obj = $self->{channels}{lc $chan_name} || $self->{channels}{lc($chan_name)};
         unless ($chan_obj) {
             botNotice($self, $nick, "Channel $chan_name is undefined");
             return;

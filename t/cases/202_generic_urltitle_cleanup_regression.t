@@ -64,10 +64,17 @@ return sub {
         '_extract_url captures first HTTP(S) URL'
     );
 
+    # mb405: le strip est désormais en deux temps — ponctuation pure, puis
+    # fermantes ')'/']' UNIQUEMENT si non appariées (URLs Wikipédia).
     $assert->like(
         $extract_url // '',
-        qr/\$url\s*=~\s*s\/\[\)\\\]\.,!\?;:\]\+\$\/\/;/,
+        qr/\$url\s*=~\s*s\/\[\.,!\?;:\]\+\$\/\/;/,
         '_extract_url strips common trailing punctuation'
+    );
+    $assert->like(
+        $extract_url // '',
+        qr/last if \$n_close <= \$n_open;/,
+        '_extract_url keeps balanced closing parens (Wikipedia URLs)'
     );
 
     $assert->like(

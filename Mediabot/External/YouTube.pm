@@ -592,25 +592,34 @@ sub _yt_format_views {
     return $raw;
 }
 
+# mb398-B1: parsing ISO-8601 partagé, avec le composant JOURS. Les durées
+# YouTube > 24h existent (streams/archives) et arrivent en "P1DT2H3M4S" —
+# l'ancien parsing ("PT" strip + regex H/M/S) ignorait le D : affichage et
+# secondes faux de 86400s par jour ("P3D" seul donnait même '' / 0).
+# Le M n'est lu qu'APRÈS le "T" (avant le T, M = mois en ISO-8601).
+sub _yt_parse_duration {
+    my ($iso) = @_;
+    return (0, 0, 0, 0) unless defined $iso && $iso ne '';
+    my ($date_part, $time_part) = $iso =~ /\AP([^Tt]*)(?:[Tt](.*))?\z/;
+    return (0, 0, 0, 0) unless defined $date_part || defined $time_part;
+    my ($d)   = ($date_part // '') =~ /(\d+)D/i;
+    my ($h)   = ($time_part // '') =~ /(\d+)H/i;
+    my ($m)   = ($time_part // '') =~ /(\d+)M/i;
+    my ($sec) = ($time_part // '') =~ /(\d+)S/i;
+    return ($d || 0, $h || 0, $m || 0, $sec || 0);
+}
+
 sub _yt_format_duration {
     my ($iso) = @_;
 
     return '' unless defined $iso && $iso ne '';
 
-    my $raw = $iso;
-    $raw =~ s/^PT//i;
+    my ($d, $h, $m, $sec) = _yt_parse_duration($iso);
 
-    my ($h)   = $raw =~ /(\d+)H/i;
-    my ($m)   = $raw =~ /(\d+)M/i;
-    my ($sec) = $raw =~ /(\d+)S/i;
-
-    $h   ||= 0;
-    $m   ||= 0;
-    $sec ||= 0;
-
-    return '' if !$h && !$m && !$sec;
+    return '' if !$d && !$h && !$m && !$sec;
 
     my $out = '';
+    $out .= "${d}d "   if $d;
     $out .= "${h}h "   if $h;
     $out .= "${m}mn "  if $m;
     $out .= "${sec}s"  if $sec;
@@ -625,18 +634,10 @@ sub _yt_duration_seconds {
 
     return 0 unless defined $iso && $iso ne '';
 
-    my $raw = $iso;
-    $raw =~ s/^PT//i;
+    # mb398-B1: via le parseur partagé (composant jours inclus).
+    my ($d, $h, $m, $sec) = _yt_parse_duration($iso);
 
-    my ($h) = $raw =~ /(\d+)H/i;
-    my ($m) = $raw =~ /(\d+)M/i;
-    my ($sec) = $raw =~ /(\d+)S/i;
-
-    $h   ||= 0;
-    $m   ||= 0;
-    $sec ||= 0;
-
-    return ($h * 3600) + ($m * 60) + $sec;
+    return ($d * 86400) + ($h * 3600) + ($m * 60) + $sec;
 }
 
 
@@ -662,27 +663,29 @@ sub _yt_label {
 # ---------------------------------------------------------------------------
 
 sub _is_youtube_url {
+    # mb406-B1: motifs ancrés en début d'URL (\A) — une URL YouTube imbriquée
+    # dans la query d'un autre site ne doit pas router vers le handler YouTube.
     my ($url) = @_;
     return undef unless defined $url;
 
     # Standard watch URL on all subdomains
-    if ($url =~ m{https?://(?:www\.|m\.|music\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp|be)/watch[^\s]*[?&]v=([A-Za-z0-9_-]{11})}i) {
+    if ($url =~ m{\Ahttps?://(?:www\.|m\.|music\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp|be)/watch[^\s]*[?&]v=([A-Za-z0-9_-]{11})}i) {
         return $1;
     }
     # Shorts
-    if ($url =~ m{https?://(?:www\.|m\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp)/shorts/([A-Za-z0-9_-]{11})}i) {
+    if ($url =~ m{\Ahttps?://(?:www\.|m\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp)/shorts/([A-Za-z0-9_-]{11})}i) {
         return $1;
     }
     # Live
-    if ($url =~ m{https?://(?:www\.|m\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp)/live/([A-Za-z0-9_-]{11})}i) {
+    if ($url =~ m{\Ahttps?://(?:www\.|m\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp)/live/([A-Za-z0-9_-]{11})}i) {
         return $1;
     }
     # Embed
-    if ($url =~ m{https?://(?:www\.)?youtube(?:-nocookie)?\.com/embed/([A-Za-z0-9_-]{11})}i) {
+    if ($url =~ m{\Ahttps?://(?:www\.)?youtube(?:-nocookie)?\.com/embed/([A-Za-z0-9_-]{11})}i) {
         return $1;
     }
     # youtu.be short link
-    if ($url =~ m{https?://youtu\.be/([A-Za-z0-9_-]{11})}i) {
+    if ($url =~ m{\Ahttps?://youtu\.be/([A-Za-z0-9_-]{11})}i) {
         return $1;
     }
     return undef;

@@ -3660,11 +3660,8 @@ sub _cmd_remind {
         }
     }
 
-    my $sth_c = $dbh->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
-    if ($sth_c && $sth_c->execute($chan_name)) {
-        my $r = $sth_c->fetchrow_hashref; $sth_c->finish;
-        $id_channel = $r ? $r->{id_channel} : undef;
-    }
+    # mb412-R1: id canal via le helper central (cache d'abord, mb411).
+    $id_channel = Mediabot::Helpers::channel_id_cached($bot, $chan_name);
     unless ($id_channel) { $stream->write("Channel not found in DB.\r\n"); return; }
 
     my $sth = $dbh->prepare(q{
@@ -3976,12 +3973,8 @@ sub _cmd_stats {
     }
 
     # Top 3 karma
-    my $sth_chan = $dbh->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?');
-    my $id_channel;
-    if ($sth_chan && $sth_chan->execute($chan)) {
-        my $r = $sth_chan->fetchrow_hashref; $sth_chan->finish;
-        $id_channel = $r->{id_channel} if $r;
-    }
+    # mb412-R1: id canal via le helper central (cache d'abord, mb411).
+    my $id_channel = Mediabot::Helpers::channel_id_cached($bot, $chan);
     if ($id_channel) {
         my $sth_k = $dbh->prepare(q{
             SELECT nick, score FROM KARMA
@@ -4601,21 +4594,12 @@ sub _cmd_bans {
 
     # Resolve id_channel
     my $dbh = $bot->{dbh};
-    my $sth = $dbh->prepare("SELECT id_channel FROM CHANNEL WHERE name = ? LIMIT 1");
-    unless ($sth && $sth->execute($chan)) {
-        $stream->write("DB error.\r\n");
-        $sth->finish if $sth;
-        return;
-    }
-    my $row = $sth->fetchrow_hashref;
-    $sth->finish;
-
-    unless ($row) {
+    # mb412-R1: id canal via le helper central (cache d'abord, mb411).
+    my $id_channel = Mediabot::Helpers::channel_id_cached($bot, $chan);
+    unless ($id_channel) {
         $stream->write("Channel $chan not found in DB.\r\n");
         return;
     }
-
-    my $id_channel = $row->{id_channel};
     # A2: fetch up to 11 to detect overflow without loading all bans
     my @bans = $bot->{channel_ban}->list_active_bans($id_channel, 11);
 
@@ -4765,21 +4749,12 @@ sub _cmd_unban {
     }
 
     my $dbh = $bot->{dbh};
-    my $sth = $dbh->prepare("SELECT id_channel FROM CHANNEL WHERE name = ? LIMIT 1");
-    unless ($sth && $sth->execute($chan)) {
-        $stream->write("DB error.\r\n");
-        $sth->finish if $sth;
-        return;
-    }
-    my $row = $sth->fetchrow_hashref;
-    $sth->finish;
-
-    unless ($row) {
+    # mb412-R1: id canal via le helper central (cache d'abord, mb411).
+    my $id_channel = Mediabot::Helpers::channel_id_cached($bot, $chan);
+    unless ($id_channel) {
         $stream->write("Channel $chan not found in DB.\r\n");
         return;
     }
-
-    my $id_channel = $row->{id_channel};
     my $level = $self->{users}{$id}{level};
 
     # Resolve ban: by numeric id or by mask
@@ -5060,7 +5035,7 @@ sub _cmd_stat {
     }
 
     foreach my $chan_name (sort keys %$channels) {
-        my $chan_obj   = $bot->{channels}{$chan_name};
+        my $chan_obj   = $bot->{channels}{lc $chan_name};
         my $id_channel = eval { $chan_obj->get_id } // 0;
 
         my @nicks      = $bot->gethChannelsNicksOnChan($chan_name);
@@ -5136,7 +5111,7 @@ sub _cmd_say {
     if ($target =~ /^#/) {
         # Channel message — verify bot presence (warn only, still send)
         my $target_lc = lc($target);
-        unless (exists $bot->{channels}{$target} || exists $bot->{channels}{$target_lc}) {
+        unless (exists $bot->{channels}{lc $target} || exists $bot->{channels}{lc $target_lc}) {
             $stream->write("Warning: bot does not appear to be in $target (sending anyway).\r\n");
         }
     }

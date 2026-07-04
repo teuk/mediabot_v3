@@ -71,8 +71,8 @@ return sub {
 
     $assert->like(
         $src,
-        qr/use Time::Local qw\(timegm\);/,
-        'UserCommands imports Time::Local for date calculations'
+        qr/use Time::Local qw\(timegm timelocal\);/,
+        'UserCommands imports Time::Local for date calculations (mb399: timelocal aussi)'
     );
 
     for my $helper (qw(_birthday_valid_date _birthday_mmdd_from_value _birthday_days_ahead)) {

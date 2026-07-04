@@ -841,6 +841,37 @@ sub claude_ctx {
     if (@args && lc($args[0]) eq 'summary') {
         shift @args;
 
+        # mb415-R1: options positionnelles LIBRES, extraites avant les filtres :
+        #   help        -> aide complète de la sous-commande (notice) ;
+        #   public|pub  -> sortie sur le canal courant (au lieu de notices) ;
+        #   <N>l        -> nombre de lignes du RÉSUMÉ (1..10 ; défaut: 2-3
+        #                  phrases, inchangé). Le nombre NU reste, comme avant,
+        #                  le nombre de MESSAGES analysés.
+        my ($public_out, $out_lines, $want_help) = (0, undef, 0);
+        @args = grep {
+            my $a = lc($_ // '');
+            if    ($a eq 'public' || $a eq 'pub') { $public_out = 1; 0 }
+            elsif ($a =~ /^(\d+)l$/)              { $out_lines = int($1); 0 }
+            elsif ($a eq 'help')                  { $want_help = 1; 0 }
+            else                                  { 1 }
+        } @args;
+        if (defined $out_lines) {
+            $out_lines = 1  if $out_lines < 1;
+            $out_lines = 10 if $out_lines > 10;
+        }
+        if ($want_help) {
+            Mediabot::Helpers::botNotice($self, $nick, 'Usage: ai summary [last|today|yesterday|week|<N>d] [<N>] [<N>l] [public] [nick]');
+            Mediabot::Helpers::botNotice($self, $nick, 'Periode: last = depuis le dernier summary sur ce canal ; today / yesterday / week ; <N>d = N derniers jours (1-30). Defaut: les <N> derniers messages.');
+            Mediabot::Helpers::botNotice($self, $nick, 'Options: <N> = nombre de messages analyses (5-50, defaut 10 ; 200 avec une periode) ; <N>l = nombre de lignes du resume (1-10, defaut 2-3 phrases) ; public = reponse sur le canal au lieu d\'une notice ; nick = ne resumer que ce nick.');
+            Mediabot::Helpers::botNotice($self, $nick, 'Exemples: ai summary 5l public | ai summary today teuk | ai summary 7d 3l | ai summary last public');
+            return;
+        }
+        # Sortie : canal courant si public demandé (et dispo), sinon notice.
+        my $can_public = $public_out && Mediabot::Helpers::isIrcChannelTarget($channel); # mb416-B2
+        my $send_out = $can_public
+            ? sub { Mediabot::Helpers::botPrivmsg($self, $channel, $_[0]) }
+            : sub { Mediabot::Helpers::botNotice($self, $nick, $_[0]) };
+
         # mb86-IMP3 / mb87-IMP2 / mb91-IMP2: modes de filtre temporel
         my $date_filter = '';
         my $date_label  = '';
@@ -920,7 +951,8 @@ sub claude_ctx {
         while (my $r = $sth->fetchrow_hashref) { unshift @rows, "$r->{nick}: $r->{text}"; }
         $sth->finish;
         unless (@rows) {
-            Mediabot::Helpers::botNotice($self, $nick, "No messages found on $channel$date_label."); return;
+            $send_out->("No messages found on $channel$date_label.");  # mb415-R1
+            return;
         }
         my $transcript = join("\n", @rows);
         my $who_str    = $filter_nick ? " by $filter_nick" : "";
@@ -930,19 +962,24 @@ sub claude_ctx {
             $self->{_claude_summary_ts}{"summary_last:$channel"} = time();
         }
         # mb108-IMP4: notifier immédiatement le nb de messages analysés (feedback avant l'appel API)
-        Mediabot::Helpers::botNotice($self, $nick,
-            "Summarising $n_found message(s)${who_str}${date_label} on $channel...");
-        my $summary_prompt = "Summarise this IRC conversation${who_str}${date_label} ($n_found messages) in 2-3 sentences:\n$transcript";
-        # Call Claude with injected prompt, output as notice to caller
-        return claudeAI($self, $ctx->message, $nick, undef,
-            sub { Mediabot::Helpers::botNotice($self, $nick, $_[0]) }, $summary_prompt);
+        $send_out->("Summarising $n_found message(s)${who_str}${date_label} on $channel...");  # mb415-R1
+        # mb415-R1: longueur du résumé paramétrable (<N>l) ; défaut inchangé.
+        my $len_str = defined($out_lines)
+            ? ($out_lines == 1 ? 'in exactly 1 short line' : "in exactly $out_lines short lines")
+            : 'in 2-3 sentences';
+        my $summary_prompt = "Summarise this IRC conversation${who_str}${date_label} ($n_found messages) $len_str:\n$transcript";
+        # Call Claude with injected prompt; output publicly on the channel if
+        # requested (mb415-R1), otherwise as notice to the caller (historique
+        # de contexte aligné sur la destination).
+        return claudeAI($self, $ctx->message, $nick, ($can_public ? $channel : undef),
+            $send_out, $summary_prompt);
     }
 
     # Y1: !ai relay <#chan> <prompt> — relay response to a channel (from private)
     if (@args >= 2 && lc($args[0]) eq 'relay' && $args[1] =~ /^#/) {
         shift @args;
         my $relay_chan = shift @args;
-        unless (exists $self->{channels}{$relay_chan}) {
+        unless (exists $self->{channels}{lc $relay_chan}) {
             Mediabot::Helpers::botNotice($self, $nick, "Not on channel $relay_chan."); return;
         }
         # Override channel and re-enter claudeAI with relay channel

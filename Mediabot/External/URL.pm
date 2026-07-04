@@ -59,7 +59,22 @@ sub _extract_url {
     #   https://example.org/foo).
     #   https://example.org/foo,
     #   https://example.org/foo]
-    $url =~ s/[)\].,!?;:]+$//;
+    #
+    # mb405-B1: MAIS ne retirer une ')' ou ']' finale que si elle est NON
+    # APPARIÉE dans l'URL. Les URLs Wikipédia se terminent très souvent par
+    # une parenthèse LÉGITIME (…/Talos_(mythologie)) : l'ancien strip aveugle
+    # la coupait -> mauvaise page / 404. On strippe la ponctuation pure, puis
+    # on ne consomme les fermantes finales que tant qu'elles sont en excès.
+    $url =~ s/[.,!?;:]+$//;
+    while ($url =~ /[)\]]$/) {
+        my $last = substr($url, -1);
+        my ($open, $close) = $last eq ')' ? ('(', ')') : ('[', ']');
+        my $n_open  = () = $url =~ /\Q$open\E/g;
+        my $n_close = () = $url =~ /\Q$close\E/g;
+        last if $n_close <= $n_open;   # appariée -> elle fait partie de l'URL
+        chop $url;
+        $url =~ s/[.,!?;:]+$//;
+    }
 
     # If the URL is wrapped in a single trailing quote, remove it.
     $url =~ s/["']+$//;
@@ -1240,7 +1255,13 @@ sub _clean_generic_url_title {
     );
     return undef if grep { $title =~ $_ } @_BLOCKED_TITLE_PATTERNS;
 
-    $title = substr($title, 0, 300);
+    # mb408-R1: troncature à la frontière de mot + ellipse. Avant,
+    # substr(0,300) coupait en plein mot sans indiquer la coupe.
+    if (length($title) > 300) {
+        $title = substr($title, 0, 300);
+        $title =~ s/\s+\S*$// if $title =~ /\s/;   # ne pas finir sur un mot coupé
+        $title .= '…';
+    }
 
     return $title;
 }
@@ -1344,7 +1365,7 @@ sub displayUrlTitle {
 
     # IMP1: anti-repetition cache — skip if same URL posted in same channel < 5 min ago
     if (defined $url) {
-        my $cache_key  = lc($url) . "\x00" . ($sChannel // '');
+        my $cache_key  = lc($url) . "\x00" . lc($sChannel // '');   # mb408-R1: canal lc (cohérent mb407)
         my $cache      = $self->{_url_display_cache} //= {};
         my $now        = time();
         my $url_ttl    = 300;  # 5 minutes
@@ -1407,7 +1428,7 @@ sub displayUrlTitle {
         }
     
         # ── 2. Instagram ───────────────────────────────────────────────────────
-        if ($url =~ /instagram\.com/i) {
+        if ($url =~ m{\Ahttps?://(?:www\.)?instagram\.com(?:[/:?#]|\z)}i) { # mb406-B1: host ancré
             unless (Mediabot::External::_chanset_ok($self, $sChannel, 'UrlTitle')) {
                 $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Instagram)");
                 return undef;
@@ -1417,7 +1438,7 @@ sub displayUrlTitle {
         }
     
         # ── 3. Spotify ─────────────────────────────────────────────────────────
-        if ($url =~ /open\.spotify\.com/i) {
+        if ($url =~ m{\Ahttps?://open\.spotify\.com(?:[/:?#]|\z)}i) { # mb406-B1: host ancré
             unless (Mediabot::External::_chanset_ok($self, $sChannel, 'UrlTitle')) {
                 $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Spotify)");
                 return undef;
@@ -1427,7 +1448,7 @@ sub displayUrlTitle {
         }
     
         # ── 4. Apple Music ─────────────────────────────────────────────────────
-        if ($url =~ /music\.apple\.com/i) {
+        if ($url =~ m{\Ahttps?://music\.apple\.com(?:[/:?#]|\z)}i) { # mb406-B1: host ancré
             unless (Mediabot::External::_chanset_ok($self, $sChannel, 'AppleMusic')) {
                 $self->{logger}->log(4, "displayUrlTitle() AppleMusic chanset not enabled on $sChannel");
                 return undef;
@@ -1437,7 +1458,7 @@ sub displayUrlTitle {
         }
     
         # ── 5. Facebook ────────────────────────────────────────────────────────
-        if ($url =~ m{https?://(?:www\.)?facebook\.com(?:/|$)}i) {
+        if ($url =~ m{\Ahttps?://(?:www\.)?facebook\.com(?:/|\z)}i) { # mb416-B1: host anchored
             unless (Mediabot::External::_chanset_ok($self, $sChannel, 'UrlTitle')) {
                 $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Facebook)");
                 return undef;
@@ -1447,7 +1468,7 @@ sub displayUrlTitle {
         }
     
         # ── 6. X / Twitter ─────────────────────────────────────────────────────
-        if ($url =~ m{https?://(?:www\.)?(?:x|twitter)\.com(?:/|$)}i) {
+        if ($url =~ m{\Ahttps?://(?:www\.)?(?:x|twitter)\.com(?:/|\z)}i) { # mb416-B1: host anchored
             unless (Mediabot::External::_chanset_ok($self, $sChannel, 'UrlTitle')) {
                 $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (X/Twitter)");
                 return undef;

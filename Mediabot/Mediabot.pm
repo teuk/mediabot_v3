@@ -724,7 +724,7 @@ sub setup_channel_nicklist_timers {
     $interval = 300 unless defined $interval && $interval =~ /^\d+$/ && $interval > 0;
 
     foreach my $channel_name (sort keys %{ $self->{channels} || {} }) {
-        my $channel_obj = $self->{channels}{$channel_name};
+        my $channel_obj = $self->{channels}{lc $channel_name};
         next unless $channel_obj;
 
         my $timer = IO::Async::Timer::Periodic->new(
@@ -1035,7 +1035,12 @@ sub populateChannels {
             auto_join   => $ref->{auto_join},
         });
 
-        $self->{channels}{ $ref->{name} } = $channel_obj;
+        # mb407-B1: clé CANONIQUE lc — un canal ajouté en live (chanadd, déjà lc)
+        # et le même canal rechargé au restart doivent partager LA MÊME clé, et
+        # les lookups par nom reçu d'IRC/utilisateur (casse libre, wrappés lc)
+        # doivent toujours le trouver. Le nom d'affichage canonique reste dans
+        # l'objet (get_name).
+        $self->{channels}{ lc($ref->{name}) } = $channel_obj;
     }
 
     $sth->finish;
@@ -1418,7 +1423,7 @@ sub refresh_channel_hashes {
     $sth->finish;
 
     foreach my $chan_name (keys %{ $self->{channels} }) {
-        my $chan_obj = $self->{channels}{$chan_name};
+        my $chan_obj = $self->{channels}{lc $chan_name};
 
         if (exists $db_info{$chan_name}) {
             my $ref = $db_info{$chan_name};
@@ -1502,7 +1507,7 @@ sub getMessageNickIdentHost {
 	return ($sNick,$sIdent,$sHost);
 }
 
-# DEPRECATED: use $self->{channels}{$name}->get_id instead
+# DEPRECATED: use $self->{channels}{lc $name}->get_id instead
 sub joinChannels {
     my ($self) = @_;
 
@@ -2320,7 +2325,7 @@ triviascore|triviascore|public|Show trivia scores for the current channel sessio
 define|define <word>|public|Look up a word definition from Wiktionary.
 
 # AI
-ai|ai <prompt>|public|Ask Claude. Subcommands: summary, pin, relay, forget, models, stats, reset, history, ai persona.
+ai|ai <prompt>|public|Ask Claude. Subcommands: summary [periode] [N] [Nl] [public] [nick] (details: ai summary help), pin, relay, forget, models, stats, reset, history, ai persona.
 
 # Misc
 spike|spike|public|Show Spike memorial image.
@@ -3186,7 +3191,7 @@ sub process_expired_channel_bans {
         my $channel_name = '';
 
         for my $name (sort keys %{ $self->{channels} || {} }) {
-            my $ch = $self->{channels}{$name} || next;
+            my $ch = $self->{channels}{lc $name} || next;
             my $ch_id = eval { $ch->get_id };
             if (defined $ch_id && $ch_id == $id_channel) {
                 $channel_name = eval { $ch->get_name } || $name;

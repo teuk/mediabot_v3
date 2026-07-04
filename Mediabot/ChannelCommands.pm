@@ -69,14 +69,14 @@ our @EXPORT = qw(
 
 sub getChannel {
     my ($self, $chan_name) = @_;
-    return $self->{channels}{$chan_name};
+    return $self->{channels}{lc $chan_name};
 }
 
 # Get PID file path from configuration
 sub getIdChannel {
     my ($self, $sChannel) = @_;
  $self->{logger}->log(1, " getIdChannel() is deprecated. Use channel object instead.");
-    return $self->{channels}{$sChannel} ? $self->{channels}{$sChannel}->get_id : undef;
+    return $self->{channels}{lc $sChannel} ? $self->{channels}{lc $sChannel}->get_id : undef;
 }
 
 # Get user nickname from user id
@@ -124,7 +124,7 @@ sub get_channel_by_name {
 sub getChannelById {
 	my ($self, $id_channel) = @_;
 	foreach my $chan_name (keys %{ $self->{channels} }) {
-		my $chan = $self->{channels}{$chan_name};
+		my $chan = $self->{channels}{lc $chan_name};
 		return $chan if $chan->{id} == $id_channel;
 	}
 	return undef;
@@ -476,7 +476,7 @@ sub channelSet_ctx {
     # Historical caches may be keyed either by the exact DB channel name
     # (#WatchDog.Test) or by lowercase (#watchdog.test). Accept both.
     my $k = lc($target_channel);
-    my $channel = $self->{channels}{$target_channel} || $self->{channels}{$k};
+    my $channel = $self->{channels}{lc $target_channel} || $self->{channels}{lc $k};
 
     unless ($channel) {
         botNotice($self, $nick, "Unknown channel $target_channel");
@@ -619,7 +619,7 @@ sub purgeChannel_ctx {
     my $key = lc($sChannel);
 
     # Check if bot knows about this channel
-    my $channel_obj = $self->{channels}{$sChannel} || $self->{channels}{$key};
+    my $channel_obj = $self->{channels}{lc $sChannel} || $self->{channels}{lc $key};
     unless ($channel_obj) {
         Mediabot::botNotice($self, $nick, "Channel $sChannel does not exist");
         return;
@@ -706,7 +706,7 @@ sub purgeChannel_ctx {
     # memory in sync so the purged channel cannot survive through TTL caches.
     my @purged_channel_keys = ($sChannel, lc($sChannel));
 
-    delete $self->{channels}{$sChannel};
+    # mb407-B1: clé canonique lc — un seul delete suffit désormais.
     delete $self->{channels}{lc($sChannel)};
 
     if (my $hn = eval { $self->gethChannelNicks }) {
@@ -838,7 +838,7 @@ sub channelPart_ctx {
     }
 
     # Ensure the bot knows the channel BEFORE checking per-channel access
-    my $channel_obj = $self->{channels}{$target} || $self->{channels}{lc($target)};
+    my $channel_obj = $self->{channels}{lc $target} || $self->{channels}{lc($target)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $target does not exist");
         return;
@@ -919,7 +919,7 @@ sub channelJoin_ctx {
     }
 
     # Ensure the bot knows the channel BEFORE checking per-channel access (avoids noisy SQL)
-    my $channel_obj = $self->{channels}{$target} || $self->{channels}{lc($target)};
+    my $channel_obj = $self->{channels}{lc $target} || $self->{channels}{lc($target)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $target does not exist");
         return;
@@ -1035,7 +1035,7 @@ sub channelAddUser_ctx {
     $target_level = int($target_level);
 
     # Ensure the bot knows the channel BEFORE doing any DB access checks
-    my $channel_obj = $self->{channels}{$channel} || $self->{channels}{lc($channel)};
+    my $channel_obj = $self->{channels}{lc $channel} || $self->{channels}{lc($channel)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $channel does not exist");
         return;
@@ -1190,7 +1190,7 @@ sub channelDelUser_ctx {
     }
 
     # Ensure the bot knows the channel BEFORE doing per-channel logic
-    my $channel_obj = $self->{channels}{$channel} || $self->{channels}{lc($channel)};
+    my $channel_obj = $self->{channels}{lc $channel} || $self->{channels}{lc($channel)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $channel does not exist");
         return;
@@ -1337,7 +1337,7 @@ sub userOpChannel_ctx {
     }
 
     # Ensure bot knows the channel BEFORE per-channel level checks (avoids noisy SQL on unknown channel)
-    my $channel_obj = $self->{channels}{$target_chan} || $self->{channels}{lc($target_chan)};
+    my $channel_obj = $self->{channels}{lc $target_chan} || $self->{channels}{lc($target_chan)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $target_chan does not exist");
         return;
@@ -1422,7 +1422,7 @@ sub userDeopChannel_ctx {
     }
 
     # Ensure bot knows the channel BEFORE per-channel level checks (avoids noisy SQL on unknown channel)
-    my $channel_obj = $self->{channels}{$target_chan} || $self->{channels}{lc($target_chan)};
+    my $channel_obj = $self->{channels}{lc $target_chan} || $self->{channels}{lc($target_chan)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $target_chan does not exist");
         return;
@@ -1507,7 +1507,7 @@ sub userInviteChannel_ctx {
     }
 
     # Ensure the bot knows the channel BEFORE per-channel checks (avoid noisy SQL)
-    my $channel_obj = $self->{channels}{$target_chan} || $self->{channels}{lc($target_chan)};
+    my $channel_obj = $self->{channels}{lc $target_chan} || $self->{channels}{lc($target_chan)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $target_chan does not exist");
         return;
@@ -1592,7 +1592,7 @@ sub userVoiceChannel_ctx {
     }
 
     # Ensure the channel exists in bot memory (avoid useless SQL errors)
-    my $channel_obj = $self->{channels}{$target_chan} || $self->{channels}{lc($target_chan)};
+    my $channel_obj = $self->{channels}{lc $target_chan} || $self->{channels}{lc($target_chan)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $target_chan does not exist");
         return;
@@ -1684,7 +1684,7 @@ sub userDevoiceChannel_ctx {
     }
 
     # Ensure the channel exists in bot memory (avoid useless SQL errors)
-    my $channel_obj = $self->{channels}{$target_chan} || $self->{channels}{lc($target_chan)};
+    my $channel_obj = $self->{channels}{lc $target_chan} || $self->{channels}{lc($target_chan)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $target_chan does not exist");
         return;
@@ -1776,7 +1776,7 @@ sub userKickChannel_ctx {
     }
 
     # Ensure the bot knows the channel BEFORE doing per-channel privilege checks
-    my $channel_obj = $self->{channels}{$target_chan} || $self->{channels}{lc($target_chan)};
+    my $channel_obj = $self->{channels}{lc $target_chan} || $self->{channels}{lc($target_chan)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $target_chan does not exist");
         return;
@@ -1866,7 +1866,7 @@ sub _channelban_resolve_channel {
 
 sub _channelban_channel_obj {
     my ($self, $channel) = @_;
-    return $self->{channels}{$channel} || $self->{channels}{lc($channel || '')};
+    return $self->{channels}{lc $channel} || $self->{channels}{lc($channel || '')};
 }
 
 sub _channelban_actor_level {
@@ -2474,7 +2474,7 @@ sub userTopicChannel {
     }
 
     # Get channel object and verify existence
-    my $channel_obj = $self->{channels}{$sChannel};
+    my $channel_obj = $self->{channels}{lc $sChannel};
     unless (defined $channel_obj) {
         botNotice($self, $sNick, "Channel $sChannel does not exist");
         return;
@@ -2543,7 +2543,7 @@ sub userShowcommandsChannel_ctx {
     }
 
     # If the bot doesn't know this channel, don't try DB lookups (avoid noisy SQL)
-    my $channel_obj = $self->{channels}{$target} || $self->{channels}{lc($target)};
+    my $channel_obj = $self->{channels}{lc $target} || $self->{channels}{lc($target)};
     unless ($channel_obj) {
         return queueBotNotices(
             $self,
@@ -2610,7 +2610,7 @@ sub userChannelInfo_ctx {
     }
 
     # Require the channel to exist in the bot cache/hash first
-    my $channel_obj = $self->{channels}{$sChannel} || $self->{channels}{lc($sChannel)};
+    my $channel_obj = $self->{channels}{lc $sChannel} || $self->{channels}{lc($sChannel)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $sChannel does not exist");
         logBot($self, $ctx->message, $sChannel, "chaninfo", $sChannel);
@@ -2765,7 +2765,7 @@ sub channelStatLines_ctx {
     }
 
     # (small improvement) If we don't know the channel internally, say it early (no pointless SQL)
-    my $chan_obj = $self->{channels}{$target_channel} || $self->{channels}{lc($target_channel)};
+    my $chan_obj = $self->{channels}{lc $target_channel} || $self->{channels}{lc($target_channel)};
     unless ($chan_obj) {
         botNotice($self, $nick, "Channel $target_channel doesn't seem to be registered.");
         logBot($self, $ctx->message, undef, "chanstatlines", $target_channel, "No such channel");
@@ -2966,7 +2966,7 @@ sub mbDbCheckHostnameNickChan_ctx {
     }
 
     # Ensure the bot knows this channel (avoid noisy SQL / ambiguous errors elsewhere)
-    my $channel_obj = $self->{channels}{$target_chan} || $self->{channels}{lc($target_chan)};
+    my $channel_obj = $self->{channels}{lc $target_chan} || $self->{channels}{lc($target_chan)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $target_chan does not exist");
         return;
@@ -3402,7 +3402,7 @@ sub channelAddBadword_ctx {
     }
 
     # Channel must be registered in memory
-    my $channel_obj = $self->{channels}{$chan} || $self->{channels}{lc($chan)};
+    my $channel_obj = $self->{channels}{lc $chan} || $self->{channels}{lc($chan)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $chan is not registered");
         return;
@@ -3521,7 +3521,7 @@ sub channelRemBadword_ctx {
     }
 
     # Channel must be registered in memory
-    my $channel_obj = $self->{channels}{$chan} || $self->{channels}{lc($chan)};
+    my $channel_obj = $self->{channels}{lc $chan} || $self->{channels}{lc($chan)};
     unless ($channel_obj) {
         botNotice($self, $nick, "Channel $chan is not registered");
         return;
@@ -3623,7 +3623,7 @@ sub setChannelAntiFloodParams_ctx {
     # ---------------------------------------------------------
     # Resolve channel object from in-memory map
     # ---------------------------------------------------------
-    my $channel_obj = $self->{channels}{$target_channel}
+    my $channel_obj = $self->{channels}{lc $target_channel}
                    || $self->{channels}{lc $target_channel};
 
     unless ($channel_obj) {
@@ -3750,7 +3750,7 @@ sub setChannelAntiFloodParams_ctx {
 sub getChannelOwner {
 	my ($self, $sChannel) = @_;
 
-	my $channel_obj = $self->{channels}{$sChannel};
+	my $channel_obj = $self->{channels}{lc $sChannel};
 
 	unless (defined $channel_obj) {
 		$self->{logger}->log(1, "getChannelOwner() unknown channel: $sChannel");
@@ -4011,7 +4011,7 @@ sub setTMDBLangChannel_ctx {
         }
     }
 
-    my $channel_obj_tmdb = $self->{channels}{$target_channel}
+    my $channel_obj_tmdb = $self->{channels}{lc $target_channel}
                         || $self->{channels}{lc($target_channel)};
     unless ($channel_obj_tmdb) {
         botNotice($self, $nick, "Unknown channel: $target_channel");

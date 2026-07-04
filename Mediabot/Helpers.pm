@@ -100,6 +100,7 @@ our @EXPORT = qw(
     whereis
     whereis_async
     getConsoleChan
+    channel_id_cached
     leet
     logBotAction
     versionCheck
@@ -389,8 +390,8 @@ sub logBot {
 
     # Retrieve the channel ID from the channel object if available
     my $channel_id;
-    if (defined $channel && exists $self->{channels}{$channel}) {
-        $channel_id = $self->{channels}{$channel}->get_id;
+    if (defined $channel && exists $self->{channels}{lc $channel}) {
+        $channel_id = $self->{channels}{lc $channel}->get_id;
     }
 
     # Normalize the argument string (handle undefined values)
@@ -1321,7 +1322,7 @@ sub getUserChannelLevelByName {
 sub setChannelAntiFlood {
 	my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-	my $channel_obj = $self->{channels}{$sChannel};
+	my $channel_obj = $self->{channels}{lc $sChannel};
 
 	unless (defined $channel_obj) {
 		botNotice($self, $sNick, "Channel $sChannel is not registered to me");
@@ -1396,6 +1397,64 @@ sub make_password_hash {
 }
 
 
+# mb411-R1: résolution CENTRALE de l'id d'un canal — cache interne d'abord
+# (clé canonique lc, mb407), SELECT en repli. Remplace le motif
+# « prepare('SELECT id_channel FROM CHANNEL WHERE name = ?') » recopié dans
+# ~20 handlers (une requête SQL PAR COMMANDE). Renvoie l'id, ou undef si le
+# canal est inconnu du cache ET de la base.
+sub channel_id_cached {
+    my ($self, $channel) = @_;
+    return undef unless defined $channel && $channel ne '';
+
+    my $obj = $self->{channels}{lc $channel};
+    return $obj->get_id if $obj;
+
+    # mb416-B3: the compatibility handle $self->{dbh} can be stale after
+    # Mediabot::DB reconnects. Ask the DB wrapper for its current handle before
+    # falling back, and turn a missing/broken fallback into undef rather than a
+    # runtime exception in every migrated command.
+    my $dbh;
+    my $db_obj = $self->{db};
+    if ($db_obj && eval { $db_obj->can('ensure_connected') }) {
+        $dbh = eval { $db_obj->ensure_connected };
+        if (!$dbh && $@ && $self->{logger}) {
+            (my $err = $@) =~ s/\s+/ /g;
+            $self->{logger}->log(1,
+                "channel_id_cached() DB reconnect failed for $channel: $err");
+        }
+    }
+    $dbh ||= $self->{dbh};
+    return undef unless $dbh;
+
+    my $sth = eval {
+        $dbh->prepare('SELECT id_channel FROM CHANNEL WHERE name = ?')
+    };
+    unless ($sth) {
+        my $err = $@ || $DBI::errstr || 'unknown error';
+        $err =~ s/\s+/ /g;
+        $self->{logger}->log(1,
+            "channel_id_cached() SQL prepare failed for $channel: $err")
+            if $self->{logger};
+        return undef;
+    }
+
+    my $ok = eval { $sth->execute($channel) };
+    unless ($ok) {
+        my $err = $@ || $DBI::errstr || 'unknown error';
+        $err =~ s/\s+/ /g;
+        eval { $sth->finish };
+        $self->{logger}->log(1,
+            "channel_id_cached() SQL execute failed for $channel: $err")
+            if $self->{logger};
+        return undef;
+    }
+
+    my $ref = eval { $sth->fetchrow_hashref };
+    eval { $sth->finish };
+    return $ref->{id_channel} if $ref;
+    return undef;
+}
+
 sub getConsoleChan {
     my ($self) = @_;
 
@@ -1434,32 +1493,16 @@ sub logBotAction {
     my $id_channel;
 
     if (defined $sChannel) {
-        my $sQuery = "SELECT id_channel FROM CHANNEL WHERE name = ?";
-        my $sth = $self->{dbh}->prepare($sQuery);
+        # mb416-B3: logBotAction is a hot path (public/action/join/part/etc.).
+        # Resolve the channel id from the canonical in-memory cache instead of
+        # issuing an extra SELECT before every CHANNEL_LOG INSERT.
+        $id_channel = channel_id_cached($self, $sChannel);
 
-        unless ($sth) {
-            $self->{logger}->log(1, "logBotAction() SQL prepare error: $DBI::errstr Query: $sQuery")
-                if $self->{logger};
-            return;
-        }
-
-        unless ($sth && $sth->execute($sChannel)) {
-            $self->{logger}->log(1, "logBotAction() SQL execute error: $DBI::errstr Query: $sQuery")
-                if $self->{logger};
-            $sth->finish if $sth;
-            return;
-        }
-
-        my $ref = $sth->fetchrow_hashref();
-        $sth->finish;
-
-        unless ($ref) {
+        unless (defined $id_channel) {
             $self->{logger}->log(4, "logBotAction() channel not found: $sChannel")
                 if $self->{logger};
             return;
         }
-
-        $id_channel = $ref->{id_channel};
     }
 
     my $insert_query = <<'SQL';
@@ -1944,7 +1987,7 @@ sub checkAntiFlood {
     my $params_ttl = _af_conf_int($self, 'OUTPUT_PARAMS_CACHE_TTL', 60, 5, 86400);
     my $pc = $self->{_af_params}{$sChannel} // {};
     if (!$pc->{ts} || ($now - $pc->{ts}) >= $params_ttl) {
-        my $channel_obj = $self->{channels}{$sChannel};
+        my $channel_obj = $self->{channels}{lc $sChannel};
         unless (defined $channel_obj) {
             $self->{logger}->log(1, "checkAntiFlood() unknown channel: $sChannel");
             return 0;
@@ -1966,7 +2009,14 @@ sub checkAntiFlood {
                 };
                 $pc = $self->{_af_params}{$sChannel};
             } else {
-                # No CHANNEL_FLOOD row — AntiFlood not configured, allow all
+                # mb409-B1: CACHE NÉGATIF. Sans lui, l'absence de ligne
+                # CHANNEL_FLOOD (le cas par défaut d'un canal sans antiflood)
+                # relançait le SELECT à CHAQUE message sortant — à rebours de
+                # l'objectif AF1 « zero DB queries per outgoing message ».
+                # L'absence est mémorisée avec le même TTL que les paramètres :
+                # activer l'antiflood en base est pris en compte au prochain
+                # rafraîchissement (<= OUTPUT_PARAMS_CACHE_TTL).
+                $self->{_af_params}{$sChannel} = { ts => $now, unconfigured => 1 };
                 return 0;
             }
         } else {
@@ -1974,6 +2024,10 @@ sub checkAntiFlood {
             return 0;
         }
     }
+
+    # mb409-B1: canal sans antiflood (cache négatif frais) -> tout passe,
+    # sans requête SQL.
+    return 0 if $pc->{unconfigured};
 
     my $nbmsg_max  = $pc->{nbmsg_max}  // 5;
     my $duration   = $pc->{duration}   // 30;
@@ -3275,7 +3329,7 @@ sub whoTalk_ctx {
     }
 
     # Prefer our internal channel hash (avoid mismatches / useless SQL)
-    my $chan_obj = $self->{channels}{$target} || $self->{channels}{lc($target)};
+    my $chan_obj = $self->{channels}{lc $target} || $self->{channels}{lc($target)};
     unless ($chan_obj) {
         botNotice($self, $nick, "Channel $target doesn't seem to be registered.");
         logBot($self, $ctx->message, undef, "whotalk", $target, "No such channel");

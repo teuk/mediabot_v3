@@ -59,6 +59,9 @@ return sub {
 
     # --- 1. Contrat réel de _yt_format_duration() ---------------------------
     my $sub_text = _extract_sub_528($src, '_yt_format_duration');
+    # mb398: _yt_format_duration délègue désormais le parsing à
+    # _yt_parse_duration (composant jours) — extraire aussi la dépendance.
+    my $parse_text = _extract_sub_528($src, '_yt_parse_duration');
     $assert->ok(
         defined $sub_text && $sub_text ne '',
         '_yt_format_duration source extrait'
@@ -67,7 +70,7 @@ return sub {
     my $fmt;
     {
         no strict; no warnings;
-        $fmt = eval "package T528; $sub_text; \\&T528::_yt_format_duration";
+        $fmt = eval "package T528; $parse_text; $sub_text; \\&T528::_yt_format_duration";
     }
     $assert->ok(ref($fmt) eq 'CODE', '_yt_format_duration compilé en isolation');
 

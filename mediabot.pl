@@ -252,13 +252,30 @@ my $sStartedMode = ( $MAIN_PROG_DAEMON ? "background" : "foreground");
 my $MAIN_PROG_DEBUG = $mediabot->getDebugLevel();
 $mediabot->{logger}->log(0,"Mediabot v$MAIN_PROG_VERSION started in $sStartedMode with debug level $MAIN_PROG_DEBUG");
 
+# mb404-R1: ORDRE D'INITIALISATION REQUIS (ne pas réordonner sans réflexion) :
+#   1. DB           — tout le reste lit/écrit la base ;
+#   2. ChannelBan   — a besoin de dbh ;
+#   3. dbCheckTables— échoue vite si le schéma est absent, AVANT tout usage ;
+#   4. init_auth    — l'auth lit USER ; dbLogoutUsers suppose l'auth prête ;
+#   5. dbLogoutUsers— purge les sessions d'un run précédent avant tout login ;
+#   6. populateChannels — construit le cache canaux utilisé par pickServer,
+#      les timers de nicklist et les gauges initiales ;
+#   7. loop, PUIS Metrics (Metrics->new exige le loop pour son serveur HTTP) ;
+#   8. Partyline / Scheduler — s'appuient sur bot+loop+metrics ;
+#   9. _build_irc / _do_login en dernier : les handlers IRC supposent tout le
+#      reste en place ($SIG{TERM/INT/HUP} sont posés dans _do_login).
+# Les gauges Prometheus initiales sont posées en un seul endroit, après
+# start_http_server() (cf. mb403).
+
 # Initialize Database instance
 $mediabot->{db} = Mediabot::DB->new($mediabot->{conf}, $mediabot->{logger});
 $mediabot->{dbh} = $mediabot->{db}->dbh;  # for compatibility with old code
 
-if ($mediabot->{metrics}) {
-    $mediabot->{metrics}->set('mediabot_db_connected', $mediabot->{dbh} ? 1 : 0);
-}
+# mb403-R1: le bloc "set mediabot_db_connected" qui suivait était MORT :
+# $mediabot->{metrics} n'existe pas encore ici (l'objet Metrics est créé plus
+# bas, après le loop). Les gauges initiales sont réellement posées dans le
+# bloc unique qui suit start_http_server(). Supprimé pour ne plus laisser
+# croire qu'elles sont disponibles dès la connexion DB.
 
 # Initialize persistent channel ban helper
 $mediabot->{channel_ban} = Mediabot::ChannelBan->new(
@@ -280,12 +297,8 @@ $mediabot->dbLogoutUsers();
 # Populate channels from database
 $mediabot->populateChannels();
 
-if ($mediabot->{metrics}) {
-    $mediabot->{metrics}->set(
-        'mediabot_channels_managed',
-        scalar(keys %{ $mediabot->{channels} || {} })
-    );
-}
+# mb403-R1: idem — le set 'mediabot_channels_managed' qui suivait était mort
+# (metrics pas encore créé) ; la gauge est posée après start_http_server().
 
 # Pick IRC Server
 $mediabot->pickServer();
@@ -1310,13 +1323,13 @@ sub on_login {
         # NS3: throttled JOIN flood prevention — stagger joins every 1.5s
         # Prevents server-side flood kick on large channel lists after a split.
         my @chans_to_join = sort grep {
-            my $c = $mediabot->{channels}{$_};
+            my $c = $mediabot->{channels}{lc $_};
             $c && $c->get_auto_join
             && (($c->get_description // '') ne 'console')
         } keys %{ $mediabot->{channels} // {} };
         my $join_delay = 0;
         for my $chan_name (@chans_to_join) {
-            my $c = $mediabot->{channels}{$chan_name};
+            my $c = $mediabot->{channels}{lc $chan_name};
             my $key = $c->get_key // '';
             $join_delay += 1500;  # 1.5s between each JOIN
             my $jt = IO::Async::Timer::Countdown->new(
@@ -2262,7 +2275,7 @@ sub on_message_JOIN {
         # Enforce active ChannelBans on JOIN: MODE +b + KICK if mask matches.
         if ($mediabot->{channel_ban} && $sIdent && $sHost) {
             my $cb       = $mediabot->{channel_ban};
-            my $chan_obj = $mediabot->{channels}{$target_name}
+            my $chan_obj = $mediabot->{channels}{lc $target_name}
                         // $mediabot->{channels}{lc($target_name)};
             my $id_channel = eval { $chan_obj->get_id } // 0;
             if ($id_channel) {
@@ -2589,7 +2602,7 @@ sub on_message_RPL_WHOISUSER {
                 return;
             }
 
-            my $chan_obj   = $mediabot->{channels}{$chan} // $mediabot->{channels}{lc($chan)};
+            my $chan_obj   = $mediabot->{channels}{lc $chan} // $mediabot->{channels}{lc($chan)};
             my $id_channel = eval { $chan_obj->get_id } // 0;
             unless ($id_channel) {
                 $stream->write("Channel $chan not found in bot state.\r\n");

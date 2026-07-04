@@ -2,7 +2,8 @@ package Mediabot::ChannelBan;
 
 use strict;
 use warnings;
-use POSIX qw(strftime);
+# mb401-R1: POSIX::strftime n'est plus importé — son seul utilisateur était
+# expires_sql_from_seconds(), supprimée.
 
 # =============================================================================
 # Mediabot::ChannelBan
@@ -91,15 +92,10 @@ sub parse_duration {
     return ($n * $mult{$unit}, "$n$unit", undef);
 }
 
-sub expires_sql_from_seconds {
-    my ($self, $seconds) = @_;
-
-    return undef unless defined $seconds;
-    return undef if $seconds <= 0;
-
-    my $ts = time + $seconds;
-    return strftime('%Y-%m-%d %H:%M:%S', localtime($ts));
-}
+# mb401-R1: expires_sql_from_seconds() supprimée. Plus aucun appelant depuis
+# mb350 (l'expiration est calculée en SQL via NOW() + INTERVAL ? SECOND) et la
+# garder invitait à réintroduire le bug de double horloge (Perl localtime vs
+# NOW() MySQL) qu'elle incarnait.
 
 # -----------------------------------------------------------------------------
 # parse_ban_level($text, $actor_channel_level)
