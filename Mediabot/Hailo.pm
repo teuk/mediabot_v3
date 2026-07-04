@@ -455,6 +455,19 @@ sub get_hailo_channel_ratio {
     return -1 unless defined($sChannel) && $sChannel ne '';
     return -1 unless $self->{dbh};
 
+    # mb432-R1: cache avec TTL. hailo_should_chatter() est appelé à CHAQUE
+    # message public d'un canal ; sans cache, get_hailo_channel_ratio faisait
+    # un SELECT+JOIN par message. Le ratio ne change que par commande
+    # (set_hailo_channel_ratio, qui invalide ce cache) -> on peut le mémoriser.
+    # Clé lc (mb407). TTL 60 s : une modif externe de la table est prise en
+    # compte au prochain rafraîchissement.
+    my $ckey = lc $sChannel;
+    my $now  = time();
+    my $cached = $self->{_hailo_ratio_cache}{$ckey};
+    if ($cached && ($now - $cached->{ts}) < 60) {
+        return $cached->{ratio};
+    }
+
     my $sQuery = "SELECT HAILO_CHANNEL.ratio FROM HAILO_CHANNEL JOIN CHANNEL ON CHANNEL.id_channel = HAILO_CHANNEL.id_channel WHERE CHANNEL.name = ?";
     my $sth = $self->{dbh}->prepare($sQuery);
 
@@ -477,6 +490,9 @@ sub get_hailo_channel_ratio {
     }
 
     $sth->finish;
+    # mb432-R1: mémoriser (y compris -1 = non configuré, pour éviter de
+    # re-SELECT à chaque message sur un canal sans ratio).
+    $self->{_hailo_ratio_cache}{$ckey} = { ts => $now, ratio => $ratio };
     return $ratio;
 }
 
@@ -549,6 +565,10 @@ sub set_hailo_channel_ratio {
         }
 
         $sth->finish;
+        # mb435-B2: mb432 invalidated the cache only after INSERT. The common
+        # UPDATE path returned first, leaving the old ratio active for up to
+        # 60 seconds. Invalidate here too so an existing channel changes now.
+        delete $self->{_hailo_ratio_cache}{lc $sChannel};
         $self->{logger}->log(3, "set_hailo_channel_ratio updated hailo chatter ratio to $ratio for $sChannel")
             if $self->{logger};
         return 0;
@@ -571,6 +591,9 @@ sub set_hailo_channel_ratio {
     }
 
     $sth->finish;
+    # mb432-R1: invalider le cache de ratio pour ce canal afin qu'un changement
+    # prenne effet immédiatement (sinon le TTL pouvait retarder l'application).
+    delete $self->{_hailo_ratio_cache}{lc $sChannel};
     $self->{logger}->log(3, "set_hailo_channel_ratio set hailo chatter ratio to $ratio for $sChannel")
         if $self->{logger};
     return 0;
@@ -813,14 +836,27 @@ sub check_birthdays_today {
     my @t   = localtime;
     my $mmdd = sprintf("%02d-%02d", $t[4]+1, $t[3]);  # MM-DD today
 
-    # Match both MM-DD and YYYY-MM-DD formats
-    my $sth = $dbh->prepare(q{
+    # mb433-B1: les personnes nées un 29 février n'ont pas de date le
+    # 3 années sur 4. Sans traitement, elles ne sont JAMAIS fêtées hors année
+    # bissextile (le MM-DD du jour ne vaut jamais "02-29"). Convention (cohérente
+    # avec le "prochain 29 février valide" de mb399) : on observe leur
+    # anniversaire le 28 février des années NON bissextiles. On construit donc
+    # la liste des MM-DD à faire matcher aujourd'hui.
+    my $year    = $t[5] + 1900;
+    my $is_leap = ($year % 4 == 0 && ($year % 100 != 0 || $year % 400 == 0)) ? 1 : 0;
+    my @match_mmdd = ($mmdd);
+    push @match_mmdd, '02-29' if !$is_leap && $mmdd eq '02-28';
+
+    # Match both MM-DD and YYYY-MM-DD formats, pour chaque MM-DD observé.
+    my $where = join(' OR ', ('birthday = ? OR birthday LIKE ?') x scalar(@match_mmdd));
+    my @binds = map { ($_, "%-$_") } @match_mmdd;
+    my $sth = $dbh->prepare(qq{
         SELECT nickname, birthday
         FROM USER
         WHERE birthday IS NOT NULL
-          AND (birthday = ? OR birthday LIKE ?)
+          AND ($where)
     });
-    unless ($sth && $sth->execute($mmdd, "%-$mmdd")) {
+    unless ($sth && $sth->execute(@binds)) {
         $self->{logger}->log(1, "check_birthdays_today() SQL error: $DBI::errstr");
         $sth->finish if $sth;
         return;

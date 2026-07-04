@@ -59,10 +59,11 @@ return sub {
     my $fall = timelocal(0, 0, 12, 24, 9, 2026);
     $assert->is($fn->(10, 25, $fall), 1, 'veille du DST automne -> 1');
 
-    # 29 février : prochain = 2028.
+    # 29 février : observé le 28/02 des années non bissextiles (mb434, aligné
+    # sur l'annonce mb433). Depuis le 03/07/2026, prochain = 28/02/2027.
     my $mid = timelocal(0, 0, 12, 3, 6, 2026);
-    my $expected_feb29 = int((timelocal(0,0,12,29,1,2028) - timelocal(0,0,12,3,6,2026)) / 86400 + 0.5);
-    $assert->is($fn->(2, 29, $mid), $expected_feb29, '29/02 -> prochaine année bissextile');
+    my $expected_feb29 = int((timelocal(0,0,12,28,1,2027) - timelocal(0,0,12,3,6,2026)) / 86400 + 0.5);
+    $assert->is($fn->(2, 29, $mid), $expected_feb29, '29/02 -> 28/02 non bissextile (observance mb433)');
 
     # --- scan source -------------------------------------------------------
     $assert->like($ahead, qr/timelocal\(/,       'compte en calendrier local');

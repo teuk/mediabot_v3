@@ -2336,7 +2336,7 @@ sub _cmd_scriptdryrun {
             my $target = defined($action->{target}) ? $action->{target} : '';
             my $text = defined($action->{text}) ? $action->{text} : '';
             $text =~ s/[\r\n]+/ /g;
-            $text = substr($text, 0, 160) . '...' if length($text) > 160;
+            $text = Mediabot::Helpers::truncate_utf8($text, 160);  # mb429-R1
             $stream->write("    $idx. type=$type target=$target text=$text\r\n");
         }
     }
@@ -4121,7 +4121,7 @@ sub _cmd_ai {
         for my $msg (@display) {
             my $role    = $msg->{role}    // '?';
             my $content = $msg->{content} // '';
-            $content = substr($content, 0, 120) . '...' if length($content) > 120;
+            $content = Mediabot::Helpers::truncate_utf8($content, 120);  # mb429-R1
             $stream->write("  [$role] $content\r\n");
         }
         return;

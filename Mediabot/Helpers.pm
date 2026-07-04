@@ -101,6 +101,7 @@ our @EXPORT = qw(
     whereis_async
     getConsoleChan
     channel_id_cached
+    truncate_utf8
     leet
     logBotAction
     versionCheck
@@ -1402,6 +1403,47 @@ sub make_password_hash {
 # « prepare('SELECT id_channel FROM CHANNEL WHERE name = ?') » recopié dans
 # ~20 handlers (une requête SQL PAR COMMANDE). Renvoie l'id, ou undef si le
 # canal est inconnu du cache ET de la base.
+# mb429-R1: troncature UTF-8-safe partagée. Les textes issus de la DB
+# (publictext, contenus IA, actions...) arrivent en OCTETS UTF-8 (DBI ne
+# décode pas). Un substr($s, 0, N) brut peut couper au milieu d'un caractère
+# accenté -> séquence invalide -> mojibake. On tronque à N octets, on retire
+# une éventuelle séquence multi-octets incomplète (decode tolérant + strip
+# d'un \x{FFFD} final), puis on ré-encode en octets et on ajoute l'ellipse.
+# Généralise le _quote_excerpt de mb428 (Quotes.pm délègue ici).
+sub truncate_utf8 {
+    my ($s, $max, $ellipsis) = @_;
+    $s = '' unless defined $s;
+    $ellipsis = '...' unless defined $ellipsis;
+    $max = int($max // 0);
+    return $s if $max < 1;
+
+    # mb435-B1: this helper is used for both raw UTF-8 bytes read from DBI and
+    # character strings returned by JSON decoders (notably Claude history in
+    # Partyline). Decoding an already-upgraded character string raises
+    # "Wide character" and could break `.ai context`. Preserve the input
+    # representation while applying the same wire-byte budget in both cases.
+    if (utf8::is_utf8($s)) {
+        my $wire = Encode::encode('UTF-8', $s);
+        return $s if length($wire) <= $max;
+
+        my $out  = '';
+        my $used = 0;
+        for my $ch (split //, $s) {
+            my $bytes = Encode::encode('UTF-8', $ch);
+            last if $used + length($bytes) > $max;
+            $out  .= $ch;
+            $used += length($bytes);
+        }
+        return $out . $ellipsis;
+    }
+
+    return $s if length($s) <= $max;
+    my $cut   = substr($s, 0, $max);
+    my $chars = Encode::decode('UTF-8', $cut, Encode::FB_DEFAULT);
+    $chars =~ s/\x{FFFD}+\z//;
+    return Encode::encode('UTF-8', $chars) . $ellipsis;
+}
+
 sub channel_id_cached {
     my ($self, $channel) = @_;
     return undef unless defined $channel && $channel ne '';

@@ -729,12 +729,21 @@ sub mbTMDBSearch_ctx {
         return;
     }
 
-    my $title    = $info->{title}    || $info->{name}          || "Unknown title";
+    # mb424-R1: TMDB renvoie parfois un titre LOCALISÉ vide (film sans
+    # traduction dans la langue demandée) alors que original_title/original_name
+    # est rempli -> l'ancien "$info->{title} || $info->{name}" affichait
+    # "Unknown title". On déroule tous les champs de titre. Le type dérive du
+    # media_type déjà validé par get_tmdb_info (source de vérité) au lieu de la
+    # simple présence d'un champ.
+    my $title = _tmdb_first_nonempty(
+        $info->{title}, $info->{name},
+        $info->{original_title}, $info->{original_name},
+    ) // "Unknown title";
     my $overview = $info->{overview} || "No synopsis available.";
     my $date     = $info->{release_date} || $info->{first_air_date} || "????";
     my $year     = ($date =~ /^(\d{4})/) ? $1 : "????";
     my $rating   = defined($info->{vote_average}) ? sprintf("%.1f", $info->{vote_average}) : "?";
-    my $type     = exists($info->{title}) ? "Movie" : "TV Series";
+    my $type     = (($info->{media_type} // '') eq 'tv') ? "TV Series" : "Movie";
 
     # Build the final IRC message first, then truncate the complete line.
     # The old code truncated only the overview based on prefix length; when the
@@ -758,6 +767,16 @@ sub mbTMDBSearch_ctx {
     }
 
     Mediabot::Helpers::botPrivmsg($self, $channel, $reply);
+}
+
+# mb424-R1: premier argument défini, non vide (après trim), sinon undef.
+sub _tmdb_first_nonempty {
+    for my $v (@_) {
+        next unless defined $v && !ref($v);
+        (my $t = $v) =~ s/^\s+|\s+$//g;
+        return $t if $t ne '';
+    }
+    return undef;
 }
 
 # Get TMDB info using HTTP::Tiny

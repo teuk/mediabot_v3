@@ -3942,9 +3942,8 @@ sub mbChannelLog_ctx {
 
         # Compact whitespace and truncate to avoid flooding
         $text =~ s/\s+/ /g;
-        if (length($text) > 300) {
-            $text = substr($text, 0, 297) . '...';
-        }
+        # mb429-R1: troncature UTF-8-safe (publictext en octets UTF-8).
+        $text = Mediabot::Helpers::truncate_utf8($text, 297);
 
         my $pos = $idx + 1;
         my $tag = ($pos == 1)

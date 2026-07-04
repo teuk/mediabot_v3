@@ -17,6 +17,21 @@ use warnings;
 use Exporter 'import';
 use List::Util qw(min);
 use Mediabot::Helpers;
+use Encode ();
+
+# mb428-B1: extrait tronqué SANS couper un caractère UTF-8 multi-octets.
+# quotetext arrive en OCTETS UTF-8 (DBI ne décode pas). substr($s, 0, N)
+# coupait à N octets, potentiellement au milieu d'un caractère accenté ->
+# séquence UTF-8 invalide -> caractère de remplacement / mojibake en fin
+# d'extrait. On tronque à N octets puis on retire une éventuelle séquence
+# UTF-8 incomplète en queue (decode lax : la partie valide est conservée),
+# et on ré-encode en octets pour rester cohérent avec le pipeline d'envoi.
+# mb428-B1 / mb429-R1: extrait tronqué UTF-8-safe. Délègue désormais au
+# helper partagé Mediabot::Helpers::truncate_utf8 (source unique de vérité).
+sub _quote_excerpt {
+    my ($s, $max) = @_;
+    return Mediabot::Helpers::truncate_utf8($s, $max, '...');
+}
 
 our @EXPORT = qw(
     mbQuotes_ctx
@@ -399,7 +414,7 @@ sub mbQuoteView {
 
         # mb94-B3: extrait tronqué cohérent avec mbQuoteRand et mbQuoteSearch
         my $excerpt = $sQuoteText;
-        $excerpt = substr($excerpt, 0, 300) . '...' if length($excerpt) > 300;
+        $excerpt = _quote_excerpt($excerpt, 300);  # mb428-B1
 
         my $id_q = String::IRC->new($id_quotes)->bold;
         botPrivmsg($self, $sChannel, "($sUserhandle) [id: $id_q] $excerpt");
@@ -506,7 +521,7 @@ sub mbQuoteSearch {
 
         # mb93-IMP3: extrait — afficher jusqu'à 200 chars avec "..." si tronqué
         my $excerpt = $best->{quotetext} // '';
-        $excerpt = substr($excerpt, 0, 200) . '...' if length($excerpt) > 200;
+        $excerpt = _quote_excerpt($excerpt, 200);  # mb428-B1
 
         botPrivmsg($self, $sChannel,
             "Best match on $best->{ts} by $handle (id : $id_q) $excerpt");
@@ -616,7 +631,7 @@ sub mbQuoteRand {
         my $handle = getUserhandle($self, $ref->{id_user}) || 'Unknown';
         # mb93: extrait tronqué cohérent avec mbQuoteView (max 300 chars)
         my $text = $ref->{quotetext} // '';
-        $text = substr($text, 0, 300) . '...' if length($text) > 300;
+        $text = _quote_excerpt($text, 300);  # mb428-B1
         botPrivmsg($self, $sChannel, "($handle) [id: $id_q] $text");
     }
     else {
@@ -859,7 +874,7 @@ sub mbQuoteByNick {
 
     # mb101-IMP1: extrait tronqué 300 chars (cohérence avec mbQuoteRand)
     my $excerpt = $row->{quotetext} // '';
-    $excerpt = substr($excerpt, 0, 300) . '...' if length($excerpt) > 300;
+    $excerpt = _quote_excerpt($excerpt, 300);  # mb428-B1
 
     botPrivmsg($self, $sChannel,
         sprintf("[%d] <%s> %s", $row->{id_quotes}, $row->{author}, $excerpt));

@@ -2450,10 +2450,23 @@ sub _birthday_days_ahead {
     for my $offset (0 .. 4) {
         my $candidate_year = $year + $offset;
 
-        next unless _birthday_valid_date($candidate_year, $month, $day);
+        # mb434-R1: aligner "!birthday next" sur l'annonce automatique (mb433).
+        # Un anniversaire du 29 février est OBSERVÉ le 28 février les années non
+        # bissextiles (c'est ce jour-là que check_birthdays_today le fête).
+        # Avant, ce helper sautait les années non bissextiles pour un 29/02 et
+        # renvoyait le prochain 29 février réel (jusqu'à ~4 ans plus tard),
+        # désaccordé avec l'annonce.
+        my ($obs_month, $obs_day) = ($month, $day);
+        if ($month == 2 && $day == 29) {
+            my $leap = ($candidate_year % 4 == 0
+                && ($candidate_year % 100 != 0 || $candidate_year % 400 == 0)) ? 1 : 0;
+            ($obs_month, $obs_day) = (2, 28) unless $leap;
+        }
+
+        next unless _birthday_valid_date($candidate_year, $obs_month, $obs_day);
 
         my $candidate_epoch = eval {
-            timelocal(0, 0, 12, $day, $month - 1, $candidate_year)
+            timelocal(0, 0, 12, $obs_day, $obs_month - 1, $candidate_year)
         };
         next unless defined $candidate_epoch;
         next if $candidate_epoch < $today_epoch;
@@ -3828,7 +3841,14 @@ sub mbWordCount_ctx {
     my $rows_read = 0;
     while (my ($text) = $sth->fetchrow_array) {
         $rows_read++;
-        $words{lc $_}++ for split /\W+/, ($text // '');
+        # mb426-B1: la connexion DBI ne décode pas l'UTF-8 (pas de mariadb_utf8,
+        # seulement SET NAMES) -> publictext arrive en OCTETS UTF-8. Un split
+        # sur \W+ coupait sur chaque octet d'accent (café -> caf, réponse ->
+        # r+ponse), faussant le comptage sur un canal francophone. On splitte
+        # de façon byte-safe : les octets >= 0x80 (continuation/amorce des
+        # séquences UTF-8 multi-octets) comptent comme des lettres, donc les
+        # mots accentués restent entiers.
+        $words{lc $_}++ for split /[^0-9A-Za-z_\x80-\xFF]+/, ($text // '');
     }
     $sth->finish;
     delete $words{''};
@@ -4708,7 +4728,13 @@ sub mbPollExtend_ctx {
     unless ($poll && $poll->{active}) {
         botPrivmsg($self, $channel, 'No active poll.'); return 1;
     }
-    $poll->{deadline} = ($poll->{deadline} // time()) + $extra;
+    # mb431-B1: si la deadline est déjà passée (l'expiration est paresseuse,
+    # le sondage reste actif tant que personne n'a voté après l'échéance),
+    # repartir de maintenant. Sinon `deadline_passée + $extra` restait dans le
+    # passé -> "remaining" négatif et aucune vraie réouverture du vote.
+    my $base = $poll->{deadline} // time();
+    $base = time() if $base < time();
+    $poll->{deadline} = $base + $extra;
     Mediabot::Helpers::botPrivmsg($self, $channel,
         sprintf('Poll extended by %ds (%ds remaining).', $extra, $poll->{deadline} - time()));
     return 1;
@@ -5708,8 +5734,13 @@ sub mbRoll_ctx {
             : ($results[0] > $r2  ? $results[0] : $r2);
         my $total = $kept + $modifier;
         my $mod_str = $modifier ? sprintf(' %+d = %d', $modifier, $total) : '';
-        $out = sprintf('%s rolled %s (%s): [%d, ~~%d~~]%s  → %d',
-            $nick, $label, $adv_mode, $kept, $drop, $mod_str, $total);
+        # mb425-R1: le dé écarté était affiché "~~8~~" (barré Markdown/Discord),
+        # rendu en tildes littéraux sur IRC. On utilise le vrai code de barré
+        # IRC \x1e (rendu par mIRC/HexChat/WeeChat/Kiwi) + \x0f de reset, en
+        # gardant le nombre lisible même sur un client qui l'ignore.
+        my $drop_str = "\x1e$drop\x0f";
+        $out = sprintf('%s rolled %s (%s): [%d, %s]%s  → %d',
+            $nick, $label, $adv_mode, $kept, $drop_str, $mod_str, $total);
     } elsif ($num == 1) {
         my $total = $results[0] + $modifier;
         my $mod_str = $modifier ? sprintf(' %+d = %d', $modifier, $total) : '';
@@ -9176,7 +9207,9 @@ sub mbDashboard_ctx {
     if ($self->{achievements}) {
         for my $key (keys %{ $self->{achievements}{data} // {} }) {
             my ($n, $ch) = split /\x00/, $key, 2;
-            next unless defined $ch && $ch eq $channel;
+            # mb435-B3: achievement keys are canonical lowercase since
+            # mb430; compare against the folded live channel as well.
+            next unless defined $ch && $ch eq lc($channel // '');
             $ach_unlocked += scalar keys %{ $self->{achievements}{data}{$key} };
         }
     }
@@ -9675,8 +9708,11 @@ sub mbCompat_ctx {
         if ($sth_w && $sth_w->execute($channel, $who)) {
             while (my $r = $sth_w->fetchrow_arrayref) {
                 my $txt = lc($r->[0] // '');
-                $txt =~ s/[^\w\s\x{00C0}-\x{017F}]/ /g;
-                for my $w (split /\s+/, $txt) {
+                # mb427-B1: tokenisation byte-safe (comme mb426). publictext est
+                # en OCTETS UTF-8 (DBI ne décode pas) ; l'ancien
+                # s/[^\w\s\x{00C0}-\x{017F}]/ /g gardait même un octet parasite
+                # (café -> "caf\xC3"). Les octets >= 0x80 comptent comme lettres.
+                for my $w (split /[^0-9A-Za-z_\x80-\xFF]+/, $txt) {
                     next unless length($w) >= 4;
                     $w_counts{$w}++;
                 }
@@ -10100,9 +10136,11 @@ sub mbMood_ctx {
         # Compter les emojis
         while ($txt =~ /($emoji_re)/g) { $emoji_count{$1}++ }
         # Tokeniser
+        # mb427-B1: tokenisation byte-safe (comme mb426) — les mots accentués
+        # (positifs/négatifs français) restent entiers et matchent les
+        # dictionnaires de sentiment.
         my $lower = lc($txt);
-        $lower =~ s/[^\w\s\x{00C0}-\x{017F}]/ /g;
-        for my $w (split /\s+/, $lower) {
+        for my $w (split /[^0-9A-Za-z_\x80-\xFF]+/, $lower) {
             next unless length($w) >= 2;
             $pos++       if $pos_h{$w};
             $neg++       if $neg_h{$w};
@@ -10390,7 +10428,9 @@ sub mbLeaderboard_ctx {
             my %counts_on_chan;
             for my $key (keys %{ $self->{achievements}{data} // {} }) {
                 my ($n, $ch) = split /\x00/, $key, 2;
-                next unless defined $ch && $ch eq $channel;
+                # mb435-B3: mb430 stores channel keys in lowercase. A
+                # mixed-case IRC target must still see its leaderboard data.
+                next unless defined $ch && $ch eq lc($channel // '');
                 $counts_on_chan{$n} = scalar keys %{ $self->{achievements}{data}{$key} };
             }
             my @sorted = sort {

@@ -1171,15 +1171,9 @@ sub _youtube_search_format_entry {
     }
 
     my $dur_disp = _yt_format_duration($info->{duration} // '');
-    my $views = $info->{views};
-    my $views_disp = 'views ?';
-    if (defined($views) && !ref($views) && $views =~ /\A\d+\z/) {
-        $views_disp = 'views ' . (
-            $views >= 1_000_000 ? sprintf('%.1fM', $views / 1_000_000)
-          : $views >= 1_000     ? sprintf('%.1fk', $views / 1_000)
-          :                       $views
-        );
-    }
+    # mb423-R1: vues via le formateur partagé (_yt_format_views, mb360) — un
+    # seul point de vérité pour tout YouTube. '?' si absent/0/non numérique.
+    my $views_disp = 'views ' . _yt_format_views($info->{views});
 
     my $entry = _yt_text(" $title ");
 
@@ -1511,6 +1505,20 @@ sub fortniteStats_ctx {
     my $bp_level    = $battlepass->{level}   // 0;
     my $bp_progress = defined $battlepass->{progress} ? $battlepass->{progress} : 0;
 
+    # mb421-R1: l'API renvoie winRate/kd en flottants non bornés
+    # (ex. kd=1.2345678901). Les afficher bruts est illisible sur IRC. On
+    # arrondit pour l'affichage : K/D à 2 décimales, taux de victoire à 1.
+    # Les valeurs non numériques (API inattendue) retombent sur la brute.
+    my $fmt_num = sub {
+        my ($v, $dp) = @_;
+        return $v unless defined $v && $v =~ /\A-?\d+(?:\.\d+)?\z/;
+        my $s = sprintf("%.${dp}f", $v);
+        $s =~ s/\.?0+\z// if index($s, '.') >= 0;   # 1.50 -> 1.5, 2.00 -> 2
+        return $s;
+    };
+    $kd       = $fmt_num->($kd, 2);
+    $win_rate = $fmt_num->($win_rate, 1);
+
     # Readable on dark/light: bold labels only (no background colors)
     my $user_tag = String::IRC->new('[' . $name . ']')->bold;
 
@@ -1627,19 +1635,21 @@ sub ytSearch_ctx {
             if (ref($mdata) eq 'HASH' && ref($mdata->{items}) eq 'ARRAY') {
                 for my $v (@{ $mdata->{items} }) {
                     my $vid = $v->{id} // next;
-                    # Parse ISO 8601 duration: PT4M13S → 4:13
-                    # Each capture is independent to avoid list-context shift when a group is absent.
+                    # mb422-B1: réutiliser le parseur partagé _yt_parse_duration
+                    # (mb398) — l'ancien parsing inline ignorait le composant
+                    # JOURS (P1DT2H3M4S perdait 24h) et lisait le M sur toute la
+                    # chaîne (confusion mois/minutes de l'ISO-8601). Pour un
+                    # résultat de recherche compact, on replie les jours dans
+                    # les heures (26:03:04 plutôt que 1d).
                     my $dur = $v->{contentDetails}{duration} // '';
-                    my ($h) = ($dur =~ /(\d+)H/);
-                    my ($m) = ($dur =~ /(\d+)M/);
-                    my ($s) = ($dur =~ /(\d+)S/);
-                    ($h, $m, $s) = ($h // 0, $m // 0, $s // 0);
+                    my ($dd, $h, $m, $s) = _yt_parse_duration($dur);
+                    $h += $dd * 24;
                     my $dur_str = $h ? sprintf('%d:%02d:%02d', $h, $m, $s) : sprintf('%d:%02d', $m, $s);
                     # View count
-                    my $views = $v->{statistics}{viewCount} // 0;
-                    my $views_str = $views >= 1_000_000 ? sprintf('%.1fM', $views/1_000_000)
-                                 : $views >= 1_000      ? sprintf('%.0fK', $views/1_000)
-                                 : $views;
+                    # mb423-R1: formateur de vues PARTAGÉ (_yt_format_views,
+                    # mb360). L'inline divergeait (%.0fK majuscule sans décimale
+                    # au lieu de %.1fk) — incohérent avec le reste de YouTube.
+                    my $views_str = _yt_format_views($v->{statistics}{viewCount});
                     $vid_meta{$vid} = { dur => $dur_str, views => $views_str };
                 }
             }
@@ -1658,7 +1668,7 @@ sub ytSearch_ctx {
         if (($title =~ tr/A-Z//) > 20) { $title = ucfirst(lc($title)); }
         my $meta     = $vid_meta{$vid_id} // {};
         my $dur_part = $meta->{dur}   ? ' [' . $meta->{dur}   . ']' : '';
-        my $vw_part  = $meta->{views} ? ' ' .  $meta->{views} . ' views' : '';
+        my $vw_part  = ($meta->{views} && $meta->{views} ne '?') ? ' ' .  $meta->{views} . ' views' : '';  # mb423-R1
         my $line = _yt_sep("[$rank] ")
                  . _yt_text(" $title ")
                  . _yt_sep('- ')

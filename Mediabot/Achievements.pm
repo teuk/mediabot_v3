@@ -262,6 +262,37 @@ sub _load {
         return;
     }
     $self->{data} = $data if ref $data eq 'HASH';
+
+    # mb430-B1: migration de casse. Les clés sont "lc(nick)\x00<canal>" ; le
+    # canal n'était pas replié en lc auparavant, donc un même canal pouvait
+    # occuper deux clés selon la casse (#Teuk vs #teuk) -> unlocks dupliqués et
+    # récupération manquée. On replie ici toute clé à canal non-lc vers sa
+    # forme lc, en fusionnant les achievements (on garde le timestamp le plus
+    # ancien en cas de conflit). Aucune donnée perdue.
+    {
+        my $migrated = 0;
+        for my $k (keys %{ $self->{data} }) {
+            my ($n, $ch) = split /\x00/, $k, 2;
+            $ch = '' unless defined $ch;
+            my $lc_ch = lc $ch;
+            next if $ch eq $lc_ch;                 # déjà canonique
+            my $new_k = $n . "\x00" . $lc_ch;
+            my $src = delete $self->{data}{$k};
+            for my $id (keys %$src) {
+                my $ts = $src->{$id};
+                if (!exists $self->{data}{$new_k}{$id}
+                    || $ts < $self->{data}{$new_k}{$id}) {
+                    $self->{data}{$new_k}{$id} = $ts;   # garde le plus ancien
+                }
+            }
+            $migrated++;
+        }
+        if ($migrated) {
+            $self->{dirty} = 1;
+            $self->_log(2, "Achievements: folded $migrated mixed-case channel key(s) to lowercase");
+        }
+    }
+
     $self->_log(3, "Achievements: loaded " . scalar(keys %{$self->{data}}) . " profile(s)");
 }
 
@@ -309,7 +340,7 @@ sub save {
 sub get_for_nick {
     my ($self, $nick, $channel) = @_;
     return {} unless defined $nick;
-    my $key = lc($nick) . "\x00" . (defined $channel ? $channel : '');
+    my $key = lc($nick) . "\x00" . (defined $channel ? lc($channel) : "");  # mb430-B1: canal en lc (IRC insensible a la casse)
     return $self->{data}{$key} // {};
 }
 
@@ -350,7 +381,7 @@ sub unlock {
     return 0 unless defined $nick && defined $id;
     return 0 unless exists $ACH{$id};
 
-    my $key = lc($nick) . "\x00" . (defined $channel ? $channel : '');
+    my $key = lc($nick) . "\x00" . (defined $channel ? lc($channel) : "");  # mb430-B1: canal en lc (IRC insensible a la casse)
     return 0 if exists $self->{data}{$key}{$id};
 
     $self->{data}{$key}{$id} = time();
@@ -423,7 +454,7 @@ sub check_msg {
     my $bot = $self->{bot} or return;
 
     # Cache : on ne refait le check msg que toutes les 5 minutes par (nick, chan)
-    my $cache_key = lc($nick) . "\x00" . $channel;
+    my $cache_key = lc($nick) . "\x00" . lc($channel // "");  # mb430-B1
     my $now = time();
     my $last = $self->{_msg_check_ts}{$cache_key} // 0;
     return if ($now - $last) < 300;
