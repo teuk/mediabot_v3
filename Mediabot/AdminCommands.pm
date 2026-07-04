@@ -280,6 +280,14 @@ sub _openai_param_spec {
             max     => 2000000,
             help    => 'Delay between output lines, in microseconds',
         },
+        timeout => {
+            key     => 'openai.TIMEOUT',
+            default => '20',
+            type    => 'int',
+            min     => 5,
+            max     => 60,
+            help    => 'OpenAI HTTP timeout in seconds',
+        },
     };
 }
 
@@ -317,6 +325,8 @@ sub _openai_param_alias {
         sleep        => 'sleep_us',
         sleep_us     => 'sleep_us',
         delay        => 'sleep_us',
+        timeout      => 'timeout',
+        http_timeout => 'timeout',
     );
 
     return $alias{$name};
@@ -403,6 +413,7 @@ sub _openai_notice_status {
     my $max_privmsg = _openai_effective_value($self, 'max_privmsg');
     my $wrap_bytes  = _openai_effective_value($self, 'wrap_bytes');
     my $sleep_us      = _openai_effective_value($self, 'sleep_us');
+    my $timeout       = _openai_effective_value($self, 'timeout');
     my $system_prompt = _openai_effective_value($self, 'system_prompt');
     my $system_prompt_len = length($system_prompt // '');
 
@@ -415,7 +426,7 @@ sub _openai_notice_status {
 
     botNotice($self, $nick, "OpenAI/tellme: API key present: $has_key");
     botNotice($self, $nick, "OpenAI/tellme: model=$model fallback_model=$fallback_model api_url=$api_url");
-    botNotice($self, $nick, "OpenAI/tellme: temperature=$temperature max_tokens=$max_tokens max_privmsg=$max_privmsg wrap_bytes=$wrap_bytes sleep_us=$sleep_us system_prompt_len=$system_prompt_len");
+    botNotice($self, $nick, "OpenAI/tellme: temperature=$temperature max_tokens=$max_tokens max_privmsg=$max_privmsg wrap_bytes=$wrap_bytes sleep_us=$sleep_us timeout=${timeout}s system_prompt_len=$system_prompt_len");
 
     if (defined($channel) && $channel ne '') {
         botNotice($self, $nick, "OpenAI/tellme: channel $channel chatGPT chanset: $chan_state");
@@ -426,11 +437,11 @@ sub _openai_notice_help {
     my ($self, $nick) = @_;
 
     botNotice($self, $nick, "OpenAI admin syntax:");
-    botNotice($self, $nick, "openai status|config|help|defaults|profiles|test|models");
-    botNotice($self, $nick, "openai set <model|fallback_model|system_prompt|temperature|max_tokens|max_privmsg|wrap_bytes|sleep_us|api_url> <value>");
-    botNotice($self, $nick, "openai reset <model|fallback_model|system_prompt|temperature|max_tokens|max_privmsg|wrap_bytes|sleep_us|api_url>");
+    botNotice($self, $nick, "openai status|config|help|defaults|profiles|test|diagnose|models");
+    botNotice($self, $nick, "openai set <model|fallback_model|system_prompt|temperature|max_tokens|max_privmsg|wrap_bytes|sleep_us|timeout|api_url> <value>");
+    botNotice($self, $nick, "openai reset <model|fallback_model|system_prompt|temperature|max_tokens|max_privmsg|wrap_bytes|sleep_us|timeout|api_url>");
     botNotice($self, $nick, "openai explain <parameter>");
-    botNotice($self, $nick, "openai test [prompt]");
+    botNotice($self, $nick, "openai test|diagnose [prompt]");
     botNotice($self, $nick, "openai models [filter]");
     botNotice($self, $nick, "openai profiles");
     botNotice($self, $nick, "openai profile <dev|compact|safe|default>");
@@ -442,7 +453,7 @@ sub _openai_notice_defaults {
 
     my $spec = _openai_param_spec();
 
-    for my $name (qw(model fallback_model temperature max_tokens max_privmsg wrap_bytes sleep_us api_url)) {
+    for my $name (qw(model fallback_model temperature max_tokens max_privmsg wrap_bytes sleep_us timeout api_url)) {
         botNotice($self, $nick, "OpenAI default $name = $spec->{$name}{default}");
     }
 
@@ -470,10 +481,14 @@ sub _openai_run_test {
     my $prompt = join(' ', @prompt_args);
     $prompt = 'Reply with exactly OK.' unless defined($prompt) && $prompt ne '';
 
-    my $_openai_timeout = int(eval { $self->{conf}->get('openai.TIMEOUT') } // 20);
-    $_openai_timeout = 5 if $_openai_timeout < 5;   # A1: min 5s
-    $_openai_timeout = 60 if $_openai_timeout > 60; # A1: max 60s
-    my $http = Mediabot::External::_make_http(timeout => $_openai_timeout);  # A1: configurable via openai.TIMEOUT
+    my $_openai_timeout = _openai_effective_value($self, 'timeout');
+    $_openai_timeout = 20 unless defined($_openai_timeout) && $_openai_timeout =~ /^\d+\z/;
+    $_openai_timeout = 5  if $_openai_timeout < 5;
+    $_openai_timeout = 60 if $_openai_timeout > 60;
+    my $http = Mediabot::External::_make_http(
+        timeout    => $_openai_timeout,
+        verify_SSL => 1,
+    );
 
     my $build_payload = sub {
         my ($selected_model) = @_;
@@ -525,13 +540,24 @@ sub _openai_run_test {
     if ($@) { botNotice($self, $nick, "OpenAI test: network error: $@"); return; }
     my $fallback_tried = 0;
 
+    # mb419-B3: keep the Owner diagnostic command aligned with chatGPT().
+    # A transient/model-specific 429 may use the fallback model, while
+    # insufficient_quota is account/project billing and must not spend a
+    # second request.
+    my ($primary_type, $primary_code) = $res->{success}
+        ? ('', '')
+        : Mediabot::External::Claude::_chatgpt_error_cause($res->{content});
+    my $primary_quota = lc("$primary_type $primary_code") =~ /insufficient_quota/;
+    my $primary_status = $res->{status} // 0;
+    my $fallback_worthy =
+        ($primary_status == 400 || $primary_status == 403 || $primary_status == 404)
+        || ($primary_status == 429 && !$primary_quota);
+
     if (
         !$res->{success}
         && $fallback_model ne ''
         && $fallback_model ne $request_model
-        && (($res->{status} // 0) == 400
-            || ($res->{status} // 0) == 403
-            || ($res->{status} // 0) == 404)
+        && $fallback_worthy
     ) {
         botNotice(
             $self,
@@ -552,15 +578,24 @@ sub _openai_run_test {
     my $reason = $res->{reason} // '';
 
     unless ($res->{success}) {
+        my ($err_type, $err_code, $err_msg) =
+            Mediabot::External::Claude::_chatgpt_error_cause($res->{content});
+        my $diagnosis = Mediabot::External::Claude::_chatgpt_user_error_message(
+            $status, $err_type, $err_code
+        );
+
         botNotice($self, $nick, "OpenAI test: HTTP $status $reason in ${elapsed_ms}ms for model=$request_model");
+        botNotice(
+            $self,
+            $nick,
+            "OpenAI test: type=" . ($err_type || '(none)')
+            . " code=" . ($err_code || '(none)')
+        );
+        botNotice($self, $nick, "OpenAI test: diagnosis=$diagnosis");
 
-        my $err = eval { decode_json($res->{content} // '') };
-
-        if (!$@ && ref($err) eq 'HASH' && ref($err->{error}) eq 'HASH' && defined($err->{error}{message})) {
-            my $msg = $err->{error}{message};
-            $msg =~ s/\s+/ /g;
-            $msg = substr($msg, 0, 320);
-            botNotice($self, $nick, "OpenAI test: error=$msg");
+        if ($err_msg ne '') {
+            $err_msg = substr($err_msg, 0, 320);
+            botNotice($self, $nick, "OpenAI test: provider_message=$err_msg");
         }
 
         return;
@@ -735,10 +770,14 @@ sub _openai_notice_models {
         . ($filter ne '' ? " filter='$filter'" : '')
     );
 
-    my $_openai_timeout = int(eval { $self->{conf}->get('openai.TIMEOUT') } // 20);
-    $_openai_timeout = 5 if $_openai_timeout < 5;   # A1: min 5s
-    $_openai_timeout = 60 if $_openai_timeout > 60; # A1: max 60s
-    my $http = Mediabot::External::_make_http(timeout => $_openai_timeout);  # A1: configurable via openai.TIMEOUT
+    my $_openai_timeout = _openai_effective_value($self, 'timeout');
+    $_openai_timeout = 20 unless defined($_openai_timeout) && $_openai_timeout =~ /^\d+\z/;
+    $_openai_timeout = 5  if $_openai_timeout < 5;
+    $_openai_timeout = 60 if $_openai_timeout > 60;
+    my $http = Mediabot::External::_make_http(
+        timeout    => $_openai_timeout,
+        verify_SSL => 1,
+    );
     my $res  = eval {
         $http->get(
             $models_url,
@@ -754,15 +793,22 @@ sub _openai_notice_models {
     my $reason = $res->{reason} // '';
 
     unless ($res->{success}) {
-        botNotice($self, $nick, "OpenAI models: HTTP $status $reason");
+        my ($err_type, $err_code, $err_msg) =
+            Mediabot::External::Claude::_chatgpt_error_cause($res->{content});
+        my $diagnosis = Mediabot::External::Claude::_chatgpt_user_error_message(
+            $status, $err_type, $err_code
+        );
 
-        my $err = eval { decode_json($res->{content} // '') };
-        if (!$@ && ref($err) eq 'HASH' && ref($err->{error}) eq 'HASH' && defined($err->{error}{message})) {
-            my $msg = $err->{error}{message};
-            $msg =~ s/\s+/ /g;
-            $msg = substr($msg, 0, 320);
-            botNotice($self, $nick, "OpenAI models: error=$msg");
-        }
+        botNotice($self, $nick, "OpenAI models: HTTP $status $reason");
+        botNotice(
+            $self,
+            $nick,
+            "OpenAI models: type=" . ($err_type || '(none)')
+            . " code=" . ($err_code || '(none)')
+        );
+        botNotice($self, $nick, "OpenAI models: diagnosis=$diagnosis");
+        botNotice($self, $nick, "OpenAI models: provider_message=$err_msg")
+            if $err_msg ne '';
 
         return;
     }
@@ -833,7 +879,7 @@ sub openai_ctx {
         return 1;
     }
 
-    if ($subcmd eq 'test' || $subcmd eq 'ping') {
+    if ($subcmd eq 'test' || $subcmd eq 'ping' || $subcmd eq 'diagnose') {
         _openai_run_test($self, $nick, @args);
         return 1;
     }
@@ -879,7 +925,7 @@ sub openai_ctx {
 
         unless ($name) {
             botNotice($self, $nick, "Syntax: openai set <parameter> <value>");
-            botNotice($self, $nick, "Valid parameters: model fallback_model system_prompt temperature max_tokens max_privmsg wrap_bytes sleep_us api_url");
+            botNotice($self, $nick, "Valid parameters: model fallback_model system_prompt temperature max_tokens max_privmsg wrap_bytes sleep_us timeout api_url");
             return;
         }
 
@@ -907,7 +953,7 @@ sub openai_ctx {
 
         unless ($name) {
             botNotice($self, $nick, "Syntax: openai reset <parameter>");
-            botNotice($self, $nick, "Valid parameters: model fallback_model system_prompt temperature max_tokens max_privmsg wrap_bytes sleep_us api_url");
+            botNotice($self, $nick, "Valid parameters: model fallback_model system_prompt temperature max_tokens max_privmsg wrap_bytes sleep_us timeout api_url");
             return;
         }
 

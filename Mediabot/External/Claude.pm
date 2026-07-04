@@ -51,6 +51,7 @@ use constant {
     CHATGPT_MAX_PRIVMSG  => 4,       # how many PRIVMSG we allow to send
     CHATGPT_WRAP_BYTES   => 400,     # safe IRC payload length
     CHATGPT_SLEEP_US     => 750_000, # µs between PRIVMSG
+    CHATGPT_TIMEOUT      => 20,      # bounded OpenAI HTTP timeout
 	CHATGPT_TRUNC_MSG    => ' [¯\_(ツ)_/¯ guess you can’t have everything…]',   # suffix when we truncate
 
     # --- Anthropic / Claude ---
@@ -280,6 +281,61 @@ sub chatGPT_ctx {
 # ------------------------------------------------------------------
 # chatGPT()
 # ------------------------------------------------------------------
+# mb418-B1: extrait la cause réelle d'une erreur OpenAI depuis le corps JSON.
+# OpenAI renvoie { "error": { "message":..., "type":..., "code":... } }. Un
+# HTTP 429 peut signifier soit un rate-limit TRANSITOIRE (type/code
+# rate_limit_exceeded), soit un QUOTA ÉPUISÉ (code insufficient_quota) — deux
+# situations opposées qu'il ne faut pas confondre (« ma clé est morte ? »).
+# Renvoie ($type, $code, $message) nettoyés (chaînes vides si absents).
+sub _chatgpt_error_cause {
+    my ($body) = @_;
+    return ('', '', '') unless defined $body && $body ne '';
+    my $data = eval { decode_json($body) };
+    return ('', '', '') unless !$@ && ref($data) eq 'HASH' && ref($data->{error}) eq 'HASH';
+    my $e = $data->{error};
+    my $clean = sub {
+        my $s = defined $_[0] ? "$_[0]" : '';
+        $s =~ s/[\x00-\x1F\x7F]+/ /g;
+        $s =~ s/\s+/ /g;
+        $s =~ s/^\s+|\s+$//g;
+        return substr($s, 0, 200);
+    };
+    return ($clean->($e->{type}), $clean->($e->{code}), $clean->($e->{message}));
+}
+
+# mb418-B1: message utilisateur court adapté à la classe d'erreur OpenAI.
+sub _chatgpt_user_error_message {
+    my ($status, $type, $code) = @_;
+    $status = 0 unless defined($status) && $status =~ /^\d+\z/;
+    my $tc = lc("$type $code");
+
+    # mb419-B1: an insufficient_quota response is returned only after the
+    # request has been authenticated. The key is therefore accepted; rotating
+    # another key in the same unfunded project would not restore service.
+    if ($tc =~ /insufficient_quota/) {
+        return 'OpenAI API key accepted, but API credits/budget are exhausted; add API credits or raise the project limit.';
+    }
+    if (($status == 429) || $tc =~ /rate_limit/) {
+        return 'OpenAI rate limit reached; retry shortly (do not replace the API key).';
+    }
+    if (($status == 401) || $tc =~ /invalid_api_key|authentication/) {
+        return 'OpenAI rejected the API key; replace openai.API_KEY and reload/restart Mediabot.';
+    }
+    if (($status == 403) || $tc =~ /permission|access_denied/) {
+        return 'OpenAI denied access; check project/model/region permissions (the key is not necessarily invalid).';
+    }
+    if (($status == 404) || $tc =~ /model_not_found/) {
+        return 'OpenAI model unavailable or not permitted; check openai.MODEL and openai.FALLBACK_MODEL.';
+    }
+    if ($status == 0) {
+        return 'Could not reach OpenAI; check DNS, TLS, firewall and openai.API_URL.';
+    }
+    if ($status >= 500) {
+        return 'OpenAI service error; retry shortly.';
+    }
+    return 'Sorry, API did not answer.';
+}
+
 sub chatGPT {
     my ($self, $message, $nick, $chan, @args) = @_;
 
@@ -300,6 +356,7 @@ sub chatGPT {
     my $chatgpt_max_privmsg = _chatgpt_conf_int(   $self, 'openai.MAX_PRIVMSG', CHATGPT_MAX_PRIVMSG, 1, 8);
     my $chatgpt_wrap_bytes  = _chatgpt_conf_int(   $self, 'openai.WRAP_BYTES',  CHATGPT_WRAP_BYTES,  120, 450);
     my $chatgpt_sleep_us    = _chatgpt_conf_int(   $self, 'openai.SLEEP_US',    CHATGPT_SLEEP_US,    0, 2_000_000);
+    my $chatgpt_timeout     = _chatgpt_conf_int(   $self, 'openai.TIMEOUT',     CHATGPT_TIMEOUT,     5, 60); # mb419-B2
 
     unless ($chatgpt_api_url =~ m{^https://}i) {
         $self->{logger}->log(1, "chatGPT() invalid openai.API_URL, falling back to default");
@@ -342,9 +399,13 @@ sub chatGPT {
     };
 
     # --------------------------------------------------------------
-    # call the API with HTTP::Tiny (non-blocking, no shell)
+    # call the API with bounded HTTP::Tiny (no shell)
     # --------------------------------------------------------------
-    my $http = Mediabot::External::_make_http(timeout => 30);
+    # mb420-S1: API credentials must never cross an unverified TLS session.
+    my $http = Mediabot::External::_make_http(
+        timeout    => $chatgpt_timeout,
+        verify_SSL => 1,
+    );
 
     my $send_request = sub {
         my ($model) = @_;
@@ -368,13 +429,24 @@ sub chatGPT {
     my $http_response  = $send_request->($request_model);
     my $fallback_tried = 0;
 
+    # mb418-B1: un 429 rate-limit peut être spécifique au modèle (TPM/RPM) →
+    # tenter le modèle de repli. Mais PAS si le quota est épuisé
+    # (insufficient_quota) : c'est au niveau du compte, changer de modèle
+    # n'aiderait pas et gaspillerait un appel.
+    my $primary_status = $http_response->{status} // 0;
+    my ($p_type, $p_code) = $http_response->{success}
+        ? ('', '')
+        : _chatgpt_error_cause($http_response->{content});
+    my $quota_exhausted = lc("$p_type $p_code") =~ /insufficient_quota/;
+    my $fallback_worthy_status =
+        ($primary_status == 400 || $primary_status == 403 || $primary_status == 404)
+        || ($primary_status == 429 && !$quota_exhausted);
+
     if (
         !$http_response->{success}
         && $chatgpt_fallback_model ne ''
         && $chatgpt_fallback_model ne $request_model
-        && (($http_response->{status} // 0) == 400
-            || ($http_response->{status} // 0) == 403
-            || ($http_response->{status} // 0) == 404)
+        && $fallback_worthy_status
     ) {
         $self->{logger}->log(
             1,
@@ -390,15 +462,23 @@ sub chatGPT {
     }
 
     unless ($http_response->{success}) {
+        my $status = $http_response->{status} // 0;
+        # mb418-B1: extraire la cause réelle du corps JSON d'OpenAI au lieu de
+        # la masquer derrière un « API did not answer » générique.
+        my ($err_type, $err_code, $err_msg) =
+            _chatgpt_error_cause($http_response->{content});
         $self->{logger}->log(
             1,
-            "chatGPT() HTTP error: "
-            . ($http_response->{status} // 0) . " "
+            "chatGPT() HTTP error: $status "
             . ($http_response->{reason} // '')
             . " model=$request_model"
+            . ($err_type ? " type=$err_type" : '')
+            . ($err_code ? " code=$err_code" : '')
+            . ($err_msg  ? " msg=$err_msg"   : '')
         );
 
-        Mediabot::Helpers::botPrivmsg($self, $chan, "($nick) Sorry, API did not answer.");
+        my $user_msg = _chatgpt_user_error_message($status, $err_type, $err_code);
+        Mediabot::Helpers::botPrivmsg($self, $chan, "($nick) $user_msg");
         return;
     }
 
@@ -691,7 +771,7 @@ sub get_tmdb_info {
     my $encoded_lang  = uri_escape_utf8($lang);
     my $url = "https://api.themoviedb.org/3/search/multi?api_key=$api_key&language=$encoded_lang&query=$encoded_query";
 
-    my $http     = Mediabot::External::_make_http(timeout => 10);
+    my $http     = Mediabot::External::_make_http(timeout => 10, verify_SSL => 1);
     my $response = eval { $http->get($url); } // { success => 0, status => 0, reason => $@ };
 
     unless ($response->{success}) {
@@ -802,7 +882,7 @@ sub claude_ctx {
         my @fetched;
         if ($api_key ne '') {
             eval {
-                my $http = Mediabot::External::_make_http(timeout => 8);
+                my $http = Mediabot::External::_make_http(timeout => 8, verify_SSL => 1);
                 my $res  = $http->get(
                     CLAUDE_API_URL =~ s{/messages$}{/models}r,
                     { headers => {
@@ -1436,7 +1516,7 @@ sub _claude_send_and_parse {
     my $_log_chan = $p->{chan} // "__private__";
     $self->{logger}->log(3, "claudeAI() \x{2192} $model for $_log_chan / $nick [hist: $_h msg(s), ~$_c chars]");
 
-    my $http = Mediabot::External::_make_http(timeout => 30);
+    my $http = Mediabot::External::_make_http(timeout => 30, verify_SSL => 1);
     my $res  = eval {
         $http->request('POST', $api_url, {
             headers => {

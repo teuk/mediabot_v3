@@ -378,7 +378,15 @@ sub _start_download {
         }
     }
 
-    push @cmd, $query;
+    # mb417-B1: SÉCURITÉ — terminer les options par '--' avant la requête
+    # utilisateur. Sinon une requête commençant par '-'/'--' (ex.
+    # "m play --exec=<cmd>") est interprétée par yt-dlp comme une OPTION et non
+    # comme un terme de recherche : "--exec=CMD" tient en un seul argv et est
+    # une option VALIDE de yt-dlp -> exécution de commande arbitraire (injection
+    # d'arguments). Le '--' force yt-dlp à traiter tout ce qui suit comme
+    # positionnel. exec @cmd (forme liste) protège déjà du shell, mais pas de
+    # l'interprétation d'options par yt-dlp lui-même.
+    push @cmd, '--', $query;
 
     my $pid = fork();
 

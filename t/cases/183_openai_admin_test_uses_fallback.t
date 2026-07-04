@@ -92,20 +92,27 @@ return sub {
 
     $assert->like(
         $body // '',
-        qr/\(\(\$res->\{status\} \/\/ 0\) == 400/,
+        qr/\$primary_status == 400/,
         'openai test considers HTTP 400 fallback-eligible'
     );
 
     $assert->like(
         $body // '',
-        qr/\(\$res->\{status\} \/\/ 0\) == 403/,
+        qr/\$primary_status == 403/,
         'openai test considers HTTP 403 fallback-eligible'
     );
 
     $assert->like(
         $body // '',
-        qr/\(\$res->\{status\} \/\/ 0\) == 404/,
+        qr/\$primary_status == 404/,
         'openai test considers HTTP 404 fallback-eligible'
+    );
+
+
+    $assert->like(
+        $body // '',
+        qr/\$primary_status == 429 && !\$primary_quota/,
+        'openai test retries a transient 429 but not insufficient_quota'
     );
 
     $assert->like(
@@ -134,7 +141,7 @@ return sub {
 
     $assert->like(
         $sample,
-        qr/openai test also tries FALLBACK_MODEL/,
-        'sample config documents openai test fallback behavior'
+        qr/openai test\/diagnose also tries FALLBACK_MODEL/,
+        'sample config documents test/diagnose fallback behavior'
     );
 };

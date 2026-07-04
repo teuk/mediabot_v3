@@ -104,8 +104,8 @@ return sub {
 
     $assert->like(
         $test_body // '',
-        qr/OpenAI test: error=\$msg/,
-        'openai test reports API error message safely'
+        qr/OpenAI test: provider_message=\$err_msg/,
+        'openai test reports provider error message safely'
     );
 
     $assert->like(
@@ -122,8 +122,8 @@ return sub {
 
     $assert->like(
         $openai_body // '',
-        qr/if \(\$subcmd eq 'test' \|\| \$subcmd eq 'ping'\)/,
-        'openai_ctx supports test and ping aliases'
+        qr/if \(\$subcmd eq 'test' \|\| \$subcmd eq 'ping' \|\| \$subcmd eq 'diagnose'\)/,
+        'openai_ctx supports test, ping and diagnose aliases'
     );
 
     $assert->like(
@@ -134,8 +134,8 @@ return sub {
 
     $assert->like(
         $admin,
-        qr/openai test \[prompt\]/,
-        'openai help documents test command'
+        qr/openai test\|diagnose \[prompt\]/,
+        'openai help documents test and diagnose commands'
     );
 
     $assert->like(

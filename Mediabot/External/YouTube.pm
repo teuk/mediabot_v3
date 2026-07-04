@@ -79,17 +79,17 @@ sub getYoutubeDetails {
     my $yt_url = "https://www.googleapis.com/youtube/v3/videos"
                . "?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status";
 
-    my $http = Mediabot::External::_make_http(timeout => 10);
+    my $http = Mediabot::External::_make_http(timeout => 10, verify_SSL => 1);
     my $res  = eval { $http->get($yt_url); } // { success => 0, status => 0, reason => $@ };
 
     unless ($res->{success}) {
-        $self->{logger}->log(3, "getYoutubeDetails() HTTP error $res->{status} for $yt_url");
+        $self->{logger}->log(3, "getYoutubeDetails() HTTP error $res->{status} for video=$sYoutubeId");
         return undef;
     }
 
     my $json_details = $res->{content};
     unless (defined $json_details && $json_details ne '') {
-        $self->{logger}->log(3, "getYoutubeDetails() empty response for: $yt_url");
+        $self->{logger}->log(3, "getYoutubeDetails() empty response for video=$sYoutubeId");
         return undef;
     }
 
@@ -283,7 +283,7 @@ sub displayYoutubeDetails {
     my $url = "https://www.googleapis.com/youtube/v3/videos"
             . "?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status";
 
-    my $http     = Mediabot::External::_make_http(timeout => 8);
+    my $http     = Mediabot::External::_make_http(timeout => 8, verify_SSL => 1);
     my $response = eval { $http->get($url); } // { success => 0, status => 0, reason => $@ };
 
     unless ($response->{success}) {
@@ -794,8 +794,9 @@ sub _youtube_search_fetch_sync {
         . '&fields=items(id/videoId)';
 
     my $http_s = Mediabot::External::_make_http(
-        timeout  => 10,
-        max_size => 256 * 1024,
+        timeout    => 10,
+        verify_SSL => 1,
+        max_size   => 256 * 1024,
     );
     my $res_s = eval { $http_s->get($search_url) }
         // { success => 0, status => 0, reason => $@ };
@@ -822,8 +823,9 @@ sub _youtube_search_fetch_sync {
         . '&fields=items(id,snippet/title,snippet/channelTitle,contentDetails/duration,statistics/viewCount)';
 
     my $http_v = Mediabot::External::_make_http(
-        timeout  => 10,
-        max_size => 512 * 1024,
+        timeout    => 10,
+        verify_SSL => 1,
+        max_size   => 512 * 1024,
     );
     my $res_v = eval { $http_v->get($videos_url) }
         // { success => 0, status => 0, reason => $@ };
@@ -1430,7 +1432,7 @@ sub fortniteStats_ctx {
     # Call API
     my $url = "https://fortnite-api.com/v2/stats/br/v2/$account_id";
 
-    my $http = Mediabot::External::_make_http(timeout => 10);
+    my $http = Mediabot::External::_make_http(timeout => 10, verify_SSL => 1);
     my $http_response = eval { $http->get(
         $url,
         { headers => { 'Authorization' => $api_key } }
@@ -1587,7 +1589,7 @@ sub ytSearch_ctx {
             . "?part=snippet&type=video&maxResults=$yt_max"
             . "&q=$encoded&key=$APIKEY";
 
-    my $http = Mediabot::External::_make_http(timeout => 8);
+    my $http = Mediabot::External::_make_http(timeout => 8, verify_SSL => 1);
     my $res  = eval { $http->get($url) } // { success => 0 };
     unless ($res->{success}) {
         $self->{logger}->log(3, 'ytSearch_ctx() HTTP error: ' . ($res->{status} // 0));

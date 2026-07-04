@@ -91,22 +91,30 @@ return sub {
         'chatGPT checks fallback model is configured'
     );
 
+    # mb418: le déclencheur de fallback utilise $primary_status et ajoute le
+    # 429 rate-limit (hors insufficient_quota).
     $assert->like(
         $chatgpt_body // '',
-        qr/\(\(\$http_response->\{status\} \/\/ 0\) == 400/,
+        qr/\$primary_status == 400/,
         'chatGPT considers HTTP 400 fallback-eligible'
     );
 
     $assert->like(
         $chatgpt_body // '',
-        qr/\(\$http_response->\{status\} \/\/ 0\) == 403/,
+        qr/\$primary_status == 403/,
         'chatGPT considers HTTP 403 fallback-eligible'
     );
 
     $assert->like(
         $chatgpt_body // '',
-        qr/\(\$http_response->\{status\} \/\/ 0\) == 404/,
+        qr/\$primary_status == 404/,
         'chatGPT considers HTTP 404 fallback-eligible'
+    );
+
+    $assert->like(
+        $chatgpt_body // '',
+        qr/\$primary_status == 429 && !\$quota_exhausted/,
+        'chatGPT considers transient HTTP 429 fallback-eligible (not quota)'
     );
 
     $assert->like(
