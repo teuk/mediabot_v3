@@ -390,6 +390,17 @@ sub displayYoutubeDetails {
 
 # Weather command using wttr.in
 
+# mb438-B1: échappement d'URL byte-safe. Les entrées (villes tapées sur IRC,
+# format contenant des emojis) sont des OCTETS UTF-8 ; uri_escape_utf8() les
+# double-encode (Genève -> %C3%83%C2%A8..., emojis cassés). On échappe les
+# octets déjà UTF-8 (repli d'encodage si la chaîne était en caractères).
+sub _uri_escape_bytes {
+    my ($s) = @_;
+    $s = '' unless defined $s;
+    my $bytes = utf8::is_utf8($s) ? Encode::encode('UTF-8', $s) : $s;
+    return URI::Escape::uri_escape($bytes, "^A-Za-z0-9\-\._~");
+}
+
 sub displayWeather_ctx {
     my ($ctx) = @_;
 
@@ -449,8 +460,8 @@ sub displayWeather_ctx {
     # %l location, %c icon, %t temp, %f feelslike, %h humidity, %w wind, %p precip
     my $format = '%l: %c %t (feels %f) | 💧%h | 🌬%w | ☔%p';
 
-    my $encoded = uri_escape_utf8($location);
-    my $url = "https://wttr.in/$encoded?format=" . uri_escape_utf8($format) . "&m";
+    my $encoded = _uri_escape_bytes($location);
+    my $url = "https://wttr.in/$encoded?format=" . _uri_escape_bytes($format) . "&m";
 
     my $project_url = eval { $self->{conf}->get('main.MAIN_PROG_URL') }
         || 'https://github.com/teuk/mediabot_v3';
@@ -783,7 +794,7 @@ sub _youtube_search_fetch_sync {
         unless defined($api_key) && !ref($api_key) && $api_key ne ''
             && defined($query_txt) && !ref($query_txt) && $query_txt ne '';
 
-    my $q_enc = uri_escape_utf8($query_txt);
+    my $q_enc = _uri_escape_bytes($query_txt);  # mb439-B1: requête IRC en octets UTF-8
     my $search_url =
         'https://www.googleapis.com/youtube/v3/search'
         . '?part=snippet'
@@ -1589,7 +1600,7 @@ sub ytSearch_ctx {
     }
 
     require URI::Escape;
-    my $encoded = URI::Escape::uri_escape_utf8($query);
+    my $encoded = _uri_escape_bytes($query);  # mb439-B1: requête IRC en octets UTF-8
     # K4: configurable result count (main.YT_SEARCH_RESULTS, default 3, max 5)
     my $yt_max = eval { int($self->{conf}->get('main.YT_SEARCH_RESULTS') // 3) } // 3;
     $yt_max = 3 unless $yt_max >= 1 && $yt_max <= 5;

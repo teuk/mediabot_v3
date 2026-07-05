@@ -427,7 +427,7 @@ sub userCstat_ctx {
         my $line  = sprintf("cstat[%02d]: %s", $page, join(' ', @chunk));
 
         if (length($line) > 360) {
-            $line = substr($line, 0, 357) . '...';
+            $line = truncate_utf8($line, 357);
         }
 
         botNotice($self, $nick, $line);
@@ -802,7 +802,7 @@ sub userInfo_ctx {
                 my $line  = sprintf("userinfo-masks[%02d]: %s", $page, join(' | ', @chunk));
 
                 if (length($line) > 360) {
-                    $line = substr($line, 0, 357) . '...';
+                    $line = truncate_utf8($line, 357);
                 }
 
                 botNotice($self, $nick, $line);
@@ -1367,7 +1367,7 @@ SQL
             my $line  = sprintf("topsay[%02d]: %s", $page, join(' | ', @chunk));
 
             if (length($line) > 360) {
-                $line = substr($line, 0, 357) . '...';
+                $line = truncate_utf8($line, 357);
             }
 
             botNotice($self, $nick, $line);
@@ -4380,8 +4380,13 @@ sub processKarma {
 
         # mb115: hook achievements karma (positifs : score atteint, gift_giver pour le donneur)
         if ($self->{achievements}) {
-            # Pour gift_giver, on compte les +1 donnés par $nick sur le canal — via ring buffer
-            my $given_pos = 0;
+            # Pour gift_giver, on compte les +1 donnés par $nick sur le canal — via ring buffer.
+            # mb453-B1 (off-by-one): $given_pos était calculé AVANT que le vote
+            # courant soit poussé dans _karma_log (le push est plus bas), donc le
+            # don en cours n'était pas compté — gift_giver (seuil 100) se
+            # débloquait au 101e don au lieu du 100e. On amorce à 1 quand le vote
+            # courant est lui-même un don positif (++), 0 sinon.
+            my $given_pos = ($op eq '++') ? 1 : 0;
             for my $e (@{ $self->{_karma_log}{$channel} // [] }) {
                 $given_pos++ if defined $e->{from} && lc($e->{from}) eq lc($nick) && ($e->{delta} // '') eq '+1';
             }
@@ -5056,6 +5061,31 @@ sub mbPollStop_ctx {
 # mbNotes_ctx --- !notes [del <id>]
 # Personal notes stored in memory per nick.
 # ---------------------------------------------------------------------------
+# mb437-B1: charge les notes d'un nick depuis la DB dans le cache mémoire si
+# celui-ci est vide (typiquement après un restart). Partagé par mbNote_ctx
+# (ajout) et mbNotes_ctx (liste) : sans ce chargement côté ajout, le plafond
+# de 10 notes était évalué contre une liste mémoire vide au premier !note
+# suivant un redémarrage -> plafond contourné et notes au-delà de 10
+# invisibles (SELECT ... LIMIT 10).
+sub _notes_ensure_loaded {
+    my ($self, $nick) = @_;
+    my $key = lc $nick;
+    return if @{ $self->{_notes}{$key} // [] };
+    eval {
+        my $sth = $self->{dbh}->prepare(
+            'SELECT id_note, text FROM NOTE WHERE nick = ? ORDER BY id_note ASC LIMIT 10'
+        );
+        if ($sth && $sth->execute($key)) {
+            my @db_notes;
+            while (my $r = $sth->fetchrow_hashref) {
+                push @db_notes, { id => $r->{id_note}, text => $r->{text} };
+            }
+            $sth->finish;
+            $self->{_notes}{$key} = \@db_notes if @db_notes;
+        }
+    };
+}
+
 sub mbNote_ctx {
     my ($ctx) = @_;
 
@@ -5072,6 +5102,12 @@ sub mbNote_ctx {
             sprintf('Note too long (%d chars, max 200). Please shorten it.', length($text)));
         return 1;
     }
+    # mb456-B1: all note operations must see the persisted state after a
+    # restart. mb437 loaded the DB before add/list, but export/search still
+    # inspected the empty in-memory cache and falsely reported no notes.
+    $self->{_notes}{lc $nick} //= [];
+    _notes_ensure_loaded($self, $nick);
+
     # Y3: !note export — send all notes in one private message
     if ($text =~ /^export$/i) {
         my $notes = $self->{_notes}{lc $nick} // [];
@@ -5113,7 +5149,8 @@ sub mbNote_ctx {
     unless ($text ne '') {
         botNotice($self, $nick, 'Syntax: note <message>  or  note search <word>'); return;
     }
-    $self->{_notes}{lc $nick} //= [];
+    # mb437/mb456: the persisted notes were loaded above before every
+    # branch, including export/search and the add cap.
     if (scalar @{ $self->{_notes}{lc $nick} } >= 10) {
         botNotice($self, $nick, 'Max 10 notes reached. Delete some with !notes del <id>.'); return;
     }
@@ -5144,22 +5181,8 @@ sub mbNotes_ctx {
     my $nick    = $ctx->nick;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    # BB1: load from DB if memory is empty (e.g. after restart)
-    unless (@{ $self->{_notes}{lc $nick} // [] }) {
-        eval {
-            my $sth = $self->{dbh}->prepare(
-                'SELECT id_note, text FROM NOTE WHERE nick = ? ORDER BY id_note ASC LIMIT 10'
-            );
-            if ($sth && $sth->execute(lc($nick))) {
-                my @db_notes;
-                while (my $r = $sth->fetchrow_hashref) {
-                    push @db_notes, { id => $r->{id_note}, text => $r->{text} };
-                }
-                $sth->finish;
-                $self->{_notes}{lc $nick} = \@db_notes if @db_notes;
-            }
-        };
-    }
+    # BB1 / mb437-B1: load from DB if memory is empty (e.g. after restart)
+    _notes_ensure_loaded($self, $nick);
     my $notes = $self->{_notes}{lc $nick} // [];
 
     # !notes del <index>
@@ -6428,7 +6451,12 @@ sub _define_lookup_sync {
         unless defined($lang) && !ref($lang) && $lang =~ /\A[a-z]{2,5}\z/;
 
     require URI::Escape;
-    my $encoded = URI::Escape::uri_escape_utf8($word);
+    # mb436-B1: $word est en octets UTF-8. uri_escape_utf8() sur des octets
+    # double-encode (café -> %C3%83%C2%A9 au lieu de %C3%A9) -> mauvaise URL.
+    # On échappe directement les octets (déjà UTF-8) ; si par sécurité la chaîne
+    # était en caractères (flag utf8), on la ré-encode d'abord.
+    my $word_bytes = utf8::is_utf8($word) ? Encode::encode('UTF-8', $word) : $word;
+    my $encoded = URI::Escape::uri_escape($word_bytes, "^A-Za-z0-9\-\._~");
     my $url = "https://$lang.wiktionary.org/api/rest_v1/page/definition/$encoded";
 
     my $http = Mediabot::External::_make_http(
@@ -6752,7 +6780,11 @@ sub mbDefine_ctx {
         return;
     }
 
-    if ($word =~ /[^\w\s-]/ || length($word) > 64) {
+    # mb436-B1: validation byte-safe. Les args viennent d'IRC en OCTETS UTF-8 ;
+    # avec [^\w\s-] les octets d'accent (0xC3, 0xA9...) étaient rejetés, donc
+    # "!define café" répondait "Invalid word.". On autorise les octets >= 0x80
+    # (séquences UTF-8 multi-octets) comme faisant partie du mot.
+    if ($word =~ /[^\w\s\x80-\xFF-]/ || length($word) > 64) {
         $ctx->reply_private('Invalid word.');
         return;
     }
@@ -8321,9 +8353,15 @@ sub checkTriviaAnswer {
     # l'auteur (mb121-B2) : "the answer is paris" / "paris!" gagnent toujours,
     # mais "warsaw" ne valide plus "war".
     my $answer = $trivia->{answer};
+    # mb443-B1: frontières byte-safe. publictext/réponses sont en OCTETS UTF-8 ;
+    # avec des frontières ASCII seules [A-Za-z0-9], un octet d'accent (>= 0x80)
+    # passait pour une frontière -> faux positifs : la réponse "on" était
+    # validée par "garçon" (l'octet 0xA7 de ç compte comme séparateur). On
+    # inclut \x80-\xFF (octets des séquences UTF-8) dans les classes de
+    # frontière : "garçon" ne valide plus "on", mais "... is on" / "on!" oui.
     my $matched = eval {
         lc($text) eq $answer
-        || lc($text) =~ /(?<![A-Za-z0-9])\Q$answer\E(?![A-Za-z0-9])/
+        || lc($text) =~ /(?<![A-Za-z0-9\x80-\xFF])\Q$answer\E(?![A-Za-z0-9\x80-\xFF])/
     };
     return unless $matched;
     $trivia->{active} = 0;
@@ -9508,7 +9546,18 @@ sub mbHoroscope_ctx {
     my $date_key = sprintf('%04d-%02d-%02d', $lt[5]+1900, $lt[4]+1, $lt[3]);
     my $seed = 0;
     $seed = ($seed * 31 + ord($_)) & 0xFFFFFFFF for split //, ($target . ':' . $date_key);
-    srand($seed);
+
+    # mb444-B1: PRNG LOCAL déterministe. Avant, srand($seed) reseedait le RNG
+    # GLOBAL du process pour rendre l'horoscope déterministe, puis un srand()
+    # final tentait de « restaurer » — mais srand() ne restaure PAS la séquence
+    # précédente : il reseed depuis l'horloge. Ce reseed répété (un par
+    # !horoscope) perturbe et dégrade le RNG partagé par tout le reste (dés
+    # !roll, d20 des duels, 8ball, quote aléatoire, proba Hailo, sélection
+    # trivia...). On tire désormais les index via un LCG local, sans jamais
+    # toucher srand() ni le générateur global.
+    my $rng  = $seed & 0x7FFFFFFF;
+    my $next = sub { $rng = (($rng * 1103515245) + 12345) & 0x7FFFFFFF; return $rng; };
+    my $pick = sub { my ($aref) = @_; return $aref->[ $next->() % scalar(@$aref) ]; };
 
     # Pools (FR — canal francophone, Christophe préfère le français)
     my @humeurs = (
@@ -9571,19 +9620,18 @@ sub mbHoroscope_ctx {
     my @glyphs   = ("\x{2728}", "\x{1F31F}", "\x{1F319}", "\x{1F525}", "\x{2604}\x{FE0F}",
                     "\x{1F30C}", "\x{1F52E}", "\x{26A1}", "\x{1F300}");
 
-    # Tirages
-    my $humeur   = $humeurs[ int(rand @humeurs) ];
-    my $event    = $evenements[ int(rand @evenements) ];
-    my $reco     = $recommandations[ int(rand @recommandations) ];
-    my $attention = $attentions[ int(rand @attentions) ];
-    my $couleur  = $couleurs[ int(rand @couleurs) ];
-    my $chiffre  = $chiffres[ int(rand @chiffres) ];
-    my $glyph    = $glyphs[ int(rand @glyphs) ];
+    # Tirages (LCG local, mb444-B1)
+    my $humeur   = $pick->(\@humeurs);
+    my $event    = $pick->(\@evenements);
+    my $reco     = $pick->(\@recommandations);
+    my $attention = $pick->(\@attentions);
+    my $couleur  = $pick->(\@couleurs);
+    my $chiffre  = $pick->(\@chiffres);
+    my $glyph    = $pick->(\@glyphs);
     # Pourcentage chance — biais positif léger
-    my $chance   = 35 + int(rand 60);  # 35..94
+    my $chance   = 35 + ($next->() % 60);  # 35..94
 
-    # Restore real randomness for the rest of the process
-    srand();
+    # (mb444-B1: plus de srand() — le RNG global n'est jamais touché.)
 
     # Affichage 3 lignes
     botPrivmsg($self, $reply_to,
@@ -10013,7 +10061,7 @@ sub mbQuotegame_ctx {
     my $author_lc = lc($row->{author});
     # nick chars IRC: lettres, chiffres, et certains specials. Les borders sont
     # "tout ce qui n'est PAS un nick char" (ou debut/fin de string).
-    my $nick_char = qr/[A-Za-z0-9\[\]\\^_`{}|\-]/;
+    my $nick_char = qr/[A-Za-z0-9\[\]\\^_`{}|\-\x80-\xFF]/;  # mb445-B1: octets UTF-8 (>=0x80) font partie du mot
     $masked =~ s/(?<!$nick_char)\Q$row->{author}\E(?!$nick_char)/???/gi;
     # 2e passe sur la version lowercase au cas ou \Q...\E ne matche pas
     # case-insensitively pour des caracteres non-ASCII (defensif).
@@ -10054,7 +10102,7 @@ sub checkQuotegameAnswer {
 
     # mb121-B2: meme correction qu'a la creation de la quote -- les nicks IRC
     # contenant [ ] _ \ ^ { } | ne sont pas bornes correctement par \b.
-    my $nick_char = qr/[A-Za-z0-9\[\]\\^_`{}|\-]/;
+    my $nick_char = qr/[A-Za-z0-9\[\]\\^_`{}|\-\x80-\xFF]/;  # mb445-B1: octets UTF-8 (>=0x80) font partie du mot
     my $msg_lc = lc($sMsg);
     if ($msg_lc =~ /(?<!$nick_char)\Q$qg->{author_lc}\E(?!$nick_char)/) {
         _quotegame_cancel_timer($self, $sChannel);
@@ -10133,8 +10181,14 @@ sub mbMood_ctx {
         $total_msgs++;
         $exclam += () = $txt =~ /!/g;
         $questions++ if $txt =~ /\?/;
-        # Compter les emojis
-        while ($txt =~ /($emoji_re)/g) { $emoji_count{$1}++ }
+        # mb446-B1: le comptage d'emojis doit porter sur des CARACTÈRES. publictext
+        # arrive en OCTETS UTF-8 ; $emoji_re utilise des codepoints (\x{1F600}...)
+        # qui ne peuvent JAMAIS matcher un octet (< 256) -> le détail « top emoji »
+        # n'apparaissait jamais. On décode une copie (tolérant) pour ce scan ; la
+        # tokenisation des mots reste byte-safe (mb427). L'emoji retenu est un
+        # caractère, cohérent avec les \x{...} déjà émis dans la sortie mood.
+        my $txt_chars = Encode::decode('UTF-8', $txt, Encode::FB_DEFAULT);
+        while ($txt_chars =~ /($emoji_re)/g) { $emoji_count{$1}++ }
         # Tokeniser
         # mb427-B1: tokenisation byte-safe (comme mb426) — les mots accentués
         # (positifs/négatifs français) restent entiers et matchent les
@@ -10641,7 +10695,9 @@ sub mbChronos_ctx {
 
     # Premier message (avec extrait tronqué)
     my $first_text = $first->{publictext} // '';
-    $first_text = substr($first_text, 0, 60) . '...' if length($first_text) > 60;
+    # mb441-B1: troncature UTF-8-safe (publictext en octets UTF-8) via le helper
+    # partagé mb429 — un substr brut à 60 octets coupait un accent en deux.
+    $first_text = Mediabot::Helpers::truncate_utf8($first_text, 60);
     botPrivmsg($self, $channel,
         "  \x{1F30C}  \x02$first_d\x02  Genesis  \x{2014}  $first->{nick}: \"$first_text\"");
 

@@ -211,7 +211,7 @@ echo "Current live release: ${PROJECT_DIR}"
 echo "Previous release archive: ${BACKUP_DIR}"
 echo
 echo "Start the bot in foreground with:"
-echo "  cd ${PROJECT_DIR} && ./start"
-echo "Or in background with:"
-echo "  cd ${PROJECT_DIR} && ./daemon"
+echo "  cd ${PROJECT_DIR} && perl mediabot.pl --conf=mediabot.conf"
+echo "Or with systemd (recommended for production):"
+echo "  sudo systemctl restart mediabot@<instance>   # see tools/systemd/README.md"
 

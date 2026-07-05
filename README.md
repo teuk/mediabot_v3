@@ -320,16 +320,18 @@ Start in foreground first:
 ```bash
 cd /home/mediabot/mediabot_v3 || exit 1
 
-./start
-```
-
-or explicitly:
-
-```bash
 perl mediabot.pl --conf=mediabot.conf
 ```
 
-Do not daemonize until foreground startup is clean.
+For production, use the systemd template unit (recommended):
+
+```bash
+sudo systemctl start mediabot@<instance>
+```
+
+See `tools/systemd/README.md` for the systemd setup.
+
+Do not switch to systemd until foreground startup is clean.
 
 Watch for:
 

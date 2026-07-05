@@ -2827,7 +2827,7 @@ sub _cmd_match {
                 my $line  = sprintf("  Hosts[%02d]: %s", $page, join(' | ', @chunk));
 
                 if (length($line) > 360) {
-                    $line = substr($line, 0, 357) . '...';
+                    $line = truncate_utf8($line, 357);
                 }
 
                 $stream->write($line . "\r\n");

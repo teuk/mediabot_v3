@@ -917,7 +917,7 @@ sub userWhoAmI_ctx {
             my $line  = sprintf("whoami-masks[%02d/%02d]: %s", $page, $total_pages, join(' | ', @chunk));
 
             if (length($line) > 360) {
-                $line = substr($line, 0, 357) . '...';
+                $line = truncate_utf8($line, 357);
             }
 
             botNotice($self, $nick, $line);

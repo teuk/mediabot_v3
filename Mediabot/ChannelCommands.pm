@@ -211,7 +211,7 @@ sub channelList_ctx {
         my $line  = sprintf("chanlist[%02d/%02d]: %s", $page, $total_pages, join(' ', @chunk));
 
         if (length($line) > 360) {
-            $line = substr($line, 0, 357) . '...';
+            $line = truncate_utf8($line, 357);
         }
 
         botNotice($self, $nick, $line);
@@ -3066,7 +3066,7 @@ SQL
         my $line  = sprintf("checkhostchan[%02d/%02d]: %s", $page, $total_pages, join(' ', @chunk));
 
         if (length($line) > 360) {
-            $line = substr($line, 0, 357) . '...';
+            $line = truncate_utf8($line, 357);
         }
 
         botNotice($self, $nick, $line);
@@ -3252,7 +3252,7 @@ sub channelNickList_ctx {
         my $line  = sprintf("nicklist[%02d/%02d]: %s", $page, $total_pages, join(' ', @chunk));
 
         if (length($line) > 360) {
-            $line = substr($line, 0, 357) . '...';
+            $line = truncate_utf8($line, 357);
         }
 
         botNotice($self, $nick, $line);

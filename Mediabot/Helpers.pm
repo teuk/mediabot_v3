@@ -3042,7 +3042,7 @@ SQL
         my $line  = sprintf("checknick[%02d/%02d]: %s", $page, $total_pages, join(' ', @chunk));
 
         if (length($line) > 360) {
-            $line = substr($line, 0, 357) . '...';
+            $line = truncate_utf8($line, 357);
         }
 
         botNotice($self, $nick, $line);
@@ -3330,7 +3330,7 @@ SQL
         my $line  = sprintf("checkhost[%02d/%02d]: %s", $page, $total_pages, join(' ', @chunk));
 
         if (length($line) > 360) {
-            $line = substr($line, 0, 357) . '...';
+            $line = truncate_utf8($line, 357);
         }
 
         botNotice($self, $nick, $line);
@@ -3448,7 +3448,7 @@ sub whoTalk_ctx {
             join('  ', @chunk));
 
         if (length($line) > 360) {
-            $line = substr($line, 0, 357) . '...';
+            $line = truncate_utf8($line, 357);
         }
 
         botNotice($self, $nick, $line);

@@ -561,7 +561,7 @@ sub mbTimers_ctx {
             my $out = sprintf("timer[%02d/%02d]: %s", $page, $total_pages, $line);
 
             if (length($out) > 360) {
-                $out = substr($out, 0, 357) . '...';
+                $out = truncate_utf8($out, 357);
             }
 
             $self->botNotice($nick, $out);
@@ -602,7 +602,7 @@ sub mbTimers_ctx {
                 );
 
                 if (length($line) > 360) {
-                    $line = substr($line, 0, 357) . '...';
+                    $line = truncate_utf8($line, 357);
                 }
 
                 $self->botNotice($nick, $line);
@@ -1410,7 +1410,7 @@ sub mbCountCommand_ctx {
             $page, $total_pages, join(' ', @chunk));
 
         if (length($line) > 360) {
-            $line = substr($line, 0, 357) . '...';
+            $line = truncate_utf8($line, 357);
         }
 
         botNotice($self, $nick, $line);
@@ -1507,7 +1507,7 @@ sub mbTopCommand_ctx {
         my $line  = sprintf("topcmd[%02d]: %s", $page, join(' | ', @chunk));
 
         if (length($line) > 360) {
-            $line = substr($line, 0, 357) . '...';
+            $line = truncate_utf8($line, 357);
         }
 
         botNotice($self, $nick, $line);
@@ -1615,7 +1615,7 @@ sub mbLastCommand_ctx {
         my $line  = sprintf("lastcmd[%02d]: %s", $page, join(' ', @chunk));
 
         if (length($line) > 360) {
-            $line = substr($line, 0, 357) . '...';
+            $line = truncate_utf8($line, 357);
         }
 
         botNotice($self, $nick, $line);
@@ -1733,7 +1733,7 @@ sub mbDbSearchCommand_ctx {
 
         # Conservative IRC payload limit.
         if (length($line) > 360) {
-            $line = substr($line, 0, 357) . '...';
+            $line = truncate_utf8($line, 357);
         }
 
         botNotice($self, $nick, $line);
@@ -1828,7 +1828,7 @@ sub mbDbOwnersCommand_ctx {
         my $line  = sprintf("owncmd[%02d/%02d]: %s", $page, $total_pages, join(' ', @chunk));
 
         if (length($line) > 360) {
-            $line = substr($line, 0, 357) . '...';
+            $line = truncate_utf8($line, 357);
         }
 
         botNotice($self, $nick, $line);
@@ -2090,7 +2090,7 @@ sub mbPopCommand_ctx {
         my $line  = sprintf("popcmd[%02d]: %s", $page, join(' | ', @chunk));
 
         if (length($line) > 360) {
-            $line = substr($line, 0, 357) . '...';
+            $line = truncate_utf8($line, 357);
         }
 
         botNotice($self, $nick, $line);

@@ -36,10 +36,10 @@ return sub {
         qr/perl\s+--conf=mediabot\.conf\s+mediabot\.pl/,
         'README does not pass --conf as a Perl interpreter option'
     );
-    $assert->like(
+    $assert->unlike(
         $readme,
         qr/^\.\/start$/m,
-        'README documents the normal foreground start helper'
+        'README no longer recommends the removed ./start wrapper (mb447)'
     );
     $assert->like(
         $readme,
@@ -48,7 +48,7 @@ return sub {
     );
     $assert->like(
         $readme,
-        qr/Do not daemonize until foreground startup is clean\./,
-        'README explicitly requires a clean foreground start before daemonization'
+        qr/Do not switch to systemd until foreground startup is clean\./,
+        'README explicitly requires a clean foreground start before systemd (mb447)'
     );
 };

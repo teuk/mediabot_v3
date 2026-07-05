@@ -489,26 +489,44 @@ sub check_msg {
     $self->unlock($nick, $channel, 'legend')            if $n >= 100_000;
 
     # Night Owl / Early Bird : compte par tranche horaire
-    if (!exists $self->get_for_nick($nick, $channel)->{night_owl} ||
-        !exists $self->get_for_nick($nick, $channel)->{early_bird}) {
-        my $sth_h = eval {
-            $dbh->prepare(q{
-                SELECT HOUR(cl.ts) AS h, COUNT(*) AS c
-                FROM CHANNEL_LOG cl
-                JOIN CHANNEL c ON c.id_channel = cl.id_channel
-                WHERE c.name = ? AND cl.nick = ?
-                  AND cl.event_type IN ('public','action')   -- mb347-B1
-                GROUP BY HOUR(cl.ts)
-            })
-        };
-        if ($sth_h && $sth_h->execute($channel, $nick)) {
-            my (%by_h);
-            while (my $r = $sth_h->fetchrow_hashref) { $by_h{$r->{h}} = $r->{c}; }
-            $sth_h->finish;
-            my $night = 0; $night += ($by_h{$_} // 0) for (0..5);
-            my $morn  = 0; $morn  += ($by_h{$_} // 0) for (6..8);
-            $self->unlock($nick, $channel, 'night_owl')  if $night >= 50;
-            $self->unlock($nick, $channel, 'early_bird') if $morn  >= 50;
+    #
+    # mb450-B1 (perf): ce GROUP BY HOUR(ts) sur CHANNEL_LOG est la requete la
+    # plus chere de ce hook (Using temporary + filesort). Deux gardes, sans rien
+    # changer a la logique de deblocage :
+    #   1. Court-circuit mathematique : night_owl et early_bird exigent chacun
+    #      >= 50 messages dans une tranche horaire. C'est impossible si le total
+    #      du nick sur le canal ($n) est < 50 -> on saute le scan pour l'immense
+    #      majorite des nicks (le cas courant sur un canal charge).
+    #   2. Throttle horaire : pour les gros nicks qui franchissent 50, on ne
+    #      relance le scan qu'une fois par heure et par (nick,canal), au lieu de
+    #      chaque fois que le cache 5 min de check_msg laisse passer.
+    # Les seuils (>= 50) et les unlock sont identiques a l'avant-mb450.
+    if ($n >= 50 &&
+        (!exists $self->get_for_nick($nick, $channel)->{night_owl} ||
+         !exists $self->get_for_nick($nick, $channel)->{early_bird})) {
+        my $hb_key  = lc($nick) . "\x00" . lc($channel // "");
+        my $hb_last = $self->{_hourband_check_ts}{$hb_key} // 0;
+        if ((time() - $hb_last) >= 3600) {
+            $self->{_hourband_check_ts}{$hb_key} = time();
+            my $sth_h = eval {
+                $dbh->prepare(q{
+                    SELECT HOUR(cl.ts) AS h, COUNT(*) AS c
+                    FROM CHANNEL_LOG cl
+                    JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                    WHERE c.name = ? AND cl.nick = ?
+                      AND cl.event_type IN ('public','action')   -- mb347-B1
+                    GROUP BY HOUR(cl.ts)
+                })
+            };
+            if ($sth_h && $sth_h->execute($channel, $nick)) {
+                my (%by_h);
+                while (my $r = $sth_h->fetchrow_hashref) { $by_h{$r->{h}} = $r->{c}; }
+                $sth_h->finish;
+                my $night = 0; $night += ($by_h{$_} // 0) for (0..5);
+                my $morn  = 0; $morn  += ($by_h{$_} // 0) for (6..8);
+                $self->unlock($nick, $channel, 'night_owl')  if $night >= 50;
+                $self->unlock($nick, $channel, 'early_bird') if $morn  >= 50;
+            }
         }
     }
 

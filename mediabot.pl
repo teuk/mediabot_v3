@@ -171,6 +171,53 @@ $mediabot->{logger} = Mediabot::Log->new(
 # Trap signals
 init_signals($mediabot->{logger});
 
+# mb449-B1: contrôle d'intégrité de l'installation au démarrage.
+# Cause réelle (crash instance Undernet, 04/07/2026) : un déploiement partiel
+# laisse un mediabot.pl plus récent que les modules Mediabot/*.pm — l'appel
+# d'une méthode ajoutée depuis (ex. hailo_record_activity, mb370) explose en
+# "Can't locate object method" au premier message concerné, tue la boucle
+# IO::Async et donc tout le bot, parfois des heures après le start.
+# `perl -c` ne détecte PAS ce désync (résolution de méthode = runtime).
+# Ici : on inventorie toutes les méthodes que CE fichier appelle sur
+# $mediabot (auto-dérivé du source, aucune liste à maintenir) et on vérifie
+# qu'elles se résolvent. Sinon on échoue IMMÉDIATEMENT avec un message
+# actionnable, au lieu de mourir en plein trafic.
+{
+    my %called_methods;
+    my $self_source = __FILE__;
+    my $fh_self;
+    unless (open $fh_self, '<', $self_source) {
+        $mediabot->{logger}->log(0,
+            "FATAL: startup integrity check could not read $self_source: $!");
+        exit 1;
+    }
+    while (my $line = <$fh_self>) {
+        next if $line =~ /^\s*#/;
+        $called_methods{$1} = 1
+            while $line =~ /\$mediabot->([a-zA-Z_][A-Za-z0-9_]*)\(/g;
+    }
+    close $fh_self;
+    unless (keys %called_methods) {
+        $mediabot->{logger}->log(0,
+            "FATAL: startup integrity check found no Mediabot method calls in $self_source");
+        exit 1;
+    }
+    # mb456-B2: fail closed. The mb449 guard must never report success after
+    # an unreadable/empty scan, otherwise a deployment mismatch can slip
+    # through behind a misleading "0 methods resolved OK" line.
+    my @missing = grep { !Mediabot->can($_) } sort keys %called_methods;
+    if (@missing) {
+        $mediabot->{logger}->log(0,
+            "FATAL: installation mismatch — mediabot.pl calls method(s) not provided by the installed Mediabot modules: "
+            . join(', ', @missing));
+        $mediabot->{logger}->log(0,
+            "Your Mediabot/*.pm tree is older (or newer) than mediabot.pl. Redeploy the FULL tree, then restart.");
+        exit 1;
+    }
+    $mediabot->{logger}->log(3,
+        "Startup integrity check: " . scalar(keys %called_methods) . " cross-module method(s) resolved OK");
+}
+
 
 # mb172-B1: optional trusted Perl plugin autoload. This is disabled unless
 # plugins.AUTOLOAD (or compatible flat key) is explicitly truthy in config.
@@ -2281,7 +2328,14 @@ sub on_message_JOIN {
             if ($id_channel) {
                 my $norm_mask = $cb->mask_from_hostmask("$sNick!$sIdent\@$sHost");
                 if ($norm_mask) {
-                    my $ban = $cb->active_ban_for_mask($id_channel, $norm_mask);
+                    # mb440-B1: matcher les bans stockés contre le hostmask RÉEL
+                    # du joineur (nick!ident@host), pas contre $norm_mask (qui a
+                    # le nick wildcardé). Sinon un ban basé sur le nick
+                    # (ex. "spammer!*@host.com") n'était JAMAIS appliqué : son
+                    # pattern ne peut pas matcher un sujet dont le nick est déjà
+                    # remplacé par '*'. $norm_mask reste le masque posé (+b).
+                    my $raw_hostmask = "$sNick!$sIdent\@$sHost";
+                    my $ban = $cb->active_ban_for_mask($id_channel, $raw_hostmask);
                     if ($ban) {
                         $mediabot->{logger}->log(2,
                             "ChannelBan: $sNick matches ban #$ban->{id_channel_ban} on $target_name - enforcing");

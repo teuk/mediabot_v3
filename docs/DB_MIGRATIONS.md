@@ -53,6 +53,10 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260502_channel_ban.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260502_user_seen.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/mediabot_fun_commands_migration_20260512.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260515_claude_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260521_trivia_scores_note.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260603_karma_log.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260604_achievement_announce_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260604_chansets_mb115_mb118.sql;
 ```
 
 Then run the checker again:
@@ -63,16 +67,26 @@ perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
 
 ## Migration order
 
-For an existing database, apply migrations in this order unless a later release note says otherwise:
+The authoritative, complete and ordered list of migrations is maintained in
+`install/migrations/README.md`. For an existing database, apply migrations in
+this order unless a later release note says otherwise:
 
 ```text
 20260502_channel_ban.sql
 20260502_user_seen.sql
 mediabot_fun_commands_migration_20260512.sql
 20260515_claude_chanset.sql
+20260521_trivia_scores_note.sql
+20260603_karma_log.sql
+20260604_achievement_announce_chanset.sql
+20260604_chansets_mb115_mb118.sql
 ```
 
-`tools/check_schema_drift.pl` checks schema structure. Reference-data migrations such as `20260515_claude_chanset.sql` must still be applied when upgrading an existing database.
+A fresh install uses `install/mediabot.sql` directly and must NOT apply this
+historical stack. Structure migrations are verified by
+`tools/check_schema_drift.pl`; reference-data migrations (such as
+`20260515_claude_chanset.sql` or `20260604_chansets_mb115_mb118.sql`) are not
+covered by the drift checker and must still be applied when upgrading.
 
 ## Useful commands
 

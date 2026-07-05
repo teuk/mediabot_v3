@@ -39,8 +39,8 @@ return sub {
     $assert->ok(defined $sync, '_youtube_search_fetch_sync found');
     $assert->like($src, qr/^use URI::Escape qw\(uri_escape_utf8\);$/m,
         'YouTube module imports uri_escape_utf8');
-    $assert->like($sync // '', qr/my\s+\$q_enc\s*=\s*uri_escape_utf8\(\$query_txt\)/,
-        'blocking worker encodes the query with uri_escape_utf8');
+    $assert->like($sync // '', qr/my\s+\$q_enc\s*=\s*_uri_escape_bytes\(\$query_txt\)/,
+        'blocking worker encodes the query byte-safe (mb439, _uri_escape_bytes)');
     $assert->like($sync // '', qr/"&q=\$q_enc"/,
         'encoded query is used in the search URL');
     $assert->unlike($src, qr/url_encode_utf8\(/,

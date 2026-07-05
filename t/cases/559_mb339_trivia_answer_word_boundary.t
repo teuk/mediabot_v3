@@ -34,7 +34,7 @@ sub _matched {
     my ($text, $answer) = @_;
     $answer = lc $answer;
     return ( lc($text) eq $answer
-             || lc($text) =~ /(?<![A-Za-z0-9])\Q$answer\E(?![A-Za-z0-9])/ ) ? 1 : 0;
+             || lc($text) =~ /(?<![A-Za-z0-9\x80-\xFF])\Q$answer\E(?![A-Za-z0-9\x80-\xFF])/ ) ? 1 : 0;
 }
 
 sub _slurp_559 {
@@ -61,6 +61,9 @@ return sub {
         [ 'WAR',              'war',      1, 'insensible à la casse' ],
         [ "caf\x{e9}",        "caf\x{e9}",1, 'accent exact' ],
         [ "caf\x{e9}s",       "caf\x{e9}",0, 'accent + s -> rejet' ],
+        # mb443: octet d'accent adjacent ne fait plus frontière (byte-safe).
+        [ "gar".chr(0xC3).chr(0xA7)."on", 'on', 0, 'garçon ne valide plus "on" (mb443)' ],
+        [ 'the answer is on', 'on',       1, '"on" délimité par espaces reste valide' ],
     );
 
     for my $c (@cases) {
@@ -73,8 +76,8 @@ return sub {
 
     $assert->like(
         $src,
-        qr/\(\?<!\[A-Za-z0-9\]\)\\Q\$answer\\E\(\?!\[A-Za-z0-9\]\)/,
-        'checkTrivia borne la réponse par des frontières alphanumériques'
+        qr/\(\?<!\[A-Za-z0-9\\x80-\\xFF\]\)\\Q\$answer\\E\(\?!\[A-Za-z0-9\\x80-\\xFF\]\)/,
+        'checkTrivia borne la réponse par des frontières byte-safe (mb443)'
     );
     $assert->unlike(
         $src,

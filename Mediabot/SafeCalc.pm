@@ -382,6 +382,15 @@ sub _parse_mul {
         if ($self->_accept_op('%')) {
             my $right = $self->_parse_unary;
             die "Division by zero.\n" if $right == 0;
+            # mb442-B1: l'opérateur % de Perl travaille sur des ENTIERS et
+            # tronque silencieusement des opérandes flottants (10.5 % 3 -> 10 %
+            # 3 = 1), une perte de données muette incohérente avec la rigueur du
+            # module (qui die ailleurs sur overflow/non-fini). On refuse les
+            # opérandes non entiers et on renvoie vers fmod() pour le modulo
+            # flottant. Le modulo entier (convention Perl, reste toujours du
+            # signe du diviseur) reste inchangé.
+            die "Modulo requires integer operands (use fmod for floats).\n"
+                if $value != int($value) || $right != int($right);
             $value = Mediabot::SafeCalc::_checked(sub { $value % $right });
             next;
         }

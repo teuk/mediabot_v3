@@ -173,6 +173,19 @@ sub _fetch_url_chromium_dumpdom {
     my ($self, $url, %opts) = @_;
     return undef unless defined $url && $url ne '';
 
+    # mb448-B1 (revue sécurité pré-release, classe exec/argv) : cette fonction
+    # est la DERNIÈRE frontière avant open3(). $url est le dernier élément de
+    # l'argv Chromium ; une chaîne commençant par '-' serait interprétée comme
+    # une OPTION Chromium (même classe que l'injection yt-dlp corrigée en
+    # mb417). Tous les appelants actuels valident ^https?:// en amont, mais la
+    # frontière ne doit pas dépendre de la discipline des appelants (cf. la
+    # même règle dans ScriptRunner::run_plan). On n'accepte ici que des URLs
+    # http(s) absolues — ce qui exclut structurellement tout argument-option.
+    unless ($url =~ m{\Ahttps?://}i) {
+        $self->{logger}->log(3, "_fetch_url_chromium_dumpdom() refused non-http(s) argument");
+        return undef;
+    }
+
     my $chromium = '/usr/bin/chromium';
     unless (-x $chromium) {
         $self->{logger}->log(3, "_fetch_url_chromium_dumpdom() chromium not found at $chromium");
