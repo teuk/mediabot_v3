@@ -2447,7 +2447,11 @@ sub _mbHelpBuildChunkedList {
         my $piece = ($line eq $prefix) ? $item : ", $item";
 
         if (length($line) + length($piece) > $max_len) {
-            push @lines, $line;
+            # mb462-B1: ne pas pousser une ligne réduite au seul préfixe quand un
+            # item dépasse à lui seul la limite (sinon une ligne vide de contenu
+            # est émise avant celle de l'item). Latent avec les noms de commandes
+            # courts actuels ; correct pour tout réemploi avec des items longs.
+            push @lines, $line if $line ne $prefix;
             $line = $prefix . $item;
         } else {
             $line .= $piece;

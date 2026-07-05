@@ -5127,10 +5127,16 @@ sub mbNote_ctx {
     if ($text =~ /^search\s+(.+)/i) {
         my $query = lc($1);
         my $notes = $self->{_notes}{lc $nick} // [];
-        my @hits = grep {
-            my $txt = ref($_) eq 'HASH' ? ($_->{text} // '') : ($_ // '');
-            lc($txt) =~ /\Q$query\E/
-        } @$notes;
+        # mb460-B1: keep each hit's index in the FULL notes list. The displayed
+        # [N] must match the index that `!notes del <N>` expects; numbering hits
+        # positionally (1..@hits) pointed the user at the wrong note to delete
+        # when the matches weren't the first notes.
+        my @hits;
+        for my $idx (0 .. $#$notes) {
+            my $n   = $notes->[$idx];
+            my $txt = ref($n) eq 'HASH' ? ($n->{text} // '') : ($n // '');
+            push @hits, [ $idx, $n ] if lc($txt) =~ /\Q$query\E/;
+        }
 
         unless (@hits) {
             botNotice($self, $nick, "No notes matching '$query'."); return 1;
@@ -5139,10 +5145,11 @@ sub mbNote_ctx {
         # II17: show count + search term
         botNotice($self, $nick, scalar(@hits) . "/" . scalar(@$notes)
             . " note(s) matching '$query':");
-        for my $i (0..$#hits) {
-            my $n = $hits[$i];
+        for my $h (@hits) {
+            my ($idx, $n) = @$h;
             my $txt = ref($n) eq 'HASH' ? ($n->{text} // '') : ($n // '');
-            botNotice($self, $nick, "  [" . ($i+1) . "] $txt");
+            # [idx+1] = position in the full list = the !notes del index
+            botNotice($self, $nick, "  [" . ($idx + 1) . "] $txt");
         }
         return 1;
     }
@@ -5227,6 +5234,56 @@ sub mbNotes_ctx {
 # !karmawatch <nick>  → toggle watch on that nick
 # !karmawatch list    → show your active watches
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# _karma_current_score($self, $nick)  (mb459-B1)
+# Shared "current karma score": the score of the MOST RECENT karma_log entry
+# (max ts) for $nick across ALL channels, or undef if none.
+#
+# Single source of truth for the selection that was copy-pasted (and identically
+# buggy) in !karmawatch list (mb457) and !karmadiff (mb458): both used
+# `keys %_karma_log` (hash order) + `last`, returning an arbitrary/stale
+# channel's score. Centralising the max-ts logic keeps them deterministic and
+# stops the pattern from being re-introduced by copy-paste.
+# ---------------------------------------------------------------------------
+sub _karma_current_score {
+    my ($self, $nick, $channel) = @_;
+
+    # mb464-B1: karma scores are channel-scoped in SQL.  When a caller is
+    # operating in a channel (notably !karmadiff), only that channel may supply
+    # the displayed "current" score.  PM/global callers keep the historical
+    # all-channel view.  Sort channel keys and apply an explicit tie-break so
+    # two votes recorded in the same integer second never reintroduce hash-order
+    # nondeterminism.
+    my @channels = sort { lc($a) cmp lc($b) || $a cmp $b }
+                   keys %{ $self->{_karma_log} // {} };
+    if (defined $channel && $channel ne '') {
+        @channels = grep { lc($_) eq lc($channel) } @channels;
+    }
+
+    my ($best, $best_ts, $best_channel, $best_index);
+    for my $ch (@channels) {
+        my $entries = $self->{_karma_log}{$ch} // [];
+        for my $idx (0 .. $#$entries) {
+            my $e = $entries->[$idx];
+            next unless defined $e->{nick}
+                     && lc($e->{nick}) eq lc($nick)
+                     && defined $e->{score};
+
+            my $ts = $e->{ts} // 0;
+            my $channel_key = lc($ch);
+            if (!defined $best
+                || $ts > $best_ts
+                || ($ts == $best_ts && $channel_key gt $best_channel)
+                || ($ts == $best_ts && $channel_key eq $best_channel
+                    && $idx > $best_index)) {
+                ($best, $best_ts, $best_channel, $best_index)
+                    = ($e, $ts, $channel_key, $idx);
+            }
+        }
+    }
+    return defined $best ? $best->{score} : undef;
+}
+
 sub mbKarmaWatch_ctx {
     my ($ctx) = @_;
     my $self    = $ctx->bot;
@@ -5241,19 +5298,13 @@ sub mbKarmaWatch_ctx {
             botNotice($self, $nick, 'You are not watching any karma targets.');
             return 1;
         }
-        # IMP19: show current karma score for each watched nick
+        # IMP19: show current karma score for each watched nick.
+        # mb459-B1: delegate to the shared _karma_current_score() helper
+        # (most recent entry, max ts, all channels) — single source of truth.
         my @watch_with_scores;
         for my $wt (@$watching) {
-            my $score_str = '';
-            for my $ch (keys %{ $self->{_karma_log} // {} }) {
-                my $klog = $self->{_karma_log}{$ch} // [];
-                my ($last) = grep { lc($_->{nick}) eq lc($wt) } reverse @$klog;
-                if ($last && defined $last->{score}) {
-                    my $sc = $last->{score};
-                    $score_str = $sc >= 0 ? "+$sc" : "$sc";
-                    last;
-                }
-            }
+            my $sc = _karma_current_score($self, $wt);
+            my $score_str = defined $sc ? ($sc >= 0 ? "+$sc" : "$sc") : '';
             push @watch_with_scores, $score_str ne '' ? "$wt ($score_str)" : $wt;
         }
         botNotice($self, $nick, 'You are watching: ' . join(', ', @watch_with_scores));
@@ -5614,15 +5665,11 @@ sub mbKarmaDiff_ctx {
         ? '  | by: ' . join(', ', map { "$_($givers_w{$_})" } @top_givers)
         : '';
 
-    # CC11: fetch current score
-    my $cur_score = undef;
-    for my $ch (keys %{ $self->{_karma_log} // {} }) {
-        my $klog = $self->{_karma_log}{$ch} // [];
-        my ($last_e) = grep { lc($_->{nick}) eq lc($target) } reverse @$klog;
-        if ($last_e && defined $last_e->{score}) {
-            $cur_score = $last_e->{score}; last;
-        }
-    }
+    # CC11: fetch current score.
+    # mb459/mb464: shared _karma_current_score() helper.  In a channel, the
+    # displayed score is scoped to that same channel; in PM, it uses the
+    # deterministic all-channel view (see also !karmawatch list).
+    my $cur_score = _karma_current_score($self, $target, $kd_chan);
     my $score_info = defined $cur_score
         ? ', score: ' . ($cur_score >= 0 ? "+$cur_score" : "$cur_score")
         : '';

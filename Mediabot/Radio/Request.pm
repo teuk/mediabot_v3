@@ -145,7 +145,21 @@ sub _extract_youtube_id {
     #   https://youtu.be/VIDEOID
     #   https://www.youtube.com/shorts/VIDEOID
     #   plain VIDEOID
-    if ($text =~ m{(?:v=|youtu\.be/|shorts/)([A-Za-z0-9_-]{11})}) {
+    # mb461/mb464: extract IDs only from real YouTube hosts and paths.
+    # A bare `\bv=` boundary was still too broad: example.org/?v=..., a path
+    # named /shorts/, or a hostname ending in youtu.be could all be mistaken for
+    # YouTube.  Parse the supported URL shapes explicitly and require `v` to be
+    # a complete query parameter.
+    if ($text =~ m{https?://(?:www\.|m\.|music\.)?youtube\.com/watch\?([^\s#]*)}i) {
+        my $query = $1;
+        return $1 if $query =~ /(?:^|&)v=([A-Za-z0-9_-]{11})(?:&|$)/;
+    }
+
+    if ($text =~ m{https?://(?:www\.)?youtu\.be/([A-Za-z0-9_-]{11})(?=[/?#&\s]|$)}i) {
+        return $1;
+    }
+
+    if ($text =~ m{https?://(?:www\.|m\.)?youtube\.com/shorts/([A-Za-z0-9_-]{11})(?=[/?#&\s]|$)}i) {
         return $1;
     }
 

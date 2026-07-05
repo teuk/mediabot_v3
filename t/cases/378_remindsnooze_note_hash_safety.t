@@ -55,6 +55,9 @@ return sub {
     $assert->like($note // '', qr/ref\(\$n\) eq 'HASH'.*?\$n->\{text\}/s,
         'note export handles hash-backed notes');
 
-    $assert->like($note // '', qr/ref\(\$_\) eq 'HASH'.*?\$_->\{text\}/s,
+    # mb460: !note search now iterates explicitly (my $n = $notes->[$idx]) to
+    # keep each hit's full-list index, so the hash-backed access uses $n (like
+    # the export branch) instead of $_ in a grep.
+    $assert->like($note // '', qr/ref\(\$n\) eq 'HASH'.*?\$n->\{text\}/s,
         'note search handles hash-backed notes');
 };
