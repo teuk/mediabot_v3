@@ -342,8 +342,16 @@ sub chatGPT {
     # --------------------------------------------------------------
     #  sanity / config checks
     # --------------------------------------------------------------
-	my $api_key = $self->{conf}->get('openai.API_KEY')
-    	or ($self->{logger}->log(0,'chatGPT() openai.API_KEY missing'), return);
+    my $api_key = $self->{conf}->get('openai.API_KEY')
+        or do {
+            $self->{logger}->log(0,'chatGPT() openai.API_KEY missing');
+            # mb468-B1: ne pas rester silencieux côté IRC — l'utilisateur doit
+            # savoir que l'intégration n'est pas configurée (critère No-Go
+            # « commande cœur silencieuse »).
+            Mediabot::Helpers::botNotice($self, $nick,
+                'OpenAI/tellme is not configured on this bot (missing openai.API_KEY).');
+            return;
+        };
 
     my $chatgpt_api_url     = _chatgpt_conf_string($self, 'openai.API_URL',     CHATGPT_API_URL);
     my $chatgpt_model          = _chatgpt_conf_string($self, 'openai.MODEL',          CHATGPT_MODEL);
@@ -1259,7 +1267,14 @@ sub claudeAI {
 
     # Config: anthropic.API_KEY required
     my $api_key = _chatgpt_conf_string($self, 'anthropic.API_KEY', '')
-        or ($self->{logger}->log(0, 'claudeAI() anthropic.API_KEY missing'), return);
+        or do {
+            $self->{logger}->log(0, 'claudeAI() anthropic.API_KEY missing');
+            # mb468-B1: symétrique de chatGPT() — ne pas rester silencieux quand
+            # la clé Claude n'est pas configurée.
+            Mediabot::Helpers::botNotice($self, $nick,
+                'Claude/ai is not configured on this bot (missing anthropic.API_KEY).');
+            return;
+        };
 
     my $api_url     = _chatgpt_conf_string($self, 'anthropic.API_URL',
                                             CLAUDE_API_URL);

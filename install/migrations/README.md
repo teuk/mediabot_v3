@@ -25,6 +25,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260603_karma_log.sql
 20260604_achievement_announce_chanset.sql
 20260604_chansets_mb115_mb118.sql
+20260706_channel_log_channel_ts.sql
 ```
 
 The migration set adds channel-ban tracking, user seen/activity tracking, Claude chanset reference data, schema support for newer fun/user commands, and persistent trivia scores and user notes, including:
@@ -64,6 +65,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260521_trivia_scores_note
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260603_karma_log.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260604_achievement_announce_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260604_chansets_mb115_mb118.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260706_channel_log_channel_ts.sql;
 ```
 
 Afterwards:

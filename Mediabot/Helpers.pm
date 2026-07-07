@@ -1388,12 +1388,35 @@ sub setChannelAntiFlood {
 
 # ---------------------------------------------------------------------------
 # make_password_hash($plain)
-# Reproduces MariaDB PASSWORD() without DB round-trip:
-#   '*' . uc( sha1_hex( sha1($plain) ) )
-# ---------------------------------------------------------------------------
+# mb465-B1 (bcrypt lazy, plan §2.5 de la direction 3.3) : les NOUVEAUX hashes
+# sont créés en bcrypt ($2b$, coût 12) quand Crypt::Bcrypt est disponible.
+# Fallback : l'historique double-SHA1 MySQL ('*' + 40 hex) si le module manque,
+# pour ne jamais bloquer la création de compte. L'algorithme se reconnaît au
+# préfixe du hash — aucune colonne de version nécessaire (password VARCHAR(255)).
+# NOTE : bcrypt est salé donc NON déterministe — ne jamais vérifier un mot de
+# passe par égalité avec make_password_hash(); utiliser
+# Mediabot::Auth::password_matches($clear, $stored).
+my $HAVE_BCRYPT_H = eval { require Crypt::Bcrypt; 1 } ? 1 : 0;
+
+sub _bcrypt_salt16 {
+    my $salt = '';
+    if (open(my $ur, '<:raw', '/dev/urandom')) {
+        read($ur, $salt, 16);
+        close $ur;
+    }
+    # Fallback (plateformes sans /dev/urandom) : moins fort mais fonctionnel.
+    while (length($salt) < 16) { $salt .= chr(int(rand(256))); }
+    return substr($salt, 0, 16);
+}
+
 sub make_password_hash {
     my ($plain) = @_;
     return undef unless defined $plain && length $plain;
+    if ($HAVE_BCRYPT_H) {
+        my $hash = eval { Crypt::Bcrypt::bcrypt($plain, '2b', 12, _bcrypt_salt16()) };
+        return $hash if !$@ && defined $hash && $hash =~ /^\$2b\$/;
+        # en cas d'échec inattendu, retomber sur le legacy plutôt que bloquer
+    }
     return '*' . uc(sha1_hex(sha1($plain)));
 }
 

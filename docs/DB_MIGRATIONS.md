@@ -57,6 +57,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260521_trivia_scores_note
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260603_karma_log.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260604_achievement_announce_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260604_chansets_mb115_mb118.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260706_channel_log_channel_ts.sql;
 ```
 
 Then run the checker again:
@@ -80,6 +81,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260603_karma_log.sql
 20260604_achievement_announce_chanset.sql
 20260604_chansets_mb115_mb118.sql
+20260706_channel_log_channel_ts.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this
@@ -119,6 +121,23 @@ Ignore extra legacy tables/columns:
 ```bash
 perl tools/check_schema_drift.pl --conf=mediabot.conf --ignore-extra
 ```
+
+## CHANNEL_LOG composite index (20260706)
+
+`20260706_channel_log_channel_ts.sql` adds a composite index
+`idx_channel_log_channel_ts (id_channel, ts)` to speed up the hot queries that
+filter by channel then bound or sort by time (`m check` / stats, achievements
+hourband, period reports). It is idempotent: a guarded stored procedure checks
+`information_schema.STATISTICS` and only creates the index if missing, so it can
+be replayed safely. It removes no existing index, adds no table or column, and
+touches no data.
+
+Note: once the composite `(id_channel, ts)` exists, the standalone
+`idx_channel_log_id_channel (id_channel)` becomes a left-prefix duplicate. It is
+kept for now (removing an index is a separate, explicitly-approved decision per
+the 3.3 direction); it can be dropped later if write cost matters. Measure with
+`tools/measure_channel_log.pl --conf=mediabot.conf` before and after applying
+the migration to confirm the optimiser picks the composite index.
 
 ## Safety rules
 

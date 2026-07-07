@@ -178,7 +178,8 @@ CREATE TABLE `CHANNEL_LOG` (
   KEY `ts`      (`ts`),
   KEY `nick`    (`nick`(191)),
   KEY `userhost`(`userhost`(191)),
-  KEY `idx_channel_log_id_channel` (`id_channel`)
+  KEY `idx_channel_log_id_channel` (`id_channel`),
+  KEY `idx_channel_log_channel_ts` (`id_channel`, `ts`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------

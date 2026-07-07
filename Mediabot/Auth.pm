@@ -114,6 +114,15 @@ sub verify_credentials {
     my ($ok, $why) = _password_matches($clear, $stored);
     $self->_log(3, sprintf(" verify_credentials: id=%s nick=%s login_nick=%s match=%s (%s)",
                            $uid, $nick, ($login_nick//''), $ok ? 'YES' : 'NO', $why));
+
+    # mb465-B3 / mb466-B2 (bcrypt lazy, plan §2.5): on a SUCCESSFUL login against
+    # a legacy hash, immediately replace the stored hash with a fresh bcrypt one.
+    # Best-effort and shared with the `ident` path (checkAuthByUser) via
+    # maybe_upgrade_hash() so both routes migrate consistently.
+    if ($ok) {
+        $self->maybe_upgrade_hash($uid, $clear, $why, $nick);
+    }
+
     return $ok ? 1 : 0;
 }
 
@@ -759,6 +768,68 @@ sub _password_matches {
 
     # Fallback: compare plaintext (some historical rows)
     return ($clear eq $stored ? 1 : 0, 'plaintext_compare');
+}
+
+# mb465-B2: public, format-aware password check (bcrypt/double-SHA1/plaintext).
+# For callers that used to re-hash and compare with eq — that breaks with salted
+# bcrypt hashes and silently broke password changes for bcrypt accounts.
+sub password_matches {
+    my ($clear, $stored) = @_;
+    my ($ok, $why) = _password_matches($clear, $stored);
+    return wantarray ? (($ok ? 1 : 0), $why) : ($ok ? 1 : 0);
+}
+
+# ---------------------------------------------------------------------------
+# maybe_upgrade_hash($self, $uid, $clear, $why, $nick)
+# mb466-B2 (bcrypt lazy, plan §2.5): shared lazy re-hash helper. After a
+# SUCCESSFUL verification against a LEGACY hash, replace the stored password
+# with a fresh bcrypt one. Factored out of verify_credentials (mb465-B3) so the
+# `login` path AND the `ident` path (checkAuthByUser) migrate identically.
+#
+# Contract:
+#   - only acts when Crypt::Bcrypt is available and $why is NOT already 'bcrypt'
+#     (nothing to upgrade for an account already stored in bcrypt);
+#   - best-effort: any error is caught and logged, NEVER propagated — the caller
+#     has already authenticated the user, so a failed upgrade must not matter;
+#   - no schema change: the hash prefix identifies the algorithm.
+# Returns 1 if the row was upgraded, 0 otherwise (skipped or failed).
+# ---------------------------------------------------------------------------
+sub maybe_upgrade_hash {
+    my ($self, $uid, $clear, $why, $nick) = @_;
+    # mb466-B2: shared lazy bcrypt upgrade (login + ident).
+
+    return 0 unless $HAVE_BCRYPT;
+    return 0 unless defined $why && $why ne 'bcrypt';
+    return 0 unless defined $uid && $self->{dbh};
+
+    my $upgraded = eval {
+        require Mediabot::Helpers;
+        my $new_hash = Mediabot::Helpers::make_password_hash($clear);
+        if (defined $new_hash && $new_hash =~ /^\$2[aby]\$/) {
+            my $sth_up = $self->{dbh}->prepare(
+                'UPDATE USER SET password = ? WHERE id_user = ?');
+            if ($sth_up && $sth_up->execute($new_hash, $uid)) {
+                $sth_up->finish;
+                1;
+            } else {
+                $sth_up->finish if $sth_up;
+                0;
+            }
+        } else {
+            0;   # bcrypt indisponible côté Helpers -> on réessaiera au prochain login
+        }
+    };
+
+    if ($@) {
+        $self->_log(2, "maybe_upgrade_hash: lazy bcrypt upgrade failed for id=$uid: $@");
+        return 0;
+    }
+    elsif ($upgraded) {
+        my $who = defined $nick ? " nick=$nick" : '';
+        $self->_log(2, "maybe_upgrade_hash: password hash upgraded to bcrypt for id=$uid$who (was: $why)");
+        return 1;
+    }
+    return 0;
 }
 
 sub _glob_to_re {

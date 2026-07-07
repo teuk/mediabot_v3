@@ -62,6 +62,7 @@ PERL_MODULES=(
   "HTTP::Tiny"
   "IO::Socket::SSL"
   "Try::Tiny"
+  "Crypt::Bcrypt"
   "URI::Escape"
   "Date::Format"
   "JSON"

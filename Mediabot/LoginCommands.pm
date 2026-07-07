@@ -16,6 +16,8 @@ package Mediabot::LoginCommands;
 use strict;
 use warnings;
 use POSIX qw(strftime);
+use Digest::SHA ();      # mb465-B5: legacy fallback hash in checkAuth
+use Mediabot::Auth ();   # mb465-B4: format-aware password_matches in userPass
 
 use Exporter 'import';
 use List::Util qw(min);
@@ -90,10 +92,14 @@ sub getUserAutologin {
 sub checkAuth {
     my ($self, $iUserId, $sUserHandle, $sPassword) = @_;
 
-    # B4: eval around make_password_hash in case import is broken
-    my $sHashedPw = eval { make_password_hash($sPassword) };
+    # B4: eval around the hash computation in case imports are broken.
+    # mb465-B5: this value only feeds the LEGACY SQL-equality fallback below
+    # (used when Auth is unavailable). It must stay the deterministic historical
+    # double-SHA1 — make_password_hash now emits salted bcrypt (mb465-B1), which
+    # can never match by equality.
+    my $sHashedPw = eval { '*' . uc(Digest::SHA::sha1_hex(Digest::SHA::sha1($sPassword))) };
     unless (defined $sHashedPw) {
-        $self->{logger}->log(1, "checkAuth() make_password_hash failed: $@");
+        $self->{logger}->log(1, "checkAuth() legacy hash compute failed: $@");
         return 0;
     }
 
@@ -566,25 +572,21 @@ sub userPass {
             return 0;
         }
 
-        my $old_hash;
-        my $old_hash_ok = eval {
-            $old_hash = make_password_hash($old_password);
-            1;
-        };
-
-        unless ($old_hash_ok && defined($old_hash)) {
-            my $err = $@ || 'make_password_hash returned undef';
-            chomp $err;
-
-            $self->{logger}->log(1, "userPass() old password hash compute failed: $err")
+        # mb465-B4: verify the OLD password with the format-aware matcher.
+        # The previous check re-hashed and compared with `eq`, which (a) breaks
+        # by design with salted bcrypt hashes — a bcrypt account could NEVER
+        # change its password — and (b) would break for every account once
+        # make_password_hash emits bcrypt (mb465-B1).
+        my $old_ok = eval { Mediabot::Auth::password_matches($old_password, $stored_hash) };
+        if ($@) {
+            my $err = $@; chomp $err;
+            $self->{logger}->log(1, "userPass() old password check failed: $err")
                 if $self->{logger};
-
             botNotice($self, $sNick, "Internal error (password check failed).");
             logBot($self, $message, undef, "pass", "Failed - old hash error");
             return 0;
         }
-
-        unless ($stored_hash eq $old_hash) {
+        unless ($old_ok) {
             botNotice($self, $sNick, "Current password is invalid.");
             logBot($self, $message, undef, "pass", "Failed - bad old password");
             return 0;
@@ -679,23 +681,12 @@ sub checkAuthByUser {
         return (0, 0);
     }
 
-    my $sHashedPw;
-    my $hash_ok = eval {
-        $sHashedPw = make_password_hash($sPassword);
-        1;
-    };
-
-    unless ($hash_ok && defined $sHashedPw) {
-        my $err = $@ || 'make_password_hash returned undef';
-        chomp $err;
-
-        $self->{logger}->log(1, "checkAuthByUser() make_password_hash failed: $err")
-            if $self->{logger};
-
-        return (0, 0);
-    }
-
-    my $sCheckAuthQuery = "SELECT id_user FROM USER WHERE nickname = ? AND password = ?";
+    # mb465-B6: fetch the stored hash and verify with the format-aware matcher.
+    # The previous `WHERE nickname=? AND password=?` SQL equality only worked
+    # for deterministic legacy hashes — it was already broken for accounts
+    # stored in bcrypt, and would break for everyone once make_password_hash
+    # emits salted bcrypt (mb465-B1).
+    my $sCheckAuthQuery = "SELECT id_user, password FROM USER WHERE nickname = ?";
     my $sth = $dbh->prepare($sCheckAuthQuery);
 
     unless ($sth) {
@@ -704,7 +695,7 @@ sub checkAuthByUser {
         return (0, 0);
     }
 
-    unless ($sth->execute($sUserHandle, $sHashedPw)) {
+    unless ($sth->execute($sUserHandle)) {
         $self->{logger}->log(1, "checkAuthByUser() SQL execute error: " . $DBI::errstr . " Query: " . $sCheckAuthQuery)
             if $self->{logger};
         $sth->finish;
@@ -717,8 +708,27 @@ sub checkAuthByUser {
         return (0, 0);
     }
 
-    my $id_user = $ref->{id_user};
+    my $id_user     = $ref->{id_user};
+    my $stored_pw   = $ref->{password};
     $sth->finish;
+
+    my ($pw_ok, $pw_why) = eval { Mediabot::Auth::password_matches($sPassword, $stored_pw // '') };
+    if ($@) {
+        my $err = $@; chomp $err;
+        $self->{logger}->log(1, "checkAuthByUser() password check failed: $err")
+            if $self->{logger};
+        return (0, 0);
+    }
+    return (0, 0) unless $pw_ok;
+
+    # mb466-B2 (bcrypt lazy, plan §2.5): the `ident` path verifies with the
+    # format-aware matcher (mb465-B6) but historically never migrated legacy
+    # hashes, unlike the `login` path. Trigger the SAME shared lazy upgrade so a
+    # user who only ever idents still ends up stored in bcrypt. Best-effort:
+    # maybe_upgrade_hash() swallows and logs any error and never dies.
+    if ($self->{auth} && $self->{auth}->can('maybe_upgrade_hash')) {
+        eval { $self->{auth}->maybe_upgrade_hash($id_user, $sPassword, $pw_why, $sUserHandle) };
+    }
 
     my $sHostmask = getMessageHostmask($self, $message);
     unless (defined($sHostmask) && $sHostmask ne '') {

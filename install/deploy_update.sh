@@ -171,6 +171,29 @@ echo "🔍 Checking Perl syntax in the staged release ..."
 echo "✅ Staged release passed syntax validation."
 echo
 
+# A3 (mb469): startup integrity check on the STAGED tree, before switching.
+# perl -c only proves the entry point parses; it does NOT catch a mediabot.pl
+# calling a method absent from the modules, a missing dispatch handler, or a
+# stale orphan .pm from a previous version (the 04/07 Undernet crash class).
+# We generate a manifest from the freshly cloned candidate (its own tree is the
+# reference) and verify the staged tree against it. Refuse to switch on failure.
+if [ -f "${TMP_CLONE_DIR}/tools/startup_integrity_check.pl" ]; then
+    echo "🧪 Running startup integrity check on the staged release ..."
+    STAGED_MANIFEST="$(mktemp "${TMP_CLONE_DIR}/.manifest.XXXXXX")"
+    (
+        cd "${TMP_CLONE_DIR}"
+        perl tools/startup_integrity_check.pl --gen-manifest "${STAGED_MANIFEST}" --quiet
+        perl tools/startup_integrity_check.pl --manifest "${STAGED_MANIFEST}"
+    ) || fail "startup integrity check failed on the staged release — NOT switching. The clone is inconsistent; investigate before retrying."
+    rm -f "${STAGED_MANIFEST}" 2>/dev/null || true
+    echo "✅ Staged release passed the integrity check."
+    echo
+else
+    echo "⚠️  tools/startup_integrity_check.pl absent from the clone — skipping deep integrity check."
+    echo "    (Older candidate? The syntax check above still applies.)"
+    echo
+fi
+
 # +-------------------------------------------------------------------------+
 # | [6] Rotate current release and activate the new one                     |
 # +-------------------------------------------------------------------------+
