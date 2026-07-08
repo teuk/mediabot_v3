@@ -166,6 +166,7 @@ sub _make_http {
         verify_SSL => $verify,
         %ssl_opts,
         max_size   => $opts{max_size} // 512 * 1024,
+        (ref($opts{default_headers}) eq 'HASH' ? (default_headers => $opts{default_headers}) : ()),   # mb495
     );
 }
 # mb99-R1: _extract_url déplacée dans Mediabot::External::URL

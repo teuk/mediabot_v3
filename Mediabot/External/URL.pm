@@ -89,7 +89,10 @@ sub _decode_html {
     my ($str) = @_;
     return '' unless defined $str;
     my $regex = "&(?:" . join("|", map { (my $k = $_) =~ s/;\z//; $k } keys %entity2char) . ");";
-    $str = decode_entities($str) if ($str =~ /$regex/ || $str =~ /&#[0-9]+;/);
+    # mb495: also trigger on HEX numeric entities (&#xa0; &#x442; &#x1f979;) —
+    # they matched neither the named-entity regex nor the decimal one, so
+    # Facebook reel titles reached IRC raw-encoded.
+    $str = decode_entities($str) if ($str =~ /$regex/ || $str =~ /&#[0-9]+;/ || $str =~ /&#x[0-9a-fA-F]+;/);
     $str =~ s/\r|\n/ /g;
     $str =~ s/\s{2,}/ /g;
     $str =~ s/^\s+|\s+$//g;
@@ -209,9 +212,38 @@ sub _fetch_url_chromium_dumpdom {
     my $max_stdout = int($opts{max_stdout} // (2 * 1024 * 1024));
     my $max_stderr = int($opts{max_stderr} // (256 * 1024));
 
+    # mb493: chromium was dying instantly with SIGTRAP (signal 5) in prod.
+    # Root causes for a systemd-run daemon: the default profile dir lives in
+    # a confined/unwritable HOME, and concurrent/stale runs fight over the
+    # profile SingletonLock; crashpad also traps when it cannot write.
+    # Fix: a unique throwaway --user-data-dir per invocation under /tmp,
+    # opportunistically purging profiles older than 10 minutes (daemon-safe:
+    # no cleanup needed on every return path, the next call sweeps).
+    my $profile_base = '/tmp/mediabot-chromium';
+    mkdir $profile_base unless -d $profile_base;
+    if (opendir(my $dh, $profile_base)) {
+        my $now = time();
+        for my $e (readdir $dh) {
+            next if $e eq '.' || $e eq '..';
+            my $p = "$profile_base/$e";
+            my $m = (stat($p))[9];
+            next unless defined $m;
+            if ($now - $m > 600) {
+                eval { require File::Path; File::Path::remove_tree($p); };
+            }
+        }
+        closedir $dh;
+    }
+    my $profile_dir = sprintf('%s/p%d.%d.%d', $profile_base, $$, time(), int(rand(1_000_000)));
+
     my @cmd = (
         $chromium,
-        '--headless=new',
+        '--headless',                       # mb493: modern default (was =new, brittle on recent Chrome)
+        "--user-data-dir=$profile_dir",     # mb493: unique throwaway profile
+        '--no-first-run',                   # mb493: skip first-run machinery
+        '--no-default-browser-check',
+        '--disable-crash-reporter',         # mb493: crashpad traps in confined envs
+        '--disable-breakpad',
         '--disable-gpu',
         '--no-sandbox',
         '--disable-dev-shm-usage',
@@ -356,6 +388,13 @@ sub _fetch_url_chromium_dumpdom {
     if ($signal) {
         $self->{logger}->log(3,
             "_fetch_url_chromium_dumpdom() chromium terminated by signal $signal for $url");
+        # mb493: surface WHY it died — this was never logged on the signal
+        # path, making prod crashes (SIGTRAP) undiagnosable.
+        if (defined $stderr_txt && $stderr_txt ne '') {
+            my $errlog = substr($stderr_txt, 0, 700);
+            $errlog =~ s/[\r\n]+/ | /g;
+            $self->{logger}->log(3, "_fetch_url_chromium_dumpdom() chromium stderr: $errlog");
+        }
         return undef;
     }
 
@@ -416,10 +455,15 @@ sub _handle_instagram {
 
     # ------------------------------------------------------------
     # Step 1: one cheap HTTP fetch on the public page only
+    # mb494: use a SOCIAL-CRAWLER user agent — Instagram serves its og: tags
+    # server-side to crawlers (facebookexternalhit), which is how fast bots
+    # answer in under a second without a browser.
     # ------------------------------------------------------------
     my $http = Mediabot::External::_make_http(
         timeout  => 8,
         max_size => 1024 * 1024,
+        agent    => 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+        default_headers => { 'accept-language' => 'en-US,en;q=0.8' },   # mb495: stable counter locale
     );
 
     my $res = eval { $http->get($url); } // { success => 0, status => 0, reason => $@ };
@@ -592,10 +636,94 @@ sub _handle_instagram {
 # ---------------------------------------------------------------------------
 # _handle_applemusic($self, $message, $nick, $channel, $url)
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# _am_duration_from_iso($iso) — "PT3M33S" -> "3:33", "PT1H2M3S" -> "1:02:03"
+# ---------------------------------------------------------------------------
+sub _am_duration_from_iso {
+    my ($iso) = @_;
+    return undef unless defined $iso && $iso =~ /^P(?:[\d.]+D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?$/i;
+    my ($h, $m, $s) = ($1 // 0, $2 // 0, int($3 // 0));
+    return undef unless $h || $m || $s;
+    return $h ? sprintf('%d:%02d:%02d', $h, $m, $s) : sprintf('%d:%02d', $m, $s);
+}
+
+# ---------------------------------------------------------------------------
+# _applemusic_extract_details($self, $html) -> hashref
+# mb492: mine the SAME html already fetched for rich fields, Spotify-style.
+# Sources (both server-side on music.apple.com):
+#   - JSON-LD application/ld+json: @type (MusicAlbum/MusicRecording), name,
+#     byArtist, duration (ISO), datePublished, numTracks/tracks
+#   - og:description / meta description like "Album · 1969 · 17 Songs"
+# Returns {} when nothing usable; every field is optional.
+# ---------------------------------------------------------------------------
+sub _applemusic_extract_details {
+    my ($self, $html) = @_;
+    my %am;
+    return \%am unless defined $html && $html ne '';
+
+    while ($html =~ m{<script[^>]+type=["']application/ld\+json["'][^>]*>(.*?)</script>}sig) {
+        my $raw  = _decode_html($1);
+        my $data = eval { decode_json($raw) };
+        next unless defined $data;
+        my @objs = ref($data) eq 'ARRAY' ? @$data : ($data);
+        for my $o (@objs) {
+            next unless ref($o) eq 'HASH';
+            my $t = $o->{'@type'} // '';
+            $t = join(' ', @$t) if ref($t) eq 'ARRAY';
+            if ($t =~ /MusicAlbum/i)                    { $am{type} //= 'album'; }
+            elsif ($t =~ /MusicRecording|MusicSong/i)   { $am{type} //= 'song'; }
+            elsif ($t =~ /MusicPlaylist/i)              { $am{type} //= 'playlist'; }
+            if (my $a = $o->{byArtist}) {
+                my @names = ref($a) eq 'ARRAY' ? map { ref($_) eq 'HASH' ? $_->{name} : $_ } @$a
+                          : ref($a) eq 'HASH'  ? ($a->{name})
+                          : ($a);
+                @names = grep { defined && $_ ne '' } @names;
+                $am{artist} //= join(', ', @names) if @names;
+            }
+            if (defined $o->{duration}) {
+                my $d = _am_duration_from_iso($o->{duration});
+                $am{duration} //= $d if defined $d;
+            }
+            if (defined $o->{datePublished} && $o->{datePublished} =~ /\b((?:19|20)\d{2})\b/) {
+                $am{year} //= $1;
+            }
+            if (defined $o->{numTracks} && $o->{numTracks} =~ /^\d+$/) {
+                $am{tracks} //= $o->{numTracks};
+            }
+            elsif (ref($o->{tracks} // $o->{track} // '') eq 'ARRAY') {
+                my $n = scalar @{ $o->{tracks} // $o->{track} };
+                $am{tracks} //= $n if $n;
+            }
+        }
+    }
+
+    # og:description / meta description: "Album · 1969 · 17 Songs" style
+    my $desc;
+    # mb492: paired-quote capture so apostrophes inside "..." don't truncate
+    if    ($html =~ /<meta\s+property=["']og:description["']\s+content=(["'])(.*?)\1/is) { $desc = $2; }
+    elsif ($html =~ /<meta\s+content=(["'])(.*?)\1\s+property=["']og:description["']/is) { $desc = $2; }
+    elsif ($html =~ /<meta\s+name=["']description["']\s+content=(["'])(.*?)\1/is)        { $desc = $2; }
+    elsif ($html =~ /<meta\s+content=(["'])(.*?)\1\s+name=["']description["']/is)        { $desc = $2; }
+    if (defined $desc) {
+        $desc = _decode_html($desc);
+        for my $seg (split /\s*[·•]\s*/, $desc) {
+            $seg =~ s/^\s+|\s+$//g;
+            next if $seg eq '';
+            if    ($seg =~ /^(Album|Single|EP|Song|Playlist)$/i)      { $am{type}   //= lc $1; }
+            elsif ($seg =~ /^\s*((?:19|20)\d{2})\s*$/)                 { $am{year}   //= $1; }
+            elsif ($seg =~ /^(\d+)\s+Songs?$/i)                        { $am{tracks} //= $1; }
+            elsif (!exists $am{artist} && $seg !~ /\d/ && length($seg) < 80
+                   && $seg !~ /apple music/i)                          { $am{artist} //= $seg; }
+        }
+    }
+    return \%am;
+}
+
 sub _handle_applemusic {
     my ($self, $message, $nick, $channel, $url) = @_;
 
     my $title;
+    my $html_for_details = '';   # mb492: the html we ended up trusting
 
     # ------------------------------------------------------------
     # Step 1: cheap HTTP fetch first
@@ -608,6 +736,7 @@ sub _handle_applemusic {
 
     if ($res->{success}) {
         my $content = _decode_http_content_utf8($self, $res->{content} // '', 'applemusic-http');
+        $html_for_details = $content;   # mb492
 
         my $og_title;
         my $meta_description;
@@ -690,6 +819,7 @@ sub _handle_applemusic {
         );
 
         if (defined $dom && $dom ne '') {
+            $html_for_details = $dom;   # mb492: rendered DOM wins when used
             my $og_title;
             my $meta_description;
             my $title_tag;
@@ -759,11 +889,29 @@ sub _handle_applemusic {
     $title =~ s/\s+/ /g;
     $title =~ s/^\s+|\s+$//g;
 
+    # mb492: enrich the line Spotify-style from the SAME html (JSON-LD + og
+    # description). Every field optional; falls back to plain title untouched.
+    my $am = _applemusic_extract_details($self, $html_for_details);
+    my @parts = ($title);
+    if (defined $am->{artist} && $am->{artist} ne ''
+        && lc($am->{artist}) ne lc($title)
+        && index(lc($title), lc($am->{artist})) < 0) {
+        push @parts, "by $am->{artist}";
+    }
+    push @parts, $am->{type}     if defined $am->{type} && $am->{type} ne '' && lc($am->{type}) ne 'song';
+    push @parts, $am->{year}     if defined $am->{year};
+    push @parts, $am->{duration} if defined $am->{duration};
+    push @parts, "$am->{tracks} tracks" if defined $am->{tracks} && $am->{tracks} =~ /^\d+$/ && $am->{tracks} > 1;
+    my $display = join(' - ', @parts);
+    $display =~ s/\s+/ /g; $display =~ s/^\s+|\s+$//g;
+    $display = substr($display, 0, 300);
+    $self->{logger}->log(4, "_handle_applemusic() final display='$display'");
+
     my $badge = String::IRC->new("[")->white('black');
     $badge   .= String::IRC->new("AppleMusic")->white('grey');
     $badge   .= String::IRC->new("]")->white('black');
 
-    my $msg = "$badge\x0f $title";
+    my $msg = "$badge\x0f $display";
 
     Mediabot::Helpers::botPrivmsg($self, $channel, "($nick) $msg");
     return 1;
@@ -814,8 +962,18 @@ sub _facebook_title_from_html {
 
     $title = _decode_html($title);
     $title =~ s/[\r\n\t]/ /g;
+    $title =~ s/\x{a0}/ /g;   # mb495: nbsp from decoded counters -> plain space
     $title =~ s/\s{2,}/ /g;
     $title =~ s/^\s+|\s+$//g;
+
+    # mb495: reel og:title = "<view/reaction counters, random locale> | <caption>"
+    # (e.g. "377 K views · 2.6 K reactions | Would you be so kind..."). When the
+    # title STARTS with a digit and carries a pipe, keep the caption side.
+    if ($title =~ /^\s*\d/ && $title =~ /^[^|]{1,120}\|\s*(\S.*)$/s) {
+        $title = $1;
+        $title =~ s/\s{2,}/ /g;
+        $title =~ s/^\s+|\s+$//g;
+    }
 
     return undef if $title eq '';
     return undef if $title =~ /^\s*Facebook\s*$/i;
@@ -914,6 +1072,8 @@ sub _facebook_fallback_title_from_url {
 sub _handle_facebook {
     my ($self, $message, $nick, $channel, $url) = @_;
 
+    my $fb_html = '';   # mb492: html we ended up trusting
+
     my $fb_url = _facebook_url($url);
     unless (defined $fb_url) {
         $self->{logger}->log(4, "_handle_facebook() not a supported Facebook URL: " . ($url // '<undef>'));
@@ -937,6 +1097,8 @@ sub _handle_facebook {
     my $http = Mediabot::External::_make_http(
         timeout  => 8,
         max_size => 1024 * 1024,
+        agent    => 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',   # mb494: social-crawler UA -> server-side og: tags
+        default_headers => { 'accept-language' => 'en-US,en;q=0.8' },   # mb495: stable counter locale
     );
 
     my $res = eval { $http->get($fb_url); } // { success => 0, status => 0, reason => $@ };
@@ -945,6 +1107,7 @@ sub _handle_facebook {
         my $content = _decode_http_content_utf8($self, $res->{content} // '', 'facebook-http');
         my $len = length($content);
         $self->{logger}->log(4, "_handle_facebook() HTTP fetched $len bytes for $fb_url");
+        $fb_html = $content;   # mb492
         $title = _facebook_title_from_html($self, $content, 'HTTP');
     }
     else {
@@ -975,6 +1138,7 @@ sub _handle_facebook {
         if (defined $dom && $dom ne '') {
             my $len = length($dom);
             $self->{logger}->log(4, "_handle_facebook() Chromium DOM fetched $len bytes for $fb_url");
+            $fb_html = $dom;   # mb492
             $title = _facebook_title_from_html($self, $dom, 'Chromium');
         }
     }
@@ -996,7 +1160,24 @@ sub _handle_facebook {
     $badge   .= String::IRC->new("Facebook")->white('blue');
     $badge   .= String::IRC->new("]")->white('black');
 
-    my $msg = "$badge\x0f " . substr($title, 0, 300);
+    # mb492: append og:description when informative and not a duplicate
+    my $fb_line = $title;
+    my $fb_desc;
+    if    ($fb_html =~ /<meta\s+property=["']og:description["']\s+content=(["'])(.*?)\1/is) { $fb_desc = $2; }
+    elsif ($fb_html =~ /<meta\s+content=(["'])(.*?)\1\s+property=["']og:description["']/is) { $fb_desc = $2; }
+    if (defined $fb_desc) {
+        $fb_desc = _decode_html($fb_desc);
+        $fb_desc =~ s/[\r\n\t]/ /g; $fb_desc =~ s/\s{2,}/ /g; $fb_desc =~ s/^\s+|\s+$//g;
+        if ($fb_desc ne ''
+            && $fb_desc !~ /^(?:Log in|Se connecter|Sign in|Connexion)/i
+            && $fb_desc !~ /facebook/i
+            && index(lc($fb_line), lc(substr($fb_desc, 0, 40))) < 0) {
+            my $d = length($fb_desc) > 150 ? substr($fb_desc, 0, 147) . '...' : $fb_desc;
+            $fb_line .= " - $d";
+        }
+    }
+
+    my $msg = "$badge\x0f " . substr($fb_line, 0, 300);
     # IMP10: cache the result (TTL 10 min) to avoid redundant Chromium fetches
     $self->{_facebook_cache}{lc($fb_url)} = { ts => time(), msg => $msg };
 
@@ -1070,6 +1251,51 @@ sub _x_title_from_html {
 # _x_fallback_title_from_url($url)
 # Last-resort honest label when X only exposes a login shell.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# _x_desc_from_html($self, $html, $context)
+# mb492: pull the tweet text (og:description / twitter:description) with the
+# same anti-login-shell guards as the title. Returns undef when unusable.
+# ---------------------------------------------------------------------------
+sub _x_desc_from_html {
+    my ($self, $html, $context) = @_;
+    return undef unless defined $html && $html ne '';
+
+    my $desc;
+    while ($html =~ /<meta\b([^>]*?)>/sig) {
+        my $attrs = $1;
+        next unless $attrs =~ /(?:property|name)=["'](?:og:description|twitter:description)["']/i;
+        # mb492: paired-quote capture so apostrophes don't truncate the tweet
+        if ($attrs =~ /\bcontent=(["'])(.*?)\1/is) { $desc = $2; last; }
+    }
+    return undef unless defined $desc && $desc ne '';
+
+    $desc = _decode_html($desc);
+    $desc =~ s/[\r\n\t]/ /g;
+    $desc =~ s/\s{2,}/ /g;
+    $desc =~ s/^\s+|\s+$//g;
+    # strip X's decorative curly quotes wrapping the tweet text
+    $desc =~ s/^[\x{201C}"]//; $desc =~ s/[\x{201D}"]$//;
+
+    return undef if $desc eq '';
+    return undef if $desc =~ /^(?:X|Twitter)$/i;
+    return undef if $desc =~ /(?:JavaScript is not available|This browser is no longer supported)/i;
+    return undef if $desc =~ /^(?:Log in|Se connecter|Sign in|Connexion)/i;
+
+    $self->{logger}->log(4, "_x_desc_from_html() $context selected desc len=" . length($desc));
+    return $desc;
+}
+
+# ---------------------------------------------------------------------------
+# _x_compact_count($n) — mb494: 950 -> "950", 12345 -> "12.3k", 4200000 -> "4.2M"
+# ---------------------------------------------------------------------------
+sub _x_compact_count {
+    my ($n) = @_;
+    return '0' unless defined $n && $n =~ /^\d+$/;
+    return "$n" if $n < 1000;
+    return sprintf('%.1fk', $n / 1000)      =~ s/\.0k$/k/r if $n < 1_000_000;
+    return sprintf('%.1fM', $n / 1_000_000) =~ s/\.0M$/M/r;
+}
+
 sub _x_fallback_title_from_url {
     my ($url) = @_;
 
@@ -1178,29 +1404,67 @@ sub _handle_x_twitter {
     }
 
     my $title;
+    my $tweet_text;
+    my ($fx_likes, $fx_rts);
 
-    # X is rendered/client-heavy.  Go directly through Chromium, the same
-    # strategy used for stubborn Facebook shells.
+    # mb494: FAST PATH — public fxtwitter JSON API (~300 ms), the way fast
+    # bots answer in under a second. Chromium only runs if this misses.
+    if ($x_url =~ m{^https://x\.com/([^/]+)/status/(\d+)}i) {
+        my ($screen, $tid) = ($1, $2);
+        my $api  = "https://api.fxtwitter.com/$screen/status/$tid";
+        my $http = Mediabot::External::_make_http(timeout => 6, max_size => 512 * 1024);
+        my $t0   = Time::HiRes::time();
+        my $res  = eval { $http->get($api) } // { success => 0, status => 0, reason => "die: $@" };
+        my $dt   = sprintf('%.2f', Time::HiRes::time() - $t0);
+        if ($res->{success}) {
+            my $data = eval { decode_json($res->{content} // '') };
+            if (ref($data) eq 'HASH' && ($data->{code} // 0) == 200 && ref($data->{tweet}) eq 'HASH') {
+                my $tw      = $data->{tweet};
+                my $name    = eval { $tw->{author}{name} }        // '';
+                my $screen2 = eval { $tw->{author}{screen_name} } // $screen;
+                $title      = $name ne '' ? "$name (\@$screen2) on X" : "\@$screen2 on X";
+                $tweet_text = $tw->{text};
+                $fx_likes   = $tw->{likes};
+                $fx_rts     = $tw->{retweets};
+                $self->{logger}->log(4, "_handle_x_twitter() fxtwitter hit in ${dt}s for $x_url");
+            }
+            else {
+                $self->{logger}->log(4, "_handle_x_twitter() fxtwitter unusable JSON (code="
+                    . (ref($data) eq 'HASH' ? ($data->{code} // '?') : '?') . ") in ${dt}s for $x_url");
+            }
+        }
+        else {
+            $self->{logger}->log(4, "_handle_x_twitter() fxtwitter HTTP "
+                . ($res->{status} // '?') . " in ${dt}s for $x_url");
+        }
+    }
+
+    # X is rendered/client-heavy.  Go through Chromium ONLY when the fast
+    # path above did not deliver (profiles, or fxtwitter outage).
     # XT1/fix: eval around chromium call — external process may die/timeout
-    my $dom = eval { _fetch_url_chromium_dumpdom(
-        $self,
-        $x_url,
-        virtual_time_budget => 6500,
-        alarm_timeout       => 16,
-        lang                => 'fr-FR',
-    ) };
-    if ($@) {
-        $self->{logger}->log(1, "_handle_x_twitter() chromium error: $@");
-        return undef;
-    }
+    my $dom;
+    unless (defined $title && $title ne '') {
+        $dom = eval { _fetch_url_chromium_dumpdom(
+            $self,
+            $x_url,
+            virtual_time_budget => 6500,
+            alarm_timeout       => 16,
+            lang                => 'fr-FR',
+        ) };
+        if ($@) {
+            $self->{logger}->log(1, "_handle_x_twitter() chromium error: $@");
+            return undef;
+        }
 
-    if (defined $dom && $dom ne '') {
-        my $len = length($dom);
-        $self->{logger}->log(4, "_handle_x_twitter() Chromium DOM fetched $len bytes for $x_url");
-        $title = _x_title_from_html($self, $dom, 'Chromium');
-    }
-    else {
-        $self->{logger}->log(4, "_handle_x_twitter() Chromium returned no usable DOM for $x_url");
+        if (defined $dom && $dom ne '') {
+            my $len = length($dom);
+            $self->{logger}->log(4, "_handle_x_twitter() Chromium DOM fetched $len bytes for $x_url");
+            $title = _x_title_from_html($self, $dom, 'Chromium');
+            $tweet_text = _x_desc_from_html($self, $dom, 'Chromium');
+        }
+        else {
+            $self->{logger}->log(4, "_handle_x_twitter() Chromium returned no usable DOM for $x_url");
+        }
     }
 
     unless (defined $title && $title ne '') {
@@ -1220,7 +1484,27 @@ sub _handle_x_twitter {
     $badge   .= String::IRC->new("X")->white('black');
     $badge   .= String::IRC->new("]")->white('black');
 
-    my $msg = "$badge\x0f " . substr($title, 0, 300);
+    # mb492: append the tweet text when we have it and the title doesn't
+    # already carry it (X og:title is often just 'Nick on X').
+    my $line = $title;
+    if (defined $tweet_text && $tweet_text ne '') {
+        my $probe = substr($tweet_text, 0, 40);
+        if (index(lc($line), lc($probe)) < 0) {
+            my $t = length($tweet_text) > 200 ? substr($tweet_text, 0, 197) . '...' : $tweet_text;
+            $t =~ s/[\r\n]+/ /g;
+            $line .= qq{: "$t"};
+        }
+    }
+    # mb494: engagement stats from the fxtwitter fast path
+    if ((defined $fx_likes && $fx_likes =~ /^\d+$/ && $fx_likes > 0)
+        || (defined $fx_rts && $fx_rts =~ /^\d+$/ && $fx_rts > 0)) {
+        my @st;
+        push @st, _x_compact_count($fx_likes) . ' likes' if defined $fx_likes && $fx_likes > 0;
+        push @st, _x_compact_count($fx_rts)   . ' RTs'   if defined $fx_rts   && $fx_rts > 0;
+        $line .= ' (' . join(', ', @st) . ')' if @st;
+    }
+
+    my $msg = "$badge\x0f " . substr($line, 0, 300);
 
     # IMP10/fix: cache the formatted message, not just a boolean.
     # That way repeated X/Twitter URLs avoid Chromium but still produce the same

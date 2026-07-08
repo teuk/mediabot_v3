@@ -71,15 +71,18 @@ return sub {
         },
         _handle_applemusic => {
             badge => q{String::IRC->new("AppleMusic")->white('grey')},
-            reset => qr/my\s+\$msg\s*=\s*"\$badge\\x0f\s+\$title";/,
+            # mb492: rich line composed into $display, same badge+\x0f invariant
+            reset => qr/my\s+\$msg\s*=\s*"\$badge\\x0f\s+\$display";/,
         },
         _handle_facebook => {
             badge => q{String::IRC->new("Facebook")->white('blue')},
-            reset => qr/my\s+\$msg\s*=\s*"\$badge\\x0f\s+"\s*\.\s*substr\(\$title,\s*0,\s*300\);/,
+            # mb492: title+description composed into $fb_line, same invariant
+            reset => qr/my\s+\$msg\s*=\s*"\$badge\\x0f\s+"\s*\.\s*substr\(\$fb_line,\s*0,\s*300\);/,
         },
         _handle_x_twitter => {
             badge => q{String::IRC->new("X")->white('black')},
-            reset => qr/my\s+\$msg\s*=\s*"\$badge\\x0f\s+"\s*\.\s*substr\(\$title,\s*0,\s*300\);/,
+            # mb492: title+tweet text composed into $line, same invariant
+            reset => qr/my\s+\$msg\s*=\s*"\$badge\\x0f\s+"\s*\.\s*substr\(\$line,\s*0,\s*300\);/,
         },
     );
 
