@@ -110,6 +110,12 @@ our @EXPORT = qw(
     mbChronos_ctx
     mbFeatures_ctx
     mbObservatory_ctx
+    mbRecap_ctx
+    mbLearn_ctx
+    mbWhatis_ctx
+    mbForget_ctx
+    mbFactoids_ctx
+    mbFactoid_ctx
 
 );
 
@@ -2723,6 +2729,15 @@ sub mbStats_ctx {
             $out .= " | rank: #" . ($r17->{rank} // '?');
         }
     }
+    # mb480: show unlocked achievement count on this channel, if any.
+    if ($self->{achievements}) {
+        my $ach = eval { $self->{achievements}->get_for_nick($target, $channel) };
+        if (ref($ach) eq 'HASH') {
+            my $n = scalar keys %$ach;
+            $out .= " | achievements: $n" if $n > 0;
+        }
+    }
+
     botPrivmsg($self, $channel, $out);
     logBot($self, $ctx->message, $channel, "stats", $target);
     return 1;
@@ -10981,6 +10996,610 @@ sub mbObservatory_ctx {
 
     $self->{metrics}->inc('mediabot_observatory_total', { channel => $channel }) if $self->{metrics};
 
+    return 1;
+}
+
+# ===========================================================================
+# mbRecap_ctx --- !recap [<window>] [ai]
+# mb472 : résume en NOTICE privé ce qui s'est dit sur un canal pendant une
+# fenêtre de temps. Fonctionnalité vitrine prévue par la direction 3.3 (§5).
+#
+# Fenêtre :
+#   - !recap            -> depuis la dernière activité connue de l'appelant sur
+#                          ce canal (USER_SEEN.seen_at), plafonnée à RECAP_MAX_H ;
+#                          à défaut de seen, RECAP_DEFAULT_H heures.
+#   - !recap 2h / 30m / 90m -> fenêtre explicite, plafonnée à RECAP_MAX_H.
+#   - !recap ai         -> résumé en langage naturel via Claude (si configuré),
+#                          sinon repli sur le résumé statistique.
+#
+# Sortie : statistique par défaut (nb messages, top parleurs, plage, échantillon),
+# toujours en NOTICE privé pour ne pas flooder le canal.
+#
+# Garde-fous : fenêtre bornée (RECAP_MAX_H, défaut 24h), lignes lues bornées
+# (RECAP_MAX_ROWS, défaut 2000), cooldown par nick (RECAP_COOLDOWN_S, défaut 30s).
+# Lecture seule ; s'appuie sur l'index composite idx_channel_log_channel_ts (A4).
+# ===========================================================================
+sub mbRecap_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    # !recap n'a de sens que dans un canal (le "quoi de neuf ICI").
+    unless (defined $channel && $channel =~ /^#/) {
+        botNotice($self, $nick, "Syntax: recap [<window>] [ai]  — use it in a channel (e.g. 30m, 2h).");
+        return;
+    }
+
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    @args = grep { defined && $_ ne '' } @args;
+
+    my $want_ai = 0;
+    my $window_arg;
+    for my $a (@args) {
+        if (lc($a) eq 'ai')      { $want_ai = 1; }
+        elsif ($a =~ /^\d+[hm]$/i) { $window_arg = lc($a); }
+    }
+
+    # --- configuration (avec valeurs par défaut sûres) ---
+    my $cfg = sub {
+        my ($key, $default) = @_;
+        my $v = eval { $self->{conf}->get("main.$key") };
+        return (defined $v && $v ne '') ? $v : $default;
+    };
+    my $max_h      = int($cfg->('RECAP_MAX_H',       24));
+    my $default_h  = int($cfg->('RECAP_DEFAULT_H',    6));
+    my $max_rows   = int($cfg->('RECAP_MAX_ROWS',  2000));
+    my $cooldown_s = int($cfg->('RECAP_COOLDOWN_S',   30));
+    $max_h     = 24   if $max_h     <= 0;
+    $default_h = 6    if $default_h <= 0;
+    $max_rows  = 2000 if $max_rows  <= 0;
+
+    # --- cooldown par nick (mémoire bornée, best-effort) ---
+    my $now = time();
+    $self->{_recap_cooldown} ||= {};
+    my $lc_nick = lc($nick);
+    if ($cooldown_s > 0) {
+        my $last = $self->{_recap_cooldown}{$lc_nick};
+        if (defined $last && ($now - $last) < $cooldown_s) {
+            my $wait = $cooldown_s - ($now - $last);
+            botNotice($self, $nick, "recap: please wait ${wait}s before asking again.");
+            return;
+        }
+        $self->{_recap_cooldown}{$lc_nick} = $now;
+        # purge opportuniste pour borner la mémoire
+        if (scalar(keys %{ $self->{_recap_cooldown} }) > 512) {
+            for my $k (keys %{ $self->{_recap_cooldown} }) {
+                delete $self->{_recap_cooldown}{$k}
+                    if ($now - $self->{_recap_cooldown}{$k}) > 3600;
+            }
+        }
+    }
+
+    my $dbh = $self->{dbh};
+    unless ($dbh) {
+        botNotice($self, $nick, "recap: database unavailable.");
+        return;
+    }
+
+    # --- résoudre id_channel ---
+    my $channel_obj = $self->{channels}{lc $channel};
+    my $id_channel = $channel_obj ? eval { $channel_obj->get_id } : undef;
+    unless (defined $id_channel) {
+        botNotice($self, $nick, "recap: channel not known to the bot.");
+        return;
+    }
+
+    # --- déterminer la fenêtre (en secondes) ---
+    my $window_s;
+    my $window_label;
+    if (defined $window_arg) {
+        if    ($window_arg =~ /^(\d+)h$/) { $window_s = $1 * 3600; }
+        elsif ($window_arg =~ /^(\d+)m$/) { $window_s = $1 * 60;   }
+        $window_label = $window_arg;
+    }
+    else {
+        # depuis la dernière activité connue de l'appelant (USER_SEEN)
+        my $seen_epoch;
+        my $sth_seen = $dbh->prepare(
+            'SELECT UNIX_TIMESTAMP(seen_at) FROM USER_SEEN WHERE nick = ? LIMIT 1');
+        if ($sth_seen && $sth_seen->execute($lc_nick)) {
+            ($seen_epoch) = $sth_seen->fetchrow_array;
+            $sth_seen->finish;
+        }
+        if (defined $seen_epoch && $seen_epoch > 0 && $seen_epoch <= $now) {
+            $window_s = $now - $seen_epoch;
+            $window_label = "since you were last seen";
+        }
+        else {
+            $window_s = $default_h * 3600;
+            $window_label = "${default_h}h";
+        }
+    }
+
+    # borne haute
+    my $max_s = $max_h * 3600;
+    if ($window_s > $max_s) {
+        $window_s = $max_s;
+        $window_label = "${max_h}h (capped)";
+    }
+    $window_s = 60 if $window_s < 60;   # au moins une minute
+
+    # --- lire les messages de la fenêtre (index composite id_channel, ts) ---
+    my $sth = $dbh->prepare(q{
+        SELECT nick, publictext, UNIX_TIMESTAMP(ts) AS t
+        FROM CHANNEL_LOG
+        WHERE id_channel = ?
+          AND ts >= DATE_SUB(NOW(), INTERVAL ? SECOND)
+          AND event_type IN ('public','action')
+        ORDER BY ts ASC
+        LIMIT ?
+    });
+    unless ($sth && $sth->execute($id_channel, $window_s, $max_rows)) {
+        botNotice($self, $nick, "recap: could not read the channel log.");
+        return;
+    }
+
+    my @rows;
+    my %by_nick;
+    my ($first_t, $last_t);
+    while (my $r = $sth->fetchrow_hashref) {
+        # ne pas recaper les propres messages de l'appelant
+        next if lc($r->{nick}) eq $lc_nick;
+        push @rows, $r;
+        $by_nick{ $r->{nick} }++;
+        $first_t //= $r->{t};
+        $last_t = $r->{t};
+    }
+    $sth->finish;
+
+    my $msg_count = scalar @rows;
+    if ($msg_count == 0) {
+        botNotice($self, $nick, "recap ($window_label): nothing much happened on $channel — no messages from others.");
+        return;
+    }
+
+    # --- résumé IA optionnel ---
+    if ($want_ai) {
+        my $can_ai = 0;
+        my $api_key = eval { $self->{conf}->get('anthropic.API_KEY') };
+        $can_ai = 1 if defined $api_key && $api_key ne '';
+        if ($can_ai && Mediabot::External::Claude->can('claudeAI')) {
+            # Construire un transcript borné pour le prompt.
+            my $transcript = '';
+            for my $r (@rows) {
+                my $line = "<$r->{nick}> " . ($r->{publictext} // '');
+                $line = substr($line, 0, 300);
+                last if length($transcript) + length($line) + 1 > 6000;
+                $transcript .= $line . "\n";
+            }
+            my $prompt = "Summarize this IRC channel conversation in 3-5 concise bullet points, "
+                       . "in the same language as the conversation. Only the summary, no preamble.\n\n"
+                       . $transcript;
+            my $ai_ok = eval {
+                Mediabot::External::Claude::claudeAI(
+                    $self, $prompt, $nick, undef,
+                    sub {
+                        my ($text) = @_;
+                        return unless defined $text && $text ne '';
+                        for my $line (split /\n/, $text) {
+                            next if $line =~ /^\s*$/;
+                            botNotice($self, $nick, $line);
+                        }
+                    },
+                );
+                1;
+            };
+            if ($ai_ok) {
+                $self->{metrics}->inc('mediabot_recap_total', { channel => $channel, mode => 'ai' })
+                    if $self->{metrics};
+                return 1;
+            }
+            # sinon : repli sur le statistique ci-dessous
+            botNotice($self, $nick, "recap: AI summary unavailable, showing stats instead.");
+        }
+        else {
+            botNotice($self, $nick, "recap: AI not configured, showing stats instead.");
+        }
+    }
+
+    # --- résumé statistique ---
+    my $span_min = defined($first_t) && defined($last_t) && $last_t >= $first_t
+        ? int(($last_t - $first_t) / 60) : 0;
+
+    # top parleurs (jusqu'à 5)
+    my @top = sort { $by_nick{$b} <=> $by_nick{$a} || lc($a) cmp lc($b) } keys %by_nick;
+    my $ntalkers = scalar @top;
+    @top = @top[0 .. 4] if @top > 5;
+    my $top_str = join(', ', map { "$_ ($by_nick{$_})" } @top);
+
+    botNotice($self, $nick,
+        "recap $channel ($window_label): $msg_count message(s) from $ntalkers nick(s)"
+        . ($span_min > 0 ? " over ~${span_min} min." : "."));
+    botNotice($self, $nick, "Top: $top_str") if $top_str ne '';
+
+    # échantillon : première et dernière lignes, tronquées
+    if (@rows) {
+        my $first = $rows[0];
+        my $last  = $rows[-1];
+        my $trim = sub { my $s = shift // ''; $s =~ s/[\r\n\0]+/ /g; length($s) > 200 ? substr($s,0,197)."..." : $s };
+        botNotice($self, $nick, "First: <$first->{nick}> " . $trim->($first->{publictext}));
+        if (@rows > 1) {
+            botNotice($self, $nick, "Last:  <$last->{nick}> " . $trim->($last->{publictext}));
+        }
+        botNotice($self, $nick, "Tip: !recap ai for a natural-language summary.")
+            if !$want_ai;
+    }
+
+    $self->{metrics}->inc('mediabot_recap_total', { channel => $channel, mode => 'stats' })
+        if $self->{metrics};
+
+    return 1;
+}
+
+# ===========================================================================
+# Factoids — shared per-channel key/value facts (mb476).
+#   !learn <keyword> = <value>   store or update a fact (anyone can)
+#   !whatis <keyword>            recall it (also increments a hit counter)
+#   !forget <keyword>            delete it (author or channel op/admin)
+#   !factoids [pattern]          list keywords (optionally filtered)
+#
+# Backed by the FACTOID table (unique per channel+keyword). Channel only.
+# Gated by the +Factoids chanset (default on). Values are length-capped and
+# newline-sanitised. Keyword is normalised to lowercase.
+# ===========================================================================
+
+# helper: resolve id_channel for the ctx channel, or undef.
+sub _factoid_id_channel {
+    my ($self, $channel) = @_;
+    return undef unless isIrcChannelTarget($channel);
+    my $cid = eval { Mediabot::Helpers::channel_id_cached($self, $channel) };
+    return $cid if $cid;
+    my $obj = $self->{channels}{lc $channel};
+    return $obj ? (eval { $obj->get_id } || undef) : undef;
+}
+
+# helper: is the factoids feature enabled on this channel?
+sub _factoid_enabled {
+    my ($self, $channel) = @_;
+    return eval {
+        Mediabot::Helpers::chanset_enabled($self, $channel, 'Factoids', default => 1)
+    } // 1;
+}
+
+sub mbLearn_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    unless (isIrcChannelTarget($channel)) {
+        botNotice($self, $nick, "Syntax: learn <keyword> = <value>  (use it in a channel)");
+        return;
+    }
+    return unless _factoid_enabled($self, $channel);
+
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $raw  = join(' ', @args);
+    $raw =~ s/^\s+|\s+$//g;
+
+    # Format: <keyword> = <value>
+    unless ($raw =~ /^(.+?)\s*=\s*(.+)$/) {
+        botNotice($self, $nick, "Syntax: learn <keyword> = <value>");
+        return;
+    }
+    my ($keyword, $value) = ($1, $2);
+    $keyword =~ s/^\s+|\s+$//g;
+    $keyword = lc $keyword;
+    $value   =~ s/[\r\n\0]+/ /g;
+    $value   =~ s/^\s+|\s+$//g;
+
+    unless ($keyword =~ /^[a-z0-9_.\-]{1,64}$/) {
+        botNotice($self, $nick, "learn: keyword must be 1-64 chars of letters/digits/_.- (no spaces).");
+        return;
+    }
+    if ($value eq '') {
+        botNotice($self, $nick, "learn: value cannot be empty.");
+        return;
+    }
+    $value = truncate_utf8($value, 400, '');
+
+    my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
+    unless ($dbh) { botNotice($self, $nick, "learn: database unavailable."); return; }
+
+    my $id_channel = _factoid_id_channel($self, $channel);
+    unless ($id_channel) { botNotice($self, $nick, "learn: channel not known to the bot."); return; }
+
+    my $uid = eval { my $u = $ctx->user; $u ? $u->id : undef };
+
+    # UPSERT on (id_channel, keyword). On update, keep original author but
+    # refresh value/updated_at (ON DUPLICATE preserves created_by/created_at).
+    my $sth = $dbh->prepare(q{
+        INSERT INTO FACTOID (id_channel, keyword, value, created_by, created_by_nick)
+        VALUES (?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP
+    });
+    unless ($sth && $sth->execute($id_channel, $keyword, $value, $uid, $nick)) {
+        botNotice($self, $nick, "learn: could not store the factoid.");
+        return;
+    }
+    $sth->finish;
+
+    botNotice($self, $nick, "Learned '$keyword' for $channel.");
+    $self->{metrics}->inc('mediabot_factoid_total', { channel => $channel, op => 'learn' })
+        if $self->{metrics};
+    return 1;
+}
+
+sub mbWhatis_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    # mb477: "?keyword" quick recall passes a leading __quiet__ sentinel so that
+    # a spontaneous "?word" stays silent when nothing is known (no syntax/error
+    # spam), while an explicit "!whatis word" still gives feedback.
+    my $quiet = (@args && $args[0] eq '__quiet__') ? 1 : 0;
+    shift @args if $quiet;
+
+    unless (isIrcChannelTarget($channel)) {
+        botNotice($self, $nick, "Syntax: whatis <keyword>  (use it in a channel)") unless $quiet;
+        return;
+    }
+    return unless _factoid_enabled($self, $channel);
+
+    my $keyword = lc(join(' ', @args));
+    $keyword =~ s/^\s+|\s+$//g;
+    unless ($keyword ne '' && $keyword =~ /^[a-z0-9_.\-]{1,64}$/) {
+        botNotice($self, $nick, "Syntax: whatis <keyword>") unless $quiet;
+        return;
+    }
+
+    my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
+    unless ($dbh) { botNotice($self, $nick, "whatis: database unavailable.") unless $quiet; return; }
+    my $id_channel = _factoid_id_channel($self, $channel);
+    unless ($id_channel) { botNotice($self, $nick, "whatis: channel not known to the bot.") unless $quiet; return; }
+
+    my $sth = $dbh->prepare(q{
+        SELECT value, created_by_nick FROM FACTOID
+        WHERE id_channel = ? AND keyword = ? LIMIT 1
+    });
+    unless ($sth && $sth->execute($id_channel, $keyword)) {
+        botNotice($self, $nick, "whatis: lookup failed.") unless $quiet;
+        return;
+    }
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+
+    unless ($row) {
+        botNotice($self, $nick, "I don't know '$keyword'. Teach me: learn $keyword = ...") unless $quiet;
+        return;
+    }
+
+    # increment hit counter (best-effort, non-fatal)
+    eval {
+        my $up = $dbh->prepare('UPDATE FACTOID SET hits = hits + 1 WHERE id_channel = ? AND keyword = ?');
+        $up->execute($id_channel, $keyword) if $up;
+        $up->finish if $up;
+    };
+
+    botPrivmsg($self, $channel, "$keyword: $row->{value}");
+    $self->{metrics}->inc('mediabot_factoid_total', { channel => $channel, op => 'whatis' })
+        if $self->{metrics};
+    return 1;
+}
+
+sub mbForget_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    unless (isIrcChannelTarget($channel)) {
+        botNotice($self, $nick, "Syntax: forget <keyword>  (use it in a channel)");
+        return;
+    }
+    return unless _factoid_enabled($self, $channel);
+
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $keyword = lc(join(' ', @args));
+    $keyword =~ s/^\s+|\s+$//g;
+    unless ($keyword ne '' && $keyword =~ /^[a-z0-9_.\-]{1,64}$/) {
+        botNotice($self, $nick, "Syntax: forget <keyword>");
+        return;
+    }
+
+    my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
+    unless ($dbh) { botNotice($self, $nick, "forget: database unavailable."); return; }
+    my $id_channel = _factoid_id_channel($self, $channel);
+    unless ($id_channel) { botNotice($self, $nick, "forget: channel not known to the bot."); return; }
+
+    # who created it?
+    my $sth = $dbh->prepare('SELECT created_by, created_by_nick FROM FACTOID WHERE id_channel = ? AND keyword = ? LIMIT 1');
+    unless ($sth && $sth->execute($id_channel, $keyword)) {
+        botNotice($self, $nick, "forget: lookup failed.");
+        return;
+    }
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+    unless ($row) {
+        botNotice($self, $nick, "I don't know '$keyword'.");
+        return;
+    }
+
+    # permission: original author (by nick) OR a channel operator (by level).
+    my $is_author = (defined $row->{created_by_nick} && lc($row->{created_by_nick}) eq lc($nick)) ? 1 : 0;
+    my $is_op = 0;
+    unless ($is_author) {
+        my $handle = eval { my $u = $ctx->user; $u ? $u->nickname : undef };
+        if (defined $handle && $handle ne '') {
+            my (undef, $lvl) = eval { getIdUserChannelLevel($self, $handle, $channel) };
+            # USER_CHANNEL.level is the per-channel scale; >=400 is operator+.
+            $is_op = 1 if defined $lvl && $lvl >= 400;
+        }
+    }
+    unless ($is_author || $is_op) {
+        botNotice($self, $nick, "forget: only the author or a channel op can forget '$keyword'.");
+        return;
+    }
+
+    my $del = $dbh->prepare('DELETE FROM FACTOID WHERE id_channel = ? AND keyword = ?');
+    unless ($del && $del->execute($id_channel, $keyword)) {
+        botNotice($self, $nick, "forget: delete failed.");
+        return;
+    }
+    $del->finish;
+
+    botNotice($self, $nick, "Forgot '$keyword' on $channel.");
+    $self->{metrics}->inc('mediabot_factoid_total', { channel => $channel, op => 'forget' })
+        if $self->{metrics};
+    return 1;
+}
+
+sub mbFactoids_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    unless (isIrcChannelTarget($channel)) {
+        botNotice($self, $nick, "Syntax: factoids [pattern]  (use it in a channel)");
+        return;
+    }
+    return unless _factoid_enabled($self, $channel);
+
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $pattern = lc(join(' ', @args));
+    $pattern =~ s/^\s+|\s+$//g;
+
+    my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
+    unless ($dbh) { botNotice($self, $nick, "factoids: database unavailable."); return; }
+    my $id_channel = _factoid_id_channel($self, $channel);
+    unless ($id_channel) { botNotice($self, $nick, "factoids: channel not known to the bot."); return; }
+
+    # mb478: "factoids top" — most consulted facts (uses the hits counter).
+    if ($pattern eq 'top') {
+        my $sth = $dbh->prepare(q{
+            SELECT keyword, hits FROM FACTOID
+            WHERE id_channel = ? AND hits > 0
+            ORDER BY hits DESC, keyword ASC LIMIT 10
+        });
+        unless ($sth && $sth->execute($id_channel)) {
+            botNotice($self, $nick, "factoids: listing failed.");
+            return;
+        }
+        my @top;
+        while (my ($k, $h) = $sth->fetchrow_array) { push @top, "$k ($h)"; }
+        $sth->finish;
+        unless (@top) {
+            botNotice($self, $nick, "No factoids have been recalled yet on $channel.");
+            return;
+        }
+        botNotice($self, $nick, "Top factoids on $channel: " . join(', ', @top));
+        return 1;
+    }
+
+    my ($sql, @bind);
+    if ($pattern ne '' && $pattern =~ /^[a-z0-9_.\-*?]{1,64}$/) {
+        # translate glob to LIKE, escaping literal % and _
+        my $like = '';
+        for my $ch (split //, $pattern) {
+            if    ($ch eq '*') { $like .= '%'; }
+            elsif ($ch eq '?') { $like .= '_'; }
+            elsif ($ch eq '%') { $like .= '\%'; }
+            elsif ($ch eq '_') { $like .= '\_'; }
+            else               { $like .= $ch; }
+        }
+        $sql  = 'SELECT keyword FROM FACTOID WHERE id_channel = ? AND keyword LIKE ? ORDER BY keyword ASC LIMIT 60';
+        @bind = ($id_channel, $like);
+    }
+    else {
+        $sql  = 'SELECT keyword FROM FACTOID WHERE id_channel = ? ORDER BY keyword ASC LIMIT 60';
+        @bind = ($id_channel);
+    }
+
+    my $sth = $dbh->prepare($sql);
+    unless ($sth && $sth->execute(@bind)) {
+        botNotice($self, $nick, "factoids: listing failed.");
+        return;
+    }
+    my @keys;
+    while (my ($k) = $sth->fetchrow_array) { push @keys, $k; }
+    $sth->finish;
+
+    unless (@keys) {
+        botNotice($self, $nick, $pattern ne ''
+            ? "No factoids matching '$pattern' on $channel."
+            : "No factoids on $channel yet. Add one: learn <keyword> = <value>");
+        return;
+    }
+    botNotice($self, $nick, scalar(@keys) . " factoid(s) on $channel: " . join(', ', @keys));
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbFactoid_ctx --- !factoid <keyword>
+# mb478: detailed info about one factoid: value, author, created/updated dates,
+# and how many times it has been recalled. Read-only, channel-gated.
+# ---------------------------------------------------------------------------
+sub mbFactoid_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    unless (isIrcChannelTarget($channel)) {
+        botNotice($self, $nick, "Syntax: factoid <keyword>  (use it in a channel)");
+        return;
+    }
+    return unless _factoid_enabled($self, $channel);
+
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $keyword = lc(join(' ', @args));
+    $keyword =~ s/^\s+|\s+$//g;
+    unless ($keyword ne '' && $keyword =~ /^[a-z0-9_.\-]{1,64}$/) {
+        botNotice($self, $nick, "Syntax: factoid <keyword>");
+        return;
+    }
+
+    my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
+    unless ($dbh) { botNotice($self, $nick, "factoid: database unavailable."); return; }
+    my $id_channel = _factoid_id_channel($self, $channel);
+    unless ($id_channel) { botNotice($self, $nick, "factoid: channel not known to the bot."); return; }
+
+    my $sth = $dbh->prepare(q{
+        SELECT value, created_by_nick,
+               DATE_FORMAT(created_at, '%Y-%m-%d') AS created_d,
+               DATE_FORMAT(updated_at, '%Y-%m-%d') AS updated_d,
+               hits
+        FROM FACTOID
+        WHERE id_channel = ? AND keyword = ? LIMIT 1
+    });
+    unless ($sth && $sth->execute($id_channel, $keyword)) {
+        botNotice($self, $nick, "factoid: lookup failed.");
+        return;
+    }
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+    unless ($row) {
+        botNotice($self, $nick, "I don't know '$keyword'.");
+        return;
+    }
+
+    my $author  = defined($row->{created_by_nick}) && $row->{created_by_nick} ne ''
+                ? $row->{created_by_nick} : 'unknown';
+    my $created = $row->{created_d} // '?';
+    my $updated = $row->{updated_d} // '?';
+    my $hits    = $row->{hits} // 0;
+    my $date_part = ($updated ne $created)
+                  ? "created $created by $author, updated $updated"
+                  : "created $created by $author";
+
+    botNotice($self, $nick, "factoid '$keyword': $date_part, $hits recall(s).");
+    botNotice($self, $nick, "value: $row->{value}");
     return 1;
 }
 

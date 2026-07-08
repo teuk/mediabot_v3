@@ -58,6 +58,10 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260603_karma_log.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260604_achievement_announce_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260604_chansets_mb115_mb118.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260706_channel_log_channel_ts.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_channel_report_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_didyoumean_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_factoids_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_factoid.sql;
 ```
 
 Then run the checker again:
@@ -82,6 +86,10 @@ mediabot_fun_commands_migration_20260512.sql
 20260604_achievement_announce_chanset.sql
 20260604_chansets_mb115_mb118.sql
 20260706_channel_log_channel_ts.sql
+20260707_channel_report_chanset.sql
+20260707_didyoumean_chanset.sql
+20260707_factoid.sql
+20260707_factoids_chanset.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this

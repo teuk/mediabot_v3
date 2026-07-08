@@ -54,6 +54,7 @@ our @EXPORT = qw(
     setLastReponderTs
     setMainTimerTick
     mbCalc_ctx
+    mbConvert_ctx
 );
 
 sub setMainTimerTick {
@@ -3035,6 +3036,47 @@ sub mbCalc_ctx {
     # commands back to the requesting nick instead of dropping an undef target.
     $ctx->reply("$expr = $formatted");
     logBot($self, $ctx->message, $channel, "calc", $expr);
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbConvert_ctx — !convert <value> <from> [to|in] <to>
+# mb479: offline unit conversion (length, mass, temperature, volume, speed,
+# data). Delegates to Mediabot::Convert (pure, no eval, no network).
+# Examples:
+#   !convert 100 km mi        !convert 100 c f
+#   !convert 1 kg in lb       !convert 10 mi to km
+# ---------------------------------------------------------------------------
+sub mbConvert_ctx {
+    my ($ctx) = @_;
+
+    my $self    = $ctx->bot;
+    my $channel = $ctx->channel;
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    # allow an optional "to"/"in" separator: "100 km to mi" / "100 km in mi"
+    @args = grep { defined && $_ ne '' && lc($_) ne 'to' && lc($_) ne 'in' } @args;
+
+    unless (@args >= 3) {
+        $ctx->reply_private("Syntax: convert <value> <from> <to>  (e.g. convert 100 km mi, convert 100 c f)");
+        return;
+    }
+
+    my ($value, $from, $to) = @args[0,1,2];
+    if (length(join(' ', @args)) > 64) {
+        $ctx->reply_private("convert: input too long.");
+        return;
+    }
+
+    require Mediabot::Convert;
+    my ($ok, $out) = Mediabot::Convert::convert($value, $from, $to);
+    if ($ok) {
+        $ctx->reply($out);
+        logBot($self, $ctx->message, $channel, "convert", "$value $from $to");
+    }
+    else {
+        $ctx->reply_private("convert: $out");
+    }
     return 1;
 }
 

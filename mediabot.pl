@@ -664,6 +664,11 @@ $scheduler->add(
         for my $chan (sort keys %{ $mediabot->{channels} // {} }) {
             my $dbh = eval { $mediabot->{db}->ensure_connected } // $mediabot->{dbh};
             next unless $dbh;
+            # mb473: per-channel opt-out via +ChannelReport (default on for
+            # backward compat). `chanset #chan -ChannelReport` silences reports.
+            next unless eval {
+                Mediabot::Helpers::chanset_enabled($mediabot, $chan, 'ChannelReport', default => 1)
+            } // 1;
             my (@top_msg, @top_karma);
             # mb357-B1: chaque section dans son propre eval -> un échec "speakers"
             # ne prive plus le canal de son "karma" (et inversement). Départage
@@ -736,6 +741,11 @@ $scheduler->add(
         my $logger = $mediabot->{logger};
 
         for my $chan (sort keys %{ $mediabot->{channels} // {} }) {
+            # mb473: per-channel opt-out via +ChannelReport (default on for
+            # backward compat). `chanset #chan -ChannelReport` silences reports.
+            next unless eval {
+                Mediabot::Helpers::chanset_enabled($mediabot, $chan, 'ChannelReport', default => 1)
+            } // 1;
             # mb357-B1: isolation PAR CANAL — une erreur DB sur un canal (coupure,
             # RaiseError, table absente…) ne doit plus avorter toute la boucle et
             # priver les canaux suivants de leur rapport.
@@ -1842,6 +1852,14 @@ sub on_message_PRIVMSG {
                 $mediabot->mbCommandPublic($message,$where,$who,$BOTNICK_WASNOT_TRIGGERED,$sCommand,@tArgs);
             }
         }
+        elsif (defined($sCommand) && $sCommand =~ /^\?([A-Za-z0-9_.\-]{1,64})$/ && !@tArgs) {
+            # mb477: factoid quick recall — "?keyword" behaves like "!whatis keyword".
+            # Only a bare "?word" (no extra args) triggers it, so normal text
+            # containing a question mark is never captured. Reuses the whatis
+            # handler, which is channel-gated by the +Factoids chanset.
+            my $keyword = lc($1);
+            $mediabot->mbCommandPublic($message,$where,$who,$BOTNICK_WASNOT_TRIGGERED,'whatis','__quiet__',$keyword);
+        }
         elsif ((($sCommand eq $self->nick_folded) && $bNickTriggerCommand) || (($sCommand eq substr($self->nick_folded, 0, 1)) && (defined($mediabot->{conf}->get('main.MAIN_PROG_INITIAL_TRIGGER')) && $mediabot->{conf}->get('main.MAIN_PROG_INITIAL_TRIGGER')))) {
             my $botNickTriggered = (($sCommand eq $self->nick_folded) ? 1 : 0);
             $what =~ s/^\S+\s*//;
@@ -2318,6 +2336,15 @@ sub on_message_JOIN {
             userhost   => "$sIdent\@$sHost",
             event_type => 'join',
         ) };
+
+        # mb474: deliver pending reminders/tells on JOIN, not only when the
+        # target speaks. Before this, `!remind <nick> <msg>` (which doubles as
+        # a "tell") only fired when the recipient talked on this channel; a nick
+        # who rejoined and read silently never got the message. Delivery is
+        # per-channel and idempotent (rows are marked delivered), so firing here
+        # AND on message causes no double delivery.
+        eval { Mediabot::UserCommands::deliverReminders($mediabot, $sNick, $target_name) };
+        if ($@) { $mediabot->{logger}->log(1, "deliverReminders on JOIN error: $@"); }
 
         # Enforce active ChannelBans on JOIN: MODE +b + KICK if mask matches.
         if ($mediabot->{channel_ban} && $sIdent && $sHost) {

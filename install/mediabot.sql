@@ -575,6 +575,25 @@ CREATE TABLE `NOTE` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Persistent user notes saved via !note command (BB1)';
 
+--
+-- FACTOID — shared, per-channel key/value facts (mb476, "!learn"/"!whatis")
+--
+CREATE TABLE `FACTOID` (
+  `id_factoid`      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_channel`      BIGINT UNSIGNED NOT NULL,
+  `keyword`         VARCHAR(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `value`           VARCHAR(400) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_by`      BIGINT UNSIGNED DEFAULT NULL,
+  `created_by_nick` VARCHAR(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `hits`            BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id_factoid`),
+  UNIQUE KEY `uniq_factoid_channel_keyword` (`id_channel`, `keyword`),
+  KEY `idx_factoid_created_by` (`created_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Shared per-channel key/value facts (mb476: !learn / !whatis / !forget)';
+
 -- ===========================================================================
 -- FOREIGN KEYS
 -- ===========================================================================
@@ -598,6 +617,10 @@ ALTER TABLE `CHANNEL_BAN`
 
 ALTER TABLE `CHANNEL_FLOOD`
   ADD CONSTRAINT `fk_channel_flood_channel` FOREIGN KEY (`id_channel`) REFERENCES `CHANNEL` (`id_channel`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE `FACTOID`
+  ADD CONSTRAINT `fk_factoid_channel`    FOREIGN KEY (`id_channel`) REFERENCES `CHANNEL` (`id_channel`) ON DELETE CASCADE  ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_factoid_created_by` FOREIGN KEY (`created_by`) REFERENCES `USER`    (`id_user`)    ON DELETE SET NULL ON UPDATE CASCADE;
 
 ALTER TABLE `CHANNEL_LOG`
   ADD CONSTRAINT `fk_channel_log_channel` FOREIGN KEY (`id_channel`) REFERENCES `CHANNEL` (`id_channel`) ON DELETE SET NULL ON UPDATE CASCADE;
@@ -683,7 +706,10 @@ INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES
 (13, 'RandomQuote'),
 (14, 'Claude'),
 (15, 'AchievementAnnounce'),
-(16, 'Games');
+(16, 'Games'),
+(17, 'ChannelReport'),
+(18, 'DidYouMean'),
+(19, 'Factoids');
 
 --
 -- PUBLIC_COMMANDS_CATEGORY — default categories

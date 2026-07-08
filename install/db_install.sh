@@ -214,15 +214,35 @@ if [[ ! "$AUTH_HOST" =~ ^[A-Za-z0-9_.:%-]+$ ]]; then
     exit 1
 fi
 
+# mb481-B1: quote SQL string literals explicitly before embedding user-provided
+# values in CREATE/ALTER USER. The default generated password is alphanumeric,
+# but a custom password containing a quote/backslash must not break the SQL.
+sql_string_literal() {
+    local v="$1"
+    case "$v" in
+        *$'\n'*|*$'\r'*)
+            messageln "Invalid SQL string literal: newline characters are not allowed."
+            exit 1
+            ;;
+    esac
+    local escaped
+    escaped=$(printf '%s' "$v" | sed "s/\\/\\\\/g; s/'/''/g")
+    printf "'%s'" "$escaped"
+}
+
+MYSQL_DB_USER_SQL=$(sql_string_literal "$MYSQL_DB_USER")
+AUTH_HOST_SQL=$(sql_string_literal "$AUTH_HOST")
+MYSQL_DB_PASS_SQL=$(sql_string_literal "$MYSQL_DB_PASS")
+
 # ─── 1) CREATE (or ALTER) & GRANT & FLUSH in one shot ───────────────────
 messageln "Creating/updating '${MYSQL_DB_USER}'@'${AUTH_HOST}' and granting on ${MYSQL_DB}"
 mysql ${MYSQL_PARAMS} <<SQL
-CREATE USER IF NOT EXISTS '${MYSQL_DB_USER}'@'${AUTH_HOST}'
-  IDENTIFIED BY '${MYSQL_DB_PASS}';
-ALTER USER '${MYSQL_DB_USER}'@'${AUTH_HOST}'
-  IDENTIFIED BY '${MYSQL_DB_PASS}';
+CREATE USER IF NOT EXISTS ${MYSQL_DB_USER_SQL}@${AUTH_HOST_SQL}
+  IDENTIFIED BY ${MYSQL_DB_PASS_SQL};
+ALTER USER ${MYSQL_DB_USER_SQL}@${AUTH_HOST_SQL}
+  IDENTIFIED BY ${MYSQL_DB_PASS_SQL};
 GRANT ALL PRIVILEGES ON \`${MYSQL_DB}\`.*
-  TO '${MYSQL_DB_USER}'@'${AUTH_HOST}';
+  TO ${MYSQL_DB_USER_SQL}@${AUTH_HOST_SQL};
 FLUSH PRIVILEGES;
 SQL
 ok_failed $? "Errors while creating/granting for user ${MYSQL_DB_USER}@${AUTH_HOST}"

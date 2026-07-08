@@ -1810,6 +1810,7 @@ sub mbCommandPublic {
         stats        => sub { mbStats_ctx($ctx) },
         top          => sub { mbTop_ctx($ctx) },
         calc         => sub { mbCalc_ctx($ctx) },
+        convert      => sub { mbConvert_ctx($ctx) },     # mb479: unit conversion
         '8ball'      => sub { mb8ball_ctx($ctx) },
         remind       => sub {
             my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
@@ -1819,6 +1820,7 @@ sub mbCommandPublic {
             } else { mbRemind_ctx($ctx) }
         },
         remindlist   => sub { mbRemindList_ctx($ctx) },
+        tell         => sub { mbRemind_ctx($ctx) },   # mb474: leave a message, delivered when the target returns
         calclast     => sub { mbCalcLast_ctx($ctx) },
         wordcount    => sub { mbWordCount_ctx($ctx) },
         alias        => sub { mbAlias_ctx($ctx) },
@@ -1885,6 +1887,12 @@ sub mbCommandPublic {
         caps         => sub { mbFeatures_ctx($ctx) },
         observatory  => sub { mbObservatory_ctx($ctx) },
         obs          => sub { mbObservatory_ctx($ctx) },
+        recap        => sub { mbRecap_ctx($ctx) },       # mb472: catch-up summary
+        learn        => sub { mbLearn_ctx($ctx) },        # mb476: factoids
+        whatis       => sub { mbWhatis_ctx($ctx) },
+        forget       => sub { mbForget_ctx($ctx) },
+        factoids     => sub { mbFactoids_ctx($ctx) },
+        factoid      => sub { mbFactoid_ctx($ctx) },     # mb478: factoid details
         quotecount   => sub {
             my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
             mbQuoteCount_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },
@@ -2030,10 +2038,138 @@ sub mbCommandPublic {
         mbHandleNickTriggered($ctx, join(" ", $sCommand, @tArgs));
     } else {
         $self->{logger}->log(4, "Public command '$sCommand' not found");
+        # mb475: "did you mean?" — suggest the closest known public command on a
+        # genuine typo, instead of staying silent. Conservative: only for a
+        # channel command, only a close single suggestion, and rate-limited.
+        _mbSuggestCommand($self, $ctx, $sChannel, $sNick, $sCommand);
     }
 }
 
 # Handle help command
+
+# ---------------------------------------------------------------------------
+# mb475: "did you mean?" suggestion for a mistyped public command.
+#
+# _levenshtein($a, $b) — Damerau-Levenshtein edit distance (pure Perl). Unlike
+# plain Levenshtein, an adjacent transposition ("hlep" -> "help") costs 1, which
+# matches real typing mistakes far better. Bounded by caller to short tokens, so
+# the O(len_a*len_b) cost is trivial. Name kept for callers/tests.
+# ---------------------------------------------------------------------------
+sub _levenshtein {
+    my ($a, $b) = @_;
+    $a = defined $a ? $a : '';
+    $b = defined $b ? $b : '';
+    return length($b) if $a eq '';
+    return length($a) if $b eq '';
+
+    my @a = split //, $a;
+    my @b = split //, $b;
+    my ($la, $lb) = (scalar @a, scalar @b);
+
+    # full matrix for Damerau (need row i-2 / col j-2 for transposition)
+    my @d;
+    for my $i (0 .. $la) { $d[$i][0] = $i }
+    for my $j (0 .. $lb) { $d[0][$j] = $j }
+
+    for my $i (1 .. $la) {
+        for my $j (1 .. $lb) {
+            my $cost = ($a[$i-1] eq $b[$j-1]) ? 0 : 1;
+            my $min = $d[$i-1][$j] + 1;                      # deletion
+            $min = $d[$i][$j-1] + 1     if $d[$i][$j-1] + 1     < $min; # insertion
+            $min = $d[$i-1][$j-1] + $cost if $d[$i-1][$j-1] + $cost < $min; # substitution
+            # transposition of two adjacent characters
+            if ($i > 1 && $j > 1
+                && $a[$i-1] eq $b[$j-2]
+                && $a[$i-2] eq $b[$j-1]) {
+                my $t = $d[$i-2][$j-2] + 1;
+                $min = $t if $t < $min;
+            }
+            $d[$i][$j] = $min;
+        }
+    }
+    return $d[$la][$lb];
+}
+
+# ---------------------------------------------------------------------------
+# _mbSuggestCommand($self, $ctx, $channel, $nick, $typed)
+# On an unknown PUBLIC command, if a single close known public command exists,
+# reply "Unknown command 'x'. Did you mean 'y'?". Conservative by design:
+#   - only in a channel (skip private, which is quieter anyway);
+#   - the typed token must look like a command word (letters/digits, 2..24);
+#   - suggestion distance must be small AND relative to length (avoid absurd
+#     matches on very short tokens);
+#   - at most one suggestion, no list spam;
+#   - per-channel cooldown to avoid becoming a flood vector.
+# Returns 1 if a suggestion was sent, 0 otherwise.
+# ---------------------------------------------------------------------------
+sub _mbSuggestCommand {
+    my ($self, $ctx, $channel, $nick, $typed) = @_;
+
+    return 0 unless Mediabot::Helpers::isIrcChannelTarget($channel);
+    return 0 unless defined $typed;
+    my $t = lc $typed;
+    # only plausible command words: letters/digits/_, length 3..24. Two-letter
+    # tokens (hi, ok, no, lol-typos) are conversational noise, not command typos,
+    # and would produce false suggestions — require at least 3 characters.
+    return 0 unless $t =~ /^[a-z0-9_]{3,24}$/;
+
+    # opt-out per channel via chanset (default on for a friendly bot).
+    return 0 unless eval {
+        Mediabot::Helpers::chanset_enabled($self, $channel, 'DidYouMean', default => 1)
+    } // 1;
+
+    # per-channel cooldown (default 15s), bounded memory.
+    my $now = time();
+    my $cooldown = int(eval { $self->{conf}->get('main.DIDYOUMEAN_COOLDOWN_S') } // 15);
+    $cooldown = 15 if $cooldown < 0;
+    $self->{_didyoumean_cd} ||= {};
+    if ($cooldown > 0) {
+        my $last = $self->{_didyoumean_cd}{lc $channel};
+        return 0 if defined $last && ($now - $last) < $cooldown;
+    }
+
+    # candidate set = known PUBLIC commands (help metadata is the source of truth)
+    my %help = eval { _mbHelpInternalCommands() };
+    return 0 unless %help;
+    my @public = grep { ($help{$_}{level} // '') eq 'public' } keys %help;
+    return 0 unless @public;
+
+    # find the closest command by edit distance.
+    my ($best, $best_d);
+    for my $cmd (@public) {
+        # cheap length prefilter: skip candidates whose length differs a lot.
+        next if abs(length($cmd) - length($t)) > 2;
+        my $d = _levenshtein($t, $cmd);
+        if (!defined $best_d || $d < $best_d) {
+            $best_d = $d;
+            $best   = $cmd;
+        }
+    }
+    return 0 unless defined $best;
+
+    # acceptance: distance <= 2 AND not more than ~1/3 of the length, so that
+    # short tokens need an almost-exact match (e.g. don't map "hi" -> "help").
+    my $max_d = length($t) <= 4 ? 1 : 2;
+    return 0 if $best_d > $max_d;
+    return 0 if $best_d == 0;   # exact match shouldn't reach here, but be safe
+
+    $self->{_didyoumean_cd}{lc $channel} = $now;
+    # bound memory
+    if (scalar(keys %{ $self->{_didyoumean_cd} }) > 256) {
+        for my $k (keys %{ $self->{_didyoumean_cd} }) {
+            delete $self->{_didyoumean_cd}{$k}
+                if ($now - $self->{_didyoumean_cd}{$k}) > 3600;
+        }
+    }
+
+    my $cc = eval { $self->{conf}->get('main.MAIN_PROG_CMD_CHAR') } // '!';
+    botPrivmsg($self, $channel,
+        "$nick: unknown command '$cc$typed'. Did you mean $cc$best?");
+    $self->{metrics}->inc('mediabot_didyoumean_total', { channel => $channel })
+        if $self->{metrics};
+    return 1;
+}
+
 
 # ---------------------------------------------------------------------------
 # mbUptime_ctx — !uptime
@@ -2242,6 +2378,7 @@ abbrev|abbrev <text>|public|Generate an acronym from the initials of each word.
 active|active [period]|public|List nicks active in the last N hours or days (e.g. 24h, 7d).
 calclast|calclast [1-3]|public|Show your most recent !calc results (session memory).
 calc|calc <expression>|public|Evaluate a safe calculator expression.
+convert|convert <value> <from> <to>|public|Convert units: length, mass, temperature, volume, speed, data (e.g. convert 100 km mi).
 stats|stats [nick]|public|Show channel/user statistics.
 top|top [limit]|public|Show top channel activity statistics.
 compare|compare <nick1> <nick2>|public|Compare message counts between two nicks on the channel.
@@ -2263,6 +2400,7 @@ karmahist|karmahist [nick]|public|Show the last 5 karma changes on the channel (
 
 # Reminders
 remind|remind [!] <nick> <msg>|public|Set reminder. Subcommands: list, cancel <id>|all, show.
+tell|tell <nick> <msg>|public|Leave a message for a nick, delivered when they next join or speak here.
 remindsnooze|remindsnooze <id> <delay>|public|Snooze a reminder by 30m, 2h, 1d etc.
 remindlist|public|List your pending reminders with remaining time and urgent flag.
 
@@ -2302,6 +2440,12 @@ capabilities|capabilities|public|Alias for features.
 caps|caps|public|Alias for features.
 observatory|observatory|public|Show a compact live channel and bot status view.
 obs|obs|public|Alias for observatory.
+recap|recap [30m\|2h] [ai]|public|Summarize what you missed on this channel (stats, or AI summary with 'ai').
+learn|learn <keyword> = <value>|public|Store a shared channel fact. Recall with whatis.
+whatis|whatis <keyword>|public|Recall a shared channel fact stored with learn. Shortcut: ?keyword
+forget|forget <keyword>|public|Delete a channel fact (author or channel op only).
+factoids|factoids [pattern\|top]|public|List channel facts (glob pattern), or 'top' for the most recalled.
+factoid|factoid <keyword>|public|Show details of a fact: author, dates, recall count.
 mood|mood|public|Read the current channel mood from recent messages.
 ambiance|ambiance|public|Alias for mood.
 
@@ -2746,6 +2890,9 @@ sub _mbHelpSendChansetsTopic {
         "  +Claude              : enable Claude-related behavior if configured.",
         "  +NoColors            : strip colors from bot output where supported.",
         "  +AntiFlood           : enable channel anti-flood checks.",
+        "  +ChannelReport       : receive automatic daily/weekly channel reports (on by default; -ChannelReport to silence).",
+        "  +DidYouMean          : suggest the closest command on a typo (on by default; -DidYouMean to silence).",
+        "  +Factoids            : allow shared learn/whatis channel facts (on by default; -Factoids to silence).",
         "Use: help commands settings  /  help chansets  /  help chanset",
     );
 
