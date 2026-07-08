@@ -1418,15 +1418,21 @@ sub refresh_channel_hashes {
 
     my %db_info;
     while (my $ref = $sth->fetchrow_hashref()) {
-        $db_info{ $ref->{name} } = $ref;
+        next unless defined $ref->{name};
+        # mb482-B1: {channels} is keyed by lc(channel) since mb407.  Refresh
+        # must case-fold the DB side as well, otherwise a row stored as
+        # "#Glamour" is loaded at boot but reported every minute as missing
+        # when the in-memory key is "#glamour".
+        $db_info{ lc($ref->{name}) } = $ref;
     }
     $sth->finish;
 
     foreach my $chan_name (keys %{ $self->{channels} }) {
-        my $chan_obj = $self->{channels}{lc $chan_name};
+        my $chan_key = lc($chan_name);
+        my $chan_obj = $self->{channels}{$chan_key};
 
-        if (exists $db_info{$chan_name}) {
-            my $ref = $db_info{$chan_name};
+        if (exists $db_info{$chan_key}) {
+            my $ref = $db_info{$chan_key};
 
             # fields to update
             $chan_obj->{description} = $ref->{description};
