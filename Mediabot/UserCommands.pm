@@ -116,6 +116,7 @@ our @EXPORT = qw(
     mbForget_ctx
     mbFactoids_ctx
     mbFactoid_ctx
+    mbOnThisDay_ctx
 
 );
 
@@ -11027,7 +11028,7 @@ sub mbRecap_ctx {
     my $channel = $ctx->channel;
 
     # !recap n'a de sens que dans un canal (le "quoi de neuf ICI").
-    unless (defined $channel && $channel =~ /^#/) {
+    unless (isIrcChannelTarget($channel)) {
         botNotice($self, $nick, "Syntax: recap [<window>] [ai]  — use it in a channel (e.g. 30m, 2h).");
         return;
     }
@@ -11601,6 +11602,150 @@ sub mbFactoid_ctx {
     botNotice($self, $nick, "factoid '$keyword': $date_part, $hits recall(s).");
     botNotice($self, $nick, "value: $row->{value}");
     return 1;
+}
+
+# ===========================================================================
+# mbOnThisDay_ctx --- !onthisday  (alias !otd)
+# mb489: "on this day" — resurface what happened on this channel on the same
+# calendar day (month+day) in previous years/months. A nostalgia/engagement
+# feature for long-lived channels, built entirely on CHANNEL_LOG (uses the
+# composite (id_channel, ts) index). Read-only, channel-gated, throttled.
+#
+# Output (private NOTICE, no channel flood):
+#   - which past date(s) had activity, how many messages, top talker;
+#   - one representative message from that day (a longer line, to avoid "lol").
+# ===========================================================================
+sub mbOnThisDay_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    unless (isIrcChannelTarget($channel)) {
+        botNotice($self, $nick, "Syntax: onthisday  (use it in a channel)");
+        return;
+    }
+    # opt-out via the same flag as recap-style history features
+    return unless eval {
+        Mediabot::Helpers::chanset_enabled($self, $channel, 'OnThisDay', default => 1)
+    } // 1;
+
+    # light per-nick cooldown (reuse a dedicated bucket)
+    my $cooldown_s = 20;
+    my $now = time();
+    $self->{_otd_cooldown} ||= {};
+    my $lc_nick = lc($nick);
+    my $last = $self->{_otd_cooldown}{$lc_nick};
+    if (defined $last && ($now - $last) < $cooldown_s) {
+        my $wait = $cooldown_s - ($now - $last);
+        botNotice($self, $nick, "onthisday: please wait ${wait}s before asking again.");
+        return;
+    }
+    $self->{_otd_cooldown}{$lc_nick} = $now;
+    if (scalar(keys %{ $self->{_otd_cooldown} }) > 512) {
+        for my $k (keys %{ $self->{_otd_cooldown} }) {
+            delete $self->{_otd_cooldown}{$k}
+                if ($now - $self->{_otd_cooldown}{$k}) > 3600;
+        }
+    }
+
+    my $dbh = $self->{dbh};
+    unless ($dbh) { botNotice($self, $nick, "onthisday: database unavailable."); return; }
+
+    my $channel_obj = $self->{channels}{lc $channel};
+    my $id_channel  = $channel_obj ? eval { $channel_obj->get_id } : undef;
+    unless (defined $id_channel) {
+        botNotice($self, $nick, "onthisday: channel not known to the bot.");
+        return;
+    }
+
+    # Per-year stats for the same month+day, strictly before today's date.
+    # Excludes the current day so "on this day" is genuinely historical.
+    my $sth = $dbh->prepare(q{
+        SELECT YEAR(ts)               AS y,
+               COUNT(*)               AS msgs,
+               COUNT(DISTINCT nick)   AS people
+        FROM CHANNEL_LOG
+        WHERE id_channel = ?
+          AND event_type IN ('public','action')
+          AND MONTH(ts) = MONTH(CURDATE())
+          AND DAY(ts)   = DAY(CURDATE())
+          AND ts < CURDATE()
+        GROUP BY YEAR(ts)
+        ORDER BY y DESC
+    });
+    unless ($sth && $sth->execute($id_channel)) {
+        botNotice($self, $nick, "onthisday: lookup failed.");
+        return;
+    }
+    my @years;
+    while (my $r = $sth->fetchrow_hashref) { push @years, $r; }
+    $sth->finish;
+
+    unless (@years) {
+        botNotice($self, $nick, "Nothing recorded on this channel on this day in earlier years — yet.");
+        return;
+    }
+
+    my @lines;
+    my $total = 0; $total += $_->{msgs} for @years;
+    my $span  = @years == 1 ? "$years[0]{y}" : "$years[-1]{y}-$years[0]{y}";
+    push @lines, "On this day on $channel ($span): $total message(s) across " . scalar(@years) . " year(s).";
+
+    # Per-year one-liners (most recent first), capped to avoid flood.
+    my $shown = 0;
+    for my $r (@years) {
+        last if $shown >= 5;
+        # top talker of that specific day+year
+        my $tt = $dbh->prepare(q{
+            SELECT nick, COUNT(*) AS c
+            FROM CHANNEL_LOG
+            WHERE id_channel = ?
+              AND event_type IN ('public','action')
+              AND YEAR(ts)  = ?
+              AND MONTH(ts) = MONTH(CURDATE())
+              AND DAY(ts)   = DAY(CURDATE())
+            GROUP BY nick ORDER BY c DESC LIMIT 1
+        });
+        my $topnick = '?';
+        if ($tt && $tt->execute($id_channel, $r->{y})) {
+            if (my $tr = $tt->fetchrow_hashref) { $topnick = $tr->{nick}; }
+            $tt->finish;
+        }
+        push @lines, sprintf("  %d: %d msg, %d people, most active: %s",
+            $r->{y}, $r->{msgs}, $r->{people}, $topnick);
+        $shown++;
+    }
+
+    # One representative message: a longer line from the most recent past year,
+    # picked deterministically-ish (longest few, then one at random).
+    my $ry = $years[0]{y};
+    my $rm = $dbh->prepare(q{
+        SELECT nick, publictext
+        FROM CHANNEL_LOG
+        WHERE id_channel = ?
+          AND event_type IN ('public','action')
+          AND YEAR(ts)  = ?
+          AND MONTH(ts) = MONTH(CURDATE())
+          AND DAY(ts)   = DAY(CURDATE())
+          AND CHAR_LENGTH(publictext) BETWEEN 25 AND 300
+        ORDER BY CHAR_LENGTH(publictext) DESC
+        LIMIT 8
+    });
+    if ($rm && $rm->execute($id_channel, $ry)) {
+        my @cand;
+        while (my $mr = $rm->fetchrow_hashref) { push @cand, $mr; }
+        $rm->finish;
+        if (@cand) {
+            my $pick = $cand[int(rand(scalar @cand))];
+            my $text = $pick->{publictext} // '';
+            $text =~ s/[\r\n\0]+/ /g;
+            $text = Mediabot::Helpers::truncate_utf8($text, 200, '...') if length($text) > 200;
+            push @lines, "From $ry — <$pick->{nick}> $text";
+        }
+    }
+
+    return queueBotNotices($self, $nick, @lines);
 }
 
 1;

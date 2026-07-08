@@ -61,6 +61,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260706_channel_log_channe
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_channel_report_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_didyoumean_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_factoids_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260708_onthisday_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_factoid.sql;
 ```
 
@@ -90,6 +91,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260707_didyoumean_chanset.sql
 20260707_factoid.sql
 20260707_factoids_chanset.sql
+20260708_onthisday_chanset.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this

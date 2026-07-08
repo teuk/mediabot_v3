@@ -67,8 +67,8 @@ return sub {
     );
 
     $assert->ok(
-        $help =~ /Syntax: help #channel/,
-        '!help private/no-channel gives useful syntax'
+        $help =~ /_mbHelpSendWelcome\(\$ctx\)/,
+        '!help (bare) shows the welcome/category screen (mb486)'
     );
 
     $assert->ok(

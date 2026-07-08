@@ -1429,7 +1429,10 @@ sub refresh_channel_hashes {
 
     foreach my $chan_name (keys %{ $self->{channels} }) {
         my $chan_key = lc($chan_name);
-        my $chan_obj = $self->{channels}{$chan_key};
+        # mb407 guard: keep lc() visible inside the {channels} lookup itself.
+        # $chan_name comes from keys (already canonical), so lc is a no-op here,
+        # but the convention forbids a bare {channels}{$var} lookup.
+        my $chan_obj = $self->{channels}{lc $chan_name};
 
         if (exists $db_info{$chan_key}) {
             my $ref = $db_info{$chan_key};
@@ -1894,6 +1897,8 @@ sub mbCommandPublic {
         observatory  => sub { mbObservatory_ctx($ctx) },
         obs          => sub { mbObservatory_ctx($ctx) },
         recap        => sub { mbRecap_ctx($ctx) },       # mb472: catch-up summary
+        onthisday    => sub { mbOnThisDay_ctx($ctx) },    # mb489: history nostalgia
+        otd          => sub { mbOnThisDay_ctx($ctx) },
         learn        => sub { mbLearn_ctx($ctx) },        # mb476: factoids
         whatis       => sub { mbWhatis_ctx($ctx) },
         forget       => sub { mbForget_ctx($ctx) },
@@ -2447,6 +2452,8 @@ caps|caps|public|Alias for features.
 observatory|observatory|public|Show a compact live channel and bot status view.
 obs|obs|public|Alias for observatory.
 recap|recap [30m\|2h] [ai]|public|Summarize what you missed on this channel (stats, or AI summary with 'ai').
+onthisday|onthisday|public|Resurface what happened on this channel on this calendar day in past years. Alias: otd
+otd|otd|public|Alias for onthisday.
 learn|learn <keyword> = <value>|public|Store a shared channel fact. Recall with whatis.
 whatis|whatis <keyword>|public|Recall a shared channel fact stored with learn. Shortcut: ?keyword
 forget|forget <keyword>|public|Delete a channel fact (author or channel op only).
@@ -2485,6 +2492,7 @@ MEDIABOT_INTERNAL_HELP
 
     for my $line (split /\n/, $raw) {
         next if $line =~ /^\s*$/;
+        next if $line =~ /^\s*#/;   # mb485: skip heredoc comments (were parsed as ghost commands)
 
         # Format is:
         #   command|syntax|level|description
@@ -2706,8 +2714,45 @@ sub _mbHelpSendLevelResults {
 }
 
 
+sub _mbHelpExplicitCategory {
+    # mb485: explicit command -> category map. Consulted BEFORE the heuristic
+    # regexes so commands land in the right place regardless of wording. Only
+    # list commands the heuristic would misclassify or that deserve a precise
+    # home; everything else falls through to the heuristic below.
+    return (
+        # factoids family (was scattered across channel/moderation/general)
+        learn    => 'factoids',
+        whatis   => 'factoids',
+        forget   => 'factoids',
+        factoids => 'factoids',
+        factoid  => 'factoids',
+        # channel memory / catch-up
+        recap    => 'social',
+        onthisday => 'social',
+        otd      => 'social',
+        # messaging (tell was landing in admin via "delivered"/"nick")
+        tell     => 'general',
+        # tools
+        convert  => 'stats',
+        # public commands the heuristic wrongly put in 'admin'
+        remind      => 'general',
+        slap        => 'ai_fun',
+        heatmap     => 'stats',
+        karmadiff   => 'stats',
+        karmawatch  => 'stats',
+        karmgraph   => 'stats',
+        lastcom     => 'stats',
+        monthstats  => 'stats',
+        pollstatus  => 'general',
+    );
+}
+
 sub _mbHelpCategoryForCommand {
     my ($cmd, $entry) = @_;
+
+    # mb485: explicit map wins over heuristics.
+    my %explicit = _mbHelpExplicitCategory();
+    return $explicit{$cmd} if exists $explicit{$cmd};
 
     my $level  = lc($entry->{level}  // '');
     my $syntax = lc($entry->{syntax} // '');
@@ -2743,6 +2788,7 @@ sub _mbHelpCategoryLabels {
         radio      => 'Radio/media',
         stats      => 'Stats/logs/tools',
         social     => 'Social/channel memory',
+        factoids   => 'Factoids (learn/whatis)',
         games      => 'Games/playful commands',
         settings   => 'Chansets/settings',
         ai_fun     => 'AI/fun/quotes',
@@ -2772,6 +2818,10 @@ sub _mbHelpCategoryAliases {
         tools      => 'stats',
         social     => 'social',
         memory     => 'social',
+        factoid    => 'factoids',
+        factoids   => 'factoids',
+        facts      => 'factoids',
+        learn      => 'factoids',
         profile    => 'social',
         profiles   => 'social',
         games      => 'games',
@@ -2801,19 +2851,15 @@ sub _mbHelpBuildCategories {
     return %cats;
 }
 
-sub _mbHelpSendCategoryIndex {
-    my ($ctx) = @_;
-
-    my $self = $ctx->bot;
-    my $nick = $ctx->nick;
-
-    my %cats = _mbHelpBuildCategories();
+sub _mbHelpCategoryIndexLines {
+    # mb486: build the category index as a list of lines (reused by both the
+    # "help commands" index and the bare "help" welcome screen).
+    my %cats   = _mbHelpBuildCategories();
     my %labels = _mbHelpCategoryLabels();
 
-    my @order = qw(general auth channel moderation dynamic radio stats social games settings ai_fun admin);
+    my @order = qw(general auth channel moderation dynamic radio stats social factoids games settings ai_fun admin);
 
     my @lines;
-    push @lines, "Internal command categories:";
     for my $cat (@order) {
         my $count = scalar @{ $cats{$cat} || [] };
         next unless $count;
@@ -2824,9 +2870,74 @@ sub _mbHelpSendCategoryIndex {
             $count == 1 ? '' : 's',
         );
     }
+    return @lines;
+}
 
+sub _mbHelpSendCategoryIndex {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    my @lines;
+    push @lines, "Internal command categories:";
+    push @lines, _mbHelpCategoryIndexLines();
     push @lines, "Use: help commands <category>  Example: help commands radio";
     push @lines, "Other filters: help search <term> / help level <level> / help <command>";
+
+    return _mbHelpSendNoticeQueue($self, $nick, @lines);
+}
+
+sub _mbHelpCategoryIndexCompact {
+    # mb488: dense one-token-per-category index ("name(count)"), chunked so the
+    # whole set fits in a couple of lines. Used by the welcome screen, which must
+    # stay under the notice-queue cap so the navigation section is never cut off.
+    my %cats = _mbHelpBuildCategories();
+    my @order = qw(general auth channel moderation dynamic radio stats social factoids games settings ai_fun admin);
+    my @tokens;
+    for my $cat (@order) {
+        my $count = scalar @{ $cats{$cat} || [] };
+        next unless $count;
+        push @tokens, "$cat($count)";
+    }
+    return _mbHelpBuildChunkedList("", @tokens);
+}
+
+sub _mbHelpSendWelcome {
+    # mb486/mb488: the bare "help" entry point. Surfaces the whole internal help
+    # structure (categories + navigation) at once. Kept COMPACT (<= the notice
+    # queue cap) so the navigation lines are never truncated away (mb488 fix).
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    my $cc = eval { $self->{conf}->get('main.MAIN_PROG_CMD_CHAR') };
+    $cc = '!' unless defined $cc && $cc ne '';
+
+    # Read the local VERSION file directly — cheap and offline. getVersion()
+    # may reach out for a remote comparison, which must not sit in the help path.
+    my $version = '';
+    if (open(my $vfh, '<', 'VERSION')) {
+        local $/;
+        my $v = <$vfh>;
+        close $vfh;
+        $v =~ s/^\s+|\s+$//g if defined $v;
+        $version = $v if defined $v && $v ne '';
+    }
+    my $banner  = "Mediabot help" . ($version ne '' ? " ($version)" : '');
+
+    my @lines;
+    push @lines, $banner;
+    push @lines, "Categories (name = command count):";
+    push @lines, _mbHelpCategoryIndexCompact();
+    push @lines, "Navigate:";
+    push @lines, "  ${cc}help <category>      list a category   (e.g. ${cc}help radio)";
+    push @lines, "  ${cc}help <command>       syntax + details  (e.g. ${cc}help convert)";
+    push @lines, "  ${cc}help search <term>   find commands by keyword";
+    push @lines, "  ${cc}help level <role>    commands for an access level";
+    push @lines, "  ${cc}help chansets        channel behaviour flags   /   ${cc}help #channel  custom cmds";
+    push @lines, "Docs: https://github.com/teuk/mediabot_v3/wiki";
 
     return _mbHelpSendNoticeQueue($self, $nick, @lines);
 }
@@ -2857,8 +2968,33 @@ sub _mbHelpSendCategoryCommands {
 
     my @lines;
     push @lines, "Internal commands category: " . ($labels{$category} || $category);
-    push @lines, _mbHelpBuildChunkedList("Commands: ", @cmds);
-    push @lines, "Use: help <command> for syntax/details.";
+
+    # mb487: for a small category, show a one-line "name - short description"
+    # per command (far more useful than a bare list). For a large category,
+    # keep the compact chunked list to avoid flooding. Threshold chosen so the
+    # biggest detailed category stays well under a dozen NOTICE lines.
+    my $DETAILED_MAX = 12;
+
+    if (@cmds && @cmds <= $DETAILED_MAX) {
+        my %internal = _mbHelpInternalCommands();
+        my $w = 0;
+        for my $c (@cmds) { $w = length($c) if length($c) > $w; }
+        for my $c (@cmds) {
+            my $desc = $internal{$c}{desc} // '';
+            $desc =~ s/\s+/ /g;
+            $desc =~ s/^\s+|\s+$//g;
+            # keep each line comfortably within IRC limits
+            $desc = Mediabot::Helpers::truncate_utf8($desc, 90, '...') if length($desc) > 90;
+            push @lines, $desc ne ''
+                ? sprintf("  %-*s - %s", $w, $c, $desc)
+                : sprintf("  %s", $c);
+        }
+    }
+    else {
+        push @lines, _mbHelpBuildChunkedList("Commands: ", @cmds);
+    }
+
+    push @lines, "Use: help <command> for full syntax/details.";
 
     return _mbHelpSendNoticeQueue($self, $nick, @lines);
 }
@@ -2899,6 +3035,7 @@ sub _mbHelpSendChansetsTopic {
         "  +ChannelReport       : receive automatic daily/weekly channel reports (on by default; -ChannelReport to silence).",
         "  +DidYouMean          : suggest the closest command on a typo (on by default; -DidYouMean to silence).",
         "  +Factoids            : allow shared learn/whatis channel facts (on by default; -Factoids to silence).",
+        "  +OnThisDay           : allow the onthisday/otd channel history feature (on by default; -OnThisDay to silence).",
         "Use: help commands settings  /  help chansets  /  help chanset",
     );
 
@@ -2938,7 +3075,10 @@ sub mbHelp_ctx {
         return _mbHelpSendChansetsTopic($ctx);
     }
 
-    if ($first =~ /^(?:stats|logs|tools)$/i) {
+    # mb490: command/category collision rule must be real, not only simulated
+    # in tests. "help stats" is an actual command and must show command help;
+    # "help logs/tools" remain convenient aliases for the stats category.
+    if ($first =~ /^(?:logs|tools)$/i) {
         return _mbHelpSendInternalList($ctx, 'stats');
     }
 
@@ -2950,6 +3090,22 @@ sub mbHelp_ctx {
     if ($first =~ /^(?:level|role)$/i) {
         my $level_query = join(' ', @args[1 .. $#args]);
         return _mbHelpSendLevelResults($ctx, $level_query);
+    }
+
+    # mb488: "help <category>" (e.g. help general, help radio, help factoids)
+    # lists that category — the names shown by the category index. A command of
+    # the same name still wins (help stats -> the stats command), so we only
+    # route to a category when $first names a category AND is NOT a command.
+    if ($first ne '' && !isIrcChannelTarget($first) && @args == 1) {
+        my $key = lc $first;
+        $key =~ s/[\s-]+/_/g;
+        my %cats    = _mbHelpBuildCategories();
+        my %aliases = _mbHelpCategoryAliases();
+        my $canon   = exists $aliases{$key} ? $aliases{$key} : $key;
+        my %internal = _mbHelpInternalCommands();
+        if (exists $cats{$canon} && !exists $internal{$key}) {
+            return _mbHelpSendCategoryCommands($ctx, $canon);
+        }
     }
 
     if ($first ne '' && !isIrcChannelTarget($first)) {
@@ -2973,14 +3129,15 @@ sub mbHelp_ctx {
 
     my $channel = $ctx->channel // '';
 
-    if (!isIrcChannelTarget($first) && !isIrcChannelTarget($channel)) {
-        botNotice($self, $nick, "Syntax: help #channel");
-        botNotice($self, $nick, "You can also use: help docs");
-        botNotice($self, $nick, "For a specific internal command: help <command>");
-        return 1;
+    # mb486: an explicit "help #channel" still lists that channel's dynamic
+    # PUBLIC_COMMANDS. A bare "help" (no argument) now shows the welcome screen
+    # — categories + navigation — instead of a dead-end syntax line (in private)
+    # or silently dumping the channel's custom commands (on a channel).
+    if (isIrcChannelTarget($first)) {
+        return userShowcommandsChannel_ctx($ctx);
     }
 
-    return userShowcommandsChannel_ctx($ctx);
+    return _mbHelpSendWelcome($ctx);
 }
 
 # Handle bot nick triggered messages - natural patterns + Hailo fallback
