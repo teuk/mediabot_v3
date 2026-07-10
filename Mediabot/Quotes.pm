@@ -19,6 +19,20 @@ use List::Util qw(min);
 use Mediabot::Helpers;
 use Encode ();
 
+# mb501: bump a quote's recall counter (hits). Best-effort and tolerant — if
+# the `hits` column isn't there yet (migration not applied), the eval swallows
+# the error and quote display is unaffected.
+sub _quote_bump_hits {
+    my ($self, $id_quotes) = @_;
+    return unless defined $id_quotes && $id_quotes =~ /^\d+$/;
+    my $dbh = $self->{dbh} or return;
+    eval {
+        my $sth = $dbh->prepare('UPDATE QUOTES SET hits = hits + 1 WHERE id_quotes = ?');
+        $sth->execute($id_quotes) if $sth;
+        $sth->finish if $sth;
+    };
+}
+
 # mb428-B1: extrait tronqué SANS couper un caractère UTF-8 multi-octets.
 # quotetext arrive en OCTETS UTF-8 (DBI ne décode pas). substr($s, 0, N)
 # coupait à N octets, potentiellement au milieu d'un caractère accenté ->
@@ -43,6 +57,7 @@ our @EXPORT = qw(
     mbQuoteStats
     mbQuoteByNick
     mbQuoteCount_ctx
+    mbTopQuote_ctx
     _printQuoteSyntax
 );
 
@@ -418,6 +433,7 @@ sub mbQuoteView {
 
         my $id_q = String::IRC->new($id_quotes)->bold;
         botPrivmsg($self, $sChannel, "($sUserhandle) [id: $id_q] $excerpt");
+        _quote_bump_hits($self, $id_quotes);   # mb501
         logBot($self, $message, $sChannel, "q view", @tArgs);
     }
     else {
@@ -633,6 +649,7 @@ sub mbQuoteRand {
         my $text = $ref->{quotetext} // '';
         $text = _quote_excerpt($text, 300);  # mb428-B1
         botPrivmsg($self, $sChannel, "($handle) [id: $id_q] $text");
+        _quote_bump_hits($self, $ref->{id_quotes});   # mb501
     }
     else {
         botPrivmsg($self, $sChannel, "Quote database is empty for $sChannel");
@@ -933,6 +950,86 @@ sub mbQuoteCount_ctx {
     my $row = $sth->fetchrow_hashref; $sth->finish;
     botPrivmsg($self, $sChannel,
         "$targetNick: " . ($row->{cnt} // 0) . " quote(s) on $sChannel");
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# mbTopQuote_ctx --- !topquote [n]
+# mb501: channel hall of fame — the most-recalled quotes, ranked by hits
+# (bumped each time a quote is shown by id or at random). Read-only.
+# ---------------------------------------------------------------------------
+sub mbTopQuote_ctx {
+    my ($self, $sNick, $sChannel, $arg) = @_;
+
+    unless (defined $sChannel && $sChannel =~ /^[#&]/) {
+        botNotice($self, $sNick, 'Syntax: !topquote [n]  (use it in a channel)');
+        return 1;
+    }
+
+    my $limit = 5;
+    if (defined $arg && $arg =~ /^(\d{1,2})$/) {
+        $limit = $1;
+        $limit = 1  if $limit < 1;
+        $limit = 10 if $limit > 10;
+    }
+
+    my $dbh = $self->{dbh};
+    unless ($dbh) { botNotice($self, $sNick, 'topquote: database unavailable.'); return 1; }
+
+    # Tolerant of a pre-migration schema: if `hits` is missing, fall back to a
+    # recent-quotes listing rather than erroring out.
+    my $rows;
+    my $ranked_by_hits = 1;
+    eval {
+        my $sth = $dbh->prepare(q{
+            SELECT q.id_quotes AS id, q.quotetext AS txt, q.hits AS hits,
+                   COALESCE(u.nickname, '?') AS author
+            FROM QUOTES q
+            JOIN CHANNEL c ON c.id_channel = q.id_channel
+            LEFT JOIN USER u ON u.id_user = q.id_user
+            WHERE c.name = ?
+            ORDER BY q.hits DESC, q.id_quotes DESC
+            LIMIT ?
+        });
+        $sth->execute($sChannel, $limit) if $sth;
+        $rows = $sth->fetchall_arrayref({}) if $sth;
+    };
+    if ($@ || !defined $rows) {
+        $ranked_by_hits = 0;
+        my $sth = $dbh->prepare(q{
+            SELECT q.id_quotes AS id, q.quotetext AS txt,
+                   COALESCE(u.nickname, '?') AS author
+            FROM QUOTES q
+            JOIN CHANNEL c ON c.id_channel = q.id_channel
+            LEFT JOIN USER u ON u.id_user = q.id_user
+            WHERE c.name = ?
+            ORDER BY q.id_quotes DESC
+            LIMIT ?
+        });
+        if ($sth && $sth->execute($sChannel, $limit)) {
+            $rows = $sth->fetchall_arrayref({});
+        }
+    }
+
+    unless ($rows && @$rows) {
+        botPrivmsg($self, $sChannel, "No quotes yet on $sChannel — add some with !q add <text>.");
+        return 1;
+    }
+
+    my $title = $ranked_by_hits
+        ? "\x02Hall of fame\x02 $sChannel — most recalled quotes:"
+        : "\x02Quotes\x02 $sChannel — latest:";
+    botPrivmsg($self, $sChannel, $title);
+
+    my $rank = 0;
+    for my $r (@$rows) {
+        $rank++;
+        my $txt = _quote_excerpt($r->{txt} // '', 200);
+        my $hits = defined $r->{hits} ? $r->{hits} : 0;
+        my $suffix = $ranked_by_hits ? sprintf(" (%d recall%s)", $hits, $hits == 1 ? '' : 's') : '';
+        botPrivmsg($self, $sChannel,
+            sprintf("  %d. [id:%d] <%s> %s%s", $rank, $r->{id}, $r->{author}, $txt, $suffix));
+    }
     return 1;
 }
 

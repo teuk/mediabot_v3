@@ -397,6 +397,7 @@ CREATE TABLE `QUOTES` (
   `id_user`    BIGINT UNSIGNED NOT NULL,
   `ts`         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `quotetext`  VARCHAR(255) NOT NULL,
+  `hits`       BIGINT UNSIGNED NOT NULL DEFAULT 0,
   PRIMARY KEY (`id_quotes`),
   KEY `idx_quotes_id_channel` (`id_channel`),
   KEY `idx_quotes_id_user`    (`id_user`)
@@ -710,7 +711,8 @@ INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES
 (17, 'ChannelReport'),
 (18, 'DidYouMean'),
 (19, 'Factoids'),
-(20, 'OnThisDay');
+(20, 'OnThisDay'),
+(21, 'OnThisDayDigest');
 
 --
 -- PUBLIC_COMMANDS_CATEGORY — default categories

@@ -610,6 +610,34 @@ $scheduler->add(
     autostart => 1,
 );
 
+# mb496: daily "on this day" digest — calendar task that fires once a day at a
+# configurable local hour (main.ONTHISDAY_DIGEST_HOUR, default 12h; set <0 to
+# disable). Posts only to channels that opted in via the OnThisDayDigest
+# chanset, and stays silent where there is no history for the day.
+{
+    my $otd_hour = int(eval { $mediabot->{conf}->get('main.ONTHISDAY_DIGEST_HOUR') } // 12);
+    if ($otd_hour >= 0 && $otd_hour <= 23) {
+        my $next_daily_at = sub {
+            my ($now) = @_;
+            my @lt = localtime($now);
+            # today at HH:00:00 local
+            my $today = $now - ($lt[2]*3600 + $lt[1]*60 + $lt[0]) + $otd_hour*3600;
+            return $today > $now ? $today : $today + 86400;   # next occurrence
+        };
+        $scheduler->add(
+            name        => 'onthisday_digest',
+            interval    => 86400,
+            next_run_cb => $next_daily_at,
+            cb          => sub { eval { $mediabot->post_onthisday_digest }; },
+            autostart   => 1,
+        );
+    }
+    else {
+        $mediabot->{logger}->log(3, "onthisday_digest disabled (ONTHISDAY_DIGEST_HOUR=$otd_hour)")
+            if $mediabot->{logger};
+    }
+}
+
 $scheduler->add(
     name      => 'claude_history_purge',
     interval  => 3600,  # N3: every hour, purge Claude history/persona for offline nicks

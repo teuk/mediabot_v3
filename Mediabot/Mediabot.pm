@@ -1881,6 +1881,8 @@ sub mbCommandPublic {
         quotegame    => sub { mbQuotegame_ctx($ctx) },
         qg           => sub { mbQuotegame_ctx($ctx) },        # alias court
         mood         => sub { mbMood_ctx($ctx) },
+        milestone    => sub { mbMilestone_ctx($ctx) },
+        milestones   => sub { mbMilestone_ctx($ctx) },
         ambiance     => sub { mbMood_ctx($ctx) },             # alias FR
 
         # mb118: leaderboard + chronos
@@ -1907,6 +1909,13 @@ sub mbCommandPublic {
         quotecount   => sub {
             my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
             mbQuoteCount_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },
+
+        topquote     => sub {
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            mbTopQuote_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },
+        halloffame   => sub {
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            mbTopQuote_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },
 
         last         => sub { mbLast_ctx($ctx) },
         poll         => sub { mbPoll_ctx($ctx) },
@@ -2417,6 +2426,8 @@ remindlist|public|List your pending reminders with remaining time and urgent fla
 
 # Quotes
 quotecount|quotecount [nick]|public|Count quotes by author on the channel.
+topquote|topquote [n]|public|Channel hall of fame: the most-recalled quotes (default 5, max 10). Alias: halloffame
+halloffame|halloffame [n]|public|Alias for topquote.
 quote|quote [nick] | quote add <text> | quote count [nick]|public|Quote alias: fetch by nick, add a quote, or count quotes.
 
 # Notes (in-memory, reset on restart)
@@ -2452,14 +2463,16 @@ caps|caps|public|Alias for features.
 observatory|observatory|public|Show a compact live channel and bot status view.
 obs|obs|public|Alias for observatory.
 recap|recap [30m\|2h] [ai]|public|Summarize what you missed on this channel (stats, or AI summary with 'ai').
-onthisday|onthisday|public|Resurface what happened on this channel on this calendar day in past years. Alias: otd
+onthisday|onthisday [MM-DD]|public|Resurface what happened on this channel on a calendar day (today, or a given MM-DD) in past years. Alias: otd
 otd|otd|public|Alias for onthisday.
 learn|learn <keyword> = <value>|public|Store a shared channel fact. Recall with whatis.
 whatis|whatis <keyword>|public|Recall a shared channel fact stored with learn. Shortcut: ?keyword
 forget|forget <keyword>|public|Delete a channel fact (author or channel op only).
 factoids|factoids [pattern\|top]|public|List channel facts (glob pattern), or 'top' for the most recalled.
 factoid|factoid <keyword>|public|Show details of a fact: author, dates, recall count.
-mood|mood|public|Read the current channel mood from recent messages.
+mood|mood|public|Read the channel mood: sentiment, energy, who's driving it, and today's peak hour.
+milestone|milestone|public|Show channel milestones: total messages, next round milestone, progress and ETA. Alias: milestones
+milestones|milestones|public|Alias for milestone.
 ambiance|ambiance|public|Alias for mood.
 
 # Games / playful commands
@@ -2738,6 +2751,8 @@ sub _mbHelpExplicitCategory {
         remind      => 'general',
         slap        => 'ai_fun',
         heatmap     => 'stats',
+        milestone   => 'stats',
+        milestones  => 'stats',
         karmadiff   => 'stats',
         karmawatch  => 'stats',
         karmgraph   => 'stats',
@@ -2834,6 +2849,8 @@ sub _mbHelpCategoryAliases {
         ai         => 'ai_fun',
         fun        => 'ai_fun',
         quotes     => 'ai_fun',
+        topquote   => 'ai_fun',
+        halloffame => 'ai_fun',
         admin      => 'admin',
         ops        => 'admin',
     );
@@ -3036,6 +3053,7 @@ sub _mbHelpSendChansetsTopic {
         "  +DidYouMean          : suggest the closest command on a typo (on by default; -DidYouMean to silence).",
         "  +Factoids            : allow shared learn/whatis channel facts (on by default; -Factoids to silence).",
         "  +OnThisDay           : allow the onthisday/otd channel history feature (on by default; -OnThisDay to silence).",
+        "  +OnThisDayDigest     : post a daily 'on this day' recap to the channel (OFF by default; +OnThisDayDigest to enable).",
         "Use: help commands settings  /  help chansets  /  help chanset",
     );
 
@@ -3449,7 +3467,58 @@ sub purge_channel_log {
 }
 
 # ---------------------------------------------------------------------------
-# purge_user_seen() — delete USER_SEEN nicks not seen for N days
+# post_onthisday_digest() — mb496
+# Daily "on this day" digest: once a day, proactively post the onthisday recap
+# to every joined channel that opted IN via the OnThisDayDigest chanset. This
+# turns the reactive !onthisday (mb489) into a channel ritual that sparks
+# conversation on its own. Shares _onthisday_lines() with the command, so the
+# two never drift. Opt-IN (default off): a spontaneous post is more intrusive
+# than a command, so channels must ask for it.
+# Read-only against CHANNEL_LOG; silent on channels with no history that day.
+# ---------------------------------------------------------------------------
+sub post_onthisday_digest {
+    my ($self) = @_;
+    my $dbh = $self->{db} ? eval { $self->{db}->ensure_connected() } : $self->{dbh};
+    $dbh ||= $self->{dbh};
+    return unless $dbh;
+
+    my $posted = 0;
+    for my $chan_obj (values %{ $self->{channels} // {} }) {
+        next unless $chan_obj;
+
+        # canonical channel name for display + chanset lookup
+        my $channel = eval { $chan_obj->get_name };
+        next unless defined $channel && $channel =~ /^[#&]/;
+
+        # opt-IN only
+        next unless eval {
+            Mediabot::Helpers::chanset_enabled($self, $channel, 'OnThisDayDigest', default => 0)
+        };
+
+        my $id_channel = eval { $chan_obj->get_id };
+        next unless defined $id_channel;
+
+        my @lines = Mediabot::UserCommands::_onthisday_lines($self, $id_channel, $channel);
+        next unless @lines;   # nothing on this calendar day: stay quiet
+
+        # Post to the channel (bounded), with a small header so it reads as a
+        # daily feature rather than an answer to someone.
+        Mediabot::Helpers::botPrivmsg($self, $channel, "\x02On this day\x02 — a look back at $channel:");
+        my $sent = 0;
+        for my $line (@lines) {
+            last if $sent >= 8;   # hard cap, _onthisday_lines already bounds itself
+            Mediabot::Helpers::botPrivmsg($self, $channel, $line);
+            $sent++;
+        }
+        $posted++;
+        $self->{logger}->log(3, "post_onthisday_digest: posted to $channel ($sent line(s))")
+            if $self->{logger};
+    }
+
+    $self->{logger}->log(3, "post_onthisday_digest: done, $posted channel(s)")
+        if $self->{logger} && $posted;
+    return $posted;
+}
 # ---------------------------------------------------------------------------
 sub purge_user_seen {
     my ($self) = @_;

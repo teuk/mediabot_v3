@@ -131,5 +131,10 @@ return sub {
         $assert->is(Mediabot::External::URL::_x_compact_count(1000), '1k', 'compact: 1000 -> 1k');
         $assert->is(Mediabot::External::URL::_x_compact_count(4_200_000), '4.2M', 'compact: 4.2M');
         $assert->is(Mediabot::External::URL::_x_compact_count(undef), '0', 'compact: undef -> 0');
+        # mb496 regression: 999999 rounded to "1000.0k" -> must promote to 1M
+        $assert->is(Mediabot::External::URL::_x_compact_count(999999), '1M', 'compact: 999999 -> 1M (pas 1000k)');
+        $assert->is(Mediabot::External::URL::_x_compact_count(999499), '999.5k', 'compact: 999499 -> 999.5k');
+        $assert->is(Mediabot::External::URL::_x_compact_count(999), '999', 'compact: 999 (sous le millier)');
+        $assert->is(Mediabot::External::URL::_x_compact_count(15_000_000), '15M', 'compact: 15M');
     }
 };

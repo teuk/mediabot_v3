@@ -1292,8 +1292,13 @@ sub _x_compact_count {
     my ($n) = @_;
     return '0' unless defined $n && $n =~ /^\d+$/;
     return "$n" if $n < 1000;
-    return sprintf('%.1fk', $n / 1000)      =~ s/\.0k$/k/r if $n < 1_000_000;
-    return sprintf('%.1fM', $n / 1_000_000) =~ s/\.0M$/M/r;
+    # mb496 fix: 999999 rounded to "1000.0k" -> promote to M at the boundary
+    if ($n < 1_000_000) {
+        my $s = sprintf('%.1f', $n / 1000);
+        return ($s =~ s/\.0$//r) . 'k' if $s ne '1000.0';
+    }
+    my $m = sprintf('%.1f', $n / 1_000_000);
+    return ($m =~ s/\.0$//r) . 'M';
 }
 
 sub _x_fallback_title_from_url {
@@ -1422,10 +1427,13 @@ sub _handle_x_twitter {
                 my $tw      = $data->{tweet};
                 my $name    = eval { $tw->{author}{name} }        // '';
                 my $screen2 = eval { $tw->{author}{screen_name} } // $screen;
+                # mb496: guard against unexpected non-scalar API shapes
+                $name    = '' if ref $name;
+                $screen2 = $screen if ref $screen2;
                 $title      = $name ne '' ? "$name (\@$screen2) on X" : "\@$screen2 on X";
-                $tweet_text = $tw->{text};
-                $fx_likes   = $tw->{likes};
-                $fx_rts     = $tw->{retweets};
+                $tweet_text = (defined $tw->{text}  && !ref $tw->{text})  ? $tw->{text}  : undef;
+                $fx_likes   = (defined $tw->{likes} && !ref $tw->{likes}) ? $tw->{likes} : undef;
+                $fx_rts     = (defined $tw->{retweets} && !ref $tw->{retweets}) ? $tw->{retweets} : undef;
                 $self->{logger}->log(4, "_handle_x_twitter() fxtwitter hit in ${dt}s for $x_url");
             }
             else {

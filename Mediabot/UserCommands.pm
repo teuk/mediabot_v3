@@ -106,6 +106,7 @@ our @EXPORT = qw(
     mbQuotegame_ctx
     checkQuotegameAnswer
     mbMood_ctx
+    mbMilestone_ctx
     mbLeaderboard_ctx
     mbChronos_ctx
     mbFeatures_ctx
@@ -1597,6 +1598,21 @@ sub mbSeen_ctx {
         my ($h) = @_; $h //= ''; $h =~ s/^.*!//; return $h;
     };
 
+    # mb497: sanitize a stored last_msg for display — strip IRC formatting
+    # codes and control chars, collapse whitespace, bound length so a single
+    # seen line stays readable on IRC.
+    my $fmt_last = sub {
+        my ($txt) = @_;
+        return '' unless defined $txt && $txt ne '';
+        $txt =~ s/[\x02\x0f\x16\x1d\x1f]//g;         # bold/reset/reverse/italic/underline
+        $txt =~ s/\x03\d{0,2}(?:,\d{1,2})?//g;       # mIRC colour codes
+        $txt =~ s/[\x00-\x08\x0a-\x1f]/ /g;          # remaining control chars -> space
+        $txt =~ s/\s{2,}/ /g;
+        $txt =~ s/^\s+|\s+$//g;
+        $txt = Mediabot::Helpers::truncate_utf8($txt, 200, '...') if length($txt) > 200;
+        return $txt;
+    };
+
     my $fmt_ago = sub {
         my ($uts) = @_;
         my $secs = time() - ($uts // 0);
@@ -1719,20 +1735,20 @@ sub mbSeen_ctx {
         my $chan  = $seen_row->{channel} // '';
 
         if ($ev eq 'message') {
-            my $last = $seen_row->{last_msg} // '';
+            my $last = $fmt_last->($seen_row->{last_msg});
             $msg = "$targetNick ($host) was last seen $ago"
                  . ($chan ? " on $chan" : '')
-                 . ($last ? " saying: $last" : '');
+                 . ($last ne '' ? " saying: $last" : '');
         } elsif ($ev eq 'join') {
             $msg = "$targetNick ($host) was last seen joining $chan $ago";
         } elsif ($ev eq 'part') {
-            my $last = $seen_row->{last_msg} // '';
+            my $last = $fmt_last->($seen_row->{last_msg});
             $msg = "$targetNick ($host) was last seen parting $chan $ago"
-                 . ($last ? " ($last)" : '');
+                 . ($last ne '' ? " ($last)" : '');
         } elsif ($ev eq 'quit') {
-            my $last = $seen_row->{last_msg} // '';
+            my $last = $fmt_last->($seen_row->{last_msg});
             $msg = "$targetNick ($host) was last seen quitting $ago"
-                 . ($last ? " ($last)" : '');
+                 . ($last ne '' ? " ($last)" : '');
         } elsif ($ev eq 'nick') {
             my $nn = $seen_row->{new_nick} // '?';
             $msg = "$targetNick ($host) was last seen $ago changing nick to $nn";
@@ -1780,6 +1796,35 @@ sub mbSeen_ctx {
         }
     } else {
         $msg = "I don't remember seeing nick $targetNick.";
+    }
+
+    # mb497: activity hint — append how many messages this nick posted in the
+    # last 24h on the relevant channel, so "seen 3h ago" also tells you whether
+    # they are an active regular or a ghost. Best-effort, never blocks the
+    # answer; only when we can resolve a channel and the nick was actually seen.
+    if ($msg !~ /^I don't remember/) {
+        my $act_chan = $chan_for_part
+            || ($seen_row ? $seen_row->{channel} : undef);
+        if (defined $act_chan && $act_chan =~ /^[#&]/) {
+            my $chan_obj = $self->{channels}{lc $act_chan};
+            my $id_channel = $chan_obj ? eval { $chan_obj->get_id } : undef;
+            if (defined $id_channel) {
+                my $sth_act = $self->{dbh}->prepare(q{
+                    SELECT COUNT(*) AS c
+                    FROM CHANNEL_LOG
+                    WHERE id_channel = ?
+                      AND nick = ?
+                      AND event_type IN ('public','action')
+                      AND ts >= NOW() - INTERVAL 24 HOUR
+                });
+                if ($sth_act && eval { $sth_act->execute($id_channel, $targetNick) }) {
+                    my $row = $sth_act->fetchrow_hashref;
+                    $sth_act->finish;
+                    my $c = $row ? ($row->{c} // 0) : 0;
+                    $msg .= " [$c msg in last 24h]" if $c > 0;
+                }
+            }
+        }
     }
 
     if ($is_private) {
@@ -10200,7 +10245,31 @@ sub mbMood_ctx {
         botNotice($self, $nick, 'Syntax: !mood  (must be in a channel)'); return;
     }
 
+    # mb500: light per-nick cooldown — !mood now runs three CHANNEL_LOG scans
+    # (sentiment + top talkers + peak hour), so guard against spam/DB load the
+    # same way onthisday does.
+    {
+        my $cooldown_s = 15;
+        my $now = time();
+        $self->{_mood_cooldown} ||= {};
+        my $lc_nick = lc($nick);
+        my $last = $self->{_mood_cooldown}{$lc_nick};
+        if (defined $last && ($now - $last) < $cooldown_s) {
+            my $wait = $cooldown_s - ($now - $last);
+            botNotice($self, $nick, "mood: please wait ${wait}s before asking again.");
+            return;
+        }
+        $self->{_mood_cooldown}{$lc_nick} = $now;
+        if (scalar(keys %{ $self->{_mood_cooldown} }) > 512) {
+            for my $k (keys %{ $self->{_mood_cooldown} }) {
+                delete $self->{_mood_cooldown}{$k}
+                    if ($now - $self->{_mood_cooldown}{$k}) > 3600;
+            }
+        }
+    }
+
     my $dbh = $self->{dbh};
+    unless ($dbh) { botNotice($self, $nick, 'mood: database unavailable.'); return; }
     my $sth = $dbh->prepare(q{
         SELECT cl.publictext
         FROM CHANNEL_LOG cl
@@ -10315,6 +10384,56 @@ sub mbMood_ctx {
     push @details, "$exclam !"        if $exclam > 0;
     push @details, $top_emoji         if $top_emoji;
     botPrivmsg($self, $channel, "  " . join(' | ', @details)) if @details;
+
+    # mb498: "pulse" line — WHO is driving the last 60 min and WHEN the channel
+    # peaked today. Turns mood (sentiment) into a fuller read of the room.
+    # Best-effort: never blocks the mood answer.
+    {
+        my @pulse;
+
+        # top talkers over the same 60-minute window as the mood scan
+        my $sth_tt = $dbh->prepare(q{
+            SELECT cl.nick AS nick, COUNT(*) AS c
+            FROM CHANNEL_LOG cl
+            JOIN CHANNEL c ON c.id_channel = cl.id_channel
+            WHERE c.name = ?
+              AND cl.event_type IN ('public','action')
+              AND cl.ts >= NOW() - INTERVAL 60 MINUTE
+            GROUP BY cl.nick
+            ORDER BY c DESC
+            LIMIT 3
+        });
+        if ($sth_tt && eval { $sth_tt->execute($channel) }) {
+            my @tt;
+            while (my $r = $sth_tt->fetchrow_hashref) {
+                push @tt, "$r->{nick} ($r->{c})";
+            }
+            $sth_tt->finish;
+            push @pulse, "driven by: " . join(', ', @tt) if @tt;
+        }
+
+        # busiest hour of the current local day
+        my $sth_pk = $dbh->prepare(q{
+            SELECT HOUR(cl.ts) AS h, COUNT(*) AS c
+            FROM CHANNEL_LOG cl
+            JOIN CHANNEL c ON c.id_channel = cl.id_channel
+            WHERE c.name = ?
+              AND cl.event_type IN ('public','action')
+              AND cl.ts >= CURDATE()
+            GROUP BY HOUR(cl.ts)
+            ORDER BY c DESC
+            LIMIT 1
+        });
+        if ($sth_pk && eval { $sth_pk->execute($channel) }) {
+            if (my $r = $sth_pk->fetchrow_hashref) {
+                push @pulse, sprintf("peak today: %02dh-%02dh (%d msgs)",
+                    $r->{h}, ($r->{h} + 1) % 24, $r->{c}) if defined $r->{h};
+            }
+            $sth_pk->finish;
+        }
+
+        botPrivmsg($self, $channel, "  " . join("  \x{B7}  ", @pulse)) if @pulse;
+    }
 
     # Hook achievement
     $self->{_mood_count}{$nick}++;
@@ -11659,56 +11778,123 @@ sub mbOnThisDay_ctx {
         return;
     }
 
-    # Per-year stats for the same month+day, strictly before today's date.
-    # Excludes the current day so "on this day" is genuinely historical.
-    my $sth = $dbh->prepare(q{
+    # mb499: optional explicit date argument. Accept MM-DD or MM/DD (also a
+    # lone D/DD is not accepted — need both fields). Defaults to today.
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my %date_opts;
+    if (@args && defined $args[0] && $args[0] ne '') {
+        my $arg = $args[0];
+        if ($arg =~ m{^\s*(\d{1,2})[-/.](\d{1,2})\s*$}) {
+            my ($mm, $dd) = ($1 + 0, $2 + 0);
+            # basic per-month day validation (29 Feb allowed: some year had it)
+            my @maxd = (31,29,31,30,31,30,31,31,30,31,30,31);
+            unless ($mm >= 1 && $mm <= 12 && $dd >= 1 && $dd <= $maxd[$mm - 1]) {
+                botNotice($self, $nick, "onthisday: invalid date '$arg' (use MM-DD, e.g. 12-25).");
+                return;
+            }
+            %date_opts = (month => $mm, day => $dd);
+        }
+        else {
+            botNotice($self, $nick, "onthisday: unrecognized date '$arg' (use MM-DD, e.g. 01-01).");
+            return;
+        }
+    }
+
+    my @lines = Mediabot::UserCommands::_onthisday_lines($self, $id_channel, $channel, %date_opts);
+    unless (@lines) {
+        my $when = %date_opts ? "on that date" : "on this day";
+        botNotice($self, $nick, "Nothing recorded on this channel $when in earlier years — yet.");
+        return;
+    }
+
+    return queueBotNotices($self, $nick, @lines);
+}
+
+# ---------------------------------------------------------------------------
+# _onthisday_lines($id_channel, $channel_label) -> @lines
+# mb496: the pure computation behind !onthisday, factored out so both the
+# command and the daily digest tick share ONE implementation. Read-only.
+# Returns an empty list when there is no past activity on this calendar day.
+# ---------------------------------------------------------------------------
+sub _onthisday_lines {
+    my ($self, $id_channel, $channel_label, %opts) = @_;
+    my $dbh = $self->{dbh};
+    return () unless $dbh && defined $id_channel;
+
+    # mb499: optional explicit calendar date (month/day). When omitted, use
+    # today (CURDATE) exactly as before — the daily digest relies on this.
+    my $has_date = defined $opts{month} && defined $opts{day};
+    my ($month, $day) = $has_date ? ($opts{month}, $opts{day}) : ();
+
+    # Month/day SQL expression + bind values, shared by all three queries.
+    my ($md_expr, @md_bind);
+    if ($has_date) {
+        $md_expr = 'MONTH(ts) = ? AND DAY(ts) = ?';
+        @md_bind = ($month, $day);
+    }
+    else {
+        $md_expr = 'MONTH(ts) = MONTH(CURDATE()) AND DAY(ts) = DAY(CURDATE())';
+        @md_bind = ();
+    }
+
+    # "Historical only" bound. For today, exclude the current day. For an
+    # explicit date, exclude the current year only when that date hasn't
+    # occurred yet this year (a future MM-DD), so a past date this year counts.
+    my $year_bound = '';
+    if (!$has_date) {
+        $year_bound = ' AND ts < CURDATE()';
+    }
+    else {
+        # exclude current year if (month,day) is today or still ahead this year
+        $year_bound = ' AND (YEAR(ts) < YEAR(CURDATE()) '
+                    . 'OR (? < MONTH(CURDATE()) OR (? = MONTH(CURDATE()) AND ? < DAY(CURDATE()))))';
+    }
+    my @year_bound_bind = $has_date ? ($month, $month, $day) : ();
+
+    my $sth = $dbh->prepare(qq{
         SELECT YEAR(ts)               AS y,
                COUNT(*)               AS msgs,
                COUNT(DISTINCT nick)   AS people
         FROM CHANNEL_LOG
         WHERE id_channel = ?
           AND event_type IN ('public','action')
-          AND MONTH(ts) = MONTH(CURDATE())
-          AND DAY(ts)   = DAY(CURDATE())
-          AND ts < CURDATE()
+          AND $md_expr$year_bound
         GROUP BY YEAR(ts)
         ORDER BY y DESC
     });
-    unless ($sth && $sth->execute($id_channel)) {
-        botNotice($self, $nick, "onthisday: lookup failed.");
-        return;
-    }
+    return () unless $sth && $sth->execute($id_channel, @md_bind, @year_bound_bind);
     my @years;
     while (my $r = $sth->fetchrow_hashref) { push @years, $r; }
     $sth->finish;
+    return () unless @years;
 
-    unless (@years) {
-        botNotice($self, $nick, "Nothing recorded on this channel on this day in earlier years — yet.");
-        return;
+    # human label for the date being shown
+    my $date_label = '';
+    if ($has_date) {
+        my @mon = qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec);
+        my $mname = ($month >= 1 && $month <= 12) ? $mon[$month - 1] : sprintf('%02d', $month);
+        $date_label = sprintf(' (%s %d)', $mname, $day);
     }
 
     my @lines;
     my $total = 0; $total += $_->{msgs} for @years;
     my $span  = @years == 1 ? "$years[0]{y}" : "$years[-1]{y}-$years[0]{y}";
-    push @lines, "On this day on $channel ($span): $total message(s) across " . scalar(@years) . " year(s).";
+    push @lines, "On this day on $channel_label$date_label ($span): $total message(s) across " . scalar(@years) . " year(s).";
 
-    # Per-year one-liners (most recent first), capped to avoid flood.
     my $shown = 0;
     for my $r (@years) {
         last if $shown >= 5;
-        # top talker of that specific day+year
-        my $tt = $dbh->prepare(q{
+        my $tt = $dbh->prepare(qq{
             SELECT nick, COUNT(*) AS c
             FROM CHANNEL_LOG
             WHERE id_channel = ?
               AND event_type IN ('public','action')
               AND YEAR(ts)  = ?
-              AND MONTH(ts) = MONTH(CURDATE())
-              AND DAY(ts)   = DAY(CURDATE())
+              AND $md_expr
             GROUP BY nick ORDER BY c DESC LIMIT 1
         });
         my $topnick = '?';
-        if ($tt && $tt->execute($id_channel, $r->{y})) {
+        if ($tt && $tt->execute($id_channel, $r->{y}, @md_bind)) {
             if (my $tr = $tt->fetchrow_hashref) { $topnick = $tr->{nick}; }
             $tt->finish;
         }
@@ -11717,22 +11903,19 @@ sub mbOnThisDay_ctx {
         $shown++;
     }
 
-    # One representative message: a longer line from the most recent past year,
-    # picked deterministically-ish (longest few, then one at random).
     my $ry = $years[0]{y};
-    my $rm = $dbh->prepare(q{
+    my $rm = $dbh->prepare(qq{
         SELECT nick, publictext
         FROM CHANNEL_LOG
         WHERE id_channel = ?
           AND event_type IN ('public','action')
           AND YEAR(ts)  = ?
-          AND MONTH(ts) = MONTH(CURDATE())
-          AND DAY(ts)   = DAY(CURDATE())
+          AND $md_expr
           AND CHAR_LENGTH(publictext) BETWEEN 25 AND 300
         ORDER BY CHAR_LENGTH(publictext) DESC
         LIMIT 8
     });
-    if ($rm && $rm->execute($id_channel, $ry)) {
+    if ($rm && $rm->execute($id_channel, $ry, @md_bind)) {
         my @cand;
         while (my $mr = $rm->fetchrow_hashref) { push @cand, $mr; }
         $rm->finish;
@@ -11745,7 +11928,137 @@ sub mbOnThisDay_ctx {
         }
     }
 
-    return queueBotNotices($self, $nick, @lines);
+    return @lines;
+}
+
+# ===========================================================================
+# mbMilestone_ctx --- !milestone
+# mb502: channel milestones — total public messages logged, the next round
+# milestone, progress toward it, and an ETA based on the recent daily rate.
+# A celebratory, engagement-oriented read of how far the channel has come.
+# Read-only against CHANNEL_LOG (uses the composite (id_channel, ts) index).
+# ===========================================================================
+sub mbMilestone_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    unless (isIrcChannelTarget($channel)) {
+        botNotice($self, $nick, "Syntax: milestone  (use it in a channel)");
+        return;
+    }
+
+    my $dbh = $self->{dbh};
+    unless ($dbh) { botNotice($self, $nick, "milestone: database unavailable."); return; }
+
+    my $channel_obj = $self->{channels}{lc $channel};
+    my $id_channel  = $channel_obj ? eval { $channel_obj->get_id } : undef;
+    unless (defined $id_channel) {
+        botNotice($self, $nick, "milestone: channel not known to the bot.");
+        return;
+    }
+
+    # total public messages + how long the channel has been logging
+    my $sth = $dbh->prepare(q{
+        SELECT COUNT(*) AS total,
+               MIN(ts)  AS first_ts,
+               UNIX_TIMESTAMP(MIN(ts)) AS first_uts
+        FROM CHANNEL_LOG
+        WHERE id_channel = ?
+          AND event_type IN ('public','action')
+    });
+    unless ($sth && $sth->execute($id_channel)) {
+        botNotice($self, $nick, "milestone: lookup failed.");
+        return;
+    }
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+
+    my $total = $row ? ($row->{total} // 0) : 0;
+    if ($total <= 0) {
+        botPrivmsg($self, $channel, "No messages logged yet on $channel — the journey starts now!");
+        return 1;
+    }
+
+    # next round milestone: 1k steps below 100k, 100k steps at/above 1M-ish.
+    my $next = _milestone_next($total);
+    my $remaining = $next - $total;
+
+    # recent daily rate over the last 30 days -> ETA
+    my $rate_sth = $dbh->prepare(q{
+        SELECT COUNT(*) AS c
+        FROM CHANNEL_LOG
+        WHERE id_channel = ?
+          AND event_type IN ('public','action')
+          AND ts >= NOW() - INTERVAL 30 DAY
+    });
+    my $per_day = 0;
+    if ($rate_sth && $rate_sth->execute($id_channel)) {
+        my $rr = $rate_sth->fetchrow_hashref;
+        $rate_sth->finish;
+        my $last30 = $rr ? ($rr->{c} // 0) : 0;
+        $per_day = $last30 / 30 if $last30 > 0;
+    }
+
+    my $pct = $next > 0 ? int(($total / $next) * 100) : 0;
+
+    my @bits;
+    push @bits, sprintf("\x02%s\x02: %s public messages logged", $channel, _group_int($total));
+    botPrivmsg($self, $channel, join('', @bits));
+
+    my $line2 = sprintf("  next milestone: %s (%s to go, %d%%)",
+        _group_int($next), _group_int($remaining), $pct);
+    if ($per_day >= 0.5) {
+        my $days = $remaining / $per_day;
+        $line2 .= sprintf(" \x{B7} ~%s at %s msg/day",
+            _humanize_days($days), _group_int(int($per_day + 0.5)));
+    }
+    botPrivmsg($self, $channel, $line2);
+
+    # a touch of history: when did it all start
+    if (defined $row->{first_uts}) {
+        my $age_days = int((time() - $row->{first_uts}) / 86400);
+        my $since = $row->{first_ts} // '';
+        $since =~ s/ .*$//;   # keep the date part
+        botPrivmsg($self, $channel,
+            sprintf("  logging since %s (%s) \x{B7} lifetime average %s msg/day",
+                $since, _humanize_days($age_days),
+                _group_int($age_days > 0 ? int($total / $age_days + 0.5) : $total)));
+    }
+    return 1;
+}
+
+# next round milestone above $n (adaptive step)
+sub _milestone_next {
+    my ($n) = @_;
+    my $step = $n < 10_000    ? 1_000
+             : $n < 100_000   ? 5_000
+             : $n < 1_000_000 ? 50_000
+             :                  100_000;
+    my $next = (int($n / $step) + 1) * $step;
+    return $next;
+}
+
+# 1234567 -> "1,234,567"
+sub _group_int {
+    my ($n) = @_;
+    $n = int($n // 0);
+    1 while $n =~ s/^(-?\d+)(\d{3})/$1,$2/;
+    return $n;
+}
+
+# a day count -> friendly "3 years", "5 months", "12 days"
+sub _humanize_days {
+    my ($d) = @_;
+    $d = 0 if !defined $d || $d < 0;
+    return sprintf("%d day%s", $d, $d == 1 ? '' : 's') if $d < 45;
+    if ($d < 365) {
+        my $m = int($d / 30 + 0.5);
+        return sprintf("%d month%s", $m, $m == 1 ? '' : 's');
+    }
+    my $y = $d / 365;
+    return sprintf("%.1f years", $y);
 }
 
 1;

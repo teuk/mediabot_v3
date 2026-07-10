@@ -131,7 +131,8 @@ return sub {
         my $uc = _slurp_700(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
         $assert->like($uc, qr/^\s*mbOnThisDay_ctx\s*$/m, 'mbOnThisDay_ctx exporté');
         # garde projet : pas de "publictext IS NOT NULL"
-        my ($otd) = $uc =~ /(sub mbOnThisDay_ctx \{.*?\n\})/s;
+        # mb496: le SQL vit désormais dans _onthisday_lines (partagé commande+digest)
+        my ($otd) = $uc =~ /(sub _onthisday_lines \{.*?\n\})/s;
         $otd //= '';
         $assert->unlike($otd, qr/publictext\s+IS\s+NOT\s+NULL/i,
             'pas de publictext IS NOT NULL (garde projet)');
@@ -141,7 +142,7 @@ return sub {
         my $med = _slurp_700(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
         $assert->like($med, qr/onthisday\s*=>\s*sub\s*\{\s*mbOnThisDay_ctx/, 'onthisday dans le dispatch');
         $assert->like($med, qr/otd\s*=>\s*sub\s*\{\s*mbOnThisDay_ctx/, 'alias otd dans le dispatch');
-        $assert->like($med, qr/^onthisday\|onthisday\|public/m, 'onthisday documenté');
+        $assert->like($med, qr/^onthisday\|onthisday \[MM-DD\]\|public/m, 'onthisday documenté');
         $assert->like($med, qr/\+OnThisDay\b/, 'chanset OnThisDay documenté');
 
         my $sql = _slurp_700(File::Spec->catfile('.', 'install', 'mediabot.sql'));
