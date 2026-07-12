@@ -51,6 +51,12 @@ return sub {
         'builder rejects a ref whose VERSION is not the stable version');
     $assert->like($script, qr/does not point at HEAD/,
         'builder requires the release ref to point at HEAD');
+    $assert->like($script, qr/BASE="mediabot_v3-\$\{VERSION\}"/,
+        'builder preserves the historical mediabot_v3-X.Y artifact name');
+    $assert->like($script, qr/SHA256="\$WORK\/\$\{BASE\}-SHA256SUMS"/,
+        'builder uses a versioned SHA-256 manifest');
+    $assert->like($script, qr/SHA512="\$WORK\/\$\{BASE\}-SHA512SUMS"/,
+        'builder uses a versioned SHA-512 manifest');
 
     $assert->like($gitattributes, qr/^node_modules export-ignore$/m,
         'root node_modules is export-ignored');
@@ -61,16 +67,16 @@ return sub {
     $assert->like($gitattributes, qr/^mp3 export-ignore$/m,
         'runtime MP3 directory is export-ignored');
 
-    $assert->like($doc, qr/--dest \/home\/wws\/downlaods\/mediabot/,
+    $assert->like($doc, qr/--dest \/home\/wws\/downloads\/mediabot/,
         'release documentation records the requested server destination');
-    $assert->like($doc, qr/mediabot-3\.3\.tar\.gz/,
+    $assert->like($doc, qr/mediabot_v3-3\.3\.tar\.gz/,
         'release documentation names the gzip artifact');
-    $assert->like($doc, qr/mediabot-3\.3\.tar\.xz/,
+    $assert->like($doc, qr/mediabot_v3-3\.3\.tar\.xz/,
         'release documentation names the xz artifact');
-    $assert->like($doc, qr/SHA256SUMS/,
-        'release documentation includes SHA256SUMS');
-    $assert->like($doc, qr/SHA512SUMS/,
-        'release documentation includes SHA512SUMS');
+    $assert->like($doc, qr/mediabot_v3-3\.3-SHA256SUMS/,
+        'release documentation names the versioned SHA-256 manifest');
+    $assert->like($doc, qr/mediabot_v3-3\.3-SHA512SUMS/,
+        'release documentation names the versioned SHA-512 manifest');
 
     $assert->like($readme, qr/3\.3\s+current stable release/i,
         'README marks 3.3 as current stable');

@@ -13,7 +13,7 @@ For this release:
 ```text
 stable version: 3.3
 Git tag:        3.3
-archive root:   mediabot-3.3/
+archive root:   mediabot_v3-3.3/
 ```
 
 The private `snap_mediabot` ZIP may contain local collaboration tools. Public
@@ -62,7 +62,7 @@ cd /home/mediabot/mediabot_v3 || exit 1
 tools/build_release_artifacts.sh \
   --version 3.3 \
   --ref 3.3 \
-  --dest /home/wws/downlaods/mediabot
+  --dest /home/wws/downloads/mediabot
 ```
 
 The exact directory spelling above is intentional and follows the current
@@ -71,30 +71,30 @@ server path. Change `--dest` only if the web root uses a different path.
 Generated files:
 
 ```text
-mediabot-3.3.tar.gz
-mediabot-3.3.tar.xz
-mediabot-3.3-FILES.txt
-mediabot-3.3-RELEASE.txt
-SHA256SUMS
-SHA512SUMS
+mediabot_v3-3.3.tar.gz
+mediabot_v3-3.3.tar.xz
+mediabot_v3-3.3-FILES.txt
+mediabot_v3-3.3-RELEASE.txt
+mediabot_v3-3.3-SHA256SUMS
+mediabot_v3-3.3-SHA512SUMS
 ```
 
-Both archives contain the same `mediabot-3.3/` tree. The release includes the
+Both archives contain the same `mediabot_v3-3.3/` tree. The release includes the
 tracked `contrib/` and `plugins/` directories. It excludes local/runtime-only
 material such as `commit.sh`, `mediabot.conf`, `mp3/` and `node_modules/`.
 
 ## 5. Verify the published directory
 
 ```bash
-cd /home/wws/downlaods/mediabot || exit 1
+cd /home/wws/downloads/mediabot || exit 1
 
-sha256sum -c SHA256SUMS
-sha512sum -c SHA512SUMS
-gzip -t mediabot-3.3.tar.gz
-xz -t mediabot-3.3.tar.xz
+sha256sum -c mediabot_v3-3.3-SHA256SUMS
+sha512sum -c mediabot_v3-3.3-SHA512SUMS
+gzip -t mediabot_v3-3.3.tar.gz
+xz -t mediabot_v3-3.3.tar.xz
 
-tar -tzf mediabot-3.3.tar.gz | grep '^mediabot-3.3/contrib/' | head
-tar -tJf mediabot-3.3.tar.xz | grep '^mediabot-3.3/plugins/' | head
+tar -tzf mediabot_v3-3.3.tar.gz | grep '^mediabot_v3-3.3/contrib/' | head
+tar -tJf mediabot_v3-3.3.tar.xz | grep '^mediabot_v3-3.3/plugins/' | head
 ```
 
 ## 6. GitHub release and homepage

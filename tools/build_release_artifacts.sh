@@ -126,7 +126,7 @@ for required in CHANGELOG.md LICENSE.md README.md VERSION configure mediabot.pl 
   }
 done
 
-BASE="mediabot-${VERSION}"
+BASE="mediabot_v3-${VERSION}"
 PREFIX="${BASE}/"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/mediabot-release-${VERSION}.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -136,8 +136,8 @@ GZ="$WORK/${BASE}.tar.gz"
 XZ="$WORK/${BASE}.tar.xz"
 FILES="$WORK/${BASE}-FILES.txt"
 INFO="$WORK/${BASE}-RELEASE.txt"
-SHA256="$WORK/SHA256SUMS"
-SHA512="$WORK/SHA512SUMS"
+SHA256="$WORK/${BASE}-SHA256SUMS"
+SHA512="$WORK/${BASE}-SHA512SUMS"
 EXTRACT="$WORK/extract"
 mkdir -p "$EXTRACT"
 
@@ -217,8 +217,8 @@ Artifacts:
   ${BASE}.tar.xz
   ${BASE}-FILES.txt
   ${BASE}-RELEASE.txt
-  SHA256SUMS
-  SHA512SUMS
+  ${BASE}-SHA256SUMS
+  ${BASE}-SHA512SUMS
 
 Compression is deterministic for a fixed release commit:
   gzip: -n -9
@@ -240,8 +240,8 @@ ARTIFACTS=(
   "${BASE}.tar.xz"
   "${BASE}-FILES.txt"
   "${BASE}-RELEASE.txt"
-  "SHA256SUMS"
-  "SHA512SUMS"
+  "${BASE}-SHA256SUMS"
+  "${BASE}-SHA512SUMS"
 )
 
 if [ "$FORCE" -ne 1 ]; then
@@ -262,8 +262,8 @@ done
 
 (
   cd "$DEST_DIR"
-  sha256sum -c SHA256SUMS
-  sha512sum -c SHA512SUMS
+  sha256sum -c "${BASE}-SHA256SUMS"
+  sha512sum -c "${BASE}-SHA512SUMS"
   gzip -t "${BASE}.tar.gz"
   xz -t "${BASE}.tar.xz"
 )
@@ -271,8 +271,8 @@ done
 printf '\nRelease artifacts created from %s (%s):\n' "$REF" "$REF_COMMIT"
 ls -lh "$DEST_DIR/${BASE}.tar.gz" "$DEST_DIR/${BASE}.tar.xz" \
   "$DEST_DIR/${BASE}-FILES.txt" "$DEST_DIR/${BASE}-RELEASE.txt" \
-  "$DEST_DIR/SHA256SUMS" "$DEST_DIR/SHA512SUMS"
+  "$DEST_DIR/${BASE}-SHA256SUMS" "$DEST_DIR/${BASE}-SHA512SUMS"
 printf '\nSHA-256:\n'
-cat "$DEST_DIR/SHA256SUMS"
+cat "$DEST_DIR/${BASE}-SHA256SUMS"
 printf '\nSHA-512:\n'
-cat "$DEST_DIR/SHA512SUMS"
+cat "$DEST_DIR/${BASE}-SHA512SUMS"

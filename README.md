@@ -182,11 +182,11 @@ cd /home/mediabot/mediabot_v3 || exit 1
 For the stable 3.3 release, use one of the published source archives:
 
 ```text
-mediabot-3.3.tar.gz
-mediabot-3.3.tar.xz
+mediabot_v3-3.3.tar.gz
+mediabot_v3-3.3.tar.xz
 ```
 
-Verify the download against `SHA256SUMS` or `SHA512SUMS` before extracting it.
+Verify the download against `mediabot_v3-3.3-SHA256SUMS` or `mediabot_v3-3.3-SHA512SUMS` before extracting it.
 The GitHub release uses the plain `3.3` tag, matching the established project
 tag convention. See [`docs/RELEASING.md`](docs/RELEASING.md) for the complete
 artifact and verification workflow.

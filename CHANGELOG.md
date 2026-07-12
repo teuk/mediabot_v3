@@ -62,6 +62,7 @@ release. Development after this release continues on the `3.4dev` line.
   to prevent flooding, with a truncation notice beyond the cap.
 
 ### Fixed
+- Release packaging preserves the historical `mediabot_v3-X.Y` archive naming and the canonical `/home/wws/downloads/mediabot` publication path.
 
 - URL compact counter rendered `1000k` instead of `1M` at the 999,999 boundary.
 - Facebook/URL previews: hex HTML entities (`&#x…;`) were not decoded, leaking
