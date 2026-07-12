@@ -2747,6 +2747,9 @@ sub _mbHelpExplicitCategory {
         tell     => 'general',
         # tools
         convert  => 'stats',
+        # quotes hall of fame (mb503: were mistakenly in category-aliases map)
+        topquote    => 'ai_fun',
+        halloffame  => 'ai_fun',
         # public commands the heuristic wrongly put in 'admin'
         remind      => 'general',
         slap        => 'ai_fun',
@@ -2849,8 +2852,6 @@ sub _mbHelpCategoryAliases {
         ai         => 'ai_fun',
         fun        => 'ai_fun',
         quotes     => 'ai_fun',
-        topquote   => 'ai_fun',
-        halloffame => 'ai_fun',
         admin      => 'admin',
         ops        => 'admin',
     );

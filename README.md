@@ -51,6 +51,7 @@ The full documentation lives in the GitHub wiki:
 * [Troubleshooting](https://github.com/teuk/mediabot_v3/wiki/Troubleshooting)
 * [Local configure wizard reference](docs/CONFIGURE.md)
 * [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes)
+* [Changelog and 3.3 release notes](CHANGELOG.md)
 
 If something in this README is not enough, go to the wiki. The wiki is the operational reference.
 
@@ -88,6 +89,9 @@ Depending on configuration and enabled integrations, Mediabot can provide:
 * URL title handling;
 * YouTube, TMDB, media, and radio helpers;
 * reminders, notes, polls, karma, trivia, quotes, and other IRC tools;
+* channel engagement: `onthisday` history recall (with optional daily digest),
+  enriched `seen` and `mood`, a `topquote` hall of fame, and channel `milestone`
+  tracking;
 * antiflood guards for busy channels;
 * netsplit/reconnect hardening;
 * Partyline TCP/DCC admin interface;
@@ -241,17 +245,42 @@ Never commit the real `mediabot.conf`.
 
 ## Database validation
 
-After configure, validate the schema:
+Fresh installs use the current reference schema through the installer. Validate
+the newly created database with strict type checking:
 
 ```bash
 cd /home/mediabot/mediabot_v3 || exit 1
 
-perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
+perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes
 ```
 
-Fresh installs should use the current reference schema through the installer.
+For an existing instance, first generate a reviewable migration plan against
+the configuration that actually points to the target database:
 
-Existing production databases may need migrations. Do not blindly apply every migration to a fresh install.
+```bash
+perl tools/check_schema_drift.pl --conf=mediabot.conf --generate-migration --types --indexes
+```
+
+For example, on the Undernet instance:
+
+```bash
+perl tools/check_schema_drift.pl --conf=mbundernet.conf --generate-migration --types --indexes
+```
+
+Review the output, back up the database, and apply only the required ordered
+migrations from `install/migrations/README.md`. With `--indexes`, the drift
+checker also compares every index required by `install/mediabot.sql` and can
+generate non-destructive `ADD INDEX` statements for missing non-primary
+indexes. Extra live-only indexes are intentionally ignored. Keep the explicit
+index checks in the release checklist as an independent verification step.
+
+After the migration work, run:
+
+```bash
+perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes
+```
+
+Do not blindly apply historical migrations to a fresh install.
 
 See:
 

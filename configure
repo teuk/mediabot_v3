@@ -148,7 +148,7 @@ run_drift_workflow() {
 
     log "Running database schema/reference-data drift check"
     set +e
-    perl "$DRIFT_TOOL" --conf "$CONFIG_FILE"
+    perl "$DRIFT_TOOL" --conf "$CONFIG_FILE" --strict --types --indexes
     local rc=$?
     set -e
 
@@ -167,11 +167,23 @@ run_drift_workflow() {
     preview="$RUN_DIR/schema_drift_${stamp}.txt"
     log "Drift detected. Writing a review-only report to $preview"
     set +e
-    perl "$DRIFT_TOOL" --conf "$CONFIG_FILE" --generate-migration >"$preview" 2>&1
+    perl "$DRIFT_TOOL" --conf "$CONFIG_FILE" --generate-migration --types --indexes >"$preview" 2>&1
     set -e
 
     printf '\nOfficial migration files (oldest first):\n'
-    mapfile -t migrations < <(find "$INSTALL_DIR/migrations" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)
+    mapfile -t migrations < <(
+        {
+            while IFS= read -r migration_file; do
+                if [[ "$migration_file" =~ ([0-9]{8}) ]]; then
+                    printf '%s\t%s\n' "${BASH_REMATCH[1]}" "$migration_file"
+                else
+                    printf '99999999\t%s\n' "$migration_file"
+                fi
+            done < <(
+                find "$INSTALL_DIR/migrations" -maxdepth 1 -type f -name '*.sql' -printf '%f\n'
+            )
+        } | LC_ALL=C sort -k1,1 -k2,2 | cut -f2-
+    )
     local i
     for i in "${!migrations[@]}"; do
         printf '  %2d) %s\n' "$((i + 1))" "${migrations[$i]}"
@@ -193,9 +205,10 @@ run_drift_workflow() {
             fi
         done
         log "Re-running drift check after guided migration step"
-        perl "$DRIFT_TOOL" --conf "$CONFIG_FILE" --strict
+        perl "$DRIFT_TOOL" --conf "$CONFIG_FILE" --strict --types --indexes
     else
-        log "No migration applied. Review $preview and install/migrations/ before starting an upgraded bot."
+        log "Database drift remains unresolved. Review $preview and install/migrations/ before continuing."
+        return 1
     fi
 }
 
@@ -365,7 +378,7 @@ else
         install_perl_dependencies
     fi
 
-    run_drift_workflow || true
+    run_drift_workflow
 
     if ask_yes_no "Review/update IRC network and console-channel settings?" "n"; then
         perl "$INSTALL_DIR/configure.pl" --conf="$CONFIG_FILE"
@@ -379,4 +392,4 @@ log "Configuration completed"
 log "Config file : $CONFIG_FILE"
 log "Backups     : $CONFIG_DIR/config-backups"
 log "Runtime dir : $RUN_DIR"
-log "Next check  : perl tools/check_schema_drift.pl --conf='$CONFIG_FILE' --strict"
+log "Next check  : perl tools/check_schema_drift.pl --conf='$CONFIG_FILE' --strict --types --indexes"

@@ -51,6 +51,9 @@ return sub {
 
     # --- [1] helpers --------------------------------------------------------
     {
+        $assert->is(Mediabot::UserCommands::_milestone_last(98750),  95000,  '[1] last: 98750 -> 95000');
+        $assert->is(Mediabot::UserCommands::_milestone_last(500),    0,      '[1] last: 500 -> 0 (avant 1er palier)');
+        $assert->is(Mediabot::UserCommands::_milestone_last(100000), 100000, '[1] last: 100000 -> 100000 (pile)');
         $assert->is(Mediabot::UserCommands::_milestone_next(500),    1000,   '[1] next: 500 -> 1000');
         $assert->is(Mediabot::UserCommands::_milestone_next(3500),   4000,   '[1] next: 3500 -> 4000 (pas 1k)');
         $assert->is(Mediabot::UserCommands::_milestone_next(12000),  15000,  '[1] next: 12000 -> 15000 (pas 5k)');
@@ -88,6 +91,7 @@ return sub {
         Mediabot::UserCommands::mbMilestone_ctx($ctx);
         my $all = join("\n", map { _strip($_) } @SENT);
         $assert->like($all, qr/#teuk: 98,750 public messages logged/, '[2] total groupé');
+        $assert->like($all, qr/last passed 95,000/, '[2] dernier palier franchi affiché');
         $assert->like($all, qr/next milestone: 100,000 \(1,250 to go, 98%\)/, '[2] palier + progression');
         $assert->like($all, qr/300 msg\/day/, '[2] rythme récent');
         $assert->like($all, qr/logging since 2019-03-15/, '[2] date de début');

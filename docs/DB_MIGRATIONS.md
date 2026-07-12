@@ -16,7 +16,7 @@ After the database has been created, validate it with:
 
 ```bash
 cd /home/mediabot/mediabot_v3 || exit 1
-perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
+perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes
 ```
 
 A clean result should end with:
@@ -33,10 +33,16 @@ Recommended upgrade flow:
 
 ```bash
 cd /home/mediabot/mediabot_v3 || exit 1
-perl tools/check_schema_drift.pl --conf=mediabot.conf
+perl tools/check_schema_drift.pl --conf=mediabot.conf --generate-migration --types --indexes
 ```
 
-If drift is detected, inspect `install/migrations/` and apply the missing migration files.
+Review the generated plan before applying anything. It can propose missing
+tables, columns, required indexes and `CHANSET_LIST` rows, but it deliberately
+does not generate destructive `DROP` statements. With `--indexes`, required
+reference indexes are compared by name, uniqueness and ordered columns; extra
+live-only indexes are intentionally ignored. Inspect the ordered migration list
+below and apply every required structure and reference-data migration for the
+target database.
 
 Use the interactive MySQL/MariaDB client with an explicit charset:
 
@@ -60,17 +66,17 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260604_chansets_mb115_mb1
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260706_channel_log_channel_ts.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_channel_report_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_didyoumean_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_factoid.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_factoids_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260708_onthisday_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260708_onthisday_digest_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260710_quotes_hits.sql;
-SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_factoid.sql;
 ```
 
 Then run the checker again:
 
 ```bash
-perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
+perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes
 ```
 
 ## Migration order
@@ -99,10 +105,11 @@ mediabot_fun_commands_migration_20260512.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this
-historical stack. Structure migrations are verified by
-`tools/check_schema_drift.pl`; reference-data migrations (such as
-`20260515_claude_chanset.sql` or `20260604_chansets_mb115_mb118.sql`) are not
-covered by the drift checker and must still be applied when upgrading.
+historical stack. `tools/check_schema_drift.pl` checks tables, columns, optional
+normalized types and missing `CHANSET_LIST` rows. With `--indexes`, it also
+compares every required reference index. It does not infer arbitrary
+non-`CHANSET_LIST` reference data, so those data migrations must still be
+reviewed and applied when upgrading.
 
 ## Useful commands
 
@@ -115,13 +122,14 @@ perl tools/check_schema_drift.pl --conf=mediabot.conf
 Strict mode for automation:
 
 ```bash
-perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
+perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes
 ```
 
-Preview SQL for missing tables/columns only:
+Preview SQL for missing tables, columns, required indexes and
+`CHANSET_LIST` rows:
 
 ```bash
-perl tools/check_schema_drift.pl --conf=mediabot.conf --generate-migration
+perl tools/check_schema_drift.pl --conf=mediabot.conf --generate-migration --types --indexes
 ```
 
 Also compare normalized column definitions:
@@ -153,6 +161,22 @@ the 3.3 direction); it can be dropped later if write cost matters. Measure with
 `tools/measure_channel_log.pl --conf=mediabot.conf` before and after applying
 the migration to confirm the optimiser picks the composite index.
 
+## QUOTES hall-of-fame index (20260710)
+
+`20260710_quotes_hits.sql` adds `QUOTES.hits` and the composite index
+`idx_quotes_channel_hits (id_channel, hits)`. The same index is present in the
+fresh reference schema, so fresh installs and upgraded databases have the same
+query support.
+
+The drift checker compares these indexes when `--indexes` is supplied.
+Verify the two release-critical composite indexes explicitly as an independent
+certification check:
+
+```sql
+SHOW INDEX FROM CHANNEL_LOG WHERE Key_name = 'idx_channel_log_channel_ts';
+SHOW INDEX FROM QUOTES      WHERE Key_name = 'idx_quotes_channel_hits';
+```
+
 ## Safety rules
 
 Do not apply generated SQL blindly.
@@ -164,7 +188,7 @@ Before applying migrations to a production database:
 1. stop the bot if the migration touches tables used at runtime;
 2. create a database backup;
 3. apply migrations with `SET NAMES utf8mb4`;
-4. run `tools/check_schema_drift.pl --strict`;
+4. run `tools/check_schema_drift.pl --strict --types --indexes`;
 5. only then restart the bot.
 
 Note: `tools/check_schema_drift.pl` checks schema structure. Reference data migrations such as `20260515_claude_chanset.sql` must still be applied when upgrading an existing database.

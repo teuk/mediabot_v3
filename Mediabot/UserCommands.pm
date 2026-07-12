@@ -11303,9 +11303,19 @@ sub mbRecap_ctx {
                     sub {
                         my ($text) = @_;
                         return unless defined $text && $text ne '';
+                        # mb504: cap the number of emitted lines. A long AI reply
+                        # must never flood; keep it to a sane maximum and signal
+                        # truncation rather than spilling dozens of notices.
+                        my $ai_max_lines = 12;
+                        my $sent_lines = 0;
                         for my $line (split /\n/, $text) {
                             next if $line =~ /^\s*$/;
+                            if ($sent_lines >= $ai_max_lines) {
+                                botNotice($self, $nick, "recap: summary truncated (too long).");
+                                last;
+                            }
                             botNotice($self, $nick, $line);
+                            $sent_lines++;
                         }
                     },
                 );
@@ -11949,6 +11959,28 @@ sub mbMilestone_ctx {
         return;
     }
 
+    # mb503: light per-nick cooldown — milestone runs two CHANNEL_LOG scans;
+    # guard against spam the same way onthisday/mood do.
+    {
+        my $cooldown_s = 15;
+        my $now = time();
+        $self->{_milestone_cooldown} ||= {};
+        my $lc_nick = lc($nick);
+        my $last = $self->{_milestone_cooldown}{$lc_nick};
+        if (defined $last && ($now - $last) < $cooldown_s) {
+            my $wait = $cooldown_s - ($now - $last);
+            botNotice($self, $nick, "milestone: please wait ${wait}s before asking again.");
+            return;
+        }
+        $self->{_milestone_cooldown}{$lc_nick} = $now;
+        if (scalar(keys %{ $self->{_milestone_cooldown} }) > 512) {
+            for my $k (keys %{ $self->{_milestone_cooldown} }) {
+                delete $self->{_milestone_cooldown}{$k}
+                    if ($now - $self->{_milestone_cooldown}{$k}) > 3600;
+            }
+        }
+    }
+
     my $dbh = $self->{dbh};
     unless ($dbh) { botNotice($self, $nick, "milestone: database unavailable."); return; }
 
@@ -12005,6 +12037,14 @@ sub mbMilestone_ctx {
 
     my @bits;
     push @bits, sprintf("\x02%s\x02: %s public messages logged", $channel, _group_int($total));
+    my $last_milestone = _milestone_last($total);
+    if ($last_milestone > 0 && $last_milestone != $total) {
+        push @bits, sprintf(" \x{B7} last passed %s", _group_int($last_milestone));
+    }
+    elsif ($last_milestone > 0 && $last_milestone == $total) {
+        # exactly on a round number right now — celebrate it
+        push @bits, sprintf(" \x{B7} \x02just hit %s!\x02", _group_int($total));
+    }
     botPrivmsg($self, $channel, join('', @bits));
 
     my $line2 = sprintf("  next milestone: %s (%s to go, %d%%)",
@@ -12038,6 +12078,18 @@ sub _milestone_next {
              :                  100_000;
     my $next = (int($n / $step) + 1) * $step;
     return $next;
+}
+
+# last round milestone already reached at or below $n (same adaptive steps).
+# Returns 0 when the channel hasn't reached its first step yet.
+sub _milestone_last {
+    my ($n) = @_;
+    my $step = $n < 10_000    ? 1_000
+             : $n < 100_000   ? 5_000
+             : $n < 1_000_000 ? 50_000
+             :                  100_000;
+    my $last = int($n / $step) * $step;
+    return $last;   # 0 if below the first step
 }
 
 # 1234567 -> "1,234,567"

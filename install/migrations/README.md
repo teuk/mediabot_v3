@@ -8,11 +8,22 @@ Fresh installs should use:
 install/mediabot.sql
 ```
 
-Existing installations should apply only the missing migrations, then validate with:
+Existing installations should first generate and review a migration plan:
 
 ```bash
-perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
+perl tools/check_schema_drift.pl --conf=mediabot.conf --generate-migration --types --indexes
 ```
+
+Then apply only the required migrations and validate with:
+
+```bash
+perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes
+```
+
+With `--indexes`, the drift checker compares every index required by
+`install/mediabot.sql` and can emit non-destructive `ADD INDEX` statements for
+missing non-primary indexes. Extra live-only indexes are intentionally ignored.
+Official migration files remain the authoritative, reviewable upgrade path.
 
 ## Current migration order
 
@@ -75,19 +86,31 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260604_chansets_mb115_mb1
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260706_channel_log_channel_ts.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_channel_report_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_didyoumean_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_factoid.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_factoids_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260708_onthisday_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260708_onthisday_digest_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260710_quotes_hits.sql;
-SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_factoid.sql;
 ```
 
 Afterwards:
 
 ```bash
 cd /home/mediabot/mediabot_v3 || exit 1
-perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
+perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes
 ```
+
+## Index note
+
+Fresh installs receive the current indexes from `install/mediabot.sql`.
+Existing installations must apply the idempotent index migrations, notably:
+
+```text
+20260706_channel_log_channel_ts.sql
+20260710_quotes_hits.sql
+```
+
+`check_schema_drift.pl` compares required reference indexes when `--indexes` is supplied. Extra live-only indexes are intentionally ignored.
 
 ## Rule
 

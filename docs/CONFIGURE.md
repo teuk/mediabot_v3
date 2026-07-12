@@ -119,17 +119,19 @@ cannot see, before the IRC/database configuration assistant continues.
 For an existing database, the wizard runs:
 
 ```bash
-perl tools/check_schema_drift.pl --conf=mediabot.conf
+perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes
 ```
 
-If drift is found, it writes a review report under `run/` and lists the official
-files in `install/migrations/`.
+If drift is found, it writes a review report under `run/` using the same
+type/index-aware checks and lists the official files in `install/migrations/`.
 
 Generated SQL is **never** applied automatically.
 
 The optional guided selector can only run an official migration after an
-explicit selection and confirmation. The drift checker is then run again in
-strict mode.
+explicit selection and confirmation. The drift checker is then run again with
+`--strict --types --indexes`. If drift remains unresolved, `configure` exits
+non-zero instead of reporting a successful configuration. Use `--sync-only` or
+`--skip-db` when the intent is configuration maintenance without DB validation.
 
 Run only the drift workflow with:
 

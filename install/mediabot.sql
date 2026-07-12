@@ -400,7 +400,8 @@ CREATE TABLE `QUOTES` (
   `hits`       BIGINT UNSIGNED NOT NULL DEFAULT 0,
   PRIMARY KEY (`id_quotes`),
   KEY `idx_quotes_id_channel` (`id_channel`),
-  KEY `idx_quotes_id_user`    (`id_user`)
+  KEY `idx_quotes_id_user`    (`id_user`),
+  KEY `idx_quotes_channel_hits` (`id_channel`, `hits`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------

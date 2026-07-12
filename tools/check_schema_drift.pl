@@ -11,14 +11,13 @@
 #
 # Typical usage:
 #   perl tools/check_schema_drift.pl --conf=mediabot.conf
-#   perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
-#   perl tools/check_schema_drift.pl --conf=mediabot.conf --generate-migration
+#   perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes
+#   perl tools/check_schema_drift.pl --conf=mediabot.conf --generate-migration --types --indexes
 # =============================================================================
 
 use strict;
 use warnings;
 use Getopt::Long qw(GetOptions);
-use DBI;
 use FindBin qw($Bin);
 use File::Spec;
 use Cwd qw(abs_path);
@@ -38,6 +37,7 @@ my %opt = (
     charset            => 'utf8mb4',
     strict             => 0,
     types              => 0,
+    indexes            => 0,
     generate_migration => 0,
     ignore_extra       => 0,
     quiet              => 0,
@@ -57,6 +57,7 @@ GetOptions(
     'charset=s'          => \$opt{charset},
     'strict'             => \$opt{strict},
     'types'              => \$opt{types},
+    'indexes'            => \$opt{indexes},
     'generate-migration' => \$opt{generate_migration},
     'ignore-extra'       => \$opt{ignore_extra},
     'quiet'              => \$opt{quiet},
@@ -67,6 +68,13 @@ if ($opt{help}) {
     print usage();
     exit 0;
 }
+
+# DBI is only needed to talk to the live database, never for --help. Load it
+# lazily so `--help` works on a machine where CPAN modules aren't installed yet
+# (fresh checkout), with a clear message if it's genuinely missing.
+eval { require DBI; DBI->import; 1 }
+    or die "Error: DBI is required to query the database "
+          . "(install it via CPAN, e.g. `cpanm DBI`).\n";
 
 load_db_options_from_conf($opt{conf}, \%opt) if $opt{conf};
 
@@ -121,6 +129,9 @@ for my $t (sort keys %$ref) {
         }
     }
 
+    compare_required_indexes($ref->{$t}{indexes}, $live->{$t}{indexes}, $t, \@t_issues)
+        if $opt{indexes};
+
     if (@t_issues) {
         push @issues, @t_issues;
     } else {
@@ -153,8 +164,8 @@ if (@issues) {
     print "Hints:\n";
     print "  Fresh install: apply install/mediabot.sql during setup.\n";
     print "  Existing DB  : apply the missing migrations from install/migrations/.\n";
-    print "  Check again  : perl tools/check_schema_drift.pl --conf=mediabot.conf --strict\n";
-    print "  SQL preview  : perl tools/check_schema_drift.pl --conf=mediabot.conf --generate-migration\n";
+    print "  Check again  : perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes\n";
+    print "  SQL preview  : perl tools/check_schema_drift.pl --conf=mediabot.conf --generate-migration --types --indexes\n";
     exit 1 if $opt{strict};
 } else {
     print "Schema is in sync with the live database. No drift detected.\n" unless $opt{quiet};
@@ -185,9 +196,10 @@ Options:
   --schema <file>        Reference schema, default install/mediabot.sql
   --charset <charset>    Connection charset, default utf8mb4
   --types                Also compare normalized column definitions
+  --indexes              Verify required reference indexes (extra live indexes ignored)
   --strict               Exit 1 on drift
   --ignore-extra         Ignore extra tables/columns in live DB
-  --generate-migration   Print reviewable SQL for missing tables/columns only
+  --generate-migration   Print reviewable SQL for missing tables/columns/indexes/reference rows
   --quiet                Reduce output when schema is clean
   --help                 Show this help
 
@@ -291,7 +303,7 @@ sub connect_db {
     );
 
     my $dbh = DBI->connect(join(';', @dsn), $opt->{user}, $opt->{pass}, \%attrs)
-        or die "DB connect failed using DBD::$driver: $DBI::errstr\n";
+        or do { no warnings 'once'; die "DB connect failed using DBD::$driver: $DBI::errstr\n"; };
 
     # Keep charset handling driver-neutral.
     # DBD::mysql and DBD::MariaDB do not support the same connect attributes
@@ -343,6 +355,7 @@ sub parse_schema_file {
     while ($content =~ /(CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?([A-Za-z0-9_]+)`?\s*[(](.*?)[)]\s*ENGINE\s*=\s*[^;]+;)/gsi) {
         my ($create_sql, $tname, $body) = ($1, $2, $3);
         my %cols;
+        my %indexes;
 
         for my $item (split_create_table_items($body)) {
             $item =~ s/^\s+//;
@@ -350,7 +363,12 @@ sub parse_schema_file {
             $item =~ s/,\s*\z//;
             next unless length $item;
 
-            # Table constraints/indexes are not columns.
+            if (my $index = parse_index_item($item)) {
+                $indexes{ lc $index->{name} } = $index;
+                next;
+            }
+
+            # Other table constraints are not columns.
             next if is_table_constraint($item);
 
             if ($item =~ /^`([^`]+)`\s+(.+)\z/si || $item =~ /^([A-Za-z_][A-Za-z0-9_]*)\s+(.+)\z/si) {
@@ -373,6 +391,7 @@ sub parse_schema_file {
 
         $tables{$tname} = {
             columns => \%cols,
+            indexes => \%indexes,
             create  => normalize_create_table($create_sql),
         };
     }
@@ -755,6 +774,101 @@ sub split_create_table_items {
     return @items;
 }
 
+sub parse_index_item {
+    my ($item) = @_;
+    return undef unless defined $item;
+
+    my ($unique, $name, $cols_raw);
+    if ($item =~ /^\s*PRIMARY\s+KEY\s*\((.+)\)\s*\z/is) {
+        ($unique, $name, $cols_raw) = (1, 'PRIMARY', $1);
+    }
+    elsif ($item =~ /^\s*(UNIQUE\s+)?(?:KEY|INDEX)\s+`?([A-Za-z0-9_]+)`?\s*\((.+)\)\s*\z/is) {
+        ($unique, $name, $cols_raw) = ($1 ? 1 : 0, $2, $3);
+    }
+    else {
+        return undef;
+    }
+
+    my @columns;
+    for my $part (split_create_table_items($cols_raw)) {
+        $part =~ s/^\s+|\s+\z//g;
+        return undef unless $part =~ /^`?([A-Za-z0-9_]+)`?(?:\s*\(\s*(\d+)\s*\))?(?:\s+(ASC|DESC))?\s*\z/i;
+        push @columns, {
+            name   => $1,
+            prefix => defined($2) ? 0 + $2 : undef,
+            order  => uc($3 // ''),
+        };
+    }
+    return undef unless @columns;
+
+    return {
+        name    => $name,
+        unique  => $unique ? 1 : 0,
+        columns => \@columns,
+    };
+}
+
+sub normalize_index_signature {
+    my ($index) = @_;
+    return '' unless ref($index) eq 'HASH';
+    my @cols = map {
+        my $s = lc($_->{name} // '');
+        $s .= '(' . $_->{prefix} . ')' if defined $_->{prefix};
+        $s .= ':' . lc($_->{order}) if defined_non_empty($_->{order});
+        $s;
+    } @{ $index->{columns} || [] };
+    return (($index->{unique} // 0) ? 'unique|' : 'nonunique|') . join(',', @cols);
+}
+
+sub compare_required_indexes {
+    my ($ref_indexes, $live_indexes, $table, $issues) = @_;
+    $ref_indexes  = {} unless ref($ref_indexes) eq 'HASH';
+    $live_indexes = {} unless ref($live_indexes) eq 'HASH';
+
+    for my $key (sort keys %$ref_indexes) {
+        my $expected = $ref_indexes->{$key};
+        if (!exists $live_indexes->{$key}) {
+            push @$issues, {
+                kind     => 'missing_index',
+                table    => $table,
+                index    => $expected->{name},
+                expected => normalize_index_signature($expected),
+                text     => "  MISSING INDEX   $table.$expected->{name}  (in schema, absent from DB)",
+            };
+            next;
+        }
+        my $actual = $live_indexes->{$key};
+        my $want = normalize_index_signature($expected);
+        my $have = normalize_index_signature($actual);
+        if ($want ne $have) {
+            push @$issues, {
+                kind     => 'index_drift',
+                table    => $table,
+                index    => $expected->{name},
+                expected => $want,
+                actual   => $have,
+                text     => "  INDEX DRIFT     $table.$expected->{name}  expected=[$want] live=[$have]",
+            };
+        }
+    }
+}
+
+sub render_add_index_sql {
+    my ($table, $index) = @_;
+    return undef unless ref($index) eq 'HASH';
+    return undef if uc($index->{name} // '') eq 'PRIMARY';
+    my @cols = map {
+        my $s = '`' . ($_->{name} // '') . '`';
+        $s .= '(' . $_->{prefix} . ')' if defined $_->{prefix};
+        $s .= ' ' . $_->{order} if defined_non_empty($_->{order});
+        $s;
+    } @{ $index->{columns} || [] };
+    return undef unless @cols;
+    my $kind = ($index->{unique} // 0) ? 'UNIQUE INDEX' : 'INDEX';
+    return sprintf('ALTER TABLE `%s` ADD %s `%s` (%s);',
+        $table, $kind, $index->{name}, join(', ', @cols));
+}
+
 sub is_table_constraint {
     my ($item) = @_;
     return $item =~ /^\s*(?:PRIMARY|UNIQUE|KEY|INDEX|FULLTEXT|SPATIAL|CONSTRAINT|FOREIGN|CHECK)\b/i;
@@ -819,7 +933,33 @@ sub fetch_live_schema {
             };
         }
         $csth->finish;
-        $tables{$t} = { columns => \%cols };
+
+        my $isth = $dbh->prepare(
+            q{SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME, SUB_PART, COLLATION
+              FROM information_schema.STATISTICS
+              WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+              ORDER BY INDEX_NAME, SEQ_IN_INDEX}
+        );
+        $isth->execute($db, $t);
+        my %indexes;
+        while (my $row = $isth->fetchrow_hashref) {
+            my $name = $row->{INDEX_NAME};
+            next unless defined_non_empty($name);
+            my $key = lc $name;
+            my $index = ($indexes{$key} //= {
+                name => $name,
+                unique => ($row->{NON_UNIQUE} // 1) ? 0 : 1,
+                columns => [],
+            });
+            push @{ $index->{columns} }, {
+                name   => $row->{COLUMN_NAME} // '',
+                prefix => defined($row->{SUB_PART}) ? 0 + $row->{SUB_PART} : undef,
+                order  => (($row->{COLLATION} // '') eq 'D') ? 'DESC' : '',
+            };
+        }
+        $isth->finish;
+
+        $tables{$t} = { columns => \%cols, indexes => \%indexes };
     }
 
     return \%tables;
@@ -874,6 +1014,7 @@ sub print_header {
     print "Mode       : ";
     print $opt->{strict} ? "strict" : "report-only";
     print $opt->{types} ? ", type-checks" : ", structure-only";
+    print $opt->{indexes} ? ", required-index checks" : ", indexes not checked";
     print $opt->{ignore_extra} ? ", ignoring extras" : ", reporting extras";
     print "\n\n";
 }
@@ -901,6 +1042,19 @@ sub print_generated_migration {
 
             my $def = $ref->{$t}{columns}{$c}{raw} // "`$c` VARCHAR(255) DEFAULT NULL";
             print "ALTER TABLE `$t` ADD COLUMN $def;\n";
+        } elsif ($issue->{kind} eq 'missing_index') {
+            my ($t, $name) = ($issue->{table}, $issue->{index});
+            my $index = $ref->{$t}{indexes}{lc $name};
+            my $sql = render_add_index_sql($t, $index);
+            if (defined $sql) {
+                print "$sql\n";
+            }
+            else {
+                print "-- Missing index `$t`.`$name` requires manual review. No SQL generated.\n";
+            }
+        } elsif ($issue->{kind} eq 'index_drift') {
+            print "-- Index drift `$issue->{table}`.`$issue->{index}`: expected [$issue->{expected}], live [$issue->{actual}]\n";
+            print "-- No DROP/REPLACE generated. Review manually to avoid destructive changes.\n";
         } elsif ($issue->{kind} eq 'missing_chanset') {
             my $id = 0 + ($issue->{id} // 0);
             my $name = $issue->{chanset} // '';
