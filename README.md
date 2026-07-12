@@ -67,14 +67,13 @@ Mediabot follows a simple versioning rule:
 Examples:
 
 ```text
-3.1      stable release line
-3.2dev   development line
-3.3      next stable target
+3.3      current stable release
+3.4dev   next development line
 ```
 
 Use a stable release if you want a conservative deployment.
 
-Use the Git tree if you want to test or contribute to the current development line.
+Use the Git tree if you want to test or contribute to the next development line.
 
 ---
 
@@ -180,7 +179,17 @@ git clone https://github.com/teuk/mediabot_v3.git
 cd /home/mediabot/mediabot_v3 || exit 1
 ```
 
-For a stable release, download the release archive instead.
+For the stable 3.3 release, use one of the published source archives:
+
+```text
+mediabot-3.3.tar.gz
+mediabot-3.3.tar.xz
+```
+
+Verify the download against `SHA256SUMS` or `SHA512SUMS` before extracting it.
+The GitHub release uses the plain `3.3` tag, matching the established project
+tag convention. See [`docs/RELEASING.md`](docs/RELEASING.md) for the complete
+artifact and verification workflow.
 
 ### 4. Run `./configure`
 

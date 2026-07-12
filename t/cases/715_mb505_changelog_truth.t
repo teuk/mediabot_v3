@@ -61,6 +61,12 @@ return sub {
 
     # --- [4] cohérence versionnage README ----------------------------------
     my $readme = _slurp_715(File::Spec->catfile('.', 'README.md'));
-    $assert->like($readme, qr/3\.3\s+next stable target/i, '[4] README: 3.3 = cible stable');
-    $assert->like($readme, qr/3\.2dev/, '[4] README: ligne de dev 3.2dev citée');
+    $assert->like($readme, qr/3\.3\s+current stable release/i,
+        '[4] README: 3.3 = release stable courante');
+    $assert->like($readme, qr/3\.4dev\s+next development line/i,
+        '[4] README: prochaine ligne 3.4dev citée');
+    $assert->like($cl, qr/^##\s*\[3\.3\]\s+\x{2014}\s+2026-07-12/m,
+        '[4] CHANGELOG: 3.3 datée');
+    $assert->unlike($cl, qr/^##\s*\[3\.3\].*(?:unreleased|target)/mi,
+        '[4] CHANGELOG: 3.3 n’est plus marquée unreleased');
 };

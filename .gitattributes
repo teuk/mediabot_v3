@@ -1,0 +1,9 @@
+# Release archives are built with git archive from the signed-off release tag.
+# Keep collaborative/runtime-only material out of public source tarballs.
+node_modules export-ignore
+**/node_modules export-ignore
+.github export-ignore
+commit.sh export-ignore
+mp3 export-ignore
+mediabot.conf export-ignore
+t/live/test.conf export-ignore

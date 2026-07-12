@@ -2,17 +2,17 @@
 
 All notable changes to Mediabot v3 are documented here.
 
-Versioning follows the project rule: odd minor versions are stable releases,
-even minor versions are development lines. The upcoming **3.3** is the next
-stable target, currently prepared on the `3.2dev` development line.
+Versioning follows the project rule: odd minor versions are stable releases
+and even minor versions are development lines. **3.3** is the current stable
+release. Development after this release continues on the `3.4dev` line.
 
 ---
 
-## [3.3] — unreleased (target)
+## [3.3] — 2026-07-12
 
-> Prepared on `3.2dev`. The stable tag is created only after full validation
-> on the production instance and explicit sign-off. Nothing below changes the
-> database schema unless a migration is explicitly listed under "Migrations".
+> Released after validation on the development instance and a complete fresh
+> Debian 13 installation. Nothing below changes the database schema unless a
+> migration is explicitly listed under "Migrations".
 
 ### Added — everyday user features
 
@@ -109,6 +109,9 @@ Recent July release migrations, all idempotent and non-destructive:
 - `configure` now runs drift checks fail-closed with column types and required
   indexes on the initial check, generated review plan and post-migration check.
 - Extensive test suite growth; the offline suite runs green end to end.
+- Tag-based public release builder creates deterministic `tar.gz` and `tar.xz`
+  archives, includes the tracked `contrib/` and `plugins/` trees, excludes
+  local/runtime-only material, and publishes SHA-256 and SHA-512 checksum files.
 
 ---
 
