@@ -75,6 +75,10 @@ stable target, currently prepared on the `3.2dev` development line.
 - `!topquote` / `!halloffame` were mis-categorised in the help index; now grouped
   with the other quote commands.
 - `!mood` had no `$dbh` guard and no cooldown; both added.
+- Fresh database installation could fail while creating the application user:
+  a malformed `sed` expression broke SQL literal escaping even for the generated
+  alphanumeric password. SQL quoting is now dependency-free, checked explicitly,
+  and verification rollback uses `DROP USER IF EXISTS` with validated literals.
 
 ### Migrations
 

@@ -61,8 +61,14 @@ return sub {
 
     $assert->like(
         $src,
+        qr/DROP USER IF EXISTS \$\{MYSQL_DB_USER_SQL\}\@\$\{AUTH_HOST_SQL\}/,
+        'db_install.sh rolls back with validated SQL literals and IF EXISTS'
+    );
+
+    $assert->unlike(
+        $src,
         qr/DROP USER '\$\{MYSQL_DB_USER\}'\@'\$\{AUTH_HOST\}'/,
-        'db_install.sh still drops the user after verification failure'
+        'db_install.sh no longer interpolates raw account values in rollback SQL'
     );
 
     $assert->like(

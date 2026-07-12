@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # mb378-R1: update [mysql] atomically through configure_config.pl.
+# mb511-B1: fix dependency-free SQL literal escaping and idempotent user rollback.
 # chatGPT you should have told me to comment this but keep searching :) and yes you removed mysql_create_mediabot_db function...
 #set -euo pipefail
 
@@ -225,14 +226,22 @@ sql_string_literal() {
             exit 1
             ;;
     esac
-    local escaped
-    escaped=$(printf '%s' "$v" | sed "s/\\/\\\\/g; s/'/''/g")
+    # Keep this dependency-free: db_install.sh runs before CPAN and must not
+    # rely on sed quoting rules.  Escape MySQL/MariaDB SQL string literals with
+    # Bash parameter expansion: backslashes are doubled and single quotes are
+    # represented as two adjacent single quotes.
+    local escaped="$v"
+    escaped=${escaped//\\/\\\\}
+    escaped=${escaped//\'/\'\'}
     printf "'%s'" "$escaped"
 }
 
-MYSQL_DB_USER_SQL=$(sql_string_literal "$MYSQL_DB_USER")
-AUTH_HOST_SQL=$(sql_string_literal "$AUTH_HOST")
-MYSQL_DB_PASS_SQL=$(sql_string_literal "$MYSQL_DB_PASS")
+# Command substitution runs the helper in a subshell.  Check every return code
+# explicitly so a rejected newline-bearing value cannot silently become an
+# empty SQL literal when this installer is running without `set -e`.
+MYSQL_DB_USER_SQL=$(sql_string_literal "$MYSQL_DB_USER") || exit 1
+AUTH_HOST_SQL=$(sql_string_literal "$AUTH_HOST") || exit 1
+MYSQL_DB_PASS_SQL=$(sql_string_literal "$MYSQL_DB_PASS") || exit 1
 
 # ─── 1) CREATE (or ALTER) & GRANT & FLUSH in one shot ───────────────────
 messageln "Creating/updating '${MYSQL_DB_USER}'@'${AUTH_HOST}' and granting on ${MYSQL_DB}"
@@ -270,7 +279,8 @@ if [ "$verify_rc" -ne 0 ]; then
     echo -e "Failed." | tee -a "$SCRIPT_LOGFILE"
     echo "User ${MYSQL_DB_USER} failed to connect" | tee -a "$SCRIPT_LOGFILE"
     messageln "Dropping user '${MYSQL_DB_USER}'@'${AUTH_HOST}' due to verification failure"
-    mysql ${MYSQL_PARAMS} -e "DROP USER '${MYSQL_DB_USER}'@'${AUTH_HOST}';"
+    # Reuse the already validated/quoted literals and make rollback idempotent.
+    mysql ${MYSQL_PARAMS} -e "DROP USER IF EXISTS ${MYSQL_DB_USER_SQL}@${AUTH_HOST_SQL};"
     ok_failed $? "Failed to drop ${MYSQL_DB_USER}@${AUTH_HOST} after failure"
     echo "Installation log is available in $SCRIPT_LOGFILE" | tee -a "$SCRIPT_LOGFILE"
     exit "$verify_rc"
