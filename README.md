@@ -1,101 +1,113 @@
 # Mediabot v3
 
-**Mediabot v3** is a multi-purpose IRC bot written in Perl.
-
-It is designed for real IRC operations and long-term use: channel administration, user and hostmask management, public commands, database-backed features, URL/media helpers, radio helpers, antiflood protection, observability, and a dedicated TCP admin interface called **Partyline**.
-
 <p align="center">
-  <a href="docs/mediabot.png">
-    <img src="docs/mediabot.png" alt="Illustrated WeeChat view of Mediabot v3 running on the #i/o community channel">
-  </a>
+  <strong>A database-backed, operations-oriented IRC bot for long-running communities.</strong>
 </p>
 
 <p align="center">
-  <em>Illustrated WeeChat-style view of Mediabot v3 running on #i/o. The conversation is fictional.</em>
+  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.3"><img alt="Stable release 3.3" src="https://img.shields.io/badge/stable-3.3-2ea44f"></a>
+  <a href="LICENSE.md"><img alt="GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-4c1"></a>
+  <a href="https://github.com/teuk/mediabot_v3/wiki/Installation"><img alt="Debian 13 validated" src="https://img.shields.io/badge/Debian%2013-validated-A81D33?logo=debian&logoColor=white"></a>
+  <a href="https://github.com/teuk/mediabot_v3/discussions"><img alt="GitHub Discussions" src="https://img.shields.io/badge/community-Discussions-8250df?logo=github"></a>
+</p>
+
+Mediabot 3.3 helps IRC communities **run, remember, and understand their channels**. It combines channel administration, persistent community history, analytics, modern URL and media integrations, observability, and upgrade tooling in one tested application.
+
+Instead of assembling a large collection of unrelated scripts, operators get a coherent stack with one configuration model, one MariaDB-backed data model, migrations, security checks, startup integrity validation, systemd deployment guidance, and a documented release process.
+
+<p align="center">
+  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.3"><strong>Download Mediabot 3.3</strong></a>
+  ·
+  <a href="https://github.com/teuk/mediabot_v3/wiki/Installation"><strong>Install in production</strong></a>
+  ·
+  <a href="https://github.com/teuk/mediabot_v3/wiki/Public-commands"><strong>Explore commands</strong></a>
+  ·
+  <a href="https://github.com/teuk/mediabot_v3/discussions"><strong>Ask a question</strong></a>
 </p>
 
 ---
 
-## Community
+## Why Mediabot?
 
-**[Report a bug](https://github.com/teuk/mediabot_v3/issues/new?template=bug_report.md) · [Request a feature](https://github.com/teuk/mediabot_v3/issues/new?template=feature_request.md) · [Ask a question](https://github.com/teuk/mediabot_v3/discussions) · [Contribute](CONTRIBUTING.md) · [Get support](SUPPORT.md)**
+| What you need | What Mediabot provides |
+|---|---|
+| **Community memory** | `seen`, `onthisday`, quotes, factoids, karma, notes, reminders, milestones, and long-term channel history |
+| **Operational safety** | guided configuration, database migrations, schema/type/index drift checks, security audit, and startup integrity checks |
+| **Modern IRC features** | rich URL previews, media helpers, AI integrations, radio tooling, antiflood protection, and community analytics |
+| **Observability** | Prometheus metrics, Grafana resources, structured logs, and systemd-oriented operations |
+| **Extensibility** | Perl modules, plugins, controlled script bridges, and public `contrib/` and `plugins/` trees |
 
-Live IRC community chat:
-
-* **Network:** EpiKnet
-* **Server:** `irc.epiknet.org`
-* **Port:** `6697`
-* **Encryption:** SSL/TLS
-* **Channel:** `#i/o`
-
-Contributions of all sizes are welcome, including code, documentation, tests, plugins, translations, installation feedback, and testing on additional IRC networks.
-
-Use GitHub Issues for reproducible bugs and concrete feature requests. Use GitHub Discussions for installation questions, general support, and ideas that still need discussion.
+Mediabot is a strong fit for communities that want a bot to become part of their long-term infrastructure rather than remain a small disposable script. If you only need a tiny classic IRC bot with minimal dependencies, a lighter platform may be the better choice.
 
 ---
 
-## Documentation first
+## See what it can do
 
-The README gives the essential path to install and validate Mediabot.
+A typical channel can use commands such as:
 
-The full documentation lives in the GitHub wiki:
+```text
+<prefix>seen Alice
+<prefix>mood
+<prefix>onthisday
+<prefix>topquote
+<prefix>milestone
+?coffee
+<prefix>tell Bob remember the meeting
+```
 
-* [Mediabot v3 Wiki](https://github.com/teuk/mediabot_v3/wiki)
-* [Installation](https://github.com/teuk/mediabot_v3/wiki/Installation)
-* [Configuration](https://github.com/teuk/mediabot_v3/wiki/Configuration)
-* [Database model](https://github.com/teuk/mediabot_v3/wiki/Database-model)
-* [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands)
-* [Private and admin commands](https://github.com/teuk/mediabot_v3/wiki/Private-and-admin-commands)
-* [Partyline](https://github.com/teuk/mediabot_v3/wiki/Partyline)
-* [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing)
-* [Troubleshooting](https://github.com/teuk/mediabot_v3/wiki/Troubleshooting)
-* [Local configure wizard reference](docs/CONFIGURE.md)
-* [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes)
-* [Changelog and 3.3 release notes](CHANGELOG.md)
+It can also enrich supported links, expose Prometheus metrics, integrate with radio workflows, and provide a dedicated TCP/DCC administration interface through Partyline.
 
-If something in this README is not enough, go to the wiki. The wiki is the operational reference.
+The configured prefix is instance-specific and may be `!`, `m`, `.`, or another value chosen by the operator.
+
+---
+
+## Start here
+
+| Goal | Recommended path |
+|---|---|
+| **Install the stable release** | [Download Mediabot 3.3](https://github.com/teuk/mediabot_v3/releases/tag/3.3), verify the checksums, then follow the [Installation guide](https://github.com/teuk/mediabot_v3/wiki/Installation) |
+| **Understand the feature set** | Browse [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands), [Private/admin commands](https://github.com/teuk/mediabot_v3/wiki/Private-and-admin-commands), and [Partyline](https://github.com/teuk/mediabot_v3/wiki/Partyline) |
+| **Upgrade an existing instance** | Read the [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes) before applying migrations |
+| **Operate and monitor it** | See [Configuration](https://github.com/teuk/mediabot_v3/wiki/Configuration), [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing), and [Monitoring](https://github.com/teuk/mediabot_v3/wiki/Monitoring-with-Prometheus-and-Grafana) |
+| **Report or discuss something** | Use [Issues](https://github.com/teuk/mediabot_v3/issues) for reproducible work and [Discussions](https://github.com/teuk/mediabot_v3/discussions) for questions and ideas |
+
+The wiki is the operational reference. This README keeps the essential installation and validation path available in the repository.
 
 ---
 
 ## Release status
 
-Mediabot follows a simple versioning rule:
-
-* **odd minor versions** are stable releases;
-* **even minor versions** are development / beta lines.
-
-Examples:
+Mediabot uses odd minor versions for stable releases and even minor versions for development lines:
 
 ```text
 3.3      current stable release
 3.4dev   next development line
 ```
 
-Use a stable release if you want a conservative deployment.
+Release resources:
 
-Use the Git tree if you want to test or contribute to the next development line.
+- [Mediabot 3.3 GitHub release](https://github.com/teuk/mediabot_v3/releases/tag/3.3)
+- [Changelog and 3.3 release notes](CHANGELOG.md)
+- [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes)
+- [Release artifact workflow](docs/RELEASING.md)
 
 ---
 
-## Key features
+## Community
 
-Depending on configuration and enabled integrations, Mediabot can provide:
+Contributions of all sizes are welcome: code, tests, documentation, plugins, translations, installation feedback, and validation on additional IRC networks.
 
-* IRC channel administration;
-* user, level, and hostmask management;
-* public utility commands;
-* private/admin commands;
-* URL title handling;
-* YouTube, TMDB, media, and radio helpers;
-* reminders, notes, polls, karma, trivia, quotes, and other IRC tools;
-* channel engagement: `onthisday` history recall (with optional daily digest),
-  enriched `seen` and `mood`, a `topquote` hall of fame, and channel `milestone`
-  tracking;
-* antiflood guards for busy channels;
-* netsplit/reconnect hardening;
-* Partyline TCP/DCC admin interface;
-* Prometheus metrics;
-* test harnesses for static and live validation.
+**[Report a bug](https://github.com/teuk/mediabot_v3/issues/new?template=bug_report.md) · [Request a feature](https://github.com/teuk/mediabot_v3/issues/new?template=feature_request.md) · [Ask a question](https://github.com/teuk/mediabot_v3/discussions) · [Open the wiki](https://github.com/teuk/mediabot_v3/wiki)**
+
+Live IRC support:
+
+```text
+Network:    EpiKnet
+Server:     irc.epiknet.org
+Port:       6697
+Encryption: SSL/TLS
+Channel:    #i/o
+```
 
 ---
 
