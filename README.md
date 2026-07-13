@@ -11,6 +11,12 @@
   <a href="https://github.com/teuk/mediabot_v3/discussions"><img alt="GitHub Discussions" src="https://img.shields.io/badge/community-Discussions-8250df?logo=github"></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.3">
+    <img src="docs/mediabot-3.3-github-social-preview.png" alt="Mediabot 3.3 — database-backed, operations-oriented IRC bot for long-running communities" width="100%">
+  </a>
+</p>
+
 Mediabot 3.3 helps IRC communities **run, remember, and understand their channels**. It combines channel administration, persistent community history, analytics, modern URL and media integrations, observability, and upgrade tooling in one tested application.
 
 Instead of assembling a large collection of unrelated scripts, operators get a coherent stack with one configuration model, one MariaDB-backed data model, migrations, security checks, startup integrity validation, systemd deployment guidance, and a documented release process.
