@@ -1,5 +1,7 @@
+# Mediabot v3 — Git attributes
+#
 # Release archives are built with git archive from the signed-off release tag.
-# Keep collaborative/runtime-only material out of public source tarballs.
+# Keep collaborative/runtime-only material out of public source archives.
 node_modules export-ignore
 **/node_modules export-ignore
 .github export-ignore
@@ -7,3 +9,44 @@ commit.sh export-ignore
 mp3 export-ignore
 mediabot.conf export-ignore
 t/live/test.conf export-ignore
+
+# GitHub Linguist: optional companion tooling is shipped for convenience but
+# should not dominate the repository language summary.
+contrib/** linguist-vendored
+docs/** linguist-documentation
+*.md linguist-documentation
+
+# Linux runtime files must keep LF line endings, including after a Windows
+# checkout. Binary assets are explicitly excluded from text normalization.
+* text=auto
+.gitattributes text eol=lf
+cpanfile text eol=lf
+*.pl text eol=lf
+*.pm text eol=lf
+*.t text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.tcl text eol=lf
+*.sql text eol=lf
+*.conf text eol=lf
+*.sample text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.liq text eol=lf
+configure text eol=lf
+start text eol=lf
+stop text eol=lf
+daemon text eol=lf
+mb_restart.sh text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.mp3 binary
+*.zip binary
+*.gz binary
+*.xz binary

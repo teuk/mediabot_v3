@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PERL_VERSION: '5.40'
+
+jobs:
+  validate:
+    name: Perl 5.40 / offline validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+
+      # DBD::MariaDB must be compiled after the native connector headers are
+      # present. No CPAN installation is performed before this step.
+      - name: Install native build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libmariadb-dev
+
+      - name: Set up Perl and install cpanfile dependencies
+        uses: shogo82148/actions-setup-perl@v1.41.1
+        with:
+          perl-version: ${{ env.PERL_VERSION }}
+          install-modules-with: cpanm
+          install-modules-args: --notest
+          enable-modules-cache: true
+
+      # Hailo is deliberately absent from cpanfile. The fallback mirrors the
+      # supported installer and is rechecked even when the module cache hits.
+      - name: Install and verify Hailo
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5${PERL5LIB:+:$PERL5LIB}"
+
+          if perl -MHailo -e 'exit 0' >/dev/null 2>&1; then
+            echo 'Hailo is already available.'
+          elif cpanm --notest --local-lib "$GITHUB_WORKSPACE/local" Hailo; then
+            echo 'Hailo installed from CPAN.'
+          else
+            echo 'Normal Hailo installation failed; using the supported 0.75 fallback.'
+            cpanm --notest --local-lib "$GITHUB_WORKSPACE/local" \
+              https://cpan.metacpan.org/authors/id/A/AV/AVAR/Hailo-0.75.tar.gz
+          fi
+
+          perl -MHailo -e 'print "Hailo $Hailo::VERSION is available\n"'
+
+      - name: Verify all runtime Perl modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5${PERL5LIB:+:$PERL5LIB}"
+          bash install/cpan_install.sh --verify-only
+
+      - name: Check Perl syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5:$GITHUB_WORKSPACE${PERL5LIB:+:$PERL5LIB}"
+
+          failed=0
+          while IFS= read -r -d '' file; do
+            echo "Checking $file"
+            if ! perl -I. -It/lib -c "$file"; then
+              echo "::error file=$file::Perl syntax check failed"
+              failed=1
+            fi
+          done < <(
+            find Mediabot install tools bin plugins \
+              -type f \( -name '*.pm' -o -name '*.pl' \) -print0 2>/dev/null
+            printf '%s\0' mediabot.pl t/test_commands.pl t/test_live.pl
+          )
+
+          exit "$failed"
+
+      - name: Check shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+
+          while IFS= read -r -d '' file; do
+            echo "Checking $file"
+            if ! bash -n "$file"; then
+              echo "::error file=$file::Shell syntax check failed"
+              failed=1
+            fi
+          done < <(
+            find . -type f -name '*.sh' \
+              -not -path './.git/*' \
+              -not -path './local/*' \
+              -print0
+          )
+
+          for file in configure start stop daemon; do
+            [ -f "$file" ] || continue
+            echo "Checking $file"
+            if ! bash -n "$file"; then
+              echo "::error file=$file::Shell syntax check failed"
+              failed=1
+            fi
+          done
+
+          exit "$failed"
+
+      - name: Run the complete offline test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5:$GITHUB_WORKSPACE${PERL5LIB:+:$PERL5LIB}"
+          perl t/test_commands.pl
+
+      - name: Run the security invariant audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5:$GITHUB_WORKSPACE${PERL5LIB:+:$PERL5LIB}"
+          perl tools/security_audit.pl --quiet
+
+      - name: Run the startup integrity check
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5:$GITHUB_WORKSPACE${PERL5LIB:+:$PERL5LIB}"
+          perl tools/startup_integrity_check.pl --quiet
