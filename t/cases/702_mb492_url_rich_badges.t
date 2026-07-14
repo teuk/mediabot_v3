@@ -25,6 +25,8 @@ use Mediabot::External::URL;
     package C702; sub new { bless {}, shift } sub get { undef }
     package H702; sub new { my ($c,$html)=@_; bless { html=>$html }, $c }
     sub get { return { success => 1, status => 200, content => $_[0]->{html} } }
+    package F702; sub new { bless {}, shift }
+    sub get { return { success => 0, status => 503, reason => 'offline fixture' } }
 }
 
 sub _strip_irc { my ($s)=@_; $s =~ s/\x03\d{0,2}(?:,\d{1,2})?|\x0f|\x02//g; return $s; }
@@ -103,6 +105,9 @@ return sub {
     {
         my $self = _mkself();
         $self->{_x_twitter_cache} = {};
+        # Force the fxtwitter fast path to fail locally. The Chromium fixture
+        # below must be the only source used by this offline regression.
+        local *Mediabot::External::_make_http = sub { F702->new };
         local *Mediabot::External::URL::_fetch_url_chromium_dumpdom = sub {
             q{<meta property="og:title" content="jack on X"/>}
           . q{<meta property="og:description" content="just setting up my twttr"/>};
@@ -121,6 +126,9 @@ return sub {
     {
         my $self = _mkself();
         $self->{_x_twitter_cache} = {};
+        # Force the fxtwitter fast path to fail locally. The Chromium fixture
+        # below must be the only source used by this offline regression.
+        local *Mediabot::External::_make_http = sub { F702->new };
         local *Mediabot::External::URL::_fetch_url_chromium_dumpdom = sub {
             q{<meta property="og:title" content="jack on X: just setting up my twttr"/>}
           . q{<meta property="og:description" content="just setting up my twttr"/>};
@@ -139,6 +147,9 @@ return sub {
     {
         my $self = _mkself();
         $self->{_x_twitter_cache} = {};
+        # Force the fxtwitter fast path to fail locally. The Chromium fixture
+        # below must be the only source used by this offline regression.
+        local *Mediabot::External::_make_http = sub { F702->new };
         local *Mediabot::External::URL::_fetch_url_chromium_dumpdom = sub {
             q{<meta property="og:title" content="Snowden (@Snowden) on X"/>}
           . q{<meta property="og:description" content="Log in to X to see posts"/>};

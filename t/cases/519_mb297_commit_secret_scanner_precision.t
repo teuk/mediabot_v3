@@ -10,6 +10,15 @@ my $root = File::Spec->rel2abs("$Bin/../..");
 my $commit = File::Spec->catfile($root, 'commit.sh');
 my $sample = File::Spec->catfile($root, 'mediabot.sample.conf');
 
+# commit.sh is intentionally local-only and is never part of a public clone.
+# Keep this maintainer regression active in private snapshots, but do not make
+# the public GitHub CI checkout depend on a file that must never be published.
+unless (-f $commit) {
+    pass('commit.sh is local-only and absent from the public checkout');
+    done_testing();
+    exit 0;
+}
+
 open my $cfh, '<', $commit or die "$commit: $!";
 local $/;
 my $source = <$cfh>;

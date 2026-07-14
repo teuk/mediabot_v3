@@ -17,7 +17,8 @@ sub slurp {
 my $calc   = slurp('plugins/scripts/examples/calc.py');
 my $readme = slurp('plugins/scripts/README.md');
 my $sample = slurp('mediabot.sample.conf');
-my $commit = slurp('commit.sh');
+my $commit_path = File::Spec->catfile($root, 'commit.sh');
+my $commit = -f $commit_path ? slurp('commit.sh') : undef;
 my $t520   = slurp('t/cases/520_mb298_calc_reference_plugin.t');
 
 like($readme, qr/ships seven examples/, 'README counts seven external examples');
@@ -54,9 +55,12 @@ like($t520, qr/positive infinity literal is rejected cleanly/,
     'calc regression covers non-finite literals');
 like($t520, qr/zero to a negative power is reported without crashing/,
     'calc regression covers negative powers of zero');
-like($commit, qr/t\/cases\/520_mb298_calc_reference_plugin\.t/,
-    'commit preflight includes the calculator runtime test');
-like($commit, qr/t\/cases\/521_mb299_calc_route_config_contract\.t/,
-    'commit preflight includes the calculator route/config contract');
+SKIP: {
+    skip 'commit.sh is a local-only maintainer tool', 2 unless defined $commit;
+    like($commit, qr/t\/cases\/520_mb298_calc_reference_plugin\.t/,
+        'commit preflight includes the calculator runtime test');
+    like($commit, qr/t\/cases\/521_mb299_calc_route_config_contract\.t/,
+        'commit preflight includes the calculator route/config contract');
+}
 
 done_testing();

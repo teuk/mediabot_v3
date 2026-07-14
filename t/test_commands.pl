@@ -335,6 +335,18 @@ if (!@test_files) {
     exit 1;
 }
 
+sub _filter_case_load_warning {
+    my ($warning) = @_;
+
+    # Case files share package main inside this legacy runner. Helpers such as
+    # _slurp and _strip are intentionally reused by several independent cases.
+    return if $warning =~ /\ASubroutine \S+ redefined at /;
+    return if $warning =~ /\APrototype mismatch:/;
+    return if $warning =~ /used only once/i;
+
+    warn $warning;
+}
+
 for my $file (@test_files) {
     my $name = basename($file);
     print "\n[ $name ]\n";
@@ -350,7 +362,12 @@ for my $file (@test_files) {
     # to be their own t/cases directory, so localize it around do().
     local $FindBin::Bin = dirname($file);
     local $FindBin::RealBin = $FindBin::Bin;
-    my $code = do $file;
+    my $code;
+    {
+        # The warning filter must be active before do() compiles the case.
+        local $SIG{__WARN__} = \&_filter_case_load_warning;
+        $code = do $file;
+    }
     if ($@) {
         print "  ERREUR de chargement : $@\n";
         $assert->fail("$name: chargement");
