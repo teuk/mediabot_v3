@@ -5,6 +5,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/teuk/mediabot_v3/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/teuk/mediabot_v3/actions/workflows/ci.yml/badge.svg?branch=master&event=push"></a>
   <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.3"><img alt="Stable release 3.3" src="https://img.shields.io/badge/stable-3.3-2ea44f"></a>
   <a href="LICENSE.md"><img alt="GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-4c1"></a>
   <a href="https://github.com/teuk/mediabot_v3/wiki/Installation"><img alt="Debian 13 validated" src="https://img.shields.io/badge/Debian%2013-validated-A81D33?logo=debian&logoColor=white"></a>
