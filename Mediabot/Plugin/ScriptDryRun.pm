@@ -111,6 +111,7 @@ sub register {
         event_cooldown  => 10,
         event_last_run  => {},
         event_listener_entries => [],
+        route_configs   => {},
         last_result     => undef,
         last_error      => undef,
         # mb525-B1: timers IO::Async actifs, indexes par nom de timer. Permet
@@ -164,6 +165,10 @@ sub register {
     # mb529-B1: anti-tempete. Les join/part arrivent en rafale (netsplits);
     # au plus UNE execution par evenement par canal par fenetre de cooldown.
     $self->{event_cooldown} = _bounded_positive_int($self->{event_cooldown_raw}, 10, 1, 3600);
+
+    # mb531-B1: config par route, chargee une fois les deux cartes de routes
+    # connues (commandes + evenements).
+    $self->_load_route_configs;
 
     if ($bot && $bot->can('events') && $bot->events) {
         # mb242-B2: keep the EventBus listener entry so a replaced plugin
@@ -804,6 +809,10 @@ sub observe_public_command {
         command => $command,
         args    => _ctx_args($ctx),
     );
+    # mb531-B1: config par route (clé CONFIG_<route>), injectée uniquement si
+    # configurée; les scripts lisent data.config.<clé> avec leur propre défaut.
+    my $route_config = $self->route_config($command);
+    $data{config} = $route_config if %$route_config;
 
     my $result;
     my $run_started_at;
@@ -1315,6 +1324,10 @@ sub observe_channel_event {
         my $value = _ctx_scalar_value($ctx, $extra);
         $data{$extra} = $value if defined $value && length "$value";
     }
+    # mb531-B1: config par route d'evenement (clé CONFIG_<event>), meme
+    # mecanique que pour les commandes.
+    my $route_config = $self->route_config($event);
+    $data{config} = $route_config if %$route_config;
 
     my $result;
     my $label = "event:$event";
@@ -1373,6 +1386,110 @@ sub observe_channel_event {
     $self->{last_error}  = undef;
 
     return $result;
+}
+
+# ---------------------------------------------------------------------------
+# mb531-B1: configuration par route (commandes ET evenements).
+#
+# Cle de conf: CONFIG_<route> dans le bloc plugin, une par route, valeur au
+# format "cle=valeur; cle2=valeur2" (separateur ';' pour autoriser les
+# virgules dans les valeurs; Config::Simple ayant deja splitte sur les
+# virgules, les fragments sont rejoints avant parsing). Regles fail-closed:
+#   - cles limitees a [A-Za-z0-9_.-]{1,64};
+#   - valeurs scalaires de 512 caracteres max (paire REJETEE au-dela, avec
+#     log: tronquer silencieusement de la config est vicieux);
+#   - au plus 20 cles par route (tri deterministe, excedent ignore + log).
+# La map validee est injectee dans l'enveloppe JSON sous data.config,
+# uniquement quand elle est non vide; elle voyage avec les rappels timer via
+# le snapshot mb525.
+# ---------------------------------------------------------------------------
+
+use constant ROUTE_CONFIG_MAX_KEYS      => 20;
+use constant ROUTE_CONFIG_MAX_VALUE_LEN => 512;
+
+sub _parse_route_config {
+    my ($self, $route, $raw) = @_;
+
+    my $joined = join ',', grep { defined } _flatten_config_values($raw);
+    return {} unless length $joined;
+
+    my %config;
+    my $kept = 0;
+
+    for my $pair (split /;/, $joined) {
+        $pair =~ s/^\s+|\s+$//g;
+        next unless length $pair;
+
+        my ($key, $value) = split /\s*=\s*/, $pair, 2;
+        $key   = defined $key   ? $key   : '';
+        $value = defined $value ? $value : '';
+        $key =~ s/^\s+|\s+$//g;
+
+        unless ($key =~ /\A[A-Za-z0-9_.-]{1,64}\z/) {
+            $self->_log_bot(2, "PUBLIC(scriptdryrun): CONFIG_$route: rejected invalid key");
+            next;
+        }
+        if (length($value) > ROUTE_CONFIG_MAX_VALUE_LEN) {
+            $self->_log_bot(2, "PUBLIC(scriptdryrun): CONFIG_$route: rejected oversized value for key '$key'");
+            next;
+        }
+        if ($kept >= ROUTE_CONFIG_MAX_KEYS) {
+            $self->_log_bot(2, "PUBLIC(scriptdryrun): CONFIG_$route: too many keys, ignoring '$key'");
+            next;
+        }
+
+        $config{$key} = $value;
+        $kept++;
+    }
+
+    return \%config;
+}
+
+sub _load_route_configs {
+    my ($self) = @_;
+
+    my $conf = $self->{bot} ? $self->{bot}{conf} : undef;
+    my %configs;
+
+    my %route_names = (
+        %{ $self->{command_routes} || {} },
+        %{ $self->{event_routes}   || {} },
+    );
+
+    for my $name (sort keys %route_names) {
+        my $raw = _conf_get_first(
+            $conf,
+            "plugins.ScriptDryRun.CONFIG_$name",
+            "plugins.ScriptDryRun.config_$name",
+            "plugins.script_dryrun.CONFIG_$name",
+            "plugins.script_dryrun.config_$name",
+            'SCRIPT_DRYRUN_CONFIG_' . uc($name),
+        );
+        next unless defined $raw;
+
+        my $parsed = $self->_parse_route_config($name, $raw);
+        $configs{$name} = $parsed if %$parsed;
+    }
+
+    $self->{route_configs} = \%configs;
+    return \%configs;
+}
+
+# Copie defensive: un script ou un appelant ne doit pas pouvoir muter la
+# config stockee via la reference injectee dans l'enveloppe.
+sub route_config {
+    my ($self, $name) = @_;
+
+    return {} unless defined $name && !ref($name) && length $name;
+    my $stored = ref($self->{route_configs}) eq 'HASH' ? $self->{route_configs}{$name} : undef;
+    return {} unless ref($stored) eq 'HASH';
+    return { %$stored };
+}
+
+sub configured_routes {
+    my ($self) = @_;
+    return () unless ref($self->{route_configs}) eq 'HASH';
+    return sort keys %{ $self->{route_configs} };
 }
 
 sub action_mode_raw {

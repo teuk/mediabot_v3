@@ -12,6 +12,25 @@ release. Development after this release continues on the `3.4dev` line.
 
 ### Added — plugin bridge (Perl/Python/Tcl scripts)
 
+- **Per-route configuration in the script envelope** (mb531). Every route —
+  command or event — can carry its own configuration through one
+  CONFIG_<route> key ("key=value; key2=value2", ';' separated so values may
+  contain commas). Keys are [A-Za-z0-9_.-] (max 64), values are capped at
+  512 chars (oversized pairs are rejected with a log line, never silently
+  truncated) and at most 20 keys per route are kept. The validated map is
+  injected into the JSON envelope as data.config only when non-empty, and it
+  travels with deferred timer runs. data.config is the only structured
+  envelope field (one level deep, scalar values); the flat-envelope contract
+  of every other field is unchanged. The shipped greet.pl example reads
+  config.welcome, and `.scriptdryrun status` lists configured routes.
+
+- **Shipped event reference examples** (mb530). `examples/greet.pl` (join)
+  and `examples/topicwatch.pl` (topic) — the two scripts the mb529 sample
+  configuration was already referencing — now actually ship. Both stay
+  silent on IRC when routed to an unexpected event, and a new test guard
+  verifies that every example route documented in the sample configuration
+  exists on disk.
+
 - **Channel-event routing** (mb529). The bridge can now route `join`, `part`
   and `topic` channel events to scripts via the new opt-in `EVENTS` key
   (`EVENTS=join=examples/greet.pl, ...`), one script per event and no

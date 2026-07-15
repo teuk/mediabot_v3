@@ -2308,6 +2308,9 @@ sub _cmd_scriptdryrun {
     # mb188-B1: expose ScriptDryRun ACTION_MODE / ALLOW_IRC state in read-only partyline status.
     $stream->write("  action_mode: $action_mode\r\n");
     $stream->write("  allow_irc: " . ($allow_irc ? 'yes' : 'no') . "\r\n");
+    # mb531-B1: expose per-route configuration presence.
+    my @cfg_routes = eval { $plugin->can('configured_routes') ? $plugin->configured_routes : () };
+    $stream->write("  config_routes: " . (@cfg_routes ? join(',', @cfg_routes) : 'none') . "\r\n");
     # mb529-B1: expose channel-event routing state (join/part/topic bridge).
     my $event_routes_on = eval { $plugin->can('event_routes_enabled') ? $plugin->event_routes_enabled : 0 } ? 1 : 0;
     $stream->write("  event_routes: " . ($event_routes_on ? 'enabled' : 'disabled') . "\r\n");

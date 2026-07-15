@@ -120,6 +120,13 @@ EVENTS=join=examples/greet.pl, topic=examples/topicwatch.pl
 EVENT_COOLDOWN=10
 ```
 
+Both routes above ship as reference examples: `examples/greet.pl` welcomes a
+joining nick in the originating channel, and `examples/topicwatch.pl`
+acknowledges topic changes using the event-specific `topic` envelope field.
+When routed to an unexpected event, both log a warning and stay silent on
+IRC — a reference event script never spams a channel because of a config
+mistake.
+
 The routed script is executed with the matching event name (`join`, `part` or
 `topic`); the envelope carries `channel`, `nick` and, where relevant, `ident`,
 `host`, the part `message` or the new `topic` (`args` is always present and
@@ -135,6 +142,30 @@ Event guardrails:
   ignored, never forked;
 - an `EVENTS` route is an explicit scope, so `APPLY_REQUIRE_SCOPE` adds no
   extra gate here.
+
+## Per-route configuration
+
+Each route — command or event — can carry its own configuration:
+
+```ini
+CONFIG_premind=max_delay=1800
+CONFIG_join=welcome=Bienvenue sur ce canal,
+```
+
+The value is a `key=value; key2=value2` list (';' separated, so values may
+contain commas). Keys are `[A-Za-z0-9_.-]` (max 64 chars), values are capped
+at 512 chars and at most 20 keys per route are kept; invalid pairs are
+rejected with a log line, never silently truncated. The validated map is
+injected into the JSON envelope as `data.config` only when non-empty, and it
+travels with deferred timer runs. Scripts must always keep a default:
+
+```perl
+my $config  = ref($data->{config}) eq 'HASH' ? $data->{config} : {};
+my $welcome = $config->{welcome} // 'welcome,';
+```
+
+`data.config` is the only structured envelope field: one level deep, scalar
+values only. Every other field keeps the flat scalar/array contract.
 
 ## Safety boundary
 

@@ -263,6 +263,28 @@ sub _normalize_event_name {
     return $value;
 }
 
+# mb531-B1: normalisation de la cle reservee 'config' — defense en profondeur
+# derriere la validation du plugin: cles [A-Za-z0-9_.-]{1,64}, valeurs
+# scalaires bornees a 512, refs ecartees, au plus 32 cles (tri deterministe).
+sub _normalize_config_map {
+    my ($map) = @_;
+
+    my %clean;
+    my $kept = 0;
+    for my $key (sort keys %{ ref($map) eq 'HASH' ? $map : {} }) {
+        last if $kept >= 32;
+        next unless defined $key && "$key" =~ /\A[A-Za-z0-9_.-]{1,64}\z/;
+        my $value = $map->{$key};
+        next unless defined $value && !ref($value);
+        my $text = "$value";
+        next if length($text) > 512;
+        $clean{"$key"} = $text;
+        $kept++;
+    }
+
+    return \%clean;
+}
+
 sub _normalize_event_data_value {
     my ($value) = @_;
 
@@ -298,6 +320,14 @@ sub _normalize_event_data {
         my $safe_key = "$key";
         next unless length $safe_key;
         next if $safe_key =~ /[\r\n\0]/;
+        # mb531-B1: exception UNIQUE et documentee au contrat mb289 — la cle
+        # reservee 'config' accepte un HASH d'UN niveau (cles sures, valeurs
+        # scalaires, refs internes ecartees). Tout autre champ garde le
+        # contrat scalaire/ARRAY-de-scalaires, HASH arbitraire -> null.
+        if ($safe_key eq 'config' && ref($data{$key}) eq 'HASH') {
+            $clean{$safe_key} = _normalize_config_map($data{$key});
+            next;
+        }
         $clean{$safe_key} = _normalize_event_data_value($data{$key});
     }
 
