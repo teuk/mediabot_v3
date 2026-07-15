@@ -1746,6 +1746,13 @@ sub on_message_PART {
     my @tArgs = _irc_message_args($message);
     shift @tArgs;
 
+    # mb529-B1: expose channel lifecycle to the EventBus (plugin bridge).
+    eval { $mediabot->observe_channel_event('part',
+        channel => $target_name, nick => $sNick, ident => $sIdent,
+        host    => $sHost,
+        message => (defined($tArgs[0]) && $tArgs[0] ne '' ? $tArgs[0] : ''),
+        is_self => ($sNick eq $self->nick ? 1 : 0)); };
+
     if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
             $mediabot->{logger}->log(0, "[LIVE] <$target_name> * Parts: $sNick ($sIdent\@$sHost) (" . $tArgs[0] . ")");
@@ -2228,6 +2235,12 @@ sub on_message_TOPIC {
     my ($target_name,$text) = @{$hints}{qw<target_name text>};
     my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
     unless(defined($text)) { $text="";}
+
+    # mb529-B1: expose channel lifecycle to the EventBus (plugin bridge).
+    eval { $mediabot->observe_channel_event('topic',
+        channel => $target_name, nick => $sNick, ident => $sIdent,
+        host    => $sHost, topic => $text,
+        is_self => ($sNick eq $self->nick ? 1 : 0)); };
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
         $mediabot->{logger}->log(0,"[LIVE] <$target_name> * $sNick changes topic to '$text'");
     }
@@ -2341,6 +2354,13 @@ sub on_message_JOIN {
     }
     my ($target_name) = @{$hints}{qw<target_name>};
     my ($sNick,$sIdent,$sHost) = $mediabot->getMessageNickIdentHost($message);
+
+    # mb529-B1: expose channel lifecycle to the EventBus (plugin bridge).
+    # Eval-guarded: an observer failure must never break core JOIN handling.
+    eval { $mediabot->observe_channel_event('join',
+        channel => $target_name, nick => $sNick, ident => $sIdent,
+        host    => $sHost, is_self => ($sNick eq $self->nick ? 1 : 0)); };
+
     if ( $sNick eq $self->nick ) {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
             $mediabot->{logger}->log(0,"[LIVE] * Now talking in $target_name");

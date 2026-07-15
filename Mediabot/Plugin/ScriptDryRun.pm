@@ -76,6 +76,25 @@ sub register {
             'plugins.script_dryrun.apply_require_scope',
             'SCRIPT_DRYRUN_APPLY_REQUIRE_SCOPE',
         ),
+        # mb529-B1: routage opt-in des evenements de canal vers des scripts.
+        # Format identique a ROUTES (event=script), whitelist join/part/topic,
+        # PAS de fallback SCRIPT pour les evenements.
+        event_routes_raw => _conf_get_first(
+            $bot ? $bot->{conf} : undef,
+            'plugins.ScriptDryRun.EVENTS',
+            'plugins.ScriptDryRun.events',
+            'plugins.script_dryrun.EVENTS',
+            'plugins.script_dryrun.events',
+            'SCRIPT_DRYRUN_EVENTS',
+        ),
+        event_cooldown_raw => _conf_get_first(
+            $bot ? $bot->{conf} : undef,
+            'plugins.ScriptDryRun.EVENT_COOLDOWN',
+            'plugins.ScriptDryRun.event_cooldown',
+            'plugins.script_dryrun.EVENT_COOLDOWN',
+            'plugins.script_dryrun.event_cooldown',
+            'SCRIPT_DRYRUN_EVENT_COOLDOWN',
+        ),
         action_mode => 'dry-run',
         allow_irc   => 0,
         apply_require_scope => 0,
@@ -84,6 +103,14 @@ sub register {
         observed_public => 0,
         skipped_public  => 0,
         filtered_public => 0,
+        # mb529-B1: compteurs et etat du chemin evenements de canal.
+        observed_events      => 0,
+        skipped_events       => 0,
+        event_cooldown_skips => 0,
+        event_routes    => undef,
+        event_cooldown  => 10,
+        event_last_run  => {},
+        event_listener_entries => [],
         last_result     => undef,
         last_error      => undef,
         # mb525-B1: timers IO::Async actifs, indexes par nom de timer. Permet
@@ -119,6 +146,25 @@ sub register {
     # where an unscoped apply-mode config would apply actions for every command.
     $self->{apply_require_scope} = _truthy_with_default($self->{apply_require_scope_raw}, 1);
 
+    # mb529-B1: routes d'evenements. Reutilise le parseur ROUTES puis filtre
+    # sur la whitelist; toute entree inconnue est ignoree (et loggee) plutot
+    # que d'ouvrir silencieusement un chemin d'execution non prevu.
+    my $raw_event_routes = _make_command_routes($self->{event_routes_raw});
+    my %event_routes;
+    for my $event (keys %{ $raw_event_routes || {} }) {
+        if (_is_supported_channel_event($event)) {
+            $event_routes{$event} = $raw_event_routes->{$event};
+        }
+        else {
+            $self->_log_bot(2, "PUBLIC(scriptdryrun): ignoring unsupported EVENTS entry '$event' (supported: join, part, topic)");
+        }
+    }
+    $self->{event_routes} = \%event_routes;
+
+    # mb529-B1: anti-tempete. Les join/part arrivent en rafale (netsplits);
+    # au plus UNE execution par evenement par canal par fenetre de cooldown.
+    $self->{event_cooldown} = _bounded_positive_int($self->{event_cooldown_raw}, 10, 1, 3600);
+
     if ($bot && $bot->can('events') && $bot->events) {
         # mb242-B2: keep the EventBus listener entry so a replaced plugin
         # instance can unregister its own observer without removing the new
@@ -132,6 +178,21 @@ sub register {
             name   => 'script-dryrun-public-command-observer',
             plugin => __PACKAGE__,
         );
+
+        # mb529-B1: ne s'abonner QU'AUX evenements effectivement routes. Les
+        # entries sont conservees pour un unregister propre (regle mb242).
+        for my $event (sort keys %event_routes) {
+            my $bus_event = "channel_${event}_observed";
+            my $entry = $bot->events->on(
+                $bus_event => sub {
+                    my ($ctx) = @_;
+                    return $self->observe_channel_event($event, $ctx);
+                },
+                name   => "script-dryrun-${event}-observer",
+                plugin => __PACKAGE__,
+            );
+            push @{ $self->{event_listener_entries} }, [ $bus_event, $entry ];
+        }
     }
 
     return $self;
@@ -145,10 +206,20 @@ sub unregister {
     # d'une instance morte (et le slot pending resterait occupe a jamais).
     $self->cancel_script_timers;
 
+    # mb529-B1: retirer aussi les observateurs d'evenements de canal, sinon un
+    # remplacement de plugin accumulerait des listeners join/part/topic morts.
+    my $bot = $self->{bot};
+    if ($bot && $bot->can('events') && $bot->events && $bot->events->can('off')) {
+        for my $pair (@{ $self->{event_listener_entries} || [] }) {
+            next unless ref($pair) eq 'ARRAY' && ref($pair->[1]) eq 'HASH';
+            eval { $bot->events->off($pair->[0] => $pair->[1]); 1 };
+        }
+        $self->{event_listener_entries} = [];
+    }
+
     my $entry = $self->{listener_entry};
     return 0 unless ref($entry) eq 'HASH';
 
-    my $bot = $self->{bot};
     return 0 unless $bot && $bot->can('events') && $bot->events && $bot->events->can('off');
 
     my $removed = eval { $bot->events->off(public_command_observed => $entry) } || 0;
@@ -910,7 +981,20 @@ sub _schedule_script_timer {
         return (0, $err);
     }
 
-    $self->{active_timers}{"$name"} = $timer;
+    $self->{active_timers}{"$name"} = {
+        # mb527-B1: garder les metadonnees du timer avec l'objet IO::Async,
+        # pour la visibilite partyline (.scriptdryrun timers) et l'annulation
+        # ciblee. L'objet timer lui-meme n'est jamais expose hors du plugin.
+        timer      => $timer,
+        name       => "$name",
+        delay      => $delay,
+        armed_at   => time(),
+        expires_at => time() + $delay,
+        channel    => $snapshot{channel},
+        nick       => $snapshot{nick},
+        command    => $snapshot{command},
+        script     => $script_path,
+    };
     $self->_log_bot(4, "PUBLIC(scriptdryrun): timer armed name=$name delay=$delay script=$script_path");
 
     return (1, undef);
@@ -997,11 +1081,54 @@ sub _fire_script_timer {
     return $result;
 }
 
-sub cancel_script_timers {
+# mb527-B1: instantane en LECTURE SEULE des timers en attente, pour la
+# partyline. Retourne des copies triees par nom; ni l'objet timer IO::Async ni
+# le hash interne ne sont exposes. Le champ remaining est recalcule a chaque
+# appel.
+sub script_timer_list {
     my ($self) = @_;
 
     my $timers = $self->{active_timers};
-    return 0 unless ref($timers) eq 'HASH' && %$timers;
+    return () unless ref($timers) eq 'HASH' && %$timers;
+
+    my $now = time();
+    my @list;
+
+    for my $name (sort keys %$timers) {
+        my $rec = $timers->{$name};
+        next unless ref($rec) eq 'HASH';
+
+        my $remaining = (defined $rec->{expires_at} ? $rec->{expires_at} : $now) - $now;
+        $remaining = 0 if $remaining < 0;
+
+        push @list, {
+            name      => $rec->{name},
+            delay     => $rec->{delay},
+            remaining => int($remaining + 0.5),
+            channel   => $rec->{channel},
+            nick      => $rec->{nick},
+            command   => $rec->{command},
+            script    => $rec->{script},
+        };
+    }
+
+    return @list;
+}
+
+# mb527-B1: annulation ciblee d'un timer arme. N'execute jamais rien: stoppe
+# le timer, le retire de la boucle et libere le slot pending du runner.
+sub cancel_script_timer {
+    my ($self, $name) = @_;
+
+    return 0 unless defined $name && !ref($name) && length $name;
+
+    my $timers = $self->{active_timers};
+    return 0 unless ref($timers) eq 'HASH' && exists $timers->{$name};
+
+    my $rec = delete $timers->{$name};
+    # Tolerance: un record mb527 est un HASH { timer => ... }; un eventuel
+    # ancien format (objet timer nu) reste annulable.
+    my $timer = ref($rec) eq 'HASH' ? $rec->{timer} : $rec;
 
     my $loop = $self->_script_timer_loop;
     my $bot  = $self->{bot};
@@ -1009,19 +1136,243 @@ sub cancel_script_timers {
         $bot && $bot->can('script_action_runner') ? $bot->script_action_runner : undef;
     };
 
+    eval { $timer->stop; 1 } if $timer;
+    eval { $loop->remove($timer); 1 } if $timer && $loop;
+    eval { $runner->release_timer($name); 1 } if $runner;
+
+    $self->_log_bot(4, "PUBLIC(scriptdryrun): timer cancelled name=$name");
+
+    return 1;
+}
+
+sub cancel_script_timers {
+    my ($self) = @_;
+
+    my $timers = $self->{active_timers};
+    return 0 unless ref($timers) eq 'HASH' && %$timers;
+
     my $cancelled = 0;
     for my $name (sort keys %$timers) {
-        my $timer = delete $timers->{$name};
-
-        eval { $timer->stop; 1 } if $timer;
-        eval { $loop->remove($timer); 1 } if $timer && $loop;
-        eval { $runner->release_timer($name); 1 } if $runner;
-
-        $cancelled++;
-        $self->_log_bot(4, "PUBLIC(scriptdryrun): timer cancelled name=$name");
+        $cancelled += $self->cancel_script_timer($name);
     }
 
     return $cancelled;
+}
+
+# ---------------------------------------------------------------------------
+# mb529-B1: evenements de canal (join/part/topic) routes vers des scripts.
+#
+# Opt-in strict: un evenement ne tourne QUE s'il a une route EVENTS dediee
+# (pas de fallback SCRIPT). Le pipeline reutilise les portes existantes:
+# ACTION_MODE (dry-run/apply), ALLOW_IRC, garde de scope canal mb524 (le
+# contexte porte le canal de l'evenement), timers mb525 disponibles en apply.
+# Une route d'evenement est un scope explicite par definition, donc
+# APPLY_REQUIRE_SCOPE n'ajoute pas de porte supplementaire ici.
+#
+# Garde-fous specifiques aux evenements:
+#   - is_self: le bot n'execute jamais de script pour ses propres
+#     join/part/topic;
+#   - cooldown par (evenement, canal): au plus une execution par fenetre
+#     (EVENT_COOLDOWN, defaut 10s, borne 1..3600) — les rafales de
+#     join/part (netsplits) ne peuvent pas transformer le bridge en
+#     fork-bomb. Les evenements en exces sont comptes puis ignores.
+# ---------------------------------------------------------------------------
+
+sub _is_supported_channel_event {
+    my ($event) = @_;
+    return 0 unless defined $event && !ref($event);
+    return ($event eq 'join' || $event eq 'part' || $event eq 'topic') ? 1 : 0;
+}
+
+sub _bounded_positive_int {
+    my ($value, $default, $min, $max) = @_;
+
+    my $number = $default;
+    if (defined $value && !ref($value)) {
+        my $raw = "$value";
+        $raw =~ s/^\s+|\s+$//g;
+        $number = int($raw) if $raw =~ /\A[0-9]+\z/;
+    }
+
+    $number = $min if $number < $min;
+    $number = $max if $number > $max;
+    return $number;
+}
+
+sub event_routes {
+    my ($self) = @_;
+    return ref($self->{event_routes}) eq 'HASH' ? $self->{event_routes} : {};
+}
+
+sub event_routes_enabled {
+    my ($self) = @_;
+    return scalar(keys %{ $self->event_routes }) ? 1 : 0;
+}
+
+sub event_route_list {
+    my ($self) = @_;
+    return sort keys %{ $self->event_routes };
+}
+
+sub event_cooldown {
+    my ($self) = @_;
+    return $self->{event_cooldown} || 10;
+}
+
+sub observed_events       { $_[0]->{observed_events}       || 0 }
+sub skipped_events        { $_[0]->{skipped_events}        || 0 }
+sub event_cooldown_skips  { $_[0]->{event_cooldown_skips}  || 0 }
+
+sub observe_channel_event {
+    my ($self, $event, $ctx) = @_;
+
+    $self->{observed_events}++;
+
+    my $bot = $self->{bot};
+
+    unless (_is_supported_channel_event($event)) {
+        $self->{skipped_events}++;
+        $self->{last_error} = 'unsupported channel event';
+        return undef;
+    }
+
+    unless ($self->plugin_enabled) {
+        $self->{skipped_events}++;
+        $self->{last_error} = 'ScriptDryRun plugin is disabled';
+        return undef;
+    }
+
+    my $script_path = $self->event_routes->{$event};
+    unless (defined $script_path && length "$script_path") {
+        $self->{skipped_events}++;
+        $self->{last_error} = "no script routed for event '$event'";
+        return undef;
+    }
+
+    my $channel = _ctx_scalar_value($ctx, 'channel', 'target');
+    my $nick    = _ctx_scalar_value($ctx, 'nick', 'sender');
+    my $is_self = 0;
+    if (ref($ctx) eq 'HASH') {
+        $is_self = $ctx->{is_self} ? 1 : 0;
+    }
+
+    if ($is_self) {
+        $self->{skipped_events}++;
+        $self->{last_error} = "self $event event is never routed to scripts";
+        return undef;
+    }
+
+    unless (defined $channel && length "$channel") {
+        $self->{skipped_events}++;
+        $self->{last_error} = "channel event '$event' without a channel";
+        return undef;
+    }
+
+    # Anti-tempete: cooldown par (evenement, canal).
+    my $now = time();
+    my $chan_key = lc "$channel";
+    my $last_run = $self->{event_last_run}{$event}{$chan_key} || 0;
+    if (($now - $last_run) < $self->event_cooldown) {
+        $self->{skipped_events}++;
+        $self->{event_cooldown_skips}++;
+        $self->{last_error} = "event '$event' on $channel is cooling down";
+        return undef;
+    }
+
+    if ($self->action_mode eq 'apply') {
+        unless ($bot && $bot->can('script_runner') && $bot->script_runner && $bot->script_runner->can('run_script')) {
+            $self->{skipped_events}++;
+            $self->{last_error} = 'script runner is not initialized';
+            return undef;
+        }
+        unless ($bot->can('script_action_runner') && $bot->script_action_runner && $bot->script_action_runner->can('apply_actions')) {
+            $self->{skipped_events}++;
+            $self->{last_error} = 'script action runner cannot apply actions';
+            return undef;
+        }
+    }
+    else {
+        unless ($bot && $bot->can('run_script_actions_dry')) {
+            $self->{skipped_events}++;
+            $self->{last_error} = 'bot cannot run script actions dry';
+            return undef;
+        }
+    }
+
+    # Le cooldown demarre a l'ACCEPTATION (pas au succes): un script qui
+    # echoue en boucle ne doit pas etre relance a chaque join d'une rafale.
+    $self->{event_last_run}{$event}{$chan_key} = $now;
+
+    $self->_log_bot(4, "PUBLIC(scriptdryrun): accepted event=$event channel=$channel script=$script_path mode=" . $self->action_mode . " allow_irc=" . $self->allow_irc);
+
+    my %data = (
+        channel => $channel,
+        target  => $channel,
+        nick    => $nick,
+        args    => [],
+    );
+    for my $extra (qw(ident host message topic)) {
+        my $value = _ctx_scalar_value($ctx, $extra);
+        $data{$extra} = $value if defined $value && length "$value";
+    }
+
+    my $result;
+    my $label = "event:$event";
+
+    if ($self->action_mode eq 'apply') {
+        my $run_started_at = time();
+        my $script_result  = $bot->script_runner->run_script($script_path, $event, %data);
+        $self->_log_script_result($label, $run_started_at, $script_result);
+
+        my $context = {
+            event   => $event,
+            channel => $data{channel},
+            target  => $data{target},
+            nick    => $data{nick},
+            args    => $data{args},
+        };
+
+        my $apply_started_at = time();
+        my $action_plan = $bot->script_action_runner->apply_actions(
+            $script_result,
+            $context,
+            apply       => 1,
+            allow_irc   => $self->allow_irc,
+            timer_depth => 0,
+            schedule_timer => sub {
+                return $self->_schedule_script_timer($script_path, \%data, @_);
+            },
+        );
+        $self->_log_action_plan($label, $apply_started_at, $action_plan);
+
+        $result = {
+            ok            => ($script_result->{ok} && $action_plan->{applied_ok}) ? 1 : 0,
+            dry_run       => 0,
+            action_mode   => 'apply',
+            allow_irc     => $self->allow_irc,
+            event         => $event,
+            script_result => $script_result,
+            action_plan   => $action_plan,
+        };
+    }
+    else {
+        my $run_started_at = time();
+        $result = $bot->run_script_actions_dry($script_path, $event, %data);
+        if (ref($result) eq 'HASH') {
+            $result->{action_mode} = 'dry-run';
+            $result->{allow_irc}   = $self->allow_irc;
+            $result->{event}       = $event;
+        }
+        my $script_result = ref($result) eq 'HASH' ? $result->{script_result} : undef;
+        my $action_plan   = ref($result) eq 'HASH' ? $result->{action_plan}   : undef;
+        $self->_log_script_result($label, $run_started_at, $script_result);
+        $self->_log_action_plan($label, $run_started_at, $action_plan);
+    }
+
+    $self->{last_result} = $result;
+    $self->{last_error}  = undef;
+
+    return $result;
 }
 
 sub action_mode_raw {

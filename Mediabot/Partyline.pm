@@ -2128,7 +2128,7 @@ sub _do_login {
 # +---------------------------------------------------------------------------+
 
 # ---------------------------------------------------------------------------
-# .scriptdryrun [status|last|config] - read-only ScriptDryRun plugin visibility
+# .scriptdryrun [status|last|config|timers|canceltimers] - ScriptDryRun plugin visibility
 sub _cmd_scriptdryrun {
     my ($self, $stream, $id, $arg) = @_;
 
@@ -2148,6 +2148,9 @@ sub _cmd_scriptdryrun {
     # mb180-B1: read-only partyline visibility for the ScriptDryRun bridge.
     # This command never loads plugins, executes scripts, applies actions,
     # sends IRC messages, creates timers or touches the database.
+    # mb527-B1: timers/canceltimers extend this with pending-timer visibility
+    # and explicit cancellation. Cancellation only STOPS armed timers and
+    # frees their pending slots; it never creates or executes anything.
     if ($mode eq 'config') {
         $stream->write("ScriptDryRun config:\r\n");
         $stream->write("  plugin module: Mediabot::Plugin::ScriptDryRun\r\n");
@@ -2198,8 +2201,64 @@ sub _cmd_scriptdryrun {
         return;
     }
 
+    if ($mode eq 'timers' || $mode eq 'canceltimers') {
+        unless ($plugin) {
+            $stream->write("ScriptDryRun: not loaded\r\n");
+            $stream->write("  hint: load Mediabot::Plugin::ScriptDryRun explicitly or enable plugin autoload\r\n");
+            return;
+        }
+
+        if ($mode eq 'canceltimers') {
+            my $cancelled = eval {
+                $plugin->can('cancel_script_timers') ? $plugin->cancel_script_timers : 0;
+            } || 0;
+            $stream->write("ScriptDryRun timers cancelled: $cancelled\r\n");
+            return;
+        }
+
+        # mb527-B1: instantane en lecture seule des timers armes par les
+        # scripts. Le plafond et le compteur de slots viennent du runner pour
+        # exposer toute incoherence entre les deux couches.
+        my @timers = eval {
+            $plugin->can('script_timer_list') ? $plugin->script_timer_list : ();
+        };
+        @timers = () unless @timers && ref($timers[0]) eq 'HASH';
+
+        my $runner = eval {
+            $bot->can('script_action_runner') ? $bot->script_action_runner : undef;
+        };
+        my $cap = eval {
+            $runner && $runner->can('max_pending_timers') ? $runner->max_pending_timers : undef;
+        };
+        my $runner_pending = eval {
+            $runner && $runner->can('pending_timer_count') ? $runner->pending_timer_count : undef;
+        };
+
+        my $pending = scalar @timers;
+        $stream->write("ScriptDryRun timers:\r\n");
+        $stream->write("  pending: $pending" . (defined $cap ? " (cap $cap)" : '') . "\r\n");
+        if (defined $runner_pending && $runner_pending != $pending) {
+            $stream->write("  runner_pending: $runner_pending (mismatch)\r\n");
+        }
+
+        for my $t (@timers) {
+            my %safe;
+            for my $field (qw(name delay remaining channel nick command script)) {
+                my $value = $t->{$field};
+                $value = '' unless defined $value && !ref($value);
+                $value =~ s/[\r\n]+/ /g;
+                $safe{$field} = length($value) ? $value : '-';
+            }
+            $stream->write("  $safe{name}: remaining=$safe{remaining}s delay=$safe{delay}s"
+                . " channel=$safe{channel} nick=$safe{nick} command=$safe{command}"
+                . " script=$safe{script}\r\n");
+        }
+
+        return;
+    }
+
     if ($mode ne 'status' && $mode ne 'last') {
-        $stream->write("Usage: .scriptdryrun [status|last|config]\r\n");
+        $stream->write("Usage: .scriptdryrun [status|last|config|timers|canceltimers]\r\n");
         return;
     }
 
@@ -2249,6 +2308,22 @@ sub _cmd_scriptdryrun {
     # mb188-B1: expose ScriptDryRun ACTION_MODE / ALLOW_IRC state in read-only partyline status.
     $stream->write("  action_mode: $action_mode\r\n");
     $stream->write("  allow_irc: " . ($allow_irc ? 'yes' : 'no') . "\r\n");
+    # mb529-B1: expose channel-event routing state (join/part/topic bridge).
+    my $event_routes_on = eval { $plugin->can('event_routes_enabled') ? $plugin->event_routes_enabled : 0 } ? 1 : 0;
+    $stream->write("  event_routes: " . ($event_routes_on ? 'enabled' : 'disabled') . "\r\n");
+    if ($event_routes_on) {
+        my $event_map = eval { $plugin->can('event_routes') ? $plugin->event_routes : {} };
+        $event_map = {} unless ref($event_map) eq 'HASH';
+        my @event_pairs = map { $_ . '=' . ($event_map->{$_} // '') } sort keys %$event_map;
+        $stream->write("  event_map: " . (@event_pairs ? join(',', @event_pairs) : 'none') . "\r\n");
+        my $cooldown = eval { $plugin->can('event_cooldown') ? $plugin->event_cooldown : 10 } || 10;
+        my $observed_events = eval { $plugin->can('observed_events') ? $plugin->observed_events : 0 } || 0;
+        my $skipped_events  = eval { $plugin->can('skipped_events') ? $plugin->skipped_events : 0 } || 0;
+        my $cooldown_skips  = eval { $plugin->can('event_cooldown_skips') ? $plugin->event_cooldown_skips : 0 } || 0;
+        $stream->write("  event_cooldown: ${cooldown}s\r\n");
+        $stream->write("  observed_events: $observed_events\r\n");
+        $stream->write("  skipped_events: $skipped_events (cooldown: $cooldown_skips)\r\n");
+    }
     # mb190-B1: expose ScriptDryRun apply-scope guard state without executing scripts.
     $stream->write("  apply_require_scope: " . ($scope_guard ? 'yes' : 'no') . "\r\n");
     $stream->write("  apply_scope_restricted: " . ($scope_restricted ? 'yes' : 'no') . "\r\n");
@@ -2484,7 +2559,7 @@ sub _cmd_help {
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
       . "  .plugins [loaded|config] - show plugin manager/autoload status\r\n"
-      . "  .scriptdryrun [status|last|config] - show external script bridge status and last run\r\n"
+      . "  .scriptdryrun [status|last|config|timers|canceltimers] - show external script bridge status and last run, pending timers\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary)\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"
       . "  .top [n]            - top N speakers across all channels (default 5)\r\n"

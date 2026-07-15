@@ -143,7 +143,8 @@ my $case = sub {
 
     $assert->($src =~ /mb180-B1: read-only partyline visibility for the ScriptDryRun bridge/,
         'Partyline source contains mb180 marker');
-    $assert->($src =~ /\.scriptdryrun \[status\|last\|config\]/,
+    # mb527-B1: la ligne d'aide liste desormais aussi timers/canceltimers.
+    $assert->($src =~ /\.scriptdryrun \[status\|last\|config\|timers\|canceltimers\]/,
         'Partyline help contains .scriptdryrun');
     $assert->($src =~ /_cmd_scriptdryrun/,
         'Partyline has _cmd_scriptdryrun implementation');

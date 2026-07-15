@@ -12,6 +12,31 @@ release. Development after this release continues on the `3.4dev` line.
 
 ### Added — plugin bridge (Perl/Python/Tcl scripts)
 
+- **Channel-event routing** (mb529). The bridge can now route `join`, `part`
+  and `topic` channel events to scripts via the new opt-in `EVENTS` key
+  (`EVENTS=join=examples/greet.pl, ...`), one script per event and no
+  `SCRIPT` fallback. The core emits `channel_<event>_observed` on the
+  EventBus from the JOIN/PART/TOPIC handlers (fail-safe, no-op without
+  listeners). Event output passes through the same ACTION_MODE / ALLOW_IRC /
+  channel-scope guards as command output, and event scripts may arm timers.
+  Guardrails: the bot's own events never trigger scripts, and a per-event,
+  per-channel cooldown (`EVENT_COOLDOWN`, default 10s, bounded 1-3600)
+  counts and ignores join/part bursts (netsplits) instead of forking on each.
+  `.scriptdryrun status` exposes the event map, cooldown and counters.
+
+- **Shipped timer reference example** (mb528). `examples/remind.pl`, routed as
+  `premind` in the sample configuration, demonstrates the full timer
+  lifecycle: validation and confirmation on the command, one pending reminder
+  per nick (protocol-safe timer names derived from the nick), delivery on the
+  deferred `timer` event with the message rebuilt from the original args, and
+  no timer chaining. Documented in the plugin README and sample config.
+
+- **Partyline visibility for script timers** (mb527). `.scriptdryrun timers`
+  lists armed timers (name, remaining/total delay, origin
+  channel/nick/command, script) plus the runner's pending-slot cap;
+  `.scriptdryrun canceltimers` cancels every armed timer and frees its
+  pending slot. Cancellation never creates or executes anything.
+
 - **Timer actions are now applied** (mb525). In `ACTION_MODE=apply`, a script
   returning `{ "type": "timer", "name": "...", "delay": N }` re-runs the same
   script after N seconds (1–3600) with the event `timer`; deferred

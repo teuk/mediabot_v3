@@ -19,6 +19,7 @@ like normal Mediabot commands. The repository ships seven examples:
 | `p8ball` | Tcl | Magic 8-Ball |
 | `pchoose` | Perl | random choice helper |
 | `pcalc` | Python | safe AST-based arithmetic calculator |
+| `premind` | Perl | one-shot reminder demonstrating timer actions |
 
 The `p` aliases are intentional. Mediabot already has richer internal `roll`,
 `8ball`, `choose` and `calc` commands; routing the same names in apply mode would shadow
@@ -32,8 +33,8 @@ AUTOLOAD=1
 ENABLED=Mediabot::Plugin::ScriptDryRun
 
 [plugins.ScriptDryRun]
-COMMANDS=hello,pyhello,tclhello,proll,p8ball,pchoose,pcalc
-ROUTES=hello=examples/hello_perl.pl, pyhello=examples/hello_python.py, tclhello=examples/hello_tcl.tcl, proll=examples/roll.py, p8ball=examples/eightball.tcl, pchoose=examples/choose.pl, pcalc=examples/calc.py
+COMMANDS=hello,pyhello,tclhello,proll,p8ball,pchoose,pcalc,premind
+ROUTES=hello=examples/hello_perl.pl, pyhello=examples/hello_python.py, tclhello=examples/hello_tcl.tcl, proll=examples/roll.py, p8ball=examples/eightball.tcl, pchoose=examples/choose.pl, pcalc=examples/calc.py, premind=examples/remind.pl
 ACTION_MODE=apply
 ALLOW_IRC=yes
 APPLY_REQUIRE_SCOPE=yes
@@ -105,6 +106,36 @@ Timer guardrails:
 - timers are in-memory only and do not survive a bot restart or plugin reload;
 - pending timers are cancelled when the plugin is unloaded or replaced.
 
+`examples/remind.pl` (routed as `premind`) is the reference implementation of
+this lifecycle: confirmation + timer on the command, delivery on the deferred
+`timer` event, one pending reminder per nick.
+
+## Channel events (join/part/topic)
+
+Beyond public commands, the bridge can route channel lifecycle events to
+scripts, strictly opt-in and one script per event:
+
+```ini
+EVENTS=join=examples/greet.pl, topic=examples/topicwatch.pl
+EVENT_COOLDOWN=10
+```
+
+The routed script is executed with the matching event name (`join`, `part` or
+`topic`); the envelope carries `channel`, `nick` and, where relevant, `ident`,
+`host`, the part `message` or the new `topic` (`args` is always present and
+empty). Output goes through the same `ACTION_MODE`, `ALLOW_IRC` and
+channel-scope guards as command output, and event scripts may arm timers.
+
+Event guardrails:
+
+- no `SCRIPT` fallback: an event without an `EVENTS` route never runs;
+- the bot's own join/part/topic never trigger scripts;
+- at most one run per event per channel per `EVENT_COOLDOWN` window
+  (1-3600s, default 10): join/part bursts from netsplits are counted and
+  ignored, never forked;
+- an `EVENTS` route is an explicit scope, so `APPLY_REQUIRE_SCOPE` adds no
+  extra gate here.
+
 ## Safety boundary
 
 The bridge validates script paths, prevents directory/symlink escape, chooses a
@@ -119,4 +150,10 @@ trusted local extensions, not a sandbox for untrusted code.
 .scriptdryrun status
 .scriptdryrun last
 .scriptdryrun config
+.scriptdryrun timers
+.scriptdryrun canceltimers
 ```
+
+`timers` lists armed script timers (name, remaining/total delay, origin
+channel/nick/command, script). `canceltimers` cancels every armed timer and
+frees its pending slot; it never creates or executes anything.

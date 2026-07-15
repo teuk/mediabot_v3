@@ -31,7 +31,9 @@ like($readme, qr/pcalc=examples\/calc\.py/,
 like($readme, qr/internal `roll`,\s*`8ball`, `choose` and `calc` commands/s,
     'README explains the internal calc collision');
 
-like($sample, qr/^#COMMANDS=hello,pyhello,tclhello,proll,p8ball,pchoose,pcalc$/m,
+# mb528-B1: la liste d'exemples continue apres pcalc (premind) ; le contrat
+# mb299 reste "pcalc est dans le scope d'exemple", pas "pcalc est le dernier".
+like($sample, qr/^#COMMANDS=hello,pyhello,tclhello,proll,p8ball,pchoose,pcalc(?:,|$)/m,
     'sample command scope includes pcalc');
 like($sample, qr/pcalc=examples\/calc\.py/,
     'sample route map includes calc.py');

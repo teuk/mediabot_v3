@@ -434,6 +434,29 @@ sub emit_event_report {
     return $report;
 }
 
+# mb529-B1: single core entry point for observed channel lifecycle events.
+# Called (eval-guarded) from the mediabot.pl JOIN/PART/TOPIC handlers; builds a
+# small scalar-only context and emits channel_<type>_observed on the EventBus.
+# Listener errors are isolated by emit_event_report; with no listeners this is
+# a no-op, so the historical IRC handlers keep their exact behavior.
+my %OBSERVABLE_CHANNEL_EVENTS = map { $_ => 1 } qw(join part topic);
+
+sub observe_channel_event {
+    my ($self, $type, %data) = @_;
+
+    return undef unless defined $type && !ref($type) && $OBSERVABLE_CHANNEL_EVENTS{$type};
+
+    my $ctx = { event_type => $type };
+    for my $key (qw(channel nick ident host message topic is_self)) {
+        my $value = $data{$key};
+        next unless defined $value && !ref($value);
+        $ctx->{$key} = "$value";
+    }
+    $ctx->{is_self} = $ctx->{is_self} ? 1 : 0;
+
+    return $self->emit_event_report("channel_${type}_observed", $ctx);
+}
+
 
 # Register the first small batch of built-in public commands in the new
 # CommandRegistry. mb166-B1 deliberately starts with low-risk core/help commands
