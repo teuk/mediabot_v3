@@ -14,8 +14,15 @@ use Encode qw(encode);
 #
 # apply_actions_dry() validates script-returned actions and builds a structured
 # plan without side effects. apply_actions() can apply log/reply/notice actions
-# only when apply => 1; IRC output also requires allow_irc => 1. Timer actions are
-# still rejected as not implemented, and this module never writes to the DB.
+# only when apply => 1; IRC output also requires allow_irc => 1.
+#
+# mb525-B1: timer actions are applied through an INJECTED scheduler callback
+# (schedule_timer => sub { ... }) supplied by the caller (Plugin::ScriptDryRun).
+# This module owns the timer POLICY only: pending-name bookkeeping, a
+# max_pending_timers cap, duplicate-name rejection, and a timer_depth guard so
+# a timer-invoked script run can never schedule further timers (no chains).
+# Without an injected scheduler, timer actions fail closed at apply time.
+# This module never writes to the DB.
 # ---------------------------------------------------------------------------
 
 sub _constructor_positive_int {
@@ -50,11 +57,18 @@ sub new {
     # avec max_actions. Defaut 20 (comportement historique inchange).
     my $max_errors = _constructor_positive_int($args{max_errors}, 20, 1, 100);
 
+    # mb525-B1: plafond des timers en attente. Un script ne doit pas pouvoir
+    # saturer la boucle du bot avec des rappels differes; au-dela du plafond,
+    # les nouvelles actions timer sont rejetees a l'application (fail closed).
+    my $max_pending_timers = _constructor_positive_int($args{max_pending_timers}, 4, 1, 20);
+
     return bless {
-        bot             => $args{bot},
-        max_text_length => $max_text_length,
-        max_actions     => $max_actions,
-        max_errors      => $max_errors,
+        bot                => $args{bot},
+        max_text_length    => $max_text_length,
+        max_actions        => $max_actions,
+        max_errors         => $max_errors,
+        max_pending_timers => $max_pending_timers,
+        pending_timers     => {},
         allowed_actions => {
             reply  => 1,
             notice => 1,
@@ -82,6 +96,36 @@ sub max_actions {
 sub max_errors {
     my ($self) = @_;
     return $self->{max_errors} || 20;
+}
+
+sub max_pending_timers {
+    my ($self) = @_;
+    return $self->{max_pending_timers} || 4;
+}
+
+sub pending_timer_count {
+    my ($self) = @_;
+    return scalar keys %{ $self->{pending_timers} || {} };
+}
+
+sub pending_timer_names {
+    my ($self) = @_;
+    return sort keys %{ $self->{pending_timers} || {} };
+}
+
+sub timer_pending {
+    my ($self, $name) = @_;
+    return 0 unless defined $name && !ref $name && length $name;
+    return exists $self->{pending_timers}{$name} ? 1 : 0;
+}
+
+# mb525-B1: liberer un slot de timer. Appele par l'ordonnanceur injecte quand
+# le timer expire ou est annule (dechargement du plugin). Retourne 1 si le nom
+# etait effectivement en attente.
+sub release_timer {
+    my ($self, $name) = @_;
+    return 0 unless defined $name && !ref $name && length $name;
+    return delete $self->{pending_timers}{$name} ? 1 : 0;
 }
 
 sub allowed_action_types {
@@ -139,6 +183,28 @@ sub _context_default_target {
     return undef;
 }
 
+# mb524-B1 + mb526-B1: identify the underlying IRC channel token, including
+# STATUSMSG targets such as @#channel, %#channel or +#channel.  The original
+# first-character-only check treated @#other as a nickname and therefore let a
+# script bypass the cross-channel scope guard.  Keep this helper local so the
+# action layer remains dependency-free.
+sub _channel_token_base {
+    my ($value) = @_;
+    return undef unless defined $value && !ref $value;
+
+    my $token = "$value";
+
+    # Common IRC STATUSMSG prefixes (~ & @ % +) may precede an ordinary
+    # channel token.  Greedy matching deliberately backtracks so a real
+    # channel beginning with & or + is preserved when no status prefix exists.
+    return $1 if $token =~ /\A[~&@%+]*([#&!+].*)\z/;
+    return undef;
+}
+
+sub _is_channel_token {
+    return defined _channel_token_base($_[0]) ? 1 : 0;
+}
+
 sub _bounded_text {
     my ($self, $text) = @_;
 
@@ -194,10 +260,11 @@ sub _bounded_timer_name {
     my $value = _trim($name);
     return (0, 'missing timer name') unless length $value;
 
-    # mb235-B1: timer action names are future runtime identifiers. Even though
-    # timer actions are not implemented yet, validate the JSON contract now so
-    # external Perl/Python/Tcl scripts cannot produce multiline, whitespace-rich
-    # or shell-looking timer names that would become dangerous later.
+    # mb235-B1: timer action names are future runtime identifiers. The JSON
+    # contract was validated here before timers were applied, so external
+    # Perl/Python/Tcl scripts could never produce multiline, whitespace-rich
+    # or shell-looking timer names. Since mb525 these names ARE the runtime
+    # identifiers used by the pending-timer bookkeeping; the guard is load-bearing.
     return (0, 'timer name contains forbidden control characters') if $value =~ /[\r\n\0]/;
     return (0, 'timer name contains whitespace') if $value =~ /\s/;
     return (0, 'timer name too long') if length($value) > 64;
@@ -227,6 +294,21 @@ sub validate_action {
 
         my ($target_ok, $target_err, $safe_target) = $self->_bounded_target($target);
         return (0, $target_err) unless $target_ok;
+
+        # mb524-B1: channel-scope guard. A script routed from a channel command
+        # may reply into that channel or privately to a nick, but it must NOT be
+        # able to push messages into a DIFFERENT channel (cross-channel spam /
+        # harassment vector). If the resolved target is a channel and a channel
+        # context exists, the target must equal the command's channel. Private
+        # (nick) targets and the no-context case are unaffected.
+        my $ctx_channel = $self->_context_default_target($context);
+        my $ctx_channel_base    = _channel_token_base($ctx_channel);
+        my $target_channel_base = _channel_token_base($safe_target);
+        if (defined $ctx_channel_base
+            && defined $target_channel_base
+            && lc($target_channel_base) ne lc($ctx_channel_base)) {
+            return (0, "target channel is out of scope");
+        }
 
         return (1, undef, {
             type   => $type,
@@ -406,6 +488,20 @@ sub apply_actions {
     my $apply     = $opts{apply}     ? 1 : 0;
     my $allow_irc = $opts{allow_irc} ? 1 : 0;
 
+    # mb525-B1: application des timers.
+    #   schedule_timer = coderef injecte par l'appelant; recoit l'action
+    #   planifiee et le contexte, retourne (ok, err). Sans coderef, les
+    #   actions timer echouent explicitement a l'application.
+    #   timer_depth    = profondeur de rappel. Une execution declenchee par un
+    #   timer passe timer_depth => 1 et ne peut PAS replanifier de timer
+    #   (aucune chaine auto-entretenue possible).
+    my $schedule_timer = ref($opts{schedule_timer}) eq 'CODE' ? $opts{schedule_timer} : undef;
+    my $timer_depth    = 0;
+    if (defined $opts{timer_depth} && !ref($opts{timer_depth})
+        && "$opts{timer_depth}" =~ /\A[0-9]+\z/) {
+        $timer_depth = int($opts{timer_depth});
+    }
+
     my $plan = $self->apply_actions_dry($script_result, $context);
 
     # mb186-B1: real action application remains behind explicit gates.
@@ -465,11 +561,86 @@ sub apply_actions {
         }
 
         if ($action->{type} eq 'timer') {
-            push @apply_errors, {
-                index => $idx,
-                type  => 'timer',
-                error => 'timer actions are not implemented yet',
-            };
+            # mb525-B1: la couche action garde la POLITIQUE (profondeur, nom
+            # deja en attente, plafond); l'armement reel du timer appartient a
+            # l'ordonnanceur injecte. Un timer applique NE requiert PAS
+            # allow_irc: le rappel differe repassera lui-meme par les portes
+            # apply/allow_irc au moment ou il produira ses actions.
+            if ($timer_depth >= 1) {
+                push @apply_errors, {
+                    index => $idx,
+                    type  => 'timer',
+                    error => 'timer chaining is not allowed',
+                };
+                next;
+            }
+
+            unless ($schedule_timer) {
+                push @apply_errors, {
+                    index => $idx,
+                    type  => 'timer',
+                    error => 'timer actions require a scheduler',
+                };
+                next;
+            }
+
+            my $name = $action->{name};
+
+            if ($self->timer_pending($name)) {
+                push @apply_errors, {
+                    index => $idx,
+                    type  => 'timer',
+                    error => 'timer name is already pending',
+                };
+                next;
+            }
+
+            if ($self->pending_timer_count >= $self->max_pending_timers) {
+                push @apply_errors, {
+                    index => $idx,
+                    type  => 'timer',
+                    error => 'too many pending timers',
+                };
+                next;
+            }
+
+            # Reserver le slot AVANT d'armer: l'ordonnanceur (et son rappel)
+            # doit voir un etat coherent. En cas d'echec d'armement, le slot
+            # est libere immediatement.
+            $self->{pending_timers}{$name} = 1;
+
+            my ($sched_ok, $sched_err);
+            {
+                local $@;
+                my $eval_ok = eval {
+                    ($sched_ok, $sched_err) = $schedule_timer->($action, $context);
+                    1;
+                };
+                unless ($eval_ok) {
+                    $sched_ok  = 0;
+                    $sched_err = $@ || 'timer scheduler failed';
+                    $sched_err =~ s/[\r\n]+/ /g;
+                }
+            }
+
+            if ($sched_ok) {
+                push @applied, {
+                    index => $idx,
+                    type  => 'timer',
+                    name  => $name,
+                    delay => $action->{delay},
+                };
+            }
+            else {
+                $self->release_timer($name);
+                push @apply_errors, {
+                    index => $idx,
+                    type  => 'timer',
+                    error => (defined $sched_err && length $sched_err)
+                        ? $sched_err
+                        : 'timer scheduling failed',
+                };
+            }
             next;
         }
 

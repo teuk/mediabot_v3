@@ -14,35 +14,40 @@ BEGIN {
     # Keep the test runnable in the lightweight audit container. On the real
     # server the actual modules win; these fallbacks are installed only when a
     # dependency is unavailable.
+    #
+    # mb525-B2: the fallbacks MUST be installed through runtime glob
+    # assignments, never through named `sub` declarations inside a stub
+    # `package` block. Named subs are compiled UNCONDITIONALLY, so merely
+    # compiling this test used to overwrite the REAL
+    # IO::Async::Timer::Countdown::new/start/stop (and JSON::MaybeXS/Try::Tiny
+    # imports) for every later test in the shared harness process — which
+    # silently killed real timers armed by the mb525 script-timer bridge.
+    no strict 'refs';
+
     eval { require JSON::MaybeXS; 1 } or do {
         require JSON::PP;
-        package JSON::MaybeXS;
-        sub import {
+        *{'JSON::MaybeXS::import'} = sub {
             my $caller = caller;
-            no strict 'refs';
             *{"${caller}::encode_json"} = \&JSON::PP::encode_json;
             *{"${caller}::decode_json"} = \&JSON::PP::decode_json;
-        }
+        };
         $INC{'JSON/MaybeXS.pm'} = __FILE__;
     };
 
     eval { require Try::Tiny; 1 } or do {
-        package Try::Tiny;
-        sub import { return 1 }
+        *{'Try::Tiny::import'} = sub { return 1 };
         $INC{'Try/Tiny.pm'} = __FILE__;
     };
 
     eval { require IO::Async::Timer::Countdown; 1 } or do {
-        package IO::Async::Timer::Countdown;
-        sub new   { bless {}, shift }
-        sub start { 1 }
-        sub stop  { 1 }
+        *{'IO::Async::Timer::Countdown::new'}   = sub { bless {}, shift };
+        *{'IO::Async::Timer::Countdown::start'} = sub { 1 };
+        *{'IO::Async::Timer::Countdown::stop'}  = sub { 1 };
         $INC{'IO/Async/Timer/Countdown.pm'} = __FILE__;
     };
 
     eval { require IO::Async::Stream; 1 } or do {
-        package IO::Async::Stream;
-        sub new { bless {}, shift }
+        *{'IO::Async::Stream::new'} = sub { bless {}, shift };
         $INC{'IO/Async/Stream.pm'} = __FILE__;
     };
 }

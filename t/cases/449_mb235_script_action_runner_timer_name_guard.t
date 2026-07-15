@@ -73,9 +73,11 @@ my $valid_timer = $runner->apply_actions(
     allow_irc => 1,
 );
 
+# mb525-B1: les timers sont appliques via un ordonnanceur injecte; sans
+# schedule_timer, l'application reste fail-closed avec une erreur explicite.
 ok($valid_timer->{ok}, 'valid timer still plans successfully');
-ok(!$valid_timer->{applied_ok}, 'valid timer still is not applied because timers are not implemented yet');
-like(($valid_timer->{apply_errors}[0]{error} || ''), qr/not implemented/, 'valid timer still reports not implemented at apply time');
+ok(!$valid_timer->{applied_ok}, 'valid timer is not applied without an injected scheduler');
+like(($valid_timer->{apply_errors}[0]{error} || ''), qr/require a scheduler/, 'valid timer reports scheduler-required at apply time');
 
 open my $fh, '<', 'Mediabot/ScriptActionRunner.pm' or die "cannot read ScriptActionRunner.pm: $!";
 my $src = do { local $/; <$fh> };

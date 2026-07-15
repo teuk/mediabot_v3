@@ -82,8 +82,28 @@ The script writes one JSON object to STDOUT:
 ```
 
 Supported planned action types are `reply`, `notice`, `log` and `timer`.
-`timer` is validated but is not implemented for application yet. Reply/notice
-output requires both `ACTION_MODE=apply` and `ALLOW_IRC=yes`.
+Reply/notice output requires both `ACTION_MODE=apply` and `ALLOW_IRC=yes`.
+
+### Timer actions
+
+```json
+{"type": "timer", "name": "my_reminder", "delay": 30}
+```
+
+In apply mode, a `timer` action re-runs the **same script** after `delay`
+seconds (1–3600) with the event `timer`. The deferred invocation receives the
+original `channel`/`target`/`nick`/`command`/`args` data plus `timer_name` and
+`timer_delay`, so a script can branch on `event` to produce its deferred
+output. Deferred `reply`/`notice` actions pass through the same `ALLOW_IRC`
+and channel-scope guards as direct output.
+
+Timer guardrails:
+
+- a timer-invoked run can **never** schedule further timers (no chains);
+- a `name` already pending is rejected until it fires or is cancelled;
+- at most 4 timers may be pending globally in the current bot process;
+- timers are in-memory only and do not survive a bot restart or plugin reload;
+- pending timers are cancelled when the plugin is unloaded or replaced.
 
 ## Safety boundary
 

@@ -8,6 +8,37 @@ release. Development after this release continues on the `3.4dev` line.
 
 ---
 
+## [Unreleased] — 3.4dev
+
+### Added — plugin bridge (Perl/Python/Tcl scripts)
+
+- **Timer actions are now applied** (mb525). In `ACTION_MODE=apply`, a script
+  returning `{ "type": "timer", "name": "...", "delay": N }` re-runs the same
+  script after N seconds (1–3600) with the event `timer`; deferred
+  reply/notice output passes through the same `ALLOW_IRC` and channel-scope
+  guards as direct output. Guardrails: a timer-invoked run can never schedule
+  further timers, duplicate pending names are rejected, at most 4 timers may
+  be pending at once (runner cap, bounded at 20), and pending timers are
+  cancelled when the plugin is unloaded or replaced.
+
+### Fixed
+
+- Script actions can no longer target a different channel than the one the
+  command came from (mb524, cross-channel spam/harassment vector).
+- Test-suite landmine: three release-contract tests installed dependency
+  fallback stubs through named `sub` declarations, which are compiled
+  unconditionally and silently overwrote the real
+  `IO::Async::Timer::Countdown` methods for every later test in the shared
+  harness process (mb525). Fallbacks are now runtime glob assignments.
+- Script channel scoping now also recognizes IRC `STATUSMSG` targets such as
+  `@#channel` and `%#channel`; these prefixes can no longer bypass the
+  cross-channel guard (mb526).
+- The mb525 timer test now creates its script fixture in a temporary directory
+  instead of relying on `t/tmp_mb*_scripts`, which is intentionally protected
+  as generated local state by the commit workflow (mb526).
+
+---
+
 ## [3.3] — 2026-07-12
 
 > Released after validation on the development instance and a complete fresh

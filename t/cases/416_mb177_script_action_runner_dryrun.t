@@ -105,7 +105,7 @@ my $case = sub {
     my $dry = $runner->apply_actions_dry({
         response => {
             actions => [
-                { type => 'reply', target => '#x', text => 'dry' },
+                { type => 'reply', target => '#test', text => 'dry' },
             ],
         },
     }, $context);

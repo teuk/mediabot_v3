@@ -72,11 +72,13 @@ my $object_reply_target_fallback = plan_reply_without_target(
 ok($object_reply_target_fallback->{ok}, 'object context can fall back to scalar reply_target method');
 is($object_reply_target_fallback->{planned}[0]{target}, 'Teuk', 'reply_target method fallback is preserved');
 
+# mb524: a nick target is never channel-scoped, so it still demonstrates that an
+# explicit action target is preserved over a (malformed) context default.
 my $explicit_target_wins = $runner->plan_actions([
-    { type => 'reply', text => 'explicit target', target => '#explicit' },
+    { type => 'reply', text => 'explicit target', target => 'ExplicitNick' },
 ], { channel => [], target => '#fallback' });
 ok($explicit_target_wins->{ok}, 'explicit action target still wins over malformed context');
-is($explicit_target_wins->{planned}[0]{target}, '#explicit', 'explicit action target is unchanged');
+is($explicit_target_wins->{planned}[0]{target}, 'ExplicitNick', 'explicit action target is unchanged');
 
 my $notice_default = $runner->plan_actions([
     { type => 'notice', text => 'notice through context' },

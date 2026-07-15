@@ -120,12 +120,16 @@ my $case = sub {
         },
     };
 
+    # mb525-B1: les timers sont desormais appliques via un ordonnanceur INJECTE
+    # (schedule_timer => coderef). Sans ordonnanceur, l'application echoue
+    # toujours explicitement (fail closed) — le contrat mb186 "apply gate"
+    # reste donc verifie, seul le message d'erreur a change.
     my $timer_apply = $runner->apply_actions($timer_result, {}, apply => 1, allow_irc => 1);
 
     $assert->(!$timer_apply->{applied_ok},
-        'timer action is not applied yet');
-    $assert->($timer_apply->{apply_errors}[0]{error} =~ /not implemented/,
-        'timer action returns explicit not implemented error');
+        'timer action is not applied without an injected scheduler');
+    $assert->($timer_apply->{apply_errors}[0]{error} =~ /require a scheduler/,
+        'timer action returns explicit scheduler-required error');
 
     my $bad_result = {
         response => {

@@ -70,7 +70,7 @@ ok(!$ctx_comma_plan->{ok}, 'comma-separated context default target is rejected')
 is(scalar @{ $ctx_comma_plan->{planned} || [] }, 0, 'bad context target plans no action');
 
 my $safe_channel_plan = $runner->apply_actions(
-    result_for({ type => 'reply', target => '#safe', text => 'hello channel' }),
+    result_for({ type => 'reply', target => '#fallback', text => 'hello channel' }),
     { channel => '#fallback' },
     apply     => 1,
     allow_irc => 1,
@@ -79,7 +79,7 @@ my $safe_channel_plan = $runner->apply_actions(
 ok($safe_channel_plan->{ok}, 'normal channel target remains valid');
 ok($safe_channel_plan->{applied_ok}, 'normal channel target still applies');
 is(scalar @{ $irc->{sent} }, 1, 'safe channel target sends one IRC message');
-is_deeply($irc->{sent}[0], [ 'PRIVMSG', undef, '#safe', 'hello channel' ], 'safe channel uses argv-style PRIVMSG payload');
+is_deeply($irc->{sent}[0], [ 'PRIVMSG', undef, '#fallback', 'hello channel' ], 'safe channel uses argv-style PRIVMSG payload');
 
 my $safe_nick_plan = $runner->apply_actions(
     result_for({ type => 'notice', target => 'TeuK', text => 'hello nick' }),
@@ -92,6 +92,19 @@ ok($safe_nick_plan->{ok}, 'normal nick target remains valid');
 ok($safe_nick_plan->{applied_ok}, 'normal nick target still applies');
 is(scalar @{ $irc->{sent} }, 2, 'safe nick target sends one more IRC message');
 is_deeply($irc->{sent}[1], [ 'NOTICE', undef, 'TeuK', 'hello nick' ], 'safe nick uses argv-style NOTICE payload');
+
+# mb524: a channel command must not be able to speak into a DIFFERENT channel.
+my $cross_channel_plan = $runner->apply_actions(
+    result_for({ type => 'reply', target => '#other', text => 'cross-channel attempt' }),
+    { channel => '#safe' },
+    apply     => 1,
+    allow_irc => 1,
+);
+
+ok(!$cross_channel_plan->{ok}, 'cross-channel target is rejected during planning');
+is(scalar @{ $cross_channel_plan->{planned} || [] }, 0, 'cross-channel target plans no action');
+is(scalar @{ $irc->{sent} }, 2, 'cross-channel target sends no extra IRC message');
+like(($cross_channel_plan->{errors}[0]{error} || ''), qr/out of scope/, 'cross-channel target reports out of scope');
 
 open my $fh, '<', 'Mediabot/ScriptActionRunner.pm' or die "cannot read ScriptActionRunner.pm: $!";
 my $src = do { local $/; <$fh> };

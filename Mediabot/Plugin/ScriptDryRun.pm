@@ -86,6 +86,9 @@ sub register {
         filtered_public => 0,
         last_result     => undef,
         last_error      => undef,
+        # mb525-B1: timers IO::Async actifs, indexes par nom de timer. Permet
+        # l'annulation propre au dechargement/remplacement du plugin.
+        active_timers   => {},
     }, $class;
 
     # mb261-B1: SCRIPT is a single script path, not a list-like option.
@@ -136,6 +139,11 @@ sub register {
 
 sub unregister {
     my ($self, %opts) = @_;
+
+    # mb525-B1: un plugin decharge ou remplace ne doit laisser derriere lui
+    # aucun timer arme; sinon un rappel differe executerait un script au nom
+    # d'une instance morte (et le slot pending resterait occupe a jamais).
+    $self->cancel_script_timers;
 
     my $entry = $self->{listener_entry};
     return 0 unless ref($entry) eq 'HASH';
@@ -753,8 +761,16 @@ sub observe_public_command {
         my $action_plan = $bot->script_action_runner->apply_actions(
             $script_result,
             $context,
-            apply     => 1,
-            allow_irc => $self->allow_irc,
+            apply       => 1,
+            allow_irc   => $self->allow_irc,
+            # mb525-B1: brancher l'ordonnanceur de timers. La politique
+            # (plafond, doublon, profondeur) reste dans ScriptActionRunner;
+            # ce plugin ne fait qu'armer le timer IO::Async et re-executer
+            # le MEME script avec event "timer" a l'expiration.
+            timer_depth    => 0,
+            schedule_timer => sub {
+                return $self->_schedule_script_timer($script_path, \%data, @_);
+            },
         );
 
         $self->_log_action_plan($command, (defined $apply_started_at ? $apply_started_at : $run_started_at), $action_plan);
@@ -789,6 +805,223 @@ sub observe_public_command {
     _ctx_mark_scriptdryrun_handled($ctx, $result, undef) if $owns_command;
 
     return $result;
+}
+
+# ---------------------------------------------------------------------------
+# mb525-B1: application des actions timer.
+#
+# Semantique: quand un script (Perl/Python/Tcl) retourne une action
+#   { type: "timer", name: "...", delay: N }
+# en ACTION_MODE=apply, le bridge arme un IO::Async::Timer::Countdown de N
+# secondes. A l'expiration, le MEME script est re-execute avec l'evenement
+# "timer" (donnees d'origine + timer_name/timer_delay) et ses actions
+# reply/notice/log repassent par les MEMES portes: apply, ALLOW_IRC, garde de
+# scope canal mb524. Le rappel est execute avec timer_depth => 1, donc un
+# script declenche par un timer ne peut jamais replanifier de timer.
+# ---------------------------------------------------------------------------
+
+sub _script_timer_loop {
+    my ($self) = @_;
+
+    my $bot = $self->{bot};
+    return undef unless $bot;
+
+    my $loop = eval { $bot->can('getLoop') ? $bot->getLoop : undef };
+    return $loop if $loop;
+
+    return eval { $bot->{loop} };
+}
+
+sub active_script_timer_count {
+    my ($self) = @_;
+    return scalar keys %{ $self->{active_timers} || {} };
+}
+
+sub _schedule_script_timer {
+    my ($self, $script_path, $data, $planned, $context) = @_;
+
+    return (0, 'planned timer is not a hash') unless ref($planned) eq 'HASH';
+
+    my $name  = $planned->{name};
+    my $delay = $planned->{delay};
+    return (0, 'planned timer is missing name or delay')
+        unless defined $name && length $name && defined $delay;
+
+    my $loop = $self->_script_timer_loop;
+    return (0, 'bot loop is unavailable') unless $loop;
+
+    my $io_async_ok = eval { require IO::Async::Timer::Countdown; 1 };
+    return (0, 'IO::Async timer support is unavailable') unless $io_async_ok;
+
+    # Copie defensive des donnees d'origine: le contexte du rappel differe ne
+    # doit pas pouvoir etre mute par la suite du traitement de la commande.
+    my %snapshot = %{ ref($data) eq 'HASH' ? $data : {} };
+    $snapshot{args} = [ @{ ref($snapshot{args}) eq 'ARRAY' ? $snapshot{args} : [] } ];
+
+    my %planned_copy = ( name => "$name", delay => $delay );
+
+    my $timer;
+    my $armed = eval {
+        $timer = IO::Async::Timer::Countdown->new(
+            delay     => $delay,
+            on_expire => sub {
+                my ($expired) = @_;
+
+                # Nettoyage AVANT le rappel: le slot doit etre libre pendant
+                # l'execution differee (etat coherent, pas de fuite si le
+                # rappel meurt).
+                delete $self->{active_timers}{ $planned_copy{name} };
+                eval { $loop->remove($expired); 1 };
+                eval {
+                    my $bot = $self->{bot};
+                    my $runner = $bot && $bot->can('script_action_runner')
+                        ? $bot->script_action_runner
+                        : undef;
+                    $runner->release_timer($planned_copy{name}) if $runner;
+                    1;
+                };
+
+                my $fired_ok = eval {
+                    $self->_fire_script_timer($script_path, \%planned_copy, \%snapshot);
+                    1;
+                };
+                unless ($fired_ok) {
+                    my $err = $@ || 'unknown error';
+                    $err =~ s/[\r\n]+/ /g;
+                    $self->_log_bot(1, "PUBLIC(scriptdryrun): timer callback failed name=$planned_copy{name} error=$err");
+                }
+
+                return;
+            },
+        );
+
+        $loop->add($timer);
+        $timer->start;
+        1;
+    };
+
+    unless ($armed) {
+        my $err = $@ || 'failed to arm timer';
+        $err =~ s/[\r\n]+/ /g;
+        if ($timer) {
+            eval { $timer->stop;         1 };
+            eval { $loop->remove($timer); 1 };
+        }
+        return (0, $err);
+    }
+
+    $self->{active_timers}{"$name"} = $timer;
+    $self->_log_bot(4, "PUBLIC(scriptdryrun): timer armed name=$name delay=$delay script=$script_path");
+
+    return (1, undef);
+}
+
+sub _fire_script_timer {
+    my ($self, $script_path, $planned, $data) = @_;
+
+    my $bot   = $self->{bot};
+    my $label = 'timer:' . $planned->{name};
+
+    # Les portes du chemin apply s'appliquent aussi au rappel differe: un
+    # plugin desactive, repasse en dry-run ou dont les runners ont disparu
+    # entre l'armement et l'expiration ne doit rien executer.
+    unless ($self->plugin_enabled) {
+        $self->_log_bot(4, "PUBLIC(scriptdryrun): timer skipped ($label): plugin is disabled");
+        return undef;
+    }
+
+    unless ($self->action_mode eq 'apply') {
+        $self->_log_bot(4, "PUBLIC(scriptdryrun): timer skipped ($label): action mode is no longer apply");
+        return undef;
+    }
+
+    unless ($bot && $bot->can('script_runner') && $bot->script_runner
+        && $bot->script_runner->can('run_script')) {
+        $self->_log_bot(1, "PUBLIC(scriptdryrun): timer skipped ($label): script runner is not initialized");
+        return undef;
+    }
+
+    unless ($bot->can('script_action_runner') && $bot->script_action_runner
+        && $bot->script_action_runner->can('apply_actions')) {
+        $self->_log_bot(1, "PUBLIC(scriptdryrun): timer skipped ($label): script action runner cannot apply actions");
+        return undef;
+    }
+
+    my $run_started_at = time();
+    my $script_result  = $bot->script_runner->run_script(
+        $script_path,
+        'timer',
+        %$data,
+        timer_name  => $planned->{name},
+        timer_delay => $planned->{delay},
+    );
+
+    $self->_log_script_result($label, $run_started_at, $script_result);
+
+    my $context = {
+        event      => 'timer',
+        channel    => $data->{channel},
+        target     => $data->{target},
+        nick       => $data->{nick},
+        command    => $data->{command},
+        args       => $data->{args},
+        timer_name => $planned->{name},
+    };
+
+    my $apply_started_at = time();
+    my $action_plan = $bot->script_action_runner->apply_actions(
+        $script_result,
+        $context,
+        apply       => 1,
+        allow_irc   => $self->allow_irc,
+        # Pas de schedule_timer ici ET timer_depth => 1: double verrou contre
+        # les chaines de timers auto-entretenues.
+        timer_depth => 1,
+    );
+
+    $self->_log_action_plan($label, $apply_started_at, $action_plan);
+
+    my $result = {
+        ok            => ($script_result->{ok} && $action_plan->{applied_ok}) ? 1 : 0,
+        dry_run       => 0,
+        action_mode   => 'apply',
+        allow_irc     => $self->allow_irc,
+        event         => 'timer',
+        timer_name    => $planned->{name},
+        script_result => $script_result,
+        action_plan   => $action_plan,
+    };
+
+    $self->{last_result} = $result;
+
+    return $result;
+}
+
+sub cancel_script_timers {
+    my ($self) = @_;
+
+    my $timers = $self->{active_timers};
+    return 0 unless ref($timers) eq 'HASH' && %$timers;
+
+    my $loop = $self->_script_timer_loop;
+    my $bot  = $self->{bot};
+    my $runner = eval {
+        $bot && $bot->can('script_action_runner') ? $bot->script_action_runner : undef;
+    };
+
+    my $cancelled = 0;
+    for my $name (sort keys %$timers) {
+        my $timer = delete $timers->{$name};
+
+        eval { $timer->stop; 1 } if $timer;
+        eval { $loop->remove($timer); 1 } if $timer && $loop;
+        eval { $runner->release_timer($name); 1 } if $runner;
+
+        $cancelled++;
+        $self->_log_bot(4, "PUBLIC(scriptdryrun): timer cancelled name=$name");
+    }
+
+    return $cancelled;
 }
 
 sub action_mode_raw {
