@@ -10,6 +10,39 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Documentation — plugin bridge handoff (mb534)
+
+- Documented that CONFIG_<route> only applies to ROUTES/EVENTS entries: a
+  command served by the SCRIPT fallback has no route name, so its CONFIG_ key
+  is ignored (README + sample configuration).
+- The Timer actions section now points to both reference implementations
+  (remind.pl in Perl, countdown.py in Python).
+
+### Added — plugin bridge (Perl/Python/Tcl scripts)
+
+- **Multi-language feature examples** (mb533). The arc's reference examples
+  were all Perl; the language x feature matrix is now covered:
+  `examples/countdown.py` (Python, routed `pcountdown`) demonstrates timer
+  actions plus per-route configuration (`CONFIG_pcountdown=max_seconds=…`,
+  tighten-only), and `examples/partwatch.tcl` (Tcl, `EVENTS=part=…`)
+  demonstrates channel-event routes and the event-specific `message` field
+  (part reason), staying silent on IRC when misrouted. Twelve example scripts ship,
+  and the documented sample routes remain covered by the doc-truth guard.
+
+### Fixed — plugin bridge consolidation (mb532)
+
+- The `.scriptdryrun config` partyline reference now documents every key the
+  plugin reads: the EVENTS / EVENT_COOLDOWN (mb529) and CONFIG_<route>
+  (mb531) blocks were missing since their introduction. A generic test
+  contract now cross-checks the reference against the keys actually read by
+  the plugin, so a future key cannot be forgotten again.
+- `examples/remind.pl` now honors the documented `CONFIG_premind=max_delay=…`
+  route configuration (the protocol bounds always win as hard limits; the
+  usage reply announces the effective bound).
+- `.scriptdryrun status|last` now shows the origin of the last run
+  (`command`, `event:<type>` or `timer:<name>`), since mb525/mb529 introduced
+  three kinds of runs that were previously indistinguishable.
+
 ### Added — plugin bridge (Perl/Python/Tcl scripts)
 
 - **Per-route configuration in the script envelope** (mb531). Every route —

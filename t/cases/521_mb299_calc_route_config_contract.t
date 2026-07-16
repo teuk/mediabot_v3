@@ -21,7 +21,7 @@ my $commit_path = File::Spec->catfile($root, 'commit.sh');
 my $commit = -f $commit_path ? slurp('commit.sh') : undef;
 my $t520   = slurp('t/cases/520_mb298_calc_reference_plugin.t');
 
-like($readme, qr/ships seven examples/, 'README counts seven external examples');
+like($readme, qr/ships nine command examples/, 'README counts nine command examples');
 like($readme, qr/`pcalc`\s*\|\s*Python\s*\|\s*safe AST-based arithmetic calculator/,
     'README lists pcalc reference route');
 like($readme, qr/COMMANDS=hello,pyhello,tclhello,proll,p8ball,pchoose,pcalc/,

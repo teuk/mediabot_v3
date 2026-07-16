@@ -8,7 +8,7 @@ it supports both a no-side-effect **dry-run** mode and an explicitly gated
 ## What users can do
 
 Once an administrator enables routes, IRC users invoke external commands exactly
-like normal Mediabot commands. The repository ships seven examples:
+like normal Mediabot commands. The repository ships nine command examples:
 
 | Command route | Language | Purpose |
 |---|---|---|
@@ -20,6 +20,7 @@ like normal Mediabot commands. The repository ships seven examples:
 | `pchoose` | Perl | random choice helper |
 | `pcalc` | Python | safe AST-based arithmetic calculator |
 | `premind` | Perl | one-shot reminder demonstrating timer actions |
+| `pcountdown` | Python | countdown demonstrating timers + per-route config |
 
 The `p` aliases are intentional. Mediabot already has richer internal `roll`,
 `8ball`, `choose` and `calc` commands; routing the same names in apply mode would shadow
@@ -33,8 +34,8 @@ AUTOLOAD=1
 ENABLED=Mediabot::Plugin::ScriptDryRun
 
 [plugins.ScriptDryRun]
-COMMANDS=hello,pyhello,tclhello,proll,p8ball,pchoose,pcalc,premind
-ROUTES=hello=examples/hello_perl.pl, pyhello=examples/hello_python.py, tclhello=examples/hello_tcl.tcl, proll=examples/roll.py, p8ball=examples/eightball.tcl, pchoose=examples/choose.pl, pcalc=examples/calc.py, premind=examples/remind.pl
+COMMANDS=hello,pyhello,tclhello,proll,p8ball,pchoose,pcalc,premind,pcountdown
+ROUTES=hello=examples/hello_perl.pl, pyhello=examples/hello_python.py, tclhello=examples/hello_tcl.tcl, proll=examples/roll.py, p8ball=examples/eightball.tcl, pchoose=examples/choose.pl, pcalc=examples/calc.py, premind=examples/remind.pl, pcountdown=examples/countdown.py
 ACTION_MODE=apply
 ALLOW_IRC=yes
 APPLY_REQUIRE_SCOPE=yes
@@ -106,9 +107,11 @@ Timer guardrails:
 - timers are in-memory only and do not survive a bot restart or plugin reload;
 - pending timers are cancelled when the plugin is unloaded or replaced.
 
-`examples/remind.pl` (routed as `premind`) is the reference implementation of
-this lifecycle: confirmation + timer on the command, delivery on the deferred
-`timer` event, one pending reminder per nick.
+`examples/remind.pl` (routed as `premind`, Perl) is the reference implementation
+of this lifecycle: confirmation + timer on the command, delivery on the
+deferred `timer` event, one pending reminder per nick.
+`examples/countdown.py` (routed as `pcountdown`) is its Python counterpart
+and additionally demonstrates per-route configuration.
 
 ## Channel events (join/part/topic)
 
@@ -116,16 +119,18 @@ Beyond public commands, the bridge can route channel lifecycle events to
 scripts, strictly opt-in and one script per event:
 
 ```ini
-EVENTS=join=examples/greet.pl, topic=examples/topicwatch.pl
+EVENTS=join=examples/greet.pl, topic=examples/topicwatch.pl, part=examples/partwatch.tcl
 EVENT_COOLDOWN=10
 ```
 
-Both routes above ship as reference examples: `examples/greet.pl` welcomes a
-joining nick in the originating channel, and `examples/topicwatch.pl`
-acknowledges topic changes using the event-specific `topic` envelope field.
-When routed to an unexpected event, both log a warning and stay silent on
-IRC — a reference event script never spams a channel because of a config
-mistake.
+All three routes above ship as reference examples: `examples/greet.pl` (Perl)
+welcomes a joining nick in the originating channel, `examples/topicwatch.pl`
+(Perl) acknowledges topic changes using the event-specific `topic` envelope
+field, and `examples/partwatch.tcl` (Tcl) says goodbye on `part`, quoting the
+departure reason from the event-specific `message` field.
+When routed to an unexpected event, these examples log a warning and stay
+silent on IRC — a reference event script never spams a channel because of a
+config mistake.
 
 The routed script is executed with the matching event name (`join`, `part` or
 `topic`); the envelope carries `channel`, `nick` and, where relevant, `ident`,
@@ -149,11 +154,15 @@ Each route — command or event — can carry its own configuration:
 
 ```ini
 CONFIG_premind=max_delay=1800
+CONFIG_pcountdown=max_seconds=600
 CONFIG_join=welcome=Bienvenue sur ce canal,
 ```
 
 The value is a `key=value; key2=value2` list (';' separated, so values may
-contain commas). Keys are `[A-Za-z0-9_.-]` (max 64 chars), values are capped
+contain commas). Configuration is attached to ROUTES/EVENTS entries only: a
+command allowed through COMMANDS but served by the `SCRIPT` fallback has no
+route name, so a CONFIG_ key for it is silently ignored — give the command an
+explicit route if it needs configuration. Keys are `[A-Za-z0-9_.-]` (max 64 chars), values are capped
 at 512 chars and at most 20 keys per route are kept; invalid pairs are
 rejected with a log line, never silently truncated. The validated map is
 injected into the JSON envelope as `data.config` only when non-empty, and it

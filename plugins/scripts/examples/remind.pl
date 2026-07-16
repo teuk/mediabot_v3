@@ -59,6 +59,17 @@ my $command = (defined $data->{command} && !ref($data->{command}) && length $dat
     : 'remind';
 my $args = ref($data->{args}) eq 'ARRAY' ? $data->{args} : [];
 
+# mb532: per-route configuration (mb531). CONFIG_premind=max_delay=1800
+# lowers the accepted delay ceiling for this route; the protocol bound
+# (3600s) always wins as the hard maximum, and bad values fall back to it.
+my $config = ref($data->{config}) eq 'HASH' ? $data->{config} : {};
+my $max_delay = MAX_DELAY;
+if (defined $config->{max_delay} && !ref($config->{max_delay})
+    && "$config->{max_delay}" =~ /\A[0-9]+\z/) {
+    my $configured = int($config->{max_delay});
+    $max_delay = $configured if $configured >= MIN_DELAY && $configured <= MAX_DELAY;
+}
+
 # --- rebuild the reminder text from the original args ------------------------
 # args[0] = delay in seconds, the rest is the message. On the "timer" event the
 # bridge hands us the ORIGINAL args again, so the same parsing works twice.
@@ -80,10 +91,10 @@ if ($event eq 'timer') {
 else {
     my $delay = (defined $delay_arg && $delay_arg =~ /\A[0-9]+\z/) ? int($delay_arg) : 0;
 
-    if ($delay < MIN_DELAY || $delay > MAX_DELAY || !length($message)) {
+    if ($delay < MIN_DELAY || $delay > $max_delay || !length($message)) {
         push @actions, {
             type => 'reply',
-            text => "$nick: usage: $command <seconds 1-" . MAX_DELAY . "> <message>"
+            text => "$nick: usage: $command <seconds 1-$max_delay> <message>"
                   . " — e.g. $command 300 stretch your legs",
         };
     }

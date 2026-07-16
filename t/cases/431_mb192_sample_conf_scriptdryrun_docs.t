@@ -42,10 +42,11 @@ like($src, qr/^#APPLY_REQUIRE_SCOPE=yes$/m,
     'sample conf documents enabled apply scope guard');
 
 # mb528-B1: huitieme exemple livre (premind=examples/remind.pl, cycle timer).
-like($src, qr/^#COMMANDS=hello,pyhello,tclhello,proll,p8ball,pchoose,pcalc,premind$/m,
+# mb533-B1: neuvieme exemple de commande (pcountdown=examples/countdown.py).
+like($src, qr/^#COMMANDS=hello,pyhello,tclhello,proll,p8ball,pchoose,pcalc,premind,pcountdown$/m,
     'sample conf documents all conflict-safe example aliases');
-like($src, qr/^#ROUTES=hello=examples\/hello_perl\.pl, pyhello=examples\/hello_python\.py, tclhello=examples\/hello_tcl\.tcl, proll=examples\/roll\.py, p8ball=examples\/eightball\.tcl, pchoose=examples\/choose\.pl, pcalc=examples\/calc\.py, premind=examples\/remind\.pl$/m,
-    'sample conf documents all eight example routes');
+like($src, qr/^#ROUTES=hello=examples\/hello_perl\.pl, pyhello=examples\/hello_python\.py, tclhello=examples\/hello_tcl\.tcl, proll=examples\/roll\.py, p8ball=examples\/eightball\.tcl, pchoose=examples\/choose\.pl, pcalc=examples\/calc\.py, premind=examples\/remind\.pl, pcountdown=examples\/countdown\.py$/m,
+    'sample conf documents all nine example routes');
 like($src, qr/^#ACTION_MODE=apply$/m,
     'sample conf documents guarded apply mode');
 like($src, qr/^#ALLOW_IRC=yes$/m,

@@ -2195,6 +2195,29 @@ sub _cmd_scriptdryrun {
         $stream->write("    plugins.script_dryrun.APPLY_REQUIRE_SCOPE\r\n");
         $stream->write("    plugins.script_dryrun.apply_require_scope\r\n");
         $stream->write("    SCRIPT_DRYRUN_APPLY_REQUIRE_SCOPE\r\n");
+        # mb532-B1: la reference partyline doit couvrir TOUTES les cles du
+        # plugin; EVENTS/EVENT_COOLDOWN (mb529) et CONFIG_<route> (mb531)
+        # manquaient depuis leur introduction.
+        $stream->write("  event route keys:\r\n");
+        $stream->write("    plugins.ScriptDryRun.EVENTS\r\n");
+        $stream->write("    plugins.ScriptDryRun.events\r\n");
+        $stream->write("    plugins.script_dryrun.EVENTS\r\n");
+        $stream->write("    plugins.script_dryrun.events\r\n");
+        $stream->write("    SCRIPT_DRYRUN_EVENTS\r\n");
+        $stream->write("  event cooldown keys:\r\n");
+        $stream->write("    plugins.ScriptDryRun.EVENT_COOLDOWN\r\n");
+        $stream->write("    plugins.ScriptDryRun.event_cooldown\r\n");
+        $stream->write("    plugins.script_dryrun.EVENT_COOLDOWN\r\n");
+        $stream->write("    plugins.script_dryrun.event_cooldown\r\n");
+        $stream->write("    SCRIPT_DRYRUN_EVENT_COOLDOWN\r\n");
+        $stream->write("  per-route config keys:\r\n");
+        $stream->write("    plugins.ScriptDryRun.CONFIG_<route>\r\n");
+        $stream->write("    plugins.script_dryrun.CONFIG_<route>\r\n");
+        $stream->write("    SCRIPT_DRYRUN_CONFIG_<ROUTE>\r\n");
+        $stream->write("  event route format: join=script, topic=script2 (join/part/topic only, no SCRIPT fallback)\r\n");
+        $stream->write("  event cooldown: one run per event per channel per window (1-3600s, default 10)\r\n");
+        $stream->write("  per-route config format: key=value; key2=value2 (keys [A-Za-z0-9_.-] max 64, values max 512, 20 keys/route)\r\n");
+        $stream->write("  per-route config delivery: injected as data.config only when non-empty\r\n");
         $stream->write("  action modes: dry-run, apply\r\n");
         $stream->write("  IRC output requires: ACTION_MODE=apply and ALLOW_IRC=yes\r\n");
         $stream->write("  apply scope guard: when enabled, ACTION_MODE=apply requires COMMANDS or ROUTES\r\n");
@@ -2350,6 +2373,18 @@ sub _cmd_scriptdryrun {
 
     $stream->write("  last_result_ok: " . ($last_result->{ok} ? 'yes' : 'no') . "\r\n");
     $stream->write("  dry_run: " . ($last_result->{dry_run} ? 'yes' : 'no') . "\r\n");
+    # mb532-B1: depuis mb525/mb529 un run peut venir d'une commande, d'un
+    # evenement de canal ou d'un rappel timer; l'operateur doit le voir.
+    my $origin = 'command';
+    if (defined $last_result->{timer_name} && length "$last_result->{timer_name}") {
+        $origin = 'timer:' . $last_result->{timer_name};
+    }
+    elsif (defined $last_result->{event} && length "$last_result->{event}"
+        && $last_result->{event} ne 'public_command') {
+        $origin = 'event:' . $last_result->{event};
+    }
+    $origin =~ s/[\r\n]+/ /g;
+    $stream->write("  origin: $origin\r\n");
 
     if ($mode eq 'status') {
         my $planned = ref($action_plan->{planned}) eq 'ARRAY' ? scalar @{ $action_plan->{planned} } : 0;
