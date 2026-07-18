@@ -1487,6 +1487,16 @@ sub on_message_KICK {
 
     log_debug_args('on_message_KICK', $message);
     my ($kicker_nick,$target_name,$kicked_nick,$text) = @{$hints}{qw<kicker_nick target_name kicked_nick text>};
+
+    # mb535-B1: expose channel lifecycle to the EventBus (plugin bridge).
+    # is_self couvre les deux roles: le bot auteur du kick ne se commente pas,
+    # et le bot victime ne peut de toute facon plus parler dans le canal.
+    eval { $mediabot->observe_channel_event('kick',
+        channel => $target_name, nick => $kicker_nick,
+        kicked  => $kicked_nick,
+        message => (defined($text) ? $text : ''),
+        is_self => (($self->is_nick_me($kicker_nick) || $self->is_nick_me($kicked_nick)) ? 1 : 0)); };
+
     if ($self->is_nick_me($kicked_nick)) {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
             $mediabot->{logger}->log(0,"[LIVE] * you were kicked from $target_name by $kicker_nick ($text)");

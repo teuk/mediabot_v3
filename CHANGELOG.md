@@ -10,6 +10,17 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Added — plugin bridge (Perl/Python/Tcl scripts)
+
+- **Kick event routing** (mb535). The channel-event whitelist gains `kick`:
+  the envelope carries the operator (`nick`), the victim (`kicked`) and the
+  reason (`message`); events are suppressed whenever the bot is the kicker or
+  the victim, and everything else (opt-in EVENTS route, per-channel cooldown,
+  channel-scope guard, dry-run/apply gates) is inherited from mb529.
+  `examples/kickwatch.pl` ships as the reference moderation-trace script.
+  `nick` remains deliberately unsupported (no single channel, out of the
+  scope model — see the mb534 handoff).
+
 ### Documentation — plugin bridge handoff (mb534)
 
 - Documented that CONFIG_<route> only applies to ROUTES/EVENTS entries: a

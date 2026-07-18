@@ -157,7 +157,7 @@ sub register {
             $event_routes{$event} = $raw_event_routes->{$event};
         }
         else {
-            $self->_log_bot(2, "PUBLIC(scriptdryrun): ignoring unsupported EVENTS entry '$event' (supported: join, part, topic)");
+            $self->_log_bot(2, "PUBLIC(scriptdryrun): ignoring unsupported EVENTS entry '$event' (supported: join, part, topic, kick)");
         }
     }
     $self->{event_routes} = \%event_routes;
@@ -1190,7 +1190,7 @@ sub cancel_script_timers {
 sub _is_supported_channel_event {
     my ($event) = @_;
     return 0 unless defined $event && !ref($event);
-    return ($event eq 'join' || $event eq 'part' || $event eq 'topic') ? 1 : 0;
+    return ($event eq 'join' || $event eq 'part' || $event eq 'topic' || $event eq 'kick') ? 1 : 0;
 }
 
 sub _bounded_positive_int {
@@ -1320,7 +1320,7 @@ sub observe_channel_event {
         nick    => $nick,
         args    => [],
     );
-    for my $extra (qw(ident host message topic)) {
+    for my $extra (qw(ident host message topic kicked)) {
         my $value = _ctx_scalar_value($ctx, $extra);
         $data{$extra} = $value if defined $value && length "$value";
     }

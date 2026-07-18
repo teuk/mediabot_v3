@@ -113,38 +113,44 @@ deferred `timer` event, one pending reminder per nick.
 `examples/countdown.py` (routed as `pcountdown`) is its Python counterpart
 and additionally demonstrates per-route configuration.
 
-## Channel events (join/part/topic)
+## Channel events (join/part/topic/kick)
 
 Beyond public commands, the bridge can route channel lifecycle events to
 scripts, strictly opt-in and one script per event:
 
 ```ini
-EVENTS=join=examples/greet.pl, topic=examples/topicwatch.pl, part=examples/partwatch.tcl
+EVENTS=join=examples/greet.pl, topic=examples/topicwatch.pl, part=examples/partwatch.tcl, kick=examples/kickwatch.pl
 EVENT_COOLDOWN=10
 ```
 
-All three routes above ship as reference examples: `examples/greet.pl` (Perl)
+All four routes above ship as reference examples: `examples/greet.pl` (Perl)
 welcomes a joining nick in the originating channel, `examples/topicwatch.pl`
 (Perl) acknowledges topic changes using the event-specific `topic` envelope
 field, and `examples/partwatch.tcl` (Tcl) says goodbye on `part`, quoting the
-departure reason from the event-specific `message` field.
+departure reason from the event-specific `message` field, and
+`examples/kickwatch.pl` (Perl) traces moderation on `kick` using the
+kick-specific fields (`nick` = operator, `kicked` = victim, `message` =
+reason). Kick events are suppressed when the bot is the kicker or the
+victim.
 When routed to an unexpected event, these examples log a warning and stay
 silent on IRC — a reference event script never spams a channel because of a
 config mistake.
 
-The routed script is executed with the matching event name (`join`, `part` or
-`topic`); the envelope carries `channel`, `nick` and, where relevant, `ident`,
-`host`, the part `message` or the new `topic` (`args` is always present and
-empty). Output goes through the same `ACTION_MODE`, `ALLOW_IRC` and
-channel-scope guards as command output, and event scripts may arm timers.
+The routed script is executed with the matching event name (`join`, `part`,
+`topic` or `kick`); the envelope carries `channel`, `nick` and, where relevant,
+`ident`, `host`, the part or kick `message`, the new `topic`, or the kick
+victim in `kicked` (`args` is always present and empty). Output goes through
+the same `ACTION_MODE`, `ALLOW_IRC` and channel-scope guards as command
+output, and event scripts may arm timers.
 
 Event guardrails:
 
 - no `SCRIPT` fallback: an event without an `EVENTS` route never runs;
-- the bot's own join/part/topic never trigger scripts;
+- the bot's own join/part/topic events never trigger scripts, and kick is
+  suppressed when the bot is the kicker or the victim;
 - at most one run per event per channel per `EVENT_COOLDOWN` window
-  (1-3600s, default 10): join/part bursts from netsplits are counted and
-  ignored, never forked;
+  (1-3600s, default 10): join/part bursts from netsplits and kick sweeps are
+  counted and ignored, never forked;
 - an `EVENTS` route is an explicit scope, so `APPLY_REQUIRE_SCOPE` adds no
   extra gate here.
 

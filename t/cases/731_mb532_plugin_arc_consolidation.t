@@ -106,7 +106,7 @@ return sub {
         }
         $assert->like($out, qr/plugins\.ScriptDryRun\.CONFIG_<route>/,
             'config: cle CONFIG_<route> documentee');
-        $assert->like($out, qr/join\/part\/topic only, no SCRIPT fallback/,
+        $assert->like($out, qr/join\/part\/topic\/kick only, no SCRIPT fallback/,
             'config: whitelist des evenements rappelee');
         $assert->like($out, qr/one run per event per channel per window/,
             'config: cooldown explique');

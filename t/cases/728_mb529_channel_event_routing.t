@@ -177,7 +177,7 @@ return sub {
                 && ($ctx->{nick} || '') eq 'poyan' && $ctx->{is_self} == 0,
                 'coeur: contexte scalaire complet');
             $assert->ok(!exists $ctx->{junk}, 'coeur: cles non prevues filtrees');
-            $assert->ok(!defined $core->observe_channel_event('kick', channel => '#x'),
+            $assert->ok(!defined $core->observe_channel_event('quit', channel => '#x'),
                 'coeur: type non supporte refuse');
         }
         else {
@@ -185,12 +185,12 @@ return sub {
         }
 
         my $main_src = _slurp_728('mediabot.pl');
-        for my $ev (qw(join part topic)) {
+        for my $ev (qw(join part topic kick)) {
             $assert->like($main_src, qr/eval \{ \$mediabot->observe_channel_event\('$ev',/,
                 "mediabot.pl: emission $ev cablee sous eval");
         }
         my @hooks = $main_src =~ /observe_channel_event\('(\w+)'/g;
-        $assert->ok(@hooks == 3, 'mediabot.pl: exactement trois points d\'emission');
+        $assert->ok(@hooks == 4, 'mediabot.pl: exactement quatre points d\'emission (mb535: +kick)');
     }
 
     # ------------------------------------------------------------------
@@ -198,13 +198,15 @@ return sub {
     # ------------------------------------------------------------------
     {
         my ($bot, $bus) = $mk_bot->(
-            'plugins.ScriptDryRun.EVENTS' => 'join=greet.pl, kick=evil.pl, topic=topictimer.pl',
+            # mb535-B1: kick est desormais supporte; la whitelist se teste avec un
+            # evenement reellement invalide (quit).
+            'plugins.ScriptDryRun.EVENTS' => 'join=greet.pl, quit=evil.pl, topic=topictimer.pl',
         );
         my $plugin = Mediabot::Plugin::ScriptDryRun->register($bot);
 
         $assert->ok($plugin->event_routes_enabled, 'routes d\'evenements actives');
         $assert->ok(join(',', $plugin->event_route_list) eq 'join,topic',
-            'whitelist: kick ignore, join/topic conserves');
+            'whitelist: quit ignore, join/topic conserves');
         $assert->ok(($plugin->event_routes->{join} || '') eq 'greet.pl',
             'route join -> greet.pl');
 
@@ -397,7 +399,7 @@ return sub {
         $assert->like($sample, qr/^## EVENT_COOLDOWN=10/m, 'sample conf documente EVENT_COOLDOWN');
 
         my $readme = _slurp_728(File::Spec->catfile('.', 'plugins', 'scripts', 'README.md'));
-        $assert->like($readme, qr/## Channel events \(join\/part\/topic\)/, 'README: section evenements');
+        $assert->like($readme, qr/## Channel events \(join\/part\/topic\/kick\)/, 'README: section evenements');
         $assert->like($readme, qr/no `SCRIPT` fallback/, 'README: opt-in strict documente');
         $assert->like($readme, qr/EVENT_COOLDOWN/, 'README: cooldown documente');
     }

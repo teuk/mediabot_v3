@@ -2214,7 +2214,7 @@ sub _cmd_scriptdryrun {
         $stream->write("    plugins.ScriptDryRun.CONFIG_<route>\r\n");
         $stream->write("    plugins.script_dryrun.CONFIG_<route>\r\n");
         $stream->write("    SCRIPT_DRYRUN_CONFIG_<ROUTE>\r\n");
-        $stream->write("  event route format: join=script, topic=script2 (join/part/topic only, no SCRIPT fallback)\r\n");
+        $stream->write("  event route format: join=script, topic=script2 (join/part/topic/kick only, no SCRIPT fallback)\r\n");
         $stream->write("  event cooldown: one run per event per channel per window (1-3600s, default 10)\r\n");
         $stream->write("  per-route config format: key=value; key2=value2 (keys [A-Za-z0-9_.-] max 64, values max 512, 20 keys/route)\r\n");
         $stream->write("  per-route config delivery: injected as data.config only when non-empty\r\n");

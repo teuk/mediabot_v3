@@ -439,7 +439,8 @@ sub emit_event_report {
 # small scalar-only context and emits channel_<type>_observed on the EventBus.
 # Listener errors are isolated by emit_event_report; with no listeners this is
 # a no-op, so the historical IRC handlers keep their exact behavior.
-my %OBSERVABLE_CHANNEL_EVENTS = map { $_ => 1 } qw(join part topic);
+# mb535-B1: kick ajoute — canal + auteur (nick) + victime (kicked) + raison.
+my %OBSERVABLE_CHANNEL_EVENTS = map { $_ => 1 } qw(join part topic kick);
 
 sub observe_channel_event {
     my ($self, $type, %data) = @_;
@@ -447,7 +448,7 @@ sub observe_channel_event {
     return undef unless defined $type && !ref($type) && $OBSERVABLE_CHANNEL_EVENTS{$type};
 
     my $ctx = { event_type => $type };
-    for my $key (qw(channel nick ident host message topic is_self)) {
+    for my $key (qw(channel nick ident host message topic kicked is_self)) {
         my $value = $data{$key};
         next unless defined $value && !ref($value);
         $ctx->{$key} = "$value";
