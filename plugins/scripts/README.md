@@ -182,6 +182,13 @@ my $welcome = $config->{welcome} // 'welcome,';
 `data.config` is the only structured envelope field: one level deep, scalar
 values only. Every other field keeps the flat scalar/array contract.
 
+## Cookbook
+
+[COOKBOOK.md](COOKBOOK.md) is the "how do I do X" companion to this
+reference: minimal contract, argument validation, timer lifecycle, event
+fields by type, misroute silence, per-route configuration, and the survival
+rules — each recipe pointing to the shipped example that implements it.
+
 ## Safety boundary
 
 The bridge validates script paths, prevents directory/symlink escape, chooses a
@@ -198,8 +205,18 @@ trusted local extensions, not a sandbox for untrusted code.
 .scriptdryrun config
 .scriptdryrun timers
 .scriptdryrun canceltimers
+.scriptdryrun events
+.scriptdryrun clearevents
+.scriptdryrun reload
 ```
 
 `timers` lists armed script timers (name, remaining/total delay, origin
 channel/nick/command, script). `canceltimers` cancels every armed timer and
-frees its pending slot; it never creates or executes anything.
+frees its pending slot; it never creates or executes anything. `events` shows
+the event routes, counters and per-(event, channel) cooldown windows
+(cooling/ready); `clearevents` resets the cooldown windows only — routes,
+counters and timers are untouched, and nothing is ever executed. `reload`
+re-reads every plugin key from the in-memory configuration (use it after
+`.reloadconf`/`.rehash`, which reload the file but never touch plugins) and
+lists what changed; counters, cooldown windows and armed timers are kept —
+an armed timer always fires with the config snapshot it was armed with.

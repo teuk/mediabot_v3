@@ -168,7 +168,7 @@ return sub {
         # Usage mis a jour.
         my $s6 = Stream726->new;
         $party->_cmd_scriptdryrun($s6, 1, 'bogus');
-        $assert->like($s6->out, qr/Usage: \.scriptdryrun \[status\|last\|config\|timers\|canceltimers\]/,
+        $assert->like($s6->out, qr/Usage: \.scriptdryrun \[status\|last\|config\|timers\|canceltimers\|events\|clearevents\|reload\]/,
             'usage liste les nouvelles sous-commandes');
     }
 

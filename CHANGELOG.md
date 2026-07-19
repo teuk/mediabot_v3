@@ -10,6 +10,43 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Documentation — plugin bridge (mb538)
+
+- **Script cookbook** (`plugins/scripts/COOKBOOK.md`): task-oriented recipes
+  distilled from the shipped examples — minimal contract per language, strict
+  input parsing, timer lifecycle, event fields by type, misroute silence,
+  per-route configuration with mandatory defaults, and the survival rules.
+  Guarded by doc-truth tests: every cited example must exist, every shipped
+  example must be cited, the written-out count must match reality, and the
+  cited technical invariants (event fields, timer-name charset, tighten-only
+  configuration) are cross-checked against the actual sources.
+
+### Added — plugin bridge (Perl/Python/Tcl scripts)
+
+- **Hot reload of the plugin configuration** (mb537, hardened by mb539).
+  `.scriptdryrun reload` re-reads every plugin key (COMMANDS/ROUTES/SCRIPT,
+  ACTION_MODE/ALLOW_IRC/APPLY_REQUIRE_SCOPE, EVENTS/EVENT_COOLDOWN,
+  CONFIG_<route>) from the in-memory configuration — use it after
+  `.reloadconf`/`.rehash`, which reload the file but never touch plugins —
+  and lists what changed. Event listeners are resubscribed when the event
+  routes change; counters, cooldown windows and armed timers are deliberately
+  kept, and an armed timer always fires with the config snapshot it was armed
+  with. The key reads are factored into a single shared helper, so any future
+  key is hot-reloadable by construction. The fallback SCRIPT path keeps the
+  same single-scalar normalization on register and hot reload, including when
+  Config::Simple returns an ARRAY value.
+
+### Added — plugin bridge (Perl/Python/Tcl scripts)
+
+- **Partyline visibility for event cooldown windows** (mb536).
+  `.scriptdryrun events` shows the event routes, counters and the
+  per-(event, channel) cooldown windows (cooling with remaining time, or
+  ready), active windows first, capped at 20 lines with a summary.
+  `.scriptdryrun clearevents` resets the cooldown windows only — routes,
+  counters and timers are untouched and nothing is ever executed — so an
+  operator can unblock a channel after a test or a netsplit instead of
+  waiting the window out.
+
 ### Added — plugin bridge (Perl/Python/Tcl scripts)
 
 - **Kick event routing** (mb535). The channel-event whitelist gains `kick`:

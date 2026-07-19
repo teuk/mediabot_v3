@@ -2128,7 +2128,7 @@ sub _do_login {
 # +---------------------------------------------------------------------------+
 
 # ---------------------------------------------------------------------------
-# .scriptdryrun [status|last|config|timers|canceltimers] - ScriptDryRun plugin visibility
+# .scriptdryrun [status|last|config|timers|canceltimers|events|clearevents|reload] - ScriptDryRun plugin visibility
 sub _cmd_scriptdryrun {
     my ($self, $stream, $id, $arg) = @_;
 
@@ -2224,6 +2224,121 @@ sub _cmd_scriptdryrun {
         return;
     }
 
+    if ($mode eq 'reload') {
+        unless ($plugin) {
+            $stream->write("ScriptDryRun: not loaded\r\n");
+            $stream->write("  hint: load Mediabot::Plugin::ScriptDryRun explicitly or enable plugin autoload\r\n");
+            return;
+        }
+
+        # mb537-B1: rechargement a chaud de l'etat de conf du plugin, a
+        # utiliser apres .reloadconf/.rehash. Ne recharge PAS le fichier de
+        # conf lui-meme (c'est le role de .reloadconf) et n'execute jamais
+        # rien; compteurs, timers armes et fenetres de cooldown conserves.
+        unless ($plugin->can('refresh_from_conf')) {
+            $stream->write("ScriptDryRun: loaded plugin does not support conf refresh\r\n");
+            return;
+        }
+
+        my @changed = eval { $plugin->refresh_from_conf };
+        if ($@) {
+            my $err = $@;
+            $err =~ s/[\r\n]+/ /g;
+            $stream->write("ScriptDryRun conf refresh failed: $err\r\n");
+            return;
+        }
+
+        if (@changed) {
+            $stream->write("ScriptDryRun conf refreshed (changed: " . join(', ', @changed) . ")\r\n");
+            $stream->write("  note: armed timers keep the config snapshot they were armed with\r\n");
+        }
+        else {
+            $stream->write("ScriptDryRun conf refreshed (no changes)\r\n");
+        }
+        return;
+    }
+
+    if ($mode eq 'events' || $mode eq 'clearevents') {
+        unless ($plugin) {
+            $stream->write("ScriptDryRun: not loaded\r\n");
+            $stream->write("  hint: load Mediabot::Plugin::ScriptDryRun explicitly or enable plugin autoload\r\n");
+            return;
+        }
+
+        if ($mode eq 'clearevents') {
+            # mb536-B1: purge des fenetres de cooldown uniquement — routes,
+            # compteurs et timers intacts; rien n'est execute.
+            my $cleared = eval {
+                $plugin->can('clear_event_cooldowns') ? $plugin->clear_event_cooldowns : 0;
+            } || 0;
+            $stream->write("ScriptDryRun event cooldown windows cleared: $cleared\r\n");
+            return;
+        }
+
+        # mb536-B1: pendant de `timers` pour les evenements — routes,
+        # compteurs, et l'etat des fenetres de cooldown par (evenement, canal)
+        # qui etait jusqu'ici invisible pour l'operateur.
+        my $routes_on = eval { $plugin->can('event_routes_enabled') ? $plugin->event_routes_enabled : 0 } ? 1 : 0;
+        $stream->write("ScriptDryRun events:\r\n");
+        unless ($routes_on) {
+            $stream->write("  event_routes: disabled\r\n");
+            return;
+        }
+
+        my $event_map = eval { $plugin->can('event_routes') ? $plugin->event_routes : {} };
+        $event_map = {} unless ref($event_map) eq 'HASH';
+        my @event_pairs = map { $_ . '=' . ($event_map->{$_} // '') } sort keys %$event_map;
+        my $cooldown = eval { $plugin->can('event_cooldown') ? $plugin->event_cooldown : 10 } || 10;
+        my $observed = eval { $plugin->can('observed_events') ? $plugin->observed_events : 0 } || 0;
+        my $skipped  = eval { $plugin->can('skipped_events') ? $plugin->skipped_events : 0 } || 0;
+        my $cd_skips = eval { $plugin->can('event_cooldown_skips') ? $plugin->event_cooldown_skips : 0 } || 0;
+
+        $stream->write("  event_map: " . (@event_pairs ? join(',', @event_pairs) : 'none') . "\r\n");
+        $stream->write("  event_cooldown: ${cooldown}s\r\n");
+        $stream->write("  observed_events: $observed\r\n");
+        $stream->write("  skipped_events: $skipped (cooldown: $cd_skips)\r\n");
+
+        my @windows = eval {
+            $plugin->can('event_cooldown_state') ? $plugin->event_cooldown_state : ();
+        };
+        @windows = () unless @windows && ref($windows[0]) eq 'HASH';
+
+        unless (@windows) {
+            $stream->write("  windows: none\r\n");
+            return;
+        }
+
+        # Fenetres actives d'abord (remaining decroissant), puis expirees.
+        @windows = sort {
+            ($b->{remaining} || 0) <=> ($a->{remaining} || 0)
+                || ($a->{event} || '') cmp ($b->{event} || '')
+                || ($a->{channel} || '') cmp ($b->{channel} || '')
+        } @windows;
+
+        my $shown = 0;
+        for my $w (@windows) {
+            last if $shown >= 20;
+            my %safe;
+            for my $field (qw(event channel last_run_ago remaining)) {
+                my $value = $w->{$field};
+                $value = '' unless defined $value && !ref($value);
+                $value =~ s/[\r\n]+/ /g;
+                $safe{$field} = length($value) ? $value : '-';
+            }
+            my $status = ($safe{remaining} ne '-' && $safe{remaining} > 0)
+                ? "cooling ($safe{remaining}s left)"
+                : 'ready';
+            $stream->write("  $safe{event} $safe{channel}: last=$safe{last_run_ago}s ago, $status\r\n");
+            $shown++;
+        }
+        if (@windows > $shown) {
+            my $more = @windows - $shown;
+            $stream->write("  ... and $more more window(s)\r\n");
+        }
+
+        return;
+    }
+
     if ($mode eq 'timers' || $mode eq 'canceltimers') {
         unless ($plugin) {
             $stream->write("ScriptDryRun: not loaded\r\n");
@@ -2281,7 +2396,7 @@ sub _cmd_scriptdryrun {
     }
 
     if ($mode ne 'status' && $mode ne 'last') {
-        $stream->write("Usage: .scriptdryrun [status|last|config|timers|canceltimers]\r\n");
+        $stream->write("Usage: .scriptdryrun [status|last|config|timers|canceltimers|events|clearevents|reload]\r\n");
         return;
     }
 
@@ -2597,7 +2712,7 @@ sub _cmd_help {
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
       . "  .plugins [loaded|config] - show plugin manager/autoload status\r\n"
-      . "  .scriptdryrun [status|last|config|timers|canceltimers] - show external script bridge status and last run, pending timers\r\n"
+      . "  .scriptdryrun [status|last|config|timers|canceltimers|events|clearevents|reload] - show external script bridge status and last run, pending timers, event windows\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary)\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"
       . "  .top [n]            - top N speakers across all channels (default 5)\r\n"

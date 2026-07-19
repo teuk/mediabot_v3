@@ -20,15 +20,17 @@ our $VERSION = '0.001';
 # scoped by COMMANDS/ROUTES when APPLY_REQUIRE_SCOPE is enabled (the default).
 # ---------------------------------------------------------------------------
 
-sub register {
-    my ($class, $bot, %opts) = @_;
+# mb537-B1: lecture des clés de conf du plugin, partagée entre register() et
+# refresh_from_conf(). Une seule source de vérité pour les noms/alias — toute
+# nouvelle clé ajoutée ici est relue au rechargement à chaud sans code
+# supplémentaire (et le contrat mb532 la forcera dans la référence partyline).
+sub _collect_conf_raw {
+    my ($bot) = @_;
+    my $conf = $bot ? $bot->{conf} : undef;
 
-    my $self = bless {
-        bot             => $bot,
-        manager         => $opts{manager},
-        plugin_name     => $opts{name} || __PACKAGE__,
-        script_path     => _conf_get_first(
-            $bot ? $bot->{conf} : undef,
+    return (
+        script_path => _conf_get_first(
+            $conf,
             'plugins.ScriptDryRun.SCRIPT',
             'plugins.ScriptDryRun.script',
             'plugins.script_dryrun.SCRIPT',
@@ -37,7 +39,7 @@ sub register {
             'SCRIPT_DRYRUN_PATH',
         ),
         command_filter_raw => _conf_get_first(
-            $bot ? $bot->{conf} : undef,
+            $conf,
             'plugins.ScriptDryRun.COMMANDS',
             'plugins.ScriptDryRun.commands',
             'plugins.script_dryrun.COMMANDS',
@@ -45,7 +47,7 @@ sub register {
             'SCRIPT_DRYRUN_COMMANDS',
         ),
         command_routes_raw => _conf_get_first(
-            $bot ? $bot->{conf} : undef,
+            $conf,
             'plugins.ScriptDryRun.ROUTES',
             'plugins.ScriptDryRun.routes',
             'plugins.script_dryrun.ROUTES',
@@ -53,7 +55,7 @@ sub register {
             'SCRIPT_DRYRUN_ROUTES',
         ),
         action_mode_raw => _conf_get_first(
-            $bot ? $bot->{conf} : undef,
+            $conf,
             'plugins.ScriptDryRun.ACTION_MODE',
             'plugins.ScriptDryRun.action_mode',
             'plugins.script_dryrun.ACTION_MODE',
@@ -61,7 +63,7 @@ sub register {
             'SCRIPT_DRYRUN_ACTION_MODE',
         ),
         allow_irc_raw => _conf_get_first(
-            $bot ? $bot->{conf} : undef,
+            $conf,
             'plugins.ScriptDryRun.ALLOW_IRC',
             'plugins.ScriptDryRun.allow_irc',
             'plugins.script_dryrun.ALLOW_IRC',
@@ -69,7 +71,7 @@ sub register {
             'SCRIPT_DRYRUN_ALLOW_IRC',
         ),
         apply_require_scope_raw => _conf_get_first(
-            $bot ? $bot->{conf} : undef,
+            $conf,
             'plugins.ScriptDryRun.APPLY_REQUIRE_SCOPE',
             'plugins.ScriptDryRun.apply_require_scope',
             'plugins.script_dryrun.APPLY_REQUIRE_SCOPE',
@@ -77,10 +79,10 @@ sub register {
             'SCRIPT_DRYRUN_APPLY_REQUIRE_SCOPE',
         ),
         # mb529-B1: routage opt-in des evenements de canal vers des scripts.
-        # Format identique a ROUTES (event=script), whitelist join/part/topic,
+        # Format identique a ROUTES (event=script), whitelist stricte,
         # PAS de fallback SCRIPT pour les evenements.
         event_routes_raw => _conf_get_first(
-            $bot ? $bot->{conf} : undef,
+            $conf,
             'plugins.ScriptDryRun.EVENTS',
             'plugins.ScriptDryRun.events',
             'plugins.script_dryrun.EVENTS',
@@ -88,13 +90,24 @@ sub register {
             'SCRIPT_DRYRUN_EVENTS',
         ),
         event_cooldown_raw => _conf_get_first(
-            $bot ? $bot->{conf} : undef,
+            $conf,
             'plugins.ScriptDryRun.EVENT_COOLDOWN',
             'plugins.ScriptDryRun.event_cooldown',
             'plugins.script_dryrun.EVENT_COOLDOWN',
             'plugins.script_dryrun.event_cooldown',
             'SCRIPT_DRYRUN_EVENT_COOLDOWN',
         ),
+    );
+}
+
+sub register {
+    my ($class, $bot, %opts) = @_;
+
+    my $self = bless {
+        bot             => $bot,
+        manager         => $opts{manager},
+        plugin_name     => $opts{name} || __PACKAGE__,
+        _collect_conf_raw($bot),
         action_mode => 'dry-run',
         allow_irc   => 0,
         apply_require_scope => 0,
@@ -127,48 +140,7 @@ sub register {
 
     # mb182-B1: optional command allow-list for the ScriptDryRun bridge.
     # Empty or missing filter keeps the previous behavior: observe all commands.
-    $self->{command_filter} = _make_command_filter($self->{command_filter_raw});
-
-    # Optional command-to-script route map. One trusted bridge instance can
-    # dispatch different commands to different Perl/Python/Tcl scripts while
-    # keeping the same path, protocol, scope and action-application guards.
-    $self->{command_routes} = _make_command_routes($self->{command_routes_raw});
-
-    # mb187-B1: explicit action mode gate. Default is dry-run. Real application
-    # is only possible with ACTION_MODE=apply, and IRC output still requires
-    # ALLOW_IRC to be truthy.
-    $self->{action_mode} = _normalize_action_mode($self->{action_mode_raw});
-    $self->{allow_irc}   = _truthy($self->{allow_irc_raw});
-
-    # mb189-B1 + A3 (mb225): optional extra safety gate, now ENABLED BY DEFAULT.
-    # When enabled, ACTION_MODE=apply is refused unless COMMANDS or ROUTES
-    # restrict the public-command scope. An operator can still opt out
-    # explicitly with APPLY_REQUIRE_SCOPE=no. This closes the dangerous path
-    # where an unscoped apply-mode config would apply actions for every command.
-    $self->{apply_require_scope} = _truthy_with_default($self->{apply_require_scope_raw}, 1);
-
-    # mb529-B1: routes d'evenements. Reutilise le parseur ROUTES puis filtre
-    # sur la whitelist; toute entree inconnue est ignoree (et loggee) plutot
-    # que d'ouvrir silencieusement un chemin d'execution non prevu.
-    my $raw_event_routes = _make_command_routes($self->{event_routes_raw});
-    my %event_routes;
-    for my $event (keys %{ $raw_event_routes || {} }) {
-        if (_is_supported_channel_event($event)) {
-            $event_routes{$event} = $raw_event_routes->{$event};
-        }
-        else {
-            $self->_log_bot(2, "PUBLIC(scriptdryrun): ignoring unsupported EVENTS entry '$event' (supported: join, part, topic, kick)");
-        }
-    }
-    $self->{event_routes} = \%event_routes;
-
-    # mb529-B1: anti-tempete. Les join/part arrivent en rafale (netsplits);
-    # au plus UNE execution par evenement par canal par fenetre de cooldown.
-    $self->{event_cooldown} = _bounded_positive_int($self->{event_cooldown_raw}, 10, 1, 3600);
-
-    # mb531-B1: config par route, chargee une fois les deux cartes de routes
-    # connues (commandes + evenements).
-    $self->_load_route_configs;
+    $self->_derive_conf_state;
 
     if ($bot && $bot->can('events') && $bot->events) {
         # mb242-B2: keep the EventBus listener entry so a replaced plugin
@@ -184,20 +156,7 @@ sub register {
             plugin => __PACKAGE__,
         );
 
-        # mb529-B1: ne s'abonner QU'AUX evenements effectivement routes. Les
-        # entries sont conservees pour un unregister propre (regle mb242).
-        for my $event (sort keys %event_routes) {
-            my $bus_event = "channel_${event}_observed";
-            my $entry = $bot->events->on(
-                $bus_event => sub {
-                    my ($ctx) = @_;
-                    return $self->observe_channel_event($event, $ctx);
-                },
-                name   => "script-dryrun-${event}-observer",
-                plugin => __PACKAGE__,
-            );
-            push @{ $self->{event_listener_entries} }, [ $bus_event, $entry ];
-        }
+        $self->_subscribe_event_listeners;
     }
 
     return $self;
@@ -212,15 +171,10 @@ sub unregister {
     $self->cancel_script_timers;
 
     # mb529-B1: retirer aussi les observateurs d'evenements de canal, sinon un
-    # remplacement de plugin accumulerait des listeners join/part/topic morts.
+    # remplacement de plugin accumulerait des listeners morts (mb537: factorise
+    # avec la resouscription du refresh a chaud).
     my $bot = $self->{bot};
-    if ($bot && $bot->can('events') && $bot->events && $bot->events->can('off')) {
-        for my $pair (@{ $self->{event_listener_entries} || [] }) {
-            next unless ref($pair) eq 'ARRAY' && ref($pair->[1]) eq 'HASH';
-            eval { $bot->events->off($pair->[0] => $pair->[1]); 1 };
-        }
-        $self->{event_listener_entries} = [];
-    }
+    $self->_unsubscribe_event_listeners;
 
     my $entry = $self->{listener_entry};
     return 0 unless ref($entry) eq 'HASH';
@@ -1490,6 +1444,221 @@ sub configured_routes {
     my ($self) = @_;
     return () unless ref($self->{route_configs}) eq 'HASH';
     return sort keys %{ $self->{route_configs} };
+}
+
+# mb536-B1: instantane en LECTURE SEULE des fenetres de cooldown, pour la
+# partyline (.scriptdryrun events). Une entree par (evenement, canal) deja
+# declenche: anciennete du dernier declenchement et temps restant de la
+# fenetre (0 = re-declenchable). Copies triees, rien de mutable n'est expose.
+sub event_cooldown_state {
+    my ($self) = @_;
+
+    my $last_run = $self->{event_last_run};
+    return () unless ref($last_run) eq 'HASH' && %$last_run;
+
+    my $now      = time();
+    my $cooldown = $self->event_cooldown;
+    my @state;
+
+    for my $event (sort keys %$last_run) {
+        my $channels = $last_run->{$event};
+        next unless ref($channels) eq 'HASH';
+        for my $channel (sort keys %$channels) {
+            my $stamp = $channels->{$channel} || 0;
+            next unless $stamp > 0;
+            my $ago = $now - $stamp;
+            $ago = 0 if $ago < 0;
+            my $remaining = $cooldown - $ago;
+            $remaining = 0 if $remaining < 0;
+            push @state, {
+                event        => $event,
+                channel      => $channel,
+                last_run_ago => int($ago + 0.5),
+                remaining    => int($remaining + 0.5),
+            };
+        }
+    }
+
+    return @state;
+}
+
+# mb536-B1: purge manuelle des fenetres de cooldown (deblocage ops apres un
+# test, un netsplit...). Ne touche ni aux routes ni aux compteurs; n'execute
+# jamais rien — la prochaine occurrence d'un evenement route redevient
+# simplement eligible immediatement.
+sub clear_event_cooldowns {
+    my ($self) = @_;
+
+    my $last_run = $self->{event_last_run};
+    my $cleared = 0;
+    if (ref($last_run) eq 'HASH') {
+        for my $event (keys %$last_run) {
+            next unless ref($last_run->{$event}) eq 'HASH';
+            $cleared += scalar keys %{ $last_run->{$event} };
+        }
+    }
+    $self->{event_last_run} = {};
+
+    $self->_log_bot(4, "PUBLIC(scriptdryrun): event cooldown windows cleared count=$cleared");
+    return $cleared;
+}
+
+# mb537-B1: derivation de l'etat depuis les valeurs *_raw, partagee entre
+# register() et refresh_from_conf(). Ne touche ni aux compteurs, ni aux
+# timers actifs (leur snapshot mb525 fige leur config), ni aux fenetres de
+# cooldown (clearevents existe pour ca), ni aux listeners (geres a part).
+sub _derive_conf_state {
+    my ($self) = @_;
+
+    $self->{command_filter} = _make_command_filter($self->{command_filter_raw});
+
+    # Optional command-to-script route map. One trusted bridge instance can
+    # dispatch different commands to different Perl/Python/Tcl scripts while
+    # keeping the same path, protocol, scope and action-application guards.
+    $self->{command_routes} = _make_command_routes($self->{command_routes_raw});
+
+    # mb187-B1: explicit action mode gate. Default is dry-run. Real application
+    # is only possible with ACTION_MODE=apply, and IRC output still requires
+    # ALLOW_IRC to be truthy.
+    $self->{action_mode} = _normalize_action_mode($self->{action_mode_raw});
+    $self->{allow_irc}   = _truthy($self->{allow_irc_raw});
+
+    # mb189-B1 + A3 (mb225): optional extra safety gate, ENABLED BY DEFAULT.
+    # When enabled, ACTION_MODE=apply is refused unless COMMANDS or ROUTES
+    # restrict the public-command scope. An operator can still opt out
+    # explicitly with APPLY_REQUIRE_SCOPE=no.
+    $self->{apply_require_scope} = _truthy_with_default($self->{apply_require_scope_raw}, 1);
+
+    # mb529-B1: routes d'evenements. Reutilise le parseur ROUTES puis filtre
+    # sur la whitelist; toute entree inconnue est ignoree (et loggee) plutot
+    # que d'ouvrir silencieusement un chemin d'execution non prevu.
+    my $raw_event_routes = _make_command_routes($self->{event_routes_raw});
+    my %event_routes;
+    for my $event (keys %{ $raw_event_routes || {} }) {
+        if (_is_supported_channel_event($event)) {
+            $event_routes{$event} = $raw_event_routes->{$event};
+        }
+        else {
+            $self->_log_bot(2, "PUBLIC(scriptdryrun): ignoring unsupported EVENTS entry '$event' (supported: join, part, topic, kick)");
+        }
+    }
+    $self->{event_routes} = \%event_routes;
+
+    # mb529-B1: anti-tempete. Les join/part arrivent en rafale (netsplits);
+    # au plus UNE execution par evenement par canal par fenetre de cooldown.
+    $self->{event_cooldown} = _bounded_positive_int($self->{event_cooldown_raw}, 10, 1, 3600);
+
+    # mb531-B1: config par route, chargee une fois les deux cartes de routes
+    # connues (commandes + evenements).
+    $self->_load_route_configs;
+
+    return 1;
+}
+
+# mb537-B1: abonnement aux SEULS evenements routes (regle mb529). Les entries
+# sont conservees pour un retrait propre (regle mb242) — a l'unregister comme
+# lors d'une resouscription apres refresh_from_conf().
+sub _subscribe_event_listeners {
+    my ($self) = @_;
+
+    my $bot = $self->{bot};
+    return 0 unless $bot && $bot->can('events') && $bot->events;
+
+    for my $event (sort keys %{ $self->{event_routes} || {} }) {
+        my $bus_event = "channel_${event}_observed";
+        my $entry = $bot->events->on(
+            $bus_event => sub {
+                my ($ctx) = @_;
+                return $self->observe_channel_event($event, $ctx);
+            },
+            name   => "script-dryrun-${event}-observer",
+            plugin => __PACKAGE__,
+        );
+        push @{ $self->{event_listener_entries} }, [ $bus_event, $entry ];
+    }
+
+    return 1;
+}
+
+sub _unsubscribe_event_listeners {
+    my ($self) = @_;
+
+    my $bot = $self->{bot};
+    return 0 unless $bot && $bot->can('events') && $bot->events && $bot->events->can('off');
+
+    for my $pair (@{ $self->{event_listener_entries} || [] }) {
+        next unless ref($pair) eq 'ARRAY' && ref($pair->[1]) eq 'HASH';
+        eval { $bot->events->off($pair->[0] => $pair->[1]); 1 };
+    }
+    $self->{event_listener_entries} = [];
+
+    return 1;
+}
+
+# mb537-B1: rechargement a chaud de l'etat de conf du plugin, SANS reload du
+# plugin. A utiliser apres .reloadconf ou .rehash (qui rechargent le
+# fichier dans $bot->{conf} mais ne touchent pas aux plugins). Relit toutes
+# les cles via _collect_conf_raw, re-derive l'etat, resouscrit les listeners
+# d'evenements si les routes ont change, et retourne la liste triee des
+# champs modifies. Compteurs, timers armes (snapshot mb525) et fenetres de
+# cooldown sont volontairement conserves.
+sub refresh_from_conf {
+    my ($self) = @_;
+
+    my $fingerprint = sub {
+        my %fp;
+        $fp{script_path} = defined $self->{script_path} ? "$self->{script_path}" : '';
+        $fp{action_mode} = $self->{action_mode} || '';
+        $fp{allow_irc}   = $self->{allow_irc} ? 1 : 0;
+        $fp{apply_require_scope} = $self->{apply_require_scope} ? 1 : 0;
+        $fp{event_cooldown} = $self->{event_cooldown} || 0;
+        my $filter = $self->{command_filter};
+        $fp{command_filter} = ref($filter) eq 'HASH' ? join(',', sort keys %$filter) : '';
+        for my $pair ([ command_routes => 'command_routes' ],
+                      [ event_routes   => 'event_routes' ]) {
+            my ($label, $key) = @$pair;
+            my $map = $self->{$key};
+            $fp{$label} = ref($map) eq 'HASH'
+                ? join(',', map { "$_=" . ($map->{$_} // '') } sort keys %$map)
+                : '';
+        }
+        my $configs = $self->{route_configs};
+        $fp{route_configs} = '';
+        if (ref($configs) eq 'HASH') {
+            $fp{route_configs} = join('|', map {
+                my $route = $_;
+                my $c = $configs->{$route};
+                "$route:" . join(';', map { "$_=" . ($c->{$_} // '') } sort keys %{ ref($c) eq 'HASH' ? $c : {} });
+            } sort keys %$configs);
+        }
+        return \%fp;
+    };
+
+    my $before = $fingerprint->();
+
+    my %fresh = _collect_conf_raw($self->{bot});
+    @{$self}{keys %fresh} = values %fresh;
+
+    # mb539-B1: register() already normalizes SCRIPT because Config::Simple
+    # may return an ARRAY ref for a single-path option. Hot reload must apply
+    # the same rule before the fallback path can reach ScriptRunner.
+    $self->{script_path} = _first_config_scalar($self->{script_path});
+
+    $self->_derive_conf_state;
+
+    my $after = $fingerprint->();
+
+    my @changed = sort grep { ($before->{$_} // '') ne ($after->{$_} // '') } keys %$after;
+
+    if (($before->{event_routes} // '') ne ($after->{event_routes} // '')) {
+        $self->_unsubscribe_event_listeners;
+        $self->_subscribe_event_listeners;
+    }
+
+    $self->_log_bot(3, 'PUBLIC(scriptdryrun): conf refreshed'
+        . (@changed ? ' changed=' . join(',', @changed) : ' (no changes)'));
+
+    return @changed;
 }
 
 sub action_mode_raw {
