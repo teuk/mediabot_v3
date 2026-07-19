@@ -131,7 +131,9 @@ departure reason from the event-specific `message` field, and
 `examples/kickwatch.pl` (Perl) traces moderation on `kick` using the
 kick-specific fields (`nick` = operator, `kicked` = victim, `message` =
 reason). Kick events are suppressed when the bot is the kicker or the
-victim.
+victim. For a combined event+timer+config reference, `examples/topicreminder.pl`
+re-posts the topic after a configurable delay (`CONFIG_topic=remind_after=900`)
+and can be routed as an alternative to `topicwatch.pl`.
 When routed to an unexpected event, these examples log a warning and stay
 silent on IRC — a reference event script never spams a channel because of a
 config mistake.
@@ -188,6 +190,24 @@ values only. Every other field keeps the flat scalar/array contract.
 reference: minimal contract, argument validation, timer lifecycle, event
 fields by type, misroute silence, per-route configuration, and the survival
 rules — each recipe pointing to the shipped example that implements it.
+
+## Metrics
+
+When the bot's Prometheus metrics system is enabled, the bridge exposes four
+series (no extra configuration — it follows the global metrics switch, and
+the bridge never depends on metrics to function):
+
+- `mediabot_scriptbridge_runs_total{origin,result}` — script runs by origin
+  (`command`, `event`, `timer`) and result (`ok`, `error`);
+- `mediabot_scriptbridge_events_total{event,outcome}` — channel events seen
+  by the bridge (`accepted`, `cooldown`, `self`, `unrouted`, `other`; unknown
+  event names are aggregated under `invalid` to keep cardinality bounded);
+- `mediabot_scriptbridge_timers_total{outcome}` — timer lifecycle
+  (`armed`, `delivered`, `cancelled`);
+- `mediabot_scriptbridge_pending_timers` — gauge of currently armed timers.
+
+A ready-made Grafana dashboard for these series ships in
+`contrib/grafana/grafana_mediabot_scriptbridge_v1.json`.
 
 ## Safety boundary
 

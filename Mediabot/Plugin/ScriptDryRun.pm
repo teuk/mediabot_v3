@@ -142,6 +142,13 @@ sub register {
     # Empty or missing filter keeps the previous behavior: observe all commands.
     $self->_derive_conf_state;
 
+    # mb540-B1: declarer les series du bridge (idempotent, no-op sans Metrics).
+    $self->_declare_bridge_metrics;
+    # mb543-B1: publier immediatement le zero initial du gauge. Une metrique
+    # declaree sans echantillon reste invisible a Prometheus jusqu'au premier
+    # run, ce qui rendrait le panneau Grafana ambigu apres un demarrage calme.
+    $self->_note_pending_timers_metric;
+
     if ($bot && $bot->can('events') && $bot->events) {
         # mb242-B2: keep the EventBus listener entry so a replaced plugin
         # instance can unregister its own observer without removing the new
@@ -836,6 +843,8 @@ sub observe_public_command {
 
     $self->{last_result} = $result;
     $self->{last_error}  = undef;
+    $self->_note_run_metric('command', $result);
+    $self->_note_pending_timers_metric;
     _ctx_mark_scriptdryrun_handled($ctx, $result, undef) if $owns_command;
 
     return $result;
@@ -914,6 +923,10 @@ sub _schedule_script_timer {
                     $runner->release_timer($planned_copy{name}) if $runner;
                     1;
                 };
+                # mb543-B1: le slot est deja libere ici. Mettre le gauge a jour
+                # avant le rappel garantit sa justesse meme si le rappel est
+                # saute (plugin desactive, mode dry-run, runner absent) ou meurt.
+                $self->_note_pending_timers_metric;
 
                 my $fired_ok = eval {
                     $self->_fire_script_timer($script_path, \%planned_copy, \%snapshot);
@@ -959,6 +972,9 @@ sub _schedule_script_timer {
         script     => $script_path,
     };
     $self->_log_bot(4, "PUBLIC(scriptdryrun): timer armed name=$name delay=$delay script=$script_path");
+
+    $self->_bridge_metric('inc', 'mediabot_scriptbridge_timers_total', { outcome => 'armed' });
+    $self->_note_pending_timers_metric;
 
     return (1, undef);
 }
@@ -1040,6 +1056,9 @@ sub _fire_script_timer {
     };
 
     $self->{last_result} = $result;
+    $self->_note_run_metric('timer', $result);
+    $self->_bridge_metric('inc', 'mediabot_scriptbridge_timers_total', { outcome => 'delivered' });
+    $self->_note_pending_timers_metric;
 
     return $result;
 }
@@ -1104,6 +1123,8 @@ sub cancel_script_timer {
     eval { $runner->release_timer($name); 1 } if $runner;
 
     $self->_log_bot(4, "PUBLIC(scriptdryrun): timer cancelled name=$name");
+    $self->_bridge_metric('inc', 'mediabot_scriptbridge_timers_total', { outcome => 'cancelled' });
+    $self->_note_pending_timers_metric;
 
     return 1;
 }
@@ -1192,16 +1213,26 @@ sub observe_channel_event {
     $self->{observed_events}++;
 
     my $bot = $self->{bot};
+    # mb540-B1: label event sur des valeurs sures uniquement (cardinalite
+    # bornee par la whitelist; tout le reste est agrege sous invalid).
+    my $event_label = _is_supported_channel_event($event) ? $event : 'invalid';
+    my $note_event = sub {
+        my ($outcome) = @_;
+        $self->_bridge_metric('inc', 'mediabot_scriptbridge_events_total',
+            { event => $event_label, outcome => $outcome });
+    };
 
     unless (_is_supported_channel_event($event)) {
         $self->{skipped_events}++;
         $self->{last_error} = 'unsupported channel event';
+        $note_event->('other');
         return undef;
     }
 
     unless ($self->plugin_enabled) {
         $self->{skipped_events}++;
         $self->{last_error} = 'ScriptDryRun plugin is disabled';
+        $note_event->('other');
         return undef;
     }
 
@@ -1209,6 +1240,7 @@ sub observe_channel_event {
     unless (defined $script_path && length "$script_path") {
         $self->{skipped_events}++;
         $self->{last_error} = "no script routed for event '$event'";
+        $note_event->('unrouted');
         return undef;
     }
 
@@ -1222,12 +1254,14 @@ sub observe_channel_event {
     if ($is_self) {
         $self->{skipped_events}++;
         $self->{last_error} = "self $event event is never routed to scripts";
+        $note_event->('self');
         return undef;
     }
 
     unless (defined $channel && length "$channel") {
         $self->{skipped_events}++;
         $self->{last_error} = "channel event '$event' without a channel";
+        $note_event->('other');
         return undef;
     }
 
@@ -1239,6 +1273,7 @@ sub observe_channel_event {
         $self->{skipped_events}++;
         $self->{event_cooldown_skips}++;
         $self->{last_error} = "event '$event' on $channel is cooling down";
+        $note_event->('cooldown');
         return undef;
     }
 
@@ -1246,11 +1281,13 @@ sub observe_channel_event {
         unless ($bot && $bot->can('script_runner') && $bot->script_runner && $bot->script_runner->can('run_script')) {
             $self->{skipped_events}++;
             $self->{last_error} = 'script runner is not initialized';
+            $note_event->('other');
             return undef;
         }
         unless ($bot->can('script_action_runner') && $bot->script_action_runner && $bot->script_action_runner->can('apply_actions')) {
             $self->{skipped_events}++;
             $self->{last_error} = 'script action runner cannot apply actions';
+            $note_event->('other');
             return undef;
         }
     }
@@ -1258,6 +1295,7 @@ sub observe_channel_event {
         unless ($bot && $bot->can('run_script_actions_dry')) {
             $self->{skipped_events}++;
             $self->{last_error} = 'bot cannot run script actions dry';
+            $note_event->('other');
             return undef;
         }
     }
@@ -1265,6 +1303,7 @@ sub observe_channel_event {
     # Le cooldown demarre a l'ACCEPTATION (pas au succes): un script qui
     # echoue en boucle ne doit pas etre relance a chaque join d'une rafale.
     $self->{event_last_run}{$event}{$chan_key} = $now;
+    $note_event->('accepted');
 
     $self->_log_bot(4, "PUBLIC(scriptdryrun): accepted event=$event channel=$channel script=$script_path mode=" . $self->action_mode . " allow_irc=" . $self->allow_irc);
 
@@ -1338,6 +1377,8 @@ sub observe_channel_event {
 
     $self->{last_result} = $result;
     $self->{last_error}  = undef;
+    $self->_note_run_metric('event', $result);
+    $self->_note_pending_timers_metric;
 
     return $result;
 }
@@ -1659,6 +1700,60 @@ sub refresh_from_conf {
         . (@changed ? ' changed=' . join(',', @changed) : ' (no changes)'));
 
     return @changed;
+}
+
+# ---------------------------------------------------------------------------
+# mb540-B1: metriques Prometheus du bridge (best-effort). Quatre series sous
+# le prefixe mediabot_scriptbridge_*; toutes les emissions passent par
+# _bridge_metric, qui ne fait RIEN si le bot n'a pas de Metrics actif — le
+# bridge ne depend jamais de l'observabilite pour fonctionner. Aucune cle de
+# conf nouvelle: l'activation suit le systeme de metriques global du bot.
+# ---------------------------------------------------------------------------
+
+sub _bridge_metric {
+    my ($self, $method, @args) = @_;
+
+    my $metrics = $self->{bot} ? $self->{bot}{metrics} : undef;
+    return 0 unless $metrics && eval { $metrics->can($method) };
+    eval { $metrics->$method(@args); 1 } or return 0;
+    return 1;
+}
+
+sub _declare_bridge_metrics {
+    my ($self) = @_;
+
+    $self->_bridge_metric('declare', 'mediabot_scriptbridge_runs_total', 'counter',
+        'External script bridge runs by origin (command/event/timer) and result');
+    $self->_bridge_metric('declare', 'mediabot_scriptbridge_events_total', 'counter',
+        'Channel events seen by the script bridge, by event and outcome');
+    $self->_bridge_metric('declare', 'mediabot_scriptbridge_timers_total', 'counter',
+        'Script bridge timers by lifecycle outcome (armed/delivered/cancelled)');
+    $self->_bridge_metric('declare', 'mediabot_scriptbridge_pending_timers', 'gauge',
+        'Currently armed script bridge timers');
+
+    return 1;
+}
+
+sub _note_run_metric {
+    my ($self, $origin, $result) = @_;
+
+    my $ok = ref($result) eq 'HASH' && $result->{ok} ? 'ok' : 'error';
+    $self->_bridge_metric('inc', 'mediabot_scriptbridge_runs_total',
+        { origin => $origin, result => $ok });
+    return 1;
+}
+
+sub _note_pending_timers_metric {
+    my ($self) = @_;
+
+    my $bot = $self->{bot};
+    my $count = 0;
+    if ($bot && $bot->can('script_action_runner') && $bot->script_action_runner
+        && $bot->script_action_runner->can('pending_timer_count')) {
+        $count = $bot->script_action_runner->pending_timer_count || 0;
+    }
+    $self->_bridge_metric('set', 'mediabot_scriptbridge_pending_timers', $count);
+    return 1;
 }
 
 sub action_mode_raw {

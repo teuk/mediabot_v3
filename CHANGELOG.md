@@ -10,6 +10,54 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Fixed — plugin bridge observability and examples (mb543)
+
+- Prometheus event outcomes now account for incomplete contexts and missing
+  runners under `other`; the pending-timer gauge is initialized at zero and
+  updated as soon as an expired timer releases its slot, even when the deferred
+  run is skipped or fails. The timer metric help now lists only emitted
+  outcomes. The Grafana lifecycle panel no longer mixes per-second counter
+  rates with an absolute gauge on one axis.
+- `topicreminder.pl` now adds a stable digest suffix to its readable timer
+  names, preventing sanitized or truncated channel names from sharing a timer
+  slot while keeping the 64-character protocol bound.
+
+### Added — plugin bridge (Perl/Python/Tcl scripts)
+
+- **Combined event+timer+config reference** (mb542).
+  `examples/topicreminder.pl` re-posts the channel topic after a configurable
+  delay (`CONFIG_topic=remind_after=…`, bounded 1-3600, default 300):
+  a channel event arms a configured timer whose deferred run rebuilds the
+  topic and author from the original envelope — the three arc features in a
+  single reference file. It stays silent on the immediate run, arms nothing
+  on a cleared topic, and honestly exposes the one-pending-timer-per-name
+  semantic (a topic change while a reminder is pending keeps the original
+  reminder). Fourteen examples now ship; the cookbook count and citation
+  guards were updated accordingly.
+
+### Added — contrib (mb541)
+
+- **Grafana dashboard for the script bridge**
+  (`contrib/grafana/grafana_mediabot_scriptbridge_v1.json`): runs by origin
+  and result, 24h error ratio, channel-event outcomes with bursts absorbed by
+  the anti-storm cooldown, timer lifecycle and the armed-timers gauge.
+  Follows the folder conventions (schemaVersion 39, DS_PROMETHEUS variable,
+  no hard-coded datasource) and is guarded by truth tests: every PromQL
+  series must be declared by the plugin, every declared series must appear
+  in a panel, and both READMEs must reference the file.
+
+### Added — plugin bridge (Perl/Python/Tcl scripts)
+
+- **Prometheus metrics for the script bridge** (mb540). Four series under
+  mediabot_scriptbridge_*: runs_total{origin,result} (command/event/timer x
+  ok/error), events_total{event,outcome} (accepted/cooldown/self/unrouted/
+  other, unknown event names aggregated under "invalid" to bound
+  cardinality), timers_total{outcome} (armed/delivered/cancelled) and the
+  pending_timers gauge. Strictly best-effort: declared and emitted only when
+  the bot's Metrics system is present, no new configuration key, and the
+  bridge never depends on observability to function (proven by a
+  no-metrics regression test).
+
 ### Documentation — plugin bridge (mb538)
 
 - **Script cookbook** (`plugins/scripts/COOKBOOK.md`): task-oriented recipes

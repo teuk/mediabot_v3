@@ -181,3 +181,12 @@ If a panel is empty, either the metric is not emitted yet, the corresponding fea
 ```text
 Dashboard UID: mediabot-fleet-dream-hourly
 ```
+
+## Script bridge (plugins) — grafana_mediabot_scriptbridge_v1.json
+
+Dashboard for the external script bridge (mb540 metrics): runs by origin and
+result, channel-event outcomes (including bursts absorbed by the anti-storm
+cooldown), timer lifecycle and the armed-timers gauge. Import it and point
+the DS_PROMETHEUS variable at the Prometheus instance that scrapes the bot's
+metrics endpoint. Requires the bot's metrics system to be enabled; the
+series appear after the ScriptDryRun plugin is loaded.

@@ -130,6 +130,14 @@ never widen them. References: `examples/greet.pl` (`welcome`),
 Note: an armed timer fires with the config snapshot it was armed with;
 `.scriptdryrun reload` affects new runs only.
 
+For all three features combined in one file — an event arming a configured
+timer whose deferred run rebuilds everything from the original envelope —
+see `examples/topicreminder.pl` (route it as an alternative to the simple
+`topic` reference). It also demonstrates the one-pending-timer-per-name
+semantic honestly: while a reminder is pending, a new topic change cannot
+arm a second one. Its readable timer name includes a stable digest suffix so
+sanitization or truncation cannot make ordinary channel names share a slot.
+
 ## 8. Survival rules (what the bridge enforces around you)
 
 - Delays are bounded to 1..3600s; reply/notice text is bounded upstream.
@@ -145,6 +153,6 @@ Note: an armed timer fires with the config snapshot it was armed with;
 ## 9. Where to look next
 
 - Reference: [README](README.md) — protocol, keys, partyline tooling.
-- Full sources: `examples/` — thirteen shipped scripts, all covered by the
+- Full sources: `examples/` — fourteen shipped scripts, all covered by the
   test suite (statically, by real execution, and end to end through the
   apply pipeline).
