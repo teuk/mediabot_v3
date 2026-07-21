@@ -47,8 +47,21 @@ return sub {
     my ($assert) = @_;
 
     # ------------------------------------------------------------------
-    # [1] JSON valide + identite + variable datasource
+    # [1] JSON livre, non ignore, valide + identite + variable datasource
     # ------------------------------------------------------------------
+    $assert->ok(-f $dash_path,
+        'dashboard: fichier JSON livre dans le checkout');
+    return unless -f $dash_path;
+
+    my $not_ignored = 1;
+    if (-d '.git') {
+        $not_ignored = system(
+            'git', 'check-ignore', '-q', '--', $dash_path
+        ) != 0;
+    }
+    $assert->ok($not_ignored,
+        'dashboard: fichier public non masque par .gitignore');
+
     my $raw = _slurp_738($dash_path);
     my $dash = eval { JSON::PP->new->decode($raw) };
     $assert->ok(ref($dash) eq 'HASH', 'dashboard: JSON strictement valide');

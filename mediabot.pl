@@ -99,6 +99,11 @@ sub on_message_002;
 sub on_message_003;
 sub on_message_004;
 sub on_message_005;
+sub on_message_251;
+sub on_message_252;
+sub on_message_254;
+sub on_message_265;
+sub on_message_266;
 sub on_message_RPL_WHOISUSER;
 sub on_message_PING;
 sub on_message_PONG;
@@ -979,6 +984,11 @@ sub _build_irc {
         on_message_003                   => \&on_message_003,
         on_message_004                   => \&on_message_004,
         on_message_005                   => \&on_message_005,
+        on_message_251                   => \&on_message_251,
+        on_message_252                   => \&on_message_252,
+        on_message_254                   => \&on_message_254,
+        on_message_265                   => \&on_message_265,
+        on_message_266                   => \&on_message_266,
         on_message_RPL_WHOISUSER         => \&on_message_RPL_WHOISUSER,
         on_message_ERROR                 => \&on_message_ERROR,
         on_message_KILL                  => \&on_message_KILL,
@@ -1171,6 +1181,8 @@ sub log_error {
 }
 
 sub on_timer_tick {
+    # mb543-B1: keep the network gauges fresh (throttled inside).
+    eval { $mediabot->maybe_request_lusers(); };
     my @params = @_;
 
     $mediabot->{logger}->log(5, "on_timer_tick() params: " . scalar(@params) . " args");
@@ -2485,6 +2497,21 @@ sub on_message_005 {
     my $features = join(" ", @args);
     $mediabot->{logger}->log(4, "005 $features");
 }
+
+# mb543-B1: LUSERS numerics -> network gauges. Thin, eval-guarded handlers;
+# all parsing lives in Mediabot::update_network_metrics_from_numeric.
+sub _on_lusers_numeric {
+    my ($numeric, $message, $hints) = @_;
+    my ($text) = @{$hints}{qw<text>};
+    my @args = _irc_message_args($message);
+    shift @args;  # own nick
+    eval { $mediabot->update_network_metrics_from_numeric($numeric, \@args, $text); };
+}
+sub on_message_251 { my ($self,$message,$hints) = @_; _on_lusers_numeric('251', $message, $hints); }
+sub on_message_252 { my ($self,$message,$hints) = @_; _on_lusers_numeric('252', $message, $hints); }
+sub on_message_254 { my ($self,$message,$hints) = @_; _on_lusers_numeric('254', $message, $hints); }
+sub on_message_265 { my ($self,$message,$hints) = @_; _on_lusers_numeric('265', $message, $hints); }
+sub on_message_266 { my ($self,$message,$hints) = @_; _on_lusers_numeric('266', $message, $hints); }
         
 sub on_motd {
     my ($self,$message,$hints) = @_;

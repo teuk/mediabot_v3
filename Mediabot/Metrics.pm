@@ -32,6 +32,12 @@ sub new {
     $self->_declare('mediabot_build_info',             'gauge',   'Build and runtime identity info');
 
     $self->_declare('mediabot_irc_connected',          'gauge',   'Whether the bot is currently connected to IRC');
+    # mb543-B1: network-wide stats parsed from LUSERS numerics (251/252/254/266).
+    $self->_declare('mediabot_network_users',          'gauge',   'Current users on the IRC network (LUSERS)');
+    $self->_declare('mediabot_network_users_max',      'gauge',   'Max users seen on the IRC network (LUSERS)');
+    $self->_declare('mediabot_network_channels',       'gauge',   'Channels formed on the IRC network (LUSERS)');
+    $self->_declare('mediabot_network_servers',        'gauge',   'Servers on the IRC network (LUSERS)');
+    $self->_declare('mediabot_network_operators',      'gauge',   'IRC operators online on the network (LUSERS)');
     $self->_declare('mediabot_irc_reconnect_total',    'counter', 'Total IRC reconnect attempts');
     $self->_declare('mediabot_irc_login_total',        'counter', 'Total successful IRC login events');
     $self->_declare('mediabot_current_channels',       'gauge',   'Current number of joined channels');

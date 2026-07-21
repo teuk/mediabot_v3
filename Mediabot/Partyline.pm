@@ -1866,6 +1866,10 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.raw' }) if $self->{bot}->{metrics};
         $self->_cmd_raw($stream, $id, $1)
     }
+    elsif ($line =~ /^\.lusers(?:\s+(refresh))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.lusers' }) if $self->{bot}->{metrics};
+        $self->_cmd_lusers($stream, $id, $1);
+    }
     elsif ($line =~ /^\.reloadconf$/i) {
         $self->_cmd_reloadconf($stream, $id);
     }
@@ -2752,6 +2756,7 @@ sub _cmd_help {
       . "  .part #chan         - make the bot part a channel\r\n"
       . "  .nick <newnick>     - change the bot's nick\r\n"
       . "  .raw <IRC command>  - send a raw IRC command (Owner only)\r\n"
+      . "  .lusers [refresh]   - show network stats from LUSERS (optionally request fresh ones)\r\n"
       . "  .reloadconf         - reload config file without restart\r\n"
       . "  .rehash             - reload configuration and runtime state\r\n"
       . "  .restart            - reconnect IRC without killing process (Owner)\r\n"
@@ -4107,6 +4112,46 @@ sub _reload_configuration_file {
 # ---------------------------------------------------------------------------
 # .reloadconf  - reload only the configuration file in place
 # ---------------------------------------------------------------------------
+# mb544-B1: les details du LUSERS en partyline — lit le cache coeur (source
+# independante du systeme Metrics); .lusers refresh demande une mise a jour
+# immediate au serveur (les numerics repeupleront le cache en retour).
+sub _cmd_lusers {
+    my ($self, $stream, $id, $arg) = @_;
+
+    my $bot = $self->{bot};
+    my $stats = ($bot && eval { $bot->can('network_stats') }) ? $bot->network_stats : {};
+    $stats = {} unless ref($stats) eq 'HASH';
+
+    if (defined $arg && lc($arg) eq 'refresh') {
+        my $sent = eval { $bot->can('request_lusers_now') ? $bot->request_lusers_now : 0 } || 0;
+        if ($sent) {
+            $stream->write("LUSERS refresh requested; values below are pre-refresh.\r\n");
+        }
+        else {
+            $stream->write("LUSERS refresh not sent (not connected).\r\n");
+        }
+    }
+
+    unless (%$stats) {
+        $stream->write("Network stats: none yet (no LUSERS numerics received).\r\n");
+        return;
+    }
+
+    my $line = "Network:";
+    $line .= " users=" . $stats->{users} if defined $stats->{users};
+    $line .= " (max " . $stats->{users_max} . ")" if defined $stats->{users_max};
+    $line .= " channels=" . $stats->{channels} if defined $stats->{channels};
+    $line .= " servers=" . $stats->{servers} if defined $stats->{servers};
+    $line .= " operators=" . $stats->{operators} if defined $stats->{operators};
+    $stream->write("$line\r\n");
+
+    if (defined $stats->{updated_at}) {
+        my $age = time() - $stats->{updated_at};
+        $age = 0 if $age < 0;
+        $stream->write("  updated: ${age}s ago\r\n");
+    }
+}
+
 sub _cmd_reloadconf {
     my ($self, $stream, $id) = @_;
 

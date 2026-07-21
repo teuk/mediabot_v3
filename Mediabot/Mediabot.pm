@@ -458,6 +458,126 @@ sub observe_channel_event {
     return $self->emit_event_report("channel_${type}_observed", $ctx);
 }
 
+# mb543-B1: network-wide stats from the LUSERS numerics. Called (eval-guarded)
+# by the thin on_message_251/252/254/265/266 handlers in mediabot.pl; parses
+# defensively and updates the mediabot_network_* gauges best-effort. Returns a
+# hashref of what was updated (empty on unknown/garbage input) so the logic is
+# unit-testable without an IRC connection.
+sub update_network_metrics_from_numeric {
+    my ($self, $numeric, $args, $text) = @_;
+
+    $numeric = defined $numeric && !ref($numeric) ? "$numeric" : '';
+    $args    = ref($args) eq 'ARRAY' ? $args : [];
+    $text    = defined $text && !ref($text) ? "$text" : '';
+
+    my %updated;
+    my $set = sub {
+        my ($name, $value) = @_;
+        return unless defined $value && "$value" =~ /\A[0-9]+\z/;
+        $updated{$name} = int($value);
+        # mb544-B1: cache coeur — source de verite pour la partyline et les
+        # logs, disponible meme sans le systeme Metrics.
+        my $short = $name;
+        $short =~ s/^mediabot_network_//;
+        $self->{network_stats}{$short} = int($value);
+        $self->{network_stats}{updated_at} = time();
+        if ($self->{metrics} && eval { $self->{metrics}->can('set') }) {
+            eval { $self->{metrics}->set($name, int($value)); 1 };
+        }
+    };
+
+    if ($numeric eq '251') {
+        # ":There are 7 users and 3 invisible on 2 servers"
+        if ($text =~ /There are\s+([0-9]+)\s+users\s+and\s+([0-9]+)\s+invisible/i) {
+            $set->('mediabot_network_users', $1 + $2);
+        }
+        if ($text =~ /on\s+([0-9]+)\s+servers?/i) {
+            $set->('mediabot_network_servers', $1);
+        }
+    }
+    elsif ($numeric eq '252') {
+        my ($count) = grep { defined && /\A[0-9]+\z/ } @$args;
+        $set->('mediabot_network_operators', $count);
+    }
+    elsif ($numeric eq '254') {
+        my ($count) = grep { defined && /\A[0-9]+\z/ } @$args;
+        $set->('mediabot_network_channels', $count);
+    }
+    elsif ($numeric eq '266') {
+        # Preferred source for users: global current/max, either as numeric
+        # args (current, max) or in the trailing text.
+        my @nums = grep { defined && /\A[0-9]+\z/ } @$args;
+        if (@nums >= 2) {
+            $set->('mediabot_network_users',     $nums[0]);
+            $set->('mediabot_network_users_max', $nums[1]);
+        }
+        elsif ($text =~ /global users[:\s]+([0-9]+)[,\s]+max[:\s]+([0-9]+)/i) {
+            $set->('mediabot_network_users',     $1);
+            $set->('mediabot_network_users_max', $2);
+        }
+    }
+
+    # mb544-B1: les details du LUSERS en debug 3 — une ligne par numeric
+    # ayant extrait quelque chose, avec les paires cle=valeur.
+    if (%updated && $self->{logger}) {
+        my $detail = join ' ', map {
+            my $short = $_; $short =~ s/^mediabot_network_//;
+            "$short=$updated{$_}";
+        } sort keys %updated;
+        $self->{logger}->log(3, "LUSERS $numeric: $detail");
+    }
+
+    return \%updated;
+}
+
+# mb544-B1: instantane du cache reseau (copie) pour la partyline et les
+# integrations; updated_at = epoch de la derniere valeur recue.
+sub network_stats {
+    my ($self) = @_;
+    my $stats = $self->{network_stats};
+    return {} unless ref($stats) eq 'HASH';
+    return { %$stats };
+}
+
+# mb544-B1: requete LUSERS immediate (commande operateur), sans throttle mais
+# alignant le compteur pour que le refresh periodique reparte proprement.
+sub request_lusers_now {
+    my ($self) = @_;
+
+    return 0 unless $self->{irc} && eval { $self->{irc}->is_connected };
+    $self->{network_lusers_last_request} = time();
+    eval { $self->{irc}->send_message('LUSERS', undef); 1 } or return 0;
+    $self->{logger}->log(3, 'LUSERS refresh requested (partyline)') if $self->{logger};
+    return 1;
+}
+
+# mb543-B1: periodic LUSERS refresh so the network gauges stay current after
+# the connection burst. Called from the main tick (eval-guarded); throttled by
+# main.LUSERS_REFRESH (seconds, default 300, bounded 60..3600, 0 disables).
+sub maybe_request_lusers {
+    my ($self) = @_;
+
+    my $raw = eval { $self->{conf} ? $self->{conf}->get('main.LUSERS_REFRESH') : undef };
+    my $interval = 300;
+    if (defined $raw && !ref($raw) && "$raw" =~ /\A[0-9]+\z/) {
+        $interval = int($raw);
+    }
+    return 0 if $interval == 0;
+    $interval = 60   if $interval < 60;
+    $interval = 3600 if $interval > 3600;
+
+    return 0 unless $self->{irc} && eval { $self->{irc}->is_connected };
+
+    my $now  = time();
+    my $last = $self->{network_lusers_last_request} || 0;
+    return 0 if ($now - $last) < $interval;
+
+    $self->{network_lusers_last_request} = $now;
+    eval { $self->{irc}->send_message('LUSERS', undef); 1 } or return 0;
+    $self->{logger}->log(3, 'LUSERS refresh requested') if $self->{logger};
+    return 1;
+}
+
 
 # Register the first small batch of built-in public commands in the new
 # CommandRegistry. mb166-B1 deliberately starts with low-risk core/help commands

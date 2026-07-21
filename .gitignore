@@ -13,6 +13,10 @@ config/
 *.env
 *.ini
 *.json
+
+# Public Grafana dashboards are versioned project artifacts.
+!contrib/grafana/*.json
+
 *.key
 # Local tools & tmp
 *.log

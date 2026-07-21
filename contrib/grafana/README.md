@@ -190,3 +190,16 @@ cooldown), timer lifecycle and the armed-timers gauge. Import it and point
 the DS_PROMETHEUS variable at the Prometheus instance that scrapes the bot's
 metrics endpoint. Requires the bot's metrics system to be enabled; the
 series appear after the ScriptDryRun plugin is loaded.
+
+## Network overview (3.3 style) — grafana_mediabot_overview_v1.json
+
+The dashboard matching the 3.3 social-preview look: a COMPACT top stats row
+(bots up, IRC connected, network users/channels from the new LUSERS gauges,
+joined channels, 24h messages — 3 grid units high, no wasted space), network
+graphs, channel activity, a top-commands donut, and a per-target drilldown
+via the `bot` (Prometheus instance) and `channel` template variables. The
+header links to grafana.com and prometheus.io through their logos (small
+HTML images; if your Grafana sanitizes HTML in text panels, the plain-text
+links below the logos still work). Requires the LUSERS network gauges
+(mediabot_network_*), fed at connect time and refreshed every
+main.LUSERS_REFRESH seconds (default 300).

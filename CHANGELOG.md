@@ -10,6 +10,33 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Added — LUSERS visibility (mb544)
+
+- The LUSERS details are now first-class debug material: every numeric that
+  yields values logs one level-3 line with its key=value pairs (and the
+  periodic/manual refresh requests log at level 3 too), the parsed values
+  feed a core cache available even without the Metrics system, and a new
+  partyline command `.lusers` shows the network snapshot (users/max/
+  channels/servers/operators + age); `.lusers refresh` requests fresh
+  numerics immediately and resynchronizes the periodic throttle.
+
+### Added — network stats and overview dashboard (mb543)
+
+- **LUSERS network gauges**: the 251/252/254/265/266 numerics now feed five
+  gauges (mediabot_network_users, _users_max, _channels, _servers,
+  _operators), parsed defensively in the core (unit-tested) with thin
+  eval-guarded handlers. A throttled periodic LUSERS refresh keeps them
+  current after the connection burst (main.LUSERS_REFRESH, default 300s,
+  bounded 60-3600, 0 disables).
+- **Network overview dashboard**
+  (contrib/grafana/grafana_mediabot_overview_v1.json), matching the 3.3
+  social-preview look: a compact 3-unit-high top stats row (bots up, IRC
+  connected, network users/channels, joined channels, 24h messages), network
+  graphs, per-channel activity, a top-commands donut, per-target drilldown
+  via bot/channel template variables, and clickable Grafana/Prometheus
+  logos linking to their sites. Guarded by truth tests (every referenced
+  series exists, stats-row compactness asserted).
+
 ### Fixed — plugin bridge observability and examples (mb543)
 
 - Prometheus event outcomes now account for incomplete contexts and missing
