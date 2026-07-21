@@ -70,6 +70,15 @@ sub _collect_conf_raw {
             'plugins.script_dryrun.allow_irc',
             'SCRIPT_DRYRUN_ALLOW_IRC',
         ),
+        # mb545-B1: gate dediee pour l'action topic (defaut: non).
+        allow_topic_raw => _conf_get_first(
+            $conf,
+            'plugins.ScriptDryRun.ALLOW_TOPIC',
+            'plugins.ScriptDryRun.allow_topic',
+            'plugins.script_dryrun.ALLOW_TOPIC',
+            'plugins.script_dryrun.allow_topic',
+            'SCRIPT_DRYRUN_ALLOW_TOPIC',
+        ),
         apply_require_scope_raw => _conf_get_first(
             $conf,
             'plugins.ScriptDryRun.APPLY_REQUIRE_SCOPE',
@@ -110,6 +119,7 @@ sub register {
         _collect_conf_raw($bot),
         action_mode => 'dry-run',
         allow_irc   => 0,
+        allow_topic => 0,
         apply_require_scope => 0,
         command_filter => undef,
         command_routes => undef,
@@ -804,6 +814,7 @@ sub observe_public_command {
             $context,
             apply       => 1,
             allow_irc   => $self->allow_irc,
+            allow_topic   => $self->allow_topic,
             # mb525-B1: brancher l'ordonnanceur de timers. La politique
             # (plafond, doublon, profondeur) reste dans ScriptActionRunner;
             # ce plugin ne fait qu'armer le timer IO::Async et re-executer
@@ -821,6 +832,7 @@ sub observe_public_command {
             dry_run       => 0,
             action_mode   => 'apply',
             allow_irc     => $self->allow_irc,
+            allow_topic     => $self->allow_topic,
             script_result => $script_result,
             action_plan   => $action_plan,
         };
@@ -1037,6 +1049,7 @@ sub _fire_script_timer {
         $context,
         apply       => 1,
         allow_irc   => $self->allow_irc,
+            allow_topic   => $self->allow_topic,
         # Pas de schedule_timer ici ET timer_depth => 1: double verrou contre
         # les chaines de timers auto-entretenues.
         timer_depth => 1,
@@ -1049,6 +1062,7 @@ sub _fire_script_timer {
         dry_run       => 0,
         action_mode   => 'apply',
         allow_irc     => $self->allow_irc,
+            allow_topic     => $self->allow_topic,
         event         => 'timer',
         timer_name    => $planned->{name},
         script_result => $script_result,
@@ -1344,6 +1358,7 @@ sub observe_channel_event {
             $context,
             apply       => 1,
             allow_irc   => $self->allow_irc,
+            allow_topic   => $self->allow_topic,
             timer_depth => 0,
             schedule_timer => sub {
                 return $self->_schedule_script_timer($script_path, \%data, @_);
@@ -1356,6 +1371,7 @@ sub observe_channel_event {
             dry_run       => 0,
             action_mode   => 'apply',
             allow_irc     => $self->allow_irc,
+            allow_topic     => $self->allow_topic,
             event         => $event,
             script_result => $script_result,
             action_plan   => $action_plan,
@@ -1563,6 +1579,7 @@ sub _derive_conf_state {
     # ALLOW_IRC to be truthy.
     $self->{action_mode} = _normalize_action_mode($self->{action_mode_raw});
     $self->{allow_irc}   = _truthy($self->{allow_irc_raw});
+    $self->{allow_topic} = _truthy($self->{allow_topic_raw});
 
     # mb189-B1 + A3 (mb225): optional extra safety gate, ENABLED BY DEFAULT.
     # When enabled, ACTION_MODE=apply is refused unless COMMANDS or ROUTES
@@ -1651,6 +1668,7 @@ sub refresh_from_conf {
         $fp{script_path} = defined $self->{script_path} ? "$self->{script_path}" : '';
         $fp{action_mode} = $self->{action_mode} || '';
         $fp{allow_irc}   = $self->{allow_irc} ? 1 : 0;
+        $fp{allow_topic} = $self->{allow_topic} ? 1 : 0;
         $fp{apply_require_scope} = $self->{apply_require_scope} ? 1 : 0;
         $fp{event_cooldown} = $self->{event_cooldown} || 0;
         my $filter = $self->{command_filter};
@@ -1764,6 +1782,11 @@ sub action_mode_raw {
 sub action_mode {
     my ($self) = @_;
     return $self->{action_mode} || 'dry-run';
+}
+
+sub allow_topic {
+    my ($self) = @_;
+    return $self->{allow_topic} ? 1 : 0;
 }
 
 sub allow_irc {

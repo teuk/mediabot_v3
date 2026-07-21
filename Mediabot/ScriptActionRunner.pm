@@ -74,6 +74,7 @@ sub new {
             notice => 1,
             log    => 1,
             timer  => 1,
+            topic  => 1,  # mb545-B1
         },
     }, $class;
 }
@@ -283,6 +284,40 @@ sub validate_action {
     return (0, 'missing action type') unless length $type;
     return (0, "unsupported action type '$type'") unless $self->{allowed_actions}{$type};
 
+    # mb545-B1: action topic — change le topic du canal D'ORIGINE uniquement.
+    # Fail-closed par construction: aucun champ target accepte (la cible est
+    # TOUJOURS le canal du contexte, pas de version cross-canal possible),
+    # contexte canal obligatoire, texte borne a 300 caracteres (les serveurs
+    # tronquent vers ~390; une reference doit rester sous la limite).
+    if ($type eq 'topic') {
+        return (0, 'topic action takes no target')
+            if exists $action->{target};
+
+        my ($text_ok, $text_err, $text) = $self->_bounded_text($action->{text});
+        return (0, $text_err) unless $text_ok;
+        return (0, 'topic text is too long (max 300)') if length($text) > 300;
+
+        my $ctx_channel = $self->_context_default_target($context);
+        my $ctx_channel_base = _channel_token_base($ctx_channel);
+        return (0, 'topic action requires a channel context')
+            unless defined $ctx_channel_base && length $ctx_channel_base;
+
+        # mb547-B1: store the underlying channel token, never a STATUSMSG
+        # decoration such as @#channel. Validate it as one IRC target before it
+        # reaches send_message, even when the caller supplied a malformed
+        # context rather than a normal command/event context.
+        my ($target_ok, $target_err, $safe_channel)
+            = $self->_bounded_target($ctx_channel_base);
+        return (0, "invalid topic channel context: $target_err")
+            unless $target_ok;
+
+        return (1, undef, {
+            type   => 'topic',
+            target => $safe_channel,
+            text   => $text,
+        });
+    }
+
     if ($type eq 'reply' || $type eq 'notice') {
         my ($text_ok, $text_err, $text) = $self->_bounded_text($action->{text});
         return (0, $text_err) unless $text_ok;
@@ -452,6 +487,29 @@ sub _log_action {
     return 1;
 }
 
+# mb545-B1: envoi TOPIC — meme discipline que _send_irc_action, commande
+# dediee (le canal cible vient de la validation: toujours le canal d'origine).
+sub _send_topic_action {
+    my ($self, $action) = @_;
+
+    my $bot = $self->{bot};
+    return (0, 'bot irc connection is unavailable')
+        unless $bot && $bot->{irc};
+
+    # mb547-B1: JSON decoders return Perl character strings. Apply the same
+    # UTF-8 wire encoding as reply/notice actions before IO::Async::Stream can
+    # receive a wide-character scalar and fail at syswrite.
+    my $wire_text = $action->{text};
+    $wire_text = encode('UTF-8', $wire_text) if utf8::is_utf8($wire_text);
+
+    my $sent = eval {
+        $bot->{irc}->send_message('TOPIC', undef, $action->{target}, $wire_text);
+        1;
+    };
+    return (0, 'TOPIC send failed') unless $sent;
+    return (1, undef);
+}
+
 sub _send_irc_action {
     my ($self, $action) = @_;
 
@@ -486,7 +544,10 @@ sub apply_actions {
     my ($self, $script_result, $context, %opts) = @_;
 
     my $apply     = $opts{apply}     ? 1 : 0;
-    my $allow_irc = $opts{allow_irc} ? 1 : 0;
+    my $allow_irc   = $opts{allow_irc} ? 1 : 0;
+    # mb545-B1: gate dediee — un changement de topic est plus intrusif qu'un
+    # reply; il exige apply + allow_irc + ALLOW_TOPIC explicite.
+    my $allow_topic = $opts{allow_topic} ? 1 : 0;
 
     # mb525-B1: application des timers.
     #   schedule_timer = coderef injecte par l'appelant; recoit l'action
@@ -556,6 +617,30 @@ sub apply_actions {
                     type  => $action->{type},
                     error => $err,
                 };
+            }
+            next;
+        }
+
+        if ($action->{type} eq 'topic') {
+            unless ($allow_irc) {
+                push @apply_errors, { index => $idx, type => 'topic',
+                    error => 'irc actions require allow_irc' };
+                next;
+            }
+            unless ($allow_topic) {
+                # mb545-B1: gate dediee, refus explicite et distinct.
+                push @apply_errors, { index => $idx, type => 'topic',
+                    error => 'topic actions require allow_topic' };
+                next;
+            }
+
+            my ($ok, $err) = $self->_send_topic_action($action);
+            if ($ok) {
+                push @applied, { index => $idx, type => 'topic',
+                    target => $action->{target} };
+            }
+            else {
+                push @apply_errors, { index => $idx, type => 'topic', error => $err };
             }
             next;
         }

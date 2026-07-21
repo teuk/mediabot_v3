@@ -135,12 +135,18 @@ timer whose deferred run rebuilds everything from the original envelope —
 see `examples/topicreminder.pl` (route it as an alternative to the simple
 `topic` reference). It also demonstrates the one-pending-timer-per-name
 semantic honestly: while a reminder is pending, a new topic change cannot
-arm a second one. Its readable timer name includes a stable digest suffix so
+arm a second one. With `CONFIG_topic=mode=restore` it switches from
+re-posting the topic to RE-SETTING it through the topic action — the
+canonical demonstration that per-route config can select between action
+types, and that the topic action's triple gate (apply + ALLOW_IRC +
+ALLOW_TOPIC) applies to deferred runs exactly as to immediate ones. Its readable timer name includes a stable digest suffix so
 sanitization or truncation cannot make ordinary channel names share a slot.
 
 ## 8. Survival rules (what the bridge enforces around you)
 
-- Delays are bounded to 1..3600s; reply/notice text is bounded upstream.
+- Delays are bounded to 1..3600s; reply/notice text is bounded upstream;
+  the topic action targets the originating channel only (300 chars max) and
+  needs the dedicated ALLOW_TOPIC gate on top of apply + ALLOW_IRC.
 - IRC output requires `ACTION_MODE=apply` **and** `ALLOW_IRC=yes`; in dry-run
   your actions are validated and planned, never applied.
 - Keep IRC-bound text plain ASCII in reference-quality scripts: exotic

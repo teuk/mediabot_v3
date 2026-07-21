@@ -12,11 +12,20 @@
 # Behavior:
 #   - event "topic": stay SILENT on IRC (no ack spam), log, and arm one
 #     deferred reminder for the channel;
-#   - event "timer": re-post the topic for people who missed it, rebuilt
-#     from the ORIGINAL envelope (the snapshot carries data.topic);
+#   - event "timer": deliver the reminder, rebuilt from the ORIGINAL
+#     envelope (the snapshot carries data.topic). Two modes (mb546):
+#       mode=remind  (default) — re-post the topic as a channel reply;
+#       mode=restore           — RE-SET the topic via the mb545 "topic"
+#                                action (re-asserts the original topic; it
+#                                needs the full triple gate ACTION_MODE=apply
+#                                + ALLOW_IRC + ALLOW_TOPIC, otherwise the
+#                                apply error stays visible in ".scriptdryrun
+#                                last" — a reference script does not hide
+#                                its requirements);
 #   - a cleared topic (empty) arms nothing;
 #   - config remind_after (seconds, 1..3600) adjusts the delay, protocol
-#     default 300; invalid values fall back to the default.
+#     default 300; invalid values fall back to the default; config mode
+#     accepts remind|restore, anything else falls back to remind.
 #
 # Deliberate limitation worth learning from: the timer name is derived from
 # the CHANNEL, and the bridge allows one pending timer per name — so while a
@@ -63,6 +72,14 @@ my $topic = (defined $data->{topic} && !ref($data->{topic}))
 
 # --- per-route configuration (mandatory default, bounded) --------------------
 my $config = ref($data->{config}) eq 'HASH' ? $data->{config} : {};
+
+# mb546: delivery mode — remind (reply) or restore (re-set via topic action).
+my $mode = 'remind';
+if (defined $config->{mode} && !ref($config->{mode})) {
+    my $m = lc $config->{mode};
+    $mode = $m if $m eq 'remind' || $m eq 'restore';
+}
+
 my $remind_after = DEFAULT_REMIND_AFTER;
 if (defined $config->{remind_after} && !ref($config->{remind_after})
     && "$config->{remind_after}" =~ /\A[0-9]+\z/) {
@@ -76,10 +93,19 @@ my @actions;
 if ($event eq 'timer') {
     # Deferred run: the snapshot carries the ORIGINAL topic and author.
     if (length $topic) {
-        push @actions,
-            { type => 'reply', text => "topic reminder: $topic (set by $nick)" },
-            { type => 'log', level => 'info',
-              text => "topicreminder: re-posted topic on $channel" };
+        if ($mode eq 'restore') {
+            # mb546: re-assert the original topic (needs the triple gate).
+            push @actions,
+                { type => 'topic', text => $topic },
+                { type => 'log', level => 'info',
+                  text => "topicreminder: restored topic on $channel (set by $nick)" };
+        }
+        else {
+            push @actions,
+                { type => 'reply', text => "topic reminder: $topic (set by $nick)" },
+                { type => 'log', level => 'info',
+                  text => "topicreminder: re-posted topic on $channel" };
+        }
     }
     else {
         push @actions,

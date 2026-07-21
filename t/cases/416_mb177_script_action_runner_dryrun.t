@@ -19,7 +19,7 @@ my $case = sub {
         'ScriptActionRunner object can be created');
     $assert->($runner->max_text_length == 40,
         'ScriptActionRunner stores max_text_length');
-    $assert->(join(',', $runner->allowed_action_types) eq 'log,notice,reply,timer',
+    $assert->(join(',', $runner->allowed_action_types) eq 'log,notice,reply,timer,topic',
         'ScriptActionRunner exposes safe initial action types');
 
     my $context = {

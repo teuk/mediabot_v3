@@ -101,6 +101,7 @@ sub new {
         allowed_actions  => {
             reply  => 1,
             notice => 1,
+            topic  => 1,  # mb545-B1
             log    => 1,
             timer  => 1,
         },

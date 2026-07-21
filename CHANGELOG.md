@@ -10,6 +10,39 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Fixed — topic action wire safety (mb547)
+
+- Topic actions now canonicalize a STATUSMSG-decorated context to the
+  underlying channel, reject malformed context targets before sending, and
+  encode Unicode topic text to UTF-8 bytes just like reply/notice actions.
+  This prevents invalid TOPIC destinations and wide-character failures in the
+  IO::Async write path.
+
+### Changed — plugin bridge examples (mb546)
+
+- **topicreminder.pl learns mode=restore**. With
+  `CONFIG_topic=remind_after=900;mode=restore`, the deferred run RE-SETS the
+  original topic through the mb545 topic action instead of re-posting it as
+  a reply — the canonical demonstration that per-route config can select
+  between action types, and that the topic action's triple gate applies to
+  deferred runs exactly as to immediate ones (a closed gate leaves the
+  dedicated apply error visible in `.scriptdryrun last`, and nothing is
+  sent). Default behavior (mode absent or invalid) is unchanged: remind.
+
+### Added — plugin bridge (Perl/Python/Tcl scripts)
+
+- **Topic action** (mb545). Scripts may emit
+  `{"type": "topic", "text": "..."}` to change the topic of their
+  ORIGINATING channel. Deliberately fail-closed: no `target` field is
+  accepted (the channel always comes from the run context, so no
+  cross-channel variant exists by construction), a channel context is
+  required, the text is capped at 300 characters, and applying it needs
+  three gates — `ACTION_MODE=apply`, `ALLOW_IRC=yes` and the dedicated
+  `ALLOW_TOPIC=yes` (default no, hot-reloadable, each refusal carrying its
+  own distinct error). Dry-run plans the action like any other; the gate is
+  visible in `.scriptdryrun status`/`last` and documented in the partyline
+  config reference, sample conf, README and cookbook.
+
 ### Added — LUSERS visibility (mb544)
 
 - The LUSERS details are now first-class debug material: every numeric that

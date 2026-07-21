@@ -133,7 +133,9 @@ kick-specific fields (`nick` = operator, `kicked` = victim, `message` =
 reason). Kick events are suppressed when the bot is the kicker or the
 victim. For a combined event+timer+config reference, `examples/topicreminder.pl`
 re-posts the topic after a configurable delay (`CONFIG_topic=remind_after=900`)
-and can be routed as an alternative to `topicwatch.pl`.
+and can be routed as an alternative to `topicwatch.pl`. With
+`CONFIG_topic=remind_after=900;mode=restore` it RE-SETS the topic through the
+topic action instead (triple gate required — see the Topic action section).
 When routed to an unexpected event, these examples log a warning and stay
 silent on IRC — a reference event script never spams a channel because of a
 config mistake.
@@ -155,6 +157,16 @@ Event guardrails:
   counted and ignored, never forked;
 - an `EVENTS` route is an explicit scope, so `APPLY_REQUIRE_SCOPE` adds no
   extra gate here.
+
+## Topic action
+
+Scripts may emit `{"type": "topic", "text": "..."}` to change the topic of
+their ORIGINATING channel. Deliberately strict: no `target` field is accepted
+(the channel always comes from the run context — no cross-channel version
+exists), the text is capped at 300 characters, a channel context is required,
+and applying it needs three gates: `ACTION_MODE=apply`, `ALLOW_IRC=yes` and
+the dedicated `ALLOW_TOPIC=yes` (default no). In dry-run the action is
+validated and planned like any other.
 
 ## Per-route configuration
 

@@ -2202,6 +2202,13 @@ sub _cmd_scriptdryrun {
         # mb532-B1: la reference partyline doit couvrir TOUTES les cles du
         # plugin; EVENTS/EVENT_COOLDOWN (mb529) et CONFIG_<route> (mb531)
         # manquaient depuis leur introduction.
+        $stream->write("  topic gate keys:\r\n");
+        $stream->write("    plugins.ScriptDryRun.ALLOW_TOPIC\r\n");
+        $stream->write("    plugins.ScriptDryRun.allow_topic\r\n");
+        $stream->write("    plugins.script_dryrun.ALLOW_TOPIC\r\n");
+        $stream->write("    plugins.script_dryrun.allow_topic\r\n");
+        $stream->write("    SCRIPT_DRYRUN_ALLOW_TOPIC\r\n");
+        $stream->write("  topic gate: topic actions require apply + ALLOW_IRC + ALLOW_TOPIC (default: no)\r\n");
         $stream->write("  event route keys:\r\n");
         $stream->write("    plugins.ScriptDryRun.EVENTS\r\n");
         $stream->write("    plugins.ScriptDryRun.events\r\n");
@@ -2450,6 +2457,8 @@ sub _cmd_scriptdryrun {
     # mb188-B1: expose ScriptDryRun ACTION_MODE / ALLOW_IRC state in read-only partyline status.
     $stream->write("  action_mode: $action_mode\r\n");
     $stream->write("  allow_irc: " . ($allow_irc ? 'yes' : 'no') . "\r\n");
+    my $allow_topic_545 = eval { $plugin->can('allow_topic') ? $plugin->allow_topic : 0 } ? 1 : 0;
+    $stream->write("  allow_topic: " . ($allow_topic_545 ? 'yes' : 'no') . "\r\n");
     # mb531-B1: expose per-route configuration presence.
     my @cfg_routes = eval { $plugin->can('configured_routes') ? $plugin->configured_routes : () };
     $stream->write("  config_routes: " . (@cfg_routes ? join(',', @cfg_routes) : 'none') . "\r\n");
@@ -2549,6 +2558,8 @@ sub _cmd_scriptdryrun {
     }
     $stream->write("  action_mode: $action_mode\r\n");
     $stream->write("  allow_irc: " . ($allow_irc ? 'yes' : 'no') . "\r\n");
+    my $allow_topic_545b = eval { $plugin->can('allow_topic') ? $plugin->allow_topic : 0 } ? 1 : 0;
+    $stream->write("  allow_topic: " . ($allow_topic_545b ? 'yes' : 'no') . "\r\n");
     $stream->write("  apply_require_scope: " . ($scope_guard ? 'yes' : 'no') . "\r\n");
     $stream->write("  apply_scope_restricted: " . ($scope_restricted ? 'yes' : 'no') . "\r\n");
     if (defined $scope_warning && length "$scope_warning") {
