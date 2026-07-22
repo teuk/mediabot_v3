@@ -75,6 +75,7 @@ sub new {
             log    => 1,
             timer  => 1,
             topic  => 1,  # mb545-B1
+            kick   => 1,  # mb554-B1
         },
     }, $class;
 }
@@ -283,6 +284,60 @@ sub validate_action {
     my $type = lc _trim($action->{type});
     return (0, 'missing action type') unless length $type;
     return (0, "unsupported action type '$type'") unless $self->{allowed_actions}{$type};
+
+    # mb554-B1: action kick — ejecte un nick du canal D'ORIGINE uniquement.
+    # Meme discipline fail-closed que topic: aucun target accepte, contexte
+    # canal obligatoire; nick au charset IRC (longueur <= 30), raison bornee
+    # a 120 octets UTF-8 avec un defaut explicite. Le refus du self-kick est
+    # verifie fail-closed a l'APPLICATION, pas ici: la validation n'a
+    # pas acces a l'identite IRC courante.
+    if ($type eq 'kick') {
+        return (0, 'kick action takes no target')
+            if exists $action->{target};
+
+        my $nick = $action->{nick};
+        return (0, 'kick action requires a nick')
+            unless defined $nick && !ref($nick) && length "$nick";
+        $nick = "$nick";
+        return (0, 'kick nick is too long (max 30)') if length($nick) > 30;
+        # mb555-B1: enforce the IRC nickname grammar, not only a bag of
+        # allowed characters. A nickname may not start with a digit or '-'.
+        return (0, 'kick nick has invalid characters')
+            unless $nick =~ /\A[A-Za-z\[\]\\\x60_^{}|][A-Za-z0-9\[\]\\\x60_^{}|-]{0,29}\z/;
+
+        my $reason = 'requested by script';
+        if (defined $action->{reason}) {
+            my ($r_ok, $r_err, $r_text) = $self->_bounded_text($action->{reason});
+            return (0, $r_err) unless $r_ok;
+
+            my $r_wire = $r_text;
+            $r_wire = encode('UTF-8', $r_wire) if utf8::is_utf8($r_wire);
+            return (0, 'kick reason is too long (max 120 UTF-8 bytes)')
+                if length($r_wire) > 120;
+
+            $reason = $r_text if length $r_text;
+        }
+
+        my $ctx_channel = $self->_context_default_target($context);
+        my $ctx_channel_base = _channel_token_base($ctx_channel);
+        return (0, 'kick action requires a channel context')
+            unless defined $ctx_channel_base && length $ctx_channel_base;
+
+        # mb555-B1: store the real channel token, never a STATUSMSG-decorated
+        # target such as @#channel, and reject malformed contexts before they
+        # can reach the IRC writer.
+        my ($target_ok, $target_err, $safe_channel)
+            = $self->_bounded_target($ctx_channel_base);
+        return (0, "invalid kick channel context: $target_err")
+            unless $target_ok;
+
+        return (1, undef, {
+            type   => 'kick',
+            target => $safe_channel,
+            nick   => $nick,
+            reason => $reason,
+        });
+    }
 
     # mb545-B1: action topic — change le topic du canal D'ORIGINE uniquement.
     # Fail-closed par construction: aucun champ target accepte (la cible est
@@ -510,6 +565,29 @@ sub _send_topic_action {
     return (1, undef);
 }
 
+# mb554-B1 / mb555-B1: envoi KICK — canal d'origine, nick valide, raison en trailing.
+sub _send_kick_action {
+    my ($self, $action) = @_;
+
+    my $bot = $self->{bot};
+    return (0, 'bot irc connection is unavailable')
+        unless $bot && $bot->{irc};
+
+    # mb555-B1: ScriptRunner returns character strings from decoded JSON.
+    # Encode the trailing reason before it reaches IO::Async::Stream, matching
+    # the reply/notice/topic wire-safety contract.
+    my $wire_reason = $action->{reason};
+    $wire_reason = encode('UTF-8', $wire_reason) if utf8::is_utf8($wire_reason);
+
+    my $sent = eval {
+        $bot->{irc}->send_message('KICK', undef,
+            $action->{target}, $action->{nick}, $wire_reason);
+        1;
+    };
+    return (0, 'KICK send failed') unless $sent;
+    return (1, undef);
+}
+
 sub _send_irc_action {
     my ($self, $action) = @_;
 
@@ -548,6 +626,8 @@ sub apply_actions {
     # mb545-B1: gate dediee — un changement de topic est plus intrusif qu'un
     # reply; il exige apply + allow_irc + ALLOW_TOPIC explicite.
     my $allow_topic = $opts{allow_topic} ? 1 : 0;
+    # mb554-B1: gate dediee kick, meme modele que topic.
+    my $allow_kick  = $opts{allow_kick} ? 1 : 0;
 
     # mb525-B1: application des timers.
     #   schedule_timer = coderef injecte par l'appelant; recoit l'action
@@ -641,6 +721,56 @@ sub apply_actions {
             }
             else {
                 push @apply_errors, { index => $idx, type => 'topic', error => $err };
+            }
+            next;
+        }
+
+        if ($action->{type} eq 'kick') {
+            unless ($allow_irc) {
+                push @apply_errors, { index => $idx, type => 'kick',
+                    error => 'irc actions require allow_irc' };
+                next;
+            }
+            unless ($allow_kick) {
+                push @apply_errors, { index => $idx, type => 'kick',
+                    error => 'kick actions require allow_kick' };
+                next;
+            }
+
+            # mb554-B1 / mb555-B1: self-kick protection is fail-closed.
+            # A moderation action must not proceed when the IRC object cannot
+            # reliably identify its own current nickname.
+            my $bot_k = $self->{bot};
+            my $irc_k = $bot_k && $bot_k->{irc} ? $bot_k->{irc} : undef;
+            unless ($irc_k && eval { $irc_k->can('is_nick_me') }) {
+                push @apply_errors, { index => $idx, type => 'kick',
+                    error => 'cannot verify bot identity for kick action' };
+                next;
+            }
+
+            my $is_me = 0;
+            my $checked = eval {
+                $is_me = $irc_k->is_nick_me($action->{nick}) ? 1 : 0;
+                1;
+            };
+            unless ($checked) {
+                push @apply_errors, { index => $idx, type => 'kick',
+                    error => 'cannot verify bot identity for kick action' };
+                next;
+            }
+            if ($is_me) {
+                push @apply_errors, { index => $idx, type => 'kick',
+                    error => 'refusing to kick the bot itself' };
+                next;
+            }
+
+            my ($ok, $err) = $self->_send_kick_action($action);
+            if ($ok) {
+                push @applied, { index => $idx, type => 'kick',
+                    target => $action->{target}, nick => $action->{nick} };
+            }
+            else {
+                push @apply_errors, { index => $idx, type => 'kick', error => $err };
             }
             next;
         }

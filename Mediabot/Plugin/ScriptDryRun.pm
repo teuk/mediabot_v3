@@ -79,6 +79,15 @@ sub _collect_conf_raw {
             'plugins.script_dryrun.allow_topic',
             'SCRIPT_DRYRUN_ALLOW_TOPIC',
         ),
+        # mb554-B1: gate dediee pour l'action kick (defaut: non).
+        allow_kick_raw => _conf_get_first(
+            $conf,
+            'plugins.ScriptDryRun.ALLOW_KICK',
+            'plugins.ScriptDryRun.allow_kick',
+            'plugins.script_dryrun.ALLOW_KICK',
+            'plugins.script_dryrun.allow_kick',
+            'SCRIPT_DRYRUN_ALLOW_KICK',
+        ),
         apply_require_scope_raw => _conf_get_first(
             $conf,
             'plugins.ScriptDryRun.APPLY_REQUIRE_SCOPE',
@@ -120,6 +129,7 @@ sub register {
         action_mode => 'dry-run',
         allow_irc   => 0,
         allow_topic => 0,
+        allow_kick  => 0,
         apply_require_scope => 0,
         command_filter => undef,
         command_routes => undef,
@@ -815,6 +825,7 @@ sub observe_public_command {
             apply       => 1,
             allow_irc   => $self->allow_irc,
             allow_topic   => $self->allow_topic,
+            allow_kick    => $self->allow_kick,
             # mb525-B1: brancher l'ordonnanceur de timers. La politique
             # (plafond, doublon, profondeur) reste dans ScriptActionRunner;
             # ce plugin ne fait qu'armer le timer IO::Async et re-executer
@@ -833,6 +844,7 @@ sub observe_public_command {
             action_mode   => 'apply',
             allow_irc     => $self->allow_irc,
             allow_topic     => $self->allow_topic,
+            allow_kick      => $self->allow_kick,
             script_result => $script_result,
             action_plan   => $action_plan,
         };
@@ -1050,6 +1062,7 @@ sub _fire_script_timer {
         apply       => 1,
         allow_irc   => $self->allow_irc,
             allow_topic   => $self->allow_topic,
+            allow_kick    => $self->allow_kick,
         # Pas de schedule_timer ici ET timer_depth => 1: double verrou contre
         # les chaines de timers auto-entretenues.
         timer_depth => 1,
@@ -1063,6 +1076,7 @@ sub _fire_script_timer {
         action_mode   => 'apply',
         allow_irc     => $self->allow_irc,
             allow_topic     => $self->allow_topic,
+            allow_kick      => $self->allow_kick,
         event         => 'timer',
         timer_name    => $planned->{name},
         script_result => $script_result,
@@ -1359,6 +1373,7 @@ sub observe_channel_event {
             apply       => 1,
             allow_irc   => $self->allow_irc,
             allow_topic   => $self->allow_topic,
+            allow_kick    => $self->allow_kick,
             timer_depth => 0,
             schedule_timer => sub {
                 return $self->_schedule_script_timer($script_path, \%data, @_);
@@ -1372,6 +1387,7 @@ sub observe_channel_event {
             action_mode   => 'apply',
             allow_irc     => $self->allow_irc,
             allow_topic     => $self->allow_topic,
+            allow_kick      => $self->allow_kick,
             event         => $event,
             script_result => $script_result,
             action_plan   => $action_plan,
@@ -1580,6 +1596,7 @@ sub _derive_conf_state {
     $self->{action_mode} = _normalize_action_mode($self->{action_mode_raw});
     $self->{allow_irc}   = _truthy($self->{allow_irc_raw});
     $self->{allow_topic} = _truthy($self->{allow_topic_raw});
+    $self->{allow_kick}  = _truthy($self->{allow_kick_raw});
 
     # mb189-B1 + A3 (mb225): optional extra safety gate, ENABLED BY DEFAULT.
     # When enabled, ACTION_MODE=apply is refused unless COMMANDS or ROUTES
@@ -1669,6 +1686,7 @@ sub refresh_from_conf {
         $fp{action_mode} = $self->{action_mode} || '';
         $fp{allow_irc}   = $self->{allow_irc} ? 1 : 0;
         $fp{allow_topic} = $self->{allow_topic} ? 1 : 0;
+        $fp{allow_kick}  = $self->{allow_kick} ? 1 : 0;
         $fp{apply_require_scope} = $self->{apply_require_scope} ? 1 : 0;
         $fp{event_cooldown} = $self->{event_cooldown} || 0;
         my $filter = $self->{command_filter};
@@ -1801,6 +1819,11 @@ sub action_mode {
 sub allow_topic {
     my ($self) = @_;
     return $self->{allow_topic} ? 1 : 0;
+}
+
+sub allow_kick {
+    my ($self) = @_;
+    return $self->{allow_kick} ? 1 : 0;
 }
 
 sub allow_irc {

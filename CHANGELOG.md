@@ -10,6 +10,32 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Fixed — kick action scope and wire safety (mb555)
+
+- Kick actions now canonicalize STATUSMSG-decorated channel contexts, reject
+  malformed channel targets, enforce the IRC first-character nickname rule,
+  bound reasons to 120 UTF-8 bytes, and encode Unicode reasons before the IRC
+  write path. Self-kick protection is fail-closed when bot identity cannot be
+  checked, and gatekeeper logs a truthful kick request rather than claiming
+  that a rejected or failed kick already happened.
+
+### Added — plugin bridge (Perl/Python/Tcl scripts)
+
+- **Kick action** (mb554). Scripts may emit
+  {"type": "kick", "nick": "...", "reason": "..."} to eject a nick from
+  their ORIGINATING channel. Same fail-closed shape as the topic action:
+  no target field accepted, channel context required, nick validated
+  against the IRC charset (max 30), reason bounded to 120 with an explicit
+  default, and three gates to apply — ACTION_MODE=apply, ALLOW_IRC=yes and
+  the dedicated ALLOW_KICK=yes (default no, hot-reloadable, distinct
+  refusal errors). The bridge refuses to kick the bot itself and fails
+  closed if its current IRC identity cannot be verified at apply time.
+- **gatekeeper.pl**, the canonical join-time use: case-insensitive
+  substring matching on the joining nick (no user-supplied regex by
+  design), total silence on normal joins, an unarmed configuration that
+  never kicks. Fifteen examples now ship; cookbook count and citations
+  updated under the mb538 guards.
+
 ### Fixed — observability truth and non-blocking status (mb553)
 
 - Histogram observations and bucket bounds now accept finite scientific

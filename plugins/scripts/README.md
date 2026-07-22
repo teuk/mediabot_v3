@@ -158,6 +158,17 @@ Event guardrails:
 - an `EVENTS` route is an explicit scope, so `APPLY_REQUIRE_SCOPE` adds no
   extra gate here.
 
+## Kick action
+
+Scripts may emit `{"type": "kick", "nick": "...", "reason": "..."}` to eject
+a nick from their ORIGINATING channel. Same strict shape as the topic
+action: no `target` field is accepted, a channel context is required, the
+nick follows the IRC grammar (max 30), the reason is bounded to 120 UTF-8
+bytes (default: requested by script), and applying it needs
+three gates: `ACTION_MODE=apply`, `ALLOW_IRC=yes` and the dedicated
+`ALLOW_KICK=yes` (default no). The bridge refuses to kick the bot itself.
+See `examples/gatekeeper.pl` for the canonical join-time use.
+
 ## Topic action
 
 Scripts may emit `{"type": "topic", "text": "..."}` to change the topic of

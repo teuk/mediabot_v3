@@ -325,7 +325,7 @@ return sub {
         $assert->unlike($plugin_src, qr/`[^`]+`/, 'aucun backtick apparie (garde mb203)');
         my @metric_conf_keys = $plugin_src =~ /'plugins\.ScriptDryRun\.([A-Z_]+)'/g;
         my %known = map { $_ => 1 } qw(SCRIPT COMMANDS ROUTES ACTION_MODE ALLOW_IRC
-            ALLOW_TOPIC APPLY_REQUIRE_SCOPE EVENTS EVENT_COOLDOWN);
+            ALLOW_KICK ALLOW_TOPIC APPLY_REQUIRE_SCOPE EVENTS EVENT_COOLDOWN);
         my @new_keys = grep { !$known{$_} } @metric_conf_keys;
         $assert->ok(!@new_keys, 'aucune nouvelle cle de conf introduite par les metriques');
 

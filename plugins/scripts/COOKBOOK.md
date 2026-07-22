@@ -96,6 +96,11 @@ carries its own extra fields:
 | `topic` | `topic` (new topic, may be empty) | `examples/topicwatch.pl` (Perl) |
 | `kick`  | `kicked` (victim), `message` (reason); `nick` is the operator | `examples/kickwatch.pl` (Perl) |
 
+For join-time moderation, `examples/gatekeeper.pl` shows the kick action
+(mb554): substring matching on the joining nick (no user-supplied regex by
+design), total silence on normal joins, an unarmed configuration that never
+kicks, and the full ALLOW_KICK gate chain advertised in its header.
+
 Rules every event script must live with:
 
 - the cooldown means you do **not** see every occurrence (netsplits, bursts);
@@ -151,7 +156,9 @@ sanitization or truncation cannot make ordinary channel names share a slot.
 
 - Delays are bounded to 1..3600s; reply/notice text is bounded upstream;
   the topic action targets the originating channel only (300 chars max) and
-  needs the dedicated ALLOW_TOPIC gate on top of apply + ALLOW_IRC.
+  needs the dedicated ALLOW_TOPIC gate on top of apply + ALLOW_IRC; the kick
+  action follows the same shape with ALLOW_KICK (IRC nick <= 30, reason
+  <= 120 UTF-8 bytes) and the bridge refuses to kick the bot itself.
 - IRC output requires `ACTION_MODE=apply` **and** `ALLOW_IRC=yes`; in dry-run
   your actions are validated and planned, never applied.
 - Keep IRC-bound text plain ASCII in reference-quality scripts: exotic
@@ -164,6 +171,6 @@ sanitization or truncation cannot make ordinary channel names share a slot.
 ## 9. Where to look next
 
 - Reference: [README](README.md) — protocol, keys, partyline tooling.
-- Full sources: `examples/` — fourteen shipped scripts, all covered by the
+- Full sources: `examples/` — fifteen shipped scripts, all covered by the
   test suite (statically, by real execution, and end to end through the
   apply pipeline).
