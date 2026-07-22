@@ -375,6 +375,9 @@ $mediabot->{metrics} = Mediabot::Metrics->new(
     loop    => $loop,
     logger  => $mediabot->{logger},
 );
+# mb550-B1: give the DB layer its Prometheus projection (best-effort).
+$mediabot->{db}->set_metrics($mediabot->{metrics})
+    if $mediabot->{db} && $mediabot->{db}->can('set_metrics');
 
 $mediabot->{metrics}->set_build_info(
     version => $MAIN_PROG_VERSION || 'unknown',
@@ -1182,6 +1185,8 @@ sub log_error {
 }
 
 sub on_timer_tick {
+    # mb550-B1: measure our own lateness first — any blocked loop shows here.
+    eval { $mediabot->note_tick_for_stall_detection(5); };
     # mb543-B1: keep the network gauges fresh (throttled inside).
     eval { $mediabot->maybe_request_lusers(); };
     my @params = @_;
@@ -1860,6 +1865,8 @@ sub on_message_PRIVMSG {
     }
 
     my $elapsed_548 = Time::HiRes::tv_interval($t0_548);
+    # mb551-B1: full latency distribution, not just the slow tail.
+    eval { $mediabot->{metrics}->observe('mediabot_privmsg_processing_seconds', $elapsed_548); };
     if ($elapsed_548 > 1.0) {
         my $who_548 = $hints ? ($hints->{prefix_nick} // '?') : '?';
         eval {

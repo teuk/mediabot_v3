@@ -193,7 +193,12 @@ my $config  = ref($data->{config}) eq 'HASH' ? $data->{config} : {};
 my $welcome = $config->{welcome} // 'welcome,';
 ```
 
-`data.config` is the only structured envelope field: one level deep, scalar
+`data.config` and the read-only `data.network` snapshot are the only
+structured envelope fields. `data.network` (present once the bot has LUSERS
+data) carries `users`, `users_max`, `channels`, `servers`, `operators` and
+`age_seconds`, and is rebuilt FRESH at every run — including a deferred
+timer run, unlike `data.config` which travels with the timer's snapshot.
+`data.config` remains one level deep, scalar
 values only. Every other field keeps the flat scalar/array contract.
 
 ## Cookbook

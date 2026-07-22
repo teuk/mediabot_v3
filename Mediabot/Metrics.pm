@@ -33,6 +33,14 @@ sub new {
 
     $self->_declare('mediabot_irc_connected',          'gauge',   'Whether the bot is currently connected to IRC');
     # mb543-B1: network-wide stats parsed from LUSERS numerics (251/252/254/266).
+    # mb550-B1: DB health and event-loop stall series.
+    $self->_declare('mediabot_db_up',                  'gauge',   'Whether the DB connection is currently usable (1/0)');
+    $self->_declare('mediabot_db_reconnects_total',    'counter', 'DB reconnect attempts by result (ok/failed)');
+    $self->_declare('mediabot_db_slow_pings_total',    'counter', 'DB pings slower than the slow threshold');
+    $self->_declare('mediabot_loop_stalls_total',      'counter', 'Event-loop stalls detected by the periodic tick');
+    # mb551-B1: end-to-end PRIVMSG processing latency distribution.
+    $self->_declare('mediabot_privmsg_processing_seconds', 'histogram',
+        'End-to-end PRIVMSG handler processing time (seconds)');
     $self->_declare('mediabot_network_users',          'gauge',   'Current users on the IRC network (LUSERS)');
     $self->_declare('mediabot_network_users_max',      'gauge',   'Max users seen on the IRC network (LUSERS)');
     $self->_declare('mediabot_network_channels',       'gauge',   'Channels formed on the IRC network (LUSERS)');
@@ -188,8 +196,46 @@ sub set_build_info {
 }
 
 sub declare {
-    my ($self, $name, $type, $help) = @_;
-    return $self->_declare($name, $type, $help);
+    my ($self, @args) = @_;
+    return $self->_declare(@args);
+}
+
+# mb553-B1: Time::HiRes legitimately stringifies very small durations as
+# scientific notation (for example 3e-06). Keep validation strict and finite,
+# but accept decimal and exponent forms; refs, NaN and infinities stay out.
+sub _valid_metric_number {
+    my ($value) = @_;
+    return 0 unless defined $value && !ref($value);
+    return "$value" =~ /\A[+-]?(?:(?:[0-9]+(?:\.[0-9]*)?)|(?:\.[0-9]+))(?:[eE][+-]?[0-9]+)?\z/;
+}
+
+# mb551-B1: record one observation into a histogram. No-op when disabled,
+# unknown, or not a histogram — observability never throws.
+sub observe {
+    my ($self, $name, $value, $labels) = @_;
+    return unless $self->enabled;
+    return unless _valid_metric_number($value);
+    $value = 0 + $value;
+
+    my $entry = $self->{metrics}{$name} or return;
+    return unless ($entry->{type} || '') eq 'histogram';
+
+    my $key = $self->_labels_key($labels);
+    my $buckets = $entry->{buckets};
+    my $h = $entry->{values}{$key} //= {
+        counts => [ (0) x (scalar(@$buckets) + 1) ],
+        sum    => 0,
+        count  => 0,
+    };
+
+    my $idx = scalar @$buckets;   # default: +Inf slot
+    for my $i (0 .. $#$buckets) {
+        if ($value <= $buckets->[$i]) { $idx = $i; last; }
+    }
+    $h->{counts}[$idx]++;
+    $h->{sum}   += $value;
+    $h->{count} += 1;
+    return 1;
 }
 
 sub inc {
@@ -273,14 +319,39 @@ sub render_prometheus {
         push @out, sprintf("# TYPE %s %s", $name, (defined($m->{type}) && $m->{type} ne '') ? $m->{type} : 'untyped');
 
         my $values = $m->{values} || {};
-        for my $label_key (sort keys %$values) {
-            my $v = $values->{$label_key};
-            $v = 0 unless defined $v;
+        if (($m->{type} || '') eq 'histogram') {
+            # mb551-B1: cumulative _bucket lines, then _sum and _count, per
+            # label set. Storage is per-bucket; cumulation happens here.
+            my $buckets = $m->{buckets} || [];
+            for my $label_key (sort keys %$values) {
+                my $h = $values->{$label_key};
+                next unless ref($h) eq 'HASH';
+                my $cum = 0;
+                for my $i (0 .. $#$buckets) {
+                    $cum += $h->{counts}[$i] || 0;
+                    my $le = 'le="' . $buckets->[$i] . '"';
+                    my $lbl = length($label_key) ? "$label_key,$le" : $le;
+                    push @out, sprintf('%s_bucket{%s} %s', $name, $lbl, $cum);
+                }
+                $cum += $h->{counts}[ scalar @$buckets ] || 0;
+                my $inf = 'le="+Inf"';
+                my $lbl_inf = length($label_key) ? "$label_key,$inf" : $inf;
+                push @out, sprintf('%s_bucket{%s} %s', $name, $lbl_inf, $cum);
+                my $suffix = length($label_key) ? "{$label_key}" : '';
+                push @out, sprintf('%s_sum%s %s',   $name, $suffix, $h->{sum}   || 0);
+                push @out, sprintf('%s_count%s %s', $name, $suffix, $h->{count} || 0);
+            }
+        }
+        else {
+            for my $label_key (sort keys %$values) {
+                my $v = $values->{$label_key};
+                $v = 0 unless defined $v;
 
-            if (defined $label_key && length $label_key) {
-                push @out, sprintf('%s{%s} %s', $name, $label_key, $v);
-            } else {
-                push @out, sprintf('%s %s', $name, $v);
+                if (defined $label_key && length $label_key) {
+                    push @out, sprintf('%s{%s} %s', $name, $label_key, $v);
+                } else {
+                    push @out, sprintf('%s %s', $name, $v);
+                }
             }
         }
 
@@ -439,16 +510,37 @@ sub stop_http_server {
 }
 
 sub _declare {
-    my ($self, $name, $type, $help) = @_;
+    my ($self, $name, $type, $help, @rest) = @_;
+
+    # mb551-B1: legacy callers pass a label-name arrayref as a positional
+    # fourth argument; accept and skip it before reading keyword options.
+    shift @rest if @rest && ref($rest[0]) eq 'ARRAY';
+    my %opts = @rest;
 
     $type ||= 'gauge';
     $help ||= $name;
 
-    $self->{metrics}{$name} ||= {
+    my %entry = (
         type   => $type,
         help   => $help,
         values => {},
-    };
+    );
+
+    # mb551-B1: histograms carry their bucket bounds (sorted, positive,
+    # deduplicated); a histogram declared without buckets gets latency-ish
+    # defaults suitable for seconds.
+    if ($type eq 'histogram') {
+        my @raw = ref($opts{buckets}) eq 'ARRAY' ? @{ $opts{buckets} } : ();
+        my %seen;
+        my @buckets = sort { $a <=> $b }
+            grep { $_ > 0 && !$seen{$_}++ }
+            map  { 0 + $_ }
+            grep { _valid_metric_number($_) } @raw;
+        @buckets = (0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10) unless @buckets;
+        $entry{buckets} = \@buckets;
+    }
+
+    $self->{metrics}{$name} ||= { %entry };
 
     return 1;
 }

@@ -22,6 +22,7 @@ package Mediabot::Partyline;
 # +---------------------------------------------------------------------------+
 
 use strict;
+use Time::HiRes ();
 use warnings;
 use bytes ();
 use IO::Async::Listener;
@@ -819,10 +820,22 @@ sub _dispatch_line_safely {
 
     $transport = 'Partyline' unless defined($transport) && length($transport);
 
+    # mb552-B1: same discipline as the PRIVMSG wrapper — any partyline
+    # command slower than one second names itself at level 3.
+    my $t0_552 = [ Time::HiRes::gettimeofday() ];
     my $ok = eval {
         $self->_handle_line($stream, $id, $line);
         1;
     };
+    my $elapsed_552 = Time::HiRes::tv_interval($t0_552);
+    if ($elapsed_552 > 1.0) {
+        my $cmd = $line;
+        $cmd = (split ' ', $cmd)[0] // '';
+        eval {
+            $self->{bot}->{logger}->log(3,
+                sprintf('SLOW PARTYLINE: %s took %.2fs', $cmd, $elapsed_552));
+        };
+    }
 
     return 1 if $ok;
 
@@ -3506,6 +3519,29 @@ sub _cmd_status {
     $stream->write(sprintf("Bot:      %s  uptime: %s\r\n",
         $bot_info->{nick} // '?', $bot_info->{uptime} // '?'));
     $stream->write(sprintf("Sessions: %d active\r\n", scalar @$sessions));
+    # mb552-B1 / mb553-B1: infrastructure health at a glance. Read the
+    # DB handle state maintained by the canonical five-second health tick;
+    # .status must never perform a synchronous ping/reconnect and become the
+    # very partyline stall it is supposed to diagnose.
+    {
+        my $bot_h = $self->{bot};
+        my $db_state = 'unknown';
+        if ($bot_h && $bot_h->{db} && eval { $bot_h->{db}->can('dbh') }) {
+            my $dbh = eval { $bot_h->{db}->dbh };
+            $db_state = $dbh ? 'up' : 'DOWN';
+        }
+        $stream->write("DB:       $db_state\r\n");
+        if ($bot_h && eval { $bot_h->can('last_loop_stall') }) {
+            my $stall = eval { $bot_h->last_loop_stall };
+            if (ref($stall) eq 'HASH' && $stall->{seconds}) {
+                $stream->write(sprintf("Loop:     last stall %.2fs at %s\r\n",
+                    $stall->{seconds}, scalar localtime($stall->{at} || 0)));
+            }
+            else {
+                $stream->write("Loop:     no stall detected\r\n");
+            }
+        }
+    }
     # IMP24: add global AF status
     my $bot_s = $self->{bot};
     my $gaf = $bot_s->{_global_af} // {};

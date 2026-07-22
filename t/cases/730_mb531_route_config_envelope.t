@@ -318,6 +318,6 @@ return sub {
 
         my $readme = _slurp_730(File::Spec->catfile('.', 'plugins', 'scripts', 'README.md'));
         $assert->like($readme, qr/## Per-route configuration/, 'README: section config par route');
-        $assert->like($readme, qr/only structured envelope field/, 'README: contrat un-niveau documente');
+        $assert->like($readme, qr/only\s+structured envelope fields/, 'README: contrat des champs structures documente (config + network, mb552)');
     }
 };

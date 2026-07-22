@@ -115,7 +115,12 @@ push @actions, { type => 'log', level => 'warning',
 
 ## 7. Read per-route configuration (with a mandatory default)
 
-`CONFIG_<route>` lands in the envelope as `data.config` (the only structured
+The envelope also carries a read-only `data.network` snapshot (users,
+users_max, channels, servers, operators, age_seconds) rebuilt fresh at
+every run — a deferred timer sees the network as it is NOW, while its
+`data.config` stays as it was when armed.
+
+`CONFIG_<route>` lands in the envelope as `data.config` (the primary structured
 field — one level, scalar values), and it is present only when non-empty, so
 **always keep a default**:
 

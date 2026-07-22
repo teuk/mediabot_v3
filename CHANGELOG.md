@@ -10,6 +10,65 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Fixed — observability truth and non-blocking status (mb553)
+
+- Histogram observations and bucket bounds now accept finite scientific
+  notation produced legitimately by Time::HiRes, so very fast runs are no
+  longer dropped silently. `.status` reads the DB handle state maintained by
+  the canonical five-second health tick instead of performing a synchronous
+  ping/reconnect from the partyline. `data.network` is enforced as a reserved
+  read-only field, absent without current LUSERS data, and failed LUSERS sends
+  no longer advance the refresh throttle or prolong stale snapshots.
+
+### Added — network envelope, status health, partyline tracer (mb552)
+
+- **data.network in the script envelope**: a read-only snapshot (users,
+  users_max, channels, servers, operators, age_seconds) built FRESH at
+  every payload construction — including deferred timer runs, which see the
+  network as it is NOW while their data.config stays the arming-time
+  snapshot. Whitelisted fields only, per-field garbage rejection, absent
+  entirely until LUSERS data exists; fractional epochs accepted.
+- **.status infrastructure lines**: cached DB up/DOWN from the canonical
+  five-second health tick (no synchronous partyline probe) and the last
+  event-loop stall (or "no stall detected").
+- **SLOW PARTYLINE tracer**: the partyline line dispatcher gets the same
+  end-to-end timing discipline as the PRIVMSG wrapper — any command above
+  one second logs its name and duration at level 3.
+
+### Added — latency histograms (mb551)
+
+- **Histogram metric type** in Mediabot::Metrics: declare(..., 'histogram',
+  help, buckets => [...]) with sorted/deduplicated/validated bounds
+  (latency defaults when omitted), observe(name, value, labels), and full
+  Prometheus exposition (cumulative _bucket lines with le="+Inf", _sum,
+  _count, per label set). Backward compatible with the legacy positional
+  label-list argument.
+- **Two latencies become distributions**: mediabot_privmsg_processing_seconds
+  (fed by the PRIVMSG wrapper on every message — the SLOW threshold log is
+  unchanged) and mediabot_scriptbridge_run_seconds{origin} (fed from the
+  run duration now measured with sub-second precision by ScriptRunner and
+  exposed as result->{duration_s}).
+- **Dashboards**: p50/p95 PRIVMSG panel on the overview, p95-by-origin panel
+  on the scriptbridge dashboard; the dashboard truth contracts learned to
+  resolve histogram _bucket/_sum/_count suffixes (trying the full name
+  first, since real series can legitimately end in _count).
+
+### Added — DB health metrics and event-loop stall detector (mb550)
+
+- **DB health as Prometheus series**: mediabot_db_up (gauge),
+  mediabot_db_reconnects_total{result}, mediabot_db_slow_pings_total —
+  emitted from the already-timed ensure_connected path (best-effort
+  injection via DB::set_metrics; behavior unchanged without Metrics, and
+  a failed reconnect reports db_up=0, consistent with the mb549
+  stale-handle fix).
+- **Event-loop stall detector**: the 5s periodic tick measures its own
+  lateness; any drift beyond 2s logs "event loop stalled ~X.Xs" at level 1,
+  increments mediabot_loop_stalls_total and keeps the last stall for
+  operator views. Catches synchronous freezes (SQL, DNS, disk) that never
+  touch the PRIVMSG path.
+- **Overview dashboard**: new Infrastructure row (DB up, reconnects, slow
+  pings, loop stalls — compact stats plus two rate panels).
+
 ### Fixed/Added — first-command lag diagnosis and hardening (mb548, corrected by mb549)
 
 - **Bounded DB network waits**: both DSN construction sites now set

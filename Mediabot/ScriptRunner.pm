@@ -341,6 +341,37 @@ sub build_event_payload {
     $event = _normalize_event_name($event);
     my %safe_data = _normalize_event_data(%data);
 
+    # mb553-B1: data.network is reserved and read-only. Never preserve a
+    # caller-supplied HASH/null placeholder; either rebuild it from current
+    # core LUSERS state below, or leave the field absent.
+    delete $safe_data{network};
+
+    # mb552-B1: read-only network snapshot for scripts (data.network). Built
+    # FRESH at every payload construction — including a deferred timer run,
+    # which replays run_script: unlike data.config (snapshotted at arming),
+    # network reflects the world NOW. Whitelisted fields only, age in
+    # seconds instead of a raw epoch; absent entirely when the bot has no
+    # LUSERS data yet.
+    my $bot = $self->{bot};
+    if ($bot && eval { $bot->can('network_stats') }) {
+        my $stats = eval { $bot->network_stats } || {};
+        if (ref($stats) eq 'HASH' && %$stats) {
+            my %net;
+            for my $field (qw(users users_max channels servers operators)) {
+                $net{$field} = int($stats->{$field})
+                    if defined $stats->{$field} && "$stats->{$field}" =~ /\A[0-9]+\z/;
+            }
+            # mb552-B1: accept a fractional epoch too — any caller using
+            # Time::HiRes-imported time() legitimately produces floats (and
+            # the shared-process test suite proved it the hard way).
+            if (defined $stats->{updated_at} && "$stats->{updated_at}" =~ /\A[0-9]+(?:\.[0-9]+)?\z/) {
+                my $age = time() - int($stats->{updated_at});
+                $net{age_seconds} = $age >= 0 ? $age : 0;
+            }
+            $safe_data{network} = \%net if %net;
+        }
+    }
+
     return {
         protocol => 'mediabot-script-v1',
         event    => $event,
@@ -1066,10 +1097,18 @@ sub run_plan {
 sub run_script {
     my ($self, $script_path, $event, %data) = @_;
 
+    # mb551-B1: measure the full run with sub-second precision; consumers
+    # (metrics histograms) read result->{duration_s}. Purely additive.
+    my $t0_551 = [ Time::HiRes::gettimeofday() ];
+
     my $plan = $self->run_dry($script_path, $event, %data);
-    return $plan unless ref($plan) eq 'HASH' && $plan->{ok};
+    unless (ref($plan) eq 'HASH' && $plan->{ok}) {
+        $plan->{duration_s} = Time::HiRes::tv_interval($t0_551) if ref($plan) eq 'HASH';
+        return $plan;
+    }
 
     my $result = $self->run_plan($plan);
+    $result->{duration_s} = Time::HiRes::tv_interval($t0_551) if ref($result) eq 'HASH';
 
     # A5 (mb225): expose the resolved language and validated absolute path in
     # the result for observability (.scriptdryrun last, logs). Additive fields;

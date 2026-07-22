@@ -36,7 +36,12 @@ sub _slurp_741 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
     package IRC741;
     sub new { bless { connected => 1, sent => [] }, shift }
     sub is_connected { $_[0]->{connected} }
-    sub send_message { my ($self, @args) = @_; push @{ $self->{sent} }, \@args; 1 }
+    sub send_message {
+        my ($self, @args) = @_;
+        die "simulated LUSERS send failure\n" if $self->{fail};
+        push @{ $self->{sent} }, \@args;
+        1;
+    }
 }
 
 {
@@ -122,6 +127,16 @@ return sub {
         my $s3 = Stream741->new;
         $party->_cmd_lusers($s3, 1, 'refresh');
         $assert->like($s3->out, qr/not sent \(not connected\)/, 'refresh: refus propre');
+
+        # course de connexion: le test initial passe, l'envoi echoue ensuite.
+        $irc->{connected} = 1;
+        $irc->{fail} = 1;
+        $core->{network_lusers_last_request} = 123;
+        my $s3b = Stream741->new;
+        $party->_cmd_lusers($s3b, 1, 'refresh');
+        $assert->ok($core->{network_lusers_last_request} == 123,
+            'refresh: echec envoi ne decale pas le throttle');
+        $irc->{fail} = 0;
 
         # cache vide.
         my $empty = bless { logger => L741->new }, 'Mediabot';

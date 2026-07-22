@@ -42,7 +42,12 @@ sub _slurp_740 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
     package IRC740;
     sub new { bless { connected => 1, sent => [] }, shift }
     sub is_connected { $_[0]->{connected} }
-    sub send_message { my ($self, @args) = @_; push @{ $self->{sent} }, \@args; 1 }
+    sub send_message {
+        my ($self, @args) = @_;
+        die "simulated LUSERS send failure\n" if $self->{fail};
+        push @{ $self->{sent} }, \@args;
+        1;
+    }
 }
 
 {
@@ -129,6 +134,14 @@ return sub {
             conf => Conf740->new('main.LUSERS_REFRESH' => '300') }, 'Mediabot';
         $dc->{irc}{connected} = 0;
         $assert->ok($dc->maybe_request_lusers == 0, 'non connecte: silence');
+
+        my $failed = bless { irc => IRC740->new, logger => L740->new,
+            conf => Conf740->new('main.LUSERS_REFRESH' => '60'),
+            network_lusers_last_request => 123 }, 'Mediabot';
+        $failed->{irc}{fail} = 1;
+        $assert->ok($failed->maybe_request_lusers == 0
+            && $failed->{network_lusers_last_request} == 123,
+            'echec envoi periodique: throttle non avance');
     }
 
     # ------------------------------------------------------------------
@@ -187,7 +200,16 @@ return sub {
         while ($plugin_src =~ /'declare',\s*'(mediabot_scriptbridge_[a-z_]+)'/g) { $declared{$1} = 1 }
 
         my %used;
-        while ($raw =~ /(mediabot_[a-z_]+)/g) { $used{$1} = 1 }
+        while ($raw =~ /(mediabot_[a-z_]+)/g) {
+            my $series = $1;
+            # mb551: try the full name first (real series can end in _count),
+            # then the histogram-suffix-stripped base name.
+            unless ($declared{$series}) {
+                (my $base = $series) =~ s/_(?:bucket|sum|count)\z//;
+                $series = $base if $declared{$base};
+            }
+            $used{$series} = 1;
+        }
         $assert->ok(scalar(keys %used) >= 10, 'overview: au moins dix series utilisees');
         for my $series (sort keys %used) {
             $assert->ok($declared{$series}, "overview -> code: '$series' est declaree");

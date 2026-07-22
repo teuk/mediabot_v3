@@ -1748,6 +1748,11 @@ sub _declare_bridge_metrics {
         'Script bridge timers by lifecycle outcome (armed/delivered/cancelled)');
     $self->_bridge_metric('declare', 'mediabot_scriptbridge_pending_timers', 'gauge',
         'Currently armed script bridge timers');
+    # mb551-B1: run latency distribution by origin (histogram; needs a
+    # Metrics build with the histogram type — declare is best-effort anyway).
+    $self->_bridge_metric('declare', 'mediabot_scriptbridge_run_seconds', 'histogram',
+        'External script run duration in seconds, by origin',
+        buckets => [ 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10 ]);
 
     return 1;
 }
@@ -1758,6 +1763,15 @@ sub _note_run_metric {
     my $ok = ref($result) eq 'HASH' && $result->{ok} ? 'ok' : 'error';
     $self->_bridge_metric('inc', 'mediabot_scriptbridge_runs_total',
         { origin => $origin, result => $ok });
+
+    # mb551-B1: feed the latency histogram when the runner measured the run.
+    my $script_result = ref($result) eq 'HASH' ? $result->{script_result} : undef;
+    my $duration = ref($script_result) eq 'HASH' ? $script_result->{duration_s} : undef;
+    $duration = $result->{duration_s}
+        if !defined($duration) && ref($result) eq 'HASH';
+    $self->_bridge_metric('observe', 'mediabot_scriptbridge_run_seconds',
+        $duration, { origin => $origin })
+        if defined $duration;
     return 1;
 }
 

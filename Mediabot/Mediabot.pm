@@ -545,10 +545,51 @@ sub request_lusers_now {
     my ($self) = @_;
 
     return 0 unless $self->{irc} && eval { $self->{irc}->is_connected };
-    $self->{network_lusers_last_request} = time();
     eval { $self->{irc}->send_message('LUSERS', undef); 1 } or return 0;
+    # mb553-B1: only a successful send makes the cached network snapshot
+    # eligible to age behind a new throttle window.
+    $self->{network_lusers_last_request} = time();
     $self->{logger}->log(3, 'LUSERS refresh requested (partyline)') if $self->{logger};
     return 1;
+}
+
+# mb550-B1: event-loop stall detector. The periodic tick calls this with its
+# expected interval; any drift beyond STALL_THRESHOLD means the loop was
+# blocked (synchronous SQL, DNS, disk...) — log it loudly, count it, and keep
+# the last stall for operator views. Catches freezes that never touch the
+# PRIVMSG path. First call only arms the reference point.
+use constant LOOP_STALL_THRESHOLD => 2;
+
+sub note_tick_for_stall_detection {
+    my ($self, $expected_interval) = @_;
+
+    $expected_interval = 5
+        unless defined $expected_interval && "$expected_interval" =~ /\A[0-9]+(?:\.[0-9]+)?\z/
+            && $expected_interval > 0;
+
+    my $now  = Time::HiRes::time();
+    my $last = $self->{loop_last_tick_at};
+    $self->{loop_last_tick_at} = $now;
+    return 0 unless defined $last;
+
+    my $drift = ($now - $last) - $expected_interval;
+    return 0 if $drift <= LOOP_STALL_THRESHOLD;
+
+    my $stall = sprintf('%.2f', $drift);
+    $self->{loop_last_stall} = { at => int($now), seconds => 0 + $stall };
+    $self->{logger}->log(1, "event loop stalled ~${stall}s (tick expected every ${expected_interval}s) — a synchronous operation blocked the bot")
+        if $self->{logger};
+    if ($self->{metrics} && eval { $self->{metrics}->can('inc') }) {
+        eval { $self->{metrics}->inc('mediabot_loop_stalls_total'); 1 };
+    }
+    return 0 + $stall;
+}
+
+# mb550-B1: read-only copy of the last detected stall (for .status and tests).
+sub last_loop_stall {
+    my ($self) = @_;
+    my $stall = $self->{loop_last_stall};
+    return ref($stall) eq 'HASH' ? { %$stall } : undef;
 }
 
 # mb543-B1: periodic LUSERS refresh so the network gauges stay current after
@@ -572,8 +613,10 @@ sub maybe_request_lusers {
     my $last = $self->{network_lusers_last_request} || 0;
     return 0 if ($now - $last) < $interval;
 
-    $self->{network_lusers_last_request} = $now;
     eval { $self->{irc}->send_message('LUSERS', undef); 1 } or return 0;
+    # mb553-B1: a connection race must leave the previous timestamp untouched
+    # so the next tick can retry instead of serving stale data for a full window.
+    $self->{network_lusers_last_request} = $now;
     $self->{logger}->log(3, 'LUSERS refresh requested') if $self->{logger};
     return 1;
 }

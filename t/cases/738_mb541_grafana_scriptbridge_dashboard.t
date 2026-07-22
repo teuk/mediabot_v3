@@ -85,7 +85,7 @@ return sub {
     while ($plugin_src =~ /'declare',\s*'(mediabot_scriptbridge_[a-z_]+)'/g) {
         $declared{$1} = 1;
     }
-    $assert->ok(scalar(keys %declared) == 4, 'plugin: quatre series declarees (base du croisement)');
+    $assert->ok(scalar(keys %declared) == 5, 'plugin: cinq series declarees (base du croisement, mb551 inclus)');
 
     my $exprs = _walk_exprs_738($dash, []);
     $assert->ok(@$exprs >= 8, 'dashboard: au moins huit expressions PromQL');
@@ -94,6 +94,13 @@ return sub {
     for my $expr (@$exprs) {
         while ($expr =~ /(mediabot_[a-z_]+)/g) {
             my $series = $1;
+            # mb551: histogram exprs may reference _bucket/_sum/_count
+            # synthetic series; try the full name first (real series can end
+            # in _count too), then the stripped base name.
+            unless ($declared{$series}) {
+                (my $base = $series) =~ s/_(?:bucket|sum|count)\z//;
+                $series = $base if $declared{$base};
+            }
             $used{$series} = 1;
             $assert->ok($declared{$series},
                 "expr -> code: la serie '$series' est declaree par le plugin");

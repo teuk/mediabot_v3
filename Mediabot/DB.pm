@@ -189,6 +189,23 @@ sub dbh {
     return $self->{dbh};
 }
 
+# mb550-B1: optional Prometheus projection, injected after construction.
+# Strictly best-effort: without it, health behavior is unchanged.
+sub set_metrics {
+    my ($self, $metrics) = @_;
+    $self->{metrics} = $metrics;
+    $self->_health_metric('set', 'mediabot_db_up', ($self->{dbh} ? 1 : 0));
+    return 1;
+}
+
+sub _health_metric {
+    my ($self, $method, @args) = @_;
+    my $metrics = $self->{metrics};
+    return 0 unless $metrics && eval { $metrics->can($method) };
+    eval { $metrics->$method(@args); 1 } or return 0;
+    return 1;
+}
+
 # mb548-B1: bounded numeric timeout with default (0 or garbage -> default).
 sub _bounded_timeout {
     my ($raw, $default, $min, $max) = @_;
@@ -214,9 +231,12 @@ sub ensure_connected {
     my $ping_s = Time::HiRes::tv_interval($t0);
 
     if ($alive) {
-        if ($ping_s > 0.25 && $self->{logger}) {
-            $self->{logger}->log(3, sprintf('DB ping slow: %.2fs (connection degrading?)', $ping_s));
+        if ($ping_s > 0.25) {
+            $self->{logger}->log(3, sprintf('DB ping slow: %.2fs (connection degrading?)', $ping_s))
+                if $self->{logger};
+            $self->_health_metric('inc', 'mediabot_db_slow_pings_total');
         }
+        $self->_health_metric('set', 'mediabot_db_up', 1);
         return $dbh;
     }
 
@@ -236,6 +256,10 @@ sub ensure_connected {
     $self->{dbh} = undef unless $reconnect_ok;
 
     my $reconnect_s = Time::HiRes::tv_interval($t1);
+    # mb550-B1: reconnects and availability become Prometheus series.
+    $self->_health_metric('inc', 'mediabot_db_reconnects_total',
+        { result => ($reconnect_ok ? 'ok' : 'failed') });
+    $self->_health_metric('set', 'mediabot_db_up', ($reconnect_ok ? 1 : 0));
     if ($self->{logger}) {
         my $state = $reconnect_ok ? 'ok' : 'FAILED';
         $self->{logger}->log(1, sprintf('DB reconnect %s in %.2fs (ping wait was %.2fs)',
