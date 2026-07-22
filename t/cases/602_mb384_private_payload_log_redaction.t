@@ -131,7 +131,7 @@ return sub {
         'generic private callback no longer uses the historical raw-text log'
     );
 
-    my $privmsg_body = _extract_sub_mb384($main, 'on_message_PRIVMSG') // '';
+    my $privmsg_body = _extract_sub_mb384($main, '_on_message_PRIVMSG_body') // '';
     $assert->like(
         $privmsg_body,
         qr/redact_last_arg\s*=>\s*\(\$is_channel\s*\?\s*0\s*:\s*1\)/,

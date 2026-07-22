@@ -10,6 +10,23 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Fixed/Added — first-command lag diagnosis and hardening (mb548, corrected by mb549)
+
+- **Bounded DB network waits**: both DSN construction sites now set
+  mariadb_connect_timeout/read_timeout/write_timeout (mysql.CONNECT_TIMEOUT/
+  READ_TIMEOUT/WRITE_TIMEOUT, defaults 5/30/30, bounded). A silently dropped
+  idle connection can no longer stall the first command indefinitely.
+- **Timed reconnect path**: ensure_connected logs slow pings (level 3, with
+  duration) and every reconnect's duration and accurate outcome (level 1),
+  clears a dead stale handle before retrying, and never reports success or
+  returns the old handle when reconnect fails.
+- **Single periodic DB health check**: the existing A4 check on the five-second
+  tick remains the canonical keepalive and legacy-dbh synchronization point;
+  the diagnostic round does not add a redundant second ping.
+- **SLOW PRIVMSG tracer**: end-to-end timing wrapper around the PRIVMSG
+  handler; any processing above one second logs its duration and origin at
+  level 3 while preserving the caller's scalar/list/void context.
+
 ### Fixed — topic action wire safety (mb547)
 
 - Topic actions now canonicalize a STATUSMSG-decorated context to the

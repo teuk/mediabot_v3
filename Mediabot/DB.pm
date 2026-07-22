@@ -3,6 +3,7 @@ package Mediabot::DB;
 use strict;
 use warnings;
 use DBI;
+use Time::HiRes ();
 
 # CHARSET_MODE:
 #   utf8mb4 (défaut) -> SET NAMES utf8mb4, etc.
@@ -39,7 +40,19 @@ sub new {
     # DBD::MariaDB refuses port when host=localhost (uses Unix socket instead)
     # Force TCP by converting localhost to 127.0.0.1
     my $tcp_host = ($dbhost eq 'localhost') ? '127.0.0.1' : $dbhost;
-    my $dsn = "DBI:MariaDB:database=$dbname;host=$tcp_host;port=$dbport";
+
+    # mb548-B1: bound every network wait. Without these, a silently dropped
+    # idle connection (NAT/conntrack/wait_timeout) can stall the FIRST db
+    # access after quiet hours for tens of seconds — observed as "the first
+    # command lags, the next ones are fine". Configurable, sane defaults.
+    my $t_connect = _bounded_timeout($conf->get('mysql.CONNECT_TIMEOUT'), 5, 1, 60);
+    my $t_read    = _bounded_timeout($conf->get('mysql.READ_TIMEOUT'),   30, 5, 300);
+    my $t_write   = _bounded_timeout($conf->get('mysql.WRITE_TIMEOUT'),  30, 5, 300);
+
+    my $dsn = "DBI:MariaDB:database=$dbname;host=$tcp_host;port=$dbport"
+        . ";mariadb_connect_timeout=$t_connect"
+        . ";mariadb_read_timeout=$t_read"
+        . ";mariadb_write_timeout=$t_write";
 
     my %attrs = (
         RaiseError           => 0,
@@ -136,7 +149,19 @@ sub _connect {
     # DBD::MariaDB refuses port when host=localhost (uses Unix socket instead)
     # Force TCP by converting localhost to 127.0.0.1
     my $tcp_host = ($dbhost eq 'localhost') ? '127.0.0.1' : $dbhost;
-    my $dsn = "DBI:MariaDB:database=$dbname;host=$tcp_host;port=$dbport";
+
+    # mb548-B1: bound every network wait. Without these, a silently dropped
+    # idle connection (NAT/conntrack/wait_timeout) can stall the FIRST db
+    # access after quiet hours for tens of seconds — observed as "the first
+    # command lags, the next ones are fine". Configurable, sane defaults.
+    my $t_connect = _bounded_timeout($conf->get('mysql.CONNECT_TIMEOUT'), 5, 1, 60);
+    my $t_read    = _bounded_timeout($conf->get('mysql.READ_TIMEOUT'),   30, 5, 300);
+    my $t_write   = _bounded_timeout($conf->get('mysql.WRITE_TIMEOUT'),  30, 5, 300);
+
+    my $dsn = "DBI:MariaDB:database=$dbname;host=$tcp_host;port=$dbport"
+        . ";mariadb_connect_timeout=$t_connect"
+        . ";mariadb_read_timeout=$t_read"
+        . ";mariadb_write_timeout=$t_write";
     my %attrs = (
         RaiseError           => 0,
         PrintError           => 0,
@@ -147,12 +172,16 @@ sub _connect {
     $logger->log(1, "Connecting to DB: $dbname at $dbhost:$dbport (charset_mode=$mode)");
     my $dbh = DBI->connect($dsn, $dbuser, $dbpass, \%attrs);
     unless ($dbh) {
+        # mb549-B1: a failed reconnect must not leave the old dead handle
+        # looking usable to ensure_connected or legacy callers.
+        $self->{dbh} = undef;
         $logger->log(0, "DBI connect failed: $DBI::errstr");
         return;
     }
 
     _apply_session_charset($dbh, $logger, $mode);
     $self->{dbh} = $dbh;
+    return $dbh;
 }
 
 sub dbh {
@@ -160,18 +189,59 @@ sub dbh {
     return $self->{dbh};
 }
 
+# mb548-B1: bounded numeric timeout with default (0 or garbage -> default).
+sub _bounded_timeout {
+    my ($raw, $default, $min, $max) = @_;
+    return $default unless defined $raw && !ref($raw) && "$raw" =~ /\A[0-9]+\z/;
+    my $v = int($raw);
+    return $default if $v == 0;
+    $v = $min if $v < $min;
+    $v = $max if $v > $max;
+    return $v;
+}
+
 # ensure_connected() — verify DB handle is alive, reconnect if needed
 # Call this before any critical DB operation in long-running event loops
+# mb548-B1: every path is TIMED — a slow ping (dying socket) and a reconnect
+# both log their duration, so a laggy first command after idle hours shows
+# its cause in the log instead of staying a mystery.
 sub ensure_connected {
     my ($self) = @_;
     my $dbh = $self->{dbh};
 
-    # Quick path: handle exists and ping succeeds
-    return $dbh if $dbh && eval { $dbh->ping };
+    my $t0 = [ Time::HiRes::gettimeofday() ];
+    my $alive = $dbh && eval { $dbh->ping };
+    my $ping_s = Time::HiRes::tv_interval($t0);
 
- $self->{logger}->log(1, "DB connection lost reconnecting...") if $self->{logger};
-    $self->_connect;
-    return $self->{dbh};
+    if ($alive) {
+        if ($ping_s > 0.25 && $self->{logger}) {
+            $self->{logger}->log(3, sprintf('DB ping slow: %.2fs (connection degrading?)', $ping_s));
+        }
+        return $dbh;
+    }
+
+    $self->{logger}->log(1, 'DB connection lost, reconnecting...') if $self->{logger};
+    my $t1 = [ Time::HiRes::gettimeofday() ];
+
+    # mb549-B1: discard the known-dead handle before reconnecting. Otherwise a
+    # dying _connect can leave a truthy stale object behind and produce a false
+    # "DB reconnect ok" line while returning an unusable handle.
+    $self->{dbh} = undef;
+    my $new_dbh;
+    my $connect_eval_ok = eval {
+        $new_dbh = $self->_connect;
+        1;
+    };
+    my $reconnect_ok = $connect_eval_ok && $new_dbh ? 1 : 0;
+    $self->{dbh} = undef unless $reconnect_ok;
+
+    my $reconnect_s = Time::HiRes::tv_interval($t1);
+    if ($self->{logger}) {
+        my $state = $reconnect_ok ? 'ok' : 'FAILED';
+        $self->{logger}->log(1, sprintf('DB reconnect %s in %.2fs (ping wait was %.2fs)',
+            $state, $reconnect_s, $ping_s));
+    }
+    return $reconnect_ok ? $new_dbh : undef;
 }
 
 1;

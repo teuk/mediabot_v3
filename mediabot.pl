@@ -28,6 +28,7 @@ use Mediabot::DCC qw(parse_ctcp_payload parse_dcc_payload is_ctcp_chat is_dcc_ch
                       is_dcc_active is_dcc_passive ip_int_to_ipv4);
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
+use Time::HiRes ();
 use Mediabot::Scheduler;
 use IO::Async::Timer::Countdown;
 use Net::Async::IRC;
@@ -1192,7 +1193,9 @@ sub on_timer_tick {
     $irc = undef if defined $irc && !defined $mediabot->{irc};
     $irc //= $mediabot->{irc};
 
-    # A4: sync $mediabot->{dbh} if DB.pm reconnected since last tick
+    # A4 / mb549-B1: this existing five-second health check is the single
+    # canonical DB keepalive. It both pays for reconnects off the PRIVMSG path
+    # and synchronizes the legacy dbh alias; do not add a second tick ping.
     if ($mediabot->{db}) {
         my $live_dbh = eval { $mediabot->{db}->ensure_connected() };
         if ($live_dbh && (!$mediabot->{dbh} || $live_dbh != $mediabot->{dbh})) {
@@ -1835,7 +1838,41 @@ sub on_message_PART {
     }
 }
 
+# mb548-B1: end-to-end timing wrapper. Any PRIVMSG whose full processing
+# exceeds one second logs its duration and origin at level 3 — the tool that
+# turns "the first command lagged ten seconds" from a mystery into a log line
+# naming the culprit path.
 sub on_message_PRIVMSG {
+    my ($self, $message, $hints) = @_;
+
+    my $want_547 = wantarray;
+    my (@ret_547, $ret_547);
+    my $t0_548 = [ Time::HiRes::gettimeofday() ];
+
+    if (!defined $want_547) {
+        _on_message_PRIVMSG_body($self, $message, $hints);
+    }
+    elsif ($want_547) {
+        @ret_547 = _on_message_PRIVMSG_body($self, $message, $hints);
+    }
+    else {
+        $ret_547 = _on_message_PRIVMSG_body($self, $message, $hints);
+    }
+
+    my $elapsed_548 = Time::HiRes::tv_interval($t0_548);
+    if ($elapsed_548 > 1.0) {
+        my $who_548 = $hints ? ($hints->{prefix_nick} // '?') : '?';
+        eval {
+            $mediabot->{logger}->log(3,
+                sprintf('SLOW PRIVMSG: processing took %.2fs (from %s)', $elapsed_548, $who_548));
+        };
+    }
+
+    return unless defined $want_547;
+    return $want_547 ? @ret_547 : $ret_547;
+}
+
+sub _on_message_PRIVMSG_body {
     my ($self, $message, $hints) = @_;
 
     my ($who, $where, $what) = @{$hints}{qw<prefix_nick targets text>};
