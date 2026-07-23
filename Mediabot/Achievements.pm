@@ -21,6 +21,7 @@ package Mediabot::Achievements;
 # =============================================================================
 
 use strict;
+use Time::HiRes ();
 use warnings;
 use utf8;
 use Encode    ();
@@ -234,8 +235,27 @@ sub new {
         data   => {},   # { "$nick\x00$channel" => { id => ts, ... } }
         dirty  => 0,
         last_save => 0,
+        # mb559-B1: bounded async queue. An entry remains owned by the parent
+        # until a child result is accepted; failures are retried and never
+        # acknowledged merely because a worker was started.
+        _pending_checks   => {},
+        _pending_order    => [],
+        _worker_inflight  => undef,
+        _worker_process   => undef,
+        _worker_seq       => 0,
+        _worker_launcher  => $args{worker_launcher},
+        _worker_timeout   => $args{worker_timeout},
+        _shutting_down    => 0,
     }, $class;
+    $self->{_worker_timeout} = 75
+        unless defined($self->{_worker_timeout})
+            && !ref($self->{_worker_timeout})
+            && "$self->{_worker_timeout}" =~ /\A\d+(?:\.\d+)?\z/;
+    $self->{_worker_timeout} = 10  if $self->{_worker_timeout} < 10;
+    $self->{_worker_timeout} = 180 if $self->{_worker_timeout} > 180;
     $self->_load;
+    $self->_metric('set', 'mediabot_achievement_queue_pending', 0);
+    $self->_metric('set', 'mediabot_achievement_worker_inflight', 0);
     return $self;
 }
 
@@ -446,8 +466,512 @@ sub rarity_color {
 }
 
 # -- Hook : vérifie les achievements 'msg' après chaque PRIVMSG ----------------
-# Cette méthode est appelée depuis on_message_PRIVMSG. Elle limite ses
-# requêtes SQL via un cache mémoire pour ne pas exploser la charge.
+# mb558 created the bounded queue; mb559 makes its consumer genuinely
+# asynchronous. The IRC/event-loop parent only queues work, starts one child at
+# a time and applies validated unlock results. CHANNEL_LOG scans run on a fresh
+# child-only DB connection and can no longer freeze PRIVMSG, PING/PONG or the
+# Scheduler itself.
+sub _metric {
+    my ($self, $method, @args) = @_;
+    my $metrics = $self->{bot} ? $self->{bot}{metrics} : undef;
+    return 0 unless $metrics && eval { $metrics->can($method) };
+    return eval { $metrics->$method(@args); 1 } ? 1 : 0;
+}
+
+sub _sync_queue_metric {
+    my ($self) = @_;
+    $self->_metric('set', 'mediabot_achievement_queue_pending',
+        scalar(keys %{ $self->{_pending_checks} || {} }));
+}
+
+sub queue_check {
+    my ($self, $nick, $channel) = @_;
+    return 0 if $self->{_shutting_down};
+    return 0 unless defined $nick && defined $channel && $channel =~ /^#/;
+
+    my $key = lc($nick) . "\x00" . lc($channel);
+    my $last = $self->{_msg_check_ts}{$key} // 0;
+    return 0 if (time() - $last) < 300;
+    return 0 if exists $self->{_pending_checks}{$key};
+
+    if (scalar(keys %{ $self->{_pending_checks} || {} }) >= 200) {
+        $self->_metric('inc', 'mediabot_achievement_queue_dropped_total',
+            { reason => 'full' });
+        $self->_log(2, "Achievements: async queue full, dropping check for $nick/$channel");
+        return 0;
+    }
+
+    $self->{_pending_checks}{$key} = {
+        nick      => $nick,
+        channel   => $channel,
+        attempts  => 0,
+        retry_at  => 0,
+        queued_at => Time::HiRes::time(),
+    };
+    push @{ $self->{_pending_order} }, $key;
+    $self->_sync_queue_metric;
+    return 1;
+}
+
+sub pending_check_count {
+    my ($self) = @_;
+    return scalar(keys %{ $self->{_pending_checks} || {} });
+}
+
+sub worker_inflight {
+    my ($self) = @_;
+    return $self->{_worker_inflight} ? 1 : 0;
+}
+
+sub _next_ready_check {
+    my ($self) = @_;
+    my $order = $self->{_pending_order} || [];
+    my $count = scalar @$order;
+    my $now = Time::HiRes::time();
+
+    for (1 .. $count) {
+        my $key = shift @$order;
+        my $entry = $self->{_pending_checks}{$key};
+        next unless ref($entry) eq 'HASH';
+        push @$order, $key;
+        next if ($entry->{retry_at} // 0) > $now;
+        return ($key, $entry);
+    }
+    return;
+}
+
+sub start_next_check_async {
+    my ($self) = @_;
+    return 0 if $self->{_shutting_down} || $self->{_worker_inflight};
+
+    my ($key, $entry) = $self->_next_ready_check;
+    return 0 unless defined $key && ref($entry) eq 'HASH';
+
+    my $token = ++$self->{_worker_seq};
+    my $job = {
+        key     => $key,
+        nick    => $entry->{nick},
+        channel => $entry->{channel},
+    };
+    $self->{_worker_inflight} = {
+        token      => $token,
+        key        => $key,
+        started_at => Time::HiRes::time(),
+    };
+    $self->_metric('set', 'mediabot_achievement_worker_inflight', 1);
+
+    my $done = sub {
+        my ($result) = @_;
+        $self->_finish_async_check($token, $result);
+    };
+    my $launcher = $self->{_worker_launcher};
+    my $started;
+    if (ref($launcher) eq 'CODE') {
+        $started = eval { $launcher->($job, $done, $self) };
+    }
+    else {
+        $started = eval { $self->_spawn_check_worker($job, $done) };
+    }
+
+    unless ($started) {
+        my $error = $@ || 'worker launcher refused the job';
+        $error =~ s/[\r\n\0]+/ /g;
+        $done->({
+            ok     => 0,
+            error  => 'worker_setup',
+            stage  => 'launcher',
+            detail => substr($error, 0, 240),
+        });
+    }
+    return 1;
+}
+
+# Compatibility name retained for private callers from the short-lived mb558
+# queue implementation. It now STARTS an async worker and never performs SQL.
+sub drain_one_check {
+    my ($self) = @_;
+    return $self->start_next_check_async;
+}
+
+sub _finish_async_check {
+    my ($self, $token, $result) = @_;
+    my $active = $self->{_worker_inflight};
+    return 0 unless ref($active) eq 'HASH' && ($active->{token} // -1) == $token;
+
+    my $key = $active->{key};
+    my $entry = $self->{_pending_checks}{$key};
+    $self->{_worker_inflight} = undef;
+    $self->_metric('set', 'mediabot_achievement_worker_inflight', 0);
+    return 0 unless ref($entry) eq 'HASH';
+
+    $result = {} unless ref($result) eq 'HASH';
+    my $ok = $result->{ok} ? 1 : 0;
+    my $result_label = $ok ? 'ok' : ($result->{error} // 'failed');
+    # mb560-B1: keep successful completions labelled as "ok". Without
+    # this value in the bounded whitelist, every healthy worker was rewritten
+    # to "failed", making the Grafana failure panel count successes.
+    $result_label = 'failed'
+        unless defined($result_label) && !ref($result_label)
+            && $result_label =~ /\A(?:ok|failed|worker_setup|worker_timeout|worker_failed|worker_decode|worker_exception)\z/;
+    $self->_metric('inc', 'mediabot_achievement_worker_total',
+        { result => $result_label });
+    $self->_metric('inc', 'mediabot_achievement_worker_timeouts_total')
+        if $result_label eq 'worker_timeout';
+
+    if ($ok) {
+        my %checks;
+        if (ref($result->{checks}) eq 'ARRAY') {
+            $checks{$_} = 1 for grep {
+                defined($_) && !ref($_)
+                    && /\A(?:msg_count|hour_band|polyphony)\z/
+            } @{ $result->{checks} };
+        }
+
+        if (ref($result->{timings}) eq 'HASH') {
+            for my $check (qw(msg_count hour_band polyphony)) {
+                next unless exists $result->{timings}{$check};
+                my $elapsed = $result->{timings}{$check};
+                next unless defined($elapsed) && !ref($elapsed)
+                    && "$elapsed" =~ /\A(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?\z/
+                    && $elapsed >= 0;
+                $self->_metric('observe', 'mediabot_achievement_check_seconds',
+                    0 + $elapsed, { check => $check });
+                if ($elapsed > 1.0) {
+                    $self->_log(3, sprintf(
+                        'SLOW ACHIEVEMENT: %s for %s/%s took %.2fs',
+                        $check, $entry->{nick}, $entry->{channel}, $elapsed));
+                }
+            }
+        }
+
+        if (ref($result->{unlocks}) eq 'ARRAY') {
+            my $seen = 0;
+            for my $unlock (@{ $result->{unlocks} }) {
+                last if ++$seen > 32;
+                next unless ref($unlock) eq 'HASH';
+                next unless defined($unlock->{nick}) && !ref($unlock->{nick})
+                    && defined($unlock->{channel}) && !ref($unlock->{channel})
+                    && defined($unlock->{id}) && !ref($unlock->{id});
+                next unless lc($unlock->{nick}) eq lc($entry->{nick})
+                    && lc($unlock->{channel}) eq lc($entry->{channel});
+                $self->unlock($entry->{nick}, $entry->{channel}, $unlock->{id});
+            }
+        }
+
+        my $now = time();
+        $self->{_msg_check_ts}{$key} = $now if $checks{msg_count};
+        $self->{_hourband_check_ts}{$key} = $now if $checks{hour_band};
+        $self->{_polyphony_check_ts}{lc($entry->{nick})} = $now
+            if $checks{polyphony};
+
+        delete $self->{_pending_checks}{$key};
+        @{ $self->{_pending_order} } = grep { $_ ne $key }
+            @{ $self->{_pending_order} || [] };
+        $self->_sync_queue_metric;
+        $self->_log(3, "Achievements: async check completed for $entry->{nick}/$entry->{channel}");
+        return 1;
+    }
+
+    $entry->{attempts} = int($entry->{attempts} // 0) + 1;
+    my $error = $result->{detail} // $result->{error} // 'worker failure';
+    $error = 'worker failure' if ref($error);
+    $error =~ s/[\r\n\0]+/ /g;
+    $error = substr($error, 0, 240);
+
+    if ($entry->{attempts} >= 3) {
+        delete $self->{_pending_checks}{$key};
+        @{ $self->{_pending_order} } = grep { $_ ne $key }
+            @{ $self->{_pending_order} || [] };
+        $self->_metric('inc', 'mediabot_achievement_queue_dropped_total',
+            { reason => 'retry_exhausted' });
+        $self->_sync_queue_metric;
+        $self->_log(1, "Achievements: async check dropped after 3 attempts for $entry->{nick}/$entry->{channel}: $error");
+        return 0;
+    }
+
+    my @backoff = (0, 15, 60);
+    $entry->{retry_at} = Time::HiRes::time() + $backoff[$entry->{attempts}];
+    $self->_log(2, "Achievements: async check retry $entry->{attempts}/3 for $entry->{nick}/$entry->{channel}: $error");
+    return 0;
+}
+
+sub _spawn_check_worker {
+    my ($self, $job, $done) = @_;
+    return 0 unless ref($job) eq 'HASH' && ref($done) eq 'CODE';
+
+    my $bot = $self->{bot};
+    my $loop = eval { $bot->getLoop } if $bot;
+    $loop ||= $bot->{loop} if $bot && ref($bot);
+    unless ($loop && $loop->can('add') && $loop->can('remove')
+        && $loop->can('watch_process')) {
+        $done->({ ok => 0, error => 'worker_setup', stage => 'event_loop',
+            detail => 'IO::Async loop with watch_process is required' });
+        return 1;
+    }
+
+    require IO::Async::Stream;
+    require IO::Async::Timer::Countdown;
+    require POSIX;
+
+    my ($pipe, $child_write);
+    unless (pipe($pipe, $child_write)) {
+        $done->({ ok => 0, error => 'worker_setup', stage => 'pipe',
+            detail => substr("$!", 0, 240) });
+        return 1;
+    }
+
+    my $pid = fork();
+    unless (defined $pid) {
+        eval { close $pipe };
+        eval { close $child_write };
+        $done->({ ok => 0, error => 'worker_setup', stage => 'fork',
+            detail => substr("$!", 0, 240) });
+        return 1;
+    }
+
+    if ($pid == 0) {
+        eval { close $pipe };
+        binmode($child_write, ':raw');
+        local $SIG{PIPE} = 'IGNORE';
+        local $SIG{TERM} = 'DEFAULT';
+        local $SIG{INT}  = 'DEFAULT';
+        local $SIG{HUP}  = 'DEFAULT';
+
+        # Never let DBI destruction in the child disconnect the parent's
+        # inherited socket. All worker SQL uses a separately opened handle.
+        my $parent_dbh = $bot ? $bot->{dbh} : undef;
+        eval { $parent_dbh->{InactiveDestroy} = 1 if $parent_dbh };
+        my $db_obj = $bot ? $bot->{db} : undef;
+        eval { $db_obj->{dbh}{InactiveDestroy} = 1 if $db_obj && $db_obj->{dbh} };
+
+        my $result;
+        if (!$db_obj || !eval { $db_obj->can('connect_isolated_handle') }) {
+            $result = { ok => 0, error => 'worker_setup', stage => 'isolated_db',
+                detail => 'database wrapper has no isolated connector' };
+        }
+        else {
+            my ($dbh, $db_error) = $db_obj->connect_isolated_handle;
+            if (!$dbh) {
+                $db_error = 'isolated DB connection failed' unless defined $db_error;
+                $db_error =~ s/[\r\n\0]+/ /g;
+                $result = { ok => 0, error => 'worker_failed', stage => 'isolated_db',
+                    detail => substr($db_error, 0, 240) };
+            }
+            else {
+                my %worker = %$self;
+                $worker{bot} = { dbh => $dbh };
+                $worker{logger} = undef;
+                $worker{_worker_unlocks} = [];
+                $worker{_worker_checks} = {};
+                $worker{_worker_timings} = {};
+                my $child = bless \%worker, 'Mediabot::Achievements::Worker';
+
+                my $run_ok = eval {
+                    $child->check_msg($job->{nick}, $job->{channel});
+                    1;
+                };
+                if ($run_ok) {
+                    $result = {
+                        ok      => 1,
+                        unlocks => $child->{_worker_unlocks},
+                        checks  => [ sort keys %{ $child->{_worker_checks} || {} } ],
+                        timings => $child->{_worker_timings},
+                    };
+                }
+                else {
+                    my $err = $@ || 'achievement worker exception';
+                    $err =~ s/[\r\n\0]+/ /g;
+                    $result = { ok => 0, error => 'worker_exception',
+                        stage => 'check_msg', detail => substr($err, 0, 240) };
+                }
+                eval { $dbh->disconnect };
+            }
+        }
+
+        my $payload = eval { JSON::PP::encode_json($result) };
+        if (!defined($payload) || ref($payload) || length($payload) > 64 * 1024) {
+            $payload = JSON::PP::encode_json({ ok => 0, error => 'worker_decode',
+                stage => 'encode', detail => 'invalid worker result payload' });
+        }
+        my $offset = 0;
+        while ($offset < length($payload)) {
+            my $written = syswrite($child_write, $payload,
+                length($payload) - $offset, $offset);
+            next if !defined($written) && $!{EINTR};
+            last unless defined($written) && $written > 0;
+            $offset += $written;
+        }
+        eval { close $child_write };
+        POSIX::_exit(0);
+    }
+
+    eval { close $child_write };
+    my $started = Time::HiRes::time();
+    my $state = {
+        buffer     => '',
+        bytes      => 0,
+        eof        => 0,
+        child_done => 0,
+        wait_status => undef,
+        timed_out  => 0,
+        finalized  => 0,
+        force      => 0,
+    };
+    my ($stream, $timeout_timer, $kill_timer, $force_timer);
+    my $finish;
+
+    my $remove = sub {
+        my ($obj) = @_;
+        return unless $obj;
+        eval { $obj->stop };
+        eval { $loop->remove($obj) };
+    };
+
+    $finish = sub {
+        return if $state->{finalized};
+        return unless $state->{force}
+            || ($state->{child_done} && ($state->{eof} || $state->{timed_out}));
+        $state->{finalized} = 1;
+        $remove->($timeout_timer);
+        $remove->($kill_timer);
+        $remove->($force_timer);
+        eval { $loop->remove($stream) } if $stream;
+        eval { close $pipe };
+        delete $self->{_worker_process};
+
+        my $status = $state->{wait_status} // 0;
+        my $signal = $status & 127;
+        my $exit = ($status >> 8) & 255;
+        my $result;
+        if ($state->{timed_out}) {
+            $result = { ok => 0, error => 'worker_timeout', stage => 'timeout',
+                detail => sprintf('worker exceeded %.1fs', $self->{_worker_timeout}) };
+        }
+        elsif ($signal || $exit != 0) {
+            $result = { ok => 0, error => 'worker_failed', stage => 'process_exit',
+                detail => "worker exit=$exit signal=$signal" };
+        }
+        elsif ($state->{bytes} > 64 * 1024) {
+            $result = { ok => 0, error => 'worker_decode', stage => 'payload_limit',
+                detail => 'worker output exceeded 64 KiB' };
+        }
+        else {
+            $result = eval { JSON::PP::decode_json($state->{buffer}) };
+            if ($@ || ref($result) ne 'HASH') {
+                $result = { ok => 0, error => 'worker_decode', stage => 'json',
+                    detail => 'worker returned invalid JSON' };
+            }
+        }
+        $result->{worker_elapsed_s} = Time::HiRes::time() - $started;
+        eval { $done->($result); 1 } or do {
+            my $err = $@ || 'unknown callback error';
+            $err =~ s/\s+/ /g;
+            $self->_log(1, "Achievements: async completion callback failed: $err");
+        };
+        $finish = undef;
+    };
+
+    my $watch_ok = eval {
+        $loop->watch_process($pid, sub {
+            my ($seen_pid, $status) = @_;
+            return unless defined($seen_pid) && $seen_pid == $pid;
+            $state->{wait_status} = $status;
+            $state->{child_done} = 1;
+            $finish->() if $finish;
+        });
+        1;
+    };
+    unless ($watch_ok) {
+        kill 'KILL', $pid;
+        eval { close $pipe };
+        $done->({ ok => 0, error => 'worker_setup', stage => 'watch_process',
+            detail => 'could not register child process watcher' });
+        return 1;
+    }
+
+    $stream = IO::Async::Stream->new(
+        read_handle => $pipe,
+        on_read => sub {
+            my ($io, $buffref, $eof) = @_;
+            if (length $$buffref) {
+                $state->{bytes} += length($$buffref);
+                $state->{buffer} .= $$buffref if $state->{bytes} <= 64 * 1024;
+                $$buffref = '';
+            }
+            if ($eof && !$state->{eof}++) {
+                eval { $loop->remove($io) };
+                $finish->() if $finish;
+            }
+            return 0;
+        },
+    );
+    $loop->add($stream);
+
+    $timeout_timer = IO::Async::Timer::Countdown->new(
+        delay => $self->{_worker_timeout},
+        on_expire => sub {
+            return if $state->{finalized} || $state->{child_done};
+            $state->{timed_out} = 1;
+            kill 'TERM', $pid;
+            $kill_timer = IO::Async::Timer::Countdown->new(
+                delay => 0.5,
+                on_expire => sub {
+                    return if $state->{finalized} || $state->{child_done};
+                    kill 'KILL', $pid;
+                },
+            );
+            $force_timer = IO::Async::Timer::Countdown->new(
+                delay => 2,
+                on_expire => sub {
+                    return if $state->{finalized};
+                    $state->{force} = 1;
+                    $finish->() if $finish;
+                },
+            );
+            $loop->add($kill_timer); $kill_timer->start;
+            $loop->add($force_timer); $force_timer->start;
+        },
+    );
+    $loop->add($timeout_timer);
+    $timeout_timer->start;
+
+    $self->{_worker_process} = { pid => $pid };
+    return 1;
+}
+
+sub shutdown_worker {
+    my ($self) = @_;
+    $self->{_shutting_down} = 1;
+    my $proc = delete $self->{_worker_process};
+    if (ref($proc) eq 'HASH' && $proc->{pid}) {
+        kill 'TERM', $proc->{pid};
+    }
+    return 1;
+}
+
+# mb558-B1: per-query stopwatch. Every aggregation names itself when slow
+# (level 3) and feeds mediabot_achievement_check_seconds{check} — the
+# instrument that would have pointed at these queries on day one.
+sub _timed_check {
+    my ($self, $check, $nick, $channel, $code) = @_;
+
+    my $t0 = [ Time::HiRes::gettimeofday() ];
+    my @ret = $code->();
+    my $elapsed = Time::HiRes::tv_interval($t0);
+
+    my $metrics = $self->{bot} ? $self->{bot}{metrics} : undef;
+    if ($metrics && eval { $metrics->can('observe') }) {
+        eval { $metrics->observe('mediabot_achievement_check_seconds',
+            $elapsed, { check => $check }); 1 };
+    }
+    if ($elapsed > 1.0 && $self->{logger}) {
+        $self->{logger}->log(3, sprintf(
+            "SLOW ACHIEVEMENT: %s for %s/%s took %.2fs",
+            $check, $nick, $channel, $elapsed));
+    }
+    return @ret;
+}
+
 sub check_msg {
     my ($self, $nick, $channel) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
@@ -468,18 +992,21 @@ sub check_msg {
     # gonflés (on débloquait "chatterbox" en rejoignant 1000×). On s'aligne sur
     # la convention "a parlé" = event_type IN ('public','action').
     my $dbh = $bot->{dbh} or return;
-    my $sth = eval {
-        $dbh->prepare(q{
-            SELECT COUNT(*) AS c
-            FROM CHANNEL_LOG cl
-            JOIN CHANNEL    c  ON c.id_channel = cl.id_channel
-            WHERE c.name = ? AND cl.nick = ?
-              AND cl.event_type IN ('public','action')
-        })
-    };
-    return unless $sth && $sth->execute($channel, $nick);
-    my $row = $sth->fetchrow_hashref; $sth->finish;
-    my $n   = $row ? ($row->{c} // 0) : 0;
+    my ($n) = $self->_timed_check('msg_count', $nick, $channel, sub {
+        my $sth = eval {
+            $dbh->prepare(q{
+                SELECT COUNT(*) AS c
+                FROM CHANNEL_LOG cl
+                JOIN CHANNEL    c  ON c.id_channel = cl.id_channel
+                WHERE c.name = ? AND cl.nick = ?
+                  AND cl.event_type IN ('public','action')
+            })
+        };
+        return (undef) unless $sth && $sth->execute($channel, $nick);
+        my $row = $sth->fetchrow_hashref; $sth->finish;
+        return ($row ? ($row->{c} // 0) : 0);
+    });
+    return unless defined $n;
 
     # First message — déclenché systématiquement pour tout nouveau nick avec ≥1 msg
     $self->unlock($nick, $channel, 'first_msg')         if $n >= 1;
@@ -508,22 +1035,27 @@ sub check_msg {
         my $hb_last = $self->{_hourband_check_ts}{$hb_key} // 0;
         if ((time() - $hb_last) >= 3600) {
             $self->{_hourband_check_ts}{$hb_key} = time();
-            my $sth_h = eval {
-                $dbh->prepare(q{
-                    SELECT HOUR(cl.ts) AS h, COUNT(*) AS c
-                    FROM CHANNEL_LOG cl
-                    JOIN CHANNEL c ON c.id_channel = cl.id_channel
-                    WHERE c.name = ? AND cl.nick = ?
-                      AND cl.event_type IN ('public','action')   -- mb347-B1
-                    GROUP BY HOUR(cl.ts)
-                })
-            };
-            if ($sth_h && $sth_h->execute($channel, $nick)) {
+            my ($night, $morn) = $self->_timed_check('hour_band', $nick, $channel, sub {
+                my $sth_h = eval {
+                    $dbh->prepare(q{
+                        SELECT HOUR(cl.ts) AS h, COUNT(*) AS c
+                        FROM CHANNEL_LOG cl
+                        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                        WHERE c.name = ? AND cl.nick = ?
+                          AND cl.event_type IN ('public','action')   -- mb347-B1
+                        GROUP BY HOUR(cl.ts)
+                    })
+                };
+                return (undef, undef) unless $sth_h && $sth_h->execute($channel, $nick);
                 my (%by_h);
                 while (my $r = $sth_h->fetchrow_hashref) { $by_h{$r->{h}} = $r->{c}; }
                 $sth_h->finish;
-                my $night = 0; $night += ($by_h{$_} // 0) for (0..5);
-                my $morn  = 0; $morn  += ($by_h{$_} // 0) for (6..8);
+                my ($ni, $mo) = (0, 0);
+                $ni += ($by_h{$_} // 0) for (0..5);
+                $mo += ($by_h{$_} // 0) for (6..8);
+                return ($ni, $mo);
+            });
+            if (defined $night) {
                 $self->unlock($nick, $channel, 'night_owl')  if $night >= 50;
                 $self->unlock($nick, $channel, 'early_bird') if $morn  >= 50;
             }
@@ -538,21 +1070,23 @@ sub check_msg {
         my $last_p = $self->{_polyphony_check_ts}{lc($nick)} // 0;
         if (($now_p - $last_p) >= 3600) {
             $self->{_polyphony_check_ts}{lc($nick)} = $now_p;
-            my $sth_p = eval {
-                $dbh->prepare(q{
-                    SELECT COUNT(DISTINCT c.name) AS n
-                    FROM CHANNEL_LOG cl
-                    JOIN CHANNEL c ON c.id_channel = cl.id_channel
-                    WHERE cl.nick = ?
-                      AND cl.event_type IN ('public','action')   -- mb347-B1
-                      AND c.name LIKE '#%'
-                })
-            };
-            if ($sth_p && $sth_p->execute($nick)) {
+            my ($nchan) = $self->_timed_check('polyphony', $nick, $channel, sub {
+                my $sth_p = eval {
+                    $dbh->prepare(q{
+                        SELECT COUNT(DISTINCT c.name) AS n
+                        FROM CHANNEL_LOG cl
+                        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                        WHERE cl.nick = ?
+                          AND cl.event_type IN ('public','action')   -- mb347-B1
+                          AND c.name LIKE '#%'
+                    })
+                };
+                return (undef) unless $sth_p && $sth_p->execute($nick);
                 my $r = $sth_p->fetchrow_hashref; $sth_p->finish;
-                $self->unlock($nick, $channel, 'polyphony')
-                    if $r && ($r->{n} // 0) >= 5;
-            }
+                return ($r ? ($r->{n} // 0) : 0);
+            });
+            $self->unlock($nick, $channel, 'polyphony')
+                if defined $nchan && $nchan >= 5;
         }
     }
 }
@@ -640,5 +1174,51 @@ sub _log {
     return unless $self->{logger};
     $self->{logger}->log($level, $msg);
 }
+
+
+# Child-only facade used after fork. It runs the historical check_msg logic on
+# an isolated DB handle, but records unlock intents and timings instead of
+# touching parent state, JSON storage, IRC or Prometheus directly.
+package Mediabot::Achievements::Worker;
+our @ISA = ('Mediabot::Achievements');
+
+sub unlock {
+    my ($self, $nick, $channel, $id) = @_;
+    return 0 unless defined $nick && defined $id && exists $ACH{$id};
+    my $key = lc($nick) . "\x00" . (defined($channel) ? lc($channel) : '');
+    return 0 if exists $self->{data}{$key}{$id};
+    $self->{data}{$key}{$id} = time();
+    push @{ $self->{_worker_unlocks} }, {
+        nick => $nick, channel => $channel, id => $id,
+    };
+    return 1;
+}
+
+sub _timed_check {
+    my ($self, $check, $nick, $channel, $code) = @_;
+    my $t0 = [ Time::HiRes::gettimeofday() ];
+    my (@ret, $ok, $error);
+    $ok = eval { @ret = $code->(); 1 };
+    $error = $@ unless $ok;
+    my $elapsed = Time::HiRes::tv_interval($t0);
+    $self->{_worker_checks}{$check} = 1;
+    $self->{_worker_timings}{$check} = $elapsed;
+
+    if (!$ok) {
+        $error ||= "$check query failed";
+        die $error;
+    }
+    if (($check eq 'msg_count' || $check eq 'polyphony') && !defined $ret[0]) {
+        die "$check query returned no value";
+    }
+    if ($check eq 'hour_band' && (!defined($ret[0]) || !defined($ret[1]))) {
+        die "$check query returned incomplete values";
+    }
+    return @ret;
+}
+
+sub save { return 1 }
+
+package Mediabot::Achievements;
 
 1;

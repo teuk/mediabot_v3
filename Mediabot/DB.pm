@@ -184,6 +184,77 @@ sub _connect {
     return $dbh;
 }
 
+# mb559-B1: create a DB handle dedicated to a forked worker. This method
+# never mutates the parent wrapper's canonical handle and never exits. The
+# caller must ensure that any inherited parent DBI handle is marked
+# InactiveDestroy in the child before using this new connection.
+sub connect_isolated_handle {
+    my ($self) = @_;
+    my $conf = $self->{conf};
+    return (undef, 'missing database configuration')
+        unless $conf && eval { $conf->can('get') };
+
+    my $dbname = $conf->get('mysql.MAIN_PROG_DDBNAME') || '';
+    my $dbhost = $conf->get('mysql.MAIN_PROG_DBHOST')  || 'localhost';
+    my $dbuser = $conf->get('mysql.MAIN_PROG_DBUSER')  || '';
+    my $dbpass = $conf->get('mysql.MAIN_PROG_DBPASS')  || '';
+    my $dbport = $conf->get('mysql.MAIN_PROG_DBPORT')  || 3306;
+    my $mode   = $self->{charset_mode} // 'utf8mb4';
+    return (undef, 'missing database name or user') unless $dbname && $dbuser;
+
+    my $tcp_host = ($dbhost eq 'localhost') ? '127.0.0.1' : $dbhost;
+    my $t_connect = _bounded_timeout($conf->get('mysql.CONNECT_TIMEOUT'), 5, 1, 60);
+    my $t_read    = _bounded_timeout($conf->get('mysql.READ_TIMEOUT'),   30, 5, 300);
+    my $t_write   = _bounded_timeout($conf->get('mysql.WRITE_TIMEOUT'),  30, 5, 300);
+
+    my $dsn = "DBI:MariaDB:database=$dbname;host=$tcp_host;port=$dbport"
+        . ";mariadb_connect_timeout=$t_connect"
+        . ";mariadb_read_timeout=$t_read"
+        . ";mariadb_write_timeout=$t_write";
+    my %attrs = (
+        RaiseError             => 0,
+        PrintError             => 0,
+        AutoCommit             => 1,
+        mariadb_auto_reconnect => 0,
+    );
+
+    my $dbh = DBI->connect($dsn, $dbuser, $dbpass, \%attrs);
+    return (undef, ($DBI::errstr || 'isolated DB connect failed')) unless $dbh;
+
+    my @sql;
+    if ($mode eq 'latin1') {
+        @sql = (
+            'SET NAMES latin1',
+            'SET CHARACTER SET latin1',
+            'SET COLLATION_CONNECTION = latin1_swedish_ci',
+        );
+    }
+    elsif ($mode ne 'off') {
+        @sql = (
+            'SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci',
+            'SET CHARACTER SET utf8mb4',
+            'SET COLLATION_CONNECTION = utf8mb4_unicode_ci',
+        );
+    }
+
+    for my $stmt (@sql) {
+        my $ok = eval {
+            my $sth = $dbh->prepare($stmt);
+            my $rv = $sth && $sth->execute;
+            $sth->finish if $sth;
+            $rv ? 1 : 0;
+        };
+        unless ($ok) {
+            my $err = $@ || $DBI::errstr || 'session charset setup failed';
+            eval { $dbh->disconnect };
+            $err =~ s/[\r\n\0]+/ /g;
+            return (undef, substr($err, 0, 240));
+        }
+    }
+
+    return ($dbh, undef);
+}
+
 sub dbh {
     my ($self) = @_;
     return $self->{dbh};

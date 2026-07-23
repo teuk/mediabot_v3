@@ -10,6 +10,56 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Fixed — regression guards caught up with mb559 (mb560)
+
+- Two static guards were stricter than the contracts they encode and failed
+  on the legitimate mb559 async worker. The DSN guard now checks "every
+  DBI->connect site is timeout-bounded" instead of hard-coding two sites
+  (the worker's isolated connection is bounded too, and now counted); the
+  duplicate-sub guard now scopes detection by package, accepting the
+  Mediabot::Achievements::Worker post-fork overrides while still failing on
+  a real duplicate inside one package. Test-only round: no runtime change.
+
+### Fixed — truthful achievement worker outcomes (mb560)
+
+- Successful asynchronous achievement workers now retain the bounded
+  `result="ok"` label. The original mb559 whitelist accidentally rewrote that
+  valid value to `failed`, which made Grafana's 24-hour worker-failure panel
+  count healthy completions. Regression coverage now locks both successful
+  and timeout outcome labels.
+
+### Fixed — isolated asynchronous achievement workers (mb559)
+
+- Achievement CHANNEL_LOG aggregations now run in a forked child with a fresh,
+  child-only MariaDB connection. The parent event loop only starts one worker,
+  reads a bounded JSON result through IO::Async, and applies unlocks after a
+  validated success. A 75-second hard timeout, TERM/KILL escalation, bounded
+  retries and shutdown cleanup prevent stuck or orphaned work. The inherited
+  parent DBI socket is marked InactiveDestroy in the child and is never reused.
+- Queue entries remain pending until success; failures rotate with backoff and
+  are dropped only after three attempts. Prometheus exposes pending/in-flight
+  gauges, worker results, timeouts and bounded-drop reasons. The scheduler runs
+  the non-blocking launcher every second, so it can drain promptly without ever
+  executing achievement SQL itself.
+
+### Fixed — achievements checks off the PRIVMSG path (mb558)
+
+- Root cause of the 48s "calc" incident (Undernet, 2026-07-23, caught by
+  the mb548/550 tracers): the three CHANNEL_LOG aggregations behind the
+  message-count, hour-band and polyphony achievements ran synchronously
+  inside the PRIVMSG path — the first unthrottled passage on a large
+  history table cost tens of seconds. The hot path now only enqueues
+  (queue_check: case-insensitive dedup, original casing preserved, bounded
+  at 200). MB559 completes this queue foundation with an isolated async
+  worker; the Scheduler only launches work and never executes the historical
+  scans in the event-loop process. Unlock semantics, thresholds and existing
+  throttles remain unchanged, while delivery delay is now observable through
+  queue and worker metrics rather than promised to be only a few seconds.
+- Each aggregation is now individually timed: slow ones log
+  "SLOW ACHIEVEMENT: <check> for <nick>/<chan> took X.XXs" (level 3) and
+  every duration feeds mediabot_achievement_check_seconds{check} (fixed
+  cardinality); p95-by-check panel added to the overview dashboard.
+
 ### Fixed — scheduler metrics startup wiring (mb557)
 
 - The scheduler is now attached to Metrics only after the Scheduler object is

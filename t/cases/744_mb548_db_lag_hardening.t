@@ -5,8 +5,8 @@
 # idle tuée en silence (wait_timeout/conntrack), payée par le premier humain.
 #
 # Trois volets contractés :
-#   [1] DSN borné : mariadb_connect_timeout/read/write présents aux DEUX
-#       sites de construction, clés mysql.*_TIMEOUT bornées (garbage/0 ->
+#   [1] DSN borné : mariadb_connect_timeout/read/write présents sur TOUS
+#       les sites de construction, clés mysql.*_TIMEOUT bornées (garbage/0 ->
 #       défauts) ;
 #   [2] ensure_connected chronométré : ping lent -> ligne niveau 3 avec
 #       durée ; reconnexion -> durée logguée niveau 1 (ok/FAILED) ; chemin
@@ -64,8 +64,13 @@ return sub {
         $assert->ok(Mediabot::DB::_bounded_timeout('abc', 5, 1, 60) == 5, 'timeout: garbage -> defaut');
 
         my $src = _slurp_744(File::Spec->catfile('Mediabot', 'DB.pm'));
+        # mb560-B1: le contrat est « chaque DBI->connect est borné », pas un
+        # nombre figé de sites — mb559 a légitimement ajouté la connexion
+        # isolée du worker (elle aussi bornée).
+        my $connect_sites = () = $src =~ /DBI->connect\(/g;
         my $dsn_sites = () = $src =~ /mariadb_connect_timeout=\$t_connect/g;
-        $assert->ok($dsn_sites == 2, 'DSN: les DEUX sites de construction bornes');
+        $assert->ok($connect_sites >= 2 && $dsn_sites == $connect_sites,
+            "DSN: TOUS les sites de construction bornes ($dsn_sites/$connect_sites)");
         $assert->like($src, qr/mariadb_read_timeout=\$t_read/, 'DSN: read timeout');
         $assert->like($src, qr/mariadb_write_timeout=\$t_write/, 'DSN: write timeout');
     }

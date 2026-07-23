@@ -572,6 +572,20 @@ $scheduler->add(
 );
 
 $scheduler->add(
+    name      => 'achievements_check',
+    interval  => 1,
+    cb        => sub {
+        # mb559-B1: start at most one isolated worker and return immediately.
+        # The worker owns a fresh DB connection; no CHANNEL_LOG aggregation
+        # runs in the IO::Async event-loop process.
+        $mediabot->{achievements}->start_next_check_async
+            if $mediabot->{achievements}
+            && $mediabot->{achievements}->can('start_next_check_async');
+    },
+    autostart => 1,
+);
+
+$scheduler->add(
     name      => 'channel_log_purge',
     interval  => 86400,
     cb        => sub { $mediabot->purge_channel_log() },
@@ -1925,8 +1939,11 @@ sub _on_message_PRIVMSG_body {
         if ($@) { $mediabot->{logger}->log(1, "checkQuotegameAnswer error: $@"); }
         # mb115: hook achievements (msg-based) — limité par cache 5min en interne
         if ($mediabot->{achievements}) {
-            eval { $mediabot->{achievements}->check_msg($who, $where) };
-            if ($@) { $mediabot->{logger}->log(1, "achievements check_msg error: $@"); }
+            # mb558-B1: enqueue only — the CHANNEL_LOG aggregations behind the
+            # 48s calc incident now run from the achievements_check scheduler
+            # task, never inside the PRIVMSG path.
+            eval { $mediabot->{achievements}->queue_check($who, $where) };
+            if ($@) { $mediabot->{logger}->log(1, "achievements queue_check error: $@"); }
         }
         if ($mediabot->{metrics}) {
             $mediabot->{metrics}->inc(

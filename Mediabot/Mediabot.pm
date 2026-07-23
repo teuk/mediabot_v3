@@ -1268,6 +1268,14 @@ sub clean_and_exit {
         1;
     };
 
+    # --- mb559-B1: stop an isolated achievement worker before DB teardown ---
+    eval {
+        if ($self->{achievements} && $self->{achievements}->can('shutdown_worker')) {
+            $self->{achievements}->shutdown_worker;
+        }
+        1;
+    };
+
     # --- mb120-B2: flush des achievements avant le shutdown ---
     # Le save() est habituellement debounce 10s — sans flush forcé au shutdown,
     # les unlocks récents (< 10s avant le SIGTERM) seraient perdus.

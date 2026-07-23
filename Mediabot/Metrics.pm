@@ -45,6 +45,22 @@ sub new {
     # (bounded cardinality: internal task registry only).
     $self->_declare('mediabot_scheduler_tick_seconds', 'histogram',
         'Scheduler task callback duration in seconds, by task');
+    # mb558-B1: achievement DB check durations (fixed cardinality: msg_count,
+    # hour_band, polyphony) — the queries behind the 48s calc incident.
+    $self->_declare('mediabot_achievement_check_seconds', 'histogram',
+        'Achievement CHANNEL_LOG aggregation duration in seconds, by check');
+    # mb559-B1: async achievement worker health. Label values are fixed by the
+    # parent implementation and cannot be supplied by IRC users.
+    $self->_declare('mediabot_achievement_queue_pending', 'gauge',
+        'Pending achievement checks, including the single in-flight entry');
+    $self->_declare('mediabot_achievement_worker_inflight', 'gauge',
+        'Whether an isolated achievement worker is currently running (1/0)');
+    $self->_declare('mediabot_achievement_queue_dropped_total', 'counter',
+        'Achievement checks dropped by bounded reason', ['reason']);
+    $self->_declare('mediabot_achievement_worker_total', 'counter',
+        'Isolated achievement workers completed by result', ['result']);
+    $self->_declare('mediabot_achievement_worker_timeouts_total', 'counter',
+        'Isolated achievement workers killed by the hard timeout');
     $self->_declare('mediabot_network_users',          'gauge',   'Current users on the IRC network (LUSERS)');
     $self->_declare('mediabot_network_users_max',      'gauge',   'Max users seen on the IRC network (LUSERS)');
     $self->_declare('mediabot_network_channels',       'gauge',   'Channels formed on the IRC network (LUSERS)');

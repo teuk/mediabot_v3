@@ -4,7 +4,7 @@
 #
 # This test guards against:
 #   - accidental joined "use" statements, e.g. use Foo;use Bar;
-#   - duplicate sub definitions inside the same module
+#   - duplicate sub definitions inside the same package
 #   - duplicate symbols inside @EXPORT blocks
 #   - modules missing their final true value
 #
@@ -81,7 +81,21 @@ return sub {
             "$file has no joined use statement"
         );
 
-        my @subs = $src =~ /^sub\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{/mg;
+        # mb560-B1: scope duplicate detection by package — one file may host
+        # several packages (mb559: Mediabot::Achievements::Worker overrides
+        # unlock/_timed_check/save after fork, legitimate polymorphism). A
+        # duplicate INSIDE the same package still fails.
+        my @subs;
+        my $pkg_msc = '';
+        for my $line_msc (split /\n/, $src) {
+            if ($line_msc =~ /^package\s+([A-Za-z_][A-Za-z0-9_:]*)\s*;/) {
+                $pkg_msc = $1;
+                next;
+            }
+            if ($line_msc =~ /^sub\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{/) {
+                push @subs, "$pkg_msc\::$1";
+            }
+        }
         my @duplicate_subs = _duplicates_module_structure_sanity(@subs);
 
         $assert->is(
