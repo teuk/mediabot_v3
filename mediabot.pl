@@ -378,7 +378,6 @@ $mediabot->{metrics} = Mediabot::Metrics->new(
 # mb550-B1: give the DB layer its Prometheus projection (best-effort).
 $mediabot->{db}->set_metrics($mediabot->{metrics})
     if $mediabot->{db} && $mediabot->{db}->can('set_metrics');
-
 $mediabot->{metrics}->set_build_info(
     version => $MAIN_PROG_VERSION || 'unknown',
     network => $mediabot->{conf}->get('connection.CONN_SERVER_NETWORK') || 'unknown',
@@ -554,6 +553,10 @@ my $scheduler = Mediabot::Scheduler->new(
     logger => $mediabot->{logger},
 );
 $mediabot->{scheduler} = $scheduler;
+# mb556-B1 / mb557-B1: Metrics already exists at this point. Attach it now,
+# after Scheduler construction, so task histograms are actually populated.
+$scheduler->set_metrics($mediabot->{metrics})
+    if $mediabot->{metrics} && $scheduler->can('set_metrics');
 
 # Register and keep the main timer handle for setMainTimerTick compatibility
 my $timer = IO::Async::Timer::Periodic->new(interval => 5, on_tick => \&on_timer_tick);

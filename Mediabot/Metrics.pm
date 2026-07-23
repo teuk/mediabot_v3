@@ -41,6 +41,10 @@ sub new {
     # mb551-B1: end-to-end PRIVMSG processing latency distribution.
     $self->_declare('mediabot_privmsg_processing_seconds', 'histogram',
         'End-to-end PRIVMSG handler processing time (seconds)');
+    # mb556-B1: scheduler task duration distribution, labelled by task name
+    # (bounded cardinality: internal task registry only).
+    $self->_declare('mediabot_scheduler_tick_seconds', 'histogram',
+        'Scheduler task callback duration in seconds, by task');
     $self->_declare('mediabot_network_users',          'gauge',   'Current users on the IRC network (LUSERS)');
     $self->_declare('mediabot_network_users_max',      'gauge',   'Max users seen on the IRC network (LUSERS)');
     $self->_declare('mediabot_network_channels',       'gauge',   'Channels formed on the IRC network (LUSERS)');

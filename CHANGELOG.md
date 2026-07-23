@@ -10,6 +10,27 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Fixed — scheduler metrics startup wiring (mb557)
+
+- The scheduler is now attached to Metrics only after the Scheduler object is
+  constructed. The earlier pre-construction call was a silent no-op, so slow
+  scheduler logs worked but the new histogram remained empty at runtime.
+  The regression contract now verifies ordering, rejects the dead early call,
+  and exercises Scheduler::set_metrics directly.
+
+### Added — scheduler tick timing (mb556)
+
+- The named scheduler tasks get the same timing discipline as PRIVMSG, the
+  event loop and the partyline — the tracing quadriptych is complete. Both
+  execution modes (periodic and calendar) run their callback through one
+  shared timed helper: every duration feeds the new
+  mediabot_scheduler_tick_seconds{task} histogram (bounded cardinality:
+  internal task registry only), any task above one second logs
+  "SLOW SCHEDULER: task 'name' took X.XXs" at level 3, and error semantics
+  are preserved (a dying callback still logs at level 1, its duration still
+  observed). Best-effort metrics via Scheduler::set_metrics (mb550
+  pattern); a p95-by-task panel joins the overview dashboard.
+
 ### Fixed — kick action scope and wire safety (mb555)
 
 - Kick actions now canonicalize STATUSMSG-decorated channel contexts, reject

@@ -11,10 +11,45 @@ package Mediabot::Scheduler;
 use strict;
 use warnings;
 use IO::Async::Timer::Periodic;
+use Time::HiRes ();
 use IO::Async::Timer::Countdown;
 use Scalar::Util qw(weaken refaddr);
 
 our $VERSION = '1.11';
+
+# mb556-B1: optional Prometheus projection (mb550 pattern) plus the timed
+# task-callback helper shared by the periodic and calendar paths. Any task
+# slower than one second names itself at level 3, and every duration feeds
+# the mediabot_scheduler_tick_seconds{task} histogram. Best-effort: without
+# Metrics, only the SLOW log remains; errors keep their existing semantics.
+sub set_metrics {
+    my ($self, $metrics) = @_;
+    $self->{metrics} = $metrics;
+    return 1;
+}
+
+sub _run_task_callback {
+    my ($self, $name, $cb) = @_;
+
+    my $t0 = [ Time::HiRes::gettimeofday() ];
+    eval { $cb->() };
+    my $err = $@;
+    my $elapsed = Time::HiRes::tv_interval($t0);
+
+    if ($self->{metrics} && eval { $self->{metrics}->can('observe') }) {
+        eval { $self->{metrics}->observe('mediabot_scheduler_tick_seconds',
+            $elapsed, { task => $name }); 1 };
+    }
+    if ($elapsed > 1.0) {
+        $self->_log(3, sprintf("SLOW SCHEDULER: task '%s' took %.2fs", $name, $elapsed));
+    }
+    if ($err) {
+        (my $clean = $err) =~ s/\s+/ /g;
+        $self->_log(1, "Scheduler: task '$name' error: $clean");
+    }
+
+    return 1;
+}
 
 sub new {
     my ($class, %args) = @_;
@@ -95,12 +130,7 @@ sub add {
                 $task->{next_run}  = $now + $task->{interval};
                 $self->_log(4, "Scheduler: tick '$name' (#$task->{ticks})");
 
-                eval { $cb->() };
-
-                if ($@) {
-                    (my $err = $@) =~ s/\s+/ /g;
-                    $self->_log(1, "Scheduler: task '$name' error: $err");
-                }
+                $self->_run_task_callback($name, $cb);
             },
         );
 
@@ -186,11 +216,7 @@ sub _arm_calendar {
             $scheduler->_log(4,
                 "Scheduler: calendar tick '$name' (#$current->{ticks})");
 
-            eval { $current->{cb}->() };
-            if ($@) {
-                (my $err = $@) =~ s/\s+/ /g;
-                $scheduler->_log(1, "Scheduler: task '$name' error: $err");
-            }
+            $scheduler->_run_task_callback($name, $current->{cb});
 
             $current = $scheduler->{_tasks}{$name} or return;
             return unless refaddr($current) == $task_addr;
