@@ -2959,7 +2959,11 @@ sub mb8ball_ctx {
     }
 
     # J3: French answers if main.LANG = fr
-    my $lang_8b = eval { $self->{conf}->get('main.LANG') } // 'en';
+    # mb563-B1: per-channel override via chansets +LangFR/+LangES
+    # (Helpers::channel_lang); PM and unflagged channels keep main.LANG.
+    # mb562-B1: FR/ES pools were double-encoded (accents shipped broken on
+    # IRC); re-encoded once. Guard 753 forbids mojibake file-wide.
+    my $lang_8b = Mediabot::Helpers::channel_lang($self, $channel);
 
     my @answers = (
         'It is certain.',
@@ -2985,45 +2989,45 @@ sub mb8ball_ctx {
     );
     my @answers_fr = (
         'C\'est certain.',
-        'C\'est absolument Ã§a.',
+        'C\'est absolument ça.',
         'Sans aucun doute.',
-        'Oui, dÃ©finitivement.',
+        'Oui, définitivement.',
         'Tu peux compter dessus.',
         'Comme je le vois, oui.',
-        'TrÃ¨s probablement.',
+        'Très probablement.',
         'Les perspectives sont bonnes.',
         'Oui.',
         'Les signes indiquent que oui.',
         'Flou, essaie encore.',
         'Demande plus tard.',
         'Mieux vaut ne pas te le dire maintenant.',
-        'Je ne peux pas prÃ©dire Ã§a.',
+        'Je ne peux pas prédire ça.',
         'Concentre-toi et redemande.',
         'N\'y compte pas.',
-        'Ma rÃ©ponse est non.',
+        'Ma réponse est non.',
         'Mes sources disent non.',
         'Les perspectives ne sont pas bonnes.',
-        'TrÃ¨s douteux.',
+        'Très douteux.',
     );
     @answers = @answers_fr if $lang_8b eq 'fr';
 
     # L2: Spanish answers if main.LANG = es
     my @answers_es = (
-        'Definitivamente sÃ­.',
+        'Definitivamente sí.',
         'Por supuesto.',
         'Sin ninguna duda.',
-        'SÃ­, definitivamente.',
+        'Sí, definitivamente.',
         'Puedes contar con ello.',
         'Las perspectivas son buenas.',
         'Muy probablemente.',
-        'SÃ­.',
-        'Los indicios apuntan que sÃ­.',
-        'Como yo lo veo, sÃ­.',
+        'Sí.',
+        'Los indicios apuntan que sí.',
+        'Como yo lo veo, sí.',
         'La respuesta es incierta, intenta de nuevo.',
-        'Pregunta mÃ¡s tarde.',
+        'Pregunta más tarde.',
         'Mejor no responderte ahora.',
         'No puedo predecirlo.',
-        'ConcÃ©ntrate y pregunta de nuevo.',
+        'Concéntrate y pregunta de nuevo.',
         'No cuentes con ello.',
         'Mi respuesta es no.',
         'Mis fuentes dicen que no.',
@@ -9631,6 +9635,72 @@ sub mbDuel_ctx {
 # Horoscope IRC déterministe en français. Seed = nick + date.
 # Compteur de consultations en mémoire (achievement star_gazer).
 # ---------------------------------------------------------------------------
+# mb561-B1: (jour, mois) -> (nom, glyphe, element) du signe, bornes standard.
+# Retourne () si la date est invalide. Testable unitairement (test 752).
+sub _horoscope_zodiac_sign {
+    my ($d, $m) = @_;
+    return () unless defined $d && defined $m;
+    return () unless $d =~ /^\d+$/ && $m =~ /^\d+$/;
+    return () unless $d >= 1 && $d <= 31 && $m >= 1 && $m <= 12;
+    return () unless _birthday_valid_date(2000, $m, $d);
+    # Trié par date de début CROISSANTE : on garde le DERNIER signe dont la
+    # date de début est <= (mois,jour) demandé. Capricorne (début 22/12) est
+    # le défaut : il couvre aussi le début d'année (01/01 - 19/01), avant le
+    # premier début de la liste (Verseau 20/01).
+    my @zodiac = (
+        [ 'Verseau',    "\x{2652}", 'air',    1, 20 ],
+        [ 'Poissons',   "\x{2653}", 'eau',    2, 19 ],
+        [ 'Bélier',     "\x{2648}", 'feu',    3, 21 ],
+        [ 'Taureau',    "\x{2649}", 'terre',  4, 20 ],
+        [ 'Gémeaux',    "\x{264A}", 'air',    5, 21 ],
+        [ 'Cancer',     "\x{264B}", 'eau',    6, 21 ],
+        [ 'Lion',       "\x{264C}", 'feu',    7, 23 ],
+        [ 'Vierge',     "\x{264D}", 'terre',  8, 23 ],
+        [ 'Balance',    "\x{264E}", 'air',    9, 23 ],
+        [ 'Scorpion',   "\x{264F}", 'eau',   10, 23 ],
+        [ 'Sagittaire', "\x{2650}", 'feu',   11, 22 ],
+        [ 'Capricorne', "\x{2651}", 'terre', 12, 22 ],
+    );
+    my $md = $m * 100 + $d;
+    my $found = [ 'Capricorne', "\x{2651}", 'terre' ];   # 01/01 - 19/01
+    for my $z (@zodiac) {
+        my $z_md = $z->[3] * 100 + $z->[4];
+        $found = $z if $md >= $z_md;
+    }
+    return @$found[0, 1, 2];
+}
+
+# mb565-R1: USER.birthday is stored by the birthday command as MM-DD or
+# YYYY-MM-DD. Accept those canonical DB formats and legacy dd/mm variants,
+# validate the real calendar date, then delegate the zodiac boundaries to the
+# tested helper above.
+sub _horoscope_zodiac_from_birthday {
+    my ($birthday) = @_;
+    return () unless defined $birthday && !ref($birthday);
+
+    my $raw = "$birthday";
+    $raw =~ s/^\s+|\s+$//g;
+    return () unless length $raw;
+
+    my ($year, $month, $day) = (2000, undef, undef);
+    if ($raw =~ /\A(\d{4})-(\d{2})-(\d{2})\z/) {
+        ($year, $month, $day) = ($1 + 0, $2 + 0, $3 + 0);
+    }
+    elsif ($raw =~ /\A(\d{2})-(\d{2})\z/) {
+        ($month, $day) = ($1 + 0, $2 + 0);
+    }
+    elsif ($raw =~ m{\A(\d{1,2})/(\d{1,2})(?:/(\d{4}))?\z}) {
+        ($day, $month) = ($1 + 0, $2 + 0);
+        $year = $3 + 0 if defined $3;
+    }
+    else {
+        return ();
+    }
+
+    return () unless _birthday_valid_date($year, $month, $day);
+    return _horoscope_zodiac_sign($day, $month);
+}
+
 sub mbHoroscope_ctx {
     my ($ctx) = @_;
     my $self    = $ctx->bot;
@@ -9649,108 +9719,172 @@ sub mbHoroscope_ctx {
         }
     }
 
+    # mb561-B1 + mb565-R1: signe astrologique depuis USER.birthday, avec
+    # les formats réellement stockés par la commande birthday (MM-DD ou
+    # YYYY-MM-DD) et compatibilité legacy dd/mm[/YYYY]. Même clé d'accès :
+    # USER.nickname = cible. Best-effort : sans base, sans user ou sans date
+    # valide -> horoscope complet quand même, simplement sans signe.
+    my ($sign_name, $sign_glyph, $sign_element);
+    {
+        my $bday;
+        eval {
+            my $sth_b = $self->{dbh}->prepare(
+                "SELECT birthday FROM USER WHERE nickname = ?");
+            if ($sth_b && $sth_b->execute($target)) {
+                my $row_b = $sth_b->fetchrow_hashref;
+                $bday = $row_b->{birthday} if $row_b;
+                $sth_b->finish;
+            }
+            1;
+        };
+        if (defined $bday) {
+            ($sign_name, $sign_glyph, $sign_element) =
+                _horoscope_zodiac_from_birthday($bday);
+        }
+    }
+
     # Seed déterministe : nick + date du jour
     my @lt = localtime(time);
     my $date_key = sprintf('%04d-%02d-%02d', $lt[5]+1900, $lt[4]+1, $lt[3]);
     my $seed = 0;
     $seed = ($seed * 31 + ord($_)) & 0xFFFFFFFF for split //, ($target . ':' . $date_key);
 
-    # mb444-B1: PRNG LOCAL déterministe. Avant, srand($seed) reseedait le RNG
-    # GLOBAL du process pour rendre l'horoscope déterministe, puis un srand()
-    # final tentait de « restaurer » — mais srand() ne restaure PAS la séquence
-    # précédente : il reseed depuis l'horloge. Ce reseed répété (un par
-    # !horoscope) perturbe et dégrade le RNG partagé par tout le reste (dés
-    # !roll, d20 des duels, 8ball, quote aléatoire, proba Hailo, sélection
-    # trivia...). On tire désormais les index via un LCG local, sans jamais
-    # toucher srand() ni le générateur global.
+    # mb444-B1: PRNG LOCAL déterministe — le RNG global (dés, duels, 8ball,
+    # trivia, Hailo) n'est JAMAIS touché. Contrat verrouillé par le test 659.
     my $rng  = $seed & 0x7FFFFFFF;
     my $next = sub { $rng = (($rng * 1103515245) + 12345) & 0x7FFFFFFF; return $rng; };
     my $pick = sub { my ($aref) = @_; return $aref->[ $next->() % scalar(@$aref) ]; };
 
-    # Pools (FR — canal francophone, Christophe préfère le français)
+    # mb561-B1: pools entierement generiques — aucune personne, aucun projet,
+    # aucun evenement interne. Teinte legerement IRC/tech assumee (c'est un
+    # bot), mais rien de nominatif.
     my @humeurs = (
         "lumineuse \x{1F31E}", "mystérieuse \x{1F315}", "espiègle \x{1F608}",
-        "philosophe \x{1F914}", "tranchante \x{2694}\x{FE0F}", "rêveuse \x{2601}\x{FE0F}",
-        "indomptable \x{1F981}", "fluide \x{1F30A}", "explosive \x{1F4A5}",
-        "feutrée \x{1F436}", "stoïque \x{1F5FF}", "magnétique \x{1F9F2}",
+        "philosophe \x{1F914}", "conquérante \x{2694}\x{FE0F}", "rêveuse \x{2601}\x{FE0F}",
+        "indomptable \x{1F981}", "fluide \x{1F30A}", "électrique \x{26A1}",
+        "feutrée \x{1F43E}", "sereine \x{1F9D8}", "magnétique \x{1F9F2}",
+    );
+
+    # Accroches par élément (utilisées seulement si le signe est connu)
+    my %elans = (
+        feu   => [ "ton énergie ouvre les portes avant que tu frappes",
+                   "l'étincelle du jour t'appartient, ne la prête pas",
+                   "ce qui résiste aujourd'hui cédera par enthousiasme" ],
+        terre => [ "ta constance vaut mieux que trois coups d'éclat",
+                   "bâtis petit mais bâtis vrai, le reste suivra",
+                   "un pas mesuré t'emmènera plus loin qu'un sprint" ],
+        air   => [ "une conversation légère portera une idée sérieuse",
+                   "ta curiosité est le bon outil, laisse-la ouvrir les onglets",
+                   "les mots justes te viendront au moment exact" ],
+        eau   => [ "ton intuition lit entre les lignes, fais-lui confiance",
+                   "la marée du jour ramène quelque chose que tu croyais perdu",
+                   "écoute deux fois, réponds une fois : magie garantie" ],
+    );
+
+    my @climats_social = (
+        "Une attention discrète te fera plus de bien qu'un long discours",
+        "Quelqu'un pense à toi sans te le dire",
+        "Un échange anodin cachera une vraie complicité",
+        "On te lira plus attentivement que tu ne le crois",
+        "Un ancien contact refera surface au bon moment",
+        "Ta bonne humeur sera contagieuse, dose-la avec malice",
+        "Un silence bien placé vaudra une réponse brillante",
+    );
+
+    my @climats_projets = (
+        "une tâche repoussée se révélera plus courte que prévu",
+        "la solution viendra en expliquant le problème à voix haute",
+        "un détail négligé mérite une seconde lecture",
+        "ce que tu ranges aujourd'hui te sauvera demain",
+        "une idée notée à la va-vite contient l'essentiel",
+        "termine avant d'améliorer : l'ordre compte",
+        "la version simple est la bonne",
     );
 
     my @evenements = (
         "Un café partagé deviendra mémorable.",
-        "Quelqu'un te citera de travers, ne corrige pas.",
-        "Un vieux fichier de conf répondra enfin à une question d'hier.",
-        "Mefie-toi du backup que tu n'as pas vérifié.",
-        "Une commande tapée trop vite t'apprendra quelque chose.",
-        "Quelqu'un te demandera ton avis sur du Perl — résiste, parle de Tcl.",
-        "Un nick que tu n'as pas vu depuis 2 ans dira bonjour.",
-        "Un grep négligé révèlera une perle cachée dans tes logs.",
-        "Une notification ignorée ce matin reviendra t'embêter ce soir.",
-        "L'éditeur que tu fuis va finir par te séduire — c'est non.",
-        "Un fail2ban silencieux te sauvera la mise.",
-        "Le DNS aura ses humeurs : prévois un dig.",
-        "Une fenêtre tmux oubliée contient une réponse précieuse.",
-        "Quelqu'un fera un join sans saluer, mais te lira attentivement.",
-        "Un /msg arrivé avant ton premier café sera mal interprété.",
-        "Un cron jamais déclenché va exiger ton attention.",
-        "Une typo glissée dans un README te suivra plus longtemps que de raison.",
+        "Quelqu'un te citera de travers : souris, ne corrige pas.",
+        "Une question d'hier trouvera sa réponse toute seule.",
+        "Une notification ignorée ce matin reviendra ce soir.",
+        "Un air de musique te suivra toute la journée.",
+        "Une coïncidence te fera lever un sourcil.",
+        "Un objet perdu réapparaîtra à l'endroit évident.",
+        "Une fenêtre oubliée contient encore une réponse précieuse.",
+        "Un message tapé trop vite t'apprendra la patience.",
+        "Une promesse faite à la légère te rattrapera gentiment.",
     );
 
     my @recommandations = (
         "ne refuse pas le café qu'on te tend",
-        "commit avant de partir manger",
-        "fais un git pull avant d'ouvrir vi",
-        "lance un htop : tu y verras quelque chose d'intéressant",
-        "tape !active et lis attentivement les rangs",
-        "envoie un sosreport pour le plaisir",
-        "réponds à un ping que tu avais ignoré",
-        "rejoins #boulets même si c'est calme",
-        "écris dans BUGFIX_mb83.md au moins une ligne",
-        "ne touche pas à iptables après 22h",
-        "lis le man d'un outil que tu crois maîtriser",
-        "salue Gwen en passant",
+        "lis le mode d'emploi d'un outil que tu crois maîtriser",
+        "réponds à un message que tu avais laissé filer",
+        "range une seule chose, mais range-la vraiment",
+        "note l'idée avant qu'elle ne s'évapore",
+        "fais une sauvegarde, tu sais pourquoi",
+        "prends l'escalier, les astres y voient plus clair",
+        "offre un compliment sans raison",
+        "éteins un écran une heure avant de dormir",
+        "goûte quelque chose de nouveau, même en pensée",
     );
 
     my @attentions = (
-        "un cron qui s'emballe",
-        "une regex un peu trop gourmande",
-        "une PR qui dort depuis trop longtemps",
-        "un disque /var qui grimpe en silence",
-        "un certificat qui te lâche dans 3 jours",
-        "une dépendance CPAN désuète",
-        "un \"force push\" dont tu te souviendras",
-        "un kill -9 qui paraissait nécessaire",
-        "un sudo tapé trop vite",
-        "un rollback que tu auras oublié de tester",
+        "une promesse faite trop vite",
+        "un détail qui grossit dans l'ombre",
+        "une certitude qui mériterait vérification",
+        "un raccourci qui coûtera plus qu'il ne rapporte",
+        "une réponse envoyée sous le coup de l'agacement",
+        "un oubli minuscule aux grandes conséquences",
+        "une rumeur plus rapide que les faits",
+        "un « ça peut attendre » de trop",
     );
 
     my @couleurs = qw(turquoise carmin indigo or pourpre ardoise émeraude saphir cuivre ivoire);
     my @chiffres = (3, 7, 11, 13, 17, 21, 23, 42, 47, 77, 100, 666);
     my @glyphs   = ("\x{2728}", "\x{1F31F}", "\x{1F319}", "\x{1F525}", "\x{2604}\x{FE0F}",
                     "\x{1F30C}", "\x{1F52E}", "\x{26A1}", "\x{1F300}");
+    my @autres_signes = ('Bélier', 'Taureau', 'Gémeaux', 'Cancer', 'Lion', 'Vierge',
+                         'Balance', 'Scorpion', 'Sagittaire', 'Capricorne', 'Verseau', 'Poissons');
 
-    # Tirages (LCG local, mb444-B1)
-    my $humeur   = $pick->(\@humeurs);
-    my $event    = $pick->(\@evenements);
-    my $reco     = $pick->(\@recommandations);
+    # Tirages (LCG local, mb444-B1) — ordre FIXE pour la stabilité du jour
+    my $humeur    = $pick->(\@humeurs);
+    my $social    = $pick->(\@climats_social);
+    my $projets   = $pick->(\@climats_projets);
+    my $event     = $pick->(\@evenements);
+    my $reco      = $pick->(\@recommandations);
     my $attention = $pick->(\@attentions);
-    my $couleur  = $pick->(\@couleurs);
-    my $chiffre  = $pick->(\@chiffres);
-    my $glyph    = $pick->(\@glyphs);
-    # Pourcentage chance — biais positif léger
-    my $chance   = 35 + ($next->() % 60);  # 35..94
+    my $couleur   = $pick->(\@couleurs);
+    my $chiffre   = $pick->(\@chiffres);
+    my $glyph     = $pick->(\@glyphs);
+    my $chance    = 35 + ($next->() % 60);  # 35..94, biais positif léger
 
-    # (mb444-B1: plus de srand() — le RNG global n'est jamais touché.)
-
-    # Affichage 3 lignes
-    botPrivmsg($self, $reply_to,
-        "$glyph \x02Horoscope du $date_key pour $target\x02 \x{2014} humeur $humeur");
-    botPrivmsg($self, $reply_to,
-        "  $event");
-    botPrivmsg($self, $reply_to,
-        sprintf("  Conseil : %s. Méfiance : %s.", $reco, $attention));
-    botPrivmsg($self, $reply_to,
-        sprintf("  \x{1F3B2} Chiffre %d \x{B7} \x{1F3A8} couleur %s \x{B7} \x{1F340} chance %d%%",
-            $chiffre, $couleur, $chance));
+    # Affichage — meme gabarit avec ou sans signe (mb561-B1)
+    if (defined $sign_name) {
+        my $elan = $pick->($elans{$sign_element});
+        my @complices = grep { $_ ne $sign_name } @autres_signes;
+        my $complice = $pick->(\@complices);
+        botPrivmsg($self, $reply_to,
+            "$glyph \x02Horoscope du $date_key\x02 \x{2014} $target, $sign_glyph \x02$sign_name\x02 ($sign_element) \x{B7} humeur $humeur");
+        botPrivmsg($self, $reply_to,
+            "  \x{1F52E} $elan.");
+        botPrivmsg($self, $reply_to,
+            "  Climat : $social. Côté projets : $projets. $event");
+        botPrivmsg($self, $reply_to,
+            sprintf("  Conseil : %s. Méfiance : %s.", $reco, $attention));
+        botPrivmsg($self, $reply_to,
+            sprintf("  \x{1F3B2} Chiffre %d \x{B7} \x{1F3A8} couleur %s \x{B7} \x{1F340} chance %d%% \x{B7} \x{1F4AB} signe complice : %s",
+                $chiffre, $couleur, $chance, $complice));
+    }
+    else {
+        botPrivmsg($self, $reply_to,
+            "$glyph \x02Horoscope du $date_key pour $target\x02 \x{2014} humeur $humeur");
+        botPrivmsg($self, $reply_to,
+            "  Climat : $social. Côté projets : $projets. $event");
+        botPrivmsg($self, $reply_to,
+            sprintf("  Conseil : %s. Méfiance : %s.", $reco, $attention));
+        botPrivmsg($self, $reply_to,
+            sprintf("  \x{1F3B2} Chiffre %d \x{B7} \x{1F3A8} couleur %s \x{B7} \x{1F340} chance %d%%",
+                $chiffre, $couleur, $chance));
+    }
 
     # Compteur consultations + hook achievement
     $self->{_horoscope_count}{$nick}++;

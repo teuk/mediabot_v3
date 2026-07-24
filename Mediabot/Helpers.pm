@@ -2578,6 +2578,21 @@ sub getDetailedVersion {
 #   chanset_enabled($self, $chan, 'AchievementAnnounce', default => 1)
 #   chanset_enabled($self, $chan, 'Games')
 # ---------------------------------------------------------------------------
+# mb563-B1: per-channel language. +LangFR forces French, +LangES Spanish
+# (FR wins if both are set — pick one per channel); with neither flag the
+# global main.LANG applies (default 'en'). Private messages have no channel,
+# so they follow the global setting. Data-only migration seeds the chansets;
+# on an unmigrated database chanset_enabled returns its default (0) and the
+# behaviour is exactly the historical global one.
+sub channel_lang {
+    my ($self, $channel) = @_;
+    my $global = eval { $self->{conf}->get('main.LANG') } // 'en';
+    return $global unless defined $channel && $channel =~ /^#/;
+    return 'fr' if eval { chanset_enabled($self, $channel, 'LangFR', default => 0) };
+    return 'es' if eval { chanset_enabled($self, $channel, 'LangES', default => 0) };
+    return $global;
+}
+
 sub chanset_enabled {
     my ($self, $channel, $chanset_name, %opts) = @_;
     return 0 unless defined $channel && $channel =~ /^#/ && defined $chanset_name;

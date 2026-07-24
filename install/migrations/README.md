@@ -44,6 +44,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260708_onthisday_chanset.sql
 20260708_onthisday_digest_chanset.sql
 20260710_quotes_hits.sql
+20260724_lang_chansets.sql
 ```
 
 The migration set adds channel-ban tracking, user seen/activity tracking, Claude chanset reference data, schema support for newer fun/user commands, and persistent trivia scores and user notes, including:
@@ -91,6 +92,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_factoids_chanset.s
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260708_onthisday_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260708_onthisday_digest_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260710_quotes_hits.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260724_lang_chansets.sql;
 ```
 
 Afterwards:

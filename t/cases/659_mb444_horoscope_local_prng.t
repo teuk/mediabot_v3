@@ -57,7 +57,9 @@ return sub {
     $assert->like($code, qr/my \$next = sub \{ \$rng = \(\(\$rng \* 1103515245\)/,
         'LCG local présent');
     $assert->like($code, qr/my \$pick = sub \{/, 'sélecteur local présent');
-    $assert->like($code, qr/\$chance   = 35 \+ \(\$next->\(\) % 60\)/, 'chance via LCG local');
+    # mb561-B1: whitespace assoupli — le contrat porte sur la SOURCE du tirage
+    # (le LCG local), pas sur l'alignement vertical du bloc.
+    $assert->like($code, qr/\$chance\s+= 35 \+ \(\$next->\(\) % 60\)/, 'chance via LCG local');
 
     $assert->like($src, qr/mb444-B1/, 'tag mb444-B1');
 };

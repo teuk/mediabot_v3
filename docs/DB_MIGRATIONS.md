@@ -71,6 +71,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260707_factoids_chanset.s
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260708_onthisday_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260708_onthisday_digest_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260710_quotes_hits.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260724_lang_chansets.sql;
 ```
 
 Then run the checker again:
@@ -102,6 +103,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260708_onthisday_chanset.sql
 20260708_onthisday_digest_chanset.sql
 20260710_quotes_hits.sql
+20260724_lang_chansets.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this

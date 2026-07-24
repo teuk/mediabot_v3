@@ -102,7 +102,9 @@ sub new {
             reply  => 1,
             notice => 1,
             topic  => 1,  # mb545-B1
+            ban    => 1,  # mb564-B1
             kick   => 1,  # mb554-B1
+            unban  => 1,  # mb564-B1
             log    => 1,
             timer  => 1,
         },

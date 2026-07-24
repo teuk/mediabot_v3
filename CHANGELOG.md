@@ -10,6 +10,55 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Added — per-channel language chansets (mb563)
+
+- New data-only migration seeds LangFR/LangES chansets. Helpers::channel_lang
+  resolves a channel's language: +LangFR forces French, +LangES Spanish (FR
+  wins if both), no flag or PM falls back to the global main.LANG (default
+  en) — an unmigrated database behaves exactly as before. First consumer:
+  the 8ball command; the helper is ready for any other localized command.
+
+### Added — ban/unban script actions + gatekeeper v2 (mb564)
+
+- Scripts may emit ban/unban actions: MODE +b/-b on their ORIGINATING
+  channel only, mandatory full nick!user@host mask (wildcards per segment,
+  90 bytes max, strict charset), no target field, STATUSMSG-canonicalized
+  channel. No other mode change is available to scripts. Applying requires
+  ACTION_MODE=apply + ALLOW_IRC=yes + ALLOW_BAN=yes (default no,
+  hot-reloadable, fingerprinted). For `ban`, fail-closed self-protection
+  is consistent with kick: a literal nick segment equal to the bot's nick is
+  refused, an unverifiable identity is refused; a wildcard segment passes
+  (undecidable by nick — ALLOW_BAN is the explicit operator gate). `unban`
+  remains available as a repair path.
+- gatekeeper.pl v2: opt-in ban=yes route config closes the door BEFORE the
+  kick (ban nick!*@* then kick); default stays kick-only — zero regression.
+  Action-type contracts, plugin known-keys, partyline help, sample.conf,
+  README and cookbook updated.
+
+### Fixed — 8ball FR/ES answers were double-encoded (mb562)
+
+- The French and Spanish 8ball answer pools were stored with double-encoded
+  UTF-8 (every accent shipped broken on IRC as soon as main.LANG=fr|es).
+  Re-encoded once; a new file-wide regression guard (753) now forbids any
+  mojibake sequence in every shipped module, so this class of corruption
+  cannot silently return.
+
+### Changed — horoscope rework (mb561)
+
+- The horoscope grows up. If the target matches a registered user whose
+  USER.birthday is set through the birthday command (canonical DB formats
+  MM-DD or YYYY-MM-DD, with legacy dd/mm support), the reading opens with
+  their zodiac sign (glyph, name, element)
+  and adds an element-tinted opening line plus a "signe complice" of the
+  day; without a birthday the same full horoscope is served, simply without
+  any sign — never refused, never guessed. New unit-tested
+  _horoscope_zodiac_sign covers all 25 boundary dates including 29/02.
+- All pools rewritten fully generic: no people, no channels, no project
+  files, no internal tooling references. New sections (social climate,
+  project climate) join the existing advice/warning/number/colour/luck.
+  The mb444 deterministic local-LCG contract is untouched (same seed:
+  nick + date), so one nick still gets one stable reading per day.
+
 ### Fixed — regression guards caught up with mb559 (mb560)
 
 - Two static guards were stricter than the contracts they encode and failed

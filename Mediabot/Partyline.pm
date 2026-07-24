@@ -2215,6 +2215,13 @@ sub _cmd_scriptdryrun {
         # mb532-B1: la reference partyline doit couvrir TOUTES les cles du
         # plugin; EVENTS/EVENT_COOLDOWN (mb529) et CONFIG_<route> (mb531)
         # manquaient depuis leur introduction.
+        $stream->write("  ban gate keys:\r\n");
+        $stream->write("    plugins.ScriptDryRun.ALLOW_BAN\r\n");
+        $stream->write("    plugins.ScriptDryRun.allow_ban\r\n");
+        $stream->write("    plugins.script_dryrun.ALLOW_BAN\r\n");
+        $stream->write("    plugins.script_dryrun.allow_ban\r\n");
+        $stream->write("    SCRIPT_DRYRUN_ALLOW_BAN\r\n");
+        $stream->write("  ban gate: ban/unban actions (MODE +b/-b, originating channel, full nick!user\@host mask) require apply + ALLOW_IRC + ALLOW_BAN (default: no); +b never targets the bot's own literal nick, while -b remains available as a repair path\r\n");
         $stream->write("  kick gate keys:\r\n");
         $stream->write("    plugins.ScriptDryRun.ALLOW_KICK\r\n");
         $stream->write("    plugins.ScriptDryRun.allow_kick\r\n");

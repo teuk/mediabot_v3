@@ -167,6 +167,14 @@ nick follows the IRC grammar (max 30), the reason is bounded to 120 UTF-8
 bytes (default: requested by script), and applying it needs
 three gates: `ACTION_MODE=apply`, `ALLOW_IRC=yes` and the dedicated
 `ALLOW_KICK=yes` (default no). The bridge refuses to kick the bot itself.
+
+Scripts may also emit `ban` / `unban` actions (mb564): `MODE +b` / `-b` on
+their originating channel only, with a mandatory full `nick!user@host` mask
+(wildcards `*` `?` allowed per segment, 90 bytes max). No other mode change
+is available to scripts. Applying requires `ACTION_MODE=apply` plus
+`ALLOW_IRC=yes` plus `ALLOW_BAN=yes` (default no). The bridge refuses to
+ban the bot's own literal nick; a wildcard nick segment cannot be decided
+by nick and passes — `ALLOW_BAN` is the explicit operator gate for that.
 See `examples/gatekeeper.pl` for the canonical join-time use.
 
 ## Topic action

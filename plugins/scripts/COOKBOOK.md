@@ -99,7 +99,10 @@ carries its own extra fields:
 For join-time moderation, `examples/gatekeeper.pl` shows the kick action
 (mb554): substring matching on the joining nick (no user-supplied regex by
 design), total silence on normal joins, an unarmed configuration that never
-kicks, and the full ALLOW_KICK gate chain advertised in its header.
+kicks, and the full ALLOW_KICK gate chain advertised in its header. Since
+mb564 it can also close the door first: `ban=yes` in the route config emits
+a `ban` action (mask `nick!*@*`) before the kick, behind the ALLOW_BAN gate
+— kick-only remains the default.
 
 Rules every event script must live with:
 

@@ -7,6 +7,12 @@
 #   EVENTS=join=examples/gatekeeper.pl
 #   CONFIG_join=kick_substrings=spambot flood;kick_reason=not welcome here
 #
+# mb564-B1 (v2): optional ban-then-kick. Add ban=yes to the route config to
+# emit a ban action (mask nick!*@*) BEFORE the kick — a kick without a ban
+# is a revolving door. Default (absent/anything else) keeps the historical
+# kick-only behavior; the ban action additionally requires the ALLOW_BAN
+# gate, so an unconfigured bridge stays kick-only even with ban=yes.
+#
 # Behavior:
 #   - event "join": if the joining nick contains one of the configured
 #     substrings (case-insensitive, space-separated list), emit a kick
@@ -73,10 +79,18 @@ if ($event eq 'join') {
     my ($hit) = grep { index($lc_nick, $_) >= 0 } @substrings;
 
     if (length($nick) && defined $hit) {
+        # mb564-B1: opt-in ban BEFORE the kick (order matters: the door
+        # closes, then the visitor is walked out). Mask is nick!*@* — built
+        # from envelope data only; a nick-changing spammer changes mask
+        # anyway, which is the operator's escalation call, not the script's.
+        my $want_ban = (defined $config->{ban} && !ref($config->{ban})
+            && lc("$config->{ban}") eq 'yes') ? 1 : 0;
+        push @actions, { type => 'ban', mask => "$nick!*\@*" } if $want_ban;
         push @actions,
             { type => 'kick', nick => $nick, reason => $reason },
             { type => 'log', level => 'info',
-              text => "gatekeeper: kick requested for $nick from $channel (matched '$hit')" };
+              text => 'gatekeeper: ' . ($want_ban ? 'ban+kick' : 'kick')
+                    . " requested for $nick from $channel (matched '$hit')" };
     }
     # No match (or unarmed config): total silence — a gatekeeper that
     # comments every visitor is a nuisance, not a guard.

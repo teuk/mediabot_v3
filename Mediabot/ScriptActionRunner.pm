@@ -75,7 +75,9 @@ sub new {
             log    => 1,
             timer  => 1,
             topic  => 1,  # mb545-B1
+            ban    => 1,  # mb564-B1
             kick   => 1,  # mb554-B1
+            unban  => 1,  # mb564-B1
         },
     }, $class;
 }
@@ -284,6 +286,42 @@ sub validate_action {
     my $type = lc _trim($action->{type});
     return (0, 'missing action type') unless length $type;
     return (0, "unsupported action type '$type'") unless $self->{allowed_actions}{$type};
+
+    # mb564-B1: actions ban/unban — MODE +b/-b sur le canal D'ORIGINE
+    # uniquement, jamais d'op/voice/limite (ce sous-ensemble est le seul
+    # ouvert aux scripts). Mask complet nick!user@host exige, jokers *?
+    # admis dans chaque segment, ASCII strict, 90 octets max. Aucun champ
+    # target: la meme discipline de scope que kick/topic.
+    if ($type eq 'ban' || $type eq 'unban') {
+        return (0, "$type action takes no target")
+            if exists $action->{target};
+
+        my $mask = $action->{mask};
+        return (0, "$type action requires a mask")
+            unless defined $mask && !ref($mask) && length "$mask";
+        $mask = "$mask";
+        return (0, "$type mask is too long (max 90)") if length($mask) > 90;
+        return (0, "$type mask has invalid characters")
+            unless $mask =~ /\A[A-Za-z0-9\[\]\\\x60_^{}|.\-*?~\/:!@]+\z/;
+        return (0, "$type mask must be nick!user\@host")
+            unless $mask =~ /\A([^!@]{1,32})!([^!@]{1,32})\@([^!@]{1,64})\z/;
+
+        my $ctx_channel = $self->_context_default_target($context);
+        my $ctx_channel_base = _channel_token_base($ctx_channel);
+        return (0, "$type action requires a channel context")
+            unless defined $ctx_channel_base && length $ctx_channel_base;
+
+        my ($target_ok, $target_err, $safe_channel)
+            = $self->_bounded_target($ctx_channel_base);
+        return (0, "invalid $type channel context: $target_err")
+            unless $target_ok;
+
+        return (1, undef, {
+            type   => $type,
+            target => $safe_channel,
+            mask   => $mask,
+        });
+    }
 
     # mb554-B1: action kick — ejecte un nick du canal D'ORIGINE uniquement.
     # Meme discipline fail-closed que topic: aucun target accepte, contexte
@@ -566,6 +604,28 @@ sub _send_topic_action {
 }
 
 # mb554-B1 / mb555-B1: envoi KICK — canal d'origine, nick valide, raison en trailing.
+# mb564-B1: MODE +b / -b sur le canal valide. Le mask est ASCII par
+# validation; encode par coherence si un scalaire wide arrivait ici.
+sub _send_ban_action {
+    my ($self, $action) = @_;
+
+    my $bot = $self->{bot};
+    return (0, 'bot irc connection is unavailable')
+        unless $bot && $bot->{irc};
+
+    my $wire_mask = $action->{mask};
+    $wire_mask = encode('UTF-8', $wire_mask) if utf8::is_utf8($wire_mask);
+    my $mode = $action->{type} eq 'ban' ? '+b' : '-b';
+
+    my $sent = eval {
+        $bot->{irc}->send_message('MODE', undef,
+            $action->{target}, $mode, $wire_mask);
+        1;
+    };
+    return (0, 'MODE ' . $mode . ' send failed') unless $sent;
+    return (1, undef);
+}
+
 sub _send_kick_action {
     my ($self, $action) = @_;
 
@@ -628,6 +688,7 @@ sub apply_actions {
     my $allow_topic = $opts{allow_topic} ? 1 : 0;
     # mb554-B1: gate dediee kick, meme modele que topic.
     my $allow_kick  = $opts{allow_kick} ? 1 : 0;
+    my $allow_ban   = $opts{allow_ban} ? 1 : 0;   # mb564-B1
 
     # mb525-B1: application des timers.
     #   schedule_timer = coderef injecte par l'appelant; recoit l'action
@@ -721,6 +782,61 @@ sub apply_actions {
             }
             else {
                 push @apply_errors, { index => $idx, type => 'topic', error => $err };
+            }
+            next;
+        }
+
+        if ($action->{type} eq 'ban' || $action->{type} eq 'unban') {
+            my $btype = $action->{type};
+            unless ($allow_irc) {
+                push @apply_errors, { index => $idx, type => $btype,
+                    error => 'irc actions require allow_irc' };
+                next;
+            }
+            unless ($allow_ban) {
+                push @apply_errors, { index => $idx, type => $btype,
+                    error => 'ban actions require allow_ban' };
+                next;
+            }
+
+            # mb564-B1: fail-closed self-protection, coherente avec kick. Si
+            # le segment nick du mask est LITTERAL (aucun joker), il est
+            # compare au nick courant du bot; identite IRC indisponible =>
+            # refus. Un segment avec jokers ne peut pas etre tranche par
+            # nick: il passe (ALLOW_BAN est un gate explicite et -b repare).
+            my ($mask_nick) = $action->{mask} =~ /\A([^!@]+)!/;
+            if ($btype eq 'ban' && defined $mask_nick && $mask_nick !~ /[*?]/) {
+                my $bot_b = $self->{bot};
+                my $irc_b = $bot_b && $bot_b->{irc} ? $bot_b->{irc} : undef;
+                unless ($irc_b && eval { $irc_b->can('is_nick_me') }) {
+                    push @apply_errors, { index => $idx, type => $btype,
+                        error => "cannot verify bot identity for $btype action" };
+                    next;
+                }
+                my $is_me_b = 0;
+                my $checked_b = eval {
+                    $is_me_b = $irc_b->is_nick_me($mask_nick) ? 1 : 0;
+                    1;
+                };
+                unless ($checked_b) {
+                    push @apply_errors, { index => $idx, type => $btype,
+                        error => "cannot verify bot identity for $btype action" };
+                    next;
+                }
+                if ($is_me_b) {
+                    push @apply_errors, { index => $idx, type => $btype,
+                        error => 'refusing to ban the bot itself' };
+                    next;
+                }
+            }
+
+            my ($ok, $err) = $self->_send_ban_action($action);
+            if ($ok) {
+                push @applied, { index => $idx, type => $btype,
+                    target => $action->{target}, mask => $action->{mask} };
+            }
+            else {
+                push @apply_errors, { index => $idx, type => $btype, error => $err };
             }
             next;
         }
