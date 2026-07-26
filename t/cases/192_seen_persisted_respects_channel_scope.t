@@ -93,8 +93,8 @@ return sub {
 
     $assert->like(
         $body // '',
-        qr/event_type IN \('message', 'join', 'part', 'quit'\)/,
-        'mbSeen_ctx channel fallback can use message/join/part/quit events'
+        qr/event_type IN \('message', 'public', 'action', 'join', 'part', 'quit'\)/,
+        'mbSeen_ctx channel fallback accepts legacy and current message events plus presence'
     );
 
     $assert->like(

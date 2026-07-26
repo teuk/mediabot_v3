@@ -10,7 +10,138 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
-### Fixed — truthful archive dashboard state (mb574)
+### mb579 — derniere garde pre-commit : resultat archive non contamine
+- `channel_log_gather` echoue maintenant proprement si une erreur de fetch
+  survient APRES que des lignes d'archive ont deja ete livrees au callback :
+  ces lignes partielles ne peuvent pas etre retirees generiquement, donc le
+  resultat est marque `tainted`, `live_ok` repasse a 0 et la commande refuse
+  d'afficher un historique incomplet. Une panne archive avant toute ligne
+  reste best-effort et conserve le resultat du vif.
+- `stats` affiche desormais `first seen` meme pour un nick apparu mais encore
+  silencieux (`0 message`) et ne le qualifie plus a tort de « not in
+  database ».
+- Test 768 : fetch archive avant/apres une ligne, contrat fail-closed et
+  garde d'affichage de la premiere apparition silencieuse.
+
+### mb578 — semantique « premiere apparition » et contrat LIVE partout
+- `when` retrouve son sens (revue pre-commit) : mb577 avait sur-applique le
+  filtre public/action et transforme « premiere apparition » en « premier
+  message » — un nick ayant rejoint sans parler etait declare absent et
+  l'archive de presence ignoree. Deux gathers desormais : premiere
+  apparition (tout event_type, scope `all` — un JOIN archive de 2018
+  anterieur au premier message fait foi) + compteur de messages
+  (public/action, scope `content`) ; un nick apparu sans parler affiche
+  « 0 msg(s) ».
+- `stats` : msg_count/last_msg restent des messages ; `first seen` redevient
+  la premiere TRACE du nick (gather separe, scope `all`, sans filtre).
+- Contrat « LIVE KO = echec franc » applique aux 31 gathers : chaque appel
+  est capture et verifie (`profil`, `dashboard`, `chronos`, `compat`,
+  `seen`, `leaderboard`, et les secondaires de `stats`/`top`) — plus de
+  « No history found » ou « no activity » sur une base en panne, plus de
+  rang #1 calcule sur une fusion vide. Deux exemptions DOCUMENTEES qui
+  degradent proprement : la ligne bonus « your rank » de `top` et le
+  suffixe « activity rank » de `wordcount` sont omis sur panne au lieu
+  d'inventer un rang.
+- Helper : panne du VIF = arret IMMEDIAT de la boucle (l'archive,
+  potentiellement une requete historique couteuse, n'est jamais tentee) ;
+  les erreurs de fetch (`$sth->err` apres la boucle) sont detectees et
+  traitees comme des pannes ; zero ligne reste un succes valide.
+- Test 767 (68 assertions) : arret immediat prouve sur fixture (l'archive
+  n'apparait pas dans le journal du dbh), erreur de fetch, fusion when
+  2018-archive vs 2024-vif, structures when/stats, comptage exhaustif
+  gathers vs checks live_ok par sub avec les deux exemptions.
+- Test 766 : mbWhen_ctx retiree de l'obligation globale public/action qui
+  verrouillait la mauvaise semantique.
+
+### mb577 — securisation du gather archive (revue pre-commit)
+- Scope de sources : `channel_log_sources($self, $scope)` ne joint l'archive
+  que si elle peut CONTENIR les donnees — `content` exige
+  `CHANNEL_LOG_ARCHIVE_CONTENT_DAYS > 0`, `presence` exige
+  `PRESENCE_DAYS > 0`, `all` l'une des deux. Conf Undernet (CONTENT=0) :
+  les commandes de contenu ne touchent plus l'archive de presence.
+- Vide != panne : `channel_log_gather` retourne
+  `{ live_ok, sources, executed, ok_sources, rows }` ; zero ligne est un
+  succes valide (`m last NickInconnu` repond fonctionnellement, plus jamais
+  « Database error ») ; un echec du VIF est un echec franc ; un echec de
+  l'archive est logue et le resultat du vif conserve.
+- Casse : toutes les cles de fusion par nick sont normalisees `lc`
+  (SlaY archive + slay vif = une identite, 300+800=1100) ; casse
+  d'affichage memorisee a la premiere rencontre.
+- Semantique : les metriques affichees en « msg » (stats, top, streak,
+  compare, heatmap, when) filtrent explicitement
+  `event_type IN ('public','action')` — la presence ne gonfle plus les
+  compteurs de messages.
+- Predicats indexables : `DATE(cl.ts) = ...` remplace par des plages
+  `ts >= ... AND ts < ...` (top/wordcount/recap periods today/yesterday).
+- `wordcount all` streame les textes dans les compteurs (plus d'accumulation
+  du corpus entier en memoire) ; le mode plafonne reste borne a
+  2 x ROW_LIMIT avant troncature aux plus recents.
+- Test comportemental 766 : matrice de scope (dont conf Undernet), vide,
+  panne vif, panne archive, fusion de casse, filtres event_type, absence de
+  DATE()=, streaming, tous les gather scopes.
+
+### mb576 — compteurs carriere : per-table + fusion Perl (remplace UNION ALL)
+- L'analyse (ChatGPT) etait juste : dans une derivee `(vif UNION ALL archive)`,
+  MariaDB pousse les WHERE dans les branches mais PAS les ORDER BY/LIMIT — un
+  `m last` d'un gros parleur materialisait toutes ses lignes pour en garder
+  une, et meme les COUNT materialisaient avant d'agreger. Le modele correct
+  etait celui de mb570 (onthisday) : une petite requete PAR TABLE, chaque
+  branche sert ses index, la fusion se fait en Perl.
+- Nouveaux helpers `Helpers::channel_log_sources` et
+  `Helpers::channel_log_gather` (token litteral `__CLSRC__`, best-effort par
+  source) ; `channel_log_from` (UNION ALL) supprime.
+- Toute la surface carriere refactoree : stats (x4 apres la separation
+  first_seen de mb578), top (x3 : total, groupes, compteur cible du caller ;
+  le rang reutilise la fusion sans quatrieme requete), streak, leaderboard,
+  wordcount (x2),
+  last, compat (x2), seen (x2), when, compare, heatmap, profil (x3),
+  dashboard (x2), chronos (x4), milestone.
+- Fusions plus JUSTES en prime : un nick a cheval vif/archive compte sa somme
+  dans les rangs et podiums (l'ancien HAVING/LIMIT par branche le sous-
+  estimait) ; les nicks distincts du dashboard passent par un set Perl.
+- Fenetres recentes (mood, recap, sparkline dashboard, taux milestone)
+  inchangees : vif seul.
+- Tests 763/764/765 refondus sur le nouveau contrat (fixture DBH a deux
+  sources, garde « aucun UNION ALL hors commentaires »).
+
+### Fixed — complete live+archive lifetime view (mb576, coverage pass)
+
+- Coverage extension (kept, mechanism replaced by the per-table refactor
+  above): `top` uses one lifetime source for totals, rows and caller rank;
+  `wordcount` ranks against the same population; `compat` reaches
+  archived-only users; `seen` fallback, `when`, `compare`, `heatmap`,
+  `profil`, and the lifetime sections of `dashboard`, `chronos`, `milestone`
+  all see the archive. Explicit recent windows (24h/7d/30d/90d, mood, recap,
+  archive ETA) remain live-only by design.
+- Reclassified the earlier truthful archive-worker dashboard fix as mb573-B2,
+  avoiding two unrelated mb574 labels in the same development batch.
+
+### Added — text readers join the live+archive view (mb575) — mechanism superseded by mb576/mb577
+
+- Sequel to mb574 (counters): three text readers now go through
+  Helpers::channel_log_from — wordcount (career sample, ORDER BY primary
+  key stays globally coherent since PKs are preserved on move), last (the
+  true last message of a long-gone nick lives in the archive) and compat
+  (the 5000-message vocabulary sample extends to the archive for
+  low-activity nicks). mood intentionally stays live-only (recent
+  windows), and the mb574 interpolation guard still holds file-wide.
+
+### Added — career counters see the archive (mb574) — mechanism superseded by mb576/mb577
+
+- Direct sequel to mb570 (which only taught onthisday): the six CAREER
+  counter sites now read live + archive through a single
+  Helpers::channel_log_from fragment — stats (message count, channel total,
+  rank), top (total), streak (distinct days) and the leaderboard msgs
+  section. Without a configured archive the fragment is byte-identical to
+  the historical 'CHANNEL_LOG' (zero regression); with one, live and annex
+  are joined by UNION ALL and MariaDB pushes the predicates into both
+  tables so their indexes keep serving. Recent-window features (mood,
+  recap) intentionally stay on the live table. Interpolation safety: the
+  q{} queries containing REGEXP '$)' sequences are spliced by
+  concatenation, never converted to qq{} — a dedicated guard forbids the
+  dangerous combination file-wide.
+
+### Fixed — truthful archive dashboard state (mb573-B2)
 
 - Partyline `.status` now shows a currently running archive worker before the
   previous run result; after the first completed run, later workers are no

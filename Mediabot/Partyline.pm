@@ -3602,7 +3602,7 @@ sub _cmd_status {
         if (!length $adb) {
             $stream->write("Archive:  disabled\r\n");
         }
-        # mb574-B1: a current worker is more important than the previous result.
+        # mb573-B2: a current worker is more important than the previous result.
         # Once one run had completed, the old ordering hid every later in-flight
         # worker behind "_archive_last_run".
         elsif ($bot_s->{_channel_log_archive_pid}) {

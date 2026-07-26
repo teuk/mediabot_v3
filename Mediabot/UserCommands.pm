@@ -1672,6 +1672,7 @@ sub mbSeen_ctx {
     my ($quit, $part, $chanlog);
 
     unless ($seen_row) {
+        # mb576-B1: pre-USER_SEEN history may already live in the archive.
         my $id_channel = 0;
 
         if (defined $chan_for_part) {
@@ -1681,46 +1682,66 @@ sub mbSeen_ctx {
         }
 
         if (defined($chan_for_part) && $id_channel) {
-            my $sth_chanlog = $self->{dbh}->prepare(
+            # mb576-B1: LIMIT 1 par table, la fusion garde la plus recente
+            # (le dernier passage d'un ancien vit dans l'archive).
+            my $seen_best;
+            my $seen_chan_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh},
                 "SELECT ts, UNIX_TIMESTAMP(ts) AS uts, userhost, publictext, event_type
-                 FROM CHANNEL_LOG
+                 FROM __CLSRC__ cl
                  WHERE id_channel = ?
                    AND nick = ?
-                   AND event_type IN ('message', 'join', 'part', 'quit')
-                 ORDER BY ts DESC LIMIT 1"
-            );
-
-            if ($sth_chanlog && $sth_chanlog->execute($id_channel, $targetNick)) {
-                if (my $r = $sth_chanlog->fetchrow_hashref) {
+                   AND event_type IN ('message', 'public', 'action', 'join', 'part', 'quit')
+                 ORDER BY ts DESC LIMIT 1",
+                [ $id_channel, $targetNick ], sub {
+                    my ($r) = @_;
+                    $seen_best = $r
+                        if !$seen_best
+                        || (($r->{uts} // 0) > ($seen_best->{uts} // 0));
+                }, 'all');
+            # mb578-B1: panne LIVE = echec franc — sans quoi seen pourrait
+            # repondre depuis une archive ancienne seule.
+            unless ($seen_chan_g->{live_ok}) {
+                botNotice($self, $nick, 'Database error.');
+                return;
+            }
+            {
+                if (my $r = $seen_best) {
                     $chanlog = {
                         ts    => $r->{ts},
                         uts   => $r->{uts} // 0,
                         host  => $r->{userhost} // '',
                         text  => $r->{publictext} // '',
-                        event => $r->{event_type} // 'message',
+                        event => (($r->{event_type} // 'message') =~ /\A(?:public|action)\z/
+                            ? 'message' : ($r->{event_type} // 'message')),
                     };
                 }
-                $sth_chanlog->finish;
             }
         }
         else {
-            my $sth_quit = $self->{dbh}->prepare(
+            # mb576-B1: LIMIT 1 par table, fusion = le quit le plus recent.
+            my $quit_best;
+            my $seen_quit_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh},
                 "SELECT ts, UNIX_TIMESTAMP(ts) AS uts, userhost, publictext
-                 FROM CHANNEL_LOG
+                 FROM __CLSRC__ cl
                  WHERE nick = ? AND event_type = 'quit'
-                 ORDER BY ts DESC LIMIT 1"
-            );
-
-            if ($sth_quit && $sth_quit->execute($targetNick)) {
-                if (my $r = $sth_quit->fetchrow_hashref) {
-                    $quit = {
-                        ts   => $r->{ts},
-                        uts  => $r->{uts} // 0,
-                        host => $r->{userhost} // '',
-                        text => $r->{publictext} // '',
-                    };
-                }
-                $sth_quit->finish;
+                 ORDER BY ts DESC LIMIT 1",
+                [ $targetNick ], sub {
+                    my ($r) = @_;
+                    $quit_best = $r
+                        if !$quit_best
+                        || (($r->{uts} // 0) > ($quit_best->{uts} // 0));
+                }, 'presence');
+            unless ($seen_quit_g->{live_ok}) {
+                botNotice($self, $nick, 'Database error.');
+                return;
+            }
+            if (my $r = $quit_best) {
+                $quit = {
+                    ts   => $r->{ts},
+                    uts  => $r->{uts} // 0,
+                    host => $r->{userhost} // '',
+                    text => $r->{publictext} // '',
+                };
             }
         }
     }
@@ -2621,48 +2642,78 @@ sub mbStats_ctx {
     # Message count + last real message on this channel.
     # MB75-S1: exclude the stats command itself from the aggregate, otherwise
     # "m stats" immediately becomes the user's last message and always shows 0h ago.
-    my $sth = $self->{dbh}->prepare(q{
+    # mb576-B1: compteurs carriere -> vif + archive par requetes par table.
+    # mb576-B1: une petite requete PAR TABLE + fusion Perl — jamais de
+    # UNION ALL derive (WHERE pousses mais pas ORDER/LIMIT ; les COUNT
+    # materialisent). Comparaisons de ts au format fixe -> gt/lt suffisent.
+    # mb577-B1: scope content (l'archive n'est jointe que si CONTENT_DAYS>0),
+    # event_type explicite (des « msg » ne comptent pas la presence), et le
+    # succes se lit sur live_ok — zero ligne est un succes valide.
+    # mb578-B1: msg_count et last_msg restent des MESSAGES (public/action,
+    # scope content) ; first_seen redevient la PREMIERE TRACE du nick —
+    # tout event_type, scope 'all' (un JOIN archive anterieur au premier
+    # message fait foi). La revue avait raison : mb577 avait change
+    # « join date » en « date du premier message ».
+    my ($msg_count, $last_msg, $first_seen) = (0, undef, undef);
+    my $stats_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, q{
         SELECT COUNT(*)  AS msg_count,
-               MAX(ts)  AS last_msg,
-               MIN(ts)  AS first_seen
-        FROM CHANNEL_LOG cl
+               MAX(ts)  AS last_msg
+        FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE LOWER(cl.nick) = LOWER(?)
           AND c.name = ?
+          AND cl.event_type IN ('public','action')
           AND NOT (
               LOWER(TRIM(COALESCE(cl.publictext, ''))) REGEXP '^m[[:space:]]+stats([[:space:]]|$)'
               OR LOWER(TRIM(COALESCE(cl.publictext, ''))) REGEXP '^!stats([[:space:]]|$)'
           )
-    });
-    unless ($sth && $sth->execute($target, $channel)) {
+    }, [ $target, $channel ], sub {
+        my ($r) = @_;
+        $msg_count += $r->{msg_count} // 0;
+        $last_msg = $r->{last_msg}
+            if defined $r->{last_msg}
+            && (!defined $last_msg || $r->{last_msg} gt $last_msg);
+    }, 'content');
+    unless ($stats_g->{live_ok}) {
         botNotice($self, $nick, "Database error.");
-        $sth->finish if $sth;
         return;
     }
-    my $msg_row = $sth->fetchrow_hashref;
-    $sth->finish;
-
-    my $msg_count  = $msg_row->{msg_count}  // 0;
-    my $last_msg   = $msg_row->{last_msg}   // 'never';
-    my $first_seen = $msg_row->{first_seen} // undef;
+    my $stats_first_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, q{
+        SELECT MIN(cl.ts) AS first_seen
+        FROM __CLSRC__ cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE LOWER(cl.nick) = LOWER(?)
+          AND c.name = ?
+    }, [ $target, $channel ], sub {
+        $first_seen = $_[0]->{first_seen}
+            if defined $_[0]->{first_seen}
+            && (!defined $first_seen || $_[0]->{first_seen} lt $first_seen);
+    }, 'all');
+    unless ($stats_first_g->{live_ok}) {
+        botNotice($self, $nick, "Database error.");
+        return;
+    }
+    $last_msg //= 'never';
 
     # A1: total messages on channel for percentage (global, no period filter)
     # Keep the denominator aligned with the user aggregate above.
-    my $sth_tot = $self->{dbh}->prepare(q{
+    # mb578-B1: gather indispensable (les pourcentages en dependent) —
+    # panne LIVE = echec franc, jamais un pct calcule sur un total absent.
+    my $total = 0;
+    my $stats_tot_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, q{
         SELECT COUNT(*) AS total
-        FROM CHANNEL_LOG cl
+        FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ?
+          AND cl.event_type IN ('public','action')
           AND NOT (
               LOWER(TRIM(COALESCE(cl.publictext, ''))) REGEXP '^m[[:space:]]+stats([[:space:]]|$)'
               OR LOWER(TRIM(COALESCE(cl.publictext, ''))) REGEXP '^!stats([[:space:]]|$)'
           )
-    });
-    my $total = 0;
-    if ($sth_tot && $sth_tot->execute($channel)) {
-        my $r = $sth_tot->fetchrow_hashref;
-        $total = $r->{total} // 0;
-        $sth_tot->finish;
+    }, [ $channel ], sub { $total += $_[0]->{total} // 0 }, 'content');
+    unless ($stats_tot_g->{live_ok}) {
+        botNotice($self, $nick, "Database error.");
+        return;
     }
     my $pct = ($total > 0 && $msg_count > 0)
         ? sprintf(" (%.1f%%)", 100 * $msg_count / $total) : '';
@@ -2750,7 +2801,9 @@ sub mbStats_ctx {
                 :        int((time()-$epoch)/3600) . 'h';
         return " ($str ago)";
     };
-    $out .= " | first seen: $first_seen" . $_ago->($first_seen) if $first_seen && $msg_count > 0;
+    # mb579-B1: un nick deja apparu mais encore silencieux a bien une
+    # premiere apparition. Le compteur a zero ne doit plus masquer la date.
+    $out .= " | first seen: $first_seen" . $_ago->($first_seen) if $first_seen;
     $out .= " | last msg: $last_msg" . $_ago->($last_msg)       if $msg_count > 0;
 
     # MB75-S1: when a user asks for their own stats, USER_SEEN may already
@@ -2761,19 +2814,31 @@ sub mbStats_ctx {
         if $show_seen && $seen_at ne 'never';
 
     $out .= $karma_str if $karma_str;
-    $out .= " | not in database" unless $id_user || $msg_count;
+    $out .= " | not in database" unless $id_user || $msg_count || $first_seen;
 
     # CC17: add global rank on channel
     if ($msg_count > 0 && $total > 0) {
-        my $sth_cc17 = $self->{dbh}->prepare(
-            "SELECT COUNT(DISTINCT sub.nick)+1 AS rank FROM"
-          . " (SELECT cl2.nick, COUNT(*) AS cnt"
-          .  " FROM CHANNEL_LOG cl2 JOIN CHANNEL c2 ON c2.id_channel=cl2.id_channel"
-          .  " WHERE c2.name=? GROUP BY cl2.nick HAVING cnt>?) sub");
-        if ($sth_cc17 && $sth_cc17->execute($channel, $msg_count)) {
-            my $r17 = $sth_cc17->fetchrow_hashref; $sth_cc17->finish;
-            $out .= " | rank: #" . ($r17->{rank} // '?');
+        # mb576-B1: les comptes par nick des deux tables sont fusionnes
+        # AVANT le seuil — un nick a cheval vif/archive compte sa somme.
+        # Chaque requete par table est un index scan groupe, sans HAVING.
+        my %rank_counts;
+        my $stats_rank_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh},
+            "SELECT cl2.nick AS nick, COUNT(*) AS cnt"
+          . " FROM __CLSRC__ cl2 JOIN CHANNEL c2 ON c2.id_channel=cl2.id_channel"
+          . " WHERE c2.name=? AND cl2.event_type IN ('public','action')"
+          . " GROUP BY cl2.nick",
+            # mb577-B1: cle lc — la collation SQL est insensible a la casse,
+            # les tables peuvent rendre SlaY et slay pour la meme identite.
+            [ $channel ], sub { $rank_counts{ lc $_[0]->{nick} } += $_[0]->{cnt} // 0 },
+            'content');
+        # mb578-B1: sans live_ok, un rang calcule sur une fusion vide
+        # afficherait #1 — panne LIVE = echec franc.
+        unless ($stats_rank_g->{live_ok}) {
+            botNotice($self, $nick, "Database error.");
+            return;
         }
+        my $rank = 1 + scalar grep { $rank_counts{$_} > $msg_count } keys %rank_counts;
+        $out .= " | rank: #" . $rank;
     }
     # mb480: show unlocked achievement count on this channel, if any.
     if ($self->{achievements}) {
@@ -2843,10 +2908,10 @@ sub mbTop_ctx {
     if (@args) {
         my $p = lc($args[0]);
         if ($p eq 'today') {
-            $period_sql   = "AND DATE(cl.ts) = CURDATE()";
+            $period_sql   = "AND cl.ts >= CURDATE() AND cl.ts < CURDATE() + INTERVAL 1 DAY";  # mb577-B1: plage indexable
             $period_label = " (today)";
         } elsif ($p eq 'yesterday') {
-            $period_sql   = "AND DATE(cl.ts) = CURDATE() - INTERVAL 1 DAY";
+            $period_sql   = "AND cl.ts >= CURDATE() - INTERVAL 1 DAY AND cl.ts < CURDATE()";  # mb577-B1: plage indexable
             $period_label = " (yesterday)";
         } elsif ($p eq 'week') {
             $period_sql   = "AND cl.ts >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)";
@@ -2862,37 +2927,48 @@ sub mbTop_ctx {
     my @bind_base = ($channel, @bot_list);
 
     # A2: fetch total for percentage
-    my $sth_tot = $self->{dbh}->prepare(
-        "SELECT COUNT(*) AS total"
-        . " FROM CHANNEL_LOG cl"
-        . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
-        . " WHERE c.name = ? $bots_filter $period_sql"
-    );
+    # mb574-B1: carriere -> vif + archive.
+    # mb576-B1: une requete par table, somme Perl.
+    # mb578-B1: indispensable (les % de chaque ligne en dependent).
     my $total = 0;
-    if ($sth_tot && $sth_tot->execute(@bind_base)) {
-        my $r = $sth_tot->fetchrow_hashref;
-        $total = $r->{total} // 0;
-        $sth_tot->finish;
-    }
-
-    my $sth = $self->{dbh}->prepare(
-        "SELECT cl.nick, COUNT(*) AS msg_count"
-        . " FROM CHANNEL_LOG cl"
+    my $top_tot_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh},
+        "SELECT COUNT(*) AS total"
+        . " FROM __CLSRC__ cl"
         . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
-        . " WHERE c.name = ? $bots_filter $period_sql"
-        . " GROUP BY cl.nick ORDER BY msg_count DESC LIMIT ?"
-    );
-    unless ($sth && $sth->execute(@bind_base, $n)) {
+        . " WHERE c.name = ? AND cl.event_type IN ('public','action')"
+        . " $bots_filter $period_sql",
+        [ @bind_base ], sub { $total += $_[0]->{total} // 0 }, 'content');
+    unless ($top_tot_g->{live_ok}) {
         botNotice($self, $nick, "Database error.");
-        $sth->finish if $sth;
         return;
     }
 
-    my @rows;
-    while (my $row = $sth->fetchrow_hashref) {
-        push @rows, $row;
+    # mb576-B1: GROUP BY complet par table + fusion par nick + tri/LIMIT
+    # Perl (un LIMIT par branche fausserait le classement d'un nick a
+    # cheval vif/archive).
+    # mb577-B1: event_type explicite, cle lc (casse d'affichage memorisee a
+    # la premiere rencontre, vif d'abord), scope content, succes via live_ok.
+    my (%top_counts, %top_display);
+    my $top_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh},
+        "SELECT cl.nick AS nick, COUNT(*) AS msg_count"
+        . " FROM __CLSRC__ cl"
+        . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
+        . " WHERE c.name = ? AND cl.event_type IN ('public','action')"
+        . " $bots_filter $period_sql"
+        . " GROUP BY cl.nick",
+        [ @bind_base ], sub {
+            my $k = lc $_[0]->{nick};
+            $top_display{$k} //= $_[0]->{nick};
+            $top_counts{$k} += $_[0]->{msg_count} // 0;
+        }, 'content');
+    unless ($top_g->{live_ok}) {
+        botNotice($self, $nick, "Database error.");
+        return;
     }
-    $sth->finish;
+    my @top_nicks = sort { $top_counts{$b} <=> $top_counts{$a} || $a cmp $b }
+        keys %top_counts;
+    splice(@top_nicks, $n) if @top_nicks > $n;
+    my @rows = map { { nick => $top_display{$_}, msg_count => $top_counts{$_} } } @top_nicks;
 
     unless (@rows) {
         botPrivmsg($self, $channel, "No data for $channel yet.");
@@ -2911,26 +2987,32 @@ sub mbTop_ctx {
             $rank++, $row->{nick}, $msgs, ($msgs != 1 ? "s" : ""), $pct));
     }
 
-    # V10: show caller's rank if not in top-N
+    # V10 / mb576-B1: caller rank uses the exact same live+archive source.
     my $chan_ok = defined $channel && $channel =~ /^#/;
     if ($total > 0 && $chan_ok && $bots_mode != 1) {
-        my $sth_r = $self->{dbh}->prepare(
-            "SELECT COUNT(*)+1 AS rank, SUM(CASE WHEN cl.nick=? THEN 1 ELSE 0 END) AS mine"
-          . " FROM (SELECT nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl2"
-          .        " JOIN CHANNEL c2 ON c2.id_channel=cl2.id_channel"
-          .        " WHERE c2.name=? $bots_filter $period_sql GROUP BY nick) AS sub"
-          . " WHERE sub.cnt > (SELECT COUNT(*) FROM CHANNEL_LOG cl3"
-          .                   " JOIN CHANNEL c3 ON c3.id_channel=cl3.id_channel"
-          .                   " WHERE c3.name=? $bots_filter $period_sql AND cl3.nick=?)"
-        );
-        if ($sth_r && $sth_r->execute(lc($nick), $channel, @bot_list, $channel, @bot_list, lc($nick))) {
-            my $r = $sth_r->fetchrow_hashref; $sth_r->finish;
-            my $my_rank = $r->{rank} // 0;
-            my $mine    = $r->{mine} // 0;
-            if ($my_rank > $n && $mine > 0) {
-                my $pct_me = $total > 0 ? sprintf('%.1f%%', 100*$mine/$total) : '0%';
-                botPrivmsg($self, $channel,
-                    "  (your rank: #$my_rank — $mine msg(s), $pct_me)");
+        # mb578-B1: gather OPTIONNEL documente — la ligne bonus « your
+        # rank » est simplement omise si ce comptage echoue ($mine reste 0,
+        # le classement principal deja affiche n'est pas invalide). Teste.
+        my $mine = 0;
+        my $top_mine_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh},
+            "SELECT COUNT(*) AS mine FROM __CLSRC__ cl"
+          . " JOIN CHANNEL c ON c.id_channel=cl.id_channel"
+          . " WHERE c.name=? AND cl.event_type IN ('public','action')"
+          . " $bots_filter $period_sql AND LOWER(cl.nick)=LOWER(?)",
+            [ $channel, @bot_list, lc($nick) ],
+            sub { $mine += $_[0]->{mine} // 0 }, 'content');
+        $mine = 0 unless $top_mine_g->{live_ok};
+        if ($mine > 0) {
+            # mb576-B1: la fusion complete par nick est deja en memoire
+            # (%top_counts porte le meme filtre) — zero requete de plus.
+            {
+                my $my_rank = 1 + scalar grep { $top_counts{$_} > $mine }
+                    keys %top_counts;
+                if ($my_rank > $n) {
+                    my $pct_me = $total > 0 ? sprintf('%.1f%%', 100*$mine/$total) : '0%';
+                    botPrivmsg($self, $channel,
+                        "  (your rank: #$my_rank — $mine msg(s), $pct_me)");
+                }
             }
         }
     }
@@ -3866,10 +3948,10 @@ sub mbWordCount_ctx {
     if (defined($period_arg) && $period_arg ne '') {
         my $p = $period_arg;
         if ($p eq 'today') {
-            $period_sql   = "AND DATE(cl.ts) = CURDATE()";
+            $period_sql   = "AND cl.ts >= CURDATE() AND cl.ts < CURDATE() + INTERVAL 1 DAY";  # mb577-B1: plage indexable
             $period_label = " (today)";
         } elsif ($p eq 'yesterday') {
-            $period_sql   = "AND DATE(cl.ts) = CURDATE() - INTERVAL 1 DAY";
+            $period_sql   = "AND cl.ts >= CURDATE() - INTERVAL 1 DAY AND cl.ts < CURDATE()";  # mb577-B1: plage indexable
             $period_label = " (yesterday)";
         } elsif ($p eq 'week') {
             $period_sql   = "AND cl.ts >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)";
@@ -3889,22 +3971,20 @@ sub mbWordCount_ctx {
     # mb92-B1: LIMIT 50000 par défaut — mb102-IMP2: désactivé si option 'all'
     my $ROW_LIMIT = 50_000;
     my $limit_clause = $no_limit ? '' : "LIMIT $ROW_LIMIT";
-    my $sth = $self->{dbh}->prepare(qq{
-        SELECT publictext FROM CHANNEL_LOG cl
-        JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE cl.nick = ? AND c.name = ? AND event_type IN ('public','action')
-        $period_sql
-        ORDER BY cl.id_channel_log DESC
-        $limit_clause
-    });
-    unless ($sth && $sth->execute($target, $channel)) {
-        botNotice($self, $nick, 'Database error.');
-        $sth->finish if $sth;
-        return;
-    }
+    # mb575-B1: carriere -> vif + archive (les PK sont preservees au
+    # deplacement, l'ORDER BY id_channel_log reste globalement coherent).
+    # mb576-B1: LIMIT par table (index scans), le comptage de mots agrege
+    # les deux flux — l'ordre entre tables est indifferent pour un total,
+    # et le plafond global est applique dans la boucle de lecture.
+    # mb577-B1: en mode all, les textes sont STREAMES dans les compteurs
+    # (jamais accumules — un canal Undernet en compterait des millions) ;
+    # en mode plafonne, l'accumulation reste bornee a 2 x ROW_LIMIT avant
+    # le splice qui garde les plus recents. Succes via live_ok.
     my %words;
     my $rows_read = 0;
-    while (my ($text) = $sth->fetchrow_array) {
+    my @wc_texts;
+    my $wc_count_text = sub {
+        my ($text) = @_;
         $rows_read++;
         # mb426-B1: la connexion DBI ne décode pas l'UTF-8 (pas de mariadb_utf8,
         # seulement SET NAMES) -> publictext arrive en OCTETS UTF-8. Un split
@@ -3914,8 +3994,26 @@ sub mbWordCount_ctx {
         # séquences UTF-8 multi-octets) comptent comme des lettres, donc les
         # mots accentués restent entiers.
         $words{lc $_}++ for split /[^0-9A-Za-z_\x80-\xFF]+/, ($text // '');
+    };
+    my $wc_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, qq{
+        SELECT publictext FROM __CLSRC__ cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE cl.nick = ? AND c.name = ? AND event_type IN ('public','action')
+        $period_sql
+        ORDER BY cl.id_channel_log DESC
+        $limit_clause
+    }, [ $target, $channel ], $no_limit
+        ? sub { $wc_count_text->($_[0]->{publictext}) }
+        : sub { push @wc_texts, $_[0]->{publictext} },
+    'content');
+    unless ($wc_g->{live_ok}) {
+        botNotice($self, $nick, 'Database error.');
+        return;
     }
-    $sth->finish;
+    unless ($no_limit) {
+        splice(@wc_texts, $ROW_LIMIT) if @wc_texts > $ROW_LIMIT;
+        $wc_count_text->($_) for @wc_texts;
+    }
     delete $words{''};
 
     # V9/MB75-R4: show top 5 most frequent useful words.
@@ -3938,22 +4036,27 @@ sub mbWordCount_ctx {
     # a much heavier full-channel tokenization pass.
     my $rank_str = '';
     unless (defined($period_arg) && $period_arg ne '') {
-        my $sth_rank = $self->{dbh}->prepare(qq{
-            SELECT COUNT(*) + 1 AS rank_pos FROM (
-                SELECT cl2.nick
-                FROM CHANNEL_LOG cl2
-                JOIN CHANNEL c2 ON c2.id_channel = cl2.id_channel
-                WHERE c2.name = ?
-                  AND cl2.nick != ?
-                  AND cl2.event_type IN ('public','action')
-                GROUP BY cl2.nick
-                HAVING COUNT(*) > ?
-            ) sub_q
-        });
-        if ($sth_rank && $sth_rank->execute($channel, $target, $rows_read)) {
-            my $r = $sth_rank->fetchrow_hashref;
-            $rank_str = "  | activity rank: #$r->{rank_pos}" if $r && defined $r->{rank_pos};
-            $sth_rank->finish;
+        # mb576-B1: comptes par nick fusionnes AVANT le seuil (meme patron
+        # que le rank de stats) — un nick a cheval compte sa somme.
+        my %wc_rank_counts;
+        my $wc_rank_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, q{
+            SELECT cl2.nick AS nick, COUNT(*) AS cnt
+            FROM __CLSRC__ cl2
+            JOIN CHANNEL c2 ON c2.id_channel = cl2.id_channel
+            WHERE c2.name = ?
+              AND cl2.nick != ?
+              AND cl2.event_type IN ('public','action')
+            GROUP BY cl2.nick
+        }, [ $channel, $target ], sub {
+            $wc_rank_counts{ lc $_[0]->{nick} } += $_[0]->{cnt} // 0;
+        }, 'content');
+        # mb578-B1: suffixe OPTIONNEL documente — sans live_ok, pas de
+        # « activity rank » (un rang sur l'archive seule serait faux) ;
+        # le comptage principal deja calcule reste affiche. Teste.
+        if ($wc_rank_g->{live_ok} && %wc_rank_counts) {
+            my $rank_pos = 1 + scalar grep { $wc_rank_counts{$_} > $rows_read }
+                keys %wc_rank_counts;
+            $rank_str = "  | activity rank: #" . $rank_pos;
         }
     }
 
@@ -4076,22 +4179,29 @@ sub mbStreak_ctx {
     }
     my $target = $args[0] ? lc($args[0]) : lc($nick);
 
-    my $sth = $self->{dbh}->prepare(q{
+    # mb574-B1: le streak est une carriere -> vif + archive.
+    # mb576-B1: LIMIT par table (chaque branche sert son index), puis
+    # dedup + tri + tronque en Perl — jamais d'ORDER/LIMIT sur une derivee.
+    # mb577-B1: event_type explicite (le streak mesure des jours de PAROLE,
+    # pas des join/quit), scope content, succes via live_ok (vide = valide).
+    my %seen_days;
+    my $streak_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, q{
         SELECT DISTINCT DATE(ts) AS day
-        FROM CHANNEL_LOG cl
+        FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE cl.nick = ? AND c.name = ?
+          AND cl.event_type IN ('public','action')
         ORDER BY day DESC
         LIMIT 365
-    });
-    unless ($sth && $sth->execute($target, $channel)) {
+    }, [ $target, $channel ], sub {
+        $seen_days{ $_[0]->{day} } = 1 if defined $_[0]->{day};
+    }, 'content');
+    unless ($streak_g->{live_ok}) {
         botNotice($self, $nick, 'Database error.');
-        $sth->finish if $sth;
         return;
     }
-    my @days;
-    while (my ($day) = $sth->fetchrow_array) { push @days, $day; }
-    $sth->finish;
+    my @days = sort { $b cmp $a } keys %seen_days;
+    splice(@days, 365) if @days > 365;
 
     unless (@days) {
         botPrivmsg($self, $channel, "$target: no activity found on $channel.");
@@ -4628,22 +4738,29 @@ sub mbLast_ctx {
         $limit = 5 if $limit > 5;
     }
 
-    my $sth = $self->{dbh}->prepare(qq{
+    # mb575-B1: le vrai « last » d'un nick parti depuis longtemps vit dans
+    # l'archive — union vif + annexe.
+    # mb576-B1: le cas d'ecole de l'analyse — ORDER/LIMIT ne se poussent
+    # pas dans une derivee UNION : chaque table repond ses $limit dernieres
+    # lignes via SON index, la fusion triee garde les plus recentes.
+    # mb577-B1: succes via live_ok — un nick inconnu (zero ligne) recoit la
+    # reponse fonctionnelle, plus jamais « Database error ».
+    my @rows;
+    my $last_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, qq{
         SELECT cl.publictext, cl.ts,
                TIMESTAMPDIFF(MINUTE, cl.ts, NOW()) AS minutes_ago
-        FROM CHANNEL_LOG cl
+        FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE cl.nick = ? AND c.name = ?
           AND cl.event_type IN ('public','action') AND cl.publictext != ''
         ORDER BY cl.ts DESC
         LIMIT $limit
-    });
-    unless ($sth && $sth->execute($target, $channel)) {
-        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
+    }, [ $target, $channel ], sub { push @rows, $_[0] }, 'content');
+    unless ($last_g->{live_ok}) {
+        botNotice($self, $nick, 'Database error.'); return;
     }
-    my @rows;
-    while (my $row = $sth->fetchrow_hashref) { push @rows, $row; }
-    $sth->finish;
+    @rows = sort { ($b->{ts} // '') cmp ($a->{ts} // '') } @rows;
+    splice(@rows, $limit) if @rows > $limit;
 
     unless (@rows) {
         botPrivmsg($self, $channel, "$target: no message found on $channel.");
@@ -5977,11 +6094,11 @@ sub mbActive_ctx {
         my $p = lc($args[0]);
         if ($p eq 'today') {
             # mb90-IMP2: activité du jour courant (depuis minuit)
-            $date_filter     = "DATE(cl.ts) = CURDATE()";
+            $date_filter     = "cl.ts >= CURDATE() AND cl.ts < CURDATE() + INTERVAL 1 DAY";  # mb577-B1: plage indexable
             $use_date_filter = 1;
             $label           = 'today';
         } elsif ($p eq 'yesterday') {
-            $date_filter     = "DATE(cl.ts) = CURDATE() - INTERVAL 1 DAY";
+            $date_filter     = "cl.ts >= CURDATE() - INTERVAL 1 DAY AND cl.ts < CURDATE()";  # mb577-B1: plage indexable
             $use_date_filter = 1;
             $label           = 'yesterday';
         } elsif ($p eq 'week') {
@@ -6069,15 +6186,40 @@ sub mbWhen_ctx {
     my $target = lc($args[0]);
 
     # HH10: also count total messages for richer output
-    my $sth = $self->{dbh}->prepare(q{
-        SELECT MIN(cl.ts) AS first_seen, COUNT(*) AS total_msgs FROM CHANNEL_LOG cl
+    # mb576-B1: first appearance and total span live + archive.
+    # mb576-B1: MIN/COUNT par table, fusion Perl (min lexical, somme).
+    # mb578-B1: « when » = PREMIERE APPARITION (revue pre-commit) — la
+    # sur-application mb577 du filtre public/action l'avait transformee en
+    # « premier message » : un nick ayant rejoint sans parler etait declare
+    # absent, et l'archive de presence (qui contient precisement les vieux
+    # JOIN) n'etait plus consultee. Deux gathers aux scopes distincts :
+    #   1) premiere apparition : TOUT event_type, scope 'all' ;
+    #   2) compteur de messages : public/action, scope 'content'.
+    my $row = { first_seen => undef, total_msgs => 0 };
+    my $when_first_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, q{
+        SELECT MIN(cl.ts) AS first_seen FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE cl.nick = ? AND c.name = ?
-    });
-    unless ($sth && $sth->execute($target, $channel)) {
-        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
+    }, [ $target, $channel ], sub {
+        my ($r) = @_;
+        $row->{first_seen} = $r->{first_seen}
+            if defined $r->{first_seen}
+            && (!defined $row->{first_seen} || $r->{first_seen} lt $row->{first_seen});
+    }, 'all');
+    unless ($when_first_g->{live_ok}) {
+        botNotice($self, $nick, 'Database error.'); return;
     }
-    my $row = $sth->fetchrow_hashref; $sth->finish;
+    my $when_msgs_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, q{
+        SELECT COUNT(*) AS total_msgs FROM __CLSRC__ cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE cl.nick = ? AND c.name = ?
+          AND cl.event_type IN ('public','action')
+    }, [ $target, $channel ], sub {
+        $row->{total_msgs} += $_[0]->{total_msgs} // 0;
+    }, 'content');
+    unless ($when_msgs_g->{live_ok}) {
+        botNotice($self, $nick, 'Database error.'); return;
+    }
 
     if ($row && $row->{first_seen}) {
         # V3: show age alongside raw date
@@ -6097,7 +6239,9 @@ sub mbWhen_ctx {
             }
         }
         my $tot_msgs = $row->{total_msgs} // 0;
-        my $msgs_str = $tot_msgs > 0 ? ", $tot_msgs msg(s)" : "";
+        # mb578-B1: un nick apparu sans jamais parler affiche « 0 msg(s) »
+        # au lieu de masquer l'information.
+        my $msgs_str = ", $tot_msgs msg(s)";
         botPrivmsg($self, $channel,
             "$target first seen on $channel: $row->{first_seen}$age_str$msgs_str");
     } else {
@@ -6292,7 +6436,6 @@ sub mbCompare_ctx {
         return;
     }
     my ($t1, $t2) = (lc($args[0]), lc($args[1]));
-
     # mb86-IMP2: période optionnelle — 7d, 4w, 3m, 1y, all (défaut: all)
     my ($period_sql, $period_label) = ('', 'all time');
     if (@args >= 3) {
@@ -6318,20 +6461,24 @@ sub mbCompare_ctx {
         }
     }
 
-    my $sth = $self->{dbh}->prepare(qq{
-        SELECT cl.nick, COUNT(*) AS cnt
-        FROM CHANNEL_LOG cl
+    # mb576-B1: une requete par table, comptes additionnes en Perl.
+    # mb577-B1: event_type explicite, cle lc (t1/t2 sont deja lc — la
+    # collation SQL peut rendre une autre casse), scope content, live_ok.
+    my %counts;
+    my $cmp_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, qq{
+        SELECT cl.nick AS nick, COUNT(*) AS cnt
+        FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.nick IN (?,?)
+          AND cl.event_type IN ('public','action')
         $period_sql
         GROUP BY cl.nick
-    });
-    unless ($sth && $sth->execute($channel, $t1, $t2)) {
-        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
+    }, [ $channel, $t1, $t2 ], sub {
+        $counts{ lc $_[0]->{nick} } += $_[0]->{cnt} // 0;
+    }, 'content');
+    unless ($cmp_g->{live_ok}) {
+        botNotice($self, $nick, 'Database error.'); return;
     }
-    my %counts;
-    while (my $r = $sth->fetchrow_hashref) { $counts{$r->{nick}} = $r->{cnt}; }
-    $sth->finish;
     my $c1 = $counts{$t1} // 0;
     my $c2 = $counts{$t2} // 0;
     my $diff = abs($c1 - $c2);
@@ -6356,19 +6503,23 @@ sub mbHeatmap_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     my $target  = @args ? lc($args[0]) : lc($nick);
-    my $sth = $self->{dbh}->prepare(
+    # mb576-B1: GROUP BY horaire par table, buckets additionnes en Perl.
+    # mb577-B1: event_type explicite (activite = paroles), scope content,
+    # succes via live_ok (heatmap vide = reponse fonctionnelle).
+    my @hours = (0) x 24;
+    my $hm_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh},
         'SELECT HOUR(cl.ts) AS h, COUNT(*) AS cnt'
-        . ' FROM CHANNEL_LOG cl'
+        . ' FROM __CLSRC__ cl'
         . ' JOIN CHANNEL c ON c.id_channel = cl.id_channel'
         . ' WHERE cl.nick = ? AND c.name = ?'
-        . ' GROUP BY HOUR(cl.ts) ORDER BY h'
-    );
-    unless ($sth && $sth->execute($target, $channel)) {
-        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
+        . " AND cl.event_type IN ('public','action')"
+        . ' GROUP BY HOUR(cl.ts) ORDER BY h',
+        [ $target, $channel ], sub {
+            $hours[ $_[0]->{h} ] += $_[0]->{cnt} // 0;
+        }, 'content');
+    unless ($hm_g->{live_ok}) {
+        botNotice($self, $nick, 'Database error.'); return;
     }
-    my @hours = (0) x 24;
-    while (my $r = $sth->fetchrow_hashref) { $hours[$r->{h}] = $r->{cnt}; }
-    $sth->finish;
     my $max = (sort { $b <=> $a } @hours)[0] || 1;
     # 6-hour blocks
     my @blocks = ('00-05', '06-11', '12-17', '18-23');
@@ -8826,22 +8977,36 @@ sub mbProfil_ctx {
     my %stats;
 
     # 1. Compte total + premier message + dernier message
-    my $sth = $dbh->prepare(q{
+    # mb576-B1: agregats par table fusionnes en Perl (somme/min/max) ;
+    # days_seen est rapporte PAR TABLE et le max (= depuis le first_ts le
+    # plus ancien) est conserve.
+    $stats{msgs} = 0; $stats{first_ts} = ''; $stats{last_ts} = ''; $stats{days_seen} = 0;
+    my $pr_agg_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
         SELECT COUNT(*) AS msgs,
                MIN(cl.ts) AS first_ts,
                MAX(cl.ts) AS last_ts,
                TIMESTAMPDIFF(DAY, MIN(cl.ts), NOW()) AS days_seen
-        FROM CHANNEL_LOG cl
+        FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.nick = ?
           AND cl.event_type IN ('public','action')
-    });
-    if ($sth && $sth->execute($channel, $target)) {
-        my $r = $sth->fetchrow_hashref; $sth->finish;
-        $stats{msgs}      = $r->{msgs}      // 0;
-        $stats{first_ts}  = $r->{first_ts}  // '';
-        $stats{last_ts}   = $r->{last_ts}   // '';
-        $stats{days_seen} = $r->{days_seen} // 0;
+    }, [ $channel, $target ], sub {
+        my ($r) = @_;
+        $stats{msgs} += $r->{msgs} // 0;
+        $stats{first_ts} = $r->{first_ts}
+            if defined $r->{first_ts}
+            && ($stats{first_ts} eq '' || $r->{first_ts} lt $stats{first_ts});
+        $stats{last_ts} = $r->{last_ts}
+            if defined $r->{last_ts}
+            && ($stats{last_ts} eq '' || $r->{last_ts} gt $stats{last_ts});
+        $stats{days_seen} = $r->{days_seen}
+            if ($r->{days_seen} // 0) > $stats{days_seen};
+    }, 'content');
+    # mb578-B1: panne LIVE = echec franc — sans quoi profil declarerait
+    # « no activity recorded » sur une base en panne.
+    unless ($pr_agg_g->{live_ok}) {
+        botNotice($self, $nick, 'Database error.');
+        return;
     }
 
     if (($stats{msgs} // 0) == 0) {
@@ -8862,36 +9027,41 @@ sub mbProfil_ctx {
     }
 
     # 3. Rank activité (proxy: nb de nicks plus actifs)
-    my $sth_r = $dbh->prepare(q{
-        SELECT COUNT(*) + 1 AS rank_pos FROM (
-            SELECT cl2.nick
-            FROM CHANNEL_LOG cl2
+    # mb576-B1: comptes par nick fusionnes AVANT le seuil.
+    {
+        my %pr_counts;
+        my $pr_rank_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+            SELECT cl2.nick AS nick, COUNT(*) AS cnt
+            FROM __CLSRC__ cl2
             JOIN CHANNEL c2 ON c2.id_channel = cl2.id_channel
             WHERE c2.name = ?
               AND cl2.nick != ?
               AND cl2.event_type IN ('public','action')
             GROUP BY cl2.nick
-            HAVING COUNT(*) > ?
-        ) sub_q
-    });
-    if ($sth_r && $sth_r->execute($channel, $target, $stats{msgs})) {
-        my $r = $sth_r->fetchrow_hashref; $sth_r->finish;
-        $stats{rank} = $r ? ($r->{rank_pos} // 0) : 0;
+        }, [ $channel, $target ], sub {
+            $pr_counts{ lc $_[0]->{nick} } += $_[0]->{cnt} // 0;
+        }, 'content');
+        unless ($pr_rank_g->{live_ok}) {
+            botNotice($self, $nick, 'Database error.');
+            return;
+        }
+        $stats{rank} = 1 + scalar grep { $pr_counts{$_} > $stats{msgs} }
+            keys %pr_counts;
     }
 
     # 4. Heure de pointe + bloc le plus actif
-    my $sth_h = $dbh->prepare(q{
+    my @hours = (0) x 24;
+    my $pr_hours_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
         SELECT HOUR(cl.ts) AS h, COUNT(*) AS c
-        FROM CHANNEL_LOG cl
+        FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.nick = ?
           AND cl.event_type IN ('public','action')
         GROUP BY HOUR(cl.ts)
-    });
-    my @hours = (0) x 24;
-    if ($sth_h && $sth_h->execute($channel, $target)) {
-        while (my $r = $sth_h->fetchrow_hashref) { $hours[$r->{h}] = $r->{c}; }
-        $sth_h->finish;
+    }, [ $channel, $target ], sub { $hours[ $_[0]->{h} ] += $_[0]->{c} // 0 }, 'content');
+    unless ($pr_hours_g->{live_ok}) {
+        botNotice($self, $nick, 'Database error.');
+        return;
     }
     my $peak_h = 0; my $peak_c = 0;
     for my $h (0..23) { if ($hours[$h] > $peak_c) { $peak_c = $hours[$h]; $peak_h = $h; } }
@@ -9236,21 +9406,45 @@ sub mbDashboard_ctx {
     }
 
     my $dbh = $self->{dbh};
-
     # 1. Vue globale — total msgs, distinct nicks, période
-    my $sth = $dbh->prepare(q{
+    # mb576-B1: agregats par table fusionnes en Perl. Les nicks distincts
+    # passent par un set (sommer des COUNT(DISTINCT) par table compterait
+    # double un nick present en vif ET en archive).
+    my %g = (total => 0, nicks => 0, since => undef, days => 0);
+    my $dash_agg_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
         SELECT COUNT(*) AS total,
-               COUNT(DISTINCT cl.nick) AS nicks,
                MIN(cl.ts) AS since,
                TIMESTAMPDIFF(DAY, MIN(cl.ts), NOW()) AS days
-        FROM CHANNEL_LOG cl
+        FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.event_type IN ('public','action')
-    });
-    my %g;
-    if ($sth && $sth->execute($channel)) {
-        my $r = $sth->fetchrow_hashref; $sth->finish;
-        %g = %$r if $r;
+    }, [ $channel ], sub {
+        my ($r) = @_;
+        $g{total} += $r->{total} // 0;
+        $g{since} = $r->{since}
+            if defined $r->{since}
+            && (!defined $g{since} || $r->{since} lt $g{since});
+        $g{days} = $r->{days} if ($r->{days} // 0) > $g{days};
+    }, 'content');
+    # mb578-B1: panne LIVE = echec franc — sans quoi dashboard repondrait
+    # « No public activity recorded ».
+    unless ($dash_agg_g->{live_ok}) {
+        botNotice($self, $nick, 'Database error.');
+        return;
+    }
+    {
+        my %dash_nicks;
+        my $dash_n_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+            SELECT DISTINCT cl.nick AS nick
+            FROM __CLSRC__ cl
+            JOIN CHANNEL c ON c.id_channel = cl.id_channel
+            WHERE c.name = ? AND cl.event_type IN ('public','action')
+        }, [ $channel ], sub { $dash_nicks{ lc $_[0]->{nick} } = 1 }, 'content');
+        unless ($dash_n_g->{live_ok}) {
+            botNotice($self, $nick, 'Database error.');
+            return;
+        }
+        $g{nicks} = scalar keys %dash_nicks;
     }
     my $total = $g{total} // 0;
     if ($total == 0) {
@@ -9262,21 +9456,29 @@ sub mbDashboard_ctx {
     my $msgs_per_day = sprintf('%.0f', $total / $days);
 
     # 2. Top 5 contributeurs
-    my $sth_t = $dbh->prepare(q{
-        SELECT cl.nick, COUNT(*) AS c
-        FROM CHANNEL_LOG cl
-        JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.event_type IN ('public','action')
-        GROUP BY cl.nick
-        ORDER BY c DESC
-        LIMIT 5
-    });
+    # mb576-B1: GROUP BY complet par table + fusion + top 5 Perl.
     my @top5;
-    if ($sth_t && $sth_t->execute($channel)) {
-        while (my $r = $sth_t->fetchrow_hashref) {
-            push @top5, sprintf('%s:%s', $r->{nick}, _fmt_n($r->{c}));
+    {
+        my (%t5_counts, %t5_display);
+        my $dash_t5_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+            SELECT cl.nick AS nick, COUNT(*) AS c
+            FROM __CLSRC__ cl
+            JOIN CHANNEL c ON c.id_channel = cl.id_channel
+            WHERE c.name = ? AND cl.event_type IN ('public','action')
+            GROUP BY cl.nick
+        }, [ $channel ], sub {
+            my $k = lc $_[0]->{nick};
+            $t5_display{$k} //= $_[0]->{nick};
+            $t5_counts{$k} += $_[0]->{c} // 0;
+        }, 'content');
+        unless ($dash_t5_g->{live_ok}) {
+            botNotice($self, $nick, 'Database error.');
+            return;
         }
-        $sth_t->finish;
+        my @t5 = sort { $t5_counts{$b} <=> $t5_counts{$a} || $a cmp $b }
+            keys %t5_counts;
+        splice(@t5, 5) if @t5 > 5;
+        @top5 = map { sprintf('%s:%s', $t5_display{$_}, _fmt_n($t5_counts{$_})) } @t5;
     }
 
     # 3. Activité par jour (sparkline 7 jours, jour le plus actif)
@@ -10087,26 +10289,30 @@ sub mbCompat_ctx {
     }
 
     my $dbh = $self->{dbh};
-
     # === Dimension 1 : Recouvrement horaire (24 buckets) ====================
-    my $sth_h = $dbh->prepare(q{
-        SELECT cl.nick, HOUR(cl.ts) AS h, COUNT(*) AS c
-        FROM CHANNEL_LOG cl
+    # mb576-B1: GROUP BY par table, les buckets s'additionnent en Perl.
+    my %hours = ($n1 => [(0)x24], $n2 => [(0)x24]);
+    my %total_msgs = ($n1 => 0, $n2 => 0);
+    my $compat_h_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+        SELECT cl.nick AS nick, HOUR(cl.ts) AS h, COUNT(*) AS c
+        FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.nick IN (?, ?)
           AND cl.event_type IN ('public','action')
         GROUP BY cl.nick, HOUR(cl.ts)
-    });
-    my %hours = ($n1 => [(0)x24], $n2 => [(0)x24]);
-    my %total_msgs = ($n1 => 0, $n2 => 0);
-    if ($sth_h && $sth_h->execute($channel, $n1, $n2)) {
-        while (my $r = $sth_h->fetchrow_hashref) {
-            my $who = lc($r->{nick});
-            next unless exists $hours{$who};
-            $hours{$who}[$r->{h}] = $r->{c};
-            $total_msgs{$who} += $r->{c};
-        }
-        $sth_h->finish;
+    }, [ $channel, $n1, $n2 ], sub {
+        my $r = $_[0];
+        my $who = lc($r->{nick});
+        return unless exists $hours{$who};
+        # += : les buckets des deux tables s'additionnent (fusion mb576).
+        $hours{$who}[$r->{h}] += $r->{c};
+        $total_msgs{$who} += $r->{c};
+    }, 'content');
+    # mb578-B1: panne LIVE = echec franc — sans quoi compat pretendrait
+    # qu'un nick n'a aucune activite.
+    unless ($compat_h_g->{live_ok}) {
+        botNotice($self, $nick, 'Database error.');
+        return;
     }
 
     if ($total_msgs{$n1} == 0 || $total_msgs{$n2} == 0) {
@@ -10127,29 +10333,36 @@ sub mbCompat_ctx {
     # Fenêtre : derniers 50k msgs par nick pour rester rapide
     my %words;
     for my $who ($n1, $n2) {
-        my $sth_w = $dbh->prepare(q{
-            SELECT cl.publictext
-            FROM CHANNEL_LOG cl
+        # mb576-B1: LIMIT par table puis fusion triee — l'echantillon reste
+        # « les 5000 plus recents » tous volumes confondus.
+        my @w_rows;
+        my $compat_w_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+            SELECT cl.publictext, cl.ts
+            FROM __CLSRC__ cl
             JOIN CHANNEL c ON c.id_channel = cl.id_channel
             WHERE c.name = ? AND cl.nick = ?
               AND cl.event_type IN ('public','action')
             ORDER BY cl.ts DESC
             LIMIT 5000
-        });
+        }, [ $channel, $who ], sub { push @w_rows, $_[0] }, 'content');
+        # mb578-B1: le score jaccard serait faux sur un vocabulaire ampute.
+        unless ($compat_w_g->{live_ok}) {
+            botNotice($self, $nick, 'Database error.');
+            return;
+        }
+        @w_rows = sort { ($b->{ts} // '') cmp ($a->{ts} // '') } @w_rows;
+        splice(@w_rows, 5000) if @w_rows > 5000;
         my %w_counts;
-        if ($sth_w && $sth_w->execute($channel, $who)) {
-            while (my $r = $sth_w->fetchrow_arrayref) {
-                my $txt = lc($r->[0] // '');
-                # mb427-B1: tokenisation byte-safe (comme mb426). publictext est
-                # en OCTETS UTF-8 (DBI ne décode pas) ; l'ancien
-                # s/[^\w\s\x{00C0}-\x{017F}]/ /g gardait même un octet parasite
-                # (café -> "caf\xC3"). Les octets >= 0x80 comptent comme lettres.
-                for my $w (split /[^0-9A-Za-z_\x80-\xFF]+/, $txt) {
-                    next unless length($w) >= 4;
-                    $w_counts{$w}++;
-                }
+        for my $wr (@w_rows) {
+            my $txt = lc($wr->{publictext} // '');
+            # mb427-B1: tokenisation byte-safe (comme mb426). publictext est
+            # en OCTETS UTF-8 (DBI ne décode pas) ; l'ancien
+            # s/[^\w\s\x{00C0}-\x{017F}]/ /g gardait même un octet parasite
+            # (café -> "caf\xC3"). Les octets >= 0x80 comptent comme lettres.
+            for my $w (split /[^0-9A-Za-z_\x80-\xFF]+/, $txt) {
+                next unless length($w) >= 4;
+                $w_counts{$w}++;
             }
-            $sth_w->finish;
         }
         # Garder top 100 mots
         my @top = (sort { $w_counts{$b} <=> $w_counts{$a} } keys %w_counts)[0..99];
@@ -10836,24 +11049,35 @@ sub mbLeaderboard_ctx {
     my $kl_period_sql = $period_label ? " AND kl.ts >= NOW() - INTERVAL $period_num $period_unit_sql" : '';
 
     # --- Top 3 messages -----------------------------------------------------
+    # mb574-B1: la section msgs est une carriere (sauf periode explicite)
+    # -> vif + archive.
     my @msgs_top;
     if (!$only || $only eq 'msgs') {
-        my $sth = $dbh->prepare(qq{
-            SELECT cl.nick, COUNT(*) AS msg_count
-            FROM CHANNEL_LOG cl
+        # mb576-B1: GROUP BY complet par table puis fusion par nick — un
+        # LIMIT 3 par branche fausserait le podium (un 4e des deux cotes
+        # peut etre 1er global). Chaque requete est un index scan groupe.
+        my (%lb_counts, %lb_display);
+        my $lb_g = Mediabot::Helpers::channel_log_gather($self, $dbh, qq{
+            SELECT cl.nick AS nick, COUNT(*) AS msg_count
+            FROM __CLSRC__ cl
             JOIN CHANNEL c ON c.id_channel = cl.id_channel
             WHERE c.name = ? AND cl.event_type IN ('public','action')
               $cl_period_sql
             GROUP BY cl.nick
-            ORDER BY msg_count DESC
-            LIMIT 3
-        });
-        if ($sth && $sth->execute($channel)) {
-            while (my $r = $sth->fetchrow_hashref) {
-                push @msgs_top, [$r->{nick}, $r->{msg_count}];
-            }
-            $sth->finish;
+        }, [ $channel ], sub {
+            my $k = lc $_[0]->{nick};
+            $lb_display{$k} //= $_[0]->{nick};
+            $lb_counts{$k} += $_[0]->{msg_count} // 0;
+        }, 'content');
+        # mb578-B1: panne LIVE = echec franc — plus jamais un podium msgs
+        # silencieusement omis pendant que les autres sections s'affichent.
+        unless ($lb_g->{live_ok}) {
+            botNotice($self, $nick, 'Database error.');
+            return;
         }
+        my @sorted = sort { $lb_counts{$b} <=> $lb_counts{$a} || $a cmp $b } keys %lb_counts;
+        splice(@sorted, 3) if @sorted > 3;
+        @msgs_top = map { [ $lb_display{$_}, $lb_counts{$_} ] } @sorted;
     }
 
     # --- Top 3 karma --------------------------------------------------------
@@ -11020,67 +11244,96 @@ sub mbChronos_ctx {
     }
 
     my $dbh = $self->{dbh};
-
     # 1. Premier message du canal (avec auteur)
-    my $sth1 = $dbh->prepare(q{
+    # mb576-B1: LIMIT 1 par table, la fusion garde le plus ANCIEN (il vit
+    # generalement dans l'archive).
+    my $first;
+    my $ch_first_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
         SELECT cl.nick, cl.ts, cl.publictext
-        FROM CHANNEL_LOG cl
+        FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.event_type IN ('public','action')
         ORDER BY cl.ts ASC
         LIMIT 1
-    });
-    my $first;
-    if ($sth1 && $sth1->execute($channel)) {
-        $first = $sth1->fetchrow_hashref; $sth1->finish;
+    }, [ $channel ], sub {
+        my ($r) = @_;
+        $first = $r
+            if !$first
+            || (defined $r->{ts} && $r->{ts} lt ($first->{ts} // ''));
+    }, 'content');
+    # mb578-B1: panne LIVE = echec franc, AVANT le test « No history
+    # found » — une base en panne n'est pas un canal sans histoire.
+    unless ($ch_first_g->{live_ok}) {
+        botNotice($self, $nick, 'Database error.');
+        return;
     }
     unless ($first) {
         botPrivmsg($self, $channel, "\x{1F4DC} No history found on $channel.");
         return 1;
     }
 
-    # 2. Dernier message
-    my $sth2 = $dbh->prepare(q{
+    # 2. Dernier message — LIMIT 1 par table, fusion = le plus recent.
+    my $last;
+    my $ch_last_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
         SELECT cl.nick, cl.ts
-        FROM CHANNEL_LOG cl
+        FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.event_type IN ('public','action')
         ORDER BY cl.ts DESC
         LIMIT 1
-    });
-    my $last;
-    if ($sth2 && $sth2->execute($channel)) {
-        $last = $sth2->fetchrow_hashref; $sth2->finish;
+    }, [ $channel ], sub {
+        my ($r) = @_;
+        $last = $r
+            if !$last
+            || (defined $r->{ts} && $r->{ts} gt ($last->{ts} // ''));
+    }, 'content');
+    unless ($ch_last_g->{live_ok}) {
+        botNotice($self, $nick, 'Database error.');
+        return;
     }
 
-    # 3. Jour record
-    my $sth3 = $dbh->prepare(q{
-        SELECT DATE(cl.ts) AS d, COUNT(*) AS c
-        FROM CHANNEL_LOG cl
-        JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.event_type IN ('public','action')
-        GROUP BY DATE(cl.ts)
-        ORDER BY c DESC
-        LIMIT 1
-    });
+    # 3. Jour record — GROUP BY complet par table, fusion += (le jour de
+    # bascule vif/archive doit sommer ses deux moities), max Perl.
     my $best_day;
-    if ($sth3 && $sth3->execute($channel)) {
-        $best_day = $sth3->fetchrow_hashref; $sth3->finish;
+    {
+        my %day_counts;
+        my $ch_day_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+            SELECT DATE(cl.ts) AS d, COUNT(*) AS c
+            FROM __CLSRC__ cl
+            JOIN CHANNEL c ON c.id_channel = cl.id_channel
+            WHERE c.name = ? AND cl.event_type IN ('public','action')
+            GROUP BY DATE(cl.ts)
+        }, [ $channel ], sub { $day_counts{ $_[0]->{d} } += $_[0]->{c} // 0 }, 'content');
+        unless ($ch_day_g->{live_ok}) {
+            botNotice($self, $nick, 'Database error.');
+            return;
+        }
+        for my $d (sort keys %day_counts) {
+            $best_day = { d => $d, c => $day_counts{$d} }
+                if !$best_day || $day_counts{$d} > $best_day->{c};
+        }
     }
 
-    # 4. Heure record
-    my $sth4 = $dbh->prepare(q{
-        SELECT DATE_FORMAT(cl.ts, '%Y-%m-%d %H:00') AS h, COUNT(*) AS c
-        FROM CHANNEL_LOG cl
-        JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.event_type IN ('public','action')
-        GROUP BY DATE_FORMAT(cl.ts, '%Y-%m-%d %H:00')
-        ORDER BY c DESC
-        LIMIT 1
-    });
+    # 4. Heure record — meme patron (le token __CLSRC__ coexiste sans
+    # danger avec les % de DATE_FORMAT, contrairement a un sprintf).
     my $best_hour;
-    if ($sth4 && $sth4->execute($channel)) {
-        $best_hour = $sth4->fetchrow_hashref; $sth4->finish;
+    {
+        my %hour_counts;
+        my $ch_hour_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+            SELECT DATE_FORMAT(cl.ts, '%Y-%m-%d %H:00') AS h, COUNT(*) AS c
+            FROM __CLSRC__ cl
+            JOIN CHANNEL c ON c.id_channel = cl.id_channel
+            WHERE c.name = ? AND cl.event_type IN ('public','action')
+            GROUP BY DATE_FORMAT(cl.ts, '%Y-%m-%d %H:00')
+        }, [ $channel ], sub { $hour_counts{ $_[0]->{h} } += $_[0]->{c} // 0 }, 'content');
+        unless ($ch_hour_g->{live_ok}) {
+            botNotice($self, $nick, 'Database error.');
+            return;
+        }
+        for my $h (sort keys %hour_counts) {
+            $best_hour = { h => $h, c => $hour_counts{$h} }
+                if !$best_hour || $hour_counts{$h} > $best_hour->{c};
+        }
     }
 
     # 5. Karma all-time leader
@@ -12311,20 +12564,29 @@ sub mbMilestone_ctx {
     }
 
     # total public messages + how long the channel has been logging
-    my $sth = $dbh->prepare(q{
+    # mb576-B1: COUNT/MIN par table, fusion Perl (somme, minimum).
+    my $row;
+    my $ms_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
         SELECT COUNT(*) AS total,
                MIN(ts)  AS first_ts,
                UNIX_TIMESTAMP(MIN(ts)) AS first_uts
-        FROM CHANNEL_LOG
+        FROM __CLSRC__ cl
         WHERE id_channel = ?
           AND event_type IN ('public','action')
-    });
-    unless ($sth && $sth->execute($id_channel)) {
+    }, [ $id_channel ], sub {
+        my ($r) = @_;
+        $row //= { total => 0, first_ts => undef, first_uts => undef };
+        $row->{total} += $r->{total} // 0;
+        if (defined $r->{first_uts}
+            && (!defined $row->{first_uts} || $r->{first_uts} < $row->{first_uts})) {
+            $row->{first_uts} = $r->{first_uts};
+            $row->{first_ts}  = $r->{first_ts};
+        }
+    }, 'content');
+    unless ($ms_g->{live_ok}) {
         botNotice($self, $nick, "milestone: lookup failed.");
         return;
     }
-    my $row = $sth->fetchrow_hashref;
-    $sth->finish;
 
     my $total = $row ? ($row->{total} // 0) : 0;
     if ($total <= 0) {
