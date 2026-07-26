@@ -3570,6 +3570,55 @@ sub _cmd_status {
         my $hits = scalar @{ $gaf->{hits} // [] };
         $stream->write("GlobalAF: ok ($hits msgs in window)\r\n");
     }
+    # mb573-B1: operator observability — the three queues/background jobs an
+    # operator actually wonders about. Everything below reads IN-MEMORY state
+    # only (same non-blocking discipline as the DB/Loop lines above: .status
+    # must never query anything).
+    {
+        my $outq = $bot_s->{_flood_outq} // {};
+        my @busy = sort grep { scalar @{ $outq->{$_}{items} // [] } } keys %$outq;
+        if (@busy) {
+            my $total = 0; $total += scalar @{ $outq->{$_}{items} } for @busy;
+            my $detail = join(', ', map {
+                sprintf('%s:%d%s', $_, scalar @{ $outq->{$_}{items} },
+                    $outq->{$_}{armed} ? '' : ' UNARMED')
+            } @busy);
+            $stream->write("FloodQ:   $total deferred ($detail)\r\n");
+        }
+        else {
+            $stream->write("FloodQ:   empty\r\n");
+        }
+
+        my $ach = $bot_s->{achievements};
+        if ($ach && eval { $ach->can('pending_check_count') }) {
+            my $pending = eval { $ach->pending_check_count } // 0;
+            $stream->write($pending
+                ? "AchvQ:    $pending pending check(s)\r\n"
+                : "AchvQ:    empty\r\n");
+        }
+
+        my $adb = eval { $bot_s->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_DBNAME') } // '';
+        $adb = '' if ref $adb;
+        if (!length $adb) {
+            $stream->write("Archive:  disabled\r\n");
+        }
+        # mb574-B1: a current worker is more important than the previous result.
+        # Once one run had completed, the old ordering hid every later in-flight
+        # worker behind "_archive_last_run".
+        elsif ($bot_s->{_channel_log_archive_pid}) {
+            $stream->write(
+                "Archive:  worker running (pid $bot_s->{_channel_log_archive_pid})\r\n");
+        }
+        elsif (my $last = $bot_s->{_archive_last_run}) {
+            $stream->write(sprintf("Archive:  last run %s exit=%d in %.2fs%s\r\n",
+                scalar localtime($last->{at} // 0), $last->{exit} // -1,
+                $last->{elapsed} // 0,
+                ($last->{signal} ? " signal=$last->{signal}" : '')));
+        }
+        else {
+            $stream->write("Archive:  enabled, no run yet\r\n");
+        }
+    }
 
     for my $s (@$sessions) {
         my $lvl_display = $s->{level_desc} || $s->{level} // '?';

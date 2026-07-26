@@ -9755,6 +9755,15 @@ sub mbHoroscope_ctx {
     my $next = sub { $rng = (($rng * 1103515245) + 12345) & 0x7FFFFFFF; return $rng; };
     my $pick = sub { my ($aref) = @_; return $aref->[ $next->() % scalar(@$aref) ]; };
 
+    # mb572-B1: la langue du canal choisit les pools (Helpers::channel_lang,
+    # mb563) — 'fr' garde les textes historiques, tout le reste (en, es tant
+    # qu'aucun pool ES n'existe) recoit la version anglaise. CHAQUE pool EN a
+    # EXACTEMENT la meme taille que son jumeau FR : un meme tirage LCG tombe
+    # sur la meme "carte" dans les deux langues, et le contrat mb444 (ordre
+    # des tirages, LCG local) est strictement inchange.
+    my $horo_lang = Mediabot::Helpers::channel_lang($self, $channel);
+    my $horo_fr = ($horo_lang eq 'fr') ? 1 : 0;
+
     # mb561-B1: pools entierement generiques — aucune personne, aucun projet,
     # aucun evenement interne. Teinte legerement IRC/tech assumee (c'est un
     # bot), mais rien de nominatif.
@@ -9845,6 +9854,102 @@ sub mbHoroscope_ctx {
     my @autres_signes = ('Bélier', 'Taureau', 'Gémeaux', 'Cancer', 'Lion', 'Vierge',
                          'Balance', 'Scorpion', 'Sagittaire', 'Capricorne', 'Verseau', 'Poissons');
 
+
+    # mb572-B1: jumeaux anglais (tailles identiques aux pools FR).
+    my @moods_en = (
+        "radiant \x{1F31E}", "mysterious \x{1F315}", "mischievous \x{1F608}",
+        "philosophical \x{1F914}", "conquering \x{2694}\x{FE0F}", "dreamy \x{2601}\x{FE0F}",
+        "untamable \x{1F981}", "fluid \x{1F30A}", "electric \x{26A1}",
+        "hushed \x{1F43E}", "serene \x{1F9D8}", "magnetic \x{1F9F2}",
+    );
+    my %elans_en = (
+        feu   => [ "your energy opens doors before you knock",
+                   "today's spark is yours, don't lend it out",
+                   "what resists today will yield to enthusiasm" ],
+        terre => [ "your steadiness beats three flashy moves",
+                   "build small but build true, the rest will follow",
+                   "one measured step will carry you further than a sprint" ],
+        air   => [ "a light conversation will carry a serious idea",
+                   "your curiosity is the right tool, let it open the tabs",
+                   "the right words will come at the exact moment" ],
+        eau   => [ "your intuition reads between the lines, trust it",
+                   "today's tide brings back something you thought lost",
+                   "listen twice, answer once: guaranteed magic" ],
+    );
+    my @social_en = (
+        "A quiet gesture will do you more good than a long speech",
+        "Someone is thinking of you without saying it",
+        "A casual exchange will hide a real bond",
+        "You will be read more carefully than you think",
+        "An old contact will resurface at the right time",
+        "Your good mood will be contagious, dose it with mischief",
+        "A well-placed silence will be worth a brilliant reply",
+    );
+    my @projets_en = (
+        "a postponed task will turn out shorter than expected",
+        "the answer will come while explaining the problem out loud",
+        "an overlooked detail deserves a second read",
+        "what you tidy today will save you tomorrow",
+        "an idea scribbled in haste holds the essential",
+        "finish before improving: order matters",
+        "the simple version is the right one",
+    );
+    my @events_en = (
+        "A shared coffee will become memorable.",
+        "Someone will misquote you: smile, don't correct.",
+        "Yesterday's question will answer itself.",
+        "A notification ignored this morning will return tonight.",
+        "A tune will follow you all day long.",
+        "A coincidence will raise one of your eyebrows.",
+        "A lost object will reappear in the obvious place.",
+        "A forgotten window still holds a precious answer.",
+        "A message typed too fast will teach you patience.",
+        "A promise made lightly will gently catch up with you.",
+    );
+    my @recos_en = (
+        "don't refuse the coffee you're offered",
+        "read the manual of a tool you think you master",
+        "answer a message you had let slip",
+        "tidy one single thing, but tidy it truly",
+        "write the idea down before it evaporates",
+        "make a backup, you know why",
+        "take the stairs, the stars see clearer there",
+        "give a compliment for no reason",
+        "turn off a screen one hour before sleep",
+        "taste something new, even in thought",
+    );
+    my @attentions_en = (
+        "a promise made too fast",
+        "a detail growing in the shadows",
+        "a certainty that deserves a check",
+        "a shortcut that will cost more than it saves",
+        "a reply sent in irritation",
+        "a tiny oversight with big consequences",
+        "a rumor faster than the facts",
+        "one 'it can wait' too many",
+    );
+    my @colours_en = qw(turquoise crimson indigo gold purple slate emerald sapphire copper ivory);
+    my %sign_en = (
+        'Bélier' => 'Aries', 'Taureau' => 'Taurus', 'Gémeaux' => 'Gemini',
+        'Cancer' => 'Cancer', 'Lion' => 'Leo', 'Vierge' => 'Virgo',
+        'Balance' => 'Libra', 'Scorpion' => 'Scorpio', 'Sagittaire' => 'Sagittarius',
+        'Capricorne' => 'Capricorn', 'Verseau' => 'Aquarius', 'Poissons' => 'Pisces',
+    );
+    my %element_en = (feu => 'fire', terre => 'earth', air => 'air', eau => 'water');
+
+    # Selection par langue (les tailles jumelles garantissent la parite LCG).
+    unless ($horo_fr) {
+        @humeurs         = @moods_en;
+        %elans           = %elans_en;
+        @climats_social  = @social_en;
+        @climats_projets = @projets_en;
+        @evenements      = @events_en;
+        @recommandations = @recos_en;
+        @attentions      = @attentions_en;
+        @couleurs        = @colours_en;
+        @autres_signes   = map { $sign_en{$_} } @autres_signes;
+    }
+
     # Tirages (LCG local, mb444-B1) — ordre FIXE pour la stabilité du jour
     my $humeur    = $pick->(\@humeurs);
     my $social    = $pick->(\@climats_social);
@@ -9858,32 +9963,69 @@ sub mbHoroscope_ctx {
     my $chance    = 35 + ($next->() % 60);  # 35..94, biais positif léger
 
     # Affichage — meme gabarit avec ou sans signe (mb561-B1)
+    # mb572-B1: le nom/element du signe se traduit A L'AFFICHAGE seulement —
+    # _horoscope_zodiac_sign reste canonique FR (test 752 intact), la cle
+    # d'element des elans reste FR des deux cotes.
+    my ($disp_sign, $disp_element) = ($sign_name, $sign_element);
+    if (defined $sign_name && !$horo_fr) {
+        $disp_sign    = $sign_en{$sign_name}       // $sign_name;
+        $disp_element = $element_en{$sign_element} // $sign_element;
+    }
+
     if (defined $sign_name) {
         my $elan = $pick->($elans{$sign_element});
-        my @complices = grep { $_ ne $sign_name } @autres_signes;
+        my @complices = grep { $_ ne $disp_sign } @autres_signes;
         my $complice = $pick->(\@complices);
-        botPrivmsg($self, $reply_to,
-            "$glyph \x02Horoscope du $date_key\x02 \x{2014} $target, $sign_glyph \x02$sign_name\x02 ($sign_element) \x{B7} humeur $humeur");
-        botPrivmsg($self, $reply_to,
-            "  \x{1F52E} $elan.");
-        botPrivmsg($self, $reply_to,
-            "  Climat : $social. Côté projets : $projets. $event");
-        botPrivmsg($self, $reply_to,
-            sprintf("  Conseil : %s. Méfiance : %s.", $reco, $attention));
-        botPrivmsg($self, $reply_to,
-            sprintf("  \x{1F3B2} Chiffre %d \x{B7} \x{1F3A8} couleur %s \x{B7} \x{1F340} chance %d%% \x{B7} \x{1F4AB} signe complice : %s",
-                $chiffre, $couleur, $chance, $complice));
+        if ($horo_fr) {
+            botPrivmsg($self, $reply_to,
+                "$glyph \x02Horoscope du $date_key\x02 \x{2014} $target, $sign_glyph \x02$disp_sign\x02 ($disp_element) \x{B7} humeur $humeur");
+            botPrivmsg($self, $reply_to,
+                "  \x{1F52E} $elan.");
+            botPrivmsg($self, $reply_to,
+                "  Climat : $social. Côté projets : $projets. $event");
+            botPrivmsg($self, $reply_to,
+                sprintf("  Conseil : %s. Méfiance : %s.", $reco, $attention));
+            botPrivmsg($self, $reply_to,
+                sprintf("  \x{1F3B2} Chiffre %d \x{B7} \x{1F3A8} couleur %s \x{B7} \x{1F340} chance %d%% \x{B7} \x{1F4AB} signe complice : %s",
+                    $chiffre, $couleur, $chance, $complice));
+        }
+        else {
+            botPrivmsg($self, $reply_to,
+                "$glyph \x02Horoscope for $date_key\x02 \x{2014} $target, $sign_glyph \x02$disp_sign\x02 ($disp_element) \x{B7} mood: $humeur");
+            botPrivmsg($self, $reply_to,
+                "  \x{1F52E} $elan.");
+            botPrivmsg($self, $reply_to,
+                "  Vibe: $social. On the work front: $projets. $event");
+            botPrivmsg($self, $reply_to,
+                sprintf("  Advice: %s. Beware of: %s.", $reco, $attention));
+            botPrivmsg($self, $reply_to,
+                sprintf("  \x{1F3B2} Number %d \x{B7} \x{1F3A8} colour %s \x{B7} \x{1F340} luck %d%% \x{B7} \x{1F4AB} kindred sign: %s",
+                    $chiffre, $couleur, $chance, $complice));
+        }
     }
     else {
-        botPrivmsg($self, $reply_to,
-            "$glyph \x02Horoscope du $date_key pour $target\x02 \x{2014} humeur $humeur");
-        botPrivmsg($self, $reply_to,
-            "  Climat : $social. Côté projets : $projets. $event");
-        botPrivmsg($self, $reply_to,
-            sprintf("  Conseil : %s. Méfiance : %s.", $reco, $attention));
-        botPrivmsg($self, $reply_to,
-            sprintf("  \x{1F3B2} Chiffre %d \x{B7} \x{1F3A8} couleur %s \x{B7} \x{1F340} chance %d%%",
-                $chiffre, $couleur, $chance));
+        if ($horo_fr) {
+            botPrivmsg($self, $reply_to,
+                "$glyph \x02Horoscope du $date_key pour $target\x02 \x{2014} humeur $humeur");
+            botPrivmsg($self, $reply_to,
+                "  Climat : $social. Côté projets : $projets. $event");
+            botPrivmsg($self, $reply_to,
+                sprintf("  Conseil : %s. Méfiance : %s.", $reco, $attention));
+            botPrivmsg($self, $reply_to,
+                sprintf("  \x{1F3B2} Chiffre %d \x{B7} \x{1F3A8} couleur %s \x{B7} \x{1F340} chance %d%%",
+                    $chiffre, $couleur, $chance));
+        }
+        else {
+            botPrivmsg($self, $reply_to,
+                "$glyph \x02Horoscope for $date_key \x{2014} $target\x02 \x{2014} mood: $humeur");
+            botPrivmsg($self, $reply_to,
+                "  Vibe: $social. On the work front: $projets. $event");
+            botPrivmsg($self, $reply_to,
+                sprintf("  Advice: %s. Beware of: %s.", $reco, $attention));
+            botPrivmsg($self, $reply_to,
+                sprintf("  \x{1F3B2} Number %d \x{B7} \x{1F3A8} colour %s \x{B7} \x{1F340} luck %d%%",
+                    $chiffre, $couleur, $chance));
+        }
     }
 
     # Compteur consultations + hook achievement

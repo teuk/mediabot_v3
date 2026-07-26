@@ -4,7 +4,7 @@
 #
 # A. archive_channel_log() — archivage quotidien vers la base jumelle :
 #   [1] desactive proprement sans ARCHIVE_DBNAME (retour 0, aucune requete) ;
-#       nom de base invalide -> refus loggue ;
+#       les erreurs dures retournent undef pour que le worker sorte non-zero ;
 #   [2] flux atomique-par-lot : CREATE IF NOT EXISTS (schema LIKE), SELECT
 #       des ids eligibles (predicat « ts < NOW()-N DAY » = rattrapage offline
 #       par construction), INSERT IGNORE, VERIFICATION count == lot AVANT le
@@ -120,9 +120,18 @@ return sub {
         my $logger = L759->new;
         my $bad = _bot_759(dbh => DBH759->new, logger => $logger,
             conf => Conf759->new('mysql.CHANNEL_LOG_ARCHIVE_DBNAME' => 'bad-name!'));
-        $assert->ok($bad->archive_channel_log == 0
+        $assert->ok(!defined($bad->archive_channel_log)
             && scalar($logger->grep_msg(qr/invalid ARCHIVE_DBNAME/)) == 1,
-            'nom de base invalide: refus loggue');
+            'nom de base invalide: echec dur loggue');
+
+        my $create_dbh = DBH759->new(
+            fail_do => { 'CREATE TABLE IF NOT EXISTS' => 'permission denied' });
+        my $create_log = L759->new;
+        my $create_bad = _bot_759(dbh => $create_dbh, logger => $create_log,
+            conf => Conf759->new('mysql.CHANNEL_LOG_ARCHIVE_DBNAME' => 'mediabot2'));
+        $assert->ok(!defined($create_bad->archive_channel_log)
+            && scalar($create_log->grep_msg(qr/cannot ensure/)) == 1,
+            'CREATE archive refuse: echec dur, jamais faux succes');
     }
 
     # ------------------------------------------------------------------
@@ -154,9 +163,23 @@ return sub {
             conf => Conf759->new('mysql.CHANNEL_LOG_ARCHIVE_DBNAME' => 'mediabot2'));
         my $moved2 = $bot2->archive_channel_log;
         my @del2 = grep { $_->[0] =~ /DELETE FROM CHANNEL_LOG/ } @{ $dbh2->{done} };
-        $assert->ok($moved2 == 0 && !@del2
+        $assert->ok(!defined($moved2) && !@del2
             && scalar($log2->grep_msg(qr/batch aborted .*nothing lost/)) == 1,
-            'verify en echec: lot abandonne, AUCUN DELETE, retentera');
+            'verify en echec: echec dur, AUCUN DELETE, retentera');
+
+        # DELETE refuse apres copie+verification : la ligne reste dans le vif
+        # et le worker doit annoncer un echec, pas exit=0.
+        my $dbh3 = DBH759->new(
+            ids_batches => [ [ 20, 21 ] ],
+            fail_do => { 'DELETE FROM CHANNEL_LOG' => 'delete denied' },
+        );
+        my $log3 = L759->new;
+        my $bot3 = _bot_759(dbh => $dbh3, logger => $log3,
+            conf => Conf759->new('mysql.CHANNEL_LOG_ARCHIVE_DBNAME' => 'mediabot2'));
+        my $moved3 = $bot3->archive_channel_log;
+        $assert->ok(!defined($moved3)
+            && scalar($log3->grep_msg(qr/delete failed|batch aborted/)) >= 1,
+            'DELETE refuse: echec dur, jamais comptabilise comme succes');
     }
 
     # ------------------------------------------------------------------
@@ -179,9 +202,20 @@ return sub {
             'mysql.CHANNEL_LOG_ARCHIVE_DBNAME' => 'mediabot2',
             'mysql.CHANNEL_LOG_ARCHIVE_EVENTS' => 'INVALID!, ALSO BAD',
         ));
-        $assert->ok($none->archive_channel_log == 0
+        $assert->ok(!defined($none->archive_channel_log)
             && scalar($log3->grep_msg(qr/no valid event/)) == 1,
-            'events tous invalides: refus loggue');
+            'events de presence tous invalides: echec dur loggue');
+
+        my $log4 = L759->new;
+        my $bad_content = _bot_759(dbh => DBH759->new, logger => $log4,
+            conf => Conf759->new(
+                'mysql.CHANNEL_LOG_ARCHIVE_DBNAME' => 'mediabot2',
+                'mysql.CHANNEL_LOG_ARCHIVE_CONTENT_DAYS' => 730,
+                'mysql.CHANNEL_LOG_ARCHIVE_CONTENT_EVENTS' => 'BAD!, ALSO-BAD',
+            ));
+        $assert->ok(!defined($bad_content->archive_channel_log)
+            && scalar($log4->grep_msg(qr/CONTENT_DAYS .* no valid event/)) == 1,
+            'contenu active sans event valide: echec dur loggue');
     }
 
     # ------------------------------------------------------------------

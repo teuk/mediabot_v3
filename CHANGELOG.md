@@ -10,6 +10,40 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Fixed — truthful archive dashboard state (mb574)
+
+- Partyline `.status` now shows a currently running archive worker before the
+  previous run result; after the first completed run, later workers are no
+  longer hidden behind stale history.
+- The archive worker now distinguishes a successful zero-row pass from a hard
+  SQL/configuration failure. Invalid event policies, missing handles, failed
+  table creation, SELECT preparation/execution, INSERT, verification or DELETE
+  produce a non-zero worker exit instead of a misleading `exit=0`.
+
+### Added — .status operator dashboard lines (mb573)
+
+- Partyline .status now reports the three queues/background jobs an
+  operator actually wonders about, from in-memory state only (same
+  non-blocking discipline as the DB/Loop lines — .status never queries
+  anything): FloodQ (deferred messages per +AntiFlood channel, with an
+  UNARMED flag if a drain timer is missing), AchvQ (pending deferred
+  achievement checks), and Archive (disabled / enabled-no-run / worker
+  running with pid / last run with exit code, duration and signal). The
+  mb571 reap callback now memorizes its last run for this display.
+
+### Added — bilingual horoscope via channel language (mb572)
+
+- The horoscope now speaks the channel's language (Helpers::channel_lang,
+  mb563): +LangFR channels keep the historical French reading; every other
+  channel (and PMs following a non-fr main.LANG) get a full English version
+  — moods, element openers, social/work climates, events, advice, warnings,
+  colours, sign names (Aries..Pisces) and elements, translated at display
+  time only. Every English pool has exactly the same size as its French
+  twin, so one LCG draw lands on the same "card" in both languages, and
+  the mb444 deterministic-draw contract is untouched (zodiac boundaries
+  remain covered by their own canonical test). Second consumer of
+  channel_lang after 8ball.
+
 ### Fixed — archive pre-commit safety hardening (mb571)
 
 <!-- mb571-B1: pre-commit archive hardening -->

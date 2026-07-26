@@ -3728,7 +3728,12 @@ sub start_channel_log_archive_async {
         $worker{loop} = undef;
         $worker{irc}  = undef;
         my $child = bless \%worker, ref($self) || 'Mediabot';
-        my $ok = eval { $child->archive_channel_log; 1 };
+        my $moved;
+        my $ok = eval {
+            $moved = $child->archive_channel_log;
+            die "archive routine reported a hard failure\n" unless defined $moved;
+            1;
+        };
         if (!$ok) {
             my $err = $@ || 'archive worker exception';
             $err =~ s/[\r\n\0]+/ /g;
@@ -3750,6 +3755,11 @@ sub start_channel_log_archive_async {
             my $signal = $status & 127;
             my $exit = ($status >> 8) & 255;
             my $level = (!$signal && $exit == 0) ? 3 : 1;
+            # mb573-B1: memorise pour .status (observabilite operateur).
+            $self->{_archive_last_run} = {
+                at => time(), exit => $exit, signal => $signal,
+                elapsed => $elapsed,
+            };
             $self->{logger}->log($level, sprintf(
                 'channel_log_archive worker finished: exit=%d signal=%d elapsed=%.2fs',
                 $exit, $signal, $elapsed)) if $self->{logger};
@@ -3779,7 +3789,7 @@ sub archive_channel_log {
     return 0 unless length $adb;
     unless ($adb =~ /\A[A-Za-z0-9_]{1,64}\z/) {
         $self->{logger}->log(1, "archive_channel_log: invalid ARCHIVE_DBNAME '$adb'");
-        return 0;
+        return undef;
     }
 
     # mb570-B1 + mb571-B1: DEUX politiques de retention. La presence part
@@ -3800,7 +3810,7 @@ sub archive_channel_log {
         split /\s*,\s*/, $p_events_raw;
     unless (@p_events) {
         $self->{logger}->log(1, "archive_channel_log: no valid event in ARCHIVE_EVENTS");
-        return 0;
+        return undef;
     }
 
     my $c_days = int(eval { $self->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_CONTENT_DAYS') } // 0);
@@ -3812,13 +3822,22 @@ sub archive_channel_log {
     $c_events_raw = join(',', @$c_events_raw) if ref($c_events_raw) eq 'ARRAY';
     my @c_events = grep { /\A[a-z_]{1,16}\z/ } map { lc } grep { length }
         split /\s*,\s*/, $c_events_raw;
+    if ($c_days > 0 && !@c_events) {
+        $self->{logger}->log(1,
+            "archive_channel_log: CONTENT_DAYS is enabled but CONTENT_EVENTS has no valid event");
+        return undef;
+    }
 
     my $max_run = int(eval { $self->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_MAX_PER_RUN') } // 200000);
     $max_run = 5000    if $max_run < 5000;
     $max_run = 2000000 if $max_run > 2000000;
 
     my $dbh = $self->{db} ? $self->{db}->ensure_connected() : $self->{dbh};
-    return 0 unless $dbh;
+    unless ($dbh) {
+        $self->{logger}->log(1, "archive_channel_log: no database handle available")
+            if $self->{logger};
+        return undef;
+    }
 
     # mb569-B1: pas de backticks — $adb est valide [A-Za-z0-9_]{1,64} plus
     # haut, le quoting d'identifiant est superflu (et l'audit securite
@@ -3826,11 +3845,16 @@ sub archive_channel_log {
     my $atable = "$adb.CHANNEL_LOG_ARCHIVE";
 
     # Idempotent : meme schema que la table vivante.
-    my $created = eval { $dbh->do("CREATE TABLE IF NOT EXISTS $atable LIKE CHANNEL_LOG"); 1 };
+    my $created = eval {
+        my $rv = $dbh->do("CREATE TABLE IF NOT EXISTS $atable LIKE CHANNEL_LOG");
+        die "create failed: " . ($dbh->errstr // 'unknown') . "\n"
+            unless defined $rv;
+        1;
+    };
     unless ($created) {
         $self->{logger}->log(1, "archive_channel_log: cannot ensure $atable ("
-            . ($dbh->errstr // 'unknown') . ") — check GRANTs on $adb");
-        return 0;
+            . ($@ || $dbh->errstr || 'unknown') . ") — check GRANTs on $adb");
+        return undef;
     }
 
     my @policies = ( [ $p_days, \@p_events ] );
@@ -3845,10 +3869,19 @@ sub archive_channel_log {
         "SELECT id_channel_log FROM CHANNEL_LOG"
         . " WHERE ts < DATE_SUB(NOW(), INTERVAL ? DAY)"
         . " AND event_type IN ($in_events)"
-        . " ORDER BY id_channel_log LIMIT 5000") or next POLICY;
+        . " ORDER BY id_channel_log LIMIT 5000");
+    unless ($sel) {
+        $self->{logger}->log(1, "archive_channel_log: SELECT prepare failed ("
+            . ($dbh->errstr // 'unknown') . ")") if $self->{logger};
+        return undef;
+    }
 
     while ($total < $max_run) {
-        last unless $sel->execute($days, @events);
+        unless ($sel->execute($days, @events)) {
+            $self->{logger}->log(1, "archive_channel_log: SELECT execute failed ("
+                . ($dbh->errstr // 'unknown') . ")") if $self->{logger};
+            return undef;
+        }
         my @ids;
         while (my ($id) = $sel->fetchrow_array) { push @ids, $id }
         $sel->finish;
@@ -3861,8 +3894,11 @@ sub archive_channel_log {
 
         my $in_ids = join(',', ('?') x @ids);
         my $moved = eval {
-            $dbh->do("INSERT IGNORE INTO $atable SELECT * FROM CHANNEL_LOG"
-                   . " WHERE id_channel_log IN ($in_ids)", undef, @ids);
+            my $inserted = $dbh->do(
+                "INSERT IGNORE INTO $atable SELECT * FROM CHANNEL_LOG"
+              . " WHERE id_channel_log IN ($in_ids)", undef, @ids);
+            die "insert failed: " . ($dbh->errstr // 'unknown') . "\n"
+                unless defined $inserted;
             # mb571-B1: existence of the same primary key is not enough. A
             # misconfigured shared archive database could already contain an unrelated
             # row with that id. Verify the copied row identity before deleting live data.
@@ -3879,14 +3915,17 @@ sub archive_channel_log {
                 undef, @ids);
             die "verify failed: $present/" . scalar(@ids) . " exact row(s) in archive\n"
                 unless defined $present && $present == scalar(@ids);
-            $dbh->do("DELETE FROM CHANNEL_LOG WHERE id_channel_log IN ($in_ids)",
+            my $deleted = $dbh->do(
+                "DELETE FROM CHANNEL_LOG WHERE id_channel_log IN ($in_ids)",
                 undef, @ids);
+            die "delete failed: " . ($dbh->errstr // 'unknown') . "\n"
+                unless defined $deleted;
             1;
         };
         unless ($moved) {
             (my $err = $@ || $dbh->errstr || 'unknown') =~ s/\s+/ /g;
             $self->{logger}->log(1, "archive_channel_log: batch aborted ($err) — nothing lost, will retry next run");
-            last;
+            return undef;
         }
         $total += scalar(@ids);
         last if scalar(@ids) < 5000;
