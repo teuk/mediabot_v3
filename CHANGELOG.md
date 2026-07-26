@@ -10,6 +10,120 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Fixed — archive pre-commit safety hardening (mb571)
+
+<!-- mb571-B1: pre-commit archive hardening -->
+
+- The daily CHANNEL_LOG archive now runs in a forked worker with a fresh,
+  bounded database handle and IO::Async process reaping, so a multi-million-row
+  catch-up cannot freeze IRC. Shutdown terminates and reaps that worker.
+- SQL archive batches now enforce MAX_PER_RUN exactly and compare the full row
+  identity in live and archive tables before deleting. The legacy monolithic
+  purge fails closed whenever the twin archive is configured.
+- archive_channel_log.pl freezes executions at a primary-key high-water mark,
+  uses indexable month ranges with real-date validation, writes private unique
+  gzip files, and preserves the distinction between SQL NULL and a literal \N.
+- normalize_channel_log_indexes.pl now skips every projected DROP if any ADD
+  failed and exits non-zero, preventing removal of the only usable index.
+- Documentation now states the exact scope: onthisday reads live + archive;
+  other lifetime commands and achievements still use the live retention window.
+- The LUSERS throttle regression test now uses a fixed expired timestamp,
+  avoiding full-suite wall-clock and shared-package import flakiness.
+
+### Added — two-tier archive retention + archive-aware onthisday (mb570)
+
+- archive_channel_log gains a second, opt-in retention tier: CONTENT rows
+  (public/action/notice/topic/invite by default) older than
+  CHANNEL_LOG_ARCHIVE_CONTENT_DAYS also move to the twin archive database.
+  Default 0 keeps content in the live table forever; the presence tier
+  (7 days) runs unchanged, and MAX_PER_RUN is shared across both tiers.
+- onthisday now reads LIVE + ARCHIVE and merges per year (messages summed,
+  people maxed, source remembered); the per-year top nick and the era quote
+  are fetched from whichever table(s) the year lives in. Best-effort: no
+  archive configured, table missing or grants absent => exact historical
+  behaviour. Archiving old public no longer amputates channel memory —
+  which unlocks the remaining mass action on the Undernet instance.
+
+### Added — daily archive to a queryable twin database + index canon (mb569)
+
+- New daily scheduler task channel_log_archive: rows of the configured
+  event types (default: presence — join,quit,mode,part,nick,kick) older
+  than PRESENCE_DAYS (default 7) are MOVED into
+  <ARCHIVE_DBNAME>.CHANNEL_LOG_ARCHIVE on the same MariaDB server — a real
+  queryable table (created automatically, same schema), not a dead dump.
+  The predicate is age-based ("older than N days"), so a bot that was
+  offline catches up by itself, bounded by MAX_PER_RUN per pass. Replay
+  safety: batches of 5000, INSERT IGNORE, then a COUNT verification of the
+  whole batch in the archive BEFORE any DELETE — a crash between the two
+  steps replays without loss or duplication. Disabled unless
+  CHANNEL_LOG_ARCHIVE_DBNAME is set; the bot user needs SELECT,INSERT,
+  CREATE on the archive database.
+- New tools/normalize_channel_log_indexes.pl (4th of the family): compares
+  CHANNEL_LOG's real indexes to the canonical set covering every hot query,
+  ADDs what's missing and DROPs prefix-redundant ones (computed on the
+  PROJECTED state, so `nick` falls once (nick,event_type) is planned) in
+  online DDL — dry-run by default, out-of-canon indexes are flagged for
+  review, never dropped automatically. Run it with each instance's conf to
+  keep every database identical.
+- Fixed analyze_channel_log.pl redundancy detector crash ("Can't use
+  string as ARRAY ref"): `for my $a/$b` loop variables shadowed the sort()
+  globals. Guard added: no $a/$b loop variables in either index tool.
+
+### Fixed — AntiFlood defers instead of dropping the bot's own output (mb568)
+
+- Root cause of "leaderboard doesn't show everything": on +AntiFlood
+  channels, botPrivmsg/botAction silently DROPPED the bot's own messages
+  once the flood window filled — any multi-line command (leaderboard,
+  horoscope, stats, chronos) lost its tail. Regulated messages are now
+  deferred: bounded per-channel queue (30), drained one message every 2s
+  by a countdown timer, each deferred send going through the full path
+  (NoColors, badword, logging) at real emission time; re-blocked messages
+  return to the HEAD of the queue so display order is preserved. A full
+  queue drops the newest message with a level-3 log — never silently.
+- analyze_channel_log.pl gains a redundant-index detector: any secondary
+  index whose columns are a strict prefix of another (exact duplicates
+  deduplicated) is reported with a ready online-DDL DROP — never executed.
+
+### Fixed — archive tool: encode UTF-8 before gzip (mb567)
+
+- First real-world run of archive_channel_log.pl on the April selection hit
+  "Wide character in IO::Compress::Gzip::write": DBI returns character
+  strings and the export pushed them raw into the gzip layer. Every value
+  is now encoded to UTF-8 bytes before writing (same wire discipline as
+  mb359 for IRC output), proven by a decode/roundtrip test. The
+  export-before-delete design did its job during the incident: the run
+  stopped in the export phase and nothing was deleted.
+
+### Added — tools/archive_channel_log.pl (mb566)
+
+- Third tool of the CHANNEL_LOG family (measure = query plans, analyze =
+  inventory, archive = relief). Investigation mode (--analyze-month) breaks
+  a month down by day/event_type/channel/nick in aggregates only. Selection
+  filters (--before/--month/--events/--channel, AND-combined) drive a
+  DRY-RUN BY DEFAULT; --execute first exports the selected rows to a
+  gzip TSV (columns discovered dynamically), verifies exported == selected
+  (mismatch aborts with nothing deleted and the archive kept), then deletes
+  in bounded batches (--batch 1000..500000, pause between batches) — never
+  one monolithic DELETE. --execute without any filter is refused; skipping
+  the archive requires an explicit --no-archive. Password never printed,
+  message content never displayed. Guard test 757 pins every discipline.
+
+### Added — tools/analyze_channel_log.pl (mb565)
+
+- New read-only ops tool: connects with the bot's own conf ([mysql]
+  MAIN_PROG_*, same DSN discipline and driver fallback as
+  measure_channel_log.pl) and reports CHANNEL_LOG rows per year (share of
+  total, year-over-year delta), last-N-months detail, recent vs lifetime
+  daily rate, event_type/channel/nick breakdowns (aggregates only, no
+  message content, no password ever printed), physical health (engine,
+  sizes, fragmentation, auto_increment headroom with capacity warning),
+  present indexes plus verdicts on the three recommended ones (mb558 x2 +
+  A4) with ready-to-copy online DDL — never executed by the tool — and a
+  whole-database overview (server version, total size, top tables,
+  fragmentation flags, collation mix warning). Options: --conf --top
+  --months --json --quiet. Guard test 756 pins the read-only and privacy
+  disciplines.
+
 ### Added — per-channel language chansets (mb563)
 
 - New data-only migration seeds LangFR/LangES chansets. Helpers::channel_lang

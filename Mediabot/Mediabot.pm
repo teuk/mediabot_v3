@@ -37,7 +37,7 @@ use DBI;
 use IO::Async::Timer::Periodic;
 use IO::Async::Timer::Countdown;
 use String::IRC;
-use POSIX qw(setsid strftime);
+use POSIX qw(setsid strftime WNOHANG);
 use DateTime;
 use DateTime::TimeZone;
 use utf8;
@@ -1264,6 +1264,25 @@ sub clean_and_exit {
             }
             $irc->can('do_QUIT') ? $irc->do_QUIT( reason => $quit_msg )
                                  : 0;
+        }
+        1;
+    };
+
+    # --- mb571-B1: stop/reap the isolated CHANNEL_LOG archive worker ---
+    eval {
+        if (my $pid = delete $self->{_channel_log_archive_pid}) {
+            kill 'TERM', $pid;
+            my $reaped = 0;
+            for (1 .. 10) {
+                my $seen = waitpid($pid, WNOHANG);
+                if ($seen == $pid || $seen == -1) { $reaped = 1; last; }
+                usleep(50_000);
+            }
+            unless ($reaped) {
+                kill 'KILL', $pid;
+                waitpid($pid, 0);
+            }
+            delete $self->{_channel_log_archive_started};
         }
         1;
     };
@@ -3640,10 +3659,261 @@ sub getQuit {
 # ---------------------------------------------------------------------------
 # purge_channel_log() — delete CHANNEL_LOG entries older than N days
 # ---------------------------------------------------------------------------
+# =============================================================================
+# mb569-B1: archive_channel_log() — archivage quotidien vers une base SQL
+# jumelle, REQUETABLE (pas un gzip mort). Politique: les event_types
+# configures (defaut: la presence — join/quit/mode/part/nick/kick) plus
+# vieux que N jours (defaut 7) sont DEPLACES vers
+# `<ARCHIVE_DBNAME>`.CHANNEL_LOG_ARCHIVE (meme schema, creee si absente).
+#
+# Resilience voulue par teuk (« s'il a ete offline quelques jours ») : le
+# predicat est « ts < NOW() - N DAY », jamais « hier » — un bot qui revient
+# apres une semaine rattrape tout ce qui est devenu eligible, borne par
+# MAX_PER_RUN par passage pour ne pas s'emballer.
+#
+# Surete de rejeu : INSERT IGNORE (meme PK) puis VERIFICATION que chaque id
+# du lot existe dans l'archive AVANT le DELETE — un crash entre les deux
+# etapes se rejoue sans perte ni doublon. Lots de 5000, jamais de DELETE
+# monolithique. Vide ou invalide => desactive, log niveau 4 seulement.
+# mb571-B1: run the potentially massive daily archive outside the IO::Async
+# event loop. A configured 2,000,000-row catch-up must never freeze IRC while
+# SQL batches are copied and verified. The child owns a fresh bounded DB handle;
+# inherited DBI handles are marked InactiveDestroy and never used.
+sub start_channel_log_archive_async {
+    my ($self) = @_;
+
+    return 0 if $self->{_channel_log_archive_pid};
+
+    my $adb = eval { $self->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_DBNAME') } // '';
+    $adb = '' if ref $adb;
+    return 0 unless length $adb;
+
+    my $loop = $self->{loop};
+    unless ($loop && eval { $loop->can('watch_process') }) {
+        $self->{logger}->log(1,
+            'channel_log_archive: IO::Async watch_process unavailable; refusing synchronous fallback')
+            if $self->{logger};
+        return 0;
+    }
+
+    my $pid = fork();
+    unless (defined $pid) {
+        $self->{logger}->log(1, "channel_log_archive: fork failed: $!") if $self->{logger};
+        return 0;
+    }
+
+    if ($pid == 0) {
+        local $SIG{TERM} = 'DEFAULT';
+        local $SIG{INT}  = 'DEFAULT';
+        local $SIG{HUP}  = 'DEFAULT';
+
+        my $parent_dbh = $self->{dbh};
+        eval { $parent_dbh->{InactiveDestroy} = 1 if $parent_dbh };
+        my $db_obj = $self->{db};
+        eval { $db_obj->{dbh}{InactiveDestroy} = 1 if $db_obj && $db_obj->{dbh} };
+
+        my ($dbh, $db_error) = $db_obj && eval { $db_obj->can('connect_isolated_handle') }
+            ? $db_obj->connect_isolated_handle
+            : (undef, 'database wrapper has no isolated connector');
+        unless ($dbh) {
+            $db_error = 'isolated DB connection failed' unless defined $db_error;
+            $db_error =~ s/[\r\n\0]+/ /g;
+            eval { $self->{logger}->log(1, "channel_log_archive worker: $db_error") if $self->{logger} };
+            POSIX::_exit(2);
+        }
+
+        my %worker = %$self;
+        $worker{dbh}  = $dbh;
+        $worker{db}   = undef;
+        $worker{loop} = undef;
+        $worker{irc}  = undef;
+        my $child = bless \%worker, ref($self) || 'Mediabot';
+        my $ok = eval { $child->archive_channel_log; 1 };
+        if (!$ok) {
+            my $err = $@ || 'archive worker exception';
+            $err =~ s/[\r\n\0]+/ /g;
+            eval { $self->{logger}->log(1, "channel_log_archive worker: $err") if $self->{logger} };
+        }
+        eval { $dbh->disconnect };
+        POSIX::_exit($ok ? 0 : 3);
+    }
+
+    $self->{_channel_log_archive_pid} = $pid;
+    $self->{_channel_log_archive_started} = Time::HiRes::time();
+    my $watch_ok = eval {
+        $loop->watch_process($pid, sub {
+            my ($seen_pid, $status) = @_;
+            return unless defined($seen_pid) && $seen_pid == $pid;
+            delete $self->{_channel_log_archive_pid};
+            my $started = delete($self->{_channel_log_archive_started}) // Time::HiRes::time();
+            my $elapsed = Time::HiRes::time() - $started;
+            my $signal = $status & 127;
+            my $exit = ($status >> 8) & 255;
+            my $level = (!$signal && $exit == 0) ? 3 : 1;
+            $self->{logger}->log($level, sprintf(
+                'channel_log_archive worker finished: exit=%d signal=%d elapsed=%.2fs',
+                $exit, $signal, $elapsed)) if $self->{logger};
+        });
+        1;
+    };
+    unless ($watch_ok) {
+        kill 'KILL', $pid;
+        waitpid($pid, 0);
+        delete $self->{_channel_log_archive_pid};
+        delete $self->{_channel_log_archive_started};
+        $self->{logger}->log(1,
+            'channel_log_archive: could not register child watcher; worker killed')
+            if $self->{logger};
+        return 0;
+    }
+
+    $self->{logger}->log(3, "channel_log_archive worker started pid=$pid") if $self->{logger};
+    return 1;
+}
+
+sub archive_channel_log {
+    my ($self) = @_;
+
+    my $adb = eval { $self->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_DBNAME') } // '';
+    $adb = '' if ref $adb;
+    return 0 unless length $adb;
+    unless ($adb =~ /\A[A-Za-z0-9_]{1,64}\z/) {
+        $self->{logger}->log(1, "archive_channel_log: invalid ARCHIVE_DBNAME '$adb'");
+        return 0;
+    }
+
+    # mb570-B1 + mb571-B1: DEUX politiques de retention. La presence part
+    # vite (defaut 7 jours) ; le CONTENU (public/action/notice/topic) ne part
+    # que si CONTENT_DAYS > 0 — opt-in explicite. Seul onthisday lit aujourd'hui
+    # l'archive en complement. Les autres commandes/statistiques historiques
+    # restent volontairement bornees a la table vive : l'operateur doit donc
+    # traiter CONTENT_DAYS comme une fenetre de retention, pas comme une memoire
+    # transparente pour toutes les fonctions.
+    my $p_days = int(eval { $self->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_PRESENCE_DAYS') } // 7);
+    $p_days = 1    if $p_days < 1;
+    $p_days = 3650 if $p_days > 3650;
+
+    my $p_events_raw = eval { $self->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_EVENTS') }
+        // 'join,quit,mode,part,nick,kick';
+    $p_events_raw = join(',', @$p_events_raw) if ref($p_events_raw) eq 'ARRAY';
+    my @p_events = grep { /\A[a-z_]{1,16}\z/ } map { lc } grep { length }
+        split /\s*,\s*/, $p_events_raw;
+    unless (@p_events) {
+        $self->{logger}->log(1, "archive_channel_log: no valid event in ARCHIVE_EVENTS");
+        return 0;
+    }
+
+    my $c_days = int(eval { $self->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_CONTENT_DAYS') } // 0);
+    $c_days = 0     if $c_days < 0;
+    $c_days = 36500 if $c_days > 36500;
+
+    my $c_events_raw = eval { $self->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_CONTENT_EVENTS') }
+        // 'public,action,notice,topic,invite';
+    $c_events_raw = join(',', @$c_events_raw) if ref($c_events_raw) eq 'ARRAY';
+    my @c_events = grep { /\A[a-z_]{1,16}\z/ } map { lc } grep { length }
+        split /\s*,\s*/, $c_events_raw;
+
+    my $max_run = int(eval { $self->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_MAX_PER_RUN') } // 200000);
+    $max_run = 5000    if $max_run < 5000;
+    $max_run = 2000000 if $max_run > 2000000;
+
+    my $dbh = $self->{db} ? $self->{db}->ensure_connected() : $self->{dbh};
+    return 0 unless $dbh;
+
+    # mb569-B1: pas de backticks — $adb est valide [A-Za-z0-9_]{1,64} plus
+    # haut, le quoting d'identifiant est superflu (et l'audit securite
+    # interdit les backticks apparies dans les chaines interpolees).
+    my $atable = "$adb.CHANNEL_LOG_ARCHIVE";
+
+    # Idempotent : meme schema que la table vivante.
+    my $created = eval { $dbh->do("CREATE TABLE IF NOT EXISTS $atable LIKE CHANNEL_LOG"); 1 };
+    unless ($created) {
+        $self->{logger}->log(1, "archive_channel_log: cannot ensure $atable ("
+            . ($dbh->errstr // 'unknown') . ") — check GRANTs on $adb");
+        return 0;
+    }
+
+    my @policies = ( [ $p_days, \@p_events ] );
+    push @policies, [ $c_days, \@c_events ] if $c_days > 0 && @c_events;
+
+    my $total = 0;
+    POLICY: for my $pol (@policies) {
+    my ($days, $events_ref) = @$pol;
+    my @events = @$events_ref;
+    my $in_events = join(',', ('?') x @events);
+    my $sel = $dbh->prepare(
+        "SELECT id_channel_log FROM CHANNEL_LOG"
+        . " WHERE ts < DATE_SUB(NOW(), INTERVAL ? DAY)"
+        . " AND event_type IN ($in_events)"
+        . " ORDER BY id_channel_log LIMIT 5000") or next POLICY;
+
+    while ($total < $max_run) {
+        last unless $sel->execute($days, @events);
+        my @ids;
+        while (my ($id) = $sel->fetchrow_array) { push @ids, $id }
+        $sel->finish;
+        last unless @ids;
+
+        # mb571-B1: MAX_PER_RUN is a strict ceiling even when it is not a
+        # multiple of the 5000-row SQL batch size.
+        my $remaining = $max_run - $total;
+        splice(@ids, $remaining) if @ids > $remaining;
+
+        my $in_ids = join(',', ('?') x @ids);
+        my $moved = eval {
+            $dbh->do("INSERT IGNORE INTO $atable SELECT * FROM CHANNEL_LOG"
+                   . " WHERE id_channel_log IN ($in_ids)", undef, @ids);
+            # mb571-B1: existence of the same primary key is not enough. A
+            # misconfigured shared archive database could already contain an unrelated
+            # row with that id. Verify the copied row identity before deleting live data.
+            my ($present) = $dbh->selectrow_array(
+                "SELECT COUNT(*) FROM $atable arch"
+              . " JOIN CHANNEL_LOG live ON live.id_channel_log = arch.id_channel_log"
+              . " WHERE live.id_channel_log IN ($in_ids)"
+              . " AND arch.id_channel = live.id_channel"
+              . " AND arch.ts = live.ts"
+              . " AND BINARY COALESCE(arch.event_type,'') = BINARY COALESCE(live.event_type,'')"
+              . " AND BINARY COALESCE(arch.nick,'') = BINARY COALESCE(live.nick,'')"
+              . " AND BINARY COALESCE(arch.userhost,'') = BINARY COALESCE(live.userhost,'')"
+              . " AND BINARY COALESCE(arch.publictext,'') = BINARY COALESCE(live.publictext,'')",
+                undef, @ids);
+            die "verify failed: $present/" . scalar(@ids) . " exact row(s) in archive\n"
+                unless defined $present && $present == scalar(@ids);
+            $dbh->do("DELETE FROM CHANNEL_LOG WHERE id_channel_log IN ($in_ids)",
+                undef, @ids);
+            1;
+        };
+        unless ($moved) {
+            (my $err = $@ || $dbh->errstr || 'unknown') =~ s/\s+/ /g;
+            $self->{logger}->log(1, "archive_channel_log: batch aborted ($err) — nothing lost, will retry next run");
+            last;
+        }
+        $total += scalar(@ids);
+        last if scalar(@ids) < 5000;
+    }
+    }
+
+    $self->{logger}->log(3, "archive_channel_log: moved $total row(s) to $atable")
+        if $total;
+    return $total;
+}
+
 sub purge_channel_log {
     my ($self) = @_;
     my $days = int(eval { $self->{conf}->get('main.CHANNEL_LOG_RETENTION_DAYS') } // 90);
     return if $days <= 0;
+
+    # mb571-B1: the legacy purge is monolithic and not archive-aware. Running it
+    # after a bounded archive pass could delete eligible rows that MAX_PER_RUN
+    # did not reach. Fail closed whenever the twin archive is configured.
+    my $archive_db = eval { $self->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_DBNAME') } // '';
+    $archive_db = '' if ref $archive_db;
+    if (length $archive_db) {
+        $self->{logger}->log(1,
+            'purge_channel_log: disabled while CHANNEL_LOG_ARCHIVE_DBNAME is configured; keep retention at 0')
+            if $self->{logger};
+        return 0;
+    }
     my $dbh = $self->{db} ? $self->{db}->ensure_connected() : $self->{dbh};
     my $sth = $dbh->prepare(
         "DELETE FROM CHANNEL_LOG WHERE ts < DATE_SUB(NOW(), INTERVAL ? DAY)"

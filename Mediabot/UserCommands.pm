@@ -11995,21 +11995,42 @@ sub _onthisday_lines {
     }
     my @year_bound_bind = $has_date ? ($month, $month, $day) : ();
 
-    my $sth = $dbh->prepare(qq{
-        SELECT YEAR(ts)               AS y,
-               COUNT(*)               AS msgs,
-               COUNT(DISTINCT nick)   AS people
-        FROM CHANNEL_LOG
-        WHERE id_channel = ?
-          AND event_type IN ('public','action')
-          AND $md_expr$year_bound
-        GROUP BY YEAR(ts)
-        ORDER BY y DESC
-    });
-    return () unless $sth && $sth->execute($id_channel, @md_bind, @year_bound_bind);
-    my @years;
-    while (my $r = $sth->fetchrow_hashref) { push @years, $r; }
-    $sth->finish;
+    # mb570-B1: onthisday lit le VIF puis l'ARCHIVE (mb569) et fusionne par
+    # annee — archiver le vieux public ne coupe plus la memoire du canal.
+    # L'archive est best-effort : non configuree, table absente ou droits
+    # manquants => comportement historique exact. Une annee vit normalement
+    # d'un seul cote (l'archivage deplace par age) ; en cas de chevauchement
+    # les messages s'additionnent et 'people' prend le max (approximation
+    # honnete sur quelques jours de bascule).
+    my %by_year;   # y => { msgs, people, src => {live=>1, archive=>1} }
+    my $collect = sub {
+        my ($table, $src) = @_;
+        my $q = eval { $dbh->prepare(qq{
+            SELECT YEAR(ts)               AS y,
+                   COUNT(*)               AS msgs,
+                   COUNT(DISTINCT nick)   AS people
+            FROM $table
+            WHERE id_channel = ?
+              AND event_type IN ('public','action')
+              AND $md_expr$year_bound
+            GROUP BY YEAR(ts)
+            ORDER BY y DESC
+        }) };
+        return unless $q && eval { $q->execute($id_channel, @md_bind, @year_bound_bind) };
+        while (my $r = $q->fetchrow_hashref) {
+            my $slot = $by_year{ $r->{y} } //= { y => $r->{y}, msgs => 0, people => 0, src => {} };
+            $slot->{msgs}  += $r->{msgs};
+            $slot->{people} = $r->{people} if $r->{people} > $slot->{people};
+            $slot->{src}{$src} = 1;
+        }
+        $q->finish;
+        return;
+    };
+    $collect->('CHANNEL_LOG', 'live');
+    my $archive_table = Mediabot::Helpers::channel_log_archive_table($self);
+    $collect->($archive_table, 'archive') if $archive_table;
+
+    my @years = sort { $b->{y} <=> $a->{y} } values %by_year;
     return () unless @years;
 
     # human label for the date being shown
@@ -12028,41 +12049,63 @@ sub _onthisday_lines {
     my $shown = 0;
     for my $r (@years) {
         last if $shown >= 5;
-        my $tt = $dbh->prepare(qq{
-            SELECT nick, COUNT(*) AS c
-            FROM CHANNEL_LOG
-            WHERE id_channel = ?
-              AND event_type IN ('public','action')
-              AND YEAR(ts)  = ?
-              AND $md_expr
-            GROUP BY nick ORDER BY c DESC LIMIT 1
-        });
+        # mb570-B1: le top nick vient de la table ou vit l'annee ; annee a
+        # cheval -> les deux, sommees en Perl.
+        my %nick_counts;
+        my @tables_for_year;
+        push @tables_for_year, 'CHANNEL_LOG'  if $r->{src}{live};
+        push @tables_for_year, $archive_table if $archive_table && $r->{src}{archive};
+        for my $t (@tables_for_year) {
+            my $tq = eval { $dbh->prepare(qq{
+                SELECT nick, COUNT(*) AS c
+                FROM $t
+                WHERE id_channel = ?
+                  AND event_type IN ('public','action')
+                  AND YEAR(ts)  = ?
+                  AND $md_expr
+                GROUP BY nick ORDER BY c DESC LIMIT 3
+            }) };
+            next unless $tq && eval { $tq->execute($id_channel, $r->{y}, @md_bind) };
+            while (my $row = $tq->fetchrow_hashref) {
+                $nick_counts{ $row->{nick} } += $row->{c};
+            }
+            $tq->finish;
+        }
         my $topnick = '?';
-        if ($tt && $tt->execute($id_channel, $r->{y}, @md_bind)) {
-            if (my $tr = $tt->fetchrow_hashref) { $topnick = $tr->{nick}; }
-            $tt->finish;
+        if (%nick_counts) {
+            ($topnick) = sort { $nick_counts{$b} <=> $nick_counts{$a} || $a cmp $b }
+                keys %nick_counts;
         }
         push @lines, sprintf("  %d: %d msg, %d people, most active: %s",
             $r->{y}, $r->{msgs}, $r->{people}, $topnick);
         $shown++;
     }
 
+    # mb570-B1: la citation d'epoque vient elle aussi de la table ou vit
+    # l'annee la plus recente (vif et/ou archive).
     my $ry = $years[0]{y};
-    my $rm = $dbh->prepare(qq{
-        SELECT nick, publictext
-        FROM CHANNEL_LOG
-        WHERE id_channel = ?
-          AND event_type IN ('public','action')
-          AND YEAR(ts)  = ?
-          AND $md_expr
-          AND CHAR_LENGTH(publictext) BETWEEN 25 AND 300
-        ORDER BY CHAR_LENGTH(publictext) DESC
-        LIMIT 8
-    });
-    if ($rm && $rm->execute($id_channel, $ry, @md_bind)) {
-        my @cand;
+    my @cand;
+    my @quote_tables;
+    push @quote_tables, 'CHANNEL_LOG'  if $years[0]{src}{live};
+    push @quote_tables, $archive_table if $archive_table && $years[0]{src}{archive};
+    @quote_tables = ('CHANNEL_LOG') unless @quote_tables;
+    for my $qt (@quote_tables) {
+        my $rm = eval { $dbh->prepare(qq{
+            SELECT nick, publictext
+            FROM $qt
+            WHERE id_channel = ?
+              AND event_type IN ('public','action')
+              AND YEAR(ts)  = ?
+              AND $md_expr
+              AND CHAR_LENGTH(publictext) BETWEEN 25 AND 300
+            ORDER BY CHAR_LENGTH(publictext) DESC
+            LIMIT 8
+        }) };
+        next unless $rm && eval { $rm->execute($id_channel, $ry, @md_bind) };
         while (my $mr = $rm->fetchrow_hashref) { push @cand, $mr; }
         $rm->finish;
+    }
+    {
         if (@cand) {
             my $pick = $cand[int(rand(scalar @cand))];
             my $text = $pick->{publictext} // '';

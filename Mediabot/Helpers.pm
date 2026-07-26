@@ -682,6 +682,86 @@ sub _split_text_for_irc {
     return @chunks;
 }
 
+# mb568-B1: l'anti-flood JETAIT les messages du bot lui-meme — un
+# leaderboard de 6 lignes sur un canal +AntiFlood perdait sa fin en
+# silence. Les messages regules sont desormais DIFFERES : file bornee par
+# canal, drainee un message toutes les 2 s par un timer countdown. Chaque
+# envoi differe repasse par le chemin complet (NoColors, badword, log) au
+# moment reel de l'emission ; s'il est re-bloque, il reprend sa place en
+# TETE de file (l'ordre d'affichage est preserve). File pleine -> le
+# nouveau message est abandonne avec un log niveau 3 (comportement
+# historique, mais trace).
+# mb570-B1: table d'archive CHANNEL_LOG si configuree (mb569), sinon undef.
+# Nom valide uniquement — memes regles que archive_channel_log.
+sub channel_log_archive_table {
+    my ($self) = @_;
+    my $adb = eval { $self->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_DBNAME') } // '';
+    $adb = '' if ref $adb;
+    return undef unless length $adb && $adb =~ /\A[A-Za-z0-9_]{1,64}\z/;
+    return "$adb.CHANNEL_LOG_ARCHIVE";
+}
+
+sub _defer_flooded_send {
+    my ($self, $kind, $to, $msg) = @_;
+
+    my $q = $self->{_flood_outq}{$to} //= { items => [], armed => 0 };
+
+    if ($self->{_flood_draining}) {
+        # Re-blocage pendant un drain : on reprend la tete, le drain rearme.
+        unshift @{ $q->{items} }, [ $kind, $msg ];
+        return undef;
+    }
+
+    if (scalar(@{ $q->{items} }) >= 30) {
+        $self->{logger}->log(3,
+            "flood queue full on $to — dropping one $kind message");
+        return undef;
+    }
+
+    push @{ $q->{items} }, [ $kind, $msg ];
+    $self->{logger}->log(4, "botPrivmsg/botAction deferred by AntiFlood on $to ("
+        . scalar(@{ $q->{items} }) . " queued)");
+    _arm_flood_drain($self, $to);
+    return 1;
+}
+
+sub _arm_flood_drain {
+    my ($self, $to) = @_;
+    my $q = $self->{_flood_outq}{$to} or return;
+    return if $q->{armed};
+
+    my $loop = eval { $self->getLoop } // $self->{loop};
+    unless ($loop) {
+        # Pas de boucle (tests unitaires, arret) : la file reste, un prochain
+        # envoi reel la rearmera.
+        return;
+    }
+    my $timer = IO::Async::Timer::Countdown->new(
+        delay     => 2,
+        on_expire => sub { _drain_flood_queue($self, $to) },
+    );
+    $q->{armed} = 1;
+    $loop->add($timer);
+    $timer->start;
+    return 1;
+}
+
+sub _drain_flood_queue {
+    my ($self, $to) = @_;
+    my $q = $self->{_flood_outq}{$to} or return;
+    $q->{armed} = 0;
+
+    my $item = shift @{ $q->{items} };
+    if ($item) {
+        my ($kind, $msg) = @$item;
+        local $self->{_flood_draining} = 1;
+        if ($kind eq 'action') { botAction($self, $to, $msg) }
+        else                   { botPrivmsg($self, $to, $msg) }
+    }
+    _arm_flood_drain($self, $to) if @{ $q->{items} };
+    return 1;
+}
+
 sub botPrivmsg {
     my ($self, $sTo, $sMsg) = @_;
 
@@ -723,7 +803,9 @@ sub botPrivmsg {
             my $id_channel_set = getIdChannelSet($self, $sTo, $id_chanset_list);
             if (defined($id_channel_set) && $id_channel_set ne "") {
                 $self->{logger}->log(4, "botPrivmsg() channel $sTo has chanset +AntiFlood");
-                return undef if checkAntiFlood($self, $sTo);  # Already refactored
+                # mb568-B1: differe au lieu de jeter
+                return _defer_flooded_send($self, 'privmsg', $sTo, $sMsg)
+                    if checkAntiFlood($self, $sTo);
             }
         }
 
@@ -846,7 +928,8 @@ sub botAction {
 					if (defined($id_channel_set) && ($id_channel_set ne "")) {
 						$self->{logger}->log(4,"botAction() channel $sTo has chanset +AntiFlood");
 						if (checkAntiFlood($self,$sTo)) {
-							return undef;
+							# mb568-B1: differe au lieu de jeter
+							return _defer_flooded_send($self,'action',$sTo,$sMsg);
 						}
 					}
 				}

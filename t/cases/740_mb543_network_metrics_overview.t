@@ -122,7 +122,10 @@ return sub {
         $assert->ok($core->maybe_request_lusers == 0 && @{ $irc->{sent} } == 1,
             'throttle: pas de second envoi dans la fenetre');
 
-        $core->{network_lusers_last_request} = time() - 61;
+        # mb571-B2: use a fixed expired timestamp. The legacy full-suite
+        # runner shares package main, so imported time() implementations and
+        # wall-clock adjustments must not make this throttle test flaky.
+        $core->{network_lusers_last_request} = 1;
         $assert->ok($core->maybe_request_lusers == 1 && @{ $irc->{sent} } == 2,
             'throttle: renvoi apres la fenetre');
 

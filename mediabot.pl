@@ -586,6 +586,18 @@ $scheduler->add(
 );
 
 $scheduler->add(
+    name      => 'channel_log_archive',
+    interval  => 86400,
+    cb        => sub {
+        # mb569-B1 + mb571-B1: age-based catch-up, but always in an isolated
+        # child so a large archive pass cannot block the IRC event loop.
+        $mediabot->start_channel_log_archive_async()
+            if $mediabot->can('start_channel_log_archive_async');
+    },
+    autostart => 1,
+);
+
+$scheduler->add(
     name      => 'channel_log_purge',
     interval  => 86400,
     cb        => sub { $mediabot->purge_channel_log() },
