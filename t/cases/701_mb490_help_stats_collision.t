@@ -29,8 +29,11 @@ return sub {
     $assert->ok($help ne '', 'mbHelp_ctx localisé');
     $assert->like($med, qr/^stats\|stats \[nick\]\|public\|/m,
         'stats est documenté comme commande publique');
-    $assert->like($med, qr/^\s*stats\s*=>\s*sub\s*\{\s*mbStats_ctx\(\$ctx\)/m,
-        'stats est dans le dispatch public');
+    # mb583: stats part en worker async — l'entree du dispatch enveloppe
+    # mbStats_ctx dans CommandAsync::run_ctx_async, la cible reste la meme.
+    $assert->like($med,
+        qr/^\s*stats\s*=>\s*sub\s*\{\s*Mediabot::CommandAsync::run_ctx_async\(.*mbStats_ctx\(\$ctx\)/m,
+        'stats est dans le dispatch public (via CommandAsync mb583)');
 
     $assert->unlike($help, qr/\(\?:stats\|logs\|tools\)/,
         'pas de raccourci legacy qui capture help stats avant la commande');

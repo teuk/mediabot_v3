@@ -10,6 +10,273 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb591 — plugins v2 : derniere garde pre-commit
+- Le replace/reload devient transactionnel jusque dans le montage des
+  commandes : l'ancienne entry et ses commandes sont restaurees si le nouveau
+  montage echoue. L'etat enabled/disabled est conserve lors d'un reload reussi
+  comme lors d'un rollback.
+- Un manifest de module qui declare des commandes exige maintenant un vrai
+  objet enregistre et un CommandRegistry disponible ; aucun plugin v2 ne peut
+  rester charge avec une surface de commandes silencieusement absente.
+- Les scripts v2 doivent exister comme fichiers reguliers au chargement. Le
+  sidecar est valide contre les echappements par symlink et lu avec une borne
+  REELLE de 8 Ko avant decode JSON (plus de slurp potentiellement illimite).
+- Le resultat de ScriptActionRunner est verifie : `applied_ok=0` n'est plus
+  transforme en faux succes ; l'erreur est journalisee et une notice sobre est
+  envoyee au demandeur.
+- L'aide partyline mentionne desormais `loadscript`. Test 775 : 22 assertions
+  sur rollback, etat preserve, sidecar, objet/registry fail-closed et erreurs
+  d'application.
+
+### mb590 — arc plugins v2, increment 5 : les scripts externes rejoignent le contrat
+- Un script Perl/Python/Tcl devient un plugin v2 via un manifest SIDECAR
+  JSON obligatoire (<script>.manifest.json a cote du script), meme forme
+  que le manifest in-process. load_script_v2 : chemin valide par
+  validate_script_path du runner (memes gardes anti-traversal que toute
+  execution), langage par extension, sidecar borne (8 Ko) et decode
+  strictement, validation par _validate_manifest (method-check saute et
+  documente — le mensonge d'un script se detecte a l'execution).
+- L'entry porte kind=script + script_path ; montage, autorisation (pont
+  mb589 partage — une commande 'Master' de script refuse un User avant
+  meme de lancer le script), demontage et replace sont EXACTEMENT le cycle
+  de vie des plugins in-process.
+- Dispatch : run_script(path,'public_command', champs du ctx) — timeout,
+  bornes stdout/actions du runner inchanges — puis apply_actions en vif
+  avec apply+allow_irc SEULEMENT : les gates intrusives (topic/kick/ban)
+  restent fermees par defaut (modele mb545/554/564). Echec du run = notice
+  sobre au nick, aucune action appliquee, raison au journal.
+- Partyline : .plugins loadscript <path> [name] (Owner) ; reload conscient
+  du kind — un script se recharge en relisant son sidecar, meme rollback
+  (sidecar devenu invalide = instance precedente toujours active).
+- Test 774 (31 assertions) : chargement (kind/api/commandes), refus
+  traversal/extension/sidecar absent/JSON invalide/trop gros, dispatch
+  (chemin/event/nick/args transmis, apply=1 allow_irc=1 gates fermees),
+  echec sans apply, pont d'auth (User refuse/Owner passe), replace relit
+  le sidecar, unload demonte, pins partyline. Pin usage 412 etendu.
+- L'ARC PLUGINS V2 EST COMPLET : manifest (mb586), montage (mb587), cycle
+  de vie partyline (mb588), autorisation (mb589), scripts externes (mb590).
+
+### mb589 — arc plugins v2, increment 4 : le pont d'autorisation
+- Le contrat level devient auto-documente : 0 = commande publique, sinon
+  une DESCRIPTION de la table USER_LEVEL de l'instance ('Owner', 'Master',
+  'Administrator', 'User'...). Les entiers >0 du contrat mb586 n'ont
+  JAMAIS ete montables (refus mb587) : ils recoivent un message de
+  migration precis — aucun plugin existant ne casse.
+- Les commandes a niveau se MONTENT desormais. Le wrapper verifie
+  l'autorisation a CHAQUE dispatch (jamais figee au montage) :
+  identification par get_user_from_message (le meme chemin que logBot),
+  authentification exigee, niveau compare par checkUserLevel (semantique
+  maison : plus petit = plus fort — un Owner passe une commande Master).
+  Refus fail-closed de bout en bout : pas de message dans le ctx, user
+  inconnu, non authentifie, niveau insuffisant ; notice « Access denied »
+  au nick (silencieux si aucun contexte), trace niveau 3. L'entry registry
+  porte le level declare.
+- Pins d'epoque evolues : 770 (level hors bornes -> message de migration +
+  nouveau cas description mal formee), 771 (le refus « auth bridge » a
+  saute, remplace par la migration).
+- Test 773 (21 assertions) : contrat (0/description/entier>0/mal formee),
+  montage de la commande Master, dispatch complet — non authentifie refuse
+  avec notice et methode non appelee, Owner passe Master, User refuse,
+  sans message = refus silencieux, level 0 sans check, gardes
+  structurelles (verification par dispatch, pont appele avec le level du
+  manifest).
+
+### mb588 — arc plugins v2, increment 3 : cycle de vie a chaud en partyline
+- .plugins pilote desormais le cycle de vie : load <Module> [name],
+  unload <name>, reload <name> (Owner), enable/disable <name> (Master+,
+  comme .schedule). Refus expliques ; toute erreur de chargement est
+  montree en clair — le die du PluginManager porte deja la raison precise
+  (manifest rejete, collision, methode manquante).
+- reload = VRAI rechargement : delete %INC puis load replace ; si le
+  nouveau code echoue (require, manifest, register), le die tombe avant
+  register_plugin — l'instance precedente reste enregistree et ACTIVE, ses
+  commandes continuent de servir (rollback naturel, annonce « previous
+  instance still active »).
+- Validation : un replace de soi-meme n'est plus une fausse collision — la
+  commande deja au registry est tolerée si son entry porte plugin=>meme
+  cle (le montage mb587 l'etiquette) ; toute autre appartenance reste un
+  refus.
+- Liste enrichie (api=N, commands=...), usage et .help a jour. Contrat 412
+  (mb173) evolue : les mutations existent mais UNIQUEMENT dans le bloc
+  gate par niveau ; la section de lecture reste pure (garde structurelle).
+- Test 772 (20 assertions) : gates par niveau (y compris niveau indefini),
+  load reel avec annonce api/commandes, erreur affichee, disable/enable
+  pilotent le silence, reload de bout en bout sur module DISQUE (le
+  nouveau code sert), echec de reload = instance precedente vivante,
+  unload demonte, usage/.help.
+
+### mb587 — arc plugins v2, increment 2 : montage automatique des commandes
+- Les commands du manifest se montent au load dans le CommandRegistry
+  (source public) : handler wrapper qui verifie l'etat enabled du plugin a
+  CHAQUE dispatch (disable = la commande se tait sans dechargement, trace
+  niveau 4) puis appelle $object->command_<nom>($ctx) ; plugin/description/
+  level portes par l'entry registry ; le chemin de dispatch existant
+  (handler_for avant la table legacy, mb166) rend la commande vivante sans
+  autre cablage. Montage atomique : un echec demonte ce qui vient d'etre
+  monte, retire le plugin fraichement enregistre, et remonte l'erreur.
+- Validation durcie : une commande declaree sans methode command_<nom> =
+  manifest menteur, refuse AVANT register() ; level>0 refuse au MONTAGE
+  avec message explicite — le pont d'autorisation USER_LEVEL (plus petit =
+  plus fort) est l'increment suivant, d'ici la jamais une commande
+  privilegiee sans controle. Ordre des refus : collisions d'abord, methode
+  ensuite (diagnostic precis).
+- Demontage sur tout le cycle de vie : CommandRegistry::unregister_command
+  (retire l'entree + ses aliases, idempotent) ; unregister_plugin demonte
+  AVANT le teardown objet ; replace avec objet different demonte l'ancien
+  (les deux chemins, direct et load/defer) ; same-object refresh conserve
+  les commandes et herite mounted_commands (discipline mb248). Une commande
+  fantome serait le jumeau exact des listeners fantomes mb233.
+- Test 771 (23 assertions) : montage+dispatch reels sur un vrai registry,
+  disable/enable, unregister sans fantome, refus menteur (aucun demi-etat),
+  refus level>0, same-object refresh, unregister_command unitaire (aliases,
+  idempotence), garde demontage-avant-teardown. 770 adapte au durcissement.
+
+### mb586 — arc plugins v2, increment 1 : le manifest
+- Ouverture de l'arc v2 (cap 3.5). Un plugin v2 expose une sub manifest
+  declarative : api=2, name (slug, anti-usurpation : doit correspondre au
+  nom d'enregistrement), version, description, commands (slug + help +
+  level 0..1200, collision refusee contre le CommandRegistry du bot ET
+  contre les manifests des autres plugins), events (noms valides).
+- Validation FAIL-CLOSED placee AVANT $module->register() : un manifest
+  invalide ne produit aucun effet de bord (meme discipline que le refus de
+  doublon mb233). Un module sans manifest reste un plugin v1 legacy,
+  accepte tel quel (metadata api=1) — zero regression.
+- L'entry porte manifest + metadata.api ; version/description de l'entry
+  viennent du manifest quand il existe. Demo migre en v2 (0.002) : premier
+  plugin dont la surface se lit sans ouvrir le code.
+- Test 770 (25 assertions) : cas valide, 14 refus cibles, collision
+  inter-plugins, compat v1, integration load_perl_module, garde
+  structurelle validation-avant-register.
+- Prochains increments annonces : montage automatique des commandes du
+  manifest dans le CommandRegistry ; cycle de vie partyline
+  (list/load/reload/unload) ; manifest sidecar pour les scripts externes
+  (Perl/Python/Tcl) via ScriptRunner.
+
+### mb585 — les logs du worker ne se perdent plus (relais par le pipe)
+- Incident #quebec post-mb583 : « lb » termine en 40.30s (pile la borne
+  max_statement_time=40) avec 2 lignes au lieu de 4, et AUCUN log du worker
+  dans le journal — POSIX::_exit(0) sort sans vider les buffers du logger
+  herite, donc le message decisif du gather (« ARCHIVE query failed ...
+  live result kept ») etait perdu. Diagnostic a l'aveugle.
+- L'enfant recoit desormais un logger-collecteur (borne MAX_WLOGS=40,
+  surplus compte et annonce) ; les logs voyagent dans le resultat JSON
+  (les deux chemins, succes et echec) et le parent les rejoue au reap via
+  son vrai logger, prefixes « [worker <label>] », avant les messages.
+  logBot reste non facade (ecritures DB via le dbh isole, correctes).
+- Gardes 769 (+8) : collecteur unitaire (contenu, borne, surplus),
+  branchement enfant, rejeu prefixe, embarquement dans les deux chemins.
+
+### mb584 — normalize couvre aussi la table d'archive
+- Verification terrain mb583 : le gel est mort (« lb » sur #teuk servi en
+  0.48s ; pendant les 30 s du worker de #quebec, ticks reguliers, Hailo,
+  cache — le bot vit). Le « Database error » a 30.01 s = READ_TIMEOUT du
+  handle isole (defaut 30 s) : la requete de #quebec depasse car les index
+  canon n'ont jamais ete crees. L'archivage massif seul ne suffirait pas :
+  les gathers mb576 scannent vif ET archive, et l'archive (creee LIKE)
+  herite des memes index bancals.
+- tools/normalize_channel_log_indexes.pl : pipeline factorise en
+  run_table($table) et applique aux DEUX tables — CHANNEL_LOG puis
+  <ARCHIVE_DBNAME>.CHANNEL_LOG_ARCHIVE si configuree (nom valide par regex,
+  presence verifiee via information_schema ; absente = message, pas
+  d'erreur). Memes 4 index canon, memes ADD/DROP INPLACE LOCK=NONE, DROP
+  toujours calcules sur l'etat projete par table. Code retour agrege.
+- Gardes 759 (+9) : plus aucun ALTER en dur, archive par le meme pipeline,
+  validation regex, information_schema, code retour. 761 evolue
+  ($total_failed).
+
+### mb583 — les commandes carriere quittent la boucle d'evenements
+- Terrain Undernet : « m lb » sur la table vive de 5M lignes a tenu la
+  boucle 60 s (SLOW PRIVMSG 60.60s, event loop stalled ~59.52s) avant que
+  MariaDB ne tue la requete — le bot etait fige pour tous les canaux.
+  C'etait le point 5 de la revue pre-commit, reporte deux fois.
+- Nouveau `Mediabot::CommandAsync` (moule mb559/571) : la commande forke,
+  l'enfant execute la sub INCHANGEE avec une connexion DB isolee
+  (InactiveDestroy sur les handles herites, `SET SESSION
+  max_statement_time=40` en borne dure) ; des facades locales collectent
+  ses botPrivmsg/botNotice/botAction en INTENTS (bornes, tronques avec
+  drapeau au-dela) — l'enfant ne touche jamais la socket IRC ; le parent
+  rejoue les intents au reap via les vrais helpers, donc AntiFlood,
+  NoColors et la file differee mb568 s'appliquent. logBot n'est pas
+  facade : il ecrit via le dbh isole. Timeout 45 s TERM puis KILL, verrou
+  « un gros job par canal », reap watch_process, fallback SYNCHRONE
+  documente (commande de lecture : degrader vers l'historique vaut mieux
+  qu'une commande morte).
+- 16 entrees du dispatch wrappees : stats, top, streak, wordcount, when,
+  profil/profile, dashboard, compat, compare, heatmap, milestone(s),
+  leaderboard/lb, chronos/chrono/timeline. last et seen restent synchrones
+  (LIMIT indexes). Tests 701/712 evolues (la cible du dispatch est
+  inchangee, via le wrapper).
+- Test 769 (41 assertions) : facade unitaire sans fork (ordre des intents,
+  borne+truncated, exception capturee avec intents partiels, facades
+  retirees apres), gardes structurelles du worker, cablage des 16 entrees,
+  last/seen non wrappes.
+
+### mb582 — verify NULL-safe : les quits reseau archivent enfin (VRAIE cause)
+- La contradiction Undernet (« seul id_channel diverge : 3816 » vs
+  « align: 0 ») etait le symptome d'un angle mort SQL partage : NULL = NULL
+  n'est pas vrai, NULL <> NULL non plus. Les quits sont des evenements
+  RESEAU — id_channel NULL par design (schema : DEFAULT NULL). Le VERIFY du
+  bot (arch.id_channel = live.id_channel) ne pouvait donc JAMAIS valider un
+  lot contenant des quits : sa tache nocturne butait silencieusement a
+  chaque run et le stock ne descendait pas. Les lignes etaient IDENTIQUES
+  (NULL des deux cotes), pas divergentes.
+- Fix : toutes les comparaisons nullables passent en <=> (NULL-safe) — dans
+  le VERIFY du bot ET de l'outil (toujours identiques ligne a ligne, garde
+  768), dans l'align (NOT(<=>) couvre aussi un vrai NULL-vs-valeur), et
+  dans le diagnose (field-level NULL-safe + compteur both-NULL explicite +
+  grille de lecture « network-wide events »).
+- Gardes test : <=> exige dans les DEUX verify, egalite stricte bannie,
+  aucune divergence <> NULL-blind restante dans l'outil, both_null_chan
+  affiche.
+
+### mb581 — diagnose v2 + --align-archive-channel-ids (incident Undernet resolu)
+- Le diagnose Undernet a parle : charsets identiques, 5000/5000 presents,
+  ts/event/nick/host/texte identiques a l'octet — SEUL id_channel diverge
+  (1184/5000 ok). Memes evenements, referentiel de canaux d'une autre
+  epoque dans l'archive. Diagnose v2 : distribution du mapping
+  (live.id_channel -> arch.id_channel) avec noms resolus dans CHANNEL et
+  bornes ts par paire ; les requetes muettes affichent desormais errstr ;
+  collation de table extraite correctement (l'ancienne regex attrapait
+  celle d'une colonne).
+- `--align-archive-channel-ids` : realigne l'ARCHIVE sur le vif (autorite :
+  il joint la table CHANNEL courante) pour les lignes par ailleurs
+  IDENTIQUES a l'octet — UPDATE de l'archive uniquement, le vif n'est
+  jamais ecrit (garde testee) ; dry-run par defaut, --execute par lots de
+  5000 avec budget max-per-run ; refuse --diagnose et --loop. Une ligne qui
+  differe par autre chose qu'id_channel n'est jamais touchee.
+- Gardes test : section align sans aucune ecriture de CHANNEL_LOG, identite
+  a 5 champs exigee, extraction du VERIFY re-ancree (l'outil contient
+  desormais d'autres COUNT sur la table d'archive).
+
+### mb580 — mode --diagnose : expliquer un « verify failed » sans rien toucher
+- Premier run reel sur Undernet : `verify failed: 1184/5000` — le VERIFY a
+  fait son travail (aucune suppression du vif). `--diagnose` (LECTURE SEULE,
+  refuse --execute) explique pourquoi : definitions des deux tables
+  comparees (alerte explicite si les CHARSETS different — BINARY convertit
+  avant de comparer, les lignes non-ASCII ne verifieraient jamais),
+  repartition du premier lot en absent/identique/DIVERGENT avec le champ
+  fautif (SUM par champ), echantillon de 5 lignes divergentes en HEX
+  (ts live vs arch annote « DIFFERENT EPOCH? id reuse suspected » quand les
+  dates n'ont rien a voir), et grille de lecture des trois scenarios.
+- Gardes test : section diagnose sans aucun `$dbh->do(` (les selects
+  seulement), garde --diagnose/--execute, SHOW CREATE, HEX, alertes.
+
+### mb579 — tools/archive_channel_log_once.pl : archivage ponctuel fidele au bot
+- Nouvel outil one-shot qui rejoue EXACTEMENT la tache quotidienne
+  `archive_channel_log` (mb569/570/571) avec la conf d'une instance : memes
+  cles [mysql], memes bornes (presence 1..3650 j, contenu 0..36500 j, budget
+  5000..2000000), meme flux par lots de 5000 (INSERT IGNORE -> VERIFY
+  d'identite BINARY champ a champ -> DELETE, plafond strict), CREATE LIKE
+  idempotent. Dry-run par defaut (compte les lignes eligibles par politique
+  et estime le nombre de runs) ; `--execute` = un run identique au bot ;
+  `--execute --loop` = rattrapage complet (runs enchaines avec pause
+  `--sleep`, defaut 2 s, jusqu'a epuisement). `--max-per-run` optionnel,
+  borne comme le bot. Aucun backtick, mot de passe jamais imprime, repli
+  DBD::MariaDB -> DBD::mysql comme les outils freres.
+- Test 768 : le bloc VERIFY de l'outil est verifie IDENTIQUE LIGNE A LIGNE
+  a celui du bot, bornes et flux presents dans les DEUX fichiers, dry-run
+  sans aucune ecriture, --loop refuse sans --execute, VERIFY avant DELETE.
+
 ### mb579 — derniere garde pre-commit : resultat archive non contamine
 - `channel_log_gather` echoue maintenant proprement si une erreur de fetch
   survient APRES que des lignes d'archive ont deja ete livrees au callback :

@@ -26,7 +26,8 @@ like($dispatch, qr/mediabot_commands_partyline_total.*?command => '\.plugins'/s,
     '.plugins increments partyline command metric');
 like($dispatch, qr/_cmd_plugins\(\$stream, \$id, \$1\)/,
     '.plugins dispatch passes optional argument');
-like($help, qr/\.plugins \[loaded\|config\] - show plugin manager\/autoload status/,
+# mb588: .plugins pilote desormais le cycle de vie v2 — le .help l'annonce.
+like($help, qr/\.plugins \[loaded\|config\|load\|unload\|reload\|enable\|disable\] - plugin lifecycle \(v2\)/,
     '.help documents .plugins command');
 
 like($plugins, qr/Read-only Partyline visibility for the active PluginManager state/,
@@ -37,8 +38,10 @@ like($plugins, qr/plugin_autoload_enabled/,
     '_cmd_plugins reports autoload gate status');
 like($plugins, qr/\$pm->list/,
     '_cmd_plugins reads PluginManager list');
-like($plugins, qr/Usage: \.plugins \[loaded\|config\]/,
+like($plugins, qr/Usage: \.plugins \[loaded\|config/,
     '_cmd_plugins has usage branch');
+like($plugins, qr/\|load <Module> \[name\]\|loadscript <path> \[name\]\|unload <name>\|reload <name>/,
+    '_cmd_plugins usage covers the lifecycle verbs (incl. loadscript mb590)');
 like($plugins, qr/Plugin config:/,
     '_cmd_plugins has config view');
 like($plugins, qr/plugins\.ENABLED_AUTOLOAD, PLUGIN_AUTOLOAD, PLUGINS_AUTOLOAD/,
@@ -47,8 +50,18 @@ like($plugins, qr/PLUGINS_ENABLED, PLUGIN_ENABLED, PLUGINS/,
     '_cmd_plugins lists all plugin-list compatibility keys');
 like($plugins, qr/Loaded plugins:/,
     '_cmd_plugins has loaded plugin listing');
-unlike($plugins, qr/load_configured_plugins|load_perl_module|register_plugin|unregister_plugin|enable\(|disable\(/,
-    '_cmd_plugins is read-only and does not mutate PluginManager');
+# mb588: le contrat evolue — les mutations existent mais UNIQUEMENT dans le
+# bloc de cycle de vie gate par niveau ; la section de lecture (summary/
+# loaded/config), qui suit le marqueur historique read-only, reste pure.
+my ($lifecycle_412, $readonly_412) = $plugins =~
+    /(mb588-B1.*?)(# Read-only Partyline visibility.*)/s;
+ok(defined $readonly_412, '_cmd_plugins keeps a distinct read-only section');
+unlike($readonly_412 // '', qr/load_configured_plugins|load_perl_module|register_plugin|unregister_plugin|->enable\(|->disable\(/,
+    '_cmd_plugins read-only section does not mutate PluginManager');
+like($lifecycle_412 // '', qr/requires Owner level/,
+    '_cmd_plugins destructive verbs are Owner-gated');
+like($lifecycle_412 // '', qr/requires Master or Owner level/,
+    '_cmd_plugins enable\/disable are Master-gated');
 
 SKIP: {
     my $loaded = eval {

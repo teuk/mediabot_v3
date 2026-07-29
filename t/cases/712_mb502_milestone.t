@@ -134,8 +134,10 @@ return sub {
         $assert->like($fn, qr/\$self->\{channels\}\{lc \$channel\}/, '[3] lookup canal en lc (garde 625)');
 
         my $med = _slurp_712(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
-        $assert->like($med, qr/milestone\s*=>\s*sub\s*\{\s*mbMilestone_ctx/, '[3] milestone au dispatch');
-        $assert->like($med, qr/milestones\s*=>\s*sub\s*\{\s*mbMilestone_ctx/, '[3] alias milestones');
+        # mb583: milestone part en worker async — l'entree enveloppe
+        # mbMilestone_ctx dans CommandAsync::run_ctx_async, cible inchangee.
+        $assert->like($med, qr/milestone\s*=>\s*sub\s*\{\s*Mediabot::CommandAsync::run_ctx_async\(.*mbMilestone_ctx/, '[3] milestone au dispatch');
+        $assert->like($med, qr/milestones\s*=>\s*sub\s*\{\s*Mediabot::CommandAsync::run_ctx_async\(.*mbMilestone_ctx/, '[3] alias milestones');
         $assert->like($med, qr/^milestone\|milestone\|public/m, '[3] milestone documenté');
         $assert->like($med, qr/milestone\s*=>\s*'stats'/, '[3] milestone catégorisé stats');
     }

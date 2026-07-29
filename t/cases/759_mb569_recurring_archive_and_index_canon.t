@@ -259,6 +259,28 @@ return sub {
             $assert->like($src, qr/'\Q$canon\E'/, "normalize: canon contient $canon");
         }
         $assert->like($src, qr/etat PROJETE/, 'normalize: DROP calcule sur l\'etat projete');
+
+        # mb584: le meme traitement s'applique au VIF ET a l'ARCHIVE (creee
+        # LIKE, elle herite des memes index bancals et les gathers mb576 la
+        # scannent avec les memes patterns).
+        $assert->like($src, qr/sub run_table \{/,
+            'mb584-759: pipeline factorise par table');
+        $assert->ok($src !~ /ALTER TABLE CHANNEL_LOG (?:ADD|DROP) INDEX/,
+            'mb584-759: plus aucun ALTER en dur — table parametree');
+        $assert->like($src, qr/run_table\('CHANNEL_LOG'\)/,
+            'mb584-759: la table vive d abord');
+        $assert->like($src, qr/mysql\.CHANNEL_LOG_ARCHIVE_DBNAME/,
+            'mb584-759: cible archive lue de la conf du bot');
+        $assert->like($src, qr/\\A\[A-Za-z0-9_\]\{1,64\}\\z/,
+            'mb584-759: nom de base d archive valide par regex');
+        $assert->like($src, qr/information_schema\.TABLES/,
+            'mb584-759: presence de l archive verifiee avant traitement');
+        $assert->like($src, qr/run_table\("\$adb\.CHANNEL_LOG_ARCHIVE"\)/,
+            'mb584-759: l archive passe par le meme pipeline');
+        $assert->like($src, qr/configuree mais absente/,
+            'mb584-759: archive absente = ignoree avec message, pas d erreur');
+        $assert->like($src, qr/exit\(\$total_failed \? 2 : 0\)/,
+            'mb584-759: code retour agrege des deux tables');
         $assert->like($src, qr/REVIEW/, 'normalize: hors canon = review, pas de drop auto');
         $assert->like($src, qr/measure_channel_log\.pl/, 'normalize: renvoie vers measure');
     }

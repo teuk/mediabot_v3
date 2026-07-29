@@ -2681,6 +2681,134 @@ sub _cmd_plugins {
 
     my $pm = $bot->plugin_manager;
 
+    # mb588-B1: cycle de vie a chaud — la partyline devient le poste de
+    # pilotage de l'arc plugins v2. Les actions destructives (load/unload/
+    # reload) exigent Owner (level 0) ; enable/disable exigent Master ou
+    # mieux (level <= 1), comme .schedule. Chaque refus est explique, chaque
+    # erreur de chargement est montree en clair (le die du PluginManager
+    # porte deja la raison precise : manifest rejete, collision, methode
+    # manquante...).
+    my ($verb, @rest) = split /\s+/, $arg;
+    $verb = lc($verb // '');
+    if ($verb =~ /\A(?:load|loadscript|unload|reload|enable|disable)\z/) {
+        my $level = $self->{users}{$id}{level};
+        my $need_owner = ($verb =~ /\A(?:load|loadscript|unload|reload)\z/) ? 1 : 0;
+        if ($need_owner && !(defined $level && $level == 0)) {
+            $stream->write("Access denied: .plugins $verb requires Owner level.\r\n");
+            return;
+        }
+        if (!$need_owner && !(defined $level && $level <= 1)) {
+            $stream->write("Access denied: .plugins $verb requires Master or Owner level.\r\n");
+            return;
+        }
+
+        # mb590-B1: chargement d'un plugin SCRIPT v2 (sidecar JSON) — meme
+        # gate Owner, memes messages en clair, meme cycle de vie ensuite.
+        if ($verb eq 'loadscript') {
+            my ($path, $custom) = @rest;
+            unless (defined $path && length $path) {
+                $stream->write("Usage: .plugins loadscript <relative/script.(pl|py|tcl)> [name]\r\n");
+                return;
+            }
+            my $entry = eval {
+                $pm->load_script_v2($path,
+                    (defined $custom && length $custom) ? (name => $custom) : ());
+            };
+            if (!$entry) {
+                (my $err = $@ || 'unknown error') =~ s/\s+\z//;
+                $stream->write("Load failed: $err\r\n");
+                return;
+            }
+            my @cmds = @{ $entry->{mounted_commands} || [] };
+            $stream->write("Loaded script plugin '$entry->{name}' ("
+                . ($entry->{metadata}{script_path})
+                . (@cmds ? ", commands: " . join(',', @cmds) : "")
+                . ")\r\n");
+            return;
+        }
+
+        if ($verb eq 'load') {
+            my ($module, $custom) = @rest;
+            unless (defined $module && length $module) {
+                $stream->write("Usage: .plugins load <Perl::Module> [name]\r\n");
+                return;
+            }
+            my $entry = eval {
+                $pm->load_perl_module($module,
+                    (defined $custom && length $custom) ? (name => $custom) : ());
+            };
+            if (!$entry) {
+                (my $err = $@ || 'unknown error') =~ s/\s+\z//;
+                $stream->write("Load failed: $err\r\n");
+                return;
+            }
+            my @cmds = @{ $entry->{mounted_commands} || [] };
+            $stream->write("Loaded plugin '$entry->{name}' (api="
+                . ($entry->{metadata}{api} // 1)
+                . (@cmds ? ", commands: " . join(',', @cmds) : "")
+                . ")\r\n");
+            return;
+        }
+
+        my ($target) = @rest;
+        unless (defined $target && length $target) {
+            $stream->write("Usage: .plugins $verb <name>\r\n");
+            return;
+        }
+        unless ($pm->is_registered($target)) {
+            $stream->write("Unknown plugin '$target' — see .plugins loaded\r\n");
+            return;
+        }
+
+        if ($verb eq 'unload') {
+            $pm->unregister_plugin($target);
+            $stream->write("Unloaded plugin '$target' (commands unmounted).\r\n");
+            return;
+        }
+        if ($verb eq 'enable' || $verb eq 'disable') {
+            $verb eq 'enable' ? $pm->enable($target) : $pm->disable($target);
+            $stream->write("Plugin '$target' is now ${verb}d"
+                . ($verb eq 'disable' ? " (mounted commands stay silent)" : "")
+                . ".\r\n");
+            return;
+        }
+        # reload : le VRAI rechargement — delete %INC puis load replace. Si le
+        # nouveau code echoue (require/manifest/register), le die tombe AVANT
+        # register_plugin : l'instance precedente reste enregistree et active.
+        my $plug = $pm->plugin($target);
+        # mb590-B1: le reload d'un plugin SCRIPT relit le sidecar JSON et
+        # remonte ses commandes (pas de %INC en jeu) — meme rollback : un
+        # sidecar devenu invalide laisse l'instance precedente active.
+        if ($plug && ($plug->{metadata}{kind} // '') eq 'script') {
+            my $spath = $plug->{metadata}{script_path};
+            my $sentry = eval { $pm->load_script_v2($spath, name => $target, replace => 1) };
+            if (!$sentry) {
+                (my $err = $@ || 'unknown error') =~ s/\s+\z//;
+                $stream->write("Reload failed (previous instance still active): $err\r\n");
+                return;
+            }
+            $stream->write("Reloaded script plugin '$target' (version "
+                . ($sentry->{version} // '-') . ").\r\n");
+            return;
+        }
+        my $module = $plug ? $plug->{module} : undef;
+        unless (defined $module && length $module) {
+            $stream->write("Reload failed: plugin '$target' has no module recorded.\r\n");
+            return;
+        }
+        my $file = $module; $file =~ s{::}{/}g; $file .= '.pm';
+        delete $INC{$file};
+        my $entry = eval { $pm->load_perl_module($module, name => $target, replace => 1) };
+        if (!$entry) {
+            (my $err = $@ || 'unknown error') =~ s/\s+\z//;
+            $stream->write("Reload failed (previous instance still active): $err\r\n");
+            return;
+        }
+        $stream->write("Reloaded plugin '$target' (version "
+            . ($entry->{version} // '-') . ").\r\n");
+        return;
+    }
+
     # Read-only Partyline visibility for the active PluginManager state. This
     # command does not load, unload, enable, or disable anything.
     my $autoload = eval { $bot->can('plugin_autoload_enabled') ? $bot->plugin_autoload_enabled : 0 } ? 'enabled' : 'disabled';
@@ -2706,7 +2834,9 @@ sub _cmd_plugins {
     }
 
     if ($mode ne 'summary' && $mode ne 'loaded') {
-        $stream->write("Usage: .plugins [loaded|config]\r\n");
+        $stream->write("Usage: .plugins [loaded|config"
+            . "|load <Module> [name]|loadscript <path> [name]|unload <name>|reload <name>"
+            . "|enable <name>|disable <name>]\r\n");
         return;
     }
 
@@ -2731,7 +2861,10 @@ sub _cmd_plugins {
         my $state   = $entry->{enabled} ? 'enabled' : 'disabled';
         my $desc    = $entry->{description} // '';
 
-        $stream->write("  - $name [$state] module=$module version=$version");
+        my $api  = $entry->{metadata}{api} // 1;
+        my @cmds = @{ $entry->{mounted_commands} || [] };
+        $stream->write("  - $name [$state] api=$api module=$module version=$version");
+        $stream->write(" commands=" . join(',', @cmds)) if @cmds;
         $stream->write(" - $desc") if length $desc;
         $stream->write("\r\n");
     }
@@ -2757,7 +2890,7 @@ sub _cmd_help {
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
-      . "  .plugins [loaded|config] - show plugin manager/autoload status\r\n"
+      . "  .plugins [loaded|config|load|loadscript|unload|reload|enable|disable] - plugin lifecycle (v2)\r\n"
       . "  .scriptdryrun [status|last|config|timers|canceltimers|events|clearevents|reload] - show external script bridge status and last run, pending timers, event windows\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary)\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"

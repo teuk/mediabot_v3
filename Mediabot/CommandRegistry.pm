@@ -193,6 +193,31 @@ sub aliases_for {
     return @{ $entry->{aliases} };
 }
 
+# mb587-B1: retrait d'une commande — le pendant exact de register_command,
+# necessaire au cycle de vie des plugins v2 (unregister/replace ne doivent
+# pas laisser de commandes fantomes, meme discipline que les listeners
+# EventBus mb233-249). Retire l'entree ET tous les aliases qui pointent
+# vers elle. Retourne 1 si retiree, 0 si absente (idempotent, jamais die).
+sub unregister_command {
+    my ($self, $name, $source) = @_;
+
+    my $cmd = _name($name);
+    return 0 unless defined $cmd;
+    my $src = _source($source);
+    return 0 unless defined $src;
+
+    return 0 unless exists $self->{commands}{$src}
+                 && exists $self->{commands}{$src}{$cmd};
+
+    delete $self->{commands}{$src}{$cmd};
+    for my $alias (keys %{ $self->{aliases}{$src} || {} }) {
+        delete $self->{aliases}{$src}{$alias}
+            if defined $self->{aliases}{$src}{$alias}
+            && $self->{aliases}{$src}{$alias} eq $cmd;
+    }
+    return 1;
+}
+
 sub list {
     my ($self, $source) = @_;
 

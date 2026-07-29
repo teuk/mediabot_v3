@@ -13,6 +13,7 @@ use Mediabot::Log;
 use Mediabot::Context;
 use Mediabot::Command;
 use Mediabot::CommandRegistry;
+use Mediabot::CommandAsync;
 use Mediabot::EventBus;
 use Mediabot::PluginManager;
 use Mediabot::ScriptRunner;
@@ -2030,8 +2031,15 @@ sub mbCommandPublic {
         birthdate    => sub { displayBirthDate_ctx($ctx) },
         colors       => sub { mbColors_ctx($ctx) },
         seen         => sub { mbSeen_ctx($ctx) },
-        stats        => sub { mbStats_ctx($ctx) },
-        top          => sub { mbTop_ctx($ctx) },
+        # mb583-B1: les commandes CARRIERE (scans/GROUP BY sur CHANNEL_LOG
+        # potentiellement enorme) partent en worker forke — la boucle
+        # d'evenements ne gele plus jamais (terrain : « m lb » a fige le bot
+        # 60 s puis MariaDB a tue la requete). Les subs restent INCHANGEES :
+        # l'enfant collecte leurs botPrivmsg/botNotice en intents, le parent
+        # les rejoue (AntiFlood/NoColors/file mb568 s'appliquent au rejeu).
+        # last/seen/quotes restent synchrones : LIMIT indexes, rapides.
+        stats        => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'stats',     sub { mbStats_ctx($ctx) }) },
+        top          => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'top',       sub { mbTop_ctx($ctx) }) },
         calc         => sub { mbCalc_ctx($ctx) },
         convert      => sub { mbConvert_ctx($ctx) },     # mb479: unit conversion
         '8ball'      => sub { mb8ball_ctx($ctx) },
@@ -2045,9 +2053,9 @@ sub mbCommandPublic {
         remindlist   => sub { mbRemindList_ctx($ctx) },
         tell         => sub { mbRemind_ctx($ctx) },   # mb474: leave a message, delivered when the target returns
         calclast     => sub { mbCalcLast_ctx($ctx) },
-        wordcount    => sub { mbWordCount_ctx($ctx) },
+        wordcount    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'wordcount', sub { mbWordCount_ctx($ctx) }) },
         alias        => sub { mbAlias_ctx($ctx) },
-        streak       => sub { mbStreak_ctx($ctx) },
+        streak       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'streak',    sub { mbStreak_ctx($ctx) }) },
         slap         => sub { mbSlap_ctx($ctx) },
         karma        => sub { mbKarma_ctx($ctx) },
         karmatop     => sub { mbKarmaTop_ctx($ctx) },
@@ -2067,46 +2075,46 @@ sub mbCommandPublic {
         choose       => sub { mbChoose_ctx($ctx) },
         morse        => sub { mbMorse_ctx($ctx) },
         abbrev       => sub { mbAbbrev_ctx($ctx) },
-        compare      => sub { mbCompare_ctx($ctx) },
-        heatmap      => sub { mbHeatmap_ctx($ctx) },
+        compare      => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'compare',   sub { mbCompare_ctx($ctx) }) },
+        heatmap      => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'heatmap',   sub { mbHeatmap_ctx($ctx) }) },
         monthstats   => sub { mbMonthStats_ctx($ctx) },
         define       => sub { mbDefine_ctx($ctx) },
         trivia       => sub { mbTrivia_ctx($ctx) },
         triviascore  => sub { mbTriviaScore_ctx($ctx) },
         active       => sub { mbActive_ctx($ctx) },
-        when         => sub { mbWhen_ctx($ctx) },
+        when         => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'when',      sub { mbWhen_ctx($ctx) }) },
         # mb115: système d'achievements + profil + radar
         achievements => sub { mbAchievements_ctx($ctx) },
         achievs      => sub { mbAchievements_ctx($ctx) },   # alias court
-        profil       => sub { mbProfil_ctx($ctx) },
-        profile      => sub { mbProfil_ctx($ctx) },          # alias en anglais
+        profil       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'profil',    sub { mbProfil_ctx($ctx) }) },
+        profile      => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'profil',    sub { mbProfil_ctx($ctx) }) },          # alias en anglais
         radar        => sub { mbRadar_ctx($ctx) },
 
         # mb116: dashboard de canal + duel + horoscope
-        dashboard    => sub { mbDashboard_ctx($ctx) },
+        dashboard    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'dashboard', sub { mbDashboard_ctx($ctx) }) },
         chanstats    => sub { mbDashboard_ctx($ctx) },        # alias
         duel         => sub { mbDuel_ctx($ctx) },
         horoscope    => sub { mbHoroscope_ctx($ctx) },
         horo         => sub { mbHoroscope_ctx($ctx) },        # alias court
 
         # mb117: compat + quotegame + mood
-        compat       => sub { mbCompat_ctx($ctx) },
+        compat       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'compat',    sub { mbCompat_ctx($ctx) }) },
         affinity     => sub { mbCompat_ctx($ctx) },           # alias EN
         quotegame    => sub { mbQuotegame_ctx($ctx) },
         qg           => sub { mbQuotegame_ctx($ctx) },        # alias court
         mood         => sub { mbMood_ctx($ctx) },
-        milestone    => sub { mbMilestone_ctx($ctx) },
-        milestones   => sub { mbMilestone_ctx($ctx) },
+        milestone    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'milestone', sub { mbMilestone_ctx($ctx) }) },
+        milestones   => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'milestone', sub { mbMilestone_ctx($ctx) }) },
         ambiance     => sub { mbMood_ctx($ctx) },             # alias FR
 
         # mb118: leaderboard + chronos
         # Keep the historical !top command mapped to mbTop_ctx above.
         # Leaderboard aliases are !leaderboard and !lb.
-        leaderboard  => sub { mbLeaderboard_ctx($ctx) },
-        lb           => sub { mbLeaderboard_ctx($ctx) },      # alias court
-        chronos      => sub { mbChronos_ctx($ctx) },
-        chrono       => sub { mbChronos_ctx($ctx) },          # alias court
-        timeline     => sub { mbChronos_ctx($ctx) },          # alias EN
+        leaderboard  => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'leaderboard', sub { mbLeaderboard_ctx($ctx) }) },
+        lb           => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'leaderboard', sub { mbLeaderboard_ctx($ctx) }) },      # alias court
+        chronos      => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },
+        chrono       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },          # alias court
+        timeline     => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },          # alias EN
         features     => sub { mbFeatures_ctx($ctx) },
         capabilities => sub { mbFeatures_ctx($ctx) },
         caps         => sub { mbFeatures_ctx($ctx) },
@@ -3906,8 +3914,8 @@ sub archive_channel_log {
                 "SELECT COUNT(*) FROM $atable arch"
               . " JOIN CHANNEL_LOG live ON live.id_channel_log = arch.id_channel_log"
               . " WHERE live.id_channel_log IN ($in_ids)"
-              . " AND arch.id_channel = live.id_channel"
-              . " AND arch.ts = live.ts"
+              . " AND arch.id_channel <=> live.id_channel"
+              . " AND arch.ts <=> live.ts"
               . " AND BINARY COALESCE(arch.event_type,'') = BINARY COALESCE(live.event_type,'')"
               . " AND BINARY COALESCE(arch.nick,'') = BINARY COALESCE(live.nick,'')"
               . " AND BINARY COALESCE(arch.userhost,'') = BINARY COALESCE(live.userhost,'')"

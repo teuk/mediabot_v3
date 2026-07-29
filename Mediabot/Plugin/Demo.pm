@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use utf8;
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 # ---------------------------------------------------------------------------
 # Mediabot::Plugin::Demo
@@ -15,6 +15,19 @@ our $VERSION = '0.001';
 # on EventBus, but it is not loaded unless the administrator explicitly enables
 # it through PluginManager/load_configured_plugins().
 # ---------------------------------------------------------------------------
+
+# mb586-B1: Demo devient le premier plugin v2 — il declare son manifest.
+# Aucune commande (il reste purement observationnel) mais il declare l'event
+# qu'il ecoute : la surface du plugin se lit desormais sans ouvrir le code.
+sub manifest {
+    return {
+        api         => 2,
+        name        => 'demo',
+        version     => '0.002',
+        description => 'Observational demo plugin: counts observed public commands.',
+        events      => [ 'public_command_observed' ],
+    };
+}
 
 sub register {
     my ($class, $bot, %opts) = @_;

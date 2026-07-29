@@ -90,11 +90,22 @@ unless ($dbh) {
 die "DB connect failed: " . ($DBI::errstr // 'unknown') . "\n" unless $dbh;
 
 # --- Etat reel -------------------------------------------------------------
+# mb584-B1: le meme traitement pour la table VIVE et la table d'ARCHIVE.
+# L'archive est creee LIKE CHANNEL_LOG : elle herite des memes index bancals,
+# et depuis mb576 les commandes carriere la scannent avec les MEMES patterns
+# (fusion per-table). Normaliser le vif seulement deplacerait la lenteur vers
+# l'archive au premier archivage massif. $table est un identifiant valide
+# (CHANNEL_LOG ou db.CHANNEL_LOG_ARCHIVE valides par regex) — pas d'entree
+# libre, coherent avec l'interdit des backticks d'audit.
+sub run_table {
+    my ($table) = @_;
+    say_out('');
+    say_out("=== Table: $table ===");
 my %by_index;
 {
-    my $sth = $dbh->prepare(q{SHOW INDEX FROM CHANNEL_LOG})
+    my $sth = $dbh->prepare("SHOW INDEX FROM $table")
         or die "SHOW INDEX failed\n";
-    $sth->execute or die "SHOW INDEX failed: " . ($dbh->errstr // '?') . "\n";
+    $sth->execute or die "SHOW INDEX failed ($table): " . ($dbh->errstr // '?') . "\n";
     while (my $r = $sth->fetchrow_hashref) {
         push @{ $by_index{ $r->{Key_name} } }, [ $r->{Seq_in_index}, lc $r->{Column_name} ];
     }
@@ -137,8 +148,8 @@ for my $c (@canon) {
     }
     else {
         push @actions, [ 'ADD', sprintf('(%s) manquant', join(',', @{ $c->{cols} })),
-            sprintf('ALTER TABLE CHANNEL_LOG ADD INDEX %s (%s), ALGORITHM=INPLACE, LOCK=NONE',
-                $c->{name}, join(', ', @{ $c->{cols} })) ];
+            sprintf('ALTER TABLE %s ADD INDEX %s (%s), ALGORITHM=INPLACE, LOCK=NONE',
+                $table, $c->{name}, join(', ', @{ $c->{cols} })) ];
     }
 }
 
@@ -167,7 +178,7 @@ for my $name_a (sort keys %cols_of) {
         next if @ca == @cb && exists $cols_of{$name_b} && $name_a lt $name_b;
         push @actions, [ 'DROP', sprintf('%s (%s) redondant, couvert par %s',
                 $name_a, join(',', @ca), $name_b),
-            sprintf('ALTER TABLE CHANNEL_LOG DROP INDEX `%s`, ALGORITHM=INPLACE, LOCK=NONE', $name_a) ];
+            sprintf('ALTER TABLE %s DROP INDEX `%s`, ALGORITHM=INPLACE, LOCK=NONE', $table, $name_a) ];
         last;
     }
 }
@@ -236,7 +247,32 @@ elsif (!$opt_execute) {
     say_out("$changes changement(s) proposes. Rejouer avec --execute pour appliquer.");
 }
 else {
-    say_out("Termine: $applied applique(s), $failed echec(s), $skipped drop(s) saute(s).");
+    say_out("Termine ($table): $applied applique(s), $failed echec(s), $skipped drop(s) saute(s).");
+}
+return $failed;
+}
+
+# --- Cibles : la table vive, puis l'archive si configuree ET presente ------
+my $total_failed = run_table('CHANNEL_LOG');
+
+my $adb = $conf->{'mysql.CHANNEL_LOG_ARCHIVE_DBNAME'} // '';
+if ($adb =~ /\A[A-Za-z0-9_]{1,64}\z/) {
+    my ($present) = $dbh->selectrow_array(
+        'SELECT COUNT(*) FROM information_schema.TABLES'
+        . ' WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
+        undef, $adb, 'CHANNEL_LOG_ARCHIVE');
+    if ($present) {
+        $total_failed += run_table("$adb.CHANNEL_LOG_ARCHIVE");
+    }
+    else {
+        say_out('');
+        say_out("Archive $adb.CHANNEL_LOG_ARCHIVE configuree mais absente — ignoree"
+              . ' (elle sera creee LIKE au premier archivage; relancer ensuite).');
+    }
+}
+else {
+    say_out('');
+    say_out('Pas de table d\'archive configuree (CHANNEL_LOG_ARCHIVE_DBNAME) — vif seulement.');
 }
 $dbh->disconnect;
-exit($failed ? 2 : 0);
+exit($total_failed ? 2 : 0);

@@ -46,7 +46,9 @@ return sub {
 
     $assert->like($norm, qr/if \(\$verb eq 'DROP' && \$add_failed\)/,
         'normalize saute les DROP projetes apres echec ADD');
-    $assert->like($norm, qr/exit\(\$failed \? 2 : 0\)/,
+    # mb584: le pipeline traite desormais vif + archive — le code retour
+    # agrege les echecs des deux tables (run_table retourne $failed).
+    $assert->like($norm, qr/exit\(\$total_failed \? 2 : 0\)/,
         'normalize retourne non-zero si une action echoue');
 
     $assert->like($sample, qr/Other lifetime commands\/achievements still read only\n# the live table/,

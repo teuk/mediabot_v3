@@ -2,19 +2,22 @@ package Mediabot::PluginManager;
 
 use strict;
 use warnings;
+use File::Spec;
+use JSON::PP ();
 use utf8;
 
-use Scalar::Util qw(refaddr);
+use Scalar::Util qw(refaddr blessed);
 
 # ---------------------------------------------------------------------------
 # Mediabot::PluginManager
 # ---------------------------------------------------------------------------
-# Active manager for trusted in-process Perl plugins.
+# Active manager for trusted in-process Perl plugins and declarative external
+# script plugins.
 #
 # It owns registration, replacement, unregister cleanup and configuration-driven
 # loading behind Mediabot's explicit plugins.AUTOLOAD boot gate. External
-# Perl/Python/Tcl scripts stay out of process: ScriptDryRun delegates them to
-# ScriptRunner across the mediabot-script-v1 boundary.
+# Perl/Python/Tcl scripts stay out of process: ScriptDryRun and plugin-v2 sidecars
+# delegate execution to ScriptRunner across the mediabot-script-v1 boundary.
 # ---------------------------------------------------------------------------
 
 sub new {
@@ -119,7 +122,10 @@ sub register_plugin {
         description => $args{description},
         enabled     => exists $args{enabled} ? ($args{enabled} ? 1 : 0) : 1,
         metadata    => (ref($args{metadata}) eq 'HASH') ? { %{ $args{metadata} } } : {},
+        # mb586-B1: manifest v2 valide (undef pour un plugin v1 legacy).
+        manifest    => (ref($args{manifest}) eq 'HASH') ? $args{manifest} : undef,
     };
+    $entry->{metadata}{api} ||= $entry->{manifest} ? 2 : 1;
 
     if (!exists $self->{plugins}{$name}) {
         push @{ $self->{order} }, $name;
@@ -135,6 +141,20 @@ sub register_plugin {
     my $previous_object = $previous_entry ? $previous_entry->{object} : undef;
     my $replacement_object = $entry->{object};
     my $replacement_is_same_object = _same_plugin_object($previous_object, $replacement_object);
+
+    # mb587-B1: replace avec objet different = les commandes montees de
+    # l'ancien objet tombent (le chemin de load remontera celles du nouveau).
+    # Un same-object refresh les conserve (metadata refresh mb248).
+    if ($previous_entry
+        && !$replacement_is_same_object
+        && !$args{defer_command_cleanup}) {
+        $self->_unmount_entry_commands($previous_entry);
+    }
+    elsif ($previous_entry
+        && $replacement_is_same_object
+        && !$args{defer_command_cleanup}) {
+        $entry->{mounted_commands} = $previous_entry->{mounted_commands};
+    }
 
     if ($previous_entry
         && !$args{defer_unregister_cleanup}
@@ -163,6 +183,11 @@ sub unregister_plugin {
     return 0 unless exists $self->{plugins}{$key};
 
     my $entry = $self->{plugins}{$key};
+
+    # mb587-B1: demonter les commandes du registry AVANT le teardown objet —
+    # une commande fantome qui dispatche vers un plugin retire serait le
+    # jumeau exact des listeners fantomes mb233.
+    $self->_unmount_entry_commands($entry);
 
     # mb244-B1: explicit plugin unregister must also give the plugin object a
     # chance to remove runtime hooks such as EventBus listeners.  MB242 already
@@ -420,6 +445,448 @@ sub load_configured_plugins {
 }
 
 
+# ---------------------------------------------------------------------------
+# mb586-B1: contrat plugin v2 — le MANIFEST.
+#
+# Un plugin v2 expose une sub manifest retournant un HASH declaratif :
+#   { api => 2, name => 'demo', version => '0.001',
+#     description => '...',
+#     commands => { hello => { help => 'Say hello.', level => 0 } },
+#     events   => [ 'public_command_observed' ] }
+#
+# La validation est FAIL-CLOSED et se joue AVANT $module->register() : un
+# manifest invalide ne produit AUCUN effet de bord (meme discipline que le
+# refus de doublon mb233 place avant require/register). Un module SANS
+# manifest reste un plugin v1 legacy, accepte tel quel (api=1) — zero
+# regression sur l'existant. Ce round pose le contrat et ses gardes ; le
+# montage automatique des commandes declarees dans le CommandRegistry est
+# l'increment suivant de l'arc v2.
+# ---------------------------------------------------------------------------
+sub _validate_manifest {
+    my ($self, $module, $key, $m, %vopt) = @_;
+
+    return 'manifest must return a HASH reference' unless ref($m) eq 'HASH';
+    return 'manifest api must be the integer 2'
+        unless defined $m->{api} && !ref($m->{api}) && $m->{api} =~ /\A2\z/;
+
+    my $name = $m->{name};
+    return 'manifest name is required'
+        unless defined $name && !ref($name) && length $name;
+    return "manifest name '$name' is not a valid slug"
+        unless $name =~ /\A[a-z0-9][a-z0-9_-]{0,31}\z/;
+    # le manifest ne peut pas usurper une autre identite : son name doit
+    # correspondre au nom d'enregistrement, complet ou dernier segment.
+    my $short = lc($module); $short =~ s/.*:://;
+    # mb590-B1: pour un script, l'identite courte = basename sans extension
+    # (plugins/hello.py -> hello) ; pour un module Perl, dernier segment.
+    (my $script_short = $short) =~ s{.*/}{}; $script_short =~ s/\.[a-z0-9]+\z//;
+    return "manifest name '$name' does not match registration '$key'"
+        unless lc($name) eq $key || lc($name) eq $short
+            || lc($name) eq $script_short;
+
+    return 'manifest version is required (digits and dots, e.g. 0.001)'
+        unless defined $m->{version} && !ref($m->{version})
+            && $m->{version} =~ /\A[0-9]+(?:\.[0-9]+){0,3}\z/;
+
+    if (defined $m->{description}) {
+        return 'manifest description must be a short scalar'
+            if ref($m->{description}) || length($m->{description}) > 200;
+    }
+
+    if (defined $m->{commands}) {
+        return 'manifest commands must be a HASH' unless ref($m->{commands}) eq 'HASH';
+        my $registry = $self->{bot} && eval { $self->{bot}->can('registry') }
+            ? eval { $self->{bot}->registry } : undef;
+        for my $cmd (sort keys %{ $m->{commands} }) {
+            return "manifest command '$cmd' is not a valid command name"
+                unless $cmd =~ /\A[a-z][a-z0-9_]{0,23}\z/;
+            my $spec = $m->{commands}{$cmd};
+            return "manifest command '$cmd' spec must be a HASH"
+                unless ref($spec) eq 'HASH';
+            return "manifest command '$cmd' needs a short help string"
+                unless defined $spec->{help} && !ref($spec->{help})
+                    && length($spec->{help}) && length($spec->{help}) <= 200;
+            # mb589-B1: le pont d'autorisation est la — le contrat level
+            # devient auto-documente : 0 = commande publique, sinon une
+            # DESCRIPTION de la table USER_LEVEL de l'instance ('Owner',
+            # 'Master', 'Administrator', 'User'...), verifiee au dispatch
+            # via checkUserLevel (semantique maison : plus petit = plus
+            # fort). Les entiers >0 du contrat mb586 n'ont JAMAIS ete
+            # montables (refus mb587) : les refuser avec un message de
+            # migration ne casse aucun plugin existant.
+            return "manifest command '$cmd' level must be 0 (public) or a"
+                 . " USER_LEVEL description string such as 'Master'"
+                unless defined $spec->{level} && !ref($spec->{level});
+            if ($spec->{level} =~ /\A[0-9]+\z/) {
+                return "manifest command '$cmd' has numeric level"
+                     . " $spec->{level}: since mb589 declare 0 (public) or a"
+                     . " USER_LEVEL description string such as 'Master'"
+                    if $spec->{level} > 0;
+            }
+            else {
+                return "manifest command '$cmd' level '$spec->{level}' is not"
+                     . " a valid USER_LEVEL description"
+                    unless $spec->{level} =~ /\A[A-Za-z][A-Za-z ]{1,31}\z/;
+            }
+            # collision fail-closed : ni le registry du bot... — SAUF si la
+            # commande enregistree appartient deja a CE plugin (mb588 : un
+            # reload/replace de soi-meme n'est pas une collision ; l'entry
+            # registry porte plugin=>$key depuis le montage mb587).
+            if ($registry && eval { $registry->can('command_for') }) {
+                my $existing = eval { $registry->command_for($cmd) };
+                if ($existing
+                    && !(defined $existing->{plugin} && $existing->{plugin} eq $key)) {
+                    return "manifest command '$cmd' collides with an existing bot command";
+                }
+            }
+            # ...ni un autre plugin deja enregistre.
+            for my $other (@{ $self->{order} }) {
+                next if $other eq $key;
+                my $om = $self->{plugins}{$other}{manifest} or next;
+                return "manifest command '$cmd' collides with plugin '$other'"
+                    if ref($om->{commands}) eq 'HASH' && exists $om->{commands}{$cmd};
+            }
+            # fail-closed : un manifest qui declare une commande que le module
+            # n'implemente pas (sub command_<nom>) est un manifest menteur.
+            # mb590-B1: pour un SCRIPT hors process il n'y a pas de methode a
+            # verifier — le mensonge ne se detecte qu'a l'execution (le run
+            # echoue et le canal recoit un message sobre) ; skip documente.
+            return "manifest command '$cmd' has no matching method command_$cmd"
+                unless $vopt{skip_method_check} || $module->can("command_$cmd");
+        }
+    }
+
+    if (defined $m->{events}) {
+        return 'manifest events must be an ARRAY' unless ref($m->{events}) eq 'ARRAY';
+        for my $ev (@{ $m->{events} }) {
+            return 'manifest events must be simple event names'
+                unless defined $ev && !ref($ev) && $ev =~ /\A[a-z][a-z0-9_]*\z/;
+        }
+    }
+
+    return undef;
+}
+
+# mb587-B1: montage des commandes du manifest dans le CommandRegistry
+# (source 'public'). Le handler enregistre est un wrapper qui verifie
+# l'etat enabled du plugin a CHAQUE dispatch (un plugin disable se tait
+# sans etre decharge), puis appelle $object->command_<nom>($ctx). La
+# validation mb586/587 a deja garanti l'absence de collision et l'existence
+# des methodes ; un echec residuel demonte ce qui vient d'etre monte
+# (atomicite) et remonte l'erreur. L'entry memorise mounted_commands pour
+# le demontage a l'unregister/replace.
+# mb589-B1: verification d'autorisation d'une commande de plugin a niveau.
+# Retourne (1) si le dispatch peut continuer, (0, raison courte) sinon.
+# L'identite vient de get_user_from_message (le meme chemin que logBot et
+# les commandes du bot) ; le niveau est compare par checkUserLevel — la
+# methode du bot si elle existe (fixtures comprises), sinon le helper
+# qualifie. Fail-closed de bout en bout : pas de message dans le ctx, user
+# inconnu, non authentifie, ou niveau insuffisant = refus.
+sub _plugin_command_authorized {
+    my ($bot, $ctx, $required) = @_;
+
+    return 1 if !defined($required) || $required eq '0';
+
+    my $message = eval { $ctx->message };
+    return (0, 'no message context') unless $message;
+
+    my $user = eval { Mediabot::Helpers::get_user_from_message($bot, $message) };
+    return (0, 'unknown user') unless $user;
+    return (0, 'not authenticated')
+        unless eval { $user->is_authenticated };
+
+    my $ok = eval {
+        $bot->can('checkUserLevel')
+            ? $bot->checkUserLevel($user->level, $required)
+            : Mediabot::Helpers::checkUserLevel($bot, $user->level, $required);
+    };
+    return (0, "requires $required level") unless $ok;
+    return 1;
+}
+
+sub _mount_manifest_commands {
+    my ($self, $key, $entry) = @_;
+
+    my $manifest = $entry->{manifest};
+    return 1 unless $manifest && ref($manifest->{commands}) eq 'HASH'
+                 && %{ $manifest->{commands} };
+    my $registry = $self->{bot} && eval { $self->{bot}->can('registry') }
+        ? eval { $self->{bot}->registry } : undef;
+    die "PluginManager: cannot mount commands for plugin '$key': command registry unavailable\n"
+        unless $registry;
+
+    my $object = $entry->{object};
+    my $kind   = $entry->{metadata}{kind} // 'module';
+    if ($kind ne 'script') {
+        die "PluginManager: plugin '$key' commands require a registered object\n"
+            unless blessed($object);
+    }
+    my @mounted;
+    for my $cmd (sort keys %{ $manifest->{commands} }) {
+        my $spec   = $manifest->{commands}{$cmd};
+        my $method = "command_$cmd";
+        my $ok = eval {
+            $registry->register_command(
+                name        => $cmd,
+                source      => 'public',
+                plugin      => $key,
+                level       => $spec->{level},
+                description => $spec->{help},
+                handler     => sub {
+                    my ($ctx) = @_;
+                    unless ($self->is_enabled($key)) {
+                        # plugin disable : la commande se tait, tracee bas.
+                        eval { $self->{bot}{logger}->log(4,
+                            "plugin '$key' disabled — command '$cmd' ignored") };
+                        return;
+                    }
+                    # mb589-B1: pont d'autorisation — verifie a CHAQUE
+                    # dispatch, jamais fige au montage.
+                    my ($authorized, $deny) =
+                        _plugin_command_authorized($self->{bot}, $ctx, $spec->{level});
+                    unless ($authorized) {
+                        my $nick = eval { $ctx->nick } // '';
+                        eval { $self->{bot}{logger}->log(3,
+                            "plugin '$key' command '$cmd' denied: $deny") };
+                        eval { Mediabot::Helpers::botNotice($self->{bot}, $nick,
+                            "Access denied: '$cmd' requires $spec->{level} level.") }
+                            if length $nick && $deny ne 'no message context';
+                        return;
+                    }
+                    # mb590-B1: un plugin SCRIPT dispatche vers le protocole
+                    # mediabot-script-v1 existant (run hors process + actions
+                    # appliquees par ScriptActionRunner) ; un module appelle
+                    # sa methode in-process comme depuis mb587.
+                    return $kind eq 'script'
+                        ? $self->_dispatch_script_command($key, $entry, $cmd, $ctx)
+                        : $object->$method($ctx);
+                },
+            );
+            1;
+        };
+        unless ($ok) {
+            my $err = _plugin_error_text($@, 'register_command failed');
+            $registry->unregister_command($_, 'public') for @mounted;
+            die "PluginManager: mounting command '$cmd' for plugin '$key' failed: $err\n";
+        }
+        push @mounted, $cmd;
+    }
+    $entry->{mounted_commands} = \@mounted;
+    return 1;
+}
+
+sub _unmount_entry_commands {
+    my ($self, $entry) = @_;
+    return 0 unless $entry && ref($entry->{mounted_commands}) eq 'ARRAY';
+    my $registry = $self->{bot} && eval { $self->{bot}->can('registry') }
+        ? eval { $self->{bot}->registry } : undef;
+    return 0 unless $registry;
+    $registry->unregister_command($_, 'public')
+        for @{ $entry->{mounted_commands} };
+    $entry->{mounted_commands} = [];
+    return 1;
+}
+
+# mb590-B1: dispatch d'une commande de plugin SCRIPT — reutilise le chemin
+# d'execution mediabot-script-v1 de bout en bout : run_script (gardes de
+# chemin, langage perl/python/tcl, timeout, bornes stdout/actions du runner)
+# puis apply_actions en vif avec apply+allow_irc SEULEMENT — les gates
+# intrusives (topic/kick/ban) restent fermees par defaut, exactement comme
+# le veut leur modele mb545/554/564.
+sub _dispatch_script_command {
+    my ($self, $key, $entry, $cmd, $ctx) = @_;
+
+    my $bot    = $self->{bot};
+    my $runner = eval { $bot->script_runner };
+    my $ar     = eval { $bot->script_action_runner };
+    my $nick    = eval { $ctx->nick }    // '';
+    my $channel = eval { $ctx->channel } // '';
+    unless ($runner && $ar) {
+        eval { $bot->{logger}->log(1,
+            "plugin '$key': script runtime unavailable for '$cmd'") };
+        return;
+    }
+
+    my @args = eval { @{ $ctx->args || [] } };
+    my $result = eval {
+        $runner->run_script(
+            $entry->{metadata}{script_path},
+            'public_command',
+            channel => $channel,
+            target  => $channel,
+            nick    => $nick,
+            command => $cmd,
+            args    => \@args,
+        );
+    };
+    unless (ref($result) eq 'HASH' && $result->{ok}) {
+        my $why = ref($result) eq 'HASH' ? ($result->{error} // 'script failed')
+                                         : ($@ || 'script failed');
+        $why =~ s/[\r\n\0]+/ /g;
+        eval { $bot->{logger}->log(1,
+            "plugin '$key' script command '$cmd' failed: $why") };
+        eval { Mediabot::Helpers::botNotice($bot, $nick,
+            "Command '$cmd' failed (script error).") } if length $nick;
+        return;
+    }
+
+    my $context = { event => 'public_command', channel => $channel,
+                    target => $channel, nick => $nick,
+                    command => $cmd, args => \@args };
+    my $plan;
+    my $applied = eval {
+        $plan = $ar->apply_actions($result, $context,
+            apply => 1, allow_irc => 1);
+        1;
+    };
+    unless ($applied && ref($plan) eq 'HASH' && $plan->{applied_ok}) {
+        my $why = $applied
+            ? join('; ', map { $_->{error} // 'action failed' }
+                @{ $plan->{apply_errors} || [] })
+            : ($@ || 'action apply failed');
+        $why = 'action apply failed' unless length $why;
+        $why =~ s/[\r\n\0]+/ /g;
+        eval { $bot->{logger}->log(1,
+            "plugin '$key' script command '$cmd' action apply failed: $why") };
+        eval { Mediabot::Helpers::botNotice($bot, $nick,
+            "Command '$cmd' completed with action errors.") } if length $nick;
+        return;
+    }
+    return 1;
+}
+
+# mb590-B1: chargement d'un plugin SCRIPT v2 — le manifest vit dans un
+# fichier SIDECAR JSON obligatoire (<script>.manifest.json a cote du
+# script). Le chemin passe par validate_script_path du runner (les memes
+# gardes anti-traversal que toute execution), le JSON est borne et decode
+# strictement, la validation reutilise _validate_manifest (method-check
+# saute, documente). L'entry porte kind=script + script_path ; montage,
+# cycle de vie, autorisation et demontage sont EXACTEMENT ceux des plugins
+# in-process.
+our $MAX_SIDECAR_BYTES = 8192;
+
+sub load_script_v2 {
+    my ($self, $rel_path, %opts) = @_;
+
+    die "PluginManager: script path must be a plain scalar\n"
+        if !defined($rel_path) || ref($rel_path) || !length($rel_path);
+
+    my $runner = eval { $self->{bot}->script_runner }
+        or die "PluginManager: no script runner available\n";
+
+    my ($path_ok, $path_err, $language, $full_path) =
+        $runner->validate_script_path($rel_path);
+    die "PluginManager: invalid script path: $path_err\n" unless $path_ok;
+    die "PluginManager: unsupported script language for '$rel_path'\n"
+        unless $language;
+    die "PluginManager: script file not found or not regular: $rel_path\n"
+        unless defined $full_path && -f $full_path;
+
+    # Use the normalized path validated by ScriptRunner for the sidecar and
+    # for later execution metadata. This avoids validating one spelling and
+    # opening another one.
+    $rel_path = File::Spec->abs2rel($full_path, $runner->script_dir);
+    $rel_path =~ s{\\}{/}g;
+
+    (my $base = $rel_path) =~ s{.*/}{};
+    $base =~ s/\.[A-Za-z0-9]+\z//;
+    my $name = $opts{name} || $base;
+    my $key  = _name($name);
+    die "PluginManager: missing plugin name\n" unless defined $key;
+    die "PluginManager: plugin '$key' already registered\n"
+        if exists $self->{plugins}{$key} && !$opts{replace};
+
+    my $sidecar = File::Spec->catfile($runner->script_dir, $rel_path)
+        . '.manifest.json';
+    die "PluginManager: sidecar manifest not found: $rel_path.manifest.json\n"
+        unless -f $sidecar;
+    my ($sidecar_ok, $sidecar_err) = $runner->_path_within_script_dir($sidecar);
+    die "PluginManager: invalid sidecar path: $sidecar_err\n"
+        unless $sidecar_ok;
+
+    my $sidecar_size = -s $sidecar;
+    die "PluginManager: cannot stat sidecar manifest\n"
+        unless defined $sidecar_size;
+    die "PluginManager: sidecar manifest larger than $MAX_SIDECAR_BYTES bytes\n"
+        if $sidecar_size > $MAX_SIDECAR_BYTES;
+
+    open my $fh, '<:raw', $sidecar
+        or die "PluginManager: cannot read sidecar: $!\n";
+    my $json = '';
+    while (length($json) <= $MAX_SIDECAR_BYTES) {
+        my $want = $MAX_SIDECAR_BYTES + 1 - length($json);
+        my $n = read($fh, my $chunk, $want);
+        die "PluginManager: cannot read sidecar: $!\n" unless defined $n;
+        last if $n == 0;
+        $json .= $chunk;
+    }
+    close $fh;
+    die "PluginManager: sidecar manifest larger than $MAX_SIDECAR_BYTES bytes\n"
+        if length($json) > $MAX_SIDECAR_BYTES;
+    my $manifest = eval { JSON::PP->new->decode($json) };
+    die "PluginManager: sidecar manifest is not valid JSON: "
+      . _plugin_error_text($@, 'decode failed') . "\n"
+        unless ref($manifest) eq 'HASH';
+
+    my $why = $self->_validate_manifest($rel_path, $key, $manifest,
+        skip_method_check => 1);
+    die "PluginManager: manifest rejected for $rel_path: $why\n"
+        if defined $why;
+
+    my $previous_entry = ($opts{replace} && exists $self->{plugins}{$key})
+        ? $self->{plugins}{$key} : undef;
+
+    my $effective_enabled = exists $opts{enabled}
+        ? ($opts{enabled} ? 1 : 0)
+        : ($previous_entry ? ($previous_entry->{enabled} ? 1 : 0) : 1);
+
+    my $entry = $self->register_plugin(
+        name        => $key,
+        module      => "script:$rel_path",
+        object      => undef,
+        version     => $manifest->{version},
+        description => $opts{description} // $manifest->{description},
+        enabled     => $effective_enabled,
+        manifest    => $manifest,
+        metadata    => { kind => 'script', script_path => $rel_path },
+        replace     => $opts{replace},
+        defer_unregister_cleanup => 1,
+        defer_command_cleanup    => 1,
+    );
+    $entry->{metadata}{api}  = 2;
+    $entry->{metadata}{kind} = 'script';
+    $entry->{metadata}{script_path} = $rel_path;
+
+    # Transactional replace: keep the previous entry/object alive until the
+    # new manifest is validated and registered, then swap the registry
+    # commands. If mounting fails, restore the previous entry and commands.
+    $self->_unmount_entry_commands($previous_entry) if $previous_entry;
+
+    my $mounted_ok = eval { $self->_mount_manifest_commands($key, $entry); 1 };
+    unless ($mounted_ok) {
+        my $mount_err = _plugin_error_text($@, 'command mount failed');
+        $self->_unmount_entry_commands($entry);
+
+        if ($previous_entry) {
+            $self->{plugins}{$key} = $previous_entry;
+            my $restored = eval {
+                $self->_mount_manifest_commands($key, $previous_entry);
+                1;
+            };
+            unless ($restored) {
+                my $rollback_err = _plugin_error_text($@, 'rollback mount failed');
+                die "PluginManager: $mount_err; rollback failed: $rollback_err\n";
+            }
+        }
+        else {
+            delete $self->{plugins}{$key};
+            @{ $self->{order} } = grep { $_ ne $key } @{ $self->{order} };
+        }
+        die "PluginManager: $mount_err\n";
+    }
+    return $entry;
+}
+
 sub load_perl_module {
     my ($self, $module, %opts) = @_;
 
@@ -465,6 +932,20 @@ sub load_perl_module {
 
     die "PluginManager: failed to load $module: " . _plugin_error_text($@, 'require failed') . "\n" unless $ok;
 
+    # mb586-B1: manifest v2 valide AVANT tout register() (fail-closed, aucun
+    # effet de bord si refus). Absence de manifest = plugin v1 legacy.
+    my ($manifest, $api) = (undef, 1);
+    if ($module->can('manifest')) {
+        my $got = eval { $module->manifest };
+        die "PluginManager: manifest call failed for $module: "
+          . _plugin_error_text($@, 'manifest died') . "\n"
+            unless defined $got || !$@;
+        my $why = $self->_validate_manifest($module, $key, $got);
+        die "PluginManager: manifest rejected for $module: $why\n" if defined $why;
+        $manifest = $got;
+        $api = 2;
+    }
+
     my $object;
     if ($module->can('register')) {
         # mb245-B2: tell the plugin the manager-facing name used for this
@@ -484,27 +965,71 @@ sub load_perl_module {
             unless $registered;
     }
 
+    my $effective_enabled = exists $opts{enabled}
+        ? ($opts{enabled} ? 1 : 0)
+        : ($previous_entry ? ($previous_entry->{enabled} ? 1 : 0) : 1);
+
     my $entry = $self->register_plugin(
         name        => $name,
         module      => $module,
         object      => $object,
-        version     => $module->can('VERSION') ? $module->VERSION : undef,
-        description => $opts{description},
-        enabled     => exists $opts{enabled} ? $opts{enabled} : 1,
+        version     => $manifest ? $manifest->{version}
+                     : ($module->can('VERSION') ? $module->VERSION : undef),
+        description => $opts{description}
+                     // ($manifest ? $manifest->{description} : undef),
+        enabled     => $effective_enabled,
         metadata    => $opts{metadata},
+        manifest    => $manifest,
         replace     => $opts{replace},
         defer_unregister_cleanup => 1,
+        defer_command_cleanup    => 1,
     );
+    $entry->{metadata}{api} = $api;
+
+    # Transactional replace: do not destroy the previous command surface until
+    # the new object and manifest are ready. Swap the registry commands, and
+    # restore the previous entry if mounting fails.
+    my $previous_object = $previous_entry ? $previous_entry->{object} : undef;
+    my $replacement_object = $entry->{object};
+    my $replacement_is_same_object =
+        _same_plugin_object($previous_object, $replacement_object);
+
+    $self->_unmount_entry_commands($previous_entry) if $previous_entry;
+
+    my $mounted_ok = eval { $self->_mount_manifest_commands($key, $entry); 1 };
+    unless ($mounted_ok) {
+        my $mount_err = _plugin_error_text($@, 'command mount failed');
+        $self->_unmount_entry_commands($entry);
+
+        if (ref($replacement_object)
+            && !$replacement_is_same_object
+            && eval { $replacement_object->can('unregister') }) {
+            eval { $replacement_object->unregister(manager => $self) };
+        }
+
+        if ($previous_entry) {
+            $self->{plugins}{$key} = $previous_entry;
+            my $restored = eval {
+                $self->_mount_manifest_commands($key, $previous_entry);
+                1;
+            };
+            unless ($restored) {
+                my $rollback_err = _plugin_error_text($@, 'rollback mount failed');
+                die "PluginManager: $mount_err; rollback failed: $rollback_err\n";
+            }
+        }
+        else {
+            delete $self->{plugins}{$key};
+            @{ $self->{order} } = grep { $_ ne $key } @{ $self->{order} };
+        }
+        die "PluginManager: $mount_err\n";
+    }
 
     # mb249-B1: load_perl_module(..., replace => 1) must mirror the
     # same-object guard already present in direct register_plugin(). Some
     # plugins may return a singleton/current object from register(); in that
     # case the replacement is only a metadata refresh and calling unregister()
     # on the previous object would tear down the still-current plugin hooks.
-    my $previous_object = $previous_entry ? $previous_entry->{object} : undef;
-    my $replacement_object = $entry->{object};
-    my $replacement_is_same_object = _same_plugin_object($previous_object, $replacement_object);
-
     if ($previous_entry
         && ref($previous_object)
         && !$replacement_is_same_object
