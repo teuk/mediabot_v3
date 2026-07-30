@@ -27,7 +27,7 @@ like($dispatch, qr/mediabot_commands_partyline_total.*?command => '\.plugins'/s,
 like($dispatch, qr/_cmd_plugins\(\$stream, \$id, \$1\)/,
     '.plugins dispatch passes optional argument');
 # mb588: .plugins pilote desormais le cycle de vie v2 — le .help l'annonce.
-like($help, qr/\.plugins \[loaded\|config\|load\|unload\|reload\|enable\|disable\] - plugin lifecycle \(v2\)/,
+like($help, qr/\.plugins \[loaded\|config\|load\|loadscript\|unload\|reload\|enable\|disable\] - plugin lifecycle \(v2\)/,
     '.help documents .plugins command');
 
 like($plugins, qr/Read-only Partyline visibility for the active PluginManager state/,
