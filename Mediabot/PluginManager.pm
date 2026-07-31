@@ -740,11 +740,33 @@ sub _dispatch_script_command {
         1;
     };
     unless ($applied && ref($plan) eq 'HASH' && $plan->{applied_ok}) {
-        my $why = $applied
-            ? join('; ', map { $_->{error} // 'action failed' }
-                @{ $plan->{apply_errors} || [] })
-            : ($@ || 'action apply failed');
-        $why = 'action apply failed' unless length $why;
+        # mb591-B3: ScriptActionRunner failures are an external contract.
+        # Never assume a HASH result or HASH-shaped apply_errors: old/custom
+        # runners may return a scalar, and diagnostics may be plain strings.
+        my $why;
+        if (!$applied) {
+            $why = $@ || 'action apply failed';
+        }
+        elsif (ref($plan) ne 'HASH') {
+            $why = 'invalid action apply result';
+        }
+        else {
+            my @errors;
+            if (ref($plan->{apply_errors}) eq 'ARRAY') {
+                for my $error (@{ $plan->{apply_errors} }) {
+                    my $message =
+                        ref($error) eq 'HASH' ? $error->{error}
+                      : !ref($error)          ? $error
+                      :                        undef;
+                    $message = 'action failed'
+                        unless defined($message) && length($message);
+                    $message =~ s/[\r\n\0]+/ /g;
+                    push @errors, $message;
+                }
+            }
+            $why = @errors ? join('; ', @errors) : 'action apply failed';
+        }
+        $why = 'action apply failed' unless defined($why) && length($why);
         $why =~ s/[\r\n\0]+/ /g;
         eval { $bot->{logger}->log(1,
             "plugin '$key' script command '$cmd' action apply failed: $why") };

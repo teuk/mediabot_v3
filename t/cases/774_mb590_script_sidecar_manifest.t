@@ -51,7 +51,7 @@ sub _write_774 {
     sub apply_actions {
         my ($self, $result, $context, %opts) = @_;
         push @{ $self->{applies} }, { opts => {%opts}, context => $context };
-        return 1;
+        return { applied_ok => 1, apply_errors => [] };
     }
     sub events { undef }
     sub checkUserLevel {

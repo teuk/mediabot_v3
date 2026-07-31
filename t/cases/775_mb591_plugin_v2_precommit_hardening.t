@@ -226,6 +226,49 @@ return sub {
         qr/Teuk: Command 'action775' completed with action errors\./,
         'mb591-775: action-plan failure is notified');
 
+    # Legacy/custom action runners may return a scalar instead of a plan.
+    # The plugin wrapper must fail cleanly rather than dereference it.
+    $ar->{plan} = 1;
+    @Mediabot::Helpers::NOTICES = ();
+    my $scalar_ok = eval {
+        $result = $handler->(Ctx775->new(
+            nick => 'Teuk', channel => '#i/o', args => [], message => {},
+        ));
+        1;
+    };
+    $assert->ok($scalar_ok,
+        'mb591-B3-775: scalar action result does not crash dispatch');
+    $assert->ok(!defined $result,
+        'mb591-B3-775: scalar action result is not reported as success');
+    $assert->like($Mediabot::Helpers::NOTICES[0] // '',
+        qr/Teuk: Command 'action775' completed with action errors\./,
+        'mb591-B3-775: scalar action result is notified');
+
+    # Diagnostics are allowed to be strings or hashes. Nested values receive
+    # the generic fallback and must never crash the error path.
+    $ar->{plan} = {
+        applied_ok => 0,
+        apply_errors => [
+            'plain apply failure',
+            { error => 'hash apply failure' },
+            [],
+        ],
+    };
+    @Mediabot::Helpers::NOTICES = ();
+    my $mixed_ok = eval {
+        $result = $handler->(Ctx775->new(
+            nick => 'Teuk', channel => '#i/o', args => [], message => {},
+        ));
+        1;
+    };
+    $assert->ok($mixed_ok,
+        'mb591-B3-775: mixed apply_errors do not crash dispatch');
+    $assert->ok(!defined $result,
+        'mb591-B3-775: mixed apply_errors remain a command failure');
+    $assert->like($Mediabot::Helpers::NOTICES[0] // '',
+        qr/Teuk: Command 'action775' completed with action errors\./,
+        'mb591-B3-775: mixed apply_errors are notified');
+
     my $src = do {
         open my $fh, '<:encoding(UTF-8)', 'Mediabot/PluginManager.pm' or die $!;
         local $/;

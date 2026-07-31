@@ -173,6 +173,6 @@ return sub {
     $assert->like($st->out, qr/Usage: \.plugins \[loaded\|config\|load <Module>/,
         'mb588-772: usage montre le cycle de vie');
     my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline.pm' or die $!; local $/; <$fh> };
-    $assert->like($src, qr/\.plugins \[loaded\|config\|load\|unload\|reload\|enable\|disable\] - plugin lifecycle \(v2\)/,
+    $assert->like($src, qr/\.plugins \[loaded\|config\|load\|loadscript\|unload\|reload\|enable\|disable\] - plugin lifecycle \(v2\)/,
         'mb588-772: .help documente le cycle de vie');
 };

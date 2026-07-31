@@ -95,7 +95,7 @@ my $source = do {
 };
 
 like($source, qr/mb258-B1/, 'PluginManager source contains mb258 refaddr identity marker');
-like($source, qr/use\s+Scalar::Util\s+qw\(refaddr\)/, 'PluginManager imports refaddr for identity checks');
+like($source, qr/use\s+Scalar::Util\s+qw\([^)]*\brefaddr\b[^)]*\)/, 'PluginManager imports refaddr for identity checks');
 unlike($source, qr/\$previous_object"\s+eq\s+"\$replacement_object/, 'PluginManager no longer compares plugin identity by stringification');
 unlike($source, qr/\b(?:system|qx)\b|`[^`]+`/, 'mb258 identity guard does not introduce shell execution');
 

@@ -10,6 +10,16 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb591-B3 — alignement de la suite CI plugins v2
+- Les pins historiques 470 et 772 acceptent le contrat courant :
+  `Scalar::Util` importe maintenant `refaddr` avec `blessed`, et l'aide
+  `.plugins` expose `loadscript`.
+- La fixture 774 retourne le plan structure attendu par ScriptActionRunner.
+- Le wrapper des commandes script ne dereference plus un resultat scalaire et
+  accepte des diagnostics `apply_errors` sous forme de hashes ou de chaines ;
+  les formes imbriquees recoivent un message generique sans faire tomber le
+  dispatch. Le test 775 verrouille ces chemins.
+
 ### mb591 — plugins v2 : derniere garde pre-commit
 - Le replace/reload devient transactionnel jusque dans le montage des
   commandes : l'ancienne entry et ses commandes sont restaurees si le nouveau
