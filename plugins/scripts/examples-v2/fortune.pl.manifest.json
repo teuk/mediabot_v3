@@ -1,0 +1,10 @@
+{
+  "api": 2,
+  "name": "fortune",
+  "version": "1.0",
+  "description": "Random aphorisms by category; the category list is Master-gated.",
+  "commands": {
+    "fortune":  { "help": "fortune [code|irc|life] - one random aphorism.", "level": 0 },
+    "fortunes": { "help": "fortunes - list fortune categories (Master).", "level": "Master" }
+  }
+}

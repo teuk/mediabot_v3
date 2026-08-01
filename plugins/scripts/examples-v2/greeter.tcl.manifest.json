@@ -1,0 +1,7 @@
+{
+  "api": 2,
+  "name": "greeter",
+  "version": "1.0",
+  "description": "Welcomes people joining the channel; stays silent on the bot's own joins.",
+  "events": ["channel_join_observed"]
+}

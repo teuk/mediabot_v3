@@ -1,0 +1,9 @@
+{
+  "api": 2,
+  "name": "lart",
+  "version": "1.0",
+  "description": "Percussive attitude readjustment, the Eggdrop way.",
+  "commands": {
+    "lart": { "help": "lart [nick] - administer a percussive attitude readjustment.", "level": 0 }
+  }
+}

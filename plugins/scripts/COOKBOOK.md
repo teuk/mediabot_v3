@@ -177,3 +177,74 @@ sanitization or truncation cannot make ordinary channel names share a slot.
 - Full sources: `examples/` — fifteen shipped scripts, all covered by the
   test suite (statically, by real execution, and end to end through the
   apply pipeline).
+
+## 10. Plugin v2: declare your commands in a sidecar manifest (mb586-mb592)
+
+Everything above still applies — the envelope, the actions, the survival
+rules. What changes with plugin v2 is HOW your script gets wired to a
+command: no configuration route needed. Put a JSON manifest next to the
+script and let the PluginManager mount it:
+
+    plugins/scripts/examples-v2/coin.py
+    plugins/scripts/examples-v2/coin.py.manifest.json
+
+    {
+      "api": 2,
+      "name": "coin",
+      "version": "1.0",
+      "description": "Coin flips with an anti-abuse cap.",
+      "commands": {
+        "coin": { "help": "coin [n] - flip 1..10 coins.", "level": 0 }
+      }
+    }
+
+Then, from the partyline (Owner):
+
+    .plugins loadscript examples-v2/coin.py
+    Loaded script plugin 'coin' (examples-v2/coin.py, commands: coin)
+
+The contract, in six rules:
+
+1. **The sidecar is mandatory and validated.** Missing, malformed, oversized
+   (8 KB cap) or colliding manifests are refused with the precise reason —
+   nothing is half-mounted. `name` must match the script basename (or the
+   registration name you pass to loadscript).
+2. **`level` is 0 or a USER_LEVEL description.** `0` = public. A string such
+   as `"Master"` makes the auth bridge check the caller's level BEFORE your
+   script is even executed (see `fortunes` in examples-v2/fortune.pl). The
+   semantics are the bot's own: smaller is stronger, an Owner passes a
+   Master command.
+3. **Reply, notice and log actions apply.** Mounted script commands run
+   with `apply + allow_irc`: normal IRC replies/notices and bounded log
+   actions work. Topic, kick, ban and unban stay refused without their
+   dedicated gates; timer actions have no scheduler in this lifecycle.
+4. **Failures stay sober.** A crashing script, an invalid envelope or a
+   failed action never spams the channel: one short notice, the details go
+   to the bot log.
+5. **The lifecycle is the plugin lifecycle.** `.plugins loaded` shows your
+   commands, `enable`/`disable` silences them without unloading,
+   `reload <name>` re-reads the sidecar (a broken edit leaves the previous
+   instance active), `unload <name>` unmounts everything.
+
+6. **Declared events are real subscriptions (mb593).** For a sidecar
+   script, each name in `"events"` must belong to the routable whitelist —
+   `public_command_observed`, `channel_join_observed`,
+   `channel_part_observed`, `channel_topic_observed`,
+   `channel_kick_observed` — and the PluginManager subscribes for you: your
+   script is executed with that event name and a bounded observed context
+   (channel, nick, message, topic, kicked, is_self... depending on the
+   event; `public_command_observed` also carries command and scalar args).
+   Same action gates as commands; failures go to the log only — an
+   event has no caller to notify. `disable` silences the subscription,
+   `unload` removes it. In-process Perl plugins are unchanged: they
+   subscribe themselves in register() and their list stays informational.
+
+       { "api": 2, "name": "greeter", "version": "1.0",
+         "events": ["channel_join_observed"] }
+
+Working three-language examples live in `plugins/scripts/examples-v2/`:
+`fortune.pl` (Perl, includes a Master-gated command), `coin.py` (Python,
+anti-abuse cap), `lart.tcl` (Tcl, dependency-free — in loving memory of
+every Eggdrop that ever ran one), and `greeter.tcl` (Tcl, the event
+showcase: no command at all, one declared `channel_join_observed`, an
+is_self guard, and a warm welcome for everyone else).

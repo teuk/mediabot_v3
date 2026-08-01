@@ -10,6 +10,139 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb597 — garde pre-commit mb592-mb596
+- Le routage d'events sidecar accepte maintenant le vrai
+  Mediabot::Context de public_command_observed : channel, target, nick,
+  command et args scalaires traversent la frontiere JSON au lieu d'un
+  contexte vide. Les contextes de canal restent limites a une liste blanche.
+- Un manifest d'events refuse les doublons et echoue proprement si aucun
+  EventBus complet (on/off) n'est disponible : plus de plugin event charge
+  mais silencieusement inerte. Les erreurs ScriptRunner/apply_actions sont
+  journalisees avec leurs diagnostics bornes.
+- Le quatrieme repli synchrone CommandAsync (echec watch_process) alimente
+  maintenant fallback_sync, comme les replis loop/pipe/fork.
+- Le flood boot partyline ferme reellement le transport avec
+  close_when_empty avant le nettoyage idempotent de session ; sans cela le
+  stream IO::Async pouvait rester vivant avec une session deja supprimee.
+- Documentation corrigee : six regles v2, actions reply/notice/log, contexte
+  public_command_observed, et 35 assertions pour le test des exemples.
+- Test 780 verrouille les contextes benis, doublons, EventBus absent,
+  diagnostics et gardes structurelles ; les tests 778/779 couvrent le
+  quatrieme fallback et la fermeture effective du stream.
+
+
+### mb596 — durcissement du throttle partyline (anti-amplification + flood)
+- Le rate limiter existant (10 lignes / 5 s par session authentifiee,
+  exemption pre-auth conservee) repondait « Rate limit exceeded » a CHAQUE
+  ligne au-dela de la limite : un collage accidentel de 1000 lignes
+  recevait 990 refus — le throttle etait lui-meme un amplificateur.
+- Nouvelles regles, limite INCHANGEE : le refus s'annonce UNE fois par
+  fenetre, les lignes suivantes sont ignorees en silence (comptees) ; et
+  au-dela de 3x la limite dans la meme fenetre (30 lignes), flood
+  caracterise : la session est deconnectee proprement (message court +
+  _close_session idempotent mb366, log niveau 1 avec login et volume).
+- Compteurs cumules _rate_stats{hits, silent_drops, flood_boots} exposes
+  au .status sur une ligne Throttle (memoire seule, contrat mb573).
+- Test 779 (18 assertions) : rafale reelle a travers _handle_line — 10
+  passent, la 11e recoit LE refus, 12..29 silencieuses (drops comptes,
+  session vivante), la 30e deconnecte (stream ferme, session nettoyee,
+  compteur, log niveau 1), nouvelle fenetre = reprise avec rate_warned reset et refus
+  reposable, exemption pre-auth et ligne .status gardees
+  structurellement.
+
+
+### mb595 — .status voit les jobs CommandAsync
+- La ligne Async du .status partyline : nombre de jobs en cours + detail
+  par job ([label] canal pid duree ecoulee, tries du plus ancien au plus
+  recent) + compteurs cumules depuis le demarrage (spawned, completed,
+  timeouts, sync fallbacks, lock refusals). L'operateur voit d'un coup
+  d'oeil le gros classement qui tourne en fond et l'historique de sante
+  du sous-systeme.
+- Compteurs poses aux cinq points du cycle CommandAsync : spawn du worker,
+  succes (avant le rejeu des intents), timeout (chemin timed_out), les
+  QUATRE replis synchrones (pas de loop / pipe / fork / watch_process),
+  et le refus de verrou un-job-par-canal. Le record de job gagne le canal
+  d'origine.
+- Nouvelles fonctions de LECTURE Mediabot::CommandAsync::
+  async_jobs_snapshot / async_stats_snapshot — memoire seule, contrat
+  mb573 respecte a la lettre : .status ne lance rien, ne tue rien,
+  n'attend rien (garde structurelle au test : ni kill ni waitpid ni DB
+  dans la section).
+- Test 778 (22 assertions) : snapshots unitaires (tri par anciennete,
+  elapsed, compteurs absents = 0, liste vide), gardes structurelles des
+  cinq points d'incrementation, rendu reel de la section sur un stream
+  capture, et refus de verrou en conditions reelles via run_ctx_async
+  (compteur incremente, code non execute, notice envoyee).
+
+
+### mb594 — plugins v2 : greeter.tcl, l'exemple event-driven
+- Nouvel exemple plugins/scripts/examples-v2/greeter.tcl : la vitrine du
+  routage d'events mb593 — AUCUNE commande, un seul event declare
+  (channel_join_observed) dans son sidecar ; chaque join lance le script,
+  qui souhaite la bienvenue (pool de formules) et se tait sur le join du
+  bot lui-meme (garde is_self, motif cookbook 6 « stay silent when
+  misrouted »). Tcl core sans dependance, meme technique d'enveloppe que
+  lart.tcl ; l'extraction is_self tolere "1"/1/true.
+- COOKBOOK.md : le greeter rejoint la liste des exemples references.
+- Test 777 (13 assertions) : sidecar strict pur-event, chargement reel
+  depuis le depot (zero commande montee, un listener pose), EXECUTION
+  REELLE tclsh des deux chemins (join utilisateur -> reply contenant le
+  nick ; join du bot -> ok + zero action), unload retire le listener
+  (zero fantome), reference cookbook.
+
+
+### mb593 — plugins v2 : les events du manifest deviennent des routages reels
+- Pour un script sidecar, chaque nom de "events" est desormais un
+  ABONNEMENT : le PluginManager s'abonne sur l'EventBus au load et lance le
+  script avec le nom d'event et un contexte borne (channel, nick, message,
+  topic, kicked, is_self ; command/args pour public_command). Liste blanche
+  %ROUTABLE_SCRIPT_EVENTS = ce que le bot emet aujourd'hui :
+  public_command_observed + channel_{join,part,topic,kick}_observed ; un
+  event hors liste est refuse au load avec la liste dans le message. Les
+  plugins in-process ne changent PAS (ils s'abonnent eux-memes dans
+  register(), leur liste reste informationnelle).
+- Memes gates que les commandes (apply + allow_irc, topic/kick/ban fermes)
+  mais PAS de notice en cas d'echec — un evenement n'a pas d'appelant a
+  prevenir : l'echec va au journal, c'est tout. is_enabled verifie a
+  CHAQUE evenement (disable = silence sans dechargement).
+- Cycle de vie complet, dans le moule transactionnel mb591 : les
+  abonnements suivent exactement les commandes montees — desabonnement a
+  l'unregister (off() par reference exacte, discipline mb242 : zero
+  listener fantome), replace sans doublon, rollback d'un sidecar devenu
+  invalide RESTAURE les abonnements precedents (l'instance restauree route
+  toujours, prouve au test).
+- COOKBOOK chapitre 10 : regle 6 (events = vraies souscriptions, liste
+  blanche, squelette greeter). Test 776 (27 assertions) : refus hors liste
+  avec liste dans le message + zero demi-etat, meme manifest libre pour un
+  module in-process, abonnement + routage reel via emit (event/contexte
+  transmis, gates), echec au journal sans notice, disable/enable, replace
+  sans doublon + nouvel event, rollback restaure et route, unload zero
+  fantome, regle 6 verrouillee.
+
+
+### mb592 — plugins v2 : les exemples et le cookbook
+- Nouveau repertoire plugins/scripts/examples-v2/ : trois scripts complets
+  avec leur sidecar, un par langage. fortune.pl (Perl : pools d'aphorismes
+  par categorie ET une commande 'fortunes' declaree level "Master" — la
+  demonstration vivante du pont d'autorisation : le refus tombe AVANT
+  d'executer le script) ; coin.py (Python : pile ou face, plafond anti-abus
+  1..10, motif cookbook 3) ; lart.tcl (Tcl core sans dependance, technique
+  d'enveloppe minimale d'eightball.tcl — le clin d'oeil Eggdrop assume).
+  Chaque script parle mediabot-script-v1 a l'identique des examples/.
+- COOKBOOK.md : chapitre 10 « Plugin v2: declare your commands in a
+  sidecar manifest » ajoute en fin de fichier (zero renumerotation des
+  chapitres existants) — le contrat en six regles : sidecar obligatoire
+  et valide, level 0 ou description USER_LEVEL (plus petit = plus fort),
+  actions reply/notice/log (topic/kick/ban refuses a l'application),
+  echecs sobres, cycle de vie = celui des plugins.
+- Test 775 (35 assertions) : les trois sidecars charges par load_script_v2
+  avec un VRAI ScriptRunner pointe sur plugins/scripts du depot (montage,
+  niveaux portes par le registry — fortune Master) ; EXECUTION REELLE des
+  trois langages via run_script (perl, python3, tclsh) avec verification
+  ok + action reply non vide ; JSON strict et coherence name=basename ;
+  regles cles du chapitre 10 verrouillees.
+
+
 ### mb591-B3 — alignement de la suite CI plugins v2
 - Les pins historiques 470 et 772 acceptent le contrat courant :
   `Scalar::Util` importe maintenant `refaddr` avec `blessed`, et l'aide

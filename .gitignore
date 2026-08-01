@@ -62,3 +62,6 @@ snap_mediabot*.sh
 
 # Public GitHub Actions workflows are intentionally tracked.
 !.github/workflows/*.yml
+
+# Public plugin v2 sidecar manifests are versioned project artifacts.
+!plugins/scripts/**/*.manifest.json

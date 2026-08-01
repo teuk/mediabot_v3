@@ -96,6 +96,39 @@ sub _replay_intents {
     return 1;
 }
 
+# mb595-B1: instantanes de LECTURE pour l'operateur (.status) — memoire
+# seule, contrat mb573 : jamais une requete, jamais un kill, jamais un
+# waitpid ici. Les jobs actifs sont rendus tries par anciennete avec leur
+# duree ecoulee ; les stats sont une copie a plat des compteurs cumules
+# depuis le demarrage (spawned/completed/timeouts/fallback_sync/
+# lock_refused — absents = 0). Le compteur fallback_sync couvre les quatre
+# replis : loop, pipe, fork et echec d'enregistrement watch_process.
+sub async_jobs_snapshot {
+    my ($self) = @_;
+    my $jobs = $self->{_cmd_async_jobs} || {};
+    my $now  = Time::HiRes::time();
+    my @out;
+    for my $lockkey (sort keys %$jobs) {
+        my $j = $jobs->{$lockkey} or next;
+        push @out, {
+            lockkey => $lockkey,
+            channel => $j->{channel} // $lockkey,
+            label   => $j->{label}   // '?',
+            pid     => $j->{pid}     // 0,
+            elapsed => sprintf('%.1f', $now - ($j->{started} || $now)),
+        };
+    }
+    @out = sort { $b->{elapsed} <=> $a->{elapsed} } @out;
+    return \@out;
+}
+
+sub async_stats_snapshot {
+    my ($self) = @_;
+    my $st = $self->{_cmd_async_stats} || {};
+    return { map { $_ => $st->{$_} || 0 }
+        qw(spawned completed timeouts fallback_sync lock_refused) };
+}
+
 sub run_ctx_async {
     my ($self, $ctx, $label, $code) = @_;
     return 0 unless $self && $ctx && ref($code) eq 'CODE';
@@ -107,7 +140,9 @@ sub run_ctx_async {
 
     # Un seul gros job par canal : proteger MariaDB et l'ordre des reponses.
     $self->{_cmd_async_jobs} ||= {};
+    $self->{_cmd_async_stats} ||= {};
     if ($self->{_cmd_async_jobs}{$lockkey}) {
+        $self->{_cmd_async_stats}{lock_refused}++;
         eval { Mediabot::Helpers::botNotice($self, $nick,
             "Another heavy analysis is already running for $channel — try again in a moment.") };
         return 1;
@@ -119,6 +154,7 @@ sub run_ctx_async {
 
     unless ($can_async) {
         # mb583-B1: fallback SYNCHRONE documente (comportement historique).
+        $self->{_cmd_async_stats}{fallback_sync}++;
         eval { $self->{logger}->log(3,
             "CommandAsync: no async loop, running '$label' synchronously") };
         return $code->();
@@ -130,11 +166,13 @@ sub run_ctx_async {
 
     my ($pipe, $child_write);
     unless (pipe($pipe, $child_write)) {
+        $self->{_cmd_async_stats}{fallback_sync}++;
         eval { $self->{logger}->log(1, "CommandAsync: pipe failed: $!") };
         return $code->();
     }
     my $pid = fork();
     unless (defined $pid) {
+        $self->{_cmd_async_stats}{fallback_sync}++;
         eval { close $pipe }; eval { close $child_write };
         eval { $self->{logger}->log(1, "CommandAsync: fork failed: $!") };
         return $code->();
@@ -210,7 +248,8 @@ sub run_ctx_async {
     # ------------------------------- PARENT --------------------------------
     eval { close $child_write };
     $self->{_cmd_async_jobs}{$lockkey} = { pid => $pid, label => $label,
-        started => Time::HiRes::time() };
+        channel => $channel, started => Time::HiRes::time() };
+    $self->{_cmd_async_stats}{spawned}++;
     eval { $self->{logger}->log(3,
         "CommandAsync: '$label' worker started pid=$pid chan=$channel") };
 
@@ -231,6 +270,7 @@ sub run_ctx_async {
         $cleanup->();
         my $elapsed = sprintf('%.2f', Time::HiRes::time() - $job_started);
         if ($state->{timed_out}) {
+            $self->{_cmd_async_stats}{timeouts}++;
             eval { $self->{logger}->log(1,
                 "CommandAsync: '$label' timed out after ${TIMEOUT_S}s (killed)") };
             eval { Mediabot::Helpers::botNotice($self, $nick,
@@ -246,6 +286,7 @@ sub run_ctx_async {
             }
         }
         if (ref($res) eq 'HASH' && $res->{ok}) {
+            $self->{_cmd_async_stats}{completed}++;
             _replay_intents($self, $res->{intents});
             eval { Mediabot::Helpers::botNotice($self, $nick,
                 "$label: output truncated (too many lines for one run).") }
@@ -294,6 +335,7 @@ sub run_ctx_async {
         1;
     };
     unless ($watch_ok) {
+        $self->{_cmd_async_stats}{fallback_sync}++;
         kill 'KILL', $pid;
         waitpid($pid, 0);
         $cleanup->();

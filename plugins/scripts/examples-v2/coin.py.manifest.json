@@ -1,0 +1,9 @@
+{
+  "api": 2,
+  "name": "coin",
+  "version": "1.0",
+  "description": "Coin flips with an anti-abuse cap.",
+  "commands": {
+    "coin": { "help": "coin [n] - flip 1..10 coins.", "level": 0 }
+  }
+}

@@ -4,9 +4,22 @@ use strict;
 use warnings;
 use File::Spec;
 use JSON::PP ();
+
+# mb593-B1: evenements routables vers les scripts sidecar — la liste blanche
+# exacte de ce que le bot emet aujourd'hui (public_command_observed au
+# dispatch public, channel_<type>_observed via observe_channel_event pour
+# join/part/topic/kick). Etendre cette table quand le bot emettra plus.
+our %ROUTABLE_SCRIPT_EVENTS = map { $_ => 1 } qw(
+    public_command_observed
+    channel_join_observed
+    channel_part_observed
+    channel_topic_observed
+    channel_kick_observed
+);
+
 use utf8;
 
-use Scalar::Util qw(refaddr blessed);
+use Scalar::Util qw(refaddr blessed reftype);
 
 # ---------------------------------------------------------------------------
 # Mediabot::PluginManager
@@ -188,6 +201,8 @@ sub unregister_plugin {
     # une commande fantome qui dispatche vers un plugin retire serait le
     # jumeau exact des listeners fantomes mb233.
     $self->_unmount_entry_commands($entry);
+    # mb593-B1: et desabonner les events routes des scripts, au meme point.
+    $self->_unsubscribe_entry_events($entry);
 
     # mb244-B1: explicit plugin unregister must also give the plugin object a
     # chance to remove runtime hooks such as EventBus listeners.  MB242 already
@@ -558,9 +573,22 @@ sub _validate_manifest {
 
     if (defined $m->{events}) {
         return 'manifest events must be an ARRAY' unless ref($m->{events}) eq 'ARRAY';
+        my %seen_event;
         for my $ev (@{ $m->{events} }) {
             return 'manifest events must be simple event names'
                 unless defined $ev && !ref($ev) && $ev =~ /\A[a-z][a-z0-9_]*\z/;
+            return "manifest event '$ev' is declared more than once"
+                if $vopt{script_events_routable} && $seen_event{$ev}++;
+            # mb593-B1: pour un SCRIPT, un event declare est un ROUTAGE reel
+            # (le PluginManager s'abonne et lance le script) — seule la liste
+            # blanche des evenements observables du bot est acceptee. Les
+            # plugins in-process gardent leur liberte : ils s'abonnent
+            # eux-memes dans register() et leur liste reste informationnelle.
+            if ($vopt{script_events_routable}
+                && !$ROUTABLE_SCRIPT_EVENTS{$ev}) {
+                return "manifest event '$ev' is not routable to scripts"
+                     . " (routable: " . join(', ', sort keys %ROUTABLE_SCRIPT_EVENTS) . ")";
+            }
         }
     }
 
@@ -684,6 +712,197 @@ sub _unmount_entry_commands {
     $registry->unregister_command($_, 'public')
         for @{ $entry->{mounted_commands} };
     $entry->{mounted_commands} = [];
+    return 1;
+}
+
+# mb593-B1: abonnement des events du manifest d'un plugin SCRIPT sur
+# l'EventBus. Chaque listener verifie is_enabled a CHAQUE evenement (un
+# plugin disable observe en silence... c'est-a-dire pas du tout), puis
+# route vers le script par le protocole v1. Les entries rendues par on()
+# sont memorisees dans l'entry pour le desabonnement exact (off() par
+# reference, discipline mb242) sur tout le cycle de vie — un listener
+# fantome de script serait le retour des fantomes mb233. Atomicite : un
+# echec d'abonnement desabonne ceux deja poses et remonte l'erreur.
+sub _subscribe_manifest_events {
+    my ($self, $key, $entry) = @_;
+
+    my $manifest = $entry->{manifest};
+    return 1 unless $manifest && ref($manifest->{events}) eq 'ARRAY'
+                 && @{ $manifest->{events} };
+    my $bus = $self->{bot} && eval { $self->{bot}->can('events') }
+        ? eval { $self->{bot}->events } : undef;
+    die "PluginManager: cannot subscribe events for plugin '$key': event bus unavailable\n"
+        unless $bus && eval { $bus->can('on') && $bus->can('off') };
+
+    my @subscribed;
+    for my $event (@{ $manifest->{events} }) {
+        my $listener = eval {
+            $bus->on($event, sub {
+                my ($ctx) = @_;
+                return unless $self->is_enabled($key);
+                return $self->_dispatch_script_event($key, $entry, $event, $ctx);
+            },
+            plugin => $key,
+            name   => "script:" . ($entry->{metadata}{script_path} // $key) . ":$event");
+        };
+        unless ($listener) {
+            my $err = _plugin_error_text($@, 'event subscribe failed');
+            $bus->off(@$_) for @subscribed;
+            die "PluginManager: subscribing event '$event' for plugin '$key' failed: $err\n";
+        }
+        push @subscribed, [ $event, $listener ];
+    }
+    $entry->{event_listeners} = \@subscribed;
+    return 1;
+}
+
+sub _unsubscribe_entry_events {
+    my ($self, $entry) = @_;
+    return 0 unless $entry && ref($entry->{event_listeners}) eq 'ARRAY';
+    my $bus = $self->{bot} && eval { $self->{bot}->can('events') }
+        ? eval { $self->{bot}->events } : undef;
+    return 0 unless $bus;
+    $bus->off(@$_) for @{ $entry->{event_listeners} };
+    $entry->{event_listeners} = [];
+    return 1;
+}
+
+# mb597-B1: normaliser le contexte EventBus avant la frontiere JSON.
+# Les evenements de canal portent un HASH simple, mais
+# public_command_observed porte un Mediabot::Context (HASH beni). L'ancien
+# test ref($ctx) eq 'HASH' vidait donc completement ce dernier. On expose une
+# liste blanche de champs scalaires et args (ARRAY de scalaires), puis target
+# suit channel comme dans le chemin des commandes.
+sub _script_event_data {
+    my ($ctx) = @_;
+
+    my %data;
+    my $storage = eval { reftype($ctx) } // '';
+    if ($storage eq 'HASH') {
+        for my $key (qw(event_type channel target nick ident host message topic kicked is_self command)) {
+            my $value = $ctx->{$key};
+            $data{$key} = "$value" if defined $value && !ref($value);
+        }
+        if (ref($ctx->{args}) eq 'ARRAY') {
+            my @args;
+            for my $value (@{ $ctx->{args} }) {
+                next unless defined $value && !ref($value);
+                push @args, "$value";
+                last if @args >= 64;
+            }
+            $data{args} = \@args;
+        }
+    }
+    elsif (blessed($ctx)) {
+        for my $key (qw(channel nick command)) {
+            my $value = eval { $ctx->$key() };
+            $data{$key} = "$value" if defined $value && !ref($value);
+        }
+        my $args = eval { $ctx->args };
+        if (ref($args) eq 'ARRAY') {
+            my @clean;
+            for my $value (@$args) {
+                next unless defined $value && !ref($value);
+                push @clean, "$value";
+                last if @clean >= 64;
+            }
+            $data{args} = \@clean;
+        }
+    }
+
+    $data{target} = $data{channel}
+        if !defined($data{target}) && defined($data{channel});
+    return \%data;
+}
+
+sub _script_event_run_error {
+    my ($result, $eval_error) = @_;
+
+    if (ref($result) eq 'HASH') {
+        for my $key (qw(error detail stage)) {
+            my $value = $result->{$key};
+            return _plugin_error_text($value, 'script failed')
+                if defined $value && !ref($value) && length($value);
+        }
+        if (ref($result->{errors}) eq 'ARRAY') {
+            my @errors;
+            for my $value (@{ $result->{errors} }) {
+                next unless defined $value && !ref($value) && length($value);
+                push @errors, _plugin_error_text($value, 'script failed');
+                last if @errors >= 3;
+            }
+            return join('; ', @errors) if @errors;
+        }
+    }
+    return _plugin_error_text($eval_error, 'script failed');
+}
+
+sub _script_event_apply_error {
+    my ($plan, $eval_error) = @_;
+
+    return _plugin_error_text($eval_error, 'action apply failed')
+        unless ref($plan) eq 'HASH';
+    my @errors;
+    if (ref($plan->{apply_errors}) eq 'ARRAY') {
+        for my $item (@{ $plan->{apply_errors} }) {
+            my $value = ref($item) eq 'HASH' ? $item->{error}
+                      : !ref($item)          ? $item
+                      :                       undef;
+            next unless defined $value && length($value);
+            push @errors, _plugin_error_text($value, 'action failed');
+            last if @errors >= 3;
+        }
+    }
+    return @errors ? join('; ', @errors) : 'action apply failed';
+}
+
+# mb593-B1: dispatch d'un EVENEMENT vers un plugin SCRIPT. Meme protocole
+# et memes gates que les commandes (apply + allow_irc seulement) ; en
+# revanche PAS de notice en cas d'echec — un evenement n'a pas d'appelant
+# a prevenir, l'echec va au journal et c'est tout. Le contexte transmis au
+# script est une copie bornee du ctx observe (dont command/args pour
+# public_command_observed).
+sub _dispatch_script_event {
+    my ($self, $key, $entry, $event, $ctx) = @_;
+
+    my $bot    = $self->{bot};
+    my $runner = eval { $bot->script_runner };
+    my $ar     = eval { $bot->script_action_runner };
+    return unless $runner && $ar;
+
+    my $data = _script_event_data($ctx);
+
+    my $result = eval {
+        $runner->run_script($entry->{metadata}{script_path}, $event, %$data);
+    };
+    my $run_error = $@;
+    unless (ref($result) eq 'HASH' && $result->{ok}) {
+        my $why = _script_event_run_error($result, $run_error);
+        eval { $bot->{logger}->log(1,
+            "plugin '$key' script event '$event' failed: $why") };
+        return;
+    }
+
+    my $context = { event => $event,
+                    channel => $data->{channel}, target => $data->{target},
+                    nick => $data->{nick} };
+    my $plan;
+    my $applied = eval {
+        $plan = $ar->apply_actions($result, $context,
+            apply => 1, allow_irc => 1);
+        1;
+    };
+    my $apply_error = $@;
+    unless ($applied && ref($plan) eq 'HASH' && $plan->{applied_ok}) {
+        my $why = !$applied
+            ? _plugin_error_text($apply_error, 'action apply failed')
+            : ref($plan) eq 'HASH'
+                ? _script_event_apply_error($plan, $apply_error)
+                : 'invalid action apply result';
+        eval { $bot->{logger}->log(1,
+            "plugin '$key' script event '$event' action apply failed: $why") };
+        return;
+    }
     return 1;
 }
 
@@ -851,7 +1070,7 @@ sub load_script_v2 {
         unless ref($manifest) eq 'HASH';
 
     my $why = $self->_validate_manifest($rel_path, $key, $manifest,
-        skip_method_check => 1);
+        skip_method_check => 1, script_events_routable => 1);
     die "PluginManager: manifest rejected for $rel_path: $why\n"
         if defined $why;
 
@@ -882,17 +1101,28 @@ sub load_script_v2 {
     # Transactional replace: keep the previous entry/object alive until the
     # new manifest is validated and registered, then swap the registry
     # commands. If mounting fails, restore the previous entry and commands.
-    $self->_unmount_entry_commands($previous_entry) if $previous_entry;
+    # mb593-B1: les abonnements d'evenements suivent exactement le meme
+    # cycle transactionnel que les commandes montees.
+    if ($previous_entry) {
+        $self->_unmount_entry_commands($previous_entry);
+        $self->_unsubscribe_entry_events($previous_entry);
+    }
 
-    my $mounted_ok = eval { $self->_mount_manifest_commands($key, $entry); 1 };
+    my $mounted_ok = eval {
+        $self->_mount_manifest_commands($key, $entry);
+        $self->_subscribe_manifest_events($key, $entry);
+        1;
+    };
     unless ($mounted_ok) {
         my $mount_err = _plugin_error_text($@, 'command mount failed');
         $self->_unmount_entry_commands($entry);
+        $self->_unsubscribe_entry_events($entry);
 
         if ($previous_entry) {
             $self->{plugins}{$key} = $previous_entry;
             my $restored = eval {
                 $self->_mount_manifest_commands($key, $previous_entry);
+                $self->_subscribe_manifest_events($key, $previous_entry);
                 1;
             };
             unless ($restored) {

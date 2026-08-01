@@ -1587,11 +1587,40 @@ sub _handle_line {
         if ($now - ($session->{rate_window} // $now) >= 5) {
             $session->{rate_window} = $now;
             $session->{rate_count}  = 0;
+            $session->{rate_warned} = 0;
         }
         $session->{rate_count}++;
         if ($session->{rate_count} > 10) {
-            $self->{bot}->{logger}->log(2, "Partyline: rate limit hit for fd=$id login=" . ($session->{login} || 'anon'));
-            $stream->write("Rate limit exceeded. Slow down.\r\n");
+            # mb596-B1: anti-amplification et anti-flood. L'ancien code
+            # repondait « Rate limit exceeded » a CHAQUE ligne au-dela de la
+            # limite : un collage accidentel de 1000 lignes recevait 990
+            # refus — le throttle devenait lui-meme un amplificateur. Regles :
+            # le refus s'annonce UNE fois par fenetre, les lignes suivantes
+            # sont ignorees en silence (comptees), et au-dela de 3x la
+            # limite dans la meme fenetre la session est deconnectee
+            # proprement (flood caracterise, modele .boot). Les compteurs
+            # cumules alimentent le .status.
+            $self->{_rate_stats} ||= {};
+            if ($session->{rate_count} >= 30) {
+                $self->{_rate_stats}{flood_boots}++;
+                $self->{bot}->{logger}->log(1,
+                    "Partyline: flood protection boot fd=$id login="
+                    . ($session->{login} || 'anon')
+                    . " (" . $session->{rate_count} . " lines in window)");
+                eval { $stream->write("Flood protection: disconnecting.\r\n") };
+                eval { $stream->close_when_empty }
+                    if $stream && eval { $stream->can('close_when_empty') };
+                $self->_close_session($id);
+                return;
+            }
+            if (!$session->{rate_warned}) {
+                $session->{rate_warned} = 1;
+                $self->{_rate_stats}{hits}++;
+                $self->{bot}->{logger}->log(2, "Partyline: rate limit hit for fd=$id login=" . ($session->{login} || 'anon'));
+                $stream->write("Rate limit exceeded. Slow down.\r\n");
+                return;
+            }
+            $self->{_rate_stats}{silent_drops}++;
             return;
         }
     }
@@ -3691,6 +3720,33 @@ sub _cmd_status {
             else {
                 $stream->write("Loop:     no stall detected\r\n");
             }
+        }
+        # mb595-B1: jobs CommandAsync sous les yeux de l'operateur — memoire
+        # seule (snapshots), contrat mb573 : .status ne lance rien, ne tue
+        # rien, n'attend rien. Un job actif = un gros classement en fond ;
+        # les compteurs cumulés racontent la sante depuis le demarrage.
+        if ($bot_h && eval { require Mediabot::CommandAsync; 1 }) {
+            my $jobs = eval { Mediabot::CommandAsync::async_jobs_snapshot($bot_h) } || [];
+            my $st   = eval { Mediabot::CommandAsync::async_stats_snapshot($bot_h) } || {};
+            $stream->write(sprintf(
+                "Async:    %d running (since start: %d spawned, %d completed,"
+                . " %d timeout(s), %d sync fallback(s), %d lock refusal(s))\r\n",
+                scalar @$jobs,
+                $st->{spawned} // 0, $st->{completed} // 0,
+                $st->{timeouts} // 0, $st->{fallback_sync} // 0,
+                $st->{lock_refused} // 0));
+            for my $j (@$jobs) {
+                $stream->write(sprintf("  - [%s] %s pid=%d running %ss\r\n",
+                    $j->{label}, $j->{channel}, $j->{pid}, $j->{elapsed}));
+            }
+        }
+        # mb596-B1: sante du throttle partyline (memoire seule, meme contrat).
+        {
+            my $rs = $self->{_rate_stats} || {};
+            $stream->write(sprintf(
+                "Throttle: %d rate hit(s), %d silent drop(s), %d flood boot(s)\r\n",
+                $rs->{hits} // 0, $rs->{silent_drops} // 0,
+                $rs->{flood_boots} // 0));
         }
     }
     # IMP24: add global AF status
