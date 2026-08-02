@@ -35,6 +35,22 @@ if {[regexp {"nick"[ \t\r\n]*:[ \t\r\n]*"([^"\\]*)"} $input -> extracted_nick]} 
     }
 }
 
+# mb600: a configured GREETING (sidecar defaults, overridable from the
+# bot's conf as plugins.greeter.GREETING) replaces the pool — change the
+# welcome line without editing this script. %s receives the nick.
+set configured ""
+if {[regexp {"GREETING"[ \t\r\n]*:[ \t\r\n]*"([^"\\]*)"} $input -> extracted_greeting]} {
+    set configured $extracted_greeting
+}
+if {$configured ne ""} {
+    # Treat %s as a literal placeholder, not as a Tcl format program:
+    # operator text such as "100% welcome, %s" must never crash the script.
+    set line [string map [list %s $nick] $configured]
+    set line [json_escape $line]
+    puts "{\"ok\": true, \"protocol\": \"mediabot-script-v1\", \"actions\": \[{\"type\": \"reply\", \"text\": \"$line\"}, {\"type\": \"log\", \"level\": 3, \"text\": \"greeter.tcl welcomed [json_escape $nick] (configured)\"}\]}"
+    exit 0
+}
+
 set greetings [list \
     "Welcome aboard, %s! Pull up a chair." \
     "%s has entered the building." \
@@ -42,6 +58,7 @@ set greetings [list \
     "Make way — %s is here." \
     "Fresh coffee is on, %s. Probably."]
 set line [format [lindex $greetings [expr {int(rand() * [llength $greetings])}]] \
-    [json_escape $nick]]
+    $nick]
+set line [json_escape $line]
 
 puts "{\"ok\": true, \"protocol\": \"mediabot-script-v1\", \"actions\": \[{\"type\": \"reply\", \"text\": \"$line\"}, {\"type\": \"log\", \"level\": 3, \"text\": \"greeter.tcl welcomed [json_escape $nick]\"}\]}"

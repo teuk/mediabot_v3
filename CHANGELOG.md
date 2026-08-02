@@ -10,6 +10,129 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb602 — garde pre-commit mb598-mb601 : frontieres storage/info/diagnostics
+- La persistance accepte maintenant les booleens JSON et reutilise UN SEUL
+  validateur complet aux trois frontieres (plan, ecriture, lecture) : profondeur,
+  nombre/longueur de cles et taille ne peuvent plus diverger. Les fichiers
+  locaux trop profonds, invalides ou symboliques sont ignores et journalises.
+- Le nom de storage est revalide comme slug avant resolution ou purge :
+  `.plugins cleardata` ne peut plus traverser DATA_DIR. Les lectures et
+  `.plugins info` ne creent plus le repertoire ; seul un vrai `store` le cree.
+- `.plugins info` borne chaque texte sur une ligne et masque les cles de config
+  susceptibles de contenir un secret (password/token/key/auth/credentials),
+  sans masquer les champs ordinaires.
+- Les erreurs ScriptRunner imbriquees dans `response.errors` restent visibles ;
+  les echecs d application d actions comptent aussi dans
+  `mediabot_plugin_script_failure_total` pour command ET event.
+- Le greeter remplace `%s` comme placeholder LITTERAL : une formule operateur
+  telle que `100% welcome, %s` ne peut plus etre interpretee comme programme
+  `format` Tcl. Test 785 : booleens, bornes disque, traversal/symlink, lecture
+  pure, redaction/injection, diagnostics/metriques et execution Tcl reelle.
+
+### mb601 — chantier D : persistance KV par plugin (le bot ecrit, le script demande)
+- Nouvelle action de protocole `{"type":"store","data":{...}}` : le script
+  ne touche JAMAIS le disque ; le BOT applique via un store_sink injecte
+  par le PluginManager (modele schedule_timer), gate allow_store fermee
+  par defaut — les routes v1 sans sink echouent explicitement. Bornes
+  validees au plan : objet JSON profondeur <=3, <=256 cles, cle <=64
+  chars, serialisation canonique <=16384 octets ; UN SEUL store applique
+  par run (le premier gagne, les suivants sont des erreurs).
+- Fichier <DATA_DIR>/<name>.json (conf plugins.DATA_DIR, defaut
+  plugin-data/ relatif au CWD, cree 0700), ecrit ATOMIQUEMENT
+  (temp.$$ + rename), borne re-verifiee a l'ecriture. Lecture a CHAQUE
+  dispatch : data.storage arrive FRAIS (l'inverse assume de data.config
+  snapshotee — un compteur perime ne sert a personne) ; un fichier
+  invalide est journalise et ignore, jamais un die sur le chemin d'un
+  dispatch. Ecritures concurrentes : dernier ecrit gagne, documente.
+- Partyline : .plugins cleardata <name> (Owner) purge l'etat ; .plugins
+  info affiche « storage: N bytes (chemin) ». Cookbook regle 8.
+- Sample conf : la section [plugins] devient ACTIVE (en-tete seul, cles
+  commentees — aucune entree Config::Simple) pour que le garde-fou 615
+  couvre plugins.DATA_DIR ; les pins 431/517 evoluent en verrouillant
+  toujours l'esprit « rien d'actif » (unlike DATA_DIR= ajoute).
+- Test 784 (19 assertions) : bornes du store, gates (sans sink=erreur
+  explicite, un seul store, premier gagnant), atomicite structurelle,
+  ROUNDTRIP REEL python (run 1 ecrit n=1, run 2 relit et ecrit n=2, le
+  chemin event pousse n=3), cleardata (gate Owner, purge, inconnu), info
+  storage, cookbook. Pins evolues : 413/416 (listes de types + store),
+  774 (parseur + gate Owner), 781, 412/772/775 (.help), 431/517 (sample).
+
+### mb600 — chantier B : config par plugin dans le sidecar
+- Le sidecar gagne un bloc "config" : les DEFAULTS de l'auteur (<=32 cles
+  MAJUSCULES [A-Z][A-Z0-9_]{0,31}, valeurs scalaires <=512 octets — memes
+  bornes que _normalize_config_map du runner, mais FAIL-CLOSED a la
+  validation : l'auteur apprend tout de suite). L'operateur surcharge
+  n'importe quelle cle depuis la conf du bot en plugins.<name>.<KEY>,
+  sans editer le script ; une surcharge invalide est ignoree avec trace
+  et le defaut conserve — la conf de l'operateur n'empeche jamais un
+  plugin de charger.
+- La config effective est SNAPSHOTEE au load (meme philosophie que la
+  config des routes v1 vs data.network frais, mb552) et .plugins reload
+  relit sidecar ET surcharges. Elle voyage dans data.config aux DEUX
+  dispatchs (commande et event) — le runner la normalisait deja, le
+  protocole n'a pas bouge d'un octet.
+- greeter.tcl devient la demo vivante : son sidecar declare GREETING ;
+  posee dans la conf (plugins.greeter.GREETING = "..."), la formule
+  configuree remplace le pool, %s recoit le nick — zero edition du
+  script. .plugins info affiche la config effective (valeurs tronquees a
+  60 chars). Cookbook regle 7.
+- Test 783 (14 assertions) : 4 refus fail-closed, fusion
+  defaults+surcharge, surcharge >512 ignoree defaut conserve,
+  transmission aux deux dispatchs, plugin sans bloc = rien de transmis,
+  reload relit les surcharges, greeter en EXECUTION REELLE tclsh avec la
+  formule configuree, info + cookbook verrouilles.
+
+
+### mb599 — chantier C : la surface d'evenements s'elargit (nick, quit, cron)
+- observe_channel_event accepte nick et quit. Ce sont des evenements
+  RESEAU — pas de champ channel, la meme realite que les id_channel NULL
+  de mb582. nick : le ctx porte nick (ancien) + new_nick (nouveau) +
+  is_self (le renommage du bot lui-meme est observable). quit : nick,
+  ident/host, message (raison), is_self — et JAMAIS sur netsplit : NS1
+  existe precisement pour eviter le travail cher en rafale, lancer des
+  scripts hors process par dizaines pendant un split serait pire que les
+  ecritures DB deja supprimees.
+- Nouveau observe_cron_event : le bind time d'Eggdrop reincarne. Appele
+  par le tick 5 s existant (eval-garde comme tout observateur), il emet
+  plugin_cron_observed UNE fois par minute (garde _last_cron_stamp,
+  jitter <= 5 s, no-op sans listener) avec minute/hour/dow/mday/month —
+  le script decide si cette minute le concerne, exactement bind time.
+- Le pont scripts suit : liste blanche routable + channel_nick_observed,
+  channel_quit_observed, plugin_cron_observed ; _script_event_data laisse
+  passer new_nick et les champs cron. Cookbook regle 6 mis a jour (liste
+  + le motif « annonce quotidienne = deux tests sur hour et minute »).
+- Pins 728 (mb529/535) evolues : quit n'est plus l'exemple de type refuse
+  (mode le remplace, la garde demeure), six points d'emission au lieu de
+  quatre. Test 782 (26 assertions) : nick/new_nick/pas-de-channel, quit
+  avec raison, inconnu refuse, cron champs numeriques + une emission par
+  minute, sidecar nick+cron accepte, new_nick et hour/dow traversent le
+  pont en conditions reelles, cablages structurels (cron dans le tick,
+  NICK old+new, QUIT jamais netsplit), cookbook verrouille.
+
+
+### mb598 — observabilite du sous-systeme plugins v2 (chantier A)
+- Quatre nouvelles metriques Prometheus declarees dans Metrics :
+  mediabot_plugin_command_total{plugin,command} (dispatchs passes par le
+  pont d'auth — un dispatch autorise dont le script echoue COMPTE),
+  mediabot_plugin_command_denied_total{plugin,command} (refus du pont),
+  mediabot_plugin_event_total{plugin,event} (events routes vers les
+  scripts), mediabot_plugin_script_failure_total{plugin,kind} (echecs par
+  kind command/event). Increments via _pm_metric best-effort : sans objet
+  metrics, aucun die, dispatch inchange.
+- .plugins info <name> en partyline : la fiche complete d'un plugin —
+  identite (etat/kind/api/version), source (module ou chemin de script),
+  description, commandes du manifest avec niveau + compteur d'appels +
+  help, events avec compteur de routage. Mode LECTURE (comme
+  loaded/config) : le parseur de verbes gated reste strictement intact.
+  Usage et .help gagnent info ; pins 412/772/775 evolues avec le contrat.
+- Test 781 (18 assertions) : declaration des 4 metriques (inc reellement
+  incrementable sur le VRAI Mediabot::Metrics), compteurs en conditions
+  reelles (autorise ×2, refus sans dispatch, event route, echec command
+  ET event), best-effort sans metrics, fiche info rendue (compteurs
+  vivants dedans, calls=3 car le dispatch autorise echoue compte), inconnu
+  explique, garde parseur intact.
+
+
 ### mb597 — garde pre-commit mb592-mb596
 - Le routage d'events sidecar accepte maintenant le vrai
   Mediabot::Context de public_command_observed : channel, target, nick,

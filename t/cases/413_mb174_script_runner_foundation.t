@@ -84,7 +84,8 @@ my $case = sub {
         'decode_script_response rejects unsupported action type');
 
     my @types = $runner->allowed_action_types;
-    $assert->(join(',', @types) eq 'ban,kick,log,notice,reply,timer,topic,unban',
+    # mb601: store rejoint les types connus (persistance KV par plugin).
+    $assert->(join(',', @types) eq 'ban,kick,log,notice,reply,store,timer,topic,unban',
         'allowed_action_types returns safe initial action set');
 
     my $sr_file = File::Spec->catfile($root, 'Mediabot', 'ScriptRunner.pm');

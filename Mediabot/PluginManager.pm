@@ -15,6 +15,9 @@ our %ROUTABLE_SCRIPT_EVENTS = map { $_ => 1 } qw(
     channel_part_observed
     channel_topic_observed
     channel_kick_observed
+    channel_nick_observed
+    channel_quit_observed
+    plugin_cron_observed
 );
 
 use utf8;
@@ -137,6 +140,9 @@ sub register_plugin {
         metadata    => (ref($args{metadata}) eq 'HASH') ? { %{ $args{metadata} } } : {},
         # mb586-B1: manifest v2 valide (undef pour un plugin v1 legacy).
         manifest    => (ref($args{manifest}) eq 'HASH') ? $args{manifest} : undef,
+        # mb600-B1: config effective d'un plugin script (defaults sidecar +
+        # surcharges conf), snapshotee au load.
+        plugin_config => (ref($args{plugin_config}) eq 'HASH') ? $args{plugin_config} : undef,
     };
     $entry->{metadata}{api} ||= $entry->{manifest} ? 2 : 1;
 
@@ -571,6 +577,27 @@ sub _validate_manifest {
         }
     }
 
+    # mb600-B1: bloc config du sidecar — les DEFAULTS de l'auteur. Memes
+    # bornes que _normalize_config_map du runner (<=32 cles, cle style conf
+    # MAJUSCULES, valeur scalaire <=512 octets) mais ici FAIL-CLOSED : un
+    # bloc invalide refuse le manifest au lieu d'etre silencieusement
+    # filtre — l'auteur apprend tout de suite.
+    if (defined $m->{config}) {
+        return 'manifest config must be a HASH of defaults'
+            unless ref($m->{config}) eq 'HASH';
+        my @ckeys = keys %{ $m->{config} };
+        return 'manifest config allows at most 32 keys' if @ckeys > 32;
+        for my $ckey (sort @ckeys) {
+            return "manifest config key '$ckey' must match [A-Z][A-Z0-9_]{0,31}"
+                unless $ckey =~ /\A[A-Z][A-Z0-9_]{0,31}\z/;
+            my $cval = $m->{config}{$ckey};
+            return "manifest config value for '$ckey' must be a scalar"
+                if !defined $cval || ref($cval);
+            return "manifest config value for '$ckey' exceeds 512 bytes"
+                if length("$cval") > 512;
+        }
+    }
+
     if (defined $m->{events}) {
         return 'manifest events must be an ARRAY' unless ref($m->{events}) eq 'ARRAY';
         my %seen_event;
@@ -610,6 +637,191 @@ sub _validate_manifest {
 # methode du bot si elle existe (fixtures comprises), sinon le helper
 # qualifie. Fail-closed de bout en bout : pas de message dans le ctx, user
 # inconnu, non authentifie, ou niveau insuffisant = refus.
+# mb601-B1: persistance KV par plugin — LE BOT ecrit, jamais le script.
+# Fichier <DATA_DIR>/<key>.json (DATA_DIR = conf plugins.DATA_DIR, defaut
+# 'plugin-data' relatif au CWD du bot, cree 0700 a la demande). $key est le
+# nom d'enregistrement deja valide (slug) : aucune traversee possible.
+# Ecriture ATOMIQUE (temp + rename), re-verification de la borne 16K a
+# l'ecriture (defense en profondeur apres validate_action). Lecture a
+# CHAQUE dispatch (l'etat doit etre frais, contrairement a la config
+# snapshotee) ; un fichier invalide est journalise et ignore — jamais un
+# die sur le chemin d'un dispatch. Deux dispatchs concurrents : dernier
+# ecrit gagne, documente au cookbook.
+sub _plugin_storage_log {
+    my ($self, $level, $message) = @_;
+    eval { $self->{bot}{logger}->log($level, $message) };
+    return;
+}
+
+sub _plugin_data_dir {
+    my ($self, %opts) = @_;
+
+    my $dir = eval { $self->{bot}{conf}->get('plugins.DATA_DIR') };
+    $dir = 'plugin-data' unless defined $dir && length $dir && !ref($dir);
+
+    if (-e $dir && !-d $dir) {
+        return (undef, "plugin data path '$dir' exists but is not a directory");
+    }
+    return ($dir, undef) if -d $dir;
+
+    # mb602-B1: reads and .plugins info are genuinely read-only. The
+    # directory is created only when a store action needs to write.
+    return (undef, undef) unless $opts{create};
+
+    mkdir $dir, 0700
+        or return (undef, "cannot create plugin data dir '$dir': $!");
+    return ($dir, undef);
+}
+
+sub _plugin_data_key {
+    my ($name) = @_;
+
+    my $key = _name($name);
+    return undef unless defined $key;
+    return undef unless $key =~ /\A[a-z0-9][a-z0-9_-]{0,31}\z/;
+    return $key;
+}
+
+sub _plugin_data_path {
+    my ($self, $name, %opts) = @_;
+
+    my $key = _plugin_data_key($name);
+    return (undef, 'invalid plugin storage name') unless defined $key;
+
+    my ($dir, $err) = $self->_plugin_data_dir(create => ($opts{create} ? 1 : 0));
+    return (undef, $err) unless defined $dir;
+    return (File::Spec->catfile($dir, "$key.json"), undef);
+}
+
+sub _validate_plugin_data_object {
+    my ($obj) = @_;
+
+    my $loaded = eval { require Mediabot::ScriptActionRunner; 1 };
+    return (0, 'storage validator unavailable') unless $loaded;
+    return Mediabot::ScriptActionRunner::validate_storage_object($obj);
+}
+
+sub _read_plugin_data {
+    my ($self, $name) = @_;
+
+    my $key = _plugin_data_key($name);
+    return undef unless defined $key;
+
+    my ($path, $path_err) = $self->_plugin_data_path($key);
+    if (defined $path_err && length $path_err) {
+        $self->_plugin_storage_log(2,
+            "PluginManager: cannot resolve storage for '$key': $path_err");
+        return undef;
+    }
+    return undef unless defined $path && -f $path;
+
+    # A storage file is bot-owned state, never a redirect to another file.
+    if (-l $path) {
+        $self->_plugin_storage_log(1,
+            "PluginManager: ignoring symlink storage file for '$key'");
+        return undef;
+    }
+
+    open my $fh, '<:raw', $path or do {
+        $self->_plugin_storage_log(2,
+            "PluginManager: cannot read storage file for '$key': $!");
+        return undef;
+    };
+    local $/;
+    my $raw = <$fh>;
+    close $fh;
+
+    unless (defined $raw && length($raw) <= 16384 + 1024) {
+        $self->_plugin_storage_log(2,
+            "PluginManager: ignoring oversized storage file for '$key'");
+        return undef;
+    }
+
+    my $obj = eval { JSON::PP->new->decode($raw) };
+    my ($valid, $why) = _validate_plugin_data_object($obj);
+    unless ($valid) {
+        $self->_plugin_storage_log(2,
+            "PluginManager: ignoring invalid storage file for '$key': "
+            . _plugin_error_text($why, 'invalid storage object'));
+        return undef;
+    }
+
+    return $obj;
+}
+
+sub _store_plugin_data {
+    my ($self, $name, $obj) = @_;
+
+    my $key = _plugin_data_key($name);
+    return (0, 'invalid plugin storage name') unless defined $key;
+
+    # mb602-B1: repeat the COMPLETE storage contract at the disk boundary,
+    # not only the 16 KiB check. This protects direct/internal sink callers
+    # and keeps malformed local state out of future dispatch envelopes.
+    my ($valid, $why) = _validate_plugin_data_object($obj);
+    return (0, $why) unless $valid;
+
+    my $json = eval { JSON::PP->new->canonical->encode($obj) };
+    return (0, 'storage object is not JSON-serializable') unless defined $json;
+
+    my ($path, $err) = $self->_plugin_data_path($key, create => 1);
+    return (0, $err) unless defined $path;
+
+    my $tmp = "$path.tmp.$$";
+    open my $fh, '>:raw', $tmp or return (0, "cannot write '$tmp': $!");
+    chmod 0600, $tmp;
+
+    unless (print {$fh} $json) {
+        my $write_err = $!;
+        close $fh;
+        unlink $tmp;
+        return (0, "cannot write '$tmp': $write_err");
+    }
+    close $fh or do { unlink $tmp; return (0, "cannot close '$tmp': $!") };
+    rename $tmp, $path
+        or do { unlink $tmp; return (0, "cannot rename into '$path': $!") };
+    return (1, undef);
+}
+
+sub plugin_data_info {
+    my ($self, $name) = @_;
+
+    my $key = _plugin_data_key($name);
+    return (undef, 'invalid plugin storage name') unless defined $key;
+
+    my ($path, $err) = $self->_plugin_data_path($key);
+    return (undef, $err) if defined $err && length $err;
+    return (undef, undef) unless defined $path && -f $path && !-l $path;
+
+    my $size = -s $path;
+    return ({ path => $path, size => (defined $size ? $size : 0) }, undef);
+}
+
+sub clear_plugin_data {
+    my ($self, $name) = @_;
+
+    my $key = _plugin_data_key($name);
+    return (0, 0, 'invalid plugin storage name') unless defined $key;
+
+    my ($path, $err) = $self->_plugin_data_path($key);
+    return (0, 0, $err) if defined $err && length $err;
+    return (1, 0, undef) unless defined $path && -f $path && !-l $path;
+
+    return (1, 1, undef) if unlink $path;
+    return (0, 0, "cannot clear storage for '$key': $!");
+}
+
+# mb598-B1: increment de metrique best-effort — jamais un die, jamais un
+# prerequis : sans objet metrics (fixtures, conf sans exporter) le dispatch
+# continue exactement comme avant.
+sub _pm_metric {
+    my ($bot, $name, $labels) = @_;
+    my $metrics = eval { $bot->{metrics} };
+    return unless $metrics && eval { $metrics->can('inc') };
+    eval { $metrics->inc($name, $labels) };
+    return;
+}
+
 sub _plugin_command_authorized {
     my ($bot, $ctx, $required) = @_;
 
@@ -673,6 +885,9 @@ sub _mount_manifest_commands {
                     my ($authorized, $deny) =
                         _plugin_command_authorized($self->{bot}, $ctx, $spec->{level});
                     unless ($authorized) {
+                        _pm_metric($self->{bot},
+                            'mediabot_plugin_command_denied_total',
+                            { plugin => $key, command => $cmd });
                         my $nick = eval { $ctx->nick } // '';
                         eval { $self->{bot}{logger}->log(3,
                             "plugin '$key' command '$cmd' denied: $deny") };
@@ -681,6 +896,8 @@ sub _mount_manifest_commands {
                             if length $nick && $deny ne 'no message context';
                         return;
                     }
+                    _pm_metric($self->{bot}, 'mediabot_plugin_command_total',
+                        { plugin => $key, command => $cmd });
                     # mb590-B1: un plugin SCRIPT dispatche vers le protocole
                     # mediabot-script-v1 existant (run hors process + actions
                     # appliquees par ScriptActionRunner) ; un module appelle
@@ -740,6 +957,8 @@ sub _subscribe_manifest_events {
             $bus->on($event, sub {
                 my ($ctx) = @_;
                 return unless $self->is_enabled($key);
+                _pm_metric($self->{bot}, 'mediabot_plugin_event_total',
+                    { plugin => $key, event => $event });
                 return $self->_dispatch_script_event($key, $entry, $event, $ctx);
             },
             plugin => $key,
@@ -779,7 +998,8 @@ sub _script_event_data {
     my %data;
     my $storage = eval { reftype($ctx) } // '';
     if ($storage eq 'HASH') {
-        for my $key (qw(event_type channel target nick ident host message topic kicked is_self command)) {
+        for my $key (qw(event_type channel target nick ident host message topic kicked is_self command
+                        new_nick minute hour dow mday month)) {
             my $value = $ctx->{$key};
             $data{$key} = "$value" if defined $value && !ref($value);
         }
@@ -815,24 +1035,28 @@ sub _script_event_data {
     return \%data;
 }
 
-sub _script_event_run_error {
+sub _script_result_error {
     my ($result, $eval_error) = @_;
 
     if (ref($result) eq 'HASH') {
-        for my $key (qw(error detail stage)) {
-            my $value = $result->{$key};
-            return _plugin_error_text($value, 'script failed')
-                if defined $value && !ref($value) && length($value);
-        }
-        if (ref($result->{errors}) eq 'ARRAY') {
-            my @errors;
-            for my $value (@{ $result->{errors} }) {
-                next unless defined $value && !ref($value) && length($value);
-                push @errors, _plugin_error_text($value, 'script failed');
-                last if @errors >= 3;
+        for my $container ($result,
+            (ref($result->{response}) eq 'HASH' ? $result->{response} : ())) {
+            for my $key (qw(error detail stage)) {
+                my $value = $container->{$key};
+                return _plugin_error_text($value, 'script failed')
+                    if defined $value && !ref($value) && length($value);
             }
-            return join('; ', @errors) if @errors;
+            if (ref($container->{errors}) eq 'ARRAY') {
+                my @errors;
+                for my $value (@{ $container->{errors} }) {
+                    next unless defined $value && !ref($value) && length($value);
+                    push @errors, _plugin_error_text($value, 'script failed');
+                    last if @errors >= 3;
+                }
+                return join('; ', @errors) if @errors;
+            }
         }
+        return 'script timed out' if $result->{timeout};
     }
     return _plugin_error_text($eval_error, 'script failed');
 }
@@ -873,11 +1097,17 @@ sub _dispatch_script_event {
     my $data = _script_event_data($ctx);
 
     my $result = eval {
-        $runner->run_script($entry->{metadata}{script_path}, $event, %$data);
+        my $st = $self->_read_plugin_data($key);
+        $runner->run_script($entry->{metadata}{script_path}, $event, %$data,
+            (ref($entry->{plugin_config}) eq 'HASH' && %{ $entry->{plugin_config} }
+                ? (config => $entry->{plugin_config}) : ()),
+            (defined $st ? (storage => $st) : ()));
     };
     my $run_error = $@;
     unless (ref($result) eq 'HASH' && $result->{ok}) {
-        my $why = _script_event_run_error($result, $run_error);
+        my $why = _script_result_error($result, $run_error);
+        _pm_metric($bot, 'mediabot_plugin_script_failure_total',
+            { plugin => $key, kind => 'event' });
         eval { $bot->{logger}->log(1,
             "plugin '$key' script event '$event' failed: $why") };
         return;
@@ -889,7 +1119,11 @@ sub _dispatch_script_event {
     my $plan;
     my $applied = eval {
         $plan = $ar->apply_actions($result, $context,
-            apply => 1, allow_irc => 1);
+            apply => 1, allow_irc => 1,
+            # mb601-B1: la gate store s'ouvre pour les plugins v2, le sink
+            # ecrit atomiquement sous le nom du plugin.
+            allow_store => 1,
+            store_sink  => sub { $self->_store_plugin_data($key, $_[0]) });
         1;
     };
     my $apply_error = $@;
@@ -901,6 +1135,8 @@ sub _dispatch_script_event {
                 : 'invalid action apply result';
         eval { $bot->{logger}->log(1,
             "plugin '$key' script event '$event' action apply failed: $why") };
+        _pm_metric($bot, 'mediabot_plugin_script_failure_total',
+            { plugin => $key, kind => 'event' });
         return;
     }
     return 1;
@@ -936,14 +1172,21 @@ sub _dispatch_script_command {
             nick    => $nick,
             command => $cmd,
             args    => \@args,
+            # mb600-B1: la config effective du plugin voyage dans data.config
+            # (le runner la normalise deja — _normalize_config_map).
+            (ref($entry->{plugin_config}) eq 'HASH' && %{ $entry->{plugin_config} }
+                ? (config => $entry->{plugin_config}) : ()),
+            do { my $st = $self->_read_plugin_data($key);
+                 defined $st ? (storage => $st) : () },
         );
     };
+    my $run_error = $@;
     unless (ref($result) eq 'HASH' && $result->{ok}) {
-        my $why = ref($result) eq 'HASH' ? ($result->{error} // 'script failed')
-                                         : ($@ || 'script failed');
-        $why =~ s/[\r\n\0]+/ /g;
+        my $why = _script_result_error($result, $run_error);
         eval { $bot->{logger}->log(1,
             "plugin '$key' script command '$cmd' failed: $why") };
+        _pm_metric($bot, 'mediabot_plugin_script_failure_total',
+            { plugin => $key, kind => 'command' });
         eval { Mediabot::Helpers::botNotice($bot, $nick,
             "Command '$cmd' failed (script error).") } if length $nick;
         return;
@@ -955,7 +1198,11 @@ sub _dispatch_script_command {
     my $plan;
     my $applied = eval {
         $plan = $ar->apply_actions($result, $context,
-            apply => 1, allow_irc => 1);
+            apply => 1, allow_irc => 1,
+            # mb601-B1: la gate store s'ouvre pour les plugins v2, le sink
+            # ecrit atomiquement sous le nom du plugin.
+            allow_store => 1,
+            store_sink  => sub { $self->_store_plugin_data($key, $_[0]) });
         1;
     };
     unless ($applied && ref($plan) eq 'HASH' && $plan->{applied_ok}) {
@@ -989,6 +1236,8 @@ sub _dispatch_script_command {
         $why =~ s/[\r\n\0]+/ /g;
         eval { $bot->{logger}->log(1,
             "plugin '$key' script command '$cmd' action apply failed: $why") };
+        _pm_metric($bot, 'mediabot_plugin_script_failure_total',
+            { plugin => $key, kind => 'command' });
         eval { Mediabot::Helpers::botNotice($bot, $nick,
             "Command '$cmd' completed with action errors.") } if length $nick;
         return;
@@ -1074,6 +1323,31 @@ sub load_script_v2 {
     die "PluginManager: manifest rejected for $rel_path: $why\n"
         if defined $why;
 
+    # mb600-B1: config effective = defaults du sidecar surcharges par les
+    # cles plugins.<name>.<KEY> de la conf du bot. SNAPSHOT au load — meme
+    # philosophie que data.config des routes v1 (mb552 : config snapshotee,
+    # network frais) ; .plugins reload relit sidecar ET surcharges. Une
+    # surcharge invalide (ref, >512 octets) est ignoree avec trace : la
+    # conf de l'operateur ne doit jamais empecher un plugin de charger.
+    my $plugin_config;
+    if (ref($manifest->{config}) eq 'HASH' && %{ $manifest->{config} }) {
+        my %effective = %{ $manifest->{config} };
+        my $conf = eval { $self->{bot}{conf} };
+        if ($conf && eval { $conf->can('get') }) {
+            for my $ckey (sort keys %effective) {
+                my $ov = eval { $conf->get("plugins.$key.$ckey") };
+                next unless defined $ov;
+                if (ref($ov) || length("$ov") > 512) {
+                    eval { $self->{bot}{logger}->log(2,
+                        "PluginManager: ignoring invalid override plugins.$key.$ckey") };
+                    next;
+                }
+                $effective{$ckey} = "$ov";
+            }
+        }
+        $plugin_config = \%effective;
+    }
+
     my $previous_entry = ($opts{replace} && exists $self->{plugins}{$key})
         ? $self->{plugins}{$key} : undef;
 
@@ -1090,6 +1364,7 @@ sub load_script_v2 {
         enabled     => $effective_enabled,
         manifest    => $manifest,
         metadata    => { kind => 'script', script_path => $rel_path },
+        plugin_config => $plugin_config,
         replace     => $opts{replace},
         defer_unregister_cleanup => 1,
         defer_command_cleanup    => 1,

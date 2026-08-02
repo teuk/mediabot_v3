@@ -19,7 +19,8 @@ my $case = sub {
         'ScriptActionRunner object can be created');
     $assert->($runner->max_text_length == 40,
         'ScriptActionRunner stores max_text_length');
-    $assert->(join(',', $runner->allowed_action_types) eq 'ban,kick,log,notice,reply,timer,topic,unban',
+    # mb601: store rejoint les types connus (persistance KV par plugin).
+    $assert->(join(',', $runner->allowed_action_types) eq 'ban,kick,log,notice,reply,store,timer,topic,unban',
         'ScriptActionRunner exposes safe initial action types');
 
     my $context = {

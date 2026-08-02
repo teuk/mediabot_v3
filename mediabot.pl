@@ -1218,6 +1218,9 @@ sub on_timer_tick {
     eval { $mediabot->note_tick_for_stall_detection(5); };
     # mb543-B1: keep the network gauges fresh (throttled inside).
     eval { $mediabot->maybe_request_lusers(); };
+    # mb599-B1: plugin cron heartbeat — emits plugin_cron_observed once per
+    # minute (no-op without listeners). Eval-guarded like every observer.
+    eval { $mediabot->observe_cron_event(); };
     my @params = @_;
 
     $mediabot->{logger}->log(5, "on_timer_tick() params: " . scalar(@params) . " args");
@@ -1663,6 +1666,16 @@ sub on_message_NICK {
         %hChannelsNicks = %{$mediabot->gethChannelNicks()};
     }
     my ($old_nick,$new_nick) = @{$hints}{qw<old_nick new_nick>};
+    # mb599-B1: expose nick changes to the EventBus (network-wide event, no
+    # channel field — same reality as mb582's NULL id_channel). nick = the
+    # OLD nick, new_nick = the new one; is_self covers the bot's own rename.
+    {
+        my (undef, $sIdent_o, $sHost_o) = $mediabot->getMessageNickIdentHost($message);
+        eval { $mediabot->observe_channel_event('nick',
+            nick => $old_nick, new_nick => $new_nick,
+            ident => $sIdent_o, host => $sHost_o,
+            is_self => ($self->is_nick_me($old_nick) ? 1 : 0)); };
+    }
     if ($self->is_nick_me($old_nick)) {
         $mediabot->{logger}->log(1,"* Your nick is now $new_nick");
         $self->_set_nick($new_nick);
@@ -1749,6 +1762,16 @@ sub on_message_QUIT {
     # During a netsplit, dozens of QUITs arrive with this pattern.
     # Skip expensive DB operations (logBotAction, updateUserSeen) for these.
     my $is_netsplit = ($text =~ /^\S+\.\S+\s+\S+\.\S+$/);
+    # mb599-B1: expose real quits to the EventBus. NEVER on netsplits — NS1
+    # exists precisely to skip expensive work during splits, and spawning
+    # external script processes by the dozen would be worse than the DB
+    # writes NS1 already suppresses. message = quit reason.
+    unless ($is_netsplit) {
+        eval { $mediabot->observe_channel_event('quit',
+            nick => $sNick, ident => $sIdent, host => $sHost,
+            message => $text,
+            is_self => ($self->is_nick_me($sNick) ? 1 : 0)); };
+    }
     if ($is_netsplit) {
         $mediabot->{logger}->log(2, "NS1: netsplit QUIT suppressed for $sNick (msg: $text)");
         # NS5: do NOT purge Claude history on netsplit QUITs — user will rejoin

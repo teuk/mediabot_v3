@@ -170,9 +170,9 @@ return sub {
     # usage + .help
     $st->reset;
     $pl->_cmd_plugins($st, 7, 'bogus');
-    $assert->like($st->out, qr/Usage: \.plugins \[loaded\|config\|load <Module>/,
+    $assert->like($st->out, qr/Usage: \.plugins \[loaded\|config\|info <name>\|load <Module>/,
         'mb588-772: usage montre le cycle de vie');
     my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline.pm' or die $!; local $/; <$fh> };
-    $assert->like($src, qr/\.plugins \[loaded\|config\|load\|loadscript\|unload\|reload\|enable\|disable\] - plugin lifecycle \(v2\)/,
+    $assert->like($src, qr/\.plugins \[loaded\|config\|info\|load\|loadscript\|unload\|reload\|enable\|disable\|cleardata\] - plugin lifecycle \(v2\)/,
         'mb588-772: .help documente le cycle de vie');
 };

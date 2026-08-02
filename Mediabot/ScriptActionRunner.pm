@@ -6,6 +6,7 @@ use utf8;
 
 use Scalar::Util qw(looks_like_number);
 use Encode qw(encode);
+use JSON::PP ();   # mb601-B1: bornes canoniques de l'action store
 
 # ---------------------------------------------------------------------------
 # Mediabot::ScriptActionRunner
@@ -75,6 +76,7 @@ sub new {
             log    => 1,
             timer  => 1,
             topic  => 1,  # mb545-B1
+            store  => 1,  # mb601-B1: persistance KV par plugin (sink injecte)
             ban    => 1,  # mb564-B1
             kick   => 1,  # mb554-B1
             unban  => 1,  # mb564-B1
@@ -277,6 +279,66 @@ sub _bounded_timer_name {
     return (1, undef, $value);
 }
 
+# mb601-B1: bornes de l'objet de stockage d'un plugin. Volontairement
+# genereuses pour des compteurs/karma, volontairement petites pour le
+# disque : un plugin qui veut plus qu'un carnet de notes veut une base.
+our $MAX_STORE_BYTES = 16384;
+our $MAX_STORE_KEYS  = 256;
+our $MAX_STORE_DEPTH = 3;
+
+sub _count_storage_nodes {
+    my ($node, $depth, $keys_ref) = @_;
+    return 'storage nesting deeper than 3 levels' if $depth > $MAX_STORE_DEPTH;
+
+    # mb602-B1: JSON booleans are blessed scalar references in JSON::PP.
+    # They are legitimate JSON leaves and must not be rejected as arbitrary
+    # Perl references.
+    return undef if JSON::PP::is_bool($node);
+
+    if (ref($node) eq 'HASH') {
+        for my $k (keys %$node) {
+            return 'storage key is not a plain scalar' if ref(\$k) ne 'SCALAR';
+            return 'storage key longer than 64 chars' if length("$k") > 64;
+            $$keys_ref++;
+            return 'storage holds more than 256 keys' if $$keys_ref > $MAX_STORE_KEYS;
+            my $why = _count_storage_nodes($node->{$k}, $depth + 1, $keys_ref);
+            return $why if $why;
+        }
+        return undef;
+    }
+    if (ref($node) eq 'ARRAY') {
+        return 'storage array longer than 256 items' if @$node > $MAX_STORE_KEYS;
+        for my $v (@$node) {
+            my $why = _count_storage_nodes($v, $depth + 1, $keys_ref);
+            return $why if $why;
+        }
+        return undef;
+    }
+    return 'storage value has an unsupported reference type' if ref($node);
+    return undef;
+}
+
+sub _validate_storage_object {
+    my ($data) = @_;
+    return (0, 'store data must be an object') unless ref($data) eq 'HASH';
+    my $keys = 0;
+    my $why = _count_storage_nodes($data, 1, \$keys);
+    return (0, $why) if $why;
+    my $json = eval { JSON::PP->new->canonical->encode($data) };
+    return (0, 'store data is not JSON-serializable') unless defined $json;
+    return (0, "store data exceeds $MAX_STORE_BYTES bytes")
+        if length($json) > $MAX_STORE_BYTES;
+    return (1, undef);
+}
+
+# Shared validator for the action-planning boundary and the PluginManager
+# disk boundary. Keeping one implementation prevents the two contracts from
+# drifting apart.
+sub validate_storage_object {
+    my ($data) = @_;
+    return _validate_storage_object($data);
+}
+
 sub validate_action {
     my ($self, $action, $context) = @_;
 
@@ -292,6 +354,21 @@ sub validate_action {
     # ouvert aux scripts). Mask complet nick!user@host exige, jokers *?
     # admis dans chaque segment, ASCII strict, 90 octets max. Aucun champ
     # target: la meme discipline de scope que kick/topic.
+    # mb601-B1: action store — le script demande au BOT de persister son
+    # etat. Le script n'ecrit jamais lui-meme : l'application passe par un
+    # store_sink injecte par l'appelant (modele schedule_timer). Bornes
+    # validees ICI, avant tout apply : data = objet JSON, profondeur <= 3,
+    # <= 256 cles au total, serialisation canonique <= 16384 octets.
+    if ($type eq 'store') {
+        return (0, 'store action takes no target') if exists $action->{target};
+        return (0, 'store action takes no text')   if exists $action->{text};
+        my ($ok_st, $err_st) = _validate_storage_object($action->{data});
+        return (0, "store action rejected: $err_st") unless $ok_st;
+        # validate_action rend l'action NORMALISEE en 3e position — c'est
+        # elle qui entre au plan et que la boucle d'application verra.
+        return (1, undef, { type => 'store', data => $action->{data} });
+    }
+
     if ($type eq 'ban' || $type eq 'unban') {
         return (0, "$type action takes no target")
             if exists $action->{target};
@@ -689,6 +766,14 @@ sub apply_actions {
     # mb554-B1: gate dediee kick, meme modele que topic.
     my $allow_kick  = $opts{allow_kick} ? 1 : 0;
     my $allow_ban   = $opts{allow_ban} ? 1 : 0;   # mb564-B1
+    # mb601-B1: gate + sink du store — modele schedule_timer : le coderef est
+    # injecte par l'appelant (le PluginManager pour les plugins v2), recoit
+    # ($data, $context) et rend (ok, err). Sans gate ou sans sink, l'action
+    # echoue explicitement ; UN SEUL store applique par run (le premier),
+    # les suivants sont des erreurs — determinisme avant tout.
+    my $allow_store = $opts{allow_store} ? 1 : 0;
+    my $store_sink  = ref($opts{store_sink}) eq 'CODE' ? $opts{store_sink} : undef;
+    my $store_done  = 0;
 
     # mb525-B1: application des timers.
     #   schedule_timer = coderef injecte par l'appelant; recoit l'action
@@ -730,6 +815,30 @@ sub apply_actions {
             }
             else {
                 push @apply_errors, { index => $idx, type => 'log', error => 'log action failed' };
+            }
+            next;
+        }
+
+        if ($action->{type} eq 'store') {
+            unless ($allow_store && $store_sink) {
+                push @apply_errors, { index => $idx, type => 'store',
+                    error => 'store actions require allow_store and a store sink' };
+                next;
+            }
+            if ($store_done) {
+                push @apply_errors, { index => $idx, type => 'store',
+                    error => 'only one store action per run' };
+                next;
+            }
+            my ($ok, $err) = eval { $store_sink->($action->{data}, $context) };
+            $err = $@ || $err || 'store sink failed' unless $ok;
+            if ($ok) {
+                $store_done = 1;
+                push @applied, { index => $idx, type => 'store' };
+            }
+            else {
+                push @apply_errors, { index => $idx, type => 'store',
+                    error => $err };
             }
             next;
         }

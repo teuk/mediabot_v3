@@ -72,9 +72,15 @@ unlike($src, qr/^ACTION_MODE=apply$/m,
 unlike($src, qr/^ALLOW_IRC=yes$/m,
     'sample conf does not actively enable IRC output');
 
-my @plugin_headers = ($src =~ /^#\[plugins\]$/mg);
+# mb601: la section [plugins] devient ACTIVE (en-tete seul, toutes cles
+# commentees — une section vide n'ajoute aucune entree Config::Simple)
+# pour que le garde-fou 615 couvre les cles plugins.* lues par le code.
+# L'esprit du pin reste : RIEN d'actif dans le sample.
+my @plugin_headers = ($src =~ /^\[plugins\]$/mg);
 my @script_headers = ($src =~ /^#\[plugins\.ScriptDryRun\]$/mg);
 is(scalar @plugin_headers, 1, 'sample conf has one commented plugin section');
+unlike($src, qr/^DATA_DIR=/m,
+    'sample conf does not actively set a plugin data dir');
 is(scalar @script_headers, 1, 'sample conf has one commented ScriptDryRun section');
 
 for my $rel (

@@ -58,7 +58,11 @@ like($party, qr/plugin list keys: plugins\.ENABLED, plugins\.enabled, plugins\.P
 like($party, qr/SCRIPT fallback: used only when no route matches; keep scoped in apply mode/,
     'partyline ScriptDryRun config explains fallback scope');
 
-unlike($sample, qr/^\[plugins\]$/m,
+# mb601: l'en-tete [plugins] est desormais ACTIF dans le sample (section
+# vide, toutes cles commentees) pour que le garde-fou 615 couvre les cles
+# plugins.* ; l'esprit du contrat — rien d'actif — reste verrouille par
+# les unlike ci-dessous.
+like($sample, qr/^\[plugins\]$/m,
     'sample does not activate plugins section');
 unlike($sample, qr/^AUTOLOAD=1$/m,
     'sample does not activate plugin autoload');

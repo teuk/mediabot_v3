@@ -230,7 +230,10 @@ The contract, in six rules:
    script, each name in `"events"` must belong to the routable whitelist —
    `public_command_observed`, `channel_join_observed`,
    `channel_part_observed`, `channel_topic_observed`,
-   `channel_kick_observed` — and the PluginManager subscribes for you: your
+   `channel_kick_observed`, `channel_nick_observed` (nick = old nick,
+   `new_nick` = the new one), `channel_quit_observed` (real quits only,
+   never netsplits; both are network-wide — no channel field), and
+   `plugin_cron_observed` — and the PluginManager subscribes for you: your
    script is executed with that event name and a bounded observed context
    (channel, nick, message, topic, kicked, is_self... depending on the
    event; `public_command_observed` also carries command and scalar args).
@@ -241,6 +244,37 @@ The contract, in six rules:
 
        { "api": 2, "name": "greeter", "version": "1.0",
          "events": ["channel_join_observed"] }
+
+   `plugin_cron_observed` fires once per minute (Eggdrop's bind time,
+   reborn): the context carries minute, hour, dow (0=Sunday), mday and
+   month, and YOUR script decides whether this minute matters — return
+   `ok` with an empty action list otherwise (pattern 6). A daily 09:00
+   announcement is a two-line test on hour and minute.
+
+7. **Sidecar config: defaults declared, conf overrides (mb600).** A
+   `"config"` block in the sidecar declares the author's defaults (up to
+   32 UPPERCASE keys, scalar values, 512 bytes each — fail-closed at
+   validation). The operator overrides any key from the bot's conf as
+   `plugins.<name>.<KEY>`, no script edit needed. The effective map is
+   snapshotted at load (reload re-reads sidecar AND overrides — the same
+   philosophy as route config) and delivered to your script as
+   `data.config`. See greeter.tcl: set `plugins.greeter.GREETING` to
+   replace the welcome pool with your own line (`%s` receives the nick).
+
+8. **Persistent storage: the bot writes, your script asks (mb601).** Your
+   script never touches the filesystem. To persist state, emit a `store`
+   action: `{"type": "store", "data": {...}}` — a JSON object, at most 3
+   levels deep, 256 keys, 16 KB serialized, ONE store per run (the whole
+   object replaces the previous one; read-modify-write). The bot writes
+   it atomically to `<DATA_DIR>/<plugin>.json` (conf `plugins.DATA_DIR`,
+   default `plugin-data/`). On every later dispatch your script receives
+   the current object as `data.storage` — read FRESH each time, unlike
+   the snapshotted `data.config` (a stale counter helps nobody).
+   Concurrent runs: last write wins. JSON booleans are valid storage
+   leaves. `.plugins info` shows the file size without creating the storage
+   directory; sensitive config keys are redacted. `.plugins cleardata <name>`
+   (Owner) wipes only a validated plugin slug. Route-v1 scripts have no store
+   sink: their store actions fail explicitly.
 
 Working three-language examples live in `plugins/scripts/examples-v2/`:
 `fortune.pl` (Perl, includes a Master-gated command), `coin.py` (Python,

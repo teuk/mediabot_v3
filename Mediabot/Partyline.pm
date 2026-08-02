@@ -2694,6 +2694,35 @@ sub _cmd_scriptdryrun {
 
 
 # ---------------------------------------------------------------------------
+# Plugin v2 partyline rendering helpers.
+# Keep every manifest/config value on one bounded line, and never expose
+# likely credentials through the read-only .plugins info view.
+sub _plugin_info_text {
+    my ($value, $max) = @_;
+
+    return '' unless defined $value && !ref($value);
+    my $text = "$value";
+    $text =~ s/[\x00-\x1f\x7f]+/ /g;
+    $text =~ s/\s+/ /g;
+    $text =~ s/^\s+|\s+$//g;
+
+    $max = 200 unless defined $max && $max =~ /\A[0-9]+\z/;
+    $text = substr($text, 0, $max - 3) . '...'
+        if $max >= 4 && length($text) > $max;
+    return $text;
+}
+
+sub _plugin_config_display_value {
+    my ($key, $value) = @_;
+
+    my $name = defined($key) && !ref($key) ? uc("$key") : '';
+    return '[redacted]'
+        if $name =~ /(?:\A|_)(?:PASS(?:WORD)?|SECRET|TOKEN|KEY|APIKEY|PRIVATEKEY|ACCESSKEY|CREDENTIALS?|AUTH)(?:\z|_)/;
+
+    return _plugin_info_text($value, 63);
+}
+
+# ---------------------------------------------------------------------------
 # .plugins [loaded|config] - read-only PluginManager visibility
 sub _cmd_plugins {
     my ($self, $stream, $id, $arg) = @_;
@@ -2719,15 +2748,37 @@ sub _cmd_plugins {
     # manquante...).
     my ($verb, @rest) = split /\s+/, $arg;
     $verb = lc($verb // '');
-    if ($verb =~ /\A(?:load|loadscript|unload|reload|enable|disable)\z/) {
+    if ($verb =~ /\A(?:load|loadscript|unload|reload|enable|disable|cleardata)\z/) {
         my $level = $self->{users}{$id}{level};
-        my $need_owner = ($verb =~ /\A(?:load|loadscript|unload|reload)\z/) ? 1 : 0;
+        my $need_owner = ($verb =~ /\A(?:load|loadscript|unload|reload|cleardata)\z/) ? 1 : 0;
         if ($need_owner && !(defined $level && $level == 0)) {
             $stream->write("Access denied: .plugins $verb requires Owner level.\r\n");
             return;
         }
         if (!$need_owner && !(defined $level && $level <= 1)) {
             $stream->write("Access denied: .plugins $verb requires Master or Owner level.\r\n");
+            return;
+        }
+
+        # mb601-B1: purge de l'etat persistant d'un plugin (Owner). Le
+        # plugin peut rester charge : son prochain store repartira de zero.
+        if ($verb eq 'cleardata') {
+            my ($target) = @rest;
+            unless (defined $target && length $target) {
+                $stream->write("Usage: .plugins cleardata <name>\r\n");
+                return;
+            }
+            my ($ok, $removed, $clear_err) = $pm->clear_plugin_data($target);
+            unless ($ok) {
+                $stream->write("Could not clear data for '$target': "
+                    . _plugin_info_text($clear_err, 160) . "\r\n");
+                return;
+            }
+            unless ($removed) {
+                $stream->write("No stored data for plugin '$target'.\r\n");
+                return;
+            }
+            $stream->write("Stored data for plugin '$target' cleared.\r\n");
             return;
         }
 
@@ -2862,10 +2913,87 @@ sub _cmd_plugins {
         return;
     }
 
+    # mb598-B1: .plugins info <name> — la fiche complete d'un plugin, mode
+    # LECTURE (aucune gate au-dela de la session authentifiee, comme
+    # loaded/config) : identite, manifest detaille (commandes avec niveau et
+    # help, events), etat, et les compteurs d'invocation Prometheus quand
+    # l'exporteur est actif. Le parseur de verbes gated reste intact.
+    if ($mode =~ /\Ainfo\s+(\S+)\z/) {
+        my $target = $1;
+        my $entry = $pm->plugin($target);
+        unless ($entry) {
+            $stream->write("Unknown plugin '$target' — see .plugins loaded\r\n");
+            return;
+        }
+        my $state = $entry->{enabled} ? 'enabled' : 'disabled';
+        my $kind  = $entry->{metadata}{kind} // 'module';
+        my $api   = $entry->{metadata}{api}  // 1;
+        $stream->write("Plugin '$entry->{name}' [$state] kind=$kind api=$api"
+            . " version=" . ($entry->{version} // '-') . "\r\n");
+        $stream->write("  source: " . ($kind eq 'script'
+            ? ($entry->{metadata}{script_path} // '?')
+            : ($entry->{module} // '?')) . "\r\n");
+        if (defined $entry->{description} && length $entry->{description}) {
+            $stream->write("  description: "
+                . _plugin_info_text($entry->{description}, 200) . "\r\n");
+        }
+        my $manifest = $entry->{manifest};
+        my $metrics  = eval { $bot->{metrics} };
+        if ($manifest && ref($manifest->{commands}) eq 'HASH'
+            && %{ $manifest->{commands} }) {
+            $stream->write("  commands:\r\n");
+            for my $cmd (sort keys %{ $manifest->{commands} }) {
+                my $spec  = $manifest->{commands}{$cmd};
+                my $level = defined $spec->{level} && $spec->{level} ne '0'
+                    ? $spec->{level} : 'public';
+                my $count = $metrics
+                    ? eval { $metrics->get('mediabot_plugin_command_total',
+                        { plugin => $entry->{name}, command => $cmd }) }
+                    : undef;
+                $stream->write(sprintf("    %-14s level=%-8s calls=%s  %s\r\n",
+                    $cmd, $level, $count // 0,
+                    _plugin_info_text($spec->{help}, 200)));
+            }
+        }
+        else {
+            $stream->write("  commands: none\r\n");
+        }
+        # mb601-B1: etat persistant sur disque, taille reelle du fichier.
+        {
+            my ($storage) = eval { $pm->plugin_data_info($entry->{name}) };
+            if (ref($storage) eq 'HASH') {
+                $stream->write("  storage: " . ($storage->{size} // 0)
+                    . " bytes (" . _plugin_info_text($storage->{path}, 200) . ")\r\n");
+            }
+        }
+        # mb600-B1: config effective (defaults sidecar + surcharges conf).
+        if (ref($entry->{plugin_config}) eq 'HASH' && %{ $entry->{plugin_config} }) {
+            for my $ckey (sort keys %{ $entry->{plugin_config} }) {
+                my $cval = _plugin_config_display_value(
+                    $ckey, $entry->{plugin_config}{$ckey});
+                $stream->write("  config: $ckey=$cval\r\n");
+            }
+        }
+        if ($manifest && ref($manifest->{events}) eq 'ARRAY'
+            && @{ $manifest->{events} }) {
+            for my $ev (@{ $manifest->{events} }) {
+                my $count = $metrics
+                    ? eval { $metrics->get('mediabot_plugin_event_total',
+                        { plugin => $entry->{name}, event => $ev }) }
+                    : undef;
+                $stream->write("  event: $ev routed=" . ($count // 0) . "\r\n");
+            }
+        }
+        else {
+            $stream->write("  events: none\r\n");
+        }
+        return;
+    }
+
     if ($mode ne 'summary' && $mode ne 'loaded') {
-        $stream->write("Usage: .plugins [loaded|config"
+        $stream->write("Usage: .plugins [loaded|config|info <name>"
             . "|load <Module> [name]|loadscript <path> [name]|unload <name>|reload <name>"
-            . "|enable <name>|disable <name>]\r\n");
+            . "|enable <name>|disable <name>|cleardata <name>]\r\n");
         return;
     }
 
@@ -2919,7 +3047,7 @@ sub _cmd_help {
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
-      . "  .plugins [loaded|config|load|loadscript|unload|reload|enable|disable] - plugin lifecycle (v2)\r\n"
+      . "  .plugins [loaded|config|info|load|loadscript|unload|reload|enable|disable|cleardata] - plugin lifecycle (v2)\r\n"
       . "  .scriptdryrun [status|last|config|timers|canceltimers|events|clearevents|reload] - show external script bridge status and last run, pending timers, event windows\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary)\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"

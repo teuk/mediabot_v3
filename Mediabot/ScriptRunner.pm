@@ -107,6 +107,7 @@ sub new {
             unban  => 1,  # mb564-B1
             log    => 1,
             timer  => 1,
+            store  => 1,  # mb601-B1: persistance KV par plugin
         },
     }, $class;
 }
@@ -330,6 +331,18 @@ sub _normalize_event_data {
         # contrat scalaire/ARRAY-de-scalaires, HASH arbitraire -> null.
         if ($safe_key eq 'config' && ref($data{$key}) eq 'HASH') {
             $clean{$safe_key} = _normalize_config_map($data{$key});
+            next;
+        }
+        # mb601-B1: data.storage — l'etat persistant du plugin, relu par le
+        # BOT depuis le disque a CHAQUE dispatch (frais, comme data.network ;
+        # l'inverse de data.config snapshotee — un compteur perime ne sert a
+        # rien). Le contenu a ete valide et borne a l'ECRITURE (action store)
+        # ; ici, defense en profondeur minimale : HASH accepte tel quel si sa
+        # serialisation reste sous la borne, sinon absent.
+        if ($safe_key eq 'storage' && ref($data{$key}) eq 'HASH') {
+            my $json = eval { JSON::PP->new->canonical->encode($data{$key}) };
+            $clean{$safe_key} = $data{$key}
+                if defined $json && length($json) <= 16384;
             next;
         }
         $clean{$safe_key} = _normalize_event_data_value($data{$key});

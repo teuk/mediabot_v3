@@ -441,7 +441,33 @@ sub emit_event_report {
 # Listener errors are isolated by emit_event_report; with no listeners this is
 # a no-op, so the historical IRC handlers keep their exact behavior.
 # mb535-B1: kick ajoute — canal + auteur (nick) + victime (kicked) + raison.
-my %OBSERVABLE_CHANNEL_EVENTS = map { $_ => 1 } qw(join part topic kick);
+# mb599-B1: nick et quit rejoignent la famille observable. Ce sont des
+# evenements RESEAU — pas de champ channel fiable (la meme realite que les
+# id_channel NULL de mb582 : un quit n'appartient a aucun canal). Le champ
+# new_nick porte la cible d'un renommage.
+my %OBSERVABLE_CHANNEL_EVENTS = map { $_ => 1 } qw(join part topic kick nick quit);
+
+# mb599-B1: l'evenement periodique des plugins — le bind time d'Eggdrop
+# reincarne. Appele par le tick 5 s ; n'emet qu'au CHANGEMENT de minute
+# (jitter <= 5 s), et emit_event_report est deja un no-op sans listener :
+# zero cout quand aucun plugin cron n'est charge. Le contexte donne au
+# script tout ce qu'un cron sait : minute, hour, dow (0=dimanche), mday,
+# month (1..12). Le script decide s'il agit — exactement bind time.
+sub observe_cron_event {
+    my ($self) = @_;
+
+    my @lt = localtime(time());
+    my ($min, $hour, $mday, $mon, $dow) = @lt[1, 2, 3, 4, 6];
+    my $stamp = sprintf('%02d:%02d', $hour, $min);
+    return undef if defined $self->{_last_cron_stamp}
+        && $self->{_last_cron_stamp} eq $stamp;
+    $self->{_last_cron_stamp} = $stamp;
+
+    my $ctx = { event_type => 'cron',
+                minute => $min, hour => $hour,
+                dow => $dow, mday => $mday, month => $mon + 1 };
+    return $self->emit_event_report('plugin_cron_observed', $ctx);
+}
 
 sub observe_channel_event {
     my ($self, $type, %data) = @_;
@@ -449,7 +475,7 @@ sub observe_channel_event {
     return undef unless defined $type && !ref($type) && $OBSERVABLE_CHANNEL_EVENTS{$type};
 
     my $ctx = { event_type => $type };
-    for my $key (qw(channel nick ident host message topic kicked is_self)) {
+    for my $key (qw(channel nick ident host message topic kicked is_self new_nick)) {
         my $value = $data{$key};
         next unless defined $value && !ref($value);
         $ctx->{$key} = "$value";

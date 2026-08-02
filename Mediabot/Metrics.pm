@@ -84,6 +84,11 @@ sub new {
     $self->_declare('mediabot_commands_public_total',  'counter', 'Total public IRC commands executed');
     $self->_declare('mediabot_commands_private_total', 'counter', 'Total private IRC commands executed');
     $self->_declare('mediabot_commands_partyline_total','counter','Total Partyline commands executed');
+    # mb598-B1: le sous-systeme plugins v2 devient observable dans Grafana.
+    $self->_declare('mediabot_plugin_command_total','counter','Plugin v2 command dispatches (after the auth bridge)');
+    $self->_declare('mediabot_plugin_command_denied_total','counter','Plugin v2 command dispatches denied by the auth bridge');
+    $self->_declare('mediabot_plugin_event_total','counter','Plugin v2 events routed to sidecar scripts');
+    $self->_declare('mediabot_plugin_script_failure_total','counter','Plugin v2 sidecar script failures by kind');
     $self->_declare('mediabot_command_errors_total',   'counter', 'Total command execution errors');
 
     $self->_declare('mediabot_privmsg_in_total',       'counter', 'Total incoming PRIVMSG lines');

@@ -202,9 +202,10 @@ return sub {
 
     # [4] partyline : loadscript gate + sortie
     my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline.pm' or die $!; local $/; <$fh> };
-    $assert->like($src, qr/\Qload|loadscript|unload|reload|enable|disable\E/,
+    $assert->like($src, qr/\Qload|loadscript|unload|reload|enable|disable|cleardata\E/,
         'mb590-774: loadscript dans le parseur de verbes');
-    $assert->like($src, qr/\Qload|loadscript|unload|reload)\E/,
+    # mb601: cleardata rejoint la gate Owner.
+    $assert->like($src, qr/\Qload|loadscript|unload|reload|cleardata)\E/,
         'mb590-774: loadscript exige Owner');
     $assert->like($src, qr/Loaded script plugin/,
         'mb590-774: sortie partyline annonce le script');

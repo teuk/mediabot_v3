@@ -285,6 +285,6 @@ return sub {
         <$fh>;
     };
     $assert->like($party,
-        qr/\.plugins \[loaded\|config\|load\|loadscript\|unload\|reload\|enable\|disable\]/,
+        qr/\.plugins \[loaded\|config\|info\|load\|loadscript\|unload\|reload\|enable\|disable\|cleardata\]/,
         'mb591-775: partyline help includes loadscript');
 };

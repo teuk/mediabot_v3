@@ -177,7 +177,9 @@ return sub {
                 && ($ctx->{nick} || '') eq 'poyan' && $ctx->{is_self} == 0,
                 'coeur: contexte scalaire complet');
             $assert->ok(!exists $ctx->{junk}, 'coeur: cles non prevues filtrees');
-            $assert->ok(!defined $core->observe_channel_event('quit', channel => '#x'),
+            # mb599: quit est devenu observable — le type invalide de
+            # reference change, la garde (refus des inconnus) demeure.
+            $assert->ok(!defined $core->observe_channel_event('mode', channel => '#x'),
                 'coeur: type non supporte refuse');
         }
         else {
@@ -190,7 +192,8 @@ return sub {
                 "mediabot.pl: emission $ev cablee sous eval");
         }
         my @hooks = $main_src =~ /observe_channel_event\('(\w+)'/g;
-        $assert->ok(@hooks == 4, 'mediabot.pl: exactement quatre points d\'emission (mb535: +kick)');
+        # mb599: nick et quit rejoignent la famille — six points d'emission.
+        $assert->ok(@hooks == 6, 'mediabot.pl: exactement six points d\'emission (mb535: +kick, mb599: +nick +quit)');
     }
 
     # ------------------------------------------------------------------
