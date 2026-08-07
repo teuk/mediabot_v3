@@ -452,20 +452,26 @@ my %OBSERVABLE_CHANNEL_EVENTS = map { $_ => 1 } qw(join part topic kick nick qui
 # (jitter <= 5 s), et emit_event_report est deja un no-op sans listener :
 # zero cout quand aucun plugin cron n'est charge. Le contexte donne au
 # script tout ce qu'un cron sait : minute, hour, dow (0=dimanche), mday,
-# month (1..12). Le script decide s'il agit — exactement bind time.
+# month (1..12) et year. Le script decide s'il agit — exactement bind time.
+# mb605-B1: le stamp inclut la date complete et le contexte inclut l'annee ;
+# un plugin persistant ne doit pas confondre le 4 aout 2026 avec celui de 2027.
 sub observe_cron_event {
     my ($self) = @_;
 
     my @lt = localtime(time());
-    my ($min, $hour, $mday, $mon, $dow) = @lt[1, 2, 3, 4, 6];
-    my $stamp = sprintf('%02d:%02d', $hour, $min);
+    my ($min, $hour, $mday, $mon, $year, $dow) = @lt[1, 2, 3, 4, 5, 6];
+    $year += 1900;
+    my $month = $mon + 1;
+    my $stamp = sprintf('%04d-%02d-%02dT%02d:%02d',
+        $year, $month, $mday, $hour, $min);
     return undef if defined $self->{_last_cron_stamp}
         && $self->{_last_cron_stamp} eq $stamp;
     $self->{_last_cron_stamp} = $stamp;
 
     my $ctx = { event_type => 'cron',
                 minute => $min, hour => $hour,
-                dow => $dow, mday => $mday, month => $mon + 1 };
+                dow => $dow, mday => $mday, month => $month,
+                year => $year };
     return $self->emit_event_report('plugin_cron_observed', $ctx);
 }
 

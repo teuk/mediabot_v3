@@ -701,6 +701,18 @@ sub _validate_plugin_data_object {
     return Mediabot::ScriptActionRunner::validate_storage_object($obj);
 }
 
+sub _mark_plugin_storage_invalid {
+    my ($self, $key) = @_;
+    return unless defined $key;
+    _pm_metric($self->{bot}, 'mediabot_plugin_storage_read_invalid_total',
+        { plugin => $key });
+    # mb605-B1: a rejected file is not a current usable document. Reset the
+    # gauge instead of leaving a stale pre-corruption value in Prometheus.
+    _pm_gauge($self->{bot}, 'mediabot_plugin_storage_bytes', 0,
+        { plugin => $key });
+    return;
+}
+
 sub _read_plugin_data {
     my ($self, $name) = @_;
 
@@ -713,12 +725,19 @@ sub _read_plugin_data {
             "PluginManager: cannot resolve storage for '$key': $path_err");
         return undef;
     }
-    return undef unless defined $path && -f $path;
+    unless (defined $path && -f $path) {
+        # mb605-B1: initialize/reconcile the gauge after restart and after a
+        # missing file. A gauge called storage_bytes must describe NOW.
+        _pm_gauge($self->{bot}, 'mediabot_plugin_storage_bytes', 0,
+            { plugin => $key });
+        return undef;
+    }
 
     # A storage file is bot-owned state, never a redirect to another file.
     if (-l $path) {
         $self->_plugin_storage_log(1,
             "PluginManager: ignoring symlink storage file for '$key'");
+        $self->_mark_plugin_storage_invalid($key);
         return undef;
     }
 
@@ -734,6 +753,7 @@ sub _read_plugin_data {
     unless (defined $raw && length($raw) <= 16384 + 1024) {
         $self->_plugin_storage_log(2,
             "PluginManager: ignoring oversized storage file for '$key'");
+        $self->_mark_plugin_storage_invalid($key);
         return undef;
     }
 
@@ -743,9 +763,16 @@ sub _read_plugin_data {
         $self->_plugin_storage_log(2,
             "PluginManager: ignoring invalid storage file for '$key': "
             . _plugin_error_text($why, 'invalid storage object'));
+        # mb604-B1: un fichier local abime n'est plus seulement une ligne de
+        # journal — il devient une serie visible dans Grafana.
+        $self->_mark_plugin_storage_invalid($key);
         return undef;
     }
 
+    # mb605-B1: after a restart there has been no store call yet, but the
+    # existing valid document is still current state and must seed the gauge.
+    _pm_gauge($self->{bot}, 'mediabot_plugin_storage_bytes', length($raw),
+        { plugin => $key });
     return $obj;
 }
 
@@ -769,7 +796,12 @@ sub _store_plugin_data {
 
     my $tmp = "$path.tmp.$$";
     open my $fh, '>:raw', $tmp or return (0, "cannot write '$tmp': $!");
-    chmod 0600, $tmp;
+    unless (chmod 0600, $tmp) {
+        my $chmod_err = $!;
+        close $fh;
+        unlink $tmp;
+        return (0, "cannot chmod '$tmp': $chmod_err");
+    }
 
     unless (print {$fh} $json) {
         my $write_err = $!;
@@ -780,6 +812,11 @@ sub _store_plugin_data {
     close $fh or do { unlink $tmp; return (0, "cannot close '$tmp': $!") };
     rename $tmp, $path
         or do { unlink $tmp; return (0, "cannot rename into '$path': $!") };
+    # mb604-B1: une ecriture reussie = un compteur et la TAILLE COURANTE du
+    # document (gauge : la valeur remplace la precedente, comme le document).
+    _pm_metric($self->{bot}, 'mediabot_plugin_store_total', { plugin => $key });
+    _pm_gauge($self->{bot}, 'mediabot_plugin_storage_bytes',
+        length($json), { plugin => $key });
     return (1, undef);
 }
 
@@ -805,10 +842,77 @@ sub clear_plugin_data {
 
     my ($path, $err) = $self->_plugin_data_path($key);
     return (0, 0, $err) if defined $err && length $err;
-    return (1, 0, undef) unless defined $path && -f $path && !-l $path;
+    unless (defined $path && -f $path && !-l $path) {
+        _pm_gauge($self->{bot}, 'mediabot_plugin_storage_bytes', 0,
+            { plugin => $key });
+        return (1, 0, undef);
+    }
 
-    return (1, 1, undef) if unlink $path;
+    if (unlink $path) {
+        # mb605-B1: clear means zero bytes now, not the last value written.
+        _pm_gauge($self->{bot}, 'mediabot_plugin_storage_bytes', 0,
+            { plugin => $key });
+        return (1, 1, undef);
+    }
     return (0, 0, "cannot clear storage for '$key': $!");
+}
+
+# mb604-B1: un refus d'ecriture doit dire POURQUOI, en cardinalite bornee.
+# Les refus naissent a deux endroits : au PLAN (bornes du contrat, avant
+# toute application) et a l'APPLICATION (gate fermee, second store, panne
+# du sink). On les ramene a un petit vocabulaire fixe — un label libre
+# tire du message d'erreur ferait exploser les series Prometheus.
+sub _store_rejection_reason {
+    my ($text) = @_;
+    $text = '' unless defined $text && !ref($text);
+    return 'too_large'      if $text =~ /exceeds \d+ bytes/;
+    return 'too_deep'       if $text =~ /deeper than/;
+    return 'too_many_keys'  if $text =~ /more than \d+ keys|longer than \d+ items/;
+    return 'key_too_long'   if $text =~ /key longer than/;
+    return 'not_an_object'  if $text =~ /must be an object|unsupported reference|not JSON-serializable|not a plain scalar/;
+    return 'duplicate'      if $text =~ /only one store action/;
+    return 'no_sink'        if $text =~ /require allow_store/;
+    return 'invalid_name'   if $text =~ /invalid plugin storage name/;
+    return 'write_failed'   if $text =~ /cannot (?:write|close|rename|create|chmod)/;
+    return 'other';
+}
+
+sub _pm_store_rejections {
+    my ($bot, $key, $plan) = @_;
+    return unless ref($plan) eq 'HASH';
+
+    # mb605-B1: observability is never allowed to change dispatch semantics.
+    # A legacy/custom action runner may return malformed diagnostic fields;
+    # inspect only real arrays and keep the collector itself fail-safe.
+    my $errors = ref($plan->{errors}) eq 'ARRAY' ? $plan->{errors} : [];
+    for my $err (@$errors) {
+        my $text = ref($err) eq 'HASH' ? ($err->{error} // '')
+                 : !ref($err)          ? ($err // '')
+                 :                       '';
+        next unless length($text) && $text =~ /store action rejected/;
+        _pm_metric($bot, 'mediabot_plugin_store_rejected_total',
+            { plugin => $key, reason => _store_rejection_reason($text) });
+    }
+
+    my $apply_errors = ref($plan->{apply_errors}) eq 'ARRAY'
+        ? $plan->{apply_errors} : [];
+    for my $err (@$apply_errors) {
+        next unless ref($err) eq 'HASH' && ($err->{type} // '') eq 'store';
+        _pm_metric($bot, 'mediabot_plugin_store_rejected_total',
+            { plugin => $key, reason => _store_rejection_reason($err->{error}) });
+    }
+    return;
+}
+
+# mb604-B1: pose d'une gauge best-effort — meme discipline que _pm_metric
+# (sans metrics, le dispatch est inchange et rien ne meurt).
+sub _pm_gauge {
+    my ($bot, $name, $value, $labels) = @_;
+    return unless $bot;
+    my $metrics = eval { $bot->{metrics} } or return;
+    return unless eval { $metrics->can('set') };
+    eval { $metrics->set($name, $value, $labels) };
+    return;
 }
 
 # mb598-B1: increment de metrique best-effort — jamais un die, jamais un
@@ -999,7 +1103,7 @@ sub _script_event_data {
     my $storage = eval { reftype($ctx) } // '';
     if ($storage eq 'HASH') {
         for my $key (qw(event_type channel target nick ident host message topic kicked is_self command
-                        new_nick minute hour dow mday month)) {
+                        new_nick minute hour dow mday month year)) {
             my $value = $ctx->{$key};
             $data{$key} = "$value" if defined $value && !ref($value);
         }
@@ -1124,6 +1228,8 @@ sub _dispatch_script_event {
             # ecrit atomiquement sous le nom du plugin.
             allow_store => 1,
             store_sink  => sub { $self->_store_plugin_data($key, $_[0]) });
+        # mb604-B1: pourquoi une ecriture n'a pas eu lieu (plan ou application).
+        _pm_store_rejections($bot, $key, $plan);
         1;
     };
     my $apply_error = $@;
@@ -1203,6 +1309,8 @@ sub _dispatch_script_command {
             # ecrit atomiquement sous le nom du plugin.
             allow_store => 1,
             store_sink  => sub { $self->_store_plugin_data($key, $_[0]) });
+        # mb604-B1: pourquoi une ecriture n'a pas eu lieu (plan ou application).
+        _pm_store_rejections($bot, $key, $plan);
         1;
     };
     unless ($applied && ref($plan) eq 'HASH' && $plan->{applied_ok}) {

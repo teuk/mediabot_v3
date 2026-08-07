@@ -1,0 +1,8 @@
+{
+  "api": 2,
+  "name": "daily",
+  "version": "1.0",
+  "description": "Announces a configured line once a day; remembers the day it spoke.",
+  "events": ["plugin_cron_observed"],
+  "config": { "CHANNEL": "", "TEXT": "", "HOUR": "9", "MINUTE": "0" }
+}

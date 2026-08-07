@@ -4,7 +4,7 @@
 #   [1] observe_channel_event accepte nick (avec new_nick) et quit ; le ctx
 #       reste scalar-only ; l'inconnu reste refuse.
 #   [2] observe_cron_event : emet plugin_cron_observed avec minute/hour/dow/
-#       mday/month ; N'EMET QU'AU CHANGEMENT de minute (2e appel dans la
+#       mday/month/year ; N'EMET QU'AU CHANGEMENT de minute (2e appel dans la
 #       meme minute = no-op) ; no-op sans listener ne casse rien.
 #   [3] la liste blanche routable des scripts gagne les 3 events ; le pont
 #       _script_event_data transmet new_nick et les champs cron.
@@ -69,7 +69,7 @@ return sub {
         'mb599-782: cron emet au premier appel');
     ($name, $ctx) = @{ $bus->{emitted}[-1] };
     $assert->is($name, 'plugin_cron_observed', 'mb599-782: nom d event cron');
-    for my $field (qw(minute hour dow mday month)) {
+    for my $field (qw(minute hour dow mday month year)) {
         $assert->ok(defined $ctx->{$field} && $ctx->{$field} =~ /\A[0-9]+\z/,
             "mb599-782: champ cron $field numerique");
     }
@@ -124,12 +124,13 @@ return sub {
         'mb599-782: new_nick traverse le pont _script_event_data');
     $sbot->events->emit('plugin_cron_observed',
         { event_type => 'cron', minute => 7, hour => 9, dow => 5,
-          mday => 1, month => 8 });
+          mday => 1, month => 8, year => 2026 });
     $run = $sbot->{runs}[-1];
     $assert->is($run->{event}, 'plugin_cron_observed',
         'mb599-782: le script recoit l event cron');
     $assert->is($run->{data}{hour}, 9, 'mb599-782: hour traverse le pont');
     $assert->is($run->{data}{dow}, 5, 'mb599-782: dow traverse le pont');
+    $assert->is($run->{data}{year}, 2026, 'mb605-782: year traverse le pont');
 
     # [4] cablages structurels dans mediabot.pl
     my $main = do { open my $fh, '<:encoding(UTF-8)', 'mediabot.pl' or die $!; local $/; <$fh> };

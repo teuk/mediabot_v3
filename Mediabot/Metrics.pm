@@ -89,6 +89,12 @@ sub new {
     $self->_declare('mediabot_plugin_command_denied_total','counter','Plugin v2 command dispatches denied by the auth bridge');
     $self->_declare('mediabot_plugin_event_total','counter','Plugin v2 events routed to sidecar scripts');
     $self->_declare('mediabot_plugin_script_failure_total','counter','Plugin v2 sidecar script failures by kind');
+    # mb604-B1: la persistance mb601 devient observable — combien un plugin
+    # ecrit, a quelle frequence, et POURQUOI ses ecritures sont refusees.
+    $self->_declare('mediabot_plugin_storage_bytes','gauge','Plugin v2 persistent storage size in bytes, by plugin');
+    $self->_declare('mediabot_plugin_store_total','counter','Plugin v2 storage writes applied by the bot');
+    $self->_declare('mediabot_plugin_store_rejected_total','counter','Plugin v2 storage writes rejected, by reason');
+    $self->_declare('mediabot_plugin_storage_read_invalid_total','counter','Plugin v2 storage files ignored as invalid at read time');
     $self->_declare('mediabot_command_errors_total',   'counter', 'Total command execution errors');
 
     $self->_declare('mediabot_privmsg_in_total',       'counter', 'Total incoming PRIVMSG lines');

@@ -69,9 +69,12 @@ References: `examples/remind.pl` (Perl), `examples/countdown.py` (Python).
 
 Key ideas the references demonstrate:
 
-- **State survives by rebuilding from the original args** — the protocol is
-  deliberately stateless, and the deferred run receives the original args
-  again, so parse the same way twice.
+- **State survives by rebuilding from the original args** — a timer callback
+  carries no memory of its own, and the deferred run receives the original
+  args again, so parse the same way twice. (Since mb601 a plugin CAN keep
+  state between runs — see pattern 8 — but a timer still rebuilds from its
+  args: storage is for what outlives the run, not for passing arguments to
+  yourself.)
 - **Derive the timer name from the nick**, restricted to the protocol charset
   and length (`[A-Za-z0-9_.-]`, max 64): one pending timer per nick, and a
   duplicate is rejected by the bridge (visible in `.scriptdryrun timers`).
@@ -246,10 +249,15 @@ The contract, in six rules:
          "events": ["channel_join_observed"] }
 
    `plugin_cron_observed` fires once per minute (Eggdrop's bind time,
-   reborn): the context carries minute, hour, dow (0=Sunday), mday and
-   month, and YOUR script decides whether this minute matters — return
+   reborn): the context carries minute, hour, dow (0=Sunday), mday, month and
+   year, and YOUR script decides whether this minute matters — return
    `ok` with an empty action list otherwise (pattern 6). A daily 09:00
-   announcement is a two-line test on hour and minute.
+   announcement is a two-line test on hour and minute. A cron event
+   belongs to no channel, so there is no context target to default to:
+   give your reply an EXPLICIT `target` taken from your configuration
+   (the channel-scope guard only constrains replies that HAVE a channel
+   context). See `daily.tcl`, which also stores the day it last spoke so
+   a restart cannot announce twice.
 
 7. **Sidecar config: defaults declared, conf overrides (mb600).** A
    `"config"` block in the sidecar declares the author's defaults (up to
@@ -279,6 +287,12 @@ The contract, in six rules:
 Working three-language examples live in `plugins/scripts/examples-v2/`:
 `fortune.pl` (Perl, includes a Master-gated command), `coin.py` (Python,
 anti-abuse cap), `lart.tcl` (Tcl, dependency-free — in loving memory of
-every Eggdrop that ever ran one), and `greeter.tcl` (Tcl, the event
+every Eggdrop that ever ran one), `greeter.tcl` (Tcl, the event
 showcase: no command at all, one declared `channel_join_observed`, an
-is_self guard, and a warm welcome for everyone else).
+is_self guard, and a warm welcome for everyone else), `karma.py` (Python,
+the stateful one: `thanks <nick>` and `karma`, a read-modify-write on
+`data.storage`, self-thanks refused, and its own ceiling kept well under
+the bot's 256-key limit by dropping the quietest entries), and
+`daily.tcl` (Tcl, three mechanisms in one: `plugin_cron_observed`,
+operator config for channel/hour/text, and the last announced day in
+storage so a restart never announces twice).

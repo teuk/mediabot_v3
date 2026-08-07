@@ -1,0 +1,10 @@
+{
+  "api": 2,
+  "name": "karma",
+  "version": "1.0",
+  "description": "Channel karma with persistent state; the bot holds the notebook.",
+  "commands": {
+    "karma": { "help": "karma [nick] - show one score, or the top three.", "level": 0 },
+    "thanks": { "help": "thanks <nick> - give someone one karma point.", "level": 0 }
+  }
+}

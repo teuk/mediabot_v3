@@ -10,6 +10,76 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb605 — garde pre-commit mb603-mb604 : date, plafonds et verite des gauges
+- `plugin_cron_observed` transporte maintenant `year` et son stamp interne
+  contient la date complete. `daily.tcl` memorise `year-month-day` : le 4 aout
+  2027 n'est plus confondu avec le 4 aout 2026.
+- `karma.py` respecte reellement `MAX_TRACKED=200` : si le nick tout juste
+  remercie serait elimine par le tri, il remplace l'entree la plus faible au
+  lieu de devenir une 201e cle.
+- `mediabot_plugin_storage_bytes` est reconcilie a la lecture apres restart,
+  remis a zero sur clear ou document invalide, et les symlinks/oversizes
+  increments aussi `storage_read_invalid_total`.
+- Le collecteur des refus de store ignore sans die les diagnostics mal formes ;
+  l'observabilite reste best-effort et ne peut pas transformer un succes en
+  echec de dispatch. Le chmod 0600 du fichier temporaire est desormais verifie.
+- Pins 782/786/787 et nouveau test 788 (10 assertions) verrouillent les
+  regressions ci-dessus.
+
+### mb604 — l'observabilite de la persistance
+- Quatre series decrivent desormais le storage mb601 :
+  mediabot_plugin_storage_bytes{plugin} (GAUGE : la taille du document
+  courant, elle REMPLACE et ne s'additionne pas — comme le document),
+  mediabot_plugin_store_total{plugin} (ecritures appliquees),
+  mediabot_plugin_store_rejected_total{plugin,reason} et
+  mediabot_plugin_storage_read_invalid_total{plugin}.
+- Les raisons de refus sont ramenees a un VOCABULAIRE BORNE
+  (too_large, too_deep, too_many_keys, key_too_long, not_an_object,
+  duplicate, no_sink, invalid_name, write_failed, other) : un label tire
+  du texte d'erreur brut ferait exploser la cardinalite Prometheus. Les
+  refus sont comptes aux DEUX endroits ou ils naissent — au PLAN (bornes
+  du contrat, avant toute application) et a l'APPLICATION (gate fermee,
+  second store du meme run, panne du sink).
+- Un fichier local abime n'est plus seulement une ligne de journal : il
+  devient une serie (read_invalid) tout en restant ignore.
+- Discipline mb598 conservee : _pm_gauge/_pm_metric sont best-effort
+  (eval + can) — sans sous-systeme metrics, le dispatch est inchange et
+  rien ne meurt.
+- Test 787 (19 assertions) : declaration des 4 sur un VRAI Metrics,
+  ecriture reelle (compteur +1, gauge = taille reelle du fichier, la
+  gauge remplace au 2e store), refus au plan par raison (too_large,
+  too_deep) sans incrementer les ecritures, refus a l'application
+  (duplicate) avec le PREMIER store bien ecrit, fichier hors contrat
+  compte read_invalid, best-effort sans metrics, et la table de
+  classification verifiee message par message.
+
+### mb603 — la galerie prend vie : karma.py (storage) et daily.tcl (cron)
+- Deux mecanismes majeurs livres sans vitrine trouvent enfin leur exemple.
+  examples-v2/karma.py : l'exemple A ETAT que le cookbook declarait
+  « hors protocole, volontairement sans etat » depuis mb524 — thanks
+  <nick> / karma [nick], read-modify-write explicite sur data.storage,
+  anti-abus (se remercier soi-meme ne stocke RIEN), et un plafond propre
+  MAX_TRACKED=200 qui laisse tomber les plus discrets AVANT que le bot
+  refuse le document : le motif « mon plafond sous celui du bot ».
+- examples-v2/daily.tcl : trois mecanismes en huit lignes utiles —
+  plugin_cron_observed (mb599), config operateur CHANNEL/HOUR/MINUTE/TEXT
+  (mb600) et le dernier jour annonce en storage (mb601) pour qu'un
+  redemarrage n'annonce jamais deux fois. LECON NEUVE documentee : un
+  event cron n'appartient a AUCUN canal, donc la reply porte un target
+  EXPLICITE tire de la config (la garde de portee mb524 ne contraint que
+  les replies qui ONT un contexte de canal).
+- Cookbook : galerie a jour, lecon du target cron ajoutee a la regle 6,
+  et la phrase « le protocole est volontairement sans etat » corrigee —
+  elle est fausse depuis mb601 ; un timer rebatit toujours depuis ses
+  args, le storage est pour ce qui SURVIT au run.
+- Test 786 (24 assertions) : chargement reel des 2 sidecars du depot,
+  karma en EXECUTION REELLE via le pipeline complet (thanks persiste, 2e
+  thanks relit frais et incremente, lecture n'ecrit rien, podium trie),
+  anti-abus sans ecriture, 200 nicks passent les bornes du bot, daily
+  reel sur les 4 chemins (annonce avec target explicite + memorisation,
+  2e tick du jour = silence, autre minute = silence, non configure =
+  silence), cookbook verrouille.
+
 ### mb602 — garde pre-commit mb598-mb601 : frontieres storage/info/diagnostics
 - La persistance accepte maintenant les booleens JSON et reutilise UN SEUL
   validateur complet aux trois frontieres (plan, ecriture, lecture) : profondeur,
