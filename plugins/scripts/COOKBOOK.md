@@ -284,6 +284,37 @@ The contract, in six rules:
    (Owner) wipes only a validated plugin slug. Route-v1 scripts have no store
    sink: their store actions fail explicitly.
 
+9. **Check it without starting the bot (mb606/mb607).** `tools/mb_plugin_dev.pl`
+   validates a sidecar and can run a script offline without starting Mediabot.
+   Returned actions are dry-planned: Mediabot sends no IRC message and writes
+   no plugin storage:
+
+       tools/mb_plugin_dev.pl validate examples-v2/karma.py
+       tools/mb_plugin_dev.pl run examples-v2/karma.py --command thanks \
+             --nick aur --arg SlaY --storage /tmp/state.json
+       tools/mb_plugin_dev.pl run examples-v2/daily.tcl \
+             --event plugin_cron_observed --config CHANNEL='#dev' \
+             --config TEXT='Morning!' --data hour=9 --data minute=0
+
+   It prints the actions the bot WOULD take (a `store` shows its document
+   and size) and reuses the real PluginManager, ScriptRunner and
+   ScriptActionRunner for sidecar, script and action validation. `--storage`
+   is also checked by the real storage-object validator before it enters
+   `data.storage`. Event fixture defaults mirror the core event shape
+   (`channel_join_observed` carries `event_type=join`,
+   `plugin_cron_observed` carries `event_type=cron`, etc.) and the tool fails
+   closed if the routable-event list grows without a matching fixture shape.
+
+   **Important:** `run` really executes the external script process and is
+   **not a sandbox**. Mediabot does not apply the returned actions, but trusted
+   script code still has whatever OS/filesystem/network permissions belong to
+   the account running the tool. A privileged manifest command may be dry-run
+   for development, but USER_LEVEL authentication is not emulated offline and
+   the tool says so explicitly.
+
+   Exit code is 0 or 1, so the tool can be used in pre-commit or CI.
+   `--show-envelope` prints the JSON that this offline run hands to the script.
+
 Working three-language examples live in `plugins/scripts/examples-v2/`:
 `fortune.pl` (Perl, includes a Master-gated command), `coin.py` (Python,
 anti-abuse cap), `lart.tcl` (Tcl, dependency-free — in loving memory of

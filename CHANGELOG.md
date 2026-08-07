@@ -10,6 +10,57 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb607 — garde pre-commit de l'outil plugin offline
+- Le dry-run est rendu explicite : seules les ACTIONS Mediabot ne sont pas
+  appliquees. `run` execute bien le script comme un vrai subprocessus et
+  n'est PAS un sandbox ; un script de confiance conserve les droits OS du
+  compte qui lance l'outil.
+- Le sidecar n'est plus pre-lu par l'outil pour deviner son nom. Le premier
+  lecteur est desormais le vrai PluginManager (chemin, borne, JSON, identite),
+  puis les overrides `--config` sont appliques par un vrai replace load.
+- Les fixtures d'events reproduisent les `event_type` du coeur : `join`,
+  `part`, `topic`, `kick`, `nick`, `quit`, `cron`; `public_command_observed`
+  transporte command/args sans event_type. Si la whitelist routable grandit
+  sans fixture correspondante, l'outil refuse de mentir.
+- `--storage` passe par le vrai `validate_storage_object` avant d'alimenter
+  `data.storage`. Les commandes a niveau (ex. Master) restent testables mais
+  l'outil annonce clairement que USER_LEVEL n'est pas emule hors ligne.
+- Nouveau test 790 + cookbook pour verrouiller ces garanties de fidelite.
+
+### mb606 — tools/mb_plugin_dev.pl : valider un plugin v2 sans lancer le bot
+- Le chainon manquant du confort d'auteur : depuis l'arc v2, ecrire un
+  plugin exigeait un bot en marche (et donc une base, un reseau, un
+  canal) pour savoir si le sidecar passait. L'outil valide et EXECUTE un
+  script hors ligne, sans base, sans IRC, sans rien ecrire.
+
+      tools/mb_plugin_dev.pl validate examples-v2/karma.py
+      tools/mb_plugin_dev.pl run examples-v2/karma.py --command thanks \
+            --nick aur --arg SlaY --storage /tmp/state.json
+      tools/mb_plugin_dev.pl run examples-v2/daily.tcl \
+            --event plugin_cron_observed --config CHANNEL='#dev' \
+            --config TEXT='Morning!' --data hour=9 --data minute=0
+
+- REGLE DE CONCEPTION, et tout l'interet : l'outil ne reimplemente AUCUNE
+  regle. Il monte le vrai PluginManager, le vrai ScriptRunner et le vrai
+  ScriptActionRunner derriere un bot hors ligne minimal — bornes, refus,
+  fusion de config, routabilite des events, tout vient du code que le bot
+  execute. Meme la taille limite affichee pour un store est LUE dans
+  $Mediabot::ScriptActionRunner::MAX_STORE_BYTES, jamais recopiee : le
+  test 789 verifie qu'aucune borne du contrat n'est en dur dans l'outil.
+- Les actions sont PLANIFIEES (apply => 0) : l'outil montre ce que le bot
+  ferait — un store affiche son document et sa taille — et n'applique
+  rien. Codes de sortie 0/1 exploitables en pre-commit ou en CI.
+- Le contexte est construit comme dans le bot, depuis les DONNEES de
+  l'evenement : un event reseau (cron, quit, nick) n'a pas de canal, donc
+  un target explicite passe. Premiere version de l'outil refusait a tort
+  l'annonce de daily.tcl — le piege est desormais verrouille par un test.
+- Cookbook regle 9. Test 789 (23 assertions) : compilation, usage, les
+  trois exemples reels du depot valides, message d'erreur EXACT du
+  PluginManager sur sidecar invalide, absence de borne recopiee,
+  execution reelle avec et sans --storage, event reseau avec target
+  explicite, event non declare refuse, et aucun repertoire de donnees
+  cree par l'outil.
+
 ### mb605 — garde pre-commit mb603-mb604 : date, plafonds et verite des gauges
 - `plugin_cron_observed` transporte maintenant `year` et son stamp interne
   contient la date complete. `daily.tcl` memorise `year-month-day` : le 4 aout
