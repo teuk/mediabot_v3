@@ -76,7 +76,8 @@ return sub {
 
     # L'aide interne (help ai) mentionne la nouvelle syntaxe.
     my $med = _slurp_630(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
-    $assert->like($med, qr/summary \[periode\] \[N\] \[Nl\] \[public\] \[nick\] \(details: ai summary help\)/,
+    # mb608: la langue de sortie rejoint la syntaxe annoncee.
+    $assert->like($med, qr/summary \[periode\] \[N\] \[Nl\] \[public\] \[en\|fr\|es\] \[nick\] \(details: ai summary help\)/,
         'help ai: syntaxe summary à jour');
 
     $assert->like($src, qr/mb415-R1/, 'tag mb415-R1');

@@ -852,6 +852,76 @@ sub get_tmdb_info {
 # ------------------------------------------------------------------
 # claude_ctx() — Context wrapper for !ai command
 # ------------------------------------------------------------------
+# mb608-B1: rendu localise des messages de service de 'ai summary'. Trois
+# langues seulement — celles que le bot connait deja par ses chansets
+# (LangFR/LangES, mb563). L'anglais est le repli de toute valeur inconnue.
+our %SUMMARY_STRINGS = (
+    en => {
+        name      => 'English',
+        by        => ' by %s',
+        none      => 'No messages found on %s%s.',
+        working   => 'Summarising %d message(s)%s%s on %s...',
+        last_h    => ' (last %dh%02dm)',
+        last_m    => ' (last %dm)',
+        no_last   => ' (today - no previous summary found)',
+        today     => ' (today)',
+        yesterday => ' (yesterday)',
+        week      => ' (this week)',
+        days      => ' (last %dd)',
+    },
+    fr => {
+        name      => 'French',
+        by        => ' de %s',
+        none      => 'Aucun message trouve sur %s%s.',
+        working   => 'Resume de %d message(s)%s%s sur %s...',
+        last_h    => ' (depuis %dh%02dm)',
+        last_m    => ' (depuis %dm)',
+        no_last   => " (aujourd'hui - aucun resume precedent)",
+        today     => " (aujourd'hui)",
+        yesterday => ' (hier)',
+        week      => ' (cette semaine)',
+        days      => ' (%d derniers jours)',
+    },
+    es => {
+        name      => 'Spanish',
+        by        => ' de %s',
+        none      => 'No se encontraron mensajes en %s%s.',
+        working   => 'Resumiendo %d mensaje(s)%s%s en %s...',
+        last_h    => ' (desde %dh%02dm)',
+        last_m    => ' (desde %dm)',
+        no_last   => ' (hoy - sin resumen previo)',
+        today     => ' (hoy)',
+        yesterday => ' (ayer)',
+        week      => ' (esta semana)',
+        days      => ' (ultimos %dd)',
+    },
+);
+
+sub _summary_lang_strings {
+    my ($lang) = @_;
+    return $SUMMARY_STRINGS{ $lang || '' } || $SUMMARY_STRINGS{en};
+}
+
+# Libelle de periode dans la langue de sortie. Cle vide = aucun filtre de
+# date : pas de libelle, exactement comme avant.
+sub _summary_period_label {
+    my ($lang, $key, $arg) = @_;
+    my $S = _summary_lang_strings($lang);
+    return '' unless defined $key && length $key;
+    if ($key eq 'last') {
+        my $mins = $arg || 0;
+        return $mins >= 60
+            ? sprintf($S->{last_h}, int($mins / 60), $mins % 60)
+            : sprintf($S->{last_m}, $mins);
+    }
+    return $S->{no_last}   if $key eq 'today_nolast';
+    return $S->{today}     if $key eq 'today';
+    return $S->{yesterday} if $key eq 'yesterday';
+    return $S->{week}      if $key eq 'week';
+    return sprintf($S->{days}, ($arg || 0)) if $key eq 'days';
+    return '';
+}
+
 sub claude_ctx {
     my ($ctx) = @_;
 
@@ -954,12 +1024,27 @@ sub claude_ctx {
         #   <N>l        -> nombre de lignes du RÉSUMÉ (1..10 ; défaut: 2-3
         #                  phrases, inchangé). Le nombre NU reste, comme avant,
         #                  le nombre de MESSAGES analysés.
+        # mb608-B1: la langue de sortie s'extrait ici aussi — AVANT le
+        # parsing du filtre nick, sinon 'fr' serait pris pour un pseudo.
+        # Formes acceptees : jeton nu (en|fr|es) ou lang=xx. Meme risque de
+        # collision qu'avec 'public' pour un pseudo homonyme : documente.
         my ($public_out, $out_lines, $want_help) = (0, undef, 0);
+        my ($forced_lang, $bad_lang, $forced_nick) = (undef, undef, undef);
         @args = grep {
             my $a = lc($_ // '');
             if    ($a eq 'public' || $a eq 'pub') { $public_out = 1; 0 }
             elsif ($a =~ /^(\d+)l$/)              { $out_lines = int($1); 0 }
             elsif ($a eq 'help')                  { $want_help = 1; 0 }
+            elsif ($a =~ /^lang[=:]([a-z]{2})$/)  {
+                my $code = $1;
+                if ($code =~ /\A(?:en|fr|es)\z/) { $forced_lang = $code }
+                else                             { $bad_lang = $code }
+                0;
+            }
+            # mb608-B2: explicit nick escape for names colliding with option
+            # tokens such as en/fr/es/public/help (or looking like <N>l).
+            elsif ($a =~ /^nick=(.+)$/)             { $forced_nick = lc($1); 0 }
+            elsif ($a =~ /\A(?:en|fr|es)\z/)      { $forced_lang = $a; 0 }
             else                                  { 1 }
         } @args;
         if (defined $out_lines) {
@@ -970,7 +1055,8 @@ sub claude_ctx {
             Mediabot::Helpers::botNotice($self, $nick, 'Usage: ai summary [last|today|yesterday|week|<N>d] [<N>] [<N>l] [public] [nick]');
             Mediabot::Helpers::botNotice($self, $nick, 'Periode: last = depuis le dernier summary sur ce canal ; today / yesterday / week ; <N>d = N derniers jours (1-30). Defaut: les <N> derniers messages.');
             Mediabot::Helpers::botNotice($self, $nick, 'Options: <N> = nombre de messages analyses (5-50, defaut 10 ; 200 avec une periode) ; <N>l = nombre de lignes du resume (1-10, defaut 2-3 phrases) ; public = reponse sur le canal au lieu d\'une notice ; nick = ne resumer que ce nick.');
-            Mediabot::Helpers::botNotice($self, $nick, 'Exemples: ai summary 5l public | ai summary today teuk | ai summary 7d 3l | ai summary last public');
+            Mediabot::Helpers::botNotice($self, $nick, 'Langue: par defaut celle du canal (chansets LangFR / LangES, sinon main.LANG). Forcer avec en | fr | es, ou lang=fr. Pour un pseudo homonyme d une option (fr, en, es, public...), utiliser nick=<pseudo>.');
+            Mediabot::Helpers::botNotice($self, $nick, 'Exemples: ai summary 5l public | ai summary today teuk | ai summary today fr | ai summary today lang=en nick=fr | ai summary 7d 3l lang=en | ai summary last public');
             return;
         }
         # Sortie : canal courant si public demandé (et dispo), sinon notice.
@@ -979,9 +1065,26 @@ sub claude_ctx {
             ? sub { Mediabot::Helpers::botPrivmsg($self, $channel, $_[0]) }
             : sub { Mediabot::Helpers::botNotice($self, $nick, $_[0]) };
 
+        # mb608-B1: langue effective = jeton force, sinon LA LANGUE DU CANAL
+        # (Helpers::channel_lang, mb563 : chansets LangFR/LangES, sinon
+        # main.LANG dont le defaut est 'en' — l'anglais reste donc le defaut
+        # historique, aucun canal existant ne change de comportement).
+        my $lang = $forced_lang
+                || (eval { Mediabot::Helpers::channel_lang($self, $channel) } || 'en');
+        $lang = lc($lang // 'en');
+        $lang = 'en' unless $lang =~ /\A(?:en|fr|es)\z/;
+        if (defined $bad_lang) {
+            Mediabot::Helpers::botNotice($self, $nick,
+                "Unsupported language '$bad_lang' (en, fr, es) - using '$lang'.");
+        }
+
         # mb86-IMP3 / mb87-IMP2 / mb91-IMP2: modes de filtre temporel
         my $date_filter = '';
         my $date_label  = '';
+        # mb608-B1: le libelle de periode existe en DEUX versions — celle du
+        # PROMPT reste en anglais (metadonnee pour le modele, comportement
+        # inchange) et celle des messages de service suit $lang.
+        my ($date_key, $date_arg) = ('', undef);
         if (@args && lc($args[0]) eq 'last') {
             # mb91-IMP2: résumé depuis le dernier appel !ai summary sur ce canal
             shift @args;
@@ -990,31 +1093,37 @@ sub claude_ctx {
             if ($last_ts > 0) {
                 $date_filter = "AND cl.ts > FROM_UNIXTIME($last_ts)";
                 my $mins = int((time() - $last_ts) / 60);
+                ($date_key, $date_arg) = ('last', $mins);
                 $date_label  = $mins >= 60
                     ? sprintf(' (last %dh%02dm)', int($mins/60), $mins%60)
                     : " (last ${mins}m)";
             } else {
                 $date_filter = "AND DATE(cl.ts) = CURDATE()";
+                $date_key    = 'today_nolast';
                 $date_label  = ' (today — no previous summary found)';
             }
         } elsif (@args && lc($args[0]) eq 'today') {
             shift @args;
             $date_filter = "AND DATE(cl.ts) = CURDATE()";
+            $date_key    = 'today';
             $date_label  = ' (today)';
         } elsif (@args && lc($args[0]) eq 'yesterday') {
             shift @args;
             $date_filter = "AND DATE(cl.ts) = CURDATE() - INTERVAL 1 DAY";
+            $date_key    = 'yesterday';
             $date_label  = ' (yesterday)';
         } elsif (@args && lc($args[0]) eq 'week') {
             # mb87-IMP2: résumé de la semaine courante (lundi → aujourd'hui)
             shift @args;
             $date_filter = "AND cl.ts >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)";
+            $date_key    = 'week';
             $date_label  = ' (this week)';
         } elsif (@args && $args[0] =~ /^(\d+)d$/i) {
             # mb87-IMP2: !ai summary 7d — N derniers jours
             my $days = int($1); shift @args;
             $days = 1 if $days < 1; $days = 30 if $days > 30;
             $date_filter = "AND cl.ts >= NOW() - INTERVAL $days DAY";
+            ($date_key, $date_arg) = ('days', $days);
             $date_label  = " (last ${days}d)";
         }
 
@@ -1024,7 +1133,9 @@ sub claude_ctx {
         # With date filter: lift the limit to 200 (couvre une journée/semaine chargée)
         $n_msgs = 200 if $date_filter;
 
-        my $filter_nick = (@args && $args[0] !~ /^\d/) ? lc(shift @args) : undef;
+        my $filter_nick = defined($forced_nick)
+            ? $forced_nick
+            : ((@args && $args[0] !~ /^\d/) ? lc(shift @args) : undef);
         my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
         unless ($dbh && defined $channel) {
             Mediabot::Helpers::botNotice($self, $nick, 'Not available in private or DB not connected.'); return;
@@ -1058,7 +1169,9 @@ sub claude_ctx {
         while (my $r = $sth->fetchrow_hashref) { unshift @rows, "$r->{nick}: $r->{text}"; }
         $sth->finish;
         unless (@rows) {
-            $send_out->("No messages found on $channel$date_label.");  # mb415-R1
+            # mb608-B1: message de service dans la langue de sortie.
+            $send_out->(sprintf(_summary_lang_strings($lang)->{none}, $channel,
+                _summary_period_label($lang, $date_key, $date_arg)));
             return;
         }
         my $transcript = join("\n", @rows);
@@ -1069,12 +1182,22 @@ sub claude_ctx {
             $self->{_claude_summary_ts}{"summary_last:$channel"} = time();
         }
         # mb108-IMP4: notifier immédiatement le nb de messages analysés (feedback avant l'appel API)
-        $send_out->("Summarising $n_found message(s)${who_str}${date_label} on $channel...");  # mb415-R1
+        # mb608-B1: idem pour l'accuse de reception (le prompt, lui, garde
+        # ses metadonnees en anglais — voir plus bas).
+        my $who_out = $filter_nick
+            ? sprintf(_summary_lang_strings($lang)->{by}, $filter_nick) : '';
+        $send_out->(sprintf(_summary_lang_strings($lang)->{working},
+            $n_found, $who_out,
+            _summary_period_label($lang, $date_key, $date_arg), $channel));
         # mb415-R1: longueur du résumé paramétrable (<N>l) ; défaut inchangé.
         my $len_str = defined($out_lines)
             ? ($out_lines == 1 ? 'in exactly 1 short line' : "in exactly $out_lines short lines")
             : 'in 2-3 sentences';
-        my $summary_prompt = "Summarise this IRC conversation${who_str}${date_label} ($n_found messages) $len_str:\n$transcript";
+        # mb608-B1: la langue demandee au modele. Le reste du prompt (et donc
+        # le comportement de resume) est inchange a la lettre.
+        my $lang_name = _summary_lang_strings($lang)->{name};
+        my $summary_prompt = "Summarise this IRC conversation${who_str}${date_label} "
+            . "($n_found messages) $len_str, in $lang_name:\n$transcript";
         # Call Claude with injected prompt; output publicly on the channel if
         # requested (mb415-R1), otherwise as notice to the caller (historique
         # de contexte aligné sur la destination).

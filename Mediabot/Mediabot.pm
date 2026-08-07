@@ -2749,7 +2749,7 @@ triviascore|triviascore|public|Show trivia scores for the current channel sessio
 define|define <word>|public|Look up a word definition from Wiktionary.
 
 # AI
-ai|ai <prompt>|public|Ask Claude. Subcommands: summary [periode] [N] [Nl] [public] [nick] (details: ai summary help), pin, relay, forget, models, stats, reset, history, ai persona.
+ai|ai <prompt>|public|Ask Claude. Subcommands: summary [periode] [N] [Nl] [public] [en|fr|es] [nick] (details: ai summary help), pin, relay, forget, models, stats, reset, history, ai persona.
 
 # Misc
 spike|spike|public|Show Spike memorial image.

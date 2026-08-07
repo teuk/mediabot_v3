@@ -10,6 +10,33 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb608 — 'ai summary' parle la langue du canal (et sait etre force)
+- La reponse suit desormais la langue du canal : les chansets LangFR /
+  LangES (mb563, Helpers::channel_lang) decident, et a defaut main.LANG
+  s'applique — dont le defaut est 'en'. AUCUN canal existant ne change de
+  comportement : l'anglais reste le defaut historique.
+- Forcage explicite par jeton positionnel, dans la meme passe que
+  public / <N>l / help : 'ai summary today fr', ou la forme non ambigue
+  'lang=fr'. Le jeton est extrait AVANT le parsing du filtre nick. Pour
+  pouvoir malgre tout cibler un pseudo homonyme d'une option (fr/en/es,
+  public, help...), 'nick=<pseudo>' fournit un echappement explicite.
+  Un code hors trio (en|fr|es) previent l'appelant et retombe sur la
+  langue du canal.
+- Les messages de service sont traduits eux aussi ('Resume de 12
+  message(s) (aujourd'hui) sur #chan...', 'Aucun message trouve...'),
+  libelles de periode compris, y compris les formes a parametre
+  (depuis 2h05m, 7 derniers jours).
+- Le PROMPT garde ses metadonnees en anglais et ne gagne qu'une
+  instruction de langue : le comportement de resume est inchange a la
+  lettre, seule la langue de sortie bouge.
+- .ai summary help documente la langue ; la ligne de commande publique
+  annonce [en|fr|es] (pin 630 evolue).
+- Test 790 (33 assertions) dont une SONDE EXECUTABLE : la passe grep est
+  extraite du source et reellement executee sur des arguments realistes
+  ('today fr', 'today teuk', '7d 3l public lang=es SlaY', 'lang=de'), ce
+  qui prouve qu'un pseudo ordinaire n'est jamais pris pour une langue et
+  que le jeton coexiste avec toutes les autres options.
+
 ### mb607 — garde pre-commit de l'outil plugin offline
 - Le dry-run est rendu explicite : seules les ACTIONS Mediabot ne sont pas
   appliquees. `run` execute bien le script comme un vrai subprocessus et
