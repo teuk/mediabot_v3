@@ -3912,6 +3912,17 @@ sub _cmd_status {
             $stream->write($pending
                 ? "AchvQ:    $pending pending check(s)\r\n"
                 : "AchvQ:    empty\r\n");
+            # mb612-B1: le registre de progression est desormais l'etat le
+            # plus precieux du systeme (il ne se recalcule pas). L'operateur
+            # doit voir en un coup d'oeil qu'il est bien charge et sauve.
+            my $ach_data = eval { $ach->{data} }     || {};
+            my $ach_prog = eval { $ach->{progress} } || {};
+            my $profiles = scalar keys %$ach_data;
+            my $counters = 0;
+            $counters += scalar keys %{ $ach_prog->{$_} || {} } for keys %$ach_prog;
+            my $pending_save = (eval { $ach->{dirty} }) ? ' (unsaved changes)' : '';
+            $stream->write(sprintf("Achv:     %d profile(s), %d progress counter(s)%s\r\n",
+                $profiles, $counters, $pending_save));
         }
 
         my $adb = eval { $bot_s->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_DBNAME') } // '';

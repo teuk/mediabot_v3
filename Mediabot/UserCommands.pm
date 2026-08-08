@@ -8672,8 +8672,13 @@ sub checkTriviaAnswer {
     # mb115: hook achievements trivia (score atteint, sniper si réponse < 3s)
     if ($self->{achievements}) {
         my $response_time = (time() - ($trivia->{started} // time())) || 0;
+        # mb610-B1: $score est le score de la PARTIE en cours. Un palier
+        # « 100 bonnes reponses » exigeait donc 100 reponses dans une seule
+        # session — inatteignable. Le hook recoit desormais le total
+        # cumule persistant ; l'affichage du jeu, lui, ne bouge pas.
+        my $total = _ach_progress($self, 'trivia_correct', $nick, $channel) // $score;
         eval {
-            $self->{achievements}->check_trivia($nick, $channel, $score, $response_time);
+            $self->{achievements}->check_trivia($nick, $channel, $total, $response_time);
         };
         if ($@) { $self->{logger}->log(1, "achievements check_trivia error: $@"); }
     }
@@ -8854,6 +8859,36 @@ sub mbTriviaScore_ctx {
 # ---------------------------------------------------------------------------
 # mbAchievements_ctx --- !achievements [nick|list|all|top]
 # ---------------------------------------------------------------------------
+# mb612-B1: barre de progression compacte, sûre pour IRC (12 cases, pas de
+# caractere large qui casse l'alignement selon le client).
+sub _ach_bar {
+    my ($pct) = @_;
+    $pct = 0   unless defined $pct && $pct =~ /\A\d+\z/;
+    $pct = 100 if $pct > 100;
+    my $filled = int(($pct * 12) / 100);
+    return "\x02[\x02" . ('=' x $filled) . ('.' x (12 - $filled)) . "\x02]\x02";
+}
+
+# Nombres lisibles : 137, 1.2k, 45k, 150k.
+sub _ach_num {
+    my ($n) = @_;
+    return 0 unless defined $n;
+    return $n if $n < 1000;
+    return sprintf('%.1fk', $n / 1000) =~ s/\.0k\z/k/r if $n < 100_000;
+    return int($n / 1000) . 'k';
+}
+
+# Une ligne d'objectif : emoji, nom colore par rarete, valeurs, pourcentage.
+sub _ach_goal_line {
+    my ($ach, $defs, $g) = @_;
+    my $a   = $defs->{ $g->{id} } or return '';
+    my $col = $ach->rarity_color($a->{rarity});
+    my $rst = $col ? "\x0f" : '';
+    return sprintf('%s %s%s%s %s/%s (%d%%)',
+        $a->{emoji}, $col, $a->{name}, $rst,
+        _ach_num($g->{current}), _ach_num($g->{threshold}), $g->{pct});
+}
+
 sub mbAchievements_ctx {
     my ($ctx) = @_;
     my $self    = $ctx->bot;
@@ -8908,6 +8943,48 @@ sub mbAchievements_ctx {
         return 1;
     }
 
+    # mb612-B1: !achievements progress [nick] → la grille MESURABLE, du plus
+    # proche au plus lointain. Repond en notice (c'est une vue detaillee),
+    # sauf si l'appelant demande explicitement le canal.
+    if (@args && lc($args[0]) =~ /\A(?:progress|prog)\z/) {
+        shift @args;
+        my $who = @args ? lc(shift @args) : lc($nick);
+        unless ($channel && $channel =~ /^#/) {
+            botNotice($self, $nick, 'Syntax: !achievements progress [nick]  (in a channel)');
+            return 1;
+        }
+        my $snap = $ach->progress_snapshot($who, $channel);
+        my @locked = grep { !$snap->{$_}{unlocked} && $snap->{$_}{measurable} }
+                     keys %$snap;
+        my $done   = grep { $snap->{$_}{unlocked} } keys %$snap;
+        unless (@locked) {
+            botNotice($self, $nick,
+                "$who has unlocked every measurable achievement on $channel. Nothing left to chase.");
+            return 1;
+        }
+        my @sorted = sort {
+            ($snap->{$b}{pct} <=> $snap->{$a}{pct})
+            || ($snap->{$a}{threshold} <=> $snap->{$b}{threshold})
+            || ($a cmp $b)
+        } @locked;
+        # Emoji litteral, comme partout ailleurs dans ce fichier : un
+        # \x{...} rend la chaine « wide » et l'accent du tiret cadratin
+        # ressortait alors en mojibake sur le canal.
+        botNotice($self, $nick, sprintf('📊 %s on %s — %d/%d unlocked, %d in progress:',
+            "\x02$who\x02", $channel, $done, scalar(keys %$snap), scalar @sorted));
+        my $shown = 0;
+        for my $id (@sorted) {
+            last if $shown >= 12;   # une notice par ligne : on borne le flood
+            my $g = { id => $id, %{ $snap->{$id} } };
+            botNotice($self, $nick,
+                '  ' . _ach_bar($g->{pct}) . ' ' . _ach_goal_line($ach, $defs, $g));
+            $shown++;
+        }
+        botNotice($self, $nick, sprintf('  ... and %d more (never started).',
+            scalar(@sorted) - $shown)) if @sorted > $shown;
+        return 1;
+    }
+
     # !achievements all [nick]  → cross-canal
     my $cross = 0;
     if (@args && lc($args[0]) eq 'all') {
@@ -8925,6 +9002,13 @@ sub mbAchievements_ctx {
         my $scope = $cross ? '(all channels)' : "on $channel";
         botPrivmsg($self, $reply_to,
             "$target has no achievements unlocked yet $scope. Try \x02!achievements list\x02.");
+        # mb612-B1: « rien de debloque » est justement le moment ou montrer
+        # ce qui est a portee — sinon la commande ne dit rien d'utile.
+        if (!$cross && $channel =~ /^#/) {
+            my $goals = eval { $ach->next_goals($target, $channel, 3) } || [];
+            my @lines = grep { length } map { _ach_goal_line($ach, $defs, $_) } @$goals;
+            botPrivmsg($self, $reply_to, '  Closest: ' . join('  |  ', @lines)) if @lines;
+        }
         return 1;
     }
 
@@ -8953,6 +9037,19 @@ sub mbAchievements_ctx {
     while (@cells) {
         my @chunk = splice(@cells, 0, 4);
         botPrivmsg($self, $reply_to, '  ' . join('  |  ', @chunk));
+    }
+
+    # mb612-B1: et la suite ? Les 3 objectifs verrouilles les plus proches,
+    # sur une seule ligne. Vue cross-canal exclue : la progression se compte
+    # par canal, l'afficher a cote d'un total cross-canal serait trompeur.
+    if (!$cross && $channel =~ /^#/) {
+        my $goals = eval { $ach->next_goals($target, $channel, 3) } || [];
+        my @lines = grep { length } map { _ach_goal_line($ach, $defs, $_) } @$goals;
+        if (@lines) {
+            botPrivmsg($self, $reply_to, '  Next: ' . join('  |  ', @lines));
+            botPrivmsg($self, $reply_to,
+                "  (\x02!achievements progress\x02 for the full ladder)");
+        }
     }
     return 1;
 }
@@ -9812,7 +9909,10 @@ sub mbDuel_ctx {
 
     # Hooks achievements
     if ($self->{achievements}) {
-        my $wins = $self->{_duel_stats}{$channel}{$winner}{wins} // 0;
+        # mb610-B1: victoires cumulees persistantes (la table memoire
+        # servait de compteur et repartait a zero a chaque redemarrage).
+        my $wins = _ach_progress($self, 'duel_win', $winner, $channel)
+                // ($self->{_duel_stats}{$channel}{$winner}{wins} // 0);
         eval { $self->{achievements}->check_duel($winner, $channel, $wins, $underdog_streak) };
         if ($@) { $self->{logger}->log(1, "achievements check_duel error: $@") }
         # Karma achievements potentiellement aussi
@@ -10230,10 +10330,13 @@ sub mbHoroscope_ctx {
         }
     }
 
-    # Compteur consultations + hook achievement
+    # mb610-B1: le compteur passe au registre PERSISTANT des achievements
+    # (le compteur memoire reste pour les instances sans systeme
+    # d'achievements, et pour ne rien changer au reste du code).
     $self->{_horoscope_count}{$nick}++;
     if ($self->{achievements} && $channel =~ /^#/) {
-        my $count = $self->{_horoscope_count}{$nick} // 0;
+        my $count = _ach_progress($self, 'horoscope', $nick, $channel)
+                 // ($self->{_horoscope_count}{$nick} // 0);
         eval { $self->{achievements}->check_horoscope($nick, $channel, $count) };
         if ($@) { $self->{logger}->log(1, "achievements check_horoscope error: $@") }
     }
@@ -10463,10 +10566,11 @@ sub mbCompat_ctx {
     push @details, sprintf("%d adjacent msg pairs (90d)", $copresence) if $copresence > 0;
     botPrivmsg($self, $channel, "  " . join("  \x{B7}  ", @details)) if @details;
 
-    # Hook achievement
+    # Hook achievement (mb610-B1: progression persistante)
     $self->{_compat_count}{$nick}++;
     if ($self->{achievements}) {
-        my $cnt = $self->{_compat_count}{$nick} // 0;
+        my $cnt = _ach_progress($self, 'compat', $nick, $channel)
+               // ($self->{_compat_count}{$nick} // 0);
         eval { $self->{achievements}->check_compat($nick, $channel, $cnt) };
         if ($@) { $self->{logger}->log(1, "achievements check_compat error: $@") }
     }
@@ -10711,9 +10815,11 @@ sub checkQuotegameAnswer {
             sprintf("\x{1F3AF} Correct, \x02%s\x02! It was \x02%s\x02 (in %ds, score: %d)",
                 $sNick, $qg->{author}, $elapsed, $score));
 
-        # Hook achievement
+        # Hook achievement (mb610-B1: total cumule, pas le score de la partie)
         if ($self->{achievements}) {
-            eval { $self->{achievements}->check_quotegame($sNick, $sChannel, $score) };
+            my $qg_total = _ach_progress($self, 'quotegame_solved', $sNick, $sChannel)
+                        // $score;
+            eval { $self->{achievements}->check_quotegame($sNick, $sChannel, $qg_total) };
         }
         $self->{metrics}->inc('mediabot_quotegame_correct_total') if $self->{metrics};
     }
@@ -10924,10 +11030,11 @@ sub mbMood_ctx {
         botPrivmsg($self, $channel, "  " . join("  \x{B7}  ", @pulse)) if @pulse;
     }
 
-    # Hook achievement
+    # Hook achievement (mb610-B1: progression persistante)
     $self->{_mood_count}{$nick}++;
     if ($self->{achievements}) {
-        my $cnt = $self->{_mood_count}{$nick} // 0;
+        my $cnt = _ach_progress($self, 'mood', $nick, $channel)
+               // ($self->{_mood_count}{$nick} // 0);
         eval { $self->{achievements}->check_mood($nick, $channel, $cnt) };
         if ($@) { $self->{logger}->log(1, "achievements check_mood error: $@") }
     }
@@ -11668,6 +11775,30 @@ sub mbObservatory_ctx {
 # (RECAP_MAX_ROWS, défaut 2000), cooldown par nick (RECAP_COOLDOWN_S, défaut 30s).
 # Lecture seule ; s'appuie sur l'index composite idx_channel_log_channel_ts (A4).
 # ===========================================================================
+# mb609-B1: texte de service localise, avec repli sur la formulation
+# historique anglaise si le module Claude n'est pas charge.
+sub _recap_text {
+    my ($lang, $key, $fallback) = @_;
+    my $fn = Mediabot::External::Claude->can('ai_lang_text') or return $fallback;
+    my $text = eval { $fn->($lang, $key) };
+    return (defined $text && length $text) ? $text : $fallback;
+}
+
+# mb610-B1: increment du registre de progression persistant des
+# achievements, avec repli silencieux si le systeme n'est pas la (rend
+# undef, l'appelant garde alors sa valeur historique).
+sub _ach_progress {
+    my ($self, $kind, $nick, $channel) = @_;
+    my $ach = $self->{achievements} or return undef;
+    return undef unless $ach->can('bump_progress');
+    my $value = eval { $ach->bump_progress($kind, $nick, $channel) };
+    if ($@) {
+        eval { $self->{logger}->log(1, "achievements progress error: $@") };
+        return undef;
+    }
+    return $value;
+}
+
 sub mbRecap_ctx {
     my ($ctx) = @_;
 
@@ -11677,18 +11808,37 @@ sub mbRecap_ctx {
 
     # !recap n'a de sens que dans un canal (le "quoi de neuf ICI").
     unless (isIrcChannelTarget($channel)) {
-        botNotice($self, $nick, "Syntax: recap [<window>] [ai]  — use it in a channel (e.g. 30m, 2h).");
+        botNotice($self, $nick, "Syntax: recap [<window>] [ai] [en|fr|es]  — use it in a channel (e.g. 30m, 2h).");
         return;
     }
 
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     @args = grep { defined && $_ ne '' } @args;
 
+    # mb609-B1: meme regle de langue que 'ai summary' — et la MEME
+    # implementation (Claude::extract_ai_lang_token / resolve_ai_lang),
+    # pour que les deux commandes ne puissent pas diverger.
+    # Le module Claude est charge paresseusement : on passe par can() comme
+    # le fait deja le chemin IA plus bas. Sans lui, aucun jeton n'est extrait
+    # et la langue reste celle du canal — le comportement historique.
+    my ($forced_lang, $bad_lang);
+    if (my $extract = Mediabot::External::Claude->can('extract_ai_lang_token')) {
+        ($forced_lang, $bad_lang, @args) = $extract->(@args);
+    }
+
     my $want_ai = 0;
     my $window_arg;
     for my $a (@args) {
         if (lc($a) eq 'ai')      { $want_ai = 1; }
         elsif ($a =~ /^\d+[hm]$/i) { $window_arg = lc($a); }
+    }
+    my $resolve = Mediabot::External::Claude->can('resolve_ai_lang');
+    my $recap_lang = $resolve
+        ? $resolve->($self, $channel, $forced_lang)
+        : (eval { Mediabot::Helpers::channel_lang($self, $channel) } || 'en');
+    if (defined $bad_lang && $want_ai) {
+        botNotice($self, $nick,
+            "Unsupported language '$bad_lang' (en, fr, es) - using '$recap_lang'.");
     }
 
     # --- configuration (avec valeurs par défaut sûres) ---
@@ -11823,8 +11973,12 @@ sub mbRecap_ctx {
                 last if length($transcript) + length($line) + 1 > 6000;
                 $transcript .= $line . "\n";
             }
+            # mb609-B1: la langue est desormais EXPLICITE. « la meme langue
+            # que la conversation » laissait le modele deviner — et un canal
+            # bilingue obtenait un resume au hasard.
+            my $lang_name = Mediabot::External::Claude::ai_lang_name($recap_lang);
             my $prompt = "Summarize this IRC channel conversation in 3-5 concise bullet points, "
-                       . "in the same language as the conversation. Only the summary, no preamble.\n\n"
+                       . "in $lang_name. Only the summary, no preamble.\n\n"
                        . $transcript;
             my $ai_ok = eval {
                 Mediabot::External::Claude::claudeAI(
@@ -11840,7 +11994,9 @@ sub mbRecap_ctx {
                         for my $line (split /\n/, $text) {
                             next if $line =~ /^\s*$/;
                             if ($sent_lines >= $ai_max_lines) {
-                                botNotice($self, $nick, "recap: summary truncated (too long).");
+                                botNotice($self, $nick,
+                                    _recap_text($recap_lang, 'recap_truncated',
+                                        'recap: summary truncated (too long).'));
                                 last;
                             }
                             botNotice($self, $nick, $line);
@@ -11856,10 +12012,14 @@ sub mbRecap_ctx {
                 return 1;
             }
             # sinon : repli sur le statistique ci-dessous
-            botNotice($self, $nick, "recap: AI summary unavailable, showing stats instead.");
+            botNotice($self, $nick,
+                _recap_text($recap_lang, 'recap_unavailable',
+                    'recap: AI summary unavailable, showing stats instead.'));
         }
         else {
-            botNotice($self, $nick, "recap: AI not configured, showing stats instead.");
+            botNotice($self, $nick,
+                _recap_text($recap_lang, 'recap_notconf',
+                    'recap: AI not configured, showing stats instead.'));
         }
     }
 

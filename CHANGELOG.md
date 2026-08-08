@@ -10,6 +10,129 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb613 — la progression async revient vraiment au parent
+- Correction d'un ecart entre les tests directs et le runtime : les checks
+  lourds d'achievements tournent dans un worker forké ; les set_progress()
+  faits dans ce child modifiaient seulement sa memoire copy-on-write puis
+  disparaissaient. msg_count et channels_active reviennent desormais dans le
+  resultat borne du worker et sont appliques par le parent.
+- Le worker honorait aussi les seuils par defaut uniquement, car son objet bot
+  est volontairement reduit au handle DB isole. Les seuils EFFECTIFS (y
+  compris les surcharges [achievements]) sont maintenant snapshots avant fork.
+- Le compteur de canaux deja calcule par le check polyphony nourrit enfin
+  channels_active au lieu d'etre jete apres le test d'unlock.
+- Les descriptions du catalogue ont ete alignees sur les nouveaux seuils
+  par defaut mb611 (150k messages, 300 trivia, 250 karma, etc.).
+- Hygiene : suppression effective de l'ancien
+  t/cases/790_mb608_ai_summary_language.t, remplace par 791 depuis mb609.
+- Test 796 : passage parent/worker des progressions, seuil configure dans le
+  worker, polyphony enregistre, descriptions alignees.
+
+### mb612 — la progression devient visible, et la grille est complete
+- Le catalogue declare desormais QUEL compteur mesure chaque achievement
+  (progress_kind). 20 des 24 sont mesurables ; les 4 autres (sniper,
+  underdog, night_owl, early_bird) se declarent NON mesurables au lieu
+  qu'on leur fabrique une progression qu'on ne sait pas calculer.
+- Les valeurs deja connues des verifications sont enregistrees dans le
+  registre mb610 par set_progress — nombre de messages, karma, karma
+  donne, mots distincts, canaux frequentes. AUCUNE requete supplementaire :
+  ces nombres etaient deja calcules, ils etaient simplement jetes. La
+  valeur d'etat est monotone : une lecture plus basse (fenetre glissante,
+  purge) n'efface pas un merite deja constate.
+- Nouvelles lectures : progress_snapshot (debloque, valeur, seuil,
+  pourcentage borne, mesurable ou non) et next_goals (les N objectifs
+  verrouilles les plus PROCHES). Un palier deja atteint mais pas encore
+  enregistre n'est jamais propose comme objectif — « 137/10 (100%) »
+  n'est pas une chose a faire.
+- !achievements gagne une ligne « Next: » avec les 3 objectifs les plus
+  proches et leur pourcentage ; la vue « aucun achievement debloque »
+  montre enfin ce qui est a portee, ce qui est precisement le moment ou
+  la commande doit servir. Vue cross-canal exclue : la progression se
+  compte par canal, l'afficher a cote d'un total cross-canal tromperait.
+- Nouvelle vue !achievements progress [nick] : la grille complete, du plus
+  proche au plus lointain, barre de 12 cases, nombres lisibles (4.2k,
+  150k), bornee a 12 lignes en notice avec un compte des restants.
+- .status partyline : « Achv: N profile(s), M progress counter(s) » et
+  « (unsaved changes) » le cas echeant — le registre est le seul etat du
+  systeme qui ne se recalcule pas, l'operateur doit le voir.
+- Test 795 (32 assertions) dont le RENDU REEL des trois vues capture
+  ligne a ligne. Piege consigne : UserCommands importe botPrivmsg/botNotice,
+  c'est SON alias qu'un test doit remplacer, pas celui de Helpers.
+
+### mb611 — le merite exige croit avec la rarete, et se regle sans coder
+- Les seuils vivent desormais DANS le catalogue %ACH (champ threshold) :
+  la definition d'un achievement et sa verification ne peuvent plus
+  diverger, et plus aucun nombre n'est ecrit en dur dans les checks.
+- Chaque seuil est reglable par conf, section [achievements], cle =
+  identifiant en MAJUSCULES (TRIVIA_CHAMPION=200). Valeur absente, non
+  numerique, nulle ou negative : le defaut du catalogue s'applique.
+- Reequilibrage des paliers rares et au-dela : trivia_champion 100->300,
+  quote_master 50->150, duel_master 50->150, quote_detective 10->20,
+  matchmaker 10->25, karma_legend 100->250, gift_giver 100->250,
+  polyglot 5000->7500, polyphony 5->8, underdog 5->8 defaites d'affilee,
+  trivia_sniper <=3s -> <=2s, legend 100k->150k messages. Les paliers
+  d'entree (first_msg, trivia_rookie, chatterbox, karma_star, night_owl,
+  early_bird, duel_warrior, star_gazer, mood_reader, wordsmith) ne bougent
+  pas : c'est la rarete qui se paie.
+- Relever un seuil ne revoque RIEN : un achievement deja gagne est un fait
+  enregistre, pas un calcul refait.
+- Pin 665 evolue (il verrouillait un 50 litteral ; il verrouille desormais
+  la SOURCE du seuil et sa valeur par defaut). Test 794 (17 assertions) :
+  catalogue complet, absence de seuil en dur, surcharge conf et garde-fous,
+  monotonie des paliers dans chaque famille, hausse effective des rares+,
+  seuil inverse du sniper, non-revocation apres durcissement.
+
+### mb610 — la progression vers les achievements survit au redemarrage
+- Diagnostic : les unlocks etaient bien persistes (var/achievements.json),
+  mais les COMPTEURS qui y menent ne l'etaient pas. horoscope, compat, mood
+  et duels vivaient dans des tables memoire du bot ; pire, trivia et
+  quotegame recevaient le score de la PARTIE en cours — « 100 bonnes
+  reponses » exigeait donc 100 reponses dans une seule session, et
+  « 50 quotegame » repartait a zero a chaque partie. Ces paliers n'etaient
+  pas difficiles : ils etaient inatteignables.
+- Nouveau registre de progression PERSISTANT dans le meme fichier JSON
+  (aucune modification de schema) : { kind => { "lc(nick)\0lc(canal)" => n } },
+  API progress / bump_progress / progress_for_nick. Cle canonique en
+  minuscules pour le nick ET le canal, et merite compte PAR CANAL puisqu'un
+  achievement se debloque par canal.
+- Format de fichier v2 { version, profiles, progress }, avec lecture
+  transparente des fichiers HERITES a plat : aucun unlock existant n'est
+  perdu, le fichier repart en v2 au premier save.
+- Plafond $MAX_PROGRESS_ENTRIES (5000 par type) : au-dela, ce sont les
+  compteurs les PLUS FAIBLES qui tombent — et jamais celui qu'on vient
+  d'incrementer (sans cette garde, une entree neuve pouvait etre elaguee
+  dans la foulee de sa creation et ne jamais decoller).
+- Les six familles de compteurs passent par le registre, avec repli
+  silencieux si le systeme d'achievements est absent. L'affichage des jeux
+  (score de la partie) est inchange : seul le hook recoit le cumul.
+- Test 793 (26 assertions), dont la persistance REELLE verifiee par une
+  seconde instance relisant le fichier — c'est-a-dire un redemarrage.
+
+### mb609 — 'recap ai' rejoint la regle de langue, par la MEME implementation
+- La regle de langue de mb608 est extraite de claude_ctx en API publique du
+  module Claude : extract_ai_lang_token (jeton nu en|fr|es ou lang=xx),
+  resolve_ai_lang (force > langue du canal mb563 > 'en'), ai_lang_name et
+  ai_lang_text (vocabulaire de service partage). 'ai summary' consomme
+  desormais ces fonctions au lieu de sa regle en ligne : les deux commandes
+  ne peuvent plus diverger, et une future langue s'ajoute en un seul point.
+- 'recap ai' suit la langue du canal et accepte le meme forcage :
+  recap 2h ai fr, recap ai lang=en. Un code hors trio previent l'appelant.
+- Le prompt de recap demande EXPLICITEMENT la langue. L'ancienne formule
+  « in the same language as the conversation » laissait le modele deviner —
+  sur un canal bilingue, le resume tombait au hasard.
+- Les trois messages de service du chemin IA (resume indisponible, IA non
+  configuree, resume tronque) sont localises, avec repli sur la formulation
+  anglaise historique.
+- Le module Claude etant charge PARESSEUSEMENT, recap passe par can() comme
+  le fait deja son chemin IA : sans le module, aucun jeton n'est extrait et
+  la langue reste celle du canal — comportement historique intact.
+- Hygiene : le test de mb608 est renumerote 791 (deux fichiers portaient le
+  prefixe 790 apres la passe mb607 ; c'est le mien qui bouge).
+- Usage et ligne de commande publique mis a jour. Test 792 (29 assertions) :
+  API unitaire (extraction, resolution, casse, hors-trio, repli, cle
+  absente), consommation par recap via can(), absence de regle recopiee,
+  prompt explicite, 3 messages localises avec repli, syntaxe annoncee.
+
 ### mb608 — 'ai summary' parle la langue du canal (et sait etre force)
 - La reponse suit desormais la langue du canal : les chansets LangFR /
   LangES (mb563, Helpers::channel_lang) decident, et a defaut main.LANG

@@ -868,6 +868,9 @@ our %SUMMARY_STRINGS = (
         yesterday => ' (yesterday)',
         week      => ' (this week)',
         days      => ' (last %dd)',
+        recap_unavailable => 'recap: AI summary unavailable, showing stats instead.',
+        recap_notconf     => 'recap: AI not configured, showing stats instead.',
+        recap_truncated   => 'recap: summary truncated (too long).',
     },
     fr => {
         name      => 'French',
@@ -881,6 +884,9 @@ our %SUMMARY_STRINGS = (
         yesterday => ' (hier)',
         week      => ' (cette semaine)',
         days      => ' (%d derniers jours)',
+        recap_unavailable => 'recap: resume IA indisponible, statistiques a la place.',
+        recap_notconf     => 'recap: IA non configuree, statistiques a la place.',
+        recap_truncated   => 'recap: resume tronque (trop long).',
     },
     es => {
         name      => 'Spanish',
@@ -894,8 +900,55 @@ our %SUMMARY_STRINGS = (
         yesterday => ' (ayer)',
         week      => ' (esta semana)',
         days      => ' (ultimos %dd)',
+        recap_unavailable => 'recap: resumen IA no disponible, estadisticas en su lugar.',
+        recap_notconf     => 'recap: IA no configurada, estadisticas en su lugar.',
+        recap_truncated   => 'recap: resumen truncado (demasiado largo).',
     },
 );
+
+# mb609-B1: resolution de la langue de sortie des reponses IA. Extraite de
+# claude_ctx pour que 'recap ai' partage EXACTEMENT la meme regle plutot
+# que d'en ecrire une seconde : jeton force > langue du canal (mb563) >
+# 'en'. Rend aussi le jeton refuse, a charge de l'appelant de prevenir.
+sub resolve_ai_lang {
+    my ($self, $channel, $forced) = @_;
+    my $lang = $forced
+            || (eval { Mediabot::Helpers::channel_lang($self, $channel) } || 'en');
+    $lang = lc($lang // 'en');
+    $lang = 'en' unless $lang =~ /\A(?:en|fr|es)\z/;
+    return $lang;
+}
+
+# mb609-B1: extraction d'un jeton de langue depuis une liste d'arguments.
+# Rend (langue_forcee, code_refuse, arguments_restants). Formes: jeton nu
+# en|fr|es, ou lang=xx / lang:xx.
+sub extract_ai_lang_token {
+    my (@args) = @_;
+    my ($forced, $bad);
+    my @rest = grep {
+        my $a = lc($_ // '');
+        if ($a =~ /^lang[=:]([a-z]{2})$/) {
+            my $code = $1;
+            if ($code =~ /\A(?:en|fr|es)\z/) { $forced = $code } else { $bad = $code }
+            0;
+        }
+        elsif ($a =~ /\A(?:en|fr|es)\z/) { $forced = $a; 0 }
+        else { 1 }
+    } @args;
+    return ($forced, $bad, @rest);
+}
+
+# Nom anglais de la langue, tel qu'il est demande au modele.
+sub ai_lang_name { return _summary_lang_strings($_[0])->{name} }
+
+# Chaine de service localisee (repli anglais, puis chaine vide) — le
+# vocabulaire est partage par 'ai summary' et 'recap ai'.
+sub ai_lang_text {
+    my ($lang, $key) = @_;
+    my $S = _summary_lang_strings($lang);
+    return $S->{$key} if defined $S->{$key};
+    return $SUMMARY_STRINGS{en}{$key} // '';
+}
 
 sub _summary_lang_strings {
     my ($lang) = @_;
@@ -1069,10 +1122,7 @@ sub claude_ctx {
         # (Helpers::channel_lang, mb563 : chansets LangFR/LangES, sinon
         # main.LANG dont le defaut est 'en' — l'anglais reste donc le defaut
         # historique, aucun canal existant ne change de comportement).
-        my $lang = $forced_lang
-                || (eval { Mediabot::Helpers::channel_lang($self, $channel) } || 'en');
-        $lang = lc($lang // 'en');
-        $lang = 'en' unless $lang =~ /\A(?:en|fr|es)\z/;
+        my $lang = resolve_ai_lang($self, $channel, $forced_lang);
         if (defined $bad_lang) {
             Mediabot::Helpers::botNotice($self, $nick,
                 "Unsupported language '$bad_lang' (en, fr, es) - using '$lang'.");

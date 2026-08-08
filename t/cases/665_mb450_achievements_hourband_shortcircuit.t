@@ -97,10 +97,20 @@ return sub {
     # Non-régression : le GROUP BY et les seuils/unlock d'origine sont préservés.
     $assert->like($cm, qr/GROUP BY HOUR\(cl\.ts\)/,
                   'check_msg: la requête GROUP BY HOUR(ts) est conservée');
-    $assert->like($cm, qr/night_owl.*?\$night\s*>=\s*50/s,
+    # mb611: le catalogue est interroge en vrai — ce test lisait jusqu'ici
+    # le source seulement, il charge donc le module ici.
+    require Mediabot::Achievements;
+
+    # mb611: le seuil vit desormais dans le catalogue (et peut etre regle
+    # par conf) — on verrouille la SOURCE du seuil et sa valeur par defaut.
+    $assert->like($cm, qr/night_owl.*?\$night\s*>=\s*\$self->threshold\('night_owl'\)/s,
                   'check_msg: seuil night_owl >= 50 inchangé');
-    $assert->like($cm, qr/early_bird.*?\$morn\s*>=\s*50/s,
+    $assert->is(Mediabot::Achievements::threshold(undef, 'night_owl'), 50,
+                  'check_msg: night_owl vaut toujours 50 par defaut');
+    $assert->like($cm, qr/early_bird.*?\$morn\s*>=\s*\$self->threshold\('early_bird'\)/s,
                   'check_msg: seuil early_bird >= 50 inchangé');
+    $assert->is(Mediabot::Achievements::threshold(undef, 'early_bird'), 50,
+                  'check_msg: early_bird vaut toujours 50 par defaut');
 
     # Le filtre event_type des 3 requêtes (garanti par mb347) n'a pas bougé.
     my $sql_only = $cm;

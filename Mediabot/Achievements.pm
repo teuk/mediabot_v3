@@ -48,6 +48,8 @@ my %ACH = (
         desc    => 'Posted a first message on a channel',
         rarity  => 'common',
         check_on => 'msg',
+        threshold => 1,
+        progress_kind => 'msg_count',
     },
     chatterbox => {
         emoji   => '💬',
@@ -55,6 +57,8 @@ my %ACH = (
         desc    => 'Sent 1 000 messages on a channel',
         rarity  => 'uncommon',
         check_on => 'msg',
+        threshold => 1000,
+        progress_kind => 'msg_count',
     },
     megaphone => {
         emoji   => '📢',
@@ -62,6 +66,8 @@ my %ACH = (
         desc    => 'Sent 10 000 messages on a channel',
         rarity  => 'rare',
         check_on => 'msg',
+        threshold => 10000,
+        progress_kind => 'msg_count',
     },
     icon => {
         emoji   => '🗿',
@@ -69,13 +75,17 @@ my %ACH = (
         desc    => 'Sent 50 000 messages on a channel',
         rarity  => 'epic',
         check_on => 'msg',
+        threshold => 50000,
+        progress_kind => 'msg_count',
     },
     legend => {
         emoji   => '⭐',
         name    => 'Legend',
-        desc    => 'Sent 100 000 messages on a channel',
+        desc    => 'Sent 150 000 messages on a channel',
         rarity  => 'legendary',
         check_on => 'msg',
+        threshold => 150000,
+        progress_kind => 'msg_count',
     },
     wordsmith => {
         emoji   => '📚',
@@ -83,13 +93,17 @@ my %ACH = (
         desc    => 'Used 1 000 distinct words',
         rarity  => 'uncommon',
         check_on => 'wordcount',
+        threshold => 1000,
+        progress_kind => 'distinct_words',
     },
     polyglot => {
         emoji   => '🎓',
         name    => 'Polyglot',
-        desc    => 'Used 5 000 distinct words',
+        desc    => 'Used 7 500 distinct words',
         rarity  => 'rare',
         check_on => 'wordcount',
+        threshold => 7500,
+        progress_kind => 'distinct_words',
     },
     karma_star => {
         emoji   => '🌟',
@@ -97,20 +111,26 @@ my %ACH = (
         desc    => 'Reached +50 karma on a channel',
         rarity  => 'uncommon',
         check_on => 'karma',
+        threshold => 50,
+        progress_kind => 'karma_score',
     },
     karma_legend => {
         emoji   => '💫',
         name    => 'Karma Legend',
-        desc    => 'Reached +100 karma on a channel',
+        desc    => 'Reached +250 karma on a channel',
         rarity  => 'epic',
         check_on => 'karma',
+        threshold => 250,
+        progress_kind => 'karma_score',
     },
     gift_giver => {
         emoji   => '🎁',
         name    => 'Gift Giver',
-        desc    => 'Gave 100 positive karma',
+        desc    => 'Gave 250 positive karma',
         rarity  => 'rare',
         check_on => 'karma',
+        threshold => 250,
+        progress_kind => 'karma_given',
     },
     night_owl => {
         emoji   => '🌙',
@@ -118,6 +138,7 @@ my %ACH = (
         desc    => 'Active between 00h-05h (50+ msgs)',
         rarity  => 'uncommon',
         check_on => 'msg',
+        threshold => 50,
     },
     early_bird => {
         emoji   => '🌅',
@@ -125,6 +146,7 @@ my %ACH = (
         desc    => 'Active between 06h-08h (50+ msgs)',
         rarity  => 'uncommon',
         check_on => 'msg',
+        threshold => 50,
     },
     trivia_rookie => {
         emoji   => '🧠',
@@ -132,20 +154,25 @@ my %ACH = (
         desc    => 'Answered 10 trivia questions correctly',
         rarity  => 'common',
         check_on => 'trivia',
+        threshold => 10,
+        progress_kind => 'trivia_correct',
     },
     trivia_champion => {
         emoji   => '🏆',
         name    => 'Trivia Champion',
-        desc    => 'Answered 100 trivia questions correctly',
+        desc    => 'Answered 300 trivia questions correctly',
         rarity  => 'rare',
         check_on => 'trivia',
+        threshold => 300,
+        progress_kind => 'trivia_correct',
     },
     trivia_sniper => {
         emoji   => '🎯',
         name    => 'Trivia Sniper',
-        desc    => 'Answered a trivia question in under 3 seconds',
+        desc    => 'Answered a trivia question in 2 seconds or less',
         rarity  => 'epic',
         check_on => 'trivia',
+        threshold => 2,
     },
 
     # mb116: achievements liés au duel
@@ -155,20 +182,25 @@ my %ACH = (
         desc    => 'Won 10 duels on a channel',
         rarity  => 'uncommon',
         check_on => 'duel',
+        threshold => 10,
+        progress_kind => 'duel_win',
     },
     duel_master => {
         emoji   => '🛡️',
         name    => 'Duel Master',
-        desc    => 'Won 50 duels on a channel',
+        desc    => 'Won 150 duels on a channel',
         rarity  => 'rare',
         check_on => 'duel',
+        threshold => 150,
+        progress_kind => 'duel_win',
     },
     underdog => {
         emoji   => '🐺',
         name    => 'Underdog',
-        desc    => 'Won a duel after losing 5 in a row',
+        desc    => 'Won a duel after losing 8 in a row',
         rarity  => 'epic',
         check_on => 'duel',
+        threshold => 8,
     },
     star_gazer => {
         emoji   => '🔮',
@@ -176,29 +208,37 @@ my %ACH = (
         desc    => 'Consulted the horoscope 30 times',
         rarity  => 'uncommon',
         check_on => 'horoscope',
+        threshold => 30,
+        progress_kind => 'horoscope',
     },
 
     # mb117: nouveaux achievements sociaux
     matchmaker => {
         emoji   => '💞',
         name    => 'Matchmaker',
-        desc    => 'Calculated 10 compatibility scores',
+        desc    => 'Calculated 25 compatibility scores',
         rarity  => 'uncommon',
         check_on => 'compat',
+        threshold => 25,
+        progress_kind => 'compat',
     },
     quote_detective => {
         emoji   => '🕵️',
         name    => 'Quote Detective',
-        desc    => 'Solved 10 quotegame questions',
+        desc    => 'Solved 20 quotegame questions',
         rarity  => 'uncommon',
         check_on => 'quotegame',
+        threshold => 20,
+        progress_kind => 'quotegame_solved',
     },
     quote_master => {
         emoji   => '📜',
         name    => 'Quote Master',
-        desc    => 'Solved 50 quotegame questions',
+        desc    => 'Solved 150 quotegame questions',
         rarity  => 'rare',
         check_on => 'quotegame',
+        threshold => 150,
+        progress_kind => 'quotegame_solved',
     },
     mood_reader => {
         emoji   => '🌡️',
@@ -206,15 +246,39 @@ my %ACH = (
         desc    => 'Took the channel temperature 30 times',
         rarity  => 'uncommon',
         check_on => 'mood',
+        threshold => 30,
+        progress_kind => 'mood',
     },
     polyphony => {
         emoji   => '🎼',
         name    => 'Polyphony',
-        desc    => 'Active on at least 5 channels',
+        desc    => 'Active on at least 8 channels',
         rarity  => 'rare',
         check_on => 'polyphony',
+        threshold => 8,
+        progress_kind => 'channels_active',
     },
 );
+
+# -- Seuils (mb611) ------------------------------------------------------------
+# Le merite exige par chaque achievement vit DANS le catalogue ci-dessus :
+# la definition et la verification ne peuvent plus diverger. Chaque seuil est
+# reglable sans toucher au code via la conf, section [achievements], clé =
+# l'identifiant en MAJUSCULES (ex. TRIVIA_CHAMPION=200). Une valeur invalide
+# ou <= 0 est ignoree et le defaut du catalogue s'applique.
+sub threshold {
+    my ($self, $id) = @_;
+    my $default = (ref $ACH{$id || ''} eq 'HASH') ? $ACH{$id}{threshold} : undef;
+    return $default unless defined $id;
+    my $conf = ref($self) ? eval { $self->{bot}{conf} } : undef;
+    if ($conf && eval { $conf->can('get') }) {
+        my $raw = eval { $conf->get('achievements.' . uc($id)) };
+        if (defined $raw && !ref $raw && $raw =~ /\A\d+\z/ && $raw > 0) {
+            return int($raw);
+        }
+    }
+    return $default;
+}
 
 # -- Couleurs IRC par rareté ----------------------------------------------------
 my %RARITY_COLOR = (
@@ -233,6 +297,15 @@ sub new {
         logger => $args{logger},
         bot    => $args{bot},
         data   => {},   # { "$nick\x00$channel" => { id => ts, ... } }
+        # mb610-B1: REGISTRE DE PROGRESSION persistant. Les compteurs qui
+        # menent aux achievements vivaient en memoire du bot (horoscope,
+        # compat, mood, duels) ou dans la partie en cours (trivia,
+        # quotegame) : au redemarrage — ou a la partie suivante — le
+        # merite acquis repartait de zero, ce qui rendait les paliers
+        # eleves inatteignables plutot que difficiles. Le registre est
+        # { kind => { "lc(nick)\x00lc(channel)" => n } }, ecrit dans le
+        # MEME fichier JSON (aucune modification de schema).
+        progress => {},
         dirty  => 0,
         last_save => 0,
         # mb559-B1: bounded async queue. An entry remains owned by the parent
@@ -281,7 +354,19 @@ sub _load {
         }
         return;
     }
-    $self->{data} = $data if ref $data eq 'HASH';
+    # mb610-B1: deux formats acceptes. v2 = enveloppe { version, profiles,
+    # progress } ; heritage = table de profils a plat. Un fichier hérité se
+    # charge tel quel (aucune perte) et repartira en v2 au prochain save.
+    if (ref $data eq 'HASH'
+        && ref $data->{profiles} eq 'HASH'
+        && defined $data->{version} && $data->{version} eq '2') {
+        $self->{data}     = $data->{profiles};
+        $self->{progress} = (ref $data->{progress} eq 'HASH') ? $data->{progress} : {};
+    }
+    elsif (ref $data eq 'HASH') {
+        $self->{data} = $data;
+        $self->_log(2, 'Achievements: legacy flat file loaded, will be saved as v2');
+    }
 
     # mb430-B1: migration de casse. Les clés sont "lc(nick)\x00<canal>" ; le
     # canal n'était pas replié en lc auparavant, donc un même canal pouvait
@@ -313,7 +398,11 @@ sub _load {
         }
     }
 
-    $self->_log(3, "Achievements: loaded " . scalar(keys %{$self->{data}}) . " profile(s)");
+    my $tracked = 0;
+    $tracked += scalar keys %{ $self->{progress}{$_} || {} }
+        for keys %{ $self->{progress} || {} };
+    $self->_log(3, "Achievements: loaded " . scalar(keys %{$self->{data}})
+        . " profile(s), $tracked progress counter(s)");
 }
 
 # -- Sauvegarde en JSON (avec debounce) -----------------------------------------
@@ -326,7 +415,11 @@ sub save {
     }
     eval {
         make_path(dirname($self->{path})) unless -d dirname($self->{path});
-        my $json = JSON::PP->new->utf8(0)->pretty->canonical->encode($self->{data});
+        my $json = JSON::PP->new->utf8(0)->pretty->canonical->encode({
+            version  => '2',
+            profiles => $self->{data},
+            progress => $self->{progress},
+        });
         my $tmp  = "$self->{path}.tmp";
         open my $fh, '>:utf8', $tmp or die "open $tmp: $!";
         # mb400-B1: vérifier print ET close avant le rename. Sur disque plein
@@ -354,6 +447,150 @@ sub save {
     }
     $self->{dirty}     = 0;
     $self->{last_save} = time();
+}
+
+# -- Registre de progression (mb610) -------------------------------------------
+# Cle canonique : lc(nick) + \x00 + lc(channel), comme les profils. Un
+# achievement se debloque PAR CANAL, donc le merite se compte par canal.
+our $MAX_PROGRESS_ENTRIES = 5000;
+
+sub _progress_key {
+    my ($nick, $channel) = @_;
+    return undef unless defined $nick && length $nick;
+    return lc($nick) . "\x00" . lc($channel // '');
+}
+
+# Lecture seule : la valeur courante, 0 si inconnue.
+sub progress {
+    my ($self, $kind, $nick, $channel) = @_;
+    my $key = _progress_key($nick, $channel);
+    return 0 unless defined $kind && defined $key;
+    return $self->{progress}{$kind}{$key} // 0;
+}
+
+# Incremente et rend la NOUVELLE valeur. Marque le fichier a sauver ; la
+# sauvegarde reelle passe par le debounce de save() — un compteur n'a pas
+# besoin de la meme urgence qu'un unlock, qui force l'ecriture.
+sub bump_progress {
+    my ($self, $kind, $nick, $channel, $by) = @_;
+    my $key = _progress_key($nick, $channel);
+    return 0 unless defined $kind && length $kind && defined $key;
+    $by = 1 unless defined $by && $by =~ /\A-?\d+\z/;
+    my $value = ($self->{progress}{$kind}{$key} // 0) + $by;
+    $value = 0 if $value < 0;
+    $self->{progress}{$kind}{$key} = $value;
+    $self->{dirty} = 1;
+    # Le compteur qu'on vient de toucher est protege : sans cela, une
+    # nouvelle entree (valeur 1) pouvait etre elaguee dans la foulee de sa
+    # creation et ne jamais decoller.
+    $self->_prune_progress($kind, $key);
+    $self->save;
+    return $self->{progress}{$kind}{$key} // $value;
+}
+
+# Un canal tres frequente ne doit pas faire enfler le fichier sans fin :
+# au-dela du plafond, on laisse tomber les compteurs les PLUS FAIBLES —
+# ceux qui sont le plus loin d'un palier, donc les moins interessants.
+sub _prune_progress {
+    my ($self, $kind, $keep_key) = @_;
+    my $table = $self->{progress}{$kind} or return;
+    my $count = scalar keys %$table;
+    return if $count <= $MAX_PROGRESS_ENTRIES;
+    my @by_value = grep { !defined $keep_key || $_ ne $keep_key }
+                   sort { $table->{$a} <=> $table->{$b} || $a cmp $b } keys %$table;
+    my $drop = $count - $MAX_PROGRESS_ENTRIES;
+    $drop = scalar @by_value if $drop > scalar @by_value;
+    delete $table->{ $by_value[$_] } for 0 .. ($drop - 1);
+    $self->_log(2, "Achievements: pruned $drop low '$kind' progress counter(s)");
+}
+
+# mb612-B1: valeur d'ETAT (et non incrementale). Certains compteurs sont des
+# cumuls que le bot incremente (duels, trivia, horoscope) ; d'autres sont
+# deja connus au moment de la verification parce qu'ils viennent de la base
+# (nombre de messages, karma, mots distincts, canaux frequentes). Ces
+# derniers sont ENREGISTRES tels quels — aucune requete supplementaire — pour
+# que l'affichage de progression connaisse TOUTE la grille et pas la moitie.
+# La valeur ne redescend pas : un etat lu plus bas (fenetre glissante, purge)
+# ne doit pas effacer un merite deja constate.
+sub set_progress {
+    my ($self, $kind, $nick, $channel, $value) = @_;
+    my $key = _progress_key($nick, $channel);
+    return 0 unless defined $kind && length $kind && defined $key;
+    return 0 unless defined $value && !ref $value && $value =~ /\A\d+\z/;
+    my $current = $self->{progress}{$kind}{$key} // 0;
+    return $current if $value <= $current;
+    $self->{progress}{$kind}{$key} = int($value);
+    $self->{dirty} = 1;
+    $self->_prune_progress($kind, $key);
+    $self->save;
+    return $self->{progress}{$kind}{$key} // int($value);
+}
+
+# mb612-B1: photographie complete de la grille pour un nick sur un canal.
+# Rend, par achievement : debloque ou non, valeur courante, seuil, pourcentage.
+# Un achievement sans progress_kind (sniper, underdog, tranches horaires) est
+# rendu SANS mesure — on ne fabrique pas une progression qu'on ne sait pas
+# mesurer.
+sub progress_snapshot {
+    my ($self, $nick, $channel) = @_;
+    my $unlocked = $self->get_for_nick($nick, $channel);
+    my %out;
+    for my $id (keys %ACH) {
+        my $kind = $ACH{$id}{progress_kind};
+        my $goal = $self->threshold($id);
+        my $entry = {
+            unlocked  => (exists $unlocked->{$id} ? 1 : 0),
+            threshold => $goal,
+            rarity    => $ACH{$id}{rarity},
+            measurable => ($kind && $goal ? 1 : 0),
+        };
+        if ($entry->{measurable}) {
+            my $cur = $self->progress($kind, $nick, $channel);
+            $cur = $goal if $entry->{unlocked} && $cur < $goal;   # deja gagne
+            $entry->{current} = $cur;
+            $entry->{pct} = $goal > 0 ? int(100 * $cur / $goal) : 0;
+            $entry->{pct} = 100 if $entry->{pct} > 100;
+        }
+        $out{$id} = $entry;
+    }
+    return \%out;
+}
+
+# mb612-B1: les N achievements VERROUILLES dont on est le plus pres, du plus
+# proche au plus lointain. Un achievement jamais commence (0 %) n'est propose
+# qu'a defaut de mieux : viser ce qu'on a deja entame est plus motivant.
+sub next_goals {
+    my ($self, $nick, $channel, $limit) = @_;
+    $limit = 3 unless defined $limit && $limit =~ /\A\d+\z/ && $limit > 0;
+    my $snap = $self->progress_snapshot($nick, $channel);
+    # Un palier deja atteint mais pas encore enregistre (la verification
+    # l'ouvrira au prochain evenement) n'est PAS un objectif : le proposer
+    # afficherait « 137/10 (100%) » dans la liste des choses a faire.
+    my @candidates =
+        grep { !$snap->{$_}{unlocked} && $snap->{$_}{measurable}
+               && $snap->{$_}{current} < $snap->{$_}{threshold} }
+        keys %$snap;
+    my @sorted = sort {
+        ($snap->{$b}{pct} <=> $snap->{$a}{pct})
+        || ($snap->{$a}{threshold} <=> $snap->{$b}{threshold})
+        || ($a cmp $b)
+    } @candidates;
+    @sorted = @sorted[0 .. $limit - 1] if @sorted > $limit;
+    return [ map { { id => $_, %{ $snap->{$_} } } } @sorted ];
+}
+
+# Compteurs d'un nick sur un canal, tous types confondus (pour .achievements
+# et le futur affichage de progression).
+sub progress_for_nick {
+    my ($self, $nick, $channel) = @_;
+    my $key = _progress_key($nick, $channel);
+    return {} unless defined $key;
+    my %out;
+    for my $kind (sort keys %{ $self->{progress} || {} }) {
+        my $v = $self->{progress}{$kind}{$key};
+        $out{$kind} = $v if defined $v && $v > 0;
+    }
+    return \%out;
 }
 
 # -- Récupère les achievements d'un nick sur un canal ---------------------------
@@ -658,6 +895,20 @@ sub _finish_async_check {
             }
         }
 
+        # mb613-B1: check_msg normally runs in the forked SQL worker.
+        # set_progress() there only changes child memory, so explicitly import
+        # the two DB-derived state counters into the parent after validating
+        # their bounded result shape.
+        if (ref($result->{progress}) eq 'HASH') {
+            for my $kind (qw(msg_count channels_active)) {
+                next unless exists $result->{progress}{$kind};
+                my $value = $result->{progress}{$kind};
+                next unless defined($value) && !ref($value)
+                    && "$value" =~ /\A\d+\z/;
+                $self->set_progress($kind, $entry->{nick}, $entry->{channel}, $value);
+            }
+        }
+
         my $now = time();
         $self->{_msg_check_ts}{$key} = $now if $checks{msg_count};
         $self->{_hourband_check_ts}{$key} = $now if $checks{hour_band};
@@ -758,12 +1009,21 @@ sub _spawn_check_worker {
                     detail => substr($db_error, 0, 240) };
             }
             else {
+                # mb613-B1: the SQL worker runs with a deliberately reduced
+                # bot object. Snapshot the EFFECTIVE thresholds first so
+                # [achievements] overrides are honoured in the child too.
+                my %worker_thresholds = map {
+                    $_ => $self->threshold($_)
+                } keys %ACH;
+
                 my %worker = %$self;
                 $worker{bot} = { dbh => $dbh };
                 $worker{logger} = undef;
                 $worker{_worker_unlocks} = [];
                 $worker{_worker_checks} = {};
                 $worker{_worker_timings} = {};
+                $worker{_worker_progress} = {};
+                $worker{_worker_thresholds} = \%worker_thresholds;
                 my $child = bless \%worker, 'Mediabot::Achievements::Worker';
 
                 my $run_ok = eval {
@@ -772,10 +1032,13 @@ sub _spawn_check_worker {
                 };
                 if ($run_ok) {
                     $result = {
-                        ok      => 1,
-                        unlocks => $child->{_worker_unlocks},
-                        checks  => [ sort keys %{ $child->{_worker_checks} || {} } ],
-                        timings => $child->{_worker_timings},
+                        ok       => 1,
+                        unlocks  => $child->{_worker_unlocks},
+                        checks   => [ sort keys %{ $child->{_worker_checks} || {} } ],
+                        timings  => $child->{_worker_timings},
+                        # mb613-B1: state values calculated in the fork must
+                        # return to the parent; child memory is copy-on-write.
+                        progress => $child->{_worker_progress},
                     };
                 }
                 else {
@@ -1009,11 +1272,13 @@ sub check_msg {
     return unless defined $n;
 
     # First message — déclenché systématiquement pour tout nouveau nick avec ≥1 msg
-    $self->unlock($nick, $channel, 'first_msg')         if $n >= 1;
-    $self->unlock($nick, $channel, 'chatterbox')        if $n >= 1_000;
-    $self->unlock($nick, $channel, 'megaphone')         if $n >= 10_000;
-    $self->unlock($nick, $channel, 'icon')              if $n >= 50_000;
-    $self->unlock($nick, $channel, 'legend')            if $n >= 100_000;
+    # mb611-B1: les seuils viennent du catalogue (et de la conf).
+    # mb612-B1: le compte est deja calcule ici — on l'enregistre pour
+    # l'affichage de progression, sans requete supplementaire.
+    $self->set_progress('msg_count', $nick, $channel, $n);
+    $self->unlock($nick, $channel, $_)
+        for grep { $n >= $self->threshold($_) }
+            qw(first_msg chatterbox megaphone icon legend);
 
     # Night Owl / Early Bird : compte par tranche horaire
     #
@@ -1056,8 +1321,10 @@ sub check_msg {
                 return ($ni, $mo);
             });
             if (defined $night) {
-                $self->unlock($nick, $channel, 'night_owl')  if $night >= 50;
-                $self->unlock($nick, $channel, 'early_bird') if $morn  >= 50;
+                $self->unlock($nick, $channel, 'night_owl')
+                    if $night >= $self->threshold('night_owl');
+                $self->unlock($nick, $channel, 'early_bird')
+                    if $morn  >= $self->threshold('early_bird');
             }
         }
     }
@@ -1085,8 +1352,12 @@ sub check_msg {
                 my $r = $sth_p->fetchrow_hashref; $sth_p->finish;
                 return ($r ? ($r->{n} // 0) : 0);
             });
+            # mb613-B1: the value is already known; return/persist it just
+            # like msg_count instead of throwing it away after the unlock check.
+            $self->set_progress('channels_active', $nick, $channel, $nchan)
+                if defined $nchan && $nchan =~ /\A\d+\z/;
             $self->unlock($nick, $channel, 'polyphony')
-                if defined $nchan && $nchan >= 5;
+                if defined $nchan && $nchan >= $self->threshold('polyphony');
         }
     }
 }
@@ -1095,10 +1366,17 @@ sub check_msg {
 sub check_karma {
     my ($self, $nick, $channel, $score, $giver, $given_total) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
-    $self->unlock($nick, $channel, 'karma_star')   if defined $score && $score >=  50;
-    $self->unlock($nick, $channel, 'karma_legend') if defined $score && $score >= 100;
-    # Gift giver : 100+ karma positifs donnés (cross-canal somme)
-    if (defined $giver && defined $given_total && $given_total >= 100) {
+    $self->set_progress('karma_score', $nick, $channel, $score)
+        if defined $score && $score =~ /\A\d+\z/;
+    $self->unlock($nick, $channel, 'karma_star')
+        if defined $score && $score >= $self->threshold('karma_star');
+    $self->unlock($nick, $channel, 'karma_legend')
+        if defined $score && $score >= $self->threshold('karma_legend');
+    # Gift giver : karma positifs donnés (cross-canal somme)
+    $self->set_progress('karma_given', $giver, $channel, $given_total)
+        if defined $giver && defined $given_total && $given_total =~ /\A\d+\z/;
+    if (defined $giver && defined $given_total
+        && $given_total >= $self->threshold('gift_giver')) {
         $self->unlock($giver, $channel, 'gift_giver');
     }
 }
@@ -1107,17 +1385,25 @@ sub check_karma {
 sub check_trivia {
     my ($self, $nick, $channel, $correct_count, $response_seconds) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
-    $self->unlock($nick, $channel, 'trivia_rookie')    if defined $correct_count && $correct_count >=  10;
-    $self->unlock($nick, $channel, 'trivia_champion')  if defined $correct_count && $correct_count >= 100;
-    $self->unlock($nick, $channel, 'trivia_sniper')    if defined $response_seconds && $response_seconds <= 3;
+    $self->unlock($nick, $channel, 'trivia_rookie')
+        if defined $correct_count && $correct_count >= $self->threshold('trivia_rookie');
+    $self->unlock($nick, $channel, 'trivia_champion')
+        if defined $correct_count && $correct_count >= $self->threshold('trivia_champion');
+    # Seuil INVERSE : le sniper doit repondre en MOINS de N secondes.
+    $self->unlock($nick, $channel, 'trivia_sniper')
+        if defined $response_seconds && $response_seconds <= $self->threshold('trivia_sniper');
 }
 
 # -- Hook : vérifie les achievements 'wordcount' -------------------------------
 sub check_wordcount {
     my ($self, $nick, $channel, $distinct) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
-    $self->unlock($nick, $channel, 'wordsmith') if defined $distinct && $distinct >= 1_000;
-    $self->unlock($nick, $channel, 'polyglot')  if defined $distinct && $distinct >= 5_000;
+    $self->set_progress('distinct_words', $nick, $channel, $distinct)
+        if defined $distinct && $distinct =~ /\A\d+\z/;
+    $self->unlock($nick, $channel, 'wordsmith')
+        if defined $distinct && $distinct >= $self->threshold('wordsmith');
+    $self->unlock($nick, $channel, 'polyglot')
+        if defined $distinct && $distinct >= $self->threshold('polyglot');
 }
 
 # -- Hook : vérifie les achievements 'duel' (mb116) ---------------------------
@@ -1126,38 +1412,46 @@ sub check_wordcount {
 sub check_duel {
     my ($self, $nick, $channel, $wins, $streak_loss) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
-    $self->unlock($nick, $channel, 'duel_warrior') if defined $wins && $wins >= 10;
-    $self->unlock($nick, $channel, 'duel_master')  if defined $wins && $wins >= 50;
-    $self->unlock($nick, $channel, 'underdog')     if defined $streak_loss && $streak_loss >= 5;
+    $self->unlock($nick, $channel, 'duel_warrior')
+        if defined $wins && $wins >= $self->threshold('duel_warrior');
+    $self->unlock($nick, $channel, 'duel_master')
+        if defined $wins && $wins >= $self->threshold('duel_master');
+    $self->unlock($nick, $channel, 'underdog')
+        if defined $streak_loss && $streak_loss >= $self->threshold('underdog');
 }
 
 # -- Hook : vérifie les achievements 'horoscope' (mb116) -----------------------
 sub check_horoscope {
     my ($self, $nick, $channel, $consultations) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
-    $self->unlock($nick, $channel, 'star_gazer') if defined $consultations && $consultations >= 30;
+    $self->unlock($nick, $channel, 'star_gazer')
+        if defined $consultations && $consultations >= $self->threshold('star_gazer');
 }
 
 # -- Hook : vérifie les achievements 'compat' (mb117) --------------------------
 sub check_compat {
     my ($self, $nick, $channel, $count) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
-    $self->unlock($nick, $channel, 'matchmaker') if defined $count && $count >= 10;
+    $self->unlock($nick, $channel, 'matchmaker')
+        if defined $count && $count >= $self->threshold('matchmaker');
 }
 
 # -- Hook : vérifie les achievements 'quotegame' (mb117) -----------------------
 sub check_quotegame {
     my ($self, $nick, $channel, $solved) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
-    $self->unlock($nick, $channel, 'quote_detective') if defined $solved && $solved >= 10;
-    $self->unlock($nick, $channel, 'quote_master')    if defined $solved && $solved >= 50;
+    $self->unlock($nick, $channel, 'quote_detective')
+        if defined $solved && $solved >= $self->threshold('quote_detective');
+    $self->unlock($nick, $channel, 'quote_master')
+        if defined $solved && $solved >= $self->threshold('quote_master');
 }
 
 # -- Hook : vérifie les achievements 'mood' (mb117) ----------------------------
 sub check_mood {
     my ($self, $nick, $channel, $reads) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
-    $self->unlock($nick, $channel, 'mood_reader') if defined $reads && $reads >= 30;
+    $self->unlock($nick, $channel, 'mood_reader')
+        if defined $reads && $reads >= $self->threshold('mood_reader');
 }
 
 # -- Hook : vérifie l'achievement 'polyphony' (mb117) --------------------------
@@ -1165,7 +1459,10 @@ sub check_mood {
 sub check_polyphony {
     my ($self, $nick, $current_channel, $n_channels) = @_;
     return unless defined $nick && defined $current_channel && $current_channel =~ /^#/;
-    $self->unlock($nick, $current_channel, 'polyphony') if defined $n_channels && $n_channels >= 5;
+    $self->set_progress('channels_active', $nick, $current_channel, $n_channels)
+        if defined $n_channels && $n_channels =~ /\A\d+\z/;
+    $self->unlock($nick, $current_channel, 'polyphony')
+        if defined $n_channels && $n_channels >= $self->threshold('polyphony');
 }
 
 # -- Logger interne -------------------------------------------------------------
@@ -1181,6 +1478,30 @@ sub _log {
 # touching parent state, JSON storage, IRC or Prometheus directly.
 package Mediabot::Achievements::Worker;
 our @ISA = ('Mediabot::Achievements');
+
+# mb613-B1: the worker's bot object intentionally contains only its isolated
+# DB handle. Effective thresholds are snapshotted by the parent before fork.
+sub threshold {
+    my ($self, $id) = @_;
+    if (ref($self->{_worker_thresholds}) eq 'HASH'
+        && exists $self->{_worker_thresholds}{$id}) {
+        return $self->{_worker_thresholds}{$id};
+    }
+    return $self->SUPER::threshold($id);
+}
+
+# State progress must cross the process boundary just like unlock intents.
+# Keep only the highest value observed for each kind in this one job.
+sub set_progress {
+    my ($self, $kind, $nick, $channel, $value) = @_;
+    return 0 unless defined($kind) && length($kind)
+        && defined($value) && !ref($value) && "$value" =~ /\A\d+\z/;
+    $self->{_worker_progress} ||= {};
+    my $current = $self->{_worker_progress}{$kind} // 0;
+    $self->{_worker_progress}{$kind} = int($value)
+        if $value > $current;
+    return $self->{_worker_progress}{$kind} // $current;
+}
 
 sub unlock {
     my ($self, $nick, $channel, $id) = @_;

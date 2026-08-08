@@ -2699,8 +2699,8 @@ unvote|unvote|public|Cancel your vote in the current poll.
 vote|vote <n>|public|Vote in the current poll. Shows live tally after each vote (U3).
 
 # Social / channel memory
-achievements|achievements [nick|list|all|top]|public|Show achievements for yourself, a nick, the catalogue or the top unlocks.
-achievs|achievs [nick|list|all|top]|public|Alias for achievements.
+achievements|achievements [nick|list|all|top|progress [nick]]|public|Show achievements for yourself, a nick, the catalogue, the top unlocks, or how close you are to the next ones.
+achievs|achievs [nick|list|all|top|progress [nick]]|public|Alias for achievements.
 profil|profil [nick]|public|Show a compact channel profile for a nick.
 profile|profile [nick]|public|Alias for profil.
 radar|radar [Nd]|public|Show current or historical channel activity radar.
@@ -2716,7 +2716,7 @@ capabilities|capabilities|public|Alias for features.
 caps|caps|public|Alias for features.
 observatory|observatory|public|Show a compact live channel and bot status view.
 obs|obs|public|Alias for observatory.
-recap|recap [30m\|2h] [ai]|public|Summarize what you missed on this channel (stats, or AI summary with 'ai').
+recap|recap [30m\|2h] [ai] [en\|fr\|es]|public|Summarize what you missed on this channel (stats, or AI summary with 'ai'; the AI summary follows the channel language unless forced).
 onthisday|onthisday [MM-DD]|public|Resurface what happened on this channel on a calendar day (today, or a given MM-DD) in past years. Alias: otd
 otd|otd|public|Alias for onthisday.
 learn|learn <keyword> = <value>|public|Store a shared channel fact. Recall with whatis.
