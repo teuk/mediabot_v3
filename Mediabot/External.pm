@@ -65,6 +65,16 @@ Mediabot::External::Claude->import(qw(
     _claude_send_and_parse
 ));
 
+# mb613-B1: sous-module Actualites (Tavily + synthese Claude)
+require Mediabot::External::News;
+Mediabot::External::News->import(qw(
+    mbNews_ctx
+    _news_select_results
+    _news_sources_line
+    _news_default_query
+    _news_search_params
+));
+
 # mb99-R1: sous-module YouTube/Weather/Fortnite
 require Mediabot::External::YouTube;
 Mediabot::External::YouTube->import(qw(

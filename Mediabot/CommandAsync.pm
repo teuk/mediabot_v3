@@ -75,6 +75,25 @@ sub _collect_intents_run {
         push @intents, [ $kind, "$target", defined $text ? "$text" : '' ];
     };
     no warnings 'redefine';
+    # mb615-B1: la facade doit couvrir les DEUX chemins d'appel.
+    #
+    # Terrain (#boulets, 2026-08-08) : « m actualités » demarrait bien son
+    # worker mais ne repondait JAMAIS. Les facades n'existaient que sur les
+    # alias IMPORTES par Mediabot::UserCommands ; or un module appele depuis
+    # un worker peut tres bien appeler la forme QUALIFIEE
+    # Mediabot::Helpers::botPrivmsg (c'est le cas de External::News, et de
+    # tout module hors UserCommands). Ces appels-la partaient alors vers la
+    # vraie socket depuis l'ENFANT — qui ne doit jamais y toucher — et le
+    # POSIX::_exit final jetait le tampon : silence complet, sans la moindre
+    # erreur. Toutes les commandes asynchrones existantes vivant dans
+    # UserCommands, le trou n'avait jamais mordu jusqu'ici.
+    #
+    # On pose donc la facade sur le glob SOURCE (Helpers) *et* sur l'alias
+    # importe (UserCommands) : un alias importe est un glob distinct, poser
+    # l'un ne suffit pas a couvrir l'autre.
+    local *Mediabot::Helpers::botPrivmsg      = sub { $push->('privmsg', $_[1], $_[2]); 1 };
+    local *Mediabot::Helpers::botNotice       = sub { $push->('notice',  $_[1], $_[2]); 1 };
+    local *Mediabot::Helpers::botAction       = sub { $push->('action',  $_[1], $_[2]); 1 };
     local *Mediabot::UserCommands::botPrivmsg = sub { $push->('privmsg', $_[1], $_[2]); 1 };
     local *Mediabot::UserCommands::botNotice  = sub { $push->('notice',  $_[1], $_[2]); 1 };
     local *Mediabot::UserCommands::botAction  = sub { $push->('action',  $_[1], $_[2]); 1 };

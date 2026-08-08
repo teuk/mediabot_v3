@@ -10,6 +10,106 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb616 — les garde-fous de news tiennent aussi entre alias et fenêtres
+- Le cooldown parent de 45 s était déclaré sur les quatre alias mais son état
+  restait indexé par le nom tapé : `actualites -> news -> actu -> actualite`
+  permettait donc quatre appels payants successifs. Les alias partagent
+  désormais réellement le bucket canonique `actualites`, y compris pour les
+  overrides `.cmdcooldown`.
+- `MIN_FRESH=2` était documenté mais la boucle Tavily s'arrêtait au premier
+  résultat non vide. Elle élargit maintenant réellement la fenêtre tant que
+  deux résultats datés de moins de 7 jours ne sont pas disponibles ; un
+  résultat sans date reste utilisable en dernier recours mais ne prétend plus
+  être « frais ».
+- Hygiène tests : le nouveau test news mb613 est renuméroté 799 afin de ne plus
+  doubler le numéro 796 déjà occupé par la vérité async des achievements ; les
+  tests 798/799 verrouillent le bucket partagé et la fraîcheur réelle.
+
+### mb615 — la sortie d'un worker est capturee quel que soit le chemin d'appel
+- INCIDENT (prod #boulets) : « m actualités » demarrait bien son worker
+  (« CommandAsync: 'actualites' worker started ») et ne repondait JAMAIS,
+  sans la moindre erreur. Cause : les facades du worker n'etaient posees que
+  sur les alias IMPORTES par Mediabot::UserCommands. External::News appelle
+  la forme QUALIFIEE Mediabot::Helpers::botPrivmsg — ces appels partaient
+  donc vers la vraie socket depuis l'ENFANT, qui ne doit jamais y toucher, et
+  le POSIX::_exit final jetait le tampon. Toutes les commandes asynchrones
+  existantes vivant dans UserCommands, le trou n'avait jamais mordu.
+- La facade couvre desormais le glob SOURCE (Helpers) *et* l'alias importe
+  (UserCommands) : un alias importe est un glob DISTINCT, poser l'un ne
+  couvre pas l'autre. Tout module appele depuis un worker est protege, y
+  compris ceux a venir.
+- Corollaire du meme piege, corrige dans la foulee : le cooldown et le cache
+  que mb613 posait DANS le module etaient un trompe-l'oeil — un compteur
+  ecrit dans $self meurt avec le processus fils. Le garde-fou de frequence
+  vit maintenant cote parent (checkCmdCooldown, 45 s) et couvre les QUATRE
+  alias : sans cela on le contourne en tapant 'news' juste apres
+  'actualites'. Le cache de reponses, qui n'aurait jamais servi, est retire
+  plutot que laisse en decoration.
+- Test 798 (16 assertions) : capture des deux chemins d'appel et des trois
+  genres, absence de fuite vers les vrais helpers pendant la collecte,
+  RESTAURATION des globs a la sortie (le rejeu parent doit repasser par les
+  vrais helpers, sinon le bot se parle a lui-meme), bornes et exceptions
+  inchangees, couverture du cooldown sur les 4 alias, et absence de tout
+  compteur pose dans le worker.
+
+### mb614 — une commande accentuee atteint enfin sa table
+- INCIDENT (prod #boulets) : « m actualités » ne declenchait RIEN, le log
+  montrant la commande en mojibake (« actualitÃ©s »). Cause : Mediabot.pm a
+  « use utf8 », donc la cle litterale 'actualités' posee en mb613 etait une
+  chaine de CARACTERES (é = U+00E9) alors qu'IRC livre des OCTETS utf-8
+  ("actualit\xC3\xA9s"). Aucune correspondance possible : la commande
+  tombait silencieusement dans le chemin des commandes inconnues.
+- Correction A LA RACINE plutot qu'au cas par cas : _fold_command_name()
+  replie tout nom de commande sur sa forme ASCII minuscule — octets utf-8,
+  chaine deja decodee, latin-1, majuscules — et le repliement est applique
+  AVANT toute recherche, en public comme en prive. Un nom deja ASCII ressort
+  inchange, donc le chemin normal ne paie rien. La prochaine commande
+  accentuee marchera sans qu'on y pense.
+- La table ne contient plus AUCUNE cle non-ASCII : elles ne pouvaient de
+  toute facon jamais matcher.
+- Les cinq formes demandees repondent : actualités, actualité, actualites,
+  actualite, news (plus la forme courte actu). Singulier et pluriel sont le
+  meme geste ; chaque alias a son entree d'aide.
+- Test 797 (21 assertions) : repliement depuis chaque encodage, les 5 formes
+  verifiees comme atteignant une cle REELLEMENT presente au dispatch, ordre
+  repliement-puis-recherche, absence de cle accentuee, robustesse (undef,
+  vide, reference, octets indecodables : une valeur rendue, aucune mort, et
+  aucune commande atteinte). Pin 796 evolue en consequence.
+
+### mb613 — !actualites : recherche Tavily + synthese dans la langue du canal
+- Portage du news_teuk.tcl (Windrop) dans le moule mediabot. Nouveau module
+  Mediabot/External/News.pm, commande publique actualites (alias actualités,
+  actu, news), routee via CommandAsync : deux appels reseau a la suite ne
+  doivent pas figer la boucle d'evenements.
+- La langue vient de l'API PARTAGEE mb609 (jeton force en|fr|es ou lang=xx,
+  sinon langue du canal, sinon main.LANG) : aucune regle de langue n'est
+  recopiee. Les textes de service existent dans les trois langues avec repli
+  anglais, et la synthese est demandee dans la langue resolue.
+- SANS SUJET, la commande cherche vraiment les actualites du jour (requete
+  par defaut propre a la langue) au lieu de repondre qu'elle n'a pas de quoi
+  resumer, et la fenetre temporelle S'ELARGIT par paliers reellement
+  distincts (day -> week -> month cote Tavily, 1 -> 3 -> 7 jours cote
+  vertical news) tant qu'il n'y a pas de matiere.
+- Pas de vieux articles : les resultats sont tries du plus recent au plus
+  ancien et ceux de plus de 7 jours sont ecartes DES QU'il reste assez de
+  matiere fraiche — mais jamais au prix du silence, et chaque source est
+  affichee avec sa date pour que le lecteur juge.
+- La ligne « Sources: domaine (date) » est construite DETERMINISTEMENT depuis
+  les resultats Tavily, dedupliquee et bornee : le modele ne peut pas
+  halluciner une source. Si la synthese echoue, les titres eux-memes servent
+  de repli plutot qu'un message d'echec.
+- Le francais et l'espagnol interrogent le topic 'general' avec country
+  (la presse locale remonte mal dans le vertical news, paywalls) ; l'anglais
+  utilise le vertical news. Domaines bruyants exclus, cooldown 45 s et cache
+  5 min par salon, comme le script d'origine.
+- Conf : section [tavily], cle API_KEY (commentee dans le sample — AUCUNE
+  cle n'entre dans le depot). Sans cle, la commande le dit et s'arrete.
+- Test 796 (47 assertions) : routage des 4 alias, textes des 3 langues,
+  requetes par defaut, paliers reellement croissants, tri et ecartement des
+  vieilleries sans jamais rendre le silence, resultats sans date acceptes,
+  ligne Sources deterministe/dedupliquee/sans date inventee, refus explicite
+  sans cle, et absence de cle dans le code comme dans le sample.
+
 ### mb613 — la progression async revient vraiment au parent
 - Correction d'un ecart entre les tests directs et le runtime : les checks
   lourds d'achievements tournent dans un worker forké ; les set_progress()

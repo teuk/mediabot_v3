@@ -2028,18 +2028,35 @@ sub checkCmdCooldown {
         ai      => 10,
         trivia  => 5,
         openai  => 10,
+        # mb615-B1: 'actualites' enchaine deux appels reseau payants (Tavily
+        # puis Claude). Le cooldown DOIT vivre ici, cote parent : la commande
+        # s'execute dans un worker jetable, ou tout compteur pose meurt avec
+        # le processus. Les alias partagent la meme cle, sinon le garde-fou
+        # se contourne en tapant 'news' apres 'actualites'.
+        actualites => 45,
+        actualite  => 45,
+        actu       => 45,
+        news       => 45,
     );
+    # mb616-B1: aliases of the same paid news command must share one bucket.
+    # Keeping the typed alias in the key would let a user rotate
+    # actualites -> news -> actu -> actualite and bypass the intended 45 s
+    # parent-side guard. Canonicalise before both config lookup and state key.
+    my $cooldown_cmd = lc $cmd;
+    $cooldown_cmd = 'actualites'
+        if $cooldown_cmd =~ /\A(?:actualites|actualite|actu|news)\z/;
+
     # CC2: per-channel override via .cmdcooldown takes priority
     my $chan_conf = defined $channel
-        ? ($self->{_cmd_cooldown_conf}{$channel}{lc $cmd} // undef)
+        ? ($self->{_cmd_cooldown_conf}{$channel}{$cooldown_cmd} // undef)
         : undef;
     my $cooldown = defined $override_secs ? $override_secs
                  : defined $chan_conf      ? $chan_conf
-                 : ($defaults{lc $cmd} // 0);
+                 : ($defaults{$cooldown_cmd} // 0);
     return 0 if $cooldown <= 0;
 
     my $now = time();
-    my $key = lc($cmd) . ':' . lc($channel);
+    my $key = $cooldown_cmd . ':' . lc($channel);
     my $last = $self->{_cmd_cooldown}{$key} // 0;
     my $elapsed = $now - $last;
 

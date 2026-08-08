@@ -1904,6 +1904,40 @@ sub _dispatch_radio {
 }
 
 # Handle public commands
+# mb614-B1: replie un nom de commande sur sa forme ASCII minuscule.
+# Accepte indifféremment des OCTETS utf-8 (ce que livre la socket IRC), une
+# chaîne de caractères déjà décodée, ou du latin-1, et rend une clé sans
+# diacritique : « actualités », « actualitÃ©s » et « ACTUALITES » tombent tous
+# sur 'actualites'. Un nom déjà ASCII ressort inchangé — le chemin normal ne
+# paie rien.
+sub _fold_command_name {
+    my ($name) = @_;
+    return '' unless defined $name && !ref $name;
+    return lc $name if $name !~ /[^\x00-\x7F]/;   # ASCII pur : rien à faire
+
+    my $text = $name;
+    unless (utf8::is_utf8($text)) {
+        my $decoded = eval { Encode::decode('UTF-8', $text, Encode::FB_CROAK()) };
+        $text = defined $decoded ? $decoded
+              : eval { Encode::decode('iso-8859-1', $name) } // $name;
+    }
+    $text = lc $text;
+
+    my %fold = (
+        "\x{e0}" => 'a', "\x{e1}" => 'a', "\x{e2}" => 'a', "\x{e3}" => 'a',
+        "\x{e4}" => 'a', "\x{e5}" => 'a', "\x{e7}" => 'c',
+        "\x{e8}" => 'e', "\x{e9}" => 'e', "\x{ea}" => 'e', "\x{eb}" => 'e',
+        "\x{ec}" => 'i', "\x{ed}" => 'i', "\x{ee}" => 'i', "\x{ef}" => 'i',
+        "\x{f1}" => 'n',
+        "\x{f2}" => 'o', "\x{f3}" => 'o', "\x{f4}" => 'o', "\x{f5}" => 'o',
+        "\x{f6}" => 'o',
+        "\x{f9}" => 'u', "\x{fa}" => 'u', "\x{fb}" => 'u', "\x{fc}" => 'u',
+        "\x{fd}" => 'y', "\x{ff}" => 'y',
+    );
+    $text =~ s/([^\x00-\x7F])/$fold{$1} \/\/ $1/ge;
+    return $text;
+}
+
 sub mbCommandPublic {
     my ($self, $message, $sChannel, $sNick, $botNickTriggered, $sCommand, @tArgs) = @_;
 
@@ -1913,7 +1947,15 @@ sub mbCommandPublic {
     return if checkNickFlood($self, $sNick, $sChannel);
 
     # Normalize command once
-    my $cmd = lc $sCommand;
+    # mb614-B1: ... accents compris. Ce fichier a « use utf8 », donc une clé
+    # littérale accentuée est une chaîne de CARACTÈRES, alors qu'IRC livre des
+    # OCTETS utf-8 : 'actualités' tapé sur le canal arrivait en
+    # "actualit\xC3\xA9s" et ne trouvait aucune entrée (constaté en prod sur
+    # #boulets, la commande tombait silencieusement dans le chemin inconnu).
+    # On replie donc le nom de commande sur son équivalent ASCII avant TOUTE
+    # recherche : la table ne contient que des clés ASCII, et la prochaine
+    # commande accentuée fonctionnera sans y penser.
+    my $cmd = _fold_command_name($sCommand);
 
     # DD2: per-command invocation counter
     $self->{metrics}->inc_label('mediabot_command_total', $cmd)
@@ -2121,6 +2163,16 @@ sub mbCommandPublic {
         profil       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'profil',    sub { mbProfil_ctx($ctx) }) },
         profile      => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'profil',    sub { mbProfil_ctx($ctx) }) },          # alias en anglais
         radar        => sub { mbRadar_ctx($ctx) },
+
+        # mb613-B1: actualites (Tavily + synthese Claude). Deux appels reseau
+        # a la suite -> worker, comme les commandes de carriere (mb583).
+        # mb614-B1: clés ASCII seulement — 'actualités' et 'actualité' y
+        # arrivent par le repliement de _fold_command_name. Singulier et
+        # pluriel sont acceptés : c'est le même geste.
+        actualites   => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
+        actualite    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
+        actu         => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
+        news         => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
 
         # mb116: dashboard de canal + duel + horoscope
         dashboard    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'dashboard', sub { mbDashboard_ctx($ctx) }) },
@@ -2699,6 +2751,10 @@ unvote|unvote|public|Cancel your vote in the current poll.
 vote|vote <n>|public|Vote in the current poll. Shows live tally after each vote (U3).
 
 # Social / channel memory
+actualites|actualites [sujet] [en\|fr\|es]|public|Latest news on a topic (or today's headlines with no topic), searched then summarised in the channel language.
+actualite|actualite [sujet] [en\|fr\|es]|public|Alias for actualites (accented forms actualités/actualité work too).
+actu|actu [sujet] [en\|fr\|es]|public|Alias for actualites.
+news|news [sujet] [en\|fr\|es]|public|Alias for actualites.
 achievements|achievements [nick|list|all|top|progress [nick]]|public|Show achievements for yourself, a nick, the catalogue, the top unlocks, or how close you are to the next ones.
 achievs|achievs [nick|list|all|top|progress [nick]]|public|Alias for achievements.
 profil|profil [nick]|public|Show a compact channel profile for a nick.
@@ -3646,7 +3702,9 @@ sub mbCommandPrivate {
         ai           => sub { claude_ctx($ctx) },  # P4: !ai in private (no chanset gate)
     );
 
-    if (my $handler = $command_table{$sCommand}) {
+    # mb614-B1: meme repliement qu'en public — une commande accentuee doit
+    # marcher en prive aussi.
+    if (my $handler = $command_table{ _fold_command_name($sCommand) }) {
         $self->{logger}->log(4, "PRIVATE: $sNick triggered $sCommand");
         return $handler->();
     }
