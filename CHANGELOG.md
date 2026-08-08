@@ -10,6 +10,69 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb619 — les news affichées sont vraiment celles du moment
+- Le RSS mb618 rendait enfin de vrais titres, mais la requête sans sujet cherchait
+  littéralement « actualités importantes du jour en France ». Google News pouvait
+  alors classer par pertinence des pages de juillet ou d'avril devant les dépêches
+  du 8 août. La commande sans sujet utilise désormais le flux localisé **Top Stories**
+  (`FR/ES/EN`) au lieu d'une recherche textuelle.
+- Une source visible doit maintenant avoir une `pubDate` exploitable et réellement
+  fraîche : 36 h maximum pour `m actualites` sans sujet. Les recherches thématiques
+  utilisent `when:1d`, puis `when:3d`, puis `when:7d` uniquement si nécessaire.
+  Les articles futurs incohérents et les dates inconnues sont exclus de la vitrine.
+- Les faux « articles » de type fil d'actualité, info en continu, journal des
+  informations, live updates/top stories sont filtrés de la liste cliquable.
+- Le prompt Claude est désormais **ancré sur les trois titres cliquables** : Tavily
+  ne peut plus faire partir la synthèse sur un sujet sans lien avec les références
+  affichées ; il sert de matière de corroboration/contexte pour ces mêmes sujets.
+- Nouveau test 802 : Top Stories pour le défaut, `when:` pour un sujet, exclusion
+  des vieux/génériques/sans date, élargissement 1→3→7 jours et alignement du prompt.
+
+### mb618 — les liens news pointent vers de vrais articles, pas des rubriques
+- Le rendu mb617 etait enfin lisible, mais les titres exposes venaient encore
+  de Tavily. Sur une recherche generale, Tavily remonte parfois une page de
+  rubrique ou une homepage (`Journaux d’information`, `Actualites Ile-de-France`,
+  etc.) : le lien etait cliquable mais n'annoncait pas precisement l'article.
+- Architecture alignee sur `news_teuk.tcl` : Tavily reste la matiere factuelle
+  de la synthese Claude, tandis qu'un Google News RSS localise (FR/ES/EN)
+  fournit jusqu'a trois vrais titres de presse avec editeur et date pour la
+  liste cliquable. En cas d'echec RSS, repli automatique sur les resultats
+  Tavily existants — la commande ne depend donc pas de Google News pour vivre.
+- Les titres RSS sont aussi injectes comme contexte secondaire dans le prompt
+  afin d'aider la synthese a nommer les developpements precis plutot que les
+  rubriques generiques. Le suffixe ` - Editeur` ajoute par Google News est
+  retire puisque l'editeur est deja affiche dans la charte.
+- La diversite se fait maintenant par editeur RSS et non par `news.google.com`,
+  puis les URLs Google News sont raccourcies comme les liens Tavily. Aucune
+  nouvelle cle API ni aucun schema de base.
+- Nouveau test 801 : URL RSS localisee, parsing XML/entites/date, suppression
+  du suffixe editeur, diversite des sources, titres precis dans la charte et
+  preuve du repli Tavily.
+
+### mb617 — actualites retrouve la charte visuelle et des liens utiles
+- Le portage mb613 etait fonctionnel mais trop austere sur IRC : une synthese
+  courte suivie d'une simple ligne « Sources: domaine (date) ». Cela disait
+  d'ou venait l'info, mais pas OÙ cliquer, et on perdait l'ergonomie du
+  script Windrop d'origine.
+- La sortie reprend maintenant la charte qui a fait ses preuves : badge
+  `Actu/News/Noticias` sur la synthese, puis une ou plusieurs lignes
+  d'articles au format visuel `dd/mm domaine titre URL`, avec date et
+  source en gris, separateur orange et lien bleu souligne.
+- Les liens de source sont raccourcis via TinyURL (repli sur l'URL d'origine
+  en cas d'echec) pour rester lisibles sur IRC sans exploser la longueur des
+  lignes. Le raccourcisseur a son propre timeout court afin de ne pas manger le
+  budget de 45 s du worker asynchrone.
+- Comme dans `news_teuk.tcl`, seul le premier paragraphe de synthese porte le
+  badge colore ; la seconde ligne reste legere, puis les references arrivent
+  avec date/source en gris et URL bleue soulignee. Quand Tavily le permet, les
+  trois references privilegient trois domaines distincts.
+- La synthese reste bornee a deux lignes ; jusqu'a trois articles sources
+  sont ensuite exposes. Si la construction des lignes article est impossible,
+  le repli deterministe `Sources: domaine (date)` est conserve.
+- Nouveau test 800 (16 assertions) : segments article avec charte IRC,
+  emballage sur une ou plusieurs lignes, presence des tinyurl, et preuve que
+  la sortie runtime privilegie les liens sources sur la ligne `Sources:` brute.
+
 ### mb616 — les garde-fous de news tiennent aussi entre alias et fenêtres
 - Le cooldown parent de 45 s était déclaré sur les quatre alias mais son état
   restait indexé par le nom tapé : `actualites -> news -> actu -> actualite`

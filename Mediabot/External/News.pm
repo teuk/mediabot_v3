@@ -5,9 +5,9 @@ package Mediabot::External::News;
 # puis synthese par Claude, dans LA LANGUE DU CANAL.
 #
 # Portage du news_teuk.tcl (Windrop) dans le moule mediabot :
-#   * la recherche est faite par Tavily ; la ligne « Sources: » est construite
-#     DETERMINISTEMENT depuis les resultats (domaine + date) — aucune source
-#     ne peut etre hallucinee par le modele ;
+#   * Tavily fournit la matiere factuelle de la synthese ; Google News RSS
+#     fournit, quand disponible, les titres/date/editeur precis de la liste
+#     cliquable. Aucun titre de source n'est invente par le modele ;
 #   * la synthese passe par claudeAI, donc elle herite du modele, des quotas,
 #     du decoupage IRC et de la gestion d'erreur deja en place ;
 #   * la langue vient de l'API partagee mb609 (jeton force en|fr|es, sinon
@@ -31,12 +31,22 @@ use utf8;
 use Exporter 'import';
 use JSON::PP ();
 use POSIX qw(strftime);
+use URI::Escape qw(uri_escape_utf8);
 
 our @EXPORT_OK = qw(mbNews_ctx _news_select_results _news_sources_line
-                    _news_default_query _news_search_params);
+                    _news_default_query _news_search_params
+                    _news_google_rss_url _news_parse_google_rss
+                    _news_select_press_articles _news_fetch_google_articles
+                    _news_article_segments _news_article_lines);
 
 our $TAVILY_URL     = 'https://api.tavily.com/search';
+our $GNEWS_URL      = 'https://news.google.com/rss/search';
+our $GNEWS_TOP_URL  = 'https://news.google.com/rss';
 our $MAX_RESULTS    = 8;
+our $MAX_ARTICLES   = 3;
+our $PRESS_SCAN_LIMIT = 30;
+our $PRESS_DEFAULT_MAX_AGE_HOURS = 36;
+our $PRESS_TOPIC_MAX_AGE_DAYS = 7;
 our $MAX_AGE_DAYS   = 7;     # au-dela, un resultat n'est plus une actualite
 our $MIN_FRESH      = 2;     # en dessous, on elargit la fenetre
 our $SNIPPET_MAX    = 400;
@@ -206,6 +216,285 @@ sub _news_sources_line {
     return _text($lang, 'sources') . ': ' . join(', ', @parts);
 }
 
+# Google News RSS is deliberately separate from Tavily. Tavily is good raw
+# material for the synthesis, but its `general` search can return section or
+# homepage titles ("Journaux d'information", "Actualites Ile-de-France", ...).
+# The RSS feed is used only for the visible clickable article list: precise
+# press headline, publisher and publication date. Tavily remains the fallback.
+sub _xml_unescape {
+    my ($s) = @_;
+    return '' unless defined $s;
+    $s =~ s{&(#x[0-9A-Fa-f]+|#\d+|amp|lt|gt|quot|apos);}{
+        my $e = $1;
+        if ($e eq 'amp')  { '&' }
+        elsif ($e eq 'lt')   { '<' }
+        elsif ($e eq 'gt')   { '>' }
+        elsif ($e eq 'quot') { '"' }
+        elsif ($e eq 'apos') { "'" }
+        elsif ($e =~ /^#x([0-9A-Fa-f]+)$/) {
+            my $cp = hex($1);
+            ($cp <= 0x10FFFF && !($cp >= 0xD800 && $cp <= 0xDFFF)) ? chr($cp) : '';
+        }
+        elsif ($e =~ /^#(\d+)$/) {
+            my $cp = 0 + $1;
+            ($cp <= 0x10FFFF && !($cp >= 0xD800 && $cp <= 0xDFFF)) ? chr($cp) : '';
+        }
+        else { '' }
+    }eg;
+    return $s;
+}
+
+sub _news_google_rss_url {
+    my ($lang, $query, $is_default, $window) = @_;
+    $query = '' unless defined $query;
+    $window = 0 unless defined $window;
+    my %locale = (
+        fr => 'hl=fr&gl=FR&ceid=FR:fr',
+        es => 'hl=es&gl=ES&ceid=ES:es',
+        en => 'hl=en-US&gl=US&ceid=US:en',
+    );
+    my $loc = $locale{$lang || ''} || $locale{en};
+
+    # A no-subject request means "today's headlines", not a text search for
+    # the literal words "important news today". Google News' localized top
+    # feed is much better for that job and is already editorially ranked.
+    return $GNEWS_TOP_URL . '?' . $loc if $is_default;
+
+    # For a requested topic, keep Google News Search but make recency explicit.
+    # Widen only when necessary; otherwise relevance search can surface a
+    # months-old evergreen page ahead of a current article.
+    my @when = ('1d', '3d', '7d');
+    my $age = $when[$window] // '7d';
+    my $q = $query;
+    $q .= " when:$age" unless $q =~ /(?:^|\s)when:\S+/i;
+    return $GNEWS_URL . '?q=' . uri_escape_utf8($q) . '&' . $loc;
+}
+
+sub _news_parse_google_rss {
+    my ($body, $limit) = @_;
+    $limit ||= $MAX_ARTICLES;
+    return [] unless defined $body && length $body;
+
+    require Encode;
+    my $xml = utf8::is_utf8($body)
+        ? $body
+        : Encode::decode('UTF-8', $body, Encode::FB_DEFAULT());
+
+    my (@articles, %seen_source, %seen_url);
+    while ($xml =~ m{<item\b[^>]*>(.*?)</item>}sig) {
+        last if @articles >= $limit;
+        my $item = $1;
+        my ($title)  = $item =~ m{<title\b[^>]*>(.*?)</title>}si;
+        my ($link)   = $item =~ m{<link\b[^>]*>(.*?)</link>}si;
+        my ($pubdate)= $item =~ m{<pubDate\b[^>]*>(.*?)</pubDate>}si;
+        my ($source) = $item =~ m{<source\b[^>]*>(.*?)</source>}si;
+        next unless defined $title && defined $link;
+
+        for ($title, $link, $pubdate, $source) {
+            next unless defined $_;
+            s/^\s*<!\[CDATA\[(.*?)\]\]>\s*$/$1/s;
+            $_ = _xml_unescape($_);
+            s/<[^>]+>/ /g;
+            s/\s+/ /g;
+            s/^\s+|\s+$//g;
+        }
+        next unless length($title) && $link =~ m{\Ahttps?://}i;
+        next if $seen_url{$link}++;
+
+        # Google News appends " - Publisher" to the title even though the
+        # publisher is already available in <source>. Keep the useful part.
+        if (defined $source && length $source) {
+            $title =~ s/\s+-\s+\Q$source\E\s*\z//i;
+            my $sk = lc $source;
+            next if $seen_source{$sk}++;
+        }
+
+        my $epoch = _epoch_of($pubdate);
+        push @articles, {
+            title  => $title,
+            url    => $link,
+            source => (defined $source && length $source) ? $source : 'source',
+            domain => _domain_of($link),
+            epoch  => $epoch,
+            age_d  => defined $epoch ? int((time() - $epoch) / 86400) : undef,
+        };
+    }
+    return \@articles;
+}
+
+sub _news_press_title_is_generic {
+    my ($title) = @_;
+    return 1 unless defined $title && $title =~ /\S/;
+    my $t = lc $title;
+    return 1 if $t =~ /\b(?:actualit(?:é|e)s?\s+du\s+jour|info(?:s)?\s+en\s+continu|fil\s+info|journal(?:\s+des)?\s+informations?)\b/;
+    return 1 if $t =~ /\b(?:l['’]actu(?:alité)?\s+de\s+ce|en\s+direct\s*[:\-]|à\s+la\s+une\s*[:\-])\b/;
+    return 1 if $t =~ /\b(?:latest\s+news|live\s+updates?|breaking\s+news\s+live|top\s+stories)\b/;
+    return 1 if $t =~ /\b(?:últimas\s+noticias|noticias\s+de\s+hoy|en\s+directo\s*[:\-])\b/;
+    return 0;
+}
+
+sub _news_select_press_articles {
+    my ($articles, $now, %opt) = @_;
+    $now ||= time();
+    my $max_age_s = $opt{max_age_s};
+    $max_age_s = 36 * 3600 unless defined $max_age_s;
+    my $limit = $opt{limit} || $MAX_ARTICLES;
+
+    my (@out, %seen_source, %seen_url);
+    for my $a (@{ $articles || [] }) {
+        next unless ref $a eq 'HASH';
+        next unless defined $a->{epoch};  # visible dates must be provable
+        my $age_s = $now - $a->{epoch};
+        next if $age_s < -3 * 3600;       # reject implausible future dates
+        next if $age_s > $max_age_s;
+        next if _news_press_title_is_generic($a->{title});
+
+        my $url = $a->{url} // '';
+        next unless length $url && !$seen_url{$url}++;
+        my $src = lc($a->{source} || $a->{domain} || '');
+        next if length($src) && $seen_source{$src}++;
+
+        push @out, $a;
+        last if @out >= $limit;
+    }
+    return \@out;
+}
+
+sub _news_fetch_google_articles {
+    my ($http, $lang, $query, $is_default, $now) = @_;
+    return [] unless $http;
+    $now ||= time();
+
+    # The default command uses the localized Top Stories feed and a tight
+    # freshness window. A topic search starts at 1 day and widens to 3/7 days
+    # only if it cannot produce enough precise, dated articles.
+    my @windows = $is_default ? (0) : (0 .. 2);
+    my $best = [];
+    for my $window (@windows) {
+        my $url = _news_google_rss_url($lang, $query, $is_default, $window);
+        my $res = eval { $http->get($url) } || { success => 0 };
+        next unless $res->{success};
+
+        my $raw = _news_parse_google_rss($res->{content} // '', $PRESS_SCAN_LIMIT);
+        my $max_age_s = $is_default
+            ? $PRESS_DEFAULT_MAX_AGE_HOURS * 3600
+            : (1, 3, $PRESS_TOPIC_MAX_AGE_DAYS)[$window] * 86400;
+        my $sel = _news_select_press_articles($raw, $now,
+            max_age_s => $max_age_s, limit => $MAX_ARTICLES);
+        $best = $sel if @$sel > @$best;
+        last if @$sel >= $MIN_FRESH;
+    }
+    return $best;
+}
+
+sub _utf8_bytes {
+    my ($s) = @_;
+    $s = '' unless defined $s;
+    require Encode;
+    return length(Encode::encode('UTF-8', $s));
+}
+
+sub _cap_bytes {
+    my ($s, $max) = @_;
+    $s = '' unless defined $s;
+    $s =~ s/\s+/ /g;
+    $s =~ s/^\s+|\s+$//g;
+    return $s if _utf8_bytes($s) <= $max;
+    my $cut = length($s);
+    while ($cut > 0) {
+        my $trial = substr($s, 0, $cut) . "…";
+        return $trial if _utf8_bytes($trial) <= $max;
+        $cut--;
+    }
+    return "…";
+}
+
+sub _news_shorten_url {
+    my ($http, $url) = @_;
+    return '' unless defined $url && length $url;
+    return $url unless $url =~ m{\Ahttps?://}i;
+    return $url if $url =~ m{\Ahttps?://tinyurl\.com/}i;
+    return $url unless $http;
+    my $tiny = 'https://tinyurl.com/api-create.php?url=' . uri_escape_utf8($url);
+    my $res = eval { $http->get($tiny) } || { success => 0 };
+    return $url unless $res->{success};
+    my $short = $res->{content} // '';
+    $short =~ s/^\s+|\s+$//g;
+    return $short =~ m{\Ahttps?://tinyurl\.com/\S+\z}i ? $short : $url;
+}
+
+sub _news_article_segments {
+    my ($picked, $shortener) = @_;
+
+    # Prefer three different publishers when Tavily gives enough variety;
+    # if not, fill the remaining slots with additional articles.
+    my (@primary, @same_domain, %seen_domain, %seen_url);
+    for my $r (@{ $picked || [] }) {
+        next unless ref $r eq 'HASH';
+        my $title = $r->{title} // '';
+        my $url   = $r->{url} // '';
+        next unless length($title) && $url =~ m{\Ahttps?://}i;
+        next if $seen_url{$url}++;
+        my $publisher = $r->{source} || $r->{domain} || _domain_of($url) || 'source';
+        my $publisher_key = lc $publisher;
+        if (!$seen_domain{$publisher_key}++) { push @primary, $r }
+        else                                 { push @same_domain, $r }
+    }
+
+    my @segments;
+    for my $r (@primary, @same_domain) {
+        last if @segments >= 3;
+        my $title = $r->{title} // '';
+        my $when = defined $r->{epoch} ? strftime('%d/%m', gmtime($r->{epoch})) : '?';
+        my $publisher = $r->{source} || $r->{domain} || _domain_of($r->{url}) || 'source';
+        my $url  = $r->{url} // '';
+        my $short = $url;
+        if ($shortener && ref($shortener) eq 'CODE') {
+            $short = eval { $shortener->($url) } || $url;
+        }
+
+        # Same charter as news_teuk.tcl: date/source grey, orange separators,
+        # blue underlined clickable URL. No decorative brackets: preserve IRC
+        # bytes for the useful title/link payload.
+        my $prefix = "\x0314$when $publisher\x03";
+        my $link   = "\x1f\x0312$short\x0f";
+        my $overhead = _utf8_bytes($prefix . '  ' . $link);
+        my $tmax = 400 - $overhead;
+        $tmax = 40 if $tmax < 40;
+        my $seg = $prefix . ' ' . _cap_bytes($title, $tmax) . ' ' . $link;
+        push @segments, $seg;
+    }
+    return \@segments;
+}
+
+sub _news_article_lines {
+    my ($segments, $max_bytes) = @_;
+    $max_bytes ||= 400;
+    my $sep = " 07| ";
+    my @lines;
+    my ($cur, $curb) = ('', 0);
+    for my $seg (@{ $segments || [] }) {
+        next unless defined $seg && length $seg;
+        my $segb = _utf8_bytes($seg);
+        if (!length $cur) {
+            $cur = $seg;
+            $curb = $segb;
+            next;
+        }
+        if ($curb + _utf8_bytes($sep) + $segb <= $max_bytes) {
+            $cur .= $sep . $seg;
+            $curb += _utf8_bytes($sep) + $segb;
+        }
+        else {
+            push @lines, $cur;
+            $cur = $seg;
+            $curb = $segb;
+        }
+    }
+    push @lines, $cur if length $cur;
+    return \@lines;
+}
+
 # --- commande ----------------------------------------------------------------
 
 sub mbNews_ctx {
@@ -302,6 +591,14 @@ sub mbNews_ctx {
         return;
     }
 
+    # Precise visible article list, like news_teuk.tcl: Google News RSS is
+    # independent from Tavily and gives real press headlines instead of
+    # generic section/homepage labels. Failure is non-fatal: Tavily articles
+    # remain the deterministic fallback.
+    my $rss_http = Mediabot::External::_make_http(timeout => 5, max_size => 512 * 1024);
+    my $press_articles = _news_fetch_google_articles($rss_http, $lang, $query, $is_default, $now);
+    my $display_articles = @$press_articles ? $press_articles : $picked;
+
     # Matiere pour le modele : titre, source, date, extrait.
     my @block;
     for my $r (@$picked) {
@@ -311,27 +608,44 @@ sub mbNews_ctx {
     my $lang_name = (Mediabot::External::Claude->can('ai_lang_name')
         ? Mediabot::External::Claude::ai_lang_name($lang) : 'English');
     my $prompt =
-        "You are summarising news dispatches for an IRC channel. From the results below "
-      . "(title, source, date, snippet), write a factual summary in $lang_name, in at most "
-      . "2 lines of under 380 characters each. LINE 1: the most recent and most important "
-      . "development, dated, with concrete facts (figures, names, places). LINE 2: context, "
-      . "what is at stake, and disagreements between sources if any. Prefer what several "
-      . "sources corroborate; attribute explicitly what rests on a single one. Ignore "
-      . "off-topic results without commenting on them. Invent no fact, no date, no source; "
-      . "if the material is thin, one sober line is enough. No Markdown, no emoji, no lists, "
-      . "no preamble.\n\n"
-      . "Topic: $query\n\n" . join("\n", @block);
+        "You are summarising news dispatches for an IRC channel. Write in $lang_name, in at most "
+      . "2 lines of under 380 characters each. The PRECISE PRESS HEADLINES listed below, when "
+      . "present, define the visible article selection and therefore the events you may lead with. "
+      . "Keep the summary aligned with those clickable stories; do not introduce an unrelated "
+      . "Tavily-only event. Use Tavily snippets only to corroborate or add concrete context to those "
+      . "same events. LINE 1: the most recent and important selected development, with concrete facts "
+      . "(figures, names, places). LINE 2: another selected development or useful context. Attribute "
+      . "single-source claims explicitly. Invent no fact, date or source. No Markdown, no emoji, "
+      . "no lists, no preamble.\n\n"
+      . "Topic: $query\n\nTavily corroboration material:\n" . join("\n", @block);
+
+    if (@$press_articles) {
+        my @press = map {
+            my $when = defined $_->{epoch} ? strftime('%Y-%m-%d', gmtime($_->{epoch})) : 'n/a';
+            my $publisher = $_->{source} || $_->{domain} || 'source';
+            "- [$when] $publisher: $_->{title}";
+        } @$press_articles;
+        $prompt .= "\n\nPRECISE PRESS HEADLINES — these are the clickable stories "
+                 . "shown to the user; keep the synthesis on these events:\n"
+                 . join("\n", @press);
+    }
 
     my $badge = "\x0300,04" . _text($lang, 'badge') . "\x0f";
     my @lines;
+    my $summary_count = 0;
+    my $push_summary = sub {
+        my ($line) = @_;
+        return unless defined $line && $line =~ /\S/;
+        $line =~ s/^\s+|\s+$//g;
+        push @lines, ($summary_count++ == 0 ? "$badge $line" : $line);
+    };
     my $emit = sub {
         my ($text) = @_;
         return unless defined $text && $text =~ /\S/;
         for my $line (split /\n/, $text) {
             next unless $line =~ /\S/;
-            last if @lines >= 3;
-            $line =~ s/^\s+|\s+$//g;
-            push @lines, "$badge $line";
+            last if @lines >= 2;
+            $push_summary->($line);
         }
     };
     my $ok = eval {
@@ -343,11 +657,23 @@ sub mbNews_ctx {
         # Repli utile plutot qu'un message d'echec : les titres eux-memes.
         for my $r (@$picked) {
             last if @lines >= 3;
-            push @lines, "$badge $r->{title} — $r->{domain}";
+            $push_summary->("$r->{title} — $r->{domain}");
         }
     }
-    my $sources = _news_sources_line($lang, $picked);
-    push @lines, "$badge $sources" if length $sources;
+    # TinyURL is presentation only: keep its timeout small so three shortener
+    # calls cannot consume the 45 s CommandAsync budget. Failure simply keeps
+    # the original article URL.
+    my $tiny_http = Mediabot::External::_make_http(timeout => 2, max_size => 4096);
+    my $article_segments = _news_article_segments($display_articles,
+        sub { _news_shorten_url($tiny_http, shift) });
+    my $article_lines = _news_article_lines($article_segments, 400);
+    if (@$article_lines) {
+        push @lines, @$article_lines;
+    }
+    else {
+        my $sources = _news_sources_line($lang, $picked);
+        push @lines, "$badge $sources" if length $sources;
+    }
 
     $say->($_) for @lines;
     return 1;
