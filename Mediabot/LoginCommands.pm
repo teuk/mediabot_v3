@@ -15,6 +15,12 @@ package Mediabot::LoginCommands;
 
 use strict;
 use warnings;
+use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
+            # Sans cela ils sont des OCTETS, et interpoler une variable
+            # venue d'IRC (mediabot.pl decode les messages entrants) fait
+            # basculer toute la chaine : les octets sont relus en latin-1
+            # puis re-encodes a l'envoi -> mojibake (« humeur Ã©lectrique »).
+
 use POSIX qw(strftime);
 use Digest::SHA ();      # mb465-B5: legacy fallback hash in checkAuth
 use Mediabot::Auth ();   # mb465-B4: format-aware password_matches in userPass

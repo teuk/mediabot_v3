@@ -12,6 +12,12 @@ package Mediabot::External::Claude;
 
 use strict;
 use warnings;
+use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
+            # Sans cela ils sont des OCTETS, et interpoler une variable
+            # venue d'IRC (mediabot.pl decode les messages entrants) fait
+            # basculer toute la chaine : les octets sont relus en latin-1
+            # puis re-encodes a l'envoi -> mojibake (« humeur Ã©lectrique »).
+
 use Exporter 'import';
 
 # mb348-B1: les statistiques basees sur CHANNEL_LOG filtrent les VRAIS messages

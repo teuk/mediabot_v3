@@ -11,6 +11,8 @@
 
 use strict;
 use warnings;
+use utf8;   # mb621: la sortie du bot est en CARACTERES depuis mb621
+
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
 

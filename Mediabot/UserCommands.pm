@@ -6,6 +6,12 @@ package Mediabot::UserCommands;
 
 use strict;
 use warnings;
+use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
+            # Sans cela ils sont des OCTETS, et interpoler une variable
+            # venue d'IRC (mediabot.pl decode les messages entrants) fait
+            # basculer toute la chaine : les octets sont relus en latin-1
+            # puis re-encodes a l'envoi -> mojibake (« humeur Ã©lectrique »).
+
 use POSIX qw(strftime);
 use Time::Local qw(timegm timelocal);
 use Time::Piece;
@@ -9939,6 +9945,39 @@ sub mbDuel_ctx {
 # ---------------------------------------------------------------------------
 # mb561-B1: (jour, mois) -> (nom, glyphe, element) du signe, bornes standard.
 # Retourne () si la date est invalide. Testable unitairement (test 752).
+# mb620-B1: passerelles entre le tableau canonique FR (historique, verrouille
+# par le test 752) et les slugs anglais que veut l'API. Deux fonctions plutot
+# qu'une table de plus : la source de verite reste _horoscope_zodiac_sign.
+our %HOROSCOPE_SLUG_OF = (
+    'Verseau' => 'aquarius', 'Poissons' => 'pisces', 'Bélier' => 'aries',
+    'Taureau' => 'taurus', 'Gémeaux' => 'gemini', 'Cancer' => 'cancer',
+    'Lion' => 'leo', 'Vierge' => 'virgo', 'Balance' => 'libra',
+    'Scorpion' => 'scorpio', 'Sagittaire' => 'sagittarius',
+    'Capricorne' => 'capricorn',
+);
+
+sub _horoscope_slug_from_sign {
+    my ($fr_name) = @_;
+    return undef unless defined $fr_name;
+    return $HOROSCOPE_SLUG_OF{$fr_name};
+}
+
+# Rend [ nom_fr, glyphe, element ] pour un slug anglais, en RELISANT le
+# tableau canonique : si une date de bascule change un jour, rien a resynchroniser.
+sub _horoscope_sign_from_slug {
+    my ($slug) = @_;
+    return undef unless defined $slug;
+    my %date_of = (
+        aquarius => [ 20, 1 ], pisces => [ 19, 2 ], aries => [ 21, 3 ],
+        taurus   => [ 20, 4 ], gemini => [ 21, 5 ], cancer => [ 21, 6 ],
+        leo      => [ 23, 7 ], virgo  => [ 23, 8 ], libra  => [ 23, 9 ],
+        scorpio  => [ 23, 10 ], sagittarius => [ 22, 11 ], capricorn => [ 22, 12 ],
+    );
+    my $d = $date_of{$slug} or return undef;
+    my @sign = _horoscope_zodiac_sign(@$d);
+    return @sign ? \@sign : undef;
+}
+
 sub _horoscope_zodiac_sign {
     my ($d, $m) = @_;
     return () unless defined $d && defined $m;
@@ -9950,21 +9989,21 @@ sub _horoscope_zodiac_sign {
     # le défaut : il couvre aussi le début d'année (01/01 - 19/01), avant le
     # premier début de la liste (Verseau 20/01).
     my @zodiac = (
-        [ 'Verseau',    "\x{2652}", 'air',    1, 20 ],
-        [ 'Poissons',   "\x{2653}", 'eau',    2, 19 ],
-        [ 'Bélier',     "\x{2648}", 'feu',    3, 21 ],
-        [ 'Taureau',    "\x{2649}", 'terre',  4, 20 ],
-        [ 'Gémeaux',    "\x{264A}", 'air',    5, 21 ],
-        [ 'Cancer',     "\x{264B}", 'eau',    6, 21 ],
-        [ 'Lion',       "\x{264C}", 'feu',    7, 23 ],
-        [ 'Vierge',     "\x{264D}", 'terre',  8, 23 ],
-        [ 'Balance',    "\x{264E}", 'air',    9, 23 ],
-        [ 'Scorpion',   "\x{264F}", 'eau',   10, 23 ],
-        [ 'Sagittaire', "\x{2650}", 'feu',   11, 22 ],
-        [ 'Capricorne', "\x{2651}", 'terre', 12, 22 ],
+        [ 'Verseau',    "♒", 'air',    1, 20 ],
+        [ 'Poissons',   "♓", 'eau',    2, 19 ],
+        [ 'Bélier',     "♈", 'feu',    3, 21 ],
+        [ 'Taureau',    "♉", 'terre',  4, 20 ],
+        [ 'Gémeaux',    "♊", 'air',    5, 21 ],
+        [ 'Cancer',     "♋", 'eau',    6, 21 ],
+        [ 'Lion',       "♌", 'feu',    7, 23 ],
+        [ 'Vierge',     "♍", 'terre',  8, 23 ],
+        [ 'Balance',    "♎", 'air',    9, 23 ],
+        [ 'Scorpion',   "♏", 'eau',   10, 23 ],
+        [ 'Sagittaire', "♐", 'feu',   11, 22 ],
+        [ 'Capricorne', "♑", 'terre', 12, 22 ],
     );
     my $md = $m * 100 + $d;
-    my $found = [ 'Capricorne', "\x{2651}", 'terre' ];   # 01/01 - 19/01
+    my $found = [ 'Capricorne', "♑", 'terre' ];   # 01/01 - 19/01
     for my $z (@zodiac) {
         my $z_md = $z->[3] * 100 + $z->[4];
         $found = $z if $md >= $z_md;
@@ -10009,7 +10048,19 @@ sub mbHoroscope_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-    my $target  = @args ? lc(shift @args) : lc($nick);
+
+    # mb620-B1: l'argument est SOIT un signe (dans n'importe laquelle des
+    # trois langues, accentue ou non, glyphe ou abrege), SOIT un pseudo. On
+    # teste le signe d'abord : « m horoscope lion » doit donner le Lion, pas
+    # l'horoscope d'un utilisateur hypothetique nomme lion. Les trois cas
+    # demandes sont ainsi couverts : signe donne, pseudo donne, rien donne.
+    my $forced_sign;
+    if (@args) {
+        my $joined = join ' ', @args;
+        $forced_sign = Mediabot::External::Horoscope::normalize_sign($joined)
+                    || Mediabot::External::Horoscope::normalize_sign($args[0]);
+    }
+    my $target = (!$forced_sign && @args) ? lc($args[0]) : lc($nick);
 
     my $reply_to = ($channel && $channel =~ /^#/) ? $channel : $nick;
 
@@ -10045,11 +10096,31 @@ sub mbHoroscope_ctx {
         }
     }
 
+    # mb620-B1: un signe donne a la main gagne sur la date de naissance
+    # stockee — c'est le cas « on me donne le signe ».
+    my $api_slug;
+    if ($forced_sign) {
+        $api_slug = $forced_sign;
+        my ($fr_name) = _horoscope_sign_from_slug($forced_sign);
+        if (defined $fr_name) {
+            ($sign_name, $sign_glyph, $sign_element) = @{ $fr_name };
+        }
+    }
+    elsif (defined $sign_name) {
+        $api_slug = _horoscope_slug_from_sign($sign_name);
+    }
+
     # Seed déterministe : nick + date du jour
     my @lt = localtime(time);
     my $date_key = sprintf('%04d-%02d-%02d', $lt[5]+1900, $lt[4]+1, $lt[3]);
     my $seed = 0;
-    $seed = ($seed * 31 + ord($_)) & 0xFFFFFFFF for split //, ($target . ':' . $date_key);
+    # mb620-B1: quand un signe est demande explicitement, il entre dans la
+    # graine — sinon « !horoscope lion » et « !horoscope vierge » rendraient
+    # la meme saveur au meme utilisateur le meme jour. Sans signe force, la
+    # graine est identique a l'historique (contrat mb444/test 659 intact).
+    my $seed_src = $target . ':' . $date_key
+                 . (defined $forced_sign ? ':' . $forced_sign : '');
+    $seed = ($seed * 31 + ord($_)) & 0xFFFFFFFF for split //, $seed_src;
 
     # mb444-B1: PRNG LOCAL déterministe — le RNG global (dés, duels, 8ball,
     # trivia, Hailo) n'est JAMAIS touché. Contrat verrouillé par le test 659.
@@ -10070,10 +10141,10 @@ sub mbHoroscope_ctx {
     # aucun evenement interne. Teinte legerement IRC/tech assumee (c'est un
     # bot), mais rien de nominatif.
     my @humeurs = (
-        "lumineuse \x{1F31E}", "mystérieuse \x{1F315}", "espiègle \x{1F608}",
-        "philosophe \x{1F914}", "conquérante \x{2694}\x{FE0F}", "rêveuse \x{2601}\x{FE0F}",
-        "indomptable \x{1F981}", "fluide \x{1F30A}", "électrique \x{26A1}",
-        "feutrée \x{1F43E}", "sereine \x{1F9D8}", "magnétique \x{1F9F2}",
+        "lumineuse 🌞", "mystérieuse 🌕", "espiègle 😈",
+        "philosophe 🤔", "conquérante ⚔️", "rêveuse ☁️",
+        "indomptable 🦁", "fluide 🌊", "électrique ⚡",
+        "feutrée 🐾", "sereine 🧘", "magnétique 🧲",
     );
 
     # Accroches par élément (utilisées seulement si le signe est connu)
@@ -10151,18 +10222,18 @@ sub mbHoroscope_ctx {
 
     my @couleurs = qw(turquoise carmin indigo or pourpre ardoise émeraude saphir cuivre ivoire);
     my @chiffres = (3, 7, 11, 13, 17, 21, 23, 42, 47, 77, 100, 666);
-    my @glyphs   = ("\x{2728}", "\x{1F31F}", "\x{1F319}", "\x{1F525}", "\x{2604}\x{FE0F}",
-                    "\x{1F30C}", "\x{1F52E}", "\x{26A1}", "\x{1F300}");
+    my @glyphs   = ("✨", "🌟", "🌙", "🔥", "☄️",
+                    "🌌", "🔮", "⚡", "🌀");
     my @autres_signes = ('Bélier', 'Taureau', 'Gémeaux', 'Cancer', 'Lion', 'Vierge',
                          'Balance', 'Scorpion', 'Sagittaire', 'Capricorne', 'Verseau', 'Poissons');
 
 
     # mb572-B1: jumeaux anglais (tailles identiques aux pools FR).
     my @moods_en = (
-        "radiant \x{1F31E}", "mysterious \x{1F315}", "mischievous \x{1F608}",
-        "philosophical \x{1F914}", "conquering \x{2694}\x{FE0F}", "dreamy \x{2601}\x{FE0F}",
-        "untamable \x{1F981}", "fluid \x{1F30A}", "electric \x{26A1}",
-        "hushed \x{1F43E}", "serene \x{1F9D8}", "magnetic \x{1F9F2}",
+        "radiant 🌞", "mysterious 🌕", "mischievous 😈",
+        "philosophical 🤔", "conquering ⚔️", "dreamy ☁️",
+        "untamable 🦁", "fluid 🌊", "electric ⚡",
+        "hushed 🐾", "serene 🧘", "magnetic 🧲",
     );
     my %elans_en = (
         feu   => [ "your energy opens doors before you knock",
@@ -10274,59 +10345,75 @@ sub mbHoroscope_ctx {
         $disp_element = $element_en{$sign_element} // $sign_element;
     }
 
+    # mb620-B1: la prevision REELLE du jour pour ce signe. Best-effort de bout
+    # en bout : API muette, lente ou changee, traduction indisponible -> undef,
+    # et l'horoscope local s'affiche seul, exactement comme avant. L'utilisateur
+    # ne voit jamais un message d'echec pour un horoscope.
+    my $api_line;
+    if (defined $api_slug) {
+        $api_line = eval {
+            Mediabot::External::Horoscope::daily_line(
+                $self, $api_slug, ($horo_fr ? 'fr' : $horo_lang), $nick);
+        };
+    }
+
     if (defined $sign_name) {
         my $elan = $pick->($elans{$sign_element});
         my @complices = grep { $_ ne $disp_sign } @autres_signes;
         my $complice = $pick->(\@complices);
         if ($horo_fr) {
             botPrivmsg($self, $reply_to,
-                "$glyph \x02Horoscope du $date_key\x02 \x{2014} $target, $sign_glyph \x02$disp_sign\x02 ($disp_element) \x{B7} humeur $humeur");
+                "$glyph \x02Horoscope du $date_key\x02 — $target, $sign_glyph \x02$disp_sign\x02 ($disp_element) · humeur $humeur");
             botPrivmsg($self, $reply_to,
-                "  \x{1F52E} $elan.");
+                "  🔮 $elan.");
+            botPrivmsg($self, $reply_to, "  ✨ $api_line") if defined $api_line;
             botPrivmsg($self, $reply_to,
                 "  Climat : $social. Côté projets : $projets. $event");
             botPrivmsg($self, $reply_to,
                 sprintf("  Conseil : %s. Méfiance : %s.", $reco, $attention));
             botPrivmsg($self, $reply_to,
-                sprintf("  \x{1F3B2} Chiffre %d \x{B7} \x{1F3A8} couleur %s \x{B7} \x{1F340} chance %d%% \x{B7} \x{1F4AB} signe complice : %s",
+                sprintf("  🎲 Chiffre %d · 🎨 couleur %s · 🍀 chance %d%% · 💫 signe complice : %s",
                     $chiffre, $couleur, $chance, $complice));
         }
         else {
             botPrivmsg($self, $reply_to,
-                "$glyph \x02Horoscope for $date_key\x02 \x{2014} $target, $sign_glyph \x02$disp_sign\x02 ($disp_element) \x{B7} mood: $humeur");
+                "$glyph \x02Horoscope for $date_key\x02 — $target, $sign_glyph \x02$disp_sign\x02 ($disp_element) · mood: $humeur");
             botPrivmsg($self, $reply_to,
-                "  \x{1F52E} $elan.");
+                "  🔮 $elan.");
+            botPrivmsg($self, $reply_to, "  ✨ $api_line") if defined $api_line;
             botPrivmsg($self, $reply_to,
                 "  Vibe: $social. On the work front: $projets. $event");
             botPrivmsg($self, $reply_to,
                 sprintf("  Advice: %s. Beware of: %s.", $reco, $attention));
             botPrivmsg($self, $reply_to,
-                sprintf("  \x{1F3B2} Number %d \x{B7} \x{1F3A8} colour %s \x{B7} \x{1F340} luck %d%% \x{B7} \x{1F4AB} kindred sign: %s",
+                sprintf("  🎲 Number %d · 🎨 colour %s · 🍀 luck %d%% · 💫 kindred sign: %s",
                     $chiffre, $couleur, $chance, $complice));
         }
     }
     else {
         if ($horo_fr) {
             botPrivmsg($self, $reply_to,
-                "$glyph \x02Horoscope du $date_key pour $target\x02 \x{2014} humeur $humeur");
+                "$glyph \x02Horoscope du $date_key pour $target\x02 — humeur $humeur");
             botPrivmsg($self, $reply_to,
                 "  Climat : $social. Côté projets : $projets. $event");
             botPrivmsg($self, $reply_to,
                 sprintf("  Conseil : %s. Méfiance : %s.", $reco, $attention));
             botPrivmsg($self, $reply_to,
-                sprintf("  \x{1F3B2} Chiffre %d \x{B7} \x{1F3A8} couleur %s \x{B7} \x{1F340} chance %d%%",
-                    $chiffre, $couleur, $chance));
+                sprintf("  🎲 Chiffre %d · 🎨 couleur %s · 🍀 chance %d%% · 💡 %s",
+                    $chiffre, $couleur, $chance,
+                    "signe inconnu : essaie \x02!horoscope lion\x02 ou \x02!birthday set\x02"));
         }
         else {
             botPrivmsg($self, $reply_to,
-                "$glyph \x02Horoscope for $date_key \x{2014} $target\x02 \x{2014} mood: $humeur");
+                "$glyph \x02Horoscope for $date_key — $target\x02 — mood: $humeur");
             botPrivmsg($self, $reply_to,
                 "  Vibe: $social. On the work front: $projets. $event");
             botPrivmsg($self, $reply_to,
                 sprintf("  Advice: %s. Beware of: %s.", $reco, $attention));
             botPrivmsg($self, $reply_to,
-                sprintf("  \x{1F3B2} Number %d \x{B7} \x{1F3A8} colour %s \x{B7} \x{1F340} luck %d%%",
-                    $chiffre, $couleur, $chance));
+                sprintf("  🎲 Number %d · 🎨 colour %s · 🍀 luck %d%% · 💡 %s",
+                    $chiffre, $couleur, $chance,
+                    "sign unknown: try \x02!horoscope leo\x02 or \x02!birthday set\x02"));
         }
     }
 

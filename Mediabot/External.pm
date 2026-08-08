@@ -65,6 +65,9 @@ Mediabot::External::Claude->import(qw(
     _claude_send_and_parse
 ));
 
+# mb620-B1: sous-module Horoscope (API gratuite + mise en langue)
+require Mediabot::External::Horoscope;
+
 # mb613-B1: sous-module Actualites (Tavily + synthese Claude)
 require Mediabot::External::News;
 Mediabot::External::News->import(qw(

@@ -10,6 +10,87 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb622 — l'alias horo suit le meme chemin asynchrone que horoscope
+- Depuis mb620, `horoscope` peut appeler un fournisseur HTTP puis Claude pour
+  localiser la prevision. La commande longue passait donc par CommandAsync,
+  mais l'alias historique `horo` appelait encore `mbHoroscope_ctx` directement :
+  un `m horo lion` pouvait bloquer la boucle IRC pendant les appels reseau.
+- `horoscope` et `horo` utilisent maintenant le meme label canonique
+  `horoscope` dans `run_ctx_async` : meme worker, meme verrou de canal, meme
+  timeout et meme facade de sortie. L'aide de `horo` annonce aussi correctement
+  qu'un signe peut etre fourni, comme pour la commande longue.
+- Nettoyage de documentation : le commentaire de repliement des signes ne
+  pretend plus que `Horoscope.pm` est sans `use utf8` depuis mb621.
+- Nouveau test 805 : les deux dispatchs passent par CommandAsync avec le meme
+  label, aucun alias synchrone ne subsiste, aide longue/courte coherente.
+
+### mb621 — encodage de sortie : la vraie cause, et la classe entiere fermee
+- Mon correctif mb620 avait AGGRAVE le probleme : une seule expression etait
+  cassee avant, toute la ligne l'etait apres. Diagnostic complet cette fois :
+  mediabot.pl DECODE les messages entrants (~ligne 2089), donc $nick, $target
+  et les arguments sont des chaines de CARACTERES ; l'envoi n'encode QUE si
+  la chaine est marquee utf8 ; or un fichier sans « use utf8 » a des
+  litteraux en OCTETS. Interpoler une variable marquee dans un tel litteral
+  fait basculer TOUTE la chaine : les octets sont relus en latin-1 puis
+  re-encodes a l'envoi — double encodage. Rien a voir avec mediabot.conf.
+- Correction de la CLASSE, pas du symptome : « use utf8 » pose sur les 15
+  modules dont les litteraux non-ASCII peuvent partir sur IRC (106 litteraux
+  concernes au total ; la commande actualites portait la meme bombe). Les
+  litteraux deviennent des caracteres, l'envoi encode une fois, la sortie est
+  juste quel que soit ce qu'on interpole.
+- Bugs revele par la correction, corriges dans la foulee :
+  * un signe accentue TAPE SUR IRC n'etait pas reconnu (« horoscope bélier »
+    arrive DECODE, mon repliement ne connaissait que les octets) — le
+    repliement accepte desormais les deux mondes ;
+  * une substitution avec un echappement de trop (\/\/ au lieu de //)
+    SUPPRIMAIT silencieusement le caractere au lieu de le replier ;
+  * deux cles de passerelle ecrites en octets cassaient l'aller-retour de
+    Bélier et Gémeaux.
+- Test 804 (29 assertions) : garde structurelle « tout module qui emet du
+  non-ASCII declare use utf8 », et surtout SIMULATION DU FIL — la regle
+  d'envoi reelle est rejouee sur la sortie de l'horoscope avec un pseudo
+  DECODE (le cas de production), puis les octets sont re-decodes en strict
+  pour prouver qu'ils sont de l'UTF-8 valide, sans aucune sequence de double
+  encodage. Cette classe de bug ne peut plus revenir sans faire rougir la
+  suite. Tests 700 et 803 alignes sur le monde correct.
+
+### mb620 — horoscope : accents corriges, signe reconnu, prevision reelle
+- MOJIBAKE (« humeur Ã©lectrique », capture #boulets) : UserCommands.pm n'a
+  PAS « use utf8 », donc ses accents sont des OCTETS, tandis que "\x{26A1}"
+  cree un CARACTERE large. Toute chaine melant les deux est double-encodee a
+  l'affichage. Sept litteraux etaient dans ce cas (pool d'humeurs) et le
+  tableau des signes portait le meme defaut latent — il aurait casse des
+  qu'un signe francais s'affichait. Tous les \x{...} de ces deux zones sont
+  convertis en caracteres litteraux : plus aucune chaine du fichier ne mele
+  les deux mondes, et le test le verifie sur l'ENSEMBLE du fichier.
+- Nouveau module Mediabot/External/Horoscope.pm : reconnaissance d'un signe
+  ecrit par un humain (francais, anglais, espagnol, accentue ou non, glyphe,
+  abreviation) et prevision quotidienne reelle depuis une API publique SANS
+  CLE. La commande passe en worker (appel reseau).
+- Les trois cas demandes sont couverts : « horoscope lion » (signe donne, il
+  gagne sur la date de naissance stockee), « horoscope SaYa » (pseudo, signe
+  deduit de USER.birthday), « horoscope » seul (soi-meme). Le signe est teste
+  AVANT le pseudo, mais un pseudo ordinaire n'est jamais pris pour un signe.
+  Sans signe connu, une invite discrete remplace l'ancien silence.
+- GARDE-FOU CENTRAL : la reponse de l'API doit concerner le signe DEMANDE.
+  Un fournisseur qui ignorerait son parametre servirait le meme signe a tout
+  le monde — exactement le genre de detail qui fait rire un canal aux depens
+  du bot. Reponse non conforme : ignoree, journalisee, horoscope local seul.
+  Deux fournisseurs sont essayes dans l'ordre, la conf peut les remplacer.
+- Best-effort de bout en bout : API muette, JSON casse, champ absent,
+  traduction indisponible -> aucune ligne supplementaire et AUCUN message
+  d'echec a l'utilisateur. Sur canal fr/es la prevision est traduite par
+  claudeAI ; si la traduction echoue, on prefere ne rien afficher plutot
+  qu'une phrase anglaise au milieu d'un horoscope francais.
+- Un signe demande explicitement entre dans la graine du tirage local, sinon
+  « horoscope lion » et « horoscope vierge » rendaient la meme saveur au meme
+  utilisateur (contrat mb444/test 659 inchange sans signe force).
+- Conf : section [horoscope] (API_URL, TIMEOUT), aucune cle requise.
+- Test 803 (25 assertions) : absence totale de litteral mixte, reconnaissance
+  des trois langues sans faux positif sur les pseudos, aller-retour des 12
+  signes avec le tableau canonique, les trois cas en RENDU REEL, garde-fou du
+  mauvais signe, et les quatre modes de panne.
+
 ### mb619 — les news affichées sont vraiment celles du moment
 - Le RSS mb618 rendait enfin de vrais titres, mais la requête sans sujet cherchait
   littéralement « actualités importantes du jour en France ». Google News pouvait

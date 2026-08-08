@@ -2178,8 +2178,10 @@ sub mbCommandPublic {
         dashboard    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'dashboard', sub { mbDashboard_ctx($ctx) }) },
         chanstats    => sub { mbDashboard_ctx($ctx) },        # alias
         duel         => sub { mbDuel_ctx($ctx) },
-        horoscope    => sub { mbHoroscope_ctx($ctx) },
-        horo         => sub { mbHoroscope_ctx($ctx) },        # alias court
+        # mb620-B1: la commande interroge une API -> worker (la facade de
+        # sortie couvre les deux chemins d'appel depuis mb615).
+        horoscope    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'horoscope', sub { mbHoroscope_ctx($ctx) }) },
+        horo         => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'horoscope', sub { mbHoroscope_ctx($ctx) }) }, # alias court, meme worker
 
         # mb117: compat + quotegame + mood
         compat       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'compat',    sub { mbCompat_ctx($ctx) }) },
@@ -2787,8 +2789,8 @@ ambiance|ambiance|public|Alias for mood.
 
 # Games / playful commands
 duel|duel <nick>|public|Challenge a present nick to a d20 duel. Gated by chanset +Games.
-horoscope|horoscope [nick]|public|Show a deterministic daily IRC horoscope. Public use is gated by +Games.
-horo|horo [nick]|public|Alias for horoscope.
+horoscope|horoscope [nick\|signe]|public|Show a deterministic daily IRC horoscope. Public use is gated by +Games.
+horo|horo [nick\|signe]|public|Alias for horoscope.
 compat|compat <nick1> [nick2]|public|Compare IRC affinity between two nicks. Gated by +Games.
 affinity|affinity <nick1> [nick2]|public|Alias for compat.
 quotegame|quotegame [stop|top]|public|Guess who said a stored quote. Uses a proactive 60s timer. Gated by +Games.
