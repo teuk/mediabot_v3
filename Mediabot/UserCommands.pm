@@ -11871,6 +11871,69 @@ sub _recap_text {
     return (defined $text && length $text) ? $text : $fallback;
 }
 
+# mb624-B1: LA syntaxe de recap, ecrite UNE fois — l'aide et les messages
+# d'erreur la lisent au meme endroit (meme discipline que 'ai summary', mb623).
+our @RECAP_USAGE_LINES = (
+    'Syntaxe: recap [fenetre] [ai] [en|fr|es]   (l\'ordre est libre)',
+    'Fenetre: <N>m (minutes) ou <N>h (heures), ex. 30m, 2h. Defaut: la fenetre du canal.',
+    'Options: ai = resume par l\'IA au lieu des statistiques | en|fr|es ou lang=fr = langue du resume.',
+    'Exemples: recap | recap 2h | recap 2h ai | recap ai fr | recap 45m ai lang=en',
+);
+our @RECAP_KEYWORDS = qw(ai);
+
+# mb624-B1: lecture STRICTE des arguments de recap. Meme maladie que celle
+# corrigee dans 'ai summary' : ici, tout jeton non reconnu etait IGNORE EN
+# SILENCE — « recap 2h ia » (faute de frappe sur 'ai') rendait les
+# statistiques au lieu du resume, sans un mot, et « recap 30min » retombait
+# sur la fenetre par defaut sans le dire. Un utilisateur ne peut pas deviner
+# qu'il s'est trompe si le bot repond quelque chose de plausible.
+sub _recap_parse {
+    my (@args) = @_;
+    my %o = (ai => 0, window => undef, lang => undef, bad_lang => undef,
+             unknown => [], duplicate => [], typos => []);
+
+    # mb624-B1: la langue reste extraite par l'API PARTAGEE de mb609 — recopier
+    # sa regle ici recreerait exactement la divergence qu'elle a supprimee. Le
+    # repli inline ne sert que si le module Claude n'est pas charge (tests hors
+    # contexte IA) ; il ne connait donc que le trio nu.
+    if (my $extract = Mediabot::External::Claude->can('extract_ai_lang_token')) {
+        my ($forced, $bad, @rest) = $extract->(@args);
+        ($o{lang}, $o{bad_lang}) = ($forced, $bad);
+        @args = @rest;
+    }
+
+    for my $raw (@args) {
+        my $a = lc($raw // '');
+        next unless length $a;
+
+        if ($a eq 'ai') { $o{ai} = 1 }
+        elsif ($a =~ /^(\d+)([hm])$/) {
+            if (defined $o{window}) { push @{ $o{duplicate} }, $raw; next }
+            $o{window} = $a;
+        }
+        elsif ($a =~ /^lang[=:]([a-z]{2})$/) {
+            my $code = $1;
+            if ($code =~ /\A(?:en|fr|es)\z/) { $o{lang} = $code }
+            else                             { $o{bad_lang} = $code }
+        }
+        elsif ($a =~ /\A(?:en|fr|es)\z/) { $o{lang} = $a }
+        else {
+            # Une fenetre mal ecrite (30min, 2hours, 2 h) doit etre dite,
+            # sinon l'utilisateur croit avoir choisi sa fenetre.
+            if ($a =~ /^\d+\s*[a-z]+$/) {
+                push @{ $o{typos} }, [ $raw, ($a =~ /^(\d+)\s*h/ ? "$1h" : ($a =~ /^(\d+)/ ? "$1m" : 'Nm')) ];
+                next;
+            }
+            if (my $near = Mediabot::Helpers::suggest_keyword($a, @RECAP_KEYWORDS, qw(en fr es))) {
+                push @{ $o{typos} }, [ $raw, $near ];
+                next;
+            }
+            push @{ $o{unknown} }, $raw;
+        }
+    }
+    return \%o;
+}
+
 # mb610-B1: increment du registre de progression persistant des
 # achievements, avec repli silencieux si le systeme n'est pas la (rend
 # undef, l'appelant garde alors sa valeur historique).
@@ -11895,7 +11958,8 @@ sub mbRecap_ctx {
 
     # !recap n'a de sens que dans un canal (le "quoi de neuf ICI").
     unless (isIrcChannelTarget($channel)) {
-        botNotice($self, $nick, "Syntax: recap [<window>] [ai] [en|fr|es]  — use it in a channel (e.g. 30m, 2h).");
+        botNotice($self, $nick, $_) for @RECAP_USAGE_LINES;
+        botNotice($self, $nick, 'recap se lance dans un canal.');
         return;
     }
 
@@ -11908,24 +11972,37 @@ sub mbRecap_ctx {
     # Le module Claude est charge paresseusement : on passe par can() comme
     # le fait deja le chemin IA plus bas. Sans lui, aucun jeton n'est extrait
     # et la langue reste celle du canal — le comportement historique.
-    my ($forced_lang, $bad_lang);
-    if (my $extract = Mediabot::External::Claude->can('extract_ai_lang_token')) {
-        ($forced_lang, $bad_lang, @args) = $extract->(@args);
+    # mb624-B1: lecture stricte, ordre libre, fautes annoncees.
+    my $ro = _recap_parse(@args);
+    if (@{ $ro->{typos} }) {
+        for my $t (@{ $ro->{typos} }) {
+            botNotice($self, $nick, sprintf(
+                "recap: unknown option '%s' - did you mean \x02%s\x02?",
+                $t->[0], $t->[1]));
+        }
+        botNotice($self, $nick, $RECAP_USAGE_LINES[0]);
+        return;
     }
-
-    my $want_ai = 0;
-    my $window_arg;
-    for my $a (@args) {
-        if (lc($a) eq 'ai')      { $want_ai = 1; }
-        elsif ($a =~ /^\d+[hm]$/i) { $window_arg = lc($a); }
+    if (@{ $ro->{unknown} } || @{ $ro->{duplicate} }) {
+        my @bad = (@{ $ro->{unknown} }, @{ $ro->{duplicate} });
+        botNotice($self, $nick, sprintf('recap: %s: %s',
+            (@bad > 1 ? 'unknown or duplicate options' : 'unknown option'),
+            join(', ', map { "'$_'" } @bad)));
+        botNotice($self, $nick, $RECAP_USAGE_LINES[0]);
+        return;
     }
+    my ($forced_lang, $bad_lang) = ($ro->{lang}, $ro->{bad_lang});
+    my $want_ai    = $ro->{ai};
+    my $window_arg = $ro->{window};
     my $resolve = Mediabot::External::Claude->can('resolve_ai_lang');
     my $recap_lang = $resolve
         ? $resolve->($self, $channel, $forced_lang)
         : (eval { Mediabot::Helpers::channel_lang($self, $channel) } || 'en');
-    if (defined $bad_lang && $want_ai) {
+    if (defined $bad_lang) {
         botNotice($self, $nick,
-            "Unsupported language '$bad_lang' (en, fr, es) - using '$recap_lang'.");
+            "recap: unsupported language '$bad_lang' (en, fr, es).");
+        botNotice($self, $nick, $RECAP_USAGE_LINES[0]);
+        return;
     }
 
     # --- configuration (avec valeurs par défaut sûres) ---

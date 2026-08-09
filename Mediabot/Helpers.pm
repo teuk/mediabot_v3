@@ -2791,6 +2791,43 @@ sub getDetailedVersion {
 # so they follow the global setting. Data-only migration seeds the chansets;
 # on an unmigrated database chanset_enabled returns its default (0) and the
 # behaviour is exactly the historical global one.
+# mb624-B1: distance d'edition « une faute » — une SEULE implementation pour
+# tout le bot. Elle est nee dans 'ai summary' (mb623) pour transformer un
+# « todya » muet en suggestion ; les autres commandes en ont le meme besoin,
+# et deux copies auraient divergé au premier ajustement.
+sub edit_distance_1 {
+    my ($a, $b) = @_;
+    return 0 unless defined $a && defined $b;
+    return 0 if abs(length($a) - length($b)) > 1;
+    return 0 if $a eq $b;
+    my @a = split //, $a; my @b = split //, $b;
+    if (@a == @b) {                       # substitution ou transposition
+        my @diff = grep { $a[$_] ne $b[$_] } 0 .. $#a;
+        return 1 if @diff == 1;
+        return 1 if @diff == 2 && $diff[1] == $diff[0] + 1
+                 && $a[$diff[0]] eq $b[$diff[1]] && $a[$diff[1]] eq $b[$diff[0]];
+        return 0;
+    }
+    my ($long, $short) = @a > @b ? (\@a, \@b) : (\@b, \@a);   # insertion/suppression
+    my ($i, $j, $skips) = (0, 0, 0);
+    while ($i < @$long && $j < @$short) {
+        if ($long->[$i] eq $short->[$j]) { $i++; $j++ }
+        else { return 0 if $skips++; $i++ }
+    }
+    return 1;
+}
+
+# Le mot-cle le plus proche a une faute pres, ou undef.
+sub suggest_keyword {
+    my ($token, @keywords) = @_;
+    return undef unless defined $token && length $token;
+    my $t = lc $token;
+    for my $kw (@keywords) {
+        return $kw if edit_distance_1($t, lc $kw);
+    }
+    return undef;
+}
+
 sub channel_lang {
     my ($self, $channel) = @_;
     my $global = eval { $self->{conf}->get('main.LANG') } // 'en';

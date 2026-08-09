@@ -58,58 +58,32 @@ return sub {
     my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/External/Claude.pm'
         or die $!; local $/; <$fh> };
 
-    # [3] extraction avant le filtre nick
-    my ($grep_block) = $src =~ /\@args = grep \{(.+?)\} \@args;/s;
-    $assert->ok(defined $grep_block && $grep_block =~ /forced_lang/,
-        'mb608-791: le jeton de langue est extrait dans la passe grep');
-    my $grep_pos = index($src, '@args = grep {');
-    my $nick_pos = index($src, 'my $filter_nick =');
-    $assert->ok($grep_pos > 0 && $nick_pos > $grep_pos,
-        'mb608-791: ... donc AVANT le parsing du filtre nick');
-    $assert->like($grep_block, qr/lang\[=:\]\(\[a-z\]\{2\}\)/,
-        'mb608-791: la forme lang=xx est acceptee');
-    $assert->like($grep_block, qr/\\A\(\?:en\|fr\|es\)\\z/,
-        'mb608-791: le jeton nu en|fr|es est accepte');
-    $assert->like($grep_block, qr/nick=\(\.\+\)/,
+    # [3] mb623: le parseur est desormais une FONCTION PURE — on l'interroge
+    # au lieu de deviner sa forme en relisant le source. Chaque garde
+    # structurelle d'origine devient une verification de COMPORTEMENT.
+    my $P = Mediabot::External::Claude->can('_summary_parse');
+    $assert->ok($P, 'mb608-791: le parseur est expose et testable');
+    my $o = $P->(qw(today fr));
+    $assert->is(($o->{lang} // ''), 'fr', 'mb608-791: jeton nu fr capte');
+    $assert->is(($o->{period} // ''), 'today',
+        'mb608-791: la periode survit a cote de la langue');
+    $o = $P->(qw(today teuk));
+    $assert->ok(!defined $o->{lang} && ($o->{nick} // '') eq 'teuk',
+        'mb608-791: un pseudo ordinaire n est PAS pris pour une langue');
+    $o = $P->(qw(7d 3l public lang=es SlaY));
+    $assert->ok(($o->{lang} // '') eq 'es' && $o->{public} && $o->{lines} == 3
+                && ($o->{period} // '') eq 'days' && $o->{period_arg} == 7
+                && ($o->{nick} // '') eq 'slay',
+        'mb608-791: lang=es coexiste avec public, 3l, periode et pseudo');
+    $o = $P->(qw(lang=de));
+    $assert->ok(!defined $o->{lang} && ($o->{bad_lang} // '') eq 'de',
+        'mb608-791: un code inconnu est signale, pas accepte');
+    $o = $P->(qw(10));
+    $assert->ok(!defined $o->{lang} && !defined $o->{bad_lang},
+        'mb608-791: sans jeton, rien n est force (defaut = canal)');
+    $o = $P->('nick=fr');
+    $assert->ok(!defined $o->{lang} && ($o->{nick_opt} // '') eq 'fr',
         'mb608-791: nick=<pseudo> echappe les collisions avec les options');
-
-    # [3b] SONDE EXECUTABLE : la passe grep est extraite du source et
-    # reellement executee sur des arguments realistes. Une garde structurelle
-    # dit que le code est la ; ceci prouve qu'il fait ce qu'on croit.
-    my $probe = eval "sub { my \@args = \@_;
-        my (\$public_out, \$out_lines, \$want_help) = (0, undef, 0);
-        my (\$forced_lang, \$bad_lang, \$forced_nick) = (undef, undef, undef);
-        \@args = grep {$grep_block} \@args;
-        return { rest => [ \@args ], lang => \$forced_lang, bad => \$bad_lang,
-                 nick => \$forced_nick, public => \$public_out,
-                 lines => \$out_lines, help => \$want_help };
-    }";
-    $assert->ok(ref($probe) eq 'CODE', 'mb608-791: sonde du parseur compilee');
-    my $r = $probe->(qw(today fr));
-    $assert->is(($r->{lang} // ''), 'fr', 'mb608-791: sonde — jeton nu fr capte');
-    $assert->is(join(',', @{ $r->{rest} }), 'today',
-        'mb608-791: sonde — la periode survit au filtrage');
-    $r = $probe->(qw(today teuk));
-    $assert->ok(!defined $r->{lang} && join(',', @{ $r->{rest} }) eq 'today,teuk',
-        'mb608-791: sonde — un pseudo ordinaire n est PAS pris pour une langue');
-    $r = $probe->(qw(7d 3l public lang=es SlaY));
-    $assert->ok(($r->{lang} // '') eq 'es' && $r->{public} && $r->{lines} == 3
-                && join(',', @{ $r->{rest} }) eq '7d,SlaY',
-        'mb608-791: sonde — lang=es coexiste avec public, 3l, periode et nick');
-    $r = $probe->(qw(lang=de));
-    $assert->ok(!defined $r->{lang} && ($r->{bad} // '') eq 'de',
-        'mb608-791: sonde — un code inconnu est signale, pas accepte');
-    $r = $probe->(qw(today lang=en nick=fr));
-    $assert->ok(($r->{lang} // '') eq 'en' && ($r->{nick} // '') eq 'fr'
-                && join(',', @{ $r->{rest} }) eq 'today',
-        'mb608-791: sonde — nick=fr reste un filtre nick avec langue explicite');
-    $r = $probe->(qw(today fr nick=fr));
-    $assert->ok(($r->{lang} // '') eq 'fr' && ($r->{nick} // '') eq 'fr'
-                && join(',', @{ $r->{rest} }) eq 'today',
-        'mb608-791: sonde — langue fr et pseudo fr peuvent coexister');
-    $r = $probe->(qw(10));
-    $assert->ok(!defined $r->{lang} && !defined $r->{bad},
-        'mb608-791: sonde — sans jeton, rien n est force (defaut = canal)');
 
     # [4] resolution et repli
     # mb609: la regle vit desormais dans resolve_ai_lang, partagee avec
@@ -133,8 +107,12 @@ return sub {
         'mb608-791: le libelle du prompt reste anglais');
 
     # [6] documentation
-    $assert->like($src, qr/Forcer avec en \| fr \| es, ou lang=fr/,
+    # mb623: l'aide est une liste unique, lue par l'aide comme par les erreurs.
+    my @usage = Mediabot::External::Claude::_summary_usage();
+    $assert->ok((grep { /en\|fr\|es ou lang=fr/ } @usage),
         'mb608-791: l aide de la sous-commande documente la langue');
+    $assert->ok((grep { /Langue par defaut: celle du canal/ } @usage),
+        'mb608-791: ... et le defaut par canal');
     $assert->like($src, qr/nick=<pseudo>/,
         'mb608-791: l aide documente l echappement des pseudos homonymes');
     my $mb = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Mediabot.pm'

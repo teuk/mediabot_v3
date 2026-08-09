@@ -10,6 +10,85 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb625 — pre-commit truthfulness for the summary parsers
+- The new AI-summary/recap rounds are renumbered to **mb623/mb624** (tests
+  **806/807**) because mb618/mb619 and tests 801/802 already belong to the
+  committed news arc. The changelog and test filters therefore remain unique.
+- `ai summary <N>h` now has a localized period label in EN/FR/ES service
+  messages; the new hours window was parsed and queried correctly but its
+  human-facing label had been forgotten.
+- The documented bounds are now actually strict: `<N>d` must be 1-30, `<N>h`
+  1-72, bare message counts 5-50 and `<N>l` 1-10. Invalid values are reported
+  instead of being silently clamped. A bare message count combined with a
+  period is rejected instead of being accepted and ignored; duplicate count,
+  line, language and nick selectors are also refused.
+- The sampling notice renders the safety-cap marker as `1500+ messages` rather
+  than the misleading `messages on the period+` form.
+- `today` / `yesterday` use timestamp ranges instead of `DATE(cl.ts)`, keeping
+  the `(id_channel, ts)` index usable when a period summary reads a busy log.
+- `recap lang=de` now fails closed even without `ai`; strict syntax no longer
+  accepts an invalid language only because the statistical path would ignore it.
+- Test 808 locks numbering uniqueness, strict ranges, hour labels, capped
+  wording, index-friendly date predicates and recap invalid-language handling.
+
+### mb624 — recap herite des exigences de 'ai summary', et un seul detecteur
+- La maladie corrigee dans 'ai summary' (mb623) vivait aussi dans sa commande
+  soeur : recap IGNORAIT EN SILENCE tout jeton non reconnu. « recap 2h ia »
+  — une faute de frappe sur 'ai' — rendait les statistiques au lieu du resume
+  demande, sans un mot ; « recap 30min » retombait sur la fenetre par defaut
+  sans le dire. Le bot repondait quelque chose de PLAUSIBLE, donc l'erreur
+  etait invisible : c'est le pire cas.
+- recap lit desormais ses arguments dans n'importe quel ordre, annonce les
+  fautes de frappe avec la bonne forme (« ia » -> « ai », « 30min » -> « 30m »,
+  « 2hours » -> « 2h ») et refuse les jetons inconnus comme les doublons
+  (deux fenetres) au lieu de les avaler.
+- Une faute de frappe n'active JAMAIS l'option devinee : signaler et s'arreter
+  vaut mieux que decider a la place de l'utilisateur.
+- La distance d'edition passe dans Helpers (edit_distance_1 / suggest_keyword) :
+  UNE implementation pour tout le bot. La copie de Claude.pm disparait — deux
+  copies auraient diverge au premier ajustement — et Claude declare desormais
+  sa dependance au lieu de la supposer chargee.
+- La langue de recap reste extraite par l'API PARTAGEE de mb609 : recopier sa
+  regle dans le nouveau parseur aurait recree exactement la divergence que
+  mb609 avait supprimee (rappele par le test 792, a juste titre).
+- Syntaxe de recap ecrite UNE fois (@RECAP_USAGE_LINES), lue par l'aide comme
+  par les messages d'erreur.
+- Verification faite au passage : plus AUCUN module depourvu de « use utf8 »
+  n'emet de litteral non-ASCII — la classe de bugs d'encodage des deux
+  derniers rounds est entierement fermee.
+- Test 807 (52 assertions), pin 792 aligne sur la source unique de syntaxe.
+
+### mb623 — 'ai summary' : syntaxe claire, fautes annoncees, periode couverte
+- TROIS DEFAUTS DE TERRAIN, corriges. (1) Une faute de frappe ne disait
+  RIEN : « ai summary todya » survivait au filtre d'options et devenait le
+  filtre PSEUDO — d'ou un « aucun message trouve » qui ressemblait a un canal
+  vide. (2) « ai summary today » n'etait pas la journee mais
+  « ORDER BY id DESC LIMIT 200 » : les 200 DERNIERS messages, en silence — sur
+  un canal actif, on croyait resumer la journee en resumant la derniere demi-
+  heure. (3) L'ordre des mots etait fige, la periode devait etre en premiere
+  position.
+- Le parseur devient une FONCTION PURE (_summary_parse) : ordre libre, chaque
+  jeton classe, et ce qui n'entre dans aucune case est une ERREUR annoncee.
+  Le test l'interroge directement au lieu d'extraire du source par regex.
+- Fautes de frappe : « todya », « yesteday », « wek », « lat », « publi » sont
+  detectes par distance d'edition 1 sur les mots-cles et SUGGERES, avec le
+  rappel de nick=<pseudo> pour le cas ou ce serait vraiment un pseudo. Aucun
+  vrai pseudo n'est requalifie en erreur (verifie sur teuk, SaYa, Te[u]K...).
+  Jetons illisibles et doublons (deux periodes, deux pseudos) : refus explicite.
+- Une periode lit desormais jusqu'a 1500 messages, et si c'est trop pour un
+  prompt, l'echantillon est REPARTI (debut, milieu, fin, la fin plus dense)
+  au lieu de garder la seule fin. Le compte reel est annonce : « 1842 messages
+  sur la periode - resume sur un echantillon reparti de 400. » Un resume qui
+  ne couvre pas tout le dit.
+- Nouvelle fenetre <N>h (1-72 heures) : « ce qui s'est dit depuis mon
+  dejeuner » etait impossible a demander — today trop large, un compte de
+  messages trop aveugle.
+- La syntaxe est ecrite UNE fois (@_summary_usage_lines) et lue par l'aide
+  comme par les messages d'erreur : elles ne peuvent plus diverger.
+- Pins 630 et 791 evolues : ils verrouillaient la FORME de l'ancienne passe
+  grep et l'ancienne ligne d'aide ; ils verrouillent desormais le
+  COMPORTEMENT du parseur et la liste de syntaxe. Test 806 (47 assertions).
+
 ### mb622 — l'alias horo suit le meme chemin asynchrone que horoscope
 - Depuis mb620, `horoscope` peut appeler un fournisseur HTTP puis Claude pour
   localiser la prevision. La commande longue passait donc par CommandAsync,

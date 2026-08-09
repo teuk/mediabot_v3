@@ -34,6 +34,7 @@ return sub {
 
     require Mediabot::External::Claude;
     require Mediabot::Helpers;
+    require Mediabot::UserCommands;
     my $C = 'Mediabot::External::Claude';
 
     # [1] API publique
@@ -108,7 +109,9 @@ return sub {
         'mb609-792: la formulation historique reste le repli');
 
     # [6] syntaxe annoncee
-    $assert->like($src, qr/Syntax: recap \[<window>\] \[ai\] \[en\|fr\|es\]/,
+    # mb624: l'usage vit dans @RECAP_USAGE_LINES (source unique lue par l'aide
+    # et par les messages d'erreur).
+    $assert->ok((grep { /en\|fr\|es ou lang=fr/ } @Mediabot::UserCommands::RECAP_USAGE_LINES),
         'mb609-792: l usage annonce la langue');
     my $mb = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Mediabot.pm'
         or die $!; local $/; <$fh> };

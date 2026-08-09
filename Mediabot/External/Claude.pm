@@ -26,6 +26,7 @@ use Exporter 'import';
 # Le viewer de log brut .logs (_cmd_chanlog) reste volontairement non filtre.
 use Encode qw(encode decode);
 use JSON::MaybeXS;
+require Mediabot::Helpers;   # mb624-B1: suggest_keyword/edit_distance_1 partages
 use URI::Escape qw(uri_escape_utf8);
 
 our $VERSION = '1.00';
@@ -874,6 +875,8 @@ our %SUMMARY_STRINGS = (
         yesterday => ' (yesterday)',
         week      => ' (this week)',
         days      => ' (last %dd)',
+        hours     => ' (last %dh)',
+        sampled   => '%d%s messages in that window - summarising a spread sample of %d.',
         recap_unavailable => 'recap: AI summary unavailable, showing stats instead.',
         recap_notconf     => 'recap: AI not configured, showing stats instead.',
         recap_truncated   => 'recap: summary truncated (too long).',
@@ -890,6 +893,8 @@ our %SUMMARY_STRINGS = (
         yesterday => ' (hier)',
         week      => ' (cette semaine)',
         days      => ' (%d derniers jours)',
+        hours     => ' (depuis %dh)',
+        sampled   => '%d%s messages sur la periode - resume sur un echantillon reparti de %d.',
         recap_unavailable => 'recap: resume IA indisponible, statistiques a la place.',
         recap_notconf     => 'recap: IA non configuree, statistiques a la place.',
         recap_truncated   => 'recap: resume tronque (trop long).',
@@ -906,6 +911,8 @@ our %SUMMARY_STRINGS = (
         yesterday => ' (ayer)',
         week      => ' (esta semana)',
         days      => ' (ultimos %dd)',
+        hours     => ' (ultimas %dh)',
+        sampled   => '%d%s mensajes en el periodo - resumen sobre una muestra repartida de %d.',
         recap_unavailable => 'recap: resumen IA no disponible, estadisticas en su lugar.',
         recap_notconf     => 'recap: IA no configurada, estadisticas en su lugar.',
         recap_truncated   => 'recap: resumen truncado (demasiado largo).',
@@ -956,6 +963,157 @@ sub ai_lang_text {
     return $SUMMARY_STRINGS{en}{$key} // '';
 }
 
+# mb623-B1: LA syntaxe de la sous-commande, ecrite UNE fois. L'aide et les
+# messages d'erreur la lisent au meme endroit : ils ne peuvent pas diverger,
+# et une option ajoutee plus tard se documente d'elle-meme.
+our @_summary_usage_lines = (
+    'Syntaxe: ai summary [periode] [pseudo] [options]   (l\'ordre est libre)',
+    'Periode: today | yesterday | week | last | <N>d (1-30 jours) | <N>h (1-72 heures).'
+        . ' Sans periode: les <N> derniers messages.',
+    'Options: <N> = messages analyses sans periode (5-50, defaut 10) | <N>l = lignes du resume (1-10)'
+        . ' | public = repondre sur le canal | en|fr|es ou lang=fr = langue | nick=<pseudo> si le pseudo'
+        . ' ressemble a une option.',
+    'Langue par defaut: celle du canal (chansets LangFR / LangES, sinon main.LANG).',
+    'Exemples: ai summary today | ai summary today teuk | ai summary 6h public'
+        . ' | ai summary week 3l fr | ai summary teuk 7d | ai summary 20 nick=fr',
+);
+
+sub _summary_usage { return @_summary_usage_lines }
+
+# mb623-B1: lecture STRICTE et SANS ORDRE IMPOSE des arguments de
+# « ai summary ». Rend une structure ; ne touche a rien d'autre. Tout jeton
+# qui n'entre dans aucune case ressort dans {unknown} — c'est ce qui permet
+# de DIRE « option inconnue » au lieu de prendre une faute de frappe pour un
+# pseudo et de repondre « aucun message trouve ».
+# mb623-B1: « todya » a la forme d'un pseudo valide — impossible de le
+# refuser d'office sans casser les vrais pseudos. On mesure donc la distance
+# d'edition avec les mots-cles : a UNE faute pres, on suppose la faute de
+# frappe et on le DIT, en rappelant l'echappatoire nick=<pseudo> pour le cas
+# ou ce serait vraiment un pseudo. Mieux vaut une question qu'un « aucun
+# message trouve » trompeur.
+our @SUMMARY_KEYWORDS = qw(today yesterday week last public help);
+
+# mb624-B1: le calcul vit desormais dans Helpers — une seule implementation
+# pour tout le bot (recap en a le meme besoin).
+sub _summary_suggest {
+    my ($token) = @_;
+    return Mediabot::Helpers::suggest_keyword($token, @SUMMARY_KEYWORDS);
+}
+
+sub _summary_parse {
+    my (@args) = @_;
+    my %o = (public => 0, lines => undef, help => 0, lang => undef,
+             bad_lang => undef, nick_opt => undef, nick => undef,
+             period => undef, period_arg => undef, count => undef,
+             unknown => [], duplicate => [], invalid => [], typos => []);
+
+    for my $raw (@args) {
+        my $a = lc($raw // '');
+        next unless length $a;
+
+        if    ($a eq 'public' || $a eq 'pub') { $o{public} = 1 }
+        elsif ($a eq 'help')                  { $o{help}   = 1 }
+        elsif ($a =~ /^(\d+)l$/)              {
+            my $n = int($1);
+            if (defined $o{lines}) { push @{ $o{duplicate} }, $raw; next }
+            if ($n < 1 || $n > 10) {
+                push @{ $o{invalid} }, [ $raw, 'summary lines must be between 1 and 10' ];
+                next;
+            }
+            $o{lines} = $n;
+        }
+        elsif ($a =~ /^lang[=:]([a-z]{2})$/)  {
+            my $code = $1;
+            if (defined $o{lang} || defined $o{bad_lang}) {
+                push @{ $o{duplicate} }, $raw; next;
+            }
+            if ($code =~ /\A(?:en|fr|es)\z/) { $o{lang} = $code }
+            else                             { $o{bad_lang} = $code }
+        }
+        # mb608-B2: echappement pour un pseudo homonyme d'une option.
+        elsif ($a =~ /^nick[=:](.+)$/)        {
+            if (defined $o{nick_opt} || defined $o{nick}) {
+                push @{ $o{duplicate} }, $raw; next;
+            }
+            $o{nick_opt} = lc($1);
+        }
+        elsif ($a =~ /\A(?:en|fr|es)\z/)      {
+            if (defined $o{lang} || defined $o{bad_lang}) {
+                push @{ $o{duplicate} }, $raw; next;
+            }
+            $o{lang} = $a;
+        }
+        elsif ($a =~ /\A(?:today|yesterday|week|last)\z/) {
+            if (defined $o{period}) { push @{ $o{duplicate} }, $raw; next }
+            $o{period} = $a;
+        }
+        elsif ($a =~ /^(\d+)([dh])$/) {
+            if (defined $o{period}) { push @{ $o{duplicate} }, $raw; next }
+            my ($n, $unit) = (int($1), $2);
+            my $max = $unit eq 'd' ? 30 : 72;
+            if ($n < 1 || $n > $max) {
+                push @{ $o{invalid} }, [ $raw,
+                    $unit eq 'd' ? 'day window must be between 1d and 30d'
+                                   : 'hour window must be between 1h and 72h' ];
+                next;
+            }
+            ($o{period}, $o{period_arg}) = ($unit eq 'd' ? 'days' : 'hours', $n);
+        }
+        elsif ($a =~ /^\d+$/)                 {
+            my $n = int($a);
+            if (defined $o{count}) { push @{ $o{duplicate} }, $raw; next }
+            if ($n < 5 || $n > 50) {
+                push @{ $o{invalid} }, [ $raw, 'message count must be between 5 and 50' ];
+                next;
+            }
+            $o{count} = $n;
+        }
+        # Pseudo IRC : lettres, chiffres et les speciaux RFC 2812.
+        elsif ($raw =~ /\A[A-Za-z0-9\[\]\\`_^{}|-]{1,30}\z/) {
+            if (my $near = _summary_suggest($a)) {
+                push @{ $o{typos} }, [ $raw, $near ];
+                next;
+            }
+            if (defined $o{nick} || defined $o{nick_opt}) {
+                push @{ $o{duplicate} }, $raw; next;
+            }
+            $o{nick} = lc $raw;
+        }
+        else { push @{ $o{unknown} }, $raw }
+    }
+    if (defined $o{period} && defined $o{count}) {
+        push @{ $o{invalid} }, [ $o{count}, 'message count can only be used without a period' ];
+    }
+    return \%o;
+}
+
+# mb623-B1: bornes de lecture d'une periode. Le plafond de LECTURE est large
+# (une journee chargee tient dedans) ; le budget d'ANALYSE borne ce qui part
+# au modele. Entre les deux, on echantillonne de facon repartie.
+our $CLAUDE_SUMMARY_FETCH_CAP  = 1500;
+our $CLAUDE_SUMMARY_ANALYSE    = 400;
+
+# Reduit une liste de lignes a $keep en gardant le DEBUT, la FIN et un pas
+# regulier au milieu : la couverture reste celle de toute la periode, avec la
+# fin plus dense parce que c'est ce dont on parle encore.
+sub _summary_spread {
+    my ($rows, $keep) = @_;
+    my $n = scalar @$rows;
+    return $rows if $keep <= 0 || $n <= $keep;
+
+    my $tail_n = int($keep * 0.4);          # 40 % pour les plus recents
+    my $head_n = $keep - $tail_n;           # le reste, reparti sur le debut
+    my @tail   = @$rows[ ($n - $tail_n) .. ($n - 1) ];
+    my @early  = @$rows[ 0 .. ($n - $tail_n - 1) ];
+    my $step   = @early / $head_n;
+    my @head;
+    for my $i (0 .. $head_n - 1) {
+        my $idx = int($i * $step);
+        push @head, $early[$idx] if defined $early[$idx];
+    }
+    return [ @head, @tail ];
+}
+
 sub _summary_lang_strings {
     my ($lang) = @_;
     return $SUMMARY_STRINGS{ $lang || '' } || $SUMMARY_STRINGS{en};
@@ -977,7 +1135,8 @@ sub _summary_period_label {
     return $S->{today}     if $key eq 'today';
     return $S->{yesterday} if $key eq 'yesterday';
     return $S->{week}      if $key eq 'week';
-    return sprintf($S->{days}, ($arg || 0)) if $key eq 'days';
+    return sprintf($S->{days},  ($arg || 0)) if $key eq 'days';
+    return sprintf($S->{hours}, ($arg || 0)) if $key eq 'hours';
     return '';
 }
 
@@ -1087,37 +1246,67 @@ sub claude_ctx {
         # parsing du filtre nick, sinon 'fr' serait pris pour un pseudo.
         # Formes acceptees : jeton nu (en|fr|es) ou lang=xx. Meme risque de
         # collision qu'avec 'public' pour un pseudo homonyme : documente.
-        my ($public_out, $out_lines, $want_help) = (0, undef, 0);
-        my ($forced_lang, $bad_lang, $forced_nick) = (undef, undef, undef);
-        @args = grep {
-            my $a = lc($_ // '');
-            if    ($a eq 'public' || $a eq 'pub') { $public_out = 1; 0 }
-            elsif ($a =~ /^(\d+)l$/)              { $out_lines = int($1); 0 }
-            elsif ($a eq 'help')                  { $want_help = 1; 0 }
-            elsif ($a =~ /^lang[=:]([a-z]{2})$/)  {
-                my $code = $1;
-                if ($code =~ /\A(?:en|fr|es)\z/) { $forced_lang = $code }
-                else                             { $bad_lang = $code }
-                0;
-            }
-            # mb608-B2: explicit nick escape for names colliding with option
-            # tokens such as en/fr/es/public/help (or looking like <N>l).
-            elsif ($a =~ /^nick=(.+)$/)             { $forced_nick = lc($1); 0 }
-            elsif ($a =~ /\A(?:en|fr|es)\z/)      { $forced_lang = $a; 0 }
-            else                                  { 1 }
-        } @args;
-        if (defined $out_lines) {
-            $out_lines = 1  if $out_lines < 1;
-            $out_lines = 10 if $out_lines > 10;
-        }
+        # mb623-B1: UN SEUL passage de lecture, SANS ORDRE IMPOSE, et STRICT.
+        #
+        # Avant : les options etaient filtrees, la periode devait etre en
+        # premiere position, et TOUT mot inconnu survivait pour devenir le
+        # filtre pseudo. « ai summary todya » cherchait donc les messages d'un
+        # utilisateur nomme « todya » et repondait « aucun message trouve » —
+        # une faute de frappe ressemblait a un canal vide. Desormais chaque
+        # jeton est classe ; ce qui n'entre dans aucune case est une ERREUR
+        # DE SYNTAXE annoncee, avec la syntaxe rappelee.
+        # mb623-B1: lecture des arguments — une fonction PURE et testable
+        # (_summary_parse), plutot qu'une boucle noyee dans la commande. Le
+        # test peut donc l'interroger directement au lieu de deviner sa forme
+        # en relisant le source.
+        my $o = _summary_parse(@args);
+        my ($public_out, $out_lines, $want_help) =
+            ($o->{public}, $o->{lines}, $o->{help});
+        my ($forced_lang, $bad_lang, $forced_nick) =
+            ($o->{lang}, $o->{bad_lang}, $o->{nick_opt});
+        my ($period, $period_arg, $nick_arg, $count_arg) =
+            ($o->{period}, $o->{period_arg}, $o->{nick}, $o->{count});
+        my @unknown = @{ $o->{unknown} };
+        my @dup     = @{ $o->{duplicate} };
+        my @invalid = @{ $o->{invalid} };
+        my @typos   = @{ $o->{typos} };
+
         if ($want_help) {
-            Mediabot::Helpers::botNotice($self, $nick, 'Usage: ai summary [last|today|yesterday|week|<N>d] [<N>] [<N>l] [public] [nick]');
-            Mediabot::Helpers::botNotice($self, $nick, 'Periode: last = depuis le dernier summary sur ce canal ; today / yesterday / week ; <N>d = N derniers jours (1-30). Defaut: les <N> derniers messages.');
-            Mediabot::Helpers::botNotice($self, $nick, 'Options: <N> = nombre de messages analyses (5-50, defaut 10 ; 200 avec une periode) ; <N>l = nombre de lignes du resume (1-10, defaut 2-3 phrases) ; public = reponse sur le canal au lieu d\'une notice ; nick = ne resumer que ce nick.');
-            Mediabot::Helpers::botNotice($self, $nick, 'Langue: par defaut celle du canal (chansets LangFR / LangES, sinon main.LANG). Forcer avec en | fr | es, ou lang=fr. Pour un pseudo homonyme d une option (fr, en, es, public...), utiliser nick=<pseudo>.');
-            Mediabot::Helpers::botNotice($self, $nick, 'Exemples: ai summary 5l public | ai summary today teuk | ai summary today fr | ai summary today lang=en nick=fr | ai summary 7d 3l lang=en | ai summary last public');
+            Mediabot::Helpers::botNotice($self, $nick, $_) for _summary_usage();
             return;
         }
+
+        # mb623-B1: la faute de frappe est dite, pas devinee.
+        # mb623-B1: quasi-mot-cle : on suppose la faute de frappe et on le dit.
+        if (@typos) {
+            for my $t (@typos) {
+                Mediabot::Helpers::botNotice($self, $nick, sprintf(
+                    "Unknown option '%s' - did you mean \x02%s\x02? "
+                    . "(if it really is a nick: nick=%s)",
+                    $t->[0], $t->[1], $t->[0]));
+            }
+            Mediabot::Helpers::botNotice($self, $nick, $_summary_usage_lines[0]);
+            return;
+        }
+        if (@invalid) {
+            for my $e (@invalid) {
+                Mediabot::Helpers::botNotice($self, $nick,
+                    sprintf("Invalid option '%s': %s.", $e->[0], $e->[1]));
+            }
+            Mediabot::Helpers::botNotice($self, $nick, $_summary_usage_lines[0]);
+            return;
+        }
+        if (@unknown || @dup) {
+            my @bad = (@unknown, @dup);
+            Mediabot::Helpers::botNotice($self, $nick, sprintf(
+                '%s: %s', (@bad > 1 ? 'Unknown or duplicate options' : 'Unknown option'),
+                join(', ', map { "'$_'" } @bad)));
+            Mediabot::Helpers::botNotice($self, $nick, $_summary_usage_lines[0]);
+            Mediabot::Helpers::botNotice($self, $nick,
+                "Try \x02ai summary help\x02 for the full syntax.");
+            return;
+        }
+
         # Sortie : canal courant si public demandé (et dispo), sinon notice.
         my $can_public = $public_out && Mediabot::Helpers::isIrcChannelTarget($channel); # mb416-B2
         my $send_out = $can_public
@@ -1134,18 +1323,19 @@ sub claude_ctx {
                 "Unsupported language '$bad_lang' (en, fr, es) - using '$lang'.");
         }
 
-        # mb86-IMP3 / mb87-IMP2 / mb91-IMP2: modes de filtre temporel
+        # mb86-IMP3 / mb87-IMP2 / mb91-IMP2 : filtres temporels.
+        # mb623-B1: la periode est reconnue n'importe ou dans la ligne (voir le
+        # passage de lecture ci-dessus), plus seulement en premiere position.
         my $date_filter = '';
         my $date_label  = '';
         # mb608-B1: le libelle de periode existe en DEUX versions — celle du
-        # PROMPT reste en anglais (metadonnee pour le modele, comportement
-        # inchange) et celle des messages de service suit $lang.
+        # PROMPT reste en anglais (metadonnee pour le modele) et celle des
+        # messages de service suit $lang.
         my ($date_key, $date_arg) = ('', undef);
-        if (@args && lc($args[0]) eq 'last') {
-            # mb91-IMP2: résumé depuis le dernier appel !ai summary sur ce canal
-            shift @args;
-            my $last_key = "summary_last:$channel";
-            my $last_ts  = $self->{_claude_summary_ts}{$last_key} // 0;
+
+        if (defined $period && $period eq 'last') {
+            # mb91-IMP2: depuis le dernier !ai summary sur ce canal.
+            my $last_ts = $self->{_claude_summary_ts}{"summary_last:$channel"} // 0;
             if ($last_ts > 0) {
                 $date_filter = "AND cl.ts > FROM_UNIXTIME($last_ts)";
                 my $mins = int((time() - $last_ts) / 60);
@@ -1154,44 +1344,55 @@ sub claude_ctx {
                     ? sprintf(' (last %dh%02dm)', int($mins/60), $mins%60)
                     : " (last ${mins}m)";
             } else {
-                $date_filter = "AND DATE(cl.ts) = CURDATE()";
+                $date_filter = "AND cl.ts >= CURDATE() AND cl.ts < CURDATE() + INTERVAL 1 DAY";
                 $date_key    = 'today_nolast';
-                $date_label  = ' (today — no previous summary found)';
+                $date_label  = ' (today - no previous summary found)';
             }
-        } elsif (@args && lc($args[0]) eq 'today') {
-            shift @args;
-            $date_filter = "AND DATE(cl.ts) = CURDATE()";
+        }
+        elsif (defined $period && $period eq 'today') {
+            $date_filter = "AND cl.ts >= CURDATE() AND cl.ts < CURDATE() + INTERVAL 1 DAY";
             $date_key    = 'today';
             $date_label  = ' (today)';
-        } elsif (@args && lc($args[0]) eq 'yesterday') {
-            shift @args;
-            $date_filter = "AND DATE(cl.ts) = CURDATE() - INTERVAL 1 DAY";
+        }
+        elsif (defined $period && $period eq 'yesterday') {
+            $date_filter = "AND cl.ts >= CURDATE() - INTERVAL 1 DAY AND cl.ts < CURDATE()";
             $date_key    = 'yesterday';
             $date_label  = ' (yesterday)';
-        } elsif (@args && lc($args[0]) eq 'week') {
-            # mb87-IMP2: résumé de la semaine courante (lundi → aujourd'hui)
-            shift @args;
+        }
+        elsif (defined $period && $period eq 'week') {
             $date_filter = "AND cl.ts >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)";
             $date_key    = 'week';
             $date_label  = ' (this week)';
-        } elsif (@args && $args[0] =~ /^(\d+)d$/i) {
-            # mb87-IMP2: !ai summary 7d — N derniers jours
-            my $days = int($1); shift @args;
-            $days = 1 if $days < 1; $days = 30 if $days > 30;
+        }
+        elsif (defined $period && $period eq 'days') {
+            my $days = $period_arg; $days = 1 if $days < 1; $days = 30 if $days > 30;
             $date_filter = "AND cl.ts >= NOW() - INTERVAL $days DAY";
             ($date_key, $date_arg) = ('days', $days);
             $date_label  = " (last ${days}d)";
         }
+        elsif (defined $period && $period eq 'hours') {
+            # mb623-B1: fenetre en HEURES — « ce qui s'est dit depuis mon dejeuner »
+            # etait impossible a demander : today etait trop large, un compte de
+            # messages trop aveugle.
+            my $hours = $period_arg; $hours = 1 if $hours < 1; $hours = 72 if $hours > 72;
+            $date_filter = "AND cl.ts >= NOW() - INTERVAL $hours HOUR";
+            ($date_key, $date_arg) = ('hours', $hours);
+            $date_label  = " (last ${hours}h)";
+        }
 
-        # AA2: optional count (ignoré quand date_filter actif, mais toujours parsé)
-        my $n_msgs = (@args && $args[0] =~ /^(\d+)$/) ? int(shift @args) : 10;
+        my $filter_nick = defined($forced_nick) ? $forced_nick : $nick_arg;
+
+        # Sans periode : le nombre de messages demande (comportement historique).
+        my $n_msgs = defined($count_arg) ? $count_arg : 10;
         $n_msgs = 5 if $n_msgs < 5; $n_msgs = 50 if $n_msgs > 50;
-        # With date filter: lift the limit to 200 (couvre une journée/semaine chargée)
-        $n_msgs = 200 if $date_filter;
 
-        my $filter_nick = defined($forced_nick)
-            ? $forced_nick
-            : ((@args && $args[0] !~ /^\d/) ? lc(shift @args) : undef);
+        # mb623-B1: AVEC une periode, on ne prend plus « les 200 derniers » en
+        # silence. On lit la periode ENTIERE (jusqu'a un plafond de securite),
+        # puis, si c'est trop pour un prompt, on ECHANTILLONNE DE MANIERE
+        # REPARTIE plutot que de garder la fin : resumer « aujourd'hui » ne doit
+        # pas vouloir dire resumer la derniere demi-heure. Et le compte reel est
+        # annonce, donc l'utilisateur sait toujours ce qui a ete lu.
+        $n_msgs = $CLAUDE_SUMMARY_FETCH_CAP if $date_filter;
         my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
         unless ($dbh && defined $channel) {
             Mediabot::Helpers::botNotice($self, $nick, 'Not available in private or DB not connected.'); return;
@@ -1230,6 +1431,16 @@ sub claude_ctx {
                 _summary_period_label($lang, $date_key, $date_arg)));
             return;
         }
+        # mb623-B1: echantillonnage reparti si la periode deborde le budget
+        # d'analyse, et VERITE sur ce qui a ete lu.
+        my $n_read    = scalar @rows;
+        my $truncated = 0;
+        if ($date_filter && $n_read > $CLAUDE_SUMMARY_ANALYSE) {
+            @rows = @{ _summary_spread(\@rows, $CLAUDE_SUMMARY_ANALYSE) };
+            $truncated = 1;
+        }
+        my $capped = ($date_filter && $n_read >= $CLAUDE_SUMMARY_FETCH_CAP) ? 1 : 0;
+
         my $transcript = join("\n", @rows);
         my $who_str    = $filter_nick ? " by $filter_nick" : "";
         my $n_found    = scalar @rows;
@@ -1245,6 +1456,13 @@ sub claude_ctx {
         $send_out->(sprintf(_summary_lang_strings($lang)->{working},
             $n_found, $who_out,
             _summary_period_label($lang, $date_key, $date_arg), $channel));
+        # mb623-B1: dire ce qui a ete lu ET ce qui a ete analyse. Un resume qui
+        # ne couvre pas tout doit l'annoncer : c'est exactement ce que faisait
+        # l'ancien plafond de 200 messages, en silence.
+        if ($truncated || $capped) {
+            $send_out->(sprintf(_summary_lang_strings($lang)->{sampled},
+                $n_read, ($capped ? '+' : ''), $n_found));
+        }
         # mb415-R1: longueur du résumé paramétrable (<N>l) ; défaut inchangé.
         my $len_str = defined($out_lines)
             ? ($out_lines == 1 ? 'in exactly 1 short line' : "in exactly $out_lines short lines")

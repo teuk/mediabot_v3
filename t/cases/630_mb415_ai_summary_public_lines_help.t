@@ -46,8 +46,13 @@ return sub {
         'nombre nu = nombre de messages (rétro-compatible)');
     ($p,$ol,$h,$rest) = $parse->('7d','3l');
     $assert->ok($ol==3 && "@$rest" eq '7d', 'Nd (jours) et Nl (lignes) coexistent');
-    ($p,$ol,$h,$rest) = $parse->('50l');
-    $assert->is($ol, 10, 'Nl clampé à 10');
+    # mb625: la syntaxe est desormais stricte ; la borne 1-10 annoncee par
+    # l'aide est un contrat, pas un clamp silencieux. Interroger le vrai parseur
+    # plutot que prolonger ici une copie historique de cette seule regle.
+    require Mediabot::External::Claude;
+    my $real_parse = Mediabot::External::Claude->can('_summary_parse');
+    my $bad_lines = $real_parse->('50l');
+    $assert->is(scalar @{ $bad_lines->{invalid} }, 1, 'Nl hors plage refuse explicitement');
     ($p,$ol,$h,$rest) = $parse->('pub');
     $assert->is($p, 1, 'alias pub accepté');
     ($p,$ol,$h,$rest) = $parse->('help');
@@ -69,9 +74,11 @@ return sub {
         'prompt: nombre de lignes injecté');
     $assert->like($code, qr/'in 2-3 sentences'/,
         'défaut inchangé (2-3 phrases)');
-    $assert->like($code, qr/Usage: ai summary \[last\|today\|yesterday\|week\|<N>d\] \[<N>\] \[<N>l\] \[public\] \[nick\]/,
+    # mb623: la syntaxe vit dans @_summary_usage_lines (source unique lue par
+    # l'aide ET par les messages d'erreur).
+    $assert->like($code, qr/Syntaxe: ai summary \[periode\] \[pseudo\] \[options\]/,
         'aide inline: ligne usage');
-    $assert->like($code, qr/Exemples: ai summary 5l public/,
+    $assert->like($code, qr/Exemples: ai summary today \| ai summary today teuk/,
         'aide inline: exemples');
 
     # L'aide interne (help ai) mentionne la nouvelle syntaxe.
