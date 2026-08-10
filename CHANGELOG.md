@@ -10,6 +10,55 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb630 — derniere garde : le test de dispatch cesse de mentir
+- Le vieux test standalone 383 avait un piege Perl subtil : un `m//` rate
+  passe en premier argument de `ok()` etait evalue en contexte de liste. La
+  liste vide faisait glisser le libelle en premier argument, donc un contrat
+  de dispatch casse s'affichait `ok - unnamed test` au lieu d'echouer.
+- Toutes ses assertions regexp forcent desormais le contexte scalaire. Les
+  routes `top`, `leaderboard/lb` et `chronos` acceptent leur enveloppe async
+  moderne tout en exigeant toujours le bon handler final.
+- `_irc_bytes` declare directement sa dependance `Encode` au lieu de compter
+  sur le chargement transitif par Helpers ; le commentaire de mise en forme
+  est corrige de mb628 vers mb629. Aucun comportement IRC n'est change.
+
+### mb629 — le palmares passe Administrateur, et cesse d'etre un mur
+- ACCES : leaderboard et son alias lb exigent desormais le niveau
+  Administrator. La porte est posee AVANT le fork — un refus ne doit pas
+  couter un worker — et le refus part du parent, comme pour toute commande
+  de niveau. Les deux entrees d'aide l'annoncent.
+- MISE EN PAGE : le defaut devient COMPACT. Les categories sont groupees par
+  ligne (deux lignes au lieu de cinq d'affilee) ; « full » rend l'ancienne
+  forme, une ligne par categorie, et « compact » revient au defaut. Le
+  remplissage compte les OCTETS et non les caracteres : un emoji pese 4
+  octets pour une seule case a l'ecran, et une ligne coupee par le serveur
+  casserait une sequence de couleur en deux.
+- COULEUR : une teinte par categorie (msgs, karma, trivia, duels, achievs),
+  choisies lisibles sur fond clair COMME sur fond sombre — ni blanc ni noir —
+  toutes distinctes, chaque sequence refermee juste apres son libelle. Le
+  premier de chaque podium garde sa medaille et le gras ; les suivants
+  restent sobres, sinon la ligne devient illisible a force de decorations.
+- dashboard : couleurs ajoutees, contenu STRICTEMENT inchange — memes mots,
+  meme ordre, memes valeurs (demande explicite : « pas de regression, c'est
+  pas mal tel que c'est »). Le test verrouille chacune de ses six lignes.
+- Bug attrape par le test : _irc_bytes se fiait au drapeau utf8, or un
+  caractere < 256 (le point median, un « e accent ») peut etre stocke sans
+  drapeau et pese pourtant 2 octets sur le fil — la mesure se declenche
+  desormais des qu'il y a du non-ASCII.
+- Bug attrape par le rendu reel : le separateur ecrit ' \x{B7} ' entre
+  APOSTROPHES s'imprimait tel quel sur le canal ; c'est le caractere litteral
+  qui est utilise, ce fichier declarant « use utf8 ».
+- Pin 769 evolue : il exigeait que run_ctx_async soit le PREMIER mot du bloc
+  de dispatch. Le contrat reel est « cette commande s'execute dans un
+  worker » — il tolere maintenant une porte de niveau devant, et exige
+  toujours le worker.
+- Test 812 (35 assertions) : porte sur les deux alias et avant le fork,
+  compact par defaut avec full/compact, mesure en octets (ASCII 1, emoji 4,
+  point median 2, undef sans mort), simulation du compactage sur cinq
+  categories (moins de cinq lignes, jamais une seule interminable, aucune
+  couleur laissee ouverte en fin de ligne), unicite et lisibilite des
+  teintes, separateur litteral, et les six lignes du dashboard conservees.
+
 ### mb628 — derniere garde : les tests disent la meme chose que le runtime
 - Le test historique 709 attendait encore l'ancienne forme fonctionnelle dans
   le top-talker `onthisday`, alors que mb627 vient de la remplacer par une

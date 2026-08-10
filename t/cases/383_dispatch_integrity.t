@@ -107,16 +107,23 @@ if (@dups) {
     say "# duplicate keys: " . join(', ', sort @dups);
 }
 
+# mb630-B1: les regexp passees directement comme premier argument a ok()
+# etaient evaluees en contexte de LISTE. Un match rate rend alors une liste
+# vide : le libelle devenait le premier argument (vrai), et le test affichait
+# `ok - unnamed test`. Forcer scalar() transforme enfin un mismatch en echec.
+# Les commandes async sont validees sur leur handler reel, pas sur la forme
+# historique `sub { mbX_ctx(...) }`.
+
 # ---------------------------------------------------------------------------
 # 3. Historical !top must remain mapped to mbTop_ctx.
 # ---------------------------------------------------------------------------
 ok(
-    $dispatch_body =~ /^\s*top\s*=>\s*sub\s*\{\s*mbTop_ctx\(\$ctx\)\s*\}/m,
+    scalar($dispatch_body =~ /^\s*top\s*=>\s*sub\s*\{[^}]{0,240}?mbTop_ctx\(\$ctx\)/ms),
     'historical !top maps to mbTop_ctx'
 );
 
 ok(
-    $dispatch_body !~ /^\s*top\s*=>\s*sub\s*\{\s*mbLeaderboard_ctx\(\$ctx\)\s*\}/m,
+    scalar($dispatch_body !~ /^\s*top\s*=>\s*sub\s*\{[^}]{0,240}?mbLeaderboard_ctx\(\$ctx\)/ms),
     '!top is not stolen by leaderboard'
 );
 
@@ -124,52 +131,52 @@ ok(
 # 4. Leaderboard / Chronos aliases.
 # ---------------------------------------------------------------------------
 ok(
-    $dispatch_body =~ /^\s*leaderboard\s*=>\s*sub\s*\{\s*mbLeaderboard_ctx\(\$ctx\)\s*\}/m,
+    scalar($dispatch_body =~ /^\s*leaderboard\s*=>\s*sub\s*\{[^}]{0,320}?mbLeaderboard_ctx\(\$ctx\)/ms),
     '!leaderboard maps to mbLeaderboard_ctx'
 );
 
 ok(
-    $dispatch_body =~ /^\s*lb\s*=>\s*sub\s*\{\s*mbLeaderboard_ctx\(\$ctx\)\s*\}/m,
+    scalar($dispatch_body =~ /^\s*lb\s*=>\s*sub\s*\{[^}]{0,320}?mbLeaderboard_ctx\(\$ctx\)/ms),
     '!lb maps to mbLeaderboard_ctx'
 );
 
 ok(
-    $dispatch_body =~ /^\s*chronos\s*=>\s*sub\s*\{\s*mbChronos_ctx\(\$ctx\)\s*\}/m,
+    scalar($dispatch_body =~ /^\s*chronos\s*=>\s*sub\s*\{[^}]{0,240}?mbChronos_ctx\(\$ctx\)/ms),
     '!chronos maps to mbChronos_ctx'
 );
 
 ok(
-    $dispatch_body =~ /^\s*chrono\s*=>\s*sub\s*\{\s*mbChronos_ctx\(\$ctx\)\s*\}/m,
+    scalar($dispatch_body =~ /^\s*chrono\s*=>\s*sub\s*\{[^}]{0,240}?mbChronos_ctx\(\$ctx\)/ms),
     '!chrono maps to mbChronos_ctx'
 );
 
 ok(
-    $dispatch_body =~ /^\s*timeline\s*=>\s*sub\s*\{\s*mbChronos_ctx\(\$ctx\)\s*\}/m,
+    scalar($dispatch_body =~ /^\s*timeline\s*=>\s*sub\s*\{[^}]{0,240}?mbChronos_ctx\(\$ctx\)/ms),
     '!timeline maps to mbChronos_ctx'
 );
 
 ok(
-    $dispatch_body =~ /^\s*features\s*=>\s*sub\s*\{\s*mbFeatures_ctx\(\$ctx\)\s*\}/m,
+    scalar($dispatch_body =~ /^\s*features\s*=>\s*sub\s*\{\s*mbFeatures_ctx\(\$ctx\)\s*\}/m),
     '!features maps to mbFeatures_ctx'
 );
 
 ok(
-    $dispatch_body =~ /^\s*capabilities\s*=>\s*sub\s*\{\s*mbFeatures_ctx\(\$ctx\)\s*\}/m,
+    scalar($dispatch_body =~ /^\s*capabilities\s*=>\s*sub\s*\{\s*mbFeatures_ctx\(\$ctx\)\s*\}/m),
     '!capabilities maps to mbFeatures_ctx'
 );
 
 ok(
-    $dispatch_body =~ /^\s*caps\s*=>\s*sub\s*\{\s*mbFeatures_ctx\(\$ctx\)\s*\}/m,
+    scalar($dispatch_body =~ /^\s*caps\s*=>\s*sub\s*\{\s*mbFeatures_ctx\(\$ctx\)\s*\}/m),
     '!caps maps to mbFeatures_ctx'
 );
 
 ok(
-    $dispatch_body =~ /^\s*observatory\s*=>\s*sub\s*\{\s*mbObservatory_ctx\(\$ctx\)\s*\}/m,
+    scalar($dispatch_body =~ /^\s*observatory\s*=>\s*sub\s*\{\s*mbObservatory_ctx\(\$ctx\)\s*\}/m),
     '!observatory maps to mbObservatory_ctx'
 );
 
 ok(
-    $dispatch_body =~ /^\s*obs\s*=>\s*sub\s*\{\s*mbObservatory_ctx\(\$ctx\)\s*\}/m,
+    scalar($dispatch_body =~ /^\s*obs\s*=>\s*sub\s*\{\s*mbObservatory_ctx\(\$ctx\)\s*\}/m),
     '!obs maps to mbObservatory_ctx'
 );
 

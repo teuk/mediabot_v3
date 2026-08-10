@@ -117,8 +117,13 @@ return sub {
     for my $cmd (qw(stats top streak wordcount when profil profile dashboard
                     compat compare heatmap milestone milestones leaderboard
                     lb chronos)) {
+        # mb629: le contrat est « cette commande s'execute dans un worker »,
+        # pas « run_ctx_async est le premier mot du bloc ». leaderboard/lb
+        # posent desormais une porte de niveau AVANT le fork (un refus ne
+        # doit pas couter un processus) ; on tolere donc ce qui precede sur
+        # la meme ligne ou la suivante, mais on exige toujours le worker.
         $assert->like($med,
-            qr/^\s*\Q$cmd\E\s*=>\s*sub\s*\{\s*Mediabot::CommandAsync::run_ctx_async\(/m,
+            qr/^\s*\Q$cmd\E\s*=>\s*sub\s*\{[^}]{0,120}?Mediabot::CommandAsync::run_ctx_async\(/ms,
             "mb583-769: $cmd passe par le worker async");
     }
     for my $cmd (qw(last seen)) {

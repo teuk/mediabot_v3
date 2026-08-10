@@ -2196,8 +2196,14 @@ sub mbCommandPublic {
         # mb118: leaderboard + chronos
         # Keep the historical !top command mapped to mbTop_ctx above.
         # Leaderboard aliases are !leaderboard and !lb.
-        leaderboard  => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'leaderboard', sub { mbLeaderboard_ctx($ctx) }) },
-        lb           => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'leaderboard', sub { mbLeaderboard_ctx($ctx) }) },      # alias court
+        # mb629-B1: le palmares est reserve aux Administrateurs. La porte est
+        # posee AVANT le fork : un refus ne doit pas couter un worker, et le
+        # message de refus part du parent comme pour toute autre commande de
+        # niveau.
+        leaderboard  => sub { $ctx->require_level('Administrator')
+                              && Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'leaderboard', sub { mbLeaderboard_ctx($ctx) }) },
+        lb           => sub { $ctx->require_level('Administrator')
+                              && Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'leaderboard', sub { mbLeaderboard_ctx($ctx) }) },      # alias court
         chronos      => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },
         chrono       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },          # alias court
         timeline     => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },          # alias EN
@@ -2764,8 +2770,8 @@ profile|profile [nick]|public|Alias for profil.
 radar|radar [Nd]|public|Show current or historical channel activity radar.
 dashboard|dashboard|public|Show a compact dashboard for the current channel.
 chanstats|chanstats|public|Alias for dashboard.
-leaderboard|leaderboard [msgs|karma|trivia|duels|achievs] [24h|7d|30d]|public|Show channel rankings, optionally limited to recent msgs/karma.
-lb|lb [msgs|karma|trivia|duels|achievs] [24h|7d|30d]|public|Alias for leaderboard.
+leaderboard|leaderboard [msgs|karma|trivia|duels|achievs] [24h|7d|30d] [full]|public|Show channel rankings, optionally limited to recent msgs/karma. Administrator+.
+lb|lb [msgs|karma|trivia|duels|achievs] [24h|7d|30d] [full]|public|Alias for leaderboard. Administrator+.
 chronos|chronos [short|full]|public|Show a compact or full narrative timeline of the current channel.
 chrono|chrono [short|full]|public|Alias for chronos.
 timeline|timeline [short|full]|public|Alias for chronos.

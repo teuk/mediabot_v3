@@ -16,6 +16,7 @@ use POSIX qw(strftime);
 use Time::Local qw(timegm timelocal);
 use Time::Piece;
 use List::Util qw(min);
+use Encode ();   # mb630-B1: _irc_bytes appelle Encode::encode directement.
 use Exporter 'import';
 
 # mb348-B1: les statistiques basees sur CHANNEL_LOG filtrent les VRAIS messages
@@ -9258,6 +9259,22 @@ sub mbProfil_ctx {
 }
 
 # Helper : formate les grands nombres (1234 → 1.2k, 12345 → 12k)
+# mb629-B1: poids RÉEL d'une ligne sur le fil IRC. Ce fichier declare
+# « use utf8 » : ses chaines sont des CARACTERES, or la limite IRC est en
+# OCTETS. Un emoji pese 4 octets pour une seule case de largeur — compter
+# avec length() surestimerait la place disponible d'un cote et la
+# sous-estimerait de l'autre, et une ligne tronquee par le serveur couperait
+# une sequence de couleur en deux.
+sub _irc_bytes {
+    my ($text) = @_;
+    return 0 unless defined $text;
+    # Le drapeau utf8 ne suffit PAS : un caractere < 256 (« point median »,
+    # « e accent ») peut etre stocke sans drapeau et pese pourtant 2 octets
+    # une fois encode. On mesure donc des qu'il y a du non-ASCII.
+    return length($text) unless $text =~ /[^\x00-\x7F]/;
+    return length(Encode::encode('UTF-8', $text));
+}
+
 sub _fmt_n {
     my ($n) = @_;
     return '?' unless defined $n;
@@ -9693,23 +9710,25 @@ sub mbDashboard_ctx {
     # 8. Affichage
     my $peak_label = sprintf('%02dh', $peak_h);
     botPrivmsg($self, $channel,
-        "\x{2550}\x{2550}\x{2550} \x02Dashboard\x02 $channel \x{2550}\x{2550}\x{2550}  "
-        . "since $since_s \x{B7} $days days \x{B7} avg ${msgs_per_day}/d");
+        # mb629-B1: couleur seulement — mots, ordre et valeurs inchanges
+        # (teuk : « pas de regression, c'est pas mal tel que c'est »).
+        "\x0312\x{2550}\x{2550}\x{2550}\x0f \x02Dashboard\x02 $channel \x0312\x{2550}\x{2550}\x{2550}\x0f  "
+        . "\x0314since $since_s \x{B7} $days days \x{B7} avg ${msgs_per_day}/d\x0f");
 
     botPrivmsg($self, $channel,
-        sprintf("  \x{1F4AC} %s msgs from %s nicks  \x{B7}  \x{1F50A} %d active in last 60min",
+        sprintf("  \x0311\x{1F4AC}\x0f \x02%s\x02 msgs from %s nicks  \x{B7}  \x0309\x{1F50A}\x0f %d active in last 60min",
             _fmt_n($total), _fmt_n($g{nicks} // 0), $active_now));
 
     botPrivmsg($self, $channel,
-        sprintf("  \x{1F451} top: %s", @top5 ? join("  ", @top5) : "n/a"));
+        sprintf("  \x0308\x{1F451} top:\x0f %s", @top5 ? join("  ", @top5) : "n/a"));
 
     botPrivmsg($self, $channel,
-        sprintf("  \x{1F4C5} 7d: %s  \x{B7}  \x{1F567} 24h: %s  peak %s (%s)",
+        sprintf("  \x0310\x{1F4C5} 7d:\x0f %s  \x{B7}  \x0310\x{1F567} 24h:\x0f %s  peak \x02%s\x02 (%s)",
             $spark_d, $spark_h, $peak_label, _fmt_n($peak_c)));
 
     if (%givers || %receivers) {
         botPrivmsg($self, $channel,
-            sprintf("  \x{2728} karma 7d: +%d/-%d  \x{B7}  giver: %s  \x{B7}  receiver: %s",
+            sprintf("  \x0313\x{2728} karma 7d:\x0f \x0309+%d\x0f/\x0304-%d\x0f  \x{B7}  giver: %s  \x{B7}  receiver: %s",
                 $kpos, $kneg,
                 $top_giver    // 'n/a',
                 $top_receiver // 'n/a'));
@@ -9718,7 +9737,7 @@ sub mbDashboard_ctx {
     if ($self->{achievements}) {
         my $defs_count = scalar keys %{ $self->{achievements}->list_definitions };
         botPrivmsg($self, $channel,
-            sprintf("  \x{1F3C6} achievements unlocked on $channel: %d  \x{B7}  catalogue: %d available",
+            sprintf("  \x0309\x{1F3C6}\x0f achievements unlocked on $channel: \x02%d\x02  \x{B7}  catalogue: %d available",
                 $ach_unlocked, $defs_count));
     }
 
@@ -11182,6 +11201,7 @@ sub mbLeaderboard_ctx {
 
     my $only = '';
     my $period_arg = '';
+    my $full_out = 0;
 
     for my $arg (@args) {
         next unless defined $arg && $arg ne '';
@@ -11197,7 +11217,14 @@ sub mbLeaderboard_ctx {
             next;
         }
 
-        botNotice($self, $nick, 'Syntax: !leaderboard [msgs|karma|trivia|duels|achievs] [24h|7d|30d]');
+        # mb629-B1: 'full' rend l'ancienne mise en page, une ligne par
+        # categorie. Le defaut est desormais compact — cinq lignes d'affilee
+        # sur un canal, c'est un mur, et tout le monde n'aime pas ca.
+        if ($a eq 'full' || $a eq 'long') { $full_out = 1; next; }
+        if ($a eq 'compact' || $a eq 'short') { $full_out = 0; next; }
+
+        botNotice($self, $nick,
+            'Syntax: !leaderboard [msgs|karma|trivia|duels|achievs] [24h|7d|30d] [full]');
         return 1;
     }
 
@@ -11381,33 +11408,88 @@ sub mbLeaderboard_ctx {
         }
     }
 
-    # --- Format des médailles ----------------------------------------------
+    # --- Mise en forme (mb629) ---------------------------------------------
+    # Couleur par categorie : elle rend le bloc lisible d'un coup d'oeil sans
+    # rien ajouter en hauteur. Codes mIRC choisis pour rester lisibles sur
+    # fond clair COMME sur fond sombre (ni blanc, ni noir, ni jaune pale).
+    my %cat_style = (
+        msgs    => [ "\x0311", "\x{1F4AC}", 'msgs'    ],
+        karma   => [ "\x0308", "\x{1F31F}", 'karma'   ],
+        trivia  => [ "\x0313", "\x{1F9E0}", 'trivia'  ],
+        duels   => [ "\x0304", "\x{2694}\x{FE0F}", 'duels' ],
+        achievs => [ "\x0309", "\x{1F3C6}", 'achievs' ],
+    );
     my @medals = ("\x{1F947}", "\x{1F948}", "\x{1F949}");   # 🥇 🥈 🥉
-    my $fmt_top = sub {
-        my ($top, $label) = @_;
-        return undef unless @$top;
+
+    # Un segment = une categorie complete, tenant sur une portion de ligne.
+    # Le premier est medaille et gras ; les suivants restent sobres, sinon
+    # la ligne devient illisible a force de decorations.
+    my $segment = sub {
+        my ($top, $key) = @_;
+        return undef unless ref $top eq 'ARRAY' && @$top;
+        my ($colour, $emoji, $label) = @{ $cat_style{$key} };
         my @parts;
-        for my $i (0..$#{$top}) {
-            my ($n, $v) = @{$top->[$i]};
-            push @parts, "$medals[$i] $n ($v)";
+        for my $i (0 .. $#{$top}) {
+            my ($n, $v) = @{ $top->[$i] };
+            my $val = _fmt_n($v);
+            push @parts, $i == 0
+                ? "$medals[0] \x02$n\x02 $val"
+                : "$n $val";
         }
-        return "$label  " . join('  ', @parts);
+        # Le point median en LITTERAL : ce fichier a « use utf8 », et une
+        # sequence \x{...} entre apostrophes serait imprimee telle quelle.
+        return "$colour$emoji $label\x0f " . join(' · ', @parts);
     };
 
-    botPrivmsg($self, $channel,
-        "\x{1F3C5} \x02Leaderboard\x02 $channel"
-        . ($only ? " [$only]" : '')
-        . ($period_suffix ? " [$period_suffix]" : ''));
+    my @segments;
+    push @segments, [ 'msgs',    $segment->(\@msgs_top,   'msgs')    ];
+    push @segments, [ 'karma',   $segment->(\@karma_top,  'karma')   ];
+    push @segments, [ 'trivia',  $segment->(\@trivia_top, 'trivia')  ];
+    push @segments, [ 'duels',   $segment->(\@duel_top,   'duels')   ];
+    push @segments, [ 'achievs', $segment->(\@ach_top,    'achievs') ];
+    @segments = grep { defined $_->[1] } @segments;
 
-    my $any = 0;
-    if (my $l = $fmt_top->(\@msgs_top,   "\x{1F4AC}  msgs$period_suffix   :")) { botPrivmsg($self, $channel, "  $l"); $any++; }
-    if (my $l = $fmt_top->(\@karma_top,  "\x{1F31F}  karma$period_suffix  :")) { botPrivmsg($self, $channel, "  $l"); $any++; }
-    if (my $l = $fmt_top->(\@trivia_top, "\x{1F9E0}  trivia :"))   { botPrivmsg($self, $channel, "  $l"); $any++; }
-    if (my $l = $fmt_top->(\@duel_top,   "\x{2694}\x{FE0F}  duels  :")) { botPrivmsg($self, $channel, "  $l"); $any++; }
-    if (my $l = $fmt_top->(\@ach_top,    "\x{1F3C6}  achievs:"))   { botPrivmsg($self, $channel, "  $l"); $any++; }
+    my $header = "\x{1F3C5} \x02Leaderboard\x02 $channel"
+        . ($only ? " \x0314[$only]\x0f" : '')
+        . ($period_suffix ? " \x0314[$period_suffix]\x0f" : '');
+    botPrivmsg($self, $channel, $header);
+
+    my $any = scalar @segments;
+
+    if ($full_out) {
+        # Mise en page historique : une categorie par ligne.
+        botPrivmsg($self, $channel, '  ' . $_->[1]) for @segments;
+    }
+    else {
+        # mb629-B1: compactage — on remplit chaque ligne jusqu'a une limite
+        # SURE pour IRC (512 octets moins l'enveloppe), en comptant les
+        # OCTETS et non les caracteres : emojis et couleurs pesent plus que
+        # leur largeur a l'ecran, et une ligne coupee par le serveur casse
+        # une sequence de couleur au milieu.
+        # Un client IRC enroule une ligne longue : viser ~190 octets donne
+        # deux a trois categories par ligne, soit deux lignes lisibles au
+        # lieu d'un pave unique ou de cinq lignes d'affilee.
+        my $budget = 190;
+        my @lines;
+        my $cur = '';
+        for my $seg (@segments) {
+            my $piece = $seg->[1];
+            my $sep   = length($cur) ? '   ' : '  ';
+            if (_irc_bytes($cur) && _irc_bytes($cur . $sep . $piece) > $budget) {
+                push @lines, $cur;
+                $cur = '  ' . $piece;
+            }
+            else {
+                $cur .= $sep . $piece;
+            }
+        }
+        push @lines, $cur if length $cur;
+        botPrivmsg($self, $channel, $_) for @lines;
+    }
 
     if ($period_label && !$only) {
-        botPrivmsg($self, $channel, "  \x{2139} Period mode shows timestamped categories only: msgs and karma.");
+        botPrivmsg($self, $channel,
+            "  \x0314\x{2139} Period mode covers timestamped categories only: msgs and karma.\x0f");
     }
 
     botPrivmsg($self, $channel, "  (no data yet)") unless $any;
