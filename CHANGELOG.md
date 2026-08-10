@@ -10,6 +10,72 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb628 — derniere garde : les tests disent la meme chose que le runtime
+- Le test historique 709 attendait encore l'ancienne forme fonctionnelle dans
+  le top-talker `onthisday`, alors que mb627 vient de la remplacer par une
+  plage indexable. Il est aligne sur le nouveau contrat et verrouille les binds.
+- `ai summary last` conserve sa borne historique stricte `ts > dernier_resume`.
+- Si le comptage exact de mb626 echoue, la commande echoue fermee avec
+  `DB error` au lieu de retomber sur une lecture tronquee.
+- Le test 809 couvre les deux chemins runtime ; le test 811 verrouille la
+  coherence runtime/tests et l'unicite des numeros recents.
+
+### mb627 — les predicats de date redeviennent utilisables par l'index
+- CLASSE DE DEFAUT : une fonction appliquee a la COLONNE dans un WHERE
+  (DATE(ts), YEAR(ts), MONTH(ts)) interdit a MariaDB d'utiliser l'index
+  (id_channel, ts) — la requete balaie. Sur une table a plus de 10 millions
+  de lignes, c'est un balayage complet a chaque appel de la commande. mb577
+  avait converti six sites et mb625 deux autres ; TROIS subsistaient, dont un
+  oubli evident : la branche « mois courant » se trouve juste sous
+  today/yesterday, deja convertis.
+- Fenetre 365 jours : DATE(cl.ts) >= D devient cl.ts >= D. Equivalence exacte
+  — DATE() tronque vers le bas, donc les deux formes selectionnent la meme
+  journee de depart ; seule la fonction autour de la colonne disparait.
+- Mois courant : YEAR+MONTH deviennent la plage [1er du mois, 1er du mois
+  suivant), alignant la branche sur ses deux voisines.
+- onthisday : dans les DEUX requetes par annee, YEAR(ts)=? AND MONTH(ts)=?
+  AND DAY(ts)=? designe UNE journee precise, donc la plage
+  [jour, lendemain). Un 29 fevrier inexistant rend NULL des deux cotes :
+  aucune ligne, exactement comme avant.
+- La requete qui cherche le meme jour SUR TOUTES les annees ne peut
+  mathematiquement pas devenir une plage (et son GROUP BY YEAR(ts) l'impose
+  de toute facon) : elle garde sa forme et porte desormais l'explication sur
+  place, pour qu'un futur passage ne la « corrige » pas a tort.
+- Test 810 (22 assertions) : recensement de la classe entiere (zero predicat
+  non indexable hors du cas impossible, dont les definitions ne servent plus
+  qu'a lui), forme de chaque conversion, conservation des branches voisines,
+  perimetre inchange (longueur des citations, type d'evenement, podium), et
+  surtout ARITE DES BINDS — l'expression de journee apparait DEUX fois dans
+  la plage, donc les valeurs sont fournies deux fois, dans les deux modes
+  (date explicite ou date du jour). C'est exactement la ou ce genre de
+  conversion casse en silence.
+
+### mb626 — une periode est lue sur toute sa largeur, et le total est le vrai
+- Le defaut signale par teuk en mb623 subsistait A UNE AUTRE ECHELLE : la
+  lecture d'une periode restait « ORDER BY id DESC LIMIT 1500 ». Sur une
+  journee a 4000 messages, « ai summary today » lisait donc les 1500
+  DERNIERS, puis echantillonnait « de maniere repartie »... sur cette fin
+  seulement. Le bot annoncait « 1500+ » : il avouait un plafond, mais
+  revendiquait une couverture qu'il n'avait pas. Corriger 200 en 1500 n'avait
+  fait que deplacer le seuil du mensonge.
+- Les bornes de periode deviennent explicites (_summary_period_bounds) et,
+  au-dela du plafond, la fenetre est decoupee en 8 TRANCHES EGALES DANS LE
+  TEMPS dont chacune fournit sa part : la couverture est reelle, du premier
+  message de la journee au dernier. Les bornes intermediaires sont calculees
+  par MariaDB (TIMESTAMPADD/TIMESTAMPDIFF), donc aucune date ne remonte dans
+  Perl et chaque tranche reste une plage indexee sur (id_channel, ts).
+- Sous le plafond, RIEN ne change : une seule requete, comme avant.
+- Un comptage prealable (indexe, et portant le meme filtre pseudo que la
+  lecture) donne le total EXACT : l'annonce dit desormais « 4213 messages sur
+  la periode - resume sur un echantillon reparti de 400 » la ou elle disait
+  « 1500+ ». Le « + » signalait un plafond sans dire sur quoi il portait.
+- Test 809 (20 assertions) : bornes de chaque periode, arithmetique des
+  tranches (extremites exactes, bornes intermediaires deleguees a la base),
+  et surtout EXECUTION REELLE de la sous-commande contre une base simulee —
+  une seule lecture sous le plafond, un comptage plus une lecture PAR TRANCHE
+  au-dessus, chaque requete bornee dans le temps, total exact annonce, et
+  filtre pseudo present jusque dans le comptage.
+
 ### mb625 — pre-commit truthfulness for the summary parsers
 - The new AI-summary/recap rounds are renumbered to **mb623/mb624** (tests
   **806/807**) because mb618/mb619 and tests 801/802 already belong to the

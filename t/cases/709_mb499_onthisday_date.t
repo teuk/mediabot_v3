@@ -2,8 +2,8 @@
 # =============================================================================
 # mb499 — !onthisday [MM-DD] : viser une date précise, pas seulement aujourd'hui.
 #
-#   [1] _onthisday_lines accepte month/day optionnels -> SQL PARAMÉTRÉ
-#       (MONTH(ts)=? AND DAY(ts)=?) au lieu de MONTH(CURDATE()) ; label daté ;
+#   [1] _onthisday_lines accepte month/day optionnels -> scan historique
+#       paramétré, puis plages indexables pour les requêtes d'une année connue ;
 #   [2] rétrocompat : sans date, comportement identique (CURDATE, ts<CURDATE) —
 #       le digest quotidien (mb496) n'est pas impacté ;
 #   [3] parsing de l'argument dans mbOnThisDay_ctx (MM-DD, MM/DD ; rejet des
@@ -80,9 +80,17 @@ return sub {
         $assert->is(scalar(@{$cap[0]{bind}}), 6, 'date: 6 binds (id + m/d + borne année)');
         $assert->is($cap[0]{bind}[1], 12, 'date: bind month=12');
         $assert->is($cap[0]{bind}[2], 25, 'date: bind day=25');
-        # la requête top-talker par année utilise aussi les placeholders m/d
+        # mb627: la requête top-talker connaît l'année et doit donc utiliser
+        # une plage sargable, pas MONTH(ts)/DAY(ts) sur la colonne.
         my ($tt) = grep { $_->{sql} =~ /GROUP BY nick/ } @cap;
-        $assert->ok($tt && $tt->{sql} =~ /MONTH\(ts\) = \? AND DAY\(ts\) = \?/, 'date: top-talker aussi paramétré');
+        $assert->ok($tt && $tt->{sql} =~ /ts >= STR_TO_DATE/ && $tt->{sql} =~ /ts < .*INTERVAL 1 DAY/s,
+            'date: top-talker utilise une plage de journée indexable');
+        $assert->ok($tt && $tt->{sql} !~ /MONTH\(ts\)|DAY\(ts\)|YEAR\(ts\)/,
+            'date: top-talker n applique plus de fonction a ts');
+        $assert->is(scalar(@{$tt->{bind}}), 7,
+            'date: top-talker fournit id + deux fois (year,month,day)');
+        $assert->is(join(',', @{$tt->{bind}}[1..6]), '2025,12,25,2025,12,25',
+            'date: ordre des binds de la plage top-talker');
     }
 
     # --- [3] parsing dans mbOnThisDay_ctx ----------------------------------

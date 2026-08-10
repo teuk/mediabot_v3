@@ -4257,7 +4257,10 @@ sub mbStreak_ctx {
                     JOIN CHANNEL c ON c.id_channel = cl.id_channel
                     WHERE c.name = ?
                       AND cl.nick != ?
-                      AND DATE(cl.ts) >= CURDATE() - INTERVAL 365 DAY
+                      -- mb627-B1: plage indexable. DATE(ts) >= D equivaut a
+                      -- ts >= D (DATE() tronque vers le bas), mais la fonction
+                      -- autour de la colonne interdisait l'index (id_channel, ts).
+                      AND cl.ts >= CURDATE() - INTERVAL 365 DAY
                     GROUP BY cl.nick
                 ) sub
                 WHERE sub.days_active > ?
@@ -6112,7 +6115,11 @@ sub mbActive_ctx {
             $use_date_filter = 1;
             $label           = 'this week';
         } elsif ($p eq 'month') {
-            $date_filter     = "YEAR(cl.ts) = YEAR(CURDATE()) AND MONTH(cl.ts) = MONTH(CURDATE())";
+            # mb627-B1: mb577 avait converti today/yesterday en plages mais
+            # OUBLIE le mois courant, juste au-dessous. Meme mois, meme
+            # resultat, index utilisable.
+            $date_filter     = "cl.ts >= DATE_FORMAT(CURDATE(), '%Y-%m-01')"
+                             . " AND cl.ts < DATE_FORMAT(CURDATE(), '%Y-%m-01') + INTERVAL 1 MONTH";
             $use_date_filter = 1;
             $label           = 'this month';
         } elsif ($p eq 'now') {
@@ -12689,6 +12696,24 @@ sub _onthisday_lines {
     my $has_date = defined $opts{month} && defined $opts{day};
     my ($month, $day) = $has_date ? ($opts{month}, $opts{day}) : ();
 
+    # mb627-B1: pour les requetes qui visent UNE journee precise (annee connue),
+    # MONTH(ts)=? AND DAY(ts)=? AND YEAR(ts)=? designe exactement la plage
+    # [jour 00:00, lendemain 00:00). L'ecrire ainsi rend l'index (id_channel, ts)
+    # utilisable la ou trois fonctions autour de la colonne l'interdisaient.
+    # Un 29 fevrier inexistant rend NULL des deux cotes : aucune ligne, comme
+    # avec l'ancienne comparaison. La requete de BALAYAGE des annees, elle,
+    # cherche le meme jour SUR TOUTES les annees : elle ne peut pas devenir une
+    # plage et garde donc sa forme (commentee sur place).
+    my $day_range_expr = $has_date
+        ? "STR_TO_DATE(CONCAT(?, '-', ?, '-', ?), '%Y-%m-%d')"
+        : "STR_TO_DATE(CONCAT(?, DATE_FORMAT(CURDATE(), '-%m-%d')), '%Y-%m-%d')";
+    # Les binds de la plage, dans l'ordre, pour UNE occurrence de l'expression.
+    my $day_range_binds = sub {
+        my ($year) = @_;
+        return $has_date ? ($year, $month, $day) : ($year);
+    };
+    my $day_range_sql = "ts >= $day_range_expr AND ts < $day_range_expr + INTERVAL 1 DAY";
+
     # Month/day SQL expression + bind values, shared by all three queries.
     my ($md_expr, @md_bind);
     if ($has_date) {
@@ -12731,6 +12756,9 @@ sub _onthisday_lines {
             FROM $table
             WHERE id_channel = ?
               AND event_type IN ('public','action')
+              -- mb627-B1: celle-ci cherche le meme jour SUR TOUTES les annees :
+              -- aucune plage ne peut l'exprimer, la forme fonctionnelle reste
+              -- (et le GROUP BY YEAR(ts) l'impose de toute facon).
               AND $md_expr$year_bound
             GROUP BY YEAR(ts)
             ORDER BY y DESC
@@ -12780,11 +12808,11 @@ sub _onthisday_lines {
                 FROM $t
                 WHERE id_channel = ?
                   AND event_type IN ('public','action')
-                  AND YEAR(ts)  = ?
-                  AND $md_expr
+                  AND $day_range_sql
                 GROUP BY nick ORDER BY c DESC LIMIT 3
             }) };
-            next unless $tq && eval { $tq->execute($id_channel, $r->{y}, @md_bind) };
+            next unless $tq && eval { $tq->execute($id_channel,
+                $day_range_binds->($r->{y}), $day_range_binds->($r->{y})) };
             while (my $row = $tq->fetchrow_hashref) {
                 $nick_counts{ $row->{nick} } += $row->{c};
             }
@@ -12814,13 +12842,13 @@ sub _onthisday_lines {
             FROM $qt
             WHERE id_channel = ?
               AND event_type IN ('public','action')
-              AND YEAR(ts)  = ?
-              AND $md_expr
+              AND $day_range_sql
               AND CHAR_LENGTH(publictext) BETWEEN 25 AND 300
             ORDER BY CHAR_LENGTH(publictext) DESC
             LIMIT 8
         }) };
-        next unless $rm && eval { $rm->execute($id_channel, $ry, @md_bind) };
+        next unless $rm && eval { $rm->execute($id_channel,
+            $day_range_binds->($ry), $day_range_binds->($ry)) };
         while (my $mr = $rm->fetchrow_hashref) { push @cand, $mr; }
         $rm->finish;
     }

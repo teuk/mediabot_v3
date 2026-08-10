@@ -1091,11 +1091,45 @@ sub _summary_parse {
 # (une journee chargee tient dedans) ; le budget d'ANALYSE borne ce qui part
 # au modele. Entre les deux, on echantillonne de facon repartie.
 our $CLAUDE_SUMMARY_FETCH_CAP  = 1500;
+# mb626-B1: au-dela du plafond, la periode est lue en TRANCHES egales plutot
+# que par la fin — sinon « resume de la journee » redevient « resume de la
+# derniere heure », le defaut meme que mb623 avait corrige a l'echelle de 200.
+our $CLAUDE_SUMMARY_SLICES     = 8;
 our $CLAUDE_SUMMARY_ANALYSE    = 400;
 
 # Reduit une liste de lignes a $keep en gardant le DEBUT, la FIN et un pas
 # regulier au milieu : la couverture reste celle de toute la periode, avec la
 # fin plus dense parce que c'est ce dont on parle encore.
+# mb626-B1: BORNES de la periode, en expressions SQL. Elles existaient jusqu'ici
+# noyees dans le filtre WHERE ; les extraire permet de decouper la fenetre —
+# voir _summary_slice_bounds. Rend (debut, fin) ou rien s'il n'y a pas de
+# periode (mode « N derniers messages », inchange).
+sub _summary_period_bounds {
+    my ($period, $arg, $last_ts) = @_;
+    return () unless defined $period;
+    return ("FROM_UNIXTIME($last_ts)", 'NOW()')
+        if $period eq 'last' && $last_ts;
+    return ('CURDATE()', 'CURDATE() + INTERVAL 1 DAY')
+        if $period eq 'today' || $period eq 'last';
+    return ('CURDATE() - INTERVAL 1 DAY', 'CURDATE()')      if $period eq 'yesterday';
+    return ('DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)', 'NOW()')
+        if $period eq 'week';
+    return ("NOW() - INTERVAL " . int($arg // 1) . " DAY",  'NOW()') if $period eq 'days';
+    return ("NOW() - INTERVAL " . int($arg // 1) . " HOUR", 'NOW()') if $period eq 'hours';
+    return ();
+}
+
+# mb626-B1: la i-eme borne d'un decoupage de la fenetre en $slices tranches
+# EGALES DANS LE TEMPS, calculee par MariaDB elle-meme (aucune date n'a besoin
+# de remonter dans Perl). i=0 rend le debut, i=$slices rend la fin.
+sub _summary_slice_bound {
+    my ($start, $end, $i, $slices) = @_;
+    return $start if $i <= 0;
+    return $end   if $i >= $slices;
+    return "TIMESTAMPADD(SECOND,"
+         . " FLOOR(TIMESTAMPDIFF(SECOND, $start, $end) * $i / $slices), $start)";
+}
+
 sub _summary_spread {
     my ($rows, $keep) = @_;
     my $n = scalar @$rows;
@@ -1397,40 +1431,102 @@ sub claude_ctx {
         unless ($dbh && defined $channel) {
             Mediabot::Helpers::botNotice($self, $nick, 'Not available in private or DB not connected.'); return;
         }
-        my ($sth, @bind);
-        if ($filter_nick) {
-            $sth = $dbh->prepare(qq{
+        # mb626-B1: lecture de la periode. Le comptage d'abord (index
+        # (id_channel, ts), donc bon marche), puis DEUX regimes :
+        #   * sous le plafond -> une seule requete, comportement inchange ;
+        #   * au-dessus -> la fenetre est decoupee en tranches EGALES et on
+        #     lit la meme part dans chacune. Sans cela, « ORDER BY id DESC
+        #     LIMIT 1500 » rendait les 1500 DERNIERS messages : le resume
+        #     d'une journee chargee redevenait le resume de sa fin, et
+        #     l'echantillon « reparti » ne l'etait que sur cette fin.
+        my $nick_cond = $filter_nick ? 'AND LOWER(cl.nick) = ?' : '';
+        my @nick_bind = $filter_nick ? ($filter_nick) : ();
+
+        my $fetch_window = sub {
+            my ($where, $limit) = @_;
+            my $q = $dbh->prepare(qq{
                 SELECT cl.nick, cl.publictext AS text FROM CHANNEL_LOG cl
                 JOIN CHANNEL c ON c.id_channel = cl.id_channel
-                WHERE c.name = ? AND LOWER(cl.nick) = ? AND cl.event_type IN ('public','action')
-                $date_filter
+                WHERE c.name = ? $nick_cond AND cl.event_type IN ('public','action')
+                $where
                 ORDER BY cl.id_channel_log DESC LIMIT ?
-            });
-            @bind = ($channel, $filter_nick, $n_msgs);
-        } else {
-            $sth = $dbh->prepare(qq{
-                SELECT cl.nick, cl.publictext AS text FROM CHANNEL_LOG cl
-                JOIN CHANNEL c ON c.id_channel = cl.id_channel
-                WHERE c.name = ? AND cl.event_type IN ('public','action')
-                $date_filter
-                ORDER BY cl.id_channel_log DESC LIMIT ?
-            });
-            @bind = ($channel, $n_msgs);
-        }
-        unless ($sth && $sth->execute(@bind)) {
-            $sth->finish if $sth;
-            Mediabot::Helpers::botNotice($self, $nick, 'DB error.');
-            return;
-        }
+            }) or return undef;
+            return undef unless $q->execute($channel, @nick_bind, $limit);
+            my @out;
+            while (my $r = $q->fetchrow_hashref) { unshift @out, "$r->{nick}: $r->{text}" }
+            $q->finish;
+            return \@out;
+        };
+
         my @rows;
-        while (my $r = $sth->fetchrow_hashref) { unshift @rows, "$r->{nick}: $r->{text}"; }
-        $sth->finish;
+        my $n_total;
+        my $summary_last_ts =
+            $self->{_claude_summary_ts}{"summary_last:$channel"} // 0;
+        my ($win_start, $win_end) =
+            _summary_period_bounds($period, $period_arg, $summary_last_ts);
+        # mb628-B1: le mode 'last' etait historiquement STRICTEMENT posterieur
+        # au dernier resume (cl.ts > FROM_UNIXTIME(...)). Le decoupage mb626
+        # avait transforme ce bord en >= et pouvait relire un message tombe
+        # exactement sur la seconde-frontiere.
+        my $win_start_op =
+            (defined $period && $period eq 'last' && $summary_last_ts > 0)
+                ? '>' : '>=';
+
+        if ($date_filter && defined $win_start) {
+            my $cq = $dbh->prepare(qq{
+                SELECT COUNT(*) FROM CHANNEL_LOG cl
+                JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                WHERE c.name = ? $nick_cond AND cl.event_type IN ('public','action')
+                  AND cl.ts $win_start_op $win_start AND cl.ts < $win_end
+            });
+            if ($cq && $cq->execute($channel, @nick_bind)) {
+                ($n_total) = $cq->fetchrow_array;
+                $cq->finish;
+            }
+            # mb628-B1: le total exact est une PRECONDITION du nouveau contrat.
+            # Si le comptage echoue, ne pas retomber silencieusement sur les
+            # 1500 derniers messages et reapparaitre avec l'ancien mensonge.
+            unless (defined $n_total) {
+                Mediabot::Helpers::botNotice($self, $nick, 'DB error.');
+                return;
+            }
+        }
+
+        if ($date_filter && defined $win_start && defined $n_total
+            && $n_total > $CLAUDE_SUMMARY_FETCH_CAP) {
+            my $slices    = $CLAUDE_SUMMARY_SLICES;
+            my $per_slice = int($CLAUDE_SUMMARY_FETCH_CAP / $slices) || 1;
+            for my $i (0 .. $slices - 1) {
+                my $a = _summary_slice_bound($win_start, $win_end, $i,     $slices);
+                my $b = _summary_slice_bound($win_start, $win_end, $i + 1, $slices);
+                my $op = ($i == 0) ? $win_start_op : '>=';
+                my $part = $fetch_window->("AND cl.ts $op $a AND cl.ts < $b", $per_slice);
+                unless (defined $part) {
+                    Mediabot::Helpers::botNotice($self, $nick, 'DB error.');
+                    return;
+                }
+                push @rows, @$part;
+            }
+        }
+        else {
+            my $where = $date_filter;
+            $where = "AND cl.ts $win_start_op $win_start AND cl.ts < $win_end"
+                if $date_filter && defined $win_start;
+            my $all = $fetch_window->($where, $n_msgs);
+            unless (defined $all) {
+                Mediabot::Helpers::botNotice($self, $nick, 'DB error.');
+                return;
+            }
+            @rows = @$all;
+        }
+
         unless (@rows) {
             # mb608-B1: message de service dans la langue de sortie.
             $send_out->(sprintf(_summary_lang_strings($lang)->{none}, $channel,
                 _summary_period_label($lang, $date_key, $date_arg)));
             return;
         }
+
         # mb623-B1: echantillonnage reparti si la periode deborde le budget
         # d'analyse, et VERITE sur ce qui a ete lu.
         my $n_read    = scalar @rows;
@@ -1439,7 +1535,14 @@ sub claude_ctx {
             @rows = @{ _summary_spread(\@rows, $CLAUDE_SUMMARY_ANALYSE) };
             $truncated = 1;
         }
-        my $capped = ($date_filter && $n_read >= $CLAUDE_SUMMARY_FETCH_CAP) ? 1 : 0;
+        # mb626-B1: le comptage donne le total EXACT de la periode. On annonce
+        # donc « 4213 messages » au lieu de « 1500+ » : le « + » disait qu'on
+        # avait bute sur un plafond sans dire sur quoi. Quand le total depasse
+        # le plafond, les lignes lues viennent de tranches reparties sur toute
+        # la fenetre, donc l'echantillon merite bien son nom.
+        my $capped = ($date_filter && defined $n_total
+                      && $n_total > $CLAUDE_SUMMARY_FETCH_CAP) ? 1 : 0;
+        my $n_window = (defined $n_total && $n_total >= $n_read) ? $n_total : $n_read;
 
         my $transcript = join("\n", @rows);
         my $who_str    = $filter_nick ? " by $filter_nick" : "";
@@ -1461,7 +1564,7 @@ sub claude_ctx {
         # l'ancien plafond de 200 messages, en silence.
         if ($truncated || $capped) {
             $send_out->(sprintf(_summary_lang_strings($lang)->{sampled},
-                $n_read, ($capped ? '+' : ''), $n_found));
+                $n_window, '', $n_found));
         }
         # mb415-R1: longueur du résumé paramétrable (<N>l) ; défaut inchangé.
         my $len_str = defined($out_lines)
