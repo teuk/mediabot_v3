@@ -10,6 +10,39 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb631 — 'ai summary' passe Administrator, et une garde de test cesse de mentir
+- NUMEROTATION : cette passe etait nommee mb630 dans le CR Claude, mais mb630
+  est deja le garde de verite du dispatch commite la veille. Elle devient donc
+  mb631 ; le numero de test 813, lui, etait libre et reste 813.
+- ACCES : la sous-commande summary exige desormais Administrator, sous
+  TOUTES ses formes — en canal et en prive (les deux passent par claude_ctx)
+  et en partyline. Le resume lit l'historique complet d'un salon et le fait
+  ressortir reformule : c'est une capacite de moderation.
+- La porte est le PREMIER traitement specifique de la branche, avant tout
+  parsing/consommation des arguments et avant « help » : la sous-commande ne
+  se documente pas a qui n'y a pas droit, et un refus n'atteint jamais la
+  lecture CHANNEL_LOG du summary (la resolution d'identite reste normale).
+- La partyline utilise son echelle INVERSEE (Owner=0, Master=1,
+  Administrator=2, donc « level <= 2 »), documentee sur place pour qu'on ne
+  la lise pas a l'envers plus tard. Les trois aides annoncent le niveau.
+- Les autres sous-commandes de !ai (forget, models, stats, reset, history,
+  pin) restent libres : le test le verifie explicitement.
+- BUG DE TEST CORRIGE, trouve en verifiant la baseline : la suite arrivait
+  ROUGE. La garde anti-mojibake du test 804 refusait « â » SEUL — or c'est
+  une lettre francaise parfaitement legitime, et « âmes », « bâtis »,
+  « tâche » vivent dans les pools de l'horoscope. Le tirage dependant de la
+  DATE, la suite virait au rouge certains jours et au vert d'autres, pour
+  une sortie strictement correcte. La garde vise desormais la vraie
+  signature du double encodage — « Ã » suivi d'un caractere de continuation,
+  « â€ », « Â » colle a une ponctuation — et deux assertions neuves prouvent
+  qu'elle mord toujours sur un double encodage reel tout en laissant passer
+  les circonflexes.
+- Test 813 renforce : la porte partyline est aussi exercee au runtime et les
+  autres sous-commandes doivent etre trouvees explicitement avant de verifier
+  qu'elles restent libres (aucun `next` silencieux si le source evolue). Pins
+  630 et 791 mis a jour (ligne d'aide), et le contexte simule du test 809 gagne
+  require_level.
+
 ### mb630 — derniere garde : le test de dispatch cesse de mentir
 - Le vieux test standalone 383 avait un piege Perl subtil : un `m//` rate
   passe en premier argument de `ok()` etait evalue en contexte de liste. La

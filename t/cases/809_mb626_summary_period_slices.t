@@ -183,4 +183,8 @@ sub _run_summary {
     sub new { my ($c,%a)=@_; bless { %a }, $c }
     sub bot { $_[0]{bot} } sub nick { 'teuk' } sub channel { '#c' }
     sub args { $_[0]{args} } sub message { {} }
+    # mb631: 'ai summary' est reserve aux Administrateurs — ce contexte joue
+    # un appelant autorise pour continuer d'exercer la LECTURE de periode,
+    # qui est l'objet de ce fichier.
+    sub require_level { 1 }
 }

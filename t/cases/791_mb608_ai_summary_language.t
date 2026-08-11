@@ -117,6 +117,6 @@ return sub {
         'mb608-791: l aide documente l echappement des pseudos homonymes');
     my $mb = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Mediabot.pm'
         or die $!; local $/; <$fh> };
-    $assert->like($mb, qr/summary \[periode\] \[N\] \[Nl\] \[public\] \[en\|fr\|es\]/,
+    $assert->like($mb, qr/summary \(Administrator\+\) \[periode\] \[N\] \[Nl\] \[public\] \[en\|fr\|es\]/,
         'mb608-791: la ligne de commande publique annonce la langue');
 };

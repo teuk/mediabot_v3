@@ -101,8 +101,23 @@ return sub {
         'mb621-804: les accents du corps sortent justes');
     $assert->like($back, qr/♌ \x02Lion\x02/,
         'mb621-804: le glyphe du signe sort juste');
-    $assert->ok($back !~ /Ã©|Ã¨|Ã |â/,
+    # mb631: « â » SEUL n'est pas un symptome — c'est une lettre francaise
+    # parfaitement legitime (« âmes », « bâtis », « tâche » sont dans les
+    # pools de l'horoscope). Comme le tirage depend de la DATE, cette
+    # alternative rendait la suite rouge certains jours et verte d'autres,
+    # pour une sortie parfaitement correcte. Le vrai symptome du double
+    # encodage est une SEQUENCE : « Ã » suivi d'un caractere de continuation,
+    # ou « â€ » / « Â » colles a un signe de ponctuation.
+    $assert->ok($back !~ /Ã[\x80-\xBF\xA0-\xFF]|â€|Â[\x80-\xBF\xA0-\xBF]/,
         'mb621-804: aucun mojibake visible (le symptome de la capture)');
+    # ... et la garde attrape toujours du VRAI mojibake : sans quoi on aurait
+    # remplace un faux positif par un test qui ne teste plus rien.
+    my $real = Encode::decode('UTF-8', Encode::encode('UTF-8',
+        Encode::decode('ISO-8859-1', Encode::encode('UTF-8', 'humeur électrique'))));
+    $assert->ok($real =~ /Ã[\x80-\xBF\xA0-\xFF]|â€|Â[\x80-\xBF\xA0-\xBF]/,
+        'mb621-804: la garde reconnait toujours un double encodage reel');
+    $assert->ok('une tâche, des âmes, il bâtis' !~ /Ã[\x80-\xBF\xA0-\xFF]|â€|Â[\x80-\xBF\xA0-\xBF]/,
+        'mb621-804: ... et laisse passer les accents circonflexes legitimes');
 
     # [3] meme garantie avec un pseudo NON decode (appels internes)
     @out = ();

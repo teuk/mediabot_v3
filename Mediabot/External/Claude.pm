@@ -967,7 +967,7 @@ sub ai_lang_text {
 # messages d'erreur la lisent au meme endroit : ils ne peuvent pas diverger,
 # et une option ajoutee plus tard se documente d'elle-meme.
 our @_summary_usage_lines = (
-    'Syntaxe: ai summary [periode] [pseudo] [options]   (l\'ordre est libre)',
+    'Syntaxe: ai summary [periode] [pseudo] [options]   (l\'ordre est libre) - Administrator+',
     'Periode: today | yesterday | week | last | <N>d (1-30 jours) | <N>h (1-72 heures).'
         . ' Sans periode: les <N> derniers messages.',
     'Options: <N> = messages analyses sans periode (5-50, defaut 10) | <N>l = lignes du resume (1-10)'
@@ -1268,6 +1268,13 @@ sub claude_ctx {
 
     # Z2: !ai summary [n|today|yesterday|week|last|Nd] [nick] — summarise from CHANNEL_LOG
     if (@args && lc($args[0]) eq 'summary') {
+        # mb631-B1: le resume de canal est reserve aux Administrateurs. Il lit
+        # l'historique complet d'un salon et le fait sortir reformule : c'est
+        # une capacite de moderation, pas un jouet de salon. La porte est
+        # posee AVANT tout traitement specifique du summary — y compris avant
+        # 'help' — pour que la sous-commande n'existe pas du tout en dessous
+        # du niveau requis.
+        return unless $ctx->require_level('Administrator');
         shift @args;
 
         # mb415-R1: options positionnelles LIBRES, extraites avant les filtres :

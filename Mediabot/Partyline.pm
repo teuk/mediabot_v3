@@ -3055,7 +3055,7 @@ sub _cmd_help {
       . "  .metrics            - dump Prometheus metrics\r\n"
       . "  .plugins [loaded|config|info|load|loadscript|unload|reload|enable|disable|cleardata] - plugin lifecycle (v2)\r\n"
       . "  .scriptdryrun [status|last|config|timers|canceltimers|events|clearevents|reload] - show external script bridge status and last run, pending timers, event windows\r\n"
-      . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary)\r\n"
+      . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary [Administrator+])\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"
       . "  .top [n]            - top N speakers across all channels (default 5)\r\n"
       . "  .seen <nick>        - last activity for a nick in channel logs\r\n"
@@ -4940,6 +4940,14 @@ sub _cmd_ai {
 
     # .ai summary [n] — summarize recent CHANNEL_LOG messages for the resolved scope.
     if ($subcmd eq 'summary') {
+        # mb631-B1: meme porte qu'en canal (Administrator+). L'echelle de la
+        # partyline est INVERSEE : Owner=0, Master=1, Administrator=2, donc
+        # « Administrator ou mieux » s'ecrit level <= 2.
+        my $pl_level = $self->{users}{$id}{level} // 99;
+        unless ($pl_level <= 2) {
+            $stream->write("Permission denied (Administrator+ required).\r\n");
+            return;
+        }
         my $n_msgs = ($rest =~ /^\s*(\d+)/) ? int($1) : 10;
         $n_msgs = 5  if $n_msgs < 5;
         $n_msgs = 50 if $n_msgs > 50;
