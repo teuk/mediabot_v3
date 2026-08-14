@@ -2414,11 +2414,134 @@ sub leet {
 # /leet <string>
 # Convert the given string to leet-speak and display it.
 
+# mb638-B1: LE fetch de la version distante, et la RAISON de son echec.
+#
+# Terrain (#teuk) : « github: Undefined » sans un mot d'explication. La cause
+# etait structurelle : getVersion journalisait bien « Failed to fetch ... HTTP
+# 599 », mais getVersion_async execute getVersion dans un FILS dont le logger
+# est volontairement muet (_SilentLogger, pour ne pas doubler les traces de
+# demarrage). Un echec reseau devenait donc indiscernable d'une absence de
+# version. On rend desormais (version, raison) : la raison traverse le tuyau
+# et remonte jusqu'a l'operateur.
+#
+# Deux URL sont essayees : raw.githubusercontent.com, puis le miroir
+# github.com/<repo>/raw/<branche>. Un seul des deux peut etre bloque par un
+# pare-feu, un proxy ou une route IPv6 morte — c'est exactement le genre de
+# panne qu'on ne diagnostique pas a distance.
+our @VERSION_URLS = (
+    'https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION',
+    'https://github.com/teuk/mediabot_v3/raw/master/VERSION',
+);
+
+sub _remote_version_urls {
+    my ($self) = @_;
+
+    my $conf_url = eval { $self->{conf}->get('update.VERSION_URL') };
+    if (defined $conf_url && !ref $conf_url && $conf_url =~ m{\Ahttps?://}i) {
+        # mb639: VERSION_URL est un vrai override. L'operateur qui le renseigne
+        # demande UNE route precise (proxy/miroir interne), pas « essaye-la puis
+        # repars quand meme vers GitHub ».
+        return ($conf_url);
+    }
+
+    return @VERSION_URLS;
+}
+
+sub _remote_version_timeout {
+    my ($self) = @_;
+
+    my $timeout = eval { $self->{conf}->get('update.VERSION_TIMEOUT') };
+    $timeout = 8 unless defined $timeout && !ref($timeout)
+        && $timeout =~ /\A\d+\z/ && $timeout > 0;
+    $timeout = 30 if $timeout > 30;
+    return 0 + $timeout;
+}
+
+sub _remote_version_worker_timeout {
+    my ($self) = @_;
+
+    my @urls = _remote_version_urls($self);
+    my $per_url = _remote_version_timeout($self);
+
+    # mb639: le worker doit survivre a CHAQUE tentative. Avec deux URL et un
+    # timeout de 8 s, l'ancien timeout externe fixe a 8 s tuait le fils au
+    # moment exact ou le miroir devait prendre le relais.
+    my $budget = ($per_url * (@urls || 1)) + 1;
+    $budget = 65 if $budget > 65;    # 2 * 30 s + marge, borne absolue
+    return $budget;
+}
+
+sub fetch_remote_version {
+    my ($self) = @_;
+
+    my @urls = _remote_version_urls($self);
+    my $timeout = _remote_version_timeout($self);
+
+    # HTTP::Tiny ne fait pas d'HTTPS sans IO::Socket::SSL. Ne l'exigeons que
+    # lorsque la route choisie est HTTPS : un override HTTP explicite (reseau
+    # de confiance/proxy interne) ne doit pas etre refuse avant meme l'essai.
+    if (grep { /^https:\/\//i } @urls) {
+        unless (HTTP::Tiny->can_ssl) {
+            return (undef, 'HTTPS unavailable (install IO::Socket::SSL and Net::SSLeay)');
+        }
+    }
+
+    my $last_error;
+    for my $url (@urls) {
+        my $res = eval {
+            HTTP::Tiny->new(
+                timeout    => $timeout,
+                agent      => 'mediabot-version-check/1.0 ',
+                verify_SSL => 1,
+            )->get($url);
+        };
+        if (!$res || !ref $res) {
+            $last_error = 'request failed: ' . ($@ || 'unknown error');
+            next;
+        }
+        unless ($res->{success}) {
+            my $status = $res->{status} // '?';
+            my $reason = $res->{reason} // '';
+            # HTTP::Tiny met le detail de l'erreur reseau dans le corps
+            # quand le statut est 599 (echec avant reponse).
+            my $detail = ($status eq '599' && defined $res->{content})
+                ? do { my $c = $res->{content}; $c =~ s/\s+/ /g; substr($c, 0, 120) }
+                : $reason;
+            $last_error = "HTTP $status" . (length($detail) ? " ($detail)" : '');
+            next;
+        }
+
+        my $body = $res->{content} // '';
+        $body =~ s/\A\x{FEFF}//;          # BOM eventuel
+        $body =~ s/\s+\z//;
+        $body =~ s/\A\s+//;
+        if ($body eq '') {
+            $last_error = 'empty VERSION file';
+            next;
+        }
+        if (length($body) > 256 || $body =~ /[\r\n]/ || !_version_parts($body)) {
+            # Un HTTP 200 ne suffit pas : une page HTML courte sur UNE ligne,
+            # un message de proxy ou n'importe quel texte arbitraire ne doit
+            # jamais devenir une version distante.
+            $last_error = 'unexpected content (not a VERSION file)';
+            next;
+        }
+        return ($body, undef);
+    }
+
+    return (undef, $last_error // 'no URL could be reached');
+}
+
 sub getVersion {
     my $self = shift;
     my ($local_version, $remote_version) = ("Undefined", "Undefined");
     my ($c_major, $c_minor, $c_type, $c_dev_info);
     my ($r_major, $r_minor, $r_type, $r_dev_info);
+
+    # mb639: chaque check part avec une raison vierge. Sinon un ancien HTTP 599
+    # pouvait survivre dans l'objet et etre rapporte au check suivant alors que
+    # la version locale etait devenue illisible et qu'aucun fetch n'avait eu lieu.
+    $self->{_version_fetch_error} = undef if ref($self);
 
     # MB389: explicit remote checks reuse the same local-only identity helper
     # used by startup, then perform GitHub I/O only for the remote half.
@@ -2438,13 +2561,15 @@ sub getVersion {
     if ($local_version ne "Undefined") {
         $self->{logger}->log(1, "Checking latest version from GitHub...");
 
-        my $version_url = 'https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION';
-        my $response = eval { HTTP::Tiny->new(timeout => 5)->get($version_url); }
-                    // { success => 0, status => 0, reason => $@ };
+        # mb638-B1: un seul fetch pour tout le bot, et sa raison d'echec.
+        my ($fetched, $fetch_error) = fetch_remote_version($self);
+        my $response = { success => (defined $fetched ? 1 : 0),
+                         status  => (defined $fetched ? 200 : 599),
+                         reason  => $fetch_error };
 
         if ($response->{success}) {
-            $remote_version = $response->{content} // '';
-            $remote_version =~ s/\r?\n\z//;
+            $remote_version = $fetched;
+            $self->{_version_fetch_error} = undef;
 
             ($r_major, $r_minor, $r_type, $r_dev_info) = $self->getDetailedVersion($remote_version);
 
@@ -2473,8 +2598,9 @@ sub getVersion {
                 $self->{logger}->log(1, "Unknown remote version format: $remote_version");
             }
         } else {
-            my $status = defined $response->{status} ? $response->{status} : 'unknown';
-            $self->{logger}->log(1, "Failed to fetch version from GitHub: HTTP $status");
+            $self->{_version_fetch_error} = $fetch_error;
+            $self->{logger}->log(1,
+                "Failed to fetch version from GitHub: " . ($fetch_error // 'unknown'));
         }
     }
 
@@ -2502,12 +2628,12 @@ sub getVersion_async {
     my $fallback_local = _cached_local_version($self);
 
     my $timeout = $opts{timeout};
-    $timeout = 7
+    $timeout = _remote_version_worker_timeout($self)
         unless defined($timeout)
             && !ref($timeout)
             && $timeout =~ /\A\d+(?:\.\d+)?\z/;
     $timeout = 0.1 if $timeout < 0.1;
-    $timeout = 20  if $timeout > 20;
+    $timeout = 65  if $timeout > 65;
 
     my $loop = eval { $self->getLoop };
     $loop ||= $self->{loop} if ref($self);
@@ -2521,7 +2647,7 @@ sub getVersion_async {
             // _usable_local_version($fallback_local)
             // 'Undefined';
         $remote = _usable_local_version($remote) // 'Undefined';
-        eval { $callback->($local, $remote); 1; };
+        eval { $callback->($local, $remote, $self->{_version_fetch_error}); 1; };
         return 1;
     }
 
@@ -2545,8 +2671,12 @@ sub getVersion_async {
         $local  = substr($local,  0, 256);
         $remote = substr($remote, 0, 256);
 
-        my $payload = eval { encode_json([$local, $remote]) };
-        $payload = '["Undefined","Undefined"]'
+        # mb638-B1: la RAISON voyage avec les versions. Sans elle, le parent
+        # ne peut que dire « Undefined » — ce que le terrain a montre.
+        my $why = $self->{_version_fetch_error};
+        $why = substr("$why", 0, 200) if defined $why && !ref $why;
+        my $payload = eval { encode_json([$local, $remote, $why]) };
+        $payload = '["Undefined","Undefined",null]'
             unless defined($payload) && !ref($payload) && $payload ne '';
 
         my $offset = 0;
@@ -2605,6 +2735,7 @@ sub getVersion_async {
         eval { close $pipe };
 
         my ($local, $remote) = ($fallback_local, 'Undefined');
+        my $reason;
 
         unless ($state->{timed_out} || $state->{wait_failed}) {
             my $status = $state->{wait_status} // 0;
@@ -2615,6 +2746,8 @@ sub getVersion_async {
                 my $decoded = eval { decode_json($state->{output} // '') };
                 if (!$@ && ref($decoded) eq 'ARRAY' && @$decoded >= 2) {
                     my ($candidate_local, $candidate_remote) = @$decoded[0, 1];
+                    my $why = $decoded->[2];
+                    $reason = $why if defined $why && !ref $why && length $why;
                     my $usable_local  = _usable_local_version($candidate_local);
                     my $usable_remote = _usable_local_version($candidate_remote);
 
@@ -2626,7 +2759,10 @@ sub getVersion_async {
             }
         }
 
-        my $callback_ok = eval { $callback->($local, $remote); 1; };
+        # mb638-B1: 3e argument = pourquoi le distant manque (undef si tout va
+        # bien). Les appelants historiques qui n'en veulent pas l'ignorent.
+        $reason = 'version check timed out' if $state->{timed_out} && !defined $reason;
+        my $callback_ok = eval { $callback->($local, $remote, $reason); 1; };
         if (!$callback_ok && $self && $self->{logger}) {
             my $error = $@ || 'unknown callback failure';
             $error =~ s/\s+/ /g;

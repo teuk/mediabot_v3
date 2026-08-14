@@ -10,6 +10,61 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb639 — garde pre-commit : le diagnostic distant tient ses propres promesses
+- AUDIT de mb638 : `update.VERSION_URL` etait documente comme un override qui
+  force UNE URL, mais le code la placait seulement devant les deux URL GitHub.
+  Une URL explicite remplace desormais la liste par defaut ; une valeur invalide
+  est ignoree et conserve les deux URL integrees.
+- `VERSION_TIMEOUT` est maintenant un delai PAR URL et le timeout du worker
+  asynchrone est calcule pour laisser a toutes les URL selectionnees le temps
+  d'etre essayees. Le `timeout => 8` fixe de `update_ctx` annulait sinon le fils
+  au moment ou la premiere URL lente expirait, avant le miroir.
+- Le support SSL n'est exige que si la liste choisie contient HTTPS : un
+  `VERSION_URL=http://...` explicite reste utilisable sur un reseau de confiance.
+- Un HTTP 200 n'est accepte que si le corps est une vraie version Mediabot
+  comprise par `_version_parts`. Une courte page HTML sur une seule ligne ou
+  un texte de proxy ne peut donc plus passer pour une version.
+- `getVersion` efface son ancienne raison d'echec avant chaque tentative :
+  une erreur reseau precedente ne peut pas etre recyclee si, au check suivant,
+  c'est la version locale qui devient illisible.
+- Test 818 renomme mb638 et etendu de 23 a 33 assertions ; nouveau test 819
+  (12 assertions) pour le budget worker, l'override URL reel et l'absence de
+  raison stale.
+
+### mb638 — « update » dit POURQUOI la version distante manque
+- TERRAIN (#teuk) : « local: 3.4dev-... | github: Undefined » puis « Cannot
+  check: version could not be determined » — aucune prise pour l'operateur.
+- CAUSE, et c'est un defaut de conception de mb631 : la commande s'appuie sur
+  getVersion_async, dont le FILS tourne avec un logger volontairement muet
+  (_SilentLogger, pour ne pas doubler les traces de demarrage). getVersion
+  journalisait bien « Failed to fetch version from GitHub: HTTP 599 », mais
+  dans le fils cette ligne partait au neant. Une panne reseau et une absence
+  de version devenaient donc indiscernables — et le diagnostic impossible a
+  distance.
+- Le fetch distant devient une fonction unique, Helpers::fetch_remote_version,
+  qui rend (version, RAISON). getVersion la consomme — plus de seconde
+  implementation de la requete. La raison traverse le tuyau enfant -> parent
+  (3e valeur du payload JSON) et arrive au callback en 3e argument ; les
+  appelants historiques qui n'en veulent pas l'ignorent.
+- Chaque mode de panne a desormais sa phrase : HTTPS indisponible (« install
+  IO::Socket::SSL and Net::SSLeay » — HTTP::Tiny ne fait pas d'https sans
+  eux), HTTP <statut> avec le detail reseau que HTTP::Tiny place dans le corps
+  d'un 599, fichier vide, contenu qui n'est pas un fichier VERSION (une page
+  de proxy ou de portail captif n'est JAMAIS prise pour une version), et
+  depassement de delai.
+- Deux URL sont essayees — raw.githubusercontent.com puis le miroir
+  github.com/<repo>/raw/<branche> — parce qu'un pare-feu, un proxy ou une
+  route IPv6 morte peut n'en bloquer qu'une. La conf peut en imposer une
+  (update.VERSION_URL) et regler le delai (update.VERSION_TIMEOUT).
+- La commande affiche la raison ET le point de lecture, avec le moyen de le
+  changer. Quand aucune raison n'est connue, le message generique subsiste.
+- Pins 138 et 207 evolues : ils verrouillaient la requete DANS getVersion ;
+  ils verrouillent desormais les memes garanties (aucune sortie shell, appel
+  reseau sous eval, exception conservee) la ou elles s'appliquent.
+- Test 818 (23 assertions) : chaque mode de panne avec sa raison, les deux URL
+  essayees, l'URL de conf prioritaire et une URL invalide ignoree, le BOM, la
+  traversee du tuyau, l'affichage par la commande, et le chemin nominal intact.
+
 ### mb637 — l'identite du canal source est canonique, pas celle tapee
 - AUDIT pre-commit de mb636 : la cible explicite etait verifiee via la cle
   `lc(...)` du cache des canaux, mais la graphie fournie par l'operateur

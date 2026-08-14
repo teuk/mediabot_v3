@@ -121,9 +121,13 @@ return sub {
         'whereis body found'
     );
 
+    # mb638: la requete vit dans fetch_remote_version — la GARANTIE (appel
+    # reseau sous eval, jamais de die qui remonte dans la boucle IRC) est
+    # verifiee la ou elle s'applique desormais.
+    my $fetch_body = _extract_sub_207($src, 'fetch_remote_version');
     $assert->like(
-        $check_version // '',
-        qr/my\s+\$response\s*=\s*eval\s+\{\s*HTTP::Tiny->new\(timeout\s*=>\s*5\)->get\(\$version_url\);\s*\}/,
+        $fetch_body // '',
+        qr/my\s+\$res\s*=\s*eval\s+\{\s*\n\s*HTTP::Tiny->new\(/,
         'getVersion protects GitHub VERSION fetch with eval'
     );
 
@@ -134,8 +138,8 @@ return sub {
     );
 
     $assert->like(
-        $check_version // '',
-        qr/reason\s*=>\s*\$\@/,
+        $fetch_body // '',
+        qr/\$last_error = 'request failed: ' \. \(\$\@ \|\| 'unknown error'\);/,
         'getVersion keeps network exception reason in fallback response'
     );
 

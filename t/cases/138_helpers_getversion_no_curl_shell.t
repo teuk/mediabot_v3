@@ -75,28 +75,42 @@ return sub {
         'Helpers.pm imports HTTP::Tiny'
     );
 
+    # mb638: la requete a demenage dans fetch_remote_version — une seule
+    # implementation, qui rend AUSSI la raison de l'echec (le fils de
+    # getVersion_async a un logger muet : sans elle, « github: Undefined »
+    # n'apprenait rien a l'operateur). Le contrat de CE fichier — aucune
+    # sortie shell, une requete Perl — vaut desormais pour les deux subs.
+    my $fetch = _extract_sub_body_helpers_getversion($src, 'fetch_remote_version');
+    $assert->ok(defined $fetch, 'fetch_remote_version body found');
+
     $assert->like(
-        $body // '',
-        qr/my \$version_url = 'https:\/\/raw\.githubusercontent\.com\/teuk\/mediabot_v3\/master\/VERSION';/,
+        $src,
+        qr/'https:\/\/raw\.githubusercontent\.com\/teuk\/mediabot_v3\/master\/VERSION'/,
         'getVersion defines the remote VERSION URL'
     );
 
     $assert->like(
-        $body // '',
-        qr/HTTP::Tiny->new\(timeout => 5\)->get\(\$version_url\)/,
+        $fetch // '',
+        qr/HTTP::Tiny->new\(/,
         'getVersion fetches remote VERSION through HTTP::Tiny'
     );
 
     $assert->like(
         $body // '',
-        qr/\$remote_version = \$response->\{content\} \/\/ '';/,
+        qr/my \(\$fetched, \$fetch_error\) = fetch_remote_version\(\$self\);/,
         'getVersion reads remote version from HTTP response content'
     );
 
     $assert->like(
-        $body // '',
-        qr/\$remote_version =~ s\/\\r\?\\n\\z\/\/;/,
+        $fetch // '',
+        qr/\$body =~ s\/\\s\+\\z\/\/;/,
         'getVersion strips one trailing newline from the remote version'
+    );
+
+    $assert->unlike(
+        $fetch // '',
+        qr/curl --connect-timeout/,
+        'fetch_remote_version no longer shells out to curl'
     );
 
     $assert->unlike(
@@ -111,9 +125,11 @@ return sub {
         'getVersion no longer opens a command pipe'
     );
 
+    # mb638: le journal porte desormais la RAISON complete (statut + detail
+    # reseau) au lieu du seul code — c'est ce qui manquait sur le terrain.
     $assert->like(
         $body // '',
-        qr/Failed to fetch version from GitHub: HTTP \$status/,
+        qr/Failed to fetch version from GitHub: " \. \(\$fetch_error/,
         'getVersion logs HTTP status on fetch failure'
     );
 };

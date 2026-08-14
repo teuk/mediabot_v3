@@ -276,7 +276,7 @@ sub update_ctx {
     # [3] Versions : appel GitHub NON BLOQUANT (getVersion_async fait le
     # travail dans un fils, la boucle IRC continue de tourner).
     my $done = sub {
-        my ($local, $remote) = @_;
+        my ($local, $remote, $why) = @_;   # mb638-B1: $why = pourquoi le distant manque
 
         my $decision = update_decision(
             local   => $local,
@@ -290,15 +290,34 @@ sub update_ctx {
             $decision->{local}  // 'unknown',
             $decision->{remote} // 'unknown'));
 
+        # mb638-B1: dire CE QUI a echoue. « version could not be determined »
+        # ne donnait aucune prise a l'operateur : selon le cas c'est un
+        # pare-feu, un proxy, une route IPv6 morte, ou IO::Socket::SSL absent.
+        my $unreadable = "\x0304Cannot check\x0f: ";
+        if (defined $remote && $remote ne 'Undefined' or !defined $why) {
+            $unreadable .= ($decision->{reason} // 'version could not be determined');
+        }
+        else {
+            $unreadable .= "GitHub version unavailable - $why";
+        }
+
         my %msg = (
-            unreadable   => "\x0304Cannot check\x0f: " . ($decision->{reason} // ''),
+            unreadable   => $unreadable,
             incomparable => "\x0304Cannot compare\x0f: " . ($decision->{reason} // ''),
             up_to_date   => "\x0309Already up to date.\x0f Nothing to do.",
             ahead        => "\x0308Local build is NEWER than GitHub.\x0f Refusing to downgrade.",
         );
         if ($decision->{state} ne 'available') {
             _say($ctx, $msg{ $decision->{state} } // 'Unknown version state.');
-            _log($self, $ctx, 'check', $decision->{state});
+            if ($decision->{state} eq 'unreadable' && defined $why) {
+                my @sources = eval { Mediabot::Helpers::_remote_version_urls($self) };
+                @sources = @Mediabot::Helpers::VERSION_URLS unless @sources;
+                _say($ctx, '  version source' . (@sources > 1 ? 's: ' : ': ')
+                    . join(' -> ', @sources)
+                    . ' (override: conf update.VERSION_URL)');
+            }
+            _log($self, $ctx, 'check',
+                $decision->{state} . (defined $why ? " ($why)" : ''));
             return;
         }
 
@@ -330,7 +349,10 @@ sub update_ctx {
         _say($ctx, "  updater started - progress in $log");
     };
 
-    my $started = eval { Mediabot::Helpers::getVersion_async($self, $done, timeout => 8) };
+    # mb639: laisser getVersion_async calculer son budget depuis
+    # VERSION_TIMEOUT et le nombre reel d'URL. Un timeout externe fixe a 8 s
+    # annulait la tentative juste avant le miroir dans le pire cas.
+    my $started = eval { Mediabot::Helpers::getVersion_async($self, $done) };
     unless ($started) {
         _say($ctx, "\x0304Cannot check versions right now.\x0f Nothing was changed.");
         _log($self, $ctx, 'check', 'unavailable');
