@@ -147,7 +147,7 @@ return sub {
     # [6] syntaxe canonique unique
     my @usage = $C->can('_summary_usage')->();
     $assert->ok(scalar @usage >= 4, 'mb623-806: la syntaxe est documentee');
-    $assert->like($usage[0], qr/l'ordre est libre/,
+    $assert->like($usage[0], qr/l'ordre des options est libre/,
         'mb623-806: l aide annonce l ordre libre');
     $assert->ok((grep { /<N>h/ } @usage), 'mb623-806: la fenetre en heures est documentee');
     $assert->like($src, qr/botNotice\(\$self, \$nick, \$_summary_usage_lines\[0\]\);/,

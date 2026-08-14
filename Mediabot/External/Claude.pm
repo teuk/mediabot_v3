@@ -967,18 +967,42 @@ sub ai_lang_text {
 # messages d'erreur la lisent au meme endroit : ils ne peuvent pas diverger,
 # et une option ajoutee plus tard se documente d'elle-meme.
 our @_summary_usage_lines = (
-    'Syntaxe: ai summary [periode] [pseudo] [options]   (l\'ordre est libre) - Administrator+',
+    'Syntaxe: ai [#canal] summary [periode] [pseudo] [options]   (l\'ordre des options est libre)',
+    'Canal: sans #canal, le canal courant. Avec #canal, on resume CE canal-la'
+        . ' (utile depuis une console). Le #canal se place AVANT le mot summary.',
+    'Reponse: en notice par defaut. « public » repond sur le CANAL COURANT.',
+    'Niveaux: Administrator+ pour resumer. Master+ pour publier le resume d\'un'
+        . ' AUTRE canal sur le canal courant.',
     'Periode: today | yesterday | week | last | <N>d (1-30 jours) | <N>h (1-72 heures).'
         . ' Sans periode: les <N> derniers messages.',
     'Options: <N> = messages analyses sans periode (5-50, defaut 10) | <N>l = lignes du resume (1-10)'
         . ' | public = repondre sur le canal | en|fr|es ou lang=fr = langue | nick=<pseudo> si le pseudo'
         . ' ressemble a une option.',
-    'Langue par defaut: celle du canal (chansets LangFR / LangES, sinon main.LANG).',
-    'Exemples: ai summary today | ai summary today teuk | ai summary 6h public'
-        . ' | ai summary week 3l fr | ai summary teuk 7d | ai summary 20 nick=fr',
+    'Langue par defaut: celle du canal RESUME (chansets LangFR / LangES, sinon main.LANG).',
+    'Exemples: ai summary | ai summary public | ai summary today | ai summary 7d'
+        . ' | ai #35+ans summary | ai #35+ans summary public | ai summary today teuk'
+        . ' | ai summary week 3l fr | ai summary 20 nick=fr',
 );
 
 sub _summary_usage { return @_summary_usage_lines }
+
+# mb637-B1: une cible tapee par l'operateur n'est pas une identite stable.
+# {channels} est indexe en lc, mais le nom canonique de la DB reste dans
+# l'objet Channel (get_name). Toute la branche summary doit travailler avec
+# CE nom-la : requetes SQL, langue, libelle et surtout la cle en memoire du
+# mode « last ». Sinon « #35+ANS » puis « #35+ans summary last » creent deux
+# timelines distinctes pour le meme canal.
+sub _summary_canonical_channel {
+    my ($self, $name) = @_;
+    return undef unless defined $name && length $name;
+    return undef unless exists $self->{channels}{ lc $name };
+
+    my $obj = $self->{channels}{ lc $name };
+    my $canon = eval {
+        ($obj && ref($obj) && $obj->can('get_name')) ? $obj->get_name : undef;
+    };
+    return (defined $canon && length $canon) ? $canon : $name;
+}
 
 # mb623-B1: lecture STRICTE et SANS ORDRE IMPOSE des arguments de
 # « ai summary ». Rend une structure ; ne touche a rien d'autre. Tout jeton
@@ -1267,6 +1291,15 @@ sub claude_ctx {
     }
 
     # Z2: !ai summary [n|today|yesterday|week|last|Nd] [nick] — summarise from CHANNEL_LOG
+    # mb636-B1: cible de canal explicite — « ai #autre summary ... ». Le jeton
+    # n'est reconnu QUE s'il precede immediatement 'summary' : sans cette
+    # condition, « ai #linux c'est mieux que quoi ? » perdrait son premier mot
+    # au lieu de partir en question au modele.
+    my $target_channel;
+    if (@args >= 2 && $args[0] =~ /\A[#&]\S+\z/ && lc($args[1]) eq 'summary') {
+        $target_channel = shift @args;
+    }
+
     if (@args && lc($args[0]) eq 'summary') {
         # mb631-B1: le resume de canal est reserve aux Administrateurs. Il lit
         # l'historique complet d'un salon et le fait sortir reformule : c'est
@@ -1276,6 +1309,34 @@ sub claude_ctx {
         # du niveau requis.
         return unless $ctx->require_level('Administrator');
         shift @args;
+
+        # mb636-B1: DEUX canaux distincts, et il faut les tenir separes.
+        #   $src_channel : celui dont on LIT l'historique ;
+        #   $channel     : celui ou l'on PARLE (destination de « public »).
+        # Sans cible explicite, les deux sont le canal courant : comportement
+        # historique inchange.
+        my $requested_src_channel = defined $target_channel ? $target_channel : $channel;
+
+        unless (defined $requested_src_channel
+            && Mediabot::Helpers::isIrcChannelTarget($requested_src_channel)) {
+            Mediabot::Helpers::botNotice($self, $nick,
+                'ai summary: no channel to summarise here - name one, e.g. '
+                . "\x02ai #channel summary\x02");
+            return;
+        }
+
+        # mb637-B1: une fois le canal reconnu, abandonner la graphie tapee et
+        # utiliser le nom canonique stocke dans l'objet Channel. C'est cette
+        # identite stable qui alimente SQL, chansets et summary_last.
+        my $src_channel = _summary_canonical_channel($self, $requested_src_channel);
+
+        # Un canal que le bot ne connait pas ne rendrait aucune ligne : autant
+        # le dire, plutot que de laisser croire a un salon vide.
+        unless (defined $src_channel) {
+            Mediabot::Helpers::botNotice($self, $nick,
+                "ai summary: I don't know the channel $requested_src_channel.");
+            return;
+        }
 
         # mb415-R1: options positionnelles LIBRES, extraites avant les filtres :
         #   help        -> aide complète de la sous-commande (notice) ;
@@ -1350,6 +1411,19 @@ sub claude_ctx {
 
         # Sortie : canal courant si public demandé (et dispo), sinon notice.
         my $can_public = $public_out && Mediabot::Helpers::isIrcChannelTarget($channel); # mb416-B2
+
+        # mb636-B1: PUBLIER LE CONTENU D'UN AUTRE CANAL exige Master.
+        # Lire ailleurs pour soi (notice) reste du ressort de l'Administrateur ;
+        # le recracher devant un public qui n'etait pas dans la conversation est
+        # un geste d'une autre nature — les gens de #autre n'ont pas choisi cette
+        # audience. La porte ne se leve donc que pour ce cas precis.
+        my $cross = (lc($src_channel) ne lc($channel // '')) ? 1 : 0;
+        if ($cross && $can_public) {
+            unless ($ctx->require_level('Master')) {
+                return;
+            }
+        }
+
         my $send_out = $can_public
             ? sub { Mediabot::Helpers::botPrivmsg($self, $channel, $_[0]) }
             : sub { Mediabot::Helpers::botNotice($self, $nick, $_[0]) };
@@ -1358,7 +1432,9 @@ sub claude_ctx {
         # (Helpers::channel_lang, mb563 : chansets LangFR/LangES, sinon
         # main.LANG dont le defaut est 'en' — l'anglais reste donc le defaut
         # historique, aucun canal existant ne change de comportement).
-        my $lang = resolve_ai_lang($self, $channel, $forced_lang);
+        # La langue suit le canal RESUME (c'est sa conversation), pas celui
+        # ou l'on parle ; un jeton force gagne toujours.
+        my $lang = resolve_ai_lang($self, $src_channel, $forced_lang);
         if (defined $bad_lang) {
             Mediabot::Helpers::botNotice($self, $nick,
                 "Unsupported language '$bad_lang' (en, fr, es) - using '$lang'.");
@@ -1376,7 +1452,7 @@ sub claude_ctx {
 
         if (defined $period && $period eq 'last') {
             # mb91-IMP2: depuis le dernier !ai summary sur ce canal.
-            my $last_ts = $self->{_claude_summary_ts}{"summary_last:$channel"} // 0;
+            my $last_ts = $self->{_claude_summary_ts}{"summary_last:$src_channel"} // 0;
             if ($last_ts > 0) {
                 $date_filter = "AND cl.ts > FROM_UNIXTIME($last_ts)";
                 my $mins = int((time() - $last_ts) / 60);
@@ -1435,7 +1511,7 @@ sub claude_ctx {
         # annonce, donc l'utilisateur sait toujours ce qui a ete lu.
         $n_msgs = $CLAUDE_SUMMARY_FETCH_CAP if $date_filter;
         my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
-        unless ($dbh && defined $channel) {
+        unless ($dbh && defined $src_channel) {
             Mediabot::Helpers::botNotice($self, $nick, 'Not available in private or DB not connected.'); return;
         }
         # mb626-B1: lecture de la periode. Le comptage d'abord (index
@@ -1458,7 +1534,7 @@ sub claude_ctx {
                 $where
                 ORDER BY cl.id_channel_log DESC LIMIT ?
             }) or return undef;
-            return undef unless $q->execute($channel, @nick_bind, $limit);
+            return undef unless $q->execute($src_channel, @nick_bind, $limit);
             my @out;
             while (my $r = $q->fetchrow_hashref) { unshift @out, "$r->{nick}: $r->{text}" }
             $q->finish;
@@ -1468,7 +1544,7 @@ sub claude_ctx {
         my @rows;
         my $n_total;
         my $summary_last_ts =
-            $self->{_claude_summary_ts}{"summary_last:$channel"} // 0;
+            $self->{_claude_summary_ts}{"summary_last:$src_channel"} // 0;
         my ($win_start, $win_end) =
             _summary_period_bounds($period, $period_arg, $summary_last_ts);
         # mb628-B1: le mode 'last' etait historiquement STRICTEMENT posterieur
@@ -1486,7 +1562,7 @@ sub claude_ctx {
                 WHERE c.name = ? $nick_cond AND cl.event_type IN ('public','action')
                   AND cl.ts $win_start_op $win_start AND cl.ts < $win_end
             });
-            if ($cq && $cq->execute($channel, @nick_bind)) {
+            if ($cq && $cq->execute($src_channel, @nick_bind)) {
                 ($n_total) = $cq->fetchrow_array;
                 $cq->finish;
             }
@@ -1529,7 +1605,7 @@ sub claude_ctx {
 
         unless (@rows) {
             # mb608-B1: message de service dans la langue de sortie.
-            $send_out->(sprintf(_summary_lang_strings($lang)->{none}, $channel,
+            $send_out->(sprintf(_summary_lang_strings($lang)->{none}, $src_channel,
                 _summary_period_label($lang, $date_key, $date_arg)));
             return;
         }
@@ -1555,8 +1631,8 @@ sub claude_ctx {
         my $who_str    = $filter_nick ? " by $filter_nick" : "";
         my $n_found    = scalar @rows;
         # mb91-IMP2: mémoriser le timestamp pour le mode !ai summary last
-        if (defined $channel) {
-            $self->{_claude_summary_ts}{"summary_last:$channel"} = time();
+        if (defined $src_channel) {
+            $self->{_claude_summary_ts}{"summary_last:$src_channel"} = time();
         }
         # mb108-IMP4: notifier immédiatement le nb de messages analysés (feedback avant l'appel API)
         # mb608-B1: idem pour l'accuse de reception (le prompt, lui, garde
@@ -1565,7 +1641,7 @@ sub claude_ctx {
             ? sprintf(_summary_lang_strings($lang)->{by}, $filter_nick) : '';
         $send_out->(sprintf(_summary_lang_strings($lang)->{working},
             $n_found, $who_out,
-            _summary_period_label($lang, $date_key, $date_arg), $channel));
+            _summary_period_label($lang, $date_key, $date_arg), $src_channel));
         # mb623-B1: dire ce qui a ete lu ET ce qui a ete analyse. Un resume qui
         # ne couvre pas tout doit l'annoncer : c'est exactement ce que faisait
         # l'ancien plafond de 200 messages, en silence.

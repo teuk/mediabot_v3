@@ -76,15 +76,16 @@ return sub {
         'défaut inchangé (2-3 phrases)');
     # mb623: la syntaxe vit dans @_summary_usage_lines (source unique lue par
     # l'aide ET par les messages d'erreur).
-    $assert->like($code, qr/Syntaxe: ai summary \[periode\] \[pseudo\] \[options\]/,
+    # mb636: le canal cible entre dans la syntaxe annoncee.
+    $assert->like($code, qr/Syntaxe: ai \[#canal\] summary \[periode\] \[pseudo\] \[options\]/,
         'aide inline: ligne usage');
-    $assert->like($code, qr/Exemples: ai summary today \| ai summary today teuk/,
+    $assert->like($code, qr/Exemples: ai summary \| ai summary public \| ai summary today/,
         'aide inline: exemples');
 
     # L'aide interne (help ai) mentionne la nouvelle syntaxe.
     my $med = _slurp_630(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
     # mb608: la langue de sortie rejoint la syntaxe annoncee.
-    $assert->like($med, qr/summary \(Administrator\+\) \[periode\] \[N\] \[Nl\] \[public\] \[en\|fr\|es\] \[nick\] \(details: ai summary help\)/,
+    $assert->like($med, qr/\[#channel\] summary \(Administrator\+; Master\+ to publish another channel here\) \[periode\]/,
         'help ai: syntaxe summary à jour');
 
     $assert->like($src, qr/mb415-R1/, 'tag mb415-R1');

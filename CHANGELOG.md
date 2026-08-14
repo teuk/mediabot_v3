@@ -10,6 +10,47 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb637 — l'identite du canal source est canonique, pas celle tapee
+- AUDIT pre-commit de mb636 : la cible explicite etait verifiee via la cle
+  `lc(...)` du cache des canaux, mais la graphie fournie par l'operateur
+  continuait ensuite dans SQL, les chansets et surtout la cle memoire
+  `summary_last:<canal>`. `#35+ANS` puis `#35+ans summary last` pouvaient donc
+  creer deux timelines pour le meme canal IRC.
+- Apres reconnaissance, la branche recupere desormais le nom canonique via
+  l'objet `Channel->get_name` et n'utilise plus que cette identite stable pour
+  les lectures, la langue, les annonces et l'horodatage `last`.
+- Le test 817 utilise maintenant de vrais petits objets Channel et couvre une
+  cible saisie avec une casse differente : bind SQL et annonce retombent tous
+  deux sur `#35+ans`. 34 assertions au total dans le test cible.
+
+### mb636 — « ai [#canal] summary » : resumer un autre canal depuis une console
+- Nouvelle forme : « ai #35+ans summary » lit l'historique du canal NOMME au
+  lieu du canal courant. Le jeton se place avant le mot summary et n'est
+  reconnu QUE la — sans quoi « ai #linux c'est quoi ? » perdrait son premier
+  mot au lieu de partir en question au modele.
+- DEUX canaux desormais distincts, et tenus separes dans tout le corps de la
+  sous-commande : $src_channel (celui qu'on LIT : requetes, comptage,
+  horodatage du dernier resume, langue, libelle de l'annonce) et $channel
+  (celui ou l'on PARLE : destination de « public »). Sans cible, les deux
+  valent le canal courant — comportement historique strictement inchange.
+- NIVEAUX. Administrator+ pour resumer, comme avant. Master+ EN PLUS pour
+  publier le resume d'un AUTRE canal sur le canal courant : lire ailleurs
+  pour soi et le recracher devant une audience qui n'etait pas dans la
+  conversation sont deux gestes de nature differente — les gens du canal
+  resume n'ont pas choisi ce public. La porte ne se leve que pour ce cas, et
+  un refus n'execute AUCUNE requete.
+- Un canal que le bot ne connait pas est annonce comme tel au lieu de rendre
+  « aucun message trouve », qui laissait croire a un salon vide.
+- La langue suit le canal RESUME (c'est sa conversation) ; un jeton force
+  gagne toujours.
+- Syntaxe canonique reecrite : le canal, la destination et les deux niveaux y
+  figurent, avec les exemples demandes. Pins 630/791/806/813 alignes.
+- Test 817 (31 assertions) : les quatre formes historiques inchangees, la
+  cible explicite en notice, le croisement public refuse a un Administrateur
+  SANS toucher la base puis accorde a un Master, le canal inconnu, la
+  non-capture d'un prompt, et la separation source/destination verifiee sur
+  chaque site de lecture.
+
 ### mb635 — l'updater prepare le nouveau chateau avant d'eteindre l'ancien
 - AUDIT pre-commit : `deploy_update.sh` arretait le bot AVANT `git clone` et
   les validations du candidat. Un echec reseau ou un clone invalide creait

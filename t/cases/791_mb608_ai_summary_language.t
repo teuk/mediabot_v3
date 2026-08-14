@@ -93,7 +93,9 @@ return sub {
         'mb608-791: force > langue du canal');
     $assert->like($src, qr/sub resolve_ai_lang \{.*?\$lang = 'en' unless \$lang =~/s,
         'mb608-791: ... et repli anglais si la valeur sort du trio');
-    $assert->like($src, qr/my \$lang = resolve_ai_lang\(\$self, \$channel, \$forced_lang\)/,
+    # mb636: la langue suit le canal RESUME ($src_channel), qui vaut le canal
+    # courant tant qu'aucune cible n'est nommee.
+    $assert->like($src, qr/my \$lang = resolve_ai_lang\(\$self, \$src_channel, \$forced_lang\)/,
         'mb608-791: summary consomme le helper partage');
     $assert->like($src, qr/Unsupported language '\$bad_lang'/,
         'mb608-791: un code inconnu previent l appelant');
@@ -117,6 +119,6 @@ return sub {
         'mb608-791: l aide documente l echappement des pseudos homonymes');
     my $mb = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Mediabot.pm'
         or die $!; local $/; <$fh> };
-    $assert->like($mb, qr/summary \(Administrator\+\) \[periode\] \[N\] \[Nl\] \[public\] \[en\|fr\|es\]/,
+    $assert->like($mb, qr/\[#channel\] summary \(Administrator\+; Master\+ to publish another channel here\) \[periode\] \[N\] \[Nl\] \[public\] \[en\|fr\|es\]/,
         'mb608-791: la ligne de commande publique annonce la langue');
 };

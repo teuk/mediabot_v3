@@ -133,7 +133,8 @@ return sub {
     }
 
     # [5] les trois aides annoncent le niveau
-    $assert->like($disp, qr/summary \(Administrator\+\)/,
+    # mb636: la ligne annonce aussi le niveau supplementaire du croisement.
+    $assert->like($disp, qr/summary \(Administrator\+; Master\+ to publish another channel here\)/,
         'mb631-813: la ligne de commande publique l annonce');
     my @usage = Mediabot::External::Claude::_summary_usage();
     $assert->ok((grep { /Administrator\+/ } @usage),
