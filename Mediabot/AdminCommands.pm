@@ -2655,19 +2655,11 @@ sub update_ctx {
     my $self = $ctx->bot;
     my $nick = $ctx->nick;
 
-    return unless $ctx->require_level('Master');
-
-    my $script = 'install/deploy_update.sh';
-    my $msg = "The IRC update command is disabled for safety. Use ./$script manually from the mediabot_v3 directory.";
-
-    if ($ctx->is_private) {
-        $ctx->reply_private($msg);
-    } else {
-        botNotice($self, $nick, $msg);
-    }
-
-    logBot($self, $ctx->message, undef, 'update', 'disabled');
-    return 1;
+    # mb631-B1: la commande n'est plus desactivee — elle est ENCADREE.
+    # Toute la logique (niveau, chemin protege, comparaison de versions,
+    # lancement detache) vit dans Mediabot::Update, qui la rend testable.
+    require Mediabot::Update;
+    return Mediabot::Update::update_ctx($ctx);
 }
 
 sub update {

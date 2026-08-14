@@ -10,6 +10,109 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb635 — l'updater prepare le nouveau chateau avant d'eteindre l'ancien
+- AUDIT pre-commit : `deploy_update.sh` arretait le bot AVANT `git clone` et
+  les validations du candidat. Un echec reseau ou un clone invalide creait
+  donc une coupure inutile ; sous systemd, le restart pouvait aussi partir
+  pendant que l'ancien arbre etait encore le chemin actif.
+- L'ordre devient : clone -> syntaxe/integrity du STAGE -> SIGTERM -> copie de
+  la conf et du dernier cerveau Hailo -> deux `mv` locaux -> validation finale.
+  La partie lente et faillible se fait bot vivant ; la section critique apres
+  SIGTERM est reduite au strict minimum.
+- La conf et le cerveau restent copies APRES l'arret : le `.brn` sauvegarde est
+  donc bien l'etat final du bot, pas une image prise pendant qu'il ecrit encore.
+- Test 816 : verrouille l'ordre des etapes, la validation avant SIGTERM et la
+  restauration de l'etat prive entre SIGTERM et activation.
+
+### mb634 — la garde teuk.org exige le nom d'hote ENTIER
+- CORRECTION demandee avant commit : `teuk.org` dans le NOM d'un autre hote
+  ne suffit jamais a refuser une mise a jour. La protection integree ne
+  s'applique que si le chemin normalise est `/home/mediabot/mediabot_v3` ET si
+  le hostname courant est exactement `teuk.org` (casse ignoree, point DNS
+  final optionnel).
+- `mediabot.teuk.org`, `foo-teuk.org`, `teuk.org.example`, un autre serveur et
+  un hostname introuvable sont donc autorises par CETTE protection integree.
+  Les protections de conf `<path>@<host>` suivent la meme egalite exacte ;
+  un `<path>` nu reste volontairement protege sur tous les hotes.
+- `install/deploy_update.sh` applique la meme paire exacte chemin+hote et ne
+  depend plus du compte Unix qui l'a lancee : root ne contourne pas la garde
+  sur l'hote exact, et un sous-domaine n'est pas pris pour `teuk.org`.
+- NUMEROTATION : la nouvelle commande update, appelee mb631 dans le CR Claude,
+  devient mb632 car mb631 est deja le round `ai summary` commite. La passe
+  chemin+hote devient mb633. Le test 814 est renomme en consequence et etendu
+  pour verrouiller les faux positifs de sous-chaine et la garde shell.
+
+### mb633 — la protection de l'update est un couple chemin+hote, pas un chemin
+- CORRECTION d'une vraie erreur de mb632, relevee par teuk : proteger
+  /home/mediabot/mediabot_v3 « quel que soit l'hote » etait faux. C'est le
+  chemin d'installation NORMAL d'un mediabot — les autres serveurs
+  (nbot.soyou.rocks entre autres) l'utilisent aussi. La commande aurait donc
+  refuse la mise a jour precisement la ou elle est attendue, et n'aurait
+  jamais pu etre essayee ailleurs qu'en la modifiant.
+- La protection integree devient un COUPLE : /home/mediabot/mediabot_v3 SUR
+  teuk.org, comme le fait deja install/deploy_update.sh. Le meme chemin sur
+  un autre serveur redevient une installation ordinaire, donc updatable.
+- L'hote courant est cherche a plusieurs sources (Sys::Hostname, POSIX::uname,
+  /etc/hostname) parce qu'une seule peut rendre le nom court ; la
+  correspondance est une sous-chaine insensible a la casse, comme le
+  grep -qi "teuk\.org" du script — « teuk.org » attrape donc aussi
+  « mediabot.teuk.org ».
+- Hote INTROUVABLE sur un chemin protege : refus. Ne pas savoir ou l'on est
+  n'est pas une raison de se croire ailleurs, et le cout d'un faux refus est
+  un « fais-le a la main » la ou un faux accord ecraserait une production.
+- Conf : update.PROTECTED_PATHS accepte desormais <chemin>@<hote> pour viser
+  une instance, ou un <chemin> nu pour proteger partout (choix explicite de
+  l'operateur). Elle ne peut toujours qu'AJOUTER.
+- Test 814 etendu : matrice chemin×hote (prod refusee sous FQDN complet ou
+  exact, MEME CHEMIN sur un autre serveur autorise, dev sur teuk.org
+  autorise, slash final), refus prudent quand l'hote est inconnu, et les deux
+  formes de conf.
+
+### mb632 — `update` : mettre a jour Mediabot depuis GitHub, depuis IRC
+- « m update » (reponse sur le canal) et « /msg mediabot update » (reponse en
+  prive) interrogent GitHub, comparent avec la version locale et, avec
+  « update now », installent la nouvelle version. Master+ requis.
+- Nouveau module Mediabot/Update.pm. Il est ecrit a l'envers des autres : tout
+  ce qui REFUSE d'abord, ce qui agit ensuite. Les regles de refus sont des
+  fonctions PURES (update_eligibility, update_decision, restart_mode) parce
+  que c'est la seule partie qu'une suite de tests peut prouver — l'echange
+  reel (clone, bascule, SIGTERM) ne se rejoue pas.
+- INSTANCE PROTEGEE : /home/mediabot/mediabot_v3 est refuse quels que soient
+  l'utilisateur et la machine. La regle porte sur le CHEMIN, pas sur un
+  triplet utilisateur+hote+chemin : « je suis root » n'ouvre pas la porte.
+  La conf (update.PROTECTED_PATHS) ne peut qu'AJOUTER des chemins proteges,
+  jamais en retirer — une protection desactivable n'est pas une protection.
+- Prerequis verifies avant tout appel reseau : nom du repertoire, presence de
+  mediabot.pl et de install/deploy_update.sh, bit executable, repertoire
+  parent inscriptible (sans quoi la rotation des releases echouerait a
+  mi-chemin).
+- VERSIONS : le comparateur existant (_compare_mediabot_versions) et le
+  fetch non bloquant existant (getVersion_async) sont reutilises — aucune
+  seconde implementation. Cinq etats distincts : disponible, deja a jour,
+  LOCAL EN AVANCE (refus de downgrade), illisible, incomparable. Seul
+  « disponible » autorise l'action.
+- Le travail lourd reste dans install/deploy_update.sh (clone, restauration
+  de mediabot.conf et du cerveau Hailo, perl -c et integrity check sur
+  l'arbre STAGE, rotation mediabot_v3 -> mediabot_v3.N, rollback si la
+  validation post-bascule echoue).
+- LE POINT QUE PERSONNE N'AVAIT NOMME : deploy_update.sh envoie SIGTERM au bot
+  et NE LE REDEMARRE PAS. Sous systemd l'unite le relance ; lance a la main,
+  le bot reste ETEINT. La commande detecte le mode et l'ANNONCE avant d'agir
+  (« the bot will STAY DOWN until you start it again ») au lieu de laisser
+  l'operateur le decouvrir.
+- « update » seul ne fait QUE diagnostiquer ; seul « now » agit. Une commande
+  qui remplace le code du bot ne se declenche pas sur un mot isole.
+- Le script est lance DETACHE (setsid + double fork, sortie journalisee dans
+  var/update.log) : il va tuer le bot, il ne peut donc pas rester son fils.
+- install/deploy_update.sh : son message de refus renvoyait vers « la commande
+  IRC » — laquelle refuse desormais exactement le meme chemin. Les deux portes
+  disent la meme chose au lieu de se renvoyer l'une a l'autre.
+- Test 814 (74 assertions) : chemin protege sous ses variantes, conf qui ne
+  desarme rien, chaque prerequis manquant avec sa raison, les cinq etats de
+  version, Master pose AVANT toute autre chose (un refus n'interroge pas
+  GitHub et ne lance rien), diagnostic sans action, detection et annonce du
+  mode de redemarrage, detachement, et coherence des deux portes.
+
 ### mb631 — 'ai summary' passe Administrator, et une garde de test cesse de mentir
 - NUMEROTATION : cette passe etait nommee mb630 dans le CR Claude, mais mb630
   est deja le garde de verite du dispatch commite la veille. Elle devient donc

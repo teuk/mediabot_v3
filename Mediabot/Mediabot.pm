@@ -2329,6 +2329,8 @@ sub mbCommandPublic {
             mbHelp_ctx($ctx);
         },
         spike        => sub { $ctx->reply("https://teuk.org/In_Spike_Memory.jpg") },
+        # mb631-B1: « m update » sur le canal, « /msg bot update » en prive —
+        # meme fonction (update_ctx), la sortie suit le lieu de l'appel.
         update       => sub { update_ctx($ctx) },
     );
 
@@ -2688,6 +2690,7 @@ userinfo|userinfo <nick>|admin|Show information about a user.
 users|users|admin|List or count known users.
 verify|verify|public|Verify your authentication or account state.
 version|version|public|Show bot version.
+update|update [check\|now]|public|Check GitHub for a newer release and, with 'now', install it (config and Hailo brain preserved). Master+.
 voice|voice #channel [nick]|operator+|Give voice on a channel.
 weather|weather [city]|public|Display weather information.
 whereis|whereis <nick>|public|Locate a nick or channel when known.

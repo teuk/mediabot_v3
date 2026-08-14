@@ -10,14 +10,20 @@ PROJECT_NAME="$(basename "$PROJECT_DIR")"
 TARGET_REAL="$PROJECT_DIR"
 
 CURRENT_HOST="$(hostname -f 2>/dev/null || hostname)"
+CURRENT_HOST_NORM="${CURRENT_HOST,,}"
+CURRENT_HOST_NORM="${CURRENT_HOST_NORM%.}"
 CURRENT_USER="$(id -un)"
 
 # +-------------------------------------------------------------------------+
-# | [0] Safety check: refuse to run on teuk.org production instance        |
+# | [0] Safety check: refuse ONLY the exact teuk.org production instance   |
 # +-------------------------------------------------------------------------+
-if [ "$CURRENT_USER" = "mediabot" ] &&    echo "$CURRENT_HOST" | grep -qi "teuk\.org" &&    [ "$TARGET_REAL" = "/home/mediabot/mediabot_v3" ]; then
+# mb634: hostname equality is exact (case-insensitive, optional final DNS dot).
+# A host merely containing "teuk.org" — e.g. mediabot.teuk.org — is NOT
+# teuk.org and must not be refused for the normal /home/mediabot path.
+# The guard is about the path+host pair, not the Unix account used to launch it.
+if [ "$CURRENT_HOST_NORM" = "teuk.org" ] && [ "$TARGET_REAL" = "/home/mediabot/mediabot_v3" ]; then
     echo "🚫 Refusing to update the production instance on teuk.org."
-    echo "   Use the IRC command or a manual procedure on this server."
+    echo "   The IRC 'update' command refuses this exact path+host pair too: update it manually."
     exit 1
 fi
 
@@ -67,8 +73,56 @@ echo "==> Backup directory will be: ${BACKUP_DIR}"
 echo
 
 # +-------------------------------------------------------------------------+
-# | [2] Find the running instance to stop                                   |
+# | [2] Clone the latest version into a temporary directory                 |
 # +-------------------------------------------------------------------------+
+TMP_CLONE_DIR="$(mktemp -d "${PARENT_DIR}/mediabot_v3.new.XXXXXX")"
+echo "🌐 Cloning the latest version from GitHub into ${TMP_CLONE_DIR} ..."
+
+git clone https://github.com/teuk/mediabot_v3 "${TMP_CLONE_DIR}"
+[ -f "${TMP_CLONE_DIR}/mediabot.pl" ] || fail "clone completed but mediabot.pl is missing in ${TMP_CLONE_DIR}"
+echo
+
+# +-------------------------------------------------------------------------+
+# | [3] Validate the staged release before switching                        |
+# +-------------------------------------------------------------------------+
+echo "🔍 Checking Perl syntax in the staged release ..."
+(
+    cd "${TMP_CLONE_DIR}"
+    perl -c mediabot.pl
+)
+echo "✅ Staged release passed syntax validation."
+echo
+
+# A3 (mb469): startup integrity check on the STAGED tree, before switching.
+# perl -c only proves the entry point parses; it does NOT catch a mediabot.pl
+# calling a method absent from the modules, a missing dispatch handler, or a
+# stale orphan .pm from a previous version (the 04/07 Undernet crash class).
+# We generate a manifest from the freshly cloned candidate (its own tree is the
+# reference) and verify the staged tree against it. Refuse to switch on failure.
+if [ -f "${TMP_CLONE_DIR}/tools/startup_integrity_check.pl" ]; then
+    echo "🧪 Running startup integrity check on the staged release ..."
+    STAGED_MANIFEST="$(mktemp "${TMP_CLONE_DIR}/.manifest.XXXXXX")"
+    (
+        cd "${TMP_CLONE_DIR}"
+        perl tools/startup_integrity_check.pl --gen-manifest "${STAGED_MANIFEST}" --quiet
+        perl tools/startup_integrity_check.pl --manifest "${STAGED_MANIFEST}"
+    ) || fail "startup integrity check failed on the staged release — NOT switching. The clone is inconsistent; investigate before retrying."
+    rm -f "${STAGED_MANIFEST}" 2>/dev/null || true
+    echo "✅ Staged release passed the integrity check."
+    echo
+else
+    echo "⚠️  tools/startup_integrity_check.pl absent from the clone — skipping deep integrity check."
+    echo "    (Older candidate? The syntax check above still applies.)"
+    echo
+fi
+
+# +-------------------------------------------------------------------------+
+# | [4] Find the running instance to stop                                   |
+# +-------------------------------------------------------------------------+
+# mb635: clone + staged validation happen BEFORE this stop. A failed GitHub
+# fetch or bad candidate must never create downtime. With systemd RestartSec,
+# the remaining critical section is now only: stop -> restore private state ->
+# two local mv operations -> final syntax check, so restart sees the new tree.
 while IFS= read -r PID; do
     [ -z "$PID" ] && continue
 
@@ -126,17 +180,7 @@ fi
 echo
 
 # +-------------------------------------------------------------------------+
-# | [3] Clone the latest version into a temporary directory                 |
-# +-------------------------------------------------------------------------+
-TMP_CLONE_DIR="$(mktemp -d "${PARENT_DIR}/mediabot_v3.new.XXXXXX")"
-echo "🌐 Cloning the latest version from GitHub into ${TMP_CLONE_DIR} ..."
-
-git clone https://github.com/teuk/mediabot_v3 "${TMP_CLONE_DIR}"
-[ -f "${TMP_CLONE_DIR}/mediabot.pl" ] || fail "clone completed but mediabot.pl is missing in ${TMP_CLONE_DIR}"
-echo
-
-# +-------------------------------------------------------------------------+
-# | [4] Restore config and Hailo brain into the temporary clone             |
+# | [5] Restore config and Hailo brain into the temporary clone             |
 # +-------------------------------------------------------------------------+
 echo "⚙️  Restoring config and Hailo brain into the staged release ..."
 
@@ -159,40 +203,6 @@ else
     echo "⚠️  Warning: no .brn brain file was found in the current or archived releases."
 fi
 echo
-
-# +-------------------------------------------------------------------------+
-# | [5] Validate the staged release before switching                        |
-# +-------------------------------------------------------------------------+
-echo "🔍 Checking Perl syntax in the staged release ..."
-(
-    cd "${TMP_CLONE_DIR}"
-    perl -c mediabot.pl
-)
-echo "✅ Staged release passed syntax validation."
-echo
-
-# A3 (mb469): startup integrity check on the STAGED tree, before switching.
-# perl -c only proves the entry point parses; it does NOT catch a mediabot.pl
-# calling a method absent from the modules, a missing dispatch handler, or a
-# stale orphan .pm from a previous version (the 04/07 Undernet crash class).
-# We generate a manifest from the freshly cloned candidate (its own tree is the
-# reference) and verify the staged tree against it. Refuse to switch on failure.
-if [ -f "${TMP_CLONE_DIR}/tools/startup_integrity_check.pl" ]; then
-    echo "🧪 Running startup integrity check on the staged release ..."
-    STAGED_MANIFEST="$(mktemp "${TMP_CLONE_DIR}/.manifest.XXXXXX")"
-    (
-        cd "${TMP_CLONE_DIR}"
-        perl tools/startup_integrity_check.pl --gen-manifest "${STAGED_MANIFEST}" --quiet
-        perl tools/startup_integrity_check.pl --manifest "${STAGED_MANIFEST}"
-    ) || fail "startup integrity check failed on the staged release — NOT switching. The clone is inconsistent; investigate before retrying."
-    rm -f "${STAGED_MANIFEST}" 2>/dev/null || true
-    echo "✅ Staged release passed the integrity check."
-    echo
-else
-    echo "⚠️  tools/startup_integrity_check.pl absent from the clone — skipping deep integrity check."
-    echo "    (Older candidate? The syntax check above still applies.)"
-    echo
-fi
 
 # +-------------------------------------------------------------------------+
 # | [6] Rotate current release and activate the new one                     |
