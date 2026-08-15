@@ -10,6 +10,49 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb643 — le worker de version adopte le pipe/fork eprouve en production
+- TERRAIN (nbot/Epiknet) : mb642 supprimait le faux
+  `version check worker could not be reaped`, mais `m update` pouvait ensuite
+  rester suspendu sans reponse finale. Le test reel sur l'instance Epiknet a
+  reproduit le hang.
+- CAUSE : le worker utilisait encore le `open(..., '-|')` special de Perl tout
+  en confiant le meme PID a `IO::Async::watch_process()`. Ce piped-open garde
+  sa propre gestion de processus et ne constitue pas une base saine pour le
+  watcher IO::Async.
+- FIX : `getVersion_async` suit maintenant le pattern deja eprouve par le
+  worker Achievements : `pipe()` explicite, `fork()` explicite, fermeture des
+  extremites inutiles, ecriture du JSON sur le descripteur enfant et
+  `watch_process()` comme proprietaire unique de la fin du processus.
+- LIVENESS : apres le timeout, TERM puis KILL restent inchanges ; une garde de
+  finalisation forcee a +2 s garantit qu'une notification de processus perdue
+  ne peut plus laisser la commande IRC pendue indefiniment.
+- VALIDATION TERRAIN : sur nbot/Epiknet, `m update` repond en ~1 s avec la
+  version locale et la version GitHub identiques puis `Already up to date`.
+- Nouveau test 823 : verrouille le pipe/fork explicite, l'absence de piped-open,
+  le descripteur d'ecriture dedie, `watch_process()` et la garde de liveness.
+
+### mb642 — le worker de version laisse IO::Async recolter son propre enfant
+- TERRAIN (#teuk) : `m update` terminait en ~1 seconde avec
+  `version check worker could not be reaped` alors que le fetch distant avait
+  le temps de reussir. Ce n'etait pas un echec GitHub : le parent et IO::Async
+  se disputaient le meme PID.
+- CAUSE : `getVersion_async` pollait `waitpid(..., WNOHANG)` alors que la boucle
+  IO::Async possede deja SIGCHLD et la collecte des processus. Le projet avait
+  deja corrige exactement cette course dans le worker YouTube (MB321) avec
+  `watch_process()`, mais le worker de version avait reintroduit l'ancien
+  schema.
+- FIX : le PID est desormais enregistre avec `watch_process()` ; le statut brut
+  fourni par IO::Async alimente les diagnostics signal/exit. Tout `waitpid`
+  manuel disparait de `getVersion_async`. Le timeout conserve TERM puis KILL,
+  et la fin attend toujours a la fois le statut enfant et EOF (sauf timeout).
+- Si la boucle ne sait pas surveiller les processus, ou si l'enregistrement du
+  watcher echoue, le callback recoit une raison explicite sans bloquer l'IRC.
+- Le diagnostic `version sources` ne pretend plus qu'un override est actif
+  quand les URL GitHub integrees sont utilisees : il indique comment definir
+  `update.VERSION_URL` pour les remplacer.
+- Tests 539/821 adaptes ; nouveau test 822 verrouille la propriete SIGCHLD par
+  IO::Async, l'absence de `waitpid` manuel et le libelle source non trompeur.
+
 ### mb641 — derniere garde : aucun chemin terminal du worker ne reste muet
 - AUDIT pre-commit de mb640 : la promesse « ne jamais echouer en silence »
   restait fausse sur quatre chemins rares mais reels. Un echec de `open(...,

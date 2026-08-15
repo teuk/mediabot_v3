@@ -38,8 +38,8 @@ return sub {
     # Toutes les terminaisons du parent doivent etre distinguees.
     $assert->like($async, qr/version check timed out/,
         'mb641-821: timeout garde sa raison');
-    $assert->like($async, qr/version check worker could not be reaped/,
-        'mb641-821: waitpid impossible => raison');
+    $assert->like($async, qr/version check worker setup failed:/,
+        'mb642-821: echec du process watcher => raison');
     $assert->like($async, qr/version check worker terminated by signal \$signal/,
         'mb641-821: signal => raison');
     $assert->like($async, qr/version check worker exited with status \$exit/,

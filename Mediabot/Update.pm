@@ -314,7 +314,7 @@ sub update_ctx {
                 @sources = @Mediabot::Helpers::VERSION_URLS unless @sources;
                 _say($ctx, '  version source' . (@sources > 1 ? 's: ' : ': ')
                     . join(' -> ', @sources)
-                    . ' (override: conf update.VERSION_URL)');
+                    . ' (set conf update.VERSION_URL to override)');
             }
             _log($self, $ctx, 'check',
                 $decision->{state} . (defined $why ? " ($why)" : ''));

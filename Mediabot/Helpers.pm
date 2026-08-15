@@ -2670,15 +2670,41 @@ sub getVersion_async {
         return 1;
     }
 
-    my $child_pid = open(my $pipe, '-|');
+    # mb642-B1: IO::Async owns SIGCHLD/process collection. The version worker
+    # must register with watch_process() exactly like the existing YouTube
+    # worker does. Polling waitpid() in parallel races the loop: IO::Async may
+    # reap the child first, after which waitpid() returns -1 and a perfectly
+    # successful VERSION fetch is misreported as "could not be reaped".
+    unless ($loop->can('watch_process')) {
+        my $local = _usable_local_version($fallback_local) // 'Undefined';
+        my $reason = 'version check worker setup failed: '
+            . 'event loop cannot watch child processes';
+        eval { $callback->($local, 'Undefined', $reason); 1; };
+        return 1;
+    }
+
+    # mb643-B1: explicit pipe + fork, matching the proven Achievements worker.
+    # Perl's piped-open ('-|') carries its own child-process bookkeeping; using
+    # it together with IO::Async::watch_process left the live Epiknet check
+    # waiting forever after mb642. A plain pipe/fork gives IO::Async one clear
+    # owner for process completion.
+    my ($pipe, $child_write);
+    unless (pipe($pipe, $child_write)) {
+        my $error = "$!";
+        $error = 'unknown error' unless defined $error && $error =~ /\S/;
+        $error =~ s/\s+/ /g;
+        my $reason = 'version check worker pipe failed: ' . substr($error, 0, 150);
+        my $local = _usable_local_version($fallback_local) // 'Undefined';
+        eval { $callback->($local, 'Undefined', $reason); 1; };
+        return 1;
+    }
+
+    my $child_pid = fork();
 
     unless (defined $child_pid) {
-        # mb641-B1: meme l'echec de CREATION du worker doit expliquer pourquoi
-        # le distant manque. L'ancien chemin appelait le callback avec seulement
-        # (local, Undefined), recreant exactement le symptome que mb640 promet
-        # d'eliminer. $! est local au fork/open : on le capture tout de suite,
-        # on le rend monoligne et on le borne avant de l'envoyer vers IRC.
         my $error = "$!";
+        eval { close $pipe };
+        eval { close $child_write };
         $error = 'unknown error' unless defined $error && $error =~ /\S/;
         $error =~ s/\s+/ /g;
         my $reason = 'version check worker could not start: ' . substr($error, 0, 150);
@@ -2688,6 +2714,7 @@ sub getVersion_async {
     }
 
     if ($child_pid == 0) {
+        eval { close $pipe };
         # Suppress duplicate version logs from the forked worker and avoid
         # inherited bot/DB/IRC destructors when the child finishes.
         local $self->{logger} = bless {}, 'Mediabot::Helpers::_SilentLogger';
@@ -2723,11 +2750,11 @@ sub getVersion_async {
 
         my $offset = 0;
         local $SIG{PIPE} = 'IGNORE';
-        binmode(STDOUT, ':raw');
+        binmode($child_write, ':raw');
 
         while ($offset < length($payload)) {
             my $written = syswrite(
-                STDOUT,
+                $child_write,
                 $payload,
                 length($payload) - $offset,
                 $offset,
@@ -2738,8 +2765,11 @@ sub getVersion_async {
             $offset += $written;
         }
 
+        eval { close $child_write };
         POSIX::_exit(0);
     }
+
+    eval { close $child_write };
 
     my $state = {
         output      => '',
@@ -2747,14 +2777,14 @@ sub getVersion_async {
         child_done  => 0,
         finalized   => 0,
         timed_out   => 0,
-        wait_failed => 0,
         wait_status => undef,
         term_sent   => 0,
         kill_sent   => 0,
+        force        => 0,
     };
 
-    my ($stream, $timeout_timer, $kill_timer, $reap_timer);
-    my ($finish, $schedule_reap);
+    my ($stream, $timeout_timer, $kill_timer, $force_timer);
+    my $finish;
 
     my $remove_timer = sub {
         my ($timer) = @_;
@@ -2765,14 +2795,14 @@ sub getVersion_async {
 
     $finish = sub {
         return if $state->{finalized};
-        return unless $state->{child_done};
-        return unless $state->{pipe_eof} || $state->{timed_out};
+        return unless $state->{force}
+            || ($state->{child_done} && ($state->{pipe_eof} || $state->{timed_out}));
 
         $state->{finalized} = 1;
 
         $remove_timer->($timeout_timer);
         $remove_timer->($kill_timer);
-        $remove_timer->($reap_timer);
+        $remove_timer->($force_timer);
         eval { $loop->remove($stream) } if $stream;
         eval { close $pipe };
 
@@ -2782,18 +2812,11 @@ sub getVersion_async {
         );
         my $reason;
 
-        # mb641-B1: chaque sortie TERMINALE du worker doit avoir un sens. mb640
-        # couvrait le timeout et le payload totalement vide, mais pas :
-        #   - waitpid qui echoue ;
-        #   - enfant tue par signal / exit non-zero ;
-        #   - JSON tronque ou autrement illisible mais NON vide.
-        # Ces chemins rendaient encore (local, Undefined, undef), donc le meme
-        # « github: Undefined » muet que le round cherchait justement a fermer.
+        # mb641-B1/mb642-B1: chaque sortie TERMINALE du worker doit avoir un
+        # sens. Le statut est fourni par watch_process(); on ne concurrence
+        # jamais IO::Async avec notre propre waitpid().
         if ($state->{timed_out}) {
             $reason = 'version check timed out';
-        }
-        elsif ($state->{wait_failed}) {
-            $reason = 'version check worker could not be reaped';
         }
         else {
             my $status = $state->{wait_status} // 0;
@@ -2838,46 +2861,39 @@ sub getVersion_async {
             $self->{logger}->log(1, "getVersion_async callback failed: $error");
         }
 
-        $finish        = undef;
-        $schedule_reap = undef;
+        $finish = undef;
     };
 
-    $schedule_reap = sub {
-        return if $state->{finalized} || $state->{child_done};
-        return if $reap_timer;
-
-        $reap_timer = IO::Async::Timer::Countdown->new(
-            delay     => 0.05,
-            on_expire => sub {
-                my $expired = $reap_timer;
-                $reap_timer = undef;
-                $remove_timer->($expired);
-
+    my $watch_ok = eval {
+        $loop->watch_process(
+            $child_pid,
+            sub {
+                my ($pid, $wait_status) = @_;
                 return if $state->{finalized};
+                return unless defined($pid) && $pid == $child_pid;
 
-                my $waited = waitpid($child_pid, WNOHANG);
-
-                if ($waited == $child_pid) {
-                    $state->{wait_status} = $?;
-                    $state->{child_done}  = 1;
-                    $finish->();
-                    return;
-                }
-
-                if ($waited == -1) {
-                    $state->{wait_failed} = 1;
-                    $state->{child_done}  = 1;
-                    $finish->();
-                    return;
-                }
-
-                $schedule_reap->();
+                $state->{wait_status} = $wait_status;
+                $state->{child_done}  = 1;
+                $finish->() if $finish;
             },
         );
-
-        $loop->add($reap_timer);
-        $reap_timer->start;
+        1;
     };
+
+    unless ($watch_ok) {
+        my $error = $@ || 'watch_process registration failed';
+        $error =~ s/\s+/ /g;
+        $error = substr($error, 0, 150);
+
+        kill 'TERM', $child_pid;
+        eval { close $pipe };
+
+        my $local = _usable_local_version($fallback_local) // 'Undefined';
+        my $reason = "version check worker setup failed: $error";
+        eval { $callback->($local, 'Undefined', $reason); 1; };
+        $finish = undef;
+        return 1;
+    }
 
     $timeout_timer = IO::Async::Timer::Countdown->new(
         delay     => $timeout,
@@ -2891,40 +2907,34 @@ sub getVersion_async {
                 $state->{term_sent} = 1;
             }
 
-            $schedule_reap->();
-
             $kill_timer = IO::Async::Timer::Countdown->new(
                 delay     => 0.2,
                 on_expire => sub {
                     return if $state->{finalized} || $state->{child_done};
 
-                    my $waited = waitpid($child_pid, WNOHANG);
-
-                    if ($waited == $child_pid) {
-                        $state->{wait_status} = $?;
-                        $state->{child_done}  = 1;
-                        $finish->();
-                        return;
-                    }
-
-                    if ($waited == -1) {
-                        $state->{wait_failed} = 1;
-                        $state->{child_done}  = 1;
-                        $finish->();
-                        return;
-                    }
-
                     unless ($state->{kill_sent}) {
                         kill 'KILL', $child_pid;
                         $state->{kill_sent} = 1;
                     }
+                },
+            );
 
-                    $schedule_reap->();
+            # mb643-B1: same liveness backstop as the existing Achievements
+            # worker. A lost process notification must never leave an IRC
+            # command hanging forever after its timeout.
+            $force_timer = IO::Async::Timer::Countdown->new(
+                delay     => 2,
+                on_expire => sub {
+                    return if $state->{finalized};
+                    $state->{force} = 1;
+                    $finish->() if $finish;
                 },
             );
 
             $loop->add($kill_timer);
             $kill_timer->start;
+            $loop->add($force_timer);
+            $force_timer->start;
         },
     );
 
@@ -2945,7 +2955,7 @@ sub getVersion_async {
 
             if ($eof && !$state->{pipe_eof}++) {
                 eval { $loop->remove($io) };
-                $schedule_reap->();
+                $finish->() if $finish;
             }
 
             return 0;

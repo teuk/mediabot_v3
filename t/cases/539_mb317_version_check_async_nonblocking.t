@@ -106,8 +106,8 @@ return sub {
 
     $assert->like(
         $async // '',
-        qr/open\(my\s+\$pipe,\s*'-\|'\)/,
-        'blocking GitHub lookup runs in a child process'
+        qr/my\s+\$child_pid\s*=\s*fork\(\)/,
+        'blocking GitHub lookup runs in an explicit child process'
     );
 
     $assert->like(
@@ -137,13 +137,21 @@ return sub {
     $assert->like(
         $async // '',
         qr/IO::Async::Timer::Countdown->new/,
-        'timeout and reap polling use asynchronous timers'
+        'timeout escalation uses asynchronous timers'
     );
 
     $assert->like(
         $async // '',
-        qr/waitpid\(\$child_pid,\s*WNOHANG\)/,
-        'version worker is reaped non-blockingly'
+        qr/\$loop->watch_process\(\s*\$child_pid/s,
+        'IO::Async owns version-worker process collection'
+    );
+
+    my $async_exec = $async // '';
+    $async_exec =~ s/#.*$//mg;
+    $assert->unlike(
+        $async_exec,
+        qr/\bwaitpid\s*\(/,
+        'version worker never races IO::Async with manual waitpid'
     );
 
     $assert->like(
