@@ -10,6 +10,53 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb641 — derniere garde : aucun chemin terminal du worker ne reste muet
+- AUDIT pre-commit de mb640 : la promesse « ne jamais echouer en silence »
+  restait fausse sur quatre chemins rares mais reels. Un echec de `open(...,
+  '-|')` appelait encore le callback sans raison ; un `waitpid` impossible, un
+  enfant termine par signal/exit non-zero et un payload JSON tronque mais non
+  vide pouvaient eux aussi rendre `github: Undefined` sans explication.
+- Chaque terminaison a maintenant sa raison propre, monoligne et bornee :
+  worker impossible a lancer, impossible a reap, signal, code de sortie,
+  resultat vide ou resultat invalide. Le timeout garde son message specifique.
+- Le fallback local est normalise comme les autres chemins (`Undefined` plutot
+  qu'un undef Perl brut). Aucun comportement nominal ni politique HTTP/TLS ne
+  change.
+- Nouveau test 821 : verrouille toutes les sorties terminales et interdit le
+  vieux callback a deux arguments sur l'echec de creation du worker.
+
+### mb640 — le check de version cesse d'echouer en silence (deux bugs a moi)
+- TERRAIN (#teuk, deux fois) : « local: 3.4dev-... | github: Undefined » puis
+  « Cannot check: version could not be determined », sans la moindre raison,
+  alors que mb638/mb639 etaient censes en fournir une. Deux defauts, tous
+  deux introduits par moi.
+- (A) mb637 forgeait un client HTTP a part avec « verify_SSL => 1 ». Or tout
+  le bot passe par Mediabot::External::_make_http, dont le commentaire dit
+  exactement pourquoi : « verify_SSL defaults to 0 for OVH/Kimsufi
+  compatibility ». Le serveur cible EST un Kimsufi/OVH : la verification
+  echouait instantanement — d'ou une reponse en UNE seconde la ou un blocage
+  reseau aurait consomme tout le delai. Le fetch reutilise desormais le
+  client commun : une seule politique TLS pour tout le bot.
+- (B) Plus grave : une EXCEPTION de getVersion etait avalee par un eval nu.
+  Le fils n'ecrivait alors rien, le parent retombait sur le local EN CACHE, et
+  aucune raison n'existait — bon local, « Undefined », zero explication : la
+  capture, mot pour mot. Une panne reseau et un plantage du code produisaient
+  le meme ecran. L'exception devient une raison (« version check crashed:
+  ... »), sur le chemin fork COMME sur le chemin sans event loop, nettoyee du
+  « at ... line N » et bornee a 200 caracteres.
+- Un fils muet (payload vide ou illisible) produit lui aussi sa raison, sans
+  jamais ecraser une raison deja connue.
+- BUGS DE TEST PREEXISTANTS corriges au passage : la suite livree arrivait
+  ROUGE (12796/12798). Deux assertions de la passe mb639 etaient fausses —
+  « scalar(liste) » rend le DERNIER ELEMENT et non le compte, et le cas
+  « URL invalide => deux sources essayees » reutilisait une reponse en SUCCES,
+  qui arrete legitimement la boucle a la premiere URL. Le code etait juste,
+  les attentes ne l'etaient pas.
+- Pins 138 et 207 suivent le client commun. Test 820 (21 assertions) : usage
+  du client partage, absence de tout client forge a part, exception -> raison
+  sur les deux chemins, message propre et borne, fils muet, et chemin nominal
+  qui n'invente aucune alarme.
+
 ### mb639 — garde pre-commit : le diagnostic distant tient ses propres promesses
 - AUDIT de mb638 : `update.VERSION_URL` etait documente comme un override qui
   force UNE URL, mais le code la placait seulement devant les deux URL GitHub.

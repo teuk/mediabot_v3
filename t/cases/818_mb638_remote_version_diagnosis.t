@@ -105,7 +105,10 @@ return sub {
         'mb638-818: la conf impose son URL');
     $assert->is(scalar @asked, 1,
         'mb639-818: VERSION_URL force UNE seule source, sans fallback GitHub');
-    $assert->is(scalar($URLS->($tuned)), 1,
+    # mb640: _remote_version_urls rend une LISTE. « scalar(liste) » rend son
+    # DERNIER element, pas son compte — d'ou un test rouge pour un code juste.
+    my @tuned_urls = $URLS->($tuned);
+    $assert->is(scalar(@tuned_urls), 1,
         'mb639-818: le plan interne contient lui aussi une seule URL forcee');
     $assert->is($WT->($tuned), 9,
         'mb639-818: une URL au timeout par defaut => budget worker 9s');
@@ -117,11 +120,18 @@ return sub {
 
     my $bad = bless { conf => ConfV->new({ 'update.VERSION_URL' => 'pas-une-url' }),
                       logger => LogV->new }, 'Mediabot';
+    # mb640: pour VERIFIER que les deux sources sont essayees, il faut que la
+    # premiere ECHOUE. Avec la reponse en succes laissee par le cas precedent,
+    # la boucle s'arretait a la premiere URL — et c'etait le bon comportement,
+    # c'est l'attente du test qui etait fausse.
+    my $saved_reply = $reply;
+    $reply = { success => 0, status => 599, content => 'connect timeout' };
     @asked = (); $F->($bad);
     $assert->like($asked[0], qr{^https://},
         'mb638-818: une URL de conf invalide est ignoree');
     $assert->is(scalar @asked, 2,
         'mb639-818: URL invalide => les deux sources integrees restent actives');
+    $reply = $saved_reply;
 
     # Un override HTTP explicite ne depend pas de IO::Socket::SSL.
     my $plain = bless { conf => ConfV->new({ 'update.VERSION_URL' => 'http://mirror.local/VERSION' }),

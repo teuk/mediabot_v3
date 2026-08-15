@@ -127,7 +127,7 @@ return sub {
     my $fetch_body = _extract_sub_207($src, 'fetch_remote_version');
     $assert->like(
         $fetch_body // '',
-        qr/my\s+\$res\s*=\s*eval\s+\{\s*\n\s*HTTP::Tiny->new\(/,
+        qr/my\s+\$res\s*=\s*eval\s+\{\s*\n\s*require Mediabot::External;/,
         'getVersion protects GitHub VERSION fetch with eval'
     );
 

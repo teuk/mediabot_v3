@@ -89,9 +89,12 @@ return sub {
         'getVersion defines the remote VERSION URL'
     );
 
+    # mb640: la requete passe par le client COMMUN du bot (_make_http), qui
+    # porte la politique TLS unique — verify_SSL=0 pour OVH/Kimsufi. Forger un
+    # client a part ici avait casse le check en production.
     $assert->like(
         $fetch // '',
-        qr/HTTP::Tiny->new\(/,
+        qr/Mediabot::External::_make_http\(/,
         'getVersion fetches remote VERSION through HTTP::Tiny'
     );
 

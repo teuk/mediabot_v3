@@ -2485,14 +2485,26 @@ sub fetch_remote_version {
             return (undef, 'HTTPS unavailable (install IO::Socket::SSL and Net::SSLeay)');
         }
     }
+    # NB: la verification des certificats suit la politique commune du bot
+    # (_make_http), pas une regle propre a cette fonction — voir plus bas.
 
     my $last_error;
     for my $url (@urls) {
+        # mb640-B1: MON BUG de mb637. J'avais forge un client HTTP a part avec
+        # « verify_SSL => 1 ». Or tout le reste du bot passe par
+        # Mediabot::External::_make_http, dont le commentaire dit exactement
+        # pourquoi : « verify_SSL defaults to 0 for OVH/Kimsufi compatibility ».
+        # Sur le serveur de teuk (Kimsufi/OVH), la verification echoue donc
+        # instantanement — d'ou un echec en une seconde, la ou un vrai blocage
+        # reseau aurait mis le delai complet. On reutilise le client commun :
+        # une seule politique TLS pour tout le bot, et plus d'exception
+        # inventee par moi dans un coin.
         my $res = eval {
-            HTTP::Tiny->new(
-                timeout    => $timeout,
-                agent      => 'mediabot-version-check/1.0 ',
-                verify_SSL => 1,
+            require Mediabot::External;
+            Mediabot::External::_make_http(
+                timeout  => $timeout,
+                agent    => 'mediabot-version-check/1.0 ',
+                max_size => 64 * 1024,
             )->get($url);
         };
         if (!$res || !ref $res) {
@@ -2643,6 +2655,13 @@ sub getVersion_async {
     # no usable event loop exists.
     unless ($loop && $loop->can('add') && $loop->can('remove')) {
         my ($local, $remote) = eval { getVersion($self) };
+        my $died = $@;
+        if (defined $died && $died =~ /\S/) {
+            $died =~ s/\s+at\s+\S+\s+line\s+\d+\.?\s*\z//;
+            $died =~ s/\s+/ /g;
+            $self->{_version_fetch_error} = 'version check crashed: '
+                . substr($died, 0, 160);
+        }
         $local  = _usable_local_version($local)
             // _usable_local_version($fallback_local)
             // 'Undefined';
@@ -2654,7 +2673,17 @@ sub getVersion_async {
     my $child_pid = open(my $pipe, '-|');
 
     unless (defined $child_pid) {
-        eval { $callback->($fallback_local, 'Undefined'); 1; };
+        # mb641-B1: meme l'echec de CREATION du worker doit expliquer pourquoi
+        # le distant manque. L'ancien chemin appelait le callback avec seulement
+        # (local, Undefined), recreant exactement le symptome que mb640 promet
+        # d'eliminer. $! est local au fork/open : on le capture tout de suite,
+        # on le rend monoligne et on le borne avant de l'envoyer vers IRC.
+        my $error = "$!";
+        $error = 'unknown error' unless defined $error && $error =~ /\S/;
+        $error =~ s/\s+/ /g;
+        my $reason = 'version check worker could not start: ' . substr($error, 0, 150);
+        my $local = _usable_local_version($fallback_local) // 'Undefined';
+        eval { $callback->($local, 'Undefined', $reason); 1; };
         return 1;
     }
 
@@ -2663,7 +2692,20 @@ sub getVersion_async {
         # inherited bot/DB/IRC destructors when the child finishes.
         local $self->{logger} = bless {}, 'Mediabot::Helpers::_SilentLogger';
 
+        # mb640-B1: une EXCEPTION de getVersion doit produire une raison, pas
+        # un silence. C'est le vrai defaut du terrain : getVersion mourait,
+        # l'eval avalait tout, le fils n'ecrivait rien d'exploitable et le
+        # parent retombait sur le local EN CACHE — d'ou « local: 3.4dev-...
+        # | github: Undefined » SANS explication, indiscernable d'une panne
+        # reseau. On capture le message et on le fait voyager.
         my ($local, $remote) = eval { getVersion($self) };
+        my $died = $@;
+        if (defined $died && $died =~ /\S/) {
+            $died =~ s/\s+at\s+\S+\s+line\s+\d+\.?\s*\z//;
+            $died =~ s/\s+/ /g;
+            $self->{_version_fetch_error} = 'version check crashed: '
+                . substr($died, 0, 160);
+        }
         $local  = _usable_local_version($local)
             // _usable_local_version($fallback_local)
             // 'Undefined';
@@ -2734,17 +2776,45 @@ sub getVersion_async {
         eval { $loop->remove($stream) } if $stream;
         eval { close $pipe };
 
-        my ($local, $remote) = ($fallback_local, 'Undefined');
+        my ($local, $remote) = (
+            _usable_local_version($fallback_local) // 'Undefined',
+            'Undefined',
+        );
         my $reason;
 
-        unless ($state->{timed_out} || $state->{wait_failed}) {
+        # mb641-B1: chaque sortie TERMINALE du worker doit avoir un sens. mb640
+        # couvrait le timeout et le payload totalement vide, mais pas :
+        #   - waitpid qui echoue ;
+        #   - enfant tue par signal / exit non-zero ;
+        #   - JSON tronque ou autrement illisible mais NON vide.
+        # Ces chemins rendaient encore (local, Undefined, undef), donc le meme
+        # « github: Undefined » muet que le round cherchait justement a fermer.
+        if ($state->{timed_out}) {
+            $reason = 'version check timed out';
+        }
+        elsif ($state->{wait_failed}) {
+            $reason = 'version check worker could not be reaped';
+        }
+        else {
             my $status = $state->{wait_status} // 0;
             my $signal = $status & 127;
             my $exit   = ($status >> 8) & 255;
 
-            if (!$signal && $exit == 0) {
-                my $decoded = eval { decode_json($state->{output} // '') };
-                if (!$@ && ref($decoded) eq 'ARRAY' && @$decoded >= 2) {
+            if ($signal) {
+                $reason = "version check worker terminated by signal $signal";
+            }
+            elsif ($exit != 0) {
+                $reason = "version check worker exited with status $exit";
+            }
+            elsif (!length($state->{output} // '')) {
+                $reason = 'version check worker produced no result';
+            }
+            else {
+                my $decoded = eval { decode_json($state->{output}) };
+                if ($@ || ref($decoded) ne 'ARRAY' || @$decoded < 2) {
+                    $reason = 'version check worker returned an invalid result';
+                }
+                else {
                     my ($candidate_local, $candidate_remote) = @$decoded[0, 1];
                     my $why = $decoded->[2];
                     $reason = $why if defined $why && !ref $why && length $why;
@@ -2761,7 +2831,6 @@ sub getVersion_async {
 
         # mb638-B1: 3e argument = pourquoi le distant manque (undef si tout va
         # bien). Les appelants historiques qui n'en veulent pas l'ignorent.
-        $reason = 'version check timed out' if $state->{timed_out} && !defined $reason;
         my $callback_ok = eval { $callback->($local, $remote, $reason); 1; };
         if (!$callback_ok && $self && $self->{logger}) {
             my $error = $@ || 'unknown callback failure';
