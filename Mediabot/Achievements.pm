@@ -3,8 +3,8 @@ package Mediabot::Achievements;
 # =============================================================================
 # Mediabot::Achievements — système de succès débloquables
 #
-# Stockage : JSON persisté dans var/achievements.json
-# Structure : { "$nick\x00$channel" => { ach_id => unlock_ts, ... } }
+# Stockage : MariaDB depuis mb646 (JSON uniquement comme import/fallback legacy)
+# Identité durable : profil par canal + alias (nick, user@host, channel).
 #
 # Hooks intégrés depuis :
 #   - mediabot.pl on_message_PRIVMSG   → first_msg, chatterbox, megaphone,
@@ -27,7 +27,10 @@ use utf8;
 use Encode    ();
 use JSON::PP  ();
 use File::Path qw(make_path);
-use File::Basename qw(dirname);
+use File::Basename qw(dirname basename);
+use File::Copy qw(copy);
+use File::Spec ();
+use Scalar::Util qw(reftype);
 
 # -- Définition des achievements -------------------------------------------------
 # id        => clef interne (snake_case)
@@ -296,6 +299,8 @@ sub new {
         path   => $args{path}   // 'var/achievements.json',
         logger => $args{logger},
         bot    => $args{bot},
+        storage => 'json',
+        # JSON fallback caches (also retained for legacy unit tests).
         data   => {},   # { "$nick\x00$channel" => { id => ts, ... } }
         # mb610-B1: REGISTRE DE PROGRESSION persistant. Les compteurs qui
         # menent aux achievements vivaient en memoire du bot (horoscope,
@@ -303,8 +308,8 @@ sub new {
         # quotegame) : au redemarrage — ou a la partie suivante — le
         # merite acquis repartait de zero, ce qui rendait les paliers
         # eleves inatteignables plutot que difficiles. Le registre est
-        # { kind => { "lc(nick)\x00lc(channel)" => n } }, ecrit dans le
-        # MEME fichier JSON (aucune modification de schema).
+        # { kind => { "lc(nick)\x00lc(channel)" => n } } dans le fallback
+        # JSON historique ; en mode mb646 la DB est la source de verite.
         progress => {},
         dirty  => 0,
         last_save => 0,
@@ -319,6 +324,18 @@ sub new {
         _worker_launcher  => $args{worker_launcher},
         _worker_timeout   => $args{worker_timeout},
         _shutting_down    => 0,
+
+        # mb646: database-backed identity/profile caches. The DB is the source
+        # of truth when the migration tables exist; JSON remains a guarded
+        # compatibility fallback for installations that have not migrated yet.
+        _profiles             => {},
+        _identity_exact       => {},
+        _nick_channel_profile => {},
+        _channel_ids          => {},
+        _channel_names        => {},
+        _unlocks_by_profile   => {},
+        _progress_by_profile  => {},
+        _identity_touch_ts     => {},
     }, $class;
     $self->{_worker_timeout} = 75
         unless defined($self->{_worker_timeout})
@@ -326,11 +343,917 @@ sub new {
             && "$self->{_worker_timeout}" =~ /\A\d+(?:\.\d+)?\z/;
     $self->{_worker_timeout} = 10  if $self->{_worker_timeout} < 10;
     $self->{_worker_timeout} = 180 if $self->{_worker_timeout} > 180;
-    $self->_load;
+    $self->_initialize_storage;
     $self->_metric('set', 'mediabot_achievement_queue_pending', 0);
     $self->_metric('set', 'mediabot_achievement_worker_inflight', 0);
     return $self;
 }
+
+
+# -- mb646: stockage DB + résolution d'identité -------------------------------
+#
+# The durable identity is a PROFILE scoped to one channel. IRC appearances are
+# aliases attached to that profile. This lets one of the visible tuple elements
+# change without losing merit:
+#
+#   nick + user@host + channel
+#
+# Resolution is deliberately conservative:
+#   1. exact triplet
+#   2. registered USER id on the same channel
+#   3. exact user@host on the same channel (nick may have changed)
+#   4. same nick + compatible user@host (same ident OR same host)
+#   5. same nick + legacy empty userhost imported from JSON
+#
+# We never merge on a nick alone when two plausible profiles exist. A known
+# registered USER id is the strongest proof and is reused when available.
+
+sub _initialize_storage {
+    my ($self) = @_;
+
+    if ($self->_db_schema_available) {
+        $self->{storage} = 'db';
+        $self->_load_db;
+
+        # On the first DB-backed boot, merge every legacy snapshot we can still
+        # find (live JSON + numeric release archives). Repeated historical
+        # updates may each have stranded a different piece of merit, so using
+        # only the newest file could preserve an already-truncated history.
+        my $first_db_boot = !keys %{ $self->{_profiles} || {} };
+        $self->_import_legacy_json_if_present(
+            include_archives => $first_db_boot,
+        );
+        $self->_log(3, 'Achievements: database persistence enabled');
+        return 1;
+    }
+
+    # An installation that has not applied mb646 yet must keep the old JSON
+    # behaviour, including recovery from an archive produced by an old updater.
+    $self->{storage} = 'json';
+    $self->_restore_legacy_from_latest_archive;
+    $self->_log(1,
+        'Achievements: DB persistence tables are missing; using legacy JSON fallback. '
+      . 'Apply install/migrations/20260816_achievements_db.sql.');
+    $self->_load;
+    return 1;
+}
+
+sub _db_schema_available {
+    my ($self) = @_;
+    my $bot = $self->{bot};
+    return 0 unless $bot && (reftype($bot) || '') eq 'HASH';
+    my $dbh = $bot->{dbh};
+    return 0 unless $dbh && eval { $dbh->can('prepare') };
+
+    my @required = qw(
+        ACHIEVEMENT_PROFILE
+        ACHIEVEMENT_IDENTITY
+        ACHIEVEMENT_UNLOCK
+        ACHIEVEMENT_PROGRESS
+    );
+
+    my $sth = eval {
+        $dbh->prepare(q{
+            SELECT COUNT(*) AS n
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME IN (
+                'ACHIEVEMENT_PROFILE',
+                'ACHIEVEMENT_IDENTITY',
+                'ACHIEVEMENT_UNLOCK',
+                'ACHIEVEMENT_PROGRESS'
+              )
+        })
+    };
+    return 0 unless $sth && eval { $sth->execute };
+
+    my ($n) = $sth->fetchrow_array;
+    $sth->finish;
+    return (defined($n) && $n == @required) ? 1 : 0;
+}
+
+sub _legacy_archive_json_sources {
+    my ($self, $path) = @_;
+    return () unless defined($path) && length($path);
+    return () if File::Spec->file_name_is_absolute($path);
+
+    my $cwd = File::Spec->rel2abs('.');
+    my $parent = dirname($cwd);
+    my $base = basename($cwd);
+    return () unless defined($base) && length($base);
+
+    # Scope archive discovery to the CURRENT deployment family. teuk.org has
+    # both /home/mediabot/mediabot_v3 (dev) and /home/mediabot/mediabot3
+    # (Undernet) under the same Unix home, so a broad mediabot* scan would risk
+    # cross-importing achievements from another bot/database.
+    #
+    # Supported updater archive shapes, scoped by the current root basename:
+    #   <root>.NNN
+    #   <root>.old.YYYYMMDD_HHMMSS
+    my @candidates;
+    opendir my $dh, $parent or return ();
+    while (defined(my $name = readdir $dh)) {
+        next if $name eq '.' || $name eq '..';
+        next unless $name =~ /\A\Q$base\E(?:\.\d+|\.old\.\d{8}_\d{6})\z/;
+
+        my $dir = File::Spec->catdir($parent, $name);
+        next unless -d $dir && !-l $dir;
+
+        my $candidate = File::Spec->catfile($dir, split m{/+}, $path);
+        next unless -f $candidate && !-l $candidate;
+
+        my $mtime = (stat($candidate))[9] // 0;
+        push @candidates, [ $mtime, $name, $candidate ];
+    }
+    closedir $dh;
+
+    # Import merge semantics are order-safe (unlock=min timestamp,
+    # progress=max), but newest-first keeps diagnostics deterministic and is
+    # essential for the JSON fallback recovery path below.
+    return map { $_->[2] }
+        sort { $b->[0] <=> $a->[0] || $b->[1] cmp $a->[1] } @candidates;
+}
+
+sub _restore_legacy_from_latest_archive {
+    my ($self) = @_;
+    my $path = $self->{path};
+    return 0 unless defined($path) && length($path);
+    return 0 if -f $path;
+    return 0 if File::Spec->file_name_is_absolute($path);
+
+    my @candidates = $self->_legacy_archive_json_sources($path);
+    return 0 unless @candidates;
+
+    my $source = $candidates[0];
+    make_path(dirname($path)) unless -d dirname($path);
+    if (copy($source, $path)) {
+        $self->_log(1,
+            "Achievements: recovered legacy state from archived release $source");
+        return 1;
+    }
+
+    $self->_log(1,
+        "Achievements: could not recover legacy state from $source: $!");
+    return 0;
+}
+
+sub _norm_nick {
+    my ($nick) = @_;
+    return '' unless defined $nick;
+    $nick =~ s/^\s+|\s+$//g;
+    return lc $nick;
+}
+
+sub _norm_channel {
+    my ($channel) = @_;
+    return '' unless defined $channel;
+    $channel =~ s/^\s+|\s+$//g;
+    return lc $channel;
+}
+
+sub _norm_userhost {
+    my ($userhost) = @_;
+    return '' unless defined $userhost;
+    $userhost =~ s/^\s+|\s+$//g;
+    return lc $userhost;
+}
+
+sub _split_userhost {
+    my ($userhost) = @_;
+    $userhost = _norm_userhost($userhost);
+    my ($ident, $host) = split /\@/, $userhost, 2;
+    $ident //= '';
+    $host  //= '';
+    $ident =~ s/^~+//;
+    return ($ident, $host);
+}
+
+sub _userhost_compatible {
+    my ($a, $b) = @_;
+    $a = _norm_userhost($a);
+    $b = _norm_userhost($b);
+    return 1 if $a eq $b && $a ne '';
+    return 1 if $a eq '' || $b eq ''; # legacy JSON alias; nick+channel guards it
+
+    my ($ai, $ah) = _split_userhost($a);
+    my ($bi, $bh) = _split_userhost($b);
+
+    return 1 if $ai ne '' && $bi ne '' && $ai eq $bi;
+    return 1 if $ah ne '' && $bh ne '' && $ah eq $bh;
+    return 0;
+}
+
+sub _channel_id {
+    my ($self, $channel) = @_;
+    my $norm = _norm_channel($channel);
+    return undef unless $norm ne '';
+
+    return $self->{_channel_ids}{$norm}
+        if exists $self->{_channel_ids}{$norm};
+
+    my $dbh = eval { $self->{bot}{dbh} } or return undef;
+    my $sth = $dbh->prepare('SELECT id_channel, name FROM CHANNEL WHERE name = ? LIMIT 1');
+    return undef unless $sth && $sth->execute($channel);
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+    return undef unless $row && defined $row->{id_channel};
+
+    my $id = 0 + $row->{id_channel};
+    my $name = $row->{name} // $channel;
+    $self->{_channel_ids}{_norm_channel($name)} = $id;
+    $self->{_channel_names}{$id} = $name;
+    return $id;
+}
+
+sub _identity_cache_key {
+    my ($channel_id, $nick, $userhost) = @_;
+    return join("\x00", $channel_id // 0, _norm_nick($nick), _norm_userhost($userhost));
+}
+
+sub _nick_channel_cache_key {
+    my ($channel_id, $nick) = @_;
+    return join("\x00", $channel_id // 0, _norm_nick($nick));
+}
+
+sub _load_db {
+    my ($self) = @_;
+    my $dbh = $self->{bot}{dbh};
+
+    $self->{_profiles}             = {};
+    $self->{_identity_exact}       = {};
+    $self->{_nick_channel_profile} = {};
+    $self->{_channel_ids}          = {};
+    $self->{_channel_names}        = {};
+    $self->{_unlocks_by_profile}   = {};
+    $self->{_progress_by_profile}  = {};
+
+    my $sth_p = $dbh->prepare(q{
+        SELECT p.id_achievement_profile, p.id_channel, p.id_user,
+               p.display_nick, p.created_at, p.last_seen_at,
+               c.name AS channel_name
+        FROM ACHIEVEMENT_PROFILE p
+        JOIN CHANNEL c ON c.id_channel = p.id_channel
+        ORDER BY p.id_achievement_profile
+    });
+    if ($sth_p && $sth_p->execute) {
+        while (my $r = $sth_p->fetchrow_hashref) {
+            my $pid = 0 + $r->{id_achievement_profile};
+            my $cid = 0 + $r->{id_channel};
+            $self->{_profiles}{$pid} = {
+                id_channel   => $cid,
+                id_user      => $r->{id_user},
+                display_nick => $r->{display_nick} // '',
+                channel      => $r->{channel_name} // '',
+                last_seen_at => $r->{last_seen_at},
+            };
+            $self->{_channel_ids}{_norm_channel($r->{channel_name})} = $cid;
+            $self->{_channel_names}{$cid} = $r->{channel_name};
+            my $nk = _nick_channel_cache_key($cid, $r->{display_nick});
+            $self->{_nick_channel_profile}{$nk} = $pid;
+        }
+        $sth_p->finish;
+    }
+
+    my $sth_i = $dbh->prepare(q{
+        SELECT id_achievement_profile, id_channel, nick, userhost
+        FROM ACHIEVEMENT_IDENTITY
+        ORDER BY last_seen_at, id_achievement_identity
+    });
+    if ($sth_i && $sth_i->execute) {
+        while (my $r = $sth_i->fetchrow_hashref) {
+            my $pid = 0 + $r->{id_achievement_profile};
+            my $cid = 0 + $r->{id_channel};
+            $self->{_identity_exact}{
+                _identity_cache_key($cid, $r->{nick}, $r->{userhost})
+            } = $pid;
+            $self->{_nick_channel_profile}{
+                _nick_channel_cache_key($cid, $r->{nick})
+            } = $pid;
+        }
+        $sth_i->finish;
+    }
+
+    my $sth_u = $dbh->prepare(q{
+        SELECT id_achievement_profile, achievement_id,
+               UNIX_TIMESTAMP(unlocked_at) AS unlock_ts
+        FROM ACHIEVEMENT_UNLOCK
+    });
+    if ($sth_u && $sth_u->execute) {
+        while (my $r = $sth_u->fetchrow_hashref) {
+            my $pid = 0 + $r->{id_achievement_profile};
+            $self->{_unlocks_by_profile}{$pid}{ $r->{achievement_id} } =
+                0 + ($r->{unlock_ts} // 0);
+        }
+        $sth_u->finish;
+    }
+
+    my $sth_g = $dbh->prepare(q{
+        SELECT id_achievement_profile, progress_kind, progress_value
+        FROM ACHIEVEMENT_PROGRESS
+    });
+    if ($sth_g && $sth_g->execute) {
+        while (my $r = $sth_g->fetchrow_hashref) {
+            my $pid = 0 + $r->{id_achievement_profile};
+            $self->{_progress_by_profile}{ $r->{progress_kind} }{$pid} =
+                0 + ($r->{progress_value} // 0);
+        }
+        $sth_g->finish;
+    }
+
+    my $tracked = 0;
+    $tracked += scalar keys %{ $self->{_progress_by_profile}{$_} || {} }
+        for keys %{ $self->{_progress_by_profile} || {} };
+    $self->_log(3, 'Achievements: loaded '
+        . scalar(keys %{ $self->{_profiles} }) . " DB profile(s), "
+        . "$tracked progress counter(s)");
+}
+
+sub _user_object_id {
+    my ($user) = @_;
+    return undef unless $user;
+    my $id = eval { $user->can('id') ? $user->id : $user->{id_user} };
+    return (defined($id) && "$id" =~ /\A\d+\z/) ? 0 + $id : undef;
+}
+
+sub _message_user_id {
+    my ($self, $message, %opts) = @_;
+    return undef unless $message && $self->{bot};
+
+    # Reuse Helpers.pm's hostmask cache first. This is intentionally usable
+    # even after its short command-auth TTL: attaching a previously proven
+    # USER.id_user to an achievement profile is identity bookkeeping, not an
+    # authorization decision.
+    my $fullmask = eval { $message->prefix } // '';
+    if ($fullmask ne '' && ref($self->{bot}{_user_cache}) eq 'HASH') {
+        my $cached = $self->{bot}{_user_cache}{$fullmask};
+        my $id = _user_object_id($cached);
+        return $id if defined $id;
+    }
+    return undef if $opts{cached_only};
+
+    my $user = eval { $self->{bot}->get_user_from_message($message) };
+    return _user_object_id($user);
+}
+
+sub _create_profile {
+    my ($self, $channel_id, $nick, $userhost, $id_user) = @_;
+    my $dbh = $self->{bot}{dbh};
+    my $display = defined($nick) ? $nick : '';
+
+    my $sth = $dbh->prepare(q{
+        INSERT INTO ACHIEVEMENT_PROFILE
+            (id_channel, id_user, display_nick, created_at, last_seen_at)
+        VALUES (?, ?, ?, NOW(), NOW())
+    });
+    return undef unless $sth && $sth->execute($channel_id, $id_user, $display);
+    my $pid = $dbh->last_insert_id(undef, undef, undef, undef);
+    $pid //= $dbh->{mysql_insertid};
+    return undef unless defined($pid) && "$pid" =~ /\A\d+\z/;
+    $pid = 0 + $pid;
+
+    $self->{_profiles}{$pid} = {
+        id_channel   => $channel_id,
+        id_user      => $id_user,
+        display_nick => $display,
+        channel      => $self->{_channel_names}{$channel_id} // '',
+    };
+    $self->_attach_identity($pid, $channel_id, $nick, $userhost);
+    return $pid;
+}
+
+sub _attach_identity {
+    my ($self, $pid, $channel_id, $nick, $userhost) = @_;
+    return 0 unless $pid && $channel_id && defined($nick) && length($nick);
+    my $dbh = $self->{bot}{dbh};
+    $userhost = '' unless defined $userhost;
+
+    my $sth = $dbh->prepare(q{
+        INSERT INTO ACHIEVEMENT_IDENTITY
+            (id_achievement_profile, id_channel, nick, userhost, first_seen_at, last_seen_at)
+        VALUES (?, ?, ?, ?, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE
+            id_achievement_profile = VALUES(id_achievement_profile),
+            last_seen_at = NOW()
+    });
+    return 0 unless $sth && $sth->execute($pid, $channel_id, $nick, $userhost);
+
+    $self->{_identity_exact}{
+        _identity_cache_key($channel_id, $nick, $userhost)
+    } = $pid;
+    $self->{_nick_channel_profile}{
+        _nick_channel_cache_key($channel_id, $nick)
+    } = $pid;
+    return 1;
+}
+
+sub _touch_seen_alias {
+    my ($self, $pid, $channel_id, $nick, $userhost) = @_;
+    my $key = _identity_cache_key($channel_id, $nick, $userhost);
+    my $now = time();
+    my $last = $self->{_identity_touch_ts}{$key} // 0;
+    return 1 if ($now - $last) < 3600;
+
+    my $dbh = $self->{bot}{dbh};
+    my $sth_i = $dbh->prepare(q{
+        UPDATE ACHIEVEMENT_IDENTITY
+        SET last_seen_at = NOW()
+        WHERE id_channel = ? AND nick = ? AND userhost = ?
+    });
+    eval { $sth_i->execute($channel_id, $nick, $userhost) } if $sth_i;
+
+    my $sth_p = $dbh->prepare(q{
+        UPDATE ACHIEVEMENT_PROFILE
+        SET display_nick = ?, last_seen_at = NOW()
+        WHERE id_achievement_profile = ?
+    });
+    eval { $sth_p->execute($nick, $pid) } if $sth_p;
+
+    $self->{_profiles}{$pid}{display_nick} = $nick
+        if $self->{_profiles}{$pid};
+    $self->{_identity_touch_ts}{$key} = $now;
+    return 1;
+}
+
+sub _touch_profile {
+    my ($self, $pid, $nick, $id_user) = @_;
+    return 0 unless $pid && $self->{_profiles}{$pid};
+    my $dbh = $self->{bot}{dbh};
+
+    my $current_uid = $self->{_profiles}{$pid}{id_user};
+    my $new_uid = defined($current_uid) ? $current_uid : $id_user;
+
+    my $sth = $dbh->prepare(q{
+        UPDATE ACHIEVEMENT_PROFILE
+        SET display_nick = ?,
+            id_user = COALESCE(id_user, ?),
+            last_seen_at = NOW()
+        WHERE id_achievement_profile = ?
+    });
+    return 0 unless $sth && $sth->execute($nick, $id_user, $pid);
+
+    $self->{_profiles}{$pid}{display_nick} = $nick;
+    $self->{_profiles}{$pid}{id_user} = $new_uid;
+    my $cid = $self->{_profiles}{$pid}{id_channel};
+    $self->{_nick_channel_profile}{
+        _nick_channel_cache_key($cid, $nick)
+    } = $pid;
+    return 1;
+}
+
+sub _profile_for_registered_user {
+    my ($self, $channel_id, $id_user) = @_;
+    return undef unless $channel_id && defined($id_user);
+    my $dbh = $self->{bot}{dbh};
+    my $sth = $dbh->prepare(q{
+        SELECT id_achievement_profile
+        FROM ACHIEVEMENT_PROFILE
+        WHERE id_channel = ? AND id_user = ?
+        ORDER BY id_achievement_profile
+        LIMIT 1
+    });
+    return undef unless $sth && $sth->execute($channel_id, $id_user);
+    my ($pid) = $sth->fetchrow_array;
+    $sth->finish;
+    return (defined($pid) && "$pid" =~ /\A\d+\z/) ? 0 + $pid : undef;
+}
+
+sub _merge_profiles {
+    my ($self, $keep, $drop) = @_;
+    return $keep unless $keep && $drop && $keep != $drop;
+    my $dbh = $self->{bot}{dbh};
+
+    my $ok = eval {
+        local $dbh->{AutoCommit} = 0;
+
+        # Merit is merged losslessly: oldest unlock time, highest progress.
+        my $u = $dbh->prepare(q{
+            INSERT INTO ACHIEVEMENT_UNLOCK
+                (id_achievement_profile, achievement_id, unlocked_at)
+            SELECT ?, achievement_id, unlocked_at
+            FROM ACHIEVEMENT_UNLOCK
+            WHERE id_achievement_profile = ?
+            ON DUPLICATE KEY UPDATE
+                unlocked_at = LEAST(unlocked_at, VALUES(unlocked_at))
+        });
+        $u->execute($keep, $drop);
+
+        my $g = $dbh->prepare(q{
+            INSERT INTO ACHIEVEMENT_PROGRESS
+                (id_achievement_profile, progress_kind, progress_value, updated_at)
+            SELECT ?, progress_kind, progress_value, updated_at
+            FROM ACHIEVEMENT_PROGRESS
+            WHERE id_achievement_profile = ?
+            ON DUPLICATE KEY UPDATE
+                progress_value = GREATEST(progress_value, VALUES(progress_value)),
+                updated_at = GREATEST(updated_at, VALUES(updated_at))
+        });
+        $g->execute($keep, $drop);
+
+        # Copy aliases instead of UPDATEing them in place: an exact triplet may
+        # already exist on the kept profile and the unique key must never make a
+        # legitimate merge fail.
+        my $i = $dbh->prepare(q{
+            INSERT INTO ACHIEVEMENT_IDENTITY
+                (id_achievement_profile, id_channel, nick, userhost,
+                 first_seen_at, last_seen_at)
+            SELECT ?, id_channel, nick, userhost, first_seen_at, last_seen_at
+            FROM ACHIEVEMENT_IDENTITY
+            WHERE id_achievement_profile = ?
+            ON DUPLICATE KEY UPDATE
+                first_seen_at = LEAST(first_seen_at, VALUES(first_seen_at)),
+                last_seen_at  = GREATEST(last_seen_at, VALUES(last_seen_at))
+        });
+        $i->execute($keep, $drop);
+
+        $dbh->do(
+            'DELETE FROM ACHIEVEMENT_IDENTITY WHERE id_achievement_profile = ?',
+            undef, $drop
+        );
+        $dbh->do(
+            'DELETE FROM ACHIEVEMENT_UNLOCK WHERE id_achievement_profile = ?',
+            undef, $drop
+        );
+        $dbh->do(
+            'DELETE FROM ACHIEVEMENT_PROGRESS WHERE id_achievement_profile = ?',
+            undef, $drop
+        );
+        $dbh->do(
+            'DELETE FROM ACHIEVEMENT_PROFILE WHERE id_achievement_profile = ?',
+            undef, $drop
+        );
+        $dbh->commit;
+        1;
+    };
+
+    if (!$ok) {
+        my $error = $@;
+        eval { $dbh->rollback };
+        eval { $self->_load_db };
+        $self->_log(1,
+            "Achievements: profile merge failed ($drop -> $keep): $error");
+        return $drop;
+    }
+
+    $self->_load_db;
+    $self->_log(2, "Achievements: merged identity profile $drop into $keep");
+    return $keep;
+}
+
+sub observe_identity {
+    my ($self, $nick, $channel, $userhost, $message) = @_;
+    return undef unless defined($nick) && length($nick)
+        && defined($channel) && $channel =~ /^#/;
+
+    # JSON fallback keeps the historical semantics.
+    return lc($nick) . "\x00" . lc($channel)
+        unless ($self->{storage} // '') eq 'db';
+
+    my $cid = $self->_channel_id($channel);
+    return undef unless $cid;
+
+    $userhost = '' unless defined $userhost;
+    my $exact_key = _identity_cache_key($cid, $nick, $userhost);
+    if (my $pid = $self->{_identity_exact}{$exact_key}) {
+        $self->_touch_seen_alias($pid, $cid, $nick, $userhost);
+
+        # A user may authenticate/register AFTER this IRC alias was first
+        # observed. If Helpers has since proved that full hostmask, enrich the
+        # durable profile without forcing a USER_HOSTMASK scan on every PRIVMSG.
+        if ($self->{_profiles}{$pid}
+            && !defined($self->{_profiles}{$pid}{id_user})) {
+            my $cached_uid = $self->_message_user_id(
+                $message, cached_only => 1
+            );
+            if (defined $cached_uid) {
+                my $registered = $self->_profile_for_registered_user(
+                    $cid, $cached_uid
+                );
+                if ($registered && $registered != $pid) {
+                    $pid = $self->_merge_profiles($registered, $pid);
+                }
+                $self->_touch_profile($pid, $nick, $cached_uid);
+            }
+        }
+        return $pid;
+    }
+
+    my $dbh = $self->{bot}{dbh};
+    my $id_user = $self->_message_user_id($message);
+
+    # Registered account is authoritative within one channel.
+    if (defined $id_user) {
+        my $pid = $self->_profile_for_registered_user($cid, $id_user);
+        if ($pid) {
+            $self->_attach_identity($pid, $cid, $nick, $userhost);
+            $self->_touch_profile($pid, $nick, $id_user);
+            return $pid;
+        }
+    }
+
+    # Same user@host on the same channel: a nick change is safe to follow.
+    if (_norm_userhost($userhost) ne '') {
+        my $sth = $dbh->prepare(q{
+            SELECT DISTINCT id_achievement_profile
+            FROM ACHIEVEMENT_IDENTITY
+            WHERE id_channel = ? AND userhost = ?
+            ORDER BY id_achievement_profile
+        });
+        if ($sth && $sth->execute($cid, $userhost)) {
+            my @pids;
+            while (my ($pid) = $sth->fetchrow_array) { push @pids, 0 + $pid }
+            $sth->finish;
+            if (@pids == 1) {
+                my $pid = $pids[0];
+                $self->_attach_identity($pid, $cid, $nick, $userhost);
+                $self->_touch_profile($pid, $nick, $id_user);
+                return $pid;
+            }
+        }
+    }
+
+    # Same nick on the same channel: accept only a compatible user@host and
+    # only when that evidence points to one profile.
+    my $sth_n = $dbh->prepare(q{
+        SELECT id_achievement_profile, userhost
+        FROM ACHIEVEMENT_IDENTITY
+        WHERE id_channel = ? AND nick = ?
+        ORDER BY last_seen_at DESC, id_achievement_identity DESC
+    });
+    if ($sth_n && $sth_n->execute($cid, $nick)) {
+        my %candidate;
+        while (my $r = $sth_n->fetchrow_hashref) {
+            if (_userhost_compatible($r->{userhost}, $userhost)) {
+                $candidate{ 0 + $r->{id_achievement_profile} } = 1;
+            }
+        }
+        $sth_n->finish;
+        if (keys(%candidate) == 1) {
+            my ($pid) = keys %candidate;
+            $self->_attach_identity($pid, $cid, $nick, $userhost);
+            $self->_touch_profile($pid, $nick, $id_user);
+            return 0 + $pid;
+        }
+    }
+
+    my $pid = $self->_create_profile($cid, $nick, $userhost, $id_user);
+    return $pid;
+}
+
+sub _profile_id_for {
+    my ($self, $nick, $channel, %opts) = @_;
+    return undef unless ($self->{storage} // '') eq 'db';
+
+    my $cid = $self->_channel_id($channel);
+    return undef unless $cid;
+
+    my $nk = _nick_channel_cache_key($cid, $nick);
+    return $self->{_nick_channel_profile}{$nk}
+        if exists $self->{_nick_channel_profile}{$nk};
+
+    my $dbh = $self->{bot}{dbh};
+    my $sth = $dbh->prepare(q{
+        SELECT i.id_achievement_profile
+        FROM ACHIEVEMENT_IDENTITY i
+        JOIN ACHIEVEMENT_PROFILE p
+          ON p.id_achievement_profile = i.id_achievement_profile
+        WHERE i.id_channel = ? AND i.nick = ?
+        ORDER BY i.last_seen_at DESC, i.id_achievement_identity DESC
+        LIMIT 2
+    });
+    if ($sth && $sth->execute($cid, $nick)) {
+        my @pids;
+        while (my ($pid) = $sth->fetchrow_array) { push @pids, 0 + $pid }
+        $sth->finish;
+        if (@pids) {
+            # For a display/query by nick, the most recently observed identity
+            # is the least surprising answer. Live callers are pinned more
+            # precisely by observe_identity().
+            $self->{_nick_channel_profile}{$nk} = $pids[0];
+            return $pids[0];
+        }
+    }
+
+    return $self->_create_profile($cid, $nick, '', undef) if $opts{create};
+    return undef;
+}
+
+sub _db_get_unlocks {
+    my ($self, $pid) = @_;
+    return {} unless $pid;
+    return $self->{_unlocks_by_profile}{$pid} // {};
+}
+
+sub _db_progress {
+    my ($self, $pid, $kind) = @_;
+    return 0 unless $pid && defined $kind;
+    return $self->{_progress_by_profile}{$kind}{$pid} // 0;
+}
+
+sub _db_set_progress {
+    my ($self, $pid, $kind, $value) = @_;
+    return 0 unless $pid && defined($kind) && length($kind);
+    return 0 unless defined($value) && "$value" =~ /\A\d+\z/;
+
+    my $dbh = $self->{bot}{dbh};
+    my $sth = $dbh->prepare(q{
+        INSERT INTO ACHIEVEMENT_PROGRESS
+            (id_achievement_profile, progress_kind, progress_value, updated_at)
+        VALUES (?, ?, ?, NOW())
+        ON DUPLICATE KEY UPDATE
+            progress_value = GREATEST(progress_value, VALUES(progress_value)),
+            updated_at = NOW()
+    });
+    return 0 unless $sth && $sth->execute($pid, $kind, $value);
+
+    my $cur = $self->{_progress_by_profile}{$kind}{$pid} // 0;
+    $self->{_progress_by_profile}{$kind}{$pid} = int($value) if $value > $cur;
+    return $self->{_progress_by_profile}{$kind}{$pid} // $cur;
+}
+
+sub _read_legacy_json {
+    my ($self, $path) = @_;
+    return undef unless defined($path) && -f $path;
+    open my $fh, '<:utf8', $path or return undef;
+    local $/;
+    my $raw = <$fh>;
+    close $fh;
+    my $decoded = eval { JSON::PP->new->utf8(0)->decode($raw) };
+    return undef if $@ || ref($decoded) ne 'HASH';
+
+    if (ref($decoded->{profiles}) eq 'HASH'
+        && defined($decoded->{version}) && $decoded->{version} eq '2') {
+        return {
+            profiles => $decoded->{profiles},
+            progress => ref($decoded->{progress}) eq 'HASH' ? $decoded->{progress} : {},
+        };
+    }
+    return { profiles => $decoded, progress => {} };
+}
+
+sub _legacy_json_sources {
+    my ($self, %opts) = @_;
+    my @sources;
+
+    my $path = $self->{path};
+    push @sources, $path if defined($path) && -f $path;
+
+    if ($opts{include_archives}) {
+        push @sources, $self->_legacy_archive_json_sources($path);
+    }
+
+    my %seen;
+    return grep { defined($_) && !$seen{$_}++ } @sources;
+}
+
+sub _import_legacy_json_if_present {
+    my ($self, %opts) = @_;
+    return 0 unless ($self->{storage} // '') eq 'db';
+
+    my @sources = $self->_legacy_json_sources(%opts);
+    return 0 unless @sources;
+
+    # Merge legacy snapshots before touching SQL. Repeated old-style updates
+    # could have left different merit in different release archives.
+    my (%legacy_profiles, %legacy_progress);
+    my @decoded_sources;
+    for my $source (@sources) {
+        my $legacy = $self->_read_legacy_json($source);
+        if (!$legacy) {
+            $self->_log(1,
+                "Achievements: legacy JSON exists but cannot be decoded: $source");
+            next;
+        }
+        push @decoded_sources, $source;
+
+        for my $key (keys %{ $legacy->{profiles} || {} }) {
+            for my $id (keys %{ $legacy->{profiles}{$key} || {} }) {
+                next unless exists $ACH{$id};
+                my $ts = $legacy->{profiles}{$key}{$id};
+                $ts = time() unless defined($ts) && "$ts" =~ /\A\d+\z/;
+                if (!exists($legacy_profiles{$key}{$id})
+                    || $ts < $legacy_profiles{$key}{$id}) {
+                    $legacy_profiles{$key}{$id} = $ts;
+                }
+            }
+        }
+
+        for my $kind (keys %{ $legacy->{progress} || {} }) {
+            for my $key (keys %{ $legacy->{progress}{$kind} || {} }) {
+                my $value = $legacy->{progress}{$kind}{$key};
+                next unless defined($value) && "$value" =~ /\A\d+\z/;
+                if (!exists($legacy_progress{$kind}{$key})
+                    || $value > $legacy_progress{$kind}{$key}) {
+                    $legacy_progress{$kind}{$key} = 0 + $value;
+                }
+            }
+        }
+    }
+    return 0 unless @decoded_sources;
+
+    my $legacy = {
+        profiles => \%legacy_profiles,
+        progress => \%legacy_progress,
+    };
+
+    my $dbh = $self->{bot}{dbh};
+    my ($profiles, $unlocks, $progress) = (0, 0, 0);
+    my $ok = eval {
+        local $dbh->{AutoCommit} = 0;
+
+        my %pid_for;
+        for my $key (sort keys %{ $legacy->{profiles} || {} }) {
+            my ($nick, $channel) = split /\x00/, $key, 2;
+            next unless defined($nick) && length($nick)
+                && defined($channel) && $channel =~ /^#/;
+            my $cid = $self->_channel_id($channel) or next;
+
+            my $pid = $self->_profile_id_for($nick, $channel);
+            $pid ||= $self->_create_profile($cid, $nick, '', undef);
+            next unless $pid;
+            $pid_for{$key} = $pid;
+            $profiles++;
+
+            for my $id (keys %{ $legacy->{profiles}{$key} || {} }) {
+                my $ts = $legacy->{profiles}{$key}{$id};
+                my $sth = $dbh->prepare(q{
+                    INSERT INTO ACHIEVEMENT_UNLOCK
+                        (id_achievement_profile, achievement_id, unlocked_at)
+                    VALUES (?, ?, FROM_UNIXTIME(?))
+                    ON DUPLICATE KEY UPDATE
+                        unlocked_at = LEAST(unlocked_at, VALUES(unlocked_at))
+                });
+                $sth->execute($pid, $id, $ts);
+                $unlocks++;
+            }
+        }
+
+        for my $kind (keys %{ $legacy->{progress} || {} }) {
+            for my $key (keys %{ $legacy->{progress}{$kind} || {} }) {
+                my $value = $legacy->{progress}{$kind}{$key};
+                my $pid = $pid_for{$key};
+                if (!$pid) {
+                    my ($nick, $channel) = split /\x00/, $key, 2;
+                    next unless defined($nick) && defined($channel) && $channel =~ /^#/;
+                    my $cid = $self->_channel_id($channel) or next;
+                    $pid = $self->_profile_id_for($nick, $channel)
+                        || $self->_create_profile($cid, $nick, '', undef);
+                    $pid_for{$key} = $pid if $pid;
+                }
+                next unless $pid;
+                my $sth = $dbh->prepare(q{
+                    INSERT INTO ACHIEVEMENT_PROGRESS
+                        (id_achievement_profile, progress_kind, progress_value, updated_at)
+                    VALUES (?, ?, ?, NOW())
+                    ON DUPLICATE KEY UPDATE
+                        progress_value = GREATEST(progress_value, VALUES(progress_value)),
+                        updated_at = NOW()
+                });
+                $sth->execute($pid, $kind, $value);
+                $progress++;
+            }
+        }
+
+        $dbh->commit;
+        1;
+    };
+
+    if (!$ok) {
+        my $error = $@;
+        eval { $dbh->rollback };
+        # Transactional writes may already have touched the in-memory caches.
+        # Reload from committed DB state so a failed import cannot leave ghost
+        # profiles visible until the next restart.
+        eval { $self->_load_db };
+        $self->_log(1, "Achievements: legacy JSON DB import failed: $error");
+        return 0;
+    }
+
+    # Only the live file is mutable. Archived releases are historical evidence
+    # and are deliberately left untouched.
+    my $path = $self->{path};
+    if (defined($path) && -f $path) {
+        my $backup = $path . '.migrated-' . time();
+        if (!rename($path, $backup)) {
+            $self->_log(1,
+                "Achievements: DB import succeeded but cannot archive legacy JSON $path: $!");
+        }
+        else {
+            $self->_log(1,
+                "Achievements: archived live legacy JSON as $backup");
+        }
+    }
+
+    $self->_log(1,
+        "Achievements: processed legacy state from "
+      . scalar(@decoded_sources) . " source(s) into DB "
+      . "($profiles profile record(s) processed, "
+      . "$unlocks unlock record(s) processed, "
+      . "$progress progress record(s) processed)");
+
+    $self->_load_db;
+    return 1;
+}
+
 
 # -- Chargement depuis le fichier JSON -----------------------------------------
 sub _load {
@@ -408,6 +1331,9 @@ sub _load {
 # -- Sauvegarde en JSON (avec debounce) -----------------------------------------
 sub save {
     my ($self, $force) = @_;
+    # mb646: DB writes are synchronous write-through operations. There is no
+    # buffered state to flush; keep save() as a compatibility no-op.
+    return 1 if ($self->{storage} // '') eq 'db';
     return unless $force || $self->{dirty};
     # debounce : pas plus d'une sauvegarde toutes les 10s sauf force
     if (!$force && (time() - $self->{last_save}) < 10) {
@@ -463,6 +1389,10 @@ sub _progress_key {
 # Lecture seule : la valeur courante, 0 si inconnue.
 sub progress {
     my ($self, $kind, $nick, $channel) = @_;
+    if (($self->{storage} // '') eq 'db') {
+        my $pid = $self->_profile_id_for($nick, $channel);
+        return $self->_db_progress($pid, $kind);
+    }
     my $key = _progress_key($nick, $channel);
     return 0 unless defined $kind && defined $key;
     return $self->{progress}{$kind}{$key} // 0;
@@ -473,6 +1403,16 @@ sub progress {
 # besoin de la meme urgence qu'un unlock, qui force l'ecriture.
 sub bump_progress {
     my ($self, $kind, $nick, $channel, $by) = @_;
+    if (($self->{storage} // '') eq 'db') {
+        return 0 unless defined($kind) && length($kind);
+        $by = 1 unless defined $by && "$by" =~ /\A-?\d+\z/;
+        my $pid = $self->_profile_id_for($nick, $channel, create => 1);
+        return 0 unless $pid;
+        my $value = $self->_db_progress($pid, $kind) + $by;
+        $value = 0 if $value < 0;
+        return $self->_db_set_progress($pid, $kind, $value);
+    }
+
     my $key = _progress_key($nick, $channel);
     return 0 unless defined $kind && length $kind && defined $key;
     $by = 1 unless defined $by && $by =~ /\A-?\d+\z/;
@@ -514,6 +1454,16 @@ sub _prune_progress {
 # ne doit pas effacer un merite deja constate.
 sub set_progress {
     my ($self, $kind, $nick, $channel, $value) = @_;
+    if (($self->{storage} // '') eq 'db') {
+        return 0 unless defined($kind) && length($kind);
+        return 0 unless defined($value) && !ref($value) && "$value" =~ /\A\d+\z/;
+        my $pid = $self->_profile_id_for($nick, $channel, create => 1);
+        return 0 unless $pid;
+        my $current = $self->_db_progress($pid, $kind);
+        return $current if $value <= $current;
+        return $self->_db_set_progress($pid, $kind, int($value));
+    }
+
     my $key = _progress_key($nick, $channel);
     return 0 unless defined $kind && length $kind && defined $key;
     return 0 unless defined $value && !ref $value && $value =~ /\A\d+\z/;
@@ -583,6 +1533,17 @@ sub next_goals {
 # et le futur affichage de progression).
 sub progress_for_nick {
     my ($self, $nick, $channel) = @_;
+    if (($self->{storage} // '') eq 'db') {
+        my $pid = $self->_profile_id_for($nick, $channel);
+        return {} unless $pid;
+        my %out;
+        for my $kind (sort keys %{ $self->{_progress_by_profile} || {} }) {
+            my $v = $self->{_progress_by_profile}{$kind}{$pid};
+            $out{$kind} = $v if defined($v) && $v > 0;
+        }
+        return \%out;
+    }
+
     my $key = _progress_key($nick, $channel);
     return {} unless defined $key;
     my %out;
@@ -597,6 +1558,10 @@ sub progress_for_nick {
 sub get_for_nick {
     my ($self, $nick, $channel) = @_;
     return {} unless defined $nick;
+    if (($self->{storage} // '') eq 'db') {
+        my $pid = $self->_profile_id_for($nick, $channel);
+        return $self->_db_get_unlocks($pid);
+    }
     my $key = lc($nick) . "\x00" . (defined $channel ? lc($channel) : "");  # mb430-B1: canal en lc (IRC insensible a la casse)
     return $self->{data}{$key} // {};
 }
@@ -605,6 +1570,35 @@ sub get_for_nick {
 sub get_for_nick_all {
     my ($self, $nick) = @_;
     return {} unless defined $nick;
+
+    if (($self->{storage} // '') eq 'db') {
+        my $dbh = $self->{bot}{dbh};
+        my $sth = $dbh->prepare(q{
+            SELECT DISTINCT p.id_achievement_profile, c.name AS channel_name
+            FROM ACHIEVEMENT_PROFILE p
+            JOIN CHANNEL c ON c.id_channel = p.id_channel
+            LEFT JOIN ACHIEVEMENT_IDENTITY i
+              ON i.id_achievement_profile = p.id_achievement_profile
+            WHERE p.display_nick = ? OR i.nick = ?
+            ORDER BY p.last_seen_at DESC, p.id_achievement_profile
+        });
+        my %merged;
+        if ($sth && $sth->execute($nick, $nick)) {
+            while (my $r = $sth->fetchrow_hashref) {
+                my $pid = 0 + $r->{id_achievement_profile};
+                my $ch  = $r->{channel_name} // '';
+                for my $id (keys %{ $self->_db_get_unlocks($pid) }) {
+                    my $ts = $self->{_unlocks_by_profile}{$pid}{$id};
+                    if (!exists($merged{$id}) || $ts < $merged{$id}{ts}) {
+                        $merged{$id} = { ts => $ts, channel => $ch };
+                    }
+                }
+            }
+            $sth->finish;
+        }
+        return \%merged;
+    }
+
     my %merged;
     my $lc_nick = lc($nick);
     for my $k (keys %{$self->{data}}) {
@@ -620,6 +1614,16 @@ sub get_for_nick_all {
 # -- Compte d'achievements par nick (cross-canal) - pour le top -----------------
 sub count_all_nicks {
     my ($self) = @_;
+    if (($self->{storage} // '') eq 'db') {
+        my %counts;
+        for my $pid (keys %{ $self->{_profiles} || {} }) {
+            my $nick = $self->{_profiles}{$pid}{display_nick} // '';
+            next unless length $nick;
+            $counts{lc $nick} += scalar keys %{ $self->_db_get_unlocks($pid) };
+        }
+        return \%counts;
+    }
+
     my %counts;
     for my $k (keys %{$self->{data}}) {
         my ($n) = split /\x00/, $k, 2;
@@ -631,6 +1635,97 @@ sub count_all_nicks {
     return \%counts;
 }
 
+
+# -- Agrégats pour dashboard / leaderboard ------------------------------------
+# Keep presentation code out of the internal storage representation.
+sub storage_stats {
+    my ($self) = @_;
+
+    if (($self->{storage} // '') eq 'db') {
+        my $profiles = scalar keys %{ $self->{_profiles} || {} };
+        my $counters = 0;
+        $counters += scalar keys %{ $self->{_progress_by_profile}{$_} || {} }
+            for keys %{ $self->{_progress_by_profile} || {} };
+        return {
+            backend  => 'db',
+            profiles => $profiles,
+            counters => $counters,
+            dirty    => 0,
+        };
+    }
+
+    my $profiles = scalar keys %{ $self->{data} || {} };
+    my $counters = 0;
+    $counters += scalar keys %{ $self->{progress}{$_} || {} }
+        for keys %{ $self->{progress} || {} };
+    return {
+        backend  => 'json',
+        profiles => $profiles,
+        counters => $counters,
+        dirty    => $self->{dirty} ? 1 : 0,
+    };
+}
+
+sub channel_unlock_count {
+    my ($self, $channel) = @_;
+
+    if (($self->{storage} // '') eq 'db') {
+        my $cid = $self->_channel_id($channel);
+        return 0 unless $cid;
+        my $count = 0;
+        for my $pid (keys %{ $self->{_profiles} || {} }) {
+            next unless ($self->{_profiles}{$pid}{id_channel} // 0) == $cid;
+            $count += scalar keys %{ $self->_db_get_unlocks($pid) };
+        }
+        return $count;
+    }
+
+    my $count = 0;
+    for my $key (keys %{ $self->{data} || {} }) {
+        my (undef, $ch) = split /\x00/, $key, 2;
+        next unless defined($ch) && $ch eq lc($channel // '');
+        $count += scalar keys %{ $self->{data}{$key} || {} };
+    }
+    return $count;
+}
+
+sub top_on_channel {
+    my ($self, $channel, $limit) = @_;
+    $limit = 3 unless defined($limit) && "$limit" =~ /\A\d+\z/ && $limit > 0;
+
+    if (($self->{storage} // '') eq 'db') {
+        my $cid = $self->_channel_id($channel);
+        return [] unless $cid;
+
+        my @rows;
+        for my $pid (keys %{ $self->{_profiles} || {} }) {
+            next unless ($self->{_profiles}{$pid}{id_channel} // 0) == $cid;
+            my $count = scalar keys %{ $self->_db_get_unlocks($pid) };
+            next unless $count > 0;
+            push @rows, {
+                nick  => $self->{_profiles}{$pid}{display_nick} // '',
+                count => $count,
+            };
+        }
+        @rows = sort {
+            $b->{count} <=> $a->{count}
+                || lc($a->{nick}) cmp lc($b->{nick})
+        } @rows;
+        splice(@rows, $limit) if @rows > $limit;
+        return \@rows;
+    }
+
+    my %counts;
+    for my $key (keys %{ $self->{data} || {} }) {
+        my ($nick, $ch) = split /\x00/, $key, 2;
+        next unless defined($ch) && $ch eq lc($channel // '');
+        $counts{$nick} = scalar keys %{ $self->{data}{$key} || {} };
+    }
+    my @nicks = sort { $counts{$b} <=> $counts{$a} || $a cmp $b } keys %counts;
+    splice(@nicks, $limit) if @nicks > $limit;
+    return [ map { { nick => $_, count => $counts{$_} } } @nicks ];
+}
+
 # -- Déblocage d'un achievement (avec notification IRC) -------------------------
 # Retourne 1 si nouvellement débloqué, 0 si déjà obtenu.
 sub unlock {
@@ -638,14 +1733,32 @@ sub unlock {
     return 0 unless defined $nick && defined $id;
     return 0 unless exists $ACH{$id};
 
-    my $key = lc($nick) . "\x00" . (defined $channel ? lc($channel) : "");  # mb430-B1: canal en lc (IRC insensible a la casse)
-    return 0 if exists $self->{data}{$key}{$id};
+    if (($self->{storage} // '') eq 'db') {
+        my $pid = $self->_profile_id_for($nick, $channel, create => 1);
+        return 0 unless $pid;
+        return 0 if exists $self->{_unlocks_by_profile}{$pid}{$id};
 
-    $self->{data}{$key}{$id} = time();
-    $self->{dirty} = 1;
-    # mb118: unlocks are rare enough to persist immediately; do not risk
-    # losing a freshly unlocked achievement during the debounce window.
-    $self->save(1);
+        my $dbh = $self->{bot}{dbh};
+        my $sth = $dbh->prepare(q{
+            INSERT IGNORE INTO ACHIEVEMENT_UNLOCK
+                (id_achievement_profile, achievement_id, unlocked_at)
+            VALUES (?, ?, NOW())
+        });
+        return 0 unless $sth && $sth->execute($pid, $id);
+        return 0 unless $sth->rows > 0;
+
+        $self->{_unlocks_by_profile}{$pid}{$id} = time();
+    }
+    else {
+        my $key = lc($nick) . "\x00" . (defined $channel ? lc($channel) : "");  # mb430-B1: canal en lc (IRC insensible a la casse)
+        return 0 if exists $self->{data}{$key}{$id};
+
+        $self->{data}{$key}{$id} = time();
+        $self->{dirty} = 1;
+        # mb118: unlocks are rare enough to persist immediately; do not risk
+        # losing a freshly unlocked achievement during the debounce window.
+        $self->save(1);
+    }
 
     # Notification IRC
     #
@@ -738,12 +1851,21 @@ sub queue_check {
         return 0;
     }
 
+    my $profile_id;
+    if (($self->{storage} // '') eq 'db') {
+        # observe_identity() normally pinned the live alias before queue_check().
+        # Carry that durable profile into the fork so historical CHANNEL_LOG
+        # scans can include every known alias of the same IRC identity.
+        $profile_id = $self->_profile_id_for($nick, $channel);
+    }
+
     $self->{_pending_checks}{$key} = {
-        nick      => $nick,
-        channel   => $channel,
-        attempts  => 0,
-        retry_at  => 0,
-        queued_at => Time::HiRes::time(),
+        nick       => $nick,
+        channel    => $channel,
+        profile_id => $profile_id,
+        attempts   => 0,
+        retry_at   => 0,
+        queued_at  => Time::HiRes::time(),
     };
     push @{ $self->{_pending_order} }, $key;
     $self->_sync_queue_metric;
@@ -786,9 +1908,10 @@ sub start_next_check_async {
 
     my $token = ++$self->{_worker_seq};
     my $job = {
-        key     => $key,
-        nick    => $entry->{nick},
-        channel => $entry->{channel},
+        key        => $key,
+        nick       => $entry->{nick},
+        channel    => $entry->{channel},
+        profile_id => $entry->{profile_id},
     };
     $self->{_worker_inflight} = {
         token      => $token,
@@ -1024,6 +2147,7 @@ sub _spawn_check_worker {
                 $worker{_worker_timings} = {};
                 $worker{_worker_progress} = {};
                 $worker{_worker_thresholds} = \%worker_thresholds;
+                $worker{_worker_profile_id} = $job->{profile_id};
                 my $child = bless \%worker, 'Mediabot::Achievements::Worker';
 
                 my $run_ok = eval {
@@ -1235,6 +2359,73 @@ sub _timed_check {
     return @ret;
 }
 
+# mb646: build a bounded SQL predicate for every IRC alias attached to the
+# durable achievement profile.  This lets message-derived merit follow a nick
+# change or a small user@host variation instead of waiting for the new nick to
+# rebuild its counters from zero.
+sub _worker_identity_aliases {
+    my ($self, $nick) = @_;
+
+    my @aliases = ({ nick => $nick, userhost => undef });
+    my $pid = $self->{_worker_profile_id};
+    my $dbh = eval { $self->{bot}{dbh} };
+    return \@aliases unless ($self->{storage} // '') eq 'db'
+        && $pid && $dbh && eval { $dbh->can('prepare') };
+
+    my $sth = eval {
+        $dbh->prepare(q{
+            SELECT nick, userhost
+            FROM ACHIEVEMENT_IDENTITY
+            WHERE id_achievement_profile = ?
+            ORDER BY last_seen_at DESC, id_achievement_identity DESC
+            LIMIT 32
+        })
+    };
+    return \@aliases unless $sth && eval { $sth->execute($pid) };
+
+    my (%seen, @db_aliases);
+    while (my $r = $sth->fetchrow_hashref) {
+        next unless defined($r->{nick}) && length($r->{nick});
+        my $uh = defined($r->{userhost}) ? $r->{userhost} : '';
+        my $key = _norm_nick($r->{nick}) . "\x00" . _norm_userhost($uh);
+        next if $seen{$key}++;
+        push @db_aliases, { nick => $r->{nick}, userhost => $uh };
+    }
+    $sth->finish;
+
+    return @db_aliases ? \@db_aliases : \@aliases;
+}
+
+sub _worker_identity_sql {
+    my ($self, $column_prefix, $nick) = @_;
+    $column_prefix = 'cl' unless defined($column_prefix)
+        && $column_prefix =~ /\A[A-Za-z_][A-Za-z0-9_]*\z/;
+
+    my $aliases = $self->_worker_identity_aliases($nick);
+    my (@where, @bind);
+    for my $a (@$aliases) {
+        next unless ref($a) eq 'HASH' && defined($a->{nick}) && length($a->{nick});
+        my $uh = defined($a->{userhost}) ? $a->{userhost} : '';
+
+        # Empty userhost is the legacy JSON identity.  It deliberately falls
+        # back to nick-only matching for historical rows that predate mb646.
+        if ($uh eq '') {
+            push @where, "$column_prefix.nick = ?";
+            push @bind, $a->{nick};
+        }
+        else {
+            push @where, "($column_prefix.nick = ? AND $column_prefix.userhost = ?)";
+            push @bind, $a->{nick}, $uh;
+        }
+    }
+
+    if (!@where) {
+        push @where, "$column_prefix.nick = ?";
+        push @bind, $nick;
+    }
+    return ('(' . join(' OR ', @where) . ')', @bind);
+}
+
 sub check_msg {
     my ($self, $nick, $channel) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
@@ -1255,17 +2446,21 @@ sub check_msg {
     # gonflés (on débloquait "chatterbox" en rejoignant 1000×). On s'aligne sur
     # la convention "a parlé" = event_type IN ('public','action').
     my $dbh = $bot->{dbh} or return;
+    my ($identity_sql, @identity_bind) =
+        $self->_worker_identity_sql('cl', $nick);
+
     my ($n) = $self->_timed_check('msg_count', $nick, $channel, sub {
-        my $sth = eval {
-            $dbh->prepare(q{
-                SELECT COUNT(*) AS c
-                FROM CHANNEL_LOG cl
-                JOIN CHANNEL    c  ON c.id_channel = cl.id_channel
-                WHERE c.name = ? AND cl.nick = ?
-                  AND cl.event_type IN ('public','action')
-            })
+        my $sql = qq{
+            SELECT COUNT(*) AS c
+            FROM CHANNEL_LOG cl
+            JOIN CHANNEL    c  ON c.id_channel = cl.id_channel
+            WHERE c.name = ?
+              AND $identity_sql
+              AND cl.event_type IN ('public','action')
         };
-        return (undef) unless $sth && $sth->execute($channel, $nick);
+        my $sth = eval { $dbh->prepare($sql) };
+        return (undef) unless $sth
+            && $sth->execute($channel, @identity_bind);
         my $row = $sth->fetchrow_hashref; $sth->finish;
         return ($row ? ($row->{c} // 0) : 0);
     });
@@ -1301,17 +2496,18 @@ sub check_msg {
         if ((time() - $hb_last) >= 3600) {
             $self->{_hourband_check_ts}{$hb_key} = time();
             my ($night, $morn) = $self->_timed_check('hour_band', $nick, $channel, sub {
-                my $sth_h = eval {
-                    $dbh->prepare(q{
-                        SELECT HOUR(cl.ts) AS h, COUNT(*) AS c
-                        FROM CHANNEL_LOG cl
-                        JOIN CHANNEL c ON c.id_channel = cl.id_channel
-                        WHERE c.name = ? AND cl.nick = ?
-                          AND cl.event_type IN ('public','action')   -- mb347-B1
-                        GROUP BY HOUR(cl.ts)
-                    })
+                my $sql_h = qq{
+                    SELECT HOUR(cl.ts) AS h, COUNT(*) AS c
+                    FROM CHANNEL_LOG cl
+                    JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                    WHERE c.name = ?
+                      AND $identity_sql
+                      AND cl.event_type IN ('public','action')   -- mb347-B1
+                    GROUP BY HOUR(cl.ts)
                 };
-                return (undef, undef) unless $sth_h && $sth_h->execute($channel, $nick);
+                my $sth_h = eval { $dbh->prepare($sql_h) };
+                return (undef, undef) unless $sth_h
+                    && $sth_h->execute($channel, @identity_bind);
                 my (%by_h);
                 while (my $r = $sth_h->fetchrow_hashref) { $by_h{$r->{h}} = $r->{c}; }
                 $sth_h->finish;
@@ -1338,17 +2534,16 @@ sub check_msg {
         if (($now_p - $last_p) >= 3600) {
             $self->{_polyphony_check_ts}{lc($nick)} = $now_p;
             my ($nchan) = $self->_timed_check('polyphony', $nick, $channel, sub {
-                my $sth_p = eval {
-                    $dbh->prepare(q{
-                        SELECT COUNT(DISTINCT c.name) AS n
-                        FROM CHANNEL_LOG cl
-                        JOIN CHANNEL c ON c.id_channel = cl.id_channel
-                        WHERE cl.nick = ?
-                          AND cl.event_type IN ('public','action')   -- mb347-B1
-                          AND c.name LIKE '#%'
-                    })
+                my $sql_p = qq{
+                    SELECT COUNT(DISTINCT c.name) AS n
+                    FROM CHANNEL_LOG cl
+                    JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                    WHERE $identity_sql
+                      AND cl.event_type IN ('public','action')   -- mb347-B1
+                      AND c.name LIKE '#%'
                 };
-                return (undef) unless $sth_p && $sth_p->execute($nick);
+                my $sth_p = eval { $dbh->prepare($sql_p) };
+                return (undef) unless $sth_p && $sth_p->execute(@identity_bind);
                 my $r = $sth_p->fetchrow_hashref; $sth_p->finish;
                 return ($r ? ($r->{n} // 0) : 0);
             });

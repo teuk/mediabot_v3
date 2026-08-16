@@ -3918,17 +3918,17 @@ sub _cmd_status {
             $stream->write($pending
                 ? "AchvQ:    $pending pending check(s)\r\n"
                 : "AchvQ:    empty\r\n");
-            # mb612-B1: le registre de progression est desormais l'etat le
-            # plus precieux du systeme (il ne se recalcule pas). L'operateur
-            # doit voir en un coup d'oeil qu'il est bien charge et sauve.
-            my $ach_data = eval { $ach->{data} }     || {};
-            my $ach_prog = eval { $ach->{progress} } || {};
-            my $profiles = scalar keys %$ach_data;
-            my $counters = 0;
-            $counters += scalar keys %{ $ach_prog->{$_} || {} } for keys %$ach_prog;
-            my $pending_save = (eval { $ach->{dirty} }) ? ' (unsaved changes)' : '';
-            $stream->write(sprintf("Achv:     %d profile(s), %d progress counter(s)%s\r\n",
-                $profiles, $counters, $pending_save));
+            # mb612 / mb646: expose storage state through the module API.
+            # DB mode is write-through; JSON fallback can still have a dirty
+            # debounce window on legacy installations.
+            my $stats = eval { $ach->storage_stats } || {};
+            my $profiles = $stats->{profiles} // 0;
+            my $counters = $stats->{counters} // 0;
+            my $backend  = $stats->{backend}  // 'unknown';
+            my $pending_save = $stats->{dirty} ? ' (unsaved changes)' : '';
+            $stream->write(sprintf(
+                "Achv:     %d profile(s), %d progress counter(s) [%s]%s\r\n",
+                $profiles, $counters, $backend, $pending_save));
         }
 
         my $adb = eval { $bot_s->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_DBNAME') } // '';

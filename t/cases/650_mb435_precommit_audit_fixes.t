@@ -62,28 +62,33 @@ return sub {
     my $delete_count = () = $set_body =~ /delete \$self->\{_hailo_ratio_cache\}\{lc \$sChannel\}/g;
     $assert->is($delete_count, 2, 'both UPDATE and INSERT success paths invalidate cache');
 
-    # --- 3. Achievement aggregate scans fold the live channel -------------
+    # --- 3. Achievement aggregate APIs fold the live channel ---------------
+    # mb646 moved dashboard/leaderboard aggregation out of UserCommands.pm and
+    # behind storage-neutral Achievements APIs. Keep the original mb435 case-fold
+    # invariant, but assert it at its new owner instead of the removed JSON scan.
     my $users = _slurp_650(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
-    my $folded_count = () = $users =~ /\$ch eq lc\(\$channel \/\/ ''\)/g;
+    my $ach   = _slurp_650(File::Spec->catfile('.', 'Mediabot', 'Achievements.pm'));
+    my $folded_count = () = $ach =~ /\$ch eq lc\(\$channel \/\/ ''\)/g;
     $assert->is($folded_count, 2,
-        'dashboard and leaderboard compare against folded live channel');
-    $assert->unlike($users, qr/next unless defined \$ch && \$ch eq \$channel;/,
-        'no raw channel comparison remains in direct achievement scans');
+        'storage-neutral aggregate fallbacks compare against folded live channel');
+    $assert->unlike($ach, qr/next unless defined \$ch && \$ch eq \$channel;/,
+        'no raw channel comparison remains in achievement aggregate fallbacks');
 
-    my %data = (
-        "alice\x00#teuk" => { one => 1, two => 2 },
-        "bob\x00#other" => { one => 1 },
-    );
-    my $live_channel = '#TeUk';
-    my $count = 0;
-    for my $key (keys %data) {
-        my (undef, $ch) = split /\x00/, $key, 2;
-        next unless defined $ch && $ch eq lc($live_channel // '');
-        $count += scalar keys %{ $data{$key} };
-    }
-    $assert->is($count, 2, 'mixed-case live channel still finds canonical achievements');
+    require Mediabot::Achievements;
+    my $aggregate = bless {
+        storage => 'json',
+        data    => {
+            "alice\x00#teuk" => { one => 1, two => 2 },
+            "bob\x00#other" => { one => 1 },
+        },
+    }, 'Mediabot::Achievements';
+    $assert->is($aggregate->channel_unlock_count('#TeUk'), 2,
+        'mixed-case live channel still finds canonical achievements');
 
     $assert->like($helpers, qr/mb435-B1/, 'mb435-B1 tag present');
     $assert->like($hailo,   qr/mb435-B2/, 'mb435-B2 tag present');
-    $assert->like($users,   qr/mb435-B3/, 'mb435-B3 tag present');
+    $assert->ok(
+        $users =~ /channel_unlock_count\(\$channel\)/
+            && $users =~ /top_on_channel\(\$channel,\s*3\)/,
+        'mb435-B3 invariant is delegated to storage-neutral achievement APIs');
 };

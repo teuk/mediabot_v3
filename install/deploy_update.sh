@@ -225,6 +225,14 @@ else
     echo "⚠️  Warning: mediabot.conf was not found in ${PROJECT_DIR}."
 fi
 
+# mb646: transitional safety only. Achievements are DB-backed after migration,
+# but an older instance may still have its last durable state in JSON. Preserve
+# that file across the directory swap so the new release can import it once.
+if [ -f "${PROJECT_DIR}/var/achievements.json" ]; then
+    mkdir -p "${TMP_CLONE_DIR}/var"
+    cp -pfv "${PROJECT_DIR}/var/achievements.json"         "${TMP_CLONE_DIR}/var/achievements.json"
+fi
+
 LATEST_BRAIN="$(
     find "$PARENT_DIR" -maxdepth 2 -type f \( -path '*/mediabot_v3/*.brn' -o -path '*/mediabot_v3.*/*.brn' \) -printf '%T@ %p\n' 2>/dev/null \
     | sort -nr \

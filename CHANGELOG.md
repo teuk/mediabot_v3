@@ -8,6 +8,28 @@ release. Development after this release continues on the `3.4dev` line.
 
 ---
 
+## mb646 — achievements survive restarts and updates in MariaDB
+
+- Achievements no longer depend on the release-local JSON file once the new DB
+  migration is installed. Unlocks and progress are written through to MariaDB.
+- Added durable per-channel achievement profiles plus IRC identity aliases. The
+  resolver uses the live `(nick, user@host, channel)` tuple conservatively:
+  exact triplets first, registered USER id as authoritative proof, exact
+  user@host across nick changes, then same-nick aliases only when ident or host
+  still matches.
+- Existing `var/achievements.json` state is imported once and preserved as a
+  `.migrated-<timestamp>` backup. Older deployments that have not applied the
+  schema migration retain the JSON fallback instead of losing achievements.
+- Message-derived thresholds (`msg_count`, night/early hour bands and
+  `polyphony`) aggregate the durable profile's known aliases, so a nick change
+  does not reset long-running merit back to zero.
+- The updater preserves the legacy JSON during the transition, and startup can
+  recover history from the current deployment family's archives: both numeric
+  `<root>.NNN` and timestamped `<root>.old.YYYYMMDD_HHMMSS` layouts are
+  supported without scanning a sibling bot family under the same Unix home.
+- Dashboard and leaderboard code now consume achievement storage through public
+  methods instead of reaching into the module's internal hash representation.
+
 ## [Unreleased] — 3.4dev
 
 ### mb645 — l'auto-update et systemd partagent enfin le meme cycle de vie

@@ -84,12 +84,14 @@ return sub {
     }
     $assert->is($recorded, 5,
         'mb612-795: les 5 valeurs deja connues des checks sont enregistrees');
-    # La progression se nourrit de valeurs DEJA calculees : le module ne
-    # doit pas avoir gagne une seule requete. Ce compte est un garde-fou —
-    # s'il bouge, c'est qu'une lecture a ete ajoutee quelque part.
-    my $queries = () = $src =~ /prepare\(/g;
-    $assert->is($queries, 3,
-        'mb612-795: aucune requete supplementaire pour la progression');
+    # mb646: persistence itself is now SQL write-through, so a module-wide
+    # prepare() count is no longer meaningful. The important mb612 contract is
+    # unchanged: set_progress receives a value already calculated by its caller
+    # and must not launch a second SELECT to recompute that merit.
+    my ($set_body) = $src =~ /sub set_progress \{(.*?)\n\}/s;
+    $set_body //= '';
+    $assert->ok($set_body !~ /\bSELECT\b/i,
+        'mb612-795: set_progress does not recompute an already-known value');
 
     # [4] snapshot
     $A->set_progress('karma_score', 'teuk', '#c', 41);

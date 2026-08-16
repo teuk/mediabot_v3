@@ -9684,13 +9684,9 @@ sub mbDashboard_ctx {
     # 6. Achievements totaux unlock sur ce canal
     my $ach_unlocked = 0;
     if ($self->{achievements}) {
-        for my $key (keys %{ $self->{achievements}{data} // {} }) {
-            my ($n, $ch) = split /\x00/, $key, 2;
-            # mb435-B3: achievement keys are canonical lowercase since
-            # mb430; compare against the folded live channel as well.
-            next unless defined $ch && $ch eq lc($channel // '');
-            $ach_unlocked += scalar keys %{ $self->{achievements}{data}{$key} };
-        }
+        $ach_unlocked = eval {
+            $self->{achievements}->channel_unlock_count($channel)
+        } // 0;
     }
 
     # 7. Active right now (nicks ayant parlé dans les 60 dernières min)
@@ -11389,22 +11385,10 @@ sub mbLeaderboard_ctx {
     my @ach_top;
     if ($show_alltime_sections && (!$only || $only eq 'achievs')) {
         if ($self->{achievements}) {
-            my %counts_on_chan;
-            for my $key (keys %{ $self->{achievements}{data} // {} }) {
-                my ($n, $ch) = split /\x00/, $key, 2;
-                # mb435-B3: mb430 stores channel keys in lowercase. A
-                # mixed-case IRC target must still see its leaderboard data.
-                next unless defined $ch && $ch eq lc($channel // '');
-                $counts_on_chan{$n} = scalar keys %{ $self->{achievements}{data}{$key} };
-            }
-            my @sorted = sort {
-                $counts_on_chan{$b} <=> $counts_on_chan{$a}
-                || $a cmp $b
-            } keys %counts_on_chan;
-            for my $n (@sorted[0..2]) {
-                next unless defined $n;
-                push @ach_top, [$n, $counts_on_chan{$n}];
-            }
+            my $top = eval {
+                $self->{achievements}->top_on_channel($channel, 3)
+            } || [];
+            @ach_top = map { [ $_->{nick}, $_->{count} ] } @$top;
         }
     }
 

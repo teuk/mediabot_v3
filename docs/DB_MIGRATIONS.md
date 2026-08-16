@@ -72,6 +72,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260708_onthisday_chanset.
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260708_onthisday_digest_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260710_quotes_hits.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260724_lang_chansets.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260816_achievements_db.sql;
 ```
 
 Then run the checker again:
@@ -104,6 +105,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260708_onthisday_digest_chanset.sql
 20260710_quotes_hits.sql
 20260724_lang_chansets.sql
+20260816_achievements_db.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this
@@ -178,6 +180,30 @@ certification check:
 SHOW INDEX FROM CHANNEL_LOG WHERE Key_name = 'idx_channel_log_channel_ts';
 SHOW INDEX FROM QUOTES      WHERE Key_name = 'idx_quotes_channel_hits';
 ```
+
+## Achievements DB persistence (20260816)
+
+`20260816_achievements_db.sql` moves achievement unlocks and progress from the
+release-local `var/achievements.json` file into MariaDB.
+
+The model separates a durable per-channel profile from the IRC identities that
+have been observed for it:
+
+```text
+ACHIEVEMENT_PROFILE
+  └─ ACHIEVEMENT_IDENTITY  (nick + user@host + channel aliases)
+  ├─ ACHIEVEMENT_UNLOCK
+  └─ ACHIEVEMENT_PROGRESS
+```
+
+Identity matching is intentionally conservative. Exact triplets win; a known
+registered `USER.id_user` is authoritative; an exact `user@host` can follow a
+nick change; and the same nick can follow a host variation only when the ident
+or host still matches. Ambiguous nick-only collisions are not merged.
+
+After the migration is applied, the first Mediabot startup imports any existing
+legacy JSON state idempotently and renames the source file to
+`achievements.json.migrated-<timestamp>`.
 
 ## Safety rules
 

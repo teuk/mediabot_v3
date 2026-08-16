@@ -392,8 +392,10 @@ if ($mediabot->{auth} && $mediabot->{auth}->can('set_metrics')) {
     $mediabot->{auth}->set_metrics($mediabot->{metrics});
 }
 
-# mb115: Initialize Achievements system
-# Stockage JSON persistant — pas de modif schéma DB
+# mb115 / mb646: Initialize Achievements system.
+# The database is now the durable source of truth when the mb646 migration is
+# installed. ACHIEVEMENTS_PATH is retained only for one-time legacy JSON import
+# and a compatibility fallback on databases not migrated yet.
 $mediabot->{achievements} = Mediabot::Achievements->new(
     path   => $mediabot->{conf}->get('main.ACHIEVEMENTS_PATH') || 'var/achievements.json',
     logger => $mediabot->{logger},
@@ -1964,13 +1966,31 @@ sub _on_message_PRIVMSG_body {
         # mb85-B1 / mb86-port: bloc updateUserSeen fermé avant deliverReminders
         {
             my ($sn,$si,$sh) = $mediabot->getMessageNickIdentHost($message);
+            my $userhost = "$si\@$sh";
             eval { $mediabot->updateUserSeen(
                 nick       => $sn,
                 channel    => $where,
-                userhost   => "$si\@$sh",
+                userhost   => $userhost,
                 event_type => 'message',
                 last_msg   => $what,
             ) } if $sn;
+
+            # mb646: bind the live IRC triplet to a durable achievement profile
+            # BEFORE trivia/quotegame/command hooks can mutate progress. Exact
+            # user@host follows nick changes; same nick accepts only compatible
+            # ident/host changes; registered USER id is authoritative.
+            if ($sn && $mediabot->{achievements}
+                && $mediabot->{achievements}->can('observe_identity')) {
+                eval {
+                    $mediabot->{achievements}->observe_identity(
+                        $sn, $where, $userhost, $message
+                    );
+                };
+                if ($@) {
+                    $mediabot->{logger}->log(1,
+                        "achievements observe_identity error: $@");
+                }
+            }
         }
         # F13: deliver pending reminders on every public channel message
         eval { Mediabot::UserCommands::deliverReminders($mediabot, $who, $where) };
