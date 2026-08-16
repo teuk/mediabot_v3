@@ -215,6 +215,8 @@ return sub {
         'mb632-814: ... par ses deux marqueurs');
     $assert->is($U->can('restart_mode')->({}), 'manual',
         'mb632-814: hors systemd, mode manuel');
+    $assert->like($src, qr/restart policy is verified before shutdown/,
+        'mb645-814: systemd detecte ne vaut plus promesse aveugle, le script verifie la policy');
     $assert->like($src, qr/the bot will STAY DOWN until you start it again/,
         'mb632-814: le mode manuel est ANNONCE — le script ne relance pas le bot');
 

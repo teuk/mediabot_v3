@@ -6388,6 +6388,10 @@ sub _cmd_die {
     $stream->close_when_empty;
     $self->_close_session($id);
 
+    # mb645: `.die` is an intentional final shutdown, not a restart request.
+    # Exit 75 is reserved by the shipped systemd unit via
+    # RestartPreventExitStatus=75.
+    $bot->setShutdownExitCode($bot->getNoRestartExitCode());
     $bot->{Quit} = 1;
     $bot->{irc}->send_message("QUIT", undef, $msg);
 }

@@ -1262,7 +1262,7 @@ sub on_timer_tick {
     if ($reconnect_needed) {
         if ($mediabot->getQuit() && !$mediabot->{irc_reconnect_requested}) {
             $mediabot->{logger}->log(0,"Disconnected from server");
-            $mediabot->clean_and_exit(0);
+            $mediabot->clean_and_exit($mediabot->getShutdownExitCode());
         }
         else {
             my $delay = int($mediabot->{conf}->get('main.RECONNECT_DELAY') // 30);
@@ -2917,7 +2917,7 @@ sub on_message_ERROR {
     $mediabot->{logger}->log(0, "ERROR from server: $err_msg");
 
     if ($mediabot->getQuit()) {
-        $mediabot->clean_and_exit(0);
+        $mediabot->clean_and_exit($mediabot->getShutdownExitCode());
         return;
     }
 
@@ -2944,7 +2944,7 @@ sub on_message_KILL {
     $mediabot->{logger}->log(0, "Killed by $killer: $reason - will reconnect.");
 
     if ($mediabot->getQuit()) {
-        $mediabot->clean_and_exit(0);
+        $mediabot->clean_and_exit($mediabot->getShutdownExitCode());
         return;
     }
 

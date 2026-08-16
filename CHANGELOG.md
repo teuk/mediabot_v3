@@ -10,6 +10,40 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb645 — l'auto-update et systemd partagent enfin le meme cycle de vie
+- TERRAIN (nbot) : la mise a jour clonait, validait, preservait la conf/le
+  cerveau et activait correctement la nouvelle release, puis le bot restait
+  arrete. Cause : `deploy_update.sh` envoie SIGTERM, Mediabot termine proprement
+  (`exit 0`) et le template publie utilisait `Restart=on-failure`.
+- DIAGNOSTIC SYSTEMD : l'echec initial de l'unite sur nbot n'etait PAS lie au
+  template `bash -lc`/`stdbuf` : un ancien processus Mediabot possedait encore
+  le verrou PID. Le template multi-instance eprouve sur teuk.org est donc
+  conserve (`EnvironmentFile=/etc/default/mediabot-%i`, `BOT_DIR/BOT_BIN/BOT_CONF`).
+- CONTRAT : le template passe a `Restart=always` + `ExitType=cgroup`.
+  L'updater, fork/setsid depuis le bot, reste membre du cgroup de l'unite :
+  systemd attend ainsi la fin de la restauration/rotation avant de redemarrer
+  la nouvelle release. Aucune course ne depend plus des 10 secondes de
+  `RestartSec`.
+- COMPATIBILITE : `Restart=always` permet aussi a une release plus ancienne,
+  dont le handler SIGTERM sort avec status 0, de revenir apres sa premiere
+  auto-update vers le code courant.
+- ARRET VOLONTAIRE : le nouveau template exporte
+  `MEDIABOT_SYSTEMD_UPDATE_SAFE=1`. Avec ce marqueur, `die` et Partyline `.die`
+  memorisent l'exit 75, declare a la fois dans `SuccessExitStatus=75` (arret
+  volontaire = succes) et `RestartPreventExitStatus=75` (aucun restart). Sans le
+  marqueur (ancien template `Restart=on-failure` ou lancement manuel), ils
+  gardent l'exit historique 0 : une mise a jour du code seule ne transforme
+  donc jamais `die` en restart involontaire.
+- FAIL-CLOSED : `deploy_update.sh` identifie l'unite depuis le cgroup du PID
+  cible et verifie `Restart=always` + `ExitType=cgroup` AVANT SIGTERM. Une
+  ancienne/mauvaise unite fait echouer l'update sans couper le bot.
+- DOCUMENTATION : `ExitType=cgroup` requiert systemd >= 250 pour le contrat
+  d'auto-update. Le template public et la documentation systemd restent
+  multi-instance et ne codent aucun chemin dev en dur.
+- Nouveau test 825 : verrouille le template eprouve, le contrat systemd,
+  l'ordre garde->SIGTERM, l'exit 75 de `die`/`.die` et la compatibilite
+  SIGTERM des anciennes releases.
+
 ### mb644 — la frontiere IRC decode enfin le texte une seule fois
 - DIAGNOSTIC TERRAIN : un probe sur `#teuk` a mesure le texte livre par
   Net::Async::IRC : `utf8_flag=0`, avec les vrais octets UTF-8 (`C3 A9` pour

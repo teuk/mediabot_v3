@@ -78,17 +78,22 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
+ExitType=cgroup
+
 User=mediabot
 Group=mediabot
 
 EnvironmentFile=/etc/default/mediabot-%i
+Environment=MEDIABOT_SYSTEMD_UPDATE_SAFE=1
 
 WorkingDirectory=/
 SyslogIdentifier=mediabot-%i
 
 ExecStart=/bin/bash -lc 'cd "$BOT_DIR" && exec /usr/bin/stdbuf -oL -eL /usr/bin/perl "$BOT_BIN" --conf="$BOT_CONF"'
 
-Restart=on-failure
+Restart=always
+SuccessExitStatus=75
+RestartPreventExitStatus=75
 RestartSec=10s
 
 TimeoutStopSec=30
@@ -132,6 +137,65 @@ BOT_DIR=/home/mediabot/mediabot3
 BOT_BIN=/home/mediabot/mediabot3/mediabot.pl
 BOT_CONF=/home/mediabot/mediabot3/mbundernet.conf
 ```
+
+## Update and shutdown contract
+
+The self-update command and systemd deliberately share a small lifecycle
+contract:
+
+```text
+m update now
+  -> deploy_update.sh is forked from the running bot
+  -> the staged release is fully validated
+  -> the old bot receives SIGTERM
+  -> the updater remains alive in the same service cgroup
+  -> config/brain are restored and the directory swap finishes
+  -> the updater exits
+  -> the cgroup becomes empty
+  -> systemd starts the new release
+```
+
+`ExitType=cgroup` is important here: the main Perl process may exit before the
+updater, but the service is not considered finished until the updater leaves
+the cgroup. This removes any dependency on the directory swap completing
+inside `RestartSec=`.
+
+`Restart=always` is intentional. It also makes the service compatible with an
+older Mediabot release whose SIGTERM handler exits with status 0 during an
+update. Explicit bot shutdown remains available: the template exports
+`MEDIABOT_SYSTEMD_UPDATE_SAFE=1`, so `die` and Partyline `.die` use exit status
+**75**, which is listed in both `SuccessExitStatus=` and
+`RestartPreventExitStatus=`. The first makes the explicit shutdown a clean
+systemd termination; the second prevents `Restart=always` from starting it
+again.
+
+That environment marker is also a compatibility guard. If new Mediabot code is
+started by an older template (or manually) the marker is absent, so `die`
+keeps its historical exit status 0 instead of being misread as a failure by an
+old `Restart=on-failure` unit.
+
+An administrative stop remains an administrative stop:
+
+```bash
+systemctl stop mediabot@dev
+```
+
+systemd does not restart a service that it is explicitly stopping.
+
+`ExitType=cgroup` was added in systemd 250. On older systemd releases the bot
+can still be managed normally, but the IRC self-update path must not be relied
+upon; update the code manually or upgrade systemd first. `deploy_update.sh`
+checks the live service policy before it sends SIGTERM and fails closed when
+the required update contract is not active.
+
+After installing or changing the template on a host:
+
+```bash
+systemctl daemon-reload
+systemctl restart mediabot@dev
+```
+
+For another instance, replace `dev` with its instance name.
 
 ## Useful commands
 

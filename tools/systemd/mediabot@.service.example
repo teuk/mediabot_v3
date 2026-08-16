@@ -8,17 +8,39 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
+
+# mb645: the updater is deliberately forked from Mediabot and remains in this
+# service cgroup after the main bot exits.  ExitType=cgroup keeps the unit alive
+# until that updater has finished the directory swap, so systemd cannot race
+# the deployment by starting the new bot too early.  Requires systemd >= 250.
+ExitType=cgroup
+
 User=mediabot
 Group=mediabot
 
 EnvironmentFile=/etc/default/mediabot-%i
+
+# Marker consumed by Mediabot itself.  It enables exit 75 for explicit
+# `die` / `.die` only when this matching RestartPreventExitStatus policy is
+# actually installed.  Old templates therefore keep their historical exit 0.
+Environment=MEDIABOT_SYSTEMD_UPDATE_SAFE=1
 
 WorkingDirectory=/
 SyslogIdentifier=mediabot-%i
 
 ExecStart=/bin/bash -lc 'cd "$BOT_DIR" && exec /usr/bin/stdbuf -oL -eL /usr/bin/perl "$BOT_BIN" --conf="$BOT_CONF"'
 
-Restart=on-failure
+# `m update now` stops the old bot with SIGTERM after staging the candidate.
+# Restart=always also supports installations updating from an older Mediabot
+# whose SIGTERM handler exits cleanly (status 0).
+#
+# Exit 75 is reserved by Mediabot for explicit `die` / `.die`: those commands
+# must remain final shutdowns and must not be undone by Restart=always.
+Restart=always
+# Exit 75 is an intentional, successful shutdown (`die` / `.die`), not a crash.
+# Mark it successful AND prevent Restart=always from reviving the bot.
+SuccessExitStatus=75
+RestartPreventExitStatus=75
 RestartSec=10s
 
 TimeoutStopSec=30

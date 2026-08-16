@@ -213,6 +213,10 @@ sub mbQuit_ctx {
 
     logBot($self, $ctx->message, undef, 'die', $reason);
 
+    # mb645: an explicit `die` is a final operator-requested shutdown.  The
+    # systemd template uses Restart=always for update compatibility, therefore
+    # reserve exit 75 as RestartPreventExitStatus so `die` still means die.
+    $self->setShutdownExitCode($self->getNoRestartExitCode());
     $self->{Quit} = 1;
     $self->{irc}->send_message('QUIT', undef, $reason);
 }

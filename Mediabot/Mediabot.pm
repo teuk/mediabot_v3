@@ -89,6 +89,7 @@ sub new {
         plugin_manager          => undef,
         script_runner           => undef,
         script_action_runner    => undef,
+        shutdown_exit_code      => 0,
         WHOIS_VARS              => {},
     }, $class;
 
@@ -3736,6 +3737,32 @@ sub setConnectionTimestamp {
 sub getConnectionTimestamp {
 	my $self = shift;
 	return $self->{iConnectionTimestamp};
+}
+
+# Exit code reserved by the mb645 systemd contract for an intentional final
+# shutdown.  IMPORTANT: old systemd templates use Restart=on-failure, where a
+# bare exit 75 would restart `die` by mistake.  The new template therefore
+# advertises its policy explicitly; without that marker (old unit or manual
+# foreground run), keep the historical clean exit 0.
+sub getNoRestartExitCode {
+    my ($self, $env) = @_;
+    $env ||= \%ENV;
+    return 75
+        if defined($env->{MEDIABOT_SYSTEMD_UPDATE_SAFE})
+        && $env->{MEDIABOT_SYSTEMD_UPDATE_SAFE} eq '1';
+    return 0;
+}
+
+sub setShutdownExitCode {
+    my ($self, $code) = @_;
+    $code = 0 unless defined($code) && "$code" =~ /\A\d+\z/;
+    $self->{shutdown_exit_code} = int($code);
+    return $self->{shutdown_exit_code};
+}
+
+sub getShutdownExitCode {
+    my ($self) = @_;
+    return int($self->{shutdown_exit_code} // 0);
 }
 
 # Set quit flag (used to signal shutdown)

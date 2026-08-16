@@ -158,6 +158,41 @@ while IFS= read -r PID; do
     fi
 done < <(pgrep -f 'mediabot\.pl' 2>/dev/null || true)
 
+# mb645: when the matching bot is owned by a systemd service, verify the
+# lifecycle contract BEFORE sending SIGTERM.  The updater is a descendant of
+# that service and remains in its cgroup despite setsid()/double-fork.  We need:
+#   - ExitType=cgroup : keep the unit alive until this updater finishes;
+#   - Restart=always  : restart even when an older bot handles SIGTERM as exit 0.
+#
+# Without both, a successful deployment could leave the bot down or systemd
+# could restart it in the middle of the directory swap.  Fail closed.
+SYSTEMD_UNIT=""
+SYSTEMD_RESTART=""
+SYSTEMD_EXIT_TYPE=""
+
+if [ -n "$BOT_PID" ] && [ -r "/proc/${BOT_PID}/cgroup" ]; then
+    SYSTEMD_UNIT="$(
+        awk -F: '{ print $3 }' "/proc/${BOT_PID}/cgroup" 2>/dev/null \
+        | sed -n 's#^.*/\([^/]*\.service\)$#\1#p' \
+        | head -1
+    )"
+fi
+
+if [ -n "$SYSTEMD_UNIT" ]; then
+    if ! command -v systemctl >/dev/null 2>&1; then
+        fail "PID ${BOT_PID} belongs to ${SYSTEMD_UNIT}, but systemctl is unavailable"
+    fi
+
+    SYSTEMD_RESTART="$(systemctl show "$SYSTEMD_UNIT" --property=Restart --value 2>/dev/null || true)"
+    SYSTEMD_EXIT_TYPE="$(systemctl show "$SYSTEMD_UNIT" --property=ExitType --value 2>/dev/null || true)"
+
+    echo "🧭 systemd instance: ${SYSTEMD_UNIT} (Restart=${SYSTEMD_RESTART:-unknown}, ExitType=${SYSTEMD_EXIT_TYPE:-unknown})"
+
+    if [ "$SYSTEMD_RESTART" != "always" ] || [ "$SYSTEMD_EXIT_TYPE" != "cgroup" ]; then
+        fail "systemd unit ${SYSTEMD_UNIT} is not update-safe: expected Restart=always and ExitType=cgroup. Install the current tools/systemd/mediabot@.service.example, run systemctl daemon-reload, restart the instance, then retry."
+    fi
+fi
+
 if [ -n "$BOT_PID" ]; then
     echo "🛑 Sending SIGTERM to PID ${BOT_PID} ..."
     kill -15 "$BOT_PID"

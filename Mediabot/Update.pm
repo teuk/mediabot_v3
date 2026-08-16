@@ -22,10 +22,12 @@ package Mediabot::Update;
 # logique ici — une deuxieme implementation divergerait de la premiere.
 #
 # LE POINT QUI COMPTE : deploy_update.sh envoie SIGTERM au bot et NE LE
-# REDEMARRE PAS. Sous systemd, l'unite le relance ; lance a la main (screen,
-# tmux, foreground), le bot reste ETEINT. mb635 impose clone + validation AVANT
-# le SIGTERM afin qu'un echec reseau/candidat ne cree aucune coupure et que la
-# fenetre stop->bascule reste minimale avant le redemarrage systemd.
+# REDEMARRE PAS. Sous systemd, mb645 impose un contrat explicite :
+# Restart=always + ExitType=cgroup. Le second garde l'updater detache dans le
+# cycle de vie de l'unite jusqu'a la fin de la bascule ; le premier relance
+# ensuite la nouvelle release, y compris quand une ancienne version du bot
+# traite SIGTERM comme une sortie propre. Lance a la main (screen, tmux,
+# foreground), le bot reste ETEINT. Le script verifie ce contrat AVANT SIGTERM.
 # =============================================================================
 
 use strict;
@@ -201,10 +203,10 @@ sub update_decision {
     return { %d, state => 'available', available => 1 };
 }
 
-# Sous systemd, l'unite relance le bot apres le SIGTERM du script : la mise a
-# jour se termine seule. Sinon, le bot reste eteint et quelqu'un doit le
-# relancer a la main. On ne devine pas : on lit les marqueurs poses par
-# systemd sur ses propres services.
+# Ici on detecte seulement si le processus a ete lance par systemd pour
+# l'affichage IRC. La garantie de redemarrage, elle, n'est jamais supposee :
+# deploy_update.sh interroge la vraie unite (Restart + ExitType) et refuse
+# AVANT SIGTERM si le contrat mb645 n'est pas actif.
 sub restart_mode {
     my ($env) = @_;
     $env ||= \%ENV;
@@ -325,7 +327,7 @@ sub update_ctx {
 
         unless ($do_it) {
             _say($ctx, "  restart after update: " . ($mode eq 'systemd'
-                ? "\x0309systemd\x0f (the bot comes back on its own)"
+                ? "\x0309systemd\x0f (restart policy is verified before shutdown)"
                 : "\x0308manual\x0f - the bot will STAY DOWN until you start it again"));
             _say($ctx, "  run \x02update now\x02 to apply it "
                      . "(config and Hailo brain are preserved, previous release archived)");
@@ -336,7 +338,9 @@ sub update_ctx {
         # [4] Execution. Le script tue le bot : on annonce AVANT, et on lance
         # un processus DETACHE (setsid) qui survivra a notre propre mort.
         _say($ctx, "\x02Updating now.\x02 Backing up config and brain, then restarting"
-                 . ($mode eq 'systemd' ? ' via systemd.' : ' - START ME AGAIN afterwards.'));
+                 . ($mode eq 'systemd'
+                    ? ' via systemd (policy checked before shutdown).'
+                    : ' - START ME AGAIN afterwards.'));
         _log($self, $ctx, 'start', ($decision->{remote} // '?'));
 
         my $log = File::Spec->catfile($dir, 'var', 'update.log');
