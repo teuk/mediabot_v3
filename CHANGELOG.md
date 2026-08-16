@@ -10,6 +10,33 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb644 — la frontiere IRC decode enfin le texte une seule fois
+- DIAGNOSTIC TERRAIN : un probe sur `#teuk` a mesure le texte livre par
+  Net::Async::IRC : `utf8_flag=0`, avec les vrais octets UTF-8 (`C3 A9` pour
+  `é`, `C5 93` pour `œ`). Un second probe DB a montre l'autre cote de la
+  frontiere : DBD::MariaDB 1.24 rend les colonnes texte comme chaines Perl
+  Unicode (`utf8_flag=1`). Injecter directement les octets IRC dans DBI
+  reproduit exactement le double encodage `é -> Ã©` (`C3 A9 -> C3 83 C2 A9`).
+- FIX : `Mediabot::Helpers::decode_irc_text()` devient la frontiere unique
+  fil IRC -> application. Un PRIVMSG UTF-8 valide est decode UNE fois juste
+  apres extraction des hints ; une chaine deja Unicode reste inchangee et une
+  entree legacy/invalide reste en octets, sans hypothese destructive.
+- SECURITE DE REPRESENTATION : `Encode::LEAVE_SRC` empeche le decode strict de
+  consommer/modifier sa source — le bug du probe temporaire qui avait vide
+  `[LIVE]` ne peut donc pas se reproduire dans le helper. Les commandes privees
+  portant des credentials (`login`, `pass`, `register`, `identify`, etc.)
+  conservent volontairement leurs octets historiques afin de ne jamais changer
+  la semantique d'un mot de passe existant.
+- HAILO : les trois anciens `decode("UTF-8", $what, ...)` du handler principal
+  disparaissent ; l'entree directe `mbHandleNickTriggered` reutilise le helper
+  idempotent au lieu de tenter un second decode.
+- DB : aucun attribut DBD::MariaDB exotique, aucun changement de schema, aucun
+  changement de connexion. Le correctif agit avant les binds texte, la ou les
+  representations divergent reellement.
+- Nouveau test 824 : octets UTF-8 reels, chaine deja decodee, ASCII, octets
+  invalides, non-mutation de la source, ordre de la frontiere dans PRIVMSG,
+  disparition du probe et absence de double decode Hailo.
+
 ### mb643 — le worker de version adopte le pipe/fork eprouve en production
 - TERRAIN (nbot/Epiknet) : mb642 supprimait le faux
   `version check worker could not be reaped`, mais `m update` pouvait ensuite

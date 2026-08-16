@@ -3522,7 +3522,9 @@ sub mbHandleNickTriggered {
             my $sCurrentNick = $self->{irc}->nick_folded;
             $what =~ s/\Q$sCurrentNick\E//g;
 
-            $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
+            # mb644-B1: normal path is already decoded in mediabot.pl; keep
+            # this direct-entry fallback idempotent for tests/internal callers.
+            $what = Mediabot::Helpers::decode_irc_text($what);
 
             # AA5+AA6: timeout + metrics around Hailo brain call
             $self->{metrics}->inc('mediabot_hailo_learn_reply_total') if $self->{metrics};

@@ -15,6 +15,7 @@ use POSIX qw/setsid strftime mktime/;
 use Getopt::Long;
 use File::Basename;
 use Mediabot::Mediabot;
+use Mediabot::Helpers ();
 use Mediabot::Conf;
 use Mediabot::Log;
 use Mediabot::Metrics;
@@ -33,7 +34,7 @@ use Mediabot::Scheduler;
 use IO::Async::Timer::Countdown;
 use Net::Async::IRC;
 use utf8;
-use Encode qw(encode decode);
+use Encode qw(encode);
 
 use open qw(:std :encoding(UTF-8));
 binmode(STDOUT, ':encoding(UTF-8)');
@@ -1935,7 +1936,17 @@ sub _on_message_PRIVMSG_body {
     my ($self, $message, $hints) = @_;
 
     my ($who, $where, $what) = @{$hints}{qw<prefix_nick targets text>};
+
     my $is_channel = _irc_target_is_channel($where);
+
+    # mb644-B1: Net::Async::IRC exposes PRIVMSG text as wire bytes. Normalize
+    # valid UTF-8 exactly once at the IRC/application boundary so command args,
+    # DB text binds, Hailo and logs all see Perl characters. Invalid legacy
+    # byte strings are deliberately preserved unchanged. Credential-bearing
+    # private commands keep their historical byte representation so existing
+    # password hashes/authentication semantics cannot change under this fix.
+    $what = Mediabot::Helpers::decode_irc_text($what)
+        if defined($what) && ($is_channel || !_private_message_is_sensitive($what));
 
     log_debug_args(
         'on_message_PRIVMSG',
@@ -2086,7 +2097,6 @@ sub _on_message_PRIVMSG_body {
                                 $what =~ s/\Q$sCurrentNick\E//gi;
                                 $what =~ s/^\s+//g;
                                 $what =~ s/\s+$//g;
-                                $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
                                 my $sAnswer = $hailo->learn_reply($what);
                                 if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
                                     $mediabot->{logger}->log(4,"Hailo current nick learn_reply $what from $who : $sAnswer");
@@ -2107,7 +2117,6 @@ sub _on_message_PRIVMSG_body {
                             # not a fatal message-processing error.
                             my $hailo = $mediabot->get_hailo_runtime();
                             if ($hailo) {
-                                $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
                                 my $sAnswer = $hailo->learn_reply($what);
                                 if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
                                     $mediabot->{logger}->log(4,"HailoChatter learn_reply $what from $who : $sAnswer");
@@ -2133,7 +2142,6 @@ sub _on_message_PRIVMSG_body {
                                 # could not be initialized. Keep the bot online.
                                 my $hailo = $mediabot->get_hailo_runtime();
                                 if ($hailo) {
-                                    $what = decode("UTF-8", $what, sub { decode("iso-8859-2", chr(shift)) });
                                     $hailo->learn($what);
                                     $mediabot->{logger}->log(4,"learnt $what from $who");
                                 }

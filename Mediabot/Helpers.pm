@@ -1611,17 +1611,41 @@ sub make_password_hash {
 }
 
 
+# mb644-B1: frontière d'encodage IRC -> application. Net::Async::IRC livre
+# le texte PRIVMSG sous forme d'OCTETS. Le reste de Mediabot (DBD::MariaDB,
+# JSON, Hailo, litteraux sous use utf8, botPrivmsg) travaille en chaines Perl
+# de CARACTERES. Decodage strict UNE fois : UTF-8 valide -> caracteres ;
+# entree deja decodee -> inchangee ; octets invalides/legacy -> laisses tels
+# quels pour ne jamais detruire une entree IRC non UTF-8. LEAVE_SRC garantit
+# que le diagnostic/decodage ne consomme jamais la chaine source.
+sub decode_irc_text {
+    my ($text) = @_;
+
+    return undef unless defined $text;
+    return $text if ref $text;
+    return $text if utf8::is_utf8($text);
+
+    my $decoded = eval {
+        Encode::decode(
+            'UTF-8',
+            $text,
+            Encode::FB_CROAK() | Encode::LEAVE_SRC(),
+        );
+    };
+
+    return (!$@ && defined $decoded) ? $decoded : $text;
+}
+
 # mb411-R1: résolution CENTRALE de l'id d'un canal — cache interne d'abord
 # (clé canonique lc, mb407), SELECT en repli. Remplace le motif
 # « prepare('SELECT id_channel FROM CHANNEL WHERE name = ?') » recopié dans
 # ~20 handlers (une requête SQL PAR COMMANDE). Renvoie l'id, ou undef si le
 # canal est inconnu du cache ET de la base.
-# mb429-R1: troncature UTF-8-safe partagée. Les textes issus de la DB
-# (publictext, contenus IA, actions...) arrivent en OCTETS UTF-8 (DBI ne
-# décode pas). Un substr($s, 0, N) brut peut couper au milieu d'un caractère
-# accenté -> séquence invalide -> mojibake. On tronque à N octets, on retire
-# une éventuelle séquence multi-octets incomplète (decode tolérant + strip
-# d'un \x{FFFD} final), puis on ré-encode en octets et on ajoute l'ellipse.
+# mb429-R1: troncature UTF-8-safe partagée. Le helper accepte les deux
+# représentations encore rencontrées dans le projet : chaines Perl Unicode
+# (notamment les colonnes texte rendues par DBD::MariaDB actuel et les JSON)
+# et octets UTF-8 provenant de chemins legacy. Le budget reste exprime en
+# octets du fil IRC et aucune sequence multi-octets n'est coupee.
 # Généralise le _quote_excerpt de mb428 (Quotes.pm délègue ici).
 sub truncate_utf8 {
     my ($s, $max, $ellipsis) = @_;
@@ -1630,9 +1654,9 @@ sub truncate_utf8 {
     $max = int($max // 0);
     return $s if $max < 1;
 
-    # mb435-B1: this helper is used for both raw UTF-8 bytes read from DBI and
-    # character strings returned by JSON decoders (notably Claude history in
-    # Partyline). Decoding an already-upgraded character string raises
+    # mb435-B1/mb644: callers may still provide either legacy raw UTF-8 bytes
+    # or character strings (DBD::MariaDB/JSON). Decoding an already-upgraded
+    # character string raises
     # "Wide character" and could break `.ai context`. Preserve the input
     # representation while applying the same wire-byte budget in both cases.
     if (utf8::is_utf8($s)) {

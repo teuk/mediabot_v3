@@ -39,14 +39,10 @@ sub _quote_bump_hits {
     };
 }
 
-# mb428-B1: extrait tronqué SANS couper un caractère UTF-8 multi-octets.
-# quotetext arrive en OCTETS UTF-8 (DBI ne décode pas). substr($s, 0, N)
-# coupait à N octets, potentiellement au milieu d'un caractère accenté ->
-# séquence UTF-8 invalide -> caractère de remplacement / mojibake en fin
-# d'extrait. On tronque à N octets puis on retire une éventuelle séquence
-# UTF-8 incomplète en queue (decode lax : la partie valide est conservée),
-# et on ré-encode en octets pour rester cohérent avec le pipeline d'envoi.
-# mb428-B1 / mb429-R1: extrait tronqué UTF-8-safe. Délègue désormais au
+# mb428-B1 / mb429-R1: extrait tronqué UTF-8-safe. Le helper accepte aussi
+# bien une chaine Perl Unicode (DBD::MariaDB actuel) que des octets UTF-8 issus
+# d'un chemin legacy, et respecte dans les deux cas le budget en octets IRC.
+# Délègue désormais au
 # helper partagé Mediabot::Helpers::truncate_utf8 (source unique de vérité).
 sub _quote_excerpt {
     my ($s, $max) = @_;
