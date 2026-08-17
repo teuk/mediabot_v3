@@ -32,6 +32,97 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb648 — Mediabot Doctor, round 2 : systemd + updater/deploiement
+- Doctor distingue maintenant trois verites systemd qui ne doivent jamais etre
+  confondues : le gestionnaire reel observe dans `/proc/<pid>/cgroup`, le
+  marqueur `MEDIABOT_SYSTEMD_UPDATE_SAFE=1` du processus, et le contrat de
+  l'unite lu par `systemctl show`. Un marqueur qui pretend « safe » face a une
+  unite non conforme devient un FAIL au lieu de masquer le probleme.
+- Le contrat MB645 est verifie en lecture seule : `Restart=always`,
+  `ExitType=cgroup`, ainsi que la politique d'exit 75
+  (`SuccessExitStatus` + `RestartPreventExitStatus`). Aucun restart, daemon-reload
+  ou changement systemd n'est effectue.
+- La sonde updater reutilise `Mediabot::Update::protected_paths()` et
+  `update_eligibility()` au lieu de recopier les regles chemin+hote. Une
+  installation volontairement protegee ou un arbre non-`mediabot_v3` est INFO ;
+  un updater reellement casse reste WARN.
+- Etat Git strictement local : checkout/non-checkout, branche/HEAD, worktree sale
+  et divergence par rapport a l'upstream deja en cache. Doctor ne fait aucun
+  `fetch`, `ls-remote` ou acces reseau. Un deploiement non-Git est supporte.
+- Les archives de deploiement sont groupees par basename EXACT du root courant
+  (`<root>.NNN` et `<root>.old.YYYYMMDD_HHMMSS`) ; les familles soeurs sont
+  comptees comme ignorees et ne peuvent pas entrer dans le resultat de la
+  famille courante.
+- Correction terrain du round 1 : `0660`/`0640` sur un groupe de service
+  reellement prive n'est plus signale comme trop permissif. Doctor enumere les
+  comptes ayant ce GID primaire et les membres supplementaires avant de conclure ;
+  un groupe partage reste WARN.
+- Les filtres `--domain` conservent maintenant les dependances de collecte :
+  `systemd` et `filesystem` executent silencieusement la sonde runtime pour
+  obtenir le PID et l'identite de service, sans afficher le domaine runtime si
+  l'operateur ne l'a pas demande. Un diagnostic filtre ne peut donc plus changer
+  la verite observee.
+- Nouveau test 829 pour les contrats systemd/updater, l'isolation des familles
+  de deploiement, l'absence de reseau Git et la semantique du groupe prive.
+- Validation terrain Undernet : `mediabot.pl` est lance explicitement par
+  `/usr/bin/perl`, donc l'absence de bit `+x` sur le script deploye n'empeche
+  pas le runtime. Doctor distingue maintenant execution directe (sans `+x` =
+  FAIL) et lancement via Perl (sans `+x` = WARN de packaging, runtime viable),
+  au lieu de produire un faux FAIL filesystem.
+- Correction de severite inter-domaines : le contrat MB645 n'est plus juge
+  `UNSAFE` hors contexte. `systemd` collecte silencieusement l'applicabilite de
+  l'updater ; un ancien contrat `Restart=on-failure`/`ExitType=main` sans
+  marqueur reste INFO lorsqu'une installation utilise volontairement un autre
+  mecanisme de deploiement (cas `mediabot3`), mais reste FAIL si l'updater
+  integre est applicable. Un marqueur `MEDIABOT_SYSTEMD_UPDATE_SAFE=1` mensonger
+  face a une unite non conforme reste toujours FAIL. `--domain updater` collecte
+  aussi silencieusement runtime afin de juger les droits avec l'identite du bot.
+
+### mb647 — Mediabot Doctor, round 1 : noyau, modele de faits, sondes locales
+- Nouvel outil tools/mediabot_doctor.pl, STRICTEMENT en lecture : il n'ecrit
+  rien, ne touche aucune base, n'envoie aucun signal au bot, et ne collecte
+  jamais la valeur d'un secret. Perimetre de ce round : noyau + filesystem +
+  config + runtime.
+- ORCHESTRATEUR, PAS REIMPLEMENTEUR. Le depot contient deja
+  check_schema_drift.pl (1077 lignes), startup_integrity_check.pl et
+  security_audit.pl : Doctor les invoquera plutot que de refaire leur travail.
+  Une seconde analyse de schema divergerait au premier ALTER TABLE.
+- L'interface des SEPT sondes est figee des ce round : systemd, updater,
+  database et migrations sont DECLARES (avec leur contrainte) mais pas
+  implementes. Un domaine silencieux serait indiscernable d'un domaine sain ;
+  ils rendent donc un fait « not_implemented » explicite.
+- Modele de faits ferme (domain, id, level, summary, detail, SOURCE, data) :
+  domaine/niveau/provenance invalides sont refuses au lieu d'etre normalises
+  silencieusement. schema_version=1, rendus texte et --json depuis le meme
+  modele, avec verdict global READY / DEGRADED / UNSAFE.
+- Cinq niveaux dont UNKNOWN, qui n'est PAS une gravite mais l'aveu qu'un fait
+  n'a pas pu etre etabli — jamais un OK par defaut, jamais un FAIL alarmiste.
+  Regle ecrite apres mb640, ou un eval nu rendait panne reseau et bug de code
+  indiscernables.
+- SECRETS : leur valeur n'entre pas dans le modele, meme masquee. Masquer au
+  rendu serait insuffisant puisque le JSON se recopie dans un ticket ou un
+  canal ; on ne conserve que present=true/false.
+- config : les clefs manquantes sont classees required / defaulted / optional
+  — une clef absente n'est pas automatiquement un probleme. Les seules clefs
+  DB fatales du constructeur actuel sont les vraies mysql.MAIN_PROG_DDBNAME
+  et mysql.MAIN_PROG_DBUSER ; aucune clef de connexion fictive n'est inventee.
+  Un arbre sans source analysable rend UNKNOWN au lieu de paraitre sain.
+- runtime : un PID vivant n'est pas « le bot tourne » — Doctor confirme
+  separement le mediabot.pl de CET arbre et le --conf de CETTE instance depuis
+  /proc/<pid>/cmdline. Un PID recycle ou une conf differente sont donc visibles.
+  L'identite attendue pour les droits filesystem est DERIVEE du processus.
+- filesystem : verifie aussi les chemins structurants, le bit executable de
+  mediabot.pl, les liens symboliques, les permissions de conf et, quand un
+  processus est observe, les droits calcules pour SON uid/groupes plutot que
+  ceux de l'utilisateur qui lance Doctor. achievements.json absent reste INFO
+  en mode MariaDB ; le round database tranchera le fallback legacy.
+- Une sonde qui plante devient un fait UNKNOWN et n'emporte pas
+  l'orchestrateur : verifie par test, et constate en execution reelle des la
+  premiere passe.
+- NOTE POUR LE ROUND DATABASE : ne pas appeler Mediabot::DB->new(), ce
+  constructeur peut exit(1) sur une conf invalide et tuerait l'outil.
+- Test 828 couvre les REGLES et regressions CLI/runtime/filesystem, non la forme du code des sondes.
+
 ### mb645 — l'auto-update et systemd partagent enfin le meme cycle de vie
 - TERRAIN (nbot) : la mise a jour clonait, validait, preservait la conf/le
   cerveau et activait correctement la nouvelle release, puis le bot restait
