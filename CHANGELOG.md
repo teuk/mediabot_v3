@@ -32,6 +32,30 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb650 — test-suite profiler
+- `t/test_commands.pl` gains an opt-in `--profile` mode that measures each test
+  file with `Time::HiRes` while preserving the existing execution order,
+  assertion accounting and final exit status.
+- `--profile-top N` limits the ranked report (default 20) and also enables
+  profiling when used on its own. Invalid non-positive limits fail fast.
+- The report is sorted slowest-first and records elapsed seconds, runner mode
+  (`runner`, `isolated`, `load-error` or `skip`) and assertions contributed by
+  each file, plus cumulative per-case time. A leading `!` marks files that
+  contributed a failed assertion.
+- Profiling includes case loading and execution; standalone TAP subprocess
+  cases are timed around their complete isolated lifecycle, so the report
+  reflects the cost paid by the real suite rather than only closure runtime.
+- Profiling is deliberately observational: this round does not parallelise,
+  reorder or skip tests. The measured data is intended to drive the later
+  PURE/FILESYSTEM/PROCESS/DB/NETWORK classification before any concurrency is
+  considered.
+- New test 832 exercises opt-in behaviour, top-N ranking, sorting, preserved
+  normal verdicts and invalid-limit handling.
+- Profiler clock calls are fully qualified (`Time::HiRes::time`) instead of
+  importing `time` into the shared runner namespace. This preserves the normal
+  integer `CORE::time()` semantics of loaded test cases, including reminder
+  `[at:TS]` parsing.
+
 ### mb649 — Mediabot Doctor, round 3 : database + migrations read-only
 - Deuxieme passe de normalisation `information_schema` : MariaDB peut exposer
   `COLUMN_DEFAULT` sous forme de token SQL `NULL` ou de litteral deja quote

@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # =============================================================================
 #  Mediabot v3 - Framework de test des commandes IRC
-#  Usage : perl t/test_commands.pl [--verbose] [--filter <pattern>]
+#  Usage : perl t/test_commands.pl [--verbose] [--filter <pattern>] [--profile]
 #           [--nick <nick>] [--host <host>] [--channel <chan>]
 #           [--botnick <botnick>] [--cmdchar <char>]
 # =============================================================================
@@ -23,6 +23,7 @@ use File::Basename;
 use Cwd qw(getcwd);
 use POSIX qw(strftime);
 use TAP::Parser;
+use Time::HiRes ();
 
 binmode(STDOUT, ':encoding(UTF-8)');
 binmode(STDERR, ':encoding(UTF-8)');
@@ -39,6 +40,8 @@ my $opt_host    = 'test.host';
 my $opt_channel = '#test';
 my $opt_botnick = 'mediabot';
 my $opt_cmdchar = '!';
+my $opt_profile = 0;
+my $opt_profile_top;
 GetOptions(
     'verbose|v'   => \$opt_verbose,
     'filter|f=s'  => \$opt_filter,
@@ -47,6 +50,8 @@ GetOptions(
     'channel|c=s' => \$opt_channel,
     'botnick|b=s' => \$opt_botnick,
     'cmdchar=s'   => \$opt_cmdchar,
+    'profile'     => \$opt_profile,
+    'profile-top=i' => \$opt_profile_top,
 ) or die <<USAGE;
 Usage: $0 [options]
   --verbose, -v          Afficher chaque test [OK]/[FAIL]
@@ -56,7 +61,15 @@ Usage: $0 [options]
   --channel, -c <chan>   Canal par defaut   (defaut: #test)
   --botnick, -b <name>   Pseudo du bot      (defaut: mediabot)
   --cmdchar     <char>   Caractere de commande (defaut: !)
+  --profile              Mesurer le temps de chaque fichier de test
+  --profile-top <n>      Afficher les n fichiers les plus lents (defaut: 20) ; implique --profile
 USAGE
+
+if (defined $opt_profile_top) {
+    die "--profile-top must be a positive integer\n" if $opt_profile_top < 1;
+    $opt_profile = 1;
+}
+$opt_profile_top = 20 unless defined $opt_profile_top;
 
 # ---- Classe d'assertion -----------------------------------------------------
 package Assert;
@@ -311,6 +324,62 @@ sub _run_isolated_tap_case {
     return 1;
 }
 
+# ---- Profiling ---------------------------------------------------------------
+
+my @profile_rows;
+
+sub _record_profile_case {
+    my (%args) = @_;
+    return unless $opt_profile;
+
+    my $elapsed = Time::HiRes::time() - $args{started};
+    my $assertions = $args{assert}->total - $args{assert_before};
+    my $failures   = $args{assert}->failed - $args{failed_before};
+
+    push @profile_rows, {
+        name       => $args{name},
+        elapsed    => $elapsed,
+        mode       => $args{mode} // 'runner',
+        assertions => $assertions,
+        failures   => $failures,
+    };
+}
+
+sub _print_profile_report {
+    return unless $opt_profile;
+
+    my @sorted = sort {
+        $b->{elapsed} <=> $a->{elapsed}
+            || $a->{name} cmp $b->{name}
+    } @profile_rows;
+
+    my $count = scalar @sorted;
+    my $limit = $opt_profile_top < $count ? $opt_profile_top : $count;
+    my $sum = 0;
+    $sum += $_->{elapsed} for @profile_rows;
+
+    print "\nSlowest test files (top $limit of $count)\n";
+    print "-" x 78 . "\n";
+    print " #     seconds  mode       asserts  file\n";
+    print "-" x 78 . "\n";
+
+    for my $idx (0 .. $limit - 1) {
+        my $row = $sorted[$idx];
+        my $status = $row->{failures} ? '!' : ' ';
+        printf "%s%2d  %9.3f  %-9s %7d  %s\n",
+            $status,
+            $idx + 1,
+            $row->{elapsed},
+            $row->{mode},
+            $row->{assertions},
+            $row->{name};
+    }
+
+    print "-" x 78 . "\n";
+    printf "Profiled %d test file(s); cumulative case time %.3fs\n", $count, $sum;
+    print "A leading '!' marks a file that contributed at least one failed assertion.\n";
+}
+
 # ---- Chargement des cas de test ---------------------------------------------
 
 my $assert   = Assert->new(verbose => $opt_verbose);
@@ -349,12 +418,25 @@ sub _filter_case_load_warning {
 
 for my $file (@test_files) {
     my $name = basename($file);
+    my $case_started = Time::HiRes::time();
+    my $assert_before = $assert->total;
+    my $failed_before = $assert->failed;
+    my $profile_mode = 'runner';
     print "\n[ $name ]\n";
 
     my ($isolate, $isolate_reason) = _case_requires_isolation($file);
     if ($isolate) {
+        $profile_mode = 'isolated';
         print "  (isolated standalone TAP case: $isolate_reason)\n" if $opt_verbose;
         _run_isolated_tap_case($file, $name, $assert);
+        _record_profile_case(
+            name          => $name,
+            mode          => $profile_mode,
+            started       => $case_started,
+            assert        => $assert,
+            assert_before => $assert_before,
+            failed_before => $failed_before,
+        );
         next;
     }
 
@@ -371,6 +453,14 @@ for my $file (@test_files) {
     if ($@) {
         print "  ERREUR de chargement : $@\n";
         $assert->fail("$name: chargement");
+        _record_profile_case(
+            name          => $name,
+            mode          => 'load-error',
+            started       => $case_started,
+            assert        => $assert,
+            assert_before => $assert_before,
+            failed_before => $failed_before,
+        );
         next;
     }
     if (ref $code eq 'CODE') {
@@ -395,8 +485,18 @@ for my $file (@test_files) {
             $assert->fail("$name: execution");
         }
     } else {
+        $profile_mode = 'skip';
         print "  (pas de sous-routine retournee, skip)\n";
     }
+
+    _record_profile_case(
+        name          => $name,
+        mode          => $profile_mode,
+        started       => $case_started,
+        assert        => $assert,
+        assert_before => $assert_before,
+        failed_before => $failed_before,
+    );
 }
 
 # ---- Resume -----------------------------------------------------------------
@@ -405,6 +505,8 @@ my $elapsed = time() - $ts_start;
 my $total   = $assert->total;
 my $passed  = $assert->passed;
 my $failed  = $assert->failed;
+
+_print_profile_report();
 
 print "\n" . "=" x 60 . "\n";
 if ($failed == 0) {

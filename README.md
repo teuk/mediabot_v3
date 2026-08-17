@@ -343,6 +343,22 @@ Run the full static suite:
 perl t/test_commands.pl --verbose
 ```
 
+Profile the suite without changing its execution order:
+
+```bash
+perl t/test_commands.pl --profile
+```
+
+By default the 20 slowest test files are reported. Choose another limit with:
+
+```bash
+perl t/test_commands.pl --profile-top 30
+```
+
+Profiling is observational only: it does not parallelise, reorder or skip test
+files. Use the measured timings to guide test classification before considering
+parallel execution.
+
 Run live tests when a local IRC test server is available:
 
 ```bash
