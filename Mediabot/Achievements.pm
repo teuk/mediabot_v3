@@ -1638,6 +1638,204 @@ sub count_all_nicks {
 
 # -- Agrégats pour dashboard / leaderboard ------------------------------------
 # Keep presentation code out of the internal storage representation.
+
+# -- mb654: read-only durable identity diagnostic ----------------------------
+#
+# This deliberately does NOT call observe_identity(), _profile_id_for() or any
+# other helper that can create/touch/merge profiles.  The diagnostic reports
+# the durable evidence that exists now; it cannot reconstruct the historical
+# reason why an alias was originally attached because mb646 does not persist a
+# merge audit trail.
+sub identity_profile_diagnostic {
+    my ($self, $nick, $channel) = @_;
+
+    my $result = {
+        backend => ($self->{storage} // 'unknown'),
+        nick    => defined($nick)    ? $nick    : '',
+        channel => defined($channel) ? $channel : '',
+        status  => 'invalid',
+    };
+
+    return $result unless defined($nick) && $nick =~ /\S/
+        && defined($channel) && $channel =~ /^#\S+$/;
+
+    # Legacy installations have no durable alias/profile graph to explain.
+    # Still report the old nick+channel key and merit counts without writing.
+    if (($self->{storage} // '') ne 'db') {
+        my $key = lc($nick) . "\x00" . lc($channel);
+        my $unlocks = scalar keys %{ $self->{data}{$key} || {} };
+        my $progress = 0;
+        for my $kind (keys %{ $self->{progress} || {} }) {
+            $progress++ if exists $self->{progress}{$kind}{$key};
+        }
+        return {
+            %$result,
+            status            => 'legacy_json',
+            storage_label     => 'legacy JSON',
+            legacy_key        => $key,
+            unlock_count      => $unlocks,
+            progress_counters => $progress,
+            historical_reason => 'not_available',
+        };
+    }
+
+    my $dbh = eval { $self->{bot}{dbh} };
+    unless ($dbh && eval { $dbh->can('prepare') }) {
+        return { %$result, status => 'db_unavailable', storage_label => 'MariaDB' };
+    }
+
+    # Resolve the channel with a SELECT only.  Do not use _channel_id(): that
+    # helper intentionally fills runtime caches and is therefore not a pure
+    # diagnostic source.
+    my $sth_c = eval {
+        $dbh->prepare(q{
+            SELECT id_channel, name
+            FROM CHANNEL
+            WHERE name = ?
+            LIMIT 1
+        })
+    };
+    unless ($sth_c && eval { $sth_c->execute($channel) }) {
+        return { %$result, status => 'query_error', storage_label => 'MariaDB' };
+    }
+    my $crow = $sth_c->fetchrow_hashref;
+    $sth_c->finish;
+    unless ($crow && defined($crow->{id_channel})) {
+        return { %$result, status => 'channel_not_found', storage_label => 'MariaDB' };
+    }
+
+    my $cid = 0 + $crow->{id_channel};
+    my $canonical_channel = $crow->{name} // $channel;
+
+    # A nick-only diagnostic must never silently pick one of two plausible
+    # profiles.  Return every candidate so the operator can see the ambiguity.
+    my $sth_p = eval {
+        $dbh->prepare(q{
+            SELECT DISTINCT
+                   p.id_achievement_profile,
+                   p.id_user,
+                   p.display_nick,
+                   p.created_at,
+                   p.last_seen_at,
+                   u.nickname AS registered_nick,
+                   (SELECT COUNT(*)
+                      FROM ACHIEVEMENT_IDENTITY ai
+                     WHERE ai.id_achievement_profile = p.id_achievement_profile)
+                       AS alias_count,
+                   (SELECT COUNT(*)
+                      FROM ACHIEVEMENT_UNLOCK au
+                     WHERE au.id_achievement_profile = p.id_achievement_profile)
+                       AS unlock_count,
+                   (SELECT COUNT(*)
+                      FROM ACHIEVEMENT_PROGRESS ap
+                     WHERE ap.id_achievement_profile = p.id_achievement_profile)
+                       AS progress_counters
+            FROM ACHIEVEMENT_PROFILE p
+            LEFT JOIN ACHIEVEMENT_IDENTITY i
+              ON i.id_achievement_profile = p.id_achievement_profile
+            LEFT JOIN USER u
+              ON u.id_user = p.id_user
+            WHERE p.id_channel = ?
+              AND (p.display_nick = ? OR i.nick = ?)
+            ORDER BY p.last_seen_at DESC, p.id_achievement_profile DESC
+            LIMIT 21
+        })
+    };
+    unless ($sth_p && eval { $sth_p->execute($cid, $nick, $nick) }) {
+        return {
+            %$result,
+            status        => 'query_error',
+            storage_label => 'MariaDB',
+            id_channel    => $cid,
+            channel       => $canonical_channel,
+        };
+    }
+
+    my @profiles;
+    while (my $row = $sth_p->fetchrow_hashref) {
+        next unless defined($row->{id_achievement_profile});
+        push @profiles, {
+            id_achievement_profile => 0 + $row->{id_achievement_profile},
+            id_user                => defined($row->{id_user}) ? 0 + $row->{id_user} : undef,
+            registered_nick        => $row->{registered_nick},
+            display_nick           => $row->{display_nick} // '',
+            created_at             => $row->{created_at},
+            last_seen_at           => $row->{last_seen_at},
+            alias_count            => 0 + ($row->{alias_count} // 0),
+            unlock_count           => 0 + ($row->{unlock_count} // 0),
+            progress_counters      => 0 + ($row->{progress_counters} // 0),
+        };
+    }
+    $sth_p->finish;
+
+    my $base = {
+        %$result,
+        storage_label     => 'MariaDB',
+        id_channel        => $cid,
+        channel           => $canonical_channel,
+        historical_reason => 'not_persisted',
+    };
+
+    return { %$base, status => 'not_found', candidates => [] }
+        unless @profiles;
+
+    if (@profiles > 1) {
+        my $truncated = @profiles > 20 ? 1 : 0;
+        pop @profiles while @profiles > 20;
+        return {
+            %$base,
+            status               => 'ambiguous',
+            candidates           => \@profiles,
+            candidates_truncated => $truncated,
+        };
+    }
+
+    my $profile = $profiles[0];
+    my $pid = $profile->{id_achievement_profile};
+
+    my $sth_i = eval {
+        $dbh->prepare(q{
+            SELECT nick, userhost, first_seen_at, last_seen_at
+            FROM ACHIEVEMENT_IDENTITY
+            WHERE id_achievement_profile = ?
+            ORDER BY last_seen_at DESC, id_achievement_identity DESC
+            LIMIT 20
+        })
+    };
+    unless ($sth_i && eval { $sth_i->execute($pid) }) {
+        return {
+            %$base,
+            status  => 'query_error',
+            profile => $profile,
+        };
+    }
+
+    my @aliases;
+    while (my $row = $sth_i->fetchrow_hashref) {
+        push @aliases, {
+            nick          => $row->{nick} // '',
+            userhost      => $row->{userhost} // '',
+            first_seen_at => $row->{first_seen_at},
+            last_seen_at  => $row->{last_seen_at},
+        };
+    }
+    $sth_i->finish;
+
+    return {
+        %$base,
+        status             => 'ok',
+        profile            => $profile,
+        aliases            => \@aliases,
+        aliases_shown      => scalar(@aliases),
+        aliases_truncated  => ($profile->{alias_count} > scalar(@aliases)) ? 1 : 0,
+        resolution_evidence => {
+            nick_query_unique => 1,
+            registered_user   => defined($profile->{id_user}) ? 1 : 0,
+            durable_aliases   => scalar(@aliases),
+        },
+    };
+}
+
 sub storage_stats {
     my ($self) = @_;
 

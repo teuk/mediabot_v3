@@ -32,6 +32,25 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb654 — read-only achievement identity diagnostics
+- Added `Mediabot::Achievements::identity_profile_diagnostic()` to explain the
+  current durable per-channel profile, registered USER anchor, alias set, unlock
+  count and progress-counter count without observing, touching, creating or
+  merging an identity.
+- The diagnostic queries MariaDB with `SELECT` statements only and deliberately
+  avoids `_channel_id()`, `_profile_id_for()` and `observe_identity()` so an
+  operator inspection cannot refresh caches or mutate persistence state.
+- Nick-only ambiguity is reported rather than guessed: if multiple durable
+  profiles match the requested nick on one channel, every candidate is shown
+  and no profile is selected.
+- Legacy JSON installations report the historical nick+channel key and merit
+  counts but explicitly state that no durable alias graph exists.
+- Added Partyline `.achievementprofile <nick> <#channel>` as a bounded, read-only
+  rendering of those facts. Alias display is capped at 20 records.
+- Historical merge reasons are not invented: mb646 never stored an audit trail,
+  so the command distinguishes current durable evidence from unknowable past
+  resolution decisions. No database schema change is required.
+
 ### mb653 — Trivia migrated to shared AsyncWorker
 - `_trivia_fetch_async()` now delegates pipe/fork ownership, `watch_process`,
   bounded child transport, timeout escalation and callback-once finalisation to
