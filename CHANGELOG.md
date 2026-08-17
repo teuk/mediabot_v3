@@ -32,6 +32,65 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb649 — Mediabot Doctor, round 3 : database + migrations read-only
+- Deuxieme passe de normalisation `information_schema` : MariaDB peut exposer
+  `COLUMN_DEFAULT` sous forme de token SQL `NULL` ou de litteral deja quote
+  (`'irc'`, `''`). Le checker ne transforme plus ces valeurs en faux
+  `DEFAULT NULL` / `'''irc'''`; les differences de valeur reelles restent
+  visibles.
+- Revue terrain du schema drift : le checker ne confond plus les largeurs
+  d affichage MariaDB (`BIGINT(20)`, `INT(11)`, etc.) avec des changements de
+  type reels. Les charset/collations explicites restent verifies, `DEFAULT NULL`
+  nullable et les commentaires de colonne sont canonicalises sans masquer un
+  vrai ecart.
+- Doctor ne classe plus automatiquement tout `RC=1` du drift checker en
+  `UNSAFE` : une table/colonne/donnee de reference requise manquante reste FAIL,
+  tandis qu un drift de type/index sans objet requis manquant est WARN/DEGRADED.
+  Le checker reste la source de verite ; seule la severite operationnelle est
+  contextualisee par Doctor.
+- Les migrations avec effets manquants nomment maintenant les effets precis
+  (table/colonne/index/contrainte/chanset) et rappellent explicitement que leur
+  absence ne prouve pas que le fichier de migration n a jamais ete execute.
+  L audit read-only DEV a notamment distingue des tables existantes de leurs
+  foreign keys encore absentes au lieu de resumer cela a « migration manquante ».
+- Nouveau test 831 pour la normalisation du schema MariaDB et extension du test
+  830 pour la severite drift et les details d effets de migration.
+- La sonde database reutilise le chemin non fatal
+  `Mediabot::DB::connect_isolated_handle()` sans jamais appeler le constructeur
+  `Mediabot::DB->new()` qui peut terminer le processus sur erreur. Les secrets
+  restent confines a l objet de configuration lexical de la sonde et n entrent
+  jamais dans le contexte partage ni dans le JSON de diagnostic.
+- Avant toute requete Doctor, la connexion dediee impose
+  `SET SESSION TRANSACTION READ ONLY`. Les seules lectures propres au Doctor
+  sont des `SELECT`/`information_schema`; aucun DDL/DML de migration n est
+  execute.
+- Doctor rapporte la base active, le driver/version serveur, le charset/collation
+  de session et l etat des quatre tables MB646. Quatre tables presentes =
+  stockage MariaDB disponible, aucune = fallback JSON supporte mais WARN, et un
+  schema MB646 partiel = FAIL.
+- Le schema drift n est PAS reimplemente : Doctor invoque
+  `tools/check_schema_drift.pl --strict --types --indexes --ignore-extra --quiet`
+  avec un timeout borne. Le checker reste la source de verite pour le schema
+  requis et les donnees de reference ; les objets live supplementaires ne sont
+  pas assimiles a une rupture de compatibilite.
+- La sonde migrations lit uniquement `install/migrations/*.sql` et en extrait
+  des effets durables observables (tables, colonnes, index, contraintes et
+  lignes `CHANSET_LIST`). Elle compare ces effets a la base en lecture seule et
+  utilise exclusivement les etats `observable_effect_present`,
+  `observable_effect_missing` ou `indeterminate`. L historique d execution n est
+  jamais invente : aucun ledger de migrations n existe.
+- Les formes SQL actuellement presentes dans les 18 migrations officielles sont
+  couvertes, y compris les ALTER dynamiques de `QUOTES.hits`, l index compose de
+  `CHANNEL_LOG`, les foreign keys conditionnelles et les migrations data-only de
+  chansets. Une future mutation non modelisee devient `indeterminate` au lieu de
+  produire un faux OK.
+- Le message filesystem sur `achievements.json` devient neutre : l absence du
+  JSON n est plus presentee comme preuve de stockage MariaDB ; c est la sonde
+  database qui tranche desormais le mode de persistance.
+- Nouveau test 830 pour la connexion non fatale/read-only, la delegation du
+  schema drift, les trois etats MB646, les 18 signatures de migrations courantes
+  et l interdiction de pretendre qu une migration a historiquement ete appliquee.
+
 ### mb648 — Mediabot Doctor, round 2 : systemd + updater/deploiement
 - Doctor distingue maintenant trois verites systemd qui ne doivent jamais etre
   confondues : le gestionnaire reel observe dans `/proc/<pid>/cgroup`, le

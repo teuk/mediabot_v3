@@ -3,9 +3,11 @@
 # tools/mediabot_doctor.pl — diagnostic STRICTEMENT EN LECTURE d'une instance
 # =============================================================================
 # ROUND 1 : noyau + modele de faits + sondes filesystem / config / runtime.
-# ROUND 2 : systemd + updater/deploiement. Les domaines database/migrations
-# restent explicitement differes : le Doctor avance par contrats valides sur
-# une vraie instance, jamais par gros-bang.
+# ROUND 2 : systemd + updater/deploiement.
+# ROUND 3 : database + migrations, toujours strictement read-only. La base
+# est ouverte par le chemin non fatal connect_isolated_handle(), puis la
+# session est forcee READ ONLY avant toute requete Doctor. Le schema drift
+# reste delegue a l'outil de reference au lieu d'etre reimplemente ici.
 #
 # CE QUE CET OUTIL NE FAIT JAMAIS :
 #   - ecrire, creer, supprimer ou deplacer quoi que ce soit ;
@@ -21,12 +23,11 @@
 # diagnostic doit tenir la meme regle en plus strict que le code qu'il
 # examine.
 #
-# NON RESOLU (assume) : ne pas appeler Mediabot::DB->new() — ce constructeur
-# peut exit(1) sur une conf ou une connexion invalide et tuerait
-# l'orchestrateur. Le futur round « database » passera par un chemin non fatal
-# (connect_isolated_handle ou une abstraction dediee). C'est pourquoi la sonde
-# database n'est pas implementee ici : mieux vaut un domaine absent qu'un
-# domaine qui tue l'outil.
+# ROUND 3 : ne JAMAIS appeler Mediabot::DB->new() ici — ce constructeur peut
+# exit(1). Doctor construit un wrapper minimal uniquement pour reutiliser
+# connect_isolated_handle(), qui retourne une erreur sans tuer le processus.
+# Les secrets restent confines a l'objet de conf lexical de la sonde et
+# n'entrent jamais dans le contexte partage ni dans les faits/JSON.
 # =============================================================================
 
 use strict;
@@ -39,12 +40,14 @@ use Cwd qw(abs_path);
 use Getopt::Long qw(GetOptions);
 use POSIX qw(strftime);
 use IPC::Open3 qw(open3);
+use IO::Select;
 use Symbol qw(gensym);
+use Time::HiRes qw(time sleep);
 
 binmode(STDOUT, ':encoding(UTF-8)');
 binmode(STDERR, ':encoding(UTF-8)');
 
-our $VERSION = '1.0';
+our $VERSION = '1.1';
 
 # Version du MODELE de faits, pas de l'outil. Un consommateur JSON doit
 # pouvoir refuser un modele qu'il ne comprend pas plutot que de deviner.
@@ -224,6 +227,269 @@ sub _capture_command {
     my $rc = $? == -1 ? 127 : ($? >> 8);
     return { ok => ($rc == 0 ? 1 : 0), rc => $rc,
              stdout => $stdout, stderr => $stderr };
+}
+
+sub _capture_command_bounded {
+    my ($timeout, @cmd) = @_;
+    $timeout = 20 unless defined $timeout && $timeout > 0;
+    return { ok => 0, rc => 127, stdout => '', stderr => 'empty command' }
+        unless @cmd;
+
+    my ($in, $out);
+    my $err = gensym();
+    my $pid = eval { open3($in, $out, $err, @cmd) };
+    if (!$pid) {
+        my $why = $@ || $! || 'unable to execute command';
+        $why =~ s/\s+\z//;
+        return { ok => 0, rc => 127, stdout => '', stderr => "$why" };
+    }
+    close $in;
+
+    my $sel = IO::Select->new($out, $err);
+    my %kind = (fileno($out) => 'stdout', fileno($err) => 'stderr');
+    my %buf = (stdout => '', stderr => '');
+    my $max_bytes = 262_144;
+    my $deadline = time() + $timeout;
+    my $timed_out = 0;
+
+    while ($sel->count) {
+        my $left = $deadline - time();
+        if ($left <= 0) { $timed_out = 1; last }
+        my @ready = $sel->can_read($left > 0.25 ? 0.25 : $left);
+        next unless @ready;
+        for my $fh (@ready) {
+            my $fd = fileno($fh);
+            my $n = sysread($fh, my $chunk, 8192);
+            if (!defined $n) {
+                next if $!{EINTR};
+                $sel->remove($fh); close $fh;
+                next;
+            }
+            if ($n == 0) {
+                $sel->remove($fh); close $fh;
+                next;
+            }
+            my $k = $kind{$fd} // 'stdout';
+            my $room = $max_bytes - length($buf{$k});
+            $buf{$k} .= substr($chunk, 0, $room) if $room > 0;
+        }
+    }
+
+    if ($timed_out) {
+        kill 'TERM', $pid;
+        sleep 0.15;
+        kill 'KILL', $pid if kill(0, $pid);
+        waitpid($pid, 0);
+        for my $fh ($out, $err) { eval { close $fh } }
+        return { ok => 0, rc => 124, timeout => 1,
+                 stdout => $buf{stdout}, stderr => $buf{stderr} };
+    }
+
+    waitpid($pid, 0);
+    my $status = $?;
+    my $rc = $status == -1 ? 127 : ($status >> 8);
+    return { ok => ($rc == 0 ? 1 : 0), rc => $rc,
+             stdout => $buf{stdout}, stderr => $buf{stderr} };
+}
+
+sub _sanitize_diag_text {
+    my ($text, $max) = @_;
+    $text //= '';
+    $max //= 500;
+    $text =~ s/[\r\n\0]+/ /g;
+    $text =~ s/\s+/ /g;
+    $text =~ s/\b(pass(?:word)?|token|secret|api[_-]?key)\s*[:=]\s*\S+/$1=<redacted>/ig;
+    $text =~ s/^\s+|\s+$//g;
+    return substr($text, 0, $max);
+}
+
+sub _doctor_db_connect {
+    my ($ctx) = @_;
+    return (undef, { error => 'configuration file is missing or unreadable' })
+        unless defined $ctx->{conf_file} && -f $ctx->{conf_file} && -r $ctx->{conf_file};
+
+    my ($conf, $mode, $dbname, $dbuser, $dbhost, $dbport);
+    my $loaded = eval {
+        local @INC = ($ctx->{root}, @INC);
+        require Mediabot::Conf;
+        require Mediabot::DB;
+        $conf = Mediabot::Conf->new(undef, $ctx->{conf_file});
+        $mode   = lc($conf->get('mysql.CHARSET_MODE') // 'utf8mb4');
+        $dbname = $conf->get('mysql.MAIN_PROG_DDBNAME') // '';
+        $dbuser = $conf->get('mysql.MAIN_PROG_DBUSER') // '';
+        $dbhost = $conf->get('mysql.MAIN_PROG_DBHOST') // 'localhost';
+        $dbport = $conf->get('mysql.MAIN_PROG_DBPORT') // 3306;
+        1;
+    };
+    unless ($loaded) {
+        my $err = _sanitize_diag_text($@ || 'cannot load database configuration');
+        return (undef, { error => $err });
+    }
+
+    # Deliberately bypass Mediabot::DB->new(): it can exit(1). The wrapper
+    # contains only what connect_isolated_handle() needs. The password remains
+    # lexical inside $conf and never enters shared context or facts/JSON.
+    my $db_obj = bless { conf => $conf, charset_mode => $mode }, 'Mediabot::DB';
+    my ($dbh, $err) = eval { $db_obj->connect_isolated_handle() };
+    if (!$dbh) {
+        my $why = _sanitize_diag_text($@ || $err || 'database connection failed');
+        return (undef, { error => $why, dbname => $dbname, dbuser => $dbuser,
+                         dbhost => $dbhost, dbport => $dbport, charset_mode => $mode });
+    }
+
+    # Enforce a session-level read-only policy before Doctor runs any query.
+    # SET NAMES performed by connect_isolated_handle() only changes session
+    # decoding; no persistent data or schema is modified.
+    my $readonly_ok = eval { $dbh->do('SET SESSION TRANSACTION READ ONLY') };
+    unless ($readonly_ok) {
+        my $why = _sanitize_diag_text($@ || $DBI::errstr || 'cannot enforce read-only DB session');
+        eval { $dbh->disconnect };
+        return (undef, { error => "read-only session refused: $why",
+                         dbname => $dbname, dbuser => $dbuser,
+                         dbhost => $dbhost, dbport => $dbport, charset_mode => $mode });
+    }
+
+    my $driver = eval { $dbh->{Driver}{Name} } // '';
+    my $driver_version = eval { $dbh->{Driver}{Version} } // '';
+    return ($dbh, {
+        dbname => $dbname, dbuser => $dbuser, dbhost => $dbhost, dbport => $dbport,
+        charset_mode => $mode, driver => $driver, driver_version => $driver_version,
+        read_only_enforced => 1,
+    });
+}
+
+sub _db_select_one {
+    my ($dbh, $sql, @bind) = @_;
+    my $sth = eval { $dbh->prepare($sql) };
+    return (undef, _sanitize_diag_text($@ || $DBI::errstr || 'prepare failed')) unless $sth;
+    my $ok = eval { $sth->execute(@bind) };
+    unless ($ok) {
+        my $err = _sanitize_diag_text($@ || $DBI::errstr || 'execute failed');
+        eval { $sth->finish };
+        return (undef, $err);
+    }
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+    return ($row, undef);
+}
+
+sub _db_select_all {
+    my ($dbh, $sql, @bind) = @_;
+    my $sth = eval { $dbh->prepare($sql) };
+    return (undef, _sanitize_diag_text($@ || $DBI::errstr || 'prepare failed')) unless $sth;
+    my $ok = eval { $sth->execute(@bind) };
+    unless ($ok) {
+        my $err = _sanitize_diag_text($@ || $DBI::errstr || 'execute failed');
+        eval { $sth->finish };
+        return (undef, $err);
+    }
+    my $rows = $sth->fetchall_arrayref({});
+    $sth->finish;
+    return ($rows, undef);
+}
+
+sub _migration_sql_without_comments {
+    my ($text) = @_;
+    $text //= '';
+    $text =~ s{/\*.*?\*/}{}gs;
+    my @lines = grep { $_ !~ /^\s*--/ && $_ !~ /^\s*#/ } split /\n/, $text;
+    return join("\n", @lines);
+}
+
+sub _matching_paren_body {
+    my ($text, $open) = @_;
+    my $depth = 0;
+    my ($single, $double, $backtick) = (0, 0, 0);
+    for (my $i = $open; $i < length($text); $i++) {
+        my $c = substr($text, $i, 1);
+        my $prev = $i ? substr($text, $i - 1, 1) : '';
+        if (!$double && !$backtick && $c eq "'" && $prev ne '\\') { $single = !$single; next }
+        if (!$single && !$backtick && $c eq '"' && $prev ne '\\') { $double = !$double; next }
+        if (!$single && !$double && $c eq '`') { $backtick = !$backtick; next }
+        next if $single || $double || $backtick;
+        if ($c eq '(') { $depth++ }
+        elsif ($c eq ')') {
+            $depth--;
+            return (substr($text, $open + 1, $i - $open - 1), $i) if $depth == 0;
+        }
+    }
+    return (undef, undef);
+}
+
+sub _migration_observables {
+    my ($path) = @_;
+    return { effects => [], reason => 'migration file missing' }
+        unless defined $path && -f $path && !-l $path;
+    open my $fh, '<:raw', $path or return { effects => [], reason => "cannot read migration: $!" };
+    local $/;
+    my $raw = <$fh> // '';
+    close $fh;
+    my $sql = _migration_sql_without_comments($raw);
+    my @effects;
+    my %seen;
+    my $add = sub {
+        my ($type, %e) = @_;
+        my $key = join('|', $type, map { defined $e{$_} ? $e{$_} : '' }
+                                   qw(table column index constraint chanset));
+        return if $seen{$key}++;
+        push @effects, { type => $type, %e };
+    };
+
+    # CREATE TABLE: observe the table plus its declared columns/indexes/FKs.
+    while ($sql =~ /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?([A-Za-z0-9_]+)`?\s*\(/ig) {
+        my $table = $1;
+        my $open = pos($sql) - 1;
+        my ($body, $end) = _matching_paren_body($sql, $open);
+        last unless defined $body;
+        $add->('table', table => $table);
+        while ($body =~ /^\s*`([A-Za-z0-9_]+)`\s+/mg) {
+            $add->('column', table => $table, column => $1);
+        }
+        if ($body =~ /\bPRIMARY\s+KEY\b/i) {
+            $add->('index', table => $table, index => 'PRIMARY');
+        }
+        while ($body =~ /\b(?:UNIQUE\s+)?(?:KEY|INDEX)\s+`?([A-Za-z0-9_]+)`?/ig) {
+            $add->('index', table => $table, index => $1);
+        }
+        while ($body =~ /\bCONSTRAINT\s+`?([A-Za-z0-9_]+)`?\s+FOREIGN\s+KEY/ig) {
+            $add->('constraint', table => $table, constraint => $1);
+        }
+        pos($sql) = $end + 1;
+    }
+
+    # ALTER TABLE effects, including statements embedded in dynamic SQL strings.
+    while ($sql =~ /ALTER\s+TABLE\s+`?([A-Za-z0-9_]+)`?\s+ADD\s+COLUMN\s+`?([A-Za-z0-9_]+)`?/ig) {
+        $add->('column', table => $1, column => $2);
+    }
+    while ($sql =~ /ALTER\s+TABLE\s+`?([A-Za-z0-9_]+)`?[\s\S]{0,180}?\bADD\s+(?:UNIQUE\s+)?(?:INDEX|KEY)\s+`?([A-Za-z0-9_]+)`?/ig) {
+        $add->('index', table => $1, index => $2);
+    }
+    while ($sql =~ /ALTER\s+TABLE\s+`?([A-Za-z0-9_]+)`?[\s\S]{0,180}?\bADD\s+CONSTRAINT\s+`?([A-Za-z0-9_]+)`?\s+FOREIGN\s+KEY/ig) {
+        $add->('constraint', table => $1, constraint => $2);
+    }
+
+    # Data-only migrations currently use CHANSET_LIST. Capture the inserted
+    # semantic value, never the historical fact "this file was executed".
+    while ($sql =~ /(INSERT(?:\s+IGNORE)?\s+INTO\s+`?CHANSET_LIST`?[\s\S]*?;)/ig) {
+        my $stmt = $1;
+        while ($stmt =~ /'([^']+)'/g) {
+            my $v = $1;
+            next if $v =~ /\s/ || $v =~ /already|exists/i;
+            $add->('chanset', chanset => $v) if $v =~ /\A[A-Za-z][A-Za-z0-9_]*\z/;
+        }
+    }
+
+    # Unsupported mutation forms make historical inference indeterminate even
+    # if some other durable effects were recognised.
+    my $unsupported = 0;
+    $unsupported = 1 if $sql =~ /^\s*(?:UPDATE|DELETE\s+FROM|REPLACE\s+INTO)\b/im;
+    $unsupported = 1 if $sql =~ /^\s*INSERT\s+(?:IGNORE\s+)?INTO\s+(?!`?CHANSET_LIST`?)/im;
+
+    return {
+        effects => \@effects,
+        unsupported_mutation => $unsupported,
+        reason => (!@effects ? 'no durable observable effect recognised' : undef),
+    };
 }
 
 sub _status_has_75 {
@@ -489,9 +755,9 @@ sub _identity_access {
             if ($e->{id} eq 'achievements' && !$e->{exists}) {
                 push @out, _fact(
                     domain => 'filesystem', id => $id, level => 'info',
-                    summary => 'legacy achievements JSON absent (normal with MariaDB storage)',
-                    detail  => 'Only matters if the legacy JSON fallback is active; '
-                             . 'the database probe (round 3) decides that.',
+                    summary => 'legacy achievements JSON absent',
+                    detail  => 'storage relevance is evaluated by the database domain; '
+                             . 'absence alone is not a filesystem error.',
                     source  => $source,
                     data    => { path => $e->{path}, exists => 0, legacy_fallback => 'unknown' },
                 );
@@ -1616,15 +1882,405 @@ sub _conf_from_argv {
                    collect => $collect, evaluate => $evaluate);
 }
 
-_declare_pending('database',
-    'Must NOT call Mediabot::DB->new(): that constructor can exit(1) on an '
-  . 'invalid configuration and would kill the orchestrator. Needs a non-fatal '
-  . 'path around connect_isolated_handle or a dedicated abstraction.');
-_declare_pending('migrations',
-    'Will report observable_effect_present / observable_effect_missing / '
-  . 'indeterminate — never "applied", which no source of truth can establish: '
-  . 'there is no migration tracking table. Schema drift stays delegated to '
-  . 'tools/check_schema_drift.pl.');
+# =============================================================================
+# SONDE : database (round 3)
+# =============================================================================
+{
+    my $collect = sub {
+        my ($ctx) = @_;
+        my ($dbh, $meta) = _doctor_db_connect($ctx);
+        return { connected => 0, meta => $meta } unless $dbh;
+
+        my %r = (connected => 1, meta => $meta);
+        my ($session, $session_err) = _db_select_one($dbh, q{
+            SELECT DATABASE() AS dbname,
+                   VERSION() AS server_version,
+                   @@character_set_client AS character_set_client,
+                   @@character_set_connection AS character_set_connection,
+                   @@character_set_results AS character_set_results,
+                   @@collation_connection AS collation_connection
+        });
+        $r{session} = $session if $session;
+        $r{session_error} = $session_err if $session_err;
+
+        my @required = qw(
+            ACHIEVEMENT_PROFILE ACHIEVEMENT_IDENTITY
+            ACHIEVEMENT_UNLOCK ACHIEVEMENT_PROGRESS
+        );
+        my ($tables, $table_err) = _db_select_all($dbh, q{
+            SELECT TABLE_NAME, ENGINE, TABLE_COLLATION
+              FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME IN (
+                   'ACHIEVEMENT_PROFILE', 'ACHIEVEMENT_IDENTITY',
+                   'ACHIEVEMENT_UNLOCK', 'ACHIEVEMENT_PROGRESS'
+               )
+             ORDER BY TABLE_NAME
+        });
+        $r{achievement_tables} = $tables if $tables;
+        $r{achievement_table_error} = $table_err if $table_err;
+        $r{achievement_required} = \@required;
+
+        eval { $dbh->disconnect };
+
+        # Schema truth stays in the existing checker. --ignore-extra asks the
+        # operational question Doctor needs: are all REQUIRED current
+        # structures/indexes/reference rows present? Extra legacy objects are
+        # not a reason to declare the instance unsafe.
+        my $checker = File::Spec->catfile($ctx->{root}, 'tools', 'check_schema_drift.pl');
+        if (-f $checker && !-l $checker) {
+            $r{schema_drift} = _capture_command_bounded(
+                30, $^X, $checker, '--conf=' . $ctx->{conf_file},
+                '--strict', '--types', '--indexes', '--ignore-extra', '--quiet');
+        }
+        else {
+            $r{schema_drift} = { ok => 0, rc => 127, missing_tool => 1,
+                                 stderr => 'tools/check_schema_drift.pl missing' };
+        }
+        return \%r;
+    };
+
+    my $evaluate = sub {
+        my ($raw, $ctx) = @_;
+        my @out;
+        my $meta = $raw->{meta} || {};
+
+        unless ($raw->{connected}) {
+            return _fact(
+                domain => 'database', id => 'database.connection', level => 'unknown',
+                summary => 'database could not be inspected safely',
+                detail => _sanitize_diag_text($meta->{error} || 'connection unavailable'),
+                source => 'Mediabot::DB::connect_isolated_handle',
+                data => { connected => 0, read_only_enforced => 0,
+                          dbname => $meta->{dbname}, host => $meta->{dbhost}, port => $meta->{dbport} },
+            );
+        }
+
+        my $session = $raw->{session} || {};
+        my $db_name = $session->{dbname} || $meta->{dbname} || '(unknown)';
+        my $driver = $meta->{driver} || 'DBI';
+        my $driver_v = $meta->{driver_version} ? " $meta->{driver_version}" : '';
+        push @out, _fact(
+            domain => 'database', id => 'database.connection', level => 'ok',
+            summary => "connected read-only to database '$db_name' via DBD::$driver$driver_v",
+            source => 'Mediabot::DB::connect_isolated_handle + SET SESSION TRANSACTION READ ONLY',
+            data => { connected => 1, read_only_enforced => 1, dbname => $db_name,
+                      host => $meta->{dbhost}, port => $meta->{dbport}, driver => $driver,
+                      driver_version => $meta->{driver_version}, server_version => $session->{server_version} },
+        );
+
+        if ($raw->{session_error}) {
+            push @out, _fact(
+                domain => 'database', id => 'database.session_charset', level => 'unknown',
+                summary => 'database session charset could not be verified',
+                detail => _sanitize_diag_text($raw->{session_error}),
+                source => 'SELECT @@character_set_* / @@collation_connection', data => {},
+            );
+        }
+        else {
+            my $mode = lc($meta->{charset_mode} // 'utf8mb4');
+            my $cs = $session->{character_set_connection} // '';
+            my $coll = $session->{collation_connection} // '';
+            my $expected = $mode eq 'latin1' ? 'latin1' : ($mode eq 'off' ? undef : 'utf8mb4');
+            my $level = !defined($expected) ? 'info' : ($cs eq $expected ? 'ok' : 'warn');
+            my $summary = !defined($expected)
+                ? "charset mode is off; live connection uses $cs / $coll"
+                : ($cs eq $expected
+                    ? "session charset $cs / $coll"
+                    : "session charset $cs does not match configured mode $expected");
+            push @out, _fact(
+                domain => 'database', id => 'database.session_charset', level => $level,
+                summary => $summary,
+                source => 'live DB session variables + mysql.CHARSET_MODE',
+                data => { configured_mode => $mode,
+                          character_set_client => $session->{character_set_client},
+                          character_set_connection => $session->{character_set_connection},
+                          character_set_results => $session->{character_set_results},
+                          collation_connection => $session->{collation_connection} },
+            );
+        }
+
+        if ($raw->{achievement_table_error}) {
+            push @out, _fact(
+                domain => 'database', id => 'database.achievement_storage', level => 'unknown',
+                summary => 'MB646 achievement persistence tables could not be inspected',
+                detail => _sanitize_diag_text($raw->{achievement_table_error}),
+                source => 'information_schema.TABLES', data => {},
+            );
+        }
+        else {
+            my @required = @{ $raw->{achievement_required} || [] };
+            my @rows = @{ $raw->{achievement_tables} || [] };
+            my %present = map { ($_->{TABLE_NAME} // $_->{table_name} // '') => $_ } @rows;
+            my @missing = grep { !$present{$_} } @required;
+            if (!@missing && @required) {
+                my @nonstandard;
+                for my $name (@required) {
+                    my $row = $present{$name} || {};
+                    my $engine = $row->{ENGINE} // $row->{engine} // '';
+                    my $coll = $row->{TABLE_COLLATION} // $row->{table_collation} // '';
+                    push @nonstandard, "$name(engine=$engine,collation=$coll)"
+                        unless lc($engine) eq 'innodb' && lc($coll) eq 'utf8mb4_unicode_ci';
+                }
+                push @out, _fact(
+                    domain => 'database', id => 'database.achievement_storage',
+                    level => (@nonstandard ? 'warn' : 'ok'),
+                    summary => (@nonstandard
+                        ? 'all MB646 achievement tables exist but storage metadata differs from the reference'
+                        : 'MB646 achievement persistence tables present (MariaDB storage available)'),
+                    detail => (@nonstandard ? join(', ', @nonstandard) : undef),
+                    source => 'information_schema.TABLES + Mediabot::Achievements::_db_schema_available',
+                    data => { storage => 'db', present => scalar(@rows), required => scalar(@required),
+                              missing => \@missing },
+                );
+            }
+            elsif (!@rows) {
+                push @out, _fact(
+                    domain => 'database', id => 'database.achievement_storage', level => 'warn',
+                    summary => 'MB646 achievement tables are absent; Mediabot will use legacy JSON fallback',
+                    detail => 'apply install/migrations/20260816_achievements_db.sql before relying on DB persistence',
+                    source => 'information_schema.TABLES + Mediabot::Achievements::_db_schema_available',
+                    data => { storage => 'json_fallback', present => 0,
+                              required => scalar(@required), missing => \@missing },
+                );
+            }
+            else {
+                push @out, _fact(
+                    domain => 'database', id => 'database.achievement_storage', level => 'fail',
+                    summary => 'partial MB646 achievement schema detected',
+                    detail => 'missing: ' . join(', ', @missing),
+                    source => 'information_schema.TABLES + Mediabot::Achievements::_db_schema_available',
+                    data => { storage => 'partial', present => scalar(@rows),
+                              required => scalar(@required), missing => \@missing },
+                );
+            }
+        }
+
+        my $drift = $raw->{schema_drift} || {};
+        if ($drift->{ok}) {
+            push @out, _fact(
+                domain => 'database', id => 'database.schema_drift', level => 'ok',
+                summary => 'required live schema/reference data match install/mediabot.sql',
+                detail => 'delegated to check_schema_drift.pl (--types --indexes --ignore-extra)',
+                source => 'tools/check_schema_drift.pl',
+                data => { delegated => 1, rc => 0, network_used => 0, extra_live_objects_ignored => 1 },
+            );
+        }
+        elsif ($drift->{timeout}) {
+            push @out, _fact(
+                domain => 'database', id => 'database.schema_drift', level => 'unknown',
+                summary => 'schema drift checker timed out',
+                detail => 'bounded at 30 seconds; no schema change was attempted',
+                source => 'tools/check_schema_drift.pl', data => { delegated => 1, rc => 124 },
+            );
+        }
+        elsif (($drift->{rc} // 127) == 1) {
+            my $evidence = ($drift->{stdout} // '') . "\n" . ($drift->{stderr} // '');
+            my $critical_missing = ($evidence =~ /\bMISSING\s+(?:TABLE|COLUMN|DATA)\b/i) ? 1 : 0;
+            my $detail = _sanitize_diag_text($evidence, 900);
+            push @out, _fact(
+                domain => 'database', id => 'database.schema_drift',
+                level => ($critical_missing ? 'fail' : 'warn'),
+                summary => ($critical_missing
+                    ? 'required schema/reference objects are missing'
+                    : 'schema/reference drift detected (types/indexes or other non-missing differences)'),
+                detail => $detail || 'run tools/check_schema_drift.pl manually for details',
+                source => 'tools/check_schema_drift.pl',
+                data => { delegated => 1, rc => 1, extra_live_objects_ignored => 1,
+                          critical_missing => $critical_missing },
+            );
+        }
+        else {
+            my $detail = _sanitize_diag_text(($drift->{stderr} // '') . ' ' . ($drift->{stdout} // ''), 500);
+            push @out, _fact(
+                domain => 'database', id => 'database.schema_drift', level => 'unknown',
+                summary => 'schema drift checker could not complete',
+                detail => $detail || 'checker unavailable',
+                source => 'tools/check_schema_drift.pl',
+                data => { delegated => 1, rc => ($drift->{rc} // 127) },
+            );
+        }
+
+        return @out;
+    };
+
+    register_probe(domain => 'database', round => 3,
+                   collect => $collect, evaluate => $evaluate);
+}
+
+# =============================================================================
+# SONDE : migrations (round 3)
+# =============================================================================
+{
+    my $collect = sub {
+        my ($ctx) = @_;
+        my $dir = File::Spec->catdir($ctx->{root}, 'install', 'migrations');
+        return { directory_error => 'install/migrations directory missing' }
+            unless -d $dir && !-l $dir;
+
+        opendir(my $dh, $dir) or return { directory_error => "cannot open migrations directory: $!" };
+        my @names = sort grep { /\.sql\z/ && -f File::Spec->catfile($dir, $_)
+                                        && !-l File::Spec->catfile($dir, $_) } readdir($dh);
+        closedir $dh;
+
+        my @migrations;
+        for my $name (@names) {
+            my $path = File::Spec->catfile($dir, $name);
+            my $spec = _migration_observables($path);
+            push @migrations, { name => $name, path => $path, %$spec };
+        }
+
+        my ($dbh, $meta) = _doctor_db_connect($ctx);
+        return { migrations => \@migrations, db_error => $meta->{error}, db_meta => $meta }
+            unless $dbh;
+
+        for my $mig (@migrations) {
+            my @observed;
+            for my $effect (@{ $mig->{effects} || [] }) {
+                my ($row, $err);
+                if ($effect->{type} eq 'table') {
+                    ($row, $err) = _db_select_one($dbh, q{
+                        SELECT 1 AS present FROM information_schema.TABLES
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1
+                    }, $effect->{table});
+                }
+                elsif ($effect->{type} eq 'column') {
+                    ($row, $err) = _db_select_one($dbh, q{
+                        SELECT 1 AS present FROM information_schema.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1
+                    }, $effect->{table}, $effect->{column});
+                }
+                elsif ($effect->{type} eq 'index') {
+                    ($row, $err) = _db_select_one($dbh, q{
+                        SELECT 1 AS present FROM information_schema.STATISTICS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1
+                    }, $effect->{table}, $effect->{index});
+                }
+                elsif ($effect->{type} eq 'constraint') {
+                    ($row, $err) = _db_select_one($dbh, q{
+                        SELECT 1 AS present FROM information_schema.TABLE_CONSTRAINTS
+                         WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ? LIMIT 1
+                    }, $effect->{table}, $effect->{constraint});
+                }
+                elsif ($effect->{type} eq 'chanset') {
+                    ($row, $err) = _db_select_one($dbh,
+                        'SELECT 1 AS present FROM CHANSET_LIST WHERE chanset = ? LIMIT 1',
+                        $effect->{chanset});
+                }
+                push @observed, { %$effect,
+                    state => ($err ? 'indeterminate' : ($row ? 'present' : 'missing')),
+                    (defined $err ? (error => $err) : ()),
+                };
+            }
+            $mig->{observed} = \@observed;
+        }
+        eval { $dbh->disconnect };
+        return { migrations => \@migrations, db_meta => $meta };
+    };
+
+    my $evaluate = sub {
+        my ($raw, $ctx) = @_;
+        if ($raw->{directory_error}) {
+            return _fact(
+                domain => 'migrations', id => 'migrations.inventory', level => 'unknown',
+                summary => 'migration inventory could not be inspected',
+                detail => $raw->{directory_error}, source => 'install/migrations', data => {},
+            );
+        }
+
+        my @migrations = @{ $raw->{migrations} || [] };
+        my @out;
+        push @out, _fact(
+            domain => 'migrations', id => 'migrations.inventory',
+            level => (@migrations ? 'ok' : 'warn'),
+            summary => scalar(@migrations) . ' migration file(s) discovered',
+            source => 'directory:install/migrations',
+            data => { count => scalar(@migrations), names => [ map { $_->{name} } @migrations ] },
+        );
+
+        if ($raw->{db_error}) {
+            push @out, _fact(
+                domain => 'migrations', id => 'migrations.observable_state', level => 'unknown',
+                summary => 'migration observable effects could not be compared with the live database',
+                detail => _sanitize_diag_text($raw->{db_error}),
+                source => 'read-only database session + install/migrations/*.sql',
+                data => { states => [] },
+            );
+            return @out;
+        }
+
+        my (@present, @missing, @indeterminate, @states, @missing_details);
+        my $effect_label = sub {
+            my ($e) = @_;
+            return 'table ' . ($e->{table} // '?') if ($e->{type} // '') eq 'table';
+            return 'column ' . ($e->{table} // '?') . '.' . ($e->{column} // '?')
+                if ($e->{type} // '') eq 'column';
+            return 'index ' . ($e->{table} // '?') . '.' . ($e->{index} // '?')
+                if ($e->{type} // '') eq 'index';
+            return 'constraint ' . ($e->{table} // '?') . '.' . ($e->{constraint} // '?')
+                if ($e->{type} // '') eq 'constraint';
+            return 'chanset ' . ($e->{chanset} // '?') if ($e->{type} // '') eq 'chanset';
+            return ($e->{type} // 'effect');
+        };
+        for my $mig (@migrations) {
+            my $state;
+            my @obs = @{ $mig->{observed} || [] };
+            my @missing_obs = grep { ($_->{state} // '') eq 'missing' } @obs;
+            if ($mig->{unsupported_mutation} || !@{ $mig->{effects} || [] }) {
+                $state = 'indeterminate';
+            }
+            elsif (grep { ($_->{state} // '') eq 'indeterminate' } @obs) {
+                $state = 'indeterminate';
+            }
+            elsif (@missing_obs) {
+                $state = 'observable_effect_missing';
+            }
+            else {
+                $state = 'observable_effect_present';
+            }
+            push @{ $state eq 'observable_effect_present' ? \@present
+                    : $state eq 'observable_effect_missing' ? \@missing : \@indeterminate },
+                 $mig->{name};
+            my @labels = map { $effect_label->($_) } @missing_obs;
+            push @missing_details, $mig->{name} . ': ' . join(', ', @labels) if @labels;
+            push @states, { name => $mig->{name}, state => $state,
+                            effect_count => scalar(@{ $mig->{effects} || [] }),
+                            missing_effects => \@labels };
+        }
+
+        my ($level, $summary, $detail);
+        if (@missing) {
+            $level = 'warn';
+            $summary = scalar(@missing) . ' migration file(s) have observable effects missing';
+            $detail = 'missing observable effects: ' . join('; ', @missing_details);
+            $detail .= '; indeterminate: ' . join(', ', @indeterminate) if @indeterminate;
+            $detail .= '; this does NOT prove the migration file was never executed';
+        }
+        elsif (@indeterminate) {
+            $level = 'unknown';
+            $summary = scalar(@indeterminate) . ' migration file(s) are indeterminate from observable state';
+            $detail = 'indeterminate: ' . join(', ', @indeterminate);
+        }
+        else {
+            $level = 'ok';
+            $summary = 'all migration files have their observable effects present';
+            $detail = scalar(@present) . ' file(s); this proves current observable state, NOT historical execution';
+        }
+
+        push @out, _fact(
+            domain => 'migrations', id => 'migrations.observable_state', level => $level,
+            summary => $summary, detail => $detail,
+            source => 'install/migrations/*.sql + live read-only information_schema/reference queries',
+            data => { states => \@states, present => \@present, missing => \@missing,
+                      indeterminate => \@indeterminate,
+                      historical_execution_proven => 0 },
+        );
+        return @out;
+    };
+
+    register_probe(domain => 'migrations', round => 3,
+                   collect => $collect, evaluate => $evaluate);
+}
 
 # =============================================================================
 # 4. Contexte, orchestration, rendus
@@ -1889,8 +2545,9 @@ Mediabot Doctor $VERSION — read-only diagnosis of a Mediabot instance
                  (@{[ join ', ', @DOMAINS ]})
   --strict       exit 1 on warnings or unknowns too (default: only failures)
 
-This tool never writes anything, never touches the database, never signals the
-bot, and never collects the value of a secret.
+This tool never writes persistent data or schema, never signals the bot, and never
+collects a secret value into its fact model. Database diagnostics use read-only
+sessions and SELECT/information_schema queries only.
 USAGE
     exit $code;
 }

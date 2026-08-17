@@ -347,25 +347,16 @@ return sub {
     }
 
     # ---------------------------------------------------------------------
-    # [6] Pending round-3 domains keep the corrected design contracts
+    # [6] Seven-domain interface survives later Doctor rounds
     # ---------------------------------------------------------------------
-    for my $d (qw(database migrations)) {
-        my @pf = $main::PROBES{$d}{evaluate}->([], $ctx2);
-        $assert->is($pf[0]{data}{implemented}, 0,
-            "mb647-828: $d declared but not implemented");
-    }
     $assert->is($main::PROBES{systemd}{round}, 2,
         'mb647-828: systemd interface remains the round-2 domain');
     $assert->is($main::PROBES{updater}{round}, 2,
         'mb647-828: updater interface remains the round-2 domain');
-    my @dbf = $main::PROBES{database}{evaluate}->([], $ctx2);
-    $assert->like($dbf[0]{detail}, qr/NOT call Mediabot::DB->new\(\).*exit\(1\)/s,
-        'mb647-828: future DB probe preserves non-fatal connection requirement');
-    my @mig = $main::PROBES{migrations}{evaluate}->([], $ctx2);
-    $assert->like($mig[0]{detail}, qr/never "applied"/,
-        'mb647-828: migration inference never claims applied');
-    $assert->like($mig[0]{detail}, qr/check_schema_drift\.pl/,
-        'mb647-828: schema drift remains delegated');
+    $assert->is($main::PROBES{database}{round}, 3,
+        'mb647-828: database interface is now implemented by round 3');
+    $assert->is($main::PROBES{migrations}{round}, 3,
+        'mb647-828: migrations interface is now implemented by round 3');
 
     # ---------------------------------------------------------------------
     # [7] Probe failure isolation

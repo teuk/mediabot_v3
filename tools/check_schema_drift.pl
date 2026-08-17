@@ -108,7 +108,7 @@ for my $t (sort keys %$ref) {
 
         if ($opt{types}) {
             my $expected = normalize_column_def($ref->{$t}{columns}{$c}{definition});
-            my $actual   = normalize_live_column_def($live->{$t}{columns}{$c});
+            my $actual   = normalize_live_column_def($live->{$t}{columns}{$c}, $ref->{$t}{columns}{$c}{definition});
             if ($expected ne $actual) {
                 push @t_issues, {
                     kind     => 'type_drift',
@@ -965,21 +965,51 @@ sub fetch_live_schema {
     return \%tables;
 }
 
+sub _normalize_integer_display_widths {
+    my ($def) = @_;
+    $def //= '';
+    # MySQL/MariaDB integer display widths (INT(11), BIGINT(20), ...) do not
+    # change the storage type.  MariaDB still reports them through COLUMN_TYPE
+    # even when the reference schema uses modern width-less syntax.
+    $def =~ s/\b(tinyint|smallint|mediumint|int|integer|bigint)\s*\(\s*\d+\s*\)/$1/ig;
+    return $def;
+}
+
 sub normalize_column_def {
     my ($def) = @_;
     $def //= '';
     $def = lc $def;
     $def =~ s/`//g;
+    # COMMENT is metadata, not part of the type contract checked by --types.
+    $def =~ s/\s+comment\s+'(?:''|[^'])*'//g;
+    $def = _normalize_integer_display_widths($def);
     $def =~ s/\s+/ /g;
     $def =~ s/\s*,\s*/,/g;
     $def =~ s/current_timestamp[(][)]/current_timestamp/g;
+    # Explicit nullable NULL is the SQL default and information_schema reports
+    # it through IS_NULLABLE.  COLUMN_DEFAULT cannot reliably distinguish an
+    # omitted default from an explicit DEFAULT NULL, so canonicalise both.
+    $def =~ s/\s+default\s+null\b//g;
+    $def =~ s/\s+(?<!not )null(?=\s+(?:character|collate|on\s+update|auto_increment)|\s*\z)//g;
     $def =~ s/\s+\z//;
     return $def;
 }
 
 sub normalize_live_column_def {
-    my ($col) = @_;
+    my ($col, $expected_raw) = @_;
+    $expected_raw //= '';
     my $def = lc($col->{type} // '');
+    $def = _normalize_integer_display_widths($def);
+
+    # Only compare per-column charset/collation when the reference explicitly
+    # declares them.  Otherwise the column inherits the table default and this
+    # helper should not invent an explicit token that is absent from the SQL.
+    if ($expected_raw =~ /\bcharacter\s+set\s+[A-Za-z0-9_]+/i) {
+        $def .= ' character set ' . lc($col->{charset} // '');
+    }
+    if ($expected_raw =~ /\bcollate\s+[A-Za-z0-9_]+/i) {
+        $def .= ' collate ' . lc($col->{collation} // '');
+    }
 
     $def .= ' not null' if ($col->{nullable} // '') eq 'NO';
 
@@ -988,8 +1018,16 @@ sub normalize_live_column_def {
         if ($d =~ /\Acurrent_timestamp[(][)]\z/i) {
             $def .= ' default current_timestamp';
         } elsif ($d =~ /\Anull\z/i) {
-            $def .= ' default null';
+            # MariaDB information_schema.COLUMNS can expose nullable implicit
+            # defaults as the SQL token NULL rather than Perl undef.  DEFAULT
+            # NULL is semantically the same as an omitted default for a
+            # nullable column, and normalize_column_def() canonicalises it away.
         } elsif ($d =~ /\A-?\d+(?:[.]\d+)?\z/) {
+            $def .= " default $d";
+        } elsif ($d =~ /\A'(?:''|[^'])*'\z/s) {
+            # MariaDB returns literal COLUMN_DEFAULT values SQL-quoted on
+            # current releases.  They are already escaped/quoted; wrapping
+            # them again created bogus values such as '''irc'''.
             $def .= " default $d";
         } else {
             $d =~ s/'/''/g;
