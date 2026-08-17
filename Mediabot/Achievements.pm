@@ -8,7 +8,8 @@ package Mediabot::Achievements;
 #
 # Hooks intégrés depuis :
 #   - mediabot.pl on_message_PRIVMSG   → first_msg, chatterbox, megaphone,
-#                                         night_owl, early_bird
+#                                         night_owl, midnight_regular,
+#                                         creature_night, early_bird
 #   - UserCommands.pm  mbKarma_ctx     → karma_star, karma_legend
 #   - UserCommands.pm  mbTrivia (ok)   → trivia_rookie, trivia_champion, trivia_sniper
 #   - UserCommands.pm  mbWordCount_ctx → wordsmith
@@ -135,21 +136,44 @@ my %ACH = (
         threshold => 250,
         progress_kind => 'karma_given',
     },
+    # mb657: the historical hour-band scan already knows the exact number of
+    # night/morning messages.  Persist that result as progress and turn the
+    # original Night Owl into the first rung of a cumulative night ladder.
     night_owl => {
         emoji   => '🌙',
         name    => 'Night Owl',
-        desc    => 'Active between 00h-05h (50+ msgs)',
+        desc    => 'Sent 50 messages between 00h and 05h',
         rarity  => 'uncommon',
         check_on => 'msg',
         threshold => 50,
+        progress_kind => 'night_messages',
+    },
+    midnight_regular => {
+        emoji   => '🌌',
+        name    => 'Midnight Regular',
+        desc    => 'Sent 250 messages between 00h and 05h',
+        rarity  => 'rare',
+        check_on => 'msg',
+        threshold => 250,
+        progress_kind => 'night_messages',
+    },
+    creature_night => {
+        emoji   => '🦇',
+        name    => 'Creature of the Night',
+        desc    => 'Sent 1 000 messages between 00h and 05h',
+        rarity  => 'epic',
+        check_on => 'msg',
+        threshold => 1000,
+        progress_kind => 'night_messages',
     },
     early_bird => {
         emoji   => '🌅',
         name    => 'Early Bird',
-        desc    => 'Active between 06h-08h (50+ msgs)',
+        desc    => 'Sent 50 messages between 06h and 08h',
         rarity  => 'uncommon',
         check_on => 'msg',
         threshold => 50,
+        progress_kind => 'morning_messages',
     },
     # mb655: user-facing activity streak milestones.  The expensive day-by-day
     # calculation already exists in !streak; these achievements reuse that result
@@ -2281,7 +2305,7 @@ sub _finish_async_check {
         # the two DB-derived state counters into the parent after validating
         # their bounded result shape.
         if (ref($result->{progress}) eq 'HASH') {
-            for my $kind (qw(msg_count channels_active)) {
+            for my $kind (qw(msg_count channels_active night_messages morning_messages)) {
                 next unless exists $result->{progress}{$kind};
                 my $value = $result->{progress}{$kind};
                 next unless defined($value) && !ref($value)
@@ -2733,52 +2757,75 @@ sub check_msg {
         for grep { $n >= $self->threshold($_) }
             qw(first_msg chatterbox megaphone icon legend);
 
-    # Night Owl / Early Bird : compte par tranche horaire
+    # Night Owl / Early Bird : compte par tranche horaire.
     #
-    # mb450-B1 (perf): ce GROUP BY HOUR(ts) sur CHANNEL_LOG est la requete la
-    # plus chere de ce hook (Using temporary + filesort). Deux gardes, sans rien
-    # changer a la logique de deblocage :
-    #   1. Court-circuit mathematique : night_owl et early_bird exigent chacun
-    #      >= 50 messages dans une tranche horaire. C'est impossible si le total
-    #      du nick sur le canal ($n) est < 50 -> on saute le scan pour l'immense
-    #      majorite des nicks (le cas courant sur un canal charge).
-    #   2. Throttle horaire : pour les gros nicks qui franchissent 50, on ne
-    #      relance le scan qu'une fois par heure et par (nick,canal), au lieu de
-    #      chaque fois que le cache 5 min de check_msg laisse passer.
-    # Les seuils (>= 50) et les unlock sont identiques a l'avant-mb450.
-    if ($n >= 50 &&
-        (!exists $self->get_for_nick($nick, $channel)->{night_owl} ||
-         !exists $self->get_for_nick($nick, $channel)->{early_bird})) {
-        my $hb_key  = lc($nick) . "\x00" . lc($channel // "");
-        my $hb_last = $self->{_hourband_check_ts}{$hb_key} // 0;
-        if ((time() - $hb_last) >= 3600) {
-            $self->{_hourband_check_ts}{$hb_key} = time();
-            my ($night, $morn) = $self->_timed_check('hour_band', $nick, $channel, sub {
-                my $sql_h = qq{
-                    SELECT HOUR(cl.ts) AS h, COUNT(*) AS c
-                    FROM CHANNEL_LOG cl
-                    JOIN CHANNEL c ON c.id_channel = cl.id_channel
-                    WHERE c.name = ?
-                      AND $identity_sql
-                      AND cl.event_type IN ('public','action')   -- mb347-B1
-                    GROUP BY HOUR(cl.ts)
-                };
-                my $sth_h = eval { $dbh->prepare($sql_h) };
-                return (undef, undef) unless $sth_h
-                    && $sth_h->execute($channel, @identity_bind);
-                my (%by_h);
-                while (my $r = $sth_h->fetchrow_hashref) { $by_h{$r->{h}} = $r->{c}; }
-                $sth_h->finish;
-                my ($ni, $mo) = (0, 0);
-                $ni += ($by_h{$_} // 0) for (0..5);
-                $mo += ($by_h{$_} // 0) for (6..8);
-                return ($ni, $mo);
-            });
-            if (defined $night) {
-                $self->unlock($nick, $channel, 'night_owl')
-                    if $night >= $self->threshold('night_owl');
-                $self->unlock($nick, $channel, 'early_bird')
-                    if $morn  >= $self->threshold('early_bird');
+    # mb657: the same historical scan now feeds measurable progress plus two
+    # extra Night Owl milestones.  Do NOT add a second query: one conditional
+    # aggregate returns both bands.  This also removes the old GROUP BY HOUR()
+    # temporary/filesort path.
+    #
+    # mb450-B1 remains the governing performance contract.
+    # The mathematical short-circuit now follows the lowest still-locked
+    # configurable threshold.  This preserves mb450's "do not scan when an
+    # unlock is impossible" rule while finally honouring [achievements]
+    # overrides below the old hard-coded value of 50.
+    my $hour_unlocked = $self->get_for_nick($nick, $channel);
+    my @hour_pending = grep { !exists $hour_unlocked->{$_} }
+        qw(night_owl midnight_regular creature_night early_bird);
+    if (@hour_pending) {
+        my $hour_floor;
+        for my $id (@hour_pending) {
+            my $threshold = $self->threshold($id);
+            next unless defined($threshold) && $threshold > 0;
+            $hour_floor = $threshold
+                if !defined($hour_floor) || $threshold < $hour_floor;
+        }
+
+        if (defined($hour_floor) && $n >= $hour_floor) {
+            my $hb_key  = lc($nick) . "\x00" . lc($channel // "");
+            my $hb_last = $self->{_hourband_check_ts}{$hb_key} // 0;
+            if ((time() - $hb_last) >= 3600) {
+                $self->{_hourband_check_ts}{$hb_key} = time();
+                my ($night, $morn) = $self->_timed_check('hour_band', $nick, $channel, sub {
+                    my $sql_h = qq{
+                        SELECT
+                            COALESCE(SUM(CASE
+                                WHEN HOUR(cl.ts) BETWEEN 0 AND 5 THEN 1 ELSE 0
+                            END), 0) AS night_count,
+                            COALESCE(SUM(CASE
+                                WHEN HOUR(cl.ts) BETWEEN 6 AND 8 THEN 1 ELSE 0
+                            END), 0) AS morning_count
+                        FROM CHANNEL_LOG cl
+                        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+                        WHERE c.name = ?
+                          AND $identity_sql
+                          AND cl.event_type IN ('public','action')   -- mb347-B1
+                    };
+                    my $sth_h = eval { $dbh->prepare($sql_h) };
+                    return (undef, undef) unless $sth_h
+                        && $sth_h->execute($channel, @identity_bind);
+                    my $row_h = $sth_h->fetchrow_hashref;
+                    $sth_h->finish;
+                    return (undef, undef) unless $row_h;
+                    return (
+                        0 + ($row_h->{night_count} // 0),
+                        0 + ($row_h->{morning_count} // 0),
+                    );
+                });
+                if (defined $night) {
+                    # mb657: the worker already paid for these exact values.
+                    # Persist them through the generic monotonic progress path;
+                    # the async parent imports both kinds from the child result.
+                    $self->set_progress('night_messages', $nick, $channel, $night);
+                    $self->set_progress('morning_messages', $nick, $channel, $morn);
+
+                    for my $id (qw(night_owl midnight_regular creature_night)) {
+                        $self->unlock($nick, $channel, $id)
+                            if $night >= $self->threshold($id);
+                    }
+                    $self->unlock($nick, $channel, 'early_bird')
+                        if $morn >= $self->threshold('early_bird');
+                }
             }
         }
     }

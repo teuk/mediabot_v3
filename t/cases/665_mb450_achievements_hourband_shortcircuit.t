@@ -2,20 +2,18 @@
 # =============================================================================
 # mb450 — check_msg : perf du GROUP BY HOUR(ts) sur CHANNEL_LOG.
 #
-# Le hook check_msg lance, par (nick,canal) et par passage non caché, un
-# GROUP BY HOUR(cl.ts) sur CHANNEL_LOG (1 M+ lignes en prod Undernet) pour les
-# achievements night_owl / early_bird. C'est un « Using temporary + filesort »
-# qui bloque la boucle IO::Async de façon synchrone -> lag ressenti sur la
-# moindre commande.
+# Le hook check_msg lance, par (nick,canal) et par passage non caché, une
+# agrégation horaire sur CHANNEL_LOG (1 M+ lignes en prod Undernet) pour les
+# achievements night_owl / early_bird. Historiquement, GROUP BY HOUR(ts) imposait un « Using temporary +
+# filesort ». mb657 conserve les gardes mb450 mais remplace ce GROUP BY par
+# deux agrégats conditionnels dans une seule requête.
 #
-# mb450-B1 ajoute DEUX gardes SANS changer la logique de déblocage :
-#   1. Court-circuit mathématique : night_owl et early_bird exigent chacun
-#      >= 50 messages dans une tranche horaire. Impossible si le total du nick
-#      sur le canal ($n) est < 50 -> on saute le scan.
-#   2. Throttle horaire (_hourband_check_ts) : au plus 1 scan / heure / (nick,
-#      canal) pour les gros nicks, au lieu de 1 / 5 min.
+# mb450-B1 garde deux protections, étendues par mb657 :
+#   1. court-circuit mathématique contre le plus petit seuil encore verrouillé ;
+#   2. throttle horaire (_hourband_check_ts).
 #
-# Les seuils (>= 50) et les unlock night_owl/early_bird sont inchangés.
+# mb657 rend night_owl/early_bird mesurables et ajoute deux paliers nuit, sans
+# ajouter une seconde requête horaire.
 #
 # Pas de DBI réel : on valide (a) la SÉMANTIQUE (impossibilité < 50, seuils
 # préservés) et (b) le CÂBLAGE dans le source (garde n>=50, throttle 3600, tag).
@@ -83,10 +81,14 @@ return sub {
     $cm //= '';
     $assert->ok($cm ne '', 'sub check_msg extraite');
 
-    # Garde de court-circuit : la condition night_owl/early_bird est précédée
-    # d'un test $n >= 50 sur la même instruction if.
-    $assert->like($cm, qr/if\s*\(\s*\$n\s*>=\s*50\s*&&/,
-                  'check_msg: le GROUP BY horaire est gardé par $n >= 50');
+    # Garde de court-circuit : mb657 dérive le plancher du plus petit seuil
+    # encore verrouillé, au lieu de figer 50 dans le code.
+    $assert->like($cm, qr/\@hour_pending/,
+                  'check_msg: liste uniquement les paliers horaires encore verrouilles');
+    $assert->like($cm, qr/\$hour_floor/,
+                  'check_msg: le court-circuit est derive des seuils configurables');
+    $assert->like($cm, qr/\$n\s*>=\s*\$hour_floor/,
+                  'check_msg: aucun scan si le total ne peut atteindre le prochain palier');
 
     # Throttle horaire : clé mémoire + fenêtre de 3600 s.
     $assert->like($cm, qr/_hourband_check_ts/,
@@ -94,23 +96,23 @@ return sub {
     $assert->like($cm, qr/>=\s*3600/,
                   'check_msg: throttle horaire (3600 s) présent');
 
-    # Non-régression : le GROUP BY et les seuils/unlock d'origine sont préservés.
-    $assert->like($cm, qr/GROUP BY HOUR\(cl\.ts\)/,
-                  'check_msg: la requête GROUP BY HOUR(ts) est conservée');
-    # mb611: le catalogue est interroge en vrai — ce test lisait jusqu'ici
-    # le source seulement, il charge donc le module ici.
-    require Mediabot::Achievements;
+    # mb657: une SEULE requête ramène les deux bandes sans GROUP BY/filesort.
+    $assert->unlike($cm, qr/GROUP BY HOUR\(cl\.ts\)/,
+                    'check_msg: ancien GROUP BY HOUR(ts) retire');
+    $assert->like($cm, qr/SUM\(CASE\s+WHEN HOUR\(cl\.ts\) BETWEEN 0 AND 5/s,
+                  'check_msg: agrégat conditionnel nuit présent');
+    $assert->like($cm, qr/SUM\(CASE\s+WHEN HOUR\(cl\.ts\) BETWEEN 6 AND 8/s,
+                  'check_msg: agrégat conditionnel matin présent');
 
-    # mb611: le seuil vit desormais dans le catalogue (et peut etre regle
-    # par conf) — on verrouille la SOURCE du seuil et sa valeur par defaut.
-    $assert->like($cm, qr/night_owl.*?\$night\s*>=\s*\$self->threshold\('night_owl'\)/s,
-                  'check_msg: seuil night_owl >= 50 inchangé');
+    require Mediabot::Achievements;
     $assert->is(Mediabot::Achievements::threshold(undef, 'night_owl'), 50,
-                  'check_msg: night_owl vaut toujours 50 par defaut');
-    $assert->like($cm, qr/early_bird.*?\$morn\s*>=\s*\$self->threshold\('early_bird'\)/s,
-                  'check_msg: seuil early_bird >= 50 inchangé');
+                  'check_msg: Night Owl vaut toujours 50 par defaut');
+    $assert->is(Mediabot::Achievements::threshold(undef, 'midnight_regular'), 250,
+                  'check_msg: Midnight Regular vaut 250 par defaut');
+    $assert->is(Mediabot::Achievements::threshold(undef, 'creature_night'), 1000,
+                  'check_msg: Creature of the Night vaut 1000 par defaut');
     $assert->is(Mediabot::Achievements::threshold(undef, 'early_bird'), 50,
-                  'check_msg: early_bird vaut toujours 50 par defaut');
+                  'check_msg: Early Bird vaut toujours 50 par defaut');
 
     # Le filtre event_type des 3 requêtes (garanti par mb347) n'a pas bougé.
     my $sql_only = $cm;

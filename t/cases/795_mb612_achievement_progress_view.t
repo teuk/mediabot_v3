@@ -2,8 +2,8 @@
 # =============================================================================
 # mb612 — la progression devient VISIBLE, et la grille est complete.
 #   [1] chaque achievement MESURABLE declare le compteur qui le mesure ;
-#       ceux qu'on ne sait pas mesurer (sniper, underdog, tranches
-#       horaires) le disent au lieu d'inventer une progression.
+#       ceux qu'on ne sait pas mesurer (sniper, underdog, declencheurs
+#       instantanes) le disent au lieu d'inventer une progression.
 #   [2] set_progress : valeur d'etat, monotone (une lecture plus basse
 #       n'efface pas un merite constate), invalides ignorees.
 #   [3] les checks qui CONNAISSENT deja la valeur l'enregistrent —
@@ -48,15 +48,16 @@ return sub {
     # [1] grille des compteurs
     my %kind_of = map { $_ => $defs->{$_}{progress_kind} } keys %$defs;
     my @measurable = grep { $kind_of{$_} } keys %kind_of;
-    $assert->is(scalar @measurable, 26,
-        'mb612-795: 26 achievements sur 30 sont mesurables');
+    $assert->is(scalar @measurable, 30,
+        'mb612-795: 30 achievements sur 32 sont mesurables');
     my @unmeasurable = sort grep { !$kind_of{$_} } keys %kind_of;
-    $assert->is(join(',', @unmeasurable), 'early_bird,night_owl,trivia_sniper,underdog',
-        'mb612-795: les 4 non mesurables sont ceux qu on ne sait pas mesurer');
+    $assert->is(join(',', @unmeasurable), 'trivia_sniper,underdog',
+        'mb612-795: seuls les 2 declencheurs instantanes restent non mesurables');
     my %kinds = map { $_ => 1 } values %kind_of;
     delete $kinds{''}; delete $kinds{undef};
     $assert->ok($kinds{msg_count} && $kinds{karma_score} && $kinds{distinct_words}
-             && $kinds{channels_active} && $kinds{trivia_correct},
+             && $kinds{channels_active} && $kinds{trivia_correct}
+             && $kinds{night_messages} && $kinds{morning_messages},
         'mb612-795: les compteurs issus de la base sont declares comme les autres');
 
     # [2] set_progress : etat monotone

@@ -32,6 +32,24 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb657 — measurable Night Owl ladder
+- Turned the existing **Night Owl** (50 messages between 00h-05h) into the
+  first measurable rung of a three-level ladder: **Midnight Regular** (250)
+  and **Creature of the Night** (1,000) reuse the same `night_messages`
+  progress counter. Existing **Early Bird** also becomes measurable through
+  `morning_messages`.
+- Reused the already-existing hour-band check rather than adding another
+  `CHANNEL_LOG` query. One result now feeds both progress counters and all
+  hour-based unlock decisions.
+- Replaced the historical `GROUP BY HOUR(ts)` path with two conditional
+  aggregate sums in one query, avoiding the temporary/filesort grouping while
+  preserving the 00h-05h and 06h-08h semantics.
+- The mb450 short-circuit now derives its floor from the lowest still-locked
+  configurable hour-band threshold instead of hard-coding 50, so lower
+  `[achievements]` overrides cannot be accidentally made unreachable.
+- The existing one-scan-per-hour throttle remains in place. No table,
+  migration or new configuration key is required.
+
 ### mb656 — comeback achievements
 - Added three user-facing comeback milestones based on the existing `USER_SEEN`
   history: **Welcome Back** (7 days), **Long Time No See** (30 days) and **The
