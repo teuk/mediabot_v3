@@ -1979,16 +1979,36 @@ sub _on_message_PRIVMSG_body {
             # BEFORE trivia/quotegame/command hooks can mutate progress. Exact
             # user@host follows nick changes; same nick accepts only compatible
             # ident/host changes; registered USER id is authoritative.
+            my $achievement_identity_ready = 0;
             if ($sn && $mediabot->{achievements}
                 && $mediabot->{achievements}->can('observe_identity')) {
                 eval {
-                    $mediabot->{achievements}->observe_identity(
+                    my $profile = $mediabot->{achievements}->observe_identity(
                         $sn, $where, $userhost, $message
                     );
+                    $achievement_identity_ready = defined($profile) ? 1 : 0;
                 };
                 if ($@) {
                     $mediabot->{logger}->log(1,
                         "achievements observe_identity error: $@");
+                }
+            }
+
+            # mb656: a comeback candidate is consumed only after mb646 has
+            # resolved the current live identity. This prevents a JOIN alone
+            # from creating merit and prevents a stale nick record from being
+            # attached to an unverified Achievement profile.
+            if ($achievement_identity_ready
+                && $mediabot->{achievements}
+                && $mediabot->{achievements}->can('consume_comeback_candidate')) {
+                eval {
+                    $mediabot->{achievements}->consume_comeback_candidate(
+                        $sn, $where
+                    );
+                };
+                if ($@) {
+                    $mediabot->{logger}->log(1,
+                        "achievements comeback consume error: $@");
                 }
             }
         }
@@ -2524,6 +2544,22 @@ sub on_message_JOIN {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
             $mediabot->{logger}->log(0,"[LIVE] <$target_name> * Joins $sNick ($sIdent\@$sHost)");
         }
+        # mb656: sample USER_SEEN before the JOIN upsert refreshes seen_at.
+        # This only records a transient candidate; it does not create/touch an
+        # Achievement profile until the user later speaks.
+        if ($mediabot->{achievements}
+            && $mediabot->{achievements}->can('note_comeback_candidate')) {
+            eval {
+                $mediabot->{achievements}->note_comeback_candidate(
+                    $sNick, "$sIdent\@$sHost"
+                );
+            };
+            if ($@) {
+                $mediabot->{logger}->log(1,
+                    "achievements comeback candidate error: $@");
+            }
+        }
+
         $mediabot->userOnJoin($message,$target_name,$sNick);
 
         # Track last seen on JOIN

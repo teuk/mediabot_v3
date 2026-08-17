@@ -181,6 +181,36 @@ my %ACH = (
         threshold => 100,
         progress_kind => 'activity_streak_days',
     },
+    # mb656: comeback milestones. USER_SEEN is sampled on JOIN before the normal
+    # upsert overwrites seen_at; the candidate is consumed only after the user
+    # speaks and mb646 has resolved the live identity.
+    comeback_week => {
+        emoji   => '🪃',
+        name    => 'Welcome Back',
+        desc    => 'Returned after at least 7 days away',
+        rarity  => 'uncommon',
+        check_on => 'comeback',
+        threshold => 7,
+        progress_kind => 'comeback_days',
+    },
+    comeback_month => {
+        emoji   => '🕰️',
+        name    => 'Long Time No See',
+        desc    => 'Returned after at least 30 days away',
+        rarity  => 'rare',
+        check_on => 'comeback',
+        threshold => 30,
+        progress_kind => 'comeback_days',
+    },
+    comeback_legend => {
+        emoji   => '🌠',
+        name    => 'The Return',
+        desc    => 'Returned after at least 90 days away',
+        rarity  => 'epic',
+        check_on => 'comeback',
+        threshold => 90,
+        progress_kind => 'comeback_days',
+    },
     trivia_rookie => {
         emoji   => '🧠',
         name    => 'Trivia Rookie',
@@ -2835,6 +2865,114 @@ sub check_streak {
     for my $id (qw(streak_week streak_month streak_master)) {
         $self->unlock($nick, $channel, $id)
             if $best >= $self->threshold($id);
+    }
+    return $saved;
+}
+
+# -- Hook : mb656 comeback achievements ---------------------------------------
+# USER_SEEN is one row per nick and is updated on JOIN before the user can speak.
+# Capture its PRE-JOIN age in memory, then consume it on the first public message
+# only after observe_identity() has pinned the live nick/user@host/channel tuple.
+#
+# This deliberately does not unlock on JOIN: merely entering a channel must not
+# create an Achievement profile for a nick that never interacts with Mediabot.
+my $COMEBACK_PENDING_TTL = 24 * 60 * 60;
+my $COMEBACK_PENDING_MAX = 200;
+
+sub note_comeback_candidate {
+    my ($self, $nick, $current_userhost) = @_;
+    return 0 unless defined($nick) && length($nick);
+    return 0 unless $self->{bot} && $self->{bot}{dbh};
+
+    my $key = lc($nick);
+    $self->{_comeback_pending} ||= {};
+
+    # Keep a still-valid earlier candidate. This matters when one IRC identity
+    # joins several shared channels: the first JOIN sees the real long absence;
+    # later JOINs see USER_SEEN already refreshed by the first one.
+    if (my $pending = $self->{_comeback_pending}{$key}) {
+        if (time() - ($pending->{captured_at} // 0) <= $COMEBACK_PENDING_TTL) {
+            return 1;
+        }
+        delete $self->{_comeback_pending}{$key};
+    }
+
+    my $dbh = $self->{bot}{dbh};
+    my $sth = $dbh->prepare(q{
+        SELECT userhost, event_type, seen_at,
+               TIMESTAMPDIFF(SECOND, seen_at, NOW()) AS away_seconds
+        FROM USER_SEEN
+        WHERE nick = ?
+        LIMIT 1
+    });
+    return 0 unless $sth && $sth->execute(lc($nick));
+
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+    return 0 unless $row && defined($row->{away_seconds})
+        && !ref($row->{away_seconds})
+        && "$row->{away_seconds}" =~ /\A\d+\z/;
+
+    my $away_seconds = int($row->{away_seconds});
+    my $minimum_days = $self->threshold('comeback_week') // 7;
+    return 0 if $away_seconds < int($minimum_days) * 86400;
+
+    # USER_SEEN is nick-based. Refuse to transfer an old nick's absence to a
+    # clearly different current hostmask. The normal mb646 identity resolver
+    # may still follow legitimate ident/host changes when one side matches.
+    my $previous_userhost = $row->{userhost} // '';
+    $current_userhost = '' unless defined $current_userhost;
+    return 0 unless _userhost_compatible($previous_userhost, $current_userhost);
+
+    # Bound the transient map. Drop the oldest captured candidate if needed.
+    if (scalar(keys %{ $self->{_comeback_pending} }) >= $COMEBACK_PENDING_MAX) {
+        my ($oldest) = sort {
+            ($self->{_comeback_pending}{$a}{captured_at} // 0)
+                <=>
+            ($self->{_comeback_pending}{$b}{captured_at} // 0)
+        } keys %{ $self->{_comeback_pending} };
+        delete $self->{_comeback_pending}{$oldest} if defined $oldest;
+    }
+
+    $self->{_comeback_pending}{$key} = {
+        away_seconds => $away_seconds,
+        seen_at      => $row->{seen_at},
+        event_type   => $row->{event_type},
+        userhost     => $previous_userhost,
+        captured_at  => time(),
+    };
+    return 1;
+}
+
+sub consume_comeback_candidate {
+    my ($self, $nick, $channel) = @_;
+    return 0 unless defined($nick) && length($nick)
+                 && defined($channel) && $channel =~ /^#/;
+
+    my $key = lc($nick);
+    my $pending = delete(($self->{_comeback_pending} ||= {})->{$key});
+    return 0 unless $pending;
+
+    return 0 if time() - ($pending->{captured_at} // 0) > $COMEBACK_PENDING_TTL;
+    return $self->check_comeback(
+        $nick, $channel, $pending->{away_seconds}
+    );
+}
+
+sub check_comeback {
+    my ($self, $nick, $channel, $away_seconds) = @_;
+    return 0 unless defined($nick) && length($nick)
+                 && defined($channel) && $channel =~ /^#/;
+    return 0 unless defined($away_seconds) && !ref($away_seconds)
+                 && "$away_seconds" =~ /\A\d+\z/;
+
+    my $days = int($away_seconds / 86400);
+    return 0 if $days < 1;
+
+    my $saved = $self->set_progress('comeback_days', $nick, $channel, $days);
+    for my $id (qw(comeback_week comeback_month comeback_legend)) {
+        $self->unlock($nick, $channel, $id)
+            if $days >= $self->threshold($id);
     }
     return $saved;
 }

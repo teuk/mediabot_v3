@@ -32,6 +32,23 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb656 — comeback achievements
+- Added three user-facing comeback milestones based on the existing `USER_SEEN`
+  history: **Welcome Back** (7 days), **Long Time No See** (30 days) and **The
+  Return** (90 days). They share the monotonic `comeback_days` progress counter.
+- JOIN handling samples the previous `USER_SEEN.seen_at` **before** the normal
+  JOIN upsert refreshes it, but stores only a bounded in-memory candidate.
+  Merely joining a channel therefore cannot create or touch an Achievement
+  profile.
+- The candidate is consumed on the user's first public message only after
+  mb646 `observe_identity()` has resolved the live nick/user@host/channel
+  identity. Clearly incompatible old/current hostmasks are rejected so a
+  recycled nick cannot inherit somebody else's absence.
+- Pending comeback candidates are capped at 200 and expire after 24 hours.
+  Multiple channel JOINs preserve the first long-absence sample instead of
+  replacing it with the freshly updated `USER_SEEN` timestamp.
+- No new table, migration or configuration key is required.
+
 ### mb655 — activity streak achievements
 - Added three user-facing streak milestones that reuse the existing `!streak`
   career calculation: **On a Roll** (7 consecutive active days), **Habit
