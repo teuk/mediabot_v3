@@ -117,57 +117,47 @@ return sub {
     );
 
     $assert->like(
+        $src,
+        qr/use\s+Mediabot::AsyncWorker;/,
+        'blocking trivia work uses the shared AsyncWorker contract'
+    );
+
+    $assert->like(
         $async // '',
-        qr/my\s+\(\s*\$pipe,\s*\$child_write\s*\)\s*;\s*unless\s*\(\s*pipe\(\$pipe,\s*\$child_write\)\s*\).*?my\s+\$child_pid\s*=\s*fork\(\)/s,
-        'blocking trivia work runs in an ordinary pipe/fork child process'
+        qr/Mediabot::AsyncWorker->start\(/,
+        'trivia async wrapper delegates process lifecycle to AsyncWorker'
     );
 
     $assert->like(
         $async // '',
         qr/_trivia_fetch_sync\(\s*\$category_id,\s*\$difficulty,.*?progress_cb\s*=>/s,
-        'child reuses the guarded synchronous request implementation'
+        'shared worker child reuses the guarded synchronous request implementation'
     );
 
     $assert->like(
         $async // '',
-        qr/POSIX::_exit\(0\)/,
-        'forked trivia child exits without inherited destructors'
+        qr/on_progress\s*=>\s*\$progress/,
+        'trivia stage progress is delegated through the shared worker transport'
     );
 
     $assert->like(
         $async // '',
-        qr/IO::Async::Stream->new/,
-        'parent consumes the trivia result asynchronously'
+        qr/term_grace\s*=>\s*0\.5.*?force_grace\s*=>\s*1\.5/s,
+        'historical TERM/KILL and liveness timing is preserved through AsyncWorker'
     );
 
-    $assert->like(
-        $async // '',
-        qr/IO::Async::Timer::Countdown->new/,
-        'worker timeout and kill escalation use asynchronous timers'
+    my $async_mechanics = $async // '';
+    $async_mechanics =~ s/#.*$//mg;
+    $assert->unlike(
+        $async_mechanics,
+        qr/\b(?:pipe|fork|watch_process)\s*\(/,
+        'trivia adapter no longer owns pipe/fork/watch_process mechanics'
     );
 
-    $assert->like(
+    $assert->unlike(
         $async // '',
-        qr/\$loop->watch_process\(\s*\$child_pid/s,
-        'trivia worker is registered with IO::Async process watching'
-    );
-
-    $assert->like(
-        $async // '',
-        qr/my \(\$pid, \$wait_status\) = \@_/,
-        'process watcher receives the child wait status'
-    );
-
-    $assert->like(
-        $async // '',
-        qr/kill\s+'TERM',\s*\$child_pid/,
-        'timeout sends TERM first'
-    );
-
-    $assert->like(
-        $async // '',
-        qr/kill\s+'KILL',\s*\$child_pid/,
-        'timeout escalates to KILL'
+        qr/IO::Async::(?:Stream|Timer::Countdown)->new/,
+        'trivia adapter no longer builds private IO::Async streams or timers'
     );
 
     $assert->unlike(

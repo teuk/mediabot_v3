@@ -27,6 +27,7 @@ sub start {
         loop          => $args{loop},
         child         => $args{child},
         on_done       => $done,
+        on_progress   => ref($args{on_progress}) eq 'CODE' ? $args{on_progress} : undef,
         label         => _clean_scalar($args{label}, 'worker', 80),
         timeout       => _bounded_number($args{timeout},
             $DEFAULT_TIMEOUT, 0.01, 3600),
@@ -39,6 +40,9 @@ sub start {
         started_at    => Time::HiRes::time(),
         buffer        => '',
         bytes         => 0,
+        final_record  => undef,
+        protocol_error => undef,
+        progress_count => 0,
         pipe_eof      => 0,
         child_done    => 0,
         wait_status   => undef,
@@ -232,11 +236,29 @@ sub _child_main {
     local $SIG{INT}  = 'DEFAULT';
     local $SIG{HUP}  = 'DEFAULT';
 
-    my $envelope;
-    my $value = eval { $self->{child}->() };
-    if ($@) {
-        $envelope = {
+    # MB653: the child may stream bounded progress records before its one
+    # terminal result record. Existing children may ignore the emitter.
+    my $emit_progress = sub {
+        my ($value) = @_;
+        my $record = {
             protocol => $PROTOCOL_VERSION,
+            type     => 'progress',
+            value    => $value,
+        };
+
+        my $payload = eval { JSON::PP::encode_json($record) };
+        return 0 if !defined($payload) || ref($payload);
+        $payload .= "\n";
+        return 0 if length($payload) > $self->{max_output};
+        return _write_all($write_fh, $payload);
+    };
+
+    my $record;
+    my $value = eval { $self->{child}->($emit_progress) };
+    if ($@) {
+        $record = {
+            protocol => $PROTOCOL_VERSION,
+            type     => 'result',
             ok       => JSON::PP::false,
             error    => 'worker_exception',
             stage    => 'child',
@@ -244,14 +266,15 @@ sub _child_main {
         };
     }
     else {
-        $envelope = {
+        $record = {
             protocol => $PROTOCOL_VERSION,
+            type     => 'result',
             ok       => JSON::PP::true,
             value    => $value,
         };
     }
 
-    my $payload = eval { JSON::PP::encode_json($envelope) };
+    my $payload = eval { JSON::PP::encode_json($record) };
     if (!defined($payload) || ref($payload) || $payload eq '') {
         $payload = _encode_child_error(
             'worker_encode', 'encode',
@@ -259,13 +282,16 @@ sub _child_main {
         );
     }
 
-    if (length($payload) > $self->{max_output}) {
+    # Keep the terminal record independently bounded. The parent also enforces
+    # max_output across the complete progress + result byte stream.
+    if (length($payload) + 1 > $self->{max_output}) {
         $payload = _encode_child_error(
             'worker_output_limit', 'child_payload',
             'worker result exceeded output limit',
         );
     }
 
+    $payload .= "\n";
     _write_all($write_fh, $payload);
     eval { close $write_fh };
     POSIX::_exit(0);
@@ -277,10 +303,11 @@ sub _consume_output {
 
     if (defined($buffref) && length($$buffref)) {
         my $chunk_len = length($$buffref);
+        my $before = $self->{bytes};
         $self->{bytes} += $chunk_len;
 
         if (!$self->{output_exceeded}) {
-            my $remaining = $self->{max_output} - length($self->{buffer});
+            my $remaining = $self->{max_output} - $before;
             if ($remaining > 0) {
                 $self->{buffer} .= substr($$buffref, 0, $remaining);
             }
@@ -289,14 +316,72 @@ sub _consume_output {
         }
 
         $$buffref = '';
+        $self->_drain_records unless $self->{output_exceeded};
     }
 
     if ($eof && !$self->{pipe_eof}) {
         $self->{pipe_eof} = 1;
+
+        if (!$self->{output_exceeded} && length($self->{buffer})) {
+            $self->_handle_record($self->{buffer});
+            $self->{buffer} = '';
+        }
+
         eval { $self->{loop}->remove($io) } if $io;
         $self->{stream_removed} = 1;
         $self->_maybe_finish;
     }
+}
+
+sub _drain_records {
+    my ($self) = @_;
+
+    while ($self->{buffer} =~ s/\A([^\n]*)\n//) {
+        $self->_handle_record($1);
+    }
+}
+
+sub _handle_record {
+    my ($self, $line) = @_;
+    return if $self->{finalized};
+    return if $self->{protocol_error};
+
+    if (!defined($line) || ref($line) || $line eq '') {
+        $self->{protocol_error} = 'empty_record';
+        return;
+    }
+
+    my $decoded = eval { JSON::PP::decode_json($line) };
+    if ($@ || ref($decoded) ne 'HASH'
+        || ($decoded->{protocol} // 0) != $PROTOCOL_VERSION) {
+        $self->{protocol_error} = 'invalid_record';
+        return;
+    }
+
+    my $type = $decoded->{type} // '';
+    if ($type eq 'progress') {
+        if (!exists $decoded->{value}) {
+            $self->{protocol_error} = 'progress_shape';
+            return;
+        }
+
+        $self->{progress_count}++;
+        my $callback = $self->{on_progress};
+        eval { $callback->($decoded->{value}, $self); 1 }
+            if ref($callback) eq 'CODE';
+        return;
+    }
+
+    if ($type eq 'result') {
+        if ($self->{final_record}) {
+            $self->{protocol_error} = 'duplicate_result';
+            return;
+        }
+        $self->{final_record} = $decoded;
+        return;
+    }
+
+    $self->{protocol_error} = 'record_type';
 }
 
 sub _begin_termination {
@@ -388,14 +473,17 @@ sub _build_result {
     }
 
     my %meta = (
-        pid        => $self->{pid},
-        exit       => $exit,
-        signal     => $signal,
-        timed_out  => $self->{timed_out} ? 1 : 0,
-        cancelled  => $self->{cancelled} ? 1 : 0,
-        forced     => $self->{forced} ? 1 : 0,
-        bytes      => 0 + ($self->{bytes} // 0),
-        elapsed_s  => Time::HiRes::time() - $self->{started_at},
+        pid            => $self->{pid},
+        exit           => $exit,
+        signal         => $signal,
+        timed_out      => $self->{timed_out} ? 1 : 0,
+        cancelled      => $self->{cancelled} ? 1 : 0,
+        forced         => $self->{forced} ? 1 : 0,
+        term_sent      => $self->{term_sent} ? 1 : 0,
+        kill_sent      => $self->{kill_sent} ? 1 : 0,
+        bytes          => 0 + ($self->{bytes} // 0),
+        progress_count => 0 + ($self->{progress_count} // 0),
+        elapsed_s      => Time::HiRes::time() - $self->{started_at},
     );
 
     if ($self->{cancelled}) {
@@ -458,24 +546,22 @@ sub _build_result {
         };
     }
 
-    unless (length($self->{buffer} // '')) {
+    if ($self->{protocol_error}) {
         return {
             %{ _error_result(
-                'worker_empty', 'payload',
-                'worker produced no result',
+                'worker_decode', 'record_protocol',
+                $self->{protocol_error},
             ) },
             %meta,
         };
     }
 
-    my $decoded = eval { JSON::PP::decode_json($self->{buffer}) };
-    if ($@ || ref($decoded) ne 'HASH'
-        || ($decoded->{protocol} // 0) != $PROTOCOL_VERSION
-        || !exists($decoded->{ok})) {
+    my $decoded = $self->{final_record};
+    unless (ref($decoded) eq 'HASH' && exists($decoded->{ok})) {
         return {
             %{ _error_result(
-                'worker_decode', 'json',
-                'worker returned an invalid JSON envelope',
+                'worker_empty', 'payload',
+                'worker produced no terminal result',
             ) },
             %meta,
         };
@@ -543,6 +629,7 @@ sub _complete {
     }
 
     delete $self->{child};
+    delete $self->{on_progress};
     return 1;
 }
 
@@ -572,6 +659,7 @@ sub _encode_child_error {
     my ($error, $stage, $detail) = @_;
     return JSON::PP::encode_json({
         protocol => $PROTOCOL_VERSION,
+        type     => 'result',
         ok       => JSON::PP::false,
         error    => $error,
         stage    => $stage,
@@ -653,7 +741,12 @@ Mediabot::AsyncWorker - shared fork/pipe lifecycle for bounded JSON workers
         timeout    => 10,
         max_output => 64 * 1024,
         child      => sub {
+            my ($emit_progress) = @_;
+            $emit_progress->({ stage => 'fetching' });
             return { version => fetch_version() };
+        },
+        on_progress => sub {
+            my ($event) = @_;
         },
         on_done    => sub {
             my ($result) = @_;
@@ -665,7 +758,9 @@ Mediabot::AsyncWorker - shared fork/pipe lifecycle for bounded JSON workers
 =head1 CONTRACT
 
 The parent owns process completion through C<watch_process>. The child writes
-one bounded JSON envelope to a dedicated pipe and exits with C<POSIX::_exit>.
+a bounded newline-delimited JSON record stream to a dedicated pipe: zero or more
+C<progress> records followed by exactly one terminal C<result> record. Existing
+children may ignore the progress emitter passed as their first argument.
 Timeout uses TERM, then KILL, plus a liveness backstop. Completion is guarded so
 C<on_done> runs at most once.
 

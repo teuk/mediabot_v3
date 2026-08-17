@@ -94,34 +94,20 @@ return sub {
     $assert->ok(defined $async,   'trivia asynchronous worker found');
     $assert->ok(defined $command, 'trivia command found');
 
-    $assert->like(
-        $async // '',
-        qr/IO::Async owns SIGCHLD\/process collection/,
-        'the process ownership rationale is documented next to the worker'
+    my $worker_src = _slurp_mb395(
+        File::Spec->catfile('.', 'Mediabot', 'AsyncWorker.pm')
     );
 
     $assert->like(
         $async // '',
-        qr/\$loop->can\('watch_process'\)/,
-        'the loop capability is checked before forking'
+        qr/Mediabot::AsyncWorker->start\(/,
+        'trivia delegates process ownership to the shared AsyncWorker'
     );
 
     $assert->like(
-        $async // '',
-        qr/\$loop->watch_process\(\s*\$child_pid/s,
-        'the trivia child is registered with IO::Async watch_process'
-    );
-
-    $assert->like(
-        $async // '',
-        qr/my \(\$pid, \$wait_status\) = \@_/,
-        'the process callback receives the raw wait status'
-    );
-
-    $assert->like(
-        $async // '',
-        qr/\$state->\{wait_status\}\s*=\s*\$wait_status/,
-        'the IO::Async-provided wait status is retained'
+        $worker_src,
+        qr/->watch_process\(\s*\$pid,/s,
+        'shared AsyncWorker registers children with IO::Async watch_process'
     );
 
     my $async_code = $async // '';
@@ -129,13 +115,12 @@ return sub {
     $assert->unlike(
         $async_code,
         qr/\bwaitpid\s*\(/,
-        'manual waitpid polling is absent from executable trivia code'
+        'manual waitpid polling remains absent from executable trivia code'
     );
-
     $assert->unlike(
-        $async // '',
-        qr/POSIX::WNOHANG/,
-        'manual WNOHANG polling is absent from the trivia worker'
+        $async_code,
+        qr/\b(?:pipe|fork|watch_process)\s*\(/,
+        'trivia no longer duplicates shared subprocess mechanics'
     );
 
     for my $error_class (qw(
@@ -150,26 +135,26 @@ return sub {
         $assert->like(
             $async // '',
             qr/\Q$error_class\E/,
-            "async worker preserves $error_class diagnostics"
+            "trivia adapter preserves historical $error_class diagnostics"
         );
     }
 
     $assert->like(
         $async // '',
         qr/trivia worker \$message/,
-        'async diagnostics use a dedicated bounded log prefix'
+        'async diagnostics retain the dedicated bounded log prefix'
     );
 
     $assert->like(
         $async // '',
-        qr/output_bytes=\$output_bytes/,
-        'completion diagnostics include bounded pipe output size'
+        qr/worker_output_bytes/,
+        'completion diagnostics retain bounded transport size'
     );
 
     $assert->like(
         $async // '',
-        qr/elapsed_ms=\$elapsed/,
-        'completion diagnostics include worker elapsed time'
+        qr/worker_elapsed_ms/,
+        'completion diagnostics retain worker elapsed time'
     );
 
     $assert->like(

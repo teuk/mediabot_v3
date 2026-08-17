@@ -25,6 +25,7 @@ use Exporter 'import';
 # Le viewer de log brut .logs (_cmd_chanlog) reste volontairement non filtre.
 use Try::Tiny;
 use Mediabot::Helpers;
+use Mediabot::AsyncWorker;
 
 our @EXPORT = qw(
     _del_user_tz
@@ -7567,6 +7568,7 @@ sub _trivia_fetch_async {
     return 0 unless ref($callback) eq 'CODE';
 
     require Time::HiRes;
+    require JSON::PP;
 
     my $timeout = $opts{timeout};
     # The child has a seven-second hard wall around each HTTP attempt and may
@@ -7597,6 +7599,16 @@ sub _trivia_fetch_async {
         $self->{logger}->log($level, "trivia worker $message");
     };
 
+    my $clean_trace_value = sub {
+        my ($value, $limit) = @_;
+        $limit ||= 120;
+        return '' unless defined($value) && !ref($value);
+        $value =~ s/[\r\n\0]+/ /g;
+        $value =~ s/\s{2,}/ /g;
+        $value =~ s/^\s+|\s+$//g;
+        return substr($value, 0, $limit);
+    };
+
     my $loop = eval { $self->getLoop };
     $loop ||= $self->{loop} if ref($self);
 
@@ -7607,7 +7619,7 @@ sub _trivia_fetch_async {
     };
 
     # Compatibility path for lightweight tests or emergency callers without a
-    # usable event loop. Normal runtime always uses the forked child.
+    # usable event loop. Normal runtime uses the shared forked AsyncWorker.
     unless ($loop && $loop->can('add') && $loop->can('remove')) {
         $debug_log->(2, "sync fallback label=$debug_label reason=no_event_loop");
         my $result = eval {
@@ -7629,27 +7641,14 @@ sub _trivia_fetch_async {
         return 1;
     }
 
-    # IO::Async owns SIGCHLD/process collection. Use an ordinary pipe plus fork
-    # and register that PID explicitly. A magic open '-|' filehandle can reap
-    # its child while being closed at EOF, racing the IO::Async process watcher.
-    unless ($loop->can('watch_process')) {
-        my $result = {
-            ok     => 0,
-            error  => 'worker_setup',
-            stage  => 'process_watch',
-            detail => 'IO::Async loop does not support watch_process',
-        };
-        $debug_log->(1, "setup failed label=$debug_label detail=$result->{detail}");
-        eval { $callback->($result); 1; };
-        return 1;
-    }
-
-    require IO::Async::Stream;
-    require IO::Async::Timer::Countdown;
-    require JSON::PP;
-    require POSIX;
-
+    # MB653: AsyncWorker now owns pipe/fork, watch_process, bounded transport,
+    # timeout TERM/KILL escalation and callback-once semantics. Trivia retains
+    # only its fetch protocol, stage diagnostics and IRC-specific error shape.
     my $worker_started = Time::HiRes::time();
+    my $last_stage = 'worker_started';
+    my $adapter_done = 0;
+    my $worker;
+
     $debug_log->(
         3,
         sprintf(
@@ -7661,335 +7660,137 @@ sub _trivia_fetch_async {
         ),
     );
 
-    my ($pipe, $child_write);
-    unless (pipe($pipe, $child_write)) {
-        my $detail = $! || 'pipe setup failed';
-        $detail =~ s/[\r\n\0]+/ /g;
-        $detail =~ s/\s{2,}/ /g;
-        my $result = {
-            ok     => 0,
-            error  => 'worker_setup',
-            stage  => 'pipe',
-            detail => substr("$detail", 0, 240),
-        };
-        $debug_log->(1, "setup failed label=$debug_label detail=$result->{detail}");
-        eval { $callback->($result); 1; };
-        return 1;
-    }
+    my $progress = sub {
+        my ($event, $worker_handle) = @_;
+        return unless ref($event) eq 'HASH';
 
-    my $child_pid = fork();
+        my $stage = $clean_trace_value->($event->{stage}, 64);
+        return unless $stage =~ /\A[a-z_]+\z/;
+        $last_stage = $stage;
 
-    unless (defined $child_pid) {
-        my $detail = $! || 'fork failed';
-        $detail =~ s/[\r\n\0]+/ /g;
-        $detail =~ s/\s{2,}/ /g;
-        eval { close $pipe };
-        eval { close $child_write };
-        my $result = {
-            ok     => 0,
-            error  => 'worker_setup',
-            stage  => 'fork',
-            detail => substr("$detail", 0, 240),
-        };
-        $debug_log->(1, "setup failed label=$debug_label detail=$result->{detail}");
-        eval { $callback->($result); 1; };
-        return 1;
-    }
+        my $pid = eval { $worker_handle->pid };
+        $pid = eval { $worker->pid } unless defined $pid;
+        $pid = '-' unless defined $pid;
 
-    if ($child_pid == 0) {
-        eval { close $pipe };
-        binmode($child_write, ':raw');
-        local $SIG{PIPE} = 'IGNORE';
-        local $SIG{TERM} = 'DEFAULT';
-        local $SIG{INT}  = 'DEFAULT';
-        local $SIG{HUP}  = 'DEFAULT';
-
-        my $write_record = sub {
-            my ($record) = @_;
-            return 0 unless ref($record) eq 'HASH';
-            my $payload = eval { JSON::PP::encode_json($record) };
-            return 0 unless defined($payload) && !ref($payload);
-            $payload .= "\n";
-            return 0 if length($payload) > 20 * 1024;
-
-            my $offset = 0;
-            while ($offset < length($payload)) {
-                my $written = syswrite(
-                    $child_write,
-                    $payload,
-                    length($payload) - $offset,
-                    $offset,
-                );
-                next if !defined($written) && $!{EINTR};
-                return 0 unless defined($written) && $written > 0;
-                $offset += $written;
-            }
-            return 1;
-        };
-
-        my $result = eval {
-            _trivia_fetch_sync(
-                $category_id,
-                $difficulty,
-                progress_cb => sub {
-                    my ($event) = @_;
-                    return unless ref($event) eq 'HASH';
-                    $write_record->({
-                        type  => 'progress',
-                        event => $event,
-                    });
-                },
-            );
-        };
-        if ($@) {
-            my $error = $@;
-            $error =~ s/[\r\n\0]+/ /g;
-            $error =~ s/\s{2,}/ /g;
-            $result = {
-                ok     => 0,
-                error  => 'worker_exception',
-                stage  => 'sync_worker',
-                detail => substr($error, 0, 240),
-            };
+        my @trace = (
+            'progress',
+            'label=' . ($debug_label ne '' ? $debug_label : '-'),
+            "pid=$pid",
+            "stage=$stage",
+        );
+        for my $field (qw(attempt elapsed_ms attempt_elapsed_ms status success content_bytes response_code parse_error delay_ms)) {
+            next unless exists($event->{$field})
+                && defined($event->{$field})
+                && !ref($event->{$field});
+            my $value = $clean_trace_value->($event->{$field}, 80);
+            push @trace, "$field=$value" if $value ne '';
         }
-        $result = $fallback unless ref($result) eq 'HASH';
-
-        my $final_record = {
-            type   => 'result',
-            result => $result,
-        };
-        my $final_probe = eval { JSON::PP::encode_json($final_record) };
-        if (!defined($final_probe) || ref($final_probe)) {
-            $final_record = {
-                type   => 'result',
-                result => {
-                    ok     => 0,
-                    error  => 'worker_encode',
-                    stage  => 'json_encode',
-                    detail => 'could not encode final worker record',
-                },
-            };
-        }
-        elsif (length($final_probe) > 20 * 1024) {
-            $final_record = {
-                type   => 'result',
-                result => {
-                    ok            => 0,
-                    error         => 'worker_payload',
-                    stage         => 'payload_limit',
-                    payload_bytes => length($final_probe),
-                },
-            };
-        }
-        $write_record->($final_record);
-
-        eval { close $child_write };
-        POSIX::_exit(0);
-    }
-
-    eval { close $child_write };
-
-    my $state = {
-        read_buffer => '',
-        output_bytes => 0,
-        pipe_eof    => 0,
-        child_done  => 0,
-        finalized   => 0,
-        timed_out   => 0,
-        force_finish => 0,
-        wait_status => undef,
-        term_sent   => 0,
-        kill_sent   => 0,
-        last_stage  => 'worker_started',
-        result      => undef,
-        protocol_error => undef,
+        $debug_log->(4, join(' ', @trace));
     };
 
-    my ($stream, $timeout_timer, $kill_timer, $force_timer);
-    my $finish;
-
-    my $remove_timer = sub {
-        my ($timer) = @_;
-        return unless $timer;
-        eval { $timer->stop };
-        eval { $loop->remove($timer) };
-    };
-
-    my $clean_trace_value = sub {
-        my ($value, $limit) = @_;
-        $limit ||= 120;
-        return '' unless defined($value) && !ref($value);
-        $value =~ s/[\r\n\0]+/ /g;
-        $value =~ s/\s{2,}/ /g;
-        $value =~ s/^\s+|\s+$//g;
-        return substr($value, 0, $limit);
-    };
-
-    my $handle_record = sub {
-        my ($line) = @_;
-        return if $state->{finalized};
-
-        if (!defined($line) || ref($line) || length($line) > 20 * 1024) {
-            $state->{protocol_error} ||= 'record_size';
-            return;
-        }
-
-        my $record = eval { JSON::PP::decode_json($line) };
-        if ($@ || ref($record) ne 'HASH') {
-            $state->{protocol_error} ||= 'record_json';
-            return;
-        }
-
-        my $type = $record->{type};
-        if (defined($type) && !ref($type) && $type eq 'progress') {
-            my $event = $record->{event};
-            unless (ref($event) eq 'HASH') {
-                $state->{protocol_error} ||= 'progress_shape';
-                return;
-            }
-
-            my $stage = $clean_trace_value->($event->{stage}, 64);
-            return unless $stage =~ /\A[a-z_]+\z/;
-            $state->{last_stage} = $stage;
-
-            my @trace = (
-                'progress',
-                'label=' . ($debug_label ne '' ? $debug_label : '-'),
-                "pid=$child_pid",
-                "stage=$stage",
-            );
-            for my $field (qw(attempt elapsed_ms attempt_elapsed_ms status success content_bytes response_code parse_error delay_ms)) {
-                next unless exists($event->{$field})
-                    && defined($event->{$field})
-                    && !ref($event->{$field});
-                my $value = $clean_trace_value->($event->{$field}, 80);
-                push @trace, "$field=$value" if $value ne '';
-            }
-            $debug_log->(4, join(' ', @trace));
-            return;
-        }
-
-        if (defined($type) && !ref($type) && $type eq 'result') {
-            if (ref($record->{result}) eq 'HASH') {
-                $state->{result} = $record->{result};
-                return;
-            }
-            $state->{protocol_error} ||= 'result_shape';
-            return;
-        }
-
-        $state->{protocol_error} ||= 'record_type';
-    };
-
-    my $drain_records = sub {
-        while ($state->{read_buffer} =~ s/\A([^\n]*)\n//) {
-            $handle_record->($1);
-        }
-        if (length($state->{read_buffer}) > 20 * 1024) {
-            $state->{protocol_error} ||= 'buffer_limit';
-            $state->{read_buffer} = '';
-        }
-    };
-
-    $finish = sub {
-        return if $state->{finalized};
-        return unless $state->{child_done} || $state->{force_finish};
-        return unless $state->{pipe_eof} || $state->{timed_out};
-
-        $state->{finalized} = 1;
-
-        $remove_timer->($timeout_timer);
-        $remove_timer->($kill_timer);
-        $remove_timer->($force_timer);
-        eval { $loop->remove($stream) } if $stream;
-        eval { close $pipe };
+    my $done = sub {
+        my ($shared) = @_;
+        return if $adapter_done;
+        $adapter_done = 1;
 
         my $elapsed = int(
             (Time::HiRes::time() - $worker_started) * 1000 + 0.5
         );
-        my $status = $state->{wait_status} // 0;
-        my $output_bytes = $state->{output_bytes};
-        my $signal = $status & 127;
-        my $exit   = ($status >> 8) & 255;
-        my $result;
 
-        if ($state->{timed_out}) {
-            $result = {
-                ok                  => 0,
-                error               => 'worker_timeout',
-                stage               => 'async_timeout',
-                last_stage          => $state->{last_stage},
-                worker_exit         => $exit,
-                worker_signal       => $signal,
-                worker_output_bytes => $output_bytes,
-                worker_elapsed_ms   => $elapsed,
-                forced_completion   => $state->{force_finish} ? 1 : 0,
-            };
-        }
-        elsif ($signal || $exit != 0) {
-            $result = {
-                ok                  => 0,
-                error               => 'worker_failed',
-                stage               => 'process_exit',
-                last_stage          => $state->{last_stage},
-                worker_exit         => $exit,
-                worker_signal       => $signal,
-                worker_output_bytes => $output_bytes,
-                worker_elapsed_ms   => $elapsed,
-            };
-        }
-        elsif ($state->{protocol_error}) {
-            $result = {
-                ok                  => 0,
-                error               => 'worker_decode',
-                stage               => 'record_protocol',
-                detail              => $state->{protocol_error},
-                last_stage          => $state->{last_stage},
-                worker_exit         => $exit,
-                worker_signal       => $signal,
-                worker_output_bytes => $output_bytes,
-                worker_elapsed_ms   => $elapsed,
-            };
-        }
-        elsif (ref($state->{result}) eq 'HASH') {
-            $result = $state->{result};
-            $result->{worker_exit} = $exit
-                unless exists $result->{worker_exit};
-            $result->{worker_signal} = $signal
-                unless exists $result->{worker_signal};
-            $result->{worker_output_bytes} = $output_bytes
-                unless exists $result->{worker_output_bytes};
-            $result->{worker_elapsed_ms} = $elapsed
-                unless exists $result->{worker_elapsed_ms};
-            $result->{last_stage} = $state->{last_stage}
-                unless exists $result->{last_stage};
+        my $pid = ref($shared) eq 'HASH' ? $shared->{pid} : undef;
+        $pid = eval { $worker->pid } unless defined $pid;
+        $pid = '-' unless defined $pid;
+
+        my $result;
+        if (ref($shared) eq 'HASH' && $shared->{ok}) {
+            if (ref($shared->{value}) eq 'HASH') {
+                $result = { %{ $shared->{value} } };
+            }
+            else {
+                $result = {
+                    ok     => 0,
+                    error  => 'worker_decode',
+                    stage  => 'missing_result',
+                    detail => 'worker returned no trivia result hash',
+                };
+            }
         }
         else {
+            my $error = ref($shared) eq 'HASH'
+                && defined($shared->{error})
+                && !ref($shared->{error})
+                    ? $shared->{error}
+                    : 'worker_failed';
+            my $stage = ref($shared) eq 'HASH'
+                && defined($shared->{stage})
+                && !ref($shared->{stage})
+                    ? $shared->{stage}
+                    : 'process_exit';
+            my $detail = ref($shared) eq 'HASH'
+                && defined($shared->{detail})
+                && !ref($shared->{detail})
+                    ? $shared->{detail}
+                    : undef;
+
+            if ($error eq 'worker_timeout') {
+                $stage = 'async_timeout';
+            }
+            elsif ($error eq 'worker_signal' || $error eq 'worker_exit') {
+                $error = 'worker_failed';
+                $stage = 'process_exit';
+            }
+            elsif ($error eq 'worker_output_limit') {
+                $error = 'worker_payload';
+                $stage = 'payload_limit';
+            }
+            elsif ($error eq 'worker_empty') {
+                $error = 'worker_decode';
+                $stage = 'missing_result';
+            }
+
             $result = {
-                ok                  => 0,
-                error               => 'worker_decode',
-                stage               => 'missing_result',
-                detail              => 'worker exited without a final result record',
-                last_stage          => $state->{last_stage},
-                worker_exit         => $exit,
-                worker_signal       => $signal,
-                worker_output_bytes => $output_bytes,
-                worker_elapsed_ms   => $elapsed,
+                ok    => 0,
+                error => $error,
+                stage => $stage,
             };
+            $result->{detail} = substr($detail, 0, 240)
+                if defined($detail) && length($detail);
         }
+
+        if (ref($shared) eq 'HASH') {
+            $result->{worker_exit} = defined($shared->{exit})
+                ? int($shared->{exit}) : 0;
+            $result->{worker_signal} = defined($shared->{signal})
+                ? int($shared->{signal}) : 0;
+            $result->{worker_output_bytes} = int($shared->{bytes} // 0);
+            $result->{worker_elapsed_ms} = int(
+                1000 * ($shared->{elapsed_s} // 0) + 0.5
+            );
+            $result->{forced_completion} = $shared->{forced} ? 1 : 0;
+        }
+        else {
+            $result->{worker_exit} = 0;
+            $result->{worker_signal} = 0;
+            $result->{worker_output_bytes} = 0;
+            $result->{worker_elapsed_ms} = $elapsed;
+            $result->{forced_completion} = 0;
+        }
+
+        $result->{last_stage} = $last_stage
+            unless exists $result->{last_stage};
 
         my @trace = (
             'complete',
             'label=' . ($debug_label ne '' ? $debug_label : '-'),
-            "pid=$child_pid",
+            "pid=$pid",
             'result=' . ($result->{ok} ? 'ok' : ($result->{error} // 'unknown')),
             'stage=' . ($result->{stage} // '-'),
             'last_stage=' . ($result->{last_stage} // '-'),
-            "elapsed_ms=$elapsed",
-            "output_bytes=$output_bytes",
-            "exit=$exit",
-            "signal=$signal",
-            'forced=' . ($state->{force_finish} ? 1 : 0),
+            'elapsed_ms=' . ($result->{worker_elapsed_ms} // $elapsed),
+            'output_bytes=' . ($result->{worker_output_bytes} // 0),
+            'exit=' . ($result->{worker_exit} // 0),
+            'signal=' . ($result->{worker_signal} // 0),
+            'forced=' . ($result->{forced_completion} ? 1 : 0),
         );
         for my $field (qw(attempts status response_code parse_error content_type content_bytes elapsed_ms)) {
             next unless exists($result->{$field})
@@ -8006,142 +7807,99 @@ sub _trivia_fetch_async {
             $error =~ s/\s+/ /g;
             $self->{logger}->log(1, "trivia async callback failed: $error");
         }
-
-        $finish = undef;
     };
 
-    my $watch_ok = eval {
-        $loop->watch_process(
-            $child_pid,
-            sub {
-                my ($pid, $wait_status) = @_;
-                return unless defined($pid) && $pid == $child_pid;
-                return if $state->{finalized};
+    my $launch_ok = eval {
+        $worker = Mediabot::AsyncWorker->start(
+            loop        => $loop,
+            label       => 'trivia fetch',
+            timeout     => $timeout,
+            term_grace  => 0.5,
+            force_grace => 1.5,
+            max_output  => 64 * 1024,
+            on_progress => $progress,
+            child       => sub {
+                my ($emit_progress) = @_;
 
-                $state->{wait_status} = $wait_status;
-                $state->{child_done}  = 1;
-                $debug_log->(
-                    4,
-                    "exit observed label=$debug_label pid=$child_pid status=$wait_status",
-                );
-                $finish->();
+                my $result = eval {
+                    _trivia_fetch_sync(
+                        $category_id,
+                        $difficulty,
+                        progress_cb => sub {
+                            my ($event) = @_;
+                            return unless ref($event) eq 'HASH';
+                            return unless ref($emit_progress) eq 'CODE';
+
+                            # Preserve MB396's per-record 20 KiB safety bound
+                            # before handing the event to the shared transport.
+                            my $probe = eval { JSON::PP::encode_json($event) };
+                            return if !defined($probe) || ref($probe);
+                            return if length($probe) > 20 * 1024;
+                            $emit_progress->($event);
+                        },
+                    );
+                };
+
+                if ($@) {
+                    my $error = $@;
+                    $error =~ s/[\r\n\0]+/ /g;
+                    $error =~ s/\s{2,}/ /g;
+                    $result = {
+                        ok     => 0,
+                        error  => 'worker_exception',
+                        stage  => 'sync_worker',
+                        detail => substr($error, 0, 240),
+                    };
+                }
+
+                $result = $fallback unless ref($result) eq 'HASH';
+
+                # Preserve the old 20 KiB bound for the terminal Trivia result.
+                my $probe = eval { JSON::PP::encode_json($result) };
+                if (!defined($probe) || ref($probe)) {
+                    $result = {
+                        ok     => 0,
+                        error  => 'worker_encode',
+                        stage  => 'json_encode',
+                        detail => 'could not encode final worker record',
+                    };
+                }
+                elsif (length($probe) > 20 * 1024) {
+                    $result = {
+                        ok            => 0,
+                        error         => 'worker_payload',
+                        stage         => 'payload_limit',
+                        payload_bytes => length($probe),
+                    };
+                }
+
+                return $result;
             },
+            on_done => $done,
         );
         1;
     };
 
-    unless ($watch_ok) {
-        my $error = $@ || 'watch_process registration failed';
-        $error =~ s/[\r\n\0]+/ /g;
-        $error =~ s/\s{2,}/ /g;
-
-        my $sent = kill 'TERM', $child_pid;
-        eval { close $pipe };
-        my $result = {
+    # AsyncWorker normally reports setup failures through on_done. Keep a final
+    # adapter guard so a launcher exception can never make Trivia silently hang.
+    if (!$launch_ok && !$adapter_done) {
+        my $error = $@ || 'unknown AsyncWorker launch failure';
+        $done->({
             ok     => 0,
             error  => 'worker_setup',
-            stage  => 'watch_process',
-            detail => substr($error, 0, 240),
-        };
-        $debug_log->(1, "setup failed label=$debug_label pid=$child_pid term_delivered=$sent detail=$result->{detail}");
-        eval { $callback->($result); 1; };
-        return 1;
+            stage  => 'launcher',
+            detail => $error,
+        });
+    }
+    elsif (!$worker && !$adapter_done) {
+        $done->({
+            ok     => 0,
+            error  => 'worker_setup',
+            stage  => 'launcher',
+            detail => 'AsyncWorker refused launch without a completion result',
+        });
     }
 
-    $timeout_timer = IO::Async::Timer::Countdown->new(
-        delay     => $timeout,
-        on_expire => sub {
-            return if $state->{finalized} || $state->{child_done};
-
-            $state->{timed_out} = 1;
-            my $sent = 0;
-            unless ($state->{term_sent}) {
-                $sent = kill 'TERM', $child_pid;
-                $state->{term_sent} = 1;
-            }
-            my $errno = $sent ? '-' : $clean_trace_value->("$!", 120);
-            $debug_log->(
-                2,
-                "timeout label=$debug_label pid=$child_pid after=${timeout}s "
-                . "last_stage=$state->{last_stage} sending=TERM delivered=$sent errno=$errno",
-            );
-
-            $kill_timer = IO::Async::Timer::Countdown->new(
-                delay     => 0.5,
-                on_expire => sub {
-                    return if $state->{finalized} || $state->{child_done};
-
-                    my $kill_sent = 0;
-                    unless ($state->{kill_sent}) {
-                        $kill_sent = kill 'KILL', $child_pid;
-                        $state->{kill_sent} = 1;
-                    }
-                    my $kill_errno = $kill_sent ? '-' : $clean_trace_value->("$!", 120);
-                    $debug_log->(
-                        1,
-                        "timeout escalation label=$debug_label pid=$child_pid "
-                        . "last_stage=$state->{last_stage} sending=KILL "
-                        . "delivered=$kill_sent errno=$kill_errno",
-                    );
-                },
-            );
-
-            $force_timer = IO::Async::Timer::Countdown->new(
-                delay     => 1.5,
-                on_expire => sub {
-                    return if $state->{finalized};
-                    $state->{force_finish} = 1;
-                    $debug_log->(
-                        1,
-                        "timeout forced completion label=$debug_label pid=$child_pid "
-                        . "child_done=$state->{child_done} pipe_eof=$state->{pipe_eof} "
-                        . "last_stage=$state->{last_stage}",
-                    );
-                    $finish->();
-                },
-            );
-
-            $loop->add($kill_timer);
-            $kill_timer->start;
-            $loop->add($force_timer);
-            $force_timer->start;
-        },
-    );
-
-    $loop->add($timeout_timer);
-    $timeout_timer->start;
-
-    $stream = IO::Async::Stream->new(
-        read_handle => $pipe,
-        on_read     => sub {
-            my ($io, $buffref, $eof) = @_;
-
-            if (length $$buffref) {
-                $state->{output_bytes} += length($$buffref);
-                $state->{read_buffer} .= $$buffref;
-                $$buffref = '';
-                $drain_records->();
-            }
-
-            if ($eof && !$state->{pipe_eof}++) {
-                if (length($state->{read_buffer})) {
-                    $handle_record->($state->{read_buffer});
-                    $state->{read_buffer} = '';
-                }
-                eval { $loop->remove($io) };
-                $debug_log->(
-                    4,
-                    "pipe EOF label=$debug_label pid=$child_pid "
-                    . "child_done=$state->{child_done} last_stage=$state->{last_stage}",
-                );
-                $finish->() if $finish;
-            }
-
-            return 0;
-        },
-    );
-
-    $loop->add($stream);
     return 1;
 }
 

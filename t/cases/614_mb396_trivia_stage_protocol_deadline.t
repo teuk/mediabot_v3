@@ -111,16 +111,26 @@ return sub {
     $assert->ok(defined $sync,  'trivia synchronous worker found');
     $assert->ok(defined $async, 'trivia asynchronous worker found');
 
+    my $worker_src = _slurp_mb396(
+        File::Spec->catfile('.', 'Mediabot', 'AsyncWorker.pm')
+    );
+
     $assert->like(
         $async // '',
-        qr/my\s+\(\s*\$pipe,\s*\$child_write\s*\)\s*;\s*unless\s*\(\s*pipe\(\$pipe,\s*\$child_write\)\s*\).*?my\s+\$child_pid\s*=\s*fork\(\)/s,
-        'worker uses an ordinary pipe and explicit fork'
+        qr/Mediabot::AsyncWorker->start\(/,
+        'trivia uses the shared explicit pipe/fork worker contract'
     );
 
     $assert->unlike(
         $async // '',
         qr/open\(my\s+\$pipe,\s*'-\|'\)/,
-        q{magic open '-|' no longer owns the trivia child}
+        q{trivia adapter never reintroduces magic open '-|'}
+    );
+
+    $assert->like(
+        $worker_src,
+        qr/\bpipe\(\$read_fh,\s*\$write_fh\).*?\bmy \$pid = fork\(\)/s,
+        'shared worker owns ordinary pipe + explicit fork'
     );
 
     $assert->like(
@@ -143,32 +153,32 @@ return sub {
 
     $assert->like(
         $async // '',
-        qr/type\s*=>\s*'progress'/,
-        'child emits bounded progress records'
+        qr/on_progress\s*=>\s*\$progress/,
+        'child progress is routed through the shared worker protocol'
     );
 
     $assert->like(
         $async // '',
-        qr/last_stage=\$state->\{last_stage\}/,
+        qr/\$last_stage\s*=\s*\$stage/,
         'timeout diagnostics preserve the last observed child stage'
     );
 
     $assert->like(
         $async // '',
-        qr/timeout forced completion/,
-        'timeout path has a forced completion fallback'
+        qr/force_grace\s*=>\s*1\.5/,
+        'trivia preserves its forced-completion deadline through AsyncWorker'
     );
 
     $assert->like(
-        $async // '',
-        qr/\$state->\{force_finish\}\s*=\s*1/,
-        'forced completion is explicit in worker state'
+        $worker_src,
+        qr/\$self->\{forced\}\s*\|\|.*?\$self->\{child_done\}/s,
+        'shared worker retains the liveness backstop'
     );
 
     $assert->like(
-        $async // '',
-        qr/local \$SIG\{TERM\} = 'DEFAULT'/,
-        'forked worker resets inherited TERM handling'
+        $worker_src,
+        qr/local \$SIG\{TERM\}\s*=\s*'DEFAULT'/,
+        'shared forked worker resets inherited TERM handling'
     );
 
     $assert->like(

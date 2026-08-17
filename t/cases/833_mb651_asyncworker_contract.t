@@ -246,6 +246,16 @@ return sub {
     );
     $assert->like(
         $src,
+        qr/type\s*=>\s*'progress'/,
+        'mb653-833: shared worker supports bounded progress records',
+    );
+    $assert->like(
+        $src,
+        qr/on_progress/,
+        'mb653-833: progress delivery is an explicit optional contract',
+    );
+    $assert->like(
+        $src,
         qr/POSIX::_exit\(0\)/,
         'mb651-833: child exits without inherited Perl destructors',
     );
@@ -301,6 +311,48 @@ return sub {
     $loop->pump_for(0.03);
     $assert->is(scalar(@done), 1,
         'mb651-833: late loop activity cannot duplicate completion');
+
+    # MB653: progress records cross the same bounded transport before the
+    # terminal result without changing callback-once semantics.
+    my $loop_progress = AW651::Loop->new;
+    my (@progress, @progress_done);
+    my $worker_progress = Mediabot::AsyncWorker->start(
+        loop       => $loop_progress,
+        label      => 'progress-test',
+        timeout    => 1,
+        max_output => 4096,
+        child      => sub {
+            my ($emit) = @_;
+            $emit->({ stage => 'one', attempt => 1 });
+            $emit->({ stage => 'two', attempt => 2 });
+            return { answer => 42 };
+        },
+        on_progress => sub {
+            my ($event) = @_;
+            push @progress, $event;
+        },
+        on_done => sub { push @progress_done, shift },
+    );
+    $assert->ok($worker_progress,
+        'mb653-833: progress scenario launches');
+    $assert->ok(
+        $loop_progress->run_until(sub { @progress_done == 1 }, 2),
+        'mb653-833: progress scenario completes',
+    );
+    $assert->is(scalar(@progress), 2,
+        'mb653-833: both progress records arrive before completion');
+    $assert->is(
+        join(',', map { $_->{stage} // '' } @progress),
+        'one,two',
+        'mb653-833: progress ordering survives child-to-parent transport',
+    );
+    $assert->is($progress_done[0]{progress_count}, 2,
+        'mb653-833: terminal metadata counts progress records');
+    $assert->is($progress_done[0]{value}{answer}, 42,
+        'mb653-833: final value survives after progress records');
+    $loop_progress->pump_for(0.03);
+    $assert->is(scalar(@progress_done), 1,
+        'mb653-833: progress cannot duplicate terminal completion');
 
     # Child exception becomes data rather than an inherited die in the parent.
     my $loop_die = AW651::Loop->new;
@@ -447,11 +499,9 @@ return sub {
     $assert->is($setup[0]{stage}, 'event_loop',
         'mb651-833: setup failure identifies event-loop stage');
 
-    # MB652 is allowed to migrate the version checker in Helpers.pm. The
-    # remaining consumers are still protected against an accidental big-bang
-    # migration: each one gets its own later round.
+    # MB652 migrated Version and MB653 may migrate Trivia/UserCommands. The
+    # remaining consumers stay protected against an accidental big-bang move.
     for my $consumer (
-        'Mediabot/UserCommands.pm',
         'Mediabot/Achievements.pm',
         'Mediabot/CommandAsync.pm',
         'Mediabot/External/YouTube.pm',
@@ -460,7 +510,7 @@ return sub {
         $assert->unlike(
             $consumer_src,
             qr/Mediabot::AsyncWorker/,
-            "mb652-833: $consumer remains outside the first consumer migration",
+            "mb653-833: $consumer remains outside the Trivia migration",
         );
     }
 };

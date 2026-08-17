@@ -32,6 +32,31 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb653 — Trivia migrated to shared AsyncWorker
+- `_trivia_fetch_async()` now delegates pipe/fork ownership, `watch_process`,
+  bounded child transport, timeout escalation and callback-once finalisation to
+  `Mediabot::AsyncWorker`; Trivia keeps only fetch policy, stage diagnostics and
+  its established IRC-facing result vocabulary.
+- The shared AsyncWorker protocol now supports bounded newline-delimited
+  progress records before the one terminal result record. Existing consumers
+  that do not need progress remain compatible and may ignore the emitter.
+- Trivia preserves its existing operational limits: 24s default/30s capped
+  outer timeout, 0.5s TERM grace, 1.5s liveness backstop, the synchronous
+  no-event-loop compatibility path, and the historical 20 KiB per-result
+  safety check inside the Trivia child.
+- MB396 stage diagnostics survive the migration: `_trivia_fetch_sync()` streams
+  safe progress metadata through `on_progress`, so timeout/failure reports still
+  retain the last observed stage without logging remote question payloads.
+- Shared worker terminal states are adapted back to the established Trivia
+  error classes (`worker_timeout`, `worker_failed`, `worker_payload`,
+  `worker_decode`, etc.) together with exit/signal/output/elapsed metadata.
+- Tests 541/613/614 now verify delegation rather than requiring another private
+  subprocess implementation in `UserCommands.pm`; test 833 extends the shared
+  contract with ordered progress transport and test 835 covers the Trivia
+  adapter, progress diagnostics, timeout translation and launcher failure.
+- This remains an incremental migration: Achievements, CommandAsync and YouTube
+  are deliberately untouched.
+
 ### mb652 — version checker migrated to shared AsyncWorker
 - `getVersion_async()` is the first production consumer migrated to
   `Mediabot::AsyncWorker`; the version checker no longer owns its own
