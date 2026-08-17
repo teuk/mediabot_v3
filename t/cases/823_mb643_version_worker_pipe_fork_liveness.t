@@ -1,8 +1,7 @@
 # t/cases/823_mb643_version_worker_pipe_fork_liveness.t
 # =============================================================================
-# mb643 — le worker de version doit utiliser un pipe/fork explicite avec
-# IO::Async::watch_process(), jamais le piped-open Perl '-|'. Un backstop de
-# finalisation doit aussi garantir qu'un timeout ne peut pas pendre l'IRC.
+# mb643/mb652 — explicit pipe/fork and liveness guarantees remain mandatory,
+# but MB652 centralises those mechanics in Mediabot::AsyncWorker.
 # =============================================================================
 
 use strict;
@@ -19,102 +18,66 @@ sub _slurp_823 {
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_823('Mediabot/Helpers.pm');
-    my ($async) = $src =~ /(sub getVersion_async \{.*?\n\}\n# getDetailedVersion)/s;
+    my $hsrc = _slurp_823('Mediabot/Helpers.pm');
+    my $awsrc = _slurp_823('Mediabot/AsyncWorker.pm');
+    my ($async) = $hsrc =~ /(sub getVersion_async \{.*?\n\}\n# getDetailedVersion)/s;
 
-    $assert->ok(defined $async,
-        'mb643-823: getVersion_async localisee');
-
-    $assert->like($async // '',
-        qr/explicit pipe \+ fork, matching the proven Achievements worker/,
-        'mb643-823: la cause et le pattern de reference sont documentes');
+    $assert->ok(defined $async, 'mb652-823: getVersion_async localisee');
 
     $assert->like($async // '',
-        qr/pipe\(\$pipe,\s*\$child_write\)/,
-        'mb643-823: pipe explicite');
+        qr/shared AsyncWorker owns pipe\/fork.*?timeout escalation.*?callback-once/s,
+        'mb652-823: delegation rationale is documented');
 
     $assert->like($async // '',
-        qr/my \$child_pid = fork\(\)/,
-        'mb643-823: fork explicite');
+        qr/Mediabot::AsyncWorker->start\(/,
+        'mb652-823: version adapter starts shared worker');
 
     my $exec = $async // '';
     $exec =~ s/#.*$//mg;
+    $assert->unlike($exec, qr/\bpipe\s*\(/,
+        'mb652-823: version adapter no longer duplicates pipe setup');
+    $assert->unlike($exec, qr/\bfork\s*\(/,
+        'mb652-823: version adapter no longer duplicates fork');
+    $assert->unlike($exec, qr/\bwaitpid\s*\(/,
+        'mb643-823: version adapter has no manual reap');
+    $assert->unlike($exec, qr/\bkill\s+['"](?:TERM|KILL)['"]/,
+        'mb652-823: version adapter no longer owns TERM/KILL');
 
-    $assert->unlike($exec,
+    $assert->like($awsrc,
+        qr/\bpipe\(\$read_fh,\s*\$write_fh\).*?\bmy \$pid = fork\(\)/s,
+        'mb643-823: shared worker uses explicit pipe + fork');
+    $assert->unlike($awsrc,
         qr/open\s*\([^;\n]*['"]-\|['"]/,
-        'mb643-823: aucun piped-open Perl ne subsiste');
+        'mb643-823: shared worker never uses piped-open');
+    $assert->like($awsrc,
+        qr/binmode\(\$write_fh,\s*':raw'\)/,
+        'mb643-823: shared child uses dedicated raw writer');
+    $assert->like($awsrc,
+        qr/_write_all\(\$write_fh,\s*\$payload\)/,
+        'mb652-823: shared child writes JSON only to dedicated pipe');
+    $assert->like($awsrc,
+        qr/POSIX::_exit\(0\)/,
+        'mb643-823: shared child exits without inherited destructors');
+    $assert->like($awsrc,
+        qr/->watch_process\(\s*\$pid,/s,
+        'mb643-823: IO::Async remains process owner');
+    $assert->like($awsrc,
+        qr/\$self->\{forced\}\s*\|\|.*?\$self->\{child_done\}/s,
+        'mb643-823: liveness backstop remains part of finalization');
+    $assert->like($awsrc,
+        qr/for my \$name \(qw\(timeout_timer kill_timer force_timer\)\)/,
+        'mb643-823: all lifecycle timers are cleaned centrally');
+    $assert->like($awsrc,
+        qr/\$self->_signal_child\('TERM'\).*?_signal_child\('KILL'\)/s,
+        'mb643-823: shared timeout path preserves TERM then KILL');
+    $assert->like($awsrc,
+        qr/return 0 if \$self->\{finalized\}/,
+        'mb643-823: shared completion protects callback-once semantics');
 
     $assert->like($async // '',
-        qr/if \(\$child_pid == 0\) \{\s*eval \{ close \$pipe \}/s,
-        'mb643-823: le fils ferme le cote lecture');
-
+        qr/term_grace\s*=>\s*0\.2.*?force_grace\s*=>\s*2/s,
+        'mb652-823: version-specific escalation timings are preserved');
     $assert->like($async // '',
-        qr/binmode\(\$child_write,\s*':raw'\)/,
-        'mb643-823: le fils utilise le descripteur d ecriture dedie');
-
-    $assert->like($async // '',
-        qr/syswrite\(\s*\$child_write,/s,
-        'mb643-823: le payload JSON est ecrit dans le pipe dedie');
-
-    $assert->like($async // '',
-        qr/eval \{ close \$child_write \};\s*\n\s*POSIX::_exit\(0\)/s,
-        'mb643-823: le fils ferme son writer avant _exit');
-
-    $assert->like($async // '',
-        qr/\n\s*eval \{ close \$child_write \};\s*\n\s*\n\s*my \$state/s,
-        'mb643-823: le parent ferme immediatement son writer');
-
-    $assert->like($async // '',
-        qr/\$loop->watch_process\(\s*\$child_pid/s,
-        'mb643-823: IO::Async reste proprietaire du PID');
-
-    $assert->unlike($exec,
-        qr/\bwaitpid\s*\(/,
-        'mb643-823: aucun waitpid manuel');
-
-    $assert->like($async // '',
-        qr/force\s*=>\s*0/,
-        'mb643-823: etat de finalisation forcee present');
-
-    $assert->like($async // '',
-        qr/my \(\$stream,\s*\$timeout_timer,\s*\$kill_timer,\s*\$force_timer\)/,
-        'mb643-823: timer de liveness distinct');
-
-    $assert->like($async // '',
-        qr/\$state->\{force\}\s*\|\|\s*\(\$state->\{child_done\}/s,
-        'mb643-823: le backstop peut debloquer finish');
-
-    $assert->like($async // '',
-        qr/\$remove_timer->\(\$force_timer\)/,
-        'mb643-823: le backstop est nettoye a la finalisation');
-
-    $assert->like($async // '',
-        qr/\$force_timer\s*=\s*IO::Async::Timer::Countdown->new/,
-        'mb643-823: backstop de liveness cree');
-
-    $assert->like($async // '',
-        qr/\$force_timer\s*=\s*IO::Async::Timer::Countdown->new\(.*?
-           delay\s*=>\s*2,/sx,
-        'mb643-823: backstop arme deux secondes apres timeout');
-
-    $assert->like($async // '',
-        qr/\$state->\{force\}\s*=\s*1;\s*
-           \$finish->\(\)\s+if\s+\$finish;/sx,
-        'mb643-823: expiration force la finalisation');
-
-    $assert->like($async // '',
-        qr/kill 'TERM', \$child_pid/,
-        'mb643-823: TERM conserve');
-
-    $assert->like($async // '',
-        qr/kill 'KILL', \$child_pid/,
-        'mb643-823: KILL conserve');
-
-    $assert->like($async // '',
-        qr/\$finish->\(\)\s+if\s+\$finish/,
-        'mb643-823: callbacks tardifs proteges apres finalisation');
-
-    $assert->unlike($exec,
-        qr/binmode\s*\(\s*STDOUT|syswrite\s*\(\s*STDOUT/,
-        'mb643-823: le worker ne detourne plus STDOUT pour son IPC');
+        qr/max_output\s*=>\s*1024/,
+        'mb652-823: version-specific output bound is preserved');
 };

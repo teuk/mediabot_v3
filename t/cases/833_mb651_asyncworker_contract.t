@@ -2,8 +2,8 @@
 # =============================================================================
 # MB651 — shared AsyncWorker contract.
 #
-# The abstraction is introduced and tested in isolation only. No existing
-# consumer is migrated in this round.
+# The abstraction was introduced and tested in isolation in MB651. Later
+# migration rounds may adopt it one consumer at a time.
 # =============================================================================
 
 use strict;
@@ -447,9 +447,10 @@ return sub {
     $assert->is($setup[0]{stage}, 'event_loop',
         'mb651-833: setup failure identifies event-loop stage');
 
-    # This round must only introduce the abstraction; consumers stay untouched.
+    # MB652 is allowed to migrate the version checker in Helpers.pm. The
+    # remaining consumers are still protected against an accidental big-bang
+    # migration: each one gets its own later round.
     for my $consumer (
-        'Mediabot/Helpers.pm',
         'Mediabot/UserCommands.pm',
         'Mediabot/Achievements.pm',
         'Mediabot/CommandAsync.pm',
@@ -459,7 +460,7 @@ return sub {
         $assert->unlike(
             $consumer_src,
             qr/Mediabot::AsyncWorker/,
-            "mb651-833: $consumer is not migrated in the abstraction-only round",
+            "mb652-833: $consumer remains outside the first consumer migration",
         );
     }
 };

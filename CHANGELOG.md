@@ -32,6 +32,29 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb652 — version checker migrated to shared AsyncWorker
+- `getVersion_async()` is the first production consumer migrated to
+  `Mediabot::AsyncWorker`; the version checker no longer owns its own
+  pipe/fork, `watch_process`, stream, timers or TERM/KILL lifecycle.
+- The shared worker now owns subprocess transport, bounded JSON envelopes,
+  process completion and timeout escalation while `Mediabot::Helpers` keeps
+  only version-specific policy: cached-local fallback, remote-version
+  validation and operator-facing failure wording.
+- The historical no-event-loop synchronous compatibility path is preserved for
+  startup/tests and callers that cannot use IO::Async.
+- Version-worker limits are preserved (`max_output=1024`, TERM grace 0.2s,
+  liveness grace 2s), as are the established reasons for timeout, signal,
+  non-zero exit, empty/invalid payload and worker setup failure.
+- A `getVersion()` exception is still converted inside the child into a clean,
+  bounded `version check crashed: ...` reason rather than becoming a silent
+  `Undefined` remote version.
+- Historical lifecycle tests 539/818/820–823 now verify delegation instead of
+  requiring a private duplicate implementation in `Helpers.pm`; test 833 keeps
+  the remaining consumers protected from an accidental big-bang migration.
+- New test 834 exercises the version adapter contract, AsyncWorker argument
+  wiring, child success/crash policy and terminal error translation. Trivia,
+  Achievements, CommandAsync and YouTube remain untouched in this round.
+
 ### mb651 — shared AsyncWorker contract
 - Added `Mediabot::AsyncWorker`, a consumer-neutral asynchronous subprocess
   contract built on an explicit pipe/fork pair with `IO::Async::watch_process`

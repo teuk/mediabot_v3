@@ -105,15 +105,21 @@ return sub {
     );
 
     $assert->like(
-        $async // '',
-        qr/my\s+\$child_pid\s*=\s*fork\(\)/,
-        'blocking GitHub lookup runs in an explicit child process'
+        $src,
+        qr/use\s+Mediabot::AsyncWorker;/,
+        'version helper loads the shared AsyncWorker contract'
     );
 
     $assert->like(
         $async // '',
-        qr/getVersion\(\$self\)/,
-        'child reuses the existing guarded version implementation'
+        qr/Mediabot::AsyncWorker->start\(/,
+        'blocking GitHub lookup is delegated to the shared worker'
+    );
+
+    $assert->like(
+        $async // '',
+        qr/child\s*=>\s*sub\s*\{.*?getVersion\(\$self\)/s,
+        'shared-worker child reuses the existing guarded version implementation'
     );
 
     $assert->like(
@@ -124,58 +130,53 @@ return sub {
 
     $assert->like(
         $async // '',
-        qr/POSIX::_exit\(0\)/,
-        'forked child exits without inherited destructors'
+        qr/max_output\s*=>\s*1024/,
+        'version adapter keeps its historical bounded output budget'
     );
 
     $assert->like(
         $async // '',
-        qr/IO::Async::Stream->new/,
-        'parent consumes version result asynchronously'
+        qr/term_grace\s*=>\s*0\.2.*?force_grace\s*=>\s*2/s,
+        'version adapter preserves TERM/KILL and liveness timing policy'
     );
 
     $assert->like(
         $async // '',
-        qr/IO::Async::Timer::Countdown->new/,
-        'timeout escalation uses asynchronous timers'
+        qr/ref\(\$result\)\s+eq\s+'HASH'.*?\$result->\{ok\}.*?ref\(\$value\)\s+ne\s+'ARRAY'/s,
+        'parent validates the structured shared-worker result'
     );
 
     $assert->like(
         $async // '',
-        qr/\$loop->watch_process\(\s*\$child_pid/s,
-        'IO::Async owns version-worker process collection'
+        qr/_version_asyncworker_reason\(\$result\)/,
+        'worker lifecycle failures are translated into version-specific reasons'
     );
 
     my $async_exec = $async // '';
     $async_exec =~ s/#.*$//mg;
+
     $assert->unlike(
         $async_exec,
-        qr/\bwaitpid\s*\(/,
-        'version worker never races IO::Async with manual waitpid'
+        qr/\b(?:pipe|fork|waitpid)\s*\(/,
+        'version adapter no longer owns pipe/fork/reaping mechanics'
     );
 
-    $assert->like(
-        $async // '',
-        qr/kill\s+'TERM',\s*\$child_pid/,
-        'timeout sends TERM first'
+    $assert->unlike(
+        $async_exec,
+        qr/\bwatch_process\s*\(/,
+        'version adapter no longer owns process-watch mechanics'
     );
 
-    $assert->like(
-        $async // '',
-        qr/kill\s+'KILL',\s*\$child_pid/,
-        'timeout escalates to KILL'
+    $assert->unlike(
+        $async_exec,
+        qr/IO::Async::(?:Stream|Timer::Countdown)->new/,
+        'version adapter no longer creates lifecycle streams or timers'
     );
 
-    $assert->like(
-        $async // '',
-        qr/my\s+\$remaining\s*=\s*1024\s*-\s*length\(\$state->\{output\}\)/,
-        'child output is bounded'
-    );
-
-    $assert->like(
-        $async // '',
-        qr/decode_json\(\$state->\{output\}/,
-        'parent validates the structured child payload'
+    $assert->unlike(
+        $async_exec,
+        qr/\bkill\s+['"](?:TERM|KILL)['"]/,
+        'version adapter no longer sends lifecycle signals itself'
     );
 
     $assert->unlike(

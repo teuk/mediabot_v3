@@ -168,13 +168,15 @@ return sub {
     $assert->ok($gv !~ /HTTP::Tiny->new/,
         'mb638-818: ... et ne refait plus la requete lui-meme');
 
-    # [4] la raison traverse le tuyau
-    $assert->like($hsrc, qr/encode_json\(\[\$local, \$remote, \$why\]\)/,
-        'mb638-818: le fils embarque la raison dans le payload');
+    # [4] la raison traverse le worker partage
+    $assert->like($hsrc, qr/return \[\$local, \$remote, \$why\]/,
+        'mb652-818: le fils confie version + raison au payload AsyncWorker');
     $assert->like($hsrc, qr/\$callback->\(\$local, \$remote, \$reason\)/,
         'mb638-818: le parent la passe au callback');
-    $assert->like($hsrc, qr/\$reason = 'version check timed out'/,
-        'mb638-818: un depassement de delai a aussi sa raison');
+    $assert->like($hsrc, qr/worker_timeout/,
+        'mb652-818: le code terminal AsyncWorker timeout est reconnu');
+    $assert->like($hsrc, qr/version check timed out/,
+        'mb652-818: un timeout AsyncWorker conserve la raison historique');
 
     # [5] la commande l'affiche
     my @out;

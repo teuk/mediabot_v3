@@ -106,14 +106,10 @@ return sub {
     # simple : un resultat vide ou illisible doit toujours avoir une raison.
     $assert->like($src, qr/version check worker produced no result/,
         'mb640-820: un fils sans resultat produit une raison');
-    $assert->like(
-        $src,
-        qr/\$reason\s*=\s*'version check worker produced no result'/,
-        'mb641-820: le payload vide possede une raison explicite');
-    $assert->like(
-        $src,
-        qr/\$reason\s*=\s*'version check worker returned an invalid result'/,
-        'mb641-820: le payload illisible possede une raison explicite');
+    $assert->like($src, qr/worker_empty/,
+        'mb652-820: worker_empty est traduit explicitement');
+    $assert->like($src, qr/worker_decode/,
+        'mb652-820: worker_decode est traduit explicitement');
 
     # [5] chemin nominal : aucune alarme inventee
     {

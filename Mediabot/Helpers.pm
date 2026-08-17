@@ -37,6 +37,7 @@ use Encode qw(encode);
 use Cwd qw(abs_path);
 use File::Basename qw(dirname);
 use File::Spec;
+use Mediabot::AsyncWorker;
 
 our @EXPORT = qw(
     botNotice
@@ -2655,6 +2656,71 @@ sub getVersion {
 # MB317: the public `version` command must not perform GitHub/DNS I/O inside
 # the IRC callback. Keep getVersion() synchronous for startup and explicit
 # callers, but expose a child-backed asynchronous wrapper for runtime commands.
+
+sub _version_asyncworker_reason {
+    my ($result) = @_;
+
+    return 'version check worker returned an invalid result'
+        unless ref($result) eq 'HASH';
+
+    my $error  = $result->{error} // '';
+    my $stage  = $result->{stage} // '';
+    my $detail = $result->{detail};
+    $detail = '' if !defined($detail) || ref($detail);
+    $detail =~ s/[\r\n\0]+/ /g;
+    $detail =~ s/\s{2,}/ /g;
+    $detail =~ s/^\s+|\s+$//g;
+    $detail = substr($detail, 0, 150);
+
+    return 'version check timed out'
+        if $error eq 'worker_timeout';
+
+    if ($error eq 'worker_signal') {
+        my $signal = $result->{signal};
+        return "version check worker terminated by signal $signal"
+            if defined($signal) && $signal =~ /\A\d+\z/ && $signal > 0;
+        return 'version check worker terminated by signal';
+    }
+
+    if ($error eq 'worker_exit') {
+        my $exit = $result->{exit};
+        return "version check worker exited with status $exit"
+            if defined($exit) && $exit =~ /\A\d+\z/;
+        return 'version check worker exited with non-zero status';
+    }
+
+    return 'version check worker produced no result'
+        if $error eq 'worker_empty';
+
+    return 'version check worker returned an invalid result'
+        if $error eq 'worker_decode'
+        || $error eq 'worker_encode'
+        || $error eq 'worker_output_limit';
+
+    if ($error eq 'worker_setup') {
+        my $suffix = length($detail) ? ": $detail" : '';
+        return "version check worker pipe failed$suffix"
+            if $stage eq 'pipe';
+        return "version check worker could not start$suffix"
+            if $stage eq 'fork';
+        return "version check worker setup failed$suffix";
+    }
+
+    return 'version check worker finalization timed out'
+        if $error eq 'worker_liveness';
+
+    return 'version check worker cancelled'
+        if $error eq 'worker_cancelled';
+
+    if ($error eq 'worker_exception') {
+        my $suffix = length($detail) ? ": $detail" : '';
+        return "version check crashed$suffix";
+    }
+
+    my $suffix = length($detail) ? ": $detail" : '';
+    return "version check worker failed$suffix";
+}
+
 sub getVersion_async {
     my ($self, $callback, %opts) = @_;
 
@@ -2694,141 +2760,14 @@ sub getVersion_async {
         return 1;
     }
 
-    # mb642-B1: IO::Async owns SIGCHLD/process collection. The version worker
-    # must register with watch_process() exactly like the existing YouTube
-    # worker does. Polling waitpid() in parallel races the loop: IO::Async may
-    # reap the child first, after which waitpid() returns -1 and a perfectly
-    # successful VERSION fetch is misreported as "could not be reaped".
-    unless ($loop->can('watch_process')) {
-        my $local = _usable_local_version($fallback_local) // 'Undefined';
-        my $reason = 'version check worker setup failed: '
-            . 'event loop cannot watch child processes';
-        eval { $callback->($local, 'Undefined', $reason); 1; };
-        return 1;
-    }
-
-    # mb643-B1: explicit pipe + fork, matching the proven Achievements worker.
-    # Perl's piped-open ('-|') carries its own child-process bookkeeping; using
-    # it together with IO::Async::watch_process left the live Epiknet check
-    # waiting forever after mb642. A plain pipe/fork gives IO::Async one clear
-    # owner for process completion.
-    my ($pipe, $child_write);
-    unless (pipe($pipe, $child_write)) {
-        my $error = "$!";
-        $error = 'unknown error' unless defined $error && $error =~ /\S/;
-        $error =~ s/\s+/ /g;
-        my $reason = 'version check worker pipe failed: ' . substr($error, 0, 150);
-        my $local = _usable_local_version($fallback_local) // 'Undefined';
-        eval { $callback->($local, 'Undefined', $reason); 1; };
-        return 1;
-    }
-
-    my $child_pid = fork();
-
-    unless (defined $child_pid) {
-        my $error = "$!";
-        eval { close $pipe };
-        eval { close $child_write };
-        $error = 'unknown error' unless defined $error && $error =~ /\S/;
-        $error =~ s/\s+/ /g;
-        my $reason = 'version check worker could not start: ' . substr($error, 0, 150);
-        my $local = _usable_local_version($fallback_local) // 'Undefined';
-        eval { $callback->($local, 'Undefined', $reason); 1; };
-        return 1;
-    }
-
-    if ($child_pid == 0) {
-        eval { close $pipe };
-        # Suppress duplicate version logs from the forked worker and avoid
-        # inherited bot/DB/IRC destructors when the child finishes.
-        local $self->{logger} = bless {}, 'Mediabot::Helpers::_SilentLogger';
-
-        # mb640-B1: une EXCEPTION de getVersion doit produire une raison, pas
-        # un silence. C'est le vrai defaut du terrain : getVersion mourait,
-        # l'eval avalait tout, le fils n'ecrivait rien d'exploitable et le
-        # parent retombait sur le local EN CACHE — d'ou « local: 3.4dev-...
-        # | github: Undefined » SANS explication, indiscernable d'une panne
-        # reseau. On capture le message et on le fait voyager.
-        my ($local, $remote) = eval { getVersion($self) };
-        my $died = $@;
-        if (defined $died && $died =~ /\S/) {
-            $died =~ s/\s+at\s+\S+\s+line\s+\d+\.?\s*\z//;
-            $died =~ s/\s+/ /g;
-            $self->{_version_fetch_error} = 'version check crashed: '
-                . substr($died, 0, 160);
-        }
-        $local  = _usable_local_version($local)
-            // _usable_local_version($fallback_local)
-            // 'Undefined';
-        $remote = _usable_local_version($remote) // 'Undefined';
-        $local  = substr($local,  0, 256);
-        $remote = substr($remote, 0, 256);
-
-        # mb638-B1: la RAISON voyage avec les versions. Sans elle, le parent
-        # ne peut que dire « Undefined » — ce que le terrain a montre.
-        my $why = $self->{_version_fetch_error};
-        $why = substr("$why", 0, 200) if defined $why && !ref $why;
-        my $payload = eval { encode_json([$local, $remote, $why]) };
-        $payload = '["Undefined","Undefined",null]'
-            unless defined($payload) && !ref($payload) && $payload ne '';
-
-        my $offset = 0;
-        local $SIG{PIPE} = 'IGNORE';
-        binmode($child_write, ':raw');
-
-        while ($offset < length($payload)) {
-            my $written = syswrite(
-                $child_write,
-                $payload,
-                length($payload) - $offset,
-                $offset,
-            );
-
-            next if !defined($written) && $!{EINTR};
-            last unless defined($written) && $written > 0;
-            $offset += $written;
-        }
-
-        eval { close $child_write };
-        POSIX::_exit(0);
-    }
-
-    eval { close $child_write };
-
-    my $state = {
-        output      => '',
-        pipe_eof    => 0,
-        child_done  => 0,
-        finalized   => 0,
-        timed_out   => 0,
-        wait_status => undef,
-        term_sent   => 0,
-        kill_sent   => 0,
-        force        => 0,
-    };
-
-    my ($stream, $timeout_timer, $kill_timer, $force_timer);
-    my $finish;
-
-    my $remove_timer = sub {
-        my ($timer) = @_;
-        return unless $timer;
-        eval { $timer->stop };
-        eval { $loop->remove($timer) };
-    };
-
-    $finish = sub {
-        return if $state->{finalized};
-        return unless $state->{force}
-            || ($state->{child_done} && ($state->{pipe_eof} || $state->{timed_out}));
-
-        $state->{finalized} = 1;
-
-        $remove_timer->($timeout_timer);
-        $remove_timer->($kill_timer);
-        $remove_timer->($force_timer);
-        eval { $loop->remove($stream) } if $stream;
-        eval { close $pipe };
+    # MB652: the shared AsyncWorker owns pipe/fork, process collection,
+    # timeout escalation, bounded JSON transport and callback-once semantics.
+    # The version checker keeps only version-specific policy and wording.
+    my $adapter_done = 0;
+    my $done = sub {
+        my ($result) = @_;
+        return if $adapter_done;
+        $adapter_done = 1;
 
         my ($local, $remote) = (
             _usable_local_version($fallback_local) // 'Undefined',
@@ -2836,44 +2775,29 @@ sub getVersion_async {
         );
         my $reason;
 
-        # mb641-B1/mb642-B1: chaque sortie TERMINALE du worker doit avoir un
-        # sens. Le statut est fourni par watch_process(); on ne concurrence
-        # jamais IO::Async avec notre propre waitpid().
-        if ($state->{timed_out}) {
-            $reason = 'version check timed out';
-        }
-        else {
-            my $status = $state->{wait_status} // 0;
-            my $signal = $status & 127;
-            my $exit   = ($status >> 8) & 255;
-
-            if ($signal) {
-                $reason = "version check worker terminated by signal $signal";
-            }
-            elsif ($exit != 0) {
-                $reason = "version check worker exited with status $exit";
-            }
-            elsif (!length($state->{output} // '')) {
-                $reason = 'version check worker produced no result';
+        if (ref($result) eq 'HASH' && $result->{ok}) {
+            my $value = $result->{value};
+            if (ref($value) ne 'ARRAY' || @$value < 2) {
+                $reason = 'version check worker returned an invalid result';
             }
             else {
-                my $decoded = eval { decode_json($state->{output}) };
-                if ($@ || ref($decoded) ne 'ARRAY' || @$decoded < 2) {
-                    $reason = 'version check worker returned an invalid result';
-                }
-                else {
-                    my ($candidate_local, $candidate_remote) = @$decoded[0, 1];
-                    my $why = $decoded->[2];
-                    $reason = $why if defined $why && !ref $why && length $why;
-                    my $usable_local  = _usable_local_version($candidate_local);
-                    my $usable_remote = _usable_local_version($candidate_remote);
+                my ($candidate_local, $candidate_remote) = @$value[0, 1];
+                my $why = $value->[2];
 
-                    $local = $usable_local
-                        if defined($usable_local) && length($usable_local) <= 256;
-                    $remote = $usable_remote
-                        if defined($usable_remote) && length($usable_remote) <= 256;
-                }
+                my $usable_local  = _usable_local_version($candidate_local);
+                my $usable_remote = _usable_local_version($candidate_remote);
+
+                $local = $usable_local
+                    if defined($usable_local) && length($usable_local) <= 256;
+                $remote = $usable_remote
+                    if defined($usable_remote) && length($usable_remote) <= 256;
+
+                $reason = $why
+                    if defined($why) && !ref($why) && length($why);
             }
+        }
+        else {
+            $reason = _version_asyncworker_reason($result);
         }
 
         # mb638-B1: 3e argument = pourquoi le distant manque (undef si tout va
@@ -2884,109 +2808,75 @@ sub getVersion_async {
             $error =~ s/\s+/ /g;
             $self->{logger}->log(1, "getVersion_async callback failed: $error");
         }
-
-        $finish = undef;
     };
 
-    my $watch_ok = eval {
-        $loop->watch_process(
-            $child_pid,
-            sub {
-                my ($pid, $wait_status) = @_;
-                return if $state->{finalized};
-                return unless defined($pid) && $pid == $child_pid;
+    my $worker;
+    my $launch_ok = eval {
+        $worker = Mediabot::AsyncWorker->start(
+            loop        => $loop,
+            label       => 'version check',
+            timeout     => $timeout,
+            term_grace  => 0.2,
+            force_grace => 2,
+            max_output  => 1024,
+            child       => sub {
+            # Suppress duplicate version logs from the forked worker. The
+            # shared worker exits via POSIX::_exit(), so inherited bot/DB/IRC
+            # destructors are not run by the child.
+            local $self->{logger} = bless {}, 'Mediabot::Helpers::_SilentLogger';
 
-                $state->{wait_status} = $wait_status;
-                $state->{child_done}  = 1;
-                $finish->() if $finish;
+            # mb640-B1: an exception from getVersion is data, not silence.
+            my ($local, $remote) = eval { getVersion($self) };
+            my $died = $@;
+            if (defined $died && $died =~ /\S/) {
+                $died =~ s/\s+at\s+\S+\s+line\s+\d+\.?\s*\z//;
+                $died =~ s/\s+/ /g;
+                $self->{_version_fetch_error} = 'version check crashed: '
+                    . substr($died, 0, 160);
+            }
+
+            $local  = _usable_local_version($local)
+                // _usable_local_version($fallback_local)
+                // 'Undefined';
+            $remote = _usable_local_version($remote) // 'Undefined';
+            $local  = substr($local,  0, 256);
+            $remote = substr($remote, 0, 256);
+
+            my $why = $self->{_version_fetch_error};
+            $why = substr("$why", 0, 200)
+                if defined($why) && !ref($why);
+
+            return [$local, $remote, $why];
             },
+            on_done => $done,
         );
         1;
     };
 
-    unless ($watch_ok) {
-        my $error = $@ || 'watch_process registration failed';
-        $error =~ s/\s+/ /g;
-        $error = substr($error, 0, 150);
-
-        kill 'TERM', $child_pid;
-        eval { close $pipe };
-
-        my $local = _usable_local_version($fallback_local) // 'Undefined';
-        my $reason = "version check worker setup failed: $error";
-        eval { $callback->($local, 'Undefined', $reason); 1; };
-        $finish = undef;
-        return 1;
+    # AsyncWorker normally turns every setup problem into a structured
+    # completion. Keep a final adapter-level guard so an unexpected launcher
+    # exception or a contract violation can never make the version check die
+    # or disappear silently.
+    if (!$launch_ok && !$adapter_done) {
+        my $error = $@ || 'unknown AsyncWorker launch failure';
+        $done->({
+            ok     => 0,
+            error  => 'worker_setup',
+            stage  => 'launcher',
+            detail => $error,
+        });
+    }
+    elsif (!$worker && !$adapter_done) {
+        $done->({
+            ok     => 0,
+            error  => 'worker_setup',
+            stage  => 'launcher',
+            detail => 'AsyncWorker refused launch without a completion result',
+        });
     }
 
-    $timeout_timer = IO::Async::Timer::Countdown->new(
-        delay     => $timeout,
-        on_expire => sub {
-            return if $state->{finalized};
-
-            $state->{timed_out} = 1;
-
-            unless ($state->{term_sent}) {
-                kill 'TERM', $child_pid;
-                $state->{term_sent} = 1;
-            }
-
-            $kill_timer = IO::Async::Timer::Countdown->new(
-                delay     => 0.2,
-                on_expire => sub {
-                    return if $state->{finalized} || $state->{child_done};
-
-                    unless ($state->{kill_sent}) {
-                        kill 'KILL', $child_pid;
-                        $state->{kill_sent} = 1;
-                    }
-                },
-            );
-
-            # mb643-B1: same liveness backstop as the existing Achievements
-            # worker. A lost process notification must never leave an IRC
-            # command hanging forever after its timeout.
-            $force_timer = IO::Async::Timer::Countdown->new(
-                delay     => 2,
-                on_expire => sub {
-                    return if $state->{finalized};
-                    $state->{force} = 1;
-                    $finish->() if $finish;
-                },
-            );
-
-            $loop->add($kill_timer);
-            $kill_timer->start;
-            $loop->add($force_timer);
-            $force_timer->start;
-        },
-    );
-
-    $loop->add($timeout_timer);
-    $timeout_timer->start;
-
-    $stream = IO::Async::Stream->new(
-        read_handle => $pipe,
-        on_read     => sub {
-            my ($io, $buffref, $eof) = @_;
-
-            if (length $$buffref) {
-                my $remaining = 1024 - length($state->{output});
-                $state->{output} .= substr($$buffref, 0, $remaining)
-                    if $remaining > 0;
-                $$buffref = '';
-            }
-
-            if ($eof && !$state->{pipe_eof}++) {
-                eval { $loop->remove($io) };
-                $finish->() if $finish;
-            }
-
-            return 0;
-        },
-    );
-
-    $loop->add($stream);
+    # AsyncWorker reports setup failures through on_done as well, preserving
+    # the historical "started/handled" contract expected by update callers.
     return 1;
 }
 # getDetailedVersion – parses a version string and returns its components
