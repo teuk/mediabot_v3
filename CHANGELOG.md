@@ -32,6 +32,29 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb651 — shared AsyncWorker contract
+- Added `Mediabot::AsyncWorker`, a consumer-neutral asynchronous subprocess
+  contract built on an explicit pipe/fork pair with `IO::Async::watch_process`
+  as the normal owner of child completion.
+- The shared lifecycle centralises timeout handling, TERM→KILL escalation,
+  a forced liveness backstop, bounded child output, JSON child→parent
+  envelopes, exit/signal metadata and callback-once finalisation.
+- Child exceptions and transport/setup failures become structured results
+  instead of leaking dies into the event loop. Explicit cancellation uses the
+  same bounded termination path.
+- Child processes exit through `POSIX::_exit` and write only to their dedicated
+  IPC descriptor. Consumer-specific inherited DB/socket safety remains the
+  consumer's responsibility inside the child callback.
+- The abstraction deliberately provides no implicit synchronous fallback:
+  callers remain responsible for choosing whether a failed async setup may
+  fall back, fail closed or retry.
+- New test 833 exercises real fork/pipe transport against a deterministic
+  event-loop harness: success, structured JSON, child exception, output bound,
+  timeout with TERM/KILL, cancellation, setup failure and callback-once races.
+- No existing worker consumer is migrated in this round; version, Trivia,
+  Achievements, command workers and YouTube keep their current implementation
+  until the shared contract is proven independently.
+
 ### mb650 — test-suite profiler
 - `t/test_commands.pl` gains an opt-in `--profile` mode that measures each test
   file with `Time::HiRes` while preserving the existing execution order,
