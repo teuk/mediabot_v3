@@ -11,11 +11,6 @@ use strict;
 use warnings;
 BEGIN {
     use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../..";
-    $INC{'Mediabot/Helpers.pm'} = __FILE__;
-    package Mediabot::Helpers;
-    sub chanset_enabled { 0 }
-    sub botPrivmsg { 1 }
-    package main;
 }
 use File::Temp qw(tempdir);
 use Time::HiRes qw(time);
@@ -43,6 +38,13 @@ sub slurp751 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!"; l
 
 return sub {
     my ($assert)=@_;
+
+    # Keep the Helpers test double strictly scoped to this test invocation.
+    # The test runner executes many case files in one Perl interpreter; a
+    # permanent %INC entry or package-level stub would poison later tests.
+    local $INC{'Mediabot/Helpers.pm'} = __FILE__;
+    local *Mediabot::Helpers::chanset_enabled = sub { 0 };
+    local *Mediabot::Helpers::botPrivmsg = sub { 1 };
     my $tmp=tempdir(CLEANUP=>1);
     my @pending_done;
     my @jobs;

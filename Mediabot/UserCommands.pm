@@ -4240,6 +4240,17 @@ sub mbStreak_ctx {
     }
     my $best_str = $best > $streak ? "  (best ever: ${best}d)" : '';
 
+    # mb655: checking one's own streak also records the already-computed best
+    # run in the persistent Achievement registry.  Looking up somebody else's
+    # streak stays read-only: a third party must never create/touch that person's
+    # durable Achievement profile merely by inspecting it.
+    if ($self->{achievements} && lc($target) eq lc($nick)) {
+        eval { $self->{achievements}->check_streak($nick, $channel, $streak, $best) };
+        if ($@) {
+            eval { $self->{logger}->log(1, "achievements check_streak error: $@") };
+        }
+    }
+
     # mb85-IMP1 / mb92-B2: rang du streak — cache TTL 5min pour éviter la sous-requête coûteuse
     my $rank_str  = '';
     my $cache_key = "streak_rank:$channel:$target:$streak";

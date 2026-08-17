@@ -12,7 +12,7 @@ package Mediabot::Achievements;
 #   - UserCommands.pm  mbKarma_ctx     → karma_star, karma_legend
 #   - UserCommands.pm  mbTrivia (ok)   → trivia_rookie, trivia_champion, trivia_sniper
 #   - UserCommands.pm  mbWordCount_ctx → wordsmith
-#   - UserCommands.pm  mbActive_ctx    → streak_master (via _seen_days)
+#   - UserCommands.pm  mbStreak_ctx    → streak_week, streak_month, streak_master
 #
 # Commande : !achievements [nick]   liste pour soi ou un autre
 #            !achievements list     affiche tous les achievements possibles
@@ -150,6 +150,36 @@ my %ACH = (
         rarity  => 'uncommon',
         check_on => 'msg',
         threshold => 50,
+    },
+    # mb655: user-facing activity streak milestones.  The expensive day-by-day
+    # calculation already exists in !streak; these achievements reuse that result
+    # instead of introducing another CHANNEL_LOG scan in the message hot path.
+    streak_week => {
+        emoji   => '🔥',
+        name    => 'On a Roll',
+        desc    => 'Stayed active for 7 consecutive days',
+        rarity  => 'uncommon',
+        check_on => 'activity',
+        threshold => 7,
+        progress_kind => 'activity_streak_days',
+    },
+    streak_month => {
+        emoji   => '📆',
+        name    => 'Habit Formed',
+        desc    => 'Stayed active for 30 consecutive days',
+        rarity  => 'rare',
+        check_on => 'activity',
+        threshold => 30,
+        progress_kind => 'activity_streak_days',
+    },
+    streak_master => {
+        emoji   => '⚡',
+        name    => 'Streak Master',
+        desc    => 'Stayed active for 100 consecutive days',
+        rarity  => 'epic',
+        check_on => 'activity',
+        threshold => 100,
+        progress_kind => 'activity_streak_days',
     },
     trivia_rookie => {
         emoji   => '🧠',
@@ -2785,6 +2815,28 @@ sub check_trivia {
     # Seuil INVERSE : le sniper doit repondre en MOINS de N secondes.
     $self->unlock($nick, $channel, 'trivia_sniper')
         if defined $response_seconds && $response_seconds <= $self->threshold('trivia_sniper');
+}
+
+# -- mb655: activity streak achievements --------------------------------------
+# The caller already paid for the !streak history scan.  Persist only the best
+# run ever observed; set_progress() is monotonic, so a broken current streak does
+# not erase previously earned merit.
+sub check_streak {
+    my ($self, $nick, $channel, $current, $best) = @_;
+    return 0 unless defined($nick) && length($nick)
+                 && defined($channel) && $channel =~ /^#/;
+
+    $best = $current unless defined $best;
+    return 0 unless defined($best) && !ref($best) && "$best" =~ /\A\d+\z/;
+    $best = int($best);
+    return 0 if $best < 1;
+
+    my $saved = $self->set_progress('activity_streak_days', $nick, $channel, $best);
+    for my $id (qw(streak_week streak_month streak_master)) {
+        $self->unlock($nick, $channel, $id)
+            if $best >= $self->threshold($id);
+    }
+    return $saved;
 }
 
 # -- Hook : vérifie les achievements 'wordcount' -------------------------------

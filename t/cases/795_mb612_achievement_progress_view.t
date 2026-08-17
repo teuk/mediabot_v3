@@ -48,8 +48,8 @@ return sub {
     # [1] grille des compteurs
     my %kind_of = map { $_ => $defs->{$_}{progress_kind} } keys %$defs;
     my @measurable = grep { $kind_of{$_} } keys %kind_of;
-    $assert->is(scalar @measurable, 20,
-        'mb612-795: 20 achievements sur 24 sont mesurables');
+    $assert->is(scalar @measurable, 23,
+        'mb612-795: 23 achievements sur 27 sont mesurables');
     my @unmeasurable = sort grep { !$kind_of{$_} } keys %kind_of;
     $assert->is(join(',', @unmeasurable), 'early_bird,night_owl,trivia_sniper,underdog',
         'mb612-795: les 4 non mesurables sont ceux qu on ne sait pas mesurer');

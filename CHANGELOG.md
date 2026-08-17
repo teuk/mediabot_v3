@@ -32,6 +32,23 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb655 — activity streak achievements
+- Added three user-facing streak milestones that reuse the existing `!streak`
+  career calculation: **On a Roll** (7 consecutive active days), **Habit
+  Formed** (30 days) and **Streak Master** (100 days).
+- The milestones share the persistent `activity_streak_days` progress counter,
+  so `!achievements progress` and next-goal rendering can show streak progress
+  without a new table or schema change.
+- `!streak` records the already-computed **best-ever** run rather than adding a
+  second `CHANNEL_LOG` scan to the message hot path. Progress is monotonic: a
+  later broken streak cannot erase past merit.
+- Only checking one's **own** streak may update Achievement persistence. Looking
+  up another nick remains read-only and cannot create/touch that person's
+  durable Achievement profile as a side effect.
+- Existing configurable achievement thresholds continue to apply through the
+  generic `[achievements]` override mechanism; no new configuration key is
+  required.
+
 ### mb654 — read-only achievement identity diagnostics
 - Added `Mediabot::Achievements::identity_profile_diagnostic()` to explain the
   current durable per-channel profile, registered USER anchor, alias set, unlock
