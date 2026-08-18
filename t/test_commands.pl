@@ -3,7 +3,7 @@
 #  Mediabot v3 - Framework de test des commandes IRC
 #  Usage : perl t/test_commands.pl [--verbose] [--filter <pattern>] [--profile]
 #           [--class <tag>] [--exclude-class <tag>]
-#           [--class-summary] [--list-selected]
+#           [--class-summary] [--list-selected] [--fast]
 #           [--nick <nick>] [--host <host>] [--channel <chan>]
 #           [--botnick <botnick>] [--cmdchar <char>]
 # =============================================================================
@@ -27,6 +27,11 @@ use POSIX qw(strftime);
 use TAP::Parser;
 use Time::HiRes ();
 use TestClassifier qw(classify_test_file allowed_test_classes);
+use FastValidation qw(
+    fast_lane_reason
+    select_fast_files
+    validate_fast_lane_sentinels
+);
 
 binmode(STDOUT, ':encoding(UTF-8)');
 binmode(STDERR, ':encoding(UTF-8)');
@@ -49,6 +54,7 @@ my @opt_classes;
 my @opt_exclude_classes;
 my $opt_class_summary = 0;
 my $opt_list_selected = 0;
+my $opt_fast = 0;
 GetOptions(
     'verbose|v'   => \$opt_verbose,
     'filter|f=s'  => \$opt_filter,
@@ -63,6 +69,7 @@ GetOptions(
     'exclude-class=s@' => \@opt_exclude_classes,
     'class-summary' => \$opt_class_summary,
     'list-selected' => \$opt_list_selected,
+    'fast'          => \$opt_fast,
 ) or die <<USAGE;
 Usage: $0 [options]
   --verbose, -v          Afficher chaque test [OK]/[FAIL]
@@ -78,6 +85,8 @@ Usage: $0 [options]
   --exclude-class <tag>   Exclure les tests portant ce tag (repeatable/comma-separated)
   --class-summary         Afficher la classification selectionnee sans lancer les tests
   --list-selected         Lister les tests selectionnes/classes sans les lancer
+  --fast                  Lane de validation rapide: PURE + sentinelles critiques
+                          (ne remplace PAS la suite complete)
   Classes: PURE, FILESYSTEM, PROCESS, DB, NETWORK
 USAGE
 
@@ -466,15 +475,19 @@ sub _print_selected_tests {
     my ($files, $info_by_file) = @_;
 
     print "\nSelected test files\n";
-    print "-" x 78 . "\n";
-    printf "%-10s %-34s %s\n", 'primary', 'tags', 'file';
-    print "-" x 78 . "\n";
+    print "-" x 110 . "\n";
+    printf "%-10s %-34s %-44s %s\n", 'primary', 'tags', 'selection', 'file';
+    print "-" x 110 . "\n";
 
     for my $file (@$files) {
         my $info = $info_by_file->{$file};
-        printf "%-10s %-34s %s\n",
+        my $selection = $opt_fast
+            ? (fast_lane_reason($file, $info) // 'filtered fast lane')
+            : 'normal selection';
+        printf "%-10s %-34s %-44s %s\n",
             $info->{primary},
             join(',', @{ $info->{tags} }),
+            $selection,
             basename($file);
     }
 }
@@ -496,6 +509,19 @@ for my $file (@all_test_files) {
 }
 
 my @test_files = @all_test_files;
+
+if ($opt_fast) {
+    my ($sentinels_ok, $missing) =
+        validate_fast_lane_sentinels(\@all_test_files);
+
+    die "Fast validation sentinel(s) missing: "
+        . join(', ', @$missing)
+        . "\nRefusing to run a silently weakened fast lane.\n"
+        unless $sentinels_ok;
+
+    @test_files =
+        select_fast_files(\@test_files, \%case_classification);
+}
 
 if ($opt_filter) {
     my $filter_re = eval { qr/$opt_filter/i };
@@ -540,6 +566,15 @@ if ($opt_list_selected) {
 }
 
 exit 0 if $opt_class_summary || $opt_list_selected;
+
+if ($opt_fast) {
+    print "\nFast validation lane\n";
+    print "-" x 60 . "\n";
+    printf "Selected: %d of %d discovered test file(s)\n",
+        scalar(@test_files), scalar(@all_test_files);
+    print "Policy  : fast PURE - reviewed slow cases + mandatory sentinels\n";
+    print "Scope   : development validation; NOT equivalent to the full suite\n";
+}
 
 sub _filter_case_load_warning {
     my ($warning) = @_;

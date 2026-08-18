@@ -32,6 +32,31 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb661 — deterministic fast validation lane
+- Added an explicit `--fast` development-validation lane to
+  `t/test_commands.pl`. It selects every test whose mb660 primary class is
+  `PURE`, then adds a small reviewed set of cross-cutting sentinels for runner
+  isolation, dispatch, startup integrity, profiling/classification and module
+  structure.
+- The sentinel manifest is fail-closed: if a required sentinel is renamed or
+  removed, `--fast` refuses to run instead of silently weakening its coverage.
+  `--fast --class-summary` and `--fast --list-selected` expose the exact lane
+  without executing it.
+- Existing `--filter`, `--class` and `--exclude-class` selectors may further
+  narrow the fast lane for diagnosis; they never expand it. Default execution
+  with no `--fast` option remains the complete suite.
+- The first real-host fast-lane profile showed that `PURE` is not synonymous
+  with quick: a small set of timing-heavy PURE tests dominated runtime. MB661
+  therefore keeps an explicit profiler-backed slow manifest; those tests stay
+  in targeted regressions and the default full suite, while mandatory sentinels
+  always override the optimisation manifest.
+- The runner labels fast execution explicitly as development validation and
+  states that it is **not equivalent to the full suite**. No parallelism,
+  reordering or hidden skip mechanism is introduced in mb661.
+- Normal development can now combine targeted regression tests with `--fast`,
+  while the full suite remains the global checkpoint for cross-cutting changes
+  and release validation.
+
 ### mb660 — conservative test classification
 - Added a reusable test classifier with the roadmap's `PURE`, `FILESYSTEM`,
   `PROCESS`, `DB` and `NETWORK` capability families. Classification is

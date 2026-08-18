@@ -379,6 +379,38 @@ class is only a reporting convenience. **Classification does not certify that
 a test is safe to run in parallel.** MB660 intentionally adds no parallel
 executor and changes no default full-suite behaviour.
 
+Run the MB661 fast development-validation lane with:
+
+```bash
+perl t/test_commands.pl --fast
+```
+
+The fast lane is deterministic: it starts from tests whose MB660 primary class
+is `PURE`, removes a small explicit manifest of profiler-confirmed slow cases,
+then adds a fail-closed set of cross-cutting sentinels for runner isolation,
+dispatch, startup integrity, profiling, classification and module structure.
+Sentinels always win over the slow manifest. If a named sentinel disappears,
+`--fast` refuses to run rather than silently reducing coverage.
+
+`PURE` means dependency-light, not necessarily quick. The slow manifest exists
+because the first real MB661 profile showed that a handful of PURE timing-heavy
+tests dominated the lane. Those cases remain covered by targeted regressions
+and by the default full suite.
+
+Inspect the exact lane without executing it:
+
+```bash
+perl t/test_commands.pl --fast --class-summary
+perl t/test_commands.pl --fast --list-selected
+```
+
+`--filter`, `--class` and `--exclude-class` can further narrow the already
+selected fast lane when debugging. They do not add tests outside it.
+
+**`--fast` is not equivalent to the full suite.** Combine targeted regression
+tests with `--fast` during normal development. Keep the default full suite as
+the global checkpoint for cross-cutting changes and release validation.
+
 Run live tests when a local IRC test server is available:
 
 ```bash
