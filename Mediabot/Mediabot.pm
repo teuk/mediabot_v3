@@ -2216,6 +2216,7 @@ sub mbCommandPublic {
         recap        => sub { mbRecap_ctx($ctx) },       # mb472: catch-up summary
         onthisday    => sub { mbOnThisDay_ctx($ctx) },    # mb489: history nostalgia
         otd          => sub { mbOnThisDay_ctx($ctx) },
+        memory       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'memory', sub { mbMemory_ctx($ctx) }) }, # mb664
         learn        => sub { mbLearn_ctx($ctx) },        # mb476: factoids
         whatis       => sub { mbWhatis_ctx($ctx) },
         forget       => sub { mbForget_ctx($ctx) },
@@ -2787,6 +2788,7 @@ obs|obs|public|Alias for observatory.
 recap|recap [30m\|2h] [ai] [en\|fr\|es]|public|Summarize what you missed on this channel (stats, or AI summary with 'ai'; the AI summary follows the channel language unless forced).
 onthisday|onthisday [MM-DD]|public|Resurface what happened on this channel on a calendar day (today, or a given MM-DD) in past years. Alias: otd
 otd|otd|public|Alias for onthisday.
+memory|memory|public|Take a bounded random trip into this channel's history (older than 30 days).
 learn|learn <keyword> = <value>|public|Store a shared channel fact. Recall with whatis.
 whatis|whatis <keyword>|public|Recall a shared channel fact stored with learn. Shortcut: ?keyword
 forget|forget <keyword>|public|Delete a channel fact (author or channel op only).
@@ -3065,6 +3067,7 @@ sub _mbHelpExplicitCategory {
         recap    => 'social',
         onthisday => 'social',
         otd      => 'social',
+        memory   => 'social',
         # messaging (tell was landing in admin via "delivered"/"nick")
         tell     => 'general',
         # tools
@@ -3375,7 +3378,7 @@ sub _mbHelpSendChansetsTopic {
         "  +ChannelReport       : receive automatic daily/weekly channel reports (on by default; -ChannelReport to silence).",
         "  +DidYouMean          : suggest the closest command on a typo (on by default; -DidYouMean to silence).",
         "  +Factoids            : allow shared learn/whatis channel facts (on by default; -Factoids to silence).",
-        "  +OnThisDay           : allow the onthisday/otd channel history feature (on by default; -OnThisDay to silence).",
+        "  +OnThisDay           : allow onthisday/otd and memory channel-history features (on by default; -OnThisDay to silence).",
         "  +OnThisDayDigest     : post a daily 'on this day' recap to the channel (OFF by default; +OnThisDayDigest to enable).",
         "Use: help commands settings  /  help chansets  /  help chanset",
     );

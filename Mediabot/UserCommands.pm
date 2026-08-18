@@ -126,6 +126,7 @@ our @EXPORT = qw(
     mbFactoids_ctx
     mbFactoid_ctx
     mbOnThisDay_ctx
+    mbMemory_ctx
 
 );
 
@@ -11618,7 +11619,7 @@ sub mbFeatures_ctx {
             . "  | catalogue: $ach_defs",
         "  \x{1F3B2} games: $games  | commands: duel, horoscope, compat, quotegame",
         "  \x{1F517} links: UrlTitle=$urltitle  Youtube=$youtube  YoutubeSearch=$ytsearch",
-        "  \x{1F4AC} social memory: profil/radar/dashboard/leaderboard/chronos/mood available",
+        "  \x{1F4AC} social memory: profil/radar/dashboard/leaderboard/chronos/mood/memory available",
         "  \x{1F916} integrations: Claude=$claude  RandomQuote=$randomquote  Radio=$radio",
         "  \x{1F6E1} safety/output: AntiFlood=$antiflood  NoColors=$nocolors  Metrics=$metrics",
         "  Help: help social / help games / help chansets",
@@ -12745,6 +12746,264 @@ sub _onthisday_lines {
             $text = Mediabot::Helpers::truncate_utf8($text, 200, '...') if length($text) > 200;
             push @lines, "From $ry — <$pick->{nick}> $text";
         }
+    }
+
+    return @lines;
+}
+
+# ===========================================================================
+# mbMemory_ctx --- !memory
+# mb664: take the user somewhere in the channel's history rather than looking
+# at one fixed calendar date. The expensive/history work runs through
+# CommandAsync at dispatch level; this command body stays read-only and reuses
+# the existing +OnThisDay opt-out contract.
+# ===========================================================================
+sub mbMemory_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel;
+
+    unless (isIrcChannelTarget($channel)) {
+        botNotice($self, $nick, "Syntax: memory  (use it in a channel)");
+        return;
+    }
+
+    return unless eval {
+        Mediabot::Helpers::chanset_enabled($self, $channel, 'OnThisDay', default => 1)
+    } // 1;
+
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    if (grep { defined($_) && /\S/ } @args) {
+        botNotice($self, $nick, "Syntax: memory  (no argument)");
+        return;
+    }
+
+    my $dbh = $self->{dbh};
+    unless ($dbh) {
+        botNotice($self, $nick, "memory: database unavailable.");
+        return;
+    }
+
+    my $channel_obj = $self->{channels}{lc $channel};
+    my $id_channel  = $channel_obj ? eval { $channel_obj->get_id } : undef;
+    unless (defined $id_channel) {
+        botNotice($self, $nick, "memory: channel not known to the bot.");
+        return;
+    }
+
+    my @lines = Mediabot::UserCommands::_memory_lines(
+        $self, $id_channel, $channel
+    );
+    unless (@lines) {
+        botNotice(
+            $self,
+            $nick,
+            "No suitable channel memory older than 30 days was found."
+        );
+        return;
+    }
+
+    # CommandAsync captures direct botNotice() calls in the child and replays
+    # them safely from the parent. queueBotNotices() must NOT be used here:
+    # its timers would belong to the disposable child loop and never fire.
+    botNotice($self, $nick, $_) for @lines;
+    return 1;
+}
+
+# ===========================================================================
+# _memory_lines($self, $id_channel, $channel_label, %opts) -> @lines
+# mb664 step 1: bounded random channel-memory selector.
+#
+# This deliberately reuses channel_log_gather() as the live/archive source of
+# truth. Selection is an indexed timestamp seek; all follow-up work is limited
+# to one concrete day. No ORDER BY RAND(), no schema change, read-only only.
+# ===========================================================================
+sub _memory_rand_bounded {
+    my ($rand_cb, $limit) = @_;
+    $limit = int($limit // 0);
+    return 0 if $limit <= 1;
+    my $v = eval { $rand_cb->($limit) };
+    $v = 0 unless defined $v && !ref($v) && $v =~ /\A\d+(?:\.\d+)?\z/;
+    $v = int($v);
+    $v = 0 if $v < 0;
+    $v = $limit - 1 if $v >= $limit;
+    return $v;
+}
+
+sub _memory_lines {
+    my ($self, $id_channel, $channel_label, %opts) = @_;
+    my $dbh = $self->{dbh};
+    return () unless $dbh && defined $id_channel;
+
+    my $attempts = int($opts{attempts} // 4);
+    $attempts = 1 if $attempts < 1;
+    $attempts = 6 if $attempts > 6;
+    my $rand_cb = ref($opts{rand_cb}) eq 'CODE'
+        ? $opts{rand_cb}
+        : sub { rand($_[0]) };
+
+    my ($first_uts, $last_uts);
+    my $first_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+        SELECT ts, UNIX_TIMESTAMP(ts) AS uts
+        FROM __CLSRC__
+        WHERE id_channel = ?
+          AND event_type IN ('public','action')
+          AND ts < CURDATE() - INTERVAL 30 DAY
+        ORDER BY ts ASC
+        LIMIT 1
+    }, [ $id_channel ], sub {
+        my ($r) = @_;
+        return unless defined $r->{uts};
+        $first_uts = 0 + $r->{uts}
+            if !defined($first_uts) || $r->{uts} < $first_uts;
+    }, 'content');
+    return () unless $first_g->{live_ok} && defined $first_uts;
+
+    my $last_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+        SELECT ts, UNIX_TIMESTAMP(ts) AS uts
+        FROM __CLSRC__
+        WHERE id_channel = ?
+          AND event_type IN ('public','action')
+          AND ts < CURDATE() - INTERVAL 30 DAY
+        ORDER BY ts DESC
+        LIMIT 1
+    }, [ $id_channel ], sub {
+        my ($r) = @_;
+        return unless defined $r->{uts};
+        $last_uts = 0 + $r->{uts}
+            if !defined($last_uts) || $r->{uts} > $last_uts;
+    }, 'content');
+    return () unless $last_g->{live_ok} && defined $last_uts && $last_uts >= $first_uts;
+
+    my $span = $last_uts - $first_uts + 1;
+    my ($best, %seen_day);
+
+    ATTEMPT:
+    for (1 .. $attempts) {
+        my $anchor = $first_uts + _memory_rand_bounded($rand_cb, $span);
+        my $hit;
+        my $seek_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+            SELECT ts, UNIX_TIMESTAMP(ts) AS uts
+            FROM __CLSRC__
+            WHERE id_channel = ?
+              AND event_type IN ('public','action')
+              AND ts >= FROM_UNIXTIME(?)
+              AND ts < CURDATE() - INTERVAL 30 DAY
+            ORDER BY ts ASC
+            LIMIT 1
+        }, [ $id_channel, $anchor ], sub {
+            my ($r) = @_;
+            return unless defined $r->{uts};
+            $hit = $r if !$hit || $r->{uts} < $hit->{uts};
+        }, 'content');
+        return () unless $seek_g->{live_ok};
+        next ATTEMPT unless $hit && defined $hit->{ts};
+
+        my ($day) = $hit->{ts} =~ /\A(\d{4}-\d{2}-\d{2})/;
+        next ATTEMPT unless defined $day && !$seen_day{$day}++;
+
+        my ($msgs, $people) = (0, 0);
+        my $day_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+            SELECT COUNT(*) AS msgs, COUNT(DISTINCT nick) AS people
+            FROM __CLSRC__
+            WHERE id_channel = ?
+              AND event_type IN ('public','action')
+              AND ts >= ?
+              AND ts < DATE_ADD(?, INTERVAL 1 DAY)
+        }, [ $id_channel, $day, $day ], sub {
+            my ($r) = @_;
+            $msgs += $r->{msgs} // 0;
+            my $p = $r->{people} // 0;
+            $people = $p if $p > $people;  # same boundary approximation as !onthisday
+        }, 'content');
+        return () unless $day_g->{live_ok};
+        next ATTEMPT if $msgs <= 0;
+
+        my $cand = {
+            day => $day, msgs => 0 + $msgs, people => 0 + $people,
+            score => (0 + $msgs) + (5 * (0 + $people)),
+        };
+        $best = $cand if !$best || $cand->{score} > $best->{score};
+        last ATTEMPT if $msgs >= 5 && $people >= 2;
+    }
+    return () unless $best;
+
+    my $day = $best->{day};
+    my %nick_counts;
+    my $top_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+        SELECT nick, COUNT(*) AS c
+        FROM __CLSRC__
+        WHERE id_channel = ?
+          AND event_type IN ('public','action')
+          AND ts >= ?
+          AND ts < DATE_ADD(?, INTERVAL 1 DAY)
+        GROUP BY nick
+        ORDER BY c DESC
+        LIMIT 10
+    }, [ $id_channel, $day, $day ], sub {
+        my ($r) = @_;
+        $nick_counts{ $r->{nick} } += $r->{c} // 0
+            if defined($r->{nick}) && length($r->{nick});
+    }, 'content');
+    return () unless $top_g->{live_ok};
+
+    my $topnick = '?';
+    if (%nick_counts) {
+        ($topnick) = sort { $nick_counts{$b} <=> $nick_counts{$a} || $a cmp $b }
+            keys %nick_counts;
+    }
+
+    my @lines = (sprintf(
+        "\x{1F4FC} Memory from %s \x{2014} %s: %d messages, %d people, most active: %s.",
+        $channel_label, $day, $best->{msgs}, $best->{people}, $topnick,
+    ));
+
+    my $offset = _memory_rand_bounded($rand_cb, 86400);
+    my @quotes;
+    for my $pass (0, 1) {
+        @quotes = ();
+        my ($sql, $bind) = $pass == 0
+            ? (q{
+                SELECT ts, nick, event_type, publictext
+                FROM __CLSRC__
+                WHERE id_channel = ?
+                  AND event_type IN ('public','action')
+                  AND ts >= FROM_UNIXTIME(UNIX_TIMESTAMP(?) + ?)
+                  AND ts < DATE_ADD(?, INTERVAL 1 DAY)
+                  AND CHAR_LENGTH(publictext) BETWEEN 25 AND 300
+                ORDER BY ts ASC
+                LIMIT 40
+            }, [ $id_channel, $day, $offset, $day ])
+            : (q{
+                SELECT ts, nick, event_type, publictext
+                FROM __CLSRC__
+                WHERE id_channel = ?
+                  AND event_type IN ('public','action')
+                  AND ts >= ?
+                  AND ts < DATE_ADD(?, INTERVAL 1 DAY)
+                  AND CHAR_LENGTH(publictext) BETWEEN 25 AND 300
+                ORDER BY ts ASC
+                LIMIT 40
+            }, [ $id_channel, $day, $day ]);
+
+        my $quote_g = Mediabot::Helpers::channel_log_gather(
+            $self, $dbh, $sql, $bind, sub { push @quotes, $_[0] }, 'content'
+        );
+        return () unless $quote_g->{live_ok};
+        last if @quotes;
+    }
+
+    if (@quotes) {
+        my $pick = $quotes[_memory_rand_bounded($rand_cb, scalar @quotes)];
+        my $text = $pick->{publictext} // '';
+        $text =~ s/[\r\n\0]+/ /g;
+        $text = Mediabot::Helpers::truncate_utf8($text, 200, '...') if length($text) > 200;
+        my $speaker = $pick->{nick} // '?';
+        my $quote = ($pick->{event_type} // '') eq 'action'
+            ? "* $speaker $text"
+            : "<$speaker> $text";
+        push @lines, "\x{1F4AC} $quote";
     }
 
     return @lines;

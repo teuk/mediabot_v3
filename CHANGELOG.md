@@ -32,6 +32,28 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb664 — take a bounded trip through channel history
+- Added the public `memory` command: a deliberately different companion to
+  `onthisday` that takes the user to a bounded historical day instead of
+  looking up the same calendar date in previous years.
+- Reused the existing channel-history content policy and `+OnThisDay` opt-out,
+  including live/archive gathering, without adding a new chanset, migration or
+  database schema.
+- Historical selection avoids `ORDER BY RAND()` and unbounded history scans:
+  it uses indexed time seeks, then limits aggregation, top-talker and quote
+  selection to one selected day.
+- Runs through the established `CommandAsync` isolated-worker contract so
+  historical database work cannot block the IRC event loop. Worker output is
+  emitted as direct NOTICE intents for safe replay by the parent process.
+- Added focused MB664 regression coverage for bounded SQL/archive behaviour,
+  public dispatch, async execution, help/category integration and output
+  replay.
+- Runtime validation on the dev instance successfully returned a real
+  `#radiocapsule` memory. Focused async regression passed `91/91`; the normal
+  fast validation lane passed `5187/5187` in 178 seconds.
+- No database schema, migration, configuration, service or systemd change.
+
+
 ### mb663 — close the operational documentation loop
 - Made `tools/mediabot_doctor.pl` visible from the main README with practical
   examples for normal, strict, JSON and domain-scoped diagnostics, plus the
