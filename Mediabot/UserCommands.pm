@@ -8988,18 +8988,35 @@ sub mbProfil_ctx {
         $stats{trivia} = $r ? ($r->{score} // 0) : 0;
     }
 
-    # 6. Achievements
+    # 6. Achievements + progression already persisted by the Achievement
+    # system. mb659 deliberately reuses these counters instead of launching
+    # another CHANNEL_LOG scan from !profil.
     my $ach_count = 0;
     my $ach_total = 0;
+    my $ach_progress = {};
+    my $ach_next = '';
     if ($self->{achievements}) {
-        my $unl  = $self->{achievements}->get_for_nick($target, $channel);
-        my $defs = $self->{achievements}->list_definitions;
+        my $ach  = $self->{achievements};
+        my $unl  = $ach->get_for_nick($target, $channel);
+        my $defs = $ach->list_definitions;
         $ach_count = scalar keys %$unl;
         # mb658: !profil must not disclose locked secret achievements through
         # the denominator. A secret joins the visible total only after unlock.
         $ach_total = scalar grep {
             !$defs->{$_}{hidden} || exists $unl->{$_}
         } keys %$defs;
+
+        # progress_for_nick() reads the already-loaded Achievement registry.
+        # With the DB backend, get_for_nick() above has also pinned the durable
+        # profile lookup in cache, so this adds no new historical aggregation.
+        $ach_progress = eval { $ach->progress_for_nick($target, $channel) } || {};
+
+        # Reuse the same spoiler-safe ordering as !achievements progress.
+        # Locked mb658 secrets are filtered inside next_goals().
+        my $goals = eval { $ach->next_goals($target, $channel, 1) } || [];
+        if (@$goals) {
+            $ach_next = _ach_goal_line($ach, $defs, $goals->[0]);
+        }
     }
 
     # 7. Formats lisibles
@@ -9040,9 +9057,22 @@ sub mbProfil_ctx {
 
     my $peak_label = sprintf('%02dh-%02dh', $stats{peak_hour}, ($stats{peak_hour}+1)%24);
     botPrivmsg($self, $reply_to,
-        sprintf("  \x{1F4C8} 24h: %s  \x{B7}  peak %s (%d msgs)  \x{B7}  \x{1F3C6} %d/%d",
-            $spark, $peak_label, $stats{peak_count} // 0,
-            $ach_count, $ach_total));
+        sprintf("  \x{1F4C8} 24h: %s  \x{B7}  peak %s (%d msgs)",
+            $spark, $peak_label, $stats{peak_count} // 0));
+
+    # mb659: compact social/progression line. These are Achievement progress
+    # values already persisted by normal feature paths, not fresh DB scans.
+    my $streak_days   = int($ach_progress->{activity_streak_days} // 0);
+    my $night_msgs    = int($ach_progress->{night_messages} // 0);
+    my $morning_msgs  = int($ach_progress->{morning_messages} // 0);
+    my $comeback_days = int($ach_progress->{comeback_days} // 0);
+    botPrivmsg($self, $reply_to,
+        sprintf("  \x{1F3C6} %d/%d  \x{B7}  \x{1F525} streak best %dd  \x{B7}  \x{1F319} night %s  \x{B7}  \x{1F305} early %s  \x{B7}  \x{1FA83} comeback %dd",
+            $ach_count, $ach_total, $streak_days,
+            _fmt_n($night_msgs), _fmt_n($morning_msgs), $comeback_days));
+
+    botPrivmsg($self, $reply_to, "  \x{1F3AF} Next: $ach_next")
+        if length $ach_next;
 
     return 1;
 }

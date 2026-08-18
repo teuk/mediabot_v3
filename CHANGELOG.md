@@ -32,6 +32,23 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb659 — richer `!profil` progression card
+- Enriched `!profil` / `!profile` with Achievement progress already persisted by
+  the normal feature paths: best activity streak, Night Owl and Early Bird
+  message counters, and the longest observed comeback now sit beside the
+  existing activity, karma, trivia and 24-hour profile signals.
+- Added a single spoiler-safe `Next:` goal using the existing
+  `Achievements::next_goals()` ordering. Locked mb658 secret achievements remain
+  invisible even when their hidden threshold is closer than every public goal.
+- The visible achievement X/Y counter keeps the mb658 secret-denominator rule.
+  No new `CHANNEL_LOG` gather or direct profile SQL query is introduced: the
+  new values come from `progress_for_nick()` and the already-loaded Achievement
+  registry.
+- Added regression coverage for the rendered profile, hidden-secret safety and
+  the invariant that `!profil` still owns exactly three historical gathers and
+  its two pre-existing direct karma/trivia query sites. No schema, migration or
+  configuration change is required.
+
 ### mb658 — secret achievements
 - Added three deliberately hidden legendary achievements that extend counters
   Mediabot already persists: **The Witching Hour** (5,000 night messages),
