@@ -411,6 +411,29 @@ selected fast lane when debugging. They do not add tests outside it.
 tests with `--fast` during normal development. Keep the default full suite as
 the global checkpoint for cross-cutting changes and release validation.
 
+MB662 adds an **opt-in parallel pilot** without changing either default runner
+mode:
+
+```bash
+perl t/fast_parallel.pl --jobs 2
+```
+
+The pilot asks the committed MB661 lane for its exact selection, overlaps only
+non-sentinel files whose selected primary class is `PURE`, and runs all 11
+cross-cutting sentinels afterwards in a separate serial stage. It refuses more
+than four jobs and can show the deterministic plan without running tests:
+
+```bash
+perl t/fast_parallel.pl --jobs 2 --plan-only
+```
+
+For equivalence checks, `--expect-assertions <n>` can require the aggregate
+passing assertion count to match a known serial `--fast` reference. The pilot
+is deliberately separate from `t/test_commands.pl`: **MB662 does not make
+`--fast` parallel by default and does not parallelise the full suite.** It is a
+measured experiment that must prove both coverage and stability before any
+parallel mode is promoted.
+
 Run live tests when a local IRC test server is available:
 
 ```bash

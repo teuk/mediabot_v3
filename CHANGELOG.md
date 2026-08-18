@@ -32,6 +32,21 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb662 — opt-in conservative fast-lane parallel pilot
+- Added `t/fast_parallel.pl` as a deliberately separate MB661 acceleration
+  experiment. It reuses `--fast --list-selected` as the source of truth instead
+  of reimplementing test classification or fast-lane membership.
+- Only selected non-sentinel tests whose primary class is `PURE` may overlap.
+  The 11 cross-cutting MB661 sentinels always run afterwards in a separate
+  serial stage; unexpected non-PURE non-sentinels fail closed.
+- The pilot supports two to four jobs, deterministic plan-only inspection and
+  an optional aggregate assertion-count check against a known serial `--fast`
+  reference. Every selected fast-lane file must appear exactly once in either a
+  parallel shard or the serial sentinel stage.
+- Default `t/test_commands.pl`, serial `--fast` and the full suite remain
+  unchanged. MB662 is opt-in evidence gathering before any parallel execution
+  can be promoted into the normal validation workflow.
+
 ### mb661 — deterministic fast validation lane
 - Added an explicit `--fast` development-validation lane to
   `t/test_commands.pl`. It selects every test whose mb660 primary class is
