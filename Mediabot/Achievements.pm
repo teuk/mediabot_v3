@@ -9,7 +9,8 @@ package Mediabot::Achievements;
 # Hooks intégrés depuis :
 #   - mediabot.pl on_message_PRIVMSG   → first_msg, chatterbox, megaphone,
 #                                         night_owl, midnight_regular,
-#                                         creature_night, early_bird
+#                                         creature_night, witching_hour,
+#                                         early_bird
 #   - UserCommands.pm  mbKarma_ctx     → karma_star, karma_legend
 #   - UserCommands.pm  mbTrivia (ok)   → trivia_rookie, trivia_champion, trivia_sniper
 #   - UserCommands.pm  mbWordCount_ctx → wordsmith
@@ -166,6 +167,19 @@ my %ACH = (
         threshold => 1000,
         progress_kind => 'night_messages',
     },
+    # mb658: secret achievements reuse already-persisted monotonic counters.
+    # Their name/condition/progress stay out of public catalogue/goal views
+    # until the unlock itself reveals them.
+    witching_hour => {
+        emoji   => '🌑',
+        name    => 'The Witching Hour',
+        desc    => 'Sent 5 000 messages between 00h and 05h',
+        rarity  => 'legendary',
+        check_on => 'msg',
+        threshold => 5000,
+        progress_kind => 'night_messages',
+        hidden  => 1,
+    },
     early_bird => {
         emoji   => '🌅',
         name    => 'Early Bird',
@@ -205,6 +219,16 @@ my %ACH = (
         threshold => 100,
         progress_kind => 'activity_streak_days',
     },
+    eternal_flame => {
+        emoji   => '🔥',
+        name    => 'Eternal Flame',
+        desc    => 'Stayed active for 365 consecutive days',
+        rarity  => 'legendary',
+        check_on => 'activity',
+        threshold => 365,
+        progress_kind => 'activity_streak_days',
+        hidden  => 1,
+    },
     # mb656: comeback milestones. USER_SEEN is sampled on JOIN before the normal
     # upsert overwrites seen_at; the candidate is consumed only after the user
     # speaks and mb646 has resolved the live identity.
@@ -234,6 +258,16 @@ my %ACH = (
         check_on => 'comeback',
         threshold => 90,
         progress_kind => 'comeback_days',
+    },
+    phoenix_rising => {
+        emoji   => '🪶',
+        name    => 'Phoenix Rising',
+        desc    => 'Returned after at least 365 days away',
+        rarity  => 'legendary',
+        check_on => 'comeback',
+        threshold => 365,
+        progress_kind => 'comeback_days',
+        hidden  => 1,
     },
     trivia_rookie => {
         emoji   => '🧠',
@@ -1573,9 +1607,10 @@ sub progress_snapshot {
         my $kind = $ACH{$id}{progress_kind};
         my $goal = $self->threshold($id);
         my $entry = {
-            unlocked  => (exists $unlocked->{$id} ? 1 : 0),
-            threshold => $goal,
-            rarity    => $ACH{$id}{rarity},
+            unlocked   => (exists $unlocked->{$id} ? 1 : 0),
+            threshold  => $goal,
+            rarity     => $ACH{$id}{rarity},
+            hidden     => ($ACH{$id}{hidden} ? 1 : 0),
             measurable => ($kind && $goal ? 1 : 0),
         };
         if ($entry->{measurable}) {
@@ -1601,7 +1636,8 @@ sub next_goals {
     # l'ouvrira au prochain evenement) n'est PAS un objectif : le proposer
     # afficherait « 137/10 (100%) » dans la liste des choses a faire.
     my @candidates =
-        grep { !$snap->{$_}{unlocked} && $snap->{$_}{measurable}
+        grep { !$snap->{$_}{unlocked} && !$snap->{$_}{hidden}
+               && $snap->{$_}{measurable}
                && $snap->{$_}{current} < $snap->{$_}{threshold} }
         keys %$snap;
     my @sorted = sort {
@@ -2771,7 +2807,7 @@ sub check_msg {
     # overrides below the old hard-coded value of 50.
     my $hour_unlocked = $self->get_for_nick($nick, $channel);
     my @hour_pending = grep { !exists $hour_unlocked->{$_} }
-        qw(night_owl midnight_regular creature_night early_bird);
+        qw(night_owl midnight_regular creature_night witching_hour early_bird);
     if (@hour_pending) {
         my $hour_floor;
         for my $id (@hour_pending) {
@@ -2819,7 +2855,7 @@ sub check_msg {
                     $self->set_progress('night_messages', $nick, $channel, $night);
                     $self->set_progress('morning_messages', $nick, $channel, $morn);
 
-                    for my $id (qw(night_owl midnight_regular creature_night)) {
+                    for my $id (qw(night_owl midnight_regular creature_night witching_hour)) {
                         $self->unlock($nick, $channel, $id)
                             if $night >= $self->threshold($id);
                     }
@@ -2909,7 +2945,7 @@ sub check_streak {
     return 0 if $best < 1;
 
     my $saved = $self->set_progress('activity_streak_days', $nick, $channel, $best);
-    for my $id (qw(streak_week streak_month streak_master)) {
+    for my $id (qw(streak_week streak_month streak_master eternal_flame)) {
         $self->unlock($nick, $channel, $id)
             if $best >= $self->threshold($id);
     }
@@ -3017,7 +3053,7 @@ sub check_comeback {
     return 0 if $days < 1;
 
     my $saved = $self->set_progress('comeback_days', $nick, $channel, $days);
-    for my $id (qw(comeback_week comeback_month comeback_legend)) {
+    for my $id (qw(comeback_week comeback_month comeback_legend phoenix_rising)) {
         $self->unlock($nick, $channel, $id)
             if $days >= $self->threshold($id);
     }

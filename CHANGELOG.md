@@ -32,6 +32,23 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb658 — secret achievements
+- Added three deliberately hidden legendary achievements that extend counters
+  Mediabot already persists: **The Witching Hour** (5,000 night messages),
+  **Eternal Flame** (365 consecutive active days) and **Phoenix Rising**
+  (returning after at least 365 days away).
+- Locked secrets are excluded from `!achievements list`, `!achievements
+  progress`, closest-goal suggestions and visible achievement denominators.
+  Their name, condition, threshold and progress therefore remain undisclosed
+  until the normal unlock announcement reveals them.
+- Once unlocked, a secret behaves like any other achievement: it appears in the
+  user's achievement view and joins the visible total. `!profil` follows the
+  same rule so its X/Y counter cannot leak undiscovered secrets.
+- The three secrets reuse `night_messages`, `activity_streak_days` and
+  `comeback_days`. The night secret participates in the existing MB657
+  hour-band query; streak/comeback reuse their existing checks. No new
+  historical scan, table, migration or configuration key is required.
+
 ### mb657 — measurable Night Owl ladder
 - Turned the existing **Night Owl** (50 messages between 00h-05h) into the
   first measurable rung of a three-level ladder: **Midnight Regular** (250)

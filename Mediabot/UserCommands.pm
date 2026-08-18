@@ -8691,6 +8691,7 @@ sub mbAchievements_ctx {
         my @order = qw(common uncommon rare epic legendary);
         my %by_rarity;
         for my $id (keys %$defs) {
+            next if $defs->{$id}{hidden};   # mb658: secrets reveal themselves only on unlock
             push @{ $by_rarity{ $defs->{$id}{rarity} } }, $id;
         }
         for my $r (@order) {
@@ -8705,7 +8706,10 @@ sub mbAchievements_ctx {
                     "  $a->{emoji} \x02$a->{name}\x02 — $a->{desc}");
             }
         }
-        botPrivmsg($self, $nick, "Total: " . scalar(keys %$defs) . " achievements available.");
+        my $visible_total = scalar grep { !$defs->{$_}{hidden} } keys %$defs;
+        botPrivmsg($self, $nick,
+            "Total: $visible_total visible achievements available. "
+          . "🔒 Secret achievements are revealed only when unlocked.");
         return 1;
     }
 
@@ -8737,12 +8741,20 @@ sub mbAchievements_ctx {
             return 1;
         }
         my $snap = $ach->progress_snapshot($who, $channel);
-        my @locked = grep { !$snap->{$_}{unlocked} && $snap->{$_}{measurable} }
-                     keys %$snap;
-        my $done   = grep { $snap->{$_}{unlocked} } keys %$snap;
+        # mb658: locked secrets must not leak through names, conditions,
+        # thresholds, percentages or even a progress-bar row. Once unlocked,
+        # they become ordinary visible achievements.
+        my @visible = grep { !$snap->{$_}{hidden} || $snap->{$_}{unlocked} }
+                      keys %$snap;
+        my @locked = grep {
+            !$snap->{$_}{unlocked}
+            && !$snap->{$_}{hidden}
+            && $snap->{$_}{measurable}
+        } keys %$snap;
+        my $done = grep { $snap->{$_}{unlocked} } @visible;
         unless (@locked) {
             botNotice($self, $nick,
-                "$who has unlocked every measurable achievement on $channel. Nothing left to chase.");
+                "$who has unlocked every visible measurable achievement on $channel. Nothing left to chase.");
             return 1;
         }
         my @sorted = sort {
@@ -8753,8 +8765,8 @@ sub mbAchievements_ctx {
         # Emoji litteral, comme partout ailleurs dans ce fichier : un
         # \x{...} rend la chaine « wide » et l'accent du tiret cadratin
         # ressortait alors en mojibake sur le canal.
-        botNotice($self, $nick, sprintf('📊 %s on %s — %d/%d unlocked, %d in progress:',
-            "\x02$who\x02", $channel, $done, scalar(keys %$snap), scalar @sorted));
+        botNotice($self, $nick, sprintf('📊 %s on %s — %d/%d visible unlocked, %d in progress:',
+            "\x02$who\x02", $channel, $done, scalar(@visible), scalar @sorted));
         my $shown = 0;
         for my $id (@sorted) {
             last if $shown >= 12;   # une notice par ligne : on borne le flood
@@ -8805,9 +8817,12 @@ sub mbAchievements_ctx {
     } keys %$unlocked;
 
     my $scope_str = $cross ? ' (all channels)' : '';
+    my $visible_total = scalar grep {
+        !$defs->{$_}{hidden} || exists $unlocked->{$_}
+    } keys %$defs;
     botPrivmsg($self, $reply_to,
-        "🏆 \x02$target\x02 — " . scalar(@sorted_ids) . " / " . scalar(keys %$defs)
-        . " achievements$scope_str:");
+        "🏆 \x02$target\x02 — " . scalar(@sorted_ids) . " / " . $visible_total
+        . " visible achievements$scope_str:");
 
     # Afficher par groupes de 4 par ligne pour ne pas flooder
     my @cells;
@@ -8977,9 +8992,14 @@ sub mbProfil_ctx {
     my $ach_count = 0;
     my $ach_total = 0;
     if ($self->{achievements}) {
-        my $unl = $self->{achievements}->get_for_nick($target, $channel);
+        my $unl  = $self->{achievements}->get_for_nick($target, $channel);
+        my $defs = $self->{achievements}->list_definitions;
         $ach_count = scalar keys %$unl;
-        $ach_total = scalar keys %{ $self->{achievements}->list_definitions };
+        # mb658: !profil must not disclose locked secret achievements through
+        # the denominator. A secret joins the visible total only after unlock.
+        $ach_total = scalar grep {
+            !$defs->{$_}{hidden} || exists $unl->{$_}
+        } keys %$defs;
     }
 
     # 7. Formats lisibles

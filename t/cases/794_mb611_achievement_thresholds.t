@@ -77,6 +77,9 @@ return sub {
         [ 'duel',      qw(duel_warrior duel_master) ],
         [ 'quotegame', qw(quote_detective quote_master) ],
         [ 'mots',      qw(wordsmith polyglot) ],
+        [ 'nuit',      qw(night_owl midnight_regular creature_night witching_hour) ],
+        [ 'streak',    qw(streak_week streak_month streak_master eternal_flame) ],
+        [ 'comeback',  qw(comeback_week comeback_month comeback_legend phoenix_rising) ],
     );
     my $monotone = 0;
     for my $ladder (@ladders) {
