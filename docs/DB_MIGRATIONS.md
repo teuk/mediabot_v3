@@ -205,6 +205,82 @@ After the migration is applied, the first Mediabot startup imports any existing
 legacy JSON state idempotently and renames the source file to
 `achievements.json.migrated-<timestamp>`.
 
+### MB646 operational upgrade runbook
+
+This procedure is for an **existing** Mediabot instance. A fresh installation
+uses `install/mediabot.sql` and must not replay the historical migration stack.
+
+Before changing anything, run the Doctor against the configuration actually used
+by the instance:
+
+```bash
+perl tools/mediabot_doctor.pl --conf=mediabot.conf
+```
+
+Before MB646 is applied, completely absent achievement tables are a supported
+legacy **runtime** state: Mediabot keeps using JSON fallback. The Doctor reports
+that fallback, but its delegated schema-drift check also sees the four required
+MB646 tables as missing. Therefore an otherwise healthy pre-MB646 instance is
+expected to finish with an overall `UNSAFE` verdict until the migration is
+applied. JSON fallback means the old runtime can still operate; it does **not**
+mean that updating/restarting the new code against the unmigrated database is
+safe.
+
+A **partial** MB646 schema is different again and must be investigated rather
+than treated as a normal upgrade starting point.
+
+For the migration itself:
+
+1. stop the Mediabot instance so achievement state cannot change during the
+   transition;
+2. back up the configured database;
+3. connect to that database with `utf8mb4` enabled;
+4. apply `install/migrations/20260816_achievements_db.sql`;
+5. while the bot is still stopped, verify schema and migration state;
+6. restart the instance;
+7. run the Doctor again against the live instance.
+
+The pre-restart checks can be performed with:
+
+```bash
+perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes
+perl tools/mediabot_doctor.pl --conf=mediabot.conf --domain database --domain migrations
+```
+
+Then restart the instance using its normal systemd/deployment contract and run:
+
+```bash
+perl tools/mediabot_doctor.pl --conf=mediabot.conf
+```
+
+On the first DB-backed startup, Mediabot imports legacy achievement state
+transactionally. If the DB is still empty it can merge the live JSON file with
+compatible archived releases from the **same deployment family**:
+
+```text
+<root>.NNN
+<root>.old.YYYYMMDD_HHMMSS
+```
+
+Sibling deployment families are deliberately ignored. For example, an instance
+running from `mediabot3` must not import achievement state from
+`mediabot_v3.*`.
+
+Only the live legacy JSON file is renamed after a successful import:
+
+```text
+var/achievements.json
+→ var/achievements.json.migrated-<timestamp>
+```
+
+Historical archive files are left untouched. If the import fails, its database
+transaction is rolled back and the live JSON is not archived as migrated.
+
+For an instance whose MB646 tables are already populated, startup does not
+repeat the historical archive-family scan. Any live legacy JSON still present
+can still be merged idempotently; otherwise MariaDB simply remains the source
+of truth.
+
 ## Safety rules
 
 Do not apply generated SQL blindly.

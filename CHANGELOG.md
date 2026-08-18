@@ -32,6 +32,24 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb663 — close the operational documentation loop
+- Made `tools/mediabot_doctor.pl` visible from the main README with practical
+  examples for normal, strict, JSON and domain-scoped diagnostics, plus the
+  operational meaning of `READY`, `DEGRADED` and `UNSAFE`.
+- Added the missing MB646 upgrade runbook for existing instances: pre-migration
+  Doctor inspection, database backup, migration, schema/migration verification,
+  restart through the normal service contract and post-restart Doctor check.
+- Documented the important distinction between the supported legacy JSON
+  runtime fallback and update safety: a pre-MB646 instance may still run on
+  JSON, while the Doctor correctly reports the missing required DB schema as
+  `UNSAFE` until the migration is installed.
+- Documented same-deployment-family archive recovery, idempotent live JSON
+  import, successful `.migrated-<timestamp>` archival, rollback behaviour and
+  the already-populated MB646 path.
+- Documentation/metadata only: no runtime code, database schema, migration,
+  configuration, service or systemd behaviour changes.
+
+
 ### mb662 — opt-in conservative fast-lane parallel pilot
 - Added `t/fast_parallel.pl` as a deliberately separate MB661 acceleration
   experiment. It reuses `--fast --list-selected` as the source of truth instead

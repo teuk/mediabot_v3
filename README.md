@@ -317,6 +317,47 @@ See:
 
 ---
 
+## Mediabot Doctor
+
+`tools/mediabot_doctor.pl` is the read-only operational diagnostic for a real
+Mediabot instance. It inspects runtime, configuration, filesystem, systemd /
+deployment state, Git state when applicable, database state and migrations
+without repairing, restarting or modifying the instance.
+
+Run it against the configuration actually used by the instance:
+
+```bash
+perl tools/mediabot_doctor.pl --conf=mediabot.conf
+```
+
+For example, for an Undernet-style instance:
+
+```bash
+perl tools/mediabot_doctor.pl --conf=mbundernet.conf
+```
+
+Useful modes include:
+
+```bash
+perl tools/mediabot_doctor.pl --conf=mediabot.conf --strict
+perl tools/mediabot_doctor.pl --conf=mediabot.conf --json
+perl tools/mediabot_doctor.pl --conf=mediabot.conf --domain database
+```
+
+The final verdict is intentionally operational:
+
+```text
+READY     no blocking problem detected
+DEGRADED  warning or unknown state requires review
+UNSAFE    at least one failing condition makes operation/update unsafe
+```
+
+`--strict` also returns failure for warnings or unknown states. The Doctor is a
+diagnostic tool only: it does not apply migrations, edit configuration, restart
+services or repair deployment trees.
+
+---
+
 ## Syntax checks
 
 From the project root:
