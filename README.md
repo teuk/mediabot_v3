@@ -38,7 +38,7 @@ Instead of assembling a large collection of unrelated scripts, operators get a c
 
 | What you need | What Mediabot provides |
 |---|---|
-| **Community memory** | `seen`, `onthisday`, `memory`, quotes, factoids, karma, notes, reminders, milestones, and long-term channel history |
+| **Community memory** | `seen`, `onthisday`, `memory`, `awards`, quotes, factoids, karma, notes, reminders, milestones, and long-term channel history |
 | **Operational safety** | guided configuration, database migrations, schema/type/index drift checks, security audit, and startup integrity checks |
 | **Modern IRC features** | rich URL previews, media helpers, AI integrations, radio tooling, antiflood protection, and community analytics |
 | **Observability** | Prometheus metrics, Grafana resources, structured logs, and systemd-oriented operations |
@@ -57,6 +57,7 @@ A typical channel can use commands such as:
 <prefix>mood
 <prefix>onthisday
 <prefix>memory
+<prefix>awards 7d
 <prefix>topquote
 <prefix>milestone
 ?coffee

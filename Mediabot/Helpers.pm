@@ -2047,6 +2047,7 @@ sub _af_conf_int {
 #   ai      → 10s per channel
 #   trivia  → 5s per channel
 #   poll    → 0s (no cooldown — managed by poll active flag)
+#   awards  → 20s per channel (mb666 cross-feature aggregation)
 #
 # Operators (.chanset) can override via _cmd_cooldown config (CC2).
 # ---------------------------------------------------------------------------
@@ -2059,6 +2060,9 @@ sub checkCmdCooldown {
         ai      => 10,
         trivia  => 5,
         openai  => 10,
+        # mb666: awards performs bounded cross-feature aggregation in a worker.
+        # Keep the cooldown here, in the PARENT, so it survives the child.
+        awards  => 20,
         # mb615-B1: 'actualites' enchaine deux appels reseau payants (Tavily
         # puis Claude). Le cooldown DOIT vivre ici, cote parent : la commande
         # s'execute dans un worker jetable, ou tout compteur pose meurt avec

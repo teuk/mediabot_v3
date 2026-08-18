@@ -116,6 +116,7 @@ our @EXPORT = qw(
     mbMood_ctx
     mbMilestone_ctx
     mbLeaderboard_ctx
+    mbAwards_ctx
     mbChronos_ctx
     mbFeatures_ctx
     mbObservatory_ctx
@@ -11422,6 +11423,214 @@ sub mbLeaderboard_ctx {
 }
 
 
+
+# ---------------------------------------------------------------------------
+# mbAwards_ctx --- !awards [7d|30d]
+# mb666: compact cross-feature channel awards. This is deliberately NOT a
+# second leaderboard: each category names one role from a bounded recent
+# window. Heavy reads run under CommandAsync from the public dispatcher.
+# ---------------------------------------------------------------------------
+sub _awards_add {
+    my ($store, $nick, $metric, $value) = @_;
+    return unless ref($store) eq 'HASH' && defined($nick) && defined($metric);
+    $nick =~ s/^\s+|\s+$//g;
+    return if $nick eq '';
+    $value = int($value // 0);
+    return if $value <= 0;
+
+    my $key = lc $nick;
+    $store->{$key}{display} //= $nick;
+    $store->{$key}{$metric} = int($store->{$key}{$metric} // 0) + $value;
+    return 1;
+}
+
+sub _awards_pick {
+    my ($store, $metric) = @_;
+    return unless ref($store) eq 'HASH' && defined $metric;
+    my @keys = grep { int($store->{$_}{$metric} // 0) > 0 } keys %$store;
+    return unless @keys;
+    @keys = sort {
+           int($store->{$b}{$metric} // 0) <=> int($store->{$a}{$metric} // 0)
+        || lc($store->{$a}{display} // $a) cmp lc($store->{$b}{display} // $b)
+    } @keys;
+    my $k = $keys[0];
+    return [ $store->{$k}{display} // $k, int($store->{$k}{$metric} // 0) ];
+}
+
+sub mbAwards_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel // '';
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    unless (isIrcChannelTarget($channel)) {
+        botNotice($self, $nick, 'Syntax: awards [7d|30d]  (use it in a channel)');
+        return 1;
+    }
+
+    my $period = @args ? lc($args[0] // '') : '7d';
+    if (@args > 1 || $period !~ /\A(?:7d|30d)\z/) {
+        botNotice($self, $nick, 'Syntax: awards [7d|30d]');
+        return 1;
+    }
+    my $days = ($period eq '30d') ? 30 : 7;
+
+    my $dbh = $self->{dbh};
+    unless ($dbh) {
+        botNotice($self, $nick, 'awards: database unavailable.');
+        return 1;
+    }
+
+    my $channel_obj = $self->{channels}{lc $channel};
+    my $id_channel  = $channel_obj ? eval { $channel_obj->get_id } : undef;
+    unless (defined($id_channel) && $id_channel =~ /^\d+$/) {
+        botNotice($self, $nick, 'awards: channel not known to the bot.');
+        return 1;
+    }
+
+    # One archive-aware history gather gives both total activity and the same
+    # 00:00-05:59 band used by the Night Owl achievement ladder.
+    my %msg;
+    my $g = Mediabot::Helpers::channel_log_gather($self, $dbh, qq{
+        SELECT cl.nick AS nick,
+               COUNT(*) AS msg_count,
+               SUM(CASE WHEN HOUR(cl.ts) BETWEEN 0 AND 5 THEN 1 ELSE 0 END) AS night_count
+        FROM __CLSRC__ cl
+        JOIN CHANNEL c ON c.id_channel = cl.id_channel
+        WHERE c.name = ?
+          AND cl.event_type IN ('public','action')
+          AND cl.ts >= NOW() - INTERVAL $days DAY
+        GROUP BY cl.nick
+    }, [ $channel ], sub {
+        my ($r) = @_;
+        _awards_add(\%msg, $r->{nick}, 'messages', $r->{msg_count});
+        _awards_add(\%msg, $r->{nick}, 'night',    $r->{night_count});
+    }, 'content');
+
+    unless ($g->{live_ok}) {
+        botNotice($self, $nick, 'awards: channel history is temporarily unavailable.');
+        return 1;
+    }
+
+    # One bounded KARMA_LOG query produces both receiver and giver awards.
+    my %karma;
+    my $sth_k = eval { $dbh->prepare(qq{
+        SELECT x.who,
+               SUM(x.received) AS positive_received,
+               SUM(x.given)    AS positive_given
+        FROM (
+            SELECT kl.nick AS who,
+                   SUM(CASE WHEN kl.delta = 1 THEN 1 ELSE 0 END) AS received,
+                   0 AS given
+            FROM KARMA_LOG kl
+            WHERE kl.id_channel = ?
+              AND kl.ts >= NOW() - INTERVAL $days DAY
+            GROUP BY kl.nick
+            UNION ALL
+            SELECT kl.from_nick AS who,
+                   0 AS received,
+                   SUM(CASE WHEN kl.delta = 1 THEN 1 ELSE 0 END) AS given
+            FROM KARMA_LOG kl
+            WHERE kl.id_channel = ?
+              AND kl.ts >= NOW() - INTERVAL $days DAY
+            GROUP BY kl.from_nick
+        ) x
+        WHERE x.who IS NOT NULL AND x.who <> ''
+        GROUP BY x.who
+    }) };
+    if ($sth_k && eval { $sth_k->execute($id_channel, $id_channel) }) {
+        while (my $r = $sth_k->fetchrow_hashref) {
+            _awards_add(\%karma, $r->{who}, 'received', $r->{positive_received});
+            _awards_add(\%karma, $r->{who}, 'given',    $r->{positive_given});
+        }
+        eval { $sth_k->finish };
+    }
+    elsif ($sth_k) {
+        eval { $sth_k->finish };
+    }
+
+    # One bounded community query merges quote and factoid contributions.
+    # Anonymous quotes have no durable author and are intentionally ignored.
+    my %community;
+    my $sth_c = eval { $dbh->prepare(qq{
+        SELECT x.who,
+               SUM(x.quote_count)   AS quote_count,
+               SUM(x.factoid_count) AS factoid_count
+        FROM (
+            SELECT COALESCE(NULLIF(u.nickname, ''), '') AS who,
+                   COUNT(*) AS quote_count,
+                   0 AS factoid_count
+            FROM QUOTES q
+            LEFT JOIN USER u ON u.id_user = q.id_user
+            WHERE q.id_channel = ?
+              AND q.ts >= NOW() - INTERVAL $days DAY
+            GROUP BY COALESCE(NULLIF(u.nickname, ''), '')
+            UNION ALL
+            SELECT COALESCE(NULLIF(f.created_by_nick, ''), NULLIF(u.nickname, ''), '') AS who,
+                   0 AS quote_count,
+                   COUNT(*) AS factoid_count
+            FROM FACTOID f
+            LEFT JOIN USER u ON u.id_user = f.created_by
+            WHERE f.id_channel = ?
+              AND f.created_at >= NOW() - INTERVAL $days DAY
+            GROUP BY COALESCE(NULLIF(f.created_by_nick, ''), NULLIF(u.nickname, ''), '')
+        ) x
+        WHERE x.who <> ''
+        GROUP BY x.who
+    }) };
+    if ($sth_c && eval { $sth_c->execute($id_channel, $id_channel) }) {
+        while (my $r = $sth_c->fetchrow_hashref) {
+            _awards_add(\%community, $r->{who}, 'quotes',   $r->{quote_count});
+            _awards_add(\%community, $r->{who}, 'factoids', $r->{factoid_count});
+        }
+        eval { $sth_c->finish };
+    }
+    elsif ($sth_c) {
+        eval { $sth_c->finish };
+    }
+
+    my $voice     = _awards_pick(\%msg,       'messages');
+    my $night     = _awards_pick(\%msg,       'night');
+    my $magnet    = _awards_pick(\%karma,     'received');
+    my $generous  = _awards_pick(\%karma,     'given');
+    my $archivist = _awards_pick(\%community, 'quotes');
+    my $lore      = _awards_pick(\%community, 'factoids');
+
+    my @lines;
+    my @activity;
+    push @activity, "\x{1F5E3} Top Voice: \x02$voice->[0]\x02 \x{2014} " . _fmt_n($voice->[1]) . ' msgs'
+        if $voice;
+    push @activity, "\x{1F319} Night Owl: \x02$night->[0]\x02 \x{2014} " . _fmt_n($night->[1]) . ' night msgs'
+        if $night;
+    push @lines, join("  \x{B7}  ", @activity) if @activity;
+
+    my @karma_line;
+    push @karma_line, "\x{2728} Karma Magnet: \x02$magnet->[0]\x02 \x{2014} " . _fmt_n($magnet->[1]) . ' positive votes'
+        if $magnet;
+    push @karma_line, "\x{1F381} Generous Soul: \x02$generous->[0]\x02 \x{2014} " . _fmt_n($generous->[1]) . ' positive votes'
+        if $generous;
+    push @lines, join("  \x{B7}  ", @karma_line) if @karma_line;
+
+    my @community_line;
+    push @community_line, "\x{1F4DC} Archivist: \x02$archivist->[0]\x02 \x{2014} " . _fmt_n($archivist->[1]) . ' quotes'
+        if $archivist;
+    push @community_line, "\x{1F4DA} Lorekeeper: \x02$lore->[0]\x02 \x{2014} " . _fmt_n($lore->[1]) . ' factoids'
+        if $lore;
+    push @lines, join("  \x{B7}  ", @community_line) if @community_line;
+
+    my $header = "\x{1F3C6} \x02$channel Awards\x02 \x{2014} last $days days";
+    if (!@lines) {
+        botPrivmsg($self, $channel, "$header \x{2014} not enough activity yet.");
+        return 1;
+    }
+
+    botPrivmsg($self, $channel, $header);
+    botPrivmsg($self, $channel, "  $_") for @lines;
+    return 1;
+}
+
+
 # ---------------------------------------------------------------------------
 # mbChronos_ctx --- !chronos
 # Chronologie ASCII des événements marquants du canal :
@@ -11740,7 +11949,7 @@ sub mbFeatures_ctx {
             . "  | catalogue: $ach_defs",
         "  \x{1F3B2} games: $games  | commands: duel, horoscope, compat, quotegame",
         "  \x{1F517} links: UrlTitle=$urltitle  Youtube=$youtube  YoutubeSearch=$ytsearch",
-        "  \x{1F4AC} social memory: profil/radar/dashboard/leaderboard/chronos/mood/memory available",
+        "  \x{1F4AC} social memory: profil/radar/dashboard/leaderboard/awards/chronos/mood/memory available",
         "  \x{1F916} integrations: Claude=$claude  RandomQuote=$randomquote  Radio=$radio",
         "  \x{1F6E1} safety/output: AntiFlood=$antiflood  NoColors=$nocolors  Metrics=$metrics",
         "  Help: help social / help games / help chansets",

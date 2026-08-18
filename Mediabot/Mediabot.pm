@@ -2205,6 +2205,7 @@ sub mbCommandPublic {
                               && Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'leaderboard', sub { mbLeaderboard_ctx($ctx) }) },
         lb           => sub { $ctx->require_level('Administrator')
                               && Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'leaderboard', sub { mbLeaderboard_ctx($ctx) }) },      # alias court
+        awards       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'awards', sub { mbAwards_ctx($ctx) }) }, # mb666
         chronos      => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },
         chrono       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },          # alias court
         timeline     => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },          # alias EN
@@ -2777,6 +2778,7 @@ dashboard|dashboard|public|Show a compact dashboard for the current channel.
 chanstats|chanstats|public|Alias for dashboard.
 leaderboard|leaderboard [msgs|karma|trivia|duels|achievs] [24h|7d|30d] [full]|public|Show channel rankings, optionally limited to recent msgs/karma. Administrator+.
 lb|lb [msgs|karma|trivia|duels|achievs] [24h|7d|30d] [full]|public|Alias for leaderboard. Administrator+.
+awards|awards [7d|30d]|public|Celebrate recent channel roles across activity, karma, quotes and factoids.
 chronos|chronos [short|full]|public|Show a compact or full narrative timeline of the current channel.
 chrono|chrono [short|full]|public|Alias for chronos.
 timeline|timeline [short|full]|public|Alias for chronos.
@@ -3068,6 +3070,7 @@ sub _mbHelpExplicitCategory {
         onthisday => 'social',
         otd      => 'social',
         memory   => 'social',
+        awards   => 'social',
         # messaging (tell was landing in admin via "delivered"/"nick")
         tell     => 'general',
         # tools
@@ -3102,7 +3105,7 @@ sub _mbHelpCategoryForCommand {
     my $desc   = lc($entry->{desc}   // '');
     my $hay    = "$cmd $syntax $level $desc";
 
-    return 'social' if $cmd =~ /^(?:achievements|achievs|profil|profile|radar|dashboard|chanstats|leaderboard|lb|chronos|chrono|timeline|features|capabilities|caps|observatory|obs|mood|ambiance)$/;
+    return 'social' if $cmd =~ /^(?:achievements|achievs|profil|profile|radar|dashboard|chanstats|leaderboard|lb|awards|chronos|chrono|timeline|features|capabilities|caps|observatory|obs|mood|ambiance)$/;
     return 'games' if $cmd =~ /^(?:duel|horoscope|horo|compat|affinity|quotegame|qg)$/;
     return 'settings' if $cmd =~ /^(?:chanset)$/;
 

@@ -32,6 +32,29 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb666 — celebrate the people shaping a channel
+- Added the public `awards` command with a default 7-day window and an optional
+  reviewed 30-day window: `awards` / `awards 7d` / `awards 30d`.
+- Added six compact social awards from existing data: Top Voice, Night Owl,
+  Karma Magnet, Generous Soul, Archivist and Lorekeeper.
+- Kept the aggregation bounded and asynchronous: one archive-aware
+  `CHANNEL_LOG` gather plus one karma query and one quote/factoid query, all
+  constrained to the selected 7- or 30-day window and executed through the
+  existing `CommandAsync` worker path.
+- Added a 20-second parent-side cooldown for the cross-feature aggregation and
+  integrated `awards` into public dispatch, help metadata and the social command
+  category.
+- Preserved the database contract: no schema change, migration, configuration
+  key or new persistence layer, and no `ORDER BY RAND()` history scan.
+- Hardened the test infrastructure encountered during validation: MB333 no
+  longer assumes a hard-coded standalone TAP total, and MB666 output uses
+  `\x{2014}` for em dashes so wide-character strings remain compatible with
+  the existing MB620 encoding guard.
+- Runtime validation succeeded on `#radiocapsule` for both 7-day and 30-day
+  windows. Focused regression passed `107/107`; the normal fast validation lane
+  passed `5189/5189` in 178 seconds.
+
+
 ### mb665 — connect profiles to their wider community footprint
 - Enriched the existing `profil` / `profile` view with a compact community
   contribution line built from already-persisted quote and factoid ownership.

@@ -40,8 +40,10 @@ my $case = sub {
         'three historical unguarded-exit cases complete successfully');
     $assert->like($real_out, qr/\[ 383_dispatch_integrity\.t \].*?\[ 495_mb281_scriptdryrun_command_token_contract\.t \].*?\[ 496_mb282_plugin_autoload_config_scalar_contract\.t \]/s,
         'runner continues past the first standalone exit case');
-    $assert->like($real_out, qr/PASSED\s*:\s*57\/57/,
-        'standalone TAP assertions are merged into the final summary');
+    my $real_tap_ok = () = $real_out =~ /^ok(?:\s+\d+)?\s+-/mg;
+    $assert->like($real_out,
+        qr/PASSED\s*:\s*\Q$real_tap_ok\E\/\Q$real_tap_ok\E/,
+        'standalone TAP assertions are merged into the final summary without a hard-coded total');
 
     my ($pass_fh, $pass_path) = tempfile(
         'mb333_isolated_pass_XXXX',

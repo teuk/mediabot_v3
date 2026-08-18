@@ -50,6 +50,7 @@ my @important_cmds = qw(
     quotegame
     mood
     leaderboard
+    awards
     chronos
     features
     capabilities
@@ -203,6 +204,7 @@ my @required_exports = qw(
     checkQuotegameAnswer
     mbMood_ctx
     mbLeaderboard_ctx
+    mbAwards_ctx
     mbChronos_ctx
     mbFeatures_ctx
     mbObservatory_ctx
