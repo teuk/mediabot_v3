@@ -8857,6 +8857,115 @@ sub mbAchievements_ctx {
 # mbProfil_ctx --- !profil [nick]
 # Fiche d'identité complète d'un nick sur le canal courant.
 # ---------------------------------------------------------------------------
+# mb665: compact contribution counters from existing community tables.
+# Keep this outside mbProfil_ctx so the profile's historical/SQL contract stays
+# easy to audit: no additional CHANNEL_LOG gather and one isolated, fail-soft
+# read for QUOTES + FACTOID only.
+sub _profile_community_footprint {
+    my ($self, $dbh, $channel, $target) = @_;
+    return unless $dbh && defined $channel && defined $target;
+
+    # mb665: community tables are tied to registered USER ids while IRC history
+    # is tied to visible nicks. Resolve that boundary conservatively:
+    #   1. exact registered nickname;
+    #   2. otherwise a UNIQUE registered USER id already attached to this nick
+    #      by the durable mb646 Achievement identity graph.
+    # If the alias is ambiguous (more than one registered id), do not guess.
+    my $id_user;
+
+    my $sth_u = eval {
+        $dbh->prepare(q{
+            SELECT id_user
+            FROM USER
+            WHERE nickname = ?
+            LIMIT 1
+        })
+    };
+    if ($sth_u && eval { $sth_u->execute($target) }) {
+        my $r = eval { $sth_u->fetchrow_hashref };
+        $id_user = $r->{id_user}
+            if $r && defined($r->{id_user}) && $r->{id_user} =~ /^\d+$/;
+        eval { $sth_u->finish };
+    }
+
+    unless (defined $id_user) {
+        my $sth_a = eval {
+            $dbh->prepare(q{
+                SELECT p.id_user
+                FROM ACHIEVEMENT_PROFILE p
+                JOIN CHANNEL c ON c.id_channel = p.id_channel
+                LEFT JOIN ACHIEVEMENT_IDENTITY i
+                  ON i.id_achievement_profile = p.id_achievement_profile
+                WHERE c.name = ?
+                  AND p.id_user IS NOT NULL
+                  AND (p.display_nick = ? OR i.nick = ?)
+                GROUP BY p.id_user
+                ORDER BY MAX(p.last_seen_at) DESC
+                LIMIT 2
+            })
+        };
+
+        if ($sth_a && eval { $sth_a->execute($channel, $target, $target) }) {
+            my @ids;
+            while (my $r = eval { $sth_a->fetchrow_hashref }) {
+                last unless $r;
+                push @ids, 0 + $r->{id_user}
+                    if defined($r->{id_user}) && $r->{id_user} =~ /^\d+$/;
+                last if @ids >= 2;
+            }
+            eval { $sth_a->finish };
+            $id_user = $ids[0] if @ids == 1;
+        }
+    }
+
+    my $sth = eval { $dbh->prepare(q{
+        SELECT
+            (SELECT COUNT(*)
+               FROM QUOTES q
+               JOIN CHANNEL cq ON cq.id_channel = q.id_channel
+              WHERE cq.name = ?
+                AND (
+                    (? IS NOT NULL AND q.id_user = ?)
+                    OR q.id_user IN (
+                        SELECT u.id_user FROM USER u WHERE u.nickname = ?
+                    )
+                )) AS quote_count,
+            (SELECT COUNT(*)
+               FROM FACTOID f
+               JOIN CHANNEL cf ON cf.id_channel = f.id_channel
+              WHERE cf.name = ?
+                AND (
+                    f.created_by_nick = ?
+                    OR (? IS NOT NULL AND f.created_by = ?)
+                    OR f.created_by IN (
+                        SELECT u.id_user FROM USER u WHERE u.nickname = ?
+                    )
+                )) AS factoid_count
+    }) };
+    return unless $sth;
+
+    my $ok = eval {
+        $sth->execute(
+            $channel, $id_user, $id_user, $target,
+            $channel, $target, $id_user, $id_user, $target,
+        )
+    };
+    unless ($ok) {
+        eval { $sth->finish };
+        return;
+    }
+
+    my $r = eval { $sth->fetchrow_hashref };
+    eval { $sth->finish };
+    return unless $r;
+
+    return {
+        quote_count   => int($r->{quote_count}   // 0),
+        factoid_count => int($r->{factoid_count} // 0),
+        (defined($id_user) ? (id_user => 0 + $id_user) : ()),
+    };
+}
+
 sub mbProfil_ctx {
     my ($ctx) = @_;
     my $self    = $ctx->bot;
@@ -9020,7 +9129,12 @@ sub mbProfil_ctx {
         }
     }
 
-    # 7. Formats lisibles
+    # 7. mb665 Community Footprint. The helper is deliberately separate from
+    # the three CHANNEL_LOG gathers above and fails soft if the optional social
+    # read cannot be completed.
+    my $community = _profile_community_footprint($self, $dbh, $channel, $target) || {};
+
+    # 8. Formats lisibles
     my $first_s = ($stats{first_ts} && $stats{first_ts} =~ /^(\d{4}-\d{2}-\d{2})/) ? $1 : '?';
     my $last_ago = '?';
     if ($stats{last_ts} && $stats{last_ts} =~ /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/) {
@@ -9035,7 +9149,7 @@ sub mbProfil_ctx {
         }
     }
 
-    # 8. Karma sign (vert/rouge)
+    # 9. Karma sign (vert/rouge)
     my $karma_sign = '0';
     if (defined $stats{karma}) {
         $karma_sign = $stats{karma} > 0 ? "\x0303+$stats{karma}\x0f"
@@ -9043,7 +9157,7 @@ sub mbProfil_ctx {
                     :                     '0';
     }
 
-    # 9. Affichage final — 3 lignes condensées et stylées
+    # 10. Affichage final — lignes condensées et stylées
     my $rank_str = $stats{rank} ? "#$stats{rank}" : '?';
     my $reply_to = $channel;
 
@@ -9071,6 +9185,13 @@ sub mbProfil_ctx {
         sprintf("  \x{1F3C6} %d/%d  \x{B7}  \x{1F525} streak best %dd  \x{B7}  \x{1F319} night %s  \x{B7}  \x{1F305} early %s  \x{B7}  \x{1FA83} comeback %dd",
             $ach_count, $ach_total, $streak_days,
             _fmt_n($night_msgs), _fmt_n($morning_msgs), $comeback_days));
+
+    if (($community->{quote_count} // 0) || ($community->{factoid_count} // 0)) {
+        botPrivmsg($self, $reply_to,
+            sprintf("  \x{1F9E9} community: \x{1F4DC} %s quotes  \x{B7}  \x{1F4DA} %s factoids",
+                _fmt_n($community->{quote_count} // 0),
+                _fmt_n($community->{factoid_count} // 0)));
+    }
 
     botPrivmsg($self, $reply_to, "  \x{1F3AF} Next: $ach_next")
         if length $ach_next;

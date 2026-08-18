@@ -32,6 +32,28 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb665 — connect profiles to their wider community footprint
+- Enriched the existing `profil` / `profile` view with a compact community
+  contribution line built from already-persisted quote and factoid ownership.
+- Kept the existing profile history budget unchanged: MB665 adds no new
+  `CHANNEL_LOG` gather and leaves the three existing historical gathers intact.
+- Added an isolated, read-only community-footprint helper instead of growing the
+  main profile query path into another historical aggregation layer.
+- Reused the durable MB646 Achievement identity graph when an IRC nick such as
+  `Te[u]K` differs from its registered `USER.nickname`. Alias resolution is
+  conservative: an ambiguous mapping is never guessed.
+- Runtime validation on the dev instance resolved `Te[u]K` to the registered
+  contributor and correctly displayed `28 quotes` on `#radiocapsule`, matching
+  the database probe.
+- Added MB665 regression coverage for registered-identity bridging, quote and
+  factoid attribution, ambiguity-bounded resolution, and preservation of the
+  existing profile scan contract.
+- Focused regression passed `36/36`; the normal fast validation lane passed
+  `5187/5187` in 179 seconds.
+- No database schema, migration, configuration, new command, new worker,
+  service or systemd change.
+
+
 ### mb664 — take a bounded trip through channel history
 - Added the public `memory` command: a deliberately different companion to
   `onthisday` that takes the user to a bounded historical day instead of

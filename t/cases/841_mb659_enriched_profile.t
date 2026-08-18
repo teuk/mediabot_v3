@@ -116,6 +116,9 @@ return sub {
         sub { push @out, [ 'pub', $_[2] ]; 1 };
     local *Mediabot::UserCommands::botNotice =
         sub { push @out, [ 'not', $_[2] ]; 1 };
+    local *Mediabot::UserCommands::_profile_community_footprint = sub {
+        return { quote_count => 12, factoid_count => 7 };
+    };
 
     local *Mediabot::Helpers::channel_log_gather = sub {
         my ($self, $dbh_arg, $sql, $bind, $cb, $scope) = @_;
@@ -177,6 +180,8 @@ return sub {
         'mb659-841: Early Bird progress is surfaced');
     $assert->like($text, qr/comeback 364d/,
         'mb659-841: best observed comeback is surfaced');
+    $assert->like($text, qr/community:.*12 quotes.*7 factoids/s,
+        'mb665: community contribution counters are surfaced');
 
     # [3] The closest PUBLIC goal is useful, but mb658 secrets remain secret.
     $assert->like($text,
