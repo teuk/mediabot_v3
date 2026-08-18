@@ -2,6 +2,8 @@
 # =============================================================================
 #  Mediabot v3 - Framework de test des commandes IRC
 #  Usage : perl t/test_commands.pl [--verbose] [--filter <pattern>] [--profile]
+#           [--class <tag>] [--exclude-class <tag>]
+#           [--class-summary] [--list-selected]
 #           [--nick <nick>] [--host <host>] [--channel <chan>]
 #           [--botnick <botnick>] [--cmdchar <char>]
 # =============================================================================
@@ -24,6 +26,7 @@ use Cwd qw(getcwd);
 use POSIX qw(strftime);
 use TAP::Parser;
 use Time::HiRes ();
+use TestClassifier qw(classify_test_file allowed_test_classes);
 
 binmode(STDOUT, ':encoding(UTF-8)');
 binmode(STDERR, ':encoding(UTF-8)');
@@ -42,6 +45,10 @@ my $opt_botnick = 'mediabot';
 my $opt_cmdchar = '!';
 my $opt_profile = 0;
 my $opt_profile_top;
+my @opt_classes;
+my @opt_exclude_classes;
+my $opt_class_summary = 0;
+my $opt_list_selected = 0;
 GetOptions(
     'verbose|v'   => \$opt_verbose,
     'filter|f=s'  => \$opt_filter,
@@ -50,8 +57,12 @@ GetOptions(
     'channel|c=s' => \$opt_channel,
     'botnick|b=s' => \$opt_botnick,
     'cmdchar=s'   => \$opt_cmdchar,
-    'profile'     => \$opt_profile,
+    'profile'       => \$opt_profile,
     'profile-top=i' => \$opt_profile_top,
+    'class=s@'      => \@opt_classes,
+    'exclude-class=s@' => \@opt_exclude_classes,
+    'class-summary' => \$opt_class_summary,
+    'list-selected' => \$opt_list_selected,
 ) or die <<USAGE;
 Usage: $0 [options]
   --verbose, -v          Afficher chaque test [OK]/[FAIL]
@@ -63,6 +74,11 @@ Usage: $0 [options]
   --cmdchar     <char>   Caractere de commande (defaut: !)
   --profile              Mesurer le temps de chaque fichier de test
   --profile-top <n>      Afficher les n fichiers les plus lents (defaut: 20) ; implique --profile
+  --class <tag>           Inclure les tests portant ce tag (repeatable/comma-separated)
+  --exclude-class <tag>   Exclure les tests portant ce tag (repeatable/comma-separated)
+  --class-summary         Afficher la classification selectionnee sans lancer les tests
+  --list-selected         Lister les tests selectionnes/classes sans les lancer
+  Classes: PURE, FILESYSTEM, PROCESS, DB, NETWORK
 USAGE
 
 if (defined $opt_profile_top) {
@@ -70,6 +86,32 @@ if (defined $opt_profile_top) {
     $opt_profile = 1;
 }
 $opt_profile_top = 20 unless defined $opt_profile_top;
+
+my %valid_test_class = map { $_ => 1 } allowed_test_classes();
+
+sub _normalize_class_args {
+    my ($label, @specs) = @_;
+    my @out;
+    my %seen;
+
+    for my $spec (@specs) {
+        for my $raw (split /,/, ($spec // '')) {
+            $raw =~ s/^\s+|\s+$//g;
+            next unless length $raw;
+            my $class = uc($raw);
+            die "Unknown $label class '$raw'. Allowed: "
+                . join(', ', allowed_test_classes()) . "\n"
+                unless $valid_test_class{$class};
+            push @out, $class unless $seen{$class}++;
+        }
+    }
+
+    return @out;
+}
+
+@opt_classes = _normalize_class_args('--class', @opt_classes);
+@opt_exclude_classes =
+    _normalize_class_args('--exclude-class', @opt_exclude_classes);
 
 # ---- Classe d'assertion -----------------------------------------------------
 package Assert;
@@ -380,14 +422,80 @@ sub _print_profile_report {
     print "A leading '!' marks a file that contributed at least one failed assertion.\n";
 }
 
+# ---- Classification -----------------------------------------------------------
+
+sub _classification_has_any {
+    my ($info, $wanted) = @_;
+    return 1 unless @$wanted;
+
+    my %tag = map { $_ => 1 } @{ $info->{tags} // [] };
+    return scalar grep { $tag{$_} } @$wanted;
+}
+
+sub _print_class_summary {
+    my ($files, $info_by_file, $all_count) = @_;
+
+    my %primary = map { $_ => 0 } allowed_test_classes();
+    my %tagged  = map { $_ => 0 } allowed_test_classes();
+
+    for my $file (@$files) {
+        my $info = $info_by_file->{$file};
+        $primary{ $info->{primary} }++;
+        $tagged{$_}++ for @{ $info->{tags} };
+    }
+
+    print "\nTest classification summary\n";
+    print "-" x 62 . "\n";
+    printf "Selected: %d of %d discovered test file(s)\n",
+        scalar(@$files), $all_count;
+    print "\nPrimary class (one per file)\n";
+    for my $class (allowed_test_classes()) {
+        printf "  %-10s %4d\n", $class, $primary{$class};
+    }
+
+    print "\nCapability tags (overlap allowed)\n";
+    for my $class (allowed_test_classes()) {
+        printf "  %-10s %4d\n", $class, $tagged{$class};
+    }
+
+    print "\nClassification is conservative source-touchpoint metadata.\n";
+    print "It is NOT a parallel-safety certification.\n";
+}
+
+sub _print_selected_tests {
+    my ($files, $info_by_file) = @_;
+
+    print "\nSelected test files\n";
+    print "-" x 78 . "\n";
+    printf "%-10s %-34s %s\n", 'primary', 'tags', 'file';
+    print "-" x 78 . "\n";
+
+    for my $file (@$files) {
+        my $info = $info_by_file->{$file};
+        printf "%-10s %-34s %s\n",
+            $info->{primary},
+            join(',', @{ $info->{tags} }),
+            basename($file);
+    }
+}
+
 # ---- Chargement des cas de test ---------------------------------------------
 
 my $assert   = Assert->new(verbose => $opt_verbose);
 my $ts_start = time();
 
 # Chemin absolu vers t/cases/ — indépendant du CWD
-my $cases_dir  = "$FindBin::Bin/cases";
-my @test_files = sort glob("$cases_dir/*.t");
+my $cases_dir = "$FindBin::Bin/cases";
+my @all_test_files = sort glob("$cases_dir/*.t");
+my %case_classification;
+
+for my $file (@all_test_files) {
+    my ($isolate) = _case_requires_isolation($file);
+    $case_classification{$file} =
+        classify_test_file($file, isolated => $isolate ? 1 : 0);
+}
+
+my @test_files = @all_test_files;
 
 if ($opt_filter) {
     my $filter_re = eval { qr/$opt_filter/i };
@@ -399,10 +507,39 @@ if ($opt_filter) {
     @test_files = grep { basename($_) =~ $filter_re } @test_files;
 }
 
+if (@opt_classes) {
+    @test_files = grep {
+        _classification_has_any($case_classification{$_}, \@opt_classes)
+    } @test_files;
+}
+
+if (@opt_exclude_classes) {
+    @test_files = grep {
+        !_classification_has_any(
+            $case_classification{$_},
+            \@opt_exclude_classes,
+        )
+    } @test_files;
+}
+
 if (!@test_files) {
-    print "Aucun fichier de test trouve dans $cases_dir\n";
+    print "Aucun fichier de test selectionne dans $cases_dir\n";
     exit 1;
 }
+
+if ($opt_class_summary) {
+    _print_class_summary(
+        \@test_files,
+        \%case_classification,
+        scalar(@all_test_files),
+    );
+}
+
+if ($opt_list_selected) {
+    _print_selected_tests(\@test_files, \%case_classification);
+}
+
+exit 0 if $opt_class_summary || $opt_list_selected;
 
 sub _filter_case_load_warning {
     my ($warning) = @_;

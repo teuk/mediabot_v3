@@ -356,8 +356,28 @@ perl t/test_commands.pl --profile-top 30
 ```
 
 Profiling is observational only: it does not parallelise, reorder or skip test
-files. Use the measured timings to guide test classification before considering
-parallel execution.
+files.
+
+Inspect the conservative MB660 test classification without running the suite:
+
+```bash
+perl t/test_commands.pl --class-summary
+```
+
+List or select a capability family:
+
+```bash
+perl t/test_commands.pl --class PROCESS --list-selected
+perl t/test_commands.pl --class DB --filter 'achievement|schema'
+perl t/test_commands.pl --exclude-class NETWORK --filter 'external|version'
+```
+
+The available tags are `PURE`, `FILESYSTEM`, `PROCESS`, `DB` and `NETWORK`.
+Tags are conservative source-touchpoint metadata: a mocked SQL/HTTP test may
+still carry `DB`/`NETWORK`, and a file can carry multiple tags. The primary
+class is only a reporting convenience. **Classification does not certify that
+a test is safe to run in parallel.** MB660 intentionally adds no parallel
+executor and changes no default full-suite behaviour.
 
 Run live tests when a local IRC test server is available:
 

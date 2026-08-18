@@ -32,6 +32,27 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb660 — conservative test classification
+- Added a reusable test classifier with the roadmap's `PURE`, `FILESYSTEM`,
+  `PROCESS`, `DB` and `NETWORK` capability families. Classification is
+  deliberately conservative: source touchpoints and isolated-TAP execution are
+  recorded even when an external dependency is mocked.
+- `t/test_commands.pl` can now select tests with repeatable/comma-separated
+  `--class` and `--exclude-class` filters, print a no-execution
+  `--class-summary`, or list the exact selected files and their tags with
+  `--list-selected`.
+- Capability tags may overlap; each file also receives one primary reporting
+  class using conservative precedence. These labels are explicitly **not**
+  parallel-safety certification, and mb660 adds no jobs/parallel executor,
+  reordering or implicit test skipping.
+- Default runner behaviour remains the same when no classification options are
+  supplied. New regression coverage validates synthetic/real classifications,
+  isolated-process tagging, filtering, invalid-class rejection and the
+  inspection-only CLI paths.
+- This completes the classification foundation requested after the mb650
+  profiler so later fast/parallel lanes can be designed from explicit metadata
+  instead of blindly parallelising the full suite.
+
 ### mb659 — richer `!profil` progression card
 - Enriched `!profil` / `!profile` with Achievement progress already persisted by
   the normal feature paths: best activity streak, Night Owl and Early Bird
