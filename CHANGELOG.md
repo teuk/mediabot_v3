@@ -32,6 +32,30 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb670 — extract social and channel history from UserCommands
+- Added `Mediabot::SocialHistory` and moved the coherent social/history command
+  family out of the oversized `Mediabot::UserCommands` implementation:
+  `profil`, `dashboard`, `mood`, `leaderboard`, `chronos`, `recap`,
+  `onthisday`, `memory`, `milestone`, `awards`, and `yearbook`.
+- Preserved the historical `Mediabot::UserCommands::*` symbols and existing
+  dispatch contract so callers, plugins, help routing, and public command names
+  continue to resolve without a compatibility break.
+- Reduced `Mediabot/UserCommands.pm` from 13,746 to 11,065 lines while the new
+  `Mediabot/SocialHistory.pm` owns 2,831 lines of the extracted implementation.
+- Updated source-structure tests to follow implementation ownership instead of
+  assuming every social/history handler physically lives in `UserCommands.pm`.
+  The initial complete-suite checkpoint exposed 35 such stale assertions across
+  seven test files; those tests were corrected without changing application
+  code.
+- Runtime smoke validation succeeded for `profile`/`profil`, `memory`,
+  `awards 7d`, `yearbook 2026`, and `recap` after the extraction.
+- Focused regression passed `1566/1566`; the fast lane passed `5194/5194` in
+  171 seconds; the final complete suite passed `13953/13953` in 769 seconds
+  with `RC=0`.
+- No database schema, migration, configuration, service, or systemd change was
+  introduced.
+
+
 ### mb669 — make durable IRC identity a public read-only API
 - Added `resolve_registered_user(channel, nick)` as the public conservative
   resolver for mapping a visible IRC nickname to a registered Mediabot user.

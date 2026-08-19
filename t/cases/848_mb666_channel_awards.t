@@ -198,7 +198,7 @@ return sub {
     $assert->is(scalar @{ $dbh->{sql} }, $sql_before_bad,
         'mb666-848: invalid period performs no secondary query');
 
-    my $uc = slurp848('Mediabot/UserCommands.pm');
+    my $uc = slurp848('Mediabot/SocialHistory.pm');
     my $mb = slurp848('Mediabot/Mediabot.pm');
     my $hp = slurp848('Mediabot/Helpers.pm');
 

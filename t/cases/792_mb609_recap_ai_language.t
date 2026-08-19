@@ -78,7 +78,7 @@ return sub {
     $assert->is($C->can('ai_lang_text')->('fr', 'cle_absente'), '',
         'mb609-792: cle absente -> chaine vide, jamais undef');
 
-    my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/UserCommands.pm'
+    my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/SocialHistory.pm'
         or die $!; local $/; <$fh> };
 
     # [3] recap consomme l API, via can()

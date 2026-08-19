@@ -32,7 +32,7 @@ return sub {
     $assert->is($b, 'abc', 'caractère accenté incomplet retiré');
 
     # --- 2. Câblage réel ---------------------------------------------------
-    my $src = _slurp_656(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_656(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
     my ($body) = $src =~ /(sub mbChronos_ctx \{.*?\n\}\n)/s; $body //= '';
     (my $code = $body) =~ s/^\s*#.*$//mg;
 

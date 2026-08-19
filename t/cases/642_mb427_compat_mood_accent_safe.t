@@ -44,7 +44,8 @@ return sub {
     $assert->ok(!$seen{'caf'}, 'plus de fragment caf');
 
     # --- 2. Câblage réel ---------------------------------------------------
-    my $src = _slurp_642(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_642(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'))
+              . "\n" . _slurp_642(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
     (my $code = $src) =~ s/^\s*#.*$//mg;
 
     for my $sub (qw(mbCompat_ctx mbMood_ctx)) {

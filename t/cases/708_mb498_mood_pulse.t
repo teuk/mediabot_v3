@@ -122,7 +122,7 @@ return sub {
     # --- 5. garde source : conventions ------------------------------------
     {
         open my $fh, '<:encoding(UTF-8)',
-            File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm') or die $!;
+            File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm') or die $!;
         local $/; my $src = <$fh>; close $fh;
         my ($body) = $src =~ /(sub mbMood_ctx \{.*?\n\})\n/s; $body //= '';
         $assert->like($body, qr/INTERVAL 60 MINUTE/, 'talkers: fenêtre 60 min');

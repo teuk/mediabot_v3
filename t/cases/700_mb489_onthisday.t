@@ -130,7 +130,8 @@ return sub {
 
     # --- 5. intégration -------------------------------------------------------
     {
-        my $uc = _slurp_700(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+        my $uc = _slurp_700(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'))
+             . "\n" . _slurp_700(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
         $assert->like($uc, qr/^\s*mbOnThisDay_ctx\s*$/m, 'mbOnThisDay_ctx exporté');
         # garde projet : pas de "publictext IS NOT NULL"
         # mb496: le SQL vit désormais dans _onthisday_lines (partagé commande+digest)

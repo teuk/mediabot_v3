@@ -31,7 +31,7 @@ return sub {
     my ($assert) = @_;
 
     require Mediabot::UserCommands;
-    my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/UserCommands.pm'
+    my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/SocialHistory.pm'
         or die $!; local $/; <$fh> };
     my $disp = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Mediabot.pm'
         or die $!; local $/; <$fh> };

@@ -175,9 +175,10 @@ return sub {
             'mb669-851: identity API calls no mutating identity helper');
     }
 
-    my $uc = slurp851('Mediabot/UserCommands.pm');
-    $assert->unlike($uc, qr/ACHIEVEMENT_(?:PROFILE|IDENTITY)/,
-        'mb669-851: UserCommands has no private durable-identity table dependency');
-    $assert->like($uc, qr/resolve_registered_user\(\$channel,\s*\$target\)/,
+    my $uc     = slurp851('Mediabot/UserCommands.pm');
+    my $social = slurp851('Mediabot/SocialHistory.pm');
+    $assert->unlike($uc . "\n" . $social, qr/ACHIEVEMENT_(?:PROFILE|IDENTITY)/,
+        'mb669-851: runtime consumers have no private durable-identity table dependency');
+    $assert->like($social, qr/resolve_registered_user\(\$channel,\s*\$target\)/,
         'mb669-851: Community Footprint consumes the public identity API');
 };

@@ -124,7 +124,7 @@ return sub {
 
     # --- [4] garde source : borne d'année conditionnelle -------------------
     {
-        my $src = _slurp_709(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+        my $src = _slurp_709(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
         my ($fn) = $src =~ /(sub _onthisday_lines \{.*?\n\})/s; $fn //= '';
         $assert->like($fn, qr/YEAR\(ts\) < YEAR\(CURDATE\(\)\)/, '[4] borne: années passées incluses');
         $assert->like($fn, qr/\? < MONTH\(CURDATE\(\)\)/, '[4] borne: gère la date passée/future dans l\'année');

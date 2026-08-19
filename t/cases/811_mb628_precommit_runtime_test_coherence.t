@@ -16,11 +16,11 @@ sub _slurp_811 {
 return sub {
     my ($assert) = @_;
     my $claude = _slurp_811(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
-    my $user   = _slurp_811(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $social = _slurp_811(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
     my $t709   = _slurp_811(File::Spec->catfile('.', 't', 'cases', '709_mb499_onthisday_date.t'));
 
-    $assert->like($user, qr/my \$day_range_sql = "ts >= \$day_range_expr AND ts < \$day_range_expr \+ INTERVAL 1 DAY";/,
-        'mb628-811: runtime onthisday porte la plage sargable');
+    $assert->like($social, qr/my \$day_range_sql = "ts >= \$day_range_expr AND ts < \$day_range_expr \+ INTERVAL 1 DAY";/,
+        'mb628-811: runtime onthisday porte la plage sargable dans SocialHistory');
     $assert->like($t709, qr/top-talker utilise une plage de journée indexable/,
         'mb628-811: le test 709 attend maintenant la plage indexable');
     $assert->ok($t709 !~ /top-talker aussi paramétré/,

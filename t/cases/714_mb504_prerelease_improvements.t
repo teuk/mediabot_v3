@@ -39,7 +39,7 @@ return sub {
         }
 
         # câblage dans mbMilestone_ctx
-        my $uc = _slurp_714(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+        my $uc = _slurp_714(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
         my ($fn) = $uc =~ /(sub mbMilestone_ctx \{.*?\n\})/s; $fn //= '';
         $assert->like($fn, qr/_milestone_last\(\$total\)/, '[1] mbMilestone appelle _milestone_last');
         $assert->like($fn, qr/last passed/, '[1] libellé "last passed"');
@@ -48,7 +48,7 @@ return sub {
 
     # --- [2] recap AI : cap du nombre de lignes ----------------------------
     {
-        my $uc = _slurp_714(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+        my $uc = _slurp_714(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
         my ($fn) = $uc =~ /(sub mbRecap_ctx \{.*?\n\})/s; $fn //= '';
         $assert->like($fn, qr/\$ai_max_lines\s*=\s*\d+/, '[2] cap de lignes défini');
         $assert->like($fn, qr/\$sent_lines >= \$ai_max_lines/, '[2] garde sur le compteur de lignes');

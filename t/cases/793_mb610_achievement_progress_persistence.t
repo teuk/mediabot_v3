@@ -120,19 +120,22 @@ return sub {
     }
 
     # [6] cablage des 6 familles
-    my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/UserCommands.pm'
+    my $users = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/UserCommands.pm'
         or die $!; local $/; <$fh> };
+    my $social = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/SocialHistory.pm'
+        or die $!; local $/; <$fh> };
+    my $wired_src = $users . "\n" . $social;
     my $wired = 0;
     for my $kind (qw(horoscope compat mood duel_win trivia_correct quotegame_solved)) {
-        $wired++ if $src =~ /_ach_progress\(\$self, '\Q$kind\E'/;
+        $wired++ if $wired_src =~ /_ach_progress\(\$self, '\Q$kind\E'/;
     }
     $assert->is($wired, 6, 'mb610-793: les 6 familles de compteurs passent au registre');
-    $assert->like($src, qr/sub _ach_progress \{.*?return undef unless \$ach->can\('bump_progress'\)/s,
+    $assert->like($social, qr/sub _ach_progress \{.*?return undef unless \$ach->can\('bump_progress'\)/s,
         'mb610-793: repli silencieux si le systeme d achievements est absent');
-    $assert->like($src, qr/my \$total = _ach_progress\(\$self, 'trivia_correct'.*?\/\/ \$score;/s,
+    $assert->like($users, qr/my \$total = _ach_progress\(\$self, 'trivia_correct'.*?\/\/ \$score;/s,
         'mb610-793: trivia — total cumule, avec repli sur le score de partie');
-    $assert->like($src, qr/check_trivia\(\$nick, \$channel, \$total, \$response_time\)/,
+    $assert->like($users, qr/check_trivia\(\$nick, \$channel, \$total, \$response_time\)/,
         'mb610-793: ... et c est bien le total qui part au hook');
-    $assert->like($src, qr/check_quotegame\(\$sNick, \$sChannel, \$qg_total\)/,
+    $assert->like($users, qr/check_quotegame\(\$sNick, \$sChannel, \$qg_total\)/,
         'mb610-793: quotegame — idem (palier 50 enfin atteignable)');
 };

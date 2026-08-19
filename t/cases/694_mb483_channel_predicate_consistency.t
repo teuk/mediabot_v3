@@ -26,9 +26,10 @@ return sub {
     my ($assert) = @_;
 
     my $uc = _slurp_694(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $sh = _slurp_694(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
 
-    # recap doit désormais utiliser le prédicat partagé, plus /^#/.
-    my $recap = _body_694($uc, 'mbRecap_ctx');
+    # recap vit dans SocialHistory depuis MB670.
+    my $recap = _body_694($sh, 'mbRecap_ctx');
     $assert->ok($recap ne '', 'mbRecap_ctx localisé');
     $assert->like($recap, qr/isIrcChannelTarget\(\$channel\)/,
         'recap utilise le prédicat de canal partagé');

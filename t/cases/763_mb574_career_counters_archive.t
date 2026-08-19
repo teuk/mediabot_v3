@@ -27,7 +27,8 @@ sub _sub_src_763 {
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_763(File::Spec->catfile('Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_763(File::Spec->catfile('Mediabot', 'UserCommands.pm'))
+              . "\n" . _slurp_763(File::Spec->catfile('Mediabot', 'SocialHistory.pm'));
 
     # [1] chaque compteur carriere passe par le gather par table
     for my $sub_name (qw(mbStats_ctx mbTop_ctx mbStreak_ctx mbLeaderboard_ctx)) {

@@ -79,7 +79,7 @@ return sub {
         qr/cl\.ts >= CURDATE\(\) - INTERVAL 1 DAY AND cl\.ts < CURDATE\(\)/,
         'mb625-808: yesterday uses an index-friendly half-open timestamp range');
 
-    my $usrc = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/UserCommands.pm'
+    my $usrc = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/SocialHistory.pm'
         or die $!; local $/; <$fh> };
     $assert->like($usrc,
         qr/if \(defined \$bad_lang\) \{.*?unsupported language.*?return;/s,

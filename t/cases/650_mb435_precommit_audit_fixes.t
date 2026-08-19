@@ -66,8 +66,8 @@ return sub {
     # mb646 moved dashboard/leaderboard aggregation out of UserCommands.pm and
     # behind storage-neutral Achievements APIs. Keep the original mb435 case-fold
     # invariant, but assert it at its new owner instead of the removed JSON scan.
-    my $users = _slurp_650(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
-    my $ach   = _slurp_650(File::Spec->catfile('.', 'Mediabot', 'Achievements.pm'));
+    my $social = _slurp_650(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
+    my $ach    = _slurp_650(File::Spec->catfile('.', 'Mediabot', 'Achievements.pm'));
     my $folded_count = () = $ach =~ /\$ch eq lc\(\$channel \/\/ ''\)/g;
     $assert->is($folded_count, 2,
         'storage-neutral aggregate fallbacks compare against folded live channel');
@@ -88,7 +88,7 @@ return sub {
     $assert->like($helpers, qr/mb435-B1/, 'mb435-B1 tag present');
     $assert->like($hailo,   qr/mb435-B2/, 'mb435-B2 tag present');
     $assert->ok(
-        $users =~ /channel_unlock_count\(\$channel\)/
-            && $users =~ /top_on_channel\(\$channel,\s*3\)/,
+        $social =~ /channel_unlock_count\(\$channel\)/
+            && $social =~ /top_on_channel\(\$channel,\s*3\)/,
         'mb435-B3 invariant is delegated to storage-neutral achievement APIs');
 };

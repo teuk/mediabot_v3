@@ -159,7 +159,8 @@ return sub {
     }
 
     # [5] semantique dans UserCommands
-    my $src = _slurp_766(File::Spec->catfile('Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_766(File::Spec->catfile('Mediabot', 'UserCommands.pm'))
+            . "\n" . _slurp_766(File::Spec->catfile('Mediabot', 'SocialHistory.pm'));
 
     # 5a. event_type explicite sur les metriques « msg »
     # mb578: mbWhen_ctx retiree de cette liste — « when » = premiere
@@ -192,12 +193,12 @@ return sub {
             "succes via live_ok: \$$pat");
     }
 
-    # 5e. chaque appel gather de UserCommands porte un scope explicite
+    # 5e. chaque appel gather UserCommands/SocialHistory porte un scope explicite
     my $n_calls  = () = $src =~ /Mediabot::Helpers::channel_log_gather\(/g;
     # mb667/full-suite: whitespace between the explicit scope and the final
     # call parenthesis is formatting, not semantics (mb664 memory uses it).
     my $n_scoped = () = $src =~ /,\s*'(?:content|presence|all)'\s*\);/g;
     $assert->ok($n_calls > 0, 'des appels gather existent');
     $assert->is($n_scoped, $n_calls,
-        'tous les gather de UserCommands sont scopes');
+        'tous les gather UserCommands/SocialHistory sont scopes');
 };

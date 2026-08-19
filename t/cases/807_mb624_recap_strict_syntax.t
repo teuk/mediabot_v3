@@ -99,10 +99,12 @@ return sub {
         'mb624-807: les deux unites de fenetre sont documentees');
     my $usrc = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/UserCommands.pm'
         or die $!; local $/; <$fh> };
-    my $reads = () = $usrc =~ /\$RECAP_USAGE_LINES\[0\]/g;
+    $usrc .= do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/SocialHistory.pm'
+        or die $!; local $/; <$fh> };
+    my $reads = () = $usrc =~ /RECAP_USAGE_LINES\[0\]/g;
     $assert->ok($reads >= 2,
         'mb624-807: les messages d erreur rappellent LA MEME ligne de syntaxe');
-    $assert->like($usrc, qr/botNotice\(\$self, \$nick, \$_\) for \@RECAP_USAGE_LINES;/,
+    $assert->like($usrc, qr/botNotice\(\$self, \$nick, \$_\) for \@(?:Mediabot::UserCommands::)?RECAP_USAGE_LINES;/,
         'mb624-807: ... et l aide lit la meme liste');
 
     # [6] non-regression des formes valides

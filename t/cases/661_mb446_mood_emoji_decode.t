@@ -44,7 +44,7 @@ return sub {
     $assert->is(unpack('H*', $txt), $before, 'FB_DEFAULT laisse publictext intact');
 
     # --- Câblage réel ------------------------------------------------------
-    my $src = _slurp_661(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_661(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
     my ($body) = $src =~ /(sub mbMood_ctx \{.*?\n\}\n)/s; $body //= '';
     (my $code = $body) =~ s/^\s*#.*$//mg;
 

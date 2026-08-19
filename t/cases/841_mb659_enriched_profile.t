@@ -211,7 +211,7 @@ return sub {
         'mb659-841: !profil still has only the existing karma + trivia prepares');
 
     # [5] Source-level contract for future regressions.
-    my $src = slurp841('Mediabot/UserCommands.pm');
+    my $src = slurp841('Mediabot/SocialHistory.pm');
     my $body = sub_src841($src, 'mbProfil_ctx');
     $assert->ok(defined $body, 'mb659-841: mbProfil_ctx source isolated');
     my $gather_sites = () = $body =~ /channel_log_gather\(/g;

@@ -15,8 +15,8 @@ sub _slurp_845 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
 
 return sub {
     my ($assert) = @_;
-    my $src = _slurp_845(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
-    my ($fn) = $src =~ /(sub _memory_lines \{.*?\n\})\n\n# ===========================================================================\n# mbMilestone_ctx/s;
+    my $src = _slurp_845(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
+    my ($fn) = $src =~ /(sub _memory_lines \{.*?\n\})(?=\n+(?:sub |1;))/s;
     $fn //= '';
 
     $assert->like($src, qr/sub _memory_lines \{/, 'mb664-845: memory helper exists');

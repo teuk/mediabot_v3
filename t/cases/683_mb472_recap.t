@@ -185,7 +185,7 @@ return sub {
     # 7. Périmètre : aucune écriture SQL dans le handler (lecture seule).
     # -------------------------------------------------------------------------
     {
-        my $uc = _slurp_683(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+        my $uc = _slurp_683(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
         my ($body) = $uc =~ /(sub mbRecap_ctx \{.*?\n\}\n)/s;
         $body //= '';
         # On cible les vraies instructions SQL d'écriture (mot-clé + contexte SQL),

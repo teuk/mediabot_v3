@@ -320,6 +320,13 @@ Durable IRC identity is intentionally hidden behind the read-only
 instead of querying `ACHIEVEMENT_PROFILE` or `ACHIEVEMENT_IDENTITY` directly.
 This keeps ambiguity handling and registered-user authority in one place.
 
+Social and channel-history commands are implemented in
+`Mediabot::SocialHistory`. The historical `Mediabot::UserCommands::*` symbols
+remain available for compatibility, but new work on `profil`, `dashboard`,
+`mood`, `leaderboard`, `chronos`, `recap`, `onthisday`, `memory`, `milestone`,
+`awards`, and `yearbook` should live in the dedicated module instead of growing
+`UserCommands.pm` again.
+
 See:
 
 * [Database model](https://github.com/teuk/mediabot_v3/wiki/Database-model)

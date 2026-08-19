@@ -7,9 +7,9 @@
 # IS NOT NULL, kick/mode/topic/notice portent du texte). mb347 avait corrigé
 # Achievements ; mb348 étend la correction à toutes les stats/contextes basés sur
 # CHANNEL_LOG :
-#   - UserCommands.pm : 27 requêtes de stats (mbWordCount, mbLast, mbProfil,
-#     mbRadar, mbDashboard, mbCompat, mbMood, mbLeaderboard, mbChronos,
-#     mbObservatory) ;
+#   - UserCommands.pm + SocialHistory.pm : requêtes de stats historiques ;
+#     MB670 a déplacé une partie de ces requêtes vers SocialHistory sans
+#     modifier le contrat de filtrage ;
 #   - External/Claude.pm : 2 requêtes de contexte IA ;
 #   - Partyline.pm : _cmd_ai (contexte IA).
 # Laissé VOLONTAIREMENT : Partyline _cmd_chanlog (.logs) — viewer de log brut
@@ -60,12 +60,18 @@ return sub {
     $assert->is($old, 9, 'témoin: ancien filtre compte tous les événements');
     $assert->is($new, 2, 'nouveau filtre: seuls public+action');
 
-    # --- UserCommands.pm : entièrement balayé ----------------------------
+    # --- UserCommands + SocialHistory : contrat préservé après MB670 ------
     my $uc = _slurp_567(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $sh = _slurp_567(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
+    my $stats_src = $uc . "\n" . $sh;
     $assert->is(_count_sql($uc, 'publictext IS NOT NULL'), 0,
                 'UserCommands: plus aucun publictext IS NOT NULL en SQL');
-    $assert->ok(_count_sql($uc, "event_type IN ('public','action')") >= 27,
-                'UserCommands: >= 27 requêtes filtrent event_type IN (public,action)');
+    $assert->is(_count_sql($sh, 'publictext IS NOT NULL'), 0,
+                'SocialHistory: aucun publictext IS NOT NULL réintroduit');
+    $assert->ok(_count_sql($stats_src, "event_type IN ('public','action')") >= 27,
+                'UserCommands + SocialHistory: >= 27 requêtes conservent le filtre public/action');
+    $assert->ok(_count_sql($sh, "event_type IN ('public','action')") > 0,
+                'SocialHistory: les requêtes extraites conservent le filtre public/action');
     $assert->like($uc, qr/mb348-B1/, 'UserCommands: tag mb348-B1');
 
     # --- External/Claude.pm : contexte IA balayé -------------------------

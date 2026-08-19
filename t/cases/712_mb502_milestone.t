@@ -127,7 +127,8 @@ return sub {
 
     # --- [3] intégration ----------------------------------------------------
     {
-        my $uc = _slurp_712(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+        my $uc = _slurp_712(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'))
+             . "\n" . _slurp_712(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
         $assert->like($uc, qr/^\s*mbMilestone_ctx\s*$/m, '[3] mbMilestone_ctx exporté');
         my ($fn) = $uc =~ /(sub mbMilestone_ctx \{.*?\n\})/s; $fn //= '';
         $assert->like($fn, qr/event_type IN \('public','action'\)/, '[3] convention event_type');

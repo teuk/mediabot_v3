@@ -18,7 +18,7 @@ sub _slurp_846 {
 return sub {
     my ($assert) = @_;
 
-    my $uc = _slurp_846(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $uc = _slurp_846(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
     my $mb = _slurp_846(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
 
     $assert->like(
@@ -26,7 +26,7 @@ return sub {
         'mb664-846: mbMemory_ctx is present/exported'
     );
 
-    my ($fn) = $uc =~ /(sub mbMemory_ctx \{.*?\n\})\n\n# ===========================================================================\n# _memory_lines/s;
+    my ($fn) = $uc =~ /(sub mbMemory_ctx \{.*?\n\})(?=\n+(?:sub |1;))/s;
     $fn //= '';
 
     $assert->like(

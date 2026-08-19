@@ -165,7 +165,8 @@ return sub {
             'when: le JOIN archive anterieur au premier message fait foi');
     }
 
-    my $src = _slurp_767(File::Spec->catfile('Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_767(File::Spec->catfile('Mediabot', 'UserCommands.pm'))
+              . "\n" . _slurp_767(File::Spec->catfile('Mediabot', 'SocialHistory.pm'));
 
     # [1b] structure de when : gather all SANS filtre + gather content AVEC
     my $when = _sub_src_767($src, 'mbWhen_ctx');

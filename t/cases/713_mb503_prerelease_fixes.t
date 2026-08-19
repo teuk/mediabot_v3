@@ -74,7 +74,7 @@ return sub {
         $assert->unlike(join("\n",@SENT), qr/please wait/, '[1] cooldown par-nick (erin passe)');
 
         # garde source : le pattern cooldown existe
-        my $uc = _slurp_713(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+        my $uc = _slurp_713(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
         my ($fn) = $uc =~ /(sub mbMilestone_ctx \{.*?\n\})/s; $fn //= '';
         $assert->like($fn, qr/_milestone_cooldown/, '[1] bucket _milestone_cooldown présent');
     }

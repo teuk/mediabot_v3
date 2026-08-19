@@ -32,8 +32,11 @@ BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 return sub {
     my ($assert) = @_;
 
-    my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/UserCommands.pm'
+    my $users = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/UserCommands.pm'
         or die $!; local $/; <$fh> };
+    my $social = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/SocialHistory.pm'
+        or die $!; local $/; <$fh> };
+    my $src = $users . "\n" . $social;
 
     # [1] recensement de la classe
     my @bad;

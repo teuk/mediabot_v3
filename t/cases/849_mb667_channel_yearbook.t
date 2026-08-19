@@ -190,7 +190,7 @@ return sub {
     $assert->is(scalar @{ $dbh->{sql} }, $q_before,
         'mb667-849: invalid year performs no direct query');
 
-    my $uc = slurp849('Mediabot/UserCommands.pm');
+    my $uc = slurp849('Mediabot/SocialHistory.pm');
     my $mb = slurp849('Mediabot/Mediabot.pm');
     my $hp = slurp849('Mediabot/Helpers.pm');
     my $yb_src = extract_sub849($uc, 'mbYearbook_ctx') // '';

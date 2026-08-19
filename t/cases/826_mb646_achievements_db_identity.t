@@ -82,12 +82,14 @@ return sub {
         'mb646-826: updater carries legacy JSON into staged release for one-time import');
 
     # [6] Presentation code no longer depends on internal JSON hashes.
-    my $uc = slurp826('Mediabot/UserCommands.pm');
-    $assert->ok(index($uc, '$self->{achievements}{data}') < 0,
-        'mb646-826: UserCommands no longer reaches into achievement data internals');
-    $assert->like($uc, qr/channel_unlock_count\(\$channel\)/,
+    my $uc     = slurp826('Mediabot/UserCommands.pm');
+    my $social = slurp826('Mediabot/SocialHistory.pm');
+    $assert->ok(index($uc, '$self->{achievements}{data}') < 0
+            && index($social, '$self->{achievements}{data}') < 0,
+        'mb646-826: presentation code no longer reaches into achievement data internals');
+    $assert->like($social, qr/channel_unlock_count\(\$channel\)/,
         'mb646-826: dashboard uses storage-neutral aggregate API');
-    $assert->like($uc, qr/top_on_channel\(\$channel,\s*3\)/,
+    $assert->like($social, qr/top_on_channel\(\$channel,\s*3\)/,
         'mb646-826: leaderboard uses storage-neutral aggregate API');
 
     # [7] Public contract: DB first, JSON guarded fallback/import.

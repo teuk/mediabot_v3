@@ -110,7 +110,7 @@ return sub {
     $assert->unlike($all_sql, qr/ORDER\s+BY\s+RAND\s*\(/i,
         'mb665-847: footprint introduces no random database scan');
 
-    my $src = slurp847('Mediabot/UserCommands.pm');
+    my $src = slurp847('Mediabot/SocialHistory.pm');
     my $profile = sub_src847($src, 'mbProfil_ctx');
     my $helper  = sub_src847($src, '_profile_community_footprint');
 

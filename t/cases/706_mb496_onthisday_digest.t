@@ -123,7 +123,8 @@ return sub {
     # [2] refactor : commande ET digest utilisent _onthisday_lines
     # -------------------------------------------------------------------------
     {
-        my $uc = _slurp_706(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+        my $uc = _slurp_706(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'))
+             . "\n" . _slurp_706(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
         $assert->like($uc, qr/sub _onthisday_lines \{/, '[2] _onthisday_lines existe');
         $assert->like($uc, qr/Mediabot::UserCommands::_onthisday_lines\(\$self, \$id_channel, \$channel, %date_opts\)/,
             '[2] la commande délègue à _onthisday_lines (avec date optionnelle)');

@@ -238,7 +238,7 @@ return sub {
     # !achievements but also to !profil, so the latter cannot disclose the
     # existence of locked secrets through its X/Y denominator.
     my $src_a = slurp840('Mediabot/Achievements.pm');
-    my $src_u = slurp840('Mediabot/UserCommands.pm');
+    my $src_p = slurp840('Mediabot/SocialHistory.pm');
 
     $assert->like($src_a,
         qr/qw\(night_owl midnight_regular creature_night witching_hour early_bird\)/,
@@ -249,7 +249,7 @@ return sub {
     $assert->like($src_a,
         qr/qw\(comeback_week comeback_month comeback_legend phoenix_rising\)/,
         'mb658-840: secret comeback rung reuses check_comeback');
-    $assert->like($src_u,
+    $assert->like($src_p,
         qr/!\$defs->\{\$_\}\{hidden\}\s*\|\|\s*exists \$unl->\{\$_\}/,
         'mb658-840: !profil denominator reveals secrets only after unlock');
 };
