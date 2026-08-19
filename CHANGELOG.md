@@ -32,6 +32,33 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb668 — reward the people who build the channel's shared memory
+- Added five contribution-driven achievements backed by existing community
+  content: `Archivist` (10 quotes), `Master Archivist` (50 quotes),
+  `Lorekeeper` (10 factoids), `Encyclopedist` (50 factoids), and `Curator`
+  (10 quotes plus 10 factoids).
+- Kept QUOTES and FACTOID as the source of truth. After a successful quote or
+  factoid write, Mediabot rereads the registered user's current contribution
+  totals and persists Achievement progress from that state instead of blindly
+  incrementing a second counter.
+- Made retries and factoid UPSERTs naturally idempotent for Achievement
+  progression: repeated writes cannot inflate community merit beyond the
+  actual content currently attributed to the user.
+- Reused the durable Achievement identity/profile layer so contributions are
+  credited to the registered user rather than to a transient IRC nick.
+- Hardened quote insertion after runtime validation exposed an ordering bug:
+  the QUOTES `last_insert_id` is now captured before Achievement progress or
+  unlock writes can change the connection's most recent INSERT id.
+- Runtime validation on `#radiocapsule` unlocked `Archivist` for `Te[u]K`.
+  The initial test exposed the insert-id bug (`735723` was reported for the
+  real quote id `55`); after the fix, a second quote correctly returned id
+  `56` and that exact id was successfully deleted.
+- Focused regression passed `213/213`; the fast validation lane passed
+  `5191/5191` in 179 seconds with `RC=0`.
+- No database schema, migration, configuration key or new persistence layer
+  was added.
+
+
 ### mb667 — turn channel history into a yearly story
 - Added the public `yearbook` command: `yearbook` selects the last completed
   calendar year, while `yearbook YYYY` requests a specific year.

@@ -154,7 +154,7 @@ return sub {
     }
     $assert->like($text, qr/Secret achievements are revealed only when unlocked/,
         'mb658-840: catalogue explains the secret contract without spoilers');
-    $assert->like($text, qr/Total:\s+32 visible achievements available/,
+    $assert->like($text, qr/Total:\s+37 visible achievements available/,
         'mb658-840: catalogue denominator excludes all locked secrets');
 
     @out = ();
@@ -196,7 +196,7 @@ return sub {
     $text = join "\n", map { $_->[1] } @out;
     $assert->like($text, qr/The Witching Hour/,
         'mb658-840: unlocked secret is revealed in the normal achievement view');
-    $assert->like($text, qr/1\s+\/\s+33 visible achievements/,
+    $assert->like($text, qr/1\s+\/\s+38 visible achievements/,
         'mb658-840: revealed secret joins the visible denominator');
 
     # [4] Existing check paths unlock the secret rungs from the same counters.

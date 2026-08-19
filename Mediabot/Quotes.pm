@@ -263,9 +263,32 @@ sub mbQuoteAdd {
 
     $sth->finish;
 
+    # Capture the quote id before the Achievement hook performs any other DB
+    # writes. DBI last_insert_id/mysql_insertid describe the connection's most
+    # recent INSERT, so reading them after unlock/progress writes can return an
+    # Achievement row id instead of the QUOTES id.
     my $id_inserted = $self->{dbh}->last_insert_id(undef, undef, undef, undef);
     $id_inserted //= $self->{dbh}->{mysql_insertid};
     $id_inserted //= '?';
+
+    # mb668: achievements are derived from the real QUOTES/FACTOID state after
+    # the insert succeeds. Anonymous quotes have id_user=0 and are deliberately
+    # not attributed to a registered-user quote total.
+    if ($self->{achievements}) {
+        my $ok = eval {
+            $self->{achievements}->check_community_contributions(
+                $sNick, $sChannel, $id_user
+            );
+            1;
+        };
+        if (!$ok && $self->{logger}) {
+            my $err = $@ || 'unknown error';
+            $err =~ s/[\r\n\0]+/ /g;
+            $self->{logger}->log(
+                1, "achievements community check after quote add failed: $err"
+            );
+        }
+    }
 
     my $id_bold = String::IRC->new($id_inserted)->bold;
     my $prefix = defined($sMatchingUserHandle) ? "($sMatchingUserHandle) " : "";

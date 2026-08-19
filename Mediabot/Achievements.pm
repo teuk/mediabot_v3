@@ -40,7 +40,7 @@ use Scalar::Util qw(reftype);
 # name      => nom court (affichage IRC)
 # desc      => description condition
 # rarity    => common | uncommon | rare | epic | legendary
-# check_on  => événement déclencheur ('msg', 'karma', 'trivia', 'wordcount', 'activity')
+# check_on  => événement déclencheur ('msg', 'karma', 'trivia', 'wordcount', 'activity', 'community')
 #
 # Couleur IRC associée à la rareté :
 #   common    = gris  (15) | uncommon = vert (03) | rare = cyan (11)
@@ -136,6 +136,54 @@ my %ACH = (
         check_on => 'karma',
         threshold => 250,
         progress_kind => 'karma_given',
+    },
+    # mb668: community contribution achievements are derived from the current
+    # QUOTES / FACTOID state after a successful write. No parallel counters are
+    # incremented blindly: the database remains the source of truth.
+    archivist => {
+        emoji   => '📜',
+        name    => 'Archivist',
+        desc    => 'Contributed 10 quotes on a channel',
+        rarity  => 'uncommon',
+        check_on => 'community',
+        threshold => 10,
+        progress_kind => 'quotes_contributed',
+    },
+    master_archivist => {
+        emoji   => '🗄️',
+        name    => 'Master Archivist',
+        desc    => 'Contributed 50 quotes on a channel',
+        rarity  => 'rare',
+        check_on => 'community',
+        threshold => 50,
+        progress_kind => 'quotes_contributed',
+    },
+    lorekeeper => {
+        emoji   => '📚',
+        name    => 'Lorekeeper',
+        desc    => 'Created 10 factoids on a channel',
+        rarity  => 'uncommon',
+        check_on => 'community',
+        threshold => 10,
+        progress_kind => 'factoids_contributed',
+    },
+    encyclopedist => {
+        emoji   => '🧠',
+        name    => 'Encyclopedist',
+        desc    => 'Created 50 factoids on a channel',
+        rarity  => 'rare',
+        check_on => 'community',
+        threshold => 50,
+        progress_kind => 'factoids_contributed',
+    },
+    curator => {
+        emoji   => '🧩',
+        name    => 'Curator',
+        desc    => 'Contributed 10 quotes and 10 factoids on a channel',
+        rarity  => 'epic',
+        check_on => 'community',
+        threshold => 10,
+        progress_kind => 'community_curator',
     },
     # mb657: the historical hour-band scan already knows the exact number of
     # night/morning messages.  Persist that result as progress and turn the
@@ -3110,6 +3158,87 @@ sub check_quotegame {
         if defined $solved && $solved >= $self->threshold('quote_detective');
     $self->unlock($nick, $channel, 'quote_master')
         if defined $solved && $solved >= $self->threshold('quote_master');
+}
+
+# -- Hook : vérifie les achievements communautaires (mb668) --------------------
+# Appelé uniquement après une écriture QUOTES / FACTOID réussie. Les compteurs
+# sont relus dans les tables métier afin d'éviter qu'un retry, un UPSERT ou un
+# redémarrage ne fasse dériver une seconde source de vérité.
+sub check_community_contributions {
+    my ($self, $nick, $channel, $id_user) = @_;
+    return 0 unless defined($nick) && length($nick)
+                 && defined($channel) && $channel =~ /^#/;
+
+    my $dbh = eval { $self->{bot}{dbh} };
+    return 0 unless $dbh && eval { $dbh->can('prepare') };
+
+    my $id_channel = $self->_channel_id($channel);
+    return 0 unless $id_channel;
+
+    $id_user = undef
+        unless defined($id_user) && !ref($id_user)
+            && "$id_user" =~ /\A[1-9]\d*\z/;
+
+    my $sth = eval {
+        $dbh->prepare(q{
+            SELECT
+                (SELECT COUNT(*)
+                   FROM QUOTES q
+                  WHERE q.id_channel = ?
+                    AND ? IS NOT NULL
+                    AND q.id_user = ?) AS quote_count,
+                (SELECT COUNT(*)
+                   FROM FACTOID f
+                  WHERE f.id_channel = ?
+                    AND (
+                        (? IS NOT NULL AND f.created_by = ?)
+                        OR (f.created_by IS NULL AND f.created_by_nick = ?)
+                    )) AS factoid_count
+        })
+    };
+    return 0 unless $sth;
+
+    my $ok = eval {
+        $sth->execute(
+            $id_channel, $id_user, $id_user,
+            $id_channel, $id_user, $id_user, $nick,
+        )
+    };
+    unless ($ok) {
+        eval { $sth->finish };
+        return 0;
+    }
+
+    my $row = eval { $sth->fetchrow_hashref };
+    eval { $sth->finish };
+    return 0 unless $row;
+
+    my $quotes = (defined($row->{quote_count})
+        && "$row->{quote_count}" =~ /\A\d+\z/) ? 0 + $row->{quote_count} : 0;
+    my $factoids = (defined($row->{factoid_count})
+        && "$row->{factoid_count}" =~ /\A\d+\z/) ? 0 + $row->{factoid_count} : 0;
+    my $curator = $quotes < $factoids ? $quotes : $factoids;
+
+    $self->set_progress('quotes_contributed',   $nick, $channel, $quotes);
+    $self->set_progress('factoids_contributed', $nick, $channel, $factoids);
+    $self->set_progress('community_curator',    $nick, $channel, $curator);
+
+    for my $id (qw(archivist master_archivist)) {
+        $self->unlock($nick, $channel, $id)
+            if $quotes >= $self->threshold($id);
+    }
+    for my $id (qw(lorekeeper encyclopedist)) {
+        $self->unlock($nick, $channel, $id)
+            if $factoids >= $self->threshold($id);
+    }
+    $self->unlock($nick, $channel, 'curator')
+        if $curator >= $self->threshold('curator');
+
+    return {
+        quotes   => $quotes,
+        factoids => $factoids,
+        curator  => $curator,
+    };
 }
 
 # -- Hook : vérifie les achievements 'mood' (mb117) ----------------------------

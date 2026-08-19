@@ -12773,6 +12773,24 @@ sub mbLearn_ctx {
     }
     $sth->finish;
 
+    # mb668: derive community achievements from the persisted FACTOID/QUOTES
+    # state. An update of an existing factoid therefore cannot inflate merit.
+    if ($self->{achievements}) {
+        my $ok = eval {
+            $self->{achievements}->check_community_contributions(
+                $nick, $channel, $uid
+            );
+            1;
+        };
+        if (!$ok && $self->{logger}) {
+            my $err = $@ || 'unknown error';
+            $err =~ s/[\r\n\0]+/ /g;
+            $self->{logger}->log(
+                1, "achievements community check after factoid learn failed: $err"
+            );
+        }
+    }
+
     botNotice($self, $nick, "Learned '$keyword' for $channel.");
     $self->{metrics}->inc('mediabot_factoid_total', { channel => $channel, op => 'learn' })
         if $self->{metrics};
