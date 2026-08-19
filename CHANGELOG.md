@@ -32,6 +32,38 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb667 — turn channel history into a yearly story
+- Added the public `yearbook` command: `yearbook` selects the last completed
+  calendar year, while `yearbook YYYY` requests a specific year.
+- Built the retrospective from existing channel history instead of introducing
+  another persistence layer: total messages and voices, busiest month, peak
+  day/hour, top voices, and quote/factoid contributions are combined into a
+  compact five-line IRC summary.
+- Made historical coverage explicit. The current year is labelled
+  `year to date`, incomplete historical years report their actual recorded
+  range, and years with no usable channel history fail cleanly instead of
+  fabricating an empty retrospective.
+- Reused the existing archive-aware history layer and `OnThisDay` content
+  policy. The command performs two bounded historical gathers plus one
+  quote/factoid query through `CommandAsync`, with a 60-second parent-side
+  cooldown.
+- Validated the archive design against the real Undernet production history:
+  `#quebec` exposes public/action history back to 2018, with the 2024 boundary
+  split cleanly between archive and live storage. The complete 2025 year
+  contains 19,177 messages from 997 distinct voices.
+- Runtime validation on the development bot succeeded for `#radiocapsule`
+  2026, including `year to date`, peak activity, top voices and contribution
+  counts. The no-argument path correctly selected 2025 and handled the absence
+  of data on that development channel.
+- Full-suite validation exposed and fixed two older contract issues encountered
+  by the new coverage: MB666 `awards` no longer uses real `UNION ALL` SQL, and
+  the MB577 gather-scope regression is now whitespace-insensitive.
+- Focused regression passed `225/225`; the complete suite passed
+  `13784/13784` in 956 seconds with `RC=0`.
+- No database schema, migration, configuration key or new persistence layer
+  was added.
+
+
 ### mb666 — celebrate the people shaping a channel
 - Added the public `awards` command with a default 7-day window and an optional
   reviewed 30-day window: `awards` / `awards 7d` / `awards 30d`.

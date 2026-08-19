@@ -194,7 +194,9 @@ return sub {
 
     # 5e. chaque appel gather de UserCommands porte un scope explicite
     my $n_calls  = () = $src =~ /Mediabot::Helpers::channel_log_gather\(/g;
-    my $n_scoped = () = $src =~ /,\s*'(?:content|presence|all)'\);/g;
+    # mb667/full-suite: whitespace between the explicit scope and the final
+    # call parenthesis is formatting, not semantics (mb664 memory uses it).
+    my $n_scoped = () = $src =~ /,\s*'(?:content|presence|all)'\s*\);/g;
     $assert->ok($n_calls > 0, 'des appels gather existent');
     $assert->is($n_scoped, $n_calls,
         'tous les gather de UserCommands sont scopes');

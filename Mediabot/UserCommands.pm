@@ -117,6 +117,7 @@ our @EXPORT = qw(
     mbMilestone_ctx
     mbLeaderboard_ctx
     mbAwards_ctx
+    mbYearbook_ctx
     mbChronos_ctx
     mbFeatures_ctx
     mbObservatory_ctx
@@ -11513,76 +11514,79 @@ sub mbAwards_ctx {
         return 1;
     }
 
-    # One bounded KARMA_LOG query produces both receiver and giver awards.
-    my %karma;
+    # One bounded KARMA_LOG prepare, executed twice with a role selector.
+    # This keeps the two indexed role scans (receiver / giver) without a
+    # derived set-combining query, preserving the mb576 per-source SQL contract.
+    my ($magnet, $generous);
     my $sth_k = eval { $dbh->prepare(qq{
-        SELECT x.who,
-               SUM(x.received) AS positive_received,
-               SUM(x.given)    AS positive_given
-        FROM (
-            SELECT kl.nick AS who,
-                   SUM(CASE WHEN kl.delta = 1 THEN 1 ELSE 0 END) AS received,
-                   0 AS given
-            FROM KARMA_LOG kl
-            WHERE kl.id_channel = ?
-              AND kl.ts >= NOW() - INTERVAL $days DAY
-            GROUP BY kl.nick
-            UNION ALL
-            SELECT kl.from_nick AS who,
-                   0 AS received,
-                   SUM(CASE WHEN kl.delta = 1 THEN 1 ELSE 0 END) AS given
-            FROM KARMA_LOG kl
-            WHERE kl.id_channel = ?
-              AND kl.ts >= NOW() - INTERVAL $days DAY
-            GROUP BY kl.from_nick
-        ) x
-        WHERE x.who IS NOT NULL AND x.who <> ''
-        GROUP BY x.who
+        SELECT CASE WHEN ? = 'given' THEN kl.from_nick ELSE kl.nick END AS who,
+               SUM(CASE WHEN kl.delta = 1 THEN 1 ELSE 0 END) AS positive_count
+        FROM KARMA_LOG kl
+        WHERE kl.id_channel = ?
+          AND kl.ts >= NOW() - INTERVAL $days DAY
+        GROUP BY CASE WHEN ? = 'given' THEN kl.from_nick ELSE kl.nick END
+        HAVING who IS NOT NULL AND who <> '' AND positive_count > 0
+        ORDER BY positive_count DESC, who ASC
+        LIMIT 1
     }) };
-    if ($sth_k && eval { $sth_k->execute($id_channel, $id_channel) }) {
-        while (my $r = $sth_k->fetchrow_hashref) {
-            _awards_add(\%karma, $r->{who}, 'received', $r->{positive_received});
-            _awards_add(\%karma, $r->{who}, 'given',    $r->{positive_given});
+    if ($sth_k) {
+        if (eval { $sth_k->execute('received', $id_channel, 'received') }) {
+            my $r = eval { $sth_k->fetchrow_hashref } || {};
+            $magnet = [ $r->{who}, int($r->{positive_count} // 0) ]
+                if defined($r->{who}) && length($r->{who})
+                && int($r->{positive_count} // 0) > 0;
+        }
+        if (eval { $sth_k->execute('given', $id_channel, 'given') }) {
+            my $r = eval { $sth_k->fetchrow_hashref } || {};
+            $generous = [ $r->{who}, int($r->{positive_count} // 0) ]
+                if defined($r->{who}) && length($r->{who})
+                && int($r->{positive_count} // 0) > 0;
         }
         eval { $sth_k->finish };
     }
-    elsif ($sth_k) {
-        eval { $sth_k->finish };
-    }
 
-    # One bounded community query merges quote and factoid contributions.
-    # Anonymous quotes have no durable author and are intentionally ignored.
-    my %community;
+    # One bounded community prepare. Each scalar subquery owns its table and
+    # returns only the winning contributor, avoiding derived-set materialization
+    # while keeping quote/factoid attribution in a single DB round-trip.
+    my ($archivist, $lore);
     my $sth_c = eval { $dbh->prepare(qq{
-        SELECT x.who,
-               SUM(x.quote_count)   AS quote_count,
-               SUM(x.factoid_count) AS factoid_count
-        FROM (
-            SELECT COALESCE(NULLIF(u.nickname, ''), '') AS who,
-                   COUNT(*) AS quote_count,
-                   0 AS factoid_count
-            FROM QUOTES q
-            LEFT JOIN USER u ON u.id_user = q.id_user
-            WHERE q.id_channel = ?
-              AND q.ts >= NOW() - INTERVAL $days DAY
-            GROUP BY COALESCE(NULLIF(u.nickname, ''), '')
-            UNION ALL
-            SELECT COALESCE(NULLIF(f.created_by_nick, ''), NULLIF(u.nickname, ''), '') AS who,
-                   0 AS quote_count,
-                   COUNT(*) AS factoid_count
-            FROM FACTOID f
-            LEFT JOIN USER u ON u.id_user = f.created_by
-            WHERE f.id_channel = ?
-              AND f.created_at >= NOW() - INTERVAL $days DAY
-            GROUP BY COALESCE(NULLIF(f.created_by_nick, ''), NULLIF(u.nickname, ''), '')
-        ) x
-        WHERE x.who <> ''
-        GROUP BY x.who
+        SELECT
+            (SELECT CONCAT(u.nickname, CHAR(9), COUNT(*))
+               FROM QUOTES q
+               JOIN USER u ON u.id_user = q.id_user
+              WHERE q.id_channel = ?
+                AND q.ts >= NOW() - INTERVAL $days DAY
+                AND u.nickname <> ''
+              GROUP BY u.nickname
+              ORDER BY COUNT(*) DESC, u.nickname ASC
+              LIMIT 1) AS archivist,
+            (SELECT CONCAT(
+                        COALESCE(NULLIF(f.created_by_nick, ''), NULLIF(u.nickname, ''), ''),
+                        CHAR(9), COUNT(*)
+                    )
+               FROM FACTOID f
+               LEFT JOIN USER u ON u.id_user = f.created_by
+              WHERE f.id_channel = ?
+                AND f.created_at >= NOW() - INTERVAL $days DAY
+                AND COALESCE(NULLIF(f.created_by_nick, ''), NULLIF(u.nickname, ''), '') <> ''
+              GROUP BY COALESCE(NULLIF(f.created_by_nick, ''), NULLIF(u.nickname, ''), '')
+              ORDER BY COUNT(*) DESC,
+                       COALESCE(NULLIF(f.created_by_nick, ''), NULLIF(u.nickname, ''), '') ASC
+              LIMIT 1) AS lorekeeper
     }) };
     if ($sth_c && eval { $sth_c->execute($id_channel, $id_channel) }) {
-        while (my $r = $sth_c->fetchrow_hashref) {
-            _awards_add(\%community, $r->{who}, 'quotes',   $r->{quote_count});
-            _awards_add(\%community, $r->{who}, 'factoids', $r->{factoid_count});
+        my $r = eval { $sth_c->fetchrow_hashref } || {};
+        for my $spec (
+            [ archivist => \$archivist ],
+            [ lorekeeper => \$lore ],
+        ) {
+            my ($field, $slot) = @$spec;
+            my $packed = $r->{$field};
+            next unless defined($packed) && length($packed);
+            my ($who, $count) = split /\t/, $packed, 2;
+            next unless defined($who) && length($who)
+                     && defined($count) && $count =~ /^\d+$/ && $count > 0;
+            $$slot = [ $who, int($count) ];
         }
         eval { $sth_c->finish };
     }
@@ -11590,12 +11594,8 @@ sub mbAwards_ctx {
         eval { $sth_c->finish };
     }
 
-    my $voice     = _awards_pick(\%msg,       'messages');
-    my $night     = _awards_pick(\%msg,       'night');
-    my $magnet    = _awards_pick(\%karma,     'received');
-    my $generous  = _awards_pick(\%karma,     'given');
-    my $archivist = _awards_pick(\%community, 'quotes');
-    my $lore      = _awards_pick(\%community, 'factoids');
+    my $voice = _awards_pick(\%msg, 'messages');
+    my $night = _awards_pick(\%msg, 'night');
 
     my @lines;
     my @activity;
@@ -11627,6 +11627,247 @@ sub mbAwards_ctx {
 
     botPrivmsg($self, $channel, $header);
     botPrivmsg($self, $channel, "  $_") for @lines;
+    return 1;
+}
+
+
+
+# ---------------------------------------------------------------------------
+# mbYearbook_ctx --- !yearbook [YYYY]
+# mb667: one bounded annual portrait of the current channel. Historical data
+# is merged through channel_log_gather(), so a year split between live and the
+# archive is counted exactly once per source. No random scan, no persistence.
+# ---------------------------------------------------------------------------
+sub _yearbook_best_key {
+    my ($h) = @_;
+    return unless ref($h) eq 'HASH' && keys %$h;
+    my @keys = sort {
+           int($h->{$b} // 0) <=> int($h->{$a} // 0)
+        || $a cmp $b
+    } keys %$h;
+    my $k = $keys[0];
+    return [ $k, int($h->{$k} // 0) ];
+}
+
+sub _yearbook_month_label {
+    my ($month) = @_;
+    my @names = qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec);
+    $month = int($month // 0);
+    return '?' if $month < 1 || $month > 12;
+    return $names[$month - 1];
+}
+
+sub _yearbook_day_label {
+    my ($day) = @_;
+    return '?' unless defined($day) && $day =~ /\A\d{4}-(\d{2})-(\d{2})\z/;
+    return _yearbook_month_label($1) . ' ' . int($2);
+}
+
+sub _yearbook_collect {
+    my ($self, $id_channel, $year) = @_;
+    my $dbh = $self->{dbh};
+    return unless $dbh && defined($id_channel) && $id_channel =~ /^\d+$/;
+    return unless defined($year) && $year =~ /^\d{4}$/;
+
+    my $start = sprintf('%04d-01-01 00:00:00', $year);
+    my $end   = sprintf('%04d-01-01 00:00:00', $year + 1);
+
+    # Pass 1: group by nick. Merging by lower-cased nick avoids double
+    # counting a case-only nick variant when the year crosses live/archive.
+    my %voices;
+    my $voices_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+        SELECT nick, COUNT(*) AS messages
+        FROM __CLSRC__
+        WHERE id_channel = ?
+          AND event_type IN ('public','action')
+          AND ts >= ?
+          AND ts < ?
+        GROUP BY nick
+    }, [ $id_channel, $start, $end ], sub {
+        my ($r) = @_;
+        my $display = $r->{nick};
+        return unless defined($display) && length($display);
+        my $count = int($r->{messages} // 0);
+        return if $count <= 0;
+        my $key = lc $display;
+        $voices{$key}{display} //= $display;
+        $voices{$key}{messages} = int($voices{$key}{messages} // 0) + $count;
+    }, 'content');
+    return unless $voices_g->{live_ok} && !$voices_g->{tainted};
+    return unless keys %voices;
+
+    my $messages = 0;
+    $messages += int($voices{$_}{messages} // 0) for keys %voices;
+    my $people = scalar keys %voices;
+    my @voice_keys = sort {
+           int($voices{$b}{messages} // 0) <=> int($voices{$a}{messages} // 0)
+        || lc($voices{$a}{display} // $a) cmp lc($voices{$b}{display} // $b)
+    } keys %voices;
+    splice(@voice_keys, 3) if @voice_keys > 3;
+    my @top_voices = map {
+        [ $voices{$_}{display} // $_, int($voices{$_}{messages} // 0) ]
+    } @voice_keys;
+
+    # Pass 2: one bounded day/hour cube. From these rows we derive the busiest
+    # day, month and hour and the actual recorded activity span. At most
+    # 366*24 rows/source are returned for a leap year.
+    my (%days, %months, %hours);
+    my ($first_day, $last_day);
+    my $time_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+        SELECT DATE(ts) AS day_key,
+               HOUR(ts) AS hour_key,
+               COUNT(*) AS messages
+        FROM __CLSRC__
+        WHERE id_channel = ?
+          AND event_type IN ('public','action')
+          AND ts >= ?
+          AND ts < ?
+        GROUP BY DATE(ts), HOUR(ts)
+    }, [ $id_channel, $start, $end ], sub {
+        my ($r) = @_;
+        my $day = $r->{day_key};
+        return unless defined($day) && $day =~ /\A\d{4}-\d{2}-\d{2}\z/;
+        my $hour = int($r->{hour_key} // -1);
+        return if $hour < 0 || $hour > 23;
+        my $count = int($r->{messages} // 0);
+        return if $count <= 0;
+        my $month = substr($day, 5, 2);
+        $days{$day}       = int($days{$day}       // 0) + $count;
+        $months{$month}   = int($months{$month}   // 0) + $count;
+        $hours{$hour}     = int($hours{$hour}     // 0) + $count;
+        $first_day = $day if !defined($first_day) || $day lt $first_day;
+        $last_day  = $day if !defined($last_day)  || $day gt $last_day;
+    }, 'content');
+    return unless $time_g->{live_ok} && !$time_g->{tainted};
+    return unless defined($first_day) && defined($last_day);
+
+    my $best_month = _yearbook_best_key(\%months);
+    my $best_day   = _yearbook_best_key(\%days);
+    my $best_hour  = _yearbook_best_key(\%hours);
+
+    # Community tables are not part of CHANNEL_LOG archival rotation. Keep the
+    # annual contribution read isolated and fail-soft: the yearbook remains
+    # useful even if one optional community table is unavailable.
+    my ($quote_count, $factoid_count) = (0, 0);
+    my $sth_c = eval { $dbh->prepare(q{
+        SELECT
+            (SELECT COUNT(*)
+               FROM QUOTES
+              WHERE id_channel = ? AND ts >= ? AND ts < ?) AS quote_count,
+            (SELECT COUNT(*)
+               FROM FACTOID
+              WHERE id_channel = ? AND created_at >= ? AND created_at < ?) AS factoid_count
+    }) };
+    if ($sth_c && eval {
+        $sth_c->execute($id_channel, $start, $end, $id_channel, $start, $end)
+    }) {
+        my $r = eval { $sth_c->fetchrow_hashref } || {};
+        $quote_count   = int($r->{quote_count}   // 0);
+        $factoid_count = int($r->{factoid_count} // 0);
+        eval { $sth_c->finish };
+    }
+    elsif ($sth_c) {
+        eval { $sth_c->finish };
+    }
+
+    return {
+        year          => 0 + $year,
+        messages      => $messages,
+        people        => $people,
+        top_voices    => \@top_voices,
+        best_month    => $best_month,
+        best_day      => $best_day,
+        best_hour     => $best_hour,
+        first_day     => $first_day,
+        last_day      => $last_day,
+        quote_count   => $quote_count,
+        factoid_count => $factoid_count,
+    };
+}
+
+sub mbYearbook_ctx {
+    my ($ctx) = @_;
+    my $self    = $ctx->bot;
+    my $nick    = $ctx->nick;
+    my $channel = $ctx->channel // '';
+    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    unless (isIrcChannelTarget($channel)) {
+        botNotice($self, $nick, 'Syntax: yearbook [YYYY]  (use it in a channel)');
+        return 1;
+    }
+
+    return 1 unless eval {
+        Mediabot::Helpers::chanset_enabled($self, $channel, 'OnThisDay', default => 1)
+    } // 1;
+
+    my $current_year = (localtime())[5] + 1900;
+    my $year = @args ? ($args[0] // '') : ($current_year - 1);
+    if (@args > 1 || $year !~ /\A\d{4}\z/ || $year < 2000 || $year > $current_year) {
+        botNotice($self, $nick, "Syntax: yearbook [YYYY]  (2000-$current_year)");
+        return 1;
+    }
+    $year = int($year);
+
+    my $dbh = $self->{dbh};
+    unless ($dbh) {
+        botNotice($self, $nick, 'yearbook: database unavailable.');
+        return 1;
+    }
+
+    my $channel_obj = $self->{channels}{lc $channel};
+    my $id_channel  = $channel_obj ? eval { $channel_obj->get_id } : undef;
+    unless (defined($id_channel) && $id_channel =~ /^\d+$/) {
+        botNotice($self, $nick, 'yearbook: channel not known to the bot.');
+        return 1;
+    }
+
+    my $yb = _yearbook_collect($self, $id_channel, $year);
+    unless ($yb) {
+        botNotice($self, $nick, "yearbook: no usable channel history found for $year.");
+        return 1;
+    }
+
+    my $header = "\x{1F4D6} \x02$channel Yearbook\x02 \x{2014} $year";
+    $header .= " \x{B7} year to date" if $year == $current_year;
+    botPrivmsg($self, $channel, $header);
+
+    my $month = $yb->{best_month};
+    my $month_label = $month ? _yearbook_month_label($month->[0]) : '?';
+    botPrivmsg($self, $channel,
+        "  \x{1F4AC} " . _fmt_n($yb->{messages}) . " msgs \x{B7} "
+        . "\x{1F465} " . _fmt_n($yb->{people}) . " voices \x{B7} "
+        . "\x{1F4C5} busiest month: $month_label ("
+        . _fmt_n($month ? $month->[1] : 0) . ')');
+
+    my $day  = $yb->{best_day};
+    my $hour = $yb->{best_hour};
+    my $hour_n = $hour ? int($hour->[0]) : 0;
+    my $hour_end = ($hour_n + 1) % 24;
+    botPrivmsg($self, $channel,
+        "  \x{1F525} peak day: " . _yearbook_day_label($day ? $day->[0] : undef)
+        . ' (' . _fmt_n($day ? $day->[1] : 0) . " msgs) \x{B7} "
+        . sprintf("\x{1F553} peak hour: %02d:00-%02d:00 (%s msgs)",
+            $hour_n, $hour_end, _fmt_n($hour ? $hour->[1] : 0)));
+
+    my @voice_parts = map {
+        my ($vnick, $count) = @$_;
+        "\x02$vnick\x02 " . _fmt_n($count)
+    } @{ $yb->{top_voices} || [] };
+    botPrivmsg($self, $channel,
+        "  \x{1F451} top voices: " . join(" \x{B7} ", @voice_parts));
+
+    my $tail = "  \x{1F4DC} " . _fmt_n($yb->{quote_count}) . " quotes added \x{B7} "
+             . "\x{1F4DA} " . _fmt_n($yb->{factoid_count}) . ' factoids learned';
+    my $full_first = sprintf('%04d-01-01', $year);
+    my $full_last  = sprintf('%04d-12-31', $year);
+    if (($yb->{first_day} // '') ne $full_first || ($yb->{last_day} // '') ne $full_last) {
+        $tail .= " \x{B7} \x{1F5D3} recorded "
+              . _yearbook_day_label($yb->{first_day}) . '-'
+              . _yearbook_day_label($yb->{last_day});
+    }
+    botPrivmsg($self, $channel, $tail);
+
     return 1;
 }
 
@@ -11949,7 +12190,7 @@ sub mbFeatures_ctx {
             . "  | catalogue: $ach_defs",
         "  \x{1F3B2} games: $games  | commands: duel, horoscope, compat, quotegame",
         "  \x{1F517} links: UrlTitle=$urltitle  Youtube=$youtube  YoutubeSearch=$ytsearch",
-        "  \x{1F4AC} social memory: profil/radar/dashboard/leaderboard/awards/chronos/mood/memory available",
+        "  \x{1F4AC} social memory: profil/radar/dashboard/leaderboard/awards/yearbook/chronos/mood/memory available",
         "  \x{1F916} integrations: Claude=$claude  RandomQuote=$randomquote  Radio=$radio",
         "  \x{1F6E1} safety/output: AntiFlood=$antiflood  NoColors=$nocolors  Metrics=$metrics",
         "  Help: help social / help games / help chansets",

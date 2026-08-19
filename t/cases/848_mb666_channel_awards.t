@@ -18,16 +18,16 @@ BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
         my ($s, @bind) = @_;
         $s->{i} = 0;
         if ($s->{kind} eq 'karma') {
-            $s->{rows} = [
-                { who=>'carol', positive_received=>18, positive_given=>2 },
-                { who=>'dave',  positive_received=>1,  positive_given=>22 },
-            ];
+            my $role = $bind[0] // 'received';
+            $s->{rows} = $role eq 'given'
+                ? [ { who=>'dave',  positive_count=>22 } ]
+                : [ { who=>'carol', positive_count=>18 } ];
         }
         elsif ($s->{kind} eq 'community') {
-            $s->{rows} = [
-                { who=>'eve',   quote_count=>9, factoid_count=>0 },
-                { who=>'frank', quote_count=>1, factoid_count=>6 },
-            ];
+            $s->{rows} = [ {
+                archivist  => "eve\t9",
+                lorekeeper => "frank\t6",
+            } ];
         }
         return 1;
     }
@@ -208,6 +208,8 @@ return sub {
     $awards_src //= '';
     $assert->unlike($awards_src, qr/ORDER\s+BY\s+RAND\s*\(/i,
         'mb666-848: awards adds no ORDER BY RAND()');
+    $assert->unlike($awards_src, qr/\bUNION\s+ALL\b/i,
+        'mb666-848: awards preserves the per-table no-UNION-ALL archive contract');
     my $gathers = () = $awards_src =~ /channel_log_gather\(/g;
     my $prepares = () = $awards_src =~ /\$dbh->prepare\(/g;
     $assert->is($gathers, 1,

@@ -2048,6 +2048,7 @@ sub _af_conf_int {
 #   trivia  → 5s per channel
 #   poll    → 0s (no cooldown — managed by poll active flag)
 #   awards  → 20s per channel (mb666 cross-feature aggregation)
+#   yearbook → 60s per channel (mb667 annual archive-aware aggregation)
 #
 # Operators (.chanset) can override via _cmd_cooldown config (CC2).
 # ---------------------------------------------------------------------------
@@ -2063,6 +2064,8 @@ sub checkCmdCooldown {
         # mb666: awards performs bounded cross-feature aggregation in a worker.
         # Keep the cooldown here, in the PARENT, so it survives the child.
         awards  => 20,
+        # mb667: two annual archive-aware aggregations can span millions of rows.
+        yearbook => 60,
         # mb615-B1: 'actualites' enchaine deux appels reseau payants (Tavily
         # puis Claude). Le cooldown DOIT vivre ici, cote parent : la commande
         # s'execute dans un worker jetable, ou tout compteur pose meurt avec

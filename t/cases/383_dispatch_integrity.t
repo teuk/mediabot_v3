@@ -51,6 +51,7 @@ my @important_cmds = qw(
     mood
     leaderboard
     awards
+    yearbook
     chronos
     features
     capabilities
