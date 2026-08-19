@@ -1807,6 +1807,181 @@ sub count_all_nicks {
 # -- Agrégats pour dashboard / leaderboard ------------------------------------
 # Keep presentation code out of the internal storage representation.
 
+
+# -- mb669: public read-only durable identity API -----------------------------
+#
+# Other subsystems must not query ACHIEVEMENT_PROFILE / ACHIEVEMENT_IDENTITY
+# directly.  These methods expose the registered USER anchor and its bounded
+# alias set without observing, touching, merging or creating identity state.
+sub resolve_registered_user {
+    my ($self, $channel, $nick) = @_;
+
+    my $base = {
+        backend => ($self->{storage} // 'unknown'),
+        channel => defined($channel) ? $channel : '',
+        nick    => defined($nick)    ? $nick    : '',
+        status  => 'invalid',
+    };
+
+    return $base unless defined($channel) && $channel =~ /^#\S+$/
+        && defined($nick) && $nick =~ /\S/;
+
+    return { %$base, status => 'legacy_json' }
+        unless ($self->{storage} // '') eq 'db';
+
+    my $dbh = eval { $self->{bot}{dbh} };
+    return { %$base, status => 'db_unavailable' }
+        unless $dbh && eval { $dbh->can('prepare') };
+
+    # Resolve the channel and the strongest possible anchor in one SELECT.
+    # USER.nickname is authoritative when it matches exactly; the channel is
+    # still resolved first so every result remains channel-scoped.
+    my $sth_direct = eval {
+        $dbh->prepare(q{
+            SELECT c.id_channel,
+                   c.name AS channel_name,
+                   u.id_user,
+                   u.nickname AS registered_nick
+            FROM CHANNEL c
+            LEFT JOIN USER u ON u.nickname = ?
+            WHERE c.name = ?
+            LIMIT 1
+        })
+    };
+    return { %$base, status => 'query_error' }
+        unless $sth_direct && eval { $sth_direct->execute($nick, $channel) };
+
+    my $direct = eval { $sth_direct->fetchrow_hashref };
+    eval { $sth_direct->finish };
+    return { %$base, status => 'channel_not_found' }
+        unless $direct && defined($direct->{id_channel});
+
+    my $cid = 0 + $direct->{id_channel};
+    my $canonical_channel = $direct->{channel_name} // $channel;
+    my $resolved = {
+        %$base,
+        id_channel => $cid,
+        channel    => $canonical_channel,
+    };
+
+    if (defined($direct->{id_user}) && "$direct->{id_user}" =~ /\A\d+\z/) {
+        return {
+            %$resolved,
+            status          => 'ok',
+            source          => 'registered_nick',
+            id_user         => 0 + $direct->{id_user},
+            registered_nick => $direct->{registered_nick} // $nick,
+        };
+    }
+
+    # Otherwise use the durable Achievement graph, but only when it identifies
+    # one registered USER.  LIMIT 2 is intentional: ambiguity must be visible,
+    # never silently resolved by recency.
+    my $sth_alias = eval {
+        $dbh->prepare(q{
+            SELECT p.id_user,
+                   u.nickname AS registered_nick,
+                   MIN(p.id_achievement_profile) AS id_achievement_profile,
+                   MAX(p.last_seen_at) AS last_seen_at
+            FROM ACHIEVEMENT_PROFILE p
+            LEFT JOIN ACHIEVEMENT_IDENTITY i
+              ON i.id_achievement_profile = p.id_achievement_profile
+            JOIN USER u ON u.id_user = p.id_user
+            WHERE p.id_channel = ?
+              AND p.id_user IS NOT NULL
+              AND (p.display_nick = ? OR i.nick = ?)
+            GROUP BY p.id_user, u.nickname
+            ORDER BY MAX(p.last_seen_at) DESC
+            LIMIT 2
+        })
+    };
+    return { %$resolved, status => 'query_error' }
+        unless $sth_alias && eval { $sth_alias->execute($cid, $nick, $nick) };
+
+    my @candidates;
+    while (my $row = eval { $sth_alias->fetchrow_hashref }) {
+        last unless $row;
+        next unless defined($row->{id_user}) && "$row->{id_user}" =~ /\A\d+\z/;
+        push @candidates, {
+            id_user                => 0 + $row->{id_user},
+            registered_nick        => $row->{registered_nick} // '',
+            id_achievement_profile => (defined($row->{id_achievement_profile})
+                && "$row->{id_achievement_profile}" =~ /\A\d+\z/)
+                    ? 0 + $row->{id_achievement_profile} : undef,
+            last_seen_at           => $row->{last_seen_at},
+        };
+        last if @candidates >= 2;
+    }
+    eval { $sth_alias->finish };
+
+    return { %$resolved, status => 'not_found', candidates => [] }
+        unless @candidates;
+    return { %$resolved, status => 'ambiguous', candidates => \@candidates }
+        if @candidates > 1;
+
+    return {
+        %$resolved,
+        status                   => 'ok',
+        source                   => 'durable_alias',
+        id_user                  => $candidates[0]{id_user},
+        registered_nick          => $candidates[0]{registered_nick},
+        id_achievement_profile   => $candidates[0]{id_achievement_profile},
+        last_seen_at             => $candidates[0]{last_seen_at},
+    };
+}
+
+sub known_aliases {
+    my ($self, $channel, $nick, $limit) = @_;
+    $limit = 32 unless defined($limit) && "$limit" =~ /\A\d+\z/
+        && $limit >= 1 && $limit <= 64;
+
+    my $resolved = $self->resolve_registered_user($channel, $nick);
+    return { %$resolved, aliases => [] }
+        unless ref($resolved) eq 'HASH' && ($resolved->{status} // '') eq 'ok'
+            && defined($resolved->{id_user}) && defined($resolved->{id_channel});
+
+    my $dbh = eval { $self->{bot}{dbh} };
+    return { %$resolved, status => 'db_unavailable', aliases => [] }
+        unless $dbh && eval { $dbh->can('prepare') };
+
+    my $sth = eval {
+        $dbh->prepare(qq{
+            SELECT i.nick,
+                   i.userhost,
+                   MIN(i.first_seen_at) AS first_seen_at,
+                   MAX(i.last_seen_at) AS last_seen_at
+            FROM ACHIEVEMENT_PROFILE p
+            JOIN ACHIEVEMENT_IDENTITY i
+              ON i.id_achievement_profile = p.id_achievement_profile
+            WHERE p.id_channel = ?
+              AND p.id_user = ?
+            GROUP BY i.nick, i.userhost
+            ORDER BY MAX(i.last_seen_at) DESC, i.nick
+            LIMIT $limit
+        })
+    };
+    return { %$resolved, status => 'query_error', aliases => [] }
+        unless $sth && eval {
+            $sth->execute($resolved->{id_channel}, $resolved->{id_user})
+        };
+
+    my @aliases;
+    while (my $row = eval { $sth->fetchrow_hashref }) {
+        last unless $row;
+        push @aliases, {
+            nick          => $row->{nick} // '',
+            userhost      => $row->{userhost} // '',
+            first_seen_at => $row->{first_seen_at},
+            last_seen_at  => $row->{last_seen_at},
+        };
+        last if @aliases >= $limit;
+    }
+    eval { $sth->finish };
+
+    return { %$resolved, aliases => \@aliases };
+}
+
+
 # -- mb654: read-only durable identity diagnostic ----------------------------
 #
 # This deliberately does NOT call observe_identity(), _profile_id_for() or any

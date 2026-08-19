@@ -8867,56 +8867,20 @@ sub _profile_community_footprint {
     my ($self, $dbh, $channel, $target) = @_;
     return unless $dbh && defined $channel && defined $target;
 
-    # mb665: community tables are tied to registered USER ids while IRC history
-    # is tied to visible nicks. Resolve that boundary conservatively:
-    #   1. exact registered nickname;
-    #   2. otherwise a UNIQUE registered USER id already attached to this nick
-    #      by the durable mb646 Achievement identity graph.
-    # If the alias is ambiguous (more than one registered id), do not guess.
+    # mb669: registered identity is now a public, read-only Achievement API.
+    # UserCommands deliberately has no private durable-identity table knowledge;
+    # ambiguous aliases stay unresolved instead of being guessed here.
     my $id_user;
-
-    my $sth_u = eval {
-        $dbh->prepare(q{
-            SELECT id_user
-            FROM USER
-            WHERE nickname = ?
-            LIMIT 1
-        })
-    };
-    if ($sth_u && eval { $sth_u->execute($target) }) {
-        my $r = eval { $sth_u->fetchrow_hashref };
-        $id_user = $r->{id_user}
-            if $r && defined($r->{id_user}) && $r->{id_user} =~ /^\d+$/;
-        eval { $sth_u->finish };
-    }
-
-    unless (defined $id_user) {
-        my $sth_a = eval {
-            $dbh->prepare(q{
-                SELECT p.id_user
-                FROM ACHIEVEMENT_PROFILE p
-                JOIN CHANNEL c ON c.id_channel = p.id_channel
-                LEFT JOIN ACHIEVEMENT_IDENTITY i
-                  ON i.id_achievement_profile = p.id_achievement_profile
-                WHERE c.name = ?
-                  AND p.id_user IS NOT NULL
-                  AND (p.display_nick = ? OR i.nick = ?)
-                GROUP BY p.id_user
-                ORDER BY MAX(p.last_seen_at) DESC
-                LIMIT 2
-            })
+    if ($self->{achievements}
+        && eval { $self->{achievements}->can('resolve_registered_user') }) {
+        my $identity = eval {
+            $self->{achievements}->resolve_registered_user($channel, $target)
         };
-
-        if ($sth_a && eval { $sth_a->execute($channel, $target, $target) }) {
-            my @ids;
-            while (my $r = eval { $sth_a->fetchrow_hashref }) {
-                last unless $r;
-                push @ids, 0 + $r->{id_user}
-                    if defined($r->{id_user}) && $r->{id_user} =~ /^\d+$/;
-                last if @ids >= 2;
-            }
-            eval { $sth_a->finish };
-            $id_user = $ids[0] if @ids == 1;
+        if (ref($identity) eq 'HASH'
+            && ($identity->{status} // '') eq 'ok'
+            && defined($identity->{id_user})
+            && "$identity->{id_user}" =~ /^\d+$/) {
+            $id_user = 0 + $identity->{id_user};
         }
     }
 

@@ -1,6 +1,6 @@
 # t/cases/847_mb665_profile_community_footprint.t
 # =============================================================================
-# mb665 — !profil Community Footprint + durable registered-identity bridge.
+# mb665/mb669 — !profil Community Footprint through the durable identity API.
 # =============================================================================
 use strict;
 use warnings;
@@ -9,22 +9,11 @@ BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 
 {
     package Stmt847;
-    sub new {
-        my ($class, $kind) = @_;
-        bless { kind => $kind, rows => [], pos => 0, bind => [] }, $class;
-    }
+    sub new { bless { rows => [], pos => 0, bind => [] }, shift }
     sub execute {
         my ($self, @bind) = @_;
         $self->{bind} = [@bind];
-        if ($self->{kind} eq 'direct_user') {
-            $self->{rows} = [];
-        }
-        elsif ($self->{kind} eq 'achievement_alias') {
-            $self->{rows} = [ { id_user => 42 } ];
-        }
-        elsif ($self->{kind} eq 'footprint') {
-            $self->{rows} = [ { quote_count => 28, factoid_count => 7 } ];
-        }
+        $self->{rows} = [ { quote_count => 28, factoid_count => 7 } ];
         $self->{pos} = 0;
         return 1;
     }
@@ -42,13 +31,23 @@ BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
     sub prepare {
         my ($self, $sql) = @_;
         push @{ $self->{prepares} }, $sql;
-        return Stmt847->new('direct_user')
-            if $sql =~ /\bFROM USER\b.*\bWHERE nickname = \?/s;
-        return Stmt847->new('achievement_alias')
-            if $sql =~ /\bFROM ACHIEVEMENT_PROFILE\b.*\bACHIEVEMENT_IDENTITY\b/s;
-        return Stmt847->new('footprint')
-            if $sql =~ /\bFROM QUOTES\b.*\bFROM FACTOID\b/s;
+        return Stmt847->new if $sql =~ /\bFROM QUOTES\b.*\bFROM FACTOID\b/s;
         die "mb665-847: unexpected prepare: $sql";
+    }
+}
+
+{
+    package Ach847;
+    sub new { bless { calls => [] }, shift }
+    sub resolve_registered_user {
+        my ($self, $channel, $nick) = @_;
+        push @{ $self->{calls} }, [$channel, $nick];
+        return {
+            status          => 'ok',
+            source          => 'durable_alias',
+            id_user         => 42,
+            registered_nick => 'fixture_user',
+        };
     }
 }
 
@@ -74,32 +73,38 @@ return sub {
     require Mediabot::UserCommands;
 
     my $dbh = DBH847->new;
-    my $bot = {};
+    my $ach = Ach847->new;
+    my $bot = { achievements => $ach };
     my $r = Mediabot::UserCommands::_profile_community_footprint(
-        $bot, $dbh, '#radiocapsule', 'te[u]k'
+        $bot, $dbh, '#mb665-fixture', 'alias_fixture'
     );
 
     $assert->ok(ref($r) eq 'HASH',
         'mb665-847: footprint helper returns a result');
     $assert->is($r->{id_user}, 42,
-        'mb665-847: IRC alias resolves to unique durable registered user');
+        'mb665-847: community footprint consumes resolved registered USER id');
     $assert->is($r->{quote_count}, 28,
         'mb665-847: registered quote contribution is returned through alias');
     $assert->is($r->{factoid_count}, 7,
         'mb665-847: factoid contribution is returned through alias');
 
-    $assert->is(scalar @{ $dbh->{prepares} }, 3,
-        'mb665-847: alias path uses direct-user, durable-identity and footprint reads');
+    $assert->is(scalar @{ $ach->{calls} }, 1,
+        'mb665-847: identity API is called exactly once');
+    $assert->is($ach->{calls}[0][0], '#mb665-fixture',
+        'mb665-847: identity API receives the current channel');
+    $assert->is($ach->{calls}[0][1], 'alias_fixture',
+        'mb665-847: identity API receives the profile target nick');
+
+    $assert->is(scalar @{ $dbh->{prepares} }, 1,
+        'mb665-847: UserCommands owns only the bounded footprint read');
 
     my $all_sql = join "\n", @{ $dbh->{prepares} };
-    $assert->like($all_sql, qr/\bFROM ACHIEVEMENT_PROFILE\b/s,
-        'mb665-847: existing mb646 profile graph is reused');
-    $assert->like($all_sql, qr/\bACHIEVEMENT_IDENTITY\b/s,
-        'mb665-847: existing mb646 alias evidence is reused');
     $assert->like($all_sql, qr/\bFROM QUOTES\b/s,
         'mb665-847: footprint reads QUOTES');
     $assert->like($all_sql, qr/\bFROM FACTOID\b/s,
         'mb665-847: footprint reads FACTOID');
+    $assert->unlike($all_sql, qr/ACHIEVEMENT_(?:PROFILE|IDENTITY)/s,
+        'mb665-847: UserCommands no longer reads Achievement identity tables');
     $assert->unlike($all_sql, qr/CHANNEL_LOG/s,
         'mb665-847: identity bridge adds no CHANNEL_LOG scan');
     $assert->unlike($all_sql, qr/ORDER\s+BY\s+RAND\s*\(/i,
@@ -124,6 +129,8 @@ return sub {
     $assert->like($profile, qr/community:.*quote_count.*factoid_count/s,
         'mb665-847: !profil renders the compact community line');
 
-    $assert->like($helper, qr/LIMIT 2/s,
-        'mb665-847: durable alias resolution is ambiguity-bounded');
+    $assert->like($helper, qr/resolve_registered_user\(\$channel,\s*\$target\)/,
+        'mb665-847: footprint uses the public durable identity API');
+    $assert->unlike($helper, qr/ACHIEVEMENT_(?:PROFILE|IDENTITY)/,
+        'mb665-847: footprint has no private Achievement schema knowledge');
 };

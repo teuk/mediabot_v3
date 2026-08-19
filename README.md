@@ -314,6 +314,12 @@ perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes
 
 Do not blindly apply historical migrations to a fresh install.
 
+Durable IRC identity is intentionally hidden behind the read-only
+`Mediabot::Achievements` API. Runtime consumers should use
+`resolve_registered_user(channel, nick)` and `known_aliases(channel, nick)`
+instead of querying `ACHIEVEMENT_PROFILE` or `ACHIEVEMENT_IDENTITY` directly.
+This keeps ambiguity handling and registered-user authority in one place.
+
 See:
 
 * [Database model](https://github.com/teuk/mediabot_v3/wiki/Database-model)

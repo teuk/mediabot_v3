@@ -32,6 +32,31 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb669 — make durable IRC identity a public read-only API
+- Added `resolve_registered_user(channel, nick)` as the public conservative
+  resolver for mapping a visible IRC nickname to a registered Mediabot user.
+  Exact registered USER nicknames remain authoritative; durable alias evidence
+  is accepted only when it resolves unambiguously.
+- Added `known_aliases(channel, nick [, limit])` to expose bounded durable alias
+  evidence for the resolved registered user without leaking persistence-table
+  details to consumers.
+- Kept both APIs strictly read-only: they perform no identity observation,
+  profile creation, merge, touch, migration or repair operation.
+- Migrated the MB665 Community Footprint consumer to the new API. Runtime
+  modules outside `Mediabot::Achievements` no longer reference
+  `ACHIEVEMENT_PROFILE` or `ACHIEVEMENT_IDENTITY` directly.
+- Preserved conservative failure semantics: missing and ambiguous identities
+  are reported instead of choosing a plausible user.
+- Real development validation confirmed that `teuk` resolves through the
+  authoritative registered nickname path while `Te[u]K` resolves through the
+  durable alias path, both to `id_user=1`; `known_aliases` returned the stored
+  `Te[u]K!teuk@teuk.org` evidence. The probe was SELECT-only.
+- Focused identity/profile regression passed `182/182`; the fast validation
+  lane passed `5191/5191` in 180 seconds with `RC=0`.
+- No database schema, migration, configuration key or identity-data rewrite was
+  added.
+
+
 ### mb668 — reward the people who build the channel's shared memory
 - Added five contribution-driven achievements backed by existing community
   content: `Archivist` (10 quotes), `Master Archivist` (50 quotes),
