@@ -106,7 +106,7 @@ return sub {
     # -------------------------------------------------------------------------
     {
         my $src = _slurp_704(File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm'));
-        my ($ig) = $src =~ /(sub _handle_instagram \{.*?\n\})\n\n/s; $ig //= '';
+        my ($ig) = $src =~ /(sub _instagram_fetch_sync \{.*?\n\})\n\n/s; $ig //= '';
         my ($fb) = $src =~ /(sub _handle_facebook \{.*?\n\})\n\n/s;  $fb //= '';
         $assert->like($ig, qr/facebookexternalhit\/1\.1/,
             'Instagram: étape HTTP en UA crawler social');

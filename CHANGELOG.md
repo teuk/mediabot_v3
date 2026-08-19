@@ -32,6 +32,36 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb671 — make Instagram previews rich without blocking IRC
+- Reworked Instagram URL handling around a bounded `Mediabot::AsyncWorker`
+  request so slow or unavailable Instagram pages no longer block PRIVMSG
+  processing or stall the IRC event loop.
+- Removed Chromium from the Instagram path. Runtime diagnostics showed that a
+  problematic post spent roughly five additional seconds rendering a 1.6 MB
+  DOM without exposing any metadata beyond the generic `Instagram` title.
+- Preserved the existing `[Instagram]` badge exactly. A hard IRC reset is kept
+  immediately after the badge so the rich details use the client's normal
+  foreground and remain readable on both dark and light themes.
+- Added type-aware previews for posts, reels, legacy video/TV links, profiles,
+  stories, and highlights. When Instagram exposes metadata, previews can show
+  the owner, likes, comments, date, caption/title, and useful profile details;
+  unavailable content falls back to a compact type-aware
+  `public details unavailable` line.
+- Hardened Story handling against Instagram's generic Story viewer shell. A
+  dead Story returning `Watch this story by ... before it disappears` plus
+  profile counters is no longer misreported as real Story content.
+- Real IRC validation covered multiple public NatGeo/NASA reels and posts,
+  profile URLs, the original unavailable post, deliberately invalid posts and
+  reels, an unavailable Story, and an unavailable Highlight. No
+  `SLOW PRIVMSG` or `event loop stalled` events were observed during the
+  validation window.
+- Focused Instagram regression passed `323/323`; the fast validation lane
+  passed `5242/5242` in 171 seconds; the final complete suite passed
+  `14001/14001` in 769 seconds with `RC=0`.
+- No database schema, migration, configuration, service, or systemd change was
+  introduced.
+
+
 ### mb670 — extract social and channel history from UserCommands
 - Added `Mediabot::SocialHistory` and moved the coherent social/history command
   family out of the oversized `Mediabot::UserCommands` implementation:

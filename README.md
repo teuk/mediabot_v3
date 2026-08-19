@@ -68,6 +68,11 @@ A typical channel can use commands such as:
 
 It can also enrich supported links, expose Prometheus metrics, integrate with radio workflows, and provide a dedicated TCP/DCC administration interface through Partyline.
 
+Instagram previews are non-blocking and type-aware: public posts, reels, profiles,
+stories, and highlights use available metadata for compact rich previews, while
+private, removed, expired, or otherwise unavailable content falls back cleanly
+without stalling the IRC event loop.
+
 The configured prefix is instance-specific and may be `!`, `m`, `.`, or another value chosen by the operator.
 
 ---

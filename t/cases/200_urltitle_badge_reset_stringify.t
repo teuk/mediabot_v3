@@ -67,7 +67,9 @@ return sub {
     my %handlers = (
         _handle_instagram => {
             badge => q{String::IRC->new("Instagram")->white('pink')},
-            reset => qr/my\s+\$msg\s*=\s*"\$badge\\x0f\s+"\s*\.\s*substr\(\$title,\s*0,\s*300\);/,
+            # mb671: Instagram now builds/truncates the rich display first,
+            # then preserves the same badge + hard-reset invariant.
+            reset => qr/my\s+\$msg\s*=\s*"\$badge\\x0f\s+"\s*\.\s*\$title;/,
         },
         _handle_applemusic => {
             badge => q{String::IRC->new("AppleMusic")->white('grey')},
