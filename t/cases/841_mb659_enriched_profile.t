@@ -79,6 +79,10 @@ return sub {
         logger => Log841->new,
     );
 
+    # Synthetic fixtures only: keep tests independent from real channels/users.
+    my $fixture_nick    = 'profile_fixture';
+    my $fixture_channel = '#mb659-fixture';
+
     # A plausible persisted profile. The hidden Phoenix threshold is close
     # (364/365), but it must NEVER become the profile's "Next" spoiler.
     for my $pair (
@@ -89,7 +93,7 @@ return sub {
         [ 'morning_messages',      634 ],
         [ 'comeback_days',         364 ],
     ) {
-        $A->set_progress($pair->[0], 'balibalo', '#radiocapsule', $pair->[1]);
+        $A->set_progress($pair->[0], $fixture_nick, $fixture_channel, $pair->[1]);
     }
 
     for my $id (qw(
@@ -98,7 +102,7 @@ return sub {
         streak_week streak_month
         comeback_week comeback_month comeback_legend
     )) {
-        $A->unlock('balibalo', '#radiocapsule', $id);
+        $A->unlock($fixture_nick, $fixture_channel, $id);
     }
 
     my $dbh = DBH841->new;
@@ -151,16 +155,23 @@ return sub {
     Mediabot::UserCommands::mbProfil_ctx(
         Ctx841->new(
             bot     => $bot,
-            nick    => 'teuk',
-            channel => '#radiocapsule',
-            args    => [ 'balibalo' ],
+            nick    => 'test_caller',
+            channel => $fixture_channel,
+            args    => [ $fixture_nick ],
         )
     );
 
     my $text = join "\n", map { $_->[1] } @out;
 
+    my $defs = $A->list_definitions;
+    my $unlocked = $A->get_for_nick($fixture_nick, $fixture_channel);
+    my $visible_total = scalar grep {
+        !$defs->{$_}{hidden} || exists $unlocked->{$_}
+    } keys %$defs;
+    my $unlocked_total = scalar keys %$unlocked;
+
     # [1] Existing identity/activity card remains intact.
-    $assert->like($text, qr/balibalo.*#radiocapsule/s,
+    $assert->like($text, qr/\Q$fixture_nick\E.*\Q$fixture_channel\E/s,
         'mb659-841: profile header remains present');
     $assert->like($text, qr/3\.9k msgs \(rank #2, 229d seen\)/,
         'mb659-841: existing activity summary is preserved');
@@ -170,8 +181,11 @@ return sub {
         'mb659-841: existing 24h peak remains present');
 
     # [2] Rich profile line comes solely from persisted Achievement progress.
-    $assert->like($text, qr/\x{1F3C6}\s+10\/32/,
-        'mb659-841: spoiler-safe visible achievement count is on the progress line');
+    $assert->like(
+        $text,
+        qr/\x{1F3C6}\s+\Q$unlocked_total\E\/\Q$visible_total\E\b/,
+        'mb659-841: spoiler-safe visible achievement count is on the progress line'
+    );
     $assert->like($text, qr/streak best 42d/,
         'mb659-841: best activity streak is surfaced');
     $assert->like($text, qr/night 964/,

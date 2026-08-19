@@ -53,8 +53,14 @@ release. Development after this release continues on the `3.4dev` line.
   The initial test exposed the insert-id bug (`735723` was reported for the
   real quote id `55`); after the fix, a second quote correctly returned id
   `56` and that exact id was successfully deleted.
+- A post-commit complete-suite checkpoint exposed one stale MB659 test
+  assumption: `841_mb659_enriched_profile.t` still hard-coded the old visible
+  Achievement denominator (`32`) and used real-looking `Balibalo` /
+  `#radiocapsule` fixtures. The test now derives the visible total from the
+  Achievement registry and uses synthetic fixture names.
 - Focused regression passed `213/213`; the fast validation lane passed
-  `5191/5191` in 179 seconds with `RC=0`.
+  `5191/5191` in 179 seconds with `RC=0`; after the MB659 test hardening, the
+  complete suite passed `13837/13837` in 955 seconds with `RC=0`.
 - No database schema, migration, configuration key or new persistence layer
   was added.
 
