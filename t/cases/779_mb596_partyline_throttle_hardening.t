@@ -91,6 +91,7 @@ return sub {
 
     # [5] + [6] gardes structurelles
     my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline.pm' or die $!; local $/; <$fh> };
+    $src .= "\n" . do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline/Dispatcher.pm' or die $!; local $/; <$fh> };
     $assert->like($src, qr/Exempted during authentication/,
         'mb596-779: exemption pre-auth conservee');
     my ($throttle_sec) = $src =~ /(# mb596-B1: sante du throttle.*?flood boot\(s\).*?\n.*?\})/s;

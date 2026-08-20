@@ -18,6 +18,7 @@ return sub {
 
     my $party = _slurp_862(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
     my $trans = _slurp_862(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Transport.pm'));
+    my $disp  = _slurp_862(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Dispatcher.pm'));
 
     $assert->like($party, qr/use Mediabot::Partyline::Transport qw\(/,
         'Partyline imports the extracted transport API');
@@ -48,8 +49,10 @@ return sub {
 
     $assert->like($party, qr/sub new \{.*?\$self->_start_listener;/s,
         'constructor still starts the historical listener method');
-    $assert->like($party, qr/^sub _handle_line \{/m,
-        'command dispatch remains in Partyline during MB678 transport round');
+    $assert->unlike($trans, qr/^sub _handle_line \{/m,
+        'command dispatch is not part of the transport module');
+    $assert->like($disp, qr/^sub _handle_line \{/m,
+        'command dispatch remains available in the dedicated dispatcher module');
     $assert->unlike($trans, qr/^sub _do_login \{/m,
         'authentication is not part of the transport module');
     $assert->unlike($trans, qr/^sub _close_session \{/m,

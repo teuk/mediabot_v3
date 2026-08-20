@@ -12,6 +12,13 @@ local $/;
 my $src = <$fh>;
 close $fh;
 
+my $dispatcher_file = File::Spec->catfile($root, 'Mediabot', 'Partyline', 'Dispatcher.pm');
+open my $dfh, '<', $dispatcher_file or die "$dispatcher_file: $!";
+my $dispatcher_src = <$dfh>;
+close $dfh;
+
+$src .= "\n" . $dispatcher_src;
+
 my ($dispatch) = $src =~ /(# ---- Authenticated : dispatch commands.*?Unknown command\. Type \.help)/s;
 my ($plugins)  = $src =~ /(sub _cmd_plugins \{.*?)(?=^sub _cmd_help)/ms;
 my ($help)     = $src =~ /(sub _cmd_help \{.*?^\})/ms;

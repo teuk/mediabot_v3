@@ -13,7 +13,7 @@ sub _slurp_341 {
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_341(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $src = _slurp_341(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Dispatcher.pm'));
 
     for my $cmd (qw(kick unmute floodset cmdcooldown netsplit floodstatus flushcooldown)) {
         my @hits = ($src =~ /^    elsif \(\$line =~ \/\^\\\.$cmd\b/mg);

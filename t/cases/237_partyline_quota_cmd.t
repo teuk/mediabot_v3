@@ -10,7 +10,7 @@ sub _sub { my($s,$n)=@_; my $re=qr/^[ \t]*sub[ \t]+\Q$n\E\b[^{]*\{/m;
     return substr($s,$st,$p+1-$st) if $d==0; $p++} undef }
 return sub {
     my ($assert) = @_;
-    my $src  = _slurp(File::Spec->catfile('.','Mediabot','Partyline.pm'));
+    my $src  = _slurp(File::Spec->catfile('.','Mediabot','Partyline.pm')) . "\n" . _slurp(File::Spec->catfile('.','Mediabot','Partyline','Dispatcher.pm'));
     my $body = _sub($src, '_cmd_quota');
     $assert->ok(defined $body, '_cmd_quota sub found');
     $assert->like($body // '', qr/_claude_ratelimit/,

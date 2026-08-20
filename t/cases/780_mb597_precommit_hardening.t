@@ -188,6 +188,10 @@ return sub {
         open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline/Transport.pm' or die $!;
         local $/; <$fh>;
     };
+    $party_src .= "\n" . do {
+        open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline/Dispatcher.pm' or die $!;
+        local $/; <$fh>;
+    };
     $assert->like($party_src,
         qr/Flood protection: disconnecting.*?close_when_empty.*?_close_session/s,
         'mb597-780: flood boot ferme le stream avant le nettoyage');

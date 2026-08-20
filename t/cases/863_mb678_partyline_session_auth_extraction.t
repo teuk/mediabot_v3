@@ -19,6 +19,7 @@ return sub {
     my $party = _slurp_863(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
     my $sess  = _slurp_863(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'SessionAuth.pm'));
     my $trans = _slurp_863(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Transport.pm'));
+    my $disp  = _slurp_863(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Dispatcher.pm'));
 
     $assert->like($party, qr/use Mediabot::Partyline::SessionAuth qw\(/,
         'Partyline imports the extracted session/auth API');
@@ -46,8 +47,10 @@ return sub {
             "$name remains imported into Partyline");
     }
 
-    $assert->like($party, qr/^sub _handle_line \{/m,
-        'line/auth/command dispatch remains in Partyline during MB678-II');
+    $assert->unlike($sess, qr/^sub _handle_line \{/m,
+        'dispatcher is not part of SessionAuth.pm');
+    $assert->like($disp, qr/^sub _handle_line \{/m,
+        'line/auth/command dispatch remains available in Dispatcher.pm');
     $assert->like($party, qr/^sub _cmd_help \{/m,
         'Partyline commands remain in Partyline during MB678-II');
     $assert->like($sess, qr/PARTYLINE_LOGIN_IP_MAX_FAILURES/,
