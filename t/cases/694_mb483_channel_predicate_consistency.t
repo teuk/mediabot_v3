@@ -25,7 +25,7 @@ sub _body_694 {
 return sub {
     my ($assert) = @_;
 
-    my $uc = _slurp_694(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $uc = _slurp_694(File::Spec->catfile('.', 'Mediabot', 'CommunityState.pm'));
     my $sh = _slurp_694(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
 
     # recap vit dans SocialHistory depuis MB670.

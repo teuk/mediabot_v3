@@ -39,7 +39,7 @@ return sub {
     $assert->ok($rem2 > 0, 'remaining jamais négatif');
 
     # --- 2. Câblage réel ---------------------------------------------------
-    my $src = _slurp_646(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_646(File::Spec->catfile('.', 'Mediabot', 'CommunityState.pm'));
     my ($body) = $src =~ /(sub mbPollExtend_ctx \{.*?\n\}\n)/s; $body //= '';
     (my $code = $body) =~ s/^\s*#.*$//mg;
 

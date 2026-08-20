@@ -35,7 +35,7 @@ sub _sub_380 {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_380(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src  = _slurp_380(File::Spec->catfile('.', 'Mediabot', 'CommunityState.pm'));
     my $body = _sub_380($src, 'mbNote_ctx');
 
     $assert->ok(defined $body, 'mbNote_ctx body found');

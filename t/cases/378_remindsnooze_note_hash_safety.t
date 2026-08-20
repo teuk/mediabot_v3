@@ -35,7 +35,7 @@ sub _sub_378 {
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_378(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_378(File::Spec->catfile('.', 'Mediabot', 'CommunityState.pm'));
 
     my $snooze = _sub_378($src, 'mbRemindSnooze_ctx');
     my $note   = _sub_378($src, 'mbNote_ctx');

@@ -62,7 +62,7 @@ return sub {
     $assert->like($hits[0][1], qr/PIZZA/, 'match insensible à la casse');
 
     # --- Câblage source ------------------------------------------------------
-    my $src = _slurp_673(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_673(File::Spec->catfile('.', 'Mediabot', 'CommunityState.pm'));
     my ($blk) = $src =~ /(# W7: !note search.*?return 1;\n    \}\n    unless \(\$text ne '')/s;
     $blk //= '';
     $assert->ok($blk ne '', 'bloc !note search extrait');

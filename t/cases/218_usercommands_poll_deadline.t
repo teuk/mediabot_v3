@@ -23,7 +23,7 @@ sub _slurp_218 {
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_218(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_218(File::Spec->catfile('.', 'Mediabot', 'CommunityState.pm'));
 
     $assert->like($src, qr/deadline.*time\(\).*\+/,
         'mbPoll_ctx sets a deadline based on time()');

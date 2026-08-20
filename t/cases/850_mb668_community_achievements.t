@@ -195,7 +195,7 @@ return sub {
         'mb668-850: quote id is captured before Achievement writes can replace last_insert_id'
     );
 
-    my $uc_src = slurp850('Mediabot/UserCommands.pm');
+    my $uc_src = slurp850('Mediabot/CommunityState.pm');
     my $learn = sub_src850($uc_src, 'mbLearn_ctx');
     $assert->ok(defined $learn,
         'mb668-850: learn source found');

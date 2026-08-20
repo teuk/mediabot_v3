@@ -44,7 +44,7 @@ return sub {
     $assert->is(scalar @{ $notes{'teuk'} }, 10, 'ensure idempotent (pas de doublon)');
 
     # --- 2. Câblage réel ---------------------------------------------------
-    my $src = _slurp_652(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_652(File::Spec->catfile('.', 'Mediabot', 'CommunityState.pm'));
 
     $assert->like($src, qr/sub _notes_ensure_loaded \{/, 'helper _notes_ensure_loaded défini');
 

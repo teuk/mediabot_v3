@@ -25,7 +25,7 @@ sub _slurp_669 {
 return sub {
     my ($assert) = @_;
 
-    my $uc = _slurp_669(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $uc = _slurp_669(File::Spec->catfile('.', 'Mediabot', 'CommunityState.pm'));
     my ($note) = $uc =~ /(sub mbNote_ctx \{.*?\n\}\n)/s;
     $note //= '';
     $assert->ok($note ne '', 'mbNote_ctx extracted');

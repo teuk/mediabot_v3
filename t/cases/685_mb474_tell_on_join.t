@@ -62,7 +62,7 @@ return sub {
     # [4] Idempotence : deliverReminders marque delivered AVANT l'envoi, donc
     #     l'appeler au JOIN puis sur message ne double-délivre pas.
     # -------------------------------------------------------------------------
-    my $uc = _slurp_685(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $uc = _slurp_685(File::Spec->catfile('.', 'Mediabot', 'CommunityState.pm'));
     my ($deliver) = $uc =~ /(sub deliverReminders \{.*?\n\}\s*#\s*end sub deliverReminders)/s;
     $deliver //= '';
     $assert->ok($deliver ne '', 'deliverReminders localisé');

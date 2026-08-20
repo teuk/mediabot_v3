@@ -10,7 +10,7 @@ sub _sub { my($s,$n)=@_; my $re=qr/^[ \t]*sub[ \t]+\Q$n\E\b[^{]*\{/m;
     return substr($s,$st,$p+1-$st) if $d==0; $p++} undef }
 return sub {
     my ($assert) = @_;
-    my $src = _slurp(File::Spec->catfile('.','Mediabot','UserCommands.pm'));
+    my $src = _slurp(File::Spec->catfile('.','Mediabot','CommunityState.pm'));
 
     my $pr = _sub($src, 'mbPollResult_ctx');
     $assert->ok(defined $pr, 'mbPollResult_ctx sub found');

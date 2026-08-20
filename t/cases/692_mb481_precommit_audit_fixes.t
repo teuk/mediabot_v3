@@ -32,7 +32,7 @@ return sub {
         'newline-bearing custom passwords are rejected explicitly');
 
     # --- 2. factoid code: shared IRC channel predicate + UTF-8-safe cap ------
-    my $uc = _slurp_692(File::Spec->catfile($root, 'Mediabot', 'UserCommands.pm'));
+    my $uc = _slurp_692(File::Spec->catfile($root, 'Mediabot', 'CommunityState.pm'));
     my ($factoid) = $uc =~ /(Factoids .+?shared per-channel key\/value facts.*?\n1;)/s;
     $factoid //= '';
     $assert->like($factoid, qr/isIrcChannelTarget\(\$channel\)/,

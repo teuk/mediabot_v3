@@ -39,7 +39,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_mb306(
-        File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm')
+        File::Spec->catfile('.', 'Mediabot', 'CommunityState.pm')
     );
     my $stop = _extract_sub_mb306($src, 'mbPollStop_ctx');
 
