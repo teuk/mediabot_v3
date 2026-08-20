@@ -16,7 +16,7 @@ sub _slurp_672 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
 
 return sub {
     my ($assert) = @_;
-    my $src = _slurp_672(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_672(File::Spec->catfile('.', 'Mediabot', 'Karma.pm'));
 
     my $defs = () = $src =~ /^sub _karma_current_score \{/mg;
     $assert->is($defs, 1, '_karma_current_score défini exactement une fois');

@@ -77,10 +77,12 @@ return sub {
 
     # --- 3. Les 3 sites convertis + budget de migration ---------------------
     my $uc = _slurp_629(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
-    my $ncalls = () = $uc =~ /Mediabot::Helpers::channel_id_cached\(/g;
-    $assert->ok($ncalls >= 3, 'au moins 3 handlers convertis au helper');
-    my $nsel = () = $uc =~ /SELECT id_channel FROM CHANNEL WHERE name/g;
-    $assert->is($nsel, 2, "migration UserCommands terminée: seuls les 2 replis mb410 restent (actuel: $nsel, mb414)");
+    my $karma = _slurp_629(File::Spec->catfile('.', 'Mediabot', 'Karma.pm'));
+    my $uc_karma = $uc . "\n" . $karma;
+    my $ncalls = () = $uc_karma =~ /Mediabot::Helpers::channel_id_cached\(/g;
+    $assert->ok($ncalls >= 3, 'handlers UserCommands/Karma convertis au helper');
+    my $nsel = () = $uc_karma =~ /SELECT id_channel FROM CHANNEL WHERE name/g;
+    $assert->is($nsel, 2, "migration UserCommands+Karma: seuls les 2 replis mb410 restent (actuel: $nsel, mb414)");
 
     # mb412: le lot Partyline est intégralement migré — verrouillé à zéro.
     my $pl = _slurp_629(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));

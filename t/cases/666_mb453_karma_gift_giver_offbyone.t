@@ -92,7 +92,7 @@ return sub {
         "tout premier don positif compte pour 1 (et non 0)");
 
     # --- 5. Scan de source ----------------------------------------------------
-    my $src = _slurp_666(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_666(File::Spec->catfile('.', 'Mediabot', 'Karma.pm'));
     my ($pk) = $src =~ /(sub processKarma \{.*?\n\}\n)/s;
     $pk //= '';
     $assert->ok($pk ne '', 'sub processKarma extraite');

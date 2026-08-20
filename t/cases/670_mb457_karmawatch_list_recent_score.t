@@ -78,7 +78,7 @@ return sub {
         'la plus récente gagne (ts 300 > 250), indépendamment du canal');
 
     # --- Scan source ---------------------------------------------------------
-    my $src = _slurp_670(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_670(File::Spec->catfile('.', 'Mediabot', 'Karma.pm'));
     my ($blk) = $src =~ /(# IMP19: show current karma score.*?You are watching:)/s;
     $blk //= '';
     $assert->ok($blk ne '', 'bloc karmawatch list extrait');

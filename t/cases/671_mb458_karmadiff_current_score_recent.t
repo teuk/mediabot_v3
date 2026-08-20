@@ -62,7 +62,7 @@ return sub {
     $assert->is(_cs671($tie, 'kai', undef), 8,
         'égalité de timestamp: départage de canal déterministe');
 
-    my $src = _slurp_671(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_671(File::Spec->catfile('.', 'Mediabot', 'Karma.pm'));
     my ($blk) = $src =~ /(# CC11: fetch current score.*?my \$cur_score = _karma_current_score\(\$self, \$target, \$kd_chan\);)/s;
     $blk //= '';
     $assert->ok($blk ne '', 'bloc CC11 extrait');

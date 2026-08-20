@@ -12,7 +12,7 @@ sub _sub_236 { my($s,$n)=@_; my $re=qr/^[ \t]*sub[ \t]+\Q$n\E\b[^{]*\{/m;
     return substr($s,$st,$p+1-$st) if $d==0; $p++} undef }
 return sub {
     my ($assert) = @_;
-    my $src = _slurp_236(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_236(File::Spec->catfile('.', 'Mediabot', 'Karma.pm'));
 
     # processKarma log
     my $pk = _sub_236($src, 'processKarma');

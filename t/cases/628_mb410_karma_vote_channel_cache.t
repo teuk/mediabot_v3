@@ -15,7 +15,7 @@ sub _slurp_628 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_628(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_628(File::Spec->catfile('.', 'Mediabot', 'Karma.pm'));
     my ($body) = $src =~ /(sub mbKarma_ctx \{.*?\n\}\n)/s; $body //= '';
     $assert->ok($body ne '', 'mbKarma_ctx extraite');
     (my $code = $body) =~ s/^\s*#.*$//mg;

@@ -29,7 +29,7 @@ sub _load_real_sub_677 {
 return sub {
     my ($assert) = @_;
 
-    my $score = _load_real_sub_677('Mediabot/UserCommands.pm', '_karma_current_score');
+    my $score = _load_real_sub_677('Mediabot/Karma.pm', '_karma_current_score');
     my $bot = {
         _karma_log => {
             '#Alpha' => [

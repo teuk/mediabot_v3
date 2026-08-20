@@ -23,7 +23,7 @@ sub _slurp_217 {
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_217(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_217(File::Spec->catfile('.', 'Mediabot', 'Karma.pm'));
 
     # C2/fix must be present
     $assert->like($src, qr/karma_hits/,

@@ -10,7 +10,7 @@ sub _sub { my($s,$n)=@_; my $re=qr/^[ \t]*sub[ \t]+\Q$n\E\b[^{]*\{/m;
     return substr($s,$st,$p+1-$st) if $d==0; $p++} undef }
 return sub {
     my ($assert) = @_;
-    my $src  = _slurp(File::Spec->catfile('.','Mediabot','UserCommands.pm'));
+    my $src  = _slurp(File::Spec->catfile('.','Mediabot','Karma.pm'));
     my $body = _sub($src, 'mbKarmaTop_ctx');
     $assert->ok(defined $body, 'mbKarmaTop_ctx sub found');
     $assert->like($body // '', qr/KARMA/,
