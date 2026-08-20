@@ -3,7 +3,7 @@
 # mb492 — Une URL collée dans le chat => badge + DÉTAILS riches.
 #
 #   Apple Music : og:title brut -> ligne façon Spotify
-#                 "Title - by Artist - album - 1969 - 3:33 - 17 tracks"
+#                 "Title - by Artist - album - 1969 - 3m 33s - 17 tracks"
 #                 (JSON-LD + og:description "Album · 1969 · 17 Songs")
 #   X           : titre + TEXTE DU TWEET : jack on X: "just setting up my twttr"
 #   Facebook    : titre + og:description courte.
@@ -78,7 +78,7 @@ return sub {
         Mediabot::External::URL::_handle_applemusic(_mkself(), 'u', 'nick', '#c',
             'https://music.apple.com/fr/album/x?i=1');
         my $line = _strip_irc($SENT[0] // '');
-        $assert->like($line, qr/3:33/, 'AM: durée ISO convertie (PT3M33S -> 3:33)');
+        $assert->like($line, qr/3m 33s/, 'AM: durée ISO convertie (PT3M33S -> 3m 33s)');
         $assert->like($line, qr/1987/, 'AM: année du morceau');
         my $artist_count = () = $line =~ /Rick Astley/g;
         $assert->is($artist_count, 1, 'AM: pas de doublon artiste (déjà dans le titre)');
@@ -185,10 +185,10 @@ return sub {
     # 8. Helpers unitaires
     # =========================================================================
     {
-        $assert->is(Mediabot::External::URL::_am_duration_from_iso('PT3M33S'), '3:33',
-            'iso PT3M33S -> 3:33');
-        $assert->is(Mediabot::External::URL::_am_duration_from_iso('PT1H2M3S'), '1:02:03',
-            'iso PT1H2M3S -> 1:02:03');
+        $assert->is(Mediabot::External::URL::_am_duration_from_iso('PT3M33S'), '3m 33s',
+            'iso PT3M33S -> 3m 33s');
+        $assert->is(Mediabot::External::URL::_am_duration_from_iso('PT1H2M3S'), '1h02m03s',
+            'iso PT1H2M3S -> 1h02m03s');
         $assert->ok(!defined Mediabot::External::URL::_am_duration_from_iso('garbage'),
             'iso invalide -> undef');
     }

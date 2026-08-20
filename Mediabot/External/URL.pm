@@ -812,25 +812,49 @@ sub _handle_instagram {
 # _handle_applemusic($self, $message, $nick, $channel, $url)
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-# _am_duration_from_iso($iso) — "PT3M33S" -> "3:33", "PT1H2M3S" -> "1:02:03"
+# _am_duration_from_iso($iso) — Spotify-style IRC duration: "3m 33s", "1h02m03s"
 # ---------------------------------------------------------------------------
 sub _am_duration_from_iso {
     my ($iso) = @_;
     return undef unless defined $iso && $iso =~ /^P(?:[\d.]+D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?$/i;
     my ($h, $m, $s) = ($1 // 0, $2 // 0, int($3 // 0));
     return undef unless $h || $m || $s;
-    return $h ? sprintf('%d:%02d:%02d', $h, $m, $s) : sprintf('%d:%02d', $m, $s);
+    return sprintf('%dh%02dm%02ds', $h, $m, $s) if $h;
+    return sprintf('%dm %02ds', $m, $s);
 }
 
-# ---------------------------------------------------------------------------
-# _applemusic_extract_details($self, $html) -> hashref
-# mb492: mine the SAME html already fetched for rich fields, Spotify-style.
-# Sources (both server-side on music.apple.com):
-#   - JSON-LD application/ld+json: @type (MusicAlbum/MusicRecording), name,
-#     byArtist, duration (ISO), datePublished, numTracks/tracks
-#   - og:description / meta description like "Album · 1969 · 17 Songs"
-# Returns {} when nothing usable; every field is optional.
-# ---------------------------------------------------------------------------
+sub _am_duration_from_ms {
+    my ($ms) = @_;
+    return undef unless defined $ms && $ms =~ /^\d+$/;
+
+    my $total = int($ms / 1000);
+    return undef if $total <= 0;
+
+    my $h = int($total / 3600);
+    my $m = int(($total % 3600) / 60);
+    my $s = $total % 60;
+
+    return sprintf('%dh%02dm%02ds', $h, $m, $s) if $h;
+    return sprintf('%dm %02ds', $m, $s);
+}
+
+sub _applemusic_url_info {
+    my ($url) = @_;
+
+    my ($storefront) = ($url // '') =~ m{^https?://music\.apple\.com/([a-z]{2})(?:/|$)}i;
+    $storefront = lc($storefront // 'us');
+
+    my ($track_id) = ($url // '') =~ /[?&]i=(\d+)/;
+    if (!defined $track_id) {
+        ($track_id) = ($url // '') =~ m{/song/(?:[^/?#]+/)?(\d+)(?:[/?#]|$)}i;
+    }
+
+    return {
+        storefront => $storefront,
+        track_id   => $track_id,
+    };
+}
+
 sub _applemusic_extract_details {
     my ($self, $html) = @_;
     my %am;
@@ -872,9 +896,7 @@ sub _applemusic_extract_details {
         }
     }
 
-    # og:description / meta description: "Album · 1969 · 17 Songs" style
     my $desc;
-    # mb492: paired-quote capture so apostrophes inside "..." don't truncate
     if    ($html =~ /<meta\s+property=["']og:description["']\s+content=(["'])(.*?)\1/is) { $desc = $2; }
     elsif ($html =~ /<meta\s+content=(["'])(.*?)\1\s+property=["']og:description["']/is) { $desc = $2; }
     elsif ($html =~ /<meta\s+name=["']description["']\s+content=(["'])(.*?)\1/is)        { $desc = $2; }
@@ -887,35 +909,103 @@ sub _applemusic_extract_details {
             if    ($seg =~ /^(Album|Single|EP|Song|Playlist)$/i)      { $am{type}   //= lc $1; }
             elsif ($seg =~ /^\s*((?:19|20)\d{2})\s*$/)                 { $am{year}   //= $1; }
             elsif ($seg =~ /^(\d+)\s+Songs?$/i)                        { $am{tracks} //= $1; }
-            elsif (!exists $am{artist} && $seg !~ /\d/ && length($seg) < 80
-                   && $seg !~ /apple music/i)                          { $am{artist} //= $seg; }
         }
     }
     return \%am;
 }
 
-sub _handle_applemusic {
-    my ($self, $message, $nick, $channel, $url) = @_;
+sub _applemusic_lookup_track {
+    my ($self, $http, $storefront, $track_id) = @_;
+    return undef unless defined $track_id && $track_id =~ /^\d+$/;
 
-    my $title;
-    my $html_for_details = '';   # mb492: the html we ended up trusting
+    my $lookup = 'https://itunes.apple.com/lookup?id=' . $track_id
+               . '&country=' . uri_escape_utf8(uc($storefront // 'us'))
+               . '&entity=song';
 
-    # ------------------------------------------------------------
-    # Step 1: cheap HTTP fetch first
-    # ------------------------------------------------------------
+    my $res = eval { $http->get($lookup); } // {
+        success => 0,
+        status  => 0,
+        reason  => $@,
+    };
+
+    unless ($res->{success}) {
+        $self->{logger}->log(4,
+            "_handle_applemusic() lookup HTTP $res->{status} $res->{reason} for track=$track_id");
+        return undef;
+    }
+
+    my $data = eval { decode_json($res->{content} // '') };
+    unless (ref($data) eq 'HASH') {
+        my $error = $@ || 'not a JSON object';
+        $error =~ s/\s+/ /g;
+        $self->{logger}->log(4,
+            "_handle_applemusic() lookup JSON decode failed for track=$track_id: $error");
+        return undef;
+    }
+
+    my $results = ref($data->{results}) eq 'ARRAY' ? $data->{results} : [];
+    my ($r) = grep {
+        ref($_) eq 'HASH'
+            && defined($_->{trackId})
+            && "$_->{trackId}" eq "$track_id"
+            && (!defined($_->{kind}) || $_->{kind} eq 'song')
+    } @$results;
+
+    return undef unless ref($r) eq 'HASH';
+
+    my %am = (type => 'song');
+    $am{artist} = $r->{artistName}
+        if defined $r->{artistName} && $r->{artistName} ne '';
+    $am{album} = $r->{collectionName}
+        if defined $r->{collectionName} && $r->{collectionName} ne '';
+    $am{year} = $1
+        if defined($r->{releaseDate}) && $r->{releaseDate} =~ /^((?:19|20)\d{2})/;
+    $am{duration} = _am_duration_from_ms($r->{trackTimeMillis})
+        if defined $r->{trackTimeMillis};
+
+    my $title = $r->{trackName};
+    return undef unless defined $title && $title ne '';
+
+    return {
+        title   => $title,
+        details => \%am,
+        source  => 'itunes-lookup',
+        status  => int($res->{status} // 200),
+        bytes   => length($res->{content} // ''),
+    };
+}
+
+sub _applemusic_fetch_sync {
+    my ($self, $url) = @_;
+
+    my $info = _applemusic_url_info($url);
     my $http = Mediabot::External::_make_http(
         timeout  => 12,
         max_size => 512 * 1024,
     );
-    my $res  = eval { $http->get($url); } // { success => 0, status => 0, reason => $@ };
+
+    if (defined $info->{track_id}) {
+        my $track = _applemusic_lookup_track(
+            $self, $http, $info->{storefront}, $info->{track_id}
+        );
+        return $track if ref($track) eq 'HASH';
+    }
+
+    my $title;
+    my $html_for_details = '';
+    my $res = eval { $http->get($url); } // {
+        success => 0,
+        status  => 0,
+        reason  => $@,
+    };
 
     if ($res->{success}) {
-        my $content = _decode_http_content_utf8($self, $res->{content} // '', 'applemusic-http');
-        $html_for_details = $content;   # mb492
+        my $content = _decode_http_content_utf8(
+            $self, $res->{content} // '', 'applemusic-http'
+        );
+        $html_for_details = $content;
 
-        my $og_title;
-        my $meta_description;
-        my $title_tag;
+        my ($og_title, $meta_description, $title_tag);
 
         if ($content =~ /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i) {
             $og_title = $1;
@@ -940,52 +1030,25 @@ sub _handle_applemusic {
             $_ = _decode_html($_) if defined $_;
         }
 
-        $self->{logger}->log(4, "_handle_applemusic() HTTP og:title=" . (defined $og_title ? $og_title : '<undef>'));
-        $self->{logger}->log(4, "_handle_applemusic() HTTP meta description=" . (defined $meta_description ? $meta_description : '<undef>'));
-        $self->{logger}->log(4, "_handle_applemusic() HTTP <title>=" . (defined $title_tag ? $title_tag : '<undef>'));
-
-        if (defined $og_title
-            && $og_title ne ''
-            && $og_title !~ /^\s*Apple Music\s*$/i
-            && $og_title !~ /listen on apple music/i
-            && $og_title !~ /open in music/i
-        ) {
-            $title = $og_title;
-            $self->{logger}->log(4, "_handle_applemusic() selected HTTP og:title");
-        }
-        elsif (defined $meta_description
-            && $meta_description ne ''
-            && $meta_description !~ /^\s*Apple Music\s*$/i
-            && $meta_description !~ /listen on apple music/i
-            && $meta_description !~ /open in music/i
-        ) {
-            $title = $meta_description;
-            $self->{logger}->log(4, "_handle_applemusic() selected HTTP meta description");
-        }
-        elsif (defined $title_tag
-            && $title_tag ne ''
-            && $title_tag !~ /^\s*Apple Music\s*$/i
-            && $title_tag !~ /listen on apple music/i
-            && $title_tag !~ /open in music/i
-        ) {
-            $title = $title_tag;
-            $self->{logger}->log(4, "_handle_applemusic() selected HTTP <title>");
+        for my $candidate ($og_title, $meta_description, $title_tag) {
+            next unless defined $candidate && $candidate ne '';
+            next if $candidate =~ /^\s*Apple Music\s*$/i;
+            next if $candidate =~ /listen on apple music/i;
+            next if $candidate =~ /open in music/i;
+            $title = $candidate;
+            last;
         }
     }
     else {
-        $self->{logger}->log(3, "_handle_applemusic() HTTP $res->{status} $res->{reason} for $url");
+        $self->{logger}->log(3,
+            "_handle_applemusic() HTTP $res->{status} $res->{reason} for $url");
     }
 
-    # ------------------------------------------------------------
-    # Step 2: Chromium fallback if HTTP title is missing or generic
-    # ------------------------------------------------------------
     my $title_check = defined($title) ? $title : '';
     $title_check =~ s/\s+/ /g;
     $title_check =~ s/^\s+|\s+$//g;
 
     if (!defined($title) || $title_check eq '' || $title_check =~ /^\s*Apple Music\s*$/i) {
-        $self->{logger}->log(4, "_handle_applemusic() falling back to Chromium rendered DOM for $url");
-
         my $dom = _fetch_url_chromium_dumpdom(
             $self,
             $url,
@@ -994,10 +1057,8 @@ sub _handle_applemusic {
         );
 
         if (defined $dom && $dom ne '') {
-            $html_for_details = $dom;   # mb492: rendered DOM wins when used
-            my $og_title;
-            my $meta_description;
-            my $title_tag;
+            $html_for_details = $dom;
+            my ($og_title, $meta_description, $title_tag);
 
             if ($dom =~ /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i) {
                 $og_title = $1;
@@ -1022,74 +1083,165 @@ sub _handle_applemusic {
                 $_ = _decode_html($_) if defined $_;
             }
 
-            $self->{logger}->log(4, "_handle_applemusic() Chromium og:title=" . (defined $og_title ? $og_title : '<undef>'));
-            $self->{logger}->log(4, "_handle_applemusic() Chromium meta description=" . (defined $meta_description ? $meta_description : '<undef>'));
-            $self->{logger}->log(4, "_handle_applemusic() Chromium <title>=" . (defined $title_tag ? $title_tag : '<undef>'));
-
-            if (defined $og_title
-                && $og_title ne ''
-                && $og_title !~ /^\s*Apple Music\s*$/i
-                && $og_title !~ /listen on apple music/i
-                && $og_title !~ /open in music/i
-            ) {
-                $title = $og_title;
-                $self->{logger}->log(4, "_handle_applemusic() selected Chromium og:title");
-            }
-            elsif (defined $meta_description
-                && $meta_description ne ''
-                && $meta_description !~ /^\s*Apple Music\s*$/i
-                && $meta_description !~ /listen on apple music/i
-                && $meta_description !~ /open in music/i
-            ) {
-                $title = $meta_description;
-                $self->{logger}->log(4, "_handle_applemusic() selected Chromium meta description");
-            }
-            elsif (defined $title_tag
-                && $title_tag ne ''
-                && $title_tag !~ /^\s*Apple Music\s*$/i
-                && $title_tag !~ /listen on apple music/i
-                && $title_tag !~ /open in music/i
-            ) {
-                $title = $title_tag;
-                $self->{logger}->log(4, "_handle_applemusic() selected Chromium <title>");
+            for my $candidate ($og_title, $meta_description, $title_tag) {
+                next unless defined $candidate && $candidate ne '';
+                next if $candidate =~ /^\s*Apple Music\s*$/i;
+                next if $candidate =~ /listen on apple music/i;
+                next if $candidate =~ /open in music/i;
+                $title = $candidate;
+                last;
             }
         }
     }
 
-    unless (defined $title && $title ne '') {
-        $self->{logger}->log(3, "_handle_applemusic() could not extract title from $url");
-        return undef;
+    return {
+        title   => $title,
+        details => _applemusic_extract_details($self, $html_for_details),
+        source  => 'page-fallback',
+        status  => int($res->{status} // 0),
+        bytes   => length($html_for_details),
+    };
+}
+
+sub _handle_applemusic {
+    my ($self, $message, $nick, $channel, $url) = @_;
+
+    $self->{logger}->log(4, "_handle_applemusic() start url=$url");
+
+    my $info = _applemusic_url_info($url);
+    my $cache_key = defined($info->{track_id})
+        ? join(':', 'track', $info->{storefront}, $info->{track_id})
+        : lc($url // '');
+
+    my $cached = $self->{_applemusic_cache}{$cache_key};
+    if ($cached && (time() - ($cached->{ts} // 0)) < 600) {
+        $self->{logger}->log(4, "_handle_applemusic() cache hit for $url");
+        Mediabot::Helpers::botPrivmsg($self, $channel, "($nick) $cached->{msg}");
+        return 1;
     }
 
-    $title =~ s/\s+/ /g;
-    $title =~ s/^\s+|\s+$//g;
+    my $finish = sub {
+        my ($fetch, $worker_status) = @_;
+        delete $self->{_applemusic_pending}{$cache_key};
 
-    # mb492: enrich the line Spotify-style from the SAME html (JSON-LD + og
-    # description). Every field optional; falls back to plain title untouched.
-    my $am = _applemusic_extract_details($self, $html_for_details);
-    my @parts = ($title);
-    if (defined $am->{artist} && $am->{artist} ne ''
-        && lc($am->{artist}) ne lc($title)
-        && index(lc($title), lc($am->{artist})) < 0) {
-        push @parts, "by $am->{artist}";
+        $fetch = {} unless ref($fetch) eq 'HASH';
+        my $title = $fetch->{title};
+        my $am = ref($fetch->{details}) eq 'HASH' ? $fetch->{details} : {};
+
+        unless (defined $title && $title ne '') {
+            $self->{logger}->log(3,
+                "_handle_applemusic() could not extract title from $url worker="
+                . (defined($worker_status) ? $worker_status : 'sync'));
+            return undef;
+        }
+
+        $title =~ s/\s+/ /g;
+        $title =~ s/^\s+|\s+$//g;
+
+        my @parts = ($title);
+        if (defined $am->{artist} && $am->{artist} ne ''
+            && lc($am->{artist}) ne lc($title)
+            && index(lc($title), lc($am->{artist})) < 0) {
+            push @parts, "by $am->{artist}";
+        }
+        if (defined $am->{album} && $am->{album} ne ''
+            && lc($am->{album}) ne lc($title)) {
+            push @parts, "album $am->{album}";
+        }
+        push @parts, $am->{type}
+            if defined $am->{type} && $am->{type} ne '' && lc($am->{type}) ne 'song';
+        push @parts, $am->{year} if defined $am->{year};
+        push @parts, $am->{duration} if defined $am->{duration};
+        push @parts, "$am->{tracks} tracks"
+            if defined $am->{tracks} && $am->{tracks} =~ /^\d+$/ && $am->{tracks} > 1;
+
+        my $display = join(' - ', @parts);
+        $display =~ s/\s+/ /g;
+        $display =~ s/^\s+|\s+$//g;
+        $display = Mediabot::Helpers::truncate_utf8($display, 300, '…');
+
+        $self->{logger}->log(4,
+            "_handle_applemusic() final display='$display' source=" . ($fetch->{source} // 'unknown'));
+
+        my $badge = String::IRC->new("[")->white('black');
+        $badge   .= String::IRC->new("AppleMusic")->white('grey');
+        $badge   .= String::IRC->new("]")->white('black');
+        my $msg = "$badge\x0f $display";
+
+        $self->{_applemusic_cache}{$cache_key} = { ts => time(), msg => $msg };
+        Mediabot::Helpers::botPrivmsg($self, $channel, "($nick) $msg");
+        return 1;
+    };
+
+    my $loop = eval { $self->getLoop };
+    $loop ||= $self->{loop} if ref($self);
+
+    if ($loop
+        && eval { $loop->can('add') }
+        && eval { $loop->can('remove') }
+        && eval { $loop->can('watch_process') }) {
+
+        if ($self->{_applemusic_pending}{$cache_key}) {
+            $self->{logger}->log(4,
+                "_handle_applemusic() request already pending for $url");
+            return 1;
+        }
+        $self->{_applemusic_pending}{$cache_key} = time();
+
+        my $adapter_done = 0;
+        my $done = sub {
+            my ($result) = @_;
+            return if $adapter_done++;
+
+            my $fetch = {};
+            my $worker_status = 'failed';
+            if (ref($result) eq 'HASH' && $result->{ok}) {
+                $fetch = ref($result->{value}) eq 'HASH' ? $result->{value} : {};
+                $worker_status = 'ok';
+            }
+            elsif (ref($result) eq 'HASH') {
+                $worker_status = $result->{error} // 'failed';
+            }
+
+            eval { $finish->($fetch, $worker_status); 1 } or do {
+                my $error = $@ || 'unknown Apple Music completion error';
+                $error =~ s/\s+/ /g;
+                delete $self->{_applemusic_pending}{$cache_key};
+                $self->{logger}->log(1,
+                    "_handle_applemusic() completion failed: $error");
+            };
+        };
+
+        my $worker;
+        my $launch_ok = eval {
+            $worker = Mediabot::AsyncWorker->start(
+                loop        => $loop,
+                label       => 'apple music metadata',
+                timeout     => 45,
+                term_grace  => 0.2,
+                force_grace => 1.0,
+                max_output  => 16 * 1024,
+                child       => sub { return _applemusic_fetch_sync($self, $url); },
+                on_done     => $done,
+            );
+            1;
+        };
+
+        if (!$launch_ok && !$adapter_done) {
+            my $error = $@ || 'AsyncWorker launch failed';
+            $error =~ s/\s+/ /g;
+            $self->{logger}->log(2,
+                "_handle_applemusic() async launch failed: $error");
+            $done->({ ok => 0, error => 'worker_setup' });
+        }
+        elsif (!$worker && !$adapter_done) {
+            $done->({ ok => 0, error => 'worker_setup' });
+        }
+
+        return 1;
     }
-    push @parts, $am->{type}     if defined $am->{type} && $am->{type} ne '' && lc($am->{type}) ne 'song';
-    push @parts, $am->{year}     if defined $am->{year};
-    push @parts, $am->{duration} if defined $am->{duration};
-    push @parts, "$am->{tracks} tracks" if defined $am->{tracks} && $am->{tracks} =~ /^\d+$/ && $am->{tracks} > 1;
-    my $display = join(' - ', @parts);
-    $display =~ s/\s+/ /g; $display =~ s/^\s+|\s+$//g;
-    $display = substr($display, 0, 300);
-    $self->{logger}->log(4, "_handle_applemusic() final display='$display'");
 
-    my $badge = String::IRC->new("[")->white('black');
-    $badge   .= String::IRC->new("AppleMusic")->white('grey');
-    $badge   .= String::IRC->new("]")->white('black');
-
-    my $msg = "$badge\x0f $display";
-
-    Mediabot::Helpers::botPrivmsg($self, $channel, "($nick) $msg");
-    return 1;
+    return $finish->(_applemusic_fetch_sync($self, $url), 'sync-no-loop');
 }
 
 # ---------------------------------------------------------------------------
@@ -1289,32 +1441,42 @@ sub _handle_facebook {
         $self->{logger}->log(4, "_handle_facebook() HTTP $res->{status} $res->{reason} for $fb_url");
     }
 
-    # Step 2: Chromium fallback.  This is useful for Facebook shells where
-    # the initial HTML is present but the useful title is rendered or altered.
+    # Step 2: Chromium fallback.  Keep it for non-Reel Facebook URLs where
+    # rendered metadata can still add value. Public Reel shells are different:
+    # when the crawler HTML has no usable title, Chromium commonly waits until
+    # its alarm and still exposes no metadata. Skip that known-dead path so the
+    # deterministic Reel fallback is returned immediately.
     unless (defined $title && $title ne '') {
-        $self->{logger}->log(4, "_handle_facebook() falling back to Chromium rendered DOM");
+        my $is_reel = $fb_url =~ m{^https://www\.facebook\.com/(?:reel|reels)/}i ? 1 : 0;
 
-        my $fb_vtb = int(eval { $self->{conf}->get('chromium.FACEBOOK_VIRTUAL_TIME_BUDGET') } // 6500);
-        my $fb_alarm = int(eval { $self->{conf}->get('chromium.FACEBOOK_ALARM_TIMEOUT') } // 22);
+        if ($is_reel) {
+            $self->{logger}->log(4, "_handle_facebook() Reel shell has no usable HTTP metadata; skipping Chromium");
+        }
+        else {
+            $self->{logger}->log(4, "_handle_facebook() falling back to Chromium rendered DOM");
 
-        $fb_vtb = 1000 if $fb_vtb < 1000;
-        $fb_vtb = 30000 if $fb_vtb > 30000;
-        $fb_alarm = 5 if $fb_alarm < 5;
-        $fb_alarm = 60 if $fb_alarm > 60;
+            my $fb_vtb = int(eval { $self->{conf}->get('chromium.FACEBOOK_VIRTUAL_TIME_BUDGET') } // 6500);
+            my $fb_alarm = int(eval { $self->{conf}->get('chromium.FACEBOOK_ALARM_TIMEOUT') } // 22);
 
-        my $dom = _fetch_url_chromium_dumpdom(
-            $self,
-            $fb_url,
-            virtual_time_budget => $fb_vtb,
-            alarm_timeout       => $fb_alarm,
-            lang                => 'fr-FR',
-        );
+            $fb_vtb = 1000 if $fb_vtb < 1000;
+            $fb_vtb = 30000 if $fb_vtb > 30000;
+            $fb_alarm = 5 if $fb_alarm < 5;
+            $fb_alarm = 60 if $fb_alarm > 60;
 
-        if (defined $dom && $dom ne '') {
-            my $len = length($dom);
-            $self->{logger}->log(4, "_handle_facebook() Chromium DOM fetched $len bytes for $fb_url");
-            $fb_html = $dom;   # mb492
-            $title = _facebook_title_from_html($self, $dom, 'Chromium');
+            my $dom = _fetch_url_chromium_dumpdom(
+                $self,
+                $fb_url,
+                virtual_time_budget => $fb_vtb,
+                alarm_timeout       => $fb_alarm,
+                lang                => 'fr-FR',
+            );
+
+            if (defined $dom && $dom ne '') {
+                my $len = length($dom);
+                $self->{logger}->log(4, "_handle_facebook() Chromium DOM fetched $len bytes for $fb_url");
+                $fb_html = $dom;   # mb492
+                $title = _facebook_title_from_html($self, $dom, 'Chromium');
+            }
         }
     }
 
@@ -1829,6 +1991,37 @@ sub _handle_generic_title {
 }
 
 # ---------------------------------------------------------------------------
+# _url_display_cache_gate($self, $url, $channel)
+#
+# Anti-repeat cache for displayed URLs.  The caller invokes this only after the
+# matching chanset has accepted the URL, so disabled features never burn an URL
+# that should become immediately usable after being enabled.
+# ---------------------------------------------------------------------------
+sub _url_display_cache_gate {
+    my ($self, $url, $channel) = @_;
+
+    my $cache_key = lc($url // '') . "\x00" . lc($channel // '');
+    my $cache     = $self->{_url_display_cache} //= {};
+    my $now       = time();
+    my $url_ttl   = 300;  # 5 minutes
+
+    # Purge stale entries at most once per minute.
+    if (($self->{_url_cache_last_purge} // 0) < $now - 60) {
+        my @stale = grep { ($cache->{$_} // 0) < $now - $url_ttl } keys %$cache;
+        delete @{$cache}{@stale};
+        $self->{_url_cache_last_purge} = $now;
+    }
+
+    if (($cache->{$cache_key} // 0) >= $now - $url_ttl) {
+        $self->{logger}->log(4, "displayUrlTitle() skipping repeated URL: $url");
+        return 0;
+    }
+
+    $cache->{$cache_key} = $now;
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
 # displayUrlTitle($self, $message, $nick, $channel, $text)
 #
 # Main entry point for URL handling from on_message_PRIVMSG.
@@ -1842,25 +2035,6 @@ sub displayUrlTitle {
 
     my $url = _extract_url($sText);
     my $captured_url = $url // '(unknown)';  # DU1/fix: capture before eval scope
-
-    # IMP1: anti-repetition cache — skip if same URL posted in same channel < 5 min ago
-    if (defined $url) {
-        my $cache_key  = lc($url) . "\x00" . lc($sChannel // '');   # mb408-R1: canal lc (cohérent mb407)
-        my $cache      = $self->{_url_display_cache} //= {};
-        my $now        = time();
-        my $url_ttl    = 300;  # 5 minutes
-        # Purge stale entries (max once per 60s to avoid per-message cost)
-        if (($self->{_url_cache_last_purge} // 0) < $now - 60) {
-            my @stale = grep { ($cache->{$_} // 0) < $now - $url_ttl } keys %$cache;
-            delete @{$cache}{@stale};
-            $self->{_url_cache_last_purge} = $now;
-        }
-        if (($cache->{$cache_key} // 0) >= $now - $url_ttl) {
-            $self->{logger}->log(4, "displayUrlTitle() skipping repeated URL: $url");
-            return undef;
-        }
-        $cache->{$cache_key} = $now;
-    }
 
     my $result = eval {
     
@@ -1902,6 +2076,7 @@ sub displayUrlTitle {
                 $self->{logger}->log(4, "displayUrlTitle() YouTube chanset not enabled on $sChannel");
                 return undef;
             }
+            return undef unless _url_display_cache_gate($self, $url, $sChannel);
             # Delegate to Mediabot::External::displayYoutubeDetails which uses the YouTube Data API v3
             eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'youtube' }) if $self->{metrics}; };
             return Mediabot::External::displayYoutubeDetails($self, $message, $sNick, $sChannel, $url);
@@ -1913,6 +2088,7 @@ sub displayUrlTitle {
                 $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Instagram)");
                 return undef;
             }
+            return undef unless _url_display_cache_gate($self, $url, $sChannel);
             eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'instagram' }) if $self->{metrics}; };
             return _handle_instagram($self, $message, $sNick, $sChannel, $url);
         }
@@ -1923,6 +2099,7 @@ sub displayUrlTitle {
                 $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Spotify)");
                 return undef;
             }
+            return undef unless _url_display_cache_gate($self, $url, $sChannel);
             eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'spotify' }) if $self->{metrics}; };
             return Mediabot::External::_handle_spotify($self, $message, $sNick, $sChannel, $url);
         }
@@ -1933,6 +2110,7 @@ sub displayUrlTitle {
                 $self->{logger}->log(4, "displayUrlTitle() AppleMusic chanset not enabled on $sChannel");
                 return undef;
             }
+            return undef unless _url_display_cache_gate($self, $url, $sChannel);
             eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'applemusic' }) if $self->{metrics}; };
             return _handle_applemusic($self, $message, $sNick, $sChannel, $url);
         }
@@ -1943,6 +2121,7 @@ sub displayUrlTitle {
                 $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (Facebook)");
                 return undef;
             }
+            return undef unless _url_display_cache_gate($self, $url, $sChannel);
             eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'facebook' }) if $self->{metrics}; };
             return _handle_facebook($self, $message, $sNick, $sChannel, $url);
         }
@@ -1953,6 +2132,7 @@ sub displayUrlTitle {
                 $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel (X/Twitter)");
                 return undef;
             }
+            return undef unless _url_display_cache_gate($self, $url, $sChannel);
             eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'x_twitter' }) if $self->{metrics}; };
             return _handle_x_twitter($self, $message, $sNick, $sChannel, $url);
         }
@@ -1962,6 +2142,7 @@ sub displayUrlTitle {
             $self->{logger}->log(4, "displayUrlTitle() UrlTitle chanset not enabled on $sChannel");
             return undef;
         }
+        return undef unless _url_display_cache_gate($self, $url, $sChannel);
         eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'generic' }) if $self->{metrics}; };
         return _handle_generic_title($self, $message, $sNick, $sChannel, $url);
     };

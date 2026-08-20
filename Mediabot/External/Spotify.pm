@@ -7,8 +7,7 @@ package Mediabot::External::Spotify;
 # réexporte _handle_spotify via l'import implicite dans le même package.
 #
 # Dépendances internes (helpers restant dans External.pm) :
-#   _decode_html, _make_http, _decode_http_content_utf8,
-#   _fetch_url_chromium_dumpdom, botPrivmsg
+#   _decode_html, _make_http, _decode_http_content_utf8, botPrivmsg
 # Ces fonctions sont appelées sans qualification de package car ce fichier
 # est chargé depuis External.pm avec 'require' et injecté dans son namespace.
 # =============================================================================
@@ -17,6 +16,7 @@ use strict;
 use warnings;
 use Exporter 'import';
 use JSON::MaybeXS;
+use Mediabot::AsyncWorker ();
 use URI::Escape qw(uri_escape_utf8);
 use String::IRC;
 
@@ -142,6 +142,45 @@ sub _spotify_extract_meta {
 sub _spotify_extract_jsonish {
     my ($self, $info, $text, $context) = @_;
     return unless defined $text && $text ne '';
+
+    # Spotify's lightweight /embed page exposes a compact __NEXT_DATA__ JSON
+    # payload. Prefer that structured server-side data before broader regex
+    # fallbacks: it carries track title, artists, releaseDate and duration.
+    while ($text =~ m{<script\b([^>]*)>(.*?)</script>}sig) {
+        my ($attrs, $raw) = ($1, $2);
+        next unless $attrs =~ /\bid=["']__NEXT_DATA__["']/i;
+        next unless $attrs =~ /\btype=["']application\/json["']/i;
+
+        my $data = eval { decode_json($raw) };
+        next unless ref($data) eq 'HASH';
+
+        my $entity = eval { $data->{props}{pageProps}{state}{data}{entity} };
+        next unless ref($entity) eq 'HASH';
+
+        $info->{title} //= _spotify_clean($entity->{title} // $entity->{name});
+
+        if (!defined $info->{artist} && ref($entity->{artists}) eq 'ARRAY') {
+            my @artists = grep { defined $_ && $_ ne '' }
+                map { ref($_) eq 'HASH' ? _spotify_clean($_->{name}) : _spotify_clean($_) }
+                @{ $entity->{artists} };
+            $info->{artist} = join(', ', @artists) if @artists;
+        }
+
+        if (!defined $info->{album} && ref($entity->{album}) eq 'HASH') {
+            $info->{album} = _spotify_clean($entity->{album}{name});
+        }
+
+        if (!defined $info->{year}) {
+            my $release = $entity->{releaseDate};
+            my $date = ref($release) eq 'HASH' ? $release->{isoString} : $release;
+            $info->{year} = $1 if defined($date) && $date =~ /^((?:19|20)\d{2})/;
+        }
+
+        if (!defined $info->{duration} && defined $entity->{duration}
+            && $entity->{duration} =~ /^\d+$/) {
+            $info->{duration} = _spotify_duration_from_ms($entity->{duration});
+        }
+    }
     while ($text =~ m{<script[^>]+type=["']application/ld\+json["'][^>]*>(.*?)</script>}sig) {
         my $json = Mediabot::External::_decode_html($1);
         my $data = eval { decode_json($json) }; next unless defined $data;
@@ -192,6 +231,101 @@ sub _spotify_extract_jsonish {
 # _handle_spotify($self, $message, $nick, $channel, $url)
 # Point d'entrée principal — appelé depuis displayUrlTitle() dans External.pm.
 # ---------------------------------------------------------------------------
+sub _spotify_fetch_sync {
+    my ($self, $clean_url, $spotify_type, $spotify_id) = @_;
+
+    my %info = (type => $spotify_type);
+    my $http = Mediabot::External::_make_http(
+        timeout  => 4,
+        max_size => 2 * 1024 * 1024,
+    );
+
+    # Step 1: cheap oEmbed lookup.
+    {
+        my $oembed_url = "https://open.spotify.com/oembed?url=" . uri_escape_utf8($clean_url);
+        my $res = eval { $http->get($oembed_url) } // { success => 0, status => 0, reason => $@ };
+
+        if ($res->{success}) {
+            my $json = Mediabot::External::_decode_http_content_utf8(
+                $self, $res->{content} // '', 'spotify-oembed'
+            );
+            my $data = eval { decode_json($json) };
+
+            if (ref($data) eq 'HASH') {
+                $info{title}  //= _spotify_clean($data->{title});
+                $info{artist} //= _spotify_clean($data->{author_name});
+                _spotify_extract_jsonish($self, \%info, $json, 'oEmbed-json');
+                $self->{logger}->log(4, "_handle_spotify() parsed oEmbed metadata");
+            }
+        }
+        else {
+            $self->{logger}->log(
+                4,
+                "_handle_spotify() oEmbed HTTP $res->{status} $res->{reason} for $oembed_url"
+            );
+        }
+    }
+
+    # Step 2: lightweight embed page. Fetch it even when oEmbed has a title:
+    # __NEXT_DATA__ adds artist, release year and duration for tracks.
+    {
+        my $embed_url = "https://open.spotify.com/embed/$spotify_type/$spotify_id";
+        my $res = eval { $http->get($embed_url) } // { success => 0, status => 0, reason => $@ };
+
+        if ($res->{success}) {
+            my $content = Mediabot::External::_decode_http_content_utf8(
+                $self, $res->{content} // '', 'spotify-embed'
+            );
+            $self->{logger}->log(
+                4,
+                "_handle_spotify() embed fetched " . length($content) . " bytes"
+            );
+            _spotify_extract_meta($self, \%info, $content, 'embed');
+            _spotify_extract_jsonish($self, \%info, $content, 'embed');
+        }
+        else {
+            $self->{logger}->log(
+                4,
+                "_handle_spotify() embed HTTP $res->{status} $res->{reason}"
+            );
+        }
+    }
+
+    # Step 3: retain the normal page only as a conservative fallback when the
+    # lightweight sources still lack a usable title (or track artist).
+    # Chromium is deliberately not used: the measured fallback cost ~7.4s and
+    # exposed no metadata beyond the lightweight embed response.
+    my $needs_page =
+           !defined($info{title})
+        || _spotify_is_bad($info{title})
+        || ($spotify_type eq 'track'
+            && (!defined($info{artist}) || _spotify_is_bad($info{artist})));
+
+    if ($needs_page) {
+        my $res = eval { $http->get($clean_url) } // { success => 0, status => 0, reason => $@ };
+
+        if ($res->{success}) {
+            my $content = Mediabot::External::_decode_http_content_utf8(
+                $self, $res->{content} // '', 'spotify-http'
+            );
+            $self->{logger}->log(
+                4,
+                "_handle_spotify() HTTP fallback fetched " . length($content) . " bytes"
+            );
+            _spotify_extract_meta($self, \%info, $content, 'HTTP');
+            _spotify_extract_jsonish($self, \%info, $content, 'HTTP');
+        }
+        else {
+            $self->{logger}->log(
+                3,
+                "_handle_spotify() HTTP $res->{status} $res->{reason} for $clean_url"
+            );
+        }
+    }
+
+    return \%info;
+}
+
 sub _handle_spotify {
     my ($self, $message, $nick, $channel, $url) = @_;
 
@@ -207,99 +341,153 @@ sub _handle_spotify {
     }ix;
 
     unless (defined $spotify_type && defined $spotify_id) {
-        $self->{logger}->log(3, "_handle_spotify() could not extract Spotify type/id from $clean_url");
+        $self->{logger}->log(
+            3,
+            "_handle_spotify() could not extract Spotify type/id from $clean_url"
+        );
         return undef;
     }
 
-    my %info = (type => $spotify_type);
+    my $pending_key = lc($clean_url);
 
-    my $http = Mediabot::External::_make_http(timeout => 10, max_size => 2 * 1024 * 1024);
+    my $finish = sub {
+        my ($info, $worker_status) = @_;
+        delete $self->{_spotify_pending}{$pending_key};
 
-    # Step 1: Spotify oEmbed
-    {
-        my $oembed_url = "https://open.spotify.com/oembed?url=" . uri_escape_utf8($clean_url);
-        my $res = eval { $http->get($oembed_url) } // { success => 0, status => 0, reason => $@ };
-        if ($res->{success}) {
-            my $json = Mediabot::External::_decode_http_content_utf8($self, $res->{content} // '', 'spotify-oembed');
-            my $data = eval { decode_json($json) };
-            if (ref($data) eq 'HASH') {
-                $info{title}  //= _spotify_clean($data->{title});
-                $info{artist} //= _spotify_clean($data->{author_name});
-                _spotify_extract_jsonish($self, \%info, $json, 'oEmbed-json');
-                $self->{logger}->log(4, "_handle_spotify() parsed oEmbed metadata");
+        $info = {} unless ref($info) eq 'HASH';
+
+        $self->{logger}->log(
+            4,
+            "_handle_spotify() fetch done worker="
+                . (defined($worker_status) ? $worker_status : 'sync')
+        );
+
+        unless (defined $info->{title} && !_spotify_is_bad($info->{title})) {
+            $self->{logger}->log(
+                3,
+                "_handle_spotify() could not extract a usable Spotify title from $clean_url"
+            );
+            return undef;
+        }
+
+        my @parts;
+        push @parts, $info->{title};
+        push @parts, "by $info->{artist}"
+            if defined $info->{artist}
+            && !_spotify_is_bad($info->{artist})
+            && $info->{artist} ne $info->{title};
+        push @parts, "album $info->{album}"
+            if defined $info->{album}
+            && !_spotify_is_bad($info->{album})
+            && $info->{album} ne $info->{title};
+        push @parts, $info->{year}
+            if defined $info->{year} && $info->{year} =~ /^\d{4}$/;
+        push @parts, $info->{duration}
+            if defined $info->{duration} && $info->{duration} ne '';
+
+        my $display = join(' - ', @parts);
+        $display =~ s/\s+/ /g;
+        $display =~ s/^\s+|\s+$//g;
+        $display = substr($display, 0, 300);
+
+        $self->{logger}->log(4, "_handle_spotify() final display='$display'");
+
+        # Historical Spotify badge contract — intentionally unchanged.
+        my $badge = String::IRC->new("[")->white('black');
+        $badge   .= String::IRC->new("Spotify")->black('green');
+        $badge   .= String::IRC->new("]")->white('black');
+        my $msg = "$badge\x0f $display";
+
+        Mediabot::Helpers::botPrivmsg($self, $channel, "($nick) $msg");
+        return 1;
+    };
+
+    # At runtime, never perform Spotify HTTP inside the IRC event loop.
+    my $loop = eval { $self->getLoop };
+    $loop ||= $self->{loop} if ref($self);
+
+    if ($loop
+        && eval { $loop->can('add') }
+        && eval { $loop->can('remove') }
+        && eval { $loop->can('watch_process') }) {
+
+        if ($self->{_spotify_pending}{$pending_key}) {
+            $self->{logger}->log(
+                4,
+                "_handle_spotify() request already pending for $clean_url"
+            );
+            return 1;
+        }
+
+        $self->{_spotify_pending}{$pending_key} = time();
+
+        my $adapter_done = 0;
+
+        my $done = sub {
+            my ($result) = @_;
+            return if $adapter_done++;
+
+            my $info = {};
+            my $worker_status = 'failed';
+
+            if (ref($result) eq 'HASH' && $result->{ok}) {
+                $info = ref($result->{value}) eq 'HASH' ? $result->{value} : {};
+                $worker_status = 'ok';
             }
-        } else {
-            $self->{logger}->log(4, "_handle_spotify() oEmbed HTTP $res->{status} $res->{reason} for $oembed_url");
+            elsif (ref($result) eq 'HASH') {
+                $worker_status = $result->{error} // 'failed';
+            }
+
+            eval { $finish->($info, $worker_status); 1 } or do {
+                my $error = $@ || 'unknown Spotify completion error';
+                $error =~ s/\s+/ /g;
+                delete $self->{_spotify_pending}{$pending_key};
+                $self->{logger}->log(
+                    1,
+                    "_handle_spotify() completion failed: $error"
+                );
+            };
+        };
+
+        my $worker;
+        my $launch_ok = eval {
+            $worker = Mediabot::AsyncWorker->start(
+                loop        => $loop,
+                label       => 'spotify metadata',
+                timeout     => 10,
+                term_grace  => 0.2,
+                force_grace => 1.0,
+                max_output  => 16 * 1024,
+                child       => sub {
+                    return _spotify_fetch_sync(
+                        $self, $clean_url, $spotify_type, $spotify_id
+                    );
+                },
+                on_done => $done,
+            );
+            1;
+        };
+
+        if (!$launch_ok && !$adapter_done) {
+            my $error = $@ || 'AsyncWorker launch failed';
+            $error =~ s/\s+/ /g;
+            $self->{logger}->log(
+                2,
+                "_handle_spotify() async launch failed: $error"
+            );
+            $done->({ ok => 0, error => 'worker_setup' });
         }
-    }
-
-    # Step 2: Spotify embed page
-    unless (defined $info{title} && defined $info{artist} && defined $info{album}
-         && defined $info{duration} && defined $info{year}) {
-        my $embed_url = "https://open.spotify.com/embed/$spotify_type/$spotify_id";
-        my $res = eval { $http->get($embed_url) } // { success => 0, status => 0, reason => $@ };
-        if ($res->{success}) {
-            my $content = Mediabot::External::_decode_http_content_utf8($self, $res->{content} // '', 'spotify-embed');
-            $self->{logger}->log(4, "_handle_spotify() embed fetched " . length($content) . " bytes");
-            _spotify_extract_meta($self, \%info, $content, 'embed');
-            _spotify_extract_jsonish($self, \%info, $content, 'embed');
-        } else {
-            $self->{logger}->log(4, "_handle_spotify() embed HTTP $res->{status} $res->{reason}");
+        elsif (!$worker && !$adapter_done) {
+            $done->({ ok => 0, error => 'worker_setup' });
         }
+
+        return 1;
     }
 
-    # Step 3: normal Spotify page
-    unless (defined $info{title} && defined $info{artist} && defined $info{album}
-         && defined $info{duration} && defined $info{year}) {
-        my $res = eval { $http->get($clean_url) } // { success => 0, status => 0, reason => $@ };
-        if ($res->{success}) {
-            my $content = Mediabot::External::_decode_http_content_utf8($self, $res->{content} // '', 'spotify-http');
-            $self->{logger}->log(4, "_handle_spotify() HTTP fetched " . length($content) . " bytes");
-            _spotify_extract_meta($self, \%info, $content, 'HTTP');
-            _spotify_extract_jsonish($self, \%info, $content, 'HTTP');
-        } else {
-            $self->{logger}->log(3, "_handle_spotify() HTTP $res->{status} $res->{reason} for $clean_url");
-        }
-    }
-
-    # Step 4: Chromium fallback
-    unless (defined $info{title} && defined $info{artist} && defined $info{album}
-         && defined $info{duration} && defined $info{year}) {
-        $self->{logger}->log(4, "_handle_spotify() falling back to Chromium for $clean_url");
-        my $dom = Mediabot::External::_fetch_url_chromium_dumpdom($self, $clean_url,
-            virtual_time_budget => 10000, alarm_timeout => 28, lang => 'fr-FR');
-        if (defined $dom && $dom ne '') {
-            $self->{logger}->log(4, "_handle_spotify() Chromium DOM fetched " . length($dom) . " bytes");
-            _spotify_extract_meta($self, \%info, $dom, 'Chromium');
-            _spotify_extract_jsonish($self, \%info, $dom, 'Chromium');
-        }
-    }
-
-    unless (defined $info{title} && !_spotify_is_bad($info{title})) {
-        $self->{logger}->log(3, "_handle_spotify() could not extract a usable Spotify title from $clean_url");
-        return undef;
-    }
-
-    my @parts;
-    push @parts, $info{title};
-    push @parts, "by $info{artist}"   if defined $info{artist} && !_spotify_is_bad($info{artist}) && $info{artist} ne $info{title};
-    push @parts, "album $info{album}" if defined $info{album}  && !_spotify_is_bad($info{album})  && $info{album}  ne $info{title};
-    push @parts, $info{year}          if defined $info{year}    && $info{year}    =~ /^\d{4}$/;
-    push @parts, $info{duration}      if defined $info{duration} && $info{duration} ne '';
-
-    my $display = join(' - ', @parts);
-    $display =~ s/\s+/ /g; $display =~ s/^\s+|\s+$//g;
-    $display = substr($display, 0, 300);
-
-    $self->{logger}->log(4, "_handle_spotify() final display='$display'");
-
-    my $badge = String::IRC->new("[")->white('black');
-    $badge   .= String::IRC->new("Spotify")->black('green');
-    $badge   .= String::IRC->new("]")->white('black');
-    my $msg = "$badge\x0f $display";
-
-    Mediabot::Helpers::botPrivmsg($self, $channel, "($nick) $msg");
-    return 1;
+    return $finish->(
+        _spotify_fetch_sync($self, $clean_url, $spotify_type, $spotify_id),
+        'sync-no-loop'
+    );
 }
 
 1;

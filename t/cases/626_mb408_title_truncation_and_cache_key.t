@@ -39,10 +39,14 @@ return sub {
     $assert->like($fn->($nospace), qr/x\x{2026}\z/, 'sans espace: coupe dure + ellipse');
     $assert->ok(!defined $fn->('Just a moment...'), 'titres bot-wall toujours filtrés');
 
-    # --- 2. Clé du cache : canal en lc --------------------------------------
-    (my $code = $src) =~ s/^\s*#.*$//mg;
-    $assert->like($code, qr/lc\(\$url\) \. "\\x00" \. lc\(\$sChannel \/\/ ''\)/,
-        'clé du cache anti-répétition: URL et canal en lc');
+    # --- 2. Clé du cache : URL + canal normalisés en lc --------------------
+    my ($cache_body) = $src =~ /(sub _url_display_cache_gate \{.*?\n\}\n)/s;
+    $assert->ok(defined $cache_body && $cache_body ne '',
+        '_url_display_cache_gate extrait');
 
-    $assert->like($src, qr/mb408-R1/, 'tag mb408-R1');
+    $assert->like(
+        $cache_body,
+        qr/lc\(\$url \/\/ ''\)\s*\.\s*"\\x00"\s*\.\s*lc\(\$channel \/\/ ''\)/,
+        'clé du cache anti-répétition: URL et canal en lc'
+    );
 };

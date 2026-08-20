@@ -58,21 +58,27 @@ return sub {
     $assert->ok(defined $body && $body ne '', '_handle_spotify body found');
 
     $assert->like(
-        $body // '',
+        $src,
         qr/open\.spotify\.com\/oembed\?url=/,
         'Spotify tries oEmbed first'
     );
 
     $assert->like(
-        $body // '',
+        $src,
         qr/open\.spotify\.com\/embed\/\$spotify_type\/\$spotify_id/,
         'Spotify tries the embed page'
     );
 
-    $assert->like(
+    $assert->unlike(
         $body // '',
         qr/_fetch_url_chromium_dumpdom/,
-        'Spotify keeps Chromium fallback'
+        'Spotify no longer invokes Chromium from the IRC handler'
+    );
+
+    $assert->like(
+        $body // '',
+        qr/Mediabot::AsyncWorker->start\(/,
+        'Spotify runtime uses AsyncWorker'
     );
 
     $assert->like(
@@ -88,20 +94,20 @@ return sub {
     );
 
     $assert->like(
-        $body // '',
-        qr/release_date|datePublished|year/,
+        $src,
+        qr/release_date|datePublished|releaseDate|year/,
         'Spotify tries to extract release year/date'
     );
 
     $assert->like(
         $body // '',
-        qr/album\s+\$info\{album\}/,
+        qr/album\s+\$info->\{album\}/,
         'Spotify output can include album'
     );
 
     $assert->like(
         $body // '',
-        qr/by\s+\$info\{artist\}/,
+        qr/by\s+\$info->\{artist\}/,
         'Spotify output can include artist'
     );
 
