@@ -282,6 +282,58 @@ if ! (
 fi
 echo
 
+# +-------------------------------------------------------------------------+
+# | [8] Persist the IRC completion notice for the NEW process                |
+# +-------------------------------------------------------------------------+
+# mb673: the old process cannot report success because it is intentionally
+# stopped before the directory swap. The detached updater is the only actor
+# that knows the deployment really completed. Write the marker only AFTER the
+# live-path validation above; rollback/failure therefore never emits success.
+if [ -n "${MEDIABOT_UPDATE_NOTIFY_KIND:-}" ] && [ -n "${MEDIABOT_UPDATE_NOTIFY_TARGET:-}" ]; then
+    LIVE_VERSION="$(head -n 1 "${PROJECT_DIR}/VERSION" 2>/dev/null | tr -d '\r\n' || true)"
+    if [ -n "$LIVE_VERSION" ]; then
+        NOTICE_FILE="${PROJECT_DIR}/var/update.completed.json"
+        NOTICE_TMP="${NOTICE_FILE}.tmp.$$"
+
+        if mkdir -p "${PROJECT_DIR}/var" \
+           && MEDIABOT_UPDATE_NOTIFY_VERSION="$LIVE_VERSION" \
+              MEDIABOT_UPDATE_NOTIFY_FILE="$NOTICE_TMP" \
+              perl -MJSON::PP -e '
+                    use strict;
+                    use warnings;
+                    my $kind   = $ENV{MEDIABOT_UPDATE_NOTIFY_KIND}    // q{};
+                    my $target = $ENV{MEDIABOT_UPDATE_NOTIFY_TARGET}  // q{};
+                    my $ver    = $ENV{MEDIABOT_UPDATE_NOTIFY_VERSION} // q{};
+                    my $file   = $ENV{MEDIABOT_UPDATE_NOTIFY_FILE}    // q{};
+                    die "invalid completion notice\n"
+                        unless ($kind eq "channel" || $kind eq "notice")
+                            && length($target) && $target !~ /[\x00\r\n]/
+                            && length($ver) && $ver !~ /[\x00\r\n]/
+                            && length($file);
+                    umask 0077;
+                    open my $fh, ">:raw", $file or die "$file: $!\n";
+                    print {$fh} JSON::PP->new->utf8->canonical->encode({
+                        schema       => 1,
+                        kind         => $kind,
+                        target       => $target,
+                        version      => $ver,
+                        completed_at => 0 + time(),
+                    });
+                    print {$fh} "\n";
+                    close $fh or die "$file: $!\n";
+                ' \
+           && mv -f "$NOTICE_TMP" "$NOTICE_FILE"
+        then
+            echo "📣 IRC completion notice armed for ${MEDIABOT_UPDATE_NOTIFY_KIND}:${MEDIABOT_UPDATE_NOTIFY_TARGET} (version ${LIVE_VERSION})."
+        else
+            rm -f "$NOTICE_TMP" 2>/dev/null || true
+            echo "⚠️  Warning: update succeeded, but the IRC completion notice could not be written."
+        fi
+    else
+        echo "⚠️  Warning: update succeeded, but VERSION is unreadable; no IRC completion notice was armed."
+    fi
+fi
+
 echo "✅ Deployment complete."
 echo "Current live release: ${PROJECT_DIR}"
 echo "Previous release archive: ${BACKUP_DIR}"

@@ -1420,6 +1420,14 @@ sub on_login {
     $mediabot->setConnectionTimestamp(time);
     $mediabot->setLastRandomQuote(time);
     $mediabot->onStartTimers();
+
+    # mb673: a private `update now` can only report success after the new
+    # process is connected. Channel notifications wait for the matching JOIN.
+    eval {
+        require Mediabot::Update;
+        Mediabot::Update::update_completion_on_login($mediabot);
+    };
+    $mediabot->{logger}->log(1, "update completion login hook error: $@") if $@;
     
     # Undernet: authentication to channel service if credentials are defined
     if (defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ( $mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 1 ) && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN') ne "") && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME') ne "") && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD') ne "")) {
@@ -2539,6 +2547,14 @@ sub on_message_JOIN {
             $mediabot->{metrics}->set('mediabot_current_channels',
                 scalar(keys %{ $mediabot->{channels} || {} }));
         }
+
+        # mb673: channel-scoped `update now` completion is emitted only once
+        # the restarted bot has actually rejoined the command channel.
+        eval {
+            require Mediabot::Update;
+            Mediabot::Update::update_completion_on_join($mediabot, $target_name);
+        };
+        $mediabot->{logger}->log(1, "update completion JOIN hook error: $@") if $@;
     }
     else {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {

@@ -37,6 +37,7 @@ use utf8;
 use Cwd qw(realpath);
 use File::Basename qw(basename dirname);
 use File::Spec;
+use JSON::PP qw(decode_json);
 use POSIX qw(setsid);
 
 use Exporter 'import';
@@ -234,6 +235,140 @@ sub _exists_map {
     };
 }
 
+# --- notification post-update ------------------------------------------------
+
+# Le processus qui lance l'update meurt pendant la bascule. Pour pouvoir dire
+# « update completed » APRES le restart, deploy_update.sh pose un petit marqueur
+# dans le nouvel arbre uniquement une fois la validation live terminee.
+#
+# Le marqueur est volontairement dans var/ du NOUVEL arbre : un echec avant
+# activation ou un rollback ne peut donc jamais produire un faux succes IRC.
+sub _completion_marker_path {
+    my ($self) = @_;
+    my $dir = _project_dir($self);
+    return undef unless defined $dir && length $dir;
+    return File::Spec->catfile($dir, 'var', 'update.completed.json');
+}
+
+sub _read_local_version {
+    my ($self) = @_;
+    my $dir = _project_dir($self);
+    return undef unless defined $dir && length $dir;
+
+    my $path = File::Spec->catfile($dir, 'VERSION');
+    open my $fh, '<:encoding(UTF-8)', $path or return undef;
+    my $version = <$fh>;
+    close $fh;
+    return undef unless defined $version;
+    $version =~ s/[\r\n]+\z//;
+    $version =~ s/^\s+|\s+$//g;
+    return length($version) ? $version : undef;
+}
+
+sub _safe_notice_target {
+    my ($kind, $target) = @_;
+    return 0 unless defined $kind && ($kind eq 'channel' || $kind eq 'notice');
+    return 0 unless defined $target && length $target && length($target) <= 200;
+    return 0 if $target =~ /[\x00\r\n]/;
+    return 0 if $kind eq 'channel' && $target !~ /^[#&+!]/;
+    return 1;
+}
+
+sub _load_completion_notice {
+    my ($self) = @_;
+
+    return $self->{_update_completion_notice}
+        if ref($self->{_update_completion_notice}) eq 'HASH';
+    return undef if $self->{_update_completion_notice_checked};
+    $self->{_update_completion_notice_checked} = 1;
+
+    my $path = _completion_marker_path($self);
+    return undef unless defined $path && -f $path;
+
+    open my $fh, '<:raw', $path or do {
+        eval { $self->{logger}->log(1, "update completion: cannot read $path: $!") };
+        return undef;
+    };
+    local $/;
+    my $raw = <$fh>;
+    close $fh;
+
+    my $data = eval { decode_json($raw // '') };
+    unless (ref($data) eq 'HASH'
+        && ($data->{schema} // 0) == 1
+        && _safe_notice_target($data->{kind}, $data->{target})
+        && defined($data->{version}) && length($data->{version}) <= 128
+        && $data->{version} !~ /[\x00\r\n]/) {
+        eval { $self->{logger}->log(1, 'update completion: invalid marker discarded') };
+        unlink $path;
+        return undef;
+    }
+
+    # Un vieux marqueur ne doit jamais annoncer une version qui n'est plus
+    # celle du processus courant (par exemple apres une mise a jour manuelle).
+    my $local = _read_local_version($self);
+    unless (defined $local && $local eq $data->{version}) {
+        eval { $self->{logger}->log(1,
+            'update completion: stale marker discarded (marker=' .
+            ($data->{version} // '?') . ', local=' . ($local // '?') . ')') };
+        unlink $path;
+        return undef;
+    }
+
+    $data->{_path} = $path;
+    $self->{_update_completion_notice} = $data;
+    return $data;
+}
+
+sub _finish_completion_notice {
+    my ($self, $data) = @_;
+    return 0 unless ref($data) eq 'HASH';
+    my $path = $data->{_path};
+    unlink $path if defined $path && -f $path;
+    delete $self->{_update_completion_notice};
+    return 1;
+}
+
+sub _completion_message {
+    my ($version) = @_;
+    return "\x0309Update completed.\x0f Version: \x02$version\x02";
+}
+
+# Appel au login uniquement pour une commande lancee en prive. Pour une cible
+# canal, on attend le JOIN reel du bot : envoyer avant le JOIN echouerait sur
+# les canaux +n et casserait precisement la garantie recherchee.
+sub update_completion_on_login {
+    my ($self) = @_;
+    my $data = _load_completion_notice($self) or return 0;
+    return 0 unless $data->{kind} eq 'notice';
+
+    Mediabot::Helpers::botNotice($self, $data->{target},
+        _completion_message($data->{version}));
+    _finish_completion_notice($self, $data);
+    eval { $self->{logger}->log(1,
+        "update completion: notified $data->{target} version $data->{version}") };
+    return 1;
+}
+
+# Pour une commande lancee sur un canal, la notification part au premier JOIN
+# de CE canal par le nouveau processus. C'est restart-safe et compatible avec
+# l'authentification Undernet/Libera et les JOINs throttles.
+sub update_completion_on_join {
+    my ($self, $channel) = @_;
+    return 0 unless defined $channel && length $channel;
+
+    my $data = _load_completion_notice($self) or return 0;
+    return 0 unless $data->{kind} eq 'channel';
+    return 0 unless lc($data->{target}) eq lc($channel);
+
+    Mediabot::Helpers::botPrivmsg($self, $channel,
+        _completion_message($data->{version}));
+    _finish_completion_notice($self, $data);
+    eval { $self->{logger}->log(1,
+        "update completion: notified $channel version $data->{version}") };
+    return 1;
+}
+
 sub update_ctx {
     my ($ctx) = @_;
 
@@ -344,7 +479,11 @@ sub update_ctx {
         _log($self, $ctx, 'start', ($decision->{remote} // '?'));
 
         my $log = File::Spec->catfile($dir, 'var', 'update.log');
-        my $rc  = _spawn_updater($self, $dir, $log);
+        my $reply_channel = eval { $ctx->channel };
+        my $notify = (defined $reply_channel && $reply_channel =~ /^#/ )
+            ? { kind => 'channel', target => $reply_channel }
+            : { kind => 'notice',  target => $nick };
+        my $rc  = _spawn_updater($self, $dir, $log, $notify);
         unless ($rc) {
             _say($ctx, "\x0304Failed to launch the updater.\x0f Nothing was changed.");
             _log($self, $ctx, 'spawn_failed', '');
@@ -367,7 +506,7 @@ sub update_ctx {
 # Lance deploy_update.sh hors de notre arbre de processus : il va nous tuer,
 # il ne doit donc etre ni notre fils actif, ni partager notre session.
 sub _spawn_updater {
-    my ($self, $dir, $log) = @_;
+    my ($self, $dir, $log, $notify) = @_;
 
     my $script = File::Spec->catfile($dir, 'install', 'deploy_update.sh');
     my $vardir = dirname($log);
@@ -388,6 +527,17 @@ sub _spawn_updater {
         # d'avoir moissonne le premier.
         my $second = fork();
         POSIX::_exit(0) if $second;      # le premier fils sort tout de suite
+
+        if (ref($notify) eq 'HASH'
+            && _safe_notice_target($notify->{kind}, $notify->{target})) {
+            $ENV{MEDIABOT_UPDATE_NOTIFY_KIND}   = $notify->{kind};
+            $ENV{MEDIABOT_UPDATE_NOTIFY_TARGET} = $notify->{target};
+        }
+        else {
+            delete $ENV{MEDIABOT_UPDATE_NOTIFY_KIND};
+            delete $ENV{MEDIABOT_UPDATE_NOTIFY_TARGET};
+        }
+
         exec($script) if defined $second;
         POSIX::_exit(1);
     }
