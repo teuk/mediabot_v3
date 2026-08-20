@@ -3,7 +3,7 @@
 # MB312:
 #   - OpenAI/Claude IRC chunk pacing must not sleep in the event loop;
 #   - chunks remain ordered and serialized per target;
-#   - Partyline callback output remains synchronous;
+#   - callback output remains immediate once the parent receives the answer;
 #   - no-loop fallback remains compatible with lightweight tests.
 # =============================================================================
 
@@ -51,10 +51,12 @@ return sub {
     my $queue  = _extract_sub_mb312($src, '_queue_irc_chunks');
     my $openai = _extract_sub_mb312($src, 'chatGPT');
     my $claude = _extract_sub_mb312($src, 'claudeAI');
+    my $deliver = _extract_sub_mb312($src, '_claude_deliver_answer');
 
     $assert->ok(defined $queue, '_queue_irc_chunks helper found');
     $assert->ok(defined $openai, 'chatGPT body found');
     $assert->ok(defined $claude, 'claudeAI body found');
+    $assert->ok(defined $deliver, '_claude_deliver_answer body found');
 
     $assert->unlike(
         $src,
@@ -81,15 +83,15 @@ return sub {
     );
 
     $assert->like(
-        $claude // '',
+        $deliver // '',
         qr/_queue_irc_chunks\(/,
-        'Claude IRC output uses the asynchronous pacing queue'
+        'Claude IRC output uses the asynchronous pacing queue after worker completion'
     );
 
     $assert->like(
-        $claude // '',
-        qr/if\s*\(\$output_fn\).*?\$_out->\(\$chunk\[\$i\]\)/s,
-        'Partyline callback output remains synchronous'
+        $deliver // '',
+        qr/if\s*\(ref\(\$p->\{output_fn\}\)\s+eq\s+'CODE'\).*?_claude_emit/s,
+        'callback output bypasses IRC pacing once the parent answer is ready'
     );
 
     # Exercise the actual helper body in isolation with a deterministic fake

@@ -2,7 +2,7 @@
 # =============================================================================
 # mb359 — Lecture robuste de la réponse Anthropic (tableau content[]).
 #
-# _claude_send_and_parse ne lisait que content[0] et exigeait
+# Le parseur Claude ne lisait que content[0] et exigeait
 # content[0]{type} eq 'text'. Or l'API Anthropic peut renvoyer plusieurs blocs
 # et placer un bloc NON-text en tête (p.ex. 'thinking' si le raisonnement étendu
 # est actif, ou 'tool_use') : l'ancien code répondait alors "Could not read
@@ -87,8 +87,8 @@ return sub {
 
     # --- 2. Scan source ---------------------------------------------------
     my $src = _slurp_578(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
-    my ($fn) = $src =~ /(sub _claude_send_and_parse \{.*?\n\}\n)/s; $fn //= '';
-    $assert->ok($fn ne '', 'sub _claude_send_and_parse extraite');
+    my ($fn) = $src =~ /(sub _claude_extract_answer \{.*?\n\}\n)/s; $fn //= '';
+    $assert->ok($fn ne '', 'sub _claude_extract_answer extraite');
 
     # On itère sur les blocs (boucle) plutôt que de lire seulement content[0].
     $assert->like($fn, qr/for my \$blk \(\@\{ \$data->\{content\} \}\)/,

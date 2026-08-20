@@ -44,24 +44,28 @@ return sub {
 
     my $body = _extract_sub_220($src, 'claudeAI');
     my $send = _extract_sub_220($src, '_claude_send_and_parse');
+    my $http = _extract_sub_220($src, '_claude_http_request');
+    my $parse = _extract_sub_220($src, '_claude_extract_answer');
     $assert->ok(defined $body && $body ne '', 'claudeAI body found');
     $assert->ok(defined $send && $send ne '', '_claude_send_and_parse body found');
+    $assert->ok(defined $http && $http ne '', '_claude_http_request body found');
+    $assert->ok(defined $parse && $parse ne '', '_claude_extract_answer body found');
 
     # Must use Anthropic headers, not OpenAI
-    $assert->like($send // '', qr/x-api-key/,
+    $assert->like($http // '', qr/x-api-key/,
         'claudeAI uses x-api-key header (Anthropic)');
 
-    $assert->like($send // '', qr/anthropic-version/,
+    $assert->like($http // '', qr/anthropic-version/,
         'claudeAI sends anthropic-version header');
 
-    $assert->unlike($send // '', qr/Authorization.*Bearer/,
+    $assert->unlike($http // '', qr/Authorization.*Bearer/,
         'claudeAI does not use Bearer token (OpenAI pattern)');
 
     # Response parsing must use content[0]{text}
-    $assert->like($send // '', qr/content.*\[0\].*text/s,
-        'claudeAI parses content[0]{text} from response');
+    $assert->like($parse // '', qr/for my \$blk .*content/s,
+        'Claude parser iterates Anthropic content blocks');
 
-    $assert->unlike($send // '', qr/choices.*\[0\].*message/,
+    $assert->unlike($parse // '', qr/choices.*\[0\].*message/,
         'claudeAI does not use OpenAI choices structure');
 
     # Must use anthropic.API_KEY config key

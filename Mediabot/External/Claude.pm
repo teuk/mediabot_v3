@@ -25,8 +25,10 @@ use Exporter 'import';
 # publictext IS NOT NULL (qui comptait aussi join/part/kick/mode/topic/notice).
 # Le viewer de log brut .logs (_cmd_chanlog) reste volontairement non filtre.
 use Encode qw(encode decode);
+use MIME::Base64 qw(encode_base64 decode_base64);
 use JSON::MaybeXS;
 require Mediabot::Helpers;   # mb624-B1: suggest_keyword/edit_distance_1 partages
+use Mediabot::AsyncWorker ();  # MB675: Anthropic HTTP outside the IRC event loop
 use URI::Escape qw(uri_escape_utf8);
 
 our $VERSION = '1.00';
@@ -1842,12 +1844,6 @@ sub claudeAI {
     # mb98-B1: $chan peut être undef (ex: !ai summary passe undef pour envoyer en NOTICE)
     # Normaliser pour éviter les warnings "uninitialized" dans hist_key et logs
     my $chan_for_hist = $chan // '__private__';
-    my $_out = sub {
-        my ($text) = @_;
-        if ($output_fn) { $output_fn->($text); }
-        else            { Mediabot::Helpers::botPrivmsg($self, $chan, $text); }
-    };
-
     # Config: anthropic.API_KEY required
     my $api_key = _chatgpt_conf_string($self, 'anthropic.API_KEY', '')
         or do {
@@ -1943,6 +1939,24 @@ sub claudeAI {
     my $prompt = join ' ', @args;
     $self->{logger}->log(5, "claudeAI() prompt: $prompt");
 
+    # MB675: once Anthropic I/O is moved out of the IRC event loop, a second
+    # prompt from the same conversation can arrive before the first one has
+    # completed. The historical synchronous path implicitly serialized those
+    # prompts. Preserve that invariant explicitly so history can never gain
+    # consecutive user messages or race two assistant completions.
+    my $hist_key  = "$nick\x00$chan_for_hist";
+    my $use_async = _claude_can_async($self);
+    if ($use_async && $self->{_claude_inflight}{$hist_key}) {
+        my $busy = 'Claude is already processing a request for this conversation.';
+        if ($output_fn) {
+            $output_fn->($busy);
+        }
+        else {
+            Mediabot::Helpers::botNotice($self, $nick, $busy);
+        }
+        return 1;
+    }
+
     # R2: per-nick rate limiting — W2: configurable via anthropic.RATE_MAX / RATE_WINDOW
     unless ($output_fn) {  # skip rate limit for Partyline (already authenticated)
         my $rate_max    = eval { int($self->{conf}->get('anthropic.RATE_MAX')    // 5)  } // 5;
@@ -1966,7 +1980,6 @@ sub claudeAI {
     }
 
     # P2: build conversation history (max 3 exchanges = 6 messages)
-    my $hist_key  = "$nick\x00$chan_for_hist";
     my $history   = $self->{_claude_history}{$hist_key} //= [];
     push @$history, { role => 'user', content => $prompt };
     # Keep only last N messages (user+assistant pairs).
@@ -1982,9 +1995,11 @@ sub claudeAI {
     splice @$history, 0, @$history - $max_history if @$history > $max_history;
     shift @$history while @$history && ($history->[0]{role} // '') ne 'user';
 
-    # mb87-R1: appel HTTP + parsing extraits dans _claude_send_and_parse
-    # mb88-R3: passer output_fn pour que le chemin cache-hit l'utilise aussi
-    my $answer = _claude_send_and_parse($self, {
+    # Keep the request context entirely parent-owned. Only the scalar HTTP
+    # transport inputs cross the fork boundary in _claude_send_and_parse_async;
+    # history, cache, output callbacks and metrics are updated after completion
+    # back in the main process.
+    my $request = {
         api_url     => $api_url,
         api_key     => $api_key,
         api_version => $api_version,
@@ -1996,204 +2011,482 @@ sub claudeAI {
         prompt      => $prompt,
         prompt_key  => do {
             require Digest::MD5;
-            # mb163-B2: inclure le system prompt EFFECTIF (qui contient le
-            # persona override et le pin context prepend) dans la cle de
-            # cache. Avant ce fix, la cle etait md5(lc(prompt)) seule :
-            # si Alice (persona pirate, pin "my pet is Talos") posait une
-            # question, sa reponse personnalisee etait cachee 60s et servie
-            # telle quelle a Bob posant la meme question — reponse dans le
-            # mauvais style ET fuite possible du contenu du pin d'Alice.
-            # Deux users ne partagent desormais un cache-hit que s'ils ont
-            # le MEME system prompt effectif (cas typique : aucun des deux
-            # n'a de persona/pin -> dedup utile preservee).
+            # mb163-B2: include the EFFECTIVE system prompt (persona + pin)
+            # so prompt-cache entries cannot leak personalized context across
+            # users that happen to ask the same question.
             Digest::MD5::md5_hex(encode('UTF-8',
                 lc($prompt // '') . "\x00" . ($sys_prompt // '')));
         },
         wrap_bytes  => $wrap_bytes,
         max_privmsg => $max_privmsg,
         max_history => $max_history,
+        sleep_us    => $sleep_us,
+        show_model  => _chatgpt_conf_int($self, 'anthropic.SHOW_MODEL', 0, 0, 1),
         nick        => $nick,
-        chan         => $chan,
-        output_fn   => $output_fn,  # mb88-R3: nécessaire pour cache-hit via callback
-    });
+        chan        => $chan,
+        output_fn   => $output_fn,
+    };
 
-    # mb141-B2: if the API call failed before an assistant answer was appended,
-    # rollback the user message we just pushed. Cache hits append an assistant
-    # internally before returning undef, so the last role tells both cases apart.
-    if (!defined $answer
-        && ref($history) eq 'ARRAY'
-        && @$history
-        && ($history->[-1]{role} // '') eq 'user')
-    {
+    my $rollback_orphan = sub {
+        return unless ref($history) eq 'ARRAY'
+            && @$history
+            && ($history->[-1]{role} // '') eq 'user';
+
         pop @$history;
         $self->{logger}->log(4,
             "claudeAI() rollback orphan user msg in history (key=$hist_key)");
-    }
-    return unless defined $answer;
+    };
 
-    # P2: optionally prefix response with model name
-    my $show_model = _chatgpt_conf_int($self, 'anthropic.SHOW_MODEL', 0, 0, 1);
-    if ($show_model) {
-        my $model_short = $model =~ s/claude-//r =~ s/-\d{8,}//r;
+    if ($use_async) {
+        $self->{_claude_inflight}{$hist_key} = time();
+
+        my $completion = sub {
+            my ($answer, $state) = @_;
+            delete $self->{_claude_inflight}{$hist_key};
+
+            $state //= 'failure';
+            if ($state eq 'failure') {
+                $rollback_orphan->();
+                return;
+            }
+            return if $state eq 'cache';
+            return unless defined $answer;
+
+            _claude_deliver_answer($self, $request, $answer);
+        };
+
+        my $started = _claude_send_and_parse_async(
+            $self,
+            $request,
+            $completion,
+        );
+
+        # The async adapter is required to complete every launch attempt, but
+        # keep this defensive backstop so an unexpected contract break cannot
+        # leave the conversation permanently locked.
+        unless ($started) {
+            delete $self->{_claude_inflight}{$hist_key};
+            $rollback_orphan->();
+            _claude_emit($self, $request,
+                "($nick) Sorry, Claude did not answer.");
+        }
+        return 1;
+    }
+
+    # Compatibility fallback for contexts that genuinely have no IO::Async
+    # loop (mainly lightweight tools/tests). Production IRC/Partyline runtime
+    # has a loop and therefore always takes the worker path above.
+    my $answer = _claude_send_and_parse($self, $request);
+    if (!defined $answer) {
+        $rollback_orphan->();
+        return;
+    }
+
+    _claude_deliver_answer($self, $request, $answer);
+}
+
+# ---------------------------------------------------------------------------
+# MB675 — Claude transport split
+#
+# Parent-only state:
+#   history, prompt cache, metrics, output callbacks, IRC queueing.
+#
+# Worker-only work:
+#   the bounded Anthropic HTTP request.  The raw HTTP body is transported as
+#   base64 so AsyncWorker's JSON protocol never has to guess whether API bytes
+#   are already decoded Perl characters.
+# ---------------------------------------------------------------------------
+
+sub _claude_emit {
+    my ($self, $p, $text) = @_;
+
+    my $output_fn = $p->{output_fn};
+    my $chan      = $p->{chan};
+    my $nick      = $p->{nick};
+
+    if (ref($output_fn) eq 'CODE') {
+        $output_fn->($text);
+    }
+    elsif (defined $chan) {
+        Mediabot::Helpers::botPrivmsg($self, $chan, $text);
+    }
+    else {
+        Mediabot::Helpers::botNotice($self, $nick, $text);
+    }
+}
+
+sub _claude_cache_hit {
+    my ($self, $p) = @_;
+
+    my $prompt_key  = $p->{prompt_key};
+    my $history     = $p->{history};
+    my $wrap_bytes  = $p->{wrap_bytes};
+    my $max_privmsg = $p->{max_privmsg};
+    my $max_history = $p->{max_history};
+
+    my $pcache = $self->{_claude_prompt_cache}{$prompt_key};
+    return 0 unless $pcache && (time() - $pcache->{ts}) < 60;
+
+    $self->{logger}->log(4, 'claudeAI() prompt cache hit');
+
+    my @chunk = _chatgpt_wrap($pcache->{answer}, $wrap_bytes);
+    my $last  = @chunk > $max_privmsg ? $max_privmsg - 1 : $#chunk;
+    _claude_emit($self, $p, $chunk[$_]) for 0 .. $last;
+
+    push @$history, { role => 'assistant', content => $pcache->{answer} };
+    splice @$history, 0, @$history - $max_history if @$history > $max_history;
+    return 1;
+}
+
+sub _claude_build_payload {
+    my ($self, $p) = @_;
+
+    my $payload = eval { encode_json({
+        model       => $p->{model},
+        max_tokens  => $p->{max_tokens},
+        temperature => $p->{temperature} + 0,
+        system      => $p->{sys_prompt},
+        messages    => $p->{history},
+    }) };
+
+    unless ($payload) {
+        $self->{logger}->log(1, "claudeAI() payload encode error: $@");
+        _claude_emit($self, $p,
+            "($p->{nick}) Internal error building request.");
+        return undef;
+    }
+
+    return $payload;
+}
+
+sub _claude_log_request {
+    my ($self, $p) = @_;
+
+    my $history = $p->{history};
+    my $h = scalar @$history;
+    my $c = 0;
+    $c += length($_->{content} // '') for @$history;
+    my $log_chan = $p->{chan} // '__private__';
+
+    $self->{logger}->log(3,
+        "claudeAI() \x{2192} $p->{model} for $log_chan / $p->{nick} "
+        . "[hist: $h msg(s), ~$c chars]");
+}
+
+sub _claude_http_request {
+    my ($transport, $payload) = @_;
+
+    my $http = Mediabot::External::_make_http(
+        timeout    => 30,
+        verify_SSL => 1,
+    );
+
+    my $res = eval {
+        $http->request('POST', $transport->{api_url}, {
+            headers => {
+                'Content-Type'      => 'application/json',
+                'x-api-key'         => $transport->{api_key},
+                'anthropic-version' => $transport->{api_version},
+            },
+            content => $payload,
+        });
+    };
+
+    if (!$res || ref($res) ne 'HASH') {
+        my $reason = $@ || 'invalid HTTP response';
+        $reason =~ s/[\r\n\0]+/ /g;
+        return {
+            success     => 0,
+            status      => 0,
+            reason      => substr($reason, 0, 300),
+            content_b64 => '',
+        };
+    }
+
+    my $status = $res->{status};
+    $status = 0 if !defined($status) || ref($status);
+
+    my $reason = $res->{reason};
+    $reason = '' if !defined($reason) || ref($reason);
+    $reason =~ s/[\r\n\0]+/ /g;
+    $reason = substr($reason, 0, 300);
+
+    my $content = $res->{content};
+    $content = '' if !defined($content) || ref($content);
+
+    return {
+        success     => $res->{success} ? 1 : 0,
+        status      => "$status",
+        reason      => $reason,
+        content_b64 => encode_base64($content, ''),
+    };
+}
+
+sub _claude_extract_answer {
+    my ($content) = @_;
+
+    # mb359-B1: parse every Anthropic content block and concatenate text blocks.
+
+    my $data = eval { decode_json($content // '') };
+    return undef unless ref($data) eq 'HASH'
+        && ref($data->{content}) eq 'ARRAY';
+
+    my @texts;
+    for my $blk (@{ $data->{content} }) {
+        next unless ref($blk) eq 'HASH'
+            && ($blk->{type} // '') eq 'text'
+            && defined $blk->{text};
+        push @texts, $blk->{text};
+    }
+
+    my $joined = join('', @texts);
+    return length($joined) > 0 ? $joined : undef;
+}
+
+sub _claude_accept_http_result {
+    my ($self, $p, $res) = @_;
+
+    unless (ref($res) eq 'HASH' && $res->{success}) {
+        my $status = ref($res) eq 'HASH' ? ($res->{status} // 0) : 0;
+        my $reason = ref($res) eq 'HASH' ? ($res->{reason} // '') : '';
+        $self->{logger}->log(1,
+            'claudeAI() HTTP error: ' . $status . ' ' . $reason
+            . " model=$p->{model}");
+        $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
+        _claude_emit($self, $p,
+            "($p->{nick}) Sorry, Claude did not answer.");
+        return undef;
+    }
+
+    my $content = eval { decode_base64($res->{content_b64} // '') };
+    $content = '' unless defined $content;
+
+    my $answer = _claude_extract_answer($content);
+    unless (defined $answer && $answer ne '') {
+        $self->{logger}->log(1, 'claudeAI() unexpected response structure');
+        $self->{logger}->log(5,
+            'claudeAI() raw: ' . ($content ne '' ? $content : '(empty)'));
+        _claude_emit($self, $p,
+            "($p->{nick}) Could not read Claude response.");
+        return undef;
+    }
+
+    $self->{logger}->log(5, "claudeAI() raw answer: $answer");
+
+    my $history = $p->{history};
+    push @$history, { role => 'assistant', content => $answer };
+
+    # F53: cache this prompt->answer pair (TTL 60s).
+    $self->{_claude_prompt_cache}{$p->{prompt_key}} = {
+        ts     => time(),
+        answer => $answer,
+    };
+
+    # Evict entries older than 120s.
+    for my $k (keys %{ $self->{_claude_prompt_cache} // {} }) {
+        delete $self->{_claude_prompt_cache}{$k}
+            if (time() - ($self->{_claude_prompt_cache}{$k}{ts} // 0)) > 120;
+    }
+
+    splice @$history, 0, @$history - $p->{max_history}
+        if @$history > $p->{max_history};
+
+    return $answer;
+}
+
+sub _claude_can_async {
+    my ($self) = @_;
+
+    my $loop = eval {
+        (ref($self) && $self->can('getLoop'))
+            ? $self->getLoop
+            : undef;
+    };
+    $loop ||= eval { $self->{loop} };
+
+    return undef unless $loop
+        && eval { $loop->can('add') }
+        && eval { $loop->can('remove') }
+        && eval { $loop->can('watch_process') };
+
+    return $loop;
+}
+
+# Historical synchronous adapter retained for contexts with no usable event
+# loop. Production Mediabot runtime uses _claude_send_and_parse_async instead.
+sub _claude_send_and_parse {
+    my ($self, $p) = @_;
+
+    return undef if _claude_cache_hit($self, $p);
+
+    my $payload = _claude_build_payload($self, $p);
+    return undef unless defined $payload;
+
+    _claude_log_request($self, $p);
+
+    my %transport = map { $_ => $p->{$_} }
+        qw(api_url api_key api_version);
+
+    my $res = _claude_http_request(\%transport, $payload);
+    return _claude_accept_http_result($self, $p, $res);
+}
+
+sub _claude_send_and_parse_async {
+    my ($self, $p, $on_complete) = @_;
+    return 0 unless ref($on_complete) eq 'CODE';
+
+    my $adapter_done = 0;
+    my $done = sub {
+        my ($answer, $state) = @_;
+        return if $adapter_done++;
+        $on_complete->($answer, $state);
+    };
+
+    if (_claude_cache_hit($self, $p)) {
+        $done->(undef, 'cache');
+        return 1;
+    }
+
+    my $payload = _claude_build_payload($self, $p);
+    unless (defined $payload) {
+        $done->(undef, 'failure');
+        return 1;
+    }
+
+    _claude_log_request($self, $p);
+
+    my $loop = _claude_can_async($self);
+    unless ($loop) {
+        $self->{logger}->log(1,
+            'claudeAI() async worker unavailable: no usable IO::Async loop');
+        _claude_emit($self, $p,
+            "($p->{nick}) Sorry, Claude did not answer.");
+        $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
+        $done->(undef, 'failure');
+        return 1;
+    }
+
+    # Only immutable scalar transport material is captured by the child.
+    # Parent-owned history/cache/callback objects never cross this boundary.
+    my %transport = map { $_ => $p->{$_} }
+        qw(api_url api_key api_version);
+
+    my $worker_done = sub {
+        my ($result) = @_;
+
+        unless (ref($result) eq 'HASH' && $result->{ok}
+            && ref($result->{value}) eq 'HASH') {
+            my $error = ref($result) eq 'HASH'
+                ? ($result->{error} // 'worker_failed')
+                : 'worker_failed';
+            my $detail = ref($result) eq 'HASH'
+                ? ($result->{detail} // '')
+                : '';
+            $detail =~ s/[\r\n\0]+/ /g;
+            $self->{logger}->log(1,
+                "claudeAI() AsyncWorker error: $error $detail");
+            $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
+            _claude_emit($self, $p,
+                "($p->{nick}) Sorry, Claude did not answer.");
+            $done->(undef, 'failure');
+            return;
+        }
+
+        my $answer = _claude_accept_http_result(
+            $self,
+            $p,
+            $result->{value},
+        );
+
+        $done->(
+            $answer,
+            defined($answer) ? 'success' : 'failure',
+        );
+    };
+
+    my $worker;
+    my $launch_ok = eval {
+        $worker = Mediabot::AsyncWorker->start(
+            loop        => $loop,
+            label       => 'claude anthropic request',
+            timeout     => 32,
+            term_grace  => 0.2,
+            force_grace => 2.0,
+            max_output  => 128 * 1024,
+            child       => sub {
+                return _claude_http_request(\%transport, $payload);
+            },
+            on_done => $worker_done,
+        );
+        1;
+    };
+
+    if (!$launch_ok && !$adapter_done) {
+        my $error = $@ || 'unknown AsyncWorker launch failure';
+        $error =~ s/[\r\n\0]+/ /g;
+        $self->{logger}->log(1,
+            "claudeAI() AsyncWorker launch failed: $error");
+        $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
+        _claude_emit($self, $p,
+            "($p->{nick}) Sorry, Claude did not answer.");
+        $done->(undef, 'failure');
+    }
+    elsif (!$worker && !$adapter_done) {
+        $self->{logger}->log(1,
+            'claudeAI() AsyncWorker refused launch without completion');
+        $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
+        _claude_emit($self, $p,
+            "($p->{nick}) Sorry, Claude did not answer.");
+        $done->(undef, 'failure');
+    }
+
+    return 1;
+}
+
+sub _claude_deliver_answer {
+    my ($self, $p, $answer) = @_;
+    return 0 unless defined($answer) && $answer ne '';
+
+    if ($p->{show_model}) {
+        my $model_short = $p->{model} =~ s/claude-//r =~ s/-\d{8,}//r;
         $answer = "[$model_short] $answer";
     }
 
-    # Sanitise and wrap — reuse _chatgpt_wrap
     $answer =~ s/[\r\n]+/ /g;
     $answer =~ s/\s{2,}/ /g;
 
-    my @chunk    = _chatgpt_wrap($answer, $wrap_bytes);
-    my $truncate = @chunk > $max_privmsg;
-    my $last     = $truncate ? $max_privmsg - 1 : $#chunk;
+    my @chunk    = _chatgpt_wrap($answer, $p->{wrap_bytes});
+    my $truncate = @chunk > $p->{max_privmsg};
+    my $last     = $truncate ? $p->{max_privmsg} - 1 : $#chunk;
 
     if ($truncate) {
-        # mb376-B1: même garantie byte-safe que le chemin OpenAI, afin que le
-        # suffixe de troncature fasse partie du budget et non d'un ajout après
-        # coup susceptible de créer une ligne IRC supplémentaire.
+        # mb376-B1: keep the truncation suffix inside the byte budget.
         $chunk[$last] = _fit_truncation_suffix(
             $chunk[$last],
             CLAUDE_TRUNC_MSG,
-            $wrap_bytes,
+            $p->{wrap_bytes},
         );
     }
 
-    if ($output_fn) {
-        # Partyline callbacks are already non-IRC and must remain synchronous.
-        for my $i (0 .. $last) {
-            $_out->($chunk[$i]);
-        }
-        $self->{logger}->log(4, 'claudeAI() sent ' . ($last+1) . ' callback line(s)');
+    if (ref($p->{output_fn}) eq 'CODE') {
+        _claude_emit($self, $p, $chunk[$_]) for 0 .. $last;
+        $self->{logger}->log(4,
+            'claudeAI() sent ' . ($last + 1) . ' callback line(s)');
     }
     else {
         my @out_chunks = @chunk[0 .. $last];
         my $queued = _queue_irc_chunks(
             $self,
-            $chan,
+            $p->{chan},
             \@out_chunks,
-            $sleep_us,
+            $p->{sleep_us},
             'claudeAI',
         );
         $self->{logger}->log(4, "claudeAI() queued $queued PRIVMSG");
     }
-    # P5: increment Prometheus counter on success
+
     $self->{metrics}->inc('mediabot_claude_requests_total') if $self->{metrics};
-}
-
-# ---------------------------------------------------------------------------
-# mb87-R1: _claude_send_and_parse — extrait de claudeAI() pour lisibilité
-# Gère le cache prompt, l'appel HTTP Anthropic et le parsing de la réponse.
-# Retourne la réponse texte ou undef en cas d'erreur.
-# ---------------------------------------------------------------------------
-sub _claude_send_and_parse {
-    my ($self, $p) = @_;
-    my ($api_url, $api_key, $api_version, $model, $max_tokens, $temperature,
-        $sys_prompt, $history, $prompt, $prompt_key, $wrap_bytes, $max_privmsg,
-        $max_history, $nick, $chan, $output_fn) =
-        @{$p}{qw(api_url api_key api_version model max_tokens temperature
-                  sys_prompt history prompt prompt_key wrap_bytes max_privmsg
-                  max_history nick chan output_fn)};
-
-    # mb88-R3: _out utilise output_fn si disponible, sinon Mediabot::Helpers::botPrivmsg/Mediabot::Helpers::botNotice
-    my $_out_sub = sub {
-        my ($text) = @_;
-        if ($output_fn) { $output_fn->($text); }
-        elsif (defined $chan) { Mediabot::Helpers::botPrivmsg($self, $chan, $text); }
-        else                  { Mediabot::Helpers::botNotice($self, $nick, $text); }
-    };
-
-    # F53: prompt cache — same exact prompt answered within 60s → skip API
-    my $pcache = $self->{_claude_prompt_cache}{$prompt_key};
-    if ($pcache && (time() - $pcache->{ts}) < 60) {
-        $self->{logger}->log(4, 'claudeAI() prompt cache hit');
-        my @chunk = _chatgpt_wrap($pcache->{answer}, $wrap_bytes);
-        my $last  = @chunk > $max_privmsg ? $max_privmsg - 1 : $#chunk;
-        $_out_sub->($chunk[$_]) for 0..$last;
-        push @$history, { role => 'assistant', content => $pcache->{answer} };
-        splice @$history, 0, @$history - $max_history if @$history > $max_history;
-        return undef;  # already sent, caller should not re-send
-    }
-
-    # Anthropic API payload
-    my $payload = eval { encode_json({
-        model       => $model,
-        max_tokens  => $max_tokens,
-        temperature => $temperature + 0,
-        system      => $sys_prompt,
-        messages    => $history,
-    }) };
-    unless ($payload) {
-        $self->{logger}->log(1, "claudeAI() payload encode error: $@");
-        $_out_sub->("($nick) Internal error building request.");
-        return undef;
-    }
-
-    # AA8/V14: log model + history size
-    my $_h = scalar @$history;
-    my $_c = 0; $_c += length($_->{content}//'') for @$history;
-    my $_log_chan = $p->{chan} // "__private__";
-    $self->{logger}->log(3, "claudeAI() \x{2192} $model for $_log_chan / $nick [hist: $_h msg(s), ~$_c chars]");
-
-    my $http = Mediabot::External::_make_http(timeout => 30, verify_SSL => 1);
-    my $res  = eval {
-        $http->request('POST', $api_url, {
-            headers => {
-                'Content-Type'      => 'application/json',
-                'x-api-key'         => $api_key,
-                'anthropic-version' => $api_version,
-            },
-            content => $payload,
-        });
-    } // { success => 0, status => 0, reason => $@ };
-
-    unless ($res->{success}) {
-        $self->{logger}->log(1,
-            'claudeAI() HTTP error: ' . ($res->{status}//0)
-            . ' ' . ($res->{reason}//'') . " model=$model");
-        $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
-        $_out_sub->("($nick) Sorry, Claude did not answer.");
-        return undef;
-    }
-
-    my $data   = eval { decode_json($res->{content} // '') };
-    # mb359-B1: parcourir TOUS les blocs de content et concaténer ceux de type
-    # 'text', au lieu de ne lire que content[0]. L'API Anthropic peut renvoyer
-    # plusieurs blocs et placer un bloc non-text en tête (p.ex. un bloc 'thinking'
-    # si le raisonnement étendu est actif, ou 'tool_use') : l'ancien code, qui
-    # exigeait content[0]{type} eq 'text', répondait alors "Could not read Claude
-    # response" à tort alors qu'un bloc texte existait plus loin dans le tableau.
-    my $answer = eval {
-        return undef unless ref($data) eq 'HASH' && ref($data->{content}) eq 'ARRAY';
-        my @texts;
-        for my $blk (@{ $data->{content} }) {
-            next unless ref($blk) eq 'HASH'
-                     && ($blk->{type} // '') eq 'text'
-                     && defined $blk->{text};
-            push @texts, $blk->{text};
-        }
-        my $joined = join('', @texts);
-        length($joined) > 0 ? $joined : undef;
-    };
-
-    unless (defined $answer && $answer ne '') {
-        $self->{logger}->log(1, 'claudeAI() unexpected response structure');
-        $self->{logger}->log(5, 'claudeAI() raw: ' . ($res->{content} // '(empty)'));
-        $_out_sub->("($nick) Could not read Claude response.");
-        return undef;
-    }
-    $self->{logger}->log(5, "claudeAI() raw answer: $answer");
-
-    # P2: store assistant reply in history
-    push @$history, { role => 'assistant', content => $answer };
-    # F53: cache this prompt→answer pair (TTL 60s)
-    $self->{_claude_prompt_cache}{$prompt_key} = { ts => time(), answer => $answer };
-    # Evict entries older than 120s
-    for my $k (keys %{ $self->{_claude_prompt_cache} // {} }) {
-        delete $self->{_claude_prompt_cache}{$k}
-            if (time() - ($self->{_claude_prompt_cache}{$k}{ts} // 0)) > 120;
-    }
-    splice @$history, 0, @$history - $max_history if @$history > $max_history;
-
-    return $answer;
+    return 1;
 }
 
 1;

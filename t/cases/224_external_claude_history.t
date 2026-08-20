@@ -42,10 +42,14 @@ return sub {
     my $ai_body    = _extract_sub_224($src, 'claudeAI');
     my $ctx_body   = _extract_sub_224($src, 'claude_ctx');
     my $send_body  = _extract_sub_224($src, '_claude_send_and_parse');
+    my $payload_body = _extract_sub_224($src, '_claude_build_payload');
+    my $accept_body  = _extract_sub_224($src, '_claude_accept_http_result');
 
     $assert->ok(defined $ai_body  && $ai_body  ne '', 'claudeAI body found');
     $assert->ok(defined $ctx_body && $ctx_body ne '', 'claude_ctx body found');
     $assert->ok(defined $send_body && $send_body ne '', '_claude_send_and_parse body found');
+    $assert->ok(defined $payload_body && $payload_body ne '', '_claude_build_payload body found');
+    $assert->ok(defined $accept_body && $accept_body ne '', '_claude_accept_http_result body found');
 
     # History storage
     $assert->like($ai_body // '', qr/_claude_history/,
@@ -54,7 +58,7 @@ return sub {
     $assert->like($ai_body // '', qr/role.*user.*content.*prompt/s,
         'claudeAI pushes user message into history');
 
-    $assert->like($send_body // '', qr/role.*assistant.*content.*answer/s,
+    $assert->like($accept_body // '', qr/role.*assistant.*content.*answer/s,
         'claudeAI stores assistant reply in history');
 
     # History cap
@@ -69,6 +73,6 @@ return sub {
         'claude_ctx clears history on reset');
 
     # Messages sent as array (not single object)
-    $assert->like($send_body // '', qr/messages\s*=>\s*\$history/,
+    $assert->like($payload_body // '', qr/messages\s*=>\s*\$p->\{history\}/,
         'claudeAI sends full history array as messages');
 };
