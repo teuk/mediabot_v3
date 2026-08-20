@@ -212,7 +212,7 @@ return sub {
     # [4] + [5] Gardes statiques et docs
     # ------------------------------------------------------------------
     {
-        my $party_src = _slurp_747(File::Spec->catfile('Mediabot', 'Partyline.pm'));
+        my $party_src = _slurp_747(File::Spec->catfile('Mediabot', 'Partyline.pm')) . "\n" . _slurp_747(File::Spec->catfile('Mediabot', 'Partyline', 'Transport.pm'));
         $assert->like($party_src, qr/SLOW PARTYLINE: %s took %\.2fs/,
             'partyline: traceur SLOW present');
         $assert->like($party_src, qr/tv_interval\(\$t0_552\)/, 'partyline: chrono HiRes reel');

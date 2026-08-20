@@ -110,7 +110,13 @@ say_info("\n[1] Secrets never logged in clear");
     }
 
     # Le masqueur de token DCC doit exister et être utilisé.
-    my $party = slurp('Mediabot/Partyline.pm') // '';
+    # MB678: le transport peut vivre dans Partyline/Transport.pm ; l'invariant
+    # de sécurité porte sur l'ensemble de la couche Partyline, pas sur son
+    # emplacement physique dans un fichier unique.
+    my $party = join "\n",
+        (slurp('Mediabot/Partyline.pm') // ''),
+        (slurp('Mediabot/Partyline/Transport.pm') // '');
+
     if ($party =~ /sub\s+_dcc_token_hint/ && $party =~ /_dcc_token_hint\s*\(/) {
         pass("DCC token masking helper present and used");
     }

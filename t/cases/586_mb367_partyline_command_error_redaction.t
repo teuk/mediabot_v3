@@ -284,7 +284,7 @@ return sub {
     $assert->like($ai_logger->{entries}[0][1], qr/^Partyline \.ai failed: Claude key/,
         '.ai provider details remain in the server log');
 
-    my $src = _slurp_586("$Bin/../../Mediabot/Partyline.pm");
+    my $src = _slurp_586("$Bin/../../Mediabot/Partyline.pm") . "\n" . _slurp_586("$Bin/../../Mediabot/Partyline/Transport.pm");
     $assert->like($src, qr/mb367-B1/,
         'mb367-B1 marker is present');
 

@@ -179,7 +179,7 @@ return sub {
     $assert->ok($defensive_ok,
         'logger or stream failures do not rethrow the original Partyline exception');
 
-    my $src = _slurp_584("$Bin/../../Mediabot/Partyline.pm");
+    my $src = _slurp_584("$Bin/../../Mediabot/Partyline/Transport.pm");
     $assert->like($src, qr/mb365-B1/,
         'mb365-B1 marker is present');
     $assert->like(

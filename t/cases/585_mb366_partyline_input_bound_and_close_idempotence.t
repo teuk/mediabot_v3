@@ -218,7 +218,7 @@ return sub {
     $assert->is($live->{status_writes}, 1,
         'runtime status is rewritten only for the real close');
 
-    my $src = _slurp_585("$Bin/../../Mediabot/Partyline.pm");
+    my $src = _slurp_585("$Bin/../../Mediabot/Partyline.pm") . "\n" . _slurp_585("$Bin/../../Mediabot/Partyline/Transport.pm");
     $assert->like($src, qr/mb366-B1/,
         'mb366-B1 input-bound marker is present');
     $assert->like($src, qr/mb366-B2/,

@@ -36,7 +36,7 @@ return sub {
     my ($assert) = @_;
 
     my $mediabot = _slurp_345(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
-    my $party    = _slurp_345(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $party    = _slurp_345(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Transport.pm'));
 
     my $dcc_body = _sub_345($mediabot, '_handle_dcc_chat_request');
     my $pl_body  = _sub_345($party, 'accept_dcc_chat_passive');

@@ -55,7 +55,7 @@ sub _extract_sub_560 {
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_560(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $src = _slurp_560(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Transport.pm'));
     my $sub_src = _extract_sub_560($src, '_peer_ip_from_handle');
     $assert->ok(defined $sub_src && $sub_src ne '', '_peer_ip_from_handle extrait du source');
 

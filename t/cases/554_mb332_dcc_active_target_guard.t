@@ -127,7 +127,7 @@ return sub {
         File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm')
     );
     my $partyline = _slurp_554(
-        File::Spec->catfile('.', 'Mediabot', 'Partyline.pm')
+        File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Transport.pm')
     );
 
     $assert->like(

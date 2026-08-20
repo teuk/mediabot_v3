@@ -44,6 +44,8 @@ return sub {
 
     my $partyline = _slurp_dcc_sample_block(
         File::Spec->catfile('.', 'Mediabot', 'Partyline.pm')
+    ) . "\n" . _slurp_dcc_sample_block(
+        File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Transport.pm')
     );
 
     my $doc = _slurp_dcc_sample_block(

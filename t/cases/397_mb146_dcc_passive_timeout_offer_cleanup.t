@@ -8,7 +8,7 @@ my $case = sub {
     my ($assert) = @_;
 
     my $root = File::Spec->catdir($Bin, '..', '..');
-    my $partyline_file = File::Spec->catfile($root, 'Mediabot', 'Partyline.pm');
+    my $partyline_file = File::Spec->catfile($root, 'Mediabot', 'Partyline', 'Transport.pm');
 
     open my $fh, '<', $partyline_file
         or do { $assert->(0, "cannot open Partyline.pm: $!"); return; };
