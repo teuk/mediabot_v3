@@ -49,7 +49,7 @@ BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 
 sub slurp849 {
     my ($path) = @_;
-    open my $fh, '<:encoding(UTF-8)', $path or die "$path: $!";
+    open my $fh, '<:raw', $path or die "$path: $!";
     local $/;
     return <$fh>;
 }

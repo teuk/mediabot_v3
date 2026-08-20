@@ -23,7 +23,7 @@ use Scalar::Util qw(weaken);
 
 sub _slurp_557 {
     my ($path) = @_;
-    open my $fh, '<:encoding(UTF-8)', $path
+    open my $fh, '<:raw', $path
         or die "cannot read $path: $!";
     local $/;
     return <$fh>;

@@ -14,7 +14,7 @@ use Time::HiRes qw(time sleep);
 
 sub _slurp_mb396 {
     my ($path) = @_;
-    open my $fh, '<:encoding(UTF-8)', $path
+    open my $fh, '<:raw', $path
         or die "cannot read $path: $!";
     local $/;
     return <$fh>;

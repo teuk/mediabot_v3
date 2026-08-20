@@ -17,7 +17,7 @@ use File::Spec;
 
 sub _slurp_222 {
     my ($path) = @_;
-    open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
+    open my $fh, '<:raw', $path or die "cannot read $path: $!";
     local $/; return <$fh>;
 }
 

@@ -5,7 +5,7 @@ BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
 
 sub _slurp_336 {
-    open my $fh, '<:encoding(UTF-8)', $_[0] or die $!;
+    open my $fh, '<:raw', $_[0] or die $!;
     local $/;
     return <$fh>;
 }

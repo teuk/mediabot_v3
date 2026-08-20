@@ -3,7 +3,7 @@
 use strict; use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
-sub _slurp { open my $fh,'<:encoding(UTF-8)',$_[0] or die $!; local $/; <$fh> }
+sub _slurp { open my $fh,'<:raw',$_[0] or die $!; local $/; <$fh> }
 sub _sub { my($s,$n)=@_; my $re=qr/^[ \t]*sub[ \t]+\Q$n\E\b[^{]*\{/m;
     return undef unless $s=~/$re/g; my($st,$p,$d)=($-[0],pos($s),1);
     while($p<length($s)){my $c=substr($s,$p,1);$d++ if $c eq '{';$d-- if $c eq '}';

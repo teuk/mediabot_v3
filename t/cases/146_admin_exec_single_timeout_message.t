@@ -20,7 +20,7 @@ use File::Spec;
 sub _slurp_admin_exec_timeout_message {
     my ($path) = @_;
 
-    open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
+    open my $fh, '<:raw', $path or die "cannot read $path: $!";
     local $/;
     return <$fh>;
 }

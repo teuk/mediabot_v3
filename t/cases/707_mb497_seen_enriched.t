@@ -16,7 +16,7 @@ use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
 
-sub _slurp_707 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!"; local $/; <$fh> }
+sub _slurp_707 { my ($p)=@_; open my $fh,'<:raw',$p or die "$p: $!"; local $/; <$fh> }
 
 sub _extract_sub_707 {
     my ($src, $name) = @_;
