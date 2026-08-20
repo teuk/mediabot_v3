@@ -141,6 +141,11 @@ my $case = sub {
         or do { $assert->(0, "cannot open Partyline.pm: $!"); return; };
     my $src = do { local $/; <$fh> };
     close $fh;
+    my $cmd_file = File::Spec->catfile($root, 'Mediabot', 'Partyline', 'Commands.pm');
+    open my $cfh, '<', $cmd_file
+        or do { $assert->(0, "cannot open Commands.pm: $!"); return; };
+    $src .= "\n" . do { local $/; <$cfh> };
+    close $cfh;
 
     $assert->($src =~ /mb183-B1: include ScriptDryRun command filter visibility/,
         'Partyline source contains mb183 marker');

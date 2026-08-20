@@ -172,7 +172,7 @@ return sub {
         my $sample = _slurp_755('mediabot.sample.conf');
         $assert->like($sample, qr/^#ALLOW_BAN=no$/m, 'sample.conf: gate documente');
 
-        my $partyline = _slurp_755(File::Spec->catfile('Mediabot', 'Partyline.pm'));
+        my $partyline = _slurp_755(File::Spec->catfile('Mediabot', 'Partyline.pm')) . "\n" . _slurp_755(File::Spec->catfile('Mediabot', 'Partyline', 'Commands.pm'));
         $assert->like($partyline, qr/plugins\.ScriptDryRun\.ALLOW_BAN/,
             'partyline: cle documentee');
         $assert->like($partyline, qr/ban gate: ban\/unban actions/,

@@ -18,7 +18,7 @@ my $sample = slurp('mediabot.sample.conf');
 my $bridge = slurp('Mediabot/Plugin/ScriptDryRun.pm');
 my $manager = slurp('Mediabot/PluginManager.pm');
 my $bot = slurp('Mediabot/Mediabot.pm');
-my $party = slurp('Mediabot/Partyline.pm');
+my $party = slurp('Mediabot/Partyline.pm') . "\n" . slurp('Mediabot/Partyline/Commands.pm');
 
 for my $key (qw(SCRIPT COMMANDS ROUTES ACTION_MODE ALLOW_IRC APPLY_REQUIRE_SCOPE)) {
     like($sample, qr/\b\Q$key\E\b/, "sample documents canonical ScriptDryRun key $key");

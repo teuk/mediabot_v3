@@ -189,6 +189,7 @@ return sub {
 
     # le parseur de verbes gated est reste intact (info = mode lecture)
     my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline.pm' or die $!; local $/; <$fh> };
+    $src .= "\n" . do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline/Commands.pm' or die $!; local $/; <$fh> };
     $assert->like($src, qr/\Qload|loadscript|unload|reload|enable|disable|cleardata\E/,
         'mb598-781: parseur de verbes gated inchange — info hors gate');
 };

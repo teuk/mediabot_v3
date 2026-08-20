@@ -50,7 +50,8 @@ return sub {
     $assert->like($cc, qr/truncate_utf8\(\$text, 297\)/, 'chanlog: publictext UTF-8-safe');
     $assert->unlike($cc, qr/substr\(\$text, 0, 297\) \. '\.\.\.'/, 'plus de substr brut chanlog');
 
-    my $pl = _slurp_644(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $pl = _slurp_644(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'))
+        . "\n" . _slurp_644(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
     $assert->like($pl, qr/truncate_utf8\(\$text, 160\)/,    'action text UTF-8-safe');
     $assert->like($pl, qr/truncate_utf8\(\$content, 120\)/, 'contenu IA UTF-8-safe');
 

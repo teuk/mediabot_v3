@@ -202,6 +202,7 @@ return sub {
 
     # [4] partyline : loadscript gate + sortie
     my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline.pm' or die $!; local $/; <$fh> };
+    $src .= "\n" . do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline/Commands.pm' or die $!; local $/; <$fh> };
     $assert->like($src, qr/\Qload|loadscript|unload|reload|enable|disable|cleardata\E/,
         'mb590-774: loadscript dans le parseur de verbes');
     # mb601: cleardata rejoint la gate Owner.

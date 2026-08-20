@@ -18,7 +18,7 @@ sub slurp {
 my $pm       = slurp('Mediabot/PluginManager.pm');
 my $bus      = slurp('Mediabot/EventBus.pm');
 my $registry = slurp('Mediabot/CommandRegistry.pm');
-my $party    = slurp('Mediabot/Partyline.pm');
+my $party    = slurp('Mediabot/Partyline.pm') . "\n" . slurp('Mediabot/Partyline/Commands.pm');
 my $runner   = slurp('Mediabot/ScriptRunner.pm');
 
 like($pm, qr/Active manager for trusted in-process Perl plugins/,

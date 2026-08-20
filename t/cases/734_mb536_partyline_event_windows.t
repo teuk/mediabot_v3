@@ -251,7 +251,7 @@ return sub {
             'usage liste les nouvelles sous-commandes');
         $plugin->unregister;
 
-        my $party_src = _slurp_734(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+        my $party_src = _slurp_734(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm')) . "\n" . _slurp_734(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
         $assert->like($party_src, qr/mb536-B1/, 'marqueur mb536 dans Partyline');
         $assert->like($party_src, qr/show external script bridge status and last run/,
             'contrat mb291 de la ligne d\'aide conserve');
