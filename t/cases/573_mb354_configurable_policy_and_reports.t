@@ -64,7 +64,7 @@ sub slurp {
     return <$fh>;
 }
 
-my $partyline = slurp('Mediabot/Partyline.pm');
+my $partyline = slurp('Mediabot/Partyline/SessionAuth.pm');
 for my $key (qw(
     PARTYLINE_LOGIN_MAX_FAILURES
     PARTYLINE_LOGIN_IP_MAX_FAILURES

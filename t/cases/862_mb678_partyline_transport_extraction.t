@@ -50,10 +50,10 @@ return sub {
         'constructor still starts the historical listener method');
     $assert->like($party, qr/^sub _handle_line \{/m,
         'command dispatch remains in Partyline during MB678 transport round');
-    $assert->like($party, qr/^sub _do_login \{/m,
-        'authentication remains in Partyline during MB678 transport round');
-    $assert->like($party, qr/^sub _close_session \{/m,
-        'session lifecycle remains in Partyline during MB678 transport round');
+    $assert->unlike($trans, qr/^sub _do_login \{/m,
+        'authentication is not part of the transport module');
+    $assert->unlike($trans, qr/^sub _close_session \{/m,
+        'session lifecycle is not part of the transport module');
     $assert->like($party, qr/use constant MAX_PARTYLINE_LINE_BYTES => 4 \* 1024;/,
         'historical public input-bound constant remains in Partyline');
     $assert->like(

@@ -60,7 +60,7 @@ return sub {
     my ($assert) = @_;
 
     my $partyline = _slurp_197(
-        File::Spec->catfile('.', 'Mediabot', 'Partyline.pm')
+        File::Spec->catfile('.', 'Mediabot', 'Partyline', 'SessionAuth.pm')
     );
 
     my $auth = _slurp_197(

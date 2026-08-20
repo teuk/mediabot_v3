@@ -33,7 +33,7 @@ sub _slurp_562 {
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_562(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $src = _slurp_562(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'SessionAuth.pm'));
 
     # Compile les vrais helpers dans un package de test.
     for my $n (qw(_pl_bf_blocked _pl_bf_record _pl_bf_clear)) {

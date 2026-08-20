@@ -10,6 +10,7 @@ my $case = sub {
     my $root = File::Spec->catdir($Bin, '..', '..');
     my $partyline_file = File::Spec->catfile($root, 'Mediabot', 'Partyline.pm');
     my $transport_file = File::Spec->catfile($root, 'Mediabot', 'Partyline', 'Transport.pm');
+    my $session_file   = File::Spec->catfile($root, 'Mediabot', 'Partyline', 'SessionAuth.pm');
 
     open my $fh, '<', $partyline_file
         or do { $assert->(0, "cannot open Partyline.pm: $!"); return; };
@@ -20,6 +21,11 @@ my $case = sub {
         or do { $assert->(0, "cannot open Partyline/Transport.pm: $!"); return; };
     $src .= "\n" . do { local $/; <$tfh> };
     close $tfh;
+
+    open my $sfh, '<', $session_file
+        or do { $assert->(0, "cannot open Partyline/SessionAuth.pm: $!"); return; };
+    $src .= "\n" . do { local $/; <$sfh> };
+    close $sfh;
 
     my ($init_dcc) = $src =~ /sub _init_dcc_session \{(.*?)^sub _start_listener/ms;
     my ($cancel)   = $src =~ /sub _cancel_auth_timeout \{(.*?)^\}/ms;

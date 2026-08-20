@@ -29,7 +29,7 @@ sub _slurp_571 {
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_571(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $src = _slurp_571(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'SessionAuth.pm'));
     my ($record) = $src =~ /(sub _pl_bf_record \{.*?\n\})/s;
     $record //= '';
 

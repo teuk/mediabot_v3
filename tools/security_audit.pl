@@ -284,8 +284,12 @@ say_info("\n[6] HTTP download caps");
 say_info("\n[7] Authentication throttling");
 {
     my $login = slurp('Mediabot/LoginCommands.pm') // '';
-    my $party = slurp('Mediabot/Partyline.pm') // '';
+    my $party = join "\n",
+        (slurp('Mediabot/Partyline.pm') // ''),
+        (slurp('Mediabot/Partyline/SessionAuth.pm') // '');
     # Chaque chemin d'authentification doit conserver SA garde anti-brute-force.
+    # MB678-II: l'invariant suit la couche Partyline session/auth au lieu de
+    # supposer que toute son implementation vit dans Partyline.pm.
     my $login_ok = ($login =~ /throttle|MAX_FAILURES|Login throttle|blocked/i) ? 1 : 0;
     my $party_ok = ($party =~ /max_failures|throttle|bad password/i) ? 1 : 0;
     if ($login_ok && $party_ok) {
@@ -295,7 +299,7 @@ say_info("\n[7] Authentication throttling");
         fail("IRC login throttling missing in LoginCommands.pm");
     }
     else {
-        fail("Partyline login throttling missing in Partyline.pm");
+        fail("Partyline login throttling missing in Partyline session/auth layer");
     }
 }
 

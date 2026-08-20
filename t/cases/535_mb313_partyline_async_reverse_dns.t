@@ -48,6 +48,8 @@ return sub {
         File::Spec->catfile('.', 'Mediabot', 'Partyline.pm')
     ) . "\n" . _slurp_mb313(
         File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Transport.pm')
+    ) . "\n" . _slurp_mb313(
+        File::Spec->catfile('.', 'Mediabot', 'Partyline', 'SessionAuth.pm')
     );
 
     my $compat = _extract_sub_mb313($src, '_reverse_dns_timeout');
