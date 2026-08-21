@@ -126,6 +126,8 @@ use Mediabot::Partyline::Commands qw(
     _reload_configuration_file
     _cmd_reloadconf
     _cmd_reload
+    _cmd_lusers
+    _cmd_stats
 );
 
 
@@ -296,122 +298,9 @@ sub _write_runtime_status {
 
 # MB678-IV-G: configuration reload commands moved to Mediabot::Partyline::Commands.
 
-# ---------------------------------------------------------------------------
-# .lusers [refresh] - show cached network stats from LUSERS
-# ---------------------------------------------------------------------------
-# mb544-B1: les details du LUSERS en partyline — lit le cache coeur (source
-# independante du systeme Metrics); .lusers refresh demande une mise a jour
-# immediate au serveur (les numerics repeupleront le cache en retour).
-sub _cmd_lusers {
-    my ($self, $stream, $id, $arg) = @_;
-
-    my $bot = $self->{bot};
-    my $stats = ($bot && eval { $bot->can('network_stats') }) ? $bot->network_stats : {};
-    $stats = {} unless ref($stats) eq 'HASH';
-
-    if (defined $arg && lc($arg) eq 'refresh') {
-        my $sent = eval { $bot->can('request_lusers_now') ? $bot->request_lusers_now : 0 } || 0;
-        if ($sent) {
-            $stream->write("LUSERS refresh requested; values below are pre-refresh.\r\n");
-        }
-        else {
-            $stream->write("LUSERS refresh not sent (not connected).\r\n");
-        }
-    }
-
-    unless (%$stats) {
-        $stream->write("Network stats: none yet (no LUSERS numerics received).\r\n");
-        return;
-    }
-
-    my $line = "Network:";
-    $line .= " users=" . $stats->{users} if defined $stats->{users};
-    $line .= " (max " . $stats->{users_max} . ")" if defined $stats->{users_max};
-    $line .= " channels=" . $stats->{channels} if defined $stats->{channels};
-    $line .= " servers=" . $stats->{servers} if defined $stats->{servers};
-    $line .= " operators=" . $stats->{operators} if defined $stats->{operators};
-    $stream->write("$line\r\n");
-
-    if (defined $stats->{updated_at}) {
-        my $age = time() - $stats->{updated_at};
-        $age = 0 if $age < 0;
-        $stream->write("  updated: ${age}s ago\r\n");
-    }
-}
+# MB678-IV-H: network visibility/statistics commands moved to Mediabot::Partyline::Commands.
 
 # MB678-IV-G: .reloadconf/.reload implementations moved to Mediabot::Partyline::Commands.
-
-
-# ---------------------------------------------------------------------------
-# .stats [#chan]  - top 3 msgs + karma top 3 for a channel
-# ---------------------------------------------------------------------------
-sub _cmd_stats {
-    my ($self, $stream, $id, $args) = @_;
-
-    my $bot = $self->{bot};
-    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
-    return unless $dbh;
-
-    # Determine channel
-    my $chan;
-    if (defined $args && $args =~ /^(#\S+)/) {
-        $chan = $1;
-    } else {
-        # Default: first joined channel
-        my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
-        for my $name (sort keys %{ $bot->{channels} || {} }) {
-            my @n = eval { $bot->gethChannelsNicksOnChan($name) };
-            if (grep { lc($_) eq lc($bot_nick) } @n) { $chan = $name; last; }
-        }
-    }
-    unless ($chan) { $stream->write("No channel. Usage: .stats [#channel]\r\n"); return; }
-
-    $stream->write("Stats for $chan:\r\n");
-    $stream->write("-" x 40 . "\r\n");
-
-    # Top 3 messages
-    my $sth_top = $dbh->prepare(
-        "SELECT cl.nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl"
-        . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
-        . " WHERE c.name = ? GROUP BY cl.nick ORDER BY cnt DESC LIMIT 3"
-    );
-    if ($sth_top && $sth_top->execute($chan)) {
-        $stream->write("  Top speakers:\r\n");
-        my $rank = 1;
-        while (my $r = $sth_top->fetchrow_hashref) {
-            $stream->write(sprintf("    %d. %-20s %d msgs\r\n",
-                $rank++, $r->{nick}, $r->{cnt}));
-        }
-        $sth_top->finish;
-    }
-
-    # Top 3 karma
-    # mb412-R1: id canal via le helper central (cache d'abord, mb411).
-    my $id_channel = Mediabot::Helpers::channel_id_cached($bot, $chan);
-    if ($id_channel) {
-        my $sth_k = $dbh->prepare(q{
-            SELECT nick, score FROM KARMA
-            WHERE id_channel = ? AND score != 0
-            ORDER BY score DESC LIMIT 3
-        });
-        if ($sth_k && $sth_k->execute($id_channel)) {
-            my @krows;
-            while (my $r = $sth_k->fetchrow_hashref) { push @krows, $r; }
-            $sth_k->finish;
-            if (@krows) {
-                $stream->write("  Top karma:\r\n");
-                for my $r (@krows) {
-                    my $sign = $r->{score} > 0 ? '+' : '';
-                    $stream->write(sprintf("    %-20s %s%d\r\n",
-                        $r->{nick}, $sign, $r->{score}));
-                }
-            } else {
-                $stream->write("  No karma data yet.\r\n");
-            }
-        }
-    }
-    $stream->write("-" x 40 . "\r\n");
-}
 
 
 # ---------------------------------------------------------------------------

@@ -58,14 +58,10 @@ return sub {
     $assert->like($cmds, qr/Reload failed\./,
         '.reload keeps its sealed client failure response');
 
-    $assert->like($party, qr/^sub _cmd_lusers \{/m,
-        'network visibility commands remain in Partyline after IV-G');
-    $assert->like($party, qr/^sub _cmd_stats \{/m,
-        'channel statistics remain in Partyline after IV-G');
-    $assert->unlike($cmds, qr/^sub _cmd_lusers \{/m,
-        'IV-G does not broaden into network visibility commands');
-    $assert->unlike($cmds, qr/^sub _cmd_stats \{/m,
-        'IV-G does not broaden into channel statistics');
+    $assert->like($party, qr/^sub _cmd_ai \{/m,
+        'large AI command family remains in Partyline after later extractions');
+    $assert->unlike($cmds, qr/^sub _cmd_ai \{/m,
+        'reload and later small-command extractions do not broaden into AI');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');
