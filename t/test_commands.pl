@@ -3,7 +3,7 @@
 #  Mediabot v3 - Framework de test des commandes IRC
 #  Usage : perl t/test_commands.pl [--verbose] [--filter <pattern>] [--profile]
 #           [--class <tag>] [--exclude-class <tag>]
-#           [--class-summary] [--list-selected] [--fast]
+#           [--class-summary] [--list-selected] [--fast] [--progress]
 #           [--nick <nick>] [--host <host>] [--channel <chan>]
 #           [--botnick <botnick>] [--cmdchar <char>]
 # =============================================================================
@@ -22,10 +22,12 @@ use MockMessage;
 use MockUser;
 use Getopt::Long;
 use File::Basename;
+use File::Temp qw(tempfile);
 use Cwd qw(getcwd);
 use POSIX qw(strftime);
 use TAP::Parser;
 use Time::HiRes ();
+use IO::Handle ();
 use TestClassifier qw(classify_test_file allowed_test_classes);
 use FastValidation qw(
     fast_lane_reason
@@ -55,6 +57,7 @@ my @opt_exclude_classes;
 my $opt_class_summary = 0;
 my $opt_list_selected = 0;
 my $opt_fast = 0;
+my $opt_progress = 0;
 GetOptions(
     'verbose|v'   => \$opt_verbose,
     'filter|f=s'  => \$opt_filter,
@@ -70,6 +73,7 @@ GetOptions(
     'class-summary' => \$opt_class_summary,
     'list-selected' => \$opt_list_selected,
     'fast'          => \$opt_fast,
+    'progress'      => \$opt_progress,
 ) or die <<USAGE;
 Usage: $0 [options]
   --verbose, -v          Afficher chaque test [OK]/[FAIL]
@@ -87,6 +91,8 @@ Usage: $0 [options]
   --list-selected         Lister les tests selectionnes/classes sans les lancer
   --fast                  Lane de validation rapide: PURE + sentinelles critiques
                           (ne remplace PAS la suite complete)
+  --progress              Barre de progression compacte sur une seule ligne
+                          (pourcentage par fichiers, compteur d'assertions reel)
   Classes: PURE, FILESYSTEM, PROCESS, DB, NETWORK
 USAGE
 
@@ -95,6 +101,9 @@ if (defined $opt_profile_top) {
     $opt_profile = 1;
 }
 $opt_profile_top = 20 unless defined $opt_profile_top;
+
+die "--progress cannot be combined with --verbose\n"
+    if $opt_progress && $opt_verbose;
 
 my %valid_test_class = map { $_ => 1 } allowed_test_classes();
 
@@ -588,8 +597,166 @@ sub _filter_case_load_warning {
     warn $warning;
 }
 
+my @progress_failure_details;
+my ($progress_console_out, $progress_console_err, $progress_capture_fh);
+my $progress_done = 0;
+my $progress_render_width = 0;
+
+sub _progress_render {
+    my (%args) = @_;
+    return unless $opt_progress;
+
+    my $fh      = $args{fh}      // $progress_console_out;
+    my $done    = $args{done}    // 0;
+    my $total   = $args{total}   // 0;
+    my $tests   = $args{tests}   // 0;
+    my $current = $args{current} // '';
+    $current = '' if $total > 0 && $done >= $total;
+
+    my $width = 20;
+    my $ratio = $total > 0 ? $done / $total : 1;
+    $ratio = 0 if $ratio < 0;
+    $ratio = 1 if $ratio > 1;
+
+    my $percent = int(($ratio * 100) + 0.5);
+    my $filled = int($ratio * $width);
+    my $bar;
+
+    if ($filled >= $width) {
+        $bar = '=' x $width;
+    }
+    elsif ($filled > 0) {
+        $bar = ('=' x ($filled - 1)) . '>' . (' ' x ($width - $filled));
+    }
+    else {
+        $bar = ' ' x $width;
+    }
+
+    my $line = sprintf "[%s] %3d%% [%d/%d files | %d tests]%s",
+        $bar, $percent, $done, $total, $tests,
+        length($current) ? " | running: $current" : "";
+
+    my $padding = $progress_render_width > length($line)
+        ? ' ' x ($progress_render_width - length($line))
+        : '';
+
+    print {$fh} "\r$line$padding";
+    print {$fh} "\r$line" if length($padding);
+    $progress_render_width = length($line)
+        if length($line) > $progress_render_width;
+    $fh->flush();
+}
+
+sub _progress_capture_take {
+    return '' unless $opt_progress && $progress_capture_fh;
+
+    STDOUT->flush();
+    STDERR->flush();
+
+    seek($progress_capture_fh, 0, 0)
+        or die "Cannot rewind progress capture: $!\n";
+    local $/;
+    my $output = <$progress_capture_fh> // '';
+
+    truncate($progress_capture_fh, 0)
+        or die "Cannot truncate progress capture: $!\n";
+    seek($progress_capture_fh, 0, 0)
+        or die "Cannot reset progress capture: $!\n";
+
+    $output =~ s/\r\n?/\n/g;
+    $output =~ s/\s+\z//;
+    return $output;
+}
+
+sub _progress_begin {
+    return unless $opt_progress;
+
+    open $progress_console_out, '>&', \*STDOUT
+        or die "Cannot duplicate STDOUT for progress mode: $!\n";
+    open $progress_console_err, '>&', \*STDERR
+        or die "Cannot duplicate STDERR for progress mode: $!\n";
+
+    ($progress_capture_fh) = tempfile(
+        'mediabot_test_progress_XXXX',
+        TMPDIR => 1,
+        UNLINK => 1,
+    );
+
+    open STDOUT, '>&', $progress_capture_fh
+        or die "Cannot redirect STDOUT for progress mode: $!\n";
+    open STDERR, '>&', $progress_capture_fh
+        or die "Cannot redirect STDERR for progress mode: $!\n";
+
+    _progress_render(
+        done  => 0,
+        total => scalar(@test_files),
+        tests => $assert->total,
+    );
+}
+
+sub _progress_after_case {
+    my (%args) = @_;
+    return unless $opt_progress;
+
+    my $output = _progress_capture_take();
+    if ($assert->failed > ($args{failed_before} // 0)) {
+        push @progress_failure_details, {
+            name   => $args{name},
+            output => $output,
+        };
+    }
+
+    $progress_done++;
+    _progress_render(
+        done  => $progress_done,
+        total => scalar(@test_files),
+        tests => $assert->total,
+    );
+}
+
+sub _progress_finish {
+    return unless $opt_progress;
+
+    STDOUT->flush();
+    STDERR->flush();
+
+    open STDOUT, '>&', $progress_console_out
+        or die "Cannot restore STDOUT after progress mode: $!\n";
+    open STDERR, '>&', $progress_console_err
+        or die "Cannot restore STDERR after progress mode: $!\n";
+
+    print "\n";
+
+    return unless @progress_failure_details;
+
+    print "\nFailure details\n";
+    print "-" x 60 . "\n";
+
+    for my $row (@progress_failure_details) {
+        if (length $row->{output}) {
+            print "$row->{output}\n\n";
+        }
+        else {
+            print "[ $row->{name} ]\n(no captured diagnostics)\n\n";
+        }
+    }
+}
+
+_progress_begin();
+
+my $progress_case_failed_before = 0;
+my $progress_case_name = '';
+
 for my $file (@test_files) {
+    $progress_case_failed_before = $assert->failed;
+    $progress_case_name = basename($file);
     my $name = basename($file);
+    _progress_render(
+        done    => $progress_done,
+        total   => scalar(@test_files),
+        tests   => $assert->total,
+        current => $name,
+    );
     my $case_started = Time::HiRes::time();
     my $assert_before = $assert->total;
     my $failed_before = $assert->failed;
@@ -670,6 +837,14 @@ for my $file (@test_files) {
         failed_before => $failed_before,
     );
 }
+continue {
+    _progress_after_case(
+        name          => $progress_case_name,
+        failed_before => $progress_case_failed_before,
+    );
+}
+
+_progress_finish();
 
 # ---- Resume -----------------------------------------------------------------
 
