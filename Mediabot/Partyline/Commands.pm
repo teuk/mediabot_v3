@@ -46,6 +46,9 @@ our @EXPORT_OK = qw(
     _cmd_purgereminders
     _cmd_karma
     _cmd_karmahist
+    _reload_configuration_file
+    _cmd_reloadconf
+    _cmd_reload
 );
 
 # ---------------------------------------------------------------------------
@@ -2470,6 +2473,79 @@ sub _cmd_karmahist {
         $stream->write(sprintf("  %-20s %s (now %s%d) by %-15s %s ago\r\n",
             $e->{nick}, $e->{delta}, $sign, $e->{score}, $e->{from}, $ago));
     }
+}
+
+
+# =============================================================================
+# MB678-IV-G: configuration reload commands
+# =============================================================================
+
+# mb368-B1: one checked path for both Partyline configuration reload commands.
+# Mediabot::Conf exposes reload(), not the historical/non-existent load().
+sub _reload_configuration_file {
+    my ($self) = @_;
+
+    my $conf = $self->{bot}{conf};
+    die "configuration object unavailable\n" unless $conf;
+    die "configuration object has no reload method\n"
+        unless $conf->can('reload');
+
+    my $ok = $conf->reload();
+    die "configuration reload returned failure\n" unless $ok;
+
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# .reloadconf - reload only the configuration file in place
+# ---------------------------------------------------------------------------
+sub _cmd_reloadconf {
+    my ($self, $stream, $id) = @_;
+
+    my $ok = eval { $self->_reload_configuration_file() };
+    if ($ok) {
+        $stream->write("Configuration reloaded.\r\n");
+        return 1;
+    }
+
+    my $err = $@ || 'configuration reload returned failure';
+    return $self->_report_operation_error(
+        $stream,
+        'Partyline .reloadconf failed',
+        'Configuration reload failed.',
+        $err,
+    );
+}
+
+# ---------------------------------------------------------------------------
+# .reload  - Owner-only alias for an in-place configuration file reload
+# ---------------------------------------------------------------------------
+sub _cmd_reload {
+    my ($self, $stream, $id) = @_;
+    my $session = $self->{users}{$id} // {};
+    unless (($session->{level} // 99) <= 0) {  # Owner only
+        $stream->write("Permission denied (Owner required).\r\n"); return;
+    }
+
+    my $ok = eval { $self->_reload_configuration_file() };
+    if ($ok) {
+        my $logger = $self->{bot}{logger};
+        eval {
+            $logger->log(2, "Partyline: config reloaded by " . ($session->{login} // '?'))
+                if $logger && $logger->can('log');
+            1;
+        };
+        $stream->write("Configuration reloaded.\r\n");
+        return 1;
+    }
+
+    my $err = $@ || 'configuration reload returned failure';
+    return $self->_report_operation_error(
+        $stream,
+        'Partyline .reload failed',
+        'Reload failed.',
+        $err,
+    );
 }
 
 

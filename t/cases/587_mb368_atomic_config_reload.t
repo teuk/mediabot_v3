@@ -216,6 +216,9 @@ close $pfh;
 open my $dfh, '<', "$Bin/../../Mediabot/Partyline/Dispatcher.pm" or die $!;
 $party_src .= "\n" . <$dfh>;
 close $dfh;
+open my $cmdfh, '<', "$Bin/../../Mediabot/Partyline/Commands.pm" or die $!;
+$party_src .= "\n" . <$cmdfh>;
+close $cmdfh;
 
 like($conf_src, qr/mb368-B1/, 'MB368 marker is present in Mediabot::Conf');
 like($conf_src, qr/sub reload\s*\{/, 'Mediabot::Conf exposes the real reload method');
