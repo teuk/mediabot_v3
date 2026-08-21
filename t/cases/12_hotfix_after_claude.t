@@ -36,7 +36,9 @@ return sub {
     my $helpers_pm   = _slurp(File::Spec->catfile('.', 'Mediabot', 'Helpers.pm'));
     my $auth_pm      = _slurp(File::Spec->catfile('.', 'Mediabot', 'Auth.pm'));
     my $log_pm       = _slurp(File::Spec->catfile('.', 'Mediabot', 'Log.pm'));
-    my $partyline_pm = _slurp(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $partyline_pm = _slurp(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'))
+                     . "\n"
+                     . _slurp(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
     my $mediabot_pl  = _slurp(File::Spec->catfile('.', 'mediabot.pl'));
 
     # -------------------------------------------------------------------------

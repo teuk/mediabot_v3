@@ -50,10 +50,10 @@ return sub {
     $assert->like($cmds, qr/Mediabot::UserCommands::_seconds_to_human/,
         '.karmahist keeps human-readable age formatting');
 
-    $assert->like($party, qr/^sub _cmd_bans \{/m,
-        'moderation family remains in Partyline after later extractions');
-    $assert->unlike($cmds, qr/^sub _cmd_bans \{/m,
-        'command extractions do not broaden into the moderation family yet');
+    $assert->like($party, qr/^sub _cmd_eval \{/m,
+        '.eval owner/developer control remains in Partyline after IV-L');
+    $assert->unlike($cmds, qr/^sub _cmd_eval \{/m,
+        'IV-L does not broaden into .eval owner/developer control');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');

@@ -76,10 +76,10 @@ return sub {
     $assert->like($cmds, qr/mediabot_karmahist_requests_total/,
         '.dbstats keeps bot request counters');
 
-    $assert->like($party, qr/^sub _cmd_bans \{/m,
-        'moderation family remains in Partyline after IV-K');
-    $assert->unlike($cmds, qr/^sub _cmd_bans \{/m,
-        'IV-K does not broaden into moderation');
+    $assert->like($party, qr/^sub _cmd_eval \{/m,
+        '.eval owner/developer control remains in Partyline after IV-L');
+    $assert->unlike($cmds, qr/^sub _cmd_eval \{/m,
+        'IV-L does not broaden into .eval owner/developer control');
 
     $assert->like($party, qr/^sub _cmd_eval \{/m,
         '.eval remains in Partyline after IV-K');

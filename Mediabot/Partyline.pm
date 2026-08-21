@@ -142,6 +142,12 @@ use Mediabot::Partyline::Commands qw(
     _cmd_dccstat
     _cmd_stat
     _cmd_dbstats
+    _cmd_bans
+    _cmd_ban
+    _cmd_unban
+    _cmd_topic
+    _cmd_kick
+    _cmd_unmute
 );
 
 
@@ -329,83 +335,7 @@ sub _write_runtime_status {
 # ---------------------------------------------------------------------------
 # .bans [#chan] - list active bans (from ChannelBan) on a channel
 # ---------------------------------------------------------------------------
-sub _cmd_bans {
-    my ($self, $stream, $id, $chan) = @_;
-
-    my $bot = $self->{bot};
-
-    unless ($bot->{channel_ban} && $bot->{channel_ban}->can('list_active_bans')) {
-        $stream->write("ChannelBan module not available.\r\n");
-        return;
-    }
-
-    unless (defined $chan && $chan =~ /^#/) {
-        $stream->write("Usage: .bans #channel\r\n");
-        return;
-    }
-
-    # Resolve id_channel
-    my $dbh = $bot->{dbh};
-    # mb412-R1: id canal via le helper central (cache d'abord, mb411).
-    my $id_channel = Mediabot::Helpers::channel_id_cached($bot, $chan);
-    unless ($id_channel) {
-        $stream->write("Channel $chan not found in DB.\r\n");
-        return;
-    }
-    # A2: fetch up to 11 to detect overflow without loading all bans
-    my @bans = $bot->{channel_ban}->list_active_bans($id_channel, 11);
-
-    unless (@bans) {
-        $stream->write("No active bans on $chan.\r\n");
-        return;
-    }
-
-    my $has_more  = scalar(@bans) > 10;
-    @bans = @bans[0..9] if $has_more;  # trim to 10
-    my $total_bans = scalar @bans + ($has_more ? 1 : 0);  # approximate
-    my $shown_bans = scalar @bans;
-    $stream->write(sprintf("%d active ban(s) on $chan (showing %d):\r\n", $total_bans, $shown_bans));
-    $stream->write(sprintf("  %-4s %-30s %-8s %-16s %s\r\n",
-        "#", "Mask", "Level", "By", "Expires"));
-    $stream->write("  " . ("-" x 76) . "\r\n");
-
-    my $now_sth = $dbh->prepare('SELECT TIMESTAMPDIFF(SECOND, NOW(), ?) AS secs');
-
-    for my $ban (@bans) {
-        my $expires_txt = 'permanent';
-        if ($ban->{expires_at}) {
-            # G1/fix: guard undef $now_sth (prepare may fail when DB is down)
-            my $secs = 0;
-            if ($now_sth && $now_sth->execute($ban->{expires_at})) {
-                my $r = $now_sth->fetchrow_hashref;
-                $now_sth->finish;
-                $secs = ($r && defined $r->{secs} && $r->{secs} > 0) ? $r->{secs} : 0;
-            }
-            if ($secs > 0) {
-                my $d = int($secs / 86400);
-                my $h = int(($secs % 86400) / 3600);
-                my $m = int(($secs % 3600) / 60);
-                $expires_txt = '';
-                $expires_txt .= "${d}d " if $d;
-                $expires_txt .= "${h}h " if $h;
-                $expires_txt .= "${m}m"  if $m || (!$d && !$h);
-                $expires_txt =~ s/\s+$//;
-            } else {
-                $expires_txt = 'expiring soon';
-            }
-        }
-
-        $stream->write(sprintf("  %-4s %-30s %-8s %-16s %s\r\n",
-            $ban->{id_channel_ban} // '?',
-            $ban->{mask}           // '?',
-            $ban->{ban_level}      // '?',
-            $ban->{created_by_nick} // '?',
-            $expires_txt
-        ));
-    }
-}
-
-
+# MB678-IV-L: _cmd_bans implementation moved to Mediabot::Partyline::Commands.
 
 # ---------------------------------------------------------------------------
 # .ban #chan <nick> [duration] [reason]
@@ -415,168 +345,17 @@ sub _cmd_bans {
 # partylineBan callback in on_message_RPL_WHOISUSER performs the actual ban.
 # Duration formats: 10m 2h 3d 1w perm/permanent (default: permanent)
 # ---------------------------------------------------------------------------
-sub _cmd_ban {
-    my ($self, $stream, $id, $chan, $nick_target, @rest) = @_;
-
-    my $bot    = $self->{bot};
-    my $actor  = $self->{users}{$id}{login} // 'unknown';
-
-    unless ($bot->{irc} && $bot->{irc}->is_connected) {
-        $stream->write("Bot is not connected to IRC.\r\n");
-        return;
-    }
-
-    unless ($bot->{channel_ban}) {
-        $stream->write("ChannelBan module not available.\r\n");
-        return;
-    }
-
-    unless (defined $chan && $chan =~ /^#/ && defined $nick_target && $nick_target ne '') {
-        $stream->write("Usage: .ban #channel <nick> [duration] [reason]\r\n");
-        $stream->write("Durations: 10m 2h 3d 1w perm (default: permanent)\r\n");
-        return;
-    }
-
-    # Parse optional duration (first word of @rest if it looks like a duration)
-    my ($duration_secs, $dur_label, $reason);
-    if (@rest && $bot->{channel_ban}->looks_like_duration($rest[0])) {
-        my $dur_str = shift @rest;
-        my ($secs, $label, $err) = $bot->{channel_ban}->parse_duration($dur_str);
-        if ($err) {
-            $stream->write("Invalid duration: $err\r\n");
-            return;
-        }
-        ($duration_secs, $dur_label) = ($secs, $label);
-    } else {
-        ($duration_secs, $dur_label) = (0, 'permanent');
-    }
-    $reason = join(' ', @rest) // '';
-
-    # Store context for the async WHOIS callback
-    # Guard against concurrent .ban calls overwriting WHOIS_VARS.
-    # Store a unique token; the callback checks it matches before proceeding.
-    my $ban_token = "partylineBan:${id}:" . time() . ":" . int(rand(1_000_000));
-
-    # Keep the expected token on the Partyline session too.
-    # The async WHOIS callback must compare both sides before applying the ban.
-    $self->{users}{$id}{pending_whois_token} = $ban_token;
-    $self->{users}{$id}{pending_whois_sub}   = 'partylineBan';
-
-    %{ $bot->{WHOIS_VARS} } = (
-        nick      => $nick_target,
-        sub       => 'partylineBan',
-        token     => $ban_token,
-        caller    => $id,           # fd of the Partyline session
-        channel   => $chan,
-        duration  => $duration_secs,
-        dur_label => $dur_label,
-        reason    => $reason,
-        actor     => $actor,
-        ts        => time,
-    );
-
-    $bot->{irc}->send_message('WHOIS', undef, $nick_target);
-    $bot->{logger}->log(2, "Partyline: $actor requested ban on $nick_target in $chan");
-    $stream->write("WHOIS sent for $nick_target, ban will be applied on reply...\r\n");
-    delete $self->{_stat_cache};   # B5/A5: invalidate .stat cache on ban
-}
+# MB678-IV-L: _cmd_ban implementation moved to Mediabot::Partyline::Commands.
 
 # ---------------------------------------------------------------------------
 # .unban #chan <mask|ban_id>  - remove an active ban (Master+)
 # ---------------------------------------------------------------------------
-sub _cmd_unban {
-    my ($self, $stream, $id, $chan, $target) = @_;
-
-    my $bot  = $self->{bot};
-    my $nick = $self->{users}{$id}{login} // 'unknown';
-
-    unless ($bot->{channel_ban} && $bot->{channel_ban}->can('mark_removed')) {
-        $stream->write("ChannelBan module not available.\r\n");
-        return;
-    }
-
-    unless (defined $chan && $chan =~ /^#/ && defined $target && $target ne '') {
-        $stream->write("Usage: .unban #channel <mask|ban_id>\r\n");
-        return;
-    }
-
-    my $dbh = $bot->{dbh};
-    # mb412-R1: id canal via le helper central (cache d'abord, mb411).
-    my $id_channel = Mediabot::Helpers::channel_id_cached($bot, $chan);
-    unless ($id_channel) {
-        $stream->write("Channel $chan not found in DB.\r\n");
-        return;
-    }
-    my $level = $self->{users}{$id}{level};
-
-    # Resolve ban: by numeric id or by mask
-    my ($rows, $err, $mask_used);
-    if ($target =~ /^\d+$/) {
-        ($rows, $err) = $bot->{channel_ban}->mark_removed(
-            id_channel_ban => $target,
-            removed_by_nick => $nick,
-        );
-        $mask_used = "ban #$target";
-    } else {
-        ($rows, $err) = $bot->{channel_ban}->mark_removed(
-            id_channel => $id_channel,
-            mask       => $target,
-            removed_by_nick => $nick,
-        );
-        $mask_used = $target;
-    }
-
-    if ($err) {
-        $stream->write("Unban failed: $err\r\n");
-        return;
-    }
-
-    if (!$rows) {
-        $stream->write("No active ban found matching '$target' on $chan.\r\n");
-        return;
-    }
-
-    # Send MODE -b to IRC
-    eval {
-        $bot->{irc}->send_message('MODE', undef, $chan, '-b', $target)
-            if $target !~ /^\d+$/;
-    };
-
-    $bot->{logger}->log(2, "Partyline: $nick unbanned '$mask_used' on $chan");
-    $stream->write("Unbanned '$mask_used' on $chan.\r\n");
-    delete $self->{_stat_cache};   # invalidate .stat cache
-}
+# MB678-IV-L: _cmd_unban implementation moved to Mediabot::Partyline::Commands.
 
 # ---------------------------------------------------------------------------
 # .topic #chan [new topic]  - show or change channel topic (Master+)
 # ---------------------------------------------------------------------------
-sub _cmd_topic {
-    my ($self, $stream, $id, $chan, $topic) = @_;
-
-    my $bot  = $self->{bot};
-    my $nick = $self->{users}{$id}{login} // 'unknown';
-
-    unless ($bot->{irc} && $bot->{irc}->is_connected) {
-        $stream->write("Bot is not connected to IRC.\r\n");
-        return;
-    }
-
-    unless (defined $chan && $chan =~ /^#/) {
-        $stream->write("Usage: .topic #channel [new topic]\r\n");
-        return;
-    }
-
-    if (defined $topic && $topic ne '') {
-        # Set new topic
-        $bot->{irc}->send_message('TOPIC', undef, $chan, $topic);
-        $bot->{logger}->log(2, "Partyline: $nick set topic on $chan: $topic");
-        $stream->write("Topic set on $chan.\r\n");
-    } else {
-        # Request current topic via TOPIC (server will reply with 332)
-        $bot->{irc}->send_message('TOPIC', undef, $chan);
-        $stream->write("Topic request sent for $chan (check .console for server reply).\r\n");
-    }
-}
+# MB678-IV-L: _cmd_topic implementation moved to Mediabot::Partyline::Commands.
 
 # ---------------------------------------------------------------------------
 # .history  - show last 10 commands in this session
@@ -1175,43 +954,9 @@ sub _cmd_who_chan {
     }
 }
 
-sub _cmd_kick {
-    my ($self, $stream, $id, $args) = @_;
-    unless (defined $args && $args =~ /^(\S+)\s+(#\S+)(?:\s+(.*))?$/) {
-        $stream->write("Usage: .kick <nick> <#channel> [reason]\r\n"); return;
-    }
-    my ($target, $chan, $reason) = ($1, $2, $3 // 'Kicked by operator');
-    my $bot = $self->{bot};
-    eval { $bot->{irc}->send_message('KICK', undef, $chan, $target, $reason) };
-    if ($@) {
-        my $err = $@;
-        $self->_report_operation_error(
-            $stream,
-            'Partyline .kick failed',
-            'Kick failed.',
-            $err,
-        );
-    }
-    else {
-        $stream->write("Kicked $target from $chan ($reason)\r\n");
-    }
-}
+# MB678-IV-L: _cmd_kick implementation moved to Mediabot::Partyline::Commands.
 
-sub _cmd_unmute {
-    # CC3: manually lift a temp mute set by AF7
-    my ($self, $stream, $id, $args) = @_;
-    unless (defined $args && $args =~ /^(\S+)/) {
-        $stream->write("Usage: .unmute <nick>\r\n"); return;
-    }
-    my $target = lc($1);
-    my $bot = $self->{bot};
-    if (exists $bot->{_nick_mute}{$target}) {
-        delete $bot->{_nick_mute}{$target};
-        $stream->write("AF7 mute lifted for $target.\r\n");
-    } else {
-        $stream->write("$target is not muted.\r\n");
-    }
-}
+# MB678-IV-L: _cmd_unmute implementation moved to Mediabot::Partyline::Commands.
 
 sub _cmd_kv {
     # FF8: in-memory key-value store — .kv set <key> <val>  .kv get <key>  .kv del <key>  .kv list

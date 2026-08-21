@@ -54,10 +54,10 @@ return sub {
     $assert->like($cmds, qr/Mediabot::Helpers::channel_id_cached\(\$bot, \$chan\)/,
         '.stats keeps the shared channel-id cache helper');
 
-    $assert->like($party, qr/^sub _cmd_bans \{/m,
-        'moderation family remains in Partyline after later extractions');
-    $assert->unlike($cmds, qr/^sub _cmd_bans \{/m,
-        'IV-H and later extractions do not broaden into moderation');
+    $assert->like($party, qr/^sub _cmd_eval \{/m,
+        '.eval owner/developer control remains in Partyline after IV-L');
+    $assert->unlike($cmds, qr/^sub _cmd_eval \{/m,
+        'IV-L does not broaden into .eval owner/developer control');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');
