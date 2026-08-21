@@ -153,6 +153,14 @@ use Mediabot::Partyline::Commands qw(
     _cmd_netsplit
     _cmd_floodstatus
     _cmd_flushcooldown
+    _cmd_history
+    _cmd_say
+    _cmd_who
+    _cmd_chanlog
+    _cmd_nickinfo
+    _cmd_who_chan
+    _cmd_kv
+    _cmd_achievementprofile
 );
 
 
@@ -365,21 +373,7 @@ sub _write_runtime_status {
 # ---------------------------------------------------------------------------
 # .history  - show last 10 commands in this session
 # ---------------------------------------------------------------------------
-sub _cmd_history {
-    my ($self, $stream, $id) = @_;
-
-    my $hist = $self->{users}{$id}{history} // [];
-    unless (@$hist) {
-        $stream->write("No command history for this session.\r\n");
-        return;
-    }
-
-    $stream->write("Recent commands:\r\n");
-    my $i = 1;
-    for my $cmd (@$hist) {
-        $stream->write(sprintf("  %2d  %s\r\n", $i++, $cmd));
-    }
-}
+# MB678-IV-N: .history implementation moved to Mediabot::Partyline::Commands.
 
 # .stat - for each known channel: joined?, nick count, owner, chansets
 # ---------------------------------------------------------------------------
@@ -395,48 +389,12 @@ sub _cmd_history {
 # .say <#chan|nick> <message>
 # Supports both channels (#chan) and private messages (nick).
 # ---------------------------------------------------------------------------
-sub _cmd_say {
-    my ($self, $stream, $id, $target, $msg) = @_;
-
-    my $bot  = $self->{bot};
-    my $nick = $self->{users}{$id}{login};
-
-    unless ($bot->{irc} && $bot->{irc}->is_connected) {
-        $stream->write("Bot is not connected to IRC.\r\n");
-        return;
-    }
-
-    if ($target =~ /^#/) {
-        # Channel message — verify bot presence (warn only, still send)
-        my $target_lc = lc($target);
-        unless (exists $bot->{channels}{lc $target} || exists $bot->{channels}{lc $target_lc}) {
-            $stream->write("Warning: bot does not appear to be in $target (sending anyway).\r\n");
-        }
-    }
-    # No check needed for private messages — just send
-
-    $bot->botPrivmsg($target, $msg);
-    $bot->{logger}->log(2, "Partyline: $nick sent to $target: $msg");
-    $stream->write("-> $target: $msg\r\n");
-}
+# MB678-IV-N: .say implementation moved to Mediabot::Partyline::Commands.
 
 # ---------------------------------------------------------------------------
 # .who #chan - list nicks in a channel
 # ---------------------------------------------------------------------------
-sub _cmd_who {
-    my ($self, $stream, $id, $chan) = @_;
-
-    my $bot = $self->{bot};
-
-    my @nicks = $bot->gethChannelsNicksOnChan($chan);
-    unless (@nicks) {
-        $stream->write("No nicks known for $chan (not joined or channel is empty).\r\n");
-        return;
-    }
-
-    $stream->write(scalar(@nicks) . " nick(s) in $chan:\r\n");
-    $stream->write(join(', ', sort @nicks) . "\r\n");
-}
+# MB678-IV-N: .who implementation moved to Mediabot::Partyline::Commands.
 
 # MB678-IV-I: IRC control/lifecycle commands moved to Mediabot::Partyline::Commands.
 
@@ -808,319 +766,24 @@ sub _cmd_die {
 }
 
 
-sub _cmd_chanlog {
-    my ($self, $stream, $id, $args) = @_;
-    unless (defined $args && $args =~ /^(#\S+)(?:\s+(\d+))?/) {
-        $stream->write("Usage: .logs <#channel> [n]  (default n=10, max 50)\r\n"); return;
-    }
-    my ($chan, $n) = ($1, int($2 // 10));
-    $n = 10 if $n < 1; $n = 50 if $n > 50;
-    my $bot = $self->{bot};
-    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
-    return unless $dbh;
-    # mb349-B1: .logs affiche un log de CONVERSATION ([ts] <nick> texte), donc on
-    # ne montre que les vrais messages (event_type IN ('public','action')) et plus
-    # publictext IS NOT NULL, qui faisait apparaître join/part/kick/mode/topic
-    # comme si le nick les avait "dits" (ex. <bob> +o alice).
-    my $sth = $dbh->prepare(q{
-        SELECT cl.ts, cl.nick, cl.publictext AS text FROM CHANNEL_LOG cl
-        JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.event_type IN ('public','action')
-        ORDER BY cl.id_channel_log DESC LIMIT ?
-    });
-    unless ($sth && $sth->execute($chan, $n)) {
-        $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
-    }
-    my @rows;
-    while (my $r = $sth->fetchrow_hashref) { unshift @rows, $r; }
-    $sth->finish;
-    unless (@rows) { $stream->write("No logs found for $chan.\r\n"); return; }
-    $stream->write("Last " . scalar(@rows) . " lines on $chan:\r\n");
-    for my $r (@rows) {
-        # X9: show full date if entry is not from today
-        my $raw_ts = $r->{ts} // '';
-        my $ts;
-        if ($raw_ts =~ /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/) {
-            my ($date, $hhmm) = ($1, $2);
-            my $today = do { my @t=localtime(time); sprintf('%04d-%02d-%02d',$t[5]+1900,$t[4]+1,$t[3]); };
-            $ts = $date eq $today ? $hhmm : "$date $hhmm";
-        } else {
-            $ts = substr($raw_ts, 11, 5);
-        }
-        $stream->write(sprintf("[%s] <%s> %s\r\n", $ts, $r->{nick}, $r->{text}));
-    }
-}
-sub _cmd_nickinfo {
-    my ($self, $stream, $id, $args) = @_;
-    unless (defined $args && $args =~ /^(\S+)$/) {
-        $stream->write("Usage: .nickinfo <nick>\r\n"); return;
-    }
-    my $target = lc($1);
-    my $bot = $self->{bot};
-    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
-    return unless $dbh;
-    # mb109-B1: USER a 'nickname' pas 'nick', pas de email/USER_LOG/USER_HOST
-    my $sth = $dbh->prepare(q{
-        SELECT u.nickname, u.id_user, u.username, u.info1, u.info2,
-               u.birthday, u.last_login,
-               ul.description AS level
-        FROM USER u
-        JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
-        WHERE LOWER(u.nickname) = ?
-    });
-    unless ($sth && $sth->execute($target)) {
-        $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
-    }
-    my $r = $sth->fetchrow_hashref; $sth->finish;
-    unless ($r) {
-        $stream->write("$target: not found in DB.\r\n"); return;
-    }
-    $stream->write("Nick     : $r->{nickname}\r\n");
-    $stream->write("ID       : $r->{id_user}\r\n");
-    $stream->write("Level    : " . ($r->{level}    // 'N/A') . "\r\n");
-    $stream->write("Username : " . ($r->{username} // 'N/A') . "\r\n");
-    $stream->write("Info1    : " . ($r->{info1}    // 'N/A') . "\r\n") if $r->{info1};
-    $stream->write("Info2    : " . ($r->{info2}    // 'N/A') . "\r\n") if $r->{info2};
-    $stream->write("Birthday : " . ($r->{birthday} // 'N/A') . "\r\n") if $r->{birthday};
-    # Y1: compute age of last login
-    my $ll = $r->{last_login} // '';
-    if ($ll =~ /^(\d{4})-(\d{2})-(\d{2})/) {
-        require Time::Local;
-        my ($y,$mo,$d) = ($1,$2,$3);
-        my $ep = eval { Time::Local::timelocal(0,0,12,$d,$mo-1,$y-1900) };
-        if ($ep) {
-            my $diff = int((time()-$ep)/86400);
-            $ll .= $diff > 0 ? " (${diff}d ago)" : " (today)";
-        }
-    }
-    $stream->write("Last login: " . ($ll || 'never') . "\r\n");
-}
-sub _cmd_who_chan {
-    my ($self, $stream, $id, $args) = @_;
-    my $bot  = $self->{bot};
-    my $chan  = (defined $args && $args =~ /^(#\S+)/) ? $1 : undef;
-    unless ($chan) { $stream->write("Usage: .who <#channel>\r\n"); return; }
-    my @nicks = eval { $bot->gethChannelsNicksOnChan($chan) };
-    unless (@nicks) {
-        $stream->write("No nicks found on $chan (not joined or empty).\r\n"); return;
-    }
-    $stream->write(scalar(@nicks) . " nick(s) on $chan:\r\n");
-    # Try to show level for each nick
-    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
-    my %levels;
-    if ($dbh) {
-        eval {
-            # mb109-B1: USER a 'nickname' pas 'nick'
-            my $sth = $dbh->prepare(q{
-                SELECT u.nickname, ul.description AS level FROM USER u
-                JOIN USER_CHANNEL uc ON uc.id_user = u.id_user
-                JOIN CHANNEL c ON c.id_channel = uc.id_channel
-                JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
-                WHERE c.name = ?
-            });
-            if ($sth && $sth->execute($chan)) {
-                while (my $r = $sth->fetchrow_hashref) {
-                    $levels{lc $r->{nickname}} = $r->{level};
-                }
-                $sth->finish;
-            }
-        };
-    }
-    # FF3: fetch IRC modes (op/voice) from the IRC channel object
-    my %irc_flag;
-    eval {
-        my $irc = $bot->{irc};
-        if ($irc && $irc->is_connected) {
-            my $irc_chan = $irc->channel($chan);
-            if ($irc_chan) {
-                for my $n ($irc_chan->nicks) {
-                    my $mode = $irc_chan->mode_for_nick($n) // '';
-                    $irc_flag{lc($n->nick)} = $mode =~ /o/ ? '@'
-                                           : $mode =~ /v/ ? '+'
-                                           : '';
-                }
-            }
-        }
-    };
-    my @lines;
-    # Y6: sort by level desc (highest first), then alphabetically
-    my @sorted_nicks = sort {
-        ($levels{lc $b} // 0) <=> ($levels{lc $a} // 0)
-        || lc($a) cmp lc($b)
-    } @nicks;
-    for my $nick (@sorted_nicks) {
-        my $flag = $irc_flag{lc $nick} // '';
-        my $lvl  = $levels{lc $nick}   ? " [" . $levels{lc $nick} . "]" : '';
-        push @lines, "$flag$nick$lvl";
-    }
-    # Output in chunks of 8
-    while (my @chunk = splice @lines, 0, 8) {
-        $stream->write('  ' . join('  ', @chunk) . "\r\n");
-    }
-}
+# MB678-IV-N: .chanlog implementation moved to Mediabot::Partyline::Commands.
+
+# MB678-IV-N: .nickinfo implementation moved to Mediabot::Partyline::Commands.
+
+# MB678-IV-N: .who_chan implementation moved to Mediabot::Partyline::Commands.
 
 # MB678-IV-L: _cmd_kick implementation moved to Mediabot::Partyline::Commands.
 
 # MB678-IV-L: _cmd_unmute implementation moved to Mediabot::Partyline::Commands.
 
-sub _cmd_kv {
-    # FF8: in-memory key-value store — .kv set <key> <val>  .kv get <key>  .kv del <key>  .kv list
-    my ($self, $stream, $id, $args) = @_;
-    my $bot = $self->{bot};
-    unless (defined $args && $args =~ /^(\w+)(?:\s+(\S+)(?:\s+(.*))?)?/) {
-        $stream->write("Usage: .kv set <key> <value>  |  .kv get <key>  |  .kv del <key>  |  .kv list\r\n");
-        return;
-    }
-    my ($op, $key, $val) = (lc($1), $2, $3);
-    my $store = $bot->{_kv} //= {};
-    if ($op eq 'set') {
-        unless (defined $key && defined $val) {
-            $stream->write("Usage: .kv set <key> <value>\r\n"); return;
-        }
-        $store->{$key} = $val;
-        $stream->write("kv: $key = $val\r\n");
-    } elsif ($op eq 'get') {
-        unless (defined $key) {
-            $stream->write("Usage: .kv get <key>\r\n"); return;
-        }
-        if (exists $store->{$key}) {
-            $stream->write("kv: $key = $store->{$key}\r\n");
-        } else {
-            $stream->write("kv: key '$key' not found.\r\n");
-        }
-    } elsif ($op eq 'del') {
-        unless (defined $key) {
-            $stream->write("Usage: .kv del <key>\r\n"); return;
-        }
-        if (delete $store->{$key}) {
-            $stream->write("kv: '$key' deleted.\r\n");
-        } else {
-            $stream->write("kv: key '$key' not found.\r\n");
-        }
-    } elsif ($op eq 'list') {
-        unless (%$store) {
-            $stream->write("kv: store is empty.\r\n"); return;
-        }
-        $stream->write("kv store (" . scalar(keys %$store) . " entries):\r\n");
-        for my $k (sort keys %$store) {
-            $stream->write("  $k = $store->{$k}\r\n");
-        }
-    } else {
-        $stream->write("kv: unknown op '$op'. Use set/get/del/list.\r\n");
-    }
-}
+# MB678-IV-N: .kv implementation moved to Mediabot::Partyline::Commands.
 
 # MB678-IV-M: anti-flood/cooldown operator commands moved to Mediabot::Partyline::Commands.
 
 # .achievementprofile <nick> <#channel>
 # Read-only visibility into mb646 durable identity resolution.  The source of
 # truth stays in Mediabot::Achievements; Partyline only renders the facts.
-sub _cmd_achievementprofile {
-    my ($self, $stream, $id, $arg) = @_;
-    $arg //= '';
-    $arg =~ s/^\s+|\s+$//g;
-
-    unless ($arg =~ /\A(\S+)\s+(#\S+)\z/) {
-        $stream->write("Usage: .achievementprofile <nick> <#channel>\r\n");
-        return 0;
-    }
-    my ($nick, $channel) = ($1, $2);
-
-    my $ach = eval { $self->{bot}{achievements} };
-    unless ($ach && eval { $ach->can('identity_profile_diagnostic') }) {
-        $stream->write("Achievement diagnostics unavailable.\r\n");
-        return 0;
-    }
-
-    my $diag = eval { $ach->identity_profile_diagnostic($nick, $channel) };
-    if (!$diag || ref($diag) ne 'HASH') {
-        $stream->write("Achievement diagnostic failed safely.\r\n");
-        return 0;
-    }
-
-    my $status = $diag->{status} // 'unknown';
-    my $backend = $diag->{storage_label} // $diag->{backend} // 'unknown';
-    $stream->write("Achievement identity diagnostic (read-only)\r\n");
-    $stream->write("  Query    : $nick on $channel\r\n");
-    $stream->write("  Storage  : $backend\r\n");
-
-    if ($status eq 'legacy_json') {
-        $stream->write("  Identity : legacy nick+channel key (no durable alias graph)\r\n");
-        $stream->write("  Unlocks  : " . ($diag->{unlock_count} // 0) . "\r\n");
-        $stream->write("  Progress : " . ($diag->{progress_counters} // 0) . " counter(s)\r\n");
-        return 1;
-    }
-    if ($status eq 'channel_not_found') {
-        $stream->write("  Result   : channel not found in DB\r\n");
-        return 1;
-    }
-    if ($status eq 'not_found') {
-        $stream->write("  Result   : no durable achievement profile matches this nick on the channel\r\n");
-        return 1;
-    }
-    if ($status eq 'ambiguous') {
-        my $candidates = $diag->{candidates};
-        $candidates = [] unless ref($candidates) eq 'ARRAY';
-        $stream->write("  Result   : ambiguous nick; " . scalar(@$candidates) . " durable profiles match\r\n");
-        for my $p (@$candidates) {
-            next unless ref($p) eq 'HASH';
-            $stream->write(sprintf(
-                "    profile=%d display=%s aliases=%d unlocks=%d progress=%d\r\n",
-                $p->{id_achievement_profile} // 0,
-                $p->{display_nick} // '',
-                $p->{alias_count} // 0,
-                $p->{unlock_count} // 0,
-                $p->{progress_counters} // 0,
-            ));
-        }
-        if ($diag->{candidates_truncated}) {
-            $stream->write("    ... additional candidate profiles omitted (display capped at 20)\r\n");
-        }
-        $stream->write("  Note     : nick-only diagnostics never choose between plausible profiles\r\n");
-        return 1;
-    }
-    if ($status ne 'ok') {
-        $stream->write("  Result   : diagnostic unavailable ($status)\r\n");
-        return 0;
-    }
-
-    my $p = $diag->{profile};
-    $p = {} unless ref($p) eq 'HASH';
-    $stream->write("  Profile  : " . ($p->{id_achievement_profile} // '?') . "\r\n");
-    $stream->write("  Display  : " . ($p->{display_nick} // '') . "\r\n");
-    if (defined $p->{id_user}) {
-        my $reg = defined($p->{registered_nick}) && length($p->{registered_nick})
-            ? " ($p->{registered_nick})" : '';
-        $stream->write("  USER     : " . $p->{id_user} . $reg
-            . " [authoritative resolver anchor on this channel]\r\n");
-    }
-    else {
-        $stream->write("  USER     : none attached\r\n");
-    }
-    $stream->write("  Unlocks  : " . ($p->{unlock_count} // 0) . "\r\n");
-    $stream->write("  Progress : " . ($p->{progress_counters} // 0) . " counter(s)\r\n");
-    $stream->write("  Aliases  : " . ($p->{alias_count} // 0) . " durable identity record(s)\r\n");
-
-    my $aliases = $diag->{aliases};
-    $aliases = [] unless ref($aliases) eq 'ARRAY';
-    for my $alias (@$aliases) {
-        next unless ref($alias) eq 'HASH';
-        my $anick = $alias->{nick} // '';
-        my $uh = $alias->{userhost} // '';
-        my $identity = length($uh) ? "$anick!$uh" : "$anick [legacy alias]";
-        my $last = defined($alias->{last_seen_at}) ? $alias->{last_seen_at} : '?';
-        $stream->write("    $identity  last_seen=$last\r\n");
-    }
-    if ($diag->{aliases_truncated}) {
-        $stream->write("    ... additional aliases omitted (display capped at 20)\r\n");
-    }
-
-    $stream->write("  Evidence : nick maps to one stored profile on this channel");
-    $stream->write("; registered USER id is authoritative") if defined $p->{id_user};
-    $stream->write("\r\n");
-    $stream->write("  Note     : mb646 does not persist historical merge reasons; this shows current durable evidence only.\r\n");
-    return 1;
-}
+# MB678-IV-N: .achievementprofile implementation moved to Mediabot::Partyline::Commands.
 
 # MB678-IV-K: .dbstats implementation moved to Mediabot::Partyline::Commands.
 

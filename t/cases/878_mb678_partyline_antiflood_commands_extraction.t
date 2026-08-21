@@ -74,10 +74,10 @@ return sub {
     $assert->like($cmds, qr/All karma cooldowns cleared\./,
         '.flushcooldown keeps global-clear confirmation');
 
-    $assert->like($party, qr/^sub _cmd_history \{/m,
-        '.history remains in Partyline after IV-M');
-    $assert->unlike($cmds, qr/^sub _cmd_history \{/m,
-        'IV-M does not broaden into session history');
+    $assert->unlike($party, qr/^sub _cmd_history \{/m,
+        'later IV-N extraction removes .history implementation from Partyline');
+    $assert->like($cmds, qr/^sub _cmd_history \{/m,
+        'later IV-N extraction places .history implementation in Commands');
 
     $assert->like($party, qr/^sub _cmd_eval \{/m,
         '.eval remains in Partyline after IV-M');

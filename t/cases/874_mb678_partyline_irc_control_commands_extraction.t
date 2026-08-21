@@ -83,10 +83,14 @@ return sub {
     $assert->unlike($cmds, qr/^sub _cmd_eval \{/m,
         'IV-L does not broaden into .eval owner/developer control');
 
-    $assert->like($party, qr/^sub _cmd_say \{/m,
-        '.say remains in Partyline after IV-I');
-    $assert->like($party, qr/^sub _cmd_who \{/m,
-        '.who remains in Partyline after IV-I');
+    $assert->unlike($party, qr/^sub _cmd_say \{/m,
+        'later IV-N extraction removes .say implementation from Partyline');
+    $assert->like($cmds, qr/^sub _cmd_say \{/m,
+        'later IV-N extraction places .say implementation in Commands');
+    $assert->unlike($party, qr/^sub _cmd_who \{/m,
+        'later IV-N extraction removes legacy _cmd_who implementation from Partyline');
+    $assert->like($cmds, qr/^sub _cmd_who \{/m,
+        'later IV-N extraction preserves legacy _cmd_who in Commands');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');

@@ -39,7 +39,9 @@ sub _strip_comments_568 {
 return sub {
     my ($assert) = @_;
 
-    my $pl = _slurp_568(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $pl = _slurp_568(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'))
+           . "\n"
+           . _slurp_568(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
 
     # _cmd_chanlog filtré
     my ($logs) = $pl =~ /(sub _cmd_chanlog \{.*?\n\}\n)/s; $logs //= '';

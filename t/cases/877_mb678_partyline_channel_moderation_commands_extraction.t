@@ -77,10 +77,10 @@ return sub {
     $assert->unlike($cmds, qr/^sub _cmd_eval \{/m,
         'IV-L does not broaden into .eval');
 
-    $assert->like($party, qr/^sub _cmd_history \{/m,
-        '.history remains in Partyline after IV-L');
-    $assert->unlike($cmds, qr/^sub _cmd_history \{/m,
-        'IV-L does not broaden into channel history');
+    $assert->unlike($party, qr/^sub _cmd_history \{/m,
+        'later IV-N extraction removes .history implementation from Partyline');
+    $assert->like($cmds, qr/^sub _cmd_history \{/m,
+        'later IV-N extraction places .history implementation in Commands');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');
