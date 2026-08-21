@@ -72,6 +72,11 @@ our @EXPORT_OK = qw(
     _cmd_topic
     _cmd_kick
     _cmd_unmute
+    _cmd_floodset
+    _cmd_cmdcooldown
+    _cmd_netsplit
+    _cmd_floodstatus
+    _cmd_flushcooldown
 );
 
 # ---------------------------------------------------------------------------
@@ -3934,6 +3939,213 @@ sub _cmd_unmute {
         $stream->write("AF7 mute lifted for $target.\r\n");
     } else {
         $stream->write("$target is not muted.\r\n");
+    }
+}
+
+
+# =============================================================================
+# MB678-IV-M: anti-flood and cooldown operator commands
+# =============================================================================
+
+sub _cmd_floodset {
+    my ($self, $stream, $id, $args) = @_;
+    my $bot = $self->{bot};
+    unless (defined $args && $args =~ /^(#\S+)(?:\s+(\d+)(?:\s+(\d+)(?:\s+(\d+))?)?)?/) {
+        $stream->write("Usage: .floodset <#chan> [window] [max_cmds] [silence_secs]\r\n");
+        $stream->write("  Defaults: window=10 max=8 silence=30\r\n");
+        $stream->write("  Example: .floodset #quebec 10 4 60\r\n");
+        return;
+    }
+    my ($chan, $window, $max, $silence) = ($1, $2, $3, $4);
+    # Store overrides in memory — used by checkChanFlood via _chan_flood_conf
+    # A-68-1: clamp override values to sane minimums (matches checkChanFlood)
+    my $safe_window  = defined $window  ? (int($window)  >= 1 ? int($window)  : 1) : undef;
+    my $safe_max     = defined $max     ? (int($max)     >= 1 ? int($max)     : 1) : undef;
+    my $safe_silence = defined $silence ? (int($silence) >= 1 ? int($silence) : 1) : undef;
+    if ((defined $window && int($window) < 1) || (defined $max && int($max) < 1)) {
+        $stream->write("Warning: values below 1 clamped to 1.\r\n");
+    }
+    # FF6: optional warn-only mode — bot warns but does not silence
+    my $warn_only = ($args && $args =~ /\bwarn.?only\b/i) ? 1 : 0;
+    $bot->{_chan_flood_conf}{$chan} = {
+        window    => $safe_window,
+        max       => $safe_max,
+        silence   => $safe_silence,
+        warn_only => $warn_only,
+    };
+    # Also reset current flood state for this channel
+    delete $bot->{_chan_flood}{$chan};
+    my $conf = $bot->{_chan_flood_conf}{$chan};
+    my $w = $conf->{window}  // '(default)';
+    my $m = $conf->{max}     // '(default)';
+    my $s = $conf->{silence} // '(default)';
+    my $wo = $bot->{_chan_flood_conf}{$chan}{warn_only} ? ' warn-only' : '';
+    $stream->write("CC2: floodset $chan — window=$w max=$m silence=$s${wo}\r\n");
+    $stream->write("Current flood state reset.\r\n");
+}
+
+sub _cmd_cmdcooldown {
+    # CC2: set per-command cooldown for a channel: .cmdcooldown #chan <cmd> <secs>
+    my ($self, $stream, $id, $args) = @_;
+    my $bot = $self->{bot};
+    # V15: no args → list active cooldowns
+    unless (defined $args && $args =~ /\S/) {
+        my $conf = $bot->{_cmd_cooldown_conf} // {};
+        unless (%$conf) {
+            $stream->write("No cooldowns configured.\r\n"); return;
+        }
+        $stream->write("Active cooldowns:\r\n");
+        for my $ch (sort keys %$conf) {
+            for my $cmd (sort keys %{ $conf->{$ch} }) {
+                my $secs = $conf->{$ch}{$cmd};
+                # HH9: human-readable cooldown duration
+                my $cd_str = $secs >= 60
+                    ? sprintf("%dm%02ds", int($secs/60), $secs%60)
+                    : "${secs}s";
+                $stream->write(sprintf("  %-20s %-12s %s\r\n", $ch, "!$cmd", $cd_str));
+            }
+        }
+        return;
+    }
+    unless ($args =~ /^(#\S+)\s+(\w+)\s+(\d+)$/) {
+        $stream->write("Usage: .cmdcooldown <#chan> <cmd> <seconds>\r\n");
+        $stream->write("  Example: .cmdcooldown #boulets ai 20\r\n");
+        return;
+    }
+    my ($chan, $cmd, $secs) = ($1, lc($2), int($3));
+    $secs = 0 if $secs < 0; $secs = 3600 if $secs > 3600;  # A-68-2: clamp range
+    $bot->{_cmd_cooldown_conf}{$chan}{$cmd} = $secs;
+    # Reset any active cooldown for this cmd+chan
+    delete $bot->{_cmd_cooldown}{"$cmd:" . lc($chan)};
+    # HH16: human-readable confirmation
+    my $secs_h = $secs >= 60 ? sprintf("%dm%02ds", int($secs/60), $secs%60) : "${secs}s";
+    my $action_str = $secs == 0 ? "removed" : "set to $secs_h";
+    $stream->write("Cooldown for !$cmd on $chan $action_str.\r\n");
+}
+
+sub _cmd_netsplit {
+    # NS: show current netsplit state
+    my ($self, $stream, $id, $args) = @_;
+    my $bot = $self->{bot};
+    my $now = time();
+    my $count = $bot->{_netsplit_quit_count} // 0;
+    $stream->write("--- Netsplit state ---\r\n");
+    # BB5: show time since last netsplit event if available
+    my $ns_ts = $bot->{_netsplit_last_ts} // 0;
+    my $ns_age_str = '';
+    if ($ns_ts > 0) {
+        my $ns_diff = time() - $ns_ts;
+        $ns_age_str = $ns_diff >= 3600
+            ? sprintf(' (last: %dh%02dm ago)', int($ns_diff/3600), int(($ns_diff%3600)/60))
+            : sprintf(' (last: %dm%02ds ago)', int($ns_diff/60), $ns_diff%60);
+    }
+    $stream->write("  Netsplit QUITs since last reconnect: $count$ns_age_str\r\n");
+    # Show antiflood state that was reset
+    my $af_chans = scalar keys %{ $bot->{_af} // {} };
+    my $cf_chans = scalar keys %{ $bot->{_chan_flood} // {} };
+    $stream->write("  AF1 channels in state: $af_chans\r\n");
+    $stream->write("  AF4 channels in state: $cf_chans\r\n");
+    # Channel nicklist freshness
+    $stream->write("\r\n--- Channel nicklist status ---\r\n");
+    for my $chan (sort keys %{ $bot->{channels} // {} }) {
+        my @nicks = eval { $bot->gethChannelsNicksOnChan($chan) };
+        $stream->write(sprintf("  %-22s %d nicks\r\n", $chan, scalar @nicks));
+    }
+}
+
+sub _cmd_floodstatus {
+    my ($self, $stream, $id, $args) = @_;
+    my $bot = $self->{bot};
+    my $now = time();
+
+    # AF1: checkAntiFlood in-memory state
+    # V8: show global AF state first
+    my $gaf = $bot->{_global_af} // {};
+    my $gaf_hits = scalar @{ $gaf->{hits} // [] };
+    my $gaf_sil  = ($gaf->{silenced_until} // 0) > time()
+        ? sprintf(" SILENCED %ds", $gaf->{silenced_until} - time()) : '';
+    $stream->write("--- Global AF (IMP7/IMP16) ---\r\n");
+    $stream->write(sprintf("  hits in window: %d%s\r\n", $gaf_hits, $gaf_sil));
+    $stream->write("--- Channel antiflood (AF1 — output guard) ---\r\n");
+    my $af = $bot->{_af} // {};
+    if (%$af) {
+        for my $chan (sort keys %$af) {
+            my $st = $af->{$chan};
+            my $sil = $st->{silenced_until} // 0;
+            my $status = ($sil && $now < $sil)
+                ? sprintf('SILENCED (%ds remaining)', $sil - $now)
+                : sprintf('%d msgs in window', $st->{nbmsg} // 0);
+            $stream->write(sprintf("  %-22s %s\r\n", $chan, $status));
+        }
+    } else {
+        $stream->write("  (no active output flood state)\r\n");
+    }
+
+    # AF4: checkChanFlood in-memory state
+    $stream->write("--- Channel flood (AF4 — input guard) ---\r\n");
+    my $cf = $bot->{_chan_flood} // {};
+    if (%$cf) {
+        for my $chan (sort keys %$cf) {
+            my $st = $cf->{$chan};
+            my $sil = $st->{silenced_until} // 0;
+            my $cnt = scalar @{ $st->{hits} // [] };
+            my $status = ($sil && $now < $sil)
+                ? sprintf('SILENCED (%ds remaining)', $sil - $now)
+                : sprintf('%d cmds in window', $cnt);
+            $stream->write(sprintf("  %-22s %s\r\n", $chan, $status));
+        }
+    } else {
+        $stream->write("  (no active input flood state)\r\n");
+    }
+
+    # CC3: temp-muted nicks
+    $stream->write("--- Temp mutes (CC3/AF7) ---\r\n");
+    my $mutes = $bot->{_nick_mute} // {};
+    my @active_mutes = sort grep { ($mutes->{$_} // 0) > $now } keys %$mutes;
+    if (@active_mutes) {
+        for my $nick (@active_mutes) {
+            $stream->write(sprintf("  %-20s muted (%ds remaining)\r\n",
+                $nick, $mutes->{$nick} - $now));
+        }
+    } else {
+        $stream->write("  (no active mutes)\r\n");
+    }
+
+    # AF3: per-nick flood state
+    $stream->write("--- Per-nick flood (AF3) ---\r\n");
+    my $nf = $bot->{_nick_flood} // {};
+    my @throttled = sort grep {
+        scalar @{ $nf->{$_}{hits} // [] } >= 3
+    } keys %$nf;
+    if (@throttled) {
+        for my $nick (@throttled) {
+            my $cnt = scalar @{ $nf->{$nick}{hits} // [] };
+            $stream->write(sprintf("  %-20s %d cmds in window\r\n", $nick, $cnt));
+        }
+    } else {
+        $stream->write("  (no active nick flood state)\r\n");
+    }
+}
+
+sub _cmd_flushcooldown {
+    my ($self, $stream, $id, $args) = @_;
+    my $bot = $self->{bot};
+    # Z6: support targeted nick+chan clear: .flushcooldown <nick> <#chan>
+    if (defined $args && $args =~ /^(\S+)\s+(#\S+)$/) {
+        my ($target, $chan) = (lc($1), $2);
+        my $cd_key = "$target:" . lc($chan);  # matches U6 format
+        if (exists $bot->{_karma_cooldown}{$chan}{$cd_key}) {
+            delete $bot->{_karma_cooldown}{$chan}{$cd_key};
+            $stream->write("Karma cooldown cleared for $target on $chan.\r\n");
+        } else {
+            $stream->write("No active cooldown for $target on $chan.\r\n");
+        }
+    } elsif (defined $args && $args =~ /^(#\S+)$/) {
+        delete $bot->{_karma_cooldown}{$1};
+        $stream->write("Karma cooldown cleared for $1.\r\n");
+    } else {
+        $bot->{_karma_cooldown} = {};
+        $stream->write("All karma cooldowns cleared.\r\n");
     }
 }
 
