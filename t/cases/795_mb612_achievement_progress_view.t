@@ -174,6 +174,8 @@ return sub {
     # seul etat du systeme qui ne se recalcule pas).
     my $pl_src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline.pm'
         or die $!; local $/; <$fh> };
+    $pl_src .= "\n" . do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline/Commands.pm'
+        or die $!; local $/; <$fh> };
     $assert->like($pl_src, qr/Achv:\s+%d profile\(s\), %d progress counter\(s\)/,
         'mb612-795: .status compte profils et compteurs');
     $assert->like($pl_src, qr/\(unsaved changes\)/,

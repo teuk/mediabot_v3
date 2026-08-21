@@ -122,7 +122,8 @@ return sub {
     # [2] Discipline non-bloquante
     # ------------------------------------------------------------------
     {
-        my $src = _slurp_762(File::Spec->catfile('Mediabot', 'Partyline.pm'));
+        my $src = _slurp_762(File::Spec->catfile('Mediabot', 'Partyline.pm'))
+            . "\n" . _slurp_762(File::Spec->catfile('Mediabot', 'Partyline', 'Commands.pm'));
         my ($block) = $src =~ /(# mb573-B1: operator observability.*?\n    \}\n)/s;
         $assert->ok(defined $block, 'bloc mb573 isole');
         $assert->unlike($block, qr/prepare|execute|ensure_connected|->dbh|selectrow/,

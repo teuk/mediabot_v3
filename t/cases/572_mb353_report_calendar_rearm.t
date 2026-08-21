@@ -196,7 +196,7 @@ like($main, qr/name\s*=>\s*'daily_channel_report'.*?next_run_cb\s*=>\s*sub\s*\{\
 like($main, qr/name\s*=>\s*'weekly_channel_report'.*?next_run_cb\s*=>\s*sub\s*\{\s*_next_weekly_epoch/s,
     'weekly report uses dynamic calendar re-arm');
 
-my $partyline = slurp('Mediabot/Partyline.pm');
+my $partyline = slurp('Mediabot/Partyline.pm') . "\n" . slurp('Mediabot/Partyline/Commands.pm');
 like($partyline, qr/my \$next = \$t->\{next_run\} \/\/ 0/,
     '.timers uses Scheduler exact next_run');
 like($partyline, qr/%04d-%02d-%02d %02d:%02d:%02d/,

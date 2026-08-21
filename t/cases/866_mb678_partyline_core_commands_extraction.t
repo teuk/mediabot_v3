@@ -50,10 +50,10 @@ return sub {
             "dispatcher still routes through historical $route surface");
     }
 
-    $assert->like($party, qr/^sub _cmd_timers \{/m,
-        'scheduler command family intentionally remains in Partyline for the next round');
-    $assert->unlike($cmds, qr/^sub _cmd_timers \{/m,
-        'IV-B does not broaden into scheduler command extraction');
+    $assert->unlike($party, qr/^sub _cmd_timers \{/m,
+        'scheduler command family may leave Partyline after IV-B');
+    $assert->like($cmds, qr/^sub _cmd_timers \{/m,
+        'Commands owns the scheduler command family after IV-C');
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');
     $assert->unlike($cmds, qr/^sub _do_login \{/m,

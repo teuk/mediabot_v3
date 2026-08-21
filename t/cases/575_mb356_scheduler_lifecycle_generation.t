@@ -162,7 +162,8 @@ like($scheduler_src, qr/return 0 if \$task->\{started\} && !\$self->stop\(\$name
 like($scheduler_src, qr/mb356-B1/,
     'Scheduler carries the mb356 marker');
 
-my $partyline_src = slurp('Mediabot/Partyline.pm');
+my $partyline_src = slurp('Mediabot/Partyline.pm')
+    . "\n" . slurp('Mediabot/Partyline/Commands.pm');
 like($partyline_src, qr/Scheduler action failed for '\$name'/,
     'Partyline reports actual scheduler failures');
 like($partyline_src, qr/is already running/,

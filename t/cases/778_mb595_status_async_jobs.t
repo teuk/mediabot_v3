@@ -70,6 +70,7 @@ return sub {
 
     # [3] .status : la section async, memoire seule
     my $pl_src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline.pm' or die $!; local $/; <$fh> };
+    $pl_src .= "\n" . do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline/Commands.pm' or die $!; local $/; <$fh> };
     my ($section) = $pl_src =~ /(# mb595-B1:.*?for my \$j \(\@\$jobs\) \{.*?\n\s*\}\n\s*\})/s;
     $assert->ok(defined $section, 'mb595-778: section Async presente dans .status');
     $assert->like($section // '', qr/async_jobs_snapshot/,

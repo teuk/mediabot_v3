@@ -31,6 +31,12 @@ our @EXPORT_OK = qw(
     _cmd_boot
     _cmd_whois
     _cmd_log
+    _cmd_timers
+    _format_duration
+    _seconds_to_human
+    _cmd_schedule
+    _cmd_status
+    _cmd_metrics
 );
 
 # ---------------------------------------------------------------------------
@@ -1417,5 +1423,472 @@ sub _cmd_log {
     $stream->write("--- end ---\r\n");
 }
 
+
+# =============================================================================
+# MB678-IV-C: scheduler / operational status commands
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# .timers  - list all registered scheduler tasks (Master+)
+# ---------------------------------------------------------------------------
+sub _cmd_timers {
+    my ($self, $stream, $id) = @_;
+    # V1: delegate to _cmd_schedule list — single source of truth with next_run
+    return $self->_cmd_schedule($stream, $id, 'list', undef);
+}
+
+sub _format_duration {
+    my ($self, $seconds) = @_;
+
+    $seconds = 0 unless defined $seconds && $seconds =~ /^\d+(?:\.\d+)?$/;
+    $seconds = int($seconds);
+
+    my $days = int($seconds / 86400);
+    $seconds %= 86400;
+
+    my $hours = int($seconds / 3600);
+    $seconds %= 3600;
+
+    my $minutes = int($seconds / 60);
+    my $secs    = $seconds % 60;
+
+    my @parts;
+    push @parts, "${days}d" if $days;
+    push @parts, "${hours}h" if $hours;
+    push @parts, "${minutes}m" if $minutes;
+    push @parts, "${secs}s" if $secs || !@parts;
+
+    return join(' ', @parts);
+}
+
+
+
+# ---------------------------------------------------------------------------
+# .schedule <start|stop> <name>  - control a Scheduler task at runtime
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# _seconds_to_human($secs) — format a duration as '3h 25m 12s' (SL1)
+# ---------------------------------------------------------------------------
+sub _seconds_to_human {
+    my ($secs) = @_;
+    $secs = int($secs // 0);
+    return '0s' unless $secs > 0;
+    my $d = int($secs / 86400); $secs %= 86400;
+    my $h = int($secs / 3600);  $secs %= 3600;
+    my $m = int($secs / 60);    $secs %= 60;
+    my $s = $secs;
+    return "${d}d ${h}h"  if $d;
+    return "${h}h ${m}m"  if $h;
+    return "${m}m ${s}s"  if $m;
+    return "${s}s";
+}
+
+sub _cmd_schedule {
+    my ($self, $stream, $id, $action, $name) = @_;
+    my $bot   = $self->{bot};
+    my $sched = $bot->{scheduler};
+
+    # mb356-B2: keep the control command explicitly restricted even though the
+    # current Partyline login gate already requires Master or Owner.
+    my $level = $self->{users}{$id}{level};
+    unless (defined($level) && $level <= 1) {
+        $stream->write("Access denied: .schedule requires Master or Owner level.\r\n");
+        return;
+    }
+
+    unless ($sched) {
+        $stream->write("Scheduler not available.\r\n");
+        return;
+    }
+
+    my $act = lc($action // 'list');
+
+    my $find_info = sub {
+        my ($wanted) = @_;
+        return undef unless defined($wanted) && $wanted ne '';
+
+        if ($sched->can('task_info')) {
+            return $sched->task_info($wanted);
+        }
+
+        for my $info ($sched->all_info) {
+            return $info if $info && ($info->{name} // '') eq $wanted;
+        }
+        return undef;
+    };
+
+    if ($act eq 'list' || !defined $action) {
+        my @infos = $sched->all_info;
+        unless (@infos) {
+            $stream->write("No scheduled tasks.\r\n");
+            return;
+        }
+
+        my $now = time();
+        $stream->write(sprintf("%-28s %-9s %-8s %-6s %s\r\n",
+            'Name', 'Interval', 'Status', 'Ticks', 'Next run'));
+        $stream->write(("-" x 70) . "\r\n");
+
+        for my $t (@infos) {
+            my $next_str;
+            if (!$t->{started}) {
+                $next_str = 'stopped';
+            }
+            else {
+                my $next = $t->{next_run} // 0;
+                if ($next > 0) {
+                    my $diff = $next - $now;
+                    if ($diff <= 0) {
+                        $next_str = 'imminent';
+                    }
+                    else {
+                        my @nt = localtime($next);
+                        $next_str = sprintf('%04d-%02d-%02d %02d:%02d:%02d (in %s)',
+                            $nt[5] + 1900, $nt[4] + 1, $nt[3],
+                            $nt[2], $nt[1], $nt[0], _seconds_to_human($diff));
+                    }
+                }
+                else {
+                    $next_str = 'soon';
+                }
+            }
+
+            my $iv = $t->{interval} // 0;
+            my $iv_str = $iv >= 3600 ? sprintf("%dh%02dm", int($iv/3600), int(($iv%3600)/60))
+                       : $iv >= 60   ? sprintf("%dm%02ds", int($iv/60), $iv%60)
+                       :               "${iv}s";
+            $stream->write(sprintf("%-28s %-9s %-8s %-6d %s\r\n",
+                $t->{name}, $iv_str,
+                ($t->{started} ? 'running' : 'stopped'),
+                $t->{ticks}, $next_str));
+        }
+        return;
+    }
+
+    if ($act eq 'status') {
+        my $info = $find_info->($name);
+        unless ($info) {
+            $stream->write("Usage: .schedule status <task_name>\r\n");
+            $stream->write("Tasks: " . join(', ', $sched->task_names) . "\r\n");
+            return;
+        }
+
+        my $last;
+        if ($info->{last_tick}) {
+            my @lt = localtime($info->{last_tick});
+            my $ago = time() - $info->{last_tick};
+            $last = sprintf("%02d:%02d:%02d (%s ago)",
+                $lt[2], $lt[1], $lt[0], _seconds_to_human($ago));
+        }
+        else {
+            $last = 'never';
+        }
+
+        $stream->write("Task:     $info->{name}\r\n");
+        $stream->write("Mode:     " . ($info->{mode} // 'periodic') . "\r\n");
+        $stream->write("Interval: $info->{interval}s\r\n");
+        $stream->write("Status:   " . ($info->{started} ? "running" : "stopped") . "\r\n");
+        $stream->write("Ticks:    $info->{ticks}\r\n");
+        $stream->write("Last run: $last\r\n");
+
+        my $next_run_s;
+        if (!$info->{started}) {
+            $next_run_s = 'n/a (stopped)';
+        }
+        else {
+            my $next = $info->{next_run} // 0;
+            if ($next > 0) {
+                my $diff = $next - time();
+                if ($diff <= 0) {
+                    $next_run_s = 'imminent';
+                }
+                else {
+                    my @nt = localtime($next);
+                    $next_run_s = sprintf('%04d-%02d-%02d %02d:%02d:%02d (in %s)',
+                        $nt[5] + 1900, $nt[4] + 1, $nt[3],
+                        $nt[2], $nt[1], $nt[0], _seconds_to_human($diff));
+                }
+            }
+            else {
+                $next_run_s = 'soon';
+            }
+        }
+        $stream->write("Next run: $next_run_s\r\n");
+        return;
+    }
+
+    unless (defined $name && $name ne '') {
+        $stream->write("Usage: .schedule <list|status|start|stop|restart> [task_name]\r\n");
+        return;
+    }
+
+    unless ($act eq 'start' || $act eq 'stop' || $act eq 'restart') {
+        $stream->write("Unknown action '$act'. Use: list status start stop restart\r\n");
+        return;
+    }
+
+    my $before = $find_info->($name);
+    unless ($before) {
+        $stream->write("Scheduler task '$name' not found.\r\n");
+        return;
+    }
+
+    if ($act eq 'start' && $before->{started}) {
+        $stream->write("Task '$name' is already running.\r\n");
+        return;
+    }
+
+    if ($act eq 'stop' && !$before->{started}) {
+        $stream->write("Task '$name' is already stopped.\r\n");
+        return;
+    }
+
+    my $ok = eval {
+        if ($act eq 'start') {
+            $sched->start($name);
+        }
+        elsif ($act eq 'stop') {
+            $sched->stop($name);
+        }
+        else {
+            $sched->restart($name);
+        }
+    };
+
+    if ($@ || !$ok) {
+        my $err = $@ || 'scheduler returned failure';
+        $err =~ s/\s+/ /g;
+        $bot->{logger}->log(1,
+            "Partyline .schedule $act $name failed: $err") if $bot->{logger};
+        $stream->write("Scheduler action failed for '$name' ($act).\r\n");
+        return;
+    }
+
+    my $verb = $act eq 'start' ? 'started'
+             : $act eq 'stop'  ? 'stopped'
+             :                   'restarted';
+    $bot->{logger}->log(2,
+        "Scheduler task '$name' $verb from Partyline") if $bot->{logger};
+    $stream->write("Task '$name' $verb.\r\n");
+    return;
+}
+
+
+# ---------------------------------------------------------------------------
+# .status  - display the runtime status payload in the partyline session
+# ---------------------------------------------------------------------------
+sub _cmd_status {
+    my ($self, $stream, $id) = @_;
+
+    my $payload = eval { $self->_runtime_status_payload };
+    if ($@) {
+        my $err = $@;
+        $self->_report_operation_error(
+            $stream,
+            'Partyline .status failed',
+            'Status unavailable.',
+            $err,
+        );
+        return;
+    }
+
+    my $sessions  = $payload->{sessions}  // [];
+    my $bot_info  = $payload->{bot}       // {};
+    my $ts        = $payload->{generated_at} // time();
+
+    $stream->write(sprintf("--- runtime status (generated %s) ---\r\n",
+        scalar localtime($ts)));
+    $stream->write(sprintf("Bot:      %s  uptime: %s\r\n",
+        $bot_info->{nick} // '?', $bot_info->{uptime} // '?'));
+    $stream->write(sprintf("Sessions: %d active\r\n", scalar @$sessions));
+    # mb552-B1 / mb553-B1: infrastructure health at a glance. Read the
+    # DB handle state maintained by the canonical five-second health tick;
+    # .status must never perform a synchronous ping/reconnect and become the
+    # very partyline stall it is supposed to diagnose.
+    {
+        my $bot_h = $self->{bot};
+        my $db_state = 'unknown';
+        if ($bot_h && $bot_h->{db} && eval { $bot_h->{db}->can('dbh') }) {
+            my $dbh = eval { $bot_h->{db}->dbh };
+            $db_state = $dbh ? 'up' : 'DOWN';
+        }
+        $stream->write("DB:       $db_state\r\n");
+        if ($bot_h && eval { $bot_h->can('last_loop_stall') }) {
+            my $stall = eval { $bot_h->last_loop_stall };
+            if (ref($stall) eq 'HASH' && $stall->{seconds}) {
+                $stream->write(sprintf("Loop:     last stall %.2fs at %s\r\n",
+                    $stall->{seconds}, scalar localtime($stall->{at} || 0)));
+            }
+            else {
+                $stream->write("Loop:     no stall detected\r\n");
+            }
+        }
+        # mb595-B1: jobs CommandAsync sous les yeux de l'operateur — memoire
+        # seule (snapshots), contrat mb573 : .status ne lance rien, ne tue
+        # rien, n'attend rien. Un job actif = un gros classement en fond ;
+        # les compteurs cumulés racontent la sante depuis le demarrage.
+        if ($bot_h && eval { require Mediabot::CommandAsync; 1 }) {
+            my $jobs = eval { Mediabot::CommandAsync::async_jobs_snapshot($bot_h) } || [];
+            my $st   = eval { Mediabot::CommandAsync::async_stats_snapshot($bot_h) } || {};
+            $stream->write(sprintf(
+                "Async:    %d running (since start: %d spawned, %d completed,"
+                . " %d timeout(s), %d sync fallback(s), %d lock refusal(s))\r\n",
+                scalar @$jobs,
+                $st->{spawned} // 0, $st->{completed} // 0,
+                $st->{timeouts} // 0, $st->{fallback_sync} // 0,
+                $st->{lock_refused} // 0));
+            for my $j (@$jobs) {
+                $stream->write(sprintf("  - [%s] %s pid=%d running %ss\r\n",
+                    $j->{label}, $j->{channel}, $j->{pid}, $j->{elapsed}));
+            }
+        }
+        # mb596-B1: sante du throttle partyline (memoire seule, meme contrat).
+        {
+            my $rs = $self->{_rate_stats} || {};
+            $stream->write(sprintf(
+                "Throttle: %d rate hit(s), %d silent drop(s), %d flood boot(s)\r\n",
+                $rs->{hits} // 0, $rs->{silent_drops} // 0,
+                $rs->{flood_boots} // 0));
+        }
+    }
+    # IMP24: add global AF status
+    my $bot_s = $self->{bot};
+    my $gaf = $bot_s->{_global_af} // {};
+    if (($gaf->{silenced_until} // 0) > time()) {
+        my $rem = $gaf->{silenced_until} - time();
+        $stream->write("GlobalAF: SILENCED for ${rem}s\r\n");
+    } else {
+        my $hits = scalar @{ $gaf->{hits} // [] };
+        $stream->write("GlobalAF: ok ($hits msgs in window)\r\n");
+    }
+    # mb573-B1: operator observability — the three queues/background jobs an
+    # operator actually wonders about. Everything below reads IN-MEMORY state
+    # only (same non-blocking discipline as the DB/Loop lines above: .status
+    # must never query anything).
+    {
+        my $outq = $bot_s->{_flood_outq} // {};
+        my @busy = sort grep { scalar @{ $outq->{$_}{items} // [] } } keys %$outq;
+        if (@busy) {
+            my $total = 0; $total += scalar @{ $outq->{$_}{items} } for @busy;
+            my $detail = join(', ', map {
+                sprintf('%s:%d%s', $_, scalar @{ $outq->{$_}{items} },
+                    $outq->{$_}{armed} ? '' : ' UNARMED')
+            } @busy);
+            $stream->write("FloodQ:   $total deferred ($detail)\r\n");
+        }
+        else {
+            $stream->write("FloodQ:   empty\r\n");
+        }
+
+        my $ach = $bot_s->{achievements};
+        if ($ach && eval { $ach->can('pending_check_count') }) {
+            my $pending = eval { $ach->pending_check_count } // 0;
+            $stream->write($pending
+                ? "AchvQ:    $pending pending check(s)\r\n"
+                : "AchvQ:    empty\r\n");
+            # mb612 / mb646: expose storage state through the module API.
+            # DB mode is write-through; JSON fallback can still have a dirty
+            # debounce window on legacy installations.
+            my $stats = eval { $ach->storage_stats } || {};
+            my $profiles = $stats->{profiles} // 0;
+            my $counters = $stats->{counters} // 0;
+            my $backend  = $stats->{backend}  // 'unknown';
+            my $pending_save = $stats->{dirty} ? ' (unsaved changes)' : '';
+            $stream->write(sprintf(
+                "Achv:     %d profile(s), %d progress counter(s) [%s]%s\r\n",
+                $profiles, $counters, $backend, $pending_save));
+        }
+
+        my $adb = eval { $bot_s->{conf}->get('mysql.CHANNEL_LOG_ARCHIVE_DBNAME') } // '';
+        $adb = '' if ref $adb;
+        if (!length $adb) {
+            $stream->write("Archive:  disabled\r\n");
+        }
+        # mb573-B2: a current worker is more important than the previous result.
+        # Once one run had completed, the old ordering hid every later in-flight
+        # worker behind "_archive_last_run".
+        elsif ($bot_s->{_channel_log_archive_pid}) {
+            $stream->write(
+                "Archive:  worker running (pid $bot_s->{_channel_log_archive_pid})\r\n");
+        }
+        elsif (my $last = $bot_s->{_archive_last_run}) {
+            $stream->write(sprintf("Archive:  last run %s exit=%d in %.2fs%s\r\n",
+                scalar localtime($last->{at} // 0), $last->{exit} // -1,
+                $last->{elapsed} // 0,
+                ($last->{signal} ? " signal=$last->{signal}" : '')));
+        }
+        else {
+            $stream->write("Archive:  enabled, no run yet\r\n");
+        }
+    }
+
+    for my $s (@$sessions) {
+        my $lvl_display = $s->{level_desc} || $s->{level} // '?';
+        my $con_display = defined($s->{console_level}) && $s->{console_level} ne '' && $s->{console_level} ne '0'
+            ? $s->{console_level} : 'off';
+        $stream->write(sprintf("  %-16s  fd=%-4s  level=%-10s  console=%s\r\n",
+            $s->{login}  // '?',
+            $s->{fd}     // '?',
+            $lvl_display,
+            $con_display));
+    }
+    # A5: joined channels summary
+    my $bot        = $self->{bot};
+    my $bot_nick_s = eval { $bot->{irc}->nick_folded } // '';
+    my $chans_s    = $bot->{channels} || {};
+    my @joined_s   = grep {
+        my @n = eval { $bot->gethChannelsNicksOnChan($_) };
+        grep { lc($_) eq lc($bot_nick_s) } @n;
+    } sort keys %$chans_s;
+    $stream->write(sprintf("Channels: %s\r\n",
+        @joined_s ? join(", ", @joined_s) : "(none)"));
+    $stream->write("--- end ---\r\n");
+}
+
+
+# ---------------------------------------------------------------------------
+# .metrics  - dump current Prometheus metrics to the partyline session
+# ---------------------------------------------------------------------------
+sub _cmd_metrics {
+    my ($self, $stream, $id) = @_;
+
+    my $metrics = $self->{bot}->{metrics};
+    unless ($metrics && $metrics->can('render_prometheus')) {
+        $stream->write("Metrics not available.\r\n");
+        return;
+    }
+
+    my $rendered = eval { $metrics->render_prometheus };
+    if ($@) {
+        my $err = $@;
+        $self->_report_operation_error(
+            $stream,
+            'Partyline .metrics failed',
+            'Metrics render error.',
+            $err,
+        );
+        return;
+    }
+
+    # IMP23: show only non-zero metrics, sorted, with category grouping
+    my %grouped;
+    for my $line (split /\n/, $rendered) {
+        next if $line =~ /^#/ || $line =~ /^\s*$/;
+        if ($line =~ /^(\w+?)(?:\{[^}]*\})?\s+([\d.e+\-]+)/) {
+            my ($metric, $val) = ($1, $2);
+            next if $val == 0;          # IMP23: skip zeroes
+            my ($cat) = $metric =~ /^([^_]+(?:_[^_]+)?)_/;
+            $cat //= 'other';
+            push @{ $grouped{$cat} }, $line;
+        }
+    }
+    $stream->write("--- Prometheus metrics (non-zero) ---\r\n");
+    for my $cat (sort keys %grouped) {
+        $stream->write("[$cat]\r\n");
+        $stream->write("  $_ \r\n") for @{ $grouped{$cat} };
+    }
+    $stream->write("--- end ---\r\n");
+}
 
 1;
