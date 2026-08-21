@@ -48,10 +48,10 @@ return sub {
     $assert->like($cmds, qr/^sub _seconds_to_human \{/m,
         'human duration helper travels with the operational commands');
 
-    $assert->like($party, qr/^sub _cmd_channels \{/m,
-        'channel/network command family intentionally remains in Partyline for IV-D');
-    $assert->unlike($cmds, qr/^sub _cmd_channels \{/m,
-        'IV-C does not broaden into channel/network commands');
+    $assert->unlike($party, qr/^sub _cmd_channels \{/m,
+        'channel/network command family may leave Partyline after IV-C');
+    $assert->like($cmds, qr/^sub _cmd_channels \{/m,
+        'Commands owns the channel/network family after IV-D');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');

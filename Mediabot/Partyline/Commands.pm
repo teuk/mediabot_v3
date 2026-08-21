@@ -37,6 +37,10 @@ our @EXPORT_OK = qw(
     _cmd_schedule
     _cmd_status
     _cmd_metrics
+    _cmd_channels
+    _cmd_bcast
+    _cmd_whochan
+    _cmd_top
 );
 
 # ---------------------------------------------------------------------------
@@ -1889,6 +1893,265 @@ sub _cmd_metrics {
         $stream->write("  $_ \r\n") for @{ $grouped{$cat} };
     }
     $stream->write("--- end ---\r\n");
+}
+
+# =============================================================================
+# MB678-IV-D: channel / network visibility commands
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# .channels  - list joined channels with nick count and owner
+# ---------------------------------------------------------------------------
+sub _cmd_channels {
+    my ($self, $stream, $id) = @_;
+
+    my $bot      = $self->{bot};
+    my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
+    my $chans    = $bot->{channels} || {};
+    my $dbh      = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+
+    my @names = sort keys %$chans;
+    unless (@names) {
+        $stream->write("No channels.\r\n");
+        return;
+    }
+
+    # Batch-fetch owners (level 500) for all channels
+    my %owners;
+    if ($dbh) {
+        my $sth_o = $dbh->prepare(
+            "SELECT uc.id_channel, u.nickname FROM USER u
+              JOIN USER_CHANNEL uc ON uc.id_user = u.id_user
+              WHERE uc.level = 500"
+        );
+        if ($sth_o && $sth_o->execute()) {
+            while (my $r = $sth_o->fetchrow_hashref) {
+                $owners{ $r->{id_channel} } //= $r->{nickname};
+            }
+            $sth_o->finish;
+        }
+    }
+
+    # AA3: also fetch Hailo flag and DB user count per channel
+    my (%hailo_flags, %db_users);
+    if ($dbh) {
+        my $sth_h = $dbh->prepare(
+            "SELECT c.name, cs.value FROM CHANNEL c
+              JOIN CHANNEL_SET cs ON cs.id_channel = c.id_channel
+              JOIN CHANSET_LIST cl ON cl.id_chanset_list = cs.id_chanset_list
+              WHERE cl.name = 'Hailo'"
+        );
+        if ($sth_h && $sth_h->execute()) {
+            while (my $r = $sth_h->fetchrow_hashref) {
+                $hailo_flags{$r->{name}} = $r->{value};
+            }
+            $sth_h->finish;
+        }
+        my $sth_u = $dbh->prepare(
+            "SELECT c.name, COUNT(*) AS cnt FROM USER_CHANNEL uc
+              JOIN CHANNEL c ON c.id_channel = uc.id_channel
+              GROUP BY uc.id_channel"
+        );
+        if ($sth_u && $sth_u->execute()) {
+            while (my $r = $sth_u->fetchrow_hashref) {
+                $db_users{$r->{name}} = $r->{cnt};
+            }
+            $sth_u->finish;
+        }
+    }
+
+    $stream->write(sprintf("%-22s %-8s %-5s %-5s %-6s %s\r\n",
+        'Channel', 'Status', 'IRC', 'DB', 'Hailo', 'Owner'));
+    $stream->write("-" x 70 . "\r\n");
+
+    for my $name (@names) {
+        my $chan_obj   = $chans->{$name} or next;
+        my $id_channel = eval { $chan_obj->get_id } // 0;
+
+        my @nicks      = eval { $bot->gethChannelsNicksOnChan($name) };
+        my $joined     = (grep { lc($_) eq lc($bot_nick) } @nicks) ? 'joined' : 'parted';
+        my $nick_count = scalar @nicks;
+        my $owner      = $owners{$id_channel} // 'none';
+        my $hailo      = exists $hailo_flags{$name} ? ($hailo_flags{$name} ? 'on' : 'off') : '-';
+        my $db_cnt     = $db_users{$name} // 0;
+
+        $stream->write(sprintf("%-22s %-8s %-5d %-5d %-6s %s\r\n",
+            $name, $joined, $nick_count, $db_cnt, $hailo, $owner));
+    }
+}
+
+
+# ---------------------------------------------------------------------------
+# .bcast <message>  - broadcast a message to all joined channels (Master+)
+# ---------------------------------------------------------------------------
+sub _cmd_bcast {
+    my ($self, $stream, $id, $msg) = @_;
+
+    my $bot      = $self->{bot};
+    my $session  = $self->{users}{$id} // {};  # B1/fix: auth data in users{}, not sessions{}
+    my $level    = $session->{level} // 99;
+
+    unless (defined $level && $level <= 1) {  # Owner=0, Master=1 (inverted scale)
+        $stream->write("Permission denied (Master+ required).\r\n");
+        return;
+    }
+
+    unless (defined $msg && $msg =~ /\S/) {
+        $stream->write("Usage: .bcast <message>\r\n");
+        return;
+    }
+
+    my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
+    my $chans    = $bot->{channels} || {};
+    my $sent     = 0;
+
+    for my $name (sort keys %$chans) {
+        my @nicks = eval { $bot->gethChannelsNicksOnChan($name) };
+        next unless grep { lc($_) eq lc($bot_nick) } @nicks;
+        Mediabot::Helpers::botPrivmsg($bot, $name, "[broadcast] $msg");
+        $sent++;
+    }
+
+    $stream->write("Broadcast sent to $sent channel(s).\r\n");
+    $bot->{logger}->log(2, "Partyline: bcast from $session->{login}: $msg");
+}
+
+
+# ---------------------------------------------------------------------------
+# .who <nick>  - show which joined channels a nick is present on
+# ---------------------------------------------------------------------------
+sub _cmd_whochan {
+    my ($self, $stream, $id, $target) = @_;
+
+    my $bot      = $self->{bot};
+    my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
+
+    unless (defined $target && $target =~ /\S/) {
+        $stream->write("Usage: .who <nick>\r\n");
+        return;
+    }
+
+    my $chans   = $bot->{channels} || {};
+    my @found;
+
+    for my $name (sort keys %$chans) {
+        my @nicks = eval { $bot->gethChannelsNicksOnChan($name) };
+        next unless grep { lc($_) eq lc($bot_nick) } @nicks;  # only joined
+        if (grep { lc($_) eq lc($target) } @nicks) {
+            push @found, $name;
+        }
+    }
+
+    if (@found) {
+        $stream->write("$target is on: " . join(', ', @found) . "\r\n");
+    } else {
+        $stream->write("$target not found on any joined channel.\r\n");
+    }
+}
+
+
+# ---------------------------------------------------------------------------
+# .top [#chan] [n]  - top n nicks on a channel (default current/first, 5)
+# ---------------------------------------------------------------------------
+sub _cmd_top {
+    # Safe Partyline top:
+    #   .top              -> usage only, no implicit full scan
+    #   .top #chan [n]   -> top N on explicit channel
+    #   .top all [n]     -> explicit all-channel aggregate
+    my ($self, $stream, $id, $args) = @_;
+
+    my $bot = $self->{bot};
+    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+    unless ($dbh) {
+        $stream->write("DB unavailable.\r\n");
+        return;
+    }
+
+    if (!defined($args) || $args !~ /\S/) {
+        $stream->write("Usage: .top <#chan> [n] or .top all [n] (default n=5, max=15)\r\n");
+        $stream->write("Example: .top #teuk 10\r\n");
+        return;
+    }
+
+    my $all_chans = ($args =~ /\ball\b/i) ? 1 : 0;
+    my ($chan) = ($args =~ /(#\S+)/i);
+
+    # mb122-B2: avant ce fix, ($args =~ /(\d+)/) matchait le PREMIER chiffre
+    # rencontre, donc `.top #chan42 10` produisait n=42 (clampe a 15).
+    # On retire d'abord le nom du canal et le mot "all" pour ne considerer
+    # que les arguments numeriques restants.
+    my $args_for_n = $args;
+    $args_for_n =~ s/#\S+//g;
+    $args_for_n =~ s/\ball\b//gi;
+    # mb124-B4: only accept standalone numeric tokens as n.
+    # Avoid treating arbitrary words such as foo10bar as a valid limit.
+    my ($n) = ($args_for_n =~ /(?:^|\s)(\d+)(?=\s|$)/);
+    $n //= 5;
+    $n = 5  if !$n || $n < 1;
+    $n = 15 if $n > 15;
+
+    unless ($all_chans || (defined($chan) && $chan =~ /^#/)) {
+        $stream->write("Usage: .top <#chan> [n] or .top all [n] (default n=5, max=15)\r\n");
+        $stream->write("Example: .top #teuk 10\r\n");
+        return;
+    }
+
+    my ($sth, $label);
+    if ($all_chans) {
+        $sth = $dbh->prepare(
+            "SELECT cl.nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl"
+            . " GROUP BY cl.nick ORDER BY cnt DESC LIMIT ?"
+        );
+        unless ($sth && $sth->execute($n)) {
+            $stream->write("DB error.\r\n");
+            $sth->finish if $sth;
+            return;
+        }
+        $label = "Top $n speakers (all channels)";
+    }
+    else {
+        $sth = $dbh->prepare(
+            "SELECT cl.nick, COUNT(*) AS cnt FROM CHANNEL_LOG cl"
+            . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
+            . " WHERE c.name = ? GROUP BY cl.nick ORDER BY cnt DESC LIMIT ?"
+        );
+        unless ($sth && $sth->execute($chan, $n)) {
+            $stream->write("DB error.\r\n");
+            $sth->finish if $sth;
+            return;
+        }
+        $label = "Top $n on $chan";
+    }
+
+    my $total_pl = 0;
+    my $sth_t = $all_chans
+        ? $dbh->prepare('SELECT COUNT(*) AS t FROM CHANNEL_LOG')
+        : $dbh->prepare('SELECT COUNT(*) AS t FROM CHANNEL_LOG cl'
+                      . ' JOIN CHANNEL c ON c.id_channel = cl.id_channel'
+                      . ' WHERE c.name = ?');
+
+    if ($sth_t) {
+        my $ok = $all_chans ? $sth_t->execute : $sth_t->execute($chan);
+        if ($ok) {
+            my $r = $sth_t->fetchrow_hashref;
+            $total_pl = $r->{t} // 0;
+        }
+        $sth_t->finish;
+    }
+
+    $stream->write("$label:\r\n");
+
+    my $rank = 1;
+    while (my $row = $sth->fetchrow_hashref) {
+        my $pct = ($total_pl && $total_pl > 0)
+            ? sprintf(' (%.1f%%)', 100 * $row->{cnt} / $total_pl)
+            : '';
+
+        $stream->write(sprintf("  %2d. %-20s %d msgs%s\r\n",
+            $rank++, $row->{nick}, $row->{cnt}, $pct));
+    }
+
+    $sth->finish;
 }
 
 1;
