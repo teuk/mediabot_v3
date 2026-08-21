@@ -61,6 +61,11 @@ our @EXPORT_OK = qw(
     _cmd_ai
     _cmd_persona
     _cmd_quota
+    _cmd_ping
+    _cmd_uptime
+    _cmd_dccstat
+    _cmd_stat
+    _cmd_dbstats
 );
 
 # ---------------------------------------------------------------------------
@@ -3324,6 +3329,330 @@ sub _cmd_quota {
     else {
         $stream->write("No active rate limit for '$target'.\r\n");
     }
+}
+
+
+# =============================================================================
+# MB678-IV-K: runtime diagnostics and status commands
+# =============================================================================
+
+sub _cmd_ping {
+    my ($self, $stream, $id) = @_;
+    my ($sec, $min, $hour) = localtime(time);
+    $stream->write(sprintf("PONG %02d:%02d:%02d\r\n", $hour, $min, $sec));
+}
+
+sub _cmd_uptime {
+    my ($self, $stream, $id) = @_;
+
+    my $bot = $self->{bot};
+    my $now = time();
+
+    my $bot_start = Mediabot::Helpers::getProcessStartTimestamp($bot, $now);
+
+    my $bot_uptime = $now - $bot_start;
+    $bot_uptime = 0 if $bot_uptime < 0;
+
+    my $server_uptime = undef;
+    if (open my $fh, '<', '/proc/uptime') {
+        my $line = <$fh>;
+        close $fh;
+
+        if (defined $line && $line =~ /^(\d+(?:\.\d+)?)/) {
+            $server_uptime = int($1);
+        }
+    }
+
+    my $bot_name = eval { $bot->{conf}->get('main.MAIN_PROG_NAME') } || 'Mediabot';
+    my $version  = $bot->{main_prog_version} // '';
+
+    $stream->write("Uptime:\r\n");
+    $stream->write("  Bot     : " . $self->_format_duration($bot_uptime) . "\r\n");
+    $stream->write("  Process : pid $$\r\n");
+    $stream->write("  Name    : $bot_name" . ($version ne '' ? " v$version" : "") . "\r\n");
+
+    if (defined $server_uptime) {
+        $stream->write("  Server  : " . $self->_format_duration($server_uptime) . "\r\n");
+    }
+    else {
+        $stream->write("  Server  : unavailable\r\n");
+    }
+
+    # J1: Claude stats in .uptime output
+    my $claude_reqs   = eval { $bot->{metrics}->get('mediabot_claude_requests_total') } // 0;
+    my $claude_errs   = eval { $bot->{metrics}->get('mediabot_claude_errors_total') } // 0;
+    my $claude_rl     = eval { $bot->{metrics}->get('mediabot_claude_ratelimit_total') } // 0;
+    my $persona_count = scalar keys %{ $bot->{_claude_persona} // {} };
+    my $hist_count    = scalar keys %{ $bot->{_claude_history}  // {} };
+    $stream->write("Claude AI:\r\n");
+    $stream->write("  Requests : $claude_reqs (errors: $claude_errs, ratelimited: $claude_rl)\r\n");
+    $stream->write("  Personas : $persona_count active\r\n");
+    $stream->write("  History  : $hist_count active session(s)\r\n");
+}
+
+sub _cmd_dccstat {
+    my ($self, $stream, $id) = @_;
+
+    my $bot = $self->{bot};
+
+    my $public_ip = eval { $self->_resolve_dcc_public_ip($bot) } || '(not configured)';
+
+    # Use shared helpers to avoid duplicating config key lookup logic.
+    my $dcc_port  = eval { $self->_dcc_listen_port($bot) } // 0;
+    my $port_mode = $dcc_port > 0
+        ? "configured port $dcc_port (from DCC_PORT_MIN/MAX range)"
+        : 'OS ephemeral port';
+
+    my $offers = eval { $self->_dcc_offers_snapshot } || [];
+
+    my @dcc_sessions;
+    my @telnet_sessions;
+
+    for my $fid (sort { $a <=> $b } keys %{ $self->{users} || {} }) {
+        my $u = $self->{users}{$fid} || next;
+        next unless $u->{authenticated};
+
+        my $entry = {
+            fd         => $fid,
+            login      => $u->{login}      || '?',
+            level_desc => $u->{level_desc} || '?',
+            peer_host  => $u->{peer_host}  || 'unknown',
+            peer_ip    => $u->{peer_ip}    || '',
+            console    => defined $u->{console_level} ? $u->{console_level} : 'off',
+        };
+
+        if ($u->{is_dcc}) {
+            push @dcc_sessions, $entry;
+        }
+        else {
+            push @telnet_sessions, $entry;
+        }
+    }
+
+    $stream->write("DCC Partyline status:\r\n");
+    $stream->write("  Public IP      : $public_ip\r\n");
+    $stream->write("  Port mode      : $port_mode\r\n");
+    $stream->write("  Pending offers : " . scalar(@$offers) . "\r\n");
+    $stream->write("  DCC sessions   : " . scalar(@dcc_sessions) . "\r\n");
+    $stream->write("  Telnet sessions: " . scalar(@telnet_sessions) . "\r\n");
+    $stream->write("\r\n");
+
+    if (@$offers) {
+        $stream->write("Pending DCC offers:\r\n");
+        $stream->write(sprintf("  %-12s %-14s %-16s %-8s %-6s\r\n",
+            "Type", "Nick", "Public IP", "Port", "Age"));
+        $stream->write("  " . ("-" x 64) . "\r\n");
+
+        my $now = time;
+        for my $o (@$offers) {
+            my $age = $now - ($o->{created_at} || $now);
+            # Z4: human-readable age for DCC offers
+            my $age_h = $age >= 60
+                ? sprintf('%dm %ds', int($age/60), $age%60)
+                : "${age}s";
+            $stream->write(sprintf("  %-12s %-14s %-16s %-8s %s\r\n",
+                $o->{type}      || '?',
+                $o->{nick}      || '?',
+                $o->{public_ip} || '?',
+                $o->{port}      || '?',
+                $age_h
+            ));
+        }
+
+        $stream->write("\r\n");
+    }
+    else {
+        $stream->write("No pending DCC offers.\r\n\r\n");
+    }
+
+    if (@dcc_sessions) {
+        $stream->write("Active DCC sessions:\r\n");
+        $stream->write(sprintf("  %-14s %-14s %-6s %-20s %-10s\r\n",
+            "Nick", "Level", "FD", "Peer", "Console"));
+        $stream->write("  " . ("-" x 76) . "\r\n");
+
+        for my $u (@dcc_sessions) {
+            $stream->write(sprintf("  %-14s %-14s fd=%-3s %-20s console:%s\r\n",
+                $u->{login},
+                $u->{level_desc},
+                $u->{fd},
+                $u->{peer_host},
+                $u->{console}
+            ));
+        }
+
+        $stream->write("\r\n");
+    }
+    else {
+        $stream->write("No active DCC sessions.\r\n\r\n");
+    }
+
+    if (@telnet_sessions) {
+        $stream->write("Active telnet sessions:\r\n");
+        $stream->write(sprintf("  %-14s %-14s %-6s %-20s %-10s\r\n",
+            "Nick", "Level", "FD", "Peer", "Console"));
+        $stream->write("  " . ("-" x 76) . "\r\n");
+
+        for my $u (@telnet_sessions) {
+            $stream->write(sprintf("  %-14s %-14s fd=%-3s %-20s console:%s\r\n",
+                $u->{login},
+                $u->{level_desc},
+                $u->{fd},
+                $u->{peer_host},
+                $u->{console}
+            ));
+        }
+
+        $stream->write("\r\n");
+    }
+}
+
+sub _cmd_stat {
+    my ($self, $stream, $id) = @_;
+
+    my $bot = $self->{bot};
+    my $irc = $bot->{irc};
+    my $dbh = $bot->{dbh};
+
+    unless ($irc && $irc->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    my $bot_nick = $irc->nick_folded // '';
+
+    # Header
+    $stream->write(sprintf("%-30s %-12s %-5s %-20s %s\r\n",
+        "Channel", "Status", "Nicks", "Owner", "Chansets"));
+    $stream->write(("-" x 90) . "\r\n");
+
+    my $channels = $bot->{channels};
+    unless ($channels && ref($channels) eq 'HASH' && %$channels) {
+        $stream->write("No channels known (bot not yet joined any channel).\r\n");
+        return;
+    }
+
+    # Batch-fetch owners and chansets in two queries instead of N×2.
+    # Results cached for 60 seconds to avoid hammering the DB on repeated .stat.
+    my $stat_cache_key = '_stat_cache';
+    my $stat_cache     = $self->{$stat_cache_key};
+    my %owners;
+    my %chansets;
+
+    if (!$stat_cache || (time() - ($stat_cache->{at} // 0)) > 60) {
+        # Owners: one query for all channels
+        my $sth_o = $dbh->prepare(
+            "SELECT uc.id_channel, u.nickname FROM USER u
+              JOIN USER_CHANNEL uc ON uc.id_user = u.id_user
+              WHERE uc.level = 500"
+        );
+        if ($sth_o && $sth_o->execute()) {
+            while (my $r = $sth_o->fetchrow_hashref) {
+                $owners{ $r->{id_channel} } //= $r->{nickname};
+            }
+            $sth_o->finish;
+        }
+
+        # Chansets: one query for all channels
+        my $sth_c = $dbh->prepare(
+            "SELECT cs.id_channel, cl.chanset FROM CHANSET_LIST cl
+              JOIN CHANNEL_SET cs ON cs.id_chanset_list = cl.id_chanset_list
+              ORDER BY cs.id_channel, cl.chanset"
+        );
+        if ($sth_c && $sth_c->execute()) {
+            while (my $r = $sth_c->fetchrow_hashref) {
+                $chansets{ $r->{id_channel} } //= '';
+                $chansets{ $r->{id_channel} } .= '+' . $r->{chanset} . ' ';
+            }
+            $sth_c->finish;
+        }
+
+        $self->{$stat_cache_key} = { at => time(), owners => \%owners, chansets => \%chansets };
+    } else {
+        %owners   = %{ $stat_cache->{owners}   // {} };
+        %chansets = %{ $stat_cache->{chansets} // {} };
+    }
+
+    foreach my $chan_name (sort keys %$channels) {
+        my $chan_obj   = $bot->{channels}{lc $chan_name};
+        my $id_channel = eval { $chan_obj->get_id } // 0;
+
+        my @nicks      = $bot->gethChannelsNicksOnChan($chan_name);
+        my $joined     = grep { lc($_) eq lc($bot_nick) } @nicks;
+        my $nick_count = scalar @nicks;
+        my $status     = $joined ? "joined" : "NOT joined";
+
+        my $owner    = $owners{$id_channel}   // 'none';
+        my $chanset_str = $chansets{$id_channel} // 'none';
+        $chanset_str =~ s/\s+$//;
+
+        $stream->write(sprintf("%-30s %-12s %-5d %-20s %s\r\n",
+            $chan_name, $status, $nick_count, $owner, $chanset_str));
+    }
+
+    # EE3: bottom section — uptime, Claude sessions, memory, AF state
+    $stream->write(("=" x 90) . "\r\n");
+    my $started  = $bot->{metrics} ? ($bot->{metrics}{started} // time()) : time();
+    my $uptime   = time() - $started;
+    my $ud = int($uptime/86400); my $uh = int(($uptime%86400)/3600);
+    my $um = int(($uptime%3600)/60);  my $us = $uptime%60;
+    $stream->write(sprintf("Uptime: %dd %02dh%02dm%02ds\r\n", $ud,$uh,$um,$us));
+
+    my $claude_sessions = scalar keys %{ $bot->{_claude_history} // {} };
+    my $ai_cache        = scalar keys %{ $bot->{_claude_prompt_cache} // {} };
+    $stream->write("Claude: $claude_sessions active session(s), $ai_cache cached prompt(s)\r\n");
+
+    # IMP18/mb115: IRC command totals from real Prometheus counters.
+    # Use public + private command counters; there is no aggregate IRC counter.
+    if ($bot->{metrics}) {
+        my $cmds_pub  = eval { $bot->{metrics}->get('mediabot_commands_public_total') } // 0;
+        my $cmds_priv = eval { $bot->{metrics}->get('mediabot_commands_private_total') } // 0;
+        my $cmds_pl   = eval { $bot->{metrics}->get('mediabot_commands_partyline_total') } // 0;
+        my $msgs_out  = eval { $bot->{metrics}->get('mediabot_privmsg_out_total') } // 0;
+        $stream->write("Commands: ${cmds_pub} IRC public, ${cmds_priv} IRC private, ${cmds_pl} partyline\r\n");
+        $stream->write("Messages: ${msgs_out} PRIVMSG sent\r\n");
+    }
+
+    my $mutes   = scalar grep { ($bot->{_nick_mute}{$_} // 0) > time() }
+                        keys %{ $bot->{_nick_mute} // {} };
+    my $sil_af  = scalar grep { ($_->{silenced_until} // 0) > time() }
+                        values %{ $bot->{_af} // {} };
+    my $sil_cf  = scalar grep { ($_->{silenced_until} // 0) > time() }
+                        values %{ $bot->{_chan_flood} // {} };
+    $stream->write("Flood: $sil_af chan(s) AF-silenced, $sil_cf chan(s) CF-silenced, "
+                 . "$mutes nick(s) muted\r\n");
+
+    if (eval { require Scalar::Util::Numeric; 1 } || 1) {
+        my $mem = 0;
+        if (open my $fh, '<', '/proc/self/status') {
+            while (<$fh>) { if (/^VmRSS:\s+(\d+)/) { $mem = int($1/1024); last; } }
+            close $fh;
+        }
+        $stream->write("Memory: ${mem} MB RSS\r\n") if $mem;
+    }
+}
+
+sub _cmd_dbstats {
+    my ($self, $stream, $id) = @_;
+    my $bot = $self->{bot};
+    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
+    unless ($dbh) { $stream->write("DB not connected.\r\n"); return; }
+    my %stats;
+    for my $like ('Questions', 'Slow_queries', 'Threads_connected') {
+        my $sth = eval { $dbh->prepare("SHOW STATUS LIKE '$like'") };
+        if ($sth && $sth->execute()) {
+            while (my $r = $sth->fetchrow_arrayref) { $stats{$r->[0]} = $r->[1]; }
+            $sth->finish;
+        }
+    }
+    my $db_name = eval { ($dbh->selectrow_array('SELECT DATABASE()'))[0] } // '?';
+    $stream->write("DB stats ($db_name):\r\n");
+    $stream->write(sprintf("  Threads : %s | Questions : %s | Slow : %s\r\n",
+        $stats{Threads_connected}//'N/A', $stats{Questions}//'N/A', $stats{Slow_queries}//'N/A'));
+    my $reqs = eval { $bot->{metrics}->get('mediabot_claude_requests_total') } // 0;
+    my $yts  = eval { $bot->{metrics}->get('mediabot_ytsearch_requests_total') } // 0;
+    my $kh   = eval { $bot->{metrics}->get('mediabot_karmahist_requests_total') } // 0;
+    $stream->write("Bot: Claude=$reqs YTsearch=$yts KarmaHist=$kh\r\n");
 }
 
 

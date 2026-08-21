@@ -120,13 +120,14 @@ return sub {
     my $channel_file = File::Spec->catfile($root, 'Mediabot', 'ChannelCommands.pm');
     my $context_file = File::Spec->catfile($root, 'Mediabot', 'Context.pm');
     my $party_file   = File::Spec->catfile($root, 'Mediabot', 'Partyline.pm');
+    my $party_cmds   = File::Spec->catfile($root, 'Mediabot', 'Partyline', 'Commands.pm');
 
     my $helpers = _slurp_mb391($helpers_file);
     my $main    = _slurp_mb391($main_file);
     my $admin   = _slurp_mb391($admin_file);
     my $channel = _slurp_mb391($channel_file);
     my $context = _slurp_mb391($context_file);
-    my $party   = _slurp_mb391($party_file);
+    my $party   = _slurp_mb391($party_file) . "\n" . _slurp_mb391($party_cmds);
 
     my $version = _extract_sub_mb391($helpers, 'versionCheck');
     my $queue   = _extract_sub_mb391($helpers, 'queueBotNotices');

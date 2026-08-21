@@ -71,10 +71,10 @@ return sub {
     $assert->like($cmds, qr/anthropic\.RATE_WINDOW/,
         '.quota keeps configured rate window');
 
-    $assert->like($party, qr/^sub _cmd_ping \{/m,
-        'ping/uptime family remains in Partyline after IV-J');
-    $assert->unlike($cmds, qr/^sub _cmd_ping \{/m,
-        'IV-J does not broaden into ping/uptime');
+    $assert->like($party, qr/^sub _cmd_bans \{/m,
+        'moderation family remains in Partyline after IV-K');
+    $assert->unlike($cmds, qr/^sub _cmd_bans \{/m,
+        'IV-J and IV-K do not broaden into moderation');
 
     $assert->like($party, qr/^sub _cmd_eval \{/m,
         '.eval remains in Partyline after IV-J');

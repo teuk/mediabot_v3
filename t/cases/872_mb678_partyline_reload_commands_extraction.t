@@ -58,10 +58,10 @@ return sub {
     $assert->like($cmds, qr/Reload failed\./,
         '.reload keeps its sealed client failure response');
 
-    $assert->like($party, qr/^sub _cmd_ping \{/m,
-        'ping/uptime family remains in Partyline after later extractions');
-    $assert->unlike($cmds, qr/^sub _cmd_ping \{/m,
-        'reload and later command extractions do not broaden into ping/uptime');
+    $assert->like($party, qr/^sub _cmd_bans \{/m,
+        'moderation family remains in Partyline after later extractions');
+    $assert->unlike($cmds, qr/^sub _cmd_bans \{/m,
+        'reload and later command extractions do not broaden into moderation');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');
