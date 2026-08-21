@@ -121,6 +121,8 @@ use Mediabot::Partyline::Commands qw(
     _cmd_remind
     _cmd_seen
     _cmd_purgereminders
+    _cmd_karma
+    _cmd_karmahist
 );
 
 
@@ -286,105 +288,8 @@ sub _write_runtime_status {
 # MB678-IV-B: core operator/session commands moved to Mediabot::Partyline::Commands.
 
 # MB678-IV-E: reminder / seen commands moved to Mediabot::Partyline::Commands.
+# MB678-IV-F: karma visibility commands moved to Mediabot::Partyline::Commands.
 
-# ---------------------------------------------------------------------------
-# .karma <nick> [#chan]  - show karma from partyline
-# ---------------------------------------------------------------------------
-sub _cmd_karma {
-    my ($self, $stream, $id, $args) = @_;
-
-    my $bot = $self->{bot};
-    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
-
-    unless ($dbh) {
-        $stream->write("DB error.\r\n");
-        return;
-    }
-
-    my ($target, $chan) = split /\s+/, ($args // ''), 2;
-    unless ($target) {
-        $stream->write("Usage: .karma <nick> [#channel]\r\n");
-        return;
-    }
-
-    my $target_lc = lc($target);
-
-    # Explicit channel: keep old useful behavior and show zero if no row exists.
-    if (defined $chan && $chan =~ /^#/) {
-        my $sth_c = $dbh->prepare(
-            'SELECT id_channel, name FROM CHANNEL WHERE LOWER(name) = LOWER(?)'
-        );
-
-        unless ($sth_c && $sth_c->execute($chan)) {
-            $stream->write("DB error.\r\n");
-            $sth_c->finish if $sth_c;
-            return;
-        }
-
-        my $c = $sth_c->fetchrow_hashref;
-        $sth_c->finish;
-
-        unless ($c && $c->{id_channel}) {
-            $stream->write("Channel $chan not found.\r\n");
-            return;
-        }
-
-        my $sth = $dbh->prepare(
-            'SELECT score FROM KARMA WHERE id_channel = ? AND nick = ?'
-        );
-
-        unless ($sth && $sth->execute($c->{id_channel}, $target_lc)) {
-            $stream->write("DB error.\r\n");
-            $sth->finish if $sth;
-            return;
-        }
-
-        my $row = $sth->fetchrow_hashref;
-        $sth->finish;
-
-        my $score = $row ? ($row->{score} // 0) : 0;
-        my $sign  = $score > 0 ? '+' : '';
-
-        $stream->write("$target on $c->{name}: karma ${sign}${score}\r\n");
-        return;
-    }
-
-    # No explicit channel: show only non-zero karma across all channels.
-    # This avoids the old misleading behavior: first joined channel, often 0.
-    my $sth = $dbh->prepare(q{
-        SELECT c.name AS channel, k.score AS score
-        FROM KARMA k
-        JOIN CHANNEL c ON c.id_channel = k.id_channel
-        WHERE LOWER(k.nick) = ?
-          AND k.score <> 0
-        ORDER BY ABS(k.score) DESC, k.score DESC, c.name ASC
-    });
-
-    unless ($sth && $sth->execute($target_lc)) {
-        $stream->write("DB error.\r\n");
-        $sth->finish if $sth;
-        return;
-    }
-
-    my @rows;
-    while (my $r = $sth->fetchrow_hashref) {
-        push @rows, $r;
-    }
-    $sth->finish;
-
-    unless (@rows) {
-        $stream->write("$target has no karma on any channel.\r\n");
-        return;
-    }
-
-    $stream->write("Karma for $target:\r\n");
-    for my $r (@rows) {
-        my $score = $r->{score} // 0;
-        my $sign  = $score > 0 ? '+' : '';
-        $stream->write(sprintf("  %-25s %s%d\r\n",
-            $r->{channel} // '?', $sign, $score));
-    }
-}
 
 # mb368-B1: one checked path for both Partyline configuration reload commands.
 # Mediabot::Conf exposes reload(), not the historical/non-existent load().
@@ -882,52 +787,6 @@ sub _cmd_ai {
             'AI request failed.',
             $err,
         );
-    }
-}
-
-
-
-# ---------------------------------------------------------------------------
-# .karmahist [nick]  — show karma history from Partyline (K5)
-# ---------------------------------------------------------------------------
-sub _cmd_karmahist {
-    my ($self, $stream, $id, $args) = @_;
-    my $bot    = $self->{bot};
-    my $filter = (defined $args && $args =~ /\S/) ? lc($args) : undef;
-    $filter =~ s/^\s+|\s+$//g if $filter;
-
-    # Resolve first active channel
-    my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
-    my $chan;
-    for my $name (sort keys %{ $bot->{channels} || {} }) {
-        my @n = eval { $bot->gethChannelsNicksOnChan($name) };
-        if (grep { lc($_) eq lc($bot_nick) } @n) { $chan = $name; last; }
-    }
-    unless ($chan) {
-        $stream->write("Not on any channel.\r\n"); return;
-    }
-
-    my $klog = $bot->{_karma_log}{$chan} // [];
-    unless (@$klog) {
-        $stream->write("No karma history for $chan.\r\n"); return;
-    }
-
-    my @entries = reverse @$klog;
-    if ($filter) {
-        @entries = grep { lc($_->{nick}) eq $filter } @entries;
-        unless (@entries) {
-            $stream->write("No karma history for '$filter' on $chan.\r\n"); return;
-        }
-    }
-    @entries = @entries[0..9] if @entries > 10;  # max 10 in PL
-
-    my $label = $filter ? "Karma history for $filter" : "Recent karma changes";
-    $stream->write("$label on $chan:\r\n");
-    for my $e (@entries) {
-        my $sign = $e->{score} > 0 ? '+' : '';
-        my $ago  = Mediabot::UserCommands::_seconds_to_human(time() - $e->{ts});
-        $stream->write(sprintf("  %-20s %s (now %s%d) by %-15s %s ago\r\n",
-            $e->{nick}, $e->{delta}, $sign, $e->{score}, $e->{from}, $ago));
     }
 }
 

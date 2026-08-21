@@ -49,8 +49,10 @@ return sub {
         'later IV-E extraction removes _cmd_remind from Partyline.pm');
     $assert->like($cmds, qr/^sub _cmd_remind \{/m,
         'later IV-E extraction places _cmd_remind in Commands.pm');
-    $assert->like($party, qr/^sub _cmd_karma \{/m,
-        'karma family remains in Partyline after IV-E');
+    $assert->unlike($party, qr/^sub _cmd_karma \{/m,
+        'later IV-F extraction removes karma implementation from Partyline.pm');
+    $assert->like($cmds, qr/^sub _cmd_karma \{/m,
+        'later IV-F extraction places karma implementation in Commands.pm');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');

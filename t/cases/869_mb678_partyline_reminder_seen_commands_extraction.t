@@ -49,10 +49,10 @@ return sub {
     $assert->like($cmds, qr/DELETE FROM REMINDERS\s+WHERE delivered > 0/s,
         '.purgereminders keeps bounded delivered-reminder cleanup');
 
-    $assert->like($party, qr/^sub _cmd_karma \{/m,
-        'karma command family intentionally remains in Partyline for a later round');
-    $assert->unlike($cmds, qr/^sub _cmd_karma \{/m,
-        'IV-E does not broaden into karma commands');
+    $assert->unlike($party, qr/^sub _cmd_karma \{/m,
+        'later IV-F extraction removes karma implementation from Partyline.pm');
+    $assert->like($cmds, qr/^sub _cmd_karma \{/m,
+        'later IV-F extraction places karma implementation in Commands.pm');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');
