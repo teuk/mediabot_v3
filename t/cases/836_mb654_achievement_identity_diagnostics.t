@@ -170,7 +170,7 @@ return sub {
         'mb654-836: legacy diagnostic reports progress counter count read-only');
 
     # [5] Partyline is only a bounded renderer around the Achievements API.
-    my $pl = slurp836('Mediabot/Partyline.pm') . "\n" . slurp836('Mediabot/Partyline/Dispatcher.pm');
+    my $pl = slurp836('Mediabot/Partyline.pm') . "\n" . slurp836('Mediabot/Partyline/Dispatcher.pm') . "\n" . slurp836('Mediabot/Partyline/Commands.pm');
     $assert->like($pl,
         qr/^\s*elsif \(\$line =~ \/\^\\\.achievementprofile/m,
         'mb654-836: Partyline dispatches .achievementprofile');

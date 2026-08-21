@@ -24,7 +24,9 @@ sub _slurp {
 return sub {
     my ($assert) = @_;
 
-    my $partyline = _slurp(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $partyline = _slurp(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'))
+        . "\n" . _slurp(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'))
+        . "\n" . _slurp(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Dispatcher.pm'));
 
     $assert->ok(
         $partyline =~ /elsif \(\$line =~ \/^\\\.uptime\$\/i\)/,

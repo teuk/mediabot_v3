@@ -14,6 +14,7 @@ use strict;
 use warnings;
 use utf8;
 use Exporter 'import';
+use Encode qw(encode);
 use Mediabot::Helpers ();
 
 our @EXPORT_OK = qw(
@@ -21,6 +22,15 @@ our @EXPORT_OK = qw(
     _plugin_info_text
     _plugin_config_display_value
     _cmd_plugins
+    _cmd_help
+    _cmd_console
+    _cmd_motd
+    _send_motd
+    _cmd_whom
+    _cmd_match
+    _cmd_boot
+    _cmd_whois
+    _cmd_log
 );
 
 # ---------------------------------------------------------------------------
@@ -878,5 +888,534 @@ sub _cmd_plugins {
 
     return;
 }
+
+
+# =============================================================================
+# MB678-IV-B: core operator/session commands
+# =============================================================================
+
+# .help
+# ---------------------------------------------------------------------------
+sub _cmd_help {
+    my ($self, $stream, $id) = @_;
+    $stream->write(
+        "Available commands:\r\n"
+      . "  .help               - this help\r\n"
+      . "  .stat               - channel status (owner, chansets, nick count)\r\n"
+      . "  .dccstat            - show DCC Partyline listeners and sessions\r\n"
+      . "  .whom               - list users currently on the partyline\r\n"
+      . "  .whois <nick>       - send WHOIS to IRC and display result\r\n"
+      . "  .timers             - list all scheduled tasks\r\n"
+      . "  .schedule <list|status|start|stop|restart> [name] - control scheduler tasks\r\n"
+      . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
+      . "  .ping               - check partyline session is alive\r\n"
+      . "  .metrics            - dump Prometheus metrics\r\n"
+      . "  .plugins [loaded|config|info|load|loadscript|unload|reload|enable|disable|cleardata] - plugin lifecycle (v2)\r\n"
+      . "  .scriptdryrun [status|last|config|timers|canceltimers|events|clearevents|reload] - show external script bridge status and last run, pending timers, event windows\r\n"
+      . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary [Administrator+])\r\n"
+      . "  .aistats            - show Claude AI usage stats\r\n"
+      . "  .top [n]            - top N speakers across all channels (default 5)\r\n"
+      . "  .seen <nick>        - last activity for a nick in channel logs\r\n"
+      . "  .logs <#chan> [n]   - show last N lines from CHANNEL_LOG (default 10)\r\n"
+      . "  .nickinfo <nick>    - show DB info for a registered nick\r\n"
+      . "  .kick <nick> <#chan> [reason] - kick a nick from channel\r\n"
+      . "  .unmute <nick>               - lift a CC3/AF7 temporary nick mute\r\n"
+      . "  .kv set|get|del|list [key] [val]- persistent in-memory key-value store\r\n"
+      . "  .floodset <#chan> [w] [n] [s]- override AF4 params (window/max/silence)\r\n"
+      . "  .cmdcooldown <#chan> <cmd> <s>- set per-cmd cooldown in seconds (CC1)\r\n"
+      . "  .netsplit                    - show netsplit state and channel nicklist status\r\n"
+      . "  .floodstatus                 - show live antiflood state (AF1/AF3/AF4)\r\n"
+      . "  .flushcooldown [#chan]        - clear karma anti-spam cooldown\r\n"
+      . "  .achievementprofile <nick> <#chan> - explain durable achievement identity (read-only)\r\n"
+      . "  .dbstats            - show DB connection and query stats\r\n"
+      . "  .remind <nick> <#chan> <msg> - set a reminder from Partyline\r\n"
+      . "  .karmahist [nick]   - show karma history for a channel or nick\r\n"
+      . "  .persona [nick]     - view/clear Claude persona (all or specific nick)\r\n"
+      . "  .quota [nick]       - show Claude rate limit (all or specific nick)\r\n"
+      . "  .ai quota           - show your own Claude rate limit\r\n"
+      . "  .stats [#chan]      - top 3 speakers + karma for a channel\r\n"
+      . "  .karma <nick> [#chan] - show karma for a nick\r\n"
+      . "  .reload             - reload bot configuration (Owner)\r\n"
+      . "  .seen <nick>        - last seen event for a nick\r\n"
+      . "  .purgereminders     - clean up delivered reminders\r\n"
+      . "  .top [#chan] [n]    - top nicks on a channel\r\n"
+      . "  .remind <nick> <msg> - set IRC reminder from partyline\r\n"
+      . "  .who <nick>         - find nick on joined channels\r\n"
+      . "  .bcast <msg>        - broadcast to all joined channels (Master+)\r\n"
+      . "  .channels           - list joined channels with stats\r\n"
+      . "  .status             - show runtime session status\r\n"
+      . "  .uptime             - show bot and server uptime\r\n"
+      . "  .match <handle>     - show user record (wildcards * ? allowed)\r\n"
+      . "  .say <#chan|nick> <msg> - send a message to channel or user\r\n"
+      . "  .who #chan          - list nicks present in a channel\r\n"
+      . "  .join #chan [key]   - make the bot join a channel\r\n"
+      . "  .part #chan         - make the bot part a channel\r\n"
+      . "  .nick <newnick>     - change the bot's nick\r\n"
+      . "  .raw <IRC command>  - send a raw IRC command (Owner only)\r\n"
+      . "  .lusers [refresh]   - show network stats from LUSERS (optionally request fresh ones)\r\n"
+      . "  .reloadconf         - reload config file without restart\r\n"
+      . "  .rehash             - reload configuration and runtime state\r\n"
+      . "  .restart            - reconnect IRC without killing process (Owner)\r\n"
+      . "  .die                - terminate bot process entirely (Owner only)\r\n"
+      . "  .eval <perl>        - execute Perl in bot context (Owner, dangerous)\r\n"
+      . "  .console [0-5|off]  - redirect bot log to this session\r\n"
+      . "  .ban #chan <nick> [duration] [reason] - ban a nick via WHOIS\r\n"
+      . "  .bans #chan         - list active channel bans\r\n"
+      . "  .unban #chan <mask|id> - remove an active ban\r\n"
+      . "  .topic #chan [text] - show or change channel topic\r\n"
+      . "  .history          - show last 10 commands this session\r\n"
+      . "  .boot <handle>      - kick a user off the partyline (Owner)\r\n"
+      . "  .motd [text|add <line>|clear]  - show/set/append/clear MOTD (Owner)\r\n"
+      . "  .quit               - close this partyline session\r\n"
+      . "\r\n"
+      . "Chat:\r\n"
+      . "  <text>              - broadcast to all partyline users\r\n"
+    );
+}
+
+# ---------------------------------------------------------------------------
+# .console - display or change per-session log redirect level
+# Usage : .console          → show current level
+#         .console <0-5>    → set level (0=INFO … 5=DEBUG5)
+#         .console off      → disable console
+sub _cmd_console {
+    my ($self, $stream, $id, $arg) = @_;
+
+    my $bot    = $self->{bot};
+    my $logger = $bot->{logger};
+
+    unless ($logger && $logger->can('add_console_hook')) {
+        $stream->write("Console hooks not supported by this logger.\r\n");
+        return;
+    }
+
+    if (!defined $arg || $arg eq '') {
+        my $cur = $self->{users}{$id}{console_level};
+        if (defined $cur) {
+            my $level_name = ("INFO","DEBUG1","DEBUG2","DEBUG3","DEBUG4","DEBUG5")[$cur] // "UNKNOWN";
+        $stream->write("Console is ON at level $cur ($level_name).\r\n");
+        } else {
+            $stream->write("Console is OFF. Use .console <0-5> to enable.\r\n");
+        }
+        return;
+    }
+
+    if (lc($arg) eq 'off') {
+        $logger->remove_console_hook($id);
+        $self->{users}{$id}{console_level} = undef;
+        $stream->write("Console disabled.\r\n");
+        $bot->{logger}->log(2, "Partyline: " . ($self->{users}{$id}{login} // '?') . " disabled console (fd=$id)");
+        return;
+    }
+
+    unless ($arg =~ /^[0-5]$/) {
+        $stream->write("Usage: .console [0-5|off]  (0=INFO only, 5=all debug)\r\n");
+        return;
+    }
+
+    my $level = int($arg);
+    my $nick  = $self->{users}{$id}{login} // 'unknown';
+
+    $logger->add_console_hook($id, $level, sub {
+        my ($line) = @_;
+        my $s = $self->{streams}{$id};
+        return unless $s;
+
+        # IO::Async::Stream ultimately uses syswrite(), which expects bytes.
+        # Logger lines may contain real Perl Unicode characters coming from
+        # IRC output, e.g. heatmap bars (█/░), titles, emojis, etc.
+        # Encode only at the transport boundary so IRC rendering stays intact.
+        my $wire = encode('UTF-8', ($line // '') . "\r\n");
+
+        eval { $s->write($wire) };
+        if ($@) {
+            # Stream gone — silently remove the hook so it stops firing
+            eval { $logger->remove_console_hook($id) };
+            $self->{users}{$id}{console_level} = undef if $self->{users}{$id};
+        }
+    });
+
+    $self->{users}{$id}{console_level} = $level;
+    $stream->write("Console enabled at level $level.\r\n");
+    $bot->{logger}->log(2, "Partyline: $nick set console level=$level (fd=$id)");
+}
+
+# .motd - display or set the partyline message of the day
+# Usage : .motd              → display current MOTD
+#         .motd <text>       → replace MOTD with a single line (Owner)
+#         .motd clear        → clear MOTD (Owner)
+sub _cmd_motd {
+    my ($self, $stream, $id, $arg) = @_;
+
+    my $nick = $self->{users}{$id}{login} // 'unknown';
+
+    if (!defined $arg || $arg eq '') {
+        $self->_send_motd($stream);
+        return;
+    }
+
+    # Modification requires Owner level
+    unless (defined($self->{users}{$id}{level}) && $self->{users}{$id}{level} == 0) {
+        $stream->write("Access denied: changing MOTD requires Owner level.\r\n");
+        return;
+    }
+
+    if (lc($arg) eq 'clear') {
+        $self->{motd} = [];
+        $stream->write("MOTD cleared.\r\n");
+        $self->{bot}->{logger}->log(2, "Partyline: $nick cleared MOTD");
+        return;
+    }
+
+    # .motd add <line> — append a line to a multiline MOTD
+    if ($arg =~ /^add\s+(.+)$/i) {
+        push @{ $self->{motd} }, $1;
+        $stream->write("MOTD line added (" . scalar(@{ $self->{motd} }) . " line(s) total).\r\n");
+        $self->{bot}->{logger}->log(2, "Partyline: $nick added MOTD line: $1");
+        return;
+    }
+
+    # .motd <text> — replace entire MOTD with a single line
+    $self->{motd} = [ $arg ];
+    $stream->write("MOTD set (1 line). Use '.motd add <line>' to append more.\r\n");
+    $self->{bot}->{logger}->log(2, "Partyline: $nick set MOTD to: $arg");
+}
+
+# Internal helper - send MOTD lines to a stream
+sub _send_motd {
+    my ($self, $stream) = @_;
+
+    my @lines = @{ $self->{motd} || [] };
+
+    if (!@lines) {
+        $stream->write("No MOTD set.\r\n");
+        return;
+    }
+
+    $stream->write("--- MOTD ---\r\n");
+    for my $line (@lines) {
+        $stream->write("$line\r\n");
+    }
+    $stream->write("--- End of MOTD ---\r\n");
+}
+
+# .whom - list all authenticated partyline sessions (Eggdrop style)
+sub _cmd_whom {
+    my ($self, $stream, $id) = @_;
+
+    my @rows;
+    my $count = 0;
+    my $nick_width = length('Nick/Host');
+
+    for my $fid (sort { $a <=> $b } keys %{ $self->{users} }) {
+        my $u = $self->{users}{$fid};
+        next unless $u && $u->{authenticated};
+
+        # Keep full IP visible. _display_nick only truncates reverse DNS.
+        my $nick       = $self->_display_nick($fid, 48);
+        my $level_desc = $u->{level_desc}   // '?';
+        my $con_level  = defined $u->{console_level}
+            ? "console:" . $u->{console_level}
+            : "console:off";
+        my $is_me      = ($fid == $id) ? " *" : "";
+
+        $nick_width = length($nick) if length($nick) > $nick_width;
+
+        push @rows, {
+            nick       => $nick,
+            level_desc => $level_desc,
+            fd         => $fid,
+            con_level  => $con_level,
+            is_me      => $is_me,
+        };
+
+        $count++;
+    }
+
+    if ($count == 0) {
+        $stream->write("No users currently on the partyline.\r\n");
+        return;
+    }
+
+    $nick_width = 18 if $nick_width < 18;
+    $nick_width = 80 if $nick_width > 80;
+
+    my @lines;
+    for my $row (@rows) {
+        push @lines, sprintf("  %-*s  %-14s  fd=%-4d  %s%s",
+            $nick_width,
+            $row->{nick},
+            $row->{level_desc},
+            $row->{fd},
+            $row->{con_level},
+            $row->{is_me}
+        );
+    }
+
+    $stream->write(sprintf("Partyline users (%d):\r\n", $count));
+    $stream->write(sprintf("  %-*s  %-14s  %-7s %s\r\n",
+        $nick_width, "Nick/Host", "Level", "Socket", "Console"));
+    $stream->write("  " . ("-" x ($nick_width + 2 + 14 + 2 + 7 + 1 + 14)) . "\r\n");
+    $stream->write("$_\r\n") for @lines;
+}
+
+# .match <handle> - show user record from database (Eggdrop whois-style)
+# Accepts exact handle or wildcard pattern (* and ?)
+# .match <handle> - show user record from database (Eggdrop whois-style)
+# Accepts exact handle or wildcard pattern (* and ?)
+sub _cmd_match {
+    my ($self, $stream, $id, $pattern) = @_;
+
+    my $bot = $self->{bot};
+    my $dbh = $bot->{dbh};
+
+    unless (defined $pattern && $pattern ne '') {
+        $stream->write("Usage: .match <handle>  (wildcards * and ? allowed)\r\n");
+        return;
+    }
+
+    # Convert Eggdrop-style wildcards to SQL LIKE wildcards.
+    # This command intentionally supports wildcards, so * and ? become SQL
+    # wildcards. Escape SQL LIKE escape char and literal SQL wildcards first.
+    my $sql_pat = $pattern;
+    $sql_pat =~ s/!/!!/g;
+    $sql_pat =~ s/%/!%/g;
+    $sql_pat =~ s/_/!_/g;
+    $sql_pat =~ s/\*/%/g;
+    $sql_pat =~ s/\?/_/g;
+
+    my $sth = $dbh->prepare(q{
+        SELECT
+            u.id_user,
+            u.nickname,
+            u.auth,
+            u.info1,
+            u.info2,
+            ul.description  AS level_desc,
+            ul.level        AS level_num
+        FROM USER u
+        JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
+        WHERE u.nickname LIKE ? ESCAPE '!'
+        ORDER BY u.nickname
+        LIMIT 21
+    }); # fetch 21 to detect truncation (display only 20)
+
+    unless ($sth && $sth->execute($sql_pat)) {
+        $bot->{logger}->log(1, "Partyline .match SQL error: $DBI::errstr");
+        $stream->write("Database error.\r\n");
+        $sth->finish if $sth;
+        return;
+    }
+
+    my $found = 0;
+
+    while (my $row = $sth->fetchrow_hashref) {
+        $found++;
+        last if $found > 20;
+
+        my $auth  = $row->{auth} ? "logged in" : "not logged in";
+        my $info1 = $row->{info1}     // "";
+        my $info2 = $row->{info2}     // "";
+
+        $stream->write("\r\n");
+        $stream->write(sprintf("  Handle  : %s\r\n", $row->{nickname}));
+        $stream->write(sprintf("  Level   : %s (%d)\r\n", $row->{level_desc}, $row->{level_num}));
+        $stream->write(sprintf("  Status  : %s\r\n", $auth));
+
+        my @hostmasks;
+        my $hm_sth = $dbh->prepare(q{
+            SELECT hostmask
+            FROM USER_HOSTMASK
+            WHERE id_user = ?
+            ORDER BY id_user_hostmask
+            LIMIT 20
+        });
+
+        if ($hm_sth && $hm_sth->execute($row->{id_user})) {
+            while (my $hm = $hm_sth->fetchrow_hashref) {
+                push @hostmasks, $hm->{hostmask}
+                    if defined($hm->{hostmask}) && $hm->{hostmask} ne '';
+            }
+            $hm_sth->finish;
+        }
+        else {
+            $bot->{logger}->log(1, "Partyline .match hostmask SQL error: $DBI::errstr")
+                if $bot->{logger};
+            $hm_sth->finish if $hm_sth;
+        }
+
+        if (@hostmasks) {
+            my $mask_count = scalar(@hostmasks);
+            $stream->write(sprintf("  Hosts   : %d shown, max 20\r\n", $mask_count));
+
+            my $per_line = 2;
+            my $page     = 1;
+
+            while (@hostmasks) {
+                my @chunk = splice(@hostmasks, 0, $per_line);
+                my $line  = sprintf("  Hosts[%02d]: %s", $page, join(' | ', @chunk));
+
+                if (length($line) > 360) {
+                    $line = Mediabot::Helpers::truncate_utf8($line, 357);
+                }
+
+                $stream->write($line . "\r\n");
+                $page++;
+            }
+        }
+        else {
+            $stream->write("  Hosts   : (none)\r\n");
+        }
+
+        $stream->write(sprintf("  Info1   : %s\r\n", $info1)) if $info1 ne '';
+        $stream->write(sprintf("  Info2   : %s\r\n", $info2)) if $info2 ne '';
+    }
+
+    $sth->finish;
+
+    if ($found == 0) {
+        $stream->write("No match for '$pattern'.\r\n");
+    }
+    elsif ($found > 20) {
+ $stream->write(sprintf("\r\nShowing first 20 matches for '%s' (more exist -- narrow your search).\r\n", $pattern));
+    }
+    elsif ($found > 1) {
+        $stream->write(sprintf("\r\n%d match(es) for '%s'.\r\n", $found, $pattern));
+    }
+}
+
+
+# .boot <handle> - kick a user off the partyline (Owner only)
+sub _cmd_boot {
+    my ($self, $stream, $id, $target_login) = @_;
+
+    my $bot  = $self->{bot};
+    my $nick = $self->{users}{$id}{login} // 'unknown';
+
+    unless (defined($self->{users}{$id}{level}) && $self->{users}{$id}{level} == 0) {
+        $stream->write("Access denied: .boot requires Owner level.\r\n");
+        return;
+    }
+
+    unless (defined $target_login && $target_login ne '') {
+        $stream->write("Usage: .boot <handle>\r\n");
+        return;
+    }
+
+    # Find target session by login name
+    my $target_id;
+    for my $fid (keys %{ $self->{users} }) {
+        next unless $self->{users}{$fid}{authenticated};
+        if (lc($self->{users}{$fid}{login} // '') eq lc($target_login)) {
+            $target_id = $fid;
+            last;
+        }
+    }
+
+    unless (defined $target_id) {
+        $stream->write("No partyline session found for '$target_login'.\r\n");
+        return;
+    }
+
+    if ($target_id == $id) {
+        $stream->write("You cannot boot yourself. Use .quit instead.\r\n");
+        return;
+    }
+
+    my $target_stream = $self->{streams}{$target_id};
+    $bot->{logger}->log(2, "Partyline: $nick booted $target_login (fd=$target_id)");
+
+    # Notify the victim
+    if ($target_stream) {
+        $target_stream->write("You have been booted by $nick.\r\n");
+        $target_stream->close_when_empty;
+    }
+
+    # Announce to everyone else
+    $self->_broadcast("*** " . $self->_display_nick($target_id) . " was booted by " . $self->_display_nick($id) . ". ***", $target_id);
+    $stream->write("Booted $target_login.\r\n");
+
+    $self->_close_session($target_id);
+}
+
+
+
+# ---------------------------------------------------------------------------
+# .whois <nick>  - send WHOIS and display result in the partyline session
+# Master+ only. The reply is captured via a console hook on the next
+# RPL_WHOISUSER (311), RPL_WHOISCHANNELS (319), and RPL_ENDOFWHOIS (318).
+# Because the WHOIS reply comes asynchronously, we store the session fd in a
+# lightweight state key and let the bot's on_message_RPL_WHOISUSER handler
+# write back to the stream.
+# ---------------------------------------------------------------------------
+sub _cmd_whois {
+    my ($self, $stream, $id, $target) = @_;
+
+    my $bot = $self->{bot};
+
+    unless ($bot->{irc} && $bot->{irc}->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    unless (defined $target && $target =~ /\S/) {
+        $stream->write("Usage: .whois <nick>\r\n");
+        return;
+    }
+
+    # Store the session fd so the WHOIS reply callback can write back here
+    $bot->{_partyline_whois_fd} = $id;
+    $bot->{_partyline_whois_nick} = $target;
+    $bot->{_partyline_whois_ts}   = time();
+
+    $bot->{irc}->send_message('WHOIS', undef, $target);
+    $stream->write("WHOIS sent for $target...\r\n");
+    $bot->{logger}->log(3, "Partyline: $id requested WHOIS for $target");
+}
+
+
+# ---------------------------------------------------------------------------
+# .log [n]  - show last N lines of the bot log (default: 20, max: 100)
+# ---------------------------------------------------------------------------
+sub _cmd_log {
+    my ($self, $stream, $id, $n_arg) = @_;
+
+    my $bot    = $self->{bot};
+    my $logger = $bot->{logger};
+
+    my $n = int($n_arg // 20);
+    $n = 20  if $n < 1;
+    $n = 100 if $n > 100;
+
+    my $logfile = eval { $logger->{logfile} };
+    unless ($logfile && -f $logfile) {
+        $stream->write("No log file configured or file not found.\r\n");
+        return;
+    }
+
+    # A6: re-check file existence just before open (may have been rotated)
+    unless (-f $logfile && -r $logfile) {
+        $stream->write("Log file not readable: $logfile\r\n");
+        return;
+    }
+
+    open my $fh, '<:utf8', $logfile or do {  # A1: log written in UTF-8
+        $stream->write("Cannot open log file: $!\r\n");
+        return;
+    };
+    my @lines = <$fh>;
+    close $fh;
+
+    my @tail = @lines > $n ? @lines[-$n..-1] : @lines;
+
+    $stream->write(sprintf("--- last %d line(s) of %s ---\r\n",
+        scalar @tail, $logfile));
+    for my $line (@tail) {
+        $line =~ s/[\r\n]+$//;
+        $stream->write("$line\r\n");
+    }
+    $stream->write("--- end ---\r\n");
+}
+
 
 1;

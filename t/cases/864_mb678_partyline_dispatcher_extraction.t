@@ -20,6 +20,7 @@ return sub {
     my $disp  = _slurp_864(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Dispatcher.pm'));
     my $sess  = _slurp_864(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'SessionAuth.pm'));
     my $trans = _slurp_864(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Transport.pm'));
+    my $cmds  = _slurp_864(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
 
     $assert->like($party, qr/use Mediabot::Partyline::Dispatcher qw\(/,
         'Partyline imports the extracted dispatcher API');
@@ -53,8 +54,10 @@ return sub {
     $assert->like($disp, qr/->_cmd_help\(/,
         'dispatcher still delegates command implementation through historical methods');
 
-    $assert->like($party, qr/^sub _cmd_help \{/m,
-        'command implementations remain in Partyline during MB678-III');
+    $assert->unlike($party, qr/^sub _cmd_help \{/m,
+        'later command extraction removes _cmd_help from Partyline.pm');
+    $assert->like($cmds, qr/^sub _cmd_help \{/m,
+        'dispatcher command target remains implemented in Commands.pm');
     $assert->like($party, qr/^sub _runtime_status_payload \{/m,
         'runtime status remains in Partyline during MB678-III');
 

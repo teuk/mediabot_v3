@@ -21,7 +21,7 @@ sub slurp {
 my $bridge = slurp('Mediabot/Plugin/ScriptDryRun.pm');
 my $runner = slurp('Mediabot/ScriptRunner.pm');
 my $actions = slurp('Mediabot/ScriptActionRunner.pm');
-my $partyline = slurp('Mediabot/Partyline.pm');
+my $partyline = slurp('Mediabot/Partyline.pm') . "\n" . slurp('Mediabot/Partyline/Commands.pm');
 my $manager = slurp('Mediabot/PluginManager.pm');
 my $sample = slurp('mediabot.sample.conf');
 my $readme = slurp('plugins/scripts/README.md');

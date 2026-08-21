@@ -58,6 +58,8 @@ return sub {
         or die $!; local $/; <$fh> };
     my $pl   = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline.pm'
         or die $!; local $/; <$fh> };
+    $pl .= "\n" . do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline/Commands.pm'
+        or die $!; local $/; <$fh> };
     my $disp = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Mediabot.pm'
         or die $!; local $/; <$fh> };
 

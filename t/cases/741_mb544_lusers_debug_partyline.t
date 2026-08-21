@@ -151,7 +151,8 @@ return sub {
     # [4] Aide et marqueurs
     # ------------------------------------------------------------------
     {
-        my $party_src = _slurp_741(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+        my $party_src = _slurp_741(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'))
+            . "\n" . _slurp_741(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
         $assert->like($party_src, qr/\.lusers \[refresh\]\s+- show network stats from LUSERS/,
             'aide: .lusers documente');
         $assert->like($party_src, qr/mb544-B1/, 'marqueur mb544 dans Partyline');

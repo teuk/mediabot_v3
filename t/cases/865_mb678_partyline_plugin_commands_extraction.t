@@ -39,10 +39,10 @@ return sub {
             "$name remains imported into Partyline");
     }
 
-    $assert->like($party, qr/^sub _cmd_help \{/m,
-        'generic Partyline help intentionally remains in Partyline during IV-A');
-    $assert->unlike($cmds, qr/^sub _cmd_help \{/m,
-        'IV-A does not broaden into unrelated command extraction');
+    $assert->unlike($party, qr/^sub _cmd_help \{/m,
+        'later IV-B extraction removes generic Partyline help from the parent');
+    $assert->like($cmds, qr/^sub _cmd_help \{/m,
+        'IV-A plugin commands coexist with later command families in Commands.pm');
     $assert->like($disp, qr/->_cmd_scriptdryrun\(/,
         'dispatcher still routes .scriptdryrun through historical method surface');
     $assert->like($disp, qr/->_cmd_plugins\(/,

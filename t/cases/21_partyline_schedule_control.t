@@ -28,6 +28,8 @@ return sub {
         File::Spec->catfile('.', 'Mediabot', 'Partyline.pm')
     ) . "\n" . _slurp_partyline_schedule(
         File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Dispatcher.pm')
+    ) . "\n" . _slurp_partyline_schedule(
+        File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm')
     );
 
     $assert->like($src, qr/elsif \(\$line =~ \/\^\\\.schedule/,

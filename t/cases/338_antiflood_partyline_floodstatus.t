@@ -28,7 +28,8 @@ sub _sub_338 {
 return sub {
     my ($assert) = @_;
 
-    my $partyline = _slurp_338(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $partyline = _slurp_338(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'))
+        . "\n" . _slurp_338(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Dispatcher.pm'));
     my $body = _sub_338($partyline, '_cmd_floodstatus');
 
     $assert->ok(defined $body, '_cmd_floodstatus body found');

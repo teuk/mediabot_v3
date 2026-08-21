@@ -66,6 +66,11 @@ return sub {
     );
     for my $mod (sort keys %expect) {
         my $src  = _slurp_668(File::Spec->catfile('.', 'Mediabot', $mod));
+        if ($mod eq 'Partyline.pm') {
+            $src .= "\n" . _slurp_668(
+                File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm')
+            );
+        }
         my $conv = () = $src =~ /truncate_utf8\(\$line, 357\)/g;
         $assert->ok($conv >= $expect{$mod},
             "$mod: >= $expect{$mod} conversion(s) truncate_utf8(\$line,357) (vu: $conv)");

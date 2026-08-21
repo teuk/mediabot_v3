@@ -102,7 +102,7 @@ sub _extract_sub_partyline_match {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_partyline_match(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $src  = _slurp_partyline_match(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
     my $func = _extract_sub_partyline_match($src, '_cmd_match');
 
     $assert->ok(

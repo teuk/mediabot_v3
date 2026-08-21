@@ -284,6 +284,11 @@ return sub {
         local $/;
         <$fh>;
     };
+    $party .= "\n" . do {
+        open my $fh, '<:encoding(UTF-8)', 'Mediabot/Partyline/Commands.pm' or die $!;
+        local $/;
+        <$fh>;
+    };
     $assert->like($party,
         qr/\.plugins \[loaded\|config\|info\|load\|loadscript\|unload\|reload\|enable\|disable\|cleardata\]/,
         'mb591-775: partyline help includes loadscript');
