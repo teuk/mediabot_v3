@@ -51,6 +51,12 @@ our @EXPORT_OK = qw(
     _cmd_reload
     _cmd_lusers
     _cmd_stats
+    _cmd_join
+    _cmd_part
+    _cmd_nick
+    _cmd_raw
+    _cmd_rehash
+    _cmd_restart
 );
 
 # ---------------------------------------------------------------------------
@@ -2669,6 +2675,170 @@ sub _cmd_stats {
     $stream->write("-" x 40 . "\r\n");
 }
 
+
+
+# =============================================================================
+# MB678-IV-I: IRC control and lifecycle commands
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# .join #chan [key]
+# ---------------------------------------------------------------------------
+sub _cmd_join {
+    my ($self, $stream, $id, $chan, $key) = @_;
+
+    my $bot  = $self->{bot};
+    my $nick = $self->{users}{$id}{login};
+
+    unless ($bot->{irc} && $bot->{irc}->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+        $bot->joinChannel($chan, $key);
+
+    if ($bot->can('refresh_channel_nicklist')) {
+        eval { $bot->refresh_channel_nicklist($chan) };
+    }
+
+    $bot->{logger}->log(2, "Partyline: $nick requested JOIN $chan" . ($key ? " (key: [redacted])" : ""));
+    $stream->write("Joining $chan" . ($key ? " with key [redacted]" : "") . "...\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .part #chan
+# ---------------------------------------------------------------------------
+sub _cmd_part {
+    my ($self, $stream, $id, $chan) = @_;
+
+    my $bot  = $self->{bot};
+    my $nick = $self->{users}{$id}{login};
+
+    unless ($bot->{irc} && $bot->{irc}->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    $bot->partChannel($chan, "Partyline requested part");
+
+    if ($bot->can('stop_channel_nicklist_timer')) {
+        $bot->stop_channel_nicklist_timer($chan);
+    }
+
+    $bot->sethChannelsNicksOnChan($chan, ());
+    $bot->{logger}->log(2, "Partyline: $nick requested PART $chan");
+    $stream->write("Parting $chan...\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .nick <newnick>  - Master level required (already enforced by login,
+#                    but validated explicitly here for clarity)
+# ---------------------------------------------------------------------------
+sub _cmd_nick {
+    my ($self, $stream, $id, $newnick) = @_;
+
+    my $bot  = $self->{bot};
+    my $nick = $self->{users}{$id}{login};
+
+    unless ($bot->{irc} && $bot->{irc}->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    # Validate nick: IRC nicks must not contain spaces or control chars
+    unless ($newnick =~ /^[A-Za-z\[\]\\\`_\^\{\|\}][A-Za-z0-9\[\]\\\`_\-\^\{\|\}]{0,14}$/) {
+        $stream->write("Invalid nick format.\r\n");
+        return;
+    }
+
+    $bot->{irc}->change_nick($newnick);
+    $bot->{logger}->log(2, "Partyline: $nick changed bot nick to $newnick");
+    $stream->write("Nick change requested: $newnick\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .raw <IRC command>  - Owner only
+# ---------------------------------------------------------------------------
+sub _cmd_raw {
+    my ($self, $stream, $id, $raw) = @_;
+
+    my $bot  = $self->{bot};
+    my $nick = $self->{users}{$id}{login};
+
+    unless ($bot->{irc} && $bot->{irc}->is_connected) {
+        $stream->write("Bot is not connected to IRC.\r\n");
+        return;
+    }
+
+    unless (defined($self->{users}{$id}{level}) && $self->{users}{$id}{level} == 0) {
+        $stream->write("Access denied: .raw requires Owner level.\r\n");
+        return;
+    }
+
+    $raw =~ s/[\r\n]//g;    # strip embedded CR/LF to prevent IRC command injection
+    $bot->{irc}->write($raw . "\x0d\x0a");
+    $bot->{logger}->log(2, "Partyline: $nick sent RAW: $raw");
+    $stream->write("RAW -> $raw\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .rehash
+# ---------------------------------------------------------------------------
+sub _cmd_rehash {
+    my ($self, $stream, $id) = @_;
+
+    my $bot   = $self->{bot};
+    my $nick  = $self->{users}{$id}{login};
+    my $level = $self->{users}{$id}{level};
+
+    unless (defined($level) && $level <= 1) {   # Owner=0, Master=1
+        $stream->write("Access denied: .rehash requires Master or Owner level.\r\n");
+        return;
+    }
+
+    $bot->{logger}->log(2, "Partyline: $nick requested rehash");
+    $stream->write("Rehashing...\r\n");
+
+    my $result = eval { $bot->rehash_runtime_state() };
+    if (!$result) {
+        my $err = $@ || 'rehash failed';
+        $bot->{logger}->log(1, "Partyline rehash failed for $nick: $err");
+        $stream->write("ERR rehash failed\r\n");
+        return;
+    }
+
+    $stream->write("OK rehash completed\r\n");
+}
+
+# ---------------------------------------------------------------------------
+# .restart
+# ---------------------------------------------------------------------------
+sub _cmd_restart {
+    my ($self, $stream, $id, $reason) = @_;
+
+    my $bot   = $self->{bot};
+    my $nick  = $self->{users}{$id}{login};
+    my $level = $self->{users}{$id}{level};
+
+    unless (defined($level) && $level == 0) {   # Owner only
+        $stream->write("Access denied: .restart requires Owner level.\r\n");
+        return;
+    }
+
+    $bot->{logger}->log(2, "Partyline: $nick requested IRC restart");
+
+    # In-process IRC restart: the Partyline stays alive.
+    # restart_irc() sends QUIT best-effort, detaches the IRC object from the loop,
+    # and on_timer_tick() will trigger reconnect() in the same process on the same loop.
+    if ($bot->can('restart_irc')) {
+        $stream->write("Restarting IRC connection (Partyline stays up)...\r\n");
+        $self->_broadcast("*** IRC restarting - bot will reconnect shortly. ***");
+        my $msg = (defined $reason && $reason ne '') ? $reason : "Partyline .restart by $nick";
+        $bot->restart_irc(reason => $msg);
+    } else {
+        $stream->write("ERR: restart_irc() not available.\r\n");
+    }
+}
 
 
 1;

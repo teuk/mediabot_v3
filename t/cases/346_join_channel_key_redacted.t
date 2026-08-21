@@ -36,7 +36,9 @@ return sub {
     my ($assert) = @_;
 
     my $helpers = _slurp_346(File::Spec->catfile('.', 'Mediabot', 'Helpers.pm'));
-    my $party   = _slurp_346(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $party   = _slurp_346(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'))
+                . "\n"
+                . _slurp_346(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
 
     my $join_body = _sub_346($helpers, 'joinChannel');
     my $cmd_body  = _sub_346($party, '_cmd_join');
