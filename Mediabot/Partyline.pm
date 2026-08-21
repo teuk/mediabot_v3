@@ -118,6 +118,9 @@ use Mediabot::Partyline::Commands qw(
     _cmd_bcast
     _cmd_whochan
     _cmd_top
+    _cmd_remind
+    _cmd_seen
+    _cmd_purgereminders
 );
 
 
@@ -282,168 +285,7 @@ sub _write_runtime_status {
 # MB678-IV-A: plugin/ScriptDryRun commands moved to Mediabot::Partyline::Commands.
 # MB678-IV-B: core operator/session commands moved to Mediabot::Partyline::Commands.
 
-# ---------------------------------------------------------------------------
-# .remind <nick> <message>  - set a reminder from the Partyline
-# ---------------------------------------------------------------------------
-sub _cmd_remind {
-    my ($self, $stream, $id, $args) = @_;
-
-    my $bot = $self->{bot};
-    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
-
-    my ($target, $message) = ($args =~ /^(\S+)\s+(.+)$/);
-    unless ($target && $message) {
-        $stream->write("Usage: .remind <nick> <message>\r\n"); return;
-    }
-
-    my $session  = $self->{users}{$id} // {};
-    my $from     = $session->{login} // '?';
-
-    # Use first joined channel
-    my $bot_nick = eval { $bot->{irc}->nick_folded } // '';
-    my $chans    = $bot->{channels} || {};
-    my ($chan_name, $id_channel);
-    for my $name (sort keys %$chans) {
-        my @nicks = eval { $bot->gethChannelsNicksOnChan($name) };
-        if (grep { lc($_) eq lc($bot_nick) } @nicks) {
-            $chan_name = $name; last;
-        }
-    }
-    unless ($chan_name) { $stream->write("Bot not joined on any channel.\r\n"); return; }
-
-    unless ($dbh) { $stream->write("DB unavailable.\r\n"); return; }
-
-    # mb93-B3: valider le nick destinataire (cohérence avec mb92-B3 dans UserCommands)
-    {
-        my $target_known = 0;
-        # Vérifier nicklist en mémoire sur tous les canaux
-        my $chans_chk = $bot->{channels} // {};
-        for my $cname (keys %$chans_chk) {
-            my @nicks = eval { $bot->gethChannelsNicksOnChan($cname) };
-            if (grep { defined($_) && lc($_) eq lc($target) } @nicks) {
-                $target_known = 1; last;
-            }
-        }
-        unless ($target_known) {
-            my $sth_seen = $dbh->prepare('SELECT 1 FROM USER_SEEN WHERE nick = ? LIMIT 1');
-            if ($sth_seen && $sth_seen->execute(lc($target))) {
-                $target_known = 1 if $sth_seen->fetchrow_array;
-                $sth_seen->finish;
-            }
-        }
-        unless ($target_known) {
-            my $sth_user = $dbh->prepare('SELECT 1 FROM USER WHERE nickname = ? LIMIT 1');
-            if ($sth_user && $sth_user->execute(lc($target))) {
-                $target_known = 1 if $sth_user->fetchrow_array;
-                $sth_user->finish;
-            }
-        }
-        unless ($target_known) {
-            $stream->write("Unknown nick '$target'. Remind not created.\r\n");
-            return;
-        }
-    }
-
-    # mb412-R1: id canal via le helper central (cache d'abord, mb411).
-    $id_channel = Mediabot::Helpers::channel_id_cached($bot, $chan_name);
-    unless ($id_channel) { $stream->write("Channel not found in DB.\r\n"); return; }
-
-    my $sth = $dbh->prepare(q{
-        INSERT INTO REMINDERS (id_channel, from_nick, to_nick, message) VALUES (?,?,?,?)
-    });
-    if ($sth && $sth->execute($id_channel, $from, lc($target), $message)) {
-        $sth->finish;
-        $stream->write("Reminder set for $target on $chan_name.\r\n");
-    } else {
-        $stream->write("DB error.\r\n");
-    }
-}
-
-
-# ---------------------------------------------------------------------------
-# .seen <nick>  - last seen event for a nick
-# ---------------------------------------------------------------------------
-sub _cmd_seen {
-    my ($self, $stream, $id, $target) = @_;
-
-    my $bot = $self->{bot};
-    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
-
-    unless (defined $target && $target =~ /\S/) {
-        $stream->write("Usage: .seen <nick>  (wildcard: .seen teu*)\r\n"); return;
-    }
-
-    # mb94-B1 / mb127-B3: support wildcard (* -> %, ? -> _) while escaping
-    # literal SQL LIKE metacharacters from the user input.
-    if ($target =~ /[*?]/) {
-        my $like = '';
-        for my $ch (split //, lc($target)) {
-            if    ($ch eq '*') { $like .= '%';  }
-            elsif ($ch eq '?') { $like .= '_';  }
-            elsif ($ch eq '!') { $like .= '!!'; }
-            elsif ($ch eq '%') { $like .= '!%'; }
-            elsif ($ch eq '_') { $like .= '!_'; }
-            else               { $like .= $ch;  }
-        }
-        my $sth = $dbh->prepare(q{
-            SELECT nick, channel, event_type, seen_at
-            FROM USER_SEEN WHERE nick LIKE ? ESCAPE '!'
-            ORDER BY seen_at DESC LIMIT 5
-        });
-        unless ($sth && $sth->execute($like)) {
-            $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
-        }
-        my @rows;
-        while (my $r = $sth->fetchrow_hashref) { push @rows, $r; }
-        $sth->finish;
-        unless (@rows) {
-            $stream->write("No nicks matching '$target'.\r\n"); return;
-        }
-        for my $r (@rows) {
-            $stream->write(sprintf("  %-20s  %s  on %s  (%s)\r\n",
-                $r->{nick}, $r->{seen_at}, $r->{channel}, $r->{event_type}));
-        }
-        return;
-    }
-
-    my $sth = $dbh->prepare(q{
-        SELECT nick, channel, event_type, seen_at, last_msg
-        FROM USER_SEEN WHERE nick = ? ORDER BY seen_at DESC LIMIT 1
-    });
-    # mb100-B1: USER_SEEN stocke les nicks en lc() — normaliser $target
-    unless ($sth && $sth->execute(lc($target))) {
-        $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
-    }
-    my $row = $sth->fetchrow_hashref; $sth->finish;
-    unless ($row) {
-        $stream->write("$target: not found in seen log.\r\n"); return;
-    }
-    my $msg = $row->{last_msg} ? " saying: \"$row->{last_msg}\"" : '';
-    $stream->write("$target last seen $row->{seen_at} on $row->{channel}"
-        . " ($row->{event_type})$msg\r\n");
-}
-
-# ---------------------------------------------------------------------------
-# .purgereminders  - clean up delivered/cancelled reminders older than 7 days
-# ---------------------------------------------------------------------------
-sub _cmd_purgereminders {
-    my ($self, $stream, $id) = @_;
-
-    my $bot = $self->{bot};
-    my $dbh = eval { $bot->{db}->ensure_connected } // $bot->{dbh};
-
-    my $sth = $dbh->prepare(q{
-        DELETE FROM REMINDERS
-        WHERE delivered > 0
-          AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)
-    });
-    unless ($sth && $sth->execute()) {
-        $stream->write("DB error.\r\n"); $sth->finish if $sth; return;
-    }
-    my $rows = $sth->rows; $sth->finish;
-    $stream->write("Purged $rows reminder(s) older than 7 days.\r\n");
-}
-
+# MB678-IV-E: reminder / seen commands moved to Mediabot::Partyline::Commands.
 
 # ---------------------------------------------------------------------------
 # .karma <nick> [#chan]  - show karma from partyline

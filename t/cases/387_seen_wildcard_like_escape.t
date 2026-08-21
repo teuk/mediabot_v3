@@ -53,10 +53,15 @@ my $case = sub {
     $assert->($uc =~ /WHERE nick LIKE \? ESCAPE '!'\s+ORDER BY seen_at DESC LIMIT 5/s, 'mbSeen_ctx global wildcard query uses ESCAPE');
 
     my $pl_file = File::Spec->catfile($root, 'Mediabot', 'Partyline.pm');
+    my $pc_file = File::Spec->catfile($root, 'Mediabot', 'Partyline', 'Commands.pm');
     open my $pfh, '<', $pl_file
         or do { $assert->(0, "cannot open Partyline.pm: $!"); return; };
     my $pl = do { local $/; <$pfh> };
     close $pfh;
+    open my $pcfh, '<', $pc_file
+        or do { $assert->(0, "cannot open Partyline/Commands.pm: $!"); return; };
+    $pl .= "\n" . do { local $/; <$pcfh> };
+    close $pcfh;
 
     $assert->($pl =~ /mb94-B1 \/ mb127-B3: support wildcard/, 'Partyline .seen contains mb127-B3 escaping comment');
     $assert->($pl =~ /FROM USER_SEEN WHERE nick LIKE \? ESCAPE '!'/, 'Partyline .seen wildcard query uses ESCAPE');

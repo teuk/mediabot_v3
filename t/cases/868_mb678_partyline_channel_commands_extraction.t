@@ -45,10 +45,12 @@ return sub {
     $assert->like($cmds, qr/mb124-B4:/,
         '.top keeps standalone numeric limit parsing');
 
-    $assert->like($party, qr/^sub _cmd_remind \{/m,
-        'community/reminder family intentionally remains in Partyline for IV-E');
-    $assert->unlike($cmds, qr/^sub _cmd_remind \{/m,
-        'IV-D does not broaden into community/reminder commands');
+    $assert->unlike($party, qr/^sub _cmd_remind \{/m,
+        'later IV-E extraction removes _cmd_remind from Partyline.pm');
+    $assert->like($cmds, qr/^sub _cmd_remind \{/m,
+        'later IV-E extraction places _cmd_remind in Commands.pm');
+    $assert->like($party, qr/^sub _cmd_karma \{/m,
+        'karma family remains in Partyline after IV-E');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');

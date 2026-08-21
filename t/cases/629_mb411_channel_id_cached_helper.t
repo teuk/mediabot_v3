@@ -85,7 +85,8 @@ return sub {
     $assert->is($nsel, 2, "migration UserCommands+Karma: seuls les 2 replis mb410 restent (actuel: $nsel, mb414)");
 
     # mb412: le lot Partyline est intégralement migré — verrouillé à zéro.
-    my $pl = _slurp_629(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $pl = _slurp_629(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'))
+           . "\n" . _slurp_629(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
     my $npl = () = $pl =~ /SELECT id_channel FROM CHANNEL WHERE name/g;
     $assert->is($npl, 0, 'Partyline: plus aucun SELECT id_channel par nom (mb412)');
     my $nplcalls = () = $pl =~ /Mediabot::Helpers::channel_id_cached\(/g;
