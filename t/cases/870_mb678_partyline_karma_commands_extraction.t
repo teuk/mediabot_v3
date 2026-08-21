@@ -50,10 +50,10 @@ return sub {
     $assert->like($cmds, qr/Mediabot::UserCommands::_seconds_to_human/,
         '.karmahist keeps human-readable age formatting');
 
-    $assert->like($party, qr/^sub _cmd_ai \{/m,
-        'large AI command family remains in Partyline after later extractions');
-    $assert->unlike($cmds, qr/^sub _cmd_ai \{/m,
-        'command extractions do not broaden into the AI family yet');
+    $assert->like($party, qr/^sub _cmd_ping \{/m,
+        'ping/uptime family remains in Partyline after later extractions');
+    $assert->unlike($cmds, qr/^sub _cmd_ping \{/m,
+        'command extractions do not broaden into the ping/uptime family yet');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');

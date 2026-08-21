@@ -78,10 +78,10 @@ return sub {
     $assert->like($cmds, qr/\$self->_broadcast\("\*\*\* IRC restarting - bot will reconnect shortly\. \*\*\*"\)/,
         '.restart keeps Partyline restart broadcast');
 
-    $assert->like($party, qr/^sub _cmd_ai \{/m,
-        'large AI command family remains in Partyline after IV-I');
-    $assert->unlike($cmds, qr/^sub _cmd_ai \{/m,
-        'IV-I does not broaden into the AI command family');
+    $assert->like($party, qr/^sub _cmd_ping \{/m,
+        'ping/uptime family remains in Partyline after later extractions');
+    $assert->unlike($cmds, qr/^sub _cmd_ping \{/m,
+        'IV-I and later extractions do not broaden into ping/uptime');
 
     $assert->like($party, qr/^sub _cmd_say \{/m,
         '.say remains in Partyline after IV-I');

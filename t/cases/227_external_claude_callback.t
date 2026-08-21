@@ -38,7 +38,9 @@ return sub {
     my ($assert) = @_;
 
     my $src      = _slurp_227(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
-    my $pl_src   = _slurp_227(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $pl_src   = _slurp_227(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'))
+                 . "\n"
+                 . _slurp_227(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
     my $ai_body  = _extract_sub_227($src, 'claudeAI');
     my $emit_body = _extract_sub_227($src, '_claude_emit');
     my $deliver_body = _extract_sub_227($src, '_claude_deliver_answer');

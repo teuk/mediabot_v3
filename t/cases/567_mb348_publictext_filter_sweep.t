@@ -83,7 +83,9 @@ return sub {
     $assert->like($cl, qr/mb348-B1/, 'Claude: tag mb348-B1');
 
     # --- Partyline.pm : _cmd_ai balayé, .logs (_cmd_chanlog) PRÉSERVÉ -----
-    my $pl = _slurp_567(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
+    my $pl = _slurp_567(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'))
+           . "\n"
+           . _slurp_567(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
     # _cmd_ai utilise le filtre
     my ($ai) = $pl =~ /(sub _cmd_ai \{.*?\n\}\n)/s; $ai //= '';
     $assert->like($ai, qr/event_type IN \('public','action'\)/, 'Partyline _cmd_ai: filtre event_type');

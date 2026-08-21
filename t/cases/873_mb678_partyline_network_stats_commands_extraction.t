@@ -54,10 +54,10 @@ return sub {
     $assert->like($cmds, qr/Mediabot::Helpers::channel_id_cached\(\$bot, \$chan\)/,
         '.stats keeps the shared channel-id cache helper');
 
-    $assert->like($party, qr/^sub _cmd_ai \{/m,
-        'large AI command family remains in Partyline after IV-H');
-    $assert->unlike($cmds, qr/^sub _cmd_ai \{/m,
-        'IV-H does not broaden into the AI command family');
+    $assert->like($party, qr/^sub _cmd_ping \{/m,
+        'ping/uptime family remains in Partyline after later extractions');
+    $assert->unlike($cmds, qr/^sub _cmd_ping \{/m,
+        'IV-H and later extractions do not broaden into ping/uptime');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');
