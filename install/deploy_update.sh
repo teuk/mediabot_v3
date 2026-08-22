@@ -31,14 +31,110 @@ TMP_CLONE_DIR=""
 BOT_PID=""
 ROLLED_BACK=0
 
+# mb680: durable updater state lives BESIDE the rotating release tree.
+# Keeping it under PROJECT_DIR/var would archive the truth with the old release
+# during the very operation we are trying to observe.
+STATUS_FILE="${PARENT_DIR}/.${PROJECT_NAME}.update-status.json"
+STATUS_STARTED_AT="$(date +%s)"
+STATUS_OLD_VERSION=""
+STATUS_TARGET_VERSION=""
+STATUS_INSTALLED_VERSION=""
+STATUS_PHASE="preflight"
+STATUS_DETAIL=""
+STATUS_STARTED=0
+STATUS_FINALIZED=0
+
+write_update_status() {
+    local state="$1"
+    local phase="$2"
+    local detail="${3:-}"
+    local finished_at="${4:-}"
+    local tmp="${STATUS_FILE}.tmp.$$"
+
+    if ! MEDIABOT_UPDATE_STATUS_FILE="$tmp" \
+         MEDIABOT_UPDATE_STATUS_STATE="$state" \
+         MEDIABOT_UPDATE_STATUS_PHASE="$phase" \
+         MEDIABOT_UPDATE_STATUS_STARTED="$STATUS_STARTED_AT" \
+         MEDIABOT_UPDATE_STATUS_FINISHED="$finished_at" \
+         MEDIABOT_UPDATE_STATUS_PID="$$" \
+         MEDIABOT_UPDATE_STATUS_OLD="$STATUS_OLD_VERSION" \
+         MEDIABOT_UPDATE_STATUS_TARGET="$STATUS_TARGET_VERSION" \
+         MEDIABOT_UPDATE_STATUS_INSTALLED="$STATUS_INSTALLED_VERSION" \
+         MEDIABOT_UPDATE_STATUS_DETAIL="$detail" \
+         perl -MJSON::PP -e '
+            use strict;
+            use warnings;
+            my $file = $ENV{MEDIABOT_UPDATE_STATUS_FILE} // q{};
+            die "missing update status path\n" unless length $file;
+
+            my %data = (
+                schema       => 1,
+                state        => ($ENV{MEDIABOT_UPDATE_STATUS_STATE} // q{}),
+                phase        => ($ENV{MEDIABOT_UPDATE_STATUS_PHASE} // q{}),
+                started_at   => 0 + ($ENV{MEDIABOT_UPDATE_STATUS_STARTED} // 0),
+                updater_pid  => 0 + ($ENV{MEDIABOT_UPDATE_STATUS_PID} // 0),
+            );
+
+            for my $pair (
+                [ old_version       => "MEDIABOT_UPDATE_STATUS_OLD" ],
+                [ target_version    => "MEDIABOT_UPDATE_STATUS_TARGET" ],
+                [ installed_version => "MEDIABOT_UPDATE_STATUS_INSTALLED" ],
+                [ detail            => "MEDIABOT_UPDATE_STATUS_DETAIL" ],
+            ) {
+                my ($key, $env) = @$pair;
+                my $value = $ENV{$env} // q{};
+                $data{$key} = $value if length $value;
+            }
+
+            my $finished = $ENV{MEDIABOT_UPDATE_STATUS_FINISHED} // q{};
+            $data{finished_at} = 0 + $finished if $finished =~ /\A\d+\z/ && $finished > 0;
+
+            umask 0077;
+            open my $fh, ">:raw", $file or die "$file: $!\n";
+            print {$fh} JSON::PP->new->utf8->canonical->encode(\%data), "\n";
+            close $fh or die "$file: $!\n";
+        '
+    then
+        rm -f "$tmp" 2>/dev/null || true
+        return 1
+    fi
+
+    if ! mv -f "$tmp" "$STATUS_FILE"; then
+        rm -f "$tmp" 2>/dev/null || true
+        return 1
+    fi
+    return 0
+}
+
+status_checkpoint() {
+    STATUS_PHASE="$1"
+    if ! write_update_status "running" "$STATUS_PHASE" ""; then
+        echo "⚠️  Warning: could not refresh durable update status (${STATUS_PHASE})." >&2
+    fi
+}
+
 cleanup() {
+    local rc=$?
+    trap - EXIT
+
+    if [ "$rc" -ne 0 ] && [ "$STATUS_STARTED" -eq 1 ] && [ "$STATUS_FINALIZED" -eq 0 ]; then
+        local state="failed"
+        [ "$ROLLED_BACK" -eq 1 ] && state="rolled_back"
+        local detail="${STATUS_DETAIL:-updater exited with rc ${rc}}"
+        write_update_status "$state" "$STATUS_PHASE" "$detail" "$(date +%s)" \
+            || echo "⚠️  Warning: could not persist final update failure status." >&2
+    fi
+
     if [ -n "${TMP_CLONE_DIR}" ] && [ -d "${TMP_CLONE_DIR}" ]; then
         rm -rf "${TMP_CLONE_DIR}"
     fi
+
+    exit "$rc"
 }
 trap cleanup EXIT
 
 fail() {
+    STATUS_DETAIL="$*"
     echo "ERROR: $*" >&2
     exit 1
 }
@@ -54,6 +150,12 @@ echo
 [ "${PROJECT_NAME}" = "mediabot_v3" ] || fail "project directory name is '${PROJECT_NAME}', expected 'mediabot_v3'"
 [ -f "${PROJECT_DIR}/mediabot.pl" ] || fail "${PROJECT_DIR}/mediabot.pl not found"
 [ -d "${PARENT_DIR}" ] || fail "parent directory ${PARENT_DIR} does not exist"
+
+STATUS_OLD_VERSION="$(head -n 1 "${PROJECT_DIR}/VERSION" 2>/dev/null | tr -d '\r\n' || true)"
+if ! write_update_status "running" "preflight" ""; then
+    fail "cannot initialize durable update status at ${STATUS_FILE}"
+fi
+STATUS_STARTED=1
 
 # +-------------------------------------------------------------------------+
 # | [1] Determine the next version number                                   |
@@ -77,9 +179,12 @@ echo
 # +-------------------------------------------------------------------------+
 TMP_CLONE_DIR="$(mktemp -d "${PARENT_DIR}/mediabot_v3.new.XXXXXX")"
 echo "🌐 Cloning the latest version from GitHub into ${TMP_CLONE_DIR} ..."
+status_checkpoint "clone"
 
 git clone https://github.com/teuk/mediabot_v3 "${TMP_CLONE_DIR}"
 [ -f "${TMP_CLONE_DIR}/mediabot.pl" ] || fail "clone completed but mediabot.pl is missing in ${TMP_CLONE_DIR}"
+STATUS_TARGET_VERSION="$(head -n 1 "${TMP_CLONE_DIR}/VERSION" 2>/dev/null | tr -d '\r\n' || true)"
+status_checkpoint "staged_validation"
 echo
 
 # +-------------------------------------------------------------------------+
@@ -119,6 +224,7 @@ fi
 # +-------------------------------------------------------------------------+
 # | [4] Find the running instance to stop                                   |
 # +-------------------------------------------------------------------------+
+status_checkpoint "pre_stop"
 # mb635: clone + staged validation happen BEFORE this stop. A failed GitHub
 # fetch or bad candidate must never create downtime. With systemd RestartSec,
 # the remaining critical section is now only: stop -> restore private state ->
@@ -194,6 +300,7 @@ if [ -n "$SYSTEMD_UNIT" ]; then
 fi
 
 if [ -n "$BOT_PID" ]; then
+    status_checkpoint "stopping"
     echo "🛑 Sending SIGTERM to PID ${BOT_PID} ..."
     kill -15 "$BOT_PID"
 
@@ -217,6 +324,7 @@ echo
 # +-------------------------------------------------------------------------+
 # | [5] Restore config and Hailo brain into the temporary clone             |
 # +-------------------------------------------------------------------------+
+status_checkpoint "preserve_state"
 echo "⚙️  Restoring config and Hailo brain into the staged release ..."
 
 if [ -f "${PROJECT_DIR}/mediabot.conf" ]; then
@@ -250,6 +358,7 @@ echo
 # +-------------------------------------------------------------------------+
 # | [6] Rotate current release and activate the new one                     |
 # +-------------------------------------------------------------------------+
+status_checkpoint "activating"
 echo "📦 Archiving current release: ${PROJECT_DIR} → ${BACKUP_DIR}"
 mv -v "${PROJECT_DIR}" "${BACKUP_DIR}"
 
@@ -261,6 +370,7 @@ echo
 # +-------------------------------------------------------------------------+
 # | [7] Final validation on the live path                                   |
 # +-------------------------------------------------------------------------+
+status_checkpoint "live_validation"
 echo "🔍 Re-checking Perl syntax on the live path ..."
 if ! (
     cd "${PROJECT_DIR}"
@@ -271,6 +381,9 @@ if ! (
     if [ -d "${PROJECT_DIR}" ] && [ -d "${BACKUP_DIR}" ]; then
         FAILED_DIR="${PARENT_DIR}/mediabot_v3.failed.$$"
         mv -v "${PROJECT_DIR}" "${FAILED_DIR}" &&         mv -v "${BACKUP_DIR}"  "${PROJECT_DIR}" &&         ROLLED_BACK=1 || true
+        if [ "$ROLLED_BACK" -eq 1 ]; then
+            STATUS_INSTALLED_VERSION="$STATUS_OLD_VERSION"
+        fi
         rm -rf "${FAILED_DIR}" 2>/dev/null || true
     fi
 
@@ -280,6 +393,8 @@ if ! (
         fail "rollback failed; manual intervention is required"
     fi
 fi
+STATUS_INSTALLED_VERSION="$(head -n 1 "${PROJECT_DIR}/VERSION" 2>/dev/null | tr -d '\r\n' || true)"
+status_checkpoint "completion_notice"
 echo
 
 # +-------------------------------------------------------------------------+
@@ -332,6 +447,13 @@ if [ -n "${MEDIABOT_UPDATE_NOTIFY_KIND:-}" ] && [ -n "${MEDIABOT_UPDATE_NOTIFY_T
     else
         echo "⚠️  Warning: update succeeded, but VERSION is unreadable; no IRC completion notice was armed."
     fi
+fi
+
+STATUS_PHASE="completed"
+if write_update_status "success" "$STATUS_PHASE" "" "$(date +%s)"; then
+    STATUS_FINALIZED=1
+else
+    echo "⚠️  Warning: deployment succeeded, but durable update status could not be finalized." >&2
 fi
 
 echo "✅ Deployment complete."

@@ -10,8 +10,9 @@ package Mediabot::Update;
 # des tests — l'echange reel, lui, ne se rejoue pas dans une suite.
 #
 # Deroulement :
-#   m update            -> DIAGNOSTIC seulement : version locale, version
+#   m update            -> DIAGNOSTIC reseau : version locale, version
 #                          distante, eligibilite, mode de redemarrage.
+#   m update status     -> ETAT DURABLE local du dernier updater ; aucun reseau.
 #   m update now        -> execute reellement (Master, et seulement si le
 #                          diagnostic est vert).
 #
@@ -38,13 +39,14 @@ use Cwd qw(realpath);
 use File::Basename qw(basename dirname);
 use File::Spec;
 use JSON::PP qw(decode_json);
-use POSIX qw(setsid);
+use POSIX qw(setsid strftime);
 
 use Exporter 'import';
 our @EXPORT_OK = qw(
     update_ctx
     update_eligibility
     update_decision
+    update_status_record
     protected_paths
     restart_mode
 );
@@ -265,6 +267,145 @@ sub _read_local_version {
     return length($version) ? $version : undef;
 }
 
+# mb680: unlike update.completed.json (which is a one-shot IRC notification),
+# the updater status is durable and lives BESIDE the rotating release tree.
+# mediabot_v3 can become mediabot_v3.N during activation, so keeping this file
+# inside var/ would make the truth move with the old release exactly when it is
+# most useful.  One deployment root => one stable sibling status file.
+sub _update_status_path {
+    my ($self) = @_;
+    my $dir = _project_dir($self);
+    return undef unless defined $dir && length $dir;
+
+    return File::Spec->catfile(
+        dirname($dir),
+        '.' . basename($dir) . '.update-status.json',
+    );
+}
+
+sub _status_scalar_safe {
+    my ($value, $max) = @_;
+    return 1 unless defined $value;
+    return 0 if ref $value;
+    return 0 if length($value) > $max;
+    return 0 if $value =~ /[\x00-\x1f\x7f]/;
+    return 1;
+}
+
+# Public structured reader for IRC today and Doctor/other read-only diagnostics
+# later.  No network, no mutation, and no attempt to infer history from Git.
+sub update_status_record {
+    my ($self) = @_;
+
+    my $path = _update_status_path($self);
+    return (undef, 'status path could not be resolved')
+        unless defined $path && length $path;
+    return (undef, 'no update status recorded')
+        unless -f $path;
+
+    open my $fh, '<:raw', $path
+        or return (undef, 'update status record could not be read');
+    local $/;
+    my $raw = <$fh>;
+    close $fh;
+
+    my $data = eval { decode_json($raw // '') };
+    return (undef, 'invalid update status record')
+        unless ref($data) eq 'HASH'
+            && ($data->{schema} // 0) == 1;
+
+    my %state_ok = map { $_ => 1 } qw(running success failed rolled_back);
+    return (undef, 'invalid update status state')
+        unless defined($data->{state})
+            && !ref($data->{state})
+            && $state_ok{ $data->{state} };
+
+    return (undef, 'invalid update status phase')
+        unless defined($data->{phase})
+            && !ref($data->{phase})
+            && $data->{phase} =~ /\A[a-z][a-z0-9_]{0,63}\z/;
+
+    return (undef, 'invalid update status start time')
+        unless defined($data->{started_at})
+            && !ref($data->{started_at})
+            && $data->{started_at} =~ /\A\d+\z/
+            && $data->{started_at} > 0;
+
+    if (defined $data->{finished_at}) {
+        return (undef, 'invalid update status finish time')
+            if ref($data->{finished_at})
+                || $data->{finished_at} !~ /\A\d+\z/
+                || $data->{finished_at} < $data->{started_at};
+    }
+
+    if (defined $data->{updater_pid}) {
+        return (undef, 'invalid update status updater pid')
+            if ref($data->{updater_pid})
+                || $data->{updater_pid} !~ /\A\d+\z/
+                || $data->{updater_pid} <= 0;
+    }
+
+    for my $key (qw(old_version target_version installed_version)) {
+        return (undef, "invalid update status $key")
+            unless _status_scalar_safe($data->{$key}, 128);
+    }
+    return (undef, 'invalid update status detail')
+        unless _status_scalar_safe($data->{detail}, 400);
+
+    return ($data, undef);
+}
+
+sub _format_update_status_time {
+    my ($epoch) = @_;
+    return 'unknown'
+        unless defined $epoch && !ref($epoch) && $epoch =~ /\A\d+\z/ && $epoch > 0;
+    my $text = eval { strftime('%Y-%m-%d %H:%M:%S %Z', localtime($epoch)) };
+    return defined($text) && length($text) ? $text : "$epoch";
+}
+
+sub _show_update_status {
+    my ($ctx) = @_;
+    my $self = $ctx->bot;
+
+    _say($ctx, "\x02Mediabot update status\x02");
+    _say($ctx, '  local: ' . (_read_local_version($self) // 'unknown'));
+
+    my ($data, $why) = update_status_record($self);
+    unless ($data) {
+        my $none = defined($why) && $why eq 'no update status recorded';
+        _say($ctx, $none
+            ? "\x0308  last: no durable update record yet\x0f"
+            : "\x0304  last: unavailable\x0f - " . ($why // 'unknown reason'));
+        return 1;
+    }
+
+    my %label = (
+        running     => 'RUNNING',
+        success     => 'SUCCESS',
+        failed      => 'FAILED',
+        rolled_back => 'ROLLED BACK',
+    );
+    _say($ctx, sprintf('  last: %s  |  phase: %s',
+        $label{ $data->{state} } // uc($data->{state}),
+        $data->{phase}));
+
+    my $from = $data->{old_version};
+    my $to = $data->{installed_version} // $data->{target_version};
+    if (defined($from) || defined($to)) {
+        _say($ctx, sprintf('  version: %s -> %s',
+            defined($from) && length($from) ? $from : '?',
+            defined($to)   && length($to)   ? $to   : '?'));
+    }
+
+    _say($ctx, '  started: ' . _format_update_status_time($data->{started_at}));
+    _say($ctx, '  finished: ' . _format_update_status_time($data->{finished_at}))
+        if defined $data->{finished_at};
+    _say($ctx, '  detail: ' . $data->{detail})
+        if defined($data->{detail}) && length($data->{detail});
+
+    return 1;
+}
+
 sub _safe_notice_target {
     my ($kind, $target) = @_;
     return 0 unless defined $kind && ($kind eq 'channel' || $kind eq 'notice');
@@ -385,9 +526,14 @@ sub update_ctx {
     my $do_it = ($verb eq 'now' || $verb eq 'go' || $verb eq 'confirm') ? 1 : 0;
 
     if (length $verb && !$do_it && $verb ne 'check' && $verb ne 'status') {
-        _say($ctx, "update: unknown option '$verb'. Usage: update [check|now]");
+        _say($ctx, "update: unknown option '$verb'. Usage: update [check|status|now]");
         return 1;
     }
+
+    # mb680: status is deliberately LOCAL-ONLY.  It must remain useful when
+    # GitHub is unreachable and even on an installation where applying the
+    # built-in updater is intentionally forbidden.
+    return _show_update_status($ctx) if $verb eq 'status';
 
     # Sortie : sur le canal si la commande y est lancee, en prive sinon.
     # (Demande explicite : « m update » informe le canal, « /msg bot update »

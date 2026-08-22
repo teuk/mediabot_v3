@@ -2688,13 +2688,12 @@ topcmd|topcmd|authorized|Show most used dynamic commands.
 topsay|topsay [#channel]|public|Show top talkers.
 unban|unban #channel <mask|id>|operator+|Remove a ban from a channel.
 unignore|unignore <nick|mask>|admin|Remove an ignore entry.
-update|update|master|Disabled IRC update command. Use the deploy script manually.
 uptime|uptime|public|Show bot uptime.
 userinfo|userinfo <nick>|admin|Show information about a user.
 users|users|admin|List or count known users.
 verify|verify|public|Verify your authentication or account state.
 version|version|public|Show bot version.
-update|update [check\|now]|public|Check GitHub for a newer release and, with 'now', install it (config and Hailo brain preserved). Master+.
+update|update [check\|status\|now]|public|Check GitHub, show durable local updater status, or install a newer release with 'now'. Master+.
 voice|voice #channel [nick]|operator+|Give voice on a channel.
 weather|weather [city]|public|Display weather information.
 whereis|whereis <nick>|public|Locate a nick or channel when known.
