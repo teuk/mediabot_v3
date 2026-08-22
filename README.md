@@ -181,10 +181,16 @@ configuration generation with `./configure --sync-only --skip-db --skip-cpan
 `install/db_install.sh -c ...` fresh-database path with safe defaults, verifies
 that the private config remains owned by `mediabot` with mode `0600`, and runs
 `tools/check_schema_drift.pl --strict --types --indexes` through the generated
-application credentials. The CI-only `cpanm` local library is an
-acceleration/isolation mechanism; the supported operator installation path
-remains the CPAN flow described above. Live systemd deployment and IRC
-connectivity remain end-to-end runtime checks rather than container-CI claims.
+application credentials. The same Debian 13 job also exports the real stable
+`3.3` database schema from the Git tag, proves that it is detectably behind the
+current reference schema, applies only migration files added after `3.3` in the
+authoritative order from `install/migrations/README.md`, and requires the final
+strict type/index drift check to return clean. Released migration files shared
+with `3.3` are checksum-compared and must remain immutable. The CI-only `cpanm`
+local library is an acceleration/isolation mechanism; the supported operator
+installation path remains the CPAN flow described above. Live systemd deployment and IRC
+connectivity remain end-to-end runtime checks rather than container-CI claims. A manual end-to-end fresh install on a dedicated Debian 13
+VM is still required before final 3.5 acceptance.
 
 Optional but useful:
 

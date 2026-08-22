@@ -281,6 +281,54 @@ repeat the historical archive-family scan. Any live legacy JSON still present
 can still be merged idempotently; otherwise MariaDB simply remains the source
 of truth.
 
+## Debian 13 stable-upgrade CI gate
+
+The Debian 13 workflow now validates the database upgrade boundary from the
+actual stable `3.3` Git tag to the current development tree.
+
+The gate deliberately does **not** maintain a hand-written "3.3 schema"
+fixture. Instead it exports `install/mediabot.sql` and the migration inventory
+from Git tag `3.3`, creates a real MariaDB database from that released schema,
+and first requires the current strict drift checker to detect that the stable
+database is behind:
+
+```text
+stable 3.3 schema
+    -> current strict drift check must return drift
+```
+
+It then compares the migration inventories. A migration already present in the
+stable tag must still exist and its SHA-256 must be unchanged. New migration
+files are selected from the current tree and ordered by their exact entries in
+`install/migrations/README.md`.
+
+Each post-3.3 migration is applied through the real helper:
+
+```bash
+install/db_migrate.sh \
+  --defaults-extra-file /path/to/private-mysql.cnf \
+  mediabot_upgrade \
+  install/migrations/<migration>.sql
+```
+
+The private option file is mode `0600`; credentials are therefore not placed on
+the command line. The historical interactive form remains supported for human
+operators:
+
+```bash
+install/db_migrate.sh mediabot install/migrations/<migration>.sql root
+```
+
+After all post-3.3 migrations, the current checker must pass:
+
+```bash
+perl tools/check_schema_drift.pl --strict --types --indexes
+```
+
+This is an automated database-upgrade proof. It does not replace the final
+manual upgrade rehearsal against a backed-up real instance, nor the separate
+systemd/IRC runtime acceptance checks.
+
 ## Safety rules
 
 Do not apply generated SQL blindly.

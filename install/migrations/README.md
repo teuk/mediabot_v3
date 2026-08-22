@@ -65,6 +65,31 @@ ACHIEVEMENT_PROFILE / ACHIEVEMENT_IDENTITY / ACHIEVEMENT_UNLOCK / ACHIEVEMENT_PR
 
 These tables and reference-data migrations are used by reminder, alias, karma, karma history, trivia, note-related, achievements and games-related code paths.
 
+## Released migration immutability
+
+Migration files that shipped in a stable release are append-only history: do
+not edit or remove them after publication. Fixes belong in a new migration.
+The Debian 13 stable-upgrade CI gate compares the migration files from Git tag
+`3.3` with the current tree by SHA-256 and fails if a released migration was
+removed or rewritten.
+
+Migration files added after the stable tag are applied in the exact order
+listed in **Current migration order** above, then the live database must pass
+`check_schema_drift.pl --strict --types --indexes`.
+
+For automation, `install/db_migrate.sh` accepts a private MySQL option file:
+
+```bash
+install/db_migrate.sh \
+  --defaults-extra-file /root/.mediabot-mysql.cnf \
+  mediabot \
+  install/migrations/<migration>.sql
+```
+
+The file must be a regular non-symlink file with no group/other permissions.
+Without that option, the helper preserves its historical interactive `-p`
+prompt.
+
 ## Recommended application method
 
 Use the interactive SQL client and explicit UTF-8 settings:
