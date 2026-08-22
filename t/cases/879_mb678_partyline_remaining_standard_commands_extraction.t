@@ -18,6 +18,7 @@ return sub {
 
     my $party = _slurp_879(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
     my $cmds  = _slurp_879(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
+    my $priv  = _slurp_879(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Privileged.pm'));
     my $disp  = _slurp_879(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Dispatcher.pm'));
 
     $assert->like($cmds, qr/MB678-IV-N: remaining standard\/operator Partyline commands/,
@@ -89,15 +90,18 @@ return sub {
         '.achievementprofile keeps durable identity diagnostic API');
     $assert->like($cmds, qr/Achievement identity diagnostic \(read-only\)/,
         '.achievementprofile remains explicitly read-only');
-
-    $assert->like($party, qr/^sub _cmd_eval \{/m,
-        '.eval remains in Partyline for dedicated privileged-control round');
+    $assert->unlike($party, qr/^sub _cmd_eval \{/m,
+        '.eval implementation has left Partyline after IV-O');
+    $assert->like($priv, qr/^sub _cmd_eval \{/m,
+        '.eval privileged control is isolated in Privileged');
     $assert->unlike($cmds, qr/^sub _cmd_eval \{/m,
-        'IV-N does not broaden into .eval');
-    $assert->like($party, qr/^sub _cmd_die \{/m,
-        '.die remains in Partyline for dedicated privileged-control round');
+        '.eval is not duplicated in Commands.pm');
+    $assert->unlike($party, qr/^sub _cmd_die \{/m,
+        '.die implementation has left Partyline after IV-O');
+    $assert->like($priv, qr/^sub _cmd_die \{/m,
+        '.die privileged control is isolated in Privileged');
     $assert->unlike($cmds, qr/^sub _cmd_die \{/m,
-        'IV-N does not broaden into .die');
+        '.die is not duplicated in Commands.pm');
 
     for my $core (qw(new get_port _runtime_status_path _runtime_status_payload _write_runtime_status)) {
         $assert->like($party, qr/^sub\s+\Q$core\E\s*\{/m,

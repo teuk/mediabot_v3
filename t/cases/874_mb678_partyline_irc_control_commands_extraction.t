@@ -18,6 +18,7 @@ return sub {
 
     my $party = _slurp_874(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
     my $cmds  = _slurp_874(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
+    my $priv  = _slurp_874(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Privileged.pm'));
     my $disp  = _slurp_874(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Dispatcher.pm'));
 
     $assert->like($cmds, qr/MB678-IV-I: IRC control and lifecycle commands/,
@@ -77,11 +78,12 @@ return sub {
         '.restart keeps the in-process IRC restart path');
     $assert->like($cmds, qr/\$self->_broadcast\("\*\*\* IRC restarting - bot will reconnect shortly\. \*\*\*"\)/,
         '.restart keeps Partyline restart broadcast');
-
-    $assert->like($party, qr/^sub _cmd_eval \{/m,
-        '.eval owner/developer control remains in Partyline after IV-L');
+    $assert->unlike($party, qr/^sub _cmd_eval \{/m,
+        '.eval implementation has left Partyline after IV-O');
+    $assert->like($priv, qr/^sub _cmd_eval \{/m,
+        '.eval privileged control is isolated in Privileged');
     $assert->unlike($cmds, qr/^sub _cmd_eval \{/m,
-        'IV-L does not broaden into .eval owner/developer control');
+        '.eval is not duplicated in Commands.pm');
 
     $assert->unlike($party, qr/^sub _cmd_say \{/m,
         'later IV-N extraction removes .say implementation from Partyline');

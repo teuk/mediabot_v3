@@ -18,6 +18,7 @@ return sub {
 
     my $party = _slurp_875(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
     my $cmds  = _slurp_875(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
+    my $priv  = _slurp_875(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Privileged.pm'));
     my $disp  = _slurp_875(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Dispatcher.pm'));
 
     $assert->like($cmds, qr/MB678-IV-J: Claude \/ AI commands/,
@@ -70,16 +71,18 @@ return sub {
         '.quota keeps configured request limit');
     $assert->like($cmds, qr/anthropic\.RATE_WINDOW/,
         '.quota keeps configured rate window');
-
-    $assert->like($party, qr/^sub _cmd_eval \{/m,
-        '.eval owner/developer control remains in Partyline after IV-L');
+    $assert->unlike($party, qr/^sub _cmd_eval \{/m,
+        '.eval implementation has left Partyline after IV-O');
+    $assert->like($priv, qr/^sub _cmd_eval \{/m,
+        '.eval privileged control is isolated in Privileged');
     $assert->unlike($cmds, qr/^sub _cmd_eval \{/m,
-        'IV-L does not broaden into .eval owner/developer control');
-
-    $assert->like($party, qr/^sub _cmd_eval \{/m,
-        '.eval remains in Partyline after IV-J');
+        '.eval is not duplicated in Commands.pm');
+    $assert->unlike($party, qr/^sub _cmd_eval \{/m,
+        '.eval implementation has left Partyline after IV-O');
+    $assert->like($priv, qr/^sub _cmd_eval \{/m,
+        '.eval privileged control is isolated in Privileged');
     $assert->unlike($cmds, qr/^sub _cmd_eval \{/m,
-        'IV-J does not broaden into .eval');
+        '.eval is not duplicated in Commands.pm');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');

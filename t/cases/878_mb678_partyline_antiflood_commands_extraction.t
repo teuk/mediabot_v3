@@ -18,6 +18,7 @@ return sub {
 
     my $party = _slurp_878(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
     my $cmds  = _slurp_878(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
+    my $priv  = _slurp_878(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Privileged.pm'));
     my $disp  = _slurp_878(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Dispatcher.pm'));
 
     $assert->like($cmds, qr/MB678-IV-M: anti-flood and cooldown operator commands/,
@@ -78,16 +79,18 @@ return sub {
         'later IV-N extraction removes .history implementation from Partyline');
     $assert->like($cmds, qr/^sub _cmd_history \{/m,
         'later IV-N extraction places .history implementation in Commands');
-
-    $assert->like($party, qr/^sub _cmd_eval \{/m,
-        '.eval remains in Partyline after IV-M');
+    $assert->unlike($party, qr/^sub _cmd_eval \{/m,
+        '.eval implementation has left Partyline after IV-O');
+    $assert->like($priv, qr/^sub _cmd_eval \{/m,
+        '.eval privileged control is isolated in Privileged');
     $assert->unlike($cmds, qr/^sub _cmd_eval \{/m,
-        'IV-M does not broaden into owner/developer eval');
-
-    $assert->like($party, qr/^sub _cmd_die \{/m,
-        '.die remains in Partyline after IV-M');
+        '.eval is not duplicated in Commands.pm');
+    $assert->unlike($party, qr/^sub _cmd_die \{/m,
+        '.die implementation has left Partyline after IV-O');
+    $assert->like($priv, qr/^sub _cmd_die \{/m,
+        '.die privileged control is isolated in Privileged');
     $assert->unlike($cmds, qr/^sub _cmd_die \{/m,
-        'IV-M does not broaden into process termination');
+        '.die is not duplicated in Commands.pm');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');

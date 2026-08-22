@@ -18,6 +18,7 @@ return sub {
 
     my $party = _slurp_876(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
     my $cmds  = _slurp_876(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
+    my $priv  = _slurp_876(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Privileged.pm'));
     my $disp  = _slurp_876(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Dispatcher.pm'));
 
     $assert->like($cmds, qr/MB678-IV-K: runtime diagnostics and status commands/,
@@ -75,16 +76,18 @@ return sub {
         '.dbstats keeps connection-count visibility');
     $assert->like($cmds, qr/mediabot_karmahist_requests_total/,
         '.dbstats keeps bot request counters');
-
-    $assert->like($party, qr/^sub _cmd_eval \{/m,
-        '.eval owner/developer control remains in Partyline after IV-L');
+    $assert->unlike($party, qr/^sub _cmd_eval \{/m,
+        '.eval implementation has left Partyline after IV-O');
+    $assert->like($priv, qr/^sub _cmd_eval \{/m,
+        '.eval privileged control is isolated in Privileged');
     $assert->unlike($cmds, qr/^sub _cmd_eval \{/m,
-        'IV-L does not broaden into .eval owner/developer control');
-
-    $assert->like($party, qr/^sub _cmd_eval \{/m,
-        '.eval remains in Partyline after IV-K');
+        '.eval is not duplicated in Commands.pm');
+    $assert->unlike($party, qr/^sub _cmd_eval \{/m,
+        '.eval implementation has left Partyline after IV-O');
+    $assert->like($priv, qr/^sub _cmd_eval \{/m,
+        '.eval privileged control is isolated in Privileged');
     $assert->unlike($cmds, qr/^sub _cmd_eval \{/m,
-        'IV-K does not broaden into .eval');
+        '.eval is not duplicated in Commands.pm');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');

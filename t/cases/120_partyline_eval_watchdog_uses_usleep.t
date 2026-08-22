@@ -40,13 +40,13 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_partyline_watchdog_mb309(
-        File::Spec->catfile('.', 'Mediabot', 'Partyline.pm')
+        File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Privileged.pm')
     );
     my $body = _extract_sub_body_partyline_watchdog_mb309($src, '_cmd_eval');
 
     $assert->ok(defined $body, '_cmd_eval body found');
     $assert->unlike($src, qr/^use Time::HiRes qw\(usleep\);$/m,
-        'Partyline.pm no longer imports usleep');
+        'Privileged.pm does not import usleep');
     $assert->unlike($body // '', qr/\busleep\s*\(/,
         'eval watchdog never sleeps inside the event loop');
     $assert->like($body // '', qr/kill\s+'TERM',\s*\$pid/,

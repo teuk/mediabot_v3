@@ -63,15 +63,15 @@ sub _extract_sub_body_partyline_eval_guard {
 return sub {
     my ($assert) = @_;
 
-    my $partyline = _slurp_partyline_eval_guard(
-        File::Spec->catfile('.', 'Mediabot', 'Partyline.pm')
+    my $privileged = _slurp_partyline_eval_guard(
+        File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Privileged.pm')
     );
 
     my $sample = _slurp_partyline_eval_guard(
         File::Spec->catfile('.', 'mediabot.sample.conf')
     );
 
-    my $body = _extract_sub_body_partyline_eval_guard($partyline, '_cmd_eval');
+    my $body = _extract_sub_body_partyline_eval_guard($privileged, '_cmd_eval');
 
     $assert->ok(
         defined $body,

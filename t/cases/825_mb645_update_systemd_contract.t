@@ -36,6 +36,7 @@ return sub {
     my $main   = slurp_utf8('mediabot.pl');
     my $admin  = slurp_utf8('Mediabot/AdminCommands.pm');
     my $party  = slurp_utf8('Mediabot/Partyline.pm');
+    my $priv   = slurp_utf8('Mediabot/Partyline/Privileged.pm');
     my $core   = slurp_utf8('Mediabot/Mediabot.pm');
 
     # [1] Le template Git reste le meme modele multi-instance que teuk.org.
@@ -108,7 +109,7 @@ return sub {
     $assert->like($admin,
         qr/sub mbQuit_ctx.*?setShutdownExitCode\(\$self->getNoRestartExitCode\(\)\).*?\$self->\{Quit\} = 1/s,
         'mb645-825: commande die arme exit 75 avant QUIT');
-    $assert->like($party,
+    $assert->like($priv,
         qr/sub _cmd_die.*?setShutdownExitCode\(\$bot->getNoRestartExitCode\(\)\).*?\$bot->\{Quit\} = 1/s,
         'mb645-825: Partyline .die arme exit 75 avant QUIT');
 

@@ -18,6 +18,7 @@ return sub {
 
     my $party = _slurp_870(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'));
     my $cmds  = _slurp_870(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
+    my $priv  = _slurp_870(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Privileged.pm'));
     my $disp  = _slurp_870(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Dispatcher.pm'));
 
     $assert->like($cmds, qr/MB678-IV-F: karma visibility commands/,
@@ -49,11 +50,12 @@ return sub {
         '.karmahist remains capped to ten Partyline entries');
     $assert->like($cmds, qr/Mediabot::UserCommands::_seconds_to_human/,
         '.karmahist keeps human-readable age formatting');
-
-    $assert->like($party, qr/^sub _cmd_eval \{/m,
-        '.eval owner/developer control remains in Partyline after IV-L');
+    $assert->unlike($party, qr/^sub _cmd_eval \{/m,
+        '.eval implementation has left Partyline after IV-O');
+    $assert->like($priv, qr/^sub _cmd_eval \{/m,
+        '.eval privileged control is isolated in Privileged');
     $assert->unlike($cmds, qr/^sub _cmd_eval \{/m,
-        'IV-L does not broaden into .eval owner/developer control');
+        '.eval is not duplicated in Commands.pm');
 
     $assert->unlike($cmds, qr/^sub _handle_line \{/m,
         'dispatcher responsibility is not duplicated in Commands.pm');

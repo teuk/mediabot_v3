@@ -38,7 +38,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_mb309(
-        File::Spec->catfile('.', 'Mediabot', 'Partyline.pm')
+        File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Privileged.pm')
     );
     my $body = _extract_sub_mb309($src, '_cmd_eval');
 
