@@ -186,9 +186,13 @@ application credentials. The same Debian 13 job also exports the real stable
 current reference schema, applies only migration files added after `3.3` in the
 authoritative order from `install/migrations/README.md`, and requires the final
 strict type/index drift check to return clean. Released migration files shared
-with `3.3` are checksum-compared and must remain immutable. The CI-only `cpanm`
-local library is an acceleration/isolation mechanism; the supported operator
-installation path remains the CPAN flow described above. Live systemd deployment and IRC
+with `3.3` are checksum-compared and must remain immutable. The same job also
+runs the supported systemd installation helper against an isolated filesystem
+root, proves idempotent/fail-closed replacement behavior, and parses the
+installed published template with Debian 13 `systemd-analyze verify`. The
+CI-only `cpanm` local library is an acceleration/isolation mechanism; the
+supported operator installation path remains the CPAN flow described above.
+Live systemd deployment and IRC
 connectivity remain end-to-end runtime checks rather than container-CI claims. A manual end-to-end fresh install on a dedicated Debian 13
 VM is still required before final 3.5 acceptance.
 

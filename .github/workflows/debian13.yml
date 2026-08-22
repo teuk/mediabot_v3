@@ -37,6 +37,7 @@ jobs:
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             bash \
+            systemd \
             ca-certificates \
             git \
             sudo \
@@ -145,6 +146,65 @@ jobs:
               grep -Fq "Fresh installation detected:" configure.log
               grep -Fq "Configuration synchronization completed (--sync-only)" configure.log
             '
+
+      - name: Exercise systemd installation and static unit validation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SYSTEMD_ROOT="$(mktemp -d /tmp/mediabot-systemd-root.XXXXXX)"
+          cleanup_systemd_root() {
+            rm -rf "$SYSTEMD_ROOT"
+          }
+          trap cleanup_systemd_root EXIT
+
+          install -d -m 0755 "$SYSTEMD_ROOT/home/mediabot/mediabot_v3"
+          install -m 0644 \
+            /home/mediabot/mediabot_v3/mediabot.pl \
+            "$SYSTEMD_ROOT/home/mediabot/mediabot_v3/mediabot.pl"
+          install -m 0600 \
+            /home/mediabot/mediabot_v3/mediabot.conf \
+            "$SYSTEMD_ROOT/home/mediabot/mediabot_v3/mediabot.conf"
+
+          bash install/systemd_install.sh \
+            --root "$SYSTEMD_ROOT" \
+            --instance ci \
+            --bot-dir /home/mediabot/mediabot_v3
+
+          cmp tools/systemd/mediabot@.service.example "$SYSTEMD_ROOT/etc/systemd/system/mediabot@.service"
+          test "$(stat -c %a "$SYSTEMD_ROOT/etc/systemd/system/mediabot@.service")" = 644
+          test "$(stat -c %a "$SYSTEMD_ROOT/etc/default/mediabot-ci")" = 644
+          grep -Fxq 'BOT_DIR=/home/mediabot/mediabot_v3' "$SYSTEMD_ROOT/etc/default/mediabot-ci"
+          grep -Fxq 'BOT_BIN=/home/mediabot/mediabot_v3/mediabot.pl' "$SYSTEMD_ROOT/etc/default/mediabot-ci"
+          grep -Fxq 'BOT_CONF=/home/mediabot/mediabot_v3/mediabot.conf' "$SYSTEMD_ROOT/etc/default/mediabot-ci"
+
+          # A second identical install must be a no-op success.
+          bash install/systemd_install.sh \
+            --root "$SYSTEMD_ROOT" \
+            --instance ci \
+            --bot-dir /home/mediabot/mediabot_v3
+
+          # A divergent template must fail closed unless replacement is explicit.
+          printf '\n# deliberate MB687 CI drift\n' >>"$SYSTEMD_ROOT/etc/systemd/system/mediabot@.service"
+          if bash install/systemd_install.sh \
+              --root "$SYSTEMD_ROOT" \
+              --instance ci \
+              --bot-dir /home/mediabot/mediabot_v3; then
+            echo 'ERROR: divergent systemd template was overwritten without --replace-template' >&2
+            exit 1
+          fi
+
+          bash install/systemd_install.sh \
+            --root "$SYSTEMD_ROOT" \
+            --instance ci \
+            --bot-dir /home/mediabot/mediabot_v3 \
+            --replace-template
+
+          cmp tools/systemd/mediabot@.service.example "$SYSTEMD_ROOT/etc/systemd/system/mediabot@.service"
+          systemd-analyze verify "$SYSTEMD_ROOT/etc/systemd/system/mediabot@.service"
+
+          # Static/container validation deliberately never enables or starts a unit.
+          test ! -e "$SYSTEMD_ROOT/etc/systemd/system/multi-user.target.wants/mediabot@ci.service"
 
       - name: Exercise fresh MariaDB database installation and strict drift validation
         shell: bash
@@ -366,4 +426,4 @@ jobs:
           export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5:$GITHUB_WORKSPACE${PERL5LIB:+:$PERL5LIB}"
 
           perl t/test_commands.pl \
-            -f '^(119_|125_|132_|597_|598_|599_|600_|610_|717_|718_|719_|720_|723_|830_|884_|885_|886_|887_|888_)'
+            -f '^(119_|125_|132_|597_|598_|599_|600_|610_|717_|718_|719_|720_|723_|830_|884_|885_|886_|887_|888_|889_)'

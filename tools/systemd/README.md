@@ -112,6 +112,95 @@ Reload systemd after installing or editing the unit:
 systemctl daemon-reload
 ```
 
+## Supported installer
+
+The repository provides a fail-closed installer for the published template and
+instance environment files:
+
+```text
+install/systemd_install.sh
+```
+
+For a fresh development instance:
+
+```bash
+cd /home/mediabot/mediabot_v3 || exit 1
+sudo ./install/systemd_install.sh \
+  --instance dev \
+  --bot-dir /home/mediabot/mediabot_v3
+```
+
+This installs:
+
+```text
+/etc/systemd/system/mediabot@.service
+/etc/default/mediabot-dev
+```
+
+The helper is deliberately conservative:
+
+- an existing identical file is accepted unchanged;
+- an existing divergent template is preserved unless `--replace-template` is explicit;
+- an existing divergent instance environment is preserved unless `--replace-instance` is explicit;
+- symlink targets are refused;
+- the current template requires systemd 250 or newer because it uses `ExitType=cgroup`;
+- it does not start, restart, or enable the bot automatically.
+
+When real `/etc` files are changed the helper runs only `systemctl daemon-reload`.
+Starting and enabling an instance remain explicit operator actions after review.
+
+For an existing installation where the per-instance `/etc/default` file must
+remain untouched, update only the shared template:
+
+```bash
+cd /home/mediabot/mediabot_v3 || exit 1
+sudo ./install/systemd_install.sh --template-only --replace-template
+```
+
+The previous divergent file is backed up beside the installed file before an
+explicit replacement.
+
+After installation, review the effective unit before starting or restarting an
+instance:
+
+```bash
+systemd-analyze verify /etc/systemd/system/mediabot@.service
+systemctl cat mediabot@dev.service --no-pager
+systemctl show mediabot@dev.service \
+  -p ExitType \
+  -p Restart \
+  -p SuccessExitStatus \
+  -p RestartPreventExitStatus \
+  --no-pager
+```
+
+Expected update-safe lifecycle values are:
+
+```text
+ExitType=cgroup
+Restart=always
+SuccessExitStatus=75
+RestartPreventExitStatus=75
+```
+
+Only after that review, enable/start explicitly when appropriate:
+
+```bash
+systemctl enable mediabot@dev.service
+systemctl start mediabot@dev.service
+```
+
+### Debian 13 CI boundary
+
+The Debian 13 gate executes this installer against an isolated filesystem root,
+checks idempotency and fail-closed replacement, compares the installed unit to
+the published template, and parses it with `systemd-analyze verify` from Debian
+13.
+
+That is an installation/static-unit proof. A container does not provide the
+project's live systemd PID 1, so service startup, restart behavior, updater
+handoff, and IRC connectivity remain end-to-end acceptance checks.
+
 ## Example environment files
 
 ### Dev instance
