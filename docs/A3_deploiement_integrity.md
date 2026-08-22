@@ -40,18 +40,24 @@ Code retour : `0` = OK, `1` = au moins un défaut (fail-closed).
 
 ## Déploiement recommandé : `install/deploy_update.sh`
 
-Ce script fait déjà les choses bien : clone COMPLET depuis GitHub (jamais de
-copie fichier par fichier), restauration de `mediabot.conf` + brain Hailo,
-rotation atomique par `mv` avec archive versionnée et rollback.
+Ce script fait déjà les choses bien : clone COMPLET depuis le `origin` Git du
+déploiement courant (jamais de copie fichier par fichier), restauration de la
+configuration privée d'instance, du brain Hailo et de l'état media local,
+rotation atomique par `mv` avec archive versionnée et rollback. `mediabot.conf`
+reste la configuration par défaut ; une autre configuration locale se choisit
+explicitement avec `--conf=<fichier>`.
 
 **A3 y ajoute** : après la validation `perl -c` de l'arbre stagé et AVANT la
 bascule, il génère un manifest depuis le clone candidat (son propre arbre =
 référence) et lance l'integrity check sur l'arbre stagé. Si le check échoue, il
 refuse de basculer et l'ancienne release reste en place.
 
-    # Sur l'hôte de l'instance Undernet (utilisateur du bot) :
-    cd ~/mediabot_v3
+    # Depuis le répertoire Git de l'instance, avec l'utilisateur du bot :
+    cd /chemin/vers/instance
     ./install/deploy_update.sh
+
+    # Instance utilisant un autre fichier de configuration privé :
+    ./install/deploy_update.sh --conf=instance.conf
 
 Le script s'arrête tout seul si le clone est incohérent — rien n'est activé.
 

@@ -14,11 +14,11 @@ return sub {
     my $sh = <$fh>;
     close $fh;
 
-    my $clone   = index($sh, 'git clone https://github.com/teuk/mediabot_v3');
+    my $clone   = index($sh, 'git clone "${ORIGIN_URL}" "${TMP_CLONE_DIR}"');
     my $syntax  = index($sh, 'Checking Perl syntax in the staged release');
     my $integ   = index($sh, 'startup_integrity_check.pl --manifest');
     my $stop    = index($sh, 'Sending SIGTERM to PID');
-    my $restore = index($sh, 'Restoring config and Hailo brain into the staged release');
+    my $restore = index($sh, 'Restoring private instance state into the staged release');
     my $rotate  = index($sh, 'Archiving current release:');
     my $active  = index($sh, 'Activating new release:');
 
@@ -49,8 +49,11 @@ return sub {
 
     $assert->like($sh, qr/clone \+ staged validation happen BEFORE this stop/,
         'mb635-816: raison de l ordre documentee dans le script');
-    $assert->like($sh, qr/cp -pfv "\$\{PROJECT_DIR\}\/mediabot\.conf" "\$\{TMP_CLONE_DIR\}\/"/,
-        'mb635-816: mediabot.conf preservee');
-    $assert->like($sh, qr/LATEST_BRAIN/,
+    $assert->like($sh,
+        qr/cp -pfv "\$\{INSTANCE_CONF_REAL\}" "\$\{TMP_CLONE_DIR\}\/\$\{INSTANCE_CONF_NAME\}"/,
+        'mb635-816: configuration d instance preservee');
+    $assert->like($sh, qr/BRAIN_COUNT/,
         'mb635-816: cerveau Hailo preserve');
+    $assert->like($sh, qr/\$\{PROJECT_DIR\}\/mp3/,
+        'mb635-816: etat media local preserve');
 };

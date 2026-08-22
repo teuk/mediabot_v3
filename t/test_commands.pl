@@ -134,6 +134,8 @@ sub _normalize_class_args {
 # ---- Classe d'assertion -----------------------------------------------------
 package Assert;
 
+our $CURRENT_CASE = '';
+
 # Legacy MB12x-MB20x case files receive an assertion callback and invoke it as
 # $assert->($condition, $description), while newer cases use the Assert object
 # methods directly. Make the same object callable so the static runner supports
@@ -170,7 +172,10 @@ sub _result {
     } else {
         $self->{fail}++;
         my $info = $extra ? " ($extra)" : '';
-        print "  [FAIL] $desc$info\n";
+        my $case = (!$self->{verbose} && length $CURRENT_CASE)
+            ? "[$CURRENT_CASE] "
+            : '';
+        print "  ${case}[FAIL] $desc$info\n";
     }
 
     # MB301: assertion methods must behave like Test::More predicates so
@@ -221,7 +226,7 @@ sub diag {
     $text =~ s/\r\n?/\n/g;
     $text =~ s/\n\z//;
     $text =~ s/^/# /mg;
-    print "$text\n" if length $text;
+    print "$text\n" if length($text) && $self->{verbose};
     return 0;
 }
 
@@ -331,7 +336,13 @@ sub _run_isolated_tap_case {
     my $closed = close $child;
     my $status = $?;
 
-    print $output;
+    if ($opt_verbose) {
+        print $output;
+    }
+    else {
+        my $compact = _compact_failure_output($name, $output);
+        print "$compact\n" if length $compact;
+    }
 
     my $parser = TAP::Parser->new({ source => \$output });
     my ($tap_pass, $tap_fail, $tap_tests) = (0, 0, 0);
@@ -597,6 +608,59 @@ sub _filter_case_load_warning {
     warn $warning;
 }
 
+sub _compact_failure_output {
+    my ($name, $output) = @_;
+
+    $name   //= '(unknown test)';
+    $output //= '';
+    $output =~ s/\r\n?/\n/g;
+
+    my @lines = split /\n/, $output;
+    my @kept;
+
+    for my $line (@lines) {
+        next unless defined $line;
+        $line =~ s/\s+\z//;
+        next unless length $line;
+
+        # Keep only failure-bearing lines in normal compact mode. Full TAP,
+        # diagnostics and arbitrary case output remain available with --verbose.
+        next unless $line =~ /
+            \[FAIL\]
+            | \bnot\h+ok\b
+            | \bBail\h+out!
+            | ERREUR\h+(?:de\h+chargement|d['’]execution)
+            | \b(?:FAILED|FATAL|PANIC)\b
+        /ix;
+
+        # Keep pathological diagnostics from turning one failure into pages.
+        my $max = 260;
+        if (length($line) > $max) {
+            $line = substr($line, 0, $max - 3) . '...';
+        }
+
+        push @kept, $line;
+    }
+
+    # Preserve order but remove duplicate lines (common with nested TAP wrappers).
+    my %seen;
+    @kept = grep { !$seen{$_}++ } @kept;
+
+    my $max_lines = 8;
+    my $omitted = @kept > $max_lines ? @kept - $max_lines : 0;
+    splice @kept, $max_lines if @kept > $max_lines;
+
+    if (!@kept) {
+        return "[ $name ]\n  failure detected (use --verbose for full diagnostics)";
+    }
+
+    my $body = join("\n", map { "  $_" } @kept);
+    $body .= "\n  ... $omitted additional failure line(s) omitted"
+        if $omitted;
+
+    return "[ $name ]\n$body";
+}
+
 my @progress_failure_details;
 my ($progress_console_out, $progress_console_err, $progress_capture_fh);
 my $progress_done = 0;
@@ -699,10 +763,14 @@ sub _progress_after_case {
     return unless $opt_progress;
 
     my $output = _progress_capture_take();
-    if ($assert->failed > ($args{failed_before} // 0)) {
+    my $failed_delta =
+        $assert->failed - ($args{failed_before} // 0);
+
+    if ($failed_delta > 0) {
         push @progress_failure_details, {
-            name   => $args{name},
-            output => $output,
+            name     => $args{name},
+            failures => $failed_delta,
+            output   => _compact_failure_output($args{name}, $output),
         };
     }
 
@@ -729,16 +797,12 @@ sub _progress_finish {
 
     return unless @progress_failure_details;
 
-    print "\nFailure details\n";
+    printf "\nFailed test files (%d)\n",
+        scalar(@progress_failure_details);
     print "-" x 60 . "\n";
 
     for my $row (@progress_failure_details) {
-        if (length $row->{output}) {
-            print "$row->{output}\n\n";
-        }
-        else {
-            print "[ $row->{name} ]\n(no captured diagnostics)\n\n";
-        }
+        print "$row->{output}\n";
     }
 }
 
@@ -751,6 +815,7 @@ for my $file (@test_files) {
     $progress_case_failed_before = $assert->failed;
     $progress_case_name = basename($file);
     my $name = basename($file);
+    $Assert::CURRENT_CASE = $name;
     _progress_render(
         done    => $progress_done,
         total   => scalar(@test_files),
@@ -761,7 +826,7 @@ for my $file (@test_files) {
     my $assert_before = $assert->total;
     my $failed_before = $assert->failed;
     my $profile_mode = 'runner';
-    print "\n[ $name ]\n";
+    print "\n[ $name ]\n" if $opt_verbose;
 
     my ($isolate, $isolate_reason) = _case_requires_isolation($file);
     if ($isolate) {

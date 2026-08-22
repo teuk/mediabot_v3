@@ -14,7 +14,7 @@ use File::Temp qw(tempfile);
 sub _run_mb333_runner {
     my ($runner, $filter) = @_;
 
-    my $pipe = open my $fh, '-|', $^X, $runner, '--filter', $filter;
+    my $pipe = open my $fh, '-|', $^X, $runner, '--filter', $filter, '--verbose';
     return (255, "cannot launch runner: $!") unless $pipe;
 
     local $/;

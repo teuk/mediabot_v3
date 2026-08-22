@@ -181,6 +181,7 @@ return sub {
     my ($run_out, $run_rc) = _capture_runner(
         '--filter', '01_context',
         '--class', 'PURE',
+        '--verbose',
     );
     $assert->is($run_rc, 0,
         'mb660-842: class filtering can execute the normal runner');

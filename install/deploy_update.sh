@@ -14,6 +14,49 @@ CURRENT_HOST_NORM="${CURRENT_HOST,,}"
 CURRENT_HOST_NORM="${CURRENT_HOST_NORM%.}"
 CURRENT_USER="$(id -un)"
 
+INSTANCE_CONF="${MEDIABOT_UPDATE_CONF:-mediabot.conf}"
+
+usage() {
+    cat <<'EOF'
+Usage:
+  install/deploy_update.sh [--conf=<file>]
+  install/deploy_update.sh [--conf <file>]
+
+Options:
+  --conf <file>   Private instance config to preserve across the update.
+                  Relative paths are resolved inside the current project.
+                  Default: mediabot.conf
+  -h, --help      Show this help and exit.
+
+The updater always clones the current repository's origin, validates the
+candidate before shutdown, preserves instance-local state, rotates the current
+directory to <project>.<N>, and activates the new clone at the same path.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --conf=*)
+            INSTANCE_CONF="${1#--conf=}"
+            shift
+            ;;
+        --conf)
+            [ "$#" -ge 2 ] || { echo "ERROR: --conf requires a file" >&2; exit 2; }
+            INSTANCE_CONF="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "ERROR: unknown option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
 # +-------------------------------------------------------------------------+
 # | [0] Safety check: refuse ONLY the exact teuk.org production instance   |
 # +-------------------------------------------------------------------------+
@@ -147,9 +190,36 @@ echo "==> Parent directory: ${PARENT_DIR}"
 echo
 
 # Safety checks
-[ "${PROJECT_NAME}" = "mediabot_v3" ] || fail "project directory name is '${PROJECT_NAME}', expected 'mediabot_v3'"
+[[ "${PROJECT_NAME}" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] \
+    || fail "project directory name '${PROJECT_NAME}' is unsafe for release rotation"
 [ -f "${PROJECT_DIR}/mediabot.pl" ] || fail "${PROJECT_DIR}/mediabot.pl not found"
 [ -d "${PARENT_DIR}" ] || fail "parent directory ${PARENT_DIR} does not exist"
+[ -d "${PROJECT_DIR}/.git" ] || fail "${PROJECT_DIR} is not a Git working tree"
+
+ORIGIN_URL="$(git -C "${PROJECT_DIR}" remote get-url origin 2>/dev/null || true)"
+[ -n "${ORIGIN_URL}" ] || fail "Git remote 'origin' is not configured"
+
+if [[ "${INSTANCE_CONF}" = /* ]]; then
+    INSTANCE_CONF_CANDIDATE="${INSTANCE_CONF}"
+else
+    INSTANCE_CONF_CANDIDATE="${PROJECT_DIR}/${INSTANCE_CONF}"
+fi
+
+INSTANCE_CONF_REAL="$(readlink -f "${INSTANCE_CONF_CANDIDATE}" 2>/dev/null || true)"
+[ -n "${INSTANCE_CONF_REAL}" ] && [ -f "${INSTANCE_CONF_REAL}" ] \
+    || fail "instance config not found: ${INSTANCE_CONF}"
+
+INSTANCE_CONF_DIR="$(dirname "${INSTANCE_CONF_REAL}")"
+[ "${INSTANCE_CONF_DIR}" = "${TARGET_REAL}" ] \
+    || fail "instance config must live directly in ${PROJECT_DIR}: ${INSTANCE_CONF_REAL}"
+
+INSTANCE_CONF_NAME="$(basename "${INSTANCE_CONF_REAL}")"
+[[ "${INSTANCE_CONF_NAME}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+    || fail "instance config filename '${INSTANCE_CONF_NAME}' is unsafe"
+
+echo "==> Instance config: ${INSTANCE_CONF_NAME}"
+echo "==> Git origin: ${ORIGIN_URL}"
+echo
 
 STATUS_OLD_VERSION="$(head -n 1 "${PROJECT_DIR}/VERSION" 2>/dev/null | tr -d '\r\n' || true)"
 if ! write_update_status "running" "preflight" ""; then
@@ -161,14 +231,14 @@ STATUS_STARTED=1
 # | [1] Determine the next version number                                   |
 # +-------------------------------------------------------------------------+
 LAST_VER="$(
-    find "$PARENT_DIR" -maxdepth 1 -type d -name 'mediabot_v3.*' -printf '%f\n' 2>/dev/null \
-    | sed -n 's/^mediabot_v3\.\([0-9][0-9]*\)$/\1/p' \
+    find "$PARENT_DIR" -maxdepth 1 -type d -name "${PROJECT_NAME}.*" -printf '%f\n' 2>/dev/null \
+    | sed -n "s/^${PROJECT_NAME}\.\([0-9][0-9]*\)$/\1/p" \
     | sort -n \
     | tail -1 \
     || true
 )"
 NEXT_VER=$(( ${LAST_VER:-0} + 1 ))
-BACKUP_DIR="${PARENT_DIR}/mediabot_v3.${NEXT_VER}"
+BACKUP_DIR="${PARENT_DIR}/${PROJECT_NAME}.${NEXT_VER}"
 
 echo "==> Next archive version: ${NEXT_VER}"
 echo "==> Backup directory will be: ${BACKUP_DIR}"
@@ -177,11 +247,11 @@ echo
 # +-------------------------------------------------------------------------+
 # | [2] Clone the latest version into a temporary directory                 |
 # +-------------------------------------------------------------------------+
-TMP_CLONE_DIR="$(mktemp -d "${PARENT_DIR}/mediabot_v3.new.XXXXXX")"
-echo "🌐 Cloning the latest version from GitHub into ${TMP_CLONE_DIR} ..."
+TMP_CLONE_DIR="$(mktemp -d "${PARENT_DIR}/${PROJECT_NAME}.new.XXXXXX")"
+echo "🌐 Cloning the latest version from origin into ${TMP_CLONE_DIR} ..."
 status_checkpoint "clone"
 
-git clone https://github.com/teuk/mediabot_v3 "${TMP_CLONE_DIR}"
+git clone "${ORIGIN_URL}" "${TMP_CLONE_DIR}"
 [ -f "${TMP_CLONE_DIR}/mediabot.pl" ] || fail "clone completed but mediabot.pl is missing in ${TMP_CLONE_DIR}"
 STATUS_TARGET_VERSION="$(head -n 1 "${TMP_CLONE_DIR}/VERSION" 2>/dev/null | tr -d '\r\n' || true)"
 status_checkpoint "staged_validation"
@@ -231,20 +301,32 @@ status_checkpoint "pre_stop"
 # two local mv operations -> final syntax check, so restart sees the new tree.
 while IFS= read -r PID; do
     [ -z "$PID" ] && continue
+    [ -r "/proc/${PID}/cmdline" ] || continue
 
-    CMDLINE="$(tr '\0' ' ' < "/proc/${PID}/cmdline" 2>/dev/null || true)"
-    [ -z "$CMDLINE" ] && continue
+    # Never parse a flattened shell command string here. A parent shell whose
+    # `-c` payload merely CONTAINS "mediabot.pl --conf=..." is not the bot.
+    # Read the kernel's real NUL-separated argv and require a genuine
+    # mediabot.pl argv item plus the exact selected --conf argument.
+    PROC_ARGV=()
+    mapfile -d '' -t PROC_ARGV < "/proc/${PID}/cmdline" 2>/dev/null || continue
+    [ "${#PROC_ARGV[@]}" -gt 0 ] || continue
 
+    HAS_MEDIABOT_ARG=0
     CONF_ARG=""
-    for arg in $CMDLINE; do
+
+    for arg in "${PROC_ARGV[@]}"; do
         case "$arg" in
+            mediabot.pl|*/mediabot.pl)
+                HAS_MEDIABOT_ARG=1
+                ;;
             --conf=*)
                 CONF_ARG="${arg#--conf=}"
-                break
                 ;;
         esac
     done
-    [ -z "$CONF_ARG" ] && continue
+
+    [ "$HAS_MEDIABOT_ARG" -eq 1 ] || continue
+    [ -n "$CONF_ARG" ] || continue
 
     if [[ "$CONF_ARG" = /* ]]; then
         CONF_ABS="$CONF_ARG"
@@ -255,9 +337,8 @@ while IFS= read -r PID; do
     fi
 
     CONF_REAL="$(readlink -f "$CONF_ABS" 2>/dev/null || echo "$CONF_ABS")"
-    CONF_DIR="$(dirname "$CONF_REAL")"
 
-    if [ "$CONF_DIR" = "$TARGET_REAL" ]; then
+    if [ "$CONF_REAL" = "$INSTANCE_CONF_REAL" ]; then
         BOT_PID="$PID"
         echo "🔎 Found matching instance: PID=${PID} conf=${CONF_REAL}"
         break
@@ -309,9 +390,7 @@ if [ -n "$BOT_PID" ]; then
         sleep 1
         WAIT=$((WAIT + 1))
         if [ "$WAIT" -ge 30 ]; then
-            echo "⚠️  Still running after 30 seconds — sending SIGKILL ..."
-            kill -9 "$BOT_PID" 2>/dev/null || true
-            break
+            fail "bot PID ${BOT_PID} is still running after 30 seconds; refusing SIGKILL and leaving the live tree untouched"
         fi
     done
 
@@ -322,36 +401,38 @@ fi
 echo
 
 # +-------------------------------------------------------------------------+
-# | [5] Restore config and Hailo brain into the temporary clone             |
+# | [5] Restore private instance state into the temporary clone             |
 # +-------------------------------------------------------------------------+
 status_checkpoint "preserve_state"
-echo "⚙️  Restoring config and Hailo brain into the staged release ..."
+echo "⚙️  Restoring private instance state into the staged release ..."
 
-if [ -f "${PROJECT_DIR}/mediabot.conf" ]; then
-    cp -pfv "${PROJECT_DIR}/mediabot.conf" "${TMP_CLONE_DIR}/"
-else
-    echo "⚠️  Warning: mediabot.conf was not found in ${PROJECT_DIR}."
-fi
+cp -pfv "${INSTANCE_CONF_REAL}" "${TMP_CLONE_DIR}/${INSTANCE_CONF_NAME}"
 
 # mb646: transitional safety only. Achievements are DB-backed after migration,
 # but an older instance may still have its last durable state in JSON. Preserve
 # that file across the directory swap so the new release can import it once.
 if [ -f "${PROJECT_DIR}/var/achievements.json" ]; then
     mkdir -p "${TMP_CLONE_DIR}/var"
-    cp -pfv "${PROJECT_DIR}/var/achievements.json"         "${TMP_CLONE_DIR}/var/achievements.json"
+    cp -pfv "${PROJECT_DIR}/var/achievements.json" \
+        "${TMP_CLONE_DIR}/var/achievements.json"
 fi
 
-LATEST_BRAIN="$(
-    find "$PARENT_DIR" -maxdepth 2 -type f \( -path '*/mediabot_v3/*.brn' -o -path '*/mediabot_v3.*/*.brn' \) -printf '%T@ %p\n' 2>/dev/null \
-    | sort -nr \
-    | head -1 \
-    | cut -d' ' -f2- \
-    || true
-)"
-if [ -n "${LATEST_BRAIN}" ]; then
-    cp -pfv "${LATEST_BRAIN}" "${TMP_CLONE_DIR}/"
-else
-    echo "⚠️  Warning: no .brn brain file was found in the current or archived releases."
+# Hailo brain files are instance-local state. Preserve every root-level .brn
+# from the current instance; never recover code from an archived release.
+BRAIN_COUNT=0
+while IFS= read -r -d '' BRAIN_FILE; do
+    cp -pfv "${BRAIN_FILE}" "${TMP_CLONE_DIR}/"
+    BRAIN_COUNT=$((BRAIN_COUNT + 1))
+done < <(find "${PROJECT_DIR}" -maxdepth 1 -type f -name '*.brn' -print0 2>/dev/null)
+
+if [ "$BRAIN_COUNT" -eq 0 ]; then
+    echo "⚠️  Warning: no root-level .brn brain file was found in the current instance."
+fi
+
+# Local media is runtime/private state and must never disappear during a code
+# rotation. It is intentionally ignored by Git.
+if [ -d "${PROJECT_DIR}/mp3" ]; then
+    cp -a "${PROJECT_DIR}/mp3" "${TMP_CLONE_DIR}/"
 fi
 echo
 
@@ -379,7 +460,7 @@ if ! (
     echo "⚠️  Validation failed after activation. Attempting rollback ..."
 
     if [ -d "${PROJECT_DIR}" ] && [ -d "${BACKUP_DIR}" ]; then
-        FAILED_DIR="${PARENT_DIR}/mediabot_v3.failed.$$"
+        FAILED_DIR="${PARENT_DIR}/${PROJECT_NAME}.failed.$$"
         mv -v "${PROJECT_DIR}" "${FAILED_DIR}" &&         mv -v "${BACKUP_DIR}"  "${PROJECT_DIR}" &&         ROLLED_BACK=1 || true
         if [ "$ROLLED_BACK" -eq 1 ]; then
             STATUS_INSTALLED_VERSION="$STATUS_OLD_VERSION"
@@ -461,7 +542,7 @@ echo "Current live release: ${PROJECT_DIR}"
 echo "Previous release archive: ${BACKUP_DIR}"
 echo
 echo "Start the bot in foreground with:"
-echo "  cd ${PROJECT_DIR} && perl mediabot.pl --conf=mediabot.conf"
+echo "  cd ${PROJECT_DIR} && perl mediabot.pl --conf=${INSTANCE_CONF_NAME}"
 echo "Or with systemd (recommended for production):"
 echo "  sudo systemctl restart mediabot@<instance>   # see tools/systemd/README.md"
 

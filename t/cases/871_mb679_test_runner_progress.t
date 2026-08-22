@@ -112,15 +112,32 @@ return sub {
     );
     $assert->is($plain_rc, 0,
         'mb679-871: normal runner remains successful without --progress');
-    $assert->like(
+    $assert->unlike(
         $plain,
         qr/\[ 717_mb507_schema_drift_indexes\.t \]/,
-        'mb679-871: normal per-file output remains unchanged without --progress',
+        'mb688-871: normal compact mode hides passing per-file headings',
+    );
+    $assert->like(
+        $plain,
+        qr/PASSED\s*:\s*\d+\/\d+/,
+        'mb688-871: normal compact mode preserves the final verdict',
     );
     $assert->unlike(
         $plain,
         qr/\r\[[=> ]{20}\]/,
         'mb679-871: progress output remains strictly opt-in',
+    );
+
+    my ($verbose, $verbose_rc) = _mb679_capture_runner(
+        '--filter', '717_mb507_schema_drift_indexes',
+        '--verbose',
+    );
+    $assert->is($verbose_rc, 0,
+        'mb688-871: verbose runner remains successful');
+    $assert->like(
+        $verbose,
+        qr/\[ 717_mb507_schema_drift_indexes\.t \]/,
+        'mb688-871: verbose mode preserves detailed per-file headings',
     );
 
     my ($cases_dir) = File::Spec->catdir($Bin);
@@ -151,8 +168,8 @@ FAIL_CASE
         'mb679-871: failing progress run preserves non-zero verdict');
     $assert->like(
         $fail_out,
-        qr/\r\[={20}\]\s+100%.*?Failure details.*?not ok 2 - synthetic progress failure/s,
-        'mb679-871: failure detail is deferred until after the final progress update',
+        qr/\r\[={20}\]\s+100%.*?Failed test files \(1\).*?not ok 2 - synthetic progress failure/s,
+        'mb688-871: compact failure detail is deferred until after the final progress update',
     );
     $assert->like(
         $fail_out,

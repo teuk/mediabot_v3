@@ -17,9 +17,10 @@ package Mediabot::Update;
 #                          diagnostic est vert).
 #
 # Le travail lourd reste dans install/deploy_update.sh : clone, restauration
-# de mediabot.conf et du cerveau Hailo (.brn), verification perl -c et
-# integrity check sur l'arbre STAGE, rotation mediabot_v3 -> mediabot_v3.N,
-# rollback si la validation post-bascule echoue. On ne reecrit pas cette
+# de la configuration d'instance et des etats locaux (Hailo/media),
+# verification perl -c et integrity check sur l'arbre STAGE, rotation du
+# repertoire courant vers <projet>.<N>, rollback si la validation
+# post-bascule echoue. On ne reecrit pas cette
 # logique ici — une deuxieme implementation divergerait de la premiere.
 #
 # LE POINT QUI COMPTE : deploy_update.sh envoie SIGTERM au bot et NE LE
@@ -165,8 +166,9 @@ sub update_eligibility {
             if _host_matches($host, $names);
     }
 
-    return (0, "unexpected project directory name '" . basename($norm) . "' (expected mediabot_v3)")
-        unless basename($norm) eq 'mediabot_v3';
+    my $base = basename($norm);
+    return (0, "unsafe project directory name '$base'")
+        unless defined($base) && $base =~ /\A[A-Za-z0-9][A-Za-z0-9_-]*\z/;
 
     return (0, 'mediabot.pl not found in the project directory')
         unless $exists->{'mediabot.pl'};
@@ -611,14 +613,14 @@ sub update_ctx {
                 ? "\x0309systemd\x0f (restart policy is verified before shutdown)"
                 : "\x0308manual\x0f - the bot will STAY DOWN until you start it again"));
             _say($ctx, "  run \x02update now\x02 to apply it "
-                     . "(config and Hailo brain are preserved, previous release archived)");
+                     . "(instance config/state are preserved, previous release archived)");
             _log($self, $ctx, 'check', 'available');
             return;
         }
 
         # [4] Execution. Le script tue le bot : on annonce AVANT, et on lance
         # un processus DETACHE (setsid) qui survivra a notre propre mort.
-        _say($ctx, "\x02Updating now.\x02 Backing up config and brain, then restarting"
+        _say($ctx, "\x02Updating now.\x02 Preserving instance config/state, then restarting"
                  . ($mode eq 'systemd'
                     ? ' via systemd (policy checked before shutdown).'
                     : ' - START ME AGAIN afterwards.'));
@@ -684,7 +686,14 @@ sub _spawn_updater {
             delete $ENV{MEDIABOT_UPDATE_NOTIFY_TARGET};
         }
 
-        exec($script) if defined $second;
+        if (defined $second) {
+            my @exec = ($script);
+            my $config_file = $self->{config_file};
+            if (defined $config_file && !ref($config_file) && length($config_file)) {
+                push @exec, '--conf=' . $config_file;
+            }
+            exec { $script } @exec;
+        }
         POSIX::_exit(1);
     }
 

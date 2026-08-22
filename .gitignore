@@ -4,6 +4,7 @@
 # Binary files / state
 *.brn
 cache/
+mp3/
 commit.sh
 *.conf
 config/

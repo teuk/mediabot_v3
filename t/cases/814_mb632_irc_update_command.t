@@ -10,7 +10,7 @@
 #
 #   [1] protection integree : /home/mediabot/mediabot_v3 est refuse UNIQUEMENT
 #       sur l'hote entier teuk.org ; la conf ne peut qu'AJOUTER des protections.
-#   [2] eligibilite de la machine : nom du repertoire, presence de
+#   [2] eligibilite de la machine : nom de repertoire sur, presence de
 #       mediabot.pl et du script, bit executable, parent inscriptible.
 #   [3] decision de version : disponible / a jour / local en avance /
 #       illisible / incomparable — et « en avance » ne declenche RIEN.
@@ -86,6 +86,12 @@ return sub {
         hostnames => ['teuk.org'], exists => $good);
     $assert->is($ok, 1, 'mb632-814: une instance de dev normale est autorisee');
 
+    my ($alt_ok) = $U->can('update_eligibility')->(
+        project_dir => '/home/teuk/mediabot3', protected => \@P,
+        hostnames => ['teuk.org'], exists => $good);
+    $assert->is($alt_ok, 1,
+        'mb688-814: un nom d instance alternatif mais sur est autorise');
+
     # la conf AJOUTE des protections, elle n'en retire aucune
     my $bot_extra = bless { conf => ConfU->new({
         'update.PROTECTED_PATHS' => '/srv/bot1, /srv/bot2@other.example' }) }, 'Mediabot';
@@ -126,7 +132,7 @@ return sub {
 
     # [2] eligibilite de la machine
     my %broken = (
-        'nom de repertoire'      => [ '/home/teuk/mediabot_v4', $good, qr/unexpected project directory/ ],
+        'nom de repertoire unsafe'=> [ '/home/teuk/mediabot.v4', $good, qr/unsafe project directory/ ],
         'mediabot.pl absent'     => [ '/home/teuk/mediabot_v3', { %$good, 'mediabot.pl' => 0 }, qr/mediabot\.pl not found/ ],
         'script absent'          => [ '/home/teuk/mediabot_v3', { %$good, 'install/deploy_update.sh' => 0 }, qr/deploy_update\.sh not found/ ],
         'script non executable'  => [ '/home/teuk/mediabot_v3', { %$good, deploy_executable => 0 }, qr/not executable/ ],
@@ -236,8 +242,9 @@ return sub {
         'mb632-814: il ne renvoie plus vers une commande qui refuse aussi');
     $assert->like($sh, qr/The IRC 'update' command refuses this exact path\+host pair too/,
         'mb634-814: ... les deux portes sont coherentes sur le couple exact path+host');
-    $assert->like($sh, qr/cp -pfv "\$\{PROJECT_DIR\}\/mediabot\.conf"/,
-        'mb632-814: la conf est toujours preservee par le script');
-    $assert->like($sh, qr/LATEST_BRAIN/,
-        'mb632-814: le cerveau Hailo aussi');
+    $assert->like($sh,
+        qr/cp -pfv "\$\{INSTANCE_CONF_REAL\}" "\$\{TMP_CLONE_DIR\}\/\$\{INSTANCE_CONF_NAME\}"/,
+        'mb688-814: la configuration d instance selectionnee est preservee');
+    $assert->like($sh, qr/BRAIN_COUNT/,
+        'mb688-814: les cerveaux Hailo de l instance sont preserves');
 };
