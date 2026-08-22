@@ -110,8 +110,8 @@ return sub {
     );
     $assert->like(
         $workflow,
-        qr/\^\(597_\|598_\|599_\|600_\|610_\|719_\|886_\)/,
-        'workflow runs the established installer/configure contracts plus MB684',
+        qr/-f '\^\(.*?886_.*?\)'/,
+        'workflow still runs the MB684 contract in the expanded fresh-install contract set',
     );
 
     $assert->like(
@@ -126,8 +126,8 @@ return sub {
     );
     $assert->like(
         $readme,
-        qr/Database creation and live IRC connectivity remain end-to-end runtime\s+checks rather than container-CI claims/s,
-        'README states the boundary of the Debian 13 CI claim',
+        qr/Live systemd deployment and IRC\s+connectivity remain end-to-end runtime checks rather than container-CI claims/s,
+        'README states the remaining deployment/runtime boundary of the Debian 13 CI claim',
     );
 
     $assert->like(
@@ -142,8 +142,8 @@ return sub {
     );
     $assert->like(
         $cfgdoc,
-        qr/container gate deliberately does \*\*not\*\* claim to replace a live database\s+or IRC end-to-end installation test/s,
-        'configure guide preserves the end-to-end boundary',
+        qr/container gate deliberately does \*\*not\*\* claim to replace live systemd or\s+IRC end-to-end validation/s,
+        'configure guide preserves the remaining deployment/runtime boundary',
     );
 
     $assert->like(

@@ -199,7 +199,15 @@ if [[ ! "$MYSQL_DB_USER" =~ ^[A-Za-z0-9_]+$ ]]; then
 fi
 
 # ─── Prompt for database user password ──────────────────────────────────
-read -rsp "$(ts) Enter MySQL database user pass [${DEFAULT_DB_PASS}]: " MYSQL_DB_PASS
+# MB685: when -c is used, the generated default will be persisted atomically
+# in the private config file. Do not expose that generated secret in terminal
+# or CI logs. Standalone mode keeps the historical visible default because,
+# without -c, it is otherwise the operator's only copy of the generated value.
+if [[ -n "${CONFIG_FILE:-}" ]]; then
+    read -rsp "$(ts) Enter MySQL database user pass [generated and stored in config]: " MYSQL_DB_PASS
+else
+    read -rsp "$(ts) Enter MySQL database user pass [${DEFAULT_DB_PASS}]: " MYSQL_DB_PASS
+fi
 echo
 MYSQL_DB_PASS=${MYSQL_DB_PASS:-$DEFAULT_DB_PASS}
 

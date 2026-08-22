@@ -177,10 +177,14 @@ baseline, installs the documented MariaDB/bootstrap packages, builds the
 runtime Perl dependency set against that system Perl, verifies it through
 `install/cpan_install.sh --verify-only`, and exercises a fresh non-root
 configuration generation with `./configure --sync-only --skip-db --skip-cpan
---yes`. The CI-only `cpanm` local library is an acceleration/isolation mechanism;
-the supported operator installation path remains the CPAN flow described
-above. Database creation and live IRC connectivity remain end-to-end runtime
-checks rather than container-CI claims.
+--yes`. It then starts the Debian 13 MariaDB server, executes the real
+`install/db_install.sh -c ...` fresh-database path with safe defaults, verifies
+that the private config remains owned by `mediabot` with mode `0600`, and runs
+`tools/check_schema_drift.pl --strict --types --indexes` through the generated
+application credentials. The CI-only `cpanm` local library is an
+acceleration/isolation mechanism; the supported operator installation path
+remains the CPAN flow described above. Live systemd deployment and IRC
+connectivity remain end-to-end runtime checks rather than container-CI claims.
 
 Optional but useful:
 

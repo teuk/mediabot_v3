@@ -82,9 +82,33 @@ only as a CI-local dependency builder before calling the supported
 `install/cpan_install.sh --verify-only` verifier; this does not change the
 operator-facing CPAN installation policy.
 
-The container gate deliberately does **not** claim to replace a live database
-or IRC end-to-end installation test. MariaDB schema creation, service startup,
-and real IRC connectivity remain separate readiness checks.
+The same job then starts MariaDB from the Debian 13 package and exercises the
+real fresh-database installer:
+
+```bash
+install/db_install.sh -c /home/mediabot/mediabot_v3/mediabot.conf
+```
+
+CI accepts the installer's safe defaults, confirms that the atomic root-side
+configuration update preserves `mediabot:mediabot` ownership and mode `0600`,
+and finally reconnects with the generated application credentials to run:
+
+```bash
+perl tools/check_schema_drift.pl \
+  --conf=mediabot.conf \
+  --strict \
+  --types \
+  --indexes
+```
+
+This proves that `install/mediabot.sql`, application-user creation, config
+persistence and the strict schema/type/index contract agree on Debian 13 /
+MariaDB. The generated database password is not printed when `db_install.sh`
+is called with `-c`; it is stored only in the private configuration file.
+
+The container gate deliberately does **not** claim to replace live systemd or
+IRC end-to-end validation. Those deployment/runtime boundaries remain separate
+readiness checks.
 
 ## Existing installation
 

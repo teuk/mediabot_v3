@@ -74,7 +74,7 @@ jobs:
 
           perl -e 'die "expected Debian 13 system Perl 5.40.x\n" unless $] >= 5.040 && $] < 5.041; print "Perl $^V\n"'
 
-          for cmd in perl cpan make gcc mysql sudo mktemp find curl mariadb_config; do
+          for cmd in perl cpan make gcc mysql mysqladmin mariadbd sudo mktemp find curl mariadb_config; do
             command -v "$cmd" >/dev/null
           done
 
@@ -144,6 +144,84 @@ jobs:
               grep -Fq "Configuration synchronization completed (--sync-only)" configure.log
             '
 
+      - name: Exercise fresh MariaDB database installation and strict drift validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5${PERL5LIB:+:$PERL5LIB}"
+
+          install -d -m 0755 -o mysql -g mysql /run/mysqld
+          DB_LOG=/tmp/mediabot-mariadb.log
+
+          mariadbd \
+            --user=mysql \
+            --datadir=/var/lib/mysql \
+            --socket=/run/mysqld/mysqld.sock \
+            --pid-file=/run/mysqld/mysqld.pid \
+            --bind-address=127.0.0.1 \
+            --log-error="$DB_LOG" &
+          DB_PID=$!
+
+          cleanup_db() {
+            if kill -0 "$DB_PID" >/dev/null 2>&1; then
+              kill "$DB_PID" >/dev/null 2>&1 || true
+              wait "$DB_PID" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup_db EXIT
+
+          ready=0
+          for _ in $(seq 1 60); do
+            if mysqladmin \
+              --protocol=socket \
+              --socket=/run/mysqld/mysqld.sock \
+              -uroot ping --silent; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$DB_PID" >/dev/null 2>&1; then
+              cat "$DB_LOG" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          if [ "$ready" -ne 1 ]; then
+            cat "$DB_LOG" >&2
+            exit 1
+          fi
+
+          mysql --protocol=socket --socket=/run/mysqld/mysqld.sock -uroot \
+            --skip-column-names --execute='SELECT VERSION();'
+
+          (
+            cd /tmp
+            printf '\n\n\n\n\n\n' \
+              | bash /home/mediabot/mediabot_v3/install/db_install.sh \
+                  -c /home/mediabot/mediabot_v3/mediabot.conf
+          )
+
+          test "$(stat -c %U:%G /home/mediabot/mediabot_v3/mediabot.conf)" = mediabot:mediabot
+          test "$(stat -c %a /home/mediabot/mediabot_v3/mediabot.conf)" = 600
+
+          sudo -u mediabot env \
+            HOME=/home/mediabot \
+            PERL5LIB="$PERL5LIB" \
+            bash -lc '
+              set -euo pipefail
+              cd /home/mediabot/mediabot_v3
+
+              test "$(perl install/configure_config.pl --config mediabot.conf --get mysql.MAIN_PROG_DDBNAME)" = mediabot
+              test "$(perl install/configure_config.pl --config mediabot.conf --get mysql.MAIN_PROG_DBUSER)" = mediabot
+              test -n "$(perl install/configure_config.pl --config mediabot.conf --get mysql.MAIN_PROG_DBPASS)"
+
+              perl tools/check_schema_drift.pl \
+                --conf=mediabot.conf \
+                --strict \
+                --types \
+                --indexes
+            '
+
       - name: Run Debian 13 fresh-install contracts
         shell: bash
         run: |
@@ -151,4 +229,4 @@ jobs:
           export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5:$GITHUB_WORKSPACE${PERL5LIB:+:$PERL5LIB}"
 
           perl t/test_commands.pl \
-            -f '^(597_|598_|599_|600_|610_|719_|886_)'
+            -f '^(119_|125_|132_|597_|598_|599_|600_|610_|717_|719_|720_|723_|830_|884_|885_|886_|887_)'
