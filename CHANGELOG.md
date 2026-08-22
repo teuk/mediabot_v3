@@ -32,6 +32,100 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb690 — keep the unreleased development history self-checking
+- Restored the missing public 3.4dev history for mb682 through mb688 so the
+  changelog once again matches the development contracts already present in
+  the repository. The intervening mb689 was an operator-side deployment and
+  lifecycle validation with no repository change, so it intentionally has no
+  product changelog entry.
+- Added a regression guard that discovers numbered mb test contracts from the
+  test filenames and requires every mb682+ repository change to have exactly
+  one heading in the current `[Unreleased]` section. This makes future
+  changelog drift fail visibly instead of being discovered several rounds
+  later.
+- Documentation/test-only round: no runtime, database, migration, configuration
+  or systemd behavior changed.
+
+### mb688 — let every instance find its own update path
+- Generalized `install/deploy_update.sh` around the actual installation: the
+  safe project basename drives archive/temp/failed tree names, `--conf` selects
+  the private instance configuration, and the current Git `origin` is the
+  candidate clone source instead of a hard-coded repository URL.
+- Preserves the selected config, all root-level `*.brn` state, transitional
+  `var/achievements.json` when present, and local `mp3/`; `mp3/` is now ignored
+  by Git. Process targeting reads the real NUL-separated `/proc/<pid>/cmdline`
+  argv and requires the exact configuration, avoiding flattened `pgrep -f`-
+  style false positives. A stop timeout now fails closed instead of escalating
+  to `SIGKILL`.
+- `Mediabot::Update` accepts safe alternate installation basenames while
+  retaining the protected development path/host guard, and forwards the bot's
+  actual `config_file` to the detached updater using argv-safe `exec`.
+- Made normal/progress test failures compact and bounded while preserving full
+  diagnostics under `--verbose`; added contracts `890` and `891` and aligned
+  older meta-tests that intentionally inspect verbose runner output.
+- Validation passed `288/288` targeted assertions, `6001/6001` in the fast
+  lane, and `15645/15645` in the complete suite. No database change was made.
+
+### mb687 — exercise the published systemd installation path on Debian 13
+- Added `install/systemd_install.sh`, a fail-closed and idempotent installer for
+  the published `mediabot@.service` template and per-instance environment.
+  Divergent existing files are preserved unless explicit replacement flags are
+  supplied; unsafe instance names and symlink targets are refused.
+- Extended the Debian 13 workflow to install the real template into an isolated
+  filesystem root, prove idempotence/replacement behavior and validate the
+  installed unit with `systemd-analyze verify`, without pretending a container
+  has exercised live PID1/IRC behavior.
+- Added contract `889_mb687_debian13_systemd_install_gate.t`.
+
+### mb686 — prove the stable 3.3 database upgrade path on Debian 13
+- Extended the Debian 13 gate to materialize the real stable `3.3` database
+  schema from the Git tag, prove that it is behind the current development
+  schema, and apply only migrations released after `3.3` in the authoritative
+  documented order.
+- Released migrations shared with `3.3` are checksum-compared and must remain
+  immutable. The real `install/db_migrate.sh` path is used, followed by strict
+  schema/type/index drift validation.
+- Added contract `888_mb686_debian13_stable_upgrade_gate.t`; the manual live
+  Debian 13 VM acceptance boundary remains explicit for final 3.5 readiness.
+
+### mb685 — exercise the real fresh MariaDB installer on Debian 13
+- Extended the Debian 13 CI gate to start the distribution MariaDB server, run
+  the supported `install/db_install.sh -c ...` fresh-database path, persist the
+  generated application credentials privately, and reconnect with those
+  credentials for strict schema/type/index validation.
+- The config-backed installer path does not print the generated database
+  password and preserves the private config's ownership/mode contract.
+- Added contract `887_mb685_debian13_fresh_database_gate.t`.
+
+### mb684 — add a real Debian 13 fresh-install/configuration gate
+- Added the dedicated public `debian13.yml` workflow using the official
+  `debian:13-slim` image and Debian system Perl 5.40 baseline. It installs the
+  documented native/bootstrap dependencies, builds the runtime Perl dependency
+  set against that system Perl and verifies it through the supported CPAN
+  tooling.
+- Exercises the real non-root `./configure --sync-only --skip-db --skip-cpan
+  --yes` path, checks private config permissions and safe Partyline defaults,
+  and finishes with the strict sample-driven configuration audit.
+- Added contract `886_mb684_debian13_fresh_install_gate.t` and public README /
+  configuration documentation for the gate and its live-runtime boundary.
+
+### mb683 — keep the public security policy aligned with release status
+- Synchronized `.github/SECURITY.md` with the README release contract: stable
+  `3.3` and development `3.4dev` are the supported public lines, while obsolete
+  `3.1` / `3.2-dev` rows are removed.
+- Kept GitHub private vulnerability reporting as the security path, retained
+  the rule against publishing real secrets/personal data, and locked the public
+  encrypted support contact.
+- Added contract `885_mb683_security_policy_version_sync.t`.
+
+### mb682 — synchronize public docs with the current 3.4dev architecture
+- Brought README and CHANGELOG coverage up to date with the post-mb671 work,
+  including async media/update changes, extracted command domains, Partyline
+  decomposition, fast/progress validation and durable updater status.
+- Added `docs/PARTYLINE_ARCHITECTURE.md` as the public ownership/boundary map for
+  the split Partyline modules and linked the final MB678 boundary contract.
+- Added contract `884_mb682_public_docs_architecture_sync.t`.
+
 ### mb681 — Doctor reads durable updater history without a network fetch
 - Advanced Mediabot Doctor to tool version `1.2` while keeping Doctor schema
   version `1`.
