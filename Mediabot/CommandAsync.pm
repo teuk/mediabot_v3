@@ -80,7 +80,7 @@ sub _collect_intents_run {
         if (@intents >= $MAX_INTENTS) { $truncated = 1; return }
         push @intents, [ $kind, "$target", defined $text ? "$text" : '' ];
     };
-    no warnings 'redefine';
+    no warnings qw(redefine once);
     # mb615-B1: la facade doit couvrir les DEUX chemins d'appel.
     #
     # Terrain (#boulets, 2026-08-08) : « m actualités » demarrait bien son
@@ -103,6 +103,12 @@ sub _collect_intents_run {
     local *Mediabot::UserCommands::botPrivmsg = sub { $push->('privmsg', $_[1], $_[2]); 1 };
     local *Mediabot::UserCommands::botNotice  = sub { $push->('notice',  $_[1], $_[2]); 1 };
     local *Mediabot::UserCommands::botAction  = sub { $push->('action',  $_[1], $_[2]); 1 };
+    # Context->reply()/reply_private() call the helpers as methods on the bot
+    # object. Capture that third path too; otherwise a worker can complete
+    # successfully with zero replayable intents (mb692 live RSS probe).
+    local *Mediabot::botPrivmsg               = sub { $push->('privmsg', $_[1], $_[2]); 1 };
+    local *Mediabot::botNotice                = sub { $push->('notice',  $_[1], $_[2]); 1 };
+    local *Mediabot::botAction                = sub { $push->('action',  $_[1], $_[2]); 1 };
     my $ok = eval { $code->(); 1 };
     my $err = $ok ? undef : ($@ || 'command exception');
     return (\@intents, $truncated, $ok, $err);

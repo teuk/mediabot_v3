@@ -133,8 +133,38 @@ return sub {
     opendir(my $dh, $mdir) or die $!;
     my @files = sort grep { /\.sql$/ } readdir($dh);
     closedir $dh;
-    $assert->is(scalar(@files), 18,
-        'mb649-830: current migration inventory contains 18 SQL files');
+
+    # The migration README is the authoritative ordering contract used by the
+    # stable-upgrade gate. Keep the filesystem inventory and that documented
+    # inventory in exact set parity instead of freezing a magic file count.
+    my $mread_path = File::Spec->catfile($mdir, 'README.md');
+    open my $mrfh, '<', $mread_path or die $!;
+    local $/;
+    my $mread = <$mrfh>;
+    close $mrfh;
+
+    my ($order_block) = $mread =~
+        /## Current migration order\s*```text\s*(.*?)```/s;
+    $assert->ok(defined($order_block),
+        'mb649-830: authoritative Current migration order block is present');
+
+    my @documented = sort grep { /\.sql\z/ }
+        map {
+            my $line = $_;
+            $line =~ s/^\s+|\s+\z//g;
+            $line;
+        } split /
+/, ($order_block // '');
+
+    my %seen_documented;
+    my @duplicates = grep { $seen_documented{$_}++ } @documented;
+    $assert->is(scalar(@duplicates), 0,
+        'mb649-830: migration order contains no duplicate SQL entries');
+    $assert->is(join("
+", @files), join("
+", @documented),
+        'mb649-830: filesystem migration inventory matches authoritative README exactly');
+
     for my $name (@files) {
         my $spec = main::_migration_observables(File::Spec->catfile($mdir, $name));
         $assert->ok(@{ $spec->{effects} || [] } > 0,

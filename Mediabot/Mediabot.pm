@@ -20,6 +20,7 @@ use Mediabot::ScriptRunner;
 use Mediabot::ScriptActionRunner;
 use Mediabot::Hailo;
 use Mediabot::Quotes;
+use Mediabot::RSS::Commands;
 use Mediabot::LoginCommands;
 use Mediabot::Helpers;
 use Mediabot::ProcessLock;
@@ -2174,6 +2175,7 @@ sub mbCommandPublic {
         actualite    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
         actu         => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
         news         => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
+        rss          => sub { Mediabot::RSS::Commands::mbRss_ctx($ctx) },
 
         # mb116: dashboard de canal + duel + horoscope
         dashboard    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'dashboard', sub { mbDashboard_ctx($ctx) }) },
@@ -2769,6 +2771,7 @@ actualites|actualites [sujet] [en\|fr\|es]|public|Latest news on a topic (or tod
 actualite|actualite [sujet] [en\|fr\|es]|public|Alias for actualites (accented forms actualités/actualité work too).
 actu|actu [sujet] [en\|fr\|es]|public|Alias for actualites.
 news|news [sujet] [en\|fr\|es]|public|Alias for actualites.
+rss|rss <list|info|add|del|set|probe|show> ...|public|Manage and inspect native per-channel RSS/Atom feeds. Changes require channel level 400+ or Administrator.
 achievements|achievements [nick|list|all|top|progress [nick]]|public|Show achievements for yourself, a nick, the catalogue, the top unlocks, or how close you are to the next ones.
 achievs|achievs [nick|list|all|top|progress [nick]]|public|Alias for achievements.
 profil|profil [nick]|public|Show a compact channel profile for a nick.

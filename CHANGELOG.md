@@ -32,6 +32,38 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb692 — lay the native RSS foundations without touching the live loop
+- Added persistent `RSS_FEED` / `RSS_ITEM` schema and an ordered migration for
+  per-channel subscriptions, first-fetch baselines and durable item dedup.
+- Added pure `Mediabot::RSS` helpers for conservative HTTP(S) feed URL safety,
+  bounded RSS/RDF/Atom parsing with DTD/entity rejection, stable SHA-256 item
+  keys and IRC rendering matching the historical `rss-synd.tcl` charter.
+- Kept existing `news` / `actualites` behavior untouched. No `m rss` command,
+  Scheduler task, network fetch or service restart is introduced in this round.
+- Added regression contract `893_mb692_rss_foundation.t`.
+- Added `Mediabot::RSS::Repository`, one-shot SSRF-aware feed fetching, and
+  the `m rss` command family (`list`, `info`, `add`, `del`, `set`, `probe`,
+  `show`). Mutations reuse Mediabot authentication plus channel level 400 /
+  Administrator ACLs; network probes/shows run through `CommandAsync`.
+- Automatic polling remains disabled until MB693.
+- Live DEV validation caught and fixed two hardening gaps before commit: async
+  Context replies are now captured/replayed by `CommandAsync`, and RSS HTTP
+  connects are pinned to the already-validated DNS address to close the DNS
+  rebinding window.
+- Live DNS validation also caught a Perl list-operator precedence bug in the
+  IPv6 classifier: public global IPv6 addresses could be mistaken for loopback
+  or IPv4-mapped addresses. The scalar `grep` tests are now explicit and a
+  dedicated public/special IPv6 regression contract guards the boundary.
+  Pinned HTTP requests prefer validated IPv4 peers and try the next validated
+  peer only after a transport `599`, preserving SSRF pinning while tolerating
+  a dead IPv6 route; attempts are capped to stay inside the async timeout.
+- Added regression contracts `894_mb692_rss_commands_repository.t`,
+  `895_mb692_rss_live_async_peer_pin.t`, `896_mb692_rss_public_ipv6.t` and
+  `897_mb692_rss_feed_encoding.t`.
+- Live IRC rendering now decodes feed response bytes before XML parsing using
+  BOM / HTTP charset / XML declaration metadata with UTF-8 as the XML default;
+  malformed or unknown encodings fail closed instead of leaking mojibake.
+
 ### mb690 — keep the unreleased development history self-checking
 - Restored the missing public 3.4dev history for mb682 through mb688 so the
   changelog once again matches the development contracts already present in

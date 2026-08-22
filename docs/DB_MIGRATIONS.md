@@ -73,6 +73,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260708_onthisday_digest_c
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260710_quotes_hits.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260724_lang_chansets.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260816_achievements_db.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260822_rss_feeds.sql;
 ```
 
 Then run the checker again:
@@ -106,6 +107,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260710_quotes_hits.sql
 20260724_lang_chansets.sql
 20260816_achievements_db.sql
+20260822_rss_feeds.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this
@@ -114,6 +116,26 @@ normalized types and missing `CHANSET_LIST` rows. With `--indexes`, it also
 compares every required reference index. It does not infer arbitrary
 non-`CHANSET_LIST` reference data, so those data migrations must still be
 reviewed and applied when upgrading.
+
+## Native RSS persistence (20260822)
+
+`20260822_rss_feeds.sql` adds the persistent storage used by Mediabot's native
+per-channel RSS/Atom feature:
+
+```text
+RSS_FEED
+RSS_ITEM
+```
+
+`RSS_FEED` stores channel subscriptions and polling metadata. `RSS_ITEM` stores
+durable item keys used for first-fetch baselines and duplicate suppression.
+The migration is idempotent and does not enable polling by itself; command
+routing and asynchronous fetching are separate runtime steps.
+
+For an existing installation, back up the configured database before applying
+the migration, then validate the RSS schema delta with the normal drift checker.
+Historical unrelated drift must be reviewed separately rather than silently
+rewritten as part of the RSS rollout.
 
 ## Useful commands
 

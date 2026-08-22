@@ -46,6 +46,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260710_quotes_hits.sql
 20260724_lang_chansets.sql
 20260816_achievements_db.sql
+20260822_rss_feeds.sql
 ```
 
 The migration set adds channel-ban tracking, user seen/activity tracking, Claude chanset reference data, schema support for newer fun/user commands, and persistent trivia scores and user notes, including:
@@ -61,6 +62,7 @@ TRIVIA_SCORES
 NOTE
 CHANSET_LIST entries: AchievementAnnounce, Games
 ACHIEVEMENT_PROFILE / ACHIEVEMENT_IDENTITY / ACHIEVEMENT_UNLOCK / ACHIEVEMENT_PROGRESS
+RSS_FEED / RSS_ITEM
 ```
 
 These tables and reference-data migrations are used by reminder, alias, karma, karma history, trivia, note-related, achievements and games-related code paths.
@@ -121,6 +123,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260708_onthisday_digest_c
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260710_quotes_hits.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260724_lang_chansets.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260816_achievements_db.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260822_rss_feeds.sql;
 ```
 
 Afterwards:
