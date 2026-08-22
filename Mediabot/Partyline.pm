@@ -1,47 +1,28 @@
 package Mediabot::Partyline;
 
-# +---------------------------------------------------------------------------+
-# ! Mediabot::Partyline                                                       !
-# ! TCP telnet-style partyline for bot administration                        !
-# !                                                                           !
-# ! Access : telnet <host> <PARTYLINE_PORT>, DCC CHAT or CTCP CHAT       !
-# !                                                                           !
-# ! Authentication : interactive nickname/password prompt                    !
-# ! Required global level : Master (or above)                                !
-# !                                                                           !
-# ! Commands :                                                                !
-# !   .help                  - this help                                     !
-# !   .stat                  - channel status (owner, chansets, nick count)  !
-# !   .say #chan <message>   - send a PRIVMSG to a channel                   !
-# !   .who #chan             - list nicks present in a channel               !
-# !   .join #chan [key]      - make the bot join a channel                   !
-# !   .part #chan            - make the bot part a channel                   !
-# !   .nick <newnick>        - change the bot's nick                         !
-# !   .raw <IRC command>     - send a raw IRC command (Owner only)           !
-# !   .quit                  - close this session                            !
-# +---------------------------------------------------------------------------+
+# =============================================================================
+# Mediabot::Partyline
+# =============================================================================
+# MB678 closure: stable Partyline facade and runtime-state owner.
+#
+# Responsibilities kept in this parent package:
+#   - construct the Partyline object and start its listener through Transport;
+#   - expose the configured Partyline port;
+#   - publish the compact runtime-status JSON used by mbweb;
+#   - preserve the historical Mediabot::Partyline method surface by importing
+#     the dedicated Transport, SessionAuth, Dispatcher, Privileged and Commands
+#     implementations below.
+#
+# Command, transport, authentication and privileged-control implementations do
+# not live in this file.  MAX_PARTYLINE_LINE_BYTES remains here as a public
+# compatibility constant used by Transport.
+# =============================================================================
 
 use strict;
-use Time::HiRes ();
 use warnings;
-use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
-            # Sans cela ils sont des OCTETS, et interpoler une variable
-            # venue d'IRC (mediabot.pl decode les messages entrants) fait
-            # basculer toute la chaine : les octets sont relus en latin-1
-            # puis re-encodes a l'envoi -> mojibake (« humeur Ã©lectrique »).
+use utf8;
 
-use bytes ();
-use IO::Async::Listener;
-use IO::Async::Stream;
-use IO::Async::Timer::Countdown;
-use POSIX qw(WNOHANG);
-use Socket qw(unpack_sockaddr_in sockaddr_family inet_ntoa inet_aton AF_INET);
-use Scalar::Util qw(weaken);
 use JSON qw(encode_json);
-use Encode qw(encode);
-use Mediabot::External ();
-use Mediabot::DCC qw(validate_dcc_active_target);
-use Mediabot::Helpers qw(getProcessStartTimestamp);
 use File::Basename qw(dirname);
 use File::Path qw(make_path);
 use File::Temp qw(tempfile);
@@ -302,139 +283,13 @@ sub _write_runtime_status {
 }
 
 
-# +---------------------------------------------------------------------------+
-# ! Internal : start TCP listener                                             !
-# +---------------------------------------------------------------------------+
-
-
-# mb678: TCP/DCC transport implementation moved to Mediabot::Partyline::Transport.
-
-# mb678-II: session lifecycle helpers moved to Mediabot::Partyline::SessionAuth.
-
-# +---------------------------------------------------------------------------+
-# ! Internal : dispatch an incoming line                                      !
-# +---------------------------------------------------------------------------+
-
-# MB678-III: line/auth/command dispatcher moved to Mediabot::Partyline::Dispatcher.
-
-# +---------------------------------------------------------------------------+
-# ! Internal : authentication                                                 !
-# +---------------------------------------------------------------------------+
-
-# mb678-II: authentication implementation moved to Mediabot::Partyline::SessionAuth.
-
-# +---------------------------------------------------------------------------+
-# ! Commands                                                                  !
-# +---------------------------------------------------------------------------+
-
-# MB678-IV-A: plugin/ScriptDryRun commands moved to Mediabot::Partyline::Commands.
-# MB678-IV-B: core operator/session commands moved to Mediabot::Partyline::Commands.
-
-# MB678-IV-E: reminder / seen commands moved to Mediabot::Partyline::Commands.
-# MB678-IV-F: karma visibility commands moved to Mediabot::Partyline::Commands.
-
-
-# MB678-IV-G: configuration reload commands moved to Mediabot::Partyline::Commands.
-
-# MB678-IV-H: network visibility/statistics commands moved to Mediabot::Partyline::Commands.
-
-# MB678-IV-G: .reloadconf/.reload implementations moved to Mediabot::Partyline::Commands.
-
-
-# MB678-IV-J: Claude/AI Partyline commands moved to Mediabot::Partyline::Commands.
-
-# MB678-IV-K: .ping implementation moved to Mediabot::Partyline::Commands.
-
-# ---------------------------------------------------------------------------
-# .uptime - show bot and server uptime from the Partyline
-# ---------------------------------------------------------------------------
-# MB678-IV-K: .uptime implementation moved to Mediabot::Partyline::Commands.
-
-# ---------------------------------------------------------------------------
-# .bans [#chan] - list active bans (from ChannelBan) on a channel
-# ---------------------------------------------------------------------------
-# MB678-IV-L: _cmd_bans implementation moved to Mediabot::Partyline::Commands.
-
-# ---------------------------------------------------------------------------
-# .ban #chan <nick> [duration] [reason]
-#
-# Bans a connected nick from a channel via Partyline.
-# Sends a WHOIS to the IRC server to get the real hostmask, then the
-# partylineBan callback in on_message_RPL_WHOISUSER performs the actual ban.
-# Duration formats: 10m 2h 3d 1w perm/permanent (default: permanent)
-# ---------------------------------------------------------------------------
-# MB678-IV-L: _cmd_ban implementation moved to Mediabot::Partyline::Commands.
-
-# ---------------------------------------------------------------------------
-# .unban #chan <mask|ban_id>  - remove an active ban (Master+)
-# ---------------------------------------------------------------------------
-# MB678-IV-L: _cmd_unban implementation moved to Mediabot::Partyline::Commands.
-
-# ---------------------------------------------------------------------------
-# .topic #chan [new topic]  - show or change channel topic (Master+)
-# ---------------------------------------------------------------------------
-# MB678-IV-L: _cmd_topic implementation moved to Mediabot::Partyline::Commands.
-
-# ---------------------------------------------------------------------------
-# .history  - show last 10 commands in this session
-# ---------------------------------------------------------------------------
-# MB678-IV-N: .history implementation moved to Mediabot::Partyline::Commands.
-
-# .stat - for each known channel: joined?, nick count, owner, chansets
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# .dccstat - display DCC Partyline state
-# ---------------------------------------------------------------------------
-# MB678-IV-K: .dccstat implementation moved to Mediabot::Partyline::Commands.
-
-# MB678-IV-K: .stat implementation moved to Mediabot::Partyline::Commands.
-
-# ---------------------------------------------------------------------------
-# .say <#chan|nick> <message>
-# Supports both channels (#chan) and private messages (nick).
-# ---------------------------------------------------------------------------
-# MB678-IV-N: .say implementation moved to Mediabot::Partyline::Commands.
-
-# ---------------------------------------------------------------------------
-# .who #chan - list nicks in a channel
-# ---------------------------------------------------------------------------
-# MB678-IV-N: .who implementation moved to Mediabot::Partyline::Commands.
-
-# MB678-IV-I: IRC control/lifecycle commands moved to Mediabot::Partyline::Commands.
-
-# ---------------------------------------------------------------------------
-# .eval <perl code>  - Owner only
-#
-# Executes arbitrary Perl in the bot process context.
-# USE WITH EXTREME CAUTION: crashes and data corruption are possible.
-# Output is capped at 20 lines. Confirmation required before execution.
-# ---------------------------------------------------------------------------
-# MB678-IV-O: .eval implementation moved to Mediabot::Partyline::Privileged.
-# ---------------------------------------------------------------------------
-# .die
-# ---------------------------------------------------------------------------
-# MB678-IV-O: .die implementation moved to Mediabot::Partyline::Privileged.
-
-# MB678-IV-N: .chanlog implementation moved to Mediabot::Partyline::Commands.
-
-# MB678-IV-N: .nickinfo implementation moved to Mediabot::Partyline::Commands.
-
-# MB678-IV-N: .who_chan implementation moved to Mediabot::Partyline::Commands.
-
-# MB678-IV-L: _cmd_kick implementation moved to Mediabot::Partyline::Commands.
-
-# MB678-IV-L: _cmd_unmute implementation moved to Mediabot::Partyline::Commands.
-
-# MB678-IV-N: .kv implementation moved to Mediabot::Partyline::Commands.
-
-# MB678-IV-M: anti-flood/cooldown operator commands moved to Mediabot::Partyline::Commands.
-
-# .achievementprofile <nick> <#channel>
-# Read-only visibility into mb646 durable identity resolution.  The source of
-# truth stays in Mediabot::Achievements; Partyline only renders the facts.
-# MB678-IV-N: .achievementprofile implementation moved to Mediabot::Partyline::Commands.
-
-# MB678-IV-K: .dbstats implementation moved to Mediabot::Partyline::Commands.
+# =============================================================================
+# MB678 module boundary
+# =============================================================================
+# The remaining Partyline behaviour is intentionally provided by the imported
+# modules above.  Keeping those imports in the historical parent package
+# preserves existing callers, callbacks and subclass overrides while making the
+# ownership of each responsibility explicit.
+# =============================================================================
 
 1;

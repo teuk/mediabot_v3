@@ -14,6 +14,7 @@ use strict;
 use warnings;
 use utf8;
 use Exporter 'import';
+use bytes ();
 use Time::HiRes ();
 use IO::Async::Listener;
 use IO::Async::Stream;
