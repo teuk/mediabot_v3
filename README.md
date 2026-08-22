@@ -339,6 +339,48 @@ See:
 
 ---
 
+
+## Built-in updater observability
+
+The built-in updater separates remote availability checks from local history:
+
+```text
+update / update check
+    remote version diagnostic
+
+update now
+    apply an eligible update through the existing deployment workflow
+
+update status
+    read the durable result of the last updater run locally
+```
+
+`update status` is deliberately local-only: it does not contact GitHub, rerun
+eligibility checks or start an update. On a deployment rooted at
+`/home/mediabot/mediabot_v3`, its durable status file lives beside the rotating
+release tree:
+
+```text
+/home/mediabot/.mediabot_v3.update-status.json
+```
+
+The record can describe `running`, `success`, `failed` or `rolled_back` and
+keeps the observed `old -> target -> installed` version trail. It contains
+operational metadata only and is written atomically.
+
+Mediabot Doctor consumes the same durable record through its `updater` domain,
+also without fetching from the network:
+
+```bash
+perl tools/mediabot_doctor.pl --conf=mediabot.conf --domain updater
+```
+
+A missing history is informational until the first updater run creates the
+record. A failed/rolled-back/stale run or a version inconsistency is surfaced
+as a warning for operator review.
+
+---
+
 ## Mediabot Doctor
 
 `tools/mediabot_doctor.pl` is the read-only operational diagnostic for a real
@@ -449,6 +491,19 @@ Run the MB661 fast development-validation lane with:
 ```bash
 perl t/test_commands.pl --fast
 ```
+
+For long interactive runs, MB679 adds an opt-in single-line progress display:
+
+```bash
+perl t/test_commands.pl --fast --progress
+perl t/test_commands.pl --progress
+```
+
+Progress is based on selected test files while the counter shows the actual
+number of completed assertions. Passing per-file chatter is hidden until the
+final summary, while failures are still reported. `--progress` is intentionally
+incompatible with `--verbose`; neither default runner behaviour nor test
+selection changes when progress mode is absent.
 
 The fast lane is deterministic: it starts from tests whose MB660 primary class
 is `PURE`, removes a small explicit manifest of profiler-confirmed slow cases,
@@ -621,8 +676,38 @@ Once authenticated, Partyline commands start with a dot:
 .quit
 ```
 
+The Partyline implementation is intentionally split by responsibility. The
+historical `Mediabot::Partyline` package remains the public facade/core, while
+physical implementations live in focused modules:
+
+```text
+Mediabot::Partyline
+    construction, port access and runtime-status publication
+
+Mediabot::Partyline::Transport
+    TCP/DCC listeners, streams and transport boundaries
+
+Mediabot::Partyline::SessionAuth
+    session lifecycle and authentication
+
+Mediabot::Partyline::Dispatcher
+    line and command routing
+
+Mediabot::Partyline::Commands
+    ordinary operator/diagnostic commands
+
+Mediabot::Partyline::Privileged
+    privileged .eval / .die controls
+```
+
+The parent contains no physical `_cmd_*` implementations. Historical method
+names remain available through the facade so callers do not need to know which
+module owns the implementation.
+
 See:
 
+* [Partyline architecture](docs/PARTYLINE_ARCHITECTURE.md)
+* [Partyline and DCC notes](docs/PARTYLINE_DCC.md)
 * [Partyline](https://github.com/teuk/mediabot_v3/wiki/Partyline)
 
 ---
@@ -727,6 +812,7 @@ or instance-specific log paths.
 Common issues are documented here:
 
 * [Troubleshooting](https://github.com/teuk/mediabot_v3/wiki/Troubleshooting)
+* [Partyline architecture](docs/PARTYLINE_ARCHITECTURE.md)
 
 ---
 

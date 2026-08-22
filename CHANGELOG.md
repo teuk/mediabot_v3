@@ -32,6 +32,109 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb681 — Doctor reads durable updater history without a network fetch
+- Advanced Mediabot Doctor to tool version `1.2` while keeping Doctor schema
+  version `1`.
+- Added the stable `updater.last_update` fact backed by the public MB680
+  `Mediabot::Update::update_status_record` reader.
+- Treats missing history as informational; matching success as OK; and failed,
+  rolled-back, stale-running, dead/reused updater PID, or version-inconsistent
+  records as warnings for operator review.
+- Sanitizes durable updater detail before exposing it through Doctor facts or
+  JSON and records `network_used => 0` for the local-history diagnostic.
+- Real `--domain updater` validation confirmed cached Git divergence only and
+  no network fetch.
+- Focused Doctor/update regression passed `290/290`; fast passed `5982/5982`;
+  the complete suite passed `15432/15432`.
+
+### mb680 — keep the last updater result as durable local state
+- Added an atomic private updater-status record beside the rotating release
+  tree so update history survives application-directory rotations.
+- Records `running`, `success`, `failed` and `rolled_back` states together with
+  phase/timestamps/PID and the `old -> target -> installed` version trail.
+- Made `update status` a strict local-only reader: no GitHub request,
+  eligibility check or updater launch is performed.
+- Preserved the existing `update`/`update check` remote diagnostic and
+  `update now` deployment path.
+- Removed an obsolete help entry that still claimed the IRC update command was
+  disabled.
+- Added `882_mb680_durable_update_status.t`; focused updater regression passed
+  `218/218`, fast passed `5982/5982`, and full passed `15400/15400`.
+- No database or schema change was introduced.
+
+### mb679 — add a quiet opt-in progress display to the test runner
+- Added `--progress` directly to `t/test_commands.pl` for both full and fast
+  validation.
+- Shows one dynamic progress line based on selected files plus the actual
+  completed assertion count, while suppressing successful per-file chatter.
+- Preserves failure reporting and normal runner behaviour when progress mode is
+  absent; `--progress --verbose` is rejected explicitly.
+- Added `871_mb679_test_runner_progress.t`.
+
+### mb678 — split Partyline into explicit architectural responsibilities
+- Decomposed the historical Partyline monolith into
+  `Partyline::Transport`, `Partyline::SessionAuth`, `Partyline::Dispatcher`,
+  `Partyline::Commands` and `Partyline::Privileged` while preserving the
+  historical `Mediabot::Partyline` method surface.
+- Moved transport/DCC, session/authentication, dispatch, ordinary operator
+  commands and privileged `.eval`/`.die` controls to their owning modules in
+  incremental, independently validated rounds.
+- Closed the boundary with `881_mb678_partyline_boundary_closure.t`: the parent
+  contains only construction, port access and runtime-status publication and
+  no physical `_cmd_*` implementation.
+- Reduced `Mediabot/Partyline.pm` from 6,976 lines before MB678 to 295 lines at
+  closure without changing command routing or the Partyline protocol.
+- Final MB678 validation passed `964/964` boundary assertions, `5982/5982` in
+  the fast lane, all 11 security invariants, real Partyline runtime smoke, and
+  `15371/15371` in the complete suite.
+
+### mb677 — extract durable community state from UserCommands
+- Added `Mediabot::CommunityState` and moved the coherent reminders, polls,
+  notes and related durable community-state implementation out of
+  `Mediabot::UserCommands`.
+- Preserved historical `UserCommands` method availability so existing dispatch
+  and callers continue to resolve through the old surface.
+- Added `861_mb677_community_state_extraction.t`.
+
+### mb676 — extract Karma from UserCommands
+- Added `Mediabot::Karma` as the owner of Karma processing, history, watch/info
+  behaviour and score helpers previously implemented in `UserCommands.pm`.
+- Preserved the historical `Mediabot::UserCommands` Karma method surface for
+  compatibility.
+- Added `860_mb676_karma_extraction.t`.
+
+### mb675 — move Claude HTTP transport out of the IRC event loop
+- Migrated the Anthropic HTTP transport used by public, private, summary and
+  Partyline Claude paths to the shared `Mediabot::AsyncWorker`.
+- Keeps history, cache, metrics and output callbacks in the parent process while
+  only bounded HTTP work runs in the child.
+- Preserved the historical synchronous adapter as a compatibility fallback for
+  lightweight/no-loop contexts.
+- Added `859_mb675_claude_async_transport.t`.
+
+### mb673 — report `update now` success from the new process
+- The detached updater now writes a structured completion marker only after the
+  newly activated tree passes live-path validation.
+- The restarted bot consumes that marker only when the original reply
+  destination is usable: private completion after login, or channel completion
+  after the matching self-JOIN.
+- Completion is one-shot, rejects unsafe destinations and reports the version
+  actually installed by the new process.
+- Added `858_mb673_update_completion_notice.t`.
+
+### mb672 — make rich media URL handling faster and safer for the IRC loop
+- Moved Spotify rich metadata handling to `AsyncWorker`, using lightweight
+  oEmbed/embed metadata without Chromium on the normal path while preserving
+  the existing badge/output contract.
+- Added structured asynchronous Apple Music track lookup with canonical URL
+  caching so equivalent locale/tracking variants reuse the same result.
+- Fixed the URL anti-repeat gate so a disabled channel feature does not burn a
+  URL before that feature is enabled.
+- Added a fast deterministic Facebook Reel fallback that skips the known-dead
+  Chromium shell path while retaining the existing fallback for non-Reel
+  content.
+- Added contracts `854` through `857`.
+
 ### mb671 — make Instagram previews rich without blocking IRC
 - Reworked Instagram URL handling around a bounded `Mediabot::AsyncWorker`
   request so slow or unavailable Instagram pages no longer block PRIVMSG
