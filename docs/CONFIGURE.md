@@ -55,6 +55,37 @@ OpenAI, Anthropic and radio integrations.
 Deployment-specific options such as DCC public IP/range and plugin loading stay
 commented until explicitly configured.
 
+## Debian 13 fresh-install CI gate
+
+The public Debian 13 badge is backed by
+`.github/workflows/debian13.yml`, which runs inside the official
+`debian:13-slim` container. The gate verifies the distribution identity, the
+Debian system Perl 5.40 baseline, the documented bootstrap/MariaDB development
+tooling, and the complete runtime Perl module set built for that system Perl.
+
+It then copies a clean checkout under `/home/mediabot/mediabot_v3`, switches to
+a dedicated non-root `mediabot` account and exercises the real configuration
+entry point in non-destructive fresh mode:
+
+```bash
+./configure \
+  --config /home/mediabot/mediabot_v3/mediabot.conf \
+  --sync-only \
+  --skip-db \
+  --skip-cpan \
+  --yes
+```
+
+The generated file must be mode `0600`, keep `PARTYLINE_EVAL_ENABLED=0`, and
+pass the strict sample-driven configuration audit. The workflow uses `cpanm`
+only as a CI-local dependency builder before calling the supported
+`install/cpan_install.sh --verify-only` verifier; this does not change the
+operator-facing CPAN installation policy.
+
+The container gate deliberately does **not** claim to replace a live database
+or IRC end-to-end installation test. MariaDB schema creation, service startup,
+and real IRC connectivity remain separate readiness checks.
+
 ## Existing installation
 
 Running `./configure` against an existing `mediabot.conf` is non-destructive by

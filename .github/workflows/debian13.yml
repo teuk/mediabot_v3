@@ -1,0 +1,154 @@
+name: Debian 13 fresh-install gate
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: debian13-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fresh-install:
+    name: Debian 13 / system Perl 5.40 / fresh config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container:
+      image: debian:13-slim
+
+    steps:
+      - name: Install Debian 13 bootstrap and CI build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # A CI container has no service manager. Prevent package postinst
+          # scripts from trying to start MariaDB while still installing the
+          # same server/client/bootstrap packages documented for operators.
+          printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d
+          chmod 0755 /usr/sbin/policy-rc.d
+
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            bash \
+            ca-certificates \
+            git \
+            sudo \
+            curl \
+            wget \
+            jq \
+            unzip \
+            zip \
+            tar \
+            perl \
+            build-essential \
+            make \
+            gcc \
+            pkg-config \
+            mariadb-server \
+            mariadb-client \
+            libmariadb-dev \
+            cpanminus
+
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Check out the repository
+        uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Verify the Debian 13 system baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          . /etc/os-release
+
+          test "$ID" = debian
+          test "$VERSION_ID" = 13
+
+          perl -e 'die "expected Debian 13 system Perl 5.40.x\n" unless $] >= 5.040 && $] < 5.041; print "Perl $^V\n"'
+
+          for cmd in perl cpan make gcc mysql sudo mktemp find curl mariadb_config; do
+            command -v "$cmd" >/dev/null
+          done
+
+          mysql --version
+          mariadb_config --version
+
+      - name: Build and verify runtime Perl dependencies on Debian 13
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5${PERL5LIB:+:$PERL5LIB}"
+
+          cpanm --notest --local-lib "$GITHUB_WORKSPACE/local" --installdeps .
+
+          if perl -MHailo -e 'exit 0' >/dev/null 2>&1; then
+            echo 'Hailo is already available.'
+          elif cpanm --notest --local-lib "$GITHUB_WORKSPACE/local" Hailo; then
+            echo 'Hailo installed from CPAN.'
+          else
+            echo 'Normal Hailo installation failed; using the supported 0.75 fallback.'
+            cpanm --notest --local-lib "$GITHUB_WORKSPACE/local" \
+              https://cpan.metacpan.org/authors/id/A/AV/AVAR/Hailo-0.75.tar.gz
+          fi
+
+          bash install/cpan_install.sh --verify-only
+
+      - name: Exercise fresh non-root configuration generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5${PERL5LIB:+:$PERL5LIB}"
+
+          adduser --disabled-password --gecos '' mediabot
+
+          install -d -m 0755 -o mediabot -g mediabot /home/mediabot/mediabot_v3
+          tar \
+            --exclude='./.git' \
+            --exclude='./local' \
+            --exclude='./mediabot.conf' \
+            --exclude='./configure.log' \
+            -cf - . \
+            | tar -xf - -C /home/mediabot/mediabot_v3
+          chown -R mediabot:mediabot /home/mediabot/mediabot_v3
+
+          sudo -u mediabot env \
+            HOME=/home/mediabot \
+            PERL5LIB="$PERL5LIB" \
+            bash -lc '
+              set -euo pipefail
+              cd /home/mediabot/mediabot_v3
+              ./configure \
+                --config /home/mediabot/mediabot_v3/mediabot.conf \
+                --sync-only \
+                --skip-db \
+                --skip-cpan \
+                --yes
+
+              test "$(stat -c %a mediabot.conf)" = 600
+              grep -Eq "^[[:space:]]*PARTYLINE_EVAL_ENABLED[[:space:]]*=[[:space:]]*0[[:space:]]*$" mediabot.conf
+              perl install/configure_config.pl \
+                --sample mediabot.sample.conf \
+                --config mediabot.conf \
+                --mode audit \
+                --strict \
+                --quiet
+              grep -Fq "Fresh installation detected:" configure.log
+              grep -Fq "Configuration synchronization completed (--sync-only)" configure.log
+            '
+
+      - name: Run Debian 13 fresh-install contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5:$GITHUB_WORKSPACE${PERL5LIB:+:$PERL5LIB}"
+
+          perl t/test_commands.pl \
+            -f '^(597_|598_|599_|600_|610_|719_|886_)'

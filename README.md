@@ -8,7 +8,7 @@
   <a href="https://github.com/teuk/mediabot_v3/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/teuk/mediabot_v3/actions/workflows/ci.yml/badge.svg?branch=master&event=push"></a>
   <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.3"><img alt="Stable release 3.3" src="https://img.shields.io/badge/stable-3.3-2ea44f"></a>
   <a href="LICENSE.md"><img alt="GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-4c1"></a>
-  <a href="https://github.com/teuk/mediabot_v3/wiki/Installation"><img alt="Debian 13 validated" src="https://img.shields.io/badge/Debian%2013-validated-A81D33?logo=debian&logoColor=white"></a>
+  <a href="https://github.com/teuk/mediabot_v3/actions/workflows/debian13.yml"><img alt="Debian 13 fresh-install gate" src="https://github.com/teuk/mediabot_v3/actions/workflows/debian13.yml/badge.svg?branch=master&event=push"></a>
   <a href="https://github.com/teuk/mediabot_v3/discussions"><img alt="GitHub Discussions" src="https://img.shields.io/badge/community-Discussions-8250df?logo=github"></a>
 </p>
 
@@ -169,6 +169,18 @@ module package.
 Do not install `libdbi-perl`, `libdbd-mariadb-perl` or
 `libdbd-mysql-perl` for the supported installation path. `./configure` installs
 and verifies `DBI`, `DBD::MariaDB` and the remaining Perl modules through CPAN.
+
+Debian 13 is also guarded by the dedicated
+[`debian13.yml`](.github/workflows/debian13.yml) CI workflow. The gate runs in
+the official `debian:13-slim` container, checks the Debian system Perl 5.40
+baseline, installs the documented MariaDB/bootstrap packages, builds the
+runtime Perl dependency set against that system Perl, verifies it through
+`install/cpan_install.sh --verify-only`, and exercises a fresh non-root
+configuration generation with `./configure --sync-only --skip-db --skip-cpan
+--yes`. The CI-only `cpanm` local library is an acceleration/isolation mechanism;
+the supported operator installation path remains the CPAN flow described
+above. Database creation and live IRC connectivity remain end-to-end runtime
+checks rather than container-CI claims.
 
 Optional but useful:
 
