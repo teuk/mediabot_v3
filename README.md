@@ -343,8 +343,9 @@ See:
 
 `tools/mediabot_doctor.pl` is the read-only operational diagnostic for a real
 Mediabot instance. It inspects runtime, configuration, filesystem, systemd /
-deployment state, Git state when applicable, database state and migrations
-without repairing, restarting or modifying the instance.
+deployment state, Git state when applicable, the durable result of the last
+built-in updater run, database state and migrations without repairing,
+restarting or modifying the instance.
 
 Run it against the configuration actually used by the instance:
 
@@ -364,6 +365,7 @@ Useful modes include:
 perl tools/mediabot_doctor.pl --conf=mediabot.conf --strict
 perl tools/mediabot_doctor.pl --conf=mediabot.conf --json
 perl tools/mediabot_doctor.pl --conf=mediabot.conf --domain database
+perl tools/mediabot_doctor.pl --conf=mediabot.conf --domain updater
 ```
 
 The final verdict is intentionally operational:

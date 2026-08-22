@@ -47,11 +47,16 @@ use Time::HiRes qw(time sleep);
 binmode(STDOUT, ':encoding(UTF-8)');
 binmode(STDERR, ':encoding(UTF-8)');
 
-our $VERSION = '1.1';
+our $VERSION = '1.2';
 
 # Version du MODELE de faits, pas de l'outil. Un consommateur JSON doit
 # pouvoir refuser un modele qu'il ne comprend pas plutot que de deviner.
 use constant SCHEMA_VERSION => 1;
+
+# mb681: a live updater should normally complete well below one hour.
+# Crossing this threshold is only WARN (never FAIL): the process may be
+# legitimately slow, but the operator deserves an explicit stale-running hint.
+use constant UPDATE_RUNNING_STALE_SECONDS => 3600;
 
 # -----------------------------------------------------------------------------
 # 1. Le modele de faits — fige pour les SEPT domaines
@@ -1737,6 +1742,50 @@ sub _conf_from_argv {
 
         $r{family} = _scan_deployment_family($ctx->{root});
 
+        # mb681: consume the durable MB680 record through the public reader.
+        # This is local-only and deliberately does not infer history from Git.
+        my ($status, $status_why) = Mediabot::Update::update_status_record($view);
+        $r{update_status} = $status if $status;
+        $r{update_status_error} = $status_why unless $status;
+
+        if (open my $vfh, '<:encoding(UTF-8)',
+                 File::Spec->catfile($ctx->{root}, 'VERSION')) {
+            my $v = <$vfh>;
+            close $vfh;
+            if (defined $v) {
+                $v =~ s/[\r\n]+\z//;
+                $v =~ s/^\s+|\s+$//g;
+                $r{tree_version} = $v if length $v;
+            }
+        }
+
+        if ($status && $status->{state} eq 'running') {
+            my $started = $status->{started_at};
+            if (defined($started) && $started =~ /\A\d+\z/ && $started > 0) {
+                my $age = int(time() - $started);
+                $r{update_status_age} = ($age < 0 ? 0 : $age);
+            }
+
+            my $pid = $status->{updater_pid};
+            if (defined($pid) && $pid =~ /\A\d+\z/ && $pid > 0) {
+                my $proc = "/proc/$pid";
+                $r{updater_process_alive} = (-d $proc ? 1 : 0);
+                if ($r{updater_process_alive}) {
+                    my $cmd = "$proc/cmdline";
+                    if (open my $pfh, '<:raw', $cmd) {
+                        local $/;
+                        my $bytes = <$pfh>;
+                        close $pfh;
+                        if (defined $bytes) {
+                            my @argv = grep { length } split /\0/, $bytes, -1;
+                            $r{updater_process_matches} =
+                                (grep { /(?:^|\/)deploy_update\.sh\z/ } @argv) ? 1 : 0;
+                        }
+                    }
+                }
+            }
+        }
+
         # Git inspection is local-only. No fetch, no ls-remote, no network.
         my $git = _find_executable('git');
         $r{git_executable} = $git;
@@ -1811,6 +1860,149 @@ sub _conf_from_argv {
                 detail => $why,
                 source => 'Mediabot::Update::update_eligibility',
                 data => { eligible => 0, intentional => $intentional },
+            );
+        }
+
+
+        # mb681: MB680 durable updater state is a separate operational truth.
+        # It never changes updater eligibility and never uses the network.
+        if (!$raw->{update_status}) {
+            my $why = $raw->{update_status_error} // 'update status unavailable';
+            if ($why eq 'no update status recorded') {
+                push @out, _fact(
+                    domain => 'updater', id => 'updater.last_update', level => 'info',
+                    summary => 'no durable updater history recorded yet',
+                    source => 'Mediabot::Update::update_status_record',
+                    data => { recorded => 0, network_used => 0 },
+                );
+            }
+            else {
+                push @out, _fact(
+                    domain => 'updater', id => 'updater.last_update', level => 'warn',
+                    summary => 'durable updater status is unavailable',
+                    detail => _sanitize_diag_text($why, 240),
+                    source => 'Mediabot::Update::update_status_record',
+                    data => { recorded => 0, network_used => 0 },
+                );
+            }
+        }
+        else {
+            my $st = $raw->{update_status};
+            my $state = $st->{state};
+            my $phase = $st->{phase};
+            my $tree = $raw->{tree_version};
+            my $installed = $st->{installed_version};
+            my $target = $st->{target_version};
+            my $old = $st->{old_version};
+            my $level = 'info';
+            my $summary;
+            my @detail;
+
+            if ($state eq 'success') {
+                $level = 'ok';
+                $summary = 'last updater run succeeded';
+                if (!defined($st->{finished_at})) {
+                    $level = 'warn';
+                    push @detail, 'success record has no finish timestamp';
+                }
+                if (!defined($installed) || !length($installed)) {
+                    $level = 'warn';
+                    push @detail, 'success record has no installed version';
+                }
+                if (defined($target) && length($target)
+                    && defined($installed) && length($installed)
+                    && $target ne $installed) {
+                    $level = 'warn';
+                    push @detail, "target $target differs from installed $installed";
+                }
+                if (defined($tree) && length($tree)
+                    && defined($installed) && length($installed)
+                    && $tree ne $installed) {
+                    $level = 'warn';
+                    push @detail, "current tree $tree differs from recorded installed $installed";
+                }
+            }
+            elsif ($state eq 'failed') {
+                $level = 'warn';
+                $summary = "last updater run failed during $phase";
+            }
+            elsif ($state eq 'rolled_back') {
+                $level = 'warn';
+                $summary = "last updater run rolled back during $phase";
+                if (defined($old) && length($old)
+                    && defined($installed) && length($installed)
+                    && $old ne $installed) {
+                    push @detail, "rollback recorded installed $installed instead of old version $old";
+                }
+                if (defined($tree) && length($tree)
+                    && defined($installed) && length($installed)
+                    && $tree ne $installed) {
+                    push @detail, "current tree $tree differs from recorded installed $installed";
+                }
+            }
+            elsif ($state eq 'running') {
+                my $age = $raw->{update_status_age};
+                my $pid = $st->{updater_pid};
+                my $alive = $raw->{updater_process_alive};
+                my $matches = $raw->{updater_process_matches};
+
+                $level = 'info';
+                $summary = "updater is running during $phase";
+
+                if (!defined($pid)) {
+                    $level = 'warn';
+                    push @detail, 'running record has no updater PID';
+                }
+                elsif (defined($alive) && !$alive) {
+                    $level = 'warn';
+                    push @detail, "recorded updater PID $pid is not alive";
+                }
+                elsif ($alive && defined($matches) && !$matches) {
+                    $level = 'warn';
+                    push @detail, "PID $pid is alive but does not look like deploy_update.sh";
+                }
+
+                if (defined($age) && $age > UPDATE_RUNNING_STALE_SECONDS) {
+                    $level = 'warn';
+                    push @detail, "running state is ${age}s old";
+                }
+            }
+
+            my $safe_record_detail = _sanitize_diag_text($st->{detail} // '', 240);
+            push @detail, $safe_record_detail if length $safe_record_detail;
+
+            my $from_to;
+            if ((defined($old) && length($old))
+                || (defined($installed) && length($installed))
+                || (defined($target) && length($target))) {
+                my $to = defined($installed) && length($installed) ? $installed
+                       : defined($target) && length($target) ? $target : '?';
+                $from_to = (defined($old) && length($old) ? $old : '?') . " -> $to";
+            }
+            $summary .= " ($from_to)" if defined $from_to;
+
+            push @out, _fact(
+                domain => 'updater', id => 'updater.last_update', level => $level,
+                summary => $summary,
+                detail => (@detail ? join('; ', @detail) : undef),
+                source => 'Mediabot::Update::update_status_record + local process/tree state',
+                data => {
+                    recorded => 1,
+                    state => $state,
+                    phase => $phase,
+                    started_at => $st->{started_at},
+                    finished_at => $st->{finished_at},
+                    updater_pid => $st->{updater_pid},
+                    age_seconds => $raw->{update_status_age},
+                    updater_process_alive => $raw->{updater_process_alive},
+                    updater_process_matches => $raw->{updater_process_matches},
+                    old_version => $old,
+                    target_version => $target,
+                    installed_version => $installed,
+                    tree_version => $tree,
+                    stale_after_seconds => UPDATE_RUNNING_STALE_SECONDS,
+                    network_used => 0,
+                },
             );
         }
 
