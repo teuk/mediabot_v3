@@ -32,6 +32,29 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb695 — reconcile long-lived database schema drift before 3.5
+- Audited database compatibility from the real stable `3.3` Git schema through
+  every post-stable migration: current fresh installs, upgraded 3.3 databases
+  and a second migration replay converge to the same deep schema fingerprint.
+- Added an idempotent, fail-closed compatibility migration for long-lived
+  pre-3.3-era databases. It normalizes historical charset/collation and column
+  metadata, restores required prefix indexes and canonical foreign-key rules,
+  preserves existing rows and unrelated performance indexes, and refuses
+  narrowing/FK changes when live data is unsafe.
+- `USER.hostmasks_legacy` is deliberately preserved: the live compatibility
+  audit found legacy values that are not yet fully represented by
+  `USER_HOSTMASK`, so structural cleanup must not discard that data.
+- Added regression contract `907_mb695_legacy_schema_reconciliation.t` and
+  documented the compatibility migration in both authoritative migration
+  guides. The controlled DEV application then completed on the real
+  long-lived database after clone rehearsal and a verified cold logical backup.
+  All 43 table row counts and the `hostmasks_legacy` fingerprint were preserved,
+  and Mediabot returned to IRC without fatal startup signatures.
+- Schema validation no longer needs Doctor's blanket `--ignore-extra` bypass.
+  The checker now supports repeatable exact
+  `--allow-extra-column TABLE.COLUMN` exceptions; Doctor permits only
+  `USER.hostmasks_legacy`, so unrelated extra objects remain strict drift.
+
 ### mb694 — polish RSS operations before feature freeze
 - `m rss list` now reports each feed's enabled/health state, polling interval,
   announcement cap, stored-item count and pending count in bounded IRC lines

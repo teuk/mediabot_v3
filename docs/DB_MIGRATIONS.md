@@ -74,6 +74,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260710_quotes_hits.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260724_lang_chansets.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260816_achievements_db.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260822_rss_feeds.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260823_legacy_schema_reconciliation.sql;
 ```
 
 Then run the checker again:
@@ -108,6 +109,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260724_lang_chansets.sql
 20260816_achievements_db.sql
 20260822_rss_feeds.sql
+20260823_legacy_schema_reconciliation.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this
@@ -136,6 +138,43 @@ For an existing installation, back up the configured database before applying
 the migration, then validate the RSS schema delta with the normal drift checker.
 Historical unrelated drift must be reviewed separately rather than silently
 rewritten as part of the RSS rollout.
+
+## Long-lived schema reconciliation (20260823)
+
+`20260823_legacy_schema_reconciliation.sql` is a compatibility migration for
+databases whose history predates the canonical stable 3.3 schema. A fresh
+installation does not need historical migrations, and the normal real
+3.3-to-current migration path is already validated to converge with a current
+fresh database.
+
+The reconciliation migration is intentionally fail-closed. Before narrowing
+numeric types, restoring unique prefix indexes or adding foreign keys, it
+checks the existing data for negative/out-of-range values, duplicate key
+prefixes, zero dates and orphan references. Unsafe data stops the migration
+instead of being silently rewritten.
+
+The migration also normalizes audited historical table defaults/text columns to
+`utf8mb4_unicode_ci`, restores canonical required indexes and foreign-key
+names/rules, and preserves unrelated extra indexes that may be local performance
+tuning.
+
+`USER.hostmasks_legacy` is deliberately **not** dropped. Long-lived databases
+may still contain compatibility values not represented by `USER_HOSTMASK`; any
+future removal requires a separately proven data migration.
+
+For a long-lived database, rehearse this migration on a clone first and take a
+database backup before applying it to the real instance. After application,
+validate with:
+
+```bash
+perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes --allow-extra-column USER.hostmasks_legacy
+```
+
+The compatibility allowance is deliberately exact: only
+`USER.hostmasks_legacy` is accepted. Any other extra table or column remains
+schema drift and still fails strict validation. The broader `--ignore-extra`
+option remains available for explicit diagnostics, but is not the MB695
+release-validation path.
 
 ## Useful commands
 

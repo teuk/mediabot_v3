@@ -2115,7 +2115,7 @@ sub _conf_from_argv {
 
         eval { $dbh->disconnect };
 
-        # Schema truth stays in the existing checker. --ignore-extra asks the
+        # Schema truth stays in the existing checker. --allow-extra-column USER.hostmasks_legacy asks the
         # operational question Doctor needs: are all REQUIRED current
         # structures/indexes/reference rows present? Extra legacy objects are
         # not a reason to declare the instance unsafe.
@@ -2123,7 +2123,7 @@ sub _conf_from_argv {
         if (-f $checker && !-l $checker) {
             $r{schema_drift} = _capture_command_bounded(
                 30, $^X, $checker, '--conf=' . $ctx->{conf_file},
-                '--strict', '--types', '--indexes', '--ignore-extra', '--quiet');
+                '--strict', '--types', '--indexes', '--allow-extra-column', 'USER.hostmasks_legacy', '--quiet');
         }
         else {
             $r{schema_drift} = { ok => 0, rc => 127, missing_tool => 1,
@@ -2253,7 +2253,7 @@ sub _conf_from_argv {
             push @out, _fact(
                 domain => 'database', id => 'database.schema_drift', level => 'ok',
                 summary => 'required live schema/reference data match install/mediabot.sql',
-                detail => 'delegated to check_schema_drift.pl (--types --indexes --ignore-extra)',
+                detail => 'delegated to check_schema_drift.pl (--types --indexes --allow-extra-column USER.hostmasks_legacy)',
                 source => 'tools/check_schema_drift.pl',
                 data => { delegated => 1, rc => 0, network_used => 0, extra_live_objects_ignored => 1 },
             );

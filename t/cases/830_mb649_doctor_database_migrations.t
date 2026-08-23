@@ -42,8 +42,16 @@ return sub {
         'mb649-830: Doctor reuses the non-fatal isolated DB connector');
     $assert->like($source, qr/SET SESSION TRANSACTION READ ONLY/,
         'mb649-830: Doctor enforces a read-only DB session before queries');
-    $assert->like($source, qr/check_schema_drift\.pl.*--ignore-extra/s,
-        'mb649-830: schema truth is delegated to the existing drift checker');
+    $assert->like(
+        $source,
+        qr/check_schema_drift\.pl.*--allow-extra-column.*USER\.hostmasks_legacy/s,
+        'mb649-830: schema truth is delegated with the exact legacy-column allowance',
+    );
+    $assert->unlike(
+        $code_only,
+        qr/['"]--ignore-extra['"]/,
+        'mb649-830: Doctor does not blanket-ignore unrelated extra schema objects',
+    );
 
     # ------------------------------------------------------------------
     # [1] bounded subprocess helper

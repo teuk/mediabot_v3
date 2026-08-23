@@ -24,6 +24,8 @@ use Cwd qw(abs_path);
 
 my $base_dir = abs_path(File::Spec->catdir($Bin, '..')) || File::Spec->catdir($Bin, '..');
 
+my @allow_extra_columns;
+
 my %opt = (
     driver             => $ENV{MEDIABOT_DB_DRIVER} // 'auto',
     host               => $ENV{MEDIABOT_DB_HOST}   // 'localhost',
@@ -60,6 +62,7 @@ GetOptions(
     'indexes'            => \$opt{indexes},
     'generate-migration' => \$opt{generate_migration},
     'ignore-extra'       => \$opt{ignore_extra},
+    'allow-extra-column=s@' => \@allow_extra_columns,
     'quiet'              => \$opt{quiet},
     'help'               => \$opt{help},
 ) or die usage();
@@ -68,6 +71,9 @@ if ($opt{help}) {
     print usage();
     exit 0;
 }
+
+my %allowed_extra_columns =
+    parse_allowed_extra_columns(@allow_extra_columns);
 
 # DBI is only needed to talk to the live database, never for --help. Load it
 # lazily so `--help` works on a machine where CPAN modules aren't installed yet
@@ -124,8 +130,17 @@ for my $t (sort keys %$ref) {
 
     if (!$opt{ignore_extra}) {
         for my $c (sort keys %{ $live->{$t}{columns} }) {
-            push @t_issues, issue('extra_column', $t, $c, "  EXTRA COLUMN    $t.$c  (in DB, not in schema)")
-                unless exists $ref->{$t}{columns}{$c};
+            next if exists $ref->{$t}{columns}{$c};
+
+            my $extra_key = "$t.$c";
+            next if $allowed_extra_columns{$extra_key};
+
+            push @t_issues, issue(
+                'extra_column',
+                $t,
+                $c,
+                "  EXTRA COLUMN    $t.$c  (in DB, not in schema)"
+            );
         }
     }
 
@@ -178,6 +193,21 @@ sub issue {
     return { kind => $kind, table => $table, column => $column, text => $text };
 }
 
+sub parse_allowed_extra_columns {
+    my @values = @_;
+    my %allowed;
+
+    for my $value (@values) {
+        die "Error: invalid --allow-extra-column '$value'; expected TABLE.COLUMN\n"
+            unless defined $value
+                && $value =~ /\A([A-Za-z0-9_]+)[.]([A-Za-z0-9_]+)\z/;
+
+        $allowed{"$1.$2"} = 1;
+    }
+
+    return %allowed;
+}
+
 sub usage {
     return <<'USAGE';
 Usage:
@@ -199,6 +229,8 @@ Options:
   --indexes              Verify required reference indexes (extra live indexes ignored)
   --strict               Exit 1 on drift
   --ignore-extra         Ignore extra tables/columns in live DB
+  --allow-extra-column X.Y
+                         Allow only this extra live column; repeatable
   --generate-migration   Print reviewable SQL for missing tables/columns/indexes/reference rows
   --quiet                Reduce output when schema is clean
   --help                 Show this help

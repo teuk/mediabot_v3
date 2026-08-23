@@ -47,6 +47,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260724_lang_chansets.sql
 20260816_achievements_db.sql
 20260822_rss_feeds.sql
+20260823_legacy_schema_reconciliation.sql
 ```
 
 The migration set adds channel-ban tracking, user seen/activity tracking, Claude chanset reference data, schema support for newer fun/user commands, and persistent trivia scores and user notes, including:
@@ -92,6 +93,21 @@ The file must be a regular non-symlink file with no group/other permissions.
 Without that option, the helper preserves its historical interactive `-p`
 prompt.
 
+## Long-lived database reconciliation
+
+`20260823_legacy_schema_reconciliation.sql` is a compatibility migration for
+installations whose database predates the canonical 3.3 schema history. It is
+not needed to make a fresh install correct: the fresh schema and the normal
+3.3-to-current migration path are already equivalent.
+
+The migration is fail-closed. It checks narrowing/index/FK preconditions before
+DDL, preserves rows and `USER.hostmasks_legacy`, normalizes historical
+utf8mb3/latin1 table defaults to `utf8mb4_unicode_ci`, restores canonical
+column/index/FK definitions, and deliberately keeps unrelated extra indexes.
+
+For a long-lived production database, rehearse this migration on a clone and
+make a database backup before applying it to the real instance.
+
 ## Recommended application method
 
 Use the interactive SQL client and explicit UTF-8 settings:
@@ -124,6 +140,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260710_quotes_hits.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260724_lang_chansets.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260816_achievements_db.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260822_rss_feeds.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260823_legacy_schema_reconciliation.sql;
 ```
 
 Afterwards:
