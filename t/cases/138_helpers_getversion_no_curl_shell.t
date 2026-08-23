@@ -89,9 +89,9 @@ return sub {
         'getVersion defines the remote VERSION URL'
     );
 
-    # mb640: la requete passe par le client COMMUN du bot (_make_http), qui
-    # porte la politique TLS unique — verify_SSL=0 pour OVH/Kimsufi. Forger un
-    # client a part ici avait casse le check en production.
+    # La requete passe par le client COMMUN du bot (_make_http), qui porte la
+    # politique TLS unique. MB696 a revalide verify_SSL=1 sur le serveur reel;
+    # aucun client HTTP local ne doit recreer une politique differente ici.
     $assert->like(
         $fetch // '',
         qr/Mediabot::External::_make_http\(/,

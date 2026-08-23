@@ -2524,20 +2524,15 @@ sub fetch_remote_version {
             return (undef, 'HTTPS unavailable (install IO::Socket::SSL and Net::SSLeay)');
         }
     }
-    # NB: la verification des certificats suit la politique commune du bot
-    # (_make_http), pas une regle propre a cette fonction — voir plus bas.
+    # La verification des certificats suit la politique commune du bot
+    # (_make_http). MB696 a revalide cette politique sur le serveur reel : TLS
+    # verifie fonctionne avec GitHub et les endpoints publics utilises ici.
 
     my $last_error;
     for my $url (@urls) {
-        # mb640-B1: MON BUG de mb637. J'avais forge un client HTTP a part avec
-        # « verify_SSL => 1 ». Or tout le reste du bot passe par
-        # Mediabot::External::_make_http, dont le commentaire dit exactement
-        # pourquoi : « verify_SSL defaults to 0 for OVH/Kimsufi compatibility ».
-        # Sur le serveur de teuk (Kimsufi/OVH), la verification echoue donc
-        # instantanement — d'ou un echec en une seconde, la ou un vrai blocage
-        # reseau aurait mis le delai complet. On reutilise le client commun :
-        # une seule politique TLS pour tout le bot, et plus d'exception
-        # inventee par moi dans un coin.
+        # Reutiliser le client commun evite toute seconde politique TLS locale.
+        # Son defaut est maintenant verify_SSL=1; les rares exceptions de
+        # compatibilite doivent etre explicites a leur point d'appel.
         my $res = eval {
             require Mediabot::External;
             Mediabot::External::_make_http(
@@ -5247,7 +5242,7 @@ sub whereis {
             && $userIP =~ /\A\d{1,3}(?:\.\d{1,3}){3}\z/;
 
     my $whereis_url = "https://api.country.is/$userIP";
-    my $response = eval { HTTP::Tiny->new(timeout => 3)->get($whereis_url); }
+    my $response = eval { HTTP::Tiny->new(timeout => 3, verify_SSL => 1)->get($whereis_url); }
                 // { success => 0, status => 0, reason => $@ };
 
     return "N/A" unless ref($response) eq 'HASH';

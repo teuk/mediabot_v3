@@ -548,7 +548,11 @@ sub mbNews_ctx {
 
     # Recherche, avec elargissement par paliers : on ne rend jamais « rien a
     # resumer » sans avoir tente la fenetre suivante.
-    my $http = Mediabot::External::_make_http(timeout => 12, max_size => 1024 * 1024);
+    my $http = Mediabot::External::_make_http(
+        timeout    => 12,
+        verify_SSL => 1,
+        max_size   => 1024 * 1024,
+    );
     my ($picked, $last_status) = ([], 0);
     for my $window (0 .. 2) {
         my ($params, $days) = _news_search_params($lang, $query, $window);

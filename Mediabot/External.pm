@@ -164,14 +164,14 @@ our @EXPORT = qw(
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# _make_http(%opts) — shared HTTP::Tiny factory with SSL bypass
-# HTTP 599 on HTTPS URLs usually means IO::Socket::SSL is present but
-# certificate verification fails. SSL_options forces no-verify mode.
+# _make_http(%opts) — shared HTTP::Tiny factory, TLS verified by default
+# HTTPS certificate verification is the safe default. A caller that needs a
+# deliberate compatibility exception must opt out explicitly with verify_SSL=0;
+# the no-verify SSL_options are then scoped to that one caller.
 # ---------------------------------------------------------------------------
 sub _make_http {
     my (%opts) = @_;
-    # verify_SSL defaults to 0 for OVH/Kimsufi compatibility but caller can override (e.g. weather)
-    my $verify = exists $opts{verify_SSL} ? $opts{verify_SSL} : 0;
+    my $verify = exists $opts{verify_SSL} ? $opts{verify_SSL} : 1;
     my %ssl_opts = $verify ? () : (SSL_options => { SSL_verify_mode => 0 });
     return HTTP::Tiny->new(
         timeout    => $opts{timeout}  // 8,

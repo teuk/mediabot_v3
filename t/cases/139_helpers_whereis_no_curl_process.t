@@ -83,8 +83,8 @@ return sub {
 
     $assert->like(
         $body // '',
-        qr/HTTP::Tiny->new\(timeout => 3\)->get\(\$whereis_url\)/,
-        'whereis fetches country.is with HTTP::Tiny and a short timeout'
+        qr/HTTP::Tiny->new\(timeout => 3, verify_SSL => 1\)->get\(\$whereis_url\)/,
+        'whereis fetches country.is with HTTP::Tiny, verified TLS and a short timeout'
     );
 
     $assert->like(

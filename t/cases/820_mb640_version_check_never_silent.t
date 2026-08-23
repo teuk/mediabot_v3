@@ -9,12 +9,10 @@
 #
 # DEUX defauts, tous deux de MOI :
 #
-#  (A) mb637 forgeait un client HTTP a part avec « verify_SSL => 1 ». Or tout
-#      le bot passe par Mediabot::External::_make_http, dont le commentaire
-#      dit exactement pourquoi : « verify_SSL defaults to 0 for OVH/Kimsufi
-#      compatibility ». Le serveur de teuk EST un Kimsufi/OVH : la
-#      verification echouait instantanement — d'ou une reponse en 1 seconde
-#      la ou un blocage reseau aurait pris tout le delai.
+#  (A) mb637 forgeait un client HTTP a part et divergeait de la politique
+#      commune. MB696 a depuis revalide la chaine CA/TLS sur le serveur reel :
+#      _make_http est maintenant verify_SSL=1 par defaut. Le contrat important
+#      reste une seule politique HTTP commune, secure-by-default.
 #
 #  (B) Plus grave : une EXCEPTION de getVersion etait avalee par un eval nu.
 #      Le fils n'ecrivait alors rien, le parent retombait sur le local EN
@@ -54,14 +52,14 @@ return sub {
     # regle qu'on a enfreinte).
     my $fetch_code = $fetch;
     $fetch_code =~ s/^\s*#.*$//mg;
-    $assert->ok($fetch_code !~ /verify_SSL\s*=>\s*1/,
-        'mb640-820: plus de verify_SSL force (le bot tourne sur OVH/Kimsufi)');
+    $assert->ok($fetch_code !~ /verify_SSL\s*=>\s*0/,
+        'mb640-820: le fetch ne desactive jamais la verification TLS');
     $assert->ok($fetch_code !~ /HTTP::Tiny->new\(/,
         'mb640-820: ... et plus aucun client HTTP forge a part');
     my $ext = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/External.pm'
         or die $!; local $/; <$fh> };
-    $assert->like($ext, qr/verify_SSL defaults to 0 for OVH\/Kimsufi compatibility/,
-        'mb640-820: ... politique commune toujours documentee a sa source');
+    $assert->like($ext, qr/exists\s+\$opts\{verify_SSL\}.*?:\s*1\s*;/s,
+        'mb640-820: ... politique commune verify_SSL=1 par defaut');
 
     # [2] une exception devient une raison — sur les DEUX chemins
     my $crashes = () = $src =~ /'version check crashed: '/g;

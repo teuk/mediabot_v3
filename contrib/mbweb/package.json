@@ -1,0 +1,19 @@
+{
+  "name": "mbweb",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Mediabot v3 web console",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node app.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.6.1",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "mysql2": "^3.22.2",
+    "helmet": "^8.0.0"
+  }
+}

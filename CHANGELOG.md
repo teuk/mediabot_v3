@@ -32,6 +32,26 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb696 — make outbound HTTPS secure by default
+- Revalidated the real TLS stack on the deployment host before changing policy:
+  GitHub, YouTube, country.is, Tavily, OpenAI and Anthropic all complete verified
+  TLS successfully; the apparent Google News `599` was only the deliberately
+  small 64 KiB probe cap, while the production-sized 512 KiB request succeeds.
+- `_make_http` now verifies certificates by default. Authenticated Tavily news
+  requests pin `verify_SSL => 1` explicitly, and the direct country.is lookup
+  does the same instead of inheriting HTTP::Tiny's insecure default.
+- The legacy Icecast compatibility bypass remains one explicit, reviewed
+  exception for the configurable radio endpoint. `tools/security_audit.pl` now
+  fails closed if another production `verify_SSL => 0` call appears.
+- Added regression contract `909_mb696_tls_secure_default.t` and updated the
+  historical version-check tests so they guard the current secure-by-default
+  policy rather than the retired OVH/Kimsufi workaround.
+
+- Removed the accidentally vendored root `node_modules/` tree from version
+  control while preserving the local working copy. The canonical mbweb
+  `package.json` and `package-lock.json` now live under `contrib/mbweb/` and
+  match the deployed `/opt/mbweb/app` dependency contract exactly.
+
 ### mb695 — reconcile long-lived database schema drift before 3.5
 - Audited database compatibility from the real stable `3.3` Git schema through
   every post-stable migration: current fresh installs, upgraded 3.3 databases

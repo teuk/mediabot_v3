@@ -477,7 +477,7 @@ sub displayWeather_ctx {
     my $http = Mediabot::External::_make_http(
         timeout    => 4,
         agent      => $weather_agent,
-        verify_SSL => 1,   # B1/A3: override Mediabot::External::_make_http default (0) for weather
+        verify_SSL => 1,   # explicit verified TLS for the weather endpoint
     );
 
     my $res = eval { $http->get($url, {
@@ -674,7 +674,7 @@ sub _yt_label {
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Mediabot::External::_make_http(%opts) — shared HTTP::Tiny factory with SSL bypass
+# Mediabot::External::_make_http(%opts) — shared HTTP::Tiny factory, verified TLS by default
 # HTTP 599 on HTTPS URLs usually means IO::Socket::SSL is present but
 # certificate verification fails. SSL_options forces no-verify mode.
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@
 #  et déjà vérifié du code de Mediabot, pour empêcher qu'un refactor le fasse
 #  régresser sans que personne le voie. Les axes correspondent à la liste B3 :
 #     1. secrets jamais loggés en clair (tokens masqués)
-#     2. TLS vérifié sur les appels d'API AUTHENTIFIÉS (clé => verify_SSL=>1)
+#     2. TLS vérifié par défaut; bypass explicite borné; API authentifiées explicites
 #     3. commandes externes sans shell (exec LIST) et yt-dlp protégé par '--'
 #     4. sanitisation CR/LF/NUL sur les sorties IRC
 #     5. verrou de process (flock LOCK_EX) et PID
@@ -126,39 +126,98 @@ say_info("\n[1] Secrets never logged in clear");
 }
 
 # ===========================================================================
-# 2. TLS vérifié sur les appels d'API AUTHENTIFIÉS
-#    Contrat : _make_http laisse verify_SSL configurable (défaut 0 pour la
-#    compat OVH), MAIS tout appel vers une API authentifiée (OpenAI, Claude,
-#    TMDB) passe explicitement verify_SSL => 1.
+# 2. TLS vérifié par défaut et exceptions explicites bornées
+#    Contrat : _make_http reste configurable mais son défaut est verify_SSL=1.
+#    Un opt-out verify_SSL=>0 est une exception de compatibilité et doit rester
+#    unique, explicite et localisée au client Icecast configurable. Les appels
+#    authentifiés sensibles conservent en plus un verify_SSL=>1 explicite.
 # ===========================================================================
-say_info("\n[2] TLS verification on authenticated API calls");
+say_info("\n[2] TLS verification secure by default");
 {
     my $ext = slurp('Mediabot/External.pm') // '';
-    if ($ext =~ /verify_SSL\s*=>\s*\$verify/) {
-        pass("_make_http honours a caller-provided verify_SSL");
+    if ($ext =~ /exists\s+\$opts\{verify_SSL\}.*?:\s*1\s*;/s
+            && $ext =~ /verify_SSL\s*=>\s*\$verify/) {
+        pass("_make_http defaults to verified TLS and honours explicit overrides");
     }
     else {
-        fail("_make_http does not forward a configurable verify_SSL");
+        fail("_make_http is not secure-by-default or no longer forwards verify_SSL");
+    }
+
+    my @bypass;
+    for my $rel (_pm_files()) {
+        my $src = slurp($rel) // next;
+        my @lines = split /\n/, $src;
+
+        for my $i (0 .. $#lines) {
+            my $line = $lines[$i];
+
+            next if $line =~ /^\s*#/;
+
+            push @bypass, "$rel:" . ($i + 1)
+                if $line =~ /verify_SSL\s*=>\s*0/;
+        }
+    }
+
+    if (@bypass == 1
+            && $bypass[0] =~ /^Mediabot\/AdminCommands[.]pm:/) {
+        pass("only the reviewed Icecast compatibility path disables TLS verification");
+    }
+    else {
+        fail(
+            "unexpected explicit verify_SSL=>0 call(s)",
+            join(', ', @bypass)
+        );
+    }
+
+    my $news = slurp('Mediabot/External/News.pm') // '';
+
+    if ($news =~ /my\s+\$http\s*=\s*Mediabot::External::_make_http\s*\(.*?verify_SSL\s*=>\s*1.*?\);/s
+            && $news =~ /api_key\s*=>\s*\$api_key/) {
+        pass("Tavily authenticated news search pins verify_SSL => 1");
+    }
+    else {
+        fail("Tavily authenticated news search is not explicitly TLS-verified");
+    }
+
+    my $helpers = slurp('Mediabot/Helpers.pm') // '';
+
+    if ($helpers =~ /HTTP::Tiny->new\(timeout\s*=>\s*3,\s*verify_SSL\s*=>\s*1\)->get\(\$whereis_url\)/) {
+        pass("country.is HTTPS lookup explicitly verifies TLS");
+    }
+    else {
+        fail("country.is HTTPS lookup does not explicitly verify TLS");
     }
 
     # Dans Claude.pm, chaque _make_http qui sert un endpoint authentifié doit
     # avoir verify_SSL => 1. On vérifie qu'aucun _make_http n'y est appelé
-    # SANS verify_SSL => 1 (les endpoints de ce module sont tous authentifiés).
+    # SANS verify_SSL => 1.
     my $claude = slurp('Mediabot/External/Claude.pm') // '';
     my @calls;
-    # capture chaque appel _make_http( ... ) même multi-lignes
+
     while ($claude =~ /_make_http\s*\((.*?)\)/gs) {
         push @calls, $1;
     }
-    my $bad = grep { $_ !~ /verify_SSL\s*=>\s*1/ } @calls;
+
+    my $bad = grep {
+        $_ !~ /verify_SSL\s*=>\s*1/
+    } @calls;
+
     if (@calls && $bad == 0) {
-        pass("all " . scalar(@calls) . " authenticated HTTP calls set verify_SSL => 1");
+        pass(
+            "all "
+            . scalar(@calls)
+            . " authenticated HTTP calls set verify_SSL => 1"
+        );
     }
     elsif (!@calls) {
-        fail("could not find _make_http calls in Claude.pm (shape changed?)");
+        fail(
+            "could not find _make_http calls in Claude.pm (shape changed?)"
+        );
     }
     else {
-        fail("$bad authenticated HTTP call(s) missing verify_SSL => 1 in Claude.pm");
+        fail(
+            "$bad authenticated HTTP call(s) missing verify_SSL => 1 in Claude.pm"
+        );
     }
 }
 

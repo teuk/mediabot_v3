@@ -133,8 +133,8 @@ return sub {
 
     $assert->like(
         $whereis // '',
-        qr/my\s+\$response\s*=\s*eval\s+\{\s*HTTP::Tiny->new\(timeout\s*=>\s*3\)->get\(\$whereis_url\);\s*\}/,
-        'whereis protects country.is fetch with eval'
+        qr/my\s+\$response\s*=\s*eval\s+\{\s*HTTP::Tiny->new\(timeout\s*=>\s*3,\s*verify_SSL\s*=>\s*1\)->get\(\$whereis_url\);\s*\}/,
+        'whereis protects verified country.is fetch with eval'
     );
 
     $assert->like(
@@ -157,7 +157,7 @@ return sub {
 
     $assert->unlike(
         $whereis // '',
-        qr/my\s+\$response\s*=\s*HTTP::Tiny->new\(timeout\s*=>\s*3\)->get\(\$whereis_url\);/,
+        qr/my\s+\$response\s*=\s*HTTP::Tiny->new\(timeout\s*=>\s*3,\s*verify_SSL\s*=>\s*1\)->get\(\$whereis_url\);/,
         'whereis no longer calls HTTP without eval'
     );
 };
