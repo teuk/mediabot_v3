@@ -32,7 +32,13 @@ sub list_feeds {
         SELECT rf.id_rss_feed, rf.id_channel, c.name AS channel, rf.label, rf.url,
                rf.enabled, rf.poll_interval, rf.announce_limit, rf.last_poll_at,
                rf.last_success_at, rf.last_error_at, rf.last_error,
-               COUNT(ri.id_rss_item) AS item_count
+               COUNT(ri.id_rss_item) AS item_count,
+               SUM(CASE WHEN ri.id_rss_item IS NOT NULL AND ri.announced_at IS NULL
+                        THEN 1 ELSE 0 END) AS pending_count,
+               MAX(CASE WHEN rf.last_poll_at IS NULL THEN 0
+                        ELSE GREATEST(0, TIMESTAMPDIFF(SECOND, NOW(),
+                             TIMESTAMPADD(SECOND, rf.poll_interval, rf.last_poll_at)))
+                   END) AS next_poll_in
           FROM RSS_FEED rf
           JOIN CHANNEL c ON c.id_channel = rf.id_channel
           LEFT JOIN RSS_ITEM ri ON ri.id_rss_feed = rf.id_rss_feed
@@ -59,7 +65,13 @@ sub get_feed {
                rf.etag, rf.last_modified, rf.last_poll_at, rf.last_success_at,
                rf.last_error_at, rf.last_error, rf.created_by, rf.created_by_nick,
                rf.created_at, rf.updated_at,
-               COUNT(ri.id_rss_item) AS item_count
+               COUNT(ri.id_rss_item) AS item_count,
+               SUM(CASE WHEN ri.id_rss_item IS NOT NULL AND ri.announced_at IS NULL
+                        THEN 1 ELSE 0 END) AS pending_count,
+               MAX(CASE WHEN rf.last_poll_at IS NULL THEN 0
+                        ELSE GREATEST(0, TIMESTAMPDIFF(SECOND, NOW(),
+                             TIMESTAMPADD(SECOND, rf.poll_interval, rf.last_poll_at)))
+                   END) AS next_poll_in
           FROM RSS_FEED rf
           JOIN CHANNEL c ON c.id_channel = rf.id_channel
           LEFT JOIN RSS_ITEM ri ON ri.id_rss_feed = rf.id_rss_feed

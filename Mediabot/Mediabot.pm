@@ -2771,7 +2771,7 @@ actualites|actualites [sujet] [en\|fr\|es]|public|Latest news on a topic (or tod
 actualite|actualite [sujet] [en\|fr\|es]|public|Alias for actualites (accented forms actualités/actualité work too).
 actu|actu [sujet] [en\|fr\|es]|public|Alias for actualites.
 news|news [sujet] [en\|fr\|es]|public|Alias for actualites.
-rss|rss <list|info|add|del|set|probe|show> ...|public|Manage and inspect native per-channel RSS/Atom feeds. Changes require channel level 400+ or Administrator.
+rss|rss <list|info|add|del|set|probe|show> ...|public|Native per-channel RSS/Atom feeds with automatic polling; first poll is silent. Changes require channel level 400+ or Administrator.
 achievements|achievements [nick|list|all|top|progress [nick]]|public|Show achievements for yourself, a nick, the catalogue, the top unlocks, or how close you are to the next ones.
 achievs|achievs [nick|list|all|top|progress [nick]]|public|Alias for achievements.
 profil|profil [nick]|public|Show a compact channel profile for a nick.

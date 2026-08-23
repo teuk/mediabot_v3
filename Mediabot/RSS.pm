@@ -26,6 +26,9 @@ our @EXPORT_OK = qw(
     rss_item_key
     format_rss_announcement
     format_rss_feed_list
+    rss_feed_state
+    format_rss_feed_overview
+    format_rss_feed_info_lines
 );
 
 use constant MAX_FEED_BYTES => 2 * 1024 * 1024;
@@ -393,6 +396,133 @@ sub format_rss_feed_list {
          . "\00314"
          . join("\00313 | \00314", @labels)
          . "\003";
+}
+
+sub rss_feed_state {
+    my ($feed) = @_;
+    return 'error' unless ref($feed) eq 'HASH';
+    return 'off' unless $feed->{enabled};
+    return 'error' if defined($feed->{last_error}) && length($feed->{last_error});
+    return 'waiting' unless defined($feed->{last_success_at}) && length($feed->{last_success_at});
+    return 'pending' if ($feed->{pending_count} || 0) > 0;
+    return 'ok';
+}
+
+sub _rss_human_interval {
+    my ($seconds) = @_;
+    $seconds = int($seconds || 0);
+    return '0 min' if $seconds <= 0;
+    my $minutes = int(($seconds + 59) / 60);
+    return '1 d' if $minutes == 1440;
+    return int($minutes / 60) . ' h' if $minutes >= 60 && $minutes % 60 == 0;
+    return "$minutes min";
+}
+
+sub _rss_human_due {
+    my ($feed) = @_;
+    return 'paused' unless $feed->{enabled};
+    my $seconds = $feed->{next_poll_in};
+    return 'now' unless defined($seconds) && $seconds =~ /^-?\d+$/ && $seconds > 0;
+    return 'in <1 min' if $seconds < 60;
+    my $minutes = int(($seconds + 59) / 60);
+    return 'in ' . int($minutes / 60) . ' h' if $minutes >= 60 && $minutes % 60 == 0;
+    return "in $minutes min";
+}
+
+sub _rss_state_text {
+    my ($state) = @_;
+    return 'PAUSED'             if $state eq 'off';
+    return 'ERROR'              if $state eq 'error';
+    return 'WAITING FIRST POLL' if $state eq 'waiting';
+    return 'PENDING'            if $state eq 'pending';
+    return 'OK';
+}
+
+sub _rss_state_color {
+    my ($state) = @_;
+    return '14' if $state eq 'off';
+    return '04' if $state eq 'error';
+    return '08' if $state eq 'waiting';
+    return '07' if $state eq 'pending';
+    return '03';
+}
+
+sub format_rss_feed_overview {
+    my ($channel, @feeds) = @_;
+    $channel = _clean_scalar($channel, 80);
+    $channel = '?' unless length $channel;
+
+    my $prefix = "\037Flux RSS $channel\037 : ";
+    my @lines;
+    my $line = $prefix;
+
+    for my $feed (@feeds) {
+        next unless ref($feed) eq 'HASH';
+        my $label = normalize_feed_label($feed->{label}) // 'RSS';
+        my $state = rss_feed_state($feed);
+        my $color = _rss_state_color($state);
+        my $status = _rss_state_text($state);
+        my $poll = _rss_human_interval($feed->{poll_interval});
+        my $max = int($feed->{announce_limit} || 0);
+        my $items = int($feed->{item_count} || 0);
+        my $pending = int($feed->{pending_count} || 0);
+
+        my $entry = "\00314[$label]\003 "
+                  . "\00313$poll/max$max · $items item" . ($items == 1 ? '' : 's')
+                  . ($pending ? " · $pending pending" : '')
+                  . " · \003${color}$status\003";
+
+        my $sep = $line eq $prefix ? '' : " \00313|\003 ";
+        if (length($line . $sep . $entry) > 390 && $line ne $prefix) {
+            push @lines, $line;
+            $line = $prefix . $entry;
+        }
+        else {
+            $line .= $sep . $entry;
+        }
+    }
+
+    push @lines, $line if $line ne $prefix;
+    return \@lines;
+}
+
+sub format_rss_feed_info_lines {
+    my ($feed) = @_;
+    return [] unless ref($feed) eq 'HASH';
+
+    my $label = normalize_feed_label($feed->{label}) // 'RSS';
+    my $channel = _clean_scalar($feed->{channel}, 80);
+    $channel = '?' unless length $channel;
+    my $state = rss_feed_state($feed);
+    my $enabled = $feed->{enabled} ? 'ON' : 'OFF';
+    my $poll = _rss_human_interval($feed->{poll_interval});
+    my $max = int($feed->{announce_limit} || 0);
+    my $items = int($feed->{item_count} || 0);
+    my $pending = int($feed->{pending_count} || 0);
+    my $due = _rss_human_due($feed);
+    my $url = _article_url($feed->{url});
+    my $last_poll = $feed->{last_poll_at} // 'never';
+    my $last_success = $feed->{last_success_at} // 'never';
+    my $last_error = $feed->{last_error};
+
+    my @lines = (
+        "RSS [$label] on $channel — $enabled · " . _rss_state_text($state),
+        "URL: $url",
+        "Polling: every $poll | max $max | next: $due",
+        "Items: $items stored | $pending pending",
+        "Last poll: $last_poll | success: $last_success",
+    );
+
+    if (defined($last_error) && length($last_error)) {
+        my $when = $feed->{last_error_at} // 'unknown time';
+        $last_error = _clean_scalar($last_error, 180);
+        push @lines, "Last error: $last_error ($when)";
+    }
+    else {
+        push @lines, 'Last error: none';
+    }
+
+    return \@lines;
 }
 
 1;

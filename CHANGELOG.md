@@ -32,6 +32,24 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb694 — polish RSS operations before feature freeze
+- `m rss list` now reports each feed's enabled/health state, polling interval,
+  announcement cap, stored-item count and pending count in bounded IRC lines
+  instead of exposing labels only. The original TCL-inspired pure list formatter
+  remains unchanged for compatibility.
+- `m rss info` now gives one operational view: ON/OFF + health state, next poll,
+  stored/pending counts, last poll, last success and timestamped last error. No
+  schema change is required; repository reads derive pending and next-poll data
+  from the existing RSS tables.
+- RSS help and mutation replies are clearer: adds explicitly promise a silent
+  first poll, set confirmations normalize interval/max/enabled values, invalid
+  values show their accepted ranges, and URL policy failures are translated
+  from internal safety codes into user-facing explanations. Automatic article
+  announcements keep the MB693 ACTION/colors/TinyURL charter unchanged.
+- Added UX contracts `905_mb694_rss_ux_format.t` and
+  `906_mb694_rss_command_polish.t`. This is presentation/operational polish only
+  and intentionally adds no new RSS architecture before feature freeze.
+
 ### mb693 — prepare automated RSS announcements with compact links
 - Native RSS article announcements now shorten presentation links through the
   TinyURL public API while preserving the existing

@@ -9,6 +9,7 @@ use Mediabot::Helpers qw(botNotice botPrivmsg checkCmdCooldown checkUserChannelL
 use Mediabot::RSS qw(
     normalize_feed_label canonical_feed_url validate_feed_url
     format_rss_announcement format_rss_feed_list
+    format_rss_feed_overview format_rss_feed_info_lines
 );
 use Mediabot::RSS::Fetcher;
 use Mediabot::RSS::Repository;
@@ -26,6 +27,8 @@ sub _syntax {
     botNotice($bot, $nick, 'rss set [#channel] <feed name> <interval|max|enabled> <value>');
     botNotice($bot, $nick, 'rss probe <https://...>');
     botNotice($bot, $nick, 'rss show [#channel] <feed name>');
+    botNotice($bot, $nick, 'Management: add/set/del require channel level 400+ or Administrator.');
+    botNotice($bot, $nick, 'Automatic polling: the first successful poll is silent; only later new items are announced.');
     return;
 }
 
@@ -81,7 +84,9 @@ sub _list {
     my $rows = eval { _repo($ctx)->list_feeds($channel) };
     return _db_error($ctx, 'listing feeds', $@) unless $rows;
     return $ctx->reply("No RSS feeds configured for $channel.") unless @$rows;
-    return $ctx->reply(format_rss_feed_list(map { $_->{label} } @$rows));
+    my $lines = format_rss_feed_overview($channel, @$rows);
+    $ctx->reply($_) for @$lines;
+    return 1;
 }
 
 sub _info {
@@ -93,13 +98,8 @@ sub _info {
     my $feed = eval { _repo($ctx)->get_feed($channel, $label) };
     return _db_error($ctx, 'reading feed info', $@) if $@;
     return botNotice($ctx->bot, $ctx->nick, "RSS feed '$label' not found on $channel.") unless $feed;
-    my $interval = int(($feed->{poll_interval} || 0) / 60);
-    my $enabled = $feed->{enabled} ? 'on' : 'off';
-    botNotice($ctx->bot, $ctx->nick, "RSS [$feed->{label}] on $channel");
-    botNotice($ctx->bot, $ctx->nick, "URL: $feed->{url}");
-    botNotice($ctx->bot, $ctx->nick, "Interval: ${interval} min | max: $feed->{announce_limit} | enabled: $enabled | seen: " . ($feed->{item_count} || 0));
-    botNotice($ctx->bot, $ctx->nick, 'Last success: ' . ($feed->{last_success_at} // 'never'));
-    botNotice($ctx->bot, $ctx->nick, 'Last error: ' . ($feed->{last_error} // 'none'));
+    my $lines = format_rss_feed_info_lines($feed);
+    botNotice($ctx->bot, $ctx->nick, $_) for @$lines;
     return 1;
 }
 
@@ -124,6 +124,41 @@ sub _parse_add {
     return ($label, $url, \%opt);
 }
 
+sub _url_error_message {
+    my ($code) = @_;
+    return 'invalid URL; use http:// or https:// without credentials'
+        if !defined($code) || $code eq 'invalid_url';
+    return 'host is not allowed for RSS fetching' if $code eq 'blocked_host';
+    return 'private, loopback or reserved IP addresses are not allowed'
+        if $code eq 'blocked_ip';
+    return 'URL rejected by RSS safety policy';
+}
+
+sub _invalid_setting_message {
+    my ($setting) = @_;
+    return 'RSS interval must be between 5 and 1440 minutes.'
+        if $setting eq 'interval';
+    return 'RSS max must be between 1 and 10 articles per poll.'
+        if $setting eq 'max';
+    return 'RSS enabled accepts on/off, yes/no or 1/0.'
+        if $setting eq 'enabled';
+    return 'Invalid RSS setting value.';
+}
+
+sub _setting_confirmation {
+    my ($label, $channel, $setting, $value) = @_;
+    if ($setting eq 'interval') {
+        return "RSS [$label] on $channel — interval: every " . int($value) . ' min.';
+    }
+    if ($setting eq 'max') {
+        my $n = int($value);
+        return "RSS [$label] on $channel — max: $n article" . ($n == 1 ? '' : 's') . ' per poll.';
+    }
+    my $v = lc($value // '');
+    my $on = $v =~ /^(?:1|on|yes)$/ ? 'on' : 'off';
+    return "RSS [$label] on $channel — enabled: $on.";
+}
+
 sub _add {
     my ($ctx, @args) = @_;
     my $channel = _target_channel($ctx, \@args);
@@ -139,7 +174,8 @@ sub _add {
         'Syntax: rss add [#channel] <feed name> <https://...> [interval=30] [max=5]')
         unless defined $label;
     my $valid = validate_feed_url($url);
-    return botNotice($ctx->bot, $ctx->nick, "RSS URL rejected: $valid->{error}.")
+    return botNotice($ctx->bot, $ctx->nick,
+        'RSS URL rejected: ' . _url_error_message($valid->{error}) . '.')
         unless $valid->{ok};
     my $canon = canonical_feed_url($url);
     my $user = $ctx->user;
@@ -164,7 +200,10 @@ sub _add {
         return _db_error($ctx, 'adding feed', $e);
     }
     logBot($ctx->bot, $ctx->message, $channel, 'rss', 'add', $label, $canon);
-    return $ctx->reply("RSS [$label] added on $channel (every $opt->{interval} min, max $opt->{max}).");
+    return $ctx->reply(
+        "RSS [$label] added on $channel — on, every $opt->{interval} min, "
+      . "max $opt->{max}; first poll is silent."
+    );
 }
 
 sub _del {
@@ -197,9 +236,9 @@ sub _set {
     my $rv = eval { _repo($ctx)->update_feed_setting($channel, $label, $setting, $value) };
     return _db_error($ctx, 'updating feed', $@) if $@;
     return botNotice($ctx->bot, $ctx->nick, "RSS feed '$label' not found on $channel.") if !$rv;
-    return botNotice($ctx->bot, $ctx->nick, "Invalid RSS $setting value.") if $rv < 0;
+    return botNotice($ctx->bot, $ctx->nick, _invalid_setting_message($setting)) if $rv < 0;
     logBot($ctx->bot, $ctx->message, $channel, 'rss', 'set', $label, $setting, $value);
-    return $ctx->reply("RSS [$label] $setting set to $value on $channel.");
+    return $ctx->reply(_setting_confirmation($label, $channel, $setting, $value));
 }
 
 sub _probe_worker {
@@ -213,7 +252,7 @@ sub _probe_worker {
     my $title = $feed->{title} || 'RSS';
     my $count = scalar @{ $feed->{items} || [] };
     $ctx->reply_private(
-        "RSS probe OK: [$title] $feed->{format}, $count item(s), HTTP $res->{status}.");
+        "RSS probe OK: [$title] $feed->{format} · $count item(s) · HTTP $res->{status}.");
     if ($count) {
         my $it = $feed->{items}[0];
         my $shorten = make_shortener();
@@ -231,7 +270,8 @@ sub _probe {
     return botNotice($ctx->bot, $ctx->nick, 'Syntax: rss probe <https://...>') unless @args == 1;
     return unless $ctx->require_level('User');
     my $valid = validate_feed_url($args[0]);
-    return botNotice($ctx->bot, $ctx->nick, "RSS URL rejected: $valid->{error}.") unless $valid->{ok};
+    return botNotice($ctx->bot, $ctx->nick,
+        'RSS URL rejected: ' . _url_error_message($valid->{error}) . '.') unless $valid->{ok};
     my $wait = checkCmdCooldown($ctx->bot, $ctx->channel, 'rssprobe', 15);
     return botNotice($ctx->bot, $ctx->nick, "RSS probe cooldown: ${wait}s.") if $wait > 0;
     my $url = $args[0];
