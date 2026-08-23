@@ -70,6 +70,11 @@ release. Development after this release continues on the `3.4dev` line.
   checker now distinguishes quoted identifiers from SQL keywords and preserves
   literal case while still canonicalizing SQL syntax; regression 898 locks the
   four exact fresh-database symptoms.
+- The Debian 13 stable-3.3 upgrade CI now registers only the exact
+  `GITHUB_WORKSPACE` as a Git `safe.directory` inside the job container before
+  reading the stable tag. This fixes Git's bind-mount ownership guard without
+  using the unsafe wildcard `safe.directory '*'`; contract 888 locks both the
+  exact-path trust and the wildcard prohibition.
 
 ### mb690 — keep the unreleased development history self-checking
 - Restored the missing public 3.4dev history for mb682 through mb688 so the

@@ -34,6 +34,17 @@ return sub {
     );
     $assert->like(
         $workflow,
+        qr/name:\s*Trust the Debian 13 container checkout for Git metadata reads.*?git config --global --add safe\.directory "\$GITHUB_WORKSPACE".*?git -C "\$GITHUB_WORKSPACE" rev-parse --show-toplevel/s,
+        'Debian 13 container explicitly trusts and verifies only its checkout path before Git metadata reads',
+    );
+    $assert->unlike(
+        $workflow,
+        qr/^\s*git\s+config\b[^\n]*\bsafe\.directory\b\s+["']?\*["']?\s*$/m,
+        'Debian 13 CI never executes wildcard safe.directory trust',
+    );
+
+    $assert->like(
+        $workflow,
         qr/name:\s*Exercise stable 3\.3 to current database upgrade/,
         'workflow has a dedicated real stable-upgrade step',
     );

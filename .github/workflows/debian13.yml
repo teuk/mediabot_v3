@@ -66,6 +66,21 @@ jobs:
           # MB686: the upgrade gate exports the real stable 3.3 schema/tag.
           fetch-depth: 0
 
+      - name: Trust the Debian 13 container checkout for Git metadata reads
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The GitHub workspace is bind-mounted into this Debian container.
+          # Its numeric owner may differ from root inside the container, so
+          # Git 2.35+ can reject it as dubious ownership. Trust only this exact
+          # runner-provided workspace path; never use safe.directory '*'.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+          test "$(
+            git -C "$GITHUB_WORKSPACE" rev-parse --show-toplevel
+          )" = "$GITHUB_WORKSPACE"
+
       - name: Verify the Debian 13 system baseline
         shell: bash
         run: |
