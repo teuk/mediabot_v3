@@ -1000,7 +1000,14 @@ sub botPrivmsg {
         }
     } else {
         $self->{logger}->log(0, "botAction() ERROR no message specified to send to target");
+        return;
     }
+
+    # mb693: callers that need durable acknowledgement (RSS auto-polling) may
+    # mark work complete only after the normal output path accepted the message
+    # for immediate or AntiFlood-queued delivery. Rejected badword/invalid paths
+    # return earlier and therefore stay unacknowledged.
+    return 1;
 }
 
 

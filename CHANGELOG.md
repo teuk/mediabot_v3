@@ -32,6 +32,39 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb693 — prepare automated RSS announcements with compact links
+- Native RSS article announcements now shorten presentation links through the
+  TinyURL public API while preserving the existing
+  `ACTION - news : [Source] Title - URL` IRC color/format charter byte-for-byte. Shortening is
+  presentation-only: a timeout, invalid response or TinyURL outage falls back
+  to the original article URL instead of suppressing the announcement.
+- `probe` and `show` reuse one shortener client per async worker. The helper is
+  isolated under `Mediabot::RSS::TinyURL` so MB693 polling can reuse the same
+  display path without coupling RSS to the existing `External::News` command.
+- Added regression contract `900_mb693_rss_tinyurl_display.t`; periodic polling
+  itself is still not enabled in this first MB693 presentation round.
+- The native scheduler now owns a lightweight `rss_poll_dispatch` task. Due
+  feeds run in isolated `AsyncWorker` children with one worker per feed and a
+  four-worker global cap, so DNS/HTTP/XML/DB polling never blocks the IRC loop.
+  The first successful poll remains a silent baseline; later pending items are
+  returned to the parent as bounded announcement candidates.
+- Automatic RSS output uses a per-channel two-second queue and the same TinyURL
+  presentation charter as manual `probe`/`show`. `RSS_ITEM.announced_at` is set
+  only after the normal parent `botPrivmsg` path accepts the line for delivery;
+  rejected output stays pending for retry. Deleted or disabled feeds are checked
+  again before queued output is emitted.
+- Added runtime contracts `903_mb693_rss_runtime_scheduler.t` and
+  `904_mb693_rss_delivery_ack.t`.
+- Added the non-scheduled polling core (`Mediabot::RSS::Poller`) and durable
+  repository helpers for due-feed discovery, first-success silent baselining,
+  `RSS_ITEM` dedup/pending state, bounded announcement candidates, poll error
+  state, and post-send `announced_at` acknowledgement. Conditional HTTP now
+  carries ETag / Last-Modified validators and handles HTTP 304 without parsing
+  a body. Scheduler registration remains deliberately deferred to the next
+  MB693 round.
+- Added regression contracts `901_mb693_rss_poller_core.t` and
+  `902_mb693_rss_repository_polling.t`.
+
 ### mb692 — lay the native RSS foundations without touching the live loop
 - Added persistent `RSS_FEED` / `RSS_ITEM` schema and an ordered migration for
   per-channel subscriptions, first-fetch baselines and durable item dedup.

@@ -31,6 +31,7 @@ use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use Time::HiRes ();
 use Mediabot::Scheduler;
+use Mediabot::RSS::Runtime;
 use IO::Async::Timer::Countdown;
 use Net::Async::IRC;
 use utf8;
@@ -572,6 +573,27 @@ $scheduler->add(
     interval  => 60,
     cb        => sub { $mediabot->refresh_channel_hashes },
     autostart => 1,
+);
+
+# mb693: lightweight discovery only. Every network/parse/DB-heavy poll runs
+# in a bounded isolated AsyncWorker owned by RSS::Runtime. _start_time keeps
+# this task inert until the IRC login has fully completed.
+my $rss_runtime = Mediabot::RSS::Runtime->new(
+    bot            => $mediabot,
+    loop           => $loop,
+    max_workers    => 4,
+    dispatch_limit => 20,
+    worker_timeout => 60,
+    output_delay   => 2,
+);
+$mediabot->{rss_runtime} = $rss_runtime;
+
+$scheduler->add(
+    name           => 'rss_poll_dispatch',
+    interval       => 15,
+    first_interval => 20,
+    cb             => sub { $rss_runtime->tick },
+    autostart      => 1,
 );
 
 $scheduler->add(

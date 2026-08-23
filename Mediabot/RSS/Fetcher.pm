@@ -71,6 +71,17 @@ sub _default_requester {
     );
     splice @ordered, 4 if @ordered > 4; # stay well inside CommandAsync timeout
 
+    my %headers = (
+        Accept => 'application/atom+xml, application/rss+xml, application/xml, text/xml, */*;q=0.2',
+    );
+    if (ref($opts{request_headers}) eq 'HASH') {
+        for my $name (qw(If-None-Match If-Modified-Since)) {
+            my $value = $opts{request_headers}{$name};
+            next unless defined($value) && !ref($value) && length($value);
+            $headers{$name} = substr($value, 0, 1024);
+        }
+    }
+
     my $last;
     for my $peer (@ordered) {
         my $http = HTTP::Tiny->new(
@@ -82,10 +93,8 @@ sub _default_requester {
         );
         my $res = eval {
             $http->get($url, {
-                peer => $peer,
-                headers => {
-                    Accept => 'application/atom+xml, application/rss+xml, application/xml, text/xml, */*;q=0.2',
-                },
+                peer    => $peer,
+                headers => \%headers,
             })
         };
         $res = { success => 0, status => 599, headers => {},
@@ -150,6 +159,8 @@ sub fetch_feed_once {
     my $requester = $opts{requester} || \&_default_requester;
     my $max_items = $opts{max_items} || 10;
     my $current   = $url;
+    my $etag      = $opts{etag};
+    my $modified  = $opts{last_modified};
 
     for my $hop (0 .. MAX_REDIRECTS) {
         my $valid = validate_feed_url($current);
@@ -163,11 +174,18 @@ sub fetch_feed_once {
             return { ok => 0, error => 'blocked_destination', detail => $err };
         }
 
+        my %request_headers;
+        $request_headers{'If-None-Match'} = $etag
+            if defined($etag) && !ref($etag) && length($etag);
+        $request_headers{'If-Modified-Since'} = $modified
+            if defined($modified) && !ref($modified) && length($modified);
+
         my $res = eval {
             $requester->($current,
                 timeout => ($opts{timeout} || 8),
                 max_size => MAX_BYTES,
                 validated_addresses => $ips,
+                request_headers => \%request_headers,
             )
         };
         if (!$res || ref($res) ne 'HASH') {
@@ -175,6 +193,22 @@ sub fetch_feed_once {
         }
 
         my $status = int($res->{status} || 0);
+        my $res_etag = _header_value($res->{headers}, 'etag');
+        my $res_modified = _header_value($res->{headers}, 'last-modified');
+
+        if ($status == 304) {
+            return {
+                ok            => 1,
+                not_modified  => 1,
+                status        => 304,
+                url           => $current,
+                resolved      => $ips,
+                etag          => $res_etag,
+                last_modified => $res_modified,
+                headers       => $res->{headers} || {},
+            };
+        }
+
         if ($status =~ /^(?:301|302|303|307|308)$/) {
             return { ok => 0, error => 'too_many_redirects' }
                 if $hop >= MAX_REDIRECTS;
@@ -185,6 +219,10 @@ sub fetch_feed_once {
             return { ok => 0, error => 'invalid_redirect' }
                 unless defined $next && length $next;
             $current = $next;
+            # Validators belong to the representation that supplied them. Do
+            # not leak or misapply them to a redirect target.
+            $etag = undef;
+            $modified = undef;
             next;
         }
 
@@ -211,11 +249,14 @@ sub fetch_feed_once {
             unless $parsed->{ok};
 
         return {
-            ok       => 1,
-            status   => $status,
-            url      => $current,
-            resolved => $ips,
-            feed     => $parsed,
+            ok            => 1,
+            status        => $status,
+            url           => $current,
+            resolved      => $ips,
+            feed          => $parsed,
+            etag          => $res_etag,
+            last_modified => $res_modified,
+            headers       => $res->{headers} || {},
         };
     }
 
