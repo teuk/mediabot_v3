@@ -12,7 +12,7 @@ return sub {
     my $code = do { local $/; <$fh> };
     close $fh;
 
-    my @subs = qw(defined_non_empty _normalize_integer_display_widths normalize_column_def normalize_live_column_def);
+    my @subs = qw(defined_non_empty _normalize_integer_display_widths _lowercase_sql_outside_single_quotes normalize_column_def normalize_live_column_def);
     my $loaded = 0;
     for my $name (@subs) {
         if ($code =~ /(sub \Q$name\E.*?^}\n)/sm) {
@@ -119,6 +119,22 @@ return sub {
         normalize_live_column_def($case_default_live, $quoted_default_ref),
         normalize_column_def($quoted_default_ref),
         'mb649-831: quoted literal case differences remain observable',
+    );
+
+    my $mixed_case_default_ref = q{VARCHAR(32) NOT NULL DEFAULT 'en-US'};
+    my $mixed_case_default_live = {
+        type => 'varchar(32)', nullable => 'NO', default => q{'en-US'},
+        extra => '', charset => '', collation => '',
+    };
+    $assert->is(
+        normalize_live_column_def($mixed_case_default_live, $mixed_case_default_ref),
+        normalize_column_def($mixed_case_default_ref),
+        'mb692-ci: matching mixed-case string defaults remain equal',
+    );
+    $assert->like(
+        normalize_column_def($mixed_case_default_ref),
+        qr/default 'en-US'\z/,
+        'mb692-ci: reference normalization preserves literal case',
     );
 
     my $comment_ref = q{TINYINT NOT NULL DEFAULT 1 COMMENT 'runtime flag'};

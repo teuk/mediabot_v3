@@ -63,6 +63,13 @@ release. Development after this release continues on the `3.4dev` line.
 - Live IRC rendering now decodes feed response bytes before XML parsing using
   BOM / HTTP charset / XML declaration metadata with UTF-8 as the XML default;
   malformed or unknown encodings fail closed instead of leaking mojibake.
+- Debian 13 fresh-database CI exposed two false positives in the strict schema
+  checker after the RSS commit: backtick-quoted reserved identifiers such as
+  `CHANNEL.key` were discarded from the parsed reference, and normalization
+  lowercased case-sensitive quoted defaults such as `en-US` / `NONE`. The
+  checker now distinguishes quoted identifiers from SQL keywords and preserves
+  literal case while still canonicalizing SQL syntax; regression 898 locks the
+  four exact fresh-database symptoms.
 
 ### mb690 — keep the unreleased development history self-checking
 - Restored the missing public 3.4dev history for mb682 through mb688 so the

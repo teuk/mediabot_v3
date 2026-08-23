@@ -371,22 +371,29 @@ sub parse_schema_file {
             # Other table constraints are not columns.
             next if is_table_constraint($item);
 
-            if ($item =~ /^`([^`]+)`\s+(.+)\z/si || $item =~ /^([A-Za-z_][A-Za-z0-9_]*)\s+(.+)\z/si) {
-                my ($col, $def) = ($1, $2);
-
-                # Guard against parser mistakes: COMMENT/DEFAULT/KEY/etc. are
-                # attributes or constraint keywords, never valid missing columns
-                # in our schema reference.
-                next if is_reserved_or_attribute_identifier($col);
-
-                $def =~ s/\s+/ /g;
-                $def =~ s/^\s+|\s+\z//g;
-
-                $cols{$col} = {
-                    definition => $def,
-                    raw        => "`$col` $def",
-                };
+            my ($col, $def, $quoted_identifier);
+            if ($item =~ /^`([^`]+)`\s+(.+)\z/si) {
+                ($col, $def, $quoted_identifier) = ($1, $2, 1);
             }
+            elsif ($item =~ /^([A-Za-z_][A-Za-z0-9_]*)\s+(.+)\z/si) {
+                ($col, $def, $quoted_identifier) = ($1, $2, 0);
+            }
+            else {
+                next;
+            }
+
+            # Unquoted KEY/DEFAULT/COMMENT/etc. are SQL attributes/constraint
+            # keywords, not columns. A backtick-quoted identifier is explicit
+            # and may legitimately use a reserved word (for example `key`).
+            next if !$quoted_identifier && is_reserved_or_attribute_identifier($col);
+
+            $def =~ s/\s+/ /g;
+            $def =~ s/^\s+|\s+\z//g;
+
+            $cols{$col} = {
+                definition => $def,
+                raw        => "`$col` $def",
+            };
         }
 
         $tables{$tname} = {
@@ -975,13 +982,57 @@ sub _normalize_integer_display_widths {
     return $def;
 }
 
+sub _lowercase_sql_outside_single_quotes {
+    my ($sql) = @_;
+    $sql //= '';
+
+    my $out = '';
+    my $in_literal = 0;
+    my $len = length $sql;
+
+    for (my $i = 0; $i < $len; $i++) {
+        my $ch = substr($sql, $i, 1);
+        my $next = $i + 1 < $len ? substr($sql, $i + 1, 1) : '';
+
+        if ($in_literal) {
+            $out .= $ch;
+
+            if ($ch eq "'" && $next eq "'") {
+                $out .= $next;
+                $i++;
+                next;
+            }
+            if ($ch eq '\\' && $next ne '') {
+                $out .= $next;
+                $i++;
+                next;
+            }
+            if ($ch eq "'") {
+                $in_literal = 0;
+            }
+            next;
+        }
+
+        if ($ch eq "'") {
+            $in_literal = 1;
+            $out .= $ch;
+            next;
+        }
+
+        $out .= lc $ch;
+    }
+
+    return $out;
+}
+
 sub normalize_column_def {
     my ($def) = @_;
     $def //= '';
-    $def = lc $def;
     $def =~ s/`//g;
     # COMMENT is metadata, not part of the type contract checked by --types.
-    $def =~ s/\s+comment\s+'(?:''|[^'])*'//g;
+    # Lowercase SQL syntax only: quoted string literals remain case-sensitive.
+    $def =~ s/\s+comment\s+'(?:''|[^'])*'//ig;
+    $def = _lowercase_sql_outside_single_quotes($def);
     $def = _normalize_integer_display_widths($def);
     $def =~ s/\s+/ /g;
     $def =~ s/\s*,\s*/,/g;
