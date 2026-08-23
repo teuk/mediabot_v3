@@ -32,6 +32,28 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb697 — mbweb dependency and runtime hardening
+
+- Refreshed the canonical mbweb dependency lock to remove the audited
+  `body-parser` and `qs` vulnerabilities while keeping the direct
+  application dependency contract unchanged.
+- Added `t/cases/911_mb697_mbweb_dependency_security.t` to prevent the
+  vulnerable dependency ranges and stale `express-rate-limit` residue
+  from returning.
+- Rehearsed the dependency update with a clean `npm ci` installation and
+  confirmed `npm audit --omit=dev` reports zero known vulnerabilities.
+- Deployed the canonical lockfile to the live `/opt/mbweb/app` runtime,
+  preserving the application manifest contract.
+- Privately archived and removed 70 historical runtime backup/example
+  files, including legacy `.env.bak*` material, without exposing their
+  contents.
+- Verified the live mbweb source tree now matches `contrib/mbweb`
+  exactly outside intentional runtime state such as `.env` and
+  `node_modules`.
+- Confirmed `mbweb.service` restarts cleanly with zero systemd restart
+  failures and the Node application remains reachable on its local
+  listener.
+
 ### mb696 — make outbound HTTPS secure by default
 - Revalidated the real TLS stack on the deployment host before changing policy:
   GitHub, YouTube, country.is, Tavily, OpenAI and Anthropic all complete verified
