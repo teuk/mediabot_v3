@@ -75,6 +75,11 @@ release. Development after this release continues on the `3.4dev` line.
   reading the stable tag. This fixes Git's bind-mount ownership guard without
   using the unsafe wildcard `safe.directory '*'`; contract 888 locks both the
   exact-path trust and the wildcard prohibition.
+- The real stable-3.3 upgrade gate then exposed a DBI driver-specific socket
+  mismatch: `check_schema_drift.pl` always emitted `mysql_socket`, while the
+  supported CPAN `DBD::MariaDB` driver requires `mariadb_socket`. Socket DSNs
+  are now selected by the resolved driver, with regression 899 exercising the
+  exact `DBI->connect()` DSN for both MariaDB and optional mysql drivers.
 
 ### mb690 — keep the unreleased development history self-checking
 - Restored the missing public 3.4dev history for mb682 through mb688 so the

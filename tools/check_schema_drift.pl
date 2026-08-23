@@ -281,7 +281,12 @@ sub connect_db {
     );
 
     if (defined_non_empty($opt->{socket})) {
-        push @dsn, 'mysql_socket=' . $opt->{socket};
+        # DBD::MariaDB and DBD::mysql use different DSN attribute names for
+        # an explicit Unix socket. Keep the checker driver-neutral instead of
+        # feeding mysql_socket to DBD::MariaDB (which rejects it as unknown).
+        my $socket_attr =
+            $driver eq 'MariaDB' ? 'mariadb_socket' : 'mysql_socket';
+        push @dsn, $socket_attr . '=' . $opt->{socket};
     }
     else {
         push @dsn, 'host=' . $opt->{host};
