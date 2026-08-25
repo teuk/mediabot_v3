@@ -119,8 +119,8 @@ return sub {
     my $t220 = _slurp_mb303('t/cases/220_external_claude_api.t');
     $assert->like(
         $t220,
-        qr/_claude_send_and_parse/,
-        'Claude API test covers the extracted Anthropic transport helper'
+        qr/Mediabot::AI::Provider::Anthropic::build_payload/,
+        'Claude API test covers the extracted Anthropic provider adapter'
     );
 
     my $t222 = _slurp_mb303('t/cases/222_external_claude_chanset_gate.t');

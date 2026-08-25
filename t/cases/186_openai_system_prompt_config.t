@@ -95,8 +95,8 @@ return sub {
 
     $assert->like(
         $chatgpt_body // '',
-        qr/content => \$chatgpt_system_prompt/,
-        'chatGPT payload uses configured system prompt'
+        qr/system\s+=>\s+\$chatgpt_system_prompt,/,
+        'chatGPT passes configured system prompt into provider-neutral request'
     );
 
     $assert->like(

@@ -1,171 +1,21 @@
 # t/cases/208_chatgpt_http_guard_debug5_regression.t
-# =============================================================================
-# Regression checks for chatGPT() HTTP guard and verbose logging level.
-#
-# chatGPT() must not let HTTP::Tiny request exceptions escape. Large/sensitive
-# payload-ish logs belong to DEBUG5, not DEBUG3/4.
-# =============================================================================
-
+# HTTP exception guarding now belongs to AI::Transport; verbose prompt/answer
+# logging remains DEBUG5 in the caller.
 use strict;
 use warnings;
-
-BEGIN {
-    use FindBin qw($Bin);
-    unshift @INC, "$Bin/../lib";
-    unshift @INC, "$Bin/../..";
-}
-
+BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
-
-sub _slurp_208 {
-    my ($path) = @_;
-
-    open my $fh, '<:raw', $path or die "cannot read $path: $!";
-    local $/;
-    return <$fh>;
-}
-
-sub _extract_sub_208 {
-    my ($src, $sub_name) = @_;
-
-    my $re = qr/^[ \t]*sub[ \t]+\Q$sub_name\E\b[^{]*\{/m;
-    return undef unless $src =~ /$re/g;
-
-    my $start = $-[0];
-    my $pos   = pos($src);
-    my $depth = 1;
-    my $len   = length($src);
-
-    my $quote;
-    my $escape  = 0;
-    my $comment = 0;
-
-    while ($pos < $len) {
-        my $ch = substr($src, $pos, 1);
-
-        if ($comment) {
-            $comment = 0 if $ch eq "\n";
-            $pos++;
-            next;
-        }
-
-        if (defined $quote) {
-            if ($escape) {
-                $escape = 0;
-                $pos++;
-                next;
-            }
-
-            if ($ch eq "\\") {
-                $escape = 1;
-                $pos++;
-                next;
-            }
-
-            if ($ch eq $quote) {
-                undef $quote;
-                $pos++;
-                next;
-            }
-
-            $pos++;
-            next;
-        }
-
-        if ($ch eq '#') {
-            $comment = 1;
-            $pos++;
-            next;
-        }
-
-        if ($ch eq '"' || $ch eq "'") {
-            $quote = $ch;
-            $pos++;
-            next;
-        }
-
-        if ($ch eq '{') {
-            $depth++;
-        }
-        elsif ($ch eq '}') {
-            $depth--;
-
-            if ($depth == 0) {
-                return substr($src, $start, $pos + 1 - $start);
-            }
-        }
-
-        $pos++;
-    }
-
-    return undef;
-}
-
+sub _s208 { my($p)=@_; open my$f,'<:raw',$p or die$!; local$/; <$f> }
 return sub {
-    my ($assert) = @_;
+    my($assert)=@_;
+    my $external=_s208(File::Spec->catfile('.','Mediabot','External','Claude.pm'));
+    my $transport=_s208(File::Spec->catfile('.','Mediabot','AI','Transport.pm'));
+    my $client=_s208(File::Spec->catfile('.','Mediabot','AI','Client.pm'));
 
-    my $src = _slurp_208(
-        File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm')
-    );
-
-    my $body = _extract_sub_208($src, 'chatGPT');
-
-    $assert->ok(
-        defined $body && $body ne '',
-        'chatGPT body found'
-    );
-
-    $assert->like(
-        $body // '',
-        qr/return\s+eval\s+\{\s*\$http->request\(/,
-        'chatGPT HTTP request is protected by eval'
-    );
-
-    $assert->like(
-        $body // '',
-        qr/reason\s*=>\s*\$\@/,
-        'chatGPT fallback response keeps literal $@ exception reason'
-    );
-
-    $assert->like(
-        $body // '',
-        qr/\$self->\{logger\}->log\(\s*5\s*,\s*"chatGPT\(\) chatGPT prompt: \$prompt"\s*\);/,
-        'chatGPT prompt is DEBUG5'
-    );
-
-    $assert->like(
-        $body // '',
-        qr/\$self->\{logger\}->log\(\s*5\s*,\s*"chatGPT\(\) Raw API response: \$response"\s*\);/,
-        'chatGPT raw API response is DEBUG5'
-    );
-
-    $assert->like(
-        $body // '',
-        qr/\$self->\{logger\}->log\(\s*5\s*,\s*"chatGPT\(\) chatGPT raw answer: \$answer"\s*\);/,
-        'chatGPT raw answer is DEBUG5'
-    );
-
-    $assert->unlike(
-        $body // '',
-        qr/return\s+\$http->request\(/,
-        'chatGPT no longer returns raw HTTP request without eval'
-    );
-
-    $assert->unlike(
-        $body // '',
-        qr/log\(\s*4\s*,\s*"chatGPT\(\) chatGPT prompt:/,
-        'chatGPT prompt is no longer DEBUG4'
-    );
-
-    $assert->unlike(
-        $body // '',
-        qr/log\(\s*4\s*,\s*"chatGPT\(\) chatGPT raw answer:/,
-        'chatGPT raw answer is no longer DEBUG4'
-    );
-
-    $assert->unlike(
-        $body // '',
-        qr/log\(\s*3\s*,\s*"chatGPT\(\) Raw API response:/,
-        'chatGPT raw API response is no longer DEBUG3'
-    );
+    $assert->like($transport, qr/my \$res = eval \{.*?\$http->request/s, 'shared transport catches HTTP request exceptions');
+    $assert->like($transport, qr/reason\s*=>\s*_clean_reason\(\$reason\)/, 'transport sanitizes exception reason');
+    $assert->like($client, qr/Mediabot::AI::Transport::post_json\(/, 'AI client routes provider HTTP through shared transport');
+    $assert->like($external, qr/log\(5,"chatGPT\(\) chatGPT prompt: \$prompt"\)/, 'tellme prompt remains DEBUG5');
+    $assert->like($external, qr/log\(5, "chatGPT\(\) chatGPT raw answer: \$answer"\)/, 'tellme raw answer remains DEBUG5');
+    $assert->unlike($external, qr/log\([34],"chatGPT\(\) chatGPT prompt:/, 'tellme prompt not logged at DEBUG3/4');
 };

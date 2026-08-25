@@ -49,12 +49,12 @@ return sub {
     );
 
     my $queue  = _extract_sub_mb312($src, '_queue_irc_chunks');
-    my $openai = _extract_sub_mb312($src, 'chatGPT');
+    my $openai = _extract_sub_mb312($src, '_chatgpt_deliver_answer');
     my $claude = _extract_sub_mb312($src, 'claudeAI');
     my $deliver = _extract_sub_mb312($src, '_claude_deliver_answer');
 
     $assert->ok(defined $queue, '_queue_irc_chunks helper found');
-    $assert->ok(defined $openai, 'chatGPT body found');
+    $assert->ok(defined $openai, '_chatgpt_deliver_answer body found');
     $assert->ok(defined $claude, 'claudeAI body found');
     $assert->ok(defined $deliver, '_claude_deliver_answer body found');
 
@@ -79,7 +79,7 @@ return sub {
     $assert->like(
         $openai // '',
         qr/_queue_irc_chunks\(/,
-        'OpenAI IRC output uses the asynchronous pacing queue'
+        'OpenAI parent completion uses the asynchronous pacing queue'
     );
 
     $assert->like(

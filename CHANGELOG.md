@@ -32,6 +32,54 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb699 — establish provider-neutral AI foundations for the 3.5 social layer
+
+- Introduced a provider-neutral `Mediabot::AI` foundation with strict provider
+  selection and an explicit `auto` mode, preparing future consumers such as
+  `+Wit` without coupling them to Claude or OpenAI.
+- Added a validated `Mediabot::AI::Request` contract that separates prompts,
+  messages and generation limits from credentials, HTTP headers, endpoints and
+  IRC delivery state.
+- Extracted Anthropic and OpenAI wire-format responsibilities into dedicated
+  provider adapters. Payload construction, authentication headers and response
+  parsing are no longer embedded directly in the legacy external integration.
+- Preserved the existing Claude history, persona, cache, rate-limit and IRC
+  behaviour while keeping Anthropic HTTP off the event loop through the shared
+  `AsyncWorker`.
+- Moved public `tellme` OpenAI HTTP transport into `AsyncWorker` when a real
+  IO::Async loop is available. The historical no-loop synchronous path remains
+  for lightweight compatibility contexts, and primary/fallback model semantics,
+  diagnostics, verified TLS and nonblocking IRC pacing are preserved.
+- Converged Anthropic and OpenAI on `Mediabot::AI::Transport` for event-loop
+  capability detection, verified JSON POST transport and worker-safe response
+  encoding/decoding. Provider-specific headers, parsing and fallback semantics
+  remain isolated in their adapters/callers.
+- Added `Mediabot::AI::Client`, the provider-neutral dispatcher used by future
+  AI consumers. It resolves `anthropic`, `openai` or `auto`, applies provider
+  configuration/defaults, preserves strict explicit-provider routing, supports
+  OpenAI model fallback, and can submit work through `AsyncWorker` without any
+  IRC/channel/nick dependency.
+- Routed the public `tellme` caller through `Mediabot::AI::Client` while
+  preserving strict OpenAI routing, the historical model/endpoint compatibility
+  policy, actionable diagnostics and parent-owned IRC pacing. Normalized client
+  failures expose only sanitized provider diagnostics, never raw response bodies
+  or credentials.
+- Routed Claude/`!ai` through the same provider-neutral client while keeping the
+  existing `+Claude` gate, per-conversation serialization, rate limit, personas,
+  pinned context, prompt cache, history rollback and IRC delivery entirely in the
+  parent process. Explicit Anthropic routing remains strict.
+- Removed the superseded OpenAI and Anthropic transport compatibility helpers
+  from `External::Claude` after both historical callers were proven live through
+  `Mediabot::AI::Client`. Provider credentials/endpoints no longer ride in the
+  parent Claude request state; provider adapters, shared transport and worker
+  lifecycle are now the single authoritative path.
+- Added regression contracts 913–922 and migrated historical OpenAI/Claude
+  sentinels to protect the new architectural boundaries rather than obsolete
+  source locations.
+- This is infrastructure for the future provider-neutral `+Wit` feature; Wit is
+  not enabled or exposed by MB699 at this stage. mbweb and the manual fresh
+  Debian 13 acceptance gate remain deliberately at the end of the pre-3.5 TODO.
+
 ### mb698 — qualify plugin-v2 boot persistence before the 3.5 gate
 
 - Added an explicit `plugins.SCRIPTS` boot list for trusted plugin-v2 sidecars,

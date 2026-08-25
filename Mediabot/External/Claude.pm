@@ -25,10 +25,12 @@ use Exporter 'import';
 # publictext IS NOT NULL (qui comptait aussi join/part/kick/mode/topic/notice).
 # Le viewer de log brut .logs (_cmd_chanlog) reste volontairement non filtre.
 use Encode qw(encode decode);
-use MIME::Base64 qw(encode_base64 decode_base64);
 use JSON::MaybeXS;
 require Mediabot::Helpers;   # mb624-B1: suggest_keyword/edit_distance_1 partages
-use Mediabot::AsyncWorker ();  # MB675: Anthropic HTTP outside the IRC event loop
+use Mediabot::AI::Transport ();
+use Mediabot::AI::Client ();
+use Mediabot::AI::Request qw(build_request);
+use Mediabot::AI::Provider::OpenAI ();
 use URI::Escape qw(uri_escape_utf8);
 
 our $VERSION = '1.00';
@@ -290,59 +292,109 @@ sub chatGPT_ctx {
 # ------------------------------------------------------------------
 # chatGPT()
 # ------------------------------------------------------------------
-# mb418-B1: extrait la cause réelle d'une erreur OpenAI depuis le corps JSON.
-# OpenAI renvoie { "error": { "message":..., "type":..., "code":... } }. Un
-# HTTP 429 peut signifier soit un rate-limit TRANSITOIRE (type/code
-# rate_limit_exceeded), soit un QUOTA ÉPUISÉ (code insufficient_quota) — deux
-# situations opposées qu'il ne faut pas confondre (« ma clé est morte ? »).
-# Renvoie ($type, $code, $message) nettoyés (chaînes vides si absents).
+# mb699-D: compatibility wrappers kept for AdminCommands and historical
+# callers while OpenAI-specific parsing/classification now lives in the provider.
 sub _chatgpt_error_cause {
-    my ($body) = @_;
-    return ('', '', '') unless defined $body && $body ne '';
-    my $data = eval { decode_json($body) };
-    return ('', '', '') unless !$@ && ref($data) eq 'HASH' && ref($data->{error}) eq 'HASH';
-    my $e = $data->{error};
-    my $clean = sub {
-        my $s = defined $_[0] ? "$_[0]" : '';
-        $s =~ s/[\x00-\x1F\x7F]+/ /g;
-        $s =~ s/\s+/ /g;
-        $s =~ s/^\s+|\s+$//g;
-        return substr($s, 0, 200);
-    };
-    return ($clean->($e->{type}), $clean->($e->{code}), $clean->($e->{message}));
+    return Mediabot::AI::Provider::OpenAI::extract_error(@_);
 }
 
-# mb418-B1: message utilisateur court adapté à la classe d'erreur OpenAI.
 sub _chatgpt_user_error_message {
-    my ($status, $type, $code) = @_;
-    $status = 0 unless defined($status) && $status =~ /^\d+\z/;
-    my $tc = lc("$type $code");
+    return Mediabot::AI::Provider::OpenAI::user_error_message(@_);
+}
 
-    # mb419-B1: an insufficient_quota response is returned only after the
-    # request has been authenticated. The key is therefore accepted; rotating
-    # another key in the same unfunded project would not restore service.
-    if ($tc =~ /insufficient_quota/) {
-        return 'OpenAI API key accepted, but API credits/budget are exhausted; add API credits or raise the project limit.';
+sub _chatgpt_can_async {
+    return Mediabot::AI::Transport::usable_loop($_[0]);
+}
+
+# MB699-J: wire transport and model fallback now live entirely in AI::Client.
+# External::Claude keeps only caller policy, normalized-result handling and IRC delivery.
+sub _chatgpt_deliver_answer {
+    my ($self, $state, $answer) = @_;
+
+    unless (defined($answer) && length($answer)) {
+        $self->{logger}->log(0, 'chatGPT() empty parsed answer');
+        Mediabot::Helpers::botPrivmsg(
+            $self, $state->{chan}, "($state->{nick}) Could not read API response."
+        );
+        return undef;
     }
-    if (($status == 429) || $tc =~ /rate_limit/) {
-        return 'OpenAI rate limit reached; retry shortly (do not replace the API key).';
+
+    $self->{logger}->log(5, "chatGPT() chatGPT raw answer: $answer");
+
+    $answer =~ s/[\r\n]+/ /g;
+    $answer =~ s/\s{2,}/ /g;
+
+    my @chunk = _chatgpt_wrap($answer, $state->{wrap_bytes});
+    my $truncate = @chunk > $state->{max_privmsg};
+    my $last = $truncate ? $state->{max_privmsg} - 1 : $#chunk;
+
+    if ($truncate) {
+        $chunk[$last] = _fit_truncation_suffix(
+            $chunk[$last],
+            CHATGPT_TRUNC_MSG,
+            $state->{wrap_bytes},
+        );
     }
-    if (($status == 401) || $tc =~ /invalid_api_key|authentication/) {
-        return 'OpenAI rejected the API key; replace openai.API_KEY and reload/restart Mediabot.';
+
+    my @out_chunks = @chunk[0 .. $last];
+    my $queued = _queue_irc_chunks(
+        $self,
+        $state->{chan},
+        \@out_chunks,
+        $state->{sleep_us},
+        'chatGPT',
+    );
+    $self->{logger}->log(4, "chatGPT() queued $queued PRIVMSG");
+
+    return $answer;
+}
+
+sub _chatgpt_accept_client_result {
+    my ($self, $state, $result) = @_;
+
+    unless (ref($result) eq 'HASH') {
+        $self->{logger}->log(1, 'chatGPT() invalid AI::Client result');
+        Mediabot::Helpers::botPrivmsg(
+            $self, $state->{chan}, "($state->{nick}) Sorry, API did not answer."
+        );
+        return undef;
     }
-    if (($status == 403) || $tc =~ /permission|access_denied/) {
-        return 'OpenAI denied access; check project/model/region permissions (the key is not necessarily invalid).';
+
+    unless ($result->{ok}) {
+        my $status = $result->{status} // 0;
+        my $error  = $result->{error} // 'provider_failed';
+        my $model  = $result->{model} // $state->{model} // '';
+        my $type   = $result->{error_type} // '';
+        my $code   = $result->{error_code} // '';
+        my $detail = $result->{error_message} // '';
+
+        $self->{logger}->log(
+            1,
+            "chatGPT() AI::Client error: $error status=$status"
+            . ($model  ne '' ? " model=$model" : '')
+            . ($type   ne '' ? " type=$type" : '')
+            . ($code   ne '' ? " code=$code" : '')
+            . ($detail ne '' ? " msg=$detail" : '')
+        );
+
+        my $user_msg = $result->{provider} && $result->{provider} eq 'openai'
+            ? _chatgpt_user_error_message($status, $type, $code)
+            : 'Sorry, API did not answer.';
+
+        Mediabot::Helpers::botPrivmsg(
+            $self, $state->{chan}, "($state->{nick}) $user_msg"
+        );
+        return undef;
     }
-    if (($status == 404) || $tc =~ /model_not_found/) {
-        return 'OpenAI model unavailable or not permitted; check openai.MODEL and openai.FALLBACK_MODEL.';
+
+    if ($result->{model_fallback}) {
+        $self->{logger}->log(
+            1,
+            "chatGPT() fallback model succeeded: " . ($result->{model} // '')
+        );
     }
-    if ($status == 0) {
-        return 'Could not reach OpenAI; check DNS, TLS, firewall and openai.API_URL.';
-    }
-    if ($status >= 500) {
-        return 'OpenAI service error; retry shortly.';
-    }
-    return 'Sorry, API did not answer.';
+
+    return _chatgpt_deliver_answer($self, $state, $result->{answer});
 }
 
 sub chatGPT {
@@ -373,7 +425,7 @@ sub chatGPT {
     my $chatgpt_max_privmsg = _chatgpt_conf_int(   $self, 'openai.MAX_PRIVMSG', CHATGPT_MAX_PRIVMSG, 1, 8);
     my $chatgpt_wrap_bytes  = _chatgpt_conf_int(   $self, 'openai.WRAP_BYTES',  CHATGPT_WRAP_BYTES,  120, 450);
     my $chatgpt_sleep_us    = _chatgpt_conf_int(   $self, 'openai.SLEEP_US',    CHATGPT_SLEEP_US,    0, 2_000_000);
-    my $chatgpt_timeout     = _chatgpt_conf_int(   $self, 'openai.TIMEOUT',     CHATGPT_TIMEOUT,     5, 60); # mb419-B2
+    my $chatgpt_timeout     = _chatgpt_conf_int(   $self, 'openai.TIMEOUT',     CHATGPT_TIMEOUT,     5, 60);
 
     unless ($chatgpt_api_url =~ m{^https://}i) {
         $self->{logger}->log(1, "chatGPT() invalid openai.API_URL, falling back to default");
@@ -394,181 +446,89 @@ sub chatGPT {
     return unless length $setid;
 
     # --------------------------------------------------------------
-    # payload preparation
+    # provider-neutral request + provider-neutral client
     # --------------------------------------------------------------
     my $prompt = join ' ', @args;
     $self->{logger}->log(5,"chatGPT() chatGPT prompt: $prompt");
 
-    my $build_payload = sub {
-        my ($model) = @_;
+    my $request = eval {
+        build_request(
+            provider          => 'openai',
+            purpose           => 'tellme',
+            system            => $chatgpt_system_prompt,
+            messages          => [ { role => 'user', content => $prompt } ],
+            max_output_tokens => $chatgpt_max_tokens,
+            temperature       => $chatgpt_temperature,
+            timeout_seconds   => $chatgpt_timeout,
+        )
+    };
+    unless ($request) {
+        my $error = $@ || 'unknown request-build failure';
+        $error =~ s/[\r\n\0]+/ /g;
+        $self->{logger}->log(1, "chatGPT() request build error: $error");
+        Mediabot::Helpers::botPrivmsg(
+            $self, $chan, "($nick) Internal error building request."
+        );
+        return;
+    }
 
-        return encode_json {
-            model       => $model,
-            temperature => $chatgpt_temperature,
-            max_tokens  => $chatgpt_max_tokens,
-            messages    => [
-                { role => 'system',
-                  content => $chatgpt_system_prompt
+    my $state = {
+        nick        => $nick,
+        chan        => $chan,
+        model       => $chatgpt_model,
+        max_privmsg => $chatgpt_max_privmsg,
+        wrap_bytes  => $chatgpt_wrap_bytes,
+        sleep_us    => $chatgpt_sleep_us,
+    };
+
+    my $client = Mediabot::AI::Client->new(
+        conf         => $self->{conf},
+        loop_owner   => $self,
+        http_factory => \&Mediabot::External::_make_http,
+        config_overrides => {
+            # Preserve the historical tellme compatibility policy while the
+            # generic AI::Client remains strict by default for new consumers.
+            'openai.API_URL'        => $chatgpt_api_url,
+            'openai.FALLBACK_MODEL' => $chatgpt_fallback_model,
+        },
+    );
+
+    # Production runtime is asynchronous. Lightweight test contexts without an
+    # IO::Async loop retain a synchronous compatibility path through the same
+    # provider-neutral client rather than through separate HTTP code.
+    if (_chatgpt_can_async($self)) {
+        my $submitted = eval {
+            $client->submit(
+                $request,
+                on_done => sub {
+                    _chatgpt_accept_client_result($self, $state, shift);
                 },
-                { role => 'user', content => $prompt },
-            ],
+            )
         };
-    };
 
-    # --------------------------------------------------------------
-    # call the API with bounded HTTP::Tiny (no shell)
-    # --------------------------------------------------------------
-    # mb420-S1: API credentials must never cross an unverified TLS session.
-    my $http = Mediabot::External::_make_http(
-        timeout    => $chatgpt_timeout,
-        verify_SSL => 1,
-    );
-
-    my $send_request = sub {
-        my ($model) = @_;
-
-        return eval {
-            $http->request(
-                'POST',
-                $chatgpt_api_url,
-                {
-                    headers => {
-                        'Content-Type'  => 'application/json',
-                        'Authorization' => "Bearer $api_key",
-                    },
-                    content => $build_payload->($model),
-                }
+        if (!$submitted && $@) {
+            my $error = $@;
+            $error =~ s/[\r\n\0]+/ /g;
+            $self->{logger}->log(1, "chatGPT() AI::Client submit failed: $error");
+            Mediabot::Helpers::botPrivmsg(
+                $self, $chan, "($nick) Sorry, API did not answer."
             );
-        } // { success => 0, status => 0, reason => $@ };
-    };
-
-    my $request_model  = $chatgpt_model;
-    my $http_response  = $send_request->($request_model);
-    my $fallback_tried = 0;
-
-    # mb418-B1: un 429 rate-limit peut être spécifique au modèle (TPM/RPM) →
-    # tenter le modèle de repli. Mais PAS si le quota est épuisé
-    # (insufficient_quota) : c'est au niveau du compte, changer de modèle
-    # n'aiderait pas et gaspillerait un appel.
-    my $primary_status = $http_response->{status} // 0;
-    my ($p_type, $p_code) = $http_response->{success}
-        ? ('', '')
-        : _chatgpt_error_cause($http_response->{content});
-    my $quota_exhausted = lc("$p_type $p_code") =~ /insufficient_quota/;
-    my $fallback_worthy_status =
-        ($primary_status == 400 || $primary_status == 403 || $primary_status == 404)
-        || ($primary_status == 429 && !$quota_exhausted);
-
-    if (
-        !$http_response->{success}
-        && $chatgpt_fallback_model ne ''
-        && $chatgpt_fallback_model ne $request_model
-        && $fallback_worthy_status
-    ) {
-        $self->{logger}->log(
-            1,
-            "chatGPT() primary model $request_model failed with HTTP "
-            . ($http_response->{status} // 0) . " "
-            . ($http_response->{reason} // '')
-            . "; retrying with fallback model $chatgpt_fallback_model"
-        );
-
-        $request_model  = $chatgpt_fallback_model;
-        $http_response  = $send_request->($request_model);
-        $fallback_tried = 1;
+        }
+        return 1;
     }
 
-    unless ($http_response->{success}) {
-        my $status = $http_response->{status} // 0;
-        # mb418-B1: extraire la cause réelle du corps JSON d'OpenAI au lieu de
-        # la masquer derrière un « API did not answer » générique.
-        my ($err_type, $err_code, $err_msg) =
-            _chatgpt_error_cause($http_response->{content});
-        $self->{logger}->log(
-            1,
-            "chatGPT() HTTP error: $status "
-            . ($http_response->{reason} // '')
-            . " model=$request_model"
-            . ($err_type ? " type=$err_type" : '')
-            . ($err_code ? " code=$err_code" : '')
-            . ($err_msg  ? " msg=$err_msg"   : '')
+    my $result = eval { $client->execute($request) };
+    if (!$result) {
+        my $error = $@ || 'unknown AI::Client execution failure';
+        $error =~ s/[\r\n\0]+/ /g;
+        $self->{logger}->log(1, "chatGPT() AI::Client execute failed: $error");
+        Mediabot::Helpers::botPrivmsg(
+            $self, $chan, "($nick) Sorry, API did not answer."
         );
-
-        my $user_msg = _chatgpt_user_error_message($status, $err_type, $err_code);
-        Mediabot::Helpers::botPrivmsg($self, $chan, "($nick) $user_msg");
         return;
     }
 
-    if ($fallback_tried) {
-        $self->{logger}->log(1, "chatGPT() fallback model succeeded: $request_model");
-    }
-
-    my $response = $http_response->{content};
-    unless ($response) {
-        $self->{logger}->log(1, "chatGPT() empty response from API");
-        Mediabot::Helpers::botPrivmsg($self, $chan, "($nick) Sorry, API did not answer.");
-        return;
-    }
-
-    # --------------------------------------------------------------
-	# decode the JSON response
-	# --------------------------------------------------------------
-	my $data = eval { decode_json($response) };
-	my $answer;
-
-	if (
-		!$@
-		&& ref($data) eq 'HASH'
-		&& ref($data->{choices}) eq 'ARRAY'
-		&& ref($data->{choices}[0]) eq 'HASH'
-		&& ref($data->{choices}[0]{message}) eq 'HASH'
-		&& defined($data->{choices}[0]{message}{content})
-		&& $data->{choices}[0]{message}{content} ne ''
-	) {
-		$answer = $data->{choices}[0]{message}{content};
-	}
-
-	if ($@ || !defined($answer) || $answer eq '') {
-		$self->{logger}->log( 0, 'chatGPT() chatGPT invalid JSON response');
-		$self->{logger}->log( 5, "chatGPT() Raw API response: $response");
-		$self->{logger}->log( 3, "chatGPT() JSON decode error: $@") if $@;
-		$self->{logger}->log( 3, "chatGPT() Missing expected content in response structure") unless $@;
-		Mediabot::Helpers::botPrivmsg($self, $chan, "($nick) Could not read API response.");
-		return;
-	}
-    $self->{logger}->log(5,"chatGPT() chatGPT raw answer: $answer");
-
-    # -------- minimise PRIVMSG --------------------------------------
-    $answer =~ s/[\r\n]+/ /g;    # strip CR/LF
-    $answer =~ s/\s{2,}/ /g;     # squeeze spaces
-
-    my @chunk = _chatgpt_wrap($answer, $chatgpt_wrap_bytes);           # word-safe
-    # … after  my @chunk = _chatgpt_wrap($answer);
-    my $truncate   = @chunk > $chatgpt_max_privmsg;
-    my $last       = $truncate ? $chatgpt_max_privmsg - 1 : $#chunk;
-
-    if ($truncate) {
-        # mb376-B1: le wrap MB374 est byte-safe, mais l'ancien ajout du suffixe
-        # recalculait encore la place avec length()/substr() en CARACTÈRES. Le
-        # suffixe ChatGPT contient lui-même de l'UTF-8, donc la dernière ligne
-        # pouvait dépasser WRAP_BYTES, être re-découpée par botPrivmsg et faire
-        # mentir MAX_PRIVMSG. Un seul helper garantit désormais le budget final.
-        $chunk[$last] = _fit_truncation_suffix(
-            $chunk[$last],
-            CHATGPT_TRUNC_MSG,
-            $chatgpt_wrap_bytes,
-        );
-    }
-
-    my @out_chunks = @chunk[0 .. $last];
-    my $queued = _queue_irc_chunks(
-        $self,
-        $chan,
-        \@out_chunks,
-        $chatgpt_sleep_us,
-        'chatGPT',
-    );
-    $self->{logger}->log(4, "chatGPT() queued $queued PRIVMSG");
+    return _chatgpt_accept_client_result($self, $state, $result);
 }
 
 # ------------------------------------------------------------------
@@ -1855,10 +1815,6 @@ sub claudeAI {
             return;
         };
 
-    my $api_url     = _chatgpt_conf_string($self, 'anthropic.API_URL',
-                                            CLAUDE_API_URL);
-    my $api_version = _chatgpt_conf_string($self, 'anthropic.API_VERSION',
-                                            CLAUDE_API_VERSION);
     my $model       = _chatgpt_conf_string($self, 'anthropic.MODEL',
                                             CLAUDE_MODEL);
     my $max_tokens  = _chatgpt_conf_int($self, 'anthropic.MAX_TOKENS',
@@ -1995,14 +1951,9 @@ sub claudeAI {
     splice @$history, 0, @$history - $max_history if @$history > $max_history;
     shift @$history while @$history && ($history->[0]{role} // '') ne 'user';
 
-    # Keep the request context entirely parent-owned. Only the scalar HTTP
-    # transport inputs cross the fork boundary in _claude_send_and_parse_async;
-    # history, cache, output callbacks and metrics are updated after completion
-    # back in the main process.
+    # Keep only conversation/delivery state in the parent. Provider credentials,
+    # endpoint configuration and wire payloads are resolved inside AI::Client.
     my $request = {
-        api_url     => $api_url,
-        api_key     => $api_key,
-        api_version => $api_version,
         model       => $model,
         max_tokens  => $max_tokens,
         temperature => $temperature,
@@ -2086,15 +2037,10 @@ sub claudeAI {
 }
 
 # ---------------------------------------------------------------------------
-# MB675 — Claude transport split
+# MB699 — provider-neutral Claude caller boundary
 #
-# Parent-only state:
-#   history, prompt cache, metrics, output callbacks, IRC queueing.
-#
-# Worker-only work:
-#   the bounded Anthropic HTTP request.  The raw HTTP body is transported as
-#   base64 so AsyncWorker's JSON protocol never has to guess whether API bytes
-#   are already decoded Perl characters.
+# External::Claude owns social/conversation state and delivery. AI::Client owns
+# provider configuration, payloads, verified transport and worker lifecycle.
 # ---------------------------------------------------------------------------
 
 sub _claude_emit {
@@ -2138,25 +2084,95 @@ sub _claude_cache_hit {
     return 1;
 }
 
-sub _claude_build_payload {
+sub _claude_build_client_request {
     my ($self, $p) = @_;
 
-    my $payload = eval { encode_json({
-        model       => $p->{model},
-        max_tokens  => $p->{max_tokens},
-        temperature => $p->{temperature} + 0,
-        system      => $p->{sys_prompt},
-        messages    => $p->{history},
-    }) };
+    my $request = eval { build_request(
+        provider          => 'anthropic',
+        purpose           => 'ai',
+        model             => $p->{model},
+        system            => $p->{sys_prompt},
+        messages          => $p->{history},
+        max_output_tokens => $p->{max_tokens},
+        temperature       => $p->{temperature} + 0,
+        timeout_seconds   => 30,
+    ) };
 
-    unless ($payload) {
-        $self->{logger}->log(1, "claudeAI() payload encode error: $@");
+    unless ($request) {
+        my $error = $@ || 'unknown request-build failure';
+        $error =~ s/[\r\n\0]+/ /g;
+        $self->{logger}->log(1, "claudeAI() request build error: $error");
         _claude_emit($self, $p,
             "($p->{nick}) Internal error building request.");
         return undef;
     }
 
-    return $payload;
+    return $request;
+}
+
+sub _claude_client {
+    my ($self) = @_;
+
+    return Mediabot::AI::Client->new(
+        conf         => $self->{conf},
+        loop_owner   => $self,
+        http_factory => \&Mediabot::External::_make_http,
+    );
+}
+
+sub _claude_accept_client_result {
+    my ($self, $p, $result) = @_;
+
+    unless (ref($result) eq 'HASH' && $result->{ok}) {
+        my $error  = ref($result) eq 'HASH' ? ($result->{error}  // 'client_failed') : 'client_failed';
+        my $status = ref($result) eq 'HASH' ? ($result->{status} // 0) : 0;
+        my $reason = ref($result) eq 'HASH' ? ($result->{reason} // '') : '';
+        $error  =~ s/[\r\n\0]+/ /g;
+        $reason =~ s/[\r\n\0]+/ /g;
+        $self->{logger}->log(1,
+            "claudeAI() AI::Client error: $error status=$status reason=$reason model=$p->{model}");
+        $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
+        _claude_emit($self, $p,
+            "($p->{nick}) Sorry, Claude did not answer.");
+        return undef;
+    }
+
+    if (($result->{provider} // '') ne 'anthropic') {
+        $self->{logger}->log(1,
+            'claudeAI() AI::Client returned unexpected provider');
+        $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
+        _claude_emit($self, $p,
+            "($p->{nick}) Sorry, Claude did not answer.");
+        return undef;
+    }
+
+    my $answer = $result->{answer};
+    unless (defined $answer && !ref($answer) && $answer ne '') {
+        $self->{logger}->log(1, 'claudeAI() unexpected AI::Client response structure');
+        _claude_emit($self, $p,
+            "($p->{nick}) Could not read Claude response.");
+        return undef;
+    }
+
+    $self->{logger}->log(5, "claudeAI() raw answer: $answer");
+
+    my $history = $p->{history};
+    push @$history, { role => 'assistant', content => $answer };
+
+    $self->{_claude_prompt_cache}{$p->{prompt_key}} = {
+        ts     => time(),
+        answer => $answer,
+    };
+
+    for my $k (keys %{ $self->{_claude_prompt_cache} // {} }) {
+        delete $self->{_claude_prompt_cache}{$k}
+            if (time() - ($self->{_claude_prompt_cache}{$k}{ts} // 0)) > 120;
+    }
+
+    splice @$history, 0, @$history - $p->{max_history}
+        if @$history > $p->{max_history};
+
+    return $answer;
 }
 
 sub _claude_log_request {
@@ -2173,143 +2189,8 @@ sub _claude_log_request {
         . "[hist: $h msg(s), ~$c chars]");
 }
 
-sub _claude_http_request {
-    my ($transport, $payload) = @_;
-
-    my $http = Mediabot::External::_make_http(
-        timeout    => 30,
-        verify_SSL => 1,
-    );
-
-    my $res = eval {
-        $http->request('POST', $transport->{api_url}, {
-            headers => {
-                'Content-Type'      => 'application/json',
-                'x-api-key'         => $transport->{api_key},
-                'anthropic-version' => $transport->{api_version},
-            },
-            content => $payload,
-        });
-    };
-
-    if (!$res || ref($res) ne 'HASH') {
-        my $reason = $@ || 'invalid HTTP response';
-        $reason =~ s/[\r\n\0]+/ /g;
-        return {
-            success     => 0,
-            status      => 0,
-            reason      => substr($reason, 0, 300),
-            content_b64 => '',
-        };
-    }
-
-    my $status = $res->{status};
-    $status = 0 if !defined($status) || ref($status);
-
-    my $reason = $res->{reason};
-    $reason = '' if !defined($reason) || ref($reason);
-    $reason =~ s/[\r\n\0]+/ /g;
-    $reason = substr($reason, 0, 300);
-
-    my $content = $res->{content};
-    $content = '' if !defined($content) || ref($content);
-
-    return {
-        success     => $res->{success} ? 1 : 0,
-        status      => "$status",
-        reason      => $reason,
-        content_b64 => encode_base64($content, ''),
-    };
-}
-
-sub _claude_extract_answer {
-    my ($content) = @_;
-
-    # mb359-B1: parse every Anthropic content block and concatenate text blocks.
-
-    my $data = eval { decode_json($content // '') };
-    return undef unless ref($data) eq 'HASH'
-        && ref($data->{content}) eq 'ARRAY';
-
-    my @texts;
-    for my $blk (@{ $data->{content} }) {
-        next unless ref($blk) eq 'HASH'
-            && ($blk->{type} // '') eq 'text'
-            && defined $blk->{text};
-        push @texts, $blk->{text};
-    }
-
-    my $joined = join('', @texts);
-    return length($joined) > 0 ? $joined : undef;
-}
-
-sub _claude_accept_http_result {
-    my ($self, $p, $res) = @_;
-
-    unless (ref($res) eq 'HASH' && $res->{success}) {
-        my $status = ref($res) eq 'HASH' ? ($res->{status} // 0) : 0;
-        my $reason = ref($res) eq 'HASH' ? ($res->{reason} // '') : '';
-        $self->{logger}->log(1,
-            'claudeAI() HTTP error: ' . $status . ' ' . $reason
-            . " model=$p->{model}");
-        $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
-        _claude_emit($self, $p,
-            "($p->{nick}) Sorry, Claude did not answer.");
-        return undef;
-    }
-
-    my $content = eval { decode_base64($res->{content_b64} // '') };
-    $content = '' unless defined $content;
-
-    my $answer = _claude_extract_answer($content);
-    unless (defined $answer && $answer ne '') {
-        $self->{logger}->log(1, 'claudeAI() unexpected response structure');
-        $self->{logger}->log(5,
-            'claudeAI() raw: ' . ($content ne '' ? $content : '(empty)'));
-        _claude_emit($self, $p,
-            "($p->{nick}) Could not read Claude response.");
-        return undef;
-    }
-
-    $self->{logger}->log(5, "claudeAI() raw answer: $answer");
-
-    my $history = $p->{history};
-    push @$history, { role => 'assistant', content => $answer };
-
-    # F53: cache this prompt->answer pair (TTL 60s).
-    $self->{_claude_prompt_cache}{$p->{prompt_key}} = {
-        ts     => time(),
-        answer => $answer,
-    };
-
-    # Evict entries older than 120s.
-    for my $k (keys %{ $self->{_claude_prompt_cache} // {} }) {
-        delete $self->{_claude_prompt_cache}{$k}
-            if (time() - ($self->{_claude_prompt_cache}{$k}{ts} // 0)) > 120;
-    }
-
-    splice @$history, 0, @$history - $p->{max_history}
-        if @$history > $p->{max_history};
-
-    return $answer;
-}
-
 sub _claude_can_async {
-    my ($self) = @_;
-
-    my $loop = eval {
-        (ref($self) && $self->can('getLoop'))
-            ? $self->getLoop
-            : undef;
-    };
-    $loop ||= eval { $self->{loop} };
-
-    return undef unless $loop
-        && eval { $loop->can('add') }
-        && eval { $loop->can('remove') }
-        && eval { $loop->can('watch_process') };
-
-    return $loop;
+    return Mediabot::AI::Transport::usable_loop($_[0]);
 }
 
 # Historical synchronous adapter retained for contexts with no usable event
@@ -2319,16 +2200,36 @@ sub _claude_send_and_parse {
 
     return undef if _claude_cache_hit($self, $p);
 
-    my $payload = _claude_build_payload($self, $p);
-    return undef unless defined $payload;
+    my $request = _claude_build_client_request($self, $p);
+    return undef unless $request;
 
     _claude_log_request($self, $p);
 
-    my %transport = map { $_ => $p->{$_} }
-        qw(api_url api_key api_version);
+    my $client = eval { _claude_client($self) };
+    unless ($client) {
+        my $error = $@ || 'unknown AI::Client construction failure';
+        $error =~ s/[\r\n\0]+/ /g;
+        $self->{logger}->log(1,
+            "claudeAI() AI::Client construction failed: $error");
+        $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
+        _claude_emit($self, $p,
+            "($p->{nick}) Sorry, Claude did not answer.");
+        return undef;
+    }
 
-    my $res = _claude_http_request(\%transport, $payload);
-    return _claude_accept_http_result($self, $p, $res);
+    my $result = eval { $client->execute($request) };
+    unless ($result) {
+        my $error = $@ || 'unknown AI::Client execution failure';
+        $error =~ s/[\r\n\0]+/ /g;
+        $self->{logger}->log(1,
+            "claudeAI() AI::Client execute failed: $error");
+        $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
+        _claude_emit($self, $p,
+            "($p->{nick}) Sorry, Claude did not answer.");
+        return undef;
+    }
+
+    return _claude_accept_client_result($self, $p, $result);
 }
 
 sub _claude_send_and_parse_async {
@@ -2347,18 +2248,17 @@ sub _claude_send_and_parse_async {
         return 1;
     }
 
-    my $payload = _claude_build_payload($self, $p);
-    unless (defined $payload) {
+    my $request = _claude_build_client_request($self, $p);
+    unless ($request) {
         $done->(undef, 'failure');
         return 1;
     }
 
     _claude_log_request($self, $p);
 
-    my $loop = _claude_can_async($self);
-    unless ($loop) {
+    unless (_claude_can_async($self)) {
         $self->{logger}->log(1,
-            'claudeAI() async worker unavailable: no usable IO::Async loop');
+            'claudeAI() async client unavailable: no usable IO::Async loop');
         _claude_emit($self, $p,
             "($p->{nick}) Sorry, Claude did not answer.");
         $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
@@ -2366,74 +2266,50 @@ sub _claude_send_and_parse_async {
         return 1;
     }
 
-    # Only immutable scalar transport material is captured by the child.
-    # Parent-owned history/cache/callback objects never cross this boundary.
-    my %transport = map { $_ => $p->{$_} }
-        qw(api_url api_key api_version);
+    my $client = eval { _claude_client($self) };
+    unless ($client) {
+        my $error = $@ || 'unknown AI::Client construction failure';
+        $error =~ s/[\r\n\0]+/ /g;
+        $self->{logger}->log(1,
+            "claudeAI() AI::Client construction failed: $error");
+        $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
+        _claude_emit($self, $p,
+            "($p->{nick}) Sorry, Claude did not answer.");
+        $done->(undef, 'failure');
+        return 1;
+    }
 
-    my $worker_done = sub {
+    my $client_done = sub {
         my ($result) = @_;
-
-        unless (ref($result) eq 'HASH' && $result->{ok}
-            && ref($result->{value}) eq 'HASH') {
-            my $error = ref($result) eq 'HASH'
-                ? ($result->{error} // 'worker_failed')
-                : 'worker_failed';
-            my $detail = ref($result) eq 'HASH'
-                ? ($result->{detail} // '')
-                : '';
-            $detail =~ s/[\r\n\0]+/ /g;
-            $self->{logger}->log(1,
-                "claudeAI() AsyncWorker error: $error $detail");
-            $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
-            _claude_emit($self, $p,
-                "($p->{nick}) Sorry, Claude did not answer.");
-            $done->(undef, 'failure');
-            return;
-        }
-
-        my $answer = _claude_accept_http_result(
-            $self,
-            $p,
-            $result->{value},
-        );
-
+        my $answer = _claude_accept_client_result($self, $p, $result);
         $done->(
             $answer,
             defined($answer) ? 'success' : 'failure',
         );
     };
 
-    my $worker;
+    my $started;
     my $launch_ok = eval {
-        $worker = Mediabot::AsyncWorker->start(
-            loop        => $loop,
-            label       => 'claude anthropic request',
-            timeout     => 32,
-            term_grace  => 0.2,
-            force_grace => 2.0,
-            max_output  => 128 * 1024,
-            child       => sub {
-                return _claude_http_request(\%transport, $payload);
-            },
-            on_done => $worker_done,
+        $started = $client->submit(
+            $request,
+            on_done => $client_done,
         );
         1;
     };
 
     if (!$launch_ok && !$adapter_done) {
-        my $error = $@ || 'unknown AsyncWorker launch failure';
+        my $error = $@ || 'unknown AI::Client submit failure';
         $error =~ s/[\r\n\0]+/ /g;
         $self->{logger}->log(1,
-            "claudeAI() AsyncWorker launch failed: $error");
+            "claudeAI() AI::Client submit failed: $error");
         $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
         _claude_emit($self, $p,
             "($p->{nick}) Sorry, Claude did not answer.");
         $done->(undef, 'failure');
     }
-    elsif (!$worker && !$adapter_done) {
+    elsif (!$started && !$adapter_done) {
         $self->{logger}->log(1,
-            'claudeAI() AsyncWorker refused launch without completion');
+            'claudeAI() AI::Client refused async submission without completion');
         $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
         _claude_emit($self, $p,
             "($p->{nick}) Sorry, Claude did not answer.");

@@ -65,11 +65,14 @@ return sub {
     );
 
     my $sample = _slurp_179('mediabot.sample.conf');
+    my $client = _slurp_179(File::Spec->catfile('.', 'Mediabot', 'AI', 'Client.pm'));
 
     my $chatgpt_body = _extract_sub_body_179($src, 'chatGPT');
+    my $accept_body  = _extract_sub_body_179($src, '_chatgpt_deliver_answer');
     my $wrap_body    = _extract_sub_body_179($src, '_chatgpt_wrap');
 
     $assert->ok(defined $chatgpt_body, 'chatGPT body found');
+    $assert->ok(defined $accept_body, '_chatgpt_deliver_answer body found');
     $assert->ok(defined $wrap_body, '_chatgpt_wrap body found');
 
     for my $helper (qw(_chatgpt_conf_int _chatgpt_conf_float _chatgpt_conf_string)) {
@@ -108,20 +111,26 @@ return sub {
 
     $assert->like(
         $chatgpt_body // '',
-        qr/my \$build_payload = sub/,
-        'chatGPT builds payload through a model-aware helper'
+        qr/Mediabot::AI::Client->new\(/,
+        'chatGPT delegates provider execution to the common AI client'
     );
 
     $assert->like(
         $chatgpt_body // '',
-        qr/my \(\$model\) = \@_;/,
-        'chatGPT payload helper receives the selected model'
+        qr/provider\s+=>\s+'openai'/,
+        'tellme remains an explicit strict OpenAI request'
     );
 
     $assert->like(
-        $chatgpt_body // '',
-        qr/model\s+=> \$model,/,
-        'chatGPT payload uses the selected request model'
+        $client,
+        qr/_conf_string\('openai\.MODEL'/,
+        'common client resolves the configured OpenAI primary model'
+    );
+
+    $assert->like(
+        $client,
+        qr/Mediabot::AI::Provider::OpenAI::build_payload\(\$adapted\)/,
+        'common client delegates payload serialization to OpenAI provider'
     );
 
     $assert->like(
@@ -132,26 +141,26 @@ return sub {
 
     $assert->like(
         $chatgpt_body // '',
-        qr/temperature => \$chatgpt_temperature,/,
-        'chatGPT payload uses configured temperature variable'
+        qr/temperature\s+=>\s+\$chatgpt_temperature,/,
+        'chatGPT passes configured temperature into provider-neutral request'
     );
 
     $assert->like(
         $chatgpt_body // '',
-        qr/max_tokens\s+=> \$chatgpt_max_tokens,/,
-        'chatGPT payload uses configured max_tokens variable'
+        qr/max_output_tokens\s+=>\s+\$chatgpt_max_tokens,/,
+        'chatGPT maps configured max tokens into provider-neutral request'
     );
 
     $assert->like(
-        $chatgpt_body // '',
-        qr/_chatgpt_wrap\(\$answer, \$chatgpt_wrap_bytes\)/,
-        'chatGPT uses configured wrap bytes'
+        $accept_body // '',
+        qr/_chatgpt_wrap\(\$answer, \$state->\{wrap_bytes\}\)/,
+        'parent acceptance uses configured wrap bytes'
     );
 
     $assert->like(
-        $chatgpt_body // '',
-        qr/_queue_irc_chunks\(\s*\$self,\s*\$chan,\s*\\\@out_chunks,\s*\$chatgpt_sleep_us/s,
-        'chatGPT passes configured pacing delay to the asynchronous IRC queue'
+        $accept_body // '',
+        qr/_queue_irc_chunks\(\s*\$self,\s*\$state->\{chan\},\s*\\\@out_chunks,\s*\$state->\{sleep_us\}/s,
+        'parent acceptance passes configured pacing delay to the IRC queue'
     );
 
     $assert->like(

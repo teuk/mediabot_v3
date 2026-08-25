@@ -1,133 +1,30 @@
 # t/cases/167_chatgpt_json_structure_guard.t
-# =============================================================================
-# Regression checks for chatGPT() response parsing.
-#
-# decode_json() being inside eval is not enough: the decoded JSON may be valid
-# but structurally unexpected, such as {error:{...}} or {choices:null}.  chatGPT()
-# must verify the response shape before dereferencing choices[0].message.content.
-# =============================================================================
-
+# OpenAI response parsing belongs to Provider::OpenAI and the normalized
+# AI::Client boundary; External::Claude must never dereference wire JSON.
 use strict;
 use warnings;
-
-BEGIN {
-    use FindBin qw($Bin);
-    unshift @INC, "$Bin/../lib";
-    unshift @INC, "$Bin/../..";
-}
-
+BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
+use Mediabot::AI::Provider::OpenAI ();
 
-sub _slurp_chatgpt_json_guard {
-    my ($path) = @_;
-
-    open my $fh, '<:raw', $path or die "cannot read $path: $!";
-    local $/;
-    return <$fh>;
-}
-
-sub _extract_sub_body_chatgpt_json_guard {
-    my ($src, $sub_name) = @_;
-
-    my $start_re = qr/^sub\s+\Q$sub_name\E\s*\{/m;
-    return undef unless $src =~ /$start_re/g;
-
-    my $start = pos($src);
-    my $depth = 1;
-    my $pos   = $start;
-    my $len   = length($src);
-
-    while ($pos < $len) {
-        my $char = substr($src, $pos, 1);
-
-        if ($char eq '{') {
-            $depth++;
-        }
-        elsif ($char eq '}') {
-            $depth--;
-
-            if ($depth == 0) {
-                return substr($src, $start, $pos - $start);
-            }
-        }
-
-        $pos++;
-    }
-
-    return undef;
-}
+sub _slurp_167 { my ($p)=@_; open my $f,'<:raw',$p or die $!; local $/; <$f> }
 
 return sub {
-    my ($assert) = @_;
+    my ($assert)=@_;
+    my $external=_slurp_167(File::Spec->catfile('.','Mediabot','External','Claude.pm'));
+    my $provider=_slurp_167(File::Spec->catfile('.','Mediabot','AI','Provider','OpenAI.pm'));
+    my $client=_slurp_167(File::Spec->catfile('.','Mediabot','AI','Client.pm'));
 
-    my $src = _slurp_chatgpt_json_guard(
-        File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm')
-    );
+    $assert->like($provider, qr/sub extract_answer\s*\{/, 'OpenAI extract_answer exists');
+    $assert->like($provider, qr/eval \{ decode_json\(\$content \/\/ ''\) \}/, 'JSON decode is guarded');
+    $assert->like($provider, qr/ref\(\$data->\{choices\}\) eq 'ARRAY'/, 'choices must be ARRAY');
+    $assert->like($provider, qr/ref\(\$data->\{choices\}\[0\]\{message\}\) eq 'HASH'/, 'message must be HASH');
+    $assert->like($provider, qr/defined\(\$data->\{choices\}\[0\]\{message\}\{content\}\)/, 'content must be defined');
+    $assert->like($client, qr/Mediabot::AI::Provider::OpenAI::extract_answer\(\$body\)/, 'AI client delegates successful OpenAI parsing to provider');
+    $assert->like($external, qr/sub _chatgpt_accept_client_result\s*\{/, 'tellme accepts normalized AI client result');
+    $assert->unlike($external, qr/\$data->\{choices\}\[0\]\{message\}\{content\}/, 'External::Claude never dereferences OpenAI wire response');
 
-    my $body = _extract_sub_body_chatgpt_json_guard($src, 'chatGPT');
-
-    $assert->ok(
-        defined $body,
-        'chatGPT body found'
-    );
-
-    $assert->like(
-        $body // '',
-        qr/my \$data = eval \{ decode_json\(\$response\) \};/,
-        'chatGPT still decodes JSON under eval'
-    );
-
-    $assert->like(
-        $body // '',
-        qr/my \$answer;/,
-        'chatGPT stores extracted content in a guarded answer variable'
-    );
-
-    $assert->like(
-        $body // '',
-        qr/ref\(\$data\) eq 'HASH'/,
-        'chatGPT verifies decoded response is a HASH'
-    );
-
-    $assert->like(
-        $body // '',
-        qr/ref\(\$data->\{choices\}\) eq 'ARRAY'/,
-        'chatGPT verifies choices is an ARRAY before dereferencing'
-    );
-
-    $assert->like(
-        $body // '',
-        qr/ref\(\$data->\{choices\}\[0\]\) eq 'HASH'/,
-        'chatGPT verifies choices[0] is a HASH'
-    );
-
-    $assert->like(
-        $body // '',
-        qr/ref\(\$data->\{choices\}\[0\]\{message\}\) eq 'HASH'/,
-        'chatGPT verifies message is a HASH'
-    );
-
-    $assert->like(
-        $body // '',
-        qr/defined\(\$data->\{choices\}\[0\]\{message\}\{content\}\)/,
-        'chatGPT verifies content is defined'
-    );
-
-    $assert->like(
-        $body // '',
-        qr/if \(\$\@ \|\| !defined\(\$answer\) \|\| \$answer eq ''\)/,
-        'chatGPT handles decode errors and missing content safely'
-    );
-
-    $assert->unlike(
-        $body // '',
-        qr/if \(\$\@ \|\| !\(\$data->\{choices\}\[0\]\{message\}\{content\} \|\| ''\)\)/,
-        'chatGPT no longer dereferences choices content in the error condition'
-    );
-
-    $assert->unlike(
-        $body // '',
-        qr/my \$answer = \$data->\{choices\}\[0\]\{message\}\{content\};/,
-        'chatGPT no longer assigns answer through an unguarded direct dereference'
-    );
+    $assert->is(Mediabot::AI::Provider::OpenAI::extract_answer('{"choices":[{"message":{"content":"ok"}}]}'), 'ok', 'valid answer parsed');
+    $assert->ok(!defined Mediabot::AI::Provider::OpenAI::extract_answer('{"choices":[]}'), 'missing choice safely rejected');
+    $assert->ok(!defined Mediabot::AI::Provider::OpenAI::extract_answer('not-json'), 'invalid JSON safely rejected');
 };
