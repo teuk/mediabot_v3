@@ -32,6 +32,29 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb698 — qualify plugin-v2 boot persistence before the 3.5 gate
+
+- Added an explicit `plugins.SCRIPTS` boot list for trusted plugin-v2 sidecars,
+  separate from the existing `plugins.ENABLED` list for in-process Perl
+  modules. Both remain governed by the existing `plugins.AUTOLOAD` gate.
+- Boot-loaded sidecars reuse the normal manifest-v2, path-containment and
+  extension validation rather than introducing a second loading path.
+- Fixed the production command-registry bridge used when mounting manifest
+  commands. PluginManager now resolves the real Mediabot
+  `command_registry()` / `commands()` API while retaining the historical
+  `registry()` accessor only as a compatibility fallback.
+- Strengthened the boot-autoload regression contract so its fixture mirrors
+  the production command-registry API and no longer masks that integration
+  failure.
+- Documented the route-v1 / sidecar-v2 capability boundary, including boot
+  persistence, storage, timer and privileged-action behavior.
+- Proved the contract on the live DEV instance: a temporary
+  `examples-v2/coin.py` boot entry produced `Plugin autoload: loaded 2
+  plugin(s)`, then the original configuration was restored bit-for-bit and
+  the next restart returned to `Plugin autoload: loaded 1 plugin(s)`.
+- The release boundary is unchanged: the manual fresh Debian 13 installation
+  gate still remains mandatory before final 3.5 qualification.
+
 ### mb697 — mbweb dependency and runtime hardening
 
 - Refreshed the canonical mbweb dependency lock to remove the audited

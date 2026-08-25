@@ -206,6 +206,25 @@ Then, from the partyline (Owner):
     .plugins loadscript examples-v2/coin.py
     Loaded script plugin 'coin' (examples-v2/coin.py, commands: coin)
 
+`loadscript` is the hot-load mechanism.
+
+For a sidecar that must return automatically after a bot restart, declare it
+in the boot configuration:
+
+    [plugins]
+    AUTOLOAD=1
+    SCRIPTS=examples-v2/coin.py
+
+`SCRIPTS` paths are relative to `plugins/scripts`.
+
+They are deliberately separate from `ENABLED`, which continues to contain
+trusted in-process Perl module names only.
+
+`AUTOLOAD=0` disables both boot lists.
+
+Boot-loaded sidecars go through the same manifest-v2 and path-safety checks
+as manual `.plugins loadscript`.
+
 The contract, in six rules:
 
 1. **The sidecar is mandatory and validated.** Missing, malformed, oversized

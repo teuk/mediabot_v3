@@ -41,6 +41,28 @@ ALLOW_IRC=yes
 APPLY_REQUIRE_SCOPE=yes
 ```
 
+### Boot autoload for plugin v2 sidecars
+
+Plugin v2 sidecars use a separate boot list.
+
+`ENABLED` remains reserved for trusted in-process Perl modules.
+`SCRIPTS` contains sidecar paths relative to `plugins/scripts`:
+
+```ini
+[plugins]
+AUTOLOAD=1
+ENABLED=Mediabot::Plugin::ScriptDryRun
+SCRIPTS=examples-v2/fortune.pl
+```
+
+`AUTOLOAD` is the common boot gate for both lists.
+
+A sidecar declared in `SCRIPTS` passes through the same path containment,
+extension and manifest-v2 validation as `.plugins loadscript`.
+
+The partyline command remains available for manual hot-loading.
+`SCRIPTS` is what makes selected sidecars return after a bot restart.
+
 For observation without real output, use:
 
 ```ini
@@ -83,8 +105,18 @@ The script writes one JSON object to STDOUT:
 }
 ```
 
-Supported planned action types are `reply`, `notice`, `log` and `timer`.
-Reply/notice output requires both `ACTION_MODE=apply` and `ALLOW_IRC=yes`.
+The shared action layer recognizes `reply`, `notice`, `log`, `timer`,
+`topic`, `kick`, `ban`, `unban` and `store`.
+
+In the route-v1 `ScriptDryRun` lifecycle:
+
+- `reply` and `notice` require the IRC output gates;
+- `timer` uses the injected ScriptDryRun scheduler;
+- `topic`, `kick`, `ban` and `unban` require their dedicated operator gates;
+- `store` is not available because route-v1 has no persistent-storage sink.
+
+In the sidecar-v2 lifecycle, `store` persists bounded JSON state through the
+plugin data directory, while `timer` has no scheduler.
 
 ### Timer actions
 

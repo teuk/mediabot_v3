@@ -57,6 +57,26 @@ sub plugin_dir {
     return $self->{plugin_dir};
 }
 
+# mb698-P4D: resolve the real Mediabot command-registry API first.
+# Historical plugin fixtures exposed ->registry(), while the production
+# Mediabot object exposes ->command_registry() and ->commands().  Keep the
+# legacy fixture alias as a final compatibility fallback, but never require
+# production to grow a third registry accessor just for PluginManager.
+sub _command_registry {
+    my ($self) = @_;
+
+    my $bot = $self->{bot} or return;
+
+    for my $method (qw(command_registry commands registry)) {
+        next unless eval { $bot->can($method) };
+
+        my $registry = eval { $bot->$method() };
+        return $registry if $registry;
+    }
+
+    return;
+}
+
 sub _same_plugin_object {
     my ($left, $right) = @_;
 
@@ -430,13 +450,40 @@ sub configured_modules_from_conf {
     };
 }
 
+sub configured_scripts_from_conf {
+    my ($self, $conf, %opts) = @_;
+
+    # mb698-P2: v2 sidecar plugins have an explicit boot list distinct from
+    # trusted in-process Perl modules. Paths remain relative to plugins/scripts
+    # and are validated by ScriptRunner/load_script_v2 at load time.
+    my $raw = _conf_get_first(
+        $conf,
+        $opts{script_key} || (),
+        'plugins.SCRIPTS',
+        'plugins.scripts',
+        'PLUGINS_SCRIPTS',
+        'PLUGIN_SCRIPTS',
+    );
+
+    my @scripts = _split_plugin_list($raw);
+
+    return wantarray ? @scripts : {
+        scripts => \@scripts,
+        raw     => $raw,
+    };
+}
+
 sub load_configured_plugins {
     my ($self, $conf, %opts) = @_;
 
     # Explicit configuration-loading entry point. The constructor never autoloads;
     # Mediabot calls this method only after the plugins.AUTOLOAD boot gate passes.
+    # mb698-P2: the same gate now covers both trusted Perl modules (ENABLED)
+    # and v2 sidecar scripts (SCRIPTS), while keeping the two lists separate.
     my $parsed = $self->configured_modules_from_conf($conf, %opts);
+    my $script_parsed = $self->configured_scripts_from_conf($conf, %opts);
     my @modules = @{ $parsed->{modules} || [] };
+    my @scripts = @{ $script_parsed->{scripts} || [] };
     my @loaded;
     my @errors;
 
@@ -457,11 +504,30 @@ sub load_configured_plugins {
         }
     }
 
+    for my $script (@scripts) {
+        my $entry = eval {
+            $self->load_script_v2($script, replace => $opts{replace});
+        };
+
+        if ($entry) {
+            push @loaded, $entry;
+        }
+        else {
+            my $err = _plugin_error_text($@, 'unknown script plugin load error');
+            push @errors, {
+                script => $script,
+                error  => $err,
+            };
+        }
+    }
+
     return {
-        loaded  => \@loaded,
-        errors  => \@errors,
-        invalid => $parsed->{invalid} || [],
-        raw     => $parsed->{raw},
+        loaded     => \@loaded,
+        errors     => \@errors,
+        invalid    => $parsed->{invalid} || [],
+        raw        => $parsed->{raw},
+        scripts    => \@scripts,
+        script_raw => $script_parsed->{raw},
     };
 }
 
@@ -516,8 +582,7 @@ sub _validate_manifest {
 
     if (defined $m->{commands}) {
         return 'manifest commands must be a HASH' unless ref($m->{commands}) eq 'HASH';
-        my $registry = $self->{bot} && eval { $self->{bot}->can('registry') }
-            ? eval { $self->{bot}->registry } : undef;
+        my $registry = $self->_command_registry;
         for my $cmd (sort keys %{ $m->{commands} }) {
             return "manifest command '$cmd' is not a valid command name"
                 unless $cmd =~ /\A[a-z][a-z0-9_]{0,23}\z/;
@@ -954,8 +1019,7 @@ sub _mount_manifest_commands {
     my $manifest = $entry->{manifest};
     return 1 unless $manifest && ref($manifest->{commands}) eq 'HASH'
                  && %{ $manifest->{commands} };
-    my $registry = $self->{bot} && eval { $self->{bot}->can('registry') }
-        ? eval { $self->{bot}->registry } : undef;
+    my $registry = $self->_command_registry;
     die "PluginManager: cannot mount commands for plugin '$key': command registry unavailable\n"
         unless $registry;
 
@@ -1027,8 +1091,7 @@ sub _mount_manifest_commands {
 sub _unmount_entry_commands {
     my ($self, $entry) = @_;
     return 0 unless $entry && ref($entry->{mounted_commands}) eq 'ARRAY';
-    my $registry = $self->{bot} && eval { $self->{bot}->can('registry') }
-        ? eval { $self->{bot}->registry } : undef;
+    my $registry = $self->_command_registry;
     return 0 unless $registry;
     $registry->unregister_command($_, 'public')
         for @{ $entry->{mounted_commands} };

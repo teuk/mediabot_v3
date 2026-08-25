@@ -823,7 +823,9 @@ sub _cmd_plugins {
 
         $stream->write("  autoload keys: plugins.AUTOLOAD, plugins.autoload, plugins.ENABLED_AUTOLOAD, PLUGIN_AUTOLOAD, PLUGINS_AUTOLOAD\r\n");
         $stream->write("  plugin list keys: plugins.ENABLED, plugins.enabled, plugins.PLUGINS, plugins.plugins, PLUGINS_ENABLED, PLUGIN_ENABLED, PLUGINS\r\n");
+        $stream->write("  sidecar list keys: plugins.SCRIPTS, plugins.scripts, PLUGINS_SCRIPTS, PLUGIN_SCRIPTS\r\n");
         $stream->write("  module safety: Perl module names only, no paths\r\n");
+        $stream->write("  sidecar safety: relative paths below plugins/scripts; .pl/.py/.tcl + manifest JSON\r\n");
         return;
     }
 

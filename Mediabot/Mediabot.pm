@@ -272,8 +272,14 @@ sub log_plugin_load_report {
     if (ref($report->{errors}) eq 'ARRAY') {
         for my $err (@{ $report->{errors} }) {
             next unless ref($err) eq 'HASH';
+            my $msg = $err->{error} || 'unknown error';
+            if (defined $err->{script} && length $err->{script}) {
+                $self->{logger}->log(1,
+                    "Plugin autoload: failed to load script $err->{script}: $msg")
+                    if $self->{logger};
+                next;
+            }
             my $module = $err->{module} || 'unknown';
-            my $msg    = $err->{error}  || 'unknown error';
             $self->{logger}->log(1, "Plugin autoload: failed to load $module: $msg")
                 if $self->{logger};
         }
