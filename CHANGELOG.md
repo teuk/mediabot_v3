@@ -32,6 +32,94 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb701 — gate proactive IRC emission with late authorization and real membership generations
+
+- Added an explicit process-wide `main.WIT_SEND_ARMED` master kill switch for
+  the runtime sender. It defaults to `0`, is independent from the per-channel
+  `+Wit` gate, is re-read before every delivery attempt, and any missing,
+  malformed or failed config read leaves the sender disarmed.
+- Documented `WIT_SEND_ARMED=0` in the sample configuration. Normal config
+  rehash/reload is sufficient to change the runtime switch; no persistent
+  sender state is introduced.
+- Added regression contract 936 for the default-off config, bounded integer
+  parsing, explicit arm/disarm synchronization and fail-closed runtime wiring.
+
+- Wired the dedicated `ConversationSender` into the proactive runtime behind its
+  independent kill switch. The runtime now owns one isolated transport adapter
+  that delegates only to the normal `Mediabot::Helpers::botPrivmsg` path, while
+  the sender itself remains disarmed and `mediabot.pl` contains no `arm()` path.
+- Only candidates that already passed the late `ConversationEmission` gate are
+  handed to the sender. With D-B's default-disarmed runtime they deterministically
+  stop as `[WIT_SEND] ... action=no_send reason=kill_switch`; the sender does not
+  even consult mutable state and the IRC transport cannot be invoked.
+- Added regression contract 935 and evolved contract 934 to permit runtime wiring
+  while permanently asserting that production code contains no sender arm path.
+  Real IRC emission remains disabled until a later explicitly armed live gate.
+
+- Added pure `Mediabot::AI::ConversationSender` as a dedicated delivery boundary.
+  It starts disarmed, requires an explicit local arm action, re-runs the final
+  `ConversationEmission` authorization from a synchronous mutable-state callback
+  immediately before transport, and checks the kill switch again after that gate.
+- Added a distinct fixed 120-second per-channel delivery limiter, separate from
+  the provider-request cooldown. Only a transport callback that returns success
+  consumes the delivery budget; state/authorization/transport failures all fail
+  closed and expose no generated text or private exception details.
+- The transport itself is injectable and MB701-D-A deliberately leaves the new
+  sender unwired from `mediabot.pl`, so this round still cannot emit IRC output.
+  Added regression contract 934.
+
+- Added deterministic late-revocation regression coverage for already-submitted
+  Wit requests. The test holds the provider callback pending, then proves that a
+  late `-Wit` opt-out forces `no_emit/disabled`, and that PART followed by a
+  re-JOIN forces `no_emit/stale_generation` even though the bot is joined again.
+  Generated candidate text remains absent from summaries/logs, and opt-out wins
+  if multiple revocations happen before the callback.
+- Added regression contract 933. No runtime sender or IRC emission is introduced.
+
+- Wired the MB700 async dry-run result into MB701's final emission gate without
+  adding any IRC sender. A normalized reply candidate crosses one private
+  in-memory callback only; the existing AI result callback and all logs remain
+  metadata-only and never receive generated reply text.
+- The channel generation is captured synchronously after policy eligibility and
+  immediately before the provider submit. When the callback returns, Mediabot
+  re-reads the `+Wit` chanset and snapshots live runtime membership/generation,
+  so opt-out, PART/KICK, disconnect, restart or shutdown always wins over stale
+  submit-time authorization.
+- Added `[WIT_EMIT_DRYRUN]` metadata logging for the final gate. Authorized
+  candidates are reported as `emit/authorized` but are still not delivered to
+  IRC; rejected candidates expose only the fail-closed reason and bounded size/
+  generation metadata. Added regression contract 932.
+
+- Added pure `Mediabot::AI::ConversationRuntimeState`, owned once per Mediabot
+  process, to distinguish configured channels from channels the current IRC
+  connection has actually joined.
+- Self JOIN grants a fresh positive per-channel generation; self PART/KICK,
+  transport loss, explicit IRC restart and final shutdown revoke membership and
+  invalidate outstanding generations. Duplicate lifecycle events are idempotent,
+  and unrelated channel changes do not invalidate each other's generation.
+- Transport loss is observed both from ERROR/KILL callbacks and the canonical
+  timer `is_connected` check, covering silent disconnects before reconnect. A
+  successful login restores only connection state; the channel remains ineligible
+  until the real self-JOIN callback arrives.
+- Added regression contract 931. No provider call, final emission authorization
+  or IRC delivery is wired in this round.
+
+- Added pure `Mediabot::AI::ConversationEmission` as the final authorization
+  contract that a future Wit IRC sender must pass immediately before delivery.
+  MB701-A still owns no IRC object, database access, chanset lookup or runtime
+  wiring and therefore cannot send anything.
+- Late authorization explicitly fails closed when `+Wit` is no longer enabled,
+  the runtime is inactive, IRC is disconnected, the bot is no longer joined to
+  the channel, or the asynchronous result belongs to an obsolete per-channel
+  generation. This establishes the contract needed to discard replies that
+  return after PART/KICK/reconnect/opt-out events.
+- Added a second output-safety boundary: CR/LF/NUL and remaining control/CTCP
+  payloads are rejected, presentation codes are removed defensively, replies
+  are never truncated, and proactive output must fit both the existing 280-char
+  ceiling and a conservative 350-byte single-IRC-message budget.
+- Added regression contract 930. Runtime join-generation tracking, dry-run
+  integration and actual IRC emission remain separate later MB701 rounds.
+
 ### mb700 — define a fail-closed conversation policy before enabling +Wit
 
 - Added a pure `Mediabot::AI::ConversationPolicy` boundary for future proactive

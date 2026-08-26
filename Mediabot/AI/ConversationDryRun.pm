@@ -75,9 +75,12 @@ sub handle_public_line {
     croak 'dry-run object is required' unless ref($self);
 
     my $on_observation = delete $args{on_observation};
+    my $on_candidate   = delete $args{on_candidate};
     my $on_result      = delete $args{on_result};
     croak 'on_observation must be a code reference'
         if defined($on_observation) && ref($on_observation) ne 'CODE';
+    croak 'on_candidate must be a code reference'
+        if defined($on_candidate) && ref($on_candidate) ne 'CODE';
     croak 'on_result must be a code reference'
         unless ref($on_result) eq 'CODE';
 
@@ -118,6 +121,33 @@ sub handle_public_line {
         return if $completed++;
 
         delete $self->{inflight}{$channel_key};
+
+        # MB701-C: the normalized reply text may cross exactly one private
+        # in-memory boundary into the late emission gate. Public/result logging
+        # still receives execution_summary(), which never contains that text.
+        if ($on_candidate
+            && ref($result) eq 'HASH'
+            && ($result->{action} // '') eq 'reply'
+            && _plain_scalar($result->{text})) {
+            my $candidate_ok = eval {
+                $on_candidate->($result);
+                1;
+            };
+            unless ($candidate_ok) {
+                my %failed = (
+                    ok     => 0,
+                    action => 'no_reply',
+                    reason => 'runtime_guard_error',
+                    error  => 'candidate_callback_exception',
+                );
+                for my $key (qw(provider model provider_fallback model_fallback)) {
+                    $failed{$key} = $result->{$key} if exists $result->{$key};
+                }
+                $on_result->(execution_summary(\%failed));
+                return;
+            }
+        }
+
         my $summary = execution_summary($result);
         $summary ||= {
             ok     => 0,

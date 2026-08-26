@@ -15,6 +15,7 @@ use Mediabot::Command;
 use Mediabot::CommandRegistry;
 use Mediabot::CommandAsync;
 use Mediabot::EventBus;
+use Mediabot::AI::ConversationRuntimeState;
 use Mediabot::PluginManager;
 use Mediabot::ScriptRunner;
 use Mediabot::ScriptActionRunner;
@@ -87,6 +88,7 @@ sub new {
         channel_nicklist_timers => {},
         command_registry        => Mediabot::CommandRegistry->new(),
         event_bus               => Mediabot::EventBus->new(),
+        wit_runtime_state       => Mediabot::AI::ConversationRuntimeState->new(),
         plugin_manager          => undef,
         script_runner           => undef,
         script_action_runner    => undef,
@@ -1027,6 +1029,11 @@ sub restart_irc {
 
     $self->{irc_restart_in_progress} = 1;
 
+    # mb701-B: an explicit IRC restart immediately revokes every outstanding
+    # proactive-Wit channel generation. Do this before best-effort QUIT so an
+    # AI callback cannot race the transport teardown.
+    eval { $self->{wit_runtime_state}->mark_disconnected() if $self->{wit_runtime_state}; };
+
     $self->{logger}->log(1, "restart_irc(): initiating IRC restart ($reason)");
 
     # Override server if jumping
@@ -1286,6 +1293,10 @@ sub clean_and_exit {
     # Re-entrance guard without 'state'
     if ($ALREADY_EXITING) { CORE::exit($iRetValue); }
     $ALREADY_EXITING = 1;
+
+    # mb701-B: revoke proactive-Wit authorization before any shutdown work.
+    # clean_and_exit() is the common final path, including admin-triggered exits.
+    eval { $self->{wit_runtime_state}->mark_shutdown() if $self->{wit_runtime_state}; };
 
     # Log if possible (best-effort)
     eval {

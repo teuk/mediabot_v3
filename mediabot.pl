@@ -22,6 +22,8 @@ use Mediabot::Metrics;
 use Mediabot::Achievements;
 use Mediabot::AI::ConversationObserver ();
 use Mediabot::AI::ConversationDryRun ();
+use Mediabot::AI::ConversationEmission ();
+use Mediabot::AI::ConversationSender ();
 use Mediabot::Radio::Icecast;
 use Mediabot::DB;
 use Mediabot::Channel;
@@ -74,6 +76,52 @@ sub reconnect;
 sub _reset_irc_reconnect_state;
 sub getVersion;
 sub _build_irc;
+sub _wit_send_transport;
+sub _wit_sync_sender_arm;
+
+sub _wit_send_transport {
+    my ($bot, $channel, $text) = @_;
+    return 0 unless $bot && defined($channel) && defined($text) && $text ne q{};
+
+    my $ok = eval {
+        Mediabot::Helpers::botPrivmsg($bot, $channel, $text);
+    };
+    return $ok ? 1 : 0;
+}
+
+sub _wit_sync_sender_arm {
+    my ($bot, $sender) = @_;
+    return 0 unless $bot && $sender;
+
+    # MB701-D-C: a second, process-wide master switch controls whether the
+    # dedicated sender may deliver. Missing/malformed config fails closed.
+    # +Wit remains a separate per-channel authorization gate.
+    my $want_armed = eval {
+        $bot->{conf}->get_int(
+            'main.WIT_SEND_ARMED',
+            default => 0,
+            min     => 0,
+            max     => 1,
+        );
+    } ? 1 : 0;
+
+    my $ok = eval {
+        if ($want_armed) {
+            $sender->arm();
+        } else {
+            $sender->disarm();
+        }
+        1;
+    };
+
+    # Any synchronization failure must leave the sender disarmed.
+    unless ($ok) {
+        eval { $sender->disarm(); };
+        return 0;
+    }
+
+    return eval { $sender->is_armed() } ? 1 : 0;
+}
 
 # +---------------------------------------------------------------------------+
 # !          IRC FUNCTIONS                                                    !
@@ -1272,6 +1320,14 @@ sub on_timer_tick {
     # Grace period of 15s after login to let Net::Async::IRC finish CAP negotiation
     my $grace = (time - ($mediabot->getConnectionTimestamp() // 0)) < 15;
     my $irc_connected = (defined($irc) && $irc->is_connected) ? 1 : 0;
+
+    # mb701-B: transport truth wins immediately, even before the reconnect
+    # grace/scheduler logic. mark_disconnected() is idempotent and invalidates
+    # every currently joined Wit generation on the first observed loss.
+    if (!$irc_connected) {
+        eval { $mediabot->{wit_runtime_state}->mark_disconnected() if $mediabot->{wit_runtime_state}; };
+    }
+
     my $reconnect_needed = !$mediabot->{irc_reconnect_in_progress} && ($mediabot->{irc_reconnect_requested} || (!$grace && !$irc_connected));
 
     $mediabot->{logger}->log(0,
@@ -1436,6 +1492,9 @@ sub on_login {
     my ( $self, $message, $hints ) = @_;
 
     $mediabot->{logger}->log(0,"on_login() Connected to irc server " . $mediabot->getServerHostname());
+    # mb701-B: a successful login restores transport connectivity only. No
+    # channel is considered joined until its own self-JOIN event arrives.
+    eval { $mediabot->{wit_runtime_state}->mark_connected() if $mediabot->{wit_runtime_state}; };
     if ($mediabot->{metrics}) {
         $mediabot->{metrics}->inc('mediabot_irc_login_total');
         $mediabot->{metrics}->set('mediabot_irc_connected', 1);
@@ -1585,6 +1644,8 @@ sub on_message_KICK {
         is_self => (($self->is_nick_me($kicker_nick) || $self->is_nick_me($kicked_nick)) ? 1 : 0)); };
 
     if ($self->is_nick_me($kicked_nick)) {
+        # mb701-B: invalidate the channel generation before requesting rejoin.
+        eval { $mediabot->{wit_runtime_state}->mark_left($target_name) if $mediabot->{wit_runtime_state}; };
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
             $mediabot->{logger}->log(0,"[LIVE] * you were kicked from $target_name by $kicker_nick ($text)");
         }
@@ -1870,6 +1931,11 @@ sub on_message_PART {
         message => (defined($tArgs[0]) && $tArgs[0] ne '' ? $tArgs[0] : ''),
         is_self => ($sNick eq $self->nick ? 1 : 0)); };
 
+    # mb701-B: self-PART revokes the generation immediately.
+    if ($sNick eq $self->nick) {
+        eval { $mediabot->{wit_runtime_state}->mark_left($target_name) if $mediabot->{wit_runtime_state}; };
+    }
+
     if (defined($tArgs[0]) && ($tArgs[0] ne "")) {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
             $mediabot->{logger}->log(0, "[LIVE] <$target_name> * Parts: $sNick ($sIdent\@$sHost) (" . $tArgs[0] . ")");
@@ -2099,6 +2165,8 @@ sub _on_message_PRIVMSG_body {
                     loop_owner => $mediabot,
                 );
 
+                my $wit_request_generation;
+
                 $mediabot->{wit_dryrun}->handle_public_line(
                     enabled                 => 1,
                     channel                 => $where,
@@ -2110,10 +2178,127 @@ sub _on_message_PRIVMSG_body {
                     initial_trigger_enabled => $mediabot->{conf}->get('main.MAIN_PROG_INITIAL_TRIGGER'),
                     on_observation          => sub {
                         my ($wit_summary) = @_;
+
+                        # The event loop cannot process JOIN/PART/KICK between
+                        # this synchronous callback and submit_dryrun(). Capture
+                        # the exact channel generation only for an eligible line.
+                        if (ref($wit_summary) eq 'HASH'
+                            && ($wit_summary->{action} // '') eq 'consider') {
+                            $wit_request_generation = eval {
+                                $mediabot->{wit_runtime_state}->capture_generation($where)
+                            };
+                        }
+
                         my $wit_log = Mediabot::AI::ConversationObserver::format_dryrun_log(
                             $where, $wit_summary
                         );
                         $mediabot->{logger}->log(3, $wit_log) if defined $wit_log;
+                    },
+                    on_candidate            => sub {
+                        my ($candidate) = @_;
+
+                        # MB701-C late gate: authorization at submit time is not
+                        # authority to emit later. Re-read +Wit and live IRC
+                        # membership/generation after the provider callback.
+                        my $wit_state_cb = sub {
+                            my $enabled_now = eval {
+                                Mediabot::Helpers::chanset_enabled(
+                                    $mediabot, $where, 'Wit', default => 0
+                                );
+                            } ? 1 : 0;
+
+                            my $runtime = eval {
+                                $mediabot->{wit_runtime_state}->snapshot($where)
+                            };
+                            $runtime = {
+                                runtime_active     => 0,
+                                irc_connected      => 0,
+                                channel_joined     => 0,
+                                current_generation => 0,
+                            } unless ref($runtime) eq 'HASH';
+
+                            return {
+                                enabled            => $enabled_now,
+                                runtime_active     => $runtime->{runtime_active},
+                                irc_connected      => $runtime->{irc_connected},
+                                channel_joined     => $runtime->{channel_joined},
+                                current_generation => $runtime->{current_generation},
+                            };
+                        };
+
+                        my $state = eval { $wit_state_cb->() };
+                        $state = {
+                            enabled            => 0,
+                            runtime_active     => 0,
+                            irc_connected      => 0,
+                            channel_joined     => 0,
+                            current_generation => 0,
+                        } unless ref($state) eq 'HASH';
+
+                        my $emission = eval {
+                            Mediabot::AI::ConversationEmission::evaluate_emission(
+                                enabled            => $state->{enabled},
+                                runtime_active     => $state->{runtime_active},
+                                irc_connected      => $state->{irc_connected},
+                                channel_joined     => $state->{channel_joined},
+                                request_generation => $wit_request_generation,
+                                current_generation => $state->{current_generation},
+                                channel            => $where,
+                                text               => $candidate->{text},
+                            );
+                        };
+                        $emission = {
+                            action => 'no_emit',
+                            reason => 'runtime_guard_error',
+                        } unless ref($emission) eq 'HASH';
+
+                        my $emit_summary = Mediabot::AI::ConversationEmission::emission_summary(
+                            $emission
+                        ) || {
+                            action => 'no_emit',
+                            reason => 'invalid_emission_result',
+                        };
+                        my $emit_log = Mediabot::AI::ConversationEmission::format_emission_dryrun_log(
+                            $where, $emit_summary
+                        );
+                        $mediabot->{logger}->log(3, $emit_log) if defined $emit_log;
+
+                        # MB701-D-B wires the dedicated sender into the runtime,
+                        # but deliberately leaves it disarmed. An authorized
+                        # dry-run candidate therefore reaches the sender boundary
+                        # and must stop at the independent kill switch.
+                        if (($emit_summary->{action} // q{}) eq 'emit') {
+                            $mediabot->{wit_sender} ||= Mediabot::AI::ConversationSender->new(
+                                send_cb => sub {
+                                    my ($channel, $text) = @_;
+                                    return _wit_send_transport($mediabot, $channel, $text);
+                                },
+                            );
+
+                            # MB701-D-C: synchronize the sender kill switch from
+                            # config immediately before every delivery attempt.
+                            # The key defaults to OFF and may be changed through
+                            # Mediabot's normal config rehash path.
+                            _wit_sync_sender_arm($mediabot, $mediabot->{wit_sender});
+
+                            my $send_result = eval {
+                                $mediabot->{wit_sender}->attempt_send(
+                                    channel            => $where,
+                                    text               => $candidate->{text},
+                                    request_generation => $wit_request_generation,
+                                    state_cb            => $wit_state_cb,
+                                );
+                            };
+                            $send_result = {
+                                action => 'no_send',
+                                reason => 'sender_runtime_error',
+                            } unless ref($send_result) eq 'HASH';
+
+                            my $send_log = Mediabot::AI::ConversationSender::format_sender_log(
+                                $where, $send_result
+                            );
+                            $mediabot->{logger}->log(3, $send_log) if defined $send_log;
+                        }
                     },
                     on_result               => sub {
                         my ($ai_summary) = @_;
@@ -2612,6 +2797,9 @@ sub on_message_JOIN {
         host    => $sHost, is_self => ($sNick eq $self->nick ? 1 : 0)); };
 
     if ( $sNick eq $self->nick ) {
+        # mb701-B: only the real self-JOIN event grants joined state and a new
+        # channel generation. Configured/auto-join intent is never sufficient.
+        eval { $mediabot->{wit_runtime_state}->mark_joined($target_name) if $mediabot->{wit_runtime_state}; };
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
             $mediabot->{logger}->log(0,"[LIVE] * Now talking in $target_name");
         }
@@ -3060,6 +3248,7 @@ sub on_message_ERROR {
     my @error_args = _irc_message_args($message);
     my $err_msg = @error_args ? join(" ", @error_args) : 'IRC connection closed';
     $mediabot->{logger}->log(0, "ERROR from server: $err_msg");
+    eval { $mediabot->{wit_runtime_state}->mark_disconnected() if $mediabot->{wit_runtime_state}; };
 
     if ($mediabot->getQuit()) {
         $mediabot->clean_and_exit($mediabot->getShutdownExitCode());
@@ -3087,6 +3276,7 @@ sub on_message_KILL {
     my @kill_args = _irc_message_args($message);
     my ($killer, $victim, $reason) = @kill_args;
     $mediabot->{logger}->log(0, "Killed by $killer: $reason - will reconnect.");
+    eval { $mediabot->{wit_runtime_state}->mark_disconnected() if $mediabot->{wit_runtime_state}; };
 
     if ($mediabot->getQuit()) {
         $mediabot->clean_and_exit($mediabot->getShutdownExitCode());
@@ -3377,6 +3567,10 @@ sub _reset_irc_reconnect_state {
 
 sub reconnect {
     return if $mediabot->{irc_reconnect_in_progress};
+
+    # mb701-B: defensive invalidation also covers reconnects reached without a
+    # protocol ERROR/KILL callback. Repeated invalidation is a no-op.
+    eval { $mediabot->{wit_runtime_state}->mark_disconnected() if $mediabot->{wit_runtime_state}; };
 
     $mediabot->{irc_reconnect_in_progress} = 1;
     $mediabot->{logger}->log(0, "reconnect(): entered");
