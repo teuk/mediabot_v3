@@ -32,6 +32,97 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb700 — define a fail-closed conversation policy before enabling +Wit
+
+- Added a pure `Mediabot::AI::ConversationPolicy` boundary for future proactive
+  channel AI. It decides only whether a line may be considered; it never sends
+  IRC output, touches the database, starts workers, performs HTTP or chooses to
+  force a reply.
+- The initial mechanical gates fail closed for disabled/private/self/bot/command,
+  empty, oversized, cooldown and invalid-provider inputs. Eligible human channel
+  text returns `consider`, deliberately distinct from a future model-level
+  `reply` / `NO_REPLY` decision.
+- Policy decisions carry only bounded operational metadata (reason, language,
+  provider and optional retry delay). Conversation text, nick identity and
+  credentials are not retained in the decision summary.
+- Defaults are intentionally conservative and deterministic: 90-second minimum
+  interval and an 800-character consideration ceiling. Random sampling, social
+  scoring, persistence and the `+Wit` chanset are deferred to later MB700
+  rounds so this foundation can be tested independently before runtime wiring.
+- Added regression contract 923. No live behavior changes in this round.
+- Registered the future `Wit` chanset in the canonical fresh schema and added
+  idempotent data-only migration `20260825_wit_chanset.sql` for existing
+  databases. The migration deliberately creates no `CHANNEL_SET` rows, so
+  every channel remains opted out until an administrator explicitly enables
+  `+Wit`.
+- Updated the authoritative migration inventory and database migration guide.
+  Runtime observation, AI calls and IRC emission remain absent in this round.
+- Added regression contract 924 for fresh/upgrade parity and default-off
+  semantics.
+- Wired public PRIVMSG observation to a new pure
+  `Mediabot::AI::ConversationObserver`, but only when the channel explicitly
+  has `+Wit`. The runtime gate uses the canonical `chanset_enabled(...,
+  default => 0)` helper and follows `LangFR` / `LangES` / global language via
+  `channel_lang`.
+- MB700-C is intentionally dry-run only: decisions are logged at debug level 3
+  as bounded `[WIT_DRYRUN]` metadata (`channel`, `action`, `reason`, language,
+  provider and optional retry delay). Nicknames and message payloads are never
+  copied into the policy log, and the hook contains no provider call or IRC
+  emission.
+- Command-shaped lines (`!command`, bare `?factoid`, direct bot addressing and
+  the configured initial trigger such as `m ...`) are classified as `no_reply`
+  before any future AI decision layer. Reliable peer/bot identity classification
+  remains deferred to the Identity work because this round cannot call AI or
+  speak.
+- Added regression contract 925 for default-off runtime wiring, sanitised
+  dry-run logs and the no-provider/no-emission boundary.
+- Added pure `Mediabot::AI::ConversationDecision` as the strict future model
+  output boundary. A model may return only exact `NO_REPLY` or
+  `REPLY: <single-line reply>`; malformed, wrapped, multiline or oversized
+  output fails closed and cannot become IRC output implicitly.
+- Future reply text is capped at 280 characters by default, strips IRC control
+  formatting and is never silently truncated. MB700-D deliberately does not
+  call `AI::Client`, select a provider, alter runtime hooks or emit IRC.
+- Added regression contract 926 for decision grammar, fail-closed parsing,
+  output sanitisation and the no-provider/no-runtime-wiring boundary.
+- Added pure `Mediabot::AI::ConversationRequest` to build the minimal
+  provider-neutral request that a future `+Wit` executor may submit. Its public
+  builder accepts only provider, language and one channel message; nick, channel,
+  model, caller-supplied prompts, memory blobs and credentials are rejected.
+- The fixed system prompt embeds the strict `NO_REPLY | REPLY` wire contract,
+  treats channel content as untrusted data, encourages abstention, follows
+  English/French/Spanish channel language, prohibits sensitive profiling and
+  secret handling, and forbids privileged moderation/system actions.
+- Wit provider input is stripped of IRC presentation controls and limited to
+  the existing 800-character policy ceiling. Generation budgets are fixed and
+  conservative (120 output tokens, temperature 0.7, 20-second timeout), while
+  request summaries expose only bounded metadata and aggregate sizes.
+- Added regression contract 927. MB700-E still does not construct `AI::Client`,
+  call Anthropic/OpenAI, change the runtime hook or emit IRC.
+- Added `Mediabot::AI::ConversationExecutor` as the first provider-neutral
+  dry-run execution boundary: safe Wit request -> `AI::Client` -> strict
+  `ConversationDecision`. It supports synchronous execution and asynchronous
+  submission while keeping provider wire formats behind the shared client.
+- Provider failures and client exceptions fail closed to `no_reply` with only
+  bounded error metadata. Successful raw model output is immediately parsed and
+  discarded; safe dry-run summaries expose reply length rather than generated
+  text and never carry request content, provider bodies or attempt histories.
+- Added regression contract 928 with injected fake-client coverage for explicit
+  abstention, valid reply, malformed output, provider failure and async
+  normalization. MB700-F is still not wired into `mediabot.pl` and cannot emit
+  IRC.
+- Added `Mediabot::AI::ConversationDryRun` and wired the public `+Wit` hook to
+  the provider-neutral executor asynchronously. The runtime remains dry-run
+  only: generated reply text is discarded before the callback and only bounded
+  `[WIT_AI_DRYRUN]` metadata is logged; no IRC emission path exists.
+- The dry-run orchestrator enforces one in-flight request per channel and reuses
+  the 90-second ConversationPolicy cooldown after a provider submission, so an
+  active channel cannot turn `+Wit` into an API request flood. Mechanical
+  `WIT_DRYRUN` decisions remain visible before provider execution.
+- Added regression contract 929 for async orchestration, per-channel inflight
+  and cooldown guards, sanitized AI logs and the no-DB/no-IRC/provider-neutral
+  boundary. Runtime live proof remains a separate gate with `+Wit` default-off.
+
 ### mb699 — establish provider-neutral AI foundations for the 3.5 social layer
 
 - Introduced a provider-neutral `Mediabot::AI` foundation with strict provider

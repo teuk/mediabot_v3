@@ -822,7 +822,8 @@ INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES
 (20, 'OnThisDay'),
 (21, 'OnThisDayDigest'),
 (22, 'LangFR'),
-(23, 'LangES');
+(23, 'LangES'),
+(24, 'Wit');
 
 --
 -- PUBLIC_COMMANDS_CATEGORY — default categories

@@ -20,6 +20,8 @@ use Mediabot::Conf;
 use Mediabot::Log;
 use Mediabot::Metrics;
 use Mediabot::Achievements;
+use Mediabot::AI::ConversationObserver ();
+use Mediabot::AI::ConversationDryRun ();
 use Mediabot::Radio::Icecast;
 use Mediabot::DB;
 use Mediabot::Channel;
@@ -2080,6 +2082,55 @@ sub _on_message_PRIVMSG_body {
         # Without this guard, split() leaves $sCommand undefined and later
         # substr()/eq checks emit warnings in the daemon logs.
         return undef if $line eq '';
+
+        # mb700-G: +Wit remains explicit opt-in and dry-run only, but eligible
+        # lines now exercise the real provider-neutral AI path asynchronously.
+        # The orchestrator owns in-memory per-channel inflight/cooldown state;
+        # this callback only owns chanset lookup, language and bounded logging.
+        my $wit_enabled = eval {
+            Mediabot::Helpers::chanset_enabled(
+                $mediabot, $where, 'Wit', default => 0
+            );
+        } ? 1 : 0;
+        if ($wit_enabled) {
+            eval {
+                $mediabot->{wit_dryrun} ||= Mediabot::AI::ConversationDryRun->new(
+                    conf       => $mediabot->{conf},
+                    loop_owner => $mediabot,
+                );
+
+                $mediabot->{wit_dryrun}->handle_public_line(
+                    enabled                 => 1,
+                    channel                 => $where,
+                    nick                    => $who,
+                    bot_nick                => $self->nick,
+                    message                 => $line,
+                    language                => Mediabot::Helpers::channel_lang($mediabot, $where),
+                    command_char            => $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR'),
+                    initial_trigger_enabled => $mediabot->{conf}->get('main.MAIN_PROG_INITIAL_TRIGGER'),
+                    on_observation          => sub {
+                        my ($wit_summary) = @_;
+                        my $wit_log = Mediabot::AI::ConversationObserver::format_dryrun_log(
+                            $where, $wit_summary
+                        );
+                        $mediabot->{logger}->log(3, $wit_log) if defined $wit_log;
+                    },
+                    on_result               => sub {
+                        my ($ai_summary) = @_;
+                        my $ai_log = Mediabot::AI::ConversationDryRun::format_ai_dryrun_log(
+                            $where, $ai_summary
+                        );
+                        $mediabot->{logger}->log(3, $ai_log) if defined $ai_log;
+                    },
+                );
+            };
+            if ($@) {
+                my $error = $@;
+                $error =~ s/[\r\n\x00]+/ /g;
+                $error = substr($error, 0, 240);
+                $mediabot->{logger}->log(1, 'Wit dry-run runtime error: ' . $error);
+            }
+        }
 
         my ($sCommand,@tArgs) = split(/\s+/,$line);
         if (defined($sCommand) && substr($sCommand, 0, 1) eq $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR')){

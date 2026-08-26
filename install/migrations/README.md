@@ -48,6 +48,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260816_achievements_db.sql
 20260822_rss_feeds.sql
 20260823_legacy_schema_reconciliation.sql
+20260825_wit_chanset.sql
 ```
 
 The migration set adds channel-ban tracking, user seen/activity tracking, Claude chanset reference data, schema support for newer fun/user commands, and persistent trivia scores and user notes, including:
@@ -61,7 +62,7 @@ KARMA
 KARMA_LOG
 TRIVIA_SCORES
 NOTE
-CHANSET_LIST entries: AchievementAnnounce, Games
+CHANSET_LIST entries: AchievementAnnounce, Games, Wit
 ACHIEVEMENT_PROFILE / ACHIEVEMENT_IDENTITY / ACHIEVEMENT_UNLOCK / ACHIEVEMENT_PROGRESS
 RSS_FEED / RSS_ITEM
 ```
