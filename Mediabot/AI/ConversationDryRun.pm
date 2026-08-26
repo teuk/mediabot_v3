@@ -7,6 +7,7 @@ use Carp qw(croak);
 use Exporter 'import';
 
 use Mediabot::AI::ConversationExecutor qw(execution_summary);
+use Mediabot::AI::ConversationFloodGuard ();
 use Mediabot::AI::ConversationObserver qw(observe_public_line);
 
 our $VERSION = '1.0';
@@ -51,12 +52,31 @@ sub new {
     croak 'clock must be a code reference'
         if defined($clock) && ref($clock) ne 'CODE';
 
+    my $flood_guard = $args{flood_guard};
+    if (defined $flood_guard) {
+        croak 'flood_guard must provide observe_public_line() and current_decision()'
+            unless ref($flood_guard)
+                && eval { $flood_guard->can('observe_public_line') }
+                && eval { $flood_guard->can('current_decision') };
+    }
+    else {
+        $flood_guard = Mediabot::AI::ConversationFloodGuard->new();
+    }
+
     return bless {
         executor       => $executor,
+        flood_guard    => $flood_guard,
         clock          => $clock || sub { time() },
         inflight       => {},
         last_submit_at => {},
     }, $class;
+}
+
+sub _runtime_language {
+    my ($value) = @_;
+    my $language = _plain_scalar($value) ? lc("$value") : 'en';
+    return $language if $language eq 'en' || $language eq 'fr' || $language eq 'es';
+    return 'en';
 }
 
 sub _runtime_no_reply {
@@ -89,11 +109,42 @@ sub handle_public_line {
         unless _plain_scalar($channel) && "$channel" =~ /^#/;
 
     my $channel_key = lc "$channel";
+    my $language = _runtime_language($args{language});
+
+    # MB702-A2: count every public line before inflight/policy/provider work.
+    # A tripped/broken guard fails closed and cannot submit to an AI provider.
+    my $flood = eval {
+        $self->{flood_guard}->observe_public_line(channel => $channel);
+    };
+    unless (ref($flood) eq 'HASH'
+        && (($flood->{action} // '') eq 'allow'
+            || ($flood->{action} // '') eq 'suppress')) {
+        my $summary = _runtime_no_reply(
+            'flood_guard_error',
+            language => $language,
+            provider => 'auto',
+        );
+        $on_observation->($summary) if $on_observation;
+        return 0;
+    }
+
+    if (($flood->{action} // '') eq 'suppress') {
+        my %extra = (
+            language => $language,
+            provider => 'auto',
+        );
+        $extra{retry_after_seconds} = int($flood->{retry_after_seconds})
+            if _plain_scalar($flood->{retry_after_seconds})
+                && "$flood->{retry_after_seconds}" =~ /^\d+\z/;
+
+        my $summary = _runtime_no_reply('flood_suppression', %extra);
+        $on_observation->($summary) if $on_observation;
+        return 0;
+    }
+
     my $now = $self->{clock}->();
 
     if ($self->{inflight}{$channel_key}) {
-        my $language = _plain_scalar($args{language}) ? lc("$args{language}") : 'en';
-        $language = 'en' unless $language eq 'en' || $language eq 'fr' || $language eq 'es';
         my $summary = _runtime_no_reply(
             'inflight',
             language => $language,
@@ -121,6 +172,47 @@ sub handle_public_line {
         return if $completed++;
 
         delete $self->{inflight}{$channel_key};
+
+        # MB702-A3: a provider reply that was started before flood suppression
+        # may no longer cross the private candidate boundary. Re-check the
+        # current per-channel flood state immediately before on_candidate.
+        if (ref($result) eq 'HASH'
+            && ($result->{action} // '') eq 'reply') {
+            my $late_flood = eval {
+                $self->{flood_guard}->current_decision(channel => $channel);
+            };
+
+            my $late_action = ref($late_flood) eq 'HASH'
+                ? ($late_flood->{action} // '')
+                : q{};
+
+            if ($late_action ne 'allow' && $late_action ne 'suppress') {
+                my %blocked = (
+                    ok     => 0,
+                    action => 'no_reply',
+                    reason => 'flood_guard_error',
+                    error  => 'late_flood_guard_invalid',
+                );
+                for my $key (qw(provider model provider_fallback model_fallback)) {
+                    $blocked{$key} = $result->{$key} if exists $result->{$key};
+                }
+                $on_result->(execution_summary(\%blocked));
+                return;
+            }
+
+            if ($late_action eq 'suppress') {
+                my %blocked = (
+                    ok     => 1,
+                    action => 'no_reply',
+                    reason => 'flood_suppression',
+                );
+                for my $key (qw(provider model provider_fallback model_fallback)) {
+                    $blocked{$key} = $result->{$key} if exists $result->{$key};
+                }
+                $on_result->(execution_summary(\%blocked));
+                return;
+            }
+        }
 
         # MB701-C: the normalized reply text may cross exactly one private
         # in-memory boundary into the late emission gate. Public/result logging

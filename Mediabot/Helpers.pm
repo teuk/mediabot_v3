@@ -3064,10 +3064,9 @@ sub getIdChansetList {
         return undef;
     }
 
-    # mb118-B1: cache statique — la table CHANSET_LIST ne change pas en runtime.
-    # Chargement lazy au premier appel, puis hit mémoire pour les appels suivants.
-    # `exists` au lieu de `defined` car on cache aussi les "not found" (= undef)
-    # pour éviter le SELECT répété sur un chanset inexistant.
+    # mb702-B1: cache only successful lookups. CHANSET_LIST can gain new rows
+    # while the process remains alive (for example after an idempotent migration).
+    # Caching a miss as undef would hide that new chanset until process restart.
     my $cache_key = lc($sChansetValue);
     if (exists $self->{_chansetlist_cache}{$cache_key}) {
         return $self->{_chansetlist_cache}{$cache_key};
@@ -3103,9 +3102,11 @@ sub getIdChansetList {
             if $self->{logger};
     }
 
+    # Positive results are stable enough to cache; misses must stay retryable.
+    $self->{_chansetlist_cache}{$cache_key} = $id_chanset_list
+        if defined $id_chanset_list;
+
     $sth->finish;
-    # Stocker dans le cache (même si undef — évite le SELECT répété)
-    $self->{_chansetlist_cache}{$cache_key} = $id_chanset_list;
     return $id_chanset_list;
 }
 

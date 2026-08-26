@@ -83,4 +83,20 @@ return sub {
         $func !~ /if \(!\$sth->execute/,
         'getIdChansetList no longer executes without prepare guard'
     );
+
+    $assert->ok(
+        $func !~ /_chansetlist_cache\}\{\$cache_key\}\s*=\s*\$id_chanset_list\s*;/,
+        'getIdChansetList no longer unconditionally caches missing chansets'
+    );
+
+    $assert->ok(
+        $func =~ /_chansetlist_cache\}\{\$cache_key\}\s*=\s*\$id_chanset_list\s*
+\s*if defined \$id_chanset_list;/,
+        'getIdChansetList caches only successful chanset lookups'
+    );
+
+    $assert->ok(
+        $func !~ /cache aussi les ["']not found["']|même si undef/i,
+        'getIdChansetList documentation no longer promises negative caching'
+    );
 };

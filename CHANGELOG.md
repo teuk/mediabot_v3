@@ -32,6 +32,40 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb702 — suppress proactive AI during channel flood pressure
+
+- Added `Mediabot::AI::ConversationFloodGuard`, a provider- and IRC-independent
+  per-channel circuit breaker. By default it trips at 20 public lines inside
+  10 seconds, suppresses proactive AI for 180 seconds, does not extend the
+  suppression window when more flood traffic arrives, uses a monotonic clock,
+  case-folds channel state and bounds memory to 256 channels.
+- Wired flood pressure ahead of per-channel inflight handling, conversation
+  policy and provider submission. Once suppression is active, new public lines
+  produce metadata-only `no_reply/flood_suppression` decisions with bounded
+  retry timing and submit zero additional Anthropic/OpenAI requests. Guard
+  failures fail closed as `no_reply/flood_guard_error`.
+- Added a second flood-state check at the provider completion boundary. If a
+  request started before the channel tripped suppression, a returned AI reply
+  is revoked before the private `on_candidate` boundary, so generated text
+  cannot reach `ConversationEmission`, `ConversationSender` or IRC while the
+  circuit remains open. The late check is side-effect free and never records a
+  synthetic line or extends the suppression period.
+- Kept the MB701 safety layers independent: provider inflight/cooldown,
+  late emission authorization, the master `WIT_SEND_ARMED` kill switch and the
+  sender's separate delivery limiter still apply normally below the flood
+  threshold. Flood state is isolated per channel and eligibility returns
+  automatically after suppression expires.
+- Fixed `getIdChansetList()` so only successful `CHANSET_LIST` lookups are
+  cached. Missing chansets remain retryable, which fixes the production case
+  where `Wit` was added by an idempotent migration after process start but a
+  previously cached `undef` made `chanset ... +Wit` report
+  `Undefined chanset Wit` until restart. Positive cache hits remain unchanged.
+- Added deterministic regression contracts 937–940 for threshold/expiry,
+  bounded per-channel state, zero provider submissions during suppression,
+  in-flight reply revocation, fail-closed behavior, metadata safety and the
+  exact negative-cache production sequence. Historical DB-safety contract 77
+  was evolved to forbid permanent negative chanset-list caching.
+
 ### mb701 — gate proactive IRC emission with late authorization and real membership generations
 
 - Added an explicit process-wide `main.WIT_SEND_ARMED` master kill switch for
