@@ -72,7 +72,7 @@ return sub {
             reset => qr/my\s+\$msg\s*=\s*"\$badge\\x0f\s+"\s*\.\s*\$title;/,
         },
         _handle_applemusic => {
-            badge => q{String::IRC->new("AppleMusic")->white('grey')},
+            badge => q{String::IRC->new("\x{2318}Music")->white('grey')},
             # mb492: rich line composed into $display, same badge+\x0f invariant
             reset => qr/my\s+\$msg\s*=\s*"\$badge\\x0f\s+\$display";/,
         },

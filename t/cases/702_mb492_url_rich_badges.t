@@ -56,7 +56,7 @@ return sub {
         Mediabot::External::URL::_handle_applemusic(_mkself(), 'u', 'nick', '#c',
             'https://music.apple.com/us/album/abbey-road-2019-mix/1474815798');
         my $line = _strip_irc($SENT[0] // '');
-        $assert->like($line, qr/\[AppleMusic\]/, 'AM: badge présent');
+        $assert->like($line, qr/\[\x{2318}Music\]/, 'AM: badge présent');
         $assert->like($line, qr/Abbey Road \(2019 Mix\)/, 'AM: titre');
         $assert->like($line, qr/by The Beatles/, 'AM: artiste (JSON-LD)');
         $assert->like($line, qr/album/, 'AM: type');
@@ -96,7 +96,7 @@ return sub {
         Mediabot::External::URL::_handle_applemusic(_mkself(), 'u', 'nick', '#c',
             'https://music.apple.com/us/playlist/p');
         my $line = _strip_irc($SENT[0] // '');
-        $assert->like($line, qr/\[AppleMusic\] Some Mix\s*$/, 'AM: fallback titre seul intact');
+        $assert->like($line, qr/\[\x{2318}Music\] Some Mix\s*$/, 'AM: fallback titre seul intact');
     }
 
     # =========================================================================

@@ -1164,7 +1164,7 @@ sub _handle_applemusic {
             "_handle_applemusic() final display='$display' source=" . ($fetch->{source} // 'unknown'));
 
         my $badge = String::IRC->new("[")->white('black');
-        $badge   .= String::IRC->new("AppleMusic")->white('grey');
+        $badge   .= String::IRC->new("\x{2318}Music")->white('grey');
         $badge   .= String::IRC->new("]")->white('black');
         my $msg = "$badge\x0f $display";
 

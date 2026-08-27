@@ -32,6 +32,19 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+
+### mb705 — shorten the Apple Music badge with a portable Command symbol
+
+- Changed the canonical IRC Apple Music badge from `[AppleMusic]` to
+  `[⌘Music]`, using standard Unicode U+2318 rather than Apple's private-use
+  U+F8FF glyph. The Perl runtime source uses `\x{2318}` explicitly.
+- Kept the `AppleMusic` chanset name, lookup/fallback behavior, asynchronous
+  execution, URL cache, badge colors and mandatory IRC reset unchanged.
+- Updated the existing badge, rich-output and asynchronous Apple Music
+  regression contracts; no parallel or instance-specific rendering path was
+  introduced.
+
+
 ### mb704 — establish the opt-in +VDM contract before any network/runtime wiring
 
 - Registered default-off `VDM` as canonical chanset id 26 in the fresh schema

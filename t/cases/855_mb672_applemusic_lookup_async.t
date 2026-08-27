@@ -142,7 +142,7 @@ return sub {
         my $clean = _strip_855($sent[0]);
         $assert->is(
             $clean,
-            '(nick) [AppleMusic] Starrider - by Foreigner - album Foreigner (Deluxe Version) - 1977 - 4m 02s',
+            "(nick) [\x{2318}Music] Starrider - by Foreigner - album Foreigner (Deluxe Version) - 1977 - 4m 02s",
             'mb672-855: structured Apple lookup renders exact rich track line'
         );
         $assert->unlike($clean, qr/\bLåt\b/i,
@@ -150,7 +150,7 @@ return sub {
 
         my ($after_reset) = ($sent[0] // '') =~ /\x0f\s+(.*)\z/s;
         $assert->ok(defined($after_reset),
-            'mb672-855: historical AppleMusic badge is followed by IRC RESET');
+            'mb672-855: Apple Music command-symbol badge is followed by IRC RESET');
 
         my $ret2 = Mediabot::External::URL::_handle_applemusic(
             $self, undef, 'nick2', '#c',
@@ -177,13 +177,13 @@ return sub {
             'mb672-855: Apple Music parent handler performs no network/browser work');
         $assert->like(
             $handler,
-            qr/String::IRC->new\("AppleMusic"\)->white\('grey'\)/,
-            'mb672-855: AppleMusic badge colors remain unchanged'
+            qr/String::IRC->new\("\\x\{2318\}Music"\)->white\('grey'\)/,
+            'mb672-855: Apple Music command-symbol badge keeps historical colors'
         );
         $assert->like(
             $handler,
             qr/my\s+\$msg\s*=\s*"\$badge\\x0f\s+\$display";/,
-            'mb672-855: AppleMusic badge/reset/display contract remains unchanged'
+            'mb672-855: Apple Music shortened badge keeps reset/display contract'
         );
     }
 };
