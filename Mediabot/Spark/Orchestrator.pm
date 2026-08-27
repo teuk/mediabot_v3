@@ -246,6 +246,7 @@ sub evaluate_channel {
         recent_humans => $state->{recent_humans},
         context_lines => scalar(@$context),
         ai_available  => _bool($args{ai_available}),
+        vdm_enabled   => _bool($args{vdm_enabled}),
         cursor        => $rt->{cursor},
         last_kind     => $rt->{last_kind},
     );
@@ -324,7 +325,7 @@ sub format_dryrun_log {
     return undef unless ref($summary) eq 'HASH';
     return undef unless ($summary->{action} // '') eq 'dryrun_candidate';
     return undef unless _plain_scalar($summary->{kind})
-        && "$summary->{kind}" =~ /^(?:fork|portal|callback)\z/;
+        && "$summary->{kind}" =~ /^(?:fork|portal|callback|vdm)\z/;
 
     my @parts = (
         '[SPARK_DRYRUN]',

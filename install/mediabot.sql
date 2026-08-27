@@ -824,7 +824,8 @@ INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES
 (22, 'LangFR'),
 (23, 'LangES'),
 (24, 'Wit'),
-(25, 'Spark');
+(25, 'Spark'),
+(26, 'VDM');
 
 --
 -- PUBLIC_COMMANDS_CATEGORY — default categories

@@ -32,6 +32,100 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb704 — establish the opt-in +VDM contract before any network/runtime wiring
+
+- Registered default-off `VDM` as canonical chanset id 26 in the fresh schema
+  and added idempotent data-only migration `20260827_vdm_chanset.sql`. The
+  migration creates no `CHANNEL_SET` row, so existing channels remain opted out.
+- Added pure `Mediabot::VDM` policy/formatting foundations with no HTTP, database,
+  scheduler or IRC transport side effects. Manual VDM requires `+VDM`; future
+  Spark-assisted VDM requires both `+Spark` and `+VDM`.
+- Pointed the source contract at the current official VDM article feed
+  `https://www.viedemerde.fr/feeds/articles`, while keeping source retrieval for
+  the next asynchronous round.
+- Preserved the historical IRC presentation contract: bold numeric story id
+  (foreground 1/background 15), story foreground 0/background 14, one line,
+  final reset, 350 visible-character ceiling, and a 120-second immediate-repeat
+  window reserved for the runtime state layer.
+- The formatter rejects malformed ids, control-bearing/multiline payloads,
+  over-budget output and stories without their source `VDM` closing marker
+  rather than silently rewriting source content.
+- Added regression contracts 967–969 for schema/migration parity, exact
+  manual-vs-Spark authorization semantics, official-source constants, item-id
+  extraction and IRC formatting boundaries. No live database migration,
+  command registration, HTTP fetch or IRC emission is performed in MB704-A.
+
+- MB704-B adds a dedicated VDM source/parser boundary on top of the existing
+  hardened RSS transport. `Mediabot::RSS::Fetcher` now accepts an optional
+  injected parser while preserving the default RSS/Atom parser for every
+  existing caller; transport still owns URL validation, DNS pinning, redirects,
+  byte limits and character decoding.
+- Added `Mediabot::VDM::Source` to extract numeric VDM ids and clean published
+  story text from RSS/Atom entries, reject malformed/control-bearing/over-budget
+  entries, and expose a bounded normalized item list without IRC side effects.
+- Added `Mediabot::VDM::AsyncFetcher`, a shared-`AsyncWorker` single-flight
+  boundary that coalesces bounded simultaneous callers and keeps network work
+  outside the parent event loop. No command, scheduler, Spark selector or IRC
+  delivery path is wired in MB704-B.
+- Added regression contracts 970–973 for VDM feed parsing, the compatible RSS
+  parser hook, asynchronous coalescing/cancellation and the still-unwired
+  runtime boundary.
+
+- MB704-C wires the manual public `vdm` command through a dedicated
+  `Mediabot::VDM::Runtime` facade. Authorization remains default-off behind
+  `+VDM`; private targets, disconnected IRC state and channels the bot has left
+  all fail closed before a fetch can start.
+- Manual requests use the shared asynchronous VDM fetcher, allow only one
+  pending request per channel, and re-read `+VDM`, connection and live channel
+  membership after asynchronous completion before any IRC delivery. Clearing a
+  channel runtime state invalidates an outstanding completion token.
+- Added bounded per-channel immediate-repeat state using the canonical 120-second
+  contract. A recently emitted story id is skipped in favor of the next valid
+  feed item; if every returned item is recent, no duplicate is sent.
+- Tightened the one-line presentation guarantee with a 400-byte encoded IRC wire
+  ceiling in addition to the historical 350-visible-character ceiling, avoiding
+  downstream chunk splitting for multibyte UTF-8 stories.
+- Added regression contracts 974–978 for default-off manual authorization,
+  asynchronous delivery, repeat suppression, late revocation, command/help
+  dispatch boundaries and UTF-8 wire budgeting. The live VDM migration remains
+  unapplied and no service restart occurs in MB704-C.
+
+- MB704-E2B hardens the VDM source parser against the current official RSS
+  shape observed during the first live DEV smoke. The feed keeps the published
+  story in `description` but appends a short editorial suffix after the story's
+  terminal `VDM` marker; the parser now isolates the canonical
+  `Aujourd'hui/Aujourd’hui ... VDM` portion instead of requiring the entire RSS
+  field to end at that marker. Unexpectedly large post-marker payloads still
+  fail closed.
+- Added regression contract 985 for the observed RSS item shape, current HTTP
+  article/guid ids, suffix stripping and fail-closed non-story/oversized cases.
+
+- MB704-D appends `vdm` as a non-AI Spark event family (`ai_use=never`) and
+  makes it selector-eligible only when the channel also has `+VDM`; the
+  historical Fork/Portal/Callback ordering remains unchanged.
+- Automatic VDM reuses the same `Mediabot::VDM::Runtime` instance as manual
+  requests, so pending state and 120-second per-channel story-id suppression are
+  shared across both modes. The VDM runtime performs asynchronous source work
+  but delegates final automatic delivery back to Spark.
+- Extended the guarded `Mediabot::Spark::Sender` to render canonical VDM content
+  while preserving its master arm switch, per-channel send limiter, mutable IRC
+  state checks, game/Wit gates and Spark generation-token validation. Automatic
+  VDM also captures the candidate's last-human timestamp and revokes the fetch if
+  conversation resumes before completion. VDM source code never consumes
+  `SPARK_SEND_ARMED` and the Spark timer still owns no IRC transport primitive.
+- Added regression contracts 979–984 for `+VDM` selector eligibility, non-AI
+  routing, shared anti-repeat state, late `+Spark`/`+VDM` revocation, canonical
+  VDM rendering through the guarded sender and delivery-authority boundaries.
+  No live migration, `+VDM` activation or service restart occurs in MB704-D.
+
+- MB704-F preserves the historical canonical channel/security contracts exposed
+  by the final full-suite gate: VDM's private per-channel runtime cache now uses
+  an explicit `channel_states` namespace instead of colliding textually with the
+  bot's canonical `{channels}` map, and its non-secret asynchronous sequence is
+  named/logged as `request_id` rather than `token`. This keeps the MB407
+  case-insensitive channel-key invariant and MB471 secret-log audit intact
+  without weakening either historical guard.
+
 ### mb703 — lay the fail-closed foundation for opt-in +Spark channel events
 
 - Registered the default-off `Spark` chanset in the canonical fresh schema and

@@ -157,6 +157,7 @@ sub fetch_feed_once {
     my ($url, %opts) = @_;
     my $resolver  = $opts{resolver};
     my $requester = $opts{requester} || \&_default_requester;
+    my $parser    = ref($opts{parser}) eq 'CODE' ? $opts{parser} : \&parse_feed_document;
     my $max_items = $opts{max_items} || 10;
     my $current   = $url;
     my $etag      = $opts{etag};
@@ -244,7 +245,13 @@ sub fetch_feed_once {
             return { ok => 0, error => 'invalid_encoding', detail => $err };
         }
 
-        my $parsed = parse_feed_document($decoded, max_items => $max_items);
+        my $parsed = eval { $parser->($decoded, max_items => $max_items) };
+        unless ($parsed && ref($parsed) eq 'HASH') {
+            my $err = $@ || 'RSS parser returned no result';
+            $err =~ s/[\r\n\0]+/ /g;
+            return { ok => 0, error => 'parse_exception', detail => substr($err, 0, 240),
+                     status => $status, url => $current, resolved => $ips };
+        }
         return { %$parsed, status => $status, url => $current, resolved => $ips }
             unless $parsed->{ok};
 

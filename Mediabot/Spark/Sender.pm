@@ -6,6 +6,7 @@ use warnings;
 use Carp qw(croak);
 use Encode qw(encode_utf8);
 use Mediabot::Spark::Event qw(spark_event_profile);
+use Mediabot::VDM qw(format_vdm_line);
 
 our $VERSION = '1.0';
 
@@ -57,7 +58,7 @@ sub _result {
         $out{$key} = int($extra{$key});
     }
     $out{kind} = $extra{kind}
-        if _plain_scalar($extra{kind}) && "$extra{kind}" =~ /^(?:fork|portal|callback)\z/;
+        if _plain_scalar($extra{kind}) && "$extra{kind}" =~ /^(?:fork|portal|callback|vdm)\z/;
     return \%out;
 }
 
@@ -79,6 +80,13 @@ sub render_generation {
         my $b = _safe_piece($content->{b}, 140);
         return undef unless defined($q) && defined($a) && defined($b);
         $text = "⚡ $q — A) $a · B) $b";
+    }
+    elsif ($kind eq 'vdm') {
+        $text = format_vdm_line(id => $content->{id}, story => $content->{story});
+        return undef unless defined($text) && length($text);
+        # The canonical VDM formatter owns its stricter 350-character /
+        # 400-byte one-line contract. Do not strip its intentional IRC colors.
+        return $text;
     }
     else {
         my $line = _safe_piece($content->{line}, 360);
@@ -247,7 +255,7 @@ sub format_sender_log {
         'reason=' . $summary->{reason},
     );
     push @parts, 'kind=' . $summary->{kind}
-        if _plain_scalar($summary->{kind}) && "$summary->{kind}" =~ /^(?:fork|portal|callback)\z/;
+        if _plain_scalar($summary->{kind}) && "$summary->{kind}" =~ /^(?:fork|portal|callback|vdm)\z/;
     for my $key (qw(generation reply_chars reply_bytes retry_after)) {
         push @parts, "$key=" . int($summary->{$key})
             if _plain_scalar($summary->{$key}) && "$summary->{$key}" =~ /^\d+\z/;

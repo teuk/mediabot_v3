@@ -44,6 +44,7 @@ sub select_spark_event {
     my $humans = _nonneg_int($args{recent_humans}, 0);
     my $context_lines = _nonneg_int($args{context_lines}, 0);
     my $ai_available = _bool($args{ai_available});
+    my $vdm_enabled = _bool($args{vdm_enabled});
     my $cursor = _nonneg_int($args{cursor}, 0);
     my $last_kind = _normal_kind($args{last_kind});
 
@@ -53,6 +54,7 @@ sub select_spark_event {
         next if $humans < $p->{min_recent_humans};
         next if $p->{needs_context} && $context_lines < 3;
         next if $kind eq 'callback' && !$ai_available;
+        next if $kind eq 'vdm' && !$vdm_enabled;
         push @eligible, $kind;
     }
 

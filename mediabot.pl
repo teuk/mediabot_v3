@@ -31,6 +31,7 @@ use Mediabot::Spark::Orchestrator ();
 use Mediabot::Spark::Generator ();
 use Mediabot::Spark::DryRun ();
 use Mediabot::Spark::Sender ();
+use Mediabot::VDM::Runtime ();
 use Mediabot::Radio::Icecast;
 use Mediabot::DB;
 use Mediabot::Channel;
@@ -92,6 +93,8 @@ sub _spark_sync_sender_arm;
 sub _spark_game_active;
 sub _spark_delivery_state;
 sub _spark_handle_candidate;
+sub _spark_vdm_runtime;
+sub _spark_handle_vdm_candidate;
 sub _spark_finish_human_event;
 sub _spark_observe_public_line;
 sub _spark_tick_all;
@@ -338,6 +341,97 @@ sub _spark_handle_candidate {
     return (($send->{action} // '') eq 'sent') ? 1 : 0;
 }
 
+sub _spark_vdm_runtime {
+    my ($bot) = @_;
+    return undef unless $bot;
+
+    my $runtime = $bot->{_vdm_runtime};
+    unless ($runtime && eval { $runtime->can('request_spark') }) {
+        my $loop = eval { $bot->getLoop } || $bot->{loop};
+        $runtime = Mediabot::VDM::Runtime->new(bot => $bot, loop => $loop);
+        $bot->{_vdm_runtime} = $runtime;
+    }
+    return $runtime;
+}
+
+sub _spark_handle_vdm_candidate {
+    my ($bot, $channel, $duration_seconds, $item) = @_;
+    return { action => 'no_send', reason => 'invalid_candidate', kind => 'vdm' }
+        unless $bot && defined($channel) && $channel =~ /^#/ && ref($item) eq 'HASH';
+
+    my $sender = eval { _spark_sender($bot) };
+    return { action => 'no_send', reason => 'sender_unavailable', kind => 'vdm' }
+        unless $sender;
+
+    unless (_spark_sync_sender_arm($bot, $sender)) {
+        return { action => 'no_send', reason => 'kill_switch', kind => 'vdm' };
+    }
+
+    my $pre = _spark_delivery_state($bot, $channel);
+    my $vdm_enabled = eval {
+        Mediabot::Helpers::chanset_enabled($bot, $channel, 'VDM', default => 0)
+    } ? 1 : 0;
+
+    my $blocked = !$pre->{enabled}        ? 'disabled'
+                : !$vdm_enabled           ? 'vdm_disabled'
+                : !$pre->{runtime_active} ? 'runtime_inactive'
+                : !$pre->{irc_connected}  ? 'irc_disconnected'
+                : !$pre->{channel_joined} ? 'not_joined'
+                : $pre->{game_active}     ? 'game_active'
+                : $pre->{wit_pending}     ? 'wit_pending'
+                : undef;
+    return { action => 'no_send', reason => $blocked, kind => 'vdm' }
+        if defined $blocked;
+
+    my $generation = eval {
+        $bot->{spark_state}->begin_event(
+            channel          => $channel,
+            kind             => 'vdm',
+            duration_seconds => $duration_seconds,
+        )
+    };
+    return { action => 'no_send', reason => 'event_unavailable', kind => 'vdm' }
+        unless $generation;
+
+    my $generated = {
+        action => 'ready',
+        reason => 'vdm_source',
+        kind   => 'vdm',
+        content => {
+            id    => $item->{id},
+            story => $item->{story},
+        },
+    };
+
+    my $send = eval {
+        $sender->attempt_send(
+            channel    => $channel,
+            kind       => 'vdm',
+            generation => $generation,
+            generated  => $generated,
+            state_cb   => sub {
+                my $state = _spark_delivery_state($bot, $channel);
+                $state->{enabled} = 0 unless eval {
+                    Mediabot::Helpers::chanset_enabled($bot, $channel, 'VDM', default => 0)
+                };
+                return $state;
+            },
+        )
+    };
+    $send = {
+        action => 'no_send', reason => 'sender_exception',
+        kind => 'vdm', generation => $generation,
+    } unless ref($send) eq 'HASH';
+
+    if (($send->{action} // '') ne 'sent') {
+        eval { $bot->{spark_state}->invalidate_event($channel); };
+    }
+
+    my $line = Mediabot::Spark::Sender::format_sender_log($channel, $send);
+    $bot->{logger}->log(3, $line) if defined $line;
+    return $send;
+}
+
 sub _spark_finish_human_event {
     my ($bot, $channel, $observation) = @_;
     return 0 unless $bot && defined($channel) && $channel =~ /^#/;
@@ -423,6 +517,9 @@ sub _spark_tick_all {
         my $enabled = eval {
             Mediabot::Helpers::chanset_enabled($bot, $channel, 'Spark', default => 0)
         } ? 1 : 0;
+        my $vdm_enabled = eval {
+            Mediabot::Helpers::chanset_enabled($bot, $channel, 'VDM', default => 0)
+        } ? 1 : 0;
 
         my $irc_state = eval { $bot->{wit_runtime_state}->snapshot($channel) };
         $irc_state = {
@@ -478,6 +575,7 @@ sub _spark_tick_all {
                 game_active    => $game_active,
                 wit_pending    => $wit_pending,
                 ai_available   => $ai_available,
+                vdm_enabled    => $vdm_enabled,
             )
         };
 
@@ -498,6 +596,58 @@ sub _spark_tick_all {
         }
 
         next unless ($summary->{action} // '') eq 'dryrun_candidate';
+
+        if (($summary->{kind} // '') eq 'vdm') {
+            my $vdm = eval { _spark_vdm_runtime($bot) };
+            unless ($vdm) {
+                my $error = $@ || 'VDM runtime unavailable';
+                $error =~ s/[\r\n\x00]+/ /g;
+                $error = substr($error, 0, 240);
+                $bot->{logger}->log(1, "Spark VDM runtime error channel=$channel: $error");
+                next;
+            }
+
+            my $candidate_state = eval { $bot->{spark_state}->snapshot($channel) };
+            $candidate_state = {} unless ref($candidate_state) eq 'HASH';
+            my $candidate_last_human_at = $candidate_state->{last_human_at};
+
+            my $started = eval {
+                $vdm->request_spark(
+                    channel => $channel,
+                    activity_current_cb => sub {
+                        my $current = eval { $bot->{spark_state}->snapshot($channel) };
+                        return 0 unless ref($current) eq 'HASH';
+                        return 0 unless defined($candidate_last_human_at)
+                            && defined($current->{last_human_at});
+                        return $current->{last_human_at} == $candidate_last_human_at ? 1 : 0;
+                    },
+                    spark_enabled_cb => sub {
+                        return eval {
+                            Mediabot::Helpers::chanset_enabled($bot, $channel, 'Spark', default => 0)
+                        } ? 1 : 0;
+                    },
+                    deliver_cb => sub {
+                        my ($item) = @_;
+                        return _spark_handle_vdm_candidate(
+                            $bot,
+                            $channel,
+                            $summary->{duration_seconds},
+                            $item,
+                        );
+                    },
+                );
+            };
+            if ($@) {
+                my $error = $@;
+                $error =~ s/[\r\n\x00]+/ /g;
+                $error = substr($error, 0, 240);
+                $bot->{logger}->log(1, "Spark VDM submit runtime error channel=$channel: $error");
+                next;
+            }
+            $logged++ if $started;
+            next;
+        }
+
         next unless $ai_available;
 
         my $context = eval { $runtime->context_lines($channel) };

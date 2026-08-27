@@ -29,7 +29,7 @@ return sub {
     my $dbdoc  = _slurp_941('docs/DB_MIGRATIONS.md');
     my $cl     = _slurp_941('CHANGELOG.md');
 
-    $assert->like($schema, qr/\(25,\s*'Spark'\);/,
+    $assert->like($schema, qr/\(25,\s*'Spark'\)[,;]/,
         'mb703-941: fresh schema registers Spark as chanset id 25');
     $assert->like($mig, qr/INSERT INTO CHANSET_LIST \(chanset\).*?SELECT 'Spark'/s,
         'mb703-941: upgrade migration registers Spark idempotently');

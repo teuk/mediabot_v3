@@ -19,8 +19,8 @@ return sub {
     my ($assert) = @_;
 
     my $kinds = spark_event_kinds();
-    $assert->is(join(',', @$kinds), 'fork,portal,callback',
-        'mb703-947: initial Spark catalog is Fork, Portal and Callback');
+    $assert->is(join(',', @$kinds[0..2]), 'fork,portal,callback',
+        'mb703-947: initial Spark catalog still begins with Fork, Portal and Callback');
 
     my $fork = spark_event_profile('FORK');
     $assert->is($fork->{duration_seconds}, 60,
@@ -39,8 +39,8 @@ return sub {
         'mb703-947: Callback explicitly prefers provider-neutral AI');
 
     my $catalog = spark_event_catalog_summary();
-    $assert->is(scalar(@$catalog), 3,
-        'mb703-947: catalog summary exposes three bounded event profiles');
+    $assert->ok(scalar(@$catalog) >= 3,
+        'mb703-947: catalog summary preserves the original three bounded event profiles');
 
     my $sel = select_spark_event(
         recent_humans => 2,

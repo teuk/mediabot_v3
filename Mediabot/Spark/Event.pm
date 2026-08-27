@@ -35,6 +35,13 @@ my %PROFILE = (
         ai_use => 'preferred',
         interaction => 'conversation',
     },
+    vdm => {
+        duration_seconds => 45,
+        min_recent_humans => 3,
+        needs_context => 0,
+        ai_use => 'never',
+        interaction => 'story',
+    },
 );
 
 sub _plain_scalar {
@@ -50,7 +57,7 @@ sub _kind {
 }
 
 sub spark_event_kinds {
-    return [ qw(fork portal callback) ];
+    return [ qw(fork portal callback vdm) ];
 }
 
 sub spark_event_profile {
