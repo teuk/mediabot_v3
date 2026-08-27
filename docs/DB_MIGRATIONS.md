@@ -76,6 +76,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260816_achievements_db.sq
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260822_rss_feeds.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260823_legacy_schema_reconciliation.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260825_wit_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260827_spark_chanset.sql;
 ```
 
 Then run the checker again:
@@ -112,6 +113,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260822_rss_feeds.sql
 20260823_legacy_schema_reconciliation.sql
 20260825_wit_chanset.sql
+20260827_spark_chanset.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this

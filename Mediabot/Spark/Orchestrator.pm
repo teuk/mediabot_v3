@@ -1,0 +1,348 @@
+package Mediabot::Spark::Orchestrator;
+
+use strict;
+use warnings;
+
+use Carp qw(croak);
+use Scalar::Util qw(looks_like_number);
+use Time::HiRes qw(clock_gettime CLOCK_MONOTONIC);
+
+use Mediabot::AI::ConversationFloodGuard;
+use Mediabot::Spark::Observer;
+use Mediabot::Spark::Policy qw(evaluate_spark_start spark_policy_summary);
+use Mediabot::Spark::Selector qw(select_spark_event spark_selector_summary);
+use Mediabot::Spark::State;
+
+our $VERSION = '1.0';
+
+sub _plain_scalar {
+    my ($value) = @_;
+    return defined($value) && !ref($value);
+}
+
+sub _bool {
+    my ($value) = @_;
+    return 0 unless defined($value) && !ref($value);
+    return $value ? 1 : 0;
+}
+
+sub _channel_key {
+    my ($channel) = @_;
+    croak 'channel must be a public IRC channel'
+        unless _plain_scalar($channel)
+            && "$channel" =~ /^#[^\s,:\x00-\x1f\x7f]{1,79}\z/;
+    return lc "$channel";
+}
+
+sub _bounded_int {
+    my ($value, $default, $min, $max) = @_;
+    return $default unless _plain_scalar($value) && "$value" =~ /^\d+\z/;
+    my $n = int($value);
+    return $default if $n < $min || $n > $max;
+    return $n;
+}
+
+sub new {
+    my ($class, %args) = @_;
+
+    my $state = $args{state};
+    croak 'state must provide observe_human() and snapshot()'
+        unless ref($state)
+            && eval { $state->can('observe_human') }
+            && eval { $state->can('snapshot') };
+
+    my $observer = $args{observer};
+    croak 'observer must provide observe_public_line() and context_lines()'
+        unless ref($observer)
+            && eval { $observer->can('observe_public_line') }
+            && eval { $observer->can('context_lines') };
+
+    my $clock = $args{clock};
+    croak 'clock must be a code reference'
+        if defined($clock) && ref($clock) ne 'CODE';
+
+    my $flood_guard = $args{flood_guard};
+    if (defined $flood_guard) {
+        croak 'flood_guard must provide observe_public_line() and current_decision()'
+            unless ref($flood_guard)
+                && eval { $flood_guard->can('observe_public_line') }
+                && eval { $flood_guard->can('current_decision') };
+    }
+    else {
+        $flood_guard = Mediabot::AI::ConversationFloodGuard->new();
+    }
+
+    return bless {
+        state      => $state,
+        observer   => $observer,
+        flood_guard => $flood_guard,
+        clock      => $clock || sub { clock_gettime(CLOCK_MONOTONIC) },
+        min_silence_seconds => _bounded_int(
+            $args{min_silence_seconds}, 1_200, 60, 86_400,
+        ),
+        candidate_probe_seconds => _bounded_int(
+            $args{candidate_probe_seconds}, 300, 30, 3_600,
+        ),
+        runtime => {},
+    }, $class;
+}
+
+sub _now {
+    my ($self) = @_;
+    my $now = $self->{clock}->();
+    croak 'clock must return a non-negative numeric value'
+        unless _plain_scalar($now) && looks_like_number($now) && $now >= 0;
+    return 0 + $now;
+}
+
+sub _rt {
+    my ($self, $key) = @_;
+    return $self->{runtime}{$key} ||= {
+        cursor        => 0,
+        last_kind     => undef,
+        next_probe_at => 0,
+    };
+}
+
+sub observe_public_line {
+    my ($self, %args) = @_;
+    croak 'Spark orchestrator object is required' unless ref($self);
+
+    my $channel = _channel_key($args{channel});
+    return { action => 'skip', reason => 'disabled' }
+        unless _bool($args{enabled});
+
+    my $flood = eval {
+        $self->{flood_guard}->observe_public_line(channel => $channel)
+    };
+    return { action => 'skip', reason => 'flood_guard_error' }
+        unless ref($flood) eq 'HASH'
+            && (($flood->{action} // '') eq 'allow'
+                || ($flood->{action} // '') eq 'suppress');
+
+    my $human = eval {
+        $self->{state}->observe_human(
+            channel => $channel,
+            nick    => $args{nick},
+        )
+    };
+    return { action => 'skip', reason => 'state_error' }
+        unless ref($human) eq 'HASH';
+
+    if (($flood->{action} // '') eq 'suppress') {
+        return {
+            action              => 'observe',
+            reason              => 'flood_suppression',
+            recent_humans       => int($human->{recent_humans} // 0),
+            retry_after_seconds => int($flood->{retry_after_seconds} // 0),
+        };
+    }
+
+    my $observation = eval {
+        $self->{observer}->observe_public_line(
+            channel      => $channel,
+            nick         => $args{nick},
+            bot_nick     => $args{bot_nick},
+            message      => $args{message},
+            command_char => $args{command_char},
+        )
+    };
+    return { action => 'skip', reason => 'observer_error' }
+        unless ref($observation) eq 'HASH';
+
+    return {
+        action        => 'observe',
+        reason        => $observation->{reason} // 'human_activity',
+        recent_humans => int($human->{recent_humans} // 0),
+        context_lines => int($observation->{line_count} // 0),
+    };
+}
+
+sub evaluate_channel {
+    my ($self, %args) = @_;
+    croak 'Spark orchestrator object is required' unless ref($self);
+
+    my $channel = _channel_key($args{channel});
+    unless (_bool($args{enabled})) {
+        $self->forget_channel($channel);
+        return { action => 'skip', reason => 'disabled' };
+    }
+
+    my $now = $self->_now();
+    my $rt = $self->_rt($channel);
+    if (($rt->{next_probe_at} // 0) > $now) {
+        my $retry = int($rt->{next_probe_at} - $now);
+        $retry = 1 if $retry < 1;
+        return {
+            action              => 'skip',
+            reason              => 'probe_wait',
+            retry_after_seconds => $retry,
+        };
+    }
+
+    my $state = eval { $self->{state}->snapshot($channel) };
+    return { action => 'skip', reason => 'state_error' }
+        unless ref($state) eq 'HASH';
+
+    # If IRC truth says we are no longer in the channel, discard ephemeral
+    # context so a later rejoin cannot resurrect stale conversation material.
+    unless (_bool($args{runtime_active})
+            && _bool($args{irc_connected})
+            && _bool($args{channel_joined})) {
+        $self->forget_channel($channel);
+        return {
+            action => 'skip',
+            reason => !_bool($args{runtime_active}) ? 'runtime_inactive'
+                    : !_bool($args{irc_connected}) ? 'irc_disconnected'
+                    : 'not_joined',
+        };
+    }
+
+    my $flood = eval {
+        $self->{flood_guard}->current_decision(channel => $channel)
+    };
+    my $flood_suppressed = 1;
+    if (ref($flood) eq 'HASH'
+        && (($flood->{action} // '') eq 'allow'
+            || ($flood->{action} // '') eq 'suppress')) {
+        $flood_suppressed = (($flood->{action} // '') eq 'suppress') ? 1 : 0;
+    }
+
+    my $policy = evaluate_spark_start(
+        enabled             => 1,
+        channel             => $channel,
+        runtime_active      => 1,
+        irc_connected       => 1,
+        channel_joined      => 1,
+        flood_suppressed    => $flood_suppressed,
+        event_active        => $state->{event_active},
+        game_active         => _bool($args{game_active}),
+        wit_pending         => _bool($args{wit_pending}),
+        recent_humans       => $state->{recent_humans},
+        cooldown_until      => $state->{cooldown_until},
+        last_human_at       => $state->{last_human_at},
+        now                 => $now,
+        min_silence_seconds => $self->{min_silence_seconds},
+    );
+
+    my $safe_policy = spark_policy_summary($policy) || {
+        action => 'skip', reason => 'policy_error',
+    };
+
+    if (($safe_policy->{action} // '') ne 'consider') {
+        my $retry = int($safe_policy->{retry_after_seconds} // 0);
+        $retry = 30 if $retry < 30;
+        $rt->{next_probe_at} = $now + $retry;
+        return {
+            %$safe_policy,
+            recent_humans => int($state->{recent_humans} // 0),
+        };
+    }
+
+    my $context = eval { $self->{observer}->context_lines($channel) };
+    $context = [] unless ref($context) eq 'ARRAY';
+
+    my $selection = select_spark_event(
+        recent_humans => $state->{recent_humans},
+        context_lines => scalar(@$context),
+        ai_available  => _bool($args{ai_available}),
+        cursor        => $rt->{cursor},
+        last_kind     => $rt->{last_kind},
+    );
+
+    my $safe_selection = spark_selector_summary($selection) || {
+        action => 'skip', reason => 'selector_error',
+    };
+
+    if (($safe_selection->{action} // '') ne 'select') {
+        $rt->{next_probe_at} = $now + $self->{candidate_probe_seconds};
+        return {
+            action        => 'skip',
+            reason        => $safe_selection->{reason},
+            recent_humans => int($state->{recent_humans} // 0),
+            context_lines => scalar(@$context),
+        };
+    }
+
+    $rt->{cursor} = int($safe_selection->{next_cursor});
+    $rt->{last_kind} = $safe_selection->{kind};
+    $rt->{next_probe_at} = $now + $self->{candidate_probe_seconds};
+
+    my $quiet_for = defined($state->{last_human_at})
+        ? int($now - $state->{last_human_at})
+        : 0;
+    $quiet_for = 0 if $quiet_for < 0;
+
+    # Deliberately do NOT call State::begin_event() here. No visible event has
+    # been emitted in MB703-D, so creating an active event would be a lie.
+    return {
+        action           => 'dryrun_candidate',
+        reason           => 'eligible_disarmed',
+        kind             => $safe_selection->{kind},
+        duration_seconds => int($safe_selection->{duration_seconds}),
+        ai_use           => $safe_selection->{ai_use},
+        interaction      => $safe_selection->{interaction},
+        recent_humans    => int($state->{recent_humans} // 0),
+        context_lines    => scalar(@$context),
+        quiet_for_seconds => $quiet_for,
+    };
+}
+
+sub channels {
+    my ($self) = @_;
+    croak 'Spark orchestrator object is required' unless ref($self);
+    return $self->{observer}->channels();
+}
+
+sub context_lines {
+    my ($self, $channel) = @_;
+    croak 'Spark orchestrator object is required' unless ref($self);
+    return $self->{observer}->context_lines($channel);
+}
+
+sub forget_channel {
+    my ($self, $channel) = @_;
+    croak 'Spark orchestrator object is required' unless ref($self);
+    my $key = _channel_key($channel);
+    eval { $self->{state}->forget_channel($key); };
+    eval { $self->{observer}->forget_channel($key); };
+    delete $self->{runtime}{$key};
+    return 1;
+}
+
+sub clear_all {
+    my ($self) = @_;
+    croak 'Spark orchestrator object is required' unless ref($self);
+    my $channels = $self->channels();
+    $self->forget_channel($_) for @$channels;
+    return scalar(@$channels);
+}
+
+sub format_dryrun_log {
+    my ($channel, $summary) = @_;
+    return undef unless _plain_scalar($channel) && "$channel" =~ /^#/;
+    return undef unless ref($summary) eq 'HASH';
+    return undef unless ($summary->{action} // '') eq 'dryrun_candidate';
+    return undef unless _plain_scalar($summary->{kind})
+        && "$summary->{kind}" =~ /^(?:fork|portal|callback)\z/;
+
+    my @parts = (
+        '[SPARK_DRYRUN]',
+        'channel=' . $channel,
+        'action=dryrun_candidate',
+        'kind=' . $summary->{kind},
+    );
+
+    for my $key (qw(recent_humans context_lines quiet_for_seconds duration_seconds)) {
+        next unless _plain_scalar($summary->{$key}) && "$summary->{$key}" =~ /^\d+\z/;
+        push @parts, "$key=" . int($summary->{$key});
+    }
+
+    push @parts, 'ai_use=' . $summary->{ai_use}
+        if _plain_scalar($summary->{ai_use})
+            && "$summary->{ai_use}" =~ /^(?:never|optional|preferred|required)\z/;
+
+    return join(' ', @parts);
+}
+
+1;

@@ -37,7 +37,7 @@ return sub {
 
     $assert->like(
         $schema,
-        qr/\(24,\s*'Wit'\);/,
+        qr/\(24,\s*'Wit'\)[,;]/,
         'mb700-924: fresh schema registers canonical Wit chanset',
     );
 

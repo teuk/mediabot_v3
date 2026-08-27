@@ -40,6 +40,8 @@ return sub {
     my $main_without_arm_sync = $main;
     $main_without_arm_sync =~ s/sub _wit_sync_sender_arm \{.*?
 \}//s;
+    $main_without_arm_sync =~ s/sub _spark_sync_sender_arm \{.*?
+\}//s;
     $assert->unlike($main_without_arm_sync, qr/->arm\s*\(|ConversationSender::arm\s*\(/,
         'mb701-935: no sender arm path exists outside the dedicated synchronization helper');
 

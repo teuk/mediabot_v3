@@ -269,9 +269,12 @@ return sub {
         local $/;
         <$fh>;
     };
-    my ($candidate_block) = $main =~ /(on_candidate\s*=>\s*sub\s*\{.*?\n\s*\},\n\s*on_result)/s;
+    my ($wit_runtime_block) = $main =~ /(\# mb700-G: \+Wit.*?)(?=\n\s*my \(\$sCommand,\@tArgs\))/s;
+    $assert->ok(defined($wit_runtime_block),
+        'mb701-933: production Wit runtime block remains identifiable');
+    my ($candidate_block) = ($wit_runtime_block // q{}) =~ /(on_candidate\s*=>\s*sub\s*\{.*?\n\s*\},\n\s*on_result)/s;
     $assert->ok(defined($candidate_block),
-        'mb701-933: production late candidate callback remains identifiable');
+        'mb701-933: production late Wit candidate callback remains identifiable');
     $assert->like($candidate_block // '', qr/chanset_enabled\s*\(/,
         'mb701-933: production callback re-reads +Wit at completion time');
     $assert->like($candidate_block // '', qr/wit_runtime_state\}->snapshot\(\$where\)/,

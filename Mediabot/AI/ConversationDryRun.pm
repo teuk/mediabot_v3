@@ -289,6 +289,14 @@ sub handle_public_line {
     return 0;
 }
 
+sub channel_inflight {
+    my ($self, $channel) = @_;
+    croak 'dry-run object is required' unless ref($self);
+    croak 'channel must be a public IRC channel'
+        unless _plain_scalar($channel) && "$channel" =~ /^#/;
+    return $self->{inflight}{lc "$channel"} ? 1 : 0;
+}
+
 sub format_ai_dryrun_log {
     my ($channel, $summary) = @_;
     return undef unless _plain_scalar($channel) && "$channel" =~ /^#/;

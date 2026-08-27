@@ -32,6 +32,94 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb703 — lay the fail-closed foundation for opt-in +Spark channel events
+
+- Registered the default-off `Spark` chanset in the canonical fresh schema and
+  added idempotent data-only migration `20260827_spark_chanset.sql`. Existing
+  channels remain opted out because the migration creates no `CHANNEL_SET` row.
+- Added pure `Mediabot::Spark::Policy`, which decides only whether a channel may
+  be considered for a future Spark event. It has no IRC, HTTP, database, AI,
+  randomness or scheduling side effects and fails closed for inactive runtime,
+  disconnect/part state, flood suppression, active events/games, pending Wit
+  work, insufficient recent humans, active conversation and cooldowns.
+- Reserved `SPARK_SEND_ARMED=0` as a separate default-off process-wide delivery
+  kill switch. This round deliberately does not read the key at runtime and
+  cannot emit, schedule or generate a Spark event.
+- Added pure `Mediabot::Spark::State` for bounded per-channel human-activity
+  metadata, short event lifecycles and generation tokens that make future
+  asynchronous AI completions revocable after completion or invalidation.
+  No conversation text or prompt content is retained by the state layer.
+- Added adaptive pacing after unanswered events: 45 minutes after the first
+  miss, 90 minutes after the second, four hours after the third and eight hours
+  after subsequent consecutive misses. Participation resets the miss streak;
+  organic conversation superseding an event is not counted as a failure.
+- Added a pure three-event catalog (`Fork`, `Portal`, `Callback`) plus a
+  deterministic selector. Event eligibility depends only on bounded metadata:
+  audience size, available recent context, provider availability, a rotation
+  cursor and the last selected kind. Callback is never selected without both
+  useful context and an available provider.
+- Added `Mediabot::Spark::Generator` as an explicit provider-neutral content
+  boundary. It reuses `Mediabot::AI::Client`, strips IRC controls from untrusted
+  context, bounds the request material, follows the channel language and uses
+  strict parse contracts that reject extra prose, multiline injection-shaped
+  output and malformed responses.
+- Defined Spark's generated voice as dry, clever, sharp and occasionally
+  caustic, while explicitly rejecting slurs, threats, sexual humiliation,
+  sensitive-trait attacks, invented private facts, profiling and personal
+  shaming. The model may decline a weak Callback rather than manufacture one.
+- Kept AI generation separate from state and delivery. Runtime generation tokens
+  remain the authority for revoking late asynchronous completions, and none of
+  the new event/selector/generator modules contains an IRC emission primitive.
+- Wired the first deliberately disarmed runtime layer: `Spark::Observer` keeps a
+  bounded, expiring in-memory context window for opted-in channels, while
+  `Spark::Orchestrator` feeds only metadata into Policy/Selector from the
+  existing five-second tick. Commands, direct bot triggers, IRC presentation
+  controls and flood-triggering lines are excluded from provider context.
+- Added independent Spark flood suppression, active trivia/quotegame and pending
+  Wit gates, IRC membership truth, provider-availability metadata and stale
+  context cleanup on disconnect/part truth. Eligible quiet channels produce
+  only grep-friendly `[SPARK_DRYRUN]` metadata; this round starts no event,
+  submits no Spark AI request and contains no IRC delivery path.
+- Added `Mediabot::Spark::DryRun` as the production AI exercise boundary. One
+  provider request may be in flight per channel, every request owns a monotonic
+  generation token, and new human activity or loss of channel/runtime truth
+  invalidates that token before an asynchronous completion can be accepted.
+- Eligible dry-run candidates can now exercise the real provider-neutral
+  `Mediabot::AI::Client` path for Fork, Portal and Callback. Provider/model and
+  fallback diagnostics are retained in bounded summaries, while channel context
+  and generated text are deliberately absent from `[SPARK_AI_DRYRUN]` logs.
+- AI generation remains structurally separated from delivery: MB703-E starts no
+  visible Spark event, reads no `SPARK_SEND_ARMED` value and has no Spark IRC
+  emission primitive. The first runtime deployment therefore remains safe for
+  observing provider behavior before any channel can see generated content.
+- Added configurable Spark inactivity pacing with conservative defaults of 20
+  minutes of silence and a five-minute candidate probe interval. Runtime values
+  are passed through the existing bounded Orchestrator constructor, so malformed
+  or extreme configuration falls back to the safe defaults. Pilot deployments
+  may temporarily use the bounded minimums (60s silence / 30s probe) without
+  weakening any delivery or safety gate.
+- Added dedicated `Mediabot::Spark::Sender` as the final IRC delivery boundary.
+  It starts disarmed, re-reads `SPARK_SEND_ARMED` for every candidate, requires
+  the separate per-channel `+Spark` opt-in, revalidates IRC membership, active
+  games, pending Wit work and the live event generation immediately before
+  transport, and applies an independent per-channel delivery limiter.
+- Provider completions now cross one private in-memory candidate callback while
+  `[SPARK_AI_DRYRUN]` remains content-free. Only an armed and fully reauthorized
+  candidate begins visible event state; failed delivery invalidates that state.
+  A real human reply finishes the event as engaged, while the existing timer
+  expires unanswered events into the adaptive miss/cooldown ladder.
+- Preserved long-standing channel-key and Wit regression boundaries while
+  extending the runtime: Spark observer lookups explicitly follow the canonical
+  lowercase channel-key convention, while historical Wit source tests scope
+  callback and sender-arm assertions to the Wit boundary so the independent
+  Spark sender cannot create false positives.
+- Added regression contracts 941–966 for fresh/upgrade chanset parity, default-
+  off behavior, deterministic policy/state/selection, adaptive cooldowns,
+  bounded ephemeral context, strict generation contracts, provider-neutral AI
+  delegation, dry-run generation revocation, guarded sender authorization,
+  metadata-only diagnostics, event lifecycle, flood/runtime cleanup and bounded
+  pilot pacing.
+
 ### mb702 — suppress proactive AI during channel flood pressure
 
 - Added `Mediabot::AI::ConversationFloodGuard`, a provider- and IRC-independent

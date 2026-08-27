@@ -24,6 +24,13 @@ use Mediabot::AI::ConversationObserver ();
 use Mediabot::AI::ConversationDryRun ();
 use Mediabot::AI::ConversationEmission ();
 use Mediabot::AI::ConversationSender ();
+use Mediabot::AI ();
+use Mediabot::Spark::State ();
+use Mediabot::Spark::Observer ();
+use Mediabot::Spark::Orchestrator ();
+use Mediabot::Spark::Generator ();
+use Mediabot::Spark::DryRun ();
+use Mediabot::Spark::Sender ();
 use Mediabot::Radio::Icecast;
 use Mediabot::DB;
 use Mediabot::Channel;
@@ -78,6 +85,16 @@ sub getVersion;
 sub _build_irc;
 sub _wit_send_transport;
 sub _wit_sync_sender_arm;
+sub _spark_runtime;
+sub _spark_ai_dryrun;
+sub _spark_sender;
+sub _spark_sync_sender_arm;
+sub _spark_game_active;
+sub _spark_delivery_state;
+sub _spark_handle_candidate;
+sub _spark_finish_human_event;
+sub _spark_observe_public_line;
+sub _spark_tick_all;
 
 sub _wit_send_transport {
     my ($bot, $channel, $text) = @_;
@@ -121,6 +138,420 @@ sub _wit_sync_sender_arm {
     }
 
     return eval { $sender->is_armed() } ? 1 : 0;
+}
+
+sub _spark_runtime {
+    my ($bot) = @_;
+    return undef unless $bot;
+
+    $bot->{spark_state} ||= Mediabot::Spark::State->new();
+    $bot->{spark_observer} ||= Mediabot::Spark::Observer->new();
+
+    my $min_silence_seconds = $bot->{conf}->get('main.SPARK_MIN_SILENCE_SECONDS');
+    my $candidate_probe_seconds = $bot->{conf}->get('main.SPARK_CANDIDATE_PROBE_SECONDS');
+
+    $bot->{spark_orchestrator} ||= Mediabot::Spark::Orchestrator->new(
+        state                   => $bot->{spark_state},
+        observer                => $bot->{spark_observer},
+        min_silence_seconds     => $min_silence_seconds,
+        candidate_probe_seconds => $candidate_probe_seconds,
+    );
+
+    return $bot->{spark_orchestrator};
+}
+
+sub _spark_ai_dryrun {
+    my ($bot) = @_;
+    return undef unless $bot;
+
+    $bot->{spark_generator} ||= Mediabot::Spark::Generator->new(
+        conf       => $bot->{conf},
+        loop_owner => $bot,
+    );
+    $bot->{spark_ai_dryrun} ||= Mediabot::Spark::DryRun->new(
+        generator => $bot->{spark_generator},
+    );
+
+    return $bot->{spark_ai_dryrun};
+}
+
+sub _spark_sender {
+    my ($bot) = @_;
+    return undef unless $bot;
+
+    $bot->{spark_sender} ||= Mediabot::Spark::Sender->new(
+        send_cb => sub {
+            my ($channel, $text) = @_;
+            return 0 unless defined($channel) && defined($text) && length($text);
+            my $ok = eval { Mediabot::Helpers::botPrivmsg($bot, $channel, $text); };
+            return $ok ? 1 : 0;
+        },
+    );
+    return $bot->{spark_sender};
+}
+
+sub _spark_sync_sender_arm {
+    my ($bot, $sender) = @_;
+    return 0 unless $bot && $sender;
+
+    my $want_armed = eval {
+        $bot->{conf}->get_int(
+            'main.SPARK_SEND_ARMED',
+            default => 0,
+            min     => 0,
+            max     => 1,
+        );
+    } ? 1 : 0;
+
+    my $ok = eval {
+        $want_armed ? $sender->arm() : $sender->disarm();
+        1;
+    };
+    unless ($ok) {
+        eval { $sender->disarm(); };
+        return 0;
+    }
+    return eval { $sender->is_armed() } ? 1 : 0;
+}
+
+sub _spark_game_active {
+    my ($bot, $channel) = @_;
+    return 0 unless $bot && defined($channel) && $channel =~ /^#/;
+
+    for my $key ($channel, lc($channel)) {
+        return 1 if ref($bot->{_trivia}{$key}) eq 'HASH'
+            && $bot->{_trivia}{$key}{active};
+        return 1 if ref($bot->{_trivia_fetch}{$key}) eq 'HASH';
+        return 1 if ref($bot->{_quotegame}{$key}) eq 'HASH'
+            && $bot->{_quotegame}{$key}{active};
+    }
+
+    return 0;
+}
+
+sub _spark_delivery_state {
+    my ($bot, $channel) = @_;
+    return {} unless $bot && defined($channel) && $channel =~ /^#/;
+
+    my $enabled = eval {
+        Mediabot::Helpers::chanset_enabled($bot, $channel, 'Spark', default => 0)
+    } ? 1 : 0;
+
+    my $irc_state = eval { $bot->{wit_runtime_state}->snapshot($channel) };
+    $irc_state = {} unless ref($irc_state) eq 'HASH';
+
+    my $wit_pending = 0;
+    if ($bot->{wit_dryrun}
+        && eval { $bot->{wit_dryrun}->can('channel_inflight') }) {
+        $wit_pending = eval { $bot->{wit_dryrun}->channel_inflight($channel) } ? 1 : 0;
+    }
+
+    my $current_generation = eval {
+        $bot->{spark_state}->capture_event_generation($channel)
+    };
+
+    return {
+        enabled            => $enabled,
+        runtime_active     => $irc_state->{runtime_active} ? 1 : 0,
+        irc_connected      => $irc_state->{irc_connected} ? 1 : 0,
+        channel_joined     => $irc_state->{channel_joined} ? 1 : 0,
+        game_active        => _spark_game_active($bot, $channel) ? 1 : 0,
+        wit_pending        => $wit_pending,
+        current_generation => $current_generation,
+    };
+}
+
+sub _spark_handle_candidate {
+    my ($bot, $channel, $duration_seconds, $candidate) = @_;
+    return 0 unless $bot && defined($channel) && $channel =~ /^#/;
+    return 0 unless ref($candidate) eq 'HASH';
+
+    my $kind = $candidate->{kind};
+    my $generated = $candidate->{generated};
+    return 0 unless defined($kind) && ref($generated) eq 'HASH';
+
+    my $sender = eval { _spark_sender($bot) };
+    unless ($sender) {
+        $bot->{logger}->log(1, "Spark sender unavailable channel=$channel");
+        return 0;
+    }
+
+    unless (_spark_sync_sender_arm($bot, $sender)) {
+        my $line = Mediabot::Spark::Sender::format_sender_log($channel, {
+            action => 'no_send', reason => 'kill_switch', kind => $kind,
+        });
+        $bot->{logger}->log(3, $line) if defined $line;
+        return 0;
+    }
+
+    my $pre = _spark_delivery_state($bot, $channel);
+    my $blocked = !$pre->{enabled}        ? 'disabled'
+                : !$pre->{runtime_active} ? 'runtime_inactive'
+                : !$pre->{irc_connected}  ? 'irc_disconnected'
+                : !$pre->{channel_joined} ? 'not_joined'
+                : $pre->{game_active}     ? 'game_active'
+                : $pre->{wit_pending}     ? 'wit_pending'
+                : undef;
+    if (defined $blocked) {
+        my $line = Mediabot::Spark::Sender::format_sender_log($channel, {
+            action => 'no_send', reason => $blocked, kind => $kind,
+        });
+        $bot->{logger}->log(3, $line) if defined $line;
+        return 0;
+    }
+
+    my $generation = eval {
+        $bot->{spark_state}->begin_event(
+            channel          => $channel,
+            kind             => $kind,
+            duration_seconds => $duration_seconds,
+        )
+    };
+    unless ($generation) {
+        my $line = Mediabot::Spark::Sender::format_sender_log($channel, {
+            action => 'no_send', reason => 'event_unavailable', kind => $kind,
+        });
+        $bot->{logger}->log(3, $line) if defined $line;
+        return 0;
+    }
+
+    my $send = eval {
+        $sender->attempt_send(
+            channel    => $channel,
+            kind       => $kind,
+            generation => $generation,
+            generated  => $generated,
+            state_cb   => sub { _spark_delivery_state($bot, $channel) },
+        )
+    };
+    $send = {
+        action => 'no_send', reason => 'sender_exception',
+        kind => $kind, generation => $generation,
+    } unless ref($send) eq 'HASH';
+
+    if (($send->{action} // '') ne 'sent') {
+        eval { $bot->{spark_state}->invalidate_event($channel); };
+    }
+
+    my $line = Mediabot::Spark::Sender::format_sender_log($channel, $send);
+    $bot->{logger}->log(3, $line) if defined $line;
+    return (($send->{action} // '') eq 'sent') ? 1 : 0;
+}
+
+sub _spark_finish_human_event {
+    my ($bot, $channel, $observation) = @_;
+    return 0 unless $bot && defined($channel) && $channel =~ /^#/;
+    return 0 unless ref($observation) eq 'HASH';
+    return 0 unless ($observation->{reason} // '') eq 'human_context';
+
+    my $before = eval { $bot->{spark_state}->snapshot($channel) };
+    return 0 unless ref($before) eq 'HASH' && $before->{event_active};
+
+    my $kind = $before->{event_kind} // 'unknown';
+    my $done = eval {
+        $bot->{spark_state}->finish_event(channel => $channel, outcome => 'engaged')
+    };
+    return 0 unless ref($done) eq 'HASH';
+
+    $bot->{logger}->log(
+        3,
+        '[SPARK_EVENT] channel=' . $channel
+            . ' outcome=engaged kind=' . $kind
+            . ' miss_streak=' . int($done->{miss_streak} // 0)
+            . ' cooldown_seconds=' . int($done->{cooldown_seconds} // 0)
+    );
+    return 1;
+}
+
+sub _spark_observe_public_line {
+    my ($bot, $bot_nick, $channel, $nick, $line) = @_;
+    return 0 unless $bot && defined($channel) && $channel =~ /^#/;
+
+    my $enabled = eval {
+        Mediabot::Helpers::chanset_enabled($bot, $channel, 'Spark', default => 0)
+    } ? 1 : 0;
+    return 0 unless $enabled;
+
+    my $runtime = _spark_runtime($bot);
+    return 0 unless $runtime;
+
+    # MB703-E: any new public human activity invalidates a pending Spark AI
+    # dry-run generation. The provider may still finish asynchronously, but its
+    # generation token will be stale and only a metadata-only revoked result can
+    # be logged. No candidate survives a conversation that has resumed.
+    if ($bot->{spark_ai_dryrun}) {
+        eval { $bot->{spark_ai_dryrun}->invalidate_channel($channel); };
+    }
+
+    my $summary = eval {
+        $runtime->observe_public_line(
+            enabled      => 1,
+            channel      => $channel,
+            nick         => $nick,
+            bot_nick     => $bot_nick,
+            message      => $line,
+            command_char => $bot->{conf}->get('main.MAIN_PROG_CMD_CHAR'),
+        )
+    };
+
+    if ($@ || ref($summary) ne 'HASH') {
+        my $error = $@ || 'invalid observer result';
+        $error =~ s/[\r\n\x00]+/ /g;
+        $error = substr($error, 0, 240);
+        $bot->{logger}->log(1, 'Spark observer runtime error: ' . $error);
+        return 0;
+    }
+
+    eval { _spark_finish_human_event($bot, $channel, $summary); };
+    return 1;
+}
+
+sub _spark_tick_all {
+    my ($bot) = @_;
+    return 0 unless $bot && $bot->{spark_orchestrator};
+
+    my $runtime = $bot->{spark_orchestrator};
+    my $channels = eval { $runtime->channels() };
+    return 0 unless ref($channels) eq 'ARRAY' && @$channels;
+
+    my $ai_available = eval {
+        scalar(Mediabot::AI::configured_providers($bot)) > 0 ? 1 : 0
+    } ? 1 : 0;
+
+    my $logged = 0;
+    for my $channel (@$channels) {
+        my $enabled = eval {
+            Mediabot::Helpers::chanset_enabled($bot, $channel, 'Spark', default => 0)
+        } ? 1 : 0;
+
+        my $irc_state = eval { $bot->{wit_runtime_state}->snapshot($channel) };
+        $irc_state = {
+            runtime_active => 0,
+            irc_connected  => 0,
+            channel_joined => 0,
+        } unless ref($irc_state) eq 'HASH';
+
+        my $wit_pending = 0;
+        if ($bot->{wit_dryrun}
+            && eval { $bot->{wit_dryrun}->can('channel_inflight') }) {
+            $wit_pending = eval {
+                $bot->{wit_dryrun}->channel_inflight($channel)
+            } ? 1 : 0;
+        }
+
+        my $game_active = _spark_game_active($bot, $channel);
+
+        my $expired = eval { $bot->{spark_state}->expire_due_event($channel) };
+        if (ref($expired) eq 'HASH') {
+            $bot->{logger}->log(
+                3,
+                '[SPARK_EVENT] channel=' . $channel
+                    . ' outcome=miss'
+                    . ' miss_streak=' . int($expired->{miss_streak} // 0)
+                    . ' cooldown_seconds=' . int($expired->{cooldown_seconds} // 0)
+            );
+        }
+
+        # MB703-E late dry-run gate: channel opt-in and live IRC truth remain
+        # authoritative while a provider request is in flight. Public human
+        # activity invalidates even earlier in _spark_observe_public_line().
+        if ($bot->{spark_ai_dryrun}
+            && eval { $bot->{spark_ai_dryrun}->channel_inflight($channel) }) {
+            unless ($enabled
+                && $ai_available
+                && $irc_state->{runtime_active}
+                && $irc_state->{irc_connected}
+                && $irc_state->{channel_joined}
+                && !$game_active
+                && !$wit_pending) {
+                eval { $bot->{spark_ai_dryrun}->invalidate_channel($channel); };
+            }
+        }
+
+        my $summary = eval {
+            $runtime->evaluate_channel(
+                enabled        => $enabled,
+                channel        => $channel,
+                runtime_active => $irc_state->{runtime_active},
+                irc_connected  => $irc_state->{irc_connected},
+                channel_joined => $irc_state->{channel_joined},
+                game_active    => $game_active,
+                wit_pending    => $wit_pending,
+                ai_available   => $ai_available,
+            )
+        };
+
+        if ($@ || ref($summary) ne 'HASH') {
+            my $error = $@ || 'invalid tick result';
+            $error =~ s/[\r\n\x00]+/ /g;
+            $error = substr($error, 0, 240);
+            $bot->{logger}->log(1, "Spark tick runtime error channel=$channel: $error");
+            next;
+        }
+
+        my $line = Mediabot::Spark::Orchestrator::format_dryrun_log(
+            $channel, $summary
+        );
+        if (defined $line) {
+            $bot->{logger}->log(3, $line);
+            $logged++;
+        }
+
+        next unless ($summary->{action} // '') eq 'dryrun_candidate';
+        next unless $ai_available;
+
+        my $context = eval { $runtime->context_lines($channel) };
+        $context = [] unless ref($context) eq 'ARRAY';
+
+        my $dryrun = eval { _spark_ai_dryrun($bot) };
+        unless ($dryrun) {
+            my $error = $@ || 'Spark AI dry-run unavailable';
+            $error =~ s/[\r\n\x00]+/ /g;
+            $error = substr($error, 0, 240);
+            $bot->{logger}->log(1, "Spark AI dry-run runtime error channel=$channel: $error");
+            next;
+        }
+
+        my $started = eval {
+            $dryrun->submit_candidate(
+                channel  => $channel,
+                kind     => $summary->{kind},
+                language => Mediabot::Helpers::channel_lang($bot, $channel),
+                context  => $context,
+                provider => 'auto',
+                on_candidate => sub {
+                    my ($candidate) = @_;
+                    _spark_handle_candidate(
+                        $bot,
+                        $channel,
+                        $summary->{duration_seconds},
+                        $candidate,
+                    );
+                },
+                on_result => sub {
+                    my ($ai_summary) = @_;
+                    my $ai_log = Mediabot::Spark::DryRun::format_ai_dryrun_log(
+                        $channel, $ai_summary
+                    );
+                    $bot->{logger}->log(3, $ai_log) if defined $ai_log;
+                },
+            );
+        };
+
+        if ($@) {
+            my $error = $@;
+            $error =~ s/[\r\n\x00]+/ /g;
+            $error = substr($error, 0, 240);
+            $bot->{logger}->log(1, "Spark AI submit runtime error channel=$channel: $error");
+            next;
+        }
+
+        # A zero return is fail-closed: duplicate inflight or async unavailable.
+        # The DryRun object owns any provider-result metadata callback.
+        $logged++ if $started;
+    }
+
+    return $logged;
 }
 
 # +---------------------------------------------------------------------------+
@@ -1328,6 +1759,18 @@ sub on_timer_tick {
         eval { $mediabot->{wit_runtime_state}->mark_disconnected() if $mediabot->{wit_runtime_state}; };
     }
 
+    # MB703-G: Spark may exercise the provider-neutral AI path and owns a
+    # guarded sender, but delivery remains fail-closed behind both +Spark and
+    # the process-wide SPARK_SEND_ARMED switch (default 0). Event expiry and
+    # adaptive cooldowns are maintained from this existing timer tick.
+    eval { _spark_tick_all($mediabot); };
+    if ($@) {
+        my $error = $@;
+        $error =~ s/[\r\n\x00]+/ /g;
+        $error = substr($error, 0, 240);
+        $mediabot->{logger}->log(1, 'Spark timer runtime error: ' . $error);
+    }
+
     my $reconnect_needed = !$mediabot->{irc_reconnect_in_progress} && ($mediabot->{irc_reconnect_requested} || (!$grace && !$irc_connected));
 
     $mediabot->{logger}->log(0,
@@ -2148,6 +2591,17 @@ sub _on_message_PRIVMSG_body {
         # Without this guard, split() leaves $sCommand undefined and later
         # substr()/eq checks emit warnings in the daemon logs.
         return undef if $line eq '';
+
+        # MB703-D: +Spark begins observing bounded, ephemeral human context.
+        # No event is started, no AI request is submitted and no IRC delivery
+        # primitive is reachable from this path in the disarmed round.
+        eval { _spark_observe_public_line($mediabot, $self->nick, $where, $who, $line); };
+        if ($@) {
+            my $error = $@;
+            $error =~ s/[\r\n\x00]+/ /g;
+            $error = substr($error, 0, 240);
+            $mediabot->{logger}->log(1, 'Spark public-line runtime error: ' . $error);
+        }
 
         # mb700-G: +Wit remains explicit opt-in and dry-run only, but eligible
         # lines now exercise the real provider-neutral AI path asynchronously.
