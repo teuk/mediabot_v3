@@ -69,6 +69,26 @@ return sub {
         'mb703-963: exactly one IRC transport call occurs');
     $assert->like($sent[0][1], qr/Tea or chaos\?.*A\) Tea.*B\) Chaos/,
         'mb703-963: Fork renders all generated fields to one compact IRC line');
+    $assert->is(
+        $sent[0][1],
+        "\x{26A1} Tea or chaos? \x{2014} A) Tea \x{00B7} B) Chaos",
+        'mb706: Fork rendering uses real Unicode code points without source-literal mojibake',
+    );
+    $assert->is(Mediabot::Spark::Sender::parse_fork_choice('A'), 'A',
+        'mb706: uppercase A is a valid Fork choice');
+    $assert->is(Mediabot::Spark::Sender::parse_fork_choice(' b '), 'B',
+        'mb706: lowercase B with surrounding whitespace normalizes safely');
+    $assert->ok(!defined(Mediabot::Spark::Sender::parse_fork_choice('anything else')),
+        'mb706: ordinary conversation is not misclassified as a Fork choice');
+    $assert->is(
+        Mediabot::Spark::Sender::render_fork_choice_ack('Te[u]K', 'a'),
+        "\x{26A1} Te[u]K \x{2192} A",
+        'mb706: Fork acknowledgement is compact, Unicode-safe and visibly confirms the choice',
+    );
+    $assert->ok(
+        !defined(Mediabot::Spark::Sender::render_fork_choice_ack("Bad\nNick", 'A')),
+        'mb706: unsafe nick input cannot enter a Fork acknowledgement',
+    );
 
     my $limited = $sender->attempt_send(
         channel => '#spark', kind => 'fork', generation => 7,

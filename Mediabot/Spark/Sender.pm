@@ -62,6 +62,24 @@ sub _result {
     return \%out;
 }
 
+sub parse_fork_choice {
+    my ($value) = @_;
+    return undef unless _plain_scalar($value);
+    my $choice = "$value";
+    $choice =~ s/^\s+|\s+$//g;
+    return undef unless $choice =~ /\A([AB])\z/i;
+    return uc($1);
+}
+
+sub render_fork_choice_ack {
+    my ($nick, $value) = @_;
+    return undef unless _plain_scalar($nick)
+        && "$nick" =~ /\A[^\s,:\x00-\x1f\x7f]{1,100}\z/;
+    my $choice = parse_fork_choice($value);
+    return undef unless defined $choice;
+    return "\x{26A1} $nick \x{2192} $choice";
+}
+
 sub render_generation {
     my ($generated) = @_;
     return undef unless ref($generated) eq 'HASH';
@@ -79,7 +97,7 @@ sub render_generation {
         my $a = _safe_piece($content->{a}, 140);
         my $b = _safe_piece($content->{b}, 140);
         return undef unless defined($q) && defined($a) && defined($b);
-        $text = "⚡ $q — A) $a · B) $b";
+        $text = "\x{26A1} $q \x{2014} A) $a \x{00B7} B) $b";
     }
     elsif ($kind eq 'vdm') {
         $text = format_vdm_line(id => $content->{id}, story => $content->{story});
@@ -91,7 +109,7 @@ sub render_generation {
     else {
         my $line = _safe_piece($content->{line}, 360);
         return undef unless defined $line;
-        $text = "⚡ $line";
+        $text = "\x{26A1} $line";
     }
 
     return undef if length($text) > $DEFAULT{max_chars};

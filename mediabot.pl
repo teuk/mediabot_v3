@@ -433,7 +433,7 @@ sub _spark_handle_vdm_candidate {
 }
 
 sub _spark_finish_human_event {
-    my ($bot, $channel, $observation) = @_;
+    my ($bot, $channel, $observation, $nick, $line) = @_;
     return 0 unless $bot && defined($channel) && $channel =~ /^#/;
     return 0 unless ref($observation) eq 'HASH';
     return 0 unless ($observation->{reason} // '') eq 'human_context';
@@ -442,15 +442,36 @@ sub _spark_finish_human_event {
     return 0 unless ref($before) eq 'HASH' && $before->{event_active};
 
     my $kind = $before->{event_kind} // 'unknown';
+    my $choice;
+    if ($kind eq 'fork') {
+        return 0 unless int($before->{event_remaining_seconds} // 0) > 0;
+        $choice = Mediabot::Spark::Sender::parse_fork_choice($line);
+        return 0 unless defined $choice;
+    }
+
     my $done = eval {
         $bot->{spark_state}->finish_event(channel => $channel, outcome => 'engaged')
     };
     return 0 unless ref($done) eq 'HASH';
 
+    my $extra = '';
+    if ($kind eq 'fork') {
+        my $ack = Mediabot::Spark::Sender::render_fork_choice_ack($nick, $choice);
+        my $ack_sent = 0;
+        if (defined $ack) {
+            $ack_sent = eval {
+                Mediabot::Helpers::botPrivmsg($bot, $channel, $ack) ? 1 : 0
+            } ? 1 : 0;
+        }
+        $extra = ' interaction=choice choice=' . $choice
+            . ' ack=' . ($ack_sent ? 'sent' : 'failed');
+    }
+
     $bot->{logger}->log(
         3,
         '[SPARK_EVENT] channel=' . $channel
             . ' outcome=engaged kind=' . $kind
+            . $extra
             . ' miss_streak=' . int($done->{miss_streak} // 0)
             . ' cooldown_seconds=' . int($done->{cooldown_seconds} // 0)
     );
@@ -496,7 +517,7 @@ sub _spark_observe_public_line {
         return 0;
     }
 
-    eval { _spark_finish_human_event($bot, $channel, $summary); };
+    eval { _spark_finish_human_event($bot, $channel, $summary, $nick, $line); };
     return 1;
 }
 

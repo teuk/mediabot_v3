@@ -33,6 +33,20 @@ release. Development after this release continues on the `3.4dev` line.
 ## [Unreleased] — 3.4dev
 
 
+### mb706 — make Spark Fork choices real and fix IRC glyph rendering
+
+- Replaced Spark's source-literal lightning, em-dash and middle-dot separators
+  with explicit Unicode code points so IRC output no longer degrades into
+  mojibake on production instances.
+- Made active `fork` events recognize only `A` or `B` (case-insensitive) while
+  their event window is still live; ordinary channel conversation is no longer
+  falsely counted as a Fork choice.
+- Added a compact visible acknowledgement (`⚡ nick → A|B`) after a valid choice
+  and metadata-only diagnostics for the selected branch and acknowledgement
+  result. Portal, Callback, VDM, AI providers, schema and configuration remain
+  unchanged.
+
+
 ### mb705 — shorten the Apple Music badge with a portable Command symbol
 
 - Changed the canonical IRC Apple Music badge from `[AppleMusic]` to
