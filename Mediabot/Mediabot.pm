@@ -23,6 +23,7 @@ use Mediabot::Hailo;
 use Mediabot::Quotes;
 use Mediabot::RSS::Commands;
 use Mediabot::VDM::Runtime ();
+use Mediabot::DTC::Commands ();
 use Mediabot::LoginCommands;
 use Mediabot::Helpers;
 use Mediabot::ProcessLock;
@@ -2195,6 +2196,8 @@ sub mbCommandPublic {
         news         => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
         rss          => sub { Mediabot::RSS::Commands::mbRss_ctx($ctx) },
         vdm          => sub { Mediabot::VDM::Runtime::mbVdm_ctx($ctx) },
+        dtc          => sub { Mediabot::DTC::Commands::dispatch_ctx($ctx) },
+        bashfr       => sub { Mediabot::DTC::Commands::dispatch_ctx($ctx) },
 
         # mb116: dashboard de canal + duel + horoscope
         dashboard    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'dashboard', sub { mbDashboard_ctx($ctx) }) },
@@ -2792,6 +2795,8 @@ actu|actu [sujet] [en\|fr\|es]|public|Alias for actualites.
 news|news [sujet] [en\|fr\|es]|public|Alias for actualites.
 rss|rss <list|info|add|del|set|probe|show> ...|public|Native per-channel RSS/Atom feeds with automatic polling; first poll is silent. Changes require channel level 400+ or Administrator.
 vdm|vdm|public|Post one VDM from the official feed when +VDM is enabled on the channel.
+dtc|dtc [id|search text]|public|Show a random, numbered, or searched DansTonChat quote when +DansTonChat is enabled.
+bashfr|bashfr [id|search text]|public|Alias for dtc.
 achievements|achievements [nick|list|all|top|progress [nick]]|public|Show achievements for yourself, a nick, the catalogue, the top unlocks, or how close you are to the next ones.
 achievs|achievs [nick|list|all|top|progress [nick]]|public|Alias for achievements.
 profil|profil [nick]|public|Show a compact channel profile for a nick.

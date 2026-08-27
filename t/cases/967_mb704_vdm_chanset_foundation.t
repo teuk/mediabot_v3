@@ -18,8 +18,8 @@ return sub {
     my $dbdoc  = _slurp_967('docs/DB_MIGRATIONS.md');
     my $cl     = _slurp_967('CHANGELOG.md');
 
-    $assert->like($schema, qr/\(26,\s*'VDM'\);/,
-        'mb704-967: fresh schema registers VDM as chanset id 26');
+    $assert->like($schema, qr/\(26,\s*'VDM'\)[,;]/,
+        'mb704-967: fresh schema keeps VDM as canonical chanset id 26 even when later chansets follow');
     $assert->like($mig, qr/INSERT INTO CHANSET_LIST \(chanset\).*?SELECT 'VDM'/s,
         'mb704-967: upgrade migration registers VDM idempotently');
     $assert->like($mig, qr/WHERE NOT EXISTS\s*\(.*?chanset = 'VDM'/s,

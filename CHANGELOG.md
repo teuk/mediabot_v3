@@ -32,6 +32,17 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb707 — bring DansTonChat / BashFR back as a native async command
+
+- Added native `!dtc` and `!bashfr` aliases behind the opt-in `+DansTonChat`
+  chanset, covering random quotes, numeric IDs and text search.
+- Reimplemented the useful behavior of the historical Tcl script in Perl: bounded
+  HTML parsing, DuckDuckGo narrow/lite search with DansTonChat fallback, ten-line
+  IRC output limits and the established `[ID]` quote color charter.
+- Runs network work through Mediabot's command worker path so HTTP never blocks
+  the IRC event loop; no Eggdrop/Tcl runtime dependency is introduced.
+
+
 
 ### mb706 — make Spark Fork choices real and fix IRC glyph rendering
 
