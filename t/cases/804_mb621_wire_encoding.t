@@ -2,7 +2,7 @@
 # =============================================================================
 # mb621 — l'encodage de SORTIE, verifié comme sur le fil.
 #
-# INCIDENT (deux captures #boulets) : « humeur Ã©lectrique », puis TOUTE la
+# INCIDENT (deux captures #test) : « humeur Ã©lectrique », puis TOUTE la
 # ligne en mojibake apres ma correction mb620. Cause reelle, enfin comprise :
 #   * mediabot.pl DECODE les messages entrants (ligne ~2089), donc $nick,
 #     $target et les arguments sont des chaines de CARACTERES ;
@@ -87,7 +87,7 @@ return sub {
     my $nick_decoded = decode('UTF-8', 'te[u]k');
     @out = ();
     Mediabot::UserCommands::mbHoroscope_ctx(
-        CtxW->new(bot => $bot, nick => $nick_decoded, channel => '#boulets',
+        CtxW->new(bot => $bot, nick => $nick_decoded, channel => '#test',
                   args => ['lion']));
     $assert->ok(scalar @out >= 4, 'mb621-804: l horoscope a repondu');
 
@@ -122,7 +122,7 @@ return sub {
     # [3] meme garantie avec un pseudo NON decode (appels internes)
     @out = ();
     Mediabot::UserCommands::mbHoroscope_ctx(
-        CtxW->new(bot => $bot, nick => 'te[u]k', channel => '#boulets', args => ['lion']));
+        CtxW->new(bot => $bot, nick => 'te[u]k', channel => '#test', args => ['lion']));
     my $wire2 = join "\n", map { _wire($_) } @out;
     $assert->ok(defined eval { decode('UTF-8', $wire2, Encode::FB_CROAK()) },
         'mb621-804: idem quand le pseudo n est pas decode');

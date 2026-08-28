@@ -2,7 +2,7 @@
 # =============================================================================
 # mb614 — une commande accentuee doit atteindre sa table.
 #
-# INCIDENT (prod #boulets, 2026-08-08) : « m actualités » ne declenchait
+# INCIDENT (prod #test, 2026-08-08) : « m actualités » ne declenchait
 # RIEN. Ce fichier a « use utf8 », donc la cle litterale 'actualités' est une
 # chaine de CARACTERES (é = U+00E9) alors qu'IRC livre des OCTETS utf-8
 # ("actualit\xC3\xA9s") : aucune correspondance, chute silencieuse dans le

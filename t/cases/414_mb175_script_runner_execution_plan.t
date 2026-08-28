@@ -73,7 +73,7 @@ my $case = sub {
     my $dry = $runner->run_dry(
         'games/duckhunt.tcl',
         'public_command',
-        channel => '#boulets',
+        channel => '#test',
         nick    => 'Georgette',
         command => 'duckhunt',
     );

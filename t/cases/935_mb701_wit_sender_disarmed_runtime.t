@@ -85,7 +85,7 @@ return sub {
         'mb701-935: runtime-equivalent sender starts disarmed');
 
     my $result = $sender->attempt_send(
-        channel            => '#boulets',
+        channel            => '#test',
         text               => 'Réponse autorisée en dry-run seulement.',
         request_generation => 7,
         state_cb            => sub {
@@ -111,9 +111,9 @@ return sub {
     $assert->ok(!exists($result->{text}),
         'mb701-935: sender result never exposes candidate text');
 
-    my $log = format_sender_log('#boulets', $result);
+    my $log = format_sender_log('#test', $result);
     $assert->is($log,
-        '[WIT_SEND] channel=#boulets action=no_send reason=kill_switch',
+        '[WIT_SEND] channel=#test action=no_send reason=kill_switch',
         'mb701-935: disarmed runtime produces a deterministic metadata-only WIT_SEND log');
     $assert->unlike($log, qr/Réponse|autorisée|dry-run/,
         'mb701-935: WIT_SEND log contains no generated candidate text');

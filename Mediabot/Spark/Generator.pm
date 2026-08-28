@@ -166,6 +166,19 @@ sub _kind_contract {
             'or exactly:',
             'NO_SPARK';
     }
+    if ($kind eq 'stage_cue') {
+        return join "\n",
+            'Write one short stage direction that performs a playful physical or metaphorical action matching one concrete detail in the recent conversation.',
+            'The bot is the only actor. Do not name, address, quote, rank or assign an action to any participant.',
+            'Do not ask a question, issue a command, announce a game, keep score, create a reward or imitate a user.',
+            'Avoid violence, threats and humiliation. Prefer a small theatrical prop, mock ritual, sound cue or visual flourish.',
+            'Return only the action body: never include /me, ACTION, CTCP markers or IRC protocol text.',
+            'If there is no specific and harmless hook worth staging, refuse.',
+            'Return exactly one physical line:',
+            'LINE: <single action body>',
+            'or exactly:',
+            'NO_SPARK';
+    }
     croak 'unknown Spark event kind';
 }
 
@@ -178,7 +191,8 @@ sub build_spark_request {
     my $contrib = _clean_contributions($args{contributions});
 
     croak 'contextual Spark generation requires recent context'
-        if ($kind eq 'callback' || $kind eq 'reaction') && @$context < 3;
+        if ($kind eq 'callback' || $kind eq 'reaction' || $kind eq 'stage_cue')
+            && @$context < 3;
     croak 'portal wrap-up requires at least two contributions'
         if $kind eq 'portal' && exists($args{contributions}) && @$contrib < 2;
 
@@ -238,7 +252,8 @@ sub parse_spark_generation {
     my $wire = "$raw";
     $wire =~ s/^\s+|\s+$//g;
 
-    if (($kind eq 'callback' || $kind eq 'reaction') && $wire eq 'NO_SPARK') {
+    if (($kind eq 'callback' || $kind eq 'reaction' || $kind eq 'stage_cue')
+        && $wire eq 'NO_SPARK') {
         return { action => 'no_content', reason => 'model_declined' };
     }
 
@@ -258,6 +273,12 @@ sub parse_spark_generation {
         unless $wire =~ /\ALINE:[ \t]+([^\r\n]+)\z/;
     my $line = _clean_generated($1, 360);
     return { action => 'no_content', reason => 'invalid_output' } unless defined $line;
+    if ($kind eq 'stage_cue') {
+        return { action => 'no_content', reason => 'invalid_output' }
+            if $line =~ m{\A/(?:me)(?:\s|\z)}i
+                || $line =~ /\AACTION(?:\s|\z)/i
+                || $line =~ /(?:PRIVMSG|NOTICE)[ \t]+#/i;
+    }
     return {
         action => 'ready', reason => 'generated', kind => $kind,
         content => { line => $line },
@@ -268,7 +289,8 @@ sub spark_request_summary {
     my ($request) = @_;
     my $base = request_summary($request);
     return undef unless ref($base) eq 'HASH';
-    return undef unless _plain_scalar($base->{purpose}) && $base->{purpose} =~ /^spark\.(fork|portal|callback|reaction)\z/;
+    return undef unless _plain_scalar($base->{purpose})
+        && $base->{purpose} =~ /^spark\.(fork|portal|callback|reaction|stage_cue)\z/;
     return {
         provider          => $base->{provider},
         purpose           => $base->{purpose},

@@ -50,6 +50,9 @@ sub select_spark_event {
 
     my @eligible;
     for my $kind (@{ spark_event_kinds() }) {
+        # Stage Cue belongs exclusively to the separately authorized momentum
+        # lane. Catalog growth must never leak it into long-silence selection.
+        next if $kind eq 'stage_cue';
         my $p = spark_event_profile($kind);
         next if $humans < $p->{min_recent_humans};
         next if $p->{needs_context} && $context_lines < 3;

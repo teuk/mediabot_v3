@@ -15,6 +15,7 @@ my %DEFAULT = (
     recent_window_seconds       => 7_200,
     event_duration_seconds      => 60,
     engaged_cooldown_seconds    => 3_600,
+    delivered_cooldown_seconds  => 3_600,
     superseded_cooldown_seconds => 1_800,
     error_cooldown_seconds      => 900,
     max_channels                => 256,
@@ -113,6 +114,9 @@ sub new {
         ),
         engaged_cooldown_seconds => _bounded_int(
             $args{engaged_cooldown_seconds}, $DEFAULT{engaged_cooldown_seconds}, 300, 86_400,
+        ),
+        delivered_cooldown_seconds => _bounded_int(
+            $args{delivered_cooldown_seconds}, $DEFAULT{delivered_cooldown_seconds}, 300, 86_400,
         ),
         superseded_cooldown_seconds => _bounded_int(
             $args{superseded_cooldown_seconds}, $DEFAULT{superseded_cooldown_seconds}, 60, 86_400,
@@ -359,7 +363,7 @@ sub _cooldown_for_miss_streak {
 }
 
 sub _finish_at {
-    my ($self, $state, $outcome, $now) = @_;
+    my ($self, $state, $outcome, $now, $cooldown_override) = @_;
     return undef unless $state->{event_active};
 
     my $old_generation = int($state->{generation} // 0);
@@ -376,6 +380,12 @@ sub _finish_at {
         $state->{miss_streak} = 0;
         $cooldown = $self->{engaged_cooldown_seconds};
     }
+    elsif ($outcome eq 'delivered') {
+        # Ambient content has no qualifying response contract. Delivery is
+        # neither participation nor a miss, so it must not rewrite the
+        # interactive miss streak in either direction.
+        $cooldown = $self->{delivered_cooldown_seconds};
+    }
     elsif ($outcome eq 'miss') {
         $state->{miss_streak} = int($state->{miss_streak} // 0) + 1;
         $cooldown = $self->_cooldown_for_miss_streak($state->{miss_streak});
@@ -390,6 +400,11 @@ sub _finish_at {
     else {
         croak 'unknown Spark event outcome';
     }
+
+    # Ambient action families may own a reviewed pacing interval distinct from
+    # conversational events. Only finish_event() can supply this bounded
+    # override, and only for the non-participatory delivered outcome.
+    $cooldown = $cooldown_override if defined $cooldown_override;
 
     $state->{cooldown_until} = $now + $cooldown;
 
@@ -412,16 +427,31 @@ sub finish_event {
     croak 'unknown Spark event outcome'
         unless _plain_scalar($outcome)
             && ($outcome eq 'engaged'
+                || $outcome eq 'delivered'
                 || $outcome eq 'miss'
                 || $outcome eq 'superseded'
                 || $outcome eq 'error');
+
+    my $cooldown_override;
+    if (exists $args{cooldown_seconds}) {
+        croak 'cooldown override is allowed only for delivered events'
+            unless $outcome eq 'delivered';
+        croak 'delivered cooldown must be between 300 and 86400 seconds'
+            unless _plain_scalar($args{cooldown_seconds})
+                && "$args{cooldown_seconds}" =~ /^\d+\z/
+                && $args{cooldown_seconds} >= 300
+                && $args{cooldown_seconds} <= 86_400;
+        $cooldown_override = int($args{cooldown_seconds});
+    }
 
     my $now = $self->_now();
     my $state = $self->{channel_state}{$channel};
     return undef unless ref($state) eq 'HASH';
     $self->_touch($state, $now);
 
-    return $self->_finish_at($state, "$outcome", $now);
+    return $self->_finish_at(
+        $state, "$outcome", $now, $cooldown_override,
+    );
 }
 
 sub expire_due_event {

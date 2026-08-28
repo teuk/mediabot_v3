@@ -1972,7 +1972,7 @@ sub mbCommandPublic {
     # littérale accentuée est une chaîne de CARACTÈRES, alors qu'IRC livre des
     # OCTETS utf-8 : 'actualités' tapé sur le canal arrivait en
     # "actualit\xC3\xA9s" et ne trouvait aucune entrée (constaté en prod sur
-    # #boulets, la commande tombait silencieusement dans le chemin inconnu).
+    # #test, la commande tombait silencieusement dans le chemin inconnu).
     # On replie donc le nom de commande sur son équivalent ASCII avant TOUTE
     # recherche : la table ne contient que des clés ASCII, et la prochaine
     # commande accentuée fonctionnera sans y penser.

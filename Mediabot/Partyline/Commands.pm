@@ -4019,7 +4019,7 @@ sub _cmd_cmdcooldown {
     }
     unless ($args =~ /^(#\S+)\s+(\w+)\s+(\d+)$/) {
         $stream->write("Usage: .cmdcooldown <#chan> <cmd> <seconds>\r\n");
-        $stream->write("  Example: .cmdcooldown #boulets ai 20\r\n");
+        $stream->write("  Example: .cmdcooldown #test ai 20\r\n");
         return;
     }
     my ($chan, $cmd, $secs) = ($1, lc($2), int($3));

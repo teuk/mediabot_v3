@@ -2,7 +2,7 @@
 # =============================================================================
 # mb620 — horoscope : accents corrigés, signe reconnu, prévision réelle.
 #
-# TERRAIN (capture #boulets) : « humeur Ã©lectrique ». UserCommands.pm n'a PAS
+# TERRAIN (capture #test) : « humeur Ã©lectrique ». UserCommands.pm n'a PAS
 # « use utf8 » : ses accents sont des OCTETS, mais "\x{26A1}" cree un
 # caractere large ; toute chaine melant les deux est double-encodee a
 # l'affichage. Sept litteraux etaient dans ce cas, tous dans le pool

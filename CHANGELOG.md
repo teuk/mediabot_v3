@@ -33,6 +33,36 @@ release. Development after this release continues on the `3.4dev` line.
 ## [Unreleased] — 3.4dev
 
 
+### mb709 — give Spark a separate momentum lane for real channel actions
+
+- Added default-off `+SparkAction` as a second channel opt-in. It never replaces
+  `+Spark`: future active micro-events require both capabilities, while existing
+  ambient Spark behavior remains under `+Spark` alone.
+- Added a pure momentum policy for recent multi-human activity followed by a
+  short breathing pause. It is structurally separate from the existing
+  long-silence revival lane and remains metadata-only in this foundation round.
+- Added bounded observer activity summaries containing only counts and timing:
+  no message text or nickname is exposed by the momentum decision boundary.
+- Corrected Spark participation semantics. Fork and Portal keep explicit reply
+  contracts; Callback, Reaction and source-backed stories now close as
+  `delivered` immediately after transport and can no longer treat an unrelated
+  later channel line as participation or reset the interactive miss streak.
+- Added dry-run-only runtime wiring and metadata diagnostics for the momentum
+  lane. No active-action selector, generated action, IRC action delivery, live
+  database migration, channel opt-in or service restart occurs in this round.
+- Added the first active momentum family, `stage_cue`: a short contextual IRC
+  action performed only by Mediabot, never aimed at a participant. Its prompt
+  rejects questions, commands, games, scoring, rewards and weak hooks.
+- Added a dedicated default-off `SPARK_ACTION_SEND_ARMED` process gate and
+  action cooldown. Public speech revokes in-flight generation, while channel
+  opt-ins, both process arms, live IRC truth, flood, game, Wit and generation
+  state are re-authorized immediately before delivery.
+- Hardened action framing at the sender boundary. Provider output remains a
+  plain body; control characters, `/me`, CTCP and protocol-shaped text fail
+  closed before the sender constructs one bounded CTCP ACTION frame. Logs keep
+  metadata only and successful ambient cues close as `delivered`.
+
+
 ### mb708 — make Spark behave more like an IRC regular than a poll bot
 
 - Added a contextual `reaction` Spark family that can make one precise, bounded
@@ -2185,7 +2215,7 @@ release. Development after this release continues on the `3.4dev` line.
   suite. Tests 700 et 803 alignes sur le monde correct.
 
 ### mb620 — horoscope : accents corriges, signe reconnu, prevision reelle
-- MOJIBAKE (« humeur Ã©lectrique », capture #boulets) : UserCommands.pm n'a
+- MOJIBAKE (« humeur Ã©lectrique », capture #test) : UserCommands.pm n'a
   PAS « use utf8 », donc ses accents sont des OCTETS, tandis que "\x{26A1}"
   cree un CARACTERE large. Toute chaine melant les deux est double-encodee a
   l'affichage. Sept litteraux etaient dans ce cas (pool d'humeurs) et le
@@ -2300,7 +2330,7 @@ release. Development after this release continues on the `3.4dev` line.
   tests 798/799 verrouillent le bucket partagé et la fraîcheur réelle.
 
 ### mb615 — la sortie d'un worker est capturee quel que soit le chemin d'appel
-- INCIDENT (prod #boulets) : « m actualités » demarrait bien son worker
+- INCIDENT (prod #test) : « m actualités » demarrait bien son worker
   (« CommandAsync: 'actualites' worker started ») et ne repondait JAMAIS,
   sans la moindre erreur. Cause : les facades du worker n'etaient posees que
   sur les alias IMPORTES par Mediabot::UserCommands. External::News appelle
@@ -2327,7 +2357,7 @@ release. Development after this release continues on the `3.4dev` line.
   compteur pose dans le worker.
 
 ### mb614 — une commande accentuee atteint enfin sa table
-- INCIDENT (prod #boulets) : « m actualités » ne declenchait RIEN, le log
+- INCIDENT (prod #test) : « m actualités » ne declenchait RIEN, le log
   montrant la commande en mojibake (« actualitÃ©s »). Cause : Mediabot.pm a
   « use utf8 », donc la cle litterale 'actualités' posee en mb613 etait une
   chaine de CARACTERES (é = U+00E9) alors qu'IRC livre des OCTETS utf-8

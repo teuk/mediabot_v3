@@ -80,10 +80,10 @@ my $case = sub {
 
     # Setup : un user 'Teuk' a une session active (history sous "Teuk", persona sous "teuk")
     {
-        my $history = { "Teuk\x00#boulets" => [{ role => 'user', content => 'hi' }] };
-        my $persona = { "teuk\x00#boulets" => 'mode mechant' };
+        my $history = { "Teuk\x00#test" => [{ role => 'user', content => 'hi' }] };
+        my $persona = { "teuk\x00#test" => 'mode mechant' };
 
-        my $had = $sim_forget->('Teuk', '#boulets', $history, $persona);
+        my $had = $sim_forget->('Teuk', '#test', $history, $persona);
         $assert->($had == 1, "B3 forget('Teuk') -> had=1 (found existing session)");
         $assert->(scalar keys %$history == 0, "B3 forget cleared history (no key left)");
         $assert->(scalar keys %$persona == 0, "B3 forget cleared persona (no key left)");

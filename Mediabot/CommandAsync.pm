@@ -83,7 +83,7 @@ sub _collect_intents_run {
     no warnings qw(redefine once);
     # mb615-B1: la facade doit couvrir les DEUX chemins d'appel.
     #
-    # Terrain (#boulets, 2026-08-08) : « m actualités » demarrait bien son
+    # Terrain (#test, 2026-08-08) : « m actualités » demarrait bien son
     # worker mais ne repondait JAMAIS. Les facades n'existaient que sur les
     # alias IMPORTES par Mediabot::UserCommands ; or un module appele depuis
     # un worker peut tres bien appeler la forme QUALIFIEE

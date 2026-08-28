@@ -52,6 +52,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260827_spark_chanset.sql
 20260827_vdm_chanset.sql
 20260827_danstonchat_chanset.sql
+20260828_spark_action_chanset.sql
 ```
 
 The migration set adds channel-ban tracking, user seen/activity tracking, Claude chanset reference data, schema support for newer fun/user commands, and persistent trivia scores and user notes, including:
@@ -65,7 +66,7 @@ KARMA
 KARMA_LOG
 TRIVIA_SCORES
 NOTE
-CHANSET_LIST entries: AchievementAnnounce, Games, Wit, Spark, VDM, DansTonChat
+CHANSET_LIST entries: AchievementAnnounce, Games, Wit, Spark, VDM, DansTonChat, SparkAction
 ACHIEVEMENT_PROFILE / ACHIEVEMENT_IDENTITY / ACHIEVEMENT_UNLOCK / ACHIEVEMENT_PROGRESS
 RSS_FEED / RSS_ITEM
 ```
@@ -149,6 +150,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260825_wit_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260827_spark_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260827_vdm_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260827_danstonchat_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260828_spark_action_chanset.sql;
 ```
 
 Afterwards:

@@ -77,6 +77,16 @@ sub capture_generation {
     return int($row->{generation} // 0) || undef;
 }
 
+sub capture_kind {
+    my ($self, $channel) = @_;
+    croak 'dry-run object is required' unless ref($self);
+    my $key = _channel_key($channel);
+    my $row = $self->{inflight}{$key};
+    return undef unless ref($row) eq 'HASH';
+    my $profile = eval { spark_event_profile($row->{kind}) };
+    return $profile ? $profile->{kind} : undef;
+}
+
 sub generation_is_current {
     my ($self, $channel, $generation) = @_;
     croak 'dry-run object is required' unless ref($self);
@@ -212,7 +222,7 @@ sub format_ai_dryrun_log {
     return undef unless $action eq 'ready'
         || $action eq 'no_content'
         || $action eq 'revoked';
-    return undef unless $kind =~ /^(?:fork|portal|callback|reaction)\z/;
+    return undef unless $kind =~ /^(?:fork|portal|callback|reaction|stage_cue)\z/;
 
     my @parts = (
         '[SPARK_AI_DRYRUN]',

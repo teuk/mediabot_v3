@@ -120,7 +120,7 @@ return sub {
         'signe complice uniquement dans le gabarit avec signe');
 
     # Plus aucune reference interne (mb561)
-    for my $forbidden ('Gwen', '#boulets', 'BUGFIX_mb83', 'sosreport',
+    for my $forbidden ('Gwen', '#test', 'BUGFIX_mb83', 'sosreport',
                        '!active', 'git pull', 'commit avant') {
         $assert->unlike($ctx, qr/\Q$forbidden\E/i,
             "aucune reference interne : $forbidden");

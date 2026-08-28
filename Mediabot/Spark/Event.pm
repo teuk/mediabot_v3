@@ -10,6 +10,7 @@ our $VERSION = '1.0';
 our @EXPORT_OK = qw(
     spark_event_kinds
     spark_event_profile
+    spark_event_requires_response
     spark_event_catalog_summary
 );
 
@@ -20,6 +21,7 @@ my %PROFILE = (
         needs_context => 0,
         ai_use => 'optional',
         interaction => 'choice',
+        requires_response => 1,
     },
     portal => {
         duration_seconds => 75,
@@ -27,6 +29,7 @@ my %PROFILE = (
         needs_context => 0,
         ai_use => 'optional',
         interaction => 'contributions',
+        requires_response => 1,
     },
     callback => {
         duration_seconds => 45,
@@ -34,6 +37,7 @@ my %PROFILE = (
         needs_context => 1,
         ai_use => 'preferred',
         interaction => 'conversation',
+        requires_response => 0,
     },
     reaction => {
         duration_seconds => 45,
@@ -41,6 +45,17 @@ my %PROFILE = (
         needs_context => 1,
         ai_use => 'preferred',
         interaction => 'conversation',
+        requires_response => 0,
+        delivery_style => 'message',
+    },
+    stage_cue => {
+        duration_seconds => 45,
+        min_recent_humans => 3,
+        needs_context => 1,
+        ai_use => 'required',
+        interaction => 'ambient_action',
+        requires_response => 0,
+        delivery_style => 'action',
     },
     vdm => {
         duration_seconds => 45,
@@ -48,8 +63,14 @@ my %PROFILE = (
         needs_context => 0,
         ai_use => 'never',
         interaction => 'story',
+        requires_response => 0,
+        delivery_style => 'message',
     },
 );
+
+$PROFILE{fork}{delivery_style} = 'message';
+$PROFILE{portal}{delivery_style} = 'message';
+$PROFILE{callback}{delivery_style} = 'message';
 
 sub _plain_scalar {
     my ($value) = @_;
@@ -64,7 +85,7 @@ sub _kind {
 }
 
 sub spark_event_kinds {
-    return [ qw(fork portal callback reaction vdm) ];
+    return [ qw(fork portal callback reaction stage_cue vdm) ];
 }
 
 sub spark_event_profile {
@@ -75,6 +96,13 @@ sub spark_event_profile {
         kind => $kind,
         %{ $PROFILE{$kind} },
     };
+}
+
+sub spark_event_requires_response {
+    my ($kind) = @_;
+    $kind = _kind($kind);
+    croak 'unknown Spark event kind' unless defined $kind;
+    return $PROFILE{$kind}{requires_response} ? 1 : 0;
 }
 
 sub spark_event_catalog_summary {
@@ -88,6 +116,8 @@ sub spark_event_catalog_summary {
             needs_context      => $p->{needs_context} ? 1 : 0,
             ai_use             => "$p->{ai_use}",
             interaction        => "$p->{interaction}",
+            requires_response  => $p->{requires_response} ? 1 : 0,
+            delivery_style     => "$p->{delivery_style}",
         };
     }
     return \@out;

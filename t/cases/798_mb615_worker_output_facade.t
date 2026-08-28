@@ -2,7 +2,7 @@
 # =============================================================================
 # mb615 — la sortie d'un worker est capturee QUEL QUE SOIT le chemin d'appel.
 #
-# INCIDENT (prod #boulets, 2026-08-08) : « m actualités » demarrait son
+# INCIDENT (prod #test, 2026-08-08) : « m actualités » demarrait son
 # worker (« CommandAsync: 'actualites' worker started ») et ne repondait
 # JAMAIS, sans la moindre erreur. Les facades du worker n'existaient que sur
 # les alias IMPORTES par Mediabot::UserCommands ; External::News appelle la
@@ -55,7 +55,7 @@ return sub {
     $assert->is(scalar @$intents, 5, 'mb615-798: cinq intents collectes');
     my $texts = join ',', map { $_->[2] } @$intents;
     $assert->like($texts, qr/\bqualifie\b/,
-        'mb615-798: la forme QUALIFIEE est capturee (le bug de #boulets)');
+        'mb615-798: la forme QUALIFIEE est capturee (le bug de #test)');
     $assert->like($texts, qr/importe/,
         'mb615-798: l alias IMPORTE l est toujours (non-regression)');
     my $kinds = join ',', map { $_->[0] } @$intents;

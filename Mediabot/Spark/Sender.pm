@@ -59,7 +59,10 @@ sub _result {
         $out{$key} = int($extra{$key});
     }
     $out{kind} = $extra{kind}
-        if _plain_scalar($extra{kind}) && "$extra{kind}" =~ /^(?:fork|portal|callback|reaction|vdm)\z/;
+        if _plain_scalar($extra{kind}) && "$extra{kind}" =~ /^(?:fork|portal|callback|reaction|stage_cue|vdm)\z/;
+    $out{delivery} = $extra{delivery}
+        if _plain_scalar($extra{delivery})
+            && "$extra{delivery}" =~ /^(?:message|action)\z/;
     return \%out;
 }
 
@@ -106,6 +109,14 @@ sub render_generation {
         # The canonical VDM formatter owns its stricter 350-character /
         # 400-byte one-line contract. Do not strip its intentional IRC colors.
         return $text;
+    }
+    elsif ($kind eq 'stage_cue') {
+        my $line = _safe_piece($content->{line}, 260);
+        return undef unless defined $line;
+        return undef if $line =~ m{\A/(?:me)(?:\s|\z)}i
+            || $line =~ /\AACTION(?:\s|\z)/i
+            || $line =~ /(?:PRIVMSG|NOTICE)[ \t]+#/i;
+        $text = "\x01ACTION \x{2728} $line\x01";
     }
     else {
         my $line = _safe_piece($content->{line}, 360);
@@ -202,24 +213,31 @@ sub attempt_send {
     my $generation = _safe_generation($args{generation});
     return _result('no_send', 'invalid_generation') unless defined $generation;
 
-    my $kind = eval { spark_event_profile($args{kind})->{kind} };
+    my $profile = eval { spark_event_profile($args{kind}) };
+    my $kind = $profile ? $profile->{kind} : undef;
     return _result('no_send', 'invalid_kind') unless defined $kind;
+    my $delivery = $profile->{delivery_style} // 'message';
+    my $generated_kind = eval { spark_event_profile($args{generated}{kind})->{kind} };
+    return _result(
+        'no_send', 'kind_mismatch', kind => $kind, delivery => $delivery,
+        generation => $generation,
+    ) unless defined($generated_kind) && $generated_kind eq $kind;
 
     my $continuation = 0;
     if (exists $args{continuation}) {
         return _result(
             'no_send', 'invalid_continuation',
-            generation => $generation, kind => $kind,
+            generation => $generation, kind => $kind, delivery => $delivery,
         ) if ref($args{continuation});
         $continuation = $args{continuation} ? 1 : 0;
     }
     return _result(
         'no_send', 'invalid_continuation',
-        generation => $generation, kind => $kind,
+        generation => $generation, kind => $kind, delivery => $delivery,
     ) if $continuation && $kind ne 'portal';
 
     my $text = render_generation($args{generated});
-    return _result('no_send', 'invalid_content', generation => $generation, kind => $kind)
+    return _result('no_send', 'invalid_content', generation => $generation, kind => $kind, delivery => $delivery)
         unless defined $text;
 
     my $state_cb = $args{state_cb};
@@ -262,6 +280,16 @@ sub attempt_send {
     ) {
         return _result('no_send', $gate->[1], generation => $generation, kind => $kind)
             unless $state->{ $gate->[0] };
+    }
+    if ($kind eq 'stage_cue') {
+        return _result(
+            'no_send', 'action_disabled', generation => $generation,
+            kind => $kind, delivery => $delivery,
+        ) unless $state->{action_enabled};
+        return _result(
+            'no_send', 'action_kill_switch', generation => $generation,
+            kind => $kind, delivery => $delivery,
+        ) unless $state->{action_armed};
     }
     return _result('no_send', 'flood_suppressed', generation => $generation, kind => $kind)
         if $state->{flood_suppressed};
@@ -320,6 +348,7 @@ sub attempt_send {
         'sent', 'delivered',
         generation  => $generation,
         kind        => $kind,
+        delivery    => $delivery,
         continuation => $continuation,
         reply_chars => length($text),
         reply_bytes => length(encode_utf8($text)),
@@ -342,7 +371,10 @@ sub format_sender_log {
         'reason=' . $summary->{reason},
     );
     push @parts, 'kind=' . $summary->{kind}
-        if _plain_scalar($summary->{kind}) && "$summary->{kind}" =~ /^(?:fork|portal|callback|reaction|vdm)\z/;
+        if _plain_scalar($summary->{kind}) && "$summary->{kind}" =~ /^(?:fork|portal|callback|reaction|stage_cue|vdm)\z/;
+    push @parts, 'delivery=' . $summary->{delivery}
+        if _plain_scalar($summary->{delivery})
+            && "$summary->{delivery}" =~ /^(?:message|action)\z/;
     for my $key (qw(generation reply_chars reply_bytes retry_after continuation)) {
         push @parts, "$key=" . int($summary->{$key})
             if _plain_scalar($summary->{$key}) && "$summary->{$key}" =~ /^\d+\z/;

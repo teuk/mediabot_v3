@@ -223,6 +223,61 @@ sub context_summary {
     };
 }
 
+sub activity_summary {
+    my ($self, $channel, %args) = @_;
+    croak 'Spark observer object is required' unless ref($self);
+
+    my $key = _channel_key($channel);
+    my $window = _bounded_int(
+        $args{window_seconds}, 600, 60, 3_600,
+    );
+    my $state = $self->{channels}{lc($key)};
+    return {
+        window_seconds   => $window,
+        line_count       => 0,
+        distinct_humans  => 0,
+        last_human_at    => undef,
+        quiet_for_seconds => 0,
+    } unless ref($state) eq 'HASH';
+
+    my $now = $self->_now();
+    croak 'Spark observer clock moved backwards'
+        if defined($state->{last_seen}) && $now < $state->{last_seen};
+    $state->{last_seen} = $now;
+    $self->_prune($state, $now);
+
+    my $cutoff = $now - $window;
+    my @recent = grep {
+        ref($_) eq 'HASH'
+            && defined($_->{at})
+            && looks_like_number($_->{at})
+            && $_->{at} >= $cutoff
+            && $_->{at} <= $now
+    } @{ $state->{lines} || [] };
+
+    my %humans;
+    my $last_human_at;
+    for my $entry (@recent) {
+        my $nick = _nick_key($entry->{nick});
+        $humans{lc($nick)} = 1 if defined $nick;
+        $last_human_at = $entry->{at}
+            if !defined($last_human_at) || $entry->{at} > $last_human_at;
+    }
+
+    my $quiet_for = defined($last_human_at)
+        ? int($now - $last_human_at)
+        : 0;
+    $quiet_for = 0 if $quiet_for < 0;
+
+    return {
+        window_seconds    => $window,
+        line_count        => scalar(@recent),
+        distinct_humans   => scalar(keys %humans),
+        last_human_at     => defined($last_human_at) ? 0 + $last_human_at : undef,
+        quiet_for_seconds => $quiet_for,
+    };
+}
+
 sub channels {
     my ($self) = @_;
     croak 'Spark observer object is required' unless ref($self);

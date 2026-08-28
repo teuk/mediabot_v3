@@ -9,6 +9,10 @@ use Time::HiRes qw(clock_gettime CLOCK_MONOTONIC);
 
 use Mediabot::AI::ConversationFloodGuard;
 use Mediabot::Spark::Observer;
+use Mediabot::Spark::ActionPolicy qw(
+    evaluate_spark_action_start spark_action_policy_summary
+);
+use Mediabot::Spark::Event qw(spark_event_profile);
 use Mediabot::Spark::Policy qw(evaluate_spark_start spark_policy_summary);
 use Mediabot::Spark::Selector qw(select_spark_event spark_selector_summary);
 use Mediabot::Spark::State;
@@ -83,6 +87,27 @@ sub new {
         candidate_probe_seconds => _bounded_int(
             $args{candidate_probe_seconds}, 300, 30, 3_600,
         ),
+        action_probe_seconds => _bounded_int(
+            $args{action_probe_seconds}, 30, 15, 300,
+        ),
+        action_cooldown_seconds => _bounded_int(
+            $args{action_cooldown_seconds}, 1_200, 300, 86_400,
+        ),
+        action_activity_window_seconds => _bounded_int(
+            $args{action_activity_window_seconds}, 600, 60, 3_600,
+        ),
+        action_min_humans => _bounded_int(
+            $args{action_min_humans}, 3, 2, 100,
+        ),
+        action_min_lines => _bounded_int(
+            $args{action_min_lines}, 6, 2, 64,
+        ),
+        action_min_pause_seconds => _bounded_int(
+            $args{action_min_pause_seconds}, 45, 15, 600,
+        ),
+        action_max_pause_seconds => _bounded_int(
+            $args{action_max_pause_seconds}, 180, 60, 1_800,
+        ),
         runtime => {},
     }, $class;
 }
@@ -101,7 +126,137 @@ sub _rt {
         cursor        => 0,
         last_kind     => undef,
         next_probe_at => 0,
+        next_action_probe_at => 0,
+        action_cooldown_until => 0,
     };
+}
+
+sub evaluate_action_channel {
+    my ($self, %args) = @_;
+    croak 'Spark orchestrator object is required' unless ref($self);
+
+    my $channel = _channel_key($args{channel});
+    return { action => 'skip', reason => 'spark_disabled' }
+        unless _bool($args{spark_enabled});
+    return { action => 'skip', reason => 'action_disabled' }
+        unless _bool($args{action_enabled});
+    return { action => 'skip', reason => 'ai_unavailable' }
+        unless _bool($args{ai_available});
+
+    my $now = $self->_now();
+    my $rt = $self->_rt($channel);
+    if (($rt->{next_action_probe_at} // 0) > $now) {
+        my $retry = int($rt->{next_action_probe_at} - $now);
+        $retry = 1 if $retry < 1;
+        return {
+            action => 'skip', reason => 'action_probe_wait',
+            retry_after_seconds => $retry,
+        };
+    }
+
+    my $state = eval { $self->{state}->snapshot($channel) };
+    return { action => 'skip', reason => 'state_error' }
+        unless ref($state) eq 'HASH';
+    return { action => 'skip', reason => 'activity_unavailable' }
+        unless eval { $self->{observer}->can('activity_summary') };
+    my $activity = eval {
+        $self->{observer}->activity_summary(
+            $channel,
+            window_seconds => $self->{action_activity_window_seconds},
+        )
+    };
+    return { action => 'skip', reason => 'activity_error' }
+        unless ref($activity) eq 'HASH';
+
+    my $flood = eval {
+        $self->{flood_guard}->current_decision(channel => $channel)
+    };
+    my $flood_suppressed = 1;
+    if (ref($flood) eq 'HASH'
+        && (($flood->{action} // '') eq 'allow'
+            || ($flood->{action} // '') eq 'suppress')) {
+        $flood_suppressed = (($flood->{action} // '') eq 'suppress') ? 1 : 0;
+    }
+
+    my $decision = evaluate_spark_action_start(
+        spark_enabled         => 1,
+        action_enabled        => 1,
+        channel               => $channel,
+        runtime_active        => _bool($args{runtime_active}),
+        irc_connected         => _bool($args{irc_connected}),
+        channel_joined        => _bool($args{channel_joined}),
+        flood_suppressed      => $flood_suppressed,
+        event_active          => $state->{event_active},
+        game_active           => _bool($args{game_active}),
+        wit_pending           => _bool($args{wit_pending}),
+        cooldown_until        => ($state->{cooldown_until} // 0)
+            > ($rt->{action_cooldown_until} // 0)
+                ? ($state->{cooldown_until} // 0)
+                : ($rt->{action_cooldown_until} // 0),
+        now                   => $now,
+        last_human_at         => $activity->{last_human_at},
+        recent_humans         => $activity->{distinct_humans},
+        recent_lines          => $activity->{line_count},
+        activity_window_seconds => $self->{action_activity_window_seconds},
+        min_recent_humans     => $self->{action_min_humans},
+        min_recent_lines      => $self->{action_min_lines},
+        min_pause_seconds     => $self->{action_min_pause_seconds},
+        max_pause_seconds     => $self->{action_max_pause_seconds},
+    );
+    my $safe = spark_action_policy_summary($decision) || {
+        action => 'skip', reason => 'action_policy_error',
+    };
+
+    if (($safe->{action} // '') ne 'consider') {
+        my $retry = int($safe->{retry_after_seconds} // 0);
+        $retry = $self->{action_probe_seconds} if $retry < 1;
+        $retry = $self->{action_probe_seconds}
+            if $retry > $self->{action_probe_seconds};
+        $rt->{next_action_probe_at} = $now + $retry;
+        return $safe;
+    }
+
+    my $profile = spark_event_profile('stage_cue');
+    my $context = eval { $self->{observer}->context_lines($channel) };
+    $context = [] unless ref($context) eq 'ARRAY';
+    # A candidate consumes the current momentum window. New public activity
+    # resets this probe below; without it, a declined provider result cannot
+    # trigger repeated requests against the same paused conversation.
+    $rt->{next_action_probe_at} =
+        $now + $self->{action_max_pause_seconds};
+    return {
+        %$safe,
+        action => 'action_candidate',
+        reason => 'momentum_ready',
+        lane   => 'momentum',
+        kind   => $profile->{kind},
+        duration_seconds => int($profile->{duration_seconds}),
+        ai_use => $profile->{ai_use},
+        interaction => $profile->{interaction},
+        context_lines => scalar(@$context),
+    };
+}
+
+sub mark_action_delivered {
+    my ($self, $channel) = @_;
+    croak 'Spark orchestrator object is required' unless ref($self);
+    my $key = _channel_key($channel);
+    my $now = $self->_now();
+    my $rt = $self->_rt($key);
+    $rt->{action_cooldown_until} = $now + $self->{action_cooldown_seconds};
+    $rt->{next_action_probe_at} = $rt->{action_cooldown_until};
+    return {
+        action => 'paced',
+        reason => 'action_delivered',
+        cooldown_seconds => int($self->{action_cooldown_seconds}),
+        cooldown_until => 0 + $rt->{action_cooldown_until},
+    };
+}
+
+sub action_cooldown_seconds {
+    my ($self) = @_;
+    croak 'Spark orchestrator object is required' unless ref($self);
+    return int($self->{action_cooldown_seconds});
 }
 
 sub observe_public_line {
@@ -149,6 +304,10 @@ sub observe_public_line {
     };
     return { action => 'skip', reason => 'observer_error' }
         unless ref($observation) eq 'HASH';
+
+    # New conversation creates a new momentum window. The action cooldown
+    # remains authoritative in policy; only the candidate probe is reset.
+    $self->_rt($channel)->{next_action_probe_at} = 0;
 
     return {
         action        => 'observe',
@@ -357,6 +516,32 @@ sub format_dryrun_log {
         if _plain_scalar($summary->{ai_use})
             && "$summary->{ai_use}" =~ /^(?:never|optional|preferred|required)\z/;
 
+    return join(' ', @parts);
+}
+
+sub format_action_candidate_log {
+    my ($channel, $summary) = @_;
+    return undef unless _plain_scalar($channel) && "$channel" =~ /^#/;
+    return undef unless ref($summary) eq 'HASH';
+    return undef unless ($summary->{action} // '') eq 'action_candidate';
+    return undef unless ($summary->{lane} // '') eq 'momentum';
+    return undef unless ($summary->{kind} // '') eq 'stage_cue';
+
+    my @parts = (
+        '[SPARK_ACTION_CANDIDATE]',
+        'channel=' . $channel,
+        'action=action_candidate',
+        'lane=momentum',
+        'kind=stage_cue',
+    );
+    for my $key (qw(
+        activity_window_seconds recent_humans recent_lines quiet_for_seconds
+        context_lines duration_seconds
+    )) {
+        next unless _plain_scalar($summary->{$key})
+            && "$summary->{$key}" =~ /^\d+\z/;
+        push @parts, "$key=" . int($summary->{$key});
+    }
     return join(' ', @parts);
 }
 

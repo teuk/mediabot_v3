@@ -9,8 +9,8 @@ use Mediabot::Spark::Selector qw(select_spark_event);
 return sub {
     my ($assert) = @_;
     my $kinds = spark_event_kinds();
-    $assert->is(join(',', @$kinds), 'fork,portal,callback,reaction,vdm',
-        'mb708: Reaction joins the catalog while VDM remains a distinct source-backed family');
+    $assert->is(join(',', @$kinds), 'fork,portal,callback,reaction,stage_cue,vdm',
+        'mb709: Stage Cue joins the catalog while VDM remains a distinct source-backed family');
     my $p = spark_event_profile('vdm');
     $assert->is($p->{ai_use}, 'never', 'mb704-979: VDM never consumes the AI generator');
     $assert->is($p->{min_recent_humans}, 3, 'mb704-979: auto VDM requires a real recent audience');
@@ -30,4 +30,6 @@ return sub {
     $assert->ok($on_seen{vdm}, 'mb708: contextual schedule still reaches VDM when +VDM authorizes it');
     $assert->ok($on_seen{reaction} && $on_seen{callback} && $on_seen{fork},
         'mb708: contextual schedule provides multiple social families instead of a Fork-only loop');
+    $assert->ok(!$on_seen{stage_cue},
+        'mb709: Stage Cue cannot leak into the long-silence selector');
 };
