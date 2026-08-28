@@ -38,9 +38,15 @@ return sub {
     $assert->is($callback->{ai_use}, 'preferred',
         'mb703-947: Callback explicitly prefers provider-neutral AI');
 
+    my $reaction = spark_event_profile('reaction');
+    $assert->ok($reaction->{needs_context},
+        'mb708: Reaction requires recent channel context');
+    $assert->is($reaction->{ai_use}, 'preferred',
+        'mb708: Reaction uses provider-neutral AI only when context can support it');
+
     my $catalog = spark_event_catalog_summary();
-    $assert->ok(scalar(@$catalog) >= 3,
-        'mb703-947: catalog summary preserves the original three bounded event profiles');
+    $assert->ok(scalar(@$catalog) >= 5,
+        'mb708: catalog contains the original families plus Reaction and VDM');
 
     my $sel = select_spark_event(
         recent_humans => 2,
@@ -60,6 +66,15 @@ return sub {
     $assert->is($sel->{kind}, 'portal',
         'mb703-947: Portal becomes eligible with three recent humans');
 
+    my $reaction_pick = select_spark_event(
+        recent_humans => 3,
+        context_lines => 5,
+        ai_available  => 1,
+        cursor        => 0,
+    );
+    $assert->is($reaction_pick->{kind}, 'reaction',
+        'mb708: rich recent context prefers a natural Reaction over a forced-choice prompt');
+
     $sel = select_spark_event(
         recent_humans => 3,
         context_lines => 5,
@@ -67,17 +82,19 @@ return sub {
         cursor        => 2,
     );
     $assert->is($sel->{kind}, 'callback',
-        'mb703-947: Callback becomes eligible only with context and AI availability');
+        'mb708: contextual schedule still gives Callback a regular slot');
 
     my $no_repeat = select_spark_event(
         recent_humans => 3,
         context_lines => 5,
         ai_available  => 1,
         cursor        => 0,
-        last_kind     => 'fork',
+        last_kind     => 'reaction',
     );
-    $assert->ok($no_repeat->{kind} ne 'fork',
-        'mb703-947: selector avoids immediate repetition when alternatives exist');
+    $assert->ok($no_repeat->{kind} ne 'reaction',
+        'mb708: selector avoids immediate Reaction repetition when alternatives exist');
+    $assert->is($reaction_pick->{reason}, 'contextual_schedule',
+        'mb708: selector exposes the contextual schedule decision rather than catalog-order rotation');
 
     my $none = select_spark_event(
         recent_humans => 1,

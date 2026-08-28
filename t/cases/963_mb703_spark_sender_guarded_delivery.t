@@ -90,6 +90,15 @@ return sub {
         'mb706: unsafe nick input cannot enter a Fork acknowledgement',
     );
 
+    $assert->is(
+        Mediabot::Spark::Sender::render_generation({
+            action => 'ready', reason => 'generated', kind => 'reaction',
+            content => { line => 'Troisième test rapide : le mot rapide demande un avocat.' },
+        }),
+        "\x{26A1} Troisième test rapide : le mot rapide demande un avocat.",
+        'mb708: Reaction uses the normal one-line guarded Spark sender path',
+    );
+
     my $limited = $sender->attempt_send(
         channel => '#spark', kind => 'fork', generation => 7,
         generated => $generated, state_cb => sub { return { %$state } },

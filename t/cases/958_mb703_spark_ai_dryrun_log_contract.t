@@ -30,6 +30,16 @@ return sub {
     $assert->unlike($ready, qr/this must never be logged/,
         'mb703-958: generated content is excluded from application log');
 
+    my $reaction = Mediabot::Spark::DryRun::format_ai_dryrun_log('#teuk', {
+        action => 'ready', reason => 'generated', kind => 'reaction',
+        generation => 44, provider => 'anthropic', model => 'claude-test',
+        content_fields => 1, content => { line => 'private reaction text' },
+    });
+    $assert->like($reaction, qr/action=ready.*kind=reaction/,
+        'mb708: Reaction uses the same metadata-only AI diagnostic boundary');
+    $assert->unlike($reaction, qr/private reaction text/,
+        'mb708: Reaction content never enters AI diagnostic logs');
+
     my $revoked = Mediabot::Spark::DryRun::format_ai_dryrun_log('#teuk', {
         action => 'revoked', reason => 'stale_generation', kind => 'portal',
         generation => 43,

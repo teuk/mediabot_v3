@@ -53,7 +53,7 @@ sub select_spark_event {
         my $p = spark_event_profile($kind);
         next if $humans < $p->{min_recent_humans};
         next if $p->{needs_context} && $context_lines < 3;
-        next if $kind eq 'callback' && !$ai_available;
+        next if ($kind eq 'callback' || $kind eq 'reaction') && !$ai_available;
         next if $kind eq 'vdm' && !$vdm_enabled;
         push @eligible, $kind;
     }
@@ -63,18 +63,42 @@ sub select_spark_event {
         reason => 'no_eligible_event',
     } unless @eligible;
 
-    if (@eligible > 1 && defined $last_kind) {
-        my @without_repeat = grep { $_ ne $last_kind } @eligible;
-        @eligible = @without_repeat if @without_repeat;
+    my %eligible = map { $_ => 1 } @eligible;
+
+    # Contextual weighted schedule, kept deterministic for reproducible tests and
+    # operations. Reaction/Callback dominate rich context, Fork stays available,
+    # Portal remains occasional until its contribution runtime is completed, and
+    # VDM stays a rare source-backed variation when +VDM is enabled.
+    my @schedule;
+    if ($ai_available && $context_lines >= 6) {
+        @schedule = qw(reaction callback reaction fork callback portal reaction vdm);
+    }
+    elsif ($ai_available && $context_lines >= 3) {
+        @schedule = qw(reaction fork callback reaction portal fork vdm);
+    }
+    else {
+        @schedule = qw(fork portal fork vdm);
     }
 
-    my $index = $cursor % @eligible;
-    my $kind = $eligible[$index];
+    @schedule = grep { $eligible{$_} } @schedule;
+
+    # Future catalog additions cannot disappear merely because the preference
+    # schedule has not been taught about them yet.
+    my %scheduled = map { $_ => 1 } @schedule;
+    push @schedule, grep { !$scheduled{$_}++ } @eligible;
+
+    if (@eligible > 1 && defined $last_kind) {
+        my @without_repeat = grep { $_ ne $last_kind } @schedule;
+        @schedule = @without_repeat if @without_repeat;
+    }
+
+    my $index = $cursor % @schedule;
+    my $kind = $schedule[$index];
     my $profile = spark_event_profile($kind);
 
     return {
         action             => 'select',
-        reason             => 'eligible',
+        reason             => 'contextual_schedule',
         kind               => $kind,
         duration_seconds   => int($profile->{duration_seconds}),
         ai_use             => "$profile->{ai_use}",

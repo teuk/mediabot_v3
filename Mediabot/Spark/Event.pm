@@ -35,6 +35,13 @@ my %PROFILE = (
         ai_use => 'preferred',
         interaction => 'conversation',
     },
+    reaction => {
+        duration_seconds => 45,
+        min_recent_humans => 2,
+        needs_context => 1,
+        ai_use => 'preferred',
+        interaction => 'conversation',
+    },
     vdm => {
         duration_seconds => 45,
         min_recent_humans => 3,
@@ -57,7 +64,7 @@ sub _kind {
 }
 
 sub spark_event_kinds {
-    return [ qw(fork portal callback vdm) ];
+    return [ qw(fork portal callback reaction vdm) ];
 }
 
 sub spark_event_profile {

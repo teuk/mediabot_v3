@@ -54,14 +54,14 @@ return sub {
     );
     $assert->is($decision->{action}, 'dryrun_candidate',
         'mb703-952: silence may produce a metadata-only dry-run candidate');
-    $assert->is($decision->{kind}, 'fork',
-        'mb703-952: first eligible dry-run selection is deterministic');
+    $assert->is($decision->{kind}, 'reaction',
+        'mb708: first rich-context candidate is a natural Reaction');
     $assert->is($state->snapshot('#spark')->{event_active}, 0,
         'mb703-952: disarmed dry-run never creates a fake active event');
 
     my $log = Mediabot::Spark::Orchestrator::format_dryrun_log('#spark', $decision);
-    $assert->like($log, qr/^\[SPARK_DRYRUN\].*kind=fork/,
-        'mb703-952: dry-run candidate has a grep-friendly metadata log');
+    $assert->like($log, qr/^\[SPARK_DRYRUN\].*kind=reaction/,
+        'mb708: Reaction candidate has a grep-friendly metadata log');
     $assert->unlike($log, qr/service|raisonnable|dangereuse/,
         'mb703-952: runtime log never leaks conversation text');
 
@@ -81,8 +81,8 @@ return sub {
     );
     $assert->is($next->{action}, 'dryrun_candidate',
         'mb703-952: dry-run may reconsider after its bounded probe interval');
-    $assert->ok($next->{kind} ne 'fork',
-        'mb703-952: selector rotation avoids immediate event repetition');
+    $assert->ok($next->{kind} ne 'reaction',
+        'mb708: contextual schedule avoids immediate event repetition');
 
     $now += 300;
     my $game = $rt->evaluate_channel(

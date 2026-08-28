@@ -32,6 +32,31 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+
+### mb708 — make Spark behave more like an IRC regular than a poll bot
+
+- Added a contextual `reaction` Spark family that can make one precise, bounded
+  observation about recent channel conversation and explicitly declines weak
+  hooks with `NO_SPARK`; no reply syntax is required.
+- Reworked deterministic event selection into a context-aware weighted schedule:
+  Reaction and Callback lead when useful recent context and AI are available,
+  Fork remains a regular but non-dominant option, Portal stays occasional, and
+  VDM remains a rare +VDM-only source-backed variation.
+- Tightened generation prompts: Callback must revive a concrete recent hook,
+  while Fork may no longer frame named participants as opponents or fall back to
+  the lazy “who is right?” pattern.
+- Completed Portal as a real collaborative event: it accepts one bounded input
+  from each of three distinct humans, closes immediately at three, or uses two
+  at the 75-second deadline. Commands, bot traffic and duplicate contributors
+  are ignored; contribution text is ephemeral and contributor nicks never cross
+  the provider boundary.
+- Added one same-channel, same-generation Portal continuation for its closing
+  payoff. It is single-use and time-bounded, while the normal 120-second pacing,
+  kill switch, flood, live IRC, game/Wit and generation gates remain
+  authoritative. No database, schema, chanset or configuration change is
+  required.
+
+
 ### mb707 — bring DansTonChat / BashFR back as a native async command
 
 - Added native `!dtc` and `!bashfr` aliases behind the opt-in `+DansTonChat`

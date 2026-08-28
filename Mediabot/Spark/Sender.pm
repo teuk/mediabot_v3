@@ -12,6 +12,7 @@ our $VERSION = '1.0';
 
 my %DEFAULT = (
     min_interval_seconds => 120,
+    portal_continuation_window_seconds => 120,
     max_chars            => 300,
     max_bytes            => 350,
 );
@@ -53,12 +54,12 @@ sub _safe_piece {
 sub _result {
     my ($action, $reason, %extra) = @_;
     my %out = ( action => $action, reason => $reason );
-    for my $key (qw(generation reply_chars reply_bytes retry_after)) {
+    for my $key (qw(generation reply_chars reply_bytes retry_after continuation)) {
         next unless _plain_scalar($extra{$key}) && "$extra{$key}" =~ /^\d+\z/;
         $out{$key} = int($extra{$key});
     }
     $out{kind} = $extra{kind}
-        if _plain_scalar($extra{kind}) && "$extra{kind}" =~ /^(?:fork|portal|callback|vdm)\z/;
+        if _plain_scalar($extra{kind}) && "$extra{kind}" =~ /^(?:fork|portal|callback|reaction|vdm)\z/;
     return \%out;
 }
 
@@ -129,6 +130,9 @@ sub new {
         clock        => $clock || sub { time() },
         armed        => 0,
         last_sent_at => {},
+        last_sent_generation => {},
+        last_sent_kind => {},
+        portal_continuation_used => {},
     }, $class;
 }
 
@@ -172,6 +176,20 @@ sub _rate_limit {
     return $retry;
 }
 
+sub _portal_continuation_allowed {
+    my ($self, $key, $generation, $kind, $now) = @_;
+    return 0 unless $kind eq 'portal';
+    return 0 unless exists $self->{last_sent_at}{$key};
+    return 0 unless int($self->{last_sent_generation}{$key} // 0) == $generation;
+    return 0 unless ($self->{last_sent_kind}{$key} // '') eq 'portal';
+    return 0 if $self->{portal_continuation_used}{$key};
+
+    my $elapsed = $now - $self->{last_sent_at}{$key};
+    return 0 if $elapsed < 0;
+    return 0 if $elapsed > $DEFAULT{portal_continuation_window_seconds};
+    return 1;
+}
+
 sub attempt_send {
     my ($self, %args) = @_;
     croak 'sender object is required' unless ref($self);
@@ -187,6 +205,19 @@ sub attempt_send {
     my $kind = eval { spark_event_profile($args{kind})->{kind} };
     return _result('no_send', 'invalid_kind') unless defined $kind;
 
+    my $continuation = 0;
+    if (exists $args{continuation}) {
+        return _result(
+            'no_send', 'invalid_continuation',
+            generation => $generation, kind => $kind,
+        ) if ref($args{continuation});
+        $continuation = $args{continuation} ? 1 : 0;
+    }
+    return _result(
+        'no_send', 'invalid_continuation',
+        generation => $generation, kind => $kind,
+    ) if $continuation && $kind ne 'portal';
+
     my $text = render_generation($args{generated});
     return _result('no_send', 'invalid_content', generation => $generation, kind => $kind)
         unless defined $text;
@@ -199,9 +230,24 @@ sub attempt_send {
         unless defined $now;
 
     my $key = lc $channel;
-    my $retry = $self->_rate_limit($key, $now);
-    return _result('no_send', 'rate_limited', generation => $generation, kind => $kind, retry_after => $retry)
-        if defined $retry;
+    my $portal_continuation = $continuation
+        ? $self->_portal_continuation_allowed(
+            $key, $generation, $kind, $now,
+        )
+        : 0;
+    return _result(
+        'no_send', 'continuation_unavailable',
+        generation => $generation, kind => $kind, continuation => 1,
+    ) if $continuation && !$portal_continuation;
+
+    my $retry;
+    unless ($portal_continuation) {
+        $retry = $self->_rate_limit($key, $now);
+        return _result(
+            'no_send', 'rate_limited',
+            generation => $generation, kind => $kind, retry_after => $retry,
+        ) if defined $retry;
+    }
 
     my ($ok, $state);
     $ok = eval { $state = $state_cb->(); 1 };
@@ -217,6 +263,8 @@ sub attempt_send {
         return _result('no_send', $gate->[1], generation => $generation, kind => $kind)
             unless $state->{ $gate->[0] };
     }
+    return _result('no_send', 'flood_suppressed', generation => $generation, kind => $kind)
+        if $state->{flood_suppressed};
     return _result('no_send', 'game_active', generation => $generation, kind => $kind)
         if $state->{game_active};
     return _result('no_send', 'wit_pending', generation => $generation, kind => $kind)
@@ -233,9 +281,21 @@ sub attempt_send {
     my $before_send = $self->_now();
     return _result('no_send', 'clock_error', generation => $generation, kind => $kind)
         unless defined $before_send;
-    $retry = $self->_rate_limit($key, $before_send);
-    return _result('no_send', 'rate_limited', generation => $generation, kind => $kind, retry_after => $retry)
-        if defined $retry;
+    if ($continuation) {
+        return _result(
+            'no_send', 'continuation_unavailable',
+            generation => $generation, kind => $kind, continuation => 1,
+        ) unless $self->_portal_continuation_allowed(
+            $key, $generation, $kind, $before_send,
+        );
+    }
+    else {
+        $retry = $self->_rate_limit($key, $before_send);
+        return _result(
+            'no_send', 'rate_limited',
+            generation => $generation, kind => $kind, retry_after => $retry,
+        ) if defined $retry;
+    }
 
     my ($send_ok, $accepted);
     $send_ok = eval { $accepted = $self->{send_cb}->($channel, $text); 1 };
@@ -247,11 +307,20 @@ sub attempt_send {
     my $sent_at = $self->_now();
     $sent_at = $before_send unless defined $sent_at;
     $self->{last_sent_at}{$key} = $sent_at;
+    if ($continuation) {
+        $self->{portal_continuation_used}{$key} = 1;
+    }
+    else {
+        $self->{last_sent_generation}{$key} = $generation;
+        $self->{last_sent_kind}{$key} = $kind;
+        $self->{portal_continuation_used}{$key} = 0;
+    }
 
     return _result(
         'sent', 'delivered',
         generation  => $generation,
         kind        => $kind,
+        continuation => $continuation,
         reply_chars => length($text),
         reply_bytes => length(encode_utf8($text)),
     );
@@ -273,8 +342,8 @@ sub format_sender_log {
         'reason=' . $summary->{reason},
     );
     push @parts, 'kind=' . $summary->{kind}
-        if _plain_scalar($summary->{kind}) && "$summary->{kind}" =~ /^(?:fork|portal|callback|vdm)\z/;
-    for my $key (qw(generation reply_chars reply_bytes retry_after)) {
+        if _plain_scalar($summary->{kind}) && "$summary->{kind}" =~ /^(?:fork|portal|callback|reaction|vdm)\z/;
+    for my $key (qw(generation reply_chars reply_bytes retry_after continuation)) {
         push @parts, "$key=" . int($summary->{$key})
             if _plain_scalar($summary->{$key}) && "$summary->{$key}" =~ /^\d+\z/;
     }

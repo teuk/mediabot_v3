@@ -301,6 +301,20 @@ sub context_lines {
     return $self->{observer}->context_lines($channel);
 }
 
+sub flood_suppressed {
+    my ($self, $channel) = @_;
+    croak 'Spark orchestrator object is required' unless ref($self);
+    my $key = _channel_key($channel);
+
+    my $decision = eval {
+        $self->{flood_guard}->current_decision(channel => $key)
+    };
+    return 1 unless ref($decision) eq 'HASH'
+        && (($decision->{action} // '') eq 'allow'
+            || ($decision->{action} // '') eq 'suppress');
+    return ($decision->{action} // '') eq 'suppress' ? 1 : 0;
+}
+
 sub forget_channel {
     my ($self, $channel) = @_;
     croak 'Spark orchestrator object is required' unless ref($self);
@@ -325,7 +339,7 @@ sub format_dryrun_log {
     return undef unless ref($summary) eq 'HASH';
     return undef unless ($summary->{action} // '') eq 'dryrun_candidate';
     return undef unless _plain_scalar($summary->{kind})
-        && "$summary->{kind}" =~ /^(?:fork|portal|callback|vdm)\z/;
+        && "$summary->{kind}" =~ /^(?:fork|portal|callback|reaction|vdm)\z/;
 
     my @parts = (
         '[SPARK_DRYRUN]',

@@ -116,28 +116,53 @@ sub _tone_prompt {
 }
 
 sub _kind_contract {
-    my ($kind) = @_;
+    my ($kind, %args) = @_;
     if ($kind eq 'fork') {
         return join "\n",
-            'Create one compact forced-choice prompt that is debatable and funny rather than factual trivia.',
+            'Create one compact forced-choice prompt about the situation, not about which named participant is right.',
+            'Never pit two channel participants against each other and avoid the lazy pattern "who is right?".',
+            'Prefer two absurd actions, excuses, consequences or ways to deny the obvious; it must invite commentary even without an A/B reply.',
+            'This is playful conversation, never factual trivia.',
             'Return exactly three physical lines:',
             'QUESTION: <one short question>',
             'A: <short choice>',
             'B: <short choice>';
     }
     if ($kind eq 'portal') {
+        if ($args{closing}) {
+            return join "\n",
+                'Close a collaborative Portal from the supplied contributions.',
+                'Fuse the contributions into one sharp absurd payoff. Use every supplied ingredient, but do not name or rank their authors.',
+                'Do not ask another question, request more input or start a second round.',
+                'Return exactly one physical line:',
+                'LINE: <single IRC-ready payoff>';
+        }
         return join "\n",
-            'Create or close a collaborative three-input micro-scene.',
-            'When contributions are supplied, fuse them into one sharp absurd payoff.',
+            'Open a collaborative three-contribution Portal.',
+            'Ask clearly for three different people to add one short ingredient each to a compact absurd micro-scene.',
+            'Make the invitation specific enough to inspire answers, but do not invent contributions or pretend the scene is already complete.',
             'Return exactly one physical line:',
-            'LINE: <single IRC-ready line>';
+            'LINE: <single IRC-ready invitation>';
     }
     if ($kind eq 'callback') {
         return join "\n",
-            'Use the recent conversation only to revive a thread that genuinely has a hook.',
-            'If nothing in context is worth reviving, refuse instead of fabricating interest.',
+            'Use the recent conversation only to revive one specific thread that genuinely has a hook.',
+            'Prefer a contradiction, promise, recurring phrase, abandoned question or shared absurdity that is actually present in context.',
+            'The callback must make sense to people who were just in the channel; never invent history or personal facts.',
+            'If the hook is generic, weak or requires explanation, refuse instead of fabricating interest.',
             'Return exactly one physical line:',
             'LINE: <single IRC-ready callback>',
+            'or exactly:',
+            'NO_SPARK';
+    }
+    if ($kind eq 'reaction') {
+        return join "\n",
+            'React to one concrete detail or social pattern in the recent conversation like a witty IRC regular who was quietly listening.',
+            'Make one short observation or punchline. Do not ask a question, do not offer A/B choices and do not demand a response.',
+            'Prefer understatement, a mock-official observation, a small escalation or a precise meta-comment over generic snark.',
+            'If there is no specific hook worth reacting to, refuse.',
+            'Return exactly one physical line:',
+            'LINE: <single IRC-ready reaction>',
             'or exactly:',
             'NO_SPARK';
     }
@@ -152,7 +177,8 @@ sub build_spark_request {
     my $context = _clean_context($args{context});
     my $contrib = _clean_contributions($args{contributions});
 
-    croak 'callback generation requires recent context' if $kind eq 'callback' && @$context < 3;
+    croak 'contextual Spark generation requires recent context'
+        if ($kind eq 'callback' || $kind eq 'reaction') && @$context < 3;
     croak 'portal wrap-up requires at least two contributions'
         if $kind eq 'portal' && exists($args{contributions}) && @$contrib < 2;
 
@@ -170,7 +196,14 @@ sub build_spark_request {
     my $request = build_request(
         provider          => exists($args{provider}) ? $args{provider} : 'auto',
         purpose           => "spark.$kind",
-        system            => join("\n", _tone_prompt($lang), _kind_contract($kind)),
+        system            => join(
+            "\n",
+            _tone_prompt($lang),
+            _kind_contract(
+                $kind,
+                closing => $kind eq 'portal' && @$contrib ? 1 : 0,
+            ),
+        ),
         messages          => [ { role => 'user', content => join("\n", @material) } ],
         max_output_tokens => $DEFAULT{max_output_tokens},
         temperature       => $DEFAULT{temperature},
@@ -205,7 +238,7 @@ sub parse_spark_generation {
     my $wire = "$raw";
     $wire =~ s/^\s+|\s+$//g;
 
-    if ($kind eq 'callback' && $wire eq 'NO_SPARK') {
+    if (($kind eq 'callback' || $kind eq 'reaction') && $wire eq 'NO_SPARK') {
         return { action => 'no_content', reason => 'model_declined' };
     }
 
@@ -235,7 +268,7 @@ sub spark_request_summary {
     my ($request) = @_;
     my $base = request_summary($request);
     return undef unless ref($base) eq 'HASH';
-    return undef unless _plain_scalar($base->{purpose}) && $base->{purpose} =~ /^spark\.(fork|portal|callback)\z/;
+    return undef unless _plain_scalar($base->{purpose}) && $base->{purpose} =~ /^spark\.(fork|portal|callback|reaction)\z/;
     return {
         provider          => $base->{provider},
         purpose           => $base->{purpose},

@@ -46,6 +46,24 @@ return sub {
     $assert->like($fork->{system}, qr/Never use slurs, threats, sexual humiliation/i,
         'mb703-948: caustic tone retains explicit safety boundaries');
 
+    $assert->like($fork->{system}, qr/Never pit two channel participants against each other/i,
+        'mb708: Fork prompt forbids lazy person-versus-person framing');
+    $assert->like($fork->{system}, qr/avoid the lazy pattern "who is right\?"/i,
+        'mb708: Fork prompt explicitly rejects the observed who-is-right pattern');
+
+    my $reaction_req = build_spark_request(
+        kind => 'reaction', language => 'fr', provider => 'auto',
+        context => [
+            'Alice: encore un test rapide',
+            'Bob: tu avais dit ça il y a vingt minutes',
+            'Alice: techniquement il est toujours rapide',
+        ],
+    );
+    $assert->is($reaction_req->{purpose}, 'spark.reaction',
+        'mb708: Reaction owns a provider-neutral Spark purpose');
+    $assert->like($reaction_req->{system}, qr/Do not ask a question, do not offer A\/B choices/i,
+        'mb708: Reaction is deliberately conversational rather than a quiz');
+
     my $req_summary = spark_request_summary($fork);
     $assert->is($req_summary->{purpose}, 'spark.fork',
         'mb703-948: request summary exposes metadata without generated content');
@@ -76,6 +94,16 @@ return sub {
     my $declined = parse_spark_generation('callback', 'NO_SPARK');
     $assert->is($declined->{reason}, 'model_declined',
         'mb703-948: model may explicitly decline a weak Callback');
+
+    my $reaction = parse_spark_generation(
+        'reaction',
+        'LINE: Troisième "test rapide" : le mot rapide porte désormais une cape d\'invisibilité.',
+    );
+    $assert->is($reaction->{action}, 'ready',
+        'mb708: compact Reaction line is accepted');
+    my $reaction_declined = parse_spark_generation('reaction', 'NO_SPARK');
+    $assert->is($reaction_declined->{reason}, 'model_declined',
+        'mb708: Reaction may decline when recent context has no precise hook');
 
     my $injected = parse_spark_generation(
         'callback',

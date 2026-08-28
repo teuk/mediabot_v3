@@ -31,6 +31,7 @@ use Mediabot::Spark::Orchestrator ();
 use Mediabot::Spark::Generator ();
 use Mediabot::Spark::DryRun ();
 use Mediabot::Spark::Sender ();
+use Mediabot::Spark::Portal ();
 use Mediabot::VDM::Runtime ();
 use Mediabot::Radio::Icecast;
 use Mediabot::DB;
@@ -93,6 +94,10 @@ sub _spark_sync_sender_arm;
 sub _spark_game_active;
 sub _spark_delivery_state;
 sub _spark_handle_candidate;
+sub _spark_portal_runtime;
+sub _spark_submit_portal_close;
+sub _spark_handle_portal_completion;
+sub _spark_fail_portal_close;
 sub _spark_vdm_runtime;
 sub _spark_handle_vdm_candidate;
 sub _spark_finish_human_event;
@@ -193,6 +198,13 @@ sub _spark_sender {
     return $bot->{spark_sender};
 }
 
+sub _spark_portal_runtime {
+    my ($bot) = @_;
+    return undef unless $bot;
+    $bot->{spark_portal} ||= Mediabot::Spark::Portal->new();
+    return $bot->{spark_portal};
+}
+
 sub _spark_sync_sender_arm {
     my ($bot, $sender) = @_;
     return 0 unless $bot && $sender;
@@ -253,11 +265,20 @@ sub _spark_delivery_state {
         $bot->{spark_state}->capture_event_generation($channel)
     };
 
+    my $flood_suppressed = 1;
+    if ($bot->{spark_orchestrator}) {
+        $flood_suppressed = eval {
+            $bot->{spark_orchestrator}->flood_suppressed($channel) ? 1 : 0
+        };
+        $flood_suppressed = 1 if $@;
+    }
+
     return {
         enabled            => $enabled,
         runtime_active     => $irc_state->{runtime_active} ? 1 : 0,
         irc_connected      => $irc_state->{irc_connected} ? 1 : 0,
         channel_joined     => $irc_state->{channel_joined} ? 1 : 0,
+        flood_suppressed   => $flood_suppressed ? 1 : 0,
         game_active        => _spark_game_active($bot, $channel) ? 1 : 0,
         wit_pending        => $wit_pending,
         current_generation => $current_generation,
@@ -292,6 +313,7 @@ sub _spark_handle_candidate {
                 : !$pre->{runtime_active} ? 'runtime_inactive'
                 : !$pre->{irc_connected}  ? 'irc_disconnected'
                 : !$pre->{channel_joined} ? 'not_joined'
+                : $pre->{flood_suppressed} ? 'flood_suppressed'
                 : $pre->{game_active}     ? 'game_active'
                 : $pre->{wit_pending}     ? 'wit_pending'
                 : undef;
@@ -318,6 +340,29 @@ sub _spark_handle_candidate {
         return 0;
     }
 
+    my $portal;
+    if ($kind eq 'portal') {
+        $portal = eval { _spark_portal_runtime($bot) };
+        my $collector = $portal
+            ? eval {
+                $portal->begin(
+                    channel => $channel,
+                    generation => $generation,
+                )
+            }
+            : undef;
+        unless (ref($collector) eq 'HASH'
+            && ($collector->{action} // '') eq 'begin') {
+            eval { $bot->{spark_state}->invalidate_event($channel); };
+            my $line = Mediabot::Spark::Sender::format_sender_log($channel, {
+                action => 'no_send', reason => 'portal_collector_error',
+                kind => $kind, generation => $generation,
+            });
+            $bot->{logger}->log(3, $line) if defined $line;
+            return 0;
+        }
+    }
+
     my $send = eval {
         $sender->attempt_send(
             channel    => $channel,
@@ -334,11 +379,234 @@ sub _spark_handle_candidate {
 
     if (($send->{action} // '') ne 'sent') {
         eval { $bot->{spark_state}->invalidate_event($channel); };
+        eval { $portal->forget_channel($channel); } if $portal;
     }
 
     my $line = Mediabot::Spark::Sender::format_sender_log($channel, $send);
     $bot->{logger}->log(3, $line) if defined $line;
     return (($send->{action} // '') eq 'sent') ? 1 : 0;
+}
+
+sub _spark_fail_portal_close {
+    my ($bot, $channel, $generation, $reason) = @_;
+    return 0 unless $bot && defined($channel) && $channel =~ /^#/;
+    $reason = 'portal_close_error'
+        unless defined($reason) && !ref($reason)
+            && $reason =~ /^[a-z_]{1,64}\z/;
+
+    my $portal = eval { _spark_portal_runtime($bot) };
+    my $portal_state = $portal ? eval { $portal->snapshot($channel) } : {};
+    my $count = ref($portal_state) eq 'HASH'
+        ? int($portal_state->{count} // 0)
+        : 0;
+
+    my $state = eval { $bot->{spark_state}->snapshot($channel) };
+    if (ref($state) eq 'HASH'
+        && $state->{event_active}
+        && ($state->{event_kind} // '') eq 'portal'
+        && int($state->{current_generation} // 0) == int($generation // 0)) {
+        eval {
+            $bot->{spark_state}->finish_event(
+                channel => $channel,
+                outcome => 'error',
+            );
+        };
+    }
+
+    eval { $portal->forget_channel($channel); } if $portal;
+
+    my $line = Mediabot::Spark::Portal::format_portal_log($channel, {
+        action => 'close_failed',
+        reason => $reason,
+        generation => int($generation // 0),
+        count => $count,
+        target => 3,
+    });
+    $bot->{logger}->log(3, $line) if defined $line;
+    return 1;
+}
+
+sub _spark_handle_portal_completion {
+    my ($bot, $channel, $generation, $candidate) = @_;
+    return 0 unless $bot && defined($channel) && $channel =~ /^#/;
+    return _spark_fail_portal_close(
+        $bot, $channel, $generation, 'invalid_candidate',
+    ) unless ref($candidate) eq 'HASH'
+        && ($candidate->{kind} // '') eq 'portal'
+        && ref($candidate->{generated}) eq 'HASH';
+
+    my $sender = eval { _spark_sender($bot) };
+    return _spark_fail_portal_close(
+        $bot, $channel, $generation, 'sender_unavailable',
+    ) unless $sender && _spark_sync_sender_arm($bot, $sender);
+
+    my $portal = eval { _spark_portal_runtime($bot) };
+    my $portal_state = $portal ? eval { $portal->snapshot($channel) } : {};
+    my $count = ref($portal_state) eq 'HASH'
+        ? int($portal_state->{count} // 0)
+        : 0;
+
+    my $send = eval {
+        $sender->attempt_send(
+            channel      => $channel,
+            kind         => 'portal',
+            generation   => $generation,
+            continuation => 1,
+            generated    => $candidate->{generated},
+            state_cb     => sub { _spark_delivery_state($bot, $channel) },
+        )
+    };
+    $send = {
+        action => 'no_send', reason => 'sender_exception',
+        kind => 'portal', generation => $generation, continuation => 1,
+    } unless ref($send) eq 'HASH';
+
+    my $sender_log = Mediabot::Spark::Sender::format_sender_log(
+        $channel, $send,
+    );
+    $bot->{logger}->log(3, $sender_log) if defined $sender_log;
+
+    unless (($send->{action} // '') eq 'sent') {
+        return _spark_fail_portal_close(
+            $bot,
+            $channel,
+            $generation,
+            $send->{reason} // 'send_failed',
+        );
+    }
+
+    my $done = eval {
+        $bot->{spark_state}->finish_event(
+            channel => $channel,
+            outcome => 'engaged',
+        )
+    };
+    eval { $portal->forget_channel($channel); } if $portal;
+
+    my $portal_log = Mediabot::Spark::Portal::format_portal_log($channel, {
+        action => 'close_sent',
+        reason => 'synthesis_delivered',
+        generation => $generation,
+        count => $count,
+        target => 3,
+    });
+    $bot->{logger}->log(3, $portal_log) if defined $portal_log;
+
+    if (ref($done) eq 'HASH') {
+        $bot->{logger}->log(
+            3,
+            '[SPARK_EVENT] channel=' . $channel
+                . ' outcome=engaged kind=portal'
+                . ' interaction=contributions'
+                . ' contributions=' . $count
+                . ' close=sent'
+                . ' miss_streak=' . int($done->{miss_streak} // 0)
+                . ' cooldown_seconds=' . int($done->{cooldown_seconds} // 0)
+        );
+    }
+    return ref($done) eq 'HASH' ? 1 : 0;
+}
+
+sub _spark_submit_portal_close {
+    my ($bot, $channel, $generation, $trigger) = @_;
+    return 0 unless $bot && defined($channel) && $channel =~ /^#/;
+    $trigger = 'target_reached'
+        unless defined($trigger) && !ref($trigger)
+            && $trigger =~ /^(?:target_reached|deadline_fallback)\z/;
+
+    my $portal = eval { _spark_portal_runtime($bot) };
+    return _spark_fail_portal_close(
+        $bot, $channel, $generation, 'collector_unavailable',
+    ) unless $portal;
+
+    my $portal_state = eval { $portal->snapshot($channel) };
+    my $contributions = eval {
+        $portal->contributions(
+            channel => $channel,
+            generation => $generation,
+        )
+    };
+    return _spark_fail_portal_close(
+        $bot, $channel, $generation, 'insufficient_contributions',
+    ) unless ref($portal_state) eq 'HASH'
+        && ($portal_state->{phase} // '') eq 'closing'
+        && ref($contributions) eq 'ARRAY'
+        && @$contributions >= 2;
+
+    my $state = eval { $bot->{spark_state}->snapshot($channel) };
+    return _spark_fail_portal_close(
+        $bot, $channel, $generation, 'stale_generation',
+    ) unless ref($state) eq 'HASH'
+        && $state->{event_active}
+        && ($state->{event_kind} // '') eq 'portal'
+        && int($state->{current_generation} // 0) == int($generation);
+
+    my $dryrun = eval { _spark_ai_dryrun($bot) };
+    return _spark_fail_portal_close(
+        $bot, $channel, $generation, 'generator_unavailable',
+    ) unless $dryrun;
+
+    my $completed = 0;
+    my $started = eval {
+        $dryrun->submit_candidate(
+            channel => $channel,
+            kind => 'portal',
+            language => Mediabot::Helpers::channel_lang($bot, $channel),
+            context => [],
+            contributions => $contributions,
+            provider => 'auto',
+            on_candidate => sub {
+                my ($candidate) = @_;
+                $completed = 1;
+                _spark_handle_portal_completion(
+                    $bot, $channel, $generation, $candidate,
+                );
+            },
+            on_result => sub {
+                my ($ai_summary) = @_;
+                $ai_summary = {
+                    action => 'no_content',
+                    reason => 'invalid_generator_result',
+                    kind => 'portal',
+                } unless ref($ai_summary) eq 'HASH';
+                my $ai_log = Mediabot::Spark::DryRun::format_ai_dryrun_log(
+                    $channel, $ai_summary,
+                );
+                $bot->{logger}->log(3, $ai_log) if defined $ai_log;
+
+                unless (($ai_summary->{action} // '') eq 'ready') {
+                    $completed = 1;
+                    _spark_fail_portal_close(
+                        $bot,
+                        $channel,
+                        $generation,
+                        $ai_summary->{reason} // 'generation_failed',
+                    );
+                }
+            },
+        )
+    };
+
+    if ($@) {
+        return _spark_fail_portal_close(
+            $bot, $channel, $generation, 'submit_exception',
+        );
+    }
+    if (!$started && !$completed) {
+        return _spark_fail_portal_close(
+            $bot, $channel, $generation, 'submit_rejected',
+        );
+    }
+
+    my $line = Mediabot::Spark::Portal::format_portal_log($channel, {
+        action => 'close_submit',
+        reason => $trigger,
+        generation => $generation,
+        count => scalar(@$contributions),
+        target => 3,
+    });
+    $bot->{logger}->log(3, $line) if defined $line;
+    return $started ? 1 : 0;
 }
 
 sub _spark_vdm_runtime {
@@ -433,7 +701,7 @@ sub _spark_handle_vdm_candidate {
 }
 
 sub _spark_finish_human_event {
-    my ($bot, $channel, $observation, $nick, $line) = @_;
+    my ($bot, $channel, $observation, $nick, $line, $bot_nick) = @_;
     return 0 unless $bot && defined($channel) && $channel =~ /^#/;
     return 0 unless ref($observation) eq 'HASH';
     return 0 unless ($observation->{reason} // '') eq 'human_context';
@@ -443,6 +711,47 @@ sub _spark_finish_human_event {
 
     my $kind = $before->{event_kind} // 'unknown';
     my $choice;
+    if ($kind eq 'portal') {
+        return 0 unless int($before->{event_remaining_seconds} // 0) > 0;
+
+        my $portal = eval { _spark_portal_runtime($bot) };
+        return 0 unless $portal;
+        my $collected = eval {
+            $portal->collect(
+                channel => $channel,
+                generation => $before->{current_generation},
+                nick => $nick,
+                bot_nick => $bot_nick,
+                message => $line,
+                command_char => $bot->{conf}->get('main.MAIN_PROG_CMD_CHAR'),
+            )
+        };
+        return 0 unless ref($collected) eq 'HASH';
+
+        my $portal_log = Mediabot::Spark::Portal::format_portal_log(
+            $channel, $collected,
+        );
+        $bot->{logger}->log(3, $portal_log) if defined $portal_log;
+
+        return 0 unless ($collected->{action} // '') eq 'collect';
+        return 1 unless $collected->{ready};
+
+        my $closing = eval {
+            $portal->mark_closing(
+                channel => $channel,
+                generation => $before->{current_generation},
+            )
+        };
+        return 0 unless ref($closing) eq 'HASH'
+            && ($closing->{action} // '') eq 'close';
+        return _spark_submit_portal_close(
+            $bot,
+            $channel,
+            $before->{current_generation},
+            'target_reached',
+        );
+    }
+
     if ($kind eq 'fork') {
         return 0 unless int($before->{event_remaining_seconds} // 0) > 0;
         $choice = Mediabot::Spark::Sender::parse_fork_choice($line);
@@ -494,7 +803,14 @@ sub _spark_observe_public_line {
     # dry-run generation. The provider may still finish asynchronously, but its
     # generation token will be stale and only a metadata-only revoked result can
     # be logged. No candidate survives a conversation that has resumed.
-    if ($bot->{spark_ai_dryrun}) {
+    my $portal_closing = 0;
+    if ($bot->{spark_portal}) {
+        my $portal_state = eval { $bot->{spark_portal}->snapshot($channel) };
+        $portal_closing = 1
+            if ref($portal_state) eq 'HASH'
+                && ($portal_state->{phase} // '') eq 'closing';
+    }
+    if ($bot->{spark_ai_dryrun} && !$portal_closing) {
         eval { $bot->{spark_ai_dryrun}->invalidate_channel($channel); };
     }
 
@@ -517,7 +833,11 @@ sub _spark_observe_public_line {
         return 0;
     }
 
-    eval { _spark_finish_human_event($bot, $channel, $summary, $nick, $line); };
+    eval {
+        _spark_finish_human_event(
+            $bot, $channel, $summary, $nick, $line, $bot_nick,
+        );
+    };
     return 1;
 }
 
@@ -559,8 +879,86 @@ sub _spark_tick_all {
 
         my $game_active = _spark_game_active($bot, $channel);
 
-        my $expired = eval { $bot->{spark_state}->expire_due_event($channel) };
+        my $skip_event_expiry = 0;
+        if ($bot->{spark_portal}) {
+            my $portal_state = eval { $bot->{spark_portal}->snapshot($channel) };
+            my $event_state = eval { $bot->{spark_state}->snapshot($channel) };
+            $portal_state = {} unless ref($portal_state) eq 'HASH';
+            $event_state = {} unless ref($event_state) eq 'HASH';
+
+            if ($portal_state->{active}) {
+                my $portal_generation = int($portal_state->{generation} // 0);
+                my $event_matches = $event_state->{event_active}
+                    && ($event_state->{event_kind} // '') eq 'portal'
+                    && int($event_state->{current_generation} // 0)
+                        == $portal_generation;
+
+                unless ($event_matches) {
+                    eval { $bot->{spark_portal}->forget_channel($channel); };
+                }
+                elsif (!$enabled
+                    || !$ai_available
+                    || !$irc_state->{runtime_active}
+                    || !$irc_state->{irc_connected}
+                    || !$irc_state->{channel_joined}
+                    || $game_active
+                    || $wit_pending) {
+                    eval {
+                        $bot->{spark_ai_dryrun}->invalidate_channel($channel)
+                            if $bot->{spark_ai_dryrun};
+                    };
+                    _spark_fail_portal_close(
+                        $bot,
+                        $channel,
+                        $portal_generation,
+                        'runtime_gate_changed',
+                    );
+                    $skip_event_expiry = 1;
+                }
+                elsif (($portal_state->{phase} // '') eq 'closing') {
+                    if ($portal_state->{closing_timed_out}) {
+                        eval {
+                            $bot->{spark_ai_dryrun}->invalidate_channel($channel)
+                                if $bot->{spark_ai_dryrun};
+                        };
+                        _spark_fail_portal_close(
+                            $bot,
+                            $channel,
+                            $portal_generation,
+                            'closing_timeout',
+                        );
+                    }
+                    $skip_event_expiry = 1;
+                }
+                elsif (int($event_state->{event_remaining_seconds} // 0) == 0
+                    && int($portal_state->{count} // 0)
+                        >= int($portal_state->{minimum} // 2)) {
+                    my $closing = eval {
+                        $bot->{spark_portal}->mark_closing(
+                            channel => $channel,
+                            generation => $portal_generation,
+                        )
+                    };
+                    if (ref($closing) eq 'HASH'
+                        && ($closing->{action} // '') eq 'close') {
+                        _spark_submit_portal_close(
+                            $bot,
+                            $channel,
+                            $portal_generation,
+                            'deadline_fallback',
+                        );
+                        $skip_event_expiry = 1;
+                    }
+                }
+            }
+        }
+
+        my $expired = $skip_event_expiry
+            ? undef
+            : eval { $bot->{spark_state}->expire_due_event($channel) };
         if (ref($expired) eq 'HASH') {
+            eval { $bot->{spark_portal}->forget_channel($channel); }
+                if $bot->{spark_portal};
             $bot->{logger}->log(
                 3,
                 '[SPARK_EVENT] channel=' . $channel
