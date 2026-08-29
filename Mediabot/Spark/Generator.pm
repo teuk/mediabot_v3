@@ -72,14 +72,24 @@ sub _clean_context {
     return [] unless defined $context;
     croak 'context must be an array reference' unless ref($context) eq 'ARRAY';
 
-    my @out;
-    my $total = 0;
+    my @clean;
     for my $raw (@$context) {
-        last if @out >= $DEFAULT{max_context_lines};
         my $line = _clean_line($raw, $DEFAULT{max_line_chars});
         next unless defined $line;
-        last if $total + length($line) > $DEFAULT{max_context_chars};
-        push @out, $line;
+        push @clean, $line;
+    }
+
+    # Observer context is chronological. Keep the freshest bounded tail, then
+    # restore chronological order for the provider. Taking the first eight
+    # lines made a full observer window silently discard its newest material.
+    splice @clean, 0, @clean - $DEFAULT{max_context_lines}
+        if @clean > $DEFAULT{max_context_lines};
+
+    my @out;
+    my $total = 0;
+    for my $line (reverse @clean) {
+        next if $total + length($line) > $DEFAULT{max_context_chars};
+        unshift @out, $line;
         $total += length($line);
     }
     return \@out;
@@ -144,6 +154,15 @@ sub _kind_contract {
             'Return exactly one physical line:',
             'LINE: <single IRC-ready invitation>';
     }
+    if ($kind eq 'mosaic') {
+        return join "\n",
+            'Close a collaborative flash mosaic from the supplied single-word ingredients.',
+            'Fuse every safe ingredient into one vivid, dry and absurd micro-scene. Rephrase or omit an ingredient if repeating it would be unsafe.',
+            'Never name, rank, score or otherwise identify the contributors.',
+            'Do not ask another question, request more input, declare a winner or start a second round.',
+            'Return exactly one physical line:',
+            'LINE: <single IRC-ready payoff>';
+    }
     if ($kind eq 'callback') {
         return join "\n",
             'Use the recent conversation only to revive one specific thread that genuinely has a hook.',
@@ -195,6 +214,8 @@ sub build_spark_request {
             && @$context < 3;
     croak 'portal wrap-up requires at least two contributions'
         if $kind eq 'portal' && exists($args{contributions}) && @$contrib < 2;
+    croak 'mosaic wrap-up requires at least two contributions'
+        if $kind eq 'mosaic' && @$contrib < 2;
 
     my @material;
     if (@$context) {
@@ -290,7 +311,7 @@ sub spark_request_summary {
     my $base = request_summary($request);
     return undef unless ref($base) eq 'HASH';
     return undef unless _plain_scalar($base->{purpose})
-        && $base->{purpose} =~ /^spark\.(fork|portal|callback|reaction|stage_cue)\z/;
+        && $base->{purpose} =~ /^spark\.(fork|portal|callback|reaction|mosaic|stage_cue)\z/;
     return {
         provider          => $base->{provider},
         purpose           => $base->{purpose},

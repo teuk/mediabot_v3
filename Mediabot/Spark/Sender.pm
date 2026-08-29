@@ -59,7 +59,7 @@ sub _result {
         $out{$key} = int($extra{$key});
     }
     $out{kind} = $extra{kind}
-        if _plain_scalar($extra{kind}) && "$extra{kind}" =~ /^(?:fork|portal|callback|reaction|stage_cue|vdm)\z/;
+        if _plain_scalar($extra{kind}) && "$extra{kind}" =~ /^(?:fork|portal|callback|reaction|mosaic|stage_cue|vdm)\z/;
     $out{delivery} = $extra{delivery}
         if _plain_scalar($extra{delivery})
             && "$extra{delivery}" =~ /^(?:message|action)\z/;
@@ -143,7 +143,7 @@ sub new {
         last_sent_at => {},
         last_sent_generation => {},
         last_sent_kind => {},
-        portal_continuation_used => {},
+        interactive_continuation_used => {},
     }, $class;
 }
 
@@ -187,13 +187,13 @@ sub _rate_limit {
     return $retry;
 }
 
-sub _portal_continuation_allowed {
+sub _interactive_continuation_allowed {
     my ($self, $key, $generation, $kind, $now) = @_;
-    return 0 unless $kind eq 'portal';
+    return 0 unless $kind eq 'portal' || $kind eq 'mosaic';
     return 0 unless exists $self->{last_sent_at}{$key};
     return 0 unless int($self->{last_sent_generation}{$key} // 0) == $generation;
-    return 0 unless ($self->{last_sent_kind}{$key} // '') eq 'portal';
-    return 0 if $self->{portal_continuation_used}{$key};
+    return 0 unless ($self->{last_sent_kind}{$key} // '') eq $kind;
+    return 0 if $self->{interactive_continuation_used}{$key};
 
     my $elapsed = $now - $self->{last_sent_at}{$key};
     return 0 if $elapsed < 0;
@@ -234,7 +234,7 @@ sub attempt_send {
     return _result(
         'no_send', 'invalid_continuation',
         generation => $generation, kind => $kind, delivery => $delivery,
-    ) if $continuation && $kind ne 'portal';
+    ) if $continuation && $kind ne 'portal' && $kind ne 'mosaic';
 
     my $text = render_generation($args{generated});
     return _result('no_send', 'invalid_content', generation => $generation, kind => $kind, delivery => $delivery)
@@ -248,18 +248,18 @@ sub attempt_send {
         unless defined $now;
 
     my $key = lc $channel;
-    my $portal_continuation = $continuation
-        ? $self->_portal_continuation_allowed(
+    my $interactive_continuation = $continuation
+        ? $self->_interactive_continuation_allowed(
             $key, $generation, $kind, $now,
         )
         : 0;
     return _result(
         'no_send', 'continuation_unavailable',
         generation => $generation, kind => $kind, continuation => 1,
-    ) if $continuation && !$portal_continuation;
+    ) if $continuation && !$interactive_continuation;
 
     my $retry;
-    unless ($portal_continuation) {
+    unless ($interactive_continuation) {
         $retry = $self->_rate_limit($key, $now);
         return _result(
             'no_send', 'rate_limited',
@@ -313,7 +313,7 @@ sub attempt_send {
         return _result(
             'no_send', 'continuation_unavailable',
             generation => $generation, kind => $kind, continuation => 1,
-        ) unless $self->_portal_continuation_allowed(
+        ) unless $self->_interactive_continuation_allowed(
             $key, $generation, $kind, $before_send,
         );
     }
@@ -336,12 +336,12 @@ sub attempt_send {
     $sent_at = $before_send unless defined $sent_at;
     $self->{last_sent_at}{$key} = $sent_at;
     if ($continuation) {
-        $self->{portal_continuation_used}{$key} = 1;
+        $self->{interactive_continuation_used}{$key} = 1;
     }
     else {
         $self->{last_sent_generation}{$key} = $generation;
         $self->{last_sent_kind}{$key} = $kind;
-        $self->{portal_continuation_used}{$key} = 0;
+        $self->{interactive_continuation_used}{$key} = 0;
     }
 
     return _result(
@@ -371,7 +371,7 @@ sub format_sender_log {
         'reason=' . $summary->{reason},
     );
     push @parts, 'kind=' . $summary->{kind}
-        if _plain_scalar($summary->{kind}) && "$summary->{kind}" =~ /^(?:fork|portal|callback|reaction|stage_cue|vdm)\z/;
+        if _plain_scalar($summary->{kind}) && "$summary->{kind}" =~ /^(?:fork|portal|callback|reaction|mosaic|stage_cue|vdm)\z/;
     push @parts, 'delivery=' . $summary->{delivery}
         if _plain_scalar($summary->{delivery})
             && "$summary->{delivery}" =~ /^(?:message|action)\z/;

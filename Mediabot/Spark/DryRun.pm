@@ -222,7 +222,7 @@ sub format_ai_dryrun_log {
     return undef unless $action eq 'ready'
         || $action eq 'no_content'
         || $action eq 'revoked';
-    return undef unless $kind =~ /^(?:fork|portal|callback|reaction|stage_cue)\z/;
+    return undef unless $kind =~ /^(?:fork|portal|callback|reaction|mosaic|stage_cue)\z/;
 
     my @parts = (
         '[SPARK_AI_DRYRUN]',

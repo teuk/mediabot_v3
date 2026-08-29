@@ -32,6 +32,11 @@ use Mediabot::Spark::Generator ();
 use Mediabot::Spark::DryRun ();
 use Mediabot::Spark::Sender ();
 use Mediabot::Spark::Portal ();
+use Mediabot::Spark::Mosaic qw(
+    mosaic_target_for_regime
+    mosaic_opening_generation
+);
+use Mediabot::Spark::Identity ();
 use Mediabot::Spark::Event qw(spark_event_requires_response);
 use Mediabot::VDM::Runtime ();
 use Mediabot::Radio::Icecast;
@@ -97,9 +102,14 @@ sub _spark_game_active;
 sub _spark_delivery_state;
 sub _spark_handle_candidate;
 sub _spark_portal_runtime;
+sub _spark_mosaic_runtime;
 sub _spark_submit_portal_close;
 sub _spark_handle_portal_completion;
 sub _spark_fail_portal_close;
+sub _spark_submit_mosaic_close;
+sub _spark_handle_mosaic_completion;
+sub _spark_fail_mosaic_close;
+sub _spark_tick_mosaic_lifecycle;
 sub _spark_vdm_runtime;
 sub _spark_handle_vdm_candidate;
 sub _spark_finish_human_event;
@@ -221,6 +231,13 @@ sub _spark_portal_runtime {
     return $bot->{spark_portal};
 }
 
+sub _spark_mosaic_runtime {
+    my ($bot) = @_;
+    return undef unless $bot;
+    $bot->{spark_mosaic} ||= Mediabot::Spark::Mosaic->new();
+    return $bot->{spark_mosaic};
+}
+
 sub _spark_sync_sender_arm {
     my ($bot, $sender) = @_;
     return 0 unless $bot && $sender;
@@ -330,7 +347,9 @@ sub _spark_finish_ambient_delivery {
     return 0 if $@ || $requires_response;
 
     my $action_cooldown = $kind eq 'stage_cue'
-        ? eval { $bot->{spark_orchestrator}->action_cooldown_seconds() }
+        ? eval {
+            $bot->{spark_orchestrator}->action_cooldown_seconds($channel)
+        }
         : undef;
 
     my $done = eval {
@@ -425,7 +444,7 @@ sub _spark_handle_candidate {
         return 0;
     }
 
-    my $portal;
+    my ($portal, $mosaic);
     if ($kind eq 'portal') {
         $portal = eval { _spark_portal_runtime($bot) };
         my $collector = $portal
@@ -447,6 +466,32 @@ sub _spark_handle_candidate {
             return 0;
         }
     }
+    elsif ($kind eq 'mosaic') {
+        $mosaic = eval { _spark_mosaic_runtime($bot) };
+        my $collector = $mosaic
+            ? eval {
+                $mosaic->begin(
+                    channel => $channel,
+                    generation => $generation,
+                    target => $candidate->{target},
+                )
+            }
+            : undef;
+        unless (ref($collector) eq 'HASH'
+            && ($collector->{action} // '') eq 'begin') {
+            eval { $bot->{spark_state}->invalidate_event($channel); };
+            my $line = Mediabot::Spark::Sender::format_sender_log($channel, {
+                action => 'no_send', reason => 'mosaic_collector_error',
+                kind => $kind, generation => $generation,
+            });
+            $bot->{logger}->log(3, $line) if defined $line;
+            return 0;
+        }
+        my $mosaic_log = Mediabot::Spark::Mosaic::format_mosaic_log(
+            $channel, $collector,
+        );
+        $bot->{logger}->log(3, $mosaic_log) if defined $mosaic_log;
+    }
 
     my $send = eval {
         $sender->attempt_send(
@@ -465,6 +510,7 @@ sub _spark_handle_candidate {
     if (($send->{action} // '') ne 'sent') {
         eval { $bot->{spark_state}->invalidate_event($channel); };
         eval { $portal->forget_channel($channel); } if $portal;
+        eval { $mosaic->forget_channel($channel); } if $mosaic;
     }
 
     my $line = Mediabot::Spark::Sender::format_sender_log($channel, $send);
@@ -696,6 +742,293 @@ sub _spark_submit_portal_close {
     return $started ? 1 : 0;
 }
 
+sub _spark_fail_mosaic_close {
+    my ($bot, $channel, $generation, $reason) = @_;
+    return 0 unless $bot && defined($channel) && $channel =~ /^#/;
+    $reason = 'mosaic_close_error'
+        unless defined($reason) && !ref($reason)
+            && $reason =~ /^[a-z_]{1,64}\z/;
+
+    my $mosaic = eval { _spark_mosaic_runtime($bot) };
+    my $mosaic_state = $mosaic ? eval { $mosaic->snapshot($channel) } : {};
+    my $count = ref($mosaic_state) eq 'HASH'
+        ? int($mosaic_state->{count} // 0)
+        : 0;
+    my $target = ref($mosaic_state) eq 'HASH'
+        ? int($mosaic_state->{target} // 0)
+        : 0;
+
+    my $state = eval { $bot->{spark_state}->snapshot($channel) };
+    if (ref($state) eq 'HASH'
+        && $state->{event_active}
+        && ($state->{event_kind} // '') eq 'mosaic'
+        && int($state->{current_generation} // 0) == int($generation // 0)) {
+        eval {
+            $bot->{spark_state}->finish_event(
+                channel => $channel,
+                outcome => 'error',
+            );
+        };
+    }
+
+    eval { $mosaic->forget_channel($channel); } if $mosaic;
+    my $line = Mediabot::Spark::Mosaic::format_mosaic_log($channel, {
+        action => 'close_failed', reason => $reason,
+        generation => int($generation // 0),
+        count => $count, target => $target,
+    });
+    $bot->{logger}->log(3, $line) if defined $line;
+    return 1;
+}
+
+sub _spark_handle_mosaic_completion {
+    my ($bot, $channel, $generation, $candidate) = @_;
+    return 0 unless $bot && defined($channel) && $channel =~ /^#/;
+    return _spark_fail_mosaic_close(
+        $bot, $channel, $generation, 'invalid_candidate',
+    ) unless ref($candidate) eq 'HASH'
+        && ($candidate->{kind} // '') eq 'mosaic'
+        && ref($candidate->{generated}) eq 'HASH';
+
+    my $sender = eval { _spark_sender($bot) };
+    return _spark_fail_mosaic_close(
+        $bot, $channel, $generation, 'sender_unavailable',
+    ) unless $sender && _spark_sync_sender_arm($bot, $sender);
+
+    my $mosaic = eval { _spark_mosaic_runtime($bot) };
+    my $mosaic_state = $mosaic ? eval { $mosaic->snapshot($channel) } : {};
+    my $count = ref($mosaic_state) eq 'HASH'
+        ? int($mosaic_state->{count} // 0)
+        : 0;
+    my $target = ref($mosaic_state) eq 'HASH'
+        ? int($mosaic_state->{target} // 0)
+        : 0;
+
+    my $send = eval {
+        $sender->attempt_send(
+            channel => $channel,
+            kind => 'mosaic',
+            generation => $generation,
+            continuation => 1,
+            generated => $candidate->{generated},
+            state_cb => sub { _spark_delivery_state($bot, $channel) },
+        )
+    };
+    $send = {
+        action => 'no_send', reason => 'sender_exception',
+        kind => 'mosaic', generation => $generation, continuation => 1,
+    } unless ref($send) eq 'HASH';
+
+    my $sender_log = Mediabot::Spark::Sender::format_sender_log(
+        $channel, $send,
+    );
+    $bot->{logger}->log(3, $sender_log) if defined $sender_log;
+    unless (($send->{action} // '') eq 'sent') {
+        return _spark_fail_mosaic_close(
+            $bot, $channel, $generation,
+            $send->{reason} // 'send_failed',
+        );
+    }
+
+    my $done = eval {
+        $bot->{spark_state}->finish_event(
+            channel => $channel,
+            outcome => 'engaged',
+        )
+    };
+    eval { $mosaic->forget_channel($channel); } if $mosaic;
+
+    my $mosaic_log = Mediabot::Spark::Mosaic::format_mosaic_log($channel, {
+        action => 'close_sent', reason => 'synthesis_delivered',
+        generation => $generation, count => $count, target => $target,
+    });
+    $bot->{logger}->log(3, $mosaic_log) if defined $mosaic_log;
+
+    if (ref($done) eq 'HASH') {
+        $bot->{logger}->log(
+            3,
+            '[SPARK_EVENT] channel=' . $channel
+                . ' outcome=engaged kind=mosaic'
+                . ' interaction=word_mosaic'
+                . ' contributions=' . $count
+                . ' target=' . $target
+                . ' close=sent'
+                . ' miss_streak=' . int($done->{miss_streak} // 0)
+                . ' cooldown_seconds=' . int($done->{cooldown_seconds} // 0)
+        );
+    }
+    return ref($done) eq 'HASH' ? 1 : 0;
+}
+
+sub _spark_submit_mosaic_close {
+    my ($bot, $channel, $generation, $trigger) = @_;
+    return 0 unless $bot && defined($channel) && $channel =~ /^#/;
+    $trigger = 'target_reached'
+        unless defined($trigger) && !ref($trigger)
+            && $trigger =~ /^(?:target_reached|deadline_fallback)\z/;
+
+    my $mosaic = eval { _spark_mosaic_runtime($bot) };
+    return _spark_fail_mosaic_close(
+        $bot, $channel, $generation, 'collector_unavailable',
+    ) unless $mosaic;
+
+    my $mosaic_state = eval { $mosaic->snapshot($channel) };
+    my $contributions = eval {
+        $mosaic->contributions(
+            channel => $channel,
+            generation => $generation,
+        )
+    };
+    return _spark_fail_mosaic_close(
+        $bot, $channel, $generation, 'insufficient_contributions',
+    ) unless ref($mosaic_state) eq 'HASH'
+        && ($mosaic_state->{phase} // '') eq 'closing'
+        && ref($contributions) eq 'ARRAY'
+        && @$contributions >= int($mosaic_state->{minimum} // 2);
+
+    my $state = eval { $bot->{spark_state}->snapshot($channel) };
+    return _spark_fail_mosaic_close(
+        $bot, $channel, $generation, 'stale_generation',
+    ) unless ref($state) eq 'HASH'
+        && $state->{event_active}
+        && ($state->{event_kind} // '') eq 'mosaic'
+        && int($state->{current_generation} // 0) == int($generation);
+
+    my $dryrun = eval { _spark_ai_dryrun($bot) };
+    return _spark_fail_mosaic_close(
+        $bot, $channel, $generation, 'generator_unavailable',
+    ) unless $dryrun;
+
+    my $completed = 0;
+    my $started = eval {
+        $dryrun->submit_candidate(
+            channel => $channel,
+            kind => 'mosaic',
+            language => Mediabot::Helpers::channel_lang($bot, $channel),
+            context => [],
+            contributions => $contributions,
+            provider => 'auto',
+            on_candidate => sub {
+                my ($candidate) = @_;
+                $completed = 1;
+                _spark_handle_mosaic_completion(
+                    $bot, $channel, $generation, $candidate,
+                );
+            },
+            on_result => sub {
+                my ($ai_summary) = @_;
+                $ai_summary = {
+                    action => 'no_content',
+                    reason => 'invalid_generator_result',
+                    kind => 'mosaic',
+                } unless ref($ai_summary) eq 'HASH';
+                my $ai_log = Mediabot::Spark::DryRun::format_ai_dryrun_log(
+                    $channel, $ai_summary,
+                );
+                $bot->{logger}->log(3, $ai_log) if defined $ai_log;
+                unless (($ai_summary->{action} // '') eq 'ready') {
+                    $completed = 1;
+                    _spark_fail_mosaic_close(
+                        $bot,
+                        $channel,
+                        $generation,
+                        $ai_summary->{reason} // 'generation_failed',
+                    );
+                }
+            },
+        )
+    };
+
+    if ($@) {
+        return _spark_fail_mosaic_close(
+            $bot, $channel, $generation, 'submit_exception',
+        );
+    }
+    if (!$started && !$completed) {
+        return _spark_fail_mosaic_close(
+            $bot, $channel, $generation, 'submit_rejected',
+        );
+    }
+
+    my $line = Mediabot::Spark::Mosaic::format_mosaic_log($channel, {
+        action => 'close_submit', reason => $trigger,
+        generation => $generation,
+        count => scalar(@$contributions),
+        target => int($mosaic_state->{target} // 0),
+    });
+    $bot->{logger}->log(3, $line) if defined $line;
+    return $started ? 1 : 0;
+}
+
+sub _spark_tick_mosaic_lifecycle {
+    my ($bot, $channel, %gates) = @_;
+    return 0 unless $bot && $bot->{spark_mosaic};
+
+    my $mosaic_state = eval { $bot->{spark_mosaic}->snapshot($channel) };
+    my $event_state = eval { $bot->{spark_state}->snapshot($channel) };
+    $mosaic_state = {} unless ref($mosaic_state) eq 'HASH';
+    $event_state = {} unless ref($event_state) eq 'HASH';
+    return 0 unless $mosaic_state->{active};
+
+    my $generation = int($mosaic_state->{generation} // 0);
+    my $event_matches = $event_state->{event_active}
+        && ($event_state->{event_kind} // '') eq 'mosaic'
+        && int($event_state->{current_generation} // 0) == $generation;
+    unless ($event_matches) {
+        eval { $bot->{spark_mosaic}->forget_channel($channel); };
+        return 0;
+    }
+
+    unless ($gates{enabled}
+        && $gates{ai_available}
+        && $gates{runtime_active}
+        && $gates{irc_connected}
+        && $gates{channel_joined}
+        && !$gates{game_active}
+        && !$gates{wit_pending}) {
+        eval {
+            $bot->{spark_ai_dryrun}->invalidate_channel($channel)
+                if $bot->{spark_ai_dryrun};
+        };
+        _spark_fail_mosaic_close(
+            $bot, $channel, $generation, 'runtime_gate_changed',
+        );
+        return 1;
+    }
+
+    if (($mosaic_state->{phase} // '') eq 'closing') {
+        if ($mosaic_state->{closing_timed_out}) {
+            eval {
+                $bot->{spark_ai_dryrun}->invalidate_channel($channel)
+                    if $bot->{spark_ai_dryrun};
+            };
+            _spark_fail_mosaic_close(
+                $bot, $channel, $generation, 'closing_timeout',
+            );
+        }
+        return 1;
+    }
+
+    if (int($event_state->{event_remaining_seconds} // 0) == 0
+        && int($mosaic_state->{count} // 0)
+            >= int($mosaic_state->{minimum} // 2)) {
+        my $closing = eval {
+            $bot->{spark_mosaic}->mark_closing(
+                channel => $channel,
+                generation => $generation,
+            )
+        };
+        if (ref($closing) eq 'HASH'
+            && ($closing->{action} // '') eq 'close') {
+            _spark_submit_mosaic_close(
+                $bot, $channel, $generation, 'deadline_fallback',
+            );
+            return 1;
+        }
+    }
+    return 0;
+}
+
 sub _spark_vdm_runtime {
     my ($bot) = @_;
     return undef unless $bot;
@@ -800,6 +1133,48 @@ sub _spark_finish_human_event {
 
     my $kind = $before->{event_kind} // 'unknown';
     my $choice;
+    if ($kind eq 'mosaic') {
+        return 0 unless int($before->{event_remaining_seconds} // 0) > 0;
+
+        my $mosaic = eval { _spark_mosaic_runtime($bot) };
+        return 0 unless $mosaic;
+        my $collected = eval {
+            $mosaic->collect(
+                channel => $channel,
+                generation => $before->{current_generation},
+                nick => $nick,
+                bot_nick => $bot_nick,
+                message => $line,
+            )
+        };
+        return 0 unless ref($collected) eq 'HASH';
+
+        my $mosaic_log = Mediabot::Spark::Mosaic::format_mosaic_log(
+            $channel, $collected,
+        );
+        $bot->{logger}->log(3, $mosaic_log) if defined $mosaic_log;
+
+        # Ordinary conversation and malformed +word attempts never become
+        # event participation. Only one explicit, valid +word is consumed.
+        return 0 unless ($collected->{action} // '') eq 'collect';
+        return 1 unless $collected->{ready};
+
+        my $closing = eval {
+            $mosaic->mark_closing(
+                channel => $channel,
+                generation => $before->{current_generation},
+            )
+        };
+        return 0 unless ref($closing) eq 'HASH'
+            && ($closing->{action} // '') eq 'close';
+        return _spark_submit_mosaic_close(
+            $bot,
+            $channel,
+            $before->{current_generation},
+            'target_reached',
+        );
+    }
+
     if ($kind eq 'portal') {
         return 0 unless int($before->{event_remaining_seconds} // 0) > 0;
 
@@ -878,7 +1253,7 @@ sub _spark_finish_human_event {
 }
 
 sub _spark_observe_public_line {
-    my ($bot, $bot_nick, $channel, $nick, $line) = @_;
+    my ($bot, $bot_nick, $channel, $nick, $line, $from_bot) = @_;
     return 0 unless $bot && defined($channel) && $channel =~ /^#/;
 
     my $enabled = eval {
@@ -900,7 +1275,14 @@ sub _spark_observe_public_line {
             if ref($portal_state) eq 'HASH'
                 && ($portal_state->{phase} // '') eq 'closing';
     }
-    if ($bot->{spark_ai_dryrun} && !$portal_closing) {
+    my $mosaic_closing = 0;
+    if ($bot->{spark_mosaic}) {
+        my $mosaic_state = eval { $bot->{spark_mosaic}->snapshot($channel) };
+        $mosaic_closing = 1
+            if ref($mosaic_state) eq 'HASH'
+                && ($mosaic_state->{phase} // '') eq 'closing';
+    }
+    if ($bot->{spark_ai_dryrun} && !$portal_closing && !$mosaic_closing) {
         eval { $bot->{spark_ai_dryrun}->invalidate_channel($channel); };
     }
 
@@ -912,6 +1294,9 @@ sub _spark_observe_public_line {
             bot_nick     => $bot_nick,
             message      => $line,
             command_char => $bot->{conf}->get('main.MAIN_PROG_CMD_CHAR'),
+            initial_trigger_enabled =>
+                $bot->{conf}->get('main.MAIN_PROG_INITIAL_TRIGGER'),
+            from_bot     => $from_bot ? 1 : 0,
         )
     };
 
@@ -1048,12 +1433,28 @@ sub _spark_tick_all {
             }
         }
 
+        if (!$skip_event_expiry && $bot->{spark_mosaic}) {
+            $skip_event_expiry = _spark_tick_mosaic_lifecycle(
+                $bot,
+                $channel,
+                enabled => $enabled,
+                ai_available => $ai_available,
+                runtime_active => $irc_state->{runtime_active},
+                irc_connected => $irc_state->{irc_connected},
+                channel_joined => $irc_state->{channel_joined},
+                game_active => $game_active,
+                wit_pending => $wit_pending,
+            );
+        }
+
         my $expired = $skip_event_expiry
             ? undef
             : eval { $bot->{spark_state}->expire_due_event($channel) };
         if (ref($expired) eq 'HASH') {
             eval { $bot->{spark_portal}->forget_channel($channel); }
                 if $bot->{spark_portal};
+            eval { $bot->{spark_mosaic}->forget_channel($channel); }
+                if $bot->{spark_mosaic};
             $bot->{logger}->log(
                 3,
                 '[SPARK_EVENT] channel=' . $channel
@@ -1270,6 +1671,37 @@ sub _spark_tick_all {
                 next;
             }
             $logged++ if $started;
+            next;
+        }
+
+        if (($summary->{kind} // '') eq 'mosaic') {
+            next unless $ai_available;
+            my $target = mosaic_target_for_regime(
+                $summary->{audience_regime},
+            );
+            unless ($target) {
+                $bot->{logger}->log(
+                    3,
+                    '[SPARK_MOSAIC] channel=' . $channel
+                        . ' action=skip reason=unsupported_audience_regime',
+                );
+                next;
+            }
+            my $generated = mosaic_opening_generation(
+                language => Mediabot::Helpers::channel_lang($bot, $channel),
+                target => $target,
+            );
+            my $delivered = _spark_handle_candidate(
+                $bot,
+                $channel,
+                $summary->{duration_seconds},
+                {
+                    kind => 'mosaic',
+                    generated => $generated,
+                    target => $target,
+                },
+            );
+            $logged++ if $delivered;
             next;
         }
 
@@ -3367,10 +3799,23 @@ sub _on_message_PRIVMSG_body {
         # substr()/eq checks emit warnings in the daemon logs.
         return undef if $line eq '';
 
-        # MB703-D: +Spark begins observing bounded, ephemeral human context.
-        # No event is started, no AI request is submitted and no IRC delivery
-        # primitive is reachable from this path in the disarmed round.
-        eval { _spark_observe_public_line($mediabot, $self->nick, $where, $who, $line); };
+        # A single generic identity decision feeds every conversational lane.
+        # The configured BOT_NICKS list supplements the bot's own live nick;
+        # neither Spark nor Wit may promote known automation to a participant.
+        my $from_conversation_bot =
+            Mediabot::Spark::Identity::is_known_bot_nick(
+                nick => $who,
+                bot_nick => $self->nick,
+                configured_bot_nicks =>
+                    $mediabot->{conf}->get('main.BOT_NICKS'),
+            );
+
+        eval {
+            _spark_observe_public_line(
+                $mediabot, $self->nick, $where, $who, $line,
+                $from_conversation_bot,
+            );
+        };
         if ($@) {
             my $error = $@;
             $error =~ s/[\r\n\x00]+/ /g;
@@ -3405,6 +3850,7 @@ sub _on_message_PRIVMSG_body {
                     language                => Mediabot::Helpers::channel_lang($mediabot, $where),
                     command_char            => $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR'),
                     initial_trigger_enabled => $mediabot->{conf}->get('main.MAIN_PROG_INITIAL_TRIGGER'),
+                    from_bot               => $from_conversation_bot,
                     on_observation          => sub {
                         my ($wit_summary) = @_;
 

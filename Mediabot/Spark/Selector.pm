@@ -38,6 +38,15 @@ sub _normal_kind {
     return $known{$kind} ? $kind : undef;
 }
 
+sub _normal_regime {
+    my ($regime) = @_;
+    return 'social' unless _plain_scalar($regime);
+    $regime = lc "$regime";
+    return $regime
+        if $regime =~ /^(?:empty|solo|small|social|crowded)\z/;
+    return 'social';
+}
+
 sub select_spark_event {
     my (%args) = @_;
 
@@ -47,16 +56,27 @@ sub select_spark_event {
     my $vdm_enabled = _bool($args{vdm_enabled});
     my $cursor = _nonneg_int($args{cursor}, 0);
     my $last_kind = _normal_kind($args{last_kind});
+    my $audience_regime = _normal_regime($args{audience_regime});
 
     my @eligible;
     for my $kind (@{ spark_event_kinds() }) {
         # Stage Cue belongs exclusively to the separately authorized momentum
         # lane. Catalog growth must never leak it into long-silence selection.
         next if $kind eq 'stage_cue';
+        next if $audience_regime eq 'empty';
+        next if $audience_regime eq 'solo'
+            && $kind ne 'reaction'
+            && $kind ne 'callback';
+        next if $audience_regime eq 'small' && $kind eq 'portal';
         my $p = spark_event_profile($kind);
-        next if $humans < $p->{min_recent_humans};
+        my $required_humans = $p->{min_recent_humans};
+        $required_humans = 1
+            if $audience_regime eq 'solo'
+                && ($kind eq 'reaction' || $kind eq 'callback');
+        next if $humans < $required_humans;
         next if $p->{needs_context} && $context_lines < 3;
         next if ($kind eq 'callback' || $kind eq 'reaction') && !$ai_available;
+        next if $kind eq 'mosaic' && !$ai_available;
         next if $kind eq 'vdm' && !$vdm_enabled;
         push @eligible, $kind;
     }
@@ -73,14 +93,21 @@ sub select_spark_event {
     # Portal remains occasional until its contribution runtime is completed, and
     # VDM stays a rare source-backed variation when +VDM is enabled.
     my @schedule;
-    if ($ai_available && $context_lines >= 6) {
-        @schedule = qw(reaction callback reaction fork callback portal reaction vdm);
+    if ($audience_regime eq 'solo') {
+        @schedule = qw(reaction callback reaction);
+    }
+    elsif ($audience_regime eq 'crowded'
+        && $ai_available && $context_lines >= 6) {
+        @schedule = qw(reaction portal callback mosaic reaction portal fork vdm);
+    }
+    elsif ($ai_available && $context_lines >= 6) {
+        @schedule = qw(reaction callback reaction mosaic fork callback portal reaction vdm);
     }
     elsif ($ai_available && $context_lines >= 3) {
-        @schedule = qw(reaction fork callback reaction portal fork vdm);
+        @schedule = qw(reaction fork callback mosaic reaction portal fork vdm);
     }
     else {
-        @schedule = qw(fork portal fork vdm);
+        @schedule = qw(fork portal fork mosaic vdm);
     }
 
     @schedule = grep { $eligible{$_} } @schedule;
@@ -108,6 +135,7 @@ sub select_spark_event {
         interaction        => "$profile->{interaction}",
         candidate_count    => scalar(@eligible),
         next_cursor        => $cursor + 1,
+        audience_regime    => $audience_regime,
     };
 }
 
@@ -134,6 +162,9 @@ sub spark_selector_summary {
             return undef unless _plain_scalar($decision->{$key});
             $out{$key} = "$decision->{$key}";
         }
+        $out{audience_regime} = _normal_regime(
+            $decision->{audience_regime},
+        );
     }
 
     return \%out;

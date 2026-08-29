@@ -7,6 +7,8 @@ use Carp qw(croak);
 use Scalar::Util qw(looks_like_number);
 use Time::HiRes qw(clock_gettime CLOCK_MONOTONIC);
 
+use Mediabot::Spark::Audience qw(summarize_audience);
+
 our $VERSION = '1.0';
 
 my %DEFAULT = (
@@ -14,6 +16,7 @@ my %DEFAULT = (
     max_lines      => 12,
     max_line_chars => 240,
     max_age_seconds => 7_200,
+    max_activity_events => 512,
 );
 
 sub _plain_scalar {
@@ -91,6 +94,9 @@ sub new {
         max_age_seconds => _bounded_int(
             $args{max_age_seconds}, $DEFAULT{max_age_seconds}, 300, 86_400,
         ),
+        max_activity_events => _bounded_int(
+            $args{max_activity_events}, $DEFAULT{max_activity_events}, 32, 4096,
+        ),
         channels => {},
     }, $class;
 }
@@ -128,6 +134,71 @@ sub _prune {
             && $_->{at} <= $now
     } @{ $state->{lines} || [] };
     $state->{lines} = \@keep;
+
+    my @activity = grep {
+        ref($_) eq 'HASH'
+            && defined($_->{at})
+            && looks_like_number($_->{at})
+            && $_->{at} >= $min
+            && $_->{at} <= $now
+            && defined($_->{kind})
+            && ($_->{kind} eq 'human' || $_->{kind} eq 'bot_pressure')
+    } @{ $state->{activity} || [] };
+    $state->{activity} = \@activity;
+}
+
+sub _state {
+    my ($self, $channel, $now) = @_;
+    $self->_make_room($channel);
+    my $state = $self->{channels}{lc($channel)} ||= {
+        lines    => [],
+        activity => [],
+        last_seen => $now,
+    };
+
+    croak 'Spark observer clock moved backwards'
+        if defined($state->{last_seen}) && $now < $state->{last_seen};
+    $state->{last_seen} = $now;
+    $self->_prune($state, $now);
+    return $state;
+}
+
+sub _record_activity {
+    my ($self, $state, %args) = @_;
+    my %event = (
+        at   => $args{at},
+        kind => $args{kind},
+    );
+    $event{nick} = $args{nick} if defined $args{nick};
+    push @{ $state->{activity} }, \%event;
+    shift @{ $state->{activity} }
+        while @{ $state->{activity} } > $self->{max_activity_events};
+}
+
+sub _command_reason {
+    my (%args) = @_;
+    my $line = $args{line};
+    my $command_char = $args{command_char};
+    return 'command'
+        if length($command_char) && index($line, $command_char) == 0;
+    return 'command' if $line =~ /^\?[A-Za-z0-9_.\-]{1,64}\z/;
+
+    my $bot_nick = $args{bot_nick};
+    return undef unless defined($bot_nick) && length($bot_nick);
+    my $quoted_nick = quotemeta($bot_nick);
+    return 'bot_trigger'
+        if $line =~ /^$quoted_nick(?:\s*[:,]\s*|\s+)/i;
+
+    my ($first) = split /\s+/, $line;
+    return undef unless defined($first) && length($first);
+
+    my $fold = lc $first;
+    my $nick_fold = lc $bot_nick;
+    if ($args{initial_trigger_enabled}) {
+        my $initial = substr($nick_fold, 0, 1);
+        return 'initial_trigger' if length($initial) && $fold eq $initial;
+    }
+    return undef;
 }
 
 sub observe_public_line {
@@ -139,9 +210,6 @@ sub observe_public_line {
     return { action => 'skip', reason => 'invalid_nick' } unless defined $nick;
 
     my $bot_nick = _nick_key($args{bot_nick});
-    if (defined($bot_nick) && lc($nick) eq lc($bot_nick)) {
-        return { action => 'skip', reason => 'self' };
-    }
 
     my $line = _clean_line($args{message}, $self->{max_line_chars});
     return { action => 'skip', reason => 'blank_or_control' } unless defined $line;
@@ -149,32 +217,56 @@ sub observe_public_line {
     my $command_char = _plain_scalar($args{command_char})
         ? "$args{command_char}"
         : '!';
-    if (length($command_char) && index($line, $command_char) == 0) {
-        return { action => 'skip', reason => 'command' };
-    }
-
-    # Bare factoid quick recall is also a command surface, even though it uses
-    # '?' instead of MAIN_PROG_CMD_CHAR.
-    return { action => 'skip', reason => 'command' }
-        if $line =~ /^\?[A-Za-z0-9_.\-]{1,64}\z/;
-
-    if (defined($bot_nick) && length($bot_nick)) {
-        my $quoted = quotemeta($bot_nick);
-        return { action => 'skip', reason => 'bot_trigger' }
-            if $line =~ /^$quoted(?:\s*[:,]\s*|\s+)/i;
-    }
-
     my $now = $self->_now();
-    $self->_make_room($channel);
-    my $state = $self->{channels}{lc($channel)} ||= {
-        lines => [],
-        last_seen => $now,
-    };
+    my $record = !exists($args{record}) || $args{record} ? 1 : 0;
+    my $state = $record
+        ? $self->_state($channel, $now)
+        : $self->{channels}{lc($channel)};
 
-    croak 'Spark observer clock moved backwards'
-        if defined($state->{last_seen}) && $now < $state->{last_seen};
-    $state->{last_seen} = $now;
-    $self->_prune($state, $now);
+    my $from_self = defined($bot_nick) && lc($nick) eq lc($bot_nick);
+    my $from_bot = $from_self || ($args{from_bot} ? 1 : 0);
+    if ($from_bot) {
+        _record_activity(
+            $self, $state,
+            at => $now, kind => 'bot_pressure',
+        ) if $record;
+        return {
+            action => 'observe',
+            reason => $from_self ? 'self' : 'bot_activity',
+            line_count => ref($state) eq 'HASH'
+                ? scalar(@{ $state->{lines} || [] }) : 0,
+            bot_pressure => 1,
+        };
+    }
+
+    my $command_reason = _command_reason(
+        line => $line,
+        command_char => $command_char,
+        bot_nick => $bot_nick,
+        initial_trigger_enabled => $args{initial_trigger_enabled},
+    );
+    if (defined $command_reason) {
+        _record_activity(
+            $self, $state,
+            at => $now, kind => 'bot_pressure',
+        ) if $record;
+        return {
+            action => 'observe',
+            reason => $command_reason,
+            line_count => ref($state) eq 'HASH'
+                ? scalar(@{ $state->{lines} || [] }) : 0,
+            bot_pressure => 1,
+        };
+    }
+
+    unless ($record) {
+        return {
+            action => 'observe',
+            reason => 'human_context',
+            line_count => ref($state) eq 'HASH'
+                ? scalar(@{ $state->{lines} || [] }) : 0,
+        };
+    }
 
     push @{ $state->{lines} }, {
         at   => $now,
@@ -184,6 +276,11 @@ sub observe_public_line {
 
     shift @{ $state->{lines} }
         while @{ $state->{lines} } > $self->{max_lines};
+
+    _record_activity(
+        $self, $state,
+        at => $now, kind => 'human', nick => $nick,
+    );
 
     return {
         action     => 'observe',
@@ -229,16 +326,16 @@ sub activity_summary {
 
     my $key = _channel_key($channel);
     my $window = _bounded_int(
-        $args{window_seconds}, 600, 60, 3_600,
+        $args{window_seconds}, 600, 60, 86_400,
     );
     my $state = $self->{channels}{lc($key)};
-    return {
-        window_seconds   => $window,
-        line_count       => 0,
-        distinct_humans  => 0,
-        last_human_at    => undef,
-        quiet_for_seconds => 0,
-    } unless ref($state) eq 'HASH';
+    return summarize_audience(
+        human_weights => {},
+        human_lines => 0,
+        bot_pressure_lines => 0,
+        window_seconds => $window,
+        now => $self->_now(),
+    ) unless ref($state) eq 'HASH';
 
     my $now = $self->_now();
     croak 'Spark observer clock moved backwards'
@@ -253,29 +350,43 @@ sub activity_summary {
             && looks_like_number($_->{at})
             && $_->{at} >= $cutoff
             && $_->{at} <= $now
-    } @{ $state->{lines} || [] };
+    } @{ $state->{activity} || [] };
 
-    my %humans;
+    my %human_weights;
+    my $human_lines = 0;
+    my $bot_pressure_lines = 0;
     my $last_human_at;
+    my $last_bot_pressure_at;
     for my $entry (@recent) {
-        my $nick = _nick_key($entry->{nick});
-        $humans{lc($nick)} = 1 if defined $nick;
-        $last_human_at = $entry->{at}
-            if !defined($last_human_at) || $entry->{at} > $last_human_at;
+        if (($entry->{kind} // '') eq 'human') {
+            my $nick = _nick_key($entry->{nick});
+            next unless defined $nick;
+            my $age = $now - $entry->{at};
+            my $weight = 1 + int(999 * (($window - $age) / $window));
+            $weight = 1 if $weight < 1;
+            $weight = 1_000 if $weight > 1_000;
+            $human_weights{lc($nick)} += $weight;
+            $human_lines++;
+            $last_human_at = $entry->{at}
+                if !defined($last_human_at) || $entry->{at} > $last_human_at;
+        }
+        elsif (($entry->{kind} // '') eq 'bot_pressure') {
+            $bot_pressure_lines++;
+            $last_bot_pressure_at = $entry->{at}
+                if !defined($last_bot_pressure_at)
+                    || $entry->{at} > $last_bot_pressure_at;
+        }
     }
 
-    my $quiet_for = defined($last_human_at)
-        ? int($now - $last_human_at)
-        : 0;
-    $quiet_for = 0 if $quiet_for < 0;
-
-    return {
-        window_seconds    => $window,
-        line_count        => scalar(@recent),
-        distinct_humans   => scalar(keys %humans),
-        last_human_at     => defined($last_human_at) ? 0 + $last_human_at : undef,
-        quiet_for_seconds => $quiet_for,
-    };
+    return summarize_audience(
+        human_weights => \%human_weights,
+        human_lines => $human_lines,
+        bot_pressure_lines => $bot_pressure_lines,
+        window_seconds => $window,
+        now => $now,
+        last_human_at => $last_human_at,
+        last_bot_pressure_at => $last_bot_pressure_at,
+    );
 }
 
 sub channels {

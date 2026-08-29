@@ -33,6 +33,46 @@ release. Development after this release continues on the `3.4dev` line.
 ## [Unreleased] — 3.4dev
 
 
+### mb710 — teach Reanimator to measure a conversation before joining it
+
+- Added a metadata-only audience model shared by the Spark revival and
+  momentum lanes. It reports a recency-weighted effective audience, speaker
+  dominance, human line rate and bot pressure without exposing message text or
+  nicknames at the policy boundary.
+- Split the tiny provider-context window from a larger bounded activity window,
+  so audience measurement is no longer capped by the eight-to-twelve lines
+  useful to generation.
+- Reused the generic `main.BOT_NICKS` configuration for conversational identity.
+  Known automation and command traffic no longer inflate human participation;
+  they create pressure that postpones unsolicited Spark work instead.
+- Aligned Spark with the enabled one-letter command trigger and passed the same
+  bot classification into Wit. The provider context now retains the newest
+  eight clean lines rather than silently dropping the freshest four.
+- Added one centralized audience policy with `empty`, `solo`, `small`, `social`
+  and `crowded` regimes. Operator pacing values remain reviewed baselines;
+  effective audience, participation balance and human cadence scale them in a
+  deterministic, testable way.
+- A solo participant may now receive only a rare contextual Reaction or
+  Callback after twice the normal silence. Small rooms remain patient, while a
+  balanced crowded room recognizes shorter pauses and makes collaborative
+  events more available without lowering its activity evidence threshold.
+- Spark revival and SparkAction now consume one channel pacing budget. A
+  delivered momentum action blocks the revival lane too, closing the former
+  asymmetric path to two unsolicited interventions from separate lanes.
+- Added Flash Mosaic, a short collective event whose visible target scales from
+  two to four voices with the measured audience. It accepts exactly one
+  explicit `+word` from each distinct nick; ordinary conversation is never
+  collected, scored or mistaken for participation.
+- Mosaic opening is local and deterministic, while its single closing payoff
+  uses the existing provider-neutral generation boundary. Words are ephemeral,
+  contributor identities never enter the prompt, and diagnostics remain
+  metadata-only.
+- Calibrated the momentum gate against two anonymized channel histories. Raw
+  nick count can no longer override an effective `solo` classification, so a
+  dominant speaker plus an occasional second voice cannot summon an ambient
+  action; the rare long-silence contextual revival remains available.
+
+
 ### mb709 — give Spark a separate momentum lane for real channel actions
 
 - Added default-off `+SparkAction` as a second channel opt-in. It never replaces

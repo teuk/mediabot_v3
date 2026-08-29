@@ -8,6 +8,9 @@ use Scalar::Util qw(looks_like_number);
 use Time::HiRes qw(clock_gettime CLOCK_MONOTONIC);
 
 use Mediabot::AI::ConversationFloodGuard;
+use Mediabot::Spark::AdaptivePolicy qw(
+    adaptive_spark_policy adaptive_spark_policy_summary
+);
 use Mediabot::Spark::Observer;
 use Mediabot::Spark::ActionPolicy qw(
     evaluate_spark_action_start spark_action_policy_summary
@@ -128,6 +131,55 @@ sub _rt {
         next_probe_at => 0,
         next_action_probe_at => 0,
         action_cooldown_until => 0,
+        shared_cooldown_until => 0,
+        last_adaptive_policy => undef,
+    };
+}
+
+sub _adaptive_policy {
+    my ($self, $activity) = @_;
+    $activity = {} unless ref($activity) eq 'HASH';
+
+    my $policy = adaptive_spark_policy(
+        effective_humans_milli => $activity->{effective_humans_milli},
+        distinct_humans => $activity->{distinct_humans},
+        dominant_share_pct => $activity->{dominant_share_pct},
+        human_line_rate_milli => $activity->{human_line_rate_milli},
+        bot_pressure_share_pct => $activity->{bot_pressure_share_pct},
+        base_revival_silence_seconds => $self->{min_silence_seconds},
+        base_revival_probe_seconds => $self->{candidate_probe_seconds},
+        base_action_min_humans => $self->{action_min_humans},
+        base_action_min_lines => $self->{action_min_lines},
+        base_action_min_pause_seconds => $self->{action_min_pause_seconds},
+        base_action_max_pause_seconds => $self->{action_max_pause_seconds},
+        base_shared_cooldown_seconds => $self->{action_cooldown_seconds},
+    );
+    return adaptive_spark_policy_summary($policy) || {
+        audience_regime => 'empty',
+        audience_rank => 0,
+        audience_intensity_pct => 0,
+        revival_min_humans => 2,
+        revival_silence_seconds => $self->{min_silence_seconds},
+        revival_probe_seconds => $self->{candidate_probe_seconds},
+        action_min_humans => $self->{action_min_humans},
+        action_min_lines => $self->{action_min_lines},
+        action_min_pause_seconds => $self->{action_min_pause_seconds},
+        action_max_pause_seconds => $self->{action_max_pause_seconds},
+        shared_cooldown_seconds => $self->{action_cooldown_seconds},
+        dominance_limited => 0,
+        pressure_limited => 0,
+    };
+}
+
+sub _shared_budget_wait {
+    my ($rt, $now) = @_;
+    return undef unless ($rt->{shared_cooldown_until} // 0) > $now;
+    my $retry = int($rt->{shared_cooldown_until} - $now);
+    $retry = 1 if $retry < 1;
+    return {
+        action => 'skip',
+        reason => 'shared_budget',
+        retry_after_seconds => $retry,
     };
 }
 
@@ -168,6 +220,51 @@ sub evaluate_action_channel {
     return { action => 'skip', reason => 'activity_error' }
         unless ref($activity) eq 'HASH';
 
+    my $adaptive = $self->_adaptive_policy($activity);
+
+    # Momentum requires an effective conversation, not merely two raw nicks.
+    # A new public line resets the probe, so this bounded wait never delays a
+    # room that genuinely grows beyond the empty/solo regimes.
+    if ($adaptive->{audience_regime} eq 'empty'
+        || $adaptive->{audience_regime} eq 'solo') {
+        my $retry = $self->{action_probe_seconds};
+        $rt->{next_action_probe_at} = $now + $retry;
+        return {
+            action => 'skip',
+            reason => 'audience_too_small',
+            retry_after_seconds => $retry,
+            recent_humans => int($activity->{distinct_humans} // 0),
+            effective_humans_milli => int(
+                $activity->{effective_humans_milli} // 0
+            ),
+            dominant_share_pct => int(
+                $activity->{dominant_share_pct} // 0
+            ),
+            audience_regime => $adaptive->{audience_regime},
+            audience_intensity_pct => int(
+                $adaptive->{audience_intensity_pct}
+            ),
+        };
+    }
+
+    if (int($activity->{bot_pressure_lines} // 0) > 0
+        && int($activity->{bot_pressure_quiet_seconds} // 0)
+            < $adaptive->{action_min_pause_seconds}) {
+        my $retry = $adaptive->{action_min_pause_seconds}
+            - int($activity->{bot_pressure_quiet_seconds} // 0);
+        $retry = 1 if $retry < 1;
+        $rt->{next_action_probe_at} = $now + $retry;
+        return {
+            action => 'skip',
+            reason => 'bot_pressure',
+            retry_after_seconds => $retry,
+            bot_pressure_lines => int($activity->{bot_pressure_lines} // 0),
+            bot_pressure_quiet_seconds => int(
+                $activity->{bot_pressure_quiet_seconds} // 0
+            ),
+        };
+    }
+
     my $flood = eval {
         $self->{flood_guard}->current_decision(channel => $channel)
     };
@@ -190,18 +287,18 @@ sub evaluate_action_channel {
         game_active           => _bool($args{game_active}),
         wit_pending           => _bool($args{wit_pending}),
         cooldown_until        => ($state->{cooldown_until} // 0)
-            > ($rt->{action_cooldown_until} // 0)
+            > ($rt->{shared_cooldown_until} // 0)
                 ? ($state->{cooldown_until} // 0)
-                : ($rt->{action_cooldown_until} // 0),
+                : ($rt->{shared_cooldown_until} // 0),
         now                   => $now,
         last_human_at         => $activity->{last_human_at},
         recent_humans         => $activity->{distinct_humans},
         recent_lines          => $activity->{line_count},
         activity_window_seconds => $self->{action_activity_window_seconds},
-        min_recent_humans     => $self->{action_min_humans},
-        min_recent_lines      => $self->{action_min_lines},
-        min_pause_seconds     => $self->{action_min_pause_seconds},
-        max_pause_seconds     => $self->{action_max_pause_seconds},
+        min_recent_humans     => $adaptive->{action_min_humans},
+        min_recent_lines      => $adaptive->{action_min_lines},
+        min_pause_seconds     => $adaptive->{action_min_pause_seconds},
+        max_pause_seconds     => $adaptive->{action_max_pause_seconds},
     );
     my $safe = spark_action_policy_summary($decision) || {
         action => 'skip', reason => 'action_policy_error',
@@ -213,7 +310,11 @@ sub evaluate_action_channel {
         $retry = $self->{action_probe_seconds}
             if $retry > $self->{action_probe_seconds};
         $rt->{next_action_probe_at} = $now + $retry;
-        return $safe;
+        return {
+            %$safe,
+            audience_regime => $adaptive->{audience_regime},
+            audience_intensity_pct => $adaptive->{audience_intensity_pct},
+        };
     }
 
     my $profile = spark_event_profile('stage_cue');
@@ -223,7 +324,8 @@ sub evaluate_action_channel {
     # resets this probe below; without it, a declined provider result cannot
     # trigger repeated requests against the same paused conversation.
     $rt->{next_action_probe_at} =
-        $now + $self->{action_max_pause_seconds};
+        $now + $adaptive->{action_max_pause_seconds};
+    $rt->{last_adaptive_policy} = { %$adaptive };
     return {
         %$safe,
         action => 'action_candidate',
@@ -234,6 +336,27 @@ sub evaluate_action_channel {
         ai_use => $profile->{ai_use},
         interaction => $profile->{interaction},
         context_lines => scalar(@$context),
+        effective_humans_milli => int(
+            $activity->{effective_humans_milli} // 0
+        ),
+        dominant_share_pct => int($activity->{dominant_share_pct} // 0),
+        human_line_rate_milli => int(
+            $activity->{human_line_rate_milli} // 0
+        ),
+        bot_pressure_lines => int($activity->{bot_pressure_lines} // 0),
+        audience_regime => $adaptive->{audience_regime},
+        audience_intensity_pct => int(
+            $adaptive->{audience_intensity_pct}
+        ),
+        policy_min_pause_seconds => int(
+            $adaptive->{action_min_pause_seconds}
+        ),
+        policy_max_pause_seconds => int(
+            $adaptive->{action_max_pause_seconds}
+        ),
+        policy_cooldown_seconds => int(
+            $adaptive->{shared_cooldown_seconds}
+        ),
     };
 }
 
@@ -243,19 +366,35 @@ sub mark_action_delivered {
     my $key = _channel_key($channel);
     my $now = $self->_now();
     my $rt = $self->_rt($key);
-    $rt->{action_cooldown_until} = $now + $self->{action_cooldown_seconds};
+    my $adaptive = ref($rt->{last_adaptive_policy}) eq 'HASH'
+        ? $rt->{last_adaptive_policy}
+        : {};
+    my $cooldown = $self->action_cooldown_seconds($key);
+    $rt->{action_cooldown_until} = $now + $cooldown;
+    $rt->{shared_cooldown_until} = $rt->{action_cooldown_until};
     $rt->{next_action_probe_at} = $rt->{action_cooldown_until};
     return {
         action => 'paced',
         reason => 'action_delivered',
-        cooldown_seconds => int($self->{action_cooldown_seconds}),
+        cooldown_seconds => $cooldown,
         cooldown_until => 0 + $rt->{action_cooldown_until},
+        audience_regime => $adaptive->{audience_regime} // 'social',
     };
 }
 
 sub action_cooldown_seconds {
-    my ($self) = @_;
+    my ($self, $channel) = @_;
     croak 'Spark orchestrator object is required' unless ref($self);
+    if (defined $channel) {
+        my $key = _channel_key($channel);
+        my $rt = $self->_rt($key);
+        if (ref($rt->{last_adaptive_policy}) eq 'HASH') {
+            return int(
+                $rt->{last_adaptive_policy}{shared_cooldown_seconds}
+                    // $self->{action_cooldown_seconds}
+            );
+        }
+    }
     return int($self->{action_cooldown_seconds});
 }
 
@@ -275,12 +414,33 @@ sub observe_public_line {
             && (($flood->{action} // '') eq 'allow'
                 || ($flood->{action} // '') eq 'suppress');
 
-    my $human = eval {
-        $self->{state}->observe_human(
-            channel => $channel,
-            nick    => $args{nick},
+    my $observation = eval {
+        $self->{observer}->observe_public_line(
+            channel      => $channel,
+            nick         => $args{nick},
+            bot_nick     => $args{bot_nick},
+            message      => $args{message},
+            command_char => $args{command_char},
+            initial_trigger_enabled => $args{initial_trigger_enabled},
+            from_bot     => $args{from_bot},
+            record       => ($flood->{action} // '') eq 'allow' ? 1 : 0,
         )
     };
+    return { action => 'skip', reason => 'observer_error' }
+        unless ref($observation) eq 'HASH';
+
+    my $human;
+    if (($observation->{reason} // '') eq 'human_context') {
+        $human = eval {
+            $self->{state}->observe_human(
+                channel => $channel,
+                nick    => $args{nick},
+            )
+        };
+    }
+    else {
+        $human = eval { $self->{state}->snapshot($channel) };
+    }
     return { action => 'skip', reason => 'state_error' }
         unless ref($human) eq 'HASH';
 
@@ -293,21 +453,16 @@ sub observe_public_line {
         };
     }
 
-    my $observation = eval {
-        $self->{observer}->observe_public_line(
-            channel      => $channel,
-            nick         => $args{nick},
-            bot_nick     => $args{bot_nick},
-            message      => $args{message},
-            command_char => $args{command_char},
-        )
-    };
-    return { action => 'skip', reason => 'observer_error' }
-        unless ref($observation) eq 'HASH';
-
     # New conversation creates a new momentum window. The action cooldown
-    # remains authoritative in policy; only the candidate probe is reset.
-    $self->_rt($channel)->{next_action_probe_at} = 0;
+    # remains authoritative in policy. Bot/command pressure receives its own
+    # short pause instead of masquerading as another human participant.
+    if ($observation->{bot_pressure}) {
+        $self->_rt($channel)->{next_action_probe_at} =
+            $self->_now() + $self->{action_min_pause_seconds};
+    }
+    else {
+        $self->_rt($channel)->{next_action_probe_at} = 0;
+    }
 
     return {
         action        => 'observe',
@@ -357,6 +512,9 @@ sub evaluate_channel {
         };
     }
 
+    my $shared_wait = _shared_budget_wait($rt, $now);
+    return $shared_wait if ref($shared_wait) eq 'HASH';
+
     my $flood = eval {
         $self->{flood_guard}->current_decision(channel => $channel)
     };
@@ -365,6 +523,33 @@ sub evaluate_channel {
         && (($flood->{action} // '') eq 'allow'
             || ($flood->{action} // '') eq 'suppress')) {
         $flood_suppressed = (($flood->{action} // '') eq 'suppress') ? 1 : 0;
+    }
+
+    my $activity_window = $self->{min_silence_seconds};
+    $activity_window = 3_600 if $activity_window < 3_600;
+    $activity_window = 7_200 if $activity_window > 7_200;
+    my $activity = eval {
+        $self->{observer}->activity_summary(
+            $channel,
+            window_seconds => $activity_window,
+        )
+    };
+    $activity = {} unless ref($activity) eq 'HASH';
+    my $adaptive = $self->_adaptive_policy($activity);
+    if (int($activity->{bot_pressure_lines} // 0) > 0
+        && int($activity->{bot_pressure_quiet_seconds} // 0)
+            < $adaptive->{revival_silence_seconds}) {
+        my $retry = $adaptive->{revival_silence_seconds}
+            - int($activity->{bot_pressure_quiet_seconds} // 0);
+        $retry = 1 if $retry < 1;
+        $rt->{next_probe_at} = $now + $retry;
+        return {
+            action => 'skip',
+            reason => 'bot_pressure',
+            retry_after_seconds => $retry,
+            recent_humans => int($state->{recent_humans} // 0),
+            bot_pressure_lines => int($activity->{bot_pressure_lines} // 0),
+        };
     }
 
     my $policy = evaluate_spark_start(
@@ -378,10 +563,14 @@ sub evaluate_channel {
         game_active         => _bool($args{game_active}),
         wit_pending         => _bool($args{wit_pending}),
         recent_humans       => $state->{recent_humans},
-        cooldown_until      => $state->{cooldown_until},
+        cooldown_until      => ($state->{cooldown_until} // 0)
+            > ($rt->{shared_cooldown_until} // 0)
+                ? ($state->{cooldown_until} // 0)
+                : ($rt->{shared_cooldown_until} // 0),
         last_human_at       => $state->{last_human_at},
         now                 => $now,
-        min_silence_seconds => $self->{min_silence_seconds},
+        min_recent_humans   => $adaptive->{revival_min_humans},
+        min_silence_seconds => $adaptive->{revival_silence_seconds},
     );
 
     my $safe_policy = spark_policy_summary($policy) || {
@@ -408,6 +597,7 @@ sub evaluate_channel {
         vdm_enabled   => _bool($args{vdm_enabled}),
         cursor        => $rt->{cursor},
         last_kind     => $rt->{last_kind},
+        audience_regime => $adaptive->{audience_regime},
     );
 
     my $safe_selection = spark_selector_summary($selection) || {
@@ -415,18 +605,20 @@ sub evaluate_channel {
     };
 
     if (($safe_selection->{action} // '') ne 'select') {
-        $rt->{next_probe_at} = $now + $self->{candidate_probe_seconds};
+        $rt->{next_probe_at} = $now + $adaptive->{revival_probe_seconds};
         return {
             action        => 'skip',
             reason        => $safe_selection->{reason},
             recent_humans => int($state->{recent_humans} // 0),
             context_lines => scalar(@$context),
+            audience_regime => $adaptive->{audience_regime},
         };
     }
 
     $rt->{cursor} = int($safe_selection->{next_cursor});
     $rt->{last_kind} = $safe_selection->{kind};
-    $rt->{next_probe_at} = $now + $self->{candidate_probe_seconds};
+    $rt->{next_probe_at} = $now + $adaptive->{revival_probe_seconds};
+    $rt->{last_adaptive_policy} = { %$adaptive };
 
     my $quiet_for = defined($state->{last_human_at})
         ? int($now - $state->{last_human_at})
@@ -445,6 +637,24 @@ sub evaluate_channel {
         recent_humans    => int($state->{recent_humans} // 0),
         context_lines    => scalar(@$context),
         quiet_for_seconds => $quiet_for,
+        effective_humans_milli => int(
+            $activity->{effective_humans_milli} // 0
+        ),
+        dominant_share_pct => int($activity->{dominant_share_pct} // 0),
+        human_line_rate_milli => int(
+            $activity->{human_line_rate_milli} // 0
+        ),
+        bot_pressure_lines => int($activity->{bot_pressure_lines} // 0),
+        audience_regime => $adaptive->{audience_regime},
+        audience_intensity_pct => int(
+            $adaptive->{audience_intensity_pct}
+        ),
+        policy_silence_seconds => int(
+            $adaptive->{revival_silence_seconds}
+        ),
+        policy_probe_seconds => int(
+            $adaptive->{revival_probe_seconds}
+        ),
     };
 }
 
@@ -498,7 +708,7 @@ sub format_dryrun_log {
     return undef unless ref($summary) eq 'HASH';
     return undef unless ($summary->{action} // '') eq 'dryrun_candidate';
     return undef unless _plain_scalar($summary->{kind})
-        && "$summary->{kind}" =~ /^(?:fork|portal|callback|reaction|vdm)\z/;
+        && "$summary->{kind}" =~ /^(?:fork|portal|callback|reaction|mosaic|vdm)\z/;
 
     my @parts = (
         '[SPARK_DRYRUN]',
@@ -507,7 +717,17 @@ sub format_dryrun_log {
         'kind=' . $summary->{kind},
     );
 
-    for my $key (qw(recent_humans context_lines quiet_for_seconds duration_seconds)) {
+    push @parts, 'audience_regime=' . $summary->{audience_regime}
+        if _plain_scalar($summary->{audience_regime})
+            && "$summary->{audience_regime}"
+                =~ /^(?:empty|solo|small|social|crowded)\z/;
+
+    for my $key (qw(
+        recent_humans effective_humans_milli dominant_share_pct
+        human_line_rate_milli bot_pressure_lines context_lines
+        quiet_for_seconds duration_seconds audience_intensity_pct
+        policy_silence_seconds policy_probe_seconds
+    )) {
         next unless _plain_scalar($summary->{$key}) && "$summary->{$key}" =~ /^\d+\z/;
         push @parts, "$key=" . int($summary->{$key});
     }
@@ -534,9 +754,17 @@ sub format_action_candidate_log {
         'lane=momentum',
         'kind=stage_cue',
     );
+    push @parts, 'audience_regime=' . $summary->{audience_regime}
+        if _plain_scalar($summary->{audience_regime})
+            && "$summary->{audience_regime}"
+                =~ /^(?:empty|solo|small|social|crowded)\z/;
     for my $key (qw(
         activity_window_seconds recent_humans recent_lines quiet_for_seconds
-        context_lines duration_seconds
+        effective_humans_milli dominant_share_pct human_line_rate_milli
+        bot_pressure_lines context_lines duration_seconds
+        audience_intensity_pct
+        policy_min_pause_seconds policy_max_pause_seconds
+        policy_cooldown_seconds
     )) {
         next unless _plain_scalar($summary->{$key})
             && "$summary->{$key}" =~ /^\d+\z/;

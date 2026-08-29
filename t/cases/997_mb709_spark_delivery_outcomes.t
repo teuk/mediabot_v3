@@ -17,7 +17,7 @@ return sub {
     my ($assert) = @_;
 
     my %expected = (
-        fork => 1, portal => 1,
+        fork => 1, portal => 1, mosaic => 1,
         callback => 0, reaction => 0, stage_cue => 0, vdm => 0,
     );
     for my $kind (@{ spark_event_kinds() }) {

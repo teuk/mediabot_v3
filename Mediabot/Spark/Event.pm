@@ -31,6 +31,15 @@ my %PROFILE = (
         interaction => 'contributions',
         requires_response => 1,
     },
+    mosaic => {
+        duration_seconds => 75,
+        min_recent_humans => 2,
+        needs_context => 0,
+        ai_use => 'required',
+        interaction => 'word_mosaic',
+        requires_response => 1,
+        delivery_style => 'message',
+    },
     callback => {
         duration_seconds => 45,
         min_recent_humans => 2,
@@ -85,7 +94,7 @@ sub _kind {
 }
 
 sub spark_event_kinds {
-    return [ qw(fork portal callback reaction stage_cue vdm) ];
+    return [ qw(fork portal callback reaction mosaic stage_cue vdm) ];
 }
 
 sub spark_event_profile {
