@@ -2,7 +2,7 @@
 # =============================================================================
 # mb446 — !mood détecte les emojis (comptage sur des caractères, pas des octets).
 #
-# publictext arrive en OCTETS UTF-8. Le comptage d'emojis utilisait
+# publictext peut arriver en OCTETS UTF-8. Le comptage d'emojis utilisait
 # $emoji_re avec des ranges de CODEPOINTS (\x{1F600}...), qui ne peuvent jamais
 # matcher un octet (< 256) : un emoji UTF-8 (4 octets) n'était donc jamais
 # reconnu, et le détail « top emoji: X×N » n'apparaissait jamais. mb446 scanne
@@ -48,8 +48,9 @@ return sub {
     my ($body) = $src =~ /(sub mbMood_ctx \{.*?\n\}\n)/s; $body //= '';
     (my $code = $body) =~ s/^\s*#.*$//mg;
 
-    $assert->like($code, qr/my \$txt_chars = Encode::decode\('UTF-8', \$txt, Encode::FB_DEFAULT\)/,
-        'copie décodée pour le scan emoji');
+    $assert->like($code,
+        qr/my \$txt_chars = utf8::is_utf8\(\$txt\).*?\? \$txt.*?: Encode::decode\('UTF-8', \$txt, Encode::FB_DEFAULT\)/s,
+        'copie Unicode conservée ou décodée pour le scan emoji');
     $assert->like($code, qr/while \(\$txt_chars =~ \/\(\$emoji_re\)\/g\)/,
         'scan emoji sur la copie décodée');
     $assert->unlike($code, qr/while \(\$txt =~ \/\(\$emoji_re\)\/g\)/,

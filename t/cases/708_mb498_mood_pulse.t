@@ -23,7 +23,10 @@ use Mediabot::Context;
     sub new { my ($c,%a)=@_; bless { %a, i=>0, rows=>[] }, $c }
     sub execute {
         my ($s,@b)=@_; $s->{i}=0; my $q=$s->{sql}; my $d=$s->{data};
-        if    ($q =~ /GROUP BY cl\.nick/)     { $s->{rows} = $d->{talkers} }
+        if    ($q =~ /MAX\(cl\.id_channel_log\)/) {
+            $s->{rows} = [[100, '2026-09-01 09:43:00', '2026-09-01']]
+        }
+        elsif ($q =~ /GROUP BY cl\.nick/)     { $s->{rows} = $d->{talkers} }
         elsif ($q =~ /GROUP BY HOUR\(cl\.ts\)/){ $s->{rows} = $d->{peak} }
         elsif ($q =~ /SELECT cl\.publictext/) { $s->{rows} = $d->{msgs} }
         else                                  { $s->{rows} = [] }
@@ -126,7 +129,10 @@ return sub {
         local $/; my $src = <$fh>; close $fh;
         my ($body) = $src =~ /(sub mbMood_ctx \{.*?\n\})\n/s; $body //= '';
         $assert->like($body, qr/INTERVAL 60 MINUTE/, 'talkers: fenêtre 60 min');
-        $assert->like($body, qr/cl\.ts >= CURDATE\(\)/, 'peak: sur le jour courant');
+        $assert->like($body, qr/NOW\(\) AS observed_at/, 'borne: heure DB figée');
+        $assert->like($body, qr/CURDATE\(\) AS observed_day/, 'borne: jour DB figé');
+        $assert->like($body, qr/cl\.id_channel_log <= \?/, 'requêtes bornées par insertion');
+        $assert->like($body, qr/cl\.ts >= \?/, 'peak: début de journée injecté');
         $assert->like($body, qr/event_type IN \('public','action'\)/,
             'convention event_type (garde projet)');
         $assert->like($body, qr/eval \{ \$sth_tt->execute/, 'talkers best-effort (eval)');

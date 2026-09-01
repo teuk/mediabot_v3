@@ -30,7 +30,10 @@ sub _slurp_710 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
     sub new { my ($c,%a)=@_; bless { %a, i=>0 }, $c }
     sub execute {
         my ($s,@b)=@_; $s->{i}=0; my $q=$s->{sql};
-        if    ($q =~ /GROUP BY cl\.nick/)      { $s->{rows}=[{nick=>'a',c=>3}] }
+        if    ($q =~ /MAX\(cl\.id_channel_log\)/) {
+            $s->{rows}=[[100, '2026-09-01 09:43:00', '2026-09-01']]
+        }
+        elsif ($q =~ /GROUP BY cl\.nick/)      { $s->{rows}=[{nick=>'a',c=>3}] }
         elsif ($q =~ /GROUP BY HOUR/)          { $s->{rows}=[{h=>20,c=>10}] }
         elsif ($q =~ /SELECT cl\.publictext/)  { $s->{rows}=[['salut cool']] }
         else                                    { $s->{rows}=[] }

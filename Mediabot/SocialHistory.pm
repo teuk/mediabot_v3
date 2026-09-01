@@ -1284,9 +1284,10 @@ sub mbMood_ctx {
         botNotice($self, $nick, 'Syntax: !mood  (must be in a channel)'); return;
     }
 
-    # mb500: light per-nick cooldown — !mood now runs three CHANNEL_LOG scans
-    # (sentiment + top talkers + peak hour), so guard against spam/DB load the
-    # same way onthisday does.
+    # mb500 / mb712: light per-nick cooldown — !mood takes one lightweight
+    # observation boundary, then runs three CHANNEL_LOG scans (sentiment, top
+    # talkers and peak hour), so guard against spam/DB load the same way
+    # onthisday does.
     {
         my $cooldown_s = 15;
         my $now = time();
@@ -1309,15 +1310,45 @@ sub mbMood_ctx {
 
     my $dbh = $self->{dbh};
     unless ($dbh) { botNotice($self, $nick, 'mood: database unavailable.'); return; }
+
+    # mb712-B1: freeze one database-native observation boundary before any IRC
+    # output. The global MAX over the primary key is a lightweight authoritative
+    # insertion ceiling; the time and day values make all three windows
+    # identical. The id ceiling also excludes this command's own replies even
+    # when CHANNEL_LOG.ts has only one-second precision and those replies share
+    # the boundary timestamp.
+    my $sth_boundary = $dbh->prepare(q{
+        SELECT COALESCE(MAX(cl.id_channel_log), 0) AS max_id,
+               NOW() AS observed_at,
+               CURDATE() AS observed_day
+        FROM CHANNEL_LOG cl
+    });
+    unless ($sth_boundary && $sth_boundary->execute()) {
+        botNotice($self, $nick, 'Database error.');
+        $sth_boundary->finish if $sth_boundary;
+        return;
+    }
+    my $boundary = $sth_boundary->fetchrow_arrayref;
+    $sth_boundary->finish;
+    unless ($boundary && defined($boundary->[0]) && $boundary->[0] =~ /\A\d+\z/
+            && defined($boundary->[1]) && defined($boundary->[2])) {
+        botNotice($self, $nick, 'Database error.');
+        return;
+    }
+    my ($max_log_id, $observed_at, $observed_day) = @{$boundary}[0, 1, 2];
+
     my $sth = $dbh->prepare(q{
         SELECT cl.publictext
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ?
           AND cl.event_type IN ('public','action')
-          AND cl.ts >= NOW() - INTERVAL 60 MINUTE
+          AND cl.id_channel_log <= ?
+          AND cl.ts >= DATE_SUB(?, INTERVAL 60 MINUTE)
+          AND cl.ts <= ?
     });
-    unless ($sth && $sth->execute($channel)) {
+    unless ($sth && $sth->execute(
+            $channel, $max_log_id, $observed_at, $observed_at)) {
         botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
     }
 
@@ -1352,13 +1383,15 @@ sub mbMood_ctx {
         $total_msgs++;
         $exclam += () = $txt =~ /!/g;
         $questions++ if $txt =~ /\?/;
-        # mb446-B1: le comptage d'emojis doit porter sur des CARACTÈRES. publictext
-        # arrive en OCTETS UTF-8 ; $emoji_re utilise des codepoints (\x{1F600}...)
-        # qui ne peuvent JAMAIS matcher un octet (< 256) -> le détail « top emoji »
-        # n'apparaissait jamais. On décode une copie (tolérant) pour ce scan ; la
-        # tokenisation des mots reste byte-safe (mb427). L'emoji retenu est un
-        # caractère, cohérent avec les \x{...} déjà émis dans la sortie mood.
-        my $txt_chars = Encode::decode('UTF-8', $txt, Encode::FB_DEFAULT);
+        # mb446-B1 / mb711-B1: DBD::MariaDB can return publictext either as
+        # UTF-8 octets or an already-decoded character string, depending on the
+        # live driver and connection. Decode only the octet form: Encode::decode on
+        # the character form throws "Wide character" and made !mood disappear
+        # behind the public dispatch error boundary. The word-token path below
+        # remains unchanged; this copy is only for the Unicode emoji scan.
+        my $txt_chars = utf8::is_utf8($txt)
+            ? $txt
+            : Encode::decode('UTF-8', $txt, Encode::FB_DEFAULT);
         while ($txt_chars =~ /($emoji_re)/g) { $emoji_count{$1}++ }
         # Tokeniser
         # mb427-B1: tokenisation byte-safe (comme mb426) — les mots accentués
@@ -1412,23 +1445,19 @@ sub mbMood_ctx {
     # Score 0-100%
     my $mood_pct = int($pos_ratio * 100);
 
-    botPrivmsg($self, $channel,
-        sprintf("\x{1F321}\x{FE0F} Mood %s (last 60min): %s \x02%s\x02 %d%%  \x{B7}  energy: %s (%d msgs)",
-            $channel, $mood_emoji, $mood_label, $mood_pct, $energy_label, $total_msgs));
-
     my @details;
     push @details, "$pos positives"   if $pos > 0;
     push @details, "$neg negatives"   if $neg > 0;
     push @details, "$questions ?"     if $questions > 0;
     push @details, "$exclam !"        if $exclam > 0;
     push @details, $top_emoji         if $top_emoji;
-    botPrivmsg($self, $channel, "  " . join(' | ', @details)) if @details;
 
     # mb498: "pulse" line — WHO is driving the last 60 min and WHEN the channel
     # peaked today. Turns mood (sentiment) into a fuller read of the room.
-    # Best-effort: never blocks the mood answer.
+    # Best-effort: never blocks the mood answer. mb712 collects the complete
+    # pulse before the first botPrivmsg so the observation cannot see itself.
+    my @pulse;
     {
-        my @pulse;
 
         # top talkers over the same 60-minute window as the mood scan
         my $sth_tt = $dbh->prepare(q{
@@ -1437,12 +1466,15 @@ sub mbMood_ctx {
             JOIN CHANNEL c ON c.id_channel = cl.id_channel
             WHERE c.name = ?
               AND cl.event_type IN ('public','action')
-              AND cl.ts >= NOW() - INTERVAL 60 MINUTE
+              AND cl.id_channel_log <= ?
+              AND cl.ts >= DATE_SUB(?, INTERVAL 60 MINUTE)
+              AND cl.ts <= ?
             GROUP BY cl.nick
             ORDER BY c DESC
             LIMIT 3
         });
-        if ($sth_tt && eval { $sth_tt->execute($channel) }) {
+        if ($sth_tt && eval { $sth_tt->execute(
+                $channel, $max_log_id, $observed_at, $observed_at) }) {
             my @tt;
             while (my $r = $sth_tt->fetchrow_hashref) {
                 push @tt, "$r->{nick} ($r->{c})";
@@ -1458,12 +1490,15 @@ sub mbMood_ctx {
             JOIN CHANNEL c ON c.id_channel = cl.id_channel
             WHERE c.name = ?
               AND cl.event_type IN ('public','action')
-              AND cl.ts >= CURDATE()
+              AND cl.id_channel_log <= ?
+              AND cl.ts >= ?
+              AND cl.ts <= ?
             GROUP BY HOUR(cl.ts)
             ORDER BY c DESC
             LIMIT 1
         });
-        if ($sth_pk && eval { $sth_pk->execute($channel) }) {
+        if ($sth_pk && eval { $sth_pk->execute(
+                $channel, $max_log_id, $observed_day, $observed_at) }) {
             if (my $r = $sth_pk->fetchrow_hashref) {
                 push @pulse, sprintf("peak today: %02dh-%02dh (%d msgs)",
                     $r->{h}, ($r->{h} + 1) % 24, $r->{c}) if defined $r->{h};
@@ -1471,8 +1506,13 @@ sub mbMood_ctx {
             $sth_pk->finish;
         }
 
-        botPrivmsg($self, $channel, "  " . join("  \x{B7}  ", @pulse)) if @pulse;
     }
+
+    botPrivmsg($self, $channel,
+        sprintf("\x{1F321}\x{FE0F} Mood %s (last 60min): %s \x02%s\x02 %d%%  \x{B7}  energy: %s (%d msgs)",
+            $channel, $mood_emoji, $mood_label, $mood_pct, $energy_label, $total_msgs));
+    botPrivmsg($self, $channel, "  " . join(' | ', @details)) if @details;
+    botPrivmsg($self, $channel, "  " . join("  \x{B7}  ", @pulse)) if @pulse;
 
     # Hook achievement (mb610-B1: progression persistante)
     $self->{_mood_count}{$nick}++;

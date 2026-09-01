@@ -33,6 +33,30 @@ release. Development after this release continues on the `3.4dev` line.
 ## [Unreleased] — 3.4dev
 
 
+### mb712 — freeze one coherent observation for mood
+
+- Captured a database-native `CHANNEL_LOG` boundary before `!mood` emits any
+  IRC response, then reused its insertion ceiling, timestamp and day across the
+  sentiment, top-talker and peak-hour queries.
+- Prevented the command's own output from inflating `driven by` and `peak
+  today`, including when incoming and outgoing rows share the same one-second
+  database timestamp.
+- Collected every optional pulse value before the first response while keeping
+  its best-effort failure boundary and the existing cooldown behavior.
+
+
+### mb711 — let mood accept both MariaDB text representations
+
+- Fixed `!mood` when DBD::MariaDB returns `CHANNEL_LOG.publictext` as an
+  already-decoded Perl character string. The emoji scan now preserves that
+  representation instead of passing it through `Encode::decode` a second time
+  and raising a `Wide character` exception.
+- Kept compatibility with deployments that still return UTF-8 octets: only
+  unflagged input is decoded, using the existing tolerant boundary.
+- Added a focused runtime regression test covering both representations and
+  requiring the normal mood and top-emoji output in each case.
+
+
 ### mb710 — teach Reanimator to measure a conversation before joining it
 
 - Added a metadata-only audience model shared by the Spark revival and
