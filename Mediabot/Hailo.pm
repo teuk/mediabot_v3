@@ -440,7 +440,7 @@ sub hailo_submit_candidate {
         $self->{conf}->get('hailo.HAILO_POST_EDIT_PROVIDER')
     };
     $provider = 'auto' unless defined($provider) && !ref($provider)
-        && $provider =~ /^(?:auto|anthropic|openai)\z/i;
+        && $provider =~ /^(?:auto|anthropic|openai|gemini)\z/i;
 
     my $queued = $runtime->submit(
         channel            => $channel,

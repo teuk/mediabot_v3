@@ -162,6 +162,12 @@ sub new {
         'Total Claude API errors');
     $self->_declare('mediabot_claude_ratelimit_total',  'counter',
         'Total Claude API rate-limit hits');
+    $self->_declare('mediabot_gemini_requests_total',   'counter',
+        'Total Gemini API requests');
+    $self->_declare('mediabot_gemini_errors_total',     'counter',
+        'Total Gemini API errors');
+    $self->_declare('mediabot_gemini_ratelimit_total',  'counter',
+        'Total Gemini API rate-limit hits');
     $self->_declare('mediabot_nick_changes_total',      'counter',
         'Total NICK changes seen (mb108-IMP3)');
     $self->_declare('mediabot_joins_total',             'counter',

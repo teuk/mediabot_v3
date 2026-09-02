@@ -38,6 +38,7 @@ return sub {
     my @runtime_files = (
         File::Spec->catfile('.', 'Mediabot', 'AdminCommands.pm'),
         File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'),
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Gemini.pm'),
         File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm'),
         File::Spec->catfile('.', 'mediabot.pl'),
     );
@@ -47,7 +48,7 @@ return sub {
         _slurp_sample_api_keys($_);
     } @runtime_files;
 
-    for my $section (qw(openai fortnite tmdb)) {
+    for my $section (qw(openai gemini fortnite tmdb)) {
         my $body = _section_body_sample_api_keys($sample, $section);
         $assert->ok(defined $body, "sample config has [$section] section");
         $assert->like(
@@ -66,6 +67,7 @@ return sub {
     $assert->unlike($sample, qr/API_KEY=\*+/, 'sample contains no asterisk API-key placeholder');
 
     $assert->like($runtime, qr/get\('openai\.API_KEY'\)/, 'runtime reads openai.API_KEY');
+    $assert->like($runtime, qr/gemini\.API_KEY/, 'runtime reads gemini.API_KEY through the provider registry');
     $assert->like($runtime, qr/get\('fortnite\.API_KEY'\)/, 'runtime reads fortnite.API_KEY');
     $assert->like($runtime, qr/get\('tmdb\.API_KEY'\)/, 'runtime reads tmdb.API_KEY');
 };

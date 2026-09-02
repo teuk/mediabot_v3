@@ -65,6 +65,13 @@ Mediabot::External::Claude->import(qw(
     _claude_send_and_parse
 ));
 
+# Google Gemini uses the same provider-neutral client and IRC pacing boundary.
+require Mediabot::External::Gemini;
+Mediabot::External::Gemini->import(qw(
+    gemini_ctx
+    geminiAI
+));
+
 # mb620-B1: sous-module Horoscope (API gratuite + mise en langue)
 require Mediabot::External::Horoscope;
 
@@ -127,6 +134,8 @@ our @EXPORT = qw(
     chatGPT_ctx
     claudeAI
     claude_ctx
+    geminiAI
+    gemini_ctx
     ytSearch_ctx
     displayUrlTitle
     displayWeather_ctx

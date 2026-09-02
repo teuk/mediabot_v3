@@ -81,6 +81,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260827_vdm_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260827_danstonchat_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260828_spark_action_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260902_hailo_policy_chansets.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260902_gemini_chanset.sql;
 ```
 
 Then run the checker again:
@@ -122,6 +123,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260827_danstonchat_chanset.sql
 20260828_spark_action_chanset.sql
 20260902_hailo_policy_chansets.sql
+20260902_gemini_chanset.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this

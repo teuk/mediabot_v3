@@ -17,7 +17,7 @@ our @EXPORT_OK = qw(
 # Provider-neutral registry. Keep credentials in their historical config
 # namespaces so existing !ai / tellme installations continue to work while the
 # transport layer is migrated behind this facade in later MB699 rounds.
-my @DEFAULT_PROVIDER_ORDER = qw(anthropic openai);
+my @DEFAULT_PROVIDER_ORDER = qw(anthropic openai gemini);
 my %PROVIDER = (
     anthropic => {
         api_key => 'anthropic.API_KEY',
@@ -26,6 +26,10 @@ my %PROVIDER = (
     openai => {
         api_key => 'openai.API_KEY',
         aliases => [qw(chatgpt gpt)],
+    },
+    gemini => {
+        api_key => 'gemini.API_KEY',
+        aliases => [qw(google googleai)],
     },
 );
 

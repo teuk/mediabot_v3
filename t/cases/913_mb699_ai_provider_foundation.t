@@ -24,7 +24,7 @@ return sub {
     require Mediabot::AI;
 
     my @known = Mediabot::AI::known_providers();
-    $assert->is(join(',', @known), 'anthropic,openai',
+    $assert->is(join(',', @known), 'anthropic,openai,gemini',
         'mb699-913: canonical provider order is deterministic');
 
     $assert->is(Mediabot::AI::normalize_provider('Claude'), 'anthropic',
@@ -33,6 +33,8 @@ return sub {
         'mb699-913: ChatGPT alias normalizes to openai');
     $assert->is(Mediabot::AI::normalize_provider('gpt'), 'openai',
         'mb699-913: GPT alias normalizes to openai');
+    $assert->is(Mediabot::AI::normalize_provider('GoogleAI'), 'gemini',
+        'mb699-913: GoogleAI alias normalizes to Gemini');
     $assert->is(Mediabot::AI::normalize_provider('AUTO'), 'auto',
         'mb699-913: auto mode is canonicalized');
     $assert->ok(!defined Mediabot::AI::normalize_provider('mystery-ai'),
@@ -41,6 +43,7 @@ return sub {
     my $none = bless { conf => Conf913->new(
         'anthropic.API_KEY' => '',
         'openai.API_KEY'    => '   ',
+        'gemini.API_KEY'    => '',
     ) }, 'Bot913';
     $assert->is(Mediabot::AI::provider_configured($none, 'anthropic'), 0,
         'mb699-913: empty Anthropic key is not configured');
@@ -52,10 +55,11 @@ return sub {
     my $both = bless { conf => Conf913->new(
         'anthropic.API_KEY' => 'anthropic-secret-never-returned',
         'openai.API_KEY'    => 'openai-secret-never-returned',
+        'gemini.API_KEY'    => 'gemini-secret-never-returned',
     ) }, 'Bot913';
 
     my @configured = Mediabot::AI::configured_providers($both);
-    $assert->is(join(',', @configured), 'anthropic,openai',
+    $assert->is(join(',', @configured), 'anthropic,openai,gemini',
         'mb699-913: configured provider list contains names only');
     $assert->is(
         Mediabot::AI::select_provider($both->{conf}, 'auto'), 'anthropic',
@@ -69,6 +73,8 @@ return sub {
         'mb699-913: caller can choose an OpenAI-first auto order');
     $assert->is(Mediabot::AI::select_provider($both, 'chatgpt'), 'openai',
         'mb699-913: explicit OpenAI alias selects OpenAI');
+    $assert->is(Mediabot::AI::select_provider($both, 'google'), 'gemini',
+        'mb699-913: explicit Google alias selects Gemini');
 
     my $anthropic_only = bless { conf => Conf913->new(
         'anthropic.API_KEY' => 'configured',
@@ -86,7 +92,7 @@ return sub {
         local $/;
         <$fh>;
     };
-    $assert->unlike($src, qr/anthropic-secret-never-returned|openai-secret-never-returned/,
+    $assert->unlike($src, qr/anthropic-secret-never-returned|openai-secret-never-returned|gemini-secret-never-returned/,
         'mb699-913: provider module contains no test or runtime credentials');
     $assert->unlike($src, qr/api\.anthropic\.com|api\.openai\.com/,
         'mb699-913: provider-neutral registry does not own HTTP endpoints');

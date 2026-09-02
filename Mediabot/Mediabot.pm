@@ -2359,6 +2359,7 @@ sub mbCommandPublic {
         tellme       => sub { chatGPT_ctx($ctx) },
         openai       => sub { openai_ctx($ctx) },
         ai           => sub { claude_ctx($ctx) },
+        gemini       => sub { gemini_ctx($ctx) },
         yomomma      => sub { Yomomma_ctx($ctx) },
         resolve      => sub { resolve_ctx($ctx) },
         tmdb         => sub { mbTMDBSearch_ctx($ctx) },
@@ -2719,6 +2720,7 @@ song|song|public|Show the current Icecast song or stream title.
 status|status|admin|Show bot runtime status.
 tellme|tellme <prompt>|public|Ask the configured ChatGPT/OpenAI integration.
 openai|openai help|owner|Show and change safe OpenAI/tellme runtime settings.
+gemini|gemini <prompt>|public|Ask Google Gemini. Requires the per-channel +Gemini chanset.
 timers|timers|admin|List bot timers.
 tmdb|tmdb <movie or show>|public|Search TMDB when configured.
 tmdblangset|tmdblangset #channel <lang>|channel admin|Set TMDB language for a channel.
@@ -3162,7 +3164,7 @@ sub _mbHelpCategoryForCommand {
         || $cmd =~ /^(?:add|del|access|chan|channels|chanlist|channellist|chaninfo|chanset|addchan|part|join|purge|nicklist)$/;
     return 'auth' if $hay =~ /\b(?:login|logout|password|pass|auth|register|verify|hostmask|whoami|ident|xlogin|user)\b/;
     return 'stats' if $hay =~ /\b(?:stats|stat|seen|top|log|lines|talk|date|weather|meteo|resolve|whereis)\b/;
-    return 'ai_fun' if $hay =~ /\b(?:hailo|openai|chatgpt|claude|tellme|quote|joke|dice|leet|yomomma|greet|birthday|birthdate|q)\b/;
+    return 'ai_fun' if $hay =~ /\b(?:hailo|openai|chatgpt|claude|gemini|tellme|quote|joke|dice|leet|yomomma|greet|birthday|birthdate|q)\b/;
     return 'admin' if $level =~ /\b(?:admin|master|owner|authorized)\b/
         || $hay =~ /\b(?:debug|exec|rehash|die|dump|update|status|version|nick)\b/;
 

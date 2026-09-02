@@ -77,7 +77,7 @@ return sub {
         qr/Run a full suite only when\s+the matching commit is imminent.*one final full suite/s,
         'mb718: single-full policy remains explicit');
     $assert->like($roadmap,
-        qr/^\| MB726 \| Final \|.*operator gives an explicit release decision \|$/m,
+        qr/^\| MB727 \| Final \|.*operator gives an explicit release decision \|$/m,
         'mb718: renumbered final release still requires an operator decision');
 
     my @entries = $change =~ /^###\s+mb718\b.*$/gmi;

@@ -12,6 +12,7 @@ use Mediabot::AI::Request qw(validate_request);
 use Mediabot::AI::Transport ();
 use Mediabot::AI::Provider::Anthropic ();
 use Mediabot::AI::Provider::OpenAI ();
+use Mediabot::AI::Provider::Gemini ();
 
 our $VERSION = '1.0';
 
@@ -31,6 +32,14 @@ my %DEFAULT = (
         max_tokens     => 400,
         temperature    => 0.7,
         timeout        => 20,
+    },
+    gemini => {
+        api_url     => 'https://generativelanguage.googleapis.com/v1beta/models',
+        model       => 'gemini-3.8-flash',
+        max_tokens  => 1024,
+        temperature => 0.7,
+        timeout     => 30,
+        thinking_level => 'LOW',
     },
 );
 
@@ -293,6 +302,70 @@ sub _provider_plan {
         return ({ provider => 'openai', attempts => \@attempts }, undef);
     }
 
+    if ($provider eq 'gemini') {
+        my $base_url = $self->_conf_string(
+            'gemini.API_URL', $DEFAULT{gemini}{api_url}
+        );
+        return (undef, 'invalid_config') unless _https_url($base_url);
+
+        my $model = $explicit_model
+            ? $request->{model}
+            : $self->_conf_string('gemini.MODEL', $DEFAULT{gemini}{model});
+        my $max_tokens = exists($request->{max_output_tokens})
+            ? $request->{max_output_tokens}
+            : $self->_conf_int('gemini.MAX_TOKENS', $DEFAULT{gemini}{max_tokens}, 1, 100_000);
+        my $temperature = exists($request->{temperature})
+            ? $request->{temperature}
+            : $self->_conf_float('gemini.TEMPERATURE', $DEFAULT{gemini}{temperature}, 0, 2);
+        my $timeout = exists($request->{timeout_seconds})
+            ? $request->{timeout_seconds}
+            : $self->_conf_int('gemini.TIMEOUT', $DEFAULT{gemini}{timeout}, 5, 60);
+        my $thinking_level = uc $self->_conf_string(
+            'gemini.THINKING_LEVEL', $DEFAULT{gemini}{thinking_level}
+        );
+        return (undef, 'invalid_config')
+            unless $thinking_level =~ /\A(?:LOW|MEDIUM|HIGH)\z/;
+
+        my $adapted = _copy_request_for_provider(
+            $request, 'gemini',
+            model             => $model,
+            max_output_tokens => $max_tokens,
+            temperature       => $temperature,
+            timeout_seconds   => $timeout,
+        );
+        my $error = validate_request($adapted);
+        return (undef, 'invalid_request') if defined $error;
+
+        my $payload = eval {
+            Mediabot::AI::Provider::Gemini::build_payload(
+                $adapted,
+                { thinking_level => $thinking_level },
+            )
+        };
+        return (undef, 'provider_build_failed') unless defined($payload) && !$@;
+
+        my $headers = eval {
+            Mediabot::AI::Provider::Gemini::build_headers({ api_key => $api_key })
+        };
+        return (undef, 'provider_build_failed') unless $headers && !$@;
+
+        my $api_url = eval {
+            Mediabot::AI::Provider::Gemini::build_url($base_url, $model)
+        };
+        return (undef, 'invalid_config') unless defined($api_url) && !$@;
+
+        return ({
+            provider => 'gemini',
+            attempts => [{
+                model   => "$model",
+                api_url => "$api_url",
+                timeout => 0 + $timeout,
+                headers => $headers,
+                payload => $payload,
+            }],
+        }, undef);
+    }
+
     return (undef, 'unknown_provider');
 }
 
@@ -372,7 +445,9 @@ sub _attempt {
     if ($res->{success}) {
         $answer = $provider eq 'anthropic'
             ? Mediabot::AI::Provider::Anthropic::extract_answer($body)
-            : Mediabot::AI::Provider::OpenAI::extract_answer($body);
+            : $provider eq 'openai'
+                ? Mediabot::AI::Provider::OpenAI::extract_answer($body)
+                : Mediabot::AI::Provider::Gemini::extract_answer($body);
     }
 
     return ($res, $body, $answer);
@@ -444,6 +519,14 @@ sub _run_plan {
             if (!$res->{success} && $provider eq 'openai') {
                 ($error_type, $error_code, $error_message) =
                     Mediabot::AI::Provider::OpenAI::extract_error($body);
+            }
+            elsif (!$res->{success} && $provider eq 'gemini') {
+                ($error_type, $error_code, $error_message) =
+                    Mediabot::AI::Provider::Gemini::extract_error($body);
+            }
+            elsif ($res->{success} && $provider eq 'gemini') {
+                ($error_type, $error_code, $error_message) =
+                    Mediabot::AI::Provider::Gemini::extract_diagnostic($body);
             }
 
             $last_failure = _failure_result(

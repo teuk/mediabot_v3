@@ -49,12 +49,13 @@ variance is a concrete MB719 preflight item, not authority for more host work.
 | --- | --- | --- |
 | MB719 | P0 | Root grants are captured and accepted, production schema reconciliation is backed up, explicitly confirmed, applied through the reviewed plan, verified drift-free and proven restorable |
 | MB720 | P0 | Hailo has an isolated per-channel brain, MegaHAL-compatible message policy, reply-before-learn ordering and a language-aware provider-neutral post-editor that preserves the learned draft or falls back to it safely |
-| MB721 | P0 | Supported instances converge one at a time and complete a seven-day observation window without unexplained restart, reconnect loop, persistent worker failure or schema drift |
-| MB722 | P1 | The supported versus experimental boundary for `mbweb` is decided, tested and documented |
-| MB723 | P1 | Security, privacy, observability and restore gates are updated for 3.5 and exercised on the supported deployment |
-| MB724 | P1 | A fresh Debian 13 installation and a representative 3.3-to-3.5 upgrade both succeed in disposable environments with rollback evidence |
-| MB725 | P1 | Installation, update, database, systemd and release documentation agree; release archives are reproduced and inspected in a dry run |
-| MB726 | Final | No open blocker; release candidate soak complete; one final full suite passes; the operator gives an explicit release decision |
+| MB721 | Complete on development pilot | Google Gemini is a strict native provider and `!gemini` is independently opt-in through `+Gemini`; a bounded live provider smoke and opt-in IRC pilot passed while key/configuration and wider channel activation remain operator-controlled |
+| MB722 | P0 | Supported instances converge one at a time and complete a seven-day observation window without unexplained restart, reconnect loop, persistent worker failure or schema drift |
+| MB723 | P1 | The supported versus experimental boundary for `mbweb` is decided, tested and documented |
+| MB724 | P1 | Security, privacy, observability and restore gates are updated for 3.5 and exercised on the supported deployment |
+| MB725 | P1 | A fresh Debian 13 installation and a representative 3.3-to-3.5 upgrade both succeed in disposable environments with rollback evidence |
+| MB726 | P1 | Installation, update, database, systemd and release documentation agree; release archives are reproduced and inspected in a dry run |
+| MB727 | Final | No open blocker; release candidate soak complete; one final full suite passes; the operator gives an explicit release decision |
 
 ## MB718 administrator result
 
@@ -151,7 +152,7 @@ provider answer may enter metrics.
 
 ## Release decision
 
-The roadmap is complete only when MB726 records all gates as satisfied. Until
+The roadmap is complete only when MB727 records all gates as satisfied. Until
 then, 3.3 is the stable release and `3.4dev` is the only development identity.
 The final version change, tag, archive publication and deployment each require
 the normal explicit release procedure.

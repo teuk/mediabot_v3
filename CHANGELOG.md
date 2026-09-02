@@ -32,6 +32,29 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb721 — welcome Google Gemini behind an opt-in channel gate
+
+- Added Google Gemini as a native third provider behind `Mediabot::AI::Client`.
+  Explicit `gemini` requests never cross to Anthropic or OpenAI; `auto` keeps
+  its compatibility order and considers Gemini only after both existing
+  providers.
+- Added the opt-in public `!gemini <prompt>` command with a strict `+Gemini`
+  channel gate, asynchronous provider work, bounded prompt/output, per-user
+  rate limiting, per-conversation serialization and aggregate metrics.
+- Gemini credentials remain in the private `gemini.API_KEY` configuration
+  namespace. Authentication uses the `x-goog-api-key` header, never a URL,
+  request object, log entry or committed file.
+- Gemini 3.8 thinking is explicitly bounded to `LOW` by default for responsive
+  IRC use. Its default generation ceiling is 1024 tokens so internal thinking
+  does not routinely consume all room for visible text.
+- Successful HTTP envelopes without visible text now retain only structural
+  diagnostics (`finishReason`, token counts and part counts); prompt, thought
+  text, response text, headers and credentials never enter that evidence.
+- Added an idempotent data-only migration that registers `Gemini` without
+  enabling it on any channel.
+- Qualified the provider with a bounded live development smoke and an opt-in
+  IRC channel pilot while leaving production and all other channels unchanged.
+
 
 ### mb720 — isolate Hailo training and define its constrained post-editor
 

@@ -829,7 +829,8 @@ INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES
 (27, 'DansTonChat'),
 (28, 'SparkAction'),
 (29, 'HailoLearn'),
-(30, 'HailoRespond');
+(30, 'HailoRespond'),
+(31, 'Gemini');
 
 --
 -- PUBLIC_COMMANDS_CATEGORY — default categories

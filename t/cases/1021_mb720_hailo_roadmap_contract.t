@@ -46,7 +46,7 @@ return sub {
     );
     $assert->like(
         $roadmap,
-        qr/\| MB726 \| Final \|/,
+        qr/\| MB727 \| Final \|/,
         'renumbered release decision remains explicit and final',
     );
 

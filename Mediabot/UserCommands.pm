@@ -8247,6 +8247,7 @@ sub mbFeatures_ctx {
     my $ytsearch     = _mbFeatures_chanset_state($self, $channel, 'YoutubeSearch', default => 0);
     my $randomquote  = _mbFeatures_chanset_state($self, $channel, 'RandomQuote', default => 0);
     my $claude       = _mbFeatures_chanset_state($self, $channel, 'Claude', default => 0);
+    my $gemini       = _mbFeatures_chanset_state($self, $channel, 'Gemini', default => 0);
     my $nocolors     = _mbFeatures_chanset_state($self, $channel, 'NoColors', default => 0);
     my $antiflood    = _mbFeatures_chanset_state($self, $channel, 'AntiFlood', default => 0);
 
@@ -8266,7 +8267,7 @@ sub mbFeatures_ctx {
         "  \x{1F3B2} games: $games  | commands: duel, horoscope, compat, quotegame",
         "  \x{1F517} links: UrlTitle=$urltitle  Youtube=$youtube  YoutubeSearch=$ytsearch",
         "  \x{1F4AC} social memory: profil/radar/dashboard/leaderboard/awards/yearbook/chronos/mood/memory available",
-        "  \x{1F916} integrations: Claude=$claude  RandomQuote=$randomquote  Radio=$radio",
+        "  \x{1F916} integrations: Claude=$claude  Gemini=$gemini  RandomQuote=$randomquote  Radio=$radio",
         "  \x{1F6E1} safety/output: AntiFlood=$antiflood  NoColors=$nocolors  Metrics=$metrics",
         "  Help: help social / help games / help chansets",
     );
@@ -8353,6 +8354,7 @@ sub mbObservatory_ctx {
     my $announce     = _mbFeatures_chanset_state($self, $channel, 'AchievementAnnounce', default => 0);
     my $urltitle     = _mbFeatures_chanset_state($self, $channel, 'UrlTitle', default => 0);
     my $claude       = _mbFeatures_chanset_state($self, $channel, 'Claude', default => 0);
+    my $gemini       = _mbFeatures_chanset_state($self, $channel, 'Gemini', default => 0);
     my $antiflood    = _mbFeatures_chanset_state($self, $channel, 'AntiFlood', default => 0);
 
     my $metrics = $self->{metrics} ? 'on' : 'off';
@@ -8372,6 +8374,7 @@ sub mbObservatory_ctx {
       . "  | energy $energy"
       . "  | UrlTitle $urltitle"
       . "  | Claude $claude"
+      . "  | Gemini $gemini"
       . "  | AntiFlood $antiflood"
       . "  | metrics $metrics"
     );
