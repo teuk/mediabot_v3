@@ -435,7 +435,7 @@ sub _migration_observables {
     my $add = sub {
         my ($type, %e) = @_;
         my $key = join('|', $type, map { defined $e{$_} ? $e{$_} : '' }
-                                   qw(table column index constraint chanset));
+            qw(table column index constraint chanset source_chanset target_chanset));
         return if $seen{$key}++;
         push @effects, { type => $type, %e };
     };
@@ -484,11 +484,34 @@ sub _migration_observables {
         }
     }
 
+    # A policy-split migration may copy an existing channel opt-in to a new
+    # independent chanset. Accept only the audited idempotent INSERT...SELECT
+    # shape: a named source, a named target and a LEFT JOIN/NULL guard. Its
+    # durable observable is that no source-enabled channel lacks the target.
+    my $unsupported_channel_set = 0;
+    while ($sql =~ /(INSERT(?:\s+IGNORE)?\s+INTO\s+`?CHANNEL_SET`?[\s\S]*?;)/ig) {
+        my $stmt = $1;
+        my ($source) = $stmt =~ /\bmaster_list[.]chanset\s*=\s*'([^']+)'/i;
+        my ($target) = $stmt =~ /\btarget_list[.]chanset\s*=\s*'([^']+)'/i;
+        my $bounded = $stmt =~ /\bexisting_set[.]id_channel_set\s+IS\s+NULL\b/i;
+        if (defined($source) && defined($target) && $bounded
+            && $source =~ /\A[A-Za-z][A-Za-z0-9_]*\z/
+            && $target =~ /\A[A-Za-z][A-Za-z0-9_]*\z/) {
+            $add->('chanset_inheritance',
+                source_chanset => $source,
+                target_chanset => $target,
+            );
+        }
+        else {
+            $unsupported_channel_set = 1;
+        }
+    }
+
     # Unsupported mutation forms make historical inference indeterminate even
     # if some other durable effects were recognised.
-    my $unsupported = 0;
+    my $unsupported = $unsupported_channel_set;
     $unsupported = 1 if $sql =~ /^\s*(?:UPDATE|DELETE\s+FROM|REPLACE\s+INTO)\b/im;
-    $unsupported = 1 if $sql =~ /^\s*INSERT\s+(?:IGNORE\s+)?INTO\s+(?!`?CHANSET_LIST`?)/im;
+    $unsupported = 1 if $sql =~ /^\s*INSERT\s+(?:IGNORE\s+)?INTO\s+(?!`?(?:CHANSET_LIST|CHANNEL_SET)`?(?:\s|\())/im;
 
     return {
         effects => \@effects,
@@ -2359,6 +2382,25 @@ sub _conf_from_argv {
                         'SELECT 1 AS present FROM CHANSET_LIST WHERE chanset = ? LIMIT 1',
                         $effect->{chanset});
                 }
+                elsif ($effect->{type} eq 'chanset_inheritance') {
+                    ($row, $err) = _db_select_one($dbh, q{
+                        SELECT 1 AS present
+                          FROM CHANSET_LIST AS target_list
+                         WHERE target_list.chanset = ?
+                           AND NOT EXISTS (
+                               SELECT 1
+                                 FROM CHANNEL_SET AS source_set
+                                 JOIN CHANSET_LIST AS source_list
+                                   ON source_list.id_chanset_list = source_set.id_chanset_list
+                                 LEFT JOIN CHANNEL_SET AS target_set
+                                   ON target_set.id_channel = source_set.id_channel
+                                  AND target_set.id_chanset_list = target_list.id_chanset_list
+                                WHERE source_list.chanset = ?
+                                  AND target_set.id_channel_set IS NULL
+                           )
+                         LIMIT 1
+                    }, $effect->{target_chanset}, $effect->{source_chanset});
+                }
                 push @observed, { %$effect,
                     state => ($err ? 'indeterminate' : ($row ? 'present' : 'missing')),
                     (defined $err ? (error => $err) : ()),
@@ -2412,6 +2454,9 @@ sub _conf_from_argv {
             return 'constraint ' . ($e->{table} // '?') . '.' . ($e->{constraint} // '?')
                 if ($e->{type} // '') eq 'constraint';
             return 'chanset ' . ($e->{chanset} // '?') if ($e->{type} // '') eq 'chanset';
+            return 'chanset inheritance ' . ($e->{source_chanset} // '?')
+                . ' -> ' . ($e->{target_chanset} // '?')
+                if ($e->{type} // '') eq 'chanset_inheritance';
             return ($e->{type} // 'effect');
         };
         for my $mig (@migrations) {

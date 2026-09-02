@@ -1361,6 +1361,21 @@ sub clean_and_exit {
         1;
     };
 
+    # Persist every lazily opened per-channel Hailo brain before database and
+    # logger teardown. Hailo also saves on object destruction; this explicit
+    # pass makes the shutdown boundary observable and reports a partial save.
+    eval {
+        if ($self->can('save_hailo_brains')) {
+            my $saved = $self->save_hailo_brains();
+            $self->{logger}->log($saved ? 3 : 1,
+                $saved
+                    ? 'Hailo: per-channel brains saved before exit'
+                    : 'Hailo: one or more per-channel brains failed to save')
+                if $self->{logger} && $self->{logger}->can('log');
+        }
+        1;
+    };
+
     # --- DB: safe disconnect ---
     eval {
         if (defined $self->{dbh} && $self->{dbh}) {
@@ -3553,32 +3568,43 @@ sub mbHandleNickTriggered {
         ) {
             # mb361-B1: Hailo initialization is allowed to fail without taking
             # IRC message handling down or incrementing the timeout metric.
-            my $hailo = get_hailo_runtime($self);
+            my $hailo = get_hailo_runtime($self, $sChannel);
             return unless $hailo;
-
-            my $sCurrentNick = $self->{irc}->nick_folded;
-            $what =~ s/\Q$sCurrentNick\E//g;
 
             # mb644-B1: normal path is already decoded in mediabot.pl; keep
             # this direct-entry fallback idempotent for tests/internal callers.
             $what = Mediabot::Helpers::decode_irc_text($what);
 
-            # AA5+AA6: timeout + metrics around Hailo brain call
+            # MegaHAL-compatible local turn: normalize and placeholder nicks,
+            # apply independent per-channel learn/respond policy, generate from
+            # prior training, then learn. Provider post-edit remains MB720-D.
             $self->{metrics}->inc('mediabot_hailo_learn_reply_total') if $self->{metrics};
-            my $sAnswer = eval {
-                local $SIG{ALRM} = sub { die "Hailo timeout\n" };
-                alarm(5);
-                my $r = $hailo->learn_reply($what);
-                alarm(0);
-                $r;
+            my $result = eval {
+                hailo_process_turn(
+                    $self,
+                    channel => $sChannel,
+                    speaker => $sNick,
+                    text    => $what,
+                    mode    => 'mention',
+                    brain   => $hailo,
+                    excluded => 0,
+                );
             };
-            alarm(0);  # ensure alarm is cleared even on exception
             if ($@) {
-                $self->{logger}->log(1, "AA5: Hailo learn_reply timeout or error: $@");
-                $self->{metrics}->inc('mediabot_hailo_timeout_total') if $self->{metrics};
-            } elsif (defined $sAnswer && $sAnswer ne '' && $sAnswer !~ /^\Q$what\E\s*\.$/i) {
-                $self->{logger}->log(4, "learn_reply $what from $sNick : $sAnswer");
-                botPrivmsg($self, $sChannel, $sAnswer);
+                $self->{logger}->log(1, "Hailo channel turn error: $@");
+            } elsif (ref($result) eq 'HASH'
+                && defined($result->{candidate})
+                && $result->{candidate} ne '') {
+                my $sAnswer = $result->{candidate};
+                $self->{logger}->log(4,
+                    'Hailo local candidate queued for bounded post-edit');
+                hailo_submit_candidate(
+                    $self,
+                    channel   => $sChannel,
+                    trigger   => $what,
+                    candidate => $sAnswer,
+                    mode      => 'mention',
+                );
             }
         }
     }

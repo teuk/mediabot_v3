@@ -3810,6 +3810,31 @@ sub _on_message_PRIVMSG_body {
                     $mediabot->{conf}->get('main.BOT_NICKS'),
             );
 
+        # MB720-E: one Hailo identity decision covers context, activity,
+        # replies and learning. It extends the generic bot list with the live
+        # bot nick, HAILO_IGNORE_NICKS and the historical SQL exclusions. IRC
+        # echo-message can therefore never feed Mediabot's own RSS output back
+        # into a channel brain.
+        my $from_hailo_ignored = $from_conversation_bot
+            || $mediabot->is_hailo_excluded_nick($who);
+
+        # MB720-D: retain only a bounded, in-memory, payload-only context for
+        # channels where Hailo is enabled. Commands and known bots never enter
+        # the provider context, and no nick or channel name is sent with it.
+        eval {
+            $mediabot->hailo_observe_public_line(
+                channel  => $where,
+                text     => $line,
+                from_bot => $from_hailo_ignored,
+            );
+        };
+        if ($@) {
+            my $error = $@;
+            $error =~ s/[\r\n\x00]+/ /g;
+            $error = substr($error, 0, 200);
+            $mediabot->{logger}->log(1, 'Hailo context observation error: ' . $error);
+        }
+
         eval {
             _spark_observe_public_line(
                 $mediabot, $self->nick, $where, $who, $line,
@@ -4038,7 +4063,8 @@ sub _on_message_PRIVMSG_body {
             my $sCurrentNick = $self->nick_folded;
             # mb370-B1: enregistre le débit de conversation du canal (en mémoire)
             # pour piloter le taux de chatter HailoChatter adaptatif.
-            $mediabot->hailo_record_activity($where);
+            $mediabot->hailo_record_activity($where)
+                unless $from_hailo_ignored;
             my $luckyShot = rand(100);
             if ( $luckyShot >= $mediabot->checkResponder($message,$who,$where,$what,@tArgs) ) {
                 $mediabot->{logger}->log(4,"Found responder [$where] for $what with luckyShot : $luckyShot");
@@ -4066,22 +4092,29 @@ sub _on_message_PRIVMSG_body {
                 if (defined($id_chanset_list)) {
                     my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);
                     if (defined($id_channel_set)) {
-                        unless ($mediabot->is_hailo_excluded_nick($who) || (substr($what, 0, 1) eq "!") || (substr($what, 0, 1) eq $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR'))) {
+                        unless ($from_hailo_ignored || (substr($what, 0, 1) eq "!") || (substr($what, 0, 1) eq $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR'))) {
                             # mb361-B1: a failed Hailo initialization must not
                             # crash this IRC callback. Skip the path cleanly.
-                            my $hailo = $mediabot->get_hailo_runtime();
+                            my $hailo = $mediabot->get_hailo_runtime($where);
                             if ($hailo) {
-                                # mb373-B1: le pseudo peut contenir des caractères
-                                # spéciaux regex (IRC autorise [ ] \ ` ^ { } | ) :
-                                # on le retire LITTÉRALEMENT (\Q..\E), sinon un
-                                # pseudo comme "bot|x" ou "Med[bot" faussait/plantait.
-                                $what =~ s/\Q$sCurrentNick\E//gi;
-                                $what =~ s/^\s+//g;
-                                $what =~ s/\s+$//g;
-                                my $sAnswer = $hailo->learn_reply($what);
-                                if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
-                                    $mediabot->{logger}->log(4,"Hailo current nick learn_reply $what from $who : $sAnswer");
-                                    $mediabot->botPrivmsg($where,$sAnswer);
+                                my $result = $mediabot->hailo_process_turn(
+                                    channel => $where,
+                                    speaker => $who,
+                                    text    => $what,
+                                    mode    => 'mention',
+                                    brain   => $hailo,
+                                    excluded => 0,
+                                );
+                                my $sAnswer = ref($result) eq 'HASH' ? $result->{candidate} : undef;
+                                if (defined($sAnswer) && ($sAnswer ne "")) {
+                                    $mediabot->{logger}->log(4,
+                                        'Hailo mention candidate queued for bounded post-edit');
+                                    $mediabot->hailo_submit_candidate(
+                                        channel   => $where,
+                                        trigger   => $what,
+                                        candidate => $sAnswer,
+                                        mode      => 'mention',
+                                    );
                                 }
                             }
                         }
@@ -4093,15 +4126,29 @@ sub _on_message_PRIVMSG_body {
                 if (defined($id_chanset_list)) {
                     my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);
                     if (defined($id_channel_set)) {
-                        unless ($mediabot->is_hailo_excluded_nick($who) || (substr($what, 0, 1) eq "!") || (substr($what, 0, 1) eq $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR'))) {
+                        unless ($from_hailo_ignored || (substr($what, 0, 1) eq "!") || (substr($what, 0, 1) eq $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR'))) {
                             # mb361-B1: unavailable Hailo is a disabled feature,
                             # not a fatal message-processing error.
-                            my $hailo = $mediabot->get_hailo_runtime();
+                            my $hailo = $mediabot->get_hailo_runtime($where);
                             if ($hailo) {
-                                my $sAnswer = $hailo->learn_reply($what);
-                                if (defined($sAnswer) && ($sAnswer ne "") && !($sAnswer =~ /^\Q$what\E\s*\.$/i)) {
-                                    $mediabot->{logger}->log(4,"HailoChatter learn_reply $what from $who : $sAnswer");
-                                    $mediabot->botPrivmsg($where,$sAnswer);
+                                my $result = $mediabot->hailo_process_turn(
+                                    channel => $where,
+                                    speaker => $who,
+                                    text    => $what,
+                                    mode    => 'chatter',
+                                    brain   => $hailo,
+                                    excluded => 0,
+                                );
+                                my $sAnswer = ref($result) eq 'HASH' ? $result->{candidate} : undef;
+                                if (defined($sAnswer) && ($sAnswer ne "")) {
+                                    $mediabot->{logger}->log(4,
+                                        'Hailo chatter candidate queued for bounded post-edit');
+                                    $mediabot->hailo_submit_candidate(
+                                        channel   => $where,
+                                        trigger   => $what,
+                                        candidate => $sAnswer,
+                                        mode      => 'chatter',
+                                    );
                                 }
                             }
                         }
@@ -4113,7 +4160,7 @@ sub _on_message_PRIVMSG_body {
                 if (defined($id_chanset_list)) {
                     my $id_channel_set = $mediabot->getIdChannelSet($where,$id_chanset_list);
                     if (defined($id_channel_set)) {
-                        unless ($mediabot->is_hailo_excluded_nick($who) || (substr($what, 0, 1) eq "!") || (substr($what, 0, 1) eq $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR'))) {
+                        unless ($from_hailo_ignored || (substr($what, 0, 1) eq "!") || (substr($what, 0, 1) eq $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR'))) {
                             my $min_words = (defined($mediabot->{conf}->get('hailo.HAILO_LEARN_MIN_WORDS')) ? $mediabot->{conf}->get('hailo.HAILO_LEARN_MIN_WORDS') : 3);
                             my $max_words = (defined($mediabot->{conf}->get('hailo.HAILO_LEARN_MAX_WORDS')) ? $mediabot->{conf}->get('hailo.HAILO_LEARN_MAX_WORDS') : 20);
                             my $num;
@@ -4121,10 +4168,18 @@ sub _on_message_PRIVMSG_body {
                             if (($num >= $min_words) && ($num <= $max_words)) {
                                 # mb361-B1: learning is optional when the brain
                                 # could not be initialized. Keep the bot online.
-                                my $hailo = $mediabot->get_hailo_runtime();
+                                my $hailo = $mediabot->get_hailo_runtime($where);
                                 if ($hailo) {
-                                    $hailo->learn($what);
-                                    $mediabot->{logger}->log(4,"learnt $what from $who");
+                                    my $result = $mediabot->hailo_process_turn(
+                                        channel => $where,
+                                        speaker => $who,
+                                        text    => $what,
+                                        mode    => 'ambient',
+                                        brain   => $hailo,
+                                        excluded => 0,
+                                    );
+                                    $mediabot->{logger}->log(4,"learnt channel message from $who")
+                                        if ref($result) eq 'HASH' && $result->{learned};
                                 }
                             }
                             else {

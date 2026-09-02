@@ -197,6 +197,27 @@ return sub {
     $assert->ok((grep { $_->{type} eq 'constraint' && $_->{constraint} eq 'fk_trivia_scores_channel' } @{ $trivia->{effects} }),
         'mb649-830: dynamic foreign-key constraint is observable');
 
+    my $hailo = main::_migration_observables(File::Spec->catfile($mdir, '20260902_hailo_policy_chansets.sql'));
+    my @hailo_inheritance = grep {
+        ($_->{type} // '') eq 'chanset_inheritance'
+    } @{ $hailo->{effects} };
+    $assert->is(scalar(@hailo_inheritance), 2,
+        'mb649-830: both Hailo policy inheritance mutations are observable');
+    $assert->is(
+        join(',', sort map {
+            ($_->{source_chanset} // '') . '->' . ($_->{target_chanset} // '')
+        } @hailo_inheritance),
+        'Hailo->HailoLearn,Hailo->HailoRespond',
+        'mb649-830: Hailo inheritance observables name exact source and targets',
+    );
+    $assert->ok(!$hailo->{unsupported_mutation},
+        'mb649-830: guarded Hailo CHANNEL_SET propagation is fully modelled');
+    $assert->like(
+        $source,
+        qr/chanset_inheritance.*?NOT EXISTS.*?target_set[.]id_channel_set IS NULL/s,
+        'mb649-830: inheritance observation detects any source channel missing its target',
+    );
+
     # ------------------------------------------------------------------
     # [4] migration evaluator never claims historical execution
     # ------------------------------------------------------------------
@@ -232,6 +253,33 @@ return sub {
         'mb649-830: missing migration detail names the concrete observable effect');
     $assert->like($mm{'migrations.observable_state'}{detail}, qr/does NOT prove/i,
         'mb649-830: missing observable effect never claims historical non-execution');
+
+    my $missing_inheritance = {
+        migrations => [
+            {
+                name => 'hailo.sql',
+                effects => [ {
+                    type => 'chanset_inheritance',
+                    source_chanset => 'Hailo',
+                    target_chanset => 'HailoLearn',
+                } ],
+                observed => [ {
+                    type => 'chanset_inheritance',
+                    source_chanset => 'Hailo',
+                    target_chanset => 'HailoLearn',
+                    state => 'missing',
+                } ],
+            },
+        ],
+    };
+    my %mh = map { $_->{id} => $_ } $mprobe->{evaluate}->($missing_inheritance, {});
+    $assert->is($mh{'migrations.observable_state'}{level}, 'warn',
+        'mb649-830: incomplete chanset inheritance is WARN');
+    $assert->like(
+        $mh{'migrations.observable_state'}{detail},
+        qr/chanset inheritance Hailo -> HailoLearn/,
+        'mb649-830: incomplete inheritance detail names source and target',
+    );
 
     my $indeterminate = {
         migrations => [

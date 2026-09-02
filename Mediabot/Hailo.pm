@@ -18,12 +18,28 @@ use warnings;
 
 use Exporter 'import';
 use Mediabot::Helpers;
+use Mediabot::Hailo::BrainRegistry;
+use Mediabot::Hailo::Normalizer qw(
+    normalize_hailo_input
+    rehydrate_hailo_output
+);
+use Mediabot::Hailo::Policy;
+use Mediabot::Hailo::PostEditor;
+use Mediabot::Hailo::PostEditRuntime;
+use Mediabot::Hailo::ReplyQueue;
 use Hailo;
 
 our @EXPORT = qw(
     init_hailo
     get_hailo
     get_hailo_runtime
+    save_hailo_brains
+    hailo_reply_before_learning
+    hailo_channel_policy
+    hailo_process_turn
+    hailo_post_edit_runtime
+    hailo_observe_public_line
+    hailo_submit_candidate
     is_hailo_excluded_nick
     hailo_ignore_ctx
     hailo_unignore_ctx
@@ -38,26 +54,91 @@ our @EXPORT = qw(
 
 sub init_hailo {
 	my ($self) = shift;
-	$self->{logger}->log(1, "Initialize Hailo");
-	my $hailo = eval {
-		Hailo->new(
-			brain        => 'mediabot_v3.brn',
-			save_on_exit => 1,
-		);
+	$self->{logger}->log(1, "Initialize per-channel Hailo brain registry");
+
+    my $conf = $self->{conf};
+    my $root = eval { $conf->get('hailo.HAILO_BRAIN_DIR') } || 'var/hailo';
+    my $legacy = eval { $conf->get('hailo.HAILO_LEGACY_BRAIN') };
+    $legacy = 'mediabot_v3.brn' unless defined($legacy) && $legacy ne '';
+    my $max_open = eval { $conf->get('hailo.HAILO_MAX_OPEN_BRAINS') } || 32;
+    my $network = eval { $conf->get('connection.CONN_SERVER_NETWORK') }
+        || $self->{network_name}
+        || 'unknown';
+
+	my $registry = eval {
+        Mediabot::Hailo::BrainRegistry->new(
+            root         => $root,
+            network      => $network,
+            legacy_brain => $legacy,
+            max_open     => $max_open,
+            logger       => $self->{logger},
+            factory      => sub {
+                my ($path) = @_;
+                return Hailo->new(
+                    brain        => $path,
+                    save_on_exit => 1,
+                );
+            },
+        );
 	};
-	if ($@) {
-		$self->{logger}->log(0, " Hailo init failed: $@");
+	if ($@ || !$registry) {
+        my $error = $@ || 'unknown registry initialization failure';
+        $error =~ s/[\r\n]+/ /g;
+		$self->{logger}->log(0, " Hailo init failed: $error");
+		$self->{hailo_registry} = undef;
 		$self->{hailo} = undef;
 		return;
 	}
-	$self->{hailo} = $hailo;
+	$self->{hailo_registry} = $registry;
+    $self->{hailo} = undef; # compatibility alias: last channel brain opened
+
+    my $conf_int = sub {
+        my ($key, $default) = @_;
+        my $value = eval { $conf->get("hailo.$key") };
+        return $default unless defined($value) && !ref($value) && "$value" =~ /^\d+\z/;
+        return int($value);
+    };
+
+    $self->{hailo_policy} = Mediabot::Hailo::Policy->new(
+        learn_interval => $conf_int->('HAILO_LEARN_INTERVAL_SECONDS', 5),
+        reply_interval => $conf_int->('HAILO_REPLY_INTERVAL_SECONDS', 5),
+        flood_max      => $conf_int->('HAILO_FLOOD_MAX_REPLIES', 4),
+        flood_window   => $conf_int->('HAILO_FLOOD_WINDOW_SECONDS', 30),
+        min_words      => $conf_int->('HAILO_LEARN_MIN_WORDS', 3),
+        max_words      => $conf_int->('HAILO_LEARN_MAX_WORDS', 20),
+        key_reply_rate => $conf_int->('HAILO_KEY_REPLY_RATE', 95),
+    );
+    $self->{hailo_reply_queue} = Mediabot::Hailo::ReplyQueue->new(
+        max_total       => $conf_int->('HAILO_REPLY_QUEUE_MAX_TOTAL', 32),
+        max_per_channel => $conf_int->('HAILO_REPLY_QUEUE_MAX_PER_CHANNEL', 3),
+        ttl_seconds     => $conf_int->('HAILO_REPLY_QUEUE_TTL_SECONDS', 30),
+        typing_coeff    => $conf_int->('HAILO_TYPING_DELAY_COEFFICIENT_PERCENT', 35) / 100,
+        typing_offset   => $conf_int->('HAILO_TYPING_DELAY_OFFSET_MS', 500) / 1000,
+    );
 	delete $self->{_hailo_runtime_unavailable_logged};
 }
 
-# Get the Hailo object
+# Get the Hailo object for a channel. Calls without a channel retain the narrow
+# compatibility contract used by older internal diagnostics: the last opened
+# channel brain is returned, but no global writable brain is created.
 sub get_hailo {
-	my ($self) = shift;
-	return $self->{hailo};
+	my ($self, $channel) = @_;
+    return $self->{hailo} unless defined($channel) && $channel ne '';
+
+    my $registry = $self->{hailo_registry};
+    return undef unless $registry;
+
+    my $hailo = eval { $registry->brain_for($channel) };
+    if ($@ || !$hailo) {
+        my $error = $@ || 'unknown per-channel brain failure';
+        $error =~ s/[\r\n]+/ /g;
+        $self->{logger}->log(1, "Hailo brain unavailable for channel: $error")
+            if $self->{logger};
+        return undef;
+    }
+
+    $self->{hailo} = $hailo;
+    return $hailo;
 }
 
 # mb361-B1: runtime paths must tolerate an unavailable Hailo brain. init_hailo()
@@ -65,33 +146,577 @@ sub get_hailo {
 # runtime diagnostic and lets message handling continue without dereferencing
 # undef or misclassifying the failure as a timeout.
 sub get_hailo_runtime {
-    my ($self) = @_;
+    my ($self, $channel) = @_;
 
-    my $hailo = get_hailo($self);
+    my $hailo = get_hailo($self, $channel);
     return $hailo if $hailo;
 
     unless ($self->{_hailo_runtime_unavailable_logged}) {
         $self->{_hailo_runtime_unavailable_logged} = 1;
         $self->{logger}->log(2,
-            "Hailo runtime unavailable; skipping reply and learning paths")
+            "Hailo runtime unavailable; skipping per-channel reply and learning paths")
             if $self->{logger};
     }
 
     return undef;
 }
 
+sub save_hailo_brains {
+    my ($self) = @_;
+    my $registry = $self->{hailo_registry};
+    return 1 unless $registry;
+    return eval { $registry->save_all } ? 1 : 0;
+}
+
+sub _hailo_optional_chanset {
+    my ($self, $channel, $name, $fallback, $fresh) = @_;
+    my $now = time();
+    my $cache = $self->{_hailo_optional_chanset_ids} ||= {};
+    my $id;
+    if (!$fresh && exists($cache->{$name}) && ($now - $cache->{$name}{ts}) < 30) {
+        $id = $cache->{$name}{id};
+    }
+    else {
+        $id = eval { getIdChansetList($self, $name) };
+        $cache->{$name} = { ts => $now, id => $id };
+    }
+    return $fallback ? 1 : 0 unless defined($id) && $id ne '';
+    my $enabled = eval { getIdChannelSet($self, $channel, $id) };
+    return $enabled ? 1 : 0;
+}
+
+sub hailo_channel_policy {
+    my ($self, $channel, %opts) = @_;
+    return {
+        master  => 0,
+        learn   => 0,
+        respond => 0,
+        chatter => 0,
+    } unless defined($channel) && !ref($channel) && $channel =~ /^#/;
+
+    my $master = eval {
+        Mediabot::Helpers::chanset_enabled($self, $channel, 'Hailo', default => 0)
+    } ? 1 : 0;
+
+    # HailoLearn and HailoRespond are data-only additions. Before their
+    # migration exists, both inherit the historical +Hailo switch so an
+    # upgrade cannot silently stop an established brain from learning or
+    # answering direct mentions.
+    my $learn = _hailo_optional_chanset(
+        $self, $channel, 'HailoLearn', $master, $opts{fresh}
+    );
+    my $respond = _hailo_optional_chanset(
+        $self, $channel, 'HailoRespond', $master, $opts{fresh}
+    );
+    my $chatter = eval {
+        Mediabot::Helpers::chanset_enabled($self, $channel, 'HailoChatter', default => 0)
+    } ? 1 : 0;
+
+    return {
+        master  => $master,
+        learn   => $master && $learn ? 1 : 0,
+        respond => $master && $respond ? 1 : 0,
+        chatter => $master && $chatter ? 1 : 0,
+    };
+}
+
+sub _hailo_channel_nicks {
+    my ($self, $channel) = @_;
+    return [] unless defined($channel) && !ref($channel);
+    my $lists = $self->{hChannelsNicks};
+    return [] unless ref($lists) eq 'HASH';
+
+    my $list = $lists->{$channel} || $lists->{lc($channel)};
+    return [] unless ref($list) eq 'ARRAY';
+    my %seen;
+    return [ grep {
+        defined($_) && !ref($_) && length($_) && !$seen{lc($_)}++
+    } @$list ];
+}
+
+sub _hailo_command_prefixes {
+    my ($self) = @_;
+    my @prefixes = ('!');
+    my $configured = eval { $self->{conf}->get('main.MAIN_PROG_CMD_CHAR') };
+    push @prefixes, "$configured"
+        if defined($configured) && !ref($configured) && length("$configured") == 1;
+    my %seen;
+    return [ grep { !$seen{$_}++ } @prefixes ];
+}
+
+sub _hailo_conf_bool {
+    my ($self, $key, $default) = @_;
+    my $value = eval { $self->{conf}->get("hailo.$key") };
+    return $default ? 1 : 0
+        unless defined($value) && !ref($value) && "$value" =~ /^(?:0|1)\z/;
+    return $value ? 1 : 0;
+}
+
+sub _hailo_safe_log_value {
+    my ($value, $default) = @_;
+    return $default unless defined($value) && !ref($value);
+    my $safe = lc "$value";
+    $safe =~ s/[^a-z0-9_.-]+/_/g;
+    $safe = substr($safe, 0, 64);
+    return length($safe) ? $safe : $default;
+}
+
+sub _hailo_schedule_post_edit {
+    my ($self, $delay, $callback) = @_;
+    return 0 unless ref($callback) eq 'CODE';
+    return $callback->() || 1 unless defined($delay) && $delay > 0;
+
+    my $loop = eval { $self->getLoop } || $self->{loop};
+    return 0 unless $loop;
+
+    require IO::Async::Timer::Countdown;
+    my $id = ++$self->{_hailo_post_edit_timer_id};
+    my $timer;
+    $timer = IO::Async::Timer::Countdown->new(
+        delay     => $delay,
+        on_expire => sub {
+            delete $self->{_hailo_post_edit_timers}{$id};
+            eval { $loop->remove($timer) };
+            eval { $callback->() };
+        },
+    );
+    $self->{_hailo_post_edit_timers}{$id} = $timer;
+    $loop->add($timer);
+    $timer->start;
+    return 1;
+}
+
+sub hailo_post_edit_runtime {
+    my ($self) = @_;
+    return $self->{hailo_post_edit_runtime}
+        if $self->{hailo_post_edit_runtime};
+
+    my $editor = eval {
+        Mediabot::Hailo::PostEditor->new(
+            conf       => $self->{conf},
+            loop_owner => $self,
+        );
+    };
+    if ($@ || !$editor) {
+        my $error = $@ || 'unknown post-editor initialization failure';
+        $error =~ s/[\r\n\x00]+/ /g;
+        $error = substr($error, 0, 200);
+        $self->{logger}->log(1, "Hailo post-editor unavailable: $error")
+            if $self->{logger};
+        return undef;
+    }
+
+    my $runtime = eval {
+        Mediabot::Hailo::PostEditRuntime->new(
+            post_editor       => $editor,
+            queue             => $self->{hailo_reply_queue},
+            max_context_lines => _hailo_conf_int(
+                $self, 'hailo.HAILO_POST_EDIT_CONTEXT_LINES', 4, 1, 8
+            ),
+            max_inflight      => _hailo_conf_int(
+                $self, 'hailo.HAILO_POST_EDIT_MAX_INFLIGHT', 4, 1, 16
+            ),
+            typing_enabled    => _hailo_conf_bool(
+                $self, 'HAILO_TYPING_DELAY_ENABLED', 1
+            ),
+            schedule_cb       => sub {
+                my ($delay, $callback) = @_;
+                return _hailo_schedule_post_edit($self, $delay, $callback);
+            },
+            metric_cb         => sub {
+                my ($summary) = @_;
+                return unless $self->{metrics} && ref($summary) eq 'HASH';
+                my $result = _hailo_safe_log_value(
+                    ($summary->{action} // 'dropped') . '_' . ($summary->{reason} // 'unknown'),
+                    'dropped_unknown',
+                );
+                $self->{metrics}->inc(
+                    'mediabot_hailo_post_edit_total', { result => $result }
+                );
+                my $stats = eval { $self->{hailo_post_edit_runtime}->stats };
+                if (ref($stats) eq 'HASH') {
+                    $self->{metrics}->set(
+                        'mediabot_hailo_post_edit_inflight', $stats->{inflight} || 0
+                    );
+                    $self->{metrics}->set(
+                        'mediabot_hailo_post_edit_queue_depth',
+                        ref($stats->{queue}) eq 'HASH' ? ($stats->{queue}{queued} || 0) : 0,
+                    );
+                }
+            },
+            log_cb            => sub {
+                my ($summary) = @_;
+                return unless $self->{logger} && ref($summary) eq 'HASH';
+                my $channel = defined($summary->{channel}) && !ref($summary->{channel})
+                    && $summary->{channel} =~ /^#/ ? $summary->{channel} : '#?';
+                my $action = _hailo_safe_log_value($summary->{action}, 'dropped');
+                my $reason = _hailo_safe_log_value($summary->{reason}, 'unknown');
+                my $edit = _hailo_safe_log_value($summary->{edit_reason}, 'unknown');
+                my $language = _hailo_safe_log_value($summary->{language}, 'en');
+                my $provider = _hailo_safe_log_value($summary->{provider}, 'fallback');
+                $self->{logger}->log(3, sprintf(
+                    '[HAILO_POST_EDIT] channel=%s action=%s reason=%s edit=%s language=%s provider=%s',
+                    $channel, $action, $reason, $edit, $language, $provider,
+                ));
+            },
+        );
+    };
+    if ($@ || !$runtime) {
+        my $error = $@ || 'unknown post-edit runtime failure';
+        $error =~ s/[\r\n\x00]+/ /g;
+        $error = substr($error, 0, 200);
+        $self->{logger}->log(1, "Hailo post-edit runtime unavailable: $error")
+            if $self->{logger};
+        return undef;
+    }
+
+    $self->{hailo_post_editor} = $editor;
+    $self->{hailo_post_edit_runtime} = $runtime;
+    return $runtime;
+}
+
+sub hailo_observe_public_line {
+    my ($self, %args) = @_;
+    my $channel = $args{channel};
+    my $policy = hailo_channel_policy($self, $channel);
+    return 0 unless $policy->{master};
+
+    my $text = $args{text};
+    return 0 unless defined($text) && !ref($text) && length($text);
+    my $prefixes = _hailo_command_prefixes($self);
+    my $is_command = scalar grep {
+        defined($_) && !ref($_) && length($_) == 1 && index($text, $_) == 0
+    } @$prefixes;
+
+    my $runtime = hailo_post_edit_runtime($self);
+    return 0 unless $runtime;
+    return $runtime->observe_public_line(
+        channel    => $channel,
+        text       => $text,
+        from_bot   => $args{from_bot} ? 1 : 0,
+        is_command => $is_command ? 1 : 0,
+    );
+}
+
+sub hailo_submit_candidate {
+    my ($self, %args) = @_;
+    my $channel = $args{channel};
+    my $candidate = $args{candidate};
+    my $trigger = $args{trigger};
+    my $mode = defined($args{mode}) && !ref($args{mode})
+        ? lc "$args{mode}" : 'mention';
+    return 0 unless defined($channel) && !ref($channel) && $channel =~ /^#/;
+    return 0 unless defined($candidate) && !ref($candidate) && length($candidate);
+    return 0 unless defined($trigger) && !ref($trigger) && length($trigger);
+
+    my $runtime = hailo_post_edit_runtime($self);
+    return 0 unless $runtime;
+    my $generation = eval {
+        $self->{wit_runtime_state}->capture_generation($channel)
+    };
+    unless (defined($generation) && $generation =~ /^[1-9]\d*\z/) {
+        $self->{metrics}->inc(
+            'mediabot_hailo_post_edit_total', { result => 'dropped_runtime_unready' }
+        ) if $self->{metrics};
+        return 0;
+    }
+
+    my $state_cb = sub {
+        my $policy = hailo_channel_policy($self, $channel, fresh => 1);
+        my $enabled = $policy->{master}
+            && ($mode eq 'chatter' ? $policy->{chatter} : $policy->{respond});
+        my $state = eval { $self->{wit_runtime_state}->snapshot($channel) };
+        $state = {} unless ref($state) eq 'HASH';
+        return {
+            enabled            => $enabled ? 1 : 0,
+            runtime_active     => $state->{runtime_active} ? 1 : 0,
+            irc_connected      => $state->{irc_connected} ? 1 : 0,
+            channel_joined     => $state->{channel_joined} ? 1 : 0,
+            current_generation => $state->{current_generation} || 0,
+        };
+    };
+
+    my $provider = eval {
+        $self->{conf}->get('hailo.HAILO_POST_EDIT_PROVIDER')
+    };
+    $provider = 'auto' unless defined($provider) && !ref($provider)
+        && $provider =~ /^(?:auto|anthropic|openai)\z/i;
+
+    my $queued = $runtime->submit(
+        channel            => $channel,
+        trigger            => $trigger,
+        candidate          => $candidate,
+        channel_language   => Mediabot::Helpers::channel_lang($self, $channel),
+        provider           => lc "$provider",
+        mode               => $mode,
+        post_edit_enabled  => _hailo_conf_bool(
+            $self, 'HAILO_POST_EDIT_ENABLED', 1
+        ),
+        request_generation => $generation,
+        command_prefixes   => _hailo_command_prefixes($self),
+        state_cb           => $state_cb,
+        send_cb            => sub {
+            my ($target, $line) = @_;
+            return Mediabot::Helpers::botPrivmsg($self, $target, $line) ? 1 : 0;
+        },
+    );
+    return ref($queued) eq 'HASH' && $queued->{accepted} ? 1 : 0;
+}
+
+sub hailo_process_turn {
+    my ($self, %args) = @_;
+    my $channel = $args{channel};
+    my $speaker = $args{speaker};
+    my $raw = $args{text};
+    return { ok => 0, reason => 'invalid_turn' }
+        unless defined($channel) && !ref($channel) && defined($speaker)
+            && !ref($speaker) && defined($raw) && !ref($raw);
+
+    my $policy_state = hailo_channel_policy($self, $channel);
+    my $nicks = _hailo_channel_nicks($self, $channel);
+    my $bot_nick = eval { $self->{irc}->nick_folded } || '';
+    my $prefixes = _hailo_command_prefixes($self);
+    my $max_input = eval { $self->{conf}->get('hailo.HAILO_MAX_INPUT_CHARS') };
+
+    my $normalized = normalize_hailo_input(
+        channel          => $channel,
+        speaker          => $speaker,
+        bot_nick         => $bot_nick,
+        nicks            => $nicks,
+        text             => $raw,
+        command_prefixes => $prefixes,
+        max_chars        => $max_input,
+    );
+    return { ok => 0, reason => $normalized->{reason} || 'normalization_failed' }
+        unless $normalized->{ok};
+
+    my $policy = $self->{hailo_policy};
+    return { ok => 0, reason => 'policy_unavailable' }
+        unless $policy && eval { $policy->can('decide') };
+
+    my $excluded = exists($args{excluded}) ? ($args{excluded} ? 1 : 0)
+        : is_hailo_excluded_nick($self, $speaker);
+    my $decision = $policy->decide(
+        channel          => $channel,
+        speaker          => $speaker,
+        text             => $normalized->{text},
+        mode             => $args{mode} || 'ambient',
+        master_enabled   => $policy_state->{master},
+        learn_enabled    => $policy_state->{learn},
+        respond_enabled  => $policy_state->{respond},
+        chatter_enabled  => $policy_state->{chatter},
+        excluded         => $excluded,
+        is_command       => $normalized->{is_command},
+        force_authorized => $args{force_authorized} ? 1 : 0,
+    );
+
+    return {
+        ok         => 1,
+        reason     => 'policy_denied',
+        decision   => $decision,
+        normalized => $normalized,
+        policy     => $policy_state,
+    } unless $decision->{reply} || $decision->{learn};
+
+    my $result = hailo_reply_before_learning(
+        $self,
+        channel => $channel,
+        text    => $decision->{text},
+        reply   => $decision->{reply},
+        learn   => $decision->{learn},
+        (defined($args{brain}) ? (brain => $args{brain}) : ()),
+    );
+    return { ok => 0, reason => 'brain_unavailable', decision => $decision }
+        unless ref($result) eq 'HASH';
+
+    $policy->record_learn(channel => $channel, speaker => $speaker)
+        if $result->{learned};
+
+    my $candidate;
+    my $output_reason = 'no_candidate';
+    if (defined($result->{candidate}) && !ref($result->{candidate})
+        && length($result->{candidate})) {
+        my $max_output = eval { $self->{conf}->get('hailo.HAILO_MAX_OUTPUT_CHARS') };
+        my $output = rehydrate_hailo_output(
+            channel          => $channel,
+            speaker          => $speaker,
+            bot_nick         => $bot_nick,
+            nicks            => $nicks,
+            bucket_nicks     => $normalized->{bucket_nicks},
+            command_prefixes => $prefixes,
+            max_chars        => $max_output,
+            text             => $result->{candidate},
+        );
+        $output_reason = $output->{reason} || 'output_rejected';
+        if ($output->{ok}
+            && $output->{line} !~ /^\Q$decision->{text}\E\s*[.]?\s*\z/i) {
+            $candidate = $output->{line};
+            $output_reason = 'accepted';
+            $policy->record_reply(channel => $channel, speaker => $speaker);
+        }
+        elsif ($output->{ok}) {
+            $output_reason = 'echo_rejected';
+        }
+    }
+
+    return {
+        ok            => 1,
+        reason        => defined($candidate) ? 'candidate' : $output_reason,
+        candidate     => $candidate,
+        learned       => $result->{learned} ? 1 : 0,
+        decision      => $decision,
+        normalized    => $normalized,
+        policy        => $policy_state,
+        output_reason => $output_reason,
+    };
+}
+
+# Generate before learning. This deliberately does not use learn_reply(): the
+# triggering line must not become eligible material for its own answer.
+sub hailo_reply_before_learning {
+    my ($self, %args) = @_;
+    my $channel = $args{channel};
+    my $text = $args{text};
+    return undef unless defined($channel) && $channel ne '';
+    return undef unless defined($text) && !ref($text) && $text ne '';
+
+    my $hailo = $args{brain} || get_hailo_runtime($self, $channel);
+    return undef unless $hailo;
+
+    my $timeout = eval { $self->{conf}->get('hailo.HAILO_OPERATION_TIMEOUT') };
+    $timeout = 5 unless defined($timeout) && !ref($timeout)
+        && "$timeout" =~ /^\d+\z/ && $timeout >= 1 && $timeout <= 10;
+
+    my $candidate;
+    my $reply_error;
+    if ($args{reply}) {
+        my $ok = eval {
+            local $SIG{ALRM} = sub { die "Hailo reply timeout\n" };
+            alarm($timeout);
+            $candidate = $hailo->reply($text);
+            alarm(0);
+            1;
+        };
+        alarm(0);
+        if (!$ok) {
+            my $error = $@ || 'unknown Hailo reply failure';
+            $error =~ s/[\r\n]+/ /g;
+            $self->{logger}->log(1, "Hailo per-channel reply failed: $error")
+                if $self->{logger};
+            $self->{metrics}->inc('mediabot_hailo_timeout_total')
+                if $self->{metrics} && $error =~ /timeout/i;
+            $reply_error = $error;
+            $candidate = undef;
+        }
+    }
+
+    my $learned = 0;
+    my $learn_error;
+    if ($args{learn}) {
+        my $ok = eval {
+            local $SIG{ALRM} = sub { die "Hailo learn timeout\n" };
+            alarm($timeout);
+            $hailo->learn($text);
+            alarm(0);
+            1;
+        };
+        alarm(0);
+        if ($ok) {
+            $learned = 1;
+        }
+        else {
+            my $error = $@ || 'unknown Hailo learn failure';
+            $error =~ s/[\r\n]+/ /g;
+            $self->{logger}->log(1, "Hailo per-channel learn failed: $error")
+                if $self->{logger};
+            $self->{metrics}->inc('mediabot_hailo_timeout_total')
+                if $self->{metrics} && $error =~ /timeout/i;
+            $learn_error = $error;
+        }
+    }
+
+    return {
+        candidate => $candidate,
+        learned   => $learned,
+        (defined($reply_error) ? (reply_error => $reply_error) : ()),
+        (defined($learn_error) ? (learn_error => $learn_error) : ()),
+    };
+}
+
+# Return one RFC1459-casemapped key for a plain IRC nickname. Configuration
+# lists share this representation so []\\^ and {}|~ variants cannot bypass an
+# explicit HAILO_IGNORE_NICKS or known-bot decision.
+sub _hailo_irc_nick_key {
+    my ($nick) = @_;
+
+    return undef unless defined($nick) && !ref($nick);
+    $nick = "$nick";
+    $nick =~ s/^\s+|\s+$//g;
+    return undef unless length($nick) >= 1
+        && length($nick) <= 100
+        && $nick !~ /[\s,:\x00-\x1f\x7f]/;
+
+    my $key = lc($nick);
+    $key =~ tr/[]\\^/{}|~/;
+    return $key;
+}
+
+# Configuration exclusions are evaluated before the SQL cache on every call.
+# A SIGHUP/.reloadconf therefore applies HAILO_IGNORE_NICKS immediately and
+# removing a nick from the list cannot leave a stale positive cache entry.
+sub _hailo_config_ignores_nick {
+    my ($self, $wanted) = @_;
+    return 0 unless defined($wanted) && $self;
+
+    my %ignored;
+    my $live_nick = eval { $self->{irc}->nick_folded };
+    my $live_key = _hailo_irc_nick_key($live_nick);
+    $ignored{$live_key} = 1 if defined $live_key;
+
+    my $configured_nick = eval {
+        $self->{conf}->get('connection.CONN_NICK')
+    };
+    my $configured_key = _hailo_irc_nick_key($configured_nick);
+    $ignored{$configured_key} = 1 if defined $configured_key;
+
+    for my $config_key ('main.BOT_NICKS', 'hailo.HAILO_IGNORE_NICKS') {
+        my $list = eval { $self->{conf}->get($config_key) };
+        next unless defined($list) && !ref($list);
+        for my $raw (split /,/, "$list") {
+            my $key = _hailo_irc_nick_key($raw);
+            $ignored{$key} = 1 if defined $key;
+        }
+    }
+
+    return $ignored{$wanted} ? 1 : 0;
+}
+
+# Keep the historical SQL cache aligned with the database collation. The SQL
+# table does not store an RFC1459 canonical column, so bracket variants must
+# not share a negative cache entry with a different literal database value.
+sub _hailo_sql_cache_key {
+    my ($nick) = @_;
+    return undef unless defined($nick) && !ref($nick);
+    $nick = "$nick";
+    $nick =~ s/^\s+|\s+$//g;
+    return length($nick) ? lc($nick) : undef;
+}
+
 # Clean up and exit the program (with proper Net::Async::IRC QUIT)
-# Check whether Hailo should ignore a nick
+# Check whether Hailo should ignore a nick. The live bot identity, BOT_NICKS
+# and HAILO_IGNORE_NICKS are authoritative even if the database is unavailable.
 sub is_hailo_excluded_nick {
     my ($self, $nick) = @_;
 
-    return 0 unless defined($nick) && $nick ne '';
+    my $identity_key = _hailo_irc_nick_key($nick);
+    return 0 unless defined $identity_key;
+    return 1 if _hailo_config_ignores_nick($self, $identity_key);
     return 0 unless $self->{dbh};
 
     # mb122-B1: cache TTL 30s. La table HAILO_EXCLUSION_NICK utilise
-    # utf8mb4_unicode_ci (case-insensitive cote DB), donc on peut cacher
-    # par lc($nick) sans craindre les ratages de casse.
-    my $cache_key = lc($nick);
+    # utf8mb4_unicode_ci, so its cache remains lowercase and literal.
+    my $cache_key = _hailo_sql_cache_key($nick);
+    return 0 unless defined $cache_key;
     my $now       = time();
     my $ttl       = 30;
     if (exists $self->{_hailo_excl_cache}{$cache_key}) {
@@ -222,7 +847,8 @@ sub hailo_ignore_ctx {
     $sth->finish;
 
     # mb122-B1: invalidate cache after INSERT
-    delete $self->{_hailo_excl_cache}{ lc($target_nick) };
+    my $cache_key = _hailo_sql_cache_key($target_nick);
+    delete $self->{_hailo_excl_cache}{$cache_key} if defined $cache_key;
 
     botNotice($self, $caller, "Hailo will now ignore nick $target_nick.");
     logBot($self, $message, $ctx->channel, "hailo_ignore", $target_nick);
@@ -330,7 +956,8 @@ sub hailo_unignore_ctx {
     $sth->finish;
 
     # mb122-B1: invalidate cache after DELETE
-    delete $self->{_hailo_excl_cache}{ lc($target_nick) };
+    my $cache_key = _hailo_sql_cache_key($target_nick);
+    delete $self->{_hailo_excl_cache}{$cache_key} if defined $cache_key;
 
     botNotice($self, $caller, "Hailo will no longer ignore nick $target_nick.");
     logBot($self, $message, $chan, "hailo_unignore", $target_nick);
@@ -380,7 +1007,7 @@ sub hailo_status_ctx {
     }
 
     # --- Get Hailo object ---
-    my $hailo = eval { get_hailo($self) };
+    my $hailo = eval { get_hailo($self, $channel) };
     if ($@ || !$hailo) {
         $self->{logger}->log(1, "hailo_status_ctx(): failed to get Hailo object: $@");
         botNotice($self, $nick, "Internal error: could not access Hailo brain.");

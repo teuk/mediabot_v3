@@ -85,6 +85,12 @@ return sub {
         qr/find "\$\{PROJECT_DIR\}" -maxdepth 1 -type f -name '\*\.brn' -print0/,
         'mb688-890: every current root brain is preserved');
     $assert->like($deploy,
+        qr/\[ -d "\$\{PROJECT_DIR\}\/var\/hailo" \].*?cp -a "\$\{PROJECT_DIR\}\/var\/hailo"/s,
+        'mb720-890: private per-channel brain directory is preserved');
+    $assert->like($deploy,
+        qr/\[ -L "\$\{PROJECT_DIR\}\/var\/hailo" \].*?refusing symbolic-link Hailo brain directory/s,
+        'mb720-890: updater refuses a symlinked per-channel brain root');
+    $assert->like($deploy,
         qr/\[ -d "\$\{PROJECT_DIR\}\/mp3" \].*?cp -a "\$\{PROJECT_DIR\}\/mp3"/s,
         'mb688-890: local mp3 state is preserved');
     $assert->like($ignore, qr/^mp3\/$/m,

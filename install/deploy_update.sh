@@ -429,6 +429,16 @@ if [ "$BRAIN_COUNT" -eq 0 ]; then
     echo "⚠️  Warning: no root-level .brn brain file was found in the current instance."
 fi
 
+# MB720: per-channel Hailo brains live below var/hailo. Preserve the directory
+# as opaque private state; never follow a symlink supplied in its place.
+if [ -L "${PROJECT_DIR}/var/hailo" ]; then
+    fail "refusing symbolic-link Hailo brain directory: ${PROJECT_DIR}/var/hailo"
+fi
+if [ -d "${PROJECT_DIR}/var/hailo" ]; then
+    mkdir -p "${TMP_CLONE_DIR}/var"
+    cp -a "${PROJECT_DIR}/var/hailo" "${TMP_CLONE_DIR}/var/"
+fi
+
 # Local media is runtime/private state and must never disappear during a code
 # rotation. It is intentionally ignored by Git.
 if [ -d "${PROJECT_DIR}/mp3" ]; then
@@ -545,4 +555,3 @@ echo "Start the bot in foreground with:"
 echo "  cd ${PROJECT_DIR} && perl mediabot.pl --conf=${INSTANCE_CONF_NAME}"
 echo "Or with systemd (recommended for production):"
 echo "  sudo systemctl restart mediabot@<instance>   # see tools/systemd/README.md"
-

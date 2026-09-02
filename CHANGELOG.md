@@ -33,6 +33,61 @@ release. Development after this release continues on the `3.4dev` line.
 ## [Unreleased] — 3.4dev
 
 
+### mb720 — isolate Hailo training and define its constrained post-editor
+
+- Replaced the single writable Hailo store with a bounded registry of private
+  per-channel brains keyed by network and RFC1459 channel identity. Existing
+  training remains available as a first-use seed, while channels learn and
+  diverge independently.
+- Split generation from learning so a reply always comes from the channel's
+  prior training and the triggering line is learned only afterwards. Added an
+  explicit save boundary, bounded-memory eviction and updater preservation for
+  the channel-brain tree.
+- Added the provider-neutral, language-aware post-editor foundation. Its
+  request treats the Hailo draft as the creative anchor, uses a small sanitized
+  context, and falls back to the original candidate on provider failure,
+  malformed output or excessive rewriting.
+- Recorded the remaining delivery boundary: message normalization, nickname
+  placeholders, independent learn/reply/chatter policy, bounded cooldown and
+  queue controls, asynchronous provider wiring, aggregate metrics and a
+  development pilot are required before the 3.5 gate can close.
+- Added `HAILO_IGNORE_NICKS` as a reloadable, comma-separated IRC-casemapped
+  exclusion list. One shared ingress decision now keeps configured ignored
+  nicks, known bots and Mediabot's own echoed output out of Hailo context,
+  activity accounting, replies and learning, including RSS announcements.
+- Preserved the historical canonical-channel contract by keeping Hailo's
+  private policy cache under an explicit `channel_states` namespace. Extended
+  Doctor's read-only migration model to verify both guarded `+Hailo` policy
+  inheritances instead of treating their idempotent `CHANNEL_SET` propagation
+  as an unknown durable mutation.
+
+
+### mb718 — turn the Debian 13 evidence into an explicit 3.5 release path
+
+- Added a living 3.5 roadmap that separates completed Debian 13 and database
+  rehearsal evidence from the remaining production release gates.
+- Made database administration a host prerequisite: the application account
+  remains least-privileged and must never receive schema-administration rights
+  to compensate for a broken local administrator login.
+- Recorded the required boundary between the successful disposable-clone
+  rehearsal and any future production schema reconciliation. Production work
+  remains separately reviewed, backed up, confirmed and reversible.
+- Kept the project on `3.4dev` until an explicit release decision and retained
+  the single-full policy: targeted and fast lanes during development, one full
+  suite only when the corresponding commit is actually imminent.
+
+
+### mb714 — measure the ScriptRunner deadline at its execution boundary
+
+- Removed a load-sensitive full-suite failure from the large-stdin timeout
+  regression test. The deliberately expensive JSON plan is now prepared before
+  timing, and the assertion no longer treats its mandatory validation cost as
+  subprocess deadline overrun.
+- Kept the production timeout and non-blocking write path unchanged. The test
+  still uses the full 2.1 MB payload and proves timeout classification, a
+  ten-second total guard, bounded termination and a healthy subsequent call.
+
+
 ### mb712 — freeze one coherent observation for mood
 
 - Captured a database-native `CHANNEL_LOG` boundary before `!mood` emits any

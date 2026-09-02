@@ -4,8 +4,8 @@
 #
 # Avant : trois chemins legacy dans mediabot.pl appelaient learn_reply()/learn()
 # sur undef, et mbHandleNickTriggered classait ce même défaut comme un timeout.
-# Après : un helper partagé renvoie le cerveau s'il existe, sinon journalise au
-# plus une fois et fait ignorer proprement les chemins de réponse/apprentissage.
+# Après MB720 : un helper partagé sélectionne le cerveau du canal, sinon
+# journalise au plus une fois et ignore les chemins de réponse/apprentissage.
 #
 # Le ratio HailoChatter n'est PAS modifié : la commande stocke 100 - chance
 # utilisateur, donc un seuil interne 97 correspond bien à 3 % (rand >= 97).
@@ -69,17 +69,17 @@ return sub {
     $assert->like($hailo_src, qr/\bget_hailo_runtime\b/,
         'helper get_hailo_runtime présent/exporté');
     $assert->like($hailo_src,
-        qr/sub get_hailo_runtime\s*\{.*?return \$hailo if \$hailo;.*?_hailo_runtime_unavailable_logged.*?return undef;/s,
-        'helper réel renvoie le cerveau ou ignore proprement');
+        qr/sub get_hailo_runtime\s*\{.*?get_hailo\(\$self, \$channel\).*?return \$hailo if \$hailo;.*?_hailo_runtime_unavailable_logged.*?return undef;/s,
+        'helper réel renvoie le cerveau du canal ou ignore proprement');
     $assert->like($hailo_src,
-        qr/\$self->\{hailo\}\s*=\s*\$hailo;\s*delete \$self->\{_hailo_runtime_unavailable_logged\}/s,
-        'une réinitialisation réussie réarme le diagnostic');
+        qr/\$self->\{hailo_registry\}\s*=\s*\$registry;.*?delete \$self->\{_hailo_runtime_unavailable_logged\}/s,
+        'une initialisation du registre réarme le diagnostic');
     $assert->like($hailo_src, qr/mb361-B1/,
         'tag mb361-B1 présent dans Hailo.pm');
 
     # --- 3. Trois chemins legacy protégés -------------------------------
     my $main = _slurp_580(File::Spec->catfile('.', 'mediabot.pl'));
-    my $runtime_calls = () = $main =~ /->get_hailo_runtime\(\)/g;
+    my $runtime_calls = () = $main =~ /->get_hailo_runtime\(\$where\)/g;
     $assert->is($runtime_calls, 3,
         'les trois chemins legacy utilisent le helper sûr');
 
@@ -103,12 +103,12 @@ return sub {
     my ($nick_block) = $mediabot_src =~ /(sub mbHandleNickTriggered \{.*?\n\})/s;
     $nick_block //= '';
     $assert->like($nick_block,
-        qr/my \$hailo = get_hailo_runtime\(\$self\);\s*return unless \$hailo;/s,
-        'fallback nick-triggered quitte proprement si Hailo est absent');
-    $assert->unlike($nick_block, qr/get_hailo\(\$self\)/,
+        qr/my \$hailo = get_hailo_runtime\(\$self, \$sChannel\);\s*return unless \$hailo;/s,
+        'fallback nick-triggered quitte proprement si le brain canal est absent');
+    $assert->unlike($nick_block, qr/get_hailo\(\$self, \$sChannel\)/,
         'fallback nick-triggered n’utilise plus l’accès brut');
     $assert->ok(
-        index($nick_block, 'get_hailo_runtime($self)')
+        index($nick_block, 'get_hailo_runtime($self, $sChannel)')
             < index($nick_block, "mediabot_hailo_learn_reply_total"),
         'disponibilité vérifiée avant la métrique learn_reply');
     $assert->like($nick_block, qr/mb361-B1/,

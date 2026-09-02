@@ -144,6 +144,12 @@ sub new {
     $self->_declare('mediabot_karma_cooldown_blocked', 'counter', 'Total karma votes blocked by cooldown (U6)');
     $self->_declare('mediabot_hailo_learn_reply_total','counter', 'Total Hailo learn_reply calls');
     $self->_declare('mediabot_hailo_timeout_total',    'counter', 'Total Hailo learn_reply timeouts (AA5)');
+    $self->_declare('mediabot_hailo_post_edit_total',  'counter',
+        'Hailo post-edit and late-delivery outcomes by bounded result', ['result']);
+    $self->_declare('mediabot_hailo_post_edit_inflight', 'gauge',
+        'Current Hailo provider post-edits and delayed deliveries in flight');
+    $self->_declare('mediabot_hailo_post_edit_queue_depth', 'gauge',
+        'Current bounded Hailo post-edit queue depth');
 
     # mb102-mb109: métriques ajoutées lors des passes d'amélioration
     $self->_declare('mediabot_urltitle_requests_total', 'counter',
