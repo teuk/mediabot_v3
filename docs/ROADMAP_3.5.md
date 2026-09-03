@@ -1,6 +1,6 @@
 # Mediabot 3.5 readiness roadmap
 
-Last updated: 2026-09-02
+Last updated: 2026-09-03
 
 Mediabot 3.5 is a consolidation release. The current stable release remains
 3.3 and development remains on the `3.4dev` line until an explicit release
@@ -34,6 +34,7 @@ named release requirement, not optional feature scope.
 | MB716 | Complete | 64 aggregate read-only probes; 52 orphan command owners identified; four optional seed names planned; timestamp semantics marked for review |
 | MB717 | Complete | Private disposable MariaDB rehearsal normalized 52 owners, reduced 40 schema differences to zero, preserved the ordered timestamp evidence, then restored the original 40-difference state and removed the clone |
 | MB718 | Complete, variance recorded | Debian 13 root access restored through `unix_socket`; application identities remained unchanged; the post-repair privilege-mask representation change is carried into MB719 for an explicit `SHOW GRANTS` check |
+| FULL01 | Development candidate | Opt-in `+Fullop` opens operator status to all while reversing unauthorized join/speech restrictions; ten-minute sanctions, authenticated 75+/Administrator exceptions and server-advertised MODE semantics are covered without enabling a channel |
 
 MB717 proves that the data and schema plan can be replayed and reversed in an
 isolated server. It does not qualify a production migration. The production

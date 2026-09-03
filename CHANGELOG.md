@@ -32,6 +32,28 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### FULL01 — guarded open-op channels with `+Fullop`
+
+- Added the opt-in `+Fullop` chanset. Every joiner is opped, and enabling the
+  policy immediately sweeps the current channel nicklist.
+- Unauthorized join or speech restrictions are reversed before their actor is
+  banned and kicked for ten minutes with the fixed message
+  `hey ho, c'est pas le genre de la maison`. Ordinary kicks remain allowed.
+- Exceptions require an authenticated global Administrator or channel access
+  75+. Server-origin changes, Mediabot corrections and narrow configured
+  service masks are trusted; nickname text alone grants nothing.
+- MODE parsing now follows live IRC `ISUPPORT` and channel-mode snapshots, so
+  status `+q` is not confused with quiet `+q`, parameter modes can be restored,
+  and op sweeps respect each server's advertised batching limit.
+- Added an idempotent migration that registers `Fullop` without enabling it on
+  any channel, plus bounded aggregate correction and sanction metrics.
+- Made the ten-minute expiry fail closed: Mediabot never emits an IRC ban
+  unless its durable expiry row exists; a storage failure still reverses the
+  restriction and kicks the actor without leaving an unmanaged ban behind.
+- When a durable ban already covers the actor, Fullop now reuses its exact
+  stored mask so the expiry worker cannot remove one mask while leaving a
+  second, untracked IRC ban behind.
+
 ### mb721 — welcome Google Gemini behind an opt-in channel gate
 
 - Added Google Gemini as a native third provider behind `Mediabot::AI::Client`.

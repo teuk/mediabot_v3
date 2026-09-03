@@ -77,6 +77,8 @@ sub new {
     $self->_declare('mediabot_channel_bans_active',        'gauge',   'Current active bans per channel', ['channel']);
     $self->_declare('mediabot_channel_bans_added_total',   'counter', 'Total bans added per channel',   ['channel']);
     $self->_declare('mediabot_channel_bans_expired_total', 'counter', 'Total bans expired',             []);
+    $self->_declare('mediabot_fullop_corrections_total',   'counter', 'Protected IRC mode changes reversed by +Fullop', ['channel', 'mode']);
+    $self->_declare('mediabot_fullop_sanctions_total',     'counter', 'Ten-minute sanctions issued by +Fullop', ['channel']);
     $self->_declare('mediabot_channel_commands_total', 'counter', 'Total public commands executed in a channel');
     $self->_declare('mediabot_commands_by_name_total', 'counter', 'Total commands dispatched per command name', ['command']);
     $self->_declare('mediabot_channel_commands_by_name_total', 'counter', 'Total public commands executed in a channel by command');

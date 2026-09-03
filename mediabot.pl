@@ -44,6 +44,7 @@ use Mediabot::DB;
 use Mediabot::Channel;
 use Mediabot::Partyline;
 use Mediabot::ChannelBan;
+use Mediabot::Fullop;
 use Mediabot::DCC qw(parse_ctcp_payload parse_dcc_payload is_ctcp_chat is_dcc_chat
                       is_dcc_active is_dcc_passive ip_int_to_ipv4);
 use IO::Async::Loop;
@@ -1790,6 +1791,7 @@ sub on_message_002;
 sub on_message_003;
 sub on_message_004;
 sub on_message_005;
+sub on_message_RPL_CHANNELMODEIS;
 sub on_message_251;
 sub on_message_252;
 sub on_message_254;
@@ -2027,6 +2029,14 @@ $mediabot->{channel_ban} = Mediabot::ChannelBan->new(
     logger => $mediabot->{logger},
 );
 $mediabot->{logger}->log(4, "ChannelBan helper initialized");
+
+# +Fullop reuses the persistent ChannelBan store for its ten-minute sanctions
+# and learns the live IRCd mode grammar from numeric 005.
+$mediabot->{fullop} = Mediabot::Fullop->new(
+    bot         => $mediabot,
+    channel_ban => $mediabot->{channel_ban},
+);
+$mediabot->{logger}->log(4, "Fullop helper initialized (disabled unless +Fullop)");
 
 # Check USER table and fail if not present
 $mediabot->dbCheckTables();
@@ -2730,6 +2740,7 @@ sub _build_irc {
         on_message_003                   => \&on_message_003,
         on_message_004                   => \&on_message_004,
         on_message_005                   => \&on_message_005,
+        on_message_RPL_CHANNELMODEIS     => \&on_message_RPL_CHANNELMODEIS,
         on_message_251                   => \&on_message_251,
         on_message_252                   => \&on_message_252,
         on_message_254                   => \&on_message_254,
@@ -3350,6 +3361,26 @@ sub on_message_MODE {
         my $sTargetNicks = join(" ",@tArgs);
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
             $mediabot->{logger}->log(0,"[LIVE] <$target_name> $sNick sets mode $sModes $sTargetNicks");
+        }
+
+        # FULL01: apply the network-aware +Fullop policy before recording the
+        # event.  One incoming MODE line yields at most one sanction, even when
+        # it contains several protected mode changes.
+        if ($mediabot->{fullop} && defined($sModes) && $sModes ne '') {
+            my $result = eval {
+                $mediabot->{fullop}->handle_mode(
+                    message     => $message,
+                    prefix      => ($message->prefix // ''),
+                    channel     => $target_name,
+                    mode_string => $sModes,
+                    mode_args   => \@tArgs,
+                );
+            };
+            if ($@) {
+                (my $err = $@) =~ s/\s+/ /g;
+                $mediabot->{logger}->log(1,
+                    "Fullop MODE guard failed closed on $target_name: $err");
+            }
         }
         $mediabot->logBotAction($message,"mode",$sNick,$target_name,"$sModes $sTargetNicks");
     }
@@ -4432,10 +4463,15 @@ sub on_message_RPL_NAMEREPLY {
 
     my $names_blob = $args[3];
 
-    # Remove common IRC prefix modes from nick list entries
-    $names_blob =~ s/[@+%&~]//g;
-
-    my @tNicklist = grep { defined($_) && $_ ne '' } split(/\s+/, $names_blob);
+    # FULL01: strip exactly the live PREFIX characters learned from ISUPPORT,
+    # including multi-prefix entries. Keep the legacy common set only as a
+    # defensive fallback during an unusually early NAMES reply.
+    my @tNicklist = $mediabot->{fullop}
+        ? $mediabot->{fullop}->names_from_blob($names_blob)
+        : do {
+            $names_blob =~ s/[@+%&~]//g;
+            grep { defined($_) && $_ ne '' } split(/\s+/, $names_blob);
+        };
 
     my %tmp_nicklists = ();
     if (defined($mediabot->{hChannelsNicksTmp})) {
@@ -4482,6 +4518,14 @@ sub on_message_RPL_ENDOFNAMES {
         if ($mediabot->{metrics}) {
             $mediabot->{metrics}->set('mediabot_channel_nick_count',
                 scalar(@deduped), { channel => $channel });
+        }
+        if ($mediabot->{fullop}) {
+            eval { $mediabot->{fullop}->sweep_channel($channel, @deduped); };
+            if ($@) {
+                (my $err = $@) =~ s/\s+/ /g;
+                $mediabot->{logger}->log(1,
+                    "Fullop NAMES sweep failed on $channel: $err");
+            }
         }
         $mediabot->{logger}->log(4, "Finalized NAMES for $channel (" . scalar(@deduped) . " unique nicks)");
     }
@@ -4546,6 +4590,12 @@ sub on_message_JOIN {
             Mediabot::Update::update_completion_on_join($mediabot, $target_name);
         };
         $mediabot->{logger}->log(1, "update completion JOIN hook error: $@") if $@;
+        eval { $mediabot->{fullop}->activate_channel($target_name) if $mediabot->{fullop}; };
+        if ($@) {
+            (my $err = $@) =~ s/\s+/ /g;
+            $mediabot->{logger}->log(1,
+                "Fullop activation after self JOIN failed on $target_name: $err");
+        }
     }
     else {
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
@@ -4587,6 +4637,8 @@ sub on_message_JOIN {
         if ($@) { $mediabot->{logger}->log(1, "deliverReminders on JOIN error: $@"); }
 
         # Enforce active ChannelBans on JOIN: MODE +b + KICK if mask matches.
+        # A banned joiner must never receive the automatic +Fullop op first.
+        my $join_is_banned = 0;
         if ($mediabot->{channel_ban} && $sIdent && $sHost) {
             my $cb       = $mediabot->{channel_ban};
             my $chan_obj = $mediabot->{channels}{lc $target_name}
@@ -4604,6 +4656,7 @@ sub on_message_JOIN {
                     my $raw_hostmask = "$sNick!$sIdent\@$sHost";
                     my $ban = $cb->active_ban_for_mask($id_channel, $raw_hostmask);
                     if ($ban) {
+                        $join_is_banned = 1;
                         $mediabot->{logger}->log(2,
                             "ChannelBan: $sNick matches ban #$ban->{id_channel_ban} on $target_name - enforcing");
                         eval {
@@ -4613,6 +4666,15 @@ sub on_message_JOIN {
                         };
                     }
                 }
+            }
+        }
+
+        if ($mediabot->{fullop} && !$join_is_banned) {
+            eval { $mediabot->{fullop}->handle_join($target_name, $sNick); };
+            if ($@) {
+                (my $err = $@) =~ s/\s+/ /g;
+                $mediabot->{logger}->log(1,
+                    "Fullop JOIN op failed on $target_name for $sNick: $err");
             }
         }
 
@@ -4666,6 +4728,33 @@ sub on_message_005 {
     shift @args; # Remove nickname (first arg)
     my $features = join(" ", @args);
     $mediabot->{logger}->log(4, "005 $features");
+    eval { $mediabot->{fullop}->update_isupport(@args) if $mediabot->{fullop}; };
+    if ($@) {
+        (my $err = $@) =~ s/\s+/ /g;
+        $mediabot->{logger}->log(1, "Fullop ISUPPORT parse failed: $err");
+    }
+}
+
+# Numeric 324 - current channel modes.  This seeds parameter-bearing state
+# (keys, limits, redirects, throttles) so an unauthorized removal can be
+# restored with the previous value rather than guessed.
+sub on_message_RPL_CHANNELMODEIS {
+    my ($self, $message, $hints) = @_;
+    log_debug_args('on_message_RPL_CHANNELMODEIS', $message);
+    my @args = _irc_message_args($message);
+    my $channel = $args[1] // '';
+    my $modes   = $args[2] // '';
+    my @params  = @args > 3 ? @args[3 .. $#args] : ();
+    return unless _irc_target_is_channel($channel) && $modes ne '';
+    eval {
+        $mediabot->{fullop}->remember_channel_modes($channel, $modes, @params)
+            if $mediabot->{fullop};
+    };
+    if ($@) {
+        (my $err = $@) =~ s/\s+/ /g;
+        $mediabot->{logger}->log(1,
+            "Fullop channel-mode snapshot failed on $channel: $err");
+    }
 }
 
 # mb543-B1: LUSERS numerics -> network gauges. Thin, eval-guarded handlers;

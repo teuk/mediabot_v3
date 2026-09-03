@@ -570,6 +570,25 @@ sub channelSet_ctx {
             # Keep legacy side effects
             setChannelAntiFlood($self, $ctx->message, $nick, $target_channel, @args) if $chanset =~ /^AntiFlood$/i;
             set_hailo_channel_ratio($self, $target_channel, 97) if $chanset =~ /^HailoChatter$/i;
+
+            # FULL01: +Fullop is opt-in.  Apply it immediately to the current
+            # nicklist, then refresh MODE/NAMES so the live shield starts from
+            # authoritative server state without waiting for another join.
+            if ($chanset =~ /^Fullop$/i && $self->{fullop}) {
+                eval {
+                    $self->{fullop}->activate_channel(
+                        $target_channel,
+                        refresh_names => 1,
+                    );
+                };
+                if ($@) {
+                    (my $err = $@) =~ s/\s+/ /g;
+                    $self->{logger}->log(1,
+                        "channelSet_ctx: Fullop activation failed on $target_channel: $err");
+                    botNotice($self, $nick,
+                        "Fullop was stored but its immediate IRC sweep failed; check the log.");
+                }
+            }
         }
         else {
             unless ($id_channel_set) {
