@@ -45,6 +45,8 @@ like($main, qr/on_message_RPL_NAMEREPLY.*?names_from_blob\(\$names_blob\)/s,
 
 like($commands, qr/\$chanset =~ \/\^Fullop\$\/i.*?activate_channel\(\s*\$target_channel,\s*refresh_names\s*=>\s*1/s,
     'chanset activation starts an immediate MODE/NAMES synchronization');
+like($commands, qr/add_ban\(.*?send_message\("MODE".*?authorize_delegated_ban\(/s,
+    'service delegation is armed only after storage and the primary IRC ban');
 
 like($fullop, qr/DEFAULT_BAN_SECONDS\s*=>\s*600/,
     'ten-minute sanction is the default');
@@ -65,6 +67,8 @@ like($metrics, qr/mediabot_fullop_corrections_total.*?\['channel', 'mode'\]/s,
     'correction metric is aggregate and bounded');
 like($metrics, qr/mediabot_fullop_sanctions_total.*?\['channel'\]/s,
     'sanction metric contains no nickname or hostmask label');
+like($metrics, qr/mediabot_fullop_delegated_bans_total.*?\['channel'\]/s,
+    'delegated-ban metric remains aggregate and bounded');
 
 like($fresh, qr/\(32,\s*'Fullop'\)/,
     'fresh schema registers Fullop');
@@ -77,7 +81,7 @@ like($mig_readme, qr/20260903_fullop_chanset\.sql/,
 like($db_docs, qr/SOURCE .*20260903_fullop_chanset\.sql;/,
     'database operator documentation includes Fullop migration');
 
-like($sample, qr/\[fullop\].*?BAN_SECONDS=600.*?TRUSTED_SERVICE_MASKS=.*?PROTECTED_MODES=/s,
+like($sample, qr/\[fullop\].*?BAN_SECONDS=600.*?TRUSTED_SERVICE_MASKS=.*?DELEGATED_BAN_SERVICES=.*?PROTECTED_MODES=/s,
     'public sample documents bounded policy controls without secrets');
 like($docs, qr/Raw IRC `KICK` remains allowed/,
     'documentation preserves the ordinary kick exception');
@@ -85,5 +89,7 @@ like($docs, qr/Nickname text alone never grants the exception/,
     'documentation records fail-closed identity semantics');
 like($docs, qr/`PREFIX` distinguishes member statuses from list modes, especially `q`/,
     'documentation records the cross-network q distinction');
+like($docs, qr/lasts five seconds.*?same channel and literal target host.*?first matching service `\+b`/s,
+    'documentation fixes the one-shot causal service boundary');
 
 done_testing();

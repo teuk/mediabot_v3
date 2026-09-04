@@ -42,6 +42,14 @@ authenticated Mediabot identity that is either:
 Nickname text alone never grants the exception. Server-origin MODE lines,
 Mediabot's own corrections and configured service identities are trusted.
 
+An official network bot may also mirror an authorized public `!ban`,
+`!kickban` or `!kb` without becoming a privileged Fullop actor. This narrow
+delegation exists only after Mediabot has authorized and durably stored its own
+ban, lasts five seconds, is bound to the same channel and literal target host,
+and is consumed by the first matching service `+b`. It cannot authorize a
+second ban, another target, another channel, or any other restrictive mode.
+EpiKnet's exact Cronos service prefix is supported by the EpiK network profile.
+
 Raw IRC `KICK` remains allowed for ordinary ops. `+Fullop` intentionally does
 not turn a friendly kick into a ban.
 
@@ -73,6 +81,7 @@ The public sample contains:
 [fullop]
 BAN_SECONDS=600
 TRUSTED_SERVICE_MASKS=
+DELEGATED_BAN_SERVICES=
 PROTECTED_MODES=
 ```
 
@@ -84,6 +93,12 @@ glob masks, for example a network's actual ChanServ prefix. Leave it empty when
 all service channel modes are server-origin. Undernet X and Libera ChanServ
 have narrow built-in profiles; site-specific services should be listed
 explicitly before enabling `+Fullop`.
+
+`DELEGATED_BAN_SERVICES` extends the one-shot ban delegation to other exact
+service prefixes. Every entry is network-qualified and contains no wildcard,
+for example `ExampleNet|PolicyBot!service@services.example`. This setting does
+not grant general MODE privilege. The EpiK profile already knows the exact
+Cronos prefix, so no private configuration override is required there.
 
 `PROTECTED_MODES` can add site-specific mode letters to the selected network
 profile. It cannot remove the baseline safety modes.

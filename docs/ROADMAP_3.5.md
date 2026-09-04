@@ -1,15 +1,16 @@
 # Mediabot 3.5 readiness roadmap
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
 
 Mediabot 3.5 is a consolidation release. The current stable release remains
 3.3 and development remains on the `3.4dev` line until an explicit release
 decision. No 3.5 tag, stable version change or public release archive is made
 implicitly by this roadmap.
 
-Mediabot 3.5 cannot release until the Hailo modernization described by MB720
-is implemented, exercised on the development instance and accepted. This is a
-named release requirement, not optional feature scope.
+The MB720 Hailo engineering gate is now implemented, exercised and accepted on
+the development instance. That closes the feature-construction gate, not the
+release: supported-instance convergence, live observation and the remaining
+database, security, installation and release gates are still mandatory.
 
 ## Release principles
 
@@ -24,17 +25,35 @@ named release requirement, not optional feature scope.
   candidate immediately before its release commit.
 - Preserve a checkpoint and rollback boundary for every live change.
 
+## Current position
+
+- MB720 Hailo and MB721 Gemini are complete on the development line. Their
+  runtime behavior, fallback boundaries and private-state handling have focused,
+  fast, full and bounded live evidence.
+- FULL01 `+Fullop` is committed and its real-network pilot is active on the
+  intended nbot channel. The pilot confirmed the main guard and also exposed a
+  service-causality gap: an official network bot mirrored an authorized ban
+  and was mistaken for an independent actor. The bounded delegation correction
+  must be deployed and observed before acceptance can close; no simulated IRC
+  client substitutes for that evidence.
+- The critical release path remains MB719, then supported-instance convergence
+  and observation under MB722, followed by MB723 through MB727.
+- Completing a feature on development never authorizes production activation,
+  a stable version change or a release.
+
 ## Completed evidence
 
 | Work item | Status | Evidence established |
 | --- | --- | --- |
 | MB713 | Complete | Debian 13 live baseline; development READY; the older deployment classified UNSAFE because of schema drift |
-| MB714 | Complete, uncommitted | ScriptRunner timing test measures the execution boundary and passes focused stability plus fast validation; production code is unchanged |
+| MB714 | Complete | ScriptRunner timing test measures the execution boundary and passes focused stability plus fast validation; production code is unchanged |
 | MB715 | Complete | Two canonical services identified; the duplicate inventory entry removed; 40 schema differences classified |
 | MB716 | Complete | 64 aggregate read-only probes; 52 orphan command owners identified; four optional seed names planned; timestamp semantics marked for review |
 | MB717 | Complete | Private disposable MariaDB rehearsal normalized 52 owners, reduced 40 schema differences to zero, preserved the ordered timestamp evidence, then restored the original 40-difference state and removed the clone |
 | MB718 | Complete, variance recorded | Debian 13 root access restored through `unix_socket`; application identities remained unchanged; the post-repair privilege-mask representation change is carried into MB719 for an explicit `SHOW GRANTS` check |
-| FULL01 | Development candidate | Opt-in `+Fullop` opens operator status to all while reversing unauthorized join/speech restrictions; ten-minute sanctions, authenticated 75+/Administrator exceptions and server-advertised MODE semantics are covered without enabling a channel |
+| MB720 | Complete on development pilot | Hailo has isolated per-channel brains, reply-before-learn ordering, MegaHAL-compatible policy boundaries and an asynchronous language-aware provider-neutral post-editor with deterministic fallback and late-revocation evidence |
+| MB721 | Complete on development pilot | Google Gemini is a strict native provider and `!gemini` is independently opt-in through `+Gemini`; a bounded live provider smoke and opt-in IRC pilot passed while key/configuration and wider channel activation remain operator-controlled |
+| FULL01 | Live pilot in progress; service correction required | Opt-in `+Fullop` opens operator status to all while reversing unauthorized join/speech restrictions; the real pilot exposed one official-service causality gap, now bounded to a one-shot same-target delegation after an authorized ban |
 
 MB717 proves that the data and schema plan can be replayed and reversed in an
 isolated server. It does not qualify a production migration. The production
@@ -49,14 +68,36 @@ variance is a concrete MB719 preflight item, not authority for more host work.
 | Work item | Priority | Exit condition |
 | --- | --- | --- |
 | MB719 | P0 | Root grants are captured and accepted, production schema reconciliation is backed up, explicitly confirmed, applied through the reviewed plan, verified drift-free and proven restorable |
-| MB720 | P0 | Hailo has an isolated per-channel brain, MegaHAL-compatible message policy, reply-before-learn ordering and a language-aware provider-neutral post-editor that preserves the learned draft or falls back to it safely |
-| MB721 | Complete on development pilot | Google Gemini is a strict native provider and `!gemini` is independently opt-in through `+Gemini`; a bounded live provider smoke and opt-in IRC pilot passed while key/configuration and wider channel activation remain operator-controlled |
+| FULL01 live pilot | Operational acceptance | nbot runs the corrected source, `+Fullop` remains limited to its intended pilot channel, real server capabilities drive the guard, joiners receive operator status, unauthorized restrictions are reversed and the exact ten-minute sanction expires cleanly; an authorized ban mirrored by the official service is accepted once for the same target without general service privilege; privileged restrictions and ordinary kicks retain their documented behavior |
 | MB722 | P0 | Supported instances converge one at a time and complete a seven-day observation window without unexplained restart, reconnect loop, persistent worker failure or schema drift |
 | MB723 | P1 | The supported versus experimental boundary for `mbweb` is decided, tested and documented |
 | MB724 | P1 | Security, privacy, observability and restore gates are updated for 3.5 and exercised on the supported deployment |
 | MB725 | P1 | A fresh Debian 13 installation and a representative 3.3-to-3.5 upgrade both succeed in disposable environments with rollback evidence |
 | MB726 | P1 | Installation, update, database, systemd and release documentation agree; release archives are reproduced and inspected in a dry run |
 | MB727 | Final | No open blocker; release candidate soak complete; one final full suite passes; the operator gives an explicit release decision |
+
+The FULL01 live pilot may proceed before MB719 because it changes no release
+status and activates no feature outside its explicit channel. It cannot close
+MB722 by itself. The seven-day observation window starts only after each
+supported instance has converged on an accepted source, configuration and
+schema baseline.
+
+## Immediate operational sequence
+
+1. Update nbot through its normal updater and verify the expected version,
+   clean service restart, migration registry and unchanged private instance
+   configuration.
+2. Confirm `Fullop` exists but is disabled everywhere, then enable it only on
+   `#i/o` after Mediabot's durable operator rights and service masks are known.
+3. Capture real-network evidence for automatic operator status, restoration of
+   an unauthorized restriction, the fixed warning, the single ten-minute
+   kickban and its expiry, a privileged restriction, an ordinary kick, and one
+   authorized service-mirrored ban without a false Cronos sanction.
+4. Disable `+Fullop` immediately on any unexplained mode loop, residual ban,
+   privilege-resolution error or service interaction; retain the application
+   log and database evidence for diagnosis.
+5. Once the supported instances have converged, begin MB722's seven-day
+   observation window. Do not backdate that window with development evidence.
 
 ## MB718 administrator result
 
@@ -100,7 +141,7 @@ or feature.
 The exit state is strict schema and migration evidence without unexplained
 differences. A rollback rehearsal is part of the gate, not a post-release task.
 
-## MB720 Hailo release gate
+## MB720 Hailo engineering gate — complete on development
 
 MB720 replaces the single writable Hailo store with one private channel brain
 per RFC1459-casemapped `(network, channel)` identity. Existing training is kept
@@ -129,10 +170,16 @@ creative anchor. Timeout, provider failure, malformed output, an unsafe line
 or excessive rewriting falls back to the original sanitized Hailo candidate.
 Provider access is asynchronous and must never block the IRC event loop.
 
-The gate closes only after aggregate metrics, rollback, legacy-brain seeding,
-channel isolation, code-switch behavior and provider fallback are covered by
-tests and a development pilot. No nickname, channel text, prompt, draft or
-provider answer may enter metrics.
+The development gate is closed: aggregate metrics, rollback, legacy-brain
+seeding, channel isolation, code-switch behavior, late authorization and
+provider fallback are covered by tests and the accepted development pilot. No
+nickname, channel text, prompt, draft or provider answer enters metrics.
+
+MB722 now owns the remaining Hailo release evidence: each supported instance
+must adopt the accepted implementation one at a time and complete the shared
+observation window without isolation loss, reconnect loops, persistent worker
+failure or privacy regression. Reopening MB720 requires a newly observed defect,
+not another rehearsal of evidence that already passed.
 
 ## Cross-cutting 3.5 gates
 

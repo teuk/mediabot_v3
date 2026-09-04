@@ -141,4 +141,18 @@ is($service->{privileged}, 1, 'configured complete service mask is trusted');
 is_deeply($service_sent, [], 'trusted service MODE is untouched');
 is(scalar(@{ $service_ban->{rows} }), 0, 'trusted service is never sanctioned');
 
+my ($cronos_without_token, $cronos_sent, undef, $cronos_ban) = exercise(
+    prefix => 'Cronos!services@olympe.epiknet.org',
+    user   => undef,
+);
+is($cronos_without_token->{delegated}, 0,
+    'Cronos gains no privilege from its official nickname or host alone');
+is($cronos_without_token->{sanctioned}, 1,
+    'Cronos without a matching command token follows the normal sanction path');
+is_deeply($cronos_sent->[0],
+    [ 'MODE', undef, '#open', '-b', '*!*@blocked.example' ],
+    'uncorrelated Cronos ban is reversed');
+is(scalar(@{ $cronos_ban->{rows} }), 1,
+    'uncorrelated Cronos actor receives a durable sanction');
+
 done_testing();

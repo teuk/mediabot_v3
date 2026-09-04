@@ -2145,6 +2145,26 @@ sub _channelban_apply {
         return;
     };
 
+    # A network service may mirror a public, already-authorized ban command.
+    # Arm only after both durable storage and Mediabot's own MODE succeeded.
+    # Fullop keeps this as a one-shot, short-lived delegation bound to the
+    # channel and target host; it never grants the service general privilege.
+    if ($self->{fullop}) {
+        my $ok = eval {
+            $self->{fullop}->authorize_delegated_ban(
+                channel => $target_chan,
+                mask    => $mask,
+                ban_id  => $id_ban,
+            );
+            1;
+        };
+        if (!$ok) {
+            (my $err = $@ || 'unknown error') =~ s/\s+/ /g;
+            $self->{logger}->log(1,
+                "channelban: Fullop delegation could not be armed on $target_chan: $err");
+        }
+    }
+
     my $duration_txt = $duration_label || 'permanent';
     my $msg = "Ban #$id_ban added on $target_chan: $mask level=$ban_level duration=$duration_txt";
     $msg .= " reason=$reason" if defined $reason && $reason ne '';

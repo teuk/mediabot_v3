@@ -53,6 +53,8 @@ sub build_guard {
         nicklist_cb   => sub { @{ $opts{nicks} || [] } },
         send_cb       => sub { push @sent, [@_]; return 1 },
         announce_cb   => sub { push @announced, [@_]; return 1 },
+        now_cb        => $opts{now_cb},
+        delegated_service_masks => $opts{delegated_service_masks},
     );
     return ($guard, \@sent, \@announced, $bans);
 }
@@ -154,6 +156,107 @@ $epik->handle_mode(
 );
 is_deeply($epik_sent->[0], [ 'MODE', undef, '#open', '-M', 'account-only' ],
     'network profile protects an EpiK/InspIRCd restriction');
+
+my $delegation_now = 1_000;
+my ($delegated, $delegated_sent, $delegated_announced, $delegated_bans) =
+    build_guard(
+        network => 'EpiKnet',
+        now_cb  => sub { $delegation_now },
+    );
+$delegated->update_isupport(
+    'NETWORK=EpiKnet',
+    'PREFIX=(qaohv)~&@%+',
+    'CHANMODES=beI,k,l,imnpst',
+);
+is(
+    $delegated->authorize_delegated_ban(
+        channel => '#open',
+        mask    => '*!*victim@users.example',
+        ban_id  => 17,
+    ),
+    1,
+    'an authorized stored ban arms one EpiK service delegation',
+);
+my $delegated_result = $delegated->handle_mode(
+    channel     => '#open',
+    prefix      => 'Cronos!services@olympe.epiknet.org',
+    mode_string => '+b',
+    mode_args   => [ '*!*@users.example' ],
+);
+is($delegated_result->{delegated}, 1,
+    'Cronos mirror for the same literal host consumes the delegation');
+is($delegated_result->{sanctioned}, 0,
+    'the correlated service mirror is not sanctioned');
+is_deeply($delegated_sent, [],
+    'the correlated service mirror is neither reversed nor answered');
+is_deeply($delegated_announced, [],
+    'the fixed warning is not emitted for a correlated mirror');
+is(scalar(@{ $delegated_bans->{added} }), 0,
+    'the correlated mirror creates no Fullop actor sanction');
+
+my $replayed_result = $delegated->handle_mode(
+    channel     => '#open',
+    prefix      => 'Cronos!services@olympe.epiknet.org',
+    mode_string => '+b',
+    mode_args   => [ '*!*other@users.example' ],
+);
+is($replayed_result->{delegated}, 0,
+    'the consumed delegation cannot authorize a second service ban');
+is($replayed_result->{sanctioned}, 1,
+    'a second service ban follows the normal Fullop sanction path');
+
+my $expiry_now = 2_000;
+my ($expired, $expired_sent, undef, $expired_bans) = build_guard(
+    network => 'EpiKnet',
+    now_cb  => sub { $expiry_now },
+);
+$expired->update_isupport('PREFIX=(qaohv)~&@%+', 'CHANMODES=beI,k,l,imnpst');
+is($expired->authorize_delegated_ban(
+    channel => '#open', mask => '*!*victim@expiry.example'), 1,
+    'a literal target host can arm a short delegation');
+$expiry_now += 6;
+my $expired_result = $expired->handle_mode(
+    channel     => '#open',
+    prefix      => 'Cronos!services@olympe.epiknet.org',
+    mode_string => '+b',
+    mode_args   => [ '*!*@expiry.example' ],
+);
+is($expired_result->{sanctioned}, 1,
+    'an expired service delegation cannot authorize a late ban');
+is_deeply($expired_sent->[0], [ 'MODE', undef, '#open', '-b', '*!*@expiry.example' ],
+    'the late ban is reversed normally');
+is(scalar(@{ $expired_bans->{added} }), 1,
+    'the late service actor receives the normal durable sanction');
+
+my ($wrong_network) = build_guard(network => 'Radiocapsule');
+is($wrong_network->authorize_delegated_ban(
+    channel => '#open', mask => '*!*victim@users.example'), 0,
+    'the EpiK service profile cannot arm delegation on another network');
+
+my ($wildcard_target) = build_guard(network => 'EpiKnet');
+is($wildcard_target->authorize_delegated_ban(
+    channel => '#open', mask => '*!*victim@*.example'), 0,
+    'a wildcard target host cannot arm delegation');
+
+my ($wrong_target, $wrong_target_sent, undef, $wrong_target_bans) =
+    build_guard(network => 'EpiKnet');
+$wrong_target->update_isupport('PREFIX=(qaohv)~&@%+', 'CHANMODES=beI,k,l,imnpst');
+is($wrong_target->authorize_delegated_ban(
+    channel => '#open', mask => '*!*victim@expected.example'), 1,
+    'the expected literal host is recorded');
+my $wrong_target_result = $wrong_target->handle_mode(
+    channel     => '#open',
+    prefix      => 'Cronos!services@olympe.epiknet.org',
+    mode_string => '+b',
+    mode_args   => [ '*!*@other.example' ],
+);
+is($wrong_target_result->{sanctioned}, 1,
+    'a service ban for another host cannot consume the delegation');
+is_deeply($wrong_target_sent->[0],
+    [ 'MODE', undef, '#open', '-b', '*!*@other.example' ],
+    'the wrong-target service ban is reversed');
+is(scalar(@{ $wrong_target_bans->{added} }), 1,
+    'the wrong-target service actor follows the durable sanction path');
 
 my ($stateful, $stateful_sent) = build_guard(network => 'GenericNet');
 $stateful->update_isupport('PREFIX=(ov)@+', 'CHANMODES=beI,k,l,imnpst');

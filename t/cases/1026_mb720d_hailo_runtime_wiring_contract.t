@@ -109,6 +109,6 @@ return sub {
         qr/Provider completion never grants permission to send/s,
         'architecture records late authorization as mandatory');
     $assert->like($docs,
-        qr/requires\s+at least one live edited reply.*focused runtime contract then deterministically completes a provider after\s+channel disable.*requires the late `disabled` outcome.*proves that no candidate\s+is emitted.*injects provider failure.*original\s+learned draft/s,
-        'development qualification combines live editing with deterministic revocation and fallback evidence');
+        qr/live edited reply established the\s+integration path.*focused runtime\s+contract then completed a provider after channel disable.*required the late\s+`disabled` outcome.*proved that no candidate was emitted.*injected provider\s+failure.*original learned draft/s,
+        'completed development qualification retains live editing, deterministic revocation and fallback evidence');
 };

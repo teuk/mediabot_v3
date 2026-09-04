@@ -148,14 +148,14 @@ only bounded outcomes, never trigger text, drafts, edited replies or nicks.
   evidence, while late revocation and fallback are exercised by the exact
   focused runtime contract instead of a timing-sensitive operator race.
 
-MB720-D is wired on the development line. A successful provider does not have
-to be sabotaged merely to manufacture a live fallback, and a fast provider
-must not turn qualification into an operator timing race. Promotion requires
-at least one live edited reply with no raw text in diagnostics. The exact
-focused runtime contract then deterministically completes a provider after
-channel disable, requires the late `disabled` outcome, proves that no candidate
-is emitted, injects provider failure and proves delivery of the original
-learned draft.
+The MB720 development gate is complete. A live edited reply established the
+integration path without raw text in diagnostics. The exact focused runtime
+contract then completed a provider after channel disable, required the late
+`disabled` outcome, proved that no candidate was emitted, injected provider
+failure and proved delivery of the original learned draft. This avoids both a
+sabotaged live provider and an operator timing race.
 
-Focused and fast validation is used during these stages. The full suite remains
-reserved for the imminent commit after the development pilot is accepted.
+Focused and fast validation covered the delivery stages, followed by the
+single full suite attached to the accepted commit. Cross-instance rollout and
+observation are tracked by MB722 in the 3.5 roadmap; they do not reopen the
+completed MB720 engineering work unless a new defect is observed.

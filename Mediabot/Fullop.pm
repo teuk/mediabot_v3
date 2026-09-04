@@ -11,6 +11,8 @@ use utf8;
 
 use constant DEFAULT_BAN_SECONDS => 600;
 use constant DEFAULT_REASON      => q{hey ho, c'est pas le genre de la maison};
+use constant DELEGATED_BAN_WINDOW_SECONDS => 5;
+use constant MAX_PENDING_DELEGATED_BANS    => 32;
 
 sub new {
     my ($class, %args) = @_;
@@ -31,6 +33,11 @@ sub new {
         max_modes        => 4,
         casemapping      => 'rfc1459',
         channel_state    => {},
+        now_cb           => ref($args{now_cb}) eq 'CODE'
+                            ? $args{now_cb} : sub { time() },
+        delegated_service_masks => ref($args{delegated_service_masks}) eq 'ARRAY'
+                            ? [ @{ $args{delegated_service_masks} } ] : undef,
+        pending_delegated_bans => [],
     }, $class;
 
     my $configured_network = $args{network};
@@ -449,6 +456,136 @@ sub _trusted_service_patterns {
     return @patterns;
 }
 
+sub _delegated_ban_service_masks {
+    my ($self) = @_;
+    my $network = lc($self->network_name);
+    my @masks;
+
+    # Cronos is an official EpiKnet channel service. It is deliberately not a
+    # generally trusted Fullop actor: the exact prefix is usable only through
+    # the one-shot, target-bound delegation below.
+    push @masks, 'Cronos!services@olympe.epiknet.org'
+        if $network =~ /epik/;
+
+    if (defined $self->{delegated_service_masks}) {
+        push @masks, @{ $self->{delegated_service_masks} };
+    }
+    elsif ($self->{bot} && $self->{bot}{conf}) {
+        my $raw = eval {
+            $self->{bot}{conf}->get('fullop.DELEGATED_BAN_SERVICES')
+        } // '';
+        for my $entry (grep { $_ ne '' } split /[\s,]+/, $raw) {
+            my ($scope, $mask) = split /\|/, $entry, 2;
+            next unless defined($scope) && defined($mask);
+            next unless lc($scope) eq $network;
+            push @masks, $mask;
+        }
+    }
+
+    my %seen;
+    return grep {
+        defined($_)
+            && $_ =~ /^[^!*?\s|]+![^@*?\s|]+\@[^*?\s|]+$/
+            && !$seen{lc($_)}++
+    } @masks;
+}
+
+sub _now {
+    my ($self) = @_;
+    my $now = eval { $self->{now_cb}->() };
+    return undef unless defined($now)
+        && !ref($now)
+        && $now =~ /^\d+(?:\.\d+)?$/;
+    return 0 + $now;
+}
+
+sub _literal_ban_host {
+    my ($mask) = @_;
+    return undef unless defined($mask) && $mask ne '';
+    my ($host) = $mask =~ /\@([^@]+)$/;
+    return undef unless defined($host)
+        && $host ne ''
+        && $host !~ /[*?\s]/;
+    return lc($host);
+}
+
+sub _purge_pending_delegations {
+    my ($self, $now) = @_;
+    $self->{pending_delegated_bans} = [
+        grep { ($_->{expires_at} // -1) >= $now }
+        @{ $self->{pending_delegated_bans} || [] }
+    ];
+    return scalar @{ $self->{pending_delegated_bans} };
+}
+
+sub authorize_delegated_ban {
+    my ($self, %args) = @_;
+    my $channel = $args{channel};
+    return 0 unless $self->enabled($channel);
+    return 0 unless $self->_delegated_ban_service_masks;
+
+    my $host = _literal_ban_host($args{mask});
+    return 0 unless defined($host);
+
+    my $now = $self->_now;
+    return 0 unless defined($now);
+    $self->_purge_pending_delegations($now);
+
+    my $pending = $self->{pending_delegated_bans};
+    shift @$pending while @$pending >= MAX_PENDING_DELEGATED_BANS;
+    push @$pending, {
+        channel    => $self->_fold($channel),
+        host       => $host,
+        ban_id     => $args{ban_id},
+        expires_at => $now + DELEGATED_BAN_WINDOW_SECONDS,
+    };
+
+    my $id = defined($args{ban_id}) ? " #$args{ban_id}" : '';
+    $self->_log(4,
+        "Fullop: armed one-shot delegated ban$id on $channel for "
+        . DELEGATED_BAN_WINDOW_SECONDS . 's');
+    return 1;
+}
+
+sub _consume_delegated_ban {
+    my ($self, $channel, $prefix, $change) = @_;
+    return 0 unless defined($change)
+        && $change->{sign} eq '+'
+        && $change->{mode} eq 'b'
+        && $change->{category} eq 'A';
+
+    my %service = map { lc($_) => 1 } $self->_delegated_ban_service_masks;
+    return 0 unless defined($prefix) && $service{lc($prefix // '')};
+
+    my $host = _literal_ban_host($change->{arg});
+    return 0 unless defined($host);
+
+    my $now = $self->_now;
+    return 0 unless defined($now);
+    $self->_purge_pending_delegations($now);
+
+    my $channel_key = $self->_fold($channel);
+    my $pending = $self->{pending_delegated_bans};
+    for my $idx (0 .. $#$pending) {
+        my $token = $pending->[$idx];
+        next unless $token->{channel} eq $channel_key;
+        next unless $token->{host} eq $host;
+        splice @$pending, $idx, 1;
+
+        $self->_remember_change($channel, $change);
+        $self->_log(3,
+            "Fullop: accepted one delegated +b on $channel from $prefix");
+        if ($self->{bot} && $self->{bot}{metrics}) {
+            $self->{bot}{metrics}->inc(
+                'mediabot_fullop_delegated_bans_total',
+                { channel => $channel },
+            );
+        }
+        return 1;
+    }
+    return 0;
+}
+
 sub _actor_is_privileged {
     my ($self, $message, $channel, $prefix) = @_;
 
@@ -567,25 +704,38 @@ sub handle_mode {
     my $mode_string = $args{mode_string};
     my @mode_args   = @{ $args{mode_args} || [] };
 
-    return { enabled => 0, corrected => 0, sanctioned => 0 }
+    return { enabled => 0, corrected => 0, sanctioned => 0, delegated => 0 }
         unless $self->enabled($channel);
 
     my @changes = $self->parse_mode_changes($mode_string, @mode_args);
-    return { enabled => 1, corrected => 0, sanctioned => 0 }
+    return { enabled => 1, corrected => 0, sanctioned => 0, delegated => 0 }
         unless @changes;
 
     if ($self->_actor_is_privileged($message, $channel, $prefix)) {
         $self->_remember_change($channel, $_) for @changes;
-        return { enabled => 1, privileged => 1, corrected => 0, sanctioned => 0 };
+        return {
+            enabled => 1, privileged => 1, corrected => 0,
+            sanctioned => 0, delegated => 0,
+        };
     }
 
-    my @protected = grep { $self->_is_protected_change($_) } @changes;
+    my (@protected, @delegated);
     for my $change (@changes) {
-        $self->_remember_change($channel, $change)
-            unless $self->_is_protected_change($change);
+        if (!$self->_is_protected_change($change)) {
+            $self->_remember_change($channel, $change);
+        }
+        elsif ($self->_consume_delegated_ban($channel, $prefix, $change)) {
+            push @delegated, $change;
+        }
+        else {
+            push @protected, $change;
+        }
     }
 
-    return { enabled => 1, corrected => 0, sanctioned => 0 }
+    return {
+        enabled => 1, corrected => 0, sanctioned => 0,
+        delegated => scalar(@delegated),
+    }
         unless @protected;
 
     my $corrected = 0;
@@ -629,6 +779,7 @@ sub handle_mode {
         corrected  => $corrected,
         protected  => scalar(@protected),
         sanctioned => $sanctioned ? 1 : 0,
+        delegated  => scalar(@delegated),
     };
 }
 

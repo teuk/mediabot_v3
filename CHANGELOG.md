@@ -53,6 +53,11 @@ release. Development after this release continues on the `3.4dev` line.
 - When a durable ban already covers the actor, Fullop now reuses its exact
   stored mask so the expiry worker cannot remove one mask while leaving a
   second, untracked IRC ban behind.
+- Added a target-bound service delegation for network bots that mirror an
+  authorized public ban command. The built-in EpiK Cronos identity may emit
+  one matching `+b` within five seconds, but receives no general Fullop
+  privilege; unrelated restrictions still follow the normal reversal and
+  sanction path.
 
 ### mb721 — welcome Google Gemini behind an opt-in channel gate
 

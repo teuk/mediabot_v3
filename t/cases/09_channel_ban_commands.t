@@ -224,6 +224,16 @@ use Mediabot::ChannelBan;
     }
 }
 
+{
+    package TestFullopDelegation;
+    sub new { bless { calls => [] }, $_[0] }
+    sub authorize_delegated_ban {
+        my ($self, %args) = @_;
+        push @{ $self->{calls} }, { %args };
+        return 1;
+    }
+}
+
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
@@ -263,6 +273,7 @@ sub _make_test_bot {
             '#TEST' => $chan,
         },
     );
+    $bot->{fullop} = $args{fullop} if $args{fullop};
 
     return ($bot, $irc, $dbh, $channel_ban);
 }
@@ -396,6 +407,7 @@ return sub {
     # 5. kickban nick -> resolve hostmask, MODE +b then KICK
     # -------------------------------------------------------------------------
     {
+        my $fullop = TestFullopDelegation->new;
         my $dbh = TestChannelBanDBH->new(
             actor_level => 100,
             hostmasks   => {
@@ -406,6 +418,7 @@ return sub {
         my ($bot, $irc, undef, $cb) = _make_test_bot(
             actor_level => 100,
             dbh         => $dbh,
+            fullop      => $fullop,
         );
 
         my $ctx = _ctx(
@@ -425,6 +438,14 @@ return sub {
         $assert->is($m[1]{command}, 'KICK', 'kickban nick : second command KICK');
         $assert->is($m[1]{params}[1], 'badnick', 'kickban nick : kicked nick');
         $assert->is(scalar @{ $cb->{added} }, 1, 'kickban nick : stored in ChannelBan');
+        $assert->is(scalar @{ $fullop->{calls} }, 1,
+            'kickban nick : one service delegation is armed');
+        $assert->is($fullop->{calls}[0]{channel}, '#test',
+            'kickban nick : delegation is bound to the command channel');
+        $assert->is($fullop->{calls}[0]{mask}, '*!*evil@evil.example.org',
+            'kickban nick : delegation uses the persisted target mask');
+        $assert->is($fullop->{calls}[0]{ban_id}, 1,
+            'kickban nick : delegation refers to the durable ban id');
     }
 
     # -------------------------------------------------------------------------
