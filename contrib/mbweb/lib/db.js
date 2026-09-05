@@ -2,15 +2,9 @@
 
 const mysql = require('mysql2/promise');
 const { config } = require('./config');
+const { qIdent } = require('./sql');
 
 const pool = mysql.createPool(config.db);
-
-function qIdent(identifier) {
-  if (!/^[A-Za-z0-9_]+$/.test(identifier)) {
-    throw new Error(`Unsafe SQL identifier: ${identifier}`);
-  }
-  return '`' + identifier + '`';
-}
 
 // Column schema cache — avoids a SHOW COLUMNS round-trip on every request.
 // TTL: 60 s. Invalidated per table on explicit call to clearColumnCache().

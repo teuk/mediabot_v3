@@ -1,20 +1,13 @@
 'use strict';
 
 const { safeBase } = require('./config');
+const { escapeHtml } = require('./html');
+const { csrfField } = require('./csrf');
 const {
   isOwner,
   isMaster,
   isAdministrator
 } = require('./permissions');
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
-}
 
 function renderPage(title, body, req) {
   const user = req.session?.user || null;
@@ -67,7 +60,10 @@ function renderPage(title, body, req) {
             <strong>${escapeHtml(user.nickname)}</strong>
           </span>
           <span class="mbw-role-badge ${isOwner(user) ? 'owner' : isMaster(user) ? 'master' : isAdministrator(user) ? 'admin' : 'user'}">${escapeHtml(user.global_role)}</span>
-          <a class="mbw-logout-btn" href="${logoutUrl}">Logout</a>
+          <form method="post" action="${logoutUrl}" class="mbw-inline-form">
+            ${csrfField(req)}
+            <button class="mbw-logout-btn" type="submit">Logout</button>
+          </form>
         ` : `<a class="mbw-login-btn" href="${loginUrl}">Login</a>`}
       </div>
     </nav>

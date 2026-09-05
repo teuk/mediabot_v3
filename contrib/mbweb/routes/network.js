@@ -6,6 +6,7 @@ const { escapeHtml, renderPage } = require('../lib/render');
 const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
 const { getNetworks } = require('../lib/mediabotRepository');
+const { logError } = require('../lib/securityLog');
 
 const router = express.Router();
 
@@ -18,7 +19,7 @@ router.get('/api/network', requireFreshLogin, async (req, res) => {
     const networks = await getNetworks();
     res.json({ ok: true, total: networks.length, networks });
   } catch (err) {
-    console.error('[mbweb][/api/network] error:', err.message);
+    logError(console, 'network.api', err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
   }
 });
@@ -39,7 +40,7 @@ router.get('/network', requireFreshLogin, async (req, res) => {
   try {
     networks = await getNetworks();
   } catch (err) {
-    console.error('[mbweb][/network] error:', err.message);
+    logError(console, 'network.page', err);
     return res.status(500).send(renderPage('Error', `
 <section class="mbw-card">
   <h1>Server error</h1>

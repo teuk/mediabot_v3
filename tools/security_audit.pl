@@ -1,8 +1,9 @@
 #!/usr/bin/perl
 # =============================================================================
-#  tools/security_audit.pl — Revue de sécurité finale (Phase B / B3, RC 3.3)
+#  tools/security_audit.pl — Contrat de sécurité transversal (B3 + MB724, 3.5)
 # =============================================================================
-#  Direction 3.3, Phase B, jalon B3. Vérifie — en LECTURE de source, sans rien
+#  Le socle historique B3 est conservé. MB724 l'étend à toute la surface 3.5
+#  acceptée. L'outil vérifie — en LECTURE de source, sans rien
 #  exécuter ni contacter — que les invariants de sécurité tenus par le code
 #  restent en place. Chaque invariant est un CONTRAT : si une régression future
 #  le casse, l'audit sort en erreur (No-Go), ce qui bloque la RC.
@@ -17,6 +18,15 @@
 #     5. verrou de process (flock LOCK_EX) et PID
 #     6. limites HTTP (cap de download) présentes
 #     7. throttle/rate-limit d'authentification présents
+#     8. workers et scripts bornés, sans shell implicite
+#     9. transport IA HTTPS, TLS, timeout et réponse bornée
+#    10. cerveaux Hailo isolés et fallback local déterministe
+#    11. observabilité agrégée sans contenu de conversation
+#    12. interfaces privilégiées et updater fail-closed
+#    13. identités systemd et chemins inscriptibles minimaux
+#    14. restauration et archives publiques bornées
+#    15. sessions, CSRF, requêtes et upstreams mbweb bornés
+#    16. diagnostic DB en lecture seule contre la référence
 #
 #  Sortie : rapport lisible + code retour 0 (Go) / 1 (No-Go).
 #  Chaque défaut est FATAL par défaut ; --warn-only rétrograde en avertissement
@@ -73,7 +83,7 @@ sub fail {
 }
 
 say_info("=" x 74);
-say_info("Mediabot final security audit (B3)");
+say_info("Mediabot cross-cutting security audit (B3 + MB724)");
 say_info("  root: $ROOT");
 say_info("=" x 74);
 
@@ -359,6 +369,317 @@ say_info("\n[7] Authentication throttling");
     }
     else {
         fail("Partyline login throttling missing in Partyline session/auth layer");
+    }
+}
+
+# ===========================================================================
+# 8. Workers et scripts bornés, sans shell implicite
+# ===========================================================================
+say_info("\n[8] Bounded workers and script execution");
+{
+    my $worker = slurp('Mediabot/AsyncWorker.pm') // '';
+    if ($worker =~ /DEFAULT_TIMEOUT\s*=\s*30/
+            && $worker =~ /DEFAULT_MAX_OUTPUT\s*=\s*64\s*\*\s*1024/
+            && $worker =~ /_begin_termination\('timeout'\)/
+            && $worker =~ /_signal_child\('TERM'\).*?_signal_child\('KILL'\)/s) {
+        pass("AsyncWorker enforces timeout, output cap and TERM/KILL escalation");
+    }
+    else {
+        fail("AsyncWorker bounded lifecycle contract is incomplete");
+    }
+
+    my $runner = slurp('Mediabot/ScriptRunner.pm') // '';
+    if ($runner =~ /validate_script_path\(\$plan->\{script\}\)/
+            && $runner =~ /open3\(\$child_in,\s*\$child_out,\s*\$child_err,\s*\@cmd\)/
+            && $runner =~ /\$timeout\s*=\s*30\s+if\s+\$timeout\s*>\s*30/
+            && $runner =~ /max_stdout_bytes/
+            && $runner =~ /max_stderr_bytes/
+            && $runner =~ /max_stdin_bytes/
+            && $runner =~ /kill\s+'TERM'.*?kill\s+'KILL'/s) {
+        pass("ScriptRunner validates argv/path and bounds time, stdin, stdout and stderr");
+    }
+    else {
+        fail("ScriptRunner execution boundary is incomplete");
+    }
+}
+
+# ===========================================================================
+# 9. HTTP et transport IA provider-neutral
+# ===========================================================================
+say_info("\n[9] HTTP and provider-neutral AI boundaries");
+{
+    my $client = slurp('Mediabot/AI/Client.pm') // '';
+    my $transport = slurp('Mediabot/AI/Transport.pm') // '';
+
+    if ($client =~ /sub\s+_https_url\s*\{.*?https:/s
+            && $client =~ /verify_SSL\s*=>\s*1/
+            && $client =~ /max_size\s*=>\s*1024\s*\*\s*1024/) {
+        pass("AI endpoints require HTTPS and the shared client verifies TLS with a 1 MiB cap");
+    }
+    else {
+        fail("AI HTTPS/TLS/response-size boundary is incomplete");
+    }
+
+    if ($transport =~ /timeout must be a positive number/
+            && $transport =~ /timeout\s*=>\s*0\s*\+\s*\$args\{timeout\}/
+            && $transport =~ /verify_SSL\s*=>\s*1/) {
+        pass("provider-neutral AI transport requires a positive timeout and verified TLS");
+    }
+    else {
+        fail("provider-neutral AI transport timeout/TLS contract is incomplete");
+    }
+
+    if ($client =~ /never return raw HTTP\s*\n?\s*# bodies, request headers or credentials/s
+            && $client =~ /for my \$key \(qw\(error_type error_code error_message\)\)/) {
+        pass("AI failure envelopes expose only the bounded diagnostic tuple");
+    }
+    else {
+        fail("AI failure envelope may expose raw provider material");
+    }
+}
+
+# ===========================================================================
+# 10. Isolation Hailo et fallback local déterministe
+# ===========================================================================
+say_info("\n[10] Hailo isolation and deterministic fallback");
+{
+    my $registry = slurp('Mediabot/Hailo/BrainRegistry.pm') // '';
+    my $post = slurp('Mediabot/Hailo/PostEditor.pm') // '';
+    my $runtime = slurp('Mediabot/Hailo/PostEditRuntime.pm') // '';
+
+    if ($registry =~ /sha256_hex\(join\s+"\\x00",\s*\$self->\{network\},\s*\$key\)/
+            && $registry =~ /Hailo brain path must not be a symbolic link/
+            && $registry =~ /umask\s+0077/) {
+        pass("Hailo brain identity is network/channel-scoped and private symlinks are refused");
+    }
+    else {
+        fail("Hailo per-channel brain isolation contract is incomplete");
+    }
+
+    if ($post =~ /reason\s*=>\s*'provider_error'.*?line\s*=>\s*\$fallback/s
+            && $post =~ /_preserves_anchor\(\$fallback,\s*\$edited\)/) {
+        pass("Hailo provider failure preserves the local draft and edits preserve its anchor");
+    }
+    else {
+        fail("Hailo deterministic fallback/anchor contract is incomplete");
+    }
+
+    if ($runtime =~ /disabled.*?runtime_inactive.*?irc_disconnected.*?not_joined.*?stale_generation/s
+            && $runtime =~ /\{post_editor\}->submit\(/
+            && $runtime !~ /\{post_editor\}->execute\(/) {
+        pass("Hailo post-edit stays asynchronous and rechecks late authorization/runtime state");
+    }
+    else {
+        fail("Hailo asynchronous late-authorization boundary is incomplete");
+    }
+}
+
+# ===========================================================================
+# 11. Observabilité agrégée et vie privée
+# ===========================================================================
+say_info("\n[11] Privacy-safe aggregate observability");
+{
+    my $metrics = slurp('Mediabot/Metrics.pm') // '';
+    my $runtime = slurp('Mediabot/Hailo/PostEditRuntime.pm') // '';
+    my $main = slurp('mediabot.pl') // '';
+    my $core = slurp('Mediabot/Mediabot.pm') // '';
+
+    if ($metrics =~ /bind\s*=>\s*\$args\{bind\}\s*\|\|\s*'127[.]0[.]0[.]1'/
+            && $metrics =~ /MAX_HTTP_HEADER_BYTES\s*=>\s*16\s*\*\s*1024/
+            && $metrics =~ /mediabot_hailo_post_edit_total'.*?\['result'\]/s) {
+        pass("metrics default to loopback, bound request headers and aggregate Hailo results");
+    }
+    else {
+        fail("metrics loopback/size/aggregate contract is incomplete");
+    }
+
+    my ($summary) = $runtime =~ /my\s+\$summary\s*=\s*\{(.*?)\n\s*\};/s;
+    if (defined($summary)
+            && $summary !~ /\b(?:trigger|candidate|line|context)\s*=>/
+            && $main !~ /Hailo(?:Chatter)? channel candidate for .*\$sAnswer/
+            && $core !~ /Hailo channel candidate for .*\$sAnswer/) {
+        pass("Hailo summaries and logs exclude trigger, draft, edited line and context text");
+    }
+    else {
+        fail("raw Hailo conversation content may cross observability boundary");
+    }
+
+    my $social = slurp('Mediabot/SocialHistory.pm') // '';
+    my $social_code = $social;
+    $social_code =~ s/^\s*#.*$//mg;
+    if ($social_code !~ /(?:q|qq)\s*\{\s*(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP)\b/is
+            && $social_code !~ /\$dbh->(?:prepare|do)\(\s*["']\s*(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP)\b/is) {
+        pass("social-history remains a read-only data surface");
+    }
+    else {
+        fail("social-history contains a write-SQL path");
+    }
+}
+
+# ===========================================================================
+# 12. Interfaces privilégiées fail-closed
+# ===========================================================================
+say_info("\n[12] Privileged interfaces fail closed");
+{
+    my $priv = slurp('Mediabot/Partyline/Privileged.pm') // '';
+    my $owner_guards = () = $priv =~ /unless\s*\(defined\(\$level\)\s*&&\s*\$level\s*==\s*0\)/g;
+    if ($owner_guards >= 2
+            && $priv =~ /PARTYLINE_EVAL_ENABLED'\)\s*\}\s*\/\/\s*0/) {
+        pass("Partyline eval/die remain Owner-only and eval defaults disabled");
+    }
+    else {
+        fail("Partyline privileged command boundary is incomplete");
+    }
+
+    my $update = slurp('Mediabot/Update.pm') // '';
+    if ($update =~ /return unless \$ctx->require_level\('Master'\)/
+            && $update =~ /BUILTIN_PROTECTED.*?\/home\/mediabot\/mediabot_v3.*?teuk[.]org/s
+            && $update =~ /update_eligibility\(.*?unless \(\$ok\)/s) {
+        pass("updater requires Master and refuses the protected development installation");
+    }
+    else {
+        fail("updater authorization/protected-installation boundary is incomplete");
+    }
+
+    my $fullop = slurp('Mediabot/Fullop.pm') // '';
+    if ($fullop =~ /authorize_delegated_ban.*?return 0 unless \$self->enabled/s
+            && $fullop =~ /_consume_delegated_ban.*?splice \@\$pending, \$idx, 1/s
+            && $fullop =~ /refusing unmanaged IRC ban.*?return 0/s) {
+        pass("Fullop delegation is enabled-only, one-shot and refuses unmanaged bans");
+    }
+    else {
+        fail("Fullop delegated/durable sanction boundary is incomplete");
+    }
+}
+
+# ===========================================================================
+# 13. Identités systemd et chemins inscriptibles
+# ===========================================================================
+say_info("\n[13] systemd identities and writable paths");
+{
+    my $irc_unit = slurp('tools/systemd/mediabot@.service.example') // '';
+    if ($irc_unit =~ /^User=mediabot$/m
+            && $irc_unit =~ /^Group=mediabot$/m
+            && $irc_unit =~ /^EnvironmentFile=\/etc\/default\/mediabot-%i$/m
+            && $irc_unit !~ /^ReadWritePaths=/m) {
+        pass("IRC systemd template uses the mediabot identity without added writable paths");
+    }
+    else {
+        fail("IRC systemd identity/writable-path contract is incomplete");
+    }
+
+    my $web_unit = slurp('install/systemd/mbweb.service') // '';
+    my @required = (
+        'User=mediabot', 'Group=mediabot', 'UMask=0077',
+        'NoNewPrivileges=true', 'ProtectSystem=strict',
+        'ProtectHome=read-only', 'PrivateTmp=true',
+        'ReadOnlyPaths=/opt/mbweb/app',
+    );
+    my @missing = grep { $web_unit !~ /^\Q$_\E$/m } @required;
+    if (!@missing && $web_unit !~ /^ReadWritePaths=/m) {
+        pass("mbweb systemd unit is sandboxed with no persistent writable path");
+    }
+    else {
+        fail("mbweb systemd hardening contract is incomplete", join(', ', @missing));
+    }
+}
+
+# ===========================================================================
+# 14. Restauration et archives publiques
+# ===========================================================================
+say_info("\n[14] Restore and public archive boundaries");
+{
+    my $deploy = slurp('install/deploy_update.sh') // '';
+    if ($deploy =~ /Archiving current release:.*?\$\{BACKUP_DIR\}/s
+            && $deploy =~ /Attempting rollback.*?mv -v "\$\{BACKUP_DIR\}"\s+"\$\{PROJECT_DIR\}"/s
+            && $deploy =~ /rollback completed successfully; previous release restored/) {
+        pass("IRC updater keeps and restores the previous release on activation failure");
+    }
+    else {
+        fail("IRC updater rollback contract is incomplete");
+    }
+
+    my $web = slurp('install/mbweb_deploy.sh') // '';
+    if ($web =~ /deployment failed; restoring \$ACTIVE_BACKUP/
+            && $web =~ /rsync -a --delete "\$candidate\/runtime\/" "\$APP_DIR\/"/
+            && $web =~ /READY/
+            && $web =~ /rollback failed: \$BACKUP/) {
+        pass("mbweb deployment arms an exact private backup and bounded rollback");
+    }
+    else {
+        fail("mbweb private backup/rollback contract is incomplete");
+    }
+
+    my $archive = slurp('tools/build_release_artifacts.sh') // '';
+    if ($archive =~ /git archive --format=tar/
+            && $archive =~ /commit\\[.]sh\$/
+            && $archive =~ /mediabot\\[.]conf\$/
+            && $archive =~ /node_modules/
+            && $archive =~ /[.]log\(\$\|\\[.]\)/
+            && $archive =~ /[.]pem\$/
+            && $archive =~ /snap_mediabot/
+            && $archive =~ /gzip -n -9/) {
+        pass("release archives are commit-derived, deterministic and reject private/generated material");
+    }
+    else {
+        fail("public release archive exclusion/determinism contract is incomplete");
+    }
+}
+
+# ===========================================================================
+# 15. Sessions et requêtes mbweb
+# ===========================================================================
+say_info("\n[15] mbweb session and request boundaries");
+{
+    my $app = slurp('contrib/mbweb/app.js') // '';
+    my $config = slurp('contrib/mbweb/lib/configCore.js') // '';
+    my $csrf = slurp('contrib/mbweb/lib/csrf.js') // '';
+    my $metrics = slurp('contrib/mbweb/lib/metrics.js') // '';
+    my $radio = slurp('contrib/mbweb/lib/radio.js') // '';
+
+    if ($config =~ /Production requires MBWEB_SESSION_STORE=mysql; MemoryStore is forbidden[.]/
+            && $app =~ /createMySqlSessionStore\(/
+            && $app =~ /sessionStore[?][.]assertReady/) {
+        pass("mbweb production sessions require the durable MySQL store before listen");
+    }
+    else {
+        fail("mbweb durable production session boundary is incomplete");
+    }
+
+    if ($app =~ /express[.]urlencoded\(\{\s*extended:\s*false,\s*limit:\s*'32kb',\s*parameterLimit:\s*64\s*\}\)/
+            && $app =~ /express[.]json\(\{\s*limit:\s*'32kb'\s*\}\)/
+            && $app =~ /createCsrfProtection\(\)/
+            && $csrf =~ /timingSafeEqual/) {
+        pass("mbweb bounds request bodies and protects state changes with constant-time CSRF checks");
+    }
+    else {
+        fail("mbweb request/CSRF boundary is incomplete");
+    }
+
+    if ($config =~ /Production MBWEB_HOST must be an explicit loopback address[.]/
+            && $metrics =~ /new AbortController\(\)/
+            && $metrics =~ /max:\s*30000/
+            && $radio =~ /new AbortController\(\)/) {
+        pass("mbweb production listener is loopback-only and upstream requests are timeout-bounded");
+    }
+    else {
+        fail("mbweb loopback/upstream timeout boundary is incomplete");
+    }
+}
+
+# ===========================================================================
+# 16. Référence DB et diagnostic en lecture seule
+# ===========================================================================
+say_info("\n[16] Database reference and read-only diagnosis");
+{
+    my $doctor = slurp('tools/mediabot_doctor.pl') // '';
+    if ($doctor =~ /SET SESSION TRANSACTION READ ONLY/
+            && $doctor =~ /check_schema_drift[.]pl'.*?'--strict',\s*'--types',\s*'--indexes'/s
+            && $doctor =~ /required live schema\/reference data match install\/mediabot[.]sql/) {
+        pass("Doctor enforces a read-only session and delegates types/indexes to the schema reference checker");
+    }
+    else {
+        fail("read-only database/reference diagnostic contract is incomplete");
     }
 }
 

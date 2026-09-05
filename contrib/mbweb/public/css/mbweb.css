@@ -1006,6 +1006,11 @@ pre {
   white-space: nowrap;
 }
 
+.mbw-inline-form {
+  display: inline-flex;
+  margin: 0;
+}
+
 .mbw-user-badge {
   gap: .45rem;
   padding: .55rem .82rem;
@@ -1068,6 +1073,8 @@ pre {
   text-decoration: none;
   font-weight: 800;
   transition: background .15s ease, color .15s ease, border-color .15s ease;
+  cursor: pointer;
+  font: inherit;
 }
 
 .mbw-logout-btn:hover {

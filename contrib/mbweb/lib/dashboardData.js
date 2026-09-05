@@ -2,6 +2,7 @@
 
 const { config } = require('./config');
 const { publicSessionUser } = require('./sessionUser');
+const { logError } = require('./securityLog');
 const { ping } = require('./db');
 const {
   getUserChannels,
@@ -54,20 +55,21 @@ async function getDashboardData(req) {
     data.db.ok = true;
     data.db.name = db?.db || config.db.database;
   } catch (err) {
-    data.db.error = err.message;
+    data.db.error = 'Database unavailable';
+    logError(console, 'dashboard.database', err);
   }
 
   try {
     data.counts = await getCounts();
   } catch (err) {
-    console.error('[mbweb][dashboard] getCounts failed', err.message);
+    logError(console, 'dashboard.counts', err);
   }
 
   if (req.session?.user?.id_user) {
     try {
       data.myChannels = await getCachedUserChannels(req.session.user.id_user);
     } catch (err) {
-      console.error('[mbweb][dashboard] getUserChannels failed', err.message);
+      logError(console, 'dashboard.channels', err);
     }
   }
 

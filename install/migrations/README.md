@@ -56,6 +56,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260902_hailo_policy_chansets.sql
 20260902_gemini_chanset.sql
 20260903_fullop_chanset.sql
+20260904_mbweb_sessions.sql
 ```
 
 The migration set adds channel-ban tracking, user seen/activity tracking, Claude chanset reference data, schema support for newer fun/user commands, and persistent trivia scores and user notes, including:
@@ -72,6 +73,7 @@ NOTE
 CHANSET_LIST entries: AchievementAnnounce, Games, Wit, Spark, VDM, DansTonChat, SparkAction, HailoLearn, HailoRespond, Gemini, Fullop
 ACHIEVEMENT_PROFILE / ACHIEVEMENT_IDENTITY / ACHIEVEMENT_UNLOCK / ACHIEVEMENT_PROGRESS
 RSS_FEED / RSS_ITEM
+MBWEB_SESSION (optional persistent mbweb sessions; no account or grant is created)
 ```
 
 These tables and reference-data migrations are used by reminder, alias, karma, karma history, trivia, note-related, achievements and games-related code paths.
@@ -155,6 +157,9 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260827_vdm_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260827_danstonchat_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260828_spark_action_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260902_hailo_policy_chansets.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260902_gemini_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260903_fullop_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260904_mbweb_sessions.sql;
 ```
 
 Afterwards:

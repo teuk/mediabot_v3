@@ -7,6 +7,7 @@ const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
 const { getAllUsersWithRoles, getUserChannelCountMap } = require('../lib/mediabotRepository');
 const { parsePositiveInt, cleanSearch } = require('../lib/requestParams');
+const { logError } = require('../lib/securityLog');
 
 const router = express.Router();
 
@@ -39,7 +40,7 @@ router.get('/api/users', requireFreshLogin, async (req, res) => {
       }))
     });
   } catch (err) {
-    console.error('[mbweb][/api/users] error:', err.message);
+    logError(console, 'users.api', err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
   }
 });
@@ -88,7 +89,7 @@ router.get('/users', requireFreshLogin, async (req, res) => {
       getUserChannelCountMap()
     ]);
   } catch (err) {
-    console.error('[mbweb][/users] error:', err.message);
+    logError(console, 'users.page', err);
     return res.status(500).send(renderPage('Error', `
 <section class="mbw-card">
   <h1>Server error</h1>

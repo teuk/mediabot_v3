@@ -32,6 +32,92 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb724 — exercise the cross-cutting 3.5 security contract
+
+- Expanded `tools/security_audit.pl` from the 14 checks of the 7 historical B3
+  axes to 37 fail-closed invariants over 16 axes. The added surface covers
+  bounded workers and scripts, provider-neutral AI transport, Hailo brain
+  isolation and fallback, aggregate-only observability, privileged interfaces,
+  systemd identities, restore/archive boundaries, mbweb and read-only database
+  diagnosis.
+- Corrected the obsolete TLS documentation: verified TLS is the shared default;
+  the single explicit Icecast compatibility exception remains bounded and
+  audited.
+- Kept the audit source-only and credential-free, then exercised its operational
+  boundaries read-only over the supported deployment and the exact MB723-D
+  restore evidence. No service, database, grant, Git, VERSION or remote mutation
+  and no full suite or publication decision are implied.
+
+### mb723 — return mbweb to the 3.5 supported-candidate path
+
+- Completed MB723-D and accepted mbweb into the supported 3.5 surface. The
+  canonical installer now stages only cleaned `contrib/mbweb` content, runs
+  `npm ci --omit=dev` from the committed lock, records a high-severity
+  dependency audit and activates only after a private recoverable backup.
+  Candidate permissions are normalized explicitly, and every declared
+  production dependency is loaded as the `mediabot` service identity before
+  the live service is stopped and again from the installed runtime.
+  Canonical-runtime drift uses content checksums while excluding the deliberate
+  owner, group and mode transformation; rollback baselines remain metadata-exact.
+- Added a hardened systemd unit with restart-rate limits, a read-only
+  application tree and no persistent writable filesystem path. The reverse
+  proxy contract keeps the listener on loopback and fixes both forwarded HTTPS
+  and base-path headers.
+- Rehearsed update, health verification and rollback on the isolated mbweb
+  deployment while preserving its private environment, database grants and all
+  IRC service states. MB724 is now the next cross-cutting release gate.
+- Completed the MB723-C read-only development pilot gate. Channel detail and
+  JSON views now expose the exact opt-in state of accepted Hailo, Gemini,
+  Spark and Fullop capabilities without adding a web control plane.
+- Exercised the real HTTPS reverse-proxy base path with an authenticated Owner
+  session: login rotation, dashboard, profile, network, channels and channel
+  detail, users, commands, quotes, radio, metrics, diagnostics, Partyline and
+  protected POST logout all produced bounded route evidence.
+- Applied the session migration through the local administrator path and ran
+  mbweb with a dedicated local database identity. Its grants are SELECT-only
+  on the explicit console read surface plus SELECT/INSERT/UPDATE/DELETE on
+  `MBWEB_SESSION`; it has no schema, grant or server-administration authority.
+- Kept the IRC services, private Mediabot configuration and channel policy
+  unchanged while updating only the isolated mbweb pilot. MB723-D packaging,
+  update and rollback promotion remains open.
+- Completed the MB723-B request-security source gate. Production now refuses
+  the default in-memory session store and non-loopback binding, while the
+  dedicated MariaDB store uses explicit expiry, indexed cleanup, one bounded
+  reconnect retry and no memory fallback.
+- Centralized session-bound CSRF enforcement across every unsafe HTTP method,
+  converted logout and Owner cache clearing to auditable POST actions, rotated
+  the session and CSRF token after login, and removed cache mutation from GET
+  navigation.
+- Bounded login throttling to 2048 source entries with pruning and non-blocking
+  housekeeping. Runtime failures now log fixed descriptors without raw errors,
+  URLs, query contents, cookies, credentials or private upstream payloads.
+- Capped form and JSON bodies, server-side session expiry and cleanup batches,
+  made Owner maintenance refresh authorization fail closed, and close runtime
+  resources when readiness or listener startup fails.
+- Added the optional `MBWEB_SESSION` migration and documented a dedicated
+  least-privileged database identity: read-only application tables plus
+  session-table SELECT/INSERT/UPDATE/DELETE, with no schema administration.
+- Completed the MB723-A deterministic application baseline with a first-class
+  `npm test` lane that requires no credentials, network access, installed Node
+  dependencies or live database. It covers configuration, authentication,
+  session normalization, authorization, request and SQL bounds, repository
+  outcomes, HTTP error boundaries, upstream size/time limits and lifecycle.
+- Split pure policy from runtime adapters so focused tests exercise the same
+  production decisions without starting Express or opening a listener. Normal
+  `node app.js` startup remains unchanged, while listener failures now reject
+  deterministically and SIGINT/SIGTERM close HTTP and database resources once.
+- Replaced the former binary supported-versus-experimental decision with four
+  explicit promotion gates: deterministic tests, session and request security,
+  a read-only development pilot, and production-grade packaging with rollback.
+- Kept mbweb outside the supported boundary until every gate has evidence. A
+  failed gate must produce an explicit experimental exclusion; it cannot be
+  hidden inside the later convergence window.
+- Moved supported-instance convergence after mbweb qualification and the
+  cross-cutting security gate. The seven-day observation window can therefore
+  cover the complete accepted 3.5 surface instead of an incomplete baseline.
+- Reserved fresh Debian 13 installation and representative 3.3-to-3.5 upgrade
+  rehearsal as the final technical gate before the explicit release decision.
+
 ### FULL01 — guarded open-op channels with `+Fullop`
 
 - Added the opt-in `+Fullop` chanset. Every joiner is opped, and enabling the

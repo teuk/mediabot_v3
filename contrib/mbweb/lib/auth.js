@@ -1,32 +1,23 @@
 'use strict';
 
-const crypto = require('crypto'); // built-in, no install needed
 const bcrypt = require('bcryptjs');
 const { config } = require('./config');
 const { pool, qIdent, tableColumns } = require('./db');
-
-// Constant-time string comparison to prevent timing attacks.
-// Pads both sides to the same length before calling timingSafeEqual
-// so length differences don't leak information either.
-function timingSafeStringEqual(a, b) {
-  const ba = Buffer.from(String(a));
-  const bb = Buffer.from(String(b));
-  // Always allocate and compare buffers of the same length
-  const len  = Math.max(ba.length, bb.length);
-  const pa   = Buffer.alloc(len);
-  const pb   = Buffer.alloc(len);
-  ba.copy(pa);
-  bb.copy(pb);
-  // timingSafeEqual throws if lengths differ — they won't, we just allocated them equal
-  return crypto.timingSafeEqual(pa, pb) && ba.length === bb.length;
-}
+const { verifyPassword } = require('./authCore');
 
 function firstExisting(candidates, existing) {
   return candidates.find(c => existing.includes(c)) || null;
 }
 
 function logAuth(message, data = {}) {
-  console.log('[mbweb][auth]', message, JSON.stringify(data));
+  const event = String(message || 'event')
+    .replace(/[^A-Za-z0-9 ._-]/g, '')
+    .slice(0, 64);
+  const flags = Object.fromEntries(
+    Object.entries(data)
+      .filter(([key, value]) => /(?:Provided|ok)$/.test(key) && typeof value === 'boolean')
+  );
+  console.log('[mbweb][auth]', event, JSON.stringify(flags));
 }
 
 async function findUser(login) {
@@ -82,48 +73,14 @@ async function findUser(login) {
 }
 
 async function passwordMatches(inputPassword, storedPassword) {
-  if (storedPassword === null || typeof storedPassword === 'undefined') {
-    return { ok: false, method: 'missing' };
-  }
-
-  const stored = String(storedPassword);
-  const input = String(inputPassword || '');
-
-  if (config.auth.allowPlaintext) {
-    // B1 — use constant-time comparison to prevent timing attacks on plaintext passwords.
-    // Only return here if the stored value looks like actual plaintext (not a hash).
-    // Hashed passwords (bcrypt $2a$… or MySQL *XXXX…) fall through to their own branch.
-    const looksLikePlaintext = (
-      !/^\$2[aby]\$/.test(stored) &&        // not bcrypt
-      !/^\*[0-9A-F]{40}$/i.test(stored)     // not MySQL PASSWORD()
-    );
-    if (looksLikePlaintext) {
-      return {
-        ok: timingSafeStringEqual(stored, input),
-        method: 'plaintext-exact'
-      };
+  return verifyPassword(inputPassword, storedPassword, {
+    allowPlaintext: config.auth.allowPlaintext,
+    bcryptCompare: (input, stored) => bcrypt.compare(input, stored),
+    mysqlPassword: async input => {
+      const [rows] = await pool.execute('SELECT PASSWORD(?) AS hash', [input]);
+      return rows && rows[0] ? String(rows[0].hash || '') : '';
     }
-  }
-
-  // B5 — removed: plaintext-trimmed was accepting passwords with stray
-  // whitespace, producing false positives (e.g. "secret " matching "secret").
-
-  if (/^\$2[aby]\$/.test(stored)) {
-    const ok = await bcrypt.compare(input, stored);
-    return { ok, method: 'bcrypt' };
-  }
-
-  if (/^\*[0-9A-F]{40}$/i.test(stored)) {
-    const [rows] = await pool.execute('SELECT PASSWORD(?) AS hash', [input]);
-    const mysqlHash = rows && rows[0] ? String(rows[0].hash || '') : '';
-    // B1 — constant-time comparison for MySQL PASSWORD() hash
-    return {
-      ok: timingSafeStringEqual(mysqlHash.toUpperCase(), stored.toUpperCase()),
-      method: 'mysql-password'
-    };
-  }
-
-  return { ok: false, method: 'no-matching-method' };
+  });
 }
 
 async function authenticate(login, password) {
@@ -140,8 +97,7 @@ async function authenticate(login, password) {
     return {
       ok: false,
       reason: 'password-refused',
-      method: check.method,
-      user
+      method: check.method
     };
   }
 

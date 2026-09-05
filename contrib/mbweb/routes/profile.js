@@ -6,6 +6,7 @@ const { escapeHtml, renderPage } = require('../lib/render');
 const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
 const { getUserWithGlobalRole, getUserChannels, getUserHostmasks } = require('../lib/mediabotRepository');
+const { logError } = require('../lib/securityLog');
 
 const router = express.Router();
 
@@ -32,7 +33,7 @@ router.get('/api/me', requireFreshLogin, async (req, res) => {
       hostmasks
     });
   } catch (err) {
-    console.error('[mbweb][/api/me] error:', err.message);
+    logError(console, 'profile.api', err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
   }
 });
@@ -46,7 +47,7 @@ router.get('/profile', requireFreshLogin, async (req, res) => {
     hostmasks = await getUserHostmasks(req.session.user.id_user);
     channels = await getUserChannels(req.session.user.id_user);
   } catch (err) {
-    console.error('[mbweb][/profile] error:', err.message);
+    logError(console, 'profile.page', err);
     return res.status(500).send(renderPage('Error', `
 <section class="mbw-card">
   <h1>Server error</h1>

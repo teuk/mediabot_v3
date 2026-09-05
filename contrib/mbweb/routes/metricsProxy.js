@@ -6,6 +6,7 @@ const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner } = require('../lib/permissions');
 const { fetchMetrics } = require('../lib/metrics');
 const { parsePositiveInt, cleanSearch } = require('../lib/requestParams');
+const { logError } = require('../lib/securityLog');
 
 const router = express.Router();
 
@@ -75,7 +76,7 @@ router.get('/api/metrics', requireFreshLogin, async (req, res) => {
       metrics: out
     });
   } catch (err) {
-    console.error('[mbweb][/api/metrics] error:', err.message);
+    logError(console, 'metrics.api', err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
   }
 });

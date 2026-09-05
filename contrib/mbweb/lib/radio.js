@@ -1,6 +1,7 @@
 'use strict';
 
 const { config } = require('./config');
+const { logError } = require('./securityLog');
 
 const DEFAULT_RADIO_TIMEOUT_MS = 4000;
 const DEFAULT_RADIO_MAX_BYTES = 1024 * 1024;
@@ -37,24 +38,25 @@ function normalizeMountPath(value, fallback = '/') {
   return out.replace(/\/{2,}/g, '/');
 }
 
-async function fetchJson(url, timeoutMs = DEFAULT_RADIO_TIMEOUT_MS) {
-  const timeout = intFromEnv(
+async function fetchJson(url, options = {}) {
+  const timeout = options.timeoutMs ?? intFromEnv(
     'MBWEB_RADIO_TIMEOUT_MS',
-    timeoutMs,
+    DEFAULT_RADIO_TIMEOUT_MS,
     { min: 250, max: 30000 }
   );
 
-  const maxBytes = intFromEnv(
+  const maxBytes = options.maxBytes ?? intFromEnv(
     'MBWEB_RADIO_MAX_BYTES',
     DEFAULT_RADIO_MAX_BYTES,
     { min: 4096, max: 10 * 1024 * 1024 }
   );
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
 
   try {
-    const res = await fetch(url, {
+    const res = await fetchImpl(url, {
       signal: controller.signal,
       headers: {
         'User-Agent': 'mbweb-mediabot-console/0.1',
@@ -64,12 +66,12 @@ async function fetchJson(url, timeoutMs = DEFAULT_RADIO_TIMEOUT_MS) {
 
     const text = await res.text();
 
-    if (text.length > maxBytes) {
+    const responseBytes = Buffer.byteLength(text, 'utf8');
+    if (responseBytes > maxBytes) {
       return {
         ok: false,
         status: res.status,
-        error: `Response too large: ${text.length} bytes`,
-        bodyStart: text.slice(0, 200)
+        error: `Response too large: ${responseBytes} bytes`
       };
     }
 
@@ -77,8 +79,7 @@ async function fetchJson(url, timeoutMs = DEFAULT_RADIO_TIMEOUT_MS) {
       return {
         ok: false,
         status: res.status,
-        error: `HTTP ${res.status}`,
-        bodyStart: text.slice(0, 200)
+        error: `HTTP ${res.status}`
       };
     }
 
@@ -97,28 +98,22 @@ async function fetchJson(url, timeoutMs = DEFAULT_RADIO_TIMEOUT_MS) {
         data: JSON.parse(text)
       };
     } catch (err) {
+      logError(console, 'radio.json', err);
       return {
         ok: false,
         status: res.status,
-        error: 'Invalid JSON: ' + err.message,
-        bodyStart: text.slice(0, 200)
+        error: 'Invalid JSON response'
       };
     }
   } catch (err) {
-    const cause = err?.cause
-      ? [
-          err.cause.code,
-          err.cause.address,
-          err.cause.port ? `port=${err.cause.port}` : null
-        ].filter(Boolean).join(' ')
-      : '';
+    logError(console, 'radio.fetch', err);
 
     return {
       ok: false,
       status: null,
       error: err.name === 'AbortError'
         ? 'Timeout'
-        : `${err.message}${cause ? ` (${cause})` : ''}`
+        : 'Radio endpoint unavailable'
     };
   } finally {
     clearTimeout(timer);
@@ -163,11 +158,11 @@ function extractMountFromListenUrl(listenurl, fallback = null) {
   }
 }
 
-async function getRadioStatus() {
-  const url = config.urls.radioStatus;
+async function getRadioStatus(options = {}) {
+  const url = options.url || config.urls.radioStatus;
   const primaryMount = normalizeMountPath(config.urls.radioPrimaryMount || '/radio160.mp3');
 
-  const fetched = await fetchJson(url);
+  const fetched = await fetchJson(url, options);
 
   const out = {
     ok: false,
@@ -233,6 +228,7 @@ async function getRadioStatus() {
 }
 
 module.exports = {
+  fetchJson,
   getRadioStatus,
   publicListenUrl,
   normalizeHttpBaseUrl,

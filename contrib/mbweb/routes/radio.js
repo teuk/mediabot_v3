@@ -6,12 +6,13 @@ const { escapeHtml, renderPage } = require('../lib/render');
 const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
 const { getCachedRadioStatus } = require('../lib/integrationCache');
+const { logError } = require('../lib/securityLog');
 
 const router = express.Router();
 
 router.get('/api/radio/status', requireFreshLogin, async (req, res) => {
   try {
-    const radioResult = await getCachedRadioStatus({ force: req.query.refresh === '1' });
+    const radioResult = await getCachedRadioStatus();
     const radio = radioResult.value;
     res.set('X-MBWeb-Cache', radioResult.cached ? 'HIT' : 'MISS');
     res.json({
@@ -19,7 +20,7 @@ router.get('/api/radio/status', requireFreshLogin, async (req, res) => {
       radio
     });
   } catch (err) {
-    console.error('[mbweb][radio] exception', err.message);
+    logError(console, 'radio.api', err);
     res.status(500).json({
       ok: false,
       error: 'Internal server error'
@@ -31,15 +32,16 @@ router.get('/radio', requireFreshLogin, async (req, res) => {
   let radio;
 
   try {
-    const radioResult = await getCachedRadioStatus({ force: req.query.refresh === '1' });
+    const radioResult = await getCachedRadioStatus();
     radio = radioResult.value;
   } catch (err) {
     radio = {
       ok: false,
-      rawError: err.message,
+      rawError: 'Radio endpoint unavailable',
       mounts: [],
       primary: null
     };
+    logError(console, 'radio.page', err);
   }
 
   const primary = radio.primary;

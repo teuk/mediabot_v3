@@ -7,6 +7,7 @@ const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
 const { getCommands, getCommandCategories } = require('../lib/mediabotRepository');
 const { parsePositiveInt, cleanSearch } = require('../lib/requestParams');
+const { logError } = require('../lib/securityLog');
 
 const router = express.Router();
 
@@ -23,7 +24,7 @@ router.get('/api/commands', requireFreshLogin, async (req, res) => {
 
     res.json({ ok: true, total: commands.length, commands, categories });
   } catch (err) {
-    console.error('[mbweb][/api/commands] error:', err.message);
+    logError(console, 'commands.api', err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
   }
 });
@@ -40,7 +41,7 @@ router.get('/commands', requireFreshLogin, async (req, res) => {
       getCommandCategories()
     ]);
   } catch (err) {
-    console.error('[mbweb][/commands] error:', err.message);
+    logError(console, 'commands.page', err);
     return res.status(500).send(renderPage('Error', `
 <section class="mbw-card">
   <h1>Server error</h1>

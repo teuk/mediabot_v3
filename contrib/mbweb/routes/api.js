@@ -11,6 +11,7 @@ const {
 } = require('../lib/permissions');
 const { getDashboardData } = require('../lib/dashboardData');
 const { requireFreshLogin } = require('../lib/sessionUser');
+const { logError } = require('../lib/securityLog');
 
 const router = express.Router();
 
@@ -45,7 +46,7 @@ router.get('/api/status', requireFreshLogin, async (req, res) => {
       ...data
     });
   } catch (err) {
-    console.error('[mbweb][/api/status] error:', err.message);
+    logError(console, 'api.status', err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
   }
 });
@@ -83,7 +84,7 @@ router.get('/api/dashboard', requireFreshLogin, async (req, res) => {
       dashboard: data
     });
   } catch (err) {
-    console.error('[mbweb][/api/dashboard] error:', err.message);
+    logError(console, 'api.dashboard', err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
   }
 });

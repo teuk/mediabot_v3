@@ -1,138 +1,165 @@
 'use strict';
 
 const express = require('express');
-const path    = require('path');
+const http = require('http');
+const path = require('path');
 const session = require('express-session');
-const helmet  = require('helmet');
+const helmet = require('helmet');
 
-const { config, safeBase }  = require('./lib/config');
+const { config, safeBase } = require('./lib/config');
+const { pool } = require('./lib/db');
 const { escapeHtml, renderPage } = require('./lib/render');
+const { createHttpBoundaries } = require('./lib/httpBoundary');
+const { installGracefulShutdown, listenHttpServer } = require('./lib/serverLifecycle');
+const { createCsrfProtection } = require('./lib/csrf');
+const { createMySqlSessionStore } = require('./lib/mysqlSessionStore');
+const { sessionOptions } = require('./lib/sessionPolicy');
+const { logError } = require('./lib/securityLog');
 
 // ── Route files ───────────────────────────────────────────────────────────────
-const apiRoutes      = require('./routes/api');
-const authRoutes     = require('./routes/auth');
-const homeRoutes     = require('./routes/home');
-const profileRoutes  = require('./routes/profile');
+const apiRoutes = require('./routes/api');
+const authRoutes = require('./routes/auth');
+const homeRoutes = require('./routes/home');
+const profileRoutes = require('./routes/profile');
 const channelsRoutes = require('./routes/channels');
-const radioRoutes    = require('./routes/radio');
-const networkRoutes  = require('./routes/network');
-const quotesRoutes   = require('./routes/quotes');
+const radioRoutes = require('./routes/radio');
+const networkRoutes = require('./routes/network');
+const quotesRoutes = require('./routes/quotes');
 const commandsRoutes = require('./routes/commands');
-const usersRoutes    = require('./routes/users');
-const metricsRoutes   = require('./routes/metricsProxy');
+const usersRoutes = require('./routes/users');
+const metricsRoutes = require('./routes/metricsProxy');
 const partylineRoutes = require('./routes/partyline');
 const diagnosticsRoutes = require('./routes/diagnostics');
 
-const app = express();
+function createApp(options = {}) {
+  const runtimeConfig = options.config || config;
+  const sessionImpl = options.sessionImpl || session;
+  const poolImpl = options.pool || pool;
+  const app = express();
 
-app.use(helmet({
-  contentSecurityPolicy: {
-    useDefaults: true,
-    directives: {
-      'default-src': ["'self'"],
-      'style-src':   ["'self'"],
-      'script-src':  ["'self'"],
-      'img-src':     ["'self'", 'data:'],
-      'connect-src': ["'self'"],
-      'object-src':  ["'none'"],
-      'base-uri':    ["'self'"],
-      'frame-ancestors': ["'self'"]
-    }
-  },
-  crossOriginEmbedderPolicy: false
-}));
-
-app.set('trust proxy', 'loopback');
-
-app.use(express.urlencoded({ extended: false }));
-app.use(express.json());
-
-app.use(session({
-  name: 'mbweb.sid',
-  secret: config.sessionSecret,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production'
-  }
-}));
-
-app.use(config.baseUrl + '/css',    express.static(path.join(__dirname, 'public', 'css')));
-app.use(config.baseUrl + '/public', express.static(path.join(__dirname, 'public')));
-
-// ── Mount routers ─────────────────────────────────────────────────────────────
-app.use(config.baseUrl, apiRoutes);
-app.use(config.baseUrl, authRoutes);
-app.use(config.baseUrl, homeRoutes);
-app.use(config.baseUrl, profileRoutes);
-app.use(config.baseUrl, channelsRoutes);
-app.use(config.baseUrl, radioRoutes);
-app.use(config.baseUrl, networkRoutes);
-app.use(config.baseUrl, quotesRoutes);
-app.use(config.baseUrl, commandsRoutes);
-app.use(config.baseUrl, usersRoutes);
-app.use(config.baseUrl, metricsRoutes);
-app.use(config.baseUrl, partylineRoutes);
-app.use(config.baseUrl, diagnosticsRoutes);
-
-// ── 404 handler ───────────────────────────────────────────────────────────────
-app.use((req, res) => {
-  res.status(404).send(renderPage('404', `
-<section class="mbw-card">
-  <h1>404</h1>
-  <p>Unknown route: ${escapeHtml(req.originalUrl)}</p>
-</section>
-`, req));
-});
-
-// ── Global error handler ──────────────────────────────────────────────────────
-// Must be declared AFTER all routes. Express 5 forwards async rejections here.
-// eslint-disable-next-line no-unused-vars
-app.use((err, req, res, next) => {
-  const status  = err.status || err.statusCode || 500;
-  const isProd  = process.env.NODE_ENV === 'production';
-  const message = isProd ? 'Internal server error' : (err.message || 'Unknown error');
-
-  console.error('[mbweb][error]',
-    req.method, req.originalUrl,
-    '→', status,
-    '|', err.message,
-    isProd ? '' : ('\n' + (err.stack || ''))
-  );
-
-  const wantsJson = req.path.startsWith(config.baseUrl + '/api/')
-    || req.headers.accept?.includes('application/json');
-
-  if (res.headersSent) return;
-
-  if (wantsJson) {
-    return res.status(status).json({ ok: false, error: message });
-  }
-
-  res.status(status).send(renderPage(
-    status === 404 ? '404' : 'Error',
-    `
-<section class="mbw-card">
-  <h1>${status === 404 ? '404 — Page not found' : 'Server error'}</h1>
-  <p>${escapeHtml(message)}</p>
-  ${!isProd && err.stack ? `<pre class="mbw-error-stack">${escapeHtml(err.stack)}</pre>` : ''}
-  <a href="${safeBase('/')}" class="mbw-btn-secondary">← Home</a>
-</section>
-`,
-    req
-  ));
-});
-
-app.listen(config.port, config.host, () => {
-  console.log(`[mbweb] listening on http://${config.host}:${config.port}${config.baseUrl || '/'}`);
-  console.log(`[mbweb] db=${config.db.user}@${config.db.host}:${config.db.port}/${config.db.database}`);
-  console.log('[mbweb] auth=' + JSON.stringify({
-    table:          config.auth.table,
-    loginColumns:   config.auth.loginColumns,
-    passwordColumns: config.auth.passwordColumns,
-    levelColumns:   config.auth.levelColumns,
-    allowPlaintext: config.auth.allowPlaintext
+  app.use(helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        'default-src': ["'self'"],
+        'style-src': ["'self'"],
+        'script-src': ["'self'"],
+        'img-src': ["'self'", 'data:'],
+        'connect-src': ["'self'"],
+        'object-src': ["'none'"],
+        'base-uri': ["'self'"],
+        'frame-ancestors': ["'self'"]
+      }
+    },
+    crossOriginEmbedderPolicy: false
   }));
-});
+
+  app.set('trust proxy', 'loopback');
+
+  app.use(express.urlencoded({ extended: false, limit: '32kb', parameterLimit: 64 }));
+  app.use(express.json({ limit: '32kb' }));
+
+  const sessionStore = runtimeConfig.session.store === 'mysql'
+    ? createMySqlSessionStore({
+        Store: sessionImpl.Store,
+        pool: poolImpl,
+        table: runtimeConfig.session.table,
+        ttlMs: runtimeConfig.session.maxAgeMs,
+        cleanupIntervalMs: runtimeConfig.session.cleanupIntervalMs
+      })
+    : null;
+
+  app.locals.mbwebSessionStore = sessionStore;
+  app.use(sessionImpl(sessionOptions(runtimeConfig, sessionStore)));
+  app.use(createCsrfProtection());
+
+  app.use(runtimeConfig.baseUrl + '/css', express.static(path.join(__dirname, 'public', 'css')));
+  app.use(runtimeConfig.baseUrl + '/public', express.static(path.join(__dirname, 'public')));
+
+  // ── Mount routers ───────────────────────────────────────────────────────────
+  app.use(runtimeConfig.baseUrl, apiRoutes);
+  app.use(runtimeConfig.baseUrl, authRoutes);
+  app.use(runtimeConfig.baseUrl, homeRoutes);
+  app.use(runtimeConfig.baseUrl, profileRoutes);
+  app.use(runtimeConfig.baseUrl, channelsRoutes);
+  app.use(runtimeConfig.baseUrl, radioRoutes);
+  app.use(runtimeConfig.baseUrl, networkRoutes);
+  app.use(runtimeConfig.baseUrl, quotesRoutes);
+  app.use(runtimeConfig.baseUrl, commandsRoutes);
+  app.use(runtimeConfig.baseUrl, usersRoutes);
+  app.use(runtimeConfig.baseUrl, metricsRoutes);
+  app.use(runtimeConfig.baseUrl, partylineRoutes);
+  app.use(runtimeConfig.baseUrl, diagnosticsRoutes);
+
+  const boundaries = createHttpBoundaries({
+    baseUrl: runtimeConfig.baseUrl,
+    escapeHtml,
+    renderPage,
+    safeBase
+  });
+
+  // Express 5 forwards asynchronous route failures to the final error boundary.
+  app.use(boundaries.notFound);
+  app.use(boundaries.error);
+
+  return app;
+}
+
+async function startApplication(options = {}) {
+  const runtimeConfig = options.config || config;
+  const poolImpl = options.pool || pool;
+  const app = options.app || createApp({
+    config: runtimeConfig,
+    pool: poolImpl,
+    sessionImpl: options.sessionImpl
+  });
+  const server = options.server || http.createServer(app);
+  const logger = options.logger || console;
+  const sessionStore = app.locals?.mbwebSessionStore || null;
+
+  try {
+    if (sessionStore?.assertReady) await sessionStore.assertReady();
+    await listenHttpServer(server, {
+      port: runtimeConfig.port,
+      host: runtimeConfig.host
+    });
+  } catch (err) {
+    for (const closeable of [sessionStore, poolImpl]) {
+      if (!closeable || typeof closeable.end !== 'function') continue;
+      try {
+        await closeable.end();
+      } catch (closeErr) {
+        logError(logger, 'startup.resource', closeErr);
+      }
+    }
+    throw err;
+  }
+
+  logger.log(
+    `[mbweb] listening on http://${runtimeConfig.host}:${runtimeConfig.port}`
+    + `${runtimeConfig.baseUrl || '/'}`
+  );
+  logger.log(`[mbweb] session store=${runtimeConfig.session.store}`);
+  logger.log('[mbweb] database and authentication adapters configured');
+
+  const shutdown = installGracefulShutdown({
+    server,
+    closeables: [sessionStore, poolImpl].filter(Boolean),
+    logger,
+    timeoutMs: 5000
+  });
+
+  return { app, server, shutdown };
+}
+
+if (require.main === module) {
+  startApplication().catch(err => {
+    logError(console, 'startup', err);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  createApp,
+  startApplication
+};

@@ -2,15 +2,26 @@
 
 const { pool, tableColumns, clearColumnCache } = require('./db');
 const { globalLevel } = require('./permissions');
+const {
+  CHANNEL_CAPABILITY_CHANSETS,
+  normalizeCapabilityRows
+} = require('./channelCapabilities');
 
+function resultRows(result, operation) {
+  if (!Array.isArray(result) || !Array.isArray(result[0])) {
+    throw new Error(`Malformed database result for ${operation}`);
+  }
+  return result[0];
+}
 
 async function tableExists(tableName) {
-  const [rows] = await pool.execute(`
+  const result = await pool.execute(`
     SELECT COUNT(*) AS n
     FROM information_schema.tables
     WHERE table_schema = DATABASE()
       AND table_name = ?
   `, [tableName]);
+  const rows = resultRows(result, 'table existence check');
   return Number(rows[0]?.n || 0) > 0;
 }
 
@@ -77,7 +88,7 @@ async function getUserWithGlobalRole(idUser) {
 }
 
 async function getUserById(idUser) {
-  const [rows] = await pool.execute(`
+  const result = await pool.execute(`
     SELECT
       id_user,
       nickname,
@@ -87,6 +98,7 @@ async function getUserById(idUser) {
     WHERE id_user = ?
     LIMIT 1
   `, [idUser]);
+  const rows = resultRows(result, 'user lookup');
 
   return rows[0] || null;
 }
@@ -276,6 +288,31 @@ async function getChannelUsers(idChannel) {
   `, [idChannel]);
 
   return rows;
+}
+
+async function getChannelCapabilities(idChannel) {
+  const channelId = positiveInt(idChannel, 0, { min: 0, max: Number.MAX_SAFE_INTEGER });
+  if (!channelId) return normalizeCapabilityRows([]);
+
+  const [listExists, setExists] = await Promise.all([
+    tableExists('CHANSET_LIST'),
+    tableExists('CHANNEL_SET')
+  ]);
+  if (!listExists || !setExists) return normalizeCapabilityRows([]);
+
+  const placeholders = CHANNEL_CAPABILITY_CHANSETS.map(() => '?').join(', ');
+  const result = await pool.execute(`
+    SELECT cl.chanset,
+           CASE WHEN cs.id_channel_set IS NULL THEN 0 ELSE 1 END AS enabled
+    FROM CHANSET_LIST cl
+    LEFT JOIN CHANNEL_SET cs
+      ON cs.id_chanset_list = cl.id_chanset_list
+     AND cs.id_channel = ?
+    WHERE cl.chanset IN (${placeholders})
+    ORDER BY cl.chanset
+  `, [channelId, ...CHANNEL_CAPABILITY_CHANSETS]);
+  const rows = resultRows(result, 'channel capability lookup');
+  return normalizeCapabilityRows(rows);
 }
 
 // Cache for getKnownChannelRelatedTables — schema never changes at runtime
@@ -675,6 +712,7 @@ module.exports = {
   getChannelById,
   userHasChannelAccess,
   getChannelUsers,
+  getChannelCapabilities,
   getKnownChannelRelatedTables,
   getAllUsersWithRoles,
   getUserChannelCountMap,

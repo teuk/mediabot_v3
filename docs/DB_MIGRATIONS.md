@@ -83,6 +83,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260828_spark_action_chans
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260902_hailo_policy_chansets.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260902_gemini_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260903_fullop_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260904_mbweb_sessions.sql;
 ```
 
 Then run the checker again:
@@ -126,6 +127,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260902_hailo_policy_chansets.sql
 20260902_gemini_chanset.sql
 20260903_fullop_chanset.sql
+20260904_mbweb_sessions.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this
@@ -134,6 +136,18 @@ normalized types and missing `CHANSET_LIST` rows. With `--indexes`, it also
 compares every required reference index. It does not infer arbitrary
 non-`CHANSET_LIST` reference data, so those data migrations must still be
 reviewed and applied when upgrading.
+
+## mbweb persistent sessions (20260904)
+
+`20260904_mbweb_sessions.sql` creates the durable `MBWEB_SESSION` table used
+by the mbweb production session store. The migration is idempotent and creates
+only schema objects; it does not create a database account or grant privileges.
+
+For the MB723-C development pilot, apply the migration before starting mbweb,
+then grant the dedicated mbweb account only read access to the Mediabot data it
+serves and `SELECT`, `INSERT`, `UPDATE`, `DELETE` on `MBWEB_SESSION`. Keep those
+account and grant operations outside the migration so each installation can use
+its own private identity and credential lifecycle.
 
 ## Native RSS persistence (20260822)
 

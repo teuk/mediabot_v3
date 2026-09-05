@@ -5,50 +5,41 @@ const {
   getUserChannels
 } = require('./mediabotRepository');
 const { safeBase } = require('./config');
-
-function publicSessionUser(user) {
-  if (!user) return null;
-
-  return {
-    nickname:       user.nickname,
-    username:       user.username || null,
-    global_level:   user.global_level,
-    global_role:    user.global_role,
-    channels_count: user.channels_count || 0
-  };
-}
-
-function roleNameFromLevel(level) {
-  const n = Number(level);
-  if (n === 0) return 'Owner';
-  if (n === 1) return 'Master';
-  if (n === 2) return 'Administrator';
-  if (n === 3) return 'User';
-  return 'Unknown';
-}
+const {
+  normalizeSessionUser,
+  publicSessionUser,
+  roleNameFromLevel
+} = require('./sessionUserCore');
+const { logError } = require('./securityLog');
 
 // Refresh interval: rebuild session user from DB if level may have changed.
 // Runs at most once every 2 minutes per session to avoid per-request DB hits.
 const SESSION_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 
-async function refreshSessionUser(req) {
+async function refreshSessionUser(req, options = {}) {
   const user = req.session?.user;
-  if (!user) return;
+  if (!user) return false;
 
   const now = Date.now();
   const lastRefresh = req.session._userRefreshedAt || 0;
-  if ((now - lastRefresh) < SESSION_REFRESH_INTERVAL_MS) return;
+  if (!options.force && (now - lastRefresh) < SESSION_REFRESH_INTERVAL_MS) return false;
 
   try {
-    const refreshed = await buildSessionUser({ id_user: user.id_user, ...user }, null);
+    const refreshed = await buildSessionUser(
+      { id_user: user.id_user, ...user },
+      null,
+      { strict: Boolean(options.strict) }
+    );
     req.session.user = refreshed;
     req.session._userRefreshedAt = now;
     await new Promise((resolve, reject) => {
       req.session.save(err => err ? reject(err) : resolve());
     });
+    return true;
   } catch (err) {
-    // Non-fatal: keep existing session data
-    console.error('[mbweb][session] refresh failed:', err.message);
+    logError(console, 'session.refresh', err);
+    if (options.strict) throw err;
+    return false;
   }
 }
 
@@ -67,64 +58,40 @@ async function requireFreshLogin(req, res, next) {
   }
 
   try {
-    await refreshSessionUser(req);
+    await refreshSessionUser(req, { force: true, strict: true });
     return next();
   } catch (err) {
-    console.error('[mbweb][session] fresh refresh failed:', err.message);
-    return next();
+    logError(console, 'session.refresh', err);
+    res.set('Cache-Control', 'no-store');
+    return res.status(503).send('Authorization could not be refreshed.');
   }
 }
 
-async function buildSessionUser(rawUser, levelCol) {
+async function buildSessionUser(rawUser, levelCol, options = {}) {
   let profile = null;
   let channels = [];
 
   try {
     profile = await getUserWithGlobalRole(rawUser.id_user);
   } catch (err) {
-    console.error('[mbweb][session] failed to load global role', err.message);
+    logError(console, 'session.role', err);
+    if (options.strict) throw err;
   }
 
   try {
     channels = await getUserChannels(rawUser.id_user);
   } catch (err) {
-    console.error('[mbweb][session] failed to load user channels', err.message);
+    logError(console, 'session.channels', err);
+    if (options.strict) throw err;
   }
 
-  const idUserLevel = profile?.id_user_level ?? rawUser.id_user_level ?? rawUser[levelCol] ?? null;
-
-  const semanticLevel =
-    typeof profile?.global_level === 'number'
-      ? profile.global_level
-      : Number.isFinite(Number(idUserLevel))
-        ? Math.max(0, Number(idUserLevel) - 1)
-        : 999;
-
-  return {
-    id_user: rawUser.id_user,
-    nickname: profile?.nickname || rawUser.nickname,
-    username: profile?.username || rawUser.username,
-    id_user_level: idUserLevel,
-    global_level: semanticLevel,
-    global_role: profile?.global_role || roleNameFromLevel(semanticLevel),
-    auth: profile?.auth ?? rawUser.auth ?? null,
-    tz: profile?.tz || null,
-    birthday: profile?.birthday || null,
-    fortniteid: profile?.fortniteid || null,
-    last_login: profile?.last_login || null,
-    channels_count: channels.length,
-    flags: {
-      owner: semanticLevel <= 0,
-      master: semanticLevel <= 1,
-      administrator: semanticLevel <= 2,
-      user: semanticLevel <= 3
-    }
-  };
+  return normalizeSessionUser(rawUser, profile, channels, levelCol);
 }
 
 module.exports = {
   publicSessionUser,
   roleNameFromLevel,
+  normalizeSessionUser,
   requireLogin,
   requireFreshLogin,
   buildSessionUser,

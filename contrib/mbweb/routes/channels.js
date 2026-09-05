@@ -13,8 +13,10 @@ const {
   getChannelById,
   userHasChannelAccess,
   getChannelUsers,
+  getChannelCapabilities,
   getKnownChannelRelatedTables
 } = require('../lib/mediabotRepository');
+const { logError } = require('../lib/securityLog');
 
 const router = express.Router();
 
@@ -40,7 +42,7 @@ router.get('/api/channels', requireFreshLogin, async (req, res) => {
       channels: result.rows
     });
   } catch (err) {
-    console.error('[mbweb][/api/channels] error:', err.message);
+    logError(console, 'channels.api', err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
   }
 });
@@ -86,7 +88,7 @@ router.get('/channels', requireFreshLogin, async (req, res) => {
       totalPages    = 1;
     }
   } catch (err) {
-    console.error('[mbweb][/channels] error:', err.message);
+    logError(console, 'channels.page', err);
     return res.status(500).send(renderPage('Error', `
 <section class="mbw-card">
   <h1>Server error</h1>
@@ -239,12 +241,15 @@ router.get('/api/channels/:id', requireFreshLogin, async (req, res) => {
       return res.status(404).json({ ok: false, error: 'Channel not found' });
     }
 
-    const users = await getChannelUsers(idChannel);
+    const [users, capabilities] = await Promise.all([
+      getChannelUsers(idChannel),
+      getChannelCapabilities(idChannel)
+    ]);
     const relatedTables = await getKnownChannelRelatedTables();
 
-    res.json({ ok: true, channel, users, relatedTables });
+    res.json({ ok: true, channel, users, capabilities, relatedTables });
   } catch (err) {
-    console.error('[mbweb][/api/channels/:id] error:', err.message);
+    logError(console, 'channel.api', err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
   }
 });
@@ -262,12 +267,12 @@ router.get('/channels/:id', requireFreshLogin, async (req, res) => {
 `, req));
   }
 
-  let channel, users, relatedTables, allowed;
+  let channel, users, capabilities, relatedTables, allowed;
 
   try {
     allowed = await userHasChannelAccess(req.session.user.id_user, idChannel);
   } catch (err) {
-    console.error('[mbweb][/channels/:id] access check error:', err.message);
+    logError(console, 'channel.access', err);
     return res.status(500).send(renderPage('Error', `
 <section class="mbw-card">
   <h1>Server error</h1>
@@ -287,13 +292,14 @@ router.get('/channels/:id', requireFreshLogin, async (req, res) => {
   }
 
   try {
-    [channel, users, relatedTables] = await Promise.all([
+    [channel, users, capabilities, relatedTables] = await Promise.all([
       getChannelById(idChannel),
       getChannelUsers(idChannel),
+      getChannelCapabilities(idChannel),
       getKnownChannelRelatedTables()
     ]);
   } catch (err) {
-    console.error('[mbweb][/channels/:id] data fetch error:', err.message);
+    logError(console, 'channel.page', err);
     return res.status(500).send(renderPage('Error', `
 <section class="mbw-card">
   <h1>Server error</h1>
@@ -311,6 +317,26 @@ router.get('/channels/:id', requireFreshLogin, async (req, res) => {
 </section>
 `, req));
   }
+
+  const capabilityCards = capabilities.map(capability => {
+    const details = capability.features.length
+      ? `<p class="mbw-muted-cell">${capability.features.map(feature =>
+          `${escapeHtml(feature.label)}: ${feature.available
+            ? (feature.enabled ? 'enabled' : 'disabled')
+            : 'unavailable'}`
+        ).join(' · ')}</p>`
+      : '<p class="mbw-muted-cell">channel opt-in</p>';
+
+    return `
+      <article class="mbw-card">
+        <h3>${escapeHtml(capability.label)}</h3>
+        <span class="mbw-status-pill ${capability.enabled ? 'ok' : 'bad'}">
+          ${escapeHtml(capability.state)}
+        </span>
+        ${details}
+      </article>
+    `;
+  }).join('');
 
   const chansetSection = relatedTables.length ? `
 <section class="mbw-card mbw-wide">
@@ -372,6 +398,19 @@ router.get('/channels/:id', requireFreshLogin, async (req, res) => {
     <div><span>tmdb_lang</span><strong>${escapeHtml(channel.tmdb_lang ?? 'n/a')}</strong></div>
     <div><span>urltitle</span><strong>${escapeHtml(channel.urltitle ?? 'n/a')}</strong></div>
     <div><span>auto_join</span><strong>${escapeHtml(boolLabel(channel.auto_join))}</strong></div>
+  </div>
+</section>
+
+<section class="mbw-card mbw-wide">
+  <div class="mbw-section-head">
+    <div>
+      <h2>Accepted 3.5 capabilities</h2>
+      <p>Read-only channel opt-in state from CHANSET_LIST and CHANNEL_SET.</p>
+    </div>
+    <span class="mbw-count-badge">Hailo · Gemini · Spark · Fullop</span>
+  </div>
+  <div class="mbw-grid">
+    ${capabilityCards}
   </div>
 </section>
 

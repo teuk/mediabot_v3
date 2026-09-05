@@ -1,6 +1,7 @@
 'use strict';
 
 const { config } = require('./config');
+const { logError } = require('./securityLog');
 
 const DEFAULT_METRICS_TIMEOUT_MS = 3000;
 const DEFAULT_METRICS_MAX_BYTES  = 1024 * 1024;
@@ -100,8 +101,9 @@ function parseMetrics(text, options = {}) {
 
 // Fetch + parse Prometheus metrics. Returns parsed Map or null on failure.
 async function fetchMetrics(options = {}) {
-  const url = config.urls?.metrics;
+  const url = options.url || config.urls?.metrics;
   if (!url) return null;
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
 
   const timeoutMs = options.timeoutMs
     ?? intFromEnv('MBWEB_METRICS_TIMEOUT_MS', DEFAULT_METRICS_TIMEOUT_MS, { min: 250, max: 30000 });
@@ -116,7 +118,7 @@ async function fetchMetrics(options = {}) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(url, {
+    const res = await fetchImpl(url, {
       signal: controller.signal,
       headers: {
         'User-Agent': 'mbweb-mediabot-console/0.1',
@@ -127,24 +129,17 @@ async function fetchMetrics(options = {}) {
     if (!res.ok) return null;
 
     const text = await res.text();
-    if (text.length > maxBytes) {
-      console.error(`[mbweb][metrics] response too large: ${text.length} bytes from ${url}`);
+    const responseBytes = Buffer.byteLength(text, 'utf8');
+    if (responseBytes > maxBytes) {
+      logError(console, 'metrics.size', Object.assign(new Error('oversized'), {
+        code: 'RESPONSE_TOO_LARGE'
+      }));
       return null;
     }
 
     return parseMetrics(text, { maxSamplesPerMetric });
   } catch (err) {
-    const cause = err?.cause
-      ? [
-          err.cause.code,
-          err.cause.address,
-          err.cause.port ? `port=${err.cause.port}` : null
-        ].filter(Boolean).join(' ')
-      : '';
-
-    console.error(
-      `[mbweb][metrics] fetch failed url=${url}: ${err.message}${cause ? ` (${cause})` : ''}`
-    );
+    logError(console, 'metrics.fetch', err);
 
     return null;
   } finally {

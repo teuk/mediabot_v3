@@ -6,7 +6,8 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "dev": "node app.js"
+    "dev": "node app.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -12,6 +12,7 @@ const {
   getAuthenticatedDbUsers,
   getRecentChannelBans
 } = require('../lib/mediabotRepository');
+const { logError } = require('../lib/securityLog');
 
 const router = express.Router();
 
@@ -63,7 +64,7 @@ router.get('/partyline', requireFreshLogin, async (req, res) => {
   let dbError = null;
 
   try {
-    const metricsResult = await getCachedMetrics({ maxSamplesPerMetric: 20, force: req.query.refresh === '1' });
+    const metricsResult = await getCachedMetrics({ maxSamplesPerMetric: 20 });
     const metrics = metricsResult.value;
     if (metrics) {
       const val = metricVal(metrics, 'mediabot_partyline_sessions_current');
@@ -75,7 +76,7 @@ router.get('/partyline', requireFreshLogin, async (req, res) => {
       }
     }
   } catch (err) {
-    console.error('[mbweb][partyline] metrics error:', err.message);
+    logError(console, 'partyline.metrics', err);
     runtimeMetricsStatus = 'Unable to read runtime Partyline metrics';
   }
 
@@ -85,7 +86,7 @@ router.get('/partyline', requireFreshLogin, async (req, res) => {
       getRecentChannelBans(banLimit)
     ]);
   } catch (err) {
-    console.error('[mbweb][partyline] DB error:', err.message);
+    logError(console, 'partyline.database', err);
     dbError = 'Unable to load Partyline/DB data.';
   }
 

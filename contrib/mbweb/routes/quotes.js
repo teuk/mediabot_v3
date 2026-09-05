@@ -7,6 +7,7 @@ const { requireFreshLogin } = require('../lib/sessionUser');
 const { isOwner, isMaster, isAdministrator, can } = require('../lib/permissions');
 const { getQuotes, getQuoteChannels } = require('../lib/mediabotRepository');
 const { parsePositiveInt, cleanSearch } = require('../lib/requestParams');
+const { logError } = require('../lib/securityLog');
 
 const router = express.Router();
 
@@ -32,7 +33,7 @@ router.get('/api/quotes', requireFreshLogin, async (req, res) => {
       channels
     });
   } catch (err) {
-    console.error('[mbweb][/api/quotes] error:', err.message);
+    logError(console, 'quotes.api', err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
   }
 });
@@ -51,7 +52,7 @@ router.get('/quotes', requireFreshLogin, async (req, res) => {
       getQuoteChannels()
     ]);
   } catch (err) {
-    console.error('[mbweb][/quotes] error:', err.message);
+    logError(console, 'quotes.page', err);
     return res.status(500).send(renderPage('Error', `
 <section class="mbw-card">
   <h1>Server error</h1>

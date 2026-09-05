@@ -20,7 +20,9 @@ Current features include:
 - commands and quotes browsing;
 - users view for Owner/Master accounts;
 - network and metrics views for privileged accounts;
-- session protection with a required strong secret;
+- persistent MariaDB sessions in production with explicit expiry and cleanup;
+- centralized session-bound CSRF protection for every unsafe HTTP method;
+- bounded login throttling and redacted security logs;
 - basic HTTP hardening with Helmet.
 
 ---
@@ -67,50 +69,58 @@ apt install nodejs npm mariadb-client curl jq rsync apache2
 If Apache is used as a reverse proxy, enable the proxy modules:
 
 ```bash
-a2enmod proxy proxy_http headers
-systemctl reload apache2
+sudo a2enmod proxy proxy_http headers
+sudo systemctl reload apache2.service
 ```
 
 ---
 
-## Create the runtime directory
+## Canonical deployment
 
-The service is expected to run as the existing `mediabot` user.
+The supported deployment path is transactional and must run as root. It keeps
+the private `.env` already installed in `/opt/mbweb/app`, stages the canonical
+source, installs the exact production dependency tree from `package-lock.json`,
+records the dependency audit and creates a private rollback point before it
+touches the running application.
 
-```bash
-mkdir -p /opt/mbweb/app
-chown -R mediabot:mediabot /opt/mbweb
-chmod 755 /opt/mbweb
-```
-
----
-
-## Install the application
-
-From the Mediabot repository:
+The clean candidate is root-owned with directories traversable and files
+readable by the service identity; the private `.env` remains mode `0600` and
+owned by `mediabot`. Before stopping the live service, the deployer resolves
+and loads every declared production dependency from the staged application as
+`mediabot`. It repeats the same proof against the installed runtime.
 
 ```bash
-cd /home/mediabot/mediabot_v3/contrib/mbweb
-
-rsync -a --delete ./ /opt/mbweb/app/
-
-chown -R mediabot:mediabot /opt/mbweb/app
-find /opt/mbweb/app -type d -exec chmod 755 {} \;
-find /opt/mbweb/app -type f -exec chmod 644 {} \;
+sudo install/mbweb_deploy.sh deploy \
+  --source /home/mediabot/mediabot_v3/contrib/mbweb \
+  --unit /home/mediabot/mediabot_v3/install/systemd/mbweb.service \
+  --health-url http://127.0.0.1:4002/mediabotv3dev/health
 ```
 
-Install Node dependencies:
+The command prints `MBWEB_BACKUP`, `MBWEB_AUDIT` and the installed lockfile
+digest. Keep the backup path for the matching rollback:
 
 ```bash
-cd /opt/mbweb/app
-sudo -u mediabot npm install --omit=dev
+sudo install/mbweb_deploy.sh rollback \
+  --backup /var/lib/mbweb-deploy/backups/mbweb-YYYYMMDD_HHMMSS.XXXXXX \
+  --health-url http://127.0.0.1:4002/mediabotv3dev/health
 ```
 
-If you are installing for development instead of production, use:
+Read-only verification neither installs dependencies nor restarts the service:
 
 ```bash
-sudo -u mediabot npm install
+sudo install/mbweb_deploy.sh verify \
+  --source /home/mediabot/mediabot_v3/contrib/mbweb \
+  --unit /home/mediabot/mediabot_v3/install/systemd/mbweb.service \
+  --health-url http://127.0.0.1:4002/mediabotv3dev/health
 ```
+
+The deployer excludes private or generated paths, serializes concurrent runs,
+and automatically restores its backup if activation or health verification
+fails. A failed activation records bounded service status and journal evidence.
+Its canonical-runtime comparison uses checksums for file content while ignoring
+the intentional permission and ownership difference between repository source
+and the root-owned runtime. Backup-to-runtime and backup-to-backup comparisons
+remain metadata-exact. It only controls `mbweb.service`.
 
 ---
 
@@ -132,6 +142,10 @@ Important variables:
 
 ```text
 MBWEB_SESSION_SECRET
+MBWEB_SESSION_STORE
+MBWEB_SESSION_TABLE
+MBWEB_SESSION_MAX_AGE_MS
+MBWEB_SESSION_CLEANUP_INTERVAL_MS
 MBWEB_DB_HOST
 MBWEB_DB_PORT
 MBWEB_DB_USER
@@ -142,7 +156,9 @@ MBWEB_BASE_URL
 
 `MBWEB_SESSION_SECRET` must be a long random value, at least 32 characters.
 
-The application refuses to start if the session secret is missing, still set to the default value, or too short.
+The application refuses to start if the session secret is missing, still set
+to the default value, or too short. Production also refuses the default
+in-memory session store and any non-loopback bind address.
 
 Never commit `.env`.
 
@@ -160,11 +176,15 @@ MBWEB_BASE_URL=/mediabotv3dev
 # Session
 # Must be a long random value, at least 32 characters.
 MBWEB_SESSION_SECRET=CHANGE_ME_WITH_A_LONG_RANDOM_SECRET_32_CHARS_MIN
+MBWEB_SESSION_STORE=mysql
+MBWEB_SESSION_TABLE=MBWEB_SESSION
+MBWEB_SESSION_MAX_AGE_MS=28800000
+MBWEB_SESSION_CLEANUP_INTERVAL_MS=300000
 
 # MariaDB / Mediabot database
 MBWEB_DB_HOST=localhost
 MBWEB_DB_PORT=3306
-MBWEB_DB_USER=mediabotv3
+MBWEB_DB_USER=mbweb
 MBWEB_DB_PASS=CHANGE_ME
 MBWEB_DB_NAME=mediabotv3
 
@@ -204,30 +224,89 @@ MBWEB_SESSION_SECRET=PASTE_THE_GENERATED_SECRET_HERE
 
 ---
 
+## Persistent session table and least privilege
+
+Production sessions use the dedicated `MBWEB_SESSION` table. Existing
+databases receive it from:
+
+```text
+install/migrations/20260904_mbweb_sessions.sql
+```
+
+The migration creates only the table. It does not create an account or grant
+rights. Use a dedicated local mbweb identity. It needs read-only access to the
+tables exposed by the console, and SELECT, INSERT, UPDATE and DELETE only on
+`MBWEB_SESSION`. It does not need `CREATE`, `ALTER`, `DROP`, `INDEX`,
+`TRIGGER`, `FILE`, `PROCESS`, `SUPER`, `GRANT OPTION` or access to MariaDB
+privilege tables.
+
+An administrator may adapt this explicit grant skeleton to the selected
+database and account:
+
+```sql
+GRANT SELECT ON mediabotv3.`USER` TO 'mbweb'@'localhost';
+GRANT SELECT ON mediabotv3.USER_LEVEL TO 'mbweb'@'localhost';
+GRANT SELECT ON mediabotv3.USER_CHANNEL TO 'mbweb'@'localhost';
+GRANT SELECT ON mediabotv3.USER_HOSTMASK TO 'mbweb'@'localhost';
+GRANT SELECT ON mediabotv3.CHANNEL TO 'mbweb'@'localhost';
+GRANT SELECT ON mediabotv3.CHANNEL_BAN TO 'mbweb'@'localhost';
+GRANT SELECT ON mediabotv3.CHANSET_LIST TO 'mbweb'@'localhost';
+GRANT SELECT ON mediabotv3.CHANNEL_SET TO 'mbweb'@'localhost';
+GRANT SELECT ON mediabotv3.NETWORK TO 'mbweb'@'localhost';
+GRANT SELECT ON mediabotv3.SERVERS TO 'mbweb'@'localhost';
+GRANT SELECT ON mediabotv3.PUBLIC_COMMANDS TO 'mbweb'@'localhost';
+GRANT SELECT ON mediabotv3.PUBLIC_COMMANDS_CATEGORY TO 'mbweb'@'localhost';
+GRANT SELECT ON mediabotv3.QUOTES TO 'mbweb'@'localhost';
+GRANT SELECT, INSERT, UPDATE, DELETE ON mediabotv3.MBWEB_SESSION TO 'mbweb'@'localhost';
+```
+
+The store checks table readiness before opening the HTTP listener. A failed
+readiness check or listener start closes the session and database resources.
+A transient
+connection loss is retried once through the pool; a repeated or non-transient
+failure is returned to the session middleware. There is no in-memory fallback.
+Expired rows are indexed and pruned in batches of at most 1000 every five
+minutes by default. The cleanup timer is unreferenced and shutdown stops it
+before closing the shared pool. Stored expiry is capped by the configured
+server-side lifetime even if an application cookie contains a later date.
+
+---
+
+## Request-security boundary
+
+Every `POST`, `PUT`, `PATCH` and `DELETE` request crosses one central
+session-bound CSRF check. HTML forms carry `_csrf`; JSON clients use
+`X-CSRF-Token`. Supplying conflicting header and form tokens fails closed.
+Login rotates the complete session and its CSRF token before saving the
+authenticated user. Form and JSON bodies are capped at 32 KiB, and forms at
+64 parameters. Logout is a protected POST and clears the scoped cookie.
+
+The only local maintenance mutation is cache clearing. It remains Owner-only,
+uses POST, crosses the same CSRF check, synchronously refreshes authorization
+and emits a bounded audit event. It returns an unavailable response instead of
+trusting stale privileges when that refresh fails. GET navigation never clears
+or force-refreshes shared caches.
+
+Login throttling keeps at most 2048 source entries, prunes expired windows and
+rejects unseen sources while full. Logs retain fixed event names and bounded
+error codes, never passwords, session secrets, cookies, query contents or
+private upstream payloads.
+
+---
+
 ## systemd service
 
-Create `/etc/systemd/system/mbweb.service`:
+Install the canonical unit from `install/systemd/mbweb.service`. It retains the
+accepted `mediabot` identity but makes the application tree read-only, gives
+the process only a private temporary directory and applies restart-rate,
+namespace, kernel and privilege restrictions. There is no persistent writable
+filesystem path.
 
-```ini
-[Unit]
-Description=Mediabot v3 web console
-After=network-online.target mariadb.service
-Wants=network-online.target
+The complete unit is maintained in the repository; do not copy a divergent
+inline version. Validate it before installation:
 
-[Service]
-Type=simple
-User=mediabot
-Group=mediabot
-WorkingDirectory=/opt/mbweb/app
-EnvironmentFile=/opt/mbweb/app/.env
-ExecStart=/usr/bin/node /opt/mbweb/app/app.js
-Restart=on-failure
-RestartSec=3
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
+```bash
+systemd-analyze verify install/systemd/mbweb.service
 ```
 
 Enable and start the service:
@@ -271,11 +350,13 @@ http://127.0.0.1:4002/mediabotv3dev/
 Enable the required Apache modules:
 
 ```bash
-a2enmod proxy proxy_http headers
-systemctl reload apache2
+sudo a2enmod proxy proxy_http headers
+sudo systemctl reload apache2.service
 ```
 
-Example Apache snippet:
+The maintained example is `install/apache/mbweb.conf.example`. Its application
+path must be adapted together with `MBWEB_BASE_URL`. The required runtime core
+is:
 
 ```apache
 ProxyPreserveHost On
@@ -284,14 +365,26 @@ ProxyPass        /mediabotv3dev/ http://127.0.0.1:4002/mediabotv3dev/
 ProxyPassReverse /mediabotv3dev/ http://127.0.0.1:4002/mediabotv3dev/
 
 RequestHeader set X-Forwarded-Proto "https"
+```
+
+The maintained example also sends this optional metadata:
+
+```apache
 RequestHeader set X-Forwarded-Prefix "/mediabotv3dev"
 ```
 
-Then reload Apache:
+MBWEB does not derive its mount path from `X-Forwarded-Prefix`. The normalized
+`MBWEB_BASE_URL` value is authoritative for routes, generated links and the
+session-cookie path. The optional header may therefore be omitted when the
+Apache `ProxyPass` path and `MBWEB_BASE_URL` already match.
+
+After installing or updating the virtual host, reload Apache and verify the
+systemd unit plus the public health endpoint:
 
 ```bash
-apachectl configtest
-systemctl reload apache2
+sudo systemctl reload apache2.service
+sudo systemctl is-active --quiet apache2.service
+curl --fail --silent --show-error https://your-host.example/mediabotv3dev/health
 ```
 
 If you use a different public path, update both:
@@ -343,10 +436,30 @@ From the live application directory:
 ```bash
 cd /opt/mbweb/app
 
+npm test
 node -c app.js
 find lib -maxdepth 1 -name '*.js' -print -exec node -c {} \;
 find routes -maxdepth 1 -name '*.js' -print -exec node -c {} \;
 ```
+
+`npm test` is the deterministic MB723 application lane. It uses Node's
+built-in test runner and does not start Express, contact MariaDB, read live
+credentials or make network requests. Database and upstream outcomes are
+supplied through bounded fakes at the adapter boundary. The lane covers
+configuration and secret rejection, authentication and roles, request and SQL
+bounds, repository result shapes, safe HTTP errors, radio/metrics/Partyline
+limits, listener startup and shutdown behavior, persistent session failure
+semantics, session rotation, CSRF enforcement and bounded login throttling.
+
+MB723-C also keeps an explicit read-only capability catalogue. The channel
+detail page and its JSON endpoint report Hailo, Gemini, Spark and Fullop as
+`enabled`, `disabled` or `unavailable`, including the accepted Hailo and Spark
+sub-capabilities. The query reads `CHANSET_LIST` and `CHANNEL_SET` with a fixed
+allowlist; it never changes channel policy.
+
+This Node lane is distinct from the Mediabot Perl fast lane. Both are required
+for a 3.5 engineering round; neither is a substitute for the release gate's
+single explicitly scheduled full suite.
 
 Check current dependencies:
 
@@ -469,7 +582,15 @@ no backup/log/archive files
 
 ## Notes
 
-`mbweb` is currently provided as a contributed web console for Mediabot v3.
+`mbweb` is a contributed web console accepted into the Mediabot 3.5 supported
+surface after MB723-A through MB723-D. It remains subject to MB724,
+supported-instance convergence and observation, release reproduction, the
+final Debian 13 gate and the explicit 3.5 release decision.
+
+Promotion keeps the console read-only by default. New general bot, channel or
+database mutation controls are outside MB723; the existing owner-only local
+cache clear remains a maintenance action and must cross the same CSRF and
+session boundaries as every other state-changing request.
 
 The live app can evolve under `/opt/mbweb/app`; when ready, copy the cleaned source back into `contrib/mbweb`, excluding local runtime files and secrets.
 

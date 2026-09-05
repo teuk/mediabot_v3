@@ -405,6 +405,19 @@ CREATE TABLE `MP3` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
+-- MBWEB_SESSION
+-- ---------------------------------------------------------------------------
+CREATE TABLE `MBWEB_SESSION` (
+  `session_id`   VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `expires_at`   DATETIME(3) NOT NULL,
+  `session_data` MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `updated_at`   DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+                 ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`session_id`),
+  KEY `idx_mbweb_session_expires_at` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
 -- NETWORK
 -- ---------------------------------------------------------------------------
 CREATE TABLE `NETWORK` (

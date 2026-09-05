@@ -1,0 +1,9 @@
+# Example reverse proxy for a production mbweb installation.
+# Keep these paths identical to MBWEB_BASE_URL in /opt/mbweb/app/.env.
+ProxyPreserveHost On
+
+ProxyPass        /mediabotv3/ http://127.0.0.1:4002/mediabotv3/ retry=0 timeout=15
+ProxyPassReverse /mediabotv3/ http://127.0.0.1:4002/mediabotv3/
+
+RequestHeader set X-Forwarded-Proto "https"
+RequestHeader set X-Forwarded-Prefix "/mediabotv3"
