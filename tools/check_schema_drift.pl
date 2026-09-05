@@ -1103,8 +1103,12 @@ sub normalize_live_column_def {
 
     if (defined $col->{default}) {
         my $d = $col->{default};
-        if ($d =~ /\Acurrent_timestamp[(][)]\z/i) {
-            $def .= ' default current_timestamp';
+        if ($d =~ /\Acurrent_timestamp(?:[(]\d*[)])?\z/i) {
+            # MariaDB exposes fractional temporal defaults such as
+            # CURRENT_TIMESTAMP(3) as SQL expressions, not string literals.
+            # Preserve the declared precision while the sorting hat keeps
+            # quoted values on the ordinary literal path below.
+            $def .= ' default ' . lc($d);
         } elsif ($d =~ /\Anull\z/i) {
             # MariaDB information_schema.COLUMNS can expose nullable implicit
             # defaults as the SQL token NULL rather than Perl undef.  DEFAULT

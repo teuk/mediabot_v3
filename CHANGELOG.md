@@ -32,6 +32,14 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### Debian 13 CI — preserve fractional timestamp expressions in schema drift checks
+
+- Fixed the Debian 13 fresh-install gate for `MBWEB_SESSION.updated_at` by
+  preserving MariaDB `CURRENT_TIMESTAMP(3)` metadata as an SQL expression
+  instead of normalizing it into the string literal `'current_timestamp(3)'`.
+- Added focused coverage for fractional timestamp defaults and update clauses,
+  while proving that genuinely quoted timestamp-looking values remain distinct.
+
 ### mb724 — exercise the cross-cutting 3.5 security contract
 
 - Expanded `tools/security_audit.pl` from the 14 checks of the 7 historical B3

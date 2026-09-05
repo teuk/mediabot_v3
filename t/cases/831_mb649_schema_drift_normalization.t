@@ -148,6 +148,28 @@ return sub {
         'mb649-831: column COMMENT is excluded from --types comparison',
     );
 
+    my $fractional_timestamp_ref =
+        'DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)';
+    my $fractional_timestamp_live = {
+        type => 'datetime(3)', nullable => 'NO', default => 'current_timestamp(3)',
+        extra => 'on update current_timestamp(3)', charset => '', collation => '',
+    };
+    $assert->is(
+        normalize_live_column_def($fractional_timestamp_live, $fractional_timestamp_ref),
+        normalize_column_def($fractional_timestamp_ref),
+        'mb724-ci: MariaDB fractional CURRENT_TIMESTAMP metadata remains an SQL expression',
+    );
+
+    my $quoted_fractional_timestamp_live = {
+        %$fractional_timestamp_live,
+        default => q{'current_timestamp(3)'},
+    };
+    $assert->isnt(
+        normalize_live_column_def($quoted_fractional_timestamp_live, $fractional_timestamp_ref),
+        normalize_column_def($fractional_timestamp_ref),
+        'mb724-ci: a quoted timestamp-looking literal remains distinguishable from the SQL expression',
+    );
+
     $assert->like($code, qr/normalize_live_column_def\([^;]+\{definition\}\)/s,
         'mb649-831: live normalization receives the reference definition for explicit charset semantics');
 };
