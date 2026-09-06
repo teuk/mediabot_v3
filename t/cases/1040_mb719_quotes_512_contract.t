@@ -74,6 +74,6 @@ return sub {
     $assert->like($changelog,
         qr/^### mb719 source prerequisite — align the quote storage contract$/m,
         'mb719: changelog records the bounded source correction');
-    $assert->like($roadmap, qr/^\| MB719 \| P0 \|/m,
-        'mb719: production reconciliation remains explicitly open');
+    $assert->like($roadmap, qr/^\| MB719 \| Operator-managed follow-up \|/m,
+        'mb719: production reconciliation remains explicitly operator-managed');
 };

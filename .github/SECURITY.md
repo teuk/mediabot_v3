@@ -6,8 +6,8 @@ Security fixes are primarily provided for the current stable release and the act
 
 | Version        | Supported             |
 | -------------- | --------------------- |
-| 3.3 stable     | Yes                   |
-| 3.4dev         | Yes, development code |
+| 3.5 stable     | Yes                   |
+| 3.6dev         | Yes, development code |
 | Older versions | No                    |
 
 This table mirrors the public release status in `README.md`; update both together when a new stable/development line is opened.

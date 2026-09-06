@@ -25,11 +25,11 @@ return sub {
     $assert->like($roadmap, qr/^# Mediabot 3\.5 readiness roadmap$/m,
         'mb718: roadmap identifies the 3.5 readiness target');
     $assert->like($roadmap,
-        qr/current stable release remains\s+3\.3.*development remains on the `3\.4dev` line/s,
-        'mb718: stable and development identities remain explicit');
+        qr/current stable consolidation release.*next development line is\s+`3\.6dev`/s,
+        'mb718: stable and next-development identities remain explicit');
     $assert->like($roadmap,
-        qr/No 3\.5 tag, stable version change or public release archive is made\s+implicitly/s,
-        'mb718: roadmap cannot publish a release implicitly');
+        qr/source-release\s+decision was explicitly accepted under MB727/s,
+        'mb718: roadmap records an explicit release decision');
 
     for my $mb (713 .. 718) {
         $assert->like($roadmap, qr/^\| MB\Q$mb\E \| Complete\b/m,
@@ -37,8 +37,8 @@ return sub {
     }
     $assert->unlike($roadmap, qr/^\| MB718 \| P0 \|/m,
         'mb718: completed administrator repair is absent from the remaining path');
-    $assert->like($roadmap, qr/^\| MB719 \| P0 \| Root grants are captured/m,
-        'mb718: production schema work is a separate pending gate');
+    $assert->like($roadmap, qr/^\| MB719 \| Operator-managed follow-up \|/m,
+        'mb718: production schema work remains a separate operator boundary');
 
     $assert->like($roadmap,
         qr/normalized 52 owners, reduced 40 schema differences to zero.*restored the original 40-difference state/s,
@@ -77,8 +77,8 @@ return sub {
         qr/Run a full suite only when\s+the matching commit is imminent.*one final full suite/s,
         'mb718: single-full policy remains explicit');
     $assert->like($roadmap,
-        qr/^\| MB727 \| Final \|.*operator gives an explicit release decision \|$/m,
-        'mb718: renumbered final release still requires an operator decision');
+        qr/^\| MB727 \| Complete — stable release decision \|/m,
+        'mb718: final release records the explicit operator decision');
 
     my @entries = $change =~ /^###\s+mb718\b.*$/gmi;
     $assert->is(scalar(@entries), 1,

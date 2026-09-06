@@ -1,7 +1,7 @@
 # t/cases/892_mb690_unreleased_changelog_truth.t
 # =============================================================================
-# MB690 — every numbered development contract from MB682 onward must be
-# represented exactly once in the current public [Unreleased] changelog.
+# MB690 / MB727 — every numbered 3.5 contract from MB682 onward must be
+# represented exactly once in the public 3.5 release changelog.
 # =============================================================================
 
 use strict;
@@ -19,12 +19,12 @@ return sub {
     my ($assert) = @_;
 
     my $change = _slurp_892('CHANGELOG.md');
-    my ($unreleased) = $change =~
-        /\Q## [Unreleased] — 3.4dev\E\s*(.*?)(?=^## \[3\.3\](?:\s|$))/ms;
+    my ($release) = $change =~
+        /\Q## [3.5] — 2026-09-06\E\s*(.*?)(?=^## \[3\.3\](?:\s|$))/ms;
 
-    $assert->ok(defined($unreleased),
-        'mb690-892: current 3.4dev Unreleased section is identifiable');
-    $unreleased //= '';
+    $assert->ok(defined($release),
+        'mb690-892: stable 3.5 release section is identifiable');
+    $release //= '';
 
     my %mb_from_tests;
     for my $path (glob('t/cases/*_mb*_*.t')) {
@@ -37,30 +37,30 @@ return sub {
         'mb690-892: development contract discovery finds the MB682+ history');
 
     for my $mb (sort { $a <=> $b } keys %mb_from_tests) {
-        my @headings = $unreleased =~ /^###\s+mb\Q$mb\E\b.*$/gmi;
+        my @headings = $release =~ /^###\s+mb\Q$mb\E\b.*$/gmi;
         $assert->is(
             scalar(@headings), 1,
-            "mb690-892: Unreleased documents mb$mb exactly once",
+            "mb690-892: release 3.5 documents mb$mb exactly once",
         );
     }
 
     for my $mb (qw(682 683 684 685 686 687 688 690)) {
         $assert->like(
-            $unreleased,
+            $release,
             qr/^###\s+mb\Q$mb\E\b/m,
             "mb690-892: expected recent development entry mb$mb is present",
         );
     }
 
-    my $p690 = index($unreleased, '### mb690 ');
-    my $p688 = index($unreleased, '### mb688 ');
-    my $p687 = index($unreleased, '### mb687 ');
-    my $p686 = index($unreleased, '### mb686 ');
-    my $p685 = index($unreleased, '### mb685 ');
-    my $p684 = index($unreleased, '### mb684 ');
-    my $p683 = index($unreleased, '### mb683 ');
-    my $p682 = index($unreleased, '### mb682 ');
-    my $p681 = index($unreleased, '### mb681 ');
+    my $p690 = index($release, '### mb690 ');
+    my $p688 = index($release, '### mb688 ');
+    my $p687 = index($release, '### mb687 ');
+    my $p686 = index($release, '### mb686 ');
+    my $p685 = index($release, '### mb685 ');
+    my $p684 = index($release, '### mb684 ');
+    my $p683 = index($release, '### mb683 ');
+    my $p682 = index($release, '### mb682 ');
+    my $p681 = index($release, '### mb681 ');
 
     $assert->ok(
         $p690 >= 0 && $p688 > $p690 && $p687 > $p688 &&
@@ -70,13 +70,13 @@ return sub {
     );
 
     $assert->like(
-        $unreleased,
+        $release,
         qr/mb689 was an operator-side deployment and\s+lifecycle validation with no repository change/s,
         'mb690-892: deployment-only MB689 is explicitly distinguished from product changes',
     );
 
     $assert->like(
-        $unreleased,
+        $release,
         qr/manual live\s+Debian 13 VM acceptance boundary remains explicit for final 3\.5 readiness/s,
         'mb690-892: current release-gate boundary remains visible in recent history',
     );

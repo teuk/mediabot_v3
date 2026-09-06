@@ -11,9 +11,9 @@ development lines.
 The currently published release remains:
 
 ```text
-stable version: 3.3
-Git tag:        3.3
-archive root:   mediabot_v3-3.3/
+stable version: 3.5
+Git tag:        3.5
+archive root:   mediabot_v3-3.5/
 ```
 
 Every release command must name both the intended stable version and its exact
@@ -33,9 +33,10 @@ printf 'VERSION=%s REF=%s DEST=%s\n' \
   "$release_version" "$release_ref" "$release_dest"
 ```
 
-Using `3.5` in these preparation examples does not declare it stable. The
-current `README.md`, `CHANGELOG.md` and `VERSION` retain their development
-identity until the final release gate is explicitly accepted.
+Mediabot 3.5 became stable through the explicit MB727 release decision. For a
+later candidate, substituting another version in preparation commands does not declare it stable:
+the final release gate must still set the exact stable
+`VERSION`, create the matching tag and publish the verified artifacts.
 
 ## 0. Rehearse the artifacts from the committed candidate
 
@@ -59,9 +60,10 @@ release artifact.
 ## MB725 Debian 13 candidate acceptance
 
 The dedicated `debian13.yml` workflow is the final technical installation and
-upgrade gate. It builds and verifies the exact non-publishable rehearsal
-archive for its commit, extracts it without Git metadata, and uses only that
-candidate tree for the fresh configuration, MariaDB, systemd and dependency
+upgrade gate. On `3.4dev` it builds the exact non-publishable rehearsal archive;
+on the final `VERSION=3.5` commit it builds the identically scoped stable
+archive. It extracts that archive without Git metadata and uses only the
+resulting tree for the fresh configuration, MariaDB, systemd and dependency
 paths.
 
 The same disposable job exports the real stable `3.3` schema from Git history,

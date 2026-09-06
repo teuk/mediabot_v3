@@ -44,8 +44,10 @@ return sub {
     $assert->like($readme,
         qr/check_schema_drift\.pl --conf=mediabot\.conf --strict --types --indexes/,
         'README documents strict type and index validation');
-    $assert->like($readme, qr/\[Changelog and 3\.3 release notes\]\(CHANGELOG\.md\)/,
-        'README links to CHANGELOG.md');
+    $assert->like($readme, qr/\[Mediabot 3\.5 release notes\]\(docs\/RELEASE_NOTES_3\.5\.md\)/,
+        'README links to the dedicated 3.5 release notes');
+    $assert->like($readme, qr/\[Complete changelog\]\(CHANGELOG\.md\)/,
+        'README links to the complete changelog');
 
     my $dbdoc = _slurp_716(File::Spec->catfile('.', 'docs', 'DB_MIGRATIONS.md'));
     $assert->like($dbdoc, qr/compares these indexes when `--indexes` is supplied/i,

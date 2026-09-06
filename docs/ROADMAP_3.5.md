@@ -2,10 +2,14 @@
 
 Last updated: 2026-09-06
 
-Mediabot 3.5 is a consolidation release. The current stable release remains
-3.3 and development remains on the `3.4dev` line until an explicit release
-decision. No 3.5 tag, stable version change or public release archive is made
-implicitly by this roadmap.
+Mediabot 3.5 is the current stable consolidation release. Its source-release
+decision was explicitly accepted under MB727 on 2026-09-06 after the complete
+candidate CI and Debian 13 trials passed. The next development line is
+`3.6dev`, but it is not opened implicitly by this release decision.
+
+MB727 publishes source; it does not deploy production. MB719, the FULL01 live
+pilot and MB722 remain operator-managed deployment follow-up and are not
+claimed as completed by this roadmap.
 
 The MB720 Hailo engineering gate is now implemented, exercised and accepted on
 the development instance. That closes the feature-construction gate, not the
@@ -30,15 +34,12 @@ database, security, installation and release gates are still mandatory.
 - MB720 Hailo and MB721 Gemini are complete on the development line. Their
   runtime behavior, fallback boundaries and private-state handling have focused,
   fast, full and bounded live evidence.
-- FULL01 `+Fullop` is committed and its real-network pilot is active on the
-  intended nbot channel. The pilot confirmed the main guard and also exposed a
-  service-causality gap: an official network bot mirrored an authorized ban
-  and was mistaken for an independent actor. The bounded delegation correction
-  must be deployed and observed before acceptance can close; no simulated IRC
-  client substitutes for that evidence.
-- The critical release path now closes the FULL01 live acceptance and MB719,
-  qualifies mbweb under MB723, exercises the cross-cutting MB724 gate, and only
-  then starts supported-instance convergence and observation under MB722.
+- FULL01 `+Fullop` is committed. Its remaining real-network acceptance is an
+  operator-managed deployment task; no simulated IRC client substitutes for
+  that evidence, and MB727 does not claim it was performed.
+- The development technical path is closed. MB723 qualified mbweb, MB724
+  exercised the cross-cutting security boundary, MB726 sealed supported release
+  paths, and MB725 passed the archive-derived Debian 13 trials.
 - MB723 is complete and mbweb is accepted into the supported 3.5 surface. The
   real HTTPS route matrix, persistent sessions, least-privileged database
   identity, read-only capability status, deterministic dependency install,
@@ -54,10 +55,13 @@ database, security, installation and release gates are still mandatory.
   mbweb dependency lock is beyond the reviewed advisory ranges, deployments
   reject moderate-or-higher findings, and the committed candidate produced two
   byte-identical six-file rehearsals while both CI workflows passed.
-- MB725 remains deliberately last among the technical gates. Its Debian 13 job
-  now consumes the exact rehearsal archive, exercises fresh installation and a
-  representative 3.3-to-3.5 upgrade, then proves exact rollback and deterministic
-  reapplication in the disposable database.
+- MB725 is complete. Its Debian 13 job consumed the exact rehearsal archive,
+  exercised fresh installation and a representative 3.3-to-3.5 upgrade, then
+  proved exact rollback and deterministic reapplication in the disposable
+  database. Main CI run 34027180932 and Debian 13 run 34027180936 passed on the
+  accepted candidate lineage.
+- MB727 records the explicit 3.5 source-release decision. Production database,
+  IRC pilot and instance rollout remain separate operator actions.
 - Completing a feature on development never authorizes production activation,
   a stable version change or a release.
 
@@ -89,16 +93,16 @@ MB718 is closed. The local administrator path is operational again and must not
 be reopened through another repair-wrapper iteration. Its one recorded
 variance is a concrete MB719 preflight item, not authority for more host work.
 
-## Remaining release path
+## Release outcome and operational follow-up
 
-| Work item | Priority | Exit condition |
+| Work item | Status | Boundary |
 | --- | --- | --- |
-| MB719 | P0 | Root grants are captured and accepted, production schema reconciliation is backed up, explicitly confirmed, applied through the reviewed plan, verified drift-free and proven restorable |
-| FULL01 live pilot | Operational acceptance | nbot runs the corrected source, `+Fullop` remains limited to its intended pilot channel, real server capabilities drive the guard, joiners receive operator status, unauthorized restrictions are reversed and the exact ten-minute sanction expires cleanly; an authorized ban mirrored by the official service is accepted once for the same target without general service privilege; privileged restrictions and ordinary kicks retain their documented behavior |
-| MB722 | P0 | Supported instances converge one at a time with all accepted components and complete a seven-day observation window without unexplained restart, reconnect loop, persistent worker failure, web-session failure or schema drift |
+| MB719 | Operator-managed follow-up | Production reconciliation requires its own backup, confirmation, drift-free verification and restore proof; MB727 performs none of it |
+| FULL01 live pilot | Operator-managed follow-up | Real-network acceptance remains limited to the intended channel and retains its immediate disable path |
+| MB722 | Operator-managed follow-up | Supported instances may converge one at a time and be observed without making source publication depend on an automated production mutation |
 | MB726 | Complete | Installation, update, database, systemd and release documentation agree; six release rehearsal artifacts were reproduced byte for byte from the clean committed candidate |
-| MB725 | Final technical gate | A fresh Debian 13 installation and a representative 3.3-to-3.5 upgrade both succeed in disposable environments against the accepted release candidate, with rollback evidence |
-| MB727 | Final | No open blocker; release candidate soak complete; one final full suite passes; the operator gives an explicit release decision |
+| MB725 | Complete | The exact archived candidate passed fresh Debian 13 installation and a representative 3.3-to-3.5 upgrade with exact rollback and deterministic reapplication |
+| MB727 | Complete — stable release decision | One final full suite, security audit, startup integrity, release commit, CI, annotated tag and deterministic public artifacts form one explicit transaction |
 
 The FULL01 live pilot may proceed before MB719 because it changes no release
 status and activates no feature outside its explicit channel. It cannot close
@@ -106,24 +110,24 @@ MB722 by itself. MB722 must not start while MB723 or MB724 is open: the
 seven-day observation window begins only after every supported component has
 an accepted source, configuration, schema and operational baseline.
 
-## Active 3.5 workstreams
+## Post-release operational workstreams
 
-- **Real IRC acceptance:** finish the FULL01 service-delegation pilot with
+- **Real IRC acceptance:** the operator may finish the FULL01 service-delegation pilot with
   server-origin evidence, expiry evidence and an immediate disable path.
-- **Production data:** close MB719 with effective-grant capture, private backup,
+- **Production data:** the operator may close MB719 with effective-grant capture, private backup,
   reviewed reconciliation, drift-free verification and restore proof.
 - **mbweb promotion:** MB723 accepted the contributed console into the
   supported surface; MB724 exercised it with the other accepted components.
 - **Cross-cutting safety:** MB724 updated the source contract and exercised
   authentication, privacy, metrics, workers, systemd boundaries and restore
   read-only across the accepted surface.
-- **Convergence and soak:** update accepted instances one at a time, then give
+- **Convergence and observation:** update accepted instances one at a time, then give
   the complete candidate a genuine seven-day MB722 observation window.
-- **Release proof:** MB726 reproduced the documentation and archives; MB725 now
-  runs the exact archived candidate through the final Debian 13 fresh-install,
-  upgrade, rollback and reapplication gate before the explicit MB727 decision.
+- **Release proof:** MB726 reproduced the documentation and rehearsal archives;
+  MB725 passed the exact archived candidate through Debian 13 fresh-install,
+  upgrade, rollback and reapplication; MB727 records the stable decision.
 
-## Immediate operational sequence
+## Post-release operational sequence
 
 1. Update nbot through its normal updater and verify the expected version,
    clean service restart, migration registry and unchanged private instance
@@ -137,19 +141,21 @@ an accepted source, configuration, schema and operational baseline.
 4. Disable `+Fullop` immediately on any unexplained mode loop, residual ban,
    privilege-resolution error or service interaction; retain the application
    log and database evidence for diagnosis.
-5. Close MB719 through the separately reviewed production database procedure;
+5. Close MB719 through the separately reviewed production database procedure
+   when the operator schedules it;
    do not reuse disposable-clone success as live authority.
 6. Reuse the accepted MB723-A/MB723-B/MB723-C evidence and the completed
    MB723-D operational promotion. Keep mbweb read-only except for explicitly
    bounded local maintenance actions.
 7. Reuse the completed MB724 read-only evidence, then converge supported
    instances one at a time.
-8. Begin MB722's seven-day observation window only after that convergence. Do
+8. Begin MB722's observation window only after that convergence. Do
    not backdate it with development or partial-surface evidence.
 9. Reuse the completed MB726 release documentation and reproducible rehearsal.
-10. Run MB725 last: the archived candidate through a fresh Debian 13 installation and a representative
-    3.3-to-3.5 upgrade in disposable environments, both with rollback proof.
-11. Stop at MB727 for the final full suite and explicit operator decision.
+10. Reuse the completed MB725 archive-derived Debian 13 evidence; do not rerun
+    it as part of production deployment.
+11. Reuse the completed MB727 source-release evidence. Production changes still
+    require their own explicit operator procedure.
 
 ## MB718 administrator result
 
@@ -294,7 +300,10 @@ Both source and operational evidence are required before MB722 convergence.
 
 ## Release decision
 
-The roadmap is complete only when MB727 records all gates as satisfied. Until
-then, 3.3 is the stable release and `3.4dev` is the only development identity.
-The final version change, tag, archive publication and deployment each require
-the normal explicit release procedure.
+MB727 records the explicit source-release decision: 3.5 is stable and the next
+development line will be `3.6dev` when separately opened. The release commit,
+annotated tag and public artifacts follow the normal explicit procedure.
+
+This source-release result does not claim a production deployment. MB719,
+FULL01 and MB722 remain separate operator-managed actions with their own
+confirmation, recovery and observation evidence.

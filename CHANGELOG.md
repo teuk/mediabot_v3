@@ -3,8 +3,8 @@
 All notable changes to Mediabot v3 are documented here.
 
 Versioning follows the project rule: odd minor versions are stable releases
-and even minor versions are development lines. **3.3** is the current stable
-release. Development after this release continues on the `3.4dev` line.
+and even minor versions are development lines. **3.5** is the current stable
+release. The next development line will be `3.6dev` when explicitly opened.
 
 ---
 
@@ -30,7 +30,19 @@ release. Development after this release continues on the `3.4dev` line.
 - Dashboard and leaderboard code now consume achievement storage through public
   methods instead of reaching into the module's internal hash representation.
 
-## [Unreleased] — 3.4dev
+## [3.5] — 2026-09-06
+
+### mb727 — seal the 3.5 release
+
+- Recorded the operator's explicit stable-release decision after the exact
+  candidate passed the complete CI suite and the Debian 13 archive-based fresh
+  installation, 3.3 upgrade, rollback and deterministic reapplication gate.
+- Bound the release transaction to one final visible full suite, the security
+  invariant audit, startup integrity, a stable `VERSION=3.5` commit, successful
+  CI, an annotated `3.5` tag and deterministic SHA-256/SHA-512 artifacts.
+- Kept production deployment separate from source publication. MB727 neither
+  changes a live IRC service or database nor claims that operator-managed
+  MB719, FULL01 or MB722 rollout work has been performed.
 
 ### mb725 — exercise the exact candidate and prove the Debian 13 upgrade rollback
 

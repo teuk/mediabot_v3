@@ -8,7 +8,7 @@
 #   [2] les commandes phares livrées pour 3.3 y sont mentionnées ;
 #   [3] toute migration .sql citée dans le CHANGELOG existe réellement sur
 #       disque (pas de référence fantôme) ;
-#   [4] la ligne de versionnage du README reste cohérente (3.3 = cible stable).
+#   [4] la ligne de versionnage du README reste cohérente avec la stable courante.
 # Purement documentaire : aucun runtime métier, aucun schéma.
 # =============================================================================
 
@@ -61,10 +61,10 @@ return sub {
 
     # --- [4] cohérence versionnage README ----------------------------------
     my $readme = _slurp_715(File::Spec->catfile('.', 'README.md'));
-    $assert->like($readme, qr/3\.3\s+current stable release/i,
-        '[4] README: 3.3 = release stable courante');
-    $assert->like($readme, qr/3\.4dev\s+next development line/i,
-        '[4] README: prochaine ligne 3.4dev citée');
+    $assert->like($readme, qr/3\.5\s+current stable release/i,
+        '[4] README: 3.5 = release stable courante');
+    $assert->like($readme, qr/3\.6dev\s+next development line/i,
+        '[4] README: prochaine ligne 3.6dev citée');
     $assert->like($cl, qr/^##\s*\[3\.3\]\s+\x{2014}\s+2026-07-12/m,
         '[4] CHANGELOG: 3.3 datée');
     $assert->unlike($cl, qr/^##\s*\[3\.3\].*(?:unreleased|target)/mi,

@@ -82,7 +82,7 @@ jobs:
             git -C "$GITHUB_WORKSPACE" rev-parse --show-toplevel
           )" = "$GITHUB_WORKSPACE"
 
-      - name: Build and unpack the exact 3.5 rehearsal candidate
+      - name: Build and unpack the exact 3.5 candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -90,14 +90,34 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           CANDIDATE_VERSION=3.5
           CANDIDATE_SHORT="${GITHUB_SHA:0:12}"
-          CANDIDATE_BASE="mediabot_v3-${CANDIDATE_VERSION}-rehearsal-${CANDIDATE_SHORT}"
           CANDIDATE_ARTIFACTS="$(mktemp -d /tmp/mediabot-candidate-artifacts.XXXXXX)"
+          SOURCE_VERSION="$(git show "${GITHUB_SHA}:VERSION" | tr -d '\r\n')"
+
+          # The Sorting Hat accepts either the last 3.4dev candidate or the
+          # exact 3.5 release commit, while keeping their archive identities
+          # impossible to confuse. 🎩✨
+          case "$SOURCE_VERSION" in
+            3.4dev|3.4dev-*)
+              CANDIDATE_KIND=rehearsal
+              CANDIDATE_BASE="mediabot_v3-${CANDIDATE_VERSION}-rehearsal-${CANDIDATE_SHORT}"
+              CANDIDATE_ARGS=(--rehearsal)
+              ;;
+            3.5)
+              CANDIDATE_KIND=stable
+              CANDIDATE_BASE="mediabot_v3-${CANDIDATE_VERSION}"
+              CANDIDATE_ARGS=()
+              ;;
+            *)
+              echo "ERROR: unsupported 3.5 candidate VERSION: $SOURCE_VERSION" >&2
+              exit 1
+              ;;
+          esac
 
           tools/build_release_artifacts.sh \
             --version "$CANDIDATE_VERSION" \
             --ref "$GITHUB_SHA" \
             --dest "$CANDIDATE_ARTIFACTS" \
-            --rehearsal
+            "${CANDIDATE_ARGS[@]}"
 
           (
             cd "$CANDIDATE_ARTIFACTS"
@@ -115,9 +135,14 @@ jobs:
           test -d "$CANDIDATE_ROOT"
           test ! -e "$CANDIDATE_ROOT/.git"
           test "$(tr -d '\r\n' <"$CANDIDATE_ROOT/VERSION")" = \
-            "$(git show "${GITHUB_SHA}:VERSION" | tr -d '\r\n')"
-          grep -Fq 'Rehearsal: yes (not publishable)' \
-            "$CANDIDATE_ARTIFACTS/${CANDIDATE_BASE}-RELEASE.txt"
+            "$SOURCE_VERSION"
+          if [ "$CANDIDATE_KIND" = rehearsal ]; then
+            grep -Fq 'Rehearsal: yes (not publishable)' \
+              "$CANDIDATE_ARTIFACTS/${CANDIDATE_BASE}-RELEASE.txt"
+          else
+            grep -Fq 'Rehearsal: no' \
+              "$CANDIDATE_ARTIFACTS/${CANDIDATE_BASE}-RELEASE.txt"
+          fi
 
           printf 'MEDIABOT_CANDIDATE_ROOT=%s\n' "$CANDIDATE_ROOT" >>"$GITHUB_ENV"
           printf 'MEDIABOT_CANDIDATE_SHA256=%s\n' "$(

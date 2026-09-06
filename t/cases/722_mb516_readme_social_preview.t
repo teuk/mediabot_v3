@@ -2,8 +2,8 @@
 # =============================================================================
 # MB516 — README social-preview contract.
 #
-# Keeps the public README visual tied to a real, repository-local, GitHub-sized
-# PNG instead of a stale or external image.
+# Keeps the historical 3.3 visual available without presenting it as the
+# current 3.5 release identity.
 # =============================================================================
 
 use strict;
@@ -43,20 +43,20 @@ return sub {
 
     my $readme = -f $readme_path ? _slurp_text_722($readme_path) : '';
 
-    $assert->like(
+    $assert->unlike(
         $readme,
         qr{<img\s+src="docs/mediabot-3\.3-github-social-preview\.png"[^>]*>},
-        'README embeds the repository-local Mediabot 3.3 preview'
+        'README no longer embeds the historical Mediabot 3.3 preview'
     );
-    $assert->like(
+    $assert->unlike(
         $readme,
         qr{<a\s+href="https://github\.com/teuk/mediabot_v3/releases/tag/3\.3">\s*<img\s+src="docs/mediabot-3\.3-github-social-preview\.png"}s,
-        'preview links to the stable 3.3 release'
+        'historical preview is not linked as the current stable release'
     );
     $assert->like(
         $readme,
-        qr/alt="Mediabot 3\.3 [^"]*long-running communities"/,
-        'preview has useful alternative text'
+        qr/releases\/tag\/3\.5.*?alt="Stable release 3\.5"/s,
+        'README visual identity points to stable 3.5'
     );
 
     if (-f $image_path) {

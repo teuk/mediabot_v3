@@ -6,24 +6,18 @@
 
 <p align="center">
   <a href="https://github.com/teuk/mediabot_v3/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/teuk/mediabot_v3/actions/workflows/ci.yml/badge.svg?branch=master&event=push"></a>
-  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.3"><img alt="Stable release 3.3" src="https://img.shields.io/badge/stable-3.3-2ea44f"></a>
+  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.5"><img alt="Stable release 3.5" src="https://img.shields.io/badge/stable-3.5-2ea44f"></a>
   <a href="LICENSE.md"><img alt="GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-4c1"></a>
   <a href="https://github.com/teuk/mediabot_v3/actions/workflows/debian13.yml"><img alt="Debian 13 fresh-install gate" src="https://github.com/teuk/mediabot_v3/actions/workflows/debian13.yml/badge.svg?branch=master&event=push"></a>
   <a href="https://github.com/teuk/mediabot_v3/discussions"><img alt="GitHub Discussions" src="https://img.shields.io/badge/community-Discussions-8250df?logo=github"></a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.3">
-    <img src="docs/mediabot-3.3-github-social-preview.png" alt="Mediabot 3.3 — database-backed, operations-oriented IRC bot for long-running communities" width="100%">
-  </a>
-</p>
-
-Mediabot 3.3 helps IRC communities **run, remember, and understand their channels**. It combines channel administration, persistent community history, analytics, modern URL and media integrations, observability, and upgrade tooling in one tested application.
+Mediabot 3.5 helps IRC communities **run, remember, and understand their channels**. It combines channel administration, persistent community history, analytics, modern URL and media integrations, observability, and upgrade tooling in one tested application.
 
 Instead of assembling a large collection of unrelated scripts, operators get a coherent stack with one configuration model, one MariaDB-backed data model, migrations, security checks, startup integrity validation, systemd deployment guidance, and a documented release process.
 
 <p align="center">
-  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.3"><strong>Download Mediabot 3.3</strong></a>
+  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.5"><strong>Download Mediabot 3.5</strong></a>
   ·
   <a href="https://github.com/teuk/mediabot_v3/wiki/Installation"><strong>Install in production</strong></a>
   ·
@@ -81,7 +75,7 @@ The configured prefix is instance-specific and may be `!`, `m`, `.`, or another 
 
 | Goal | Recommended path |
 |---|---|
-| **Install the stable release** | [Download Mediabot 3.3](https://github.com/teuk/mediabot_v3/releases/tag/3.3), verify the checksums, then follow the [Installation guide](https://github.com/teuk/mediabot_v3/wiki/Installation) |
+| **Install the stable release** | [Download Mediabot 3.5](https://github.com/teuk/mediabot_v3/releases/tag/3.5), verify the checksums, then follow the [Installation guide](https://github.com/teuk/mediabot_v3/wiki/Installation) |
 | **Understand the feature set** | Browse [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands), [Private/admin commands](https://github.com/teuk/mediabot_v3/wiki/Private-and-admin-commands), and [Partyline](https://github.com/teuk/mediabot_v3/wiki/Partyline) |
 | **Upgrade an existing instance** | Read the [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes) before applying migrations |
 | **Operate and monitor it** | See [Configuration](https://github.com/teuk/mediabot_v3/wiki/Configuration), [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing), and [Monitoring](https://github.com/teuk/mediabot_v3/wiki/Monitoring-with-Prometheus-and-Grafana) |
@@ -96,14 +90,15 @@ The wiki is the operational reference. This README keeps the essential installat
 Mediabot uses odd minor versions for stable releases and even minor versions for development lines:
 
 ```text
-3.3      current stable release
-3.4dev   next development line
+3.5      current stable release
+3.6dev   next development line
 ```
 
 Release resources:
 
-- [Mediabot 3.3 GitHub release](https://github.com/teuk/mediabot_v3/releases/tag/3.3)
-- [Changelog and 3.3 release notes](CHANGELOG.md)
+- [Mediabot 3.5 GitHub release](https://github.com/teuk/mediabot_v3/releases/tag/3.5)
+- [Mediabot 3.5 release notes](docs/RELEASE_NOTES_3.5.md)
+- [Complete changelog](CHANGELOG.md)
 - [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes)
 - [Release artifact workflow](docs/RELEASING.md)
 
@@ -241,15 +236,15 @@ git clone https://github.com/teuk/mediabot_v3.git
 cd /home/mediabot/mediabot_v3 || exit 1
 ```
 
-For the stable 3.3 release, use one of the published source archives:
+For the stable 3.5 release, use one of the published source archives:
 
 ```text
-mediabot_v3-3.3.tar.gz
-mediabot_v3-3.3.tar.xz
+mediabot_v3-3.5.tar.gz
+mediabot_v3-3.5.tar.xz
 ```
 
-Verify the download against `mediabot_v3-3.3-SHA256SUMS` or `mediabot_v3-3.3-SHA512SUMS` before extracting it.
-The GitHub release uses the plain `3.3` tag, matching the established project
+Verify the download against `mediabot_v3-3.5-SHA256SUMS` or `mediabot_v3-3.5-SHA512SUMS` before extracting it.
+The GitHub release uses the plain `3.5` tag, matching the established project
 tag convention. See [`docs/RELEASING.md`](docs/RELEASING.md) for the complete
 artifact and verification workflow.
 

@@ -90,12 +90,12 @@ return sub {
     $assert->like($doc, qr/does not declare it stable/,
         'release preparation does not prematurely publish 3.5');
 
-    $assert->like($readme, qr/3\.3\s+current stable release/i,
-        'README marks 3.3 as current stable');
-    $assert->like($readme, qr/3\.4dev\s+next development line/i,
+    $assert->like($readme, qr/3\.5\s+current stable release/i,
+        'README marks 3.5 as current stable');
+    $assert->like($readme, qr/3\.6dev\s+next development line/i,
         'README names the next development line');
-    $assert->like($changelog, qr/^##\s*\[3\.3\]\s+\x{2014}\s+2026-07-12/m,
-        'CHANGELOG dates the 3.3 release');
-    $assert->unlike($changelog, qr/^##\s*\[3\.3\].*(?:unreleased|target)/mi,
-        'CHANGELOG no longer marks 3.3 as unreleased');
+    $assert->like($changelog, qr/^##\s*\[3\.5\]\s+\x{2014}\s+2026-09-06/m,
+        'CHANGELOG dates the 3.5 release');
+    $assert->unlike($changelog, qr/^##\s*\[3\.5\].*(?:unreleased|target)/mi,
+        'CHANGELOG does not mark 3.5 as unreleased');
 };

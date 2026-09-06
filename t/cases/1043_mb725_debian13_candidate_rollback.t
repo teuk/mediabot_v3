@@ -21,11 +21,17 @@ return sub {
     my $release = _slurp_1043('docs/RELEASING.md');
     my $roadmap = _slurp_1043('docs/ROADMAP_3.5.md');
 
-    $assert->like($workflow, qr/^\s*- name: Build and unpack the exact 3\.5 rehearsal candidate$/m,
-        'mb725: Debian 13 builds an explicit rehearsal candidate');
+    $assert->like($workflow, qr/^\s*- name: Build and unpack the exact 3\.5 candidate$/m,
+        'mb725: Debian 13 builds the exact candidate archive');
     $assert->like($workflow,
-        qr/tools\/build_release_artifacts\.sh\s+\\.*?--version "\$CANDIDATE_VERSION"\s+\\.*?--ref "\$GITHUB_SHA"\s+\\.*?--dest "\$CANDIDATE_ARTIFACTS"\s+\\.*?--rehearsal/s,
-        'mb725: candidate build pins version, commit, destination and rehearsal mode');
+        qr/tools\/build_release_artifacts\.sh\s+\\.*?--version "\$CANDIDATE_VERSION"\s+\\.*?--ref "\$GITHUB_SHA"\s+\\.*?--dest "\$CANDIDATE_ARTIFACTS"\s+\\.*?"\$\{CANDIDATE_ARGS\[@\]\}"/s,
+        'mb725: candidate build pins version, commit, destination and selected mode');
+    $assert->like($workflow,
+        qr/3\.4dev\|3\.4dev-\*\).*?CANDIDATE_ARGS=\(--rehearsal\).*?3\.5\).*?CANDIDATE_ARGS=\(\)/s,
+        'mb727: Debian 13 accepts rehearsal candidates and the exact stable commit');
+    $assert->like($workflow,
+        qr/CANDIDATE_KIND" = rehearsal.*?Rehearsal: yes \(not publishable\).*?Rehearsal: no/s,
+        'mb727: archive metadata must match the selected candidate kind');
     $assert->like($workflow, qr/sha256sum --quiet -c.*?sha512sum --quiet -c.*?gzip -t.*?xz -t/s,
         'mb725: candidate manifests and both archive formats are verified');
     $assert->like($workflow,
@@ -76,7 +82,7 @@ return sub {
         'mb725: workflow contracts remain in the checkout and include this boundary');
 
     $assert->like($readme,
-        qr/exact\s+non-publishable rehearsal archive.*?rollback.*?reapplication/s,
+        qr/exact\s+(?:non-publishable rehearsal )?archive.*?rollback.*?reapplication/s,
         'mb725: README documents archive identity and upgrade recovery evidence');
     $assert->like($dbdoc,
         qr/pre-upgrade logical dump.*?restored.*?byte-for-byte.*?reapplied/s,
@@ -85,8 +91,8 @@ return sub {
         qr/^## MB725 Debian 13 candidate acceptance$/m,
         'mb725: release guide names the candidate acceptance gate');
     $assert->like($roadmap,
-        qr/\| MB726 \| Complete \|.*?\n\| MB725 \| Final technical gate \|/s,
-        'mb725: roadmap closes MB726 and keeps MB725 as the final technical gate');
+        qr/\| MB726 \| Complete \|.*?\n\| MB725 \| Complete \|/s,
+        'mb725: roadmap records both release rehearsal and final technical gate as complete');
     $assert->unlike($workflow, qr/\bgit\s+(?:add|commit|push|tag)\b/,
         'mb725: Debian 13 acceptance never mutates Git or publishes a release');
 };

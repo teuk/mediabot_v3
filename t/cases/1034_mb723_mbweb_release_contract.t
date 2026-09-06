@@ -35,10 +35,10 @@ return sub {
 
     my $p_mb723 = index($roadmap, '| MB723 | Complete — supported |');
     my $p_mb724 = index($roadmap, '| MB724 | Complete on development |');
-    my $p_mb722 = index($roadmap, '| MB722 | P0 |');
+    my $p_mb722 = index($roadmap, '| MB722 | Operator-managed follow-up |');
     my $p_mb726 = index($roadmap, '| MB726 | Complete |');
-    my $p_mb725 = index($roadmap, '| MB725 | Final technical gate |');
-    my $p_mb727 = index($roadmap, '| MB727 | Final |');
+    my $p_mb725 = index($roadmap, '| MB725 | Complete |');
+    my $p_mb727 = index($roadmap, '| MB727 | Complete — stable release decision |');
     $assert->ok(
         $p_mb723 >= 0 && $p_mb723 < $p_mb724
             && $p_mb724 < $p_mb722 && $p_mb722 < $p_mb726
@@ -49,8 +49,8 @@ return sub {
         qr/MB722 must not start while MB723 or MB724 is open/,
         'mb723: convergence cannot hide an incomplete supported surface');
     $assert->like($roadmap,
-        qr/Run MB725 last:.*fresh Debian 13 installation.*3\.3-to-3\.5 upgrade/s,
-        'mb723: Debian 13 stays the last technical gate');
+        qr/MB725 is complete.*fresh installation.*3\.3-to-3\.5 upgrade.*exact rollback.*deterministic reapplication/s,
+        'mb723: final Debian 13 technical evidence is recorded');
 
     $assert->like($contract,
         qr/Production must refuse the default in-memory session store/,

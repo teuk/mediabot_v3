@@ -41,13 +41,13 @@ return sub {
     );
     $assert->like(
         $roadmap,
-        qr/\| MB719 \| P0 \|[^\n]*Root grants/i,
-        'database production gate remains on the critical release path',
+        qr/\| MB719 \| Operator-managed follow-up \|/i,
+        'database production work remains an explicit operator boundary',
     );
     $assert->like(
         $roadmap,
-        qr/\| MB727 \| Final \|/,
-        'renumbered release decision remains explicit and final',
+        qr/\| MB727 \| Complete — stable release decision \|/,
+        'final stable release decision is recorded explicitly',
     );
 
     $assert->like(

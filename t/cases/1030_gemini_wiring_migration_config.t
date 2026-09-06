@@ -65,10 +65,10 @@ return sub {
         qr/^\| MB721 \| Complete on development pilot \|[^\n]*Gemini[^\n]*opt-in IRC pilot passed/m,
         'roadmap records the qualified MB721 development pilot');
     $assert->like($roadmap,
-        qr/^\| MB722 \| P0 \| Supported instances converge/m,
-        'post-Gemini convergence keeps a distinct future work number');
-    $assert->like($roadmap, qr/^\| MB727 \| Final \|/m,
-        'final release gate is renumbered without collision');
+        qr/^\| MB722 \| Operator-managed follow-up \|/m,
+        'post-Gemini convergence remains an operator-managed work item');
+    $assert->like($roadmap, qr/^\| MB727 \| Complete \x{2014} stable release decision \|/m,
+        'final release decision is recorded without collision');
 
     my $hailo = _slurp_1030('Mediabot/Hailo.pm');
     $assert->like($hailo, qr/auto\|anthropic\|openai\|gemini/,
