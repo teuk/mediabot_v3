@@ -187,6 +187,16 @@ return sub {
     $assert->ok((grep { $_->{type} eq 'index' && $_->{index} eq 'idx_quotes_channel_hits' } @{ $quotes->{effects} }),
         'mb649-830: dynamic QUOTES index is observable');
 
+    my $quote_capacity = main::_migration_observables(
+        File::Spec->catfile($mdir, '20260905_quotes_512_contract.sql')
+    );
+    $assert->ok((grep {
+            $_->{type} eq 'column'
+                && $_->{table} eq 'QUOTES'
+                && $_->{column} eq 'quotetext'
+        } @{ $quote_capacity->{effects} }),
+        'mb649-830: MODIFY COLUMN quote-capacity effect is observable');
+
     my $lang = main::_migration_observables(File::Spec->catfile($mdir, '20260724_lang_chansets.sql'));
     $assert->ok((grep { $_->{type} eq 'chanset' && $_->{chanset} eq 'LangFR' } @{ $lang->{effects} }),
         'mb649-830: data-only LangFR chanset is observable');

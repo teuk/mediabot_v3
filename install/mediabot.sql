@@ -463,7 +463,7 @@ CREATE TABLE `QUOTES` (
   `id_channel` BIGINT UNSIGNED NOT NULL,
   `id_user`    BIGINT UNSIGNED NOT NULL,
   `ts`         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `quotetext`  VARCHAR(255) NOT NULL,
+  `quotetext`  VARCHAR(512) NOT NULL,
   `hits`       BIGINT UNSIGNED NOT NULL DEFAULT 0,
   PRIMARY KEY (`id_quotes`),
   KEY `idx_quotes_id_channel` (`id_channel`),

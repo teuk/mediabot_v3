@@ -57,6 +57,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260902_gemini_chanset.sql
 20260903_fullop_chanset.sql
 20260904_mbweb_sessions.sql
+20260905_quotes_512_contract.sql
 ```
 
 The migration set adds channel-ban tracking, user seen/activity tracking, Claude chanset reference data, schema support for newer fun/user commands, and persistent trivia scores and user notes, including:
@@ -120,11 +121,16 @@ make a database backup before applying it to the real instance.
 
 ## Recommended application method
 
-Use the interactive SQL client and explicit UTF-8 settings:
+On the supported Debian 13 path, use the local MariaDB administrator socket and
+explicit UTF-8 settings:
 
 ```bash
-mysql -u root -p --default-character-set=utf8mb4
+sudo mariadb --protocol=socket --default-character-set=utf8mb4
 ```
+
+Where password authentication is intentionally configured, use
+`mariadb -u root -p --default-character-set=utf8mb4` and enter the password only
+at the prompt.
 
 Then inside the SQL client:
 
@@ -160,6 +166,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260902_hailo_policy_chans
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260902_gemini_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260903_fullop_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260904_mbweb_sessions.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260905_quotes_512_contract.sql;
 ```
 
 Afterwards:
@@ -180,6 +187,15 @@ Existing installations must apply the idempotent index migrations, notably:
 ```
 
 `check_schema_drift.pl` compares required reference indexes when `--indexes` is supplied. Extra live-only indexes are intentionally ignored.
+
+## Quote text capacity contract
+
+`20260905_quotes_512_contract.sql` aligns existing `QUOTES.quotetext`
+columns with the 512-character limit enforced by `Mediabot::Quotes`. It widens
+legacy 255- and 360-character `VARCHAR` columns without rewriting quote text.
+The migration is replay-safe and fails closed if the table or column has an
+unexpected type, contains `NULL`, stores text over 512 characters, or already
+has a capacity above 512 that would require narrowing.
 
 ## Rule
 

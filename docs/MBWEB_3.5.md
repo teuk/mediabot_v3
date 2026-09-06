@@ -128,7 +128,8 @@ No Mediabot IRC service was restarted.
 **Status: supported after operational promotion.** The canonical
 `install/mbweb_deploy.sh` path stages cleaned content from `contrib/mbweb`, runs
 `npm ci --omit=dev --ignore-scripts` against the committed lockfile, records a
-machine-readable dependency audit and refuses high-severity findings. It never
+machine-readable dependency audit and refuses moderate, high or critical
+findings. It never
 copies `.env`, logs, caches, `node_modules`, sessions or local archives from
 the repository source.
 

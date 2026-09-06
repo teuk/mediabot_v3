@@ -1,6 +1,6 @@
 # t/cases/721_mb512_release_packaging_contract.t
 # =============================================================================
-# mb512 — stable 3.3 release identity and public artifact contract.
+# mb512 / mb726 — explicit stable release identity and artifact contract.
 # =============================================================================
 
 use strict;
@@ -35,6 +35,14 @@ return sub {
 
     $assert->like($script, qr/git archive --format=tar --prefix="\$PREFIX" "\$REF"/,
         'builder archives the selected committed Git ref');
+    $assert->like($script, qr/^VERSION=""$/m,
+        'builder has no stale implicit release version');
+    $assert->like($script, qr/^REF=""$/m,
+        'builder has no stale implicit release ref');
+    $assert->like($script, qr/ERROR: --version X\.Y is required/,
+        'builder requires an explicit release version');
+    $assert->like($script, qr/ERROR: --ref REF is required/,
+        'builder requires an explicit release ref');
     $assert->like($script, qr/gzip -n -9 -c/,
         'gzip artifact is deterministic');
     $assert->like($script, qr/xz -T1 -9e --check=crc64 -c/,
@@ -67,16 +75,20 @@ return sub {
     $assert->like($gitattributes, qr/^mp3 export-ignore$/m,
         'runtime MP3 directory is export-ignored');
 
-    $assert->like($doc, qr/--dest \/home\/wws\/downloads\/mediabot/,
+    $assert->like($doc, qr/release_dest='\/home\/wws\/downloads\/mediabot'/,
         'release documentation records the requested server destination');
-    $assert->like($doc, qr/mediabot_v3-3\.3\.tar\.gz/,
-        'release documentation names the gzip artifact');
-    $assert->like($doc, qr/mediabot_v3-3\.3\.tar\.xz/,
-        'release documentation names the xz artifact');
-    $assert->like($doc, qr/mediabot_v3-3\.3-SHA256SUMS/,
-        'release documentation names the versioned SHA-256 manifest');
-    $assert->like($doc, qr/mediabot_v3-3\.3-SHA512SUMS/,
-        'release documentation names the versioned SHA-512 manifest');
+    $assert->like($doc, qr/release_version='3\.5'/,
+        'release documentation prepares the intended 3.5 identity explicitly');
+    $assert->like($doc, qr/--version "\$release_version"/,
+        'release documentation passes the explicit version to the builder');
+    $assert->like($doc, qr/--ref "\$release_ref"/,
+        'release documentation passes the exact ref to the builder');
+    $assert->like($doc, qr/mediabot_v3-3\.5-SHA256SUMS/,
+        'release documentation names the planned 3.5 SHA-256 manifest');
+    $assert->like($doc, qr/mediabot_v3-3\.5-SHA512SUMS/,
+        'release documentation names the planned 3.5 SHA-512 manifest');
+    $assert->like($doc, qr/does not declare it stable/,
+        'release preparation does not prematurely publish 3.5');
 
     $assert->like($readme, qr/3\.3\s+current stable release/i,
         'README marks 3.3 as current stable');

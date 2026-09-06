@@ -71,14 +71,22 @@ return sub {
     my $qs =
         $packages->{'node_modules/qs'}{version} || '';
 
+    my $mysql2 =
+        $packages->{'node_modules/mysql2'}{version} || '';
+
     $assert->ok(
         $body && at_least_911($body, '2.3.0'),
         "mb697-911: body-parser $body is outside audited vulnerable range"
     );
 
     $assert->ok(
-        $qs && at_least_911($qs, '6.15.2'),
+        $qs && at_least_911($qs, '6.16.0'),
         "mb697-911: qs $qs is outside audited vulnerable range"
+    );
+
+    $assert->ok(
+        $mysql2 && at_least_911($mysql2, '3.23.1'),
+        "mb697-911: mysql2 $mysql2 is outside audited vulnerable range"
     );
 
     $assert->ok(

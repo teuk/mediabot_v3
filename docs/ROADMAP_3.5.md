@@ -48,6 +48,12 @@ database, security, installation and release gates are still mandatory.
   fail-closed invariants over 16 cross-cutting 3.5 axes, and its operational
   boundaries passed read-only on the supported deployment without changing a
   service, database grant or private configuration.
+- MB726 source alignment is in progress on development. Release identity is
+  explicit, candidate rehearsals are visibly non-publishable, the supported
+  install/update/database/systemd authorities agree, and the obsolete remote
+  updater is excluded. The mbweb dependency lock is beyond the current advisory
+  ranges and deployments now reject moderate-or-higher findings. The actual
+  two-build rehearsal remains pending on the future clean committed candidate.
 - Fresh Debian 13 installation and representative 3.3-to-3.5 upgrade rehearsal
   remain deliberately last among the technical gates. They validate the final
   accepted surface rather than an intermediate one.

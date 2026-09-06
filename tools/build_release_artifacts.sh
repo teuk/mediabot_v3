@@ -2,10 +2,11 @@
 set -Eeuo pipefail
 umask 022
 
-VERSION="3.3"
-REF="3.3"
+VERSION=""
+REF=""
 DEST_DIR="dist"
 FORCE=0
+REHEARSAL=0
 
 usage() {
   cat <<'USAGE'
@@ -13,9 +14,11 @@ Usage:
   tools/build_release_artifacts.sh [options]
 
 Options:
-  --version X.Y   Stable version to package (default: 3.3)
-  --ref REF       Git tag/ref to archive (default: same as version)
+  --version X.Y   Stable version to package (required)
+  --ref REF       Exact Git tag/ref to archive (required)
   --dest DIR      Destination directory (default: ./dist)
+  --rehearsal     Build a visibly non-publishable archive from the preceding
+                  even development line (for example 3.4dev -> 3.5)
   --force         Replace existing artifacts in the destination
   -h, --help      Show this help
 
@@ -46,6 +49,9 @@ while [ "$#" -gt 0 ]; do
     --force)
       FORCE=1
       ;;
+    --rehearsal)
+      REHEARSAL=1
+      ;;
     -h|--help)
       usage
       exit 0
@@ -58,6 +64,18 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+
+# A release spell must name its book and edition; stale defaults stay banished.
+[ -n "$VERSION" ] || {
+  echo "ERROR: --version X.Y is required" >&2
+  usage >&2
+  exit 2
+}
+[ -n "$REF" ] || {
+  echo "ERROR: --ref REF is required" >&2
+  usage >&2
+  exit 2
+}
 
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || {
   echo "ERROR: stable version must use X.Y, got: $VERSION" >&2
@@ -98,19 +116,40 @@ if [ "$HEAD_COMMIT" != "$REF_COMMIT" ]; then
 fi
 
 REF_VERSION="$(git show "${REF}:VERSION" 2>/dev/null | tr -d '\r\n')"
-if [ "$REF_VERSION" != "$VERSION" ]; then
-  echo "ERROR: VERSION at $REF is '$REF_VERSION', expected '$VERSION'" >&2
-  exit 1
-fi
-
 REF_CHANGELOG="$(git show "${REF}:CHANGELOG.md" 2>/dev/null || true)"
-if ! grep -Eq "^##[[:space:]]*\[${VERSION//./\\.}\][[:space:]]+—[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}" <<<"$REF_CHANGELOG"; then
-  echo "ERROR: CHANGELOG.md does not contain a dated [$VERSION] release heading" >&2
-  exit 1
-fi
-if grep -Eiq "^##[[:space:]]*\[${VERSION//./\\.}\].*(unreleased|target)" <<<"$REF_CHANGELOG"; then
-  echo "ERROR: CHANGELOG.md still marks $VERSION as unreleased/target" >&2
-  exit 1
+if [ "$REHEARSAL" -eq 1 ]; then
+  VERSION_MAJOR="${VERSION%%.*}"
+  VERSION_MINOR="${VERSION##*.}"
+  if [ $((VERSION_MINOR % 2)) -ne 1 ] || [ "$VERSION_MINOR" -lt 1 ]; then
+    echo "ERROR: rehearsal target must be an odd stable X.Y version: $VERSION" >&2
+    exit 2
+  fi
+  DEV_MINOR=$((VERSION_MINOR - 1))
+  DEV_LINE="${VERSION_MAJOR}.${DEV_MINOR}dev"
+  case "$REF_VERSION" in
+    "$DEV_LINE"|"$DEV_LINE"-*) ;;
+    *)
+      echo "ERROR: rehearsal for $VERSION requires $DEV_LINE at $REF, got '$REF_VERSION'" >&2
+      exit 1
+      ;;
+  esac
+  if ! grep -Eq "^##[[:space:]]*\[Unreleased\][[:space:]]+—[[:space:]]+${DEV_LINE//./\\.}" <<<"$REF_CHANGELOG"; then
+    echo "ERROR: CHANGELOG.md does not expose [Unreleased] — $DEV_LINE" >&2
+    exit 1
+  fi
+else
+  if [ "$REF_VERSION" != "$VERSION" ]; then
+    echo "ERROR: VERSION at $REF is '$REF_VERSION', expected '$VERSION'" >&2
+    exit 1
+  fi
+  if ! grep -Eq "^##[[:space:]]*\[${VERSION//./\\.}\][[:space:]]+—[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}" <<<"$REF_CHANGELOG"; then
+    echo "ERROR: CHANGELOG.md does not contain a dated [$VERSION] release heading" >&2
+    exit 1
+  fi
+  if grep -Eiq "^##[[:space:]]*\[${VERSION//./\\.}\].*(unreleased|target)" <<<"$REF_CHANGELOG"; then
+    echo "ERROR: CHANGELOG.md still marks $VERSION as unreleased/target" >&2
+    exit 1
+  fi
 fi
 
 for required in Mediabot contrib docs install plugins t tools; do
@@ -126,7 +165,12 @@ for required in CHANGELOG.md LICENSE.md README.md VERSION configure mediabot.pl 
   }
 done
 
-BASE="mediabot_v3-${VERSION}"
+if [ "$REHEARSAL" -eq 1 ]; then
+  SHORT_COMMIT="${REF_COMMIT:0:12}"
+  BASE="mediabot_v3-${VERSION}-rehearsal-${SHORT_COMMIT}"
+else
+  BASE="mediabot_v3-${VERSION}"
+fi
 PREFIX="${BASE}/"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/mediabot-release-${VERSION}.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -167,16 +211,16 @@ for path in Mediabot contrib docs install plugins t tools; do
   require_archive_prefix "$path"
 done
 
-if grep -Eq "^${PREFIX}(commit\.sh$|mediabot\.conf$|mp3/|node_modules/|.*?/node_modules/|\.git/|.*\.log($|\.)|.*\.bak($|\.)|.*\.pem$|.*\.key$|.*\.p12$|.*\.pfx$|.*\.zip$|.*\.tar($|\.)|.*snap_mediabot)" "$FILES"; then
+if grep -Eq "^${PREFIX}(commit\.sh$|tools/update_remote\.sh$|mediabot\.conf$|mp3/|node_modules/|.*?/node_modules/|\.git/|.*\.log($|\.)|.*\.bak($|\.)|.*\.pem$|.*\.key$|.*\.p12$|.*\.pfx$|.*\.zip$|.*\.tar($|\.)|.*snap_mediabot)" "$FILES"; then
   echo "ERROR: forbidden private/generated material is present in the archive" >&2
-  grep -E "^${PREFIX}(commit\.sh$|mediabot\.conf$|mp3/|node_modules/|.*?/node_modules/|\.git/|.*\.log($|\.)|.*\.bak($|\.)|.*\.pem$|.*\.key$|.*\.p12$|.*\.pfx$|.*\.zip$|.*\.tar($|\.)|.*snap_mediabot)" "$FILES" >&2 || true
+  grep -E "^${PREFIX}(commit\.sh$|tools/update_remote\.sh$|mediabot\.conf$|mp3/|node_modules/|.*?/node_modules/|\.git/|.*\.log($|\.)|.*\.bak($|\.)|.*\.pem$|.*\.key$|.*\.p12$|.*\.pfx$|.*\.zip$|.*\.tar($|\.)|.*snap_mediabot)" "$FILES" >&2 || true
   exit 1
 fi
 
 tar -xf "$RAW_TAR" -C "$EXTRACT"
 RELEASE_ROOT="$EXTRACT/$BASE"
-[ "$(tr -d '\r\n' <"$RELEASE_ROOT/VERSION")" = "$VERSION" ] || {
-  echo "ERROR: extracted VERSION mismatch" >&2
+[ "$(tr -d '\r\n' <"$RELEASE_ROOT/VERSION")" = "$REF_VERSION" ] || {
+  echo "ERROR: extracted VERSION does not match the selected ref" >&2
   exit 1
 }
 
@@ -205,7 +249,9 @@ grep -Fc "${PREFIX}plugins/" "$FILES" | grep -Eq '^[1-9][0-9]*$' || {
 COMMIT_DATE="$(git show -s --format=%cI "$REF")"
 FILE_COUNT="$(wc -l <"$FILES" | tr -d ' ')"
 cat >"$INFO" <<EOF_INFO
-Mediabot release: $VERSION
+Mediabot target release: $VERSION
+Source VERSION: $REF_VERSION
+Rehearsal: $([ "$REHEARSAL" -eq 1 ] && printf 'yes (not publishable)' || printf 'no')
 Git ref: $REF
 Git commit: $REF_COMMIT
 Commit date: $COMMIT_DATE

@@ -32,6 +32,38 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb726 — require an explicit release identity
+
+- Removed the stale implicit `3.3` version and ref from the public artifact
+  builder. Release packaging now requires both `--version` and `--ref`, while
+  retaining the exact committed-ref, clean-tree and archive-content guards.
+- Reworked the release procedure around reviewed shell variables for the
+  intended 3.5 identity without declaring 3.5 stable before the final gate.
+- Added a non-publishable candidate rehearsal that builds all six artifacts
+  twice, compares them byte for byte and verifies both checksum manifests. Its
+  archive identity includes `rehearsal` and the exact source commit.
+- Removed the obsolete remote updater that bypassed the supported atomic
+  deployment, systemd lifecycle and private-credential boundaries. Release
+  archives now reject that path if it is accidentally reintroduced.
+- Aligned release, installation, database, update and systemd documentation on
+  one explicit authority per boundary, including Debian 13 MariaDB socket
+  administration without credentials in process arguments.
+- Refreshed the canonical mbweb lock beyond the current `mysql2` and `qs`
+  advisory ranges, and raised the deployment audit floor from high to moderate
+  so the three Dependabot findings cannot silently re-enter a candidate.
+
+### mb719 source prerequisite — align the quote storage contract
+
+- Aligned the fresh schema and upgrade path with the 512-character quote limit
+  already enforced by `Mediabot::Quotes`; the former `VARCHAR(255)` definition
+  could reject input that the application had accepted.
+- Added a replay-safe migration that widens known legacy quote columns without
+  changing rows and fails closed rather than narrowing an unexpected column.
+- Extended the read-only Doctor migration inventory to recognize bounded
+  `MODIFY COLUMN` effects while strict schema drift remains the type authority.
+- Kept MB719 production reconciliation open: this source correction performs
+  no live database or service mutation.
+
 ### Debian 13 CI — preserve fractional timestamp expressions in schema drift checks
 
 - Fixed the Debian 13 fresh-install gate for `MBWEB_SESSION.updated_at` by

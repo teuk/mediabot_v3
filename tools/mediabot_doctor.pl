@@ -466,6 +466,9 @@ sub _migration_observables {
     while ($sql =~ /ALTER\s+TABLE\s+`?([A-Za-z0-9_]+)`?\s+ADD\s+COLUMN\s+`?([A-Za-z0-9_]+)`?/ig) {
         $add->('column', table => $1, column => $2);
     }
+    while ($sql =~ /ALTER\s+TABLE\s+`?([A-Za-z0-9_]+)`?\s+MODIFY\s+(?:COLUMN\s+)?`?([A-Za-z0-9_]+)`?/ig) {
+        $add->('column', table => $1, column => $2);
+    }
     while ($sql =~ /ALTER\s+TABLE\s+`?([A-Za-z0-9_]+)`?[\s\S]{0,180}?\bADD\s+(?:UNIQUE\s+)?(?:INDEX|KEY)\s+`?([A-Za-z0-9_]+)`?/ig) {
         $add->('index', table => $1, index => $2);
     }

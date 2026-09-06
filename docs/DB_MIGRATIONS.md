@@ -44,11 +44,16 @@ live-only indexes are intentionally ignored. Inspect the ordered migration list
 below and apply every required structure and reference-data migration for the
 target database.
 
-Use the interactive MySQL/MariaDB client with an explicit charset:
+On the supported Debian 13 path, use the local MariaDB administrator socket and
+an explicit charset:
 
 ```bash
-mysql -u root -p --default-character-set=utf8mb4
+sudo mariadb --protocol=socket --default-character-set=utf8mb4
 ```
+
+An installation that deliberately uses password authentication may instead run
+`mariadb -u root -p --default-character-set=utf8mb4`. Keep the password in the
+interactive prompt, never in the command line.
 
 Then inside the SQL client:
 
@@ -84,6 +89,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260902_hailo_policy_chans
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260902_gemini_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260903_fullop_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260904_mbweb_sessions.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260905_quotes_512_contract.sql;
 ```
 
 Then run the checker again:
@@ -128,6 +134,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260902_gemini_chanset.sql
 20260903_fullop_chanset.sql
 20260904_mbweb_sessions.sql
+20260905_quotes_512_contract.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this
@@ -148,6 +155,17 @@ then grant the dedicated mbweb account only read access to the Mediabot data it
 serves and `SELECT`, `INSERT`, `UPDATE`, `DELETE` on `MBWEB_SESSION`. Keep those
 account and grant operations outside the migration so each installation can use
 its own private identity and credential lifecycle.
+
+## Quote text capacity (20260905)
+
+`Mediabot::Quotes` accepts quote text up to 512 characters. Fresh databases
+therefore define `QUOTES.quotetext` as `VARCHAR(512) NOT NULL`, and existing
+databases use `20260905_quotes_512_contract.sql` to reach the same definition.
+
+The migration preserves every row, safely widens known 255- and 360-character
+legacy columns, and is safe to replay. It refuses an unexpected table or column
+shape, `NULL` data, text longer than the application contract, and any existing
+capacity above 512 that would otherwise be narrowed.
 
 ## Native RSS persistence (20260822)
 

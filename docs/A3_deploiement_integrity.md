@@ -61,6 +61,13 @@ refuse de basculer et l'ancienne release reste en place.
 
 Le script s'arrête tout seul si le clone est incohérent — rien n'est activé.
 
+`install/deploy_update.sh` est l'unique déployeur IRC supporté dans l'arbre
+public. L'ancien `tools/update_remote.sh` a été retiré : il reposait sur une
+sélection globale de processus, copiait des fichiers privés à distance,
+plaçait des identifiants SQL dans une ligne de commande et redémarrait hors du
+contrat systemd. Il ne doit pas être restauré ni utilisé comme procédure de
+secours.
+
 ## Vérification manuelle (à tout moment)
 
 Sur un arbre déjà en place, pour un contrôle indépendant :

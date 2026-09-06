@@ -230,7 +230,7 @@ prepare_stage() {
   AUDIT_PATH="$STATE_DIR/logs/npm-audit-$(date +%Y%m%d_%H%M%S)-$$.json"
   set +e
   npm_config_cache="$STATE_DIR/npm-cache" \
-    npm --prefix "$STAGE" audit --omit=dev --audit-level=high --json > "$AUDIT_PATH"
+    npm --prefix "$STAGE" audit --omit=dev --audit-level=moderate --json > "$AUDIT_PATH"
   audit_rc=$?
   set -e
   chmod 0600 "$AUDIT_PATH"

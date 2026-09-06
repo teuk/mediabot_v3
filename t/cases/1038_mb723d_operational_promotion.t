@@ -23,8 +23,8 @@ return sub {
 
     $assert->like($deploy, qr/npm .* ci --omit=dev --ignore-scripts --no-audit --no-fund/,
         'mb723d: runtime dependencies come from npm ci and the committed lock');
-    $assert->like($deploy, qr/npm .* audit --omit=dev --audit-level=high --json/,
-        'mb723d: dependency audit is recorded and rejects high severity findings');
+    $assert->like($deploy, qr/npm .* audit --omit=dev --audit-level=moderate --json/,
+        'mb723d: dependency audit is recorded and rejects moderate severity findings');
     $assert->like($deploy, qr/--exclude='\.env'.*--exclude='\.env\.\*'.*--exclude='node_modules\/'/s,
         'mb723d: canonical synchronization excludes secrets and generated dependencies');
     $assert->like($deploy, qr/flock -n 9/,
