@@ -141,7 +141,7 @@ return sub {
     );
     $assert->like(
         $readme,
-        qr/Live systemd deployment and IRC\s+connectivity remain end-to-end runtime checks/s,
+        qr/Live systemd deployment and IRC connectivity remain MB722 operational checks,\s+not container-CI claims/s,
         'README keeps systemd and IRC outside the container-CI claim',
     );
 

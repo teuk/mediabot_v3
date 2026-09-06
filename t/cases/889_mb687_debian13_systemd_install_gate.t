@@ -52,7 +52,7 @@ return sub {
     );
     $assert->like(
         $workflow,
-        qr/cmp tools\/systemd\/mediabot\@\.service\.example "\$SYSTEMD_ROOT\/etc\/systemd\/system\/mediabot\@\.service"/,
+        qr/cmp "\$MEDIABOT_CANDIDATE_ROOT\/tools\/systemd\/mediabot\@\.service\.example"\s*\\\s*"\$SYSTEMD_ROOT\/etc\/systemd\/system\/mediabot\@\.service"/s,
         'CI proves the installed unit is byte-identical to the published template',
     );
     $assert->like(
@@ -123,7 +123,7 @@ return sub {
     );
     $assert->like(
         $readme,
-        qr/Live systemd deployment and IRC\s+connectivity remain end-to-end runtime checks/s,
+        qr/Live systemd deployment and IRC connectivity remain MB722 operational checks,\s+not container-CI claims/s,
         'README preserves the live PID1/IRC acceptance boundary',
     );
 

@@ -126,7 +126,7 @@ return sub {
     );
     $assert->like(
         $readme,
-        qr/Live systemd deployment and IRC\s+connectivity remain end-to-end runtime checks rather than container-CI claims/s,
+        qr/Live systemd deployment and IRC connectivity remain MB722 operational checks,\s+not container-CI claims/s,
         'README states the remaining deployment/runtime boundary of the Debian 13 CI claim',
     );
 
