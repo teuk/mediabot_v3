@@ -1,20 +1,23 @@
 # Mediabot v3
 
 <p align="center">
-  <strong>A database-backed, operations-oriented IRC bot for long-running communities.</strong>
+  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.5">
+    <img src="docs/mediabot-3.5-github-social-preview.png" width="1280" alt="Mediabot 3.5: IRC events flow through per-channel policy, MariaDB memory, Hailo or opt-in Gemini, then return as bounded replies with mbweb and Prometheus visibility.">
+  </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/teuk/mediabot_v3/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/teuk/mediabot_v3/actions/workflows/ci.yml/badge.svg?branch=master&event=push"></a>
   <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.5"><img alt="Stable release 3.5" src="https://img.shields.io/badge/stable-3.5-2ea44f"></a>
-  <a href="LICENSE.md"><img alt="GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-4c1"></a>
+  <a href="https://github.com/teuk/mediabot_v3/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/teuk/mediabot_v3/actions/workflows/ci.yml/badge.svg?branch=master&event=push"></a>
   <a href="https://github.com/teuk/mediabot_v3/actions/workflows/debian13.yml"><img alt="Debian 13 fresh-install gate" src="https://github.com/teuk/mediabot_v3/actions/workflows/debian13.yml/badge.svg?branch=master&event=push"></a>
+  <a href="https://github.com/teuk/mediabot_v3/actions/workflows/debian13.yml"><img alt="Tested with Perl 5.40" src="https://img.shields.io/badge/Perl-5.40-39457E?logo=perl&logoColor=white"></a>
+  <a href="LICENSE.md"><img alt="GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-4c1"></a>
   <a href="https://github.com/teuk/mediabot_v3/discussions"><img alt="GitHub Discussions" src="https://img.shields.io/badge/community-Discussions-8250df?logo=github"></a>
 </p>
 
-Mediabot 3.5 helps IRC communities **run, remember, and understand their channels**. It combines channel administration, persistent community history, analytics, modern URL and media integrations, observability, and upgrade tooling in one tested application.
+Mediabot 3.5 helps IRC communities **run, remember, and understand their channels**. It combines an event-driven IRC core, channel administration, persistent community history, analytics, media integrations, observability, and upgrade tooling in one tested application.
 
-Instead of assembling a large collection of unrelated scripts, operators get a coherent stack with one configuration model, one MariaDB-backed data model, migrations, security checks, startup integrity validation, systemd deployment guidance, and a documented release process.
+Operators get one configuration model, one MariaDB-backed data model, ordered migrations, security and startup-integrity checks, systemd deployment guidance, and a reproducible release path.
 
 <p align="center">
   <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.5"><strong>Download Mediabot 3.5</strong></a>
@@ -28,17 +31,45 @@ Instead of assembling a large collection of unrelated scripts, operators get a c
 
 ---
 
-## Why Mediabot?
+## What ships in 3.5
 
-| What you need | What Mediabot provides |
+| Area | What Mediabot actually provides |
 |---|---|
-| **Community memory** | `seen`, `onthisday`, `memory`, `awards`, `yearbook`, achievements, quotes, factoids, karma, notes, reminders, milestones, and long-term channel history |
-| **Operational safety** | guided configuration, database migrations, schema/type/index drift checks, security audit, and startup integrity checks |
-| **Modern IRC features** | rich URL previews, media helpers, AI integrations, radio tooling, antiflood protection, and community analytics |
-| **Observability** | Prometheus metrics, Grafana resources, structured logs, and systemd-oriented operations |
-| **Extensibility** | Perl modules, plugins, controlled script bridges, and public `contrib/` and `plugins/` trees |
+| **IRC runtime** | A `Net::Async::IRC` event loop, reconnect handling, channel administration, antiflood controls, URL/media enrichment, radio tooling, and a TCP/DCC Partyline |
+| **Community memory** | MariaDB-backed `seen`, `onthisday`, `memory`, `awards`, `yearbook`, achievements, quotes, factoids, karma, notes, reminders, milestones, and channel history |
+| **Conversation** | Per-channel Hailo brains and a separate Gemini capability that remains disabled until an operator explicitly enables it |
+| **Operator surfaces** | Prometheus metrics, Grafana resources, structured logs, a read-only-by-default mbweb console, Doctor diagnostics, and systemd deployment tooling |
+| **Release engineering** | Ordered migrations, schema/type/index drift checks, 37 fail-closed security invariants, and reproducible archives exercised through fresh-install and upgrade/rollback paths on Debian 13 |
 
 Mediabot is a strong fit for communities that want a bot to become part of their long-term infrastructure rather than remain a small disposable script. If you only need a tiny classic IRC bot with minimal dependencies, a lighter platform may be the better choice.
+
+---
+
+## How Mediabot behaves
+
+```mermaid
+flowchart TB
+    IRC["IRC networks<br/>events and commands"] --> Core["Mediabot core<br/>Net::Async::IRC event loop"]
+    Core --> Policy["Per-channel policy<br/>authentication, roles and capabilities"]
+    Policy --> Features["Community services<br/>commands, memory, Hailo and opt-in Gemini"]
+    Features --> Reply["Bounded replies<br/>and moderation actions"]
+    Core <--> DB["MariaDB<br/>state and history"]
+    DB --> Web["mbweb console<br/>read-only by default"]
+    Core --> Metrics["Prometheus metrics<br/>and structured logs"]
+```
+
+The diagram is architectural, not a mock interface: optional features stay behind their own channel switches, durable state lives in MariaDB, and external work is bounded so it does not stall the IRC event loop.
+
+### Release evidence
+
+| Gate | Mediabot 3.5 result |
+|---|---|
+| **Complete local suite** | 927 files · 18,760 assertions passed |
+| **Cross-cutting security audit** | 37/37 fail-closed security invariants across 16 axes |
+| **Debian acceptance** | Candidate archive · fresh install · stable 3.3 upgrade · exact rollback · deterministic reapplication |
+| **Published source** | Tagged commit `a55d030` · reproducible `.tar.gz` and `.tar.xz` · SHA-256 and SHA-512 manifests |
+
+These are release-gate results for the tagged 3.5 source, not rolling coverage claims. See the [3.5 release notes](docs/RELEASE_NOTES_3.5.md) and the [release process](docs/RELEASING.md) for the exact boundaries.
 
 ---
 

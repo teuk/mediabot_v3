@@ -2,8 +2,8 @@
 # =============================================================================
 # MB516 — README social-preview contract.
 #
-# Keeps the historical 3.3 visual available without presenting it as the
-# current 3.5 release identity.
+# Keeps the historical 3.3 visual available while requiring the current 3.5
+# identity to describe the real runtime rather than a fictional interface.
 # =============================================================================
 
 use strict;
@@ -34,12 +34,20 @@ return sub {
     my ($assert) = @_;
 
     my $readme_path = File::Spec->catfile('.', 'README.md');
-    my $image_path = File::Spec->catfile(
+    my $historical_path = File::Spec->catfile(
         '.', 'docs', 'mediabot-3.3-github-social-preview.png'
+    );
+    my $image_path = File::Spec->catfile(
+        '.', 'docs', 'mediabot-3.5-github-social-preview.png'
+    );
+    my $source_path = File::Spec->catfile(
+        '.', 'docs', 'mediabot-3.5-github-social-preview.svg'
     );
 
     $assert->ok(-f $readme_path, 'README exists');
-    $assert->ok(-f $image_path, 'local Mediabot 3.3 preview image exists');
+    $assert->ok(-f $historical_path, 'historical Mediabot 3.3 preview remains available');
+    $assert->ok(-f $source_path, 'editable Mediabot 3.5 preview source exists');
+    $assert->ok(-f $image_path, 'rendered Mediabot 3.5 preview image exists');
 
     my $readme = -f $readme_path ? _slurp_text_722($readme_path) : '';
 
@@ -55,22 +63,22 @@ return sub {
     );
     $assert->like(
         $readme,
-        qr/releases\/tag\/3\.5.*?alt="Stable release 3\.5"/s,
-        'README visual identity points to stable 3.5'
+        qr{<a\s+href="https://github\.com/teuk/mediabot_v3/releases/tag/3\.5">\s*<img\s+src="docs/mediabot-3\.5-github-social-preview\.png"[^>]*>}s,
+        'README embeds the current preview and links it to stable 3.5'
     );
 
     if (-f $image_path) {
         my ($width, $height) = _png_dimensions_722($image_path);
-        $assert->is($width, 1280, 'preview width is 1280 pixels');
-        $assert->is($height, 640, 'preview height is 640 pixels');
+        $assert->is($width, 1280, '3.5 preview width is 1280 pixels');
+        $assert->is($height, 640, '3.5 preview height is 640 pixels');
         $assert->ok(
             -s $image_path < 1_000_000,
-            'preview stays below 1,000,000 bytes'
+            '3.5 preview stays below 1,000,000 bytes'
         );
     }
     else {
-        $assert->ok(0, 'preview width is 1280 pixels');
-        $assert->ok(0, 'preview height is 640 pixels');
-        $assert->ok(0, 'preview stays below 1,000,000 bytes');
+        $assert->ok(0, '3.5 preview width is 1280 pixels');
+        $assert->ok(0, '3.5 preview height is 640 pixels');
+        $assert->ok(0, '3.5 preview stays below 1,000,000 bytes');
     }
 };

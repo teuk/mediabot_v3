@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">Mediabot 3.5 release identity</title>
+  <desc id="desc">Mediabot receives IRC events, applies per-channel policy, uses MariaDB-backed memory with Hailo or optional Gemini, and exposes bounded replies, mbweb and Prometheus observability.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#06131f"/>
+      <stop offset="0.52" stop-color="#0b2032"/>
+      <stop offset="1" stop-color="#19142f"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#30d7d2"/>
+      <stop offset="1" stop-color="#a878ff"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#76f4ec"/>
+      <stop offset="1" stop-color="#9b6cff"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#aeeaff" stroke-opacity="0.045"/>
+    </pattern>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="640" rx="28" fill="url(#background)"/>
+  <rect width="1280" height="640" rx="28" fill="url(#grid)"/>
+  <circle cx="1095" cy="-40" r="260" fill="#7047df" opacity="0.10"/>
+  <circle cx="40" cy="610" r="260" fill="#22cbc6" opacity="0.08"/>
+  <path d="M624 70V570" stroke="url(#accent)" stroke-width="2" opacity="0.22"/>
+
+  <g transform="translate(74 62)">
+    <rect x="0" y="0" width="178" height="42" rx="21" fill="#113349" stroke="#2fd4cf" stroke-opacity="0.7"/>
+    <circle cx="23" cy="21" r="6" fill="#67eee7" filter="url(#glow)"/>
+    <text x="40" y="28" fill="#dffefd" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" letter-spacing="1.2">STABLE 3.5</text>
+  </g>
+
+  <g transform="translate(76 145)">
+    <g filter="url(#glow)" opacity="0.65">
+      <circle cx="66" cy="43" r="5" fill="#5cebe4"/>
+      <circle cx="26" cy="108" r="5" fill="#5cebe4"/>
+      <circle cx="106" cy="108" r="5" fill="#a878ff"/>
+      <path d="M66 43L26 108M66 43l40 65M26 108h80" fill="none" stroke="url(#mark)" stroke-width="3"/>
+    </g>
+    <path d="M18 112L42 28l25 51 25-51 25 84h-22L84 66 67 101 50 66l-11 46z" fill="url(#mark)"/>
+  </g>
+
+  <text x="220" y="233" fill="#f5fbff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="72" font-weight="800" letter-spacing="-2">MEDIABOT</text>
+  <text x="78" y="320" fill="#b9d2df" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="28" font-weight="500">
+    <tspan x="78" dy="0">A memory-rich IRC bot built for</tspan>
+    <tspan x="78" dy="39">communities that plan to stay.</tspan>
+  </text>
+  <text x="78" y="420" fill="#6de8e1" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="18" font-weight="700">LISTEN  →  REMEMBER  →  RESPOND  →  OBSERVE</text>
+  <text x="78" y="472" fill="#90a9b8" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17">
+    <tspan x="78" dy="0">Per-channel capabilities · durable community history</tspan>
+    <tspan x="78" dy="28">safe operations · reproducible Debian deployment</tspan>
+  </text>
+
+  <g transform="translate(680 58)">
+    <text x="0" y="22" fill="#91aaba" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="15" font-weight="700" letter-spacing="1.6">WHAT HAPPENS ON AN IRC MESSAGE</text>
+
+    <g transform="translate(0 50)">
+      <rect width="510" height="76" rx="16" fill="#0c2637" stroke="#2dd6d0" stroke-opacity="0.55"/>
+      <circle cx="38" cy="38" r="20" fill="#123c4d"/>
+      <text x="30" y="44" fill="#6cf0e8" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="16" font-weight="800">01</text>
+      <text x="74" y="33" fill="#f1fbff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="19" font-weight="750">IRC event</text>
+      <text x="74" y="56" fill="#94afbd" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="14">Net::Async::IRC event loop</text>
+    </g>
+    <path d="M255 128v17" stroke="#4edbd6" stroke-width="2"/><path d="M249 140l6 8 6-8" fill="none" stroke="#4edbd6" stroke-width="2"/>
+
+    <g transform="translate(0 148)">
+      <rect width="510" height="76" rx="16" fill="#10253a" stroke="#57bcdc" stroke-opacity="0.50"/>
+      <circle cx="38" cy="38" r="20" fill="#16364c"/>
+      <text x="30" y="44" fill="#85dcf3" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="16" font-weight="800">02</text>
+      <text x="74" y="33" fill="#f1fbff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="19" font-weight="750">Policy and capabilities</text>
+      <text x="74" y="56" fill="#94afbd" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="14">authentication · roles · per-channel switches</text>
+    </g>
+    <path d="M255 226v17" stroke="#6bbfdc" stroke-width="2"/><path d="M249 238l6 8 6-8" fill="none" stroke="#6bbfdc" stroke-width="2"/>
+
+    <g transform="translate(0 246)">
+      <rect width="510" height="76" rx="16" fill="#15213d" stroke="#8d7ee4" stroke-opacity="0.55"/>
+      <circle cx="38" cy="38" r="20" fill="#272a50"/>
+      <text x="30" y="44" fill="#b6a6ff" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="16" font-weight="800">03</text>
+      <text x="74" y="33" fill="#f1fbff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="19" font-weight="750">Memory and conversation</text>
+      <text x="74" y="56" fill="#a8a8c2" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="14">MariaDB · Hailo · opt-in Gemini</text>
+    </g>
+    <path d="M255 324v17" stroke="#9c84eb" stroke-width="2"/><path d="M249 336l6 8 6-8" fill="none" stroke="#9c84eb" stroke-width="2"/>
+
+    <g transform="translate(0 344)">
+      <rect width="510" height="76" rx="16" fill="#1b1d3d" stroke="#a878ff" stroke-opacity="0.58"/>
+      <circle cx="38" cy="38" r="20" fill="#312850"/>
+      <text x="30" y="44" fill="#c4a7ff" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="16" font-weight="800">04</text>
+      <text x="74" y="33" fill="#f1fbff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="19" font-weight="750">Bounded reply and insight</text>
+      <text x="74" y="56" fill="#aea8c4" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="14">IRC · mbweb · Prometheus</text>
+    </g>
+  </g>
+
+  <g transform="translate(77 565)" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="14" font-weight="700">
+    <rect width="170" height="36" rx="18" fill="#0d2b3d" stroke="#2dd6d0" stroke-opacity="0.38"/><text x="22" y="23" fill="#c9e8ed">DEBIAN 13</text>
+    <rect x="184" width="164" height="36" rx="18" fill="#102a3e" stroke="#55bcda" stroke-opacity="0.38"/><text x="206" y="23" fill="#c9e8ed">PERL 5.40</text>
+    <rect x="362" width="210" height="36" rx="18" fill="#17243f" stroke="#8c7de3" stroke-opacity="0.42"/><text x="384" y="23" fill="#dad2f8">18,760 TESTS</text>
+    <rect x="586" width="276" height="36" rx="18" fill="#201f42" stroke="#aa78ff" stroke-opacity="0.42"/><text x="608" y="23" fill="#e0d3fa">37 SECURITY INVARIANTS</text>
+  </g>
+</svg>
