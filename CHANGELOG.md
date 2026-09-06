@@ -32,6 +32,17 @@ release. The next development line will be `3.6dev` when explicitly opened.
 
 ## [3.5] — 2026-09-06
 
+### mb728 — present the real 3.5 architecture on GitHub
+
+- Reworked the repository front page around the released 3.5 runtime, with a
+  faithful architecture diagram and a 1280×640 social preview instead of a
+  fictional application screen.
+- Kept CI badges bound to the real GitHub workflows and distinguished frozen
+  3.5 release evidence from rolling coverage claims.
+- Documented the actual boundaries between the IRC event loop, per-channel
+  policy, MariaDB memory, Hailo, opt-in Gemini, mbweb and Prometheus without
+  changing runtime behaviour or moving the stable `3.5` tag.
+
 ### mb727 — seal the 3.5 release
 
 - Recorded the operator's explicit stable-release decision after the exact
