@@ -56,6 +56,21 @@ committed development version. The command must finish with
 `RELEASE_REHEARSAL=OK`. It neither changes the repository nor produces a stable
 release artifact.
 
+## MB725 Debian 13 candidate acceptance
+
+The dedicated `debian13.yml` workflow is the final technical installation and
+upgrade gate. It builds and verifies the exact non-publishable rehearsal
+archive for its commit, extracts it without Git metadata, and uses only that
+candidate tree for the fresh configuration, MariaDB, systemd and dependency
+paths.
+
+The same disposable job exports the real stable `3.3` schema from Git history,
+applies the current candidate's ordered migrations, restores a deterministic
+pre-upgrade dump byte for byte, and reapplies the upgrade to the same final
+state. Both the normal CI workflow and this Debian 13 workflow must be green on
+the accepted commit. This evidence does not change `VERSION`, create a tag or
+publish an artifact; those remain explicit release actions below.
+
 ## Supported release-path authorities
 
 | Boundary | Authoritative path |

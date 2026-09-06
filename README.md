@@ -172,7 +172,11 @@ and verifies `DBI`, `DBD::MariaDB` and the remaining Perl modules through CPAN.
 
 Debian 13 is also guarded by the dedicated
 [`debian13.yml`](.github/workflows/debian13.yml) CI workflow. The gate runs in
-the official `debian:13-slim` container, checks the Debian system Perl 5.40
+the official `debian:13-slim` container. It first builds the exact
+non-publishable rehearsal archive from the tested commit, verifies its SHA-256
+and SHA-512 manifests and both compressed formats, then performs every current
+installation action from the extracted archive rather than from the Git
+checkout. The gate checks the Debian system Perl 5.40
 baseline, installs the documented MariaDB/bootstrap packages, builds the
 runtime Perl dependency set against that system Perl, verifies it through
 `install/cpan_install.sh --verify-only`, and exercises a fresh non-root
@@ -187,14 +191,18 @@ current reference schema, applies only migration files added after `3.3` in the
 authoritative order from `install/migrations/README.md`, and requires the final
 strict type/index drift check to return clean. Released migration files shared
 with `3.3` are checksum-compared and must remain immutable. The same job also
+runs a private deterministic pre-upgrade dump. Its rollback restores that dump
+byte for byte after the first successful migration, requires the old drift to
+return, and proves that a second ordered reapplication produces the same final
+database. It also
 runs the supported systemd installation helper against an isolated filesystem
 root, proves idempotent/fail-closed replacement behavior, and parses the
 installed published template with Debian 13 `systemd-analyze verify`. The
 CI-only `cpanm` local library is an acceleration/isolation mechanism; the
 supported operator installation path remains the CPAN flow described above.
-Live systemd deployment and IRC
-connectivity remain end-to-end runtime checks rather than container-CI claims. A manual end-to-end fresh install on a dedicated Debian 13
-VM is still required before final 3.5 acceptance.
+Live systemd deployment and IRC connectivity remain MB722 operational checks,
+not container-CI claims. The archive-derived disposable gate is the MB725 final
+technical install/upgrade proof.
 
 Optional but useful:
 

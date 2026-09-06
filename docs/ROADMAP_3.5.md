@@ -1,6 +1,6 @@
 # Mediabot 3.5 readiness roadmap
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 Mediabot 3.5 is a consolidation release. The current stable release remains
 3.3 and development remains on the `3.4dev` line until an explicit release
@@ -48,15 +48,16 @@ database, security, installation and release gates are still mandatory.
   fail-closed invariants over 16 cross-cutting 3.5 axes, and its operational
   boundaries passed read-only on the supported deployment without changing a
   service, database grant or private configuration.
-- MB726 source alignment is in progress on development. Release identity is
-  explicit, candidate rehearsals are visibly non-publishable, the supported
-  install/update/database/systemd authorities agree, and the obsolete remote
-  updater is excluded. The mbweb dependency lock is beyond the current advisory
-  ranges and deployments now reject moderate-or-higher findings. The actual
-  two-build rehearsal remains pending on the future clean committed candidate.
-- Fresh Debian 13 installation and representative 3.3-to-3.5 upgrade rehearsal
-  remain deliberately last among the technical gates. They validate the final
-  accepted surface rather than an intermediate one.
+- MB726 is complete on development. Release identity is explicit, candidate
+  rehearsals are visibly non-publishable, the supported install/update/database/
+  systemd authorities agree, and the obsolete remote updater is excluded. The
+  mbweb dependency lock is beyond the reviewed advisory ranges, deployments
+  reject moderate-or-higher findings, and the committed candidate produced two
+  byte-identical six-file rehearsals while both CI workflows passed.
+- MB725 remains deliberately last among the technical gates. Its Debian 13 job
+  now consumes the exact rehearsal archive, exercises fresh installation and a
+  representative 3.3-to-3.5 upgrade, then proves exact rollback and deterministic
+  reapplication in the disposable database.
 - Completing a feature on development never authorizes production activation,
   a stable version change or a release.
 
@@ -95,7 +96,7 @@ variance is a concrete MB719 preflight item, not authority for more host work.
 | MB719 | P0 | Root grants are captured and accepted, production schema reconciliation is backed up, explicitly confirmed, applied through the reviewed plan, verified drift-free and proven restorable |
 | FULL01 live pilot | Operational acceptance | nbot runs the corrected source, `+Fullop` remains limited to its intended pilot channel, real server capabilities drive the guard, joiners receive operator status, unauthorized restrictions are reversed and the exact ten-minute sanction expires cleanly; an authorized ban mirrored by the official service is accepted once for the same target without general service privilege; privileged restrictions and ordinary kicks retain their documented behavior |
 | MB722 | P0 | Supported instances converge one at a time with all accepted components and complete a seven-day observation window without unexplained restart, reconnect loop, persistent worker failure, web-session failure or schema drift |
-| MB726 | P1 | Installation, update, database, systemd and release documentation agree; release archives are reproduced and inspected in a dry run |
+| MB726 | Complete | Installation, update, database, systemd and release documentation agree; six release rehearsal artifacts were reproduced byte for byte from the clean committed candidate |
 | MB725 | Final technical gate | A fresh Debian 13 installation and a representative 3.3-to-3.5 upgrade both succeed in disposable environments against the accepted release candidate, with rollback evidence |
 | MB727 | Final | No open blocker; release candidate soak complete; one final full suite passes; the operator gives an explicit release decision |
 
@@ -118,9 +119,9 @@ an accepted source, configuration, schema and operational baseline.
   read-only across the accepted surface.
 - **Convergence and soak:** update accepted instances one at a time, then give
   the complete candidate a genuine seven-day MB722 observation window.
-- **Release proof:** reproduce documentation and archives under MB726, run the
-  final Debian 13 install and upgrade rehearsals under MB725, then stop for the
-  explicit MB727 decision.
+- **Release proof:** MB726 reproduced the documentation and archives; MB725 now
+  runs the exact archived candidate through the final Debian 13 fresh-install,
+  upgrade, rollback and reapplication gate before the explicit MB727 decision.
 
 ## Immediate operational sequence
 
@@ -145,8 +146,8 @@ an accepted source, configuration, schema and operational baseline.
    instances one at a time.
 8. Begin MB722's seven-day observation window only after that convergence. Do
    not backdate it with development or partial-surface evidence.
-9. Reproduce release documentation and archives under MB726.
-10. Run MB725 last: a fresh Debian 13 installation and a representative
+9. Reuse the completed MB726 release documentation and reproducible rehearsal.
+10. Run MB725 last: the archived candidate through a fresh Debian 13 installation and a representative
     3.3-to-3.5 upgrade in disposable environments, both with rollback proof.
 11. Stop at MB727 for the final full suite and explicit operator decision.
 

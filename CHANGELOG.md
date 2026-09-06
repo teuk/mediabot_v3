@@ -32,6 +32,20 @@ release. Development after this release continues on the `3.4dev` line.
 
 ## [Unreleased] — 3.4dev
 
+### mb725 — exercise the exact candidate and prove the Debian 13 upgrade rollback
+
+- Changed the Debian 13 gate from checkout-oriented installation to the exact
+  non-publishable 3.5 rehearsal archive built from the tested commit. The job
+  verifies both checksum manifests and compressed formats, extracts a tree
+  without Git metadata, and uses that tree for dependencies, fresh
+  configuration, database installation, systemd installation and contracts.
+- Extended the representative stable-3.3 database upgrade with a private,
+  deterministic logical dump. CI applies the ordered migrations, restores the
+  pre-upgrade database byte for byte, confirms that the expected old drift has
+  returned, then reapplies the same migrations and compares the two final dumps.
+- Kept the gate disposable and non-publishing. It changes no live service,
+  production database, grant, stable version or release tag.
+
 ### mb726 — require an explicit release identity
 
 - Removed the stale implicit `3.3` version and ref from the public artifact

@@ -434,6 +434,16 @@ After all post-3.3 migrations, the current checker must pass:
 perl tools/check_schema_drift.pl --strict --types --indexes
 ```
 
+MB725 adds recovery evidence around that same supported path. Before any
+migration, the disposable database is captured in a deterministic private
+pre-upgrade logical dump. After the first successful upgrade, CI drops and
+recreates the disposable database; the dump is restored and a new dump is
+compared byte-for-byte with the original. The strict checker must once again report the
+expected stable-3.3 drift. The ordered migrations are then reapplied, strict
+drift must return clean, and the two independently migrated final dumps must be
+identical. All four temporary dumps and the private option file are removed by
+the step cleanup trap.
+
 This is an automated database-upgrade proof. It does not replace the final
 manual upgrade rehearsal against a backed-up real instance, nor the separate
 systemd/IRC runtime acceptance checks.

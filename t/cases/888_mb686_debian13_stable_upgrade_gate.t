@@ -50,7 +50,7 @@ return sub {
     );
     $assert->like(
         $workflow,
-        qr/STABLE_REF=3\.3.*?git show "\$\{STABLE_REF\}:VERSION".*?= 3\.3/s,
+        qr/STABLE_REF=3\.3.*?git -C "\$GITHUB_WORKSPACE" show "\$\{STABLE_REF\}:VERSION".*?= 3\.3/s,
         'upgrade gate pins and verifies the real stable 3.3 Git identity',
     );
     $assert->like(
@@ -60,7 +60,7 @@ return sub {
     );
     $assert->like(
         $workflow,
-        qr/git archive --format=tar "\$STABLE_REF" -- install\/mediabot\.sql install\/migrations/s,
+        qr/git -C "\$GITHUB_WORKSPACE" archive --format=tar "\$STABLE_REF" --\s*\\?\s*install\/mediabot\.sql install\/migrations/s,
         'stable schema and migration inventory are exported from the Git tag rather than a fixture',
     );
     $assert->like(
@@ -224,7 +224,7 @@ FAKE_MYSQL
     );
     $assert->like(
         $readme,
-        qr/manual end-to-end fresh install on a dedicated Debian 13\s+VM is still required before final 3\.5 acceptance/s,
-        'README keeps the manual Debian 13 VM acceptance boundary explicit',
+        qr/archive-derived disposable gate is the MB725 final\s+technical install\/upgrade proof/s,
+        'README identifies the archive-derived Debian 13 proof as the MB725 technical boundary',
     );
 };

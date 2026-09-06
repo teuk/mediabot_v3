@@ -47,6 +47,7 @@ jobs:
             unzip \
             zip \
             tar \
+            xz-utils \
             perl \
             build-essential \
             make \
@@ -81,6 +82,48 @@ jobs:
             git -C "$GITHUB_WORKSPACE" rev-parse --show-toplevel
           )" = "$GITHUB_WORKSPACE"
 
+      - name: Build and unpack the exact 3.5 rehearsal candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$GITHUB_WORKSPACE"
+          CANDIDATE_VERSION=3.5
+          CANDIDATE_SHORT="${GITHUB_SHA:0:12}"
+          CANDIDATE_BASE="mediabot_v3-${CANDIDATE_VERSION}-rehearsal-${CANDIDATE_SHORT}"
+          CANDIDATE_ARTIFACTS="$(mktemp -d /tmp/mediabot-candidate-artifacts.XXXXXX)"
+
+          tools/build_release_artifacts.sh \
+            --version "$CANDIDATE_VERSION" \
+            --ref "$GITHUB_SHA" \
+            --dest "$CANDIDATE_ARTIFACTS" \
+            --rehearsal
+
+          (
+            cd "$CANDIDATE_ARTIFACTS"
+            sha256sum --quiet -c "${CANDIDATE_BASE}-SHA256SUMS"
+            sha512sum --quiet -c "${CANDIDATE_BASE}-SHA512SUMS"
+            gzip -t "${CANDIDATE_BASE}.tar.gz"
+            xz -t "${CANDIDATE_BASE}.tar.xz"
+          )
+
+          install -d -m 0755 /opt/mediabot-candidate
+          tar -xzf "$CANDIDATE_ARTIFACTS/${CANDIDATE_BASE}.tar.gz" \
+            -C /opt/mediabot-candidate
+          CANDIDATE_ROOT="/opt/mediabot-candidate/${CANDIDATE_BASE}"
+
+          test -d "$CANDIDATE_ROOT"
+          test ! -e "$CANDIDATE_ROOT/.git"
+          test "$(tr -d '\r\n' <"$CANDIDATE_ROOT/VERSION")" = \
+            "$(git show "${GITHUB_SHA}:VERSION" | tr -d '\r\n')"
+          grep -Fq 'Rehearsal: yes (not publishable)' \
+            "$CANDIDATE_ARTIFACTS/${CANDIDATE_BASE}-RELEASE.txt"
+
+          printf 'MEDIABOT_CANDIDATE_ROOT=%s\n' "$CANDIDATE_ROOT" >>"$GITHUB_ENV"
+          printf 'MEDIABOT_CANDIDATE_SHA256=%s\n' "$(
+            sha256sum "$CANDIDATE_ARTIFACTS/${CANDIDATE_BASE}.tar.gz" | awk '{print $1}'
+          )" >>"$GITHUB_ENV"
+
       - name: Verify the Debian 13 system baseline
         shell: bash
         run: |
@@ -105,6 +148,8 @@ jobs:
           set -euo pipefail
           export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5${PERL5LIB:+:$PERL5LIB}"
 
+          cd "$MEDIABOT_CANDIDATE_ROOT"
+
           cpanm --notest --local-lib "$GITHUB_WORKSPACE/local" --installdeps .
 
           if perl -MHailo -e 'exit 0' >/dev/null 2>&1; then
@@ -128,13 +173,10 @@ jobs:
           adduser --disabled-password --gecos '' mediabot
 
           install -d -m 0755 -o mediabot -g mediabot /home/mediabot/mediabot_v3
-          tar \
-            --exclude='./.git' \
-            --exclude='./local' \
-            --exclude='./mediabot.conf' \
-            --exclude='./configure.log' \
-            -cf - . \
-            | tar -xf - -C /home/mediabot/mediabot_v3
+          (
+            cd "$MEDIABOT_CANDIDATE_ROOT"
+            tar -cf - .
+          ) | tar -xf - -C /home/mediabot/mediabot_v3
           chown -R mediabot:mediabot /home/mediabot/mediabot_v3
 
           sudo -u mediabot env \
@@ -181,12 +223,13 @@ jobs:
             /home/mediabot/mediabot_v3/mediabot.conf \
             "$SYSTEMD_ROOT/home/mediabot/mediabot_v3/mediabot.conf"
 
-          bash install/systemd_install.sh \
+          bash /home/mediabot/mediabot_v3/install/systemd_install.sh \
             --root "$SYSTEMD_ROOT" \
             --instance ci \
             --bot-dir /home/mediabot/mediabot_v3
 
-          cmp tools/systemd/mediabot@.service.example "$SYSTEMD_ROOT/etc/systemd/system/mediabot@.service"
+          cmp "$MEDIABOT_CANDIDATE_ROOT/tools/systemd/mediabot@.service.example" \
+            "$SYSTEMD_ROOT/etc/systemd/system/mediabot@.service"
           test "$(stat -c %a "$SYSTEMD_ROOT/etc/systemd/system/mediabot@.service")" = 644
           test "$(stat -c %a "$SYSTEMD_ROOT/etc/default/mediabot-ci")" = 644
           grep -Fxq 'BOT_DIR=/home/mediabot/mediabot_v3' "$SYSTEMD_ROOT/etc/default/mediabot-ci"
@@ -194,14 +237,14 @@ jobs:
           grep -Fxq 'BOT_CONF=/home/mediabot/mediabot_v3/mediabot.conf' "$SYSTEMD_ROOT/etc/default/mediabot-ci"
 
           # A second identical install must be a no-op success.
-          bash install/systemd_install.sh \
+          bash /home/mediabot/mediabot_v3/install/systemd_install.sh \
             --root "$SYSTEMD_ROOT" \
             --instance ci \
             --bot-dir /home/mediabot/mediabot_v3
 
           # A divergent template must fail closed unless replacement is explicit.
           printf '\n# deliberate MB687 CI drift\n' >>"$SYSTEMD_ROOT/etc/systemd/system/mediabot@.service"
-          if bash install/systemd_install.sh \
+          if bash /home/mediabot/mediabot_v3/install/systemd_install.sh \
               --root "$SYSTEMD_ROOT" \
               --instance ci \
               --bot-dir /home/mediabot/mediabot_v3; then
@@ -209,13 +252,14 @@ jobs:
             exit 1
           fi
 
-          bash install/systemd_install.sh \
+          bash /home/mediabot/mediabot_v3/install/systemd_install.sh \
             --root "$SYSTEMD_ROOT" \
             --instance ci \
             --bot-dir /home/mediabot/mediabot_v3 \
             --replace-template
 
-          cmp tools/systemd/mediabot@.service.example "$SYSTEMD_ROOT/etc/systemd/system/mediabot@.service"
+          cmp "$MEDIABOT_CANDIDATE_ROOT/tools/systemd/mediabot@.service.example" \
+            "$SYSTEMD_ROOT/etc/systemd/system/mediabot@.service"
           systemd-analyze verify "$SYSTEMD_ROOT/etc/systemd/system/mediabot@.service"
 
           # Static/container validation deliberately never enables or starts a unit.
@@ -303,7 +347,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          umask 077
           export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5${PERL5LIB:+:$PERL5LIB}"
+
+          cd "$MEDIABOT_CANDIDATE_ROOT"
 
           STABLE_REF=3.3
           UPGRADE_DB=mediabot_upgrade
@@ -313,6 +360,10 @@ jobs:
           CURRENT_FILES="$(mktemp /tmp/mediabot-current-migrations.XXXXXX)"
           NEW_FILES="$(mktemp /tmp/mediabot-new-migrations.XXXXXX)"
           ORDERED_NEW="$(mktemp /tmp/mediabot-new-migrations-ordered.XXXXXX)"
+          PRE_UPGRADE_DUMP="$(mktemp /tmp/mediabot-upgrade-pre.XXXXXX.sql)"
+          MIGRATED_DUMP="$(mktemp /tmp/mediabot-upgrade-migrated.XXXXXX.sql)"
+          ROLLBACK_REDUMP="$(mktemp /tmp/mediabot-upgrade-rollback.XXXXXX.sql)"
+          REAPPLIED_DUMP="$(mktemp /tmp/mediabot-upgrade-reapplied.XXXXXX.sql)"
 
           DB_PID=""
           DB_LOG=/tmp/mediabot-upgrade-mariadb.log
@@ -322,7 +373,9 @@ jobs:
               wait "$DB_PID" >/dev/null 2>&1 || true
             fi
             rm -rf "$STABLE_ROOT" "$ROOT_CNF" "$STABLE_FILES" \
-              "$CURRENT_FILES" "$NEW_FILES" "$ORDERED_NEW"
+              "$CURRENT_FILES" "$NEW_FILES" "$ORDERED_NEW" \
+              "$PRE_UPGRADE_DUMP" "$MIGRATED_DUMP" \
+              "$ROLLBACK_REDUMP" "$REAPPLIED_DUMP"
           }
           trap cleanup_upgrade EXIT
 
@@ -356,8 +409,9 @@ jobs:
             exit 1
           fi
 
-          test "$(git show "${STABLE_REF}:VERSION" | tr -d '\r\n')" = 3.3
-          git archive --format=tar "$STABLE_REF" -- install/mediabot.sql install/migrations \
+          test "$(git -C "$GITHUB_WORKSPACE" show "${STABLE_REF}:VERSION" | tr -d '\r\n')" = 3.3
+          git -C "$GITHUB_WORKSPACE" archive --format=tar "$STABLE_REF" -- \
+            install/mediabot.sql install/migrations \
             | tar -xf - -C "$STABLE_ROOT"
 
           find "$STABLE_ROOT/install/migrations" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' \
@@ -420,6 +474,18 @@ jobs:
           EOF_ROOT_CNF
           chmod 0600 "$ROOT_CNF"
 
+          dump_upgrade_database() {
+            mariadb-dump \
+              --defaults-extra-file="$ROOT_CNF" \
+              --single-transaction \
+              --skip-comments \
+              --order-by-primary \
+              --skip-extended-insert \
+              "$UPGRADE_DB" >"$1"
+          }
+
+          dump_upgrade_database "$PRE_UPGRADE_DUMP"
+
           while IFS= read -r migration; do
             echo "Applying post-3.3 migration: $migration"
             bash install/db_migrate.sh \
@@ -434,11 +500,55 @@ jobs:
           MEDIABOT_DB_SOCKET=/run/mysqld/mysqld.sock \
             perl tools/check_schema_drift.pl --strict --types --indexes
 
+          dump_upgrade_database "$MIGRATED_DUMP"
+
+          mysql --defaults-extra-file="$ROOT_CNF" --execute="
+            DROP DATABASE ${UPGRADE_DB};
+            CREATE DATABASE ${UPGRADE_DB} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          "
+          mysql --defaults-extra-file="$ROOT_CNF" "$UPGRADE_DB" \
+            <"$PRE_UPGRADE_DUMP"
+          dump_upgrade_database "$ROLLBACK_REDUMP"
+          cmp --silent "$PRE_UPGRADE_DUMP" "$ROLLBACK_REDUMP"
+
+          set +e
+          MEDIABOT_DB="$UPGRADE_DB" \
+          MEDIABOT_DB_USER=root \
+          MEDIABOT_DB_PASS='' \
+          MEDIABOT_DB_SOCKET=/run/mysqld/mysqld.sock \
+            perl tools/check_schema_drift.pl --strict --types --indexes --quiet
+          ROLLBACK_DRIFT_RC=$?
+          set -e
+          test "$ROLLBACK_DRIFT_RC" -eq 1
+          echo 'MB725_ROLLBACK=OK'
+
+          while IFS= read -r migration; do
+            echo "Reapplying post-3.3 migration: $migration"
+            bash install/db_migrate.sh \
+              --defaults-extra-file "$ROOT_CNF" \
+              "$UPGRADE_DB" \
+              "install/migrations/$migration"
+          done <"$ORDERED_NEW"
+
+          MEDIABOT_DB="$UPGRADE_DB" \
+          MEDIABOT_DB_USER=root \
+          MEDIABOT_DB_PASS='' \
+          MEDIABOT_DB_SOCKET=/run/mysqld/mysqld.sock \
+            perl tools/check_schema_drift.pl --strict --types --indexes
+
+          dump_upgrade_database "$REAPPLIED_DUMP"
+          cmp --silent "$MIGRATED_DUMP" "$REAPPLIED_DUMP"
+          echo 'MB725_REAPPLY=OK'
+
       - name: Run Debian 13 fresh-install contracts
         shell: bash
         run: |
           set -euo pipefail
           export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5:$GITHUB_WORKSPACE${PERL5LIB:+:$PERL5LIB}"
 
+          # Workflow contracts stay in the checkout because .github is
+          # intentionally export-ignored from every public source archive.
+          cd "$GITHUB_WORKSPACE"
+
           perl t/test_commands.pl \
-            -f '^(119_|125_|132_|597_|598_|599_|600_|610_|717_|718_|719_|720_|723_|830_|884_|885_|886_|887_|888_|889_)'
+            -f '^(119_|125_|132_|597_|598_|599_|600_|610_|717_|718_|719_|720_|723_|830_|884_|885_|886_|887_|888_|889_|1043_)'
