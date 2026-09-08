@@ -15,6 +15,12 @@ use Mediabot::RSS::Fetcher;
 use Mediabot::RSS::Repository;
 use Mediabot::RSS::TinyURL qw(make_shortener);
 
+sub _tinyurl_api_key {
+    my ($bot) = @_;
+    my $value = eval { $bot->{conf}->get('tinyurl.API_KEY') };
+    return defined($value) && !ref($value) ? $value : '';
+}
+
 sub _syntax {
     my ($ctx) = @_;
     my $nick = $ctx->nick;
@@ -255,7 +261,7 @@ sub _probe_worker {
         "RSS probe OK: [$title] $feed->{format} · $count item(s) · HTTP $res->{status}.");
     if ($count) {
         my $it = $feed->{items}[0];
-        my $shorten = make_shortener();
+        my $shorten = make_shortener(api_key => _tinyurl_api_key($ctx->bot));
         my $display_url = $shorten->($it->{url});
         my $line = format_rss_announcement(
             label => $title, title => $it->{title}, url => $display_url
@@ -294,7 +300,7 @@ sub _show_worker {
     }
     my @items = @{ $res->{feed}{items} || [] };
     return $ctx->reply_private("RSS [$feed->{label}] has no readable items.") unless @items;
-    my $shorten = make_shortener();
+    my $shorten = make_shortener(api_key => _tinyurl_api_key($ctx->bot));
     for my $it (@items) {
         my $display_url = $shorten->($it->{url});
         my $line = format_rss_announcement(

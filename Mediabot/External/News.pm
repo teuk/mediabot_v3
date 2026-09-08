@@ -32,6 +32,7 @@ use Exporter 'import';
 use JSON::PP ();
 use POSIX qw(strftime);
 use URI::Escape qw(uri_escape_utf8);
+use Mediabot::RSS::TinyURL qw(shorten_url);
 
 our @EXPORT_OK = qw(mbNews_ctx _news_select_results _news_sources_line
                     _news_default_query _news_search_params
@@ -410,17 +411,8 @@ sub _cap_bytes {
 }
 
 sub _news_shorten_url {
-    my ($http, $url) = @_;
-    return '' unless defined $url && length $url;
-    return $url unless $url =~ m{\Ahttps?://}i;
-    return $url if $url =~ m{\Ahttps?://tinyurl\.com/}i;
-    return $url unless $http;
-    my $tiny = 'https://tinyurl.com/api-create.php?url=' . uri_escape_utf8($url);
-    my $res = eval { $http->get($tiny) } || { success => 0 };
-    return $url unless $res->{success};
-    my $short = $res->{content} // '';
-    $short =~ s/^\s+|\s+$//g;
-    return $short =~ m{\Ahttps?://tinyurl\.com/\S+\z}i ? $short : $url;
+    my ($http, $url, $api_key) = @_;
+    return shorten_url($url, http => $http, api_key => $api_key);
 }
 
 sub _news_article_segments {
@@ -664,12 +656,17 @@ sub mbNews_ctx {
             $push_summary->("$r->{title} — $r->{domain}");
         }
     }
-    # TinyURL is presentation only: keep its timeout small so three shortener
-    # calls cannot consume the 45 s CommandAsync budget. Failure simply keeps
-    # the original article URL.
-    my $tiny_http = Mediabot::External::_make_http(timeout => 2, max_size => 4096);
+    # TinyURL is presentation only. The retired anonymous endpoint can return
+    # a valid-looking alias for the wrong destination, so use only the modern
+    # authenticated API. Missing credentials or any mismatch keeps the exact
+    # original article URL.
+    my $tiny_api_key = eval { $self->{conf}->get('tinyurl.API_KEY') };
+    $tiny_api_key = '' unless defined($tiny_api_key) && !ref($tiny_api_key);
+    my $tiny_http = length($tiny_api_key)
+        ? Mediabot::External::_make_http(timeout => 2, max_size => 4096)
+        : undef;
     my $article_segments = _news_article_segments($display_articles,
-        sub { _news_shorten_url($tiny_http, shift) });
+        sub { _news_shorten_url($tiny_http, shift, $tiny_api_key) });
     my $article_lines = _news_article_lines($article_segments, 400);
     if (@$article_lines) {
         push @lines, @$article_lines;

@@ -135,7 +135,9 @@ sub _child_poll {
         };
 
         if ($res->{ok} && ref($res->{pending}) eq 'ARRAY' && @{ $res->{pending} }) {
-            my $shorten = make_shortener();
+            my $api_key = eval { $bot->{conf}->get('tinyurl.API_KEY') };
+            $api_key = '' unless defined($api_key) && !ref($api_key);
+            my $shorten = make_shortener(api_key => $api_key);
             for my $item (@{ $res->{pending} }) {
                 next unless ref($item) eq 'HASH';
                 next unless defined($item->{item_key}) && $item->{item_key} =~ /^[0-9a-f]{64}$/i;

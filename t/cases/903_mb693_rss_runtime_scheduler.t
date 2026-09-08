@@ -18,8 +18,8 @@ return sub {
         'mb693-903: same feed cannot spawn a concurrent worker');
     $assert->like($src, qr/connect_isolated_handle/,
         'mb693-903: worker opens an isolated DB handle');
-    $assert->like($src, qr/make_shortener\(\).*?format_rss_announcement/s,
-        'mb693-903: TinyURL + formatter run in the isolated worker path');
+    $assert->like($src, qr/get\('tinyurl\.API_KEY'\).*?make_shortener\(api_key => \$api_key\).*?format_rss_announcement/s,
+        'mb730-903: authenticated TinyURL + formatter run in the isolated worker path');
     $assert->like($src, qr/output_delay.*?2/s,
         'mb693-903: automatic RSS output is spaced by two seconds per channel');
     $assert->like($src, qr/is_feed_enabled.*?botPrivmsg.*?mark_announced/s,

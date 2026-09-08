@@ -32,6 +32,21 @@ release. The next development line will be `3.6dev` when explicitly opened.
 
 ## [3.5] — 2026-09-06
 
+### mb730 — bind every news link to its article again
+
+- Removed all use of TinyURL's retired anonymous `api-create.php` endpoint.
+  On 8 September it began returning the same syntactically valid alias for
+  unrelated destinations, which defeated the previous shape-only response
+  validation and made distinct RSS headlines point to one unrelated page.
+- RSS polling, `rss probe`, `rss show` and the interactive news command now use
+  TinyURL's authenticated `POST /create` API only when `tinyurl.API_KEY` is
+  configured. Without a token, on timeout, on malformed JSON or when TinyURL's
+  returned destination differs from the submitted article, presentation falls
+  back to that exact original article URL.
+- The token stays in the authorization header, ambient proxy variables are
+  neutralized before the HTTP client is constructed, and regression coverage
+  exercises two different articles plus the observed wrong-destination class.
+
 ### mb728 — present the real 3.5 architecture on GitHub
 
 - Reworked the repository front page around the released 3.5 runtime, with a

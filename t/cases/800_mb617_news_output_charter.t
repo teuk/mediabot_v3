@@ -52,22 +52,22 @@ return sub {
         'mb617-800: tous les liens restent presents');
 
     my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/External/News.pm' or die $!; local $/; <$fh> };
-    $assert->like($src, qr/_news_article_segments\(\$display_articles,\s*\n?\s*sub \{ _news_shorten_url\(\$tiny_http, shift\) \}\)/,
-        'mb617-800: le runtime construit les lignes article a partir de la liste de presentation');
+    $assert->like($src, qr/_news_article_segments\(\$display_articles,\s*\n?\s*sub \{ _news_shorten_url\(\$tiny_http, shift, \$tiny_api_key\) \}\)/,
+        'mb730-800: le runtime construit les lignes article avec le shortener authentifie');
     $assert->like($src, qr/if \(@\$article_lines\) \{\s*push \@lines, \@\$article_lines;\s*\}\s*else \{/s,
         'mb617-800: les lignes article sont privilegiees sur Sources:');
-    $assert->like($src, qr/sub _news_shorten_url \{/,
-        'mb617-800: le raccourcisseur tinyurl existe');
-    $assert->like($src, qr{tinyurl\.com/api-create\.php\?url=},
-        'mb617-800: tinyurl utilise son endpoint public');
+    $assert->like($src, qr/sub _news_shorten_url \{.*?shorten_url\(\$url, http => \$http, api_key => \$api_key\)/s,
+        'mb730-800: le raccourcisseur news delegue au helper authentifie');
+    $assert->unlike($src, qr{tinyurl\.com/api-create\.php},
+        'mb730-800: news n utilise plus le endpoint anonyme retire');
     $assert->like($src, qr/last if \@segments >= 3;/,
         'mb617-800: on borne le nombre d articles exposes');
     $assert->like($src, qr/last if \@lines >= 2;/,
         'mb617-800: la synthese reste bornee a deux lignes');
     $assert->like($src, qr/my \$summary_count = 0;/,
         'mb617-800: le badge ne doit ouvrir que la premiere ligne de synthese');
-    $assert->like($src, qr/timeout => 2, max_size => 4096/,
-        'mb617-800: tinyurl a un timeout court pour respecter le budget async');
+    $assert->like($src, qr/length\(\$tiny_api_key\).*?timeout => 2, max_size => 4096/s,
+        'mb730-800: aucun client sans cle et timeout court avec authentification');
     $assert->like($src, qr/Prefer three different publishers/,
         'mb617-800: la presentation privilegie des sources distinctes');
 };
