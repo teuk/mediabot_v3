@@ -21,8 +21,8 @@ return sub {
     my $release = _slurp_1043('docs/RELEASING.md');
     my $roadmap = _slurp_1043('docs/ROADMAP_3.5.md');
 
-    $assert->like($workflow, qr/^\s*- name: Build and unpack the exact 3\.5 candidate$/m,
-        'mb725: Debian 13 builds the exact candidate archive');
+    $assert->like($workflow, qr/^\s*- name: Build and unpack the exact supported candidate$/m,
+        'mb731: Debian 13 builds the exact supported candidate archive');
     $assert->like($workflow,
         qr/tools\/build_release_artifacts\.sh\s+\\.*?--version "\$CANDIDATE_VERSION"\s+\\.*?--ref "\$GITHUB_SHA"\s+\\.*?--dest "\$CANDIDATE_ARTIFACTS"\s+\\.*?"\$\{CANDIDATE_ARGS\[@\]\}"/s,
         'mb725: candidate build pins version, commit, destination and selected mode');

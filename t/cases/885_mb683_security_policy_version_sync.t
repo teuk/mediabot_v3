@@ -23,7 +23,7 @@ return sub {
     my $policy = _slurp_885(File::Spec->catfile('.', '.github', 'SECURITY.md'));
 
     my ($stable) = $readme =~ /^\s*(\d+\.\d+)\s+current stable release\s*$/m;
-    my ($dev)    = $readme =~ /^\s*(\d+\.\d+dev)\s+next development line\s*$/m;
+    my ($dev)    = $readme =~ /^\s*(\d+\.\d+dev)\s+current development line\s*$/m;
 
     $assert->ok(defined($stable), 'README exposes the current stable release');
     $assert->ok(defined($dev),    'README exposes the active development line');

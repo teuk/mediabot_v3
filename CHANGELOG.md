@@ -4,9 +4,22 @@ All notable changes to Mediabot v3 are documented here.
 
 Versioning follows the project rule: odd minor versions are stable releases
 and even minor versions are development lines. **3.5** is the current stable
-release. The next development line will be `3.6dev` when explicitly opened.
+release. The current development line is `3.6dev`.
 
 ---
+
+## [Unreleased] — 3.6dev
+
+### mb731 — open 3.6 development without rewriting the 3.5 release
+
+- Separated the moving source identity from the published release identity:
+  `VERSION` now follows `3.6dev-YYYYMMDD_HHMMSS`, while the public stable
+  release, tag, release notes and frozen acceptance evidence remain 3.5.
+- Extended the Debian 13 gate so a 3.6 development checkout is packaged as a
+  non-publishable 3.7 rehearsal. The existing 3.4-to-3.5 rehearsal and exact
+  stable-3.5 paths remain available and distinct.
+- Updated the release and presentation contracts to verify the active 3.6
+  development line without weakening their assertions about stable 3.5.
 
 ## mb646 — achievements survive restarts and updates in MariaDB
 

@@ -1,7 +1,7 @@
 # t/cases/892_mb690_unreleased_changelog_truth.t
 # =============================================================================
-# MB690 / MB727 — every numbered 3.5 contract from MB682 onward must be
-# represented exactly once in the public 3.5 release changelog.
+# MB690 / MB731 — numbered contracts remain in their owning release line:
+# MB682..MB730 belong to stable 3.5, while MB731+ belong to 3.6dev.
 # =============================================================================
 
 use strict;
@@ -21,10 +21,16 @@ return sub {
     my $change = _slurp_892('CHANGELOG.md');
     my ($release) = $change =~
         /\Q## [3.5] — 2026-09-06\E\s*(.*?)(?=^## \[3\.3\](?:\s|$))/ms;
+    my ($development) = $change =~
+        /\Q## [Unreleased] — 3.6dev\E\s*(.*?)(?=^## (?:\[|mb)\S)/ms;
 
     $assert->ok(defined($release),
         'mb690-892: stable 3.5 release section is identifiable');
     $release //= '';
+
+    $assert->ok(defined($development),
+        'mb731-892: 3.6dev Unreleased section is identifiable');
+    $development //= '';
 
     my %mb_from_tests;
     for my $path (glob('t/cases/*_mb*_*.t')) {
@@ -37,10 +43,11 @@ return sub {
         'mb690-892: development contract discovery finds the MB682+ history');
 
     for my $mb (sort { $a <=> $b } keys %mb_from_tests) {
-        my @headings = $release =~ /^###\s+mb\Q$mb\E\b.*$/gmi;
+        my $owner = $mb <= 730 ? $release : $development;
+        my @headings = $owner =~ /^###\s+mb\Q$mb\E\b.*$/gmi;
         $assert->is(
             scalar(@headings), 1,
-            "mb690-892: release 3.5 documents mb$mb exactly once",
+            "mb731-892: owning changelog line documents mb$mb exactly once",
         );
     }
 

@@ -92,8 +92,8 @@ return sub {
 
     $assert->like($readme, qr/3\.5\s+current stable release/i,
         'README marks 3.5 as current stable');
-    $assert->like($readme, qr/3\.6dev\s+next development line/i,
-        'README names the next development line');
+    $assert->like($readme, qr/3\.6dev\s+current development line/i,
+        'README names the current development line');
     $assert->like($changelog, qr/^##\s*\[3\.5\]\s+\x{2014}\s+2026-09-06/m,
         'CHANGELOG dates the 3.5 release');
     $assert->unlike($changelog, qr/^##\s*\[3\.5\].*(?:unreleased|target)/mi,

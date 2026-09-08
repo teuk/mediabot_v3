@@ -82,33 +82,41 @@ jobs:
             git -C "$GITHUB_WORKSPACE" rev-parse --show-toplevel
           )" = "$GITHUB_WORKSPACE"
 
-      - name: Build and unpack the exact 3.5 candidate
+      - name: Build and unpack the exact supported candidate
         shell: bash
         run: |
           set -euo pipefail
 
           cd "$GITHUB_WORKSPACE"
-          CANDIDATE_VERSION=3.5
           CANDIDATE_SHORT="${GITHUB_SHA:0:12}"
           CANDIDATE_ARTIFACTS="$(mktemp -d /tmp/mediabot-candidate-artifacts.XXXXXX)"
           SOURCE_VERSION="$(git show "${GITHUB_SHA}:VERSION" | tr -d '\r\n')"
 
-          # The Sorting Hat accepts either the last 3.4dev candidate or the
-          # exact 3.5 release commit, while keeping their archive identities
-          # impossible to confuse. 🎩✨
+          # The Sorting Hat keeps a development checkout, its future odd
+          # stable target and an already published stable release impossible
+          # to confuse. Every development archive is a non-publishable
+          # rehearsal. 🎩✨
           case "$SOURCE_VERSION" in
             3.4dev|3.4dev-*)
+              CANDIDATE_VERSION=3.5
               CANDIDATE_KIND=rehearsal
               CANDIDATE_BASE="mediabot_v3-${CANDIDATE_VERSION}-rehearsal-${CANDIDATE_SHORT}"
               CANDIDATE_ARGS=(--rehearsal)
               ;;
             3.5)
+              CANDIDATE_VERSION=3.5
               CANDIDATE_KIND=stable
               CANDIDATE_BASE="mediabot_v3-${CANDIDATE_VERSION}"
               CANDIDATE_ARGS=()
               ;;
+            3.6dev|3.6dev-*)
+              CANDIDATE_VERSION=3.7
+              CANDIDATE_KIND=rehearsal
+              CANDIDATE_BASE="mediabot_v3-${CANDIDATE_VERSION}-rehearsal-${CANDIDATE_SHORT}"
+              CANDIDATE_ARGS=(--rehearsal)
+              ;;
             *)
-              echo "ERROR: unsupported 3.5 candidate VERSION: $SOURCE_VERSION" >&2
+              echo "ERROR: unsupported release/development VERSION: $SOURCE_VERSION" >&2
               exit 1
               ;;
           esac

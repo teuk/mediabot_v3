@@ -24,13 +24,13 @@ return sub {
     my $workflow = _slurp_1044('.github/workflows/debian13.yml');
 
     $version =~ s/\s+\z//;
-    $assert->is($version, '3.5',
-        'mb727: the tested release tree has the exact stable VERSION');
+    $assert->like($version, qr/^3\.6dev-[0-9]{8}_[0-9]{6}$/,
+        'mb731: master has the timestamped 3.6 development VERSION');
 
     $assert->like($readme, qr/^3\.5\s+current stable release$/m,
         'mb727: README publishes 3.5 as current stable');
-    $assert->like($readme, qr/^3\.6dev\s+next development line$/m,
-        'mb727: README reserves the next even development line');
+    $assert->like($readme, qr/^3\.6dev\s+current development line$/m,
+        'mb731: README exposes the active even development line');
     $assert->like($readme, qr{releases/tag/3\.5},
         'mb727: README links the matching stable release');
 
@@ -82,6 +82,9 @@ return sub {
     $assert->like($workflow,
         qr/3\.4dev\|3\.4dev-\*\).*?CANDIDATE_ARGS=\(--rehearsal\).*?3\.5\).*?CANDIDATE_ARGS=\(\)/s,
         'mb727: Debian acceptance supports the final stable VERSION');
+    $assert->like($workflow,
+        qr/3\.6dev\|3\.6dev-\*\).*?CANDIDATE_VERSION=3\.7.*?CANDIDATE_ARGS=\(--rehearsal\)/s,
+        'mb731: Debian acceptance maps 3.6dev to a non-publishable 3.7 rehearsal');
     $assert->like($workflow,
         qr/CANDIDATE_KIND" = rehearsal.*?Rehearsal: yes \(not publishable\).*?Rehearsal: no/s,
         'mb727: Debian acceptance distinguishes rehearsal and stable artifacts');

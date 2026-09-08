@@ -63,8 +63,8 @@ return sub {
     my $readme = _slurp_715(File::Spec->catfile('.', 'README.md'));
     $assert->like($readme, qr/3\.5\s+current stable release/i,
         '[4] README: 3.5 = release stable courante');
-    $assert->like($readme, qr/3\.6dev\s+next development line/i,
-        '[4] README: prochaine ligne 3.6dev citée');
+    $assert->like($readme, qr/3\.6dev\s+current development line/i,
+        '[4] README: ligne de développement 3.6dev active');
     $assert->like($cl, qr/^##\s*\[3\.3\]\s+\x{2014}\s+2026-07-12/m,
         '[4] CHANGELOG: 3.3 datée');
     $assert->unlike($cl, qr/^##\s*\[3\.3\].*(?:unreleased|target)/mi,

@@ -122,7 +122,7 @@ Mediabot uses odd minor versions for stable releases and even minor versions for
 
 ```text
 3.5      current stable release
-3.6dev   next development line
+3.6dev   current development line
 ```
 
 Release resources:
