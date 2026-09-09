@@ -121,7 +121,8 @@ return sub {
     $assert->like($main, qr/format_dryrun_log\(\s*\$where,\s*\$wit_summary/s,
         'mb700-925: runtime keeps logging only observer summary metadata');
 
-    my ($hook) = $main =~ /(\# mb700-G: \+Wit remains explicit opt-in and dry-run only,.*?my \(\$sCommand,\@tArgs\))/s;
+    my ($hook) = $main =~ /(\# mb700-G: \+Wit remains explicit opt-in.*?my \(\$sCommand,\@tArgs\))/s;
+    $assert->ok(defined($hook), 'mb700-925: the shared runtime block is actually inspected');
     $hook //= '';
     $assert->unlike($hook, qr/botPrivmsg|botNotice|botAction|Mediabot::AI::Client|chatGPT|claudeAI/,
         'mb700-925: main dry-run hook contains no IRC emission or direct provider client call');

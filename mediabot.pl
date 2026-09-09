@@ -94,6 +94,7 @@ sub getVersion;
 sub _build_irc;
 sub _wit_send_transport;
 sub _wit_sync_sender_arm;
+sub _conversation_busy;
 sub _spark_runtime;
 sub _spark_ai_dryrun;
 sub _spark_sender;
@@ -120,9 +121,13 @@ sub _spark_tick_all;
 sub _wit_send_transport {
     my ($bot, $channel, $text) = @_;
     return 0 unless $bot && defined($channel) && defined($text) && $text ne q{};
+    # One conversational turn must fit one wire message, including Unicode.
+    # Do not let the ordinary helper splitter turn it into several replies.
+    my $wire_bytes = utf8::is_utf8($text) ? length(Encode::encode('UTF-8', $text)) : length($text);
+    return 0 if $wire_bytes > 400;
 
     my $ok = eval {
-        Mediabot::Helpers::botPrivmsg($bot, $channel, $text);
+        Mediabot::Helpers::botPrivmsg($bot, $channel, $text, { no_defer => 1 });
     };
     return $ok ? 1 : 0;
 }
@@ -288,6 +293,27 @@ sub _spark_game_active {
             && $bot->{_quotegame}{$key}{active};
     }
 
+    return 0;
+}
+
+sub _conversation_busy {
+    my ($bot, $channel) = @_;
+    return 1 unless $bot && defined($channel) && $channel =~ /^#/;
+    return 1 if _spark_game_active($bot, $channel);
+    if ($bot->{spark_state}) {
+        my $state = eval { $bot->{spark_state}->snapshot($channel) };
+        return 1 unless ref($state) eq 'HASH';
+        return 1 if $state->{event_active};
+    }
+    if ($bot->{spark_ai_dryrun}) {
+        my $pending = eval { $bot->{spark_ai_dryrun}->channel_inflight($channel) };
+        return 1 if $@ || $pending;
+    }
+    for my $key ($channel, lc($channel)) {
+        return 1 if ref($bot->{_flood_outq}{$key}{items}) eq 'ARRAY'
+            && @{ $bot->{_flood_outq}{$key}{items} };
+        return 1 if ($bot->{_af}{$key}{silenced_until} // 0) > time();
+    }
     return 0;
 }
 
@@ -3879,16 +3905,20 @@ sub _on_message_PRIVMSG_body {
             $mediabot->{logger}->log(1, 'Spark public-line runtime error: ' . $error);
         }
 
-        # mb700-G: +Wit remains explicit opt-in and dry-run only, but eligible
-        # lines now exercise the real provider-neutral AI path asynchronously.
-        # The orchestrator owns in-memory per-channel inflight/cooldown state;
-        # this callback only owns chanset lookup, language and bounded logging.
+        # mb700-G: +Wit remains explicit opt-in; MB732 shares this existing
+        # asynchronous request budget and sender with +Quip. Both flags select
+        # one mixed-tone request, never two independent conversational lanes.
         my $wit_enabled = eval {
             Mediabot::Helpers::chanset_enabled(
                 $mediabot, $where, 'Wit', default => 0
             );
         } ? 1 : 0;
-        if ($wit_enabled) {
+        my $quip_enabled = eval {
+            Mediabot::Helpers::chanset_enabled(
+                $mediabot, $where, 'Quip', default => 0
+            );
+        } ? 1 : 0;
+        if ($wit_enabled || $quip_enabled) {
             eval {
                 $mediabot->{wit_dryrun} ||= Mediabot::AI::ConversationDryRun->new(
                     conf       => $mediabot->{conf},
@@ -3896,9 +3926,13 @@ sub _on_message_PRIVMSG_body {
                 );
 
                 my $wit_request_generation;
+                my $conversation_style = $quip_enabled ? ($wit_enabled ? 'mixed' : 'quip') : 'wit';
 
                 $mediabot->{wit_dryrun}->handle_public_line(
                     enabled                 => 1,
+                    style                   => $conversation_style,
+                    context_blocked         => $quip_enabled ? _conversation_busy($mediabot, $where) : 0,
+                    room_generation         => eval { $mediabot->{wit_runtime_state}->capture_generation($where) },
                     channel                 => $where,
                     nick                    => $who,
                     bot_nick                => $self->nick,
@@ -3937,6 +3971,21 @@ sub _on_message_PRIVMSG_body {
                                     $mediabot, $where, 'Wit', default => 0
                                 );
                             } ? 1 : 0;
+                            my $quip_now = eval {
+                                Mediabot::Helpers::chanset_enabled(
+                                    $mediabot, $where, 'Quip', default => 0
+                                );
+                            } ? 1 : 0;
+                            $enabled_now = $conversation_style eq 'mixed' ? ($enabled_now && $quip_now)
+                                : $conversation_style eq 'quip' ? $quip_now : $enabled_now;
+                            if ($conversation_style ne 'wit') {
+                                $enabled_now = 0 if _conversation_busy($mediabot, $where);
+                                $enabled_now = 0 unless eval {
+                                    $mediabot->{wit_dryrun}->room_current(
+                                        $where, $candidate->{context_fingerprint}, $candidate->{context_started_at}
+                                    );
+                                };
+                            }
 
                             my $runtime = eval {
                                 $mediabot->{wit_runtime_state}->snapshot($where)
@@ -4029,6 +4078,14 @@ sub _on_message_PRIVMSG_body {
                                 $where, $send_result
                             );
                             $mediabot->{logger}->log(3, $send_log) if defined $send_log;
+                            if (($send_result->{action} // '') eq 'sent') {
+                                eval { $mediabot->{wit_dryrun}->note_delivery($where, $candidate->{text}); };
+                            }
+                            if ($conversation_style ne 'wit') {
+                                $mediabot->{logger}->log(3, '[QUIP_SEND] channel=' . $where
+                                    . ' style=' . $conversation_style . ' action=' . $send_result->{action}
+                                    . ' reason=' . $send_result->{reason});
+                            }
                         }
                     },
                     on_result               => sub {
@@ -4044,8 +4101,11 @@ sub _on_message_PRIVMSG_body {
                 my $error = $@;
                 $error =~ s/[\r\n\x00]+/ /g;
                 $error = substr($error, 0, 240);
-                $mediabot->{logger}->log(1, 'Wit dry-run runtime error: ' . $error);
+                $mediabot->{logger}->log(1, 'Wit/Quip runtime error: ' . $error);
             }
+        }
+        elsif ($mediabot->{wit_dryrun}) {
+            eval { $mediabot->{wit_dryrun}->forget_room($where); };
         }
 
         my ($sCommand,@tArgs) = split(/\s+/,$line);

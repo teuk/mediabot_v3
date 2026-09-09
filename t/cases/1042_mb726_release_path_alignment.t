@@ -70,8 +70,21 @@ return sub {
     $assert->ok(@$public_order > 0, 'mb726: public migration order is present');
     $assert->is(join("\n", @$public_order), join("\n", @$operator_order),
         'mb726: both migration guides expose the exact same ordered files');
-    $assert->is($public_order->[-1], '20260905_quotes_512_contract.sql',
-        'mb726: quote contract is the final ordered migration');
+    # MB732: the stable quote migration remains in the ordered history when
+    # development appends Quip or later migrations. Do not freeze the tail.
+    my @quote_positions = grep {
+        $public_order->[$_] eq '20260905_quotes_512_contract.sql'
+    } 0 .. $#$public_order;
+    my @quip_positions = grep {
+        $public_order->[$_] eq '20260909_quip_chanset.sql'
+    } 0 .. $#$public_order;
+    $assert->is(scalar(@quote_positions), 1,
+        'mb726: quote contract remains exactly once in the ordered history');
+    $assert->is(scalar(@quip_positions), 1,
+        'mb732: Quip registration appears exactly once in the ordered history');
+    $assert->ok(@quote_positions == 1 && @quip_positions == 1
+            && $quote_positions[0] < $quip_positions[0],
+        'mb732: Quip registration follows the stable quote contract');
 
     for my $directive (
         'ExitType=cgroup',

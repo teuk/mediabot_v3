@@ -10,6 +10,24 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb732 — let Quip read the room without adding another voice
+
+- Add default-off `+Quip`, with incisive contextual humor through the existing
+  provider-neutral `auto` AI client. There is no canned reply fallback.
+- Share one per-channel request interval, inflight slot, flood guard and sender
+  between Wit and Quip. Enabling both requests one appropriate tone in one call.
+- Require a recent exchange before Quip: eight bounded lines within five
+  minutes, at least three lines from two people, and room for human conversation.
+  Commands, known bots and recent bot output suppress interruptions.
+- Discard Quip/mixed replies when the room changes, the request ages beyond
+  30 seconds, the selected chansets are removed, a game/Spark event takes over,
+  or the IRC generation changes. Wit/Quip output blocked by antiflood is dropped
+  rather than queued for a later, context-free delivery.
+- Reuse `WIT_SEND_ARMED` as the shared master switch. The migration only
+  registers Quip; enabling a channel remains an explicit operator action.
+- Keep recent context in bounded memory with per-request speaker labels;
+  new diagnostics contain decisions and provider metadata, not conversation text.
+
 ### mb731 — open 3.6 development without rewriting the 3.5 release
 
 - Separated the moving source identity from the published release identity:

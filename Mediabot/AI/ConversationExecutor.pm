@@ -9,6 +9,7 @@ use Exporter 'import';
 use Mediabot::AI::Client;
 use Mediabot::AI::ConversationDecision qw(parse_model_decision);
 use Mediabot::AI::ConversationRequest qw(build_wit_request);
+use Mediabot::AI::QuipRequest qw(build_quip_request);
 
 our $VERSION = '1.0';
 our @EXPORT_OK = qw(
@@ -19,6 +20,9 @@ my %ALLOWED_RUN_ARG = map { $_ => 1 } qw(
     provider
     language
     message
+    style
+    context
+    previous_reply
 );
 
 sub _plain_scalar {
@@ -77,6 +81,11 @@ sub _request_from_args {
             unless $ALLOWED_RUN_ARG{$key};
     }
 
+    my $style = $args{style} // 'wit';
+    croak 'invalid conversation style' unless !ref($style) && $style =~ /^(?:wit|quip|mixed)\z/;
+    return build_quip_request(%args) if $style ne 'wit';
+    croak 'Wit request does not accept Quip context'
+        if exists($args{context}) || exists($args{previous_reply});
     return build_wit_request(
         provider => exists($args{provider}) ? $args{provider} : 'auto',
         language => $args{language},

@@ -153,6 +153,14 @@ Channel:    #i/o
 
 ---
 
+## Development: Wit and Quip
+
+The `3.6dev` line adds optional `+Quip`: sharper contextual humor through the
+existing automatic AI provider selection. `+Wit +Quip` shares one request and
+reply budget; enabling both does not create a second stream of messages.
+See [Wit/Quip configuration and live evaluation](docs/WIT_QUIP.md).
+The new capability is registered without enabling it on any channel.
+
 ## Quick install on Debian
 
 The full install guide is here:

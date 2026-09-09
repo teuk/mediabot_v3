@@ -118,6 +118,11 @@ sub format_dryrun_log {
         $line .= ' retry_after=' . int($summary->{retry_after_seconds});
     }
 
+    if (($summary->{style} // '') =~ /^(?:quip|mixed)\z/) {
+        $line =~ s/^\[WIT_DRYRUN\]/[QUIP_OBSERVE]/;
+        $line .= ' style=' . $summary->{style};
+    }
+
     return $line;
 }
 

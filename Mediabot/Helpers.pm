@@ -871,7 +871,7 @@ sub _drain_flood_queue {
 }
 
 sub botPrivmsg {
-    my ($self, $sTo, $sMsg) = @_;
+    my ($self, $sTo, $sMsg, $send_options) = @_;
 
     return unless defined($sTo);
 
@@ -912,8 +912,12 @@ sub botPrivmsg {
             if (defined($id_channel_set) && $id_channel_set ne "") {
                 $self->{logger}->log(4, "botPrivmsg() channel $sTo has chanset +AntiFlood");
                 # mb568-B1: differe au lieu de jeter
-                return _defer_flooded_send($self, 'privmsg', $sTo, $sMsg)
-                    if checkAntiFlood($self, $sTo);
+                if (checkAntiFlood($self, $sTo)) {
+                    # Contextual replies expire with their conversation. Other
+                    # callers keep the historical bounded deferred-send queue.
+                    return 0 if ref($send_options) eq 'HASH' && $send_options->{no_defer};
+                    return _defer_flooded_send($self, 'privmsg', $sTo, $sMsg);
+                }
             }
         }
 
@@ -1007,6 +1011,9 @@ sub botPrivmsg {
     # mark work complete only after the normal output path accepted the message
     # for immediate or AntiFlood-queued delivery. Rejected badword/invalid paths
     # return earlier and therefore stay unacknowledged.
+    if (_is_irc_channel_target($sTo) && $self->{wit_dryrun}) {
+        eval { $self->{wit_dryrun}->note_bot_pressure($sTo); };
+    }
     return 1;
 }
 
@@ -1119,6 +1126,9 @@ sub botAction {
 				next unless defined($chunk) && $chunk ne "";
 				my $payload = utf8::is_utf8($chunk) ? encode("UTF-8", $chunk) : $chunk;
 				$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $payload\1" );
+			}
+			if (_is_irc_channel_target($sTo) && $self->{wit_dryrun}) {
+				eval { $self->{wit_dryrun}->note_bot_pressure($sTo); };
 			}
 		}
 		else {

@@ -58,6 +58,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260903_fullop_chanset.sql
 20260904_mbweb_sessions.sql
 20260905_quotes_512_contract.sql
+20260909_quip_chanset.sql
 ```
 
 The migration set adds channel-ban tracking, user seen/activity tracking, Claude chanset reference data, schema support for newer fun/user commands, and persistent trivia scores and user notes, including:
@@ -72,6 +73,7 @@ KARMA_LOG
 TRIVIA_SCORES
 NOTE
 CHANSET_LIST entries: AchievementAnnounce, Games, Wit, Spark, VDM, DansTonChat, SparkAction, HailoLearn, HailoRespond, Gemini, Fullop
+Optional conversational capability: Quip (registered only; no channel is enabled).
 ACHIEVEMENT_PROFILE / ACHIEVEMENT_IDENTITY / ACHIEVEMENT_UNLOCK / ACHIEVEMENT_PROGRESS
 RSS_FEED / RSS_ITEM
 MBWEB_SESSION (optional persistent mbweb sessions; no account or grant is created)

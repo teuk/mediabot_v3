@@ -844,7 +844,8 @@ INSERT INTO `CHANSET_LIST` (`id_chanset_list`, `chanset`) VALUES
 (29, 'HailoLearn'),
 (30, 'HailoRespond'),
 (31, 'Gemini'),
-(32, 'Fullop');
+(32, 'Fullop'),
+(33, 'Quip');
 
 --
 -- PUBLIC_COMMANDS_CATEGORY — default categories

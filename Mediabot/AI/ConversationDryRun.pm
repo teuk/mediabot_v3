@@ -9,6 +9,7 @@ use Exporter 'import';
 use Mediabot::AI::ConversationExecutor qw(execution_summary);
 use Mediabot::AI::ConversationFloodGuard ();
 use Mediabot::AI::ConversationObserver qw(observe_public_line);
+use Mediabot::AI::ConversationRoom;
 
 our $VERSION = '1.0';
 our @EXPORT_OK = qw(format_ai_dryrun_log);
@@ -67,6 +68,7 @@ sub new {
         executor       => $executor,
         flood_guard    => $flood_guard,
         clock          => $clock || sub { time() },
+        room           => Mediabot::AI::ConversationRoom->new(clock => $clock || sub { time() }),
         inflight       => {},
         last_submit_at => {},
     }, $class;
@@ -110,6 +112,20 @@ sub handle_public_line {
 
     my $channel_key = lc "$channel";
     my $language = _runtime_language($args{language});
+    my $style = delete($args{style}) // 'wit';
+    croak 'invalid conversation style' unless !ref($style) && $style =~ /^(?:wit|quip|mixed)\z/;
+    my $quip = $style ne 'wit';
+    my $context_blocked = delete $args{context_blocked};
+    my $room = eval { $self->{room}->observe_public_line(%args) };
+    if ($quip) {
+        my $observation_cb = $on_observation;
+        $on_observation = sub {
+            my ($summary) = @_;
+            $observation_cb->({ %$summary, style => $style }) if $observation_cb;
+        };
+        my $result_cb = $on_result;
+        $on_result = sub { my ($summary) = @_; $result_cb->({ %$summary, style => $style }) };
+    }
 
     # MB702-A2: count every public line before inflight/policy/provider work.
     # A tripped/broken guard fails closed and cannot submit to an AI provider.
@@ -144,6 +160,13 @@ sub handle_public_line {
 
     my $now = $self->{clock}->();
 
+    if ($quip && (ref($room) ne 'HASH' || !$room->{ready} || $context_blocked)) {
+        my $reason = $context_blocked ? 'conversation_busy'
+            : ref($room) eq 'HASH' ? $room->{reason} : 'room_error';
+        $on_observation->(_runtime_no_reply($reason, language => $language, provider => 'auto'));
+        return 0;
+    }
+
     if ($self->{inflight}{$channel_key}) {
         my $summary = _runtime_no_reply(
             'inflight',
@@ -172,6 +195,12 @@ sub handle_public_line {
         return if $completed++;
 
         delete $self->{inflight}{$channel_key};
+
+        if ($quip && ref($result) eq 'HASH' && ($result->{action} // '') eq 'reply'
+            && !$self->room_current($channel, $room->{fingerprint}, $now)) {
+            $on_result->({ ok => 1, action => 'no_reply', reason => 'room_changed' });
+            return;
+        }
 
         # MB702-A3: a provider reply that was started before flood suppression
         # may no longer cross the private candidate boundary. Re-check the
@@ -221,6 +250,10 @@ sub handle_public_line {
             && ref($result) eq 'HASH'
             && ($result->{action} // '') eq 'reply'
             && _plain_scalar($result->{text})) {
+            $result = {
+                %$result, style => $style,
+                context_fingerprint => $room->{fingerprint}, context_started_at => $now,
+            } if $quip;
             my $candidate_ok = eval {
                 $on_candidate->($result);
                 1;
@@ -251,11 +284,16 @@ sub handle_public_line {
     };
 
     my $started;
+    # An unsuccessful Quip provider attempt also spends the shared request
+    # interval. Switching modes must not retry the same failing provider per line.
+    $self->{last_submit_at}{$channel_key} = $now if $quip;
     my $ok = eval {
         $started = $self->{executor}->submit_dryrun(
             provider => $observation->{provider},
             language => $observation->{language},
             message  => $args{message},
+            ($quip ? (style => $style, context => $room->{context},
+                previous_reply => $room->{previous_reply}) : ()),
             on_done  => $finish,
         );
         1;
@@ -297,6 +335,32 @@ sub channel_inflight {
     return $self->{inflight}{lc "$channel"} ? 1 : 0;
 }
 
+sub room_current {
+    my ($self, $channel, $fingerprint, $started_at) = @_;
+    return 0 unless defined($fingerprint) && !ref($fingerprint) && $fingerprint =~ /^[a-f0-9]{64}\z/
+        && defined($started_at) && !ref($started_at) && "$started_at" =~ /^\d+(?:\.\d+)?\z/;
+    my $room = eval { $self->{room}->snapshot($channel) };
+    return 0 unless ref($room) eq 'HASH' && $room->{ready};
+    my $now = $self->{clock}->();
+    return $now >= $started_at && $now - $started_at <= 30
+        && $room->{fingerprint} eq $fingerprint ? 1 : 0;
+}
+
+sub note_delivery {
+    my ($self, $channel, $text) = @_;
+    return $self->{room}->note_delivery($channel, $text);
+}
+
+sub note_bot_pressure {
+    my ($self, $channel) = @_;
+    return $self->{room}->note_bot_pressure($channel);
+}
+
+sub forget_room {
+    my ($self, $channel) = @_;
+    return $self->{room}->forget_channel($channel);
+}
+
 sub format_ai_dryrun_log {
     my ($channel, $summary) = @_;
     return undef unless _plain_scalar($channel) && "$channel" =~ /^#/;
@@ -308,11 +372,13 @@ sub format_ai_dryrun_log {
     return undef unless $action eq 'reply' || $action eq 'no_reply';
 
     my @parts = (
-        '[WIT_AI_DRYRUN]',
+        (($summary->{style} // '') =~ /^(?:quip|mixed)\z/ ? '[QUIP_AI]' : '[WIT_AI_DRYRUN]'),
         'channel=' . $channel,
         'action=' . $action,
         'reason=' . $reason,
     );
+    push @parts, 'style=' . $summary->{style}
+        if ($summary->{style} // '') =~ /^(?:quip|mixed)\z/;
 
     for my $key (qw(provider model error)) {
         my $value = _safe_short($summary->{$key}, 160);
