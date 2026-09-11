@@ -33,8 +33,8 @@ create an unmanaged IRC ban that could outlive its intended expiry.
 
 ## Privileged exceptions
 
-A restrictive MODE is accepted only when the actor resolves to an
-authenticated Mediabot identity that is either:
+A human actor's restrictive MODE requires an authenticated Mediabot identity
+that is either:
 
 - a global `Administrator`, `Master` or `Owner`; or
 - assigned access level 75 or greater on that channel.
@@ -42,13 +42,35 @@ authenticated Mediabot identity that is either:
 Nickname text alone never grants the exception. Server-origin MODE lines,
 Mediabot's own corrections and configured service identities are trusted.
 
-An official network bot may also mirror an authorized public `!ban`,
+On EpiKnet, the exact service identity `Cronos!services@olympe.epiknet.org`
+is recognized as network-service authority. Its MODE actions, including
+BotServ bans/unbans and founder/admin ranks, are accepted without correction,
+public warning or sanction. The prefix and network name are matched in full,
+case-insensitively: another nickname, ident, host or network does not match.
+No private configuration change is needed, and channel `+Fullop` stays enabled.
+
+This is necessary because BotServ's **FANTASY** commands include `!kb` and
+`!unban`. They use EpiKnet's access checks and can succeed independently of a
+Mediabot login, command handler or durable ban. Waiting for a matching
+Mediabot ban within five seconds incorrectly turns an authorized service
+action into an ordinary-op violation. Repeated or delayed service actions
+and actions after reconnect are therefore accepted on their service identity.
+See the official [Poseidon/BotServ guide](https://www.epiknet.link/tutos/poseidon/).
+
+Accepted actions are recorded at DEBUG3 as `Fullop: accepted network service`.
+Fullop does not infer the human command issuer from the service nickname,
+grant Mediabot access to channel users, or import service bans into its own
+ban store. If both bots respond to `!kb`, use Mediabot's addressed form
+(`BotNick kb #channel Target 10m reason`, with the actual bot nickname and
+nickname triggering enabled) to select its duration/history semantics alone.
+
+An explicitly configured relay may also mirror an authorized public `!ban`,
 `!kickban` or `!kb` without becoming a privileged Fullop actor. This narrow
 delegation exists only after Mediabot has authorized and durably stored its own
 ban, lasts five seconds, is bound to the same channel and literal target host,
 and is consumed by the first matching service `+b`. It cannot authorize a
 second ban, another target, another channel, or any other restrictive mode.
-EpiKnet's exact Cronos service prefix is supported by the EpiK network profile.
+This optional relay policy remains separate from Cronos's network authority.
 
 Raw IRC `KICK` remains allowed for ordinary ops. `+Fullop` intentionally does
 not turn a friendly kick into a ban.
@@ -91,14 +113,16 @@ is 600 seconds (ten minutes).
 `TRUSTED_SERVICE_MASKS` is a comma- or space-separated list of complete IRC
 glob masks, for example a network's actual ChanServ prefix. Leave it empty when
 all service channel modes are server-origin. Undernet X and Libera ChanServ
-have narrow built-in profiles; site-specific services should be listed
-explicitly before enabling `+Fullop`.
+have built-in profiles. EpiKnet Cronos is recognized by its exact complete
+prefix on the exact EpiKnet profile; no wildcard override is needed for it.
+Other site-specific services should be listed explicitly before enabling
+`+Fullop`.
 
 `DELEGATED_BAN_SERVICES` extends the one-shot ban delegation to other exact
 service prefixes. Every entry is network-qualified and contains no wildcard,
 for example `ExampleNet|PolicyBot!service@services.example`. This setting does
-not grant general MODE privilege. The EpiK profile already knows the exact
-Cronos prefix, so no private configuration override is required there.
+not grant general MODE privilege. Cronos needs no entry here: its independent
+service authority does not depend on a relay token.
 
 `PROTECTED_MODES` can add site-specific mode letters to the selected network
 profile. It cannot remove the baseline safety modes.

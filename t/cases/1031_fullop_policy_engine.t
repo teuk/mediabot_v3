@@ -160,11 +160,12 @@ is_deeply($epik_sent->[0], [ 'MODE', undef, '#open', '-M', 'account-only' ],
 my $delegation_now = 1_000;
 my ($delegated, $delegated_sent, $delegated_announced, $delegated_bans) =
     build_guard(
-        network => 'EpiKnet',
+        network => 'ExampleNet',
+        delegated_service_masks => ['Mirror!service@services.example'],
         now_cb  => sub { $delegation_now },
     );
 $delegated->update_isupport(
-    'NETWORK=EpiKnet',
+    'NETWORK=ExampleNet',
     'PREFIX=(qaohv)~&@%+',
     'CHANMODES=beI,k,l,imnpst',
 );
@@ -175,16 +176,16 @@ is(
         ban_id  => 17,
     ),
     1,
-    'an authorized stored ban arms one EpiK service delegation',
+    'an authorized stored ban arms one configured relay delegation',
 );
 my $delegated_result = $delegated->handle_mode(
     channel     => '#open',
-    prefix      => 'Cronos!services@olympe.epiknet.org',
+    prefix      => 'Mirror!service@services.example',
     mode_string => '+b',
     mode_args   => [ '*!*@users.example' ],
 );
 is($delegated_result->{delegated}, 1,
-    'Cronos mirror for the same literal host consumes the delegation');
+    'configured mirror for the same literal host consumes the delegation');
 is($delegated_result->{sanctioned}, 0,
     'the correlated service mirror is not sanctioned');
 is_deeply($delegated_sent, [],
@@ -196,7 +197,7 @@ is(scalar(@{ $delegated_bans->{added} }), 0,
 
 my $replayed_result = $delegated->handle_mode(
     channel     => '#open',
-    prefix      => 'Cronos!services@olympe.epiknet.org',
+    prefix      => 'Mirror!service@services.example',
     mode_string => '+b',
     mode_args   => [ '*!*other@users.example' ],
 );
@@ -207,7 +208,8 @@ is($replayed_result->{sanctioned}, 1,
 
 my $expiry_now = 2_000;
 my ($expired, $expired_sent, undef, $expired_bans) = build_guard(
-    network => 'EpiKnet',
+    network => 'ExampleNet',
+    delegated_service_masks => ['Mirror!service@services.example'],
     now_cb  => sub { $expiry_now },
 );
 $expired->update_isupport('PREFIX=(qaohv)~&@%+', 'CHANMODES=beI,k,l,imnpst');
@@ -217,7 +219,7 @@ is($expired->authorize_delegated_ban(
 $expiry_now += 6;
 my $expired_result = $expired->handle_mode(
     channel     => '#open',
-    prefix      => 'Cronos!services@olympe.epiknet.org',
+    prefix      => 'Mirror!service@services.example',
     mode_string => '+b',
     mode_args   => [ '*!*@expiry.example' ],
 );
@@ -231,22 +233,24 @@ is(scalar(@{ $expired_bans->{added} }), 1,
 my ($wrong_network) = build_guard(network => 'Radiocapsule');
 is($wrong_network->authorize_delegated_ban(
     channel => '#open', mask => '*!*victim@users.example'), 0,
-    'the EpiK service profile cannot arm delegation on another network');
+    'a network without a configured relay cannot arm delegation');
 
-my ($wildcard_target) = build_guard(network => 'EpiKnet');
+my ($wildcard_target) = build_guard(network => 'ExampleNet',
+    delegated_service_masks => ['Mirror!service@services.example']);
 is($wildcard_target->authorize_delegated_ban(
     channel => '#open', mask => '*!*victim@*.example'), 0,
     'a wildcard target host cannot arm delegation');
 
 my ($wrong_target, $wrong_target_sent, undef, $wrong_target_bans) =
-    build_guard(network => 'EpiKnet');
+    build_guard(network => 'ExampleNet',
+        delegated_service_masks => ['Mirror!service@services.example']);
 $wrong_target->update_isupport('PREFIX=(qaohv)~&@%+', 'CHANMODES=beI,k,l,imnpst');
 is($wrong_target->authorize_delegated_ban(
     channel => '#open', mask => '*!*victim@expected.example'), 1,
     'the expected literal host is recorded');
 my $wrong_target_result = $wrong_target->handle_mode(
     channel     => '#open',
-    prefix      => 'Cronos!services@olympe.epiknet.org',
+    prefix      => 'Mirror!service@services.example',
     mode_string => '+b',
     mode_args   => [ '*!*@other.example' ],
 );

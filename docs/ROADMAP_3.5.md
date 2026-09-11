@@ -77,7 +77,7 @@ database, security, installation and release gates are still mandatory.
 | MB718 | Complete, variance recorded | Debian 13 root access restored through `unix_socket`; application identities remained unchanged; the post-repair privilege-mask representation change is carried into MB719 for an explicit `SHOW GRANTS` check |
 | MB720 | Complete on development pilot | Hailo has isolated per-channel brains, reply-before-learn ordering, MegaHAL-compatible policy boundaries and an asynchronous language-aware provider-neutral post-editor with deterministic fallback and late-revocation evidence |
 | MB721 | Complete on development pilot | Google Gemini is a strict native provider and `!gemini` is independently opt-in through `+Gemini`; a bounded live provider smoke and opt-in IRC pilot passed while key/configuration and wider channel activation remain operator-controlled |
-| FULL01 | Live pilot in progress; service correction required | Opt-in `+Fullop` opens operator status to all while reversing unauthorized join/speech restrictions; the real pilot exposed one official-service causality gap, now bounded to a one-shot same-target delegation after an authorized ban |
+| FULL01 | Live pilot in progress; MB733 service correction awaiting rollout | Opt-in `+Fullop` opens operator status to all while reversing unauthorized user restrictions; exact EpiKnet Cronos service authority covers independent BotServ moderation and ranks, while configured relays retain one-shot same-target delegation |
 | MB723-A | Complete on development source | First-class `npm test` lane: 23 deterministic tests cover configuration, authentication, authorization, parameter and SQL bounds, repository outcomes, safe HTTP errors, bounded upstreams, startup failure and graceful shutdown without credentials, external network or a live database |
 | MB723-B | Complete on development source | The 45-test Node lane now covers persistent MariaDB sessions, explicit expiry and cleanup, one bounded reconnect retry, central session-bound CSRF, POST logout, fixed-capacity login throttling and redacted logs; migration and grants are delivered but not applied by this source gate |
 | MB723-C | Complete on development pilot | Real HTTPS login, protected logout and the supported route matrix passed through the reverse-proxy base path; the dedicated database identity is read-only outside `MBWEB_SESSION`, and channel details expose Hailo, Gemini, Spark and Fullop status without a control API |
@@ -137,7 +137,7 @@ an accepted source, configuration, schema and operational baseline.
 3. Capture real-network evidence for automatic operator status, restoration of
    an unauthorized restriction, the fixed warning, the single ten-minute
    kickban and its expiry, a privileged restriction, an ordinary kick, and one
-   authorized service-mirrored ban without a false Cronos sanction.
+   independent BotServ ban/unban and rank grant without a false Cronos sanction.
 4. Disable `+Fullop` immediately on any unexplained mode loop, residual ban,
    privilege-resolution error or service interaction; retain the application
    log and database evidence for diagnosis.

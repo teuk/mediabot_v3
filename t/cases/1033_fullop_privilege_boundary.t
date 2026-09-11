@@ -146,13 +146,12 @@ my ($cronos_without_token, $cronos_sent, undef, $cronos_ban) = exercise(
     user   => undef,
 );
 is($cronos_without_token->{delegated}, 0,
-    'Cronos gains no privilege from its official nickname or host alone');
-is($cronos_without_token->{sanctioned}, 1,
-    'Cronos without a matching command token follows the normal sanction path');
-is_deeply($cronos_sent->[0],
-    [ 'MODE', undef, '#open', '-b', '*!*@blocked.example' ],
-    'uncorrelated Cronos ban is reversed');
-is(scalar(@{ $cronos_ban->{rows} }), 1,
-    'uncorrelated Cronos actor receives a durable sanction');
+    'official Cronos service authority does not need a command token');
+is($cronos_without_token->{sanctioned}, 0,
+    'Cronos BotServ action is accepted without a Mediabot-authenticated user');
+is_deeply($cronos_sent, [],
+    'independent Cronos ban is neither reversed nor answered');
+is(scalar(@{ $cronos_ban->{rows} }), 0,
+    'official Cronos actor receives no durable sanction');
 
 done_testing();

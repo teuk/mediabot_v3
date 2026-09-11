@@ -278,6 +278,17 @@ sub _is_protected_change {
     return $profile->{$mode} ? 1 : 0;
 }
 
+sub _is_epiknet_service_actor {
+    my ($self, $prefix) = @_;
+    # MB733 R2: BotServ FANTASY executes commands with its own network access
+    # checks, independently of Mediabot's login, storage and command timing.
+    # The same service also sets ranks and removes bans. Respect that authority
+    # as a whole; matching only a recent Mediabot +b creates a moderation loop.
+    # No nickname-only match, host glob, network substring or WHOIS per MODE.
+    return lc($self->network_name) eq 'epiknet'
+        && lc($prefix // '') eq 'cronos!services@olympe.epiknet.org' ? 1 : 0;
+}
+
 sub _state_for {
     my ($self, $channel) = @_;
     return ($self->{channel_state}{$self->_fold($channel)} //= {
@@ -461,12 +472,8 @@ sub _delegated_ban_service_masks {
     my $network = lc($self->network_name);
     my @masks;
 
-    # Cronos is an official EpiKnet channel service. It is deliberately not a
-    # generally trusted Fullop actor: the exact prefix is usable only through
-    # the one-shot, target-bound delegation below.
-    push @masks, 'Cronos!services@olympe.epiknet.org'
-        if $network =~ /epik/;
-
+    # Optional custom relays retain the one-shot delegation policy. EpiKnet
+    # Cronos has independent service authority and needs no pending token.
     if (defined $self->{delegated_service_masks}) {
         push @masks, @{ $self->{delegated_service_masks} };
     }
@@ -711,8 +718,14 @@ sub handle_mode {
     return { enabled => 1, corrected => 0, sanctioned => 0, delegated => 0 }
         unless @changes;
 
-    if ($self->_actor_is_privileged($message, $channel, $prefix)) {
+    my $network_service = $self->_is_epiknet_service_actor($prefix);
+    if ($network_service || $self->_actor_is_privileged($message, $channel, $prefix)) {
         $self->_remember_change($channel, $_) for @changes;
+        if ($network_service) {
+            my $modes = join('', map { $_->{sign} . $_->{mode} } @changes);
+            $self->_log(3,
+                "Fullop: accepted network service $prefix on $channel modes=$modes");
+        }
         return {
             enabled => 1, privileged => 1, corrected => 0,
             sanctioned => 0, delegated => 0,
@@ -842,5 +855,7 @@ remove an official exception, remove an op, or alter a higher status is reversed
 The actor is then banned and kicked for ten minutes.  Raw KICK remains outside
 this module by design.  Exemptions require an authenticated global Administrator
 or a channel access of at least 75.
+EpiKnet's exact Cronos service identity is trusted for network-service MODE
+actions, including independent BotServ FANTASY bans, unbans and member ranks.
 
 =cut

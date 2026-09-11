@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb733 — respect EpiKnet service authority while keeping Fullop
+
+- Recognize the exact `Cronos!services@olympe.epiknet.org` identity on EpiKnet
+  as network-service authority. BotServ FANTASY moderation, unbans and rank
+  grants now succeed without a corrective mode, public warning or service ban.
+- Replace the initial rank-only repair with a service boundary that also
+  covers `!kb`: BotServ checks its own network access and does not depend on
+  Mediabot having stored a matching ban in the previous five seconds.
+- Preserve Fullop auto-op, authentication checks and sanctions against
+  unprivileged human restrictions. Spoofed service prefixes and other networks
+  gain no exemption; explicitly configured relays keep their one-shot tokens.
+- Add debug decisions and regression cases for independent/repeated BotServ
+  bans, unbans, reconnects, rank grants, impersonation and ordinary-op abuse.
+  No chanset, private configuration or stored-ban change is required.
+
 ### mb732 — let Quip read the room without adding another voice
 
 - Add default-off `+Quip`, with incisive contextual humor through the existing
