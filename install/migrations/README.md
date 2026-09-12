@@ -59,6 +59,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260904_mbweb_sessions.sql
 20260905_quotes_512_contract.sql
 20260909_quip_chanset.sql
+20260911_radio_chanset.sql
 ```
 
 The migration set adds channel-ban tracking, user seen/activity tracking, Claude chanset reference data, schema support for newer fun/user commands, and persistent trivia scores and user notes, including:
@@ -202,3 +203,7 @@ has a capacity above 512 that would require narrowing.
 ## Rule
 
 Never start an upgraded bot against an old database without running the schema drift checker first.
+
+MB734 registers the default-off `Radio` capability. Apply after Quip with
+`SOURCE /home/mediabot/mediabot_v3/install/migrations/20260911_radio_chanset.sql;`
+It does not enable a channel. See [radio setup](../../docs/RADIO.md) for the local API and HTTPS clients.

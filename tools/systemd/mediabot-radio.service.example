@@ -1,0 +1,23 @@
+[Unit]
+Description=Mediabot shared radio request API
+After=network-online.target
+
+[Service]
+Type=simple
+User=mediabot
+Group=mediabot
+WorkingDirectory=/home/mediabot/mediabot_v3
+ExecStart=/usr/bin/python3 -B /home/mediabot/mediabot_v3/contrib/radio_service.py --config /var/lib/mediabot-radio/control/service.json
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/mediabot-radio
+
+[Install]
+WantedBy=multi-user.target

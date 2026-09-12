@@ -137,6 +137,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260904_mbweb_sessions.sql
 20260905_quotes_512_contract.sql
 20260909_quip_chanset.sql
+20260911_radio_chanset.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this
@@ -465,3 +466,7 @@ Before applying migrations to a production database:
 5. only then restart the bot.
 
 Note: `tools/check_schema_drift.pl` checks schema structure. Reference data migrations such as `20260515_claude_chanset.sql` must still be applied when upgrading an existing database.
+
+MB734 registers the default-off `Radio` capability. Apply after Quip with
+`SOURCE /home/mediabot/mediabot_v3/install/migrations/20260911_radio_chanset.sql;`
+It does not enable a channel. See [radio setup](RADIO.md) for the local API and HTTPS clients.

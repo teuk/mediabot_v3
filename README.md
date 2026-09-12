@@ -922,3 +922,9 @@ Mediabot v3 is free software licensed under the **GNU General Public License ver
 SPDX license identifier: `GPL-3.0-or-later`
 
 See [LICENSE.md](LICENSE.md) for the complete GNU GPL version 3 license text.
+
+### Shared radio requests (development)
+
+Enable `+Radio` for public `play <YouTube URL>` and `rplay <artist or title>`.
+One local HTTP API is the default; several bots can share it over authenticated
+HTTPS. See [radio setup](docs/RADIO.md) for installation and stream acceptance.

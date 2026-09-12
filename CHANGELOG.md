@@ -10,6 +10,41 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb734 — prepare reliable radio requests and shared audio storage
+
+- Stop a downloaded request before queue submission when its MP3 catalogue
+  write fails, including database exceptions; retain the file for recovery.
+- Parse the first complete Liquidsoap END frame, reject server errors and
+  require a numeric request ID for push acknowledgements. A TCP exchange
+  alone is no longer reported as a successful queue operation.
+- Bound response reads and cover incomplete/error replies, legacy errors,
+  request IDs, database failures and successful ordering with regression tests.
+- Add opt-in 0640 group readability for new MP3s inside the configured incoming
+  directory, rejecting symlinks, shared inodes and paths outside that directory.
+- Add default-off `+Radio`: all channel participants can request a YouTube
+  track with `play`, or a random artist/title match with `rplay`.
+- Centralize downloads, catalogue ownership, rate limits and durable request
+  IDs in a local authenticated HTTP service; remote clients use HTTPS and
+  separate revocable tokens. No SSH transport or public Liquidsoap control.
+- Register MP3 metadata before queue submission, preserve uncertain pushes
+  across restarts, bound downloads, and send request feedback by NOTICE.
+- Keep administrative controls restricted. Activation and an actual audio
+  acceptance test remain operator steps; neither stream is reconfigured.
+- Allow a corrected catalogue search five seconds after an empty result;
+  report the actual remaining cooldown separately from a full queue. Distinguish
+  absent catalogue rows from rejected audio files, with private diagnostic codes.
+- Document HTTPS stream/admin access under a proxy prefix, including HTML links
+  and playlists, without exposing the Liquidsoap control socket.
+- Classify downloader failures without exposing stderr or session material;
+  pause only new downloads after YouTube authentication/rate-limit failures,
+  retaining the pause in the private ledger while cached requests keep working.
+- Deduplicate resolved tracks across `play`, `rplay` and instances, including
+  lost queue acknowledgements and restarts. Preserve the existing request IDs
+  and history; no MariaDB schema or grant change is involved.
+- Bound catalogue scanning and metadata reads, restrict audio probing to local
+  MP3 files, fingerprint new cached downloads, and terminate subprocess groups
+  even when the original downloader process has already exited.
+
 ### mb733 — respect EpiKnet service authority while keeping Fullop
 
 - Recognize the exact `Cronos!services@olympe.epiknet.org` identity on EpiKnet

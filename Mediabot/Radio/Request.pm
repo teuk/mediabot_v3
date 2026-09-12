@@ -5,6 +5,8 @@ use warnings;
 
 use File::Basename qw(basename dirname);
 use File::Spec;
+use Cwd qw(abs_path);
+use Fcntl qw(O_RDONLY O_NOFOLLOW O_NONBLOCK S_ISREG);
 use File::Find qw(find);
 use IO::Async::Timer::Countdown;
 use POSIX qw(WNOHANG);
@@ -325,7 +327,7 @@ sub _start_download {
         return;
     }
 
-    my $incoming = $self->_conf_value('YOUTUBEDL_INCOMING', '/tmp');
+    my $incoming = $self->_conf_value('YOUTUBEDL_INCOMING', '/var/lib/mediabot-radio/incoming');
     my $ytdlp    = $self->_conf_value('YTDLP_PATH', '/usr/bin/yt-dlp');
     my $cookies  = $self->_conf_value('YTDLP_COOKIES_FILE', '');
     my $remote_components = $self->_conf_value('YTDLP_REMOTE_COMPONENTS', '');
@@ -743,6 +745,40 @@ sub _classify_ytdlp_error {
     return "yt-dlp exited with code $exitcode but did not return a useful error message.";
 }
 
+# Opt-in sharing for newly downloaded MP3s only. The setgid incoming directory
+# supplies the reader group; no account membership or private file is changed.
+sub _prepare_download_permissions {
+    my ($self, $path) = @_;
+    return 1 unless $self->_bool_conf_value('RADIO_DOWNLOAD_GROUP_READ', 0);
+
+    my $incoming = abs_path($self->_conf_value('YOUTUBEDL_INCOMING', '/var/lib/mediabot-radio/incoming'));
+    return 0 unless defined($incoming) && -d $incoming;
+    return 0 unless defined($path) && $path =~ /\.mp3\z/i && !-l $path;
+    my $resolved = abs_path($path);
+    return 0 unless defined($resolved) && dirname($resolved) eq $incoming;
+    my @dir = stat($incoming);
+    my @before = lstat($path);
+    return 0 unless @dir && @before && S_ISREG($before[2]) && $before[3] == 1
+        && $before[4] == $> && $before[5] == $dir[5];
+
+    # Work on an open descriptor so a replaced symlink cannot redirect chmod.
+    sysopen(my $fh, $path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK) or return 0;
+    my @opened = stat($fh);
+    unless (@opened && $opened[0] == $before[0] && $opened[1] == $before[1]
+            && S_ISREG($opened[2]) && $opened[3] == 1
+            && $opened[4] == $> && $opened[5] == $dir[5]) {
+        close $fh;
+        return 0;
+    }
+    my $ok = chmod(0640, $fh) == 1;
+    my @after = stat($fh);
+    close $fh;
+    my @named = lstat($path);
+    return $ok && @after && (($after[2] & 0777) == 0640)
+        && @named && $named[0] == $after[0] && $named[1] == $after[1]
+        && S_ISREG($named[2]) && $named[3] == 1;
+}
+
 sub _finish_download {
     my ($self, %args) = @_;
 
@@ -788,6 +824,13 @@ sub _finish_download {
         return;
     }
 
+    unless ($self->_prepare_download_permissions($path)) {
+        $self->_logger(1, 'Downloaded MP3 sharing check failed; request not catalogued or queued');
+        $self->_say($ctx, 'Radio: the MP3 was downloaded, but its storage permissions could not be prepared. It has not been queued.');
+        logBot($bot, $ctx->message, $ctx->channel, 'play', 'download-permissions-failed', $query);
+        return;
+    }
+
     my ($ytid, $artist, $title) = $self->_metadata_from_info_json($path);
 
     # Fallback for older yt-dlp versions or missing info-json files.
@@ -808,14 +851,21 @@ sub _finish_download {
     my $folder   = dirname($path);
     my $filename = basename($path);
 
-    $self->_insert_mp3(
+    my $stored_id = eval { $self->_insert_mp3(
         id_user    => $uid,
         id_youtube => $ytid,
         folder     => $folder,
         filename   => $filename,
         artist     => $artist,
         title      => $title,
-    );
+    ) };
+
+    unless ($stored_id) {
+        $self->_logger(1, 'MP3 catalogue write failed; request not queued');
+        $self->_say($ctx, 'Radio: the MP3 was downloaded, but could not be saved in the catalogue. It has not been queued.');
+        logBot($bot, $ctx->message, $ctx->channel, 'play', 'catalogue-failed', $query);
+        return;
+    }
 
     my $liq = $self->_liquidsoap_client;
     my ($ok, $response) = $liq->push($path);

@@ -52,8 +52,9 @@ return sub {
     $assert->ok(defined $radio, 'sample config has a [radio] section');
 
     for my $key (
-        'YOUTUBEDL_INCOMING=/tmp',
+        'YOUTUBEDL_INCOMING=/var/lib/mediabot-radio/incoming',
         'RADIO_DOWNLOAD_ENABLED=0',
+        'RADIO_DOWNLOAD_GROUP_READ=0',
         'YTDLP_PATH=/usr/bin/yt-dlp',
         'YTDLP_TIMEOUT=180',
         'YTDLP_REMOTE_COMPONENTS=ejs:github',

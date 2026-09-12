@@ -19,15 +19,10 @@ It intentionally stays small and boring:
   * send quit
   * collect the response
 
-The first radio integration step only uses the commands already confirmed
-on the dev Liquidsoap instance:
-
-  * mediabot_queue.push <uri>
-  * mediabot_queue.queue
-  * mediabot_queue.skip
-  * mediabot_queue.flush_and_skip
-
-There is no mediabot_queue.status command in the tested Liquidsoap setup.
+Use the queue namespace actually exposed by the command server, configured
+through LIQUIDSOAP_QUEUE_ID. A source ID written in the Liquidsoap script does
+not by itself prove the effective control namespace. Supported queue commands
+are push, queue, skip and flush_and_skip; no status command is assumed.
 
 =cut
 
@@ -98,8 +93,15 @@ sub command {
         local $SIG{ALRM} = sub { die "read timeout\n" };
         alarm($timeout);
 
-        while (defined(my $line = <$sock>)) {
-            $response .= $line;
+        while (1) {
+            my $count = sysread($sock, my $chunk, 4096);
+            die "read failed: $!\n" unless defined $count;
+            last unless $count;
+            $response .= $chunk;
+            die "response too large\n" if length($response) > 65536;
+            # MB734: END terminates this command's response. Waiting for EOF
+            # can mistake a later quit response for the command's result.
+            last if $response =~ /(?:\A|\n)END\r?\n/;
         }
 
         alarm(0);
@@ -115,10 +117,18 @@ sub command {
 
     close $sock;
 
-    $response =~ s/\r//g;
-    $response =~ s/\A\s+|\s+\z//g;
+    return _decode_response($response);
+}
 
-    return (1, $response);
+sub _decode_response {
+    my ($response) = @_;
+    $response //= '';
+    $response =~ s/\r//g;
+    my ($body) = $response =~ /\A(.*?)^END[ \t]*$/ms;
+    return (0, 'incomplete Liquidsoap response') unless defined $body;
+    $body =~ s/\A\s+|\s+\z//g;
+    return (0, $body) if $body =~ /^(?:ERROR\b|Unknown command\b|No such command\b|Invalid command\b)/mi;
+    return (1, $body);
 }
 
 sub push {
@@ -128,7 +138,12 @@ sub push {
         unless defined($uri) && $uri ne '';
 
     my $queue_id = $self->{queue_id} || 'mediabot_queue';
-    return $self->command("$queue_id.push $uri");
+    my ($ok, $response) = $self->command("$queue_id.push $uri");
+    return ($ok, $response) unless $ok;
+    # A push acknowledgement is a non-negative request ID, not arbitrary text.
+    return (0, 'Liquidsoap did not return a request ID')
+        unless defined($response) && $response =~ /\A\d+\z/;
+    return (1, $response);
 }
 
 sub queue {

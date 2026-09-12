@@ -1916,6 +1916,14 @@ sub joinChannels {
 # Évite de dupliquer 17 entrées sub { handler($ctx) } dans la dispatch table.
 sub _dispatch_radio {
     my ($ctx, $cmd) = @_;
+    # MB734: guests may request tracks only on a +Radio channel.
+    # Existing private/Master controls keep their historical access checks.
+    if ($cmd eq 'play' || $cmd eq 'rplay') {
+        require Mediabot::Radio::Public;
+        return Mediabot::Radio::Public::submit($ctx, $cmd)
+            if Mediabot::Radio::Public::enabled($ctx);
+        return if $cmd eq 'rplay';
+    }
     my %radio_map = (
         song            => \&song_ctx,
         radiostatus     => \&radioStatus_ctx,
@@ -2314,6 +2322,7 @@ sub mbCommandPublic {
         listeners      => sub { _dispatch_radio($ctx, $cmd) },
         nextsong       => sub { _dispatch_radio($ctx, $cmd) },
         play           => sub { _dispatch_radio($ctx, $cmd) },
+        rplay         => sub { _dispatch_radio($ctx, $cmd) },
         radioimport    => sub { _dispatch_radio($ctx, $cmd) },
         radioimportdir => sub { _dispatch_radio($ctx, $cmd) },
         radioqueue     => sub { _dispatch_radio($ctx, $cmd) },
@@ -2677,7 +2686,8 @@ modcmd|modcmd <command> <new action>|authorized|Modify a dynamic PUBLIC_COMMANDS
 modinfo|modinfo <nick>|admin|Show moderation information about a user.
 moduser|moduser <nick> <field> <value>|admin|Modify a bot user.
 mp3|mp3 <query>|public|Search or display MP3/radio related information.
-play|play <query>|public|Queue a cached/downloaded radio track via Liquidsoap. Master-only during rollout.
+play|play <YouTube URL>|public|Request a track on a +Radio channel. Other uses remain Master-only.
+rplay|rplay <artist or title>|public|Request a random catalogue track on a +Radio channel.
 radioqueue|radioqueue|public|Show the Liquidsoap Mediabot request queue. Master-only.
 radiocheck|radiocheck|public|Check local radio cache, yt-dlp, cookies, Liquidsoap, and Icecast configuration. Master-only.
 radiocache|radiocache|public|Show MP3 cache database/file consistency summary. Master-only.
