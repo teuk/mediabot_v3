@@ -16,8 +16,13 @@ release. The current development line is `3.6dev`.
   dependency installation at most three times with fresh download/build state,
   retaining installed modules and exposing the failed build log.
 
-- Use the concise `TRACK` label for confirmed radio additions in both French
-  and English; preserve ranks, replay links, colours and `song` output.
+- Compact radio confirmations to `[+N]` and queue previews to `[LIVE]` / `[N]`
+  in both languages, retaining the existing public/NOTICE limits and `song`.
+- Reuse optional YouTube view counts from existing search/download responses
+  and validated cache sidecars, without extra lookups or audio downloads.
+  Preserve these observations per job; omit unavailable counters on older tracks.
+- Remove a repeated artist prefix from display-only combined credits while
+  preserving collaborators, song versions, catalogue rows and audio metadata.
 
 - Refine radio confirmations and queue views with red/orange accents and
   native client text, preserving the existing `song` display. Keep one bounded

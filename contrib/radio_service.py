@@ -53,6 +53,11 @@ def clean(value, limit=255):
     return re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', str(value))[:limit].strip()
 
 
+def valid_views(value):
+    # Optional, bounded observation; bool/float/string are not counters.
+    return value if type(value) is int and 0 <= value < 10**12 else None
+
+
 def metadata_labels(track, fallback=''):
     """Remove a literal repeated artist prefix, preserving recording/version text."""
     artist = unicodedata.normalize('NFC', clean(track.get('artist') or ''))
@@ -349,7 +354,10 @@ class Backend:
                 result = json.loads(raw)
             except (ValueError, UnicodeError):
                 raise RadioError('youtube_search_failed', 503) from None
-            return search_video(result, self.c.get('max_duration', 900), query, self.video_allowed)
+            video = search_video(result, self.c.get('max_duration', 900), query, self.video_allowed)
+            selected = next((v for v in result['entries'] if isinstance(v, dict) and v.get('id') == video), {})
+            self._last_video_stats = (video, valid_views(selected.get('view_count')))
+            return video
 
     def catalogue(self, action, **values):
         result = json.loads(run(['/usr/bin/perl', str(Path(__file__).with_name('radio_catalogue.pl')),
@@ -393,6 +401,16 @@ class Backend:
         except (OSError, KeyError, TypeError, ValueError):
             pass  # Missing presentation metadata cannot fail a valid request.
         return video, seconds
+
+    def display_views(self, track):
+        # Filled only by already-required search/download/cache validation.
+        # Never read another file, probe audio, or contact YouTube here.
+        seen = getattr(self, '_last_video_stats', ())
+        video = track.get('id_youtube')
+        if (isinstance(video, str) and re.fullmatch(r'[A-Za-z0-9_-]{11}', video)
+                and isinstance(seen, tuple) and len(seen) == 2 and seen[0] == video):
+            return valid_views(seen[1])
+        return None
 
     def resolve(self, job):
         deadline = time.monotonic() + 30
@@ -441,6 +459,9 @@ class Backend:
             content = bounded_file(audio, 32 * 1024 * 1024)
             require(len(content) == meta['size'] and hashlib.sha256(content).hexdigest() == meta['sha256'],
                     'cached_audio_changed')
+        views = valid_views(meta.get('view_count'))
+        if views is not None:
+            self._last_video_stats = (video, views)
         return meta
 
     def download(self, video):
@@ -474,8 +495,12 @@ class Backend:
                 audio = self.audio(out.with_suffix('.mp3'))
                 meta = json.loads(bounded_file(out.with_suffix('.info.json'), 8 * 1024 * 1024))
                 require(isinstance(meta, dict) and meta.get('id') == video, 'video_identity_mismatch')
+                views = valid_views(meta.get('view_count'))
                 meta = {'id': video, 'artist': clean(meta.get('artist') or meta.get('uploader') or 'YouTube'),
                         'title': clean(meta.get('track') or meta.get('title') or video)}
+                if views is not None:
+                    meta['view_count'] = views
+                    self._last_video_stats = (video, views)
                 meta['artist'], meta['title'] = metadata_labels(meta)
                 content = bounded_file(audio, 32 * 1024 * 1024)
                 meta.update(size=len(content), sha256=hashlib.sha256(content).hexdigest())
@@ -630,6 +655,7 @@ class Service:
         self.db.execute('CREATE TABLE IF NOT EXISTS job_tracks (job_id TEXT PRIMARY KEY, mp3 TEXT NOT NULL)')
         self.db.execute('''CREATE TABLE IF NOT EXISTS job_details (
             job_id TEXT PRIMARY KEY, video TEXT NOT NULL, duration INTEGER)''')
+        self.db.execute('CREATE TABLE IF NOT EXISTS job_video_stats (job_id TEXT PRIMARY KEY, views INTEGER NOT NULL)')
         self.db.execute('''CREATE TABLE IF NOT EXISTS jobs (
             id TEXT PRIMARY KEY, instance TEXT NOT NULL, caller TEXT NOT NULL, channel TEXT NOT NULL,
             action TEXT NOT NULL, query TEXT NOT NULL, video TEXT NOT NULL,
@@ -734,6 +760,9 @@ class Service:
                     result['youtube_url'] = 'https://youtu.be/' + details['video']
                 if type(details['duration']) is int and 0 < details['duration'] <= 3600:
                     result['duration_seconds'] = details['duration']
+            stats = self.db.execute('SELECT views FROM job_video_stats WHERE job_id=?', (row['id'],)).fetchone()
+            if 'youtube_url' in result and stats and valid_views(stats['views']) is not None:
+                result['youtube_views'] = stats['views']
         return result
 
     def submit(self, instance, body):
@@ -768,6 +797,7 @@ class Service:
             self.db.execute('DELETE FROM queue_receipts WHERE job_id NOT IN (SELECT id FROM jobs)')
             self.db.execute('DELETE FROM job_tracks WHERE job_id NOT IN (SELECT id FROM jobs)')
             self.db.execute('DELETE FROM job_details WHERE job_id NOT IN (SELECT id FROM jobs)')
+            self.db.execute('DELETE FROM job_video_stats WHERE job_id NOT IN (SELECT id FROM jobs)')
             rows = self.db.execute('SELECT * FROM jobs WHERE updated > ? OR created > ? OR state IN (?,?,?)',
                                    (now - 600, now - 600, *ACTIVE)).fetchall()
             self.db.execute('''DELETE FROM track_claims WHERE updated < ? AND job_id NOT IN
@@ -937,6 +967,7 @@ class Service:
         submitting = False
         acquired = False
         try:
+            self.backend._last_video_stats = ()
             self.backend.capacity()
             if job['action'] == 'play' and not job['video']:
                 video = self.backend.search(job['query'])
@@ -973,6 +1004,9 @@ class Service:
             video, seconds = Backend.display_details(self.backend, track)
             with self.lock, self.db:
                 self.db.execute('INSERT OR REPLACE INTO job_details VALUES (?,?,?)', (job['id'], video, seconds))
+                views = Backend.display_views(self.backend, track)
+                if views is not None:
+                    self.db.execute('INSERT OR REPLACE INTO job_video_stats VALUES (?,?)', (job['id'], views))
             self.update(job['id'], state='submitting', title=clean(track['artist'] + ' — ' + track['title'], 180))
             submitting = True
             rid = self.backend.push(track)

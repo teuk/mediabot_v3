@@ -106,11 +106,18 @@ sub capsule {
     # Foreground accents only; the client's normal text stays readable on its
     # own light/dark theme. Never change song's existing presentation.
     my ($text,$red)=@_;
-    return "\x0304\x02[ $text ]\x0F" if $red;
-    return "\x0307\x02[ \x0F\x02$text\x0307 ]\x0F";
+    return "\x0304\x02[$text]\x0F" if $red;
+    return "\x0307\x02[\x0F\x02$text\x0307]\x0F";
 }
 sub music_label {
     my ($value,$limit,$plain)=@_;
+    $value=safe_text($value,1024);
+    # A credited group already beginning with the artist is a complete label.
+    # Keep collaborators and version text; this is presentation-only, not retagging.
+    if ($value =~ /\A(.+?)\s+[—-]\s+(.+)\z/) {
+        my ($artist,$rest)=($1,$2);
+        $value=$rest if $rest =~ /\A\Q$artist\E,\s+\S.*\s[-–—]\s+\S/i;
+    }
     $value=safe_text($value,$limit);
     $value =~ s/ — / - /;
     return "\x0F" . ($plain ? '' : "\x02") . $value . "\x0F";
@@ -124,11 +131,11 @@ sub queued_line {
     my $rank=$r->{position};
     my $where=($r->{placement}//'') eq 'waiting' && defined($rank) && !ref($rank)
         && $rank =~ /\A[1-9]\d{0,2}\z/ && $rank<=512
-        ? "#$rank"
+        ? "+$rank"
         : ($r->{placement}//'') eq 'not_waiting'
             ? ($lang eq 'fr' ? 'plus en attente' : 'no longer waiting')
             : ($lang eq 'fr' ? 'rang non confirmé' : 'position unconfirmed');
-    my $head=capsule('+ TRACK '.$where,1).' ';
+    my $head=capsule($where,1).' ';
     my @details;
     my $seconds=$r->{duration_seconds};
     if (defined($seconds) && !ref($seconds) && $seconds =~ /\A[1-9][0-9]{0,3}\z/ && $seconds<=3600) {
@@ -140,8 +147,16 @@ sub queued_line {
     my $url=$r->{youtube_url};
     # Only the selected central identity can become a clickable replay link.
     # Default foreground and underline avoid dark-blue links on black themes.
-    $tail.=" · \x1F$url\x0F" if defined($url) && !ref($url)
-        && $url =~ m{\Ahttps://youtu\.be/[A-Za-z0-9_-]{11}\z};
+    if (defined($url) && !ref($url) && $url =~ m{\Ahttps://youtu\.be/[A-Za-z0-9_-]{11}\z}) {
+        my $views=$r->{youtube_views};
+        if (defined($views) && !ref($views) && $views =~ /\A(?:0|[1-9][0-9]{0,11})\z/) {
+            # Reuse the YouTube formatter only: no details lookup/API call.
+            my $count=eval { require Mediabot::External::YouTube;
+                $views ? Mediabot::External::YouTube::_yt_format_views($views) : '0' };
+            $tail.=' · '.$count.($lang eq 'fr' ? ' vues' : ' views') if defined($count) && $count ne '?';
+        }
+        $tail.=" · \x1F$url\x0F";
+    }
     my $budget=360-length(encode_utf8($head.$tail))-4;
     return $head.music_label($r->{title} || ($lang eq 'fr' ? 'titre indisponible' : 'title unavailable'),$budget).$tail."\x0F";
 }
@@ -229,7 +244,7 @@ sub queue_lines {
         }
         my $line;
         for (my $limit=180;$limit>=8;$limit--) {
-            $line=capsule($lang eq 'fr' ? 'ANTENNE' : 'ON AIR',1) . ' '
+            $line=capsule('LIVE',1) . ' '
                 . music_label(safe_text($r->{on_air},240) || $unknown,$limit);
             if (@titles) {
                 for my $i (0..($#titles<2 ? $#titles : 2)) {

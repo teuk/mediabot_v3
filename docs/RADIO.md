@@ -127,18 +127,25 @@ plus a count of any remaining tracks. Missing Icecast status is displayed as
 
 Radio confirmations use a red (04) bracketed marker, bold artist/title in the
 client's normal text colour, and an underlined YouTube replay link. Queue views
-use a red `ON AIR` marker and orange (07) brackets around waiting positions. Position numbers and pending
+use a red `LIVE` marker and orange (07) brackets around waiting positions. Position numbers and pending
 titles use normal client text. No background, dark-grey body text or dark-blue link colour
 is forced, so the content follows the reader's light/dark theme. IRC palettes
 remain client-configurable. `song` itself is unchanged.
+
+The addition marker is `[+N]`, with no inner spaces or redundant label;
+`[LIVE]` and `[1]`, `[2]`, `[3]` use the same compact style in both languages.
+A repeated leading artist is removed from the display only when the title
+already starts with that exact artist and a comma-separated credit followed
+by the song title. Collaborators and recording/version labels are retained;
+catalogue rows, MP3 tags, Liquidsoap metadata and `song` are not rewritten.
 
 Each addition or queue response is one line, bounded to **360 UTF-8 bytes**
 including formatting. Long labels are shortened; the replay URL remains intact.
 For example, without the IRC formatting codes (duration and ID illustrative):
 
 ```text
-[ + TRACK #1 ] Stevie Wonder - Superstition · 4:01 · MP3 #37 · https://youtu.be/ftdZ363R9kQ
-[ ON AIR ] Stevie Wonder - Superstition › [ 1 ] Paul Simon - You Can Call Me Al
+[+1] Stevie Wonder - Superstition · 4:01 · MP3 #37 · https://youtu.be/ftdZ363R9kQ
+[LIVE] Stevie Wonder - Superstition › [1] Paul Simon - You Can Call Me Al
 ```
 
 For the same selected YouTube video ID, `play` reuses the central catalogue
@@ -157,6 +164,22 @@ retagging for presentation. Missing/invalid IDs or unavailable measurements
 are omitted; historic jobs without details still return a useful confirmation.
 Details appear only after a confirmed push. An uncertain submission never
 becomes a public success because it has metadata.
+
+When YouTube's already-required search/download response includes a valid
+`view_count`, confirmations also show a compact counter using Mediabot's
+existing YouTube number formatter (for example `1.2M views`, or `1.2M vues`).
+It is a snapshot from that response, **not a live counter**. New download
+sidecars retain this optional value; cached `play` and `rplay` can reuse it.
+Existing sidecars without it remain valid and are not rewritten or refreshed.
+There is no extra network call, YouTube API key, audio probe, or catalogue
+query to obtain views. Missing/invalid counters are simply omitted, leaving
+the exact replay link available. A count alone never determines track selection.
+
+The optional `youtube_views` field is attached to the resolved video and stored
+in the additive private SQLite table `job_video_stats`. Its receipt survives
+API restarts, shares the job's instance isolation, and expires with the existing
+seven-day job history. No change to the central MariaDB `MP3` schema is needed.
+Earlier API code can ignore this table on rollback; no radio history is restored.
 
 Clients need the updated display code to render these fields; earlier HTTP
 clients keep working. No new configuration key is needed. The queue preview

@@ -236,7 +236,7 @@ print encode_json($v);
             downloads.append(args)
             target=Path(kw['directory'])
             (target/'audio.mp3').write_bytes(b'fake audio')
-            (target/'audio.info.json').write_text(json.dumps(dict(id='abcdefghijk',uploader='Artist',title='Artist - Song')))
+            (target/'audio.info.json').write_text(json.dumps(dict(id='abcdefghijk',uploader='Artist',title='Artist - Song',view_count=1234567)))
             Path(args[args.index('--cookies')+1]).write_text('updated private copy')
             return b''
         def catalogue(action,**kw):
@@ -252,6 +252,8 @@ print encode_json($v);
         self.assertEqual(registrations[0][1]['filename'],'abcdefghijk.mp3')
         self.assertEqual(registrations[0][1]['title'],'Song')
         self.assertEqual(json.loads((incoming/'abcdefghijk.radio.json').read_text())['title'],'Song')
+        self.assertEqual(json.loads((incoming/'abcdefghijk.radio.json').read_text())['view_count'],1234567)
+        self.assertEqual(b.display_views({'id_youtube':'abcdefghijk'}),1234567)
         self.assertEqual(downloads[0][-2:],['--','https://www.youtube.com/watch?v=abcdefghijk'])
         self.assertIn('--ignore-config',downloads[0]);self.assertIn('--no-plugin-dirs',downloads[0])
         self.assertFalse(any(p.name.startswith('.radio-') for p in incoming.iterdir()))
@@ -1442,6 +1444,87 @@ class DisplayReceipts(unittest.TestCase):
         self.assertEqual(radio.Backend.display_details(self.backend,track),('ftdZ363R9kQ',None))
         other=dict(track,filename='different.mp3')
         self.assertEqual(radio.Backend.display_details(self.backend,other),('ftdZ363R9kQ',None))
+
+
+
+class ViewCounters(unittest.TestCase):
+    setUp = Contract.setUp
+    tearDown = Contract.tearDown
+    body = Contract.body
+    api = Contract.api
+    resolved_track = DisplayReceipts.resolved_track
+
+    def observed_track(self, count=1234567):
+        track,path=self.resolved_track()
+        def resolve(job):
+            self.backend._last_video_stats=(track['id_youtube'],count)
+            return dict(track)
+        self.backend.resolve=resolve
+        return track,path
+
+    def test_queued_counter_survives_restart_privacy_and_pruning(self):
+        self.observed_track();body=self.body(action='rplay',query='Stevie Wonder')
+        self.s.submit('nbot',body);self.s.work_once()
+        result=self.s.status('nbot',body['id'])
+        self.assertEqual(result['youtube_views'],1234567)
+        self.assertEqual(self.api('GET','/v1/requests/'+body['id'])[0],404)
+        self.s.db.close();self.s=radio.Service(self.c,self.backend,clock=lambda:self.now)
+        self.assertEqual(self.s.status('nbot',body['id']),result)
+        self.now+=8*86400;self.s.submit('dev',self.body(2))
+        self.assertEqual(self.s.db.execute('SELECT count(*) FROM job_video_stats').fetchone()[0],0)
+
+    def test_optional_bad_counter_does_not_fail_push_or_replace_title(self):
+        for n,count in enumerate((None,-1,True,1.5,'42',{},10**12),1):
+            with self.subTest(count=count):
+                self.now+=1000;self.observed_track(count);body=self.body(n)
+                self.s.submit('dev',body);self.s.work_once();result=self.s.status('dev',body['id'])
+                self.assertEqual(result['state'],'queued');self.assertNotIn('youtube_views',result)
+                self.assertEqual(result['title'],'Stevie Wonder — Superstition')
+        self.assertEqual(self.backend.sent,7)
+
+    def test_uncertain_push_never_exposes_success_counter(self):
+        self.observed_track();self.backend.error='ack';body=self.body()
+        self.s.submit('dev',body);self.s.work_once()
+        result=self.s.status('dev',body['id']);self.assertEqual(result['state'],'uncertain')
+        self.assertNotIn('youtube_views',result);self.assertEqual(self.backend.sent,1)
+
+    def test_search_captures_only_selected_video_without_another_call(self):
+        b=radio.Backend(dict(incoming=self.temp.name,yt_dlp='/fake/yt-dlp'))
+        entries=[TextPlay.entry(title='Artist - Song (Interview)',view_count=99999999),
+                 TextPlay.entry('ABCDEFGHIJK',title='Artist - Song (Official Audio)',view_count=12345)]
+        with patch.object(radio,'run',return_value=json.dumps(dict(_type='playlist',entries=entries)).encode()) as execute:
+            self.assertEqual(b.search('Artist Song'),'ABCDEFGHIJK')
+            self.assertEqual(b.display_views({'id_youtube':'ABCDEFGHIJK'}),12345)
+            self.assertIsNone(b.display_views({'id_youtube':'abcdefghijk'}))
+            self.assertEqual(execute.call_count,1)
+
+    def test_existing_sidecar_reused_without_write_or_network(self):
+        incoming=Path(self.temp.name);video='abcdefghijk';audio=incoming/(video+'.mp3');audio.write_bytes(b'audio fixture')
+        sidecar=audio.with_suffix('.radio.json')
+        track=dict(id_youtube=video,folder=str(incoming),filename=audio.name,artist='Artist',title='Song')
+        b=radio.Backend(dict(incoming=str(incoming),music_roots=[str(incoming)]))
+        for count in (12345,0,None,'bad'):
+            meta=dict(id=video,artist='Artist',title='Song',size=audio.stat().st_size,sha256=hashlib.sha256(audio.read_bytes()).hexdigest())
+            if count is not None:meta['view_count']=count
+            sidecar.write_text(json.dumps(meta));before=sidecar.read_bytes();b._last_video_stats=()
+            with patch.object(b,'catalogue',return_value={'tracks':[dict(track)]}), patch.object(b,'audio',return_value=audio), \
+                 patch.object(radio,'run',side_effect=AssertionError('No extra process/network')):
+                resolved=b.resolve(dict(action='rplay',query='Song'))
+                self.assertEqual(b.display_views(resolved),count if type(count) is int else None)
+                self.assertEqual(sidecar.read_bytes(),before)
+
+    def test_previous_job_observation_is_not_reused_for_legacy_track(self):
+        track,path=self.resolved_track();self.backend._last_video_stats=(track['id_youtube'],1234)
+        body=self.body();self.s.submit('dev',body);self.s.work_once()
+        self.assertEqual(self.s.status('dev',body['id'])['state'],'queued')
+        self.assertNotIn('youtube_views',self.s.status('dev',body['id']))
+
+    def test_upgrade_from_earlier_database_preserves_history(self):
+        body=self.body();self.s.submit('dev',body);self.s.update(body['id'],state='queued',rid=42)
+        self.s.db.execute('DROP TABLE job_video_stats');self.s.db.commit();self.s.db.close()
+        self.s=radio.Service(self.c,self.backend,clock=lambda:self.now)
+        self.assertEqual(self.s.status('dev',body['id'])['state'],'queued')
+        self.assertNotIn('youtube_views',self.s.status('dev',body['id']))
 
 
 if __name__=='__main__':
