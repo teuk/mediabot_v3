@@ -81,9 +81,116 @@ sub notice {
     $ctx->reply_private($lang eq 'fr' ? $fr : $en);
 }
 sub queue_now { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) }
+sub safe_text {
+    my ($value,$limit)=@_;
+    return '' unless defined($value) && !ref($value);
+    $value =~ s/[\p{Cc}\p{Cf}\p{Cs}]/ /g;
+    $value =~ s/\s+/ /g;
+    $value =~ s/^\s+|\s+$//g;
+    my $bytes=encode_utf8($value);
+    if (length($bytes)>$limit) {
+        # Cut bytes once, then back up only over an incomplete UTF-8 character.
+        # Re-encoding a large Icecast title for each removed character is quadratic.
+        my $prefix=substr($bytes,0,$limit-3);
+        while (length $prefix) {
+            my $copy=$prefix;
+            my $decoded=eval { decode('UTF-8',$copy,FB_CROAK) };
+            return $decoded.'…' if defined $decoded;
+            chop $prefix;
+        }
+        return '…';
+    }
+    return $value;
+}
+sub capsule {
+    # Same foreground palette as song: orange (07) capsules, grey (14) titles.
+    return "\x0307\x02[ " . $_[0] . " ]\x0F";
+}
+sub music_label {
+    my ($value,$limit)=@_;
+    $value=safe_text($value,$limit);
+    $value =~ s/ — / - /;
+    return "\x0314$value\x0F";
+}
+sub language {
+    my ($ctx)=@_;
+    return (eval { Mediabot::Helpers::channel_lang($ctx->bot,$ctx->channel) } // 'en') eq 'fr' ? 'fr' : 'en';
+}
+sub queued_line {
+    my ($r,$lang)=@_;
+    my $rank=$r->{position};
+    my $where=($r->{placement}//'') eq 'waiting' && defined($rank) && !ref($rank)
+        && $rank =~ /\A[1-9]\d{0,2}\z/ && $rank<=512
+        ? ($lang eq 'fr' ? "rang #$rank à l’ajout" : "#$rank when added")
+        : ($r->{placement}//'') eq 'not_waiting'
+            ? ($lang eq 'fr' ? 'plus en attente' : 'no longer waiting')
+            : ($lang eq 'fr' ? 'rang non confirmé' : 'position unconfirmed');
+    return capsule($lang eq 'fr' ? 'Radio + ajout confirmé' : 'Radio + added') . ' '
+        . music_label($r->{title} || ($lang eq 'fr' ? 'titre indisponible' : 'title unavailable'),220)
+        . ' ' . capsule($where);
+}
+sub public_or_notice {
+    my ($ctx,$line,$kind,$private)=@_;
+    my $bot=$ctx->bot;
+    my $now=queue_now();
+    my $map=$bot->{_radio_display_until} //= {};
+    delete $map->{$_} for grep { ($map->{$_}{any}//0)<=$now && ($map->{$_}{queue}//0)<=$now } keys %$map;
+    my $channel=fold($ctx->channel);
+    my $entry=$map->{$channel}//{};
+    # Shared by aliases and callers. Successful additions also leave a 15s gap.
+    if (!$private && ($entry->{any}//0)<=$now && ($kind ne 'queue' || ($entry->{queue}//0)<=$now)
+        && (exists($map->{$channel}) || keys(%$map)<128)) {
+        $entry->{any}=$now+15;
+        $entry->{queue}=$now+60 if $kind eq 'queue';
+        $map->{$channel}=$entry;
+        $ctx->reply($line);
+    } else {
+        $ctx->reply_private($line);
+    }
+}
+sub consultation_allowed {
+    my ($ctx)=@_;
+    my $bot=$ctx->bot;
+    my $now=queue_now();
+    my $prefix=eval { $ctx->message->prefix } // '';
+    return unless $prefix =~ /\A[^!\s]+!([^@\s]+\@[^\s]+)\z/;
+    my $caller=sha256_hex(encode_utf8(lc($1)));
+    my $map=$bot->{_radio_consult_until} //= {};
+    delete $map->{$_} for grep {$map->{$_}<=$now} keys %$map;
+    return if ($map->{$caller}//0)>$now || ($bot->{_radio_consult_global}//0)>$now || keys(%$map)>=256;
+    $map->{$caller}=$now+5;
+    $bot->{_radio_consult_global}=$now+1;
+    return 1;
+}
+sub current_title {
+    my ($bot)=@_;
+    # Separate public Icecast read, without the radio API bearer token. One
+    # bounded request in the child; missing status does not hide the queue.
+    my $value=eval {
+        my $base=endpoint(setting($bot,'RADIO_ICECAST_STATUS_BASE_URL','http://127.0.0.1:8000'));
+        my $mount=setting($bot,'RADIO_ICECAST_PRIMARY_MOUNT','/radio.mp3');
+        my $http=HTTP::Tiny->new(timeout=>2,verify_SSL=>1,max_redirect=>0,max_size=>262144,
+            proxy=>undef,http_proxy=>undef,https_proxy=>undef);
+        my $r=$http->get($base.'/status-json.xsl');
+        die 'status' unless $r->{success};
+        my $data=JSON::PP::decode_json($r->{content}//'');
+        die 'status' unless ref($data) eq 'HASH' && ref($data->{icestats}) eq 'HASH';
+        my $sources=$data->{icestats}{source};
+        $sources=[$sources] if ref($sources) eq 'HASH';
+        die 'status' unless ref($sources) eq 'ARRAY' && @$sources<=64;
+        my @selected=grep { ref($_) eq 'HASH' && !ref($_->{listenurl})
+            && (($_->{listenurl}//'') =~ m{\Ahttps?://[^/]+(/[^?#]*)\z}) && $1 eq $mount } @$sources;
+        die 'mount' unless @selected==1;
+        my $title=safe_text($selected[0]{title},240);
+        my $artist=safe_text($selected[0]{artist},120);
+        die 'title' unless length $title;
+        $title="$artist - $title" if length($artist) && $title !~ /\A\Q$artist\E(?:\s+[-–—]\s+|\s*:\s+)/i;
+        safe_text($title,240);
+    };
+    return $value;
+}
 sub queue_lines {
     my ($r,$command)=@_;
-    $command='radioqueue' if $command eq 'queue';
     return unless ref($r) eq 'HASH' && !exists($r->{error});
     for my $key (qw(protocol total preparing transferring)) {
         return unless defined($r->{$key}) && !ref($r->{$key}) && $r->{$key} =~ /\A\d{1,3}\z/;
@@ -93,48 +200,57 @@ sub queue_lines {
     my @titles;
     for my $track (@{$r->{waiting}}) {
         return unless ref($track) eq 'HASH' && defined($track->{title}) && !ref($track->{title});
-        my $title=$track->{title};
-        $title =~ s/[\p{Cc}\p{Cf}\p{Cs}]/ /g;
-        $title =~ s/^\s+|\s+$//g;
-        # A separate NOTICE per title, bounded in bytes even with emoji/CJK.
-        chop $title while length(encode_utf8($title)) > 240;
-        push @titles,$title;
+        push @titles,safe_text($track->{title},240);
     }
-    my @lines;
-    if ($command eq 'nextsong' && @titles) {
-        my $title=$titles[0];
-        push @lines,['Radio : prochaine demande en attente — '.($title || 'titre indisponible'),
-                     'Radio: next waiting request — '.($title || 'title unavailable')];
-    } else {
-        push @lines,["Radio : file commune — $r->{total} en attente | préparation : $r->{preparing} | transmission : $r->{transferring}.",
-                     "Radio: shared queue — $r->{total} waiting | preparing: $r->{preparing} | submitting: $r->{transferring}."];
-        if ($command eq 'radioqueue') {
-            for my $i (0..$#titles) {
-                push @lines,['Radio : '.($i+1).'. '.($titles[$i] || 'titre indisponible'),
-                             'Radio: '.($i+1).'. '.($titles[$i] || 'title unavailable')];
-            }
-            push @lines,['Radio : seuls les six premiers morceaux sont affichés.',
-                         'Radio: only the first six tracks are shown.'] if $r->{total}>6;
+    my @pair;
+    for my $lang (qw(fr en)) {
+        my $unknown=$lang eq 'fr' ? 'titre indisponible' : 'title unavailable';
+        if ($command eq 'nextsong') {
+            push @pair,capsule($lang eq 'fr' ? 'À suivre' : 'Up next') . ' '
+                . (@titles ? music_label($titles[0] || $unknown,240)
+                    : ($lang eq 'fr' ? 'aucune demande en attente' : 'no waiting request'));
+            next;
         }
+        my $line;
+        for (my $limit=180;$limit>=8;$limit--) {
+            $line=capsule('Radio') . ($lang eq 'fr' ? ' En cours : ' : ' On air: ')
+                . music_label(safe_text($r->{on_air},240) || $unknown,$limit);
+            if (@titles) {
+                for my $i (0..($#titles<2 ? $#titles : 2)) {
+                    $line.=' | '.capsule(''.($i+1)).' '.music_label($titles[$i] || $unknown,$limit);
+                }
+                $line.=' '.capsule('+'.($r->{total}-3)) if $r->{total}>3;
+            } else {
+                $line.=($lang eq 'fr' ? ' | file vide' : ' | queue empty');
+            }
+            my $pending=$r->{preparing}+$r->{transferring};
+            $line.=($lang eq 'fr' ? " | préparation : $pending" : " | preparing: $pending") if $pending;
+            last if length(encode_utf8($line))<=360;
+        }
+        push @pair,$line;
     }
-    push @lines,['Radio : antenne actuelle : song. Le direct reste prioritaire ; heure de passage non garantie.',
-                 'Radio: currently on air: song. Live input keeps priority; no guaranteed airtime.'];
-    return \@lines;
+    return [\@pair];
 }
 sub inspect_queue {
     my ($ctx,$command)=@_;
     return unless $command =~ /\A(?:radioqueue|nextsong|queue)\z/ && enabled($ctx) && present($ctx);
+    return unless consultation_allowed($ctx);
     my $bot=$ctx->bot;
     my $now=queue_now();
-    return if $bot->{_radio_queue_pending} || ($bot->{_radio_queue_until}//0)>$now;
-    # One read per bot every five seconds; identities cannot grow a cooldown map.
-    $bot->{_radio_queue_until}=$now+5;
-    if (@{$ctx->args}) {
-        notice($ctx,"Syntaxe : $command","Syntax: $command"); return;
-    }
+    if (@{$ctx->args}) { notice($ctx,"Syntaxe : $command","Syntax: $command"); return }
     unless (setting($bot,'RADIO_API_ENABLED','0') eq '1') {
         notice($ctx,'Radio : service non configuré.','Radio: service not configured.'); return;
     }
+    if ($bot->{_radio_queue_pending} || ($bot->{_radio_queue_until}//0)>$now) {
+        my $cache=$bot->{_radio_queue_cache};
+        my $lines=ref($cache) eq 'HASH' && $cache->{until}>$now && $cache->{irc}==$bot->{irc}
+            ? queue_lines($cache->{value},$command) : undef;
+        if ($lines) { notice($ctx,@$_) for @$lines }
+        else { notice($ctx,'Radio : consultation en cours ; patiente quelques secondes.',
+                           'Radio: queue check in progress; wait a few seconds.') }
+        return;
+    }
+    $bot->{_radio_queue_until}=$now+5;
     if (keys(%{$bot->{_radio_api_pending}//{}})>=4) {
         notice($ctx,'Radio : consultation occupée ; réessaie dans quelques secondes.',
                     'Radio: queue view busy; try again in a few seconds.'); return;
@@ -150,8 +266,12 @@ sub inspect_queue {
     my $generation=eval { $bot->{wit_runtime_state}->capture_generation($ctx->channel) };
     $bot->{_radio_queue_pending}=1;
     my $worker=eval { Mediabot::AsyncWorker->start(
-        loop=>(eval {$bot->getLoop} // $bot->{loop}),label=>'radio-queue',timeout=>10,max_output=>8192,
-        child=>sub { call_api($url,$secret,'GET','/v1/queue',undef) },
+        loop=>(eval {$bot->getLoop} // $bot->{loop}),label=>'radio-queue',timeout=>12,max_output=>8192,
+        child=>sub {
+            my $r=call_api($url,$secret,'GET','/v1/queue',undef);
+            $r->{on_air}=current_title($bot) if ref($r) eq 'HASH' && !$r->{error};
+            return $r;
+        },
         on_done=>sub {
             my ($result)=@_;
             delete $bot->{_radio_queue_pending};
@@ -159,10 +279,13 @@ sub inspect_queue {
                 && defined($generation) && $generation == (eval { $bot->{wit_runtime_state}->capture_generation($ctx->channel) } // -1);
             my $lines=queue_lines($result->{value},$command);
             unless ($lines) {
+                delete $bot->{_radio_queue_cache};
                 notice($ctx,'Radio : file commune indisponible ; réessaie dans quelques secondes.',
                             'Radio: shared queue unavailable; try again in a few seconds.'); return;
             }
-            notice($ctx,@$_) for @$lines;
+            $bot->{_radio_queue_cache}={value=>$result->{value},until=>queue_now()+5,irc=>$irc};
+            my $line=$lines->[0][language($ctx) eq 'fr' ? 0 : 1];
+            public_or_notice($ctx,$line,'queue',$command eq 'nextsong');
         }) };
     unless ($worker) {
         delete $bot->{_radio_queue_pending};
@@ -239,10 +362,8 @@ sub submit {
             return unless $valid->();
             my $r=ref($result->{value}) eq 'HASH' ? $result->{value} : {};
             if (($r->{state}//'') eq 'queued') {
-                my $title=$r->{title}//'';
-                $title =~ s/[\x00-\x1f\x7f-\x9f]/ /g;
-                $title=substr($title,0,160);
-                notice($ctx,"Radio : ajouté à la file — $title","Radio: added to the queue — $title");
+                delete $bot->{_radio_queue_cache};
+                public_or_notice($ctx,queued_line($r,language($ctx)),'success',0);
             } elsif (($r->{state}//'') eq 'uncertain' || !($r->{error} || ($r->{state}//'') eq 'failed')) {
                 notice($ctx,'Radio : confirmation indisponible ; ne relance pas la demande tout de suite.',
                             'Radio: confirmation unavailable; do not repeat the request yet.');

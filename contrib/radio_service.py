@@ -437,16 +437,31 @@ class Backend:
                     return data[:found.start()].decode('utf-8').strip()
             raise RadioError('queue_no_ack', 503)
 
+    def queue_ids(self, deadline):
+        value = self.command(self.c['queue_id'] + '.queue', deadline=deadline)
+        require(re.fullmatch(r'(?:[0-9]{1,10}(?:\s+[0-9]{1,10})*)?', value) is not None,
+                'queue_unavailable', 503)
+        result = value.split()
+        require(len(result) <= 512 and len(set(result)) == len(result), 'queue_unavailable', 503)
+        return result
+
+    def placement(self, rid):
+        """Position observed after acknowledgement, never a pre-push estimate."""
+        require(type(rid) is int and 0 <= rid <= 9999999999, 'queue_bad_ack', 503)
+        deadline = time.monotonic() + 2
+        before = self.queue_ids(deadline)
+        after = self.queue_ids(deadline)
+        require(before == after, 'queue_changing', 503)
+        if str(rid) in after:
+            return 'waiting', after.index(str(rid)) + 1
+        # Leaving the waiting list does not prove what Icecast is broadcasting.
+        return 'not_waiting', None
+
     def queue_view(self):
         """Read actual pending RIDs, not historical acknowledgements or on-air guesses."""
         deadline = time.monotonic() + 4
         def ids():
-            value = self.command(self.c['queue_id'] + '.queue', deadline=deadline)
-            require(re.fullmatch(r'(?:[0-9]{1,10}(?:\s+[0-9]{1,10})*)?', value) is not None,
-                    'queue_unavailable', 503)
-            result = value.split()
-            require(len(result) <= 512 and len(set(result)) == len(result), 'queue_unavailable', 503)
-            return result
+            return self.queue_ids(deadline)
         for _ in range(2):
             before = ids()
             waiting = [{'title': queue_title(self.command('request.metadata ' + rid, deadline=deadline))}
@@ -481,6 +496,8 @@ class Service:
         self.db.execute('PRAGMA synchronous=FULL')
         self.db.execute('CREATE TABLE IF NOT EXISTS download_pause (name TEXT PRIMARY KEY, code TEXT NOT NULL, until REAL NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS track_claims (track TEXT PRIMARY KEY, job_id TEXT NOT NULL, updated REAL NOT NULL)')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS queue_receipts (
+            job_id TEXT PRIMARY KEY, placement TEXT NOT NULL, position INTEGER)''')
         self.db.execute('''CREATE TABLE IF NOT EXISTS jobs (
             id TEXT PRIMARY KEY, instance TEXT NOT NULL, caller TEXT NOT NULL, channel TEXT NOT NULL,
             action TEXT NOT NULL, query TEXT NOT NULL, video TEXT NOT NULL,
@@ -521,9 +538,12 @@ class Service:
                         'duplicate_track', 409)
             self.db.execute('INSERT OR REPLACE INTO track_claims VALUES (?,?,?)', (key, job_id, self.clock()))
 
-    @staticmethod
-    def view(row):
-        return {k: row[k] for k in ('id', 'state', 'code', 'title', 'rid')}
+    def view(self, row):
+        result = {k: row[k] for k in ('id', 'state', 'code', 'title', 'rid')}
+        if row['state'] == 'queued':
+            receipt = self.db.execute('SELECT placement,position FROM queue_receipts WHERE job_id=?', (row['id'],)).fetchone()
+            result.update(dict(receipt) if receipt else dict(placement='unknown', position=None))
+        return result
 
     def submit(self, instance, body):
         require(isinstance(body, dict) and set(body) == {'id', 'caller', 'channel', 'action', 'query'})
@@ -543,6 +563,7 @@ class Service:
                         and old['query'] == query, 'request_id_conflict', 409)
                 return self.view(old)
             self.db.execute("DELETE FROM jobs WHERE state IN ('queued','failed','uncertain') AND updated < ?", (now - 604800,))
+            self.db.execute('DELETE FROM queue_receipts WHERE job_id NOT IN (SELECT id FROM jobs)')
             rows = self.db.execute('SELECT * FROM jobs WHERE updated > ? OR created > ? OR state IN (?,?,?)',
                                    (now - 600, now - 600, *ACTIVE)).fetchall()
             self.db.execute('''DELETE FROM track_claims WHERE updated < ? AND job_id NOT IN
@@ -641,7 +662,21 @@ class Service:
             self.update(job['id'], state='submitting', title=clean(track['artist'] + ' — ' + track['title'], 180))
             submitting = True
             rid = self.backend.push(track)
-            self.update(job['id'], state='queued', rid=rid)
+            # Optional readback must never turn an acknowledged push into a
+            # failure/retry. Keep the observed rank with its original receipt.
+            placement, position = 'unknown', None
+            try:
+                observed, rank = self.backend.placement(rid)
+                require((observed == 'waiting' and type(rank) is int and 1 <= rank <= 512)
+                        or (observed == 'not_waiting' and rank is None), 'queue_bad_position')
+                placement, position = observed, rank
+            except Exception:
+                LOG.info('job=%s queue_position=unavailable', job['id'])
+            with self.lock, self.db:
+                self.db.execute('INSERT OR REPLACE INTO queue_receipts VALUES (?,?,?)',
+                                (job['id'], placement, position))
+                self.db.execute("UPDATE jobs SET state='queued',rid=?,updated=? WHERE id=?",
+                                (rid, self.clock(), job['id']))
         except Exception as error:
             code = error.code if isinstance(error, RadioError) else 'operation_failed'
             self.update(job['id'], state='uncertain' if submitting else 'failed', code=code)

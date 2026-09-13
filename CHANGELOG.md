@@ -12,10 +12,18 @@ release. The current development line is `3.6dev`.
 
 ### mb734 — prepare reliable radio requests and shared audio storage
 
+- Show acknowledged additions with their observed position, using orange/grey
+  radio formatting. Persist rank receipts privately; missing or changing queue
+  readback never retries an acknowledged push or invents playback.
+- Show Icecast's current title and three pending tracks in one bounded line.
+  Share one public queue view per channel/minute across aliases and callers,
+  and a 15-second public gap with addition confirmations; fall back to NOTICE.
+  Keep nextsong, preparations/errors private and bound repeat consultations.
+
 - Remove repeated artist prefixes consistently from radio confirmations,
   pending queue labels and Liquidsoap metadata, including cached tracks.
   Keep recording/version suffixes and existing catalogue/audio files.
-- Add `queue` as a private shared-queue alias on `+Radio`; remote clients must
+- Add `queue` as a shared-queue alias on `+Radio`; remote clients must
   update to the published shared-queue commands instead of using local telnet.
 
 - Add artist/title input to public `play` through the central radio API:
@@ -39,7 +47,7 @@ release. The current development line is `3.6dev`.
   IDs in a local authenticated HTTP service; remote clients use HTTPS and
   separate revocable tokens. No SSH transport or public Liquidsoap control.
 - Register MP3 metadata before queue submission, preserve uncertain pushes
-  across restarts, bound downloads, and send request feedback by NOTICE.
+  across restarts, bound downloads, and keep preparation/errors in NOTICE.
 - Keep administrative controls restricted. Activation and an actual audio
   acceptance test remain operator steps; neither stream is reconfigured.
 - Allow a corrected catalogue search five seconds after an empty result;
@@ -61,7 +69,7 @@ release. The current development line is `3.6dev`.
   MP3s without embedded tags. Quote metadata as literal text, preserve audio
   fingerprints, and keep now-playing tied to Icecast playback.
 - Connect `radioqueue` and `nextsong` on `+Radio` to the central API for all
-  participants and instances, with private NOTICE responses. Observe the actual
+  participants and instances, with bounded public/private responses. Observe the actual
   waiting queue separately from preparing jobs and Icecast's current title;
   bound and cache reads without exposing paths, identities or private history.
 

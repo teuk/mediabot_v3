@@ -4,11 +4,12 @@ use utf8;
 use Test::More;
 use File::Temp qw(tempdir);
 use JSON::PP;
+use Encode qw(encode_utf8);
 BEGIN {
     $INC{'Mediabot/Helpers.pm'}=__FILE__;
     package Mediabot::Helpers;
     sub chanset_enabled { return $_[0]{radio_on} }
-    sub channel_lang { 'en' }
+    sub channel_lang { $_[0]{test_lang}//'en' }
 }
 use Mediabot::Radio::Public;
 use Mediabot::Context;
@@ -19,7 +20,7 @@ use Mediabot::AI::ConversationRuntimeState;
     package MB734Message; sub prefix { $_[0]{prefix} }
     package MB734Bot;
     sub botNotice { push @{$_[0]{notices}},$_[2] }
-    sub botPrivmsg { die 'No public radio feedback allowed' }
+    sub botPrivmsg { push @{$_[0]{public}},[$_[1],$_[2]] }
     sub getLoop { $_[0]{loop} }
     sub get_user_from_message { die 'Guest must not need a database account' }
 }
@@ -28,7 +29,7 @@ my $path="$dir/token";
 open my $fh,'>',$path or die $!; print {$fh} 'a'x64; close $fh; chmod 0600,$path;
 my $state=Mediabot::AI::ConversationRuntimeState->new;
 $state->mark_connected; $state->mark_joined('#radio');
-my $bot=bless {radio_on=>1,notices=>[],loop=>bless({},'LoopFixture'),
+my $bot=bless {radio_on=>1,notices=>[],public=>[],loop=>bless({},'LoopFixture'),
     irc=>bless({connected=>1},'MB734IRC'),
     wit_runtime_state=>$state,
     hChannelsNicks=>{'#Radio'=>['bot','Guest']},
@@ -58,7 +59,7 @@ my @calls;
     local *Mediabot::AsyncWorker::start=sub { shift; %worker=@_; return bless({},'WorkerFixture') };
     local *Mediabot::Radio::Public::call_api=sub {
         my ($url,$token,$method,$route,$body)=@_; push @calls,[$method,$route,$body];
-        return {state=>'queued',title=>'Artist - Track',rid=>42};
+        return {state=>'queued',title=>'Artist - Track',rid=>42,placement=>'waiting',position=>3};
     };
     ok(Mediabot::Radio::Public::submit($ctx,'play'),'guest request accepted without user lookup');
     ok(ref($worker{child}) eq 'CODE','network runs in supervised child');
@@ -69,7 +70,7 @@ my @calls;
     is_deeply([sort keys %{$calls[0][2]}],[sort qw(id caller channel action query)],'no remote UID or path or instance spoof');
     like($calls[0][2]{caller},qr/\A[a-f0-9]{64}\z/,'host identity hashed');
     $worker{on_done}->({value=>$result,ok=>1});
-    like($bot->{notices}[-1],qr/added to the queue/,'success reports queue, not playback');
+    like($bot->{public}[-1][1],qr/Radio \+ added.*Artist - Track.*#3 when added/,'success reports the confirmed rank in one themed channel message');
     is(scalar(keys %{$bot->{_radio_api_pending}}),0,'completion releases pending slot');
     $ctx->{args}=['Michael','Jackson','Billie','Jean'];
     @calls=();
@@ -123,65 +124,148 @@ my @calls;
     local *Mediabot::AsyncWorker::start=sub { shift; %worker=@_; return bless({},'WorkerFixture') };
     local *Mediabot::Radio::Public::call_api=sub {
         my ($url,$token,$method,$route,$body)=@_; push @calls,[$method,$route,$body];
-        return {protocol=>1,waiting=>[{title=>'Artist — Track'}],total=>1,preparing=>2,transferring=>0};
+        return {protocol=>1,waiting=>[map {{title=>"Artist $_ — Track $_"}} 1..5],total=>5,preparing=>2,transferring=>0};
     };
+    my $current_calls=0;
+    local *Mediabot::Radio::Public::current_title=sub {$current_calls++;'Actual artist - Current song'};
     my $now=100;
     local *Mediabot::Radio::Public::queue_now=sub {$now};
-    $ctx->{channel}='#radio';$ctx->{args}=[];@calls=();$bot->{notices}=[];
+    delete $bot->{$_} for qw(_radio_display_until _radio_consult_until _radio_consult_global _radio_queue_cache _radio_queue_until);
+    $ctx->{channel}='#radio';$ctx->{args}=[];@calls=();$bot->{notices}=[];$bot->{public}=[];
     ok(Mediabot::Radio::Public::inspect_queue($ctx,'radioqueue'),'guest reads common queue');
     is(scalar @calls,0,'queue HTTP stays outside IRC parent');
-    is($worker{timeout},10,'short bounded worker');
+    is($current_calls,0,'Icecast also stays outside IRC parent');
+    is($worker{timeout},12,'worker bounded for API plus public status');
     my $r=$worker{child}->();
-    is_deeply($calls[0],['GET','/v1/queue',undef],'read-only shared route, no SQL, filesystem or caller query');
+    is_deeply($calls[0],['GET','/v1/queue',undef],'read-only shared route, no SQL, path or caller query');
     $worker{on_done}->({value=>$r,ok=>1});
-    like($bot->{notices}[0],qr/1 waiting.*preparing: 2/,'waiting and preparing are separate');
-    like($bot->{notices}[1],qr/Artist — Track/,'pending title in private notice');
-    unlike(join(' ',@{$bot->{notices}}),qr/playing.*Artist/,'waiting title never claims current playback');
+    is(scalar @{$bot->{public}},1,'one public line for initial queue');
+    my $line=$bot->{public}[0][1];
+    like($line,qr/On air: .*Actual artist - Current song/,'current title comes from Icecast');
+    like($line,qr/Artist 1 - Track 1.*Artist 2 - Track 2.*Artist 3 - Track 3/,'first three ordered titles');
+    unlike($line,qr/Artist [45]/,'fourth and later title omitted');
+    like($line,qr/\+2/,'remaining count shown');
+    like($line,qr/preparing: 2/,'preparation does not pretend to be in the waiting queue');
+    is(scalar @{$bot->{notices}},0,'public queue is not duplicated by notice');
     ok(!$bot->{_radio_queue_pending},'read worker released');
-    is(Mediabot::Radio::Public::inspect_queue($ctx,'nextsong'),undef,'shared five-second consultation cooldown');
-    is(Mediabot::Radio::Public::inspect_queue($ctx,'queue'),undef,'alias shares radioqueue cooldown');
-    $now+=6;
-    ok(Mediabot::Radio::Public::inspect_queue($ctx,'queue'),'queue alias uses the common HTTP view');
-    my $alias_result=$worker{child}->();
-    $worker{on_done}->({value=>$alias_result,ok=>1});
-    like($bot->{notices}[-2],qr/Artist — Track/,'queue alias includes pending titles by NOTICE');
-    $now+=6;
+    is(Mediabot::Radio::Public::inspect_queue($ctx,'nextsong'),undef,'five-second caller cooldown across aliases');
+    is(Mediabot::Radio::Public::inspect_queue($ctx,'queue'),undef,'same caller cannot trigger a notice flood');
+    $now+=2;
+    $ctx->{nick}='Guest2';$ctx->{message}{prefix}='Guest2!different@example.test';
+    push @{$bot->{hChannelsNicks}{'#Radio'}},'Guest2';
+    my $calls_before=@calls;
+    Mediabot::Radio::Public::inspect_queue($ctx,'queue');
+    is(scalar @calls,$calls_before,'burst consultation uses short cache without HTTP');
+    like($bot->{notices}[-1],qr/Current song.*Artist 1/,'second caller gets the compact view privately');
+    is(scalar @{$bot->{public}},1,'second caller cannot bypass channel budget');
+    $ctx->{nick}='Guest';$ctx->{message}{prefix}='Guest!ident@example.test';
+    $now=106;
+    ok(Mediabot::Radio::Public::inspect_queue($ctx,'queue'),'alias can refresh after five seconds');
+    my $alias_result=$worker{child}->();$worker{on_done}->({value=>$alias_result,ok=>1});
+    is(scalar @{$bot->{public}},1,'alias shares the minute-long public budget');
+    like($bot->{notices}[-1],qr/Artist 3/,'private fallback still contains three next titles');
+    $now=120;
     ok(Mediabot::Radio::Public::inspect_queue($ctx,'nextsong'),'nextsong after cooldown');
     $worker{on_done}->({value=>$r,ok=>1});
-    like($bot->{notices}[-2],qr/next waiting request — Artist/,'next means waiting request');
-    like($bot->{notices}[-1],qr/Live input keeps priority/,'no invented airtime or automatic skip');
+    like($bot->{notices}[-1],qr/Up next.*Artist 1/,'nextsong stays a single private title');
+    is(scalar @{$bot->{public}},1,'nextsong does not add public traffic');
+    $now=160;
+    Mediabot::Radio::Public::inspect_queue($ctx,'queue');$worker{on_done}->({value=>$r,ok=>1});
+    is(scalar @{$bot->{public}},2,'a fresh public queue is allowed at sixty seconds');
     for my $change ('disconnect','disabled','part') {
-        $now+=6;Mediabot::Radio::Public::inspect_queue($ctx,'radioqueue');
-        my $n=@{$bot->{notices}};
+        $now+=61;Mediabot::Radio::Public::inspect_queue($ctx,'radioqueue');
+        my ($n,$p)=(scalar @{$bot->{notices}},scalar @{$bot->{public}});
         if ($change eq 'disconnect') {$state->mark_disconnected;$state->mark_connected;$state->mark_joined('#radio')}
         elsif ($change eq 'disabled') {$bot->{radio_on}=0}
         else {$bot->{hChannelsNicks}{'#Radio'}=['bot']}
         $worker{on_done}->({value=>$r,ok=>1});
-        is(scalar(@{$bot->{notices}}),$n,'late queue reply suppressed: '.$change);
+        is_deeply([scalar @{$bot->{notices}},scalar @{$bot->{public}}],[$n,$p],'no late public/private reply: '.$change);
         $bot->{radio_on}=1;$bot->{hChannelsNicks}{'#Radio'}=['bot','Guest'];
     }
-    $now+=6;Mediabot::Radio::Public::inspect_queue($ctx,'radioqueue');
-    $worker{on_done}->({ok=>0});
+    $now+=61;Mediabot::Radio::Public::inspect_queue($ctx,'radioqueue');
+    my $n=@{$bot->{public}};$worker{on_done}->({ok=>0});
     like($bot->{notices}[-1],qr/shared queue unavailable/,'failed HTTP is never an empty queue');
+    is(scalar @{$bot->{public}},$n,'failures stay private');
+    ok(!exists($bot->{_radio_queue_cache}),'failed read invalidates old cache');
     $ctx->{nick}='Outsider';$now+=6;
     is(Mediabot::Radio::Public::inspect_queue($ctx,'radioqueue'),undef,'outsider cannot inspect');
     $ctx->{nick}='Guest';$ctx->{channel}='Guest';
-    is(Mediabot::Radio::Public::inspect_queue($ctx,'radioqueue'),undef,'public queue requires channel membership');
+    is(Mediabot::Radio::Public::inspect_queue($ctx,'radioqueue'),undef,'queue still requires channel membership');
     $ctx->{channel}='#radio';
     local *Mediabot::AsyncWorker::start=sub {die 'worker unavailable'};
     Mediabot::Radio::Public::inspect_queue($ctx,'radioqueue');
-    ok(!$bot->{_radio_queue_pending},'failed worker start does not permanently lock reads');
+    ok(!$bot->{_radio_queue_pending},'failed worker start releases reads');
 }
 {
     my $r={protocol=>1,waiting=>[],total=>0,preparing=>1,transferring=>0};
-    like(Mediabot::Radio::Public::queue_lines($r,'nextsong')->[0][1],qr/0 waiting.*preparing: 1/,'empty actual queue can coexist with preparation');
+    like(Mediabot::Radio::Public::queue_lines($r,'queue')->[0][1],qr/queue empty.*preparing: 1/,'empty queue and preparation distinguished');
+    like(Mediabot::Radio::Public::queue_lines($r,'queue')->[0][1],qr/On air: .*title unavailable/,'missing Icecast title is explicit');
     for my $bad ({%$r,total=>1},{%$r,waiting=>'oops'},{%$r,error=>'unavailable'},{%$r,protocol=>2}) {
         ok(!Mediabot::Radio::Public::queue_lines($bad,'radioqueue'),'malformed queue does not invent a title');
     }
-    $r->{waiting}=[{title=>"\x03A\nB\x{202e}"}];$r->{total}=1;
-    unlike(Mediabot::Radio::Public::queue_lines($r,'radioqueue')->[1][1],qr/[\x03\n\x{202e}]/,'IRC controls and bidi removed');
+    $r->{waiting}=[{title=>"X\x03A\nB\x{202e}Y"}];$r->{total}=1;
+    my $line=Mediabot::Radio::Public::queue_lines($r,'queue')->[0][1];
+    unlike($line,qr/\n|\x{202e}|X\x03/,'untrusted IRC controls and bidi removed');
+    like($line,qr/\x0307\x02\[/,'orange capsules match song');
+    like($line,qr/\x0314X A B Y\x0F/,'grey title safely resets formatting');
     $r->{waiting}=[{title=>''}];
-    like(Mediabot::Radio::Public::queue_lines($r,'nextsong')->[0][1],qr/title unavailable/,'unresolved request remains visible without a private path');
+    like(Mediabot::Radio::Public::queue_lines($r,'nextsong')->[0][1],qr/title unavailable/,'unresolved title never exposes a path');
+    $r->{on_air}='🦉東京'x200;$r->{waiting}=[map {{title=>'🪄Björk 東京'x200}} 1..6];$r->{total}=512;
+    for my $command (qw(queue radioqueue nextsong)) {
+        my $pairs=Mediabot::Radio::Public::queue_lines($r,$command);
+        is(scalar @$pairs,1,'one compact line per consultation');
+        ok(length(encode_utf8($_))<=360,'IRC byte limit including color codes and Unicode') for @{$pairs->[0]};
+    }
+    for my $placement (['waiting',2,qr/rang #2 à l’ajout/],['not_waiting',undef,qr/plus en attente/],['unknown',undef,qr/rang non confirmé/],['waiting',0,qr/rang non confirmé/]) {
+        my $line=Mediabot::Radio::Public::queued_line({title=>'Michael Jackson — Billie Jean',placement=>$placement->[0],position=>$placement->[1]},'fr');
+        like($line,$placement->[2],'truthful placement after acknowledged push');
+        like($line,qr/Michael Jackson - Billie Jean/,'artist/song separator matches song');
+        unlike($line,qr/antenne/,'queue receipt never asserts playback');
+    }
+}
+{
+    no warnings qw(redefine once);
+    my (@urls,$options);
+    my $response={success=>1,content=>encode_json({icestats=>{source=>[
+        {listenurl=>'http://local:15000/other.mp3',title=>'Do not use'},
+        {listenurl=>'http://local:8000/radio.mp3',artist=>'Paul Simon',title=>'You Can Call Me Al'}]}})};
+    local *HTTP::Tiny::new=sub {shift;$options={@_};bless({},'MB734StatusHTTP')};
+    local *MB734StatusHTTP::get=sub {push @urls,[@_[1..$#_]];$response};
+    $bot->{conf}{'radio.RADIO_ICECAST_STATUS_BASE_URL'}='https://example.test/radio';
+    is(Mediabot::Radio::Public::current_title($bot),'Paul Simon - You Can Call Me Al','exact Icecast mount supplies artist/title');
+    is_deeply(\@urls,[['https://example.test/radio/status-json.xsl']],'public status receives no bearer or request fields');
+    is_deeply([@{$options}{qw(timeout verify_SSL max_redirect max_size)}],[2,1,0,262144],'status request bound and TLS checked');
+    for my $bad ({success=>0},{success=>1,content=>'invalid'},
+        {success=>1,content=>encode_json({icestats=>{source=>{listenurl=>'http://local/other.mp3',title=>'Wrong'}}})}) {
+        $response=$bad;
+        is(Mediabot::Radio::Public::current_title($bot),undef,'unavailable status or missing configured mount stays unknown');
+    }
+}
+{
+    no warnings 'redefine';
+    local *Mediabot::AsyncWorker::start=sub {shift;%worker=@_;bless({},'WorkerFixture')};
+    my $now=1000;
+    local *Mediabot::Radio::Public::queue_now=sub {$now};
+    $bot->{public}=[];$bot->{notices}=[];delete $bot->{_radio_display_until};
+    $ctx->{args}=['Artist'];$ctx->{channel}='#radio';
+    for my $step (0,6,16) {
+        $now=1000+$step;
+        Mediabot::Radio::Public::submit($ctx,'rplay');
+        $worker{on_progress}->({});
+        like($bot->{notices}[-1],qr/request received/,'preparation stays private');
+        $worker{on_done}->({value=>{state=>'queued',title=>'Artist — Track',placement=>'waiting',position=>1}});
+    }
+    is(scalar @{$bot->{public}},2,'success announcements share fifteen-second public spacing');
+    like(join(' ',@{$bot->{notices}}),qr/#1 when added/,'success during public gap is still confirmed privately');
+    my $line=Mediabot::Radio::Public::queue_lines({protocol=>1,total=>0,waiting=>[],preparing=>0,transferring=>0,on_air=>'Actual'},'queue')->[0][1];
+    Mediabot::Radio::Public::public_or_notice($ctx,$line,'queue',0);
+    is(scalar @{$bot->{public}},2,'queue respects gap following an addition');
+    $now+=15;Mediabot::Radio::Public::public_or_notice($ctx,$line,'queue',0);
+    is(scalar @{$bot->{public}},3,'queue can speak after the shared gap');
+    $ctx->{args}=[];$bot->{test_lang}='fr';
+    my $fr=Mediabot::Radio::Public::queue_lines({protocol=>1,total=>0,waiting=>[],preparing=>0,transferring=>0,on_air=>'Actual'},'queue')->[0][0];
+    like($fr,qr/En cours.*file vide/,'French presentation available');
+    delete $bot->{test_lang};
 }
 {
     # Exercise the real dispatcher body without loading a live bot or DB.

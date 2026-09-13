@@ -44,7 +44,10 @@ on the chosen channel. MP3 files and the catalogue stay on the radio host.
 The bounded search uses yt-dlp's documented
 [YouTube search prefix](https://github.com/yt-dlp/yt-dlp#usage-and-options).
 
-Request feedback is sent by NOTICE. “Added to the queue” means Liquidsoap
+Preparation, errors and throttling remain private NOTICEs. A successful addition
+uses one orange/grey channel line, matching `song`, when the shared public
+spacing permits; otherwise the same confirmation is sent by NOTICE.
+“Added to the queue” means Liquidsoap
 returned a request ID; it does **not** mean that playback has already started.
 The API neither skips a track nor changes a streaming script. Live priority
 and track interruption follow the existing Liquidsoap configuration. In
@@ -57,9 +60,9 @@ before promising that the current track will always finish.
 | Command on `+Radio` | Result |
 | --- | --- |
 | `m song` | Current Icecast title and listening URL, as before. |
-| `m radioqueue` | NOTICE: shared waiting queue, plus preparation and submission counts. |
+| `m radioqueue` | One compact line: Icecast current title, first three waiting requests, remaining count. Public at most once per minute per channel; NOTICE otherwise. |
 | `m queue` | Alias for `m radioqueue` on `+Radio`, with the same permissions and cooldown. |
-| `m nextsong` | NOTICE: first waiting request, or an empty queue with preparation counts. |
+| `m nextsong` | One NOTICE with the first waiting request, or an empty-queue indication. |
 
 The read-only commands work for every participant through the same authenticated
 API, including remote bots. They do not use the remote host's Liquidsoap socket.
@@ -80,21 +83,55 @@ catalogue entries at their next submission, without retagging audio or rewriting
 old database rows. Metadata already on air is not changed retroactively.
 
 The queue comes from Liquidsoap's actual pending request IDs, not the history of
-successful HTTP jobs. A playing request is no longer pending. A pending request
-whose metadata is not yet available stays visible as “title unavailable”. Only
-artist/title labels are exposed; paths, caller identities and other instances'
-private job records are not. Up to six titles are displayed, with the total count
-retained if an administrator has added more. Reads are cached centrally for at
-most two seconds; each bot accepts one consultation every five seconds.
+accepted requests. It is shared between authenticated instances; private request
+history remains isolated. The API keeps its six-title response for existing
+clients; IRC shows the current Icecast title and only the next three requests,
+plus a count of any remaining tracks. Missing Icecast status is displayed as
+“title unavailable”, while the waiting queue remains usable.
 
-Preparation means an API job has not reached Liquidsoap yet. Submission means
-its acknowledgement is still pending; these counts must not be added to the
-player's queue count to infer a precise total. If the queue changes while being
-read, the service retries the observation once, then reports it unavailable.
-A failed read is never presented as an empty queue. There are no automatic
-channel announcements, queue changes, downloads or promised start times.
-`nextsong` describes the next *requested* track, not the fallback playlist or
-live input; use `song` for the title actually published by Icecast.
+Public output uses orange (07) capsules and grey (14) music labels, without a
+background colour, in the same theme as `song`. Each queue response is one line,
+bounded to 360 UTF-8 bytes including formatting. Long labels are shortened.
+
+### Channel output budget
+
+- `queue` and `radioqueue` share one public view per **60 seconds per channel**,
+  across all callers. Further eligible reads use the same compact view by NOTICE.
+- Confirmed additions and public queue views share a **15-second public gap**.
+  A suppressed public success still reaches its requester by NOTICE.
+- `nextsong`, preparation, errors and refusals are always private.
+- One caller identity may consult every **five seconds**, across aliases/nicks;
+  the bot also limits consultation responses to one per second overall. Faster
+  repetitions are ignored. At most one HTTP queue read is started every five
+  seconds per bot, with a five-second response cache for nearby requests.
+- `song` retains its existing output and behavior. These budgets do not announce
+  spontaneous queue changes, alter audio priority, or change request cooldowns.
+
+The public display budget is bounded in memory per bot/channel; instances on
+separate IRC networks therefore have independent channel output. The API queue,
+download limits and request deduplication remain shared.
+
+### Confirmed position
+
+After a numeric push acknowledgement, the service reads the real waiting IDs
+twice within a shared two-second deadline. A stable list yields the request's
+one-based **position at addition**, not an estimate from the queue length before
+pushing. This observation is kept in a small private SQLite `queue_receipts`
+table and returned with that job; polling or restarting does not recompute it.
+
+If the request has already left the waiting list, the confirmation says
+“no longer waiting”. A failed/changing read says “position unconfirmed”. Neither
+case repeats an acknowledged push or turns it into a failed request. Existing
+queued jobs without a receipt remain valid and have no invented rank. No
+MariaDB schema, catalogue row or audio file is changed by this observation.
+
+Leaving the waiting list alone does not establish what is broadcast. The current
+title comes from the configured Icecast mount; Liquidsoap also cautions against
+using request-level on-air metadata as output truth in its
+[2.3 migration notes](https://www.liquidsoap.info/doc-2.3.1/migrating.html).
+Live input keeps priority and no start time is promised. A failed queue read is
+never presented as an empty queue. `nextsong` describes the next *requested*
+track, not the fallback playlist or live input.
 
 ## One host: the default installation
 
@@ -249,12 +286,12 @@ HTTP implementation; the central Python service runs only on the radio host.
   uncached requests fail with `youtube_paused`; `rplay` and valid cached `play`
   requests continue normally. Paused requests are not replayed automatically.
   Unavailable videos and other download failures do not trigger this pause.
-- The two additional tables (`download_pause`, `track_claims`) live only in
+- The additional tables (`download_pause`, `track_claims`, `queue_receipts`) live only in
   the API's private SQLite ledger. Existing jobs and the MariaDB MP3 schema
   are preserved. No new user, migration or grant is required.
 
 The client checks `+Radio` and channel membership, has at most four supervised
-HTTP jobs per bot, and suppresses late notices after an IRC reconnect. The API
+HTTP jobs per bot, and suppresses late public/private replies after an IRC reconnect. The API
 trusts authenticated bot clients to enforce membership; a public unauthenticated
 web player is outside this protocol.
 

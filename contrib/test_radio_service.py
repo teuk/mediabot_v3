@@ -186,7 +186,7 @@ class Contract(unittest.TestCase):
     def test_public_status_has_no_paths_or_origin(self):
         self.s.submit('dev',self.body()); self.s.work_once()
         r=self.api('GET','/v1/requests/'+self.body()['id'])[1]
-        self.assertEqual(set(r),{'id','state','code','title','rid'})
+        self.assertEqual(set(r),{'id','state','code','title','rid','placement','position'})
     def test_cached_file_must_be_in_approved_roots(self):
         p=Path(self.temp.name)/'outside.mp3'; p.write_bytes(b'a')
         b=radio.Backend(dict(music_roots=[str(p.parent/'allowed')]))
@@ -735,7 +735,7 @@ class MetadataContract(unittest.TestCase):
                     s.work_once()
                 self.assertEqual(original,before)
                 self.assertEqual(s.status('nbot','a'*32)['title'],'Paul Simon — You Can Call Me Al (Official Video)')
-                self.assertIn('artist="Paul Simon",title="You Can Call Me Al (Official Video)"',command.call_args.args[0])
+                self.assertIn('artist="Paul Simon",title="You Can Call Me Al (Official Video)"',command.call_args_list[0].args[0])
                 self.assertEqual(radio.queue_title('artist="Paul Simon"\ntitle="Paul Simon - You Can Call Me Al (Official Video)"'),
                                  'Paul Simon — You Can Call Me Al (Official Video)')
                 self.assertEqual(path.read_bytes(),b'existing fixture')
@@ -840,6 +840,79 @@ class MetadataContract(unittest.TestCase):
             with self.assertRaises(OSError):
                 b.push(dict(path='/music/a.mp3', artist='A', title='B'))
             self.assertEqual(command.call_count, 1)
+
+
+class QueuePlacement(unittest.TestCase):
+    def test_rank_is_read_after_ack_with_one_shared_deadline(self):
+        b=radio.Backend({'queue_id':'q'})
+        with patch.object(b,'command',side_effect=['8 42 90','8 42 90']) as command:
+            self.assertEqual(b.placement(42),('waiting',2))
+        self.assertEqual([c.args[0] for c in command.call_args_list],['q.queue','q.queue'])
+        self.assertEqual(command.call_args_list[0].kwargs,command.call_args_list[1].kwargs)
+
+    def test_missing_rid_does_not_claim_current_playback(self):
+        b=radio.Backend({'queue_id':'q'})
+        with patch.object(b,'command',return_value=''):
+            self.assertEqual(b.placement(42),('not_waiting',None))
+
+    def test_changing_invalid_or_unreachable_queue_has_no_invented_rank(self):
+        b=radio.Backend({'queue_id':'q'})
+        for replies in (['1 42','42'],['ERROR'],['42 42']):
+            with patch.object(b,'command',side_effect=replies),self.assertRaises(radio.RadioError):
+                b.placement(42)
+        with patch.object(b,'command',side_effect=OSError),self.assertRaises(OSError):
+            b.placement(42)
+
+
+class DurablePlacement(unittest.TestCase):
+    setUp,tearDown,body,api=Contract.setUp,Contract.tearDown,Contract.body,Contract.api
+
+    def test_rank_receipt_survives_restart_and_is_not_recomputed_on_poll(self):
+        with patch.object(self.backend,'placement',return_value=('waiting',3),create=True) as place:
+            self.s.submit('dev',self.body());self.s.work_once()
+            result=self.s.status('dev',self.body()['id'])
+            self.assertEqual((result['state'],result['position'],result['placement']),('queued',3,'waiting'))
+            self.assertEqual(self.backend.events[-1],'push')
+            self.s.db.close();self.s=radio.Service(self.c,self.backend,clock=lambda:self.now)
+            self.assertEqual(self.s.submit('dev',self.body()),result)
+            self.assertEqual(self.s.status('dev',self.body()['id']),result)
+            self.assertEqual(place.call_count,1)
+            self.assertEqual(self.backend.sent,1)
+            self.assertFalse(self.s.work_once())
+            self.assertEqual(self.api('GET','/v1/requests/'+self.body()['id'],secret='b'*64)[0],404)
+
+    def test_optional_read_failure_never_retries_an_acknowledged_push(self):
+        for side_effect in (OSError('read failed'),radio.RadioError('queue_changing')):
+            self.s.db.execute('DELETE FROM jobs');self.s.db.execute('DELETE FROM track_claims');self.s.db.commit()
+            self.backend.sent=0
+            with patch.object(self.backend,'placement',side_effect=side_effect,create=True):
+                self.s.submit('dev',self.body());self.s.work_once()
+                r=self.s.status('dev',self.body()['id'])
+                self.assertEqual((r['state'],r['placement'],r['position']),('queued','unknown',None))
+                self.assertEqual(self.s.submit('dev',self.body()),r)
+                self.assertFalse(self.s.work_once());self.assertEqual(self.backend.sent,1)
+
+    def test_no_rank_is_read_without_a_push_acknowledgement(self):
+        self.backend.error='ack'
+        with patch.object(self.backend,'placement',create=True) as place:
+            self.s.submit('dev',self.body());self.s.work_once()
+            self.assertEqual(self.s.status('dev',self.body()['id'])['state'],'uncertain')
+            place.assert_not_called()
+            self.assertEqual(self.s.db.execute('SELECT count(*) FROM queue_receipts').fetchone()[0],0)
+
+    def test_old_ack_without_receipt_remains_queued_and_has_no_guessed_position(self):
+        self.s.submit('dev',self.body());self.s.update(self.body()['id'],state='queued',rid=42)
+        self.s.db.close();self.s=radio.Service(self.c,self.backend,clock=lambda:self.now)
+        self.assertEqual(self.s.status('dev',self.body()['id'])['placement'],'unknown')
+        self.assertFalse(self.s.work_once());self.assertEqual(self.backend.sent,0)
+
+    def test_invalid_placement_is_ignored_and_receipts_expire_with_their_job(self):
+        with patch.object(self.backend,'placement',return_value=('waiting',True),create=True):
+            self.s.submit('dev',self.body());self.s.work_once()
+        self.assertEqual(self.s.status('dev',self.body()['id'])['placement'],'unknown')
+        self.now+=604801
+        self.s.submit('dev',self.body(2))
+        self.assertEqual(self.s.db.execute('SELECT count(*) FROM queue_receipts').fetchone()[0],0)
 
 
 class QueueView(unittest.TestCase):
