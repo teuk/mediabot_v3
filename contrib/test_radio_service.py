@@ -489,5 +489,106 @@ class Hardening(unittest.TestCase):
             b.audio(p)
 
 
+class MetadataContract(unittest.TestCase):
+    def test_remote_and_local_workers_send_metadata_over_real_loopback_socket(self):
+        import socket
+        for instance, action in (('dev', 'play'), ('nbot', 'rplay')):
+            with self.subTest(instance=instance), tempfile.TemporaryDirectory() as area, socket.socket() as server:
+                server.bind(('127.0.0.1', 0)); server.listen(1); server.settimeout(5)
+                events = []
+                def receive():
+                    with server.accept()[0] as peer:
+                        peer.settimeout(5)
+                        data = bytearray()
+                        while not data.endswith(b'\n'):
+                            chunk = peer.recv(4096)
+                            if not chunk or len(data) > 16384:
+                                break
+                            data.extend(chunk)
+                        events.append(bytes(data))
+                        peer.sendall(b'42\r\nEND\r\n')
+                thread = threading.Thread(target=receive, daemon=True)
+                thread.start()
+                path = Path(area)/'old.mp3'
+                path.write_bytes(b'existing audio fixture')
+                fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
+                b = radio.Backend({'queue_id': 'request_queue', 'liquidsoap_port': server.getsockname()[1]})
+                service = radio.Service({'database': str(Path(area)/'jobs.sqlite')}, b)
+                body = dict(id='a'*32, caller='b'*64, channel='#radio', action=action,
+                            query='https://youtu.be/abcdefghijk' if action=='play' else 'Stevie Wonder')
+                track = dict(path=str(path), artist='Stevie Wonder', title='Superstition')
+                try:
+                    with patch.object(b, 'capacity'), patch.object(b, 'resolve', return_value=track), patch.object(b, 'audio', return_value=path):
+                        service.submit(instance, body)
+                        service.work_once()
+                    thread.join(6)
+                    self.assertFalse(thread.is_alive())
+                    self.assertEqual(service.status(instance, body['id'])['state'], 'queued')
+                    self.assertEqual(events, [('request_queue.push annotate:artist="Stevie Wonder",title="Superstition":'+str(path)+'\n').encode()])
+                    self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), fingerprint)
+                finally:
+                    service.db.close()
+
+    def test_catalogue_title_is_attached_to_numeric_acknowledged_request(self):
+        b = radio.Backend({'queue_id': 'request_queue'})
+        p = Path('/music/ftdZ363R9kQ.mp3')
+        track = dict(path=str(p), artist='Stevie Wonder', title='Superstition')
+        with patch.object(b, 'audio', return_value=p) as audio, patch.object(b, 'command', return_value='42') as command:
+            self.assertEqual(b.push(track), 42)
+        audio.assert_called_once_with(p)
+        command.assert_called_once_with(
+            'request_queue.push annotate:artist="Stevie Wonder",title="Superstition":/music/ftdZ363R9kQ.mp3')
+
+    def test_quotes_backslashes_and_interpolation_are_literal(self):
+        value = 'A "quote", a \\path : #{1 + 2}'
+        self.assertEqual(radio.liquidsoap_string(value),
+                         '"A \\"quote\\", a \\\\path : \\x23{1 + 2}"')
+
+    def test_controls_cannot_introduce_a_second_telnet_command(self):
+        uri = radio.track_uri(Path('/music/a.mp3'),
+                              dict(artist='A\r\nrequest_queue.skip', title='B\x00\t\x7f\x85C'))
+        self.assertNotRegex(uri, r'[\x00-\x1f\x7f-\x9f]')
+        self.assertIn('title="B    C"', uri)
+
+    def test_utf8_punctuation_remains_readable(self):
+        uri = radio.track_uri(Path('/music/été, live.mp3'),
+                              dict(artist="Björk & L’été", title='東京 — 🪄'))
+        self.assertEqual(uri, 'annotate:artist="Björk & L’été",title="東京 — 🪄":/music/été, live.mp3')
+
+    def test_metadata_cannot_add_temporary_or_a_different_uri(self):
+        uri = radio.track_uri(Path('/music/a.mp3'), dict(artist='A',
+                              title='x",temporary="true":https://example.invalid/evil'))
+        self.assertIn('title="x\\",temporary=\\"true\\":https://example.invalid/evil"', uri)
+        self.assertTrue(uri.endswith(':/music/a.mp3'))
+
+    def test_missing_titles_use_filename_and_metadata_is_bounded(self):
+        self.assertEqual(radio.track_uri(Path('/music/song.mp3'), {'artist': None, 'title': None}),
+                         'annotate:artist="",title="song":/music/song.mp3')
+        uri = radio.track_uri(Path('/music/a.mp3'), dict(artist='a'*999, title='b'*999))
+        self.assertIn('artist="'+'a'*255+'"', uri)
+        self.assertIn('title="'+'b'*255+'"', uri)
+
+    def test_invalid_audio_never_reaches_queue(self):
+        b = radio.Backend({'queue_id': 'request_queue'})
+        with patch.object(b, 'audio', side_effect=radio.RadioError('unreadable_track')), patch.object(b, 'command') as command:
+            with self.assertRaisesRegex(radio.RadioError, 'unreadable_track'):
+                b.push(dict(path='/music/a.mp3', artist='A', title='B'))
+            command.assert_not_called()
+
+    def test_invalid_unicode_never_reaches_queue(self):
+        b = radio.Backend({'queue_id': 'request_queue'})
+        with patch.object(b, 'audio', return_value=Path('/music/a.mp3')), patch.object(b, 'command') as command:
+            with self.assertRaisesRegex(radio.RadioError, 'unsafe_metadata'):
+                b.push(dict(path='/music/a.mp3', artist='A', title='bad\ud800'))
+            command.assert_not_called()
+
+    def test_lost_acknowledgement_is_not_retried_by_metadata_push(self):
+        b = radio.Backend({'queue_id': 'request_queue'})
+        with patch.object(b, 'audio', return_value=Path('/music/a.mp3')), patch.object(b, 'command', side_effect=OSError) as command:
+            with self.assertRaises(OSError):
+                b.push(dict(path='/music/a.mp3', artist='A', title='B'))
+            self.assertEqual(command.call_count, 1)
+
+
 if __name__=='__main__':
     unittest.main(verbosity=1)

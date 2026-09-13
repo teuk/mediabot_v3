@@ -50,6 +50,20 @@ def clean(value, limit=255):
     return re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', str(value))[:limit].strip()
 
 
+def liquidsoap_string(value):
+    """Quote literal UTF-8 for Liquidsoap, including its #{...} preprocessor."""
+    require(isinstance(value, str) and not re.search(r'[\ud800-\udfff]', value), 'unsafe_metadata')
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('#', '\\x23') + '"'
+
+
+def track_uri(path, track):
+    """Bind catalogue metadata to this request, including older untagged MP3s."""
+    artist = clean(track.get('artist') or '')
+    title = clean(track.get('title') or path.stem)
+    return ('annotate:artist=' + liquidsoap_string(artist)
+            + ',title=' + liquidsoap_string(title) + ':' + str(path))
+
+
 def youtube_id(url):
     require(isinstance(url, str) and len(url) <= 512)
     require(not re.search(r'[\x00-\x20\x7f]', url), 'youtube_url_required')
@@ -329,7 +343,7 @@ class Backend:
 
     def push(self, track):
         path = self.audio(Path(track.get('path') or Path(track['folder']) / track['filename']))
-        value = self.command(self.c['queue_id'] + '.push ' + str(path))
+        value = self.command(self.c['queue_id'] + '.push ' + track_uri(path, track))
         require(re.fullmatch(r'\d+', value), 'queue_bad_ack', 503)
         return int(value)
 

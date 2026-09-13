@@ -253,3 +253,26 @@ updates; do not clear the queue or erase history as a repair step.
 
 Audio validation references: [ffprobe input format](https://ffmpeg.org/ffprobe.html)
 and [FFmpeg protocol allowlists](https://ffmpeg.org/ffmpeg-protocols.html).
+
+
+## Request metadata
+
+The HTTP service attaches catalogue `artist` and `title` to each validated
+local MP3 request using Liquidsoap's `annotate:` protocol. This applies to new
+`play` downloads, cached `play`, and catalogue `rplay`, including older MP3s
+without embedded tags. Catalogue metadata takes precedence over existing tags.
+Missing artists stay empty; a missing title falls back to the filename stem.
+Controls are removed, values are bounded, and quotes, backslashes and Liquidsoap
+interpolation markers are escaped as literal text.
+
+Files, sidecars and their content fingerprints are unchanged. No re-download,
+retagging, global metadata injection or change to the Liquidsoap configuration
+is needed. Metadata follows the requested track when Liquidsoap actually plays
+it. Queue acceptance still does not mean that a track has started: an active
+live source retains priority. `song` continues to read the actual Icecast status.
+Previously queued or currently playing requests keep their original metadata;
+the corrected annotation applies to new requests after API restart.
+
+See [Liquidsoap request metadata](https://www.liquidsoap.info/doc-2.3.3/metadata).
+The deployed 2.3.2 parser is also covered by an isolated native resolution probe
+in the operational package; it uses generated audio only, without a live queue.

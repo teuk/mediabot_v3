@@ -45,6 +45,10 @@ release. The current development line is `3.6dev`.
   MP3 files, fingerprint new cached downloads, and terminate subprocess groups
   even when the original downloader process has already exited.
 
+- Bind catalogue artist/title to each Liquidsoap request, including existing
+  MP3s without embedded tags. Quote metadata as literal text, preserve audio
+  fingerprints, and keep now-playing tied to Icecast playback.
+
 ### mb733 — respect EpiKnet service authority while keeping Fullop
 
 - Recognize the exact `Cronos!services@olympe.epiknet.org` identity on EpiKnet
