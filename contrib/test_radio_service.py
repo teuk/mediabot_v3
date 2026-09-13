@@ -1361,5 +1361,88 @@ sub disconnect {1} 1;
             self.assertEqual(self.call(**body),(1,dict(ok=False,code='catalogue_failed')))
         self.assertEqual(json.loads(self.store.read_text())['row'],self.track)
 
+class DisplayReceipts(unittest.TestCase):
+    setUp = Contract.setUp
+    tearDown = Contract.tearDown
+    body = Contract.body
+    api = Contract.api
+
+    def resolved_track(self, video='ftdZ363R9kQ'):
+        path=Path(self.temp.name)/'local.mp3';path.write_bytes(b'unchanged audio fixture')
+        stat=path.stat()
+        self.backend._last_audio=(str(path),stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns,241)
+        track=dict(id_mp3=37,id_youtube=video,artist='Stevie Wonder',title='Superstition',
+                   folder=self.temp.name,filename=path.name)
+        self.backend.resolve=lambda job:dict(track)
+        return track,path
+
+    def test_resolved_identity_and_measured_duration_survive_restart_for_both_actions(self):
+        for n,action in enumerate(('play','rplay'),1):
+            with self.subTest(action=action):
+                track,path=self.resolved_track('ftdZ363R9kQ' if n==1 else 'ABCDEFGHIJK')
+                body=self.body(n,action=action)
+                self.now+=1000
+                self.s.submit('nbot',body);self.s.work_once()
+                result=self.s.status('nbot',body['id'])
+                self.assertEqual(result['youtube_url'],'https://youtu.be/'+track['id_youtube'])
+                self.assertEqual((result['duration_seconds'],result['mp3']),(241,'37'))
+                self.s.db.close();self.s=radio.Service(self.c,self.backend,clock=lambda:self.now)
+                self.assertEqual(self.s.status('nbot',body['id']),result)
+                self.assertEqual(path.read_bytes(),b'unchanged audio fixture')
+
+    def test_id_is_never_guessed_from_query_or_filename(self):
+        self.resolved_track(None);body=self.body()
+        self.s.submit('dev',body);self.s.work_once()
+        result=self.s.status('dev',body['id'])
+        self.assertEqual(result['state'],'queued')
+        self.assertNotIn('youtube_url',result)
+        self.assertEqual(result['duration_seconds'],241)
+
+    def test_invalid_catalogue_video_cannot_supply_an_external_link(self):
+        for n,video in enumerate(('https://evil.invalid/', 'abcdefghijk\n', '../private', 'a'*100),1):
+            self.now+=1000;self.resolved_track(video);body=self.body(n,action='rplay')
+            self.s.submit('dev',body);self.s.work_once()
+            self.assertNotIn('youtube_url',self.s.status('dev',body['id']))
+
+    def test_unconfirmed_push_does_not_expose_success_details(self):
+        self.resolved_track();self.backend.error='ack';body=self.body()
+        self.s.submit('dev',body);self.s.work_once()
+        result=self.s.status('dev',body['id'])
+        self.assertEqual(result['state'],'uncertain')
+        self.assertNotIn('youtube_url',result);self.assertNotIn('duration_seconds',result)
+        self.assertEqual(self.backend.sent,1)
+
+    def test_legacy_receipts_remain_queued_without_reconstructing_metadata(self):
+        body=self.body();self.s.submit('dev',body)
+        self.s.update(body['id'],state='queued',rid=42)
+        self.s.db.close();self.s=radio.Service(self.c,self.backend,clock=lambda:self.now)
+        result=self.s.status('dev',body['id'])
+        self.assertEqual(result['state'],'queued');self.assertNotIn('youtube_url',result)
+        self.assertNotIn('duration_seconds',result)
+
+    def test_display_receipts_keep_instance_privacy_and_expire_with_jobs(self):
+        self.resolved_track();body=self.body();self.s.submit('dev',body);self.s.work_once()
+        self.assertEqual(self.api('GET','/v1/requests/'+body['id'],secret='b'*64)[0],404)
+        self.now+=8*86400;self.s.submit('nbot',self.body(2))
+        self.assertEqual(self.s.db.execute('SELECT count(*) FROM job_details').fetchone()[0],0)
+
+    def test_duration_reuses_one_validated_probe_with_no_network_or_file_change(self):
+        track,path=self.resolved_track()
+        b=radio.Backend(dict(music_roots=[self.temp.name],max_duration=900))
+        response=json.dumps(dict(format=dict(duration='241.87'),streams=[dict(codec_type='audio',codec_name='mp3')]))
+        with patch.object(radio,'run',return_value=response) as run:
+            self.assertEqual(b.audio(path),path)
+            self.assertEqual(b.display_details(track),('ftdZ363R9kQ',241))
+            self.assertEqual(run.call_count,1)
+            self.assertEqual(run.call_args.args[0][0],'/usr/bin/ffprobe')
+        self.assertEqual(path.read_bytes(),b'unchanged audio fixture')
+
+    def test_changed_file_drops_stale_duration_without_guessing(self):
+        track,path=self.resolved_track();path.write_bytes(b'a different file now')
+        self.assertEqual(radio.Backend.display_details(self.backend,track),('ftdZ363R9kQ',None))
+        other=dict(track,filename='different.mp3')
+        self.assertEqual(radio.Backend.display_details(self.backend,other),('ftdZ363R9kQ',None))
+
+
 if __name__=='__main__':
     unittest.main(verbosity=1)

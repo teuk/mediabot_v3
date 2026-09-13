@@ -103,14 +103,17 @@ sub safe_text {
     return $value;
 }
 sub capsule {
-    # Same foreground palette as song: orange (07) capsules, grey (14) titles.
-    return "\x0307\x02[ " . $_[0] . " ]\x0F";
+    # Foreground accents only; the client's normal text stays readable on its
+    # own light/dark theme. Never change song's existing presentation.
+    my ($text,$red)=@_;
+    return "\x0304\x02[ $text ]\x0F" if $red;
+    return "\x0307\x02[ \x0F\x02$text\x0307 ]\x0F";
 }
 sub music_label {
-    my ($value,$limit)=@_;
+    my ($value,$limit,$plain)=@_;
     $value=safe_text($value,$limit);
     $value =~ s/ — / - /;
-    return "\x0314$value\x0F";
+    return "\x0F" . ($plain ? '' : "\x02") . $value . "\x0F";
 }
 sub language {
     my ($ctx)=@_;
@@ -121,15 +124,26 @@ sub queued_line {
     my $rank=$r->{position};
     my $where=($r->{placement}//'') eq 'waiting' && defined($rank) && !ref($rank)
         && $rank =~ /\A[1-9]\d{0,2}\z/ && $rank<=512
-        ? ($lang eq 'fr' ? "rang #$rank à l’ajout" : "#$rank when added")
+        ? "#$rank"
         : ($r->{placement}//'') eq 'not_waiting'
             ? ($lang eq 'fr' ? 'plus en attente' : 'no longer waiting')
             : ($lang eq 'fr' ? 'rang non confirmé' : 'position unconfirmed');
-    return capsule($lang eq 'fr' ? 'Radio + ajout confirmé' : 'Radio + added') . ' '
-        . music_label($r->{title} || ($lang eq 'fr' ? 'titre indisponible' : 'title unavailable'),220)
-        . ' ' . capsule($where)
-        . (defined($r->{mp3}) && !ref($r->{mp3}) && $r->{mp3} =~ /\A[1-9][0-9]{0,18}\z/
-            ? ' ' . capsule('MP3 #'.$r->{mp3}) : '');
+    my $head=capsule(($lang eq 'fr' ? '+ FILE ' : '+ QUEUE ').$where,1).' ';
+    my @details;
+    my $seconds=$r->{duration_seconds};
+    if (defined($seconds) && !ref($seconds) && $seconds =~ /\A[1-9][0-9]{0,3}\z/ && $seconds<=3600) {
+        push @details,sprintf('%d:%02d',int($seconds/60),$seconds%60);
+    }
+    push @details,'MP3 #'.$r->{mp3}
+        if defined($r->{mp3}) && !ref($r->{mp3}) && $r->{mp3} =~ /\A[1-9][0-9]{0,18}\z/;
+    my $tail=@details ? ' · '.join(' · ',@details) : '';
+    my $url=$r->{youtube_url};
+    # Only the selected central identity can become a clickable replay link.
+    # Default foreground and underline avoid dark-blue links on black themes.
+    $tail.=" · \x1F$url\x0F" if defined($url) && !ref($url)
+        && $url =~ m{\Ahttps://youtu\.be/[A-Za-z0-9_-]{11}\z};
+    my $budget=360-length(encode_utf8($head.$tail))-4;
+    return $head.music_label($r->{title} || ($lang eq 'fr' ? 'titre indisponible' : 'title unavailable'),$budget).$tail."\x0F";
 }
 sub public_or_notice {
     my ($ctx,$line,$kind,$private)=@_;
@@ -215,11 +229,11 @@ sub queue_lines {
         }
         my $line;
         for (my $limit=180;$limit>=8;$limit--) {
-            $line=capsule('Radio') . ($lang eq 'fr' ? ' En cours : ' : ' On air: ')
+            $line=capsule($lang eq 'fr' ? 'ANTENNE' : 'ON AIR',1) . ' '
                 . music_label(safe_text($r->{on_air},240) || $unknown,$limit);
             if (@titles) {
                 for my $i (0..($#titles<2 ? $#titles : 2)) {
-                    $line.=' | '.capsule(''.($i+1)).' '.music_label($titles[$i] || $unknown,$limit);
+                    $line.=' › '.capsule(''.($i+1)).' '.music_label($titles[$i] || $unknown,$limit,1);
                 }
                 $line.=' '.capsule('+'.($r->{total}-3)) if $r->{total}>3;
             } else {

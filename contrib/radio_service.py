@@ -374,7 +374,25 @@ class Backend:
         require(math.isfinite(duration) and 0 < duration <= self.c.get('max_duration', 900), 'track_too_long')
         require(any(s.get('codec_type') == 'audio' and s.get('codec_name') == 'mp3'
                     for s in probe.get('streams', [])), 'mp3_required')
+        # A bounded observation, reused by the receipt without another probe or
+        # YouTube request. Match path AND file identity before using it.
+        self._last_audio = (str(path), s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns,
+                            max(1, int(duration)))
         return path
+
+    def display_details(self, track):
+        video = track.get('id_youtube')
+        video = video if isinstance(video, str) and re.fullmatch(r'[A-Za-z0-9_-]{11}', video) else ''
+        seconds = None
+        try:
+            path = Path(track.get('path') or Path(track['folder']) / track['filename'])
+            s = path.stat()
+            seen = getattr(self, '_last_audio', ())
+            if len(seen) == 6 and seen[:5] == (str(path), s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns):
+                seconds = seen[5]
+        except (OSError, KeyError, TypeError, ValueError):
+            pass  # Missing presentation metadata cannot fail a valid request.
+        return video, seconds
 
     def resolve(self, job):
         deadline = time.monotonic() + 30
@@ -610,6 +628,8 @@ class Service:
         self.db.execute('''CREATE TABLE IF NOT EXISTS queue_receipts (
             job_id TEXT PRIMARY KEY, placement TEXT NOT NULL, position INTEGER)''')
         self.db.execute('CREATE TABLE IF NOT EXISTS job_tracks (job_id TEXT PRIMARY KEY, mp3 TEXT NOT NULL)')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS job_details (
+            job_id TEXT PRIMARY KEY, video TEXT NOT NULL, duration INTEGER)''')
         self.db.execute('''CREATE TABLE IF NOT EXISTS jobs (
             id TEXT PRIMARY KEY, instance TEXT NOT NULL, caller TEXT NOT NULL, channel TEXT NOT NULL,
             action TEXT NOT NULL, query TEXT NOT NULL, video TEXT NOT NULL,
@@ -708,6 +728,12 @@ class Service:
             track = self.db.execute('SELECT mp3 FROM job_tracks WHERE job_id=?', (row['id'],)).fetchone()
             if track:
                 result['mp3'] = track['mp3']
+            details = self.db.execute('SELECT video,duration FROM job_details WHERE job_id=?', (row['id'],)).fetchone()
+            if details:
+                if re.fullmatch(r'[A-Za-z0-9_-]{11}', details['video']):
+                    result['youtube_url'] = 'https://youtu.be/' + details['video']
+                if type(details['duration']) is int and 0 < details['duration'] <= 3600:
+                    result['duration_seconds'] = details['duration']
         return result
 
     def submit(self, instance, body):
@@ -741,6 +767,7 @@ class Service:
             self.db.execute("DELETE FROM jobs WHERE state IN ('queued','failed','uncertain') AND updated < ?", (now - 604800,))
             self.db.execute('DELETE FROM queue_receipts WHERE job_id NOT IN (SELECT id FROM jobs)')
             self.db.execute('DELETE FROM job_tracks WHERE job_id NOT IN (SELECT id FROM jobs)')
+            self.db.execute('DELETE FROM job_details WHERE job_id NOT IN (SELECT id FROM jobs)')
             rows = self.db.execute('SELECT * FROM jobs WHERE updated > ? OR created > ? OR state IN (?,?,?)',
                                    (now - 600, now - 600, *ACTIVE)).fetchall()
             self.db.execute('''DELETE FROM track_claims WHERE updated < ? AND job_id NOT IN
@@ -941,6 +968,11 @@ class Service:
             if re.fullmatch(r'[1-9][0-9]{0,18}', mp3):
                 with self.lock, self.db:
                     self.db.execute('INSERT OR REPLACE INTO job_tracks VALUES (?,?)', (job['id'], mp3))
+            # Capture resolved-track identity, not search words or a guessed
+            # URL. Old clients ignore these optional response fields.
+            video, seconds = Backend.display_details(self.backend, track)
+            with self.lock, self.db:
+                self.db.execute('INSERT OR REPLACE INTO job_details VALUES (?,?,?)', (job['id'], video, seconds))
             self.update(job['id'], state='submitting', title=clean(track['artist'] + ' — ' + track['title'], 180))
             submitting = True
             rid = self.backend.push(track)

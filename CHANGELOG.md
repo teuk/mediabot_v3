@@ -12,6 +12,13 @@ release. The current development line is `3.6dev`.
 
 ### mb734 — prepare reliable radio requests and shared audio storage
 
+- Refine radio confirmations and queue views with red/orange accents and
+  native client text, preserving the existing `song` display. Keep one bounded
+  IRC line and the same public/NOTICE output budget.
+- Include the selected YouTube replay link, measured MP3 duration when known,
+  and central MP3 ID in acknowledged additions. Persist optional details in
+  the private job ledger, without extra network/audio probes or media edits.
+
 - Rank bounded text-play candidates by musical relevance; prefer official
   labels and reject unsolicited covers, lessons and speed edits. Explicit
   versions remain supported; selection does not certify the audio itself.
@@ -21,7 +28,7 @@ release. The current development line is `3.6dev`.
 - Verify selected-source nextsong against direct request-queue skip, empty
   queue and playlist fallback behavior; retain Administrator+ and live protection.
 
-- Show acknowledged additions with their observed position, using orange/grey
+- Show acknowledged additions with their observed position, using compact
   radio formatting. Persist rank receipts privately; missing or changing queue
   readback never retries an acknowledged push or invents playback.
 - Show Icecast's current title and three pending tracks in one bounded line.

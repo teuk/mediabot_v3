@@ -70,7 +70,7 @@ my @calls;
     is_deeply([sort keys %{$calls[0][2]}],[sort qw(id caller channel action query)],'no remote UID or path or instance spoof');
     like($calls[0][2]{caller},qr/\A[a-f0-9]{64}\z/,'host identity hashed');
     $worker{on_done}->({value=>$result,ok=>1});
-    like($bot->{public}[-1][1],qr/Radio \+ added.*Artist - Track.*#3 when added/,'success reports the confirmed rank in one themed channel message');
+    like($bot->{public}[-1][1],qr/QUEUE #3.*Artist - Track/,'success reports the confirmed rank in one themed channel message');
     is(scalar(keys %{$bot->{_radio_api_pending}}),0,'completion releases pending slot');
     $ctx->{args}=['Michael','Jackson','Billie','Jean'];
     @calls=();
@@ -141,7 +141,7 @@ my @calls;
     $worker{on_done}->({value=>$r,ok=>1});
     is(scalar @{$bot->{public}},1,'one public line for initial queue');
     my $line=$bot->{public}[0][1];
-    like($line,qr/On air: .*Actual artist - Current song/,'current title comes from Icecast');
+    like($line,qr/ON AIR.*Actual artist - Current song/,'current title comes from Icecast');
     like($line,qr/Artist 1 - Track 1.*Artist 2 - Track 2.*Artist 3 - Track 3/,'first three ordered titles');
     unlike($line,qr/Artist [45]/,'fourth and later title omitted');
     like($line,qr/\+2/,'remaining count shown');
@@ -199,15 +199,16 @@ my @calls;
 {
     my $r={protocol=>1,waiting=>[],total=>0,preparing=>1,transferring=>0};
     like(Mediabot::Radio::Public::queue_lines($r,'queue')->[0][1],qr/queue empty.*preparing: 1/,'empty queue and preparation distinguished');
-    like(Mediabot::Radio::Public::queue_lines($r,'queue')->[0][1],qr/On air: .*title unavailable/,'missing Icecast title is explicit');
+    like(Mediabot::Radio::Public::queue_lines($r,'queue')->[0][1],qr/ON AIR.*title unavailable/,'missing Icecast title is explicit');
     for my $bad ({%$r,total=>1},{%$r,waiting=>'oops'},{%$r,error=>'unavailable'},{%$r,protocol=>2}) {
         ok(!Mediabot::Radio::Public::queue_lines($bad,'radioqueue'),'malformed queue does not invent a title');
     }
     $r->{waiting}=[{title=>"X\x03A\nB\x{202e}Y"}];$r->{total}=1;
     my $line=Mediabot::Radio::Public::queue_lines($r,'queue')->[0][1];
     unlike($line,qr/\n|\x{202e}|X\x03/,'untrusted IRC controls and bidi removed');
-    like($line,qr/\x0307\x02\[/,'orange capsules match song');
-    like($line,qr/\x0314X A B Y\x0F/,'grey title safely resets formatting');
+    like($line,qr/\x0307\x02\[/,'orange bracket accents match song');
+    like($line,qr/\x0307\x02\[ \x0F\x021\x0307 /,'waiting rank uses the native foreground on light/dark themes');
+    like($line,qr/\x0FX A B Y\x0F/,'title inherits the client theme and safely resets formatting');
     $r->{waiting}=[{title=>''}];
     like(Mediabot::Radio::Public::queue_lines($r,'nextsong')->[0][1],qr/title unavailable/,'unresolved title never exposes a path');
     $r->{on_air}='🦉東京'x200;$r->{waiting}=[map {{title=>'🪄Björk 東京'x200}} 1..6];$r->{total}=512;
@@ -216,7 +217,7 @@ my @calls;
         is(scalar @$pairs,1,'one compact line per consultation');
         ok(length(encode_utf8($_))<=360,'IRC byte limit including color codes and Unicode') for @{$pairs->[0]};
     }
-    for my $placement (['waiting',2,qr/rang #2 à l’ajout/],['not_waiting',undef,qr/plus en attente/],['unknown',undef,qr/rang non confirmé/],['waiting',0,qr/rang non confirmé/]) {
+    for my $placement (['waiting',2,qr/FILE #2/],['not_waiting',undef,qr/plus en attente/],['unknown',undef,qr/rang non confirmé/],['waiting',0,qr/rang non confirmé/]) {
         my $line=Mediabot::Radio::Public::queued_line({title=>'Michael Jackson — Billie Jean',placement=>$placement->[0],position=>$placement->[1]},'fr');
         like($line,$placement->[2],'truthful placement after acknowledged push');
         like($line,qr/Michael Jackson - Billie Jean/,'artist/song separator matches song');
@@ -256,7 +257,7 @@ my @calls;
         $worker{on_done}->({value=>{state=>'queued',title=>'Artist — Track',placement=>'waiting',position=>1}});
     }
     is(scalar @{$bot->{public}},2,'success announcements share fifteen-second public spacing');
-    like(join(' ',@{$bot->{notices}}),qr/#1 when added/,'success during public gap is still confirmed privately');
+    like(join(' ',@{$bot->{notices}}),qr/QUEUE #1/,'success during public gap is still confirmed privately');
     my $line=Mediabot::Radio::Public::queue_lines({protocol=>1,total=>0,waiting=>[],preparing=>0,transferring=>0,on_air=>'Actual'},'queue')->[0][1];
     Mediabot::Radio::Public::public_or_notice($ctx,$line,'queue',0);
     is(scalar @{$bot->{public}},2,'queue respects gap following an addition');
@@ -264,7 +265,7 @@ my @calls;
     is(scalar @{$bot->{public}},3,'queue can speak after the shared gap');
     $ctx->{args}=[];$bot->{test_lang}='fr';
     my $fr=Mediabot::Radio::Public::queue_lines({protocol=>1,total=>0,waiting=>[],preparing=>0,transferring=>0,on_air=>'Actual'},'queue')->[0][0];
-    like($fr,qr/En cours.*file vide/,'French presentation available');
+    like($fr,qr/ANTENNE.*file vide/,'French presentation available');
     delete $bot->{test_lang};
 }
 {
@@ -406,7 +407,37 @@ my @calls;
 
 {
     my $line=Mediabot::Radio::Public::queued_line({title=>'Artist - Song',placement=>'waiting',position=>2,mp3=>'28'},'fr');
-    like($line,qr/Artist - Song.*rang #2.*MP3 #28/,'new addition identifies the central row for deltrack');
+    like($line,qr/FILE #2.*Artist - Song.*MP3 #28/,'new addition identifies the central row for deltrack');
     unlike(Mediabot::Radio::Public::queued_line({title=>'Song',mp3=>"28\nSECRET"},'fr'),qr/SECRET|MP3/,'invalid row IDs never reach IRC');
+}
+{
+    my $r={title=>'Stevie Wonder — Superstition',placement=>'waiting',position=>1,mp3=>'37',
+           duration_seconds=>241,youtube_url=>'https://youtu.be/ftdZ363R9kQ'};
+    for my $lang (qw(fr en)) {
+        my $line=Mediabot::Radio::Public::queued_line($r,$lang);
+        like($line,qr/\x0304\x02\[ \+ (?:FILE|QUEUE) #1 \]/,'compact red success label');
+        like($line,qr/\x0F\x02Stevie Wonder - Superstition\x0F/,'title is bold in the client foreground');
+        like($line,qr/4:01.*MP3 #37.*https:\/\/youtu\.be\/ftdZ363R9kQ/,'duration, central ID and selected replay URL');
+        unlike($line,qr/\x03\d\d,|\x0314|\x0302|Radio \+|ajout confirmé/,'no background, forced grey/blue or long old heading');
+        like($line,qr/\x1Fhttps:\/\/youtu\.be\/ftdZ363R9kQ\x0F/,'link stays clickable and uses a reset');
+        for my $title ('é'x1000,'🪄東京'x1000,"\x0301,00bad\n\x{202e}"x100) {
+            my $long=Mediabot::Radio::Public::queued_line({%$r,title=>$title,mp3=>'9'x19},$lang);
+            ok(length(encode_utf8($long))<=360,'one bounded UTF-8 line including details');
+            like($long,qr{https://youtu\.be/ftdZ363R9kQ},'long title never truncates replay URL');
+            unlike($long,qr/\n|\x{202e}|\x03\d\d,/,'untrusted text cannot inject formatting or new lines');
+        }
+    }
+    for my $url ('https://evil.invalid/abcdefghijk',"https://youtu.be/abcdefghijk\n",'http://youtu.be/abcdefghijk', ['bad']) {
+        my $line=Mediabot::Radio::Public::queued_line({%$r,youtube_url=>$url},'en');
+        unlike($line,qr{https?://},'untrusted/malformed replay URL is omitted');
+    }
+    for my $duration (-1,0,3601,'241s',{},undef) {
+        my $line=Mediabot::Radio::Public::queued_line({%$r,duration_seconds=>$duration},'en');
+        unlike($line,qr/4:01|60:01|241s|HASH/,'invalid duration is omitted');
+        like($line,qr{https://youtu\.be/ftdZ363R9kQ},'optional detail failure keeps replay link');
+    }
+    my $line=Mediabot::Radio::Public::queued_line({title=>'Archive song',placement=>'unknown'},'en');
+    like($line,qr/position unconfirmed.*Archive song/,'old API keeps a useful confirmation');
+    unlike($line,qr{https?://|MP3|\d:\d\d},'missing details are not invented');
 }
 done_testing;

@@ -47,8 +47,8 @@ The bounded search uses yt-dlp's documented
 [YouTube search prefix](https://github.com/yt-dlp/yt-dlp#usage-and-options).
 
 Preparation, errors and throttling remain private NOTICEs. A successful addition
-uses one orange/grey channel line, matching `song`, when the shared public
-spacing permits; otherwise the same confirmation is sent by NOTICE.
+uses one compact channel line, with bracketed accents inspired by `song`,
+when the shared public spacing permits; otherwise the same confirmation is sent by NOTICE.
 “Added to the queue” means Liquidsoap
 returned a request ID; it does **not** mean that playback has already started.
 `play` and `rplay` never request a skip. Live priority
@@ -125,9 +125,36 @@ clients; IRC shows the current Icecast title and only the next three requests,
 plus a count of any remaining tracks. Missing Icecast status is displayed as
 “title unavailable”, while the waiting queue remains usable.
 
-Public output uses orange (07) capsules and grey (14) music labels, without a
-background colour, in the same theme as `song`. Each queue response is one line,
-bounded to 360 UTF-8 bytes including formatting. Long labels are shortened.
+Radio confirmations use a red (04) bracketed marker, bold artist/title in the
+client's normal text colour, and an underlined YouTube replay link. Queue views
+use a red `ON AIR` marker and orange (07) brackets around waiting positions. Position numbers and pending
+titles use normal client text. No background, dark-grey body text or dark-blue link colour
+is forced, so the content follows the reader's light/dark theme. IRC palettes
+remain client-configurable. `song` itself is unchanged.
+
+Each addition or queue response is one line, bounded to **360 UTF-8 bytes**
+including formatting. Long labels are shortened; the replay URL remains intact.
+For example, without the IRC formatting codes (duration and ID illustrative):
+
+```text
+[ + QUEUE #1 ] Stevie Wonder - Superstition · 4:01 · MP3 #37 · https://youtu.be/ftdZ363R9kQ
+[ ON AIR ] Stevie Wonder - Superstition › [ 1 ] Paul Simon - You Can Call Me Al
+```
+
+The replay URL comes from the selected central catalogue video's exact ID,
+for both `play` and `rplay`, never from the original free-text search. Duration
+comes from the MP3 audio validation already performed before submission.
+The optional `youtube_url` and `duration_seconds` response fields are stored
+with that job in private SQLite `job_details`, so polling/restarts preserve
+them. There is no extra YouTube lookup, audio probe, catalogue update or MP3
+retagging for presentation. Missing/invalid IDs or unavailable measurements
+are omitted; historic jobs without details still return a useful confirmation.
+Details appear only after a confirmed push. An uncertain submission never
+becomes a public success because it has metadata.
+
+Clients need the updated display code to render these fields; earlier HTTP
+clients keep working. No new configuration key is needed. The queue preview
+stays compact and carries no extra replay URLs or automatic messages.
 
 ### Channel output budget
 
@@ -393,7 +420,7 @@ HTTP implementation; the central Python service runs only on the radio host.
   uncached requests fail with `youtube_paused`; `rplay` and valid cached `play`
   requests continue normally. Paused requests are not replayed automatically.
   Unavailable videos and other download failures do not trigger this pause.
-- The additional tables (`download_pause`, `track_claims`, `queue_receipts`) live only in
+- The additional tables (`download_pause`, `track_claims`, `queue_receipts`, `job_details`) live only in
   the API's private SQLite ledger. Existing jobs and the MariaDB MP3 schema
   are preserved. No new user, migration or grant is required.
 
