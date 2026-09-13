@@ -148,7 +148,7 @@ my @calls;
     like($line,qr/preparing: 2/,'preparation does not pretend to be in the waiting queue');
     is(scalar @{$bot->{notices}},0,'public queue is not duplicated by notice');
     ok(!$bot->{_radio_queue_pending},'read worker released');
-    is(Mediabot::Radio::Public::inspect_queue($ctx,'nextsong'),undef,'five-second caller cooldown across aliases');
+    is(Mediabot::Radio::Public::inspect_queue($ctx,'radioqueue'),undef,'five-second caller cooldown across aliases');
     is(Mediabot::Radio::Public::inspect_queue($ctx,'queue'),undef,'same caller cannot trigger a notice flood');
     $now+=2;
     $ctx->{nick}='Guest2';$ctx->{message}{prefix}='Guest2!different@example.test';
@@ -165,10 +165,10 @@ my @calls;
     is(scalar @{$bot->{public}},1,'alias shares the minute-long public budget');
     like($bot->{notices}[-1],qr/Artist 3/,'private fallback still contains three next titles');
     $now=120;
-    ok(Mediabot::Radio::Public::inspect_queue($ctx,'nextsong'),'nextsong after cooldown');
+    ok(Mediabot::Radio::Public::inspect_queue($ctx,'radioqueue'),'queue refresh after cooldown');
     $worker{on_done}->({value=>$r,ok=>1});
-    like($bot->{notices}[-1],qr/Up next.*Artist 1/,'nextsong stays a single private title');
-    is(scalar @{$bot->{public}},1,'nextsong does not add public traffic');
+    like($bot->{notices}[-1],qr/Artist 1/,'queue refresh stays private within the public budget');
+    is(scalar @{$bot->{public}},1,'queue refresh does not add public traffic');
     $now=160;
     Mediabot::Radio::Public::inspect_queue($ctx,'queue');$worker{on_done}->({value=>$r,ok=>1});
     is(scalar @{$bot->{public}},2,'a fresh public queue is allowed at sixty seconds');
@@ -293,5 +293,120 @@ my @calls;
     is_deeply(\@local,[],'queue alias has no administrative meaning outside +Radio');
     MB734Router::_dispatch_radio($ctx,$_) for qw(radioqueue nextsong);
     is_deeply(\@local,[qw(radioqueue nextsong)],'historical local Master controls retained outside +Radio');
+}
+{
+    package MB734User;
+    sub is_authenticated { $_[0]{auth} }
+    sub has_level { $_[1] eq 'Administrator' ? $_[0]{level} <= 2 : $_[1] eq 'Master' && $_[0]{level} <= 1 }
+}
+{
+    no warnings 'redefine';
+    my $now=1000;
+    local *Mediabot::Radio::Public::queue_now=sub {$now};
+    my $user;
+    local *MB734Bot::get_user_from_message=sub {$user};
+    local *Mediabot::AsyncWorker::start=sub { shift; %worker=@_; return bless({},'WorkerFixture') };
+    local *Mediabot::Radio::Public::call_api=sub {
+        my ($url,$token,$method,$route,$body)=@_;push @calls,[$method,$route,$body];
+        return {state=>'completed',title=>'Requested - Song',origin=>'queue'};
+    };
+    $bot->{radio_on}=1;$bot->{irc}{connected}=1;
+    $bot->{hChannelsNicks}{'#Radio'}=['bot','Guest'];
+    $state->mark_connected;$state->mark_joined('#radio');
+    for my $level (undef,3,2,1,0) {
+        $now+=70;@calls=();%worker=();
+        $user=defined($level) ? bless({auth=>1,level=>$level},'MB734User') : undef;
+        my $adminctx=Mediabot::Context->new(bot=>$bot,channel=>'#radio',nick=>'Guest',args=>[],
+            message=>bless({prefix=>'Guest!ident@example.test'},'MB734Message'));
+        my $ok=Mediabot::Radio::Public::inspect_queue($adminctx,'nextsong');
+        if (!defined($level) || $level>2) {
+            ok(!$ok && !%worker,'guest/User cannot start a nextsong worker');
+            is(scalar @calls,0,'denial precedes HTTP');
+            next;
+        }
+        ok($ok,'Administrator, Master and Owner can advance the radio');
+        is(scalar @calls,0,'admin HTTP stays outside the IRC parent');
+        my $result=$worker{child}->();
+        is_deeply([@{$calls[0]}[0,1]],['POST','/v1/next'],'actual skip is a central POST');
+        is_deeply([sort keys %{$calls[0][2]}],[qw(caller channel id)],'no user-supplied rank, role or local source');
+        $worker{on_done}->({value=>$result,ok=>1});
+        like($bot->{public}[-1][1],qr/Next · queue.*Requested - Song/,'announces the confirmed new queue track');
+    }
+    $now+=70;@calls=();
+    $user=bless({auth=>0,level=>0},'MB734User');
+    my $adminctx=Mediabot::Context->new(bot=>$bot,channel=>'#radio',nick=>'Guest',args=>[],
+        message=>bless({prefix=>'Guest!ident@example.test'},'MB734Message'));
+    ok(!Mediabot::Radio::Public::next_song($adminctx),'an unauthenticated Owner is refused');
+    $user->{auth}=1;
+    local *Mediabot::Radio::Public::call_api=sub {push @calls,['POST'];return {error=>'api_unavailable'}};
+    Mediabot::Radio::Public::next_song($adminctx);
+    my $result=$worker{child}->();
+    is(scalar @calls,1,'lost HTTP acknowledgement never sends a second skip');
+    my $public=scalar @{$bot->{public}};
+    $worker{on_done}->({value=>$result,ok=>1});
+    is(scalar @{$bot->{public}},$public,'ambiguous skip is never announced as success');
+    like($bot->{notices}[-1],qr/not confirmed/,'uncertainty is private and explicit');
+    $now+=70;Mediabot::Radio::Public::next_song($adminctx);
+    $user->{level}=3;
+    my $notices=scalar @{$bot->{notices}};
+    $worker{on_done}->({value=>{state=>'completed',title=>'Track',origin=>'playlist'}});
+    is_deeply([scalar @{$bot->{public}},scalar @{$bot->{notices}}],[$public,$notices],
+        'rights revoked during work suppress privileged completion feedback');
+}
+
+
+{
+    no warnings 'redefine';
+    my $now=5000;
+    my $user;
+    local *Mediabot::Radio::Public::queue_now=sub {$now};
+    local *MB734Bot::get_user_from_message=sub {$user};
+    local *Mediabot::AsyncWorker::start=sub {shift;%worker=@_;bless({},'WorkerFixture')};
+    local *Mediabot::Radio::Public::call_api=sub {
+        my($url,$token,$method,$route,$body)=@_;push @calls,[$method,$route,$body];
+        return {state=>'removed',mp3=>'28',title=>'Artist - Track'};
+    };
+    for my $level (undef,3,2,1,0) {
+        $now+=70;@calls=();%worker=();
+        $user=defined($level)?bless({auth=>1,level=>$level},'MB734User'):undef;
+        my $masterctx=Mediabot::Context->new(bot=>$bot,channel=>'#radio',nick=>'Guest',args=>['28'],
+            message=>bless({prefix=>'Guest!ident@example.test'},'MB734Message'));
+        my $ok=Mediabot::Radio::Public::delete_track($masterctx);
+        if (!defined($level)||$level>1) {
+            ok(!$ok && !%worker,'guest, User and Administrator cannot delete a central track');
+            is(scalar @calls,0,'Master denial precedes network');next;
+        }
+        ok($ok,'authenticated Master/Owner starts central withdrawal');
+        is(scalar @calls,0,'deletion runs outside IRC parent');
+        my $result=$worker{child}->();
+        is_deeply([@{$calls[0]}[0,1]],['POST','/v1/tracks/remove'],'deletion uses central HTTP, no local DB or telnet');
+        is_deeply([sort keys %{$calls[0][2]}],[qw(caller channel id mp3)],'only central numeric ID and request context sent');
+        is($calls[0][2]{mp3},'28','central id_mp3 remains independent of local user IDs');
+        my $count=scalar @{$bot->{public}};
+        $worker{on_done}->({value=>$result});
+        is(scalar @{$bot->{public}},$count,'withdrawal feedback is always private');
+        like($bot->{notices}[-1],qr/MP3 #28 removed and blocked.*Artist - Track/,'private result identifies withdrawn track');
+    }
+    $user=bless({auth=>0,level=>0},'MB734User');
+    my $masterctx=Mediabot::Context->new(bot=>$bot,channel=>'#radio',nick=>'Guest',args=>['28'],
+        message=>bless({prefix=>'Guest!ident@example.test'},'MB734Message'));
+    ok(!Mediabot::Radio::Public::delete_track($masterctx),'unauthenticated Owner cannot delete');
+    $user->{auth}=1;
+    for my $args ([],['-1'],['0'],['28','29'],['28;delete'],['028']) {
+        $now+=70;%worker=();$masterctx->{args}=$args;
+        ok(!Mediabot::Radio::Public::delete_track($masterctx) && !%worker,'invalid central ID has no worker');
+    }
+    $now+=70;$masterctx->{args}=['28'];
+    Mediabot::Radio::Public::delete_track($masterctx);
+    my $count=scalar @{$bot->{notices}};
+    $user->{level}=2;
+    $worker{on_done}->({value=>{state=>'removed',mp3=>'28',title=>'Track'}});
+    is(scalar @{$bot->{notices}},$count,'revoked Master privileges suppress deletion feedback');
+}
+
+{
+    my $line=Mediabot::Radio::Public::queued_line({title=>'Artist - Song',placement=>'waiting',position=>2,mp3=>'28'},'fr');
+    like($line,qr/Artist - Song.*rang #2.*MP3 #28/,'new addition identifies the central row for deltrack');
+    unlike(Mediabot::Radio::Public::queued_line({title=>'Song',mp3=>"28\nSECRET"},'fr'),qr/SECRET|MP3/,'invalid row IDs never reach IRC');
 }
 done_testing;

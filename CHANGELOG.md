@@ -12,13 +12,22 @@ release. The current development line is `3.6dev`.
 
 ### mb734 — prepare reliable radio requests and shared audio storage
 
+- Rank bounded text-play candidates by musical relevance; prefer official
+  labels and reject unsolicited covers, lessons and speed edits. Explicit
+  versions remain supported; selection does not certify the audio itself.
+- Add authenticated Master+ `deltrack <central id_mp3>`: archive and withdraw
+  the exact central row, durably block video/path reuse, keep active audio
+  intact, and handle SQL failures and repeated requests without broad deletion.
+- Verify selected-source nextsong against direct request-queue skip, empty
+  queue and playlist fallback behavior; retain Administrator+ and live protection.
+
 - Show acknowledged additions with their observed position, using orange/grey
   radio formatting. Persist rank receipts privately; missing or changing queue
   readback never retries an acknowledged push or invents playback.
 - Show Icecast's current title and three pending tracks in one bounded line.
   Share one public queue view per channel/minute across aliases and callers,
   and a 15-second public gap with addition confirmations; fall back to NOTICE.
-  Keep nextsong, preparations/errors private and bound repeat consultations.
+  Keep preparations/errors private and bound repeat consultations.
 
 - Remove repeated artist prefixes consistently from radio confirmations,
   pending queue labels and Liquidsoap metadata, including cached tracks.
@@ -72,6 +81,13 @@ release. The current development line is `3.6dev`.
   participants and instances, with bounded public/private responses. Observe the actual
   waiting queue separately from preparing jobs and Icecast's current title;
   bound and cache reads without exposing paths, identities or private history.
+
+- Adapt successful radio request cooldowns to the shared waiting/preparation
+  load (5–90 seconds), retaining conservative failures and duplicate protection.
+- Restrict `nextsong` to authenticated Administrator+, advance only the selected
+  Liquidsoap source and announce the confirmed queue/global-playlist title.
+  Durable skip receipts, track-generation checks and live-input refusal prevent
+  duplicate skips and preserve the selected radio's priority policy.
 
 ### mb733 — respect EpiKnet service authority while keeping Fullop
 

@@ -1770,19 +1770,9 @@ sub displayRadioListeners_ctx {
 
 sub radioNext_ctx {
     my ($ctx) = @_;
-
-    my $self = $ctx->bot;
-
-    my $msg = "nextsong is not wired to a radio scheduler yet; current song follows.";
-
-    if ($ctx->is_private) {
-        $ctx->reply_private($msg);
-    } else {
-        $ctx->reply($msg);
-    }
-
-    logBot($self, $ctx->message, undef, 'nextsong', 'not_implemented');
-    return song_ctx($ctx);
+    return unless $ctx->require_level('Administrator');
+    $ctx->reply_private("nextsong requires a channel with +Radio and the shared radio API.");
+    return 1;
 }
 
 

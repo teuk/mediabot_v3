@@ -127,7 +127,9 @@ sub queued_line {
             : ($lang eq 'fr' ? 'rang non confirmé' : 'position unconfirmed');
     return capsule($lang eq 'fr' ? 'Radio + ajout confirmé' : 'Radio + added') . ' '
         . music_label($r->{title} || ($lang eq 'fr' ? 'titre indisponible' : 'title unavailable'),220)
-        . ' ' . capsule($where);
+        . ' ' . capsule($where)
+        . (defined($r->{mp3}) && !ref($r->{mp3}) && $r->{mp3} =~ /\A[1-9][0-9]{0,18}\z/
+            ? ' ' . capsule('MP3 #'.$r->{mp3}) : '');
 }
 sub public_or_notice {
     my ($ctx,$line,$kind,$private)=@_;
@@ -233,6 +235,7 @@ sub queue_lines {
 }
 sub inspect_queue {
     my ($ctx,$command)=@_;
+    return next_song($ctx) if $command eq 'nextsong';
     return unless $command =~ /\A(?:radioqueue|nextsong|queue)\z/ && enabled($ctx) && present($ctx);
     return unless consultation_allowed($ctx);
     my $bot=$ctx->bot;
@@ -294,6 +297,133 @@ sub inspect_queue {
     }
     $bot->{_radio_queue_pending}=$worker if exists $bot->{_radio_queue_pending};
     return 1;
+}
+sub next_song {
+    my ($ctx)=@_;
+    return unless enabled($ctx) && present($ctx);
+    return unless $ctx->require_level('Administrator');
+    if (@{$ctx->args}) { notice($ctx,'Syntaxe : nextsong','Syntax: nextsong'); return }
+    return unless consultation_allowed($ctx);
+    my $bot=$ctx->bot;
+    if ($bot->{_radio_next_pending}) {
+        notice($ctx,'Radio : passage au suivant déjà en cours.','Radio: a transition is already in progress.'); return;
+    }
+    my ($url,$secret,$id,$caller);
+    unless (eval {
+        die 'disabled' unless setting($bot,'RADIO_API_ENABLED','0') eq '1';
+        my $prefix=$ctx->message->prefix;
+        die 'identity' unless $prefix =~ /\A([^!\s]+)!([^@\s]+\@[^\s]+)\z/ && fold($1) eq fold($ctx->nick);
+        $caller=sha256_hex(encode_utf8(lc($2)));
+        $url=endpoint(setting($bot,'RADIO_API_URL','http://127.0.0.1:8765'));
+        $secret=token(setting($bot,'RADIO_API_TOKEN_FILE',''));
+        open(my $random,'<:raw','/dev/urandom') or die 'random';
+        read($random,my $bytes,16)==16 or die 'random'; close $random;
+        $id=unpack('H*',$bytes); 1;
+    }) { notice($ctx,'Radio : configuration API à vérifier.','Radio: check the API configuration.'); return }
+    my $irc=$bot->{irc};
+    my $generation=eval { $bot->{wit_runtime_state}->capture_generation($ctx->channel) };
+    $bot->{_radio_next_pending}=1;
+    my $worker=eval { Mediabot::AsyncWorker->start(
+        loop=>(eval {$bot->getLoop} // $bot->{loop}),label=>'radio-next',timeout=>12,max_output=>8192,
+        child=>sub {
+            # Never send a second skip after an ambiguous response. The server
+            # also persists an idempotent receipt before touching the player.
+            call_api($url,$secret,'POST','/v1/next',{id=>$id,caller=>$caller,channel=>fold($ctx->channel)});
+        },
+        on_done=>sub {
+            my ($result)=@_;
+            delete $bot->{_radio_next_pending};
+            return unless enabled($ctx) && present($ctx) && $bot->{irc}==$irc
+                && defined($generation) && $generation == (eval { $bot->{wit_runtime_state}->capture_generation($ctx->channel) } // -1);
+            # Resolve the current identity again before publishing admin feedback.
+            my $user=eval { $bot->get_user_from_message($ctx->message) };
+            return unless $user && $user->is_authenticated && $user->has_level('Administrator');
+            my $r=ref($result->{value}) eq 'HASH' ? $result->{value} : {};
+            if (($r->{state}//'') eq 'completed' && ($r->{origin}//'') =~ /\A(?:queue|playlist|live)\z/) {
+                delete $bot->{_radio_queue_cache};
+                my $fr=language($ctx) eq 'fr';
+                my $kind=$r->{origin} eq 'queue' ? ($fr ? 'file' : 'queue')
+                    : $r->{origin} eq 'live' ? 'live' : ($fr ? 'playlist globale' : 'global playlist');
+                my $line=capsule('Next · '.$kind).' '.music_label($r->{title} || ($fr ? 'titre indisponible' : 'title unavailable'),240);
+                public_or_notice($ctx,$line,'success',0);
+            } else {
+                my $code=$r->{error}//$r->{code}//'';
+                my %errors=(
+                    next_live=>['Le direct est prioritaire ; aucun morceau sauté.','Live input has priority; nothing was skipped.'],
+                    next_unavailable=>['Contrôle du suivant indisponible côté radio.','Next-track control is unavailable on the radio server.'],
+                    next_changed=>['La piste a changé entre-temps ; aucun second saut demandé.','The track changed in the meantime; no second skip was requested.'],
+                    next_busy=>['Patiente quelques secondes avant un autre passage au suivant.','Wait a few seconds before skipping again.']);
+                my $m=$errors{$code} // ['Passage au suivant non confirmé ; ne relance pas immédiatement.',
+                    'Track transition not confirmed; do not repeat immediately.'];
+                notice($ctx,'Radio : '.$m->[0],'Radio: '.$m->[1]);
+            }
+        }) };
+    delete $bot->{_radio_next_pending} unless $worker;
+    notice($ctx,'Radio : commande indisponible.','Radio: command unavailable.') unless $worker;
+    return $worker ? 1 : 0;
+}
+sub delete_track {
+    my ($ctx)=@_;
+    return unless enabled($ctx) && present($ctx);
+    return unless $ctx->require_level('Master');
+    my $args=$ctx->args;
+    unless (@$args==1 && defined($args->[0]) && !ref($args->[0]) && $args->[0] =~ /\A[1-9][0-9]{0,18}\z/) {
+        notice($ctx,'Syntaxe : deltrack <id_mp3 central>','Syntax: deltrack <central id_mp3>'); return;
+    }
+    return unless consultation_allowed($ctx);
+    my $bot=$ctx->bot;
+    if ($bot->{_radio_delete_pending}) {
+        notice($ctx,'Radio : retrait déjà en cours.','Radio: a withdrawal is already in progress.'); return;
+    }
+    my ($url,$secret,$id,$caller);
+    unless (eval {
+        die 'disabled' unless setting($bot,'RADIO_API_ENABLED','0') eq '1';
+        my $prefix=$ctx->message->prefix;
+        die 'identity' unless $prefix =~ /\A([^!\s]+)!([^@\s]+\@[^\s]+)\z/ && fold($1) eq fold($ctx->nick);
+        $caller=sha256_hex(encode_utf8(lc($2)));
+        $url=endpoint(setting($bot,'RADIO_API_URL','http://127.0.0.1:8765'));
+        $secret=token(setting($bot,'RADIO_API_TOKEN_FILE',''));
+        open(my $random,'<:raw','/dev/urandom') or die 'random';
+        read($random,my $bytes,16)==16 or die 'random'; close $random;
+        $id=unpack('H*',$bytes); 1;
+    }) { notice($ctx,'Radio : configuration API à vérifier.','Radio: check the API configuration.'); return }
+    my $mp3=$args->[0];
+    my $irc=$bot->{irc};
+    my $generation=eval { $bot->{wit_runtime_state}->capture_generation($ctx->channel) };
+    $bot->{_radio_delete_pending}=1;
+    my $worker=eval { Mediabot::AsyncWorker->start(
+        loop=>(eval {$bot->getLoop} // $bot->{loop}),label=>'radio-deltrack',timeout=>12,max_output=>8192,
+        child=>sub {
+            call_api($url,$secret,'POST','/v1/tracks/remove',
+                {id=>$id,caller=>$caller,channel=>fold($ctx->channel),mp3=>"$mp3"});
+        },
+        on_done=>sub {
+            my ($result)=@_;
+            delete $bot->{_radio_delete_pending};
+            return unless enabled($ctx) && present($ctx) && $bot->{irc}==$irc
+                && defined($generation) && $generation == (eval { $bot->{wit_runtime_state}->capture_generation($ctx->channel) } // -1);
+            my $user=eval { $bot->get_user_from_message($ctx->message) };
+            return unless $user && $user->is_authenticated && $user->has_level('Master');
+            my $r=ref($result->{value}) eq 'HASH' ? $result->{value} : {};
+            if (($r->{state}//'') eq 'removed' && ($r->{mp3}//'') eq "$mp3") {
+                my $title=music_label($r->{title},180);
+                notice($ctx,capsule("MP3 #$mp3 retiré et bloqué").' '.$title.' — Les lectures déjà programmées continuent ; nextsong pour passer.',
+                    capsule("MP3 #$mp3 removed and blocked").' '.$title.' — Already scheduled playback continues; nextsong skips it.');
+            } else {
+                my %errors=(
+                    track_not_found=>['ID absent du catalogue central.','ID not found in the central catalogue.'],
+                    catalogue_busy=>['Un morceau est en préparation ; réessaie le retrait dans quelques secondes.',
+                        'A track is being prepared; retry the withdrawal in a few seconds.'],
+                    catalogue_changed=>['La ligne a changé ; retrait interrompu, contrôle côté radio nécessaire.',
+                        'The row has changed; withdrawal stopped, radio operator review required.']);
+                my $m=$errors{$r->{error}//''} // ['Retrait non confirmé ; vérifie ou relance deltrack avec le même ID.',
+                    'Withdrawal not confirmed; check or retry deltrack with the same ID.'];
+                notice($ctx,'Radio : '.$m->[0],'Radio: '.$m->[1]);
+            }
+        }) };
+    delete $bot->{_radio_delete_pending} unless $worker;
+    notice($ctx,'Radio : commande indisponible.','Radio: command unavailable.') unless $worker;
+    return $worker ? 1 : 0;
 }
 sub submit {
     my ($ctx,$action)=@_;
@@ -370,6 +500,7 @@ sub submit {
             } else {
                 my $code=$r->{error}//$r->{code}//'unavailable';
                 my %messages=(
+                    track_removed=>['Ce morceau a été retiré et bloqué par un Master.','This track was removed and blocked by a Master.'],
                     youtube_url_required=>['Utilise un lien YouTube https vers une seule vidéo.','Use an https YouTube link to one video.'],
                     no_playlists=>['Les playlists ne sont pas acceptées.','Playlists are not accepted.'],
                     no_matching_track=>['Aucun morceau trouvé en base pour cette recherche.','No catalogue track matches this search.'],

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """MB734: one catalogue and request budget, local WSGI API behind optional TLS.
 
-No IRC, shell, user-supplied filesystem paths or administrative player commands.
+No IRC, shell or user-supplied filesystem paths. Next-track requests are
+authorized by Administrator+ checks in each authenticated bot instance.
 Run one process. SQLite records uncertainty BEFORE an external queue mutation.
 """
 import argparse
 import contextlib
+import difflib
 import fcntl
 import hashlib
 import hmac
@@ -42,9 +44,9 @@ class RadioError(Exception):
         super().__init__(code)
 
 
-def require(value, code='invalid_request', status=400):
+def require(value, code='invalid_request', status=400, retry_after=None):
     if not value:
-        raise RadioError(code, status)
+        raise RadioError(code, status, retry_after)
 
 
 def clean(value, limit=255):
@@ -137,11 +139,60 @@ def play_input(query):
     return ''
 
 
-def search_video(result, maximum):
-    """First eligible video in YouTube relevance order, at most five candidates."""
+def search_words(value):
+    value = unicodedata.normalize('NFKD', clean(value, 512)).casefold()
+    return re.findall(r'[^\W_]+', ''.join(c for c in value if not unicodedata.combining(c)))
+
+
+def music_score(entry, query):
+    """Conservative text selection, not a claim to recognize audio quality.
+
+    Do not let an unsolicited cover, lesson or speed edit win merely because
+    YouTube placed it first. Explicit versions remain legitimate requests.
+    Missing titles fail closed; view counts are deliberately not a gate.
+    """
+    title = entry.get('title')
+    if not isinstance(title, str) or not title.strip():
+        return None
+    title_words, query_words = search_words(title), search_words(query)
+    text, wanted = ' '.join(title_words), ' '.join(query_words)
+    versions = (
+        r'\b(?:cover|karaoke|instrumental|remix|mashup|parody|parodie)\b',
+        r'\b(?:reaction|reacts|reacting|tutorial|lesson|how to play|tutoriel|cours)\b',
+        r'\b(?:slowed|sped up|speed up|nightcore|8d audio|bass boosted)\b',
+        r'\b(?:ai generated|ai cover|a i cover|reupload|re uploaded)\b',
+        r'\b(?:loop|looped|extended version|compilation|full album)\b',
+    )
+    for pattern in versions:
+        matches = re.findall(pattern, text)
+        if any(value not in wanted for value in matches):
+            return None
+    ignore = {'the', 'a', 'an', 'and', 'of', 'de', 'la', 'le', 'les', 'official', 'video', 'audio'}
+    terms = set(query_words) - ignore
+    candidates = set(title_words + search_words(entry.get('channel') or entry.get('uploader') or ''))
+    if not terms:
+        return None
+    # Permit one ordinary spelling error (Mickael/Michael), not unrelated hits.
+    matched = sum(term in candidates or (len(term) >= 5 and any(
+        len(word) >= 5 and difflib.SequenceMatcher(None, term, word).ratio() >= .8
+        for word in candidates)) for term in terms)
+    if matched / len(terms) < .8:
+        return None
+    score = matched / len(terms) * 100
+    if re.search(r'\bofficial (?:music )?(?:video|audio)\b', text):
+        score += 8
+    channel = ' '.join(search_words(entry.get('channel') or entry.get('uploader') or ''))
+    if channel.endswith(' topic') or channel.endswith('vevo'):
+        score += 6
+    return score
+
+
+def search_video(result, maximum, query='', allowed=None):
+    """Rank at most five relevant music candidates; never search indefinitely."""
     require(isinstance(result, dict) and result.get('_type') == 'playlist'
             and isinstance(result.get('entries'), list)
             and len(result['entries']) <= 5, 'youtube_search_failed', 503)
+    choices = []
     for entry in result['entries']:
         if not isinstance(entry, dict) or entry.get('ie_key') != 'Youtube':
             continue
@@ -151,8 +202,14 @@ def search_video(result, maximum):
                 or not 0 < duration <= maximum or entry.get('is_live')
                 or entry.get('live_status') in ('is_live', 'is_upcoming', 'post_live')):
             continue
-        # Ignore all supplied URLs; only this validated ID reaches download().
-        return video
+        if allowed and not allowed(video):
+            continue
+        score = music_score(entry, query) if query else 0
+        if score is not None:
+            choices.append((score, video))
+    if choices:
+        # Stable sort preserves YouTube relevance between equal scores.
+        return max(choices, key=lambda value: value[0])[1]
     raise RadioError('no_youtube_match', 404)
 
 
@@ -239,6 +296,16 @@ class Backend:
     def __init__(self, config):
         self.c = config
         self.download_guard = lambda: None
+        self.track_guard = lambda track: None
+
+    def video_allowed(self, video):
+        try:
+            self.track_guard({'id_youtube': video})
+            return True
+        except RadioError as error:
+            if error.code != 'track_removed':
+                raise
+            return False
 
     def remaining(self, deadline, maximum):
         require(not STOP.is_set(), 'service_stopping', 503)
@@ -282,7 +349,7 @@ class Backend:
                 result = json.loads(raw)
             except (ValueError, UnicodeError):
                 raise RadioError('youtube_search_failed', 503) from None
-            return search_video(result, self.c.get('max_duration', 900))
+            return search_video(result, self.c.get('max_duration', 900), query, self.video_allowed)
 
     def catalogue(self, action, **values):
         result = json.loads(run(['/usr/bin/perl', str(Path(__file__).with_name('radio_catalogue.pl')),
@@ -315,9 +382,11 @@ class Backend:
             rows = self.catalogue('search', query=job['query'])['tracks']
         else:
             rows = self.catalogue('youtube', youtube=job['video'])['tracks']
+        blocked = 0
         for track in rows:
             timeout = self.remaining(deadline, 5)
             try:
+                self.track_guard(track)
                 track['path'] = str(self.audio(Path(track['folder']) / track['filename'], timeout=timeout))
                 path = Path(track['path'])
                 # New downloads carry a content fingerprint. Legacy catalogue
@@ -333,8 +402,11 @@ class Backend:
                 if STOP.is_set():
                     raise RadioError('service_stopping', 503)
                 reason = error.code if isinstance(error, RadioError) else type(error).__name__
+                blocked += reason == 'track_removed'
                 LOG.warning('catalogue_skip mp3=%s reason=%s', track.get('id_mp3', '?'), reason)
                 continue
+        if rows and blocked == len(rows):
+            raise RadioError('track_removed', 409)
         if rows and job['action'] == 'rplay':
             raise RadioError('catalogue_tracks_unavailable', 422)
         require(job['action'] == 'play', 'no_matching_track', 404)
@@ -355,6 +427,7 @@ class Backend:
 
     def download(self, video):
         require(re.fullmatch(r'[A-Za-z0-9_-]{11}', video), 'youtube_url_required')
+        self.track_guard({'id_youtube': video})
         incoming = Path(self.c['incoming'])
         final = incoming / (video + '.mp3')
         meta = None
@@ -445,6 +518,29 @@ class Backend:
         require(len(result) <= 512 and len(set(result)) == len(result), 'queue_unavailable', 503)
         return result
 
+    def queue_count(self):
+        return len(self.queue_ids(time.monotonic() + 1))
+
+    def control_state(self):
+        data = json.loads(self.command('mediabot.control_state', deadline=time.monotonic() + 1))
+        require(isinstance(data, dict) and data.get('protocol') == 1
+                and isinstance(data.get('epoch'), str)
+                and re.fullmatch(r'[A-Za-z0-9_.:+-]{1,80}', data['epoch'])
+                and type(data.get('serial')) is int and 0 <= data['serial'] < 10**12
+                and data.get('origin') in ('live', 'queue', 'playlist', 'none')
+                and type(data.get('pending')) is bool
+                and data.get('outcome') in ('idle', 'pending', 'sent', 'completed', 'stale', 'unavailable')
+                and all(isinstance(data.get(k), str) for k in ('artist', 'title')),
+                'next_unavailable', 503)
+        data['artist'], data['title'] = metadata_labels(data)
+        return data
+
+    def advance(self, state):
+        expected = state['epoch'] + ':' + str(state['serial'])
+        result = self.command('mediabot.control_next ' + expected, deadline=time.monotonic() + 1)
+        require(result in ('accepted', 'stale', 'busy', 'live', 'unavailable'), 'next_no_ack', 503)
+        return result
+
     def placement(self, rid):
         """Position observed after acknowledgement, never a pre-push estimate."""
         require(type(rid) is int and 0 <= rid <= 9999999999, 'queue_bad_ack', 503)
@@ -490,14 +586,30 @@ class Service:
         self.queue_lock = threading.Lock()
         self.queue_cache = None
         self.queue_cache_until = 0.
+        self.pressure_lock = threading.Lock()
+        self.pressure_cache = (0., None)
+        self.next_lock = threading.Lock()
+        self.catalogue_lock = threading.Lock()
         self.db = sqlite3.connect(config['database'], check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.execute('PRAGMA synchronous=FULL')
         self.db.execute('CREATE TABLE IF NOT EXISTS download_pause (name TEXT PRIMARY KEY, code TEXT NOT NULL, until REAL NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS track_claims (track TEXT PRIMARY KEY, job_id TEXT NOT NULL, updated REAL NOT NULL)')
+        # Never prune withdrawals with the seven-day request history. Preserve
+        # the original row before any external DELETE, including across crashes.
+        self.db.execute('''CREATE TABLE IF NOT EXISTS removed_tracks (
+            mp3 TEXT PRIMARY KEY, snapshot TEXT NOT NULL, video TEXT NOT NULL,
+            path TEXT NOT NULL, instance TEXT NOT NULL, caller TEXT NOT NULL,
+            created REAL NOT NULL, state TEXT NOT NULL)''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS next_receipts (
+            id TEXT PRIMARY KEY, instance TEXT NOT NULL, caller TEXT NOT NULL,
+            channel TEXT NOT NULL, created REAL NOT NULL, state TEXT NOT NULL,
+            code TEXT NOT NULL, title TEXT NOT NULL, origin TEXT NOT NULL)''')
+        self.db.execute("UPDATE next_receipts SET state='uncertain',code='next_no_ack' WHERE state='sending'")
         self.db.execute('''CREATE TABLE IF NOT EXISTS queue_receipts (
             job_id TEXT PRIMARY KEY, placement TEXT NOT NULL, position INTEGER)''')
+        self.db.execute('CREATE TABLE IF NOT EXISTS job_tracks (job_id TEXT PRIMARY KEY, mp3 TEXT NOT NULL)')
         self.db.execute('''CREATE TABLE IF NOT EXISTS jobs (
             id TEXT PRIMARY KEY, instance TEXT NOT NULL, caller TEXT NOT NULL, channel TEXT NOT NULL,
             action TEXT NOT NULL, query TEXT NOT NULL, video TEXT NOT NULL,
@@ -507,6 +619,56 @@ class Service:
         self.db.execute("UPDATE jobs SET state='pending' WHERE state='working'")
         self.db.commit()
         self.backend.download_guard = self.download_guard
+        self.backend.track_guard = self.track_guard
+
+    def track_guard(self, track):
+        video = track.get('id_youtube') or ''
+        mp3 = str(track.get('id_mp3') or '')
+        path = str(Path(track['folder']) / track['filename']) if track.get('folder') and track.get('filename') else ''
+        with self.lock:
+            row = self.db.execute('''SELECT 1 FROM removed_tracks WHERE mp3=?
+                OR (video<>'' AND video=?) OR (path<>'' AND path=?) LIMIT 1''', (mp3, video, path)).fetchone()
+        require(row is None, 'track_removed', 409)
+
+    def remove_track(self, instance, body):
+        # Only trusted bot instances can reach this method. Their authenticated
+        # Master+ gate is mandatory; a role in JSON never grants authority.
+        require(isinstance(body, dict) and set(body) == {'id', 'caller', 'channel', 'mp3'}
+                and all(isinstance(v, str) for v in body.values()))
+        require(re.fullmatch(r'[a-f0-9]{32}', body['id'])
+                and re.fullmatch(r'[a-f0-9]{64}', body['caller'])
+                and re.fullmatch(r'#[^\s,\x00-\x1f]{1,99}', body['channel'])
+                and re.fullmatch(r'[1-9][0-9]{0,18}', body['mp3']))
+        require(self.catalogue_lock.acquire(blocking=False), 'catalogue_busy', 409)
+        try:
+            with self.lock:
+                previous = self.db.execute('SELECT * FROM removed_tracks WHERE mp3=?', (body['mp3'],)).fetchone()
+            if previous:
+                track = json.loads(previous['snapshot'])
+            else:
+                track = self.backend.catalogue('get', mp3=body['mp3']).get('track')
+                require(isinstance(track, dict) and str(track.get('id_mp3')) == body['mp3'], 'track_not_found', 404)
+                require(set(track) == {'id_mp3','id_user','id_youtube','folder','filename','artist','title'}
+                        and all(v is None or type(v) in (int, str) for v in track.values()), 'catalogue_failed', 503)
+                require(all(len(str(v or '')) <= 255 for v in track.values()), 'catalogue_failed', 503)
+                video = track.get('id_youtube') or ''
+                path = str(Path(track['folder']) / track['filename'])
+                # This durable intent blocks play/cache/rplay immediately. No
+                # audio unlink: existing playout and third-party playlists survive.
+                with self.lock, self.db:
+                    self.db.execute('INSERT INTO removed_tracks VALUES (?,?,?,?,?,?,?,?)',
+                        (body['mp3'], json.dumps(track, ensure_ascii=False), video, path,
+                         instance, body['caller'], self.clock(), 'pending'))
+            if not previous or previous['state'] != 'removed':
+                result = self.backend.catalogue('remove', mp3=body['mp3'], expected=track)
+                require(result.get('removed') is True, 'catalogue_changed', 409)
+                with self.lock, self.db:
+                    self.db.execute("UPDATE removed_tracks SET state='removed' WHERE mp3=?", (body['mp3'],))
+            artist, title = metadata_labels(track)
+            LOG.info('track=%s withdrawn instance=%s', body['mp3'], instance)
+            return dict(state='removed', mp3=body['mp3'], title=clean(artist+' — '+title, 180))
+        finally:
+            self.catalogue_lock.release()
 
     def download_guard(self):
         with self.lock:
@@ -543,6 +705,9 @@ class Service:
         if row['state'] == 'queued':
             receipt = self.db.execute('SELECT placement,position FROM queue_receipts WHERE job_id=?', (row['id'],)).fetchone()
             result.update(dict(receipt) if receipt else dict(placement='unknown', position=None))
+            track = self.db.execute('SELECT mp3 FROM job_tracks WHERE job_id=?', (row['id'],)).fetchone()
+            if track:
+                result['mp3'] = track['mp3']
         return result
 
     def submit(self, instance, body):
@@ -555,6 +720,17 @@ class Service:
         query = body['query'].strip()
         require(1 <= len(query) <= 255 and clean(query) == query)
         video = play_input(query) if body['action'] == 'play' else ''
+        # Idempotent retries never need another player query. Recheck under
+        # the transaction below after I/O, as another HTTP thread may insert.
+        with self.lock:
+            old = self.db.execute('SELECT * FROM jobs WHERE id=?', (body['id'],)).fetchone()
+            if old:
+                require(old['instance'] == instance and all(old[k] == body[k] for k in ('caller', 'channel', 'action'))
+                        and old['query'] == query, 'request_id_conflict', 409)
+                return self.view(old)
+        if video:
+            self.track_guard({'id_youtube': video})
+        waiting = self.waiting_pressure()
         with self.lock, self.db:
             now = self.clock()
             old = self.db.execute('SELECT * FROM jobs WHERE id=?', (body['id'],)).fetchone()
@@ -564,12 +740,19 @@ class Service:
                 return self.view(old)
             self.db.execute("DELETE FROM jobs WHERE state IN ('queued','failed','uncertain') AND updated < ?", (now - 604800,))
             self.db.execute('DELETE FROM queue_receipts WHERE job_id NOT IN (SELECT id FROM jobs)')
+            self.db.execute('DELETE FROM job_tracks WHERE job_id NOT IN (SELECT id FROM jobs)')
             rows = self.db.execute('SELECT * FROM jobs WHERE updated > ? OR created > ? OR state IN (?,?,?)',
                                    (now - 600, now - 600, *ACTIVE)).fetchall()
             self.db.execute('''DELETE FROM track_claims WHERE updated < ? AND job_id NOT IN
                                (SELECT id FROM jobs WHERE state IN ('pending','working','submitting'))''',
                             (now - 604800,))
             require(sum(r['state'] in ACTIVE for r in rows) < 6, 'service_queue_full', 429)
+            active = sum(r['state'] in ACTIVE for r in rows)
+            # A preparing download reserves capacity even before it reaches
+            # Liquidsoap. A failed read retains the old conservative budget.
+            pressure = min(5, waiting + active) if waiting is not None else None
+            caller_delay = (5, 15, 30, 45, 60, 90)[pressure] if pressure is not None else 120
+            channel_delay = (5, 5, 10, 15, 20, 30)[pressure] if pressure is not None else 15
             caller_wait = channel_wait = 0
             for row in rows:
                 no_match = (row['state'] == 'failed' and
@@ -578,10 +761,11 @@ class Service:
                 if row['instance'] == instance and row['caller'] == body['caller']:
                     if row['state'] in ACTIVE:
                         raise RadioError('request_pending', 429, 5)
-                    wait = math.ceil((5 if no_match else 120) - (now - row['created']))
+                    delay = 5 if no_match else caller_delay if row['state'] == 'queued' else 120
+                    wait = math.ceil(delay - (now - row['created']))
                     caller_wait = max(caller_wait, wait)
                 if row['instance'] == instance and row['channel'] == body['channel']:
-                    wait = math.ceil((5 if no_match else 15) - (now - row['created']))
+                    wait = math.ceil((5 if no_match else channel_delay) - (now - row['created']))
                     channel_wait = max(channel_wait, wait)
                 if video and row['video'] == video:
                     require(row['state'] not in ACTIVE + ('queued', 'uncertain'), 'duplicate_video', 409)
@@ -592,6 +776,96 @@ class Service:
                                VALUES (?,?,?,?,?,?,?,'pending',?,?)''',
                             (body['id'], instance, body['caller'], body['channel'], body['action'], query, video, now, now))
             return self.view(self.db.execute('SELECT * FROM jobs WHERE id=?', (body['id'],)).fetchone())
+
+    def waiting_pressure(self):
+        """Bounded shared player read, outside the durable ledger lock."""
+        if not self.pressure_lock.acquire(blocking=False):
+            return None
+        try:
+            until, count = self.pressure_cache
+            if time.monotonic() >= until:
+                try:
+                    count = self.backend.queue_count()
+                    require(type(count) is int and 0 <= count <= 512, 'queue_unavailable')
+                except Exception:
+                    count = None
+                self.pressure_cache = (time.monotonic() + 2, count)
+            return count
+        finally:
+            self.pressure_lock.release()
+
+    def advance(self, instance, body):
+        # The authenticated Mediabot instance authorizes Administrator+ before
+        # sending this operation. No caller-supplied role grants privileges.
+        require(isinstance(body, dict) and set(body) == {'id', 'caller', 'channel'}
+                and all(isinstance(v, str) for v in body.values()))
+        require(re.fullmatch(r'[a-f0-9]{32}', body['id'])
+                and re.fullmatch(r'[a-f0-9]{64}', body['caller'])
+                and re.fullmatch(r'#[^\s,\x00-\x1f]{1,99}', body['channel']))
+        def old_receipt():
+            row = self.db.execute('SELECT * FROM next_receipts WHERE id=?', (body['id'],)).fetchone()
+            if row:
+                require(row['instance'] == instance and all(row[k] == body[k] for k in ('caller', 'channel')),
+                        'request_id_conflict', 409)
+                return {k: row[k] for k in ('state', 'code', 'title', 'origin')}
+        with self.lock:
+            old = old_receipt()
+            if old is not None:
+                return old
+        require(self.next_lock.acquire(blocking=False), 'next_busy', 429, 15)
+        try:
+            with self.lock:
+                old = old_receipt()
+                if old is not None:
+                    return old
+                latest = self.db.execute('SELECT max(created) FROM next_receipts').fetchone()[0]
+                if latest is not None:
+                    delay = math.ceil(15 - (self.clock() - latest))
+                    require(delay <= 0, 'next_busy', 429, max(1, delay))
+            try:
+                before = self.backend.control_state()
+            except Exception:
+                raise RadioError('next_unavailable', 503) from None
+            require(before['origin'] != 'live', 'next_live', 409)
+            require(before['origin'] != 'none' and before['serial'] > 0, 'next_unavailable', 503)
+            require(not before['pending'], 'next_busy', 429, 15)
+            # Persist before any possible mutation: retries and restarts never
+            # send a second skip, even when an acknowledgement is lost.
+            with self.lock, self.db:
+                self.db.execute('DELETE FROM next_receipts WHERE created < ?', (self.clock() - 604800,))
+                self.db.execute('INSERT INTO next_receipts VALUES (?,?,?,?,?,?,?,?,?)',
+                    (body['id'], instance, body['caller'], body['channel'], self.clock(),
+                     'sending', '', '', 'none'))
+            state, code, title, origin = 'uncertain', 'next_no_ack', '', 'none'
+            try:
+                ack = self.backend.advance(before)
+                if ack != 'accepted':
+                    state, code = 'failed', {'live': 'next_live', 'stale': 'next_changed',
+                        'busy': 'next_busy', 'unavailable': 'next_unavailable'}[ack]
+                else:
+                    deadline = time.monotonic() + 4
+                    while time.monotonic() < deadline and not STOP.is_set():
+                        after = self.backend.control_state()
+                        if after['epoch'] != before['epoch']:
+                            break
+                        if after['outcome'] == 'completed' and after['serial'] > before['serial']:
+                            title = clean(after['artist'] + ' — ' + after['title'], 180) if after['artist'] else clean(after['title'], 180)
+                            state, code, origin = 'completed', '', after['origin']
+                            break
+                        if after['outcome'] in ('stale', 'unavailable'):
+                            state, code = 'failed', 'next_changed'
+                            break
+                        time.sleep(.1)
+            except Exception:
+                LOG.warning('next=%s confirmation=unavailable', body['id'])
+            with self.lock, self.db:
+                self.db.execute('UPDATE next_receipts SET state=?,code=?,title=?,origin=? WHERE id=?',
+                    (state, code, title, origin, body['id']))
+            self.queue_cache_until = 0.
+            self.pressure_cache = (0., None)
+            return dict(state=state, code=code, title=title, origin=origin)
+        finally:
+            self.next_lock.release()
 
     def status(self, instance, job_id):
         with self.lock:
@@ -634,6 +908,7 @@ class Service:
             job = dict(row)
             self.update(job['id'], state='working')
         submitting = False
+        acquired = False
         try:
             self.backend.capacity()
             if job['action'] == 'play' and not job['video']:
@@ -651,7 +926,10 @@ class Service:
                              AND (state IN ('working','submitting') OR updated>?)) LIMIT 1''',
                         (job['id'], job['video'], self.clock() - 600)).fetchone()
                     require(duplicate is None, 'duplicate_video', 409)
+            self.catalogue_lock.acquire()
+            acquired = True
             track = self.backend.resolve(job)  # mandatory catalogue success before push
+            self.track_guard(track)
             # Apply the same labels to older catalogue/cache entries without
             # rewriting their files, sidecars or database ownership.
             track = dict(track)
@@ -659,6 +937,10 @@ class Service:
             self.backend.capacity()
             require(not STOP.is_set(), 'service_stopping', 503)
             self.claim(job['id'], track)
+            mp3 = str(track.get('id_mp3') or '')
+            if re.fullmatch(r'[1-9][0-9]{0,18}', mp3):
+                with self.lock, self.db:
+                    self.db.execute('INSERT OR REPLACE INTO job_tracks VALUES (?,?)', (job['id'], mp3))
             self.update(job['id'], state='submitting', title=clean(track['artist'] + ' — ' + track['title'], 180))
             submitting = True
             rid = self.backend.push(track)
@@ -684,6 +966,9 @@ class Service:
                 with self.lock, self.db:
                     self.db.execute('INSERT OR REPLACE INTO download_pause VALUES (?,?,?)',
                                     ('youtube', code, self.clock() + DOWNLOAD_PAUSES[code]))
+        finally:
+            if acquired:
+                self.catalogue_lock.release()
         with self.lock, self.db:
             if submitting:
                 self.db.execute('UPDATE track_claims SET updated=? WHERE job_id=?', (self.clock(), job['id']))
@@ -716,13 +1001,16 @@ class Service:
                 result, status = self.queue_status(), 200
             elif method == 'GET' and re.fullmatch(r'/v1/requests/[a-f0-9]{32}', path):
                 result, status = self.status(instance, path.rsplit('/', 1)[1]), 200
-            elif method == 'POST' and path == '/v1/requests':
+            elif method == 'POST' and path in ('/v1/requests', '/v1/next', '/v1/tracks/remove'):
                 require(env.get('CONTENT_TYPE', '').split(';')[0] == 'application/json', 'json_required', 415)
                 size = env.get('CONTENT_LENGTH', '')
                 require(size.isdecimal() and 0 < int(size) <= 4096, 'invalid_length', 413)
                 data = env['wsgi.input'].read(int(size))
                 require(len(data) == int(size), 'invalid_length')
-                result, status = self.submit(instance, json.loads(data)), 202
+                operation = {'/v1/requests': self.submit, '/v1/next': self.advance,
+                             '/v1/tracks/remove': self.remove_track}[path]
+                result = operation(instance, json.loads(data))
+                status = 202
             else:
                 raise RadioError('not_found', 404)
         except RadioError as error:

@@ -15,6 +15,8 @@ import radio_service as radio
 class Backend:
     def __init__(self):
         self.events, self.error, self.sent = [], None, 0
+    def queue_count(self):
+        return 5
     def capacity(self):
         self.events.append('capacity')
     def resolve(self, job):
@@ -126,7 +128,7 @@ class Contract(unittest.TestCase):
     def test_remaining_cooldown_is_reported(self):
         self.s.submit('dev',self.body());self.s.work_once();self.now+=37
         status,result=self.api('POST','/v1/requests',self.body(2,caller=self.body()['caller'],action='rplay',query='Radiohead'))
-        self.assertEqual((status,result['error'],result['retry_after']),(429,'caller_cooldown',83))
+        self.assertEqual((status,result['error'],result['retry_after']),(429,'caller_cooldown',53))
     def test_typo_is_briefly_throttled_then_corrected_track_is_queued(self):
         body=self.body(action='rplay',query='Keziaj Jones')
         with patch.object(self.backend,'resolve',side_effect=radio.RadioError('no_matching_track')):
@@ -676,7 +678,7 @@ class TextPlay(unittest.TestCase):
             self.assertEqual(p.stat().st_mode & 0o777, 0o600)
             self.assertEqual(p.read_bytes(), cookies.read_bytes())
             p.write_bytes(b'rotated by child')
-            return json.dumps(dict(_type='playlist',entries=[self.entry()])).encode()
+            return json.dumps(dict(_type='playlist',entries=[self.entry(title=query)])).encode()
         with patch.object(radio, 'run', side_effect=execute):
             self.assertEqual(backend.search(query), 'abcdefghijk')
         self.assertEqual(cookies.read_bytes(), b'private fixture')
@@ -729,7 +731,7 @@ class MetadataContract(unittest.TestCase):
             original = dict(path=str(path),artist='Paul Simon',title='Paul Simon - You Can Call Me Al (Official Video)')
             before = dict(original)
             try:
-                with patch.object(b,'capacity'), patch.object(b,'resolve',return_value=original), \
+                with patch.object(b,'queue_count',return_value=0), patch.object(b,'capacity'), patch.object(b,'resolve',return_value=original), \
                      patch.object(b,'audio',return_value=path), patch.object(b,'command',return_value='42') as command:
                     s.submit('nbot',dict(id='a'*32,caller='b'*64,channel='#radio',action='rplay',query='Paul Simon'))
                     s.work_once()
@@ -770,7 +772,7 @@ class MetadataContract(unittest.TestCase):
                             query='https://youtu.be/abcdefghijk' if action=='play' else 'Stevie Wonder')
                 track = dict(path=str(path), artist='Stevie Wonder', title='Superstition')
                 try:
-                    with patch.object(b, 'capacity'), patch.object(b, 'resolve', return_value=track), patch.object(b, 'audio', return_value=path):
+                    with patch.object(b, 'queue_count',return_value=0), patch.object(b, 'capacity'), patch.object(b, 'resolve', return_value=track), patch.object(b, 'audio', return_value=path):
                         service.submit(instance, body)
                         service.work_once()
                     thread.join(6)
@@ -1037,6 +1039,327 @@ class SharedQueue(unittest.TestCase):
         self.assertEqual(len(json.loads(data)['waiting']),6)
         self.assertIn(('Cache-Control','no-store'),headers)
 
+
+class AdaptiveAndNextContract(unittest.TestCase):
+    setUp = Contract.setUp
+    tearDown = Contract.tearDown
+    body = Contract.body
+    api = Contract.api
+
+    def test_each_waiting_count_changes_both_budgets(self):
+        self.s.submit('dev', self.body()); self.s.work_once()
+        for count, caller, channel in ((0,5,5),(1,15,5),(2,30,10),(3,45,15),(4,60,20),(5,90,30)):
+            with self.subTest(count=count), patch.object(self.backend,'queue_count',return_value=count):
+                self.s.pressure_cache=(0,None)
+                for person, delay, error in ((self.body()['caller'],caller,'caller_cooldown'),('f'*64,channel,'channel_cooldown')):
+                    status,result=self.api('POST','/v1/requests',self.body(2,caller=person,action='rplay',query='different'))
+                    self.assertEqual((status,result['error'],result['retry_after']),(429,error,delay))
+
+    def test_empty_queue_accepts_another_request_after_five_seconds(self):
+        self.s.submit('dev',self.body());self.s.work_once();self.now+=5
+        with patch.object(self.backend,'queue_count',return_value=0):
+            self.s.pressure_cache=(0,None)
+            status,result=self.api('POST','/v1/requests',self.body(2,caller=self.body()['caller'],action='rplay',query='different'))
+        self.assertEqual((status,result['state']),(202,'pending'))
+
+    def test_other_instances_preparing_requests_count_towards_pressure(self):
+        self.s.submit('dev',self.body());self.s.work_once()
+        self.s.submit('nbot',self.body(2,action='rplay',query='different'))
+        with patch.object(self.backend,'queue_count',return_value=0):
+            self.s.pressure_cache=(0,None)
+            status,result=self.api('POST','/v1/requests',self.body(3,caller=self.body()['caller'],action='rplay',query='third'))
+        self.assertEqual((status,result['retry_after']),(429,15))
+
+    def test_failed_read_is_conservative_and_outside_ledger_lock(self):
+        self.s.submit('dev',self.body());self.s.work_once()
+        def unavailable():
+            acquired=[]
+            def inspect():
+                with self.s.lock: acquired.append(True)
+            thread=threading.Thread(target=inspect);thread.start();thread.join(1)
+            self.assertEqual(acquired,[True])
+            raise OSError('unavailable')
+        with patch.object(self.backend,'queue_count',side_effect=unavailable):
+            self.s.pressure_cache=(0,None)
+            status,result=self.api('POST','/v1/requests',self.body(2,caller=self.body()['caller'],action='rplay',query='different'))
+        self.assertEqual((status,result['retry_after']),(429,120))
+
+    def test_retries_and_other_instances_share_short_player_cache(self):
+        with patch.object(self.backend,'queue_count',return_value=0) as read:
+            self.s.submit('dev',self.body());self.s.submit('dev',self.body())
+            self.s.submit('nbot',self.body(2,action='rplay',query='different'))
+        self.assertEqual(read.call_count,1)
+
+    def controller(self, origin='playlist', error=False):
+        before=dict(protocol=1,epoch='boot-1',serial=1,origin=origin,pending=False,outcome='idle',artist='Global',title='First')
+        after=dict(before,serial=2,outcome='completed',artist='Requested',title='Second',origin='queue')
+        self.backend.control_state=Mock(side_effect=[before,after])
+        self.backend.advance=Mock(side_effect=OSError('lost acknowledgement') if error else None,return_value='accepted')
+        return dict(id='e'*32,caller='f'*64,channel='#radio')
+
+    def test_successful_skip_is_idempotent_and_receipt_precedes_mutation(self):
+        body=self.controller()
+        def sent(_):
+            self.assertEqual(self.s.db.execute('SELECT state FROM next_receipts WHERE id=?',(body['id'],)).fetchone()[0],'sending')
+            return 'accepted'
+        self.backend.advance.side_effect=sent
+        status,result=self.api('POST','/v1/next',body)
+        self.assertEqual((status,result),(202,dict(state='completed',code='',title='Requested — Second',origin='queue')))
+        self.assertEqual(self.api('POST','/v1/next',body),(status,result))
+        self.backend.advance.assert_called_once()
+
+    def test_ambiguous_skip_is_never_retried_after_restart(self):
+        body=self.controller(error=True)
+        self.assertEqual(self.api('POST','/v1/next',body)[1]['state'],'uncertain')
+        self.s.db.close();self.s=radio.Service(self.c,self.backend,clock=lambda:self.now)
+        self.assertEqual(self.api('POST','/v1/next',body)[1]['state'],'uncertain')
+        self.backend.advance.assert_called_once()
+
+    def test_crash_after_sending_marker_is_not_replayed(self):
+        body=self.controller()
+        self.s.db.execute('INSERT INTO next_receipts VALUES (?,?,?,?,?,?,?,?,?)',
+            (body['id'],'dev',body['caller'],body['channel'],self.now,'sending','','','none'));self.s.db.commit()
+        self.s.db.close();self.s=radio.Service(self.c,self.backend,clock=lambda:self.now)
+        self.assertEqual(self.api('POST','/v1/next',body)[1]['state'],'uncertain')
+        self.backend.advance.assert_not_called()
+
+    def test_live_input_cannot_be_skipped(self):
+        body=self.controller(origin='live')
+        self.assertEqual(self.api('POST','/v1/next',body),(409,{'error':'next_live'}))
+        self.backend.advance.assert_not_called()
+
+    def test_failed_compare_and_skip_does_not_retry(self):
+        body=self.controller();self.backend.advance.return_value='stale'
+        self.assertEqual(self.api('POST','/v1/next',body)[1]['code'],'next_changed')
+        self.backend.advance.assert_called_once()
+
+    def test_skip_throttle_and_receipt_isolation_are_shared(self):
+        body=self.controller();self.api('POST','/v1/next',body)
+        self.assertEqual(self.api('POST','/v1/next',body,secret='b'*64)[0],409)
+        self.assertEqual(self.api('POST','/v1/next',dict(body,id='d'*32),secret='b'*64),
+                         (429,dict(error='next_busy',retry_after=15)))
+        self.backend.advance.assert_called_once()
+
+    def test_forged_roles_get_and_missing_token_never_skip(self):
+        body=self.controller()
+        self.assertEqual(self.api('POST','/v1/next',dict(body,role='Administrator'))[0],400)
+        self.assertEqual(self.api('GET','/v1/next')[0],404)
+        self.assertEqual(self.api('POST','/v1/next',body,secret='c'*64)[0],401)
+        self.backend.advance.assert_not_called()
+
+    def test_concurrent_skip_is_rejected_without_controller_io(self):
+        body=self.controller()
+        with self.s.next_lock:
+            self.assertEqual(self.api('POST','/v1/next',body)[1]['error'],'next_busy')
+        self.backend.control_state.assert_not_called()
+
+    def test_controller_restart_cannot_confirm_the_wrong_track(self):
+        body=self.controller()
+        before,after=list(self.backend.control_state.side_effect);after['epoch']='new-boot'
+        self.backend.control_state.side_effect=[before,after]
+        self.assertEqual(self.api('POST','/v1/next',body)[1]['state'],'uncertain')
+
+
+class MusicSelection(unittest.TestCase):
+    def result(self, title, video='abcdefghijk', **extra):
+        return dict(ie_key='Youtube', id=video, duration=240, title=title, **extra)
+    def select(self, query, *entries, allowed=None):
+        return radio.search_video(dict(_type='playlist', entries=list(entries)), 900, query, allowed)
+    def test_official_match_beats_unrequested_cover_and_unrelated_first_hit(self):
+        self.assertEqual(self.select('Michael Jackson Billie Jean',
+            self.result('Michael Jackson Billie Jean guitar cover'),
+            self.result('Michael Jackson interview'),
+            self.result('Michael Jackson - Billie Jean (Official Video)', 'ABCDEFGHIJK')),'ABCDEFGHIJK')
+    def test_requested_version_is_allowed(self):
+        for version in ('cover','remix','karaoke','slowed'):
+            self.assertEqual(self.select('Billie Jean '+version,
+                self.result('Billie Jean '+version)),'abcdefghijk')
+    def test_unrequested_versions_refused_but_live_and_lyrics_remain_music(self):
+        for version in ('piano tutorial','sped up','reaction','AI cover','full album','loop'):
+            with self.subTest(version=version),self.assertRaisesRegex(radio.RadioError,'no_youtube_match'):
+                self.select('Billie Jean',self.result('Billie Jean '+version))
+        for version in ('live at Wembley','lyrics','Official Audio'):
+            self.assertEqual(self.select('Billie Jean',self.result('Billie Jean '+version)),'abcdefghijk')
+    def test_diacritics_typo_and_no_popularity_threshold(self):
+        self.assertEqual(self.select('Bjork Joga',self.result('Björk - Jóga',view_count=3)),'abcdefghijk')
+        self.assertEqual(self.select('Mickael Jackson Billie Jean',self.result('Michael Jackson Billie Jean')),'abcdefghijk')
+    def test_missing_title_and_weak_match_refused(self):
+        for entry in (self.result(None),self.result('Unknown title'),self.result('Michael Jackson Interview')):
+            with self.assertRaisesRegex(radio.RadioError,'no_youtube_match'):
+                self.select('Michael Jackson Billie Jean',entry)
+    def test_blocked_video_never_wins_even_with_official_label(self):
+        self.assertEqual(self.select('Billie Jean',self.result('Billie Jean Official Video'),
+            self.result('Billie Jean','ABCDEFGHIJK'),allowed=lambda v:v!='abcdefghijk'),'ABCDEFGHIJK')
+    def test_lyrics_not_removed_from_a_song_title(self):
+        self.assertEqual(self.select('The Cover of the Rolling Stone',
+            self.result('Dr Hook - The Cover of the Rolling Stone')),'abcdefghijk')
+
+
+class Withdrawals(unittest.TestCase):
+    tearDown = Contract.tearDown
+    body = Contract.body
+    api = Contract.api
+    # Reuse the real SQLite/HTTP fixture; inherited tests remain only in Contract.
+    def setUp(self):
+        Contract.setUp(self)
+        self.track=dict(id_mp3=28,id_user=1,id_youtube='abcdefghijk',folder=self.temp.name,
+            filename='abcdefghijk.mp3',artist='Artist',title='Unwanted version')
+        self.audio=Path(self.temp.name)/self.track['filename'];self.audio.write_bytes(b'playing fixture')
+        self.rows={'28':dict(self.track)};self.removals=0
+        def catalogue(action,**values):
+            if action=='get':return dict(track=dict(self.rows[values['mp3']]) if values['mp3'] in self.rows else None)
+            if action=='remove':
+                saved=self.s.db.execute('SELECT snapshot FROM removed_tracks WHERE mp3=?',(values['mp3'],)).fetchone()
+                self.assertEqual(json.loads(saved[0]),values['expected'])
+                old=self.rows.get(values['mp3'])
+                if old and old!=values['expected']:return dict(removed=False)
+                self.rows.pop(values['mp3'],None);self.removals+=1
+                return dict(removed=True)
+            raise AssertionError(action)
+        self.backend.catalogue=Mock(side_effect=catalogue)
+        self.remove_body=dict(id='f'*32,caller='e'*64,channel='#radio',mp3='28')
+    def remove(self,body=None,**kw):
+        return self.api('POST','/v1/tracks/remove',body or self.remove_body,**kw)
+    def test_addition_receipt_exposes_central_id_and_keeps_it_after_restart(self):
+        self.backend.resolve=Mock(return_value=self.track)
+        body=self.body();self.s.submit('dev',body);self.s.work_once()
+        self.assertEqual(self.s.status('dev',body['id'])['mp3'],'28')
+        self.s.db.close();self.s=radio.Service(self.c,self.backend,clock=lambda:self.now)
+        self.assertEqual(self.s.status('dev',body['id'])['mp3'],'28')
+
+    def test_remove_archives_then_deletes_exact_row_without_unlink_or_player_command(self):
+        status,result=self.remove()
+        self.assertEqual((status,result['state'],result['mp3']),(202,'removed','28'))
+        self.assertEqual(self.rows,{})
+        self.assertEqual(self.audio.read_bytes(),b'playing fixture')
+        self.assertEqual(self.backend.sent,0)
+        self.assertEqual(self.s.db.execute('SELECT state FROM removed_tracks').fetchone()[0],'removed')
+    def test_repeated_command_and_other_instance_do_not_delete_again(self):
+        first=self.remove()
+        self.assertEqual(self.remove(dict(self.remove_body,id='a'*32),secret='b'*64),first)
+        self.assertEqual(self.removals,1)
+    def test_video_row_and_alias_path_blocked_after_restart(self):
+        self.remove();self.s.db.close();self.s=radio.Service(self.c,self.backend,clock=lambda:self.now)
+        for track in (self.track,dict(id_youtube='abcdefghijk'),dict(self.track,id_mp3=29,id_youtube='ABCDEFGHIJK')):
+            with self.assertRaisesRegex(radio.RadioError,'track_removed'):self.s.track_guard(track)
+        self.assertEqual(self.api('POST','/v1/requests',self.body())[1],dict(error='track_removed'))
+    def test_rplay_skips_withdrawn_row_and_preserves_random_order(self):
+        self.remove();b=radio.Backend({});b.track_guard=self.s.track_guard
+        other=dict(self.track,id_mp3=29,id_youtube='ABCDEFGHIJK',filename='other.mp3')
+        with patch.object(b,'catalogue',return_value=dict(tracks=[self.track,other])),patch.object(b,'audio',side_effect=lambda p,**kw:p):
+            self.assertEqual(b.resolve(dict(action='rplay',query='Artist'))['id_mp3'],29)
+    def test_cache_cannot_resurrect_a_withdrawn_video(self):
+        self.remove();b=radio.Backend(dict(incoming=self.temp.name));b.track_guard=self.s.track_guard
+        with patch.object(b,'audio') as probe,patch.object(b,'catalogue') as sql,patch.object(radio,'run') as run:
+            with self.assertRaisesRegex(radio.RadioError,'track_removed'):b.download('abcdefghijk')
+            probe.assert_not_called();sql.assert_not_called();run.assert_not_called()
+    def test_deletion_failure_preserves_recovery_row_and_blocks_until_retry(self):
+        original=self.backend.catalogue.side_effect
+        def fail(action,**kw):
+            if action=='remove':raise radio.RadioError('catalogue_failed',503)
+            return original(action,**kw)
+        self.backend.catalogue.side_effect=fail
+        self.assertEqual(self.remove()[0],503)
+        self.assertEqual(self.s.db.execute('SELECT state FROM removed_tracks').fetchone()[0],'pending')
+        self.assertIn('28',self.rows)
+        self.backend.catalogue.side_effect=original
+        self.assertEqual(self.remove()[1]['state'],'removed')
+    def test_lost_ack_after_mysql_commit_is_retryable_without_recreating_row(self):
+        original=self.backend.catalogue.side_effect
+        def lost(action,**kw):
+            result=original(action,**kw)
+            if action=='remove':raise OSError('ack lost')
+            return result
+        self.backend.catalogue.side_effect=lost
+        self.assertEqual(self.remove()[0],503);self.assertEqual(self.rows,{})
+        self.backend.catalogue.side_effect=original
+        self.assertEqual(self.remove()[1]['state'],'removed')
+    def test_changed_row_preserved_and_withdrawal_not_reported_complete(self):
+        original=self.backend.catalogue.side_effect
+        def changed(action,**kw):
+            if action=='remove':self.rows['28']['title']='Operator correction'
+            return original(action,**kw)
+        self.backend.catalogue.side_effect=changed
+        self.assertEqual(self.remove(),(409,dict(error='catalogue_changed')))
+        self.assertEqual(self.rows['28']['title'],'Operator correction')
+    def test_busy_download_or_push_refuses_without_database_mutation(self):
+        with self.s.catalogue_lock:
+            self.assertEqual(self.remove(),(409,dict(error='catalogue_busy')))
+        self.backend.catalogue.assert_not_called()
+        self.assertEqual(self.s.db.execute('SELECT count(*) FROM removed_tracks').fetchone()[0],0)
+    def test_withdrawn_worker_result_never_pushes(self):
+        self.s.submit('dev',self.body());self.remove()
+        self.backend.resolve=Mock(return_value=self.track)
+        self.s.work_once()
+        self.assertEqual(self.backend.sent,0)
+        self.assertEqual(self.s.status('dev',self.body()['id'])['code'],'track_removed')
+    def test_invalid_id_and_forged_role_refused(self):
+        for value in ('0','-1','28 OR 1=1','028','1'*20,28):
+            self.assertEqual(self.remove(dict(self.remove_body,mp3=value))[0],400)
+        self.assertEqual(self.remove(dict(self.remove_body,role='Master'))[0],400)
+        self.assertEqual(self.remove(secret='c'*64)[0],401)
+        self.assertEqual(self.api('GET','/v1/tracks/remove')[0],404)
+        self.backend.catalogue.assert_not_called()
+    def test_missing_id_does_not_create_archive(self):
+        self.assertEqual(self.remove(dict(self.remove_body,mp3='999')), (404,dict(error='track_not_found')))
+        self.assertEqual(self.s.db.execute('SELECT count(*) FROM removed_tracks').fetchone()[0],0)
+
+
+
+class CatalogueAdapter(unittest.TestCase):
+    """Execute the real Perl adapter with a local, transactional DBI fixture."""
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name);(self.root/'Config').mkdir()
+        (self.root/'conf').write_text('fixture')
+        (self.root/'Config/Simple.pm').write_text("""package Config::Simple;
+sub new { bless {}, shift } sub vars { ('mysql.MAIN_PROG_DDBNAME'=>'fixture','mysql.MAIN_PROG_DBHOST'=>'localhost') } 1;""")
+        (self.root/'DBI.pm').write_text(r"""package DBI;
+use JSON::PP;
+our $path=$ENV{MB734_SQL_FIXTURE};
+sub connect { open my $f,'<',$path or die;local $/;my $v=decode_json(<$f>);bless {v=>$v,events=>[]},'DBI::db' }
+package DBI::db;
+sub selectrow_hashref { my($s,$sql,$attr,$id)=@_;die 'bound id' unless $sql =~ /WHERE id_mp3=\?/ && $id==28;
+ push @{$s->{events}},$sql;return $s->{v}{row}; }
+sub begin_work { push @{$_[0]{events}},'BEGIN' }
+sub do { my($s,$sql,$attr,$id)=@_;push @{$s->{events}},$sql;
+ if($sql=~/^DELETE/) {die 'bound delete' unless $sql eq 'DELETE FROM MP3 WHERE id_mp3=?' && $id==28;
+ die 'fixture constraint' if $s->{v}{constraint};$s->{v}{row}=undef;return 1; } return 1; }
+sub commit { my($s)=@_;push @{$s->{events}},'COMMIT';$s->{v}{events}=$s->{events};
+ open my $f,'>',$path or die;print $f JSON::PP::encode_json($s->{v});close $f; }
+sub disconnect {1} 1;
+""")
+        self.track=dict(id_mp3=28,id_user=1,id_youtube='abcdefghijk',folder='/music',filename='file.mp3',artist='Artist',title='Track')
+        self.store=self.root/'db.json';self.store.write_text(json.dumps(dict(row=self.track)))
+    def call(self, **body):
+        import os
+        env=dict(os.environ,MB734_SQL_FIXTURE=str(self.store));env.pop('PERL5OPT',None)
+        p=subprocess.run(['perl','-I'+str(self.root),str(Path(radio.__file__).with_name('radio_catalogue.pl')),str(self.root/'conf')],
+            input=json.dumps(body).encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,timeout=5)
+        self.assertFalse(p.stderr,p.stderr.decode(errors='replace'))
+        return p.returncode,json.loads(p.stdout)
+    def test_get_reads_one_central_row(self):
+        rc,out=self.call(action='get',mp3='28');self.assertEqual(rc,0);self.assertEqual(out['track'],self.track)
+    def test_remove_locks_checks_then_deletes_and_is_repeatable(self):
+        rc,out=self.call(action='remove',mp3='28',expected=self.track)
+        self.assertEqual((rc,out),(0,dict(ok=True,removed=True)))
+        data=json.loads(self.store.read_text());self.assertIsNone(data['row'])
+        self.assertTrue(any('FOR UPDATE' in q for q in data['events']))
+        self.assertEqual(self.call(action='remove',mp3='28',expected=self.track)[1],dict(ok=True,removed=True))
+    def test_changed_nullable_field_prevents_delete(self):
+        for value in ('changed',None):
+            changed=dict(self.track,title=value);self.store.write_text(json.dumps(dict(row=changed)))
+            self.assertEqual(self.call(action='remove',mp3='28',expected=self.track)[1],dict(ok=True,removed=False))
+            self.assertEqual(json.loads(self.store.read_text())['row'],changed)
+    def test_constraint_failure_never_commits_or_reports_success(self):
+        self.store.write_text(json.dumps(dict(row=self.track,constraint=True)))
+        self.assertEqual(self.call(action='remove',mp3='28',expected=self.track),(1,dict(ok=False,code='catalogue_failed')))
+        self.assertEqual(json.loads(self.store.read_text())['row'],self.track)
+    def test_no_sql_injection_or_missing_expected_snapshot(self):
+        for body in (dict(action='remove',mp3='28 OR 1=1',expected=self.track),dict(action='remove',mp3='28'),
+                     dict(action='remove',mp3='28',expected=dict(self.track,id_mp3=29))):
+            self.assertEqual(self.call(**body),(1,dict(ok=False,code='catalogue_failed')))
+        self.assertEqual(json.loads(self.store.read_text())['row'],self.track)
 
 if __name__=='__main__':
     unittest.main(verbosity=1)

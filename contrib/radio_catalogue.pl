@@ -50,6 +50,32 @@ my $result = eval {
             SELECT * FROM MP3 WHERE artist LIKE ? ESCAPE '!' OR title LIKE ? ESCAPE '!'
             ORDER BY CASE WHEN artist=? THEN 0 WHEN artist LIKE ? ESCAPE '!' THEN 1 ELSE 2 END,
                      RAND() LIMIT 200}, {Slice=>{}}, $like, $like, $q, $like)};
+    } elsif ($action eq 'get' || $action eq 'remove') {
+        die "mp3 id" unless ($r->{mp3}//'') =~ /\A[1-9][0-9]{0,18}\z/;
+        my @fields = qw(id_mp3 id_user id_youtube folder filename artist title);
+        my $select = 'SELECT '.join(',',@fields).' FROM MP3 WHERE id_mp3=?';
+        if ($action eq 'get') {
+            $out = {track=>$db->selectrow_hashref($select,undef,$r->{mp3})};
+        } else {
+            my $expected = $r->{expected};
+            die "snapshot" unless ref($expected) eq 'HASH'
+                && join(',',sort keys %$expected) eq join(',',sort @fields)
+                && ($expected->{id_mp3}//'') eq $r->{mp3};
+            for (@fields) { die "snapshot value" if ref($expected->{$_}) || length($expected->{$_}//'')>255 }
+            $db->begin_work;
+            my $row = $db->selectrow_hashref($select.' FOR UPDATE',undef,$r->{mp3});
+            # A retry after lost acknowledgement may find the row already gone.
+            # Never delete a replacement/edited row under the same numeric ID.
+            my $same = !$row || !grep {
+                defined($row->{$_}) != defined($expected->{$_})
+                    || (defined($row->{$_}) && $row->{$_} ne $expected->{$_})
+            } @fields;
+            if ($same && $row) {
+                die "delete" unless $db->do('DELETE FROM MP3 WHERE id_mp3=?',undef,$r->{mp3}) == 1;
+            }
+            $db->commit;
+            $out = {removed=>($same ? JSON::PP::true : JSON::PP::false)};
+        }
     } elsif ($action eq 'register') {
         die "owner" unless ($r->{owner}//'') =~ /\A[1-9]\d*\z/;
         die "video" unless ($r->{youtube}//'') =~ /\A[A-Za-z0-9_-]{11}\z/;

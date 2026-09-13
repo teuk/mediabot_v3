@@ -9,12 +9,14 @@ m rplay Radiohead
 m rplay Idioteque
 m radioqueue
 m queue
-m nextsong
 ```
 
 `play` accepts an artist/title search or one HTTPS YouTube video URL. Text
-search chooses the first eligible video among YouTube's first five results,
-in relevance order. It excludes known live/upcoming videos and entries with
+search ranks at most five YouTube results by artist/title relevance. It prefers
+official video/audio and artist Topic/VEVO hints when available. Covers, karaoke,
+tutorials, reactions, remixes and speed/loop edits are rejected unless requested
+explicitly. Accents and ordinary spelling mistakes are tolerated; view counts
+are not a requirement. Missing titles and weak matches are refused. It excludes known live/upcoming videos and entries with
 missing, invalid or excessive duration (15 minutes by default). Use a video
 URL when you need a particular recording; spelling correction and the exact
 musical version are not guaranteed.
@@ -49,11 +51,44 @@ uses one orange/grey channel line, matching `song`, when the shared public
 spacing permits; otherwise the same confirmation is sent by NOTICE.
 “Added to the queue” means Liquidsoap
 returned a request ID; it does **not** mean that playback has already started.
-The API neither skips a track nor changes a streaming script. Live priority
+`play` and `rplay` never request a skip. Live priority
 and track interruption follow the existing Liquidsoap configuration. In
 particular, `track_sensitive=false` between playlist and queue can interrupt
 the playlist when a request becomes ready. Qualify this policy separately
 before promising that the current track will always finish.
+
+## Withdraw an unwanted track
+
+Authenticated **Master+** accounts on `+Radio` can use `m deltrack 28` (or
+`!deltrack 28`). The number is **`id_mp3` in the central radio catalogue**, not
+an ID from the IRC instance's local database. Administrator alone cannot do it.
+New addition confirmations show `MP3 #<id>` so moderators can identify the row.
+The withdrawal response is always a private NOTICE identifying the track.
+
+The central service archives the original row in private SQLite `removed_tracks`
+before deleting that exact row from MariaDB `MP3`. Its ID, YouTube video ID and
+file path are then blocked for future API `play`/`rplay`, including cache reuse,
+other configured instances and service restarts. Requests for another video ID
+are a different identity: this cannot recognize every re-upload of a recording.
+A busy download/push returns a brief retry message without deleting anything.
+
+This command does **not** unlink the MP3, flush the queue, or skip on air.
+Already accepted playout continues; use Administrator+ `nextsong` to skip it.
+This preserves active file handles and independent playlist references. A
+playlist directly managed outside this API is not filtered by this catalogue
+withdrawal. No track is withdrawn automatically during installation.
+
+If SQL fails, the archived withdrawal intent and block remain. Repeating
+`deltrack` with the same central ID safely finishes it, including a lost SQL
+acknowledgement. A concurrently edited row is left intact and requires operator
+review. The archive is retained beyond ordinary request-history expiry; recovery
+is an explicit operator task. Keep it in state backups. Do not roll the API back
+to a version unaware of withdrawals once any have been recorded.
+
+Selection is based on search metadata, not listening to or certifying an audio
+recording. A misleading title may still pass. Use a precise YouTube URL for a
+specific version; explicit URLs bypass version preferences, but never a Master
+withdrawal. Existing catalogue contents are not bulk edited or deleted.
 
 ## See what is waiting
 
@@ -62,9 +97,10 @@ before promising that the current track will always finish.
 | `m song` | Current Icecast title and listening URL, as before. |
 | `m radioqueue` | One compact line: Icecast current title, first three waiting requests, remaining count. Public at most once per minute per channel; NOTICE otherwise. |
 | `m queue` | Alias for `m radioqueue` on `+Radio`, with the same permissions and cooldown. |
-| `m nextsong` | One NOTICE with the first waiting request, or an empty-queue indication. |
+| `m deltrack <id_mp3>` | **Authenticated Master+ only**: withdraw and block that central track, with private feedback. |
+| `m nextsong` | **Authenticated Administrator+ only**: skip the selected track, then announce the confirmed new title and its queue/global-playlist origin. |
 
-The read-only commands work for every participant through the same authenticated
+`song`, `queue` and `radioqueue` work for every participant through the same authenticated
 API, including remote bots. They do not use the remote host's Liquidsoap socket.
 No new setting or migration is needed when `play`/`rplay` already use the API.
 Update the central API first, then the IRC clients through the usual update flow.
@@ -99,7 +135,8 @@ bounded to 360 UTF-8 bytes including formatting. Long labels are shortened.
   across all callers. Further eligible reads use the same compact view by NOTICE.
 - Confirmed additions and public queue views share a **15-second public gap**.
   A suppressed public success still reaches its requester by NOTICE.
-- `nextsong`, preparation, errors and refusals are always private.
+- A confirmed `nextsong` transition shares that public gap; NOTICE otherwise.
+  Preparation, errors and refusals are always private.
 - One caller identity may consult every **five seconds**, across aliases/nicks;
   the bot also limits consultation responses to one per second overall. Faster
   repetitions are ignored. At most one HTTP queue read is started every five
@@ -130,8 +167,76 @@ title comes from the configured Icecast mount; Liquidsoap also cautions against
 using request-level on-air metadata as output truth in its
 [2.3 migration notes](https://www.liquidsoap.info/doc-2.3.1/migrating.html).
 Live input keeps priority and no start time is promised. A failed queue read is
-never presented as an empty queue. `nextsong` describes the next *requested*
-track, not the fallback playlist or live input.
+never presented as an empty queue. The following section describes the separate
+administrative `nextsong` operation.
+
+## Adaptive requests and Administrator+ nextsong
+
+Successful `play` and `rplay` requests share a load-based cooldown. Pressure is
+waiting Liquidsoap tracks plus downloads being prepared or transferred, across
+all authenticated instances. The currently playing track is not waiting.
+
+| Pressure | Same caller | Same channel |
+| --- | --- | --- |
+| 0 | 5 s | 5 s |
+| 1 | 15 s | 5 s |
+| 2 | 30 s | 10 s |
+| 3 | 45 s | 15 s |
+| 4 | 60 s | 20 s |
+| 5 or more | 90 s | 30 s |
+
+These delays are measured from acceptance of the previous request, not from
+download completion. One bounded player count is shared for up to two seconds;
+unavailable counts retain the conservative 120 s caller / 15 s channel policy.
+A pending request still blocks another request by the same caller. Failed or
+uncertain operations retain 120 s, except an empty search (5 s). Six waiting
+tracks remain the physical queue limit. Searching, duplicate suppression and
+YouTube pauses are unchanged. The central update changes this policy for all
+existing HTTP clients without changing their configuration.
+
+`nextsong` is an actual skip, available only to an authenticated Administrator,
+Master or Owner on `+Radio`. All other callers are refused before HTTP. It uses
+`POST /v1/next` and the same instance token; the service trusts each installed
+bot's account authorization, never a role supplied in the HTTP body. Keep
+instance tokens private. Skips share a global 15 s gap. A durable receipt is
+written before sending the control command; retrying its ID or restarting the
+API cannot send it twice. An uncertain outcome is reported privately.
+
+The Liquidsoap controller must wrap **the final three-source fallback** used
+by this radio's output. It compares a boot/track generation, executes at the
+streaming frame boundary and skips only the selected source. It confirms the
+subsequent track or replayed playlist metadata before announcing, for example:
+
+```text
+[ Next · queue ] Artist - Song
+[ Next · global playlist ] Artist - Song
+```
+
+It refuses a selected live input. A track that changed naturally before the
+command executes invalidates the old generation instead of skipping again.
+The wrapper preserves live > queue > playlist priority and existing playback
+behavior, including resuming an interrupted playlist. Missing metadata is
+shown as unavailable, never guessed from a filename or a waiting request.
+
+For a single-host install, copy `contrib/liquidsoap/mediabot-next.liq` to a
+location readable by the Liquidsoap service (for example
+`/etc/liquidsoap/mediabot-next-8000.liq`, root:liquidsoap 0640). Before the output:
+
+```liquidsoap
+full = fallback(track_sensitive=false, [live, queue, global_playlist])
+%include "/etc/liquidsoap/mediabot-next-8000.liq"
+full = mediabot_next_control(full, live, queue)
+# The existing output.icecast must consume full.
+```
+
+Match these variable names to the actual configuration. Qualify the wrapper
+with Liquidsoap 2.3.x and an isolated player before loading it in the service.
+The control socket stays on loopback; remote clients continue using HTTPS.
+This requires one controlled restart of that Liquidsoap process. Wait for the
+request queue to empty and for any live input to disconnect. Icecast and other
+radio instances need no restart. Until the controller is present, `nextsong`
+returns an explicit unavailable notice; ordinary requests still work. Update
+IRC clients through the normal publication/update flow for the new command.
 
 ## One host: the default installation
 
@@ -247,12 +352,14 @@ HTTP implementation; the central Python service runs only on the radio host.
   a durable ID/state, not a playback promise. No URL fetch target other than
   a validated YouTube video, SQL, filesystem path or player command is accepted.
 - `GET /v1/requests/ID`: private status for that authenticated instance only.
+- `POST /v1/next`: authorized bot request to advance the selected source;
+  idempotent durable receipt, global skip throttle, no download.
 - `GET /v1/health`: authenticated liveness check; no playback or download.
 - `GET /v1/queue`: shared pending music labels and aggregate preparation counts;
   authenticated and read-only. Player reads share a four-second deadline and a
   single observation lock; submissions retain their independent ledger lock.
 - One download/processing worker; six pending/working jobs globally, at most
-  one per caller. Cooldowns: 120 seconds per caller, 15 seconds per channel.
+  one per caller. Successful requests use the adaptive cooldown below.
   An `rplay` search with no catalogue rows uses a five-second cooldown instead,
   so a typo can be corrected. Other errors retain the normal budget. Replies
   distinguish a pending request, the remaining cooldown and a full queue.
@@ -386,3 +493,29 @@ the corrected annotation applies to new requests after API restart.
 See [Liquidsoap request metadata](https://www.liquidsoap.info/doc-2.3.3/metadata).
 The deployed 2.3.2 parser is also covered by an isolated native resolution probe
 in the operational package; it uses generated audio only, without a live queue.
+
+### Why `nextsong` does not blindly send `request_queue.skip`
+
+On this three-source selector, `nextsong` advances the selected source in its
+streaming clock. When the request queue is on air, this has the queue-skip
+behavior. When the global playlist is on air, skipping an empty request queue
+would not advance the playlist and can leave a deferred skip for a later
+request; the playlist must be advanced through the selected-source controller. The controller never sends a
+second independent skip and refuses live input or a stale track generation.
+
+| Selected source | Confirmed result |
+| --- | --- |
+| Queue, another ready item | Next queue item, in order. |
+| Queue, last ready item | Return to the interrupted global playlist track. |
+| Global playlist | Next available playlist track. |
+| Live input | Refusal; no skip. |
+| No available source or controller | Refusal; no invented title. |
+| Track changes during the request | Stale request refused; no second skip. |
+| Lost acknowledgement or API restart | Uncertain receipt retained; no automatic resend. |
+
+A bad/unready queued request may be rejected by Liquidsoap and fallback may
+resume the playlist; announcements use the actual observed source and title,
+not a promised queue position. The isolated 2.3.2 probe also checks direct
+`request_queue.skip` and confirms it does not advance an unrelated playlist.
+Client code must be published and updated before remote `nextsong`/`deltrack`
+use these handlers. Central-only installation cannot change an old IRC handler.
