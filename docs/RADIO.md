@@ -137,9 +137,15 @@ including formatting. Long labels are shortened; the replay URL remains intact.
 For example, without the IRC formatting codes (duration and ID illustrative):
 
 ```text
-[ + QUEUE #1 ] Stevie Wonder - Superstition · 4:01 · MP3 #37 · https://youtu.be/ftdZ363R9kQ
+[ + TRACK #1 ] Stevie Wonder - Superstition · 4:01 · MP3 #37 · https://youtu.be/ftdZ363R9kQ
 [ ON AIR ] Stevie Wonder - Superstition › [ 1 ] Paul Simon - You Can Call Me Al
 ```
+
+For the same selected YouTube video ID, `play` reuses the central catalogue
+MP3 when the file remains available and passes validation. Text input still
+performs the bounded YouTube search first; it is not a local title cache.
+A different video ID can require a separate download, and a missing MP3 can
+require downloading again. `rplay` only reads the catalogue and never downloads.
 
 The replay URL comes from the selected central catalogue video's exact ID,
 for both `play` and `rplay`, never from the original free-text search. Duration

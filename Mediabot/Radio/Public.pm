@@ -128,7 +128,7 @@ sub queued_line {
         : ($r->{placement}//'') eq 'not_waiting'
             ? ($lang eq 'fr' ? 'plus en attente' : 'no longer waiting')
             : ($lang eq 'fr' ? 'rang non confirmé' : 'position unconfirmed');
-    my $head=capsule(($lang eq 'fr' ? '+ FILE ' : '+ QUEUE ').$where,1).' ';
+    my $head=capsule('+ TRACK '.$where,1).' ';
     my @details;
     my $seconds=$r->{duration_seconds};
     if (defined($seconds) && !ref($seconds) && $seconds =~ /\A[1-9][0-9]{0,3}\z/ && $seconds<=3600) {

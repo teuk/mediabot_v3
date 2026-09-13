@@ -12,6 +12,13 @@ release. The current development line is `3.6dev`.
 
 ### mb734 — prepare reliable radio requests and shared audio storage
 
+- Fetch CI dependencies through an explicit HTTPS CPAN mirror; retry Debian 13
+  dependency installation at most three times with fresh download/build state,
+  retaining installed modules and exposing the failed build log.
+
+- Use the concise `TRACK` label for confirmed radio additions in both French
+  and English; preserve ranks, replay links, colours and `song` output.
+
 - Refine radio confirmations and queue views with red/orange accents and
   native client text, preserving the existing `song` display. Keep one bounded
   IRC line and the same public/NOTICE output budget.

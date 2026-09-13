@@ -16,6 +16,7 @@ concurrency:
 
 env:
   PERL_VERSION: '5.40'
+  PERL_CPANM_OPT: '--from https://cpan.metacpan.org'
 
 jobs:
   validate:

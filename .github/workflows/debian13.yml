@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+# Keep CPAN archives and indexes on the same explicit HTTPS mirror.
+env:
+  PERL_CPANM_OPT: '--from https://cpan.metacpan.org'
+
 concurrency:
   group: debian13-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -183,7 +187,31 @@ jobs:
 
           cd "$MEDIABOT_CANDIDATE_ROOT"
 
-          cpanm --notest --local-lib "$GITHUB_WORKSPACE/local" --installdeps .
+          # A truncated download must not poison the next attempt. Reuse the
+          # installed local library, but give cpanm fresh downloads/build state.
+          CPAN_INSTALL_RC=1
+          for CPAN_ATTEMPT in 1 2 3; do
+            CPAN_ATTEMPT_HOME="$(mktemp -d "${RUNNER_TEMP:-/tmp}/mediabot-cpanm.XXXXXX")"
+            echo "CPAN dependency installation: attempt $CPAN_ATTEMPT/3"
+            if PERL_CPANM_HOME="$CPAN_ATTEMPT_HOME" \
+              cpanm --notest --local-lib "$GITHUB_WORKSPACE/local" --installdeps .; then
+              CPAN_INSTALL_RC=0
+              break
+            else
+              CPAN_INSTALL_RC=$?
+            fi
+            echo "::warning::CPAN attempt $CPAN_ATTEMPT failed (rc=$CPAN_INSTALL_RC); log: $CPAN_ATTEMPT_HOME/build.log"
+            if [ -f "$CPAN_ATTEMPT_HOME/build.log" ]; then
+              tail -n 80 "$CPAN_ATTEMPT_HOME/build.log"
+            fi
+            if [ "$CPAN_ATTEMPT" -lt 3 ]; then
+              sleep "$((CPAN_ATTEMPT * 5))"
+            fi
+          done
+          if [ "$CPAN_INSTALL_RC" -ne 0 ]; then
+            echo '::error::CPAN dependencies remain unavailable after three attempts.' >&2
+            exit "$CPAN_INSTALL_RC"
+          fi
 
           if perl -MHailo -e 'exit 0' >/dev/null 2>&1; then
             echo 'Hailo is already available.'
