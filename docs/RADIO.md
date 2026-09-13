@@ -4,12 +4,30 @@ On a channel with **`+Radio`**, every participant can use:
 
 ```text
 m play https://www.youtube.com/watch?v=VIDEO_ID
+m play Michael Jackson Billie Jean
 m rplay Radiohead
 m rplay Idioteque
+m radioqueue
+m queue
+m nextsong
 ```
 
-`play` accepts one HTTPS YouTube video, reuses an available MP3 or downloads
+`play` accepts an artist/title search or one HTTPS YouTube video URL. Text
+search chooses the first eligible video among YouTube's first five results,
+in relevance order. It excludes known live/upcoming videos and entries with
+missing, invalid or excessive duration (15 minutes by default). Use a video
+URL when you need a particular recording; spelling correction and the exact
+musical version are not guaranteed.
+
+The chosen video ID is recorded before downloading. An interrupted request
+resumes with that same ID. The service reuses an available MP3 or downloads
 it, registers it in the central `MP3` table, then submits it to Liquidsoap.
+Search runs centrally with the same private tools and cookie-copy policy,
+a 30-second deadline and at most one audio download per request. It shares
+YouTube pauses, queue limits and duplicate prevention with URL requests.
+An empty eligible search allows a corrected request after five seconds;
+other errors retain the normal cooldown. Search does not add extra IRC messages.
+
 `rplay` chooses randomly among matching artists (exact artist first, then
 partial artist), falling back to title matches. Unavailable files are skipped;
 it does not download a search result. Up to 200 catalogue candidates are
@@ -18,6 +36,14 @@ seconds per candidate probe. Existing administrative queue controls remain restr
 Outside `+Radio`, the historical Master-only `play` command is unchanged.
 `+RadioPub` is a separate announcement setting.
 
+Existing MB734 HTTP clients already transmit text queries. Once the central
+service supports text `play`, configured instances can use it without new
+keys; updating clients also provides the new help and specific search errors.
+Each additional instance still needs its own API token, API URL and `+Radio`
+on the chosen channel. MP3 files and the catalogue stay on the radio host.
+The bounded search uses yt-dlp's documented
+[YouTube search prefix](https://github.com/yt-dlp/yt-dlp#usage-and-options).
+
 Request feedback is sent by NOTICE. “Added to the queue” means Liquidsoap
 returned a request ID; it does **not** mean that playback has already started.
 The API neither skips a track nor changes a streaming script. Live priority
@@ -25,6 +51,50 @@ and track interruption follow the existing Liquidsoap configuration. In
 particular, `track_sensitive=false` between playlist and queue can interrupt
 the playlist when a request becomes ready. Qualify this policy separately
 before promising that the current track will always finish.
+
+## See what is waiting
+
+| Command on `+Radio` | Result |
+| --- | --- |
+| `m song` | Current Icecast title and listening URL, as before. |
+| `m radioqueue` | NOTICE: shared waiting queue, plus preparation and submission counts. |
+| `m queue` | Alias for `m radioqueue` on `+Radio`, with the same permissions and cooldown. |
+| `m nextsong` | NOTICE: first waiting request, or an empty queue with preparation counts. |
+
+The read-only commands work for every participant through the same authenticated
+API, including remote bots. They do not use the remote host's Liquidsoap socket.
+No new setting or migration is needed when `play`/`rplay` already use the API.
+Update the central API first, then the IRC clients through the usual update flow.
+
+A client predating shared queue support can still request tracks through the
+central API while its old `radioqueue` command tries a local Liquidsoap socket.
+Update that client to the published shared-queue version; do not point its local
+telnet settings at a remote streaming control socket. On `+Radio`, queue reads
+use the HTTP API and never fall back to local telnet, including API failures.
+
+Artist and title are presented consistently in request confirmations, the shared
+queue and metadata sent to Liquidsoap. A title beginning with the same artist
+and a separator (for example `Artist - Song (Official Video)`) loses that repeated
+prefix. Recording/version suffixes remain. This also applies to existing MP3
+catalogue entries at their next submission, without retagging audio or rewriting
+old database rows. Metadata already on air is not changed retroactively.
+
+The queue comes from Liquidsoap's actual pending request IDs, not the history of
+successful HTTP jobs. A playing request is no longer pending. A pending request
+whose metadata is not yet available stays visible as “title unavailable”. Only
+artist/title labels are exposed; paths, caller identities and other instances'
+private job records are not. Up to six titles are displayed, with the total count
+retained if an administrator has added more. Reads are cached centrally for at
+most two seconds; each bot accepts one consultation every five seconds.
+
+Preparation means an API job has not reached Liquidsoap yet. Submission means
+its acknowledgement is still pending; these counts must not be added to the
+player's queue count to infer a precise total. If the queue changes while being
+read, the service retries the observation once, then reports it unavailable.
+A failed read is never presented as an empty queue. There are no automatic
+channel announcements, queue changes, downloads or promised start times.
+`nextsong` describes the next *requested* track, not the fallback playlist or
+live input; use `song` for the title actually published by Icecast.
 
 ## One host: the default installation
 
@@ -141,6 +211,9 @@ HTTP implementation; the central Python service runs only on the radio host.
   a validated YouTube video, SQL, filesystem path or player command is accepted.
 - `GET /v1/requests/ID`: private status for that authenticated instance only.
 - `GET /v1/health`: authenticated liveness check; no playback or download.
+- `GET /v1/queue`: shared pending music labels and aggregate preparation counts;
+  authenticated and read-only. Player reads share a four-second deadline and a
+  single observation lock; submissions retain their independent ledger lock.
 - One download/processing worker; six pending/working jobs globally, at most
   one per caller. Cooldowns: 120 seconds per caller, 15 seconds per channel.
   An `rplay` search with no catalogue rows uses a five-second cooldown instead,

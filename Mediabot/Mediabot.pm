@@ -1916,6 +1916,12 @@ sub joinChannels {
 # Évite de dupliquer 17 entrées sub { handler($ctx) } dans la dispatch table.
 sub _dispatch_radio {
     my ($ctx, $cmd) = @_;
+    if ($cmd eq 'radioqueue' || $cmd eq 'nextsong' || $cmd eq 'queue') {
+        require Mediabot::Radio::Public;
+        return Mediabot::Radio::Public::inspect_queue($ctx, $cmd)
+            if Mediabot::Radio::Public::enabled($ctx);
+        return if $cmd eq 'queue';
+    }
     # MB734: guests may request tracks only on a +Radio channel.
     # Existing private/Master controls keep their historical access checks.
     if ($cmd eq 'play' || $cmd eq 'rplay') {
@@ -2326,6 +2332,7 @@ sub mbCommandPublic {
         radioimport    => sub { _dispatch_radio($ctx, $cmd) },
         radioimportdir => sub { _dispatch_radio($ctx, $cmd) },
         radioqueue     => sub { _dispatch_radio($ctx, $cmd) },
+        queue          => sub { _dispatch_radio($ctx, $cmd) },
         radiocheck     => sub { _dispatch_radio($ctx, $cmd) },
         radiocache     => sub { _dispatch_radio($ctx, $cmd) },
         radiocacheprune => sub { _dispatch_radio($ctx, $cmd) },
@@ -2686,9 +2693,10 @@ modcmd|modcmd <command> <new action>|authorized|Modify a dynamic PUBLIC_COMMANDS
 modinfo|modinfo <nick>|admin|Show moderation information about a user.
 moduser|moduser <nick> <field> <value>|admin|Modify a bot user.
 mp3|mp3 <query>|public|Search or display MP3/radio related information.
-play|play <YouTube URL>|public|Request a track on a +Radio channel. Other uses remain Master-only.
+play|play <artist title or YouTube URL>|public|Request a track on a +Radio channel. Other uses remain Master-only.
 rplay|rplay <artist or title>|public|Request a random catalogue track on a +Radio channel.
-radioqueue|radioqueue|public|Show the Liquidsoap Mediabot request queue. Master-only.
+radioqueue|radioqueue|public|On +Radio, privately show the shared pending queue. Outside +Radio, local Master-only control.
+queue|queue|public|On +Radio, alias for the shared radioqueue, by private NOTICE.
 radiocheck|radiocheck|public|Check local radio cache, yt-dlp, cookies, Liquidsoap, and Icecast configuration. Master-only.
 radiocache|radiocache|public|Show MP3 cache database/file consistency summary. Master-only.
 radiocacheprune|radiocacheprune [confirm]|public|Dry-run or delete MP3 cache rows whose files are missing. Master-only.
@@ -2701,7 +2709,7 @@ radioskip|radioskip|public|Skip the current Liquidsoap queue item. Master-only.
 radioflush|radioflush|public|Flush the Liquidsoap queue and skip. Master-only.
 msg|msg <nick|#channel> <text>|admin|Send a message through the bot.
 mvcmd|mvcmd <old> <new>|authorized|Rename a dynamic PUBLIC_COMMANDS command.
-nextsong|nextsong|public|Display next-song information when a scheduler is wired.
+nextsong|nextsong|public|On +Radio, privately show the next waiting request; song shows what is on air.
 nick|nick <newnick>|admin|Change the bot nickname.
 nicklist|nicklist #channel|public|List nicks currently known on a channel.
 op|op #channel [nick]|operator+|Give operator status on a channel.

@@ -25,6 +25,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import unicodedata
 from urllib.parse import parse_qs, urlsplit
 
 LOG = logging.getLogger('mediabot-radio')
@@ -50,6 +51,20 @@ def clean(value, limit=255):
     return re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', str(value))[:limit].strip()
 
 
+def metadata_labels(track, fallback=''):
+    """Remove a literal repeated artist prefix, preserving recording/version text."""
+    artist = unicodedata.normalize('NFC', clean(track.get('artist') or ''))
+    title = unicodedata.normalize('NFC', clean(track.get('title') or fallback))
+    if artist:
+        prefix = re.compile(r'^' + re.escape(artist) + r'(?:\s+[-–—|]\s+|\s*:\s+)(.+)$', re.IGNORECASE)
+        while True:
+            match = prefix.match(title)
+            if not match or not match[1].strip():
+                break
+            title = match[1].strip()
+    return artist, title
+
+
 def liquidsoap_string(value):
     """Quote literal UTF-8 for Liquidsoap, including its #{...} preprocessor."""
     require(isinstance(value, str) and not re.search(r'[\ud800-\udfff]', value), 'unsafe_metadata')
@@ -58,10 +73,30 @@ def liquidsoap_string(value):
 
 def track_uri(path, track):
     """Bind catalogue metadata to this request, including older untagged MP3s."""
-    artist = clean(track.get('artist') or '')
-    title = clean(track.get('title') or path.stem)
+    artist, title = metadata_labels(track, path.stem)
     return ('annotate:artist=' + liquidsoap_string(artist)
             + ',title=' + liquidsoap_string(title) + ':' + str(path))
+
+
+def queue_title(metadata):
+    """Expose music labels only, never filename, initial_uri or private job fields."""
+    labels = {}
+    for line in metadata.splitlines():
+        match = re.fullmatch(r'(artist|title)=(".*")', line)
+        if not match:
+            continue
+        try:
+            value = json.loads(match[2])
+        except ValueError:
+            continue
+        if isinstance(value, str):
+            value = ''.join(' ' if unicodedata.category(c).startswith('C') else c for c in value)
+            labels[match[1]] = ' '.join(value.split())
+    artist, title = metadata_labels(labels)
+    if not title:
+        return ''  # Do not derive a missing title from a private filesystem path.
+    value = artist + ' — ' + title if artist else title
+    return value.encode('utf-8')[:240].decode('utf-8', errors='ignore')
 
 
 def youtube_id(url):
@@ -85,6 +120,40 @@ def youtube_id(url):
         raise RadioError('youtube_url_required')
     require(re.fullmatch(r'[A-Za-z0-9_-]{11}', value), 'youtube_url_required')
     return value
+
+
+def play_input(query):
+    """Keep explicit links strict; plain words become a bounded YouTube search."""
+    require(isinstance(query, str) and 1 <= len(query) <= 255
+            and not any(unicodedata.category(c).startswith('C') for c in query), 'invalid_request')
+    if query.startswith('https://'):
+        return youtube_id(query)
+    # Do not reinterpret a rejected URI, downloader prefix, option or local path
+    # as a different source. Search words are never passed as a standalone URL.
+    require(not re.match(r'^[A-Za-z][A-Za-z0-9+.-]*:', query)
+            and not query.startswith(('/', '\\', '~', '-', './', '../'))
+            and not re.search(r'(?i)(?:https?://|www\.|youtu(?:be\.com|\.be)/)', query),
+            'youtube_url_required')
+    return ''
+
+
+def search_video(result, maximum):
+    """First eligible video in YouTube relevance order, at most five candidates."""
+    require(isinstance(result, dict) and result.get('_type') == 'playlist'
+            and isinstance(result.get('entries'), list)
+            and len(result['entries']) <= 5, 'youtube_search_failed', 503)
+    for entry in result['entries']:
+        if not isinstance(entry, dict) or entry.get('ie_key') != 'Youtube':
+            continue
+        video, duration = entry.get('id'), entry.get('duration')
+        if (not isinstance(video, str) or not re.fullmatch(r'[A-Za-z0-9_-]{11}', video)
+                or type(duration) not in (int, float) or not math.isfinite(duration)
+                or not 0 < duration <= maximum or entry.get('is_live')
+                or entry.get('live_status') in ('is_live', 'is_upcoming', 'post_live')):
+            continue
+        # Ignore all supplied URLs; only this validated ID reaches download().
+        return video
+    raise RadioError('no_youtube_match', 404)
 
 
 def bounded_file(path, limit, private=False):
@@ -176,6 +245,44 @@ class Backend:
         remaining = deadline - time.monotonic()
         require(remaining > 0, 'catalogue_scan_timeout', 503)
         return min(maximum, remaining)
+
+    def youtube_session(self, directory):
+        """The configured cookie file is immutable; yt-dlp receives a private copy."""
+        args = []
+        if self.c.get('cookies'):
+            cookies = Path(directory) / 'cookies.txt'
+            try:
+                contents = bounded_file(self.c['cookies'], 4 * 1024 * 1024, private=True)
+            except (OSError, RadioError):
+                raise RadioError('cookies_unavailable', 503) from None
+            with cookies.open('xb') as stream:
+                os.fchmod(stream.fileno(), 0o600)
+                stream.write(contents)
+            args += ['--cookies', str(cookies)]
+        if self.c.get('remote_components'):
+            args += ['--remote-components', self.c['remote_components']]
+        if self.c.get('js_runtime'):
+            args += ['--js-runtimes', self.c['js_runtime']]
+        return args
+
+    def search(self, query):
+        require(play_input(query) == '', 'invalid_request')
+        self.download_guard()
+        with tempfile.TemporaryDirectory(prefix='.radio-search-', dir=self.c['incoming']) as tmp:
+            args = [self.c['yt_dlp'], '--ignore-config', '--no-plugin-dirs',
+                    '--flat-playlist', '--skip-download', '--dump-single-json',
+                    '--no-progress', '--quiet', '--no-warnings', '--no-mark-watched',
+                    '--no-cache-dir', '--use-extractors', 'youtube:search',
+                    '--playlist-end', '5', '--socket-timeout', '10', '--retries', '1',
+                    '--extractor-retries', '1']
+            args += self.youtube_session(tmp)
+            args += ['--', 'ytsearch5:' + query]
+            raw = run(args, timeout=30, directory=tmp, error_classifier=download_error)
+            try:
+                result = json.loads(raw)
+            except (ValueError, UnicodeError):
+                raise RadioError('youtube_search_failed', 503) from None
+            return search_video(result, self.c.get('max_duration', 900))
 
     def catalogue(self, action, **values):
         result = json.loads(run(['/usr/bin/perl', str(Path(__file__).with_name('radio_catalogue.pl')),
@@ -270,20 +377,7 @@ class Backend:
                         '--match-filters', '!is_live & duration > 0 & duration <= ' + str(self.c.get('max_duration', 900)),
                         '-x', '--audio-format', 'mp3', '--audio-quality', '160K',
                         '--output', str(out) + '.%(ext)s']
-                if self.c.get('cookies'):
-                    cookies = Path(tmp) / 'cookies.txt'
-                    try:
-                        contents = bounded_file(self.c['cookies'], 4 * 1024 * 1024, private=True)
-                    except (OSError, RadioError):
-                        raise RadioError('cookies_unavailable', 503) from None
-                    with cookies.open('xb') as stream:
-                        os.fchmod(stream.fileno(), 0o600)
-                        stream.write(contents)
-                    args += ['--cookies', str(cookies)]
-                if self.c.get('remote_components'):
-                    args += ['--remote-components', self.c['remote_components']]
-                if self.c.get('js_runtime'):
-                    args += ['--js-runtimes', self.c['js_runtime']]
+                args += self.youtube_session(tmp)
                 args += ['--', 'https://www.youtube.com/watch?v=' + video]
                 run(args, timeout=180, directory=tmp, error_classifier=download_error)
                 audio = self.audio(out.with_suffix('.mp3'))
@@ -291,6 +385,7 @@ class Backend:
                 require(isinstance(meta, dict) and meta.get('id') == video, 'video_identity_mismatch')
                 meta = {'id': video, 'artist': clean(meta.get('artist') or meta.get('uploader') or 'YouTube'),
                         'title': clean(meta.get('track') or meta.get('title') or video)}
+                meta['artist'], meta['title'] = metadata_labels(meta)
                 content = bounded_file(audio, 32 * 1024 * 1024)
                 meta.update(size=len(content), sha256=hashlib.sha256(content).hexdigest())
                 # Owner writes, Liquidsoap reads; group inherited from setgid incoming.
@@ -320,13 +415,19 @@ class Backend:
                               folder=str(incoming), filename=final.name,
                               artist=clean(meta['artist']), title=clean(meta['title']))['track']
 
-    def command(self, text):
+    def command(self, text, deadline=None):
         """Only the selected local queue, END framing, no retries on mutation."""
-        with socket.create_connection(('127.0.0.1', self.c['liquidsoap_port']), timeout=5) as sock:
-            sock.settimeout(5)
+        deadline = deadline if deadline is not None else time.monotonic() + 5
+        def remaining():
+            value = deadline - time.monotonic()
+            require(value > 0, 'queue_no_ack', 503)
+            return min(5, value)
+        with socket.create_connection(('127.0.0.1', self.c['liquidsoap_port']), timeout=remaining()) as sock:
+            sock.settimeout(remaining())
             sock.sendall(text.encode() + b'\n')
-            data, deadline = bytearray(), time.monotonic() + 5
+            data = bytearray()
             while time.monotonic() < deadline:
+                sock.settimeout(remaining())
                 chunk = sock.recv(4096)
                 require(chunk, 'queue_no_ack', 503)
                 data.extend(chunk)
@@ -335,6 +436,24 @@ class Backend:
                 if found:
                     return data[:found.start()].decode('utf-8').strip()
             raise RadioError('queue_no_ack', 503)
+
+    def queue_view(self):
+        """Read actual pending RIDs, not historical acknowledgements or on-air guesses."""
+        deadline = time.monotonic() + 4
+        def ids():
+            value = self.command(self.c['queue_id'] + '.queue', deadline=deadline)
+            require(re.fullmatch(r'(?:[0-9]{1,10}(?:\s+[0-9]{1,10})*)?', value) is not None,
+                    'queue_unavailable', 503)
+            result = value.split()
+            require(len(result) <= 512 and len(set(result)) == len(result), 'queue_unavailable', 503)
+            return result
+        for _ in range(2):
+            before = ids()
+            waiting = [{'title': queue_title(self.command('request.metadata ' + rid, deadline=deadline))}
+                       for rid in before[:6]]
+            if before == ids():
+                return {'waiting': waiting, 'total': len(before)}
+        raise RadioError('queue_changing', 503)
 
     def capacity(self):
         value = self.command(self.c['queue_id'] + '.queue')
@@ -353,6 +472,9 @@ class Service:
         self.c, self.clock = config, clock
         self.backend = backend or Backend(config)
         self.lock = threading.RLock()
+        self.queue_lock = threading.Lock()
+        self.queue_cache = None
+        self.queue_cache_until = 0.
         self.db = sqlite3.connect(config['database'], check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute('PRAGMA journal_mode=WAL')
@@ -412,7 +534,7 @@ class Service:
         require(body['action'] in ('play', 'rplay'))
         query = body['query'].strip()
         require(1 <= len(query) <= 255 and clean(query) == query)
-        video = youtube_id(query) if body['action'] == 'play' else ''
+        video = play_input(query) if body['action'] == 'play' else ''
         with self.lock, self.db:
             now = self.clock()
             old = self.db.execute('SELECT * FROM jobs WHERE id=?', (body['id'],)).fetchone()
@@ -429,8 +551,9 @@ class Service:
             require(sum(r['state'] in ACTIVE for r in rows) < 6, 'service_queue_full', 429)
             caller_wait = channel_wait = 0
             for row in rows:
-                no_match = (row['action'] == 'rplay' and row['state'] == 'failed'
-                            and row['code'] == 'no_matching_track')
+                no_match = (row['state'] == 'failed' and
+                            ((row['action'] == 'rplay' and row['code'] == 'no_matching_track')
+                             or (row['action'] == 'play' and row['code'] == 'no_youtube_match')))
                 if row['instance'] == instance and row['caller'] == body['caller']:
                     if row['state'] in ACTIVE:
                         raise RadioError('request_pending', 429, 5)
@@ -455,6 +578,27 @@ class Service:
             require(row is not None, 'not_found', 404)
             return self.view(row)
 
+    def queue_status(self):
+        # One bounded read at a time for all clients. The ledger lock is never
+        # held during player I/O, so observing cannot block durable acceptance.
+        require(self.queue_lock.acquire(blocking=False), 'queue_view_busy', 503)
+        try:
+            now = time.monotonic()
+            if now >= self.queue_cache_until:
+                try:
+                    self.queue_cache = self.backend.queue_view()
+                except Exception:
+                    self.queue_cache = {'error': 'queue_unavailable'}
+                self.queue_cache_until = time.monotonic() + 2
+            require('error' not in self.queue_cache, 'queue_unavailable', 503)
+            with self.lock:
+                counts = dict(self.db.execute("SELECT state,count(*) FROM jobs WHERE state IN ('pending','working','submitting') GROUP BY state"))
+            return dict(self.queue_cache, protocol=1,
+                        preparing=counts.get('pending', 0) + counts.get('working', 0),
+                        transferring=counts.get('submitting', 0))
+        finally:
+            self.queue_lock.release()
+
     def update(self, job_id, **values):
         with self.lock, self.db:
             values['updated'] = self.clock()
@@ -471,7 +615,26 @@ class Service:
         submitting = False
         try:
             self.backend.capacity()
+            if job['action'] == 'play' and not job['video']:
+                video = self.backend.search(job['query'])
+                require(isinstance(video, str) and re.fullmatch(r'[A-Za-z0-9_-]{11}', video),
+                        'youtube_search_failed', 503)
+                # Pin BEFORE audio/network/catalogue mutation. A recovered job
+                # will use the same video, even if search results have changed.
+                self.update(job['id'], video=video)
+                job['video'] = video
+            if job['action'] == 'play':
+                with self.lock:
+                    duplicate = self.db.execute('''SELECT id FROM jobs WHERE id<>? AND video=?
+                        AND (state IN ('working','submitting','queued','uncertain')
+                             AND (state IN ('working','submitting') OR updated>?)) LIMIT 1''',
+                        (job['id'], job['video'], self.clock() - 600)).fetchone()
+                    require(duplicate is None, 'duplicate_video', 409)
             track = self.backend.resolve(job)  # mandatory catalogue success before push
+            # Apply the same labels to older catalogue/cache entries without
+            # rewriting their files, sidecars or database ownership.
+            track = dict(track)
+            track['artist'], track['title'] = metadata_labels(track)
             self.backend.capacity()
             require(not STOP.is_set(), 'service_stopping', 503)
             self.claim(job['id'], track)
@@ -514,6 +677,8 @@ class Service:
             require(not env.get('QUERY_STRING'), 'invalid_request')
             if method == 'GET' and path == '/v1/health':
                 result, status = {'ok': True, 'protocol': 1}, 200
+            elif method == 'GET' and path == '/v1/queue':
+                result, status = self.queue_status(), 200
             elif method == 'GET' and re.fullmatch(r'/v1/requests/[a-f0-9]{32}', path):
                 result, status = self.status(instance, path.rsplit('/', 1)[1]), 200
             elif method == 'POST' and path == '/v1/requests':
@@ -534,7 +699,7 @@ class Service:
         except Exception:
             LOG.error('api=internal_error')
             result, status = {'error': 'unavailable'}, 503
-        payload = json.dumps(result, ensure_ascii=True).encode()
+        payload = json.dumps(result, ensure_ascii=env.get('PATH_INFO') != '/v1/queue').encode()
         reason = {200: 'OK', 202: 'Accepted', 400: 'Bad Request', 401: 'Unauthorized', 404: 'Not Found',
                   409: 'Conflict', 413: 'Content Too Large', 415: 'Unsupported Media Type',
                   422: 'Unprocessable Content', 429: 'Too Many Requests', 503: 'Service Unavailable'}[status]

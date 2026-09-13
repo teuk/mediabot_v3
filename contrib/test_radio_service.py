@@ -8,7 +8,7 @@ import tempfile
 import subprocess
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import radio_service as radio
 
 
@@ -234,7 +234,7 @@ print encode_json($v);
             downloads.append(args)
             target=Path(kw['directory'])
             (target/'audio.mp3').write_bytes(b'fake audio')
-            (target/'audio.info.json').write_text(json.dumps(dict(id='abcdefghijk',uploader='Artist',title='Song')))
+            (target/'audio.info.json').write_text(json.dumps(dict(id='abcdefghijk',uploader='Artist',title='Artist - Song')))
             Path(args[args.index('--cookies')+1]).write_text('updated private copy')
             return b''
         def catalogue(action,**kw):
@@ -248,6 +248,8 @@ print encode_json($v);
         self.assertEqual((incoming/'abcdefghijk.mp3').stat().st_mode&0o777,0o640)
         self.assertEqual(registrations[0][1]['owner'],44)
         self.assertEqual(registrations[0][1]['filename'],'abcdefghijk.mp3')
+        self.assertEqual(registrations[0][1]['title'],'Song')
+        self.assertEqual(json.loads((incoming/'abcdefghijk.radio.json').read_text())['title'],'Song')
         self.assertEqual(downloads[0][-2:],['--','https://www.youtube.com/watch?v=abcdefghijk'])
         self.assertIn('--ignore-config',downloads[0]);self.assertIn('--no-plugin-dirs',downloads[0])
         self.assertFalse(any(p.name.startswith('.radio-') for p in incoming.iterdir()))
@@ -489,7 +491,257 @@ class Hardening(unittest.TestCase):
             b.audio(p)
 
 
+class TextPlay(unittest.TestCase):
+    setUp = Contract.setUp
+    tearDown = Contract.tearDown
+    body = Contract.body
+    api = Contract.api
+
+    @staticmethod
+    def entry(video='abcdefghijk', **extra):
+        return dict(dict(id=video, ie_key='Youtube', duration=295,
+                         url='https://www.youtube.com/watch?v='+video), **extra)
+
+    def test_text_acceptance_does_not_search_in_http_handler(self):
+        self.backend.search = Mock(return_value='abcdefghijk')
+        status, result = self.api('POST', '/v1/requests', self.body(query='Mickael Jackson Billie Jean'))
+        self.assertEqual((status, result['state']), (202, 'pending'))
+        self.backend.search.assert_not_called()
+        self.assertEqual(self.backend.sent, 0)
+
+    def test_search_pins_id_before_resolve_then_queues_for_remote_client(self):
+        self.backend.search = Mock(return_value='abcdefghijk')
+        resolve = self.backend.resolve
+        def check(job):
+            saved = self.s.db.execute('SELECT video,state FROM jobs WHERE id=?', (job['id'],)).fetchone()
+            self.assertEqual(tuple(saved), ('abcdefghijk', 'working'))
+            self.assertEqual(job['video'], 'abcdefghijk')
+            return resolve(job)
+        self.backend.resolve = check
+        self.s.submit('nbot', self.body(query='Michael Jackson Billie Jean'))
+        self.s.work_once()
+        self.backend.search.assert_called_once_with('Michael Jackson Billie Jean')
+        self.assertEqual(self.s.status('nbot', self.body()['id'])['state'], 'queued')
+        self.assertEqual(self.backend.events, ['capacity', 'catalogue', 'capacity', 'push'])
+
+    def test_restart_after_selection_never_searches_again(self):
+        self.s.submit('dev', self.body(query='Michael Jackson Billie Jean'))
+        self.s.update(self.body()['id'], state='working', video='abcdefghijk')
+        self.s.db.close()
+        self.s = radio.Service(self.c, self.backend, clock=lambda:self.now)
+        self.backend.search = Mock(side_effect=AssertionError('must retain selected video'))
+        self.s.work_once()
+        self.backend.search.assert_not_called()
+        self.assertEqual(self.backend.sent, 1)
+
+    def test_http_retry_never_researches_or_pushes_twice(self):
+        self.backend.search = Mock(return_value='abcdefghijk')
+        body = self.body(query='Michael Jackson Billie Jean')
+        self.s.submit('dev', body); self.s.work_once()
+        self.assertEqual(self.s.submit('dev', body)['state'], 'queued')
+        self.assertFalse(self.s.work_once())
+        self.backend.search.assert_called_once()
+        self.assertEqual(self.backend.sent, 1)
+
+    def test_search_result_deduplicates_url_before_download(self):
+        self.s.submit('dev', self.body()); self.s.work_once()
+        self.now += 16
+        self.backend.search = Mock(return_value='abcdefghijk')
+        self.backend.resolve = Mock(side_effect=AssertionError('duplicate must not download'))
+        self.s.submit('nbot', self.body(2, query='Michael Jackson Billie Jean'))
+        self.s.work_once()
+        self.assertEqual(self.s.status('nbot', self.body(2)['id'])['code'], 'duplicate_video')
+        self.backend.resolve.assert_not_called()
+        self.assertEqual(self.backend.sent, 1)
+
+    def test_two_different_searches_for_same_video_push_once(self):
+        self.backend.search = Mock(return_value='abcdefghijk')
+        self.s.submit('dev', self.body(query='Michael Jackson Billie Jean'))
+        self.s.submit('nbot', self.body(2, query='Billie Jean Michael Jackson'))
+        self.s.work_once(); self.s.work_once()
+        self.assertEqual(self.backend.sent, 1)
+        self.assertEqual(self.s.status('nbot', self.body(2)['id'])['code'], 'duplicate_video')
+
+    def test_play_search_and_rplay_share_final_track_claim(self):
+        self.backend.resolve = Mock(return_value=dict(artist='Artist', title='Track',
+                                                      path='/music/track.mp3', id_youtube='abcdefghijk'))
+        self.s.submit('nbot', self.body(action='rplay', query='Track')); self.s.work_once()
+        self.backend.search = Mock(return_value='abcdefghijk')
+        self.s.submit('dev', self.body(2, query='Artist Track')); self.s.work_once()
+        self.assertEqual(self.backend.sent, 1)
+        self.assertEqual(self.s.status('dev', self.body(2)['id'])['code'], 'duplicate_track')
+
+    def test_search_ack_loss_retains_existing_uncertainty_contract(self):
+        self.backend.search = Mock(return_value='abcdefghijk'); self.backend.error = 'ack'
+        body = self.body(query='Artist Track')
+        self.s.submit('dev', body); self.s.work_once()
+        self.s.db.close(); self.s = radio.Service(self.c, self.backend, clock=lambda:self.now)
+        self.assertFalse(self.s.work_once())
+        self.assertEqual(self.s.submit('dev', body)['state'], 'uncertain')
+        self.assertEqual(self.backend.sent, 1)
+
+    def test_rplay_never_searches_youtube(self):
+        self.backend.search = Mock(side_effect=AssertionError('rplay stays catalogue only'))
+        self.s.submit('dev', self.body(action='rplay', query='Radiohead')); self.s.work_once()
+        self.backend.search.assert_not_called()
+        self.assertEqual(self.backend.sent, 1)
+
+    def test_url_play_does_not_search(self):
+        self.backend.search = Mock(side_effect=AssertionError('URL pins identity directly'))
+        self.s.submit('dev', self.body()); self.s.work_once()
+        self.backend.search.assert_not_called()
+
+    def test_unsafe_input_cannot_become_an_extractor_or_local_path(self):
+        for query in ('http://youtu.be/abcdefghijk', 'file:///etc/passwd', '//127.0.0.1',
+                      'ytsearch100:music', '/home/music.mp3', '../music.mp3', '--exec id',
+                      'https://evil.test/x', 'https://youtube.com/watch?v=abcdefghijk&list=abc',
+                      'https://youtu.be:bad/abcdefghijk', 'Artist\nTrack', 'Artist\u202eTrack',
+                      'Artist\ud800Track', 'www.youtube.com/watch?v=abcdefghijk'):
+            with self.subTest(query=query):
+                self.assertEqual(self.api('POST', '/v1/requests', self.body(query=query))[0], 400)
+        self.assertEqual(self.s.db.execute('SELECT count(*) FROM jobs').fetchone()[0], 0)
+
+    def test_quotes_accents_and_shell_characters_remain_search_words(self):
+        for query in ('Björk Jóga', 'AC/DC Back in Black', 'Artist "Track"', "Guns N’ Roses", 'Artist $(id); Track'):
+            self.assertEqual(radio.play_input(query), '')
+
+    def test_first_eligible_video_in_relevance_order_is_selected(self):
+        entries = [self.entry(is_live=True), self.entry(duration=901), self.entry(duration=None),
+                   self.entry('ABCDEFGHIJK'), self.entry('01234567890')]
+        self.assertEqual(radio.search_video(dict(_type='playlist', entries=entries), 900), 'ABCDEFGHIJK')
+
+    def test_invalid_duration_identity_live_and_channel_are_skipped(self):
+        for changed in (dict(duration=True), dict(duration=float('nan')), dict(duration=float('inf')),
+                        dict(duration=0), dict(id='../etc/passwd'), dict(ie_key='YoutubeTab'),
+                        dict(live_status='is_upcoming'), dict(live_status='post_live')):
+            with self.subTest(changed=changed), self.assertRaisesRegex(radio.RadioError, 'no_youtube_match'):
+                radio.search_video(dict(_type='playlist', entries=[self.entry(**changed)]), 900)
+
+    def test_invalid_search_envelope_fails_without_taking_sixth_result(self):
+        for result in (None, [], {}, dict(_type='video', entries=[]),
+                       dict(_type='playlist', entries=[self.entry()]*6)):
+            with self.assertRaisesRegex(radio.RadioError, 'youtube_search_failed'):
+                radio.search_video(result, 900)
+
+    def test_empty_search_allows_correction_after_five_seconds(self):
+        self.backend.search = Mock(side_effect=radio.RadioError('no_youtube_match', 404))
+        self.s.submit('dev', self.body(query='Typo')); self.s.work_once()
+        self.now += 4
+        with self.assertRaisesRegex(radio.RadioError, 'caller_cooldown'):
+            self.s.submit('dev', self.body(2, caller=self.body()['caller'], query='Corrected'))
+        self.now += 1
+        self.assertEqual(self.s.submit('dev', self.body(2, caller=self.body()['caller'], query='Corrected'))['state'], 'pending')
+        self.assertEqual(self.backend.sent, 0)
+
+    def test_search_failure_preserves_normal_cooldown(self):
+        self.backend.search = Mock(side_effect=radio.RadioError('youtube_search_failed', 503))
+        self.s.submit('dev', self.body(query='Artist Track')); self.s.work_once(); self.now += 6
+        with self.assertRaisesRegex(radio.RadioError, 'caller_cooldown'):
+            self.s.submit('dev', self.body(2, caller=self.body()['caller'], query='Artist Track'))
+
+    def test_search_auth_failure_pauses_youtube_durably(self):
+        self.backend.search = Mock(side_effect=radio.RadioError('youtube_auth_required', 503))
+        self.s.submit('dev', self.body(query='Artist Track')); self.s.work_once()
+        self.s.db.close(); self.s = radio.Service(self.c, self.backend, clock=lambda:self.now)
+        with self.assertRaisesRegex(radio.RadioError, 'youtube_paused'):
+            self.s.download_guard()
+        self.assertEqual(self.backend.sent, 0)
+
+    def test_paused_search_cannot_launch_downloader(self):
+        backend = radio.Backend({'incoming':self.temp.name})
+        backend.download_guard = Mock(side_effect=radio.RadioError('youtube_paused', 503))
+        with patch.object(radio, 'run') as execute, self.assertRaisesRegex(radio.RadioError, 'youtube_paused'):
+            backend.search('Artist Track')
+        execute.assert_not_called()
+
+    def test_native_search_arguments_are_bounded_and_cookie_copy_is_private(self):
+        cookies = Path(self.temp.name)/'original.cookies'
+        cookies.write_bytes(b'private fixture'); cookies.chmod(0o600)
+        config = dict(incoming=self.temp.name, yt_dlp='/tools/yt-dlp', cookies=str(cookies),
+                      js_runtime='node:/tools/node', remote_components='ejs:github')
+        backend = radio.Backend(config)
+        query = 'Björk "Jóga" $(id); Track'
+        paths = []
+        def execute(args, **kw):
+            self.assertEqual(args[-2:], ['--', 'ytsearch5:'+query])
+            for flag, value in (('--use-extractors','youtube:search'), ('--playlist-end','5'),
+                                ('--js-runtimes','node:/tools/node')):
+                self.assertEqual(args[args.index(flag)+1], value)
+            for flag in ('--ignore-config','--no-plugin-dirs','--flat-playlist','--skip-download',
+                         '--dump-single-json','--no-mark-watched'):
+                self.assertIn(flag, args)
+            self.assertEqual(kw['timeout'], 30)
+            p = Path(args[args.index('--cookies')+1]); paths.append(p)
+            self.assertNotEqual(p, cookies)
+            self.assertEqual(p.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(p.read_bytes(), cookies.read_bytes())
+            p.write_bytes(b'rotated by child')
+            return json.dumps(dict(_type='playlist',entries=[self.entry()])).encode()
+        with patch.object(radio, 'run', side_effect=execute):
+            self.assertEqual(backend.search(query), 'abcdefghijk')
+        self.assertEqual(cookies.read_bytes(), b'private fixture')
+        self.assertFalse(paths[0].exists())
+
+    def test_selected_video_reuses_catalogue_without_download(self):
+        backend = radio.Backend({'music_roots':['/music']})
+        track = dict(folder='/music',filename='track.mp3',artist='Artist',title='Track')
+        with patch.object(backend, 'catalogue', return_value={'tracks':[track]}) as catalogue, \
+             patch.object(backend, 'audio', return_value=Path('/music/track.mp3')), \
+             patch.object(backend, 'download') as download:
+            result = backend.resolve(dict(action='play',query='Artist Track',video='abcdefghijk'))
+        catalogue.assert_called_once_with('youtube', youtube='abcdefghijk')
+        download.assert_not_called()
+        self.assertEqual(result['title'], 'Track')
+
+
 class MetadataContract(unittest.TestCase):
+    def test_duplicate_artist_prefixes_keep_recording_suffixes(self):
+        cases = (
+            ('Michael Jackson', 'Michael Jackson - Billie Jean (Official Video)', 'Billie Jean (Official Video)'),
+            ('Paul Simon', 'Paul Simon - You Can Call Me Al (Official Video)', 'You Can Call Me Al (Official Video)'),
+            ('AC/DC', 'AC/DC — Back in Black (Live)', 'Back in Black (Live)'),
+            ('A+B', 'a+b – Song (Remaster)', 'Song (Remaster)'),
+            ('Björk', 'Bjo\u0308rk | Jóga', 'Jóga'),
+            ('Artist', 'Artist: Song', 'Song'),
+            ('Artist', 'Artist - Artist - Song', 'Song'),
+        )
+        for artist, title, expected in cases:
+            with self.subTest(title=title):
+                a, t = radio.metadata_labels(dict(artist=artist, title=title))
+                self.assertEqual(t, expected)
+                self.assertEqual(radio.metadata_labels(dict(artist=a,title=t)), (a,t))
+
+    def test_titles_without_exact_separated_prefix_are_preserved(self):
+        for artist, title in (('Talk Talk','Talk Talk'), ('Artist','Artist - '),
+                              ('Paul Simon','Simon & Garfunkel - The Boxer'),
+                              ('The','The-The Song'), ('Artist','Other Artist - Song'),
+                              ('Artist','Artist feat. Guest - Song'), ('','Artist - Song')):
+            with self.subTest(title=title):
+                self.assertEqual(radio.metadata_labels(dict(artist=artist,title=title)),
+                                 (artist,title.strip()))
+
+    def test_cached_catalogue_labels_match_notice_queue_and_player_without_writes(self):
+        with tempfile.TemporaryDirectory() as area:
+            b = radio.Backend({'queue_id':'request_queue'})
+            s = radio.Service({'database':str(Path(area)/'jobs.sqlite')}, b)
+            path = Path(area)/'cached.mp3'; path.write_bytes(b'existing fixture')
+            sidecar = path.with_suffix('.radio.json');sidecar.write_bytes(b'original metadata fixture')
+            original = dict(path=str(path),artist='Paul Simon',title='Paul Simon - You Can Call Me Al (Official Video)')
+            before = dict(original)
+            try:
+                with patch.object(b,'capacity'), patch.object(b,'resolve',return_value=original), \
+                     patch.object(b,'audio',return_value=path), patch.object(b,'command',return_value='42') as command:
+                    s.submit('nbot',dict(id='a'*32,caller='b'*64,channel='#radio',action='rplay',query='Paul Simon'))
+                    s.work_once()
+                self.assertEqual(original,before)
+                self.assertEqual(s.status('nbot','a'*32)['title'],'Paul Simon — You Can Call Me Al (Official Video)')
+                self.assertIn('artist="Paul Simon",title="You Can Call Me Al (Official Video)"',command.call_args.args[0])
+                self.assertEqual(radio.queue_title('artist="Paul Simon"\ntitle="Paul Simon - You Can Call Me Al (Official Video)"'),
+                                 'Paul Simon — You Can Call Me Al (Official Video)')
+                self.assertEqual(path.read_bytes(),b'existing fixture')
+                self.assertEqual(sidecar.read_bytes(),b'original metadata fixture')
+            finally:s.db.close()
+
     def test_remote_and_local_workers_send_metadata_over_real_loopback_socket(self):
         import socket
         for instance, action in (('dev', 'play'), ('nbot', 'rplay')):
@@ -588,6 +840,129 @@ class MetadataContract(unittest.TestCase):
             with self.assertRaises(OSError):
                 b.push(dict(path='/music/a.mp3', artist='A', title='B'))
             self.assertEqual(command.call_count, 1)
+
+
+class QueueView(unittest.TestCase):
+    def test_pending_ids_are_read_twice_and_only_labels_are_exposed(self):
+        b=radio.Backend({'queue_id':'request_queue'})
+        values=['8 9', 'artist="Björk"\ntitle="東京"\nfilename="/private/secret.mp3"\nrid="8"',
+                'title="Second"\ninitial_uri="secret"', '8 9']
+        with patch.object(b,'command',side_effect=values) as command:
+            result=b.queue_view()
+        self.assertEqual(result,{'waiting':[{'title':'Björk — 東京'},{'title':'Second'}],'total':2})
+        self.assertEqual([c.args[0] for c in command.call_args_list],
+                         ['request_queue.queue','request.metadata 8','request.metadata 9','request_queue.queue'])
+        self.assertEqual(len({c.kwargs['deadline'] for c in command.call_args_list}),1)
+
+    def test_transition_drops_old_head_and_uses_new_metadata(self):
+        b=radio.Backend({'queue_id':'q'})
+        with patch.object(b,'command',side_effect=['1','title="Old"','2','2','title="New"','2']):
+            self.assertEqual(b.queue_view()['waiting'],[{'title':'New'}])
+
+    def test_twice_changing_queue_never_claims_empty_or_stable(self):
+        b=radio.Backend({'queue_id':'q'})
+        with patch.object(b,'command',side_effect=['1','','2','2','','3']):
+            with self.assertRaisesRegex(radio.RadioError,'queue_changing'):b.queue_view()
+
+    def test_no_queue_metadata_and_invalid_ids_fail_closed(self):
+        b=radio.Backend({'queue_id':'q'})
+        for bad in ('ERROR: unknown command','1 1','1\nq.skip','-1','1;2','12345678901'):
+            with self.subTest(bad=bad), patch.object(b,'command',return_value=bad) as command:
+                with self.assertRaises(radio.RadioError):b.queue_view()
+                self.assertEqual(command.call_count,1)
+
+    def test_missing_or_unresolved_title_never_falls_back_to_path(self):
+        for text in ('No such request.','filename="/home/private/secret.mp3"\nartist="A"',
+                     'title="bad\\escape"','initial_uri="title=secret"'):
+            self.assertEqual(radio.queue_title(text),'')
+
+    def test_quoted_unicode_controls_and_byte_bound(self):
+        value='A "quote" \\ #{1+2}\n\x03\u202e東京🪄'
+        title=radio.queue_title('title='+json.dumps(value,ensure_ascii=False))
+        self.assertIn('A "quote" \\ #{1+2}',title)
+        self.assertNotIn('\n',title);self.assertNotIn('\x03',title);self.assertNotIn('\u202e',title)
+        self.assertLessEqual(len(radio.queue_title('title='+json.dumps('🪄'*500)).encode()),240)
+
+    def test_admin_overflow_reads_first_six_and_keeps_total(self):
+        b=radio.Backend({'queue_id':'q'})
+        ids=' '.join(str(n) for n in range(10))
+        with patch.object(b,'command',side_effect=[ids]+['title="x"']*6+[ids]) as command:
+            result=b.queue_view()
+        self.assertEqual((result['total'],len(result['waiting']),command.call_count),(10,6,8))
+
+    def test_empty_queue_is_an_actual_player_observation(self):
+        b=radio.Backend({'queue_id':'q'})
+        with patch.object(b,'command',return_value='') as command:
+            self.assertEqual(b.queue_view(),{'waiting':[],'total':0})
+            self.assertEqual(command.call_count,2)
+
+    def test_expired_deadline_never_opens_a_socket(self):
+        b=radio.Backend({'liquidsoap_port':1235})
+        with patch('radio_service.socket.create_connection') as connect:
+            with self.assertRaises(radio.RadioError):b.command('q.queue',deadline=0)
+            connect.assert_not_called()
+
+
+class SharedQueue(unittest.TestCase):
+    setUp, tearDown, body, api = Contract.setUp, Contract.tearDown, Contract.body, Contract.api
+    def queue_backend(self, **values):
+        result=dict(waiting=[{'title':'Artist — Track'}],total=1)
+        result.update(values)
+        return patch.object(self.backend,'queue_view',return_value=result,create=True)
+
+    def test_queue_shared_but_jobs_stay_private_and_ledger_unchanged(self):
+        self.s.submit('dev',self.body()); self.s.submit('nbot',self.body(2,query='https://youtu.be/12345678901'))
+        self.s.update(self.body(2)['id'],state='submitting')
+        before=list(self.s.db.iterdump())
+        with self.queue_backend() as backend:
+            a=self.api('GET','/v1/queue')
+            b=self.api('GET','/v1/queue',secret='b'*64)
+            self.assertEqual(a,b);self.assertEqual(backend.call_count,1)
+        self.assertEqual((a[1]['preparing'],a[1]['transferring']),(1,1))
+        self.assertEqual(set(a[1]),{'protocol','waiting','total','preparing','transferring'})
+        self.assertEqual(list(self.s.db.iterdump()),before)
+        self.assertEqual(self.backend.events,[])
+        self.assertEqual(self.api('GET','/v1/requests/'+self.body()['id'],secret='b'*64)[0],404)
+
+    def test_untrusted_method_token_or_query_never_reaches_player(self):
+        with self.queue_backend() as backend:
+            self.assertEqual(self.api('GET','/v1/queue',secret='c'*64)[0],401)
+            for method in ('POST','DELETE','PUT','PATCH','HEAD'):
+                self.assertEqual(self.api(method,'/v1/queue')[0],404)
+            self.assertEqual(self.api('GET','/v1/queue',QUERY_STRING='command=q.skip')[0],400)
+            backend.assert_not_called()
+
+    def test_failed_read_is_not_reported_as_empty_and_is_briefly_cached(self):
+        with patch.object(self.backend,'queue_view',side_effect=OSError,create=True) as backend:
+            self.assertEqual(self.api('GET','/v1/queue'),(503,{'error':'queue_unavailable'}))
+            self.assertEqual(self.api('GET','/v1/queue')[0],503)
+            self.assertEqual(backend.call_count,1)
+
+    def test_cache_expires_and_reads_never_hold_the_ledger_lock(self):
+        def read():
+            acquired=[]
+            def other():
+                with self.s.lock:acquired.append(True)
+            worker=threading.Thread(target=other);worker.start();worker.join(timeout=.5)
+            self.assertEqual(acquired,[True])
+            return dict(waiting=[],total=0)
+        with patch.object(self.backend,'queue_view',side_effect=read,create=True) as backend:
+            self.api('GET','/v1/queue');self.s.queue_cache_until=0;self.api('GET','/v1/queue')
+            self.assertEqual(backend.call_count,2)
+
+    def test_parallel_read_fails_fast_without_second_player_connection(self):
+        with self.queue_backend() as backend, self.s.queue_lock:
+            self.assertEqual(self.api('GET','/v1/queue'),(503,{'error':'queue_view_busy'}))
+            backend.assert_not_called()
+
+    def test_six_unicode_titles_fit_existing_4096_byte_client_limit(self):
+        with self.queue_backend(waiting=[{'title':'🪄'*60}]*6,total=6):
+            env=dict(REQUEST_METHOD='GET',PATH_INFO='/v1/queue',HTTP_AUTHORIZATION='Bearer '+self.secret)
+            headers=[]
+            data=b''.join(self.s(env,lambda status,h:headers.extend(h)))
+        self.assertLess(len(data),4096)
+        self.assertEqual(len(json.loads(data)['waiting']),6)
+        self.assertIn(('Cache-Control','no-store'),headers)
 
 
 if __name__=='__main__':

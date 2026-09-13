@@ -7,6 +7,7 @@ use Encode qw(encode_utf8 decode FB_CROAK);
 use Fcntl qw(O_RDONLY O_NOFOLLOW S_ISREG);
 use JSON::PP ();
 use HTTP::Tiny;
+use Time::HiRes ();
 use Mediabot::AsyncWorker;
 use Mediabot::Helpers ();
 
@@ -79,6 +80,98 @@ sub notice {
     my $lang=eval { Mediabot::Helpers::channel_lang($ctx->bot,$ctx->channel) } // 'en';
     $ctx->reply_private($lang eq 'fr' ? $fr : $en);
 }
+sub queue_now { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) }
+sub queue_lines {
+    my ($r,$command)=@_;
+    $command='radioqueue' if $command eq 'queue';
+    return unless ref($r) eq 'HASH' && !exists($r->{error});
+    for my $key (qw(protocol total preparing transferring)) {
+        return unless defined($r->{$key}) && !ref($r->{$key}) && $r->{$key} =~ /\A\d{1,3}\z/;
+    }
+    return unless $r->{protocol} == 1 && $r->{total} <= 512
+        && ref($r->{waiting}) eq 'ARRAY' && @{$r->{waiting}} == ($r->{total}>6 ? 6 : $r->{total});
+    my @titles;
+    for my $track (@{$r->{waiting}}) {
+        return unless ref($track) eq 'HASH' && defined($track->{title}) && !ref($track->{title});
+        my $title=$track->{title};
+        $title =~ s/[\p{Cc}\p{Cf}\p{Cs}]/ /g;
+        $title =~ s/^\s+|\s+$//g;
+        # A separate NOTICE per title, bounded in bytes even with emoji/CJK.
+        chop $title while length(encode_utf8($title)) > 240;
+        push @titles,$title;
+    }
+    my @lines;
+    if ($command eq 'nextsong' && @titles) {
+        my $title=$titles[0];
+        push @lines,['Radio : prochaine demande en attente — '.($title || 'titre indisponible'),
+                     'Radio: next waiting request — '.($title || 'title unavailable')];
+    } else {
+        push @lines,["Radio : file commune — $r->{total} en attente | préparation : $r->{preparing} | transmission : $r->{transferring}.",
+                     "Radio: shared queue — $r->{total} waiting | preparing: $r->{preparing} | submitting: $r->{transferring}."];
+        if ($command eq 'radioqueue') {
+            for my $i (0..$#titles) {
+                push @lines,['Radio : '.($i+1).'. '.($titles[$i] || 'titre indisponible'),
+                             'Radio: '.($i+1).'. '.($titles[$i] || 'title unavailable')];
+            }
+            push @lines,['Radio : seuls les six premiers morceaux sont affichés.',
+                         'Radio: only the first six tracks are shown.'] if $r->{total}>6;
+        }
+    }
+    push @lines,['Radio : antenne actuelle : song. Le direct reste prioritaire ; heure de passage non garantie.',
+                 'Radio: currently on air: song. Live input keeps priority; no guaranteed airtime.'];
+    return \@lines;
+}
+sub inspect_queue {
+    my ($ctx,$command)=@_;
+    return unless $command =~ /\A(?:radioqueue|nextsong|queue)\z/ && enabled($ctx) && present($ctx);
+    my $bot=$ctx->bot;
+    my $now=queue_now();
+    return if $bot->{_radio_queue_pending} || ($bot->{_radio_queue_until}//0)>$now;
+    # One read per bot every five seconds; identities cannot grow a cooldown map.
+    $bot->{_radio_queue_until}=$now+5;
+    if (@{$ctx->args}) {
+        notice($ctx,"Syntaxe : $command","Syntax: $command"); return;
+    }
+    unless (setting($bot,'RADIO_API_ENABLED','0') eq '1') {
+        notice($ctx,'Radio : service non configuré.','Radio: service not configured.'); return;
+    }
+    if (keys(%{$bot->{_radio_api_pending}//{}})>=4) {
+        notice($ctx,'Radio : consultation occupée ; réessaie dans quelques secondes.',
+                    'Radio: queue view busy; try again in a few seconds.'); return;
+    }
+    my ($url,$secret);
+    unless (eval {
+        $url=endpoint(setting($bot,'RADIO_API_URL','http://127.0.0.1:8765'));
+        $secret=token(setting($bot,'RADIO_API_TOKEN_FILE','')); 1;
+    }) {
+        notice($ctx,'Radio : configuration API à vérifier.','Radio: check the API configuration.'); return;
+    }
+    my $irc=$bot->{irc};
+    my $generation=eval { $bot->{wit_runtime_state}->capture_generation($ctx->channel) };
+    $bot->{_radio_queue_pending}=1;
+    my $worker=eval { Mediabot::AsyncWorker->start(
+        loop=>(eval {$bot->getLoop} // $bot->{loop}),label=>'radio-queue',timeout=>10,max_output=>8192,
+        child=>sub { call_api($url,$secret,'GET','/v1/queue',undef) },
+        on_done=>sub {
+            my ($result)=@_;
+            delete $bot->{_radio_queue_pending};
+            return unless enabled($ctx) && present($ctx) && $bot->{irc}==$irc
+                && defined($generation) && $generation == (eval { $bot->{wit_runtime_state}->capture_generation($ctx->channel) } // -1);
+            my $lines=queue_lines($result->{value},$command);
+            unless ($lines) {
+                notice($ctx,'Radio : file commune indisponible ; réessaie dans quelques secondes.',
+                            'Radio: shared queue unavailable; try again in a few seconds.'); return;
+            }
+            notice($ctx,@$_) for @$lines;
+        }) };
+    unless ($worker) {
+        delete $bot->{_radio_queue_pending};
+        notice($ctx,'Radio : consultation indisponible ; réessaie dans quelques secondes.',
+                    'Radio: queue view unavailable; try again in a few seconds.'); return;
+    }
+    $bot->{_radio_queue_pending}=$worker if exists $bot->{_radio_queue_pending};
+    return 1;
+}
 sub submit {
     my ($ctx,$action)=@_;
     return unless enabled($ctx) && present($ctx);
@@ -93,8 +186,8 @@ sub submit {
     }
     $query =~ s/^\s+|\s+$//g;
     unless (length($query) && length($query)<=255 && $query !~ /[\x00-\x1f]/) {
-        notice($ctx,"Syntaxe : $action ".($action eq 'play' ? '<lien YouTube>' : '<artiste ou titre>'),
-                    "Syntax: $action ".($action eq 'play' ? '<YouTube URL>' : '<artist or title>')); return;
+        notice($ctx,"Syntaxe : $action ".($action eq 'play' ? '<artiste titre ou lien YouTube>' : '<pattern artiste ou titre>'),
+                    "Syntax: $action ".($action eq 'play' ? '<artist title or YouTube URL>' : '<artist or title pattern>')); return;
     }
     my $prefix=eval { $ctx->message->prefix } // '';
     return unless $prefix =~ /\A([^!\s]+)!([^@\s]+\@[^\s]+)\z/ && fold($1) eq fold($ctx->nick);
@@ -159,6 +252,10 @@ sub submit {
                     youtube_url_required=>['Utilise un lien YouTube https vers une seule vidéo.','Use an https YouTube link to one video.'],
                     no_playlists=>['Les playlists ne sont pas acceptées.','Playlists are not accepted.'],
                     no_matching_track=>['Aucun morceau trouvé en base pour cette recherche.','No catalogue track matches this search.'],
+                    no_youtube_match=>['Aucune vidéo adaptée trouvée ; précise artiste et titre ou donne un lien YouTube.',
+                        'No suitable video found; refine the artist and title or provide a YouTube URL.'],
+                    youtube_search_failed=>['Recherche YouTube indisponible ; consulte les diagnostics radio.',
+                        'YouTube search is unavailable; check the radio diagnostics.'],
                     catalogue_tracks_unavailable=>['Morceau trouvé en base, mais fichier audio indisponible ; vérification côté radio nécessaire.',
                         'Track found in the catalogue, but its audio file is unavailable; the radio operator needs to check it.'],
                     catalogue_scan_timeout=>['La vérification du catalogue prend trop longtemps ; contrôle côté radio nécessaire.',

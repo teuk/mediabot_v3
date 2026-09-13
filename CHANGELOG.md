@@ -12,6 +12,18 @@ release. The current development line is `3.6dev`.
 
 ### mb734 — prepare reliable radio requests and shared audio storage
 
+- Remove repeated artist prefixes consistently from radio confirmations,
+  pending queue labels and Liquidsoap metadata, including cached tracks.
+  Keep recording/version suffixes and existing catalogue/audio files.
+- Add `queue` as a private shared-queue alias on `+Radio`; remote clients must
+  update to the published shared-queue commands instead of using local telnet.
+
+- Add artist/title input to public `play` through the central radio API:
+  bounded YouTube search, durable video selection before downloading, and
+  the existing catalogue, metadata, shared budget and duplicate checks.
+  Keep `rplay` as random selection among matching catalogue entries; no
+  client configuration change for instances already using the HTTP API.
+
 - Stop a downloaded request before queue submission when its MP3 catalogue
   write fails, including database exceptions; retain the file for recovery.
 - Parse the first complete Liquidsoap END frame, reject server errors and
@@ -48,6 +60,10 @@ release. The current development line is `3.6dev`.
 - Bind catalogue artist/title to each Liquidsoap request, including existing
   MP3s without embedded tags. Quote metadata as literal text, preserve audio
   fingerprints, and keep now-playing tied to Icecast playback.
+- Connect `radioqueue` and `nextsong` on `+Radio` to the central API for all
+  participants and instances, with private NOTICE responses. Observe the actual
+  waiting queue separately from preparing jobs and Icecast's current title;
+  bound and cache reads without exposing paths, identities or private history.
 
 ### mb733 — respect EpiKnet service authority while keeping Fullop
 
