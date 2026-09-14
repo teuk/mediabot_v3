@@ -1,5 +1,7 @@
 # Mediabot v3
 
+> Developed with substantial help from large language models (LLMs). Apparently, that makes me a “lamer”. To be clear, I don’t consider anyone a “lamer” for building their projects the same way I do.
+
 <p align="center">
   <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.5">
     <img src="docs/mediabot-3.5-github-social-preview.png" width="1280" alt="Mediabot 3.5: IRC events flow through per-channel policy, MariaDB memory, Hailo or opt-in Gemini, then return as bounded replies with mbweb and Prometheus visibility.">
