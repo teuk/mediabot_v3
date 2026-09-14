@@ -13,12 +13,33 @@ use Mediabot::RSS qw(
 );
 use Mediabot::RSS::Fetcher;
 use Mediabot::RSS::Repository;
-use Mediabot::RSS::TinyURL qw(make_shortener);
+use Mediabot::RSS::TinyURL qw(make_shortener format_event);
 
 sub _tinyurl_api_key {
     my ($bot) = @_;
     my $value = eval { $bot->{conf}->get('tinyurl.API_KEY') };
     return defined($value) && !ref($value) ? $value : '';
+}
+
+sub _tinyurl_shortener {
+    my ($bot) = @_;
+    my $state_file = eval { $bot->{conf}->get('tinyurl.STATE_FILE') };
+    $state_file = '' unless defined($state_file) && !ref($state_file);
+    return make_shortener(
+        api_key     => _tinyurl_api_key($bot),
+        config_file => $bot->{config_file},
+        state_file  => $state_file,
+        on_event    => sub {
+            my ($event) = @_;
+            return unless ref($event) eq 'HASH';
+            my $logger = $bot->{logger};
+            return unless $logger && eval { $logger->can('log') };
+            my $level = int($event->{level} // 1);
+            $level = 0 if $level < 0;
+            $level = 4 if $level > 4;
+            eval { $logger->log($level, format_event($event)); 1 };
+        },
+    );
 }
 
 sub _syntax {
@@ -261,7 +282,7 @@ sub _probe_worker {
         "RSS probe OK: [$title] $feed->{format} · $count item(s) · HTTP $res->{status}.");
     if ($count) {
         my $it = $feed->{items}[0];
-        my $shorten = make_shortener(api_key => _tinyurl_api_key($ctx->bot));
+        my $shorten = _tinyurl_shortener($ctx->bot);
         my $display_url = $shorten->($it->{url});
         my $line = format_rss_announcement(
             label => $title, title => $it->{title}, url => $display_url
@@ -300,7 +321,7 @@ sub _show_worker {
     }
     my @items = @{ $res->{feed}{items} || [] };
     return $ctx->reply_private("RSS [$feed->{label}] has no readable items.") unless @items;
-    my $shorten = make_shortener(api_key => _tinyurl_api_key($ctx->bot));
+    my $shorten = _tinyurl_shortener($ctx->bot);
     for my $it (@items) {
         my $display_url = $shorten->($it->{url});
         my $line = format_rss_announcement(

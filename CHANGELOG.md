@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb735 — keep TinyURL exhaustion from flooding news workers
+
+- Share successful TinyURL mappings between isolated RSS, `rss show`,
+  `rss probe` and interactive news workers through a private atomic cache next
+  to the instance configuration.
+- Distinguish the account link-creation limit (`HTTP 422`) from request rate
+  limiting (`HTTP 429`), then open a shared bounded circuit instead of retrying
+  once per article and worker. Cached aliases remain usable while new links
+  fall back to their exact original URL.
+- Emit secret-free operator diagnostics on the first failure, bounded reminders
+  and recovery. A missing key keeps the existing no-request fallback.
+
 ### mb734 — prepare reliable radio requests and shared audio storage
 
 - Fetch CI dependencies through an explicit HTTPS CPAN mirror; retry Debian 13

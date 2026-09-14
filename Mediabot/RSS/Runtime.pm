@@ -10,7 +10,7 @@ use Mediabot::Helpers ();
 use Mediabot::RSS qw(format_rss_announcement);
 use Mediabot::RSS::Poller;
 use Mediabot::RSS::Repository;
-use Mediabot::RSS::TinyURL qw(make_shortener);
+use Mediabot::RSS::TinyURL qw(make_shortener format_event);
 
 our $VERSION = '1.0';
 
@@ -132,12 +132,25 @@ sub _child_poll {
             channel     => $feed->{channel},
             label       => $feed->{label},
             announcements => [],
+            tinyurl_events => [],
         };
 
         if ($res->{ok} && ref($res->{pending}) eq 'ARRAY' && @{ $res->{pending} }) {
             my $api_key = eval { $bot->{conf}->get('tinyurl.API_KEY') };
             $api_key = '' unless defined($api_key) && !ref($api_key);
-            my $shorten = make_shortener(api_key => $api_key);
+            my $state_file = eval { $bot->{conf}->get('tinyurl.STATE_FILE') };
+            $state_file = '' unless defined($state_file) && !ref($state_file);
+            my $shorten = make_shortener(
+                api_key     => $api_key,
+                config_file => $bot->{config_file},
+                state_file  => $state_file,
+                on_event    => sub {
+                    my ($event) = @_;
+                    return unless ref($event) eq 'HASH';
+                    push @{ $value->{tinyurl_events} }, $event
+                        if @{ $value->{tinyurl_events} } < 8;
+                },
+            );
             for my $item (@{ $res->{pending} }) {
                 next unless ref($item) eq 'HASH';
                 next unless defined($item->{item_key}) && $item->{item_key} =~ /^[0-9a-f]{64}$/i;
@@ -235,6 +248,16 @@ sub _worker_done {
         my $detail = $value->{detail} // $value->{error} // 'poll failed';
         $self->_log(2, "rss_poll_dispatch: poll failed feed=$id: $detail");
         return 0;
+    }
+
+    my $tinyurl_events = $value->{tinyurl_events};
+    $tinyurl_events = [] unless ref($tinyurl_events) eq 'ARRAY';
+    for my $event (@$tinyurl_events) {
+        next unless ref($event) eq 'HASH';
+        my $level = int($event->{level} // 1);
+        $level = 0 if $level < 0;
+        $level = 4 if $level > 4;
+        $self->_log($level, format_event($event));
     }
 
     if ($value->{baseline}) {

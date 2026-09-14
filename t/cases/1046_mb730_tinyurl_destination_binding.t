@@ -58,16 +58,16 @@ return sub {
     $assert->unlike($tiny, qr{https://tinyurl\.com/api-create\.php\?url=},
         'mb730-1046: executable legacy endpoint URL is absent');
 
-    $assert->like($runtime, qr/get\('tinyurl\.API_KEY'\).*?make_shortener\(api_key => \$api_key\)/s,
-        'mb730-1046: automatic RSS polling passes the configured key');
+    $assert->like($runtime, qr/get\('tinyurl\.API_KEY'\).*?make_shortener\(.*?api_key\s*=>\s*\$api_key.*?config_file\s*=>\s*\$bot->\{config_file\}/s,
+        'mb735-1046: automatic RSS polling passes key and instance identity');
     $assert->like($commands, qr/sub _tinyurl_api_key.*?get\('tinyurl\.API_KEY'\)/s,
         'mb730-1046: manual RSS commands read the same key');
-    $assert->like($commands, qr/make_shortener\(api_key => _tinyurl_api_key\(\$ctx->bot\)\)/,
-        'mb730-1046: probe and show use the authenticated helper');
-    $assert->like($news, qr/use Mediabot::RSS::TinyURL qw\(shorten_url\)/,
+    $assert->like($commands, qr/sub _tinyurl_shortener.*?make_shortener\(.*?api_key\s*=>\s*_tinyurl_api_key\(\$bot\).*?state_file/s,
+        'mb735-1046: probe and show use the resilient authenticated helper');
+    $assert->like($news, qr/use Mediabot::RSS::TinyURL qw\(make_shortener format_event\)/,
         'mb730-1046: interactive news shares the same implementation');
-    $assert->like($news, qr/get\('tinyurl\.API_KEY'\).*?_news_shorten_url\(\$tiny_http, shift, \$tiny_api_key\)/s,
-        'mb730-1046: interactive news passes its configured key');
+    $assert->like($news, qr/get\('tinyurl\.API_KEY'\).*?make_shortener\(.*?api_key\s*=>\s*\$tiny_api_key.*?state_file.*?on_event/s,
+        'mb735-1046: interactive news passes key, shared state and diagnostics');
 
     my ($tiny_conf) = $sample =~ /^\[tinyurl\]\s*\n(.*?)(?=^\[[^\]]+\]\s*$|\z)/ms;
     $assert->ok(defined($tiny_conf),
