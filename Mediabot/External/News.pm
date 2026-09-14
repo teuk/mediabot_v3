@@ -32,7 +32,7 @@ use Exporter 'import';
 use JSON::PP ();
 use POSIX qw(strftime);
 use URI::Escape qw(uri_escape_utf8);
-use Mediabot::RSS::TinyURL qw(make_shortener format_event);
+use Mediabot::URLShortener qw(make_bot_shortener format_event);
 
 our @EXPORT_OK = qw(mbNews_ctx _news_select_results _news_sources_line
                     _news_default_query _news_search_params
@@ -410,7 +410,7 @@ sub _cap_bytes {
     return "…";
 }
 
-sub _news_tinyurl_event {
+sub _news_shorturl_event {
     my ($self, $event) = @_;
     return unless ref($event) eq 'HASH';
     my $logger = $self->{logger};
@@ -663,19 +663,13 @@ sub mbNews_ctx {
             $push_summary->("$r->{title} — $r->{domain}");
         }
     }
-    # TinyURL is presentation only. The retired anonymous endpoint can return
-    # a valid-looking alias for the wrong destination, so use only the modern
-    # authenticated API. Missing credentials or any mismatch keeps the exact
-    # original article URL.
-    my $tiny_api_key = eval { $self->{conf}->get('tinyurl.API_KEY') };
-    $tiny_api_key = '' unless defined($tiny_api_key) && !ref($tiny_api_key);
-    my $tiny_state_file = eval { $self->{conf}->get('tinyurl.STATE_FILE') };
-    $tiny_state_file = '' unless defined($tiny_state_file) && !ref($tiny_state_file);
-    my $shorten = make_shortener(
-        api_key     => $tiny_api_key,
-        config_file => $self->{config_file},
-        state_file  => $tiny_state_file,
-        on_event    => sub { _news_tinyurl_event($self, shift) },
+    # URL shortening is presentation only. The private service validates the
+    # destination binding; missing credentials or any mismatch keeps the exact
+    # original article URL. Unconfigured legacy installs retain MB735 TinyURL
+    # compatibility until they opt in to the private endpoint.
+    my $shorten = make_bot_shortener(
+        bot      => $self,
+        on_event => sub { _news_shorturl_event($self, shift) },
     );
     my $article_segments = _news_article_segments($display_articles, $shorten);
     my $article_lines = _news_article_lines($article_segments, 400);

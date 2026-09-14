@@ -18,8 +18,8 @@ return sub {
         'mb693-903: same feed cannot spawn a concurrent worker');
     $assert->like($src, qr/connect_isolated_handle/,
         'mb693-903: worker opens an isolated DB handle');
-    $assert->like($src, qr/get\('tinyurl\.API_KEY'\).*?make_shortener\(.*?api_key\s*=>\s*\$api_key.*?config_file\s*=>\s*\$bot->\{config_file\}.*?tinyurl_events.*?format_rss_announcement/s,
-        'mb735-903: isolated worker shares TinyURL state and returns bounded diagnostics');
+    $assert->like($src, qr/use Mediabot::URLShortener qw\(make_bot_shortener format_event\).*?make_bot_shortener\(.*?bot\s*=>\s*\$bot.*?shorturl_events.*?format_rss_announcement/s,
+        'mb736-903: isolated worker shares ShortURL state and returns bounded diagnostics');
     $assert->like($src, qr/output_delay.*?2/s,
         'mb693-903: automatic RSS output is spaced by two seconds per channel');
     $assert->like($src, qr/is_feed_enabled.*?botPrivmsg.*?mark_announced/s,

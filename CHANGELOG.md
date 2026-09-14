@@ -10,6 +10,25 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb736 — serve private URL creation behind teuk.org HTTPS
+
+- Add a loopback-only Python/Waitress service in `contrib/shorturl`, with
+  immutable public redirects, idempotent SQLite mappings and random
+  non-sequential identifiers. Apache exposes only `/shorturl/` on the existing
+  HTTPS virtual host.
+- Restrict link creation to independent, revocable 256-bit bearer tokens for
+  Mediabot instances. Store only token hashes server-side, rate-limit each
+  instance and keep destination URLs and credentials out of application logs.
+- Route RSS polling, manual RSS display and interactive news through one
+  generic client with a shared cache and failure circuit. Any configuration,
+  transport or response error preserves the exact original URL; unconfigured
+  existing installations retain the mb735 TinyURL compatibility fallback.
+- Bound service readiness and Apache request framing, and provide a secret-safe
+  HTTPS verifier for anonymous rejection, authenticated creation and exact
+  redirect destination binding before an instance is promoted.
+- Treat `HTTP::Tiny`'s synthetic status 599 as a local transport failure with a
+  five-minute circuit, rather than reporting it as an HTTP backend outage.
+
 ### mb735 — keep TinyURL exhaustion from flooding news workers
 
 - Share successful TinyURL mappings between isolated RSS, `rss show`,

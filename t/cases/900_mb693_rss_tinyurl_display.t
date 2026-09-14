@@ -155,12 +155,12 @@ return sub {
         local $/;
         <$fh>;
     };
-    $assert->like($cmd, qr/use Mediabot::RSS::TinyURL qw\(make_shortener format_event\);/,
-        'mb693-900: RSS commands use the dedicated presentation shortener');
-    $assert->like($cmd, qr/sub _tinyurl_shortener .*?make_shortener\(.*?api_key\s*=>\s*_tinyurl_api_key\(\$bot\).*?config_file\s*=>\s*\$bot->\{config_file\}.*?on_event\s*=>/s,
-        'mb735-900: manual RSS workers share authenticated cache/circuit state and diagnostics');
-    $assert->like($cmd, qr/sub _show_worker .*?my \$shorten = _tinyurl_shortener\(\$ctx->bot\);.*?for my \$it/s,
-        'mb735-900: show reuses one resilient TinyURL client across displayed items');
+    $assert->like($cmd, qr/use Mediabot::URLShortener qw\(make_bot_shortener format_event\);/,
+        'mb736-900: RSS commands use the generic presentation shortener');
+    $assert->like($cmd, qr/sub _url_shortener .*?make_bot_shortener\(.*?bot\s*=>\s*\$bot.*?on_event\s*=>/s,
+        'mb736-900: manual RSS workers share authenticated cache/circuit state and diagnostics');
+    $assert->like($cmd, qr/sub _show_worker .*?my \$shorten = _url_shortener\(\$ctx->bot\);.*?for my \$it/s,
+        'mb736-900: show reuses one resilient URL client across displayed items');
 
     my $tiny = do {
         open my $fh, '<:encoding(UTF-8)', 'Mediabot/RSS/TinyURL.pm' or die $!;

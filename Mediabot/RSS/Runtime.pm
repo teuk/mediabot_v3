@@ -10,7 +10,7 @@ use Mediabot::Helpers ();
 use Mediabot::RSS qw(format_rss_announcement);
 use Mediabot::RSS::Poller;
 use Mediabot::RSS::Repository;
-use Mediabot::RSS::TinyURL qw(make_shortener format_event);
+use Mediabot::URLShortener qw(make_bot_shortener format_event);
 
 our $VERSION = '1.0';
 
@@ -132,23 +132,17 @@ sub _child_poll {
             channel     => $feed->{channel},
             label       => $feed->{label},
             announcements => [],
-            tinyurl_events => [],
+            shorturl_events => [],
         };
 
         if ($res->{ok} && ref($res->{pending}) eq 'ARRAY' && @{ $res->{pending} }) {
-            my $api_key = eval { $bot->{conf}->get('tinyurl.API_KEY') };
-            $api_key = '' unless defined($api_key) && !ref($api_key);
-            my $state_file = eval { $bot->{conf}->get('tinyurl.STATE_FILE') };
-            $state_file = '' unless defined($state_file) && !ref($state_file);
-            my $shorten = make_shortener(
-                api_key     => $api_key,
-                config_file => $bot->{config_file},
-                state_file  => $state_file,
+            my $shorten = make_bot_shortener(
+                bot         => $bot,
                 on_event    => sub {
                     my ($event) = @_;
                     return unless ref($event) eq 'HASH';
-                    push @{ $value->{tinyurl_events} }, $event
-                        if @{ $value->{tinyurl_events} } < 8;
+                    push @{ $value->{shorturl_events} }, $event
+                        if @{ $value->{shorturl_events} } < 8;
                 },
             );
             for my $item (@{ $res->{pending} }) {
@@ -250,9 +244,9 @@ sub _worker_done {
         return 0;
     }
 
-    my $tinyurl_events = $value->{tinyurl_events};
-    $tinyurl_events = [] unless ref($tinyurl_events) eq 'ARRAY';
-    for my $event (@$tinyurl_events) {
+    my $shorturl_events = $value->{shorturl_events};
+    $shorturl_events = [] unless ref($shorturl_events) eq 'ARRAY';
+    for my $event (@$shorturl_events) {
         next unless ref($event) eq 'HASH';
         my $level = int($event->{level} // 1);
         $level = 0 if $level < 0;

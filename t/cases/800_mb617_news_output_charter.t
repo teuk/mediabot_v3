@@ -52,12 +52,12 @@ return sub {
         'mb617-800: tous les liens restent presents');
 
     my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/External/News.pm' or die $!; local $/; <$fh> };
-    $assert->like($src, qr/my \$shorten = make_shortener\(.*?api_key\s*=>\s*\$tiny_api_key.*?config_file\s*=>\s*\$self->\{config_file\}.*?on_event\s*=>.*?_news_article_segments\(\$display_articles, \$shorten\)/s,
-        'mb735-800: le runtime construit les lignes article avec le shortener partage');
+    $assert->like($src, qr/use Mediabot::URLShortener qw\(make_bot_shortener format_event\).*?my \$shorten = make_bot_shortener\(.*?bot\s*=>\s*\$self.*?on_event\s*=>.*?_news_article_segments\(\$display_articles, \$shorten\)/s,
+        'mb736-800: le runtime construit les lignes article avec le client generique partage');
     $assert->like($src, qr/if \(@\$article_lines\) \{\s*push \@lines, \@\$article_lines;\s*\}\s*else \{/s,
         'mb617-800: les lignes article sont privilegiees sur Sources:');
-    $assert->like($src, qr/sub _news_tinyurl_event \{.*?format_event\(\$event\)/s,
-        'mb735-800: le worker news remonte le diagnostic TinyURL au logger parent');
+    $assert->like($src, qr/sub _news_shorturl_event \{.*?format_event\(\$event\)/s,
+        'mb736-800: le worker news remonte le diagnostic ShortURL au logger parent');
     $assert->unlike($src, qr{tinyurl\.com/api-create\.php},
         'mb730-800: news n utilise plus le endpoint anonyme retire');
     $assert->like($src, qr/last if \@segments >= 3;/,
@@ -66,9 +66,9 @@ return sub {
         'mb617-800: la synthese reste bornee a deux lignes');
     $assert->like($src, qr/my \$summary_count = 0;/,
         'mb617-800: le badge ne doit ouvrir que la premiere ligne de synthese');
-    my $tiny = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/RSS/TinyURL.pm' or die $!; local $/; <$fh> };
-    $assert->like($tiny, qr/timeout\s*=>\s*2.*?max_size\s*=>\s*4096/s,
-        'mb735-800: le transport authentifie conserve un budget court et borne');
+    my $client = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/URLShortener.pm' or die $!; local $/; <$fh> };
+    $assert->like($client, qr/timeout\s*=>\s*2.*?max_size\s*=>\s*4096/s,
+        'mb736-800: le transport prive conserve un budget court et borne');
     $assert->like($src, qr/Prefer three different publishers/,
         'mb617-800: la presentation privilegie des sources distinctes');
 };
