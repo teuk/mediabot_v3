@@ -10,6 +10,24 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb737 — render compact AI answers natively for IRC
+
+- Route successful `tellme`/`chatgpt`, `ai`/`claude` and `gemini` answers
+  through one provider-neutral presentation boundary. Compact Markdown
+  paragraphs, headings, lists, quotes, tables, links and fenced code before
+  converting emphasis to IRC bold, italic and underline only.
+- Enforce at most two `PRIVMSG` lines and the existing 400-byte UTF-8 payload
+  budget even when an upgraded instance still carries the former four-line or
+  450-byte settings. Rebalance styles independently on each line and add a
+  bounded plain ellipsis when content must be truncated.
+- Add `chatgpt` as a public alias for `tellme` and `claude` as a public/private
+  alias for `ai`, without changing the existing `+chatGPT`, `+Claude` or
+  `+Gemini` channel gates. Keep Partyline callbacks on their established plain
+  text path and render cached Claude answers exactly like fresh ones.
+- Append a compact IRC delivery instruction to every provider system prompt,
+  reduce new-install defaults and OpenAI profiles to two lines, and stop
+  recording raw model answers in the OpenAI debug log.
+
 ### mb736 — serve private URL creation behind teuk.org HTTPS
 
 - Add a loopback-only Python/Waitress service in `contrib/shorturl`, with

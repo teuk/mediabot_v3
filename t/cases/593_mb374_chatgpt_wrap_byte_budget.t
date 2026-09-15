@@ -117,7 +117,13 @@ return sub {
     $assert->unlike($wrap_code, qr/rindex\(\$slice/, 'plus de découpage char-based manuel');
     $assert->like($src, qr/mb374-R1/, 'tag mb374-R1 présent');
 
-    # les 3 chemins IA appellent toujours _chatgpt_wrap (interface préservée).
-    my $calls = () = $src =~ /_chatgpt_wrap\(/g;
-    $assert->ok($calls >= 3, 'les chemins IA utilisent toujours _chatgpt_wrap');
+    # Les sorties IRC passent désormais par le renderer commun; le wrapper
+    # historique reste disponible pour le callback Partyline en texte brut.
+    my $irc_output = _slurp_593(
+        File::Spec->catfile('.', 'Mediabot', 'AI', 'IRCOutput.pm')
+    );
+    $assert->like($src, qr/format_ai_reply\(/,
+        'OpenAI et Claude utilisent le renderer IRC commun');
+    $assert->like($irc_output, qr/Mediabot::Helpers::_split_text_for_irc\(/,
+        'renderer IRC commun délègue au découpeur byte-safe partagé');
 };

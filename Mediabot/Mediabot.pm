@@ -2378,8 +2378,10 @@ sub mbCommandPublic {
         f            => sub { fortniteStats_ctx($ctx) },
         xlogin       => sub { xLogin_ctx($ctx) },
         tellme       => sub { chatGPT_ctx($ctx) },
+        chatgpt      => sub { chatGPT_ctx($ctx) },
         openai       => sub { openai_ctx($ctx) },
         ai           => sub { claude_ctx($ctx) },
+        claude       => sub { claude_ctx($ctx) },
         gemini       => sub { gemini_ctx($ctx) },
         yomomma      => sub { Yomomma_ctx($ctx) },
         resolve      => sub { resolve_ctx($ctx) },
@@ -2742,9 +2744,10 @@ showcmd|showcmd <command>|public|Display a dynamic PUBLIC_COMMANDS command.
 showcommands|showcommands [#channel]|public|List commands available for your level on a channel.
 song|song|public|Show the current Icecast song or stream title.
 status|status|admin|Show bot runtime status.
-tellme|tellme <prompt>|public|Ask the configured ChatGPT/OpenAI integration.
+tellme|tellme <prompt>|public|Ask the configured ChatGPT/OpenAI integration; output is rendered for IRC in at most two lines.
+chatgpt|chatgpt <prompt>|public|Alias for tellme.
 openai|openai help|owner|Show and change safe OpenAI/tellme runtime settings.
-gemini|gemini <prompt>|public|Ask Google Gemini. Requires the per-channel +Gemini chanset.
+gemini|gemini <prompt>|public|Ask Google Gemini in at most two IRC-rendered lines. Requires the per-channel +Gemini chanset.
 timers|timers|admin|List bot timers.
 tmdb|tmdb <movie or show>|public|Search TMDB when configured.
 tmdblangset|tmdblangset #channel <lang>|channel admin|Set TMDB language for a channel.
@@ -2891,7 +2894,8 @@ triviascore|triviascore|public|Show trivia scores for the current channel sessio
 define|define <word>|public|Look up a word definition from Wiktionary.
 
 # AI
-ai|ai <prompt>|public|Ask Claude. Subcommands: [#channel] summary (Administrator+; Master+ to publish another channel here) [periode] [N] [Nl] [public] [en|fr|es] [nick] (details: ai summary help), pin, relay, forget, models, stats, reset, history, ai persona.
+ai|ai <prompt>|public|Ask Claude in at most two IRC-rendered lines. Subcommands: [#channel] summary (Administrator+; Master+ to publish another channel here) [periode] [N] [Nl] [public] [en|fr|es] [nick] (details: ai summary help), pin, relay, forget, models, stats, reset, history, ai persona.
+claude|claude <prompt>|public|Alias for ai.
 
 # Misc
 spike|spike|public|Show Spike memorial image.
@@ -3802,6 +3806,7 @@ sub mbCommandPrivate {
         antifloodset => sub { setChannelAntiFloodParams_ctx($ctx) },
         rehash      => sub { mbRehash_ctx($ctx) },
         ai           => sub { claude_ctx($ctx) },  # P4: !ai in private (no chanset gate)
+        claude       => sub { claude_ctx($ctx) },
     );
 
     # mb614-B1: meme repliement qu'en public — une commande accentuee doit

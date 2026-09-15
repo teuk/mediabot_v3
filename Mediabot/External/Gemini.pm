@@ -5,10 +5,12 @@ use warnings;
 use utf8;
 
 use Exporter 'import';
-use Encode ();
-
 use Mediabot::AI qw(provider_configured);
 use Mediabot::AI::Client ();
+use Mediabot::AI::IRCOutput qw(
+    format_ai_reply
+    with_irc_output_instruction
+);
 use Mediabot::AI::Request qw(build_request);
 use Mediabot::AI::Transport ();
 use Mediabot::AI::Provider::Gemini ();
@@ -22,14 +24,13 @@ use constant {
     GEMINI_SYSTEM_PROMPT    => 'You are a helpful IRC assistant. Answer clearly and concisely in the language of the user.',
     GEMINI_TEMPERATURE      => 0.7,
     GEMINI_MAX_TOKENS       => 1024,
-    GEMINI_MAX_PRIVMSG      => 4,
+    GEMINI_MAX_PRIVMSG      => 2,
     GEMINI_WRAP_BYTES       => 400,
     GEMINI_SLEEP_US         => 750_000,
     GEMINI_TIMEOUT          => 30,
     GEMINI_RATE_MAX         => 5,
     GEMINI_RATE_WINDOW      => 60,
     GEMINI_MAX_PROMPT_CHARS => 4000,
-    GEMINI_TRUNC_MSG        => ' [truncated]',
 };
 
 sub _conf_string {
@@ -83,40 +84,20 @@ sub _strict_chanset_enabled {
     return defined($set_id) && "$set_id" ne '' ? 1 : 0;
 }
 
-sub _fit_suffix {
-    my ($text, $suffix, $budget) = @_;
-    $text   = '' unless defined $text;
-    $suffix = '' unless defined $suffix;
-
-    while (length($text) && length(Encode::encode('UTF-8', $text . $suffix)) > $budget) {
-        chop $text;
-    }
-    return $text . $suffix;
-}
-
 sub _deliver_answer {
     my ($self, $state, $answer) = @_;
     return undef unless defined($answer) && !ref($answer) && length($answer);
 
-    $answer =~ s/[\r\n]+/ /g;
-    $answer =~ s/\s{2,}/ /g;
-    $answer =~ s/^\s+|\s+$//g;
-    return undef unless length $answer;
-
-    my @chunks = Mediabot::Helpers::_split_text_for_irc(
-        $answer, $state->{wrap_bytes}
+    my $rendered = format_ai_reply(
+        $answer,
+        max_lines         => $state->{max_privmsg},
+        wrap_bytes        => $state->{wrap_bytes},
+        truncation_suffix => ' …',
     );
+    my @chunks = @$rendered;
     return undef unless @chunks;
 
-    my $truncated = @chunks > $state->{max_privmsg};
-    my $last = $truncated ? $state->{max_privmsg} - 1 : $#chunks;
-    if ($truncated) {
-        $chunks[$last] = _fit_suffix(
-            $chunks[$last], GEMINI_TRUNC_MSG, $state->{wrap_bytes}
-        );
-    }
-
-    my @out = @chunks[0 .. $last];
+    my @out = @chunks;
     my $queued = Mediabot::External::Claude::_queue_irc_chunks(
         $self, $state->{channel}, \@out, $state->{sleep_us}, 'Gemini'
     );
@@ -241,6 +222,7 @@ sub geminiAI {
     );
     $system =~ s/[\r\n]+/ /g;
     $system = substr($system, 0, 800);
+    $system = with_irc_output_instruction($system);
 
     my $request = eval { build_request(
         provider          => 'gemini',
@@ -270,10 +252,10 @@ sub geminiAI {
         nick        => $nick,
         channel     => $channel,
         max_privmsg => _conf_int(
-            $self, 'gemini.MAX_PRIVMSG', GEMINI_MAX_PRIVMSG, 1, 8
+            $self, 'gemini.MAX_PRIVMSG', GEMINI_MAX_PRIVMSG, 1, 2
         ),
         wrap_bytes  => _conf_int(
-            $self, 'gemini.WRAP_BYTES', GEMINI_WRAP_BYTES, 120, 450
+            $self, 'gemini.WRAP_BYTES', GEMINI_WRAP_BYTES, 120, 400
         ),
         sleep_us    => _conf_int(
             $self, 'gemini.SLEEP_US', GEMINI_SLEEP_US, 0, 2_000_000

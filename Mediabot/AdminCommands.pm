@@ -244,7 +244,7 @@ sub _openai_param_spec {
         },
         system_prompt => {
             key     => 'openai.SYSTEM_PROMPT',
-            default => 'You always answer in a helpful and serious way, precise and never start your answer with « Oh là là » when the answer is in French. Always respond using a maximum of 10 lines of text and line-based. There is one chance on two the answer contains emojis.',
+            default => 'You always answer in a helpful and serious way, precise and never start your answer with « Oh là là » when the answer is in French. There is one chance on two the answer contains emojis.',
             type    => 'text',
             min     => 10,
             max     => 800,
@@ -268,19 +268,19 @@ sub _openai_param_spec {
         },
         max_privmsg => {
             key     => 'openai.MAX_PRIVMSG',
-            default => '4',
+            default => '2',
             type    => 'int',
             min     => 1,
-            max     => 8,
-            help    => 'Maximum IRC PRIVMSG lines sent for one answer',
+            max     => 2,
+            help    => 'Maximum IRC PRIVMSG lines sent for one answer (hard cap: 2)',
         },
         wrap_bytes => {
             key     => 'openai.WRAP_BYTES',
             default => '400',
             type    => 'int',
             min     => 120,
-            max     => 450,
-            help    => 'Approximate IRC-safe split size in bytes',
+            max     => 400,
+            help    => 'IRC-safe output width in bytes (hard cap: 400)',
         },
         sleep_us => {
             key     => 'openai.SLEEP_US',
@@ -349,7 +349,13 @@ sub _openai_effective_value {
     return undef unless $spec;
 
     my $value = $self->{conf}->get($spec->{key});
-    return defined($value) && $value ne '' ? $value : $spec->{default};
+    $value = $spec->{default} unless defined($value) && $value ne '';
+
+    # MB737: old configurations may still contain the former 4/450 limits.
+    # Report the value that the common IRC renderer really enforces.
+    $value = 2   if $name eq 'max_privmsg' && $value =~ /^\d+\z/ && $value > 2;
+    $value = 400 if $name eq 'wrap_bytes'  && $value =~ /^\d+\z/ && $value > 400;
+    return $value;
 }
 
 sub _openai_validate_value {
@@ -467,7 +473,7 @@ sub _openai_notice_defaults {
         botNotice($self, $nick, "OpenAI default $name = $spec->{$name}{default}");
     }
 
-    botNotice($self, $nick, "Recommended IRC dev profile: model=gpt-4o-mini temperature=0.6 max_tokens=700 max_privmsg=5 wrap_bytes=360 sleep_us=500000");
+    botNotice($self, $nick, "Recommended IRC dev profile: model=gpt-4o-mini temperature=0.6 max_tokens=700 max_privmsg=2 wrap_bytes=400 sleep_us=500000");
 }
 
 sub _openai_run_test {
@@ -645,8 +651,8 @@ sub _openai_profile_spec {
                 model        => 'gpt-4o-mini',
                 temperature  => '0.6',
                 max_tokens   => '700',
-                max_privmsg  => '5',
-                wrap_bytes   => '360',
+                max_privmsg  => '2',
+                wrap_bytes   => '400',
                 sleep_us     => '500000',
             },
         },
@@ -656,7 +662,7 @@ sub _openai_profile_spec {
                 model        => 'gpt-4o-mini',
                 temperature  => '0.4',
                 max_tokens   => '350',
-                max_privmsg  => '3',
+                max_privmsg  => '2',
                 wrap_bytes   => '340',
                 sleep_us     => '600000',
             },
@@ -667,7 +673,7 @@ sub _openai_profile_spec {
                 model        => 'gpt-4o-mini',
                 temperature  => '0.3',
                 max_tokens   => '300',
-                max_privmsg  => '3',
+                max_privmsg  => '2',
                 wrap_bytes   => '330',
                 sleep_us     => '750000',
             },
@@ -2717,4 +2723,3 @@ sub song_ctx {
 }
 
 1;
-

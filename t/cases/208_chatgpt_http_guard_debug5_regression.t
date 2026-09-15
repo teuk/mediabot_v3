@@ -1,6 +1,7 @@
 # t/cases/208_chatgpt_http_guard_debug5_regression.t
 # HTTP exception guarding now belongs to AI::Transport; verbose prompt/answer
-# logging remains DEBUG5 in the caller.
+# logging remains DEBUG5 in the caller. MB737 keeps prompt diagnostics but logs
+# answer size instead of duplicating model content in the application log.
 use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
@@ -16,6 +17,9 @@ return sub {
     $assert->like($transport, qr/reason\s*=>\s*_clean_reason\(\$reason\)/, 'transport sanitizes exception reason');
     $assert->like($client, qr/Mediabot::AI::Transport::post_json\(/, 'AI client routes provider HTTP through shared transport');
     $assert->like($external, qr/log\(5,"chatGPT\(\) chatGPT prompt: \$prompt"\)/, 'tellme prompt remains DEBUG5');
-    $assert->like($external, qr/log\(5, "chatGPT\(\) chatGPT raw answer: \$answer"\)/, 'tellme raw answer remains DEBUG5');
+    $assert->like($external, qr/'chatGPT\(\) answer received: '.*?length\(\$answer\)/s,
+        'tellme records bounded answer metadata at DEBUG5');
+    $assert->unlike($external, qr/chatGPT\(\).*?raw answer: \$answer/,
+        'tellme no longer duplicates raw answer content in logs');
     $assert->unlike($external, qr/log\([34],"chatGPT\(\) chatGPT prompt:/, 'tellme prompt not logged at DEBUG3/4');
 };

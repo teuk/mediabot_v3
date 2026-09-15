@@ -39,7 +39,7 @@ Operators get one configuration model, one MariaDB-backed data model, ordered mi
 |---|---|
 | **IRC runtime** | A `Net::Async::IRC` event loop, reconnect handling, channel administration, antiflood controls, URL/media enrichment, radio tooling, and a TCP/DCC Partyline |
 | **Community memory** | MariaDB-backed `seen`, `onthisday`, `memory`, `awards`, `yearbook`, achievements, quotes, factoids, karma, notes, reminders, milestones, and channel history |
-| **Conversation** | Per-channel Hailo brains and a separate Gemini capability that remains disabled until an operator explicitly enables it |
+| **Conversation** | Per-channel Hailo brains plus gated OpenAI, Claude and Gemini commands whose Markdown is compacted into at most two native IRC lines |
 | **Operator surfaces** | Prometheus metrics, Grafana resources, structured logs, a read-only-by-default mbweb console, Doctor diagnostics, and systemd deployment tooling |
 | **Release engineering** | Ordered migrations, schema/type/index drift checks, 37 fail-closed security invariants, and reproducible archives exercised through fresh-install and upgrade/rollback paths on Debian 13 |
 
@@ -89,11 +89,19 @@ A typical channel can use commands such as:
 <prefix>achievements progress
 <prefix>topquote
 <prefix>milestone
+<prefix>tellme <prompt>       # alias: chatgpt
+<prefix>ai <prompt>           # alias: claude
+<prefix>gemini <prompt>
 ?coffee
 <prefix>tell Bob remember the meeting
 ```
 
 It can also enrich supported links, expose Prometheus metrics, integrate with radio workflows, and provide a dedicated TCP/DCC administration interface through Partyline.
+
+Interactive AI answers share one IRC presentation contract: at most two
+400-byte lines, with Markdown structures compacted and only bold, italic and
+underline retained as native IRC emphasis. Provider and per-channel opt-in
+boundaries remain independent (`+chatGPT`, `+Claude`, and `+Gemini`).
 
 Instagram previews are non-blocking and type-aware: public posts, reels, profiles,
 stories, and highlights use available metadata for compact rich previews, while

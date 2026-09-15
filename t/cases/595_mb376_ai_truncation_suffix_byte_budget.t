@@ -65,6 +65,8 @@ BEGIN {
         }
         return ($prefix);
     }
+
+    $INC{'Mediabot/Helpers.pm'} = __FILE__;
 }
 
 require Mediabot::External::Claude;
@@ -138,13 +140,18 @@ return sub {
     my $tiny = Mediabot::External::Claude::_fit_truncation_suffix('abcdef', 'XYZ', 5);
     $assert->ok(_wire_bytes_595($tiny) <= 5, 'petit budget défensif respecté');
 
-    # Scan de source : les deux chemins utilisent le helper, plus l'ancien calcul.
+    # Scan de source : le helper historique reste byte-safe pour Partyline;
+    # les trois sorties IRC utilisent désormais le renderer commun, qui réserve
+    # puis borne son suffixe dans le même budget.
     my $src = _slurp_595(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
+    my $irc_output = _slurp_595(File::Spec->catfile('.', 'Mediabot', 'AI', 'IRCOutput.pm'));
     $assert->like($src, qr/sub _irc_wire_bytes/, 'helper de coût wire défini');
     $assert->like($src, qr/sub _irc_prefix_for_budget/, 'helper de préfixe byte-safe défini');
     $assert->like($src, qr/sub _fit_truncation_suffix/, 'helper de suffixe byte-safe défini');
-    my @helper_hits = $src =~ /_fit_truncation_suffix\(/g;
-    $assert->ok(scalar(@helper_hits) >= 2, 'helper utilisé par OpenAI + Claude');
+    $assert->like($irc_output, qr/sub format_ai_reply/,
+        'renderer commun possède le contrat de réponse IRC');
+    $assert->like($irc_output, qr/_wire_bytes\(\$line \. \$suffix\) > \$wrap_bytes/,
+        'renderer commun inclut le suffixe dans le budget en octets');
     $assert->unlike($src, qr/my \$allow = \$\w*wrap_bytes - length\(\$suff\)/,
         'plus de calcul de budget du suffixe en caractères');
     $assert->unlike($src, qr/substr\(\$chunk\[\$last\], 0, \$allow\)/,

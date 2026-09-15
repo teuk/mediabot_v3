@@ -29,6 +29,10 @@ use JSON::MaybeXS;
 require Mediabot::Helpers;   # mb624-B1: suggest_keyword/edit_distance_1 partages
 use Mediabot::AI::Transport ();
 use Mediabot::AI::Client ();
+use Mediabot::AI::IRCOutput qw(
+    format_ai_reply
+    with_irc_output_instruction
+);
 use Mediabot::AI::Request qw(build_request);
 use Mediabot::AI::Provider::OpenAI ();
 use URI::Escape qw(uri_escape_utf8);
@@ -59,18 +63,16 @@ use constant {
     CHATGPT_MODEL        => 'gpt-4o-mini',
     CHATGPT_TEMPERATURE  => 0.7,
     CHATGPT_MAX_TOKENS   => 400,
-    CHATGPT_MAX_PRIVMSG  => 4,       # how many PRIVMSG we allow to send
+    CHATGPT_MAX_PRIVMSG  => 2,       # hard public IRC charter: at most 2 lines
     CHATGPT_WRAP_BYTES   => 400,     # safe IRC payload length
     CHATGPT_SLEEP_US     => 750_000, # µs between PRIVMSG
     CHATGPT_TIMEOUT      => 20,      # bounded OpenAI HTTP timeout
-	CHATGPT_TRUNC_MSG    => ' [¯\_(ツ)_/¯ guess you can’t have everything…]',   # suffix when we truncate
-
     # --- Anthropic / Claude ---
     CLAUDE_API_URL       => 'https://api.anthropic.com/v1/messages',
     CLAUDE_API_VERSION   => '2023-06-01',
     CLAUDE_MODEL         => 'claude-haiku-4-5-20251001',
     CLAUDE_MAX_TOKENS    => 400,
-    CLAUDE_MAX_PRIVMSG   => 4,
+    CLAUDE_MAX_PRIVMSG   => 2,
     CLAUDE_WRAP_BYTES    => 400,
     CLAUDE_SLEEP_US      => 750_000,
     CLAUDE_SYSTEM_PROMPT => 'You are a helpful IRC assistant. Be concise.',
@@ -79,7 +81,7 @@ use constant {
 };
 
 use constant CHATGPT_SYSTEM_PROMPT =>
-    'You always answer in a helpful and serious way, precise and never start your answer with « Oh là là » when the answer is in French. Always respond using a maximum of 10 lines of text and line-based. There is one chance on two the answer contains emojis.';
+    'You always answer in a helpful and serious way, precise and never start your answer with « Oh là là » when the answer is in French. There is one chance on two the answer contains emojis.';
 
 sub _chatgpt_conf_int {
     my ($self, $key, $default, $min, $max) = @_;
@@ -319,24 +321,18 @@ sub _chatgpt_deliver_answer {
         return undef;
     }
 
-    $self->{logger}->log(5, "chatGPT() chatGPT raw answer: $answer");
+    $self->{logger}->log(5,
+        'chatGPT() answer received: ' . length($answer) . ' char(s)');
 
-    $answer =~ s/[\r\n]+/ /g;
-    $answer =~ s/\s{2,}/ /g;
+    my $rendered = format_ai_reply(
+        $answer,
+        max_lines         => $state->{max_privmsg},
+        wrap_bytes        => $state->{wrap_bytes},
+        truncation_suffix => ' …',
+    );
+    my @out_chunks = @$rendered;
+    return undef unless @out_chunks;
 
-    my @chunk = _chatgpt_wrap($answer, $state->{wrap_bytes});
-    my $truncate = @chunk > $state->{max_privmsg};
-    my $last = $truncate ? $state->{max_privmsg} - 1 : $#chunk;
-
-    if ($truncate) {
-        $chunk[$last] = _fit_truncation_suffix(
-            $chunk[$last],
-            CHATGPT_TRUNC_MSG,
-            $state->{wrap_bytes},
-        );
-    }
-
-    my @out_chunks = @chunk[0 .. $last];
     my $queued = _queue_irc_chunks(
         $self,
         $state->{chan},
@@ -421,9 +417,10 @@ sub chatGPT {
     my $chatgpt_system_prompt  = _chatgpt_conf_string($self, 'openai.SYSTEM_PROMPT',  CHATGPT_SYSTEM_PROMPT);
     $chatgpt_system_prompt =~ s/\r|\n/ /g;
     $chatgpt_system_prompt = substr($chatgpt_system_prompt, 0, 800);
+    $chatgpt_system_prompt = with_irc_output_instruction($chatgpt_system_prompt);
     my $chatgpt_max_tokens  = _chatgpt_conf_int(   $self, 'openai.MAX_TOKENS',  CHATGPT_MAX_TOKENS,  1, 4000);
-    my $chatgpt_max_privmsg = _chatgpt_conf_int(   $self, 'openai.MAX_PRIVMSG', CHATGPT_MAX_PRIVMSG, 1, 8);
-    my $chatgpt_wrap_bytes  = _chatgpt_conf_int(   $self, 'openai.WRAP_BYTES',  CHATGPT_WRAP_BYTES,  120, 450);
+    my $chatgpt_max_privmsg = _chatgpt_conf_int(   $self, 'openai.MAX_PRIVMSG', CHATGPT_MAX_PRIVMSG, 1, 2);
+    my $chatgpt_wrap_bytes  = _chatgpt_conf_int(   $self, 'openai.WRAP_BYTES',  CHATGPT_WRAP_BYTES,  120, 400);
     my $chatgpt_sleep_us    = _chatgpt_conf_int(   $self, 'openai.SLEEP_US',    CHATGPT_SLEEP_US,    0, 2_000_000);
     my $chatgpt_timeout     = _chatgpt_conf_int(   $self, 'openai.TIMEOUT',     CHATGPT_TIMEOUT,     5, 60);
 
@@ -438,7 +435,8 @@ sub chatGPT {
     }
 
     @args
-        or (Mediabot::Helpers::botNotice($self,$nick,'Syntax: tellme <prompt>'), return);
+        or (Mediabot::Helpers::botNotice($self,$nick,
+            'Syntax: tellme|chatgpt <prompt>'), return);
 
     # opt-in check (+chatGPT chanset)
     my $setlist = Mediabot::External::getIdChansetList($self,'chatGPT') // '';
@@ -589,8 +587,8 @@ sub _irc_prefix_for_budget {
 }
 
 # mb376-B1: append a truncation suffix while keeping the COMPLETE resulting
-# line inside the configured IRC byte budget. Both OpenAI and Anthropic use the
-# same helper so MAX_PRIVMSG continues to describe the real number of lines sent.
+# line inside the configured IRC byte budget. The plain-text Partyline callback
+# retains this compatibility helper; normal IRC output uses AI::IRCOutput.
 sub _fit_truncation_suffix {
     my ($text, $suffix, $max_bytes) = @_;
 
@@ -1825,9 +1823,9 @@ sub claudeAI {
         $t < 0 ? 0.0 : $t > 1.0 ? 1.0 : $t + 0;  # clamp 0..1
     };
     my $max_privmsg = _chatgpt_conf_int($self, 'anthropic.MAX_PRIVMSG',
-                                         CLAUDE_MAX_PRIVMSG, 1, 10);
+                                         CLAUDE_MAX_PRIVMSG, 1, 2);
     my $wrap_bytes  = _chatgpt_conf_int($self, 'anthropic.WRAP_BYTES',
-                                         CLAUDE_WRAP_BYTES, 100, 480);
+                                         CLAUDE_WRAP_BYTES, 100, 400);
     my $sleep_us    = _chatgpt_conf_int($self, 'anthropic.SLEEP_US',
                                          CLAUDE_SLEEP_US, 0, 5_000_000);
     my $sys_prompt  = _chatgpt_conf_string($self, 'anthropic.SYSTEM_PROMPT',
@@ -1879,12 +1877,14 @@ sub claudeAI {
     if (my $pinned = $self->{_claude_pinned}{$pin_key_x1}) {
         $sys_prompt = "[Always remember: $pinned] $sys_prompt";
     }
+    $sys_prompt = with_irc_output_instruction($sys_prompt);
     # A1: configurable history depth (in messages, must be even: user+assistant pairs)
     my $max_history = _chatgpt_conf_int($self, 'anthropic.MAX_HISTORY',
                                          CLAUDE_MAX_HISTORY, 2, 20);
     $max_history += 1 if $max_history % 2 != 0;  # ensure even number
 
-    @args or (Mediabot::Helpers::botNotice($self, $nick, 'Syntax: ai <prompt>'), return);
+    @args or (Mediabot::Helpers::botNotice($self, $nick,
+        'Syntax: ai|claude <prompt>'), return);
 
     # opt-in check: chanset 'Claude' must be enabled on the channel
     # Skipped for Partyline (output_fn set — already authenticated operator)
@@ -2066,8 +2066,6 @@ sub _claude_cache_hit {
 
     my $prompt_key  = $p->{prompt_key};
     my $history     = $p->{history};
-    my $wrap_bytes  = $p->{wrap_bytes};
-    my $max_privmsg = $p->{max_privmsg};
     my $max_history = $p->{max_history};
 
     my $pcache = $self->{_claude_prompt_cache}{$prompt_key};
@@ -2075,9 +2073,8 @@ sub _claude_cache_hit {
 
     $self->{logger}->log(4, 'claudeAI() prompt cache hit');
 
-    my @chunk = _chatgpt_wrap($pcache->{answer}, $wrap_bytes);
-    my $last  = @chunk > $max_privmsg ? $max_privmsg - 1 : $#chunk;
-    _claude_emit($self, $p, $chunk[$_]) for 0 .. $last;
+    my @chunk = _claude_output_chunks($p, $pcache->{answer});
+    _claude_emit($self, $p, $_) for @chunk;
 
     push @$history, { role => 'assistant', content => $pcache->{answer} };
     splice @$history, 0, @$history - $max_history if @$history > $max_history;
@@ -2328,29 +2325,16 @@ sub _claude_deliver_answer {
         $answer = "[$model_short] $answer";
     }
 
-    $answer =~ s/[\r\n]+/ /g;
-    $answer =~ s/\s{2,}/ /g;
-
-    my @chunk    = _chatgpt_wrap($answer, $p->{wrap_bytes});
-    my $truncate = @chunk > $p->{max_privmsg};
-    my $last     = $truncate ? $p->{max_privmsg} - 1 : $#chunk;
-
-    if ($truncate) {
-        # mb376-B1: keep the truncation suffix inside the byte budget.
-        $chunk[$last] = _fit_truncation_suffix(
-            $chunk[$last],
-            CLAUDE_TRUNC_MSG,
-            $p->{wrap_bytes},
-        );
-    }
+    my @chunk = _claude_output_chunks($p, $answer);
+    return 0 unless @chunk;
 
     if (ref($p->{output_fn}) eq 'CODE') {
-        _claude_emit($self, $p, $chunk[$_]) for 0 .. $last;
+        _claude_emit($self, $p, $_) for @chunk;
         $self->{logger}->log(4,
-            'claudeAI() sent ' . ($last + 1) . ' callback line(s)');
+            'claudeAI() sent ' . scalar(@chunk) . ' callback line(s)');
     }
     else {
-        my @out_chunks = @chunk[0 .. $last];
+        my @out_chunks = @chunk;
         my $queued = _queue_irc_chunks(
             $self,
             $p->{chan},
@@ -2363,6 +2347,41 @@ sub _claude_deliver_answer {
 
     $self->{metrics}->inc('mediabot_claude_requests_total') if $self->{metrics};
     return 1;
+}
+
+sub _claude_output_chunks {
+    my ($p, $answer) = @_;
+    return () unless defined($answer) && !ref($answer) && length($answer);
+
+    # Partyline callbacks are a plain-text operator surface, not IRC wire
+    # output. Preserve that established contract while applying the common
+    # Markdown renderer and two-line hard cap to public/private IRC replies.
+    if (ref($p->{output_fn}) eq 'CODE') {
+        $answer =~ s/[\r\n]+/ /g;
+        $answer =~ s/\s{2,}/ /g;
+
+        my @chunk = _chatgpt_wrap($answer, $p->{wrap_bytes});
+        my $truncate = @chunk > $p->{max_privmsg};
+        my $last = $truncate ? $p->{max_privmsg} - 1 : $#chunk;
+
+        if ($truncate) {
+            $chunk[$last] = _fit_truncation_suffix(
+                $chunk[$last],
+                CLAUDE_TRUNC_MSG,
+                $p->{wrap_bytes},
+            );
+        }
+
+        return @chunk[0 .. $last];
+    }
+
+    my $rendered = format_ai_reply(
+        $answer,
+        max_lines         => $p->{max_privmsg},
+        wrap_bytes        => $p->{wrap_bytes},
+        truncation_suffix => ' …',
+    );
+    return @$rendered;
 }
 
 1;

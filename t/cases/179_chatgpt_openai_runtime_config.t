@@ -153,8 +153,8 @@ return sub {
 
     $assert->like(
         $accept_body // '',
-        qr/_chatgpt_wrap\(\$answer, \$state->\{wrap_bytes\}\)/,
-        'parent acceptance uses configured wrap bytes'
+        qr/format_ai_reply\(.*?wrap_bytes\s*=>\s*\$state->\{wrap_bytes\}/s,
+        'parent acceptance passes configured wrap bytes to shared IRC rendering'
     );
 
     $assert->like(
