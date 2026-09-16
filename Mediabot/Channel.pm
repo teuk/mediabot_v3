@@ -12,6 +12,7 @@ sub new {
         description => $args->{description} || '',
         topic       => $args->{topic},
         tmdb_lang   => $args->{tmdb_lang},
+        timezone    => $args->{timezone} || 'UTC',
         chanmode    => $args->{chanmode},
         auto_join   => $args->{auto_join},
         key         => $args->{key},
@@ -75,6 +76,9 @@ sub get_topic      { return shift->{topic}; }
 
 # Get TMDB language (e.g. en-US, fr-FR)
 sub get_tmdb_lang  { return shift->{tmdb_lang}; }
+
+# Get the channel civil-time policy (IANA timezone, e.g. Europe/Paris)
+sub get_timezone   { return shift->{timezone} || 'UTC'; }
 
 # Get channel key (password)
 sub get_key        { return shift->{key}; }
@@ -206,6 +210,23 @@ sub set_tmdb_lang {
     );
 
     $self->{tmdb_lang} = $new_lang if $ok;
+    return $ok ? 1 : 0;
+}
+
+
+# Set the channel IANA timezone and update DB. Validation belongs to the
+# command boundary so this storage object stays usable by installers/tests.
+sub set_timezone {
+    my ($self, $new_timezone) = @_;
+    return 0 unless defined($new_timezone) && $new_timezone ne '';
+
+    my $ok = $self->_execute_update(
+        "UPDATE CHANNEL SET timezone=? WHERE id_channel=?",
+        [ $new_timezone, $self->{id} ],
+        "set_timezone()",
+    );
+
+    $self->{timezone} = $new_timezone if $ok;
     return $ok ? 1 : 0;
 }
 
@@ -412,6 +433,11 @@ Topic IRC courant (non synchrone)
 
 Langue TMDB liée (ex: 'fr-FR')
 
+=item * timezone
+
+Fuseau horaire IANA du canal (ex: C<Europe/Paris>). La valeur par défaut est
+C<UTC>.
+
 =item * chanmode
 
 Modes IRC (ex: +ntk)
@@ -455,6 +481,10 @@ Retourne le topic enregistré pour ce canal
 =head2 get_tmdb_lang
 
 Retourne la langue TMDB associée (ex: en-US)
+
+=head2 get_timezone
+
+Retourne le fuseau horaire IANA utilisé pour le calendrier civil du canal.
 
 =head2 get_key
 
@@ -501,6 +531,12 @@ Met à jour le topic IRC dans la base.
     $channel->set_tmdb_lang("fr-FR");
 
 Met à jour la langue TMDB associée.
+
+=head2 set_timezone
+
+    $channel->set_timezone("Europe/Paris");
+
+Met à jour le fuseau horaire civil du canal.
 
 =head2 set_key
 

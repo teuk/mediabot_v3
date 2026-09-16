@@ -326,8 +326,23 @@ sub processKarma {
             # débloquait au 101e don au lieu du 100e. On amorce à 1 quand le vote
             # courant est lui-même un don positif (++), 0 sinon.
             my $given_pos = ($op eq '++') ? 1 : 0;
-            for my $e (@{ $self->{_karma_log}{$channel} // [] }) {
-                $given_pos++ if defined $e->{from} && lc($e->{from}) eq lc($nick) && ($e->{delta} // '') eq '+1';
+            if ($self->{achievements}->can('bump_progress')
+                    && $self->{achievements}->can('progress')) {
+                # The achievement registry is the durable source of truth.
+                # Rebuilding this total from the bounded in-memory ring stalls
+                # Gift Giver after every restart until the ring catches up.
+                $given_pos = $op eq '++'
+                    ? $self->{achievements}->bump_progress(
+                        'karma_given', $nick, $channel, 1)
+                    : $self->{achievements}->progress(
+                        'karma_given', $nick, $channel);
+            }
+            else {
+                for my $e (@{ $self->{_karma_log}{$channel} // [] }) {
+                    $given_pos++ if defined $e->{from}
+                        && lc($e->{from}) eq lc($nick)
+                        && ($e->{delta} // '') eq '+1';
+                }
             }
             eval {
                 $self->{achievements}->check_karma($target, $channel, $score, $nick, $given_pos);

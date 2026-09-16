@@ -344,6 +344,7 @@ Further references:
 - [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing);
 - [Contribution guidelines](CONTRIBUTING.md);
 - [Complete changelog](CHANGELOG.md);
+- [Achievement accuracy and channel timezones](docs/ACHIEVEMENTS.md);
 - [3.5 release notes](docs/RELEASE_NOTES_3.5.md);
 - [3.6dev development line](https://github.com/teuk/mediabot_v3/wiki/Development-line-3.6dev);
 - [Partyline architecture](docs/PARTYLINE_ARCHITECTURE.md).

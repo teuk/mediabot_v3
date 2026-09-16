@@ -91,6 +91,8 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260903_fullop_chanset.sql
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260904_mbweb_sessions.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260905_quotes_512_contract.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260909_quip_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260911_radio_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260916_channel_timezone.sql;
 ```
 
 Then run the checker again:
@@ -138,6 +140,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260905_quotes_512_contract.sql
 20260909_quip_chanset.sql
 20260911_radio_chanset.sql
+20260916_channel_timezone.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this
@@ -470,3 +473,26 @@ Note: `tools/check_schema_drift.pl` checks schema structure. Reference data migr
 MB734 registers the default-off `Radio` capability. Apply after Quip with
 `SOURCE /home/mediabot/mediabot_v3/install/migrations/20260911_radio_chanset.sql;`
 It does not enable a channel. See [radio setup](RADIO.md) for the local API and HTTPS clients.
+
+## Channel civil time (20260916)
+
+`20260916_channel_timezone.sql` adds an IANA timezone to `CHANNEL`. Existing
+rows deliberately default to `UTC`. After the code is deployed, set each
+channel through IRC, for example:
+
+```text
+!chanset #channel timezone Europe/Paris
+```
+
+The command validates the name with `DateTime::TimeZone`, updates the live
+channel object and clears legacy Night Owl / Early Bird unlocks and progress
+for that channel. They are then recomputed from message history in the new
+timezone. A direct SQL `UPDATE` skips that reconciliation and should not be
+used for this migration.
+
+MariaDB named-timezone conversion must be available. On Debian, populate the
+system timezone tables if this probe returns `NULL`:
+
+```sql
+SELECT CONVERT_TZ('2026-01-15 12:00:00', '+00:00', 'Europe/Paris');
+```

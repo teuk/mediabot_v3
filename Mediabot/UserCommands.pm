@@ -15,6 +15,7 @@ use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
 use POSIX qw(strftime);
 use Time::Local qw(timegm timelocal);
 use Time::Piece;
+use Time::HiRes ();
 use List::Util qw(min);
 use Encode ();   # mb630-B1: _irc_bytes appelle Encode::encode directement.
 use Exporter 'import';
@@ -2720,6 +2721,12 @@ sub mbStats_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     my $target = $args[0] ? lc($args[0]) : lc($nick);
+    my $channel_timezone = eval {
+        my $channel_obj = $self->{channels}{lc($channel // '')};
+        $channel_obj ? $channel_obj->get_timezone : undef;
+    } || 'UTC';
+    my $sql_timezone = $channel_timezone eq 'UTC'
+        ? '+00:00' : $channel_timezone;
 
     # Message count + last real message on this channel.
     # MB75-S1: exclude the stats command itself from the aggregate, otherwise
@@ -3558,6 +3565,12 @@ sub mbStreak_ctx {
         pop @args;
     }
     my $target = $args[0] ? lc($args[0]) : lc($nick);
+    my $channel_timezone = eval {
+        my $channel_obj = $self->{channels}{lc($channel // '')};
+        $channel_obj ? $channel_obj->get_timezone : undef;
+    } || 'UTC';
+    my $sql_timezone = $channel_timezone eq 'UTC'
+        ? '+00:00' : $channel_timezone;
 
     # mb574-B1: le streak est une carriere -> vif + archive.
     # mb576-B1: LIMIT par table (chaque branche sert son index), puis
@@ -3566,14 +3579,14 @@ sub mbStreak_ctx {
     # pas des join/quit), scope content, succes via live_ok (vide = valide).
     my %seen_days;
     my $streak_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, q{
-        SELECT DISTINCT DATE(ts) AS day
+        SELECT DISTINCT DATE(CONVERT_TZ(cl.ts, @@session.time_zone, ?)) AS day
         FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE cl.nick = ? AND c.name = ?
           AND cl.event_type IN ('public','action')
         ORDER BY day DESC
         LIMIT 365
-    }, [ $target, $channel ], sub {
+    }, [ $sql_timezone, $target, $channel ], sub {
         $seen_days{ $_[0]->{day} } = 1 if defined $_[0]->{day};
     }, 'content');
     unless ($streak_g->{live_ok}) {
@@ -6133,7 +6146,7 @@ sub mbTrivia_ctx {
                 active         => 1,
                 answer         => lc($answer),
                 answer_display => $answer,
-                started        => time(),
+                started        => Time::HiRes::time(),
                 hint_given     => 0,
                 category       => $category,
                 difficulty     => $difficulty,
@@ -6290,9 +6303,11 @@ sub checkTriviaAnswer {
     Mediabot::Helpers::botPrivmsg($self, $channel,
         "Correct, $nick!$diff_str The answer was: $trivia->{answer_display}  (score: $score)");
 
-    # mb115: hook achievements trivia (score atteint, sniper si réponse < 3s)
+    # mb115: hook achievements trivia (score atteint, sniper si réponse <= 2s)
     if ($self->{achievements}) {
-        my $response_time = (time() - ($trivia->{started} // time())) || 0;
+        my $response_time = Time::HiRes::time()
+            - ($trivia->{started} // Time::HiRes::time());
+        $response_time = 0 if $response_time < 0;
         # mb610-B1: $score est le score de la PARTIE en cours. Un palier
         # « 100 bonnes reponses » exigeait donc 100 reponses dans une seule
         # session — inatteignable. Le hook recoit desormais le total
@@ -7114,7 +7129,7 @@ sub mbDuel_ctx {
     #   > 0  : nombre de victoires consecutives
     #   < 0  : nombre de defaites consecutives
     #
-    # Detection underdog (gagner apres 5 defaites consecutives) :
+    # Detection underdog (gagner apres 8 defaites consecutives) :
     #   - on regarde le streak du winner *avant* l'update
     #   - si <= -5, c'est un underdog
     my $prev_winner_result = $self->{_duel_last_result}{$channel}{$winner};

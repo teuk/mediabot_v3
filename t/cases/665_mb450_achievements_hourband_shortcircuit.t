@@ -99,10 +99,10 @@ return sub {
     # mb657: une SEULE requête ramène les deux bandes sans GROUP BY/filesort.
     $assert->unlike($cm, qr/GROUP BY HOUR\(cl\.ts\)/,
                     'check_msg: ancien GROUP BY HOUR(ts) retire');
-    $assert->like($cm, qr/SUM\(CASE\s+WHEN HOUR\(cl\.ts\) BETWEEN 0 AND 5/s,
-                  'check_msg: agrégat conditionnel nuit présent');
-    $assert->like($cm, qr/SUM\(CASE\s+WHEN HOUR\(cl\.ts\) BETWEEN 6 AND 8/s,
-                  'check_msg: agrégat conditionnel matin présent');
+    $assert->like($cm, qr/SUM\(CASE\s+WHEN HOUR\(CONVERT_TZ\(cl\.ts, \\\@\\\@session\.time_zone, \?\)\).*?BETWEEN 0 AND 5/s,
+                  'check_msg: agrégat conditionnel nuit en heure locale présent');
+    $assert->like($cm, qr/SUM\(CASE\s+WHEN HOUR\(CONVERT_TZ\(cl\.ts, \\\@\\\@session\.time_zone, \?\)\).*?BETWEEN 6 AND 8/s,
+                  'check_msg: agrégat conditionnel matin en heure locale présent');
 
     require Mediabot::Achievements;
     $assert->is(Mediabot::Achievements::threshold(undef, 'night_owl'), 50,

@@ -135,7 +135,7 @@ return sub {
         '_execute_update finishes statement on execute failure'
     );
 
-    for my $setter (qw(set_topic set_tmdb_lang set_key set_description set_chanmode set_auto_join)) {
+    for my $setter (qw(set_topic set_tmdb_lang set_timezone set_key set_description set_chanmode set_auto_join)) {
         my $func = _extract_sub_channel_object_safety($src, $setter);
 
         $assert->ok(

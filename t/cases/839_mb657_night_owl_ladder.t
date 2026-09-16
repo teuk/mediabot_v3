@@ -6,6 +6,7 @@
 use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
+use Time::Local qw(timegm);
 
 sub slurp839 {
     my ($path) = @_;
@@ -77,6 +78,8 @@ return sub {
         progress_calls => [],
         unlock_calls   => [],
         unlocked       => {},
+        _worker_channel_timezone => 'UTC',
+        _worker_event_epoch => timegm(0, 0, 2, 15, 0, 126),
     }, 'MB657Harness';
 
     $h->check_msg('Teuk', '#test');
@@ -94,12 +97,23 @@ return sub {
         'mb657-839: 1000 night messages includes Midnight Regular');
     $assert->ok($unlock{creature_night},
         'mb657-839: 1000 night messages unlocks Creature of the Night');
-    $assert->ok($unlock{early_bird},
-        'mb657-839: same scan can still unlock Early Bird');
+    $assert->ok(!$unlock{early_bird},
+        'mb657-839: a night message cannot announce Early Bird');
 
     my $hour_checks = grep { $_ eq 'hour_band' } @{ $h->{checks} };
     $assert->is($hour_checks, 1,
-        'mb657-839: one hour-band calculation feeds all four achievements');
+        'mb657-839: one hour-band calculation feeds the night ladder');
+
+    my $morning = bless {
+        bot            => { dbh => bless({}, 'MB657DummyDBH') },
+        checks         => [], progress_calls => [], unlock_calls => [], unlocked => {},
+        _worker_channel_timezone => 'UTC',
+        _worker_event_epoch => timegm(0, 0, 7, 15, 0, 126),
+    }, 'MB657Harness';
+    $morning->check_msg('Teuk', '#test');
+    my %morning_unlock = map { $_->[2] => 1 } @{ $morning->{unlock_calls} };
+    $assert->ok($morning_unlock{early_bird} && !$morning_unlock{night_owl},
+        'mb657-839: a morning message can announce Early Bird but not Night Owl');
 
     # [3] Source contract: no GROUP BY HOUR temporary/filesort path and the
     # async parent imports both progress kinds calculated in the child.
@@ -111,11 +125,11 @@ return sub {
         $assert->unlike($check_msg, qr/GROUP BY HOUR\(cl\.ts\)/,
             'mb657-839: old GROUP BY HOUR scan is gone');
         $assert->like($check_msg,
-            qr/COALESCE\(SUM\(CASE\s+WHEN HOUR\(cl\.ts\) BETWEEN 0 AND 5/s,
-            'mb657-839: night count uses conditional aggregate');
+            qr/COALESCE\(SUM\(CASE\s+WHEN HOUR\(CONVERT_TZ\(cl\.ts, \\\@\\\@session\.time_zone, \?\)\).*?BETWEEN 0 AND 5/s,
+            'mb657-839: night count uses channel-local conditional aggregate');
         $assert->like($check_msg,
-            qr/COALESCE\(SUM\(CASE\s+WHEN HOUR\(cl\.ts\) BETWEEN 6 AND 8/s,
-            'mb657-839: morning count uses conditional aggregate');
+            qr/COALESCE\(SUM\(CASE\s+WHEN HOUR\(CONVERT_TZ\(cl\.ts, \\\@\\\@session\.time_zone, \?\)\).*?BETWEEN 6 AND 8/s,
+            'mb657-839: morning count uses channel-local conditional aggregate');
         my $hour_selects = () = $check_msg =~ /AS\s+(?:night_count|morning_count)/g;
         $assert->is($hour_selects, 2,
             'mb657-839: one query exposes exactly the two hour-band aggregates');

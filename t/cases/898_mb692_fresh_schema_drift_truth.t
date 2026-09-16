@@ -78,6 +78,21 @@ return sub {
         'mb692-898: CHANNEL.tmdb_lang en-US has no false type drift',
     );
 
+    my $timezone_ref = $schema->{CHANNEL}{columns}{timezone}{definition};
+    my $timezone_live = {
+        type => 'varchar(64)',
+        nullable => 'NO',
+        default => q{'UTC'},
+        extra => '',
+        charset => 'ascii',
+        collation => 'ascii_bin',
+    };
+    $assert->is(
+        normalize_live_column_def($timezone_live, $timezone_ref),
+        normalize_column_def($timezone_ref),
+        'mb738-898: CHANNEL.timezone UTC has no false type drift',
+    );
+
     my $automode_ref =
         $schema->{USER_CHANNEL}{columns}{automode}{definition};
     my $automode_live = {

@@ -24,6 +24,7 @@ package Mediabot::Achievements;
 
 use strict;
 use Time::HiRes ();
+use POSIX ();
 use warnings;
 use utf8;
 use Encode    ();
@@ -131,7 +132,7 @@ my %ACH = (
     gift_giver => {
         emoji   => '🎁',
         name    => 'Gift Giver',
-        desc    => 'Gave 250 positive karma',
+        desc    => 'Gave 250 positive karma votes on a channel',
         rarity  => 'rare',
         check_on => 'karma',
         threshold => 250,
@@ -191,7 +192,7 @@ my %ACH = (
     night_owl => {
         emoji   => '🌙',
         name    => 'Night Owl',
-        desc    => 'Sent 50 messages between 00h and 05h',
+        desc    => 'Sent 50 messages between 00:00 and 05:59 channel time',
         rarity  => 'uncommon',
         check_on => 'msg',
         threshold => 50,
@@ -200,7 +201,7 @@ my %ACH = (
     midnight_regular => {
         emoji   => '🌌',
         name    => 'Midnight Regular',
-        desc    => 'Sent 250 messages between 00h and 05h',
+        desc    => 'Sent 250 messages between 00:00 and 05:59 channel time',
         rarity  => 'rare',
         check_on => 'msg',
         threshold => 250,
@@ -209,7 +210,7 @@ my %ACH = (
     creature_night => {
         emoji   => '🦇',
         name    => 'Creature of the Night',
-        desc    => 'Sent 1 000 messages between 00h and 05h',
+        desc    => 'Sent 1 000 messages between 00:00 and 05:59 channel time',
         rarity  => 'epic',
         check_on => 'msg',
         threshold => 1000,
@@ -221,7 +222,7 @@ my %ACH = (
     witching_hour => {
         emoji   => '🌑',
         name    => 'The Witching Hour',
-        desc    => 'Sent 5 000 messages between 00h and 05h',
+        desc    => 'Sent 5 000 messages between 00:00 and 05:59 channel time',
         rarity  => 'legendary',
         check_on => 'msg',
         threshold => 5000,
@@ -231,7 +232,7 @@ my %ACH = (
     early_bird => {
         emoji   => '🌅',
         name    => 'Early Bird',
-        desc    => 'Sent 50 messages between 06h and 08h',
+        desc    => 'Sent 50 messages between 06:00 and 08:59 channel time',
         rarity  => 'uncommon',
         check_on => 'msg',
         threshold => 50,
@@ -439,7 +440,8 @@ sub threshold {
     my ($self, $id) = @_;
     my $default = (ref $ACH{$id || ''} eq 'HASH') ? $ACH{$id}{threshold} : undef;
     return $default unless defined $id;
-    my $conf = ref($self) ? eval { $self->{bot}{conf} } : undef;
+    my $bot = ref($self) ? $self->{bot} : undef;
+    my $conf = $bot ? eval { $bot->{conf} } : undef;
     if ($conf && eval { $conf->can('get') }) {
         my $raw = eval { $conf->get('achievements.' . uc($id)) };
         if (defined $raw && !ref $raw && $raw =~ /\A\d+\z/ && $raw > 0) {
@@ -447,6 +449,193 @@ sub threshold {
         }
     }
     return $default;
+}
+
+# -- Channel civil time -------------------------------------------------------
+# Time-derived achievements follow the channel community, not the bot host and
+# not an individual visitor. IANA names keep daylight-saving transitions
+# correct; invalid/missing data fails closed to UTC and is logged once.
+sub _valid_channel_timezone {
+    my ($timezone) = @_;
+    return 0 unless defined($timezone) && !ref($timezone)
+        && $timezone ne '' && length($timezone) <= 64;
+    my $valid = eval {
+        require DateTime::TimeZone;
+        DateTime::TimeZone->is_valid_name($timezone) ? 1 : 0;
+    };
+    return $valid ? 1 : 0 if defined $valid;
+    return 1 if $timezone eq 'UTC';
+    return 0 unless $timezone =~ m{\A[A-Za-z][A-Za-z0-9._+-]*/[A-Za-z0-9._+/-]+\z}
+        && $timezone !~ m{(?:\A|/)\.\.?(/|\z)};
+    return -f "/usr/share/zoneinfo/$timezone" ? 1 : 0;
+}
+
+sub _channel_timezone {
+    my ($self, $channel) = @_;
+
+    my $timezone = $self->{_worker_channel_timezone};
+    if (!_valid_channel_timezone($timezone)) {
+        my $bot = $self->{bot};
+        my $channel_obj = $bot && ref($bot->{channels}) eq 'HASH'
+            ? $bot->{channels}{lc($channel // '')}
+            : undef;
+        $timezone = eval { $channel_obj->get_timezone } if $channel_obj;
+    }
+
+    if (!_valid_channel_timezone($timezone)) {
+        my $dbh = eval { $self->{bot}{dbh} };
+        if ($dbh && eval { $dbh->can('prepare') }) {
+            my $sth = eval {
+                $dbh->prepare('SELECT timezone FROM CHANNEL WHERE name = ? LIMIT 1')
+            };
+            if ($sth && eval { $sth->execute($channel) }) {
+                my $row = eval { $sth->fetchrow_hashref };
+                $timezone = $row->{timezone} if $row;
+                eval { $sth->finish };
+            }
+        }
+    }
+
+    unless (_valid_channel_timezone($timezone)) {
+        my $key = lc($channel // '');
+        unless ($self->{_timezone_warning}{$key}++) {
+            $self->_log(1,
+                "Achievements: missing or invalid timezone for $channel; using UTC");
+        }
+        $timezone = 'UTC';
+    }
+    return $timezone;
+}
+
+sub _channel_local_hour {
+    my ($self, $timezone, $epoch) = @_;
+    return undef unless _valid_channel_timezone($timezone);
+    $epoch = Time::HiRes::time() unless defined($epoch) && !ref($epoch)
+        && "$epoch" =~ /\A(?:\d+(?:\.\d*)?|\.\d+)\z/;
+    my $hour = eval {
+        require DateTime;
+        DateTime->from_epoch(epoch => $epoch, time_zone => $timezone)->hour;
+    };
+    return $hour if defined $hour;
+
+    # Minimal fallback for diagnostic/test environments without CPAN modules.
+    # Achievement workers are separate processes, so the scoped TZ/tzset pair
+    # cannot leak a temporary zone into the IRC event loop.
+    {
+        local $ENV{TZ} = $timezone;
+        POSIX::tzset();
+        $hour = (localtime($epoch))[2];
+    }
+    POSIX::tzset();
+    return $hour;
+}
+
+# A timezone change alters the meaning of all historical hour-band rows. Clear
+# only the affected unlocks/progress so the next in-band message recomputes them
+# from CHANNEL_LOG under the new policy. Other achievements remain untouched.
+sub reset_channel_hourbands {
+    my ($self, $channel, $id_channel) = @_;
+    return { unlocks => 0, progress => 0 }
+        unless defined($channel) && $channel =~ /^#/;
+
+    my ($unlock_rows, $progress_rows) = (0, 0);
+    if (($self->{storage} // '') eq 'db') {
+        return { unlocks => 0, progress => 0 }
+            unless defined($id_channel) && "$id_channel" =~ /\A[1-9]\d*\z/;
+        my $dbh = eval { $self->{bot}{dbh} };
+        die 'achievement database is unavailable' unless $dbh;
+
+        my $started = 0;
+        my $ok = eval {
+            $dbh->begin_work;
+            $started = 1;
+
+            my $sth_u = $dbh->prepare(q{
+                DELETE au
+                FROM ACHIEVEMENT_UNLOCK au
+                JOIN ACHIEVEMENT_PROFILE p
+                  ON p.id_achievement_profile = au.id_achievement_profile
+                WHERE p.id_channel = ?
+                  AND au.achievement_id IN
+                      ('night_owl', 'midnight_regular', 'creature_night',
+                       'witching_hour', 'early_bird')
+            });
+            die 'could not prepare hour-band unlock reset' unless $sth_u;
+            die 'could not reset hour-band unlocks'
+                unless $sth_u->execute($id_channel);
+            $unlock_rows = 0 + ($sth_u->rows // 0);
+            $sth_u->finish;
+
+            my $sth_p = $dbh->prepare(q{
+                DELETE ap
+                FROM ACHIEVEMENT_PROGRESS ap
+                JOIN ACHIEVEMENT_PROFILE p
+                  ON p.id_achievement_profile = ap.id_achievement_profile
+                WHERE p.id_channel = ?
+                  AND ap.progress_kind IN ('night_messages', 'morning_messages')
+            });
+            die 'could not prepare hour-band progress reset' unless $sth_p;
+            die 'could not reset hour-band progress'
+                unless $sth_p->execute($id_channel);
+            $progress_rows = 0 + ($sth_p->rows // 0);
+            $sth_p->finish;
+
+            $dbh->commit;
+            $started = 0;
+            1;
+        };
+        if (!$ok) {
+            my $error = $@ || 'hour-band reconciliation failed';
+            eval { $dbh->rollback } if $started;
+            die $error;
+        }
+
+        # Drop parent-side mirrors so a deleted DB row cannot survive in cache.
+        my @channel_pids = grep {
+            ($self->{_profiles}{$_}{id_channel} // 0) == $id_channel
+        } keys %{ $self->{_profiles} || {} };
+        for my $pid (@channel_pids) {
+            delete @{ $self->{_unlocks_by_profile}{$pid} }{
+                qw(night_owl midnight_regular creature_night witching_hour early_bird)
+            };
+        }
+        for my $kind (qw(night_messages morning_messages)) {
+            delete $self->{_progress_by_profile}{$kind}{$_} for @channel_pids;
+        }
+    }
+    else {
+        my $channel_lc = lc($channel);
+        for my $key (keys %{ $self->{data} || {} }) {
+            next unless $key =~ /\0\Q$channel_lc\E\z/;
+            for my $id (qw(night_owl midnight_regular creature_night witching_hour early_bird)) {
+                $unlock_rows++ if delete $self->{data}{$key}{$id};
+            }
+        }
+        for my $kind (qw(night_messages morning_messages)) {
+            for my $key (keys %{ $self->{progress}{$kind} || {} }) {
+                next unless $key =~ /\0\Q$channel_lc\E\z/;
+                $progress_rows++ if delete $self->{progress}{$kind}{$key};
+            }
+        }
+        $self->{dirty} = 1 if $unlock_rows || $progress_rows;
+        $self->save(1) if $self->{dirty};
+    }
+
+    my $suffix = "\x00" . lc($channel);
+    for my $map_name (qw(_msg_check_ts _hourband_check_ts)) {
+        my $map = $self->{$map_name} || {};
+        delete $map->{$_} for grep { /\Q$suffix\E\z/ } keys %$map;
+    }
+    for my $key (keys %{ $self->{_pending_checks} || {} }) {
+        delete $self->{_pending_checks}{$key}
+            if lc($self->{_pending_checks}{$key}{channel} // '') eq lc($channel);
+    }
+    @{ $self->{_pending_order} } = grep {
+        exists $self->{_pending_checks}{$_}
+    } @{ $self->{_pending_order} || [] };
+    $self->_sync_queue_metric;
+
+    return { unlocks => $unlock_rows, progress => $progress_rows };
 }
 
 # -- Couleurs IRC par rareté ----------------------------------------------------
@@ -2399,11 +2588,14 @@ sub queue_check {
         # scans can include every known alias of the same IRC identity.
         $profile_id = $self->_profile_id_for($nick, $channel);
     }
+    my $timezone = $self->_channel_timezone($channel);
 
     $self->{_pending_checks}{$key} = {
         nick       => $nick,
         channel    => $channel,
         profile_id => $profile_id,
+        timezone   => $timezone,
+        event_epoch => Time::HiRes::time(),
         attempts   => 0,
         retry_at   => 0,
         queued_at  => Time::HiRes::time(),
@@ -2453,6 +2645,8 @@ sub start_next_check_async {
         nick       => $entry->{nick},
         channel    => $entry->{channel},
         profile_id => $entry->{profile_id},
+        timezone   => $entry->{timezone},
+        event_epoch => $entry->{event_epoch},
     };
     $self->{_worker_inflight} = {
         token      => $token,
@@ -2689,6 +2883,8 @@ sub _spawn_check_worker {
                 $worker{_worker_progress} = {};
                 $worker{_worker_thresholds} = \%worker_thresholds;
                 $worker{_worker_profile_id} = $job->{profile_id};
+                $worker{_worker_channel_timezone} = $job->{timezone};
+                $worker{_worker_event_epoch} = $job->{event_epoch};
                 my $child = bless \%worker, 'Mediabot::Achievements::Worker';
 
                 my $run_ok = eval {
@@ -2704,6 +2900,7 @@ sub _spawn_check_worker {
                         # mb613-B1: state values calculated in the fork must
                         # return to the parent; child memory is copy-on-write.
                         progress => $child->{_worker_progress},
+                        timezone => $job->{timezone},
                     };
                 }
                 else {
@@ -3028,9 +3225,19 @@ sub check_msg {
     # configurable threshold.  This preserves mb450's "do not scan when an
     # unlock is impossible" rule while finally honouring [achievements]
     # overrides below the old hard-coded value of 50.
+    my $timezone = $self->_channel_timezone($channel);
+    my $sql_timezone = $timezone eq 'UTC' ? '+00:00' : $timezone;
+    my $event_epoch = $self->{_worker_event_epoch};
+    my $local_hour = $self->_channel_local_hour($timezone, $event_epoch);
+    my @hour_candidates = !defined($local_hour) ? ()
+        : $local_hour >= 0 && $local_hour <= 5
+            ? qw(night_owl midnight_regular creature_night witching_hour)
+        : $local_hour >= 6 && $local_hour <= 8
+            ? qw(early_bird)
+        : ();
+
     my $hour_unlocked = $self->get_for_nick($nick, $channel);
-    my @hour_pending = grep { !exists $hour_unlocked->{$_} }
-        qw(night_owl midnight_regular creature_night witching_hour early_bird);
+    my @hour_pending = grep { !exists $hour_unlocked->{$_} } @hour_candidates;
     if (@hour_pending) {
         my $hour_floor;
         for my $id (@hour_pending) {
@@ -3048,11 +3255,15 @@ sub check_msg {
                 my ($night, $morn) = $self->_timed_check('hour_band', $nick, $channel, sub {
                     my $sql_h = qq{
                         SELECT
+                            COUNT(*) AS source_count,
+                            COUNT(CONVERT_TZ(cl.ts, \@\@session.time_zone, ?)) AS converted_count,
                             COALESCE(SUM(CASE
-                                WHEN HOUR(cl.ts) BETWEEN 0 AND 5 THEN 1 ELSE 0
+                                WHEN HOUR(CONVERT_TZ(cl.ts, \@\@session.time_zone, ?))
+                                     BETWEEN 0 AND 5 THEN 1 ELSE 0
                             END), 0) AS night_count,
                             COALESCE(SUM(CASE
-                                WHEN HOUR(cl.ts) BETWEEN 6 AND 8 THEN 1 ELSE 0
+                                WHEN HOUR(CONVERT_TZ(cl.ts, \@\@session.time_zone, ?))
+                                     BETWEEN 6 AND 8 THEN 1 ELSE 0
                             END), 0) AS morning_count
                         FROM CHANNEL_LOG cl
                         JOIN CHANNEL c ON c.id_channel = cl.id_channel
@@ -3062,10 +3273,21 @@ sub check_msg {
                     };
                     my $sth_h = eval { $dbh->prepare($sql_h) };
                     return (undef, undef) unless $sth_h
-                        && $sth_h->execute($channel, @identity_bind);
+                        && $sth_h->execute(
+                            $sql_timezone, $sql_timezone, $sql_timezone,
+                            $channel, @identity_bind
+                        );
                     my $row_h = $sth_h->fetchrow_hashref;
                     $sth_h->finish;
                     return (undef, undef) unless $row_h;
+                    if (defined($row_h->{source_count})
+                            && defined($row_h->{converted_count})
+                            && $row_h->{source_count} > 0
+                            && $row_h->{converted_count} != $row_h->{source_count}) {
+                        $self->_log(1,
+                            "Achievements: MariaDB timezone conversion failed for $timezone; load the system timezone tables");
+                        return (undef, undef);
+                    }
                     return (
                         0 + ($row_h->{night_count} // 0),
                         0 + ($row_h->{morning_count} // 0),
@@ -3078,12 +3300,16 @@ sub check_msg {
                     $self->set_progress('night_messages', $nick, $channel, $night);
                     $self->set_progress('morning_messages', $nick, $channel, $morn);
 
-                    for my $id (qw(night_owl midnight_regular creature_night witching_hour)) {
-                        $self->unlock($nick, $channel, $id)
-                            if $night >= $self->threshold($id);
+                    if ($local_hour >= 0 && $local_hour <= 5) {
+                        for my $id (qw(night_owl midnight_regular creature_night witching_hour)) {
+                            $self->unlock($nick, $channel, $id)
+                                if $night >= $self->threshold($id);
+                        }
                     }
-                    $self->unlock($nick, $channel, 'early_bird')
-                        if $morn >= $self->threshold('early_bird');
+                    elsif ($local_hour >= 6 && $local_hour <= 8) {
+                        $self->unlock($nick, $channel, 'early_bird')
+                            if $morn >= $self->threshold('early_bird');
+                    }
                 }
             }
         }
@@ -3122,11 +3348,21 @@ sub check_msg {
 }
 
 # -- Hook : vérifie les achievements 'karma' après un vote ---------------------
+sub _unsigned_observation {
+    my ($value) = @_;
+    return undef unless defined($value) && !ref($value)
+        && "$value" =~ /\A\d+\z/;
+    return int($value);
+}
+
 sub check_karma {
     my ($self, $nick, $channel, $score, $giver, $given_total) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
+    $score = undef unless defined($score) && !ref($score)
+        && "$score" =~ /\A-?\d+\z/;
+    $given_total = _unsigned_observation($given_total);
     $self->set_progress('karma_score', $nick, $channel, $score)
-        if defined $score && $score =~ /\A\d+\z/;
+        if defined $score && $score >= 0;
     $self->unlock($nick, $channel, 'karma_star')
         if defined $score && $score >= $self->threshold('karma_star');
     $self->unlock($nick, $channel, 'karma_legend')
@@ -3144,11 +3380,17 @@ sub check_karma {
 sub check_trivia {
     my ($self, $nick, $channel, $correct_count, $response_seconds) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
+    $correct_count = _unsigned_observation($correct_count);
+    $self->set_progress('trivia_correct', $nick, $channel, $correct_count)
+        if defined $correct_count;
     $self->unlock($nick, $channel, 'trivia_rookie')
         if defined $correct_count && $correct_count >= $self->threshold('trivia_rookie');
     $self->unlock($nick, $channel, 'trivia_champion')
         if defined $correct_count && $correct_count >= $self->threshold('trivia_champion');
     # Seuil INVERSE : le sniper doit repondre en MOINS de N secondes.
+    $response_seconds = undef unless defined($response_seconds)
+        && !ref($response_seconds)
+        && "$response_seconds" =~ /\A(?:\d+(?:\.\d*)?|\.\d+)\z/;
     $self->unlock($nick, $channel, 'trivia_sniper')
         if defined $response_seconds && $response_seconds <= $self->threshold('trivia_sniper');
 }
@@ -3287,8 +3529,9 @@ sub check_comeback {
 sub check_wordcount {
     my ($self, $nick, $channel, $distinct) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
+    $distinct = _unsigned_observation($distinct);
     $self->set_progress('distinct_words', $nick, $channel, $distinct)
-        if defined $distinct && $distinct =~ /\A\d+\z/;
+        if defined $distinct;
     $self->unlock($nick, $channel, 'wordsmith')
         if defined $distinct && $distinct >= $self->threshold('wordsmith');
     $self->unlock($nick, $channel, 'polyglot')
@@ -3301,6 +3544,10 @@ sub check_wordcount {
 sub check_duel {
     my ($self, $nick, $channel, $wins, $streak_loss) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
+    $wins = _unsigned_observation($wins);
+    $streak_loss = _unsigned_observation($streak_loss);
+    $self->set_progress('duel_win', $nick, $channel, $wins)
+        if defined $wins;
     $self->unlock($nick, $channel, 'duel_warrior')
         if defined $wins && $wins >= $self->threshold('duel_warrior');
     $self->unlock($nick, $channel, 'duel_master')
@@ -3313,6 +3560,9 @@ sub check_duel {
 sub check_horoscope {
     my ($self, $nick, $channel, $consultations) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
+    $consultations = _unsigned_observation($consultations);
+    $self->set_progress('horoscope', $nick, $channel, $consultations)
+        if defined $consultations;
     $self->unlock($nick, $channel, 'star_gazer')
         if defined $consultations && $consultations >= $self->threshold('star_gazer');
 }
@@ -3321,6 +3571,9 @@ sub check_horoscope {
 sub check_compat {
     my ($self, $nick, $channel, $count) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
+    $count = _unsigned_observation($count);
+    $self->set_progress('compat', $nick, $channel, $count)
+        if defined $count;
     $self->unlock($nick, $channel, 'matchmaker')
         if defined $count && $count >= $self->threshold('matchmaker');
 }
@@ -3329,6 +3582,9 @@ sub check_compat {
 sub check_quotegame {
     my ($self, $nick, $channel, $solved) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
+    $solved = _unsigned_observation($solved);
+    $self->set_progress('quotegame_solved', $nick, $channel, $solved)
+        if defined $solved;
     $self->unlock($nick, $channel, 'quote_detective')
         if defined $solved && $solved >= $self->threshold('quote_detective');
     $self->unlock($nick, $channel, 'quote_master')
@@ -3420,6 +3676,9 @@ sub check_community_contributions {
 sub check_mood {
     my ($self, $nick, $channel, $reads) = @_;
     return unless defined $nick && defined $channel && $channel =~ /^#/;
+    $reads = _unsigned_observation($reads);
+    $self->set_progress('mood', $nick, $channel, $reads)
+        if defined $reads;
     $self->unlock($nick, $channel, 'mood_reader')
         if defined $reads && $reads >= $self->threshold('mood_reader');
 }
@@ -3429,8 +3688,9 @@ sub check_mood {
 sub check_polyphony {
     my ($self, $nick, $current_channel, $n_channels) = @_;
     return unless defined $nick && defined $current_channel && $current_channel =~ /^#/;
+    $n_channels = _unsigned_observation($n_channels);
     $self->set_progress('channels_active', $nick, $current_channel, $n_channels)
-        if defined $n_channels && $n_channels =~ /\A\d+\z/;
+        if defined $n_channels;
     $self->unlock($nick, $current_channel, 'polyphony')
         if defined $n_channels && $n_channels >= $self->threshold('polyphony');
 }

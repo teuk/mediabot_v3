@@ -60,6 +60,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260905_quotes_512_contract.sql
 20260909_quip_chanset.sql
 20260911_radio_chanset.sql
+20260916_channel_timezone.sql
 ```
 
 The migration set adds channel-ban tracking, user seen/activity tracking, Claude chanset reference data, schema support for newer fun/user commands, and persistent trivia scores and user notes, including:
@@ -170,6 +171,9 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260902_gemini_chanset.sql
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260903_fullop_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260904_mbweb_sessions.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260905_quotes_512_contract.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260909_quip_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260911_radio_chanset.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260916_channel_timezone.sql;
 ```
 
 Afterwards:
@@ -207,3 +211,9 @@ Never start an upgraded bot against an old database without running the schema d
 MB734 registers the default-off `Radio` capability. Apply after Quip with
 `SOURCE /home/mediabot/mediabot_v3/install/migrations/20260911_radio_chanset.sql;`
 It does not enable a channel. See [radio setup](../../docs/RADIO.md) for the local API and HTTPS clients.
+
+`20260916_channel_timezone.sql` adds `CHANNEL.timezone`. Existing channels
+start at `UTC`; set the intended IANA name with
+`!chanset #channel timezone Area/City` after the code is deployed. Use the IRC
+command instead of a direct `UPDATE`: it also clears legacy Night Owl / Early
+Bird classification state so history is recomputed under the new civil time.

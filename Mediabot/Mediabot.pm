@@ -1247,7 +1247,7 @@ sub populateChannels {
 
     $self->{logger}->log( 3, "populateChannels: Populating channels from database");
 
-    my $sQuery = "SELECT id_channel, name, description, topic, tmdb_lang, `key`, auto_join FROM CHANNEL";
+    my $sQuery = "SELECT id_channel, name, description, topic, tmdb_lang, timezone, `key`, auto_join FROM CHANNEL";
     my $sth = $self->{dbh}->prepare($sQuery);
     unless ($sth && $sth->execute()) {
         $self->{logger}->log( 1, "SQL Error: " . $DBI::errstr . " Query: $sQuery");
@@ -1265,6 +1265,7 @@ sub populateChannels {
             description => $ref->{description},
             topic       => $ref->{topic},
             tmdb_lang   => $ref->{tmdb_lang},
+            timezone    => $ref->{timezone},
             key         => $ref->{key},
             dbh         => $self->{dbh},
             irc         => $self->{irc},
@@ -1447,7 +1448,8 @@ sub dbConnect {
     foreach my $sql (
         "SET NAMES 'utf8'",
         "SET CHARACTER SET utf8",
-        "SET COLLATION_CONNECTION = 'utf8_general_ci'"
+        "SET COLLATION_CONNECTION = 'utf8_general_ci'",
+        "SET time_zone = '+00:00'"
     ) {
         my $sth = $dbh->prepare($sql);
         unless ($sth && $sth->execute()) {
@@ -1691,7 +1693,7 @@ sub refresh_channel_hashes {
 
     $self->{logger}->log(4, "Refreshing channel information from database");
 
-    my $sQuery = "SELECT name, description, topic, tmdb_lang, `key` FROM CHANNEL";
+    my $sQuery = "SELECT name, description, topic, tmdb_lang, timezone, `key` FROM CHANNEL";
     my $sth = $self->{dbh}->prepare($sQuery);
     unless ($sth && $sth->execute()) {
         $self->{logger}->log(1, "SQL Error: " . $DBI::errstr . " Query: $sQuery");
@@ -1724,6 +1726,7 @@ sub refresh_channel_hashes {
             $chan_obj->{description} = $ref->{description};
             $chan_obj->{topic}       = $ref->{topic};
             $chan_obj->{tmdb_lang}   = $ref->{tmdb_lang};
+            $chan_obj->{timezone}    = $ref->{timezone} || 'UTC';
             $chan_obj->{key}         = $ref->{key};
 
             $self->{logger}->log(4, "Refreshed data for $chan_name");

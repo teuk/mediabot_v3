@@ -110,6 +110,7 @@ CREATE TABLE `CHANNEL` (
   `auto_join`     TINYINT(1) NOT NULL DEFAULT 0,
   `notice`        VARCHAR(255) DEFAULT NULL,
   `tmdb_lang`     VARCHAR(255) NOT NULL DEFAULT 'en-US',
+  `timezone`      VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'UTC',
   `topic`         VARCHAR(400) DEFAULT NULL,
   `id_user`       BIGINT UNSIGNED DEFAULT NULL,
   PRIMARY KEY (`id_channel`),

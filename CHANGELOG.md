@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb738 — align achievements with channel civil time and durable evidence
+
+- Add an explicit IANA timezone to every channel, editable by authenticated
+  channel administrators through `!chanset`. Pin application MariaDB sessions
+  to UTC, convert historical message timestamps into the channel timezone and
+  keep daylight-saving transitions correct.
+- Evaluate Night Owl and Early Bird only from a message in the matching local
+  band. Reconcile their unlocks and progress when a channel timezone changes,
+  while preserving every unrelated achievement.
+- Make activity streaks use the same local calendar, keep Gift Giver durable
+  across restarts, measure Trivia Sniper with a high-resolution inclusive
+  two-second boundary and reject malformed achievement observations.
+- Document the complete evidence model, migration, MariaDB timezone-table
+  prerequisite and operator checks.
+
 ### mb737 — render compact AI answers natively for IRC
 
 - Route successful `tellme`/`chatgpt`, `ai`/`claude` and `gemini` answers

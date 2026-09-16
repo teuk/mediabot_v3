@@ -73,6 +73,21 @@ our @EXPORT = qw(
     getTMDBLangChannel
 );
 
+sub _valid_iana_timezone {
+    my ($timezone) = @_;
+    return 0 unless defined($timezone) && !ref($timezone)
+        && $timezone ne '' && length($timezone) <= 64;
+    my $valid = eval {
+        require DateTime::TimeZone;
+        DateTime::TimeZone->is_valid_name($timezone) ? 1 : 0;
+    };
+    return $valid ? 1 : 0 if defined $valid;
+    return 1 if $timezone eq 'UTC';
+    return 0 unless $timezone =~ m{\A[A-Za-z][A-Za-z0-9._+-]*/[A-Za-z0-9._+/-]+\z}
+        && $timezone !~ m{(?:\A|/)\.\.?(/|\z)};
+    return -f "/usr/share/zoneinfo/$timezone" ? 1 : 0;
+}
+
 sub getChannel {
     my ($self, $chan_name) = @_;
     return $self->{channels}{lc $chan_name};
@@ -92,7 +107,7 @@ sub get_channel_by_name {
 
     return undef unless defined($name) && $name ne '';
 
-    my $sql = "SELECT id_channel FROM CHANNEL WHERE name = ?";
+    my $sql = "SELECT id_channel, timezone FROM CHANNEL WHERE name = ?";
     my $sth = $self->{dbh}->prepare($sql);
 
     unless ($sth) {
@@ -118,6 +133,7 @@ sub get_channel_by_name {
             logger => $self->{logger},
             id     => $ref->{id_channel},
             name   => $name,
+            timezone => $ref->{timezone},
             irc    => $self->{irc},
         });
     }
@@ -428,6 +444,7 @@ sub channelSetSyntax_ctx {
     botNotice($self, $nick, "Syntax: chanset [#channel] chanmode <+chanmode>");
     botNotice($self, $nick, "Syntax: chanset [#channel] description <description>");
     botNotice($self, $nick, "Syntax: chanset [#channel] auto_join <on|off>");
+    botNotice($self, $nick, "Syntax: chanset [#channel] timezone <Area/City>");
     botNotice($self, $nick, "Syntax: chanset [#channel] <+value|-value>");
 }
 
@@ -535,6 +552,73 @@ sub channelSet_ctx {
         }
         $channel->set_description($desc);
         botNotice($self, $nick, "Set $target_channel description $desc");
+    }
+    elsif ($args[0] eq 'timezone') {
+        my $timezone = $args[1] // '';
+        unless (!ref($timezone)
+                && $timezone ne ''
+                && length($timezone) <= 64
+                && _valid_iana_timezone($timezone)) {
+            botNotice($self, $nick,
+                "Invalid timezone '$timezone'. Use an IANA name such as Europe/Paris or America/Montreal.");
+            return;
+        }
+
+        my $sql_timezone = $timezone eq 'UTC' ? '+00:00' : $timezone;
+        my $probe = eval {
+            my $sth = $self->{dbh}->prepare(q{
+                SELECT CONVERT_TZ('2026-01-15 12:00:00', '+00:00', ?)
+                    AS converted
+            });
+            my $converted;
+            if ($sth && $sth->execute($sql_timezone)) {
+                my $row = $sth->fetchrow_hashref;
+                $converted = $row ? $row->{converted} : undef;
+            }
+            $sth->finish if $sth;
+            $converted;
+        };
+        unless (defined($probe) && $probe ne '') {
+            botNotice($self, $nick,
+                "MariaDB cannot convert to $timezone. Load its system timezone tables before changing the channel policy.");
+            return;
+        }
+
+        my $previous = eval { $channel->get_timezone } || 'UTC';
+        unless ($channel->set_timezone($timezone)) {
+            botNotice($self, $nick, "Could not set $target_channel timezone.");
+            return;
+        }
+
+        my $reset = { unlocks => 0, progress => 0 };
+        if ($previous ne $timezone && $self->{achievements}
+                && $self->{achievements}->can('reset_channel_hourbands')) {
+            my $ok = eval {
+                $reset = $self->{achievements}->reset_channel_hourbands(
+                    $target_channel, $id_channel
+                );
+                1;
+            };
+            unless ($ok && ref($reset) eq 'HASH') {
+                my $error = $@ || 'unknown reconciliation error';
+                $error =~ s/[\r\n\0]+/ /g;
+                my $rolled_back = eval { $channel->set_timezone($previous) } ? 1 : 0;
+                $self->{logger}->log(1,
+                    "channelSet_ctx timezone reconciliation failed for $target_channel: $error")
+                    if $self->{logger};
+                botNotice($self, $nick,
+                    $rolled_back
+                        ? "Timezone change rolled back because achievement reconciliation failed; check the application log."
+                        : "Timezone set to $timezone, but reconciliation and rollback failed; stop the bot and check the application log.");
+                return $id_channel;
+            }
+        }
+
+        my $suffix = $previous ne $timezone
+            ? sprintf(' Time-based achievement state reset: %d unlock(s), %d progress counter(s).',
+                $reset->{unlocks} // 0, $reset->{progress} // 0)
+            : '';
+        botNotice($self, $nick, "Set $target_channel timezone $timezone.$suffix");
     }
     elsif ($args[0] =~ /^([+-])(\w+)$/) {
         my ($op, $chanset) = ($1, $2);
@@ -2678,7 +2762,8 @@ sub userChannelInfo_ctx {
             C.description    AS description,
             C.`key`          AS c_key,
             C.chanmode       AS chanmode,
-            C.auto_join      AS auto_join
+            C.auto_join      AS auto_join,
+            C.timezone       AS timezone
         FROM USER_CHANNEL UC
         JOIN `USER`  U ON U.id_user    = UC.id_user
         JOIN CHANNEL C ON C.id_channel = UC.id_channel
@@ -2711,9 +2796,11 @@ sub userChannelInfo_ctx {
     my $sKey      = defined $ref->{c_key}    ? $ref->{c_key}    : "Not set";
     my $chanmode  = defined $ref->{chanmode} ? $ref->{chanmode} : "Not set";
     my $sAutoJoin = ($ref->{auto_join} ? "True" : "False");
+    my $timezone  = $ref->{timezone} || 'UTC';
 
     botNotice($self, $nick, "$sChannel is registered by $sUsername - last login: $sLastLogin");
     botNotice($self, $nick, "Creation date : $creation_date - Description : $description");
+    botNotice($self, $nick, "Channel timezone : $timezone");
 
     # Optional Master+ info (no legacy checkUserLevel)
     my $user = $ctx->user;

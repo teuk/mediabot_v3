@@ -96,7 +96,7 @@ return sub {
         $assert->like($streak_body,
             qr/->check_streak\(\$nick,\s*\$channel,\s*\$streak,\s*\$best\)/,
             'mb655-837: existing current/best streak result feeds Achievements');
-        my $distinct_day_queries = () = $streak_body =~ /SELECT\s+DISTINCT\s+DATE\(ts\)/ig;
+        my $distinct_day_queries = () = $streak_body =~ /SELECT\s+DISTINCT\s+DATE\(CONVERT_TZ\(cl\.ts, \@\@session\.time_zone, \?\)\)/ig;
         $assert->is($distinct_day_queries, 1,
             'mb655-837: achievement hook adds no second streak history scan');
     }

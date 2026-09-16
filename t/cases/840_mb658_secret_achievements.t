@@ -6,6 +6,7 @@
 use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
+use Time::Local qw(timegm);
 use File::Temp qw(tempdir);
 
 my $DIR = tempdir(CLEANUP => 1);
@@ -224,6 +225,8 @@ return sub {
         progress_calls => [],
         unlock_calls   => [],
         unlocked       => {},
+        _worker_channel_timezone => 'UTC',
+        _worker_event_epoch => timegm(0, 0, 2, 15, 0, 126),
     }, 'MB658NightHarness';
 
     $N->check_msg('Teuk', '#test');
@@ -241,8 +244,8 @@ return sub {
     my $src_p = slurp840('Mediabot/SocialHistory.pm');
 
     $assert->like($src_a,
-        qr/qw\(night_owl midnight_regular creature_night witching_hour early_bird\)/,
-        'mb658-840: secret night rung participates in existing scan gate');
+        qr/qw\(night_owl midnight_regular creature_night witching_hour\)/,
+        'mb658-840: secret night rung participates in the local-night gate');
     $assert->like($src_a,
         qr/qw\(streak_week streak_month streak_master eternal_flame\)/,
         'mb658-840: secret streak rung reuses check_streak');

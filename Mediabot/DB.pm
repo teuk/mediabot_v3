@@ -72,6 +72,7 @@ sub new {
 
     # Appliquer le charset/collation de session selon le mode choisi
     _apply_session_charset($dbh, $logger, $mode);
+    _apply_session_timezone($dbh, $logger);
 
     # Log de vérif (collation de session)
     eval {
@@ -133,6 +134,23 @@ sub _apply_session_charset {
     }
 }
 
+# CHANNEL_LOG.ts is a TIMESTAMP. Keep every application connection in UTC so
+# SQL can convert it explicitly into a channel's IANA civil time without first
+# inheriting the host or MariaDB server timezone.
+sub _apply_session_timezone {
+    my ($dbh, $logger) = @_;
+    my $stmt = q{SET time_zone = '+00:00'};
+    my $sth = $dbh->prepare($stmt);
+    unless ($sth && $sth->execute) {
+        $logger->log(1, "SQL error during UTC session init: $DBI::errstr (query: $stmt)")
+            if $logger;
+        $sth->finish if $sth;
+        return 0;
+    }
+    $sth->finish;
+    return 1;
+}
+
 # Reconnexion (même signature que l'implémentation précédente si tu l'appelais)
 sub _connect {
     my ($self) = @_;
@@ -180,6 +198,7 @@ sub _connect {
     }
 
     _apply_session_charset($dbh, $logger, $mode);
+    _apply_session_timezone($dbh, $logger);
     $self->{dbh} = $dbh;
     return $dbh;
 }
@@ -236,6 +255,8 @@ sub connect_isolated_handle {
             'SET COLLATION_CONNECTION = utf8mb4_unicode_ci',
         );
     }
+
+    push @sql, q{SET time_zone = '+00:00'};
 
     for my $stmt (@sql) {
         my $ok = eval {
