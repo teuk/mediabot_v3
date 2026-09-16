@@ -17,169 +17,70 @@
   <a href="https://github.com/teuk/mediabot_v3/discussions"><img alt="GitHub Discussions" src="https://img.shields.io/badge/community-Discussions-8250df?logo=github"></a>
 </p>
 
-Mediabot 3.5 helps IRC communities **run, remember, and understand their channels**. It combines an event-driven IRC core, channel administration, persistent community history, analytics, media integrations, observability, and upgrade tooling in one tested application.
-
-Operators get one configuration model, one MariaDB-backed data model, ordered migrations, security and startup-integrity checks, systemd deployment guidance, and a reproducible release path.
+Mediabot helps IRC communities **run, remember and understand their channels**. It combines an event-driven IRC core, channel administration, persistent MariaDB-backed memory, community analytics, media integrations and production-oriented tooling.
 
 <p align="center">
-  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.5"><strong>Download Mediabot 3.5</strong></a>
+  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.5"><strong>Download stable 3.5</strong></a>
   ·
-  <a href="https://github.com/teuk/mediabot_v3/wiki/Installation"><strong>Install in production</strong></a>
+  <a href="https://github.com/teuk/mediabot_v3/wiki/Installation"><strong>Installation guide</strong></a>
   ·
-  <a href="https://github.com/teuk/mediabot_v3/wiki/Public-commands"><strong>Explore commands</strong></a>
+  <a href="https://github.com/teuk/mediabot_v3/wiki/Command-reference"><strong>Command reference</strong></a>
   ·
   <a href="https://github.com/teuk/mediabot_v3/discussions"><strong>Ask a question</strong></a>
 </p>
 
----
+## What Mediabot provides
 
-## What ships in 3.5
+| Area | Capabilities |
+| --- | --- |
+| IRC runtime | `Net::Async::IRC`, reconnect handling, moderation, antiflood, URL/media enrichment and multi-network operation |
+| Community memory | Seen history, quotes, factoids, karma, notes, reminders, achievements, milestones and channel analytics |
+| Conversation | Per-channel Hailo brains and independently gated OpenAI, Claude and Gemini integrations |
+| Administration | Global roles, numeric per-channel access, feature chansets and TCP/DCC Partyline |
+| Operations | MariaDB schema validation, ordered migrations, systemd deployment, Doctor diagnostics, Prometheus metrics and structured logs |
+| Optional services | mbweb console, read-only by default, and shared Icecast/Liquidsoap radio requests |
 
-| Area | What Mediabot actually provides |
-|---|---|
-| **IRC runtime** | A `Net::Async::IRC` event loop, reconnect handling, channel administration, antiflood controls, URL/media enrichment, radio tooling, and a TCP/DCC Partyline |
-| **Community memory** | MariaDB-backed `seen`, `onthisday`, `memory`, `awards`, `yearbook`, achievements, quotes, factoids, karma, notes, reminders, milestones, and channel history |
-| **Conversation** | Per-channel Hailo brains plus gated OpenAI, Claude and Gemini commands whose Markdown is compacted into at most two native IRC lines |
-| **Operator surfaces** | Prometheus metrics, Grafana resources, structured logs, a read-only-by-default mbweb console, Doctor diagnostics, and systemd deployment tooling |
-| **Release engineering** | Ordered migrations, schema/type/index drift checks, 37 fail-closed security invariants, and reproducible archives exercised through fresh-install and upgrade/rollback paths on Debian 13 |
-
-Mediabot is a strong fit for communities that want a bot to become part of their long-term infrastructure rather than remain a small disposable script. If you only need a tiny classic IRC bot with minimal dependencies, a lighter platform may be the better choice.
-
----
-
-## How Mediabot behaves
+Features are enabled deliberately per channel. External work is bounded so it cannot silently become an unbounded IRC event-loop dependency.
 
 ```mermaid
 flowchart TB
-    IRC["IRC networks<br/>events and commands"] --> Core["Mediabot core<br/>Net::Async::IRC event loop"]
-    Core --> Policy["Per-channel policy<br/>authentication, roles and capabilities"]
-    Policy --> Features["Community services<br/>commands, memory, Hailo and opt-in Gemini"]
-    Features --> Reply["Bounded replies<br/>and moderation actions"]
-    Core <--> DB["MariaDB<br/>state and history"]
-    DB --> Web["mbweb console<br/>read-only by default"]
-    Core --> Metrics["Prometheus metrics<br/>and structured logs"]
+    IRC["IRC networks"] --> Core["Mediabot core"]
+    Core --> Policy["Roles and channel policy"]
+    Policy --> Features["Commands, memory and conversation"]
+    Core <--> DB["MariaDB"]
+    DB --> Web["mbweb"]
+    Core --> Metrics["Prometheus and logs"]
 ```
 
-The diagram is architectural, not a mock interface: optional features stay behind their own channel switches, durable state lives in MariaDB, and external work is bounded so it does not stall the IRC event loop.
+## Release lines
 
-### Release evidence
+| Line | Status | Recommended use |
+| --- | --- | --- |
+| **3.5** | Current stable release | Production installations from verified release artifacts |
+| **3.6dev** | Current development line | Testing, contribution and evaluation of current development |
 
-| Gate | Mediabot 3.5 result |
-|---|---|
-| **Complete local suite** | 927 files · 18,760 assertions passed |
-| **Cross-cutting security audit** | 37/37 fail-closed security invariants across 16 axes |
-| **Debian acceptance** | Candidate archive · fresh install · stable 3.3 upgrade · exact rollback · deterministic reapplication |
-| **Published source** | Tagged commit `a55d030` · reproducible `.tar.gz` and `.tar.xz` · SHA-256 and SHA-512 manifests |
-
-These are release-gate results for the tagged 3.5 source, not rolling coverage claims. See the [3.5 release notes](docs/RELEASE_NOTES_3.5.md) and the [release process](docs/RELEASING.md) for the exact boundaries.
-
----
-
-## See what it can do
-
-A typical channel can use commands such as:
-
-```text
-<prefix>seen Alice
-<prefix>mood
-<prefix>onthisday
-<prefix>memory
-<prefix>awards 7d
-<prefix>yearbook 2025
-<prefix>achievements progress
-<prefix>topquote
-<prefix>milestone
-<prefix>tellme <prompt>       # alias: chatgpt
-<prefix>ai <prompt>           # alias: claude
-<prefix>gemini <prompt>
-?coffee
-<prefix>tell Bob remember the meeting
-```
-
-It can also enrich supported links, expose Prometheus metrics, integrate with radio workflows, and provide a dedicated TCP/DCC administration interface through Partyline.
-
-Interactive AI answers share one IRC presentation contract: at most two
-400-byte lines, with Markdown structures compacted and only bold, italic and
-underline retained as native IRC emphasis. Provider and per-channel opt-in
-boundaries remain independent (`+chatGPT`, `+Claude`, and `+Gemini`).
-
-Instagram previews are non-blocking and type-aware: public posts, reels, profiles,
-stories, and highlights use available metadata for compact rich previews, while
-private, removed, expired, or otherwise unavailable content falls back cleanly
-without stalling the IRC event loop.
-
-The configured prefix is instance-specific and may be `!`, `m`, `.`, or another value chosen by the operator.
-
----
-
-## Start here
-
-| Goal | Recommended path |
-|---|---|
-| **Install the stable release** | [Download Mediabot 3.5](https://github.com/teuk/mediabot_v3/releases/tag/3.5), verify the checksums, then follow the [Installation guide](https://github.com/teuk/mediabot_v3/wiki/Installation) |
-| **Understand the feature set** | Browse [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands), [Private/admin commands](https://github.com/teuk/mediabot_v3/wiki/Private-and-admin-commands), and [Partyline](https://github.com/teuk/mediabot_v3/wiki/Partyline) |
-| **Upgrade an existing instance** | Read the [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes) before applying migrations |
-| **Operate and monitor it** | See [Configuration](https://github.com/teuk/mediabot_v3/wiki/Configuration), [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing), and [Monitoring](https://github.com/teuk/mediabot_v3/wiki/Monitoring-with-Prometheus-and-Grafana) |
-| **Report or discuss something** | Use [Issues](https://github.com/teuk/mediabot_v3/issues) for reproducible work and [Discussions](https://github.com/teuk/mediabot_v3/discussions) for questions and ideas |
-
-The wiki is the operational reference. This README keeps the essential installation and validation path available in the repository.
-
----
-
-## Release status
-
-Mediabot uses odd minor versions for stable releases and even minor versions for development lines:
+Stable and development installations should use separate directories, configurations, systemd instances, runtime files and IRC identities.
 
 ```text
 3.5      current stable release
 3.6dev   current development line
 ```
 
-Release resources:
+### Stable 3.5 release evidence
 
-- [Mediabot 3.5 GitHub release](https://github.com/teuk/mediabot_v3/releases/tag/3.5)
-- [Mediabot 3.5 release notes](docs/RELEASE_NOTES_3.5.md)
-- [Complete changelog](CHANGELOG.md)
-- [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes)
-- [Release artifact workflow](docs/RELEASING.md)
+| Gate | Accepted result |
+| --- | --- |
+| Complete local suite | 927 files · 18,760 assertions passed |
+| Cross-cutting audit | 37/37 fail-closed security invariants across 16 axes |
+| Published source | Tagged commit `a55d030` with reproducible archives and SHA-256/SHA-512 manifests |
 
----
+These are release-gate results for the tagged 3.5 source, not rolling coverage claims. See the [Mediabot 3.5 release notes](docs/RELEASE_NOTES_3.5.md) for the exact boundary.
 
-## Community
+## Quick installation on Debian 13
 
-Contributions of all sizes are welcome: code, tests, documentation, plugins, translations, installation feedback, and validation on additional IRC networks.
+The complete procedure, including upgrades and optional services, is in the [Installation wiki page](https://github.com/teuk/mediabot_v3/wiki/Installation).
 
-**[Report a bug](https://github.com/teuk/mediabot_v3/issues/new?template=bug_report.md) · [Request a feature](https://github.com/teuk/mediabot_v3/issues/new?template=feature_request.md) · [Ask a question](https://github.com/teuk/mediabot_v3/discussions) · [Open the wiki](https://github.com/teuk/mediabot_v3/wiki)**
-
-Live IRC support:
-
-```text
-Network:    EpiKnet
-Server:     irc.epiknet.org
-Port:       6697
-Encryption: SSL/TLS
-Channel:    #i/o
-```
-
----
-
-## Development: Wit and Quip
-
-The `3.6dev` line adds optional `+Quip`: sharper contextual humor through the
-existing automatic AI provider selection. `+Wit +Quip` shares one request and
-reply budget; enabling both does not create a second stream of messages.
-See [Wit/Quip configuration and live evaluation](docs/WIT_QUIP.md).
-The new capability is registered without enabling it on any channel.
-
-## Quick install on Debian
-
-The full install guide is here:
-
-* [Installation](https://github.com/teuk/mediabot_v3/wiki/Installation)
-
-This section is only the essential path.
-
-### 1. Install bootstrap packages
+### 1. Install the base system
 
 As `root`:
 
@@ -203,738 +104,288 @@ apt install -y \
   mariadb-client \
   libmariadb-dev
 
-systemctl enable --now mariadb
-```
-
-`libmariadb-dev` provides the MariaDB Connector/C headers and `mariadb_config`
-needed to compile the CPAN driver. It is a native build dependency, not a Perl
-module package.
-
-Do not install `libdbi-perl`, `libdbd-mariadb-perl` or
-`libdbd-mysql-perl` for the supported installation path. `./configure` installs
-and verifies `DBI`, `DBD::MariaDB` and the remaining Perl modules through CPAN.
-
-Debian 13 is also guarded by the dedicated
-[`debian13.yml`](.github/workflows/debian13.yml) CI workflow. The gate runs in
-the official `debian:13-slim` container. It first builds the exact
-non-publishable rehearsal archive from the tested commit, verifies its SHA-256
-and SHA-512 manifests and both compressed formats, then performs every current
-installation action from the extracted archive rather than from the Git
-checkout. The gate checks the Debian system Perl 5.40
-baseline, installs the documented MariaDB/bootstrap packages, builds the
-runtime Perl dependency set against that system Perl, verifies it through
-`install/cpan_install.sh --verify-only`, and exercises a fresh non-root
-configuration generation with `./configure --sync-only --skip-db --skip-cpan
---yes`. It then starts the Debian 13 MariaDB server, executes the real
-`install/db_install.sh -c ...` fresh-database path with safe defaults, verifies
-that the private config remains owned by `mediabot` with mode `0600`, and runs
-`tools/check_schema_drift.pl --strict --types --indexes` through the generated
-application credentials. The same Debian 13 job also exports the real stable
-`3.3` database schema from the Git tag, proves that it is detectably behind the
-current reference schema, applies only migration files added after `3.3` in the
-authoritative order from `install/migrations/README.md`, and requires the final
-strict type/index drift check to return clean. Released migration files shared
-with `3.3` are checksum-compared and must remain immutable. The same job also
-runs a private deterministic pre-upgrade dump. Its rollback restores that dump
-byte for byte after the first successful migration, requires the old drift to
-return, and proves that a second ordered reapplication produces the same final
-database. It also
-runs the supported systemd installation helper against an isolated filesystem
-root, proves idempotent/fail-closed replacement behavior, and parses the
-installed published template with Debian 13 `systemd-analyze verify`. The
-CI-only `cpanm` local library is an acceleration/isolation mechanism; the
-supported operator installation path remains the CPAN flow described above.
-Live systemd deployment and IRC connectivity remain MB722 operational checks,
-not container-CI claims. The archive-derived disposable gate is the MB725 final
-technical install/upgrade proof.
-
-Optional but useful:
-
-```bash
-apt install -y screen tmux htop lsof net-tools iproute2 dnsutils rsync chromium
-```
-
-### 2. Create the dedicated user
-
-Mediabot must not run as root.
-
-```bash
+systemctl enable --now mariadb.service
 adduser mediabot
+```
+
+`libmariadb-dev` provides the headers required to build `DBD::MariaDB`. `./configure` installs and verifies `DBI`, `DBD::MariaDB` and the remaining Perl modules through CPAN.
+
+Do not install every optional integration by default. Chromium, Apache, Node.js, Prometheus, Icecast and Liquidsoap are needed only for the features that use them.
+
+### 2. Create the dedicated account
+
+Mediabot must not run as root. Continue the remaining installation as `mediabot`:
+
+```bash
 su - mediabot
 ```
 
-Expected:
+### 3A. Install stable 3.5
+
+Use this path for production. Download one published archive and both checksum manifests from the [3.5 release](https://github.com/teuk/mediabot_v3/releases/tag/3.5), then place them in `/home/mediabot`.
+
+As `mediabot`, for the `.tar.gz` archive:
 
 ```bash
-whoami
-pwd
+cd /home/mediabot || exit 1
+
+grep 'mediabot_v3-3.5.tar.gz$' mediabot_v3-3.5-SHA256SUMS |
+  sha256sum -c -
+grep 'mediabot_v3-3.5.tar.gz$' mediabot_v3-3.5-SHA512SUMS |
+  sha512sum -c -
+
+tar -xzf mediabot_v3-3.5.tar.gz
+mv mediabot_v3-3.5 mediabot_v3
+cd /home/mediabot/mediabot_v3 || exit 1
+
+test "$(tr -d '\n' < VERSION)" = '3.5'
 ```
 
-```text
-mediabot
-/home/mediabot
-```
+For the `.tar.xz` archive, select its checksum lines and extract it with `tar -xJf`. Do not use GitHub's automatically generated source ZIP instead of the verified project release artifacts.
 
-### 3. Get Mediabot
+### 3B. Install 3.6dev
 
-For the development tree:
+Use this path for development and testing:
 
 ```bash
 cd /home/mediabot || exit 1
 git clone https://github.com/teuk/mediabot_v3.git
 cd /home/mediabot/mediabot_v3 || exit 1
+
+git status --short
+git branch --show-current
+cat VERSION
+grep -Eq '^3\.6dev-' VERSION
 ```
 
-For the stable 3.5 release, use one of the published source archives:
-
-```text
-mediabot_v3-3.5.tar.gz
-mediabot_v3-3.5.tar.xz
-```
-
-Verify the download against `mediabot_v3-3.5-SHA256SUMS` or `mediabot_v3-3.5-SHA512SUMS` before extracting it.
-The GitHub release uses the plain `3.5` tag, matching the established project
-tag convention. See [`docs/RELEASING.md`](docs/RELEASING.md) for the complete
-artifact and verification workflow.
+The default Git branch is the active development line, not a stable release.
 
 ### 4. Run `./configure`
 
-`./configure` is the supported fresh-install entry point.
-
-Do **not** replace it with a manual `cp mediabot.sample.conf mediabot.conf` workflow.
+For a fresh installation, use the supported wizard instead of manually copying the sample configuration:
 
 ```bash
 cd /home/mediabot/mediabot_v3 || exit 1
 ./configure
 ```
 
-`mediabot.sample.conf` is a reference file. The installer now generates a
-complete `mediabot.conf` directly from it, including all active safe defaults.
-It never enables Partyline eval.
+The wizard generates `mediabot.conf`, installs and verifies Perl dependencies, creates the fresh database and application account, collects IRC/network settings and performs a final drift audit.
 
-On a fresh installation it creates the database, installs dependencies,
-configures IRC/network data and validates schema drift.
+`mediabot.sample.conf` is a reference file. Do not copy it blindly over a generated or existing configuration.
 
-On an existing installation it creates a timestamped backup, preserves current
-and custom values, adds missing defaults, normalizes duplicate INI keys and
-offers the database drift/migration workflow without automatically applying
-generated SQL.
-
-Useful maintenance modes:
-
-```bash
-./configure --config mediabot.conf --sync-only
-./configure --config mediabot.conf --drift-only
-```
-
-See [`docs/CONFIGURE.md`](docs/CONFIGURE.md) for the complete fresh/existing
-workflow and safety rules.
-
-### 5. Review `mediabot.conf`
-
-After configure:
+Confirm that the resulting configuration is private:
 
 ```bash
 chmod 600 mediabot.conf
 vi mediabot.conf
+stat -c '%U:%G %a %n' mediabot.conf
 ```
 
-Review at least:
+Expected:
 
 ```text
-[main]
-[mysql]
-[connection]
-[undernet] or [libera]
-[metrics]
-[antiflood]
-[openai]
-[anthropic]
-[chromium]
-[radio]
+mediabot:mediabot 600 mediabot.conf
 ```
 
-Never commit the real `mediabot.conf`.
+Never commit the real `mediabot.conf`. Passwords, IRC credentials, API keys, tokens, logs and runtime state also remain private.
 
----
+### 5. Validate before the first start
 
-## Database validation
+```bash
+perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes
 
-Fresh installs use the current reference schema through the installer. Validate
-the newly created database with strict type checking:
+perl -I. -c mediabot.pl
+perl t/test_commands.pl --fast --progress
+```
+
+A non-zero strict schema result is an installation failure. Do not apply historical migrations to a fresh database.
+
+### 6. Start in the foreground
+
+```bash
+perl mediabot.pl --conf=mediabot.conf
+```
+
+Check the application log first, normally `mediabot.log`. Once the bot is connected:
+
+```text
+!version
+!uptime
+!help
+!features
+```
+
+Register the first Owner only in a private message:
+
+```text
+/msg BotNick register OwnerName StrongPassword
+```
+
+Then verify the recognized identity and channel access:
+
+```text
+!whoami
+!access #channel
+```
+
+The documentation uses `!` consistently as its example IRC prefix. `MAIN_PROG_CMD_CHAR` can deliberately configure another prefix. Partyline commands retain their leading dot.
+
+Do not switch to systemd until foreground startup is clean.
+
+### 7. Install the systemd instance
+
+Stop the foreground process cleanly, then install the published template and instance definition:
 
 ```bash
 cd /home/mediabot/mediabot_v3 || exit 1
 
-perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes
+sudo ./install/systemd_install.sh \
+  --instance prod \
+  --bot-dir /home/mediabot/mediabot_v3
+
+sudo systemd-analyze verify /etc/systemd/system/mediabot@.service
+sudo systemctl enable mediabot@prod.service
+sudo systemctl start mediabot@prod.service
+sudo systemctl status mediabot@prod.service --no-pager -l
 ```
 
-For an existing instance, first generate a reviewable migration plan against
-the configuration that actually points to the target database:
+The installer never starts or enables the service implicitly. See [Running with systemd](https://github.com/teuk/mediabot_v3/wiki/Running-with-systemd) and [`tools/systemd/README.md`](tools/systemd/README.md) for multi-instance and replacement rules.
+
+## Commands, access and chansets
+
+Mediabot combines two authorization models:
+
+- global account roles: Owner, Master, Administrator and User;
+- numeric per-channel levels for channel-scoped administration.
+
+Feature switches are stored per channel as **chansets**. A capability registered in `CHANSET_LIST` is not automatically enabled everywhere.
+
+Useful discovery commands include:
+
+```text
+!help
+!help commands
+!help chansets
+!showcommands #channel
+!access #channel
+!chanset #channel +Games
+```
+
+Documentation:
+
+- [Complete command reference](https://github.com/teuk/mediabot_v3/wiki/Command-reference) — all 243 built-in command help entries;
+- [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands);
+- [Private and administrative commands](https://github.com/teuk/mediabot_v3/wiki/Private-and-admin-commands);
+- [Access levels](https://github.com/teuk/mediabot_v3/wiki/Access-levels);
+- [Chansets](https://github.com/teuk/mediabot_v3/wiki/Chansets).
+
+Database-backed dynamic commands are instance data and therefore cannot be exhaustively listed in static project documentation.
+
+## Optional services
+
+Install optional components only after the IRC bot is healthy:
+
+| Component | Documentation |
+| --- | --- |
+| mbweb web console | [mbweb console](https://github.com/teuk/mediabot_v3/wiki/Mbweb-console) and [`contrib/mbweb/README.md`](contrib/mbweb/README.md) |
+| Shared radio requests | [Radio](https://github.com/teuk/mediabot_v3/wiki/Radio) and [`docs/RADIO.md`](docs/RADIO.md) |
+| Prometheus and Grafana | [Monitoring guide](https://github.com/teuk/mediabot_v3/wiki/Monitoring-with-Prometheus-and-Grafana) |
+| TCP/DCC Partyline | [Partyline guide](https://github.com/teuk/mediabot_v3/wiki/Partyline) |
+| Plugins and external scripts | [Developing plugins](https://github.com/teuk/mediabot_v3/wiki/Developing-plugins) |
+
+The shared radio service documented for current development belongs to the 3.6dev line. Stable operators should follow the documentation shipped with their selected release.
+
+## Upgrading an existing instance
+
+Fresh installation and upgrade are different operations. Never import `install/mediabot.sql` over an existing database.
+
+Before an upgrade:
+
+1. read the [release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes);
+2. back up the database, private configuration and runtime state;
+3. synchronize configuration with `./configure --config mediabot.conf --sync-only`;
+4. review and apply only the required migrations in the authoritative order from `install/migrations/README.md`;
+5. require strict schema, type and index validation before restart.
+
+See [Database migrations](https://github.com/teuk/mediabot_v3/wiki/Database-migrations) for the complete fail-closed workflow.
+
+Generate a reviewable, type- and index-aware migration plan before changing an existing database:
 
 ```bash
 perl tools/check_schema_drift.pl --conf=mediabot.conf --generate-migration --types --indexes
 ```
 
-For example, on the Undernet instance:
+The Debian 13 workflow builds and installs from the exact non-publishable rehearsal archive (or exact stable archive), verifies its manifests, runs in the official `debian:13-slim` container with system Perl 5.40, and confirms dependencies with `install/cpan_install.sh --verify-only`. It starts the Debian 13 MariaDB server, exercises `install/db_install.sh -c mediabot.conf`, then requires `check_schema_drift.pl --strict --types --indexes`.
+
+The same disposable gate loads the real stable `3.3` database schema from the Git tag. Released migration files remain immutable; the gate applies only ordered newer migrations, proves exact rollback, and checks deterministic reapplication. The exact archive, rollback and reapplication evidence means the archive-derived disposable gate is the MB725 final technical install/upgrade proof.
+
+The systemd installation helper is also exercised in an isolated root and its installed unit is parsed by `systemd-analyze verify`. Live systemd deployment and IRC connectivity remain MB722 operational checks, not container-CI claims.
+
+## Development and tests
+
+During development, run syntax checks, the smallest targeted regression and the fast lane:
 
 ```bash
-perl tools/check_schema_drift.pl --conf=mbundernet.conf --generate-migration --types --indexes
+perl -I. -c mediabot.pl
+perl t/test_commands.pl --progress --filter '<relevant test or number>'
+perl t/test_commands.pl --fast --progress
+git diff --check
 ```
 
-Review the output, back up the database, and apply only the required ordered
-migrations from `install/migrations/README.md`. With `--indexes`, the drift
-checker also compares every index required by `install/mediabot.sql` and can
-generate non-destructive `ADD INDEX` statements for missing non-primary
-indexes. Extra live-only indexes are intentionally ignored. Keep the explicit
-index checks in the release checklist as an independent verification step.
-
-After the migration work, run:
+Run the complete suite once for the final pre-commit or release candidate:
 
 ```bash
-perl tools/check_schema_drift.pl --conf=mediabot.conf --strict --types --indexes
+perl t/test_commands.pl --progress
+./t/full_test.sh -d /tmp/mediabot_tests
 ```
 
-Do not blindly apply historical migrations to a fresh install.
+Further references:
 
-Durable IRC identity is intentionally hidden behind the read-only
-`Mediabot::Achievements` API. Runtime consumers should use
-`resolve_registered_user(channel, nick)` and `known_aliases(channel, nick)`
-instead of querying `ACHIEVEMENT_PROFILE` or `ACHIEVEMENT_IDENTITY` directly.
-This keeps ambiguity handling and registered-user authority in one place.
+- [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing);
+- [Contribution guidelines](CONTRIBUTING.md);
+- [Complete changelog](CHANGELOG.md);
+- [3.5 release notes](docs/RELEASE_NOTES_3.5.md);
+- [3.6dev development line](https://github.com/teuk/mediabot_v3/wiki/Development-line-3.6dev);
+- [Partyline architecture](docs/PARTYLINE_ARCHITECTURE.md).
 
-Social and channel-history commands are implemented in
-`Mediabot::SocialHistory`. The historical `Mediabot::UserCommands::*` symbols
-remain available for compatibility, but new work on `profil`, `dashboard`,
-`mood`, `leaderboard`, `chronos`, `recap`, `onthisday`, `memory`, `milestone`,
-`awards`, and `yearbook` should live in the dedicated module instead of growing
-`UserCommands.pm` again.
+## Operations and troubleshooting
 
-See:
-
-* [Database model](https://github.com/teuk/mediabot_v3/wiki/Database-model)
-* [Release and upgrade notes](https://github.com/teuk/mediabot_v3/wiki/Release-and-upgrade-notes)
-
----
-
-
-## Built-in updater observability
-
-The built-in updater separates remote availability checks from local history:
-
-```text
-update / update check
-    remote version diagnostic
-
-update now
-    apply an eligible update through the existing deployment workflow
-
-update status
-    read the durable result of the last updater run locally
-```
-
-`update status` is deliberately local-only: it does not contact GitHub, rerun
-eligibility checks or start an update. On a deployment rooted at
-`/home/mediabot/mediabot_v3`, its durable status file lives beside the rotating
-release tree:
-
-```text
-/home/mediabot/.mediabot_v3.update-status.json
-```
-
-The record can describe `running`, `success`, `failed` or `rolled_back` and
-keeps the observed `old -> target -> installed` version trail. It contains
-operational metadata only and is written atomically.
-
-Mediabot Doctor consumes the same durable record through its `updater` domain,
-also without fetching from the network:
+Start with the application log:
 
 ```bash
-perl tools/mediabot_doctor.pl --conf=mediabot.conf --domain updater
+tail -n 200 /home/mediabot/mediabot_v3/mediabot.log
 ```
 
-A missing history is informational until the first updater run creates the
-record. A failed/rolled-back/stale run or a version inconsistency is surfaced
-as a warning for operator review.
-
----
-
-## Mediabot Doctor
-
-`tools/mediabot_doctor.pl` is the read-only operational diagnostic for a real
-Mediabot instance. It inspects runtime, configuration, filesystem, systemd /
-deployment state, Git state when applicable, the durable result of the last
-built-in updater run, database state and migrations without repairing,
-restarting or modifying the instance.
-
-Run it against the configuration actually used by the instance:
+Use `systemctl status` and the journal primarily for service lifecycle and restart evidence. The read-only Doctor can inspect a configured instance, including the durable result of the last built-in updater run, without repairing or restarting it:
 
 ```bash
 perl tools/mediabot_doctor.pl --conf=mediabot.conf
-```
-
-For example, for an Undernet-style instance:
-
-```bash
-perl tools/mediabot_doctor.pl --conf=mbundernet.conf
-```
-
-Useful modes include:
-
-```bash
-perl tools/mediabot_doctor.pl --conf=mediabot.conf --strict
-perl tools/mediabot_doctor.pl --conf=mediabot.conf --json
-perl tools/mediabot_doctor.pl --conf=mediabot.conf --domain database
 perl tools/mediabot_doctor.pl --conf=mediabot.conf --domain updater
 ```
 
-The final verdict is intentionally operational:
+`!update status` is local-only and reads `/home/mediabot/.mediabot_v3.update-status.json`; it does not contact GitHub or start an update.
 
-```text
-READY     no blocking problem detected
-DEGRADED  warning or unknown state requires review
-UNSAFE    at least one failing condition makes operation/update unsafe
-```
+See [Troubleshooting](https://github.com/teuk/mediabot_v3/wiki/Troubleshooting) for the evidence checklist and subsystem-specific routes.
 
-`--strict` also returns failure for warnings or unknown states. The Doctor is a
-diagnostic tool only: it does not apply migrations, edit configuration, restart
-services or repair deployment trees.
+## Security
 
----
+- Never run Mediabot as `root`.
+- Keep configuration and provider credentials outside Git.
+- Bind local metrics and optional HTTP services to loopback unless a trusted authenticated proxy is used.
+- Give mbweb a dedicated least-privileged database identity.
+- Do not expose Liquidsoap control sockets to remote IRC clients.
+- Report vulnerabilities privately according to the [security policy](.github/SECURITY.md).
 
-## Syntax checks
+## Community and support
 
-From the project root:
+- [Report a bug](https://github.com/teuk/mediabot_v3/issues/new?template=bug_report.md)
+- [Request a feature](https://github.com/teuk/mediabot_v3/issues/new?template=feature_request.md)
+- [GitHub Discussions](https://github.com/teuk/mediabot_v3/discussions)
+- [Support guidelines](SUPPORT.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
 
-```bash
-cd /home/mediabot/mediabot_v3 || exit 1
-
-perl -c mediabot.pl
-find Mediabot -name '*.pm' -print -exec perl -I. -c {} \;
-perl -c tools/check_schema_drift.pl
-perl -c t/test_commands.pl
-perl -c t/test_live.pl
-```
-
-All files should report `syntax OK`.
-
----
-
-## Tests
-
-Run the full static suite:
-
-```bash
-perl t/test_commands.pl --verbose
-```
-
-Profile the suite without changing its execution order:
-
-```bash
-perl t/test_commands.pl --profile
-```
-
-By default the 20 slowest test files are reported. Choose another limit with:
-
-```bash
-perl t/test_commands.pl --profile-top 30
-```
-
-Profiling is observational only: it does not parallelise, reorder or skip test
-files.
-
-Inspect the conservative MB660 test classification without running the suite:
-
-```bash
-perl t/test_commands.pl --class-summary
-```
-
-List or select a capability family:
-
-```bash
-perl t/test_commands.pl --class PROCESS --list-selected
-perl t/test_commands.pl --class DB --filter 'achievement|schema'
-perl t/test_commands.pl --exclude-class NETWORK --filter 'external|version'
-```
-
-The available tags are `PURE`, `FILESYSTEM`, `PROCESS`, `DB` and `NETWORK`.
-Tags are conservative source-touchpoint metadata: a mocked SQL/HTTP test may
-still carry `DB`/`NETWORK`, and a file can carry multiple tags. The primary
-class is only a reporting convenience. **Classification does not certify that
-a test is safe to run in parallel.** MB660 intentionally adds no parallel
-executor and changes no default full-suite behaviour.
-
-Run the MB661 fast development-validation lane with:
-
-```bash
-perl t/test_commands.pl --fast
-```
-
-For long interactive runs, MB679 adds an opt-in single-line progress display:
-
-```bash
-perl t/test_commands.pl --fast --progress
-perl t/test_commands.pl --progress
-```
-
-Progress is based on selected test files while the counter shows the actual
-number of completed assertions. Passing per-file chatter is hidden until the
-final summary, while failures are still reported. `--progress` is intentionally
-incompatible with `--verbose`; neither default runner behaviour nor test
-selection changes when progress mode is absent.
-
-The fast lane is deterministic: it starts from tests whose MB660 primary class
-is `PURE`, removes a small explicit manifest of profiler-confirmed slow cases,
-then adds a fail-closed set of cross-cutting sentinels for runner isolation,
-dispatch, startup integrity, profiling, classification and module structure.
-Sentinels always win over the slow manifest. If a named sentinel disappears,
-`--fast` refuses to run rather than silently reducing coverage.
-
-`PURE` means dependency-light, not necessarily quick. The slow manifest exists
-because the first real MB661 profile showed that a handful of PURE timing-heavy
-tests dominated the lane. Those cases remain covered by targeted regressions
-and by the default full suite.
-
-Inspect the exact lane without executing it:
-
-```bash
-perl t/test_commands.pl --fast --class-summary
-perl t/test_commands.pl --fast --list-selected
-```
-
-`--filter`, `--class` and `--exclude-class` can further narrow the already
-selected fast lane when debugging. They do not add tests outside it.
-
-**`--fast` is not equivalent to the full suite.** Combine targeted regression
-tests with `--fast` during normal development. Keep the default full suite as
-the global checkpoint for cross-cutting changes and release validation.
-
-MB662 adds an **opt-in parallel pilot** without changing either default runner
-mode:
-
-```bash
-perl t/fast_parallel.pl --jobs 2
-```
-
-The pilot asks the committed MB661 lane for its exact selection, overlaps only
-non-sentinel files whose selected primary class is `PURE`, and runs all 11
-cross-cutting sentinels afterwards in a separate serial stage. It refuses more
-than four jobs and can show the deterministic plan without running tests:
-
-```bash
-perl t/fast_parallel.pl --jobs 2 --plan-only
-```
-
-For equivalence checks, `--expect-assertions <n>` can require the aggregate
-passing assertion count to match a known serial `--fast` reference. The pilot
-is deliberately separate from `t/test_commands.pl`: **MB662 does not make
-`--fast` parallel by default and does not parallelise the full suite.** It is a
-measured experiment that must prove both coverage and stability before any
-parallel mode is promoted.
-
-Run live tests when a local IRC test server is available:
-
-```bash
-perl t/test_live.pl --server localhost --channel '#testchan' --verbose
-```
-
-If `t/full_test.sh` is present, use it for a full validation with logs:
-
-```bash
-./t/full_test.sh -d /tmp/mediabot_tests
-```
-
-Expected final result:
-
-```text
-===== Final verdict =====
-OK: static tests passed
-OK: live tests passed
-OK: logs written successfully
-```
-
-See:
-
-* [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing)
-
----
-
-## First start
-
-Start in foreground first:
-
-```bash
-cd /home/mediabot/mediabot_v3 || exit 1
-
-perl mediabot.pl --conf=mediabot.conf
-```
-
-For production, use the systemd template unit (recommended):
-
-```bash
-sudo systemctl start mediabot@<instance>
-```
-
-See `tools/systemd/README.md` for the systemd setup.
-
-Do not switch to systemd until foreground startup is clean.
-
-Watch for:
-
-* missing Perl modules;
-* database errors;
-* IRC connection errors;
-* charset warnings;
-* missing config keys.
-
----
-
-## First registration and login
-
-When the bot is connected to IRC, register and login by private message to the bot.
-
-Example with a bot named `mediabot`:
-
-```text
-/msg mediabot register <user> <password>
-/msg mediabot login <user> <password>
-```
-
-Then verify with the configured command prefix:
-
-```text
-<prefix>whoami
-```
-
-Examples:
-
-```text
-m whoami
-!whoami
-.whoami
-```
-
-Do not use the public channel for the password.
-
----
-
-## Partyline
-
-Partyline is the Mediabot admin interface.
-
-Connect locally with telnet:
-
-```bash
-telnet localhost 23456
-```
-
-Partyline can also be reached through DCC CHAT or CTCP CHAT depending on your IRC client and bot configuration.
-
-A local TCP Partyline session prompts interactively:
-
-```text
-Mediabot Partyline
-
-Please enter your nickname.
-<user>
-
-Enter your password.
-
-Connected to Mediabot Partyline.
-```
-
-Once authenticated, Partyline commands start with a dot:
-
-```text
-.help
-.stat
-.console 3
-.floodstatus
-.netsplit
-.quit
-```
-
-The Partyline implementation is intentionally split by responsibility. The
-historical `Mediabot::Partyline` package remains the public facade/core, while
-physical implementations live in focused modules:
-
-```text
-Mediabot::Partyline
-    construction, port access and runtime-status publication
-
-Mediabot::Partyline::Transport
-    TCP/DCC listeners, streams and transport boundaries
-
-Mediabot::Partyline::SessionAuth
-    session lifecycle and authentication
-
-Mediabot::Partyline::Dispatcher
-    line and command routing
-
-Mediabot::Partyline::Commands
-    ordinary operator/diagnostic commands
-
-Mediabot::Partyline::Privileged
-    privileged .eval / .die controls
-```
-
-The parent contains no physical `_cmd_*` implementations. Historical method
-names remain available through the facade so callers do not need to know which
-module owns the implementation.
-
-See:
-
-* [Partyline architecture](docs/PARTYLINE_ARCHITECTURE.md)
-* [Partyline and DCC notes](docs/PARTYLINE_DCC.md)
-* [Partyline](https://github.com/teuk/mediabot_v3/wiki/Partyline)
-
----
-
-## Configuration notes
-
-The generated `mediabot.conf` is local runtime configuration.
-
-Important rules:
-
-* do not commit `mediabot.conf`;
-* do not commit real API keys;
-* do not commit real database passwords;
-* do not commit IRC passwords;
-* keep `PARTYLINE_STATUS_JSON` unique per bot instance;
-* keep `METRICS_PORT` unique when multiple bots run on the same host;
-* review `CHARSET_MODE` carefully on legacy databases.
-
-For fresh installs, `CHARSET_MODE=utf8mb4` is recommended.
-
-For old production databases, especially historical IRC instances, review charset behavior before changing it.
-
-See:
-
-* [Configuration](https://github.com/teuk/mediabot_v3/wiki/Configuration)
-
----
-
-## Metrics
-
-If metrics are enabled:
-
-```ini
-[metrics]
-METRICS_ENABLED=1
-METRICS_BIND=127.0.0.1
-METRICS_PORT=9108
-```
-
-Validate:
-
-```bash
-curl -s http://127.0.0.1:9108/metrics | head
-```
-
-Use one metrics port per bot instance.
-
----
-
-## Security notes
-
-Do not run Mediabot as root.
-
-Do not leave temporary passwordless sudo on the `mediabot` user after installation.
-
-If you granted temporary sudo access for installation, remove it before normal IRC use:
-
-```bash
-sudo rm -f /etc/sudoers.d/mediabot
-sudo -k
-```
-
-Then verify:
-
-```bash
-sudo -n true && echo "ERROR: sudo still active" || echo "OK: no passwordless sudo"
-```
-
-A bot connected to IRC must not have passwordless root access.
-
-Recent versions also avoid logging some runtime secrets such as DCC passive tokens and channel JOIN keys.
-
-For security vulnerabilities, do not open a public Issue or disclose the problem in a public IRC channel.
-
-Use GitHub's private vulnerability reporting feature and read:
-
-* [Security policy](.github/SECURITY.md)
-
----
-
-## Troubleshooting
-
-Start with:
-
-```bash
-cd /home/mediabot/mediabot_v3 || exit 1
-
-perl -c mediabot.pl
-find Mediabot -name '*.pm' -print -exec perl -I. -c {} \;
-perl tools/check_schema_drift.pl --conf=mediabot.conf --strict
-./t/full_test.sh -d /tmp/mediabot_tests
-```
-
-Then check:
-
-```bash
-tail -n 100 mediabot.log
-```
-
-or instance-specific log paths.
-
-Common issues are documented here:
-
-* [Troubleshooting](https://github.com/teuk/mediabot_v3/wiki/Troubleshooting)
-* [Partyline architecture](docs/PARTYLINE_ARCHITECTURE.md)
-
----
-
-## Useful links
-
-### Documentation
-
-* [Repository](https://github.com/teuk/mediabot_v3)
-* [Wiki](https://github.com/teuk/mediabot_v3/wiki)
-* [Installation](https://github.com/teuk/mediabot_v3/wiki/Installation)
-* [Configuration](https://github.com/teuk/mediabot_v3/wiki/Configuration)
-* [Testing](https://github.com/teuk/mediabot_v3/wiki/Testing)
-* [Troubleshooting](https://github.com/teuk/mediabot_v3/wiki/Troubleshooting)
-
-### Community
-
-* [Report a bug](https://github.com/teuk/mediabot_v3/issues/new?template=bug_report.md)
-* [Request a feature](https://github.com/teuk/mediabot_v3/issues/new?template=feature_request.md)
-* [GitHub Discussions](https://github.com/teuk/mediabot_v3/discussions)
-* [Support guidelines](SUPPORT.md)
-* [Contribution guidelines](CONTRIBUTING.md)
-* [Code of Conduct](CODE_OF_CONDUCT.md)
-* [Security policy](.github/SECURITY.md)
-
-### Live IRC support
-
-* **Network:** EpiKnet
-* **Server:** `irc.epiknet.org`
-* **Port:** `6697`
-* **Encryption:** SSL/TLS
-* **Channel:** `#i/o`
-
----
+Live IRC support is available on EpiKnet (`irc.epiknet.org`, TLS port `6697`) in `#i/o`.
 
 ## License
 
-Mediabot v3 is free software licensed under the **GNU General Public License version 3 or later**.
-
-SPDX license identifier: `GPL-3.0-or-later`
-
-See [LICENSE.md](LICENSE.md) for the complete GNU GPL version 3 license text.
-
-### Shared radio requests (development)
-
-Enable `+Radio` for public `play <YouTube URL>` and `rplay <artist or title>`.
-One local HTTP API is the default; several bots can share it over authenticated
-HTTPS. See [radio setup](docs/RADIO.md) for installation and stream acceptance.
+Mediabot v3 is free software licensed under the **GNU General Public License version 3 or later** (`GPL-3.0-or-later`). See [LICENSE.md](LICENSE.md).
