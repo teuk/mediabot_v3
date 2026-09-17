@@ -6,6 +6,7 @@ use Mediabot::AI::ConversationDryRun;
 use Mediabot::AI::ConversationObserver;
 use Mediabot::AI::ConversationEmission;
 use Mediabot::AI::ConversationSender;
+use Mediabot::Spark::Identity ();
 
 {
     package MB732Runtime::Executor;

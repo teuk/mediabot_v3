@@ -17,7 +17,9 @@ use Mediabot::Spark::ActionPolicy qw(
 );
 use Mediabot::Spark::Event qw(spark_event_profile);
 use Mediabot::Spark::Policy qw(evaluate_spark_start spark_policy_summary);
-use Mediabot::Spark::Selector qw(select_spark_event spark_selector_summary);
+use Mediabot::Spark::Selector qw(
+    select_spark_event select_spark_action spark_selector_summary
+);
 use Mediabot::Spark::State;
 
 our $VERSION = '1.0';
@@ -128,6 +130,8 @@ sub _rt {
     return $self->{runtime}{$key} ||= {
         cursor        => 0,
         last_kind     => undef,
+        action_cursor => 0,
+        last_action_kind => undef,
         next_probe_at => 0,
         next_action_probe_at => 0,
         action_cooldown_until => 0,
@@ -317,9 +321,28 @@ sub evaluate_action_channel {
         };
     }
 
-    my $profile = spark_event_profile('stage_cue');
     my $context = eval { $self->{observer}->context_lines($channel) };
     $context = [] unless ref($context) eq 'ARRAY';
+    my $selection = select_spark_action(
+        ai_available => 1,
+        context_lines => scalar(@$context),
+        cursor => $rt->{action_cursor},
+        last_kind => $rt->{last_action_kind},
+        audience_regime => $adaptive->{audience_regime},
+    );
+    my $safe_selection = spark_selector_summary($selection) || {
+        action => 'skip', reason => 'action_selector_error',
+    };
+    if (($safe_selection->{action} // '') ne 'select') {
+        $rt->{next_action_probe_at} = $now + $self->{action_probe_seconds};
+        return {
+            action => 'skip', reason => $safe_selection->{reason},
+            audience_regime => $adaptive->{audience_regime},
+        };
+    }
+    my $profile = spark_event_profile($safe_selection->{kind});
+    $rt->{action_cursor} = int($safe_selection->{next_cursor});
+    $rt->{last_action_kind} = $safe_selection->{kind};
     # A candidate consumes the current momentum window. New public activity
     # resets this probe below; without it, a declined provider result cannot
     # trigger repeated requests against the same paused conversation.
@@ -708,7 +731,7 @@ sub format_dryrun_log {
     return undef unless ref($summary) eq 'HASH';
     return undef unless ($summary->{action} // '') eq 'dryrun_candidate';
     return undef unless _plain_scalar($summary->{kind})
-        && "$summary->{kind}" =~ /^(?:fork|portal|callback|reaction|mosaic|vdm)\z/;
+        && "$summary->{kind}" =~ /^(?:portal|callback|reaction|aside|micro_scene|vdm)\z/;
 
     my @parts = (
         '[SPARK_DRYRUN]',
@@ -745,14 +768,14 @@ sub format_action_candidate_log {
     return undef unless ref($summary) eq 'HASH';
     return undef unless ($summary->{action} // '') eq 'action_candidate';
     return undef unless ($summary->{lane} // '') eq 'momentum';
-    return undef unless ($summary->{kind} // '') eq 'stage_cue';
+    return undef unless ($summary->{kind} // '') =~ /^(?:stage_cue|afterglow)\z/;
 
     my @parts = (
         '[SPARK_ACTION_CANDIDATE]',
         'channel=' . $channel,
         'action=action_candidate',
         'lane=momentum',
-        'kind=stage_cue',
+        'kind=' . $summary->{kind},
     );
     push @parts, 'audience_regime=' . $summary->{audience_regime}
         if _plain_scalar($summary->{audience_regime})

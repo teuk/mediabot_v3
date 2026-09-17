@@ -33,6 +33,13 @@ Quip and the combined mode require at least three recent human lines from two
 people. A dedicated bounded observer keeps at most eight lines of 240 characters
 within five minutes. It drops commands, bot triggers and known bot text. Configure
 `main.BOT_NICKS` accurately: unknown automation cannot be identified reliably.
+Automation that should remain visible to other bot features but must never feed
+Wit or Quip belongs in `main.WIT_IGNORE_NICKS`. The sample configuration sets
+it to `Coin`; matching is case-insensitive and follows the IRC nickname casemap.
+An ignored nick cannot trigger a request and none of its text enters the eight-line
+context window. An upgraded instance whose private configuration does not yet
+contain the key also defaults to `Coin`; an explicit value may add or replace
+the configured names.
 
 Commands and known bot output leave a 30-second breathing space. Active local
 games, active Spark events and pending Spark AI work also block a Quip request

@@ -75,8 +75,8 @@ return sub {
         'mb710-1008: one human may receive a rare contextual revival');
     $assert->is($solo_candidate->{audience_regime}, 'solo',
         'mb710-1008: revival candidate carries its audience regime');
-    $assert->is($solo_candidate->{kind}, 'reaction',
-        'mb710-1008: solo revival avoids a forced group interaction');
+    $assert->is($solo_candidate->{kind}, 'aside',
+        'mb739-1008: solo revival uses a response-free autonomous aside');
     $assert->is($solo_candidate->{policy_silence_seconds}, 2_400,
         'mb710-1008: candidate exposes the applied solo silence policy');
 

@@ -11,6 +11,8 @@ our @EXPORT_OK = qw(
     spark_event_kinds
     spark_event_profile
     spark_event_requires_response
+    spark_event_is_momentum
+    spark_event_is_selectable
     spark_event_catalog_summary
 );
 
@@ -22,6 +24,8 @@ my %PROFILE = (
         ai_use => 'optional',
         interaction => 'choice',
         requires_response => 1,
+        lane => 'retired',
+        selectable => 0,
     },
     portal => {
         duration_seconds => 75,
@@ -30,6 +34,8 @@ my %PROFILE = (
         ai_use => 'optional',
         interaction => 'contributions',
         requires_response => 1,
+        lane => 'revival',
+        selectable => 1,
     },
     mosaic => {
         duration_seconds => 75,
@@ -39,6 +45,8 @@ my %PROFILE = (
         interaction => 'word_mosaic',
         requires_response => 1,
         delivery_style => 'message',
+        lane => 'retired',
+        selectable => 0,
     },
     callback => {
         duration_seconds => 45,
@@ -47,6 +55,8 @@ my %PROFILE = (
         ai_use => 'preferred',
         interaction => 'conversation',
         requires_response => 0,
+        lane => 'revival',
+        selectable => 1,
     },
     reaction => {
         duration_seconds => 45,
@@ -56,6 +66,30 @@ my %PROFILE = (
         interaction => 'conversation',
         requires_response => 0,
         delivery_style => 'message',
+        lane => 'revival',
+        selectable => 1,
+    },
+    aside => {
+        duration_seconds => 45,
+        min_recent_humans => 1,
+        needs_context => 0,
+        ai_use => 'required',
+        interaction => 'autonomous_aside',
+        requires_response => 0,
+        delivery_style => 'message',
+        lane => 'revival',
+        selectable => 1,
+    },
+    micro_scene => {
+        duration_seconds => 45,
+        min_recent_humans => 1,
+        needs_context => 0,
+        ai_use => 'required',
+        interaction => 'autonomous_scene',
+        requires_response => 0,
+        delivery_style => 'message',
+        lane => 'revival',
+        selectable => 1,
     },
     stage_cue => {
         duration_seconds => 45,
@@ -65,6 +99,19 @@ my %PROFILE = (
         interaction => 'ambient_action',
         requires_response => 0,
         delivery_style => 'action',
+        lane => 'momentum',
+        selectable => 1,
+    },
+    afterglow => {
+        duration_seconds => 45,
+        min_recent_humans => 3,
+        needs_context => 1,
+        ai_use => 'required',
+        interaction => 'ambient_epilogue',
+        requires_response => 0,
+        delivery_style => 'message',
+        lane => 'momentum',
+        selectable => 1,
     },
     vdm => {
         duration_seconds => 45,
@@ -74,6 +121,8 @@ my %PROFILE = (
         interaction => 'story',
         requires_response => 0,
         delivery_style => 'message',
+        lane => 'revival',
+        selectable => 1,
     },
 );
 
@@ -94,7 +143,7 @@ sub _kind {
 }
 
 sub spark_event_kinds {
-    return [ qw(fork portal callback reaction mosaic stage_cue vdm) ];
+    return [ qw(fork portal callback reaction mosaic aside micro_scene stage_cue afterglow vdm) ];
 }
 
 sub spark_event_profile {
@@ -114,6 +163,20 @@ sub spark_event_requires_response {
     return $PROFILE{$kind}{requires_response} ? 1 : 0;
 }
 
+sub spark_event_is_momentum {
+    my ($kind) = @_;
+    $kind = _kind($kind);
+    croak 'unknown Spark event kind' unless defined $kind;
+    return ($PROFILE{$kind}{lane} // '') eq 'momentum' ? 1 : 0;
+}
+
+sub spark_event_is_selectable {
+    my ($kind) = @_;
+    $kind = _kind($kind);
+    croak 'unknown Spark event kind' unless defined $kind;
+    return $PROFILE{$kind}{selectable} ? 1 : 0;
+}
+
 sub spark_event_catalog_summary {
     my @out;
     for my $kind (@{ spark_event_kinds() }) {
@@ -127,6 +190,8 @@ sub spark_event_catalog_summary {
             interaction        => "$p->{interaction}",
             requires_response  => $p->{requires_response} ? 1 : 0,
             delivery_style     => "$p->{delivery_style}",
+            lane               => "$p->{lane}",
+            selectable         => $p->{selectable} ? 1 : 0,
         };
     }
     return \@out;

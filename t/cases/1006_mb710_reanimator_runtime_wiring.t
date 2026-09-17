@@ -25,8 +25,8 @@ return sub {
         'mb710-1006: production imports the generic bot identity boundary');
     $assert->like($main, qr/configured_bot_nicks\s*=>\s*\n?\s*\$mediabot->\{conf\}->get\('main\.BOT_NICKS'\)/s,
         'mb710-1006: runtime uses the existing generic configured bot list');
-    $assert->ok(scalar(() = $main =~ /from_bot\s*=>\s*\$from_conversation_bot/g) >= 1,
-        'mb710-1006: the shared bot decision reaches conversational lanes');
+    $assert->like($main, qr/from_bot\s*=>\s*\$from_wit_ignored/,
+        'mb739-1006: Wit and Quip receive their dedicated ignored-bot decision');
     $assert->like($main, qr/_spark_observe_public_line\(.*?\$from_conversation_bot/s,
         'mb710-1006: Spark receives the shared bot decision');
     $assert->like($main, qr/initial_trigger_enabled\s*=>.*?MAIN_PROG_INITIAL_TRIGGER/s,

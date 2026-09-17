@@ -15,8 +15,8 @@ return sub {
         recent_humans => 1, context_lines => 4, ai_available => 1,
         audience_regime => 'solo', cursor => 0,
     );
-    $assert->is($solo->{kind}, 'reaction',
-        'mb710-1009: solo schedule starts with a contextual reaction');
+    $assert->is($solo->{kind}, 'aside',
+        'mb739-1009: solo schedule starts with a self-contained aside');
     $assert->is($solo->{audience_regime}, 'solo',
         'mb710-1009: selector preserves the policy regime');
 
@@ -28,18 +28,18 @@ return sub {
         'mb710-1009: solo fallback fails closed without contextual AI');
 
     my $small = select_spark_event(
-        recent_humans => 3, context_lines => 0, ai_available => 0,
+        recent_humans => 3, context_lines => 0, ai_available => 1,
         audience_regime => 'small', cursor => 1,
     );
-    $assert->is($small->{kind}, 'fork',
-        'mb710-1009: a dominance-limited small room avoids Portal');
+    $assert->is($small->{kind}, 'micro_scene',
+        'mb739-1009: a small quiet room gets an autonomous micro-scene');
 
     my $crowded = select_spark_event(
         recent_humans => 7, context_lines => 8, ai_available => 1,
-        audience_regime => 'crowded', cursor => 1,
+        audience_regime => 'crowded', cursor => 4,
     );
     $assert->is($crowded->{kind}, 'portal',
-        'mb710-1009: crowded schedule makes contribution play more available');
+        'mb739-1009: crowded schedule retains occasional contribution play');
 
     my $summary = spark_selector_summary($crowded);
     $assert->is($summary->{audience_regime}, 'crowded',

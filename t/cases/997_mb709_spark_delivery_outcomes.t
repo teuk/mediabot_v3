@@ -18,7 +18,8 @@ return sub {
 
     my %expected = (
         fork => 1, portal => 1, mosaic => 1,
-        callback => 0, reaction => 0, stage_cue => 0, vdm => 0,
+        callback => 0, reaction => 0, aside => 0, micro_scene => 0,
+        stage_cue => 0, afterglow => 0, vdm => 0,
     );
     for my $kind (@{ spark_event_kinds() }) {
         $assert->is(

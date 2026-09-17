@@ -19,7 +19,7 @@ It also requires both default-off process switches:
 - `SPARK_SEND_ARMED=1` authorizes Spark delivery globally;
 - `SPARK_ACTION_SEND_ARMED=1` authorizes this action lane specifically.
 
-## First action family
+## Momentum repertoire
 
 `stage_cue` is a contextual ambient action. After recent multi-human activity
 enters a short breathing pause, the provider may produce one compact stage
@@ -31,6 +31,14 @@ The model returns a plain action body. The guarded sender rejects control
 characters, `/me`, CTCP markers and protocol-shaped output before constructing
 the single CTCP ACTION frame itself. Generated text is never written to Spark
 diagnostic logs.
+
+`afterglow` uses the same authorization and pacing but sends an ordinary IRC
+message: a short mock incident report, suspicious consequence, wrong-window
+afterthought or deadpan epilogue tied to one concrete conversational detail.
+It cannot name participants, ask for input or merely paraphrase the exchange.
+The deterministic selector alternates the two families and avoids an immediate
+repeat. A declined generation stays silent and consumes the current momentum
+window; it never falls through to a second provider request.
 
 The momentum policy considers a channel only after recent multi-human activity
 has reached both participation thresholds and the conversation has entered a
@@ -83,10 +91,10 @@ scales those baselines centrally:
 | Regime | Typical shape | Revival silence | Momentum delivery budget | Selection posture |
 | --- | --- | ---: | ---: | --- |
 | `empty` | no human evidence | 200% | 200% | no candidate |
-| `solo` | one effective voice | 200% | 200% | contextual Reaction or Callback only |
-| `small` | two balanced voices | 150% | 150% | patient; two-voice Flash Mosaic, no Portal |
+| `solo` | one effective voice | 200% | 200% | autonomous Aside/Micro-scene; contextual Reaction/Callback when justified |
+| `small` | two balanced voices | 150% | 150% | patient autonomous repertoire, no Portal |
 | `social` | balanced conversation | 100% | 100% | reviewed baseline behavior |
-| `crowded` | large balanced audience | 60% | 67% | shorter pauses; four-voice Mosaic and more Portal |
+| `crowded` | large balanced audience | 60% | 67% | shorter pauses and occasional Portal |
 
 The effective-human count is authoritative, not the raw nick count. A speaker
 holding at least 75% of the recency-weighted conversation demotes the policy by
@@ -94,10 +102,12 @@ one regime. Five balanced voices can reach `crowded` through sustained human
 cadence. Recent bot pressure remains a hard postponement gate rather than an
 excuse to increase activity.
 
-`solo` does not enable momentum actions: it only permits a rare, contextual
-long-silence Reaction or Callback when AI and at least three clean context
-lines are available. It never produces Fork, Portal or source-backed story
-selection for a single effective voice. An offline replay against anonymized
+`solo` does not enable momentum actions. The long-silence lane may instead emit
+an autonomous `aside` or `micro_scene`, even when the old conversation offers no
+usable callback. These are one-line, self-contained interventions: no question,
+vote, score, named target or expected response. Reaction and Callback remain
+available when at least three clean context lines offer a real hook. Portal and
+source-backed stories remain unavailable to a single effective voice. An offline replay against anonymized
 channel histories fixes this at the orchestrator boundary: two raw nicks do not
 enable momentum when speaker dominance still classifies the room as `solo`.
 Small momentum accepts a real two-human exchange with a proportionally lower
@@ -110,29 +120,19 @@ cooldown continues to block SparkAction in the other direction. Candidate logs
 include the bounded regime and applied pacing values, never text or nicknames.
 No new configuration key is required.
 
-## Flash Mosaic
+## Long-silence repertoire
 
-`mosaic` is a bounded collective event in the long-silence Spark lane. Its
-opening is deterministic and states both the only accepted syntax and the
-current target: `+word`, one word per person. The audience regime sets that
-target to two voices in `small`, three in `social`, and four in `crowded`.
-`solo` and `empty` can never select it.
+`aside` behaves like a quiet regular who finally drops one dry observation: a
+mock status, a note about the atmosphere, or an absurd conclusion that makes
+the room feel inhabited. `micro_scene` adds a compact visual gag with at most
+two beats. Both are autonomous and may use recent context as inspiration, but
+neither fabricates channel history or waits for participation.
 
-Only a single Unicode word of at most 24 characters is accepted from each
-distinct nick. Apostrophes and hyphens may occur inside a word. Ordinary
-messages, multiple words, commands, bot traffic, duplicates and late replies
-do not enter the collector. The event closes as soon as its target is reached,
-or at its 75-second deadline when at least two valid voices participated.
-Zero or one valid response remains a genuine miss.
-
-The closing provider request contains the bounded words but no nicknames. It
-must produce one compact payoff without naming, ranking or scoring anyone,
-asking for more input, or starting another round. Unsafe material may be
-omitted or rephrased instead of echoed. The same event generation receives at
-most one time-bounded continuation through the guarded sender. Every live gate
-is rechecked, and all ephemeral words are destroyed on success, miss, timeout
-or technical failure. `[SPARK_MOSAIC]` diagnostics contain lifecycle counts and
-targets only.
+Reaction and Callback keep their stricter contextual role. Portal remains a
+rare collaborative option only for a sufficiently social room. The old
+forced-choice and one-word collection families are retained solely so an event
+already present during a rolling update can be decoded safely; the selector
+marks them retired and cannot start a new one.
 
 ## Participation outcomes
 

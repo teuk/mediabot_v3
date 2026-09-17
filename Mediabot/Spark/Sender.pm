@@ -5,7 +5,7 @@ use warnings;
 
 use Carp qw(croak);
 use Encode qw(encode_utf8);
-use Mediabot::Spark::Event qw(spark_event_profile);
+use Mediabot::Spark::Event qw(spark_event_profile spark_event_is_momentum);
 use Mediabot::VDM qw(format_vdm_line);
 
 our $VERSION = '1.0';
@@ -59,7 +59,7 @@ sub _result {
         $out{$key} = int($extra{$key});
     }
     $out{kind} = $extra{kind}
-        if _plain_scalar($extra{kind}) && "$extra{kind}" =~ /^(?:fork|portal|callback|reaction|mosaic|stage_cue|vdm)\z/;
+        if _plain_scalar($extra{kind}) && "$extra{kind}" =~ /^(?:fork|portal|callback|reaction|mosaic|aside|micro_scene|stage_cue|afterglow|vdm)\z/;
     $out{delivery} = $extra{delivery}
         if _plain_scalar($extra{delivery})
             && "$extra{delivery}" =~ /^(?:message|action)\z/;
@@ -281,7 +281,7 @@ sub attempt_send {
         return _result('no_send', $gate->[1], generation => $generation, kind => $kind)
             unless $state->{ $gate->[0] };
     }
-    if ($kind eq 'stage_cue') {
+    if (spark_event_is_momentum($kind)) {
         return _result(
             'no_send', 'action_disabled', generation => $generation,
             kind => $kind, delivery => $delivery,
@@ -371,7 +371,7 @@ sub format_sender_log {
         'reason=' . $summary->{reason},
     );
     push @parts, 'kind=' . $summary->{kind}
-        if _plain_scalar($summary->{kind}) && "$summary->{kind}" =~ /^(?:fork|portal|callback|reaction|mosaic|stage_cue|vdm)\z/;
+        if _plain_scalar($summary->{kind}) && "$summary->{kind}" =~ /^(?:fork|portal|callback|reaction|mosaic|aside|micro_scene|stage_cue|afterglow|vdm)\z/;
     push @parts, 'delivery=' . $summary->{delivery}
         if _plain_scalar($summary->{delivery})
             && "$summary->{delivery}" =~ /^(?:message|action)\z/;

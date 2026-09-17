@@ -10,6 +10,25 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb739 — give quiet channels an autonomous comic pulse
+
+- Replace new Fork and Mosaic selection with two response-free long-silence
+  families: `aside` drops a dry, self-contained observation and `micro_scene`
+  stages a compact one-line visual gag. Both work for a genuine solo audience,
+  require no vote or special reply syntax, and preserve the adaptive audience,
+  flood, game, shared-budget and late-generation gates.
+- Expand `SparkAction` with `afterglow`, an ordinary-message epilogue that can
+  turn recent conversation into a mock incident report, suspicious consequence
+  or deadpan final status. It alternates with CTCP `stage_cue`, uses the same
+  separate channel/process authorization and consumes the same cooldown.
+- Mark Fork and Mosaic as retired, non-selectable compatibility families so a
+  stale in-memory event can still be decoded safely but no new round can start.
+- Add `main.WIT_IGNORE_NICKS`, defaulting to `Coin` in the sample configuration.
+  Matching follows the IRC casemap; ignored automation cannot trigger Wit or
+  Quip and never enters their bounded context.
+- Extend metadata-only diagnostics, guarded sending, documentation and offline
+  coverage for the new repertoire without logging prompts or generated text.
+
 ### mb738 — align achievements with channel civil time and durable evidence
 
 - Add an explicit IANA timezone to every channel, editable by authenticated

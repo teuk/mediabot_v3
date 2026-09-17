@@ -5,11 +5,14 @@ use warnings;
 
 use Exporter 'import';
 
-use Mediabot::Spark::Event qw(spark_event_kinds spark_event_profile);
+use Mediabot::Spark::Event qw(
+    spark_event_kinds spark_event_profile spark_event_is_selectable
+);
 
 our $VERSION = '1.0';
 our @EXPORT_OK = qw(
     select_spark_event
+    select_spark_action
     spark_selector_summary
 );
 
@@ -60,23 +63,23 @@ sub select_spark_event {
 
     my @eligible;
     for my $kind (@{ spark_event_kinds() }) {
-        # Stage Cue belongs exclusively to the separately authorized momentum
-        # lane. Catalog growth must never leak it into long-silence selection.
-        next if $kind eq 'stage_cue';
+        my $p = spark_event_profile($kind);
+        next unless spark_event_is_selectable($kind);
+        next unless ($p->{lane} // '') eq 'revival';
         next if $audience_regime eq 'empty';
         next if $audience_regime eq 'solo'
             && $kind ne 'reaction'
-            && $kind ne 'callback';
+            && $kind ne 'callback'
+            && $kind ne 'aside'
+            && $kind ne 'micro_scene';
         next if $audience_regime eq 'small' && $kind eq 'portal';
-        my $p = spark_event_profile($kind);
         my $required_humans = $p->{min_recent_humans};
         $required_humans = 1
             if $audience_regime eq 'solo'
                 && ($kind eq 'reaction' || $kind eq 'callback');
         next if $humans < $required_humans;
         next if $p->{needs_context} && $context_lines < 3;
-        next if ($kind eq 'callback' || $kind eq 'reaction') && !$ai_available;
-        next if $kind eq 'mosaic' && !$ai_available;
+        next if $p->{ai_use} ne 'never' && !$ai_available;
         next if $kind eq 'vdm' && !$vdm_enabled;
         push @eligible, $kind;
     }
@@ -88,26 +91,24 @@ sub select_spark_event {
 
     my %eligible = map { $_ => 1 } @eligible;
 
-    # Contextual weighted schedule, kept deterministic for reproducible tests and
-    # operations. Reaction/Callback dominate rich context, Fork stays available,
-    # Portal remains occasional until its contribution runtime is completed, and
-    # VDM stays a rare source-backed variation when +VDM is enabled.
+    # Deterministic variety: autonomous lines dominate quiet rooms, contextual
+    # callbacks return when the room offers a real hook, and Portal stays rare.
     my @schedule;
     if ($audience_regime eq 'solo') {
-        @schedule = qw(reaction callback reaction);
+        @schedule = qw(aside micro_scene reaction aside callback micro_scene);
     }
     elsif ($audience_regime eq 'crowded'
         && $ai_available && $context_lines >= 6) {
-        @schedule = qw(reaction portal callback mosaic reaction portal fork vdm);
+        @schedule = qw(reaction micro_scene callback aside portal reaction micro_scene vdm);
     }
     elsif ($ai_available && $context_lines >= 6) {
-        @schedule = qw(reaction callback reaction mosaic fork callback portal reaction vdm);
+        @schedule = qw(reaction aside callback micro_scene reaction aside portal vdm);
     }
     elsif ($ai_available && $context_lines >= 3) {
-        @schedule = qw(reaction fork callback mosaic reaction portal fork vdm);
+        @schedule = qw(aside reaction micro_scene callback aside portal vdm);
     }
     else {
-        @schedule = qw(fork portal fork mosaic vdm);
+        @schedule = qw(aside micro_scene portal vdm);
     }
 
     @schedule = grep { $eligible{$_} } @schedule;
@@ -136,6 +137,32 @@ sub select_spark_event {
         candidate_count    => scalar(@eligible),
         next_cursor        => $cursor + 1,
         audience_regime    => $audience_regime,
+    };
+}
+
+sub select_spark_action {
+    my (%args) = @_;
+    my $context_lines = _nonneg_int($args{context_lines}, 0);
+    return { action => 'skip', reason => 'ai_unavailable' }
+        unless _bool($args{ai_available});
+    return { action => 'skip', reason => 'context_too_small' }
+        if $context_lines < 3;
+
+    my $cursor = _nonneg_int($args{cursor}, 0);
+    my $last_kind = _normal_kind($args{last_kind});
+    my @schedule = qw(stage_cue afterglow afterglow stage_cue);
+    if (defined $last_kind) {
+        my @without_repeat = grep { $_ ne $last_kind } @schedule;
+        @schedule = @without_repeat if @without_repeat;
+    }
+    my $kind = $schedule[$cursor % @schedule];
+    my $profile = spark_event_profile($kind);
+    return {
+        action => 'select', reason => 'momentum_schedule', kind => $kind,
+        duration_seconds => int($profile->{duration_seconds}),
+        ai_use => "$profile->{ai_use}", interaction => "$profile->{interaction}",
+        candidate_count => 2, next_cursor => $cursor + 1,
+        audience_regime => _normal_regime($args{audience_regime}),
     };
 }
 

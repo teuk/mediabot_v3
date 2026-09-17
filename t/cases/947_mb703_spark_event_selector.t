@@ -19,14 +19,16 @@ return sub {
     my ($assert) = @_;
 
     my $kinds = spark_event_kinds();
-    $assert->is(join(',', @$kinds[0..2]), 'fork,portal,callback',
-        'mb703-947: initial Spark catalog still begins with Fork, Portal and Callback');
+    $assert->ok(grep($_ eq 'aside', @$kinds) && grep($_ eq 'micro_scene', @$kinds),
+        'mb739-947: catalog includes both autonomous revival families');
 
     my $fork = spark_event_profile('FORK');
     $assert->is($fork->{duration_seconds}, 60,
         'mb703-947: Fork uses a short 60-second event window');
     $assert->is($fork->{min_recent_humans}, 2,
         'mb703-947: Fork needs at least two recent humans');
+    $assert->ok(!$fork->{selectable} && $fork->{lane} eq 'retired',
+        'mb739-947: legacy Fork remains decodable but cannot be selected');
 
     my $portal = spark_event_profile('portal');
     $assert->is($portal->{min_recent_humans}, 3,
@@ -49,40 +51,42 @@ return sub {
         'mb708: catalog contains the original families plus Reaction and VDM');
 
     my $sel = select_spark_event(
-        recent_humans => 2,
+        recent_humans => 1,
         context_lines => 0,
-        ai_available  => 0,
+        ai_available  => 1,
+        audience_regime => 'solo',
         cursor        => 0,
     );
-    $assert->is($sel->{kind}, 'fork',
-        'mb703-947: Fork is the deterministic low-context baseline');
+    $assert->is($sel->{kind}, 'aside',
+        'mb739-947: Aside is the autonomous low-context baseline');
 
     $sel = select_spark_event(
         recent_humans => 3,
         context_lines => 0,
-        ai_available  => 0,
-        cursor        => 1,
+        ai_available  => 1,
+        audience_regime => 'social',
+        cursor        => 5,
     );
     $assert->is($sel->{kind}, 'portal',
-        'mb703-947: Portal becomes eligible with three recent humans');
+        'mb739-947: Portal remains an occasional social option');
 
     my $reaction_pick = select_spark_event(
         recent_humans => 3,
-        context_lines => 5,
+        context_lines => 6,
         ai_available  => 1,
         cursor        => 0,
     );
     $assert->is($reaction_pick->{kind}, 'reaction',
-        'mb708: rich recent context prefers a natural Reaction over a forced-choice prompt');
+        'mb739-947: rich recent context still starts with a natural Reaction');
 
     $sel = select_spark_event(
         recent_humans => 3,
-        context_lines => 5,
+        context_lines => 6,
         ai_available  => 1,
         cursor        => 2,
     );
     $assert->is($sel->{kind}, 'callback',
-        'mb708: contextual schedule still gives Callback a regular slot');
+        'mb739-947: contextual schedule still gives Callback a regular slot');
 
     my $no_repeat = select_spark_event(
         recent_humans => 3,
@@ -97,12 +101,13 @@ return sub {
         'mb708: selector exposes the contextual schedule decision rather than catalog-order rotation');
 
     my $none = select_spark_event(
-        recent_humans => 1,
+        recent_humans => 0,
         context_lines => 8,
         ai_available  => 1,
+        audience_regime => 'empty',
     );
     $assert->is($none->{action}, 'skip',
-        'mb703-947: insufficient audience fails closed');
+        'mb739-947: empty audience fails closed');
     $assert->is($none->{reason}, 'no_eligible_event',
         'mb703-947: selector skip reason is explicit');
 

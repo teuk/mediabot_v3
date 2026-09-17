@@ -21,7 +21,9 @@ sub _nick_key {
     return undef unless length($nick) >= 1
         && length($nick) <= 100
         && $nick !~ /[\s,:\x00-\x1f\x7f]/;
-    return lc $nick;
+    $nick = lc $nick;
+    $nick =~ tr/[]\\^/{}|~/;
+    return $nick;
 }
 
 sub is_known_bot_nick {

@@ -13,12 +13,10 @@ return sub {
     my ($assert) = @_;
 
     my $profile = spark_event_profile('mosaic');
-    $assert->is($profile->{interaction}, 'word_mosaic',
-        'mb710-1013: Mosaic declares its own explicit response contract');
-    $assert->is($profile->{min_recent_humans}, 2,
-        'mb710-1013: two real voices are the minimum audience');
-    $assert->is($profile->{ai_use}, 'required',
-        'mb710-1013: selection requires a possible closing synthesis');
+    $assert->is($profile->{lane}, 'retired',
+        'mb739-1013: Mosaic is retained only for rolling-state compatibility');
+    $assert->ok(!$profile->{selectable},
+        'mb739-1013: no new Mosaic can be selected');
 
     my (%solo, %small, %social, %crowded, %offline);
     for my $cursor (0 .. 31) {
@@ -42,12 +40,11 @@ return sub {
         }
     }
 
-    $assert->ok(!$solo{mosaic},
-        'mb710-1013: solo schedule never pretends to be collective');
-    $assert->ok($small{mosaic} && $social{mosaic} && $crowded{mosaic},
-        'mb710-1013: every genuinely collective regime can reach Mosaic');
-    $assert->ok(!$offline{mosaic},
-        'mb710-1013: Mosaic fails closed without closing AI');
-    $assert->ok($crowded{portal} && $crowded{mosaic} && $crowded{reaction},
-        'mb710-1013: crowded rooms retain varied behavior instead of one dominant game');
+    $assert->ok(!$solo{mosaic} && !$small{mosaic} && !$social{mosaic}
+            && !$crowded{mosaic} && !$offline{mosaic},
+        'mb739-1013: Mosaic is unreachable in every audience regime');
+    $assert->ok($solo{aside} && $solo{micro_scene},
+        'mb739-1013: solo rooms receive autonomous variety');
+    $assert->ok($crowded{portal} && $crowded{micro_scene} && $crowded{reaction},
+        'mb739-1013: crowded rooms retain collaborative, autonomous and contextual variety');
 };

@@ -37,7 +37,9 @@ use Mediabot::Spark::Mosaic qw(
     mosaic_opening_generation
 );
 use Mediabot::Spark::Identity ();
-use Mediabot::Spark::Event qw(spark_event_requires_response);
+use Mediabot::Spark::Event qw(
+    spark_event_requires_response spark_event_is_momentum
+);
 use Mediabot::VDM::Runtime ();
 use Mediabot::Radio::Icecast;
 use Mediabot::DB;
@@ -373,7 +375,8 @@ sub _spark_finish_ambient_delivery {
     my $requires_response = eval { spark_event_requires_response($kind) };
     return 0 if $@ || $requires_response;
 
-    my $action_cooldown = $kind eq 'stage_cue'
+    my $momentum_kind = eval { spark_event_is_momentum($kind) } ? 1 : 0;
+    my $action_cooldown = $momentum_kind
         ? eval {
             $bot->{spark_orchestrator}->action_cooldown_seconds($channel)
         }
@@ -391,7 +394,7 @@ sub _spark_finish_ambient_delivery {
     return 0 unless ref($done) eq 'HASH';
 
     my $action_pacing;
-    if ($kind eq 'stage_cue' && $bot->{spark_orchestrator}) {
+    if ($momentum_kind && $bot->{spark_orchestrator}) {
         $action_pacing = eval {
             $bot->{spark_orchestrator}->mark_action_delivered($channel)
         };
@@ -420,6 +423,7 @@ sub _spark_handle_candidate {
     my $kind = $candidate->{kind};
     my $generated = $candidate->{generated};
     return 0 unless defined($kind) && ref($generated) eq 'HASH';
+    my $momentum_kind = eval { spark_event_is_momentum($kind) } ? 1 : 0;
 
     my $sender = eval { _spark_sender($bot) };
     unless ($sender) {
@@ -437,9 +441,9 @@ sub _spark_handle_candidate {
 
     my $pre = _spark_delivery_state($bot, $channel);
     my $blocked = !$pre->{enabled}        ? 'disabled'
-                : $kind eq 'stage_cue' && !$pre->{action_enabled}
+                : $momentum_kind && !$pre->{action_enabled}
                     ? 'action_disabled'
-                : $kind eq 'stage_cue' && !$pre->{action_armed}
+                : $momentum_kind && !$pre->{action_armed}
                     ? 'action_kill_switch'
                 : !$pre->{runtime_active} ? 'runtime_inactive'
                 : !$pre->{irc_connected}  ? 'irc_disconnected'
@@ -1507,13 +1511,13 @@ sub _spark_tick_all {
                 && $irc_state->{channel_joined}
                 && !$game_active
                 && !$wit_pending
-                && ($inflight_kind ne 'stage_cue'
+                && (!eval { spark_event_is_momentum($inflight_kind) }
                     || ($action_enabled && _spark_action_arm_enabled($bot)))) {
                 eval { $bot->{spark_ai_dryrun}->invalidate_channel($channel); };
             }
         }
 
-        # MB709-C: the momentum lane owns one contextual ambient action family.
+        # The momentum lane owns a small contextual ambient repertoire.
         # Evaluation remains metadata-only; provider work starts only behind
         # the dedicated process arm, and every mutable gate is checked again
         # immediately before the guarded sender reaches IRC transport.
@@ -3919,6 +3923,18 @@ sub _on_message_PRIVMSG_body {
             );
         } ? 1 : 0;
         if ($wit_enabled || $quip_enabled) {
+            # A dedicated ignore list can exclude a game bot from context
+            # without classifying it as a bot for every unrelated feature.
+            my $wit_ignore_nicks = eval {
+                $mediabot->{conf}->get('main.WIT_IGNORE_NICKS')
+            };
+            $wit_ignore_nicks = 'Coin'
+                unless defined($wit_ignore_nicks) && !ref($wit_ignore_nicks);
+            my $from_wit_ignored = $from_conversation_bot
+                || Mediabot::Spark::Identity::is_known_bot_nick(
+                    nick => $who,
+                    configured_bot_nicks => $wit_ignore_nicks,
+                );
             eval {
                 $mediabot->{wit_dryrun} ||= Mediabot::AI::ConversationDryRun->new(
                     conf       => $mediabot->{conf},
@@ -3940,7 +3956,7 @@ sub _on_message_PRIVMSG_body {
                     language                => Mediabot::Helpers::channel_lang($mediabot, $where),
                     command_char            => $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR'),
                     initial_trigger_enabled => $mediabot->{conf}->get('main.MAIN_PROG_INITIAL_TRIGGER'),
-                    from_bot               => $from_conversation_bot,
+                    from_bot               => $from_wit_ignored,
                     on_observation          => sub {
                         my ($wit_summary) = @_;
 

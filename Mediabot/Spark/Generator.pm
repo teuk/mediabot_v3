@@ -185,6 +185,28 @@ sub _kind_contract {
             'or exactly:',
             'NO_SPARK';
     }
+    if ($kind eq 'aside') {
+        return join "\n",
+            'Write one autonomous, deadpan line that makes the quiet room feel inhabited.',
+            'Use a mock status report, a tiny observation about silence, time or atmosphere, or an absurd but harmless conclusion.',
+            'The line must stand alone: do not ask a question, request input, offer choices, name participants or announce a game.',
+            'If context exists, it may inspire the line, but never pretend an event occurred when it did not.',
+            'Return exactly one physical line:',
+            'LINE: <single IRC-ready aside>',
+            'or exactly:',
+            'NO_SPARK';
+    }
+    if ($kind eq 'micro_scene') {
+        return join "\n",
+            'Create one tiny surreal scene that happens entirely in a single IRC line.',
+            'Use at most two beats: a harmless setup and a dry payoff, like a prop, sound, object or imaginary room detail briefly misbehaving.',
+            'It must be self-contained. Do not ask a question, request input, offer choices, name participants or announce a game.',
+            'Avoid random word salad; the image must be immediately understandable.',
+            'Return exactly one physical line:',
+            'LINE: <single IRC-ready micro-scene>',
+            'or exactly:',
+            'NO_SPARK';
+    }
     if ($kind eq 'stage_cue') {
         return join "\n",
             'Write one short stage direction that performs a playful physical or metaphorical action matching one concrete detail in the recent conversation.',
@@ -195,6 +217,18 @@ sub _kind_contract {
             'If there is no specific and harmless hook worth staging, refuse.',
             'Return exactly one physical line:',
             'LINE: <single action body>',
+            'or exactly:',
+            'NO_SPARK';
+    }
+    if ($kind eq 'afterglow') {
+        return join "\n",
+            'Write one short comic epilogue to a concrete detail in the recent conversation.',
+            'Prefer a mock incident report, suspicious consequence, wrong-window afterthought or deadpan final status.',
+            'Do not name or address participants, ask a question, request input, offer choices or announce a game.',
+            'The line must add a new payoff rather than paraphrase the conversation.',
+            'If there is no precise harmless hook, refuse.',
+            'Return exactly one physical line:',
+            'LINE: <single IRC-ready epilogue>',
             'or exactly:',
             'NO_SPARK';
     }
@@ -210,7 +244,8 @@ sub build_spark_request {
     my $contrib = _clean_contributions($args{contributions});
 
     croak 'contextual Spark generation requires recent context'
-        if ($kind eq 'callback' || $kind eq 'reaction' || $kind eq 'stage_cue')
+        if ($kind eq 'callback' || $kind eq 'reaction'
+            || $kind eq 'stage_cue' || $kind eq 'afterglow')
             && @$context < 3;
     croak 'portal wrap-up requires at least two contributions'
         if $kind eq 'portal' && exists($args{contributions}) && @$contrib < 2;
@@ -273,7 +308,9 @@ sub parse_spark_generation {
     my $wire = "$raw";
     $wire =~ s/^\s+|\s+$//g;
 
-    if (($kind eq 'callback' || $kind eq 'reaction' || $kind eq 'stage_cue')
+    if (($kind eq 'callback' || $kind eq 'reaction' || $kind eq 'aside'
+            || $kind eq 'micro_scene' || $kind eq 'stage_cue'
+            || $kind eq 'afterglow')
         && $wire eq 'NO_SPARK') {
         return { action => 'no_content', reason => 'model_declined' };
     }
@@ -311,7 +348,7 @@ sub spark_request_summary {
     my $base = request_summary($request);
     return undef unless ref($base) eq 'HASH';
     return undef unless _plain_scalar($base->{purpose})
-        && $base->{purpose} =~ /^spark\.(fork|portal|callback|reaction|mosaic|stage_cue)\z/;
+        && $base->{purpose} =~ /^spark\.(fork|portal|callback|reaction|mosaic|aside|micro_scene|stage_cue|afterglow)\z/;
     return {
         provider          => $base->{provider},
         purpose           => $base->{purpose},

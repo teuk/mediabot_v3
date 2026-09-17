@@ -24,11 +24,11 @@ return sub {
         'mb709-1002: runtime consumes the separate default-off action arm');
     $assert->like(
         $main,
-        qr/\$inflight_kind ne 'stage_cue'.*?\$action_enabled.*?_spark_action_arm_enabled/s,
+        qr/spark_event_is_momentum\(\$inflight_kind\).*?\$action_enabled.*?_spark_action_arm_enabled/s,
         'mb709-1002: late in-flight gate rechecks action opt-in and process arm');
     $assert->like(
         $main,
-        qr/\$kind eq 'stage_cue' && !\$pre->\{action_enabled\}.*?\$kind eq 'stage_cue' && !\$pre->\{action_armed\}/s,
+        qr/\$momentum_kind && !\$pre->\{action_enabled\}.*?\$momentum_kind && !\$pre->\{action_armed\}/s,
         'mb709-1002: pre-delivery boundary rechecks both action authorities');
     $assert->like($main, qr/next if \$action_started/,
         'mb709-1002: one channel cannot start two Spark generations in one tick');

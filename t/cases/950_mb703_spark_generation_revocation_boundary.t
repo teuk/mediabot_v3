@@ -30,7 +30,7 @@ return sub {
         recent_humans => 3,
         context_lines => 5,
         ai_available  => 1,
-        cursor        => 2,
+        cursor        => 3,
     );
     $assert->is($choice->{kind}, 'callback',
         'mb703-950: selector can choose a context-aware AI-enriched Callback');
