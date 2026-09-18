@@ -38,9 +38,11 @@ like($dispatch, qr/mediabot_commands_partyline_total.*?command => '\.plugins'/s,
     '.plugins increments partyline command metric');
 like($dispatch, qr/_cmd_plugins\(\$stream, \$id, \$1\)/,
     '.plugins dispatch passes optional argument');
-# mb588: .plugins pilote desormais le cycle de vie v2 — le .help l'annonce.
+# mb588: la ligne historique v2 reste stable ; la v3 s'ajoute sans la casser.
 like($help, qr/\.plugins \[loaded\|config\|info\|load\|loadscript\|unload\|reload\|enable\|disable\|cleardata\] - plugin lifecycle \(v2\)/,
-    '.help documents .plugins command');
+    '.help preserves the frozen v2 plugin lifecycle line');
+like($help, qr/\.plugins \[discoverv3\|loadv3\|policy\|resetpolicy\] - API v3 discovery and channel policy/,
+    '.help documents v3 plugin control separately');
 
 like($plugins, qr/Read-only Partyline visibility for the active PluginManager state/,
     '_cmd_plugins documents active read-only visibility');
@@ -74,6 +76,10 @@ like($lifecycle_412 // '', qr/requires Owner level/,
     '_cmd_plugins destructive verbs are Owner-gated');
 like($lifecycle_412 // '', qr/requires Master or Owner level/,
     '_cmd_plugins enable\/disable are Master-gated');
+like($lifecycle_412 // '', qr/load_package_v3/,
+    '_cmd_plugins provides explicit Owner-gated v3 loading');
+like($lifecycle_412 // '', qr/set_v3_channel_policy/,
+    '_cmd_plugins provides explicit Owner-gated channel policy');
 
 SKIP: {
     my $loaded = eval {

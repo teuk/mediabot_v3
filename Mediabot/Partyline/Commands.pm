@@ -103,6 +103,7 @@ sub _cmd_scriptdryrun {
     }
 
     my $pm = $bot->plugin_manager;
+
     my $plugin = eval { $pm->object_for('Mediabot::Plugin::ScriptDryRun') };
 
     # mb180-B1: read-only partyline visibility for the ScriptDryRun bridge.
@@ -662,11 +663,109 @@ sub _cmd_plugins {
     # manquante...).
     my ($verb, @rest) = split /\s+/, $arg;
     $verb = lc($verb // '');
-    if ($verb =~ /\A(?:load|loadscript|unload|reload|enable|disable|cleardata)\z/) {
+    if ($verb eq 'discoverv3') {
+        my @packages = eval { $pm->discover_v3_packages };
+        if ($@) {
+            (my $err = $@) =~ s/\s+\z//;
+            $stream->write("API v3 discovery failed: "
+                . _plugin_info_text($err, 180) . "\r\n");
+            return;
+        }
+        $stream->write("API v3 packages:\r\n");
+        for my $package (@packages) {
+            $stream->write("  $package->{name} version=$package->{version} default=off caps="
+                . join(',', @{ $package->{capabilities} || [] }) . "\r\n");
+        }
+        $stream->write("  (none)\r\n") unless @packages;
+        return;
+    }
+    # Keep the frozen v2 lifecycle gate explicit: historical tests and tools
+    # use this exact list as the boundary between read-only inspection and
+    # mutable plugin operations.  API v3 extends that boundary alongside it
+    # instead of rewriting the legacy contract.
+    my $legacy_lifecycle_verb =
+        $verb =~ /\A(?:load|loadscript|unload|reload|enable|disable|cleardata)\z/;
+    my $v3_lifecycle_verb =
+        $verb =~ /\A(?:loadv3|policy|resetpolicy)\z/;
+    if ($legacy_lifecycle_verb || $v3_lifecycle_verb) {
         my $level = $self->{users}{$id}{level};
-        my $need_owner = ($verb =~ /\A(?:load|loadscript|unload|reload|cleardata)\z/) ? 1 : 0;
+        my $need_owner = $v3_lifecycle_verb
+            || ($verb =~ /\A(?:load|loadscript|unload|reload|cleardata)\z/)
+            ? 1 : 0;
         if ($need_owner && !(defined $level && $level == 0)) {
             $stream->write("Access denied: .plugins $verb requires Owner level.\r\n");
+            return;
+        }
+
+        if ($verb eq 'loadv3') {
+            my ($package, $grant_text) = @rest;
+            unless (defined $package && length $package) {
+                $stream->write("Usage: .plugins loadv3 <package> [capability,...]\r\n");
+                return;
+            }
+            my @grants = defined($grant_text) && $grant_text ne '-'
+                ? grep { length } split /,/, $grant_text : ();
+            my $entry = eval {
+                $pm->load_package_v3($package, grants => \@grants);
+            };
+            if (!$entry) {
+                (my $err = $@ || 'unknown error') =~ s/\s+\z//;
+                $stream->write("API v3 load failed: "
+                    . _plugin_info_text($err, 180) . "\r\n");
+                return;
+            }
+            $stream->write("Loaded API v3 package '$entry->{name}' disabled; configure one channel, then enable it.\r\n");
+            return;
+        }
+
+        if ($verb eq 'policy') {
+            my ($target, $channel, $policy_mode, @pairs) = @rest;
+            unless (defined($target) && defined($channel)
+                    && defined($policy_mode)) {
+                $stream->write("Usage: .plugins policy <name> <#channel> <off|observe|on> [key=value ...]\r\n");
+                return;
+            }
+            my %config;
+            for my $pair (@pairs) {
+                unless ($pair =~ /\A([a-z][a-z0-9_]{0,47})=(.*)\z/) {
+                    $stream->write("Invalid config token '$pair' (expected key=value).\r\n");
+                    return;
+                }
+                $config{$1} = $2;
+            }
+            my $policy = eval {
+                $pm->set_v3_channel_policy($target, $channel,
+                    mode => lc($policy_mode),
+                    (@pairs ? (config => \%config) : ()));
+            };
+            if (!$policy) {
+                (my $err = $@ || 'unknown error') =~ s/\s+\z//;
+                $stream->write("API v3 policy failed: "
+                    . _plugin_info_text($err, 180) . "\r\n");
+                return;
+            }
+            $stream->write("API v3 policy '$target' $policy->{channel}: $policy->{mode}.\r\n");
+            return;
+        }
+
+        if ($verb eq 'resetpolicy') {
+            my ($target, $channel) = @rest;
+            unless (defined($target) && defined($channel)) {
+                $stream->write("Usage: .plugins resetpolicy <name> <#channel>\r\n");
+                return;
+            }
+            my $removed = eval {
+                $pm->reset_v3_channel_policy($target, $channel);
+            };
+            if ($@) {
+                (my $err = $@) =~ s/\s+\z//;
+                $stream->write("API v3 reset failed: "
+                    . _plugin_info_text($err, 180) . "\r\n");
+                return;
+            }
+            $stream->write($removed
+                ? "API v3 policy '$target' $channel removed.\r\n"
+                : "API v3 policy '$target' $channel was already absent.\r\n");
             return;
         }
         if (!$need_owner && !(defined $level && $level <= 1)) {
@@ -770,6 +869,42 @@ sub _cmd_plugins {
         # nouveau code echoue (require/manifest/register), le die tombe AVANT
         # register_plugin : l'instance precedente reste enregistree et active.
         my $plug = $pm->plugin($target);
+        if ($plug && ($plug->{metadata}{api} // 0) == 3) {
+            my @grants = @{ $plug->{metadata}{granted_capabilities} || [] };
+            my @policies = $pm->v3_channel_policies($target);
+            my %policy_map = map {
+                $_->{channel} => {
+                    mode => $_->{mode}, config => { %{ $_->{config} || {} } },
+                }
+            } @policies;
+            my $was_enabled = $plug->{enabled} ? 1 : 0;
+            $pm->unregister_plugin($target);
+            my $entry = eval {
+                $pm->load_package_v3($target,
+                    grants => \@grants,
+                    channel_policies => \%policy_map);
+            };
+            if (!$entry) {
+                (my $err = $@ || 'unknown error') =~ s/\s+\z//;
+                $stream->write("API v3 reload failed; historical command adapters are active: "
+                    . _plugin_info_text($err, 160) . "\r\n");
+                return;
+            }
+            if ($was_enabled) {
+                my $enabled = eval { $pm->enable($target); 1 };
+                unless ($enabled) {
+                    my $err = $@ || 'activation failed';
+                    $pm->unregister_plugin($target);
+                    $err =~ s/\s+\z//;
+                    $stream->write("API v3 reload activation failed; historical command adapters are active: "
+                        . _plugin_info_text($err, 150) . "\r\n");
+                    return;
+                }
+            }
+            $stream->write("Reloaded API v3 package '$target' (version "
+                . ($entry->{version} // '-') . ").\r\n");
+            return;
+        }
         # mb590-B1: le reload d'un plugin SCRIPT relit le sidecar JSON et
         # remonte ses commandes (pas de %INC en jeu) — meme rollback : un
         # sidecar devenu invalide laisse l'instance precedente active.
@@ -903,13 +1038,29 @@ sub _cmd_plugins {
         else {
             $stream->write("  events: none\r\n");
         }
+        if ($api == 3) {
+            my @caps = @{ $entry->{metadata}{effective_capabilities} || [] };
+            $stream->write("  capabilities: "
+                . (@caps ? join(',', @caps) : 'none') . "\r\n");
+            my @policies = $pm->v3_channel_policies($entry->{name});
+            if (@policies) {
+                for my $policy (@policies) {
+                    $stream->write("  policy: $policy->{channel} mode=$policy->{mode}\r\n");
+                }
+            }
+            else {
+                $stream->write("  policies: none\r\n");
+            }
+        }
         return;
     }
 
     if ($mode ne 'summary' && $mode ne 'loaded') {
         $stream->write("Usage: .plugins [loaded|config|info <name>"
             . "|load <Module> [name]|loadscript <path> [name]|unload <name>|reload <name>"
-            . "|enable <name>|disable <name>|cleardata <name>]\r\n");
+            . "|enable <name>|disable <name>|cleardata <name>|discoverv3"
+            . "|loadv3 <package> [caps]|policy <name> <channel> <mode> [key=value ...]"
+            . "|resetpolicy <name> <channel>]\r\n");
         return;
     }
 
@@ -967,6 +1118,7 @@ sub _cmd_help {
       . "  .ping               - check partyline session is alive\r\n"
       . "  .metrics            - dump Prometheus metrics\r\n"
       . "  .plugins [loaded|config|info|load|loadscript|unload|reload|enable|disable|cleardata] - plugin lifecycle (v2)\r\n"
+      . "  .plugins [discoverv3|loadv3|policy|resetpolicy] - API v3 discovery and channel policy\r\n"
       . "  .scriptdryrun [status|last|config|timers|canceltimers|events|clearevents|reload] - show external script bridge status and last run, pending timers, event windows\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary [Administrator+])\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"

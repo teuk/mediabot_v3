@@ -1,0 +1,98 @@
+{
+  "api": 3,
+  "name": "playful-v3",
+  "version": "1.0.0",
+  "description": "A reversible v3 home for Mediabot's small playful commands and one quiet autonomous ritual.",
+  "runtime": {
+    "api": 3,
+    "kind": "perl",
+    "entrypoint": "lib/Playful.pm",
+    "class": "Mediabot::Plugin::Playful"
+  },
+  "compatibility": {
+    "mediabot": ">=3.6dev"
+  },
+  "activation": {
+    "default": "off"
+  },
+  "capabilities": [
+    "irc.reply",
+    "irc.notice",
+    "irc.channel_message",
+    "scheduler.jobs"
+  ],
+  "commands": {
+    "8ball": {
+      "source": "public",
+      "help": "Ask the Magic 8 Ball a question.",
+      "level": 0,
+      "handler": "command_8ball",
+      "migration": "legacy-public-fallback"
+    },
+    "abbrev": {
+      "source": "public",
+      "help": "Build an acronym from a phrase.",
+      "level": 0,
+      "handler": "command_abbrev",
+      "migration": "legacy-public-fallback"
+    },
+    "choose": {
+      "source": "public",
+      "help": "Choose from options separated with | or the French word ou.",
+      "level": 0,
+      "handler": "command_choose",
+      "migration": "legacy-public-fallback"
+    },
+    "flip": {
+      "source": "public",
+      "help": "Flip one to ten coins and keep channel statistics.",
+      "level": 0,
+      "handler": "command_flip",
+      "migration": "legacy-public-fallback"
+    },
+    "morse": {
+      "source": "public",
+      "help": "Translate a short message to Morse code.",
+      "level": 0,
+      "handler": "command_morse",
+      "migration": "legacy-public-fallback"
+    },
+    "roll": {
+      "source": "public",
+      "help": "Roll dice with modifiers, advantage, disadvantage and history.",
+      "level": 0,
+      "handler": "command_roll",
+      "migration": "legacy-public-fallback"
+    }
+  },
+  "events": [],
+  "jobs": {
+    "quiet_magic": {
+      "handler": "job_quiet_magic",
+      "interval_seconds": 900,
+      "first_delay_seconds": 300
+    }
+  },
+  "config_schema": {
+    "language": {
+      "type": "string",
+      "default": "fr",
+      "enum": ["fr", "en", "es"]
+    },
+    "ritual_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "ritual_every": {
+      "type": "integer",
+      "default": 4,
+      "minimum": 1,
+      "maximum": 24
+    },
+    "ritual_style": {
+      "type": "string",
+      "default": "subtle",
+      "enum": ["subtle", "chaos"]
+    }
+  }
+}

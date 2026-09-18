@@ -2446,9 +2446,19 @@ sub mbCommandPublic {
         $self->{logger}->log(4,
             "PUBLIC($dispatch): $sNick triggered $sCommand on $sChannel");
         eval {
-            $dispatch eq 'legacy-public'
-                ? $handler->()
-                : $handler->($ctx);
+            if ($dispatch eq 'legacy-public') {
+                $handler->();
+            }
+            elsif (($entry->{metadata}{migration} // '')
+                    eq 'legacy-public-fallback') {
+                my $legacy = $command_map{ $entry->{name} };
+                die "Missing legacy fallback for '$entry->{name}'\n"
+                    unless $legacy;
+                $handler->($ctx, sub { $legacy->() });
+            }
+            else {
+                $handler->($ctx);
+            }
         };
         if ($@) {
             $self->{logger}->log(1, "PUBLIC command '$cmd' error: $@");

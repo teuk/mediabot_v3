@@ -1,9 +1,8 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB744. Packages are discoverable and
-explicitly loadable, but never activate at startup. MB744 adds strict typed
-configuration and core-owned per-channel `off`, `observe` and `on` policy.
-Production rollout remains a later milestone.
+Plugin API v3 remains experimental in MB745. Packages are discoverable and
+explicitly loadable, but never activate at startup. MB745 adds the first
+reversible command migration and capability-scoped autonomous channel output.
 
 ## Package layout
 
@@ -19,7 +18,8 @@ manifest and entrypoint must be regular files inside that directory; symlinks,
 path traversal, unknown manifest fields and manifests over 16 KiB are rejected.
 
 See [`../plugins/hello-v3`](../plugins/hello-v3) for the inert reference
-package, [`../plugins/API_V3_CONTRACT.json`](../plugins/API_V3_CONTRACT.json)
+package, [`../plugins/playful-v3`](../plugins/playful-v3) for the first pilot,
+[`../plugins/API_V3_CONTRACT.json`](../plugins/API_V3_CONTRACT.json)
 for the machine-readable boundary and
 [`../plugins/API_V3_EVENTS.json`](../plugins/API_V3_EVENTS.json) for the event
 schema catalogue.
@@ -149,6 +149,17 @@ sub job_heartbeat {
 }
 ```
 
+A job that requests and is granted `irc.channel_message` may emit only to its
+own policy channel:
+
+```perl
+$context->channel_message($job, 'One bounded autonomous line.');
+```
+
+The core re-checks enablement and current `on` policy at emission time, then
+uses Mediabot's normal sanitisation, pacing and flood path. `observe` suppresses
+the line. The plugin receives no arbitrary target or IRC socket.
+
 `EventEnvelopeV3` exposes `name`, `version`, `occurred_at`, `get` and a
 detached `data` copy plus `policy_channel`, `activation_mode` and the typed
 configuration snapshot. `JobInvocationV3` exposes `name`, `sequence`,
@@ -213,9 +224,9 @@ no plugin job handler.
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-MB744 implements `irc.reply`, `irc.notice`, `events.subscribe` and
-`scheduler.jobs`. Other capability names remain reserved for later mediated
-services.
+MB745 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
+`events.subscribe` and `scheduler.jobs`. Other capability names remain
+reserved for later mediated services.
 
 Discovery reads manifests only. Loading is explicit, leaves the package
 disabled and mounts silent commands. Enabling is a second explicit operation,
@@ -250,8 +261,23 @@ $bot->plugin_manager->set_v3_channel_policy(
     'my-plugin', '#development', mode => 'on');
 ```
 
-Do not enable the witness package on a production instance. MB745 will define
-the first supported development-channel rollout after channel policy exists.
+The Owner-operated flow is also available on Partyline through `discoverv3`,
+`loadv3`, `policy` and `resetpolicy`. No v3 package is loaded at boot.
+
+## Reversible built-in migration
+
+An official command may declare `"migration": "legacy-public-fallback"` only
+for a public level-0 command that currently resolves to a frozen built-in
+adapter. The runtime rejects every other replacement.
+
+- disabled or `off`: the historical adapter answers;
+- `observe`: the v3 handler runs with output suppressed, then the historical
+  adapter answers;
+- `on`: the v3 handler owns the command in that channel;
+- unload or failed multi-command mount: the exact registry entry is restored.
+
+This bridge exists for measured migrations; new command names must register
+normally and cannot use it.
 
 ## Compatibility
 

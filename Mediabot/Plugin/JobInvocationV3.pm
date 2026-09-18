@@ -28,6 +28,15 @@ sub new {
     die "JobInvocationV3: invalid sequence\n"
         unless defined($args{sequence}) && !ref($args{sequence})
             && "$args{sequence}" =~ /\A[1-9][0-9]*\z/;
+    die "JobInvocationV3: channel message sink must be CODE\n"
+        if exists($args{channel_message_sink})
+            && ref($args{channel_message_sink}) ne 'CODE';
+    die "JobInvocationV3: output guard must be CODE\n"
+        if exists($args{output_guard}) && ref($args{output_guard}) ne 'CODE';
+    die "JobInvocationV3: invalid PluginContext authority\n"
+        if exists($args{authority})
+            && !(ref($args{authority})
+                && eval { $args{authority}->isa('Mediabot::PluginContext') });
 
     die "JobInvocationV3: invalid fired_at timestamp\n"
         if defined($args{fired_at})
@@ -57,6 +66,9 @@ sub new {
             ? "$args{channel}" : '',
         activation   => "$activation",
         config       => _copy_config($args{config}),
+        authority    => $args{authority},
+        output_guard => $args{output_guard},
+        channel_message_sink => $args{channel_message_sink} || sub { 0 },
     };
     return $self;
 }
@@ -73,6 +85,24 @@ sub config_value {
     my ($self, $key) = @_;
     return undef unless defined($key) && !ref($key);
     return _state($self)->{config}{$key};
+}
+
+sub output_allowed {
+    my ($self) = @_;
+    my $state = _state($self);
+    return 0 unless $state->{activation} eq 'on';
+    return 1 unless ref($state->{output_guard}) eq 'CODE';
+    return $state->{output_guard}->() ? 1 : 0;
+}
+
+sub _emit_channel_message {
+    my ($self, $text) = @_;
+    my $state = _state($self);
+    die "JobInvocationV3: PluginContext authority is required for output\n"
+        unless ref($state->{authority});
+    $state->{authority}->require_capability('irc.channel_message');
+    return 0 unless $self->output_allowed;
+    return $state->{channel_message_sink}->($text);
 }
 
 sub lateness_seconds {

@@ -2,8 +2,9 @@
 
 This document is the local, canonical entry point for Mediabot's plugin
 platform. It records the MB740 baseline, the MB741 command catalogue, the
-executable MB742 API v3 foundation, the MB743 event/scheduler boundary and the
-MB744 channel policy. It does not enable a plugin or grant a new capability.
+executable MB742 API v3 foundation, the MB743 event/scheduler boundary, the
+MB744 channel policy and MB745's first reversible product plugin. It does not
+enable a plugin or grant a capability automatically.
 
 ## Current baseline
 
@@ -94,8 +95,8 @@ MB742 established fail-closed packages and bounded command invocations. MB743
 adds copied event envelopes, bounded deferred delivery and scheduler-owned
 jobs. MB744 activates the manifest configuration schema and places every
 channel behind `off`, `observe` or `on`. `PluginContext` also retains bounded
-`irc.reply` and `irc.notice`; the remaining services land behind the same
-capability boundary in later milestones.
+`irc.reply` and `irc.notice`. MB745 adds `irc.channel_message` for scoped job
+output through the normal core transport and flood gates.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -107,7 +108,8 @@ Planned capability families include:
 
 | Capability | Core mediation |
 | --- | --- |
-| `irc.reply` / `irc.notice` | wire limits, channel scope, pacing and flood gates |
+| `irc.reply` / `irc.notice` | wire limits, invocation scope, pacing and flood gates |
+| `irc.channel_message` | current policy channel only, late revocation and no stale deferred send |
 | `events.subscribe` | version catalogue, copied fields, bounded queue and overflow accounting |
 | `channel.topic` | explicit instance and channel grant plus runtime authorization |
 | `moderation.kick` / `moderation.ban` | strict target scope and audit trail |
@@ -149,8 +151,10 @@ Planned capability families include:
 5. **MB744 — channel policy:** complete. Typed configuration is validated by
    the core and per-channel `off`/`observe`/`on` activation is disabled by
    default, with late revocation for queued work and IRC output.
-6. **MB745 — visible proof:** move the simple fun-command pack and ship one new
-   autonomous channel ritual on a single development channel.
+6. **MB745 — visible proof:** complete. `playful-v3` owns the six low-risk fun
+   commands only where policy is `on`, shadows them in `observe`, restores the
+   historical adapter in `off` or on unload, and adds one opt-in autonomous
+   ritual for a single development channel.
 
 Later milestones add the HTTP/data facades, extract richer first-party
 features, improve developer tooling and retire duplicate dispatch paths only

@@ -90,3 +90,10 @@ lifecycle. The core validates bounded string, integer and boolean configuration,
 applies defaults, RFC1459-folds channel keys and intersects every command,
 event, job and output attempt with `off`, `observe` or `on`. `observe` executes
 bounded handlers while suppressing IRC output; `off` also revokes deferred work.
+
+MB745 proves the boundary with `playful-v3`. Six frozen public adapters can be
+replaced only through a named fallback migration mode: legacy remains visible
+in `off` and `observe`, v3 becomes authoritative only in `on`, and unload
+restores exact registry entries. Autonomous job output gains a separate
+`irc.channel_message` capability whose target is the current policy channel.
+Partyline control is explicit, Owner-gated and never connected to AUTOLOAD.

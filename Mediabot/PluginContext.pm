@@ -98,6 +98,15 @@ sub notice {
     return $invocation->_emit_notice(_text($text));
 }
 
+sub channel_message {
+    my ($self, $invocation, $text) = @_;
+    $self->require_capability('irc.channel_message');
+    die "PluginContext: invalid channel invocation\n"
+        unless ref($invocation)
+            && eval { $invocation->can('_emit_channel_message') };
+    return $invocation->_emit_channel_message(_text($text));
+}
+
 sub DESTROY {
     my ($self) = @_;
     delete $STATE{ refaddr($self) };

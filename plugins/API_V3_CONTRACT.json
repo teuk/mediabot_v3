@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB744",
+  "milestone": "MB745",
   "activation_default": "off",
   "manifest_file": "plugin.json",
   "manifest_max_bytes": 16384,
@@ -37,6 +37,7 @@
     "http.fetch",
     "irc.notice",
     "irc.reply",
+    "irc.channel_message",
     "moderation.ban",
     "moderation.kick",
     "scheduler.jobs",
@@ -45,6 +46,7 @@
   ],
   "implemented_capabilities": [
     "events.subscribe",
+    "irc.channel_message",
     "irc.notice",
     "irc.reply",
     "scheduler.jobs"
@@ -76,7 +78,12 @@
     "minimum_interval_seconds": 5,
     "maximum_interval_seconds": 86400
   },
-  "deferred_to": {
-    "production_proof": "MB745"
+  "command_migration": {
+    "mode": "legacy-public-fallback",
+    "eligible_target": "frozen built-in public adapter",
+    "off": "legacy",
+    "observe": "plugin shadow plus visible legacy",
+    "on": "plugin",
+    "unload": "restore legacy registry entry"
   }
 }

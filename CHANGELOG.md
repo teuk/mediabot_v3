@@ -10,6 +10,25 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb745 — open the first reversible joke shop
+
+- Add the first visible API v3 product package, `playful-v3`, covering `roll`,
+  `flip`, `choose`, `8ball`, `morse` and `abbrev` plus one autonomous
+  `quiet_magic` ritual that never requires a user reply.
+- Introduce a narrowly validated `legacy-public-fallback` migration bridge.
+  Disabled and `off` channels retain historical behavior; `observe` runs a
+  silent v3 shadow before the visible legacy answer; `on` delegates to v3; an
+  unload or failed mount restores the exact previous registry entries.
+- Add capability-scoped `irc.channel_message` for job output. The core owns the
+  target channel, re-checks late policy and lifecycle state, enforces the 400
+  byte facade bound, and sends through the existing IRC safety path.
+- Expose explicit API v3 discovery, loading and per-channel policy controls on
+  the authenticated Partyline. No package is loaded at startup, no channel is
+  opted in automatically, and the ritual remains disabled in typed config.
+- Document a single-development-channel `observe` → `on` pilot and immediate
+  rollback. Add command parity, migration restoration and autonomous-output
+  policy tests without changing private configuration or the database.
+
 ### mb744 — give every plugin channel a guarded room key
 
 - Turn API v3 `config_schema` metadata into a strict core-owned contract for

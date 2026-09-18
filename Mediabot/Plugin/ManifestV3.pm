@@ -16,11 +16,11 @@ my %TOP_LEVEL = map { $_ => 1 } qw(
 
 my %RUNTIME_LEVEL = map { $_ => 1 } qw(api kind entrypoint class);
 my %ACTIVATION_LEVEL = map { $_ => 1 } qw(default);
-my %COMMAND_LEVEL = map { $_ => 1 } qw(source help level handler aliases);
+my %COMMAND_LEVEL = map { $_ => 1 } qw(source help level handler aliases migration);
 my %EVENT_LEVEL = map { $_ => 1 } qw(name version handler);
 my %JOB_LEVEL = map { $_ => 1 } qw(handler interval_seconds first_delay_seconds);
 my %BASE_CAPABILITY = map { $_ => 1 } qw(
-    irc.reply irc.notice channel.topic moderation.kick moderation.ban
+    irc.reply irc.notice irc.channel_message channel.topic moderation.kick moderation.ban
     storage.kv events.subscribe scheduler.jobs http.fetch
 );
 
@@ -114,7 +114,8 @@ sub validate {
         if keys(%$commands) > 32;
     for my $command (sort keys %$commands) {
         die "Plugin API v3: invalid command name '$command'\n"
-            unless $command =~ /\A[a-z][a-z0-9_]{0,23}\z/;
+            unless $command =~ /\A[a-z][a-z0-9_]{0,23}\z/
+                || $command eq '8ball';
         my $spec = $commands->{$command};
         die "Plugin API v3: command '$command' must be an object\n"
             unless ref($spec) eq 'HASH';
@@ -132,6 +133,16 @@ sub validate {
         die "Plugin API v3: command '$command' handler must be a method name\n"
             unless _plain_scalar($spec->{handler})
                 && $spec->{handler} =~ /\A[a-z_][a-z0-9_]{0,63}\z/;
+        if (exists $spec->{migration}) {
+            die "Plugin API v3: command '$command' has an invalid migration mode\n"
+                unless _plain_scalar($spec->{migration})
+                    && $spec->{migration} eq 'legacy-public-fallback';
+            die "Plugin API v3: command '$command' migration requires a public level-0 command\n"
+                unless $spec->{source} eq 'public' && "$spec->{level}" eq '0';
+        }
+        die "Plugin API v3: digit-leading command '$command' requires the legacy migration bridge\n"
+            if $command eq '8ball'
+                && ($spec->{migration} // '') ne 'legacy-public-fallback';
         if (exists $spec->{aliases}) {
             die "Plugin API v3: command '$command' aliases must be an array\n"
                 unless ref($spec->{aliases}) eq 'ARRAY';

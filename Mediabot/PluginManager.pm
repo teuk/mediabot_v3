@@ -81,6 +81,35 @@ sub load_package_v3 {
     return $self->v3_runtime->load_package($name, %opts);
 }
 
+sub _restore_command_entry {
+    my ($registry, $entry) = @_;
+    return 0 unless $registry && ref($entry) eq 'HASH';
+    $registry->register_command(
+        name        => $entry->{name},
+        source      => $entry->{source},
+        aliases     => [ @{ $entry->{aliases} || [] } ],
+        handler     => $entry->{handler},
+        category    => $entry->{category},
+        description => $entry->{description},
+        level       => $entry->{level},
+        chanset     => $entry->{chanset},
+        plugin      => $entry->{plugin},
+        metadata    => { %{ $entry->{metadata} || {} } },
+        replace     => 1,
+    );
+    return 1;
+}
+
+sub _v3_channel_message {
+    my ($self, $channel, $text) = @_;
+    my $bot = $self->{bot};
+    return $bot->plugin_channel_message($channel, $text)
+        if $bot && eval { $bot->can('plugin_channel_message') };
+    require Mediabot::Helpers;
+    return Mediabot::Helpers::botPrivmsg(
+        $bot, $channel, $text, { no_defer => 1 });
+}
+
 # MB744: channel policy is core-owned and deliberately separate from the
 # package lifecycle. Loading and enabling a v3 package never opts a channel in.
 sub _v3_policy_object {
@@ -1277,7 +1306,17 @@ sub _mount_v3_commands {
         my $spec = $manifest->{commands}{$command};
         my $source = $spec->{source};
         my $method = $spec->{handler};
+        my $migration = $spec->{migration} // '';
+        my $previous;
         my $ok = eval {
+            if ($migration eq 'legacy-public-fallback') {
+                $previous = $registry->command_for($command, $source);
+                die "migration target is not a frozen legacy public adapter\n"
+                    unless $previous
+                        && ($previous->{metadata}{builtin} // 0)
+                        && ($previous->{metadata}{dispatch} // '') eq 'legacy-public'
+                        && !defined($previous->{plugin});
+            }
             $registry->register_command(
                 name        => $command,
                 source      => $source,
@@ -1285,15 +1324,25 @@ sub _mount_v3_commands {
                 plugin      => $key,
                 level       => $spec->{level},
                 description => $spec->{help},
-                metadata    => { api => 3, dispatch => 'plugin-v3' },
+                metadata    => {
+                    api       => 3,
+                    dispatch  => 'plugin-v3',
+                    ($migration ? (migration => $migration) : ()),
+                },
+                replace     => $migration ? 1 : 0,
                 handler     => sub {
-                    my ($ctx) = @_;
-                    return unless $self->is_enabled($key);
+                    my ($ctx, $legacy_fallback) = @_;
+                    my $fallback = $migration
+                        && ref($legacy_fallback) eq 'CODE'
+                        ? $legacy_fallback : undef;
+                    return $fallback ? $fallback->() : undef
+                        unless $self->is_enabled($key);
 
                     my $channel = scalar(eval { $ctx->channel });
                     my $policy = $self->_v3_policy_for_entry(
                         $entry, $channel);
-                    return if $policy->{mode} eq 'off';
+                    return $fallback ? $fallback->() : undef
+                        if $policy->{mode} eq 'off';
 
                     my ($authorized, $deny) = _plugin_command_authorized(
                         $self->{bot}, $ctx, $spec->{level});
@@ -1301,7 +1350,7 @@ sub _mount_v3_commands {
                         _pm_metric($self->{bot},
                             'mediabot_plugin_command_denied_total',
                             { plugin => $key, command => $command });
-                        return;
+                        return $fallback ? $fallback->() : undef;
                     }
 
                     my $args = eval { $ctx->args };
@@ -1342,8 +1391,12 @@ sub _mount_v3_commands {
                             { plugin => $key, kind => 'command' });
                         eval { $self->{bot}{logger}->log(1,
                             "plugin '$key' API v3 command '$command' failed: $error") };
+                        return $fallback ? $fallback->() : undef
+                            if $policy->{mode} eq 'observe';
                         return;
                     }
+                    return $fallback->()
+                        if $fallback && $policy->{mode} eq 'observe';
                     return $result;
                 },
             );
@@ -1351,11 +1404,18 @@ sub _mount_v3_commands {
         };
         unless ($ok) {
             my $error = _plugin_error_text($@, 'register_command failed');
-            $registry->unregister_command($_->{name}, $_->{source})
-                for @mounted;
+            for my $mounted (reverse @mounted) {
+                $registry->unregister_command(
+                    $mounted->{name}, $mounted->{source});
+                _restore_command_entry($registry, $mounted->{restore})
+                    if $mounted->{restore};
+            }
             die "PluginManager: mounting API v3 command '$command' for '$key' failed: $error\n";
         }
-        push @mounted, { name => $command, source => $source };
+        push @mounted, {
+            name => $command, source => $source,
+            ($previous ? (restore => $previous) : ()),
+        };
     }
     $entry->{mounted_commands} = \@mounted;
     return 1;
@@ -1558,6 +1618,17 @@ sub _mount_v3_jobs {
                             channel      => $policy->{channel},
                             activation   => $policy->{mode},
                             config       => $policy->{config},
+                            authority    => $context,
+                            output_guard => sub {
+                                return 0 unless $self->is_enabled($key);
+                                my $current = $self->_v3_policy_for_entry(
+                                    $entry, $policy->{channel});
+                                return $current->{mode} eq 'on' ? 1 : 0;
+                            },
+                            channel_message_sink => sub {
+                                $self->_v3_channel_message(
+                                    $policy->{channel}, $_[0]);
+                            },
                         );
                         _pm_metric($bot, 'mediabot_plugin_v3_job_total',
                             { plugin => $key, job => $job });
@@ -1668,6 +1739,8 @@ sub _unmount_entry_commands {
         if (ref($mounted) eq 'HASH') {
             $registry->unregister_command(
                 $mounted->{name}, $mounted->{source});
+            _restore_command_entry($registry, $mounted->{restore})
+                if $mounted->{restore};
         }
         else {
             $registry->unregister_command($mounted, 'public');
