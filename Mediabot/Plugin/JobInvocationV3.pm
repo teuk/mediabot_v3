@@ -13,6 +13,12 @@ sub _state {
     return $STATE{ refaddr($self) };
 }
 
+sub _copy_config {
+    my ($config) = @_;
+    return {} unless ref($config) eq 'HASH';
+    return { map { $_ => $config->{$_} } grep { !ref($config->{$_}) } keys %$config };
+}
+
 sub new {
     my ($class, %args) = @_;
 
@@ -36,6 +42,9 @@ sub new {
         ? 0 + $args{fired_at} : time();
     my $scheduled_at = defined($args{scheduled_at})
         ? 0 + $args{scheduled_at} : $fired_at;
+    my $activation = defined($args{activation}) ? $args{activation} : 'off';
+    die "JobInvocationV3: invalid activation mode\n"
+        unless !ref($activation) && $activation =~ /\A(?:off|observe|on)\z/;
 
     my $opaque = 0;
     my $self = bless \$opaque, $class;
@@ -44,6 +53,10 @@ sub new {
         sequence     => int($args{sequence}),
         scheduled_at => $scheduled_at,
         fired_at     => $fired_at,
+        channel      => defined($args{channel}) && !ref($args{channel})
+            ? "$args{channel}" : '',
+        activation   => "$activation",
+        config       => _copy_config($args{config}),
     };
     return $self;
 }
@@ -52,6 +65,15 @@ sub name         { _state($_[0])->{name} }
 sub sequence     { _state($_[0])->{sequence} }
 sub scheduled_at { _state($_[0])->{scheduled_at} }
 sub fired_at     { _state($_[0])->{fired_at} }
+sub channel      { _state($_[0])->{channel} }
+sub activation_mode { _state($_[0])->{activation} }
+sub config { _copy_config(_state($_[0])->{config}) }
+
+sub config_value {
+    my ($self, $key) = @_;
+    return undef unless defined($key) && !ref($key);
+    return _state($self)->{config}{$key};
+}
 
 sub lateness_seconds {
     my ($self) = @_;

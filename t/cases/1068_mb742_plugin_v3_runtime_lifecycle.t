@@ -79,6 +79,10 @@ return sub {
     $assert->is($entry->{object}{started}, 1,
         'explicit enable invokes start');
     $handler->($ctx);
+    $assert->is(scalar @{ $ctx->{replies} }, 0,
+        'global enable does not opt any channel into API v3 behavior');
+    $manager->set_v3_channel_policy('hello-v3', '#i/o', mode => 'on');
+    $handler->($ctx);
     $assert->like($ctx->{replies}[0] // '', qr/capability-scoped API v3 plugin/,
         'enabled witness replies through its granted facade');
 
@@ -95,6 +99,7 @@ return sub {
 
     my $no_grant = $manager->load_package_v3('hello-v3', grants => []);
     $manager->enable('hello-v3');
+    $manager->set_v3_channel_policy('hello-v3', '#i/o', mode => 'on');
     my $denied = $bot->{registry}->handler_for('v3hello', 'public');
     my $ok = eval { $denied->($ctx); 1 };
     $assert->ok($ok && !$@,

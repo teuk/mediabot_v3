@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB743",
+  "milestone": "MB744",
   "activation_default": "off",
   "manifest_file": "plugin.json",
   "manifest_max_bytes": 16384,
@@ -9,6 +9,27 @@
     "perl"
   ],
   "capability_model": "requested intersection granted",
+  "channel_policy": {
+    "modes": [
+      "off",
+      "observe",
+      "on"
+    ],
+    "default": "off",
+    "maximum_channels_per_plugin": 128,
+    "casemapping": "rfc1459",
+    "observe_output": "suppressed"
+  },
+  "typed_config": {
+    "types": [
+      "boolean",
+      "integer",
+      "string"
+    ],
+    "maximum_fields": 32,
+    "maximum_effective_bytes": 4096,
+    "unknown_fields": "reject"
+  },
   "capabilities": [
     "channel.topic",
     "data.<domain>",
@@ -56,7 +77,6 @@
     "maximum_interval_seconds": 86400
   },
   "deferred_to": {
-    "channel_policy_and_config": "MB744",
     "production_proof": "MB745"
   }
 }

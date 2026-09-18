@@ -1,9 +1,9 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB743. Packages are discoverable and
-explicitly loadable, but never activate at startup. MB743 adds versioned event
-delivery, bounded backpressure and centrally owned periodic jobs. Channel
-policy, typed configuration and production rollout belong to later milestones.
+Plugin API v3 remains experimental in MB744. Packages are discoverable and
+explicitly loadable, but never activate at startup. MB744 adds strict typed
+configuration and core-owned per-channel `off`, `observe` and `on` policy.
+Production rollout remains a later milestone.
 
 ## Package layout
 
@@ -66,14 +66,40 @@ schema catalogue.
       "first_delay_seconds": 30
     }
   },
-  "config_schema": {}
+  "config_schema": {
+    "greeting": {
+      "type": "string",
+      "default": "Hello.",
+      "min_length": 1,
+      "max_length": 160
+    },
+    "mention_nick": {
+      "type": "boolean",
+      "default": false
+    }
+  }
 }
 ```
 
-Every field is validated fail-closed before plugin code is loaded. MB743 accepts
+Every field is validated fail-closed before plugin code is loaded. MB744 accepts
 Perl entrypoints only. Event name/version pairs must exist in the core catalogue
 and job handlers, intervals and namespace lengths are checked before any
-registration. Configuration schemas remain metadata until MB744.
+registration. Configuration schemas are executable core contracts rather than
+plugin-owned parsing hints.
+
+## Typed channel configuration
+
+`config_schema` accepts at most 32 named fields. Names are lowercase identifiers
+and each field declares exactly one of `string`, `integer` or `boolean`.
+Strings may use length bounds and an enum; integers may use minimum/maximum;
+all types may declare a typed default or be required. Unknown schema properties,
+unknown configured values and implicit string-to-number/boolean coercion fail
+before plugin code runs. One effective channel configuration is capped at 4096
+encoded bytes.
+
+Defaults and operator overrides are normalized by the core. Every invocation
+receives a detached snapshot through `config()` and `config_value($name)`; a
+plugin cannot mutate the stored policy by changing that snapshot.
 
 ## Runtime boundary
 
@@ -104,6 +130,11 @@ and capability-checked services. `Mediabot::Plugin::InvocationV3` exposes only
 bounded copies of nick, channel, command, arguments, source and private/public
 state. It contains private output sinks that the plugin cannot inspect.
 
+The invocation also exposes `activation_mode`, `config`, `config_value` and
+`output_allowed`. In `observe` mode the handler executes, but reply/notice sinks
+return without writing to IRC. The sink checks current policy again at emission
+time, so a late switch to `off` or `observe` revokes output.
+
 Event and job handlers receive equally narrow values:
 
 ```perl
@@ -119,9 +150,11 @@ sub job_heartbeat {
 ```
 
 `EventEnvelopeV3` exposes `name`, `version`, `occurred_at`, `get` and a
-detached `data` copy. `JobInvocationV3` exposes `name`, `sequence`,
-`scheduled_at`, `fired_at` and `lateness_seconds`. Neither exposes a bot,
-socket, database, raw IRC message or scheduler object.
+detached `data` copy plus `policy_channel`, `activation_mode` and the typed
+configuration snapshot. `JobInvocationV3` exposes `name`, `sequence`,
+`scheduled_at`, `fired_at`, `lateness_seconds`, `channel`, `activation_mode`
+and the same configuration accessors. Neither exposes a bot, socket, database,
+raw IRC message or scheduler object.
 
 The plugin never receives the Mediabot object, `Mediabot::Context`, the raw IRC
 message, socket, database handle or configuration object.
@@ -152,6 +185,11 @@ most eight envelopes per turn. When full, the newest event is dropped and the
 loss is logged and counted. Disable or unload clears pending work and
 invalidates already deferred callbacks.
 
+Channel-bearing events are delivered only to the matching non-`off` policy.
+Global observations such as `scheduler.minute` are fanned out once for each
+configured `observe` or `on` channel. Policy and configuration are re-read when
+the deferred item drains; switching a channel to `off` revokes queued work.
+
 ## Shared jobs
 
 Jobs are declarative, periodic and owned by the core scheduler. A plugin may
@@ -166,16 +204,31 @@ jobs transactionally; a failure rolls back already started jobs and the plugin
 contained and recorded without stopping the scheduler. A declared job requires
 the requested and granted `scheduler.jobs` capability.
 
+Each scheduler firing fans out one bounded invocation per non-`off` channel.
+All channel invocations for a firing share the same monotonic sequence number.
+An enabled package with no opted-in channel therefore owns its timer but runs
+no plugin job handler.
+
 ## Capabilities and activation
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-MB743 implements `irc.reply`, `irc.notice`, `events.subscribe` and
+MB744 implements `irc.reply`, `irc.notice`, `events.subscribe` and
 `scheduler.jobs`. Other capability names remain reserved for later mediated
 services.
 
 Discovery reads manifests only. Loading is explicit, leaves the package
-disabled and mounts silent commands. Enabling is a second explicit operation.
+disabled and mounts silent commands. Enabling is a second explicit operation,
+but it still opts in no channel. Channel policy is a separate core-owned gate:
+
+- `off` (default): no command, event or job handler runs;
+- `observe`: bounded handlers run and IRC output is suppressed;
+- `on`: bounded handlers and granted output may run.
+
+Channel keys use RFC1459 casemapping. Policies are limited to 128 channels per
+plugin and may be supplied transactionally at load or changed through
+`set_v3_channel_policy`. `reset_v3_channel_policy` removes the override and
+returns that channel to `off`.
 There is no `plugins.AUTOLOAD` path for API v3 and no automatic migration.
 
 The programmatic development flow is:
@@ -185,8 +238,16 @@ my @available = $bot->plugin_manager->discover_v3_packages;
 my $entry = $bot->plugin_manager->load_package_v3(
     'my-plugin',
     grants => ['events.subscribe', 'irc.reply', 'scheduler.jobs'],
+    channel_policies => {
+        '#development' => {
+            mode => 'observe',
+            config => { greeting => 'Hello.' },
+        },
+    },
 );
 $bot->plugin_manager->enable('my-plugin');
+$bot->plugin_manager->set_v3_channel_policy(
+    'my-plugin', '#development', mode => 'on');
 ```
 
 Do not enable the witness package on a production instance. MB745 will define

@@ -16,6 +16,7 @@ return sub {
     require Mediabot::Plugin::InvocationV3;
 
     my (@replies, @notices);
+    my $output_allowed = 1;
     my @source_args = ('one', 'two');
     my $context = Mediabot::PluginContext->new(
         plugin    => 'hello-v3',
@@ -30,6 +31,9 @@ return sub {
         source      => 'public',
         is_private  => 0,
         authority   => $context,
+        activation  => 'on',
+        config      => { greeting => 'hello' },
+        output_guard => sub { $output_allowed },
         reply_sink  => sub { push @replies, $_[0]; 1 },
         notice_sink => sub { push @notices, $_[0]; 1 },
     );
@@ -42,11 +46,21 @@ return sub {
         'an unrequested grant never becomes effective');
     $assert->is($invocation->nick, 'Tangy ',
         'invocation sanitizes line breaks in copied identity');
+    $assert->is($invocation->activation_mode, 'on',
+        'invocation carries its bounded channel activation snapshot');
+    $assert->is($invocation->config_value('greeting'), 'hello',
+        'invocation exposes only its copied typed configuration');
 
     $context->reply($invocation, "  hello\nworld  ");
     $assert->is($replies[0], 'hello world',
         'reply crosses the bounded capability-checked sink');
     $assert->is(scalar @notices, 0, 'reply does not cross notice sink');
+
+    $output_allowed = 0;
+    $assert->is($context->reply($invocation, 'late'), 0,
+        'late output revocation returns without reaching IRC');
+    $assert->is(scalar @replies, 1,
+        'late output revocation leaves the sink untouched');
 
     my $ok = eval { $context->notice($invocation, 'secret'); 1 };
     $assert->like($@ // '', qr/capability 'irc\.notice' was not granted/,

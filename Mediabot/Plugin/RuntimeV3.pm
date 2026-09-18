@@ -111,6 +111,17 @@ sub load_package {
             if $seen_grant{$grant}++;
     }
 
+    require Mediabot::Plugin::ConfigSchemaV3;
+    require Mediabot::Plugin::ChannelPolicyV3;
+    my $config_schema = Mediabot::Plugin::ConfigSchemaV3->new(
+        schema => ($manifest->{config_schema} || {}),
+    );
+    my $channel_policy = Mediabot::Plugin::ChannelPolicyV3->new(
+        schema   => $config_schema,
+        policies => (exists($opts{channel_policies})
+            ? $opts{channel_policies} : {}),
+    );
+
     my $entrypoint = File::Spec->catfile(
         $dir,
         split('/', $manifest->{runtime}{entrypoint}),
@@ -178,6 +189,8 @@ sub load_package {
             granted_capabilities   => [ sort keys %seen_grant ],
             effective_capabilities => [ $context->effective_capabilities ],
             plugin_context         => $context,
+            config_schema          => $config_schema,
+            channel_policy         => $channel_policy,
         },
     );
 

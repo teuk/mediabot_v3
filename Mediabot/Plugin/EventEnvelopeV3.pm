@@ -38,6 +38,9 @@ sub new {
     $occurred_at = time()
         unless defined($occurred_at) && !ref($occurred_at)
             && "$occurred_at" =~ /\A[0-9]+(?:\.[0-9]+)?\z/;
+    my $activation = defined($args{activation}) ? $args{activation} : 'off';
+    die "EventEnvelopeV3: invalid activation mode\n"
+        unless !ref($activation) && $activation =~ /\A(?:off|observe|on)\z/;
 
     my $opaque = 0;
     my $self = bless \$opaque, $class;
@@ -46,6 +49,11 @@ sub new {
         version     => int($args{version}),
         occurred_at => 0 + $occurred_at,
         data        => _copy_value($args{data}),
+        policy_channel => defined($args{policy_channel}) && !ref($args{policy_channel})
+            ? "$args{policy_channel}" : '',
+        activation => "$activation",
+        config     => ref($args{config}) eq 'HASH'
+            ? _copy_value($args{config}) : {},
     };
     return $self;
 }
@@ -53,6 +61,8 @@ sub new {
 sub name        { _state($_[0])->{name} }
 sub version     { _state($_[0])->{version} }
 sub occurred_at { _state($_[0])->{occurred_at} }
+sub policy_channel { _state($_[0])->{policy_channel} }
+sub activation_mode { _state($_[0])->{activation} }
 
 sub data {
     my ($self) = @_;
@@ -63,6 +73,31 @@ sub get {
     my ($self, $key) = @_;
     return undef unless defined($key) && !ref($key);
     return _copy_value(_state($self)->{data}{$key});
+}
+
+sub config {
+    my ($self) = @_;
+    return _copy_value(_state($self)->{config});
+}
+
+sub config_value {
+    my ($self, $key) = @_;
+    return undef unless defined($key) && !ref($key);
+    return _copy_value(_state($self)->{config}{$key});
+}
+
+sub with_policy {
+    my ($self, %args) = @_;
+    my $state = _state($self);
+    return ref($self)->new(
+        name           => $state->{name},
+        version        => $state->{version},
+        occurred_at    => $state->{occurred_at},
+        data           => $state->{data},
+        policy_channel => $args{channel},
+        activation     => $args{mode},
+        config         => $args{config},
+    );
 }
 
 sub DESTROY {

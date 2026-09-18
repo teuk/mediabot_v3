@@ -209,9 +209,10 @@ sub validate {
     die "Plugin API v3: compatibility must be an object\n"
         if exists($manifest->{compatibility})
             && ref($manifest->{compatibility}) ne 'HASH';
-    die "Plugin API v3: config_schema must be an object\n"
-        if exists($manifest->{config_schema})
-            && ref($manifest->{config_schema}) ne 'HASH';
+    my $config_schema = exists($manifest->{config_schema})
+        ? $manifest->{config_schema} : {};
+    require Mediabot::Plugin::ConfigSchemaV3;
+    Mediabot::Plugin::ConfigSchemaV3->validate_definition($config_schema);
 
     return $manifest;
 }

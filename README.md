@@ -275,7 +275,7 @@ Documentation:
 
 - [Complete command reference](https://github.com/teuk/mediabot_v3/wiki/Command-reference) — all 245 built-in command help entries;
 - [Plugin architecture](docs/PLUGIN_ARCHITECTURE.md) — core boundaries, API v2 freeze and API v3 roadmap;
-- [Plugin API v3](docs/PLUGIN_API_V3.md) — strict packages, versioned events, owned jobs, capabilities and the inert witness;
+- [Plugin API v3](docs/PLUGIN_API_V3.md) — strict packages, typed channel policy, versioned events, owned jobs and capabilities;
 - [Command catalogue](docs/COMMAND_CATALOGUE.md) — MB741 registry authority and frozen adapter rules;
 - [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands);
 - [Private and administrative commands](https://github.com/teuk/mediabot_v3/wiki/Private-and-admin-commands);

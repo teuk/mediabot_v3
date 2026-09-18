@@ -81,6 +81,64 @@ sub load_package_v3 {
     return $self->v3_runtime->load_package($name, %opts);
 }
 
+# MB744: channel policy is core-owned and deliberately separate from the
+# package lifecycle. Loading and enabling a v3 package never opts a channel in.
+sub _v3_policy_object {
+    my ($self, $entry) = @_;
+    return undef unless $entry && ref($entry->{metadata}) eq 'HASH'
+        && ($entry->{metadata}{api} // 0) == 3;
+    my $policy = $entry->{metadata}{channel_policy};
+    return undef unless blessed($policy)
+        && $policy->isa('Mediabot::Plugin::ChannelPolicyV3');
+    return $policy;
+}
+
+sub set_v3_channel_policy {
+    my ($self, $name, $channel, %args) = @_;
+    my $entry = $self->plugin($name)
+        or die "PluginManager: plugin '$name' is not registered\n";
+    my $policy = $self->_v3_policy_object($entry)
+        or die "PluginManager: plugin '$name' is not an API v3 package\n";
+    return $policy->set($channel, %args);
+}
+
+sub reset_v3_channel_policy {
+    my ($self, $name, $channel) = @_;
+    my $entry = $self->plugin($name)
+        or die "PluginManager: plugin '$name' is not registered\n";
+    my $policy = $self->_v3_policy_object($entry)
+        or die "PluginManager: plugin '$name' is not an API v3 package\n";
+    return $policy->reset($channel);
+}
+
+sub v3_channel_policy {
+    my ($self, $name, $channel) = @_;
+    my $entry = $self->plugin($name) or return undef;
+    my $policy = $self->_v3_policy_object($entry) or return undef;
+    return $policy->policy_for($channel);
+}
+
+sub v3_channel_policies {
+    my ($self, $name, %opts) = @_;
+    my $entry = $self->plugin($name) or return ();
+    my $policy = $self->_v3_policy_object($entry) or return ();
+    return $opts{active} ? $policy->active_policies : $policy->policies;
+}
+
+sub _v3_policy_for_entry {
+    my ($self, $entry, $channel) = @_;
+    my $policy = $self->_v3_policy_object($entry);
+    return { channel => '', mode => 'off', config => {} } unless $policy;
+    return $policy->policy_for($channel);
+}
+
+sub _v3_active_policies {
+    my ($self, $entry) = @_;
+    my $policy = $self->_v3_policy_object($entry);
+    return () unless $policy;
+    return $policy->active_policies;
+}
+
 sub v2_adapter_for {
     my ($self, $name) = @_;
     my $entry = $self->plugin($name) or return undef;
@@ -1232,6 +1290,11 @@ sub _mount_v3_commands {
                     my ($ctx) = @_;
                     return unless $self->is_enabled($key);
 
+                    my $channel = scalar(eval { $ctx->channel });
+                    my $policy = $self->_v3_policy_for_entry(
+                        $entry, $channel);
+                    return if $policy->{mode} eq 'off';
+
                     my ($authorized, $deny) = _plugin_command_authorized(
                         $self->{bot}, $ctx, $spec->{level});
                     unless ($authorized) {
@@ -1244,17 +1307,28 @@ sub _mount_v3_commands {
                     my $args = eval { $ctx->args };
                     my $invocation = Mediabot::Plugin::InvocationV3->new(
                         nick       => scalar(eval { $ctx->nick }),
-                        channel    => scalar(eval { $ctx->channel }),
+                        channel    => $channel,
                         command    => $command,
                         args       => (ref($args) eq 'ARRAY' ? $args : []),
                         source     => $source,
                         is_private => scalar(eval { $ctx->is_private }) ? 1 : 0,
                         authority  => $plugin_context,
+                        activation => $policy->{mode},
+                        config     => $policy->{config},
+                        output_guard => sub {
+                            return 0 unless $self->is_enabled($key);
+                            my $current = $self->_v3_policy_for_entry(
+                                $entry, $channel);
+                            return $current->{mode} eq 'on' ? 1 : 0;
+                        },
                         reply_sink => sub { $ctx->reply($_[0]) },
                         notice_sink => sub { $ctx->reply_private($_[0]) },
                     );
                     _pm_metric($self->{bot}, 'mediabot_plugin_command_total',
                         { plugin => $key, command => $command });
+                    _pm_metric($self->{bot}, 'mediabot_plugin_v3_observe_total',
+                        { plugin => $key, kind => 'command' })
+                        if $policy->{mode} eq 'observe';
                     my ($called, $result);
                     $called = eval {
                         $result = $object->$method($plugin_context, $invocation);
@@ -1325,8 +1399,19 @@ sub _mount_v3_events {
         dispatch    => sub {
             my ($item) = @_;
             return unless $self->is_enabled($key);
+            my $policy = $self->_v3_policy_for_entry(
+                $entry, $item->{channel});
+            return if $policy->{mode} eq 'off';
             my $method = $item->{method};
-            return $object->$method($context, $item->{envelope});
+            my $scoped = $item->{envelope}->with_policy(
+                channel => $policy->{channel},
+                mode    => $policy->{mode},
+                config  => $policy->{config},
+            );
+            _pm_metric($bot, 'mediabot_plugin_v3_observe_total',
+                { plugin => $key, kind => 'event' })
+                if $policy->{mode} eq 'observe';
+            return $object->$method($context, $scoped);
         },
         on_drop     => sub {
             my ($item) = @_;
@@ -1360,12 +1445,31 @@ sub _mount_v3_events {
                 return unless $context->has_capability('events.subscribe');
                 my $envelope = Mediabot::Plugin::EventCatalogV3->envelope(
                     $name, $version, $raw);
-                my $accepted = $queue->enqueue({
-                    method   => $method,
-                    envelope => $envelope,
-                });
-                _pm_metric($bot, 'mediabot_plugin_event_total',
-                    { plugin => $key, event => $name }) if $accepted;
+                my $event_channel = $envelope->get('channel');
+                my @policies;
+                if (defined($event_channel) && !ref($event_channel)
+                    && length($event_channel)) {
+                    my $policy = $self->_v3_policy_for_entry(
+                        $entry, $event_channel);
+                    @policies = ($policy) unless $policy->{mode} eq 'off';
+                }
+                else {
+                    @policies = $self->_v3_active_policies($entry);
+                }
+
+                my $accepted = 0;
+                for my $policy (@policies) {
+                    my $queued = $queue->enqueue({
+                        method   => $method,
+                        envelope => $envelope,
+                        channel  => $policy->{channel},
+                    });
+                    if ($queued) {
+                        $accepted++;
+                        _pm_metric($bot, 'mediabot_plugin_event_total',
+                            { plugin => $key, event => $name });
+                    }
+                }
                 return $accepted;
             },
             plugin => $key,
@@ -1443,26 +1547,35 @@ sub _mount_v3_jobs {
                     my $fired_at = time();
                     my $scheduled_at = defined($clock->{next_expected})
                         ? $clock->{next_expected} : $fired_at;
-                    my $invocation = Mediabot::Plugin::JobInvocationV3->new(
-                        name         => $job,
-                        sequence     => ++$clock->{sequence},
-                        scheduled_at => $scheduled_at,
-                        fired_at     => $fired_at,
-                    );
+                    my $sequence = ++$clock->{sequence};
                     $clock->{next_expected} = $fired_at + $interval;
-                    _pm_metric($bot, 'mediabot_plugin_v3_job_total',
-                        { plugin => $key, job => $job });
-                    my $called = eval {
-                        $object->$method($context, $invocation);
-                        1;
-                    };
-                    unless ($called) {
-                        my $error = _plugin_error_text(
-                            $@, 'API v3 job failed');
-                        _pm_metric($bot, 'mediabot_plugin_v3_failure_total',
-                            { plugin => $key, kind => 'job' });
-                        eval { $bot->{logger}->log(1,
-                            "plugin '$key' API v3 job '$job' failed: $error") };
+                    for my $policy ($self->_v3_active_policies($entry)) {
+                        my $invocation = Mediabot::Plugin::JobInvocationV3->new(
+                            name         => $job,
+                            sequence     => $sequence,
+                            scheduled_at => $scheduled_at,
+                            fired_at     => $fired_at,
+                            channel      => $policy->{channel},
+                            activation   => $policy->{mode},
+                            config       => $policy->{config},
+                        );
+                        _pm_metric($bot, 'mediabot_plugin_v3_job_total',
+                            { plugin => $key, job => $job });
+                        _pm_metric($bot, 'mediabot_plugin_v3_observe_total',
+                            { plugin => $key, kind => 'job' })
+                            if $policy->{mode} eq 'observe';
+                        my $called = eval {
+                            $object->$method($context, $invocation);
+                            1;
+                        };
+                        unless ($called) {
+                            my $error = _plugin_error_text(
+                                $@, 'API v3 job failed');
+                            _pm_metric($bot, 'mediabot_plugin_v3_failure_total',
+                                { plugin => $key, kind => 'job' });
+                            eval { $bot->{logger}->log(1,
+                                "plugin '$key' API v3 job '$job' failed for '$policy->{channel}': $error") };
+                        }
                     }
                     return;
                 },

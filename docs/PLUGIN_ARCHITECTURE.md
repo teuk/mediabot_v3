@@ -2,8 +2,8 @@
 
 This document is the local, canonical entry point for Mediabot's plugin
 platform. It records the MB740 baseline, the MB741 command catalogue, the
-executable MB742 API v3 foundation and the MB743 event/scheduler boundary. It
-does not enable a plugin or grant a new capability.
+executable MB742 API v3 foundation, the MB743 event/scheduler boundary and the
+MB744 channel policy. It does not enable a plugin or grant a new capability.
 
 ## Current baseline
 
@@ -92,9 +92,10 @@ The manifest declares compatibility, public/private commands and aliases,
 versioned events, shared jobs, configuration schema and requested capabilities.
 MB742 established fail-closed packages and bounded command invocations. MB743
 adds copied event envelopes, bounded deferred delivery and scheduler-owned
-jobs. `PluginContext` also retains bounded `irc.reply` and `irc.notice`; the
-remaining services land behind the same capability boundary in later
-milestones.
+jobs. MB744 activates the manifest configuration schema and places every
+channel behind `off`, `observe` or `on`. `PluginContext` also retains bounded
+`irc.reply` and `irc.notice`; the remaining services land behind the same
+capability boundary in later milestones.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -129,7 +130,7 @@ Planned capability families include:
 | HTTP | no shared plugin service | bounded async client with cache and circuit breaker | HTTP service |
 | Database | possible through full in-process bot | approved domain repositories only | data layer |
 | Secrets | configuration may be reachable in-process | named secret references only | core configuration |
-| Activation | global plugin enable/disable | `off`, `observe` or `on` per instance/channel | policy service |
+| Activation | global plugin lifecycle plus MB744 channel policy | `off`, `observe` or `on` per instance/channel | policy service |
 | Health | lifecycle and metrics fragments | Doctor, reason, permissions, latency and quarantine | plugin runtime |
 
 ## Migration sequence
@@ -145,8 +146,9 @@ Planned capability families include:
 4. **MB743 — events and scheduler:** complete. Eight versioned event schemas,
    immutable envelopes, deferred queues with backpressure and centrally owned
    jobs now follow the API v3 lifecycle.
-5. **MB744 — channel policy:** typed plugin configuration and per-channel
-   `off`/`observe`/`on` activation, disabled by default.
+5. **MB744 — channel policy:** complete. Typed configuration is validated by
+   the core and per-channel `off`/`observe`/`on` activation is disabled by
+   default, with late revocation for queued work and IRC output.
 6. **MB745 — visible proof:** move the simple fun-command pack and ship one new
    autonomous channel ritual on a single development channel.
 

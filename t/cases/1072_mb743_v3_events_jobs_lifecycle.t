@@ -89,6 +89,9 @@ return sub {
     my $entry = $manager->load_package_v3(
         'hello-v3',
         grants => ['events.subscribe', 'irc.reply', 'scheduler.jobs'],
+        channel_policies => {
+            '#i/o' => { mode => 'on', config => {} },
+        },
     );
 
     my $task = 'plugin.v3.hello-v3.heartbeat';
@@ -175,6 +178,9 @@ return sub {
     my $rollback_entry = $rollback_manager->load_package_v3(
         'hello-v3',
         grants => ['events.subscribe', 'irc.reply', 'scheduler.jobs'],
+        channel_policies => {
+            '#i/o' => { mode => 'on', config => {} },
+        },
     );
     my $ok = eval { $rollback_manager->enable('hello-v3'); 1 };
     $assert->like($@ // '', qr/failed to start API v3 job 'heartbeat'/,

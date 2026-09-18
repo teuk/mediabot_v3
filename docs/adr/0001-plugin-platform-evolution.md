@@ -84,3 +84,9 @@ bounded deferred queue with a deterministic overflow policy. Declarative jobs
 are namespaced in the central scheduler and follow the plugin enable, disable
 and unload lifecycle. Neither service activates a package automatically, and
 both require an effective capability grant.
+
+MB744 makes activation channel-scoped without weakening the explicit package
+lifecycle. The core validates bounded string, integer and boolean configuration,
+applies defaults, RFC1459-folds channel keys and intersects every command,
+event, job and output attempt with `off`, `observe` or `on`. `observe` executes
+bounded handlers while suppressing IRC output; `off` also revokes deferred work.

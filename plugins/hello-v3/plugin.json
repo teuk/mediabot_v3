@@ -1,7 +1,7 @@
 {
   "api": 3,
   "name": "hello-v3",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Capability-scoped API v3 witness plugin.",
   "runtime": {
     "kind": "perl",
@@ -42,5 +42,22 @@
       "first_delay_seconds": 30
     }
   },
-  "config_schema": {}
+  "config_schema": {
+    "greeting": {
+      "type": "string",
+      "default": "Hello from a tiny, capability-scoped API v3 plugin.",
+      "min_length": 1,
+      "max_length": 160
+    },
+    "enthusiasm": {
+      "type": "integer",
+      "default": 0,
+      "minimum": 0,
+      "maximum": 3
+    },
+    "mention_nick": {
+      "type": "boolean",
+      "default": false
+    }
+  }
 }

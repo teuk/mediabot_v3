@@ -10,6 +10,24 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb744 — give every plugin channel a guarded room key
+
+- Turn API v3 `config_schema` metadata into a strict core-owned contract for
+  bounded string, integer and boolean values. Defaults, required fields,
+  bounds, enums, unknown properties and a 4096-byte effective configuration
+  limit are validated before plugin code runs.
+- Add RFC1459-casemapped per-channel `off`, `observe` and `on` policy, with
+  `off` as the unconditional default. Global package enable no longer implies
+  channel activation; policies may be loaded transactionally or updated and
+  reset through the manager.
+- Scope commands, versioned events and shared jobs to detached typed channel
+  snapshots. Observe mode executes bounded handlers while suppressing IRC
+  output, and late policy checks revoke queued events or delayed output after
+  an operator switches the channel away from `on`.
+- Extend the inert witness, machine contract, metrics, author guide and
+  lifecycle coverage without activating a plugin, changing private
+  configuration or touching the database. API v1/v2 behavior remains intact.
+
 ### mb743 — give plugins a clock and a safe event post
 
 - Publish eight versioned API v3 event schemas and translate existing core

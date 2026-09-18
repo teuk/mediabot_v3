@@ -96,6 +96,7 @@ sub new {
     $self->_declare('mediabot_plugin_v3_event_dropped_total','counter','Plugin API v3 events dropped by bounded backpressure');
     $self->_declare('mediabot_plugin_v3_job_total','counter','Plugin API v3 shared job executions');
     $self->_declare('mediabot_plugin_v3_failure_total','counter','Plugin API v3 contained failures by runtime kind');
+    $self->_declare('mediabot_plugin_v3_observe_total','counter','Plugin API v3 shadow invocations with output suppressed');
     # mb604-B1: la persistance mb601 devient observable — combien un plugin
     # ecrit, a quelle frequence, et POURQUOI ses ecritures sont refusees.
     $self->_declare('mediabot_plugin_storage_bytes','gauge','Plugin v2 persistent storage size in bytes, by plugin');
