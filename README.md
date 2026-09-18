@@ -273,7 +273,8 @@ Useful discovery commands include:
 
 Documentation:
 
-- [Complete command reference](https://github.com/teuk/mediabot_v3/wiki/Command-reference) — all 243 built-in command help entries;
+- [Complete command reference](https://github.com/teuk/mediabot_v3/wiki/Command-reference) — all 245 built-in command help entries;
+- [Plugin architecture](docs/PLUGIN_ARCHITECTURE.md) — MB740 boundaries, API v2 freeze and API v3 direction;
 - [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands);
 - [Private and administrative commands](https://github.com/teuk/mediabot_v3/wiki/Private-and-admin-commands);
 - [Access levels](https://github.com/teuk/mediabot_v3/wiki/Access-levels);

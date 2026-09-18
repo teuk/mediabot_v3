@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb740 — draw the plugin boundary before opening the next corridor
+
+- Record the accepted core/plugin boundary and incremental API v3 direction:
+  capability-scoped `PluginContext`, per-channel opt-in, versioned events and
+  mediated scheduler, HTTP, storage, data and secret services. Keep IRC,
+  identity, authorization, wire safety, migrations and lifecycle in the core.
+- Freeze sidecar API v2 as a compatibility contract. Existing plugins remain
+  supported and fail-closed, while new privileged capabilities and first-party
+  product plugins move to API v3 after its executable contract lands.
+- Add a deterministic source inventory covering all 245 current built-in help
+  entries and their registry/public/private dispatch surfaces. Expose the two
+  pre-existing unescaped-pipe help anomalies without changing IRC behavior.
+- Add a tracked machine-readable v2 baseline and a contract test that compares
+  events, actions and storage limits with the runtime, preventing documentation
+  drift.
+
 ### mb739 — give quiet channels an autonomous comic pulse
 
 - Replace new Fork and Mosaic selection with two response-free long-silence

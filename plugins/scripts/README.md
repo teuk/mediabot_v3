@@ -1,5 +1,11 @@
 # Mediabot external script plugins
 
+> **API status:** sidecar API v2 is frozen at the MB740 baseline. Existing
+> plugins remain supported and continue to receive security and regression
+> fixes, but new privileged capabilities and first-party plugins target API v3.
+> See [`../../docs/PLUGIN_ARCHITECTURE.md`](../../docs/PLUGIN_ARCHITECTURE.md)
+> and [`../API_V2_CONTRACT.json`](../API_V2_CONTRACT.json).
+
 Mediabot can route selected public commands to trusted **Perl, Python or Tcl**
 scripts through `Mediabot::Plugin::ScriptDryRun`. The module name is historical:
 it supports both a no-side-effect **dry-run** mode and an explicitly gated

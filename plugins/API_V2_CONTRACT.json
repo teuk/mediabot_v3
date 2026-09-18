@@ -1,0 +1,51 @@
+{
+  "api": 2,
+  "status": "frozen",
+  "replacement": "api 3",
+  "script_protocol": "mediabot-script-v1",
+  "manifest": {
+    "required": ["api", "name", "version"],
+    "optional": ["description", "commands", "events", "config"],
+    "command_fields": ["help", "level"]
+  },
+  "routable_script_events": [
+    "channel_join_observed",
+    "channel_kick_observed",
+    "channel_nick_observed",
+    "channel_part_observed",
+    "channel_quit_observed",
+    "channel_topic_observed",
+    "plugin_cron_observed",
+    "public_command_observed"
+  ],
+  "action_types": [
+    "ban",
+    "kick",
+    "log",
+    "notice",
+    "reply",
+    "store",
+    "timer",
+    "topic",
+    "unban"
+  ],
+  "languages": ["perl", "python", "tcl"],
+  "limits": {
+    "manifest_bytes": 8192,
+    "config_keys": 32,
+    "config_value_bytes": 512,
+    "actions_per_run": 20,
+    "action_text_characters": 400,
+    "storage_bytes": 16384,
+    "storage_keys": 256,
+    "storage_depth": 3,
+    "timer_delay_seconds_min": 1,
+    "timer_delay_seconds_max": 3600
+  },
+  "compatibility_policy": [
+    "Existing API v2 plugins remain supported during the 3.6 development line.",
+    "No new privileged capability is added to API v2.",
+    "New first-party plugins target API v3 once that contract is available.",
+    "API v2 remains fail-closed and receives security and regression fixes."
+  ]
+}
