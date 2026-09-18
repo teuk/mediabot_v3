@@ -67,6 +67,8 @@ snap_mediabot*.sh
 # Public plugin v2 sidecar manifests are versioned project artifacts.
 !plugins/scripts/**/*.manifest.json
 !plugins/API_V2_CONTRACT.json
+!plugins/API_V3_CONTRACT.json
+!plugins/*/plugin.json
 
 # MB696 - Node dependency hygiene
 node_modules/

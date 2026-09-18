@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb742 — open a capability-checked plugin doorway
+
+- Add a strict, bounded `plugin.json` contract for API v3 packages. Discovery
+  validates manifests without loading code; package paths, entrypoints, unknown
+  fields, sizes, commands, aliases, events and requested capabilities all fail
+  closed.
+- Introduce `Mediabot::PluginContext` and a copied command invocation. API v3
+  code receives neither the bot, raw command context, IRC socket nor database;
+  replies and notices cross capability-checked core sinks only.
+- Add explicit construct/start/stop lifecycle integration and transactional
+  command mounting through the authoritative MB741 registry. Packages load
+  disabled, are never part of historical AUTOLOAD and keep commands silent
+  until an operator grants capabilities and enables them.
+- Ship an inert `hello-v3` witness, a machine-readable v3 contract and a
+  read-only v2 adapter. Existing v1/v2 runtime behavior remains unchanged.
+
 ### mb741 — give every command one front door
 
 - Register all 238 public and 94 private built-in commands in the central

@@ -70,3 +70,10 @@ development instance.
 MB741 makes `CommandRegistry` authoritative for all 238 public and 94 private
 built-ins. The historical hashes remain exact, frozen handler adapters during
 the migration; they are no longer alternate discovery or fallback paths.
+
+MB742 establishes the executable API v3 boundary. Package discovery reads
+strict manifests without loading code; explicit loading still leaves a plugin
+disabled; activation invokes a bounded lifecycle. Plugins receive only
+`PluginContext` and copied invocation data, while command authorization and IRC
+output remain core-owned. API v1/v2 execution remains unchanged and its adapter
+is descriptive only.

@@ -1,0 +1,31 @@
+{
+  "api": 3,
+  "name": "hello-v3",
+  "version": "0.1.0",
+  "description": "Capability-scoped API v3 witness plugin.",
+  "runtime": {
+    "kind": "perl",
+    "entrypoint": "lib/Hello.pm",
+    "class": "Mediabot::Plugin::V3::Hello"
+  },
+  "compatibility": {
+    "mediabot": ">=3.6dev"
+  },
+  "activation": {
+    "default": "off"
+  },
+  "capabilities": [
+    "irc.reply"
+  ],
+  "commands": {
+    "v3hello": {
+      "source": "public",
+      "help": "Show the bounded API v3 greeting.",
+      "level": 0,
+      "handler": "command_hello",
+      "aliases": []
+    }
+  },
+  "events": [],
+  "config_schema": {}
+}

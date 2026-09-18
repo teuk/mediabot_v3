@@ -57,6 +57,37 @@ sub plugin_dir {
     return $self->{plugin_dir};
 }
 
+# MB742: API v3 packages are deliberately outside the historical AUTOLOAD
+# path. Discovery is read-only and loading is an explicit operator action.
+sub v3_runtime {
+    my ($self) = @_;
+    return $self->{v3_runtime} if $self->{v3_runtime};
+
+    require Mediabot::Plugin::RuntimeV3;
+    $self->{v3_runtime} = Mediabot::Plugin::RuntimeV3->new(
+        manager    => $self,
+        plugin_dir => ($self->{plugin_dir} // 'plugins'),
+    );
+    return $self->{v3_runtime};
+}
+
+sub discover_v3_packages {
+    my ($self) = @_;
+    return $self->v3_runtime->discover_packages;
+}
+
+sub load_package_v3 {
+    my ($self, $name, %opts) = @_;
+    return $self->v3_runtime->load_package($name, %opts);
+}
+
+sub v2_adapter_for {
+    my ($self, $name) = @_;
+    my $entry = $self->plugin($name) or return undef;
+    require Mediabot::Plugin::V2Adapter;
+    return Mediabot::Plugin::V2Adapter->describe_entry($entry);
+}
+
 # mb698-P4D: resolve the real Mediabot command-registry API first.
 # Historical plugin fixtures exposed ->registry(), while the production
 # Mediabot object exposes ->command_registry() and ->commands().  Keep the
@@ -223,6 +254,22 @@ sub unregister_plugin {
 
     my $entry = $self->{plugins}{$key};
 
+    # MB742: API v3 teardown is lifecycle-scoped and receives only its bounded
+    # PluginContext. A failing stop never leaves the plugin enabled and never
+    # prevents command cleanup.
+    my $api = ref($entry->{metadata}) eq 'HASH'
+        ? ($entry->{metadata}{api} // 1) : 1;
+    if ($api == 3 && $entry->{enabled}) {
+        $entry->{enabled} = 0;
+        my $object = $entry->{object};
+        my $context = $entry->{metadata}{plugin_context};
+        if (ref($object) && eval { $object->can('stop') }) {
+            my $ok = eval { $object->stop(context => $context); 1 };
+            $entry->{metadata}{stop_error} = _plugin_error_text(
+                $@, 'plugin stop failed') unless $ok;
+        }
+    }
+
     # mb587-B1: demonter les commandes du registry AVANT le teardown objet —
     # une commande fantome qui dispatche vers un plugin retire serait le
     # jumeau exact des listeners fantomes mb233.
@@ -234,7 +281,8 @@ sub unregister_plugin {
     # chance to remove runtime hooks such as EventBus listeners.  MB242 already
     # cleaned the replace=>1 path; this closes the direct unregister_plugin()
     # path so a disabled/unloaded plugin cannot leave ghost observers behind.
-    if ($entry && ref($entry->{object}) && eval { $entry->{object}->can('unregister') }) {
+    if ($api != 3 && $entry && ref($entry->{object})
+        && eval { $entry->{object}->can('unregister') }) {
         my $ok = eval { $entry->{object}->unregister(manager => $self); 1 };
         if (!$ok) {
             $entry->{metadata}{unregister_error} = _plugin_error_text($@, 'plugin unregister failed');
@@ -274,6 +322,20 @@ sub enable {
     my ($self, $name) = @_;
 
     my $entry = $self->plugin($name) or return 0;
+    return 1 if $entry->{enabled};
+
+    my $api = ref($entry->{metadata}) eq 'HASH'
+        ? ($entry->{metadata}{api} // 1) : 1;
+    if ($api == 3) {
+        my $object = $entry->{object};
+        my $context = $entry->{metadata}{plugin_context};
+        if (ref($object) && eval { $object->can('start') }) {
+            my $ok = eval { $object->start(context => $context); 1 };
+            die "PluginManager: failed to start API v3 plugin '$entry->{name}': "
+              . _plugin_error_text($@, 'plugin start failed') . "\n"
+                unless $ok;
+        }
+    }
     $entry->{enabled} = 1;
 
     return 1;
@@ -283,7 +345,21 @@ sub disable {
     my ($self, $name) = @_;
 
     my $entry = $self->plugin($name) or return 0;
+    return 1 unless $entry->{enabled};
+
+    my $api = ref($entry->{metadata}) eq 'HASH'
+        ? ($entry->{metadata}{api} // 1) : 1;
     $entry->{enabled} = 0;
+    if ($api == 3) {
+        my $object = $entry->{object};
+        my $context = $entry->{metadata}{plugin_context};
+        if (ref($object) && eval { $object->can('stop') }) {
+            my $ok = eval { $object->stop(context => $context); 1 };
+            die "PluginManager: failed to stop API v3 plugin '$entry->{name}': "
+              . _plugin_error_text($@, 'plugin stop failed') . "\n"
+                unless $ok;
+        }
+    }
 
     return 1;
 }
@@ -1088,13 +1164,118 @@ sub _mount_manifest_commands {
     return 1;
 }
 
+# MB742: mount API v3 commands through the authoritative CommandRegistry.
+# The core authorizes the raw Mediabot::Context, then replaces it with a
+# bounded InvocationV3. The plugin receives neither the bot, message object,
+# socket nor database handle; output crosses capability-checked sinks only.
+sub _mount_v3_commands {
+    my ($self, $key, $entry) = @_;
+
+    my $manifest = $entry->{manifest};
+    die "PluginManager: API v3 manifest missing for '$key'\n"
+        unless ref($manifest) eq 'HASH' && ($manifest->{api} // 0) == 3;
+    return 1 unless ref($manifest->{commands}) eq 'HASH'
+        && %{ $manifest->{commands} };
+
+    my $registry = $self->_command_registry;
+    die "PluginManager: cannot mount API v3 commands for '$key': command registry unavailable\n"
+        unless $registry;
+    my $object = $entry->{object};
+    die "PluginManager: API v3 plugin '$key' has no object\n"
+        unless blessed($object);
+    my $plugin_context = $entry->{metadata}{plugin_context};
+    die "PluginManager: API v3 plugin '$key' has no PluginContext\n"
+        unless blessed($plugin_context)
+            && $plugin_context->isa('Mediabot::PluginContext');
+
+    require Mediabot::Plugin::InvocationV3;
+    my @mounted;
+    for my $command (sort keys %{ $manifest->{commands} }) {
+        my $spec = $manifest->{commands}{$command};
+        my $source = $spec->{source};
+        my $method = $spec->{handler};
+        my $ok = eval {
+            $registry->register_command(
+                name        => $command,
+                source      => $source,
+                aliases     => ($spec->{aliases} || []),
+                plugin      => $key,
+                level       => $spec->{level},
+                description => $spec->{help},
+                metadata    => { api => 3, dispatch => 'plugin-v3' },
+                handler     => sub {
+                    my ($ctx) = @_;
+                    return unless $self->is_enabled($key);
+
+                    my ($authorized, $deny) = _plugin_command_authorized(
+                        $self->{bot}, $ctx, $spec->{level});
+                    unless ($authorized) {
+                        _pm_metric($self->{bot},
+                            'mediabot_plugin_command_denied_total',
+                            { plugin => $key, command => $command });
+                        return;
+                    }
+
+                    my $args = eval { $ctx->args };
+                    my $invocation = Mediabot::Plugin::InvocationV3->new(
+                        nick       => scalar(eval { $ctx->nick }),
+                        channel    => scalar(eval { $ctx->channel }),
+                        command    => $command,
+                        args       => (ref($args) eq 'ARRAY' ? $args : []),
+                        source     => $source,
+                        is_private => scalar(eval { $ctx->is_private }) ? 1 : 0,
+                        authority  => $plugin_context,
+                        reply_sink => sub { $ctx->reply($_[0]) },
+                        notice_sink => sub { $ctx->reply_private($_[0]) },
+                    );
+                    _pm_metric($self->{bot}, 'mediabot_plugin_command_total',
+                        { plugin => $key, command => $command });
+                    my ($called, $result);
+                    $called = eval {
+                        $result = $object->$method($plugin_context, $invocation);
+                        1;
+                    };
+                    unless ($called) {
+                        my $error = _plugin_error_text(
+                            $@, 'API v3 command failed');
+                        _pm_metric($self->{bot},
+                            'mediabot_plugin_v3_failure_total',
+                            { plugin => $key, kind => 'command' });
+                        eval { $self->{bot}{logger}->log(1,
+                            "plugin '$key' API v3 command '$command' failed: $error") };
+                        return;
+                    }
+                    return $result;
+                },
+            );
+            1;
+        };
+        unless ($ok) {
+            my $error = _plugin_error_text($@, 'register_command failed');
+            $registry->unregister_command($_->{name}, $_->{source})
+                for @mounted;
+            die "PluginManager: mounting API v3 command '$command' for '$key' failed: $error\n";
+        }
+        push @mounted, { name => $command, source => $source };
+    }
+    $entry->{mounted_commands} = \@mounted;
+    return 1;
+}
+
 sub _unmount_entry_commands {
     my ($self, $entry) = @_;
     return 0 unless $entry && ref($entry->{mounted_commands}) eq 'ARRAY';
     my $registry = $self->_command_registry;
     return 0 unless $registry;
-    $registry->unregister_command($_, 'public')
-        for @{ $entry->{mounted_commands} };
+    for my $mounted (@{ $entry->{mounted_commands} }) {
+        if (ref($mounted) eq 'HASH') {
+            $registry->unregister_command(
+                $mounted->{name}, $mounted->{source});
+        }
+        else {
+            $registry->unregister_command($mounted, 'public');
+        }
+    }
     $entry->{mounted_commands} = [];
     return 1;
 }

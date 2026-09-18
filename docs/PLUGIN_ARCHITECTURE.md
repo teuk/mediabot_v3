@@ -2,16 +2,18 @@
 
 This document is the local, canonical entry point for Mediabot's plugin
 platform. It records the MB740 baseline, the MB741 command catalogue and the
-migration direction toward API v3. It does not enable a plugin or grant a new
+executable MB742 API v3 foundation. It does not enable a plugin or grant a new
 capability.
 
 ## Current baseline
 
-Mediabot currently supports two extension forms:
+Mediabot currently supports three extension forms:
 
 - trusted in-process Perl modules managed by `Mediabot::PluginManager`;
 - trusted external Perl, Python and Tcl scripts executed without a shell across
   the `mediabot-script-v1` JSON boundary.
+- experimental API v3 package directories with strict manifests, bounded
+  contexts and explicit load/enable lifecycle.
 
 API v2 sidecars already have fail-closed manifests, bounded input and output,
 transactional command/event mounting, lifecycle cleanup, controlled actions and
@@ -72,9 +74,9 @@ External scripts are trusted code running with the bot account's operating
 system permissions. Process separation and bounded JSON are not an operating
 system sandbox.
 
-## Target API v3
+## API v3 foundation
 
-An API v3 package will be a directory rather than a loose script pair:
+An API v3 package is a directory rather than a loose script pair:
 
 ```text
 plugins/<slug>/
@@ -86,10 +88,17 @@ plugins/<slug>/
   migrations/        # official plugins only; never auto-applied at boot
 ```
 
-The manifest will declare compatibility, commands, versioned events,
-configuration schema and requested capabilities. A `PluginContext` facade will
-expose only approved services such as bounded replies, namespaced storage,
-scheduler jobs and policy-controlled HTTP.
+The manifest declares compatibility, public/private commands and aliases,
+versioned events, configuration schema and requested capabilities. MB742
+validates all of these fail-closed. `PluginContext` currently implements only
+bounded `irc.reply` and `irc.notice`; the remaining services land behind the
+same capability boundary in later milestones.
+
+Discovery reads manifests without loading entrypoints. Loading is explicit and
+leaves the package disabled. Enabling separately invokes `start`, while disable
+or unload invokes `stop`. API v3 is not connected to historical plugin AUTOLOAD.
+The complete executable contract is in
+[`PLUGIN_API_V3.md`](PLUGIN_API_V3.md).
 
 Planned capability families include:
 
@@ -127,8 +136,9 @@ Planned capability families include:
 2. **MB741 — command catalogue:** complete. All built-ins are registered and
    legacy tables are reachable only as frozen adapters. No new entry may be
    added to the old dispatch.
-3. **MB742 — API v3:** introduce `plugin.json`, `PluginContext`, capabilities
-   and the v2 adapter.
+3. **MB742 — API v3:** complete. Strict `plugin.json` packages, bounded
+   `PluginContext`/invocations, requested-intersect-granted capabilities,
+   explicit lifecycle, an inert witness and a read-only v2 adapter are present.
 4. **MB743 — events and scheduler:** versioned event schemas, shared jobs and
    backpressure.
 5. **MB744 — channel policy:** typed plugin configuration and per-channel

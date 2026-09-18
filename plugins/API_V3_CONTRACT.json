@@ -1,0 +1,48 @@
+{
+  "api": 3,
+  "status": "experimental",
+  "milestone": "MB742",
+  "activation_default": "off",
+  "manifest_file": "plugin.json",
+  "manifest_max_bytes": 16384,
+  "runtime_kinds": [
+    "perl"
+  ],
+  "capability_model": "requested intersection granted",
+  "capabilities": [
+    "channel.topic",
+    "data.<domain>",
+    "http.fetch",
+    "irc.notice",
+    "irc.reply",
+    "moderation.ban",
+    "moderation.kick",
+    "scheduler.jobs",
+    "secrets.read:<name>",
+    "storage.kv"
+  ],
+  "implemented_capabilities": [
+    "irc.notice",
+    "irc.reply"
+  ],
+  "plugin_receives": [
+    "Mediabot::PluginContext",
+    "Mediabot::Plugin::InvocationV3"
+  ],
+  "plugin_never_receives": [
+    "Mediabot",
+    "Mediabot::Context",
+    "IRC socket",
+    "database handle"
+  ],
+  "lifecycle": [
+    "construct",
+    "start",
+    "stop"
+  ],
+  "deferred_to": {
+    "events_and_scheduler": "MB743",
+    "channel_policy_and_config": "MB744",
+    "production_proof": "MB745"
+  }
+}
