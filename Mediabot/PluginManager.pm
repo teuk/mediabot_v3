@@ -259,11 +259,16 @@ sub unregister_plugin {
     # prevents command cleanup.
     my $api = ref($entry->{metadata}) eq 'HASH'
         ? ($entry->{metadata}{api} // 1) : 1;
-    if ($api == 3 && $entry->{enabled}) {
+    if ($api == 3) {
+        my $was_enabled = $entry->{enabled} ? 1 : 0;
         $entry->{enabled} = 0;
+        $self->_clear_v3_event_queue($entry);
+        my $jobs_ok = eval { $self->_stop_v3_jobs($entry); 1 };
+        $entry->{metadata}{job_stop_error} = _plugin_error_text(
+            $@, 'plugin job stop failed') unless $jobs_ok;
         my $object = $entry->{object};
         my $context = $entry->{metadata}{plugin_context};
-        if (ref($object) && eval { $object->can('stop') }) {
+        if ($was_enabled && ref($object) && eval { $object->can('stop') }) {
             my $ok = eval { $object->stop(context => $context); 1 };
             $entry->{metadata}{stop_error} = _plugin_error_text(
                 $@, 'plugin stop failed') unless $ok;
@@ -276,6 +281,7 @@ sub unregister_plugin {
     $self->_unmount_entry_commands($entry);
     # mb593-B1: et desabonner les events routes des scripts, au meme point.
     $self->_unsubscribe_entry_events($entry);
+    $self->_remove_v3_jobs($entry) if $api == 3;
 
     # mb244-B1: explicit plugin unregister must also give the plugin object a
     # chance to remove runtime hooks such as EventBus listeners.  MB242 already
@@ -329,11 +335,22 @@ sub enable {
     if ($api == 3) {
         my $object = $entry->{object};
         my $context = $entry->{metadata}{plugin_context};
-        if (ref($object) && eval { $object->can('start') }) {
-            my $ok = eval { $object->start(context => $context); 1 };
-            die "PluginManager: failed to start API v3 plugin '$entry->{name}': "
-              . _plugin_error_text($@, 'plugin start failed') . "\n"
-                unless $ok;
+        my $object_started = 0;
+        my $ok = eval {
+            if (ref($object) && eval { $object->can('start') }) {
+                $object->start(context => $context);
+                $object_started = 1;
+            }
+            $self->_start_v3_jobs($entry);
+            1;
+        };
+        unless ($ok) {
+            my $error = _plugin_error_text($@, 'plugin activation failed');
+            eval { $self->_stop_v3_jobs($entry) };
+            eval { $object->stop(context => $context) }
+                if $object_started && ref($object)
+                    && eval { $object->can('stop') };
+            die "PluginManager: failed to start API v3 plugin '$entry->{name}': $error\n";
         }
     }
     $entry->{enabled} = 1;
@@ -351,14 +368,22 @@ sub disable {
         ? ($entry->{metadata}{api} // 1) : 1;
     $entry->{enabled} = 0;
     if ($api == 3) {
+        $self->_clear_v3_event_queue($entry);
+        my $job_error;
+        eval { $self->_stop_v3_jobs($entry); 1 }
+            or $job_error = _plugin_error_text($@, 'plugin job stop failed');
         my $object = $entry->{object};
         my $context = $entry->{metadata}{plugin_context};
+        my $stop_error;
         if (ref($object) && eval { $object->can('stop') }) {
             my $ok = eval { $object->stop(context => $context); 1 };
-            die "PluginManager: failed to stop API v3 plugin '$entry->{name}': "
-              . _plugin_error_text($@, 'plugin stop failed') . "\n"
+            $stop_error = _plugin_error_text($@, 'plugin stop failed')
                 unless $ok;
         }
+        die "PluginManager: failed to stop API v3 plugin '$entry->{name}': $job_error\n"
+            if defined $job_error;
+        die "PluginManager: failed to stop API v3 plugin '$entry->{name}': $stop_error\n"
+            if defined $stop_error;
     }
 
     return 1;
@@ -1260,6 +1285,265 @@ sub _mount_v3_commands {
     }
     $entry->{mounted_commands} = \@mounted;
     return 1;
+}
+
+# MB743: API v3 events are translated from the existing EventBus into a
+# versioned, copied envelope. Delivery is deferred through a bounded queue so
+# one plugin cannot recursively consume an unbounded event burst. The queue is
+# owned by the plugin entry and is cleared before disable/unload.
+sub _mount_v3_events {
+    my ($self, $key, $entry) = @_;
+
+    my $manifest = $entry->{manifest};
+    my $events = ref($manifest) eq 'HASH' ? $manifest->{events} : undef;
+    $entry->{event_listeners} = [];
+    return 1 unless ref($events) eq 'ARRAY' && @$events;
+
+    my $context = $entry->{metadata}{plugin_context};
+    return 1 unless $context
+        && $context->has_capability('events.subscribe');
+
+    my $bot = $self->{bot};
+    my $bus = $bot && eval { $bot->can('events') }
+        ? eval { $bot->events } : undef;
+    die "PluginManager: cannot mount API v3 events for '$key': event bus unavailable\n"
+        unless $bus && eval { $bus->can('on') && $bus->can('off') };
+
+    my $loop = $bot && eval { $bot->can('getLoop') }
+        ? eval { $bot->getLoop } : eval { $bot->{loop} };
+    die "PluginManager: cannot mount API v3 events for '$key': deferred loop unavailable\n"
+        unless $loop && eval { $loop->can('later') };
+
+    require Mediabot::Plugin::EventCatalogV3;
+    require Mediabot::Plugin::EventQueueV3;
+
+    my $object = $entry->{object};
+    my $queue = Mediabot::Plugin::EventQueueV3->new(
+        max_pending => 32,
+        batch_size  => 8,
+        defer       => sub { $loop->later($_[0]) },
+        dispatch    => sub {
+            my ($item) = @_;
+            return unless $self->is_enabled($key);
+            my $method = $item->{method};
+            return $object->$method($context, $item->{envelope});
+        },
+        on_drop     => sub {
+            my ($item) = @_;
+            my $name = eval { $item->{envelope}->name } // 'unknown';
+            _pm_metric($bot, 'mediabot_plugin_v3_event_dropped_total',
+                { plugin => $key, event => $name });
+            eval { $bot->{logger}->log(2,
+                "plugin '$key' API v3 event '$name' dropped by backpressure") };
+        },
+        on_error    => sub {
+            my ($item, $error) = @_;
+            my $name = eval { $item->{envelope}->name } // 'unknown';
+            my $clean = _plugin_error_text($error, 'API v3 event failed');
+            _pm_metric($bot, 'mediabot_plugin_v3_failure_total',
+                { plugin => $key, kind => 'event' });
+            eval { $bot->{logger}->log(1,
+                "plugin '$key' API v3 event '$name' failed: $clean") };
+        },
+    );
+
+    my @subscribed;
+    for my $spec (@$events) {
+        my ($name, $version, $method) =
+            @$spec{qw(name version handler)};
+        my $bus_event = Mediabot::Plugin::EventCatalogV3->bus_event(
+            $name, $version);
+        my $listener = eval {
+            $bus->on($bus_event, sub {
+                my ($raw) = @_;
+                return unless $self->is_enabled($key);
+                return unless $context->has_capability('events.subscribe');
+                my $envelope = Mediabot::Plugin::EventCatalogV3->envelope(
+                    $name, $version, $raw);
+                my $accepted = $queue->enqueue({
+                    method   => $method,
+                    envelope => $envelope,
+                });
+                _pm_metric($bot, 'mediabot_plugin_event_total',
+                    { plugin => $key, event => $name }) if $accepted;
+                return $accepted;
+            },
+            plugin => $key,
+            name   => "plugin-v3:$key:$name:v$version");
+        };
+        unless ($listener) {
+            my $error = _plugin_error_text($@, 'event subscribe failed');
+            $bus->off(@$_) for @subscribed;
+            die "PluginManager: subscribing API v3 event '$name' for '$key' failed: $error\n";
+        }
+        push @subscribed, [ $bus_event, $listener ];
+    }
+
+    $entry->{event_queue} = $queue;
+    $entry->{event_listeners} = \@subscribed;
+    return 1;
+}
+
+sub _clear_v3_event_queue {
+    my ($self, $entry) = @_;
+    return 0 unless $entry && ref($entry->{event_queue});
+    return $entry->{event_queue}->clear;
+}
+
+# MB743: declarative jobs are registered in the central Scheduler under a
+# namespaced owner key. Loading reserves them but never starts them. Enable,
+# disable and unload own the complete timer lifecycle.
+sub _mount_v3_jobs {
+    my ($self, $key, $entry) = @_;
+
+    my $manifest = $entry->{manifest};
+    my $jobs = ref($manifest) eq 'HASH' ? ($manifest->{jobs} || {}) : {};
+    $entry->{mounted_jobs} = [];
+    return 1 unless ref($jobs) eq 'HASH' && keys %$jobs;
+
+    my $context = $entry->{metadata}{plugin_context};
+    return 1 unless $context
+        && $context->has_capability('scheduler.jobs');
+
+    my $bot = $self->{bot};
+    my $scheduler = eval { $bot->{scheduler} };
+    die "PluginManager: cannot mount API v3 jobs for '$key': scheduler unavailable\n"
+        unless $scheduler && eval {
+            $scheduler->can('add') && $scheduler->can('start')
+                && $scheduler->can('stop') && $scheduler->can('remove')
+        };
+
+    require Mediabot::Plugin::JobInvocationV3;
+    my $object = $entry->{object};
+    my @mounted;
+
+    for my $job (sort keys %$jobs) {
+        my $spec = $jobs->{$job};
+        my $task_name = "plugin.v3.$key.$job";
+        my $method = $spec->{handler};
+        my $interval = int($spec->{interval_seconds});
+        my $first = exists($spec->{first_delay_seconds})
+            ? int($spec->{first_delay_seconds}) : $interval;
+        my $clock = {
+            first         => $first,
+            interval      => $interval,
+            next_expected => undef,
+            sequence      => 0,
+        };
+
+        my $ok = eval {
+            $scheduler->add(
+                name           => $task_name,
+                interval       => $interval,
+                first_interval => $first,
+                autostart      => 0,
+                cb             => sub {
+                    return unless $self->is_enabled($key);
+                    return unless $context->has_capability('scheduler.jobs');
+                    my $fired_at = time();
+                    my $scheduled_at = defined($clock->{next_expected})
+                        ? $clock->{next_expected} : $fired_at;
+                    my $invocation = Mediabot::Plugin::JobInvocationV3->new(
+                        name         => $job,
+                        sequence     => ++$clock->{sequence},
+                        scheduled_at => $scheduled_at,
+                        fired_at     => $fired_at,
+                    );
+                    $clock->{next_expected} = $fired_at + $interval;
+                    _pm_metric($bot, 'mediabot_plugin_v3_job_total',
+                        { plugin => $key, job => $job });
+                    my $called = eval {
+                        $object->$method($context, $invocation);
+                        1;
+                    };
+                    unless ($called) {
+                        my $error = _plugin_error_text(
+                            $@, 'API v3 job failed');
+                        _pm_metric($bot, 'mediabot_plugin_v3_failure_total',
+                            { plugin => $key, kind => 'job' });
+                        eval { $bot->{logger}->log(1,
+                            "plugin '$key' API v3 job '$job' failed: $error") };
+                    }
+                    return;
+                },
+            );
+            1;
+        };
+        unless ($ok) {
+            my $error = _plugin_error_text($@, 'job registration failed');
+            $scheduler->remove($_->{task}) for reverse @mounted;
+            die "PluginManager: mounting API v3 job '$job' for '$key' failed: $error\n";
+        }
+        push @mounted, {
+            name  => $job,
+            task  => $task_name,
+            clock => $clock,
+        };
+    }
+
+    $entry->{mounted_jobs} = \@mounted;
+    return 1;
+}
+
+sub _start_v3_jobs {
+    my ($self, $entry) = @_;
+    return 1 unless $entry && ref($entry->{mounted_jobs}) eq 'ARRAY';
+    my $scheduler = eval { $self->{bot}{scheduler} };
+    return 1 unless @{ $entry->{mounted_jobs} };
+    die "PluginManager: scheduler unavailable while starting API v3 jobs\n"
+        unless $scheduler;
+
+    my @started;
+    for my $job (@{ $entry->{mounted_jobs} }) {
+        $job->{clock}{next_expected} = time() + $job->{clock}{first}
+            if ref($job->{clock}) eq 'HASH';
+        unless ($scheduler->start($job->{task})) {
+            $scheduler->stop($_->{task}) for reverse @started;
+            $_->{clock}{next_expected} = undef
+                for grep { ref($_->{clock}) eq 'HASH' } @started;
+            $job->{clock}{next_expected} = undef
+                if ref($job->{clock}) eq 'HASH';
+            die "PluginManager: failed to start API v3 job '$job->{name}'\n";
+        }
+        push @started, $job;
+    }
+    return 1;
+}
+
+sub _stop_v3_jobs {
+    my ($self, $entry) = @_;
+    return 1 unless $entry && ref($entry->{mounted_jobs}) eq 'ARRAY';
+    return 1 unless @{ $entry->{mounted_jobs} };
+    my $scheduler = eval { $self->{bot}{scheduler} }
+        or die "PluginManager: scheduler unavailable while stopping API v3 jobs\n";
+
+    my @failed;
+    for my $job (reverse @{ $entry->{mounted_jobs} }) {
+        if ($scheduler->stop($job->{task})) {
+            $job->{clock}{next_expected} = undef
+                if ref($job->{clock}) eq 'HASH';
+        }
+        else {
+            push @failed, $job->{name};
+        }
+    }
+    die "PluginManager: failed to stop API v3 jobs: " . join(', ', @failed) . "\n"
+        if @failed;
+    return 1;
+}
+
+sub _remove_v3_jobs {
+    my ($self, $entry) = @_;
+    return 0 unless $entry && ref($entry->{mounted_jobs}) eq 'ARRAY';
+    my $scheduler = eval { $self->{bot}{scheduler} };
+    return 0 unless $scheduler;
+
+    my $removed = 0;
+    for my $job (reverse @{ $entry->{mounted_jobs} }) {
+        $removed++ if $scheduler->remove($job->{task});
+    }
+    $entry->{mounted_jobs} = [];
+    return $removed;
 }
 
 sub _unmount_entry_commands {

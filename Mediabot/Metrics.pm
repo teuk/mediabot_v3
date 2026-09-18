@@ -87,11 +87,15 @@ sub new {
     $self->_declare('mediabot_commands_public_total',  'counter', 'Total public IRC commands executed');
     $self->_declare('mediabot_commands_private_total', 'counter', 'Total private IRC commands executed');
     $self->_declare('mediabot_commands_partyline_total','counter','Total Partyline commands executed');
-    # mb598-B1: le sous-systeme plugins v2 devient observable dans Grafana.
-    $self->_declare('mediabot_plugin_command_total','counter','Plugin v2 command dispatches (after the auth bridge)');
-    $self->_declare('mediabot_plugin_command_denied_total','counter','Plugin v2 command dispatches denied by the auth bridge');
-    $self->_declare('mediabot_plugin_event_total','counter','Plugin v2 events routed to sidecar scripts');
+    # mb598-B1: le sous-systeme plugins devient observable dans Grafana.
+    $self->_declare('mediabot_plugin_command_total','counter','Plugin command dispatches after the auth bridge');
+    $self->_declare('mediabot_plugin_command_denied_total','counter','Plugin command dispatches denied by the auth bridge');
+    $self->_declare('mediabot_plugin_event_total','counter','Plugin events accepted for routed delivery');
     $self->_declare('mediabot_plugin_script_failure_total','counter','Plugin v2 sidecar script failures by kind');
+    # MB743: API v3 event backpressure, owned jobs and contained failures.
+    $self->_declare('mediabot_plugin_v3_event_dropped_total','counter','Plugin API v3 events dropped by bounded backpressure');
+    $self->_declare('mediabot_plugin_v3_job_total','counter','Plugin API v3 shared job executions');
+    $self->_declare('mediabot_plugin_v3_failure_total','counter','Plugin API v3 contained failures by runtime kind');
     # mb604-B1: la persistance mb601 devient observable — combien un plugin
     # ecrit, a quelle frequence, et POURQUOI ses ecritures sont refusees.
     $self->_declare('mediabot_plugin_storage_bytes','gauge','Plugin v2 persistent storage size in bytes, by plugin');

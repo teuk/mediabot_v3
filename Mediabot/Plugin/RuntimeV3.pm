@@ -148,6 +148,19 @@ sub load_package {
         die "Plugin API v3 runtime: command '$command' has no handler '$method'\n"
             unless $object->can($method);
     }
+    require Mediabot::Plugin::EventCatalogV3;
+    for my $event (@{ $manifest->{events} }) {
+        Mediabot::Plugin::EventCatalogV3->assert_supported(
+            $event->{name}, $event->{version});
+        my $method = $event->{handler};
+        die "Plugin API v3 runtime: event '$event->{name}' has no handler '$method'\n"
+            unless $object->can($method);
+    }
+    for my $job (sort keys %{ $manifest->{jobs} || {} }) {
+        my $method = $manifest->{jobs}{$job}{handler};
+        die "Plugin API v3 runtime: job '$job' has no handler '$method'\n"
+            unless $object->can($method);
+    }
 
     my $entry = $manager->register_plugin(
         name        => $name,
@@ -168,9 +181,14 @@ sub load_package {
         },
     );
 
-    my $mounted = eval { $manager->_mount_v3_commands($name, $entry); 1 };
+    my $mounted = eval {
+        $manager->_mount_v3_commands($name, $entry);
+        $manager->_mount_v3_events($name, $entry);
+        $manager->_mount_v3_jobs($name, $entry);
+        1;
+    };
     unless ($mounted) {
-        my $error = $@ || 'command mounting failed';
+        my $error = $@ || 'runtime resource mounting failed';
         $manager->unregister_plugin($name);
         die $error;
     }

@@ -12,6 +12,8 @@ sub new {
     return bless {
         context => $args{context},
         started => 0,
+        minutes_observed => 0,
+        heartbeats       => 0,
     }, $class;
 }
 
@@ -34,6 +36,20 @@ sub command_hello {
         $invocation,
         'Hello from a tiny, capability-scoped API v3 plugin.'
     );
+}
+
+sub event_minute {
+    my ($self, $context, $event) = @_;
+    return unless $self->{started};
+    $self->{minutes_observed}++;
+    return 1;
+}
+
+sub job_heartbeat {
+    my ($self, $context, $job) = @_;
+    return unless $self->{started};
+    $self->{heartbeats}++;
+    return 1;
 }
 
 1;

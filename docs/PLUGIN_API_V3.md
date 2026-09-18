@@ -1,9 +1,9 @@
 # Plugin API v3 author guide
 
-Plugin API v3 is experimental in MB742. This milestone makes packages
-discoverable and explicitly loadable, but never activates them at startup.
-Events, scheduling, channel policy, typed configuration and production rollout
-belong to later milestones.
+Plugin API v3 remains experimental in MB743. Packages are discoverable and
+explicitly loadable, but never activate at startup. MB743 adds versioned event
+delivery, bounded backpressure and centrally owned periodic jobs. Channel
+policy, typed configuration and production rollout belong to later milestones.
 
 ## Package layout
 
@@ -19,8 +19,10 @@ manifest and entrypoint must be regular files inside that directory; symlinks,
 path traversal, unknown manifest fields and manifests over 16 KiB are rejected.
 
 See [`../plugins/hello-v3`](../plugins/hello-v3) for the inert reference
-package and [`../plugins/API_V3_CONTRACT.json`](../plugins/API_V3_CONTRACT.json)
-for the machine-readable boundary.
+package, [`../plugins/API_V3_CONTRACT.json`](../plugins/API_V3_CONTRACT.json)
+for the machine-readable boundary and
+[`../plugins/API_V3_EVENTS.json`](../plugins/API_V3_EVENTS.json) for the event
+schema catalogue.
 
 ## Minimal manifest
 
@@ -36,7 +38,11 @@ for the machine-readable boundary.
     "class": "MyPlugin"
   },
   "activation": { "default": "off" },
-  "capabilities": ["irc.reply"],
+  "capabilities": [
+    "events.subscribe",
+    "irc.reply",
+    "scheduler.jobs"
+  ],
   "commands": {
     "hello": {
       "source": "public",
@@ -46,14 +52,28 @@ for the machine-readable boundary.
       "aliases": []
     }
   },
-  "events": [],
+  "events": [
+    {
+      "name": "scheduler.minute",
+      "version": 1,
+      "handler": "event_minute"
+    }
+  ],
+  "jobs": {
+    "heartbeat": {
+      "handler": "job_heartbeat",
+      "interval_seconds": 300,
+      "first_delay_seconds": 30
+    }
+  },
   "config_schema": {}
 }
 ```
 
-Every field is validated fail-closed before plugin code is loaded. MB742 accepts
-Perl entrypoints only. Declared events and configuration schemas are validated
-metadata; no event subscription or plugin configuration service is active yet.
+Every field is validated fail-closed before plugin code is loaded. MB743 accepts
+Perl entrypoints only. Event name/version pairs must exist in the core catalogue
+and job handlers, intervals and namespace lengths are checked before any
+registration. Configuration schemas remain metadata until MB744.
 
 ## Runtime boundary
 
@@ -84,6 +104,25 @@ and capability-checked services. `Mediabot::Plugin::InvocationV3` exposes only
 bounded copies of nick, channel, command, arguments, source and private/public
 state. It contains private output sinks that the plugin cannot inspect.
 
+Event and job handlers receive equally narrow values:
+
+```perl
+sub event_minute {
+    my ($self, $context, $event) = @_;
+    my $minute = $event->get('minute');
+}
+
+sub job_heartbeat {
+    my ($self, $context, $job) = @_;
+    my $sequence = $job->sequence;
+}
+```
+
+`EventEnvelopeV3` exposes `name`, `version`, `occurred_at`, `get` and a
+detached `data` copy. `JobInvocationV3` exposes `name`, `sequence`,
+`scheduled_at`, `fired_at` and `lateness_seconds`. Neither exposes a bot,
+socket, database, raw IRC message or scheduler object.
+
 The plugin never receives the Mediabot object, `Mediabot::Context`, the raw IRC
 message, socket, database handle or configuration object.
 
@@ -92,12 +131,48 @@ sandbox. The facade prevents accidental coupling and gives the core one policy
 boundary; it does not protect the host from deliberately hostile Perl code.
 Command failures are contained, logged and emit no IRC output.
 
+## Versioned events and backpressure
+
+MB743 publishes version 1 schemas for:
+
+- `command.public.observed`;
+- `irc.channel.join`, `irc.channel.part`, `irc.channel.topic` and
+  `irc.channel.kick`;
+- `irc.nick.change` and `irc.user.quit`;
+- `scheduler.minute`.
+
+The core maps existing observations into field-whitelisted copies. References,
+unknown fields and out-of-range integers are discarded. A plugin must request
+and receive `events.subscribe`; otherwise its declared subscriptions remain
+inert.
+
+Delivery never runs a plugin handler inside the original EventBus callback.
+Each plugin owns one deferred queue capped at 32 envelopes. Drains process at
+most eight envelopes per turn. When full, the newest event is dropped and the
+loss is logged and counted. Disable or unload clears pending work and
+invalidates already deferred callbacks.
+
+## Shared jobs
+
+Jobs are declarative, periodic and owned by the core scheduler. A plugin may
+declare at most eight jobs. Intervals range from 5 to 86,400 seconds and the
+optional first delay ranges from 0 to 86,400 seconds. Core task names use the
+`plugin.v3.<plugin>.<job>` namespace and must fit the scheduler's 64-character
+limit.
+
+Loading reserves granted jobs without starting them. Enabling starts all owned
+jobs transactionally; a failure rolls back already started jobs and the plugin
+`start` hook. Disable stops them, and unload removes them. Job exceptions are
+contained and recorded without stopping the scheduler. A declared job requires
+the requested and granted `scheduler.jobs` capability.
+
 ## Capabilities and activation
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-In MB742 only `irc.reply` and `irc.notice` have executable facades; the other
-names are reserved for later mediated services.
+MB743 implements `irc.reply`, `irc.notice`, `events.subscribe` and
+`scheduler.jobs`. Other capability names remain reserved for later mediated
+services.
 
 Discovery reads manifests only. Loading is explicit, leaves the package
 disabled and mounts silent commands. Enabling is a second explicit operation.
@@ -109,7 +184,7 @@ The programmatic development flow is:
 my @available = $bot->plugin_manager->discover_v3_packages;
 my $entry = $bot->plugin_manager->load_package_v3(
     'my-plugin',
-    grants => ['irc.reply'],
+    grants => ['events.subscribe', 'irc.reply', 'scheduler.jobs'],
 );
 $bot->plugin_manager->enable('my-plugin');
 ```

@@ -1,7 +1,7 @@
 {
   "api": 3,
   "name": "hello-v3",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Capability-scoped API v3 witness plugin.",
   "runtime": {
     "kind": "perl",
@@ -15,7 +15,9 @@
     "default": "off"
   },
   "capabilities": [
-    "irc.reply"
+    "events.subscribe",
+    "irc.reply",
+    "scheduler.jobs"
   ],
   "commands": {
     "v3hello": {
@@ -26,6 +28,19 @@
       "aliases": []
     }
   },
-  "events": [],
+  "events": [
+    {
+      "name": "scheduler.minute",
+      "version": 1,
+      "handler": "event_minute"
+    }
+  ],
+  "jobs": {
+    "heartbeat": {
+      "handler": "job_heartbeat",
+      "interval_seconds": 300,
+      "first_delay_seconds": 30
+    }
+  },
   "config_schema": {}
 }

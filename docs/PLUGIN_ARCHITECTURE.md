@@ -1,9 +1,9 @@
 # Mediabot plugin architecture
 
 This document is the local, canonical entry point for Mediabot's plugin
-platform. It records the MB740 baseline, the MB741 command catalogue and the
-executable MB742 API v3 foundation. It does not enable a plugin or grant a new
-capability.
+platform. It records the MB740 baseline, the MB741 command catalogue, the
+executable MB742 API v3 foundation and the MB743 event/scheduler boundary. It
+does not enable a plugin or grant a new capability.
 
 ## Current baseline
 
@@ -13,7 +13,7 @@ Mediabot currently supports three extension forms:
 - trusted external Perl, Python and Tcl scripts executed without a shell across
   the `mediabot-script-v1` JSON boundary.
 - experimental API v3 package directories with strict manifests, bounded
-  contexts and explicit load/enable lifecycle.
+  contexts, versioned events, owned jobs and explicit load/enable lifecycle.
 
 API v2 sidecars already have fail-closed manifests, bounded input and output,
 transactional command/event mounting, lifecycle cleanup, controlled actions and
@@ -89,10 +89,12 @@ plugins/<slug>/
 ```
 
 The manifest declares compatibility, public/private commands and aliases,
-versioned events, configuration schema and requested capabilities. MB742
-validates all of these fail-closed. `PluginContext` currently implements only
-bounded `irc.reply` and `irc.notice`; the remaining services land behind the
-same capability boundary in later milestones.
+versioned events, shared jobs, configuration schema and requested capabilities.
+MB742 established fail-closed packages and bounded command invocations. MB743
+adds copied event envelopes, bounded deferred delivery and scheduler-owned
+jobs. `PluginContext` also retains bounded `irc.reply` and `irc.notice`; the
+remaining services land behind the same capability boundary in later
+milestones.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -105,6 +107,7 @@ Planned capability families include:
 | Capability | Core mediation |
 | --- | --- |
 | `irc.reply` / `irc.notice` | wire limits, channel scope, pacing and flood gates |
+| `events.subscribe` | version catalogue, copied fields, bounded queue and overflow accounting |
 | `channel.topic` | explicit instance and channel grant plus runtime authorization |
 | `moderation.kick` / `moderation.ban` | strict target scope and audit trail |
 | `storage.kv` | namespaced, versioned, bounded writes with conflict handling |
@@ -119,9 +122,9 @@ Planned capability families include:
 | --- | --- | --- | --- |
 | Bot object | full object for in-process plugins | unavailable | core |
 | Commands | v2 public commands only | one declarative catalogue for public/private commands and aliases | core registry |
-| Events | eight unversioned routed events | named schemas with versions and channel policy | event catalogue |
+| Events | eight legacy routed events | eight versioned schemas, copied envelopes and bounded deferred queues | event catalogue |
 | IRC output | bounded actions | capability-scoped output facade | core transport |
-| Scheduler | route-v1 timers only | shared owned jobs with limits and cancellation | core scheduler |
+| Scheduler | core tasks plus route-v1 timers | shared owned jobs with quotas and lifecycle cancellation | core scheduler |
 | Storage | last-write-wins JSON document | namespaced KV with compare-and-swap/short transactions | data service |
 | HTTP | no shared plugin service | bounded async client with cache and circuit breaker | HTTP service |
 | Database | possible through full in-process bot | approved domain repositories only | data layer |
@@ -139,8 +142,9 @@ Planned capability families include:
 3. **MB742 — API v3:** complete. Strict `plugin.json` packages, bounded
    `PluginContext`/invocations, requested-intersect-granted capabilities,
    explicit lifecycle, an inert witness and a read-only v2 adapter are present.
-4. **MB743 — events and scheduler:** versioned event schemas, shared jobs and
-   backpressure.
+4. **MB743 — events and scheduler:** complete. Eight versioned event schemas,
+   immutable envelopes, deferred queues with backpressure and centrally owned
+   jobs now follow the API v3 lifecycle.
 5. **MB744 — channel policy:** typed plugin configuration and per-channel
    `off`/`observe`/`on` activation, disabled by default.
 6. **MB745 — visible proof:** move the simple fun-command pack and ship one new
@@ -173,4 +177,6 @@ transport are not first-wave extraction candidates.
 
 The detailed v2 author guide remains in
 [`../plugins/scripts/README.md`](../plugins/scripts/README.md). The v3 author
-guide will be added with MB742, when its executable contract exists.
+guide and executable contracts are in [`PLUGIN_API_V3.md`](PLUGIN_API_V3.md),
+[`../plugins/API_V3_CONTRACT.json`](../plugins/API_V3_CONTRACT.json) and
+[`../plugins/API_V3_EVENTS.json`](../plugins/API_V3_EVENTS.json).

@@ -40,10 +40,15 @@ return sub {
     $assert->is($manifest->{api}, 3, 'witness manifest validates as API v3');
     $assert->is($manifest->{activation}{default}, 'off',
         'witness is inert by default');
-    $assert->is(join(',', @{ $manifest->{capabilities} }), 'irc.reply',
-        'witness requests one narrow capability');
+    $assert->is(join(',', @{ $manifest->{capabilities} }),
+        'events.subscribe,irc.reply,scheduler.jobs',
+        'witness requests only its three bounded capabilities');
     $assert->is($manifest->{commands}{v3hello}{handler}, 'command_hello',
         'witness command names its explicit handler');
+    $assert->is($manifest->{events}[0]{name}, 'scheduler.minute',
+        'witness declares one versioned event');
+    $assert->is($manifest->{jobs}{heartbeat}{interval_seconds}, 300,
+        'witness declares one bounded shared job');
 
     my $fake_manager = bless {}, 'T1066::Manager';
     my $runtime = Mediabot::Plugin::RuntimeV3->new(

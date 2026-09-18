@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb743 — give plugins a clock and a safe event post
+
+- Publish eight versioned API v3 event schemas and translate existing core
+  observations into copied, field-whitelisted `EventEnvelopeV3` objects. An
+  unsupported event or schema version now fails before plugin registration.
+- Deliver events outside the core EventBus stack through one owned queue per
+  plugin, bounded to 32 pending envelopes and batches of eight. Overflow drops
+  the newest event, records the loss and cannot grow memory without bound.
+- Add declarative shared jobs backed by the central scheduler. Namespaces,
+  intervals, initial delays, quotas and handlers are validated fail-closed;
+  load only reserves jobs, enable starts them, and disable/unload cancels them.
+- Extend the inert `hello-v3` witness, machine contracts, author guide and
+  lifecycle tests without enabling a plugin, changing private configuration or
+  touching the database. Historical API v1/v2 dispatch remains unchanged.
+
 ### mb742 — open a capability-checked plugin doorway
 
 - Add a strict, bounded `plugin.json` contract for API v3 packages. Discovery

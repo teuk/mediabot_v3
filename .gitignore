@@ -68,6 +68,7 @@ snap_mediabot*.sh
 !plugins/scripts/**/*.manifest.json
 !plugins/API_V2_CONTRACT.json
 !plugins/API_V3_CONTRACT.json
+!plugins/API_V3_EVENTS.json
 !plugins/*/plugin.json
 
 # MB696 - Node dependency hygiene

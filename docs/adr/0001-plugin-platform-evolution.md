@@ -77,3 +77,10 @@ disabled; activation invokes a bounded lifecycle. Plugins receive only
 `PluginContext` and copied invocation data, while command authorization and IRC
 output remain core-owned. API v1/v2 execution remains unchanged and its adapter
 is descriptive only.
+
+MB743 gives that boundary core-owned time and observation services. Eight
+events have explicit versioned schemas and copied payloads; delivery uses a
+bounded deferred queue with a deterministic overflow policy. Declarative jobs
+are namespaced in the central scheduler and follow the plugin enable, disable
+and unload lifecycle. Neither service activates a package automatically, and
+both require an effective capability grant.

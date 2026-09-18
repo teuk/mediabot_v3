@@ -1,0 +1,98 @@
+{
+  "api": 3,
+  "milestone": "MB743",
+  "events": {
+    "command.public.observed": {
+      "1": {
+        "fields": {
+          "args": "array[scalar:256]:32",
+          "channel": "scalar:128",
+          "command": "scalar:32",
+          "nick": "scalar:64"
+        }
+      }
+    },
+    "irc.channel.join": {
+      "1": {
+        "fields": {
+          "channel": "scalar:128",
+          "host": "scalar:255",
+          "ident": "scalar:128",
+          "is_self": "boolean",
+          "nick": "scalar:64"
+        }
+      }
+    },
+    "irc.channel.kick": {
+      "1": {
+        "fields": {
+          "channel": "scalar:128",
+          "host": "scalar:255",
+          "ident": "scalar:128",
+          "is_self": "boolean",
+          "kicked": "scalar:64",
+          "message": "scalar:400",
+          "nick": "scalar:64"
+        }
+      }
+    },
+    "irc.channel.part": {
+      "1": {
+        "fields": {
+          "channel": "scalar:128",
+          "host": "scalar:255",
+          "ident": "scalar:128",
+          "is_self": "boolean",
+          "message": "scalar:400",
+          "nick": "scalar:64"
+        }
+      }
+    },
+    "irc.channel.topic": {
+      "1": {
+        "fields": {
+          "channel": "scalar:128",
+          "host": "scalar:255",
+          "ident": "scalar:128",
+          "is_self": "boolean",
+          "nick": "scalar:64",
+          "topic": "scalar:400"
+        }
+      }
+    },
+    "irc.nick.change": {
+      "1": {
+        "fields": {
+          "host": "scalar:255",
+          "ident": "scalar:128",
+          "is_self": "boolean",
+          "new_nick": "scalar:64",
+          "nick": "scalar:64"
+        }
+      }
+    },
+    "irc.user.quit": {
+      "1": {
+        "fields": {
+          "host": "scalar:255",
+          "ident": "scalar:128",
+          "is_self": "boolean",
+          "message": "scalar:400",
+          "nick": "scalar:64"
+        }
+      }
+    },
+    "scheduler.minute": {
+      "1": {
+        "fields": {
+          "dow": "integer:0..6",
+          "hour": "integer:0..23",
+          "mday": "integer:1..31",
+          "minute": "integer:0..59",
+          "month": "integer:1..12",
+          "year": "integer:1970..9999"
+        }
+      }
+    }
+  }
+}

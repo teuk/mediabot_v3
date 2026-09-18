@@ -11,16 +11,17 @@ our $MAX_MANIFEST_BYTES = 16384;
 
 my %TOP_LEVEL = map { $_ => 1 } qw(
     api name version description runtime compatibility activation
-    capabilities commands events config_schema
+    capabilities commands events jobs config_schema
 );
 
 my %RUNTIME_LEVEL = map { $_ => 1 } qw(api kind entrypoint class);
 my %ACTIVATION_LEVEL = map { $_ => 1 } qw(default);
 my %COMMAND_LEVEL = map { $_ => 1 } qw(source help level handler aliases);
 my %EVENT_LEVEL = map { $_ => 1 } qw(name version handler);
+my %JOB_LEVEL = map { $_ => 1 } qw(handler interval_seconds first_delay_seconds);
 my %BASE_CAPABILITY = map { $_ => 1 } qw(
     irc.reply irc.notice channel.topic moderation.kick moderation.ban
-    storage.kv scheduler.jobs http.fetch
+    storage.kv events.subscribe scheduler.jobs http.fetch
 );
 
 sub _plain_scalar {
@@ -89,7 +90,7 @@ sub validate {
     die "Plugin API v3: activation must be an object\n"
         unless ref($activation) eq 'HASH';
     _keys_are_known($activation, \%ACTIVATION_LEVEL, 'activation');
-    die "Plugin API v3: activation.default must be 'off' in MB742\n"
+    die "Plugin API v3: activation.default must be 'off'\n"
         unless _plain_scalar($activation->{default})
             && $activation->{default} eq 'off';
 
@@ -150,6 +151,9 @@ sub validate {
     my $events = $manifest->{events};
     die "Plugin API v3: events must be an array\n"
         unless ref($events) eq 'ARRAY';
+    die "Plugin API v3: at most 32 events may be declared\n"
+        if @$events > 32;
+    my %seen_event;
     for my $event (@$events) {
         die "Plugin API v3: each event must be an object\n"
             unless ref($event) eq 'HASH';
@@ -163,7 +167,44 @@ sub validate {
         die "Plugin API v3: event handler must be a method name\n"
             unless _plain_scalar($event->{handler})
                 && $event->{handler} =~ /\A[a-z_][a-z0-9_]{0,63}\z/;
+        my $event_key = "$event->{name}\0$event->{version}";
+        die "Plugin API v3: event '$event->{name}' version '$event->{version}' is duplicated\n"
+            if $seen_event{$event_key}++;
     }
+    die "Plugin API v3: declared events require capability 'events.subscribe'\n"
+        if @$events && !$seen_capability{'events.subscribe'};
+
+    my $jobs = exists($manifest->{jobs}) ? $manifest->{jobs} : {};
+    die "Plugin API v3: jobs must be an object\n"
+        unless ref($jobs) eq 'HASH';
+    die "Plugin API v3: at most 8 jobs may be declared\n"
+        if keys(%$jobs) > 8;
+    for my $job (sort keys %$jobs) {
+        die "Plugin API v3: invalid job name '$job'\n"
+            unless $job =~ /\A[a-z][a-z0-9_.-]{0,47}\z/;
+        die "Plugin API v3: namespaced job '$job' exceeds scheduler name limit\n"
+            if length("plugin.v3.$name.$job") > 64;
+        my $spec = $jobs->{$job};
+        die "Plugin API v3: job '$job' must be an object\n"
+            unless ref($spec) eq 'HASH';
+        _keys_are_known($spec, \%JOB_LEVEL, "job '$job'");
+        die "Plugin API v3: job '$job' handler must be a method name\n"
+            unless _plain_scalar($spec->{handler})
+                && $spec->{handler} =~ /\A[a-z_][a-z0-9_]{0,63}\z/;
+        die "Plugin API v3: job '$job' interval must be between 5 and 86400 seconds\n"
+            unless _plain_scalar($spec->{interval_seconds})
+                && "$spec->{interval_seconds}" =~ /\A[0-9]+\z/
+                && $spec->{interval_seconds} >= 5
+                && $spec->{interval_seconds} <= 86400;
+        if (exists $spec->{first_delay_seconds}) {
+            die "Plugin API v3: job '$job' first delay must be between 0 and 86400 seconds\n"
+                unless _plain_scalar($spec->{first_delay_seconds})
+                    && "$spec->{first_delay_seconds}" =~ /\A[0-9]+\z/
+                    && $spec->{first_delay_seconds} <= 86400;
+        }
+    }
+    die "Plugin API v3: declared jobs require capability 'scheduler.jobs'\n"
+        if keys(%$jobs) && !$seen_capability{'scheduler.jobs'};
 
     die "Plugin API v3: compatibility must be an object\n"
         if exists($manifest->{compatibility})

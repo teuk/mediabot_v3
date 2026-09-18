@@ -1,7 +1,7 @@
 # t/cases/781_mb598_plugin_metrics_info.t
 # =============================================================================
 # mb598 — observabilite du sous-systeme plugins v2.
-#   [1] les 4 metriques sont DECLAREES dans Metrics (un inc sans declare est
+#   [1] les metriques historiques et v3 sont DECLAREES dans Metrics (un inc sans declare est
 #       un no-op silencieux — la declaration est le contrat).
 #   [2] compteurs en conditions reelles avec le VRAI Mediabot::Metrics :
 #       dispatch commande autorise -> command_total{plugin,command} ;
@@ -103,7 +103,10 @@ return sub {
     for my $name (qw(mediabot_plugin_command_total
                      mediabot_plugin_command_denied_total
                      mediabot_plugin_event_total
-                     mediabot_plugin_script_failure_total)) {
+                     mediabot_plugin_script_failure_total
+                     mediabot_plugin_v3_event_dropped_total
+                     mediabot_plugin_v3_job_total
+                     mediabot_plugin_v3_failure_total)) {
         my $before = $bot->{metrics}->get($name, { probe => 'x' });
         $bot->{metrics}->inc($name, { probe => 'x' });
         my $after = $bot->{metrics}->get($name, { probe => 'x' });

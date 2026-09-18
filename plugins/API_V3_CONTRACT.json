@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB742",
+  "milestone": "MB743",
   "activation_default": "off",
   "manifest_file": "plugin.json",
   "manifest_max_bytes": 16384,
@@ -12,6 +12,7 @@
   "capabilities": [
     "channel.topic",
     "data.<domain>",
+    "events.subscribe",
     "http.fetch",
     "irc.notice",
     "irc.reply",
@@ -22,12 +23,16 @@
     "storage.kv"
   ],
   "implemented_capabilities": [
+    "events.subscribe",
     "irc.notice",
-    "irc.reply"
+    "irc.reply",
+    "scheduler.jobs"
   ],
   "plugin_receives": [
     "Mediabot::PluginContext",
-    "Mediabot::Plugin::InvocationV3"
+    "Mediabot::Plugin::InvocationV3",
+    "Mediabot::Plugin::EventEnvelopeV3",
+    "Mediabot::Plugin::JobInvocationV3"
   ],
   "plugin_never_receives": [
     "Mediabot",
@@ -40,8 +45,17 @@
     "start",
     "stop"
   ],
+  "event_backpressure": {
+    "max_pending_per_plugin": 32,
+    "dispatch_batch_size": 8,
+    "overflow_policy": "drop newest"
+  },
+  "scheduler_limits": {
+    "max_jobs_per_plugin": 8,
+    "minimum_interval_seconds": 5,
+    "maximum_interval_seconds": 86400
+  },
   "deferred_to": {
-    "events_and_scheduler": "MB743",
     "channel_policy_and_config": "MB744",
     "production_proof": "MB745"
   }
