@@ -41,16 +41,16 @@ my $case = sub {
     my $idx_ctx   = index($public, 'Mediabot::Context->new');
     my $idx_cmd   = index($public, '$ctx->{command_obj} = Mediabot::Command->new');
     my $idx_event = index($public, "emit_event_report('public_command_observed'");
-    my $idx_reg   = index($public, '$self->commands->handler_for');
+    my $idx_reg   = index($public, '$self->commands->command_for');
 
     $assert->($idx_ctx >= 0 && $idx_cmd > $idx_ctx && $idx_event > $idx_cmd,
         'event is emitted after Context and Command object are ready');
     $assert->($idx_reg > $idx_event,
-        'event is emitted before registry/legacy dispatch');
-    $assert->($public =~ /if \(my \$handler = \$self->commands->handler_for\(\$cmd, 'public'\)\)/,
-        'registry dispatch still exists after event');
-    $assert->($public =~ /if \(my \$handler = \$command_map\{\$cmd\}\)/,
-        'legacy command_map fallback still exists after event');
+        'event is emitted before catalogue/adapter dispatch');
+    $assert->($public =~ /if \(my \$entry = \$self->commands->command_for\(\$cmd, 'public'\)\)/,
+        'authoritative catalogue dispatch exists after event');
+    $assert->($public !~ /if \(my \$handler = \$command_map\{\$cmd\}\)/,
+        'no unregistered legacy fallback exists after event');
 
     eval { require 'Mediabot/Mediabot.pm'; 1 }
         or do { $assert->(0, "cannot load Mediabot/Mediabot.pm: $@"); return; };

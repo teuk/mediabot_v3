@@ -7,12 +7,12 @@ use utf8;
 # ---------------------------------------------------------------------------
 # Mediabot::CommandRegistry
 # ---------------------------------------------------------------------------
-# Active command registry used alongside Mediabot's legacy dispatch tables.
+# Authoritative catalogue for built-in and plugin commands.
 #
 # It stores canonical public/private commands, aliases, metadata and handlers.
-# Mediabot consults it first for migrated commands, then keeps the legacy tables
-# as a compatibility fallback for commands not registered here yet. Trusted
-# in-process plugins can use the same validated registration API.
+# Since MB741, unregistered names never reach the historical dispatch hashes.
+# Those hashes are frozen implementation adapters selected by registered
+# built-in metadata; trusted in-process plugins use direct registry handlers.
 # ---------------------------------------------------------------------------
 
 sub new {

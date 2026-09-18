@@ -85,8 +85,8 @@ return sub {
     my $generated = _slurp_1064(File::Spec->catfile('.', $inventory));
     $assert->like($generated, qr/\| Internal help entries \| 245 \|/,
         'MB740 records all 245 current built-in help entries');
-    $assert->like($generated, qr/\| Help parser anomalies \| 2 \|/,
-        'MB740 exposes the two existing help parser anomalies');
-    $assert->like($generated, qr/`roll`.*legacy-public/s,
+    $assert->like($generated, qr/\| Help parser anomalies \| 0 \|/,
+        'MB741 resolves the two frozen help parser anomalies');
+    $assert->like($generated, qr/`roll`.*registry-public.*legacy-public-adapter/s,
         'inventory includes first-wave fun command');
 };

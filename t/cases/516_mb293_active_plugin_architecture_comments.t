@@ -37,10 +37,12 @@ like($bus, qr/public_command_observed event powers plugin observation/,
 unlike($bus, qr/does not change current Mediabot behavior yet|It will allow future core code/,
     'EventBus no longer describes an unused future foundation');
 
-like($registry, qr/Active command registry used alongside Mediabot's legacy dispatch tables/,
-    'CommandRegistry header describes current hybrid dispatch');
-like($registry, qr/compatibility fallback for commands not registered here yet/,
-    'CommandRegistry header documents the legacy fallback');
+like($registry, qr/Authoritative catalogue for built-in and plugin commands/,
+    'CommandRegistry header describes authoritative dispatch');
+like($registry, qr/unregistered names never reach the historical dispatch hashes/,
+    'CommandRegistry header rejects a legacy fallback');
+like($registry, qr/frozen implementation adapters selected by registered/,
+    'CommandRegistry header documents bounded legacy adapters');
 unlike($registry, qr/does not change the existing Mediabot dispatch yet|eventually to let internal plugins/,
     'CommandRegistry no longer describes a future-only component');
 

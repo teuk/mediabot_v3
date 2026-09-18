@@ -275,6 +275,7 @@ Documentation:
 
 - [Complete command reference](https://github.com/teuk/mediabot_v3/wiki/Command-reference) — all 245 built-in command help entries;
 - [Plugin architecture](docs/PLUGIN_ARCHITECTURE.md) — MB740 boundaries, API v2 freeze and API v3 direction;
+- [Command catalogue](docs/COMMAND_CATALOGUE.md) — MB741 registry authority and frozen adapter rules;
 - [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands);
 - [Private and administrative commands](https://github.com/teuk/mediabot_v3/wiki/Private-and-admin-commands);
 - [Access levels](https://github.com/teuk/mediabot_v3/wiki/Access-levels);

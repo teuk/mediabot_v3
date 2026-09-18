@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb741 — give every command one front door
+
+- Register all 238 public and 94 private built-in commands in the central
+  `CommandRegistry`, including help-derived syntax, access level and description
+  metadata. Built-ins and plugins now share one authoritative lookup path.
+- Keep the historical public and private handler hashes as frozen
+  implementation adapters only. Unknown names can no longer bypass the
+  catalogue, and any adapter addition or removal fails the deterministic
+  architecture inventory and contract tests.
+- Preserve the four native registry handlers and all historical command
+  behavior while making future commands registry-native by construction.
+- Repair the two ambiguous help descriptions recorded by MB740, regenerate the
+  245-command inventory and document the migration and rollback rules.
+
 ### mb740 — draw the plugin boundary before opening the next corridor
 
 - Record the accepted core/plugin boundary and incremental API v3 direction:

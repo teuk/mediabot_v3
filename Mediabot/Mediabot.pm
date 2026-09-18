@@ -13,6 +13,7 @@ use Mediabot::Log;
 use Mediabot::Context;
 use Mediabot::Command;
 use Mediabot::CommandRegistry;
+use Mediabot::BuiltinCommandCatalog qw(catalogue_entries);
 use Mediabot::CommandAsync;
 use Mediabot::EventBus;
 use Mediabot::AI::ConversationRuntimeState;
@@ -110,9 +111,10 @@ sub new {
     # explicitly gated reply/notice/log actions used by ScriptDryRun apply mode.
     $self->{script_action_runner} = Mediabot::ScriptActionRunner->new(bot => $self);
 
-    # mb166-B1: seed the first low-risk built-in commands into the registry.
-    # The old dispatch tables are still kept as fallback.
-    $self->_register_builtin_public_core_commands();
+    # MB741: every built-in command is catalogued before plugins load. The
+    # historical dispatch hashes remain implementation adapters, never an
+    # alternate command-discovery path.
+    $self->_register_builtin_command_catalogue();
 
     # Minimal logging setup
     require Mediabot::Log;
@@ -667,64 +669,75 @@ sub maybe_request_lusers {
 }
 
 
-# Register the first small batch of built-in public commands in the new
-# CommandRegistry. mb166-B1 deliberately starts with low-risk core/help commands
-# and keeps the historical dispatch table as fallback.
-sub _register_builtin_public_core_commands {
+# Register the complete built-in public/private catalogue in CommandRegistry.
+# Four low-risk commands already have native registry handlers; the remaining
+# entries name frozen legacy adapters that are resolved only by the dispatcher.
+sub _register_builtin_command_catalogue {
     my ($self) = @_;
 
-    return 1 if $self->{_builtin_public_core_commands_registered};
+    return 1 if $self->{_builtin_command_catalogue_registered};
 
     my $registry = $self->commands;
     return 0 unless $registry;
 
-    $registry->register_command(
-        name        => 'version',
-        source      => 'public',
-        category    => 'core',
-        description => 'Show Mediabot version information',
-        handler     => sub {
+    my %help = _mbHelpInternalCommands();
+    my %direct_public_handler = (
+        version => sub {
             my ($ctx) = @_;
             versionCheck($ctx);
         },
-    );
-
-    $registry->register_command(
-        name        => 'uptime',
-        source      => 'public',
-        category    => 'core',
-        description => 'Show Mediabot uptime',
-        handler     => sub {
+        uptime => sub {
             my ($ctx) = @_;
             mbUptime_ctx($ctx);
         },
-    );
-
-    $registry->register_command(
-        name        => 'help',
-        source      => 'public',
-        category    => 'core',
-        description => 'Show command help',
-        handler     => sub {
+        help => sub {
             my ($ctx) = @_;
             mbHelp_ctx($ctx);
         },
-    );
-
-    $registry->register_command(
-        name        => 'commands',
-        source      => 'public',
-        category    => 'core',
-        description => 'List available commands',
-        handler     => sub {
+        commands => sub {
             my ($ctx) = @_;
             $ctx->{args} = [ 'commands' ];
             mbHelp_ctx($ctx);
         },
     );
 
-    $self->{_builtin_public_core_commands_registered} = 1;
+    for my $definition (catalogue_entries()) {
+        my $name     = $definition->{name};
+        my $source   = $definition->{source};
+        my $dispatch = $definition->{dispatch};
+        my $help     = $help{$name} || {};
+
+        my $handler = $direct_public_handler{$name};
+        if ($dispatch ne 'registry') {
+            $handler = sub {
+                die "Built-in adapter '$source/$name' must be invoked through Mediabot dispatch\n";
+            };
+        }
+
+        $registry->register_command(
+            name        => $name,
+            source      => $source,
+            category    => $dispatch eq 'registry' ? 'core' : 'builtin-adapter',
+            description => $help->{desc} // 'Built-in Mediabot command',
+            level       => $help->{level},
+            handler     => $handler,
+            metadata    => {
+                builtin  => 1,
+                dispatch => $dispatch,
+                syntax   => $help->{syntax} // $name,
+            },
+        );
+    }
+
+    $self->{_builtin_command_catalogue_registered} = 1;
     return 1;
+}
+
+# Compatibility entry point for out-of-tree code written during the mb166
+# transition. It now registers the complete MB741 catalogue.
+sub _register_builtin_public_core_commands {
+    my ($self) = @_;
+    return $self->_register_builtin_command_catalogue();
 }
 
 
@@ -2409,24 +2422,34 @@ sub mbCommandPublic {
         $self->{metrics}->inc('mediabot_commands_by_name_total', { command => $cmd });
     }
 
-    # mb166-B1: first real use of CommandRegistry for a small low-risk core
-    # public command group. The legacy %command_map remains immediately below
-    # as compatibility fallback for every command not yet migrated.
-    if (my $handler = $self->commands->handler_for($cmd, 'public')) {
-        $self->{logger}->log(4, "PUBLIC(registry): $sNick triggered $sCommand on $sChannel");
-        eval { $handler->($ctx) };
-        if ($@) {
-            $self->{logger}->log(1, "PUBLIC registry command '$cmd' error: $@");
-            $self->{metrics}->inc('mediabot_command_errors_total', { command => $cmd })
-                if $self->{metrics};
-        }
-        return;
-    }
+    # MB741: CommandRegistry is the sole authority for built-in and plugin
+    # commands. Historical handlers are reachable only through catalogue
+    # entries explicitly marked as frozen legacy-public adapters.
+    if (my $entry = $self->commands->command_for($cmd, 'public')) {
+        my $dispatch = $entry->{metadata}{dispatch} // 'registry';
+        my $handler;
 
-    # Dispatch known command through the historical table.
-    if (my $handler = $command_map{$cmd}) {
-        $self->{logger}->log(4, "PUBLIC: $sNick triggered $sCommand on $sChannel");
-        eval { $handler->() };
+        if ($dispatch eq 'legacy-public') {
+            $handler = $command_map{ $entry->{name} };
+            unless ($handler) {
+                $self->{logger}->log(1,
+                    "PUBLIC catalogue drift: missing adapter '$entry->{name}'");
+                $self->{metrics}->inc('mediabot_command_errors_total', { command => $cmd })
+                    if $self->{metrics};
+                return;
+            }
+        }
+        else {
+            $handler = $entry->{handler};
+        }
+
+        $self->{logger}->log(4,
+            "PUBLIC($dispatch): $sNick triggered $sCommand on $sChannel");
+        eval {
+            $dispatch eq 'legacy-public'
+                ? $handler->()
+                : $handler->($ctx);
+        };
         if ($@) {
             $self->{logger}->log(1, "PUBLIC command '$cmd' error: $@");
             $self->{metrics}->inc('mediabot_command_errors_total', { command => $cmd })
@@ -2810,7 +2833,7 @@ karmatop|karmatop [n]|public|Show the top N karma scores (default 5). Use 'karma
 karmahist|karmahist [nick]|public|Show the last 5 karma changes on the channel (optionally filtered by nick).
 
 # Reminders
-remind|remind [!] <nick> <msg>|public|Set reminder. Subcommands: list, cancel <id>|all, show.
+remind|remind [!] <nick> <msg>|public|Set reminder. Subcommands: list, cancel <id>/all, show.
 tell|tell <nick> <msg>|public|Leave a message for a nick, delivered when they next join or speak here.
 remindsnooze|remindsnooze <id> <delay>|public|Snooze a reminder by 30m, 2h, 1d etc.
 remindlist|public|List your pending reminders with remaining time and urgent flag.
@@ -2897,7 +2920,7 @@ triviascore|triviascore|public|Show trivia scores for the current channel sessio
 define|define <word>|public|Look up a word definition from Wiktionary.
 
 # AI
-ai|ai <prompt>|public|Ask Claude in at most two IRC-rendered lines. Subcommands: [#channel] summary (Administrator+; Master+ to publish another channel here) [periode] [N] [Nl] [public] [en|fr|es] [nick] (details: ai summary help), pin, relay, forget, models, stats, reset, history, ai persona.
+ai|ai <prompt>|public|Ask Claude in at most two IRC-rendered lines. Subcommands: [#channel] summary (Administrator+; Master+ to publish another channel here) [periode] [N] [Nl] [public] [en/fr/es] [nick] (details: ai summary help), pin, relay, forget, models, stats, reset, history, ai persona.
 claude|claude <prompt>|public|Alias for ai.
 
 # Misc
@@ -3653,8 +3676,8 @@ sub mbCommandPrivate {
     # Private commands have no channel context here and include login/admin
     # workflows that should not be silently blocked by a channel flood guard.
 
-    # Normalize command - q and Q are the same
-    $sCommand = lc $sCommand;
+    # Use the same case/accent folding as public command dispatch.
+    $sCommand = _fold_command_name($sCommand);
 
     # DD5: log private command dispatch at DEBUG3
     $self->{logger}->log(3, "mbCommandPrivate: !$sCommand from $sNick")
@@ -3812,11 +3835,31 @@ sub mbCommandPrivate {
         claude       => sub { claude_ctx($ctx) },
     );
 
-    # mb614-B1: meme repliement qu'en public — une commande accentuee doit
-    # marcher en prive aussi.
-    if (my $handler = $command_table{ _fold_command_name($sCommand) }) {
-        $self->{logger}->log(4, "PRIVATE: $sNick triggered $sCommand");
-        return $handler->();
+    # MB741: private built-ins follow the same catalogue authority as public
+    # commands. The historical table is a frozen implementation adapter only.
+    if (my $entry = $self->commands->command_for($sCommand, 'private')) {
+        my $dispatch = $entry->{metadata}{dispatch} // 'registry';
+        my $handler;
+
+        if ($dispatch eq 'legacy-private') {
+            $handler = $command_table{ $entry->{name} };
+            unless ($handler) {
+                $self->{logger}->log(1,
+                    "PRIVATE catalogue drift: missing adapter '$entry->{name}'");
+                $self->{metrics}->inc('mediabot_command_errors_total', { command => $sCommand })
+                    if $self->{metrics};
+                return undef;
+            }
+        }
+        else {
+            $handler = $entry->{handler};
+        }
+
+        $self->{logger}->log(4,
+            "PRIVATE($dispatch): $sNick triggered $sCommand");
+        return $dispatch eq 'legacy-private'
+            ? $handler->()
+            : $handler->($ctx);
     }
 
     $self->{logger}->log(4, $message->prefix . " Private command '$sCommand' not found");

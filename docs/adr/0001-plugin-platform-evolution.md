@@ -66,3 +66,7 @@ Costs:
 MB740 itself changes no IRC behavior. Subsequent milestones must retain an
 explicit old-path rollback until parity has been demonstrated on the
 development instance.
+
+MB741 makes `CommandRegistry` authoritative for all 238 public and 94 private
+built-ins. The historical hashes remain exact, frozen handler adapters during
+the migration; they are no longer alternate discovery or fallback paths.

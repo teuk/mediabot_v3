@@ -62,12 +62,12 @@ return sub {
     # [3] branchement avant toute recherche
     $assert->like($src, qr/my \$cmd = _fold_command_name\(\$sCommand\);/,
         'mb614-797: le repliement precede la recherche publique');
-    $assert->like($src, qr/\$command_table\{ _fold_command_name\(\$sCommand\) \}/,
-        'mb614-797: ... et la recherche privee');
+    $assert->like($src, qr/\$sCommand = _fold_command_name\(\$sCommand\);/,
+        'mb614-797: ... et le contexte prive');
     my $fold_pos = index($src, 'my $cmd = _fold_command_name');
-    my $look_pos = index($src, '$command_map{$cmd}');
+    my $look_pos = index($src, "command_for(\$cmd, 'public')");
     $assert->ok($fold_pos > 0 && $look_pos > $fold_pos,
-        'mb614-797: l ordre est bien repliement puis lecture de la table');
+        'mb614-797: l ordre est bien repliement puis lecture du catalogue');
 
     # [4] plus aucune cle non-ASCII : elle ne pourrait jamais matcher
     $assert->ok($table !~ /'[^']*[^\x00-\x7F][^']*'\s*=>/,

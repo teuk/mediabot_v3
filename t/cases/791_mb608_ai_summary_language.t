@@ -119,6 +119,8 @@ return sub {
         'mb608-791: l aide documente l echappement des pseudos homonymes');
     my $mb = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Mediabot.pm'
         or die $!; local $/; <$fh> };
-    $assert->like($mb, qr/\[#channel\] summary \(Administrator\+; Master\+ to publish another channel here\) \[periode\] \[N\] \[Nl\] \[public\] \[en\|fr\|es\]/,
+    # MB741 reserves the pipe character for catalogue field separation.  The
+    # public help keeps the same three choices with slash separators.
+    $assert->like($mb, qr/\[#channel\] summary \(Administrator\+; Master\+ to publish another channel here\) \[periode\] \[N\] \[Nl\] \[public\] \[en\/fr\/es\]/,
         'mb608-791: la ligne de commande publique annonce la langue');
 };

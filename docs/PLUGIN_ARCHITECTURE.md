@@ -1,8 +1,9 @@
 # Mediabot plugin architecture
 
 This document is the local, canonical entry point for Mediabot's plugin
-platform. It records the MB740 baseline and the migration direction toward API
-v3. It does not enable a plugin, alter IRC dispatch or grant a new capability.
+platform. It records the MB740 baseline, the MB741 command catalogue and the
+migration direction toward API v3. It does not enable a plugin or grant a new
+capability.
 
 ## Current baseline
 
@@ -17,10 +18,12 @@ transactional command/event mounting, lifecycle cleanup, controlled actions and
 bounded JSON storage. The platform is technically substantial, but production
 features still mostly live in central dispatch tables and large modules.
 
-The source baseline is generated in
+The live command catalogue is generated in
 [`generated/COMMAND_INVENTORY.md`](generated/COMMAND_INVENTORY.md). It shows the
-current split between `CommandRegistry`, the public compatibility table and the
-private compatibility table before MB741 consolidates them.
+public and private commands registered through `CommandRegistry`, plus the
+frozen legacy implementation adapters that remain during incremental handler
+migration. The operational rules are in
+[`COMMAND_CATALOGUE.md`](COMMAND_CATALOGUE.md).
 
 ## Decision
 
@@ -121,8 +124,9 @@ Planned capability families include:
 
 1. **MB740 — baseline:** architecture decision, v2 freeze, command inventory
    and dependency matrix. No runtime behavior changes.
-2. **MB741 — command catalogue:** register all built-in commands and keep legacy
-   tables only as adapters. No new entry may be added to the old dispatch.
+2. **MB741 — command catalogue:** complete. All built-ins are registered and
+   legacy tables are reachable only as frozen adapters. No new entry may be
+   added to the old dispatch.
 3. **MB742 — API v3:** introduce `plugin.json`, `PluginContext`, capabilities
    and the v2 adapter.
 4. **MB743 — events and scheduler:** versioned event schemas, shared jobs and

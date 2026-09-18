@@ -16,25 +16,18 @@ my $case = sub {
     my $src = do { local $/; <$fh> };
     close $fh;
 
-    $assert->($src =~ /sub _register_builtin_public_core_commands \{/,
-        'builtin public core registry method exists');
-    $assert->($src =~ /seed the first low-risk built-in commands into the registry/,
-        'constructor seeds the first registry command group');
-    $assert->($src =~ /PUBLIC\(registry\):/,
-        'public dispatch has registry path');
-    $assert->($src =~ /compatibility fallback for every command not yet migrated/,
-        'registry dispatch documents legacy fallback');
-    $assert->($src =~ /if \(my \$handler = \$self->commands->handler_for\(\$cmd, 'public'\)\)/,
-        'public dispatch checks CommandRegistry first');
-    $assert->($src =~ /if \(my \$handler = \$command_map\{\$cmd\}\)/,
-        'legacy public command_map fallback is still present');
+    $assert->($src =~ /sub _register_builtin_command_catalogue \{/,
+        'complete built-in catalogue registration method exists');
+    $assert->($src =~ /every built-in command is catalogued before plugins load/,
+        'constructor seeds the complete built-in catalogue');
+    $assert->($src =~ /CommandRegistry is the sole authority/,
+        'public dispatch documents registry authority');
+    $assert->($src =~ /command_for\(\$cmd, 'public'\)/,
+        'public dispatch resolves catalogue entry first');
+    $assert->($src !~ /if \(my \$handler = \$command_map\{\$cmd\}\)/,
+        'legacy public command_map has no unregistered fallback');
     $assert->($src =~ /my %command_map = \(/,
-        'legacy public dispatch table is still declared');
-
-    for my $cmd (qw(version uptime help commands)) {
-        $assert->($src =~ /name\s*=>\s*'$cmd'/,
-            "core command '$cmd' is registered in CommandRegistry");
-    }
+        'legacy public implementation adapter is still declared');
 
     eval { require 'Mediabot/Mediabot.pm'; 1 }
         or do { $assert->(0, "cannot load Mediabot/Mediabot.pm: $@"); return; };
@@ -44,8 +37,10 @@ my $case = sub {
 
     $assert->($reg && ref($reg) eq 'Mediabot::CommandRegistry',
         'Mediabot->commands returns CommandRegistry');
-    $assert->($reg->count('public') >= 4,
-        'public registry contains at least the first four core commands');
+    $assert->($reg->count('public') == 238,
+        'public registry contains the complete frozen built-in surface');
+    $assert->($reg->count('private') == 94,
+        'private registry contains the complete frozen built-in surface');
 
     for my $cmd (qw(version uptime help commands)) {
         $assert->($reg->has_command($cmd, 'public'),
@@ -54,10 +49,15 @@ my $case = sub {
             "runtime registry handler for '$cmd' is CODE");
     }
 
-    $assert->(!$reg->has_command('karma', 'public'),
-        'non-migrated public command is not forced into registry yet');
-    $assert->(!$reg->has_command('login', 'private'),
-        'private command migration has not started in mb166');
+    my $karma = $reg->command_for('karma', 'public');
+    $assert->($karma && $karma->{metadata}{dispatch} eq 'legacy-public',
+        'public legacy handler is reachable only through adapter metadata');
+    my $login = $reg->command_for('login', 'private');
+    $assert->($login && $login->{metadata}{dispatch} eq 'legacy-private',
+        'private legacy handler is reachable only through adapter metadata');
+    my $version = $reg->command_for('version', 'public');
+    $assert->($version && $version->{metadata}{dispatch} eq 'registry',
+        'native core handler remains direct registry dispatch');
 };
 
 if (caller) { return $case; }
