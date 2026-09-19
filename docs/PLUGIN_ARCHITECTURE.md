@@ -3,8 +3,9 @@
 This document is the local, canonical entry point for Mediabot's plugin
 platform. It records the MB740 baseline, the MB741 command catalogue, the
 executable MB742 API v3 foundation, the MB743 event/scheduler boundary, the
-MB744 channel policy and MB745's first reversible product plugin. It does not
-enable a plugin or grant a capability automatically.
+MB744 channel policy, MB745's first reversible product plugin and MB746's
+shared HTTP/repository boundary. It does not enable a plugin or grant a
+capability automatically.
 
 ## Current baseline
 
@@ -96,7 +97,9 @@ adds copied event envelopes, bounded deferred delivery and scheduler-owned
 jobs. MB744 activates the manifest configuration schema and places every
 channel behind `off`, `observe` or `on`. `PluginContext` also retains bounded
 `irc.reply` and `irc.notice`. MB745 adds `irc.channel_message` for scoped job
-output through the normal core transport and flood gates.
+output through the normal core transport and flood gates. MB746 implements
+`http.fetch` and `storage.kv`: outbound work crosses one TLS/DNS/timeout/cache
+service and small state crosses a namespaced compare-and-swap repository.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -128,8 +131,8 @@ Planned capability families include:
 | Events | eight legacy routed events | eight versioned schemas, copied envelopes and bounded deferred queues | event catalogue |
 | IRC output | bounded actions | capability-scoped output facade | core transport |
 | Scheduler | core tasks plus route-v1 timers | shared owned jobs with quotas and lifecycle cancellation | core scheduler |
-| Storage | last-write-wins JSON document | namespaced KV with compare-and-swap/short transactions | data service |
-| HTTP | no shared plugin service | bounded async client with cache and circuit breaker | HTTP service |
+| Storage | v2 last-write-wins JSON document | MB746 namespaced KV with compare-and-swap/short transactions | data service |
+| HTTP | per-feature clients outside v3 | MB746 bounded async client with cache and circuit breaker | HTTP service |
 | Database | possible through full in-process bot | approved domain repositories only | data layer |
 | Secrets | configuration may be reachable in-process | named secret references only | core configuration |
 | Activation | global plugin lifecycle plus MB744 channel policy | `off`, `observe` or `on` per instance/channel | policy service |
@@ -155,8 +158,12 @@ Planned capability families include:
    commands only where policy is `on`, shadows them in `observe`, restores the
    historical adapter in `off` or on unload, and adds one opt-in autonomous
    ritual for a single development channel.
+7. **MB746 — HTTP and repository proof:** complete. One core service validates,
+   pins, bounds, caches and cancels plugin HTTPS requests; a namespaced
+   revisioned repository mediates small state. `short-content-v3` proves both
+   while remaining unloaded, disabled and channel-off by default.
 
-Later milestones add the HTTP/data facades, extract richer first-party
+Later milestones add approved domain-data facades, extract richer first-party
 features, improve developer tooling and retire duplicate dispatch paths only
 after proven rollback.
 
@@ -165,7 +172,7 @@ after proven rollback.
 The first migration candidates are deliberately low-risk:
 
 1. `roll`, `flip`, `choose`, `8ball`, `morse` and `abbrev`;
-2. short external content after the shared HTTP service exists;
+2. short external content through the MB746 shared HTTP proof;
 3. quotes after the approved data facade exists.
 
 AI conversation, radio, central moderation, authentication, updater and IRC

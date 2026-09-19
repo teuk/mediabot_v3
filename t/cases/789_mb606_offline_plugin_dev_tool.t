@@ -32,7 +32,7 @@ my $TMP  = tempdir(CLEANUP => 1);
 sub _run {
     my (@argv) = @_;
     my $cmd = join ' ', map { "'$_'" } ($^X, $TOOL, @argv);
-    my $out = `cd '$ROOT' && $cmd 2>&1`;
+    my $out = `cd '$TMP' && $cmd 2>&1`;
     return ($? >> 8, $out);
 }
 
@@ -107,7 +107,7 @@ return sub {
     $assert->is($rc, 1, 'mb606-789: un event non declare est refuse');
 
     # [6] zero effet de bord
-    $assert->ok(!-e "$ROOT/plugin-data",
+    $assert->ok(!-e "$TMP/plugin-data",
         'mb606-789: aucun repertoire de donnees cree par l outil');
 
     # [7] doc

@@ -97,3 +97,12 @@ in `off` and `observe`, v3 becomes authoritative only in `on`, and unload
 restores exact registry entries. Autonomous job output gains a separate
 `irc.channel_message` capability whose target is the current policy channel.
 Partyline control is explicit, Owner-gated and never connected to AUTOLOAD.
+
+MB746 gives plugins a mediated outbound window and a small notebook. HTTPS
+requests run in owned asynchronous workers with public-address validation, DNS
+pinning, TLS verification, redirect revalidation, hard bounds, cache, circuit
+and lifecycle cancellation. Small plugin state uses detached revisioned
+snapshots and compare-and-swap commits through the existing atomic disk
+boundary. `short-content-v3` proves both services but remains explicitly
+unloaded, disabled and channel-off until an operator runs an observe-first
+pilot.

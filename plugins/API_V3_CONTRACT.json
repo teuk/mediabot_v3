@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB745",
+  "milestone": "MB746",
   "activation_default": "off",
   "manifest_file": "plugin.json",
   "manifest_max_bytes": 16384,
@@ -46,16 +46,19 @@
   ],
   "implemented_capabilities": [
     "events.subscribe",
+    "http.fetch",
     "irc.channel_message",
     "irc.notice",
     "irc.reply",
-    "scheduler.jobs"
+    "scheduler.jobs",
+    "storage.kv"
   ],
   "plugin_receives": [
     "Mediabot::PluginContext",
     "Mediabot::Plugin::InvocationV3",
     "Mediabot::Plugin::EventEnvelopeV3",
-    "Mediabot::Plugin::JobInvocationV3"
+    "Mediabot::Plugin::JobInvocationV3",
+    "Mediabot::Plugin::HTTPResponseV3"
   ],
   "plugin_never_receives": [
     "Mediabot",
@@ -77,6 +80,27 @@
     "max_jobs_per_plugin": 8,
     "minimum_interval_seconds": 5,
     "maximum_interval_seconds": 86400
+  },
+  "http_limits": {
+    "scheme": "https",
+    "port": 443,
+    "maximum_redirects": 2,
+    "maximum_timeout_seconds": 10,
+    "maximum_body_bytes": 65536,
+    "maximum_inflight_per_plugin": 2,
+    "maximum_cache_entries": 128,
+    "circuit_failures": 3,
+    "circuit_seconds": 60,
+    "private_addresses": "reject",
+    "ambient_proxies": "disabled"
+  },
+  "storage_limits": {
+    "maximum_values": 64,
+    "maximum_value_bytes": 2048,
+    "write_mode": "compare-and-swap",
+    "observe_writes": "suppressed",
+    "plugin_paths": "unavailable",
+    "plugin_database_handles": "unavailable"
   },
   "command_migration": {
     "mode": "legacy-public-fallback",

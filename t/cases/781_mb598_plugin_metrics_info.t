@@ -107,7 +107,11 @@ return sub {
                      mediabot_plugin_v3_event_dropped_total
                      mediabot_plugin_v3_job_total
                      mediabot_plugin_v3_failure_total
-                     mediabot_plugin_v3_observe_total)) {
+                     mediabot_plugin_v3_observe_total
+                     mediabot_plugin_v3_http_request_total
+                     mediabot_plugin_v3_http_cache_hit_total
+                     mediabot_plugin_v3_http_circuit_open_total
+                     mediabot_plugin_v3_storage_total)) {
         my $before = $bot->{metrics}->get($name, { probe => 'x' });
         $bot->{metrics}->inc($name, { probe => 'x' });
         my $after = $bot->{metrics}->get($name, { probe => 'x' });

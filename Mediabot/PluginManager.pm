@@ -44,6 +44,8 @@ sub new {
         plugin_dir => $args{plugin_dir},
         plugins    => {}, # canonical name -> entry
         order      => [],
+        v3_http_service => $args{v3_http_service},
+        v3_repositories => {},
     }, $class;
 }
 
@@ -69,6 +71,137 @@ sub v3_runtime {
         plugin_dir => ($self->{plugin_dir} // 'plugins'),
     );
     return $self->{v3_runtime};
+}
+
+# MB746: one core-owned outbound HTTP boundary is shared by every API v3
+# package. Plugins never receive a socket, HTTP client, resolver or event loop.
+sub v3_http_service {
+    my ($self) = @_;
+    return $self->{v3_http_service} if $self->{v3_http_service};
+    my $bot = $self->{bot};
+    my $loop = $bot && eval { $bot->can('getLoop') }
+        ? eval { $bot->getLoop } : eval { $bot->{loop} };
+    require Mediabot::Plugin::HTTPServiceV3;
+    $self->{v3_http_service} = Mediabot::Plugin::HTTPServiceV3->new(
+        loop => $loop,
+        on_metric => sub { _pm_metric($bot, $_[0], $_[1]) },
+        on_log => sub {
+            my ($level, $message) = @_;
+            eval { $bot->{logger}->log($level, $message) };
+        },
+    );
+    return $self->{v3_http_service};
+}
+
+sub _cancel_v3_http {
+    my ($self, $name) = @_;
+    return 0 unless $self->{v3_http_service};
+    return eval { $self->{v3_http_service}->cancel_plugin($name) } || 0;
+}
+
+sub _v3_invocation_policy {
+    my ($self, $entry, $invocation) = @_;
+    return { channel => '', mode => 'off', config => {} }
+        unless $entry && ref($invocation) && eval { $invocation->can('channel') };
+    return $self->_v3_policy_for_entry($entry, scalar($invocation->channel));
+}
+
+sub _v3_http_fetch {
+    my ($self, $name, $invocation, $request, $callback) = @_;
+    my $entry = $self->plugin($name)
+        or die "PluginManager: API v3 plugin '$name' is not registered\n";
+    die "PluginManager: API v3 HTTP callback must be CODE\n"
+        unless ref($callback) eq 'CODE';
+    return { accepted => 0, error => 'disabled' }
+        unless $entry->{enabled};
+    my $policy = $self->_v3_invocation_policy($entry, $invocation);
+    return { accepted => 0, error => 'channel_off' }
+        if $policy->{mode} eq 'off';
+    my $entry_id = refaddr($entry);
+    return $self->v3_http_service->fetch($name, $request, sub {
+        my ($response) = @_;
+        my $current = $self->plugin($name) or return;
+        return unless refaddr($current) == $entry_id && $current->{enabled};
+        my $current_policy = $self->_v3_invocation_policy(
+            $current, $invocation);
+        return if $current_policy->{mode} eq 'off';
+        my $ok = eval { $callback->($response); 1 };
+        unless ($ok) {
+            my $error = _plugin_error_text($@, 'API v3 HTTP callback failed');
+            _pm_metric($self->{bot}, 'mediabot_plugin_v3_failure_total',
+                { plugin => $name, kind => 'http_callback' });
+            eval { $self->{bot}{logger}->log(1,
+                "plugin '$name' API v3 HTTP callback failed: $error") };
+        }
+    });
+}
+
+sub _v3_storage_key {
+    my ($name) = @_;
+    my $key = "v3-$name";
+    return $key if length($key) <= 32;
+    require Digest::SHA;
+    my $suffix = substr(Digest::SHA::sha256_hex($name), 0, 10);
+    return 'v3-' . substr($name, 0, 18) . "-$suffix";
+}
+
+sub _v3_repository_for {
+    my ($self, $name) = @_;
+    return $self->{v3_repositories}{$name}
+        if $self->{v3_repositories}{$name};
+    require Mediabot::Plugin::RepositoryV3;
+    my $storage_key = _v3_storage_key($name);
+    $self->{v3_repositories}{$name} = Mediabot::Plugin::RepositoryV3->new(
+        plugin => $storage_key,
+        reader => sub { $self->_read_plugin_data($_[0]) },
+        writer => sub { $self->_store_plugin_data($_[0], $_[1]) },
+    );
+    return $self->{v3_repositories}{$name};
+}
+
+sub _v3_storage_snapshot {
+    my ($self, $name, $invocation) = @_;
+    my $entry = $self->plugin($name)
+        or die "PluginManager: API v3 plugin '$name' is not registered\n";
+    return { revision => 0, values => {}, error => 'disabled' }
+        unless $entry->{enabled};
+    my $policy = $self->_v3_invocation_policy($entry, $invocation);
+    return { revision => 0, values => {}, error => 'channel_off' }
+        if $policy->{mode} eq 'off';
+    my $snapshot = eval { $self->_v3_repository_for($name)->snapshot };
+    unless ($snapshot) {
+        _pm_metric($self->{bot}, 'mediabot_plugin_v3_storage_total',
+            { plugin => $name, outcome => 'read_error' });
+        die _plugin_error_text($@, 'API v3 storage read failed') . "\n";
+    }
+    _pm_metric($self->{bot}, 'mediabot_plugin_v3_storage_total',
+        { plugin => $name, outcome => 'read' });
+    return $snapshot;
+}
+
+sub _v3_storage_commit {
+    my ($self, $name, $invocation, %args) = @_;
+    my $entry = $self->plugin($name)
+        or die "PluginManager: API v3 plugin '$name' is not registered\n";
+    return { ok => 0, error => 'disabled' } unless $entry->{enabled};
+    my $policy = $self->_v3_invocation_policy($entry, $invocation);
+    if ($policy->{mode} ne 'on') {
+        _pm_metric($self->{bot}, 'mediabot_plugin_v3_storage_total',
+            { plugin => $name, outcome => 'suppressed' });
+        return { ok => 0, error => $policy->{mode} eq 'observe'
+            ? 'observe' : 'channel_off' };
+    }
+    my $result = eval { $self->_v3_repository_for($name)->commit(%args) };
+    unless ($result) {
+        _pm_metric($self->{bot}, 'mediabot_plugin_v3_storage_total',
+            { plugin => $name, outcome => 'write_error' });
+        die _plugin_error_text($@, 'API v3 storage write failed') . "\n";
+    }
+    my $outcome = $result->{ok} ? 'commit'
+        : ($result->{error} // '') eq 'conflict' ? 'conflict' : 'write_error';
+    _pm_metric($self->{bot}, 'mediabot_plugin_v3_storage_total',
+        { plugin => $name, outcome => $outcome });
+    return $result;
 }
 
 sub discover_v3_packages {
@@ -349,6 +482,7 @@ sub unregister_plugin {
     if ($api == 3) {
         my $was_enabled = $entry->{enabled} ? 1 : 0;
         $entry->{enabled} = 0;
+        $self->_cancel_v3_http($key);
         $self->_clear_v3_event_queue($entry);
         my $jobs_ok = eval { $self->_stop_v3_jobs($entry); 1 };
         $entry->{metadata}{job_stop_error} = _plugin_error_text(
@@ -383,6 +517,7 @@ sub unregister_plugin {
     }
 
     delete $self->{plugins}{$key};
+    delete $self->{v3_repositories}{$key};
     @{ $self->{order} } = grep { $_ ne $key } @{ $self->{order} };
 
     return 1;
@@ -455,6 +590,7 @@ sub disable {
         ? ($entry->{metadata}{api} // 1) : 1;
     $entry->{enabled} = 0;
     if ($api == 3) {
+        $self->_cancel_v3_http($entry->{name});
         $self->_clear_v3_event_queue($entry);
         my $job_error;
         eval { $self->_stop_v3_jobs($entry); 1 }

@@ -143,6 +143,15 @@ sub load_package {
         plugin    => $name,
         requested => $manifest->{capabilities},
         granted   => $grants,
+        http_fetch_sink => sub {
+            return $manager->_v3_http_fetch($name, @_);
+        },
+        storage_snapshot_sink => sub {
+            return $manager->_v3_storage_snapshot($name, @_);
+        },
+        storage_commit_sink => sub {
+            return $manager->_v3_storage_commit($name, @_);
+        },
     );
     # The plugin receives a detached manifest snapshot. It cannot rewrite the
     # already validated core-owned contract between validation and mounting.

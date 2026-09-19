@@ -34,6 +34,9 @@ sub new {
         requested => \%requested,
         granted   => \%granted,
         effective => \%effective,
+        http_fetch_sink => $args{http_fetch_sink},
+        storage_snapshot_sink => $args{storage_snapshot_sink},
+        storage_commit_sink => $args{storage_commit_sink},
     };
     return $self;
 }
@@ -105,6 +108,49 @@ sub channel_message {
         unless ref($invocation)
             && eval { $invocation->can('_emit_channel_message') };
     return $invocation->_emit_channel_message(_text($text));
+}
+
+sub _invocation {
+    my ($invocation) = @_;
+    die "PluginContext: invalid scoped invocation\n"
+        unless ref($invocation)
+            && eval { $invocation->can('channel') }
+            && eval { $invocation->can('activation_mode') };
+    return $invocation;
+}
+
+sub http_fetch {
+    my ($self, $invocation, $request, $callback) = @_;
+    $self->require_capability('http.fetch');
+    _invocation($invocation);
+    die "PluginContext: HTTP request must be an object\n"
+        unless ref($request) eq 'HASH';
+    die "PluginContext: HTTP callback must be CODE\n"
+        unless ref($callback) eq 'CODE';
+    my $sink = _state($self)->{http_fetch_sink};
+    die "PluginContext: HTTP service is unavailable\n"
+        unless ref($sink) eq 'CODE';
+    return $sink->($invocation, $request, $callback);
+}
+
+sub storage_snapshot {
+    my ($self, $invocation) = @_;
+    $self->require_capability('storage.kv');
+    _invocation($invocation);
+    my $sink = _state($self)->{storage_snapshot_sink};
+    die "PluginContext: storage service is unavailable\n"
+        unless ref($sink) eq 'CODE';
+    return $sink->($invocation);
+}
+
+sub storage_commit {
+    my ($self, $invocation, %args) = @_;
+    $self->require_capability('storage.kv');
+    _invocation($invocation);
+    my $sink = _state($self)->{storage_commit_sink};
+    die "PluginContext: storage service is unavailable\n"
+        unless ref($sink) eq 'CODE';
+    return $sink->($invocation, %args);
 }
 
 sub DESTROY {

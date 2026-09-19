@@ -1,8 +1,9 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB745. Packages are discoverable and
-explicitly loadable, but never activate at startup. MB745 adds the first
-reversible command migration and capability-scoped autonomous channel output.
+Plugin API v3 remains experimental in MB746. Packages are discoverable and
+explicitly loadable, but never activate at startup. MB746 adds core-owned
+outbound HTTPS and namespaced repository services without exposing sockets,
+filesystem paths, database handles or arbitrary SQL.
 
 ## Package layout
 
@@ -19,6 +20,8 @@ path traversal, unknown manifest fields and manifests over 16 KiB are rejected.
 
 See [`../plugins/hello-v3`](../plugins/hello-v3) for the inert reference
 package, [`../plugins/playful-v3`](../plugins/playful-v3) for the first pilot,
+[`../plugins/short-content-v3`](../plugins/short-content-v3) for the HTTP/data
+proof,
 [`../plugins/API_V3_CONTRACT.json`](../plugins/API_V3_CONTRACT.json)
 for the machine-readable boundary and
 [`../plugins/API_V3_EVENTS.json`](../plugins/API_V3_EVENTS.json) for the event
@@ -175,6 +178,48 @@ sandbox. The facade prevents accidental coupling and gives the core one policy
 boundary; it does not protect the host from deliberately hostile Perl code.
 Command failures are contained, logged and emit no IRC output.
 
+## Shared HTTPS service
+
+A package requesting and receiving `http.fetch` may submit a scoped GET through
+`PluginContext::http_fetch($invocation, \%request, $callback)`. This is an
+asynchronous service: the command handler returns while a core-owned worker
+performs DNS resolution and network I/O away from the IRC event loop. The
+callback receives an immutable `HTTPResponseV3`, never an HTTP client or
+socket.
+
+The service accepts HTTPS on port 443 only. It rejects credentials, fragments,
+control characters, loopback, private, link-local, documentation and multicast
+addresses. Every DNS result must be public, connections are pinned to the
+validated address while preserving TLS hostname verification, ambient proxy
+variables are cleared, and every redirect is revalidated. Bounds are two
+redirects, ten seconds, 64 KiB and two concurrent requests per plugin.
+
+Successful responses may enter a 128-entry process cache using a plugin-scoped
+key and a caller TTL capped at one hour. Three transport, rate-limit or server
+failures open a 60-second circuit. Disable or unload cancels owned workers and
+changes a generation token; even an uncooperative late completion is discarded.
+The current channel mode is checked again before the plugin callback. Observe
+therefore exercises fetch and parsing while the invocation sink still suppresses
+output.
+
+Only a bounded `Accept` value is plugin-controlled. Arbitrary methods, headers,
+cookies, credentials, proxy selection and request bodies are not part of MB746.
+
+## Namespaced repository
+
+A package requesting and receiving `storage.kv` may call
+`storage_snapshot($invocation)` and `storage_commit($invocation, ...)`.
+Snapshots contain a monotonic revision and at most 64 scalar values. A value is
+limited to 2048 encoded bytes. Commits supply `expected_revision` plus bounded
+changes/deletes; a stale revision returns `conflict` without writing.
+
+The core writes the entire document through the existing 0600 atomic
+temporary-file-and-rename boundary. The plugin sees no pathname or filehandle.
+Reads are allowed in `observe` so behavior can be compared, while commits are
+suppressed unless current policy is `on`. Repository errors are contained and
+counted. This generic state is intentionally small; later `data.<domain>`
+facades expose approved domain methods rather than SQL.
+
 ## Versioned events and backpressure
 
 MB743 publishes version 1 schemas for:
@@ -224,9 +269,9 @@ no plugin job handler.
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-MB745 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
-`events.subscribe` and `scheduler.jobs`. Other capability names remain
-reserved for later mediated services.
+MB746 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
+`events.subscribe`, `scheduler.jobs`, `http.fetch` and `storage.kv`. Other
+capability names remain reserved for later mediated services.
 
 Discovery reads manifests only. Loading is explicit, leaves the package
 disabled and mounts silent commands. Enabling is a second explicit operation,

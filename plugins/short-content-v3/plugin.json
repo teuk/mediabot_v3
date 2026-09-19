@@ -1,0 +1,69 @@
+{
+  "api": 3,
+  "name": "short-content-v3",
+  "version": "1.0.0",
+  "description": "Fetch one bounded short JSON item through Mediabot's shared HTTP and repository facades.",
+  "runtime": {
+    "api": 3,
+    "kind": "perl",
+    "entrypoint": "lib/ShortContent.pm",
+    "class": "Mediabot::Plugin::ShortContent"
+  },
+  "compatibility": {
+    "mediabot": ">=3.6dev"
+  },
+  "activation": {
+    "default": "off"
+  },
+  "capabilities": [
+    "http.fetch",
+    "irc.reply",
+    "storage.kv"
+  ],
+  "commands": {
+    "short": {
+      "source": "public",
+      "help": "Fetch one short item from the channel's configured HTTPS JSON endpoint.",
+      "level": 0,
+      "handler": "command_short"
+    }
+  },
+  "events": [],
+  "jobs": {},
+  "config_schema": {
+    "endpoint": {
+      "type": "string",
+      "required": true,
+      "min_length": 12,
+      "max_length": 512
+    },
+    "json_path": {
+      "type": "string",
+      "default": "text",
+      "min_length": 1,
+      "max_length": 80
+    },
+    "prefix": {
+      "type": "string",
+      "default": "✨ ",
+      "max_length": 40
+    },
+    "language": {
+      "type": "string",
+      "default": "fr",
+      "enum": ["fr", "en"]
+    },
+    "cache_ttl_seconds": {
+      "type": "integer",
+      "default": 300,
+      "minimum": 0,
+      "maximum": 3600
+    },
+    "max_chars": {
+      "type": "integer",
+      "default": 280,
+      "minimum": 80,
+      "maximum": 320
+    }
+  }
+}

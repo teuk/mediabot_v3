@@ -97,6 +97,12 @@ sub new {
     $self->_declare('mediabot_plugin_v3_job_total','counter','Plugin API v3 shared job executions');
     $self->_declare('mediabot_plugin_v3_failure_total','counter','Plugin API v3 contained failures by runtime kind');
     $self->_declare('mediabot_plugin_v3_observe_total','counter','Plugin API v3 shadow invocations with output suppressed');
+    # MB746: shared outbound HTTP and namespaced repository facades. Labels
+    # are bounded by package names and a core-owned outcome vocabulary.
+    $self->_declare('mediabot_plugin_v3_http_request_total','counter','Plugin API v3 shared HTTP requests by bounded outcome');
+    $self->_declare('mediabot_plugin_v3_http_cache_hit_total','counter','Plugin API v3 shared HTTP cache hits');
+    $self->_declare('mediabot_plugin_v3_http_circuit_open_total','counter','Plugin API v3 HTTP circuit openings');
+    $self->_declare('mediabot_plugin_v3_storage_total','counter','Plugin API v3 repository operations by bounded outcome');
     # mb604-B1: la persistance mb601 devient observable — combien un plugin
     # ecrit, a quelle frequence, et POURQUOI ses ecritures sont refusees.
     $self->_declare('mediabot_plugin_storage_bytes','gauge','Plugin v2 persistent storage size in bytes, by plugin');

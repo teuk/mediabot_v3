@@ -10,6 +10,26 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb746 — give plugins a guarded window and a tiny notebook
+
+- Add one core-owned asynchronous HTTPS GET service for API v3 packages.
+  Requests are TLS-verified, DNS-pinned and revalidated after redirects; local
+  and reserved destinations, ambient proxies, non-443 ports and non-HTTPS
+  schemes are rejected. Time, body, redirect, concurrency and output bounds
+  are enforced before a response reaches plugin code.
+- Add per-plugin caching, bounded circuit breaking, metrics and lifecycle
+  cancellation. Disable or unload cancels owned workers and invalidates late
+  completions; a current channel policy is checked again before callbacks and
+  IRC output.
+- Introduce a namespaced repository facade backed by the existing atomic
+  bot-owned JSON boundary. Detached snapshots and compare-and-swap commits
+  provide short transactions without exposing a path, filehandle, database or
+  arbitrary SQL to a plugin. Observe mode permits reads but suppresses writes.
+- Ship `short-content-v3`, an inactive proof package whose `short` command
+  reads one configured scalar from a trusted HTTPS JSON endpoint, emits one
+  bounded line and records only a last value and served count. Document the
+  single-channel `observe` → `on` pilot and immediate disable/unload rollback.
+
 ### mb745 — open the first reversible joke shop
 
 - Add the first visible API v3 product package, `playful-v3`, covering `roll`,
