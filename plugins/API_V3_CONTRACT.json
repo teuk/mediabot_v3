@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB746",
+  "milestone": "MB747",
   "activation_default": "off",
   "manifest_file": "plugin.json",
   "manifest_max_bytes": 16384,
@@ -45,6 +45,7 @@
     "storage.kv"
   ],
   "implemented_capabilities": [
+    "data.quotes.read",
     "events.subscribe",
     "http.fetch",
     "irc.channel_message",
@@ -58,7 +59,8 @@
     "Mediabot::Plugin::InvocationV3",
     "Mediabot::Plugin::EventEnvelopeV3",
     "Mediabot::Plugin::JobInvocationV3",
-    "Mediabot::Plugin::HTTPResponseV3"
+    "Mediabot::Plugin::HTTPResponseV3",
+    "Mediabot::Plugin::QuoteRecordV3"
   ],
   "plugin_never_receives": [
     "Mediabot",
@@ -100,6 +102,25 @@
     "write_mode": "compare-and-swap",
     "observe_writes": "suppressed",
     "plugin_paths": "unavailable",
+    "plugin_database_handles": "unavailable"
+  },
+  "quote_read_limits": {
+    "capability": "data.quotes.read",
+    "operations": [
+      "by_id",
+      "random",
+      "search",
+      "by_author",
+      "count",
+      "top"
+    ],
+    "maximum_results": 20,
+    "maximum_query_bytes": 256,
+    "maximum_search_words": 8,
+    "channel_source": "invocation policy",
+    "observe_reads": "allowed",
+    "writes": "unavailable",
+    "plugin_sql": "unavailable",
     "plugin_database_handles": "unavailable"
   },
   "command_migration": {

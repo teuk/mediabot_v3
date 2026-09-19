@@ -27,11 +27,11 @@ return sub {
 
     my $api_contract = JSON::PP->new->decode(
         _slurp_1070('plugins/API_V3_CONTRACT.json'));
-    $assert->is($api_contract->{milestone}, 'MB746',
-        'API v3 machine contract records the HTTP/data proof milestone');
+    $assert->is($api_contract->{milestone}, 'MB747',
+        'API v3 machine contract records the quote-data milestone');
     $assert->is(join(',', @{ $api_contract->{implemented_capabilities} }),
-        'events.subscribe,http.fetch,irc.channel_message,irc.notice,irc.reply,scheduler.jobs,storage.kv',
-        'machine contract lists the seven executable capabilities');
+        'data.quotes.read,events.subscribe,http.fetch,irc.channel_message,irc.notice,irc.reply,scheduler.jobs,storage.kv',
+        'machine contract lists the eight executable capabilities');
     $assert->is($api_contract->{event_backpressure}{max_pending_per_plugin}, 32,
         'machine contract publishes the queue bound');
     $assert->is($api_contract->{event_backpressure}{dispatch_batch_size}, 8,

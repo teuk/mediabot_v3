@@ -276,7 +276,7 @@ Documentation:
 - [Complete command reference](https://github.com/teuk/mediabot_v3/wiki/Command-reference) — all 245 built-in command help entries;
 - [Plugin architecture](docs/PLUGIN_ARCHITECTURE.md) — core boundaries, API v2 freeze and API v3 roadmap;
 - [Playful v3 pilot](docs/PLAYFUL_V3_PILOT.md) — first reversible command migration, supervised rollout and rollback;
-- [Plugin API v3](docs/PLUGIN_API_V3.md) — strict packages, typed channel policy, versioned events, owned jobs, shared HTTPS/repository services and capabilities;
+- [Plugin API v3](docs/PLUGIN_API_V3.md) — strict packages, typed channel policy, versioned events, owned jobs, shared HTTPS/repository services and approved quote reads;
 - [Short Content v3 pilot](docs/SHORT_CONTENT_V3_PILOT.md) — observe-first proof and rollback for the first external-content package;
 - [Command catalogue](docs/COMMAND_CATALOGUE.md) — MB741 registry authority and frozen adapter rules;
 - [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands);

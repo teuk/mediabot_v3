@@ -46,6 +46,7 @@ sub new {
         order      => [],
         v3_http_service => $args{v3_http_service},
         v3_repositories => {},
+        v3_quote_service => $args{v3_quote_service},
     }, $class;
 }
 
@@ -201,6 +202,56 @@ sub _v3_storage_commit {
         : ($result->{error} // '') eq 'conflict' ? 'conflict' : 'write_error';
     _pm_metric($self->{bot}, 'mediabot_plugin_v3_storage_total',
         { plugin => $name, outcome => $outcome });
+    return $result;
+}
+
+# MB747: approved quote reads cross a domain facade owned by the core. The
+# invocation selects the channel; plugins cannot supply SQL, a database handle
+# or a different channel. Read-only calls are useful in observe mode.
+sub v3_quote_service {
+    my ($self) = @_;
+    return $self->{v3_quote_service} if $self->{v3_quote_service};
+    require Mediabot::Plugin::QuoteServiceV3;
+    $self->{v3_quote_service} = Mediabot::Plugin::QuoteServiceV3->new(
+        dbh_provider => sub { eval { $self->{bot}{dbh} } },
+    );
+    return $self->{v3_quote_service};
+}
+
+sub _v3_quotes_read {
+    my ($self, $name, $invocation, $operation, $args) = @_;
+    my $entry = $self->plugin($name)
+        or die "PluginManager: API v3 plugin '$name' is not registered\n";
+    return { ok => 0, error => 'disabled' } unless $entry->{enabled};
+    my $policy = $self->_v3_invocation_policy($entry, $invocation);
+    return { ok => 0, error => 'channel_off' }
+        if $policy->{mode} eq 'off';
+    die "PluginManager: quote data operation requires an object\n"
+        unless ref($args) eq 'HASH';
+    my %methods = (
+        by_id => 'by_id', random => 'random', search => 'search',
+        by_author => 'by_author', count => 'count', top => 'top',
+    );
+    my $method = $methods{$operation // ''}
+        or die "PluginManager: unsupported quote data operation\n";
+    my $result = eval {
+        $self->v3_quote_service->$method(
+            %$args, channel => $policy->{channel});
+    };
+    unless ($result) {
+        my $error = _plugin_error_text($@, 'quote data read failed');
+        _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
+            plugin => $name, domain => 'quotes', operation => $operation,
+            outcome => 'error',
+        });
+        eval { $self->{bot}{logger}->log(
+            1, "plugin '$name' API v3 quote read failed: $error") };
+        return { ok => 0, error => 'unavailable' };
+    }
+    _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
+        plugin => $name, domain => 'quotes', operation => $operation,
+        outcome => 'read',
+    });
     return $result;
 }
 

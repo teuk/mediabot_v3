@@ -111,7 +111,8 @@ return sub {
                      mediabot_plugin_v3_http_request_total
                      mediabot_plugin_v3_http_cache_hit_total
                      mediabot_plugin_v3_http_circuit_open_total
-                     mediabot_plugin_v3_storage_total)) {
+                     mediabot_plugin_v3_storage_total
+                     mediabot_plugin_v3_data_total)) {
         my $before = $bot->{metrics}->get($name, { probe => 'x' });
         $bot->{metrics}->inc($name, { probe => 'x' });
         my $after = $bot->{metrics}->get($name, { probe => 'x' });

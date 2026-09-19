@@ -152,6 +152,9 @@ sub load_package {
         storage_commit_sink => sub {
             return $manager->_v3_storage_commit($name, @_);
         },
+        quotes_read_sink => sub {
+            return $manager->_v3_quotes_read($name, @_);
+        },
     );
     # The plugin receives a detached manifest snapshot. It cannot rewrite the
     # already validated core-owned contract between validation and mounting.

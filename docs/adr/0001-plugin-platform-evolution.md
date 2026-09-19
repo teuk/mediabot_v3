@@ -106,3 +106,9 @@ snapshots and compare-and-swap commits through the existing atomic disk
 boundary. `short-content-v3` proves both services but remains explicitly
 unloaded, disabled and channel-off until an operator runs an observe-first
 pilot.
+
+MB747 opens the first database-backed capability without opening the database.
+`data.quotes.read` consists of six core-owned, channel-scoped prepared read
+operations returning detached immutable records. Reads are permitted during
+observe-first parity work, but no write, delete or recall-counter mutation is
+available and no visible quote command is migrated by this milestone.

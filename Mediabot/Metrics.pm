@@ -103,6 +103,9 @@ sub new {
     $self->_declare('mediabot_plugin_v3_http_cache_hit_total','counter','Plugin API v3 shared HTTP cache hits');
     $self->_declare('mediabot_plugin_v3_http_circuit_open_total','counter','Plugin API v3 HTTP circuit openings');
     $self->_declare('mediabot_plugin_v3_storage_total','counter','Plugin API v3 repository operations by bounded outcome');
+    # MB747: approved domain reads; domain, operation and outcome are all
+    # selected from core-owned bounded vocabularies.
+    $self->_declare('mediabot_plugin_v3_data_total','counter','Plugin API v3 approved data operations by bounded outcome');
     # mb604-B1: la persistance mb601 devient observable — combien un plugin
     # ecrit, a quelle frequence, et POURQUOI ses ecritures sont refusees.
     $self->_declare('mediabot_plugin_storage_bytes','gauge','Plugin v2 persistent storage size in bytes, by plugin');

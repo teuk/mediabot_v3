@@ -3,9 +3,9 @@
 This document is the local, canonical entry point for Mediabot's plugin
 platform. It records the MB740 baseline, the MB741 command catalogue, the
 executable MB742 API v3 foundation, the MB743 event/scheduler boundary, the
-MB744 channel policy, MB745's first reversible product plugin and MB746's
-shared HTTP/repository boundary. It does not enable a plugin or grant a
-capability automatically.
+MB744 channel policy, MB745's first reversible product plugin, MB746's shared
+HTTP/repository boundary and MB747's first approved domain-data facade. It does
+not enable a plugin or grant a capability automatically.
 
 ## Current baseline
 
@@ -100,6 +100,8 @@ channel behind `off`, `observe` or `on`. `PluginContext` also retains bounded
 output through the normal core transport and flood gates. MB746 implements
 `http.fetch` and `storage.kv`: outbound work crosses one TLS/DNS/timeout/cache
 service and small state crosses a namespaced compare-and-swap repository.
+MB747 implements `data.quotes.read` through six channel-scoped prepared read
+operations and immutable records; it exposes neither SQL nor a database handle.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -120,7 +122,8 @@ Planned capability families include:
 | `scheduler.jobs` | ownership, quotas, cancellation and reload cleanup |
 | `http.fetch` | TLS, timeout, size, redirect, private-address and quota policy |
 | `secrets.read:<name>` | reference-based access without manifest or log disclosure |
-| `data.<domain>` | approved repository methods instead of arbitrary SQL |
+| `data.quotes.read` | six bounded channel-scoped reads returning detached records |
+| `data.<domain>` | future approved repository methods instead of arbitrary SQL |
 
 ## Dependency boundary matrix
 
@@ -133,7 +136,7 @@ Planned capability families include:
 | Scheduler | core tasks plus route-v1 timers | shared owned jobs with quotas and lifecycle cancellation | core scheduler |
 | Storage | v2 last-write-wins JSON document | MB746 namespaced KV with compare-and-swap/short transactions | data service |
 | HTTP | per-feature clients outside v3 | MB746 bounded async client with cache and circuit breaker | HTTP service |
-| Database | possible through full in-process bot | approved domain repositories only | data layer |
+| Database | possible through full in-process bot | MB747 approved quote reads; future domain repositories only | data layer |
 | Secrets | configuration may be reachable in-process | named secret references only | core configuration |
 | Activation | global plugin lifecycle plus MB744 channel policy | `off`, `observe` or `on` per instance/channel | policy service |
 | Health | lifecycle and metrics fragments | Doctor, reason, permissions, latency and quarantine | plugin runtime |
@@ -162,10 +165,14 @@ Planned capability families include:
    pins, bounds, caches and cancels plugin HTTPS requests; a namespaced
    revisioned repository mediates small state. `short-content-v3` proves both
    while remaining unloaded, disabled and channel-off by default.
+8. **MB747 — first domain-data facade:** complete. `data.quotes.read` provides
+   `by_id`, `random`, `search`, `by_author`, `count` and `top` through the
+   invocation channel. Results are detached, reads work in `observe`, and no
+   quote command or write path moves yet.
 
-Later milestones add approved domain-data facades, extract richer first-party
-features, improve developer tooling and retire duplicate dispatch paths only
-after proven rollback.
+Later milestones migrate quote reads through the reversible command bridge,
+separate quote writes behind stronger authorization, improve developer tooling
+and retire duplicate dispatch paths only after proven rollback.
 
 ## Extraction order
 
@@ -173,7 +180,7 @@ The first migration candidates are deliberately low-risk:
 
 1. `roll`, `flip`, `choose`, `8ball`, `morse` and `abbrev`;
 2. short external content through the MB746 shared HTTP proof;
-3. quotes after the approved data facade exists.
+3. quote reads through the MB747 facade, then writes as a separate gate.
 
 AI conversation, radio, central moderation, authentication, updater and IRC
 transport are not first-wave extraction candidates.

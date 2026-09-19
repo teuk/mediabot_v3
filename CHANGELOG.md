@@ -10,6 +10,23 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb747 — let plugins consult the quote archive through a guarded index
+
+- Implement the first approved API v3 domain capability,
+  `data.quotes.read`. Plugins may request six explicit read operations while
+  the core derives the channel from the current invocation; no SQL, database
+  handle, bot object or caller-selected channel crosses the boundary.
+- Return immutable `QuoteRecordV3` values and bounded result sets. Identifiers,
+  authors, search terms, limits and wildcard escaping are validated before a
+  prepared query runs, and database failures become a neutral unavailable
+  result at the plugin boundary.
+- Permit reads in `observe` for parity work while keeping `off` inert. MB747
+  performs no quote insert, update, delete or recall-counter increment and
+  migrates no visible command yet.
+- Add bounded per-operation metrics, author documentation and offline tests for
+  record detachment, literal wildcard search, channel confinement, capability
+  grants and policy gating. No plugin or channel is activated automatically.
+
 ### mb746 — give plugins a guarded window and a tiny notebook
 
 - Add one core-owned asynchronous HTTPS GET service for API v3 packages.

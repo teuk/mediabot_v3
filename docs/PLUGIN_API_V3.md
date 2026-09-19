@@ -1,9 +1,9 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB746. Packages are discoverable and
-explicitly loadable, but never activate at startup. MB746 adds core-owned
-outbound HTTPS and namespaced repository services without exposing sockets,
-filesystem paths, database handles or arbitrary SQL.
+Plugin API v3 remains experimental in MB747. Packages are discoverable and
+explicitly loadable, but never activate at startup. MB747 adds the first
+core-owned domain-data facade without exposing database handles or arbitrary
+SQL, on top of MB746's HTTPS and namespaced repository services.
 
 ## Package layout
 
@@ -220,6 +220,30 @@ suppressed unless current policy is `on`. Repository errors are contained and
 counted. This generic state is intentionally small; later `data.<domain>`
 facades expose approved domain methods rather than SQL.
 
+## Approved quote reads
+
+A package requesting and receiving `data.quotes.read` may use six explicit
+`PluginContext` methods: `quote_by_id`, `quote_random`, `quote_search`,
+`quotes_by_author`, `quote_count` and `top_quotes`. Every method also receives
+the current invocation. The core derives the database scope exclusively from
+that invocation's current channel policy; the plugin cannot name another
+channel, submit SQL or receive a database handle.
+The service resolves the core's current handle for each operation, so a normal
+database reconnect does not leave plugins attached to an obsolete connection.
+
+Search text and authors are capped at 256 encoded bytes, searches accept at
+most eight literal words, SQL wildcard characters are escaped, and list limits
+range from 1 to 20. Results are immutable `QuoteRecordV3` objects containing
+only `id`, `text`, `author`, `author_id`, `created_at` and `hits`. Lists and
+hashes returned to plugin code are detached copies.
+
+Reads are allowed in `observe` so a future migrated command can be compared
+with its historical implementation. `off` remains inert. MB747 exposes no add,
+delete, update or recall-counter operation; merely reading a record does not
+change its `hits` value. Database failures are logged and counted by the core,
+then returned as `{ ok => 0, error => "unavailable" }` without leaking a query
+or driver diagnostic.
+
 ## Versioned events and backpressure
 
 MB743 publishes version 1 schemas for:
@@ -269,9 +293,10 @@ no plugin job handler.
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-MB746 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
-`events.subscribe`, `scheduler.jobs`, `http.fetch` and `storage.kv`. Other
-capability names remain reserved for later mediated services.
+MB747 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
+`events.subscribe`, `scheduler.jobs`, `http.fetch`, `storage.kv` and
+`data.quotes.read`. Other capability names remain reserved for later mediated
+services.
 
 Discovery reads manifests only. Loading is explicit, leaves the package
 disabled and mounts silent commands. Enabling is a second explicit operation,

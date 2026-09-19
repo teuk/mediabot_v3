@@ -37,6 +37,7 @@ sub new {
         http_fetch_sink => $args{http_fetch_sink},
         storage_snapshot_sink => $args{storage_snapshot_sink},
         storage_commit_sink => $args{storage_commit_sink},
+        quotes_read_sink => $args{quotes_read_sink},
     };
     return $self;
 }
@@ -151,6 +152,52 @@ sub storage_commit {
     die "PluginContext: storage service is unavailable\n"
         unless ref($sink) eq 'CODE';
     return $sink->($invocation, %args);
+}
+
+sub _quotes_read {
+    my ($self, $invocation, $operation, $args) = @_;
+    $self->require_capability('data.quotes.read');
+    _invocation($invocation);
+    die "PluginContext: quote arguments must be an object\n"
+        unless ref($args) eq 'HASH';
+    my $sink = _state($self)->{quotes_read_sink};
+    die "PluginContext: quote data service is unavailable\n"
+        unless ref($sink) eq 'CODE';
+    return $sink->($invocation, $operation, { %$args });
+}
+
+sub quote_by_id {
+    my ($self, $invocation, $id) = @_;
+    return $self->_quotes_read($invocation, 'by_id', { id => $id });
+}
+
+sub quote_random {
+    my ($self, $invocation) = @_;
+    return $self->_quotes_read($invocation, 'random', {});
+}
+
+sub quote_search {
+    my ($self, $invocation, $query, %args) = @_;
+    return $self->_quotes_read($invocation, 'search',
+        { query => $query, limit => $args{limit} });
+}
+
+sub quotes_by_author {
+    my ($self, $invocation, $author, %args) = @_;
+    return $self->_quotes_read($invocation, 'by_author',
+        { author => $author, limit => $args{limit} });
+}
+
+sub quote_count {
+    my ($self, $invocation, %args) = @_;
+    return $self->_quotes_read($invocation, 'count',
+        { author => $args{author} });
+}
+
+sub top_quotes {
+    my ($self, $invocation, %args) = @_;
+    return $self->_quotes_read($invocation, 'top',
+        { limit => $args{limit} });
 }
 
 sub DESTROY {
