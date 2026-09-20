@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB747",
+  "milestone": "MB748",
   "activation_default": "off",
   "manifest_file": "plugin.json",
   "manifest_max_bytes": 16384,
@@ -117,6 +117,10 @@
     "maximum_results": 20,
     "maximum_query_bytes": 256,
     "maximum_search_words": 8,
+    "author_count_match_modes": [
+      "exact",
+      "prefix"
+    ],
     "channel_source": "invocation policy",
     "observe_reads": "allowed",
     "writes": "unavailable",
@@ -130,5 +134,15 @@
     "observe": "plugin shadow plus visible legacy",
     "on": "plugin",
     "unload": "restore legacy registry entry"
+  },
+  "quote_read_migration": {
+    "package": "quotes-v3",
+    "commands": [
+      "quotecount",
+      "topquote",
+      "halloffame"
+    ],
+    "mixed_read_write_commands": "remain legacy",
+    "activation": "explicit package plus channel policy"
   }
 }

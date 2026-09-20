@@ -81,6 +81,14 @@ sub _escape_like {
     return $value;
 }
 
+sub _author_match {
+    my ($value) = @_;
+    $value = 'exact' unless defined $value;
+    die "QuoteServiceV3: invalid author match mode\n"
+        unless !ref($value) && "$value" =~ /\A(?:exact|prefix)\z/;
+    return "$value";
+}
+
 sub _select {
     my ($self, $sql, @bind) = @_;
     my $dbh = $self->_dbh;
@@ -145,6 +153,7 @@ sub by_id {
 sub count {
     my ($self, %args) = @_;
     my $channel = _channel($args{channel});
+    my $author_match = _author_match($args{author_match});
     my ($sql, @bind) = (q{
         SELECT COUNT(*) AS count
           FROM QUOTES q
@@ -152,13 +161,24 @@ sub count {
          WHERE c.name = ?}, $channel);
     if (defined($args{author}) && length("$args{author}")) {
         my $author = _query_text($args{author}, 'author');
-        $sql = q{
-            SELECT COUNT(*) AS count
-              FROM QUOTES q
-              JOIN CHANNEL c ON c.id_channel = q.id_channel
-              JOIN USER u ON u.id_user = q.id_user
-             WHERE c.name = ? AND u.nickname = ?};
-        push @bind, $author;
+        if ($author_match eq 'prefix') {
+            $sql = q{
+                SELECT COUNT(*) AS count
+                  FROM QUOTES q
+                  JOIN CHANNEL c ON c.id_channel = q.id_channel
+                  JOIN USER u ON u.id_user = q.id_user
+                 WHERE c.name = ? AND LOWER(u.nickname) LIKE ? ESCAPE '!'};
+            push @bind, _escape_like(lc($author)) . '%';
+        }
+        else {
+            $sql = q{
+                SELECT COUNT(*) AS count
+                  FROM QUOTES q
+                  JOIN CHANNEL c ON c.id_channel = q.id_channel
+                  JOIN USER u ON u.id_user = q.id_user
+                 WHERE c.name = ? AND u.nickname = ?};
+            push @bind, $author;
+        }
     }
     my $rows = $self->_select($sql, @bind);
     my $count = $rows->[0] && defined($rows->[0]{count})

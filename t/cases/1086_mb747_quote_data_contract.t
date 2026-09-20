@@ -23,7 +23,7 @@ sub slurp {
 return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(slurp('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB747',
+    $assert->is($contract->{milestone}, 'MB748',
         'machine contract names the current milestone');
     $assert->ok(grep($_ eq 'data.quotes.read',
         @{ $contract->{implemented_capabilities} }),
@@ -35,6 +35,12 @@ return sub {
         'machine contract exposes no quote write');
     $assert->is($contract->{quote_read_limits}{channel_source},
         'invocation policy', 'machine contract makes channel authority explicit');
+    $assert->is(join(',',
+        @{ $contract->{quote_read_limits}{author_count_match_modes} }),
+        'exact,prefix', 'machine contract bounds author count matching');
+    $assert->is(join(',', @{ $contract->{quote_read_migration}{commands} }),
+        'quotecount,topquote,halloffame',
+        'machine contract names only the pure read migration');
 
     my $context = slurp('Mediabot/PluginContext.pm');
     my $service = slurp('Mediabot/Plugin/QuoteServiceV3.pm');

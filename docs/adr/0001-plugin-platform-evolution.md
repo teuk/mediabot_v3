@@ -112,3 +112,12 @@ MB747 opens the first database-backed capability without opening the database.
 operations returning detached immutable records. Reads are permitted during
 observe-first parity work, but no write, delete or recall-counter mutation is
 available and no visible quote command is migrated by this milestone.
+
+MB748 converts that capability into a deliberately narrow product migration.
+`quotes-v3` owns only `quotecount`, `topquote` and `halloffame`, which are pure
+reads and already have frozen public adapters. The existing fallback bridge
+keeps the old result visible in `observe`, makes the package authoritative only
+for an explicit `on` channel, and restores the exact adapter on unload. The
+core adds a bounded escaped author-prefix count mode for historical parity.
+The mixed `q` and `quote` dispatch remains untouched until a separate decision
+defines quote-write authorization and rollback.

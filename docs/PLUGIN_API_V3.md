@@ -1,9 +1,9 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB747. Packages are discoverable and
-explicitly loadable, but never activate at startup. MB747 adds the first
-core-owned domain-data facade without exposing database handles or arbitrary
-SQL, on top of MB746's HTTPS and namespaced repository services.
+Plugin API v3 remains experimental in MB748. Packages are discoverable and
+explicitly loadable, but never activate at startup. MB748 uses the first
+core-owned domain-data facade for a reversible migration of three pure-read
+quote commands, without exposing database handles or arbitrary SQL.
 
 ## Package layout
 
@@ -22,6 +22,8 @@ See [`../plugins/hello-v3`](../plugins/hello-v3) for the inert reference
 package, [`../plugins/playful-v3`](../plugins/playful-v3) for the first pilot,
 [`../plugins/short-content-v3`](../plugins/short-content-v3) for the HTTP/data
 proof,
+[`../plugins/quotes-v3`](../plugins/quotes-v3) for the first database-backed
+command migration,
 [`../plugins/API_V3_CONTRACT.json`](../plugins/API_V3_CONTRACT.json)
 for the machine-readable boundary and
 [`../plugins/API_V3_EVENTS.json`](../plugins/API_V3_EVENTS.json) for the event
@@ -237,12 +239,34 @@ range from 1 to 20. Results are immutable `QuoteRecordV3` objects containing
 only `id`, `text`, `author`, `author_id`, `created_at` and `hits`. Lists and
 hashes returned to plugin code are detached copies.
 
+`quote_count` accepts an optional core-validated `author_match` value of
+`exact` or `prefix`. Prefix mode lowercases the supplied author and treats SQL
+wildcards as literal characters before adding its own trailing wildcard. It
+exists solely to preserve the historical `quotecount <nick>` contract; it is
+not a general query interface.
+
 Reads are allowed in `observe` so a future migrated command can be compared
-with its historical implementation. `off` remains inert. MB747 exposes no add,
+with its historical implementation. `off` remains inert. MB748 exposes no add,
 delete, update or recall-counter operation; merely reading a record does not
 change its `hits` value. Database failures are logged and counted by the core,
 then returned as `{ ok => 0, error => "unavailable" }` without leaking a query
 or driver diagnostic.
+
+## Reversible quote-read migration
+
+MB748 ships `quotes-v3`, disabled and channel-off by default. It declares only
+`quotecount`, `topquote` and `halloffame`, each through
+`legacy-public-fallback`. In `observe`, the plugin performs the bounded read
+and suppresses its reply while the historical adapter remains visible. In
+`on`, the plugin owns those three commands for the selected channel. Switching
+the channel to `off`, disabling the package or unloading it restores the old
+path; unload reinstates the exact saved registry handlers.
+
+The mixed `q` and `quote` commands deliberately do not move. Their read forms
+share dispatch with add, delete and recall-counter mutations, so migrating
+them requires a later write capability, stronger authorization and its own
+rollback gate. See [`QUOTE_READ_V3_PILOT.md`](QUOTE_READ_V3_PILOT.md) for the
+single-channel operator sequence.
 
 ## Versioned events and backpressure
 
@@ -293,7 +317,7 @@ no plugin job handler.
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-MB747 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
+MB748 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
 `events.subscribe`, `scheduler.jobs`, `http.fetch`, `storage.kv` and
 `data.quotes.read`. Other capability names remain reserved for later mediated
 services.

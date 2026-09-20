@@ -191,7 +191,7 @@ sub quotes_by_author {
 sub quote_count {
     my ($self, $invocation, %args) = @_;
     return $self->_quotes_read($invocation, 'count',
-        { author => $args{author} });
+        { author => $args{author}, author_match => $args{author_match} });
 }
 
 sub top_quotes {

@@ -58,6 +58,7 @@ return sub {
     $dbh->plan({ rows => [ quote_row(10, '100% real_name', 'Carol', 2) ] });
     $dbh->plan({ rows => [ quote_row(11, 'author', 'Tangy', 0) ] });
     $dbh->plan({ rows => [ { count => 1 } ] });
+    $dbh->plan({ rows => [ { count => 3 } ] });
     $dbh->plan({ rows => [ quote_row(12, 'top', 'Dana', 99) ] });
     my $service = Mediabot::Plugin::QuoteServiceV3->new(
         dbh => $dbh, random_index => sub { 1 });
@@ -89,6 +90,11 @@ return sub {
         'by_author is explicit and bounded');
     $assert->is($service->count(channel => '#test', author => 'Tangy')->{count}, 1,
         'author count remains inside the selected channel');
+    $assert->is($service->count(
+        channel => '#test', author => 'Ta%_', author_match => 'prefix')->{count},
+        3, 'prefix author count supports historical command parity');
+    $assert->is(join(',', @{ $dbh->{binds}[7] }), '#test,ta!%!_%',
+        'prefix author count lowercases and escapes wildcard characters');
     $assert->is($service->top(channel => '#test', limit => 2)
         ->{records}[0]->hits, 99, 'top returns the bounded recall ranking');
 
@@ -101,6 +107,13 @@ return sub {
     $ok = eval { $service->by_id(channel => 'not-a-channel', id => 7); 1 };
     $assert->like($@ // '', qr/invalid channel/,
         'non-channel scope fails before database access');
+    $ok = eval {
+        $service->count(channel => '#test', author => 'Tangy',
+            author_match => 'contains');
+        1;
+    };
+    $assert->like($@ // '', qr/invalid author match mode/,
+        'unknown author match modes fail closed');
     $assert->ok(!grep(/UPDATE|INSERT|DELETE/i, @{ $dbh->{sql} }),
         'the approved service emits no mutating statement');
 

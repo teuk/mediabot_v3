@@ -4,8 +4,9 @@ This document is the local, canonical entry point for Mediabot's plugin
 platform. It records the MB740 baseline, the MB741 command catalogue, the
 executable MB742 API v3 foundation, the MB743 event/scheduler boundary, the
 MB744 channel policy, MB745's first reversible product plugin, MB746's shared
-HTTP/repository boundary and MB747's first approved domain-data facade. It does
-not enable a plugin or grant a capability automatically.
+HTTP/repository boundary, MB747's first approved domain-data facade and
+MB748's first reversible database-backed command migration. It does not enable
+a plugin or grant a capability automatically.
 
 ## Current baseline
 
@@ -102,6 +103,9 @@ output through the normal core transport and flood gates. MB746 implements
 service and small state crosses a namespaced compare-and-swap repository.
 MB747 implements `data.quotes.read` through six channel-scoped prepared read
 operations and immutable records; it exposes neither SQL nor a database handle.
+MB748 proves that boundary with `quotes-v3`: the three pure read adapters move
+through the same reversible bridge used by the playful pilot, while mixed
+read-write quote dispatch stays in the core.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -169,10 +173,15 @@ Planned capability families include:
    `by_id`, `random`, `search`, `by_author`, `count` and `top` through the
    invocation channel. Results are detached, reads work in `observe`, and no
    quote command or write path moves yet.
+9. **MB748 — reversible quote readers:** complete. `quotecount`, `topquote`
+   and `halloffame` can shadow their frozen adapters in `observe`, become
+   authoritative per channel in `on`, and restore exact handlers on unload.
+   Literal author-prefix parity is mediated by the core. `q` and `quote` remain
+   historical because their dispatch also contains writes.
 
-Later milestones migrate quote reads through the reversible command bridge,
-separate quote writes behind stronger authorization, improve developer tooling
-and retire duplicate dispatch paths only after proven rollback.
+Later milestones separate quote writes behind stronger authorization, improve
+developer tooling and retire duplicate dispatch paths only after proven
+rollback.
 
 ## Extraction order
 
@@ -180,7 +189,8 @@ The first migration candidates are deliberately low-risk:
 
 1. `roll`, `flip`, `choose`, `8ball`, `morse` and `abbrev`;
 2. short external content through the MB746 shared HTTP proof;
-3. quote reads through the MB747 facade, then writes as a separate gate.
+3. pure quote reads through the MB747 facade and MB748 bridge, then writes as a
+   separate gate.
 
 AI conversation, radio, central moderation, authentication, updater and IRC
 transport are not first-wave extraction candidates.

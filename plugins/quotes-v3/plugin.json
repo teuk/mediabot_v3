@@ -1,0 +1,49 @@
+{
+  "api": 3,
+  "name": "quotes-v3",
+  "version": "1.0.0",
+  "description": "A reversible API v3 home for read-only quote counts and channel rankings.",
+  "runtime": {
+    "api": 3,
+    "kind": "perl",
+    "entrypoint": "lib/Quotes.pm",
+    "class": "Mediabot::Plugin::Quotes"
+  },
+  "compatibility": {
+    "mediabot": ">=3.6dev"
+  },
+  "activation": {
+    "default": "off"
+  },
+  "capabilities": [
+    "data.quotes.read",
+    "irc.reply",
+    "irc.notice"
+  ],
+  "commands": {
+    "halloffame": {
+      "source": "public",
+      "help": "Alias for topquote.",
+      "level": 0,
+      "handler": "command_topquote",
+      "migration": "legacy-public-fallback"
+    },
+    "quotecount": {
+      "source": "public",
+      "help": "Count channel quotes, optionally by author prefix.",
+      "level": 0,
+      "handler": "command_quotecount",
+      "migration": "legacy-public-fallback"
+    },
+    "topquote": {
+      "source": "public",
+      "help": "Show the channel's most recalled quotes.",
+      "level": 0,
+      "handler": "command_topquote",
+      "migration": "legacy-public-fallback"
+    }
+  },
+  "events": [],
+  "jobs": {},
+  "config_schema": {}
+}

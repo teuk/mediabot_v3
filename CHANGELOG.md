@@ -10,6 +10,27 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb748 — move the first quote readers through a reversible Pensieve door
+
+- Add the inactive first-party `quotes-v3` package and move only the pure-read
+  `quotecount`, `topquote` and `halloffame` adapters behind the established
+  `legacy-public-fallback` bridge. `off` and `observe` keep the historical
+  output visible, `on` makes v3 authoritative for that channel, and unload
+  restores the exact previous registry entries.
+- Extend the approved count operation with a strictly validated `exact` or
+  escaped literal `prefix` author match. This preserves the historical
+  `quotecount <nick>` behavior without exposing SQL, a database handle or a
+  caller-selected channel.
+- Preserve the historical count, empty-channel and recall-ranking messages
+  inside the API v3 400-byte output boundary, including UTF-8-safe excerpts
+  and the existing one-to-ten result limit.
+- Keep the mixed `q` and `quote` commands in the core. Their add, delete and
+  recall-counter paths require a separate write capability and authorization
+  milestone; MB748 adds no write operation, migration or schema change.
+- Add an observe-first single-channel pilot guide plus direct rendering,
+  lifecycle rollback, manifest boundary and prefix-parity tests. No package or
+  channel is loaded, enabled or opted in automatically.
+
 ### mb747 — let plugins consult the quote archive through a guarded index
 
 - Implement the first approved API v3 domain capability,
