@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB749",
+  "milestone": "MB750",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -145,5 +145,21 @@
     ],
     "mixed_read_write_commands": "remain core-owned",
     "activation": "explicit package plus channel policy"
+  },
+  "operator_diagnostics": {
+    "commands": [
+      "doctor",
+      "permissions",
+      "why"
+    ],
+    "mode": "read-only",
+    "configuration_values": "unavailable",
+    "capability_view": "requested, granted, effective, missing",
+    "channel_decisions": [
+      "blocked",
+      "shadow",
+      "active"
+    ],
+    "automatic_remediation": "none"
   }
 }

@@ -338,6 +338,50 @@ sub v3_channel_policies {
     return $opts{active} ? $policy->active_policies : $policy->policies;
 }
 
+# MB750: operator diagnostics are detached, read-only snapshots. They explain
+# the effective capability intersection and channel decision without exposing
+# configuration values, plugin objects or core-owned service handles.
+sub _v3_diagnostic_entry {
+    my ($self, $name) = @_;
+    my $entry = $self->plugin($name)
+        or die "PluginManager: plugin '$name' is not registered\n";
+    die "PluginManager: plugin '$name' is not an API v3 package\n"
+        unless ref($entry->{metadata}) eq 'HASH'
+            && ($entry->{metadata}{api} // 0) == 3;
+    return $entry;
+}
+
+sub v3_permissions_report {
+    my ($self, $name) = @_;
+    my $entry = $self->_v3_diagnostic_entry($name);
+    require Mediabot::Plugin::DiagnosticsV3;
+    return Mediabot::Plugin::DiagnosticsV3->permissions(entry => $entry);
+}
+
+sub v3_diagnostic_report {
+    my ($self, $name) = @_;
+    my $entry = $self->_v3_diagnostic_entry($name);
+    my @policies = $self->v3_channel_policies($entry->{name});
+    require Mediabot::Plugin::DiagnosticsV3;
+    return Mediabot::Plugin::DiagnosticsV3->report(
+        entry => $entry, policies => \@policies);
+}
+
+sub v3_channel_explanation {
+    my ($self, $name, $channel) = @_;
+    my $entry = $self->_v3_diagnostic_entry($name);
+    die "PluginManager: invalid diagnostic channel\n"
+        unless defined($channel) && !ref($channel)
+            && length($channel) >= 2 && length($channel) <= 128
+            && $channel =~ /\A[#&+!][^\x00\x07\r\n ,:]+\z/;
+    my @policies = $self->v3_channel_policies($entry->{name});
+    my $policy = $self->_v3_policy_for_entry($entry, $channel);
+    require Mediabot::Plugin::DiagnosticsV3;
+    return Mediabot::Plugin::DiagnosticsV3->explain_channel(
+        entry => $entry, channel => $channel, policy => $policy,
+        policies => \@policies);
+}
+
 sub _v3_policy_for_entry {
     my ($self, $entry, $channel) = @_;
     my $policy = $self->_v3_policy_object($entry);

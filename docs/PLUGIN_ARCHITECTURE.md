@@ -5,9 +5,9 @@ platform. It records the MB740 baseline, the MB741 command catalogue, the
 executable MB742 API v3 foundation, the MB743 event/scheduler boundary, the
 MB744 channel policy, MB745's first reversible product plugin, MB746's shared
 HTTP/repository boundary, MB747's first approved domain-data facade, MB748's
-first reversible database-backed command migration and MB749's registry-native
-built-in dispatch. It does not enable a plugin or grant a capability
-automatically.
+first reversible database-backed command migration, MB749's registry-native
+built-in dispatch and MB750's read-only operator diagnostics. It does not
+enable a plugin or grant a capability automatically.
 
 ## Current baseline
 
@@ -110,6 +110,10 @@ read-write quote dispatch stays in the core.
 MB749 retires the compatibility dispatch tables without changing that bridge:
 the plugin manager captures the previous registry handler when an eligible
 command is mounted and restores the exact entry on unload.
+MB750 makes that runtime boundary explainable through detached reports: an
+operator can inspect lifecycle, effective grants, mounted resources and the
+exact per-channel decision without receiving configuration values or mutating
+the plugin.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -185,9 +189,14 @@ Planned capability families include:
     private built-ins store their executable CODE handler in `CommandRegistry`.
     The duplicate `%command_map` and `%command_table` paths are retired;
     reversible v3 migrations capture and restore registry entries directly.
+11. **MB750 — operator diagnostics:** complete. Read-only Partyline views show
+    readiness, capability intersection and the effective `off`/`observe`/`on`
+    decision, including migration fallback visibility, without exposing typed
+    configuration values or applying automatic remediation.
 
-Later milestones separate quote writes behind stronger authorization and
-improve developer tooling now that the duplicate dispatch path is closed.
+Later milestones can add explicit quarantine/reset controls and separate quote
+writes behind stronger authorization, now that both dispatch and operational
+truth have one authoritative path.
 
 ## Extraction order
 

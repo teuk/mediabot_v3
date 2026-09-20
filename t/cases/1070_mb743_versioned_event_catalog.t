@@ -27,8 +27,8 @@ return sub {
 
     my $api_contract = JSON::PP->new->decode(
         _slurp_1070('plugins/API_V3_CONTRACT.json'));
-    $assert->is($api_contract->{milestone}, 'MB749',
-        'API v3 machine contract records registry-native dispatch');
+    $assert->is($api_contract->{milestone}, 'MB750',
+        'API v3 machine contract records operator diagnostics');
     $assert->is(join(',', @{ $api_contract->{implemented_capabilities} }),
         'data.quotes.read,events.subscribe,http.fetch,irc.channel_message,irc.notice,irc.reply,scheduler.jobs,storage.kv',
         'machine contract lists the eight executable capabilities');
@@ -36,6 +36,10 @@ return sub {
         'machine contract publishes the queue bound');
     $assert->is($api_contract->{event_backpressure}{dispatch_batch_size}, 8,
         'machine contract publishes the dispatch batch');
+    $assert->is($api_contract->{operator_diagnostics}{mode}, 'read-only',
+        'machine contract keeps operator diagnostics non-mutating');
+    $assert->is($api_contract->{operator_diagnostics}{configuration_values},
+        'unavailable', 'machine contract excludes channel config values');
 
     my $published = JSON::PP->new->decode(
         _slurp_1070('plugins/API_V3_EVENTS.json'));

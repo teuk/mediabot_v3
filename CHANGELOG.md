@@ -10,6 +10,24 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb750 — light the operator's lantern inside API v3
+
+- Add detached, read-only API v3 diagnostics for lifecycle, requested/granted/
+  effective capabilities, missing grants, declared versus mounted resources,
+  channel-policy counts and captured migration rollback handlers.
+- Add Partyline views `.plugins doctor <name>`, `.plugins permissions <name>`
+  and `.plugins why <name> <#channel>`. The last view states whether plugin
+  code is blocked, shadowed or active, whether output is permitted, and whether
+  a saved built-in fallback remains visible.
+- Keep diagnostics available to authenticated Partyline readers without
+  widening the mutation gate. No channel configuration value, plugin object,
+  service handle or secret crosses the view, and no diagnosis changes lifecycle
+  or policy state.
+- Publish the diagnostic contract and direct tests for detached reports,
+  RFC1459 channel matching, partial grants, default-off decisions and Partyline
+  rendering. MB750 performs no automatic quarantine or remediation and changes
+  no plugin activation, private configuration, database data or schema.
+
 ### mb749 — close the duplicate dispatch passage behind one registry
 
 - Store executable CODE handlers for all 238 public and 94 private built-ins

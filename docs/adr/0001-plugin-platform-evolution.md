@@ -132,3 +132,10 @@ name `legacy-public-fallback` remains stable for MB745/MB748 packages, but its
 implementation now captures the eligible built-in registry handler at mount
 time and restores the exact entry on unload. This changes no command output,
 activation policy, private configuration or database state.
+
+MB750 opens the stabilization phase with read-only operational truth. The core
+derives detached doctor, permission and channel-decision reports from the same
+entry, capability intersection and policy objects used at dispatch time.
+Partyline never receives configuration values or privileged runtime objects,
+and the diagnostic path performs no automatic remediation. Quarantine and
+reset controls remain a later, separately gated decision.

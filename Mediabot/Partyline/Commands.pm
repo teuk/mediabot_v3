@@ -945,6 +945,81 @@ sub _cmd_plugins {
     my @enabled  = eval { $pm->list(enabled => 1) } ? $pm->list(enabled => 1) : ();
     my @disabled = eval { $pm->list(enabled => 0) } ? $pm->list(enabled => 0) : ();
 
+    # MB750: these views are deliberately read-only. They expose the core's
+    # decision and capability intersection, never channel configuration values
+    # or privileged service objects.
+    if ($mode =~ /\Adoctor\s+(\S+)\z/) {
+        my $target = $1;
+        my $report = eval { $pm->v3_diagnostic_report($target) };
+        unless ($report) {
+            my $error = $@ || 'diagnostic unavailable';
+            $stream->write("API v3 doctor failed: "
+                . _plugin_info_text($error, 180) . "\r\n");
+            return;
+        }
+        my $permissions = $report->{permissions};
+        my $policies = $report->{policies};
+        my $runtime = $report->{runtime};
+        my $missing = @{ $permissions->{missing} || [] }
+            ? join(',', @{ $permissions->{missing} }) : 'none';
+        $stream->write("Plugin doctor '$report->{plugin}': "
+            . "$report->{status} ($report->{reason}).\r\n");
+        $stream->write("  lifecycle: $report->{lifecycle}\r\n");
+        $stream->write("  permissions: $permissions->{status} missing=$missing\r\n");
+        $stream->write("  policies: total=$policies->{total} active=$policies->{active}"
+            . " on=$policies->{on} observe=$policies->{observe} off=$policies->{off}\r\n");
+        $stream->write("  runtime: commands=$runtime->{mounted}{commands}/$runtime->{declared}{commands}"
+            . " events=$runtime->{mounted}{events}/$runtime->{declared}{events}"
+            . " jobs=$runtime->{mounted}{jobs}/$runtime->{declared}{jobs}"
+            . " saved_handlers=$runtime->{saved_handlers}\r\n");
+        return;
+    }
+
+    if ($mode =~ /\Apermissions\s+(\S+)\z/) {
+        my $target = $1;
+        my $report = eval { $pm->v3_permissions_report($target) };
+        unless ($report) {
+            my $error = $@ || 'permissions unavailable';
+            $stream->write("API v3 permissions failed: "
+                . _plugin_info_text($error, 180) . "\r\n");
+            return;
+        }
+        for my $field (qw(requested granted effective missing)) {
+            my $value = @{ $report->{$field} || [] }
+                ? join(',', @{ $report->{$field} }) : 'none';
+            $report->{$field} = $value;
+        }
+        $stream->write("Plugin permissions '$report->{plugin}': $report->{status}.\r\n");
+        $stream->write("  requested: $report->{requested}\r\n");
+        $stream->write("  granted: $report->{granted}\r\n");
+        $stream->write("  effective: $report->{effective}\r\n");
+        $stream->write("  missing: $report->{missing}\r\n");
+        return;
+    }
+
+    if ($mode =~ /\Awhy\s+(\S+)\s+(\S+)\z/) {
+        my ($target, $channel) = ($1, $2);
+        my $report = eval { $pm->v3_channel_explanation($target, $channel) };
+        unless ($report) {
+            my $error = $@ || 'decision unavailable';
+            $stream->write("API v3 decision failed: "
+                . _plugin_info_text($error, 180) . "\r\n");
+            return;
+        }
+        my $configured = $report->{configured} ? 'yes' : 'no';
+        my $runs = $report->{plugin_runs} ? 'yes' : 'no';
+        my $output = $report->{output_allowed} ? 'yes' : 'no';
+        my $fallback = !$report->{saved_handlers} ? 'none'
+            : $report->{fallback_visible} ? 'visible' : 'suppressed';
+        $stream->write("Plugin decision '$report->{plugin}' $report->{channel}: "
+            . "$report->{decision} ($report->{reason}).\r\n");
+        $stream->write("  lifecycle: $report->{lifecycle}\r\n");
+        $stream->write("  policy: $report->{policy_mode} configured=$configured\r\n");
+        $stream->write("  plugin: runs=$runs output=$output\r\n");
+        $stream->write("  migration fallback: $fallback\r\n");
+        return;
+    }
+
     if ($mode eq 'config') {
         $stream->write("Plugin config:\r\n");
         $stream->write("  autoload: $autoload\r\n");
@@ -1060,7 +1135,8 @@ sub _cmd_plugins {
             . "|load <Module> [name]|loadscript <path> [name]|unload <name>|reload <name>"
             . "|enable <name>|disable <name>|cleardata <name>|discoverv3"
             . "|loadv3 <package> [caps]|policy <name> <channel> <mode> [key=value ...]"
-            . "|resetpolicy <name> <channel>]\r\n");
+            . "|resetpolicy <name> <channel>|doctor <name>"
+            . "|permissions <name>|why <name> <channel>]\r\n");
         return;
     }
 
@@ -1119,6 +1195,7 @@ sub _cmd_help {
       . "  .metrics            - dump Prometheus metrics\r\n"
       . "  .plugins [loaded|config|info|load|loadscript|unload|reload|enable|disable|cleardata] - plugin lifecycle (v2)\r\n"
       . "  .plugins [discoverv3|loadv3|policy|resetpolicy] - API v3 discovery and channel policy\r\n"
+      . "  .plugins [doctor|permissions|why] - API v3 read-only diagnostics\r\n"
       . "  .scriptdryrun [status|last|config|timers|canceltimers|events|clearevents|reload] - show external script bridge status and last run, pending timers, event windows\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary [Administrator+])\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"

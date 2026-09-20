@@ -1,9 +1,10 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB748. Packages are discoverable and
-explicitly loadable, but never activate at startup. MB748 uses the first
-core-owned domain-data facade for a reversible migration of three pure-read
-quote commands, without exposing database handles or arbitrary SQL.
+Plugin API v3 remains experimental in MB750. Packages are discoverable and
+explicitly loadable, but never activate at startup. MB750 adds read-only
+operator diagnostics for the established lifecycle, capabilities and channel
+policy without exposing configuration values, database handles or arbitrary
+SQL.
 
 ## Package layout
 
@@ -179,6 +180,31 @@ API v3 Perl packages are trusted in-process code, not an operating-system
 sandbox. The facade prevents accidental coupling and gives the core one policy
 boundary; it does not protect the host from deliberately hostile Perl code.
 Command failures are contained, logged and emit no IRC output.
+
+## Operator diagnostics
+
+An authenticated Partyline session can inspect API v3 runtime truth without
+changing it:
+
+```text
+.plugins doctor <name>
+.plugins permissions <name>
+.plugins why <name> <#channel>
+```
+
+`doctor` compares declared and mounted commands, events and jobs; reports the
+lifecycle, policy counts, missing capabilities and number of captured rollback
+handlers; then returns one stable state: `inactive`, `limited` or `ready`.
+`permissions` shows the requested, instance-granted, effective and missing
+capability sets. `why` resolves the current lifecycle and channel policy to
+`blocked`, `shadow` or `active`, and states separately whether plugin code runs
+and whether IRC output is allowed.
+
+These commands return detached scalar reports. They do not print typed channel
+configuration values, plugin objects, secrets or service handles. They do not
+enable, disable, reload, reconfigure, quarantine or otherwise remediate a
+plugin. Mutating Partyline commands retain their existing Owner/Master gates.
+See [`PLUGIN_OPERATIONS_V3.md`](PLUGIN_OPERATIONS_V3.md) for the operator view.
 
 ## Shared HTTPS service
 
