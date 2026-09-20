@@ -136,7 +136,9 @@ return sub {
         my $uc=_slurp_689(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
         $assert->like($uc, qr/^\s*mbFactoid_ctx\s*$/m, 'mbFactoid_ctx exporté');
         my $med=_slurp_689(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
-        $assert->like($med, qr/factoid\s*=>\s*sub\s*\{\s*mbFactoid_ctx/, 'factoid dans le dispatch');
+        $assert->like($med,
+            qr/factoid\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*mbFactoid_ctx/,
+            'factoid dans le registre');
         $assert->like($med, qr/^factoid\|factoid <keyword>/m, 'factoid documenté');
         $assert->like($med, qr/factoids \[pattern\\?\|top\]/, 'factoids top documenté');
     }

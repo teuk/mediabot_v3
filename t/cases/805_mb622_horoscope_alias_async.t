@@ -23,14 +23,15 @@ return sub {
     my ($dispatch) = $src =~ /(horoscope\s*=>.*?horo\s*=>.*?# alias court[^\n]*)/s;
     $dispatch //= '';
 
-    my $long = () = $dispatch =~ /horoscope\s*=>\s*sub\s*\{\s*Mediabot::CommandAsync::run_ctx_async\(\$ctx->bot,\s*\$ctx,\s*'horoscope'/g;
-    my $short = () = $dispatch =~ /horo\s*=>\s*sub\s*\{\s*Mediabot::CommandAsync::run_ctx_async\(\$ctx->bot,\s*\$ctx,\s*'horoscope'/g;
+    my $long = () = $dispatch =~ /horoscope\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*Mediabot::CommandAsync::run_ctx_async\(\$ctx->bot,\s*\$ctx,\s*'horoscope'/g;
+    my $short = () = $dispatch =~ /horo\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*Mediabot::CommandAsync::run_ctx_async\(\$ctx->bot,\s*\$ctx,\s*'horoscope'/g;
 
     $assert->is($long, 1,
         'mb622-805: horoscope passe une fois par CommandAsync avec label canonique');
     $assert->is($short, 1,
         'mb622-805: horo passe une fois par le meme CommandAsync/label');
-    $assert->unlike($dispatch, qr/horo\s*=>\s*sub\s*\{\s*mbHoroscope_ctx\(/,
+    $assert->unlike($dispatch,
+        qr/horo\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*mbHoroscope_ctx\(/,
         'mb622-805: aucun alias horo synchrone ne subsiste');
 
     $assert->like($src,

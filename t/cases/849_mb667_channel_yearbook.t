@@ -213,8 +213,8 @@ return sub {
     $assert->like($yb_src, qr/chanset_enabled\([^;]+['"]OnThisDay['"]/s,
         'mb667-849: yearbook reuses the existing channel-history opt-out');
     $assert->like($mb,
-        qr/yearbook\s*=>\s*sub\s*\{\s*Mediabot::CommandAsync::run_ctx_async\(\$ctx->bot,\s*\$ctx,\s*'yearbook'/s,
-        'mb667-849: public yearbook dispatch uses CommandAsync');
+        qr/yearbook\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*Mediabot::CommandAsync::run_ctx_async\(\$ctx->bot,\s*\$ctx,\s*'yearbook'/s,
+        'mb667-849: public yearbook registry handler uses CommandAsync');
     $assert->like($mb, qr/^yearbook\|yearbook \[YYYY\]\|public\|/m,
         'mb667-849: help documents the annual contract');
     $assert->like($hp, qr/^\s*yearbook\s*=>\s*60,/m,

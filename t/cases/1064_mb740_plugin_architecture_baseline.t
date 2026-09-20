@@ -87,6 +87,8 @@ return sub {
         'MB740 records all 245 current built-in help entries');
     $assert->like($generated, qr/\| Help parser anomalies \| 0 \|/,
         'MB741 resolves the two frozen help parser anomalies');
-    $assert->like($generated, qr/`roll`.*registry-public.*legacy-public-adapter/s,
-        'inventory includes first-wave fun command');
+    $assert->like($generated, qr/`roll`.*registry-public/s,
+        'inventory includes first-wave fun command as registry-native');
+    $assert->like($generated, qr/\| Compatibility dispatch tables \| 0 \|/,
+        'MB749 inventory records retired compatibility dispatch');
 };

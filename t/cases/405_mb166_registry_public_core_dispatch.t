@@ -18,16 +18,16 @@ my $case = sub {
 
     $assert->($src =~ /sub _register_builtin_command_catalogue \{/,
         'complete built-in catalogue registration method exists');
-    $assert->($src =~ /every built-in command is catalogued before plugins load/,
-        'constructor seeds the complete built-in catalogue');
-    $assert->($src =~ /CommandRegistry is the sole authority/,
-        'public dispatch documents registry authority');
+    $assert->($src =~ /every built-in command and executable handler is registered before\s+#?\s*plugins load/s,
+        'constructor seeds the complete executable built-in catalogue');
+    $assert->($src =~ /CommandRegistry owns both the command identity and the executable/,
+        'public dispatch documents registry handler authority');
     $assert->($src =~ /command_for\(\$cmd, 'public'\)/,
         'public dispatch resolves catalogue entry first');
-    $assert->($src !~ /if \(my \$handler = \$command_map\{\$cmd\}\)/,
-        'legacy public command_map has no unregistered fallback');
-    $assert->($src =~ /my %command_map = \(/,
-        'legacy public implementation adapter is still declared');
+    $assert->($src !~ /my %command_(?:map|table) = \(/,
+        'compatibility dispatch tables are retired');
+    $assert->($src =~ /my \$handler = \$entry->\{handler\};/,
+        'public dispatch invokes the handler stored in the registry entry');
 
     eval { require 'Mediabot/Mediabot.pm'; 1 }
         or do { $assert->(0, "cannot load Mediabot/Mediabot.pm: $@"); return; };
@@ -50,11 +50,14 @@ my $case = sub {
     }
 
     my $karma = $reg->command_for('karma', 'public');
-    $assert->($karma && $karma->{metadata}{dispatch} eq 'legacy-public',
-        'public legacy handler is reachable only through adapter metadata');
+    $assert->($karma && $karma->{metadata}{dispatch} eq 'registry'
+            && $karma->{metadata}{migration_fallback}
+            && ref($karma->{handler}) eq 'CODE',
+        'public built-in is a registry handler with explicit migration eligibility');
     my $login = $reg->command_for('login', 'private');
-    $assert->($login && $login->{metadata}{dispatch} eq 'legacy-private',
-        'private legacy handler is reachable only through adapter metadata');
+    $assert->($login && $login->{metadata}{dispatch} eq 'registry'
+            && ref($login->{handler}) eq 'CODE',
+        'private built-in is a direct registry handler');
     my $version = $reg->command_for('version', 'public');
     $assert->($version && $version->{metadata}{dispatch} eq 'registry',
         'native core handler remains direct registry dispatch');

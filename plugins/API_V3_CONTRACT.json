@@ -1,7 +1,8 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB748",
+  "milestone": "MB749",
+  "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
   "manifest_max_bytes": 16384,
@@ -129,11 +130,11 @@
   },
   "command_migration": {
     "mode": "legacy-public-fallback",
-    "eligible_target": "frozen built-in public adapter",
-    "off": "legacy",
-    "observe": "plugin shadow plus visible legacy",
+    "eligible_target": "registry-native public built-in with migration_fallback metadata",
+    "off": "saved built-in registry handler",
+    "observe": "plugin shadow plus visible saved built-in handler",
     "on": "plugin",
-    "unload": "restore legacy registry entry"
+    "unload": "restore exact previous registry entry"
   },
   "quote_read_migration": {
     "package": "quotes-v3",
@@ -142,7 +143,7 @@
       "topquote",
       "halloffame"
     ],
-    "mixed_read_write_commands": "remain legacy",
+    "mixed_read_write_commands": "remain core-owned",
     "activation": "explicit package plus channel policy"
   }
 }

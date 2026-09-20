@@ -8,10 +8,8 @@
 #
 # where someFunction_ctx no longer exists, was renamed, moved, or forgotten.
 #
-# It intentionally does NOT depend on the dispatch hash variable names.
-# It scans the bodies of:
-#   - mbCommandPublic()
-#   - mbCommandPrivate()
+# It scans the authoritative registry-native handler factories introduced by
+# MB749 rather than the now-thin public/private dispatch entry points.
 # =============================================================================
 
 use strict;
@@ -98,6 +96,7 @@ sub _extract_simple_handlers_dispatch_dead_handlers {
             ([A-Za-z0-9_]+)
             \s*=>\s*
             sub\s*\{\s*
+            my\s*\(\s*\$ctx\s*\)\s*=\s*\@_;\s*
             ([A-Za-z_][A-Za-z0-9_]*)
             \s*\(\s*\$ctx\s*\)
             \s*\}
@@ -132,17 +131,19 @@ return sub {
 
     my %subs = _collect_project_subs_dispatch_dead_handlers();
 
-    my $public_body  = _extract_sub_body_dispatch_dead_handlers($core, 'mbCommandPublic');
-    my $private_body = _extract_sub_body_dispatch_dead_handlers($core, 'mbCommandPrivate');
+    my $public_body  = _extract_sub_body_dispatch_dead_handlers(
+        $core, '_builtin_public_command_handlers');
+    my $private_body = _extract_sub_body_dispatch_dead_handlers(
+        $core, '_builtin_private_command_handlers');
 
     $assert->ok(
         defined $public_body && length($public_body),
-        'mbCommandPublic body found in Mediabot.pm'
+        'public registry handler factory found in Mediabot.pm'
     );
 
     $assert->ok(
         defined $private_body && length($private_body),
-        'mbCommandPrivate body found in Mediabot.pm'
+        'private registry handler factory found in Mediabot.pm'
     );
 
     my @public_handlers = _extract_simple_handlers_dispatch_dead_handlers(
@@ -155,12 +156,12 @@ return sub {
 
     $assert->ok(
         scalar(@public_handlers) > 50,
-        'public dispatch has many simple command handlers'
+        'public registry has many simple command handlers'
     );
 
     $assert->ok(
         scalar(@private_handlers) > 50,
-        'private dispatch has many simple command handlers'
+        'private registry has many simple command handlers'
     );
 
     my @public_dups  = _find_duplicate_commands_dispatch_dead_handlers(@public_handlers);
@@ -169,13 +170,13 @@ return sub {
     $assert->is(
         join(', ', @public_dups),
         '',
-        'public dispatch has no duplicate simple command entries'
+        'public registry has no duplicate simple command entries'
     );
 
     $assert->is(
         join(', ', @private_dups),
         '',
-        'private dispatch has no duplicate simple command entries'
+        'private registry has no duplicate simple command entries'
     );
 
     for my $pair (@public_handlers) {
@@ -183,7 +184,7 @@ return sub {
 
         $assert->ok(
             exists $subs{$func},
-            "public dispatch command '$cmd' points to existing function $func"
+            "public registry command '$cmd' points to existing function $func"
         );
     }
 
@@ -192,7 +193,7 @@ return sub {
 
         $assert->ok(
             exists $subs{$func},
-            "private dispatch command '$cmd' points to existing function $func"
+            "private registry command '$cmd' points to existing function $func"
         );
     }
 };

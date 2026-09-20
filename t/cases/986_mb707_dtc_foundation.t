@@ -13,9 +13,11 @@ return sub {
 
     $assert->like($main, qr/use Mediabot::DTC::Commands \(\);/,
         'mb707-986: native DTC command module is loaded');
-    $assert->like($main, qr/^\s*dtc\s*=>\s*sub \{ Mediabot::DTC::Commands::dispatch_ctx\(\$ctx\) \}/m,
+    $assert->like($main,
+        qr/^\s*dtc\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*Mediabot::DTC::Commands::dispatch_ctx\(\$ctx\)\s*\}/m,
         'mb707-986: !dtc routes to the native command');
-    $assert->like($main, qr/^\s*bashfr\s*=>\s*sub \{ Mediabot::DTC::Commands::dispatch_ctx\(\$ctx\) \}/m,
+    $assert->like($main,
+        qr/^\s*bashfr\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*Mediabot::DTC::Commands::dispatch_ctx\(\$ctx\)\s*\}/m,
         'mb707-986: !bashfr is the same native route');
     $assert->like($schema, qr/\(27, 'DansTonChat'\)/,
         'mb707-986: fresh schema contains DansTonChat chanset');

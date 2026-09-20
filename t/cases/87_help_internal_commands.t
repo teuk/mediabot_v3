@@ -66,6 +66,7 @@ sub _extract_simple_dispatch_commands_help_internal_commands {
             ([A-Za-z0-9_]+)
             \s*=>\s*
             sub\s*\{\s*
+            my\s*\(\s*\$ctx\s*\)\s*=\s*\@_;\s*
             [A-Za-z_][A-Za-z0-9_]*
             \s*\(\s*\$ctx\s*\)
             \s*\}
@@ -152,17 +153,19 @@ return sub {
         'help no longer blindly suggests showcmd for every command'
     );
 
-    my $public_body = _extract_sub_body_help_internal_commands($src, 'mbCommandPublic');
-    my $private_body = _extract_sub_body_help_internal_commands($src, 'mbCommandPrivate');
+    my $public_body = _extract_sub_body_help_internal_commands(
+        $src, '_builtin_public_command_handlers');
+    my $private_body = _extract_sub_body_help_internal_commands(
+        $src, '_builtin_private_command_handlers');
 
     $assert->ok(
         defined $public_body,
-        'mbCommandPublic body found'
+        'public registry handler factory found'
     );
 
     $assert->ok(
         defined $private_body,
-        'mbCommandPrivate body found'
+        'private registry handler factory found'
     );
 
     my %dispatch_cmds;
@@ -177,7 +180,7 @@ return sub {
     $assert->is(
         join(', ', @missing),
         '',
-        'every simple internal dispatch command has a help entry'
+        'every simple internal registry command has a help entry'
     );
 
     for my $cmd (qw(weather topic showcmd help listeners nextsong update)) {

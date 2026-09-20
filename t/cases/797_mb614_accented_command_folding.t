@@ -48,8 +48,10 @@ return sub {
     # [2] les 5 formes demandees atteignent une cle du dispatch
     my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Mediabot.pm'
         or die $!; local $/; <$fh> };
-    my ($table) = $src =~ /my %command_map = \((.*?)\n    \);/s;
-    $assert->ok(defined $table, 'mb614-797: table publique localisee');
+    my ($table) = $src =~
+        /sub _builtin_public_command_handlers \{\s*return \((.*?)\n    \);\s*\}/s;
+    $assert->ok(defined $table,
+        'mb614-797: handlers publics du registre localises');
     my %keys = map { $_ => 1 } ($table =~ /^\s{8}'?([a-z_]+)'?\s*=>/mg);
     my $reachable = 0;
     for my $typed ("actualit\xc3\xa9s", "actualit\xc3\xa9", 'actualites', 'actualite', 'news') {

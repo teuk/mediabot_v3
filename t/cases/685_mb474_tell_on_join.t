@@ -49,8 +49,9 @@ return sub {
     # [2] Alias !tell -> mbRemind_ctx
     # -------------------------------------------------------------------------
     my $med = _slurp_685(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
-    $assert->like($med, qr/tell\s*=>\s*sub\s*\{\s*mbRemind_ctx\(\$ctx\)\s*\}/,
-        '[2] alias tell -> mbRemind_ctx dans le dispatch');
+    $assert->like($med,
+        qr/tell\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*mbRemind_ctx\(\$ctx\)\s*\}/,
+        '[2] alias tell -> mbRemind_ctx dans le registre');
 
     # -------------------------------------------------------------------------
     # [3] Documentation help de tell

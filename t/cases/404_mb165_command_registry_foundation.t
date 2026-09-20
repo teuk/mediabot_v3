@@ -110,8 +110,10 @@ my $case = sub {
     my $main_src = do { local $/; <$mfh> };
     close $mfh;
 
-    $assert->($main_src =~ /my %command_map = \(/ && $main_src =~ /my %command_table = \(/,
-        'legacy public/private dispatch tables are still present for compatibility');
+    $assert->($main_src =~ /sub _builtin_public_command_handlers \{/
+            && $main_src =~ /sub _builtin_private_command_handlers \{/
+            && $main_src !~ /my %command_(?:map|table) = \(/,
+        'built-ins are registry-native and compatibility dispatch tables are absent');
 };
 
 if (caller) { return $case; }

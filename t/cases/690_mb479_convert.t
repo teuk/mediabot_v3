@@ -143,7 +143,9 @@ return sub {
         my $db = _slurp_690(File::Spec->catfile('.', 'Mediabot', 'DBCommands.pm'));
         $assert->like($db, qr/^\s*mbConvert_ctx\s*$/m, 'mbConvert_ctx exporté');
         my $med = _slurp_690(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
-        $assert->like($med, qr/convert\s*=>\s*sub\s*\{\s*mbConvert_ctx/, 'convert dans le dispatch');
+        $assert->like($med,
+            qr/convert\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*mbConvert_ctx/,
+            'convert dans le handler registry-native');
         $assert->like($med, qr/^convert\|convert <value> <from> <to>/m, 'convert documenté');
         $assert->ok(-f File::Spec->catfile('.', 'Mediabot', 'Convert.pm'), 'module Convert.pm présent');
     }

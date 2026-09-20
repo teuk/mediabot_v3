@@ -15,10 +15,10 @@ our @EXPORT_OK = qw(
     catalogue_entries
 );
 
-# MB741 freezes these names as the only commands that may still be implemented
-# by the historical dispatch hashes. Future commands belong in the catalogue
-# with a direct registry handler; they must never be appended here.
-my @LEGACY_PUBLIC_ADAPTER = qw(
+# MB749 keeps one declarative catalogue for every built-in name. Executable
+# handlers are registered directly in CommandRegistry by Mediabot.pm; there is
+# no longer a second public or private dispatch table.
+my @PUBLIC_CATALOGUE = qw(
     die nick addtimer remtimer timers msg say act cstat status echo adduser
     useradd deluser users userinfo addhost addchan chanset purge part join add
     del modinfo op deop invite voice devoice kick ban kickban kb unban bans
@@ -47,7 +47,7 @@ my @LEGACY_PUBLIC_ADAPTER = qw(
     resolve tmdb tmdblangset debug version uptime help commands spike update
 );
 
-my @LEGACY_PRIVATE_ADAPTER = qw(
+my @PRIVATE_CATALOGUE = qw(
     pass ident topic update debug status radiostatus radiomounts echo die nick
     addtimer remtimer timers register msg dump say act song play radioimport
     commands radioqueue radiopush radioskip radioflush adduser useradd deluser
@@ -60,17 +60,10 @@ my @LEGACY_PRIVATE_ADAPTER = qw(
     lastcom moduser antifloodset rehash ai claude
 );
 
-# These four commands already had native registry handlers before MB741. Their
-# historical hash entries remain available only as rollback adapters.
-my @DIRECT_PUBLIC = qw(version uptime help commands);
-
-# The catalogue starts with the complete frozen adapter surface. New direct
-# commands may be appended to these catalogue arrays without changing either
-# legacy allow-list above.
-my @PUBLIC_CATALOGUE  = (@LEGACY_PUBLIC_ADAPTER);
-my @PRIVATE_CATALOGUE = (@LEGACY_PRIVATE_ADAPTER);
-
-my %DIRECT_PUBLIC = map { $_ => 1 } @DIRECT_PUBLIC;
+# The first four native handlers predated MB741 and therefore never had the
+# reversible legacy-fallback migration contract. All other public built-ins
+# keep that explicit migration eligibility while becoming registry-native.
+my %NO_MIGRATION_FALLBACK = map { $_ => 1 } qw(version uptime help commands);
 
 sub public_command_names {
     return @PUBLIC_CATALOGUE;
@@ -81,15 +74,17 @@ sub private_command_names {
 }
 
 sub direct_public_command_names {
-    return @DIRECT_PUBLIC;
+    return @PUBLIC_CATALOGUE;
 }
 
+# Compatibility exports retained for out-of-tree inventory consumers. MB749
+# deliberately makes both lists empty: compatibility dispatch is retired.
 sub legacy_public_adapter_names {
-    return @LEGACY_PUBLIC_ADAPTER;
+    return ();
 }
 
 sub legacy_private_adapter_names {
-    return @LEGACY_PRIVATE_ADAPTER;
+    return ();
 }
 
 sub catalogue_entries {
@@ -97,9 +92,10 @@ sub catalogue_entries {
 
     push @entries, map {
         +{
-            name     => $_,
-            source   => 'public',
-            dispatch => $DIRECT_PUBLIC{$_} ? 'registry' : 'legacy-public',
+            name               => $_,
+            source             => 'public',
+            dispatch           => 'registry',
+            migration_fallback => $NO_MIGRATION_FALLBACK{$_} ? 0 : 1,
         }
     } @PUBLIC_CATALOGUE;
 
@@ -107,7 +103,7 @@ sub catalogue_entries {
         +{
             name     => $_,
             source   => 'private',
-            dispatch => 'legacy-private',
+            dispatch => 'registry',
         }
     } @PRIVATE_CATALOGUE;
 

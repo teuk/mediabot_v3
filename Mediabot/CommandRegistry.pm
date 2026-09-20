@@ -10,9 +10,9 @@ use utf8;
 # Authoritative catalogue for built-in and plugin commands.
 #
 # It stores canonical public/private commands, aliases, metadata and handlers.
-# Since MB741, unregistered names never reach the historical dispatch hashes.
-# Those hashes are frozen implementation adapters selected by registered
-# built-in metadata; trusted in-process plugins use direct registry handlers.
+# Since MB749, built-ins and plugins are executable through the handler stored
+# in their registry entry. Unregistered names never reach a compatibility
+# dispatch table because those duplicate tables no longer exist.
 # ---------------------------------------------------------------------------
 
 sub new {

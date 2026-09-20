@@ -200,7 +200,7 @@ XML
 
     $assert->like(
         $main,
-        qr/\bnews\s*=>\s*sub\s*\{\s*Mediabot::CommandAsync::run_ctx_async/s,
+        qr/\bnews\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*Mediabot::CommandAsync::run_ctx_async/s,
         'mb692-893: existing news path remains untouched',
     );
     my $rss_routes = () = $main =~ /^\s*rss\s*=>\s*sub /mg;

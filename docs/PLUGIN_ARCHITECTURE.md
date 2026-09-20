@@ -4,9 +4,10 @@ This document is the local, canonical entry point for Mediabot's plugin
 platform. It records the MB740 baseline, the MB741 command catalogue, the
 executable MB742 API v3 foundation, the MB743 event/scheduler boundary, the
 MB744 channel policy, MB745's first reversible product plugin, MB746's shared
-HTTP/repository boundary, MB747's first approved domain-data facade and
-MB748's first reversible database-backed command migration. It does not enable
-a plugin or grant a capability automatically.
+HTTP/repository boundary, MB747's first approved domain-data facade, MB748's
+first reversible database-backed command migration and MB749's registry-native
+built-in dispatch. It does not enable a plugin or grant a capability
+automatically.
 
 ## Current baseline
 
@@ -21,13 +22,13 @@ Mediabot currently supports three extension forms:
 API v2 sidecars already have fail-closed manifests, bounded input and output,
 transactional command/event mounting, lifecycle cleanup, controlled actions and
 bounded JSON storage. The platform is technically substantial, but production
-features still mostly live in central dispatch tables and large modules.
+features still mostly live in large core modules.
 
 The live command catalogue is generated in
 [`generated/COMMAND_INVENTORY.md`](generated/COMMAND_INVENTORY.md). It shows the
-public and private commands registered through `CommandRegistry`, plus the
-frozen legacy implementation adapters that remain during incremental handler
-migration. The operational rules are in
+public and private commands registered through `CommandRegistry`. Since MB749,
+the registry entry also owns each executable built-in handler; the duplicate
+public/private dispatch tables are gone. The operational rules are in
 [`COMMAND_CATALOGUE.md`](COMMAND_CATALOGUE.md).
 
 ## Decision
@@ -106,6 +107,9 @@ operations and immutable records; it exposes neither SQL nor a database handle.
 MB748 proves that boundary with `quotes-v3`: the three pure read adapters move
 through the same reversible bridge used by the playful pilot, while mixed
 read-write quote dispatch stays in the core.
+MB749 retires the compatibility dispatch tables without changing that bridge:
+the plugin manager captures the previous registry handler when an eligible
+command is mounted and restores the exact entry on unload.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -149,9 +153,8 @@ Planned capability families include:
 
 1. **MB740 — baseline:** architecture decision, v2 freeze, command inventory
    and dependency matrix. No runtime behavior changes.
-2. **MB741 — command catalogue:** complete. All built-ins are registered and
-   legacy tables are reachable only as frozen adapters. No new entry may be
-   added to the old dispatch.
+2. **MB741 — command catalogue:** complete. All built-in names, sources and
+   metadata are registered through one authoritative catalogue.
 3. **MB742 — API v3:** complete. Strict `plugin.json` packages, bounded
    `PluginContext`/invocations, requested-intersect-granted capabilities,
    explicit lifecycle, an inert witness and a read-only v2 adapter are present.
@@ -163,7 +166,7 @@ Planned capability families include:
    default, with late revocation for queued work and IRC output.
 6. **MB745 — visible proof:** complete. `playful-v3` owns the six low-risk fun
    commands only where policy is `on`, shadows them in `observe`, restores the
-   historical adapter in `off` or on unload, and adds one opt-in autonomous
+   saved built-in handler in `off` or on unload, and adds one opt-in autonomous
    ritual for a single development channel.
 7. **MB746 — HTTP and repository proof:** complete. One core service validates,
    pins, bounds, caches and cancels plugin HTTPS requests; a namespaced
@@ -174,14 +177,17 @@ Planned capability families include:
    invocation channel. Results are detached, reads work in `observe`, and no
    quote command or write path moves yet.
 9. **MB748 — reversible quote readers:** complete. `quotecount`, `topquote`
-   and `halloffame` can shadow their frozen adapters in `observe`, become
+   and `halloffame` can shadow their built-in handlers in `observe`, become
    authoritative per channel in `on`, and restore exact handlers on unload.
    Literal author-prefix parity is mediated by the core. `q` and `quote` remain
    historical because their dispatch also contains writes.
+10. **MB749 — registry-native built-ins:** complete. All 238 public and 94
+    private built-ins store their executable CODE handler in `CommandRegistry`.
+    The duplicate `%command_map` and `%command_table` paths are retired;
+    reversible v3 migrations capture and restore registry entries directly.
 
-Later milestones separate quote writes behind stronger authorization, improve
-developer tooling and retire duplicate dispatch paths only after proven
-rollback.
+Later milestones separate quote writes behind stronger authorization and
+improve developer tooling now that the duplicate dispatch path is closed.
 
 ## Extraction order
 

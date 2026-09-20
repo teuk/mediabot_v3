@@ -3,7 +3,7 @@
 # mb484 — Garde de cohérence : le dispatch public et la documentation help
 #         restent synchronisés.
 #
-#   [1] toute commande de %command_map a une entrée dans le heredoc help ;
+#   [1] tout handler public du registre a une entrée dans le heredoc help ;
 #   [2] toute entrée help de niveau 'public' correspond à une commande du
 #       dispatch (pas d'entrée fantôme qui trompe l'utilisateur).
 #
@@ -11,7 +11,7 @@
 # un futur ajout de commande sans help (ou un help orphelin) échouera ici,
 # avant la release 3.3.
 #
-# Note : les alias enregistrés hors de %command_map (ex. quelques alias définis
+# Note : les alias enregistrés hors du catalogue (ex. quelques alias définis
 # ailleurs) et les commandes non-public sont hors périmètre de [2] par design.
 # =============================================================================
 
@@ -27,12 +27,15 @@ return sub {
 
     my $src = _slurp_695(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
 
-    # --- extraire les clés du dispatch public %command_map -------------------
-    my ($block) = $src =~ /my %command_map = \((.*?)\n    \);/s;
-    $assert->ok(defined $block && $block ne '', 'bloc %command_map localisé');
+    # --- extraire les handlers publics natifs du registre --------------------
+    my ($block) = $src =~
+        /sub _builtin_public_command_handlers \{\s*return \((.*?)\n    \);\s*\}/s;
+    $assert->ok(defined $block && $block ne '',
+        'catalogue de handlers publics localisé');
     my %dispatch;
     while ($block =~ /^\s*'?([a-z0-9_]+)'?\s*=>\s*sub/mg) { $dispatch{$1} = 1; }
-    $assert->ok(scalar(keys %dispatch) > 100, 'dispatch public non vide (>100 commandes)');
+    $assert->ok(scalar(keys %dispatch) > 100,
+        'catalogue public non vide (>100 commandes)');
 
     # --- extraire les entrées du heredoc help --------------------------------
     my ($help_block) = $src =~ /MEDIABOT_INTERNAL_HELP(.*?)MEDIABOT_INTERNAL_HELP/s;

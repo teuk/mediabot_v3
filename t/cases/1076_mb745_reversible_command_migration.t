@@ -1,4 +1,4 @@
-# MB745 — a v3 pilot may shadow one frozen adapter and restore it exactly.
+# MB745/MB749 — a v3 pilot may shadow one eligible built-in and restore it exactly.
 
 use strict;
 use warnings;
@@ -60,13 +60,15 @@ return sub {
 
     my $bot = T1076::Bot->new;
     my %original;
+    my $legacy_calls = 0;
     for my $name (qw(8ball abbrev choose flip morse roll)) {
-        my $handler = sub { die "dispatcher-only $name" };
+        my $handler = sub { $legacy_calls++; 1 };
         $original{$name} = $handler;
         $bot->{registry}->register_command(
             name => $name, source => 'public', handler => $handler,
-            category => 'builtin-adapter', metadata => {
-                builtin => 1, dispatch => 'legacy-public', syntax => $name,
+            category => 'core', metadata => {
+                builtin => 1, dispatch => 'registry', syntax => $name,
+                migration_fallback => 1,
             });
     }
 
@@ -79,18 +81,17 @@ return sub {
     $assert->is($mounted->{metadata}{migration}, 'legacy-public-fallback',
         'pilot replaces only through the explicit migration bridge');
 
-    my $legacy_calls = 0;
     my $ctx = T1076::Context->new(
         nick => 'Tangy', channel => '#development', command => 'abbrev',
         args => [qw(quiet little channel)]);
-    $mounted->{handler}->($ctx, sub { $legacy_calls++; 1 });
+    $mounted->{handler}->($ctx);
     $assert->is($legacy_calls, 1,
         'disabled v3 package preserves the legacy command');
 
     $manager->set_v3_channel_policy('playful-v3', '#development',
         mode => 'observe');
     $manager->enable('playful-v3');
-    $mounted->{handler}->($ctx, sub { $legacy_calls++; 1 });
+    $mounted->{handler}->($ctx);
     $assert->is($legacy_calls, 2,
         'observe executes a visible legacy fallback');
     $assert->is(scalar @{ $ctx->{replies} }, 0,
@@ -98,7 +99,7 @@ return sub {
 
     $manager->set_v3_channel_policy('playful-v3', '#development',
         mode => 'on');
-    $mounted->{handler}->($ctx, sub { $legacy_calls++; 1 });
+    $mounted->{handler}->($ctx);
     $assert->is($legacy_calls, 2,
         'on makes the plugin authoritative for the pilot channel');
     $assert->is($ctx->{replies}[0], 'Tangy: QLC (3 word(s))',
@@ -107,9 +108,9 @@ return sub {
     $manager->unregister_plugin('playful-v3');
     my $restored = $bot->{registry}->command_for('abbrev', 'public');
     $assert->is(refaddr($restored->{handler}), refaddr($original{abbrev}),
-        'unload restores the exact historical handler reference');
-    $assert->is($restored->{metadata}{dispatch}, 'legacy-public',
-        'unload restores historical dispatch metadata');
+        'unload restores the exact built-in handler reference');
+    $assert->is($restored->{metadata}{dispatch}, 'registry',
+        'unload restores registry-native dispatch metadata');
     $assert->ok(!$bot->{registry}->command_for('abbrev', 'public')->{plugin},
         'no plugin ownership remains after rollback');
 };

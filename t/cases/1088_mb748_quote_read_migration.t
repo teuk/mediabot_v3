@@ -68,13 +68,15 @@ return sub {
 
     my $bot = T1088::Bot->new;
     my %original;
+    my $legacy_calls = 0;
     for my $name (qw(quotecount topquote halloffame)) {
-        my $handler = sub { die "dispatcher-only $name" };
+        my $handler = sub { $legacy_calls++; 1 };
         $original{$name} = $handler;
         $bot->{registry}->register_command(
             name => $name, source => 'public', handler => $handler,
-            category => 'builtin-adapter', metadata => {
-                builtin => 1, dispatch => 'legacy-public', syntax => $name,
+            category => 'core', metadata => {
+                builtin => 1, dispatch => 'registry', syntax => $name,
+                migration_fallback => 1,
             });
     }
     my $quotes = T1088::QuoteService->new;
@@ -87,11 +89,10 @@ return sub {
     my $mounted = $bot->{registry}->command_for('quotecount', 'public');
     $assert->is($mounted->{metadata}{migration}, 'legacy-public-fallback',
         'quote reads mount only through the explicit fallback bridge');
-    my $legacy_calls = 0;
     my $ctx = T1088::Context->new(
         nick => 'Tangy', channel => '#development', command => 'quotecount',
         args => []);
-    $mounted->{handler}->($ctx, sub { $legacy_calls++; 1 });
+    $mounted->{handler}->($ctx);
     $assert->is($legacy_calls, 1,
         'disabled package preserves the legacy quote counter');
     $assert->is(scalar @{ $quotes->{calls} }, 0,
@@ -100,7 +101,7 @@ return sub {
     $manager->set_v3_channel_policy('quotes-v3', '#development',
         mode => 'observe');
     $manager->enable('quotes-v3');
-    $mounted->{handler}->($ctx, sub { $legacy_calls++; 1 });
+    $mounted->{handler}->($ctx);
     $assert->is($legacy_calls, 2,
         'observe keeps the historical output path visible');
     $assert->is(scalar @{ $quotes->{calls} }, 1,
@@ -109,7 +110,7 @@ return sub {
         'observe suppresses the v3 quote reply');
 
     $manager->set_v3_channel_policy('quotes-v3', '#development', mode => 'on');
-    $mounted->{handler}->($ctx, sub { $legacy_calls++; 1 });
+    $mounted->{handler}->($ctx);
     $assert->is($legacy_calls, 2,
         'on makes v3 authoritative for the opted-in channel');
     $assert->is($ctx->{replies}[0], '#development: 7 quote(s) total',
@@ -119,12 +120,12 @@ return sub {
     my $top_ctx = T1088::Context->new(
         nick => 'Tangy', channel => '#development', command => 'halloffame',
         args => ['5']);
-    $top->{handler}->($top_ctx, sub { $legacy_calls++; 1 });
+    $top->{handler}->($top_ctx);
     $assert->like($top_ctx->{replies}[1], qr/Remember this \(5 recalls\)/,
         'the alias uses the same approved ranking path');
 
     $manager->set_v3_channel_policy('quotes-v3', '#development', mode => 'off');
-    $mounted->{handler}->($ctx, sub { $legacy_calls++; 1 });
+    $mounted->{handler}->($ctx);
     $assert->is($legacy_calls, 3,
         'off immediately restores visible legacy behavior');
 
@@ -133,7 +134,7 @@ return sub {
         my $restored = $bot->{registry}->command_for($name, 'public');
         $assert->is(refaddr($restored->{handler}), refaddr($original{$name}),
             "unload restores the exact $name handler reference");
-        $assert->is($restored->{metadata}{dispatch}, 'legacy-public',
+        $assert->is($restored->{metadata}{dispatch}, 'registry',
             "unload restores $name dispatch metadata");
     }
 };

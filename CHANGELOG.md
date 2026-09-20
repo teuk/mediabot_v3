@@ -10,6 +10,29 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb749 — close the duplicate dispatch passage behind one registry
+
+- Store executable CODE handlers for all 238 public and 94 private built-ins
+  directly in `CommandRegistry`. Public and private command execution now
+  resolves one source-scoped entry and calls its handler without a second
+  `%command_map` or `%command_table` lookup.
+- Retire both compatibility dispatch tables and their frozen allow-lists. The
+  deterministic architecture inventory now verifies exact parity between the
+  declarative catalogue and the registry-native public/private handler sets.
+- Preserve reversible `playful-v3` and `quotes-v3` migrations without teaching
+  the main dispatcher about plugins. `PluginManager` captures the eligible
+  built-in handler at mount time, uses it for disabled/`off`/`observe`, and
+  restores the exact previous registry entry on unload or failed mounting.
+- Keep the manifest protocol string `legacy-public-fallback` stable for
+  compatibility while replacing its implementation with an explicit
+  `migration_fallback` registry flag. The four original direct handlers remain
+  intentionally ineligible, matching pre-MB749 behavior.
+- Preserve command counts, help, permissions, output, API v1/v2 behavior and
+  database-backed dynamic commands. No plugin or channel is activated, and no
+  private configuration, database data or schema is changed. Historical
+  source-level routing sentinels now inspect the registry-native handler
+  factories instead of the retired duplicate dispatch hashes.
+
 ### mb748 — move the first quote readers through a reversible Pensieve door
 
 - Add the inactive first-party `quotes-v3` package and move only the pure-read

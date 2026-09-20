@@ -36,8 +36,9 @@ return sub {
         'External facade exports Gemini context wrapper');
 
     my $mediabot = _slurp_1030('Mediabot/Mediabot.pm');
-    $assert->like($mediabot, qr/gemini\s*=>\s*sub\s*\{\s*gemini_ctx\(\$ctx\)/,
-        'public dispatcher maps gemini command');
+    $assert->like($mediabot,
+        qr/gemini\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*gemini_ctx\(\$ctx\)/,
+        'public registry handler maps gemini command');
     $assert->like($mediabot, qr/gemini\|gemini <prompt>\|public\|/,
         'public help documents gemini syntax');
 

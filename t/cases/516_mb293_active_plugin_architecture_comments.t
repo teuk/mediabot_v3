@@ -39,10 +39,10 @@ unlike($bus, qr/does not change current Mediabot behavior yet|It will allow futu
 
 like($registry, qr/Authoritative catalogue for built-in and plugin commands/,
     'CommandRegistry header describes authoritative dispatch');
-like($registry, qr/unregistered names never reach the historical dispatch hashes/,
-    'CommandRegistry header rejects a legacy fallback');
-like($registry, qr/frozen implementation adapters selected by registered/,
-    'CommandRegistry header documents bounded legacy adapters');
+like($registry, qr/handler stored\s+#?\s*in their registry entry/s,
+    'CommandRegistry header documents executable registry entries');
+like($registry, qr/duplicate tables no longer exist/,
+    'CommandRegistry header documents retired compatibility dispatch');
 unlike($registry, qr/does not change the existing Mediabot dispatch yet|eventually to let internal plugins/,
     'CommandRegistry no longer describes a future-only component');
 

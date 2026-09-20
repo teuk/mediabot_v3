@@ -14,9 +14,9 @@ recall-counter writes, so they are outside this milestone.
 - the core supplies the invocation channel and prepared query;
 - the package receives detached quote records, never DBI or SQL;
 - author-prefix matching is literal, escaped and capped at 256 bytes;
-- `observe` runs the v3 read silently while the legacy answer stays visible;
+- `observe` runs the v3 read silently while the saved built-in answer stays visible;
 - `on` changes only the three declared commands on the selected channel;
-- `off`, disable or unload restores legacy behavior immediately;
+- `off`, disable or unload restores built-in behavior immediately;
 - unload restores the exact registry handler references;
 - no configuration file, database schema or quote row is modified.
 
@@ -68,7 +68,7 @@ The fastest channel rollback is:
 .plugins policy quotes-v3 #development off
 ```
 
-To stop the package globally or remove every mounted adapter:
+To stop the package globally or remove every mounted command:
 
 ```text
 .plugins disable quotes-v3

@@ -81,17 +81,18 @@ sub ok {
 }
 
 # ---------------------------------------------------------------------------
-# 1. Extract the public command dispatch hash.
+# 1. Extract the registry-native public handler catalogue.
 # ---------------------------------------------------------------------------
-my ($dispatch_body) = $mb =~ /my\s+%command_map\s*=\s*\((.*?)\n\s*\);/s;
+my ($dispatch_body) = $mb =~
+    /sub\s+_builtin_public_command_handlers\s*\{\s*return\s*\((.*?)\n\s*\);\s*\}/s;
 
-ok(defined $dispatch_body, 'public command_map found in Mediabot.pm');
+ok(defined $dispatch_body, 'public registry handlers found in Mediabot.pm');
 
 $dispatch_body //= '';
 
 my @keys = $dispatch_body =~ /^\s*'?([A-Za-z0-9_]+)'?\s*=>/gm;
 
-ok(@keys > 20, 'public command_map contains command entries');
+ok(@keys > 20, 'public registry handler catalogue contains command entries');
 
 # ---------------------------------------------------------------------------
 # 2. No duplicate keys.
@@ -158,27 +159,27 @@ ok(
 );
 
 ok(
-    scalar($dispatch_body =~ /^\s*features\s*=>\s*sub\s*\{\s*mbFeatures_ctx\(\$ctx\)\s*\}/m),
+    scalar($dispatch_body =~ /^\s*features\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*mbFeatures_ctx\(\$ctx\)\s*\}/m),
     '!features maps to mbFeatures_ctx'
 );
 
 ok(
-    scalar($dispatch_body =~ /^\s*capabilities\s*=>\s*sub\s*\{\s*mbFeatures_ctx\(\$ctx\)\s*\}/m),
+    scalar($dispatch_body =~ /^\s*capabilities\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*mbFeatures_ctx\(\$ctx\)\s*\}/m),
     '!capabilities maps to mbFeatures_ctx'
 );
 
 ok(
-    scalar($dispatch_body =~ /^\s*caps\s*=>\s*sub\s*\{\s*mbFeatures_ctx\(\$ctx\)\s*\}/m),
+    scalar($dispatch_body =~ /^\s*caps\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*mbFeatures_ctx\(\$ctx\)\s*\}/m),
     '!caps maps to mbFeatures_ctx'
 );
 
 ok(
-    scalar($dispatch_body =~ /^\s*observatory\s*=>\s*sub\s*\{\s*mbObservatory_ctx\(\$ctx\)\s*\}/m),
+    scalar($dispatch_body =~ /^\s*observatory\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*mbObservatory_ctx\(\$ctx\)\s*\}/m),
     '!observatory maps to mbObservatory_ctx'
 );
 
 ok(
-    scalar($dispatch_body =~ /^\s*obs\s*=>\s*sub\s*\{\s*mbObservatory_ctx\(\$ctx\)\s*\}/m),
+    scalar($dispatch_body =~ /^\s*obs\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*mbObservatory_ctx\(\$ctx\)\s*\}/m),
     '!obs maps to mbObservatory_ctx'
 );
 

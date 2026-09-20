@@ -1,7 +1,8 @@
 # Mediabot command catalogue
 
-MB741 gives every built-in and plugin command one authoritative front door:
-`Mediabot::CommandRegistry`.
+MB741 gave every built-in and plugin command one authoritative name catalogue.
+MB749 completes that convergence: `Mediabot::CommandRegistry` now owns the
+executable handler for every built-in as well.
 
 ## Runtime flow
 
@@ -9,32 +10,30 @@ For a public or private command, Mediabot now:
 
 1. normalizes the command name with the IRC-safe case/accent fold;
 2. resolves the source-scoped entry in `CommandRegistry`;
-3. invokes a direct registry handler, or the frozen adapter named by the
-   entry's `metadata.dispatch` value;
+3. invokes the handler stored in that registry entry;
 4. treats an unregistered name as unknown.
 
-There is no lookup fallback from an unknown registry name into either legacy
-hash. Database-backed public commands remain a separate instance-data path
-after the built-in catalogue lookup.
+There is no compatibility dispatch hash and no second handler lookup.
+Database-backed public commands remain a separate instance-data path after the
+built-in catalogue lookup.
 
 ## Sources and dispatch kinds
 
 | Source | Dispatch metadata | Meaning |
 | --- | --- | --- |
-| `public` | `registry` | Native built-in or plugin handler stored in the registry |
-| `public` | `legacy-public` | Registered built-in implemented by the frozen public adapter |
-| `private` | `legacy-private` | Registered built-in implemented by the frozen private adapter |
+| `public` | `registry` | Built-in handler stored in the registry |
+| `private` | `registry` | Built-in handler stored in the registry |
+| `public` | `plugin-v3` | Mounted plugin handler stored in the registry |
 
-The catalogue currently contains 238 public and 94 private built-ins. The four
-existing native public handlers are `version`, `uptime`, `help` and `commands`.
-All other historical handlers keep their behavior through an explicit adapter
-entry.
+The catalogue currently contains 238 public and 94 private built-ins, all with
+CODE handlers. The compatibility exports `legacy_public_adapter_names()` and
+`legacy_private_adapter_names()` remain for out-of-tree tooling but return
+empty lists.
 
 ## Adding a command
 
-A new built-in command must be added as a direct registry definition. It must
-not be appended to `%command_map`, `%command_table`, or either frozen adapter
-allow-list in `Mediabot::BuiltinCommandCatalog`.
+A new built-in command must be added to `Mediabot::BuiltinCommandCatalog` and
+to the corresponding registry-native handler catalogue in `Mediabot.pm`.
 
 The definition owns its canonical name, source, handler and metadata. Add the
 matching internal help entry and focused tests. A plugin uses the same registry
@@ -47,18 +46,20 @@ perl tools/mb_architecture_inventory.pl \
   --check docs/generated/COMMAND_INVENTORY.md
 ```
 
-The tool fails closed when a historical table drifts from its frozen
-allow-list. Regenerate the Markdown only when the source change is intentional
-and already covered by tests.
+The tool fails closed when a handler catalogue drifts from its declared names.
+Regenerate the Markdown only when the source change is intentional and already
+covered by tests.
 
 ## Migration and rollback
 
-Legacy handlers may be migrated one at a time. Move the implementation into a
-direct registry handler, change that catalogue entry's dispatch metadata to
-`registry`, then remove the corresponding adapter and frozen allow-list entry
-in the same tested change.
+An eligible public built-in may still be shadowed by an official v3 package
+through the named `legacy-public-fallback` protocol. The name is retained for
+manifest compatibility, but MB749 captures the previous registry handler at
+mount time: disabled, `off` and `observe` call that saved CODE reference, and
+unload restores the exact registry entry. The main dispatcher knows nothing
+about migration fallback.
 
-During MB741 deployment, rollback restores the complete previous source set;
+During MB749 deployment, rollback restores the complete previous source set;
 the database and private configuration are untouched. Runtime validation must
 confirm exact registry counts, syntax, focused dispatch tests, the fast lane,
 service readiness and IRC reconnection before promotion.

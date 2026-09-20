@@ -26,9 +26,10 @@ return sub {
 
     my $src = _slurp_chanlist_aliases(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
 
-    my $chanlist_count = () = $src =~ /^\s*chanlist\s*=>\s*sub\s*\{\s*channelList_ctx\(\$ctx\)\s*\},/mg;
-    my $channels_count = () = $src =~ /^\s*channels\s*=>\s*sub\s*\{\s*channelList_ctx\(\$ctx\)\s*\},/mg;
-    my $channellist_count = () = $src =~ /^\s*channellist\s*=>\s*sub\s*\{\s*channelList_ctx\(\$ctx\)\s*\},/mg;
+    my $handler = qr/sub\s*\{\s*my \(\$ctx\) = \@_;\s*channelList_ctx\(\$ctx\)\s*\}/;
+    my $chanlist_count = () = $src =~ /^\s*chanlist\s*=>\s*$handler,/mg;
+    my $channels_count = () = $src =~ /^\s*channels\s*=>\s*$handler,/mg;
+    my $channellist_count = () = $src =~ /^\s*channellist\s*=>\s*$handler,/mg;
 
     $assert->ok(
         $chanlist_count >= 1,
@@ -46,12 +47,12 @@ return sub {
     );
 
     $assert->ok(
-        $src =~ /^\s*channels\s*=>\s*sub\s*\{\s*channelList_ctx\(\$ctx\)\s*\},/m,
+        $src =~ /^\s*channels\s*=>\s*$handler,/m,
         'channels dispatches to channelList_ctx'
     );
 
     $assert->ok(
-        $src =~ /^\s*channellist\s*=>\s*sub\s*\{\s*channelList_ctx\(\$ctx\)\s*\},/m,
+        $src =~ /^\s*channellist\s*=>\s*$handler,/m,
         'channellist dispatches to channelList_ctx'
     );
 };

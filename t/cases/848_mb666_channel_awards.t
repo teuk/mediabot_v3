@@ -219,8 +219,8 @@ return sub {
     $assert->ok(index($awards_src, q{$period !~ /\A(?:7d|30d)\z/}) >= 0,
         'mb666-848: awards accepts only the reviewed 7d/30d windows');
     $assert->like($mb,
-        qr/awards\s*=>\s*sub\s*\{\s*Mediabot::CommandAsync::run_ctx_async\(\$ctx->bot,\s*\$ctx,\s*'awards'/s,
-        'mb666-848: public awards dispatch uses CommandAsync');
+        qr/awards\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*Mediabot::CommandAsync::run_ctx_async\(\$ctx->bot,\s*\$ctx,\s*'awards'/s,
+        'mb666-848: public awards registry handler uses CommandAsync');
     $assert->like($mb, qr/^awards\|awards \[7d\|30d\]\|public\|/m,
         'mb666-848: public help documents the strict period contract');
     $assert->like($hp, qr/^\s*awards\s*=>\s*20,/m,

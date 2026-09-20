@@ -51,13 +51,14 @@ return sub {
                   local $/; <$fh> };
     my $aliases = 0;
     for my $alias (qw(actualites actu news)) {
-        $aliases++ if $mb =~ /^\s+\Q$alias\E\s+=> sub \{ Mediabot::CommandAsync::run_ctx_async/m;
+        $aliases++ if $mb =~ /^\s+\Q$alias\E\s+=>\s+sub\s+\{\s+my \(\$ctx\) = \@_;\s+Mediabot::CommandAsync::run_ctx_async/m;
     }
     $assert->is($aliases, 3, 'mb613-799: les alias ascii sont routes');
     # mb614: la forme accentuee n'est plus une CLE (elle ne pouvait pas
     # matcher : « use utf8 » cote source, octets utf-8 cote IRC) — elle
     # atteint la table par le repliement. Voir le test 797.
-    $assert->like($mb, qr/^\s+actualite\s+=> sub \{ Mediabot::CommandAsync::run_ctx_async/m,
+    $assert->like($mb,
+        qr/^\s+actualite\s+=>\s+sub\s+\{\s+my \(\$ctx\) = \@_;\s+Mediabot::CommandAsync::run_ctx_async/m,
         'mb613-799: la forme singuliere est routee');
     $assert->is(Mediabot::_fold_command_name("actualit\xc3\xa9s"), 'actualites',
         'mb613-799: la forme accentuee y arrive par repliement');

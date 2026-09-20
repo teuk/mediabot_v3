@@ -46,9 +46,9 @@ my $case = sub {
     $assert->($idx_ctx >= 0 && $idx_cmd > $idx_ctx && $idx_event > $idx_cmd,
         'event is emitted after Context and Command object are ready');
     $assert->($idx_reg > $idx_event,
-        'event is emitted before catalogue/adapter dispatch');
+        'event is emitted before registry-native dispatch');
     $assert->($public =~ /if \(my \$entry = \$self->commands->command_for\(\$cmd, 'public'\)\)/,
-        'authoritative catalogue dispatch exists after event');
+        'authoritative registry dispatch exists after event');
     $assert->($public !~ /if \(my \$handler = \$command_map\{\$cmd\}\)/,
         'no unregistered legacy fallback exists after event');
 

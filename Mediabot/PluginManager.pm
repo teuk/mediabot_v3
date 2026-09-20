@@ -1495,14 +1495,18 @@ sub _mount_v3_commands {
         my $method = $spec->{handler};
         my $migration = $spec->{migration} // '';
         my $previous;
+        my $fallback_handler;
         my $ok = eval {
             if ($migration eq 'legacy-public-fallback') {
                 $previous = $registry->command_for($command, $source);
-                die "migration target is not a frozen legacy public adapter\n"
+                die "migration target is not a registry-native migratable public built-in\n"
                     unless $previous
                         && ($previous->{metadata}{builtin} // 0)
-                        && ($previous->{metadata}{dispatch} // '') eq 'legacy-public'
+                        && ($previous->{metadata}{dispatch} // '') eq 'registry'
+                        && ($previous->{metadata}{migration_fallback} // 0)
+                        && ref($previous->{handler}) eq 'CODE'
                         && !defined($previous->{plugin});
+                $fallback_handler = $previous->{handler};
             }
             $registry->register_command(
                 name        => $command,
@@ -1518,10 +1522,9 @@ sub _mount_v3_commands {
                 },
                 replace     => $migration ? 1 : 0,
                 handler     => sub {
-                    my ($ctx, $legacy_fallback) = @_;
-                    my $fallback = $migration
-                        && ref($legacy_fallback) eq 'CODE'
-                        ? $legacy_fallback : undef;
+                    my ($ctx) = @_;
+                    my $fallback = $migration && $fallback_handler
+                        ? sub { $fallback_handler->($ctx) } : undef;
                     return $fallback ? $fallback->() : undef
                         unless $self->is_enabled($key);
 

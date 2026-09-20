@@ -133,15 +133,15 @@ like($legacy_instruction, qr/Be useful[.] Be kind[.]/,
     'surrounding configured prompt text survives legacy cleanup');
 
 my $main = _slurp_1060('Mediabot/Mediabot.pm');
-like($main, qr/tellme\s*=>\s*sub\s*\{\s*chatGPT_ctx\(\$ctx\)/,
+like($main, qr/tellme\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*chatGPT_ctx\(\$ctx\)/,
     'canonical tellme command remains wired');
-like($main, qr/chatgpt\s*=>\s*sub\s*\{\s*chatGPT_ctx\(\$ctx\)/,
+like($main, qr/chatgpt\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*chatGPT_ctx\(\$ctx\)/,
     '!chatgpt is an alias of tellme');
-like($main, qr/ai\s*=>\s*sub\s*\{\s*claude_ctx\(\$ctx\)/,
+like($main, qr/ai\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*claude_ctx\(\$ctx\)/,
     'canonical ai command remains wired');
-like($main, qr/claude\s*=>\s*sub\s*\{\s*claude_ctx\(\$ctx\)/,
+like($main, qr/claude\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*claude_ctx\(\$ctx\)/,
     '!claude is an alias of ai');
-like($main, qr/gemini\s*=>\s*sub\s*\{\s*gemini_ctx\(\$ctx\)/,
+like($main, qr/gemini\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*gemini_ctx\(\$ctx\)/,
     'canonical gemini command remains wired');
 
 my $claude = _slurp_1060('Mediabot/External/Claude.pm');

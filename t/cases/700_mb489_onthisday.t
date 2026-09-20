@@ -143,8 +143,12 @@ return sub {
             'utilise la convention event_type');
 
         my $med = _slurp_700(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
-        $assert->like($med, qr/onthisday\s*=>\s*sub\s*\{\s*mbOnThisDay_ctx/, 'onthisday dans le dispatch');
-        $assert->like($med, qr/otd\s*=>\s*sub\s*\{\s*mbOnThisDay_ctx/, 'alias otd dans le dispatch');
+        $assert->like($med,
+            qr/onthisday\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*mbOnThisDay_ctx/,
+            'onthisday dans le registre');
+        $assert->like($med,
+            qr/otd\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*mbOnThisDay_ctx/,
+            'alias otd dans le registre');
         $assert->like($med, qr/^onthisday\|onthisday \[MM-DD\]\|public/m, 'onthisday documenté');
         $assert->like($med, qr/\+OnThisDay\b/, 'chanset OnThisDay documenté');
 

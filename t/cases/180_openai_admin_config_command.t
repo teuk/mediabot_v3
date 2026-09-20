@@ -111,8 +111,8 @@ return sub {
 
     $assert->like(
         $main,
-        qr/openai\s+=> sub \{ openai_ctx\(\$ctx\) \}/,
-        'Mediabot dispatch exposes openai command'
+        qr/openai\s+=>\s+sub\s+\{\s+my \(\$ctx\) = \@_;\s+openai_ctx\(\$ctx\)\s+\}/,
+        'registry-native handler exposes openai command'
     );
 
     $assert->like(

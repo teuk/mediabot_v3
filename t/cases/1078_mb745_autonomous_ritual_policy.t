@@ -52,7 +52,10 @@ return sub {
     for my $name (qw(8ball abbrev choose flip morse roll)) {
         $bot->{registry}->register_command(
             name => $name, source => 'public', handler => sub { 1 },
-            metadata => { builtin => 1, dispatch => 'legacy-public' });
+            metadata => {
+                builtin => 1, dispatch => 'registry',
+                migration_fallback => 1,
+            });
     }
     my $manager = Mediabot::PluginManager->new(
         bot => $bot, plugin_dir => 'plugins');

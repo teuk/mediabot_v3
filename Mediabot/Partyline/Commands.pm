@@ -886,7 +886,7 @@ sub _cmd_plugins {
             };
             if (!$entry) {
                 (my $err = $@ || 'unknown error') =~ s/\s+\z//;
-                $stream->write("API v3 reload failed; historical command adapters are active: "
+                $stream->write("API v3 reload failed; saved built-in handlers are active: "
                     . _plugin_info_text($err, 160) . "\r\n");
                 return;
             }
@@ -896,7 +896,7 @@ sub _cmd_plugins {
                     my $err = $@ || 'activation failed';
                     $pm->unregister_plugin($target);
                     $err =~ s/\s+\z//;
-                    $stream->write("API v3 reload activation failed; historical command adapters are active: "
+                    $stream->write("API v3 reload activation failed; saved built-in handlers are active: "
                         . _plugin_info_text($err, 150) . "\r\n");
                     return;
                 }

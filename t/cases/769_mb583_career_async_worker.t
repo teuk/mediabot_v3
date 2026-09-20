@@ -127,8 +127,9 @@ return sub {
             "mb583-769: $cmd passe par le worker async");
     }
     for my $cmd (qw(last seen)) {
-        $assert->ok($med !~ /^\s*\Q$cmd\E\s*=>\s*sub\s*\{\s*Mediabot::CommandAsync/m,
-            "mb583-769: $cmd reste synchrone (LIMIT indexe)");
+        $assert->like($med,
+            qr/^\s*\Q$cmd\E\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*(?!Mediabot::CommandAsync)/m,
+            "mb583-769: $cmd reste synchrone dans le registre (LIMIT indexe)");
     }
     $assert->like($med, qr/^use Mediabot::CommandAsync;/m,
         'mb583-769: module charge par Mediabot.pm');

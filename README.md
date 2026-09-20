@@ -279,7 +279,7 @@ Documentation:
 - [Quote Reads v3 pilot](docs/QUOTE_READ_V3_PILOT.md) — observe-first migration and exact rollback for the first database-backed commands;
 - [Plugin API v3](docs/PLUGIN_API_V3.md) — strict packages, typed channel policy, versioned events, owned jobs, shared HTTPS/repository services and approved quote reads;
 - [Short Content v3 pilot](docs/SHORT_CONTENT_V3_PILOT.md) — observe-first proof and rollback for the first external-content package;
-- [Command catalogue](docs/COMMAND_CATALOGUE.md) — MB741 registry authority and frozen adapter rules;
+- [Command catalogue](docs/COMMAND_CATALOGUE.md) — MB749 registry-native built-in dispatch and migration rollback rules;
 - [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands);
 - [Private and administrative commands](https://github.com/teuk/mediabot_v3/wiki/Private-and-admin-commands);
 - [Access levels](https://github.com/teuk/mediabot_v3/wiki/Access-levels);

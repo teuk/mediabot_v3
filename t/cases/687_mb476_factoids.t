@@ -235,8 +235,12 @@ return sub {
         $assert->like($uc, qr/^\s*mbWhatis_ctx\s*$/m, 'mbWhatis_ctx exporté');
 
         my $med = _slurp_687(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
-        $assert->like($med, qr/learn\s*=>\s*sub\s*\{\s*mbLearn_ctx/, 'learn dans le dispatch');
-        $assert->like($med, qr/whatis\s*=>\s*sub\s*\{\s*mbWhatis_ctx/, 'whatis dans le dispatch');
+        $assert->like($med,
+            qr/learn\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*mbLearn_ctx/,
+            'learn dans le registre');
+        $assert->like($med,
+            qr/whatis\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*mbWhatis_ctx/,
+            'whatis dans le registre');
         $assert->like($med, qr/^learn\|learn <keyword>/m, 'learn documenté');
         $assert->like($med, qr/\+Factoids\b/, 'chanset Factoids documenté');
 

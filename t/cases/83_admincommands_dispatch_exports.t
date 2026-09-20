@@ -118,8 +118,8 @@ return sub {
     while (my ($cmd, $func) = each %public_radio_dispatch) {
         $assert->like(
             $core,
-            qr/^\s*\Q$cmd\E\s*=>\s*sub\s*\{\s*_dispatch_radio\(\$ctx,\s*\$cmd\)\s*\},/m,
-            "public dispatch $cmd routes through _dispatch_radio"
+            qr/^\s*\Q$cmd\E\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*_dispatch_radio\(\$ctx,\s*\$ctx->command\)\s*\},/m,
+            "public registry handler $cmd routes through _dispatch_radio"
         );
         $assert->like(
             $core,
@@ -130,8 +130,8 @@ return sub {
 
     $assert->like(
         $core,
-        qr/^\s*update\s*=>\s*sub\s*\{\s*update_ctx\(\$ctx\)\s*\},/m,
-        'public dispatch update routes to update_ctx'
+        qr/^\s*update\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*update_ctx\(\$ctx\)\s*\},/m,
+        'public registry handler update routes to update_ctx'
     );
 
     my %private_dispatch = (
@@ -144,8 +144,8 @@ return sub {
     while (my ($cmd, $func) = each %private_dispatch) {
         $assert->like(
             $core,
-            qr/^\s*\Q$cmd\E\s*=>\s*sub\s*\{\s*\Q$func\E\(\$ctx\)\s*\},/m,
-            "private dispatch $cmd routes to $func"
+            qr/^\s*\Q$cmd\E\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*\Q$func\E\(\$ctx\)\s*\},/m,
+            "private registry handler $cmd routes to $func"
         );
     }
 };

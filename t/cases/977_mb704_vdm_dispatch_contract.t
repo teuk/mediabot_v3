@@ -19,8 +19,9 @@ return sub {
 
     $assert->like($mainmod, qr/use Mediabot::VDM::Runtime \(\);/,
         'mb704-977: core command runtime imports the VDM facade explicitly');
-    $assert->like($mainmod, qr/\bvdm\s*=>\s*sub\s*\{\s*Mediabot::VDM::Runtime::mbVdm_ctx\(\$ctx\)/s,
-        'mb704-977: public command map wires vdm to the dedicated runtime');
+    $assert->like($mainmod,
+        qr/\bvdm\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*Mediabot::VDM::Runtime::mbVdm_ctx\(\$ctx\)/s,
+        'mb704-977: public registry handler wires vdm to the dedicated runtime');
     $assert->like($mainmod, qr/^vdm\|vdm\|public\|Post one VDM/m,
         'mb704-977: internal help exposes the manual VDM command');
 

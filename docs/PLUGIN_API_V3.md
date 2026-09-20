@@ -257,7 +257,7 @@ or driver diagnostic.
 MB748 ships `quotes-v3`, disabled and channel-off by default. It declares only
 `quotecount`, `topquote` and `halloffame`, each through
 `legacy-public-fallback`. In `observe`, the plugin performs the bounded read
-and suppresses its reply while the historical adapter remains visible. In
+and suppresses its reply while the saved built-in registry handler remains visible. In
 `on`, the plugin owns those three commands for the selected channel. Switching
 the channel to `off`, disabling the package or unloading it restores the old
 path; unload reinstates the exact saved registry handlers.
@@ -361,12 +361,14 @@ The Owner-operated flow is also available on Partyline through `discoverv3`,
 ## Reversible built-in migration
 
 An official command may declare `"migration": "legacy-public-fallback"` only
-for a public level-0 command that currently resolves to a frozen built-in
-adapter. The runtime rejects every other replacement.
+for a public level-0 command that currently resolves to an eligible built-in
+registry entry. The protocol name is retained for manifest compatibility; the
+main dispatcher no longer owns a legacy table. The runtime rejects every other
+replacement.
 
-- disabled or `off`: the historical adapter answers;
+- disabled or `off`: the saved built-in registry handler answers;
 - `observe`: the v3 handler runs with output suppressed, then the historical
-  adapter answers;
+  built-in handler answers;
 - `on`: the v3 handler owns the command in that channel;
 - unload or failed multi-command mount: the exact registry entry is restored.
 

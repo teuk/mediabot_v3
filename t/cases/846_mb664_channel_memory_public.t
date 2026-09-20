@@ -53,8 +53,8 @@ return sub {
 
     $assert->like(
         $mb,
-        qr/memory\s*=>\s*sub\s*\{\s*Mediabot::CommandAsync::run_ctx_async\(\$ctx->bot,\s*\$ctx,\s*'memory',\s*sub\s*\{\s*mbMemory_ctx\(\$ctx\)\s*\}\s*\)\s*\}/s,
-        'mb664-846: memory dispatch uses CommandAsync'
+        qr/memory\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*Mediabot::CommandAsync::run_ctx_async\(\$ctx->bot,\s*\$ctx,\s*'memory',\s*sub\s*\{\s*mbMemory_ctx\(\$ctx\)\s*\}\s*\)\s*\}/s,
+        'mb664-846: memory registry handler uses CommandAsync'
     );
     $assert->like(
         $mb,

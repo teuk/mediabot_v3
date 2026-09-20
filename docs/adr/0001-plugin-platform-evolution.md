@@ -48,7 +48,9 @@ Costs:
 - API v2 and v3 coexist during the migration;
 - facades must be designed before coupled features can move;
 - parity and rollback tests are required for every extraction;
-- some duplication remains until MB749 retires compatibility dispatch.
+- registry names and executable handler catalogues must remain exactly in sync;
+  the deterministic inventory enforces this after MB749 retires compatibility
+  dispatch.
 
 ## Rejected alternatives
 
@@ -121,3 +123,12 @@ for an explicit `on` channel, and restores the exact adapter on unload. The
 core adds a bounded escaped author-prefix count mode for historical parity.
 The mixed `q` and `quote` dispatch remains untouched until a separate decision
 defines quote-write authorization and rollback.
+
+MB749 closes the compatibility-dispatch phase. All 238 public and 94 private
+built-ins carry executable CODE handlers in `CommandRegistry`; public and
+private dispatch call only the resolved registry entry. The duplicate
+`%command_map` and `%command_table` paths are removed. The manifest protocol
+name `legacy-public-fallback` remains stable for MB745/MB748 packages, but its
+implementation now captures the eligible built-in registry handler at mount
+time and restores the exact entry on unload. This changes no command output,
+activation policy, private configuration or database state.

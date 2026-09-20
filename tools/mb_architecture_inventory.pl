@@ -14,8 +14,6 @@ use Mediabot::BuiltinCommandCatalog qw(
     public_command_names
     private_command_names
     direct_public_command_names
-    legacy_public_adapter_names
-    legacy_private_adapter_names
 );
 
 binmode STDOUT, ':encoding(UTF-8)';
@@ -46,24 +44,21 @@ my ($help_block) = $source =~
     /my\s+\$raw\s*=\s*<<'MEDIABOT_INTERNAL_HELP';\n(.*?)\nMEDIABOT_INTERNAL_HELP/s;
 die "cannot locate MEDIABOT_INTERNAL_HELP\n" unless defined $help_block;
 
-my $public_sub  = _sub_body($source, 'mbCommandPublic');
-my $private_sub = _sub_body($source, 'mbCommandPrivate');
+my $public_sub  = _sub_body($source, '_builtin_public_command_handlers');
+my $private_sub = _sub_body($source, '_builtin_private_command_handlers');
 
-die "cannot locate mbCommandPublic\n" unless defined $public_sub;
-die "cannot locate mbCommandPrivate\n" unless defined $private_sub;
+die "cannot locate _builtin_public_command_handlers\n" unless defined $public_sub;
+die "cannot locate _builtin_private_command_handlers\n" unless defined $private_sub;
 
-my %public_dispatch  = _dispatch_commands($public_sub,  'command_map');
-my %private_dispatch = _dispatch_commands($private_sub, 'command_table');
+my %public_handlers  = _handler_commands($public_sub);
+my %private_handlers = _handler_commands($private_sub);
 my %registry_public = map { $_ => 1 } public_command_names();
 my %registry_private = map { $_ => 1 } private_command_names();
 my %direct_public = map { $_ => 1 } direct_public_command_names();
-my %legacy_public = map { $_ => 1 } legacy_public_adapter_names();
-my %legacy_private = map { $_ => 1 } legacy_private_adapter_names();
 
-_assert_same_keys('public legacy adapter freeze', \%public_dispatch, \%legacy_public);
-_assert_same_keys('private legacy adapter freeze', \%private_dispatch, \%legacy_private);
-_assert_subset('public catalogue', \%legacy_public, \%registry_public);
-_assert_subset('private catalogue', \%legacy_private, \%registry_private);
+_assert_same_keys('public registry handler catalogue', \%public_handlers, \%registry_public);
+_assert_same_keys('private registry handler catalogue', \%private_handlers, \%registry_private);
+_assert_same_keys('direct public registry catalogue', \%direct_public, \%registry_public);
 
 my %known_level = map { lc($_) => 1 } (
     'public', 'private', 'admin', 'owner', 'master', 'authorized',
@@ -96,10 +91,8 @@ for my $line (split /\n/, $help_block) {
     }
 
     my @surfaces;
-    push @surfaces, 'registry-public'        if $registry_public{$key};
-    push @surfaces, 'registry-private'       if $registry_private{$key};
-    push @surfaces, 'legacy-public-adapter'  if $public_dispatch{$key};
-    push @surfaces, 'legacy-private-adapter' if $private_dispatch{$key};
+    push @surfaces, 'registry-public'  if $registry_public{$key};
+    push @surfaces, 'registry-private' if $registry_private{$key};
     push @surfaces, 'help-only'      unless @surfaces;
 
     $entries{$key} = {
@@ -119,11 +112,11 @@ my @help_only = sort grep {
 
 my @undocumented_public = sort grep {
     !exists $entries{$_}
-} keys %public_dispatch;
+} keys %public_handlers;
 
 my @undocumented_private = sort grep {
     !exists $entries{$_}
-} keys %private_dispatch;
+} keys %private_handlers;
 
 my $markdown = '';
 $markdown .= "# Built-in command inventory\n\n";
@@ -136,18 +129,18 @@ $markdown .= "| Internal help entries | " . scalar(keys %entries) . " |\n";
 $markdown .= "| Registered public built-ins | " . scalar(keys %registry_public) . " |\n";
 $markdown .= "| Registered private built-ins | " . scalar(keys %registry_private) . " |\n";
 $markdown .= "| Direct public registry handlers | " . scalar(keys %direct_public) . " |\n";
-$markdown .= "| Frozen public legacy adapters | " . scalar(keys %public_dispatch) . " |\n";
-$markdown .= "| Frozen private legacy adapters | " . scalar(keys %private_dispatch) . " |\n";
+$markdown .= "| Direct private registry handlers | " . scalar(keys %private_handlers) . " |\n";
+$markdown .= "| Compatibility dispatch tables | 0 |\n";
 $markdown .= "| Help parser anomalies | " . scalar(@parser_anomaly) . " |\n";
 $markdown .= "| Help-only entries | " . scalar(@help_only) . " |\n";
-$markdown .= "| Undocumented public adapters | " . scalar(@undocumented_public) . " |\n";
-$markdown .= "| Undocumented private adapters | " . scalar(@undocumented_private) . " |\n\n";
+$markdown .= "| Undocumented public handlers | " . scalar(@undocumented_public) . " |\n";
+$markdown .= "| Undocumented private handlers | " . scalar(@undocumented_private) . " |\n\n";
 
 $markdown .= "`CommandRegistry` is the authority for every built-in command. "
-    . "`legacy-public-adapter` and `legacy-private-adapter` identify frozen "
-    . "implementation tables that can only be reached through registered catalogue "
-    . "metadata. Adding a command directly to either adapter makes this generator "
-    . "fail. Database-backed dynamic commands are instance data and are intentionally "
+    . "Each catalogue entry stores its executable handler, so dispatch performs no "
+    . "second lookup in a compatibility hash. Adding or removing a handler without "
+    . "updating the catalogue makes this generator fail. Database-backed dynamic "
+    . "commands are instance data and are intentionally "
     . "excluded.\n\n";
 
 if (@parser_anomaly) {
@@ -237,13 +230,10 @@ sub _sub_body {
     return undef;
 }
 
-sub _dispatch_commands {
-    my ($body, $table_name) = @_;
-    my ($table) = $body =~ /my\s+%\Q$table_name\E\s*=\s*\((.*?)\n\s*\);/s;
-    die "cannot locate %$table_name\n" unless defined $table;
-
+sub _handler_commands {
+    my ($body) = @_;
     my %commands;
-    while ($table =~ /^\s*'?([a-z0-9_]+)'?\s*=>\s*sub\b/mg) {
+    while ($body =~ /^\s*'?([a-z0-9_]+)'?\s*=>\s*sub\b/mg) {
         $commands{$1} = 1;
     }
     return %commands;
@@ -258,13 +248,6 @@ sub _assert_same_keys {
 
     die "$label drift: added=[" . join(',', @added) . "] missing=["
         . join(',', @missing) . "]\n";
-}
-
-sub _assert_subset {
-    my ($label, $subset, $superset) = @_;
-    my @missing = sort grep { !$superset->{$_} } keys %$subset;
-    return 1 unless @missing;
-    die "$label omits frozen adapters: " . join(',', @missing) . "\n";
 }
 
 sub _resolve_output_path {

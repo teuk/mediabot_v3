@@ -171,8 +171,9 @@ return sub {
         $assert->like($uc, qr/^\s*mbRecap_ctx\s*$/m, 'mbRecap_ctx exporté');
 
         my $med = _slurp_683(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
-        $assert->like($med, qr/recap\s*=>\s*sub\s*\{\s*mbRecap_ctx/,
-            'recap enregistré dans le dispatch public');
+        $assert->like($med,
+            qr/recap\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*mbRecap_ctx/,
+            'recap enregistré dans le registre public');
         $assert->like($med, qr/recap\|recap.*\|public\|/,
             'recap documenté dans les métadonnées help');
 

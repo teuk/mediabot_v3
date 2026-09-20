@@ -1,5 +1,5 @@
 package Mediabot;
- 
+
 use strict;
 use warnings;
 # mb315-C1: 'use diagnostics' retiré. Pragma de debug coûteux en prod (charge
@@ -111,9 +111,8 @@ sub new {
     # explicitly gated reply/notice/log actions used by ScriptDryRun apply mode.
     $self->{script_action_runner} = Mediabot::ScriptActionRunner->new(bot => $self);
 
-    # MB741: every built-in command is catalogued before plugins load. The
-    # historical dispatch hashes remain implementation adapters, never an
-    # alternate command-discovery path.
+    # MB749: every built-in command and executable handler is registered before
+    # plugins load. There is no secondary public/private compatibility dispatch.
     $self->_register_builtin_command_catalogue();
 
     # Minimal logging setup
@@ -670,8 +669,8 @@ sub maybe_request_lusers {
 
 
 # Register the complete built-in public/private catalogue in CommandRegistry.
-# Four low-risk commands already have native registry handlers; the remaining
-# entries name frozen legacy adapters that are resolved only by the dispatcher.
+# MB749 gives every entry its executable CODE handler here; command dispatch no
+# longer performs a second lookup in historical public/private hashes.
 sub _register_builtin_command_catalogue {
     my ($self) = @_;
 
@@ -681,24 +680,9 @@ sub _register_builtin_command_catalogue {
     return 0 unless $registry;
 
     my %help = _mbHelpInternalCommands();
-    my %direct_public_handler = (
-        version => sub {
-            my ($ctx) = @_;
-            versionCheck($ctx);
-        },
-        uptime => sub {
-            my ($ctx) = @_;
-            mbUptime_ctx($ctx);
-        },
-        help => sub {
-            my ($ctx) = @_;
-            mbHelp_ctx($ctx);
-        },
-        commands => sub {
-            my ($ctx) = @_;
-            $ctx->{args} = [ 'commands' ];
-            mbHelp_ctx($ctx);
-        },
+    my %handler_for = (
+        public  => { _builtin_public_command_handlers() },
+        private => { _builtin_private_command_handlers() },
     );
 
     for my $definition (catalogue_entries()) {
@@ -707,17 +691,14 @@ sub _register_builtin_command_catalogue {
         my $dispatch = $definition->{dispatch};
         my $help     = $help{$name} || {};
 
-        my $handler = $direct_public_handler{$name};
-        if ($dispatch ne 'registry') {
-            $handler = sub {
-                die "Built-in adapter '$source/$name' must be invoked through Mediabot dispatch\n";
-            };
-        }
+        my $handler = $handler_for{$source}{$name};
+        die "Missing registry-native built-in handler '$source/$name'\n"
+            unless ref($handler) eq 'CODE';
 
         $registry->register_command(
             name        => $name,
             source      => $source,
-            category    => $dispatch eq 'registry' ? 'core' : 'builtin-adapter',
+            category    => 'core',
             description => $help->{desc} // 'Built-in Mediabot command',
             level       => $help->{level},
             handler     => $handler,
@@ -725,6 +706,8 @@ sub _register_builtin_command_catalogue {
                 builtin  => 1,
                 dispatch => $dispatch,
                 syntax   => $help->{syntax} // $name,
+                ($definition->{migration_fallback}
+                    ? (migration_fallback => 1) : ()),
             },
         );
     }
@@ -851,11 +834,11 @@ sub reload_logger_from_config {
         $self->my_log_error("Failed to recreate logger from config: $err");
         return;
     };
-    
+
     if ($self->{logger} && $self->{logger}->{_console_hooks}) {
         $new_logger->{_console_hooks} = $self->{logger}->{_console_hooks};
     }
-    
+
     $self->{logger} = $new_logger;
     $self->{logger}->log(1, "Logger reloaded from config (debug=$debug_level, logfile=$log_path)");
 
@@ -867,7 +850,7 @@ sub rebuild_channel_cache {
 
     $self->{logger}->log(1, "Rebuilding channel cache from database");
     $self->{channels} = {};
-    
+
     # Populate channels from DB
 	$self->populateChannels();
 
@@ -1676,7 +1659,7 @@ sub _log_configure_hint {
     $self->{logger}->log(1, "Run ./configure at first use or ./configure -s to set it properly");
 }
 
-# Get server hostname 
+# Get server hostname
 sub getServerHostname {
 	my $self = shift;
 	return $self->{server_hostname};
@@ -2008,6 +1991,326 @@ sub _fold_command_name {
     return $text;
 }
 
+# MB749: executable public built-ins live in the registry itself.
+# Each closure receives the current Mediabot::Context explicitly.
+sub _builtin_public_command_handlers {
+    return (
+        die          => sub { my ($ctx) = @_; mbQuit_ctx($ctx) },
+        nick         => sub { my ($ctx) = @_; mbChangeNick_ctx($ctx) },
+        addtimer     => sub { my ($ctx) = @_; mbAddTimer_ctx($ctx) },
+        remtimer     => sub { my ($ctx) = @_; mbRemTimer_ctx($ctx) },
+        timers       => sub { my ($ctx) = @_; mbTimers_ctx($ctx) },
+        msg          => sub { my ($ctx) = @_; msgCmd_ctx($ctx) },
+        say          => sub { my ($ctx) = @_; sayChannel_ctx($ctx) },
+        act          => sub { my ($ctx) = @_; actChannel_ctx($ctx) },
+        cstat        => sub { my ($ctx) = @_; userCstat_ctx($ctx) },
+        status       => sub { my ($ctx) = @_; mbStatus_ctx($ctx) },
+        echo         => sub { my ($ctx) = @_; mbEcho($ctx) },
+        adduser      => sub { my ($ctx) = @_; addUser_ctx($ctx) },
+        useradd      => sub { my ($ctx) = @_; addUser_ctx($ctx) }, # legacy alias
+        deluser      => sub { my ($ctx) = @_; delUser_ctx($ctx) },
+        users        => sub { my ($ctx) = @_; userStats_ctx($ctx) },
+        userinfo     => sub { my ($ctx) = @_; userInfo_ctx($ctx) },
+        addhost      => sub { my ($ctx) = @_; addUserHost_ctx($ctx) },
+        addchan      => sub { my ($ctx) = @_; addChannel_ctx($ctx) },
+        chanset      => sub { my ($ctx) = @_; channelSet_ctx($ctx) },
+        purge        => sub { my ($ctx) = @_; purgeChannel_ctx($ctx) },
+        part         => sub { my ($ctx) = @_; channelPart_ctx($ctx) },
+        join         => sub { my ($ctx) = @_; channelJoin_ctx($ctx) },
+        add          => sub { my ($ctx) = @_; channelAddUser_ctx($ctx) },
+        del          => sub { my ($ctx) = @_; channelDelUser_ctx($ctx) },
+        modinfo      => sub { my ($ctx) = @_; userModinfo_ctx($ctx) },
+        op           => sub { my ($ctx) = @_; userOpChannel_ctx($ctx) },
+        deop         => sub { my ($ctx) = @_; userDeopChannel_ctx($ctx) },
+        invite       => sub { my ($ctx) = @_; userInviteChannel_ctx($ctx) },
+        voice        => sub { my ($ctx) = @_; userVoiceChannel_ctx($ctx) },
+        devoice      => sub { my ($ctx) = @_; userDevoiceChannel_ctx($ctx) },
+        kick         => sub { my ($ctx) = @_; userKickChannel_ctx($ctx) },
+        ban          => sub { my ($ctx) = @_; channelBan_ctx($ctx) },
+        kickban      => sub { my ($ctx) = @_; channelKickBan_ctx($ctx) },
+        kb           => sub { my ($ctx) = @_; channelKickBan_ctx($ctx) },
+        unban        => sub { my ($ctx) = @_; channelUnban_ctx($ctx) },
+        bans         => sub { my ($ctx) = @_; channelBans_ctx($ctx) },
+        showcommands => sub { my ($ctx) = @_; userShowcommandsChannel_ctx($ctx) },
+        chaninfo     => sub { my ($ctx) = @_; userChannelInfo_ctx($ctx) },
+        chanlist     => sub { my ($ctx) = @_; channelList_ctx($ctx) },
+        channels     => sub { my ($ctx) = @_; channelList_ctx($ctx) },
+        channellist  => sub { my ($ctx) = @_; channelList_ctx($ctx) },
+        whoami       => sub { my ($ctx) = @_; userWhoAmI_ctx($ctx) },
+        auth         => sub { my ($ctx) = @_; userAuthNick_ctx($ctx) },
+        verify       => sub { my ($ctx) = @_; userVerifyNick_ctx($ctx) },
+        access       => sub { my ($ctx) = @_; userAccessChannel_ctx($ctx) },
+        addcmd       => sub { my ($ctx) = @_; mbDbAddCommand_ctx($ctx) },
+        remcmd       => sub { my ($ctx) = @_; mbDbRemCommand_ctx($ctx) },
+        modcmd       => sub { my ($ctx) = @_; mbDbModCommand_ctx($ctx) },
+        mvcmd        => sub { my ($ctx) = @_; mbDbMvCommand_ctx($ctx) },
+        chowncmd     => sub { my ($ctx) = @_; mbChownCommand_ctx($ctx) },
+        showcmd      => sub { my ($ctx) = @_; mbDbShowCommand_ctx($ctx) },
+        chanstatlines => sub { my ($ctx) = @_; channelStatLines_ctx($ctx) },
+        whotalk      => sub { my ($ctx) = @_; whoTalk_ctx($ctx) },
+        whotalks     => sub { my ($ctx) = @_; whoTalk_ctx($ctx) },
+        countcmd     => sub { my ($ctx) = @_; mbCountCommand_ctx($ctx) },
+        topcmd       => sub { my ($ctx) = @_; mbTopCommand_ctx($ctx) },
+        popcmd       => sub { my ($ctx) = @_; mbPopCommand_ctx($ctx) },
+        searchcmd    => sub { my ($ctx) = @_; mbDbSearchCommand_ctx($ctx) },
+        lastcmd      => sub { my ($ctx) = @_; mbLastCommand_ctx($ctx) },
+        owncmd       => sub { my ($ctx) = @_; mbDbOwnersCommand_ctx($ctx) },
+        holdcmd      => sub { my ($ctx) = @_; mbDbHoldCommand_ctx($ctx) },
+        addcatcmd    => sub { my ($ctx) = @_; mbDbAddCategoryCommand_ctx($ctx) },
+        chcatcmd     => sub { my ($ctx) = @_; mbDbChangeCategoryCommand_ctx($ctx) },
+        topsay       => sub { my ($ctx) = @_; userTopSay_ctx($ctx) },
+        checkhostchan => sub { my ($ctx) = @_; mbDbCheckHostnameNickChan_ctx($ctx) },
+        checkhost    => sub { my ($ctx) = @_; mbDbCheckHostnameNick_ctx($ctx) },
+        checknick    => sub { my ($ctx) = @_; mbDbCheckNickHostname_ctx($ctx) },
+        greet        => sub { my ($ctx) = @_; userGreet_ctx($ctx) },
+        nicklist     => sub { my ($ctx) = @_; channelNickList_ctx($ctx) },
+        rnick        => sub { my ($ctx) = @_; randomChannelNick_ctx($ctx) },
+        birthdate    => sub { my ($ctx) = @_; displayBirthDate_ctx($ctx) },
+        colors       => sub { my ($ctx) = @_; mbColors_ctx($ctx) },
+        seen         => sub { my ($ctx) = @_; mbSeen_ctx($ctx) },
+        # mb583-B1: les commandes CARRIERE (scans/GROUP BY sur CHANNEL_LOG
+        # potentiellement enorme) partent en worker forke — la boucle
+        # d'evenements ne gele plus jamais (terrain : « m lb » a fige le bot
+        # 60 s puis MariaDB a tue la requete). Les subs restent INCHANGEES :
+        # l'enfant collecte leurs botPrivmsg/botNotice en intents, le parent
+        # les rejoue (AntiFlood/NoColors/file mb568 s'appliquent au rejeu).
+        # last/seen/quotes restent synchrones : LIMIT indexes, rapides.
+        stats        => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'stats',     sub { mbStats_ctx($ctx) }) },
+        top          => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'top',       sub { mbTop_ctx($ctx) }) },
+        calc         => sub { my ($ctx) = @_; mbCalc_ctx($ctx) },
+        convert      => sub { my ($ctx) = @_; mbConvert_ctx($ctx) },     # mb479: unit conversion
+        '8ball'      => sub { my ($ctx) = @_; mb8ball_ctx($ctx) },
+        remind       => sub { my ($ctx) = @_;
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            if (@a && lc($a[0]) eq 'cancel') {
+                shift @{ $ctx->args };
+                mbRemindCancel_ctx($ctx);
+            } else { mbRemind_ctx($ctx) }
+        },
+        remindlist   => sub { my ($ctx) = @_; mbRemindList_ctx($ctx) },
+        tell         => sub { my ($ctx) = @_; mbRemind_ctx($ctx) },   # mb474: leave a message, delivered when the target returns
+        calclast     => sub { my ($ctx) = @_; mbCalcLast_ctx($ctx) },
+        wordcount    => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'wordcount', sub { mbWordCount_ctx($ctx) }) },
+        alias        => sub { my ($ctx) = @_; mbAlias_ctx($ctx) },
+        streak       => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'streak',    sub { mbStreak_ctx($ctx) }) },
+        slap         => sub { my ($ctx) = @_; mbSlap_ctx($ctx) },
+        karma        => sub { my ($ctx) = @_; mbKarma_ctx($ctx) },
+        karmatop     => sub { my ($ctx) = @_; mbKarmaTop_ctx($ctx) },
+        karmareset   => sub { my ($ctx) = @_; mbKarmaReset_ctx($ctx) },
+        karmadiff    => sub { my ($ctx) = @_; mbKarmaDiff_ctx($ctx) },
+        karmgraph    => sub { my ($ctx) = @_; mbKarmaGraph_ctx($ctx) },
+        triviastop   => sub { my ($ctx) = @_; mbTriviaStop_ctx($ctx) },
+        karmawatch   => sub { my ($ctx) = @_; mbKarmaWatch_ctx($ctx) },
+        remindsnooze => sub { my ($ctx) = @_; mbRemindSnooze_ctx($ctx) },
+        karmainfo    => sub { my ($ctx) = @_; mbKarmaInfo_ctx($ctx) },
+        triviareset  => sub { my ($ctx) = @_; mbTriviaReset_ctx($ctx) },
+        triviatop    => sub { my ($ctx) = @_; mbTriviaTop_ctx($ctx) },
+        pollextend   => sub { my ($ctx) = @_; mbPollExtend_ctx($ctx) },
+        karmahist    => sub { my ($ctx) = @_; mbKarmaHist_ctx($ctx) },
+        roll         => sub { my ($ctx) = @_; mbRoll_ctx($ctx) },
+        flip         => sub { my ($ctx) = @_; mbFlip_ctx($ctx) },
+        choose       => sub { my ($ctx) = @_; mbChoose_ctx($ctx) },
+        morse        => sub { my ($ctx) = @_; mbMorse_ctx($ctx) },
+        abbrev       => sub { my ($ctx) = @_; mbAbbrev_ctx($ctx) },
+        compare      => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'compare',   sub { mbCompare_ctx($ctx) }) },
+        heatmap      => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'heatmap',   sub { mbHeatmap_ctx($ctx) }) },
+        monthstats   => sub { my ($ctx) = @_; mbMonthStats_ctx($ctx) },
+        define       => sub { my ($ctx) = @_; mbDefine_ctx($ctx) },
+        trivia       => sub { my ($ctx) = @_; mbTrivia_ctx($ctx) },
+        triviascore  => sub { my ($ctx) = @_; mbTriviaScore_ctx($ctx) },
+        active       => sub { my ($ctx) = @_; mbActive_ctx($ctx) },
+        when         => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'when',      sub { mbWhen_ctx($ctx) }) },
+        # mb115: système d'achievements + profil + radar
+        achievements => sub { my ($ctx) = @_; mbAchievements_ctx($ctx) },
+        achievs      => sub { my ($ctx) = @_; mbAchievements_ctx($ctx) },   # alias court
+        profil       => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'profil',    sub { mbProfil_ctx($ctx) }) },
+        profile      => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'profil',    sub { mbProfil_ctx($ctx) }) },          # alias en anglais
+        radar        => sub { my ($ctx) = @_; mbRadar_ctx($ctx) },
+
+        # mb613-B1: actualites (Tavily + synthese Claude). Deux appels reseau
+        # a la suite -> worker, comme les commandes de carriere (mb583).
+        # mb614-B1: clés ASCII seulement — 'actualités' et 'actualité' y
+        # arrivent par le repliement de _fold_command_name. Singulier et
+        # pluriel sont acceptés : c'est le même geste.
+        actualites   => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
+        actualite    => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
+        actu         => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
+        news         => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
+        rss          => sub { my ($ctx) = @_; Mediabot::RSS::Commands::mbRss_ctx($ctx) },
+        vdm          => sub { my ($ctx) = @_; Mediabot::VDM::Runtime::mbVdm_ctx($ctx) },
+        dtc          => sub { my ($ctx) = @_; Mediabot::DTC::Commands::dispatch_ctx($ctx) },
+        bashfr       => sub { my ($ctx) = @_; Mediabot::DTC::Commands::dispatch_ctx($ctx) },
+
+        # mb116: dashboard de canal + duel + horoscope
+        dashboard    => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'dashboard', sub { mbDashboard_ctx($ctx) }) },
+        chanstats    => sub { my ($ctx) = @_; mbDashboard_ctx($ctx) },        # alias
+        duel         => sub { my ($ctx) = @_; mbDuel_ctx($ctx) },
+        # mb620-B1: la commande interroge une API -> worker (la facade de
+        # sortie couvre les deux chemins d'appel depuis mb615).
+        horoscope    => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'horoscope', sub { mbHoroscope_ctx($ctx) }) },
+        horo         => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'horoscope', sub { mbHoroscope_ctx($ctx) }) }, # alias court, meme worker
+
+        # mb117: compat + quotegame + mood
+        compat       => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'compat',    sub { mbCompat_ctx($ctx) }) },
+        affinity     => sub { my ($ctx) = @_; mbCompat_ctx($ctx) },           # alias EN
+        quotegame    => sub { my ($ctx) = @_; mbQuotegame_ctx($ctx) },
+        qg           => sub { my ($ctx) = @_; mbQuotegame_ctx($ctx) },        # alias court
+        mood         => sub { my ($ctx) = @_; mbMood_ctx($ctx) },
+        milestone    => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'milestone', sub { mbMilestone_ctx($ctx) }) },
+        milestones   => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'milestone', sub { mbMilestone_ctx($ctx) }) },
+        ambiance     => sub { my ($ctx) = @_; mbMood_ctx($ctx) },             # alias FR
+
+        # mb118: leaderboard + chronos
+        # Keep the historical !top command mapped to mbTop_ctx above.
+        # Leaderboard aliases are !leaderboard and !lb.
+        # mb629-B1: le palmares est reserve aux Administrateurs. La porte est
+        # posee AVANT le fork : un refus ne doit pas couter un worker, et le
+        # message de refus part du parent comme pour toute autre commande de
+        # niveau.
+        leaderboard  => sub { my ($ctx) = @_; $ctx->require_level('Administrator')
+                              && Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'leaderboard', sub { mbLeaderboard_ctx($ctx) }) },
+        lb           => sub { my ($ctx) = @_; $ctx->require_level('Administrator')
+                              && Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'leaderboard', sub { mbLeaderboard_ctx($ctx) }) },      # alias court
+        awards       => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'awards', sub { mbAwards_ctx($ctx) }) }, # mb666
+        yearbook     => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'yearbook', sub { mbYearbook_ctx($ctx) }) }, # mb667
+        chronos      => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },
+        chrono       => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },          # alias court
+        timeline     => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },          # alias EN
+        features     => sub { my ($ctx) = @_; mbFeatures_ctx($ctx) },
+        capabilities => sub { my ($ctx) = @_; mbFeatures_ctx($ctx) },
+        caps         => sub { my ($ctx) = @_; mbFeatures_ctx($ctx) },
+        observatory  => sub { my ($ctx) = @_; mbObservatory_ctx($ctx) },
+        obs          => sub { my ($ctx) = @_; mbObservatory_ctx($ctx) },
+        recap        => sub { my ($ctx) = @_; mbRecap_ctx($ctx) },       # mb472: catch-up summary
+        onthisday    => sub { my ($ctx) = @_; mbOnThisDay_ctx($ctx) },    # mb489: history nostalgia
+        otd          => sub { my ($ctx) = @_; mbOnThisDay_ctx($ctx) },
+        memory       => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'memory', sub { mbMemory_ctx($ctx) }) }, # mb664
+        learn        => sub { my ($ctx) = @_; mbLearn_ctx($ctx) },        # mb476: factoids
+        whatis       => sub { my ($ctx) = @_; mbWhatis_ctx($ctx) },
+        forget       => sub { my ($ctx) = @_; mbForget_ctx($ctx) },
+        factoids     => sub { my ($ctx) = @_; mbFactoids_ctx($ctx) },
+        factoid      => sub { my ($ctx) = @_; mbFactoid_ctx($ctx) },     # mb478: factoid details
+        quotecount   => sub { my ($ctx) = @_;
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            mbQuoteCount_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },
+
+        topquote     => sub { my ($ctx) = @_;
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            mbTopQuote_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },
+        halloffame   => sub { my ($ctx) = @_;
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            mbTopQuote_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },
+
+        last         => sub { my ($ctx) = @_; mbLast_ctx($ctx) },
+        poll         => sub { my ($ctx) = @_; mbPoll_ctx($ctx) },
+        vote         => sub { my ($ctx) = @_; mbVote_ctx($ctx) },
+        pollresult   => sub { my ($ctx) = @_; mbPollResult_ctx($ctx) },
+        pollstatus   => sub { my ($ctx) = @_; mbPollStatus_ctx($ctx) },
+        pollvoters   => sub { my ($ctx) = @_; mbPollVoters_ctx($ctx) },
+        unvote       => sub { my ($ctx) = @_; mbUnvote_ctx($ctx) },
+        pollstop     => sub { my ($ctx) = @_; mbPollStop_ctx($ctx) },
+        note         => sub { my ($ctx) = @_; mbNote_ctx($ctx) },
+        notes        => sub { my ($ctx) = @_; mbNotes_ctx($ctx) },
+        date         => sub { my ($ctx) = @_; displayDate_ctx($ctx) },
+        weather      => sub { my ($ctx) = @_;
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            if (@a && lc($a[0]) eq 'compare') {
+                shift @{ $ctx->args };
+                mbWeatherCompare_ctx($ctx);
+            } else { displayWeather_ctx($ctx) }
+        },
+        meteo        => sub { my ($ctx) = @_; displayWeather_ctx($ctx) },
+        addbadword   => sub { my ($ctx) = @_; channelAddBadword_ctx($ctx) },
+        rembadword   => sub { my ($ctx) = @_; channelRemBadword_ctx($ctx) },
+        ignores      => sub { my ($ctx) = @_; IgnoresList_ctx($ctx) },
+        ignore       => sub { my ($ctx) = @_; addIgnore_ctx($ctx) },
+        unignore     => sub { my ($ctx) = @_; delIgnore_ctx($ctx) },
+        yt           => sub { my ($ctx) = @_;
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            if (@a && lc($a[0]) eq 'search') {
+                shift @{ $ctx->args };
+                ytSearch_ctx($ctx);
+            } else {
+                youtubeSearch_ctx($ctx);
+            }
+        },
+        # mb86-R1: commandes radio regroupées via _dispatch_radio
+        song           => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        radiostatus    => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        radiomounts    => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        listeners      => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        nextsong       => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        deltrack       => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        play           => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        rplay         => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        radioimport    => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        radioimportdir => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        radioqueue     => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        queue          => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        radiocheck     => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        radiocache     => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        radiocacheprune => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        radiodlstatus  => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        radiodlcancel  => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        radiopush      => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        radioskip      => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        radioflush     => sub { my ($ctx) = @_; _dispatch_radio($ctx, $ctx->command) },
+        addresponder => sub { my ($ctx) = @_; addResponder_ctx($ctx) },
+        delresponder => sub { my ($ctx) = @_; delResponder_ctx($ctx) },
+        lastcom      => sub { my ($ctx) = @_; lastCom_ctx($ctx) },
+        q            => sub { my ($ctx) = @_; mbQuotes_ctx($ctx) },
+        quote        => sub { my ($ctx) = @_;
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            if (@a && lc($a[0]) eq 'add') {
+                shift @{ $ctx->args };
+                mbQuoteAdd($ctx->bot, $ctx->nick, $ctx->channel,
+                    join(' ', @{ $ctx->args }));
+            } elsif (@a && lc($a[0]) eq 'count') {
+                shift @{ $ctx->args };
+                my @r = @{ $ctx->args };
+                mbQuoteCount_ctx($ctx->bot, $ctx->nick, $ctx->channel, $r[0]);
+            } else { mbQuoteByNick($ctx) }
+        },
+        moduser      => sub { my ($ctx) = @_; mbModUser_ctx($ctx) },
+        antifloodset => sub { my ($ctx) = @_; setChannelAntiFloodParams_ctx($ctx) },
+        leet         => sub { my ($ctx) = @_; displayLeetString_ctx($ctx) },
+        rehash       => sub { my ($ctx) = @_; mbRehash_ctx($ctx) },
+        mp3          => sub { my ($ctx) = @_; mp3_ctx($ctx) },
+        exec         => sub { my ($ctx) = @_; mbExec_ctx($ctx) },
+        qlog         => sub { my ($ctx) = @_; mbChannelLog_ctx($ctx) },
+        hailo_ignore   => sub { my ($ctx) = @_; hailo_ignore_ctx($ctx) },
+        hailo_unignore => sub { my ($ctx) = @_; hailo_unignore_ctx($ctx) },
+        hailo_status   => sub { my ($ctx) = @_; hailo_status_ctx($ctx) },
+        hailo_chatter  => sub { my ($ctx) = @_; hailo_chatter_ctx($ctx) },
+        whereis      => sub { my ($ctx) = @_; mbWhereis_ctx($ctx) },
+        birthday     => sub { my ($ctx) = @_; userBirthday_ctx($ctx) },
+        f            => sub { my ($ctx) = @_; fortniteStats_ctx($ctx) },
+        xlogin       => sub { my ($ctx) = @_; xLogin_ctx($ctx) },
+        tellme       => sub { my ($ctx) = @_; chatGPT_ctx($ctx) },
+        chatgpt      => sub { my ($ctx) = @_; chatGPT_ctx($ctx) },
+        openai       => sub { my ($ctx) = @_; openai_ctx($ctx) },
+        ai           => sub { my ($ctx) = @_; claude_ctx($ctx) },
+        claude       => sub { my ($ctx) = @_; claude_ctx($ctx) },
+        gemini       => sub { my ($ctx) = @_; gemini_ctx($ctx) },
+        yomomma      => sub { my ($ctx) = @_; Yomomma_ctx($ctx) },
+        resolve      => sub { my ($ctx) = @_; resolve_ctx($ctx) },
+        tmdb         => sub { my ($ctx) = @_; mbTMDBSearch_ctx($ctx) },
+        tmdblangset  => sub { my ($ctx) = @_; setTMDBLangChannel_ctx($ctx) },
+        debug        => sub { my ($ctx) = @_; debug_ctx($ctx) },
+        version      => sub { my ($ctx) = @_; versionCheck($ctx) },
+        uptime       => sub { my ($ctx) = @_; mbUptime_ctx($ctx) },
+        help         => sub { my ($ctx) = @_; mbHelp_ctx($ctx) },
+        commands     => sub { my ($ctx) = @_;
+            $ctx->{args} = [ 'commands' ];
+            mbHelp_ctx($ctx);
+        },
+        spike        => sub { my ($ctx) = @_; $ctx->reply("https://teuk.org/In_Spike_Memory.jpg") },
+        # mb631-B1: « m update » sur le canal, « /msg bot update » en prive —
+        # meme fonction (update_ctx), la sortie suit le lieu de l'appel.
+        update       => sub { my ($ctx) = @_; update_ctx($ctx) },
+    );
+}
+
 sub mbCommandPublic {
     my ($self, $message, $sChannel, $sNick, $botNickTriggered, $sCommand, @tArgs) = @_;
 
@@ -2097,368 +2400,23 @@ sub mbCommandPublic {
         return;
     }
 
-    # ---------------------------------------------------------------------------
-    # Command dispatch table
-    # All handlers receive a Mediabot::Context object
-    # ---------------------------------------------------------------------------
-    my %command_map = (
-        die          => sub { mbQuit_ctx($ctx) },
-        nick         => sub { mbChangeNick_ctx($ctx) },
-        addtimer     => sub { mbAddTimer_ctx($ctx) },
-        remtimer     => sub { mbRemTimer_ctx($ctx) },
-        timers       => sub { mbTimers_ctx($ctx) },
-        msg          => sub { msgCmd_ctx($ctx) },
-        say          => sub { sayChannel_ctx($ctx) },
-        act          => sub { actChannel_ctx($ctx) },
-        cstat        => sub { userCstat_ctx($ctx) },
-        status       => sub { mbStatus_ctx($ctx) },
-        echo         => sub { mbEcho($ctx) },
-        adduser      => sub { addUser_ctx($ctx) },
-        useradd      => sub { addUser_ctx($ctx) }, # legacy alias
-        deluser      => sub { delUser_ctx($ctx) },
-        users        => sub { userStats_ctx($ctx) },
-        userinfo     => sub { userInfo_ctx($ctx) },
-        addhost      => sub { addUserHost_ctx($ctx) },
-        addchan      => sub { addChannel_ctx($ctx) },
-        chanset      => sub { channelSet_ctx($ctx) },
-        purge        => sub { purgeChannel_ctx($ctx) },
-        part         => sub { channelPart_ctx($ctx) },
-        join         => sub { channelJoin_ctx($ctx) },
-        add          => sub { channelAddUser_ctx($ctx) },
-        del          => sub { channelDelUser_ctx($ctx) },
-        modinfo      => sub { userModinfo_ctx($ctx) },
-        op           => sub { userOpChannel_ctx($ctx) },
-        deop         => sub { userDeopChannel_ctx($ctx) },
-        invite       => sub { userInviteChannel_ctx($ctx) },
-        voice        => sub { userVoiceChannel_ctx($ctx) },
-        devoice      => sub { userDevoiceChannel_ctx($ctx) },
-        kick         => sub { userKickChannel_ctx($ctx) },
-        ban          => sub { channelBan_ctx($ctx) },
-        kickban      => sub { channelKickBan_ctx($ctx) },
-        kb           => sub { channelKickBan_ctx($ctx) },
-        unban        => sub { channelUnban_ctx($ctx) },
-        bans         => sub { channelBans_ctx($ctx) },
-        showcommands => sub { userShowcommandsChannel_ctx($ctx) },
-        chaninfo     => sub { userChannelInfo_ctx($ctx) },
-        chanlist     => sub { channelList_ctx($ctx) },
-        channels     => sub { channelList_ctx($ctx) },
-        channellist  => sub { channelList_ctx($ctx) },
-        whoami       => sub { userWhoAmI_ctx($ctx) },
-        auth         => sub { userAuthNick_ctx($ctx) },
-        verify       => sub { userVerifyNick_ctx($ctx) },
-        access       => sub { userAccessChannel_ctx($ctx) },
-        addcmd       => sub { mbDbAddCommand_ctx($ctx) },
-        remcmd       => sub { mbDbRemCommand_ctx($ctx) },
-        modcmd       => sub { mbDbModCommand_ctx($ctx) },
-        mvcmd        => sub { mbDbMvCommand_ctx($ctx) },
-        chowncmd     => sub { mbChownCommand_ctx($ctx) },
-        showcmd      => sub { mbDbShowCommand_ctx($ctx) },
-        chanstatlines => sub { channelStatLines_ctx($ctx) },
-        whotalk      => sub { whoTalk_ctx($ctx) },
-        whotalks     => sub { whoTalk_ctx($ctx) },
-        countcmd     => sub { mbCountCommand_ctx($ctx) },
-        topcmd       => sub { mbTopCommand_ctx($ctx) },
-        popcmd       => sub { mbPopCommand_ctx($ctx) },
-        searchcmd    => sub { mbDbSearchCommand_ctx($ctx) },
-        lastcmd      => sub { mbLastCommand_ctx($ctx) },
-        owncmd       => sub { mbDbOwnersCommand_ctx($ctx) },
-        holdcmd      => sub { mbDbHoldCommand_ctx($ctx) },
-        addcatcmd    => sub { mbDbAddCategoryCommand_ctx($ctx) },
-        chcatcmd     => sub { mbDbChangeCategoryCommand_ctx($ctx) },
-        topsay       => sub { userTopSay_ctx($ctx) },
-        checkhostchan => sub { mbDbCheckHostnameNickChan_ctx($ctx) },
-        checkhost    => sub { mbDbCheckHostnameNick_ctx($ctx) },
-        checknick    => sub { mbDbCheckNickHostname_ctx($ctx) },
-        greet        => sub { userGreet_ctx($ctx) },
-        nicklist     => sub { channelNickList_ctx($ctx) },
-        rnick        => sub { randomChannelNick_ctx($ctx) },
-        birthdate    => sub { displayBirthDate_ctx($ctx) },
-        colors       => sub { mbColors_ctx($ctx) },
-        seen         => sub { mbSeen_ctx($ctx) },
-        # mb583-B1: les commandes CARRIERE (scans/GROUP BY sur CHANNEL_LOG
-        # potentiellement enorme) partent en worker forke — la boucle
-        # d'evenements ne gele plus jamais (terrain : « m lb » a fige le bot
-        # 60 s puis MariaDB a tue la requete). Les subs restent INCHANGEES :
-        # l'enfant collecte leurs botPrivmsg/botNotice en intents, le parent
-        # les rejoue (AntiFlood/NoColors/file mb568 s'appliquent au rejeu).
-        # last/seen/quotes restent synchrones : LIMIT indexes, rapides.
-        stats        => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'stats',     sub { mbStats_ctx($ctx) }) },
-        top          => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'top',       sub { mbTop_ctx($ctx) }) },
-        calc         => sub { mbCalc_ctx($ctx) },
-        convert      => sub { mbConvert_ctx($ctx) },     # mb479: unit conversion
-        '8ball'      => sub { mb8ball_ctx($ctx) },
-        remind       => sub {
-            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-            if (@a && lc($a[0]) eq 'cancel') {
-                shift @{ $ctx->args };
-                mbRemindCancel_ctx($ctx);
-            } else { mbRemind_ctx($ctx) }
-        },
-        remindlist   => sub { mbRemindList_ctx($ctx) },
-        tell         => sub { mbRemind_ctx($ctx) },   # mb474: leave a message, delivered when the target returns
-        calclast     => sub { mbCalcLast_ctx($ctx) },
-        wordcount    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'wordcount', sub { mbWordCount_ctx($ctx) }) },
-        alias        => sub { mbAlias_ctx($ctx) },
-        streak       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'streak',    sub { mbStreak_ctx($ctx) }) },
-        slap         => sub { mbSlap_ctx($ctx) },
-        karma        => sub { mbKarma_ctx($ctx) },
-        karmatop     => sub { mbKarmaTop_ctx($ctx) },
-        karmareset   => sub { mbKarmaReset_ctx($ctx) },
-        karmadiff    => sub { mbKarmaDiff_ctx($ctx) },
-        karmgraph    => sub { mbKarmaGraph_ctx($ctx) },
-        triviastop   => sub { mbTriviaStop_ctx($ctx) },
-        karmawatch   => sub { mbKarmaWatch_ctx($ctx) },
-        remindsnooze => sub { mbRemindSnooze_ctx($ctx) },
-        karmainfo    => sub { mbKarmaInfo_ctx($ctx) },
-        triviareset  => sub { mbTriviaReset_ctx($ctx) },
-        triviatop    => sub { mbTriviaTop_ctx($ctx) },
-        pollextend   => sub { mbPollExtend_ctx($ctx) },
-        karmahist    => sub { mbKarmaHist_ctx($ctx) },
-        roll         => sub { mbRoll_ctx($ctx) },
-        flip         => sub { mbFlip_ctx($ctx) },
-        choose       => sub { mbChoose_ctx($ctx) },
-        morse        => sub { mbMorse_ctx($ctx) },
-        abbrev       => sub { mbAbbrev_ctx($ctx) },
-        compare      => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'compare',   sub { mbCompare_ctx($ctx) }) },
-        heatmap      => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'heatmap',   sub { mbHeatmap_ctx($ctx) }) },
-        monthstats   => sub { mbMonthStats_ctx($ctx) },
-        define       => sub { mbDefine_ctx($ctx) },
-        trivia       => sub { mbTrivia_ctx($ctx) },
-        triviascore  => sub { mbTriviaScore_ctx($ctx) },
-        active       => sub { mbActive_ctx($ctx) },
-        when         => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'when',      sub { mbWhen_ctx($ctx) }) },
-        # mb115: système d'achievements + profil + radar
-        achievements => sub { mbAchievements_ctx($ctx) },
-        achievs      => sub { mbAchievements_ctx($ctx) },   # alias court
-        profil       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'profil',    sub { mbProfil_ctx($ctx) }) },
-        profile      => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'profil',    sub { mbProfil_ctx($ctx) }) },          # alias en anglais
-        radar        => sub { mbRadar_ctx($ctx) },
-
-        # mb613-B1: actualites (Tavily + synthese Claude). Deux appels reseau
-        # a la suite -> worker, comme les commandes de carriere (mb583).
-        # mb614-B1: clés ASCII seulement — 'actualités' et 'actualité' y
-        # arrivent par le repliement de _fold_command_name. Singulier et
-        # pluriel sont acceptés : c'est le même geste.
-        actualites   => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
-        actualite    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
-        actu         => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
-        news         => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
-        rss          => sub { Mediabot::RSS::Commands::mbRss_ctx($ctx) },
-        vdm          => sub { Mediabot::VDM::Runtime::mbVdm_ctx($ctx) },
-        dtc          => sub { Mediabot::DTC::Commands::dispatch_ctx($ctx) },
-        bashfr       => sub { Mediabot::DTC::Commands::dispatch_ctx($ctx) },
-
-        # mb116: dashboard de canal + duel + horoscope
-        dashboard    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'dashboard', sub { mbDashboard_ctx($ctx) }) },
-        chanstats    => sub { mbDashboard_ctx($ctx) },        # alias
-        duel         => sub { mbDuel_ctx($ctx) },
-        # mb620-B1: la commande interroge une API -> worker (la facade de
-        # sortie couvre les deux chemins d'appel depuis mb615).
-        horoscope    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'horoscope', sub { mbHoroscope_ctx($ctx) }) },
-        horo         => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'horoscope', sub { mbHoroscope_ctx($ctx) }) }, # alias court, meme worker
-
-        # mb117: compat + quotegame + mood
-        compat       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'compat',    sub { mbCompat_ctx($ctx) }) },
-        affinity     => sub { mbCompat_ctx($ctx) },           # alias EN
-        quotegame    => sub { mbQuotegame_ctx($ctx) },
-        qg           => sub { mbQuotegame_ctx($ctx) },        # alias court
-        mood         => sub { mbMood_ctx($ctx) },
-        milestone    => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'milestone', sub { mbMilestone_ctx($ctx) }) },
-        milestones   => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'milestone', sub { mbMilestone_ctx($ctx) }) },
-        ambiance     => sub { mbMood_ctx($ctx) },             # alias FR
-
-        # mb118: leaderboard + chronos
-        # Keep the historical !top command mapped to mbTop_ctx above.
-        # Leaderboard aliases are !leaderboard and !lb.
-        # mb629-B1: le palmares est reserve aux Administrateurs. La porte est
-        # posee AVANT le fork : un refus ne doit pas couter un worker, et le
-        # message de refus part du parent comme pour toute autre commande de
-        # niveau.
-        leaderboard  => sub { $ctx->require_level('Administrator')
-                              && Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'leaderboard', sub { mbLeaderboard_ctx($ctx) }) },
-        lb           => sub { $ctx->require_level('Administrator')
-                              && Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'leaderboard', sub { mbLeaderboard_ctx($ctx) }) },      # alias court
-        awards       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'awards', sub { mbAwards_ctx($ctx) }) }, # mb666
-        yearbook     => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'yearbook', sub { mbYearbook_ctx($ctx) }) }, # mb667
-        chronos      => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },
-        chrono       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },          # alias court
-        timeline     => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'chronos',  sub { mbChronos_ctx($ctx) }) },          # alias EN
-        features     => sub { mbFeatures_ctx($ctx) },
-        capabilities => sub { mbFeatures_ctx($ctx) },
-        caps         => sub { mbFeatures_ctx($ctx) },
-        observatory  => sub { mbObservatory_ctx($ctx) },
-        obs          => sub { mbObservatory_ctx($ctx) },
-        recap        => sub { mbRecap_ctx($ctx) },       # mb472: catch-up summary
-        onthisday    => sub { mbOnThisDay_ctx($ctx) },    # mb489: history nostalgia
-        otd          => sub { mbOnThisDay_ctx($ctx) },
-        memory       => sub { Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'memory', sub { mbMemory_ctx($ctx) }) }, # mb664
-        learn        => sub { mbLearn_ctx($ctx) },        # mb476: factoids
-        whatis       => sub { mbWhatis_ctx($ctx) },
-        forget       => sub { mbForget_ctx($ctx) },
-        factoids     => sub { mbFactoids_ctx($ctx) },
-        factoid      => sub { mbFactoid_ctx($ctx) },     # mb478: factoid details
-        quotecount   => sub {
-            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-            mbQuoteCount_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },
-
-        topquote     => sub {
-            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-            mbTopQuote_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },
-        halloffame   => sub {
-            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-            mbTopQuote_ctx($ctx->bot, $ctx->nick, $ctx->channel, $a[0]) },
-
-        last         => sub { mbLast_ctx($ctx) },
-        poll         => sub { mbPoll_ctx($ctx) },
-        vote         => sub { mbVote_ctx($ctx) },
-        pollresult   => sub { mbPollResult_ctx($ctx) },
-        pollstatus   => sub { mbPollStatus_ctx($ctx) },
-        pollvoters   => sub { mbPollVoters_ctx($ctx) },
-        unvote       => sub { mbUnvote_ctx($ctx) },
-        pollstop     => sub { mbPollStop_ctx($ctx) },
-        note         => sub { mbNote_ctx($ctx) },
-        notes        => sub { mbNotes_ctx($ctx) },
-        date         => sub { displayDate_ctx($ctx) },
-        weather      => sub {
-            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-            if (@a && lc($a[0]) eq 'compare') {
-                shift @{ $ctx->args };
-                mbWeatherCompare_ctx($ctx);
-            } else { displayWeather_ctx($ctx) }
-        },
-        meteo        => sub { displayWeather_ctx($ctx) },
-        addbadword   => sub { channelAddBadword_ctx($ctx) },
-        rembadword   => sub { channelRemBadword_ctx($ctx) },
-        ignores      => sub { IgnoresList_ctx($ctx) },
-        ignore       => sub { addIgnore_ctx($ctx) },
-        unignore     => sub { delIgnore_ctx($ctx) },
-        yt           => sub {
-            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-            if (@a && lc($a[0]) eq 'search') {
-                shift @{ $ctx->args };
-                ytSearch_ctx($ctx);
-            } else {
-                youtubeSearch_ctx($ctx);
-            }
-        },
-        # mb86-R1: commandes radio regroupées via _dispatch_radio
-        song           => sub { _dispatch_radio($ctx, $cmd) },
-        radiostatus    => sub { _dispatch_radio($ctx, $cmd) },
-        radiomounts    => sub { _dispatch_radio($ctx, $cmd) },
-        listeners      => sub { _dispatch_radio($ctx, $cmd) },
-        nextsong       => sub { _dispatch_radio($ctx, $cmd) },
-        deltrack       => sub { _dispatch_radio($ctx, $cmd) },
-        play           => sub { _dispatch_radio($ctx, $cmd) },
-        rplay         => sub { _dispatch_radio($ctx, $cmd) },
-        radioimport    => sub { _dispatch_radio($ctx, $cmd) },
-        radioimportdir => sub { _dispatch_radio($ctx, $cmd) },
-        radioqueue     => sub { _dispatch_radio($ctx, $cmd) },
-        queue          => sub { _dispatch_radio($ctx, $cmd) },
-        radiocheck     => sub { _dispatch_radio($ctx, $cmd) },
-        radiocache     => sub { _dispatch_radio($ctx, $cmd) },
-        radiocacheprune => sub { _dispatch_radio($ctx, $cmd) },
-        radiodlstatus  => sub { _dispatch_radio($ctx, $cmd) },
-        radiodlcancel  => sub { _dispatch_radio($ctx, $cmd) },
-        radiopush      => sub { _dispatch_radio($ctx, $cmd) },
-        radioskip      => sub { _dispatch_radio($ctx, $cmd) },
-        radioflush     => sub { _dispatch_radio($ctx, $cmd) },
-        addresponder => sub { addResponder_ctx($ctx) },
-        delresponder => sub { delResponder_ctx($ctx) },
-        lastcom      => sub { lastCom_ctx($ctx) },
-        q            => sub { mbQuotes_ctx($ctx) },
-        quote        => sub {
-            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-            if (@a && lc($a[0]) eq 'add') {
-                shift @{ $ctx->args };
-                mbQuoteAdd($ctx->bot, $ctx->nick, $ctx->channel,
-                    join(' ', @{ $ctx->args }));
-            } elsif (@a && lc($a[0]) eq 'count') {
-                shift @{ $ctx->args };
-                my @r = @{ $ctx->args };
-                mbQuoteCount_ctx($ctx->bot, $ctx->nick, $ctx->channel, $r[0]);
-            } else { mbQuoteByNick($ctx) }
-        },
-        moduser      => sub { mbModUser_ctx($ctx) },
-        antifloodset => sub { setChannelAntiFloodParams_ctx($ctx) },
-        leet         => sub { displayLeetString_ctx($ctx) },
-        rehash       => sub { mbRehash_ctx($ctx) },
-        mp3          => sub { mp3_ctx($ctx) },
-        exec         => sub { mbExec_ctx($ctx) },
-        qlog         => sub { mbChannelLog_ctx($ctx) },
-        hailo_ignore   => sub { hailo_ignore_ctx($ctx) },
-        hailo_unignore => sub { hailo_unignore_ctx($ctx) },
-        hailo_status   => sub { hailo_status_ctx($ctx) },
-        hailo_chatter  => sub { hailo_chatter_ctx($ctx) },
-        whereis      => sub { mbWhereis_ctx($ctx) },
-        birthday     => sub { userBirthday_ctx($ctx) },
-        f            => sub { fortniteStats_ctx($ctx) },
-        xlogin       => sub { xLogin_ctx($ctx) },
-        tellme       => sub { chatGPT_ctx($ctx) },
-        chatgpt      => sub { chatGPT_ctx($ctx) },
-        openai       => sub { openai_ctx($ctx) },
-        ai           => sub { claude_ctx($ctx) },
-        claude       => sub { claude_ctx($ctx) },
-        gemini       => sub { gemini_ctx($ctx) },
-        yomomma      => sub { Yomomma_ctx($ctx) },
-        resolve      => sub { resolve_ctx($ctx) },
-        tmdb         => sub { mbTMDBSearch_ctx($ctx) },
-        tmdblangset  => sub { setTMDBLangChannel_ctx($ctx) },
-        debug        => sub { debug_ctx($ctx) },
-        version      => sub { versionCheck($ctx) },
-        uptime       => sub { mbUptime_ctx($ctx) },
-        help         => sub { mbHelp_ctx($ctx) },
-        commands     => sub {
-            $ctx->{args} = [ 'commands' ];
-            mbHelp_ctx($ctx);
-        },
-        spike        => sub { $ctx->reply("https://teuk.org/In_Spike_Memory.jpg") },
-        # mb631-B1: « m update » sur le canal, « /msg bot update » en prive —
-        # meme fonction (update_ctx), la sortie suit le lieu de l'appel.
-        update       => sub { update_ctx($ctx) },
-    );
-
     # A4: track per-command usage in Prometheus
     if ($self->{metrics}) {
         $self->{metrics}->inc('mediabot_commands_by_name_total', { command => $cmd });
     }
 
-    # MB741: CommandRegistry is the sole authority for built-in and plugin
-    # commands. Historical handlers are reachable only through catalogue
-    # entries explicitly marked as frozen legacy-public adapters.
+    # MB749: CommandRegistry owns both the command identity and the executable
+    # handler. Built-ins and mounted plugins now cross one dispatch doorway.
     if (my $entry = $self->commands->command_for($cmd, 'public')) {
         my $dispatch = $entry->{metadata}{dispatch} // 'registry';
-        my $handler;
-
-        if ($dispatch eq 'legacy-public') {
-            $handler = $command_map{ $entry->{name} };
-            unless ($handler) {
-                $self->{logger}->log(1,
-                    "PUBLIC catalogue drift: missing adapter '$entry->{name}'");
-                $self->{metrics}->inc('mediabot_command_errors_total', { command => $cmd })
-                    if $self->{metrics};
-                return;
-            }
-        }
-        else {
-            $handler = $entry->{handler};
-        }
+        my $handler = $entry->{handler};
 
         $self->{logger}->log(4,
             "PUBLIC($dispatch): $sNick triggered $sCommand on $sChannel");
         eval {
-            if ($dispatch eq 'legacy-public') {
-                $handler->();
-            }
-            elsif (($entry->{metadata}{migration} // '')
-                    eq 'legacy-public-fallback') {
-                my $legacy = $command_map{ $entry->{name} };
-                die "Missing legacy fallback for '$entry->{name}'\n"
-                    unless $legacy;
-                $handler->($ctx, sub { $legacy->() });
-            }
-            else {
-                $handler->($ctx);
-            }
+            die "Missing registry handler for '$entry->{name}'\n"
+                unless ref($handler) eq 'CODE';
+            $handler->($ctx);
         };
         if ($@) {
             $self->{logger}->log(1, "PUBLIC command '$cmd' error: $@");
@@ -3678,6 +3636,113 @@ sub mbHandleNickTriggered {
 
 
 # Handle private commands (same as public but with channel = nick)
+# MB749: private built-ins use the same registry-native contract.
+sub _builtin_private_command_handlers {
+    return (
+
+        # --- Legacy handlers (not yet migrated to Context) ---
+        pass        => sub { my ($ctx) = @_; userPass_ctx($ctx) },
+        ident       => sub { my ($ctx) = @_; userIdent_ctx($ctx) },
+        topic       => sub { my ($ctx) = @_; userTopicChannel_ctx($ctx) },
+        update      => sub { my ($ctx) = @_; update_ctx($ctx) },
+        debug       => sub { my ($ctx) = @_; debug_ctx($ctx) },
+
+        # --- Context-based handlers ---
+        status      => sub { my ($ctx) = @_; mbStatus_ctx($ctx) },
+        radiostatus => sub { my ($ctx) = @_; radioStatus_ctx($ctx) },
+        radiomounts => sub { my ($ctx) = @_; radioMounts_ctx($ctx) },
+        echo        => sub { my ($ctx) = @_; mbEcho($ctx) },
+        die         => sub { my ($ctx) = @_; mbQuit_ctx($ctx) },
+        nick        => sub { my ($ctx) = @_; mbChangeNick_ctx($ctx) },
+        addtimer    => sub { my ($ctx) = @_; mbAddTimer_ctx($ctx) },
+        remtimer    => sub { my ($ctx) = @_; mbRemTimer_ctx($ctx) },
+        timers      => sub { my ($ctx) = @_; mbTimers_ctx($ctx) },
+        register    => sub { my ($ctx) = @_; mbRegister_ctx($ctx) },
+        msg         => sub { my ($ctx) = @_; msgCmd_ctx($ctx) },
+        dump        => sub { my ($ctx) = @_; dumpCmd_ctx($ctx) },
+        say         => sub { my ($ctx) = @_; sayChannel_ctx($ctx) },
+        act         => sub { my ($ctx) = @_; actChannel_ctx($ctx) },
+        song        => sub { my ($ctx) = @_; song_ctx($ctx) },
+        play        => sub { my ($ctx) = @_; radioPlay_ctx($ctx) },
+        radioimport => sub { my ($ctx) = @_; radioImport_ctx($ctx) },
+        commands    => sub { my ($ctx) = @_;
+            $ctx->{args} = [ 'commands' ];
+            mbHelp_ctx($ctx);
+        },
+        radioqueue  => sub { my ($ctx) = @_; radioQueue_ctx($ctx) },
+        radiopush   => sub { my ($ctx) = @_; radioPush_ctx($ctx) },
+        radioskip   => sub { my ($ctx) = @_; radioSkip_ctx($ctx) },
+        radioflush  => sub { my ($ctx) = @_; radioFlush_ctx($ctx) },
+        adduser     => sub { my ($ctx) = @_; addUser_ctx($ctx) },
+        useradd     => sub { my ($ctx) = @_; addUser_ctx($ctx) }, # legacy alias
+        deluser     => sub { my ($ctx) = @_; delUser_ctx($ctx) },
+        users       => sub { my ($ctx) = @_; userStats_ctx($ctx) },
+        cstat       => sub { my ($ctx) = @_; userCstat_ctx($ctx) },
+        login       => sub { my ($ctx) = @_; userLogin_ctx($ctx) },
+        logout      => sub { my ($ctx) = @_; userLogout_ctx($ctx) },
+        userinfo    => sub { my ($ctx) = @_; userInfo_ctx($ctx) },
+        addhost     => sub { my ($ctx) = @_; addUserHost_ctx($ctx) },
+        addchan     => sub { my ($ctx) = @_; addChannel_ctx($ctx) },
+        chanset     => sub { my ($ctx) = @_; channelSet_ctx($ctx) },
+        purge       => sub { my ($ctx) = @_; purgeChannel_ctx($ctx) },
+        part        => sub { my ($ctx) = @_; channelPart_ctx($ctx) },
+        join        => sub { my ($ctx) = @_; channelJoin_ctx($ctx) },
+        add         => sub { my ($ctx) = @_; channelAddUser_ctx($ctx) },
+        del         => sub { my ($ctx) = @_; channelDelUser_ctx($ctx) },
+        modinfo     => sub { my ($ctx) = @_; userModinfo_ctx($ctx) },
+        op          => sub { my ($ctx) = @_; userOpChannel_ctx($ctx) },
+        deop        => sub { my ($ctx) = @_; userDeopChannel_ctx($ctx) },
+        invite      => sub { my ($ctx) = @_; userInviteChannel_ctx($ctx) },
+        voice       => sub { my ($ctx) = @_; userVoiceChannel_ctx($ctx) },
+        devoice     => sub { my ($ctx) = @_; userDevoiceChannel_ctx($ctx) },
+        kick        => sub { my ($ctx) = @_; userKickChannel_ctx($ctx) },
+        showcommands => sub { my ($ctx) = @_; userShowcommandsChannel_ctx($ctx) },
+        chaninfo    => sub { my ($ctx) = @_; userChannelInfo_ctx($ctx) },
+        chanlist    => sub { my ($ctx) = @_; channelList_ctx($ctx) },
+        channels    => sub { my ($ctx) = @_; channelList_ctx($ctx) },
+        channellist => sub { my ($ctx) = @_; channelList_ctx($ctx) },
+        whoami      => sub { my ($ctx) = @_; userWhoAmI_ctx($ctx) },
+        auth        => sub { my ($ctx) = @_; userAuthNick_ctx($ctx) },
+        verify      => sub { my ($ctx) = @_; userVerifyNick_ctx($ctx) },
+        access      => sub { my ($ctx) = @_; userAccessChannel_ctx($ctx) },
+        addcmd      => sub { my ($ctx) = @_; mbDbAddCommand_ctx($ctx) },
+        remcmd      => sub { my ($ctx) = @_; mbDbRemCommand_ctx($ctx) },
+        modcmd      => sub { my ($ctx) = @_; mbDbModCommand_ctx($ctx) },
+        mvcmd       => sub { my ($ctx) = @_; mbDbMvCommand_ctx($ctx) },
+        chowncmd    => sub { my ($ctx) = @_; mbChownCommand_ctx($ctx) },
+        showcmd     => sub { my ($ctx) = @_; mbDbShowCommand_ctx($ctx) },
+        chanstatlines => sub { my ($ctx) = @_; channelStatLines_ctx($ctx) },
+        whotalk     => sub { my ($ctx) = @_; whoTalk_ctx($ctx) },
+        whotalks    => sub { my ($ctx) = @_; whoTalk_ctx($ctx) },
+        countcmd    => sub { my ($ctx) = @_; mbCountCommand_ctx($ctx) },
+        topcmd      => sub { my ($ctx) = @_; mbTopCommand_ctx($ctx) },
+        popcmd      => sub { my ($ctx) = @_; mbPopCommand_ctx($ctx) },
+        searchcmd   => sub { my ($ctx) = @_; mbDbSearchCommand_ctx($ctx) },
+        lastcmd     => sub { my ($ctx) = @_; mbLastCommand_ctx($ctx) },
+        owncmd      => sub { my ($ctx) = @_; mbDbOwnersCommand_ctx($ctx) },
+        holdcmd     => sub { my ($ctx) = @_; mbDbHoldCommand_ctx($ctx) },
+        addcatcmd   => sub { my ($ctx) = @_; mbDbAddCategoryCommand_ctx($ctx) },
+        chcatcmd    => sub { my ($ctx) = @_; mbDbChangeCategoryCommand_ctx($ctx) },
+        topsay      => sub { my ($ctx) = @_; userTopSay_ctx($ctx) },
+        checkhostchan => sub { my ($ctx) = @_; mbDbCheckHostnameNickChan_ctx($ctx) },
+        checkhost   => sub { my ($ctx) = @_; mbDbCheckHostnameNick_ctx($ctx) },
+        checknick   => sub { my ($ctx) = @_; mbDbCheckNickHostname_ctx($ctx) },
+        greet       => sub { my ($ctx) = @_; userGreet_ctx($ctx) },
+        nicklist    => sub { my ($ctx) = @_; channelNickList_ctx($ctx) },
+        rnick       => sub { my ($ctx) = @_; randomChannelNick_ctx($ctx) },
+        birthdate   => sub { my ($ctx) = @_; displayBirthDate_ctx($ctx) },
+        ignores     => sub { my ($ctx) = @_; IgnoresList_ctx($ctx) },
+        ignore      => sub { my ($ctx) = @_; addIgnore_ctx($ctx) },
+        unignore    => sub { my ($ctx) = @_; delIgnore_ctx($ctx) },
+        lastcom     => sub { my ($ctx) = @_; lastCom_ctx($ctx) },
+        moduser     => sub { my ($ctx) = @_; mbModUser_ctx($ctx) },
+        antifloodset => sub { my ($ctx) = @_; setChannelAntiFloodParams_ctx($ctx) },
+        rehash      => sub { my ($ctx) = @_; mbRehash_ctx($ctx) },
+        ai           => sub { my ($ctx) = @_; claude_ctx($ctx) },  # P4: !ai in private (no chanset gate)
+        claude       => sub { my ($ctx) = @_; claude_ctx($ctx) },
+    );
+}
+
 sub mbCommandPrivate {
     my ($self, $message, $sNick, $sCommand, @tArgs) = @_;
 
@@ -3734,142 +3799,16 @@ sub mbCommandPrivate {
         );
     }
 
-    # ---------------------------------------------------------------------------
-    # Command dispatch table
-    # All handlers receive a Mediabot::Context object.
-    # Legacy handlers (pass, ident, topic, update, play, radiopub, debug) still
-    # receive the old signature ($self, $message, $sNick, $sChannel, @tArgs)
-    # and are wrapped in closures for forward compatibility.
-    # ---------------------------------------------------------------------------
-    my %command_table = (
-
-        # --- Legacy handlers (not yet migrated to Context) ---
-        pass        => sub { userPass_ctx($ctx) },
-        ident       => sub { userIdent_ctx($ctx) },
-        topic       => sub { userTopicChannel_ctx($ctx) },
-        update      => sub { update_ctx($ctx) },
-        debug       => sub { debug_ctx($ctx) },
-
-        # --- Context-based handlers ---
-        status      => sub { mbStatus_ctx($ctx) },
-        radiostatus => sub { radioStatus_ctx($ctx) },
-        radiomounts => sub { radioMounts_ctx($ctx) },
-        echo        => sub { mbEcho($ctx) },
-        die         => sub { mbQuit_ctx($ctx) },
-        nick        => sub { mbChangeNick_ctx($ctx) },
-        addtimer    => sub { mbAddTimer_ctx($ctx) },
-        remtimer    => sub { mbRemTimer_ctx($ctx) },
-        timers      => sub { mbTimers_ctx($ctx) },
-        register    => sub { mbRegister_ctx($ctx) },
-        msg         => sub { msgCmd_ctx($ctx) },
-        dump        => sub { dumpCmd_ctx($ctx) },
-        say         => sub { sayChannel_ctx($ctx) },
-        act         => sub { actChannel_ctx($ctx) },
-        song        => sub { song_ctx($ctx) },
-        play        => sub { radioPlay_ctx($ctx) },
-        radioimport => sub { radioImport_ctx($ctx) },
-        commands    => sub {
-            $ctx->{args} = [ 'commands' ];
-            mbHelp_ctx($ctx);
-        },
-        radioqueue  => sub { radioQueue_ctx($ctx) },
-        radiopush   => sub { radioPush_ctx($ctx) },
-        radioskip   => sub { radioSkip_ctx($ctx) },
-        radioflush  => sub { radioFlush_ctx($ctx) },
-        adduser     => sub { addUser_ctx($ctx) },
-        useradd     => sub { addUser_ctx($ctx) }, # legacy alias
-        deluser     => sub { delUser_ctx($ctx) },
-        users       => sub { userStats_ctx($ctx) },
-        cstat       => sub { userCstat_ctx($ctx) },
-        login       => sub { userLogin_ctx($ctx) },
-        logout      => sub { userLogout_ctx($ctx) },
-        userinfo    => sub { userInfo_ctx($ctx) },
-        addhost     => sub { addUserHost_ctx($ctx) },
-        addchan     => sub { addChannel_ctx($ctx) },
-        chanset     => sub { channelSet_ctx($ctx) },
-        purge       => sub { purgeChannel_ctx($ctx) },
-        part        => sub { channelPart_ctx($ctx) },
-        join        => sub { channelJoin_ctx($ctx) },
-        add         => sub { channelAddUser_ctx($ctx) },
-        del         => sub { channelDelUser_ctx($ctx) },
-        modinfo     => sub { userModinfo_ctx($ctx) },
-        op          => sub { userOpChannel_ctx($ctx) },
-        deop        => sub { userDeopChannel_ctx($ctx) },
-        invite      => sub { userInviteChannel_ctx($ctx) },
-        voice       => sub { userVoiceChannel_ctx($ctx) },
-        devoice     => sub { userDevoiceChannel_ctx($ctx) },
-        kick        => sub { userKickChannel_ctx($ctx) },
-        showcommands => sub { userShowcommandsChannel_ctx($ctx) },
-        chaninfo    => sub { userChannelInfo_ctx($ctx) },
-        chanlist    => sub { channelList_ctx($ctx) },
-        channels    => sub { channelList_ctx($ctx) },
-        channellist => sub { channelList_ctx($ctx) },
-        whoami      => sub { userWhoAmI_ctx($ctx) },
-        auth        => sub { userAuthNick_ctx($ctx) },
-        verify      => sub { userVerifyNick_ctx($ctx) },
-        access      => sub { userAccessChannel_ctx($ctx) },
-        addcmd      => sub { mbDbAddCommand_ctx($ctx) },
-        remcmd      => sub { mbDbRemCommand_ctx($ctx) },
-        modcmd      => sub { mbDbModCommand_ctx($ctx) },
-        mvcmd       => sub { mbDbMvCommand_ctx($ctx) },
-        chowncmd    => sub { mbChownCommand_ctx($ctx) },
-        showcmd     => sub { mbDbShowCommand_ctx($ctx) },
-        chanstatlines => sub { channelStatLines_ctx($ctx) },
-        whotalk     => sub { whoTalk_ctx($ctx) },
-        whotalks    => sub { whoTalk_ctx($ctx) },
-        countcmd    => sub { mbCountCommand_ctx($ctx) },
-        topcmd      => sub { mbTopCommand_ctx($ctx) },
-        popcmd      => sub { mbPopCommand_ctx($ctx) },
-        searchcmd   => sub { mbDbSearchCommand_ctx($ctx) },
-        lastcmd     => sub { mbLastCommand_ctx($ctx) },
-        owncmd      => sub { mbDbOwnersCommand_ctx($ctx) },
-        holdcmd     => sub { mbDbHoldCommand_ctx($ctx) },
-        addcatcmd   => sub { mbDbAddCategoryCommand_ctx($ctx) },
-        chcatcmd    => sub { mbDbChangeCategoryCommand_ctx($ctx) },
-        topsay      => sub { userTopSay_ctx($ctx) },
-        checkhostchan => sub { mbDbCheckHostnameNickChan_ctx($ctx) },
-        checkhost   => sub { mbDbCheckHostnameNick_ctx($ctx) },
-        checknick   => sub { mbDbCheckNickHostname_ctx($ctx) },
-        greet       => sub { userGreet_ctx($ctx) },
-        nicklist    => sub { channelNickList_ctx($ctx) },
-        rnick       => sub { randomChannelNick_ctx($ctx) },
-        birthdate   => sub { displayBirthDate_ctx($ctx) },
-        ignores     => sub { IgnoresList_ctx($ctx) },
-        ignore      => sub { addIgnore_ctx($ctx) },
-        unignore    => sub { delIgnore_ctx($ctx) },
-        lastcom     => sub { lastCom_ctx($ctx) },
-        moduser     => sub { mbModUser_ctx($ctx) },
-        antifloodset => sub { setChannelAntiFloodParams_ctx($ctx) },
-        rehash      => sub { mbRehash_ctx($ctx) },
-        ai           => sub { claude_ctx($ctx) },  # P4: !ai in private (no chanset gate)
-        claude       => sub { claude_ctx($ctx) },
-    );
-
-    # MB741: private built-ins follow the same catalogue authority as public
-    # commands. The historical table is a frozen implementation adapter only.
+    # MB749: private built-ins use the handler stored in CommandRegistry too.
     if (my $entry = $self->commands->command_for($sCommand, 'private')) {
         my $dispatch = $entry->{metadata}{dispatch} // 'registry';
-        my $handler;
-
-        if ($dispatch eq 'legacy-private') {
-            $handler = $command_table{ $entry->{name} };
-            unless ($handler) {
-                $self->{logger}->log(1,
-                    "PRIVATE catalogue drift: missing adapter '$entry->{name}'");
-                $self->{metrics}->inc('mediabot_command_errors_total', { command => $sCommand })
-                    if $self->{metrics};
-                return undef;
-            }
-        }
-        else {
-            $handler = $entry->{handler};
-        }
+        my $handler = $entry->{handler};
 
         $self->{logger}->log(4,
             "PRIVATE($dispatch): $sNick triggered $sCommand");
-        return $dispatch eq 'legacy-private'
-            ? $handler->()
-            : $handler->($ctx);
+        die "Missing registry handler for '$entry->{name}'\n"
+            unless ref($handler) eq 'CODE';
+        return $handler->($ctx);
     }
 
     $self->{logger}->log(4, $message->prefix . " Private command '$sCommand' not found");

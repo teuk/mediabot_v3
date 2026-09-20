@@ -126,11 +126,13 @@ return sub {
     my $mb = _slurp_894('Mediabot/Mediabot.pm');
     $assert->like($mb, qr/^use Mediabot::RSS::Commands;$/m,
         'mb692-894: RSS command module is loaded by Mediabot');
-    $assert->like($mb, qr/^\s*rss\s*=>\s*sub \{ Mediabot::RSS::Commands::mbRss_ctx\(\$ctx\) \},$/m,
+    $assert->like($mb,
+        qr/^\s*rss\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*Mediabot::RSS::Commands::mbRss_ctx\(\$ctx\)\s*\},$/m,
         'mb692-894: m rss has one explicit route');
     $assert->like($mb, qr/^rss\|rss <list\|info\|add\|del\|set\|probe\|show>/m,
         'mb692-894: internal help documents the RSS family');
-    $assert->like($mb, qr/^\s*news\s*=>\s*sub \{ Mediabot::CommandAsync::run_ctx_async/m,
+    $assert->like($mb,
+        qr/^\s*news\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*Mediabot::CommandAsync::run_ctx_async/m,
         'mb692-894: existing news route remains unchanged');
 
     my $all = $fetch_src . $repo_src . $cmd_src;
