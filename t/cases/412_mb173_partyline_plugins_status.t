@@ -43,7 +43,7 @@ like($help, qr/\.plugins \[loaded\|config\|info\|load\|loadscript\|unload\|reloa
     '.help preserves the frozen v2 plugin lifecycle line');
 like($help, qr/\.plugins \[discoverv3\|loadv3\|policy\|resetpolicy\] - API v3 discovery and channel policy/,
     '.help documents v3 plugin control separately');
-like($help, qr/\.plugins \[doctor\|permissions\|why\] - API v3 read-only diagnostics/,
+like($help, qr/\.plugins \[doctor\|failures\|permissions\|why\] - API v3 read-only diagnostics/,
     '.help documents v3 operator diagnostics separately');
 
 like($plugins, qr/Read-only Partyline visibility for the active PluginManager state/,
@@ -84,6 +84,8 @@ like($lifecycle_412 // '', qr/set_v3_channel_policy/,
     '_cmd_plugins provides explicit Owner-gated channel policy');
 like($readonly_412 // '', qr/v3_diagnostic_report/,
     '_cmd_plugins exposes read-only API v3 doctor state');
+like($readonly_412 // '', qr/v3_failure_report/,
+    '_cmd_plugins exposes bounded API v3 failure history');
 like($readonly_412 // '', qr/v3_permissions_report/,
     '_cmd_plugins exposes the effective capability intersection');
 like($readonly_412 // '', qr/v3_channel_explanation/,

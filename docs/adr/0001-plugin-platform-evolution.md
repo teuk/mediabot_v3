@@ -139,3 +139,11 @@ entry, capability intersection and policy objects used at dispatch time.
 Partyline never receives configuration values or privileged runtime objects,
 and the diagnostic path performs no automatic remediation. Quarantine and
 reset controls remain a later, separately gated decision.
+
+MB751 records the evidence needed before that decision. Each loaded API v3
+instance owns a bounded in-memory ledger for command, event, job and HTTP
+callback outcomes. Failure reports expose only runtime coordinates, streaks,
+timestamps and short instance-salted SHA-256 fingerprints; raw exceptions
+never cross the operator boundary. A success resets its matching streak, while
+unload destroys the complete ledger. Readiness is unchanged, and MB751
+introduces neither automatic quarantine nor a reset control.

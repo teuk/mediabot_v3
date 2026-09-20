@@ -47,6 +47,7 @@ sub new {
         v3_http_service => $args{v3_http_service},
         v3_repositories => {},
         v3_quote_service => $args{v3_quote_service},
+        v3_failure_ledgers => {},
     }, $class;
 }
 
@@ -100,6 +101,35 @@ sub _cancel_v3_http {
     return eval { $self->{v3_http_service}->cancel_plugin($name) } || 0;
 }
 
+# MB751: runtime failures are remembered only for the lifetime of one loaded
+# API v3 instance. The ledger is bounded and returns detached summaries; its
+# own observability must never become a new failure mode for plugin dispatch.
+sub _v3_failure_ledger {
+    my ($self, $name) = @_;
+    return $self->{v3_failure_ledgers}{$name}
+        if $self->{v3_failure_ledgers}{$name};
+    require Mediabot::Plugin::FailureLedgerV3;
+    return $self->{v3_failure_ledgers}{$name} =
+        Mediabot::Plugin::FailureLedgerV3->new(
+            max_recent => 16, max_resources => 128);
+}
+
+sub _record_v3_failure {
+    my ($self, $name, %args) = @_;
+    return eval {
+        $self->_v3_failure_ledger($name)->record_failure(%args);
+        1;
+    } ? 1 : 0;
+}
+
+sub _record_v3_success {
+    my ($self, $name, %args) = @_;
+    return eval {
+        $self->_v3_failure_ledger($name)->record_success(%args);
+        1;
+    } ? 1 : 0;
+}
+
 sub _v3_invocation_policy {
     my ($self, $entry, $invocation) = @_;
     return { channel => '', mode => 'off', config => {} }
@@ -129,10 +159,18 @@ sub _v3_http_fetch {
         my $ok = eval { $callback->($response); 1 };
         unless ($ok) {
             my $error = _plugin_error_text($@, 'API v3 HTTP callback failed');
+            $self->_record_v3_failure($name,
+                kind => 'http_callback', resource => 'callback',
+                channel => $current_policy->{channel}, error => $error);
             _pm_metric($self->{bot}, 'mediabot_plugin_v3_failure_total',
                 { plugin => $name, kind => 'http_callback' });
             eval { $self->{bot}{logger}->log(1,
                 "plugin '$name' API v3 HTTP callback failed: $error") };
+        }
+        else {
+            $self->_record_v3_success($name,
+                kind => 'http_callback', resource => 'callback',
+                channel => $current_policy->{channel});
         }
     });
 }
@@ -362,9 +400,17 @@ sub v3_diagnostic_report {
     my ($self, $name) = @_;
     my $entry = $self->_v3_diagnostic_entry($name);
     my @policies = $self->v3_channel_policies($entry->{name});
+    my $failures = $self->v3_failure_report($entry->{name});
     require Mediabot::Plugin::DiagnosticsV3;
     return Mediabot::Plugin::DiagnosticsV3->report(
-        entry => $entry, policies => \@policies);
+        entry => $entry, policies => \@policies, failures => $failures);
+}
+
+sub v3_failure_report {
+    my ($self, $name) = @_;
+    my $entry = $self->_v3_diagnostic_entry($name);
+    my $report = $self->_v3_failure_ledger($entry->{name})->report;
+    return { plugin => "$entry->{name}", %$report };
 }
 
 sub v3_channel_explanation {
@@ -613,6 +659,7 @@ sub unregister_plugin {
 
     delete $self->{plugins}{$key};
     delete $self->{v3_repositories}{$key};
+    delete $self->{v3_failure_ledgers}{$key};
     @{ $self->{order} } = grep { $_ ne $key } @{ $self->{order} };
 
     return 1;
@@ -1620,6 +1667,9 @@ sub _mount_v3_commands {
                     unless ($called) {
                         my $error = _plugin_error_text(
                             $@, 'API v3 command failed');
+                        $self->_record_v3_failure($key,
+                            kind => 'command', resource => $command,
+                            channel => $channel, error => $error);
                         _pm_metric($self->{bot},
                             'mediabot_plugin_v3_failure_total',
                             { plugin => $key, kind => 'command' });
@@ -1629,6 +1679,9 @@ sub _mount_v3_commands {
                             if $policy->{mode} eq 'observe';
                         return;
                     }
+                    $self->_record_v3_success($key,
+                        kind => 'command', resource => $command,
+                        channel => $channel);
                     return $fallback->()
                         if $fallback && $policy->{mode} eq 'observe';
                     return $result;
@@ -1705,7 +1758,12 @@ sub _mount_v3_events {
             _pm_metric($bot, 'mediabot_plugin_v3_observe_total',
                 { plugin => $key, kind => 'event' })
                 if $policy->{mode} eq 'observe';
-            return $object->$method($context, $scoped);
+            my $result = $object->$method($context, $scoped);
+            my $event_name = eval { $item->{envelope}->name } // 'unknown';
+            $self->_record_v3_success($key,
+                kind => 'event', resource => $event_name,
+                channel => $item->{channel});
+            return $result;
         },
         on_drop     => sub {
             my ($item) = @_;
@@ -1719,6 +1777,9 @@ sub _mount_v3_events {
             my ($item, $error) = @_;
             my $name = eval { $item->{envelope}->name } // 'unknown';
             my $clean = _plugin_error_text($error, 'API v3 event failed');
+            $self->_record_v3_failure($key,
+                kind => 'event', resource => $name,
+                channel => $item->{channel}, error => $clean);
             _pm_metric($bot, 'mediabot_plugin_v3_failure_total',
                 { plugin => $key, kind => 'event' });
             eval { $bot->{logger}->log(1,
@@ -1876,10 +1937,18 @@ sub _mount_v3_jobs {
                         unless ($called) {
                             my $error = _plugin_error_text(
                                 $@, 'API v3 job failed');
+                            $self->_record_v3_failure($key,
+                                kind => 'job', resource => $job,
+                                channel => $policy->{channel}, error => $error);
                             _pm_metric($bot, 'mediabot_plugin_v3_failure_total',
                                 { plugin => $key, kind => 'job' });
                             eval { $bot->{logger}->log(1,
                                 "plugin '$key' API v3 job '$job' failed for '$policy->{channel}': $error") };
+                        }
+                        else {
+                            $self->_record_v3_success($key,
+                                kind => 'job', resource => $job,
+                                channel => $policy->{channel});
                         }
                     }
                     return;

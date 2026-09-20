@@ -57,6 +57,7 @@ sub report {
     my $manifest = ref($entry->{manifest}) eq 'HASH'
         ? $entry->{manifest} : {};
     my $policies = ref($args{policies}) eq 'ARRAY' ? $args{policies} : [];
+    my $failures = ref($args{failures}) eq 'HASH' ? $args{failures} : {};
     my $permissions = $class->permissions(entry => $entry);
 
     my %policy_counts = (off => 0, observe => 0, on => 0);
@@ -97,6 +98,13 @@ sub report {
         ($status, $reason) = ('ready', 'operational');
     }
 
+    my $recent = ref($failures->{recent}) eq 'ARRAY'
+        ? $failures->{recent} : [];
+    my $active_streaks = ref($failures->{active_streaks}) eq 'ARRAY'
+        ? $failures->{active_streaks} : [];
+    my $last_failure_at = @$recent
+        ? ($recent->[-1]{occurred_at} // 0) : 0;
+
     return {
         plugin      => "$entry->{name}",
         version     => defined($entry->{version}) ? "$entry->{version}" : '',
@@ -123,6 +131,13 @@ sub report {
                 jobs     => $mounted_jobs,
             },
             saved_handlers => $saved_handlers,
+        },
+        failures => {
+            total              => int($failures->{total_failures} // 0),
+            recent             => scalar(@$recent),
+            affected_resources => int($failures->{affected_resources} // 0),
+            active_streaks     => scalar(@$active_streaks),
+            last_failure_at    => int($last_failure_at),
         },
     };
 }

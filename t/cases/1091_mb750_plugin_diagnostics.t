@@ -46,7 +46,12 @@ return sub {
         'permission report is detached from manager state');
 
     my $report = Mediabot::Plugin::DiagnosticsV3->report(
-        entry => $entry, policies => \@policies);
+        entry => $entry, policies => \@policies, failures => {
+            total_failures => 2,
+            affected_resources => 1,
+            active_streaks => [{ consecutive_failures => 2 }],
+            recent => [{ occurred_at => 123 }, { occurred_at => 456 }],
+        });
     $assert->is($report->{status}, 'inactive',
         'disabled lifecycle wins over channel readiness');
     $assert->is($report->{reason}, 'plugin_disabled',
@@ -57,6 +62,12 @@ return sub {
         'diagnosis counts captured rollback handlers');
     $assert->ok(!exists($report->{policies}{config}),
         'diagnosis does not expose channel configuration values');
+    $assert->is($report->{failures}{total}, 2,
+        'doctor carries only the detached aggregate failure total');
+    $assert->is($report->{failures}{last_failure_at}, 456,
+        'doctor exposes the latest timestamp without an error message');
+    $assert->ok(!exists($report->{failures}{recent_records}),
+        'doctor does not duplicate detailed failure records');
 
     $entry->{enabled} = 1;
     $report = Mediabot::Plugin::DiagnosticsV3->report(

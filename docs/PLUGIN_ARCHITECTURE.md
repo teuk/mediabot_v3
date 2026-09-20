@@ -6,8 +6,9 @@ executable MB742 API v3 foundation, the MB743 event/scheduler boundary, the
 MB744 channel policy, MB745's first reversible product plugin, MB746's shared
 HTTP/repository boundary, MB747's first approved domain-data facade, MB748's
 first reversible database-backed command migration, MB749's registry-native
-built-in dispatch and MB750's read-only operator diagnostics. It does not
-enable a plugin or grant a capability automatically.
+built-in dispatch, MB750's read-only operator diagnostics and MB751's bounded
+runtime failure history. It does not enable a plugin or grant a capability
+automatically.
 
 ## Current baseline
 
@@ -114,6 +115,10 @@ MB750 makes that runtime boundary explainable through detached reports: an
 operator can inspect lifecycle, effective grants, mounted resources and the
 exact per-channel decision without receiving configuration values or mutating
 the plugin.
+MB751 gives the same operator a bounded memory of command, event, job and HTTP
+callback failures. It stores fingerprints rather than exception text, resets
+per-resource streaks after success and disappears with the loaded instance;
+it does not quarantine or reset anything.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -151,7 +156,7 @@ Planned capability families include:
 | Database | possible through full in-process bot | MB747 approved quote reads; future domain repositories only | data layer |
 | Secrets | configuration may be reachable in-process | named secret references only | core configuration |
 | Activation | global plugin lifecycle plus MB744 channel policy | `off`, `observe` or `on` per instance/channel | policy service |
-| Health | lifecycle and metrics fragments | Doctor, reason, permissions, latency and quarantine | plugin runtime |
+| Health | lifecycle and metrics fragments | Doctor, reason, permissions and bounded failure history; quarantine remains separate | plugin runtime |
 
 ## Migration sequence
 
@@ -193,10 +198,14 @@ Planned capability families include:
     readiness, capability intersection and the effective `off`/`observe`/`on`
     decision, including migration fallback visibility, without exposing typed
     configuration values or applying automatic remediation.
+12. **MB751 — bounded failure history:** complete. One in-memory ledger per
+    loaded package records command, event, job and HTTP-callback failures as
+    non-sensitive fingerprints with bounded recent/resource cardinality.
+    Partyline can inspect the history without changing readiness or lifecycle.
 
-Later milestones can add explicit quarantine/reset controls and separate quote
-writes behind stronger authorization, now that both dispatch and operational
-truth have one authoritative path.
+Later milestones can evaluate explicit quarantine/reset controls and separate
+quote writes behind stronger authorization. MB751 deliberately supplies the
+evidence before either behavior-changing decision.
 
 ## Extraction order
 

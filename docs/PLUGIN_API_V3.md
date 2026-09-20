@@ -1,10 +1,10 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB750. Packages are discoverable and
-explicitly loadable, but never activate at startup. MB750 adds read-only
-operator diagnostics for the established lifecycle, capabilities and channel
-policy without exposing configuration values, database handles or arbitrary
-SQL.
+Plugin API v3 remains experimental in MB751. Packages are discoverable and
+explicitly loadable, but never activate at startup. MB751 adds a bounded
+in-memory failure history to the read-only operational surface established by
+MB750, without exposing exception text, configuration values, database handles
+or arbitrary SQL.
 
 ## Package layout
 
@@ -188,6 +188,7 @@ changing it:
 
 ```text
 .plugins doctor <name>
+.plugins failures <name>
 .plugins permissions <name>
 .plugins why <name> <#channel>
 ```
@@ -200,10 +201,21 @@ capability sets. `why` resolves the current lifecycle and channel policy to
 `blocked`, `shadow` or `active`, and states separately whether plugin code runs
 and whether IRC output is allowed.
 
+`failures` reports only the newest five records from an in-memory 16-record
+ring. Command, event, job and HTTP-callback failures carry a bounded resource
+name, policy channel, timestamp, consecutive-failure streak and short
+instance-salted SHA-256 fingerprint. Exception text is never present. At most
+128 resource states are
+tracked per loaded package; excess cardinality is folded into per-kind `other`
+buckets. A successful call clears the matching active streak but preserves
+recent history.
+
 These commands return detached scalar reports. They do not print typed channel
 configuration values, plugin objects, secrets or service handles. They do not
 enable, disable, reload, reconfigure, quarantine or otherwise remediate a
-plugin. Mutating Partyline commands retain their existing Owner/Master gates.
+plugin. Failure history survives disable/enable within one instance and is
+discarded on unload/reload. It does not alter the `doctor` readiness state.
+Mutating Partyline commands retain their existing Owner/Master gates.
 See [`PLUGIN_OPERATIONS_V3.md`](PLUGIN_OPERATIONS_V3.md) for the operator view.
 
 ## Shared HTTPS service

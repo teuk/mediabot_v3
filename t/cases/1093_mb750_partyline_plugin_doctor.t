@@ -27,6 +27,12 @@ return sub {
         'doctor is parsed as a bounded read-only view');
     $assert->like($plugins, qr/v3_diagnostic_report\(\$target\)/,
         'doctor consumes the core-owned detached report');
+    $assert->like($plugins, qr/\\Afailures\\s\+\(\\S\+\)\\z/,
+        'failure history is parsed as a bounded read-only view');
+    $assert->like($plugins, qr/v3_failure_report\(\$target\)/,
+        'failure history consumes the core-owned detached report');
+    $assert->like($plugins, qr/splice\(\@recent, 5\)/,
+        'Partyline renders at most five recent failures');
     $assert->like($plugins, qr/\\Apermissions\\s\+\(\\S\+\)\\z/,
         'permissions has its own read-only parser');
     $assert->like($plugins, qr/v3_permissions_report\(\$target\)/,
@@ -43,6 +49,6 @@ return sub {
     $assert->unlike($plugins, qr/\$policy->\{config\}|plugin_context/,
         'diagnostic rendering does not access config values or PluginContext');
     $assert->like($source,
-        qr/\.plugins \[doctor\|permissions\|why\] - API v3 read-only diagnostics/,
+        qr/\.plugins \[doctor\|failures\|permissions\|why\] - API v3 read-only diagnostics/,
         'Partyline help documents the non-mutating diagnostic surface');
 };

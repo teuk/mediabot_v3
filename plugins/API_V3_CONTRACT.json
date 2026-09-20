@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB750",
+  "milestone": "MB751",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -149,6 +149,7 @@
   "operator_diagnostics": {
     "commands": [
       "doctor",
+      "failures",
       "permissions",
       "why"
     ],
@@ -161,5 +162,25 @@
       "active"
     ],
     "automatic_remediation": "none"
+  },
+  "runtime_failure_history": {
+    "mode": "read-only in-memory per loaded instance",
+    "kinds": [
+      "command",
+      "event",
+      "http_callback",
+      "job"
+    ],
+    "maximum_recent_records": 16,
+    "maximum_resource_states": 128,
+    "partyline_recent_records": 5,
+    "error_text": "unavailable",
+    "fingerprint": "first 16 hexadecimal characters of instance-salted SHA-256",
+    "success": "reset matching consecutive-failure streak",
+    "disable_enable": "preserve",
+    "unload_reload": "discard",
+    "readiness_effect": "none",
+    "automatic_quarantine": "none",
+    "reset_control": "none"
   }
 }

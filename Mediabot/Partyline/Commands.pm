@@ -945,9 +945,9 @@ sub _cmd_plugins {
     my @enabled  = eval { $pm->list(enabled => 1) } ? $pm->list(enabled => 1) : ();
     my @disabled = eval { $pm->list(enabled => 0) } ? $pm->list(enabled => 0) : ();
 
-    # MB750: these views are deliberately read-only. They expose the core's
-    # decision and capability intersection, never channel configuration values
-    # or privileged service objects.
+    # MB750/MB751: these views are deliberately read-only. They expose the
+    # core's decision, capability intersection and bounded failure history,
+    # never channel configuration values or privileged service objects.
     if ($mode =~ /\Adoctor\s+(\S+)\z/) {
         my $target = $1;
         my $report = eval { $pm->v3_diagnostic_report($target) };
@@ -960,6 +960,7 @@ sub _cmd_plugins {
         my $permissions = $report->{permissions};
         my $policies = $report->{policies};
         my $runtime = $report->{runtime};
+        my $failures = $report->{failures};
         my $missing = @{ $permissions->{missing} || [] }
             ? join(',', @{ $permissions->{missing} }) : 'none';
         $stream->write("Plugin doctor '$report->{plugin}': "
@@ -972,6 +973,44 @@ sub _cmd_plugins {
             . " events=$runtime->{mounted}{events}/$runtime->{declared}{events}"
             . " jobs=$runtime->{mounted}{jobs}/$runtime->{declared}{jobs}"
             . " saved_handlers=$runtime->{saved_handlers}\r\n");
+        $stream->write("  failures: total=$failures->{total} recent=$failures->{recent}"
+            . " resources=$failures->{affected_resources}"
+            . " active_streaks=$failures->{active_streaks}"
+            . " last=$failures->{last_failure_at}\r\n");
+        return;
+    }
+
+    if ($mode =~ /\Afailures\s+(\S+)\z/) {
+        my $target = $1;
+        my $report = eval { $pm->v3_failure_report($target) };
+        unless ($report) {
+            my $error = $@ || 'failure history unavailable';
+            $stream->write("API v3 failure history failed: "
+                . _plugin_info_text($error, 180) . "\r\n");
+            return;
+        }
+        my $active = ref($report->{active_streaks}) eq 'ARRAY'
+            ? scalar(@{ $report->{active_streaks} }) : 0;
+        $stream->write("Plugin failures '$report->{plugin}':"
+            . " total=$report->{total_failures}"
+            . " recent=$report->{recent_count}/$report->{max_recent}"
+            . " resources=$report->{affected_resources}/$report->{max_resources}"
+            . " active_streaks=$active.\r\n");
+        my @recent = ref($report->{recent}) eq 'ARRAY'
+            ? reverse @{ $report->{recent} } : ();
+        splice(@recent, 5) if @recent > 5;
+        unless (@recent) {
+            $stream->write("  latest: none\r\n");
+            return;
+        }
+        for my $failure (@recent) {
+            my $channel = length($failure->{channel} // '')
+                ? $failure->{channel} : '-';
+            $stream->write("  $failure->{kind} $failure->{resource}"
+                . " channel=$channel at=$failure->{occurred_at}"
+                . " fingerprint=$failure->{fingerprint}"
+                . " streak=$failure->{streak}\r\n");
+        }
         return;
     }
 
@@ -1136,7 +1175,7 @@ sub _cmd_plugins {
             . "|enable <name>|disable <name>|cleardata <name>|discoverv3"
             . "|loadv3 <package> [caps]|policy <name> <channel> <mode> [key=value ...]"
             . "|resetpolicy <name> <channel>|doctor <name>"
-            . "|permissions <name>|why <name> <channel>]\r\n");
+            . "|failures <name>|permissions <name>|why <name> <channel>]\r\n");
         return;
     }
 
@@ -1195,7 +1234,7 @@ sub _cmd_help {
       . "  .metrics            - dump Prometheus metrics\r\n"
       . "  .plugins [loaded|config|info|load|loadscript|unload|reload|enable|disable|cleardata] - plugin lifecycle (v2)\r\n"
       . "  .plugins [discoverv3|loadv3|policy|resetpolicy] - API v3 discovery and channel policy\r\n"
-      . "  .plugins [doctor|permissions|why] - API v3 read-only diagnostics\r\n"
+      . "  .plugins [doctor|failures|permissions|why] - API v3 read-only diagnostics\r\n"
       . "  .scriptdryrun [status|last|config|timers|canceltimers|events|clearevents|reload] - show external script bridge status and last run, pending timers, event windows\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary [Administrator+])\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"

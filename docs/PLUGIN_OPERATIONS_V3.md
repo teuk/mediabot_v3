@@ -1,8 +1,9 @@
 # API v3 plugin operations
 
-MB750 adds a read-only operator view over the API v3 state that already decides
-runtime behavior. It answers three different questions without changing plugin
-lifecycle, capability grants or channel policy.
+MB750 added a read-only operator view over the API v3 state that already
+decides runtime behavior. MB751 adds bounded, in-memory failure evidence. The
+four views answer different questions without changing plugin lifecycle,
+capability grants or channel policy.
 
 ## Is the package operationally ready?
 
@@ -21,8 +22,32 @@ Its status is deterministic:
 | `ready` | package is enabled, has an active channel and every requested capability is effective |
 
 The report is diagnostic, not a health promise about an external endpoint or
-database. Existing failure counters and logs remain the source for transient
-runtime failures.
+database. MB751 adds an aggregate failure line, but previous failures do not
+change the deterministic `inactive`, `limited` or `ready` decision.
+
+## What failed recently?
+
+```text
+.plugins failures quotes-v3
+```
+
+The view covers API v3 command, event, shared-job and HTTP-callback handlers.
+Each record contains only:
+
+- runtime kind and bounded resource name;
+- current policy channel, or `-` when none applies;
+- integer timestamp and consecutive-failure streak;
+- a 16-hex-character, instance-salted SHA-256 fingerprint.
+
+The package ledger retains at most 16 recent records and 128 resource states;
+Partyline prints only the newest five. Exception messages are normalized and
+hashed inside the core, then discarded from the report. Typed configuration,
+paths, service responses, database diagnostics and secrets are not fields.
+
+A successful call resets the matching resource/channel streak without erasing
+recent history. Disable/enable preserves evidence for the current loaded
+instance. Unload/reload destroys it. This is operational memory, not durable
+storage.
 
 ## Which capabilities are effective?
 
@@ -64,11 +89,12 @@ configuration values.
 
 ## Security and mutation boundary
 
-`doctor`, `permissions` and `why` are available to authenticated Partyline
-readers, like `info`. They return only bounded scalar snapshots and never expose
-the plugin object, `PluginContext`, service facades, database handles, paths or
-secrets. They do not enable, disable, load, unload, change policy, quarantine or
-clear data. Existing mutation commands retain their Owner/Master gates.
+`doctor`, `failures`, `permissions` and `why` are available to authenticated
+Partyline readers, like `info`. They return only bounded scalar snapshots and
+never expose the plugin object, `PluginContext`, service facades, database
+handles, paths or secrets. They do not enable, disable, load, unload, change
+policy, quarantine, reset history or clear data. Existing mutation commands
+retain their Owner/Master gates.
 
-MB750 deliberately stops at explanation. Automatic quarantine and a reviewed
+MB751 deliberately stops at evidence. Automatic quarantine and a reviewed
 reset path require a separate milestone because they change live behavior.

@@ -60,6 +60,14 @@ return sub {
         'ungranted event subscription is not mounted');
     $assert->is($report->{runtime}{mounted}{jobs}, 0,
         'ungranted scheduler job is not mounted');
+    $assert->is($report->{failures}{total}, 0,
+        'doctor starts with an empty instance-scoped failure summary');
+
+    my $failures = $manager->v3_failure_report('hello-v3');
+    $assert->is($failures->{max_recent}, 16,
+        'manager publishes the fixed recent-history bound');
+    $assert->is($failures->{total_failures}, 0,
+        'manager failure view is initially empty');
 
     my $why = $manager->v3_channel_explanation(
         'hello-v3', '#I/O');

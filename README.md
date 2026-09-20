@@ -280,7 +280,7 @@ Documentation:
 - [Plugin API v3](docs/PLUGIN_API_V3.md) — strict packages, typed channel policy, versioned events, owned jobs, shared HTTPS/repository services and approved quote reads;
 - [Short Content v3 pilot](docs/SHORT_CONTENT_V3_PILOT.md) — observe-first proof and rollback for the first external-content package;
 - [Command catalogue](docs/COMMAND_CATALOGUE.md) — MB749 registry-native built-in dispatch and migration rollback rules;
-- [Plugin operations v3](docs/PLUGIN_OPERATIONS_V3.md) — MB750 read-only doctor, capability and channel-decision views;
+- [Plugin operations v3](docs/PLUGIN_OPERATIONS_V3.md) — MB751 read-only doctor, capability, channel-decision and bounded failure-history views;
 - [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands);
 - [Private and administrative commands](https://github.com/teuk/mediabot_v3/wiki/Private-and-admin-commands);
 - [Access levels](https://github.com/teuk/mediabot_v3/wiki/Access-levels);

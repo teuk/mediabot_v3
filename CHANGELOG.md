@@ -10,6 +10,23 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb751 — remember API v3 stumbles without opening the Chamber of Secrets
+
+- Add one in-memory, instance-scoped failure ledger per loaded API v3 package.
+  Command, event, shared-job and HTTP-callback failures enter a 16-record ring
+  with a hard 128-resource state bound; successful calls reset only their
+  matching consecutive-failure streak.
+- Store runtime kind, bounded resource, policy channel, timestamp, streak and a
+  short SHA-256 fingerprint. Raw exceptions, typed configuration, paths and
+  secrets never enter detached operator reports.
+- Add the read-only Partyline view `.plugins failures <name>` and a compact
+  failure summary to `.plugins doctor <name>`. Partyline renders at most five
+  newest records and never changes the existing `inactive`, `limited` or
+  `ready` readiness decision.
+- Destroy history on unload/reload and keep disable/enable history within the
+  same instance. MB751 adds no reset control, automatic quarantine, package or
+  channel activation, private configuration, database data or schema change.
+
 ### mb750 — light the operator's lantern inside API v3
 
 - Add detached, read-only API v3 diagnostics for lifecycle, requested/granted/
