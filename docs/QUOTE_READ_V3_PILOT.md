@@ -1,5 +1,8 @@
 # Quote Reads v3 pilot
 
+> Historical MB748 procedure. For the current MB754 mixed-command pilot, use
+> [`QUOTE_COMMAND_V3_PILOT.md`](QUOTE_COMMAND_V3_PILOT.md).
+
 MB748 moves the first database-backed public commands through API v3 without
 moving a write path. The `quotes-v3` package owns `quotecount`, `topquote` and
 `halloffame` only after an operator explicitly loads it, grants its three

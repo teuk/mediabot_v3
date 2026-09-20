@@ -1,8 +1,8 @@
 {
   "api": 3,
   "name": "quotes-v3",
-  "version": "1.0.0",
-  "description": "A reversible API v3 home for read-only quote counts and channel rankings.",
+  "version": "1.1.0",
+  "description": "A reversible API v3 home for quote reads and authorized channel-scoped writes.",
   "runtime": {
     "api": 3,
     "kind": "perl",
@@ -17,6 +17,7 @@
   },
   "capabilities": [
     "data.quotes.read",
+    "data.quotes.write",
     "irc.reply",
     "irc.notice"
   ],
@@ -33,6 +34,20 @@
       "help": "Count channel quotes, optionally by author prefix.",
       "level": 0,
       "handler": "command_quotecount",
+      "migration": "legacy-public-fallback"
+    },
+    "q": {
+      "source": "public",
+      "help": "View, search, add or delete channel quotes.",
+      "level": 0,
+      "handler": "command_q",
+      "migration": "legacy-public-fallback"
+    },
+    "quote": {
+      "source": "public",
+      "help": "Fetch a quote by author, add one, or count quotes.",
+      "level": 0,
+      "handler": "command_quote",
       "migration": "legacy-public-fallback"
     },
     "topquote": {

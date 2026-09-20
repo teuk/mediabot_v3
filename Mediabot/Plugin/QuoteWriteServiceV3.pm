@@ -177,7 +177,9 @@ sub delete {
     my $authorized = $is_author
         || $principal->has_global_level('administrator')
         || $principal->has_channel_level($required);
-    return { ok => 0, error => 'forbidden' } unless $authorized;
+    return {
+        ok => 0, error => 'forbidden', required_channel_level => $required,
+    } unless $authorized;
 
     die "QuoteWriteServiceV3: data service unavailable\n"
         unless defined($quote->{channel_id})
@@ -188,6 +190,20 @@ sub delete {
         $id, 0 + $quote->{channel_id});
     eval { $sth->finish };
     return { ok => 1, status => 'deleted', id => $id };
+}
+
+sub recall {
+    my ($self, %args) = @_;
+    my $channel = _channel($args{channel});
+    my $id = _id($args{id});
+    my $dbh = $self->_dbh;
+    my $sth = $self->_statement($dbh, q{
+        UPDATE QUOTES q
+        JOIN CHANNEL c ON c.id_channel = q.id_channel
+           SET q.hits = COALESCE(q.hits, 0) + 1
+         WHERE c.name = ? AND q.id_quotes = ?}, $channel, $id);
+    eval { $sth->finish };
+    return { ok => 1, status => 'recalled', id => $id };
 }
 
 1;

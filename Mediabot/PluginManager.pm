@@ -383,7 +383,8 @@ sub _v3_quotes_read {
         unless ref($args) eq 'HASH';
     my %methods = (
         by_id => 'by_id', random => 'random', search => 'search',
-        by_author => 'by_author', count => 'count', top => 'top',
+        by_author => 'by_author', random_by_author => 'random_by_author',
+        count => 'count', top => 'top', stats => 'stats',
     );
     my $method = $methods{$operation // ''}
         or die "PluginManager: unsupported quote data operation\n";
@@ -473,7 +474,7 @@ sub _v3_quotes_write {
     }
     die "PluginManager: quote write operation requires an object\n"
         unless ref($args) eq 'HASH';
-    my %methods = (add => 'add', delete => 'delete');
+    my %methods = (add => 'add', delete => 'delete', recall => 'recall');
     my $method = $methods{$operation // ''}
         or die "PluginManager: unsupported quote write operation\n";
     my $principal = eval { $invocation->principal };

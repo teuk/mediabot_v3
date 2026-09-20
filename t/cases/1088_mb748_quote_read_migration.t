@@ -69,7 +69,7 @@ return sub {
     my $bot = T1088::Bot->new;
     my %original;
     my $legacy_calls = 0;
-    for my $name (qw(quotecount topquote halloffame)) {
+    for my $name (qw(q quote quotecount topquote halloffame)) {
         my $handler = sub { $legacy_calls++; 1 };
         $original{$name} = $handler;
         $bot->{registry}->register_command(
@@ -83,7 +83,7 @@ return sub {
     my $manager = Mediabot::PluginManager->new(
         bot => $bot, plugin_dir => 'plugins', v3_quote_service => $quotes);
     $manager->load_package_v3('quotes-v3', grants => [
-        qw(data.quotes.read irc.reply irc.notice)
+        qw(data.quotes.read data.quotes.write irc.reply irc.notice)
     ]);
 
     my $mounted = $bot->{registry}->command_for('quotecount', 'public');

@@ -1,9 +1,9 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB753. Packages are discoverable and
-explicitly loadable, but never activate at startup. MB753 adds a detached
-caller principal and a separate, core-owned quote-write gate. No package uses
-that gate yet. It adds no automatic remediation and exposes no exception text,
+Plugin API v3 remains experimental in MB754. Packages are discoverable and
+explicitly loadable, but never activate at startup. MB754 uses the detached
+caller principal and core-owned quote-write gate to adopt `q` and `quote`
+reversibly. It adds no automatic remediation and exposes no exception text,
 configuration value, mutable user object, database handle or arbitrary SQL.
 
 ## Package layout
@@ -321,8 +321,10 @@ or driver diagnostic.
 ## Authorized quote writes
 
 MB753 implements `data.quotes.write` as a capability and service distinct from
-`data.quotes.read`. A package that requests and receives it may call only
-`quote_add($invocation, $text)` or `quote_delete($invocation, $id)`. The core
+`data.quotes.read`. MB754 keeps that boundary and adds the exact
+`quote_recall($invocation, $id)` operation needed to preserve historical
+ranking. A package that requests and receives the capability may call only
+`quote_add`, `quote_delete` or `quote_recall`. The core
 supplies both the policy channel and the invocation principal. Plugin-provided
 channels, user identifiers, levels, SQL and database handles are not accepted.
 The sink also rejects any invocation that lacks the runtime's private origin.
@@ -340,26 +342,22 @@ quote id and resolved channel id.
 
 Writes require current policy `on`. `observe` returns a suppressed result and
 never reaches the mutation service; `off` remains inert. MB753 deliberately
-does not add `data.quotes.write` to `quotes-v3`, migrate `q` or `quote`, change
-the schema, activate a plugin or modify live quote data. It establishes the
-authorization boundary that a later reversible migration can use.
+created the boundary without adoption. MB754 grants no capability at startup,
+but the `quotes-v3` manifest now requests `data.quotes.write` and declares
+`q`/`quote`; actual load, grant, enablement and channel policy remain explicit
+operator actions. Neither milestone changes the schema or live quote data.
 
 ## Reversible quote-read migration
 
-MB748 ships `quotes-v3`, disabled and channel-off by default. It declares only
-`quotecount`, `topquote` and `halloffame`, each through
-`legacy-public-fallback`. In `observe`, the plugin performs the bounded read
-and suppresses its reply while the saved built-in registry handler remains visible. In
-`on`, the plugin owns those three commands for the selected channel. Switching
-the channel to `off`, disabling the package or unloading it restores the old
-path; unload reinstates the exact saved registry handlers.
-
-The mixed `q` and `quote` commands deliberately do not move. Their read forms
-share dispatch with add, delete and recall-counter mutations. MB753 supplies
-the separate authorized add/delete boundary, but command parity and a dedicated
-rollback gate remain a later milestone. See
-[`QUOTE_READ_V3_PILOT.md`](QUOTE_READ_V3_PILOT.md) for the existing read-only
-single-channel operator sequence.
+MB748 ships `quotes-v3`, disabled and channel-off by default, initially with
+`quotecount`, `topquote` and `halloffame`. MB754 adds `q` and `quote`; all five
+use `legacy-public-fallback`. In `observe`, the plugin performs bounded shadow
+reads, every v3 mutation is suppressed, and the saved built-in handler remains
+the only visible path. In `on`, the plugin owns all five commands for the
+selected channel. Switching the channel to `off`, disabling the package or
+unloading it restores the old path; unload reinstates the exact saved registry
+handlers. See [`QUOTE_COMMAND_V3_PILOT.md`](QUOTE_COMMAND_V3_PILOT.md) for the
+observe-first single-channel sequence.
 
 ## Versioned events and backpressure
 
@@ -410,7 +408,7 @@ no plugin job handler.
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-MB753 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
+MB754 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
 `events.subscribe`, `scheduler.jobs`, `http.fetch`, `storage.kv` and
 `data.quotes.read` plus `data.quotes.write`. Other capability names remain
 reserved for later mediated services.

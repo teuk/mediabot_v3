@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB753",
+  "milestone": "MB754",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -114,15 +114,22 @@
       "random",
       "search",
       "by_author",
+      "random_by_author",
       "count",
-      "top"
+      "top",
+      "stats"
     ],
     "maximum_results": 20,
+    "maximum_search_results": 51,
     "maximum_query_bytes": 256,
     "maximum_search_words": 8,
     "author_count_match_modes": [
       "exact",
       "prefix"
+    ],
+    "random_author_match_modes": [
+      "prefix",
+      "contains"
     ],
     "channel_source": "invocation policy",
     "observe_reads": "allowed",
@@ -150,7 +157,8 @@
     "capability": "data.quotes.write",
     "operations": [
       "add",
-      "delete"
+      "delete",
+      "recall"
     ],
     "activation": "on only",
     "observe_writes": "suppressed",
@@ -164,7 +172,7 @@
     "plugin_sql": "unavailable",
     "plugin_database_handles": "unavailable",
     "schema_administration": "unavailable",
-    "plugin_adoption": "none"
+    "plugin_adoption": "quotes-v3 q and quote, inactive by default"
   },
   "command_migration": {
     "mode": "legacy-public-fallback",
@@ -177,11 +185,13 @@
   "quote_read_migration": {
     "package": "quotes-v3",
     "commands": [
+      "q",
+      "quote",
       "quotecount",
       "topquote",
       "halloffame"
     ],
-    "mixed_read_write_commands": "remain core-owned",
+    "mixed_read_write_commands": "reversible quotes-v3 adoption",
     "activation": "explicit package plus channel policy"
   },
   "operator_diagnostics": {

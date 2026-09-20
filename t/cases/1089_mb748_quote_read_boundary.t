@@ -1,4 +1,4 @@
-# MB748 — the first quote pack moves reads only and stays inert by default.
+# MB754 — the quote pack grows from pure readers to reversible mixed commands.
 
 use strict;
 use warnings;
@@ -30,22 +30,22 @@ return sub {
     $assert->is($manifest->{activation}{default}, 'off',
         'quote migration remains inert by default');
     $assert->is(join(',', sort keys %{ $manifest->{commands} }),
-        'halloffame,quotecount,topquote',
-        'only the three pure read commands move in MB748');
-    $assert->ok(!exists($manifest->{commands}{q})
-            && !exists($manifest->{commands}{quote}),
-        'mixed read-write quote commands remain in the historical core');
+        'halloffame,q,quote,quotecount,topquote',
+        'the package declares the complete reversible quote surface');
+    $assert->ok(exists($manifest->{commands}{q})
+            && exists($manifest->{commands}{quote}),
+        'mixed read-write quote commands adopt the authorized bridge');
     $assert->is(join(',', @{ $manifest->{capabilities} }),
-        'data.quotes.read,irc.reply,irc.notice',
-        'package requests only read data and bounded response capabilities');
+        'data.quotes.read,data.quotes.write,irc.reply,irc.notice',
+        'package requests separate read, write and response capabilities');
     for my $command (values %{ $manifest->{commands} }) {
         $assert->is($command->{migration}, 'legacy-public-fallback',
             'every migrated quote command retains explicit rollback');
     }
 
     my $source = slurp_1089('plugins/quotes-v3/lib/Quotes.pm');
-    $assert->ok($source !~ /\b(?:INSERT|UPDATE|DELETE)\b/i,
-        'plugin source contains no database write verb');
+    $assert->ok($source !~ /\b(?:INSERT\s+INTO|UPDATE\s+QUOTES|DELETE\s+FROM)\b/i,
+        'plugin source still contains no SQL mutation verb');
     $assert->ok($source !~ /\b(?:DBI|prepare|execute)\b/,
         'plugin source cannot bypass the approved quote facade');
 

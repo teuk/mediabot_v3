@@ -168,3 +168,12 @@ channel-level deletion rules. Writes are impossible in `observe`, and no package
 requests the capability in this milestone. Consequently MB753 changes no
 command routing, activation, database schema, private configuration or live
 quote data.
+
+MB754 adopts the mixed commands only after that authority exists. `quotes-v3`
+declares `q` and `quote` through the same saved-handler migration bridge as its
+read-only commands. The read facade grows only the bounded parity operations
+needed by their historical public behavior, while `data.quotes.write` gains a
+single channel-scoped recall-counter operation. In `observe`, every v3 write
+is suppressed before DB access and the historical handler remains visible; in
+`on`, the package becomes authoritative only for an explicitly selected
+channel. Loading, grants, enablement and channel policy remain manual.

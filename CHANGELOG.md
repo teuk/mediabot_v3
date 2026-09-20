@@ -10,6 +10,26 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb754 — let the quote vault change keepers without changing its locks
+
+- Extend the first-party `quotes-v3` package to own `q` and `quote` through the
+  same reversible registry bridge as the three earlier quote readers. `off`,
+  disable and unload preserve the saved built-ins; `observe` runs the v3 path
+  silently while the historical handler remains the only visible path.
+- Add bounded parity reads for anti-repeating random selection, literal
+  prefix/contains author lookup, the historical 50-result search ceiling and
+  detached quote statistics. Plugins still receive no SQL or database handle.
+- Extend `data.quotes.write` with one exact `recall` operation so visible v3
+  views preserve the `hits` ranking. Add, delete and recall remain impossible
+  outside explicit channel policy `on`; `observe` suppresses all three before
+  the mutation service.
+- Keep adoption inert. The package is never loaded, granted, enabled or opted
+  into a channel automatically, and MB754 changes no schema, private
+  configuration or live quote row.
+- Require an authenticated global Administrator at the `moduser` command
+  boundary. A stored privileged hostmask can no longer reach account mutations
+  while its IRC session is unauthenticated.
+
 ### mb753 — give quote writes a sealed authorization desk
 
 - Add a detached immutable `PrincipalV3` snapshot to command invocations. The

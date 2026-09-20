@@ -1991,6 +1991,12 @@ sub mbModUser_ctx {
     my $channel = $ctx->channel;     # may be undef (private)
     my $message = $ctx->message;
 
+    # A stored hostmask can resolve to a privileged user object even when the
+    # caller is not authenticated.  Every moduser branch mutates account state,
+    # so enforce both authentication and the documented Administrator level at
+    # the command boundary before looking up a target or touching the database.
+    $ctx->require_level('Administrator') or return;
+
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     # ---------------------------------------------------------

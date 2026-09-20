@@ -7,8 +7,9 @@ MB744 channel policy, MB745's first reversible product plugin, MB746's shared
 HTTP/repository boundary, MB747's first approved domain-data facade, MB748's
 first reversible database-backed command migration, MB749's registry-native
 built-in dispatch, MB750's read-only operator diagnostics, MB751's bounded
-runtime failure history, MB752's explicit per-resource/channel quarantine and
-MB753's separately authorized quote-write gate. It does not enable a plugin or
+runtime failure history, MB752's explicit per-resource/channel quarantine,
+MB753's quote-write authority and MB754's reversible `q`/`quote` adoption. It
+does not enable a plugin or
 grant a capability automatically.
 
 ## Current baseline
@@ -130,7 +131,9 @@ command invocation now carries a detached principal derived by the core, while
 `data.quotes.write` exposes only bounded add/delete methods through a distinct
 service. An opaque origin rejects plugin-created invocation lookalikes. The
 channel and authorization are core-owned, writes require `on`, and the existing
-`quotes-v3` package remains read-only.
+`quotes-v3` package remains read-only in that milestone. MB754 adds the exact
+bounded recall-counter mutation and adopts the two mixed commands without
+changing the default-off lifecycle.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -152,7 +155,7 @@ Planned capability families include:
 | `http.fetch` | TLS, timeout, size, redirect, private-address and quota policy |
 | `secrets.read:<name>` | reference-based access without manifest or log disclosure |
 | `data.quotes.read` | six bounded channel-scoped reads returning detached records |
-| `data.quotes.write` | on-only bounded add/delete with a core-derived principal |
+| `data.quotes.write` | on-only bounded add/delete/recall with a core-derived principal |
 | `data.<domain>` | future approved repository methods instead of arbitrary SQL |
 
 ## Dependency boundary matrix
@@ -166,7 +169,7 @@ Planned capability families include:
 | Scheduler | core tasks plus route-v1 timers | shared owned jobs with quotas and lifecycle cancellation | core scheduler |
 | Storage | v2 last-write-wins JSON document | MB746 namespaced KV with compare-and-swap/short transactions | data service |
 | HTTP | per-feature clients outside v3 | MB746 bounded async client with cache and circuit breaker | HTTP service |
-| Database | possible through full in-process bot | approved quote reads plus MB753's separately authorized add/delete service | data layer |
+| Database | possible through full in-process bot | approved quote reads plus MB754's separately authorized add/delete/recall service | data layer |
 | Secrets | configuration may be reachable in-process | named secret references only | core configuration |
 | Activation | global plugin lifecycle plus MB744 channel policy | `off`, `observe` or `on` per instance/channel | policy service |
 | Health | lifecycle and metrics fragments | Doctor, reason, permissions, bounded failure history and explicit scoped quarantine | plugin runtime |
@@ -223,11 +226,15 @@ Planned capability families include:
     carry a detached core-derived principal and `data.quotes.write` exposes only
     bounded add/delete operations. Mutations require policy `on`; no package,
     quote command or live data adopts the capability yet.
+15. **MB754 — reversible mixed quote commands:** complete. `q` and `quote`
+    join `quotes-v3` behind the saved-handler bridge. Parity reads remain
+    bounded, visible recalls use one explicit write operation, `observe`
+    suppresses all v3 mutations, and the package remains inactive by default.
 
-The next quote milestone can evaluate reversible `q`/`quote` adoption against
-this inert write gate. Only if operational evidence justifies it should a
-distinct reviewed path consider automatic remediation; manual containment
-remains reversible and exact.
+The next step is supervised observe-first evidence on one development channel,
+followed by an explicit promotion decision. Only if operational evidence
+justifies it should a distinct reviewed path consider automatic remediation;
+manual containment remains reversible and exact.
 
 ## Extraction order
 

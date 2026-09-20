@@ -1,4 +1,4 @@
-# MB753 — machine contract records an inert, separately authorized write gate.
+# MB754 — machine contract records adoption of the separately authorized gate.
 
 use strict;
 use warnings;
@@ -21,17 +21,18 @@ return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(
         slurp_1103('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB753',
-        'machine contract records the quote authorization gate');
+    $assert->is($contract->{milestone}, 'MB754',
+        'machine contract records reversible quote command adoption');
     $assert->ok(grep($_ eq 'data.quotes.write',
         @{ $contract->{implemented_capabilities} }),
         'write capability is distinct from quote reads');
     $assert->is(join(',', @{ $contract->{quote_write_limits}{operations} }),
-        'add,delete', 'only the two approved mutations are exposed');
+        'add,delete,recall', 'only the three approved mutations are exposed');
     $assert->is($contract->{quote_write_limits}{activation}, 'on only',
         'observe can never mutate quote data');
-    $assert->is($contract->{quote_write_limits}{plugin_adoption}, 'none',
-        'foundation does not migrate a command or activate a plugin');
+    $assert->is($contract->{quote_write_limits}{plugin_adoption},
+        'quotes-v3 q and quote, inactive by default',
+        'official adoption remains inactive until an operator opts in');
     $assert->is($contract->{quote_write_limits}{channel_source},
         'core invocation policy', 'plugin cannot select a write channel');
     $assert->is($contract->{quote_write_limits}{principal_source},
@@ -53,10 +54,10 @@ return sub {
 
     my $quote_manifest = JSON::PP->new->decode(
         slurp_1103('plugins/quotes-v3/plugin.json'));
-    $assert->ok(!grep($_ eq 'data.quotes.write',
+    $assert->ok(grep($_ eq 'data.quotes.write',
         @{ $quote_manifest->{capabilities} }),
-        'official quote package remains read-only in MB753');
-    $assert->ok(!exists($quote_manifest->{commands}{q})
-        && !exists($quote_manifest->{commands}{quote}),
-        'mixed commands remain core-owned');
+        'official quote package requests the separate write capability');
+    $assert->ok(exists($quote_manifest->{commands}{q})
+        && exists($quote_manifest->{commands}{quote}),
+        'mixed commands are reversibly declared by the package');
 };

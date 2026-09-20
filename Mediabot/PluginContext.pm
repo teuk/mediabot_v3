@@ -173,8 +173,9 @@ sub quote_by_id {
 }
 
 sub quote_random {
-    my ($self, $invocation) = @_;
-    return $self->_quotes_read($invocation, 'random', {});
+    my ($self, $invocation, %args) = @_;
+    return $self->_quotes_read($invocation, 'random',
+        { exclude_id => $args{exclude_id} });
 }
 
 sub quote_search {
@@ -186,7 +187,20 @@ sub quote_search {
 sub quotes_by_author {
     my ($self, $invocation, $author, %args) = @_;
     return $self->_quotes_read($invocation, 'by_author',
-        { author => $author, limit => $args{limit} });
+        { author => $author, limit => $args{limit},
+          author_match => $args{author_match} });
+}
+
+sub quote_random_by_author {
+    my ($self, $invocation, $author, %args) = @_;
+    return $self->_quotes_read($invocation, 'random_by_author',
+        { author => $author, author_match => $args{author_match},
+          exclude_id => $args{exclude_id} });
+}
+
+sub quote_stats {
+    my ($self, $invocation) = @_;
+    return $self->_quotes_read($invocation, 'stats', {});
 }
 
 sub quote_count {
@@ -221,6 +235,11 @@ sub quote_add {
 sub quote_delete {
     my ($self, $invocation, $id) = @_;
     return $self->_quotes_write($invocation, 'delete', { id => $id });
+}
+
+sub quote_recall {
+    my ($self, $invocation, $id) = @_;
+    return $self->_quotes_write($invocation, 'recall', { id => $id });
 }
 
 sub DESTROY {

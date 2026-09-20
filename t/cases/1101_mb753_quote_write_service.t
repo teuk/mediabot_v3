@@ -129,6 +129,13 @@ return sub {
         delete_level => 100)->{status}, 'deleted',
         'configured channel privilege authorizes deletion');
 
+    $dbh->plan({ rows => [] });
+    my $recalled = $service->recall(channel => '#test', id => 77);
+    $assert->is($recalled->{status}, 'recalled',
+        'recall counter mutation is an explicit bounded operation');
+    $assert->is(join(',', @{ $dbh->{binds}[-1] }), '#test,77',
+        'recall binds both the policy channel and returned quote id');
+
     eval { $service->add(
         channel => '#test', principal => $user, text => "bad\nquote") };
     $assert->like($@ // '', qr/invalid quote text/,

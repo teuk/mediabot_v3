@@ -99,11 +99,11 @@ return sub {
         ->{records}[0]->hits, 99, 'top returns the bounded recall ranking');
 
     my $ok = eval {
-        $service->search(channel => '#other', query => 'x', limit => 21);
+        $service->search(channel => '#other', query => 'x', limit => 52);
         1;
     };
-    $assert->like($@ // '', qr/invalid result limit/,
-        'result limits above the core maximum fail closed');
+    $assert->like($@ // '', qr/invalid search result limit/,
+        'search limits above the MB754 parity ceiling fail closed');
     $ok = eval { $service->by_id(channel => 'not-a-channel', id => 7); 1 };
     $assert->like($@ // '', qr/invalid channel/,
         'non-channel scope fails before database access');
