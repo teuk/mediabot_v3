@@ -27,11 +27,11 @@ return sub {
 
     my $api_contract = JSON::PP->new->decode(
         _slurp_1070('plugins/API_V3_CONTRACT.json'));
-    $assert->is($api_contract->{milestone}, 'MB752',
-        'API v3 machine contract records manual resource quarantine');
+    $assert->is($api_contract->{milestone}, 'MB753',
+        'API v3 machine contract records the quote write authorization gate');
     $assert->is(join(',', @{ $api_contract->{implemented_capabilities} }),
-        'data.quotes.read,events.subscribe,http.fetch,irc.channel_message,irc.notice,irc.reply,scheduler.jobs,storage.kv',
-        'machine contract lists the eight executable capabilities');
+        'data.quotes.read,data.quotes.write,events.subscribe,http.fetch,irc.channel_message,irc.notice,irc.reply,scheduler.jobs,storage.kv',
+        'machine contract lists the nine executable capabilities');
     $assert->is($api_contract->{event_backpressure}{max_pending_per_plugin}, 32,
         'machine contract publishes the queue bound');
     $assert->is($api_contract->{event_backpressure}{dispatch_batch_size}, 8,
@@ -51,6 +51,10 @@ return sub {
         'none', 'machine contract forbids failure-driven quarantine');
     $assert->is($api_contract->{manual_quarantine}{failure_history},
         'preserve', 'quarantine release does not erase evidence');
+    $assert->is($api_contract->{quote_write_limits}{activation}, 'on only',
+        'machine contract forbids writes in observe mode');
+    $assert->is($api_contract->{quote_write_limits}{plugin_adoption}, 'none',
+        'machine contract keeps the new write gate inert');
 
     my $published = JSON::PP->new->decode(
         _slurp_1070('plugins/API_V3_EVENTS.json'));

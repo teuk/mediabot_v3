@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB752",
+  "milestone": "MB753",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -47,6 +47,7 @@
   ],
   "implemented_capabilities": [
     "data.quotes.read",
+    "data.quotes.write",
     "events.subscribe",
     "http.fetch",
     "irc.channel_message",
@@ -58,6 +59,7 @@
   "plugin_receives": [
     "Mediabot::PluginContext",
     "Mediabot::Plugin::InvocationV3",
+    "Mediabot::Plugin::PrincipalV3",
     "Mediabot::Plugin::EventEnvelopeV3",
     "Mediabot::Plugin::JobInvocationV3",
     "Mediabot::Plugin::HTTPResponseV3",
@@ -124,9 +126,45 @@
     ],
     "channel_source": "invocation policy",
     "observe_reads": "allowed",
-    "writes": "unavailable",
+    "writes": "separate data.quotes.write capability",
     "plugin_sql": "unavailable",
     "plugin_database_handles": "unavailable"
+  },
+  "invocation_principal": {
+    "mode": "detached immutable scalar snapshot",
+    "source": "core command context",
+    "write_origin": "opaque runtime authority required",
+    "fields": [
+      "authenticated",
+      "user_id",
+      "account",
+      "global_level",
+      "channel_level"
+    ],
+    "anonymous_defaults": "unauthenticated with zero levels",
+    "passwords": "unavailable",
+    "hostmasks": "unavailable",
+    "raw_messages": "unavailable"
+  },
+  "quote_write_limits": {
+    "capability": "data.quotes.write",
+    "operations": [
+      "add",
+      "delete"
+    ],
+    "activation": "on only",
+    "observe_writes": "suppressed",
+    "maximum_quote_chars": 512,
+    "maximum_quote_bytes": 2048,
+    "channel_source": "core invocation policy",
+    "principal_source": "core command context",
+    "invocation_origin": "opaque runtime authority required",
+    "add_attribution": "authenticated user id or historical anonymous zero",
+    "delete_authorization": "quote author, Administrator global level, or configured channel level",
+    "plugin_sql": "unavailable",
+    "plugin_database_handles": "unavailable",
+    "schema_administration": "unavailable",
+    "plugin_adoption": "none"
   },
   "command_migration": {
     "mode": "legacy-public-fallback",

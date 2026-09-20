@@ -36,6 +36,13 @@ sub _copy_config {
 sub new {
     my ($class, %args) = @_;
 
+    require Mediabot::Plugin::PrincipalV3;
+    my $principal = $args{principal};
+    $principal = Mediabot::Plugin::PrincipalV3->anonymous
+        unless ref($principal);
+    die "InvocationV3: invalid principal\n"
+        unless eval { $principal->isa('Mediabot::Plugin::PrincipalV3') };
+
     my @clean_args;
     if (ref($args{args}) eq 'ARRAY') {
         for my $value (@{ $args{args} }) {
@@ -73,6 +80,8 @@ sub new {
         activation  => "$activation",
         config      => _copy_config($args{config}),
         output_guard => $args{output_guard},
+        principal    => $principal,
+        origin_token => $args{origin_token},
     };
     return $self;
 }
@@ -85,6 +94,14 @@ sub is_private { _state($_[0])->{is_private} ? 1 : 0 }
 sub args       { [ @{ _state($_[0])->{args} } ] }
 sub activation_mode { _state($_[0])->{activation} }
 sub config { _copy_config(_state($_[0])->{config}) }
+sub principal { _state($_[0])->{principal} }
+
+sub _authorized_by {
+    my ($self, $token) = @_;
+    my $origin = _state($self)->{origin_token};
+    return 0 unless ref($origin) && ref($token);
+    return refaddr($origin) == refaddr($token) ? 1 : 0;
+}
 
 sub config_value {
     my ($self, $key) = @_;

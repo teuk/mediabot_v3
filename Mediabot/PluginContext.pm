@@ -38,6 +38,7 @@ sub new {
         storage_snapshot_sink => $args{storage_snapshot_sink},
         storage_commit_sink => $args{storage_commit_sink},
         quotes_read_sink => $args{quotes_read_sink},
+        quotes_write_sink => $args{quotes_write_sink},
     };
     return $self;
 }
@@ -198,6 +199,28 @@ sub top_quotes {
     my ($self, $invocation, %args) = @_;
     return $self->_quotes_read($invocation, 'top',
         { limit => $args{limit} });
+}
+
+sub _quotes_write {
+    my ($self, $invocation, $operation, $args) = @_;
+    $self->require_capability('data.quotes.write');
+    _invocation($invocation);
+    die "PluginContext: quote write arguments must be an object\n"
+        unless ref($args) eq 'HASH';
+    my $sink = _state($self)->{quotes_write_sink};
+    die "PluginContext: quote write service is unavailable\n"
+        unless ref($sink) eq 'CODE';
+    return $sink->($invocation, $operation, { %$args });
+}
+
+sub quote_add {
+    my ($self, $invocation, $text) = @_;
+    return $self->_quotes_write($invocation, 'add', { text => $text });
+}
+
+sub quote_delete {
+    my ($self, $invocation, $id) = @_;
+    return $self->_quotes_write($invocation, 'delete', { id => $id });
 }
 
 sub DESTROY {

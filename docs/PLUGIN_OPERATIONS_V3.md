@@ -3,7 +3,9 @@
 MB750 added a read-only operator view over the API v3 state that already
 decides runtime behavior. MB751 added bounded, in-memory failure evidence.
 MB752 adds a separate Owner-only action for exact resource/channel containment;
-it does not turn evidence into automatic remediation.
+it does not turn evidence into automatic remediation. MB753 adds no Partyline
+mutation: its quote-write authority is a core runtime boundary and remains
+unused by every shipped package.
 
 ## Is the package operationally ready?
 

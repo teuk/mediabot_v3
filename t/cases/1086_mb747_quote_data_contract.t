@@ -23,16 +23,17 @@ sub slurp {
 return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(slurp('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB752',
-        'machine contract names the manual quarantine milestone');
+    $assert->is($contract->{milestone}, 'MB753',
+        'machine contract names the quote write authorization milestone');
     $assert->ok(grep($_ eq 'data.quotes.read',
         @{ $contract->{implemented_capabilities} }),
         'machine contract implements the exact quote read capability');
     $assert->is(join(',', @{ $contract->{quote_read_limits}{operations} }),
         'by_id,random,search,by_author,count,top',
         'machine contract freezes the six approved operations');
-    $assert->is($contract->{quote_read_limits}{writes}, 'unavailable',
-        'machine contract exposes no quote write');
+    $assert->is($contract->{quote_read_limits}{writes},
+        'separate data.quotes.write capability',
+        'machine contract keeps reads physically separate from writes');
     $assert->is($contract->{quote_read_limits}{channel_source},
         'invocation policy', 'machine contract makes channel authority explicit');
     $assert->is(join(',',
@@ -46,6 +47,8 @@ return sub {
     my $service = slurp('Mediabot/Plugin/QuoteServiceV3.pm');
     $assert->like($context, qr/require_capability\('data\.quotes\.read'\)/,
         'runtime requires the exact capability before every facade call');
+    $assert->like($context, qr/require_capability\('data\.quotes\.write'\)/,
+        'runtime requires a distinct capability before every mutation');
     $assert->ok($service !~ /\b(?:INSERT|UPDATE|DELETE)\b/i,
         'quote service source has no mutating SQL verb');
 

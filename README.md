@@ -277,10 +277,10 @@ Documentation:
 - [Plugin architecture](docs/PLUGIN_ARCHITECTURE.md) — core boundaries, API v2 freeze and API v3 roadmap;
 - [Playful v3 pilot](docs/PLAYFUL_V3_PILOT.md) — first reversible command migration, supervised rollout and rollback;
 - [Quote Reads v3 pilot](docs/QUOTE_READ_V3_PILOT.md) — observe-first migration and exact rollback for the first database-backed commands;
-- [Plugin API v3](docs/PLUGIN_API_V3.md) — strict packages, typed channel policy, versioned events, owned jobs, shared HTTPS/repository services and approved quote reads;
+- [Plugin API v3](docs/PLUGIN_API_V3.md) — strict packages, typed channel policy, versioned events, owned jobs, shared services, approved quote reads and an inert authorized-write gate;
 - [Short Content v3 pilot](docs/SHORT_CONTENT_V3_PILOT.md) — observe-first proof and rollback for the first external-content package;
 - [Command catalogue](docs/COMMAND_CATALOGUE.md) — MB749 registry-native built-in dispatch and migration rollback rules;
-- [Plugin operations v3](docs/PLUGIN_OPERATIONS_V3.md) — MB752 diagnostics, bounded failure evidence and explicit per-resource/channel quarantine;
+- [Plugin operations v3](docs/PLUGIN_OPERATIONS_V3.md) — diagnostics, bounded failure evidence and explicit per-resource/channel quarantine;
 - [Public commands](https://github.com/teuk/mediabot_v3/wiki/Public-commands);
 - [Private and administrative commands](https://github.com/teuk/mediabot_v3/wiki/Private-and-admin-commands);
 - [Access levels](https://github.com/teuk/mediabot_v3/wiki/Access-levels);

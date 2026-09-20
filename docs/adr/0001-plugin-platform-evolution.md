@@ -156,3 +156,15 @@ outlive the operator decision. Disable/enable preserves it; unload/reload
 discards it. Release preserves failure history, and no count, streak or
 fingerprint triggers quarantine automatically. Global disable, restart,
 persistence and bulk reset remain outside this decision.
+
+MB753 establishes write authority before moving any mixed quote command. The
+core derives an immutable scalar principal from the authenticated command
+context and attaches it to `InvocationV3`; plugins receive neither the mutable
+user object nor credentials or host identity. The distinct
+`data.quotes.write` service accepts only bounded add/delete operations, chooses
+the channel from current policy, rejects invocation lookalikes without the
+runtime's opaque origin, and reuses historical author, Administrator and
+channel-level deletion rules. Writes are impossible in `observe`, and no package
+requests the capability in this milestone. Consequently MB753 changes no
+command routing, activation, database schema, private configuration or live
+quote data.

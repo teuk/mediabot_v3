@@ -6,7 +6,9 @@ moving a write path. The `quotes-v3` package owns `quotecount`, `topquote` and
 capabilities, selects one development channel and enables it.
 
 `q` and `quote` remain historical. They combine reads with add, delete and
-recall-counter writes, so they are outside this milestone.
+recall-counter writes, so they are outside this milestone. MB753 later adds an
+inert authorized add/delete service, but does not change this read-only package
+or pilot.
 
 ## Safety properties
 

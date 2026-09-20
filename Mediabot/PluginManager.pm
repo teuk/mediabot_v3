@@ -39,6 +39,8 @@ use Scalar::Util qw(refaddr blessed reftype);
 sub new {
     my ($class, %args) = @_;
 
+    my $invocation_authority = bless {},
+        'Mediabot::Plugin::InvocationAuthorityV3';
     return bless {
         bot        => $args{bot},
         plugin_dir => $args{plugin_dir},
@@ -47,6 +49,8 @@ sub new {
         v3_http_service => $args{v3_http_service},
         v3_repositories => {},
         v3_quote_service => $args{v3_quote_service},
+        v3_quote_write_service => $args{v3_quote_write_service},
+        v3_invocation_authority => $invocation_authority,
         v3_failure_ledgers => {},
         v3_quarantines => {},
     }, $class;
@@ -402,6 +406,143 @@ sub _v3_quotes_read {
         outcome => 'read',
     });
     return $result;
+}
+
+# MB753: quote mutations cross a distinct capability and a distinct core-owned
+# service. The invocation policy supplies the channel and writes are permitted
+# only in explicit on mode; observe remains a side-effect-free shadow.
+sub v3_quote_write_service {
+    my ($self) = @_;
+    return $self->{v3_quote_write_service}
+        if $self->{v3_quote_write_service};
+    require Mediabot::Plugin::QuoteWriteServiceV3;
+    my $bot = $self->{bot};
+    $self->{v3_quote_write_service} =
+        Mediabot::Plugin::QuoteWriteServiceV3->new(
+            dbh_provider => sub { eval { $bot->{dbh} } },
+            on_created => sub {
+                my (%created) = @_;
+                return 1 unless $bot->{achievements}
+                    && $created{author_id};
+                my $ok = eval {
+                    $bot->{achievements}->check_community_contributions(
+                        ($created{account} // ''), $created{channel},
+                        $created{author_id});
+                    1;
+                };
+                unless ($ok) {
+                    my $error = _plugin_error_text(
+                        $@, 'quote contribution check failed');
+                    eval { $bot->{logger}->log(1,
+                        "API v3 quote contribution check failed: $error") };
+                }
+                return 1;
+            },
+        );
+    return $self->{v3_quote_write_service};
+}
+
+sub _v3_quote_delete_level {
+    my ($self) = @_;
+    my $level = eval {
+        $self->{bot}{conf}->get_int(
+            'main.QUOTE_DELETE_CHANNEL_LEVEL',
+            default => 100, min => 0, max => 500)
+    };
+    return defined($level) && !ref($level) && "$level" =~ /\A[0-9]+\z/
+        ? 0 + $level : 100;
+}
+
+sub _v3_quotes_write {
+    my ($self, $name, $invocation, $operation, $args) = @_;
+    my $entry = $self->plugin($name)
+        or die "PluginManager: API v3 plugin '$name' is not registered\n";
+    return { ok => 0, error => 'disabled' } unless $entry->{enabled};
+    die "PluginManager: untrusted quote write invocation\n"
+        unless ref($invocation)
+            && eval { $invocation->_authorized_by(
+                $self->{v3_invocation_authority}) };
+    my $policy = $self->_v3_invocation_policy($entry, $invocation);
+    if ($policy->{mode} ne 'on') {
+        _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
+            plugin => $name, domain => 'quotes', operation => $operation,
+            outcome => 'suppressed',
+        });
+        return { ok => 0, error => $policy->{mode} eq 'observe'
+            ? 'observe' : 'channel_off' };
+    }
+    die "PluginManager: quote write operation requires an object\n"
+        unless ref($args) eq 'HASH';
+    my %methods = (add => 'add', delete => 'delete');
+    my $method = $methods{$operation // ''}
+        or die "PluginManager: unsupported quote write operation\n";
+    my $principal = eval { $invocation->principal };
+    my $result = eval {
+        $self->v3_quote_write_service->$method(
+            %$args,
+            channel => $policy->{channel},
+            principal => $principal,
+            delete_level => $self->_v3_quote_delete_level,
+        );
+    };
+    unless ($result) {
+        my $error = _plugin_error_text($@, 'quote data write failed');
+        _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
+            plugin => $name, domain => 'quotes', operation => $operation,
+            outcome => 'error',
+        });
+        eval { $self->{bot}{logger}->log(
+            1, "plugin '$name' API v3 quote write failed: $error") };
+        return { ok => 0, error => 'unavailable' };
+    }
+    my $outcome = $result->{ok}
+        ? ($result->{status} // 'write') : ($result->{error} // 'error');
+    _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
+        plugin => $name, domain => 'quotes', operation => $operation,
+        outcome => $outcome,
+    });
+    return $result;
+}
+
+sub _v3_principal_from_context {
+    my ($self, $ctx, $channel) = @_;
+    require Mediabot::Plugin::PrincipalV3;
+    my $user = eval { $ctx->user };
+    return Mediabot::Plugin::PrincipalV3->anonymous
+        unless $user && eval { $user->is_authenticated };
+
+    my $id = eval { $user->id };
+    my $account = eval { $user->nickname };
+    return Mediabot::Plugin::PrincipalV3->anonymous
+        unless defined($id) && !ref($id) && "$id" =~ /\A[1-9][0-9]*\z/
+            && defined($account) && !ref($account) && length($account);
+
+    my $global = 'user';
+    for my $candidate (qw(Owner Master Administrator User)) {
+        if (eval { $user->has_level($candidate) }) {
+            $global = lc($candidate);
+            last;
+        }
+    }
+    my $channel_level = 0;
+    if (defined($channel) && $channel =~ /\A[#&+!]/
+        && eval { $self->{bot}->can('getUserChannelLevel') }) {
+        my $message = eval { $ctx->message };
+        $channel_level = eval {
+            $self->{bot}->getUserChannelLevel(
+                $message, $channel, 0 + $id)
+        } // 0;
+    }
+    $channel_level = 0
+        unless !ref($channel_level) && "$channel_level" =~ /\A[0-9]+\z/
+            && $channel_level >= 0 && $channel_level <= 500;
+    return Mediabot::Plugin::PrincipalV3->new(
+        authenticated => 1,
+        user_id => 0 + $id,
+        account => "$account",
+        global_level => $global,
+        channel_level => 0 + $channel_level,
+    );
 }
 
 sub discover_v3_packages {
@@ -1766,6 +1907,9 @@ sub _mount_v3_commands {
                         authority  => $plugin_context,
                         activation => $policy->{mode},
                         config     => $policy->{config},
+                        principal  => $self->_v3_principal_from_context(
+                            $ctx, $channel),
+                        origin_token => $self->{v3_invocation_authority},
                         output_guard => sub {
                             return 0 unless $self->is_enabled($key);
                             my $current = $self->_v3_policy_for_entry(

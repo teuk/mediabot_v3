@@ -10,6 +10,26 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb753 — give quote writes a sealed authorization desk
+
+- Add a detached immutable `PrincipalV3` snapshot to command invocations. The
+  core derives authenticated account identity, normalized global level and
+  current channel level; plugins receive no password, hostmask, raw message or
+  mutable user object. An opaque runtime origin rejects plugin-created
+  invocation lookalikes at the write sink.
+- Add the separate `data.quotes.write` capability and a core-owned quote write
+  service. It exposes only bounded `add` and `delete` operations, derives the
+  channel from the current policy, uses prepared statements and never exposes
+  SQL, a database handle or schema administration.
+- Preserve historical authorization deliberately: authenticated authors may
+  delete their own quote, Administrators and above may delete, and the existing
+  configured channel-level threshold remains authoritative. Anonymous adds
+  retain the historical zero attribution; duplicate adds are idempotent.
+- Make mutations `on`-only. `observe` can execute plugin code but every write is
+  suppressed by the core. No package requests the capability yet, `q` and
+  `quote` remain core-owned, and MB753 activates no plugin or channel, changes
+  no schema or private configuration, and performs no live-data mutation.
+
 ### mb752 — seal one misbehaving spell without closing the whole book
 
 - Add an in-memory manual quarantine registry to each loaded API v3 package.

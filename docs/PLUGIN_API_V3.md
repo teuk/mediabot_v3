@@ -1,10 +1,10 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB752. Packages are discoverable and
-explicitly loadable, but never activate at startup. MB752 adds explicit,
-per-resource and per-channel manual quarantine on top of MB751's bounded
-failure evidence. It adds no automatic remediation and exposes no exception
-text, configuration value, database handle or arbitrary SQL.
+Plugin API v3 remains experimental in MB753. Packages are discoverable and
+explicitly loadable, but never activate at startup. MB753 adds a detached
+caller principal and a separate, core-owned quote-write gate. No package uses
+that gate yet. It adds no automatic remediation and exposes no exception text,
+configuration value, mutable user object, database handle or arbitrary SQL.
 
 ## Package layout
 
@@ -135,6 +135,12 @@ sub command_hello {
 and capability-checked services. `Mediabot::Plugin::InvocationV3` exposes only
 bounded copies of nick, channel, command, arguments, source and private/public
 state. It contains private output sinks that the plugin cannot inspect.
+Its `principal()` accessor returns an immutable `PrincipalV3`: authenticated
+state, numeric user id, bounded account name, normalized global level and the
+current channel level. The core derives those values from the command context;
+the plugin cannot recover the mutable user object. Quote writes additionally
+require an opaque runtime origin carried only by core-created invocations, so
+constructing a lookalike invocation cannot forge a channel or principal.
 
 The invocation also exposes `activation_mode`, `config`, `config_value` and
 `output_allowed`. In `observe` mode the handler executes, but reply/notice sinks
@@ -305,12 +311,38 @@ wildcards as literal characters before adding its own trailing wildcard. It
 exists solely to preserve the historical `quotecount <nick>` contract; it is
 not a general query interface.
 
-Reads are allowed in `observe` so a future migrated command can be compared
-with its historical implementation. `off` remains inert. MB748 exposes no add,
-delete, update or recall-counter operation; merely reading a record does not
+Reads are allowed in `observe` so a migrated command can be compared with its
+historical implementation. `off` remains inert. The read service exposes no
+add, delete, update or recall-counter operation; merely reading a record does not
 change its `hits` value. Database failures are logged and counted by the core,
 then returned as `{ ok => 0, error => "unavailable" }` without leaking a query
 or driver diagnostic.
+
+## Authorized quote writes
+
+MB753 implements `data.quotes.write` as a capability and service distinct from
+`data.quotes.read`. A package that requests and receives it may call only
+`quote_add($invocation, $text)` or `quote_delete($invocation, $id)`. The core
+supplies both the policy channel and the invocation principal. Plugin-provided
+channels, user identifiers, levels, SQL and database handles are not accepted.
+The sink also rejects any invocation that lacks the runtime's private origin.
+
+Quote text is a single non-empty line capped at 512 characters and 2048 UTF-8
+bytes. Add checks for an existing identical quote on the same channel before a
+prepared insert. An authenticated add uses the principal's numeric user id;
+anonymous adds retain the historical zero attribution.
+
+Delete first resolves the numeric quote id inside the invocation channel. It
+then requires an authenticated principal who is the recorded author, has a
+global level of Administrator or above, or meets the existing configured
+channel-level threshold. The final prepared delete is constrained by both
+quote id and resolved channel id.
+
+Writes require current policy `on`. `observe` returns a suppressed result and
+never reaches the mutation service; `off` remains inert. MB753 deliberately
+does not add `data.quotes.write` to `quotes-v3`, migrate `q` or `quote`, change
+the schema, activate a plugin or modify live quote data. It establishes the
+authorization boundary that a later reversible migration can use.
 
 ## Reversible quote-read migration
 
@@ -323,9 +355,10 @@ the channel to `off`, disabling the package or unloading it restores the old
 path; unload reinstates the exact saved registry handlers.
 
 The mixed `q` and `quote` commands deliberately do not move. Their read forms
-share dispatch with add, delete and recall-counter mutations, so migrating
-them requires a later write capability, stronger authorization and its own
-rollback gate. See [`QUOTE_READ_V3_PILOT.md`](QUOTE_READ_V3_PILOT.md) for the
+share dispatch with add, delete and recall-counter mutations. MB753 supplies
+the separate authorized add/delete boundary, but command parity and a dedicated
+rollback gate remain a later milestone. See
+[`QUOTE_READ_V3_PILOT.md`](QUOTE_READ_V3_PILOT.md) for the existing read-only
 single-channel operator sequence.
 
 ## Versioned events and backpressure
@@ -377,10 +410,10 @@ no plugin job handler.
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-MB748 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
+MB753 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
 `events.subscribe`, `scheduler.jobs`, `http.fetch`, `storage.kv` and
-`data.quotes.read`. Other capability names remain reserved for later mediated
-services.
+`data.quotes.read` plus `data.quotes.write`. Other capability names remain
+reserved for later mediated services.
 
 Discovery reads manifests only. Loading is explicit, leaves the package
 disabled and mounts silent commands. Enabling is a second explicit operation,

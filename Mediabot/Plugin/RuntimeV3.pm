@@ -155,6 +155,9 @@ sub load_package {
         quotes_read_sink => sub {
             return $manager->_v3_quotes_read($name, @_);
         },
+        quotes_write_sink => sub {
+            return $manager->_v3_quotes_write($name, @_);
+        },
     );
     # The plugin receives a detached manifest snapshot. It cannot rewrite the
     # already validated core-owned contract between validation and mounting.
