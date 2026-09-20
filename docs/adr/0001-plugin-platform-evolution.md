@@ -147,3 +147,12 @@ timestamps and short instance-salted SHA-256 fingerprints; raw exceptions
 never cross the operator boundary. A success resets its matching streak, while
 unload destroys the complete ledger. Readiness is unchanged, and MB751
 introduces neither automatic quarantine nor a reset control.
+
+MB752 adds manual containment without coupling it to that evidence. An Owner
+may quarantine or release one manifest-declared command, event, job or HTTP
+callback on one channel. The 64-entry registry is instance-local, idempotent
+and checked again at deferred dispatch and completion so queued work cannot
+outlive the operator decision. Disable/enable preserves it; unload/reload
+discards it. Release preserves failure history, and no count, streak or
+fingerprint triggers quarantine automatically. Global disable, restart,
+persistence and bulk reset remain outside this decision.

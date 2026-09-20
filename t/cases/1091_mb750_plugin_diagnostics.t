@@ -51,6 +51,10 @@ return sub {
             affected_resources => 1,
             active_streaks => [{ consecutive_failures => 2 }],
             recent => [{ occurred_at => 123 }, { occurred_at => 456 }],
+        }, quarantine => {
+            total => 1,
+            max_entries => 64,
+            entries => [{ resource => 'must-not-leak' }],
         });
     $assert->is($report->{status}, 'inactive',
         'disabled lifecycle wins over channel readiness');
@@ -68,6 +72,12 @@ return sub {
         'doctor exposes the latest timestamp without an error message');
     $assert->ok(!exists($report->{failures}{recent_records}),
         'doctor does not duplicate detailed failure records');
+    $assert->is($report->{quarantine}{total}, 1,
+        'doctor carries only the detached quarantine aggregate');
+    $assert->is($report->{quarantine}{max_entries}, 64,
+        'doctor publishes the quarantine bound');
+    $assert->ok(!exists($report->{quarantine}{entries}),
+        'doctor does not duplicate quarantine entry details');
 
     $entry->{enabled} = 1;
     $report = Mediabot::Plugin::DiagnosticsV3->report(
@@ -85,6 +95,14 @@ return sub {
         entry => $entry, policies => \@policies);
     $assert->is($report->{status}, 'ready',
         'complete grants plus active policy are operationally ready');
+
+    $report = Mediabot::Plugin::DiagnosticsV3->report(
+        entry => $entry, policies => \@policies,
+        quarantine => { total => 1, max_entries => 64 });
+    $assert->is($report->{status}, 'limited',
+        'manual quarantine limits an otherwise ready plugin');
+    $assert->is($report->{reason}, 'quarantined_resources',
+        'limited diagnosis names the exact operator boundary');
 
     my $why = Mediabot::Plugin::DiagnosticsV3->explain_channel(
         entry => $entry, channel => '#room{one}',

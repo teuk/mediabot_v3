@@ -6,9 +6,9 @@ executable MB742 API v3 foundation, the MB743 event/scheduler boundary, the
 MB744 channel policy, MB745's first reversible product plugin, MB746's shared
 HTTP/repository boundary, MB747's first approved domain-data facade, MB748's
 first reversible database-backed command migration, MB749's registry-native
-built-in dispatch, MB750's read-only operator diagnostics and MB751's bounded
-runtime failure history. It does not enable a plugin or grant a capability
-automatically.
+built-in dispatch, MB750's read-only operator diagnostics, MB751's bounded
+runtime failure history and MB752's explicit per-resource/channel quarantine.
+It does not enable a plugin or grant a capability automatically.
 
 ## Current baseline
 
@@ -119,6 +119,11 @@ MB751 gives the same operator a bounded memory of command, event, job and HTTP
 callback failures. It stores fingerprints rather than exception text, resets
 per-resource streaks after success and disappears with the loaded instance;
 it does not quarantine or reset anything.
+MB752 adds the separately gated action that evidence can inform: an Owner may
+isolate one manifest-declared command, event, job or HTTP callback on one
+channel. Late guards contain queued work while unrelated resources continue.
+The action is never threshold-driven, never persistent and never clears the
+separate failure ledger.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -156,7 +161,7 @@ Planned capability families include:
 | Database | possible through full in-process bot | MB747 approved quote reads; future domain repositories only | data layer |
 | Secrets | configuration may be reachable in-process | named secret references only | core configuration |
 | Activation | global plugin lifecycle plus MB744 channel policy | `off`, `observe` or `on` per instance/channel | policy service |
-| Health | lifecycle and metrics fragments | Doctor, reason, permissions and bounded failure history; quarantine remains separate | plugin runtime |
+| Health | lifecycle and metrics fragments | Doctor, reason, permissions, bounded failure history and explicit scoped quarantine | plugin runtime |
 
 ## Migration sequence
 
@@ -202,10 +207,14 @@ Planned capability families include:
     loaded package records command, event, job and HTTP-callback failures as
     non-sensitive fingerprints with bounded recent/resource cardinality.
     Partyline can inspect the history without changing readiness or lifecycle.
+13. **MB752 — manual scoped quarantine:** complete. Owner-only controls isolate
+    and release one declared runtime resource on one channel. A 64-entry
+    instance-local registry and late guards contain queued work without global
+    disable, automatic thresholds, durable state or evidence deletion.
 
-Later milestones can evaluate explicit quarantine/reset controls and separate
-quote writes behind stronger authorization. MB751 deliberately supplies the
-evidence before either behavior-changing decision.
+Later milestones can evaluate separately authorized quote writes and, only if
+operational evidence justifies it, a distinct reviewed path for automatic
+remediation. MB752 deliberately keeps manual containment reversible and exact.
 
 ## Extraction order
 

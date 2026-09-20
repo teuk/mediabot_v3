@@ -10,6 +10,27 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb752 — seal one misbehaving spell without closing the whole book
+
+- Add an in-memory manual quarantine registry to each loaded API v3 package.
+  An Owner can isolate one declared command, event, shared job or HTTP callback
+  on one RFC1459-folded channel; the registry is hard-capped at 64 exact
+  entries and both set and release operations are idempotent.
+- Enforce quarantine before command, event, job and HTTP work reaches plugin
+  code, then re-check it at deferred dispatch, IRC output and HTTP completion.
+  Already queued work and in-flight callbacks therefore cannot escape a late
+  operator decision, while unrelated resources and channels keep running.
+- Add Owner-only `.plugins quarantine` / `.plugins unquarantine`, the detached
+  read-only `.plugins quarantines <name>` view and a compact aggregate in
+  `.plugins doctor`. An otherwise ready package with isolated resources is
+  reported as `limited (quarantined_resources)`.
+- Keep failure evidence and quarantine state deliberately separate. Releasing
+  an entry never clears MB751 history, no failure threshold triggers an action,
+  disable/enable preserves the current instance registry, and unload/reload
+  discards it. MB752 adds no global disable, restart, durable state, automatic
+  remediation, plugin/channel activation, private configuration or database
+  change.
+
 ### mb751 — remember API v3 stumbles without opening the Chamber of Secrets
 
 - Add one in-memory, instance-scoped failure ledger per loaded API v3 package.

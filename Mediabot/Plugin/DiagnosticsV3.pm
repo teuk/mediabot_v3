@@ -58,6 +58,8 @@ sub report {
         ? $entry->{manifest} : {};
     my $policies = ref($args{policies}) eq 'ARRAY' ? $args{policies} : [];
     my $failures = ref($args{failures}) eq 'HASH' ? $args{failures} : {};
+    my $quarantine = ref($args{quarantine}) eq 'HASH'
+        ? $args{quarantine} : {};
     my $permissions = $class->permissions(entry => $entry);
 
     my %policy_counts = (off => 0, observe => 0, on => 0);
@@ -93,6 +95,9 @@ sub report {
     }
     elsif (@{ $permissions->{missing} }) {
         ($status, $reason) = ('limited', 'missing_capabilities');
+    }
+    elsif (($quarantine->{total} // 0) > 0) {
+        ($status, $reason) = ('limited', 'quarantined_resources');
     }
     else {
         ($status, $reason) = ('ready', 'operational');
@@ -138,6 +143,10 @@ sub report {
             affected_resources => int($failures->{affected_resources} // 0),
             active_streaks     => scalar(@$active_streaks),
             last_failure_at    => int($last_failure_at),
+        },
+        quarantine => {
+            total       => int($quarantine->{total} // 0),
+            max_entries => int($quarantine->{max_entries} // 64),
         },
     };
 }

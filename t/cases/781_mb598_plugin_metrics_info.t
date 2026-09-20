@@ -107,6 +107,7 @@ return sub {
                      mediabot_plugin_v3_event_dropped_total
                      mediabot_plugin_v3_job_total
                      mediabot_plugin_v3_failure_total
+                     mediabot_plugin_v3_quarantine_total
                      mediabot_plugin_v3_observe_total
                      mediabot_plugin_v3_http_request_total
                      mediabot_plugin_v3_http_cache_hit_total

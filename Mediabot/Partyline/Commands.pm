@@ -686,7 +686,7 @@ sub _cmd_plugins {
     my $legacy_lifecycle_verb =
         $verb =~ /\A(?:load|loadscript|unload|reload|enable|disable|cleardata)\z/;
     my $v3_lifecycle_verb =
-        $verb =~ /\A(?:loadv3|policy|resetpolicy)\z/;
+        $verb =~ /\A(?:loadv3|policy|resetpolicy|quarantine|unquarantine)\z/;
     if ($legacy_lifecycle_verb || $v3_lifecycle_verb) {
         my $level = $self->{users}{$id}{level};
         my $need_owner = $v3_lifecycle_verb
@@ -766,6 +766,46 @@ sub _cmd_plugins {
             $stream->write($removed
                 ? "API v3 policy '$target' $channel removed.\r\n"
                 : "API v3 policy '$target' $channel was already absent.\r\n");
+            return;
+        }
+
+        if ($verb eq 'quarantine' || $verb eq 'unquarantine') {
+            my ($target, $kind, $resource, $channel, @extra) = @rest;
+            unless (defined($target) && defined($kind)
+                    && defined($resource) && defined($channel) && !@extra) {
+                $stream->write("Usage: .plugins $verb <name> <command|event|http_callback|job> <resource> <#channel>\r\n");
+                return;
+            }
+            if ($verb eq 'quarantine') {
+                my $result = eval {
+                    $pm->set_v3_quarantine(
+                        $target, lc($kind), $resource, $channel);
+                };
+                unless ($result) {
+                    my $error = $@ || 'quarantine unavailable';
+                    $stream->write("API v3 quarantine failed: "
+                        . _plugin_info_text($error, 180) . "\r\n");
+                    return;
+                }
+                my $state = $result->{created} ? 'added' : 'already present';
+                $stream->write("API v3 quarantine '$target':"
+                    . " $result->{kind} $result->{resource}"
+                    . " $result->{channel} $state.\r\n");
+                return;
+            }
+
+            my $removed = eval {
+                $pm->reset_v3_quarantine(
+                    $target, lc($kind), $resource, $channel);
+            };
+            if ($@) {
+                $stream->write("API v3 unquarantine failed: "
+                    . _plugin_info_text($@, 180) . "\r\n");
+                return;
+            }
+            $stream->write($removed
+                ? "API v3 quarantine '$target': $kind $resource $channel released.\r\n"
+                : "API v3 quarantine '$target': $kind $resource $channel was already absent.\r\n");
             return;
         }
         if (!$need_owner && !(defined $level && $level <= 1)) {
@@ -945,9 +985,9 @@ sub _cmd_plugins {
     my @enabled  = eval { $pm->list(enabled => 1) } ? $pm->list(enabled => 1) : ();
     my @disabled = eval { $pm->list(enabled => 0) } ? $pm->list(enabled => 0) : ();
 
-    # MB750/MB751: these views are deliberately read-only. They expose the
-    # core's decision, capability intersection and bounded failure history,
-    # never channel configuration values or privileged service objects.
+    # MB750-MB752: these views are deliberately read-only. They expose the
+    # core's decision, capability intersection, bounded failure history and
+    # manual quarantine state, never configuration values or service objects.
     if ($mode =~ /\Adoctor\s+(\S+)\z/) {
         my $target = $1;
         my $report = eval { $pm->v3_diagnostic_report($target) };
@@ -961,6 +1001,7 @@ sub _cmd_plugins {
         my $policies = $report->{policies};
         my $runtime = $report->{runtime};
         my $failures = $report->{failures};
+        my $quarantine = $report->{quarantine};
         my $missing = @{ $permissions->{missing} || [] }
             ? join(',', @{ $permissions->{missing} }) : 'none';
         $stream->write("Plugin doctor '$report->{plugin}': "
@@ -977,6 +1018,7 @@ sub _cmd_plugins {
             . " resources=$failures->{affected_resources}"
             . " active_streaks=$failures->{active_streaks}"
             . " last=$failures->{last_failure_at}\r\n");
+        $stream->write("  quarantine: total=$quarantine->{total}/$quarantine->{max_entries}\r\n");
         return;
     }
 
@@ -1010,6 +1052,32 @@ sub _cmd_plugins {
                 . " channel=$channel at=$failure->{occurred_at}"
                 . " fingerprint=$failure->{fingerprint}"
                 . " streak=$failure->{streak}\r\n");
+        }
+        return;
+    }
+
+    if ($mode =~ /\Aquarantines\s+(\S+)\z/) {
+        my $target = $1;
+        my $report = eval { $pm->v3_quarantine_report($target) };
+        unless ($report) {
+            my $error = $@ || 'quarantine report unavailable';
+            $stream->write("API v3 quarantine report failed: "
+                . _plugin_info_text($error, 180) . "\r\n");
+            return;
+        }
+        $stream->write("Plugin quarantines '$report->{plugin}':"
+            . " total=$report->{total}/$report->{max_entries}.\r\n");
+        my @entries = ref($report->{entries}) eq 'ARRAY'
+            ? reverse @{ $report->{entries} } : ();
+        splice(@entries, 10) if @entries > 10;
+        unless (@entries) {
+            $stream->write("  active: none\r\n");
+            return;
+        }
+        for my $entry (@entries) {
+            $stream->write("  $entry->{kind} $entry->{resource}"
+                . " channel=$entry->{channel}"
+                . " since=$entry->{quarantined_at}\r\n");
         }
         return;
     }
@@ -1174,8 +1242,11 @@ sub _cmd_plugins {
             . "|load <Module> [name]|loadscript <path> [name]|unload <name>|reload <name>"
             . "|enable <name>|disable <name>|cleardata <name>|discoverv3"
             . "|loadv3 <package> [caps]|policy <name> <channel> <mode> [key=value ...]"
-            . "|resetpolicy <name> <channel>|doctor <name>"
-            . "|failures <name>|permissions <name>|why <name> <channel>]\r\n");
+            . "|resetpolicy <name> <channel>"
+            . "|quarantine <name> <kind> <resource> <channel>"
+            . "|unquarantine <name> <kind> <resource> <channel>|doctor <name>"
+            . "|failures <name>|quarantines <name>"
+            . "|permissions <name>|why <name> <channel>]\r\n");
         return;
     }
 
@@ -1234,7 +1305,8 @@ sub _cmd_help {
       . "  .metrics            - dump Prometheus metrics\r\n"
       . "  .plugins [loaded|config|info|load|loadscript|unload|reload|enable|disable|cleardata] - plugin lifecycle (v2)\r\n"
       . "  .plugins [discoverv3|loadv3|policy|resetpolicy] - API v3 discovery and channel policy\r\n"
-      . "  .plugins [doctor|failures|permissions|why] - API v3 read-only diagnostics\r\n"
+      . "  .plugins [quarantine|unquarantine] - Owner-only API v3 resource isolation\r\n"
+      . "  .plugins [doctor|failures|quarantines|permissions|why] - API v3 read-only diagnostics\r\n"
       . "  .scriptdryrun [status|last|config|timers|canceltimers|events|clearevents|reload] - show external script bridge status and last run, pending timers, event windows\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary [Administrator+])\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"

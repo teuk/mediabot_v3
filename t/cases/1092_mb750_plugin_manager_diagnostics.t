@@ -62,12 +62,29 @@ return sub {
         'ungranted scheduler job is not mounted');
     $assert->is($report->{failures}{total}, 0,
         'doctor starts with an empty instance-scoped failure summary');
+    $assert->is($report->{quarantine}{total}, 0,
+        'doctor starts with no manually quarantined resource');
+    $assert->is($report->{quarantine}{max_entries}, 64,
+        'doctor publishes the fixed quarantine bound');
 
     my $failures = $manager->v3_failure_report('hello-v3');
     $assert->is($failures->{max_recent}, 16,
         'manager publishes the fixed recent-history bound');
     $assert->is($failures->{total_failures}, 0,
         'manager failure view is initially empty');
+
+    my $quarantine = $manager->v3_quarantine_report('hello-v3');
+    $assert->is($quarantine->{total}, 0,
+        'manager quarantine view is initially empty');
+    $manager->set_v3_quarantine(
+        'hello-v3', 'command', 'v3hello', '#i/o');
+    $report = $manager->v3_diagnostic_report('hello-v3');
+    $assert->is($report->{status}, 'limited',
+        'doctor keeps a partially granted quarantined package limited');
+    $assert->is($report->{reason}, 'missing_capabilities',
+        'missing capabilities keep precedence over quarantine');
+    $manager->reset_v3_quarantine(
+        'hello-v3', 'command', 'v3hello', '#i/o');
 
     my $why = $manager->v3_channel_explanation(
         'hello-v3', '#I/O');

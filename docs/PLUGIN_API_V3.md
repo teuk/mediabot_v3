@@ -1,10 +1,10 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB751. Packages are discoverable and
-explicitly loadable, but never activate at startup. MB751 adds a bounded
-in-memory failure history to the read-only operational surface established by
-MB750, without exposing exception text, configuration values, database handles
-or arbitrary SQL.
+Plugin API v3 remains experimental in MB752. Packages are discoverable and
+explicitly loadable, but never activate at startup. MB752 adds explicit,
+per-resource and per-channel manual quarantine on top of MB751's bounded
+failure evidence. It adds no automatic remediation and exposes no exception
+text, configuration value, database handle or arbitrary SQL.
 
 ## Package layout
 
@@ -189,6 +189,7 @@ changing it:
 ```text
 .plugins doctor <name>
 .plugins failures <name>
+.plugins quarantines <name>
 .plugins permissions <name>
 .plugins why <name> <#channel>
 ```
@@ -210,12 +211,33 @@ tracked per loaded package; excess cardinality is folded into per-kind `other`
 buckets. A successful call clears the matching active streak but preserves
 recent history.
 
+`quarantines` returns at most the newest ten entries from a separate in-memory
+64-entry registry. Each entry contains only its runtime kind, declared resource,
+policy channel and integer timestamp. It contains no exception, reason or
+configuration value.
+
 These commands return detached scalar reports. They do not print typed channel
 configuration values, plugin objects, secrets or service handles. They do not
-enable, disable, reload, reconfigure, quarantine or otherwise remediate a
-plugin. Failure history survives disable/enable within one instance and is
-discarded on unload/reload. It does not alter the `doctor` readiness state.
-Mutating Partyline commands retain their existing Owner/Master gates.
+enable, disable, reload or reconfigure a plugin. Failure history survives
+disable/enable within one instance and is discarded on unload/reload. It does
+not alter readiness. Quarantine state is summarized by `doctor`; an otherwise
+ready package becomes `limited (quarantined_resources)`.
+
+An Owner may isolate or release one exact manifest-declared resource on one
+channel:
+
+```text
+.plugins quarantine <name> <command|event|http_callback|job> <resource> <#channel>
+.plugins unquarantine <name> <command|event|http_callback|job> <resource> <#channel>
+```
+
+Both operations are idempotent. The core blocks new work and re-checks the
+entry at deferred event/job dispatch, command/job output and HTTP completion,
+so a late decision also contains already queued work. Other resources and
+channels remain active. Disable/enable preserves the instance registry;
+unload/reload discards it. Release never clears failure history. No failure
+count or streak invokes quarantine automatically, and there is no bulk reset.
+All other mutating Partyline commands retain their existing Owner/Master gates.
 See [`PLUGIN_OPERATIONS_V3.md`](PLUGIN_OPERATIONS_V3.md) for the operator view.
 
 ## Shared HTTPS service

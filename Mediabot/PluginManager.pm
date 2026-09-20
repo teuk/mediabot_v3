@@ -48,6 +48,7 @@ sub new {
         v3_repositories => {},
         v3_quote_service => $args{v3_quote_service},
         v3_failure_ledgers => {},
+        v3_quarantines => {},
     }, $class;
 }
 
@@ -130,6 +131,104 @@ sub _record_v3_success {
     } ? 1 : 0;
 }
 
+# MB752: quarantine is a separate, operator-controlled state. It is bounded,
+# instance-local and never inferred from failure counts. Runtime checks are
+# best-effort and fail open so the safety control cannot break core dispatch.
+sub _v3_quarantine_ledger {
+    my ($self, $name) = @_;
+    return $self->{v3_quarantines}{$name}
+        if $self->{v3_quarantines}{$name};
+    require Mediabot::Plugin::QuarantineV3;
+    return $self->{v3_quarantines}{$name} =
+        Mediabot::Plugin::QuarantineV3->new(max_entries => 64);
+}
+
+sub _v3_declares_resource {
+    my ($entry, $kind, $resource) = @_;
+    my $manifest = ref($entry->{manifest}) eq 'HASH'
+        ? $entry->{manifest} : {};
+    return exists($manifest->{commands}{$resource}) ? 1 : 0
+        if $kind eq 'command' && ref($manifest->{commands}) eq 'HASH';
+    if ($kind eq 'event' && ref($manifest->{events}) eq 'ARRAY') {
+        return scalar grep {
+            ref($_) eq 'HASH' && ($_->{name} // '') eq $resource
+        } @{ $manifest->{events} };
+    }
+    return exists($manifest->{jobs}{$resource}) ? 1 : 0
+        if $kind eq 'job' && ref($manifest->{jobs}) eq 'HASH';
+    if ($kind eq 'http_callback' && $resource eq 'callback'
+        && ref($manifest->{capabilities}) eq 'ARRAY') {
+        return scalar grep { defined($_) && $_ eq 'http.fetch' }
+            @{ $manifest->{capabilities} };
+    }
+    return 0;
+}
+
+sub _v3_validate_quarantine_target {
+    my ($self, $name, $kind, $resource, $channel) = @_;
+    my $entry = $self->_v3_diagnostic_entry($name);
+    die "PluginManager: invalid quarantine kind\n"
+        unless defined($kind) && !ref($kind)
+            && $kind =~ /\A(?:command|event|http_callback|job)\z/;
+    die "PluginManager: invalid quarantine resource\n"
+        unless defined($resource) && !ref($resource)
+            && length($resource) >= 1 && length($resource) <= 128
+            && $resource =~ /\A[a-zA-Z0-9][a-zA-Z0-9_.:-]*\z/;
+    die "PluginManager: invalid quarantine channel\n"
+        unless defined($channel) && !ref($channel)
+            && length($channel) >= 2 && length($channel) <= 128
+            && $channel =~ /\A[#&+!][^\x00\x07\r\n ,:]+\z/;
+    die "PluginManager: API v3 resource '$kind:$resource' is not declared by '$entry->{name}'\n"
+        unless _v3_declares_resource($entry, $kind, $resource);
+    return $entry;
+}
+
+sub set_v3_quarantine {
+    my ($self, $name, $kind, $resource, $channel) = @_;
+    my $entry = $self->_v3_validate_quarantine_target(
+        $name, $kind, $resource, $channel);
+    my $result = $self->_v3_quarantine_ledger($entry->{name})->quarantine(
+        kind => $kind, resource => $resource, channel => $channel);
+    _pm_metric($self->{bot}, 'mediabot_plugin_v3_quarantine_total', {
+        plugin => $entry->{name}, kind => $kind, action => 'set',
+    }) if $result->{created};
+    return $result;
+}
+
+sub reset_v3_quarantine {
+    my ($self, $name, $kind, $resource, $channel) = @_;
+    my $entry = $self->_v3_validate_quarantine_target(
+        $name, $kind, $resource, $channel);
+    my $removed = $self->_v3_quarantine_ledger($entry->{name})->release(
+        kind => $kind, resource => $resource, channel => $channel);
+    _pm_metric($self->{bot}, 'mediabot_plugin_v3_quarantine_total', {
+        plugin => $entry->{name}, kind => $kind, action => 'release',
+    }) if $removed;
+    return $removed;
+}
+
+sub v3_quarantine_report {
+    my ($self, $name) = @_;
+    my $entry = $self->_v3_diagnostic_entry($name);
+    my $report = $self->_v3_quarantine_ledger($entry->{name})->report;
+    return { plugin => "$entry->{name}", %$report };
+}
+
+sub _v3_resource_quarantined {
+    my ($self, $name, %args) = @_;
+    return eval {
+        $self->_v3_quarantine_ledger($name)->is_quarantined(%args);
+    } ? 1 : 0;
+}
+
+sub _v3_quarantine_blocked {
+    my ($self, $name, $kind) = @_;
+    _pm_metric($self->{bot}, 'mediabot_plugin_v3_quarantine_total', {
+        plugin => $name, kind => $kind, action => 'blocked',
+    });
+    return;
+}
+
 sub _v3_invocation_policy {
     my ($self, $entry, $invocation) = @_;
     return { channel => '', mode => 'off', config => {} }
@@ -148,6 +247,12 @@ sub _v3_http_fetch {
     my $policy = $self->_v3_invocation_policy($entry, $invocation);
     return { accepted => 0, error => 'channel_off' }
         if $policy->{mode} eq 'off';
+    if ($self->_v3_resource_quarantined($name,
+            kind => 'http_callback', resource => 'callback',
+            channel => $policy->{channel})) {
+        $self->_v3_quarantine_blocked($name, 'http_callback');
+        return { accepted => 0, error => 'quarantined' };
+    }
     my $entry_id = refaddr($entry);
     return $self->v3_http_service->fetch($name, $request, sub {
         my ($response) = @_;
@@ -156,6 +261,12 @@ sub _v3_http_fetch {
         my $current_policy = $self->_v3_invocation_policy(
             $current, $invocation);
         return if $current_policy->{mode} eq 'off';
+        if ($self->_v3_resource_quarantined($name,
+                kind => 'http_callback', resource => 'callback',
+                channel => $current_policy->{channel})) {
+            $self->_v3_quarantine_blocked($name, 'http_callback');
+            return;
+        }
         my $ok = eval { $callback->($response); 1 };
         unless ($ok) {
             my $error = _plugin_error_text($@, 'API v3 HTTP callback failed');
@@ -401,9 +512,11 @@ sub v3_diagnostic_report {
     my $entry = $self->_v3_diagnostic_entry($name);
     my @policies = $self->v3_channel_policies($entry->{name});
     my $failures = $self->v3_failure_report($entry->{name});
+    my $quarantine = $self->v3_quarantine_report($entry->{name});
     require Mediabot::Plugin::DiagnosticsV3;
     return Mediabot::Plugin::DiagnosticsV3->report(
-        entry => $entry, policies => \@policies, failures => $failures);
+        entry => $entry, policies => \@policies, failures => $failures,
+        quarantine => $quarantine);
 }
 
 sub v3_failure_report {
@@ -660,6 +773,7 @@ sub unregister_plugin {
     delete $self->{plugins}{$key};
     delete $self->{v3_repositories}{$key};
     delete $self->{v3_failure_ledgers}{$key};
+    delete $self->{v3_quarantines}{$key};
     @{ $self->{order} } = grep { $_ ne $key } @{ $self->{order} };
 
     return 1;
@@ -1634,6 +1748,13 @@ sub _mount_v3_commands {
                         return $fallback ? $fallback->() : undef;
                     }
 
+                    if ($self->_v3_resource_quarantined($key,
+                            kind => 'command', resource => $command,
+                            channel => $policy->{channel})) {
+                        $self->_v3_quarantine_blocked($key, 'command');
+                        return $fallback ? $fallback->() : undef;
+                    }
+
                     my $args = eval { $ctx->args };
                     my $invocation = Mediabot::Plugin::InvocationV3->new(
                         nick       => scalar(eval { $ctx->nick }),
@@ -1649,6 +1770,9 @@ sub _mount_v3_commands {
                             return 0 unless $self->is_enabled($key);
                             my $current = $self->_v3_policy_for_entry(
                                 $entry, $channel);
+                            return 0 if $self->_v3_resource_quarantined($key,
+                                kind => 'command', resource => $command,
+                                channel => $current->{channel});
                             return $current->{mode} eq 'on' ? 1 : 0;
                         },
                         reply_sink => sub { $ctx->reply($_[0]) },
@@ -1749,6 +1873,13 @@ sub _mount_v3_events {
             my $policy = $self->_v3_policy_for_entry(
                 $entry, $item->{channel});
             return if $policy->{mode} eq 'off';
+            my $event_name = eval { $item->{envelope}->name } // 'unknown';
+            if ($self->_v3_resource_quarantined($key,
+                    kind => 'event', resource => $event_name,
+                    channel => $policy->{channel})) {
+                $self->_v3_quarantine_blocked($key, 'event');
+                return;
+            }
             my $method = $item->{method};
             my $scoped = $item->{envelope}->with_policy(
                 channel => $policy->{channel},
@@ -1759,10 +1890,9 @@ sub _mount_v3_events {
                 { plugin => $key, kind => 'event' })
                 if $policy->{mode} eq 'observe';
             my $result = $object->$method($context, $scoped);
-            my $event_name = eval { $item->{envelope}->name } // 'unknown';
             $self->_record_v3_success($key,
                 kind => 'event', resource => $event_name,
-                channel => $item->{channel});
+                channel => $policy->{channel});
             return $result;
         },
         on_drop     => sub {
@@ -1905,6 +2035,12 @@ sub _mount_v3_jobs {
                     my $sequence = ++$clock->{sequence};
                     $clock->{next_expected} = $fired_at + $interval;
                     for my $policy ($self->_v3_active_policies($entry)) {
+                        if ($self->_v3_resource_quarantined($key,
+                                kind => 'job', resource => $job,
+                                channel => $policy->{channel})) {
+                            $self->_v3_quarantine_blocked($key, 'job');
+                            next;
+                        }
                         my $invocation = Mediabot::Plugin::JobInvocationV3->new(
                             name         => $job,
                             sequence     => $sequence,
@@ -1918,6 +2054,9 @@ sub _mount_v3_jobs {
                                 return 0 unless $self->is_enabled($key);
                                 my $current = $self->_v3_policy_for_entry(
                                     $entry, $policy->{channel});
+                                return 0 if $self->_v3_resource_quarantined(
+                                    $key, kind => 'job', resource => $job,
+                                    channel => $current->{channel});
                                 return $current->{mode} eq 'on' ? 1 : 0;
                             },
                             channel_message_sink => sub {

@@ -96,6 +96,7 @@ sub new {
     $self->_declare('mediabot_plugin_v3_event_dropped_total','counter','Plugin API v3 events dropped by bounded backpressure');
     $self->_declare('mediabot_plugin_v3_job_total','counter','Plugin API v3 shared job executions');
     $self->_declare('mediabot_plugin_v3_failure_total','counter','Plugin API v3 contained failures by runtime kind');
+    $self->_declare('mediabot_plugin_v3_quarantine_total','counter','Plugin API v3 manual quarantine actions and blocked executions');
     $self->_declare('mediabot_plugin_v3_observe_total','counter','Plugin API v3 shadow invocations with output suppressed');
     # MB746: shared outbound HTTP and namespaced repository facades. Labels
     # are bounded by package names and a core-owned outcome vocabulary.
